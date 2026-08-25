@@ -384,7 +384,7 @@ team has enough recorded context to replace the active source safely.
 | 0.3 | Write a high-level legacy gameplay feature inventory for reference only | **Implemented** | [`LEGACY_GAMEPLAY_FEATURE_INVENTORY.md`](LEGACY_GAMEPLAY_FEATURE_INVENTORY.md) groups repository-backed user-visible behavior without packet/API porting tasks |
 | 0.4 | Review desktop, PC VR, Quest, and toolchain options with the owner and approve ADR-0002 | **Implemented** | Owner approved Option A for all four decisions in [`ADR-0002`](adr/ADR-0002-platform-toolchain-policy.md) on 2026-08-25, with macOS desktop supported and macOS PC VR outside the initial release scope |
 | 0.5 | Prepare ADR-0001, review the irreversible Git mechanics with the owner, and rehearse the cutover in a disposable branch/worktree | **Implemented** | Owner-approved [`ADR-0001`](adr/ADR-0001-baseline-cutover-git-mechanics.md) records the exact mechanics; disposable production-form rehearsal `e042db240` verified ancestry, tree identity, abort, and rollback |
-| 0.6 | Capture pre-cutover repository provenance | **In Progress** | [`PRE_CUTOVER_PROVENANCE.md`](PRE_CUTOVER_PROVENANCE.md) records the clean published capture base, branches, tags, remotes, submodule state, commit/tree IDs, legacy-tree classification, and integrity checks; final documentation commit/publication and preflight remain |
+| 0.6 | Capture pre-cutover repository provenance | **Implemented** | Published commit `1dc1d5bd00519efa5b92a917c46f9407e9e28257` adds [`PRE_CUTOVER_PROVENANCE.md`](PRE_CUTOVER_PROVENANCE.md); post-push preflight verified matching local/tracking/remote refs, clean state, archive tag, submodule pin, and repository integrity |
 
 Exit gate:
 
@@ -520,8 +520,9 @@ Implementation notes:
   - Follow-ups: Slice 0.6 must capture final pre-cutover provenance. Then repeat
     the approved input/tree checks against the clean published pre-cutover commit
     and hold the Phase 0 exit-gate review before any real cutover.
-- 2026-08-25 — Slice 0.6 — In Progress
-  - Change: added
+- 2026-08-25 — Slice 0.6 — Implemented
+  - Change: commit `1dc1d5bd00519efa5b92a917c46f9407e9e28257`
+    added and published
     [`PRE_CUTOVER_PROVENANCE.md`](PRE_CUTOVER_PROVENANCE.md), recording the clean
     published capture base, local and shared branch/tag refs, remote
     configuration, submodule declaration and initialization state, commit/tree
@@ -548,11 +549,16 @@ Implementation notes:
     commit/tree/tag object ID were checked; and the changed-path check found only
     `docs/vnext/IMPLEMENTATION_PLAN.md` and
     `docs/vnext/PRE_CUTOVER_PROVENANCE.md`.
-  - Owner review: no architecture or behavior decision is introduced. Slice
-    completion and the Phase 0 exit-gate review remain pending until this capture
-    is committed and published and the final pre-cutover preflight is recorded.
-  - Follow-ups: commit and publish the Slice 0.6 documentation, run its final
-    preflight with local `vnext` equal to `origin/vnext`, acknowledge the observed
+    The post-push preflight found a clean worktree; `HEAD`, local `vnext`,
+    `origin/vnext`, and the direct remote query all resolved to the published
+    commit; its tree was `994268dd4e8917a8337d1045aea57efa6728c0ef`;
+    archive-tag and submodule checks remained unchanged; and `git diff --check`
+    plus `git fsck --no-dangling` passed.
+  - Owner review: no architecture or behavior decision is introduced, so no
+    decision approval was required for the capture. The separate Phase 0
+    exit-gate review remains pending.
+  - Follow-ups: after this status-only documentation update is published, repeat
+    the final clean/local/tracking/remote identity check, acknowledge the observed
     absence of the old lightweight tag during the exit-gate review, and obtain
     explicit project-owner approval before Phase 1 or any real cutover action.
 

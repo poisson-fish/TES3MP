@@ -4,8 +4,7 @@ Capture date: 2026-08-25
 
 Capture time: 2026-08-25T17:50:41-06:00
 
-Status: pre-cutover capture recorded; final documentation commit and publication
-pending
+Status: provenance capture published; Phase 0 exit-gate review pending
 
 ## Purpose and scope
 
@@ -13,11 +12,15 @@ This document records the repository state observed immediately before Slice 0.6
 work began. It is the provenance input required by Phase 0 and ADR-0001; it does
 not authorize the real baseline cutover.
 
-The recorded `vnext` commit is the clean, published capture base. The final
-pre-cutover commit will be the later commit that contains this document and its
-implementation-plan update. Because a commit cannot contain its own object ID,
-the real cutover evidence must record that final ID from `git rev-parse vnext`
-after this documentation is committed and published. ADR-0001 requires local
+The recorded `vnext` commit is the clean, published capture base. This provenance
+artifact and its initial implementation-plan update were committed and published
+as `1dc1d5bd00519efa5b92a917c46f9407e9e28257`, with tree
+`994268dd4e8917a8337d1045aea57efa6728c0ef`.
+
+The plan-status follow-up that records this result necessarily advances the
+documentation-only branch tip. Because a commit cannot contain its own object
+ID, the real cutover evidence must record the then-final ID from `git rev-parse
+vnext` after all Phase 0 documentation is published. ADR-0001 requires local
 `vnext`, `origin/vnext`, and that recorded final ID to match before preparation.
 
 ## Repository and tool identity
@@ -182,11 +185,24 @@ f4bec41444214a7903bebd178389ca22ca13f646 refs/tags/openmw-0.51.0
 This verifies the planned baseline object at capture time without adding a
 remote or fetching it into the active repository.
 
-## Final pre-cutover preflight
+## Published-capture preflight
 
-After this document and the plan update are committed and published, record the
-following output in the Phase 0 exit-gate/cutover evidence before running any
-ADR-0001 preparation command:
+After commit `1dc1d5bd00519efa5b92a917c46f9407e9e28257` was published,
+the preflight recorded:
+
+- `HEAD`, local `vnext`, `origin/vnext`, and the direct `origin` branch query all
+  resolved to `1dc1d5bd00519efa5b92a917c46f9407e9e28257`;
+- `HEAD^{tree}` resolved to `994268dd4e8917a8337d1045aea57efa6728c0ef`;
+- `git status --porcelain=v1 --untracked-files=all` produced no output;
+- the archive tag remained an annotated tag and both local and remote peel checks
+  resolved to `49be5b6405d6ab427e06ed350cf76c715a1f3bdd`;
+- `git submodule status` still reported the uninitialized Breakpad gitlink at
+  `e6d1c032baa222d8a8dc87813e9067199ec0266d`;
+- `git diff --check` produced no output; and
+- `git fsck --no-dangling` completed successfully with no output.
+
+Before running any ADR-0001 preparation command, repeat these checks against the
+final Phase 0 documentation tip:
 
 ```powershell
 git status --porcelain=v1 --untracked-files=all
@@ -202,7 +218,7 @@ git diff --check
 git fsck --no-dangling
 ```
 
-The preflight fails closed unless the worktree is clean, local and remote
+The final preflight fails closed unless the worktree is clean, local and remote
 `vnext` match the final documentation commit, the archive tag remains annotated
 and peels to the approved legacy commit, and the integrity checks pass. The
 Phase 0 exit gate still requires explicit project-owner approval before Phase 1
