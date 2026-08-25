@@ -24,8 +24,8 @@ Every phase and slice uses exactly one of these statuses:
 - **Not Started**: no implementation artifact for the phase or slice has landed.
 - **In Progress**: at least one implementation artifact has landed or is actively
   being integrated, but the exit gate has not been met.
-- **Implemented**: every required slice is implemented and the phase exit gate is
-  satisfied with recorded evidence.
+- **Implemented**: every required slice is implemented, its approved behavior has
+  been demonstrated, and the phase exit gate is satisfied with recorded evidence.
 
 Phase status is maintained explicitly. It is not inferred from code existing in
 a branch. If a completed phase needs material rework, move it back to **In
@@ -34,6 +34,56 @@ Progress** and record why in its implementation notes.
 Documentation and exploratory spikes do not advance an implementation slice
 unless they are named deliverables of that slice. A spike must either be removed
 or converted into tested production code before a phase can be **Implemented**.
+
+## Project-owner collaboration and decision gates
+
+Implementation is a collaborative design process, not permission to turn an
+underspecified idea into whichever behavior is easiest to code. The project
+owner must remain in the loop on architecture, authority, state scope, security,
+user-visible behavior, scripting, persistence, and compatibility decisions.
+
+Production implementation must not begin for an unresolved decision. Before an
+affected slice moves beyond research or a disposable spike:
+
+1. Identify the concrete question and the systems/players it affects.
+2. Present a small decision packet containing realistic scenarios, viable
+   options, tradeoffs, a recommendation, and proposed acceptance tests.
+3. Discuss the packet with the project owner and answer follow-up questions.
+4. Record the explicit owner-approved decision in an ADR for architecture or a
+   Gameplay Decision Record (GDR) for world behavior.
+5. Implement only the approved behavior and make the tests read like the
+   approved scenarios.
+6. Demonstrate the completed behavior and any important failure/contention case
+   to the project owner before marking the slice **Implemented**.
+
+Silence, an unanswered question, an implementation convenience, existing legacy
+behavior, or code already written is not approval. Engineers and agents may
+recommend a default, prototype options, or continue unrelated work, but they may
+not silently settle an open product or architecture question.
+
+If a decision appears during implementation, pause the affected part of the
+slice, record the question, and bring it back to the project owner. Keep the
+phase **In Progress** while safe unrelated work continues. If an approved
+decision later changes, reopen its record, document migration/compatibility
+consequences, and return affected implemented slices/phases to **In Progress**.
+
+Required review points are:
+
+- **Phase kickoff:** review the phase outcome, open decisions, proposed slice
+  boundaries, and risks before production code starts.
+- **Decision review:** approve each required ADR/GDR before dependent code lands.
+- **Behavior review:** walk through concrete single-player, two-player,
+  contention, reconnect, and failure scenarios before schemas/reducers harden.
+- **Implementation demo:** compare observed behavior and test evidence with the
+  approved scenarios.
+- **Exit-gate review:** confirm the phase is complete, note deviations/follow-ups,
+  and explicitly approve moving to the next phase.
+
+Uncontroversial mechanical details that do not affect behavior or durable
+architecture may be implemented without a separate decision record. If there is
+reasonable doubt about whether a choice affects player experience, authority,
+scope, security, interoperability, persistence, or future extensibility, it is a
+decision and must be surfaced.
 
 ## Current repository baseline
 
@@ -140,6 +190,79 @@ These rules apply to every phase and are part of every exit gate:
 12. A schema or persistence change includes its compatibility/evolution test in
     the same slice. Compatibility is only required within the declared vNext
     policy, never with TES3MP 0.8.x.
+13. Architecture and gameplay semantics are approved before their production
+    schema, state model, or API lands. A convenient data layout must not decide
+    product behavior by accident.
+14. Tests must include multi-client scenarios that prove state scope and
+    visibility, not merely that one client sees a successful interaction.
+15. An implementation demo and owner review are completion evidence for
+    user-visible or architecturally significant slices; passing tests alone is
+    necessary but not sufficient.
+
+## Authority, state scope, and presentation
+
+Every interaction design must answer three separate questions:
+
+1. **Authority:** who may propose the action, who validates it, and who commits
+   the result?
+2. **State scope:** whose canonical reality changes—global world, one player, an
+   explicitly modeled group, or an explicitly modeled world instance?
+3. **Presentation:** which clients observe the durable result and which
+   transient/local effects do they render?
+
+Server authority does not automatically mean global state. A journal entry can
+be server-authoritative and per-player. Conversely, a door can be
+server-authoritative and global while each client renders its animation locally.
+Client prediction is speculative presentation and must reconcile to the approved
+canonical result; it does not change authority or scope.
+
+The initial recommendations brought to the project owner are:
+
+- Durable physical world state is server-authoritative and global by default.
+- Player knowledge and progression is server-authoritative and per-player by
+  default.
+- Group-scoped or instanced state exists only after the group/instance identity,
+  membership, persistence, and visibility rules are intentionally designed.
+- Cosmetic effects with no gameplay consequence may remain client-local.
+
+These are recommendation defaults, not blanket approval. Each gameplay domain
+still requires concrete scenario review. Per-player or group-scoped world state
+must be represented as canonical keyed state; it must never be approximated by
+silently hiding a global update on selected clients.
+
+For example, trap disarming always begins as a semantic attempt sent to the
+server. The open product question is the scope of the successful result:
+
+- Global: `TrapState(EntityId) = Disarmed`; every interested player sees the
+  revisioned change and simultaneous attempts resolve against that revision.
+- Per-player: `TrapState(PlayerId, EntityId) = Disarmed`; the server retains a
+  distinct canonical relation and the trap remains armed for other players.
+- Group/instance: the state is keyed by an explicitly approved group or instance
+  identity with defined membership and lifecycle.
+
+The implementation cannot choose among these by selecting an easy packet shape.
+GDR-0006 must record the project owner's decision, contention examples, reset
+rules, persistence behavior, and two-client acceptance tests before trap state is
+implemented.
+
+Every ADR/GDR decision packet must contain:
+
+- The question in player-visible terms and why it must be decided now.
+- Representative single-player, two-player, late-join, reconnect, contention,
+  reset, and failure scenarios as applicable.
+- Viable options and their gameplay, security, protocol, scripting,
+  persistence, migration, VR, and operational consequences.
+- A clear recommendation with reasoning, while preserving the alternatives for
+  discussion.
+- The approved authority, state scope, visibility, lifetime/reset, ordering,
+  revision/idempotency, persistence, resync, and script behavior.
+- Acceptance scenarios that can become named automated tests and a demo script.
+- Explicit project-owner approval with date and reference to the discussion.
+
+GDRs will live under `docs/vnext/gdr/`. Small decisions may share a domain GDR,
+but each question and approval must remain individually identifiable. A GDR is a
+product behavior contract; an ADR records durable technical structure. Some
+features require both.
 
 ## Planned component boundaries
 
@@ -182,27 +305,55 @@ runtime or protocol name.
 |---|---|---|---|
 | ADR-0001 | Baseline-cutover Git mechanics | Phase 1 | **Not Started** |
 | ADR-0002 | Supported desktop platforms, compilers, and dependency policy | Phase 1 | **Not Started** |
-| ADR-0003 | Threat model and authoritative-state policy | Phase 3 | **Not Started** |
+| ADR-0003 | Threat model and trust boundaries | Phase 3 | **Not Started** |
 | ADR-0004 | Protocol schema, codec, and evolution policy | Phase 4 | **Not Started** |
 | ADR-0005 | Transport, encryption, authentication, and session resumption | Phase 6 | **Not Started** |
-| ADR-0006 | Authority rules by gameplay subsystem | Phase 10 | **Not Started** |
+| ADR-0006 | Authority, state-scope, prediction, and presentation policy | Phase 7 | **Not Started** |
 | ADR-0007 | OpenMW hook and patch-queue policy | Phase 8 | **Not Started** |
 | ADR-0008 | PC VR fork/worktree maintenance policy | Phase 9 | **Not Started** |
 | ADR-0009 | Scripting language, runtime, isolation, and API model | Phase 19 | **Not Started** |
 | ADR-0010 | Persistence store, schema evolution, backup, and replay model | Phase 20 | **Not Started** |
-| ADR-0011 | Quest rendering, packaging, and hardware-support policy | Phase 24 | **Not Started** |
+| ADR-0011 | Administration authorization, audit, and discovery exposure | Phase 21 | **Not Started** |
+| ADR-0012 | Quest rendering, packaging, and hardware-support policy | Phase 24 | **Not Started** |
 
 An ADR is complete only when it records considered alternatives, selection
-criteria, consequences, failure modes, and a replacement/review trigger. A
-library-selection ADR must also record maintenance health, license, supported
-platforms, security properties, dependency pinning, and a minimal proof build.
+criteria, consequences, failure modes, a replacement/review trigger, and
+explicit project-owner approval. A library-selection ADR must also record
+maintenance health, license, supported platforms, security properties,
+dependency pinning, and a minimal proof build. Research can precede approval;
+production code that depends on the choice cannot.
+
+## Gameplay decision register
+
+| GDR | Behavior requiring owner approval | First needed by | Status |
+|---|---|---|---|
+| GDR-0001 | First vertical-slice session, cell entry, player visibility, movement, and reconnect semantics | Phase 7 | **Not Started** |
+| GDR-0002 | Player identity/lifecycle, content mismatch, replacement connection, and moderation semantics | Phase 10 | **Not Started** |
+| GDR-0003 | Cell transitions, interest visibility, initial state, and resynchronization semantics | Phase 11 | **Not Started** |
+| GDR-0004 | Movement validation, prediction/correction, animation, teleport, and VR pose semantics | Phase 12 | **Not Started** |
+| GDR-0005 | Actor/AI ownership, lifecycle, simulation, and authority-delegation semantics | Phase 13 | **Not Started** |
+| GDR-0006 | Physical-object interaction scope, including activation, placement, locks, traps, and doors | Phase 14 | **Not Started** |
+| GDR-0007 | Item ownership, loot scope, container visibility/contention, and equipment semantics | Phase 15 | **Not Started** |
+| GDR-0008 | Combat resolution, lag handling, effects, projectiles, death, and resurrection semantics | Phase 16 | **Not Started** |
+| GDR-0009 | Dialogue, journal, faction, quest, and progression state scope | Phase 17 | **Not Started** |
+| GDR-0010 | Time, weather, globals, reset, and shared-world evolution semantics | Phase 18 | **Not Started** |
+
+A GDR is **Implemented** only after its questions are explicitly approved and
+the approval is recorded. Later code slices remain separate: an approved design
+is not evidence that the behavior has been implemented. If implementation
+reveals a missing or materially different scenario, the GDR returns to **In
+Progress** for owner review before that behavior continues.
 
 ## Feature-slice contract
 
 Phases 10 through 18 use the following checklist. A phase cannot be marked
 **Implemented** until its implementation notes link each item to code and tests:
 
+- Approved GDR questions, decision rationale, owner approval, scenario tests,
+  and implementation demo evidence.
 - Semantic commands, authority owner, validation, and abuse limits.
+- Explicit global/per-player/group/instance state scope, visibility, lifetime,
+  reset policy, and the canonical key that represents it.
 - Bounded schemas and explicit collection/string/rate limits.
 - Stable identity, revision, authority epoch, and idempotency rules as relevant.
 - Initial snapshot, delta ordering, reconnect, and full-resync behavior.
@@ -212,6 +363,10 @@ Phases 10 through 18 use the following checklist. A phase cannot be marked
 - Metrics, structured logs, and actionable rejection/error categories.
 - Persistence and script event/command mapping, even before those backends exist.
 - A deterministic state checksum addition for newly durable data.
+
+The GDR review happens before the production schema and reducer for the feature.
+The implementation demo happens after the automated scenarios pass and before
+the feature slice or phase is marked **Implemented**.
 
 ## Detailed phases
 
@@ -227,8 +382,8 @@ team has enough recorded context to replace the active source safely.
 | 0.1 | Record the accepted clean-break direction, source branch point, and OpenMW baseline | **Implemented** | `docs/vnext/README.md` at `86cfa5ab3` |
 | 0.2 | Create a permanent annotated archive tag at `49be5b640` without moving or reusing the existing `tes3mp-0.8.1` tag | **Not Started** | Tag name, peeled commit, annotation, and push verification recorded |
 | 0.3 | Write a high-level legacy gameplay feature inventory for reference only | **Not Started** | Inventory groups user-visible behavior without packet/API porting tasks |
-| 0.4 | Record desktop, PC VR, and Quest target policy plus initial supported toolchains in ADR-0002 | **Not Started** | ADR accepted; CI runner choices identified |
-| 0.5 | Write ADR-0001 and rehearse the cutover in a disposable branch/worktree | **Not Started** | Commands, resulting ancestry/tree, rollback, and verification output recorded |
+| 0.4 | Review desktop, PC VR, Quest, and toolchain options with the owner and approve ADR-0002 | **Not Started** | Owner-approved platform/toolchain policy and CI runner choices are recorded |
+| 0.5 | Prepare ADR-0001, review the irreversible Git mechanics with the owner, and rehearse the cutover in a disposable branch/worktree | **Not Started** | Owner approval plus commands, resulting ancestry/tree, rollback, and verification output are recorded |
 | 0.6 | Capture pre-cutover repository provenance | **Not Started** | Branches, tags, submodules, remotes, commit IDs, and clean-tree check archived in documentation |
 
 Exit gate:
@@ -300,12 +455,12 @@ Depends on: Phase 1.
 
 | Slice | Deliverable | Status | Completion evidence |
 |---|---|---|---|
-| 2.1 | Write ADR-0003 and a data-flow threat model | **Not Started** | Trust boundaries, assets, attacker capabilities, mitigations, and deferred risks are reviewed |
-| 2.2 | Evaluate schema/codec candidates and accept ADR-0004 | **Not Started** | Bounded decode, evolution, fuzzability, language/tooling, and license criteria are demonstrated |
-| 2.3 | Evaluate transport/security candidates and accept ADR-0005 | **Not Started** | Desktop proof builds and channel/security/backpressure semantics are demonstrated |
-| 2.4 | Define subsystem authority in ADR-0006 | **Not Started** | Movement, actors, combat, inventory, scripting, admin, and persistence ownership is explicit |
-| 2.5 | Define the OpenMW hook policy in ADR-0007 | **Not Started** | Allowed hook surface, patch organization, and upstreaming criteria are explicit |
-| 2.6 | Define deterministic simulation and protocol compatibility policies | **Not Started** | Tick, numeric/ordering rules, supported version window, and capability behavior are documented |
+| 2.1 | Prepare the threat model and obtain owner approval for ADR-0003 | **Not Started** | Owner-approved trust boundaries, assets, attacker capabilities, mitigations, and deferred risks are recorded |
+| 2.2 | Evaluate schema/codec candidates with the owner and approve ADR-0004 | **Not Started** | Owner-approved choice is backed by bounded decode, evolution, fuzzability, tooling, and license evidence |
+| 2.3 | Evaluate transport/security candidates with the owner and approve ADR-0005 | **Not Started** | Owner-approved choice is backed by desktop proof builds and channel/security/backpressure evidence |
+| 2.4 | Review authority/state-scope options by subsystem and approve ADR-0006 | **Not Started** | Owner-approved authority, scope, prediction, and presentation framework is explicit; domain GDR questions are listed |
+| 2.5 | Review the OpenMW hook/patch options with the owner and approve ADR-0007 | **Not Started** | Owner-approved hook surface, patch organization, and upstreaming criteria are explicit |
+| 2.6 | Review and approve deterministic simulation and protocol compatibility policies | **Not Started** | Owner-approved tick, numeric/ordering, supported-version, and capability behavior is documented |
 
 Exit gate:
 
@@ -492,6 +647,7 @@ Depends on: Phase 6.
 
 | Slice | Deliverable | Status | Completion evidence |
 |---|---|---|---|
+| 7.0 | Review and obtain owner approval for GDR-0001 vertical-slice behavior scenarios | **Not Started** | Approved authority/scope/contention/reconnect decisions and named demo/tests are recorded |
 | 7.1 | Add the dedicated-server composition root and new minimal configuration format | **Not Started** | Server starts/stops cleanly; invalid config fails with bounded, actionable errors |
 | 7.2 | Add a reusable headless client-session library and scripted fake-client driver | **Not Started** | Fake clients expose commands/snapshots without renderer or engine dependencies |
 | 7.3 | Implement authentication, session creation, player creation, and join | **Not Started** | Two clients receive distinct stable identities and negotiated sessions |
@@ -529,7 +685,7 @@ Depends on: Phase 7.
 
 | Slice | Deliverable | Status | Completion evidence |
 |---|---|---|---|
-| 8.1 | Inventory the minimum required OpenMW hooks and approve the patch surface | **Not Started** | Hook document maps each patch to an adapter need and upstream strategy |
+| 8.1 | Inventory the minimum required OpenMW hooks and review the final patch surface with the owner | **Not Started** | Owner-approved hook document maps each patch to an adapter need and upstream strategy |
 | 8.2 | Implement the adapter lifecycle and desktop input/presentation provider interfaces | **Not Started** | Adapter owns every direct OpenMW dependency; client-session remains headless |
 | 8.3 | Connect/authenticate/join from OpenMW with actionable UI errors | **Not Started** | Version, capability, auth, timeout, and disconnect paths are testable |
 | 8.4 | Map interior/exterior cell changes and spawn/despawn remote player presentation | **Not Started** | Two clients observe correct cell and peer lifecycle behavior |
@@ -567,7 +723,7 @@ Depends on: Phase 8.
 
 | Slice | Deliverable | Status | Completion evidence |
 |---|---|---|---|
-| 9.1 | Accept ADR-0008 and create the separate OpenMW-VR worktree/patch target | **Not Started** | Pinned fork revision, rebase/update procedure, and patch ownership are recorded |
+| 9.1 | Review PC VR maintenance options with the owner, approve ADR-0008, and create the worktree/patch target | **Not Started** | Owner-approved fork revision, rebase/update procedure, and patch ownership are recorded |
 | 9.2 | Build the same adapter/client-session targets against desktop and PC VR engines | **Not Started** | Shared code is not copied; both targets build in their supported environments |
 | 9.3 | Add optional `vr_pose` capability and bounded head/hand pose snapshot schema | **Not Started** | Negotiation, absent/unknown capability, bounds, round-trip, and fuzz tests pass |
 | 9.4 | Implement VR input and presentation providers using semantic commands | **Not Started** | Locomotion command behavior matches desktop authority rules |
@@ -603,6 +759,7 @@ Depends on: Phase 9.
 
 | Slice | Deliverable | Status | Completion evidence |
 |---|---|---|---|
+| 10.0 | Review and obtain owner approval for GDR-0002 player/content/lifecycle semantics | **Not Started** | Approved scenarios and named demo/tests cover identity, mismatch, replacement, moderation, and reconnect |
 | 10.1 | Define bounded content manifest, canonical record identity, and mismatch policy | **Not Started** | Order/hash/missing/extra/collision cases and user-facing rejection tests pass |
 | 10.2 | Implement player create/join/spawn/despawn lifecycle and validated display metadata | **Not Started** | Duplicate, invalid, reconnect, and concurrent join cases preserve invariants |
 | 10.3 | Implement session replacement, kick, ban/mute primitives, and reason categories | **Not Started** | Principal/player/session distinctions and audit events are tested |
@@ -636,6 +793,7 @@ Depends on: Phase 10.
 
 | Slice | Deliverable | Status | Completion evidence |
 |---|---|---|---|
+| 11.0 | Review and obtain owner approval for GDR-0003 cell/interest/resync semantics | **Not Started** | Approved scenarios and named demo/tests cover transitions, visibility, late join, churn, and resync |
 | 11.1 | Finalize canonical interior/exterior/worldspace `CellId` rules | **Not Started** | Normalization, content context, coordinate limits, and collision tests pass |
 | 11.2 | Implement authoritative cell transition command/validation/state machine | **Not Started** | Simultaneous, rejected, interrupted, and reconnecting transitions are tested |
 | 11.3 | Implement deterministic interest sets and enter/leave deltas | **Not Started** | Boundary churn and rapid travel do not leak or strand entities |
@@ -670,6 +828,7 @@ Depends on: Phase 11.
 
 | Slice | Deliverable | Status | Completion evidence |
 |---|---|---|---|
+| 12.0 | Review and obtain owner approval for GDR-0004 movement/animation/VR behavior | **Not Started** | Approved scenarios and named demo/tests cover validation, correction, teleport, animation, and poses |
 | 12.1 | Finalize semantic locomotion commands, input sequence/ack rules, and movement budgets | **Not Started** | Invalid speed/acceleration/time/cell/epoch commands are rejected deterministically |
 | 12.2 | Implement server movement validation and authoritative root/capsule simulation policy | **Not Started** | Desktop and VR use identical durable movement rules |
 | 12.3 | Harden client prediction, reconciliation, interpolation, and bounded extrapolation | **Not Started** | Quantitative convergence and hard-snap thresholds pass fault profiles |
@@ -704,6 +863,7 @@ Depends on: Phase 12.
 
 | Slice | Deliverable | Status | Completion evidence |
 |---|---|---|---|
+| 13.0 | Review and obtain owner approval for GDR-0005 actor/AI/authority behavior | **Not Started** | Approved scenarios and named demo/tests cover lifecycle, simulation ownership, delegation, handoff, and failure |
 | 13.1 | Implement actor stable identity, spawn, despawn, enable/disable, and base state | **Not Started** | Interest/reconnect/resync preserve identity and monotonic revisions |
 | 13.2 | Implement actor transform, velocity, stance, and animation snapshots | **Not Started** | Latest-wins and stale/epoch behavior matches movement rules |
 | 13.3 | Implement canonical AI state/intents and validated state transitions | **Not Started** | Impossible transitions and unowned commands are rejected |
@@ -738,6 +898,7 @@ Depends on: Phase 13.
 
 | Slice | Deliverable | Status | Completion evidence |
 |---|---|---|---|
+| 14.0 | Review and obtain owner approval for GDR-0006 object/lock/trap/door state scope | **Not Started** | Approved scenarios explicitly decide global/per-player/group/instance behavior, contention, reset, persistence, and visibility |
 | 14.1 | Implement stable placed-object identity and enable/disable/transform state | **Not Started** | Cell snapshot/resync/reconnect preserve identity and revision |
 | 14.2 | Implement activation command/result/event flow with reach and state validation | **Not Started** | Duplicate, stale, simultaneous, remote, and VR reach cases are tested |
 | 14.3 | Implement door open/close/teleport transition semantics | **Not Started** | Contention and interrupted cross-cell transitions converge |
@@ -771,6 +932,7 @@ Depends on: Phase 14.
 
 | Slice | Deliverable | Status | Completion evidence |
 |---|---|---|---|
+| 15.0 | Review and obtain owner approval for GDR-0007 inventory/loot/container semantics | **Not Started** | Approved scenarios and named demo/tests cover ownership, loot scope, privacy, contention, equipment, and reconnect |
 | 15.1 | Define item/stack/instance identity, quantities, metadata, and canonical ownership | **Not Started** | Split/merge/collision/overflow/content-reference tests pass |
 | 15.2 | Implement atomic add/remove/move/split/merge transaction reducer | **Not Started** | Conservation and no-duplication properties hold under randomized streams |
 | 15.3 | Implement container open/view/update access and contention rules | **Not Started** | Concurrent viewers, stale revisions, disconnect, and interest loss are tested |
@@ -804,6 +966,7 @@ Depends on: Phase 15.
 
 | Slice | Deliverable | Status | Completion evidence |
 |---|---|---|---|
+| 16.0 | Review and obtain owner approval for GDR-0008 combat and consequence semantics | **Not Started** | Approved scenarios and named demo/tests cover lag handling, hit resolution, effects, projectiles, death, and resurrection |
 | 16.1 | Implement canonical stats/resources and bounded stat-change operations | **Not Started** | Clamp/overflow/ordering/reconnect/resync tests pass |
 | 16.2 | Implement attack/cast commands, timing/range/resource validation, and result events | **Not Started** | Forged timing, reach, target, equipment, and duplicate commands are rejected |
 | 16.3 | Implement damage/healing and active-effect lifecycle | **Not Started** | Stacking, expiry, dispel, repeated delivery, and ordering are deterministic |
@@ -838,6 +1001,7 @@ Depends on: Phase 16.
 
 | Slice | Deliverable | Status | Completion evidence |
 |---|---|---|---|
+| 17.0 | Review and obtain owner approval for GDR-0009 narrative state scope | **Not Started** | Approved scenarios explicitly classify dialogue, journal, faction, and quest state as per-player/shared/group/instance |
 | 17.1 | Implement dialogue session start/select/end commands and validation | **Not Started** | Speaker/actor/range/topic/state/reconnect cases are tested |
 | 17.2 | Implement per-player journal and topic state | **Not Started** | Monotonic progression, duplicate entries, resync, and privacy tests pass |
 | 17.3 | Implement faction membership/rank/reputation and disposition inputs | **Not Started** | Authorization, bounds, ordering, and conflict tests pass |
@@ -872,6 +1036,7 @@ Depends on: Phase 17.
 
 | Slice | Deliverable | Status | Completion evidence |
 |---|---|---|---|
+| 18.0 | Review and obtain owner approval for GDR-0010 time/weather/world-state semantics | **Not Started** | Approved scenarios and named demo/tests cover scope, evolution, reset, offline time, reconnect, and persistence |
 | 18.1 | Implement canonical game time/calendar, pause/rate policy, and synchronization | **Not Started** | Drift, rate change, reconnect, and server-stall behavior is bounded and tested |
 | 18.2 | Implement regional weather state, transition commands, and presentation snapshots | **Not Started** | Cell/region interest, reconnect, and transition interpolation converge |
 | 18.3 | Implement typed durable globals/world flags with ownership and bounds | **Not Started** | Unknown/type mismatch/stale revision/content mismatch cases fail safely |
@@ -904,7 +1069,7 @@ Depends on: Phase 18.
 
 | Slice | Deliverable | Status | Completion evidence |
 |---|---|---|---|
-| 19.1 | Accept ADR-0009 and pin the language/runtime/dependency | **Not Started** | Isolation, determinism, resource limits, debugging, license, and support policy are recorded |
+| 19.1 | Review scripting options with the owner, approve ADR-0009, and pin the language/runtime/dependency | **Not Started** | Owner-approved isolation, determinism, limits, debugging, license, and support policy are recorded |
 | 19.2 | Define versioned typed event and command APIs for all implemented domains | **Not Started** | API schema/docs and compatibility tests exist independently of packet layouts |
 | 19.3 | Implement immutable event delivery and validated command submission | **Not Started** | Scripts cannot directly mutate canonical state or retain unsafe mutable views |
 | 19.4 | Implement callback time/instruction/memory limits and failure isolation | **Not Started** | Timeout, exception, allocation pressure, bad command, and reload failures are recoverable |
@@ -940,7 +1105,7 @@ Depends on: Phase 19.
 
 | Slice | Deliverable | Status | Completion evidence |
 |---|---|---|---|
-| 20.1 | Accept ADR-0010 and implement the persistence adapter boundary | **Not Started** | Store/runtime types do not leak into server-core domain APIs |
+| 20.1 | Review persistence/replay options with the owner, approve ADR-0010, and implement the adapter boundary | **Not Started** | Owner approval is recorded and store/runtime types do not leak into server-core domain APIs |
 | 20.2 | Implement transactional durable snapshots/change records and commit coordination | **Not Started** | Crash/failure injection cannot expose a partially committed canonical revision |
 | 20.3 | Implement persistence schema versioning and forward migration tooling | **Not Started** | Supported migrations and unsupported downgrade/error paths are tested |
 | 20.4 | Implement online-safe backup and verified restore workflow | **Not Started** | Restore reproduces stable identities, revisions, script bundle, and checksum |
@@ -978,6 +1143,7 @@ Depends on: Phase 20.
 
 | Slice | Deliverable | Status | Completion evidence |
 |---|---|---|---|
+| 21.0 | Review and obtain owner approval for ADR-0011 administration, audit, moderation, and discovery policy | **Not Started** | Roles, authorization boundaries, audit visibility, public/private exposure, and abuse scenarios are approved |
 | 21.1 | Finalize the new validated server configuration format and secret-source policy | **Not Started** | Invalid/deprecated/unknown settings fail clearly; secrets are not dumped or logged |
 | 21.2 | Implement authenticated administrative principals, roles, and authorization | **Not Started** | Least-privilege, revocation, expiry, and confused-deputy tests pass |
 | 21.3 | Implement versioned admin commands through the canonical command path | **Not Started** | State-changing admin actions validate, persist, replay, and emit audit events |
@@ -1051,13 +1217,13 @@ Depends on: Phase 22.
 | 23.3 | Prototype and measure viable rendering routes | **Not Started** | GLES/Vulkan/compatibility candidates have comparable CPU/GPU/memory/thermal traces |
 | 23.4 | Prove minimum networking, audio, storage, suspend/resume, and legal game-data import paths | **Not Started** | Each platform risk has an on-device result and bounded remaining work |
 | 23.5 | Define preliminary loading, frame-time, memory, thermal, and battery budgets | **Not Started** | Repeatable hardware scenarios and measurement tooling are checked in/documented |
-| 23.6 | Accept ADR-0011 with an explicit go/no-go result and support scope | **Not Started** | Evidence, selected route, risks, upstream candidates, and Phase 24 activation decision are recorded |
+| 23.6 | Review evidence with the owner and accept ADR-0012 with an explicit go/no-go result and support scope | **Not Started** | Owner-approved decision, selected route, risks, upstream candidates, and Phase 24 activation are recorded |
 
 Exit gate:
 
 - An on-device prototype resolves the major toolchain, OpenXR, rendering,
   lifecycle, networking, storage, and performance unknowns.
-- ADR-0011 makes an evidence-backed go/no-go decision. A go decision activates
+- ADR-0012 makes an evidence-backed, owner-approved go/no-go decision. A go decision activates
   Phase 24; a no-go decision leaves Phase 24 **Not Started** and records the
   conditions that would justify reconsideration.
 - Either result completes the feasibility phase without weakening Phase 22
@@ -1076,10 +1242,10 @@ Implementation notes:
 
 Status: **Not Started**
 
-Outcome: if ADR-0011 records a go decision, a supportable Quest 3 client completes
+Outcome: if ADR-0012 records a go decision, a supportable Quest 3 client completes
 the existing multiplayer slice and meets measured on-device budgets.
 
-Depends on: Phase 23 with an ADR-0011 go decision.
+Depends on: Phase 23 with an ADR-0012 go decision.
 
 | Slice | Deliverable | Status | Completion evidence |
 |---|---|---|---|
@@ -1088,7 +1254,7 @@ Depends on: Phase 23 with an ADR-0011 go decision.
 | 24.3 | Compose the existing client session, adapter boundary, semantic commands, and `vr_pose` capability | **Not Started** | No Quest-specific protocol, durable state, or server branch is introduced |
 | 24.4 | Complete Quest controller, locomotion, UI, pose presentation, and desktop fallback behavior | **Not Started** | Quest/desktop interaction behavior satisfies the existing VR authority rules |
 | 24.5 | Pass Quest/desktop/PC VR interoperability and suspend/reconnect tests | **Not Started** | Quest completes connect/join/cell/movement/reconnect with both peer types |
-| 24.6 | Pass loading, frame-time, memory, thermal, battery, and hardware soak budgets | **Not Started** | Hardware-runner evidence meets the ADR-0011 support policy |
+| 24.6 | Pass loading, frame-time, memory, thermal, battery, and hardware soak budgets | **Not Started** | Hardware-runner evidence meets the ADR-0012 support policy |
 | 24.7 | Package, document, and execute the Quest release-candidate matrix | **Not Started** | Installation, data import, permissions, update, recovery, and support docs are verified |
 
 Exit gate:
@@ -1101,7 +1267,7 @@ Exit gate:
 
 Implementation notes:
 
-- This phase is conditional and remains **Not Started** unless ADR-0011 records a
+- This phase is conditional and remains **Not Started** unless ADR-0012 records a
   go decision. A no-go decision in Phase 23 does not block program completion.
 - Reuse the established `vr_pose` capability and platform-neutral authoritative
   root/capsule. Quest is another provider/composition target, not another core.
@@ -1113,14 +1279,22 @@ Implementation notes:
 Every pull request that advances a slice must update this document in the same
 change or immediately linked follow-up:
 
-1. Change the slice to **In Progress** when the first non-disposable artifact
+1. Hold the phase kickoff and present required ADR/GDR decision packets before
+   dependent production implementation begins. Record explicit owner approval;
+   do not infer it from silence or from approval of unrelated work.
+2. Change the slice to **In Progress** when the first non-disposable artifact
    lands, and change the phase to **In Progress** if needed.
-2. Append an implementation note with the date, commit/PR, important design
+3. Append an implementation note with the date, commit/PR, important design
    details, deviations from this plan, and exact verification evidence.
-3. Change a slice to **Implemented** only when its completion evidence exists.
-4. Run the entire phase exit gate after all slices are implemented. Record the
-   gate evidence, then change the phase and program tracker row to **Implemented**.
-5. Add newly discovered work as a bounded slice in the correct phase. Do not hide
+4. Run the approved automated scenarios and demonstrate user-visible or
+   architecturally significant behavior to the owner. Record feedback and any
+   required correction.
+5. Change a slice to **Implemented** only when its completion evidence and
+   required owner acceptance exist.
+6. Run the entire phase exit gate after all slices are implemented. Review the
+   gate evidence with the owner, record approval to proceed, then change the
+   phase and program tracker row to **Implemented**.
+7. Add newly discovered work as a bounded slice in the correct phase. Do not hide
    required work in an implementation note or mark a phase complete with a known
    unmet gate.
 
@@ -1131,6 +1305,7 @@ Use this note format:
   - Change: commit/PR and concise implementation description.
   - Decisions: important choices or approved deviation from the plan/ADR.
   - Verification: exact local commands and CI job/artifact links.
+  - Owner review: decision/demo/exit-gate approval reference and resulting feedback.
   - Follow-ups: bounded work and owning phase, or `none`.
 ```
 
