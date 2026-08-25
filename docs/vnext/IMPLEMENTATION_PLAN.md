@@ -384,7 +384,7 @@ team has enough recorded context to replace the active source safely.
 | 0.3 | Write a high-level legacy gameplay feature inventory for reference only | **Implemented** | [`LEGACY_GAMEPLAY_FEATURE_INVENTORY.md`](LEGACY_GAMEPLAY_FEATURE_INVENTORY.md) groups repository-backed user-visible behavior without packet/API porting tasks |
 | 0.4 | Review desktop, PC VR, Quest, and toolchain options with the owner and approve ADR-0002 | **Implemented** | Owner approved Option A for all four decisions in [`ADR-0002`](adr/ADR-0002-platform-toolchain-policy.md) on 2026-08-25, with macOS desktop supported and macOS PC VR outside the initial release scope |
 | 0.5 | Prepare ADR-0001, review the irreversible Git mechanics with the owner, and rehearse the cutover in a disposable branch/worktree | **Implemented** | Owner-approved [`ADR-0001`](adr/ADR-0001-baseline-cutover-git-mechanics.md) records the exact mechanics; disposable production-form rehearsal `e042db240` verified ancestry, tree identity, abort, and rollback |
-| 0.6 | Capture pre-cutover repository provenance | **Not Started** | Branches, tags, submodules, remotes, commit IDs, and clean-tree check archived in documentation |
+| 0.6 | Capture pre-cutover repository provenance | **In Progress** | [`PRE_CUTOVER_PROVENANCE.md`](PRE_CUTOVER_PROVENANCE.md) records the clean published capture base, branches, tags, remotes, submodule state, commit/tree IDs, legacy-tree classification, and integrity checks; final documentation commit/publication and preflight remain |
 
 Exit gate:
 
@@ -520,6 +520,41 @@ Implementation notes:
   - Follow-ups: Slice 0.6 must capture final pre-cutover provenance. Then repeat
     the approved input/tree checks against the clean published pre-cutover commit
     and hold the Phase 0 exit-gate review before any real cutover.
+- 2026-08-25 — Slice 0.6 — In Progress
+  - Change: added
+    [`PRE_CUTOVER_PROVENANCE.md`](PRE_CUTOVER_PROVENANCE.md), recording the clean
+    published capture base, local and shared branch/tag refs, remote
+    configuration, submodule declaration and initialization state, commit/tree
+    IDs, vNext first-parent lineage, legacy-tree classification, and the final
+    pre-cutover preflight.
+  - Decisions: none. This is a read-only capture of existing repository state and
+    does not authorize the real cutover, configure `openmw-upstream`, or mutate
+    any branch, tag, submodule, or shared ref. The capture also records that the
+    earlier lightweight `tes3mp-0.8.1` tag was no longer advertised locally or
+    by `origin`; the required annotated `tes3mp-0.8.1-archive` tag remains intact.
+  - Verification: before editing, `git status --porcelain=v1
+    --untracked-files=all` and `git diff --check` produced no output;
+    `vnext` and `origin/vnext` both resolved to
+    `beb2f86cdf7d810f8eebf0207e266fb62c6e8fda`; `git fsck --no-dangling`
+    passed; `git cat-file -t tes3mp-0.8.1-archive` returned `tag`; local and
+    remote peel checks returned
+    `49be5b6405d6ab427e06ed350cf76c715a1f3bdd`; `git submodule status` and
+    `git ls-tree HEAD extern/breakpad` agreed on
+    `e6d1c032baa222d8a8dc87813e9067199ec0266d`; and a read-only
+    `git ls-remote https://gitlab.com/OpenMW/openmw.git` query resolved
+    `openmw-0.51.0` to `f4bec41444214a7903bebd178389ca22ca13f646`.
+    After editing, `git diff --check` passed; all local Markdown links under
+    `docs/vnext` resolved; required provenance headings and every recorded local
+    commit/tree/tag object ID were checked; and the changed-path check found only
+    `docs/vnext/IMPLEMENTATION_PLAN.md` and
+    `docs/vnext/PRE_CUTOVER_PROVENANCE.md`.
+  - Owner review: no architecture or behavior decision is introduced. Slice
+    completion and the Phase 0 exit-gate review remain pending until this capture
+    is committed and published and the final pre-cutover preflight is recorded.
+  - Follow-ups: commit and publish the Slice 0.6 documentation, run its final
+    preflight with local `vnext` equal to `origin/vnext`, acknowledge the observed
+    absence of the old lightweight tag during the exit-gate review, and obtain
+    explicit project-owner approval before Phase 1 or any real cutover action.
 
 ### Phase 1 — Clean OpenMW 0.51 baseline
 
