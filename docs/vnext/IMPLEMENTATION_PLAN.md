@@ -380,8 +380,8 @@ team has enough recorded context to replace the active source safely.
 | Slice | Deliverable | Status | Completion evidence |
 |---|---|---|---|
 | 0.1 | Record the accepted clean-break direction, source branch point, and OpenMW baseline | **Implemented** | `docs/vnext/README.md` at `86cfa5ab3` |
-| 0.2 | Create a permanent annotated archive tag at `49be5b640` without moving or reusing the existing `tes3mp-0.8.1` tag | **Not Started** | Tag name, peeled commit, annotation, and push verification recorded |
-| 0.3 | Write a high-level legacy gameplay feature inventory for reference only | **Not Started** | Inventory groups user-visible behavior without packet/API porting tasks |
+| 0.2 | Create a permanent annotated archive tag at `49be5b640` without moving or reusing the existing `tes3mp-0.8.1` tag | **Implemented** | Annotated tag `tes3mp-0.8.1-archive` (tag object `1f3bc4c651573a60b4326b5d4703b6fad4b7fccf`) is published on `origin` and peels to `49be5b6405d6ab427e06ed350cf76c715a1f3bdd` |
+| 0.3 | Write a high-level legacy gameplay feature inventory for reference only | **Implemented** | [`LEGACY_GAMEPLAY_FEATURE_INVENTORY.md`](LEGACY_GAMEPLAY_FEATURE_INVENTORY.md) groups repository-backed user-visible behavior without packet/API porting tasks |
 | 0.4 | Review desktop, PC VR, Quest, and toolchain options with the owner and approve ADR-0002 | **Not Started** | Owner-approved platform/toolchain policy and CI runner choices are recorded |
 | 0.5 | Prepare ADR-0001, review the irreversible Git mechanics with the owner, and rehearse the cutover in a disposable branch/worktree | **Not Started** | Owner approval plus commands, resulting ancestry/tree, rollback, and verification output are recorded |
 | 0.6 | Capture pre-cutover repository provenance | **Not Started** | Branches, tags, submodules, remotes, commit IDs, and clean-tree check archived in documentation |
@@ -398,13 +398,45 @@ Exit gate:
 
 Implementation notes:
 
-- The direction document is the only completed slice.
+- The direction document, permanent legacy archive tag, and reference-only
+  legacy gameplay inventory are the completed slices.
 - The existing `tes3mp-0.8.1` tag is a lightweight tag at `68954091c` and must
   not be moved. ADR-0001 must choose a new unambiguous archive-tag name.
 - Branch `0.8.1` currently provides the intended `49be5b640` source reference,
   but a branch alone is not the permanent archive artifact required by the plan.
 - No cutover command should be run until the dry-run result preserves the vNext
   documentation and produces an OpenMW 0.51 tree without a textual merge.
+- 2026-08-25 — Slice 0.2 — Implemented
+  - Change: created and pushed the permanent annotated tag
+    `tes3mp-0.8.1-archive`; tag object
+    `1f3bc4c651573a60b4326b5d4703b6fad4b7fccf` archives commit
+    `49be5b6405d6ab427e06ed350cf76c715a1f3bdd`.
+  - Decisions: project owner approved the recommended
+    `tes3mp-0.8.1-archive` name on 2026-08-25. This approval does not select or
+    authorize the baseline-cutover mechanics governed by ADR-0001.
+  - Verification: `git cat-file -t tes3mp-0.8.1-archive` returned `tag`;
+    `git rev-parse tes3mp-0.8.1-archive^{}` returned `49be5b6405d6ab427e06ed350cf76c715a1f3bdd`;
+    and `git ls-remote --tags origin 'refs/tags/tes3mp-0.8.1-archive' 'refs/tags/tes3mp-0.8.1-archive^{}'`
+    returned the tag object and the same peeled commit. `tes3mp-0.8.1` remains a
+    lightweight tag at `68954091c54d0596037c4fb54d2812313b7582a1`.
+  - Owner review: explicit tag-name approval received in the 2026-08-25 working
+    session; published name and target match the approved option.
+  - Follow-ups: Slice 0.5 still requires the complete ADR-0001 decision packet,
+    owner approval, and disposable cutover rehearsal before any cutover command.
+- 2026-08-25 — Slice 0.3 — Implemented
+  - Change: this commit adds
+    `docs/vnext/LEGACY_GAMEPLAY_FEATURE_INVENTORY.md`, a reference-only inventory
+    grouped by user-visible gameplay and operational domains.
+  - Decisions: none; the inventory explicitly rejects compatibility, authority,
+    state-scope, architecture, and gameplay-semantics implications.
+  - Verification: `git diff --check`; `test -e` over every source named in the
+    inventory's repository-evidence section; and `rg -q` checks for all required
+    inventory sections. No production, build, or test target changed.
+  - Owner review: not required for completion because this historical
+    documentation slice approves no architecture or behavior; included in the
+    current working-tree handoff for review.
+  - Follow-ups: missing behavior defined only by external CoreScripts, wiki, or
+    OpenMW-VR sources must be researched in the relevant future ADR/GDR slice.
 
 ### Phase 1 — Clean OpenMW 0.51 baseline
 
