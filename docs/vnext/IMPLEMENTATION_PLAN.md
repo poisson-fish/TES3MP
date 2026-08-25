@@ -303,8 +303,8 @@ runtime or protocol name.
 
 | ADR | Decision | Needed by | Status |
 |---|---|---|---|
-| ADR-0001 | Baseline-cutover Git mechanics | Phase 1 | **Not Started** |
-| ADR-0002 | Supported desktop platforms, compilers, and dependency policy | Phase 1 | **Not Started** |
+| ADR-0001 | Baseline-cutover Git mechanics | Phase 1 | **Implemented** |
+| ADR-0002 | Supported desktop platforms, compilers, and dependency policy | Phase 1 | **Implemented** |
 | ADR-0003 | Threat model and trust boundaries | Phase 3 | **Not Started** |
 | ADR-0004 | Protocol schema, codec, and evolution policy | Phase 4 | **Not Started** |
 | ADR-0005 | Transport, encryption, authentication, and session resumption | Phase 6 | **Not Started** |
@@ -382,8 +382,8 @@ team has enough recorded context to replace the active source safely.
 | 0.1 | Record the accepted clean-break direction, source branch point, and OpenMW baseline | **Implemented** | `docs/vnext/README.md` at `86cfa5ab3` |
 | 0.2 | Create a permanent annotated archive tag at `49be5b640` without moving or reusing the existing `tes3mp-0.8.1` tag | **Implemented** | Annotated tag `tes3mp-0.8.1-archive` (tag object `1f3bc4c651573a60b4326b5d4703b6fad4b7fccf`) is published on `origin` and peels to `49be5b6405d6ab427e06ed350cf76c715a1f3bdd` |
 | 0.3 | Write a high-level legacy gameplay feature inventory for reference only | **Implemented** | [`LEGACY_GAMEPLAY_FEATURE_INVENTORY.md`](LEGACY_GAMEPLAY_FEATURE_INVENTORY.md) groups repository-backed user-visible behavior without packet/API porting tasks |
-| 0.4 | Review desktop, PC VR, Quest, and toolchain options with the owner and approve ADR-0002 | **Not Started** | Owner-approved platform/toolchain policy and CI runner choices are recorded |
-| 0.5 | Prepare ADR-0001, review the irreversible Git mechanics with the owner, and rehearse the cutover in a disposable branch/worktree | **Not Started** | Owner approval plus commands, resulting ancestry/tree, rollback, and verification output are recorded |
+| 0.4 | Review desktop, PC VR, Quest, and toolchain options with the owner and approve ADR-0002 | **Implemented** | Owner approved Option A for all four decisions in [`ADR-0002`](adr/ADR-0002-platform-toolchain-policy.md) on 2026-08-25, with macOS desktop supported and macOS PC VR outside the initial release scope |
+| 0.5 | Prepare ADR-0001, review the irreversible Git mechanics with the owner, and rehearse the cutover in a disposable branch/worktree | **Implemented** | Owner-approved [`ADR-0001`](adr/ADR-0001-baseline-cutover-git-mechanics.md) records the exact mechanics; disposable production-form rehearsal `e042db240` verified ancestry, tree identity, abort, and rollback |
 | 0.6 | Capture pre-cutover repository provenance | **Not Started** | Branches, tags, submodules, remotes, commit IDs, and clean-tree check archived in documentation |
 
 Exit gate:
@@ -437,6 +437,89 @@ Implementation notes:
     current working-tree handoff for review.
   - Follow-ups: missing behavior defined only by external CoreScripts, wiki, or
     OpenMW-VR sources must be researched in the relevant future ADR/GDR slice.
+- 2026-08-25 — Slice 0.4 — In Progress
+  - Change: added proposed
+    [`ADR-0002`](adr/ADR-0002-platform-toolchain-policy.md) with desktop, PC VR,
+    Quest, CI/toolchain, and dependency-policy options, scenarios, tradeoffs,
+    recommendations, failure modes, review triggers, and acceptance evidence.
+  - Decisions: none accepted. The decision packet recommends a bounded desktop
+    matrix, Windows-first PC VR, deferred Quest production, and upstream-aligned
+    GitHub Actions/toolchain/dependency policy; every recommendation remains
+    subject to explicit project-owner approval.
+  - Verification: compared the repository baseline with the pinned OpenMW 0.51
+    CMake, CI, and dependency-version files; verified the official tag with
+    `git ls-remote`; reviewed the OpenMW-VR versioning policy and the current
+    GitHub-hosted runner catalog; then ran `git diff --check` and document-link
+    checks recorded in the working-session handoff.
+  - Owner review: decision packet presented on 2026-08-25; approval pending.
+    Slice 0.4 remains **In Progress** and no dependent production work is
+    authorized.
+  - Follow-ups: record the owner's selected options and conditions in ADR-0002,
+    then mark the ADR and slice **Implemented**. Phase 1 owns the desktop proof
+    matrix, Phase 9 owns PC VR proof, and Phase 23 owns Quest feasibility
+    evidence under the approved policy.
+- 2026-08-25 — Slice 0.4 — Implemented
+  - Change: accepted
+    [`ADR-0002`](adr/ADR-0002-platform-toolchain-policy.md) after owner review
+    and recorded the selected desktop, PC VR, Quest, CI/toolchain, and dependency
+    policies.
+  - Decisions: owner approved Option A for Decisions 1 through 4. macOS arm64
+    and x86-64 desktop remain supported; Windows x86-64 is the required initial
+    PC VR platform; Linux PC VR remains evidence-driven best effort; macOS PC VR
+    is outside the initial release scope because it is currently nonfunctional;
+    Quest production remains deferred; and the upstream-aligned GitHub Actions
+    policy is accepted.
+  - Verification: `git diff --check`; required ADR section/status checks; local
+    link checks; and comparison of the accepted text with the four presented
+    options and the owner's clarification.
+  - Owner review: explicit approval received in the 2026-08-25 working session:
+    “all A for all four,” with the macOS VR clarification recorded above.
+  - Follow-ups: Phase 1 owns desktop CI/build proof, Phase 9 owns PC VR support
+    evidence and any Linux promotion, and a future macOS PC VR expansion must
+    reopen ADR-0002. Phase 23 owns Quest feasibility.
+- 2026-08-25 — Slice 0.5 — In Progress
+  - Change: added proposed
+    [`ADR-0001`](adr/ADR-0001-baseline-cutover-git-mechanics.md) with cutover
+    graph/tree options, recommended exact-tree mechanics, preserved-path scope,
+    failure handling, verification, publication, and rollback policy.
+  - Decisions: none accepted. The packet recommends a two-parent cutover whose
+    tree is exact OpenMW 0.51 plus `docs/vnext/**`. ADR approval would authorize
+    only the disposable production-form rehearsal, not the real cutover.
+  - Verification: fetched the official tag into a disposable local clone and
+    verified `f4bec41444214a7903bebd178389ca22ca13f646`; constructed synthetic
+    one- and two-parent candidates without updating a shared ref; verified the
+    recommended candidate's parent order, both-parent ancestry, OpenMW-only tree
+    outside the three then-committed `docs/vnext` files, byte-identical preserved
+    docs, absence of checked legacy paths, and exact-tree new-commit rollback.
+  - Owner review: decision packet presented on 2026-08-25; approval pending.
+    No production-form rehearsal or active-branch cutover is authorized.
+  - Follow-ups: after approval, run and record the production-form
+    merge/read-tree/restore rehearsal from the final committed inputs. Slice 0.6
+    and Phase 0 exit-gate approval remain required before the real cutover.
+- 2026-08-25 — Slice 0.5 — Implemented
+  - Change: accepted
+    [`ADR-0001`](adr/ADR-0001-baseline-cutover-git-mechanics.md) after owner
+    approval and completed the approved merge/read-tree/restore rehearsal in an
+    isolated clone and worktrees without changing the active repository.
+  - Decisions: owner approved Option 1: a two-parent cutover with the final
+    pre-cutover `vnext` commit first, OpenMW
+    `f4bec41444214a7903bebd178389ca22ca13f646` second, and a tree equal to OpenMW
+    plus only `docs/vnext/**`. Publication is fast-forward-only; published
+    rollback is a new commit, never rewritten history.
+  - Verification: disposable input `45fa537004aa19bef4b35b9c556351f8327bf75a`;
+    cutover `e042db240fe2f109c47bedf0640e4724b7f6ea63`; tree
+    `85d3390ca15a169e04e88d746b1a1d67de4c7a1b`; rollback
+    `addf2c63ff64af3a12f09f71863ff1973f8601ac`. Exact parent order and ancestry,
+    upstream identity outside five `docs/vnext` files, preserved-doc identity,
+    legacy-path absence, clean worktrees, `git diff --check`, `git fsck
+    --no-dangling`, merge-abort restoration, and exact-tree new-commit rollback
+    all passed.
+  - Owner review: Option 1 and its mechanics explicitly approved in the
+    2026-08-25 working session. This approval covered the rehearsal only; it did
+    not authorize the real cutover.
+  - Follow-ups: Slice 0.6 must capture final pre-cutover provenance. Then repeat
+    the approved input/tree checks against the clean published pre-cutover commit
+    and hold the Phase 0 exit-gate review before any real cutover.
 
 ### Phase 1 — Clean OpenMW 0.51 baseline
 
