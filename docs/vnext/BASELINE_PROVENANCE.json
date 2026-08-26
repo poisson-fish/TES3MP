@@ -456,7 +456,7 @@
         },
         {
           "path": "docs/vnext/proofs/gamenetworkingsockets/proof.cpp",
-          "sha256": "0a540be21af512289ca986fb21a11ad1ae716de89dc60a404f484de2993ff6b5"
+          "sha256": "1d767840360b01e45f3df457cd18aca4017dc6a4e016844e440a31769554c739"
         },
         {
           "path": "scripts/run_vnext_gamenetworkingsockets_proof.py",

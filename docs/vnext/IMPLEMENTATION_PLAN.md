@@ -1392,6 +1392,40 @@ Implementation notes:
     redaction evidence; then request owner completion acceptance before changing
     Slice 2.3 to **Implemented**. Slices 2.4–2.6 remain separately required.
 
+- 2026-08-26 — Slice 2.3 — In Progress
+  - Change: diagnosed the first complete hosted proof run and corrected one
+    portable API type mismatch in the disposable proof. GameNetworkingSockets'
+    `SendMessages` result parameter uses its public `int64` typedef; using
+    `std::int64_t` happened to match on Windows but is `long` rather than the
+    required `long long` on the hosted Linux ABI.
+  - Decisions: none. The one-line correction adopts the selected library's
+    public API type and changes no dependency, proof budget, transport behavior,
+    architecture, authority, state scope, or gameplay behavior.
+  - Verification: hosted run
+    [`33011891871`](https://github.com/poisson-fish/TES3MP/actions/runs/33011891871)
+    passed Windows MSVC 2022 v143 and macOS arm64 Xcode 16, while GCC 13 job
+    `98320008864` and Clang 18 ASan/UBSan job `98320008970` both failed at the
+    same compile-time pointer-type mismatch; the push-only macOS x86-64 job was
+    correctly skipped. Successful retained artifacts `9623265318` and
+    `9623081766` were downloaded and compared: both retain the identical lock
+    SHA-256 `d5263f5cd197ee39f2ed862097b691396f4ad7759c19d715d98eb3c562ae295c`,
+    dependency and license identities, build profile, budgets, nine-test list,
+    passing CTest output, and no password or resume-token canaries. After the
+    correction, the incremental MSVC 2022 `/W4 /WX` build and all nine proof
+    scenarios passed locally in 2.09 seconds. The 76-test repository-owned
+    Python suite, exact lock validation, both changed JSON files, all 32 local
+    vNext Markdown links, and staged-diff checks passed; baseline provenance
+    accounted for all 56 intentional differences and verified all 43 dependency
+    inputs.
+  - Owner review: no new owner decision was required. Completion acceptance
+    remains pending a fully passing replacement matrix and retained-artifact
+    consistency review.
+  - Follow-ups: publish the portable type correction, require replacement GCC
+    13 and Clang 18 ASan/UBSan evidence plus the already approved Windows and
+    macOS jobs, run the manual macOS x86-64 job, compare all five retained
+    artifacts, and request owner completion acceptance before changing Slice
+    2.3 to **Implemented**.
+
 ### Phase 3 — Independent targets and test scaffold
 
 Status: **Not Started**

@@ -587,7 +587,7 @@ namespace
             message->m_conn = mClient;
             message->m_nFlags = flags;
             message->m_idxLane = lane;
-            std::int64_t result = 0;
+            int64 result = 0;
             sockets()->SendMessages(1, &message, &result, true);
             check(result > 0, "client send failed");
         }
