@@ -2,7 +2,7 @@
 
 Document type: living implementation plan
 
-Updated: 2026-08-25
+Updated: 2026-08-26
 
 Direction source: [`README.md`](README.md)
 
@@ -597,7 +597,7 @@ Depends on: Phase 0.
 | 1.5 | Add Linux baseline CI | **Implemented** | Ubuntu 24.04 GCC 13 and Clang 18 full-build/install/test jobs passed on `8e378c2c39`; retained package/license artifacts were reviewed |
 | 1.6 | Add Windows baseline CI | **Implemented** | Windows Server 2022/MSVC v143 full-build/install/test passed on `8e378c2c39`; its retained dependency/license artifact was reviewed |
 | 1.7 | Add macOS baseline CI | **Implemented** | macOS 15 arm64 per-change and manually dispatched Intel Xcode 16 full-build/install/test jobs passed on `8e378c2c39`; both retained artifacts were reviewed |
-| 1.8 | Prove legacy multiplayer exclusion | **In Progress** | Fail-closed tracked-tree, CMake-metadata, compilation-database, and Ninja-graph proof passes on committed Windows HEAD; supported-platform CI evidence and owner review remain |
+| 1.8 | Prove legacy multiplayer exclusion | **Implemented** | Fail-closed proof passed on committed Windows HEAD and the owner-accepted Linux GCC/Clang, Windows MSVC, and macOS arm64 CI matrix at `2cad2dbb28`; retained artifacts include the exclusion evidence |
 
 Exit gate:
 
@@ -1004,8 +1004,9 @@ Implementation notes:
     1 remains **In Progress** until compiled legacy multiplayer exclusion is
     proven.
 
-- 2026-08-25 — Slice 1.8 — In Progress
-  - Change: this commit adds `scripts/verify_vnext_legacy_exclusion.py`, its
+- 2026-08-26 — Slice 1.8 — Implemented
+  - Change: implementation commit `13b4282cfa9918a932d36825479b645c0127e4ff`
+    adds `scripts/verify_vnext_legacy_exclusion.py`, its
     failure-case suite, baseline-runner integration, retained JSON evidence,
     provenance coverage, and local documentation. Every supported platform's
     existing `all --ci` path now fails during configuration if an archived
@@ -1041,14 +1042,28 @@ Implementation notes:
     The retained local evidence records exact source commit `13b4282cfa`, CMake
     3.31.6, Ninja 1.12.1, MSVC 19.44.35228.0, and Qt 6.6.3. `git diff --check`
     passed before this status update.
-  - Owner review: no ADR/GDR or decision approval is required for this
-    mechanical control. The implementation demo and Phase 1 exit-gate review
-    remain pending; Phase 2 production work has not begun.
-  - Follow-ups: publish/run the existing Linux, Windows, macOS arm64, and manual
-    macOS Intel baseline jobs on the committed tree, retain their
-    `vnext-legacy-exclusion.json` artifacts, review the implementation evidence
-    with the owner, and then mark Slice 1.8 and Phase 1 **Implemented** if the
-    exit gate is approved.
+    Hosted push runs
+    [`32934599668`](https://github.com/poisson-fish/TES3MP/actions/runs/32934599668),
+    [`32934599672`](https://github.com/poisson-fish/TES3MP/actions/runs/32934599672),
+    and
+    [`32934599670`](https://github.com/poisson-fish/TES3MP/actions/runs/32934599670)
+    passed on exact source `2cad2dbb28b63848f2b43d533d5ebab26aa79cff`.
+    Linux GCC 13 and Clang 18 each verified 3,724 tracked paths, 53 CMake files,
+    1,216 compile commands, and 1,725 Ninja edges, then passed 1,397 + 490 +
+    154 upstream tests. Windows MSVC 2022 v143 verified 3,724/53/1,310/2,166
+    and passed 1,395 + 490 + 154 tests. macOS 15 arm64/Xcode 16 verified
+    3,724/53/1,284/2,349 and passed 1,397 + 490 + 154 tests. All jobs passed
+    baseline provenance for 19 dependency inputs and uploaded retained evidence
+    artifacts `9595155142`, `9595191295`, `9595061296`, and `9595066122`, whose
+    names bind them to the exact source commit and whose successful upload steps
+    include `vnext-legacy-exclusion.json`.
+  - Owner review: on 2026-08-26 the project owner explicitly directed acceptance
+    of the successful current-HEAD Linux, Windows, and macOS baseline runs for
+    Slice 1.8 and directed that the cancelled manual macOS rerun not be used.
+    This accepts the three-OS implementation evidence; it does not by itself
+    approve the separate Phase 1 exit gate or authorize Phase 2 production.
+  - Follow-ups: review and explicitly approve the Phase 1 exit gate before
+    changing the phase/program tracker to **Implemented** or beginning Phase 2.
 
 ### Phase 2 — Security and architecture decisions
 
