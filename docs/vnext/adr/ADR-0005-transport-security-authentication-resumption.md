@@ -4,9 +4,32 @@ Status: **Proposed**
 
 Date opened: 2026-08-26
 
+Date approved: 2026-08-26
+
+Date reopened: 2026-08-26
+
 Decision owner: project owner
 
 Needed by: Phase 2
+
+## Decision history and current status
+
+The project owner approved Option A and its complete restricted profile on
+2026-08-26. The selection proof then began with acceptance test 12 because
+configurable authenticated endpoint trust is a fail-fast security gate.
+
+The exact `v1.6.0` source audit found that the public API can install the local
+endpoint certificate but cannot add a configured trust anchor or revocation.
+The relevant trust-store functions are private implementation APIs, and the
+normal build instead selects one hardcoded root at compile time. The evidence is
+recorded in the
+[endpoint-trust integration assessment](../proofs/gamenetworkingsockets/TRUST_INTEGRATION_ASSESSMENT.md).
+
+That result fails the approved acceptance test as written and triggers this
+record's replacement rule. The ADR is therefore reopened before dependency
+proof or production code. Option A remains the owner-approved direction, but no
+unapproved internal API, universal signing secret, silent trust-on-first-use, or
+dependency patch will be adopted to force it through the gate.
 
 ## Decision question
 
@@ -352,9 +375,13 @@ Reopen this ADR if:
 
 ## Owner approval
 
-Pending. No transport, crypto backend, endpoint-trust model, authentication
-boundary, or session-resumption mechanism is approved by this proposed record.
+The project owner explicitly approved Option A with the complete restricted
+dedicated-server, endpoint-trust, authentication, resumption, and
+acceptance-test profile on 2026-08-26.
 
-The recommendation is Option A with the complete restricted dedicated-server,
-endpoint-trust, authentication, resumption, and acceptance-test profile above.
-Dependent proof or production work must wait for explicit owner approval.
+The record was reopened the same day after the first selection-proof audit found
+no supported public runtime trust-anchor integration at the selected release.
+New owner approval is required before vNext adds a dependency patch, operates a
+certificate authority, changes transports, or weakens configured endpoint
+authentication. No dependent proof or production implementation may bypass
+this reopened decision.

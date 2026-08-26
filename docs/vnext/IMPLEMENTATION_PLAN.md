@@ -1190,25 +1190,27 @@ Implementation notes:
     an explicit recommendation, endpoint-trust and application-authentication
     separation, secure application-resumption rules, failure modes, and named
     selection-proof acceptance tests.
-  - Decisions: none yet. The recommendation is restricted standalone
-    GameNetworkingSockets `v1.6.0` with the OpenSSL backend, direct dedicated
-    server connections only, configured endpoint trust, separate owned client
-    authentication, and single-use application resume tokens. The alternatives
-    are MsQuic streams plus QUIC DATAGRAM and ENet plus a project-owned secure
-    session. Owner approval is required before a dependency pin or proof.
+  - Decisions: the owner approved restricted standalone GameNetworkingSockets
+    `v1.6.0` with the OpenSSL backend, direct dedicated-server connections only,
+    configured endpoint trust, separate owned client authentication, and
+    single-use application resume tokens. The decision was immediately reopened
+    when the fail-fast endpoint-trust audit found no supported public runtime
+    trust-anchor API at the selected release. No workaround is approved.
   - Verification: primary upstream release, API, platform, build, security,
     license, maintenance, and standards sources were reviewed on 2026-08-26;
     local Markdown links, ADR section/status checks, JSON parsing,
     `git diff --cached --check`, and the repository-owned 64-test Python suite
-    pass; `python scripts/verify_vnext_baseline.py --index` accounts for all 46
+    pass; tagged-source endpoint-trust API and private-store paths were audited;
+    `python scripts/verify_vnext_baseline.py --index` accounts for all 47
     intentional differences and verifies all 34 dependency-input hashes.
-  - Owner review: pending explicit option/profile approval. The owner authorized
-    continuing to ADR-0005 after publishing current Slice 2.2 work, but that
-    authorization is not approval of the recommendation.
-  - Follow-ups: revise or accept ADR-0005 after owner review; only then create
-    the disposable selected-library proof and exact dependency lock. Slice 2.2
-    hosted evidence remains independently in progress and was intentionally not
-    monitored in this working session.
+  - Owner review: Option A and its complete profile explicitly approved on
+    2026-08-26. New owner review is pending for the resulting choice among a
+    narrow upstreamable trust-anchor API patch (recommended), a vNext-operated
+    certificate authority (not recommended), or reopened transport selection.
+  - Follow-ups: obtain explicit owner approval for the reopened trust-integration
+    decision before dependency patching, locks, or build/channel proof code.
+    Slice 2.2 hosted evidence remains independently in progress and was
+    intentionally not monitored in this working session.
 
 ### Phase 3 — Independent targets and test scaffold
 

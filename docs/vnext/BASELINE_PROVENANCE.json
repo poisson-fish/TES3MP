@@ -165,6 +165,11 @@
       "purpose": "Additive optional-field FlatBuffers schema used only for compatibility selection evidence."
     },
     {
+      "path": "docs/vnext/proofs/gamenetworkingsockets/TRUST_INTEGRATION_ASSESSMENT.md",
+      "status": "A",
+      "purpose": "Fail-fast ADR-0005 evidence for the selected transport's public endpoint-trust integration gate and reopened owner decision."
+    },
+    {
       "path": "scripts/capture_vnext_linux_ci.py",
       "status": "A",
       "purpose": "Fail-closed Ubuntu runner, compiler, package, repository, and package-license evidence capture."
