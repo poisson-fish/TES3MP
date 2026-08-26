@@ -597,7 +597,7 @@ Depends on: Phase 0.
 | 1.5 | Add Linux baseline CI | **Implemented** | Ubuntu 24.04 GCC 13 and Clang 18 full-build/install/test jobs passed on `8e378c2c39`; retained package/license artifacts were reviewed |
 | 1.6 | Add Windows baseline CI | **Implemented** | Windows Server 2022/MSVC v143 full-build/install/test passed on `8e378c2c39`; its retained dependency/license artifact was reviewed |
 | 1.7 | Add macOS baseline CI | **Implemented** | macOS 15 arm64 per-change and manually dispatched Intel Xcode 16 full-build/install/test jobs passed on `8e378c2c39`; both retained artifacts were reviewed |
-| 1.8 | Prove legacy multiplayer exclusion | **In Progress** | Fail-closed tracked-tree, CMake-metadata, compilation-database, and Ninja-graph proof passes locally; committed-tree CI evidence and owner review remain |
+| 1.8 | Prove legacy multiplayer exclusion | **In Progress** | Fail-closed tracked-tree, CMake-metadata, compilation-database, and Ninja-graph proof passes on committed Windows HEAD; supported-platform CI evidence and owner review remain |
 
 Exit gate:
 
@@ -1030,6 +1030,17 @@ Implementation notes:
     1,875 Ninja build edges, rebuilt the affected baseline targets, and passed
     `components-tests` (1,395), `openmw-tests` (490), and `openmw-cs-tests`
     (154) with zero failures. `git diff --cached --check` passed.
+    A subsequent committed-tree rerun at
+    `13b4282cfa9918a932d36825479b645c0127e4ff` passed `python -m unittest
+    discover -s scripts/tests -v` (51 tests), Python compilation, `python
+    scripts/verify_vnext_baseline.py`, and `python
+    scripts/verify_vnext_legacy_exclusion.py`. From the same MSVC 2022 v143
+    x86-64 environment, `python scripts/run_vnext_baseline.py all` then passed
+    a fresh configure, the same 3,724-path/53-metadata/1,232-command/1,875-edge
+    exclusion proof, the build, and all 2,039 upstream tests with zero failures.
+    The retained local evidence records exact source commit `13b4282cfa`, CMake
+    3.31.6, Ninja 1.12.1, MSVC 19.44.35228.0, and Qt 6.6.3. `git diff --check`
+    passed before this status update.
   - Owner review: no ADR/GDR or decision approval is required for this
     mechanical control. The implementation demo and Phase 1 exit-gate review
     remain pending; Phase 2 production work has not begun.

@@ -14,10 +14,10 @@ Quest 3 support is a later, conditional stretch target.
 Phase 0 is implemented and Phase 1 baseline work is in progress. The active
 source tree has been replaced with the provenance-verified OpenMW 0.51 baseline,
 and the machine-checkable baseline manifest now enumerates every intentional
-difference. The documented local Windows baseline configure/build/upstream-test
-path passes from a clean checkout; supported desktop CI and compiled
-legacy-exclusion proof remain Phase 1 work, and no vNext multiplayer target
-exists yet.
+difference. The documented local Windows baseline path and the supported
+desktop CI matrix pass. Fail-closed legacy-exclusion proof passes locally and
+remains pending on the committed supported-platform CI matrix and Phase 1 owner
+review; no vNext multiplayer target exists yet.
 
 See the [implementation plan](IMPLEMENTATION_PLAN.md) for the live phase and
 slice tracker, completion gates, architecture decisions, and implementation
