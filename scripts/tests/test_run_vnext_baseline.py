@@ -43,14 +43,34 @@ class BaselineRunnerTests(unittest.TestCase):
         self.assertEqual(baseline.executable_path("components-tests", "Windows").name, "components-tests.exe")
         self.assertEqual(baseline.executable_path("components-tests", "Linux").name, "components-tests")
 
-    def test_reads_compiler_version_from_cmake_platform_file(self) -> None:
+    def test_full_build_ci_preset_is_bounded_to_linux_until_other_slices_land(self) -> None:
+        self.assertEqual(baseline.CI_PRESETS, {"Linux": "vnext-baseline-linux-ci"})
+
+    def test_linux_ci_preset_enables_full_desktop_build_and_unbounded_target_list(self) -> None:
+        presets = json.loads((baseline.ROOT / "CMakePresets.json").read_text(encoding="utf-8"))
+        configure = {preset["name"]: preset for preset in presets["configurePresets"]}
+        linux_ci = configure["vnext-baseline-linux-ci"]
+        self.assertEqual(linux_ci["inherits"], "vnext-baseline-linux")
+        self.assertTrue(all(linux_ci["cacheVariables"].values()))
+        build = {preset["name"]: preset for preset in presets["buildPresets"]}["vnext-baseline-linux-ci"]
+        self.assertNotIn("targets", build)
+
+    def test_reads_compiler_identity_and_version_from_cmake_platform_file(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             cmake_files = pathlib.Path(directory) / "CMakeFiles" / "3.31.6"
             cmake_files.mkdir(parents=True)
             (cmake_files / "CMakeCXXCompiler.cmake").write_text(
-                'set(CMAKE_CXX_COMPILER_VERSION "19.44.35228.0")\n', encoding="utf-8"
+                'set(CMAKE_CXX_COMPILER_ID "MSVC")\n'
+                'set(CMAKE_CXX_COMPILER_VERSION "19.44.35228.0")\n',
+                encoding="utf-8",
             )
-            self.assertEqual(baseline.read_cmake_compiler_version(pathlib.Path(directory)), "19.44.35228.0")
+            self.assertEqual(
+                baseline.read_cmake_compiler_info(pathlib.Path(directory)),
+                {
+                    "CMAKE_CXX_COMPILER_ID": "MSVC",
+                    "CMAKE_CXX_COMPILER_VERSION": "19.44.35228.0",
+                },
+            )
 
     def test_dependency_lock_is_valid_json_with_one_schema(self) -> None:
         data = json.loads(baseline.LOCK_PATH.read_text(encoding="utf-8"))

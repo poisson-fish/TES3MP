@@ -5,9 +5,13 @@ configures and builds the three upstream OpenMW 0.51 unit-test executables from
 the pinned baseline, runs them directly, and writes a machine-readable
 environment and dependency inventory under the ignored `build/` directory.
 
-The preset intentionally follows OpenMW's upstream test-only build shape. Full
-desktop application builds, installs, and platform artifact capture are the
-separate Linux, Windows, and macOS CI slices (1.5 through 1.7).
+The default preset intentionally follows OpenMW's upstream test-only build
+shape. Full desktop application builds, installs, and platform artifact capture
+are the separate Linux, Windows, and macOS CI slices (1.5 through 1.7). The
+Linux CI path uses `python scripts/run_vnext_baseline.py all --ci`, which selects
+the inherited `vnext-baseline-linux-ci` preset, builds the full upstream desktop
+target set, runs the same tests, and installs under
+`build/vnext-baseline-install`.
 
 On Windows, configuration also enables the existing `openmw-cs` executable
 target because the pinned upstream CMake file unconditionally assigns its
@@ -73,9 +77,9 @@ executables when they are not on `PATH`.
 
 Install the OpenMW 0.51 packages named by `CI/install_debian_deps.sh`, using GCC
 13 or Clang 18 and Ninja, then run the common commands. The Linux preset keeps
-OpenMW's system Recast Navigation and TinyXML choices. Slice 1.5 will pin the
-GitHub runner label, invoke this same preset and script, and retain the resolved
-package/license inventory.
+OpenMW's system Recast Navigation and TinyXML choices. Slice 1.5's GitHub Actions
+workflow pins Ubuntu 24.04, runs both approved compiler gates through the same
+script, and retains the resolved package/license inventory and installed tree.
 
 ## macOS arm64 and x86-64
 

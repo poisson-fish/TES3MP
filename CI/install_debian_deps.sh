@@ -9,8 +9,8 @@ print_help() {
 }
 
 declare -rA GROUPED_DEPS=(
-  [gcc]="binutils gcc build-essential cmake ccache curl unzip git pkg-config mold"
-  [clang]="binutils clang make cmake ccache curl unzip git pkg-config mold"
+  [gcc]="binutils gcc-13 g++-13 build-essential cmake ccache curl unzip git ninja-build pkg-config mold"
+  [clang]="binutils clang-18 make cmake ccache curl unzip git ninja-build pkg-config mold"
   [coverity]="binutils clang make cmake ccache curl unzip git pkg-config file"
   [coverity_upload]="curl"
   [gcc_preprocess]="

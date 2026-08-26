@@ -594,7 +594,7 @@ Depends on: Phase 0.
 | 1.2 | Perform the clean baseline-cutover commit exactly as ADR-0001 specifies | **Implemented** | Published cutover `6cdaddda60` has the exact OpenMW tree plus six reviewed `docs/vnext/**` files |
 | 1.3 | Add a machine-checkable baseline provenance manifest/check | **Implemented** | [`BASELINE_PROVENANCE.json`](BASELINE_PROVENANCE.json) and `scripts/verify_vnext_baseline.py` enumerate all nine intentional differences and fail on tree/dependency-input drift |
 | 1.4 | Establish a documented local configure/build/test preset | **Implemented** | Clean checkout build and upstream test commands pass |
-| 1.5 | Add Linux baseline CI | **Not Started** | Configure, build, and upstream tests pass on the supported Linux toolchain |
+| 1.5 | Add Linux baseline CI | **In Progress** | Ubuntu 24.04 GCC 13 and Clang 18 full-build/install/test jobs and evidence retention are committed; hosted runs remain pending |
 | 1.6 | Add Windows baseline CI | **Not Started** | Configure, build, and upstream tests pass on the supported Windows toolchain |
 | 1.7 | Add macOS baseline CI | **Not Started** | Configure, build, and upstream tests pass on the supported macOS toolchain |
 | 1.8 | Prove legacy multiplayer exclusion | **Not Started** | No legacy server, packet processor, RakNet/CrabNet, or CoreScripts target is present in build metadata |
@@ -767,6 +767,42 @@ Implementation notes:
   - Follow-ups: Slices 1.5–1.7 add and retain evidence from supported Linux,
     Windows, and macOS CI. Slice 1.8 proves compiled legacy multiplayer
     exclusion; Phase 1 remains **In Progress** until those gates pass.
+- 2026-08-25 — Slice 1.5 — In Progress
+  - Change: this commit adds a separate Ubuntu 24.04 baseline workflow for the
+    approved GCC 13 and Clang 18 gates, removes the inherited floating
+    `ubuntu-latest` job, adds an inherited Linux CI preset that builds and
+    installs the complete upstream desktop target set, and routes configure,
+    build, upstream tests, install, and evidence through the repository-owned
+    baseline runner. A new fail-closed capture script archives resolved dpkg
+    versions, apt sources/policy, runner metadata, and dereferenced package
+    copyright files alongside the installed tree and JSON test reports.
+  - Decisions: none; the runner label, compiler matrix, Ninja generator,
+    platform-native dependency flow, evidence requirements, and per-change
+    cadence implement owner-approved ADR-0002 Option A. The workflow pins
+    `actions/checkout` v6.0.2 and `actions/upload-artifact` v4.6.2 by exact
+    commits and introduces no architecture, authority, state-scope, or gameplay
+    behavior decision.
+  - Verification: `python -m unittest
+    scripts.tests.test_capture_vnext_linux_ci
+    scripts.tests.test_run_vnext_baseline
+    scripts.tests.test_verify_vnext_baseline -v` passed 23 tests; `python -m
+    py_compile` passed for both runners and their tests; JSON parsing of
+    `CMakePresets.json` and `BASELINE_PROVENANCE.json` passed; staged
+    `python scripts/verify_vnext_baseline.py --index` and `git diff --cached
+    --check` passed. Read-only `git ls-remote` checks resolved checkout v6.0.2
+    to `de0fac2e4500dabe0009e67214ff5f5447ce83dd` and upload-artifact v4.6.2
+    to `ea165f8d65b6e75b540449e92b4886f43607fa02`. SHA-256-verified actionlint
+    v1.7.12 accepted the workflow, and Visual Studio's bundled CMake
+    4.3.1-msvc1 parsed the preset file and listed the Linux CI build preset; the
+    host condition correctly hides the Linux configure preset on Windows.
+  - Owner review: no new decision or user-visible behavior is introduced. The
+    implementation follows the already approved ADR-0002 scenarios; hosted CI
+    evidence still requires review before this slice can be **Implemented**.
+  - Follow-ups: publish the commit through the normal review path, require both
+    Linux compiler jobs to pass from the committed tree, inspect the retained
+    environment/package/license/install artifacts, record the workflow run URLs
+    and artifact evidence, and then mark Slice 1.5 **Implemented**. Slices
+    1.6–1.8 remain separate Phase 1 work.
 
 ### Phase 2 — Security and architecture decisions
 

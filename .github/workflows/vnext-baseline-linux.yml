@@ -1,0 +1,56 @@
+name: vNext Linux baseline
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  baseline:
+    name: Linux baseline (${{ matrix.compiler }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - compiler: gcc-13
+            dependency_group: gcc
+            cc: gcc-13
+            cxx: g++-13
+          - compiler: clang-18
+            dependency_group: clang
+            cc: clang-18
+            cxx: clang++-18
+    env:
+      CC: ${{ matrix.cc }}
+      CXX: ${{ matrix.cxx }}
+
+    steps:
+      - name: Check out the exact source revision
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+
+      - name: Install pinned-family Ubuntu dependencies
+        run: sudo CI/install_debian_deps.sh "${{ matrix.dependency_group }}" openmw-deps openmw-deps-dynamic
+
+      - name: Configure, build, test, and record baseline evidence
+        run: python3 scripts/run_vnext_baseline.py all --ci
+
+      - name: Capture resolved Ubuntu packages and licenses
+        run: python3 scripts/capture_vnext_linux_ci.py --compiler "${{ matrix.compiler }}"
+
+      - name: Retain test, environment, dependency, and license evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: vnext-linux-baseline-${{ matrix.compiler }}-${{ github.sha }}
+          path: |
+            build/vnext-baseline/*.json
+            build/vnext-baseline/linux-ci-evidence/*
+            build/vnext-baseline-install/**
+          if-no-files-found: error
+          retention-days: 30

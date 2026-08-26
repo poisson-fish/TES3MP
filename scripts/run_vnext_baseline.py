@@ -20,6 +20,7 @@ import urllib.request
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 BUILD_DIR = ROOT / "build" / "vnext-baseline"
+INSTALL_DIR = ROOT / "build" / "vnext-baseline-install"
 LOCK_PATH = ROOT / "scripts" / "vnext_baseline_dependencies.json"
 EVIDENCE_PATH = BUILD_DIR / "vnext-baseline-evidence.json"
 TEST_NAMES = ("components-tests", "openmw-tests", "openmw-cs-tests")
@@ -28,6 +29,7 @@ PRESETS = {
     "Linux": "vnext-baseline-linux",
     "Darwin": "vnext-baseline-macos",
 }
+CI_PRESETS = {"Linux": "vnext-baseline-linux-ci"}
 
 
 class BaselineError(RuntimeError):
@@ -189,16 +191,23 @@ def executable_path(name: str, host: str) -> pathlib.Path:
     return BUILD_DIR / f"{name}{suffix}"
 
 
-def read_cmake_compiler_version(build_dir: pathlib.Path) -> str:
+def read_cmake_compiler_info(build_dir: pathlib.Path) -> dict[str, str]:
     candidates = sorted((build_dir / "CMakeFiles").glob("*/CMakeCXXCompiler.cmake"))
     for path in candidates:
-        match = re.search(
+        compiler_id = re.search(
+            r'set\(CMAKE_CXX_COMPILER_ID "([^"]+)"\)',
+            path.read_text(encoding="utf-8", errors="replace"),
+        )
+        compiler_version = re.search(
             r'set\(CMAKE_CXX_COMPILER_VERSION "([^"]+)"\)',
             path.read_text(encoding="utf-8", errors="replace"),
         )
-        if match:
-            return match.group(1)
-    raise BaselineError("CMake did not record a C++ compiler version.")
+        if compiler_id and compiler_version:
+            return {
+                "CMAKE_CXX_COMPILER_ID": compiler_id.group(1),
+                "CMAKE_CXX_COMPILER_VERSION": compiler_version.group(1),
+            }
+    raise BaselineError("CMake did not record a C++ compiler identity and version.")
 
 
 def collect_evidence(cmake: str, ninja: str, host: str, preset: str, env: dict[str, str]) -> dict:
@@ -210,6 +219,7 @@ def collect_evidence(cmake: str, ninja: str, host: str, preset: str, env: dict[s
         if line.startswith(("CMAKE_CXX_COMPILER:", "CMAKE_CXX_COMPILER_VERSION:", "CMAKE_GENERATOR:")):
             key, value = line.split("=", 1)
             cache_values[key.split(":", 1)[0]] = value
+    compiler_info = read_cmake_compiler_info(BUILD_DIR)
     evidence = {
         "schema_version": 1,
         "recorded_at_utc": dt.datetime.now(dt.timezone.utc).isoformat(),
@@ -221,11 +231,18 @@ def collect_evidence(cmake: str, ninja: str, host: str, preset: str, env: dict[s
             "ninja": run([ninja, "--version"], env=env, capture=True),
             "python": platform.python_version(),
             **cache_values,
-            "CMAKE_CXX_COMPILER_VERSION": read_cmake_compiler_version(BUILD_DIR),
+            **compiler_info,
         },
         "dependency_lock_sha256": hash_file(LOCK_PATH, "sha256"),
         "tests": [str(executable_path(name, host).relative_to(ROOT)) for name in TEST_NAMES],
     }
+    if preset in CI_PRESETS.values():
+        if not INSTALL_DIR.is_dir():
+            raise BaselineError(f"CI installation is missing: {INSTALL_DIR}")
+        evidence["installation"] = {
+            "path": str(INSTALL_DIR.relative_to(ROOT)),
+            "files": sum(1 for path in INSTALL_DIR.rglob("*") if path.is_file()),
+        }
     if host == "Windows":
         lock = load_lock()["windows_x86_64"]
         deps_root = pathlib.Path(env["VNEXT_VCPKG_ROOT"])
@@ -252,13 +269,22 @@ def write_evidence(data: dict) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=("doctor", "provision", "configure", "build", "test", "evidence", "all"))
+    parser.add_argument(
+        "command", choices=("doctor", "provision", "configure", "build", "test", "install", "evidence", "all")
+    )
     parser.add_argument("--index", action="store_true", help="verify the staged tree instead of HEAD")
+    parser.add_argument(
+        "--ci",
+        action="store_true",
+        help="use the supported platform's full-build CI preset and install the result",
+    )
     args = parser.parse_args(argv)
     host = platform.system()
     if host not in PRESETS:
         raise BaselineError(f"Unsupported host system: {host}")
-    preset = PRESETS[host]
+    if args.ci and host not in CI_PRESETS:
+        raise BaselineError(f"A full-build CI preset is not defined for {host} yet.")
+    preset = CI_PRESETS[host] if args.ci else PRESETS[host]
     env = make_environment(host)
     cmake = find_tool("cmake", "VNEXT_CMAKE")
     ninja = find_tool("ninja", "VNEXT_NINJA")
@@ -294,6 +320,8 @@ def main(argv: list[str] | None = None) -> int:
                 raise BaselineError(f"Test executable is missing: {executable}")
             result_file = BUILD_DIR / f"{name}.json"
             run([str(executable), f"--gtest_output=json:{result_file}"], env=runtime_env)
+    if args.command == "install" or (args.command == "all" and args.ci):
+        run([cmake, "--install", str(BUILD_DIR), "--prefix", str(INSTALL_DIR)], env=env)
     if args.command in {"evidence", "all"}:
         write_evidence(collect_evidence(cmake, ninja, host, preset, env))
     return 0
