@@ -1183,6 +1183,34 @@ Implementation notes:
     Slice 2.2 to **Implemented**. No Phase 4 production codec or dependent Phase
     3 implementation may begin before the remaining Phase 2 gates.
 
+- 2026-08-26 — Slice 2.2 — In Progress
+  - Change: inspected hosted run `32946871261`; Linux GCC 13, Linux Clang 18
+    with the sanitizer/fuzzer smoke, and macOS arm64 passed, while Windows
+    failed the generated-header byte comparison because Git's Windows checkout
+    conversion was not constrained. Added a narrow `.gitattributes` rule that
+    pins only the committed proof headers to LF, plus a regression test and
+    proof documentation.
+  - Decisions: none. This preserves the approved schema, generator arguments,
+    generated output, dependency pin, supported matrix, and exact byte-drift
+    policy; it only makes the repository representation platform-independent.
+  - Verification: hosted run `32946871261` passed Linux GCC 13, Linux Clang 18
+    with its 30-second ASan/UBSan/libFuzzer smoke, and macOS arm64. Locally,
+    `python -m unittest discover -s scripts/tests -v` passes 65 tests;
+    `python scripts/run_vnext_flatbuffers_proof.py` passes from the approved
+    Visual Studio 2022 v143 x64 environment and retains evidence; `python -m
+    py_compile` passes for the proof runner, its tests, and the baseline
+    verifier; JSON parsing passes; cached `git check-attr` reports `text: set`
+    and `eol: lf` for both generated headers; `python
+    scripts/verify_vnext_baseline.py --index` accounts for all 48 intentional
+    differences and verifies all 35 dependency inputs; and `git diff --cached
+    --check` passes. Replacement hosted Windows and macOS x86-64 evidence is
+    still pending.
+  - Owner review: no architecture, authority, state-scope, security, gameplay,
+    or user-visible behavior decision is introduced by the line-ending repair.
+  - Follow-ups: publish the repair so the Windows proof can rerun, then manually
+    dispatch and review the full workflow including macOS x86-64 before marking
+    Slice 2.2 **Implemented**.
+
 - 2026-08-26 — Slice 2.3 — In Progress
   - Change: accepted and then amended
     [`ADR-0005`](adr/ADR-0005-transport-security-authentication-resumption.md)

@@ -128,6 +128,16 @@ class FlatBuffersProofRunnerTests(unittest.TestCase):
         self.assertNotRegex(workflow, r"uses:\s+[^\s@]+@v\d")
         self.assertIn("scripts/run_vnext_flatbuffers_proof.py", workflow)
 
+    def test_generated_headers_have_platform_independent_line_endings(self) -> None:
+        attributes = (proof.ROOT / ".gitattributes").read_text(encoding="utf-8").splitlines()
+        self.assertIn(
+            "docs/vnext/proofs/flatbuffers/generated/*.h text eol=lf",
+            attributes,
+        )
+        for filename in proof.load_lock()["generated_files"]:
+            contents = (proof.GENERATED_DIR / filename).read_bytes()
+            self.assertNotIn(b"\r", contents)
+
 
 if __name__ == "__main__":
     unittest.main()

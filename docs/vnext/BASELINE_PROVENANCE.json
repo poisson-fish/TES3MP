@@ -15,6 +15,11 @@
   },
   "intentional_differences": [
     {
+      "path": ".gitattributes",
+      "status": "A",
+      "purpose": "Pins disposable FlatBuffers generated proof headers to LF so exact regeneration checks are independent of Windows checkout conversion."
+    },
+    {
       "path": ".github/workflows/push.yml",
       "status": "D",
       "purpose": "Inherited floating push workflow removed after dedicated vNext Linux, Windows, and macOS baseline workflows replaced all of its jobs."
@@ -307,6 +312,10 @@
       ],
       "files": [
         {
+          "path": ".gitattributes",
+          "sha256": "df5a9faea576a48c1c69fe1d8331f93cc675f0b8c4396bd0dd57403e81fe4ba7"
+        },
+        {
           "path": ".github/workflows/vnext-flatbuffers-proof.yml",
           "sha256": "2f930ba8d3126ef58488bb2eac7ad43743d343768c255626fa1f405c04886ea5"
         },
@@ -320,7 +329,7 @@
         },
         {
           "path": "docs/vnext/proofs/flatbuffers/README.md",
-          "sha256": "29c9bbc6fdda0348dfd70a6794e4056158d45f55d68fa9bdc8eb7c820432c286"
+          "sha256": "a364b78a16d3f732b93e1bad1d15470a433666cd05049a59ee5d0bd4dd8d36da"
         },
         {
           "path": "docs/vnext/proofs/flatbuffers/fuzz.cpp",
@@ -360,7 +369,7 @@
         },
         {
           "path": "scripts/tests/test_run_vnext_flatbuffers_proof.py",
-          "sha256": "c7f58db6a5e8c9dceaa55fdac5a6646a537621b6129457051a578f7641fc9cf4"
+          "sha256": "b51e64fec3557ac5d5fbabfd80b449aa8389015d46e5ccf0ff41d16929364b3b"
         },
         {
           "path": "scripts/vnext_flatbuffers_proof.json",
@@ -375,9 +384,9 @@
         "Ubuntu runner package repositories",
         "Homebrew package repositories"
       ],
-      "resolution": "ADR-0004 pins the normal FlatBuffers v25.12.19 release commit and SHA-256-verified source archive. The repository runner safely extracts regular files, builds flatc from source, enforces the restricted generator/schema profile, reproduces committed output, compiles the header-only runtime surface, runs bounded/evolution tests and optional sanitizer-backed fuzzing, and writes exact toolchain and artifact evidence.",
+      "resolution": "ADR-0004 pins the normal FlatBuffers v25.12.19 release commit and SHA-256-verified source archive. The repository runner safely extracts regular files, builds flatc from source, enforces the restricted generator/schema profile, reproduces LF-pinned committed output independently of checkout conversion, compiles the header-only runtime surface, runs bounded/evolution tests and optional sanitizer-backed fuzzing, and writes exact toolchain and artifact evidence.",
       "license_evidence": "The lock records Apache-2.0 and the exact upstream LICENSE SHA-256; every proof job verifies and retains that license beside its dependency, toolchain, schema, generated-code, corpus, and test evidence.",
-      "phase1_follow_up": "This is an owner-approved Phase 2 selection proof, not a Phase 1 baseline dependency. Local Windows evidence passes; the Linux GCC/Clang and macOS arm64/x86-64 hosted artifacts remain required before Slice 2.2 is Implemented. Android ARM64 remains a documented Phase 23 feasibility check under ADR-0002."
+      "phase1_follow_up": "This is an owner-approved Phase 2 selection proof, not a Phase 1 baseline dependency. Hosted Linux GCC/Clang and macOS arm64 passed in run 32946871261; replacement Windows evidence after the LF checkout repair and macOS x86-64 evidence remain required before Slice 2.2 is Implemented. Android ARM64 remains a documented Phase 23 feasibility check under ADR-0002."
     },
     {
       "id": "linux-packages",

@@ -10,6 +10,8 @@ The proof:
 - builds `flatc` from the pinned source and verifies its reported version;
 - checks explicit schema IDs and compatible v1-to-v2 evolution;
 - regenerates C++ and rejects drift from the committed generated headers;
+- pins generated headers to LF in `.gitattributes` so byte-for-byte drift checks
+  are independent of Windows checkout conversion;
 - compiles generated accessors, builders, and the header-only verifier without
   OpenMW or transport dependencies;
 - tests exact size-prefix and root-identifier handling, every truncation, corrupt
