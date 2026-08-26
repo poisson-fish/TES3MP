@@ -18,8 +18,9 @@ difference. The documented local Windows baseline path and the supported
 desktop CI matrix pass. Fail-closed legacy-exclusion proof passes locally and
 on the accepted Linux, Windows, and macOS CI matrix. Phase 2 security and
 architecture decisions are in progress; the hostile-Internet threat model and
-restricted FlatBuffers schema/codec policy are accepted, the selected-library
-proof matrix is in progress, and no vNext multiplayer target exists yet.
+restricted FlatBuffers schema/codec policy are accepted, its selected-library
+proof matrix is in progress, and the ADR-0005 transport/security decision packet
+is open for owner review. No vNext multiplayer target exists yet.
 
 See the [implementation plan](IMPLEMENTATION_PLAN.md) for the live phase and
 slice tracker, completion gates, architecture decisions, and implementation

@@ -307,7 +307,7 @@ runtime or protocol name.
 | ADR-0002 | Supported desktop platforms, compilers, and dependency policy | Phase 1 | **Implemented** |
 | ADR-0003 | Threat model and trust boundaries | Phase 3 | **Implemented** |
 | ADR-0004 | Protocol schema, codec, and evolution policy | Phase 4 | **Implemented** |
-| ADR-0005 | Transport, encryption, authentication, and session resumption | Phase 6 | **Not Started** |
+| ADR-0005 | Transport, encryption, authentication, and session resumption | Phase 6 | **In Progress** |
 | ADR-0006 | Authority, state-scope, prediction, and presentation policy | Phase 7 | **Not Started** |
 | ADR-0007 | OpenMW hook and patch-queue policy | Phase 8 | **Not Started** |
 | ADR-0008 | PC VR fork/worktree maintenance policy | Phase 9 | **Not Started** |
@@ -1103,7 +1103,7 @@ Depends on: Phase 1.
 |---|---|---|---|
 | 2.1 | Prepare the threat model and obtain owner approval for ADR-0003 | **Implemented** | Owner-approved [`ADR-0003`](adr/ADR-0003-hostile-internet-threat-model.md) records the hostile-Internet boundary, protected assets, attacker capabilities, mitigations, tests, and explicit deferred risks |
 | 2.2 | Evaluate schema/codec candidates with the owner and approve ADR-0004 | **In Progress** | Owner-approved [`ADR-0004`](adr/ADR-0004-protocol-schema-codec-evolution-policy.md) selects restricted verifier-first FlatBuffers; local Windows proof passes and the accepted Linux/macOS/fuzzer CI matrix remains required |
-| 2.3 | Evaluate transport/security candidates with the owner and approve ADR-0005 | **Not Started** | Owner-approved choice is backed by desktop proof builds and channel/security/backpressure evidence |
+| 2.3 | Evaluate transport/security candidates with the owner and approve ADR-0005 | **In Progress** | Proposed [`ADR-0005`](adr/ADR-0005-transport-security-authentication-resumption.md) presents maintained transport, endpoint-trust, authentication, resumption, and proof options; owner approval remains required before selection or proof code |
 | 2.4 | Review authority/state-scope options by subsystem and approve ADR-0006 | **Not Started** | Owner-approved authority, scope, prediction, and presentation framework is explicit; domain GDR questions are listed |
 | 2.5 | Review the OpenMW hook/patch options with the owner and approve ADR-0007 | **Not Started** | Owner-approved hook surface, patch organization, and upstreaming criteria are explicit |
 | 2.6 | Review and approve deterministic simulation and protocol compatibility policies | **Not Started** | Owner-approved tick, numeric/ordering, supported-version, and capability behavior is documented |
@@ -1182,6 +1182,33 @@ Implementation notes:
     macOS arm64, macOS x86-64, and Windows hosted artifacts before changing
     Slice 2.2 to **Implemented**. No Phase 4 production codec or dependent Phase
     3 implementation may begin before the remaining Phase 2 gates.
+
+- 2026-08-26 — Slice 2.3 — In Progress
+  - Change: added proposed
+    [`ADR-0005`](adr/ADR-0005-transport-security-authentication-resumption.md)
+    with hostile-Internet scenarios, three viable transport/security options,
+    an explicit recommendation, endpoint-trust and application-authentication
+    separation, secure application-resumption rules, failure modes, and named
+    selection-proof acceptance tests.
+  - Decisions: none yet. The recommendation is restricted standalone
+    GameNetworkingSockets `v1.6.0` with the OpenSSL backend, direct dedicated
+    server connections only, configured endpoint trust, separate owned client
+    authentication, and single-use application resume tokens. The alternatives
+    are MsQuic streams plus QUIC DATAGRAM and ENet plus a project-owned secure
+    session. Owner approval is required before a dependency pin or proof.
+  - Verification: primary upstream release, API, platform, build, security,
+    license, maintenance, and standards sources were reviewed on 2026-08-26;
+    local Markdown links, ADR section/status checks, JSON parsing,
+    `git diff --cached --check`, and the repository-owned 64-test Python suite
+    pass; `python scripts/verify_vnext_baseline.py --index` accounts for all 46
+    intentional differences and verifies all 34 dependency-input hashes.
+  - Owner review: pending explicit option/profile approval. The owner authorized
+    continuing to ADR-0005 after publishing current Slice 2.2 work, but that
+    authorization is not approval of the recommendation.
+  - Follow-ups: revise or accept ADR-0005 after owner review; only then create
+    the disposable selected-library proof and exact dependency lock. Slice 2.2
+    hosted evidence remains independently in progress and was intentionally not
+    monitored in this working session.
 
 ### Phase 3 — Independent targets and test scaffold
 

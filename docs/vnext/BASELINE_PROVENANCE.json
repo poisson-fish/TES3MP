@@ -105,6 +105,11 @@
       "purpose": "Owner-approved restricted FlatBuffers schema, bounded codec, evolution, generation, dependency, and verification policy."
     },
     {
+      "path": "docs/vnext/adr/ADR-0005-transport-security-authentication-resumption.md",
+      "status": "A",
+      "purpose": "Owner-gated transport, endpoint-trust, authentication, resumption, dependency, and verification decision packet."
+    },
+    {
       "path": "docs/vnext/proofs/flatbuffers/ANDROID_ARM64.md",
       "status": "A",
       "purpose": "ADR-0002-required Android ARM64 feasibility assessment for the selected header-only codec runtime surface."
