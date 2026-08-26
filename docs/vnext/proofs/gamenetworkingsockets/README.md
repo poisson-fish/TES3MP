@@ -67,8 +67,10 @@ The capture proves resistance to passive observation for the exercised
 canaries. It makes no endpoint-authentication claim; ADR-0005 explicitly accepts
 active server impersonation for the first milestone.
 
-All approved scenarios now pass locally on Windows MSVC 2022. Slice 2.3 stays
-**In Progress** until the complete hosted matrix and retained artifacts have
-passed consistency review and the owner accepts the completion evidence.
-Android ARM64 is a separate feasibility result, recorded in
+All approved scenarios pass on Windows MSVC 2022, Linux GCC 13, Linux Clang 18
+with ASan/UBSan, macOS arm64, and macOS x86-64. The complete hosted matrix and
+five retained artifacts passed consistency review at commit
+`d5d7a1d1f49715bd41f2eb090393785e67924598`, and the owner accepted the
+completion evidence on 2026-08-26. Slice 2.3 is **Implemented**. Android ARM64
+is a separate feasibility result, recorded in
 [ANDROID_ARM64.md](ANDROID_ARM64.md).

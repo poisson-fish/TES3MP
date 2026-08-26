@@ -1103,7 +1103,7 @@ Depends on: Phase 1.
 |---|---|---|---|
 | 2.1 | Prepare the threat model and obtain owner approval for ADR-0003 | **Implemented** | Owner-approved [`ADR-0003`](adr/ADR-0003-hostile-internet-threat-model.md) records the hostile-Internet boundary, protected assets, attacker capabilities, mitigations, tests, and explicit deferred risks |
 | 2.2 | Evaluate schema/codec candidates with the owner and approve ADR-0004 | **Implemented** | Owner-approved [`ADR-0004`](adr/ADR-0004-protocol-schema-codec-evolution-policy.md) selects restricted verifier-first FlatBuffers; the exact Windows/Linux/macOS/fuzzer proof and retained-artifact consistency gate pass at `da24423a1a`, and the owner accepted the completion evidence on 2026-08-26 |
-| 2.3 | Evaluate transport/security candidates with the owner and approve ADR-0005 | **In Progress** | Owner-approved [`ADR-0005`](adr/ADR-0005-transport-security-authentication-resumption.md) selects standalone GameNetworkingSockets with automatic encryption, no endpoint-certificate operations, an optional shared join password, and automatic single-use resume tokens; the selected-library proof remains required |
+| 2.3 | Evaluate transport/security candidates with the owner and approve ADR-0005 | **Implemented** | Owner-approved [`ADR-0005`](adr/ADR-0005-transport-security-authentication-resumption.md) selects standalone GameNetworkingSockets with automatic encryption, no endpoint-certificate operations, an optional shared join password, and automatic single-use resume tokens; the exact five-platform proof and retained-artifact consistency gate pass at `d5d7a1d1f4`, and the owner accepted the completion evidence on 2026-08-26 |
 | 2.4 | Review authority/state-scope options by subsystem and approve ADR-0006 | **Not Started** | Owner-approved authority, scope, prediction, and presentation framework is explicit; domain GDR questions are listed |
 | 2.5 | Review the OpenMW hook/patch options with the owner and approve ADR-0007 | **Not Started** | Owner-approved hook surface, patch organization, and upstreaming criteria are explicit |
 | 2.6 | Review and approve deterministic simulation and protocol compatibility policies | **Not Started** | Owner-approved tick, numeric/ordering, supported-version, and capability behavior is documented |
@@ -1465,6 +1465,36 @@ Implementation notes:
     suppression, run manual macOS x86-64, compare all five retained artifacts,
     and request owner completion acceptance before changing Slice 2.3 to
     **Implemented**.
+
+- 2026-08-26 — Slice 2.3 — Implemented
+  - Change: recorded completion of the owner-approved restricted standalone
+    GameNetworkingSockets selection and its five-platform proof at implementation
+    commit `d5d7a1d1f49715bd41f2eb090393785e67924598`.
+  - Decisions: no new transport or security decision was introduced. The owner
+    accepted the completed evidence for ADR-0005 and authorized the Slice 2.3
+    status change. The approved automatic-encryption profile, explicit lack of
+    endpoint authentication, shared join-password boundary, single-use resume
+    tokens, dependency pins, and narrow sanitizer scope remain unchanged.
+  - Verification: push run
+    [`33020799953`](https://github.com/poisson-fish/TES3MP/actions/runs/33020799953)
+    passed Linux GCC 13, Linux Clang 18 ASan/UBSan, Windows MSVC 2022 v143, and
+    macOS arm64. Manually dispatched run
+    [`33022971583`](https://github.com/poisson-fish/TES3MP/actions/runs/33022971583)
+    passed the complete matrix, including macOS x86-64. Retained artifacts
+    `9627645351`, `9627621339`, `9627619303`, `9627437471`, and `9627400661`
+    were downloaded and compared against the committed lock. All five contain
+    identical dependency, transitive-license, build-profile, budget,
+    endpoint-identity-claim, and nine-scenario identities; every embedded lock
+    matches SHA-256
+    `367fd5820e41b77c5857ccf1dff9b2d0698cebf8dba5385f81204f1dba64350c`;
+    every retained license matches its manifest; and every scenario passes.
+    Exactly one artifact uses the approved Clang 18.1.3 ASan/UBSan profile, with
+    no sanitizer report, runtime error, credential canary, or broad suppression.
+  - Owner review: the project owner explicitly approved completion Option A in
+    the 2026-08-26 working session and authorized the **Implemented** status.
+  - Follow-ups: none for Slice 2.3. Phase 2 remains **In Progress**; Slice 2.4 is
+    next and requires owner review of authority and state-scope options before
+    ADR-0006 or dependent implementation work.
 
 ### Phase 3 — Independent targets and test scaffold
 

@@ -452,7 +452,7 @@
         },
         {
           "path": "docs/vnext/proofs/gamenetworkingsockets/README.md",
-          "sha256": "52f7a14d0ee4e08479b2c8a2231772bb602b8eaf8b05659de62cc8ba7034f502"
+          "sha256": "01390e234bc450060dd55519630982b4b5840224166ced543e6cbe732bca5e9e"
         },
         {
           "path": "docs/vnext/proofs/gamenetworkingsockets/proof.cpp",
@@ -485,7 +485,7 @@
       ],
       "resolution": "ADR-0005 and the repository lock pin the normal GameNetworkingSockets 1.6.0, OpenSSL 3.5.8 LTS, Protobuf C++ 6.33.4, and Abseil 20250512.1 source commits, SHA-256-verified archives and licenses, bundled utf8_range license, generated-source policy, vulnerability sources, restricted static build profile, exclusions, budgets, platform matrix, and update cadence. The runner builds only those unmodified sources and retains verbose observed scenario and toolchain evidence.",
       "license_evidence": "Every proof job verifies and retains the exact BSD-3-Clause GameNetworkingSockets and Protobuf licenses, Apache-2.0 OpenSSL and Abseil licenses, and MIT utf8_range license beside archive, compiler, build-profile, platform, and scenario evidence.",
-      "phase1_follow_up": "Phase 2 Slice 2.3 remains In Progress. The local Windows MSVC 2022 proof passes; the full five-job hosted matrix, sanitizer result, retained-artifact consistency review, and explicit owner completion acceptance remain required. Android ARM64 feasibility is recorded separately and is not a primary-platform gate."
+      "phase1_follow_up": "Phase 2 Slice 2.3 is Implemented. The exact five-job hosted matrix, Clang 18 ASan/UBSan result, retained-artifact consistency review, and explicit owner completion acceptance passed at implementation commit d5d7a1d1f49715bd41f2eb090393785e67924598. Android ARM64 feasibility is recorded separately and is not a primary-platform gate."
     },
     {
       "id": "linux-packages",

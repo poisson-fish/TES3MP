@@ -17,15 +17,15 @@ and the machine-checkable baseline manifest now enumerates every intentional
 difference. The documented local Windows baseline path and the supported
 desktop CI matrix pass. Fail-closed legacy-exclusion proof passes locally and
 on the accepted Linux, Windows, and macOS CI matrix. Phase 2 security and
-architecture decisions are in progress; the hostile-Internet threat model and
-restricted FlatBuffers schema/codec policy and its cross-platform
-selected-library proof are implemented, and ADR-0005 now accepts standalone
-GameNetworkingSockets with automatic basic encryption, no operator-managed
-certificates or dependency patches, an optional shared join password, and
-automatic single-use resume tokens. Its selected-library proof remains in
-progress: the exact dependency lock and disposable proof pass locally on
-Windows MSVC 2022, while the hosted Linux, macOS, sanitizer, and retained-
-artifact gates remain pending. No vNext multiplayer target exists yet.
+architecture decisions are in progress; the hostile-Internet threat model,
+restricted FlatBuffers schema/codec policy, and standalone
+GameNetworkingSockets transport/security selection are implemented with their
+cross-platform proofs. ADR-0005 accepts automatic basic encryption without
+operator-managed certificates or dependency patches, an optional shared join
+password, and automatic single-use resume tokens. The exact five-platform
+transport proof, Clang ASan/UBSan gate, retained-artifact consistency review,
+and owner completion acceptance pass at `d5d7a1d1f4`. Slice 2.4 authority and
+state-scope review is next; no vNext multiplayer target exists yet.
 
 See the [implementation plan](IMPLEMENTATION_PLAN.md) for the live phase and
 slice tracker, completion gates, architecture decisions, and implementation
