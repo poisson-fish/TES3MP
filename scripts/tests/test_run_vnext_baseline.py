@@ -57,6 +57,10 @@ class BaselineRunnerTests(unittest.TestCase):
         configure = {preset["name"]: preset for preset in presets["configurePresets"]}
         linux_ci = configure["vnext-baseline-linux-ci"]
         self.assertEqual(linux_ci["inherits"], "vnext-baseline-linux")
+        self.assertEqual(
+            linux_ci["cacheVariables"]["CMAKE_INSTALL_PREFIX"],
+            "${sourceDir}/build/vnext-baseline-install",
+        )
         self.assertTrue(all(linux_ci["cacheVariables"].values()))
         build = {preset["name"]: preset for preset in presets["buildPresets"]}["vnext-baseline-linux-ci"]
         self.assertNotIn("targets", build)
@@ -66,6 +70,10 @@ class BaselineRunnerTests(unittest.TestCase):
         configure = {preset["name"]: preset for preset in presets["configurePresets"]}
         windows_ci = configure["vnext-baseline-windows-ci"]
         self.assertEqual(windows_ci["inherits"], "vnext-baseline-windows")
+        self.assertEqual(
+            windows_ci["cacheVariables"]["CMAKE_INSTALL_PREFIX"],
+            "${sourceDir}/build/vnext-baseline-install",
+        )
         self.assertTrue(all(windows_ci["cacheVariables"].values()))
         build = {preset["name"]: preset for preset in presets["buildPresets"]}["vnext-baseline-windows-ci"]
         self.assertNotIn("targets", build)

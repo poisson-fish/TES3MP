@@ -841,6 +841,38 @@ Implementation notes:
     job to pass, inspect the retained environment/package/license/install
     artifact, record the run URL and evidence, then mark Slice 1.6
     **Implemented**. Slices 1.7 and 1.8 remain separate Phase 1 work.
+- 2026-08-25 — Slice 1.5 — In Progress
+  - Change: diagnosed the first two hosted Linux runs and added a bounded repair
+    that configures both full-build CI presets with the repository-local
+    `build/vnext-baseline-install` prefix. OpenMW 0.51 computes several Linux
+    install destinations from the configure-time prefix, so the runner's later
+    `cmake --install --prefix` argument alone could not redirect those cached
+    absolute paths away from `/usr/local`.
+  - Decisions: none; this fixes the already approved ADR-0002 repository-owned
+    build/install path without changing platform support, dependencies,
+    architecture, authority, state scope, or gameplay behavior.
+  - Verification: hosted Linux runs
+    [32918583062](https://github.com/poisson-fish/TES3MP/actions/runs/32918583062)
+    and
+    [32919556702](https://github.com/poisson-fish/TES3MP/actions/runs/32919556702)
+    both configured and built the full GCC 13/Clang 18 matrix and passed all
+    three upstream test binaries before failing closed when install attempted
+    `/usr/local/etc/openmw`. After the repair, `python -m unittest
+    scripts.tests.test_capture_vnext_windows_ci
+    scripts.tests.test_capture_vnext_linux_ci
+    scripts.tests.test_run_vnext_baseline
+    scripts.tests.test_verify_vnext_baseline -v` passed 33 tests; Python
+    compilation and JSON parsing passed; Visual Studio's bundled CMake
+    4.3.1-msvc1 listed the updated Windows presets; and `git diff --check`
+    passed. `python scripts/verify_vnext_baseline.py --index` enumerated exactly
+    22 intentional differences, verified 17 dependency-declaration inputs, and
+    passed; hosted proof remains pending.
+  - Owner review: no new decision or user-visible behavior is introduced. The
+    repair remains within the accepted ADR-0002 policy and does not require a
+    separate decision or demo review.
+  - Follow-ups: publish the repair, require the GCC 13 and Clang 18 hosted jobs
+    to build, test, install wholly under the repository, capture evidence, and
+    upload their retained artifacts before marking Slice 1.5 **Implemented**.
 
 ### Phase 2 — Security and architecture decisions
 

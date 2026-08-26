@@ -141,7 +141,7 @@
         },
         {
           "path": "CMakePresets.json",
-          "sha256": "5509e654f0140a9c3baf50be2c08b6b769455c36ddb9bce066ade54cbef792dc"
+          "sha256": "a5bf387ec2ae46ec810556ff815b53309c0e4e54e4078f98617b8b4524e2b8a0"
         },
         {
           "path": "extern/CMakeLists.txt",

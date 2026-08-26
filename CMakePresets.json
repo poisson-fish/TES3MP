@@ -57,6 +57,7 @@
       "displayName": "vNext OpenMW 0.51 full baseline (Windows x86-64 CI)",
       "inherits": "vnext-baseline-windows",
       "cacheVariables": {
+        "CMAKE_INSTALL_PREFIX": "${sourceDir}/build/vnext-baseline-install",
         "BUILD_OPENMW": true,
         "BUILD_LAUNCHER": true,
         "BUILD_WIZARD": true,
@@ -89,6 +90,7 @@
       "displayName": "vNext OpenMW 0.51 full baseline (Linux x86-64 CI)",
       "inherits": "vnext-baseline-linux",
       "cacheVariables": {
+        "CMAKE_INSTALL_PREFIX": "${sourceDir}/build/vnext-baseline-install",
         "BUILD_OPENMW": true,
         "BUILD_LAUNCHER": true,
         "BUILD_WIZARD": true,
