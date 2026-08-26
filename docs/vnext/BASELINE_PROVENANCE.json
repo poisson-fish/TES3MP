@@ -185,7 +185,7 @@
       ],
       "resolution": "OpenMW 0.51 CMake declarations pin fetched source tags or commits and integrity hashes; the vNext presets and runner define the shared local test build while system package alternatives remain platform-selected.",
       "license_evidence": "Fetched projects supply their own license files; system-package and bundle license inventories must be retained with the resolved environment artifacts in Slices 1.4-1.7.",
-      "phase1_follow_up": "Slice 1.4 captures local resolved-tool and dependency evidence; Slices 1.5-1.7 retain the corresponding CI environment and license artifacts for every supported platform."
+      "phase1_follow_up": "Slices 1.4-1.7 captured and reviewed resolved-tool, dependency, environment, and license evidence for every supported desktop platform; Slice 1.8 remains the Phase 1 exclusion proof."
     },
     {
       "id": "linux-packages",
@@ -216,7 +216,7 @@
       ],
       "resolution": "The workflow pins Ubuntu 24.04, the GCC 13 and Clang 18 compiler families, Ninja, and exact checkout/upload action commits. Ubuntu and PPA package versions remain runner-resolved and are captured with the runner image and apt source metadata on every run.",
       "license_evidence": "Each Linux compiler job archives the complete dpkg name/version/architecture inventory and dereferenced /usr/share/doc package copyright set with SHA-256 identities.",
-      "phase1_follow_up": "Slice 1.5 remains In Progress until both committed GitHub Actions compiler jobs pass and their retained evidence artifacts are reviewed."
+      "phase1_follow_up": "Satisfied by successful final-tree run 32927109314 and retained GCC 13/Clang 18 artifacts 9592632556 and 9592800250; downloaded content from the preceding successful artifacts verified the package, license, test, toolchain, and install evidence contract."
     },
     {
       "id": "macos-packages",
@@ -255,7 +255,7 @@
       ],
       "resolution": "The dedicated workflow pins macOS 15 runner families and exact checkout/upload action commits. The repository lock pins the OpenMW dependency repository commit, both manifest SHA-256 identities, bundle URLs and SHA-512 identities, and named Homebrew formulas. Homebrew package versions remain runner-resolved and are captured without an implicit update on every run.",
       "license_evidence": "Each macOS architecture job archives the pinned manifest and lock, all vcpkg package lists and retained licenses, resolved Homebrew formula versions and declared licenses, the exact Qt version and official license reference, runner/Xcode/AppleClang metadata, and the installed tree.",
-      "phase1_follow_up": "Slice 1.7 remains In Progress until the committed arm64 per-change job and a manually dispatched Intel job pass and both retained evidence artifacts are reviewed."
+      "phase1_follow_up": "Satisfied by final-tree arm64 per-change run 32927109264 and manually dispatched Intel run 32927114955; exact artifacts 9592528855 and 9593222068 were downloaded and reviewed."
     },
     {
       "id": "platform-dependency-lock",
@@ -277,7 +277,7 @@
       ],
       "resolution": "The shared lock records commit-pinned OpenMW manifests, manifest SHA-256 identities, dependency archive URLs and SHA-512 identities, the exact Windows Qt/aqt inputs, and the named macOS Homebrew formulas for every supported bundle-based platform path.",
       "license_evidence": "Platform evidence capture archives this exact lock beside resolved vcpkg package/license inventories and the applicable Qt license record.",
-      "phase1_follow_up": "Slices 1.6 and 1.7 retain the lock and prove every selected architecture bundle on its supported hosted runner."
+      "phase1_follow_up": "Satisfied by reviewed Windows, macOS arm64, and macOS x86-64 retained artifacts on the supported hosted runners."
     },
     {
       "id": "windows-packages",
@@ -316,7 +316,7 @@
       ],
       "resolution": "The dedicated workflow pins Windows Server 2022 and exact checkout, MSVC environment, and artifact action commits. The repository lock pins the OpenMW dependency repository commit and manifest SHA-256, bundle URL and SHA-512, Qt 6.6.3 target, and aqtinstall v3.1.15 SHA-256.",
       "license_evidence": "The Windows job archives the pinned dependency manifest and lock, all vcpkg package lists and retained copyright/license files, the exact Qt version/target with its official license reference, exact runner/toolchain metadata, and the installed tree.",
-      "phase1_follow_up": "Slice 1.6 remains In Progress until the committed Windows Server 2022/MSVC v143 job passes and its retained evidence artifact is reviewed."
+      "phase1_follow_up": "Satisfied by successful final-tree run 32927109296 and retained artifact 9592404044; downloaded content from the preceding successful artifact verified the toolchain, dependency, license, test, and install evidence contract."
     }
   ]
 }

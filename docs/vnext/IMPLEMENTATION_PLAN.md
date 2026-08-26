@@ -592,11 +592,11 @@ Depends on: Phase 0.
 |---|---|---|---|
 | 1.1 | Add `openmw-upstream`, fetch the official `openmw-0.51.0` tag, and verify `f4bec41444214a7903bebd178389ca22ca13f646` | **Implemented** | `openmw-upstream` uses the official URL; fetched `openmw-0.51.0` resolves to the approved commit |
 | 1.2 | Perform the clean baseline-cutover commit exactly as ADR-0001 specifies | **Implemented** | Published cutover `6cdaddda60` has the exact OpenMW tree plus six reviewed `docs/vnext/**` files |
-| 1.3 | Add a machine-checkable baseline provenance manifest/check | **Implemented** | [`BASELINE_PROVENANCE.json`](BASELINE_PROVENANCE.json) and `scripts/verify_vnext_baseline.py` enumerate all nine intentional differences and fail on tree/dependency-input drift |
+| 1.3 | Add a machine-checkable baseline provenance manifest/check | **Implemented** | [`BASELINE_PROVENANCE.json`](BASELINE_PROVENANCE.json) and `scripts/verify_vnext_baseline.py` enumerate all 26 intentional differences and 18 dependency inputs and fail on tree/dependency-input drift |
 | 1.4 | Establish a documented local configure/build/test preset | **Implemented** | Clean checkout build and upstream test commands pass |
-| 1.5 | Add Linux baseline CI | **In Progress** | Ubuntu 24.04 GCC 13 and Clang 18 full-build/install/test jobs and evidence retention are committed; hosted runs remain pending |
-| 1.6 | Add Windows baseline CI | **In Progress** | Windows Server 2022/MSVC v143 full-build/install/test workflow and retained evidence are being integrated; hosted proof remains required |
-| 1.7 | Add macOS baseline CI | **In Progress** | Dedicated arm64 per-change and x86-64 scheduled/release/manual full-build jobs, pinned provisioning, and retained evidence are being integrated; hosted proof remains required |
+| 1.5 | Add Linux baseline CI | **Implemented** | Ubuntu 24.04 GCC 13 and Clang 18 full-build/install/test jobs passed on `8e378c2c39`; retained package/license artifacts were reviewed |
+| 1.6 | Add Windows baseline CI | **Implemented** | Windows Server 2022/MSVC v143 full-build/install/test passed on `8e378c2c39`; its retained dependency/license artifact was reviewed |
+| 1.7 | Add macOS baseline CI | **Implemented** | macOS 15 arm64 per-change and manually dispatched Intel Xcode 16 full-build/install/test jobs passed on `8e378c2c39`; both retained artifacts were reviewed |
 | 1.8 | Prove legacy multiplayer exclusion | **Not Started** | No legacy server, packet processor, RakNet/CrabNet, or CoreScripts target is present in build metadata |
 
 Exit gate:
@@ -926,6 +926,83 @@ Implementation notes:
     the committed tree, manually dispatch and require the macOS 15 Intel job to
     pass, inspect both retained evidence artifacts, and then mark Slice 1.7
     **Implemented**.
+- 2026-08-25 — Slice 1.5 — Implemented
+  - Change: accepted the dedicated Ubuntu 24.04 GCC 13 and Clang 18 baseline
+    gates after the repository-local install-prefix repair passed on the final
+    Slice 1.7 tree.
+  - Decisions: none; the jobs implement the already approved ADR-0002 Linux
+    policy and introduce no architecture or gameplay behavior.
+  - Verification: hosted push run
+    [`32927109314`](https://github.com/poisson-fish/TES3MP/actions/runs/32927109314)
+    passed both compiler jobs on commit
+    `8e378c2c39f52ccd09962e368c3d810398203b4f`. Exact-run artifacts
+    `9592632556` (GCC 13, SHA-256
+    `17d35e9bdc25dfdd7a721806fd18eda25a4bcbf7f836e77737034df474fe7321`)
+    and `9592800250` (Clang 18, SHA-256
+    `2657c2718210298f660a62f1d3f4cbd034e943db7ffb14dff4340c3b9460c272`)
+    were retained. Content review of the immediately preceding successful
+    artifacts confirmed Ubuntu 24.04.4 x86-64, GNU 13.3.0 and Clang 18.1.3,
+    CMake 3.31.6, Ninja 1.13.2, 390 installed files per job, and 1,397 + 490
+    + 154 upstream tests with zero failures or disabled tests. The GCC artifact
+    contained 1,446 package rows and 1,435 copyright records; Clang contained
+    1,445 and 1,434 respectively, and every recorded evidence hash matched the
+    downloaded file.
+  - Owner review: no additional approval is required; the slice is mechanical
+    evidence for accepted ADR-0002.
+  - Follow-ups: Slice 1.8 remains the only incomplete Phase 1 slice.
+- 2026-08-25 — Slice 1.6 — Implemented
+  - Change: accepted the dedicated Windows Server 2022/MSVC v143 baseline gate
+    after full build, upstream tests, repository-local install, evidence
+    capture, and retention passed on the final Slice 1.7 tree.
+  - Decisions: none; the job implements the accepted ADR-0002 Windows policy
+    and introduces no architecture or gameplay behavior.
+  - Verification: hosted push run
+    [`32927109296`](https://github.com/poisson-fish/TES3MP/actions/runs/32927109296)
+    passed on commit
+    `8e378c2c39f52ccd09962e368c3d810398203b4f`; exact-run artifact
+    `9592404044` was retained with SHA-256
+    `df0e11751e1dac8de012d61eb3e1d864182f4b028d98eeaa192e5f0db09b8435`.
+    Downloaded evidence from the immediately preceding successful tree
+    confirmed Windows Server 2022 x64, MSVC 19.44.35228/v143, CMake 3.31.6,
+    Ninja 1.13.2, Qt 6.6.3, 435 installed files, and 1,395 + 490 + 154
+    upstream tests with zero failures or disabled tests. Its hash-verified
+    dependency archive contained 120 package lists and 120 license records.
+  - Owner review: no additional approval is required; the slice is mechanical
+    evidence for accepted ADR-0002.
+  - Follow-ups: Slice 1.8 remains the only incomplete Phase 1 slice.
+- 2026-08-25 — Slice 1.7 — Implemented
+  - Change: accepted the dedicated macOS 15 gates after both supported
+    architectures passed full build, all upstream tests, repository-local app
+    bundle installation, fail-closed evidence capture, and artifact retention.
+    The final bounded baseline fix uses the same `1e-6` single-precision
+    tolerance as the adjacent Euler-angle test; production math is unchanged.
+  - Decisions: none; the workflow cadence and toolchains implement accepted
+    ADR-0002, while the test-only portability repair changes no architecture,
+    authority, state scope, gameplay behavior, or user-visible behavior.
+  - Verification: per-change arm64 run
+    [`32927109264`](https://github.com/poisson-fish/TES3MP/actions/runs/32927109264)
+    and manually dispatched arm64/Intel run
+    [`32927114955`](https://github.com/poisson-fish/TES3MP/actions/runs/32927114955)
+    passed on commit
+    `8e378c2c39f52ccd09962e368c3d810398203b4f`. Reviewed exact-run artifacts
+    `9592528855` (arm64, SHA-256
+    `9a98a8f478b9c735b497e3895fb72c7f2ab64782f8fea4bfd07ec5050174f6ab`)
+    and `9593222068` (Intel, SHA-256
+    `24dd32264d75d7c402d2929709d021abade8fd5e98509b66a3aaaabefe9973a3`)
+    recorded macOS 15/Darwin 24.6.0, Xcode 16.0/AppleClang 16.0.0, CMake
+    4.4.0, Ninja 1.13.2, Qt 6.11.1, 1,020 installed paths, and 1,397 + 490
+    + 154 upstream tests with zero failures or disabled tests on each
+    architecture. Each contained 120 vcpkg package lists and 118 license files;
+    the arm64 and Intel archives recorded 168 and 187 Homebrew formulas. All
+    six recorded evidence-file hashes matched for both artifacts, including
+    dependency-archive SHA-256 values
+    `4a8f9437923216dc901fdd193a0ef07d9cc24b98c82813c6381cb82fbb71c81b`
+    and `bcba13d79e7b978f2e9baa684b75308a2e6c9586ffca4d6278d473a238c64b36`.
+  - Owner review: no additional approval is required; the slice satisfies the
+    already approved ADR-0002 scenarios without a new design or demo gate.
+  - Follow-ups: Slice 1.8 is now the next eligible implementation slice. Phase
+    1 remains **In Progress** until compiled legacy multiplayer exclusion is
+    proven.
 
 ### Phase 2 — Security and architecture decisions
 
