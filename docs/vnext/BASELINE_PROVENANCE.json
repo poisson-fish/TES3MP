@@ -135,9 +135,19 @@
       "purpose": "Failure-case tests for the machine-checkable provenance contract."
     },
     {
+      "path": "scripts/tests/test_verify_vnext_legacy_exclusion.py",
+      "status": "A",
+      "purpose": "Failure-case tests for tracked-path, CMake-metadata, compilation-database, and generated-build-graph legacy exclusion."
+    },
+    {
       "path": "scripts/verify_vnext_baseline.py",
       "status": "A",
       "purpose": "Cross-platform verifier that fails on unrecorded tree or dependency-input drift."
+    },
+    {
+      "path": "scripts/verify_vnext_legacy_exclusion.py",
+      "status": "A",
+      "purpose": "Cross-platform fail-closed proof that archived TES3MP multiplayer inputs and targets are absent from the configured build."
     },
     {
       "path": "scripts/vnext_baseline_dependencies.json",
@@ -169,7 +179,11 @@
         },
         {
           "path": "scripts/run_vnext_baseline.py",
-          "sha256": "f7ccb46eb080b1ce7ff38e2e3f2323e2904b90357689c4fff752be5fcbb20487"
+          "sha256": "55fa2d4c18ff2d640744c424484a689155dc837e846a7cf75cb5fc3ce9883a9d"
+        },
+        {
+          "path": "scripts/verify_vnext_legacy_exclusion.py",
+          "sha256": "8bbc582d967450bfd50aa8225890215bc322554bda3459d246899e99afefbec1"
         }
       ],
       "repositories": [

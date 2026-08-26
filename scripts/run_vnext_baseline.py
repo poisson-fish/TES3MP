@@ -25,6 +25,7 @@ INSTALL_DIR = ROOT / "build" / "vnext-baseline-install"
 LOCK_PATH = ROOT / "scripts" / "vnext_baseline_dependencies.json"
 DOWNLOAD_DIR = ROOT / "deps" / "downloads"
 EVIDENCE_PATH = BUILD_DIR / "vnext-baseline-evidence.json"
+LEGACY_EXCLUSION_EVIDENCE_PATH = BUILD_DIR / "vnext-legacy-exclusion.json"
 TEST_NAMES = ("components-tests", "openmw-tests", "openmw-cs-tests")
 PRESETS = {
     "Windows": "vnext-baseline-windows",
@@ -418,6 +419,17 @@ def main(argv: list[str] | None = None) -> int:
     if args.command in {"configure", "all"}:
         run(verify, env=env)
         run([cmake, "--preset", preset, "--fresh"], env=env)
+        exclusion = [
+            sys.executable,
+            str(ROOT / "scripts" / "verify_vnext_legacy_exclusion.py"),
+            "--build-dir",
+            str(BUILD_DIR),
+            "--evidence",
+            str(LEGACY_EXCLUSION_EVIDENCE_PATH),
+        ]
+        if args.index:
+            exclusion.append("--index")
+        run(exclusion, env=env)
     if args.command in {"build", "all"}:
         run([cmake, "--build", "--preset", preset], env=env)
     if args.command in {"test", "all"}:

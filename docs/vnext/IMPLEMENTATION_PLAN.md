@@ -597,7 +597,7 @@ Depends on: Phase 0.
 | 1.5 | Add Linux baseline CI | **Implemented** | Ubuntu 24.04 GCC 13 and Clang 18 full-build/install/test jobs passed on `8e378c2c39`; retained package/license artifacts were reviewed |
 | 1.6 | Add Windows baseline CI | **Implemented** | Windows Server 2022/MSVC v143 full-build/install/test passed on `8e378c2c39`; its retained dependency/license artifact was reviewed |
 | 1.7 | Add macOS baseline CI | **Implemented** | macOS 15 arm64 per-change and manually dispatched Intel Xcode 16 full-build/install/test jobs passed on `8e378c2c39`; both retained artifacts were reviewed |
-| 1.8 | Prove legacy multiplayer exclusion | **Not Started** | No legacy server, packet processor, RakNet/CrabNet, or CoreScripts target is present in build metadata |
+| 1.8 | Prove legacy multiplayer exclusion | **In Progress** | Fail-closed tracked-tree, CMake-metadata, compilation-database, and Ninja-graph proof passes locally; committed-tree CI evidence and owner review remain |
 
 Exit gate:
 
@@ -1003,6 +1003,41 @@ Implementation notes:
   - Follow-ups: Slice 1.8 is now the next eligible implementation slice. Phase
     1 remains **In Progress** until compiled legacy multiplayer exclusion is
     proven.
+
+- 2026-08-25 — Slice 1.8 — In Progress
+  - Change: this commit adds `scripts/verify_vnext_legacy_exclusion.py`, its
+    failure-case suite, baseline-runner integration, retained JSON evidence,
+    provenance coverage, and local documentation. Every supported platform's
+    existing `all --ci` path now fails during configuration if an archived
+    TES3MP server/browser, packet-processor, RakNet/CrabNet, or CoreScripts
+    path or token is tracked by the active tree or reachable from generated
+    compilation commands or Ninja build edges.
+  - Decisions: none; this is a mechanical Phase 1 exclusion control over the
+    already approved OpenMW baseline and existing Ninja CI path. It introduces
+    no vNext multiplayer target, architecture, authority, state-scope,
+    security, gameplay, or user-visible behavior choice.
+  - Verification: `python -m unittest discover -s scripts/tests -v` passed all
+    51 repository-owned Python tests, including clean evidence generation and
+    rejection of a tracked legacy path, RakNet CMake declaration, legacy
+    compilation source, `tes3mp-server` Ninja target, and empty compilation
+    database. `python -m py_compile` passed for the new verifier/tests and
+    modified runner/tests. `python scripts/verify_vnext_baseline.py --index`
+    accounted for exactly 28 intentional differences and verified 19 hashed
+    dependency-declaration inputs. From an MSVC 2022 v143 x86-64 developer
+    environment, `python scripts/run_vnext_baseline.py all --index` configured
+    with CMake 3.31.6/Ninja 1.12.1 and MSVC 19.44.35228.0, verified 3,724 staged
+    tracked paths, 53 CMake metadata files, 1,232 compilation commands, and
+    1,875 Ninja build edges, rebuilt the affected baseline targets, and passed
+    `components-tests` (1,395), `openmw-tests` (490), and `openmw-cs-tests`
+    (154) with zero failures. `git diff --cached --check` passed.
+  - Owner review: no ADR/GDR or decision approval is required for this
+    mechanical control. The implementation demo and Phase 1 exit-gate review
+    remain pending; Phase 2 production work has not begun.
+  - Follow-ups: publish/run the existing Linux, Windows, macOS arm64, and manual
+    macOS Intel baseline jobs on the committed tree, retain their
+    `vnext-legacy-exclusion.json` artifacts, review the implementation evidence
+    with the owner, and then mark Slice 1.8 and Phase 1 **Implemented** if the
+    exit gate is approved.
 
 ### Phase 2 — Security and architecture decisions
 

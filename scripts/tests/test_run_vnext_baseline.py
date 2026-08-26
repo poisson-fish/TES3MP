@@ -95,6 +95,12 @@ class BaselineRunnerTests(unittest.TestCase):
             },
         )
 
+    def test_legacy_exclusion_evidence_is_retained_with_baseline_json(self) -> None:
+        self.assertEqual(
+            baseline.LEGACY_EXCLUSION_EVIDENCE_PATH,
+            baseline.BUILD_DIR / "vnext-legacy-exclusion.json",
+        )
+
     def test_linux_ci_preset_enables_full_desktop_build_and_unbounded_target_list(self) -> None:
         presets = json.loads((baseline.ROOT / "CMakePresets.json").read_text(encoding="utf-8"))
         configure = {preset["name"]: preset for preset in presets["configurePresets"]}

@@ -40,6 +40,13 @@ host's `vnext-baseline-<platform>` configure and build presets, runs
 - `build/vnext-baseline/openmw-tests.json`
 - `build/vnext-baseline/openmw-cs-tests.json`
 - `build/vnext-baseline/vnext-baseline-evidence.json`
+- `build/vnext-baseline/vnext-legacy-exclusion.json`
+
+Configuration also fails closed if archived TES3MP server, packet-processor,
+RakNet/CrabNet, or CoreScripts paths or tokens appear in the tracked CMake
+metadata, generated compilation database, or Ninja build graph. The exclusion
+report records the exact source revision and the number of tracked paths, CMake
+files, compilation commands, and Ninja build edges checked.
 
 Individual `configure`, `build`, `test`, and `evidence` commands are available
 for iteration. `--index` makes the configure-time provenance check inspect the
