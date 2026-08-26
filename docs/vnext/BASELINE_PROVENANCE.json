@@ -107,7 +107,7 @@
     {
       "path": "docs/vnext/adr/ADR-0005-transport-security-authentication-resumption.md",
       "status": "A",
-      "purpose": "Owner-gated transport, endpoint-trust, authentication, resumption, dependency, and verification decision packet."
+      "purpose": "Owner-approved transport encryption, join authentication, resumption, dependency, risk, and verification decision."
     },
     {
       "path": "docs/vnext/proofs/flatbuffers/ANDROID_ARM64.md",
@@ -167,7 +167,7 @@
     {
       "path": "docs/vnext/proofs/gamenetworkingsockets/TRUST_INTEGRATION_ASSESSMENT.md",
       "status": "A",
-      "purpose": "Fail-fast ADR-0005 evidence for the selected transport's public endpoint-trust integration gate and reopened owner decision."
+      "purpose": "Retained ADR-0005 endpoint-trust API audit and owner-approved no-patch disposition."
     },
     {
       "path": "scripts/capture_vnext_linux_ci.py",

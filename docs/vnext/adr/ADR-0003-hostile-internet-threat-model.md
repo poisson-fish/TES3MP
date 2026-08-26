@@ -6,6 +6,8 @@ Date opened: 2026-08-26
 
 Date approved: 2026-08-26
 
+Date amended: 2026-08-26
+
 Decision owner: project owner
 
 Needed by: Phase 2
@@ -14,9 +16,18 @@ Needed by: Phase 2
 
 The project owner approved Option A on 2026-08-26. TES3MP vNext assumes a
 hostile Internet and fully untrusted clients, including authenticated clients.
-The dedicated server remains the only durable canonical-state writer. A secure
-transport authenticates and protects a connection, but neither a connection nor
-an authenticated principal receives gameplay authority merely by existing.
+The dedicated server remains the only durable canonical-state writer. Transport
+and application authentication properties are selected explicitly by ADR-0005;
+neither a connection nor an authenticated principal receives gameplay authority
+merely by existing.
+
+On 2026-08-26 the owner approved an ADR-0005 exception for the first community
+server milestone: transport encryption protects against passive observation but
+does not authenticate the intended server, so active endpoint impersonation is
+an accepted residual risk. This exception does not weaken hostile-input,
+canonical-authority, resource-bound, redaction, replay, or session-lifecycle
+requirements. Valuable account or administrative credentials remain out of
+scope and trigger review of both ADRs.
 
 The initial trusted computing base is the dedicated-server host and operating
 system, the released server binary and pinned dependencies, and the operator's
@@ -64,9 +75,11 @@ In priority order for the first vertical slice, vNext protects:
 3. **Availability and bounded resources:** one peer or input must not create
    unbounded bytes, allocations, objects, work, queues, logs, snapshots, or
    retained session state.
-4. **Identity and session integrity:** authentication, authorization, session
-   resume, command identity, revision, and authority epoch cannot be confused,
-   forged, replayed, or transferred implicitly.
+4. **Identity and session integrity:** within the connected server's trust
+   boundary, authentication, authorization, session resume, command identity,
+   revision, and authority epoch cannot be confused, forged, replayed, or
+   transferred implicitly. Initial clients do not receive cryptographic proof
+   that the contacted endpoint is the intended server.
 5. **Credential and private-data confidentiality:** reusable credentials,
    secret-source values, session-resume secrets, and private operational data
    must not enter packet-independent core state, diagnostics, metrics, replay,
@@ -195,10 +208,11 @@ action, or compel a trusted operator to disclose secrets.
    latest-wins samples, reconnect attempts, or expensive invalid commands.
    Per-input, per-peer, per-stage, and global budgets bound retained work and
    produce observable backpressure/disconnect outcomes.
-5. **On-path interference:** an attacker observes or modifies traffic. The
-   selected secure transport must provide the approved peer authentication,
-   confidentiality, and integrity properties; protocol code must not invent a
-   second ad hoc cryptographic layer.
+5. **On-path interference:** a passive observer cannot read application traffic,
+   join passwords, or resume tokens. ADR-0005 explicitly accepts active server
+   impersonation for the first community-server milestone; protocol code must
+   not claim endpoint authentication or invent a second ad hoc cryptographic
+   layer.
 6. **Credential disclosure attempt:** credentials or resume secrets appear in a
    malformed input or provider failure. Structured errors, logs, metrics,
    captures, replay, and disconnect reasons redact them.
@@ -250,7 +264,7 @@ block the first vertical slice without satisfying its primary risks.
 | Threat | Required control | Owning phase(s) |
 |---|---|---|
 | Malformed/oversized input | Complete bounded decode; byte, string, collection, allocation, depth, and work budgets; structured errors | 3–4 |
-| Spoofing/on-path tampering | Maintained authenticated encrypted transport; owned authentication boundary; no library-type leakage | 2, 4, 6 |
+| Spoofing/on-path tampering | Maintained encrypted transport; explicit initial active-impersonation exception; owned application-authentication boundary; no library-type leakage | 2, 4, 6 |
 | Replay/duplication/stale authority | Command IDs, bounded idempotency windows, sequences, revisions, session binding, authority epochs | 3–7 |
 | Unauthorized mutation | Server-only canonical writer; explicit command authorization and validation; atomic reducers | 4–5 |
 | Resource exhaustion | Per-stage/per-peer/global quotas, latest-wins coalescing, bounded queues, backpressure, timeouts, disconnect reasons | 3–7 |
@@ -318,8 +332,9 @@ absent or inaccessible until its owning phase supplies an approved boundary.
 - Protocol and server-core work carries validation and resource-budget costs
   from its first message rather than adding them after gameplay expands.
 - Client-side checks improve usability but never substitute for server checks.
-- Transport authentication and encryption are necessary but do not decide
-  gameplay authority or canonical ownership.
+- The approved transport security properties do not decide gameplay authority
+  or canonical ownership. Initial encryption does not authenticate the intended
+  server.
 - Interfaces must carry explicit validated identities, revisions, epochs, and
   bounded values instead of ambient connection or engine state.
 - Some attacks can still deny service within finite budgets. The product promises

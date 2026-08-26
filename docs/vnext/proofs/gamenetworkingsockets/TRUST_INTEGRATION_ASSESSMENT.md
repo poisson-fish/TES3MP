@@ -1,19 +1,20 @@
 # GameNetworkingSockets v1.6.0 endpoint-trust integration assessment
 
-Status: **Fail — owner decision required**
+Status: **Resolved by approved scope change — no patch required**
 
 Date: 2026-08-26
 
 ## Scope
 
-This is fail-fast research evidence for ADR-0005 acceptance test 12. It asks
-whether the exact selected GameNetworkingSockets release can receive
-per-deployment endpoint trust through its supported public API without Steam, a
-universal signing secret, silent trust-on-first-use, or an invasive dependency
-patch.
+This retained fail-fast research evidence asked whether GameNetworkingSockets
+`v1.6.0` could receive per-deployment endpoint trust through its supported public
+API without Steam, a universal signing secret, or an invasive dependency patch.
 
-It is not a production wrapper, dependency build proof, or authorization to use
-an internal upstream API.
+The assessment originally reopened ADR-0005. The owner subsequently approved a
+simpler community-server security profile that uses the library's automatic
+basic encryption without authenticated endpoint identity. The missing trust
+integration is therefore no longer a selection gate, and no upstream or local
+source patch is authorized.
 
 ## Source examined
 
@@ -24,91 +25,57 @@ an internal upstream API.
 - Private socket implementation:
   [`src/steamnetworkingsockets/clientlib/csteamnetworkingsockets.h`](https://github.com/ValveSoftware/GameNetworkingSockets/blob/v1.6.0/src/steamnetworkingsockets/clientlib/csteamnetworkingsockets.h)
 - Private certificate store:
-  [`src/steamnetworkingsockets/steamnetworkingsockets_certstore.h`](https://github.com/ValveSoftware/GameNetworkingSockets/blob/v1.6.0/src/steamnetworkingsockets/steamnetworkingsockets_certstore.h)
+  [`steamnetworkingsockets_certstore.h`](https://github.com/ValveSoftware/GameNetworkingSockets/blob/v1.6.0/src/steamnetworkingsockets/steamnetworkingsockets_certstore.h)
   and
   [`steamnetworkingsockets_certstore.cpp`](https://github.com/ValveSoftware/GameNetworkingSockets/blob/v1.6.0/src/steamnetworkingsockets/steamnetworkingsockets_certstore.cpp)
 
-The files were retrieved from the tagged GitHub repository through its contents
-API and inspected locally on 2026-08-26.
+The exact tagged files were inspected on 2026-08-26.
 
 ## Findings
 
-1. `ISteamNetworkingSockets` publicly exposes `GetCertificateRequest()` and
-   `SetCertificate()`. These provision the local endpoint certificate; they do
-   not configure which remote roots or certificates are trusted.
-2. The concrete class has additional private/internal certificate and private-key
-   machinery. It is not a supported adapter contract.
-3. `CertStore_Reset()`, `CertStore_AddCertFromBase64()`, and
-   `CertStore_AddKeyRevocation()` exist only in the private
-   `SteamNetworkingSocketsLib` certificate-store header.
-4. Unless `STEAMNETWORKINGSOCKETS_ALLOW_DYNAMIC_SELFSIGNED_CERTS` is compiled,
-   the private store defines `STEAMNETWORKINGSOCKETS_HARDCODED_ROOT_CA_KEY` and
-   trusts that single compile-time root.
-5. The private add function explicitly reports that another self-signed root
-   cannot be added when the hardcoded root configuration is active.
-6. No public `v1.6.0` API was found to add, remove, freeze, or revoke a configured
-   remote trust anchor at runtime.
+1. The public `GetCertificateRequest()` and `SetCertificate()` functions
+   provision a local endpoint certificate; they do not configure arbitrary
+   remote trust roots.
+2. The runtime certificate-store operations needed by the original proposal are
+   private implementation APIs.
+3. The normal non-Steam model instead selects a hardcoded root at compile time.
+4. No supported public `v1.6.0` API was found to add, remove, freeze, or revoke a
+   per-server remote trust anchor at runtime.
+5. The public API documentation states that connections receive basic encryption
+   by default but remain vulnerable to man-in-the-middle attacks without
+   certificates or another out-of-band shared-secret mechanism.
 
-## Security and operational consequence
+## Original gate result
 
-A stock public-API integration cannot implement ADR-0005's approved configured
-per-deployment trust policy. The remaining mechanisms would materially change
-the approved architecture:
+Stock GameNetworkingSockets `v1.6.0` could not satisfy the original configured
+per-server endpoint-trust acceptance test. The technically possible alternatives
+were:
 
-- compile all clients with one vNext root and operate a CA that issues every
-  community server certificate;
-- call private certificate-store symbols and bind vNext to unsupported internals;
-- add and maintain an upstreamable public trust-store patch; or
-- choose a transport with a supported endpoint-trust interface.
+- maintain an upstream-oriented trust-store API patch;
+- operate a vNext certificate authority and compile its root into clients; or
+- select another transport with a supported endpoint-verification API.
 
-Disabling authentication, accepting an arbitrary self-signed certificate, or
-using silent trust-on-first-use would fail ADR-0003's hostile-Internet/on-path
-scenario and is not an eligible workaround.
+Each alternative added maintenance or operator infrastructure beyond the first
+community-server milestone.
 
-## Gate result
+## Approved disposition
 
-ADR-0005 proposed acceptance test 12 fails for stock GameNetworkingSockets
-`v1.6.0`. Per the accepted decision's own review trigger, ADR-0005 is reopened
-before exact dependency locks, cross-platform builds, or channel/backpressure
-proof code is added.
+On 2026-08-26 the owner approved amending ADR-0005 to use the supported
+unauthenticated direct-IP mode with automatic encryption. The decision explicitly
+accepts active endpoint impersonation risk for the first milestone while keeping
+encryption against passive observation, application-level join authentication,
+secret redaction, rate limits, bounded inputs, and single-use resume tokens.
 
-## Decision options now requiring owner review
+Consequently:
 
-### Option A1: narrow upstreamable trust-anchor API patch (recommended)
+- the proposed trust-anchor API patch is rejected;
+- a vNext certificate authority is rejected;
+- operators will not manage transport certificates, trust anchors, pins, or
+  revocation lists;
+- no private GameNetworkingSockets certificate-store API may be called; and
+- the dependency proof must verify encryption is active and unencrypted
+  production operation fails, but it must not claim authenticated server
+  identity.
 
-Add a small initialization-only public API that loads explicit self-signed trust
-anchors and revocations into a fresh store, validates them, then freezes trust
-before any listener or connection exists. Carry the patch only behind the owned
-adapter, submit it upstream, and fail Phase 6 if the maintained patch cannot stay
-small and reviewable.
-
-This preserves the approved transport and avoids central infrastructure, but it
-makes vNext temporarily responsible for a security-sensitive dependency patch
-and its cross-platform/update proof.
-
-### Option A2: operate a vNext certificate authority
-
-Compile one vNext public root into clients and require operators to obtain
-short-lived server certificates from a vNext service. This uses the upstream
-model without a source patch, but creates a central online/offline issuance,
-revocation, availability, privacy, abuse, and key-custody product that is not in
-the current plan. It is not recommended.
-
-### Option B: reopen transport selection
-
-Reject GameNetworkingSockets and evaluate a maintained transport with supported
-runtime endpoint trust. MsQuic remains technically attractive but lacks official
-macOS support at the reviewed release, so this option requires additional
-candidate/proof research before another recommendation. It delays Phase 2 but
-avoids a security-critical dependency patch.
-
-## Recommendation
-
-Approve Option A1 only if the owner accepts a narrow, upstream-first dependency
-patch as part of the selected-library proof and patch policy. The proof must
-demonstrate explicit trust loading, validation, freeze-before-use, revocation,
-wrong/expired/malformed root rejection, repeated initialization behavior, and no
-access to broader private library state.
-
-If owning that patch is unacceptable, choose Option B. Option A2 is not
-recommended for an open community dedicated-server project.
+The accepted boundary and review triggers are authoritative in
+[ADR-0005](../../adr/ADR-0005-transport-security-authentication-resumption.md).

@@ -307,7 +307,7 @@ runtime or protocol name.
 | ADR-0002 | Supported desktop platforms, compilers, and dependency policy | Phase 1 | **Implemented** |
 | ADR-0003 | Threat model and trust boundaries | Phase 3 | **Implemented** |
 | ADR-0004 | Protocol schema, codec, and evolution policy | Phase 4 | **Implemented** |
-| ADR-0005 | Transport, encryption, authentication, and session resumption | Phase 6 | **In Progress** |
+| ADR-0005 | Transport, encryption, authentication, and session resumption | Phase 6 | **Implemented** |
 | ADR-0006 | Authority, state-scope, prediction, and presentation policy | Phase 7 | **Not Started** |
 | ADR-0007 | OpenMW hook and patch-queue policy | Phase 8 | **Not Started** |
 | ADR-0008 | PC VR fork/worktree maintenance policy | Phase 9 | **Not Started** |
@@ -1103,7 +1103,7 @@ Depends on: Phase 1.
 |---|---|---|---|
 | 2.1 | Prepare the threat model and obtain owner approval for ADR-0003 | **Implemented** | Owner-approved [`ADR-0003`](adr/ADR-0003-hostile-internet-threat-model.md) records the hostile-Internet boundary, protected assets, attacker capabilities, mitigations, tests, and explicit deferred risks |
 | 2.2 | Evaluate schema/codec candidates with the owner and approve ADR-0004 | **In Progress** | Owner-approved [`ADR-0004`](adr/ADR-0004-protocol-schema-codec-evolution-policy.md) selects restricted verifier-first FlatBuffers; local Windows proof passes and the accepted Linux/macOS/fuzzer CI matrix remains required |
-| 2.3 | Evaluate transport/security candidates with the owner and approve ADR-0005 | **In Progress** | Proposed [`ADR-0005`](adr/ADR-0005-transport-security-authentication-resumption.md) presents maintained transport, endpoint-trust, authentication, resumption, and proof options; owner approval remains required before selection or proof code |
+| 2.3 | Evaluate transport/security candidates with the owner and approve ADR-0005 | **In Progress** | Owner-approved [`ADR-0005`](adr/ADR-0005-transport-security-authentication-resumption.md) selects standalone GameNetworkingSockets with automatic encryption, no endpoint-certificate operations, an optional shared join password, and automatic single-use resume tokens; the selected-library proof remains required |
 | 2.4 | Review authority/state-scope options by subsystem and approve ADR-0006 | **Not Started** | Owner-approved authority, scope, prediction, and presentation framework is explicit; domain GDR questions are listed |
 | 2.5 | Review the OpenMW hook/patch options with the owner and approve ADR-0007 | **Not Started** | Owner-approved hook surface, patch organization, and upstreaming criteria are explicit |
 | 2.6 | Review and approve deterministic simulation and protocol compatibility policies | **Not Started** | Owner-approved tick, numeric/ordering, supported-version, and capability behavior is documented |
@@ -1184,33 +1184,39 @@ Implementation notes:
     3 implementation may begin before the remaining Phase 2 gates.
 
 - 2026-08-26 — Slice 2.3 — In Progress
-  - Change: added proposed
+  - Change: accepted and then amended
     [`ADR-0005`](adr/ADR-0005-transport-security-authentication-resumption.md)
-    with hostile-Internet scenarios, three viable transport/security options,
-    an explicit recommendation, endpoint-trust and application-authentication
-    separation, secure application-resumption rules, failure modes, and named
-    selection-proof acceptance tests.
-  - Decisions: the owner approved restricted standalone GameNetworkingSockets
-    `v1.6.0` with the OpenSSL backend, direct dedicated-server connections only,
-    configured endpoint trust, separate owned client authentication, and
-    single-use application resume tokens. The decision was immediately reopened
-    when the fail-fast endpoint-trust audit found no supported public runtime
-    trust-anchor API at the selected release. No workaround is approved.
+    to select standalone GameNetworkingSockets `v1.6.0` direct-IP transport with
+    automatic basic encryption, a separate optional shared join-password
+    authenticator, and automatic short-lived single-use resume tokens. Updated
+    ADR-0003 with the corresponding explicitly accepted active endpoint
+    impersonation risk and retained the trust-integration audit as a resolved
+    historical gate rather than a patch proposal.
+  - Decisions: production transport must be encrypted but is intentionally not
+    endpoint-authenticated for the first community-server milestone. Steam,
+    relay, P2P, operator certificates, trust anchors, pinning, certificate
+    revocation, private upstream APIs, and a maintained GameNetworkingSockets
+    patch are excluded. A join password is sent only after encrypted connection
+    establishment, is treated as a low-value server-specific secret, and is not
+    replaced by a replayable static password hash. Persistent accounts and
+    administrative credentials remain outside this decision.
   - Verification: primary upstream release, API, platform, build, security,
     license, maintenance, and standards sources were reviewed on 2026-08-26;
-    local Markdown links, ADR section/status checks, JSON parsing,
-    `git diff --cached --check`, and the repository-owned 64-test Python suite
-    pass; tagged-source endpoint-trust API and private-store paths were audited;
+    the tagged-source public/private certificate paths were audited; the
+    repository-owned Python suite passes 64 tests; local Markdown links and
+    manifest JSON parsing pass; `git diff --cached --check` passes; and
     `python scripts/verify_vnext_baseline.py --index` accounts for all 47
-    intentional differences and verifies all 34 dependency-input hashes.
-  - Owner review: Option A and its complete profile explicitly approved on
-    2026-08-26. New owner review is pending for the resulting choice among a
-    narrow upstreamable trust-anchor API patch (recommended), a vNext-operated
-    certificate authority (not recommended), or reopened transport selection.
-  - Follow-ups: obtain explicit owner approval for the reopened trust-integration
-    decision before dependency patching, locks, or build/channel proof code.
-    Slice 2.2 hosted evidence remains independently in progress and was
-    intentionally not monitored in this working session.
+    intentional differences and verifies all 34 dependency-declaration inputs.
+    Cross-platform selected-library proof evidence is still pending.
+  - Owner review: the owner explicitly approved the amended automatic-encryption
+    recommendation on 2026-08-26 after reviewing password handling, resume-token
+    behavior, operator burden, the lack of dependency patches, and the active
+    man-in-the-middle limitation. This supersedes the earlier configured-trust
+    profile and rejects all A1 patch/CA work.
+  - Follow-ups: create the disposable GameNetworkingSockets/OpenSSL/Protocol
+    Buffers dependency lock and selection proof against the amended ADR-0005
+    acceptance tests. Slice 2.2 hosted evidence remains independently in
+    progress and was intentionally not monitored in this working session.
 
 ### Phase 3 — Independent targets and test scaffold
 
@@ -1332,8 +1338,9 @@ Implementation notes:
 
 Status: **Not Started**
 
-Outcome: the in-memory session runs over a maintained real transport with secure
-identity, channel semantics, backpressure, and telemetry hidden behind owned APIs.
+Outcome: the in-memory session runs over a maintained encrypted real transport
+with application session identity, channel semantics, backpressure, and
+telemetry hidden behind owned APIs.
 
 Depends on: Phase 5.
 
@@ -1341,7 +1348,7 @@ Depends on: Phase 5.
 |---|---|---|---|
 | 6.1 | Wrap connection/listen/connect/disconnect/cancellation/lifecycle in an owned transport interface | **Not Started** | No selected-library type crosses the adapter boundary |
 | 6.2 | Map reliable operations and latest-wins snapshots to explicit transport channels | **Not Started** | Loss/reorder tests prove snapshots do not head-of-line block behind operations |
-| 6.3 | Implement encryption, peer authentication plumbing, and credential redaction per ADR-0005 | **Not Started** | Invalid identity, downgrade, replay, timeout, and redaction tests pass |
+| 6.3 | Implement required encryption, optional join-password authentication, resume-token handling, and credential redaction per ADR-0005 | **Not Started** | Encryption ordering, unencrypted-mode rejection, password failure/rate-limit, token replay, timeout, and redaction tests pass |
 | 6.4 | Implement bounded queues, priority, rate limits, backpressure, and slow-peer eviction | **Not Started** | Flood/slow-reader tests remain within configured memory/work budgets |
 | 6.5 | Implement network telemetry and stable disconnect/rejection reasons | **Not Started** | Per-channel sent/received/dropped/retransmitted/queued metrics are asserted in tests |
 | 6.6 | Integrate real sockets into the deterministic fault harness | **Not Started** | Localhost tests exercise faults above/below the adapter as supported |
@@ -1349,8 +1356,8 @@ Depends on: Phase 5.
 
 Exit gate:
 
-- A real client and server complete the Phase 4 exchange securely on all
-  supported desktop platforms.
+- A real client and server complete the Phase 4 exchange over the approved
+  encrypted transport on all supported desktop platforms.
 - Snapshot and reliable-operation delivery behave according to their distinct
   semantics under congestion and loss.
 - Queues and per-peer work remain bounded under malformed, flooding, stalled, and

@@ -1,387 +1,360 @@
 # ADR-0005: Transport, encryption, authentication, and session resumption
 
-Status: **Proposed**
+Status: **Accepted**
 
 Date opened: 2026-08-26
 
 Date approved: 2026-08-26
 
-Date reopened: 2026-08-26
+Date amended: 2026-08-26
 
 Decision owner: project owner
 
 Needed by: Phase 2
 
-## Decision history and current status
+## Decision summary
 
-The project owner approved Option A and its complete restricted profile on
-2026-08-26. The selection proof then began with acceptance test 12 because
-configurable authenticated endpoint trust is a fail-fast security gate.
+TES3MP vNext will use standalone GameNetworkingSockets `v1.6.0` at commit
+`2cb93a06350bb065db53abdb0d87cf297e0bfd34` for direct dedicated-server
+connections. The selected profile uses GameNetworkingSockets' automatic basic
+encryption and integrity protection in its supported unauthenticated direct-IP
+mode. It does not require Steam, a certificate authority, operator-managed
+certificates, trust anchors, certificate pinning, revocation lists, a private
+GameNetworkingSockets API, or a maintained upstream patch.
 
-The exact `v1.6.0` source audit found that the public API can install the local
-endpoint certificate but cannot add a configured trust anchor or revocation.
-The relevant trust-store functions are private implementation APIs, and the
-normal build instead selects one hardcoded root at compile time. The evidence is
-recorded in the
-[endpoint-trust integration assessment](../proofs/gamenetworkingsockets/TRUST_INTEGRATION_ASSESSMENT.md).
+The initial application authenticator is an optional shared server join
+password. A client may submit it only after the transport reports an encrypted
+connection as established. The password is a server-access secret, not a
+general-purpose account credential, and operators and players must not reuse a
+valuable password. A static `hash(password)` is not sent as a credential because
+it would be replayable and would merely become a password equivalent.
 
-That result fails the approved acceptance test as written and triggers this
-record's replacement rule. The ADR is therefore reopened before dependency
-proof or production code. Option A remains the owner-approved direction, but no
-unapproved internal API, universal signing secret, silent trust-on-first-use, or
-dependency patch will be adopted to force it through the gate.
+Every successful join receives a cryptographically random, short-lived,
+single-use application resume token. Reconnect always creates a fresh encrypted
+transport connection before presenting the token. Token expiry, consumption,
+replacement, and invalidation are automatic server behavior; they require no
+operator key or certificate management.
 
-## Decision question
+This decision intentionally accepts one bounded risk for the first community
+server milestone: without authenticated endpoint identity, an active on-path
+attacker can impersonate a server and obtain a join password or resume token.
+The selected transport protects against casual/passive eavesdropping and packet
+modification after its handshake, but it does not prove that the remote endpoint
+is the intended server. This limitation must be documented accurately and must
+not be represented as authenticated transport security.
 
-Which maintained transport and cryptographic dependency profile should carry
-TES3MP vNext traffic, how will a client authenticate the server and then its own
-principal, and how will a disconnected application session resume without
-making transport connection state or replayable credentials authoritative?
+## Decision history
 
-This must be decided before Phase 3 fixes the transport boundary and before
-Phase 6 adds real sockets. The choice affects hostile-input exposure, channel
-semantics, queue ownership, supported platforms, operator certificate handling,
-reconnect security, telemetry, and dependency maintenance.
+The owner first approved a restricted GameNetworkingSockets profile with
+configured per-server endpoint trust. A source audit found no supported public
+runtime API for that model in `v1.6.0`, so the ADR was reopened before dependency
+or production work. The considered remedies were a maintained upstream patch,
+a project-operated certificate authority, or a different transport.
 
-It does not decide gameplay authority, the player-visible reconnect grace
-period, player replacement behavior, discovery, account providers, or a Steam
-service dependency. Those remain owned by ADR-0006, GDR-0001/GDR-0002, and
-Phase 21 as applicable.
+After reviewing the operational cost and actual first-milestone needs, the owner
+rejected those remedies as out of scope and approved the simpler profile above.
+The audit remains retained as useful evidence in the
+[endpoint-trust integration assessment](../proofs/gamenetworkingsockets/TRUST_INTEGRATION_ASSESSMENT.md),
+but its failed gate no longer applies to the amended security objective.
 
-## Non-negotiable constraints
+## Why this decision is needed now
 
-Every option must satisfy the accepted README, ADR-0002, ADR-0003, and ADR-0004
-rules:
+Phase 3 needs stable owned transport and session boundaries, and Phase 6 needs a
+maintained implementation that carries reliable operations and unreliable
+latest-wins samples without exposing library types. The project also needs an
+explicit answer for password handling and reconnect before those concerns are
+accidentally embedded in gameplay or protocol code.
 
-1. The Internet path is encrypted and integrity protected. A client
-   authenticates the intended server against configured trust material before
-   sending an account credential, resume token, or gameplay command.
-2. Transport authentication proves an endpoint; application authentication
-   produces a minimal owned principal result. Neither grants gameplay authority.
-3. Transport-library connection, identity, buffer, clock, error, callback, and
+This ADR selects transport and initial security/session behavior. It does not
+decide gameplay authority, the visible reconnect grace period, player
+replacement behavior, discovery, persistent player accounts, administration,
+or Steam integration. Those remain later ADR/GDR decisions.
+
+## Approved constraints
+
+1. Internet traffic uses GameNetworkingSockets encryption and integrity
+   protection. Production configuration cannot enable unencrypted transport.
+2. The initial direct-IP connection is not endpoint-authenticated. Code,
+   documentation, logs, UI, and telemetry must not claim otherwise.
+3. The standalone open-source library is used without Steam authentication,
+   relay, P2P signaling, ICE/TURN, fake-IP, WebRTC, or Steam account services.
+4. No vNext certificate service, operator-managed transport certificate,
+   trust-anchor store, pinning workflow, revocation list, private upstream API,
+   or carried GameNetworkingSockets source patch is introduced.
+5. Transport-library connection, identity, buffer, clock, error, callback, and
    statistics types remain private to `multiplayer_transport`.
-4. Reliable apply-once operations and unreliable latest-wins samples have
-   distinct delivery and congestion behavior. A lost reliable operation cannot
-   head-of-line block a newer movement or pose sample.
-5. Application queues are bounded before calling the library. Library send and
-   receive buffers, message sizes, fragment/segment work, rates, timeouts, and
-   unauthenticated admission work are also bounded.
-6. A latest-wins value is coalesced by stable semantic key before it reaches a
-   transport queue. It is never silently promoted to reliable delivery.
-7. A reconnect creates a fresh authenticated encrypted transport connection.
-   Transport 0-RTT cannot carry credentials, resume commands, apply-once
-   commands, or canonical mutations.
-8. Application resumption uses a short-lived, revocable, single-use opaque token
-   bound to the server, principal, session, protocol/content context, and resume
-   generation. Raw reusable tokens are not logged, stored as canonical state,
-   or exposed to the server core.
-9. Cancellation, callback races, delayed packets, handle reuse, and shutdown
-   cannot deliver data to a destroyed or replacement session.
-10. Source, transitive dependencies, generated inputs, licenses, build options,
-    and update policy are exactly pinned and proven on Windows, Linux, macOS
-    arm64, and macOS x86-64. Android ARM64 feasibility is assessed without
-    making it a Phase 6 deliverable.
-11. No Steam account, Steam Datagram Relay, peer-to-peer signaling, NAT
-    traversal, browser stack, or external identity service is required for the
-    first dedicated-server vertical slice.
-12. The project owns stable disconnect/rejection categories, redaction, and
-    telemetry. Library strings are diagnostic inputs, not protocol or UI text.
+6. Authentication remains an owned application interface. A transport identity
+   is not a principal, player ID, session ID, or grant of gameplay authority.
+7. The optional initial credential is a bounded shared server join password. It
+   is sent only after the encrypted transport connection is established and is
+   never logged, persisted by vNext, reflected in an error, or placed in replay,
+   metrics, captures retained as evidence, or canonical state.
+8. A static password hash is never accepted as a network bearer credential.
+   Failed join attempts are rate-limited, comparison avoids secret-dependent
+   early exit, and temporary credential buffers are released promptly.
+9. Reliable apply-once operations and unreliable latest-wins samples have
+   distinct delivery and congestion behavior. A delayed reliable operation
+   cannot head-of-line block a newer movement or pose sample.
+10. Application queues and library buffers are bounded. Message size,
+    fragment/segment work, rates, timeouts, admission work, and callback draining
+    receive explicit budgets.
+11. Reconnect creates a new encrypted connection. Application resumption uses a
+    random, finite-lifetime, single-use opaque token bound to the server process,
+    principal/session, protocol/content context, and resume generation.
+12. Successful token use atomically consumes and replaces the token. Expired,
+    duplicate, wrong-context, and old-generation tokens fail without canonical
+    mutation. Server restart may invalidate all outstanding initial-milestone
+    tokens.
+13. Cancellation, delayed packets, callback races, handle reuse, and shutdown
+    cannot deliver data to a destroyed or replaced application session.
+14. Exact sources, transitive dependencies, generated inputs, licenses, build
+    options, and update policy are pinned and proven on Windows, Linux, macOS
+    arm64, and macOS x86-64. Android ARM64 feasibility is assessed separately.
+15. Stable owned disconnect/rejection categories, redaction, and telemetry are
+    required. Raw library strings are diagnostic inputs, not protocol or UI
+    contracts.
 
 ## Representative scenarios
 
-1. **Known server:** endpoint authentication and encryption finish before the
-   application authenticator receives a credential.
-2. **Wrong or rotated key:** an on-path peer, wrong host, expired certificate,
-   or unexpected key rotation cannot impersonate the configured server.
-   Accepting new trust is an explicit action outside the gameplay session.
-3. **Two delivery classes under loss:** reliable join/control operations and
+1. **Open server:** GameNetworkingSockets establishes an encrypted connection;
+   the absent join password is handled by the application authenticator and the
+   client proceeds to session creation.
+2. **Password-protected server:** the client completes the encrypted connection
+   before sending a bounded join password. The server validates it, rate-limits
+   failures, emits no secret-bearing diagnostics, and returns only a minimal
+   authentication result to session code.
+3. **Passive observer:** captured traffic does not expose the join password,
+   resume token, application messages, or canonical state.
+4. **Active impersonator:** an on-path attacker may terminate separate encrypted
+   connections and impersonate the server. This is an explicitly accepted
+   limitation, not a passing endpoint-authentication test.
+5. **Two delivery classes under loss:** reliable join/control operations and
    unreliable movement snapshots share one connection. A delayed reliable
-   fragment does not prevent a newer snapshot from arriving.
-4. **Slow reader and flood:** one peer stops reading while another sends
-   oversized messages, excessive small segments, or a sustained flood.
-   Per-message, per-peer, admission-stage, and global budgets cap resources.
-5. **Reconnect:** a client opens a new encrypted connection and presents its
-   current application resume token. The server atomically consumes and rotates
-   it. Duplicate, expired, revoked, wrong-context, and old-generation tokens fail
-   without canonical mutation.
-6. **Delayed old connection:** packets and callbacks from connection A arrive
-   after connection B resumed the session. An owned connection generation
-   discards A's work; a transport handle is never a durable identity.
-7. **Credential failure:** an account provider times out or rejects opaque input.
-   Raw credential and resume-token canaries do not appear in logs, metrics,
-   captures, disconnect text, or replay.
-8. **Configuration failure:** the server has no valid endpoint key,
-   certificate, trust configuration, or secure backend. Startup fails closed.
-9. **Desktop/VR composition:** desktop and PC VR use one owned API. VR pose is
-   merely another unreliable latest-wins sample.
-10. **Future Android assessment:** the selected source and crypto backend
-    cross-compile for Android ARM64 without OpenMW, Steam, or desktop-only types.
+   fragment does not prevent delivery of a newer snapshot.
+6. **Slow reader and flood:** oversized messages, excessive small segments,
+   sustained traffic, abandoned handshakes, and a stalled reader stay inside
+   per-message, per-peer, admission-stage, and global budgets.
+7. **Reconnect:** a new encrypted connection presents the current application
+   resume token. The server atomically consumes and rotates it; duplicate,
+   expired, wrong-context, and old-generation uses fail.
+8. **Delayed old connection:** callbacks and packets from connection A arrive
+   after connection B resumed the session. An owned generation rejects A's work.
+9. **Credential failure:** password and token canaries do not appear in logs,
+   metrics, traces, errors, replay, or retained captures.
+10. **Crypto/configuration failure:** the required crypto backend is unavailable
+    or unencrypted mode is requested. Production startup or connection setup
+    fails closed.
 
 ## Options considered
 
-### Option A: GameNetworkingSockets restricted dedicated-server profile (recommended)
+### Option A: standalone GameNetworkingSockets with automatic basic encryption
 
-Select `GameNetworkingSockets` `v1.6.0` at commit
-`2cb93a06350bb065db53abdb0d87cf297e0bfd34`. Use its standalone
-message-oriented UDP API, reliable and unreliable modes, a small fixed lane set,
-encrypted certificate handshake, queue limits, and connection statistics. Use
-the OpenSSL crypto backend and pin the current OpenSSL 3.5 LTS patch plus the
-compatible Protocol Buffers dependency in the selection proof.
+This is the approved option. Pin GameNetworkingSockets `v1.6.0`, use its
+message-oriented direct-IP API, reliable and unreliable delivery, a small fixed
+lane set, automatic encrypted handshake, queue controls, and connection
+statistics. Use the OpenSSL backend and a compatible pinned Protocol Buffers
+dependency in the selection proof.
 
-The restricted profile would:
+Advantages:
 
-- build the open-source standalone library, not the Steamworks SDK;
-- enable direct dedicated-server IPv4/IPv6 connections only and disable Steam
-  authentication, relay, P2P, signaling, ICE/TURN, fake-IP, and WebRTC surfaces;
-- make unauthenticated/unencrypted development toggles unreachable from normal
-  production configuration;
-- supply certificate trust through an owned endpoint-trust interface; the proof
-  uses repository test CA/server fixtures, while production issuance, pin
-  distribution, and discovery UX remain separately approved operational work;
-- keep client account authentication behind a separate asynchronous owned
-  boundary after endpoint authentication;
-- begin with one reliable ordered control/operation lane and one unreliable
-  no-delay/latest-wins sample lane;
-- set send bytes, receive bytes/messages, maximum message size, maximum segments
-  per packet, send rate, initial/connected timeout, and callback-drain budgets;
-- coalesce snapshots before transport submission and evict a peer that cannot
-  recover within the approved backpressure policy; and
-- bind every callback/message to an owned connection generation.
+- encryption is automatic for clients and server operators;
+- no certificate lifecycle, central service, dependency fork, or custom crypto
+  protocol is required;
+- the library directly provides the message boundaries and delivery classes the
+  game needs; and
+- it is C++/CMake based, BSD-3-Clause licensed, cross-platform, and maintained.
 
-Why it is recommended:
+Tradeoffs:
 
-- it directly provides the required delivery classes, message boundaries,
-  fragmentation/reassembly, lanes, congestion control, encryption, queue
-  limits, fault simulation, and detailed statistics;
-- one encrypted association carries reliable operations and unreliable samples,
-  avoiding a second UDP security association;
-- it is C++/CMake based, BSD-3-Clause licensed, actively maintained, and has a
-  current stable release with Windows, Linux, Apple, sanitizer, and mobile work;
-  and
-- P2P/Steam/relay features can be excluded behind a small dedicated-server
-  adapter surface.
-
-Tradeoffs and risks:
-
-- its certificate format and trust store are GameNetworkingSockets-specific,
-  not ordinary X.509/Web PKI. The proof must demonstrate configured
-  per-deployment trust without a universal signing secret, Steam, or an invasive
-  patch. Failure reopens this ADR;
-- OpenSSL and Protocol Buffers enlarge the dependency/update surface;
-- callback lifecycle is broad and stateful, so owned generation tests are
-  mandatory;
-- built-in limits do not replace semantic latest-wins coalescing or global
-  server budgets;
-- lane priority controls send scheduling, and only reliable messages within one
-  lane have a strong order guarantee. Session logic still needs its own
-  sequences, revisions, and message semantics; and
-- transport reconnect is not application session resumption. vNext still owns
-  replay defense, revocation, rotation, and resync.
+- default encryption prevents casual eavesdropping but does not authenticate
+  the intended server, so active man-in-the-middle attacks remain possible;
+- a shared join password must be treated as a low-value server-specific secret;
+- OpenSSL and Protocol Buffers enlarge the dependency/update surface; and
+- vNext still owns semantic queues, generations, application authentication,
+  replay defense, resumption, telemetry, and stable errors.
 
 Primary evidence:
 
 - [feature and security overview](https://github.com/ValveSoftware/GameNetworkingSockets/blob/v1.6.0/README.md)
+- [public API statement on default encryption and MITM limitations](https://github.com/ValveSoftware/GameNetworkingSockets/blob/v1.6.0/include/steam/isteamnetworkingsockets.h)
 - [v1.6.0 release](https://github.com/ValveSoftware/GameNetworkingSockets/releases/tag/v1.6.0)
-- [connection lanes and lifecycle API](https://github.com/ValveSoftware/GameNetworkingSockets/blob/v1.6.0/include/steam/isteamnetworkingsockets.h)
-- [limits, authentication, encryption, and fault controls](https://github.com/ValveSoftware/GameNetworkingSockets/blob/v1.6.0/include/steam/steamnetworkingtypes.h)
+- [limits and transport controls](https://github.com/ValveSoftware/GameNetworkingSockets/blob/v1.6.0/include/steam/steamnetworkingtypes.h)
 - [build requirements and crypto choices](https://github.com/ValveSoftware/GameNetworkingSockets/blob/v1.6.0/BUILDING.md)
-- [security-reporting policy](https://github.com/ValveSoftware/GameNetworkingSockets/blob/v1.6.0/SECURITY.md)
-- [OpenSSL 3.5 LTS lifecycle and current patch](https://www.openssl-library.org/source/)
+- [OpenSSL source and support lifecycle](https://www.openssl-library.org/source/)
 
-### Option B: MsQuic streams plus QUIC datagrams
+### Option B: authenticated GameNetworkingSockets endpoint certificates
 
-Pin MsQuic `v2.6.0`, map reliable operations to bounded QUIC streams, and map
-samples to the negotiated QUIC DATAGRAM extension. Use TLS 1.3 server
-certificates, disable 0-RTT application data, and resume the application above a
-fresh QUIC connection.
+Use per-server trust anchors through a new upstream API patch, or operate a
+vNext certificate authority compatible with the library's existing model.
 
-Advantages:
+This could defend against active endpoint impersonation. It was rejected because
+`v1.6.0` has no suitable supported public runtime trust API, a patch would become
+security-sensitive maintenance, and a central CA would impose certificate
+issuance, key custody, rotation, availability, and operator-support obligations
+far beyond the first community-server milestone.
 
-- standardized QUIC/TLS 1.3 supplies encryption, X.509 endpoint authentication,
-  congestion/flow control, migration, streams, and anti-amplification behavior;
-- independent streams avoid connection-wide reliable head-of-line blocking,
-  while QUIC DATAGRAM supplies secure non-retransmitted samples; and
-- MsQuic is actively maintained and MIT licensed, with extensive settings,
-  telemetry, sanitizer, and fuzz infrastructure.
+### Option C: change to a transport with Web-PKI endpoint authentication
 
-Tradeoffs:
+Use MsQuic or another TLS/QUIC transport and ordinary server certificates.
 
-- MsQuic's official platform document currently lists Windows and Linux only.
-  macOS and Android code exists, but vNext would own support for primary macOS
-  targets without an upstream guarantee;
-- vNext must add message framing, stream-count/lifetime policy, and careful
-  callback/buffer ownership;
-- QUIC DATAGRAM is negotiated and may be unavailable; vNext must fail the
-  required capability rather than fall back to reliable snapshots; and
-- Windows Schannel and non-Windows TLS backends complicate exact cross-platform
-  dependency and behavior evidence.
+This provides standardized endpoint authentication but makes certificates and
+server-name/discovery policy part of setup, and the reviewed MsQuic release does
+not officially cover all primary vNext platforms. It is not justified for the
+approved initial threat scope.
 
-Option B becomes the recommendation if Option A cannot prove project-owned
-endpoint trust, or if MsQuic gains sustained official macOS support before
-Phase 6.
+### Option D: password-authenticated key exchange
 
-Primary evidence:
+Add a reviewed PAKE such as OPAQUE or SPAKE2 so a password-protected server and
+client can establish mutual proof without certificates or revealing a reusable
+password.
 
-- [streams and unreliable datagrams](https://github.com/microsoft/msquic/blob/v2.6.0/docs/API.md)
-- [settings and flow-control limits](https://github.com/microsoft/msquic/blob/v2.6.0/docs/Settings.md)
-- [official platform support](https://github.com/microsoft/msquic/blob/v2.6.0/docs/Platforms.md)
-- [v2.6.0 release](https://github.com/microsoft/msquic/releases/tag/v2.6.0)
-- [QUIC DATAGRAM, RFC 9221](https://www.rfc-editor.org/rfc/rfc9221)
+This is operationally attractive if valuable per-user accounts enter scope, but
+it adds another security-sensitive protocol and dependency. It is deferred
+rather than improvised from hashes, nonces, or ad hoc challenge-response logic.
 
-### Option C: ENet plus a project-composed cryptographic session
+## Approved authentication and resumption boundary
 
-Pin ENet for reliable UDP channels and compose it with maintained crypto
-primitives and a project-owned handshake, certificate/trust, packet protection,
-replay window, rekey, and resume protocol.
+1. **Transport connection:** establish GameNetworkingSockets encryption. The
+   result is an `EncryptedConnection`, not an authenticated server identity.
+2. **Protocol negotiation:** exchange only bounded non-secret version,
+   capability, and content context required before authentication.
+3. **Join authentication:** pass one optional bounded password to an asynchronous
+   owned authenticator. The initial provider compares it to the operator's
+   configured shared join password and returns a minimal principal result or a
+   stable rejection category.
+4. **Session creation:** create a distinct application session and random resume
+   token only after successful authentication. Transport handles and addresses
+   never become player or durable session identity.
+5. **Resumption:** after a fresh encrypted reconnect and compatible negotiation,
+   atomically consume and rotate the application token. Exact expiry duration
+   and player-visible replacement behavior remain GDR decisions.
+6. **Authority separation:** connection, password acceptance, principal, and
+   resume success establish routing/session identity only. Every command still
+   requires ordinary authority, revision, idempotency, bounds, and semantic
+   validation.
 
-Advantages:
+Persistent player accounts, email identities, valuable reusable account
+passwords, administrative credentials, and third-party identity providers are
+not approved by this ADR. Adding any of them requires a new owner-reviewed
+authentication decision.
 
-- ENet is small, MIT licensed, message/channel oriented, portable C, and easy to
-  build on the required targets; and
-- vNext would directly control wire overhead and channel policy.
+## Approved acceptance tests
 
-Tradeoffs:
+Slice 2.3 remains **In Progress** until its disposable selection proof retains
+and passes this evidence:
 
-- ENet does not provide authenticated encryption or endpoint authentication;
-  vNext would own handshake binding, downgrade prevention, nonces, packet
-  numbers, replay windows, fragmentation, rekey, key erasure, and resumption;
-- adopting primitives is not the same as adopting a reviewed secure transport,
-  creating the largest bespoke audit, fuzz, interop, and incident burden; and
-- queue, amplification, and unauthenticated admission defenses need more
-  project code.
-
-This is not recommended unless both maintained complete transports fail and the
-owner explicitly accepts the security engineering cost.
-
-Primary evidence:
-
-- [ENet source, license, and history](https://github.com/lsalzman/enet)
-- [ENet packet flags](https://github.com/lsalzman/enet/blob/master/include/enet/enet.h)
-- [libsodium key exchange](https://doc.libsodium.org/key_exchange)
-
-## Recommended authentication and resumption boundary
-
-Approving only the library name is not sufficient. The recommendation includes:
-
-1. **Endpoint authentication:** the adapter receives an owned trust policy and
-   returns only an `AuthenticatedEndpoint` or stable failure. Missing, expired,
-   mismatched, revoked, or untrusted material fails before credentials or
-   protocol messages. There is no hidden trust-on-first-use fallback.
-2. **Client authentication:** after endpoint authentication and negotiation, the
-   client sends one bounded opaque credential to an asynchronous authenticator.
-   A transport identity is not a player ID. Fake/real provider and guest/account
-   policy remain separately gated.
-3. **Transport reconnection:** every reconnect performs a new encrypted,
-   endpoint-authenticated handshake. No application command uses 0-RTT.
-4. **Application resumption:** the server issues a cryptographically random
-   opaque token over the encrypted channel. It binds server instance, principal,
-   session, protocol/content context, and a monotonic resume generation; the
-   server retains only a keyed verifier and bounded metadata. Successful use
-   atomically consumes and replaces it. Expiry duration and player-visible
-   replacement behavior remain GDR-0001/GDR-0002 decisions, but expiry is finite
-   and the token is revocable.
-5. **Authority separation:** endpoint, principal, and resume success establish
-   routing/session identity only. Commands still require normal authority,
-   revision, idempotency, and semantic validation.
-
-## Proposed acceptance tests
-
-If the owner approves Option A and its complete profile, Slice 2.3 remains
-**In Progress** until all of this selection evidence is reviewed:
-
-1. An isolated proof builds exact GameNetworkingSockets, OpenSSL 3.5 LTS patch,
-   compatible Protocol Buffers sources, and a tiny owned adapter on Windows
-   MSVC 2022, Linux GCC 13/Clang 18, macOS arm64, and scheduled macOS x86-64. It
-   also records an Android ARM64 source assessment.
-2. A lock records tag/commit/archive hashes, licenses, transitive identities,
-   build flags, disabled features, generated policy, vulnerability sources, and
-   quarterly plus security-triggered review cadence.
-3. Certificate fixtures accept valid trust and reject unknown root, wrong
-   identity, expired/not-yet-valid or malformed certificate, revoked trust,
-   absent key, and unexpected rotation before credentials are delivered.
-4. Tests prove unauthenticated/unencrypted modes cannot be enabled through
-   production configuration and downgrade attempts fail closed.
-5. Under loss/reordering, reliable operations remain ordered within their lane
-   while unreliable samples may drop/reorder and continue past a delayed
+1. Exact GameNetworkingSockets, OpenSSL, and compatible Protocol Buffers sources
+   plus a tiny owned adapter build on Windows MSVC 2022, Linux GCC 13/Clang 18,
+   macOS arm64, and scheduled macOS x86-64. Android ARM64 source feasibility is
+   recorded.
+2. A dependency lock records tag, commit, archive hashes, licenses, transitive
+   identities, build flags, disabled features, generated policy, vulnerability
+   sources, and update cadence.
+3. A client and server connect in the supported unauthenticated mode with
+   encryption active. Requests for unencrypted production operation fail.
+4. A passive packet capture containing password and resume-token canaries does
+   not reveal either canary. The proof makes no endpoint-authentication claim.
+5. Authentication ordering tests prove no credential or resume token is emitted
+   before the encrypted connection is established and compatible negotiation
+   completes.
+6. Password tests cover absent, correct, incorrect, oversized, repeated, timed
+   out, cancelled, and redaction cases. Static password-hash bearer credentials
+   are not a supported mode.
+7. Under loss and reordering, reliable operations remain ordered within their
+   lane while unreliable samples may drop/reorder and continue past a delayed
    reliable fragment.
-6. A saturated latest-wins queue stays bounded, drops/coalesces older samples,
+8. A saturated latest-wins queue stays bounded, coalesces older samples,
    delivers the newest sample, and never promotes it to reliable delivery.
-7. Slow-reader, full-buffer, maximum-message, excessive-segment,
-   handshake-flood, and disconnect-flood tests stay inside declared per-peer and
-   global memory/work/callback/log budgets.
-8. Lifecycle tests cover cancel/reject/close races, unread data, handle reuse,
-   delayed callback/packet, replacement connection, and teardown under
-   sanitizers where supported.
-9. Resume tests cover valid single use/rotation, duplicate concurrent use,
-   expiry, revocation, wrong context, old generation, interrupted rotation, and
-   delayed old-connection traffic with no partial session attachment.
-10. Secret-canary tests inspect logs, metrics, traces, captures, disconnect
-    reasons, exceptions, and evidence for endpoint keys, credentials, and tokens.
-11. Telemetry tests assert owned per-channel sent/received/dropped/retransmitted/
-    queued categories, lifecycle, authentication, rate-limit, and disconnect
-    outcomes without exposing library strings as stable API.
-12. The proof supplies configured endpoint trust through supported integration
-    hooks without a universal CA private key, Steam dependency, or invasive
-    upstream patch. Failure reopens the choice.
+9. Slow-reader, full-buffer, maximum-message, excessive-segment,
+   handshake-flood, authentication-flood, and disconnect-flood tests stay inside
+   declared memory, work, callback, and log budgets.
+10. Lifecycle tests cover cancellation, rejection, close races, unread data,
+    handle reuse, delayed callback/packet, replacement connection, and teardown
+    under sanitizers where supported.
+11. Resume tests cover valid single use and rotation, duplicate concurrent use,
+    expiry, server invalidation, wrong context, old generation, interrupted
+    rotation, and delayed old-connection traffic without partial attachment.
+12. Secret-canary tests inspect logs, metrics, traces, retained captures,
+    disconnect reasons, exceptions, and evidence for join passwords and tokens.
+13. Telemetry tests assert stable owned per-channel and lifecycle categories
+    without exposing raw library strings or secrets as stable API.
 
-The proof is disposable evidence. Production wrappers, budgets, authentication
-providers, and the resume store remain Phases 4 and 6 work.
+The proof is selection evidence, not the production wrapper. Production
+interfaces, budgets, authentication provider, and resume store remain Phases 4
+and 6 work.
 
-## Consequences if approved
+## Consequences of the approved decision
 
-- Phase 3 defines product connection, channel, backpressure, event, telemetry,
-  and error interfaces without including GameNetworkingSockets.
-- Endpoint trust, client principal, application session, connection generation,
-  and canonical player identity remain distinct types and lifetimes.
+- Server owners configure, at most, an optional join password. They do not
+  generate, obtain, install, rotate, or revoke transport certificates.
+- Clients receive encryption automatically but no cryptographic proof of server
+  identity. UI and documentation must not display a misleading secure-identity
+  claim.
+- Players must use a server-specific join password and must not reuse an account,
+  email, storefront, or administrator password.
+- Phase 3 defines owned connection, channel, backpressure, event, telemetry, and
+  error interfaces without including GameNetworkingSockets types.
 - Movement and pose remain coalesced unreliable samples. Reliable operations
-  keep explicit command IDs/revisions despite transport retransmission.
-- OpenSSL and Protocol Buffers join the selected transport security/update
-  surface and require exact proof evidence for every pin change.
-- P2P, Steam, relay, NAT traversal, and ICE require a later ADR update.
+  keep command IDs and revisions despite transport retransmission.
+- OpenSSL and Protocol Buffers remain in the selected dependency proof and
+  update surface.
+- Steam, P2P, relay, authenticated discovery, persistent accounts, and
+  administrative authentication require later owner-approved decisions.
 
 ## Failure modes and mitigations
 
-- **Encrypted but unauthenticated:** require configured trust and negative trust
-  tests; an IP identity or encryption flag is insufficient.
-- **Certificate ecosystem cannot serve community servers:** fail the proof and
-  reopen the ADR instead of shipping a universal secret or silent TOFU.
-- **Reliable traffic starves samples:** isolate lanes, cap backlog, reserve
-  measured sample opportunity, and evict a persistently slow peer.
-- **Unreliable queue becomes stale:** coalesce before submission and cap in-flight
-  sample count/age.
+- **Passive credential capture:** require encrypted connection state before
+  credentials and verify with packet-capture canaries.
+- **Active server impersonation:** explicitly accepted for the first milestone;
+  warn against password reuse and reopen the decision if valuable credentials or
+  stronger endpoint identity enter scope.
+- **Replayable password hash:** do not implement static hash-as-credential
+  authentication. Use the password only inside the encrypted channel.
+- **Password guessing:** bound input, rate-limit failures, avoid detailed
+  rejection differences, and permit operators to disable password access.
+- **Reliable traffic starves samples:** isolate lanes, cap backlog, preserve
+  sample opportunity, and evict a persistently slow peer.
+- **Unreliable queue becomes stale:** coalesce before submission and cap
+  in-flight sample count and age.
 - **Callback after teardown:** bind callbacks to an owned generation and ignore
   stale events before releasing adapter state.
-- **Resume replay/race:** keyed verifier, atomic rotation, generation binding,
-  finite expiry, revocation, and one writer decide the winner.
+- **Resume replay or race:** random finite-lifetime token, atomic single-use
+  rotation, generation/context binding, and one writer decide the winner.
 - **Secret leakage:** opaque secret types, redacted formatting, canary tests, and
-  no raw library diagnostic passthrough.
-- **Dependency vulnerability:** exact pins, advisory monitoring, fuzz/sanitizer
+  no raw diagnostic passthrough.
+- **Dependency vulnerability:** exact pins, advisory review, sanitizer/fuzz
   regression, emergency update procedure, and ADR review when required.
 
 ## Review and replacement triggers
 
 Reopen this ADR if:
 
-- the owner selects another option or changes the authentication/resume rules;
-- endpoint trust requires a universal signing secret, Steam, invasive patch, or
-  insecure first connection;
-- a supported desktop proof or Android assessment fails;
-- reliable traffic blocks required samples despite the bounded lane policy;
-- a selected dependency loses support or lacks a timely security fix;
-- browser/WebTransport, peer hosting, federation, managed identity, or mandatory
-  relay enters scope;
-- QUIC support changes enough to remove its current macOS disadvantage; or
-- certificate, queue, telemetry, or update burden exceeds an approved budget.
+- persistent player accounts, valuable reusable credentials, administrative
+  credentials, payments, or private player data enter the transport flow;
+- authenticated server discovery, verified server identity, federation, or
+  cross-server trust becomes a product requirement;
+- an incident or demonstrated attack makes the accepted active-MITM exposure
+  unacceptable;
+- Steam authentication, relay, P2P, NAT traversal, or browser transport is
+  proposed;
+- GameNetworkingSockets loses required maintenance, platform, encryption,
+  delivery, lifecycle, or bounded-resource properties;
+- the selected dependency set cannot pass the approved platform and fault proof;
+  or
+- exact dependency pins, crypto backend, or restricted feature profile changes.
+
+Normal GameNetworkingSockets/OpenSSL/Protocol Buffers patch updates require the
+dependency review and proof policy. They require an ADR amendment only when they
+change a decision above.
 
 ## Owner approval
 
-The project owner explicitly approved Option A with the complete restricted
-dedicated-server, endpoint-trust, authentication, resumption, and
-acceptance-test profile on 2026-08-26.
+The project owner approved the amended Option A on 2026-08-26 after reviewing
+its automatic encryption, shared join-password handling, automatic resume-token
+behavior, lack of operator certificate work, lack of upstream patches, and
+explicit active-man-in-the-middle limitation.
 
-The record was reopened the same day after the first selection-proof audit found
-no supported public runtime trust-anchor integration at the selected release.
-New owner approval is required before vNext adds a dependency patch, operates a
-certificate authority, changes transports, or weakens configured endpoint
-authentication. No dependent proof or production implementation may bypass
-this reopened decision.
+The approval rejects the prior trust-anchor patch and certificate-authority
+paths. It does not approve persistent player accounts, administrative
+credentials, discovery identity, gameplay authority, reconnect grace duration,
+or player replacement behavior.

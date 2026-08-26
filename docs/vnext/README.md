@@ -19,9 +19,11 @@ desktop CI matrix pass. Fail-closed legacy-exclusion proof passes locally and
 on the accepted Linux, Windows, and macOS CI matrix. Phase 2 security and
 architecture decisions are in progress; the hostile-Internet threat model and
 restricted FlatBuffers schema/codec policy are accepted, its selected-library
-proof matrix is in progress, and ADR-0005 has been reopened after its selected
-transport lacked a supported configurable endpoint-trust hook. No vNext
-multiplayer target exists yet.
+proof matrix is in progress, and ADR-0005 now accepts standalone
+GameNetworkingSockets with automatic basic encryption, no operator-managed
+certificates or dependency patches, an optional shared join password, and
+automatic single-use resume tokens. Its selected-library proof remains in
+progress. No vNext multiplayer target exists yet.
 
 See the [implementation plan](IMPLEMENTATION_PLAN.md) for the live phase and
 slice tracker, completion gates, architecture decisions, and implementation
