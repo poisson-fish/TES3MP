@@ -593,7 +593,7 @@ Depends on: Phase 0.
 | 1.1 | Add `openmw-upstream`, fetch the official `openmw-0.51.0` tag, and verify `f4bec41444214a7903bebd178389ca22ca13f646` | **Implemented** | `openmw-upstream` uses the official URL; fetched `openmw-0.51.0` resolves to the approved commit |
 | 1.2 | Perform the clean baseline-cutover commit exactly as ADR-0001 specifies | **Implemented** | Published cutover `6cdaddda60` has the exact OpenMW tree plus six reviewed `docs/vnext/**` files |
 | 1.3 | Add a machine-checkable baseline provenance manifest/check | **Implemented** | [`BASELINE_PROVENANCE.json`](BASELINE_PROVENANCE.json) and `scripts/verify_vnext_baseline.py` enumerate all nine intentional differences and fail on tree/dependency-input drift |
-| 1.4 | Establish a documented local configure/build/test preset | **In Progress** | Clean checkout build and upstream test commands pass |
+| 1.4 | Establish a documented local configure/build/test preset | **Implemented** | Clean checkout build and upstream test commands pass |
 | 1.5 | Add Linux baseline CI | **Not Started** | Configure, build, and upstream tests pass on the supported Linux toolchain |
 | 1.6 | Add Windows baseline CI | **Not Started** | Configure, build, and upstream tests pass on the supported Windows toolchain |
 | 1.7 | Add macOS baseline CI | **Not Started** | Configure, build, and upstream tests pass on the supported macOS toolchain |
@@ -737,6 +737,36 @@ Implementation notes:
     clean disposable worktree, record its exact evidence, then mark Slice 1.4
     **Implemented**. Slices 1.5–1.7 still own supported-platform CI and retained
     CI environment/license artifacts.
+- 2026-08-25 — Slice 1.4 — Implemented
+  - Change: implementation commit
+    `67afd26db8648a14d560a55600d51b96789acac3` establishes the versioned local
+    presets, fail-closed runner, pinned Windows dependency provisioning,
+    machine-readable evidence, tests, and local build documentation described
+    above. This status update records the completed clean-checkout gate.
+  - Decisions: none; the completed implementation remains within accepted
+    ADR-0002 Option A and does not change platform support, dependency policy,
+    compiler policy, target ownership, state scope, or gameplay behavior.
+  - Verification: from a clean detached worktree at exact implementation commit
+    `67afd26db8648a14d560a55600d51b96789acac3`, `python
+    scripts/run_vnext_baseline.py all` passed the provenance check for exactly
+    14 intentional differences and 13 dependency-declaration inputs,
+    configured with CMake 3.31.6, Ninja 1.12.1, MSVC 19.44.35228.0/v143, and Qt
+    6.6.3, and completed all 1,245 Ninja actions. The generated JSON reports
+    record `components-tests` (1,395), `openmw-tests` (490), and
+    `openmw-cs-tests` (154) with zero failures and zero disabled tests (2,039
+    total). The evidence artifact records the exact source commit, dependency
+    lock SHA-256
+    `f5c6e975a8c2340959f95c1f417b86581fbc5c9441c197b052fabcb5499d66ee`,
+    vcpkg archive SHA-512, 120 package list files, and 119 copyright files.
+    The runner/verifier unit suite also passed all 13 tests; Python compilation,
+    JSON parsing, staged provenance verification, and staged diff checks passed.
+  - Owner review: no new architecture, authority, state-scope, security,
+    gameplay, or user-visible behavior decision was introduced. The clean run
+    matched the already accepted build-policy decision, so no additional demo
+    gate is required for this mechanical slice.
+  - Follow-ups: Slices 1.5–1.7 add and retain evidence from supported Linux,
+    Windows, and macOS CI. Slice 1.8 proves compiled legacy multiplayer
+    exclusion; Phase 1 remains **In Progress** until those gates pass.
 
 ### Phase 2 — Security and architecture decisions
 
