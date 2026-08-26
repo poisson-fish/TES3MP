@@ -1,24 +1,26 @@
 # ADR-0004: Protocol schema, codec, and evolution policy
 
-Status: **Proposed — owner decision required**
+Status: **Accepted**
 
 Date opened: 2026-08-26
+
+Date approved: 2026-08-26
 
 Decision owner: project owner
 
 Needed by: Phase 2
 
-## Decision requested
+## Decision summary
 
-Select the schema and binary codec profile that Phase 4 will use for every
-untrusted vNext protocol message. This decision also fixes the schema-evolution,
-code-generation, dependency-pinning, and decoder-boundary rules that make the
-codec safe to use under the hostile-Internet model accepted in ADR-0003.
+The project owner approved **Option A: FlatBuffers with a restricted
+verifier-first profile** on 2026-08-26. Phase 4 will use this schema and binary
+codec policy for every untrusted vNext protocol message. The decision also fixes
+the schema-evolution, code-generation, dependency-pinning, and decoder-boundary
+rules that make the codec safe under the hostile-Internet model accepted in
+ADR-0003.
 
-No option is approved yet. The recommendation is **Option A: FlatBuffers with a
-restricted verifier-first profile**. Approval of this ADR would authorize a
-minimal dependency proof and the policy itself, not Phase 4 production schemas
-or gameplay behavior.
+The approval authorizes the dependency proof and this policy, not Phase 4
+production schemas or gameplay behavior.
 
 ## Why this decision is needed now
 
@@ -87,7 +89,7 @@ Every option must satisfy the accepted README, ADR-0002, and ADR-0003 rules:
 
 ## Options considered
 
-### Option A: FlatBuffers with a restricted verifier-first profile (recommended)
+### Option A: FlatBuffers with a restricted verifier-first profile (approved)
 
 Pin the last normal stable release, FlatBuffers `v25.12.19` at commit
 `7e163021e59cca4f8e1e35a7c828b5c6b7915953`, and use only its C++ generated
@@ -240,10 +242,10 @@ promoted to full options. They would require a second project-owned schema and
 evolution system and make it easier for unbounded dynamic values to cross the
 network boundary.
 
-## Recommendation and proposed acceptance tests
+## Approved acceptance tests
 
-Approve Option A and the restricted profile above, subject to all of the
-following evidence before Slice 2.2 is marked **Implemented**:
+Option A and the restricted profile are approved subject to all of the following
+evidence before Slice 2.2 is marked **Implemented**:
 
 1. A repository-owned isolated proof builds pinned `flatc`, generated C++ code,
    and the header-only runtime on Windows x86-64/MSVC 2022, Linux x86-64/GCC 13
@@ -272,7 +274,7 @@ following evidence before Slice 2.2 is marked **Implemented**:
 The proof is disposable selection evidence. Production envelopes, messages,
 limits, and wrappers remain Phase 4 work and require their own tests.
 
-## Consequences if the recommendation is approved
+## Consequences of the approved decision
 
 - Protocol APIs expose owned vNext types, never FlatBuffers views or builders.
 - Every decoder has two explicit stages: structural verification, then bounded
@@ -324,5 +326,10 @@ Reopen this ADR if:
 
 ## Owner approval
 
-Pending. Approval must name Option A, B, C, or D and any conditions or changes
-to the proposed profile and acceptance tests.
+Approved by the project owner in the 2026-08-26 working session: Option A,
+FlatBuffers `v25.12.19` with the complete restricted verifier-first profile and
+acceptance tests recorded above.
+
+This approval does not select transport, authentication, authority, state scope,
+gameplay behavior, production message fields, or OpenMW hooks. Those remain
+separate owner-gated decisions and implementation slices.

@@ -17,9 +17,9 @@ and the machine-checkable baseline manifest now enumerates every intentional
 difference. The documented local Windows baseline path and the supported
 desktop CI matrix pass. Fail-closed legacy-exclusion proof passes locally and
 on the accepted Linux, Windows, and macOS CI matrix. Phase 2 security and
-architecture decisions are in progress; the hostile-Internet threat model is
-accepted, the schema/codec decision packet awaits owner approval, and no vNext
-multiplayer target exists yet.
+architecture decisions are in progress; the hostile-Internet threat model and
+restricted FlatBuffers schema/codec policy are accepted, the selected-library
+proof matrix is in progress, and no vNext multiplayer target exists yet.
 
 See the [implementation plan](IMPLEMENTATION_PLAN.md) for the live phase and
 slice tracker, completion gates, architecture decisions, and implementation

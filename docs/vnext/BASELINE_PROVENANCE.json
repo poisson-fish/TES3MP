@@ -35,6 +35,11 @@
       "purpose": "Windows Server 2022 MSVC v143 full-build, install, upstream-test, and retained-evidence CI gate."
     },
     {
+      "path": ".github/workflows/vnext-flatbuffers-proof.yml",
+      "status": "A",
+      "purpose": "Supported desktop compiler matrix for the pinned bounded FlatBuffers selection proof, sanitizer-backed fuzz smoke, and retained evidence."
+    },
+    {
       "path": "CI/install_debian_deps.sh",
       "status": "M",
       "purpose": "OpenMW Debian dependency groups with the approved Linux compiler majors and Ninja named explicitly."
@@ -97,7 +102,62 @@
     {
       "path": "docs/vnext/adr/ADR-0004-protocol-schema-codec-evolution-policy.md",
       "status": "A",
-      "purpose": "Owner-gated protocol schema, bounded codec, evolution, generation, dependency, and verification decision packet."
+      "purpose": "Owner-approved restricted FlatBuffers schema, bounded codec, evolution, generation, dependency, and verification policy."
+    },
+    {
+      "path": "docs/vnext/proofs/flatbuffers/ANDROID_ARM64.md",
+      "status": "A",
+      "purpose": "ADR-0002-required Android ARM64 feasibility assessment for the selected header-only codec runtime surface."
+    },
+    {
+      "path": "docs/vnext/proofs/flatbuffers/CMakeLists.txt",
+      "status": "A",
+      "purpose": "Isolated C++20 build, test, and Clang sanitizer/libFuzzer targets for the approved codec selection proof."
+    },
+    {
+      "path": "docs/vnext/proofs/flatbuffers/README.md",
+      "status": "A",
+      "purpose": "Scope, local execution, maintenance, fuzz, and retained-evidence instructions for the disposable selection proof."
+    },
+    {
+      "path": "docs/vnext/proofs/flatbuffers/fuzz.cpp",
+      "status": "A",
+      "purpose": "Corpus-backed libFuzzer entry point over the exact verifier and owned conversion proof path."
+    },
+    {
+      "path": "docs/vnext/proofs/flatbuffers/generated/v1_generated.h",
+      "status": "A",
+      "purpose": "Pinned flatc output for the original explicitly numbered compatibility-proof schema."
+    },
+    {
+      "path": "docs/vnext/proofs/flatbuffers/generated/v2_generated.h",
+      "status": "A",
+      "purpose": "Pinned flatc output for the additive optional-field compatibility-proof schema."
+    },
+    {
+      "path": "docs/vnext/proofs/flatbuffers/proof.cpp",
+      "status": "A",
+      "purpose": "Bounded decode, malformed input, evolution, allocation, atomic output, and lifetime selection scenarios."
+    },
+    {
+      "path": "docs/vnext/proofs/flatbuffers/proof_codec.cpp",
+      "status": "A",
+      "purpose": "Verifier-first, semantic-validation, and owned-value conversion path exercised by tests and fuzzing."
+    },
+    {
+      "path": "docs/vnext/proofs/flatbuffers/proof_codec.hpp",
+      "status": "A",
+      "purpose": "Owned proof values and explicit byte, depth, table, string, collection, and numeric limits."
+    },
+    {
+      "path": "docs/vnext/proofs/flatbuffers/schema/v1.fbs",
+      "status": "A",
+      "purpose": "Original explicit-ID FlatBuffers schema used only for compatibility selection evidence."
+    },
+    {
+      "path": "docs/vnext/proofs/flatbuffers/schema/v2.fbs",
+      "status": "A",
+      "purpose": "Additive optional-field FlatBuffers schema used only for compatibility selection evidence."
     },
     {
       "path": "scripts/capture_vnext_linux_ci.py",
@@ -120,6 +180,11 @@
       "purpose": "Cross-platform local baseline configure, build, upstream-test, and evidence runner."
     },
     {
+      "path": "scripts/run_vnext_flatbuffers_proof.py",
+      "status": "A",
+      "purpose": "Fail-closed source acquisition, safe extraction, schema policy, regeneration, build, test, fuzz, and evidence runner."
+    },
+    {
       "path": "scripts/tests/test_capture_vnext_linux_ci.py",
       "status": "A",
       "purpose": "Unit and workflow-policy tests for the Linux baseline evidence gate."
@@ -138,6 +203,11 @@
       "path": "scripts/tests/test_run_vnext_baseline.py",
       "status": "A",
       "purpose": "Unit tests for local baseline runner validation and dependency-lock handling."
+    },
+    {
+      "path": "scripts/tests/test_run_vnext_flatbuffers_proof.py",
+      "status": "A",
+      "purpose": "Failure-case tests for the selected dependency lock, acquisition, extraction, schema, and workflow policies."
     },
     {
       "path": "scripts/tests/test_verify_vnext_baseline.py",
@@ -163,6 +233,11 @@
       "path": "scripts/vnext_baseline_dependencies.json",
       "status": "A",
       "purpose": "Pinned Windows and macOS baseline dependency manifests, archives, Qt inputs, and acquisition-tool identities."
+    },
+    {
+      "path": "scripts/vnext_flatbuffers_proof.json",
+      "status": "A",
+      "purpose": "Exact FlatBuffers tag, commit, archive, license, generator profile, supported proof matrix, exclusions, and update policy."
     }
   ],
   "dependency_inputs": [
@@ -210,6 +285,89 @@
       "resolution": "OpenMW 0.51 CMake declarations pin fetched source tags or commits and integrity hashes; the vNext presets and runner define the shared local test build while system package alternatives remain platform-selected.",
       "license_evidence": "Fetched projects supply their own license files; system-package and bundle license inventories must be retained with the resolved environment artifacts in Slices 1.4-1.7.",
       "phase1_follow_up": "Slices 1.4-1.7 captured and reviewed resolved-tool, dependency, environment, and license evidence for every supported desktop platform; Slice 1.8 remains the Phase 1 exclusion proof."
+    },
+    {
+      "id": "flatbuffers-selection-proof",
+      "platforms": [
+        "Linux x86-64",
+        "Windows x86-64",
+        "macOS arm64",
+        "macOS x86-64",
+        "Android ARM64 feasibility"
+      ],
+      "files": [
+        {
+          "path": ".github/workflows/vnext-flatbuffers-proof.yml",
+          "sha256": "2f930ba8d3126ef58488bb2eac7ad43743d343768c255626fa1f405c04886ea5"
+        },
+        {
+          "path": "docs/vnext/proofs/flatbuffers/ANDROID_ARM64.md",
+          "sha256": "435ba5ac5fef3bcaa49cff582fe414e2262d831902bee87963ab827f2101cac0"
+        },
+        {
+          "path": "docs/vnext/proofs/flatbuffers/CMakeLists.txt",
+          "sha256": "a288f64ad12b286e557cea1010485bccfc97d07133100c9f946a1c3cc235088f"
+        },
+        {
+          "path": "docs/vnext/proofs/flatbuffers/README.md",
+          "sha256": "29c9bbc6fdda0348dfd70a6794e4056158d45f55d68fa9bdc8eb7c820432c286"
+        },
+        {
+          "path": "docs/vnext/proofs/flatbuffers/fuzz.cpp",
+          "sha256": "4634c854c9dd1c730cb891faa76ddf5704024d34fa29a0452a7665c3a86a7b46"
+        },
+        {
+          "path": "docs/vnext/proofs/flatbuffers/generated/v1_generated.h",
+          "sha256": "a9c1a27a1338e025f7583eedd58a7eccc9a3744d764a266dd271a58dc06ecde0"
+        },
+        {
+          "path": "docs/vnext/proofs/flatbuffers/generated/v2_generated.h",
+          "sha256": "6f196f2ac32e3567ad11a51d3d67a8f5b51cd39dd86f5b17710c491f5ce7e710"
+        },
+        {
+          "path": "docs/vnext/proofs/flatbuffers/proof.cpp",
+          "sha256": "f1a3d6404e3feed74fd0ab21fb62f96910c48b0047c11ee9fe3c10bad51e0969"
+        },
+        {
+          "path": "docs/vnext/proofs/flatbuffers/proof_codec.cpp",
+          "sha256": "31265058124794ffe1869f9689fa99272cd87c309a23b9afe0587a21b65047ec"
+        },
+        {
+          "path": "docs/vnext/proofs/flatbuffers/proof_codec.hpp",
+          "sha256": "d9e50b075a2525c93a9fb0140632eb921fd2d74b940ac6f014817201a538f602"
+        },
+        {
+          "path": "docs/vnext/proofs/flatbuffers/schema/v1.fbs",
+          "sha256": "999a94af832f533c1c94f898c3508ac8e27ce166f109dc9860fa63f11d278701"
+        },
+        {
+          "path": "docs/vnext/proofs/flatbuffers/schema/v2.fbs",
+          "sha256": "04e6e801d9b512de332bea383ad3de0ec82e1862522915747ad744ac7c300cfb"
+        },
+        {
+          "path": "scripts/run_vnext_flatbuffers_proof.py",
+          "sha256": "11e7cadf2bcac7658786f2597d05c113a3cf12fde4e1ce1e501547face17c5e5"
+        },
+        {
+          "path": "scripts/tests/test_run_vnext_flatbuffers_proof.py",
+          "sha256": "c7f58db6a5e8c9dceaa55fdac5a6646a537621b6129457051a578f7641fc9cf4"
+        },
+        {
+          "path": "scripts/vnext_flatbuffers_proof.json",
+          "sha256": "c0d058a10fd8f5d89790e104de4f3feb187734a0c4cc0783e56e5a48517af75f"
+        }
+      ],
+      "repositories": [
+        "https://github.com/google/flatbuffers",
+        "https://github.com/actions/checkout",
+        "https://github.com/actions/upload-artifact",
+        "https://github.com/ilammy/msvc-dev-cmd",
+        "Ubuntu runner package repositories",
+        "Homebrew package repositories"
+      ],
+      "resolution": "ADR-0004 pins the normal FlatBuffers v25.12.19 release commit and SHA-256-verified source archive. The repository runner safely extracts regular files, builds flatc from source, enforces the restricted generator/schema profile, reproduces committed output, compiles the header-only runtime surface, runs bounded/evolution tests and optional sanitizer-backed fuzzing, and writes exact toolchain and artifact evidence.",
+      "license_evidence": "The lock records Apache-2.0 and the exact upstream LICENSE SHA-256; every proof job verifies and retains that license beside its dependency, toolchain, schema, generated-code, corpus, and test evidence.",
+      "phase1_follow_up": "This is an owner-approved Phase 2 selection proof, not a Phase 1 baseline dependency. Local Windows evidence passes; the Linux GCC/Clang and macOS arm64/x86-64 hosted artifacts remain required before Slice 2.2 is Implemented. Android ARM64 remains a documented Phase 23 feasibility check under ADR-0002."
     },
     {
       "id": "linux-packages",

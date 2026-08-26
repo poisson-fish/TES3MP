@@ -1,0 +1,28 @@
+namespace vnext.proof.v1;
+
+enum TravelMode : ubyte {
+  Unknown = 0,
+  Walk = 1,
+  Run = 2
+}
+
+table Motion {
+  name:string (id: 0);
+  samples:[float] (id: 1);
+  mode:TravelMode = Unknown (id: 2);
+}
+
+union Payload {
+  Motion = 1
+}
+
+table Envelope {
+  protocol_version:ushort (id: 0);
+  sequence:ulong (id: 1);
+  payload:Payload (id: 3);
+  tags:[string] (id: 4);
+}
+
+root_type Envelope;
+file_identifier "VNXP";
+file_extension "vnp";
