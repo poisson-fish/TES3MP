@@ -18,14 +18,3 @@ jobs:
     uses: ./.github/workflows/macos.yml
     with:
       image: ${{ matrix.args.image }}
-
-  Windows:
-    strategy:
-      fail-fast: true
-      matrix:
-        image:
-        - "2022"
-
-    uses: ./.github/workflows/windows.yml
-    with:
-      image: ${{ matrix.image }}

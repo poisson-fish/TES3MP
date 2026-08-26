@@ -595,7 +595,7 @@ Depends on: Phase 0.
 | 1.3 | Add a machine-checkable baseline provenance manifest/check | **Implemented** | [`BASELINE_PROVENANCE.json`](BASELINE_PROVENANCE.json) and `scripts/verify_vnext_baseline.py` enumerate all nine intentional differences and fail on tree/dependency-input drift |
 | 1.4 | Establish a documented local configure/build/test preset | **Implemented** | Clean checkout build and upstream test commands pass |
 | 1.5 | Add Linux baseline CI | **In Progress** | Ubuntu 24.04 GCC 13 and Clang 18 full-build/install/test jobs and evidence retention are committed; hosted runs remain pending |
-| 1.6 | Add Windows baseline CI | **Not Started** | Configure, build, and upstream tests pass on the supported Windows toolchain |
+| 1.6 | Add Windows baseline CI | **In Progress** | Windows Server 2022/MSVC v143 full-build/install/test workflow and retained evidence are being integrated; hosted proof remains required |
 | 1.7 | Add macOS baseline CI | **Not Started** | Configure, build, and upstream tests pass on the supported macOS toolchain |
 | 1.8 | Prove legacy multiplayer exclusion | **Not Started** | No legacy server, packet processor, RakNet/CrabNet, or CoreScripts target is present in build metadata |
 
@@ -803,6 +803,44 @@ Implementation notes:
     environment/package/license/install artifacts, record the workflow run URLs
     and artifact evidence, and then mark Slice 1.5 **Implemented**. Slices
     1.6–1.8 remain separate Phase 1 work.
+
+- 2026-08-25 — Slice 1.6 — In Progress
+  - Change: this commit adds a dedicated Windows Server 2022 baseline workflow,
+    an inherited full-desktop Windows CI preset, and fail-closed capture of the
+    resolved runner/MSVC/SDK environment, dependency manifest and lock, vcpkg
+    package and license evidence, pinned Qt license reference, installed tree,
+    and JSON test reports. It removes the duplicate inherited Windows push job
+    while leaving its reusable packaging workflow available to upstream release
+    jobs.
+  - Decisions: none; Windows Server 2022, Visual Studio 2022/v143, Ninja,
+    repository-owned commands, native pinned dependencies, and per-change CI
+    implement owner-approved ADR-0002 Option A. Exact action commits are pinned.
+    The current local host exposes only Visual Studio 18, so the runner rejected
+    it instead of silently expanding the approved toolchain.
+  - Verification: `python -m unittest
+    scripts.tests.test_capture_vnext_windows_ci
+    scripts.tests.test_capture_vnext_linux_ci
+    scripts.tests.test_run_vnext_baseline
+    scripts.tests.test_verify_vnext_baseline -v` passed 33 tests; `python -m
+    py_compile` passed for both platform evidence scripts, the baseline runner,
+    verifier, and their tests; JSON parsing and `git diff --cached --check`
+    passed; staged `python scripts/verify_vnext_baseline.py --index` enumerated
+    exactly 22 intentional differences and verified 17 dependency-declaration
+    files. SHA-256-verified actionlint v1.7.12 accepted the Windows, Linux, and
+    inherited push workflows. Read-only upstream checks resolved
+    `ilammy/msvc-dev-cmd` v1 to
+    `0b201ec74fa43914dc39ae48a89fd1d8cb592756`, and the pinned provisioning
+    command verified the OpenMW manifest, dependency archive, and existing Qt
+    install. The complete hosted Windows build/test/install/evidence run remains
+    pending.
+  - Owner review: no new architecture, authority, state-scope, security,
+    gameplay, or user-visible behavior decision is introduced. The work follows
+    the accepted ADR-0002 scenarios; hosted evidence still requires review
+    before this slice can be **Implemented**.
+  - Follow-ups: publish the committed workflow, require its Windows Server 2022
+    job to pass, inspect the retained environment/package/license/install
+    artifact, record the run URL and evidence, then mark Slice 1.6
+    **Implemented**. Slices 1.7 and 1.8 remain separate Phase 1 work.
 
 ### Phase 2 — Security and architecture decisions
 

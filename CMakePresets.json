@@ -53,6 +53,24 @@
       }
     },
     {
+      "name": "vnext-baseline-windows-ci",
+      "displayName": "vNext OpenMW 0.51 full baseline (Windows x86-64 CI)",
+      "inherits": "vnext-baseline-windows",
+      "cacheVariables": {
+        "BUILD_OPENMW": true,
+        "BUILD_LAUNCHER": true,
+        "BUILD_WIZARD": true,
+        "BUILD_MWINIIMPORTER": true,
+        "BUILD_OPENCS": true,
+        "BUILD_ESSIMPORTER": true,
+        "BUILD_BSATOOL": true,
+        "BUILD_ESMTOOL": true,
+        "BUILD_NIFTEST": true,
+        "BUILD_NAVMESHTOOL": true,
+        "BUILD_BULLETOBJECTTOOL": true
+      }
+    },
+    {
       "name": "vnext-baseline-linux",
       "displayName": "vNext OpenMW 0.51 baseline tests (Linux x86-64)",
       "inherits": "vnext-baseline-common",
@@ -112,6 +130,10 @@
         "openmw-tests",
         "openmw-cs-tests"
       ]
+    },
+    {
+      "name": "vnext-baseline-windows-ci",
+      "configurePreset": "vnext-baseline-windows-ci"
     },
     {
       "name": "vnext-baseline-linux",

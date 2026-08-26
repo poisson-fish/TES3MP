@@ -29,7 +29,10 @@ PRESETS = {
     "Linux": "vnext-baseline-linux",
     "Darwin": "vnext-baseline-macos",
 }
-CI_PRESETS = {"Linux": "vnext-baseline-linux-ci"}
+CI_PRESETS = {
+    "Windows": "vnext-baseline-windows-ci",
+    "Linux": "vnext-baseline-linux-ci",
+}
 
 
 class BaselineError(RuntimeError):

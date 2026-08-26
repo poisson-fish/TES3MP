@@ -17,12 +17,17 @@
     {
       "path": ".github/workflows/push.yml",
       "status": "M",
-      "purpose": "Inherited push workflow with the floating legacy Ubuntu job removed in favor of the vNext Linux baseline workflow."
+      "purpose": "Inherited push workflow with floating legacy Linux and Windows jobs removed in favor of dedicated vNext baseline workflows."
     },
     {
       "path": ".github/workflows/vnext-baseline-linux.yml",
       "status": "A",
       "purpose": "Ubuntu 24.04 GCC 13 and Clang 18 full-build, install, upstream-test, and retained-evidence CI gates."
+    },
+    {
+      "path": ".github/workflows/vnext-baseline-windows.yml",
+      "status": "A",
+      "purpose": "Windows Server 2022 MSVC v143 full-build, install, upstream-test, and retained-evidence CI gate."
     },
     {
       "path": "CI/install_debian_deps.sh",
@@ -80,6 +85,11 @@
       "purpose": "Fail-closed Ubuntu runner, compiler, package, repository, and package-license evidence capture."
     },
     {
+      "path": "scripts/capture_vnext_windows_ci.py",
+      "status": "A",
+      "purpose": "Fail-closed Windows runner, MSVC toolchain, dependency-manifest, package, and license evidence capture."
+    },
+    {
       "path": "scripts/run_vnext_baseline.py",
       "status": "A",
       "purpose": "Cross-platform local baseline configure, build, upstream-test, and evidence runner."
@@ -88,6 +98,11 @@
       "path": "scripts/tests/test_capture_vnext_linux_ci.py",
       "status": "A",
       "purpose": "Unit and workflow-policy tests for the Linux baseline evidence gate."
+    },
+    {
+      "path": "scripts/tests/test_capture_vnext_windows_ci.py",
+      "status": "A",
+      "purpose": "Unit and workflow-policy tests for the Windows baseline evidence gate."
     },
     {
       "path": "scripts/tests/test_run_vnext_baseline.py",
@@ -126,7 +141,7 @@
         },
         {
           "path": "CMakePresets.json",
-          "sha256": "5cbe2e8985f7920e64c07555a938ea6d7b61390edf257ae4f4b5458c7a3e5b62"
+          "sha256": "5509e654f0140a9c3baf50be2c08b6b769455c36ddb9bce066ade54cbef792dc"
         },
         {
           "path": "extern/CMakeLists.txt",
@@ -134,7 +149,7 @@
         },
         {
           "path": "scripts/run_vnext_baseline.py",
-          "sha256": "1a70f52b9284c48973c71c8df597bbcf44b7f753728cf72ca74153b5becb7478"
+          "sha256": "8c62c98f0190e27fbf61a748026f75adc0045598c588b7f2c826b8f705ecc654"
         }
       ],
       "repositories": [
@@ -160,7 +175,7 @@
       "files": [
         {
           "path": ".github/workflows/push.yml",
-          "sha256": "391a28d0cd0caaef69535be07da0366cefe82879c01762fc1930e836f84b0790"
+          "sha256": "7b97797b13f5f1e5d785f96a25b4e8b7ab0b77c733e308f6044e3251f792bf65"
         },
         {
           "path": ".github/workflows/vnext-baseline-linux.yml",
@@ -223,6 +238,10 @@
       ],
       "files": [
         {
+          "path": ".github/workflows/vnext-baseline-windows.yml",
+          "sha256": "213f84b8ab3ec8d71b1f04b26d4b55f70fd007b18ad8258338b5cec239c5cc85"
+        },
+        {
           "path": ".github/workflows/windows.yml",
           "sha256": "0892b031f83ce6d5b258b6040b02c461186fef5b7d9e616df72fcb8ffe670fe2"
         },
@@ -235,17 +254,25 @@
           "sha256": "f942260610088085a196c63cba9d29ac1db90a4491d894e7eac79d7203fc0313"
         },
         {
+          "path": "scripts/capture_vnext_windows_ci.py",
+          "sha256": "1b43249430388938858bed12c0e7716d0668e34f12a698efb7cde59d37492795"
+        },
+        {
           "path": "scripts/vnext_baseline_dependencies.json",
           "sha256": "fe6617d9a0ff54d72d61d4b854a8602bf7c39909eb8ca122fd92719aad2d170e"
         }
       ],
       "repositories": [
-        "https://gitlab.com/OpenMW/openmw-deps/-/raw/main/windows",
-        "https://github.com/miurahr/aqtinstall/releases/download/v3.1.15"
+        "https://github.com/OpenMW/openmw-deps-build/releases/download/2026-02-24",
+        "https://github.com/actions/checkout",
+        "https://github.com/actions/upload-artifact",
+        "https://github.com/ilammy/msvc-dev-cmd",
+        "https://github.com/miurahr/aqtinstall/releases/download/v3.1.15",
+        "https://gitlab.com/OpenMW/openmw-deps/-/raw/0224d1bb5c7910024be22dc967828f8bf7a41817/windows"
       ],
-      "resolution": "The local dependency lock pins the OpenMW dependency repository commit and manifest SHA-256, bundle URL and SHA-512, Qt 6.6.3 target, and aqtinstall v3.1.15 SHA-256; the inherited CI workflow remains on main until Slice 1.6.",
-      "license_evidence": "The local runner inventories the bundle's vcpkg package lists and retained copyright files and records the exact Qt version; Slice 1.6 must retain the same resolved license evidence as a Windows CI artifact.",
-      "phase1_follow_up": "Slice 1.6 integrates the commit-pinned acquisition path into Windows CI and archives its exact environment, package, manifest, and license inventories."
+      "resolution": "The dedicated workflow pins Windows Server 2022 and exact checkout, MSVC environment, and artifact action commits. The repository lock pins the OpenMW dependency repository commit and manifest SHA-256, bundle URL and SHA-512, Qt 6.6.3 target, and aqtinstall v3.1.15 SHA-256.",
+      "license_evidence": "The Windows job archives the pinned dependency manifest and lock, all vcpkg package lists and retained copyright/license files, the exact Qt version/target with its official license reference, exact runner/toolchain metadata, and the installed tree.",
+      "phase1_follow_up": "Slice 1.6 remains In Progress until the committed Windows Server 2022/MSVC v143 job passes and its retained evidence artifact is reviewed."
     }
   ]
 }

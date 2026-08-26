@@ -11,7 +11,9 @@ are the separate Linux, Windows, and macOS CI slices (1.5 through 1.7). The
 Linux CI path uses `python scripts/run_vnext_baseline.py all --ci`, which selects
 the inherited `vnext-baseline-linux-ci` preset, builds the full upstream desktop
 target set, runs the same tests, and installs under
-`build/vnext-baseline-install`.
+`build/vnext-baseline-install`. The Windows CI path uses the same `all --ci`
+entry point with the inherited `vnext-baseline-windows-ci` full-build preset
+after running the normal pinned `provision` command.
 
 On Windows, configuration also enables the existing `openmw-cs` executable
 target because the pinned upstream CMake file unconditionally assigns its
@@ -63,6 +65,12 @@ Qt is requested as exact version 6.6.3 and target `win64_msvc2019_64`. The
 evidence file records the resolved compiler/CMake/Ninja versions, all installed
 vcpkg package-list filenames, the count of retained vcpkg copyright files, and
 the Qt version reported by `qmake`.
+
+Slice 1.6's GitHub Actions workflow pins Windows Server 2022 and the action
+commits used to enter the Visual Studio 2022 x64 environment. It runs the same
+provisioning and baseline entry points, then retains the installed tree, JSON
+test results, runner/toolchain metadata, the pinned dependency manifest and
+lock, vcpkg package lists and licenses, and the pinned Qt license reference.
 
 By default the dependency roots are:
 

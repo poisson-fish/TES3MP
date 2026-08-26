@@ -43,8 +43,14 @@ class BaselineRunnerTests(unittest.TestCase):
         self.assertEqual(baseline.executable_path("components-tests", "Windows").name, "components-tests.exe")
         self.assertEqual(baseline.executable_path("components-tests", "Linux").name, "components-tests")
 
-    def test_full_build_ci_preset_is_bounded_to_linux_until_other_slices_land(self) -> None:
-        self.assertEqual(baseline.CI_PRESETS, {"Linux": "vnext-baseline-linux-ci"})
+    def test_full_build_ci_presets_are_bounded_to_implemented_platform_slices(self) -> None:
+        self.assertEqual(
+            baseline.CI_PRESETS,
+            {
+                "Windows": "vnext-baseline-windows-ci",
+                "Linux": "vnext-baseline-linux-ci",
+            },
+        )
 
     def test_linux_ci_preset_enables_full_desktop_build_and_unbounded_target_list(self) -> None:
         presets = json.loads((baseline.ROOT / "CMakePresets.json").read_text(encoding="utf-8"))
@@ -53,6 +59,15 @@ class BaselineRunnerTests(unittest.TestCase):
         self.assertEqual(linux_ci["inherits"], "vnext-baseline-linux")
         self.assertTrue(all(linux_ci["cacheVariables"].values()))
         build = {preset["name"]: preset for preset in presets["buildPresets"]}["vnext-baseline-linux-ci"]
+        self.assertNotIn("targets", build)
+
+    def test_windows_ci_preset_enables_full_desktop_build_and_unbounded_target_list(self) -> None:
+        presets = json.loads((baseline.ROOT / "CMakePresets.json").read_text(encoding="utf-8"))
+        configure = {preset["name"]: preset for preset in presets["configurePresets"]}
+        windows_ci = configure["vnext-baseline-windows-ci"]
+        self.assertEqual(windows_ci["inherits"], "vnext-baseline-windows")
+        self.assertTrue(all(windows_ci["cacheVariables"].values()))
+        build = {preset["name"]: preset for preset in presets["buildPresets"]}["vnext-baseline-windows-ci"]
         self.assertNotIn("targets", build)
 
     def test_reads_compiler_identity_and_version_from_cmake_platform_file(self) -> None:

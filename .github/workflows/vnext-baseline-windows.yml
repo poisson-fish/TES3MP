@@ -1,0 +1,47 @@
+name: vNext Windows baseline
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  baseline:
+    name: Windows baseline (MSVC 2022 v143)
+    runs-on: windows-2022
+    timeout-minutes: 120
+
+    steps:
+      - name: Check out the exact source revision
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+
+      - name: Enter the Visual Studio 2022 x64 developer environment
+        uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1
+        with:
+          arch: x64
+          vsversion: "2022"
+
+      - name: Provision pinned OpenMW and Qt dependencies
+        run: python scripts/run_vnext_baseline.py provision
+
+      - name: Configure, build, test, install, and record baseline evidence
+        run: python scripts/run_vnext_baseline.py all --ci
+
+      - name: Capture resolved Windows toolchain, packages, and licenses
+        run: python scripts/capture_vnext_windows_ci.py
+
+      - name: Retain test, environment, dependency, and license evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: vnext-windows-baseline-msvc-2022-v143-${{ github.sha }}
+          path: |
+            build/vnext-baseline/*.json
+            build/vnext-baseline/windows-ci-evidence/*
+            build/vnext-baseline-install/**
+          if-no-files-found: error
+          retention-days: 30
