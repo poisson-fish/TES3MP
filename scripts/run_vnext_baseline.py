@@ -268,6 +268,8 @@ def test_environment(host: str, env: dict[str, str]) -> dict[str, str]:
 
 
 def executable_path(name: str, host: str) -> pathlib.Path:
+    if host == "Darwin":
+        return BUILD_DIR / "OpenMW.app" / "Contents" / "MacOS" / name
     suffix = ".exe" if host == "Windows" else ""
     return BUILD_DIR / f"{name}{suffix}"
 

@@ -164,7 +164,7 @@
         },
         {
           "path": "scripts/run_vnext_baseline.py",
-          "sha256": "bc060875aab64d2c0769b07f37a22ac43449f29cb6bc0151aed1bf32b38f223d"
+          "sha256": "f7ccb46eb080b1ce7ff38e2e3f2323e2904b90357689c4fff752be5fcbb20487"
         }
       ],
       "repositories": [

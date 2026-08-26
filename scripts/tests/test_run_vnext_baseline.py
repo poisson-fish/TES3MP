@@ -80,6 +80,10 @@ class BaselineRunnerTests(unittest.TestCase):
     def test_executable_names_are_platform_specific(self) -> None:
         self.assertEqual(baseline.executable_path("components-tests", "Windows").name, "components-tests.exe")
         self.assertEqual(baseline.executable_path("components-tests", "Linux").name, "components-tests")
+        self.assertEqual(
+            baseline.executable_path("components-tests", "Darwin"),
+            baseline.BUILD_DIR / "OpenMW.app" / "Contents" / "MacOS" / "components-tests",
+        )
 
     def test_full_build_ci_presets_are_bounded_to_implemented_platform_slices(self) -> None:
         self.assertEqual(

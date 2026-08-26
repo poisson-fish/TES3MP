@@ -905,7 +905,13 @@ Implementation notes:
     file; `git diff --check` passed; and `python
     scripts/verify_vnext_baseline.py --index` enumerated exactly 25 intentional
     differences and verified 18 dependency-declaration inputs. Hosted evidence
-    remains to be finalized after publication.
+    remains to be finalized after publication. The first published arm64 run
+    (`32923415388`) provisioned the pinned dependencies and completed all 1,343
+    Ninja build actions, including the three upstream test executables, before
+    failing closed because deployment-mode CMake places those executables in
+    `OpenMW.app/Contents/MacOS` while the runner still checked the build root.
+    The follow-up maps Darwin test execution to the bundle runtime directory
+    and adds a regression assertion for that platform-specific path.
   - Owner review: no architecture, authority, state-scope, security, gameplay,
     or user-visible behavior decision is introduced. The slice follows the
     already approved ADR-0002 scenarios and does not require another decision
