@@ -90,8 +90,7 @@ class LinuxCiEvidenceTests(unittest.TestCase):
         ):
             self.assertIn(required, workflow)
         self.assertNotIn("ubuntu-latest", workflow)
-        inherited_push_workflow = (capture.ROOT / ".github" / "workflows" / "push.yml").read_text(encoding="utf-8")
-        self.assertNotIn("ubuntu-latest", inherited_push_workflow)
+        self.assertFalse((capture.ROOT / ".github" / "workflows" / "push.yml").exists())
 
 
 if __name__ == "__main__":

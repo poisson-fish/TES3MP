@@ -596,7 +596,7 @@ Depends on: Phase 0.
 | 1.4 | Establish a documented local configure/build/test preset | **Implemented** | Clean checkout build and upstream test commands pass |
 | 1.5 | Add Linux baseline CI | **In Progress** | Ubuntu 24.04 GCC 13 and Clang 18 full-build/install/test jobs and evidence retention are committed; hosted runs remain pending |
 | 1.6 | Add Windows baseline CI | **In Progress** | Windows Server 2022/MSVC v143 full-build/install/test workflow and retained evidence are being integrated; hosted proof remains required |
-| 1.7 | Add macOS baseline CI | **Not Started** | Configure, build, and upstream tests pass on the supported macOS toolchain |
+| 1.7 | Add macOS baseline CI | **In Progress** | Dedicated arm64 per-change and x86-64 scheduled/release/manual full-build jobs, pinned provisioning, and retained evidence are being integrated; hosted proof remains required |
 | 1.8 | Prove legacy multiplayer exclusion | **Not Started** | No legacy server, packet processor, RakNet/CrabNet, or CoreScripts target is present in build metadata |
 
 Exit gate:
@@ -873,6 +873,47 @@ Implementation notes:
   - Follow-ups: publish the repair, require the GCC 13 and Clang 18 hosted jobs
     to build, test, install wholly under the repository, capture evidence, and
     upload their retained artifacts before marking Slice 1.5 **Implemented**.
+- 2026-08-25 — Slice 1.7 — In Progress
+  - Change: this commit adds a dedicated macOS baseline workflow, an inherited
+    full-desktop macOS CI preset, commit- and hash-pinned OpenMW dependency
+    provisioning for arm64 and x86-64, and fail-closed capture of runner,
+    Xcode, AppleClang, Homebrew formula/version/license, vcpkg
+    package/license, Qt license, install-tree, and upstream-test evidence. The
+    obsolete inherited push workflow is removed after all three platform gates
+    received dedicated replacements; the reusable upstream macOS packaging
+    workflow remains available to release composition.
+  - Decisions: none; macOS 15, Xcode 16/AppleClang, Ninja, arm64 per-change
+    coverage, and x86-64 scheduled/release/manual coverage implement the
+    owner-approved ADR-0002 Option A. The dependency repository commit and both
+    architecture bundle hashes reuse OpenMW 0.51's accepted `2026-02-24`
+    dependency generation.
+  - Verification: the two commit-pinned OpenMW dependency manifests resolved
+    to repository commit `0224d1bb5c7910024be22dc967828f8bf7a41817` and
+    matched recorded SHA-256 values
+    `6e8cd833e575d66727446ff445546e830254ae76299fa7f6b647a458706262a5`
+    (arm64) and
+    `f9f9ca974fcbbad9f3298c90d495da28e4de56aa03176e4c0399c183c725fc29`
+    (x86-64); their declared archives are independently SHA-512 pinned.
+    `python -m unittest scripts.tests.test_capture_vnext_macos_ci
+    scripts.tests.test_capture_vnext_windows_ci
+    scripts.tests.test_capture_vnext_linux_ci
+    scripts.tests.test_run_vnext_baseline
+    scripts.tests.test_verify_vnext_baseline -v` passed 43 tests; Python
+    compilation and all modified JSON parsing passed; SHA-256-verified
+    actionlint v1.7.12 accepted the dedicated and retained macOS workflows;
+    Visual Studio's bundled CMake 4.3.1-msvc1 parsed the cross-platform preset
+    file; `git diff --check` passed; and `python
+    scripts/verify_vnext_baseline.py --index` enumerated exactly 25 intentional
+    differences and verified 18 dependency-declaration inputs. Hosted evidence
+    remains to be finalized after publication.
+  - Owner review: no architecture, authority, state-scope, security, gameplay,
+    or user-visible behavior decision is introduced. The slice follows the
+    already approved ADR-0002 scenarios and does not require another decision
+    review or implementation demo.
+  - Follow-ups: publish the workflow, require the macOS 15 arm64 job to pass on
+    the committed tree, manually dispatch and require the macOS 15 Intel job to
+    pass, inspect both retained evidence artifacts, and then mark Slice 1.7
+    **Implemented**.
 
 ### Phase 2 — Security and architecture decisions
 

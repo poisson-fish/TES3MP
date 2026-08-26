@@ -15,6 +15,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 import urllib.request
 
 
@@ -22,6 +23,7 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 BUILD_DIR = ROOT / "build" / "vnext-baseline"
 INSTALL_DIR = ROOT / "build" / "vnext-baseline-install"
 LOCK_PATH = ROOT / "scripts" / "vnext_baseline_dependencies.json"
+DOWNLOAD_DIR = ROOT / "deps" / "downloads"
 EVIDENCE_PATH = BUILD_DIR / "vnext-baseline-evidence.json"
 TEST_NAMES = ("components-tests", "openmw-tests", "openmw-cs-tests")
 PRESETS = {
@@ -32,6 +34,7 @@ PRESETS = {
 CI_PRESETS = {
     "Windows": "vnext-baseline-windows-ci",
     "Linux": "vnext-baseline-linux-ci",
+    "Darwin": "vnext-baseline-macos-ci",
 }
 
 
@@ -41,7 +44,7 @@ class BaselineError(RuntimeError):
 
 def load_lock(path: pathlib.Path = LOCK_PATH) -> dict:
     data = json.loads(path.read_text(encoding="utf-8"))
-    if data.get("schema_version") != 1 or "windows_x86_64" not in data:
+    if data.get("schema_version") != 1 or not {"windows_x86_64", "macos"} <= data.keys():
         raise BaselineError(f"Unsupported dependency lock: {path}")
     return data
 
@@ -141,6 +144,66 @@ def provision_windows(cmake: str, env: dict[str, str]) -> None:
         raise BaselineError(f"Qt installation did not provide {qmake}")
 
 
+def provision_macos_prerequisites(env: dict[str, str]) -> None:
+    if env.get("GITHUB_ACTIONS") == "true":
+        candidates = sorted(pathlib.Path("/Applications").glob("Xcode_16*.app"), reverse=True)
+        if not candidates:
+            raise BaselineError("The macOS runner does not provide an Xcode 16 application bundle.")
+        developer_dir = candidates[0] / "Contents" / "Developer"
+        run(["sudo", "xcode-select", "-s", str(developer_dir)], env=env)
+        xcode_version = run(["xcodebuild", "-version"], env=env, capture=True).splitlines()[0]
+        if not xcode_version.startswith("Xcode 16."):
+            raise BaselineError(f"Expected Xcode 16 after selection, got {xcode_version!r}.")
+    brew = find_tool("brew", "VNEXT_BREW")
+    brew_env = env.copy()
+    brew_env["HOMEBREW_NO_AUTO_UPDATE"] = "1"
+    formulas = load_lock()["macos"]["homebrew"]["formulas"]
+    run([brew, "install", *formulas], env=brew_env)
+
+
+def extract_macos_bundle(cmake: str, archive: pathlib.Path, destination: pathlib.Path, env: dict[str, str]) -> None:
+    toolchain = destination / "scripts" / "buildsystems" / "vcpkg.cmake"
+    if toolchain.is_file():
+        print(f"Using existing macOS dependency bundle: {destination}")
+        return
+    if destination.exists():
+        raise BaselineError(
+            f"Incomplete macOS dependency directory exists: {destination}. Remove that exact directory and retry."
+        )
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix="vnext-macos-deps-", dir=destination.parent) as directory:
+        staging = pathlib.Path(directory)
+        run([cmake, "-E", "tar", "xf", str(archive)], env=env, cwd=staging)
+        entries = list(staging.iterdir())
+        source = entries[0] if len(entries) == 1 and entries[0].is_dir() else staging
+        destination.mkdir()
+        for path in source.iterdir():
+            shutil.move(str(path), destination / path.name)
+    if not toolchain.is_file():
+        raise BaselineError(f"macOS dependency bundle did not provide {toolchain}")
+
+
+def provision_macos(cmake: str, env: dict[str, str]) -> None:
+    macos = load_lock()["macos"]
+    triplet = env["VNEXT_VCPKG_TRIPLET"]
+    bundle = macos["vcpkg_bundles"].get(triplet)
+    if not isinstance(bundle, dict):
+        raise BaselineError(f"No pinned macOS dependency bundle for triplet: {triplet}")
+    DOWNLOAD_DIR.mkdir(parents=True, exist_ok=True)
+    manifest = DOWNLOAD_DIR / f"macos-{triplet}-manifest.txt"
+    archive = DOWNLOAD_DIR / bundle["archive_name"]
+    download(bundle["manifest_url"], manifest, "sha256", bundle["manifest_sha256"])
+    manifest_lines = manifest.read_text(encoding="utf-8").splitlines()
+    expected_hash_line = f"{bundle['archive_sha512']}  {bundle['archive_name']}"
+    if manifest_lines != [bundle["archive_url"], expected_hash_line]:
+        raise BaselineError("Pinned macOS dependency manifest content does not match the dependency lock.")
+    download(bundle["archive_url"], archive, "sha512", bundle["archive_sha512"])
+    extract_macos_bundle(cmake, archive, pathlib.Path(env["VNEXT_VCPKG_ROOT"]), env)
+    qmake = pathlib.Path(env["VNEXT_QT_ROOT"]) / "bin" / "qmake"
+    if not qmake.is_file():
+        raise BaselineError(f"Homebrew Qt installation did not provide {qmake}")
+
+
 def make_environment(host: str) -> dict[str, str]:
     env = os.environ.copy()
     deps_root = ROOT / "deps"
@@ -149,7 +212,9 @@ def make_environment(host: str) -> dict[str, str]:
         env.setdefault("VNEXT_QT_ROOT", str(deps_root / "Qt" / "6.6.3" / "msvc2019_64"))
     elif host == "Darwin":
         env.setdefault("VNEXT_VCPKG_ROOT", "/tmp/openmw-deps")
-        env.setdefault("VNEXT_VCPKG_TRIPLET", "arm64-osx-dynamic" if platform.machine() == "arm64" else "x64-osx-dynamic")
+        is_arm64 = platform.machine().lower() == "arm64"
+        env.setdefault("VNEXT_VCPKG_TRIPLET", "arm64-osx-dynamic" if is_arm64 else "x64-osx-dynamic")
+        env.setdefault("VNEXT_QT_ROOT", "/opt/homebrew/opt/qt" if is_arm64 else "/usr/local/opt/qt")
     return env
 
 
@@ -171,6 +236,19 @@ def validate_environment(host: str, env: dict[str, str], *, provision: bool = Fa
         for name in ("VNEXT_VCPKG_ROOT", "VNEXT_VCPKG_TRIPLET", "VNEXT_QT_ROOT"):
             if not env.get(name):
                 raise BaselineError(f"Required environment variable is unset: {name}")
+        expected_triplet = "arm64-osx-dynamic" if platform.machine().lower() == "arm64" else "x64-osx-dynamic"
+        if env["VNEXT_VCPKG_TRIPLET"] != expected_triplet:
+            raise BaselineError(
+                f"macOS host architecture requires {expected_triplet}, got {env['VNEXT_VCPKG_TRIPLET']}."
+            )
+        if not provision:
+            required = (
+                pathlib.Path(env["VNEXT_VCPKG_ROOT"]) / "scripts" / "buildsystems" / "vcpkg.cmake",
+                pathlib.Path(env["VNEXT_QT_ROOT"]) / "bin" / "qmake",
+            )
+            for path in required:
+                if not path.is_file():
+                    raise BaselineError(f"Required dependency is missing: {path}. Run the provision command first.")
 
 
 def test_environment(host: str, env: dict[str, str]) -> dict[str, str]:
@@ -261,6 +339,26 @@ def collect_evidence(cmake: str, ninja: str, host: str, preset: str, env: dict[s
             "qt_version": run([str(qmake), "-query", "QT_VERSION"], env=env, capture=True),
             "qt_target": lock["qt"]["target"],
         }
+    elif host == "Darwin":
+        macos = load_lock()["macos"]
+        triplet = env["VNEXT_VCPKG_TRIPLET"]
+        bundle = macos["vcpkg_bundles"][triplet]
+        deps_root = pathlib.Path(env["VNEXT_VCPKG_ROOT"])
+        package_lists = sorted((deps_root / "installed" / "vcpkg" / "info").glob("*.list"))
+        copyrights = sorted((deps_root / "installed" / triplet / "share").glob("*/copyright"))
+        archive = DOWNLOAD_DIR / bundle["archive_name"]
+        manifest = DOWNLOAD_DIR / f"macos-{triplet}-manifest.txt"
+        qmake = pathlib.Path(env["VNEXT_QT_ROOT"]) / "bin" / "qmake"
+        evidence["macos_dependencies"] = {
+            "vcpkg_tag": macos["tag"],
+            "vcpkg_triplet": triplet,
+            "vcpkg_manifest_sha256": hash_file(manifest, "sha256"),
+            "vcpkg_archive_sha512": hash_file(archive, "sha512"),
+            "vcpkg_package_list_files": [path.name for path in package_lists],
+            "vcpkg_copyright_files": len(copyrights),
+            "qt_formula": macos["homebrew"]["qt_formula"],
+            "qt_version": run([str(qmake), "-query", "QT_VERSION"], env=env, capture=True),
+        }
     return evidence
 
 
@@ -289,15 +387,20 @@ def main(argv: list[str] | None = None) -> int:
         raise BaselineError(f"A full-build CI preset is not defined for {host} yet.")
     preset = CI_PRESETS[host] if args.ci else PRESETS[host]
     env = make_environment(host)
+    if args.command == "provision" and host == "Darwin":
+        provision_macos_prerequisites(env)
     cmake = find_tool("cmake", "VNEXT_CMAKE")
     ninja = find_tool("ninja", "VNEXT_NINJA")
     validate_environment(host, env, provision=args.command == "provision")
 
     if args.command == "provision":
-        if host != "Windows":
-            raise BaselineError("Automated dependency provisioning is currently defined only for Windows.")
-        provision_windows(cmake, env)
-        print("Windows baseline dependencies are provisioned and verified.")
+        if host == "Windows":
+            provision_windows(cmake, env)
+        elif host == "Darwin":
+            provision_macos(cmake, env)
+        else:
+            raise BaselineError("Automated dependency provisioning is defined only for Windows and macOS.")
+        print(f"{host} baseline dependencies are provisioned and verified.")
         return 0
     if args.command == "doctor":
         print(f"Host: {host} {platform.machine()}")

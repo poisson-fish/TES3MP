@@ -16,13 +16,18 @@
   "intentional_differences": [
     {
       "path": ".github/workflows/push.yml",
-      "status": "M",
-      "purpose": "Inherited push workflow with floating legacy Linux and Windows jobs removed in favor of dedicated vNext baseline workflows."
+      "status": "D",
+      "purpose": "Inherited floating push workflow removed after dedicated vNext Linux, Windows, and macOS baseline workflows replaced all of its jobs."
     },
     {
       "path": ".github/workflows/vnext-baseline-linux.yml",
       "status": "A",
       "purpose": "Ubuntu 24.04 GCC 13 and Clang 18 full-build, install, upstream-test, and retained-evidence CI gates."
+    },
+    {
+      "path": ".github/workflows/vnext-baseline-macos.yml",
+      "status": "A",
+      "purpose": "macOS 15 arm64 and Intel Xcode 16 full-build, install, upstream-test, and retained-evidence CI gates on the approved cadences."
     },
     {
       "path": ".github/workflows/vnext-baseline-windows.yml",
@@ -85,6 +90,11 @@
       "purpose": "Fail-closed Ubuntu runner, compiler, package, repository, and package-license evidence capture."
     },
     {
+      "path": "scripts/capture_vnext_macos_ci.py",
+      "status": "A",
+      "purpose": "Fail-closed macOS runner, Xcode/AppleClang, Homebrew, vcpkg, Qt, package, and license evidence capture."
+    },
+    {
       "path": "scripts/capture_vnext_windows_ci.py",
       "status": "A",
       "purpose": "Fail-closed Windows runner, MSVC toolchain, dependency-manifest, package, and license evidence capture."
@@ -98,6 +108,11 @@
       "path": "scripts/tests/test_capture_vnext_linux_ci.py",
       "status": "A",
       "purpose": "Unit and workflow-policy tests for the Linux baseline evidence gate."
+    },
+    {
+      "path": "scripts/tests/test_capture_vnext_macos_ci.py",
+      "status": "A",
+      "purpose": "Unit and workflow-policy tests for the macOS baseline evidence gate."
     },
     {
       "path": "scripts/tests/test_capture_vnext_windows_ci.py",
@@ -122,7 +137,7 @@
     {
       "path": "scripts/vnext_baseline_dependencies.json",
       "status": "A",
-      "purpose": "Pinned Windows local-baseline dependency manifest, archive, Qt, and acquisition-tool identities."
+      "purpose": "Pinned Windows and macOS baseline dependency manifests, archives, Qt inputs, and acquisition-tool identities."
     }
   ],
   "dependency_inputs": [
@@ -141,7 +156,7 @@
         },
         {
           "path": "CMakePresets.json",
-          "sha256": "a5bf387ec2ae46ec810556ff815b53309c0e4e54e4078f98617b8b4524e2b8a0"
+          "sha256": "7b30ffc412fbbf6b01bb60ec36d9a3c9c6b9206c94fcb50d2609c07dfab4a782"
         },
         {
           "path": "extern/CMakeLists.txt",
@@ -149,7 +164,7 @@
         },
         {
           "path": "scripts/run_vnext_baseline.py",
-          "sha256": "8c62c98f0190e27fbf61a748026f75adc0045598c588b7f2c826b8f705ecc654"
+          "sha256": "bc060875aab64d2c0769b07f37a22ac43449f29cb6bc0151aed1bf32b38f223d"
         }
       ],
       "repositories": [
@@ -173,10 +188,6 @@
         "Linux x86-64"
       ],
       "files": [
-        {
-          "path": ".github/workflows/push.yml",
-          "sha256": "7b97797b13f5f1e5d785f96a25b4e8b7ab0b77c733e308f6044e3251f792bf65"
-        },
         {
           "path": ".github/workflows/vnext-baseline-linux.yml",
           "sha256": "35c12f0806659567fc5cece2e5c390d3de0be51d395444ff1bd2f458b2e4a3f3"
@@ -214,22 +225,54 @@
           "sha256": "5db4209e50d5109ec0705e06687bd84a7243d54a6c6e89c96a6c9c12531e9804"
         },
         {
+          "path": ".github/workflows/vnext-baseline-macos.yml",
+          "sha256": "db87251bf3c0bbf224a7d1c31db78d145fa440512ad604250ff19bdff143761e"
+        },
+        {
           "path": "CI/before_install.macos.sh",
           "sha256": "30ee4a3ff8ed904b6dcd09810588e7ad26098310cbf7e2de127ae9292920dc78"
         },
         {
           "path": "CI/macos/deps_versions.sh",
           "sha256": "4a996f0c9a327bfcbd5b24b625c14d55cee10007fe5a311fd6a54d46b9cda608"
+        },
+        {
+          "path": "scripts/capture_vnext_macos_ci.py",
+          "sha256": "cabddc1e21be5509913c627d8ca997f64c9145636ce8a21bec7fe2eb13e60a52"
         }
       ],
       "repositories": [
-        "https://gitlab.com/OpenMW/openmw-deps/-/raw/main/macos",
-        "https://raw.githubusercontent.com/Homebrew/install/HEAD",
-        "Homebrew package repositories"
+        "Homebrew package repositories",
+        "https://github.com/OpenMW/openmw-deps-build/releases/download/2026-02-24",
+        "https://github.com/actions/checkout",
+        "https://github.com/actions/upload-artifact",
+        "https://gitlab.com/OpenMW/openmw-deps/-/raw/0224d1bb5c7910024be22dc967828f8bf7a41817/macos"
       ],
-      "resolution": "The dependency bundle name pins VCPKG_TAG 2026-02-24 and its downloaded manifest supplies an archive hash; the inherited manifest URL, Homebrew installer, and Homebrew packages remain floating inputs.",
-      "license_evidence": "The dependency bundle and Homebrew package metadata supply resolved licenses; their exact inventory must be archived by the macOS baseline jobs.",
-      "phase1_follow_up": "Slice 1.7 makes the macOS dependency retrieval reproducible, captures the downloaded manifest and hash, and archives package/license inventories for both architectures."
+      "resolution": "The dedicated workflow pins macOS 15 runner families and exact checkout/upload action commits. The repository lock pins the OpenMW dependency repository commit, both manifest SHA-256 identities, bundle URLs and SHA-512 identities, and named Homebrew formulas. Homebrew package versions remain runner-resolved and are captured without an implicit update on every run.",
+      "license_evidence": "Each macOS architecture job archives the pinned manifest and lock, all vcpkg package lists and retained licenses, resolved Homebrew formula versions and declared licenses, the exact Qt version and official license reference, runner/Xcode/AppleClang metadata, and the installed tree.",
+      "phase1_follow_up": "Slice 1.7 remains In Progress until the committed arm64 per-change job and a manually dispatched Intel job pass and both retained evidence artifacts are reviewed."
+    },
+    {
+      "id": "platform-dependency-lock",
+      "platforms": [
+        "Windows x86-64",
+        "macOS arm64",
+        "macOS x86-64"
+      ],
+      "files": [
+        {
+          "path": "scripts/vnext_baseline_dependencies.json",
+          "sha256": "7c15a296fd032bb977e152eeea3fb73d53debe4f87373134d8dfcc555e4a40cb"
+        }
+      ],
+      "repositories": [
+        "https://github.com/OpenMW/openmw-deps-build/releases/download/2026-02-24",
+        "https://github.com/miurahr/aqtinstall/releases/download/v3.1.15",
+        "https://gitlab.com/OpenMW/openmw-deps/-/raw/0224d1bb5c7910024be22dc967828f8bf7a41817"
+      ],
+      "resolution": "The shared lock records commit-pinned OpenMW manifests, manifest SHA-256 identities, dependency archive URLs and SHA-512 identities, the exact Windows Qt/aqt inputs, and the named macOS Homebrew formulas for every supported bundle-based platform path.",
+      "license_evidence": "Platform evidence capture archives this exact lock beside resolved vcpkg package/license inventories and the applicable Qt license record.",
+      "phase1_follow_up": "Slices 1.6 and 1.7 retain the lock and prove every selected architecture bundle on its supported hosted runner."
     },
     {
       "id": "windows-packages",
@@ -256,10 +299,6 @@
         {
           "path": "scripts/capture_vnext_windows_ci.py",
           "sha256": "1b43249430388938858bed12c0e7716d0668e34f12a698efb7cde59d37492795"
-        },
-        {
-          "path": "scripts/vnext_baseline_dependencies.json",
-          "sha256": "fe6617d9a0ff54d72d61d4b854a8602bf7c39909eb8ca122fd92719aad2d170e"
         }
       ],
       "repositories": [

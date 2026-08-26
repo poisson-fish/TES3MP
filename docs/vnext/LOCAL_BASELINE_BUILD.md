@@ -13,7 +13,9 @@ the inherited `vnext-baseline-linux-ci` preset, builds the full upstream desktop
 target set, runs the same tests, and installs under
 `build/vnext-baseline-install`. The Windows CI path uses the same `all --ci`
 entry point with the inherited `vnext-baseline-windows-ci` full-build preset
-after running the normal pinned `provision` command.
+after running the normal pinned `provision` command. The macOS CI path uses the
+same commands with `vnext-baseline-macos-ci` on the approved arm64 and x86-64
+runner cadences.
 
 On Windows, configuration also enables the existing `openmw-cs` executable
 target because the pinned upstream CMake file unconditionally assigns its
@@ -91,12 +93,28 @@ script, and retains the resolved package/license inventory and installed tree.
 
 ## macOS arm64 and x86-64
 
-Install the dependency bundle and Qt with OpenMW's macOS dependency flow, set
-`VNEXT_VCPKG_ROOT`, `VNEXT_QT_ROOT`, and `VNEXT_VCPKG_TRIPLET`, and run the
-common commands with AppleClang from Xcode 16 and Ninja. Use
-`arm64-osx-dynamic` on arm64 and `x64-osx-dynamic` on Intel. Slice 1.7 will make
-that acquisition path fully commit-pinned and retain the resolved
-package/license inventories for both architectures.
+Use AppleClang from Xcode 16 and set `VNEXT_VCPKG_TRIPLET` to
+`arm64-osx-dynamic` on arm64 or `x64-osx-dynamic` on Intel. The default
+dependency roots are `/tmp/openmw-deps` and the architecture's Homebrew
+`qt` prefix; they can be overridden with `VNEXT_VCPKG_ROOT` and
+`VNEXT_QT_ROOT`.
+
+Run:
+
+```sh
+python3 scripts/run_vnext_baseline.py provision
+python3 scripts/run_vnext_baseline.py all
+```
+
+Provisioning installs the declared Homebrew formulas without an implicit
+Homebrew update, verifies the commit-pinned OpenMW dependency manifest and
+SHA-512-pinned architecture bundle, and extracts it into the selected vcpkg
+root. The dedicated macOS workflow runs the arm64 gate on every push and pull
+request. The Intel gate runs weekly, for published releases, and on manual
+dispatch as required by ADR-0002. Both gates use the full-build CI preset and
+retain the installed tree, JSON test reports, exact runner/Xcode/AppleClang
+metadata, Homebrew formula versions and licenses, vcpkg package lists and
+licenses, pinned manifest/lock evidence, and the resolved Qt license reference.
 
 ## What a passing local run proves
 

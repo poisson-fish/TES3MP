@@ -1,0 +1,87 @@
+name: vNext macOS baseline
+
+on:
+  push:
+  pull_request:
+  schedule:
+    - cron: "17 8 * * 1"
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  arm64:
+    name: macOS baseline (arm64, Xcode 16)
+    runs-on: macos-15
+    timeout-minutes: 120
+    env:
+      MACOSX_DEPLOYMENT_TARGET: "14.8"
+      VNEXT_QT_ROOT: /opt/homebrew/opt/qt
+      VNEXT_VCPKG_ROOT: /tmp/openmw-deps
+      VNEXT_VCPKG_TRIPLET: arm64-osx-dynamic
+
+    steps:
+      - name: Check out the exact source revision
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+
+      - name: Provision pinned OpenMW and Homebrew dependencies
+        run: python3 scripts/run_vnext_baseline.py provision
+
+      - name: Configure, build, test, install, and record baseline evidence
+        run: python3 scripts/run_vnext_baseline.py all --ci
+
+      - name: Capture resolved macOS toolchain, packages, and licenses
+        run: python3 scripts/capture_vnext_macos_ci.py --architecture arm64
+
+      - name: Retain test, environment, dependency, and license evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: vnext-macos-baseline-arm64-${{ github.sha }}
+          path: |
+            build/vnext-baseline/*.json
+            build/vnext-baseline/macos-ci-evidence/*
+            build/vnext-baseline-install/**
+          if-no-files-found: error
+          retention-days: 30
+
+  x86_64:
+    name: macOS baseline (x86-64, Xcode 16)
+    if: github.event_name == 'schedule' || github.event_name == 'release' || github.event_name == 'workflow_dispatch'
+    runs-on: macos-15-intel
+    timeout-minutes: 120
+    env:
+      MACOSX_DEPLOYMENT_TARGET: "13.7"
+      VNEXT_QT_ROOT: /usr/local/opt/qt
+      VNEXT_VCPKG_ROOT: /tmp/openmw-deps
+      VNEXT_VCPKG_TRIPLET: x64-osx-dynamic
+
+    steps:
+      - name: Check out the exact source revision
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+
+      - name: Provision pinned OpenMW and Homebrew dependencies
+        run: python3 scripts/run_vnext_baseline.py provision
+
+      - name: Configure, build, test, install, and record baseline evidence
+        run: python3 scripts/run_vnext_baseline.py all --ci
+
+      - name: Capture resolved macOS toolchain, packages, and licenses
+        run: python3 scripts/capture_vnext_macos_ci.py --architecture x86_64
+
+      - name: Retain test, environment, dependency, and license evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: vnext-macos-baseline-x86_64-${{ github.sha }}
+          path: |
+            build/vnext-baseline/*.json
+            build/vnext-baseline/macos-ci-evidence/*
+            build/vnext-baseline-install/**
+          if-no-files-found: error
+          retention-days: 30

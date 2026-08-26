@@ -121,6 +121,25 @@
         "VCPKG_HOST_TRIPLET": "$env{VNEXT_VCPKG_TRIPLET}",
         "VCPKG_TARGET_TRIPLET": "$env{VNEXT_VCPKG_TRIPLET}"
       }
+    },
+    {
+      "name": "vnext-baseline-macos-ci",
+      "displayName": "vNext OpenMW 0.51 full baseline (macOS CI)",
+      "inherits": "vnext-baseline-macos",
+      "cacheVariables": {
+        "CMAKE_INSTALL_PREFIX": "${sourceDir}/build/vnext-baseline-install",
+        "BUILD_OPENMW": true,
+        "BUILD_LAUNCHER": true,
+        "BUILD_WIZARD": true,
+        "BUILD_MWINIIMPORTER": true,
+        "BUILD_OPENCS": true,
+        "BUILD_ESSIMPORTER": true,
+        "BUILD_BSATOOL": true,
+        "BUILD_ESMTOOL": true,
+        "BUILD_NIFTEST": true,
+        "BUILD_NAVMESHTOOL": true,
+        "BUILD_BULLETOBJECTTOOL": true
+      }
     }
   ],
   "buildPresets": [
@@ -158,6 +177,10 @@
         "openmw-tests",
         "openmw-cs-tests"
       ]
+    },
+    {
+      "name": "vnext-baseline-macos-ci",
+      "configurePreset": "vnext-baseline-macos-ci"
     }
   ]
 }

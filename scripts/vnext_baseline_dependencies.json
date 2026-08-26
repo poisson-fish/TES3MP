@@ -29,5 +29,38 @@
       "aqt_sha256": "f9e9acc05975f2e70e4935ace76b41882cda4b53eb779c9bcf1d87a95029a6b0",
       "license_reference": "https://doc.qt.io/qt-6.6/licensing.html"
     }
+  },
+  "macos": {
+    "compiler": {
+      "family": "AppleClang",
+      "product": "Xcode 16"
+    },
+    "homebrew": {
+      "formulas": [
+        "cmake",
+        "ninja",
+        "qt"
+      ],
+      "qt_formula": "qt",
+      "qt_license_reference": "https://doc.qt.io/qt-6/licensing.html"
+    },
+    "openmw_deps_commit": "0224d1bb5c7910024be22dc967828f8bf7a41817",
+    "tag": "2026-02-24",
+    "vcpkg_bundles": {
+      "arm64-osx-dynamic": {
+        "archive_name": "vcpkg-arm64-osx-dynamic-2026-02-24.7z",
+        "archive_sha512": "7769233294a468f8d0c44301bb313ffc23a58fb3aa6b8c017a6aaa8714eab97e16220bd6468f4c145c72bc0b4bb79ca2d767c95cc2f65f39605e9b280c74685e",
+        "archive_url": "https://github.com/OpenMW/openmw-deps-build/releases/download/2026-02-24/vcpkg-arm64-osx-dynamic-2026-02-24.7z",
+        "manifest_sha256": "6e8cd833e575d66727446ff445546e830254ae76299fa7f6b647a458706262a5",
+        "manifest_url": "https://gitlab.com/OpenMW/openmw-deps/-/raw/0224d1bb5c7910024be22dc967828f8bf7a41817/macos/vcpkg-arm64-osx-dynamic-2026-02-24-manifest.txt"
+      },
+      "x64-osx-dynamic": {
+        "archive_name": "vcpkg-x64-osx-dynamic-2026-02-24.7z",
+        "archive_sha512": "cc20bd46634e135fd4d478321ada0f08dbf20fa65f27c9ccb332f54849c0e3fabedfd39f9575b8f761680ff67ef51dcda22067515c367f018b3bbbff6f9edbb1",
+        "archive_url": "https://github.com/OpenMW/openmw-deps-build/releases/download/2026-02-24/vcpkg-x64-osx-dynamic-2026-02-24.7z",
+        "manifest_sha256": "f9f9ca974fcbbad9f3298c90d495da28e4de56aa03176e4c0399c183c725fc29",
+        "manifest_url": "https://gitlab.com/OpenMW/openmw-deps/-/raw/0224d1bb5c7910024be22dc967828f8bf7a41817/macos/vcpkg-x64-osx-dynamic-2026-02-24-manifest.txt"
+      }
+    }
   }
 }
