@@ -19,6 +19,18 @@ set(OPENSSL_USE_STATIC_LIBS ON CACHE BOOL "" FORCE)
 
 add_subdirectory("${VNEXT_GNS_SOURCE_DIR}" gns EXCLUDE_FROM_ALL)
 
+if(SANITIZE_ADDRESS OR SANITIZE_UNDEFINED)
+    if(NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+        message(FATAL_ERROR "The approved sanitizer proof requires Clang")
+    endif()
+    if(NOT TARGET GameNetworkingSockets_s)
+        message(FATAL_ERROR "The pinned GameNetworkingSockets static target is unavailable")
+    endif()
+    # v1.6.0 deliberately type-erases a callback context through a function
+    # pointer cast. Keep every other ASan/UBSan check on the unmodified target.
+    target_compile_options(GameNetworkingSockets_s PRIVATE -fno-sanitize=function)
+endif()
+
 add_executable(vnext_gamenetworkingsockets_proof proof.cpp)
 target_compile_features(vnext_gamenetworkingsockets_proof PRIVATE cxx_std_20)
 target_compile_definitions(vnext_gamenetworkingsockets_proof PRIVATE

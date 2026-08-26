@@ -1426,6 +1426,46 @@ Implementation notes:
     artifacts, and request owner completion acceptance before changing Slice
     2.3 to **Implemented**.
 
+- 2026-08-26 — Slice 2.3 — In Progress
+  - Change: amended the approved sanitizer proof profile after the first
+    portable replacement run reached execution. The Clang job now builds
+    Protobuf and Abseil with the same ASan/UBSan instrumentation as their
+    GameNetworkingSockets consumers, keeps OpenSSL explicitly unsanitized, and
+    excludes UBSan `function` only on the unmodified GameNetworkingSockets
+    target. The proof harness retains the check; container-overflow, leak, and
+    halt-on-error behavior remain enabled; and regression tests reject broad
+    runtime suppression.
+  - Decisions: the owner explicitly approved recommended sanitizer Option A on
+    2026-08-26. Keep the pinned, unmodified dependency selection and make its
+    C++ instrumentation coherent; document the one narrow upstream callback
+    cast exclusion; and treat any remaining container report as a dependency
+    blocker. The owner rejected immediate patch/upgrade/replacement work and
+    broad process-wide sanitizer suppression.
+  - Verification: hosted run
+    [`33015281679`](https://github.com/poisson-fish/TES3MP/actions/runs/33015281679)
+    passed GCC 13 job `98331778758`, Windows MSVC 2022 v143, and macOS arm64
+    Xcode 16. Clang 18 job `98331778984` compiled successfully, then reported
+    the pinned GameNetworkingSockets callback type-erasure under UBSan and a
+    Protobuf repeated-field container report across the previously mixed
+    instrumentation boundary; manual macOS x86-64 was correctly skipped. After
+    the approved amendment, lock validation and 12 focused runner tests passed,
+    and a clean locked Windows MSVC 2022 dependency rebuild passed all nine
+    scenarios in 2.16 seconds with retained evidence and lock SHA-256
+    `367fd5820e41b77c5857ccf1dff9b2d0698cebf8dba5385f81204f1dba64350c`.
+    The complete repository-owned Python suite passed 78 tests; Python
+    compilation, both changed JSON files, all 32 local vNext Markdown links,
+    retained-evidence canary scanning, and staged-diff checks passed. Baseline
+    provenance accounted for all 56 intentional differences and verified all
+    43 dependency inputs.
+  - Owner review: the sanitizer-scope decision and ADR-0005 amendment are
+    explicitly approved. Slice completion acceptance remains pending a fully
+    passing hosted matrix and five-artifact consistency review.
+  - Follow-ups: publish the approved sanitizer profile, require its replacement
+    Clang 18 ASan/UBSan run to pass without the container report or any broad
+    suppression, run manual macOS x86-64, compare all five retained artifacts,
+    and request owner completion acceptance before changing Slice 2.3 to
+    **Implemented**.
+
 ### Phase 3 — Independent targets and test scaffold
 
 Status: **Not Started**

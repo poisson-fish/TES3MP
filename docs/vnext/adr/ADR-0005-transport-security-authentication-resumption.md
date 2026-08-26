@@ -301,6 +301,13 @@ and passes this evidence:
     disconnect reasons, exceptions, and evidence for join passwords and tokens.
 13. Telemetry tests assert stable owned per-channel and lifecycle categories
     without exposing raw library strings or secrets as stable API.
+14. The Linux Clang proof instruments the owned harness, unmodified
+    GameNetworkingSockets, and Protobuf/Abseil with ASan and UBSan. The only
+    additional category exclusion is UBSan `function` on the
+    GameNetworkingSockets target because `v1.6.0` deliberately type-erases its
+    callback context through a function-pointer cast. Container-overflow
+    detection and halt-on-error remain enabled, broad runtime suppressions are
+    forbidden, and any remaining sanitizer report fails the proof.
 
 The proof is selection evidence, not the production wrapper. Production
 interfaces, budgets, authentication provider, and resume store remain Phases 4
@@ -321,6 +328,11 @@ and 6 work.
   keep command IDs and revisions despite transport retransmission.
 - OpenSSL and Protocol Buffers remain in the selected dependency proof and
   update surface.
+- The sanitizer proof records its partial dependency instrumentation exactly:
+  the owned harness, GameNetworkingSockets, Protobuf, and Abseil are
+  instrumented; OpenSSL remains the pinned unsanitized static crypto library.
+  The narrow GameNetworkingSockets `function` exclusion is a proof-build rule,
+  not a source patch or a production compiler policy.
 - Steam, P2P, relay, authenticated discovery, persistent accounts, and
   administrative authentication require later owner-approved decisions.
 
@@ -347,6 +359,10 @@ and 6 work.
   no raw diagnostic passthrough.
 - **Dependency vulnerability:** exact pins, advisory review, sanitizer/fuzz
   regression, emergency update procedure, and ADR review when required.
+- **Mixed sanitizer instrumentation:** build Protobuf and Abseil with the same
+  ASan/UBSan profile as their GameNetworkingSockets consumers. Do not silence
+  container-overflow reports; a report that survives coherent instrumentation
+  reopens dependency review.
 
 ## Review and replacement triggers
 
@@ -379,6 +395,14 @@ explicit active-man-in-the-middle limitation.
 
 The owner separately approved the exact dependency proof profile recorded above
 as Option A on 2026-08-26.
+
+After hosted run `33015281679` exposed the upstream callback cast and a
+mixed-instrumentation Protobuf container report, the owner approved sanitizer
+Option A on 2026-08-26: keep the pinned unmodified dependency selection,
+instrument Protobuf/Abseil coherently, exclude only UBSan `function` on the
+GameNetworkingSockets target, keep all other checks fail-closed, and reopen the
+dependency decision if the container report remains. The owner rejected both a
+broad runtime suppression and an immediate dependency patch/change.
 
 The approval rejects the prior trust-anchor patch and certificate-authority
 paths. It does not approve persistent player accounts, administrative

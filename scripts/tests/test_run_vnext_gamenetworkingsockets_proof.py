@@ -24,6 +24,9 @@ class GameNetworkingSocketsProofRunnerTests(unittest.TestCase):
             self.assertRegex(lock["dependencies"][name]["source_archive"]["sha256"], r"^[0-9a-f]{64}$")
         self.assertIn("ice-off", lock["build_profile"]["gamenetworkingsockets"])
         self.assertIn("windows-no-asm", lock["build_profile"]["openssl"])
+        self.assertEqual(
+            lock["build_profile"]["sanitizer"], proof.EXPECTED_BUILD_PROFILE["sanitizer"]
+        )
         self.assertIn("operator-managed certificates", lock["excluded_surfaces"])
         self.assertEqual(lock["vulnerability_sources"], proof.EXPECTED_VULNERABILITY_SOURCES)
         self.assertEqual(lock["generated_policy"], proof.EXPECTED_GENERATED_POLICY)
@@ -129,6 +132,41 @@ class GameNetworkingSocketsProofRunnerTests(unittest.TestCase):
         self.assertIn("--sanitize", workflow)
         self.assertIn("strawberryperl", workflow)
         self.assertNotRegex(workflow, r"uses:\s+[^\s@]+@v\d")
+
+    def test_sanitizer_profile_is_coherent_and_narrowly_scoped(self) -> None:
+        cmake = (proof.PROOF_DIR / "CMakeLists.txt").read_text(encoding="utf-8")
+        runner = pathlib.Path(proof.__file__).read_text(encoding="utf-8")
+        self.assertIn(
+            "target_compile_options(GameNetworkingSockets_s PRIVATE -fno-sanitize=function)",
+            cmake,
+        )
+        self.assertEqual(cmake.count("-fno-sanitize=function"), 1)
+        self.assertNotIn("-fno-sanitize=function", proof.SANITIZER_COMPILE_FLAGS)
+        self.assertEqual(
+            proof.SANITIZER_ENVIRONMENT["ASAN_OPTIONS"],
+            "halt_on_error=1:detect_leaks=1:detect_container_overflow=1",
+        )
+        self.assertEqual(
+            proof.SANITIZER_ENVIRONMENT["UBSAN_OPTIONS"],
+            "halt_on_error=1:print_stacktrace=1",
+        )
+        self.assertNotIn("detect_container_overflow=0", runner + cmake)
+
+    def test_sanitized_protobuf_and_abseil_receive_matching_instrumentation(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            with (
+                mock.patch.object(proof, "PROTOBUF_BUILD_DIR", root / "build"),
+                mock.patch.object(proof, "PROTOBUF_INSTALL_DIR", root / "install"),
+                mock.patch.object(proof, "run") as run,
+            ):
+                proof.build_protobuf(
+                    "cmake", "ninja", {}, root / "protobuf", root / "abseil", sanitize=True
+                )
+        configure = [str(value) for value in run.call_args_list[0].args[0]]
+        self.assertIn(f"-DCMAKE_CXX_FLAGS={proof.SANITIZER_COMPILE_FLAGS}", configure)
+        self.assertIn(f"-DCMAKE_EXE_LINKER_FLAGS={proof.SANITIZER_LINK_FLAGS}", configure)
+        self.assertNotIn("-fno-sanitize=function", " ".join(configure))
 
     def test_hashed_inputs_have_platform_independent_line_endings(self) -> None:
         attributes = (proof.ROOT / ".gitattributes").read_text(encoding="utf-8").splitlines()

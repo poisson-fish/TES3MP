@@ -32,7 +32,15 @@ The Windows job requires the Visual Studio 2022 x64 developer environment,
 CMake, Ninja, `nmake`, and native Strawberry Perl. Linux and macOS require a C++
 compiler, CMake, Ninja, Make, and Perl. Tool paths can be supplied through
 `VNEXT_CMAKE`, `VNEXT_NINJA`, `VNEXT_CTEST`, `VNEXT_MAKE`, and `VNEXT_PERL`.
-The Linux Clang job also passes `--sanitize` for ASan and UBSan.
+The Linux Clang job also passes `--sanitize` for ASan and UBSan. That profile
+instruments the proof harness, unmodified GameNetworkingSockets, and the pinned
+Protobuf/Abseil build coherently. OpenSSL remains an unsanitized pinned static
+library. UBSan `function` is excluded only on the GameNetworkingSockets target
+because `v1.6.0` deliberately type-erases a callback context through a function
+pointer cast; the proof harness retains the check. ASan container-overflow and
+leak detection and both sanitizers' halt-on-error behavior remain enabled. No
+broad runtime suppression is permitted, and any remaining report fails the
+proof.
 
 The runner retains exact archive, source commit, license, build-profile,
 toolchain, platform, budget, and verbose scenario evidence under

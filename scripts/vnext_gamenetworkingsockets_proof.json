@@ -96,6 +96,16 @@
       "tests-off",
       "tools-off",
       "windows-msvc-static-runtime"
+    ],
+    "sanitizer": [
+      "linux-clang-18-only",
+      "proof-asan-ubsan",
+      "gamenetworkingsockets-asan-ubsan-function-excluded",
+      "protobuf-abseil-asan-ubsan",
+      "openssl-unsanitized",
+      "halt-on-error",
+      "container-overflow-enabled",
+      "no-runtime-suppressions"
     ]
   },
   "budgets": {

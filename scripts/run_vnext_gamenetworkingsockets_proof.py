@@ -58,6 +58,24 @@ EXPECTED_BUILD_PROFILE = {
         "tools-off",
         "windows-msvc-static-runtime",
     ],
+    "sanitizer": [
+        "linux-clang-18-only",
+        "proof-asan-ubsan",
+        "gamenetworkingsockets-asan-ubsan-function-excluded",
+        "protobuf-abseil-asan-ubsan",
+        "openssl-unsanitized",
+        "halt-on-error",
+        "container-overflow-enabled",
+        "no-runtime-suppressions",
+    ],
+}
+SANITIZER_COMPILE_FLAGS = (
+    "-g -fsanitize=address,undefined -fno-omit-frame-pointer -fno-sanitize=alignment"
+)
+SANITIZER_LINK_FLAGS = "-fsanitize=address,undefined"
+SANITIZER_ENVIRONMENT = {
+    "ASAN_OPTIONS": "halt_on_error=1:detect_leaks=1:detect_container_overflow=1",
+    "UBSAN_OPTIONS": "halt_on_error=1:print_stacktrace=1",
 }
 EXPECTED_BUDGETS = {
     "credential_bytes": 64,
@@ -417,7 +435,14 @@ def build_openssl(perl: str, environment: dict[str, str], source: Path) -> None:
         run([make, "install_sw"], cwd=source, environment=environment)
 
 
-def build_protobuf(cmake: str, ninja: str, environment: dict[str, str], source: Path, abseil: Path) -> None:
+def build_protobuf(
+    cmake: str,
+    ninja: str,
+    environment: dict[str, str],
+    source: Path,
+    abseil: Path,
+    sanitize: bool,
+) -> None:
     for directory in (PROTOBUF_BUILD_DIR, PROTOBUF_INSTALL_DIR):
         if directory.exists():
             shutil.rmtree(directory)
@@ -447,6 +472,15 @@ def build_protobuf(cmake: str, ninja: str, environment: dict[str, str], source: 
     ]
     if os.name == "nt":
         arguments.append("-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded")
+    if sanitize:
+        arguments.extend(
+            [
+                f"-DCMAKE_CXX_FLAGS={SANITIZER_COMPILE_FLAGS}",
+                f"-DCMAKE_EXE_LINKER_FLAGS={SANITIZER_LINK_FLAGS}",
+                f"-DCMAKE_MODULE_LINKER_FLAGS={SANITIZER_LINK_FLAGS}",
+                f"-DCMAKE_SHARED_LINKER_FLAGS={SANITIZER_LINK_FLAGS}",
+            ]
+        )
     run(arguments, environment=environment)
     run([cmake, "--build", PROTOBUF_BUILD_DIR, "--target", "install", "--parallel", "4"], environment=environment)
 
@@ -615,8 +649,10 @@ def execute(sanitize: bool) -> None:
 
     licenses = verify_licenses(lock, sources)
     cmake, ninja, perl, environment = configure_build_environment()
+    if sanitize:
+        environment.update(SANITIZER_ENVIRONMENT)
     build_openssl(perl, environment, sources["openssl"])
-    build_protobuf(cmake, ninja, environment, sources["protobuf"], sources["abseil"])
+    build_protobuf(cmake, ninja, environment, sources["protobuf"], sources["abseil"], sanitize)
     test_output = build_and_test_proof(cmake, ninja, environment, sources["gamenetworkingsockets"], sanitize)
     print(test_output)
     write_evidence(lock, archives, licenses, cmake, ninja, perl, environment, test_output, sanitize)
