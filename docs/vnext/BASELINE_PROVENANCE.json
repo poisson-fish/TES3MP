@@ -1,0 +1,179 @@
+{
+  "schema_version": 1,
+  "baseline": {
+    "repository": "https://gitlab.com/OpenMW/openmw.git",
+    "tag": "openmw-0.51.0",
+    "commit": "f4bec41444214a7903bebd178389ca22ca13f646",
+    "tree": "c22927e46920fe2c2e26e8ac4272135d60eb6a76"
+  },
+  "cutover": {
+    "commit": "6cdaddda60e9e1f02cc6b5029dd2b589a9f9d11b",
+    "tree": "0824acb059d88ef65be3a7277f6e48a3f9eab04d",
+    "first_parent": "85d92afed0e454c2599cf9b4c0b11788af3e9007",
+    "second_parent": "f4bec41444214a7903bebd178389ca22ca13f646",
+    "preserved_prefix": "docs/vnext"
+  },
+  "intentional_differences": [
+    {
+      "path": "docs/vnext/BASELINE_PROVENANCE.json",
+      "status": "A",
+      "purpose": "Machine-readable OpenMW baseline, cutover, dependency-input, and intentional-difference record."
+    },
+    {
+      "path": "docs/vnext/IMPLEMENTATION_PLAN.md",
+      "status": "A",
+      "purpose": "Living vNext phase, gate, status, and verification tracker."
+    },
+    {
+      "path": "docs/vnext/LEGACY_GAMEPLAY_FEATURE_INVENTORY.md",
+      "status": "A",
+      "purpose": "Reference-only inventory of archived TES3MP gameplay behavior."
+    },
+    {
+      "path": "docs/vnext/PRE_CUTOVER_PROVENANCE.md",
+      "status": "A",
+      "purpose": "Recorded pre-cutover repository and archive provenance."
+    },
+    {
+      "path": "docs/vnext/README.md",
+      "status": "A",
+      "purpose": "Accepted vNext product direction and architecture boundaries."
+    },
+    {
+      "path": "docs/vnext/adr/ADR-0001-baseline-cutover-git-mechanics.md",
+      "status": "A",
+      "purpose": "Owner-approved exact-tree baseline-cutover mechanics."
+    },
+    {
+      "path": "docs/vnext/adr/ADR-0002-platform-toolchain-policy.md",
+      "status": "A",
+      "purpose": "Owner-approved platform, CI, toolchain, and dependency policy."
+    },
+    {
+      "path": "scripts/tests/test_verify_vnext_baseline.py",
+      "status": "A",
+      "purpose": "Failure-case tests for the machine-checkable provenance contract."
+    },
+    {
+      "path": "scripts/verify_vnext_baseline.py",
+      "status": "A",
+      "purpose": "Cross-platform verifier that fails on unrecorded tree or dependency-input drift."
+    }
+  ],
+  "dependency_inputs": [
+    {
+      "id": "cmake-declarations",
+      "platforms": [
+        "Linux x86-64",
+        "Windows x86-64",
+        "macOS arm64",
+        "macOS x86-64"
+      ],
+      "files": [
+        {
+          "path": "CMakeLists.txt",
+          "sha256": "a5dd56014b1cf4d98b01ed265aff31e9d7ae15ed2e12a4815457f591dcb361f2"
+        },
+        {
+          "path": "extern/CMakeLists.txt",
+          "sha256": "364de172b60a4e9ed856d209748f05029219a9fa2b445a240c7f4f97ff041110"
+        }
+      ],
+      "repositories": [
+        "https://github.com/bulletphysics/bullet3",
+        "https://github.com/google/benchmark",
+        "https://github.com/google/googletest",
+        "https://github.com/jbeder/yaml-cpp",
+        "https://github.com/MyGUI/mygui",
+        "https://github.com/OpenMW/osg",
+        "https://github.com/OpenMW/recastnavigation",
+        "https://github.com/unicode-org/icu",
+        "https://www.sqlite.org"
+      ],
+      "resolution": "OpenMW 0.51 CMake declarations pin fetched source tags or commits and integrity hashes; system package alternatives are selected by platform build configuration.",
+      "license_evidence": "Fetched projects supply their own license files; system-package and bundle license inventories must be retained with the resolved environment artifacts in Slices 1.4-1.7.",
+      "phase1_follow_up": "Slices 1.4-1.7 capture the actually selected packages, versions, hashes, and licenses for each supported build environment."
+    },
+    {
+      "id": "linux-packages",
+      "platforms": [
+        "Linux x86-64"
+      ],
+      "files": [
+        {
+          "path": ".github/workflows/push.yml",
+          "sha256": "2b921c26c269c87daa32ed699b649ea2b9b26302f1aac7a6a8b6c29520a21f46"
+        },
+        {
+          "path": "CI/install_debian_deps.sh",
+          "sha256": "59beee569dc8c9a0643e04490a91306d2c3e3f33b32ec149adb696e21dbf6eea"
+        }
+      ],
+      "repositories": [
+        "Ubuntu runner package repositories",
+        "ppa:openmw/openmw",
+        "ppa:openmw/openmw-daily",
+        "ppa:openmw/staging"
+      ],
+      "resolution": "The hashed installer records the exact package names and repository declarations inherited from OpenMW 0.51; package versions are runner-resolved and the inherited workflow still uses ubuntu-latest.",
+      "license_evidence": "Ubuntu package metadata and /usr/share/doc package copyright files are the authoritative resolved license evidence and must be archived by the Linux baseline job.",
+      "phase1_follow_up": "Slices 1.4 and 1.5 replace the floating runner label per ADR-0002 and archive exact resolved package and license metadata."
+    },
+    {
+      "id": "macos-packages",
+      "platforms": [
+        "macOS arm64",
+        "macOS x86-64"
+      ],
+      "files": [
+        {
+          "path": ".github/workflows/macos.yml",
+          "sha256": "5db4209e50d5109ec0705e06687bd84a7243d54a6c6e89c96a6c9c12531e9804"
+        },
+        {
+          "path": "CI/before_install.macos.sh",
+          "sha256": "30ee4a3ff8ed904b6dcd09810588e7ad26098310cbf7e2de127ae9292920dc78"
+        },
+        {
+          "path": "CI/macos/deps_versions.sh",
+          "sha256": "4a996f0c9a327bfcbd5b24b625c14d55cee10007fe5a311fd6a54d46b9cda608"
+        }
+      ],
+      "repositories": [
+        "https://gitlab.com/OpenMW/openmw-deps/-/raw/main/macos",
+        "https://raw.githubusercontent.com/Homebrew/install/HEAD",
+        "Homebrew package repositories"
+      ],
+      "resolution": "The dependency bundle name pins VCPKG_TAG 2026-02-24 and its downloaded manifest supplies an archive hash; the inherited manifest URL, Homebrew installer, and Homebrew packages remain floating inputs.",
+      "license_evidence": "The dependency bundle and Homebrew package metadata supply resolved licenses; their exact inventory must be archived by the macOS baseline jobs.",
+      "phase1_follow_up": "Slices 1.4 and 1.7 must make dependency retrieval reproducible, capture the downloaded manifest and hash, and archive package/license inventories for both architectures."
+    },
+    {
+      "id": "windows-packages",
+      "platforms": [
+        "Windows x86-64"
+      ],
+      "files": [
+        {
+          "path": ".github/workflows/windows.yml",
+          "sha256": "0892b031f83ce6d5b258b6040b02c461186fef5b7d9e616df72fcb8ffe670fe2"
+        },
+        {
+          "path": "CI/before_script.msvc.sh",
+          "sha256": "9be1d0b1e86903d3156bc27c98b412d18d9aaf568762c4c56801c6615c59c7e9"
+        },
+        {
+          "path": "CI/deps_versions.msvc.sh",
+          "sha256": "f942260610088085a196c63cba9d29ac1db90a4491d894e7eac79d7203fc0313"
+        }
+      ],
+      "repositories": [
+        "https://gitlab.com/OpenMW/openmw-deps/-/raw/main/windows",
+        "https://github.com/miurahr/aqtinstall/releases/download/v3.1.15"
+      ],
+      "resolution": "The bundle name pins VCPKG_TAG 2026-02-24, Qt is 6.6.3, aqtinstall is v3.1.15, and downloaded bundle manifests supply archive hashes; the inherited openmw-deps manifest URL remains on main.",
+      "license_evidence": "The dependency bundle and Qt installation metadata supply resolved licenses; their exact inventory must be archived by the Windows baseline job.",
+      "phase1_follow_up": "Slices 1.4 and 1.6 must make dependency retrieval reproducible, capture manifests and hashes, and archive exact package and license inventories."
+    }
+  ]
+}

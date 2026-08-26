@@ -12,10 +12,10 @@ Quest 3 support is a later, conditional stretch target.
 ## Project status
 
 Phase 0 is implemented and Phase 1 baseline work is in progress. The active
-source tree has been replaced with the provenance-verified OpenMW 0.51 baseline
-plus the reviewed `docs/vnext/**` overlay. Reproducible build/CI proof and the
-machine-checkable baseline manifest remain Phase 1 work, and no vNext
-multiplayer target exists yet.
+source tree has been replaced with the provenance-verified OpenMW 0.51 baseline,
+and the machine-checkable baseline manifest now enumerates every intentional
+difference. Reproducible build/CI proof and compiled legacy-exclusion proof
+remain Phase 1 work, and no vNext multiplayer target exists yet.
 
 See the [implementation plan](IMPLEMENTATION_PLAN.md) for the live phase and
 slice tracker, completion gates, architecture decisions, and implementation
@@ -155,6 +155,19 @@ OpenXR-specific types into the multiplayer core.
   merge of legacy engine modifications into OpenMW 0.51.
 - Every active-tree difference from the pinned OpenMW baseline must be intentional
   and reviewable.
+
+[`BASELINE_PROVENANCE.json`](BASELINE_PROVENANCE.json) records the pinned
+baseline and cutover objects, every intentional path difference, and the hashed
+OpenMW dependency-declaration inputs. Verify the committed tree with:
+
+```sh
+python scripts/verify_vnext_baseline.py
+```
+
+The verifier fails closed on unrecorded or missing path differences, baseline or
+cutover identity drift, and dependency-declaration hash changes. The manifest
+also records inherited floating dependency inputs that must be resolved by the
+remaining Phase 1 build and CI slices.
 
 The exact Git mechanics must be accepted in ADR-0001 and rehearsed before the
 cutover. Shared vNext history must not be force-pushed after publication.

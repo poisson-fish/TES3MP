@@ -592,7 +592,7 @@ Depends on: Phase 0.
 |---|---|---|---|
 | 1.1 | Add `openmw-upstream`, fetch the official `openmw-0.51.0` tag, and verify `f4bec41444214a7903bebd178389ca22ca13f646` | **Implemented** | `openmw-upstream` uses the official URL; fetched `openmw-0.51.0` resolves to the approved commit |
 | 1.2 | Perform the clean baseline-cutover commit exactly as ADR-0001 specifies | **Implemented** | Published cutover `6cdaddda60` has the exact OpenMW tree plus six reviewed `docs/vnext/**` files |
-| 1.3 | Add a machine-checkable baseline provenance manifest/check | **Not Started** | CI can enumerate every intentional difference from the pinned tag |
+| 1.3 | Add a machine-checkable baseline provenance manifest/check | **Implemented** | [`BASELINE_PROVENANCE.json`](BASELINE_PROVENANCE.json) and `scripts/verify_vnext_baseline.py` enumerate all nine intentional differences and fail on tree/dependency-input drift |
 | 1.4 | Establish a documented local configure/build/test preset | **Not Started** | Clean checkout build and upstream test commands pass |
 | 1.5 | Add Linux baseline CI | **Not Started** | Configure, build, and upstream tests pass on the supported Linux toolchain |
 | 1.6 | Add Windows baseline CI | **Not Started** | Configure, build, and upstream tests pass on the supported Windows toolchain |
@@ -674,6 +674,33 @@ Implementation notes:
   - Follow-ups: Slice 1.3 adds the machine-checkable baseline provenance
     manifest/check. Build and upstream-test proof remains owned by Slices
     1.4–1.7, and compiled legacy exclusion proof remains Slice 1.8.
+- 2026-08-25 — Slice 1.3 — Implemented
+  - Change: this commit adds the machine-readable
+    [`BASELINE_PROVENANCE.json`](BASELINE_PROVENANCE.json), the cross-platform
+    `scripts/verify_vnext_baseline.py` checker, and isolated Git-fixture tests.
+    The manifest records the pinned OpenMW commit/tree, approved cutover graph,
+    every intentional path difference, and SHA-256 identities for the baseline
+    CMake and platform dependency-declaration inputs.
+  - Decisions: none; this mechanical control implements ADR-0001 and ADR-0002
+    without changing their approved baseline, preserved-path, platform, or
+    dependency policies. Inherited runner-resolved and floating dependency
+    inputs are recorded as Phase 1 follow-ups, not silently approved as
+    reproducible.
+  - Verification: `python -m unittest
+    scripts.tests.test_verify_vnext_baseline -v` passed six success/failure
+    scenarios; `python -m py_compile scripts/verify_vnext_baseline.py
+    scripts/tests/test_verify_vnext_baseline.py` passed; staged-tree
+    `python scripts/verify_vnext_baseline.py --index` enumerated exactly nine
+    intentional additions and verified ten dependency-declaration file hashes;
+    `git diff --check` and `git fsck --no-dangling` passed.
+  - Owner review: no new architecture, authority, state-scope, security,
+    gameplay, or user-visible behavior decision was introduced; no separate
+    decision approval or implementation demo is required for this mechanical
+    provenance slice.
+  - Follow-ups: Slice 1.4 establishes the local preset and reproducibly resolved
+    dependency evidence; Slices 1.5–1.7 integrate the checker and archive exact
+    platform dependency/license manifests; Slice 1.8 proves compiled legacy
+    exclusion.
 
 ### Phase 2 — Security and architecture decisions
 
