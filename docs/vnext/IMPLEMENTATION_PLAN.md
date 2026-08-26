@@ -107,7 +107,7 @@ Observed on 2026-08-25 before this plan was added:
 | Phase | Outcome | Status | Depends on |
 |---|---|---|---|
 | 0 | Archive and cutover preparation | **Implemented** | — |
-| 1 | Clean OpenMW 0.51 baseline | **In Progress** | Phase 0 |
+| 1 | Clean OpenMW 0.51 baseline | **Implemented** | Phase 0 |
 | 2 | Security and architecture decisions | **Not Started** | Phase 1 |
 | 3 | Independent targets and test scaffold | **Not Started** | Phase 2 |
 | 4 | Bounded protocol and in-memory session | **Not Started** | Phase 3 |
@@ -581,7 +581,7 @@ Implementation notes:
 
 ### Phase 1 — Clean OpenMW 0.51 baseline
 
-Status: **In Progress**
+Status: **Implemented**
 
 Outcome: the active vNext source is a provenance-verified OpenMW 0.51 baseline
 with reproducible desktop CI and no compiled legacy multiplayer code.
@@ -1062,8 +1062,33 @@ Implementation notes:
     Slice 1.8 and directed that the cancelled manual macOS rerun not be used.
     This accepts the three-OS implementation evidence; it does not by itself
     approve the separate Phase 1 exit gate or authorize Phase 2 production.
-  - Follow-ups: review and explicitly approve the Phase 1 exit gate before
-    changing the phase/program tracker to **Implemented** or beginning Phase 2.
+  - Follow-ups: Phase 1 exit-gate approval is recorded below; hold the Phase 2
+    kickoff and obtain the required ADR approvals before dependent production
+    implementation begins.
+
+- 2026-08-26 — Phase 1 exit gate — Implemented
+  - Change: marked Phase 1 and its program-tracker row **Implemented** after all
+    Slices 1.1–1.8 and the clean OpenMW 0.51 baseline exit criteria passed.
+  - Decisions: no architecture, authority, state-scope, or gameplay decision
+    changed. The owner accepted the successful current-HEAD Linux, Windows, and
+    macOS arm64 Slice 1.8 matrix and excluded the cancelled manual macOS rerun
+    from evidence; the already accepted Slice 1.7 Intel baseline evidence
+    remains unchanged.
+  - Verification: the active tree remains based on pinned OpenMW commit
+    `f4bec41444214a7903bebd178389ca22ca13f646`; the baseline verifier accounts
+    for exactly 28 intentional differences and 19 dependency-declaration
+    inputs; supported desktop build/install/upstream-test evidence is recorded
+    in Slices 1.4–1.7; and Slice 1.8 records fail-closed tracked-tree,
+    CMake-metadata, compilation-database, and Ninja-graph exclusion proof from
+    local Windows plus hosted Linux GCC/Clang, Windows MSVC, and macOS arm64
+    runs. All accepted jobs passed with retained evidence artifacts.
+  - Owner review: explicit Phase 1 exit-gate approval and authorization to mark
+    the phase complete received on 2026-08-26. This approval makes Phase 2
+    eligible for kickoff; it does not pre-approve any Phase 2 ADR choice or
+    dependent production implementation.
+  - Follow-ups: hold the Phase 2 kickoff, present ADR-0003 through ADR-0007 and
+    deterministic simulation/protocol compatibility decision packets in their
+    eligible order, and obtain explicit owner approval before production work.
 
 ### Phase 2 — Security and architecture decisions
 
