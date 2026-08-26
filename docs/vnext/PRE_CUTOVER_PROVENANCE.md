@@ -4,13 +4,14 @@ Capture date: 2026-08-25
 
 Capture time: 2026-08-25T17:50:41-06:00
 
-Status: provenance capture published; Phase 0 exit-gate review pending
+Status: provenance capture published; Phase 0 exit gate approved 2026-08-25
 
 ## Purpose and scope
 
 This document records the repository state observed immediately before Slice 0.6
-work began. It is the provenance input required by Phase 0 and ADR-0001; it does
-not authorize the real baseline cutover.
+work began. It is the provenance input required by Phase 0 and ADR-0001; the
+capture did not itself authorize the real baseline cutover. The project owner
+subsequently granted that authorization at the Phase 0 exit-gate review.
 
 The recorded `vnext` commit is the clean, published capture base. This provenance
 artifact and its initial implementation-plan update were committed and published
@@ -60,8 +61,9 @@ remote.origin.url https://github.com/poisson-fish/TES3MP.git
 remote.origin.fetch +refs/heads/*:refs/remotes/origin/*
 ```
 
-No `openmw-upstream` remote was configured. Adding it remains Phase 1, Slice 1.1
-and must not precede the Phase 0 exit-gate approval.
+No `openmw-upstream` remote was configured at capture time. The Phase 0 exit
+gate was subsequently approved on 2026-08-25, and Phase 1, Slice 1.1 added the
+remote under that authorization.
 
 Relevant local and remote-tracking refs were:
 
@@ -221,5 +223,6 @@ git fsck --no-dangling
 The final preflight fails closed unless the worktree is clean, local and remote
 `vnext` match the final documentation commit, the archive tag remains annotated
 and peels to the approved legacy commit, and the integrity checks pass. The
-Phase 0 exit gate still requires explicit project-owner approval before Phase 1
-or the real cutover begins.
+project owner explicitly approved the Phase 0 exit gate and authorized Phase 1,
+including the real cutover, on 2026-08-25. The cutover must still fail closed
+unless these checks pass again against the final published documentation commit.

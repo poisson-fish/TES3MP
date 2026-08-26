@@ -106,8 +106,8 @@ Observed on 2026-08-25 before this plan was added:
 
 | Phase | Outcome | Status | Depends on |
 |---|---|---|---|
-| 0 | Archive and cutover preparation | **In Progress** | — |
-| 1 | Clean OpenMW 0.51 baseline | **Not Started** | Phase 0 |
+| 0 | Archive and cutover preparation | **Implemented** | — |
+| 1 | Clean OpenMW 0.51 baseline | **In Progress** | Phase 0 |
 | 2 | Security and architecture decisions | **Not Started** | Phase 1 |
 | 3 | Independent targets and test scaffold | **Not Started** | Phase 2 |
 | 4 | Bounded protocol and in-memory session | **Not Started** | Phase 3 |
@@ -372,7 +372,7 @@ the feature slice or phase is marked **Implemented**.
 
 ### Phase 0 — Archive and cutover preparation
 
-Status: **In Progress**
+Status: **Implemented**
 
 Outcome: the legacy boundary is permanent, the cutover is rehearsed, and the
 team has enough recorded context to replace the active source safely.
@@ -561,10 +561,27 @@ Implementation notes:
     the final clean/local/tracking/remote identity check, acknowledge the observed
     absence of the old lightweight tag during the exit-gate review, and obtain
     explicit project-owner approval before Phase 1 or any real cutover action.
+- 2026-08-25 — Phase 0 exit gate — Implemented
+  - Change: the project owner reviewed the completed Slice 0.1–0.6 evidence and
+    approved advancing to Phase 1, including authorization to execute and
+    publish the real ADR-0001 cutover.
+  - Decisions: no ADR was changed. The review accepted the documented absence
+    of the old lightweight `tes3mp-0.8.1` tag because the required permanent
+    annotated `tes3mp-0.8.1-archive` tag remains published and correct.
+  - Verification: before the review, `HEAD`, local `vnext`, `origin/vnext`, and
+    a direct `git ls-remote --heads origin refs/heads/vnext` query all resolved
+    to `e68728ab6a03559e26564f683fbb4007c0e9c727`; the worktree was clean;
+    `git diff --check` and `git fsck --no-dangling` produced no output; the
+    archive tag was an annotated tag locally and remotely and peeled to
+    `49be5b6405d6ab427e06ed350cf76c715a1f3bdd`; and the official OpenMW tag
+    query resolved to `f4bec41444214a7903bebd178389ca22ca13f646`.
+  - Owner review: explicit Phase 0 exit-gate approval and real-cutover
+    authorization received in the 2026-08-25 working session.
+  - Follow-ups: execute Phase 1 Slices 1.1 and 1.2 exactly as ADR-0001 specifies.
 
 ### Phase 1 — Clean OpenMW 0.51 baseline
 
-Status: **Not Started**
+Status: **In Progress**
 
 Outcome: the active vNext source is a provenance-verified OpenMW 0.51 baseline
 with reproducible desktop CI and no compiled legacy multiplayer code.
@@ -573,8 +590,8 @@ Depends on: Phase 0.
 
 | Slice | Deliverable | Status | Completion evidence |
 |---|---|---|---|
-| 1.1 | Add `openmw-upstream`, fetch the official `openmw-0.51.0` tag, and verify `f4bec41444214a7903bebd178389ca22ca13f646` | **Not Started** | Remote URL, tag resolution, and verification output recorded |
-| 1.2 | Perform the clean baseline-cutover commit exactly as ADR-0001 specifies | **Not Started** | Active tree is OpenMW 0.51 plus reviewed vNext-owned files |
+| 1.1 | Add `openmw-upstream`, fetch the official `openmw-0.51.0` tag, and verify `f4bec41444214a7903bebd178389ca22ca13f646` | **Implemented** | `openmw-upstream` uses the official URL; fetched `openmw-0.51.0` resolves to the approved commit |
+| 1.2 | Perform the clean baseline-cutover commit exactly as ADR-0001 specifies | **In Progress** | Active tree is OpenMW 0.51 plus reviewed vNext-owned files |
 | 1.3 | Add a machine-checkable baseline provenance manifest/check | **Not Started** | CI can enumerate every intentional difference from the pinned tag |
 | 1.4 | Establish a documented local configure/build/test preset | **Not Started** | Clean checkout build and upstream test commands pass |
 | 1.5 | Add Linux baseline CI | **Not Started** | Configure, build, and upstream tests pass on the supported Linux toolchain |
@@ -599,6 +616,32 @@ Implementation notes:
   changes.
 - Record CI images, compilers, CMake version, dependency source, and cache keys in
   ADR-0002 so a green baseline can be reproduced outside CI.
+- 2026-08-25 — Slice 1.1 — Implemented
+  - Change: configured `openmw-upstream` with
+    `https://gitlab.com/OpenMW/openmw.git` and fetched the official
+    `openmw-0.51.0` tag and its reachable history.
+  - Decisions: none; the remote URL and pinned commit were already accepted by
+    ADR-0001.
+  - Verification: `git config --get remote.openmw-upstream.url` returned the
+    official URL; `git rev-parse openmw-0.51.0` returned
+    `f4bec41444214a7903bebd178389ca22ca13f646`; and `git cat-file -t
+    openmw-0.51.0` returned `commit`.
+  - Owner review: Phase 0 exit-gate approval authorized this Phase 1 slice in the
+    2026-08-25 working session; no new architecture or behavior decision arose.
+  - Follow-ups: Slice 1.2 performs the approved cutover from the final published
+    pre-cutover documentation commit.
+- 2026-08-25 — Slice 1.2 — In Progress
+  - Change: began the production cutover using the accepted ADR-0001 exact-tree,
+    two-parent procedure; no cutover ref has been created or published yet.
+  - Decisions: none; the owner explicitly authorized the real cutover during the
+    Phase 0 exit-gate review.
+  - Verification: pending the final documentation commit, repeated preflight,
+    disposable-worktree tree/ancestry checks, and publication verification.
+  - Owner review: real-cutover authorization received in the 2026-08-25 working
+    session.
+  - Follow-ups: publish this final pre-cutover documentation state, repeat all
+    ADR-0001 preconditions, construct and verify the cutover, then record its
+    exact commit/tree evidence before marking Slice 1.2 **Implemented**.
 
 ### Phase 2 — Security and architecture decisions
 
