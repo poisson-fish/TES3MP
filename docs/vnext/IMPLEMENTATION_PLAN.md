@@ -1102,7 +1102,7 @@ Depends on: Phase 1.
 | Slice | Deliverable | Status | Completion evidence |
 |---|---|---|---|
 | 2.1 | Prepare the threat model and obtain owner approval for ADR-0003 | **Implemented** | Owner-approved [`ADR-0003`](adr/ADR-0003-hostile-internet-threat-model.md) records the hostile-Internet boundary, protected assets, attacker capabilities, mitigations, tests, and explicit deferred risks |
-| 2.2 | Evaluate schema/codec candidates with the owner and approve ADR-0004 | **In Progress** | Owner-approved [`ADR-0004`](adr/ADR-0004-protocol-schema-codec-evolution-policy.md) selects restricted verifier-first FlatBuffers; the exact Windows/Linux/macOS/fuzzer proof and retained-artifact consistency gate pass at `da24423a1a`; explicit owner completion review remains required |
+| 2.2 | Evaluate schema/codec candidates with the owner and approve ADR-0004 | **Implemented** | Owner-approved [`ADR-0004`](adr/ADR-0004-protocol-schema-codec-evolution-policy.md) selects restricted verifier-first FlatBuffers; the exact Windows/Linux/macOS/fuzzer proof and retained-artifact consistency gate pass at `da24423a1a`, and the owner accepted the completion evidence on 2026-08-26 |
 | 2.3 | Evaluate transport/security candidates with the owner and approve ADR-0005 | **In Progress** | Owner-approved [`ADR-0005`](adr/ADR-0005-transport-security-authentication-resumption.md) selects standalone GameNetworkingSockets with automatic encryption, no endpoint-certificate operations, an optional shared join password, and automatic single-use resume tokens; the selected-library proof remains required |
 | 2.4 | Review authority/state-scope options by subsystem and approve ADR-0006 | **Not Started** | Owner-approved authority, scope, prediction, and presentation framework is explicit; domain GDR questions are listed |
 | 2.5 | Review the OpenMW hook/patch options with the owner and approve ADR-0007 | **Not Started** | Owner-approved hook surface, patch organization, and upstreaming criteria are explicit |
@@ -1268,6 +1268,23 @@ Implementation notes:
     owner acceptance is pending, so Slice 2.2 remains **In Progress**.
   - Follow-ups: obtain owner completion acceptance, then change Slice 2.2 to
     **Implemented**. Phase 2 still separately requires Slices 2.3–2.6.
+
+- 2026-08-26 — Slice 2.2 — Implemented
+  - Change: recorded completion of the owner-approved restricted FlatBuffers
+    selection and its exact cross-platform proof at implementation commit
+    `da24423a1a56ac0e499eebd962b6499db3866b0f` and evidence-record commit
+    `f99239244cf689cdb494615785a95360520ff2f3`.
+  - Decisions: no new decision; ADR-0004 remains accepted without amendment.
+  - Verification: full five-job run `32996083180`, retained artifacts
+    `9616640336`, `9616634804`, `9616631479`, `9616613594`, and `9616613060`,
+    cross-platform exact-identity comparison, the local Windows proof, 66
+    repository-owned Python tests, Python compilation, baseline provenance,
+    JSON, Markdown-link, and diff checks all passed as recorded above.
+  - Owner review: the project owner explicitly approved the Slice 2.2
+    completion evidence in the 2026-08-26 working session and authorized the
+    **Implemented** status change.
+  - Follow-ups: none for Slice 2.2. Phase 2 remains **In Progress** and next
+    requires completion of Slices 2.3–2.6.
 
 - 2026-08-26 — Slice 2.3 — In Progress
   - Change: accepted and then amended
