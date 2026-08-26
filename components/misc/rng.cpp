@@ -2,54 +2,58 @@
 
 #include <chrono>
 #include <random>
+#include <sstream>
 
-namespace
+namespace Misc::Rng
 {
-    Misc::Rng::Seed sSeed;
-}
+    static Generator sGenerator;
 
-namespace Misc
-{
-
-    Rng::Seed::Seed() {}
-
-    Rng::Seed::Seed(unsigned int seed)
+    Generator& getGenerator()
     {
-        mGenerator.seed(seed);
+        return sGenerator;
     }
 
-    Rng::Seed& Rng::getSeed()
+    std::string serialize(const Generator& prng)
     {
-        return sSeed;
+        std::stringstream ss;
+        ss << prng;
+
+        return ss.str();
     }
 
-    void Rng::init(unsigned int seed)
+    void deserialize(std::string_view data, Generator& prng)
     {
-        sSeed.mGenerator.seed(seed);
+        std::stringstream ss;
+        ss << data;
+
+        ss.seekg(0);
+        ss >> prng;
     }
 
-    float Rng::rollProbability(Seed& seed)
+    unsigned int generateDefaultSeed()
     {
-        return std::uniform_real_distribution<float>(0, 1 - std::numeric_limits<float>::epsilon())(seed.mGenerator);
+        auto res = static_cast<unsigned int>(std::chrono::high_resolution_clock::now().time_since_epoch().count());
+        return res;
     }
 
-    float Rng::rollClosedProbability(Seed& seed)
+    void init(unsigned int seed)
     {
-        return std::uniform_real_distribution<float>(0, 1)(seed.mGenerator);
+        sGenerator.seed(seed);
     }
 
-    int Rng::rollDice(int max, Seed& seed)
+    float rollProbability(Generator& prng)
     {
-        return max > 0 ? std::uniform_int_distribution<int>(0, max - 1)(seed.mGenerator) : 0;
+        return std::uniform_real_distribution<float>(0, 1 - std::numeric_limits<float>::epsilon())(prng);
     }
 
-    unsigned int Rng::generateDefaultSeed()
+    float rollClosedProbability(Generator& prng)
     {
-        return static_cast<unsigned int>(std::chrono::high_resolution_clock::now().time_since_epoch().count());
+        return std::uniform_real_distribution<float>(0, 1)(prng);
     }
 
-    float Rng::deviate(float mean, float deviation, Seed& seed)
+    float deviate(float mean, float deviation, Generator& prng)
     {
-        return std::uniform_real_distribution<float>(mean - deviation, mean + deviation)(seed.mGenerator);
+        return std::uniform_real_distribution<float>(mean - deviation, mean + deviation)(prng);
     }
+
 }

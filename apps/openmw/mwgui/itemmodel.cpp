@@ -9,14 +9,14 @@
 namespace MWGui
 {
 
-    ItemStack::ItemStack(const MWWorld::Ptr &base, ItemModel *creator, size_t count)
+    ItemStack::ItemStack(const MWWorld::Ptr& base, ItemModel* creator, size_t count)
         : mType(Type_Normal)
         , mFlags(0)
         , mCreator(creator)
         , mCount(count)
         , mBase(base)
     {
-        if (base.getClass().getEnchantment(base) != "")
+        if (!base.getClass().getEnchantment(base).empty())
             mFlags |= Flag_Enchanted;
 
         if (MWBase::Environment::get().getMechanicsManager()->isBoundItem(base))
@@ -31,18 +31,18 @@ namespace MWGui
     {
     }
 
-    bool operator == (const ItemStack& left, const ItemStack& right)
+    bool operator==(const ItemStack& left, const ItemStack& right)
     {
         if (left.mType != right.mType)
             return false;
 
-        if(left.mBase == right.mBase)
+        if (left.mBase == right.mBase)
             return true;
 
         // If one of the items is in an inventory and currently equipped, we need to check stacking both ways to be sure
         if (left.mBase.getContainerStore() && right.mBase.getContainerStore())
             return left.mBase.getContainerStore()->stacks(left.mBase, right.mBase)
-                    && right.mBase.getContainerStore()->stacks(left.mBase, right.mBase);
+                && right.mBase.getContainerStore()->stacks(left.mBase, right.mBase);
 
         if (left.mBase.getContainerStore())
             return left.mBase.getContainerStore()->stacks(left.mBase, right.mBase);
@@ -53,15 +53,15 @@ namespace MWGui
         return store.stacks(left.mBase, right.mBase);
     }
 
-    ItemModel::ItemModel()
-    {
-    }
+    ItemModel::ItemModel() {}
 
-    MWWorld::Ptr ItemModel::moveItem(const ItemStack &item, size_t count, ItemModel *otherModel)
+    MWWorld::Ptr ItemModel::moveItem(const ItemStack& item, size_t count, ItemModel* otherModel, bool allowAutoEquip)
     {
-        MWWorld::Ptr ret = otherModel->copyItem(item, count);
         removeItem(item, count);
-        return ret;
+        // If we removed the entire stack we can transfer it instead of creating a copy with a different RefNum
+        if (item.mBase.getCellRef().getCount() == 0)
+            return otherModel->addItem(item, count, allowAutoEquip);
+        return otherModel->copyItem(item, count, allowAutoEquip);
     }
 
     bool ItemModel::allowedToUseItems() const
@@ -69,25 +69,14 @@ namespace MWGui
         return true;
     }
 
-    bool ItemModel::onDropItem(const MWWorld::Ptr &item, int count)
+    bool ItemModel::onDropItem(const MWWorld::Ptr& item, int count)
     {
         return true;
     }
 
-    bool ItemModel::onTakeItem(const MWWorld::Ptr &item, int count)
+    bool ItemModel::onTakeItem(const MWWorld::Ptr& item, int count)
     {
         return true;
-    }
-
-
-    ProxyItemModel::ProxyItemModel()
-        : mSourceModel(nullptr)
-    {
-    }
-
-    ProxyItemModel::~ProxyItemModel()
-    {
-        delete mSourceModel;
     }
 
     bool ProxyItemModel::allowedToUseItems() const
@@ -95,57 +84,48 @@ namespace MWGui
         return mSourceModel->allowedToUseItems();
     }
 
-    MWWorld::Ptr ProxyItemModel::copyItem (const ItemStack& item, size_t count, bool allowAutoEquip)
+    MWWorld::Ptr ProxyItemModel::copyItem(const ItemStack& item, size_t count, bool allowAutoEquip)
     {
-        return mSourceModel->copyItem (item, count, allowAutoEquip);
+        return mSourceModel->copyItem(item, count, allowAutoEquip);
     }
 
-    void ProxyItemModel::removeItem (const ItemStack& item, size_t count)
+    void ProxyItemModel::removeItem(const ItemStack& item, size_t count)
     {
-        mSourceModel->removeItem (item, count);
+        mSourceModel->removeItem(item, count);
     }
 
-    ItemModel::ModelIndex ProxyItemModel::mapToSource (ModelIndex index)
+    ItemModel::ModelIndex ProxyItemModel::mapToSource(ModelIndex index)
     {
         const ItemStack& itemToSearch = getItem(index);
-        for (size_t i=0; i<mSourceModel->getItemCount(); ++i)
+        for (size_t i = 0; i < mSourceModel->getItemCount(); ++i)
         {
-            const ItemStack& item = mSourceModel->getItem(i);
+            const ItemStack& item = mSourceModel->getItem(static_cast<ModelIndex>(i));
             if (item.mBase == itemToSearch.mBase)
-                return i;
+                return static_cast<ModelIndex>(i);
         }
         return -1;
     }
 
-    ItemModel::ModelIndex ProxyItemModel::mapFromSource (ModelIndex index)
+    ItemModel::ModelIndex ProxyItemModel::mapFromSource(ModelIndex index)
     {
         const ItemStack& itemToSearch = mSourceModel->getItem(index);
-        for (size_t i=0; i<getItemCount(); ++i)
+        for (size_t i = 0; i < getItemCount(); ++i)
         {
-            const ItemStack& item = getItem(i);
+            const ItemStack& item = getItem(static_cast<ModelIndex>(i));
             if (item.mBase == itemToSearch.mBase)
-                return i;
+                return static_cast<ModelIndex>(i);
         }
         return -1;
     }
 
-    ItemModel::ModelIndex ProxyItemModel::getIndex (ItemStack item)
+    ItemModel::ModelIndex ProxyItemModel::getIndex(const ItemStack& item)
     {
         return mSourceModel->getIndex(item);
     }
 
-    void ProxyItemModel::setSourceModel(ItemModel *sourceModel)
+    void ProxyItemModel::setSourceModel(std::unique_ptr<ItemModel> sourceModel)
     {
-        if (mSourceModel == sourceModel)
-            return;
-
-        if (mSourceModel)
-        {
-            delete mSourceModel;
-            mSourceModel = nullptr;
-        }
-
-        mSourceModel = sourceModel;
+        mSourceModel = std::move(sourceModel);
     }
 
     void ProxyItemModel::onClose()
@@ -153,13 +133,23 @@ namespace MWGui
         mSourceModel->onClose();
     }
 
-    bool ProxyItemModel::onDropItem(const MWWorld::Ptr &item, int count)
+    bool ProxyItemModel::onDropItem(const MWWorld::Ptr& item, int count)
     {
         return mSourceModel->onDropItem(item, count);
     }
 
-    bool ProxyItemModel::onTakeItem(const MWWorld::Ptr &item, int count)
+    bool ProxyItemModel::onTakeItem(const MWWorld::Ptr& item, int count)
     {
         return mSourceModel->onTakeItem(item, count);
+    }
+
+    MWWorld::Ptr ProxyItemModel::addItem(const ItemStack& item, size_t count, bool allowAutoEquip)
+    {
+        return mSourceModel->addItem(item, count, allowAutoEquip);
+    }
+
+    bool ProxyItemModel::usesContainer(const MWWorld::Ptr& container)
+    {
+        return mSourceModel->usesContainer(container);
     }
 }

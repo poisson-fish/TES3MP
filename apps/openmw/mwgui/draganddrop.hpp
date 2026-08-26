@@ -2,6 +2,9 @@
 #define OPENMW_MWGUI_DRAGANDDROP_H
 
 #include "itemmodel.hpp"
+#include "itemwidget.hpp"
+
+#include <cstddef>
 
 namespace MyGUI
 {
@@ -18,33 +21,22 @@ namespace MWGui
     {
     public:
         bool mIsOnDragAndDrop;
-        MyGUI::Widget* mDraggedWidget;
+        ItemWidget* mDraggedWidget;
         ItemModel* mSourceModel;
         ItemView* mSourceView;
         SortFilterItemModel* mSourceSortModel;
         ItemStack mItem;
-        int mDraggedCount;
+        std::size_t mDraggedCount;
 
         DragAndDrop();
 
-        void startDrag (int index, SortFilterItemModel* sortModel, ItemModel* sourceModel, ItemView* sourceView, int count);
-        void drop (ItemModel* targetModel, ItemView* targetView);
+        void startDrag(int index, SortFilterItemModel* sortModel, ItemModel* sourceModel, ItemView* sourceView,
+            std::size_t count, bool playSound = true);
+        void drop(ItemModel* targetModel, ItemView* targetView, bool playSound = true);
+        void update();
         void onFrame();
 
-        /*
-            Start of tes3mp change (minor)
-
-            Add a deleteDragItems argument that allows the deletion of the
-            items in the drag as oppposed to the regular behavior of returning
-            them to their source model
-
-            This is required to reduce unpredictable behavior for drags approved
-            or rejected by the server
-        */
-        void finish(bool deleteDragItems = false);
-        /*
-            End of tes3mp change (minor)
-        */
+        void finish();
     };
 
 }

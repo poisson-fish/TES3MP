@@ -1,10 +1,11 @@
 #ifndef MGUI_CONTAINER_H
 #define MGUI_CONTAINER_H
 
-#include "windowbase.hpp"
-#include "referenceinterface.hpp"
-
 #include "itemmodel.hpp"
+#include "referenceinterface.hpp"
+#include "windowbase.hpp"
+
+#include <components/misc/notnullptr.hpp>
 
 namespace MyGUI
 {
@@ -17,69 +18,62 @@ namespace MWGui
     class ContainerWindow;
     class ItemView;
     class SortFilterItemModel;
-}
+    class ItemTransfer;
 
-
-namespace MWGui
-{
     class ContainerWindow : public WindowBase, public ReferenceInterface
     {
     public:
-        ContainerWindow(DragAndDrop* dragAndDrop);
+        explicit ContainerWindow(DragAndDrop& dragAndDrop, ItemTransfer& itemTransfer);
 
         void setPtr(const MWWorld::Ptr& container) override;
+
+        void onOpen() override;
+
         void onClose() override;
+
         void clear() override { resetReference(); }
 
-        void onFrame(float dt) override { checkReferenceAvailable(); }
+        void onFrame(float dt) override;
 
         void resetReference() override;
 
-        /*
-            Start of tes3mp addition
+        void onDeleteCustomData(const MWWorld::Ptr& ptr) override;
 
-            Make it possible to check from elsewhere whether there is currently an
-            item being dragged in the container window
-        */
-        bool isOnDragAndDrop();
-        /*
-            End of tes3mp addition
-        */
+        void treatNextOpenAsLoot() { mTreatNextOpenAsLoot = true; }
 
-        /*
-            Start of tes3mp addition
+        void onInventoryUpdate(const MWWorld::Ptr& ptr) override;
 
-            Make it possible to drag a specific item Ptr instead of having to rely
-            on an index that may have changed in the meantime, for drags that
-            require approval from the server
-        */
-        bool dragItemByPtr(const MWWorld::Ptr& itemPtr, int dragCount);
-        /*
-            End of tes3mp addition
-        */
+        std::string_view getWindowIdForLua() const override { return "Container"; }
+
+        ControllerButtons* getControllerButtons() override;
+        bool onControllerButtonEvent(const SDL_ControllerButtonEvent& arg) override;
+        void setActiveControllerWindow(bool active) override;
+
+        MWGui::ItemView* getItemView() { return mItemView; }
+        ItemModel* getModel() { return mModel; }
 
     private:
-        DragAndDrop* mDragAndDrop;
+        Misc::NotNullPtr<DragAndDrop> mDragAndDrop;
+        Misc::NotNullPtr<ItemTransfer> mItemTransfer;
 
         MWGui::ItemView* mItemView;
         SortFilterItemModel* mSortModel;
         ItemModel* mModel;
         int mSelectedItem;
-
+        bool mUpdateNextFrame;
+        bool mTreatNextOpenAsLoot;
         MyGUI::Button* mDisposeCorpseButton;
         MyGUI::Button* mTakeButton;
         MyGUI::Button* mCloseButton;
 
         void onItemSelected(int index);
         void onBackgroundSelected();
-        void dragItem(MyGUI::Widget* sender, int count);
+        void dragItem(MyGUI::Widget* sender, std::size_t count);
+        void transferItem(MyGUI::Widget* sender, std::size_t count);
         void dropItem();
-        void onCloseButtonClicked(MyGUI::Widget* _sender);
-        void onTakeAllButtonClicked(MyGUI::Widget* _sender);
+        void onCloseButtonClicked(MyGUI::Widget* sender);
+        void onTakeAllButtonClicked(MyGUI::Widget* sender);
         void onDisposeCorpseButtonClicked(MyGUI::Widget* sender);
-
-        /// @return is taking the item allowed?
-        bool onTakeItem(const ItemStack& item, int count);
 
         void onReferenceUnavailable() override;
     };

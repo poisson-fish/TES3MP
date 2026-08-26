@@ -19,7 +19,7 @@ namespace Files
         pos_type seekoff(off_type off, std::ios_base::seekdir dir, std::ios_base::openmode which) override
         {
             if (dir == std::ios_base::cur)
-                gbump(off);
+                setg(bufferStart, gptr() + off, bufferEnd);
             else
                 setg(bufferStart, (dir == std::ios_base::beg ? bufferStart : bufferEnd) + off, bufferEnd);
 
@@ -37,7 +37,7 @@ namespace Files
     };
 
     /// @brief A variant of std::istream that reads from a constant in-memory buffer.
-    struct IMemStream: virtual MemBuf, std::istream
+    struct IMemStream : virtual MemBuf, std::istream
     {
         IMemStream(char const* buffer, size_t size)
             : MemBuf(buffer, size)

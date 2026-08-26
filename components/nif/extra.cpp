@@ -2,89 +2,191 @@
 
 namespace Nif
 {
-
-void NiStringExtraData::read(NIFStream *nif)
-{
-    Extra::read(nif);
-    string = nif->getString();
-}
-
-void NiTextKeyExtraData::read(NIFStream *nif)
-{
-    Extra::read(nif);
-
-    int keynum = nif->getInt();
-    list.resize(keynum);
-    for(int i=0; i<keynum; i++)
+    void NiExtraData::read(NIFStream* nif)
     {
-        list[i].time = nif->getFloat();
-        list[i].text = nif->getString();
+        Extra::read(nif);
+
+        nif->readVector(mData, mRecordSize);
     }
-}
 
-void NiVertWeightsExtraData::read(NIFStream *nif)
-{
-    Extra::read(nif);
+    void NiStringsExtraData::read(NIFStream* nif)
+    {
+        Extra::read(nif);
 
-    nif->skip(nif->getUShort() * sizeof(float)); // vertex weights I guess
-}
+        nif->getSizedStrings(mData, nif->get<uint32_t>());
+    }
 
-void NiIntegerExtraData::read(NIFStream *nif)
-{
-    Extra::read(nif);
+    void NiTextKeyExtraData::TextKey::read(NIFStream* nif)
+    {
+        nif->read(mTime);
+        nif->read(mText);
+    }
 
-    data = nif->getUInt();
-}
+    void NiTextKeyExtraData::read(NIFStream* nif)
+    {
+        Extra::read(nif);
 
-void NiIntegersExtraData::read(NIFStream *nif)
-{
-    Extra::read(nif);
+        nif->readVectorOfRecords<uint32_t>(mList);
+    }
 
-    unsigned int num = nif->getUInt();
-    if (num)
-        nif->getUInts(data, num);
-}
+    void NiVertWeightsExtraData::read(NIFStream* nif)
+    {
+        Extra::read(nif);
 
-void NiBinaryExtraData::read(NIFStream *nif)
-{
-    Extra::read(nif);
-    unsigned int size = nif->getUInt();
-    if (size)
-        nif->getChars(data, size);
-}
+        nif->skip(nif->get<uint16_t>() * sizeof(float)); // vertex weights I guess
+    }
 
-void NiBooleanExtraData::read(NIFStream *nif)
-{
-    Extra::read(nif);
-    data = nif->getBoolean();
-}
+    void BSBound::read(NIFStream* nif)
+    {
+        Extra::read(nif);
 
-void NiVectorExtraData::read(NIFStream *nif)
-{
-    Extra::read(nif);
-    data = nif->getVector4();
-}
+        nif->read(mCenter);
+        nif->read(mExtents);
+    }
 
-void NiFloatExtraData::read(NIFStream *nif)
-{
-    Extra::read(nif);
+    void BSFurnitureMarker::LegacyFurniturePosition::read(NIFStream* nif)
+    {
+        nif->read(mOffset);
+        nif->read(mOrientation);
+        nif->read(mPositionRef);
+        nif->skip(1); // Position ref 2
+    }
 
-    data = nif->getFloat();
-}
+    void BSFurnitureMarker::FurniturePosition::read(NIFStream* nif)
+    {
+        nif->read(mOffset);
+        nif->read(mHeading);
+        nif->read(mType);
+        nif->read(mEntryPoint);
+    }
 
-void NiFloatsExtraData::read(NIFStream *nif)
-{
-    Extra::read(nif);
-    unsigned int num = nif->getUInt();
-    if (num)
-        nif->getFloats(data, num);
-}
+    void BSFurnitureMarker::read(NIFStream* nif)
+    {
+        Extra::read(nif);
 
-void BSBound::read(NIFStream *nif)
-{
-    Extra::read(nif);
-    center = nif->getVector3();
-    halfExtents = nif->getVector3();
-}
+        if (nif->getBethVersion() <= NIFFile::BethVersion::BETHVER_FO3)
+            nif->readVectorOfRecords<uint32_t>(mLegacyMarkers);
+        else
+            nif->readVectorOfRecords<uint32_t>(mMarkers);
+    }
+
+    void BSInvMarker::read(NIFStream* nif)
+    {
+        Extra::read(nif);
+
+        float rotX = nif->get<uint16_t>() / 1000.f;
+        float rotY = nif->get<uint16_t>() / 1000.f;
+        float rotZ = nif->get<uint16_t>() / 1000.f;
+        mRotation = osg::Quat(rotX, osg::X_AXIS, rotY, osg::Y_AXIS, rotZ, osg::Z_AXIS);
+        nif->read(mScale);
+    }
+
+    void BSBehaviorGraphExtraData::read(NIFStream* nif)
+    {
+        Extra::read(nif);
+
+        nif->read(mFile);
+        nif->read(mControlsBaseSkeleton);
+    }
+
+    void BSBoneLODExtraData::read(NIFStream* nif)
+    {
+        Extra::read(nif);
+
+        nif->readVectorOfRecords<uint32_t>(mData);
+    }
+
+    void BSBoneLODExtraData::BoneLOD::read(NIFStream* nif)
+    {
+        nif->read(mDistance);
+        nif->read(mBone);
+    }
+
+    void BSDecalPlacementVectorExtraData::read(NIFStream* nif)
+    {
+        NiFloatExtraData::read(nif);
+
+        nif->readVectorOfRecords<uint16_t>(mBlocks);
+    }
+
+    void BSDecalPlacementVectorExtraData::Block::read(NIFStream* nif)
+    {
+        nif->readVector(mPoints, nif->get<uint16_t>());
+        nif->readVector(mNormals, mPoints.size());
+    }
+
+    void BSClothExtraData::read(NIFStream* nif)
+    {
+        nif->readVector(mData, nif->get<uint32_t>());
+    }
+
+    void BSCollisionQueryProxyExtraData::read(NIFStream* nif)
+    {
+        nif->readVector(mData, nif->get<uint32_t>());
+    }
+
+    void BSConnectPoint::Point::read(NIFStream* nif)
+    {
+        mParent = nif->getSizedString();
+        mName = nif->getSizedString();
+        nif->read(mTransform.mRotation);
+        nif->read(mTransform.mTranslation);
+        nif->read(mTransform.mScale);
+    }
+
+    void BSConnectPoint::Parents::read(NIFStream* nif)
+    {
+        NiExtraData::read(nif);
+
+        nif->readVectorOfRecords<uint32_t>(mPoints);
+    }
+
+    void BSConnectPoint::Children::read(NIFStream* nif)
+    {
+        NiExtraData::read(nif);
+
+        nif->read(mSkinned);
+        nif->getSizedStrings(mPointNames, nif->get<uint32_t>());
+    }
+
+    void BSPackedGeomDataCombined::read(NIFStream* nif)
+    {
+        nif->read(mGrayscaleToPaletteScale);
+        nif->read(mTransform);
+        nif->read(mBoundingSphere);
+    }
+
+    void BSPackedGeomObject::read(NIFStream* nif)
+    {
+        nif->read(mFileHash);
+        nif->read(mDataOffset);
+    }
+
+    void BSPackedSharedGeomData::read(NIFStream* nif)
+    {
+        nif->read(mNumVertices);
+        nif->read(mLODLevels);
+        nif->read(mLOD0TriCount);
+        nif->read(mLOD0TriOffset);
+        nif->read(mLOD1TriCount);
+        nif->read(mLOD1TriOffset);
+        nif->read(mLOD2TriCount);
+        nif->read(mLOD2TriOffset);
+        nif->readVectorOfRecords<uint32_t>(mCombined);
+        mVertexDesc.read(nif);
+    }
+
+    void BSPackedCombinedSharedGeomDataExtra::read(NIFStream* nif)
+    {
+        NiExtraData::read(nif);
+
+        mVertexDesc.read(nif);
+        nif->read(mNumVertices);
+        nif->read(mNumTriangles);
+        nif->read(mFlags1);
+        nif->read(mFlags2);
+        nif->readVectorOfRecords<uint32_t>(mObjects);
+        nif->readVectorOfRecords(mObjects.size(), mObjectData);
+    }
 
 }

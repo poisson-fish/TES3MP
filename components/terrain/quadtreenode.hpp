@@ -29,10 +29,12 @@ namespace Terrain
             StopTraversal,
             StopTraversalAndUse
         };
-        virtual ReturnValue isSufficientDetail(QuadTreeNode *node, float dist) = 0;
+        virtual ReturnValue isSufficientDetail(QuadTreeNode* node, float dist) = 0;
     };
 
     class ViewData;
+
+    float distance(const osg::BoundingBox&, const osg::Vec3f& v);
 
     class QuadTreeNode : public osg::Group
     {
@@ -42,7 +44,7 @@ namespace Terrain
 
         inline QuadTreeNode* getParent() { return mParent; }
         inline QuadTreeNode* getChild(unsigned int i) { return static_cast<QuadTreeNode*>(Group::getChild(i)); }
-        inline unsigned int getNumChildren() const override { return _children.size(); }
+        inline unsigned int getNumChildren() const override { return static_cast<unsigned int>(_children.size()); }
 
         // osg::Group::addChild() does a lot of unrelated stuff, but we just really want to add a child node.
         void addChildNode(QuadTreeNode* child)
@@ -52,7 +54,7 @@ namespace Terrain
             _children.reserve(4);
             _children.push_back(child);
             child->addParent(this);
-        };
+        }
 
         float distance(const osg::Vec3f& v) const;
 
@@ -60,7 +62,7 @@ namespace Terrain
         ChildDirection getDirection() { return mDirection; }
 
         /// Get neighbour node in this direction
-        QuadTreeNode* getNeighbour (Direction dir);
+        QuadTreeNode* getNeighbour(Direction dir);
 
         /// Initialize neighbours - do this after the quadtree is built
         void initNeighbours();

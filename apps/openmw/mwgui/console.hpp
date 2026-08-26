@@ -6,11 +6,13 @@
 #include <vector>
 
 #include <components/compiler/errorhandler.hpp>
-#include <components/compiler/output.hpp>
 #include <components/compiler/extensions.hpp>
+#include <components/compiler/output.hpp>
+#include <components/files/configurationmanager.hpp>
+
+#include "../mwbase/windowmanager.hpp"
 
 #include "../mwscript/compilercontext.hpp"
-#include "../mwscript/interpretercontext.hpp"
 
 #include "referenceinterface.hpp"
 #include "windowbase.hpp"
@@ -19,91 +21,111 @@ namespace MWGui
 {
     class Console : public WindowBase, private Compiler::ErrorHandler, public ReferenceInterface
     {
-        public:
-            /// Set the implicit object for script execution
-            void setSelectedObject(const MWWorld::Ptr& object);
+    public:
+        /// Set the implicit object for script execution
+        void setSelectedObject(const MWWorld::Ptr& object);
+        MWWorld::Ptr getSelectedObject() const { return mPtr; }
 
-            /*
-                Start of tes3mp addition
+        MyGUI::EditBox* mCommandLine;
+        MyGUI::EditBox* mHistory;
+        MyGUI::EditBox* mSearchTerm;
+        MyGUI::Button* mNextButton;
+        MyGUI::Button* mPreviousButton;
+        MyGUI::Button* mCaseSensitiveToggleButton;
+        MyGUI::Button* mRegExSearchToggleButton;
 
-                Allow the direct setting of a console's Ptr, without the assumption that an object
-                was clicked and that key focus should be restored to the console window, for console
-                commands executed via server scripts
-            */
-            void setPtr(const MWWorld::Ptr& object);
-            /*
-                End of tes3mp addition
-            */
+        typedef std::list<std::string> StringList;
 
-            MyGUI::EditBox* mCommandLine;
-            MyGUI::EditBox* mHistory;
+        // History of previous entered commands
+        StringList mCommandHistory;
+        StringList::iterator mCurrent;
+        std::string mEditString;
+        std::ofstream mCommandHistoryFile;
 
-            typedef std::list<std::string> StringList;
+        Console(int w, int h, bool consoleOnlyScripts, Files::ConfigurationManager& cfgMgr);
+        ~Console();
 
-            // History of previous entered commands
-            StringList mCommandHistory;
-            StringList::iterator mCurrent;
-            std::string mEditString;
+        void onOpen() override;
 
-            Console(int w, int h, bool consoleOnlyScripts);
+        // Print a message to the console, in specified color.
+        void print(const std::string& msg, std::string_view color = MWBase::WindowManager::sConsoleColor_Default);
 
-            void onOpen() override;
+        // These are pre-colored versions that you should use.
 
-            void onResChange(int width, int height) override;
+        /// Output from successful console command
+        void printOK(const std::string& msg);
 
-            // Print a message to the console, in specified color.
-            void print(const std::string &msg, const std::string& color = "#FFFFFF");
+        /// Error message
+        void printError(const std::string& msg);
 
-            // These are pre-colored versions that you should use.
+        void execute(const std::string& command);
 
-            /// Output from successful console command
-            void printOK(const std::string &msg);
+        void executeFile(const std::filesystem::path& path);
 
-            /// Error message
-            void printError(const std::string &msg);
+        void updateSelectedObjectPtr(const MWWorld::Ptr& currentPtr, const MWWorld::Ptr& newPtr);
 
-            void execute (const std::string& command);
+        void onFrame(float dt) override { checkReferenceAvailable(); }
+        void clear() override;
 
-            void executeFile (const std::string& path);
+        void resetReference() override;
 
-            void updateSelectedObjectPtr(const MWWorld::Ptr& currentPtr, const MWWorld::Ptr& newPtr);
+        const std::string& getConsoleMode() const { return mConsoleMode; }
+        void setConsoleMode(std::string_view mode);
 
-            void clear() override;
+    protected:
+        void onReferenceUnavailable() override;
 
-            void resetReference () override;
+    private:
+        std::string mConsoleMode;
 
-        protected:
+        void updateConsoleTitle();
 
-            void onReferenceUnavailable() override;
+        void commandBoxKeyPress(MyGUI::Widget* sender, MyGUI::KeyCode key, MyGUI::Char value);
+        void acceptCommand(MyGUI::EditBox* sender);
 
-        private:
+        enum class SearchDirection;
+        void toggleCaseSensitiveSearch(MyGUI::Widget* sender);
+        void toggleRegExSearch(MyGUI::Widget* sender);
+        void acceptSearchTerm(MyGUI::EditBox* sender);
+        void findNextOccurrence(MyGUI::Widget* sender);
+        void findPreviousOccurrence(MyGUI::Widget* sender);
+        void findOccurrence(SearchDirection direction);
+        void findInHistoryText(
+            const std::string& historyText, SearchDirection direction, size_t firstIndex, size_t lastIndex);
+        void findWithRegex(
+            const std::string& historyText, SearchDirection direction, size_t firstIndex, size_t lastIndex);
+        void findWithStringSearch(
+            const std::string& historyText, SearchDirection direction, size_t firstIndex, size_t lastIndex);
+        void markOccurrence(size_t textPosition, size_t length);
+        size_t mCurrentOccurrenceIndex = std::string::npos;
+        size_t mCurrentOccurrenceLength = 0;
+        std::string mCurrentSearchTerm;
+        bool mCaseSensitiveSearch;
+        bool mRegExSearch;
 
-            void keyPress(MyGUI::Widget* _sender,
-                          MyGUI::KeyCode key,
-                          MyGUI::Char _char);
+        std::string complete(std::string input, std::vector<std::string>& matches);
 
-            void acceptCommand(MyGUI::EditBox* _sender);
+        Compiler::Extensions mExtensions;
+        MWScript::CompilerContext mCompilerContext;
+        std::vector<std::string> mNames;
 
-            std::string complete( std::string input, std::vector<std::string> &matches );
+        bool mConsoleOnlyScripts;
+        Files::ConfigurationManager& mCfgMgr;
+        bool compile(const std::string& cmd, Compiler::Output& output);
 
-            Compiler::Extensions mExtensions;
-            MWScript::CompilerContext mCompilerContext;
-            std::vector<std::string> mNames;
-            bool mConsoleOnlyScripts;
+        /// Report error to the user.
+        void report(const std::string& message, const Compiler::TokenLoc& loc, Type type) override;
 
-            bool compile (const std::string& cmd, Compiler::Output& output);
+        /// Report a file related error
+        void report(const std::string& message, Type type) override;
 
-            /// Report error to the user.
-            void report (const std::string& message, const Compiler::TokenLoc& loc, Type type) override;
+        /// Write all valid identifiers and keywords into mNames and sort them.
+        /// \note If mNames is not empty, this function is a no-op.
+        /// \note The list may contain duplicates (if a name is a keyword and an identifier at the same
+        /// time).
+        void listNames();
 
-            /// Report a file related error
-            void report (const std::string& message, Type type) override;
-
-            /// Write all valid identifiers and keywords into mNames and sort them.
-            /// \note If mNames is not empty, this function is a no-op.
-            /// \note The list may contain duplicates (if a name is a keyword and an identifier at the same
-            /// time).
-            void listNames();
-  };
+        void initConsoleHistory();
+    };
 }
 #endif

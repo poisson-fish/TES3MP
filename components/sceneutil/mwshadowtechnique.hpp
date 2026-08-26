@@ -1,3 +1,4 @@
+// clang-format off
 /* This file is based on OpenSceneGraph's include/osgShadow/ViewDependentShadowMap.
  * Where applicable, any changes made are covered by OpenMW's GPL 3 license, not the OSGPL.
  * The original copyright notice is listed below.
@@ -21,6 +22,7 @@
 
 #include <array>
 #include <mutex>
+#include <string>
 
 #include <osg/Camera>
 #include <osg/Material>
@@ -31,7 +33,8 @@
 #include <osgShadow/ShadowTechnique>
 
 #include <components/shader/shadermanager.hpp>
-#include <components/terrain/quadtreeworld.hpp>
+
+// NOLINTBEGIN(readability-identifier-naming)
 
 namespace SceneUtil {
 
@@ -43,7 +46,7 @@ namespace SceneUtil {
 
         MWShadowTechnique(const MWShadowTechnique& vdsm, const osg::CopyOp& copyop = osg::CopyOp::SHALLOW_COPY);
 
-        META_Object(SceneUtil, MWShadowTechnique);
+        META_Object(SceneUtil, MWShadowTechnique)
 
         /** initialize the ShadowedScene and local cached data structures.*/
         void init() override;
@@ -90,27 +93,28 @@ namespace SceneUtil {
         class ComputeLightSpaceBounds : public osg::NodeVisitor, public osg::CullStack
         {
         public:
-            ComputeLightSpaceBounds(osg::Viewport* viewport, const osg::Matrixd& projectionMatrix, osg::Matrixd& viewMatrix);
+            ComputeLightSpaceBounds();
 
-            void apply(osg::Node& node) override;
+            void apply(osg::Node& node) override final;
+            void apply(osg::Group& node) override;
 
-            void apply(osg::Drawable& drawable) override;
-
-            void apply(Terrain::QuadTreeWorld& quadTreeWorld);
+            void apply(osg::Drawable& drawable) override final;
+            void apply(osg::Geometry& drawable) override;
 
             void apply(osg::Billboard&) override;
 
             void apply(osg::Projection&) override;
 
-            void apply(osg::Transform& transform) override;
+            void apply(osg::Transform& transform) override final;
+            void apply(osg::MatrixTransform& transform) override;
 
             void apply(osg::Camera&) override;
-
-            using osg::NodeVisitor::apply;
 
             void updateBound(const osg::BoundingBox& bb);
 
             void update(const osg::Vec3& v);
+
+            void reset() override;
 
             osg::BoundingBox _bb;
         };
@@ -118,9 +122,14 @@ namespace SceneUtil {
         struct Frustum
         {
             Frustum(osgUtil::CullVisitor* cv, double minZNear, double maxZFar);
+            void setCustomClipSpace(const osg::BoundingBoxd& clipCornersOverride);
+            void init();
 
             osg::Matrixd projectionMatrix;
             osg::Matrixd modelViewMatrix;
+
+            bool useCustomClipSpace;
+            osg::BoundingBoxd customClipSpace;
 
             typedef std::vector<osg::Vec3d> Vertices;
             Vertices corners;
@@ -138,6 +147,19 @@ namespace SceneUtil {
             osg::Vec3d center;
             osg::Vec3d frustumCenterLine;
         };
+
+        /** Custom frustum callback allowing the application to request shadow maps covering a
+        * different furstum than the camera normally would cover, by customizing the corners of the clip space. */
+        struct CustomFrustumCallback : osg::Referenced
+        {
+            /** The callback operator.
+            * Output the custum frustum to the boundingBox variable.
+            * If sharedFrustumHint is set to a valid cull visitor, the shadow maps of that cull visitor will be re-used instead of recomputing new shadow maps 
+            * Note that the customClipSpace bounding box will be uninitialized when this operator is called. If it is not initalized, or a valid shared frustum hint set,
+            * the resulting shadow map may be invalid. */
+            virtual void operator()(osgUtil::CullVisitor& cv, osg::BoundingBoxd& customClipSpace, osgUtil::CullVisitor*& sharedFrustumHint) = 0;
+        };
+        typedef std::vector< osg::ref_ptr<osg::Uniform> > Uniforms;
 
         // forward declare
         class ViewDependentData;
@@ -173,8 +195,8 @@ namespace SceneUtil {
             ViewDependentData*                  _viewDependentData;
 
             unsigned int                        _textureUnit;
+            unsigned int                        _sm_i;
             osg::ref_ptr<osg::Texture2D>        _texture;
-            osg::ref_ptr<osg::TexGen>           _texgen;
             osg::ref_ptr<osg::Camera>           _camera;
         };
 
@@ -196,7 +218,12 @@ namespace SceneUtil {
 
             virtual void releaseGLObjects(osg::State* = 0) const;
 
+            unsigned int numValidShadows(void) const { return _numValidShadows; }
+
+            void setNumValidShadows(unsigned int numValidShadows) { _numValidShadows = numValidShadows; }
+
         protected:
+            friend class MWShadowTechnique;
             virtual ~ViewDependentData() {}
 
             MWShadowTechnique*          _viewDependentShadowMap;
@@ -205,17 +232,22 @@ namespace SceneUtil {
 
             LightDataList               _lightDataList;
             ShadowDataList              _shadowDataList;
+            std::array<Uniforms, 2>     _uniforms;
+
+            unsigned int _numValidShadows;
         };
 
         virtual ViewDependentData* createViewDependentData(osgUtil::CullVisitor* cv);
 
         ViewDependentData* getViewDependentData(osgUtil::CullVisitor* cv);
 
+        void copyShadowMap(osgUtil::CullVisitor& cv, ViewDependentData* lhs, ViewDependentData* rhs);
 
+        void setCustomFrustumCallback(CustomFrustumCallback* cfc);
+
+        void copyShadowStateSettings(osgUtil::CullVisitor& cv, ViewDependentData* vdd);
 
         virtual void createShaders();
-
-        virtual std::array<osg::ref_ptr<osg::Program>, GL_ALWAYS - GL_NEVER + 1> getCastingPrograms() const { return _castingPrograms; }
 
         virtual bool selectActiveLights(osgUtil::CullVisitor* cv, ViewDependentData* vdd) const;
 
@@ -226,8 +258,10 @@ namespace SceneUtil {
         virtual bool cropShadowCameraToMainFrustum(Frustum& frustum, osg::Camera* camera, double viewNear, double viewFar, std::vector<osg::Plane>& planeList);
 
         virtual bool adjustPerspectiveShadowMapCameraSettings(osgUtil::RenderStage* renderStage, Frustum& frustum, LightData& positionedLight, osg::Camera* camera, double viewNear, double viewFar);
-
-        virtual bool assignTexGenSettings(osgUtil::CullVisitor* cv, osg::Camera* camera, unsigned int textureUnit, osg::TexGen* texgen);
+        
+        virtual void assignShadowStateSettings(osgUtil::CullVisitor& cv, osg::Camera* camera, unsigned int sm_i, Uniforms& uniforms);
+        
+        virtual void assignValidRegionSettings(osgUtil::CullVisitor& cv, osg::Camera* camera, unsigned int sm_i, Uniforms& uniforms);
 
         virtual void cullShadowReceivingScene(osgUtil::CullVisitor* cv) const;
 
@@ -235,12 +269,20 @@ namespace SceneUtil {
 
         virtual osg::StateSet* prepareStateSetForRenderingShadow(ViewDependentData& vdd, unsigned int traversalNumber) const;
 
+        void setWorldMask(unsigned int worldMask) { _worldMask = worldMask; }
+
+        osg::ref_ptr<osg::StateSet> getOrCreateShadowsBinStateSet();
+
     protected:
         virtual ~MWShadowTechnique();
+
+        osg::ref_ptr<ComputeLightSpaceBounds>   _clsb;
 
         typedef std::map< osgUtil::CullVisitor*, osg::ref_ptr<ViewDependentData> >  ViewDependentDataMap;
         mutable std::mutex                      _viewDependentDataMapMutex;
         ViewDependentDataMap                    _viewDependentDataMap;
+        osg::ref_ptr<CustomFrustumCallback>     _customFrustumCallback;
+        osg::BoundingBoxd                       _customClipSpace;
 
         osg::ref_ptr<osg::StateSet>             _shadowRecievingPlaceholderStateSet;
 
@@ -249,7 +291,6 @@ namespace SceneUtil {
         osg::ref_ptr<osg::Texture2D>            _fallbackBaseTexture;
         osg::ref_ptr<osg::Texture2D>            _fallbackShadowMapTexture;
 
-        typedef std::vector< osg::ref_ptr<osg::Uniform> > Uniforms;
         std::array<Uniforms, 2>                 _uniforms;
         osg::ref_ptr<osg::Program>              _program;
 
@@ -259,12 +300,14 @@ namespace SceneUtil {
         double                                  _splitPointUniformLogRatio = 0.5;
         double                                  _splitPointDeltaBias = 0.0;
 
-        float                                   _polygonOffsetFactor = 1.1;
-        float                                   _polygonOffsetUnits = 4.0;
+        float                                   _polygonOffsetFactor = 1.1f;
+        float                                   _polygonOffsetUnits = 4.0f;
 
         bool                                    _useFrontFaceCulling = true;
 
-        float                                   _shadowFadeStart = 0.0;
+        float                                   _shadowFadeStart = 0.0f;
+
+        unsigned int                            _worldMask = ~0u;
 
         class DebugHUD final : public osg::Referenced
         {
@@ -291,8 +334,14 @@ namespace SceneUtil {
 
         osg::ref_ptr<DebugHUD>                  _debugHud;
         std::array<osg::ref_ptr<osg::Program>, GL_ALWAYS - GL_NEVER + 1> _castingPrograms;
+        const std::string _shadowsBinName = "ShadowsBin_" + std::to_string(reinterpret_cast<std::uint64_t>(this));
+        osg::ref_ptr<osgUtil::RenderBin> _shadowsBin;
+        osg::ref_ptr<osg::StateSet> _shadowsBinStateSet;
     };
 
 }
 
+// NOLINTEND(readability-identifier-naming)
+
 #endif
+// clang-format on

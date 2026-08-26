@@ -1,34 +1,49 @@
 #ifndef OPENMW_COMPONENTS_MISC_MESSAGEFORMATPARSER_H
 #define OPENMW_COMPONENTS_MISC_MESSAGEFORMATPARSER_H
 
-#include <string>
+#include <string_view>
 
 namespace Misc
 {
     class MessageFormatParser
     {
-        protected:
-            enum Placeholder
-            {
-                StringPlaceholder,
-                IntegerPlaceholder,
-                FloatPlaceholder
-            };
+    protected:
+        enum Placeholder
+        {
+            StringPlaceholder,
+            IntegerPlaceholder,
+            FloatPlaceholder
+        };
 
-            enum Notation
-            {
-                FixedNotation,
-                ScientificNotation,
-                ShortestNotation
-            };
+        enum Flags
+        {
+            None = 0,
+            PositiveSpace = 1,
+            PositiveSign = 2,
+            AlignLeft = 4,
+            PrependZero = 8,
+            AlternateForm = 16
+        };
 
-            virtual void visitedPlaceholder(Placeholder placeholder, char padding, int width, int precision, Notation notation) = 0;
-            virtual void visitedCharacter(char c) = 0;
+        enum class Notation : char
+        {
+            Fixed = 'f',
+            ScientificUpper = 'E',
+            ScientificLower = 'e',
+            ShortestUpper = 'G',
+            ShortestLower = 'g',
+            HexUpper = 'A',
+            HexLower = 'a'
+        };
 
-        public:
-            virtual ~MessageFormatParser();
+        virtual void visitedPlaceholder(Placeholder placeholder, int flags, int width, int precision, Notation notation)
+            = 0;
+        virtual void visitedCharacter(char c) = 0;
 
-            virtual void process(const std::string& message);
+    public:
+        virtual ~MessageFormatParser();
+
+        virtual void process(std::string_view message);
     };
 }
 

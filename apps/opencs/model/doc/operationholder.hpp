@@ -4,53 +4,46 @@
 #include <QObject>
 #include <QThread>
 
-#include "messages.hpp"
-
-namespace CSMWorld
-{
-    class UniversalId;
-}
-
 namespace CSMDoc
 {
     class Operation;
+    struct Message;
 
     class OperationHolder : public QObject
     {
-            Q_OBJECT
-            
-            QThread mThread;
-            Operation *mOperation;
-            bool mRunning;
+        Q_OBJECT
 
-        public:
+        QThread mThread;
+        Operation* mOperation;
 
-            OperationHolder (Operation *operation = nullptr);
+    public:
+        OperationHolder(QObject* parent, Operation* operation);
 
-            void setOperation (Operation *operation);
+        ~OperationHolder();
 
-            bool isRunning() const;
+        bool isRunning() const;
 
-            void start();
+        void start();
 
-            void abort();
+        void abort();
 
-            // Abort and wait until thread has finished.
-            void abortAndWait();
+        /// Stop the operation, wait for the thread to finish, and delete the operation.
+        /// Safe to call multiple times.
+        void quit();
 
-        private slots:
+    private slots:
 
-            void doneSlot (int type, bool failed);
-            
-        signals:
+        void doneSlot(int type, bool failed);
 
-            void progress (int current, int max, int type);
+    signals:
 
-            void reportMessage (const CSMDoc::Message& message, int type);
+        void progress(int current, int max, int type);
 
-            void done (int type, bool failed);
+        void reportMessage(const CSMDoc::Message& message, int type);
 
-            void abortSignal();
+        void done(int type, bool failed);
+
+        void abortSignal();
     };
 }
 

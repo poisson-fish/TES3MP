@@ -11,23 +11,21 @@ namespace Wizard
     {
         Q_OBJECT
     public:
-        ExistingInstallationPage(QWidget *parent);
+        ExistingInstallationPage(QWidget* parent);
 
         int nextId() const override;
         bool isComplete() const override;
         bool validatePage() override;
 
     private slots:
-        void on_browseButton_clicked();
-        void textChanged(const QString &text);
-
+        void browseButtonClicked();
+        void textChanged(const QString& text);
 
     private:
-        MainWizard *mWizard;
+        MainWizard* mWizard;
 
     protected:
         void initializePage() override;
-
     };
 
 }

@@ -1,19 +1,27 @@
 #ifndef OPENCS_VIEW_SCENEWIDGET_H
 #define OPENCS_VIEW_SCENEWIDGET_H
 
-#include <map>
 #include <memory>
+#include <string>
 
-#include <QWidget>
+#include <QColor>
+#include <QObject>
 #include <QTimer>
+#include <QWidget>
 
-#include <osgViewer/View>
+#include <osg/PositionAttitudeTransform>
+#include <osg/Vec4f>
+#include <osg/ref_ptr>
+
 #include <osgViewer/CompositeViewer>
 
-#include "lightingday.hpp"
-#include "lightingnight.hpp"
-#include "lightingbright.hpp"
+class QMouseEvent;
+class QWheelEvent;
+class QResizeEvent;
+class QShowEvent;
 
+class osgQOpenGLWidget;
+class CompositeOsgRenderer;
 
 namespace Resource
 {
@@ -24,6 +32,13 @@ namespace osg
 {
     class Group;
     class Camera;
+    class Geometry;
+    class Light;
+}
+
+namespace osg
+{
+    class View;
 }
 
 namespace CSVWidget
@@ -37,135 +52,133 @@ namespace CSMPrefs
     class Setting;
 }
 
+namespace SceneUtil
+{
+    class PerViewUniformStateUpdater;
+    class SharedUniformStateUpdater;
+    class StateUpdater;
+}
+
 namespace CSVRender
 {
     class CameraController;
     class FreeCameraController;
     class OrbitCameraController;
-    class Lighting;
 
     class RenderWidget : public QWidget
     {
-            Q_OBJECT
+        Q_OBJECT
 
-        public:
-            RenderWidget(QWidget* parent = nullptr, Qt::WindowFlags f = Qt::WindowFlags());
-            virtual ~RenderWidget();
+    public:
+        RenderWidget(std::shared_ptr<Resource::ResourceSystem> resourceSystem, QWidget* parent = nullptr,
+            Qt::WindowFlags f = Qt::WindowFlags());
+        virtual ~RenderWidget();
 
-            /// Initiates a request to redraw the view
-            void flagAsModified();
+        /// Initiates a request to redraw the view
+        void flagAsModified();
 
-            void setVisibilityMask(unsigned int mask);
+        void setVisibilityMask(unsigned int mask);
 
-            osg::Camera *getCamera();
+        osg::Camera* getCamera();
 
-        protected:
+    protected:
+        osgQOpenGLWidget* mWidget;
+        CompositeOsgRenderer* mRenderer;
+        osg::ref_ptr<osgViewer::View> mView;
+        osg::ref_ptr<osg::Group> mRootNode;
+        osg::ref_ptr<osg::Light> mSunLight;
 
-            osg::ref_ptr<osgViewer::View> mView;
-            osg::ref_ptr<osg::Group> mRootNode;
+        std::shared_ptr<Resource::ResourceSystem> mResourceSystem;
 
-            void updateCameraParameters(double overrideAspect = -1.0);
+        osg::ref_ptr<SceneUtil::StateUpdater> mStateUpdater;
+        osg::ref_ptr<SceneUtil::SharedUniformStateUpdater> mSharedUniformStateUpdater;
+        osg::ref_ptr<SceneUtil::PerViewUniformStateUpdater> mPerViewUniformStateUpdater;
 
-            QTimer mTimer;
+        void updateCameraParameters(double overrideAspect = -1.0);
 
-        protected slots:
+    protected slots:
 
-            void toggleRenderStats();
+        void toggleRenderStats();
     };
 
     /// Extension of RenderWidget to support lighting mode selection & toolbar
     class SceneWidget : public RenderWidget
     {
-            Q_OBJECT
-        public:
-            SceneWidget(std::shared_ptr<Resource::ResourceSystem> resourceSystem, QWidget* parent = nullptr,
-                        Qt::WindowFlags f = Qt::WindowFlags(), bool retrieveInput = true);
-            virtual ~SceneWidget();
+        Q_OBJECT
+    public:
+        SceneWidget(std::shared_ptr<Resource::ResourceSystem> resourceSystem, QWidget* parent = nullptr,
+            Qt::WindowFlags f = Qt::WindowFlags(), bool retrieveInput = true);
+        virtual ~SceneWidget();
 
-            CSVWidget::SceneToolMode *makeLightingSelector (CSVWidget::SceneToolbar *parent);
-            ///< \attention The created tool is not added to the toolbar (via addTool). Doing that
-            /// is the responsibility of the calling function.
+        CSVWidget::SceneToolMode* makeLightingSelector(CSVWidget::SceneToolbar* parent);
+        ///< \attention The created tool is not added to the toolbar (via addTool). Doing that
+        /// is the responsibility of the calling function.
 
-            void setDefaultAmbient (const osg::Vec4f& colour);
-            ///< \note The actual ambient colour may differ based on lighting settings.
+        void setDefaultAmbient(const osg::Vec4f& colour);
+        ///< \note The actual ambient colour may differ based on lighting settings.
 
-            void setExterior (bool isExterior);
+        void setExterior(bool isExterior);
 
-        protected:
-            void setLighting (Lighting *lighting);
-            ///< \attention The ownership of \a lighting is not transferred to *this.
+        void setSelectionMarkerRoot(osg::ref_ptr<osg::PositionAttitudeTransform> selectionMarker)
+        {
+            mSelectionMarkerNode = selectionMarker;
+        }
 
-            void setAmbient(const osg::Vec4f& ambient);
+    protected:
+        enum LightingMode
+        {
+            Bright,
+            Night,
+            Day
+        };
 
-            void mouseMoveEvent (QMouseEvent *event) override;
-            void wheelEvent (QWheelEvent *event) override;
+        LightingMode mLightingMode = LightingMode::Day;
 
-            osg::ref_ptr<osg::Geometry> createGradientRectangle(QColor bgColour, QColor gradientColour);
-            osg::ref_ptr<osg::Camera> createGradientCamera(QColor bgColour, QColor gradientColour);
-            void updateGradientCamera(QColor bgColour, QColor gradientColour);
+        void setLighting(LightingMode mode);
 
-            std::shared_ptr<Resource::ResourceSystem> mResourceSystem;
+        void mouseMoveEvent(QMouseEvent* event) override;
+        void wheelEvent(QWheelEvent* event) override;
+        void resizeEvent(QResizeEvent* event) override;
+        void showEvent(QShowEvent* event) override;
 
-            Lighting* mLighting;
-            
-            osg::ref_ptr<osg::Camera> mGradientCamera;
-            osg::Vec4f mDefaultAmbient;
-            bool mHasDefaultAmbient;
-            bool mIsExterior;
-            LightingDay mLightingDay;
-            LightingNight mLightingNight;
-            LightingBright mLightingBright;
+        osg::ref_ptr<osg::Geometry> createGradientRectangle(QColor& bgColour, QColor& gradientColour);
+        osg::ref_ptr<osg::Camera> createGradientCamera(QColor& bgColour, QColor& gradientColour);
+        void updateGradientCamera(QColor& bgColour, QColor& gradientColour);
 
-            int mPrevMouseX, mPrevMouseY;
-            
-            /// Tells update that camera isn't set
-            bool mCamPositionSet;
+        std::shared_ptr<Resource::ResourceSystem> mResourceSystem;
 
-            FreeCameraController* mFreeCamControl;
-            OrbitCameraController* mOrbitCamControl;
-            CameraController* mCurrentCamControl;
+        osg::ref_ptr<osg::PositionAttitudeTransform> mSelectionMarkerNode;
+        osg::ref_ptr<osg::Camera> mGradientCamera;
+        osg::Vec4f mDefaultAmbient;
+        bool mHasDefaultAmbient;
+        bool mIsExterior;
 
-        public slots:
-            void update(double dt);
+        QPointF mPrevMouse;
 
-        protected slots:
+        /// Tells update that camera isn't set
+        bool mCamPositionSet;
 
-            virtual void settingChanged (const CSMPrefs::Setting *setting);
+        FreeCameraController* mFreeCamControl;
+        OrbitCameraController* mOrbitCamControl;
+        CameraController* mCurrentCamControl;
 
-            void selectNavigationMode (const std::string& mode);
+    public slots:
+        void update(double dt);
 
-        private slots:
+    protected slots:
 
-            void selectLightingMode (const std::string& mode);
+        virtual void settingChanged(const CSMPrefs::Setting* setting);
 
-        signals:
+        void selectNavigationMode(const std::string& mode);
 
-            void focusToolbarRequest();
+    private slots:
+
+        void selectLightingMode(const std::string& mode);
+
+    signals:
+
+        void focusToolbarRequest();
     };
-
-
-    // There are rendering glitches when using multiple Viewer instances, work around using CompositeViewer with multiple views
-    class CompositeViewer : public QObject, public osgViewer::CompositeViewer
-    {
-            Q_OBJECT
-        public:
-            CompositeViewer();
-
-            static CompositeViewer& get();
-
-            QTimer mTimer;
-
-        private:
-            osg::Timer mFrameTimer;
-            double mSimulationTime;
-
-        public slots:
-            void update();
-
-        signals:
-            void simulationUpdated(double dt);
-    };
-
 }
 
 #endif

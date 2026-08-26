@@ -1,42 +1,31 @@
 #ifndef OPENMW_MECHANICS_SUMMONING_H
 #define OPENMW_MECHANICS_SUMMONING_H
 
-#include <set>
+#include <string_view>
+#include <utility>
 
-#include "../mwworld/ptr.hpp"
+#include <components/esm3/refnum.hpp>
 
-#include <components/esm/magiceffects.hpp>
-
-#include "magiceffects.hpp"
+namespace ESM
+{
+    class RefId;
+}
+namespace MWWorld
+{
+    class Ptr;
+}
 
 namespace MWMechanics
 {
-    class CreatureStats;
+    bool isSummoningEffect(ESM::RefId effectId);
 
-    bool isSummoningEffect(int effectId);
+    ESM::RefId getSummonedCreature(ESM::RefId effectId);
 
-    std::string getSummonedCreature(int effectId);
+    void purgeSummonEffect(const MWWorld::Ptr& summoner, const std::pair<ESM::RefId, ESM::RefNum>& summon);
 
-    void purgeSummonEffect(const MWWorld::Ptr& summoner, const std::pair<const ESM::SummonKey, int>& summon);
+    ESM::RefNum summonCreature(ESM::RefId effectId, const MWWorld::Ptr& summoner);
 
-    struct UpdateSummonedCreatures : public EffectSourceVisitor
-    {
-        UpdateSummonedCreatures(const MWWorld::Ptr& actor);
-        virtual ~UpdateSummonedCreatures() = default;
-
-        void visit (MWMechanics::EffectKey key, int effectIndex,
-                            const std::string& sourceName, const std::string& sourceId, int casterActorId,
-                            float magnitude, float remainingTime = -1, float totalTime = -1) override;
-
-        /// To call after all effect sources have been visited
-        void process(bool cleanup);
-
-    private:
-        MWWorld::Ptr mActor;
-
-        std::set<ESM::SummonKey> mActiveEffects;
-    };
-
+    void updateSummons(const MWWorld::Ptr& summoner, bool cleanup);
 }
 
 #endif

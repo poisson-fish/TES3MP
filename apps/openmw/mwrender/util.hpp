@@ -1,9 +1,12 @@
 #ifndef OPENMW_MWRENDER_UTIL_H
 #define OPENMW_MWRENDER_UTIL_H
 
+#include <components/vfs/pathutil.hpp>
+
+#include <osg/LightModel>
 #include <osg/NodeCallback>
-#include <osg/ref_ptr>
-#include <string>
+
+#include <string_view>
 
 namespace osg
 {
@@ -17,11 +20,13 @@ namespace Resource
 
 namespace MWRender
 {
-    // Overrides the texture of nodes in the mesh that had the same NiTexturingProperty as the first NiTexturingProperty of the .NIF file's root node,
-    // if it had a NiTexturingProperty. Used for applying "particle textures" to magic effects.
-    void overrideFirstRootTexture(const std::string &texture, Resource::ResourceSystem *resourceSystem, osg::ref_ptr<osg::Node> node);
+    // Overrides the texture of nodes in the mesh that had the same NiTexturingProperty as the first NiTexturingProperty
+    // of the .NIF file's root node, if it had a NiTexturingProperty. Used for applying "particle textures" to magic
+    // effects.
+    void overrideFirstRootTexture(
+        VFS::Path::NormalizedView texture, Resource::ResourceSystem* resourceSystem, osg::Node& node);
 
-    void overrideTexture(const std::string& texture, Resource::ResourceSystem* resourceSystem, osg::ref_ptr<osg::Node> node);
+    void overrideTexture(VFS::Path::NormalizedView texture, Resource::ResourceSystem* resourceSystem, osg::Node& node);
 
     // Node callback to entirely skip the traversal.
     class NoTraverseCallback : public osg::NodeCallback
@@ -32,6 +37,10 @@ namespace MWRender
             // no traverse()
         }
     };
+
+    bool shouldAddMSAAIntermediateTarget();
+
+    const osg::ref_ptr<osg::LightModel>& getVFXLightModelInstance();
 }
 
 #endif

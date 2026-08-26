@@ -1,22 +1,14 @@
 #ifndef GAME_MWMECHANICS_NPCSTATS_H
 #define GAME_MWMECHANICS_NPCSTATS_H
 
+#include "creaturestats.hpp"
+#include <components/esm/refid.hpp>
+#include <components/esm3/loadclas.hpp>
+#include <components/esm3/loadskil.hpp>
 #include <map>
 #include <set>
 #include <string>
 #include <vector>
-
-/*
-    Start of tes3mp addition
-
-    Include additional headers for multiplayer purposes
-*/
-#include <time.h>
-/*
-    End of tes3mp addition
-*/
-
-#include "creaturestats.hpp"
 
 namespace ESM
 {
@@ -30,152 +22,124 @@ namespace MWMechanics
 
     class NpcStats : public CreatureStats
     {
-            int mDisposition;
-            SkillValue mSkill[ESM::Skill::Length]; // SkillValue.mProgress used by the player only
+        int mDisposition;
+        int mCrimeDispositionModifier;
+        std::map<ESM::RefId, SkillValue> mSkills; // SkillValue.mProgress used by the player only
 
-            int mReputation;
-            int mCrimeId;
+        int mReputation;
+        int mCrimeId;
 
-            /*
-                Start of tes3mp addition
+        // ----- used by the player only, maybe should be moved at some point -------
+        int mBounty;
+        int mWerewolfKills;
+        /// Used only for the player and for NPC's with ranks, modified by scripts; other NPCs have maximum one faction
+        /// defined in their NPC record
+        std::map<ESM::RefId, int> mFactionRank;
+        std::set<ESM::RefId> mExpelled;
+        std::map<ESM::RefId, int> mFactionReputation;
+        int mLevelProgress; // 0-10
+        std::map<ESM::RefId, int>
+            mSkillIncreases; // number of skill increases for each attribute (resets after leveling up)
+        std::vector<int> mSpecIncreases; // number of skill increases for each specialization (accumulates throughout
+                                         // the entire game)
+        std::set<ESM::RefId> mUsedIds;
+        // ---------------------------------------------------------------------------
 
-                Add a variable used to track the time of the most recent crime by a player
-            */
-            time_t mCrimeTime = time(0);
-            /*
-                End of tes3mp addition
-            */
+        /// Countdown to getting damage while underwater
+        float mTimeToStartDrowning;
 
-            // ----- used by the player only, maybe should be moved at some point -------
-            int mBounty;
-            int mWerewolfKills;
-            /// Used only for the player and for NPC's with ranks, modified by scripts; other NPCs have maximum one faction defined in their NPC record
-            std::map<std::string, int> mFactionRank;
-            std::set<std::string> mExpelled;
-            std::map<std::string, int> mFactionReputation;
-            int mLevelProgress; // 0-10
-            std::vector<int> mSkillIncreases; // number of skill increases for each attribute (resets after leveling up)
-            std::vector<int> mSpecIncreases; // number of skill increases for each specialization (accumulates throughout the entire game)
-            std::set<std::string> mUsedIds;
-            // ---------------------------------------------------------------------------
+        bool mIsWerewolf;
 
-            /// Countdown to getting damage while underwater
-            float mTimeToStartDrowning;
+    public:
+        NpcStats();
 
-            bool mIsWerewolf;
+        int getBaseDisposition() const;
+        void setBaseDisposition(int disposition);
 
-        public:
+        int getCrimeDispositionModifier() const;
+        void setCrimeDispositionModifier(int value);
+        void modCrimeDispositionModifier(int value);
 
-            NpcStats();
+        int getReputation() const;
+        void setReputation(int reputation);
 
-            int getBaseDisposition() const;
-            void setBaseDisposition(int disposition);
+        int getCrimeId() const;
+        void setCrimeId(int id);
 
-            int getReputation() const;
-            void setReputation(int reputation);
+        const SkillValue& getSkill(ESM::RefId id) const;
+        SkillValue& getSkill(ESM::RefId id);
+        void setSkill(ESM::RefId id, const SkillValue& value);
 
-            int getCrimeId() const;
-            void setCrimeId(int id);
+        int getFactionRank(const ESM::RefId& faction) const;
+        const std::map<ESM::RefId, int>& getFactionRanks() const;
 
-            const SkillValue& getSkill (int index) const;
-            SkillValue& getSkill (int index);
-            void setSkill(int index, const SkillValue& value);
+        /// Join this faction, setting the initial rank to 0.
+        void joinFaction(const ESM::RefId& faction);
+        /// Sets the rank in this faction to a specified value, if such a rank exists.
+        void setFactionRank(const ESM::RefId& faction, int value);
 
-            int getFactionRank(const std::string &faction) const;
-            const std::map<std::string, int>& getFactionRanks() const;
+        const std::set<ESM::RefId>& getExpelled() const { return mExpelled; }
+        bool getExpelled(const ESM::RefId& factionID) const;
+        void expell(const ESM::RefId& factionID, bool printMessage);
+        void clearExpelled(const ESM::RefId& factionID);
 
-            /// Increase the rank in this faction by 1, if such a rank exists.
-            void raiseRank(const std::string& faction);
-            /// Lower the rank in this faction by 1, if such a rank exists.
-            void lowerRank(const std::string& faction);
-            /// Join this faction, setting the initial rank to 0.
-            void joinFaction(const std::string& faction);
+        bool isInFaction(const ESM::RefId& faction) const;
 
-            const std::set<std::string>& getExpelled() const { return mExpelled; }
-            bool getExpelled(const std::string& factionID) const;
-            void expell(const std::string& factionID);
-            void clearExpelled(const std::string& factionID);
+        float getSkillProgressRequirement(ESM::RefId id, const ESM::Class& npcClass) const;
 
-            bool isInFaction (const std::string& faction) const;
+        int getLevelProgress() const;
+        void setLevelProgress(int progress);
 
-            float getSkillProgressRequirement (int skillIndex, const ESM::Class& class_) const;
+        int getLevelupAttributeMultiplier(ESM::Attribute::AttributeID attribute) const;
+        int getSkillIncreasesForAttribute(ESM::Attribute::AttributeID attribute) const;
+        void setSkillIncreasesForAttribute(ESM::Attribute::AttributeID, int increases);
 
-            void useSkill (int skillIndex, const ESM::Class& class_, int usageType = -1, float extraFactor=1.f);
-            ///< Increase skill by usage.
+        int getSkillIncreasesForSpecialization(ESM::Class::Specialization spec) const;
+        void setSkillIncreasesForSpecialization(ESM::Class::Specialization spec, int increases);
 
-            void increaseSkill (int skillIndex, const ESM::Class& class_, bool preserveProgress, bool readBook = false);
+        void levelUp();
 
-            int getLevelProgress() const;
+        void updateHealth();
+        ///< Calculate health based on endurance and strength.
+        ///  Called at character creation.
 
-            /*
-                Start of tes3mp addition
+        void flagAsUsed(const ESM::RefId& id);
+        ///< @note Id must be lower-case
 
-                Useful methods for setting player stats
-            */
-            void setLevelProgress(int value);
-            int getSkillIncrease(int attribute) const;
-            void setSkillIncrease(int attribute, int value);
-            /*
-                End of tes3mp addition
-            */
+        bool hasBeenUsed(const ESM::RefId& id) const;
+        ///< @note Id must be lower-case
 
-            /*
-                Start of tes3mp addition
+        int getBounty() const;
 
-                Make it possible to get and set the time of the last crime witnessed by the NPC,
-                used to stop combat with a player after that player dies and is resurrected
-            */
-            time_t getCrimeTime();
-            void setCrimeTime(time_t crimeTime);
-            /*
-                End of tes3mp addition
-            */
+        void setBounty(int bounty);
 
-            int getLevelupAttributeMultiplier(int attribute) const;
+        int getFactionReputation(const ESM::RefId& faction) const;
 
-            int getSkillIncreasesForSpecialization(int spec) const;
+        void setFactionReputation(const ESM::RefId& faction, int value);
 
-            void levelUp();
+        bool hasSkillsForRank(const ESM::RefId& factionId, int rank) const;
 
-            void updateHealth();
-            ///< Calculate health based on endurance and strength.
-            ///  Called at character creation.
+        bool isWerewolf() const;
 
-            void flagAsUsed (const std::string& id);
-            ///< @note Id must be lower-case
+        void setWerewolf(bool set);
 
-            bool hasBeenUsed (const std::string& id) const;
-            ///< @note Id must be lower-case
+        int getWerewolfKills() const;
 
-            int getBounty() const;
+        /// Increments mWerewolfKills by 1.
+        void addWerewolfKill();
 
-            void setBounty (int bounty);
+        float getTimeToStartDrowning() const;
+        /// Sets time left for the creature to drown if it stays underwater.
+        /// @param time value from [0,20]
+        void setTimeToStartDrowning(float time);
 
-            int getFactionReputation (const std::string& faction) const;
+        void writeState(ESM::CreatureStats& state) const;
+        void writeState(ESM::NpcStats& state) const;
 
-            void setFactionReputation (const std::string& faction, int value);
+        void readState(const ESM::CreatureStats& state);
+        void readState(const ESM::NpcStats& state);
 
-            bool hasSkillsForRank (const std::string& factionId, int rank) const;
-
-            bool isWerewolf() const;
-
-            void setWerewolf(bool set);
-
-            int getWerewolfKills() const;
-
-            /// Increments mWerewolfKills by 1.
-            void addWerewolfKill();
-
-            float getTimeToStartDrowning() const;
-            /// Sets time left for the creature to drown if it stays underwater.
-            /// @param time value from [0,20]
-            void setTimeToStartDrowning(float time);
-
-            void writeState (ESM::CreatureStats& state) const;
-            void writeState (ESM::NpcStats& state) const;
-
-            void readState (const ESM::CreatureStats& state);
-            void readState (const ESM::NpcStats& state);
+        const std::map<ESM::RefId, SkillValue>& getSkills() const { return mSkills; }
     };
 }
 

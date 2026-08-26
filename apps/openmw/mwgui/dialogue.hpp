@@ -1,35 +1,62 @@
 #ifndef MWGUI_DIALOGE_H
 #define MWGUI_DIALOGE_H
 
-#include "windowbase.hpp"
+#include <memory>
+
 #include "referenceinterface.hpp"
+#include "windowbase.hpp"
 
 #include "bookpage.hpp"
 
+#include "../mwbase/dialoguemanager.hpp"
 #include "../mwdialogue/keywordsearch.hpp"
 
 #include <MyGUI_Delegate.h>
 
 namespace Gui
 {
+    class AutoSizedTextBox;
     class MWList;
 }
 
 namespace MWGui
 {
-    class ResponseCallback;
+    class DialogueWindow;
+
+    class ResponseCallback : public MWBase::DialogueManager::ResponseCallback
+    {
+        DialogueWindow* mWindow;
+        bool mNeedMargin;
+
+    public:
+        ResponseCallback(DialogueWindow* win, bool needMargin = true)
+            : mWindow(win)
+            , mNeedMargin(needMargin)
+        {
+        }
+
+        void addResponse(std::string_view title, std::string_view text) override;
+
+        void updateTopics() const;
+    };
 
     class PersuasionDialog : public WindowModal
     {
     public:
-        PersuasionDialog(ResponseCallback* callback);
+        PersuasionDialog(std::unique_ptr<ResponseCallback> callback);
 
         void onOpen() override;
 
         MyGUI::Widget* getDefaultKeyFocus() override;
 
+    protected:
+        bool onControllerButtonEvent(const SDL_ControllerButtonEvent& arg) override;
+
     private:
         std::unique_ptr<ResponseCallback> mCallback;
+
+        int mInitialGoldLabelWidth;
+        int mInitialMainWidgetWidth;
 
         MyGUI::Button* mCancelButton;
         MyGUI::Button* mAdmireButton;
@@ -38,111 +65,95 @@ namespace MWGui
         MyGUI::Button* mBribe10Button;
         MyGUI::Button* mBribe100Button;
         MyGUI::Button* mBribe1000Button;
-        MyGUI::TextBox* mGoldLabel;
+        MyGUI::Widget* mActionsBox;
+        Gui::AutoSizedTextBox* mGoldLabel;
 
-        void onCancel (MyGUI::Widget* sender);
-        void onPersuade (MyGUI::Widget* sender);
+        std::vector<MyGUI::Button*> mButtons;
+        size_t mControllerFocus = 0;
+
+        void adjustAction(MyGUI::Widget* action, int& totalHeight);
+
+        void onCancel(MyGUI::Widget* sender);
+        void onPersuade(MyGUI::Widget* sender);
     };
-
 
     struct Link
     {
-        virtual ~Link() {}
-        virtual void activated () = 0;
+        virtual ~Link() = default;
+        virtual void activated() = 0;
     };
 
     struct Topic : Link
     {
-        typedef MyGUI::delegates::CMultiDelegate1<const std::string&> EventHandle_TopicId;
-        EventHandle_TopicId eventTopicActivated;
-        Topic(const std::string& id) : mTopicId(id) {}
+        MyGUI::delegates::MultiDelegate<const std::string&> eventTopicActivated;
+        Topic(const std::string& id)
+            : mTopicId(id)
+        {
+        }
         std::string mTopicId;
-        void activated () override;
+        void activated() override;
     };
 
     struct Choice : Link
     {
-        typedef MyGUI::delegates::CMultiDelegate1<int> EventHandle_ChoiceId;
-        EventHandle_ChoiceId eventChoiceActivated;
-        Choice(int id) : mChoiceId(id) {}
+        MyGUI::delegates::MultiDelegate<int> eventChoiceActivated;
+        Choice(int id)
+            : mChoiceId(id)
+        {
+        }
         int mChoiceId;
-        void activated () override;
+        void activated() override;
     };
 
     struct Goodbye : Link
     {
-        typedef MyGUI::delegates::CMultiDelegate0 Event_Activated;
-        Event_Activated eventActivated;
-        void activated () override;
+        MyGUI::delegates::MultiDelegate<> eventActivated;
+        void activated() override;
     };
-
-    typedef MWDialogue::KeywordSearch <std::string, intptr_t> KeywordSearchT;
 
     struct DialogueText
     {
-        virtual ~DialogueText() {}
-        virtual void write (BookTypesetter::Ptr typesetter, KeywordSearchT* keywordSearch, std::map<std::string, Link*>& topicLinks) const = 0;
+        virtual ~DialogueText() = default;
+        virtual void write(std::shared_ptr<BookTypesetter> typesetter, const MWDialogue::KeywordSearch& keywordSearch,
+            std::unordered_map<std::string, std::unique_ptr<Link>>& topicLinks) const = 0;
         std::string mText;
     };
 
     struct Response : DialogueText
     {
-        Response(const std::string& text, const std::string& title = "", bool needMargin = true);
-        void write (BookTypesetter::Ptr typesetter, KeywordSearchT* keywordSearch, std::map<std::string, Link*>& topicLinks) const override;
-        void addTopicLink (BookTypesetter::Ptr typesetter, intptr_t topicId, size_t begin, size_t end) const;
+        Response(std::string_view text, std::string_view title = {}, bool needMargin = true);
+        void write(std::shared_ptr<BookTypesetter> typesetter, const MWDialogue::KeywordSearch& keywordSearch,
+            std::unordered_map<std::string, std::unique_ptr<Link>>& topicLinks) const override;
         std::string mTitle;
         bool mNeedMargin;
     };
 
     struct Message : DialogueText
     {
-        Message(const std::string& text);
-        void write (BookTypesetter::Ptr typesetter, KeywordSearchT* keywordSearch, std::map<std::string, Link*>& topicLinks) const override;
+        Message(std::string_view text);
+        void write(std::shared_ptr<BookTypesetter> typesetter, const MWDialogue::KeywordSearch& keywordSearch,
+            std::unordered_map<std::string, std::unique_ptr<Link>>& topicLinks) const override;
     };
 
-    class DialogueWindow: public WindowBase, public ReferenceInterface
+    class DialogueWindow : public WindowBase, public ReferenceInterface
     {
     public:
         DialogueWindow();
-        ~DialogueWindow();
 
         void onTradeComplete();
 
         bool exit() override;
 
-        // Events
-        typedef MyGUI::delegates::CMultiDelegate0 EventHandle_Void;
-
-        void notifyLinkClicked (TypesetBook::InteractiveId link);
-
-        /*
-            Start of tes3mp addition
-
-            Make it possible to activate any dialogue choice from elsewhere in the code
-        */
-        void activateDialogueChoice(unsigned char dialogueChoiceType, std::string topic = "");
-        /*
-            End of tes3mp addition
-        */
-
-        /*
-            Start of tes3mp addition
-
-            Make it possible to get the Ptr of the actor involved in the dialogue
-        */
-        MWWorld::Ptr getPtr();
-        /*
-            End of tes3mp addition
-        */
+        void notifyLinkClicked(TypesetBook::InteractiveId link);
 
         void setPtr(const MWWorld::Ptr& actor) override;
 
         /// @return true if stale keywords were updated successfully
-        bool setKeywords(std::list<std::string> keyWord);
+        bool setKeywords(const std::list<std::string>& keyWord);
 
-        void addResponse (const std::string& title, const std::string& text, bool needMargin = true);
+        void addResponse(std::string_view title, std::string_view text, bool needMargin = true);
 
-        void addMessageBox(const std::string& text);
+        void addMessageBox(std::string_view text);
 
         void onFrame(float dt) override;
         void clear() override { resetReference(); }
@@ -151,61 +162,55 @@ namespace MWGui
 
         void onClose() override;
 
+        std::string_view getWindowIdForLua() const override { return "Dialogue"; }
+
     protected:
         void updateTopicsPane();
         bool isCompanion(const MWWorld::Ptr& actor);
         bool isCompanion();
 
-        /*
-            Start of tes3mp addition
-
-            A different event that should be used in multiplayer when clicking on choices
-            in the dialogue screen, sending DialogueChoice packets to the server so they can
-            be approved or denied
-        */
-        void sendDialogueChoicePacket(const std::string& topic);
-        /*
-            End of tes3mp addition
-        */
-
         void onSelectListItem(const std::string& topic, int id);
-        void onByeClicked(MyGUI::Widget* _sender);
-        void onMouseWheel(MyGUI::Widget* _sender, int _rel);
-        void onWindowResize(MyGUI::Window* _sender);
+        void onByeClicked(MyGUI::Widget* sender);
+        void onMouseWheel(MyGUI::Widget* sender, int rel);
+        void onWindowResize(MyGUI::Window* sender);
         void onTopicActivated(const std::string& topicId);
         void onChoiceActivated(int id);
         void onGoodbyeActivated();
 
-        void onScrollbarMoved (MyGUI::ScrollBar* sender, size_t pos);
+        void onScrollbarMoved(MyGUI::ScrollBar* sender, size_t pos);
 
-        void updateHistory(bool scrollbar=false);
+        void updateHistory(bool scrollbar = false);
 
         void onReferenceUnavailable() override;
+
+        bool onControllerButtonEvent(const SDL_ControllerButtonEvent& arg) override;
 
     private:
         void updateDisposition();
         void restock();
         void deleteLater();
+        void redrawTopicsList();
 
         bool mIsCompanion;
         std::list<std::string> mKeywords;
 
-        std::vector<DialogueText*> mHistoryContents;
-        std::vector<std::pair<std::string, int> > mChoices;
+        std::vector<std::unique_ptr<DialogueText>> mHistoryContents;
+        std::vector<std::pair<std::string, int>> mChoices;
+        std::vector<BookTypesetter::Style*> mChoiceStyles;
         bool mGoodbye;
 
-        std::vector<Link*> mLinks;
-        std::map<std::string, Link*> mTopicLinks;
+        std::vector<std::unique_ptr<Link>> mLinks;
+        std::unordered_map<std::string, std::unique_ptr<Link>> mTopicLinks;
 
-        std::vector<Link*> mDeleteLater;
+        std::vector<std::unique_ptr<Link>> mDeleteLater;
 
-        KeywordSearchT mKeywordSearch;
+        MWDialogue::KeywordSearch mKeywordSearch;
 
         BookPage* mHistory;
-        Gui::MWList*   mTopicsList;
+        Gui::MWList* mTopicsList;
         MyGUI::ScrollBar* mScrollBar;
         MyGUI::ProgressBar* mDispositionBar;
-        MyGUI::TextBox*     mDispositionText;
+        MyGUI::TextBox* mDispositionText;
         MyGUI::Button* mGoodbyeButton;
 
         PersuasionDialog mPersuasionDialog;
@@ -214,6 +219,10 @@ namespace MWGui
 
         std::unique_ptr<ResponseCallback> mCallback;
         std::unique_ptr<ResponseCallback> mGreetingCallback;
+
+        void setControllerFocus(size_t index, bool focused);
+        size_t mControllerFocus = 0;
+        int mControllerChoice = -1;
 
         void updateTopicFormat();
     };

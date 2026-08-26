@@ -1,8 +1,8 @@
 #ifndef COMPONENTS_TRANSLATION_DATA_H
 #define COMPONENTS_TRANSLATION_DATA_H
 
-#include <components/to_utf8/to_utf8.hpp>
 #include <components/files/collections.hpp>
+#include <components/toutf8/toutf8.hpp>
 
 namespace Translation
 {
@@ -11,42 +11,31 @@ namespace Translation
     public:
         Storage();
 
-        void loadTranslationData(const Files::Collections& dataFileCollections,
-                                 const std::string& esmFileName);
+        void loadTranslationData(const Files::Collections& dataFileCollections, std::string_view esmFileName);
 
-        std::string translateCellName(const std::string& cellName) const;
-        std::string topicID(const std::string& phrase) const;
+        std::string_view translateCellName(std::string_view cellName) const;
 
         // Standard form usually means nominative case
-        std::string topicStandardForm(const std::string& phrase) const;
+        std::string_view topicStandardForm(std::string_view phrase) const;
+
+        // The phrase that will act as the hyperlink for the given topic ID
+        std::string_view topicKeyword(std::string_view phrase) const;
+
+        // Manual population for testing
+        void addPhraseForm(std::string_view phrase, std::string_view topicId);
 
         void setEncoder(ToUTF8::Utf8Encoder* encoder);
 
-        bool hasTranslation() const;
-
-        /*
-            Start of tes3mp addition
-
-            Get the localized version of an English topic ID
-        */
-        std::string getLocalizedTopicId(const std::string& englishTopicId) const;
-        /*
-            End of tes3mp addition
-        */
-
     private:
-        typedef std::map<std::string, std::string> ContainerType;
+        typedef std::map<std::string, std::string, std::less<>> ContainerType;
 
-        void loadData(ContainerType& container,
-                      const std::string& fileNameNoExtension,
-                      const std::string& extension,
-                      const Files::Collections& dataFileCollections);
+        void loadData(ContainerType& container, std::string_view fileNameNoExtension, std::string_view extension,
+            const Files::Collections& dataFileCollections);
 
         void loadDataFromStream(ContainerType& container, std::istream& stream);
 
-
         ToUTF8::Utf8Encoder* mEncoder;
-        ContainerType mCellNamesTranslations, mTopicIDs, mPhraseForms;
+        ContainerType mCellNamesTranslations, mKeywords, mPhraseForms;
     };
 }
 

@@ -1,7 +1,0 @@
-#ifndef OPENMW_INIT_PROCESSORS_HPP
-#define OPENMW_INIT_PROCESSORS_HPP
-
-void ProcessorInitializer();
-
-
-#endif //OPENMW_INIT_PROCESSORS_HPP

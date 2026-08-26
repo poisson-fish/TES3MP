@@ -1,41 +1,65 @@
 #include "magiceffects.hpp"
 
+#include <cmath>
 #include <stdexcept>
 
-#include <components/esm/effectlist.hpp>
-#include <components/esm/magiceffects.hpp>
+#include <components/esm/attr.hpp>
+#include <components/esm3/effectlist.hpp>
+#include <components/esm3/loadmgef.hpp>
+#include <components/esm3/loadskil.hpp>
+#include <components/esm3/magiceffects.hpp>
+
+#include "../mwbase/environment.hpp"
+#include "../mwbase/windowmanager.hpp"
+
+#include "../mwworld/esmstore.hpp"
+
+namespace
+{
+    // Round value to prevent precision issues
+    void truncate(float& value)
+    {
+        value = static_cast<int>(value * 1024.f) / 1024.f;
+    }
+}
 
 namespace MWMechanics
 {
-    EffectKey::EffectKey() : mId (0), mArg (-1) {}
+    EffectKey::EffectKey()
+        : mId(ESM::MagicEffect::WaterWalking)
+    {
+    }
 
-    EffectKey::EffectKey (const ESM::ENAMstruct& effect)
+    EffectKey::EffectKey(const ESM::ENAMstruct& effect)
     {
         mId = effect.mEffectID;
-        mArg = -1;
+        mArg = effect.mSkill;
 
-        if (effect.mSkill!=-1)
-            mArg = effect.mSkill;
-
-        if (effect.mAttribute!=-1)
+        if (!effect.mAttribute.empty())
         {
-            if (mArg!=-1)
-                throw std::runtime_error (
-                    "magic effect can't have both a skill and an attribute argument");
+            if (!mArg.empty())
+                throw std::runtime_error("magic effect can't have both a skill and an attribute argument");
 
             mArg = effect.mAttribute;
         }
     }
 
-    bool operator< (const EffectKey& left, const EffectKey& right)
+    std::string EffectKey::toString() const
     {
-        if (left.mId<right.mId)
-            return true;
+        const auto& store = MWBase::Environment::get().getESMStore();
+        const ESM::MagicEffect* magicEffect = store->get<ESM::MagicEffect>().find(mId);
+        return getMagicEffectString(
+            *magicEffect, store->get<ESM::Attribute>().search(mArg), store->get<ESM::Skill>().search(mArg));
+    }
 
-        if (left.mId>right.mId)
-            return false;
+    bool operator<(const EffectKey& left, const EffectKey& right)
+    {
+        return std::tie(left.mId, left.mArg) < std::tie(right.mId, right.mArg);
+    }
 
-        return left.mArg<right.mArg;
+    bool operator==(const EffectKey& left, const EffectKey& right)
+    {
+        return left.mId == right.mId && left.mArg == right.mArg;
     }
 
     float EffectParam::getMagnitude() const
@@ -68,34 +92,35 @@ namespace MWMechanics
         return mModifier;
     }
 
-    EffectParam::EffectParam() : mModifier (0), mBase(0) {}
+    EffectParam::EffectParam()
+        : mModifier(0)
+        , mBase(0)
+    {
+    }
 
-    EffectParam& EffectParam::operator+= (const EffectParam& param)
+    EffectParam& EffectParam::operator+=(const EffectParam& param)
     {
         mModifier += param.mModifier;
         mBase += param.mBase;
+        truncate(mModifier);
         return *this;
     }
 
-    EffectParam& EffectParam::operator-= (const EffectParam& param)
+    EffectParam& EffectParam::operator-=(const EffectParam& param)
     {
         mModifier -= param.mModifier;
         mBase -= param.mBase;
+        truncate(mModifier);
         return *this;
     }
 
-    void MagicEffects::remove(const EffectKey &key)
+    void MagicEffects::add(const EffectKey& key, const EffectParam& param)
     {
-        mCollection.erase(key);
-    }
+        Collection::iterator iter = mCollection.find(key);
 
-    void MagicEffects::add (const EffectKey& key, const EffectParam& param)
-    {
-        Collection::iterator iter = mCollection.find (key);
-
-        if (iter==mCollection.end())
+        if (iter == mCollection.end())
         {
-            mCollection.insert (std::make_pair (key, param));
+            mCollection.insert(std::make_pair(key, param));
         }
         else
         {
@@ -103,112 +128,90 @@ namespace MWMechanics
         }
     }
 
-    void MagicEffects::modifyBase(const EffectKey &key, int diff)
+    void MagicEffects::modifyBase(const EffectKey& key, int diff)
     {
         mCollection[key].modifyBase(diff);
     }
 
-    void MagicEffects::setModifiers(const MagicEffects &effects)
+    EffectParam MagicEffects::getOrDefault(const EffectKey& key) const
     {
-        for (Collection::iterator it = mCollection.begin(); it != mCollection.end(); ++it)
-        {
-            it->second.setModifier(effects.get(it->first).getModifier());
-        }
-
-        for (Collection::const_iterator it = effects.begin(); it != effects.end(); ++it)
-        {
-            mCollection[it->first].setModifier(it->second.getModifier());
-        }
+        return get(key).value_or(EffectParam());
     }
 
-    MagicEffects& MagicEffects::operator+= (const MagicEffects& effects)
+    EffectParam MagicEffects::getOrDefault(ESM::RefId effectId) const
     {
-        if (this==&effects)
-        {
-            MagicEffects temp (effects);
-            *this += temp;
-            return *this;
-        }
-
-        for (Collection::const_iterator iter (effects.begin()); iter!=effects.end(); ++iter)
-        {
-            Collection::iterator result = mCollection.find (iter->first);
-
-            if (result!=mCollection.end())
-                result->second += iter->second;
-            else
-                mCollection.insert (*iter);
-        }
-
-        return *this;
+        return getOrDefault(EffectKey(effectId));
     }
 
-    EffectParam MagicEffects::get (const EffectKey& key) const
+    std::optional<EffectParam> MagicEffects::get(const EffectKey& key) const
     {
-        Collection::const_iterator iter = mCollection.find (key);
+        Collection::const_iterator iter = mCollection.find(key);
 
-        if (iter==mCollection.end())
-        {
-            return EffectParam();
-        }
-        else
+        if (iter != mCollection.end())
         {
             return iter->second;
         }
+        return std::nullopt;
     }
 
-    MagicEffects MagicEffects::diff (const MagicEffects& prev, const MagicEffects& now)
+    void MagicEffects::writeState(ESM::MagicEffects& state) const
     {
-        MagicEffects result;
-
-        // adding/changing
-        for (Collection::const_iterator iter (now.begin()); iter!=now.end(); ++iter)
+        for (const auto& [key, params] : mCollection)
         {
-            Collection::const_iterator other = prev.mCollection.find (iter->first);
-
-            if (other==prev.end())
-            {
-                // adding
-                result.add (iter->first, iter->second);
-            }
-            else
-            {
-                // changing
-                result.add (iter->first, iter->second - other->second);
-            }
-        }
-
-        // removing
-        for (Collection::const_iterator iter (prev.begin()); iter!=prev.end(); ++iter)
-        {
-            Collection::const_iterator other = now.mCollection.find (iter->first);
-            if (other==now.end())
-            {
-                result.add (iter->first, EffectParam() - iter->second);
-            }
-        }
-
-        return result;
-    }
-
-    void MagicEffects::writeState(ESM::MagicEffects &state) const
-    {
-        // Don't need to save Modifiers, they are recalculated every frame anyway.
-        for (Collection::const_iterator iter (begin()); iter!=end(); ++iter)
-        {
-            if (iter->second.getBase() != 0)
+            if (params.getBase() != 0 || params.getModifier() != 0.f)
             {
                 // Don't worry about mArg, never used by magic effect script instructions
-                state.mEffects.insert(std::make_pair(iter->first.mId, iter->second.getBase()));
+                state.mEffects[key.mId] = { params.getBase(), params.getModifier() };
             }
         }
     }
 
-    void MagicEffects::readState(const ESM::MagicEffects &state)
+    void MagicEffects::readState(const ESM::MagicEffects& state)
     {
-        for (std::map<int, int>::const_iterator it = state.mEffects.begin(); it != state.mEffects.end(); ++it)
+        for (const auto& [key, params] : state.mEffects)
         {
-            mCollection[EffectKey(it->first)].setBase(it->second);
+            mCollection[EffectKey(key)].setBase(params.first);
+            mCollection[EffectKey(key)].setModifier(params.second);
         }
+    }
+
+    std::string getMagicEffectString(
+        const ESM::MagicEffect& effect, const ESM::Attribute* attribute, const ESM::Skill* skill)
+    {
+        const bool targetsSkill = effect.mData.mFlags & ESM::MagicEffect::TargetSkill && skill;
+        const bool targetsAttribute = effect.mData.mFlags & ESM::MagicEffect::TargetAttribute && attribute;
+
+        std::string spellLine;
+
+        auto windowManager = MWBase::Environment::get().getWindowManager();
+
+        if (targetsSkill || targetsAttribute)
+        {
+            if (effect.mId == ESM::MagicEffect::AbsorbAttribute || effect.mId == ESM::MagicEffect::AbsorbSkill)
+                spellLine = windowManager->getGameSettingString("sAbsorb", {});
+            else if (effect.mId == ESM::MagicEffect::DamageAttribute || effect.mId == ESM::MagicEffect::DamageSkill)
+                spellLine = windowManager->getGameSettingString("sDamage", {});
+            else if (effect.mId == ESM::MagicEffect::DrainAttribute || effect.mId == ESM::MagicEffect::DrainSkill)
+                spellLine = windowManager->getGameSettingString("sDrain", {});
+            else if (effect.mId == ESM::MagicEffect::FortifyAttribute || effect.mId == ESM::MagicEffect::FortifySkill)
+                spellLine = windowManager->getGameSettingString("sFortify", {});
+            else if (effect.mId == ESM::MagicEffect::RestoreAttribute || effect.mId == ESM::MagicEffect::RestoreSkill)
+                spellLine = windowManager->getGameSettingString("sRestore", {});
+        }
+
+        if (spellLine.empty())
+            spellLine = effect.mName;
+
+        if (targetsSkill)
+        {
+            spellLine += ' ';
+            spellLine += skill->mName;
+        }
+        else if (targetsAttribute)
+        {
+            spellLine += ' ';
+            spellLine += attribute->mName;
+        }
+        return spellLine;
     }
 }

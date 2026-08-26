@@ -5,11 +5,18 @@
 
 #include <SDL_types.h>
 
+#include "vsyncmode.hpp"
+
 struct SDL_Window;
 
 namespace osgViewer
 {
     class Viewer;
+}
+
+namespace Settings
+{
+    enum class WindowMode;
 }
 
 namespace SDLUtil
@@ -21,11 +28,11 @@ namespace SDLUtil
         VideoWrapper(SDL_Window* window, osg::ref_ptr<osgViewer::Viewer> viewer);
         ~VideoWrapper();
 
-        void setSyncToVBlank(bool sync);
+        void setSyncToVBlank(VSyncMode vsyncMode);
 
         void setGammaContrast(float gamma, float contrast);
 
-        void setVideoMode(int width, int height, bool fullscreen, bool windowBorder);
+        void setVideoMode(int width, int height, Settings::WindowMode windowMode, bool windowBorder);
 
         void centerWindow();
 
@@ -38,7 +45,7 @@ namespace SDLUtil
         bool mHasSetGammaContrast;
 
         // Store system gamma ramp on window creation. Restore system gamma ramp on exit
-        Uint16 mOldSystemGammaRamp[256*3];
+        Uint16 mOldSystemGammaRamp[256 * 3];
     };
 
 }

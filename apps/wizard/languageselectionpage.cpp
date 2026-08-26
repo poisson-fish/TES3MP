@@ -1,51 +1,43 @@
 #include "languageselectionpage.hpp"
 
+#include <components/misc/scalableicon.hpp>
+
 #include "mainwizard.hpp"
 
-#include <QDebug>
-
-Wizard::LanguageSelectionPage::LanguageSelectionPage(QWidget *parent) :
-    QWizardPage(parent)
+Wizard::LanguageSelectionPage::LanguageSelectionPage(QWidget* parent)
+    : QWizardPage(parent)
 {
     mWizard = qobject_cast<MainWizard*>(parent);
 
     setupUi(this);
 
-    registerField(QLatin1String("installation.language"), languageComboBox);
-}
+    flagIcon->setIcon(Misc::ScalableIcon::load(":preferences-desktop-locale"));
 
-void Wizard::LanguageSelectionPage::initializePage()
-{
-    QStringList languages;
-    languages << QLatin1String("English")
-              << QLatin1String("French")
-              << QLatin1String("German")
-              << QLatin1String("Italian")
-              << QLatin1String("Polish")
-              << QLatin1String("Russian")
-              << QLatin1String("Spanish");
+    registerField(QStringLiteral("installation.language"), languageComboBox, "currentData", "currentDataChanged");
 
-    languageComboBox->addItems(languages);
+    const QList<std::pair<QString, QString>> languages = { { tr("English"), QStringLiteral("English") },
+        { tr("French"), QStringLiteral("French") }, { tr("German"), QStringLiteral("German") },
+        { tr("Italian"), QStringLiteral("Italian") }, { tr("Polish"), QStringLiteral("Polish") },
+        { tr("Russian"), QStringLiteral("Russian") }, { tr("Spanish"), QStringLiteral("Spanish") } };
+
+    for (const auto& [localizedName, name] : languages)
+    {
+        languageComboBox->addItem(localizedName, name);
+    }
 }
 
 int Wizard::LanguageSelectionPage::nextId() const
 {
-    if (field(QLatin1String("installation.retailDisc")).toBool() == true) {
-        return MainWizard::Page_ComponentSelection;
-    } else {
-        QString path(field(QLatin1String("installation.path")).toString());
-
-        if (path.isEmpty())
-            return MainWizard::Page_ComponentSelection;
-
-        // Check if we have to install something
-        if (mWizard->mInstallations[path].hasMorrowind == true &&
-                mWizard->mInstallations[path].hasTribunal == true &&
-                mWizard->mInstallations[path].hasBloodmoon == true)
+    if (!field(QStringLiteral("installation.retailDisc")).toBool())
+    {
+        const QString path(field(QStringLiteral("installation.path")).toString());
+        if (!path.isEmpty())
         {
-            return MainWizard::Page_Import;
-        } else {
-            return MainWizard::Page_ComponentSelection;
+            const MainWizard::Installation& installation = mWizard->mInstallations[path];
+            if (installation.hasMorrowind && installation.hasTribunal && installation.hasBloodmoon)
+                return MainWizard::Page_Import;
         }
     }
+
+    return MainWizard::Page_ComponentSelection;
 }

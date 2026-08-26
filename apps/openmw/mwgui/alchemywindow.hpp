@@ -4,18 +4,16 @@
 #include <memory>
 #include <vector>
 
-#include <MyGUI_ControllerItem.h>
 #include <MyGUI_ComboBox.h>
+#include <MyGUI_ControllerItem.h>
 
 #include <components/widgets/box.hpp>
 #include <components/widgets/numericeditbox.hpp>
 
+#include "itemselection.hpp"
 #include "windowbase.hpp"
 
-namespace MWMechanics
-{
-    class Alchemy;
-}
+#include "../mwmechanics/alchemy.hpp"
 
 namespace MWGui
 {
@@ -33,14 +31,21 @@ namespace MWGui
 
         void onResChange(int, int) override { center(); }
 
-    private:
+        std::string_view getWindowIdForLua() const override { return "Alchemy"; }
 
+    private:
         static const float sCountChangeInitialPause; // in seconds
         static const float sCountChangeInterval; // in seconds
 
         std::string mSuggestedPotionName;
-        enum class FilterType { ByName, ByEffect };
+        enum class FilterType
+        {
+            ByName,
+            ByEffect
+        };
         FilterType mCurrentFilter;
+
+        std::unique_ptr<ItemSelectionDialog> mItemSelectionDialog;
 
         ItemView* mItemView;
         InventoryItemModel* mModel;
@@ -58,21 +63,22 @@ namespace MWGui
         MyGUI::EditBox* mNameEdit;
         Gui::NumericEditBox* mBrewCountEdit;
 
-        void onCancelButtonClicked(MyGUI::Widget* _sender);
-        void onCreateButtonClicked(MyGUI::Widget* _sender);
-        void onIngredientSelected(MyGUI::Widget* _sender);
+        void onCancelButtonClicked(MyGUI::Widget* sender);
+        void onCreateButtonClicked(MyGUI::Widget* sender);
+        void onIngredientSelected(MyGUI::Widget* sender);
+        void onApparatusSelected(MyGUI::Widget* sender);
         void onAccept(MyGUI::EditBox*);
-        void onIncreaseButtonPressed(MyGUI::Widget* _sender, int _left, int _top, MyGUI::MouseButton _id);
-        void onDecreaseButtonPressed(MyGUI::Widget* _sender, int _left, int _top, MyGUI::MouseButton _id);
-        void onCountButtonReleased(MyGUI::Widget* _sender, int _left, int _top, MyGUI::MouseButton _id);
+        void onIncreaseButtonPressed(MyGUI::Widget* sender, int left, int top, MyGUI::MouseButton id);
+        void onDecreaseButtonPressed(MyGUI::Widget* sender, int left, int top, MyGUI::MouseButton id);
+        void onCountButtonReleased(MyGUI::Widget* sender, int left, int top, MyGUI::MouseButton id);
         void onCountValueChanged(int value);
         void onRepeatClick(MyGUI::Widget* widget, MyGUI::ControllerItem* controller);
 
         void applyFilter(const std::string& filter);
         void initFilter();
-        void onFilterChanged(MyGUI::ComboBox* _sender, size_t _index);
-        void onFilterEdited(MyGUI::EditBox* _sender);
-        void switchFilterType(MyGUI::Widget* _sender);
+        void onFilterChanged(MyGUI::ComboBox* sender, size_t index);
+        void onFilterEdited(MyGUI::EditBox* sender);
+        void switchFilterType(MyGUI::Widget* sender);
         void updateFilters();
 
         void addRepeatController(MyGUI::Widget* widget);
@@ -82,7 +88,8 @@ namespace MWGui
 
         void onSelectedItem(int index);
 
-        void removeIngredient(MyGUI::Widget* ingredient);
+        void onItemSelected(MWWorld::Ptr item);
+        void onItemCancel();
 
         void createPotions(int count);
 
@@ -92,6 +99,9 @@ namespace MWGui
 
         std::vector<ItemWidget*> mApparatus;
         std::vector<ItemWidget*> mIngredients;
+
+        bool onControllerButtonEvent(const SDL_ControllerButtonEvent& arg) override;
+        void filterListButtonHandler(const SDL_ControllerButtonEvent& arg);
     };
 }
 

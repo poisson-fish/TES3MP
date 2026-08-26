@@ -4,6 +4,7 @@
 #include <memory>
 #include <stdexcept>
 
+#include <components/esm/refid.hpp>
 #include <components/interpreter/context.hpp>
 
 #include "globalscripts.hpp"
@@ -16,150 +17,120 @@ namespace MWScript
 
     class MissingImplicitRefError : public std::runtime_error
     {
-        public:
-            MissingImplicitRefError();
+    public:
+        MissingImplicitRefError();
     };
 
     class InterpreterContext : public Interpreter::Context
     {
-            Locals *mLocals;
-            mutable MWWorld::Ptr mReference;
-            std::shared_ptr<GlobalScriptDesc> mGlobalScriptDesc;
+        Locals* mLocals;
+        mutable MWWorld::Ptr mReference;
+        std::shared_ptr<GlobalScriptDesc> mGlobalScriptDesc;
 
-            /// If \a id is empty, a reference the script is run from is returned or in case
-            /// of a non-local script the reference derived from the target ID.
-            const MWWorld::Ptr getReferenceImp (const std::string& id = "",
-                bool activeOnly = false, bool doThrow=true) const;
+        /// If \a id is empty, a reference the script is run from is returned or in case
+        /// of a non-local script the reference derived from the target ID.
+        const MWWorld::Ptr getReferenceImp(
+            const ESM::RefId& id = ESM::RefId(), bool activeOnly = false, bool doThrow = true) const;
 
-            const Locals& getMemberLocals (std::string& id, bool global) const;
-            ///< \a id is changed to the respective script ID, if \a id wasn't a script ID before
+        const Locals& getMemberLocals(bool global, ESM::RefId& id) const;
+        ///< \a id is changed to the respective script ID, if \a id wasn't a script ID before
 
-            Locals& getMemberLocals (std::string& id, bool global);
-            ///< \a id is changed to the respective script ID, if \a id wasn't a script ID before
+        Locals& getMemberLocals(bool global, ESM::RefId& id);
+        ///< \a id is changed to the respective script ID, if \a id wasn't a script ID before
 
-            /// Throws an exception if local variable can't be found.
-            int findLocalVariableIndex (const std::string& scriptId, const std::string& name,
-                char type) const;
+        /// Throws an exception if local variable can't be found.
+        int findLocalVariableIndex(const ESM::RefId& scriptId, std::string_view name, char type) const;
 
-        public:
-            InterpreterContext (std::shared_ptr<GlobalScriptDesc> globalScriptDesc);
+    public:
+        InterpreterContext(std::shared_ptr<GlobalScriptDesc> globalScriptDesc);
 
-            InterpreterContext (MWScript::Locals *locals, const MWWorld::Ptr& reference);
-            ///< The ownership of \a locals is not transferred. 0-pointer allowed.
+        InterpreterContext(MWScript::Locals* locals, const MWWorld::Ptr& reference);
+        ///< The ownership of \a locals is not transferred. 0-pointer allowed.
 
-            /*
-                Start of tes3mp addition
+        ESM::RefId getTarget() const override;
 
-                Useful boolean for setting whether scripts send packets, set to false by default
-                to avoid massive packet spam
-            */
-            bool sendPackets = false;
-            /*
-                End of tes3mp addition
-            */
+        int getLocalShort(int index) const override;
 
-            /*
-                Start of tes3mp addition
+        int getLocalLong(int index) const override;
 
-                Used for tracking and checking the type of this InterpreterContext, as well as
-                its current script
-            */
-            unsigned short mContextType;
-            std::string mCurrentScriptName = "";
+        float getLocalFloat(int index) const override;
 
-            virtual unsigned short getContextType() const;
+        void setLocalShort(int index, int value) override;
 
-            virtual std::string getCurrentScriptName() const;
+        void setLocalLong(int index, int value) override;
 
-            virtual void trackContextType(unsigned short contextType);
+        void setLocalFloat(int index, float value) override;
 
-            virtual void trackCurrentScriptName(const std::string& name);
-            /*
-                End of tes3mp addition
-            */
+        using Interpreter::Context::messageBox;
 
-            int getLocalShort (int index) const override;
+        void messageBox(std::string_view message, const std::vector<std::string>& buttons) override;
 
-            int getLocalLong (int index) const override;
+        void report(const std::string& message) override;
+        ///< By default, do nothing.
 
-            float getLocalFloat (int index) const override;
+        int getGlobalShort(std::string_view name) const override;
 
-            void setLocalShort (int index, int value) override;
+        int getGlobalLong(std::string_view name) const override;
 
-            void setLocalLong (int index, int value) override;
+        float getGlobalFloat(std::string_view name) const override;
 
-            void setLocalFloat (int index, float value) override;
+        void setGlobalShort(std::string_view name, int value) override;
 
-            using Interpreter::Context::messageBox;
+        void setGlobalLong(std::string_view name, int value) override;
 
-            void messageBox (const std::string& message,
-                const std::vector<std::string>& buttons) override;
+        void setGlobalFloat(std::string_view name, float value) override;
 
-            void report (const std::string& message) override;
-            ///< By default, do nothing.
+        std::vector<std::string> getGlobals() const override;
 
-            int getGlobalShort (const std::string& name) const override;
+        char getGlobalType(std::string_view name) const override;
 
-            int getGlobalLong (const std::string& name) const override;
+        std::string getActionBinding(std::string_view action) const override;
 
-            float getGlobalFloat (const std::string& name) const override;
+        std::string_view getActorName() const override;
 
-            void setGlobalShort (const std::string& name, int value) override;
+        std::string_view getNPCRace() const override;
 
-            void setGlobalLong (const std::string& name, int value) override;
+        std::string_view getNPCClass() const override;
 
-            void setGlobalFloat (const std::string& name, float value) override;
+        std::string_view getNPCFaction() const override;
 
-            std::vector<std::string> getGlobals () const override;
+        std::string_view getNPCRank() const override;
 
-            char getGlobalType (const std::string& name) const override;
+        std::string_view getPCName() const override;
 
-            std::string getActionBinding(const std::string& action) const override;
+        std::string_view getPCRace() const override;
 
-            std::string getActorName() const override;
+        std::string_view getPCClass() const override;
 
-            std::string getNPCRace() const override;
+        std::string_view getPCRank() const override;
 
-            std::string getNPCClass() const override;
+        std::string_view getPCNextRank() const override;
 
-            std::string getNPCFaction() const override;
+        int getPCBounty() const override;
 
-            std::string getNPCRank() const override;
+        std::string_view getCurrentCellName() const override;
 
-            std::string getPCName() const override;
+        void executeActivation(const MWWorld::Ptr& ptr, const MWWorld::Ptr& actor);
+        ///< Execute the activation action for this ptr. If ptr is mActivated, mark activation as handled.
 
-            std::string getPCRace() const override;
+        int getMemberShort(ESM::RefId id, std::string_view name, bool global) const override;
 
-            std::string getPCClass() const override;
+        int getMemberLong(ESM::RefId id, std::string_view name, bool global) const override;
 
-            std::string getPCRank() const override;
+        float getMemberFloat(ESM::RefId id, std::string_view name, bool global) const override;
 
-            std::string getPCNextRank() const override;
+        void setMemberShort(ESM::RefId id, std::string_view name, int value, bool global) override;
 
-            int getPCBounty() const override;
+        void setMemberLong(ESM::RefId id, std::string_view name, int value, bool global) override;
 
-            std::string getCurrentCellName() const override;
+        void setMemberFloat(ESM::RefId id, std::string_view name, float value, bool global) override;
 
-            void executeActivation(MWWorld::Ptr ptr, MWWorld::Ptr actor);
-            ///< Execute the activation action for this ptr. If ptr is mActivated, mark activation as handled.
+        MWWorld::Ptr getReference(bool required = true) const;
+        ///< Reference, that the script is running from (can be empty)
 
-            int getMemberShort (const std::string& id, const std::string& name, bool global) const override;
-
-            int getMemberLong (const std::string& id, const std::string& name, bool global) const override;
-
-            float getMemberFloat (const std::string& id, const std::string& name, bool global) const override;
-
-            void setMemberShort (const std::string& id, const std::string& name, int value, bool global) override;
-
-            void setMemberLong (const std::string& id, const std::string& name, int value, bool global) override;
-
-            void setMemberFloat (const std::string& id, const std::string& name, float value, bool global) override;
-
-            MWWorld::Ptr getReference(bool required=true);
-            ///< Reference, that the script is running from (can be empty)
-
-            void updatePtr(const MWWorld::Ptr& base, const MWWorld::Ptr& updated);
-            ///< Update the Ptr stored in mReference, if there is one stored there. Should be called after the reference has been moved to a new cell.
+        void updatePtr(const MWWorld::Ptr& base, const MWWorld::Ptr& updated);
+        ///< Update the Ptr stored in mReference, if there is one stored there. Should be called after the reference has
+        ///< been moved to a new cell.
     };
 }
 

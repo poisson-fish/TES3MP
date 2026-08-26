@@ -1,38 +1,30 @@
 #include "globalmap.hpp"
 
+#include <osg/Geometry>
+#include <osg/Group>
 #include <osg/Image>
 #include <osg/Texture2D>
-#include <osg/Group>
-#include <osg/Geometry>
-#include <osg/Depth>
-#include <osg/TexEnvCombine>
 
 #include <osgDB/WriteFile>
 
-#include <components/settings/settings.hpp>
 #include <components/files/memorystream.hpp>
+#include <components/settings/values.hpp>
 
 #include <components/debug/debuglog.hpp>
 
+#include <components/resource/imagemanager.hpp>
+#include <components/resource/resourcesystem.hpp>
+
+#include <components/sceneutil/depth.hpp>
+#include <components/sceneutil/nodecallback.hpp>
 #include <components/sceneutil/workqueue.hpp>
 
-#include <components/esm/globalmap.hpp>
+#include <components/vfs/pathutil.hpp>
 
-/*
-    Start of tes3mp addition
-
-    Include additional headers for multiplayer purposes
-*/
-#include <components/openmw-mp/TimedLog.hpp>
-#include "../mwmp/Main.hpp"
-#include "../mwmp/Networking.hpp"
-#include "../mwmp/Worldstate.hpp"
-/*
-    End of tes3mp addition
-*/
+#include <components/esm3/globalmap.hpp>
+#include <components/esm3/loadland.hpp>
 
 #include "../mwbase/environment.hpp"
-#include "../mwbase/world.hpp"
 
 #include "../mwworld/esmstore.hpp"
 
@@ -43,7 +35,8 @@ namespace
 
     // Create a screen-aligned quad with given texture coordinates.
     // Assumes a top-left origin of the sampled image.
-    osg::ref_ptr<osg::Geometry> createTexturedQuad(float leftTexCoord, float topTexCoord, float rightTexCoord, float bottomTexCoord)
+    osg::ref_ptr<osg::Geometry> createTexturedQuad(
+        float leftTexCoord, float topTexCoord, float rightTexCoord, float bottomTexCoord)
     {
         osg::ref_ptr<osg::Geometry> geom = new osg::Geometry;
 
@@ -56,10 +49,10 @@ namespace
         geom->setVertexArray(verts);
 
         osg::ref_ptr<osg::Vec2Array> texcoords = new osg::Vec2Array;
-        texcoords->push_back(osg::Vec2f(leftTexCoord, 1.f-bottomTexCoord));
-        texcoords->push_back(osg::Vec2f(leftTexCoord, 1.f-topTexCoord));
-        texcoords->push_back(osg::Vec2f(rightTexCoord, 1.f-topTexCoord));
-        texcoords->push_back(osg::Vec2f(rightTexCoord, 1.f-bottomTexCoord));
+        texcoords->push_back(osg::Vec2f(leftTexCoord, 1.f - bottomTexCoord));
+        texcoords->push_back(osg::Vec2f(leftTexCoord, 1.f - topTexCoord));
+        texcoords->push_back(osg::Vec2f(rightTexCoord, 1.f - topTexCoord));
+        texcoords->push_back(osg::Vec2f(rightTexCoord, 1.f - bottomTexCoord));
 
         osg::ref_ptr<osg::Vec4Array> colors = new osg::Vec4Array;
         colors->push_back(osg::Vec4(1.f, 1.f, 1.f, 1.f));
@@ -67,13 +60,12 @@ namespace
 
         geom->setTexCoordArray(0, texcoords, osg::Array::BIND_PER_VERTEX);
 
-        geom->addPrimitiveSet(new osg::DrawArrays(osg::PrimitiveSet::QUADS,0,4));
+        geom->addPrimitiveSet(new osg::DrawArrays(osg::PrimitiveSet::QUADS, 0, 4));
 
         return geom;
     }
 
-
-    class CameraUpdateGlobalCallback : public osg::NodeCallback
+    class CameraUpdateGlobalCallback : public SceneUtil::NodeCallback<CameraUpdateGlobalCallback, osg::Camera*>
     {
     public:
         CameraUpdateGlobalCallback(MWRender::GlobalMap* parent)
@@ -82,14 +74,14 @@ namespace
         {
         }
 
-        void operator()(osg::Node* node, osg::NodeVisitor* nv) override
+        void operator()(osg::Camera* node, osg::NodeVisitor* nv)
         {
             if (mRendered)
             {
-                if (mParent->copyResult(static_cast<osg::Camera*>(node), nv->getTraversalNumber()))
+                if (mParent->copyResult(node, nv->getTraversalNumber()))
                 {
                     node->setNodeMask(0);
-                    mParent->markForRemoval(static_cast<osg::Camera*>(node));
+                    mParent->markForRemoval(node);
                 }
                 return;
             }
@@ -104,27 +96,46 @@ namespace
         MWRender::GlobalMap* mParent;
     };
 
+    std::vector<char> writePng(const osg::Image& overlayImage)
+    {
+        std::ostringstream ostream;
+        osgDB::ReaderWriter* readerwriter = osgDB::Registry::instance()->getReaderWriterForExtension("png");
+        if (!readerwriter)
+        {
+            Log(Debug::Error) << "Error: Can't write map overlay: no png readerwriter found";
+            return std::vector<char>();
+        }
+
+        osgDB::ReaderWriter::WriteResult result = readerwriter->writeImage(overlayImage, ostream);
+        if (!result.success())
+        {
+            Log(Debug::Warning) << "Error: Can't write map overlay: " << result.message() << " code "
+                                << result.status();
+            return std::vector<char>();
+        }
+
+        std::string data = ostream.str();
+        return std::vector<char>(data.begin(), data.end());
+    }
 }
 
 namespace MWRender
 {
-    /*
-        Start of tes3mp addition
-
-        Use maps to track which global map coordinates belong to which cell coordinates
-        without having to significantly change other methods
-    */
-    std::map<int, int> originToCellX;
-    std::map<int, int> originToCellY;
-    /*
-        End of tes3mp addition
-    */
 
     class CreateMapWorkItem : public SceneUtil::WorkItem
     {
     public:
-        CreateMapWorkItem(int width, int height, int minX, int minY, int maxX, int maxY, int cellSize, const MWWorld::Store<ESM::Land>& landStore)
-            : mWidth(width), mHeight(height), mMinX(minX), mMinY(minY), mMaxX(maxX), mMaxY(maxY), mCellSize(cellSize), mLandStore(landStore)
+        CreateMapWorkItem(int width, int height, int minX, int minY, int maxX, int maxY, int cellSize,
+            const MWWorld::Store<ESM::Land>& landStore, osg::ref_ptr<osg::Image> colorLut)
+            : mWidth(width)
+            , mHeight(height)
+            , mMinX(minX)
+            , mMinY(minY)
+            , mMaxX(maxX)
+            , mMaxY(maxY)
+            , mCellSize(cellSize)
+            , mLandStore(landStore)
+            , mColorLut(colorLut)
         {
         }
 
@@ -132,68 +143,40 @@ namespace MWRender
         {
             osg::ref_ptr<osg::Image> image = new osg::Image;
             image->allocateImage(mWidth, mHeight, 1, GL_RGB, GL_UNSIGNED_BYTE);
-            unsigned char* data = image->data();
 
             osg::ref_ptr<osg::Image> alphaImage = new osg::Image;
             alphaImage->allocateImage(mWidth, mHeight, 1, GL_ALPHA, GL_UNSIGNED_BYTE);
-            unsigned char* alphaData = alphaImage->data();
 
             for (int x = mMinX; x <= mMaxX; ++x)
             {
                 for (int y = mMinY; y <= mMaxY; ++y)
                 {
-                    const ESM::Land* land = mLandStore.search (x,y);
+                    const ESM::Land* land = mLandStore.search(x, y);
 
-                    for (int cellY=0; cellY<mCellSize; ++cellY)
+                    for (int cellY = 0; cellY < mCellSize; ++cellY)
                     {
-                        for (int cellX=0; cellX<mCellSize; ++cellX)
+                        for (int cellX = 0; cellX < mCellSize; ++cellX)
                         {
-                            int vertexX = static_cast<int>(float(cellX) / float(mCellSize) * 9);
-                            int vertexY = static_cast<int>(float(cellY) / float(mCellSize) * 9);
+                            int vertexX = (cellX * 9) / mCellSize; // 0..8
+                            int vertexY = (cellY * 9) / mCellSize; // 0..8
 
-                            int texelX = (x-mMinX) * mCellSize + cellX;
-                            int texelY = (y-mMinY) * mCellSize + cellY;
+                            int texelX = (x - mMinX) * mCellSize + cellX;
+                            int texelY = (y - mMinY) * mCellSize + cellY;
 
-                            unsigned char r,g,b;
+                            int lutIndex = 0;
+                            // Converting [-128; 127] WNAM range to [0; 255] index
+                            if (land != nullptr && (land->mDataTypes & ESM::Land::DATA_WNAM))
+                                lutIndex = static_cast<int>(land->mWnam[vertexY * 9 + vertexX]) + 128;
 
-                            float y2 = 0;
-                            if (land && (land->mDataTypes & ESM::Land::DATA_WNAM))
-                                y2 = land->mWnam[vertexY * 9 + vertexX] / 128.f;
-                            else
-                                y2 = SCHAR_MIN / 128.f;
-                            if (y2 < 0)
-                            {
-                                r = static_cast<unsigned char>(14 * y2 + 38);
-                                g = static_cast<unsigned char>(20 * y2 + 56);
-                                b = static_cast<unsigned char>(18 * y2 + 51);
-                            }
-                            else if (y2 < 0.3f)
-                            {
-                                if (y2 < 0.1f)
-                                    y2 *= 8.f;
-                                else
-                                {
-                                    y2 -= 0.1f;
-                                    y2 += 0.8f;
-                                }
-                                r = static_cast<unsigned char>(66 - 32 * y2);
-                                g = static_cast<unsigned char>(48 - 23 * y2);
-                                b = static_cast<unsigned char>(33 - 16 * y2);
-                            }
-                            else
-                            {
-                                y2 -= 0.3f;
-                                y2 *= 1.428f;
-                                r = static_cast<unsigned char>(34 - 29 * y2);
-                                g = static_cast<unsigned char>(25 - 20 * y2);
-                                b = static_cast<unsigned char>(17 - 12 * y2);
-                            }
+                            // Use getColor to handle all pixel format conversions automatically
+                            osg::Vec4 color = mColorLut->getColor(lutIndex, 0);
 
-                            data[texelY * mWidth * 3 + texelX * 3] = r;
-                            data[texelY * mWidth * 3 + texelX * 3+1] = g;
-                            data[texelY * mWidth * 3 + texelX * 3+2] = b;
+                            // Use setColor to write to output images
+                            image->setColor(color, texelX, texelY);
 
-                            alphaData[texelY * mWidth+ texelX] = (y2 < 0) ? static_cast<unsigned char>(0) : static_cast<unsigned char>(255);
+                            // Set alpha based on lutIndex threshold
+                            osg::Vec4 alpha(0.0f, 0.0f, 0.0f, lutIndex < 128 ? 0.0f : 1.0f);
+                            alphaImage->setColor(alpha, texelX, texelY);
                         }
                     }
                 }
@@ -235,6 +218,7 @@ namespace MWRender
         int mMinX, mMinY, mMaxX, mMaxY;
         int mCellSize;
         const MWWorld::Store<ESM::Land>& mLandStore;
+        osg::ref_ptr<osg::Image> mColorLut;
 
         osg::ref_ptr<osg::Texture2D> mBaseTexture;
         osg::ref_ptr<osg::Texture2D> mAlphaTexture;
@@ -243,28 +227,29 @@ namespace MWRender
         osg::ref_ptr<osg::Texture2D> mOverlayTexture;
     };
 
+    struct GlobalMap::WritePng final : public SceneUtil::WorkItem
+    {
+        osg::ref_ptr<const osg::Image> mOverlayImage;
+        std::vector<char> mImageData;
+
+        explicit WritePng(osg::ref_ptr<const osg::Image> overlayImage)
+            : mOverlayImage(std::move(overlayImage))
+        {
+        }
+
+        void doWork() override { mImageData = writePng(*mOverlayImage); }
+    };
+
     GlobalMap::GlobalMap(osg::Group* root, SceneUtil::WorkQueue* workQueue)
         : mRoot(root)
         , mWorkQueue(workQueue)
         , mWidth(0)
         , mHeight(0)
-        , mMinX(0), mMaxX(0)
-        , mMinY(0), mMaxY(0)
-
+        , mMinX(0)
+        , mMaxX(0)
+        , mMinY(0)
+        , mMaxY(0)
     {
-        /*
-            Start of tes3mp change (major)
-
-            We need map tiles to have consistent sizes, because the server's map
-            is gradually filled in through tiles sent by players via WorldMap packets
-
-            As a result, the default value is enforced for the time being
-        */
-        //mCellSize = Settings::Manager::getInt("global map cell size", "Map");
-        mCellSize = 18;
-        /*
-            End of tes3mp change (major)
-        */
     }
 
     GlobalMap::~GlobalMap()
@@ -278,10 +263,9 @@ namespace MWRender
             mWorkItem->waitTillDone();
     }
 
-    void GlobalMap::render ()
+    void GlobalMap::render()
     {
-        const MWWorld::ESMStore &esmStore =
-            MWBase::Environment::get().getWorld()->getStore();
+        const MWWorld::ESMStore& esmStore = *MWBase::Environment::get().getESMStore();
 
         // get the size of the world
         MWWorld::Store<ESM::Cell>::iterator it = esmStore.get<ESM::Cell>().extBegin();
@@ -297,32 +281,40 @@ namespace MWRender
                 mMaxY = it->getGridY();
         }
 
-        mWidth = mCellSize*(mMaxX-mMinX+1);
-        mHeight = mCellSize*(mMaxY-mMinY+1);
+        const int cellSize = Settings::map().mGlobalMapCellSize;
 
-        mWorkItem = new CreateMapWorkItem(mWidth, mHeight, mMinX, mMinY, mMaxX, mMaxY, mCellSize, esmStore.get<ESM::Land>());
+        mWidth = cellSize * (mMaxX - mMinX + 1);
+        mHeight = cellSize * (mMaxY - mMinY + 1);
+
+        // Load color LUT texture
+        constexpr VFS::Path::NormalizedView colorLutPath("textures/omw_map_color_palette.dds");
+        auto resourceSystem = MWBase::Environment::get().getResourceSystem();
+        osg::ref_ptr<osg::Image> colorLut = resourceSystem->getImageManager()->getImage(colorLutPath);
+
+        // Validate LUT dimensions
+        if (!colorLut || colorLut->s() != 256 || colorLut->t() != 1)
+        {
+            throw std::runtime_error("Global map color LUT must be 256x1 pixels, got "
+                + std::to_string(colorLut ? colorLut->s() : 0) + "x" + std::to_string(colorLut ? colorLut->t() : 0));
+        }
+
+        mWorkItem = new CreateMapWorkItem(
+            mWidth, mHeight, mMinX, mMinY, mMaxX, mMaxY, cellSize, esmStore.get<ESM::Land>(), colorLut);
         mWorkQueue->addWorkItem(mWorkItem);
     }
 
     void GlobalMap::worldPosToImageSpace(float x, float z, float& imageX, float& imageY)
     {
-        imageX = float(x / float(Constants::CellSizeInUnits) - mMinX) / (mMaxX - mMinX + 1);
+        imageX = (float(x / float(Constants::CellSizeInUnits) - mMinX) / (mMaxX - mMinX + 1)) * getWidth();
 
-        imageY = 1.f-float(z / float(Constants::CellSizeInUnits) - mMinY) / (mMaxY - mMinY + 1);
+        imageY = (1.f - float(z / float(Constants::CellSizeInUnits) - mMinY) / (mMaxY - mMinY + 1)) * getHeight();
     }
 
-    void GlobalMap::cellTopLeftCornerToImageSpace(int x, int y, float& imageX, float& imageY)
+    void GlobalMap::requestOverlayTextureUpdate(int x, int y, int width, int height,
+        osg::ref_ptr<osg::Texture2D> texture, bool clear, bool cpuCopy, float srcLeft, float srcTop, float srcRight,
+        float srcBottom)
     {
-        imageX = float(x - mMinX) / (mMaxX - mMinX + 1);
-
-        // NB y + 1, because we want the top left corner, not bottom left where the origin of the cell is
-        imageY = 1.f-float(y - mMinY + 1) / (mMaxY - mMinY + 1);
-    }
-
-    void GlobalMap::requestOverlayTextureUpdate(int x, int y, int width, int height, osg::ref_ptr<osg::Texture2D> texture, bool clear, bool cpuCopy,
-                                                float srcLeft, float srcTop, float srcRight, float srcBottom)
-    {
-        osg::ref_ptr<osg::Camera> camera (new osg::Camera);
+        osg::ref_ptr<osg::Camera> camera(new osg::Camera);
         camera->setNodeMask(Mask_RenderToTexture);
         camera->setReferenceFrame(osg::Camera::ABSOLUTE_RF);
         camera->setViewMatrix(osg::Matrix::identity());
@@ -335,7 +327,7 @@ namespace MWRender
         if (clear)
         {
             camera->setClearMask(GL_COLOR_BUFFER_BIT);
-            camera->setClearColor(osg::Vec4(0,0,0,0));
+            camera->setClearColor(osg::Vec4(0, 0, 0, 0));
         }
         else
             camera->setClearMask(GL_NONE);
@@ -351,7 +343,7 @@ namespace MWRender
         if (cpuCopy)
         {
             // Attach an image to copy the render back to the CPU when finished
-            osg::ref_ptr<osg::Image> image (new osg::Image);
+            osg::ref_ptr<osg::Image> image(new osg::Image);
             image->setPixelFormat(mOverlayImage->getPixelFormat());
             image->setDataType(mOverlayImage->getDataType());
             camera->attach(osg::Camera::COLOR_BUFFER, image);
@@ -360,19 +352,18 @@ namespace MWRender
             imageDest.mImage = image;
             imageDest.mX = x;
             imageDest.mY = y;
-            mPendingImageDest[camera] = imageDest;
+            mPendingImageDest[camera] = std::move(imageDest);
         }
 
         // Create a quad rendering the updated texture
         if (texture)
         {
             osg::ref_ptr<osg::Geometry> geom = createTexturedQuad(srcLeft, srcTop, srcRight, srcBottom);
-            osg::ref_ptr<osg::Depth> depth = new osg::Depth;
-            depth->setWriteMask(0);
+            osg::ref_ptr<osg::Depth> depth = new SceneUtil::AutoDepth;
+            depth->setWriteMask(false);
             osg::StateSet* stateset = geom->getOrCreateStateSet();
             stateset->setAttribute(depth);
             stateset->setTextureAttributeAndModes(0, texture, osg::StateAttribute::ON);
-            stateset->setMode(GL_LIGHTING, osg::StateAttribute::OFF);
             stateset->setMode(GL_DEPTH_TEST, osg::StateAttribute::OFF);
 
             if (mAlphaTexture)
@@ -390,10 +381,6 @@ namespace MWRender
                 geom->setTexCoordArray(1, texcoords, osg::Array::BIND_PER_VERTEX);
 
                 stateset->setTextureAttributeAndModes(1, mAlphaTexture, osg::StateAttribute::ON);
-                osg::ref_ptr<osg::TexEnvCombine> texEnvCombine = new osg::TexEnvCombine;
-                texEnvCombine->setCombine_RGB(osg::TexEnvCombine::REPLACE);
-                texEnvCombine->setSource0_RGB(osg::TexEnvCombine::PREVIOUS);
-                stateset->setTextureAttributeAndModes(1, texEnvCombine);
             }
 
             camera->addChild(geom);
@@ -411,24 +398,16 @@ namespace MWRender
         if (!localMapTexture)
             return;
 
-        int originX = (cellX - mMinX) * mCellSize;
-        int originY = (cellY - mMinY + 1) * mCellSize; // +1 because we want the top left corner of the cell, not the bottom left
+        const int cellSize = Settings::map().mGlobalMapCellSize;
+        const int originX = (cellX - mMinX) * cellSize;
+        // +1 because we want the top left corner of the cell, not the bottom left
+        const int originY = (cellY - mMinY + 1) * cellSize;
 
         if (cellX > mMaxX || cellX < mMinX || cellY > mMaxY || cellY < mMinY)
             return;
 
-        /*
-            Start of tes3mp addition
-
-            Track the cell coordinates corresponding to these map image coordinates
-        */
-        originToCellX[originX] = cellX;
-        originToCellY[originY - mCellSize] = cellY;
-        /*
-            End of tes3mp addition
-        */
-
-        requestOverlayTextureUpdate(originX, mHeight - originY, mCellSize, mCellSize, localMapTexture, false, true);
+        requestOverlayTextureUpdate(
+            originX, mHeight - originY, cellSize, cellSize, std::move(localMapTexture), false, true);
     }
 
     void GlobalMap::clear()
@@ -453,23 +432,15 @@ namespace MWRender
         map.mBounds.mMinY = mMinY;
         map.mBounds.mMaxY = mMaxY;
 
-        std::ostringstream ostream;
-        osgDB::ReaderWriter* readerwriter = osgDB::Registry::instance()->getReaderWriterForExtension("png");
-        if (!readerwriter)
+        if (mWritePng != nullptr)
         {
-            Log(Debug::Error) << "Error: Can't write map overlay: no png readerwriter found";
+            mWritePng->waitTillDone();
+            map.mImageData = std::move(mWritePng->mImageData);
+            mWritePng = nullptr;
             return;
         }
 
-        osgDB::ReaderWriter::WriteResult result = readerwriter->writeImage(*mOverlayImage, ostream);
-        if (!result.success())
-        {
-            Log(Debug::Warning) << "Error: Can't write map overlay: " << result.message() << " code " << result.status();
-            return;
-        }
-
-        std::string data = ostream.str();
-        map.mImageData = std::vector<char>(data.begin(), data.end());
+        map.mImageData = writePng(*mOverlayImage);
     }
 
     struct Box
@@ -477,10 +448,13 @@ namespace MWRender
         int mLeft, mTop, mRight, mBottom;
 
         Box(int left, int top, int right, int bottom)
-            : mLeft(left), mTop(top), mRight(right), mBottom(bottom)
+            : mLeft(left)
+            , mTop(top)
+            , mRight(right)
+            , mBottom(bottom)
         {
         }
-        bool operator == (const Box& other)
+        bool operator==(const Box& other) const
         {
             return mLeft == other.mLeft && mTop == other.mTop && mRight == other.mRight && mBottom == other.mBottom;
         }
@@ -492,13 +466,12 @@ namespace MWRender
 
         const ESM::GlobalMap::Bounds& bounds = map.mBounds;
 
-        if (bounds.mMaxX-bounds.mMinX < 0)
+        if (bounds.mMaxX - bounds.mMinX < 0)
             return;
-        if (bounds.mMaxY-bounds.mMinY < 0)
+        if (bounds.mMaxY - bounds.mMinY < 0)
             return;
 
-        if (bounds.mMinX > bounds.mMaxX
-                || bounds.mMinY > bounds.mMaxY)
+        if (bounds.mMinX > bounds.mMaxX || bounds.mMinY > bounds.mMaxY)
             throw std::runtime_error("invalid map bounds");
 
         if (map.mImageData.empty())
@@ -524,8 +497,8 @@ namespace MWRender
         int imageWidth = image->s();
         int imageHeight = image->t();
 
-        int xLength = (bounds.mMaxX-bounds.mMinX+1);
-        int yLength = (bounds.mMaxY-bounds.mMinY+1);
+        int xLength = (bounds.mMaxX - bounds.mMinX + 1);
+        int yLength = (bounds.mMaxY - bounds.mMinY + 1);
 
         // Size of one cell in image space
         int cellImageSizeSrc = imageWidth / xLength;
@@ -535,31 +508,26 @@ namespace MWRender
         // If cell bounds of the currently loaded content and the loaded savegame do not match,
         // we need to resize source/dest boxes to accommodate
         // This means nonexisting cells will be dropped silently
-        int cellImageSizeDst = mCellSize;
+        const int cellImageSizeDst = Settings::map().mGlobalMapCellSize;
 
         // Completely off-screen? -> no need to blit anything
-        if (bounds.mMaxX < mMinX
-                || bounds.mMaxY < mMinY
-                || bounds.mMinX > mMaxX
-                || bounds.mMinY > mMaxY)
+        if (bounds.mMaxX < mMinX || bounds.mMaxY < mMinY || bounds.mMinX > mMaxX || bounds.mMinY > mMaxY)
             return;
 
         int leftDiff = (mMinX - bounds.mMinX);
         int topDiff = (bounds.mMaxY - mMaxY);
         int rightDiff = (bounds.mMaxX - mMaxX);
-        int bottomDiff =  (mMinY - bounds.mMinY);
+        int bottomDiff = (mMinY - bounds.mMinY);
 
-        Box srcBox ( std::max(0, leftDiff * cellImageSizeSrc),
-                                  std::max(0, topDiff * cellImageSizeSrc),
-                                  std::min(imageWidth, imageWidth - rightDiff * cellImageSizeSrc),
-                                  std::min(imageHeight, imageHeight - bottomDiff * cellImageSizeSrc));
+        Box srcBox(std::max(0, leftDiff * cellImageSizeSrc), std::max(0, topDiff * cellImageSizeSrc),
+            std::min(imageWidth, imageWidth - rightDiff * cellImageSizeSrc),
+            std::min(imageHeight, imageHeight - bottomDiff * cellImageSizeSrc));
 
-        Box destBox ( std::max(0, -leftDiff * cellImageSizeDst),
-                                   std::max(0, -topDiff * cellImageSizeDst),
-                                   std::min(mWidth, mWidth + rightDiff * cellImageSizeDst),
-                                   std::min(mHeight, mHeight + bottomDiff * cellImageSizeDst));
+        Box destBox(std::max(0, -leftDiff * cellImageSizeDst), std::max(0, -topDiff * cellImageSizeDst),
+            std::min(mWidth, mWidth + rightDiff * cellImageSizeDst),
+            std::min(mHeight, mHeight + bottomDiff * cellImageSizeDst));
 
-        osg::ref_ptr<osg::Texture2D> texture (new osg::Texture2D);
+        osg::ref_ptr<osg::Texture2D> texture(new osg::Texture2D);
         texture->setImage(image);
         texture->setWrap(osg::Texture::WRAP_S, osg::Texture::CLAMP_TO_EDGE);
         texture->setWrap(osg::Texture::WRAP_T, osg::Texture::CLAMP_TO_EDGE);
@@ -571,16 +539,17 @@ namespace MWRender
         {
             mOverlayImage = image;
 
-            requestOverlayTextureUpdate(0, 0, mWidth, mHeight, texture, true, false);
+            requestOverlayTextureUpdate(0, 0, mWidth, mHeight, std::move(texture), true, false);
         }
         else
         {
             // Dimensions don't match. This could mean a changed map region, or a changed map resolution.
             // In the latter case, we'll want filtering.
             // Create a RTT Camera and draw the image onto mOverlayImage in the next frame.
-            requestOverlayTextureUpdate(destBox.mLeft, destBox.mTop, destBox.mRight-destBox.mLeft, destBox.mBottom-destBox.mTop, texture, true, true,
-                                        srcBox.mLeft/float(imageWidth), srcBox.mTop/float(imageHeight),
-                                        srcBox.mRight/float(imageWidth), srcBox.mBottom/float(imageHeight));
+            requestOverlayTextureUpdate(destBox.mLeft, destBox.mTop, destBox.mRight - destBox.mLeft,
+                destBox.mBottom - destBox.mTop, std::move(texture), true, true, srcBox.mLeft / float(imageWidth),
+                srcBox.mTop / float(imageHeight), srcBox.mRight / float(imageWidth),
+                srcBox.mBottom / float(imageHeight));
         }
     }
 
@@ -613,7 +582,7 @@ namespace MWRender
         }
     }
 
-    bool GlobalMap::copyResult(osg::Camera *camera, unsigned int frame)
+    bool GlobalMap::copyResult(osg::Camera* camera, unsigned int frame)
     {
         ImageDestMap::iterator it = mPendingImageDest.find(camera);
         if (it == mPendingImageDest.end())
@@ -621,7 +590,9 @@ namespace MWRender
         else
         {
             ImageDest& imageDest = it->second;
-            if (imageDest.mFrameDone == 0) imageDest.mFrameDone = frame+2; // wait an extra frame to ensure the draw thread has completed its frame.
+            if (imageDest.mFrameDone == 0)
+                imageDest.mFrameDone
+                    = frame + 2; // wait an extra frame to ensure the draw thread has completed its frame.
             if (imageDest.mFrameDone > frame)
             {
                 ++it;
@@ -629,64 +600,12 @@ namespace MWRender
             }
 
             mOverlayImage->copySubImage(imageDest.mX, imageDest.mY, 0, imageDest.mImage);
-
-            /*
-                Start of tes3mp addition
-
-                Send an ID_PLAYER_MAP packet with this map tile to the server, but only if:
-                1) We have recorded the exterior cell corresponding to this tile's coordinates
-                2) The tile has not previously been marked as explored in this client's mwmp::Worldstate
-                3) The tile does not belong to a Wilderness cell
-            */
-            if (originToCellX.count(imageDest.mX) > 0 && originToCellY.count(imageDest.mY) > 0)
-            {
-                int cellX = originToCellX.at(imageDest.mX);
-                int cellY = originToCellY.at(imageDest.mY);
-
-                mwmp::Worldstate *worldstate = mwmp::Main::get().getNetworking()->getWorldstate();
-
-                if (!worldstate->containsExploredMapTile(cellX, cellY))
-                {
-                    // Keep this tile marked as explored so we don't send any more packets for it
-                    worldstate->markExploredMapTile(cellX, cellY);
-
-                    if (MWBase::Environment::get().getWorld()->getExterior(cellX, cellY)->getCell()->mContextList.empty() == false)
-                    {
-                        LOG_MESSAGE_SIMPLE(TimedLog::LOG_INFO, "New global map tile corresponds to cell %i, %i", originToCellX.at(imageDest.mX), originToCellY.at(imageDest.mY));
-
-                        osgDB::ReaderWriter* readerwriter = osgDB::Registry::instance()->getReaderWriterForExtension("png");
-                        if (!readerwriter)
-                        {
-                            std::cerr << "Error: Can't write temporary map image, no '" << "png" << "' readerwriter found" << std::endl;
-                            return false;
-                        }
-
-                        std::ostringstream ostream;
-
-                        osgDB::ReaderWriter::WriteResult result = readerwriter->writeImage(*imageDest.mImage, ostream);
-
-                        if (!result.success())
-                        {
-                            std::cerr << "Error: Can't write temporary map image: " << result.message() << " code " << result.status() << std::endl;
-                        }
-
-                        std::string stringData = ostream.str();
-                        std::vector<char> vectorData = std::vector<char>(stringData.begin(), stringData.end());
-
-                        worldstate->sendMapExplored(cellX, cellY, vectorData);
-                    }
-                }
-            }
-            /*
-                End of tes3mp addition
-            */
-
             mPendingImageDest.erase(it);
             return true;
         }
     }
 
-    void GlobalMap::markForRemoval(osg::Camera *camera)
+    void GlobalMap::markForRemoval(osg::Camera* camera)
     {
         CameraVector::iterator found = std::find(mActiveCameras.begin(), mActiveCameras.end(), camera);
         if (found == mActiveCameras.end())
@@ -706,55 +625,18 @@ namespace MWRender
         mCamerasPendingRemoval.clear();
     }
 
-    void GlobalMap::removeCamera(osg::Camera *cam)
+    void GlobalMap::removeCamera(osg::Camera* cam)
     {
         cam->removeChildren(0, cam->getNumChildren());
         mRoot->removeChild(cam);
     }
 
-    /*
-        Start of tes3mp addition
-
-        Allow the setting of the image data for a global map tile from elsewhere
-        in the code
-    */
-    void GlobalMap::setImage(int cellX, int cellY, const std::vector<char>& imageData)
+    void GlobalMap::asyncWritePng()
     {
-        Files::IMemStream istream(&imageData[0], imageData.size());
-
-        osgDB::ReaderWriter* reader = osgDB::Registry::instance()->getReaderWriterForExtension("png");
-        if (!reader)
-        {
-            std::cerr << "Error: Failed to read map tile image data, no png readerwriter found" << std::endl;
+        if (mOverlayImage == nullptr)
             return;
-        }
-        osgDB::ReaderWriter::ReadResult result = reader->readImage(istream);
-
-        if (!result.success())
-        {
-            std::cerr << "Error: Can't read map tile image: " << result.message() << " code " << result.status() << std::endl;
-            return;
-        }
-        
-        osg::ref_ptr<osg::Image> image = result.getImage();
-
-        int posX = (cellX - mMinX) * mCellSize;
-        int posY = (cellY - mMinY + 1) * mCellSize;
-
-        if (cellX > mMaxX || cellX < mMinX || cellY > mMaxY || cellY < mMinY)
-            return;
-        
-        osg::ref_ptr<osg::Texture2D> texture(new osg::Texture2D);
-        texture->setImage(image);
-        texture->setWrap(osg::Texture::WRAP_S, osg::Texture::CLAMP_TO_EDGE);
-        texture->setWrap(osg::Texture::WRAP_T, osg::Texture::CLAMP_TO_EDGE);
-        texture->setFilter(osg::Texture::MIN_FILTER, osg::Texture::LINEAR);
-        texture->setFilter(osg::Texture::MAG_FILTER, osg::Texture::LINEAR);
-        texture->setResizeNonPowerOfTwoHint(false);
-
-        requestOverlayTextureUpdate(posX, mHeight - posY, mCellSize, mCellSize, texture, true, false);
+        // Use deep copy to avoid any sychronization
+        mWritePng = new WritePng(new osg::Image(*mOverlayImage, osg::CopyOp::DEEP_COPY_ALL));
+        mWorkQueue->addWorkItem(mWritePng, /*front=*/true);
     }
-    /*
-        End of tes3mp addition
-    */
 }

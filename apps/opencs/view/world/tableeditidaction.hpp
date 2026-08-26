@@ -2,29 +2,34 @@
 #define CSVWORLD_TABLEEDITIDACTION_HPP
 
 #include <QAction>
+#include <QString>
+
+#include <utility>
 
 #include "../../model/world/columnbase.hpp"
 #include "../../model/world/universalid.hpp"
 
 class QTableView;
 
+namespace CSMWorld
+{
+    class Data;
+}
+
 namespace CSVWorld
 {
     class TableEditIdAction : public QAction
     {
-            const QTableView &mTable;
-            CSMWorld::UniversalId mCurrentId;
+        const QTableView& mTable;
+        CSMWorld::Data& mData;
+        CSMWorld::UniversalId mCurrentId;
 
-            typedef std::pair<CSMWorld::ColumnBase::Display, QString> CellData;
-            CellData getCellData(int row, int column) const;
+    public:
+        TableEditIdAction(const QTableView& table, CSMWorld::Data& data, QWidget* parent = nullptr);
 
-        public:
-            TableEditIdAction(const QTableView &table, QWidget *parent = nullptr);
+        bool setCell(int row, int column);
 
-            void setCell(int row, int column);
-
-            CSMWorld::UniversalId getCurrentId() const;
-            bool isValidIdCell(int row, int column) const;
+        CSMWorld::UniversalId getCurrentId() const;
     };
 }
 

@@ -2,19 +2,8 @@
 #define GAME_MWMECHANICS_ALCHEMY_H
 
 #include <vector>
-#include <set>
 
-/*
-    Start of tes3mp addition
-
-    Include additional headers for multiplayer purposes
-*/
-#include <components/esm/loadalch.hpp>
-/*
-    End of tes3mp addition
-*/
-
-#include <components/esm/effectlist.hpp>
+#include <components/esm3/effectlist.hpp>
 
 #include "../mwworld/ptr.hpp"
 
@@ -30,132 +19,124 @@ namespace MWMechanics
     /// \brief Potion creation via alchemy skill
     class Alchemy
     {
-        public:
+    public:
+        Alchemy();
 
-            Alchemy();
+        typedef std::vector<MWWorld::Ptr> TToolsContainer;
+        typedef TToolsContainer::const_iterator TToolsIterator;
 
-            typedef std::vector<MWWorld::Ptr> TToolsContainer;
-            typedef TToolsContainer::const_iterator TToolsIterator;
+        typedef std::vector<MWWorld::Ptr> TIngredientsContainer;
+        typedef TIngredientsContainer::const_iterator TIngredientsIterator;
 
-            typedef std::vector<MWWorld::Ptr> TIngredientsContainer;
-            typedef TIngredientsContainer::const_iterator TIngredientsIterator;
+        typedef std::vector<ESM::ENAMstruct> TEffectsContainer;
+        typedef TEffectsContainer::const_iterator TEffectsIterator;
 
-            typedef std::vector<ESM::ENAMstruct> TEffectsContainer;
-            typedef TEffectsContainer::const_iterator TEffectsIterator;
+        enum Result
+        {
+            Result_Success,
 
-            enum Result
-            {
-                Result_Success,
+            Result_NoMortarAndPestle,
+            Result_LessThanTwoIngredients,
+            Result_NoName,
+            Result_NoEffects,
+            Result_RandomFailure
+        };
 
-                Result_NoMortarAndPestle,
-                Result_LessThanTwoIngredients,
-                Result_NoName,
-                Result_NoEffects,
-                Result_RandomFailure
-            };
+    private:
+        MWWorld::Ptr mAlchemist;
+        TToolsContainer mTools;
+        TIngredientsContainer mIngredients;
+        TEffectsContainer mEffects;
+        int mValue;
+        std::string mPotionName;
 
-        private:
+        void applyTools(int flags, float& value) const;
 
-            MWWorld::Ptr mAlchemist;
-            TToolsContainer mTools;
-            TIngredientsContainer mIngredients;
-            TEffectsContainer mEffects;
-            int mValue;
-            std::string mPotionName;
+        void updateEffects();
 
-            /*
-                Start of tes3mp addition
+        Result getReadyStatus() const;
 
-                Keep a copy of the last created potion record so it can be sent to the
-                server once we have determined its brewedCount
-            */
-            ESM::Potion mStoredPotion;
-            /*
-                End of tes3mp addition
-            */
+        const ESM::Potion* getRecord(const ESM::Potion& toFind) const;
+        ///< Try to find a potion record similar to \a toFind in the record store, or return 0 if not found
+        /// \note Does not account for record ID, model or icon
 
-            void applyTools (int flags, float& value) const;
+        void removeIngredients();
+        ///< Remove selected ingredients from alchemist's inventory, cleanup selected ingredients and
+        /// update effect list accordingly.
 
-            void updateEffects();
+        void addPotion(const std::string& name);
+        ///< Add a potion to the alchemist's inventory.
 
-            Result getReadyStatus() const;
+        void increaseSkill();
+        ///< Increase alchemist's skill.
 
-            const ESM::Potion *getRecord(const ESM::Potion& toFind) const;
-            ///< Try to find a potion record similar to \a toFind in the record store, or return 0 if not found
-            /// \note Does not account for record ID, model or icon
+        Result createSingle();
+        ///< Try to create a potion from the ingredients, place it in the inventory of the alchemist and
+        /// adjust the skills of the alchemist accordingly.
 
-            void removeIngredients();
-            ///< Remove selected ingredients from alchemist's inventory, cleanup selected ingredients and
-            /// update effect list accordingly.
+        float getAlchemyFactor() const;
 
-            void addPotion (const std::string& name);
-            ///< Add a potion to the alchemist's inventory.
+        int countIngredients() const;
 
-            void increaseSkill();
-            ///< Increase alchemist's skill.
+        TEffectsIterator beginEffects() const;
 
-            Result createSingle ();
-            ///< Try to create a potion from the ingredients, place it in the inventory of the alchemist and
-            /// adjust the skills of the alchemist accordingly.
+        TEffectsIterator endEffects() const;
 
-            float getAlchemyFactor() const;
+    public:
+        int countPotionsToBrew() const;
+        ///< calculates maximum amount of potions, which you can make from selected ingredients
 
-            int countIngredients() const;
+        static bool knownEffect(size_t potionEffectIndex, const MWWorld::Ptr& npc);
+        ///< Does npc have sufficient alchemy skill to know about this potion effect?
 
-            TEffectsIterator beginEffects() const;
+        void setAlchemist(const MWWorld::Ptr& npc);
+        ///< Set alchemist and configure alchemy setup accordingly. \a npc may be empty to indicate that
+        /// there is no alchemist (alchemy session has ended).
 
-            TEffectsIterator endEffects() const;
+        TToolsIterator beginTools() const;
+        ///< \attention Iterates over tool slots, not over tools. Some of the slots may be empty.
 
-        public:
-            int countPotionsToBrew() const;
-            ///< calculates maximum amount of potions, which you can make from selected ingredients
+        TToolsIterator endTools() const;
 
-            static bool knownEffect (unsigned int potionEffectIndex, const MWWorld::Ptr& npc);
-            ///< Does npc have sufficient alchemy skill to know about this potion effect?
+        TIngredientsIterator beginIngredients() const;
+        ///< \attention Iterates over ingredient slots, not over ingredients. Some of the slots may be empty.
 
-            void setAlchemist (const MWWorld::Ptr& npc);
-            ///< Set alchemist and configure alchemy setup accordingly. \a npc may be empty to indicate that
-            /// there is no alchemist (alchemy session has ended).
+        TIngredientsIterator endIngredients() const;
 
-            TToolsIterator beginTools() const;
-            ///< \attention Iterates over tool slots, not over tools. Some of the slots may be empty.
+        void clear();
+        ///< Remove alchemist, tools and ingredients.
 
-            TToolsIterator endTools() const;
+        void setPotionName(const std::string& name);
+        ///< Set name of potion to create
 
-            TIngredientsIterator beginIngredients() const;
-            ///< \attention Iterates over ingredient slots, not over ingredients. Some of the slots may be empty.
+        std::vector<EffectKey> listEffects() const;
+        ///< List all effects shared by at least two ingredients.
 
-            TIngredientsIterator endIngredients() const;
+        int addIngredient(const MWWorld::Ptr& ingredient);
+        ///< Add ingredient into the next free slot.
+        ///
+        /// \return Slot index or -1, if adding failed because of no free slot or the ingredient type being
+        /// listed already.
 
-            void clear();
-            ///< Remove alchemist, tools and ingredients.
+        void addApparatus(const MWWorld::Ptr& apparatus);
+        ///< Add apparatus into the appropriate slot.
 
-            void setPotionName(const std::string& name);
-            ///< Set name of potion to create
+        void removeIngredient(size_t index);
+        ///< Remove ingredient from slot (calling this function on an empty slot is a no-op).
 
-            std::set<EffectKey> listEffects() const;
-            ///< List all effects shared by at least two ingredients.
+        void removeApparatus(size_t index);
+        ///< Remove apparatus from slot.
 
-            int addIngredient (const MWWorld::Ptr& ingredient);
-            ///< Add ingredient into the next free slot.
-            ///
-            /// \return Slot index or -1, if adding failed because of no free slot or the ingredient type being
-            /// listed already.
+        std::string suggestPotionName();
+        ///< Suggest a name for the potion, based on the current effects
 
-            void removeIngredient (int index);
-            ///< Remove ingredient from slot (calling this function on an empty slot is a no-op).
+        Result create(const std::string& name, int& count);
+        ///< Try to create potions from the ingredients, place them in the inventory of the alchemist and
+        /// adjust the skills of the alchemist accordingly.
+        /// \param name must not be an empty string, or Result_NoName is returned
 
-            std::string suggestPotionName ();
-            ///< Suggest a name for the potion, based on the current effects
-
-            Result create (const std::string& name, int& count);
-            ///< Try to create potions from the ingredients, place them in the inventory of the alchemist and
-            /// adjust the skills of the alchemist accordingly.
-            /// \param name must not be an empty string, or Result_NoName is returned
-
-            static std::vector<std::string> effectsDescription (const MWWorld::ConstPtr &ptr, const int alchemySKill);
+        static std::vector<std::string> effectsDescription(const MWWorld::ConstPtr& ptr, const float alchemySKill);
     };
 }
 
 #endif
-

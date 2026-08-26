@@ -1,180 +1,240 @@
-///File to handle keys used by nif file records
+/// File to handle keys used by nif file records
 
 #ifndef OPENMW_COMPONENTS_NIF_NIFKEY_HPP
 #define OPENMW_COMPONENTS_NIF_NIFKEY_HPP
 
-#include "nifstream.hpp"
+#include <utility>
+#include <vector>
 
-#include <sstream>
-#include <map>
-
+#include "exception.hpp"
 #include "niffile.hpp"
+#include "nifstream.hpp"
 
 namespace Nif
 {
 
-enum InterpolationType
-{
-    InterpolationType_Unknown = 0,
-    InterpolationType_Linear = 1,
-    InterpolationType_Quadratic = 2,
-    InterpolationType_TBC = 3,
-    InterpolationType_XYZ = 4,
-    InterpolationType_Constant = 5
-};
-
-template<typename T>
-struct KeyT {
-    T mValue;
-    T mInTan; // Only for Quadratic interpolation, and never for QuaternionKeyList
-    T mOutTan; // Only for Quadratic interpolation, and never for QuaternionKeyList
-
-    // FIXME: Implement TBC interpolation
-    /*
-    float mTension;    // Only for TBC interpolation
-    float mBias;       // Only for TBC interpolation
-    float mContinuity; // Only for TBC interpolation
-    */
-};
-using FloatKey = KeyT<float>;
-using Vector3Key = KeyT<osg::Vec3f>;
-using Vector4Key = KeyT<osg::Vec4f>;
-using QuaternionKey = KeyT<osg::Quat>;
-
-template<typename T, T (NIFStream::*getValue)()>
-struct KeyMapT {
-    using MapType = std::map<float, KeyT<T>>;
-
-    using ValueType = T;
-    using KeyType = KeyT<T>;
-
-    unsigned int mInterpolationType = InterpolationType_Linear;
-    MapType mKeys;
-
-    //Read in a KeyGroup (see http://niftools.sourceforge.net/doc/nif/NiKeyframeData.html)
-    void read(NIFStream *nif, bool force = false, bool morph = false)
+    enum InterpolationType
     {
-        assert(nif);
+        InterpolationType_Unknown = 0,
+        InterpolationType_Linear = 1,
+        InterpolationType_Quadratic = 2,
+        InterpolationType_TCB = 3,
+        InterpolationType_XYZ = 4,
+        InterpolationType_Constant = 5
+    };
 
-        mInterpolationType = InterpolationType_Unknown;
+    template <typename T>
+    struct KeyT
+    {
+        T mValue;
+        T mInTan; // Only for Quadratic interpolation, and never for QuaternionKeyList
+        T mOutTan; // Only for Quadratic interpolation, and never for QuaternionKeyList
+    };
 
-        if (morph && nif->getVersion() >= NIFStream::generateVersion(10,1,0,106))
-            nif->getString(); // Frame name
+    template <typename T>
+    struct TCBKey
+    {
+        float mTime;
+        T mValue{};
+        T mInTan{};
+        T mOutTan{};
+        float mA; // Coefficients based on the TCB parameters
+        float mB; // Only used by tangent calculations
+        float mC;
+        float mD;
+    };
 
-        size_t count = nif->getUInt();
-        if (count == 0 && !force && !morph)
-            return;
+    template <typename T, T (NIFStream::*getValue)()>
+    struct KeyMapT
+    {
+        // This is theoretically a "flat map" sorted by time
+        using MapType = std::vector<std::pair<float, KeyT<T>>>;
 
-        if (morph && nif->getVersion() > NIFStream::generateVersion(10,1,0,0))
+        using ValueType = T;
+        using KeyType = KeyT<T>;
+
+        std::string mFrameName;
+        float mLegacyWeight;
+        uint32_t mInterpolationType = InterpolationType_Unknown;
+        MapType mKeys;
+
+        // Read in a KeyGroup (see http://niftools.sourceforge.net/doc/nif/NiKeyframeData.html)
+        void read(NIFStream* nif, bool morph = false)
         {
-            if (nif->getVersion() >= NIFStream::generateVersion(10,1,0,104) &&
-                nif->getVersion() <= NIFStream::generateVersion(20,1,0,2) && nif->getBethVersion() < 10)
-                nif->getFloat(); // Legacy weight
-            return;
+            assert(nif);
+
+            if (morph)
+            {
+                if (nif->getVersion() >= NIFStream::generateVersion(10, 1, 0, 106))
+                    nif->read(mFrameName);
+
+                if (nif->getVersion() > NIFStream::generateVersion(10, 1, 0, 0))
+                {
+                    if (nif->getVersion() >= NIFStream::generateVersion(10, 1, 0, 104)
+                        && nif->getVersion() <= NIFStream::generateVersion(20, 1, 0, 2) && nif->getBethVersion() < 10)
+                        nif->read(mLegacyWeight);
+                    return;
+                }
+            }
+
+            const uint32_t count = nif->get<uint32_t>();
+
+            if (count == 0 && !morph)
+                return;
+
+            nif->read(mInterpolationType);
+
+            mKeys.reserve(count);
+
+            if (mInterpolationType == InterpolationType_Linear || mInterpolationType == InterpolationType_Constant)
+            {
+                nif->readVectorOfRecords(count, readValuePair, mKeys);
+            }
+            else if (mInterpolationType == InterpolationType_Quadratic)
+            {
+                nif->readVectorOfRecords(count, readQuadraticPair, mKeys);
+            }
+            else if (mInterpolationType == InterpolationType_TCB)
+            {
+                std::vector<TCBKey<T>> tcbKeys;
+                nif->readVectorOfRecords(count, readTCBKey, tcbKeys);
+                generateTCBTangents(tcbKeys);
+                for (TCBKey<T>& tcbKey : tcbKeys)
+                    mKeys.emplace_back(tcbKey.mTime,
+                        KeyType{ std::move(tcbKey.mValue), std::move(tcbKey.mInTan), std::move(tcbKey.mOutTan) });
+            }
+            else if (mInterpolationType == InterpolationType_XYZ)
+            {
+                // XYZ keys aren't actually read here.
+                // data.cpp sees that the last type read was InterpolationType_XYZ and:
+                //     Eats a floating point number, then
+                //     Re-runs the read function 3 more times.
+                //         When it does that it's reading in a bunch of InterpolationType_Linear keys, not
+                //         InterpolationType_XYZ.
+            }
+            else if (count != 0)
+            {
+                throw Nif::Exception("Unhandled interpolation type: " + std::to_string(mInterpolationType),
+                    nif->getFile().getFilename());
+            }
+
+            // Note: NetImmerse does NOT sort keys or remove duplicates
         }
 
-        mKeys.clear();
+    private:
+        static void readValue(NIFStream& nif, KeyType& key) { key.mValue = (nif.*getValue)(); }
 
-        mInterpolationType = nif->getUInt();
-
-        KeyType key = {};
-        NIFStream &nifReference = *nif;
-
-        if (mInterpolationType == InterpolationType_Linear
-         || mInterpolationType == InterpolationType_Constant)
+        static void readValuePair(NIFStream& nif, std::pair<float, KeyType>& value)
         {
-            for(size_t i = 0;i < count;i++)
+            nif.read(value.first);
+            readValue(nif, value.second);
+        }
+
+        static void readQuadratic(NIFStream& nif, KeyType& key)
+        {
+            if constexpr (std::is_same_v<T, osg::Quat>)
             {
-                float time = nif->getFloat();
-                readValue(nifReference, key);
-                mKeys[time] = key;
+                readValue(nif, key);
+            }
+            else
+            {
+                readValue(nif, key);
+                key.mInTan = (nif.*getValue)();
+                key.mOutTan = (nif.*getValue)();
             }
         }
-        else if (mInterpolationType == InterpolationType_Quadratic)
+
+        static void readQuadraticPair(NIFStream& nif, std::pair<float, KeyType>& value)
         {
-            for(size_t i = 0;i < count;i++)
+            nif.read(value.first);
+            readQuadratic(nif, value.second);
+        }
+
+        static void readTCBKey(NIFStream& nif, TCBKey<T>& value)
+        {
+            float tension;
+            float continuity;
+            float bias;
+
+            nif.read(value.mTime);
+            value.mValue = (nif.*getValue)();
+            nif.read(tension);
+            nif.read(continuity);
+            nif.read(bias);
+
+            value.mA = (1.f - tension) * (1.f - continuity) * (1.f + bias);
+            value.mB = (1.f - tension) * (1.f + continuity) * (1.f - bias);
+            value.mC = (1.f - tension) * (1.f + continuity) * (1.f + bias);
+            value.mD = (1.f - tension) * (1.f - continuity) * (1.f - bias);
+        }
+
+        template <typename U>
+        static void generateTCBTangents(std::vector<TCBKey<U>>& keys)
+        {
+            if (keys.size() <= 1)
+                return;
+
             {
-                float time = nif->getFloat();
-                readQuadratic(nifReference, key);
-                mKeys[time] = key;
+                TCBKey<U>& first = keys[0];
+                const U delta = keys[1].mValue - first.mValue;
+                first.mInTan = delta * ((first.mA + first.mB) * 0.5f);
+                first.mOutTan = delta * ((first.mC + first.mD) * 0.5f);
+            }
+
+            for (std::size_t i = 1; i < keys.size() - 1; ++i)
+            {
+                const TCBKey<U>& prev = keys[i - 1];
+                const TCBKey<U>& next = keys[i + 1];
+                const float timeSpan = next.mTime - prev.mTime;
+                if (timeSpan == 0.f)
+                    continue;
+                TCBKey<U>& key = keys[i];
+                const U prevDelta = key.mValue - prev.mValue;
+                const U nextDelta = next.mValue - key.mValue;
+                key.mInTan = (prevDelta * key.mA + nextDelta * key.mB) * ((key.mTime - prev.mTime) / timeSpan);
+                key.mOutTan = (prevDelta * key.mC + nextDelta * key.mD) * ((next.mTime - key.mTime) / timeSpan);
+            }
+
+            {
+                TCBKey<U>& last = keys.back();
+                const U delta = last.mValue - keys[keys.size() - 2].mValue;
+                last.mInTan = delta * ((last.mA + last.mB) * 0.5f);
+                last.mOutTan = delta * ((last.mC + last.mD) * 0.5f);
             }
         }
-        else if (mInterpolationType == InterpolationType_TBC)
+
+        static void generateTCBTangents(std::vector<TCBKey<bool>>& keys)
         {
-            for(size_t i = 0;i < count;i++)
-            {
-                float time = nif->getFloat();
-                readTBC(nifReference, key);
-                mKeys[time] = key;
-            }
+            // TODO: is this even legal?
         }
-        //XYZ keys aren't actually read here.
-        //data.hpp sees that the last type read was InterpolationType_XYZ and:
-        //    Eats a floating point number, then
-        //    Re-runs the read function 3 more times.
-        //        When it does that it's reading in a bunch of InterpolationType_Linear keys, not InterpolationType_XYZ.
-        else if(mInterpolationType == InterpolationType_XYZ)
+
+        static void generateTCBTangents(std::vector<TCBKey<osg::Quat>>& keys)
         {
-            //Don't try to read XYZ keys into the wrong part
-            if ( count != 1 )
-            {
-                std::stringstream error;
-                error << "XYZ_ROTATION_KEY count should always be '1' .  Retrieved Value: "
-                      << count;
-                nif->file->fail(error.str());
-            }
+            // TODO: implement TCB interpolation for quaternions
         }
-        else if (mInterpolationType == InterpolationType_Unknown)
-        {
-            if (count != 0)
-                nif->file->fail("Interpolation type 0 doesn't work with keys");
-        }
-        else
-        {
-            std::stringstream error;
-            error << "Unhandled interpolation type: " << mInterpolationType;
-            nif->file->fail(error.str());
-        }
-    }
+    };
 
-private:
-    static void readValue(NIFStream &nif, KeyT<T> &key)
+    template <class Key, class Value>
+    void readKeyMapPair(NIFStream& stream, std::pair<Key, KeyT<Value>>& value);
+
+    template <>
+    inline void readKeyMapPair(NIFStream& stream, std::pair<float, KeyT<bool>>& value)
     {
-        key.mValue = (nif.*getValue)();
+        stream.read(value.first);
+        value.second.mValue = stream.get<uint8_t>() != 0;
     }
 
-    template <typename U>
-    static void readQuadratic(NIFStream &nif, KeyT<U> &key)
-    {
-        readValue(nif, key);
-        key.mInTan = (nif.*getValue)();
-        key.mOutTan = (nif.*getValue)();
-    }
+    using FloatKeyMap = KeyMapT<float, &NIFStream::get<float>>;
+    using Vector3KeyMap = KeyMapT<osg::Vec3f, &NIFStream::get<osg::Vec3f>>;
+    using Vector4KeyMap = KeyMapT<osg::Vec4f, &NIFStream::get<osg::Vec4f>>;
+    using QuaternionKeyMap = KeyMapT<osg::Quat, &NIFStream::get<osg::Quat>>;
+    using BoolKeyMap = KeyMapT<bool, &NIFStream::get<bool>>;
 
-    static void readQuadratic(NIFStream &nif, KeyT<osg::Quat> &key)
-    {
-        readValue(nif, key);
-    }
-
-    static void readTBC(NIFStream &nif, KeyT<T> &key)
-    {
-        readValue(nif, key);
-        /*key.mTension = */nif.getFloat();
-        /*key.mBias = */nif.getFloat();
-        /*key.mContinuity = */nif.getFloat();
-    }
-};
-using FloatKeyMap = KeyMapT<float,&NIFStream::getFloat>;
-using Vector3KeyMap = KeyMapT<osg::Vec3f,&NIFStream::getVector3>;
-using Vector4KeyMap = KeyMapT<osg::Vec4f,&NIFStream::getVector4>;
-using QuaternionKeyMap = KeyMapT<osg::Quat,&NIFStream::getQuaternion>;
-using ByteKeyMap = KeyMapT<char,&NIFStream::getChar>;
-
-using FloatKeyMapPtr = std::shared_ptr<FloatKeyMap>;
-using Vector3KeyMapPtr = std::shared_ptr<Vector3KeyMap>;
-using Vector4KeyMapPtr = std::shared_ptr<Vector4KeyMap>;
-using QuaternionKeyMapPtr = std::shared_ptr<QuaternionKeyMap>;
-using ByteKeyMapPtr = std::shared_ptr<ByteKeyMap>;
+    using FloatKeyMapPtr = std::shared_ptr<FloatKeyMap>;
+    using Vector3KeyMapPtr = std::shared_ptr<Vector3KeyMap>;
+    using Vector4KeyMapPtr = std::shared_ptr<Vector4KeyMap>;
+    using QuaternionKeyMapPtr = std::shared_ptr<QuaternionKeyMap>;
+    using BoolKeyMapPtr = std::shared_ptr<BoolKeyMap>;
 
 } // Namespace
 #endif //#ifndef OPENMW_COMPONENTS_NIF_NIFKEY_HPP

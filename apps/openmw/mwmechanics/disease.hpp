@@ -1,93 +1,89 @@
 #ifndef OPENMW_MECHANICS_DISEASE_H
 #define OPENMW_MECHANICS_DISEASE_H
 
+#include <components/esm3/loadmgef.hpp>
 #include <components/misc/rng.hpp>
+#include <components/misc/strings/format.hpp>
 
-/*
-    Start of tes3mp addition
-
-    Include additional headers for multiplayer purposes
-*/
-#include "../mwmp/Main.hpp"
-#include "../mwmp/LocalPlayer.hpp"
-/*
-    End of tes3mp addition
-*/
-
-#include "../mwbase/windowmanager.hpp"
 #include "../mwbase/environment.hpp"
+#include "../mwbase/windowmanager.hpp"
 #include "../mwbase/world.hpp"
 
-#include "../mwworld/ptr.hpp"
 #include "../mwworld/class.hpp"
 #include "../mwworld/esmstore.hpp"
+#include "../mwworld/ptr.hpp"
 
-#include "spells.hpp"
-#include "creaturestats.hpp"
 #include "actorutil.hpp"
+#include "creaturestats.hpp"
+#include "spells.hpp"
 
 namespace MWMechanics
 {
 
     /// Call when \a actor has got in contact with \a carrier (e.g. hit by him, or loots him)
-    /// @param actor The actor that will potentially catch diseases. Currently only the player can catch diseases.
+    /// @param actor The actor that will potentially catch diseases. Actors cannot catch diseases from the player.
     /// @param carrier The disease carrier.
-    inline void diseaseContact (MWWorld::Ptr actor, MWWorld::Ptr carrier)
+    inline void diseaseContact(const MWWorld::Ptr& actor, const MWWorld::Ptr& carrier)
     {
-        if (!carrier.getClass().isActor() || actor != getPlayer())
+        if (!carrier.getClass().isActor() || carrier == getPlayer())
             return;
 
-        float fDiseaseXferChance =
-                MWBase::Environment::get().getWorld()->getStore().get<ESM::GameSetting>().find(
-                    "fDiseaseXferChance")->mValue.getFloat();
+        float fDiseaseXferChance = MWBase::Environment::get()
+                                       .getESMStore()
+                                       ->get<ESM::GameSetting>()
+                                       .find("fDiseaseXferChance")
+                                       ->mValue.getFloat();
 
-        MagicEffects& actorEffects = actor.getClass().getCreatureStats(actor).getMagicEffects();
+        const MagicEffects& actorEffects = actor.getClass().getCreatureStats(actor).getMagicEffects();
 
         Spells& spells = carrier.getClass().getCreatureStats(carrier).getSpells();
-        for (Spells::TIterator it = spells.begin(); it != spells.end(); ++it)
+        for (const ESM::Spell* spell : spells)
         {
-            const ESM::Spell* spell = it->first;
             if (actor.getClass().getCreatureStats(actor).getSpells().hasSpell(spell->mId))
                 continue;
 
             float resist = 0.f;
             if (Spells::hasCorprusEffect(spell))
-                resist = 1.f - 0.01f * (actorEffects.get(ESM::MagicEffect::ResistCorprusDisease).getMagnitude()
-                                        - actorEffects.get(ESM::MagicEffect::WeaknessToCorprusDisease).getMagnitude());
+                resist = 1.f
+                    - 0.01f
+                        * (actorEffects.getOrDefault(ESM::MagicEffect::ResistCorprusDisease).getMagnitude()
+                            - actorEffects.getOrDefault(ESM::MagicEffect::WeaknessToCorprusDisease).getMagnitude());
             else if (spell->mData.mType == ESM::Spell::ST_Disease)
-                resist = 1.f - 0.01f * (actorEffects.get(ESM::MagicEffect::ResistCommonDisease).getMagnitude()
-                                        - actorEffects.get(ESM::MagicEffect::WeaknessToCommonDisease).getMagnitude());
+                resist = 1.f
+                    - 0.01f
+                        * (actorEffects.getOrDefault(ESM::MagicEffect::ResistCommonDisease).getMagnitude()
+                            - actorEffects.getOrDefault(ESM::MagicEffect::WeaknessToCommonDisease).getMagnitude());
             else if (spell->mData.mType == ESM::Spell::ST_Blight)
-                resist = 1.f - 0.01f * (actorEffects.get(ESM::MagicEffect::ResistBlightDisease).getMagnitude()
-                                        - actorEffects.get(ESM::MagicEffect::WeaknessToBlightDisease).getMagnitude());
+                resist = 1.f
+                    - 0.01f
+                        * (actorEffects.getOrDefault(ESM::MagicEffect::ResistBlightDisease).getMagnitude()
+                            - actorEffects.getOrDefault(ESM::MagicEffect::WeaknessToBlightDisease).getMagnitude());
             else
                 continue;
 
             int x = static_cast<int>(fDiseaseXferChance * 100 * resist);
-            if (Misc::Rng::rollDice(10000) < x)
+            auto& prng = MWBase::Environment::get().getWorld()->getPrng();
+            if (Misc::Rng::rollDice(10000, prng) < x)
             {
                 // Contracted disease!
-                actor.getClass().getCreatureStats(actor).getSpells().add(it->first);
+                MWMechanics::CreatureStats& creatureStats = actor.getClass().getCreatureStats(actor);
+                creatureStats.getSpells().add(spell);
+                creatureStats.getActiveSpells().addSpell(spell, actor, false);
                 MWBase::Environment::get().getWorld()->applyLoopingParticles(actor);
 
-                /*
-                    Start of tes3mp addition
-
-                    Send an ID_PLAYER_SPELLBOOK packet every time a player gains a disease
-                */
-                mwmp::Main::get().getLocalPlayer()->sendSpellChange(it->first->mId, mwmp::SpellbookChanges::ADD);
-                /*
-                    End of tes3mp addition
-                */
-
-                std::string msg = "sMagicContractDisease";
-                msg = MWBase::Environment::get().getWorld()->getStore().get<ESM::GameSetting>().find(msg)->mValue.getString();
-                msg = Misc::StringUtils::format(msg, spell->mName);
-                MWBase::Environment::get().getWindowManager()->messageBox(msg);
+                if (actor == getPlayer())
+                {
+                    std::string msg = MWBase::Environment::get()
+                                          .getESMStore()
+                                          ->get<ESM::GameSetting>()
+                                          .find("sMagicContractDisease")
+                                          ->mValue.getString();
+                    msg = Misc::StringUtils::format(msg, spell->mName);
+                    MWBase::Environment::get().getWindowManager()->messageBox(msg);
+                }
             }
         }
     }
 }
-
 
 #endif

@@ -2,7 +2,6 @@
 #define OPENMW_MWPHYSICS_HEIGHTFIELD_H
 
 #include <osg/ref_ptr>
-#include <osg/Object>
 
 #include <LinearMath/btScalar.h>
 
@@ -21,13 +20,12 @@ namespace MWPhysics
 {
     class PhysicsTaskScheduler;
 
-    class HeightField : public osg::Object
+    class HeightField
     {
     public:
-        HeightField(const float* heights, int x, int y, float triSize, float sqrtVerts, float minH, float maxH, const osg::Object* holdObject, PhysicsTaskScheduler* scheduler);
+        HeightField(const float* heights, int x, int y, int size, int verts, float minH, float maxH,
+            const osg::Object* holdObject, PhysicsTaskScheduler* scheduler);
         ~HeightField();
-
-        META_Object(MWPhysics, HeightField)
 
         btCollisionObject* getCollisionObject();
         const btCollisionObject* getCollisionObject() const;
@@ -43,8 +41,6 @@ namespace MWPhysics
 
         PhysicsTaskScheduler* mTaskScheduler;
 
-        HeightField();
-        HeightField(const HeightField&, const osg::CopyOp&);
         void operator=(const HeightField&);
         HeightField(const HeightField&);
     };

@@ -10,87 +10,54 @@ namespace MWDialogue
     /// \brief The player's journal
     class Journal : public MWBase::Journal
     {
-            TEntryContainer mJournal;
-            TQuestContainer mQuests;
-            TTopicContainer mTopics;
+        TEntryContainer mJournal;
+        TQuestContainer mQuests;
+        TTopicContainer mTopics;
 
-        private:
+    private:
+        Topic& getTopic(const ESM::RefId& id);
 
-            Quest& getQuest (const std::string& id);
+        bool isThere(const ESM::RefId& topicId, const ESM::RefId& infoId = ESM::RefId()) const;
 
-            Topic& getTopic (const std::string& id);
+    public:
+        Journal();
 
-            bool isThere (const std::string& topicId, const std::string& infoId = "") const;
+        void clear() override;
 
-        public:
+        Quest* getQuestOrNull(const ESM::RefId& id) override;
+        ///< Gets a pointer to the requested quest. Will return nullptr if the quest has not been started.
 
-            Journal();
+        Quest& getOrStartQuest(const ESM::RefId& id) override;
+        ///< Gets the quest requested. Attempts to create it and inserts it in quests if it is not yet started.
 
-            void clear() override;
+        void addEntry(const ESM::RefId& id, int index, const MWWorld::Ptr& actor) override;
+        ///< Add a journal entry.
+        /// @param actor Used as context for replacing of escape sequences (%name, etc).
 
-            /*
-                Start of tes3mp addition
+        void setJournalIndex(const ESM::RefId& id, int index) override;
+        ///< Set the journal index without adding an entry.
 
-                Make it possible to check whether a journal entry already exists from elsewhere in the code
-            */
-            virtual bool hasEntry(const std::string& id, int index);
-            /*
-                End of tes3mp addition
-            */
+        int getJournalIndex(const ESM::RefId& id) const override;
+        ///< Get the journal index.
 
-            /*
-                Start of tes3mp change (minor)
+        void addTopic(const ESM::RefId& topicId, const ESM::RefId& infoId, const MWWorld::Ptr& actor) override;
+        /// \note topicId must be lowercase
 
-                Make it possible to override current time when adding journal entries, by adding
-                optional timestamp override arguments
-            */
-            void addEntry (const std::string& id, int index, const MWWorld::Ptr& actor, int daysPassed = -1, int month = -1, int day = -1) override;
-            ///< Add a journal entry.
-            /// @param actor Used as context for replacing of escape sequences (%name, etc).
-            /*
-                End of tes3mp change (major)
-            */
+        void removeLastAddedTopicResponse(const ESM::RefId& topicId, std::string_view actorName) override;
+        ///< Removes the last topic response added for the given topicId and actor name.
+        /// \note topicId must be lowercase
 
-            void setJournalIndex (const std::string& id, int index) override;
-            ///< Set the journal index without adding an entry.
+        const TEntryContainer& getEntries() const override { return mJournal; }
 
-            int getJournalIndex (const std::string& id) const override;
-            ///< Get the journal index.
+        const TTopicContainer& getTopics() const override { return mTopics; }
 
-            void addTopic (const std::string& topicId, const std::string& infoId, const MWWorld::Ptr& actor) override;
-            /// \note topicId must be lowercase
+        const TQuestContainer& getQuests() const override { return mQuests; }
 
-            void removeLastAddedTopicResponse (const std::string& topicId, const std::string& actorName) override;
-            ///< Removes the last topic response added for the given topicId and actor name.
-            /// \note topicId must be lowercase
+        size_t countSavedGameRecords() const override;
 
-            TEntryIter begin() const override;
-            ///< Iterator pointing to the begin of the main journal.
-            ///
-            /// \note Iterators to main journal entries will never become invalid.
+        void write(ESM::ESMWriter& writer, Loading::Listener& progress) const override;
 
-            TEntryIter end() const override;
-            ///< Iterator pointing past the end of the main journal.
-
-            TQuestIter questBegin() const override;
-            ///< Iterator pointing to the first quest (sorted by topic ID)
-
-            TQuestIter questEnd() const override;
-            ///< Iterator pointing past the last quest.
-
-            TTopicIter topicBegin() const override;
-            ///< Iterator pointing to the first topic (sorted by topic ID)
-            ///
-            /// \note The topic ID is identical with the user-visible topic string.
-
-            TTopicIter topicEnd() const override;
-            ///< Iterator pointing past the last topic.
-
-            int countSavedGameRecords() const override;
-
-            void write (ESM::ESMWriter& writer, Loading::Listener& progress) const override;
-
-            void readRecord (ESM::ESMReader& reader, uint32_t type) override;
+        void readRecord(ESM::ESMReader& reader, uint32_t type) override;
     };
 }
 
