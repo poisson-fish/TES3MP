@@ -1102,7 +1102,7 @@ Depends on: Phase 1.
 | Slice | Deliverable | Status | Completion evidence |
 |---|---|---|---|
 | 2.1 | Prepare the threat model and obtain owner approval for ADR-0003 | **Implemented** | Owner-approved [`ADR-0003`](adr/ADR-0003-hostile-internet-threat-model.md) records the hostile-Internet boundary, protected assets, attacker capabilities, mitigations, tests, and explicit deferred risks |
-| 2.2 | Evaluate schema/codec candidates with the owner and approve ADR-0004 | **In Progress** | Owner-approved [`ADR-0004`](adr/ADR-0004-protocol-schema-codec-evolution-policy.md) selects restricted verifier-first FlatBuffers; local Windows proof passes and the accepted Linux/macOS/fuzzer CI matrix remains required |
+| 2.2 | Evaluate schema/codec candidates with the owner and approve ADR-0004 | **In Progress** | Owner-approved [`ADR-0004`](adr/ADR-0004-protocol-schema-codec-evolution-policy.md) selects restricted verifier-first FlatBuffers; the exact Windows/Linux/macOS/fuzzer proof and retained-artifact consistency gate pass at `da24423a1a`; explicit owner completion review remains required |
 | 2.3 | Evaluate transport/security candidates with the owner and approve ADR-0005 | **In Progress** | Owner-approved [`ADR-0005`](adr/ADR-0005-transport-security-authentication-resumption.md) selects standalone GameNetworkingSockets with automatic encryption, no endpoint-certificate operations, an optional shared join password, and automatic single-use resume tokens; the selected-library proof remains required |
 | 2.4 | Review authority/state-scope options by subsystem and approve ADR-0006 | **Not Started** | Owner-approved authority, scope, prediction, and presentation framework is explicit; domain GDR questions are listed |
 | 2.5 | Review the OpenMW hook/patch options with the owner and approve ADR-0007 | **Not Started** | Owner-approved hook surface, patch organization, and upstreaming criteria are explicit |
@@ -1244,6 +1244,30 @@ Implementation notes:
     and compare retained exact input, generated, seed-corpus, license, compiler,
     and test identities before owner review and any **Implemented** status
     change.
+
+- 2026-08-26 — Slice 2.2 — In Progress
+  - Change: commit `da24423a1a56ac0e499eebd962b6499db3866b0f`
+    published the exact-input and deterministic-seed repair. Manually dispatched
+    [run `32996083180`](https://github.com/poisson-fish/TES3MP/actions/runs/32996083180)
+    executed the complete five-job selection-proof matrix at that commit.
+  - Decisions: none; the repair implements the already approved ADR-0004 proof
+    contract and changes no schema, codec selection, protocol behavior, or
+    dependency version.
+  - Verification: Windows MSVC 2022 v143, Linux GCC 13, Linux Clang 18 with the
+    30-second ASan/UBSan/libFuzzer smoke, macOS arm64 Xcode 16, and macOS x86-64
+    Xcode 16 all passed. Retained artifacts `9616640336`, `9616634804`,
+    `9616631479`, `9616613594`, and `9616613060` were downloaded and compared
+    against the committed lock. All five contain the identical lock SHA-256
+    `a1cce8c4475460a5dcc29c0164b6743b3e228019068c08d6453c462512a95766`,
+    two schema hashes, two generated-header hashes, five pinned seed hashes, and
+    Apache-2.0 license SHA-256
+    `cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30`;
+    platform/compiler identities and declared proof/fuzz tests also match the
+    approved matrix.
+  - Owner review: technical completion evidence is ready for review. Explicit
+    owner acceptance is pending, so Slice 2.2 remains **In Progress**.
+  - Follow-ups: obtain owner completion acceptance, then change Slice 2.2 to
+    **Implemented**. Phase 2 still separately requires Slices 2.3–2.6.
 
 - 2026-08-26 — Slice 2.3 — In Progress
   - Change: accepted and then amended
