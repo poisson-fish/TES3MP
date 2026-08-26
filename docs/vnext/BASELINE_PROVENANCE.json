@@ -90,6 +90,11 @@
       "purpose": "Owner-approved platform, CI, toolchain, and dependency policy."
     },
     {
+      "path": "docs/vnext/adr/ADR-0003-hostile-internet-threat-model.md",
+      "status": "A",
+      "purpose": "Owner-approved hostile-Internet trust boundaries, assets, attacker capabilities, mitigations, verification, and deferred risks."
+    },
+    {
       "path": "scripts/capture_vnext_linux_ci.py",
       "status": "A",
       "purpose": "Fail-closed Ubuntu runner, compiler, package, repository, and package-license evidence capture."

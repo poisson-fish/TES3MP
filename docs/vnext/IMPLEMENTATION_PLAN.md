@@ -108,7 +108,7 @@ Observed on 2026-08-25 before this plan was added:
 |---|---|---|---|
 | 0 | Archive and cutover preparation | **Implemented** | — |
 | 1 | Clean OpenMW 0.51 baseline | **Implemented** | Phase 0 |
-| 2 | Security and architecture decisions | **Not Started** | Phase 1 |
+| 2 | Security and architecture decisions | **In Progress** | Phase 1 |
 | 3 | Independent targets and test scaffold | **Not Started** | Phase 2 |
 | 4 | Bounded protocol and in-memory session | **Not Started** | Phase 3 |
 | 5 | Deterministic authoritative server core | **Not Started** | Phase 4 |
@@ -1092,7 +1092,7 @@ Implementation notes:
 
 ### Phase 2 — Security and architecture decisions
 
-Status: **Not Started**
+Status: **In Progress**
 
 Outcome: implementation begins with explicit trust boundaries, technology
 choices, ownership rules, and patch policies rather than accidental coupling.
@@ -1101,7 +1101,7 @@ Depends on: Phase 1.
 
 | Slice | Deliverable | Status | Completion evidence |
 |---|---|---|---|
-| 2.1 | Prepare the threat model and obtain owner approval for ADR-0003 | **Not Started** | Owner-approved trust boundaries, assets, attacker capabilities, mitigations, and deferred risks are recorded |
+| 2.1 | Prepare the threat model and obtain owner approval for ADR-0003 | **Implemented** | Owner-approved [`ADR-0003`](adr/ADR-0003-hostile-internet-threat-model.md) records the hostile-Internet boundary, protected assets, attacker capabilities, mitigations, tests, and explicit deferred risks |
 | 2.2 | Evaluate schema/codec candidates with the owner and approve ADR-0004 | **Not Started** | Owner-approved choice is backed by bounded decode, evolution, fuzzability, tooling, and license evidence |
 | 2.3 | Evaluate transport/security candidates with the owner and approve ADR-0005 | **Not Started** | Owner-approved choice is backed by desktop proof builds and channel/security/backpressure evidence |
 | 2.4 | Review authority/state-scope options by subsystem and approve ADR-0006 | **Not Started** | Owner-approved authority, scope, prediction, and presentation framework is explicit; domain GDR questions are listed |
@@ -1126,6 +1126,30 @@ Implementation notes:
   phases, but the initial command/state ownership model must be decided now.
 - A selection proof is disposable evidence, not the production wrapper created
   in Phase 6.
+
+- 2026-08-26 — Slice 2.1 — Implemented
+  - Change: added accepted
+    [`ADR-0003`](adr/ADR-0003-hostile-internet-threat-model.md), defining the
+    hostile-Internet threat posture, assets, trust boundaries, attacker
+    capabilities, abuse scenarios, phase-owned mitigations, required
+    verification, and explicit deferrals.
+  - Decisions: the project owner approved recommended Option A. Every client and
+    network input, including authenticated clients, remains untrusted; the
+    dedicated-server host/operator is the initial trusted boundary; secure
+    transport and authentication do not grant gameplay authority; and future
+    scripts, persistence, metrics, and administration remain behind separate
+    typed least-privilege boundaries.
+  - Verification: `python scripts/verify_vnext_baseline.py --index` accounts for
+    the new ADR as the 29th intentional difference while retaining all 19
+    dependency-input hashes; `git diff --cached --check`, local Markdown-link
+    checks, required ADR section/status checks, and the 51-test repository-owned
+    Python suite pass.
+  - Owner review: Option A explicitly approved in the 2026-08-26 working
+    session after presentation of hostile-Internet, cooperative-client, and
+    hostile-host options with scenarios, tradeoffs, recommendation, and proposed
+    acceptance evidence.
+  - Follow-ups: Slice 2.2 is the next eligible decision slice. ADR-0004 must be
+    approved before a schema/codec selection or dependent production code.
 
 ### Phase 3 — Independent targets and test scaffold
 

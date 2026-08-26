@@ -17,8 +17,8 @@ and the machine-checkable baseline manifest now enumerates every intentional
 difference. The documented local Windows baseline path and the supported
 desktop CI matrix pass. Fail-closed legacy-exclusion proof passes locally and
 on the accepted Linux, Windows, and macOS CI matrix. Phase 2 security and
-architecture decisions have not started, and no vNext multiplayer target exists
-yet.
+architecture decisions are in progress; the hostile-Internet threat model is
+accepted, and no vNext multiplayer target exists yet.
 
 See the [implementation plan](IMPLEMENTATION_PLAN.md) for the live phase and
 slice tracker, completion gates, architecture decisions, and implementation
