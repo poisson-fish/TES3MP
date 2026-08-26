@@ -911,7 +911,13 @@ Implementation notes:
     failing closed because deployment-mode CMake places those executables in
     `OpenMW.app/Contents/MacOS` while the runner still checked the build root.
     The follow-up maps Darwin test execution to the bundle runtime directory
-    and adds a regression assertion for that platform-specific path.
+    and adds a regression assertion for that platform-specific path. Exact
+    repair run `32925227820` then executed the arm64 test binary and exposed
+    seven upstream Euler-angle assertions whose strict one-float-epsilon bound
+    rejects valid Apple Silicon results at singular angles; all observed
+    differences are below `1e-6`, the tolerance already used by the adjacent
+    Euler-angle test. The bounded follow-up changes only that test tolerance;
+    production math and runtime behavior are unchanged.
   - Owner review: no architecture, authority, state-scope, security, gameplay,
     or user-visible behavior decision is introduced. The slice follows the
     already approved ADR-0002 scenarios and does not require another decision

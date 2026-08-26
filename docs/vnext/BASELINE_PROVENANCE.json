@@ -45,6 +45,11 @@
       "purpose": "Versioned cross-platform configure and build presets for the Phase 1 OpenMW baseline test path."
     },
     {
+      "path": "apps/components_tests/misc/testmathutil.cpp",
+      "status": "M",
+      "purpose": "Portable single-precision tolerance for upstream Euler-angle assertions on supported macOS arm64 runners."
+    },
+    {
       "path": "docs/vnext/BASELINE_PROVENANCE.json",
       "status": "A",
       "purpose": "Machine-readable OpenMW baseline, cutover, dependency-input, and intentional-difference record."

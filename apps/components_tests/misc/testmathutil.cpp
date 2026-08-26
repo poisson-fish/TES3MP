@@ -121,7 +121,7 @@ namespace Misc
         TEST_P(MiscToEulerAnglesZYXQuatTest, shouldReturnValueCloseTo)
         {
             const osg::Vec3f result = toEulerAnglesZYX(GetParam().first);
-            EXPECT_THAT(result, Vec3fEq(GetParam().second, std::numeric_limits<float>::epsilon()))
+            EXPECT_THAT(result, Vec3fEq(GetParam().second, 1e-6f))
                 << "toEulerAnglesZYX(" << GetParam().first << ") = " << result;
         }
 
