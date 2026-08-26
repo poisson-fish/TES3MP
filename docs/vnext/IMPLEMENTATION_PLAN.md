@@ -591,7 +591,7 @@ Depends on: Phase 0.
 | Slice | Deliverable | Status | Completion evidence |
 |---|---|---|---|
 | 1.1 | Add `openmw-upstream`, fetch the official `openmw-0.51.0` tag, and verify `f4bec41444214a7903bebd178389ca22ca13f646` | **Implemented** | `openmw-upstream` uses the official URL; fetched `openmw-0.51.0` resolves to the approved commit |
-| 1.2 | Perform the clean baseline-cutover commit exactly as ADR-0001 specifies | **In Progress** | Active tree is OpenMW 0.51 plus reviewed vNext-owned files |
+| 1.2 | Perform the clean baseline-cutover commit exactly as ADR-0001 specifies | **Implemented** | Published cutover `6cdaddda60` has the exact OpenMW tree plus six reviewed `docs/vnext/**` files |
 | 1.3 | Add a machine-checkable baseline provenance manifest/check | **Not Started** | CI can enumerate every intentional difference from the pinned tag |
 | 1.4 | Establish a documented local configure/build/test preset | **Not Started** | Clean checkout build and upstream test commands pass |
 | 1.5 | Add Linux baseline CI | **Not Started** | Configure, build, and upstream tests pass on the supported Linux toolchain |
@@ -642,6 +642,38 @@ Implementation notes:
   - Follow-ups: publish this final pre-cutover documentation state, repeat all
     ADR-0001 preconditions, construct and verify the cutover, then record its
     exact commit/tree evidence before marking Slice 1.2 **Implemented**.
+- 2026-08-25 — Slice 1.2 — Implemented
+  - Change: published the ADR-0001 two-parent exact-tree cutover as
+    `6cdaddda60e9e1f02cc6b5029dd2b589a9f9d11b`, with tree
+    `0824acb059d88ef65be3a7277f6e48a3f9eab04d`. Its first parent is the final
+    published pre-cutover documentation commit
+    `85d92afed0e454c2599cf9b4c0b11788af3e9007`, and its second parent is OpenMW
+    `f4bec41444214a7903bebd178389ca22ca13f646`.
+  - Decisions: none; the production cutover used the owner-approved ADR-0001
+    parent order, exact upstream tree, `docs/vnext/**` overlay, fail-closed
+    checks, fast-forward-only publication, and no-history-rewrite policy.
+  - Verification: before preparation, the worktree was clean; local, tracking,
+    and directly queried remote `vnext` refs matched the final pre-cutover
+    commit; the upstream URL and commit matched ADR-0001; the archive tag was
+    annotated locally and remotely and peeled to the approved legacy commit;
+    `git diff --check` and `git fsck --no-dangling` passed; and the preparation
+    branch name was unused. Before publication, the cutover had exactly the two
+    approved parents in order and both were ancestors; `git diff --quiet`
+    proved byte/mode/tree identity with OpenMW outside `docs/vnext/**` and with
+    the pre-cutover parent inside `docs/vnext/**`; the only six upstream
+    differences were the six reviewed vNext documents; all explicit legacy
+    path and `RakNet|CrabNet|CoreScripts` component checks were empty; local
+    Markdown links, `git diff --check`, clean-worktree, and `git fsck
+    --no-dangling` checks passed; and the concurrent-advance check passed.
+    After publication, `HEAD`, local `vnext`, `origin/vnext`, and a direct
+    remote query all resolved to the cutover commit, with a clean worktree. The
+    disposable worktree and merged preparation branch were then removed.
+  - Owner review: the project owner explicitly authorized the real cutover in
+    the 2026-08-25 Phase 0 exit-gate review; observed production evidence
+    matched the approved ADR scenarios with no deviation.
+  - Follow-ups: Slice 1.3 adds the machine-checkable baseline provenance
+    manifest/check. Build and upstream-test proof remains owned by Slices
+    1.4–1.7, and compiled legacy exclusion proof remains Slice 1.8.
 
 ### Phase 2 — Security and architecture decisions
 

@@ -11,9 +11,11 @@ Quest 3 support is a later, conditional stretch target.
 
 ## Project status
 
-The architecture direction is accepted and implementation preparation is in
-progress. The active source tree has not yet been replaced with OpenMW 0.51, and
-no vNext multiplayer target exists yet.
+Phase 0 is implemented and Phase 1 baseline work is in progress. The active
+source tree has been replaced with the provenance-verified OpenMW 0.51 baseline
+plus the reviewed `docs/vnext/**` overlay. Reproducible build/CI proof and the
+machine-checkable baseline manifest remain Phase 1 work, and no vNext
+multiplayer target exists yet.
 
 See the [implementation plan](IMPLEMENTATION_PLAN.md) for the live phase and
 slice tracker, completion gates, architecture decisions, and implementation
