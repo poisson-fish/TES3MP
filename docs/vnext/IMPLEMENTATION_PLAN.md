@@ -305,8 +305,8 @@ runtime or protocol name.
 |---|---|---|---|
 | ADR-0001 | Baseline-cutover Git mechanics | Phase 1 | **Implemented** |
 | ADR-0002 | Supported desktop platforms, compilers, and dependency policy | Phase 1 | **Implemented** |
-| ADR-0003 | Threat model and trust boundaries | Phase 3 | **Not Started** |
-| ADR-0004 | Protocol schema, codec, and evolution policy | Phase 4 | **Not Started** |
+| ADR-0003 | Threat model and trust boundaries | Phase 3 | **Implemented** |
+| ADR-0004 | Protocol schema, codec, and evolution policy | Phase 4 | **In Progress** |
 | ADR-0005 | Transport, encryption, authentication, and session resumption | Phase 6 | **Not Started** |
 | ADR-0006 | Authority, state-scope, prediction, and presentation policy | Phase 7 | **Not Started** |
 | ADR-0007 | OpenMW hook and patch-queue policy | Phase 8 | **Not Started** |
@@ -1102,7 +1102,7 @@ Depends on: Phase 1.
 | Slice | Deliverable | Status | Completion evidence |
 |---|---|---|---|
 | 2.1 | Prepare the threat model and obtain owner approval for ADR-0003 | **Implemented** | Owner-approved [`ADR-0003`](adr/ADR-0003-hostile-internet-threat-model.md) records the hostile-Internet boundary, protected assets, attacker capabilities, mitigations, tests, and explicit deferred risks |
-| 2.2 | Evaluate schema/codec candidates with the owner and approve ADR-0004 | **Not Started** | Owner-approved choice is backed by bounded decode, evolution, fuzzability, tooling, and license evidence |
+| 2.2 | Evaluate schema/codec candidates with the owner and approve ADR-0004 | **In Progress** | Proposed [`ADR-0004`](adr/ADR-0004-protocol-schema-codec-evolution-policy.md) compares FlatBuffers, Protocol Buffers, Cap'n Proto, and a custom codec; owner selection and proof evidence remain required |
 | 2.3 | Evaluate transport/security candidates with the owner and approve ADR-0005 | **Not Started** | Owner-approved choice is backed by desktop proof builds and channel/security/backpressure evidence |
 | 2.4 | Review authority/state-scope options by subsystem and approve ADR-0006 | **Not Started** | Owner-approved authority, scope, prediction, and presentation framework is explicit; domain GDR questions are listed |
 | 2.5 | Review the OpenMW hook/patch options with the owner and approve ADR-0007 | **Not Started** | Owner-approved hook surface, patch organization, and upstreaming criteria are explicit |
@@ -1150,6 +1150,28 @@ Implementation notes:
     acceptance evidence.
   - Follow-ups: Slice 2.2 is the next eligible decision slice. ADR-0004 must be
     approved before a schema/codec selection or dependent production code.
+
+- 2026-08-26 — Slice 2.2 — In Progress
+  - Change: opened proposed
+    [`ADR-0004`](adr/ADR-0004-protocol-schema-codec-evolution-policy.md) with a
+    bounded-decode, evolution, fuzzability, tooling, maintenance, platform, and
+    license comparison of four viable approaches.
+  - Decisions: none. The packet recommends a restricted verifier-first
+    FlatBuffers profile, but no codec, pin, generation policy, or evolution
+    policy is approved until the project owner explicitly selects an option.
+  - Verification: primary upstream documentation and `git ls-remote --tags`
+    confirmed the candidate tag/commit identities as of 2026-08-26;
+    `python scripts/verify_vnext_baseline.py --index` accounts for the proposed
+    ADR as the 30th intentional difference while retaining all 19
+    dependency-input hashes; `git diff --cached --check`, local Markdown-link
+    checks, required ADR section/status checks, and the 51-test repository-owned
+    Python suite pass.
+  - Owner review: pending presentation and explicit selection of ADR-0004 Option
+    A, B, C, or D, including any conditions on the proposed acceptance tests.
+  - Follow-ups: after approval, record the accepted decision, run the isolated
+    selected-library proof on the supported desktop matrix, document Android
+    ARM64 feasibility, and retain the bounded/evolution/fuzz evidence required
+    to mark Slice 2.2 **Implemented**. No dependent production code may begin.
 
 ### Phase 3 — Independent targets and test scaffold
 

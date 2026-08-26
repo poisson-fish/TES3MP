@@ -95,6 +95,11 @@
       "purpose": "Owner-approved hostile-Internet trust boundaries, assets, attacker capabilities, mitigations, verification, and deferred risks."
     },
     {
+      "path": "docs/vnext/adr/ADR-0004-protocol-schema-codec-evolution-policy.md",
+      "status": "A",
+      "purpose": "Owner-gated protocol schema, bounded codec, evolution, generation, dependency, and verification decision packet."
+    },
+    {
       "path": "scripts/capture_vnext_linux_ci.py",
       "status": "A",
       "purpose": "Fail-closed Ubuntu runner, compiler, package, repository, and package-license evidence capture."
