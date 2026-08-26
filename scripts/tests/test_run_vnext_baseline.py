@@ -1,0 +1,61 @@
+from __future__ import annotations
+
+import hashlib
+import json
+import pathlib
+import tempfile
+import unittest
+from unittest import mock
+
+from scripts import run_vnext_baseline as baseline
+
+
+class BaselineRunnerTests(unittest.TestCase):
+    def test_dependency_lock_has_pinned_windows_inputs(self) -> None:
+        lock = baseline.load_lock()["windows_x86_64"]
+        bundle = lock["vcpkg_bundle"]
+        qt = lock["qt"]
+        self.assertRegex(bundle["openmw_deps_commit"], r"^[0-9a-f]{40}$")
+        self.assertIn(bundle["openmw_deps_commit"], bundle["manifest_url"])
+        self.assertRegex(bundle["manifest_sha256"], r"^[0-9a-f]{64}$")
+        self.assertRegex(bundle["archive_sha512"], r"^[0-9a-f]{128}$")
+        self.assertEqual(qt["version"], "6.6.3")
+        self.assertRegex(qt["aqt_sha256"], r"^[0-9a-f]{64}$")
+
+    def test_hash_file_streams_requested_algorithm(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = pathlib.Path(directory) / "data"
+            path.write_bytes(b"vnext baseline")
+            self.assertEqual(baseline.hash_file(path, "sha256"), hashlib.sha256(b"vnext baseline").hexdigest())
+
+    def test_make_environment_uses_ignored_workspace_dependencies_on_windows(self) -> None:
+        with mock.patch.dict(baseline.os.environ, {}, clear=True):
+            env = baseline.make_environment("Windows")
+        self.assertEqual(pathlib.Path(env["VNEXT_VCPKG_ROOT"]), baseline.ROOT / "deps")
+        self.assertEqual(pathlib.Path(env["VNEXT_QT_ROOT"]), baseline.ROOT / "deps" / "Qt" / "6.6.3" / "msvc2019_64")
+
+    def test_validate_windows_requires_visual_studio_2022_prompt(self) -> None:
+        env = {"VSCMD_VER": "18.0", "VNEXT_VCPKG_ROOT": "missing", "VNEXT_QT_ROOT": "missing"}
+        with self.assertRaisesRegex(baseline.BaselineError, "Visual Studio 2022"):
+            baseline.validate_environment("Windows", env)
+
+    def test_executable_names_are_platform_specific(self) -> None:
+        self.assertEqual(baseline.executable_path("components-tests", "Windows").name, "components-tests.exe")
+        self.assertEqual(baseline.executable_path("components-tests", "Linux").name, "components-tests")
+
+    def test_reads_compiler_version_from_cmake_platform_file(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            cmake_files = pathlib.Path(directory) / "CMakeFiles" / "3.31.6"
+            cmake_files.mkdir(parents=True)
+            (cmake_files / "CMakeCXXCompiler.cmake").write_text(
+                'set(CMAKE_CXX_COMPILER_VERSION "19.44.35228.0")\n', encoding="utf-8"
+            )
+            self.assertEqual(baseline.read_cmake_compiler_version(pathlib.Path(directory)), "19.44.35228.0")
+
+    def test_dependency_lock_is_valid_json_with_one_schema(self) -> None:
+        data = json.loads(baseline.LOCK_PATH.read_text(encoding="utf-8"))
+        self.assertEqual(data["schema_version"], 1)
+
+
+if __name__ == "__main__":
+    unittest.main()

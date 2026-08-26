@@ -593,7 +593,7 @@ Depends on: Phase 0.
 | 1.1 | Add `openmw-upstream`, fetch the official `openmw-0.51.0` tag, and verify `f4bec41444214a7903bebd178389ca22ca13f646` | **Implemented** | `openmw-upstream` uses the official URL; fetched `openmw-0.51.0` resolves to the approved commit |
 | 1.2 | Perform the clean baseline-cutover commit exactly as ADR-0001 specifies | **Implemented** | Published cutover `6cdaddda60` has the exact OpenMW tree plus six reviewed `docs/vnext/**` files |
 | 1.3 | Add a machine-checkable baseline provenance manifest/check | **Implemented** | [`BASELINE_PROVENANCE.json`](BASELINE_PROVENANCE.json) and `scripts/verify_vnext_baseline.py` enumerate all nine intentional differences and fail on tree/dependency-input drift |
-| 1.4 | Establish a documented local configure/build/test preset | **Not Started** | Clean checkout build and upstream test commands pass |
+| 1.4 | Establish a documented local configure/build/test preset | **In Progress** | Clean checkout build and upstream test commands pass |
 | 1.5 | Add Linux baseline CI | **Not Started** | Configure, build, and upstream tests pass on the supported Linux toolchain |
 | 1.6 | Add Windows baseline CI | **Not Started** | Configure, build, and upstream tests pass on the supported Windows toolchain |
 | 1.7 | Add macOS baseline CI | **Not Started** | Configure, build, and upstream tests pass on the supported macOS toolchain |
@@ -701,6 +701,42 @@ Implementation notes:
     dependency evidence; Slices 1.5–1.7 integrate the checker and archive exact
     platform dependency/license manifests; Slice 1.8 proves compiled legacy
     exclusion.
+- 2026-08-25 — Slice 1.4 — In Progress
+  - Change: this commit adds versioned cross-platform CMake configure/build
+    presets, `scripts/run_vnext_baseline.py`, a commit- and hash-pinned Windows
+    dependency lock/provisioning path, runner unit tests, and
+    [`LOCAL_BASELINE_BUILD.md`](LOCAL_BASELINE_BUILD.md). The runner verifies
+    baseline provenance before configuration and retains JSON test and
+    environment/dependency evidence under the ignored build directory.
+  - Decisions: none; the implementation applies accepted ADR-0002 Option A.
+    The Windows preset configures the existing `openmw-cs` target because the
+    pinned upstream CMake assigns its Windows manifest whenever `WIN32` is true;
+    the build preset still selects only the three upstream test targets, so no
+    baseline-source patch or additional product target is introduced.
+  - Verification: `python -m unittest
+    scripts.tests.test_run_vnext_baseline
+    scripts.tests.test_verify_vnext_baseline -v` passed 13 tests;
+    `python -m py_compile scripts/run_vnext_baseline.py
+    scripts/verify_vnext_baseline.py
+    scripts/tests/test_run_vnext_baseline.py
+    scripts/tests/test_verify_vnext_baseline.py` passed; JSON parsing of
+    `CMakePresets.json`, the dependency lock, and the provenance manifest
+    passed; `python scripts/verify_vnext_baseline.py --index` enumerated exactly
+    14 intentional differences and verified 13 dependency-declaration inputs;
+    and `git diff --cached --check` passed. From an MSVC 2022 v143 x86-64
+    developer environment, `python scripts/run_vnext_baseline.py all --index`
+    configured with CMake 3.31.6/Ninja 1.12.1 and compiled all 1,245 Ninja
+    actions; after correcting the runner's DLL search path, `python
+    scripts/run_vnext_baseline.py test` passed `components-tests` (1,395),
+    `openmw-tests` (490), and `openmw-cs-tests` (154), with zero failures or
+    disabled tests. A clean-checkout rerun remains pending before completion.
+  - Owner review: no new architecture, authority, state-scope, security,
+    gameplay, or user-visible behavior decision was introduced. This mechanical
+    slice does not require a separate decision review or implementation demo.
+  - Follow-ups: run the committed source through the complete command from a
+    clean disposable worktree, record its exact evidence, then mark Slice 1.4
+    **Implemented**. Slices 1.5–1.7 still own supported-platform CI and retained
+    CI environment/license artifacts.
 
 ### Phase 2 — Security and architecture decisions
 

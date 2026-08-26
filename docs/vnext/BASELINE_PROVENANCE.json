@@ -15,6 +15,11 @@
   },
   "intentional_differences": [
     {
+      "path": "CMakePresets.json",
+      "status": "A",
+      "purpose": "Versioned cross-platform configure and build presets for the Phase 1 OpenMW baseline test path."
+    },
+    {
       "path": "docs/vnext/BASELINE_PROVENANCE.json",
       "status": "A",
       "purpose": "Machine-readable OpenMW baseline, cutover, dependency-input, and intentional-difference record."
@@ -28,6 +33,11 @@
       "path": "docs/vnext/LEGACY_GAMEPLAY_FEATURE_INVENTORY.md",
       "status": "A",
       "purpose": "Reference-only inventory of archived TES3MP gameplay behavior."
+    },
+    {
+      "path": "docs/vnext/LOCAL_BASELINE_BUILD.md",
+      "status": "A",
+      "purpose": "Documented local configure, build, test, provisioning, and evidence procedure for the pinned baseline."
     },
     {
       "path": "docs/vnext/PRE_CUTOVER_PROVENANCE.md",
@@ -50,6 +60,16 @@
       "purpose": "Owner-approved platform, CI, toolchain, and dependency policy."
     },
     {
+      "path": "scripts/run_vnext_baseline.py",
+      "status": "A",
+      "purpose": "Cross-platform local baseline configure, build, upstream-test, and evidence runner."
+    },
+    {
+      "path": "scripts/tests/test_run_vnext_baseline.py",
+      "status": "A",
+      "purpose": "Unit tests for local baseline runner validation and dependency-lock handling."
+    },
+    {
       "path": "scripts/tests/test_verify_vnext_baseline.py",
       "status": "A",
       "purpose": "Failure-case tests for the machine-checkable provenance contract."
@@ -58,6 +78,11 @@
       "path": "scripts/verify_vnext_baseline.py",
       "status": "A",
       "purpose": "Cross-platform verifier that fails on unrecorded tree or dependency-input drift."
+    },
+    {
+      "path": "scripts/vnext_baseline_dependencies.json",
+      "status": "A",
+      "purpose": "Pinned Windows local-baseline dependency manifest, archive, Qt, and acquisition-tool identities."
     }
   ],
   "dependency_inputs": [
@@ -75,8 +100,16 @@
           "sha256": "a5dd56014b1cf4d98b01ed265aff31e9d7ae15ed2e12a4815457f591dcb361f2"
         },
         {
+          "path": "CMakePresets.json",
+          "sha256": "fcfab35ea899c3f26203c8723e293158944a062316977b71e13df3c97681f805"
+        },
+        {
           "path": "extern/CMakeLists.txt",
           "sha256": "364de172b60a4e9ed856d209748f05029219a9fa2b445a240c7f4f97ff041110"
+        },
+        {
+          "path": "scripts/run_vnext_baseline.py",
+          "sha256": "c18f33ccfeb43aaca8694645137e5140dfc7c03abd2a50f3de1744fe3b8e7947"
         }
       ],
       "repositories": [
@@ -90,9 +123,9 @@
         "https://github.com/unicode-org/icu",
         "https://www.sqlite.org"
       ],
-      "resolution": "OpenMW 0.51 CMake declarations pin fetched source tags or commits and integrity hashes; system package alternatives are selected by platform build configuration.",
+      "resolution": "OpenMW 0.51 CMake declarations pin fetched source tags or commits and integrity hashes; the vNext presets and runner define the shared local test build while system package alternatives remain platform-selected.",
       "license_evidence": "Fetched projects supply their own license files; system-package and bundle license inventories must be retained with the resolved environment artifacts in Slices 1.4-1.7.",
-      "phase1_follow_up": "Slices 1.4-1.7 capture the actually selected packages, versions, hashes, and licenses for each supported build environment."
+      "phase1_follow_up": "Slice 1.4 captures local resolved-tool and dependency evidence; Slices 1.5-1.7 retain the corresponding CI environment and license artifacts for every supported platform."
     },
     {
       "id": "linux-packages",
@@ -117,7 +150,7 @@
       ],
       "resolution": "The hashed installer records the exact package names and repository declarations inherited from OpenMW 0.51; package versions are runner-resolved and the inherited workflow still uses ubuntu-latest.",
       "license_evidence": "Ubuntu package metadata and /usr/share/doc package copyright files are the authoritative resolved license evidence and must be archived by the Linux baseline job.",
-      "phase1_follow_up": "Slices 1.4 and 1.5 replace the floating runner label per ADR-0002 and archive exact resolved package and license metadata."
+      "phase1_follow_up": "Slice 1.5 replaces the floating runner label per ADR-0002 and archives exact resolved package and license metadata."
     },
     {
       "id": "macos-packages",
@@ -146,7 +179,7 @@
       ],
       "resolution": "The dependency bundle name pins VCPKG_TAG 2026-02-24 and its downloaded manifest supplies an archive hash; the inherited manifest URL, Homebrew installer, and Homebrew packages remain floating inputs.",
       "license_evidence": "The dependency bundle and Homebrew package metadata supply resolved licenses; their exact inventory must be archived by the macOS baseline jobs.",
-      "phase1_follow_up": "Slices 1.4 and 1.7 must make dependency retrieval reproducible, capture the downloaded manifest and hash, and archive package/license inventories for both architectures."
+      "phase1_follow_up": "Slice 1.7 makes the macOS dependency retrieval reproducible, captures the downloaded manifest and hash, and archives package/license inventories for both architectures."
     },
     {
       "id": "windows-packages",
@@ -165,15 +198,19 @@
         {
           "path": "CI/deps_versions.msvc.sh",
           "sha256": "f942260610088085a196c63cba9d29ac1db90a4491d894e7eac79d7203fc0313"
+        },
+        {
+          "path": "scripts/vnext_baseline_dependencies.json",
+          "sha256": "fe6617d9a0ff54d72d61d4b854a8602bf7c39909eb8ca122fd92719aad2d170e"
         }
       ],
       "repositories": [
         "https://gitlab.com/OpenMW/openmw-deps/-/raw/main/windows",
         "https://github.com/miurahr/aqtinstall/releases/download/v3.1.15"
       ],
-      "resolution": "The bundle name pins VCPKG_TAG 2026-02-24, Qt is 6.6.3, aqtinstall is v3.1.15, and downloaded bundle manifests supply archive hashes; the inherited openmw-deps manifest URL remains on main.",
-      "license_evidence": "The dependency bundle and Qt installation metadata supply resolved licenses; their exact inventory must be archived by the Windows baseline job.",
-      "phase1_follow_up": "Slices 1.4 and 1.6 must make dependency retrieval reproducible, capture manifests and hashes, and archive exact package and license inventories."
+      "resolution": "The local dependency lock pins the OpenMW dependency repository commit and manifest SHA-256, bundle URL and SHA-512, Qt 6.6.3 target, and aqtinstall v3.1.15 SHA-256; the inherited CI workflow remains on main until Slice 1.6.",
+      "license_evidence": "The local runner inventories the bundle's vcpkg package lists and retained copyright files and records the exact Qt version; Slice 1.6 must retain the same resolved license evidence as a Windows CI artifact.",
+      "phase1_follow_up": "Slice 1.6 integrates the commit-pinned acquisition path into Windows CI and archives its exact environment, package, manifest, and license inventories."
     }
   ]
 }

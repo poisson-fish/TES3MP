@@ -1,0 +1,33 @@
+{
+  "schema_version": 1,
+  "windows_x86_64": {
+    "compiler": {
+      "family": "MSVC",
+      "product": "Visual Studio 2022",
+      "toolset": "v143"
+    },
+    "vcpkg_bundle": {
+      "tag": "2026-02-24",
+      "openmw_deps_commit": "0224d1bb5c7910024be22dc967828f8bf7a41817",
+      "manifest_url": "https://gitlab.com/OpenMW/openmw-deps/-/raw/0224d1bb5c7910024be22dc967828f8bf7a41817/windows/vcpkg-x64-windows-2022-2026-02-24-manifest.txt",
+      "manifest_sha256": "50354aa6bc0f40e1f6a79cf451c5cfc5fc23ba162a98f1a416f1d4542a0ffdef",
+      "archive_url": "https://github.com/OpenMW/openmw-deps-build/releases/download/2026-02-24/vcpkg-x64-windows-2022-2026-02-24.7z",
+      "archive_sha512": "26175e781a4cfe4ca8a6e1b7d97ba899d15841e97d494b5fdc73d5ba0de8af8d65fa7b1cb9950a6568c3e0c59dd5d030c800a50481453179b1dab8032f6edfd9",
+      "archive_name": "vcpkg-x64-windows-2022-2026-02-24.7z",
+      "triplet": "x64-windows",
+      "license_globs": [
+        "installed/x64-windows/share/*/copyright",
+        "installed/x64-windows/licenses/**"
+      ]
+    },
+    "qt": {
+      "version": "6.6.3",
+      "target": "win64_msvc2019_64",
+      "install_subdirectory": "6.6.3/msvc2019_64",
+      "aqt_version": "3.1.15",
+      "aqt_url": "https://github.com/miurahr/aqtinstall/releases/download/v3.1.15/aqt_x64.exe",
+      "aqt_sha256": "f9e9acc05975f2e70e4935ace76b41882cda4b53eb779c9bcf1d87a95029a6b0",
+      "license_reference": "https://doc.qt.io/qt-6.6/licensing.html"
+    }
+  }
+}

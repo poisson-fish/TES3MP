@@ -1,0 +1,117 @@
+{
+  "version": 6,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 25,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "vnext-baseline-common",
+      "hidden": true,
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/vnext-baseline",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+        "CMAKE_EXPORT_COMPILE_COMMANDS": true,
+        "BUILD_OPENMW": false,
+        "BUILD_LAUNCHER": false,
+        "BUILD_WIZARD": false,
+        "BUILD_MWINIIMPORTER": false,
+        "BUILD_OPENCS": false,
+        "BUILD_ESSIMPORTER": false,
+        "BUILD_BSATOOL": false,
+        "BUILD_ESMTOOL": false,
+        "BUILD_NIFTEST": false,
+        "BUILD_NAVMESHTOOL": false,
+        "BUILD_BULLETOBJECTTOOL": false,
+        "BUILD_COMPONENTS_TESTS": true,
+        "BUILD_OPENMW_TESTS": true,
+        "BUILD_OPENCS_TESTS": true,
+        "BUILD_BENCHMARKS": false,
+        "OPENMW_USE_SYSTEM_GOOGLETEST": false
+      }
+    },
+    {
+      "name": "vnext-baseline-windows",
+      "displayName": "vNext OpenMW 0.51 baseline tests (Windows x86-64)",
+      "inherits": "vnext-baseline-common",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Windows"
+      },
+      "cacheVariables": {
+        "BUILD_OPENCS": true,
+        "CMAKE_TOOLCHAIN_FILE": "$env{VNEXT_VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake",
+        "CMAKE_PREFIX_PATH": "$env{VNEXT_QT_ROOT}",
+        "LuaJit_INCLUDE_DIR": "$env{VNEXT_VCPKG_ROOT}/installed/x64-windows/include/luajit",
+        "LuaJit_LIBRARY": "$env{VNEXT_VCPKG_ROOT}/installed/x64-windows/lib/lua51.lib",
+        "OPENMW_USE_SYSTEM_SQLITE3": false,
+        "OPENMW_USE_SYSTEM_YAML_CPP": false,
+        "VCPKG_TARGET_TRIPLET": "x64-windows"
+      }
+    },
+    {
+      "name": "vnext-baseline-linux",
+      "displayName": "vNext OpenMW 0.51 baseline tests (Linux x86-64)",
+      "inherits": "vnext-baseline-common",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Linux"
+      },
+      "cacheVariables": {
+        "OPENMW_USE_SYSTEM_RECASTNAVIGATION": true,
+        "USE_SYSTEM_TINYXML": true
+      }
+    },
+    {
+      "name": "vnext-baseline-macos",
+      "displayName": "vNext OpenMW 0.51 baseline tests (macOS)",
+      "inherits": "vnext-baseline-common",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Darwin"
+      },
+      "cacheVariables": {
+        "CMAKE_TOOLCHAIN_FILE": "$env{VNEXT_VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake",
+        "CMAKE_PREFIX_PATH": "$env{VNEXT_VCPKG_ROOT}/installed/$env{VNEXT_VCPKG_TRIPLET};$env{VNEXT_QT_ROOT}",
+        "OPENMW_OSX_DEPLOYMENT": true,
+        "OPENMW_USE_SYSTEM_YAML_CPP": false,
+        "VCPKG_HOST_TRIPLET": "$env{VNEXT_VCPKG_TRIPLET}",
+        "VCPKG_TARGET_TRIPLET": "$env{VNEXT_VCPKG_TRIPLET}"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "vnext-baseline-windows",
+      "configurePreset": "vnext-baseline-windows",
+      "targets": [
+        "components-tests",
+        "openmw-tests",
+        "openmw-cs-tests"
+      ]
+    },
+    {
+      "name": "vnext-baseline-linux",
+      "configurePreset": "vnext-baseline-linux",
+      "targets": [
+        "components-tests",
+        "openmw-tests",
+        "openmw-cs-tests"
+      ]
+    },
+    {
+      "name": "vnext-baseline-macos",
+      "configurePreset": "vnext-baseline-macos",
+      "targets": [
+        "components-tests",
+        "openmw-tests",
+        "openmw-cs-tests"
+      ]
+    }
+  ]
+}
