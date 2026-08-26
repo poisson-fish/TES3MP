@@ -452,23 +452,23 @@
         },
         {
           "path": "docs/vnext/proofs/gamenetworkingsockets/README.md",
-          "sha256": "c07ea7de2a54e2b7947f34651d7f370a7537ad3c367619a829e0f84d18f4803e"
+          "sha256": "e4f1f0b08aa6237b882d1298f00fa98132e163c81c9c574cb6508e021f329f9e"
         },
         {
           "path": "docs/vnext/proofs/gamenetworkingsockets/proof.cpp",
-          "sha256": "79b88d49574f472d8f46065d66cb7bbffffc7566ee65400144cb3ba46858069e"
+          "sha256": "0a540be21af512289ca986fb21a11ad1ae716de89dc60a404f484de2993ff6b5"
         },
         {
           "path": "scripts/run_vnext_gamenetworkingsockets_proof.py",
-          "sha256": "7427bd3ed7ebc4722758fabd06cbebe35eba7753b870de2d5857f619afe706eb"
+          "sha256": "8a4b8cbcd33cac4b60a7675fe801982cb0421bae8c952a3d44704f3f9329500a"
         },
         {
           "path": "scripts/tests/test_run_vnext_gamenetworkingsockets_proof.py",
-          "sha256": "de26cf1b1f99ce6ca8aec2fac4894ab45bfc9d70cf64b56dc2e97b686a5bce20"
+          "sha256": "d446779a47298d4cb3a09f753a0c0efa5e93072ddd2b9d30d01f7b97cf7dc118"
         },
         {
           "path": "scripts/vnext_gamenetworkingsockets_proof.json",
-          "sha256": "6f061fda50ac00add338e3c271809febe7b362592c1de18792912c0546fbb9e5"
+          "sha256": "d5263f5cd197ee39f2ed862097b691396f4ad7759c19d715d98eb3c562ae295c"
         }
       ],
       "repositories": [

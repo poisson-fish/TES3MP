@@ -1356,6 +1356,42 @@ Implementation notes:
     and request owner completion acceptance before changing Slice 2.3 to
     **Implemented**. Slices 2.4–2.6 remain separately required.
 
+- 2026-08-26 — Slice 2.3 — In Progress
+  - Change: completed the remaining disposable hostile-resource and actual
+    lifecycle proof cases. The real GameNetworkingSockets harness now exercises
+    slow-reader receive byte/message limits and recovery, excessive segments per
+    packet, fail-closed maximum-message handling, a 32-connection handshake and
+    disconnect flood behind an eight-connection admission cap and bounded
+    callback drain, and close-with-unread-data handle invalidation. The exact
+    proof budgets and retained scenario list are locked and regression-tested.
+  - Decisions: none. The added numeric limits are disposable proof workloads,
+    not production transport budgets, architecture, authority, state-scope, or
+    gameplay behavior. They exercise the already owner-approved ADR-0005
+    acceptance scenarios without changing the selected dependencies or profile.
+  - Verification: a clean Windows x86-64 MSVC 2022 v143 run of `python
+    scripts/run_vnext_gamenetworkingsockets_proof.py` reverified all four source
+    archives and five licenses, rebuilt OpenSSL 3.5.8, Protobuf 6.33.4/Abseil
+    20250512.1, and unmodified GameNetworkingSockets 1.6.0, then passed all nine
+    proof scenarios in 2.2 seconds and retained lock hash
+    `d5263f5cd197ee39f2ed862097b691396f4ad7759c19d715d98eb3c562ae295c`.
+    An incremental MSVC `/W4 /WX` build passed, and `ctest --repeat
+    until-fail:20` passed 20 consecutive runs in 33.06 seconds. `python -m
+    unittest discover -s scripts/tests` passed 76 tests; both changed Python
+    files passed `py_compile`; lock validation passed; `python
+    scripts/verify_vnext_baseline.py --index` accounted for all 56 intentional
+    differences and verified all 43 dependency inputs; and `git diff --cached
+    --check` passed. Both changed JSON files parsed, all 32 local vNext Markdown
+    links resolved, and the retained proof evidence contained neither password
+    nor resume-token canaries.
+  - Owner review: no new owner decision was required. Slice 2.3 completion
+    acceptance remains pending the approved hosted matrix and retained-artifact
+    consistency review.
+  - Follow-ups: publish the completed proof, run Windows MSVC 2022, Linux GCC
+    13, Linux Clang 18 ASan/UBSan, macOS arm64, and manual macOS x86-64; compare
+    exact dependency, license, lock, toolchain, build-profile, budget, test, and
+    redaction evidence; then request owner completion acceptance before changing
+    Slice 2.3 to **Implemented**. Slices 2.4–2.6 remain separately required.
+
 ### Phase 3 — Independent targets and test scaffold
 
 Status: **Not Started**

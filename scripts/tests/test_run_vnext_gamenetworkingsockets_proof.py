@@ -27,6 +27,24 @@ class GameNetworkingSocketsProofRunnerTests(unittest.TestCase):
         self.assertIn("operator-managed certificates", lock["excluded_surfaces"])
         self.assertEqual(lock["vulnerability_sources"], proof.EXPECTED_VULNERABILITY_SOURCES)
         self.assertEqual(lock["generated_policy"], proof.EXPECTED_GENERATED_POLICY)
+        self.assertEqual(lock["budgets"]["receive_buffer_bytes"], 4096)
+        self.assertEqual(lock["budgets"]["receive_buffer_messages"], 4)
+        self.assertEqual(lock["budgets"]["receive_max_message_bytes"], 2048)
+        self.assertEqual(lock["budgets"]["receive_max_segments_per_packet"], 2)
+        self.assertEqual(lock["budgets"]["concurrent_handshakes"], 8)
+        self.assertEqual(lock["budgets"]["flood_connections"], 32)
+
+    def test_required_hostile_resource_and_close_scenarios_are_retained(self) -> None:
+        required = {
+            "actual_slow_reader_and_full_receive_buffer",
+            "excessive_segments_and_maximum_message_fail_closed",
+            "handshake_and_disconnect_flood_admission_bounds",
+            "close_discards_unread_data_and_invalidates_handle",
+        }
+        self.assertTrue(required.issubset(proof.EXPECTED_TESTS))
+        source = (proof.PROOF_DIR / "proof.cpp").read_text(encoding="utf-8")
+        for scenario in required:
+            self.assertIn(scenario, source)
 
     def test_lock_rejects_unknown_fields(self) -> None:
         lock = json.loads(proof.LOCK_PATH.read_text(encoding="utf-8"))

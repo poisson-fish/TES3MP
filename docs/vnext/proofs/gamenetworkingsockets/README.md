@@ -48,13 +48,19 @@ password-protected joins, rate limiting and redaction, password and resume-token
 wire canaries, single-use resume rotation under contention, expiry/context/
 generation rejection, teardown generations, bounded reliable/latest-wins
 queues, reliable ordering under faults, and separate lanes that let a new
-unreliable sample pass a delayed reliable fragment.
+unreliable sample pass a delayed reliable fragment. The real transport harness
+also verifies slow-reader receive byte/message caps, excessive per-packet
+segments, fail-closed maximum-message handling, bounded concurrent handshake and
+disconnect floods, bounded callback draining, recovery after dropped unreliable
+work, and the documented close behavior that discards unread data and
+invalidates the connection handle.
 
 The capture proves resistance to passive observation for the exercised
 canaries. It makes no endpoint-authentication claim; ADR-0005 explicitly accepts
 active server impersonation for the first milestone.
 
-Slice 2.3 stays **In Progress** while the remaining hostile-resource and actual
-close/unread-data lifecycle cases are added, and until the complete hosted
-matrix and retained artifacts have passed review. Android ARM64 is a separate
-feasibility result, recorded in [ANDROID_ARM64.md](ANDROID_ARM64.md).
+All approved scenarios now pass locally on Windows MSVC 2022. Slice 2.3 stays
+**In Progress** until the complete hosted matrix and retained artifacts have
+passed consistency review and the owner accepts the completion evidence.
+Android ARM64 is a separate feasibility result, recorded in
+[ANDROID_ARM64.md](ANDROID_ARM64.md).

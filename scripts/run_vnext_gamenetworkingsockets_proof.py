@@ -67,12 +67,22 @@ EXPECTED_BUDGETS = {
     "captured_wire_bytes": 2097152,
     "callbacks_per_drain": 128,
     "authentication_failures_before_backoff": 3,
+    "receive_buffer_bytes": 4096,
+    "receive_buffer_messages": 4,
+    "receive_max_message_bytes": 2048,
+    "receive_max_segments_per_packet": 2,
+    "concurrent_handshakes": 8,
+    "flood_connections": 32,
 }
 EXPECTED_TESTS = [
     "authentication_ordering_encryption_capture_and_redaction",
     "resume_single_use_rotation_contention_and_generation",
     "bounded_latest_reliable_authentication_and_flood_queues",
     "reliable_and_unreliable_delivery_classes_under_faults",
+    "actual_slow_reader_and_full_receive_buffer",
+    "excessive_segments_and_maximum_message_fail_closed",
+    "handshake_and_disconnect_flood_admission_bounds",
+    "close_discards_unread_data_and_invalidates_handle",
     "stable_owned_telemetry_categories",
 ]
 EXPECTED_VULNERABILITY_SOURCES = [

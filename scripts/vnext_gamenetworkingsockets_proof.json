@@ -105,7 +105,13 @@
     "reliable_queue_bytes": 262144,
     "captured_wire_bytes": 2097152,
     "callbacks_per_drain": 128,
-    "authentication_failures_before_backoff": 3
+    "authentication_failures_before_backoff": 3,
+    "receive_buffer_bytes": 4096,
+    "receive_buffer_messages": 4,
+    "receive_max_message_bytes": 2048,
+    "receive_max_segments_per_packet": 2,
+    "concurrent_handshakes": 8,
+    "flood_connections": 32
   },
   "supported_proof_platforms": [
     "Windows x86-64 / MSVC 2022 v143",

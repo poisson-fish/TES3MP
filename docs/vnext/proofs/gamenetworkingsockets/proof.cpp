@@ -7,9 +7,11 @@
 #include <deque>
 #include <functional>
 #include <iostream>
+#include <iterator>
 #include <limits>
 #include <map>
 #include <mutex>
+#include <numeric>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -45,6 +47,13 @@ namespace
     constexpr std::size_t kMaxApplicationMessageBytes = 64 * 1024;
     constexpr std::size_t kMaxReliableQueueBytes = 256 * 1024;
     constexpr std::size_t kMaxCapturedWireBytes = 2 * 1024 * 1024;
+    constexpr std::int32_t kProofReceiveBufferBytes = 4096;
+    constexpr std::int32_t kProofReceiveBufferMessages = 4;
+    constexpr std::int32_t kProofReceiveMaxMessageBytes = 2048;
+    constexpr std::int32_t kProofReceiveMaxSegmentsPerPacket = 2;
+    constexpr std::size_t kProofConcurrentHandshakes = 8;
+    constexpr std::size_t kProofFloodConnections = 32;
+    constexpr std::size_t kProofCallbacksPerDrain = 128;
     constexpr std::uint32_t kLoopback = 0x7f000001;
 
     class Failure : public std::runtime_error
@@ -491,10 +500,18 @@ namespace
         std::vector<std::uint8_t> mCapture;
     };
 
+    struct NetworkHarnessOptions
+    {
+        std::int32_t receiveBufferBytes = 0;
+        std::int32_t receiveBufferMessages = 0;
+        std::int32_t receiveMaxMessageBytes = 0;
+        std::int32_t receiveMaxSegmentsPerPacket = 0;
+    };
+
     class NetworkHarness
     {
     public:
-        NetworkHarness()
+        explicit NetworkHarness(const NetworkHarnessOptions& options = {})
         {
             SteamDatagramErrMsg error{};
             check(GameNetworkingSockets_Init(nullptr, error), "GameNetworkingSockets initialization failed");
@@ -503,7 +520,20 @@ namespace
 
             SteamNetworkingIPAddr listenAddress;
             listenAddress.SetIPv4(kLoopback, findAvailableUdpPort());
-            mListen = sockets()->CreateListenSocketIP(listenAddress, 0, nullptr);
+            std::vector<SteamNetworkingConfigValue_t> listenOptions;
+            const auto addOption = [&](ESteamNetworkingConfigValue key, std::int32_t value) {
+                if (value <= 0)
+                    return;
+                SteamNetworkingConfigValue_t option;
+                option.SetInt32(key, value);
+                listenOptions.push_back(option);
+            };
+            addOption(k_ESteamNetworkingConfig_RecvBufferSize, options.receiveBufferBytes);
+            addOption(k_ESteamNetworkingConfig_RecvBufferMessages, options.receiveBufferMessages);
+            addOption(k_ESteamNetworkingConfig_RecvMaxMessageSize, options.receiveMaxMessageBytes);
+            addOption(k_ESteamNetworkingConfig_RecvMaxSegmentsPerPacket, options.receiveMaxSegmentsPerPacket);
+            mListen = sockets()->CreateListenSocketIP(
+                listenAddress, static_cast<int>(listenOptions.size()), listenOptions.data());
             check(mListen != k_HSteamListenSocket_Invalid, "cannot create loopback listen socket");
             check(sockets()->GetListenSocketAddress(mListen, &listenAddress), "cannot query listen address");
             mProxy.emplace(listenAddress.m_port);
@@ -567,16 +597,62 @@ namespace
             std::vector<std::string> result;
             pumpUntil(
                 [&] {
-                    ISteamNetworkingMessage* message = nullptr;
-                    while (sockets()->ReceiveMessagesOnConnection(mServer, &message, 1) == 1)
-                    {
-                        result.emplace_back(static_cast<const char*>(message->m_pData), message->m_cbSize);
-                        message->Release();
-                    }
+                    auto available = receiveServerAvailable(std::numeric_limits<std::size_t>::max());
+                    result.insert(result.end(), std::make_move_iterator(available.begin()),
+                        std::make_move_iterator(available.end()));
                     return result.size() >= minimum;
                 },
                 timeout, "message receive timeout");
             return result;
+        }
+
+        std::vector<std::string> receiveServerAvailable(std::size_t limit)
+        {
+            std::vector<std::string> result;
+            while (result.size() < limit)
+            {
+                ISteamNetworkingMessage* message = nullptr;
+                const int count = sockets()->ReceiveMessagesOnConnection(mServer, &message, 1);
+                check(count >= 0, "server receive used an invalid connection handle");
+                if (count == 0)
+                    break;
+                result.emplace_back(static_cast<const char*>(message->m_pData), message->m_cbSize);
+                message->Release();
+            }
+            return result;
+        }
+
+        void flushClient()
+        {
+            check(sockets()->FlushMessagesOnConnection(mClient) == k_EResultOK, "client flush failed");
+        }
+
+        void waitForServerTerminal(std::chrono::milliseconds timeout)
+        {
+            pumpUntil([&] { return mServerTerminal; }, timeout, "server connection did not terminate");
+        }
+
+        void waitForClientReliableDrain(std::chrono::milliseconds timeout)
+        {
+            pumpUntil(
+                [&] {
+                    SteamNetConnectionRealTimeStatus_t status{};
+                    if (sockets()->GetConnectionRealTimeStatus(mClient, &status, 0, nullptr) != k_EResultOK)
+                        return false;
+                    return status.m_cbPendingReliable == 0 && status.m_cbSentUnackedReliable == 0;
+                },
+                timeout, "client reliable data did not reach the peer");
+        }
+
+        void closeServerAndVerifyUnreadDiscarded()
+        {
+            const HSteamNetConnection stale = mServer;
+            check(stale != k_HSteamNetConnection_Invalid, "server connection already invalid");
+            check(sockets()->CloseConnection(stale, 0, "proof-close", false), "server close failed");
+            mServer = k_HSteamNetConnection_Invalid;
+            ISteamNetworkingMessage* message = nullptr;
+            check(sockets()->ReceiveMessagesOnConnection(stale, &message, 1) == -1,
+                "closed connection retained a readable handle or unread data");
         }
 
         bool wireContains(std::string_view value) const { return mProxy->contains(value); }
@@ -617,6 +693,14 @@ namespace
                 if (info.m_hConn == mServer)
                     mServerConnected = true;
             }
+            if (info.m_info.m_eState == k_ESteamNetworkingConnectionState_ClosedByPeer
+                || info.m_info.m_eState == k_ESteamNetworkingConnectionState_ProblemDetectedLocally)
+            {
+                if (info.m_hConn == mClient)
+                    mClientTerminal = true;
+                if (info.m_hConn == mServer)
+                    mServerTerminal = true;
+            }
         }
 
         template <class Predicate>
@@ -639,7 +723,187 @@ namespace
         HSteamNetConnection mServer = k_HSteamNetConnection_Invalid;
         bool mClientConnected = false;
         bool mServerConnected = false;
+        bool mClientTerminal = false;
+        bool mServerTerminal = false;
         std::optional<DatagramProxy> mProxy;
+    };
+
+    class ConnectionFloodHarness
+    {
+    public:
+        ConnectionFloodHarness()
+        {
+            SteamDatagramErrMsg error{};
+            check(GameNetworkingSockets_Init(nullptr, error), "GameNetworkingSockets flood initialization failed");
+            sCurrent = this;
+            SteamNetworkingUtils()->SetGlobalCallback_SteamNetConnectionStatusChanged(&onStatusChanged);
+
+            SteamNetworkingIPAddr listenAddress;
+            listenAddress.SetIPv4(kLoopback, findAvailableUdpPort());
+            SteamNetworkingConfigValue_t initialTimeout;
+            initialTimeout.SetInt32(k_ESteamNetworkingConfig_TimeoutInitial, 1000);
+            mListen = sockets()->CreateListenSocketIP(listenAddress, 1, &initialTimeout);
+            check(mListen != k_HSteamListenSocket_Invalid, "cannot create flood listen socket");
+            check(sockets()->GetListenSocketAddress(mListen, &listenAddress), "cannot query flood listen address");
+
+            SteamNetworkingConfigValue_t options[2];
+            options[0] = productionEncryption(false);
+            options[1].SetInt32(k_ESteamNetworkingConfig_TimeoutInitial, 1000);
+            mClients.reserve(kProofFloodConnections);
+            for (std::size_t index = 0; index < kProofFloodConnections; ++index)
+            {
+                const HSteamNetConnection client = sockets()->ConnectByIPAddress(listenAddress, 2, options);
+                check(client != k_HSteamNetConnection_Invalid, "flood client creation failed");
+                mClients.push_back(client);
+            }
+        }
+
+        ConnectionFloodHarness(const ConnectionFloodHarness&) = delete;
+        ConnectionFloodHarness& operator=(const ConnectionFloodHarness&) = delete;
+
+        ~ConnectionFloodHarness()
+        {
+            closeHandles(mClients);
+            closeHandles(mServers);
+            if (mListen != k_HSteamListenSocket_Invalid)
+                sockets()->CloseListenSocket(mListen);
+            pumpFor(25ms);
+            SteamNetworkingUtils()->SetGlobalCallback_SteamNetConnectionStatusChanged(nullptr);
+            sCurrent = nullptr;
+            GameNetworkingSockets_Kill();
+        }
+
+        void admitBoundedHandshakes()
+        {
+            pumpUntil([&] { return mIncomingAttempts == kProofFloodConnections; }, 8s,
+                "handshake flood did not reach the admission gate");
+            check(mAccepted <= kProofConcurrentHandshakes, "handshake admission exceeded proof budget");
+            check(mPeakActive <= kProofConcurrentHandshakes, "concurrent handshake state exceeded proof budget");
+            check(mRejected == kProofFloodConnections - mAccepted, "handshake flood accounting mismatch");
+            check(mMaxCallbacksPerDrain <= kProofCallbacksPerDrain, "callback drain exceeded proof budget");
+        }
+
+        void disconnectFlood()
+        {
+            closeHandles(mClients);
+            pumpUntil([&] { return mActiveServers == 0; }, 5s,
+                "disconnect flood left accepted server connections active");
+            check(mMaxCallbacksPerDrain <= kProofCallbacksPerDrain, "disconnect callback drain exceeded proof budget");
+            check(mTerminalCallbacks <= kProofFloodConnections * 2,
+                "disconnect flood produced unbounded terminal callbacks");
+        }
+
+    private:
+        static ISteamNetworkingSockets* sockets() { return SteamNetworkingSockets(); }
+
+        static void onStatusChanged(SteamNetConnectionStatusChangedCallback_t* info)
+        {
+            if (sCurrent)
+                sCurrent->statusChanged(*info);
+        }
+
+        static void invalidate(std::vector<HSteamNetConnection>& handles, HSteamNetConnection handle)
+        {
+            const auto found = std::find(handles.begin(), handles.end(), handle);
+            if (found != handles.end())
+                *found = k_HSteamNetConnection_Invalid;
+        }
+
+        static void closeHandles(std::vector<HSteamNetConnection>& handles)
+        {
+            for (HSteamNetConnection& handle : handles)
+            {
+                if (handle == k_HSteamNetConnection_Invalid)
+                    continue;
+                sockets()->CloseConnection(handle, 0, "proof-flood-close", false);
+                handle = k_HSteamNetConnection_Invalid;
+            }
+        }
+
+        void statusChanged(const SteamNetConnectionStatusChangedCallback_t& info)
+        {
+            ++mCallbacksThisDrain;
+            const bool incoming = info.m_info.m_hListenSocket == mListen;
+            if (incoming && info.m_info.m_eState == k_ESteamNetworkingConnectionState_Connecting)
+            {
+                ++mIncomingAttempts;
+                if (mActiveServers < kProofConcurrentHandshakes)
+                {
+                    check(sockets()->AcceptConnection(info.m_hConn) == k_EResultOK,
+                        "bounded flood connection accept failed");
+                    mServers.push_back(info.m_hConn);
+                    ++mAccepted;
+                    ++mActiveServers;
+                    mPeakActive = std::max(mPeakActive, mActiveServers);
+                }
+                else
+                {
+                    check(sockets()->CloseConnection(info.m_hConn, 0, "admission-bounded", false),
+                        "excess flood connection rejection failed");
+                    ++mRejected;
+                }
+                return;
+            }
+
+            if (info.m_info.m_eState != k_ESteamNetworkingConnectionState_ClosedByPeer
+                && info.m_info.m_eState != k_ESteamNetworkingConnectionState_ProblemDetectedLocally)
+                return;
+            ++mTerminalCallbacks;
+            const bool serverHandle = std::find(mServers.begin(), mServers.end(), info.m_hConn) != mServers.end();
+            if (serverHandle)
+            {
+                invalidate(mServers, info.m_hConn);
+                if (mActiveServers > 0)
+                    --mActiveServers;
+            }
+            else
+                invalidate(mClients, info.m_hConn);
+            sockets()->CloseConnection(info.m_hConn, 0, nullptr, false);
+        }
+
+        void drainCallbacks()
+        {
+            mCallbacksThisDrain = 0;
+            sockets()->RunCallbacks();
+            mMaxCallbacksPerDrain = std::max(mMaxCallbacksPerDrain, mCallbacksThisDrain);
+        }
+
+        void pumpFor(std::chrono::milliseconds duration)
+        {
+            const auto deadline = Clock::now() + duration;
+            while (Clock::now() < deadline)
+            {
+                drainCallbacks();
+                std::this_thread::sleep_for(2ms);
+            }
+        }
+
+        template <class Predicate>
+        void pumpUntil(Predicate predicate, std::chrono::milliseconds timeout, std::string_view error)
+        {
+            const auto deadline = Clock::now() + timeout;
+            while (Clock::now() < deadline)
+            {
+                drainCallbacks();
+                if (predicate())
+                    return;
+                std::this_thread::sleep_for(2ms);
+            }
+            throw Failure(std::string(error));
+        }
+
+        inline static ConnectionFloodHarness* sCurrent = nullptr;
+        HSteamListenSocket mListen = k_HSteamListenSocket_Invalid;
+        std::vector<HSteamNetConnection> mClients;
+        std::vector<HSteamNetConnection> mServers;
+        std::size_t mIncomingAttempts = 0;
+        std::size_t mAccepted = 0;
+        std::size_t mRejected = 0;
+        std::size_t mActiveServers = 0;
+        std::size_t mPeakActive = 0;
+        std::size_t mTerminalCallbacks = 0;
+        std::size_t mCallbacksThisDrain = 0;
+        std::size_t mMaxCallbacksPerDrain = 0;
     };
 
     void testAuthenticationOrderingAndRedaction()
@@ -826,6 +1090,85 @@ namespace
         check(delayed.front() == delayedReliable, "delayed reliable operation was lost");
     }
 
+    void testSlowReaderAndFullReceiveBuffer()
+    {
+        NetworkHarnessOptions options;
+        options.receiveBufferBytes = kProofReceiveBufferBytes;
+        options.receiveBufferMessages = kProofReceiveBufferMessages;
+        options.receiveMaxMessageBytes = kProofReceiveMaxMessageBytes;
+        NetworkHarness network(options);
+
+        const std::string payload(768, 's');
+        for (int index = 0; index < 32; ++index)
+            network.sendClient(payload, k_nSteamNetworkingSend_Unreliable | k_nSteamNetworkingSend_NoNagle);
+        network.pumpFor(250ms);
+        const auto buffered = network.receiveServerAvailable(64);
+        const std::size_t bufferedBytes = std::accumulate(buffered.begin(), buffered.end(), std::size_t{ 0 },
+            [](std::size_t total, const std::string& value) { return total + value.size(); });
+        check(!buffered.empty(), "slow-reader proof received no messages");
+        check(buffered.size() <= static_cast<std::size_t>(kProofReceiveBufferMessages),
+            "slow reader exceeded receive-message budget");
+        check(bufferedBytes <= static_cast<std::size_t>(kProofReceiveBufferBytes),
+            "slow reader exceeded receive-byte budget");
+
+        network.sendClient("after-slow-reader", k_nSteamNetworkingSend_Unreliable | k_nSteamNetworkingSend_NoNagle);
+        const auto recovered = network.receiveServer(1, 5s);
+        check(recovered.front() == "after-slow-reader", "connection did not recover after draining a slow reader");
+    }
+
+    void testExcessiveSegmentsAndMaximumMessage()
+    {
+        {
+            NetworkHarnessOptions options;
+            options.receiveMaxSegmentsPerPacket = kProofReceiveMaxSegmentsPerPacket;
+            NetworkHarness network(options);
+            for (int index = 0; index < 8; ++index)
+                network.sendClient("segment-" + std::to_string(index), k_nSteamNetworkingSend_Unreliable);
+            network.flushClient();
+            network.pumpFor(250ms);
+            const auto accepted = network.receiveServerAvailable(16);
+            check(accepted.size() <= static_cast<std::size_t>(kProofReceiveMaxSegmentsPerPacket),
+                "excessive packet segments bypassed the configured work limit");
+
+            network.sendClient("after-segment-limit",
+                k_nSteamNetworkingSend_Unreliable | k_nSteamNetworkingSend_NoNagle);
+            const auto recovered = network.receiveServer(1, 5s);
+            check(recovered.front() == "after-segment-limit",
+                "segment-limit rejection made the connection unusable");
+        }
+
+        {
+            NetworkHarnessOptions options;
+            options.receiveBufferBytes = kProofReceiveBufferBytes;
+            options.receiveMaxMessageBytes = kProofReceiveMaxMessageBytes;
+            NetworkHarness network(options);
+            network.sendClient(std::string(static_cast<std::size_t>(kProofReceiveMaxMessageBytes) + 1, 'm'),
+                k_nSteamNetworkingSend_Reliable | k_nSteamNetworkingSend_NoNagle);
+            network.waitForServerTerminal(5s);
+        }
+    }
+
+    void testHandshakeAndDisconnectFloodAdmissionBounds()
+    {
+        ConnectionFloodHarness flood;
+        flood.admitBoundedHandshakes();
+        flood.disconnectFlood();
+    }
+
+    void testCloseDiscardsUnreadDataAndInvalidatesHandle()
+    {
+        NetworkHarness network;
+        network.sendClient("read-before-close");
+        const auto marker = network.receiveServer(1, 5s);
+        check(marker.front() == "read-before-close", "close lifecycle marker was not received");
+        network.sendClient("unread-before-close-1");
+        network.sendClient("unread-before-close-2");
+        network.flushClient();
+        network.waitForClientReliableDrain(5s);
+        network.closeServerAndVerifyUnreadDiscarded();
+        network.pumpFor(100ms);
+    }
+
     void testStableCategories()
     {
         constexpr std::array values{ Category::connected_encrypted, Category::auth_required, Category::auth_rejected,
@@ -847,6 +1190,11 @@ int main()
         std::pair{ "resume_single_use_rotation_contention_and_generation", &testResumeAtomicityAndGeneration },
         std::pair{ "bounded_latest_reliable_authentication_and_flood_queues", &testBoundedQueuesAndFloods },
         std::pair{ "reliable_and_unreliable_delivery_classes_under_faults", &testDeliveryClassesUnderFaults },
+        std::pair{ "actual_slow_reader_and_full_receive_buffer", &testSlowReaderAndFullReceiveBuffer },
+        std::pair{ "excessive_segments_and_maximum_message_fail_closed", &testExcessiveSegmentsAndMaximumMessage },
+        std::pair{ "handshake_and_disconnect_flood_admission_bounds", &testHandshakeAndDisconnectFloodAdmissionBounds },
+        std::pair{ "close_discards_unread_data_and_invalidates_handle",
+            &testCloseDiscardsUnreadDataAndInvalidatesHandle },
         std::pair{ "stable_owned_telemetry_categories", &testStableCategories },
     };
 
