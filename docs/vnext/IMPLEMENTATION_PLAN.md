@@ -1321,6 +1321,41 @@ Implementation notes:
     acceptance tests. Slice 2.2 hosted evidence remains independently in
     progress and was intentionally not monitored in this working session.
 
+- 2026-08-26 — Slice 2.3 — In Progress
+  - Change: added the disposable selected-library proof, exact source/archive/
+    license lock, safe source acquisition and extraction, restricted static
+    build, real encrypted direct-IP client/server capture harness, fault and
+    lifecycle scenarios, retained evidence, Android ARM64 assessment, and the
+    required five-job desktop workflow. This remains selection evidence and
+    creates no production multiplayer target or Phase 6 wrapper.
+  - Decisions: after explicit owner approval of dependency Option A, ADR-0005
+    records GameNetworkingSockets `1.6.0`, OpenSSL `3.5.8` LTS, Protobuf C++
+    `6.33.4`, and Abseil `20250512.1`. The proof uses unmodified upstream
+    sources, static libraries, OpenSSL, and the already approved exclusions.
+    Proof-only resource budgets are test limits, not production interface or
+    gameplay-state decisions.
+  - Verification: a clean local Windows x86-64 MSVC 2022 run verified every
+    pinned archive and license, built all four source dependencies with the
+    approved profile, and passed encryption/plaintext rejection, passive
+    password/token canary capture, authentication ordering and failure,
+    resume-token contention/rotation/invalidation, generation teardown,
+    bounded queue/flood, reliable ordering, separate-lane head-of-line, and
+    stable telemetry scenarios. The lock validator passes; the repository-owned
+    Python suite passes 75 tests; Python compilation passes; Actionlint 1.7.12
+    accepts the workflow; and JSON, Markdown-link, provenance, and diff checks
+    pass. Hosted evidence is still pending.
+  - Owner review: the project owner explicitly approved dependency Option A on
+    2026-08-26 before implementation. No additional architecture, authority,
+    state-scope, or gameplay-behavior decision was made by this proof slice.
+  - Follow-ups: extend the proof through the remaining ADR-0005 slow-reader,
+    excessive-segment, handshake/disconnect-flood, and actual close/unread-data
+    lifecycle cases without treating proof budgets as production policy. Then
+    publish and run the complete Windows, GCC 13, Clang 18 ASan/UBSan, macOS
+    arm64, and scheduled/manual macOS x86-64 matrix; compare retained exact
+    dependency, license, toolchain, build-profile, test, and redaction evidence;
+    and request owner completion acceptance before changing Slice 2.3 to
+    **Implemented**. Slices 2.4–2.6 remain separately required.
+
 ### Phase 3 — Independent targets and test scaffold
 
 Status: **Not Started**

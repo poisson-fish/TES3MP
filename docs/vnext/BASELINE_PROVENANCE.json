@@ -45,6 +45,11 @@
       "purpose": "Supported desktop compiler matrix for the pinned bounded FlatBuffers selection proof, sanitizer-backed fuzz smoke, and retained evidence."
     },
     {
+      "path": ".github/workflows/vnext-gamenetworkingsockets-proof.yml",
+      "status": "A",
+      "purpose": "Supported desktop compiler matrix for the pinned encrypted GameNetworkingSockets selection proof, sanitizer coverage, and retained evidence."
+    },
+    {
       "path": "CI/install_debian_deps.sh",
       "status": "M",
       "purpose": "OpenMW Debian dependency groups with the approved Linux compiler majors and Ninja named explicitly."
@@ -170,9 +175,29 @@
       "purpose": "Additive optional-field FlatBuffers schema used only for compatibility selection evidence."
     },
     {
+      "path": "docs/vnext/proofs/gamenetworkingsockets/ANDROID_ARM64.md",
+      "status": "A",
+      "purpose": "ADR-0005-required Android ARM64 source-feasibility assessment and unresolved upstream CMake platform gate."
+    },
+    {
+      "path": "docs/vnext/proofs/gamenetworkingsockets/CMakeLists.txt",
+      "status": "A",
+      "purpose": "Isolated C++20 static build, strict warnings, sanitizer integration, toolchain capture, and CTest entry for the transport selection proof."
+    },
+    {
+      "path": "docs/vnext/proofs/gamenetworkingsockets/README.md",
+      "status": "A",
+      "purpose": "Scope, exact dependencies, local execution, security limits, and retained-evidence instructions for the disposable transport proof."
+    },
+    {
       "path": "docs/vnext/proofs/gamenetworkingsockets/TRUST_INTEGRATION_ASSESSMENT.md",
       "status": "A",
       "purpose": "Retained ADR-0005 endpoint-trust API audit and owner-approved no-patch disposition."
+    },
+    {
+      "path": "docs/vnext/proofs/gamenetworkingsockets/proof.cpp",
+      "status": "A",
+      "purpose": "Encrypted connection, capture-canary, authentication, resume, lifecycle, bounded-queue, delivery-lane, fault, and telemetry selection scenarios."
     },
     {
       "path": "scripts/capture_vnext_linux_ci.py",
@@ -200,6 +225,11 @@
       "purpose": "Fail-closed source acquisition, safe extraction, schema policy, regeneration, build, test, fuzz, and evidence runner."
     },
     {
+      "path": "scripts/run_vnext_gamenetworkingsockets_proof.py",
+      "status": "A",
+      "purpose": "Fail-closed dependency-lock validation, verified acquisition, safe extraction, restricted source build, scenario execution, and evidence runner."
+    },
+    {
       "path": "scripts/tests/test_capture_vnext_linux_ci.py",
       "status": "A",
       "purpose": "Unit and workflow-policy tests for the Linux baseline evidence gate."
@@ -223,6 +253,11 @@
       "path": "scripts/tests/test_run_vnext_flatbuffers_proof.py",
       "status": "A",
       "purpose": "Failure-case tests for the selected dependency lock, acquisition, extraction, schema, and workflow policies."
+    },
+    {
+      "path": "scripts/tests/test_run_vnext_gamenetworkingsockets_proof.py",
+      "status": "A",
+      "purpose": "Failure-case tests for the selected transport dependency lock, acquisition, extraction, line-ending, and workflow policies."
     },
     {
       "path": "scripts/tests/test_verify_vnext_baseline.py",
@@ -253,6 +288,11 @@
       "path": "scripts/vnext_flatbuffers_proof.json",
       "status": "A",
       "purpose": "Exact FlatBuffers tag, commit, archive, license, generator profile, supported proof matrix, exclusions, and update policy."
+    },
+    {
+      "path": "scripts/vnext_gamenetworkingsockets_proof.json",
+      "status": "A",
+      "purpose": "Exact GameNetworkingSockets, OpenSSL, Protobuf, Abseil, and bundled utf8_range identities, licenses, restricted profile, budgets, vulnerability sources, and update policy."
     }
   ],
   "dependency_inputs": [
@@ -313,7 +353,7 @@
       "files": [
         {
           "path": ".gitattributes",
-          "sha256": "89196d532b0adfbe46045eed596e5c2a7f24a87eb47a2b705518f19196f0af33"
+          "sha256": "afc108d737af2f7c9dcc03f7b4141a8b725eab0e415f7b9da722e89d5243878a"
         },
         {
           "path": ".github/workflows/vnext-flatbuffers-proof.yml",
@@ -387,6 +427,65 @@
       "resolution": "ADR-0004 pins the normal FlatBuffers v25.12.19 release commit and SHA-256-verified source archive. The repository runner safely extracts regular files, builds flatc from source, enforces the restricted generator/schema profile, reproduces LF-pinned committed output independently of checkout conversion, rejects platform-dependent seed-corpus bytes against pinned hashes, compiles the header-only runtime surface, runs bounded/evolution tests and optional sanitizer-backed fuzzing, and writes exact toolchain and artifact evidence.",
       "license_evidence": "The lock records Apache-2.0 and the exact upstream LICENSE SHA-256; every proof job verifies and retains that license beside its dependency, toolchain, schema, generated-code, corpus, and test evidence.",
       "phase1_follow_up": "Satisfied for Phase 2 Slice 2.2 by the replacement full five-job matrix at da24423a1a in manual run 32996083180, successful retained exact input/schema/generated-header/seed-corpus/license/compiler/test review, and explicit owner completion acceptance on 2026-08-26. Android ARM64 remains a documented Phase 23 feasibility check under ADR-0002."
+    },
+    {
+      "id": "gamenetworkingsockets-selection-proof",
+      "platforms": [
+        "Linux x86-64",
+        "Windows x86-64",
+        "macOS arm64",
+        "macOS x86-64",
+        "Android ARM64 feasibility"
+      ],
+      "files": [
+        {
+          "path": ".github/workflows/vnext-gamenetworkingsockets-proof.yml",
+          "sha256": "68268029e3e7a0404fc86be90b2bbce735c70f273857666aaabdbf2b44401492"
+        },
+        {
+          "path": "docs/vnext/proofs/gamenetworkingsockets/ANDROID_ARM64.md",
+          "sha256": "34fefaaf02ba823791d894874e74784d7c34a503a812a6eeca8971b30a61d9a5"
+        },
+        {
+          "path": "docs/vnext/proofs/gamenetworkingsockets/CMakeLists.txt",
+          "sha256": "a6e56cb071bcaf6135651fca27ba42b2b11f75883bad1878541552e1821bc5e1"
+        },
+        {
+          "path": "docs/vnext/proofs/gamenetworkingsockets/README.md",
+          "sha256": "c07ea7de2a54e2b7947f34651d7f370a7537ad3c367619a829e0f84d18f4803e"
+        },
+        {
+          "path": "docs/vnext/proofs/gamenetworkingsockets/proof.cpp",
+          "sha256": "79b88d49574f472d8f46065d66cb7bbffffc7566ee65400144cb3ba46858069e"
+        },
+        {
+          "path": "scripts/run_vnext_gamenetworkingsockets_proof.py",
+          "sha256": "7427bd3ed7ebc4722758fabd06cbebe35eba7753b870de2d5857f619afe706eb"
+        },
+        {
+          "path": "scripts/tests/test_run_vnext_gamenetworkingsockets_proof.py",
+          "sha256": "de26cf1b1f99ce6ca8aec2fac4894ab45bfc9d70cf64b56dc2e97b686a5bce20"
+        },
+        {
+          "path": "scripts/vnext_gamenetworkingsockets_proof.json",
+          "sha256": "6f061fda50ac00add338e3c271809febe7b362592c1de18792912c0546fbb9e5"
+        }
+      ],
+      "repositories": [
+        "https://github.com/ValveSoftware/GameNetworkingSockets",
+        "https://github.com/openssl/openssl",
+        "https://github.com/protocolbuffers/protobuf",
+        "https://github.com/abseil/abseil-cpp",
+        "https://github.com/actions/checkout",
+        "https://github.com/actions/upload-artifact",
+        "https://github.com/ilammy/msvc-dev-cmd",
+        "Ubuntu runner package repositories",
+        "Chocolatey package repositories",
+        "Homebrew package repositories"
+      ],
+      "resolution": "ADR-0005 and the repository lock pin the normal GameNetworkingSockets 1.6.0, OpenSSL 3.5.8 LTS, Protobuf C++ 6.33.4, and Abseil 20250512.1 source commits, SHA-256-verified archives and licenses, bundled utf8_range license, generated-source policy, vulnerability sources, restricted static build profile, exclusions, budgets, platform matrix, and update cadence. The runner builds only those unmodified sources and retains verbose observed scenario and toolchain evidence.",
+      "license_evidence": "Every proof job verifies and retains the exact BSD-3-Clause GameNetworkingSockets and Protobuf licenses, Apache-2.0 OpenSSL and Abseil licenses, and MIT utf8_range license beside archive, compiler, build-profile, platform, and scenario evidence.",
+      "phase1_follow_up": "Phase 2 Slice 2.3 remains In Progress. The local Windows MSVC 2022 proof passes; the full five-job hosted matrix, sanitizer result, retained-artifact consistency review, and explicit owner completion acceptance remain required. Android ARM64 feasibility is recorded separately and is not a primary-platform gate."
     },
     {
       "id": "linux-packages",

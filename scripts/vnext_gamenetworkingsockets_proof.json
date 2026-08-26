@@ -1,0 +1,139 @@
+{
+  "schema_version": 1,
+  "dependencies": {
+    "gamenetworkingsockets": {
+      "version": "1.6.0",
+      "tag": "v1.6.0",
+      "commit": "2cb93a06350bb065db53abdb0d87cf297e0bfd34",
+      "source_directory": "GameNetworkingSockets-1.6.0",
+      "source_archive": {
+        "url": "https://github.com/ValveSoftware/GameNetworkingSockets/archive/refs/tags/v1.6.0.tar.gz",
+        "sha256": "bddfe735d29ff2bbf186013a945ed57caaf4b79893eb7918c06c0f64955016f3"
+      },
+      "license": {
+        "spdx": "BSD-3-Clause",
+        "path": "LICENSE",
+        "sha256": "6fedd796d51d7f996e0b3dc7c1c9f6a67603bec7a2cfb9f418e0c6607a1ca647"
+      }
+    },
+    "openssl": {
+      "version": "3.5.8",
+      "tag": "openssl-3.5.8",
+      "commit": "f4dc4d58b48d346a8270183f89acf826d459b0ca",
+      "source_directory": "openssl-3.5.8",
+      "source_archive": {
+        "url": "https://github.com/openssl/openssl/releases/download/openssl-3.5.8/openssl-3.5.8.tar.gz",
+        "sha256": "a8f84a39918ec6415ce765d9b429d313ba97b8143169c172e734b9514464f5b2"
+      },
+      "license": {
+        "spdx": "Apache-2.0",
+        "path": "LICENSE.txt",
+        "sha256": "7d5450cb2d142651b8afa315b5f238efc805dad827d91ba367d8516bc9d49e7a"
+      }
+    },
+    "protobuf": {
+      "version": "6.33.4",
+      "release": "v33.4",
+      "commit": "edaa823d8b36a8656d7b2b9241b7d0bfe50af878",
+      "source_directory": "protobuf-33.4",
+      "source_archive": {
+        "url": "https://github.com/protocolbuffers/protobuf/releases/download/v33.4/protobuf-33.4.tar.gz",
+        "sha256": "bc670a4e34992c175137ddda24e76562bb928f849d712a0e3c2fb2e19249bea1"
+      },
+      "license": {
+        "spdx": "BSD-3-Clause",
+        "path": "LICENSE",
+        "sha256": "6e5e117324afd944dcf67f36cf329843bc1a92229a8cd9bb573d7a83130fea7d"
+      }
+    },
+    "abseil": {
+      "version": "20250512.1",
+      "tag": "20250512.1",
+      "commit": "76bb24329e8bf5f39704eb10d21b9a80befa7c81",
+      "source_directory": "abseil-cpp-20250512.1",
+      "source_archive": {
+        "url": "https://github.com/abseil/abseil-cpp/archive/refs/tags/20250512.1.tar.gz",
+        "sha256": "9b7a064305e9fd94d124ffa6cc358592eb42b5da588fb4e07d09254aa40086db"
+      },
+      "license": {
+        "spdx": "Apache-2.0",
+        "path": "LICENSE",
+        "sha256": "c79a7fea0e3cac04cd43f20e7b648e5a0ff8fa5344e644b0ee09ca1162b62747"
+      }
+    }
+  },
+  "bundled_transitive_dependencies": {
+    "utf8_range": {
+      "owner": "protobuf",
+      "path": "third_party/utf8_range",
+      "license_spdx": "MIT",
+      "license_sha256": "02de69b64fc36d9e938f418e52723e42f0b2b226d58a9cb3c8dcbdf7059f5074"
+    }
+  },
+  "build_profile": {
+    "openssl": [
+      "no-shared",
+      "no-tests",
+      "no-apps",
+      "no-module",
+      "no-legacy",
+      "windows-no-asm"
+    ],
+    "protobuf": [
+      "static",
+      "tests-off",
+      "zlib-off",
+      "pinned-local-abseil",
+      "bundled-utf8-range",
+      "windows-msvc-static-runtime"
+    ],
+    "gamenetworkingsockets": [
+      "static-only",
+      "openssl",
+      "ice-off",
+      "webrtc-off",
+      "examples-off",
+      "tests-off",
+      "tools-off",
+      "windows-msvc-static-runtime"
+    ]
+  },
+  "budgets": {
+    "credential_bytes": 64,
+    "resume_token_bytes": 64,
+    "application_message_bytes": 65536,
+    "reliable_queue_bytes": 262144,
+    "captured_wire_bytes": 2097152,
+    "callbacks_per_drain": 128,
+    "authentication_failures_before_backoff": 3
+  },
+  "supported_proof_platforms": [
+    "Windows x86-64 / MSVC 2022 v143",
+    "Linux x86-64 / GCC 13",
+    "Linux x86-64 / Clang 18 ASan+UBSan",
+    "macOS arm64 / Xcode 16 AppleClang",
+    "macOS x86-64 / Xcode 16 AppleClang"
+  ],
+  "excluded_surfaces": [
+    "Steam authentication",
+    "P2P",
+    "relay",
+    "ICE",
+    "WebRTC",
+    "certificate tools",
+    "operator-managed certificates",
+    "private certificate-store APIs",
+    "unencrypted production mode",
+    "persistent accounts",
+    "administrative credentials"
+  ],
+  "vulnerability_sources": [
+    "https://github.com/ValveSoftware/GameNetworkingSockets/security/advisories",
+    "https://openssl-library.org/news/vulnerabilities/",
+    "https://github.com/openssl/openssl/security/advisories",
+    "https://github.com/protocolbuffers/protobuf/security/advisories",
+    "https://github.com/abseil/abseil-cpp/security/advisories"
+  ],
+  "generated_policy": "Generate GameNetworkingSockets protobuf C++ only at proof build time with the locked protoc; do not commit, reuse, or accept generated output from another version.",
+  "update_policy": "Review GameNetworkingSockets and Protobuf quarterly, OpenSSL advisories immediately, and all four upstreams before release. Every pin or build-profile change reruns the full five-job proof and retained-artifact consistency review."
+}

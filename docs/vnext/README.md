@@ -23,7 +23,9 @@ selected-library proof are implemented, and ADR-0005 now accepts standalone
 GameNetworkingSockets with automatic basic encryption, no operator-managed
 certificates or dependency patches, an optional shared join password, and
 automatic single-use resume tokens. Its selected-library proof remains in
-progress. No vNext multiplayer target exists yet.
+progress: the exact dependency lock and disposable proof pass locally on
+Windows MSVC 2022, while the hosted Linux, macOS, sanitizer, and retained-
+artifact gates remain pending. No vNext multiplayer target exists yet.
 
 See the [implementation plan](IMPLEMENTATION_PLAN.md) for the live phase and
 slice tracker, completion gates, architecture decisions, and implementation

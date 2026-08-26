@@ -57,6 +57,29 @@ The audit remains retained as useful evidence in the
 [endpoint-trust integration assessment](../proofs/gamenetworkingsockets/TRUST_INTEGRATION_ASSESSMENT.md),
 but its failed gate no longer applies to the amended security objective.
 
+## Approved dependency proof profile
+
+On 2026-08-26 the owner approved dependency Option A for the selected-library
+proof:
+
+- GameNetworkingSockets `v1.6.0` at commit
+  `2cb93a06350bb065db53abdb0d87cf297e0bfd34`;
+- OpenSSL `3.5.8` LTS at commit
+  `f4dc4d58b48d346a8270183f89acf826d459b0ca`;
+- Protocol Buffers C++ `6.33.4` from release `v33.4` at commit
+  `edaa823d8b36a8656d7b2b9241b7d0bfe50af878`; and
+- its pinned local Abseil `20250512.1` dependency at commit
+  `76bb24329e8bf5f39704eb10d21b9a80befa7c81`, with Protobuf's bundled
+  `utf8_range` source.
+
+The exact source-archive and license hashes are part of the repository lock.
+The proof builds upstream sources without a carried patch or dependency-manager
+resolution. It uses static libraries, the OpenSSL crypto backend, and disables
+shared libraries, Steam services, P2P, relay, ICE, WebRTC, examples, upstream
+tests, and tools. Windows additionally uses the static MSVC runtime and
+OpenSSL's `no-asm` configuration. A pin, crypto backend, or restricted-profile
+change requires the ADR review described below.
+
 ## Why this decision is needed now
 
 Phase 3 needs stable owned transport and session boundaries, and Phase 6 needs a
@@ -353,6 +376,9 @@ The project owner approved the amended Option A on 2026-08-26 after reviewing
 its automatic encryption, shared join-password handling, automatic resume-token
 behavior, lack of operator certificate work, lack of upstream patches, and
 explicit active-man-in-the-middle limitation.
+
+The owner separately approved the exact dependency proof profile recorded above
+as Option A on 2026-08-26.
 
 The approval rejects the prior trust-anchor patch and certificate-authority
 paths. It does not approve persistent player accounts, administrative
