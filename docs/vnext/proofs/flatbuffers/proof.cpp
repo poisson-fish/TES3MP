@@ -76,9 +76,10 @@ namespace
         std::vector<flatbuffers::Offset<flatbuffers::String>> encodedTags;
         for (const std::string& tag : tags)
             encodedTags.push_back(builder.CreateString(tag));
+        const auto encodedTagVector = builder.CreateVector(encodedTags);
+        const auto encodedCapability = builder.CreateString(capability.data(), capability.size());
         const auto root = vnext::proof::v2::CreateEnvelope(builder, 1, sequence,
-            vnext::proof::v2::Payload::Motion, motion.Union(), builder.CreateVector(encodedTags),
-            builder.CreateString(capability.data(), capability.size()));
+            vnext::proof::v2::Payload::Motion, motion.Union(), encodedTagVector, encodedCapability);
         vnext::proof::v2::FinishSizePrefixedEnvelopeBuffer(builder, root);
         return copyBuffer(builder);
     }

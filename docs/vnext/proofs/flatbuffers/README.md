@@ -17,7 +17,10 @@ The proof:
 - tests exact size-prefix and root-identifier handling, every truncation, corrupt
   offsets, excess depth/table work, unknown unions, collection/string bounds,
   UTF-8, finite/range numeric checks, no partial output, and owned lifetimes;
-- generates deterministic valid and malformed seed corpora; and
+- generates valid and malformed seed corpora, rejects their hashes if compiler
+  evaluation or another platform detail changes their exact bytes, and retains
+  only those pinned seed identities even when libFuzzer adds working entries;
+  and
 - optionally runs the exact proof decoder under Clang libFuzzer, ASan, and UBSan.
 
 Run from an environment containing Python 3, CMake, Ninja, and the selected C++

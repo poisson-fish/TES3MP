@@ -17,7 +17,7 @@
     {
       "path": ".gitattributes",
       "status": "A",
-      "purpose": "Pins disposable FlatBuffers generated proof headers to LF so exact regeneration checks are independent of Windows checkout conversion."
+      "purpose": "Pins byte-hashed disposable FlatBuffers proof inputs to LF so exact cross-platform evidence is independent of Windows checkout conversion."
     },
     {
       "path": ".github/workflows/push.yml",
@@ -313,7 +313,7 @@
       "files": [
         {
           "path": ".gitattributes",
-          "sha256": "df5a9faea576a48c1c69fe1d8331f93cc675f0b8c4396bd0dd57403e81fe4ba7"
+          "sha256": "89196d532b0adfbe46045eed596e5c2a7f24a87eb47a2b705518f19196f0af33"
         },
         {
           "path": ".github/workflows/vnext-flatbuffers-proof.yml",
@@ -329,7 +329,7 @@
         },
         {
           "path": "docs/vnext/proofs/flatbuffers/README.md",
-          "sha256": "a364b78a16d3f732b93e1bad1d15470a433666cd05049a59ee5d0bd4dd8d36da"
+          "sha256": "00a82424bcca78f4b9092f6ef4faa207f79f841f0f5fa7fdfc8e27cdca247590"
         },
         {
           "path": "docs/vnext/proofs/flatbuffers/fuzz.cpp",
@@ -345,7 +345,7 @@
         },
         {
           "path": "docs/vnext/proofs/flatbuffers/proof.cpp",
-          "sha256": "f1a3d6404e3feed74fd0ab21fb62f96910c48b0047c11ee9fe3c10bad51e0969"
+          "sha256": "49771a781373bf45e7811bf247f18a61f4cc739276f8732104d5c81d837ad320"
         },
         {
           "path": "docs/vnext/proofs/flatbuffers/proof_codec.cpp",
@@ -365,15 +365,15 @@
         },
         {
           "path": "scripts/run_vnext_flatbuffers_proof.py",
-          "sha256": "11e7cadf2bcac7658786f2597d05c113a3cf12fde4e1ce1e501547face17c5e5"
+          "sha256": "46b894c2d68017715190727d908daac9bd3ee59ce11744b9082580c19935d488"
         },
         {
           "path": "scripts/tests/test_run_vnext_flatbuffers_proof.py",
-          "sha256": "b51e64fec3557ac5d5fbabfd80b449aa8389015d46e5ccf0ff41d16929364b3b"
+          "sha256": "650e54822921b921df025738e9cf7b5048ea32b0e21733dffd026f8a12b90a9e"
         },
         {
           "path": "scripts/vnext_flatbuffers_proof.json",
-          "sha256": "c0d058a10fd8f5d89790e104de4f3feb187734a0c4cc0783e56e5a48517af75f"
+          "sha256": "a1cce8c4475460a5dcc29c0164b6743b3e228019068c08d6453c462512a95766"
         }
       ],
       "repositories": [
@@ -384,9 +384,9 @@
         "Ubuntu runner package repositories",
         "Homebrew package repositories"
       ],
-      "resolution": "ADR-0004 pins the normal FlatBuffers v25.12.19 release commit and SHA-256-verified source archive. The repository runner safely extracts regular files, builds flatc from source, enforces the restricted generator/schema profile, reproduces LF-pinned committed output independently of checkout conversion, compiles the header-only runtime surface, runs bounded/evolution tests and optional sanitizer-backed fuzzing, and writes exact toolchain and artifact evidence.",
+      "resolution": "ADR-0004 pins the normal FlatBuffers v25.12.19 release commit and SHA-256-verified source archive. The repository runner safely extracts regular files, builds flatc from source, enforces the restricted generator/schema profile, reproduces LF-pinned committed output independently of checkout conversion, rejects platform-dependent seed-corpus bytes against pinned hashes, compiles the header-only runtime surface, runs bounded/evolution tests and optional sanitizer-backed fuzzing, and writes exact toolchain and artifact evidence.",
       "license_evidence": "The lock records Apache-2.0 and the exact upstream LICENSE SHA-256; every proof job verifies and retains that license beside its dependency, toolchain, schema, generated-code, corpus, and test evidence.",
-      "phase1_follow_up": "This is an owner-approved Phase 2 selection proof, not a Phase 1 baseline dependency. Hosted Linux GCC/Clang and macOS arm64 passed in run 32946871261; replacement Windows evidence after the LF checkout repair and macOS x86-64 evidence remain required before Slice 2.2 is Implemented. Android ARM64 remains a documented Phase 23 feasibility check under ADR-0002."
+      "phase1_follow_up": "This is an owner-approved Phase 2 selection proof, not a Phase 1 baseline dependency. All five jobs passed at da918dd462 in manual run 32995432424, but retained-artifact review found Windows lock/schema hash conversion and compiler-dependent seed corpus bytes. The bounded determinism repair requires a replacement full matrix and artifact review before Slice 2.2 is Implemented. Android ARM64 remains a documented Phase 23 feasibility check under ADR-0002."
     },
     {
       "id": "linux-packages",

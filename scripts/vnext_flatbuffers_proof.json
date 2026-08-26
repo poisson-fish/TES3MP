@@ -24,6 +24,13 @@
     "--cpp",
     "--scoped-enums"
   ],
+  "seed_corpus": {
+    "bad-identifier-v2.vnp": "a50ea4f849818434f5f40f18775b1d2a8d75ffadbc96e23a30fee2f3f2cbc377",
+    "truncated-v2.vnp": "d09b566981bcd8c7765d58705291ec7cf0b118a36e579780fe44ced8bd60e821",
+    "unknown-union-v2.vnp": "05f6e9f9f602002875ab33eb9a922805a1432cee2ba02e54c963026f742d5439",
+    "valid-v1.vnp": "80dae1956b6fc42aa0fe43cae276aefe90086628703f08b4a9ea5ae71d3f8564",
+    "valid-v2.vnp": "42a470c4a62a7943c020211958a72a281f122cfd42c6261502c2f4cd4eaef7a7"
+  },
   "supported_proof_platforms": [
     "Windows x86-64 / MSVC 2022 v143",
     "Linux x86-64 / GCC 13",

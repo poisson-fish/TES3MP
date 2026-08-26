@@ -1,1 +1,3 @@
 docs/vnext/proofs/flatbuffers/generated/*.h text eol=lf
+docs/vnext/proofs/flatbuffers/schema/*.fbs text eol=lf
+scripts/vnext_flatbuffers_proof.json text eol=lf

@@ -1211,6 +1211,40 @@ Implementation notes:
     dispatch and review the full workflow including macOS x86-64 before marking
     Slice 2.2 **Implemented**.
 
+- 2026-08-26 — Slice 2.2 — In Progress
+  - Change: push run `32989871740` passed Windows MSVC, Linux GCC 13, Linux
+    Clang 18 with the 30-second sanitizer/fuzzer smoke, and macOS arm64 at
+    `da918dd462`; manually dispatched run `32995432424` then passed the full
+    five-job matrix including macOS x86-64. Retained-artifact review found that
+    Windows checkout conversion changed the recorded lock and schema hashes,
+    and that unspecified C++ function-argument evaluation order made three seed
+    corpus files differ between compiler families. The working-tree repair pins
+    every byte-hashed text input to LF, sequences FlatBuffer builder mutations,
+    pins all five deterministic seed hashes in the dependency lock, fails the
+    proof on seed drift, and excludes libFuzzer-added working entries from the
+    retained seed-corpus identity.
+  - Decisions: none. The change enforces the already approved exact-input and
+    deterministic-corpus proof requirements without altering the schema,
+    protocol evolution policy, dependency selection, or production behavior.
+  - Verification: all five jobs and artifacts from run `32995432424` were
+    reviewed; their dependency, generated-header, compiler, test, corpus, and
+    license fields exposed the two issues above. Locally, the full Windows MSVC
+    2022 v143 selection proof passes with the five pinned seed identities;
+    `python -m unittest discover -s scripts/tests -v` passes 66 tests; `python
+    -m py_compile` passes for the proof runner, its tests, and the baseline
+    verifier; `python scripts/verify_vnext_baseline.py --index` accounts for all
+    48 intentional differences and verifies all 35 dependency inputs; and `git
+    diff --cached --check` passes. Replacement hosted artifact evidence remains
+    pending.
+  - Owner review: no new architecture, authority, state-scope, security,
+    gameplay, or user-visible behavior decision is introduced. Slice 2.2 stays
+    **In Progress** because passing jobs alone did not satisfy retained-evidence
+    consistency.
+  - Follow-ups: publish the determinism repair, rerun the full five-job matrix,
+    and compare retained exact input, generated, seed-corpus, license, compiler,
+    and test identities before owner review and any **Implemented** status
+    change.
+
 - 2026-08-26 — Slice 2.3 — In Progress
   - Change: accepted and then amended
     [`ADR-0005`](adr/ADR-0005-transport-security-authentication-resumption.md)

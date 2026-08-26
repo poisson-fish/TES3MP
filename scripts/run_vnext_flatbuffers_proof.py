@@ -33,6 +33,13 @@ PROOF_BUILD_DIR = BUILD_DIR / "proof-build"
 EVIDENCE_DIR = BUILD_DIR / "evidence"
 EVIDENCE_PATH = EVIDENCE_DIR / "vnext-flatbuffers-proof.json"
 FUZZ_CORPUS_DIR = BUILD_DIR / "fuzz-corpus"
+SEED_CORPUS_FILES = (
+    "bad-identifier-v2.vnp",
+    "truncated-v2.vnp",
+    "unknown-union-v2.vnp",
+    "valid-v1.vnp",
+    "valid-v2.vnp",
+)
 
 
 class ProofError(RuntimeError):
@@ -88,6 +95,7 @@ def load_lock(path: Path = LOCK_PATH) -> dict[str, Any]:
             "dependency",
             "generated_files",
             "generator_arguments",
+            "seed_corpus",
             "supported_proof_platforms",
             "excluded_surfaces",
             "update_policy",
@@ -135,6 +143,12 @@ def load_lock(path: Path = LOCK_PATH) -> dict[str, Any]:
     arguments = require_string_list(value["generator_arguments"], "generator_arguments")
     if arguments != ["--cpp", "--scoped-enums"]:
         raise ProofError("generator_arguments must retain the approved restricted profile")
+    seed_corpus = value["seed_corpus"]
+    if not isinstance(seed_corpus, dict):
+        raise ProofError("seed_corpus must be an object")
+    require_exact_keys(seed_corpus, set(SEED_CORPUS_FILES), "seed_corpus")
+    for filename, digest in seed_corpus.items():
+        require_sha256(digest, f"seed_corpus.{filename}")
     require_string_list(value["supported_proof_platforms"], "supported_proof_platforms")
     require_string_list(value["excluded_surfaces"], "excluded_surfaces")
     require_string(value["update_policy"], "update_policy")
@@ -147,6 +161,19 @@ def sha256_file(path: Path) -> str:
         for chunk in iter(lambda: stream.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def verify_seed_corpus(lock: dict[str, Any]) -> dict[str, str]:
+    actual_names = sorted(path.name for path in FUZZ_CORPUS_DIR.iterdir() if path.is_file())
+    expected_names = sorted(SEED_CORPUS_FILES)
+    if actual_names != expected_names:
+        raise ProofError(f"proof generated seed corpus {actual_names}, expected {expected_names}")
+    actual = {name: sha256_file(FUZZ_CORPUS_DIR / name) for name in expected_names}
+    expected = lock["seed_corpus"]
+    if actual != expected:
+        mismatches = [name for name in expected_names if actual[name] != expected[name]]
+        raise ProofError(f"seed corpus differs from pinned output: {', '.join(mismatches)}")
+    return actual
 
 
 def find_tool(name: str, environment_name: str) -> str:
@@ -374,7 +401,13 @@ def compiler_evidence(build_dir: Path) -> dict[str, str]:
 
 
 def write_evidence(
-    lock: dict[str, Any], cmake: str, ninja: str, flatc: Path, source_root: Path, fuzz_seconds: int
+    lock: dict[str, Any],
+    cmake: str,
+    ninja: str,
+    flatc: Path,
+    source_root: Path,
+    fuzz_seconds: int,
+    seed_corpus: dict[str, str],
 ) -> None:
     dependency = lock["dependency"]
     license_source = source_root / dependency["license"]["path"]
@@ -404,9 +437,7 @@ def write_evidence(
             name: sha256_file(GENERATED_DIR / name) for name in lock["generated_files"]
         },
         "tests": ["vnext-flatbuffers-proof"] + ([f"vnext-flatbuffers-fuzz:{fuzz_seconds}s"] if fuzz_seconds else []),
-        "fuzz_corpus": {
-            path.name: sha256_file(path) for path in sorted(FUZZ_CORPUS_DIR.iterdir()) if path.is_file()
-        },
+        "fuzz_corpus": seed_corpus,
         "android_arm64_assessment": "docs/vnext/proofs/flatbuffers/ANDROID_ARM64.md",
     }
     EVIDENCE_PATH.write_text(json.dumps(evidence, indent=2, sort_keys=True) + "\n", encoding="utf-8")
@@ -469,6 +500,7 @@ def execute(update_generated: bool = False, fuzz_seconds: int = 0) -> None:
     if FUZZ_CORPUS_DIR.exists():
         shutil.rmtree(FUZZ_CORPUS_DIR)
     run([str(proof_executable), "--write-corpus", str(FUZZ_CORPUS_DIR)])
+    seed_corpus = verify_seed_corpus(lock)
     if fuzz_seconds:
         fuzz_executable = locate_executable(PROOF_BUILD_DIR, "vnext-flatbuffers-fuzz")
         run(
@@ -479,7 +511,7 @@ def execute(update_generated: bool = False, fuzz_seconds: int = 0) -> None:
                 str(FUZZ_CORPUS_DIR),
             ]
         )
-    write_evidence(lock, cmake, ninja, flatc, source_root, fuzz_seconds)
+    write_evidence(lock, cmake, ninja, flatc, source_root, fuzz_seconds, seed_corpus)
 
 
 def main() -> int:

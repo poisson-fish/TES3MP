@@ -22,6 +22,9 @@ class FlatBuffersProofRunnerTests(unittest.TestCase):
         self.assertRegex(dependency["source_archive"]["sha256"], r"^[0-9a-f]{64}$")
         self.assertEqual(dependency["license"]["spdx"], "Apache-2.0")
         self.assertEqual(lock["generator_arguments"], ["--cpp", "--scoped-enums"])
+        self.assertEqual(set(lock["seed_corpus"]), set(proof.SEED_CORPUS_FILES))
+        for digest in lock["seed_corpus"].values():
+            self.assertRegex(digest, r"^[0-9a-f]{64}$")
         self.assertIn("reflection", lock["excluded_surfaces"])
         self.assertIn("nested FlatBuffers", lock["excluded_surfaces"])
 
@@ -117,6 +120,20 @@ class FlatBuffersProofRunnerTests(unittest.TestCase):
             path.write_bytes(b"flatbuffers proof")
             self.assertEqual(proof.sha256_file(path), hashlib.sha256(b"flatbuffers proof").hexdigest())
 
+    def test_seed_corpus_rejects_unpinned_or_platform_specific_output(self) -> None:
+        lock = proof.load_lock()
+        with tempfile.TemporaryDirectory() as directory:
+            corpus = pathlib.Path(directory)
+            for filename in proof.SEED_CORPUS_FILES:
+                (corpus / filename).write_bytes(b"seed")
+            with mock.patch.object(proof, "FUZZ_CORPUS_DIR", corpus), mock.patch.object(
+                proof, "sha256_file", side_effect=lambda path: lock["seed_corpus"][path.name]
+            ):
+                self.assertEqual(proof.verify_seed_corpus(lock), lock["seed_corpus"])
+                (corpus / "fuzzer-generated").write_bytes(b"mutation")
+                with self.assertRaisesRegex(proof.ProofError, "generated seed corpus"):
+                    proof.verify_seed_corpus(lock)
+
     def test_workflow_uses_approved_matrix_and_pinned_actions(self) -> None:
         workflow = (proof.ROOT / ".github" / "workflows" / "vnext-flatbuffers-proof.yml").read_text(
             encoding="utf-8"
@@ -128,14 +145,18 @@ class FlatBuffersProofRunnerTests(unittest.TestCase):
         self.assertNotRegex(workflow, r"uses:\s+[^\s@]+@v\d")
         self.assertIn("scripts/run_vnext_flatbuffers_proof.py", workflow)
 
-    def test_generated_headers_have_platform_independent_line_endings(self) -> None:
+    def test_hashed_proof_inputs_have_platform_independent_line_endings(self) -> None:
         attributes = (proof.ROOT / ".gitattributes").read_text(encoding="utf-8").splitlines()
-        self.assertIn(
+        expected_rules = {
             "docs/vnext/proofs/flatbuffers/generated/*.h text eol=lf",
-            attributes,
-        )
-        for filename in proof.load_lock()["generated_files"]:
-            contents = (proof.GENERATED_DIR / filename).read_bytes()
+            "docs/vnext/proofs/flatbuffers/schema/*.fbs text eol=lf",
+            "scripts/vnext_flatbuffers_proof.json text eol=lf",
+        }
+        self.assertTrue(expected_rules.issubset(attributes))
+        hashed_inputs = [proof.LOCK_PATH, *proof.SCHEMA_DIR.glob("*.fbs")]
+        hashed_inputs.extend(proof.GENERATED_DIR / name for name in proof.load_lock()["generated_files"])
+        for path in hashed_inputs:
+            contents = path.read_bytes()
             self.assertNotIn(b"\r", contents)
 
 
