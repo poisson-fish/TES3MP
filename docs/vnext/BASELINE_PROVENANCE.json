@@ -510,6 +510,11 @@
       "purpose": "Owner-approved hello schemas, version/capability negotiation, rejection, legacy/no-reply, and pure API-boundary policy."
     },
     {
+      "path": "docs/vnext/adr/ADR-0023-session-state-machines-and-authentication-provider-boundary.md",
+      "status": "A",
+      "purpose": "Proposed client/server session-state, authentication-provider, opaque-secret, timeout, cancellation, redaction, and Phase 4/6 boundary decision packet."
+    },
+    {
       "path": "docs/vnext/proofs/flatbuffers/ANDROID_ARM64.md",
       "status": "A",
       "purpose": "ADR-0002-required Android ARM64 feasibility assessment for the selected header-only codec runtime surface."
