@@ -2399,7 +2399,7 @@ Depends on: Phase 3.
 
 | Slice | Deliverable | Status | Completion evidence |
 |---|---|---|---|
-| 4.1 | Implement framing/envelopes, message classification, byte budgets, and structured decode errors | **In Progress** | Truncated, oversized, unknown, and malformed inputs fail without partial objects or unbounded allocation |
+| 4.1 | Implement framing/envelopes, message classification, byte budgets, and structured decode errors | **Implemented** | Accepted [`ADR-0021`](adr/ADR-0021-bounded-protocol-framing-and-decode-boundary.md), implementation `98e62f5f19`, all applicable local verification, and owner demo acceptance pass |
 | 4.2 | Implement `ClientHello`, `ServerHello`, and clear rejection with version/capability negotiation | **Not Started** | Required/optional/unknown capability and legacy-peer cases have golden tests |
 | 4.3 | Implement the client/server session state machines and authentication-provider interface | **Not Started** | Illegal transitions, timeout, cancellation, rejection, and secret-redaction tests pass |
 | 4.4 | Define reliable-operation and latest-wins snapshot envelopes | **Not Started** | Command ID/revision and tick/sequence/epoch rules are enforced separately |
@@ -2460,6 +2460,23 @@ Implementation notes:
     owner demo acceptance; then mark Slice 4.1 **Implemented**. Slice 4.2 still
     requires its capability/version-negotiation decision packet before schemas
     or behavior land.
+
+- 2026-08-27 — Slice 4.1 — Implemented
+  - Change: retained implementation commit `98e62f5f19` without code changes and
+    marked Slice 4.1 **Implemented** after the required owner demo acceptance.
+  - Decisions: none. ADR-0021 remains accepted without amendment; the owner
+    directed that Slice 4.2 must not begin in this session.
+  - Verification: the accepted demo and implementation retain the green seven-
+    contract MSVC build, 95 repository-owned Python tests, provenance evidence
+    for 124 intentional differences and 43 dependency inputs, legacy-exclusion
+    evidence for 3,818 paths, 59 CMake files, 22 compile commands, and 69 Ninja
+    edges, changed-Python compilation, JSON parsing, 64 resolved local vNext
+    Markdown links, and clean diff checks.
+  - Owner review: implementation-demo evidence explicitly accepted by the
+    project owner in the 2026-08-27 working session.
+  - Follow-ups: none for Slice 4.1. Phase 4 remains **In Progress**; Slice 4.2
+    stays **Not Started** and requires its kickoff decision packet in a new
+    session before production schemas or behavior begin.
 
 ### Phase 5 — Deterministic authoritative server core
 
