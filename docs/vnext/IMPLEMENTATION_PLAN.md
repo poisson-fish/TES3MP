@@ -2120,6 +2120,28 @@ Implementation notes:
     reproducers, then present the implementation demo before changing Slice 3.6
     to **Implemented**. Slice 3.7 remains gated.
 
+- 2026-08-26 — Slice 3.6 — In Progress
+  - Change: retained implementation commit `1be40d1a4b` and its accepted
+    ADR-0019 safety profiles, fuzz harness, runner, workflow, and contracts
+    without amendment; this status-only follow-up records the owner-reviewed
+    local implementation demo before publication.
+  - Decisions: no amendment. The owner accepted the implemented Option A
+    behavior for Decisions 1–5 as demonstrated.
+  - Verification: the accepted demo covers the ordinary uninstrumented graph,
+    all five instrumented target registrations, separate ASan+UBSan/fuzzer and
+    ThreadSanitizer configurations, bounded 101/111/2-byte seed corpus, strict
+    compiler/profile failures, complete compile-command instrumentation checks,
+    and retained JSON/log/reproducer fields. The committed local evidence
+    remains 95 Python tests, five C++ contracts in standalone and real baseline
+    graphs, 3,805-path legacy exclusion, and provenance with 111 intentional
+    differences and 43 dependency inputs. Hosted safety execution remains
+    pending publication.
+  - Owner review: implementation-demo acceptance received in the 2026-08-26
+    working session.
+  - Follow-ups: publish the commits, wait for both hosted safety jobs, review
+    their retained artifacts, and record the results before changing Slice 3.6
+    to **Implemented**. Slice 3.7 remains gated.
+
 ### Phase 4 — Bounded protocol and in-memory session
 
 Status: **Not Started**
