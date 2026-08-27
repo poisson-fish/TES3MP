@@ -109,7 +109,7 @@ Observed on 2026-08-25 before this plan was added:
 | 0 | Archive and cutover preparation | **Implemented** | — |
 | 1 | Clean OpenMW 0.51 baseline | **Implemented** | Phase 0 |
 | 2 | Security and architecture decisions | **Implemented** | Phase 1 |
-| 3 | Independent targets and test scaffold | **In Progress** | Phase 2 |
+| 3 | Independent targets and test scaffold | **Implemented** | Phase 2 |
 | 4 | Bounded protocol and in-memory session | **Not Started** | Phase 3 |
 | 5 | Deterministic authoritative server core | **Not Started** | Phase 4 |
 | 6 | Maintained transport and secure network session | **Not Started** | Phase 5 |
@@ -1710,7 +1710,7 @@ Implementation notes:
 
 ### Phase 3 — Independent targets and test scaffold
 
-Status: **In Progress**
+Status: **Implemented**
 
 Outcome: dependency boundaries are enforced by the build, and all later work has
 deterministic testing, fuzzing, sanitizers, fault injection, and observability.
@@ -2361,6 +2361,31 @@ Implementation notes:
   - Follow-ups: complete local verification of this cadence/status update,
     publish it without launching automatic vNext workflows, and present the
     Phase 3 exit gate for owner approval.
+
+- 2026-08-27 — Phase 3 — Implemented
+  - Change: marked Phase 3 implemented after explicit exit approval and replaced
+    the README's historical slice-by-slice status narrative with a concise
+    current-state, product-scope, boundary, invariant, and workflow guide. No
+    production behavior or CI policy changed in this closeout.
+  - Decisions: no ADR or GDR amendment. The owner explicitly approved the Phase
+    3 exit and progression toward Phase 4 in the 2026-08-27 working session.
+  - Gate evidence: every Slice 3.1–3.7 deliverable is implemented and demo-
+    accepted. The independent target graph, fail-closed dependency checks,
+    deterministic normal/fault traces, six contract executables, local and
+    hosted safety profiles, supported Phase 3 platform matrix, provenance, and
+    legacy exclusion satisfy all three exit conditions.
+  - Verification: all 95 repository-owned Python tests pass. Staged provenance
+    accounts for 117 intentional differences and verifies 43 dependency inputs;
+    legacy exclusion checks 3,811 paths, 59 CMake files, 1,254 compile commands,
+    and 1,971 Ninja edges. All 63 local vNext Markdown links resolve, changed
+    Python compiles, and staged diff checks pass. The README is reduced from 265
+    to 144 lines.
+  - Owner review: Phase 3 exit approval received in the 2026-08-27 working
+    session. Phase 4 production remains subject to its kickoff and unresolved
+    protocol/session architecture decisions.
+  - Follow-ups: verify and publish this documentation-only closeout without an
+    automatic hosted run, then present the Phase 4 kickoff and Slice 4.1
+    decision options before production implementation begins.
 
 ### Phase 4 — Bounded protocol and in-memory session
 
