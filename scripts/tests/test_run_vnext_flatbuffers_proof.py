@@ -4,6 +4,7 @@ import hashlib
 import io
 import json
 import pathlib
+import re
 import tarfile
 import tempfile
 import unittest
@@ -22,6 +23,10 @@ class FlatBuffersProofRunnerTests(unittest.TestCase):
         self.assertRegex(dependency["source_archive"]["sha256"], r"^[0-9a-f]{64}$")
         self.assertEqual(dependency["license"]["spdx"], "Apache-2.0")
         self.assertEqual(lock["generator_arguments"], ["--cpp", "--scoped-enums"])
+        self.assertEqual(
+            lock["production_schemas"],
+            ["client_hello.fbs", "server_hello.fbs", "session_rejected.fbs"],
+        )
         self.assertEqual(set(lock["seed_corpus"]), set(proof.SEED_CORPUS_FILES))
         for digest in lock["seed_corpus"].values():
             self.assertRegex(digest, r"^[0-9a-f]{64}$")
@@ -36,6 +41,27 @@ class FlatBuffersProofRunnerTests(unittest.TestCase):
             path.write_text(json.dumps(lock), encoding="utf-8")
             with self.assertRaisesRegex(proof.ProofError, "restricted profile"):
                 proof.load_lock(path)
+
+    def test_production_cmake_uses_the_locked_runtime_archive(self) -> None:
+        lock = proof.load_lock()
+        cmake = (proof.ROOT / "components" / "tes3mp" / "CMakeLists.txt").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn(lock["dependency"]["source_archive"]["url"], cmake)
+        self.assertIn(
+            f'URL_HASH SHA256={lock["dependency"]["source_archive"]["sha256"]}', cmake
+        )
+
+    def test_production_schemas_have_explicit_ids_and_unique_identifiers(self) -> None:
+        lock = proof.load_lock()
+        identifiers = set()
+        for name in lock["production_schemas"]:
+            text = (proof.PRODUCTION_SCHEMA_DIR / name).read_text(encoding="utf-8")
+            proof.parse_schema(text, name)
+            identifier = re.search(r'file_identifier\s+"([A-Za-z0-9]{4})"\s*;', text)
+            self.assertIsNotNone(identifier)
+            identifiers.add(identifier.group(1))
+        self.assertEqual(len(identifiers), len(lock["production_schemas"]))
 
     def test_download_rejects_hash_mismatch_without_replacing_cache(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -154,11 +180,18 @@ class FlatBuffersProofRunnerTests(unittest.TestCase):
         expected_rules = {
             "docs/vnext/proofs/flatbuffers/generated/*.h text eol=lf",
             "docs/vnext/proofs/flatbuffers/schema/*.fbs text eol=lf",
+            "components/tes3mp/protocol/generated/*.h text eol=lf",
+            "components/tes3mp/protocol/schema/*.fbs text eol=lf",
             "scripts/vnext_flatbuffers_proof.json text eol=lf",
         }
         self.assertTrue(expected_rules.issubset(attributes))
         hashed_inputs = [proof.LOCK_PATH, *proof.SCHEMA_DIR.glob("*.fbs")]
         hashed_inputs.extend(proof.GENERATED_DIR / name for name in proof.load_lock()["generated_files"])
+        hashed_inputs.extend(proof.PRODUCTION_SCHEMA_DIR.glob("*.fbs"))
+        hashed_inputs.extend(
+            proof.PRODUCTION_GENERATED_DIR / name
+            for name in proof.load_lock()["production_generated_files"]
+        )
         for path in hashed_inputs:
             contents = path.read_bytes()
             self.assertNotIn(b"\r", contents)

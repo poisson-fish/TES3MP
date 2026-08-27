@@ -24,11 +24,14 @@ LOCK_PATH = ROOT / "scripts" / "vnext_flatbuffers_proof.json"
 PROOF_DIR = ROOT / "docs" / "vnext" / "proofs" / "flatbuffers"
 SCHEMA_DIR = PROOF_DIR / "schema"
 GENERATED_DIR = PROOF_DIR / "generated"
+PRODUCTION_SCHEMA_DIR = ROOT / "components" / "tes3mp" / "protocol" / "schema"
+PRODUCTION_GENERATED_DIR = ROOT / "components" / "tes3mp" / "protocol" / "generated"
 BUILD_DIR = ROOT / "build" / "vnext-flatbuffers-proof"
 DOWNLOAD_DIR = BUILD_DIR / "downloads"
 SOURCE_PARENT = BUILD_DIR / "source"
 DEPENDENCY_BUILD_DIR = BUILD_DIR / "dependency-build"
 GENERATED_CHECK_DIR = BUILD_DIR / "generated"
+PRODUCTION_GENERATED_CHECK_DIR = BUILD_DIR / "production-generated"
 PROOF_BUILD_DIR = BUILD_DIR / "proof-build"
 EVIDENCE_DIR = BUILD_DIR / "evidence"
 EVIDENCE_PATH = EVIDENCE_DIR / "vnext-flatbuffers-proof.json"
@@ -94,6 +97,8 @@ def load_lock(path: Path = LOCK_PATH) -> dict[str, Any]:
             "schema_version",
             "dependency",
             "generated_files",
+            "production_schemas",
+            "production_generated_files",
             "generator_arguments",
             "seed_corpus",
             "supported_proof_platforms",
@@ -102,8 +107,8 @@ def load_lock(path: Path = LOCK_PATH) -> dict[str, Any]:
         },
         "dependency lock",
     )
-    if value["schema_version"] != 1:
-        raise ProofError("dependency lock schema_version must be 1")
+    if value["schema_version"] != 2:
+        raise ProofError("dependency lock schema_version must be 2")
 
     dependency = value["dependency"]
     if not isinstance(dependency, dict):
@@ -140,6 +145,16 @@ def load_lock(path: Path = LOCK_PATH) -> dict[str, Any]:
     for filename in generated_files:
         if PurePosixPath(filename).name != filename or not filename.endswith("_generated.h"):
             raise ProofError(f"generated_files contains invalid filename {filename!r}")
+    production_schemas = require_string_list(value["production_schemas"], "production_schemas")
+    for filename in production_schemas:
+        if PurePosixPath(filename).name != filename or not filename.endswith(".fbs"):
+            raise ProofError(f"production_schemas contains invalid filename {filename!r}")
+    production_generated = require_string_list(
+        value["production_generated_files"], "production_generated_files"
+    )
+    for filename in production_generated:
+        if PurePosixPath(filename).name != filename or not filename.endswith("_generated.h"):
+            raise ProofError(f"production_generated_files contains invalid filename {filename!r}")
     arguments = require_string_list(value["generator_arguments"], "generator_arguments")
     if arguments != ["--cpp", "--scoped-enums"]:
         raise ProofError("generator_arguments must retain the approved restricted profile")
@@ -366,6 +381,50 @@ def generate_and_compare(flatc: Path, lock: dict[str, Any], update_generated: bo
             raise ProofError(f"committed generated file is missing: {expected}")
         if expected.read_bytes() != (GENERATED_CHECK_DIR / name).read_bytes():
             raise ProofError(f"committed generated file differs from pinned flatc output: {name}")
+
+    production_schema_names = sorted(lock["production_schemas"])
+    actual_schema_names = sorted(path.name for path in PRODUCTION_SCHEMA_DIR.glob("*.fbs"))
+    if actual_schema_names != production_schema_names:
+        raise ProofError(
+            f"production schemas are {actual_schema_names}, expected {production_schema_names}"
+        )
+    identifiers: set[str] = set()
+    for name in production_schema_names:
+        text = (PRODUCTION_SCHEMA_DIR / name).read_text(encoding="utf-8")
+        parse_schema(text, name)
+        match = re.search(r'file_identifier\s+"([A-Za-z0-9]{4})"\s*;', text)
+        if not match:
+            raise ProofError(f"production schema {name} lacks a four-byte file identifier")
+        if match.group(1) in identifiers:
+            raise ProofError(f"production schema {name} reuses file identifier {match.group(1)}")
+        identifiers.add(match.group(1))
+
+    if PRODUCTION_GENERATED_CHECK_DIR.exists():
+        shutil.rmtree(PRODUCTION_GENERATED_CHECK_DIR)
+    PRODUCTION_GENERATED_CHECK_DIR.mkdir(parents=True)
+    run(
+        [
+            str(flatc),
+            *lock["generator_arguments"],
+            "-o",
+            str(PRODUCTION_GENERATED_CHECK_DIR),
+            *(str(PRODUCTION_SCHEMA_DIR / name) for name in production_schema_names),
+        ]
+    )
+    actual_names = sorted(path.name for path in PRODUCTION_GENERATED_CHECK_DIR.iterdir() if path.is_file())
+    expected_names = sorted(lock["production_generated_files"])
+    if actual_names != expected_names:
+        raise ProofError(f"flatc generated production files {actual_names}, expected {expected_names}")
+    if update_generated:
+        PRODUCTION_GENERATED_DIR.mkdir(parents=True, exist_ok=True)
+        for name in expected_names:
+            shutil.copyfile(PRODUCTION_GENERATED_CHECK_DIR / name, PRODUCTION_GENERATED_DIR / name)
+    for name in expected_names:
+        expected = PRODUCTION_GENERATED_DIR / name
+        if not expected.is_file():
+            raise ProofError(f"committed production generated file is missing: {expected}")
+        if expected.read_bytes() != (PRODUCTION_GENERATED_CHECK_DIR / name).read_bytes():
+            raise ProofError(f"committed production generated file differs from pinned flatc output: {name}")
 
 
 def locate_flatc(build_dir: Path) -> Path:

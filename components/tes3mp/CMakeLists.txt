@@ -5,8 +5,35 @@ endif()
 
 include(${CMAKE_CURRENT_LIST_DIR}/../../cmake/TES3MPVerifyTargetBoundaries.cmake)
 include(${CMAKE_CURRENT_LIST_DIR}/../../cmake/TES3MPRuntimeSafety.cmake)
+include(FetchContent)
 
 tes3mp_validate_runtime_safety()
+
+set(TES3MP_FLATBUFFERS_SOURCE_DIR "" CACHE PATH
+    "Optional extracted FlatBuffers 25.12.19 source used instead of the pinned download")
+if(TES3MP_FLATBUFFERS_SOURCE_DIR)
+    if(NOT EXISTS "${TES3MP_FLATBUFFERS_SOURCE_DIR}/include/flatbuffers/flatbuffers.h")
+        message(FATAL_ERROR
+            "TES3MP_FLATBUFFERS_SOURCE_DIR does not contain include/flatbuffers/flatbuffers.h")
+    endif()
+    set(tes3mp_flatbuffers_SOURCE_DIR "${TES3MP_FLATBUFFERS_SOURCE_DIR}")
+else()
+    if(POLICY CMP0135)
+        cmake_policy(SET CMP0135 NEW)
+    endif()
+    if(POLICY CMP0169)
+        cmake_policy(SET CMP0169 OLD)
+    endif()
+    FetchContent_Declare(tes3mp_flatbuffers
+        URL https://github.com/google/flatbuffers/archive/refs/tags/v25.12.19.tar.gz
+        URL_HASH SHA256=f81c3162b1046fe8b84b9a0dbdd383e24fdbcf88583b9cb6028f90d04d90696a
+        DOWNLOAD_NO_PROGRESS TRUE
+    )
+    FetchContent_GetProperties(tes3mp_flatbuffers)
+    if(NOT tes3mp_flatbuffers_POPULATED)
+        FetchContent_Populate(tes3mp_flatbuffers)
+    endif()
+endif()
 
 set(TES3MP_ENGINE_INDEPENDENT_FORBIDDEN_INCLUDES
     "apps/openmw"
@@ -37,11 +64,20 @@ tes3mp_add_engine_independent_library(tes3mp_protocol protocol/anchor.cpp)
 add_library(TES3MP::Protocol ALIAS tes3mp_protocol)
 target_sources(tes3mp_protocol PRIVATE
     include/tes3mp/command_primitives.hpp
+    include/tes3mp/protocol_handshake.hpp
     include/tes3mp/protocol_frame.hpp
     include/tes3mp/spatial_types.hpp
     include/tes3mp/strong_value.hpp
     include/tes3mp/value_types.hpp
+    protocol/generated/client_hello_generated.h
+    protocol/generated/server_hello_generated.h
+    protocol/generated/session_rejected_generated.h
+    protocol/protocol_handshake.cpp
     protocol/protocol_frame.cpp
+)
+target_include_directories(tes3mp_protocol PRIVATE
+    "${tes3mp_flatbuffers_SOURCE_DIR}/include"
+    "${CMAKE_CURRENT_SOURCE_DIR}/protocol"
 )
 
 tes3mp_add_engine_independent_library(tes3mp_transport transport/anchor.cpp)
@@ -146,6 +182,16 @@ tes3mp_verify_target_dependencies(tes3mp_protocol_frame_tests ALLOWED tes3mp_pro
 tes3mp_verify_target_includes(tes3mp_protocol_frame_tests
     FORBIDDEN ${TES3MP_ENGINE_INDEPENDENT_FORBIDDEN_INCLUDES})
 
+add_executable(tes3mp_protocol_handshake_tests tests/protocol_handshake_tests.cpp)
+target_compile_features(tes3mp_protocol_handshake_tests PRIVATE cxx_std_20)
+target_link_libraries(tes3mp_protocol_handshake_tests PRIVATE tes3mp_protocol)
+set_target_properties(tes3mp_protocol_handshake_tests PROPERTIES FOLDER "TES3MP/Tests")
+tes3mp_enable_runtime_safety(tes3mp_protocol_handshake_tests)
+
+tes3mp_verify_target_dependencies(tes3mp_protocol_handshake_tests ALLOWED tes3mp_protocol)
+tes3mp_verify_target_includes(tes3mp_protocol_handshake_tests
+    FORBIDDEN ${TES3MP_ENGINE_INDEPENDENT_FORBIDDEN_INCLUDES})
+
 add_executable(tes3mp_spatial_primitive_tests tests/spatial_primitive_tests.cpp)
 target_compile_features(tes3mp_spatial_primitive_tests PRIVATE cxx_std_20)
 target_link_libraries(tes3mp_spatial_primitive_tests PRIVATE tes3mp_test_support)
@@ -216,11 +262,22 @@ if(TES3MP_BUILD_FUZZERS)
     tes3mp_verify_target_dependencies(tes3mp_protocol_frame_fuzz ALLOWED tes3mp_protocol)
     tes3mp_verify_target_includes(tes3mp_protocol_frame_fuzz
         FORBIDDEN ${TES3MP_ENGINE_INDEPENDENT_FORBIDDEN_INCLUDES})
+
+    add_executable(tes3mp_protocol_handshake_fuzz tests/fuzz/protocol_handshake_fuzz.cpp)
+    target_compile_features(tes3mp_protocol_handshake_fuzz PRIVATE cxx_std_20)
+    target_link_libraries(tes3mp_protocol_handshake_fuzz PRIVATE tes3mp_protocol)
+    set_target_properties(tes3mp_protocol_handshake_fuzz PROPERTIES FOLDER "TES3MP/Fuzzers")
+    tes3mp_enable_runtime_safety(tes3mp_protocol_handshake_fuzz)
+    tes3mp_enable_libfuzzer(tes3mp_protocol_handshake_fuzz)
+    tes3mp_verify_target_dependencies(tes3mp_protocol_handshake_fuzz ALLOWED tes3mp_protocol)
+    tes3mp_verify_target_includes(tes3mp_protocol_handshake_fuzz
+        FORBIDDEN ${TES3MP_ENGINE_INDEPENDENT_FORBIDDEN_INCLUDES})
 endif()
 
 add_custom_target(tes3mp_protocol_tests_run
     COMMAND $<TARGET_FILE:tes3mp_protocol_tests>
     COMMAND $<TARGET_FILE:tes3mp_protocol_frame_tests>
+    COMMAND $<TARGET_FILE:tes3mp_protocol_handshake_tests>
     COMMAND $<TARGET_FILE:tes3mp_spatial_primitive_tests>
     COMMAND $<TARGET_FILE:tes3mp_deterministic_facilities_tests>
     COMMAND $<TARGET_FILE:tes3mp_deterministic_harness_tests>
@@ -229,6 +286,7 @@ add_custom_target(tes3mp_protocol_tests_run
     DEPENDS
         tes3mp_protocol_tests
         tes3mp_protocol_frame_tests
+        tes3mp_protocol_handshake_tests
         tes3mp_spatial_primitive_tests
         tes3mp_deterministic_facilities_tests
         tes3mp_deterministic_harness_tests

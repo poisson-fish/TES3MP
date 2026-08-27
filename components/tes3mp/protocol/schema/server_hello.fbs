@@ -1,0 +1,11 @@
+namespace TES3MP.Protocol.Schema;
+
+table ServerHello {
+  protocol_major:ushort (id: 0);
+  selected_minor:ushort (id: 1);
+  negotiated_capabilities:[uint] (id: 2);
+}
+
+root_type ServerHello;
+file_identifier "T3SH";
+file_extension "t3sh";

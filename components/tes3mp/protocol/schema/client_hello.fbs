@@ -1,0 +1,13 @@
+namespace TES3MP.Protocol.Schema;
+
+table ClientHello {
+  protocol_major:ushort (id: 0);
+  minimum_minor:ushort (id: 1);
+  maximum_minor:ushort (id: 2);
+  optional_capabilities:[uint] (id: 3);
+  required_capabilities:[uint] (id: 4);
+}
+
+root_type ClientHello;
+file_identifier "T3CH";
+file_extension "t3ch";

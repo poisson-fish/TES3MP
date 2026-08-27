@@ -83,6 +83,16 @@ class RuntimeSafetyRunnerTests(unittest.TestCase):
         )
         self.assertIn("tes3mp_protocol_frame_fuzz", frame_command[0])
         self.assertIn("-max_len=65549", frame_command)
+        handshake_command = safety.fuzz_command(
+            "asan-ubsan",
+            30,
+            pathlib.Path("artifacts"),
+            target="tes3mp_protocol_handshake_fuzz",
+            corpus_dir=safety.PROTOCOL_HANDSHAKE_CORPUS_DIR,
+            maximum_input_bytes=safety.TES3MP_SESSION_CONTROL_MAX_BYTES + 1,
+        )
+        self.assertIn("tes3mp_protocol_handshake_fuzz", handshake_command[0])
+        self.assertIn("-max_len=4097", handshake_command)
 
     def test_seed_corpus_is_bounded_and_covers_length_boundaries(self):
         records = safety.verify_corpus()
@@ -96,6 +106,11 @@ class RuntimeSafetyRunnerTests(unittest.TestCase):
         frame_records = safety.verify_protocol_frame_corpus()
         self.assertGreaterEqual(len(frame_records), 2)
         self.assertTrue(all(record["bytes"] <= safety.MAX_CORPUS_FILE_BYTES for record in frame_records))
+        handshake_records = safety.verify_protocol_handshake_corpus()
+        self.assertGreaterEqual(len(handshake_records), 2)
+        self.assertTrue(
+            all(record["bytes"] <= safety.MAX_CORPUS_FILE_BYTES for record in handshake_records)
+        )
 
     def test_presets_keep_normal_build_clean_and_safety_profiles_exclusive(self):
         data = json.loads(PRESETS_PATH.read_text(encoding="utf-8"))
@@ -122,6 +137,7 @@ class RuntimeSafetyRunnerTests(unittest.TestCase):
         for target in (
             "tes3mp_protocol_tests",
             "tes3mp_protocol_frame_tests",
+            "tes3mp_protocol_handshake_tests",
             "tes3mp_spatial_primitive_tests",
             "tes3mp_deterministic_facilities_tests",
             "tes3mp_deterministic_harness_tests",
@@ -132,6 +148,7 @@ class RuntimeSafetyRunnerTests(unittest.TestCase):
         self.assertIn("tes3mp_enable_runtime_safety(${target})", component)
         self.assertIn("tes3mp_enable_libfuzzer(tes3mp_spatial_round_trip_fuzz)", component)
         self.assertIn("tes3mp_enable_libfuzzer(tes3mp_protocol_frame_fuzz)", component)
+        self.assertIn("tes3mp_enable_libfuzzer(tes3mp_protocol_handshake_fuzz)", component)
         adapter = (REPOSITORY_ROOT / "apps" / "openmw" / "tes3mp" / "CMakeLists.txt").read_text(
             encoding="utf-8"
         )

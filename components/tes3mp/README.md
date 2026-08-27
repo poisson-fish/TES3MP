@@ -122,3 +122,19 @@ no text or packet view. FlatBuffers payload schemas and generated headers do not
 land until Slice 4.2. The framing contract and production-decoder fuzz target
 remain independent of OpenMW, transport libraries, platform APIs, and test
 support.
+
+Slice 4.2 accepts ADR-0022 and adds three separately identified, size-prefixed
+FlatBuffer control payloads: `T3CH` client offers, `T3SH` negotiated results,
+and `T3RJ` typed rejections. The generated FlatBuffers views and pinned
+header-only runtime remain private to `tes3mp_protocol`; callers receive only
+owned version, capability, hello, rejection, or closed error values.
+
+Each offer carries one major, an inclusive minor range, and at most 32 sorted
+nonzero optional plus 32 sorted nonzero required capability IDs. Negotiation is
+a pure operation that selects the highest overlapping minor, checks requirements
+in both directions, and returns the sorted supported intersection. No gameplay
+capability ID or release version is assigned yet. Four initial bytes classify
+short, `T3MP`, and legacy/unknown preambles; non-vNext input produces no wire
+reply. A dedicated eighth contract, generated-code drift check, and bounded
+handshake-decoder fuzz target cover the new boundary without adding session,
+authentication, transport, OpenMW, authority, or gameplay behavior.

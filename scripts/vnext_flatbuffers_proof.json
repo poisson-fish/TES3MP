@@ -1,5 +1,5 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "dependency": {
     "name": "FlatBuffers",
     "version": "25.12.19",
@@ -19,6 +19,16 @@
   "generated_files": [
     "v1_generated.h",
     "v2_generated.h"
+  ],
+  "production_schemas": [
+    "client_hello.fbs",
+    "server_hello.fbs",
+    "session_rejected.fbs"
+  ],
+  "production_generated_files": [
+    "client_hello_generated.h",
+    "server_hello_generated.h",
+    "session_rejected_generated.h"
   ],
   "generator_arguments": [
     "--cpp",

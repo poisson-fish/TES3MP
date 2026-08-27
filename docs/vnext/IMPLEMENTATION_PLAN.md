@@ -331,6 +331,7 @@ runtime or protocol name.
 | ADR-0019 | Runtime-safety and fuzz CI policy | Phase 3 | **Implemented** |
 | ADR-0020 | Owned observability interfaces and test sinks | Phase 3 | **Implemented** |
 | ADR-0021 | Bounded protocol framing, classification, byte budgets, and decode results | Phase 4 | **Implemented** |
+| ADR-0022 | Version/capability negotiation, hello/rejection schemas, and legacy-input response boundary | Phase 4 | **Implemented** |
 
 An ADR is complete only when it records considered alternatives, selection
 criteria, consequences, failure modes, a replacement/review trigger, and
@@ -2400,7 +2401,7 @@ Depends on: Phase 3.
 | Slice | Deliverable | Status | Completion evidence |
 |---|---|---|---|
 | 4.1 | Implement framing/envelopes, message classification, byte budgets, and structured decode errors | **Implemented** | Accepted [`ADR-0021`](adr/ADR-0021-bounded-protocol-framing-and-decode-boundary.md), implementation `98e62f5f19`, all applicable local verification, and owner demo acceptance pass |
-| 4.2 | Implement `ClientHello`, `ServerHello`, and clear rejection with version/capability negotiation | **Not Started** | Required/optional/unknown capability and legacy-peer cases have golden tests |
+| 4.2 | Implement `ClientHello`, `ServerHello`, and clear rejection with version/capability negotiation | **In Progress** | Accepted [`ADR-0022`](adr/ADR-0022-version-and-capability-negotiation.md), local implementation and tests pass; owner demo acceptance pending |
 | 4.3 | Implement the client/server session state machines and authentication-provider interface | **Not Started** | Illegal transitions, timeout, cancellation, rejection, and secret-redaction tests pass |
 | 4.4 | Define reliable-operation and latest-wins snapshot envelopes | **Not Started** | Command ID/revision and tick/sequence/epoch rules are enforced separately |
 | 4.5 | Exchange a minimal player command and world snapshot over the in-memory link | **Not Started** | A fake peer completes handshake and state exchange with no sockets or OpenMW |
@@ -2409,9 +2410,10 @@ Depends on: Phase 3.
 Exit gate:
 
 - A simulated client completes a handshake and bounded state exchange in memory.
-- Unknown optional capabilities are ignored, unknown required capabilities fail
-  clearly, and legacy peers receive a clear incompatibility rejection when
-  enough input is available to respond safely.
+- Unknown optional capabilities are ignored and unknown required capabilities
+  fail clearly. Older vNext peers receive a clear incompatibility rejection
+  when a valid shared frame can be decoded; TES3MP 0.8 or other non-vNext input
+  is rejected locally without an incompatible wire reply.
 - Malformed input cannot cause partial state commits, unbounded allocation, or
   secret-bearing log output.
 
@@ -2477,6 +2479,44 @@ Implementation notes:
   - Follow-ups: none for Slice 4.1. Phase 4 remains **In Progress**; Slice 4.2
     stays **Not Started** and requires its kickoff decision packet in a new
     session before production schemas or behavior begin.
+
+- 2026-08-27 — Slice 4.2 — In Progress
+  - Change: accepted
+    [`ADR-0022`](adr/ADR-0022-version-and-capability-negotiation.md) and added
+    three size-prefixed/file-identified FlatBuffer schemas, pinned generated
+    C++, owned hello/rejection values, bounded capability offers, deterministic
+    pure negotiation, initial-peer classification, an eighth independent
+    contract, generated-drift enforcement, and a dedicated decoder fuzz target.
+    No authentication, session transition, transport behavior, release-version
+    constant, gameplay capability, authority, state scope, or OpenMW behavior
+    was added.
+  - Decisions: the owner approved Option A for ADR-0022 Decisions 1–5 on
+    2026-08-27. Payloads use `T3CH`/`T3SH`/`T3RJ`; negotiation selects the
+    highest overlapping minor and checks requirements in both directions;
+    capability IDs are nonzero stable `u32` values with separate 32-entry
+    sorted/disjoint optional and required sets; valid vNext incompatibility uses
+    typed numeric rejection while non-vNext/TES3MP 0.8 input receives no wire
+    response; and decoding/negotiation remain separate from Slice 4.3 state.
+  - Verification: from the Visual Studio 2022 v17.14.39/MSVC 19.44.35228
+    x86-64 environment, a fresh standalone configure/build and
+    `tes3mp_protocol_tests_run` pass all eight C++ contracts. A separate fresh
+    configure acquires the SHA-256-pinned FlatBuffers source and passes the same
+    target. The pinned FlatBuffers proof runner reproduces all three production
+    generated headers exactly and passes its isolated proof. All 97 repository-
+    owned Python tests pass. Indexed baseline provenance accounts for 137
+    intentional differences and verifies 50 dependency inputs; indexed legacy
+    exclusion checks 3,831 tracked paths, 59 CMake files, 24 compile commands,
+    and 74 Ninja edges. Both changed JSON files parse, all 67 local vNext
+    Markdown links resolve, changed Python compiles, the public header remains
+    isolated from FlatBuffers/generated, OpenMW, transport, platform, and test-
+    support headers, and `git diff --cached --check` passes.
+  - Owner review: architecture approval received for Option A on 2026-08-27.
+    Implementation-demo acceptance remains pending, so Slice 4.2 stays **In
+    Progress**.
+  - Follow-ups: present the three golden payloads, current/previous-minor
+    selection, optional/required capability cases, typed rejection, malformed
+    input, owned-buffer, and legacy/no-reply evidence for owner acceptance.
+    Slice 4.3 remains gated until Slice 4.2 is **Implemented**.
 
 ### Phase 5 — Deterministic authoritative server core
 

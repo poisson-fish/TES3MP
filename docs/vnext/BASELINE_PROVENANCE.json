@@ -102,7 +102,7 @@
     {
       "path": "components/tes3mp/CMakeLists.txt",
       "status": "A",
-      "purpose": "Defines the standalone-capable five-library graph, target-scoped safety registration, six contract executables, and bounded spatial fuzz target."
+      "purpose": "Defines the standalone-capable five-library graph, pinned FlatBuffers runtime input, target-scoped safety registration, eight contract executables, and bounded parser fuzz targets."
     },
     {
       "path": "components/tes3mp/CMakePresets.json",
@@ -148,6 +148,11 @@
       "path": "components/tes3mp/include/tes3mp/protocol_frame.hpp",
       "status": "A",
       "purpose": "Owner-approved fixed vNext frame layout, stable message classification and identifiers, class byte budgets, owned decoded frames, and closed structured error values."
+    },
+    {
+      "path": "components/tes3mp/include/tes3mp/protocol_handshake.hpp",
+      "status": "A",
+      "purpose": "Owned bounded protocol-version, capability-offer, hello, rejection, pure-negotiation, and initial-peer-classification API."
     },
     {
       "path": "components/tes3mp/include/tes3mp/spatial_types.hpp",
@@ -200,9 +205,44 @@
       "purpose": "Behavior-free translation-unit anchor for the engine-independent protocol target."
     },
     {
+      "path": "components/tes3mp/protocol/generated/client_hello_generated.h",
+      "status": "A",
+      "purpose": "Pinned FlatBuffers 25.12.19 generated C++ for the size-prefixed T3CH client-offer schema."
+    },
+    {
+      "path": "components/tes3mp/protocol/generated/server_hello_generated.h",
+      "status": "A",
+      "purpose": "Pinned FlatBuffers 25.12.19 generated C++ for the size-prefixed T3SH negotiated-result schema."
+    },
+    {
+      "path": "components/tes3mp/protocol/generated/session_rejected_generated.h",
+      "status": "A",
+      "purpose": "Pinned FlatBuffers 25.12.19 generated C++ for the size-prefixed T3RJ rejection schema."
+    },
+    {
       "path": "components/tes3mp/protocol/protocol_frame.cpp",
       "status": "A",
       "purpose": "Bounded little-endian frame encoding and allocation-after-validation decoding with exact length, class, kind, and payload-budget enforcement."
+    },
+    {
+      "path": "components/tes3mp/protocol/protocol_handshake.cpp",
+      "status": "A",
+      "purpose": "Verifier-first owned hello/rejection codecs, bounded capability validation, deterministic pure negotiation, and legacy/unknown no-reply classification."
+    },
+    {
+      "path": "components/tes3mp/protocol/schema/client_hello.fbs",
+      "status": "A",
+      "purpose": "Explicit-ID T3CH client protocol-range and bounded optional/required capability offer schema."
+    },
+    {
+      "path": "components/tes3mp/protocol/schema/server_hello.fbs",
+      "status": "A",
+      "purpose": "Explicit-ID T3SH selected protocol version and immutable negotiated-capability schema."
+    },
+    {
+      "path": "components/tes3mp/protocol/schema/session_rejected.fbs",
+      "status": "A",
+      "purpose": "Explicit-ID T3RJ closed negotiation rejection and bounded numeric context schema."
     },
     {
       "path": "components/tes3mp/server_core/anchor.cpp",
@@ -285,6 +325,16 @@
       "purpose": "Non-vNext input seed for bounded unknown/malformed production frame fuzz coverage."
     },
     {
+      "path": "components/tes3mp/tests/fuzz/corpus/protocol_handshake/identifiers",
+      "status": "A",
+      "purpose": "Bounded identifier-focused seed for all three production handshake payload decoders."
+    },
+    {
+      "path": "components/tes3mp/tests/fuzz/corpus/protocol_handshake/truncated",
+      "status": "A",
+      "purpose": "Truncated size-prefix seed for the production handshake payload decoders."
+    },
+    {
       "path": "components/tes3mp/tests/fuzz/corpus/spatial_round_trip/interior-sized",
       "status": "A",
       "purpose": "Exact interior-record-size seed for the bounded test-only spatial decoder fuzz smoke."
@@ -305,6 +355,11 @@
       "purpose": "Clang libFuzzer entry point with a hard pre-parse bound over the production protocol-frame decoder."
     },
     {
+      "path": "components/tes3mp/tests/fuzz/protocol_handshake_fuzz.cpp",
+      "status": "A",
+      "purpose": "Clang libFuzzer entry point over all three bounded production handshake payload decoders."
+    },
+    {
       "path": "components/tes3mp/tests/fuzz/spatial_round_trip_fuzz.cpp",
       "status": "A",
       "purpose": "Clang libFuzzer entry point with a hard pre-parse size bound over the test-support-only spatial decoder."
@@ -318,6 +373,11 @@
       "path": "components/tes3mp/tests/protocol_frame_tests.cpp",
       "status": "A",
       "purpose": "Golden, round-trip, truncation, malformed, class/kind, exact-budget, allocation, ownership, and mutation contracts for vNext framing."
+    },
+    {
+      "path": "components/tes3mp/tests/protocol_handshake_tests.cpp",
+      "status": "A",
+      "purpose": "Golden, owned round-trip, version-overlap, capability, rejection, malformed-wire, and legacy/no-reply contracts for Slice 4.2."
     },
     {
       "path": "components/tes3mp/tests/spatial_primitive_tests.cpp",
@@ -443,6 +503,11 @@
       "path": "docs/vnext/adr/ADR-0021-bounded-protocol-framing-and-decode-boundary.md",
       "status": "A",
       "purpose": "Owner-approved fixed framing, message classification and identifiers, class byte budgets, owned decode results, and structured error policy."
+    },
+    {
+      "path": "docs/vnext/adr/ADR-0022-version-and-capability-negotiation.md",
+      "status": "A",
+      "purpose": "Owner-approved hello schemas, version/capability negotiation, rejection, legacy/no-reply, and pure API-boundary policy."
     },
     {
       "path": "docs/vnext/proofs/flatbuffers/ANDROID_ARM64.md",
@@ -693,11 +758,39 @@
       "files": [
         {
           "path": ".gitattributes",
-          "sha256": "0c7d419efdea9c8d47abf262c1797e2e7989edbfcd82f69e1ed2210f65aacc21"
+          "sha256": "87dafaba23b709cbe017cab743f92daaa8753abd11a2d4f0bfe70d1e07da38c0"
         },
         {
           "path": ".github/workflows/vnext-flatbuffers-proof.yml",
           "sha256": "400482dc7dded9419b7ecb07a62c2399f88ac143cea48770b9ebf03dd6d0715e"
+        },
+        {
+          "path": "components/tes3mp/CMakeLists.txt",
+          "sha256": "545d840b129c8f6fa259040ca4799ad6a0e8fbde9b001e83a63defb7daaef593"
+        },
+        {
+          "path": "components/tes3mp/protocol/generated/client_hello_generated.h",
+          "sha256": "1ca9a4d075ac2b39c4f95bb267a7704ff7fa061ad1fd6ac46c40309fb045c5e1"
+        },
+        {
+          "path": "components/tes3mp/protocol/generated/server_hello_generated.h",
+          "sha256": "9617ce574881f2f5bdbb020978b04670cb748d0622c295a96f83e8da71f425b2"
+        },
+        {
+          "path": "components/tes3mp/protocol/generated/session_rejected_generated.h",
+          "sha256": "25217117a5fe941d9cf364b00a0a97029bfcc77f003d7ea825feeff53c2847d0"
+        },
+        {
+          "path": "components/tes3mp/protocol/schema/client_hello.fbs",
+          "sha256": "2636d0afc973e49c91ce562e55e937683fce4827b7a234569a56b6b21700905d"
+        },
+        {
+          "path": "components/tes3mp/protocol/schema/server_hello.fbs",
+          "sha256": "eb6730b9ec03e9468ea6f0964bbf76f58e5acbf191f1a847afe69f6d10e0721a"
+        },
+        {
+          "path": "components/tes3mp/protocol/schema/session_rejected.fbs",
+          "sha256": "a99918041b00518ec8def440eef71f4e5652fc5595fb7fe0ae16640ce043e027"
         },
         {
           "path": "docs/vnext/proofs/flatbuffers/ANDROID_ARM64.md",
@@ -745,15 +838,15 @@
         },
         {
           "path": "scripts/run_vnext_flatbuffers_proof.py",
-          "sha256": "46b894c2d68017715190727d908daac9bd3ee59ce11744b9082580c19935d488"
+          "sha256": "43fcdf7eb4663c6b8f638bd6b78c27b594c82655dcae93a3ed0cde35eed63bf0"
         },
         {
           "path": "scripts/tests/test_run_vnext_flatbuffers_proof.py",
-          "sha256": "c8dd11833a9aaa5f475d87004238386ff0ca52868b83909446dfaef377f110c6"
+          "sha256": "cb9d591c233597f8e93ea9d163fb0598d682c9a78966d421fc2825ec0f718e88"
         },
         {
           "path": "scripts/vnext_flatbuffers_proof.json",
-          "sha256": "a1cce8c4475460a5dcc29c0164b6743b3e228019068c08d6453c462512a95766"
+          "sha256": "c4a886a212297c29cfe1cab4816cbb0c2a27fcbb0a10dcf5e950600cc27f51be"
         }
       ],
       "repositories": [
