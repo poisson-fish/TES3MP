@@ -89,3 +89,9 @@ python3 scripts/run_tes3mp_runtime_safety.py --profile tsan
 Both profiles retain exact toolchain, contract, instrumentation, corpus, log,
 and result evidence under `build/`. Fuzz channels and bytes remain test-only;
 the harness does not define a Phase 4 production decoder or wire format.
+
+The accepted Slice 3.6 gate passes in hosted CI at `fc8f178081`: all five
+contracts pass under separate Linux Clang 18 ASan+UBSan and ThreadSanitizer
+profiles, and the bounded 30-second spatial-decoder fuzz smoke retains no
+reproducer. Slice 3.7 remains at the ADR-0020 proposal stage; no observability
+API or target dependency is approved yet.

@@ -322,6 +322,7 @@ runtime or protocol name.
 | ADR-0017 | Deterministic facilities and harness boundaries | Phase 3 | **Implemented** |
 | ADR-0018 | Deterministic network fault controls | Phase 3 | **Implemented** |
 | ADR-0019 | Runtime-safety and fuzz CI policy | Phase 3 | **Implemented** |
+| ADR-0020 | Owned observability interfaces and test sinks | Phase 3 | **Proposed** |
 
 An ADR is complete only when it records considered alternatives, selection
 criteria, consequences, failure modes, a replacement/review trigger, and
@@ -1716,8 +1717,8 @@ Depends on: Phase 2.
 | 3.3 | Add canonical `CellId`, transform, velocity, and platform-neutral command/snapshot primitives | **Implemented** | Accepted [`ADR-0016`](adr/ADR-0016-canonical-spatial-command-snapshot-primitives.md) is implemented by engine-independent spatial/metadata values and a test-support-only byte round trip; the owner accepted the implementation demo on 2026-08-26 |
 | 3.4 | Add injected clock, deterministic RNG, deterministic scheduler, and in-memory link | **Implemented** | Accepted [`ADR-0017`](adr/ADR-0017-deterministic-facilities-harness-boundaries.md) is implemented by passive server-core clock/scheduler/RNG facilities and a bounded test-support link/exact-trace harness; independent long-run, vector, isolation, backpressure, and repeatability contracts pass and the owner accepted the implementation demo on 2026-08-26 |
 | 3.5 | Add latency/loss/jitter/duplication/reordering/stall/disconnect fault controls | **Implemented** | Accepted [`ADR-0018`](adr/ADR-0018-deterministic-network-fault-controls.md) is implemented by a passive bounded test-support wrapper with independently configurable direction/channel profiles, isolated seeded fault streams, explicit stall/disconnect controls, and passing exact-trace contracts; the owner accepted the implementation demo on 2026-08-26 |
-| 3.6 | Add ASan, UBSan, race-checking where supported, and fuzz-target CI plumbing | **In Progress** | Accepted [`ADR-0019`](adr/ADR-0019-runtime-safety-and-fuzz-ci-policy.md) is implemented locally and the owner accepted the implementation demo; replacement hosted ASan+UBSan/libFuzzer and ThreadSanitizer evidence remains pending |
-| 3.7 | Add owned metrics/logging interfaces and test sinks | **Not Started** | Core tests can assert metrics and structured events without a production backend |
+| 3.6 | Add ASan, UBSan, race-checking where supported, and fuzz-target CI plumbing | **Implemented** | Accepted [`ADR-0019`](adr/ADR-0019-runtime-safety-and-fuzz-ci-policy.md), the owner-accepted demo, and reviewed hosted Clang 18 ASan+UBSan/libFuzzer and ThreadSanitizer evidence all pass at `fc8f178081` |
+| 3.7 | Add owned metrics/logging interfaces and test sinks | **In Progress** | Proposed [`ADR-0020`](adr/ADR-0020-owned-observability-interfaces-and-test-sinks.md) presents five owner decisions; production implementation is approval-gated |
 
 Exit gate:
 
@@ -2174,6 +2175,62 @@ Implementation notes:
   - Follow-ups: publish the repair, require replacement baseline and safety
     runs, and review retained safety artifacts before changing Slice 3.6 to
     **Implemented**. Slice 3.7 remains gated.
+
+- 2026-08-27 — Slice 3.6 — Implemented
+  - Change: retained accepted ADR-0019, implementation commit `1be40d1a4b`,
+    demo-acceptance commit `d21b66241f`, and portability repair commit
+    `fc8f178081` without amendment. This status update closes the slice after
+    reviewing the replacement hosted execution and its retained artifacts.
+  - Decisions: no amendment. The approved target scope, separate sanitizer
+    profiles, per-parser fuzzer, per-change cadence, and evidence contract are
+    satisfied. No production wire, threading, authority, state-scope, or
+    gameplay behavior was introduced.
+  - Verification: [runtime-safety run `33086841428`](https://github.com/poisson-fish/TES3MP/actions/runs/33086841428)
+    passes both Clang 18.1.3 Linux x86-64 jobs. The ThreadSanitizer job runs all
+    five contracts with 17 owned sources instrumented. The ASan+UBSan job runs
+    the same contracts with 18 owned sources instrumented, then executes
+    43,182,600 libFuzzer inputs in 31 seconds with the pinned 101/111/2-byte
+    corpus, 256-byte input cap, 512 MiB RSS cap, and no sanitizer finding or
+    retained reproducer. ASan+UBSan artifact `9652568259` has digest
+    `705b3e86e9e93176bd254376879466635988297bdec8f605303abd65c58d3794`;
+    ThreadSanitizer artifact `9652547046` has digest
+    `6ed693d02d38823cb1de45aed98bcfcf7319214a1ecc266c6eaa980370e0d3a7`.
+    Replacement Linux run `33086841250`, Windows run `33086841350`, and macOS
+    run `33086841457` also pass the portability repair on the supported baseline
+    matrix.
+  - Owner review: implementation-demo acceptance was received in the 2026-08-26
+    working session; the owner confirmed the replacement CI is green on
+    2026-08-27.
+  - Follow-ups: none for Slice 3.6. Slice 3.7 is the next eligible slice and its
+    observability architecture requires owner approval before public APIs land.
+
+- 2026-08-27 — Slice 3.7 — In Progress
+  - Change: inspected the accepted target topology, deterministic-state policy,
+    hostile-Internet/redaction requirements, future committed-change sinks, and
+    transport/admin telemetry ownership. Added proposed
+    [`ADR-0020`](adr/ADR-0020-owned-observability-interfaces-and-test-sinks.md)
+    with five option sets, scenarios, acceptance tests, failure mitigations, and
+    review triggers. No production header, sink, target dependency, metric/event
+    category, backend, thread, queue, or behavior was added.
+  - Decisions: none accepted. The proposal recommends Option A for Decisions
+    1–5: server-core-owned ports plus test-support recorders; explicit injected
+    non-blocking/noexcept sink attempts; closed integer metric operations and
+    low-cardinality enum dimensions; closed typed structured events with no raw
+    text/bytes; and fixed-capacity FIFO test recorders with reject-newest and
+    explicit dropped-count evidence.
+  - Verification: retained CI evidence establishes Slice 3.6 completion and the
+    repository/decision inspection identifies Slice 3.7 as the only eligible
+    implementation work. All 95 repository-owned Python tests pass; staged
+    provenance accounts for 112 intentional differences and 43 dependency
+    inputs; legacy exclusion checks 3,806 paths, 59 CMake files, 1,251 compile
+    commands, and 1,965 Ninja edges; and JSON/path ordering, all 63 local vNext
+    Markdown links, proposal/status assertions, and staged diff checks pass. A
+    new product build is not applicable because production implementation
+    remains approval-gated.
+  - Owner review: pending explicit approval or amendment of Decisions 1–5.
+  - Follow-ups: present Decisions 1–5 to the owner, accept or amend ADR-0020,
+    then implement only the approved Slice 3.7 observability interfaces and test
+    sinks. Phase 3 remains **In Progress** until Slice 3.7 and the exit gate pass.
 
 ### Phase 4 — Bounded protocol and in-memory session
 

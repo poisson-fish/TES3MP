@@ -380,6 +380,11 @@
       "purpose": "Owner-approved project-owned sanitizer, race-checking, fuzz-target, CI-cadence, and retained-evidence policy."
     },
     {
+      "path": "docs/vnext/adr/ADR-0020-owned-observability-interfaces-and-test-sinks.md",
+      "status": "A",
+      "purpose": "Proposed owner decision packet for server-core observability ownership, injection, typed metrics/events, privacy, and bounded deterministic test sinks."
+    },
+    {
       "path": "docs/vnext/proofs/flatbuffers/ANDROID_ARM64.md",
       "status": "A",
       "purpose": "ADR-0002-required Android ARM64 feasibility assessment for the selected header-only codec runtime surface."
