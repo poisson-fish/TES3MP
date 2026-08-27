@@ -63,8 +63,10 @@ ASan+UBSan and ThreadSanitizer profiles, per-parser libFuzzer targets, bounded
 per-change jobs, and repository-owned evidence. The local plumbing and its
 uninstrumented Windows proof are implemented, and the owner accepted the local
 implementation demo. Hosted sanitizer/fuzzer results and retained-artifact
-review remain required. No multiplayer runtime or production transport behavior
-exists yet.
+review remain required. The first hosted run exposed a portable C++ test-table
+compile issue before instrumentation could execute; the local repair and
+contracts pass, and replacement hosted execution is pending. No multiplayer
+runtime or production transport behavior exists yet.
 
 See the [implementation plan](IMPLEMENTATION_PLAN.md) for the live phase and
 slice tracker, completion gates, architecture decisions, and implementation

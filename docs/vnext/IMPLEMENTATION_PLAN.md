@@ -1716,7 +1716,7 @@ Depends on: Phase 2.
 | 3.3 | Add canonical `CellId`, transform, velocity, and platform-neutral command/snapshot primitives | **Implemented** | Accepted [`ADR-0016`](adr/ADR-0016-canonical-spatial-command-snapshot-primitives.md) is implemented by engine-independent spatial/metadata values and a test-support-only byte round trip; the owner accepted the implementation demo on 2026-08-26 |
 | 3.4 | Add injected clock, deterministic RNG, deterministic scheduler, and in-memory link | **Implemented** | Accepted [`ADR-0017`](adr/ADR-0017-deterministic-facilities-harness-boundaries.md) is implemented by passive server-core clock/scheduler/RNG facilities and a bounded test-support link/exact-trace harness; independent long-run, vector, isolation, backpressure, and repeatability contracts pass and the owner accepted the implementation demo on 2026-08-26 |
 | 3.5 | Add latency/loss/jitter/duplication/reordering/stall/disconnect fault controls | **Implemented** | Accepted [`ADR-0018`](adr/ADR-0018-deterministic-network-fault-controls.md) is implemented by a passive bounded test-support wrapper with independently configurable direction/channel profiles, isolated seeded fault streams, explicit stall/disconnect controls, and passing exact-trace contracts; the owner accepted the implementation demo on 2026-08-26 |
-| 3.6 | Add ASan, UBSan, race-checking where supported, and fuzz-target CI plumbing | **In Progress** | Accepted [`ADR-0019`](adr/ADR-0019-runtime-safety-and-fuzz-ci-policy.md) is implemented locally; hosted ASan+UBSan/libFuzzer and ThreadSanitizer evidence plus owner demo acceptance remain pending |
+| 3.6 | Add ASan, UBSan, race-checking where supported, and fuzz-target CI plumbing | **In Progress** | Accepted [`ADR-0019`](adr/ADR-0019-runtime-safety-and-fuzz-ci-policy.md) is implemented locally and the owner accepted the implementation demo; replacement hosted ASan+UBSan/libFuzzer and ThreadSanitizer evidence remains pending |
 | 3.7 | Add owned metrics/logging interfaces and test sinks | **Not Started** | Core tests can assert metrics and structured events without a production backend |
 
 Exit gate:
@@ -2141,6 +2141,39 @@ Implementation notes:
   - Follow-ups: publish the commits, wait for both hosted safety jobs, review
     their retained artifacts, and record the results before changing Slice 3.6
     to **Implemented**. Slice 3.7 remains gated.
+
+- 2026-08-27 — Slice 3.6 — In Progress
+  - Change: reviewed the first hosted execution of commit `d21b66241f`. Both
+    runtime-safety jobs and the Linux/macOS baseline jobs stopped while compiling
+    `fault_injection_tests.cpp`: GCC 13, Clang 18 with libstdc++ 14, and Apple
+    Clang with libc++ correctly rejected class-template argument deduction of a
+    function type in the test table that MSVC had accepted. Made each test
+    callable an explicit function pointer; production targets, instrumentation,
+    fuzzing policy, and runtime behavior are unchanged.
+  - Decisions: no ADR amendment or new architecture, authority, state-scope, or
+    gameplay-behavior decision. This is a mechanical source-portability repair
+    within the accepted ADR-0019 toolchain matrix.
+  - Verification: failed runtime-safety run `33043774198` records ASan+UBSan
+    artifact `9634839470` (digest
+    `27738fafe1e5db094344ff3dcce072da1d069c63d4b1012ddd5bf9ab8b5b4f60`) and
+    ThreadSanitizer artifact `9634839001` (digest
+    `28470dfd8f5add3c2427eb167ccb2e238c52bf7bc9e074c16499224e4f04b0fb`);
+    both failed during the common contract build before sanitizer execution.
+    Linux baseline run `33043774128` and macOS ARM64 baseline run `33043774191`
+    independently reproduce the same compiler diagnostic. Post-repair local
+    verification passes all 95 repository-owned Python tests and all five C++
+    contracts in both the standalone and real baseline graphs under MSVC
+    19.44/Ninja. Staged provenance accounts for 111 intentional differences and
+    43 dependency inputs; legacy exclusion checks 3,805 paths, 59 CMake files,
+    1,251 compile commands, and 1,965 Ninja edges. Both relevant JSON documents,
+    all 61 local vNext Markdown links, and `git diff --cached --check` pass.
+    Replacement hosted verification is pending.
+  - Owner review: the owner reported CI completion in the 2026-08-27 working
+    session; the previously accepted implementation demo and Decisions 1–5 are
+    unchanged.
+  - Follow-ups: publish the repair, require replacement baseline and safety
+    runs, and review retained safety artifacts before changing Slice 3.6 to
+    **Implemented**. Slice 3.7 remains gated.
 
 ### Phase 4 — Bounded protocol and in-memory session
 

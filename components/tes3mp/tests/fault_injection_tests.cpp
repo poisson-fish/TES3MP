@@ -312,19 +312,19 @@ namespace
 int main()
 {
     const std::array tests{
-        std::pair{ "profiles_and_paths_reject_invalid_configuration", profiles_and_paths_reject_invalid_configuration },
+        std::pair{ "profiles_and_paths_reject_invalid_configuration", &profiles_and_paths_reject_invalid_configuration },
         std::pair{ "latency_and_direction_channel_state_are_independent",
-            latency_and_direction_channel_state_are_independent },
-        std::pair{ "loss_duplication_and_pending_budgets_are_atomic", loss_duplication_and_pending_budgets_are_atomic },
+            &latency_and_direction_channel_state_are_independent },
+        std::pair{ "loss_duplication_and_pending_budgets_are_atomic", &loss_duplication_and_pending_budgets_are_atomic },
         std::pair{ "stall_resume_and_disconnect_affect_only_the_selected_path",
-            stall_resume_and_disconnect_affect_only_the_selected_path },
+            &stall_resume_and_disconnect_affect_only_the_selected_path },
         std::pair{ "base_backpressure_is_bounded_without_blocking_the_reverse_direction",
-            base_backpressure_is_bounded_without_blocking_the_reverse_direction },
+            &base_backpressure_is_bounded_without_blocking_the_reverse_direction },
         std::pair{ "same_seed_profile_and_script_reproduce_exact_fault_trace",
-            same_seed_profile_and_script_reproduce_exact_fault_trace },
+            &same_seed_profile_and_script_reproduce_exact_fault_trace },
         std::pair{ "jitter_and_reorder_are_bounded_and_can_change_delivery_order",
-            jitter_and_reorder_are_bounded_and_can_change_delivery_order },
-        std::pair{ "time_overflow_is_explicit_and_atomic", time_overflow_is_explicit_and_atomic },
+            &jitter_and_reorder_are_bounded_and_can_change_delivery_order },
+        std::pair{ "time_overflow_is_explicit_and_atomic", &time_overflow_is_explicit_and_atomic },
     };
     for (const auto& [name, test] : tests)
     {
