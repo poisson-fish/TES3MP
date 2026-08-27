@@ -321,6 +321,7 @@ runtime or protocol name.
 | ADR-0016 | Canonical spatial, command, and snapshot primitives | Phase 3 | **Implemented** |
 | ADR-0017 | Deterministic facilities and harness boundaries | Phase 3 | **Implemented** |
 | ADR-0018 | Deterministic network fault controls | Phase 3 | **Implemented** |
+| ADR-0019 | Runtime-safety and fuzz CI policy | Phase 3 | **In Progress** |
 
 An ADR is complete only when it records considered alternatives, selection
 criteria, consequences, failure modes, a replacement/review trigger, and
@@ -1715,7 +1716,7 @@ Depends on: Phase 2.
 | 3.3 | Add canonical `CellId`, transform, velocity, and platform-neutral command/snapshot primitives | **Implemented** | Accepted [`ADR-0016`](adr/ADR-0016-canonical-spatial-command-snapshot-primitives.md) is implemented by engine-independent spatial/metadata values and a test-support-only byte round trip; the owner accepted the implementation demo on 2026-08-26 |
 | 3.4 | Add injected clock, deterministic RNG, deterministic scheduler, and in-memory link | **Implemented** | Accepted [`ADR-0017`](adr/ADR-0017-deterministic-facilities-harness-boundaries.md) is implemented by passive server-core clock/scheduler/RNG facilities and a bounded test-support link/exact-trace harness; independent long-run, vector, isolation, backpressure, and repeatability contracts pass and the owner accepted the implementation demo on 2026-08-26 |
 | 3.5 | Add latency/loss/jitter/duplication/reordering/stall/disconnect fault controls | **Implemented** | Accepted [`ADR-0018`](adr/ADR-0018-deterministic-network-fault-controls.md) is implemented by a passive bounded test-support wrapper with independently configurable direction/channel profiles, isolated seeded fault streams, explicit stall/disconnect controls, and passing exact-trace contracts; the owner accepted the implementation demo on 2026-08-26 |
-| 3.6 | Add ASan, UBSan, race-checking where supported, and fuzz-target CI plumbing | **Not Started** | Smoke jobs run even before the full decoder corpus exists |
+| 3.6 | Add ASan, UBSan, race-checking where supported, and fuzz-target CI plumbing | **In Progress** | Proposed [`ADR-0019`](adr/ADR-0019-runtime-safety-and-fuzz-ci-policy.md) awaits owner approval; production plumbing remains gated |
 | 3.7 | Add owned metrics/logging interfaces and test sinks | **Not Started** | Core tests can assert metrics and structured events without a production backend |
 
 Exit gate:
@@ -2049,6 +2050,36 @@ Implementation notes:
     working session.
   - Follow-ups: none for Slice 3.5. Slice 3.6 is the next eligible slice; Phase
     3 remains **In Progress** until Slices 3.6 and 3.7 and the exit gate pass.
+
+- 2026-08-26 — Slice 3.6 — In Progress
+  - Change: inspected the accepted platform/toolchain, schema/fuzzer,
+    transport-sanitizer, target-boundary, and deterministic-harness policies;
+    current CMake presets and vNext workflows; the five existing C++ contract
+    executables; and the absence of reusable project-owned sanitizer, race, or
+    fuzz plumbing. Added proposed
+    [`ADR-0019`](adr/ADR-0019-runtime-safety-and-fuzz-ci-policy.md) with five
+    option sets, scenarios, acceptance tests, failure mitigations, and review
+    triggers. No production CMake option, sanitizer flag, runner, fuzz target,
+    seed corpus, or workflow job was added.
+  - Decisions: none accepted. The proposal recommends owned-target
+    registration with a fast independent graph; separate Linux Clang 18
+    ASan+UBSan and ThreadSanitizer profiles; one libFuzzer executable per
+    bounded parser beginning with the test-only spatial decoder; two short
+    per-change safety jobs; and repository-owned presets/runner/JSON evidence.
+  - Verification: `python -m unittest discover -s scripts/tests -v` passes all
+    85 repository-owned tests. Staged-tree
+    `python scripts/verify_vnext_baseline.py --index` passes with 102
+    intentional differences and 43 dependency inputs; JSON parsing and manifest
+    path ordering, all 61 local vNext Markdown links, `git diff --cached
+    --check`, and status/ADR assertions pass. Repository status/history and the
+    accepted ADR plus build/workflow inspection identify Phase 3/Slice 3.6 as
+    the only eligible work and confirm that no existing decision settles these
+    five choices. A new product build or sanitizer run is not applicable
+    because this step changes only the decision packet and production
+    implementation remains gated.
+  - Owner review: pending explicit approval or amendment of Decisions 1–5.
+  - Follow-ups: present Decisions 1–5 to the owner, amend or accept ADR-0019,
+    then implement only the approved Slice 3.6 safety plumbing and evidence.
 
 ### Phase 4 — Bounded protocol and in-memory session
 

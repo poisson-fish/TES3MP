@@ -340,6 +340,11 @@
       "purpose": "Owner-approved deterministic fault-wrapper, timing/order, test-path identity, random isolation, stall/disconnect, and bounded-backpressure policy."
     },
     {
+      "path": "docs/vnext/adr/ADR-0019-runtime-safety-and-fuzz-ci-policy.md",
+      "status": "A",
+      "purpose": "Proposed owner decision packet for project-owned sanitizer, race-checking, fuzz-target, CI-cadence, and retained-evidence policy."
+    },
+    {
       "path": "docs/vnext/proofs/flatbuffers/ANDROID_ARM64.md",
       "status": "A",
       "purpose": "ADR-0002-required Android ARM64 feasibility assessment for the selected header-only codec runtime surface."
