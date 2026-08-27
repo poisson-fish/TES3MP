@@ -59,5 +59,14 @@ Test support owns the checked manual clock, independently bounded FIFO byte
 duplex, and scripted exact-byte trace harness. `TestTraceDigestV1` is an FNV-1a
 test diagnostic, not canonical state, protocol, persistence, or replay policy.
 Production targets are checked against both reverse links to test support and
-direct `tes3mp/test_support` includes. Network faults remain Slice 3.5 work and
-production transport semantics remain Phase 6 work.
+direct `tes3mp/test_support` includes. Production transport semantics remain
+Phase 6 work.
+
+Slice 3.5 adds ADR-0018's passive `FaultInjectingLink` wrapper in test support.
+Direction plus a test-only numeric channel key selects an immutable bounded
+profile. Separate version-one random streams drive integer-rate loss,
+duplication, jitter, and reorder holds for each path. Explicit pump,
+stall/resume, and disconnect controls remain single-threaded and use the
+injected monotonic clock. These channel and lifecycle types make no production
+transport claim; Phase 4 still owns message classification and Phase 6 owns the
+real transport interface.

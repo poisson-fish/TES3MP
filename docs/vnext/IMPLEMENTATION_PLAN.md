@@ -320,6 +320,7 @@ runtime or protocol name.
 | ADR-0015 | Strong value types and identity/counter policy | Phase 3 | **Implemented** |
 | ADR-0016 | Canonical spatial, command, and snapshot primitives | Phase 3 | **Implemented** |
 | ADR-0017 | Deterministic facilities and harness boundaries | Phase 3 | **Implemented** |
+| ADR-0018 | Deterministic network fault controls | Phase 3 | **Implemented** |
 
 An ADR is complete only when it records considered alternatives, selection
 criteria, consequences, failure modes, a replacement/review trigger, and
@@ -1157,7 +1158,7 @@ Implementation notes:
     approved before a schema/codec selection or dependent production code.
 
 - 2026-08-26 — Slice 2.2 — In Progress
-  - Change: accepted
+  - Change: this implementation commit accepted
     [`ADR-0004`](adr/ADR-0004-protocol-schema-codec-evolution-policy.md); added
     an exact source/archive/license lock, safe proof runner, explicitly numbered
     v1/v2 schemas and pinned generated C++, an isolated C++20 proof decoder,
@@ -1713,7 +1714,7 @@ Depends on: Phase 2.
 | 3.2 | Add strong value types for IDs, ticks, sequences, revisions, command IDs, and authority epochs | **Implemented** | Accepted [`ADR-0015`](adr/ADR-0015-strong-value-types-identity-counter-policy.md) is implemented by ten explicit semantic types and independent compile-time/runtime boundary tests; the owner accepted the implementation demo on 2026-08-26 |
 | 3.3 | Add canonical `CellId`, transform, velocity, and platform-neutral command/snapshot primitives | **Implemented** | Accepted [`ADR-0016`](adr/ADR-0016-canonical-spatial-command-snapshot-primitives.md) is implemented by engine-independent spatial/metadata values and a test-support-only byte round trip; the owner accepted the implementation demo on 2026-08-26 |
 | 3.4 | Add injected clock, deterministic RNG, deterministic scheduler, and in-memory link | **Implemented** | Accepted [`ADR-0017`](adr/ADR-0017-deterministic-facilities-harness-boundaries.md) is implemented by passive server-core clock/scheduler/RNG facilities and a bounded test-support link/exact-trace harness; independent long-run, vector, isolation, backpressure, and repeatability contracts pass and the owner accepted the implementation demo on 2026-08-26 |
-| 3.5 | Add latency/loss/jitter/duplication/reordering/stall/disconnect fault controls | **Not Started** | Seeded fault profiles are repeatable and independently configurable per direction/channel |
+| 3.5 | Add latency/loss/jitter/duplication/reordering/stall/disconnect fault controls | **In Progress** | Accepted [`ADR-0018`](adr/ADR-0018-deterministic-network-fault-controls.md) fixes a passive bounded test-support wrapper, per-direction/channel profiles, isolated seeded fault streams, and explicit stall/disconnect controls; implementation and independent contracts are under verification |
 | 3.6 | Add ASan, UBSan, race-checking where supported, and fuzz-target CI plumbing | **Not Started** | Smoke jobs run even before the full decoder corpus exists |
 | 3.7 | Add owned metrics/logging interfaces and test sinks | **Not Started** | Core tests can assert metrics and structured events without a production backend |
 
@@ -1989,6 +1990,45 @@ Implementation notes:
   - Follow-ups: none for Slice 3.4. Slice 3.5 is the next eligible slice and
     still owns latency, loss, jitter, duplication, reordering, stall, and
     disconnect fault controls.
+
+- 2026-08-26 — Slice 3.5 — In Progress
+  - Change: accepted
+    [`ADR-0018`](adr/ADR-0018-deterministic-network-fault-controls.md) and added
+    a passive test-support-only `FaultInjectingLink` wrapper, test-only numeric
+    channel keys, immutable bounded profiles, isolated per-path/per-dimension
+    deterministic random streams, scheduled latency/jitter/reorder delivery,
+    integer-rate loss/duplication, explicit path stall/disconnect controls, and
+    an independent C++ contract executable. The accepted FIFO byte duplex adds
+    only a read-only budget observer so impossible messages reject before they
+    can become stuck in the wrapper.
+  - Decisions: the owner approved Option A for ADR-0018 Decisions 1–5. Faults
+    wrap rather than modify the base-link semantics; delivery is passive and
+    clock-driven; direction/channel identity is test-only; random decisions are
+    seeded and isolated; and stalls, disconnects, duplication, pending queues,
+    and underlying directional backpressure follow the approved bounded rules.
+    No protocol channel, production transport, authority, state-scope, or
+    gameplay behavior was selected.
+  - Verification: `python -m unittest discover -s scripts/tests -v` passes all
+    85 repository-owned tests, including seven focused target-boundary tests.
+    The isolated and real MSVC 19.44/Ninja engine-independent graphs build and
+    run all five C++ contract executables through
+    `tes3mp_protocol_tests_run`. Fault contracts cover invalid/duplicate/65-path
+    configuration, exact latency, direction/channel isolation, certain loss,
+    certain at-most-one duplication with atomic admission, bounded jitter and
+    reordered delivery, stall/resume, disconnect cleanup, independent reverse-
+    direction progress under base-link backpressure, due-time overflow, and a
+    pinned repeatable 97-byte seeded trace with diagnostic digest
+    `935d71908b6496c8`; another path cannot perturb it and a changed seed changes
+    it. `python scripts/verify_vnext_baseline.py --index` accounts for 101
+    intentional differences and 43 dependency inputs. Fresh supported-preset
+    configuration plus `python scripts/verify_vnext_legacy_exclusion.py
+    --build-dir build/vnext-baseline --index` checks 3,795 staged paths, 58
+    CMake files, 1,251 compile commands, and 1,965 Ninja edges. Manifest JSON,
+    all 59 local vNext Markdown links, formatting, and staged diff checks pass.
+  - Owner review: explicit Option A approval for Decisions 1–5 received in the
+    2026-08-26 working session. Implementation-demo acceptance is pending.
+  - Follow-ups: present the implementation demo and obtain owner acceptance
+    before changing Slice 3.5 to **Implemented**. Slice 3.6 remains gated.
 
 ### Phase 4 — Bounded protocol and in-memory session
 

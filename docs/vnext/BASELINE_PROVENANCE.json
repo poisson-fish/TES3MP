@@ -92,12 +92,12 @@
     {
       "path": "components/tes3mp/CMakeLists.txt",
       "status": "A",
-      "purpose": "Defines five separate engine-independent TES3MP C++20 targets, aliases, dependency direction, boundary checks, and deterministic facility contract executables."
+      "purpose": "Defines five separate engine-independent TES3MP C++20 targets, aliases, dependency direction, boundary checks, and deterministic facility/fault contract executables."
     },
     {
       "path": "components/tes3mp/README.md",
       "status": "A",
-      "purpose": "Documents the approved target graph, boundary enforcement, and implemented Slice 3.1-3.4 engine-independent API scope."
+      "purpose": "Documents the approved target graph, boundary enforcement, and implemented Slice 3.1-3.5 engine-independent API scope."
     },
     {
       "path": "components/tes3mp/client_session/anchor.cpp",
@@ -138,6 +138,11 @@
       "path": "components/tes3mp/include/tes3mp/test_support/deterministic_harness.hpp",
       "status": "A",
       "purpose": "Reusable scripted deterministic harness and explicitly non-canonical test trace digest interface."
+    },
+    {
+      "path": "components/tes3mp/include/tes3mp/test_support/fault_injecting_link.hpp",
+      "status": "A",
+      "purpose": "Owner-approved test-only bounded direction/channel fault profiles, passive wrapper, scheduled delivery, and explicit stall/disconnect interface."
     },
     {
       "path": "components/tes3mp/include/tes3mp/test_support/in_memory_link.hpp",
@@ -190,6 +195,11 @@
       "purpose": "Stable typed little-endian test trace composition and test-only FNV-1a diagnostic evidence implementation."
     },
     {
+      "path": "components/tes3mp/test_support/fault_injecting_link.cpp",
+      "status": "A",
+      "purpose": "Deterministic isolated fault-stream scheduling, bounded atomic admission, passive pumping, path stall, disconnect, and directional backpressure implementation."
+    },
+    {
       "path": "components/tes3mp/test_support/in_memory_link.cpp",
       "status": "A",
       "purpose": "Owned FIFO message queues enforcing independent message/byte budgets, atomic enqueue, and per-direction close semantics."
@@ -213,6 +223,11 @@
       "path": "components/tes3mp/tests/deterministic_harness_tests.cpp",
       "status": "A",
       "purpose": "Independent duplex budget/FIFO/close and repeated exact trace/non-canonical digest harness contracts."
+    },
+    {
+      "path": "components/tes3mp/tests/fault_injection_tests.cpp",
+      "status": "A",
+      "purpose": "Independent profile/path validation, latency, loss, duplication, jitter, reorder, stall, disconnect, bounds, backpressure, isolation, and exact seeded-trace contracts."
     },
     {
       "path": "components/tes3mp/tests/spatial_primitive_tests.cpp",
@@ -317,7 +332,12 @@
     {
       "path": "docs/vnext/adr/ADR-0017-deterministic-facilities-harness-boundaries.md",
       "status": "A",
-      "purpose": "Proposed deterministic clock, scheduler, RNG stream, in-memory link, and trace-evidence boundary decision packet pending owner approval."
+      "purpose": "Owner-approved deterministic clock, scheduler, RNG stream, in-memory link, and trace-evidence boundary policy."
+    },
+    {
+      "path": "docs/vnext/adr/ADR-0018-deterministic-network-fault-controls.md",
+      "status": "A",
+      "purpose": "Owner-approved deterministic fault-wrapper, timing/order, test-path identity, random isolation, stall/disconnect, and bounded-backpressure policy."
     },
     {
       "path": "docs/vnext/proofs/flatbuffers/ANDROID_ARM64.md",

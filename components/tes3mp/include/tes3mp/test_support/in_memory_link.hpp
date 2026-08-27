@@ -40,6 +40,7 @@ namespace TES3MP::TestSupport
         void closeSend(LinkDirection direction) noexcept;
 
         bool isSendClosed(LinkDirection direction) const noexcept;
+        LinkBudget budget(LinkDirection direction) const noexcept;
         std::size_t queuedMessages(LinkDirection direction) const noexcept;
         std::size_t queuedBytes(LinkDirection direction) const noexcept;
 

@@ -53,9 +53,11 @@ ADR-0017 fixes the project-owned monotonic clock seam, passive bounded 30 Hz
 scheduler, versioned numeric-keyed deterministic RNG streams,
 test-support-only bounded in-memory link, and exact trace plus non-canonical
 diagnostic-digest boundaries. Their independent contracts pass and the owner
-accepted the implementation demo. Slice 3.5 fault controls are the next
-eligible work; no multiplayer runtime or production transport behavior exists
-yet.
+accepted the implementation demo. Slice 3.5 fault controls are in progress:
+accepted ADR-0018 fixes a passive test-support wrapper with independently
+bounded direction/channel profiles, isolated deterministic fault streams, and
+explicit stall/disconnect controls. Implementation-demo acceptance is pending;
+no multiplayer runtime or production transport behavior exists yet.
 
 See the [implementation plan](IMPLEMENTATION_PLAN.md) for the live phase and
 slice tracker, completion gates, architecture decisions, and implementation

@@ -67,10 +67,12 @@ target_link_libraries(tes3mp_test_support
 )
 target_sources(tes3mp_test_support PRIVATE
     include/tes3mp/test_support/deterministic_harness.hpp
+    include/tes3mp/test_support/fault_injecting_link.hpp
     include/tes3mp/test_support/in_memory_link.hpp
     include/tes3mp/test_support/manual_clock.hpp
     include/tes3mp/test_support/spatial_round_trip.hpp
     test_support/deterministic_harness.cpp
+    test_support/fault_injecting_link.cpp
     test_support/in_memory_link.cpp
     test_support/manual_clock.cpp
     test_support/spatial_round_trip.cpp
@@ -145,15 +147,26 @@ tes3mp_verify_target_dependencies(tes3mp_deterministic_harness_tests ALLOWED tes
 tes3mp_verify_target_includes(tes3mp_deterministic_harness_tests
     FORBIDDEN ${TES3MP_ENGINE_INDEPENDENT_FORBIDDEN_INCLUDES})
 
+add_executable(tes3mp_fault_injection_tests tests/fault_injection_tests.cpp)
+target_compile_features(tes3mp_fault_injection_tests PRIVATE cxx_std_20)
+target_link_libraries(tes3mp_fault_injection_tests PRIVATE tes3mp_test_support)
+set_target_properties(tes3mp_fault_injection_tests PROPERTIES FOLDER "TES3MP/Tests")
+
+tes3mp_verify_target_dependencies(tes3mp_fault_injection_tests ALLOWED tes3mp_test_support)
+tes3mp_verify_target_includes(tes3mp_fault_injection_tests
+    FORBIDDEN ${TES3MP_ENGINE_INDEPENDENT_FORBIDDEN_INCLUDES})
+
 add_custom_target(tes3mp_protocol_tests_run
     COMMAND $<TARGET_FILE:tes3mp_protocol_tests>
     COMMAND $<TARGET_FILE:tes3mp_spatial_primitive_tests>
     COMMAND $<TARGET_FILE:tes3mp_deterministic_facilities_tests>
     COMMAND $<TARGET_FILE:tes3mp_deterministic_harness_tests>
+    COMMAND $<TARGET_FILE:tes3mp_fault_injection_tests>
     DEPENDS
         tes3mp_protocol_tests
         tes3mp_spatial_primitive_tests
         tes3mp_deterministic_facilities_tests
         tes3mp_deterministic_harness_tests
-    COMMENT "Running TES3MP protocol and deterministic facility contracts"
+        tes3mp_fault_injection_tests
+    COMMENT "Running TES3MP protocol, deterministic facility, and fault contracts"
 )

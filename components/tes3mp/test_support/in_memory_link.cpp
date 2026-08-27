@@ -63,6 +63,11 @@ namespace TES3MP::TestSupport
         return state(direction).closed;
     }
 
+    LinkBudget InMemoryDuplexLink::budget(LinkDirection direction) const noexcept
+    {
+        return state(direction).budget;
+    }
+
     std::size_t InMemoryDuplexLink::queuedMessages(LinkDirection direction) const noexcept
     {
         return state(direction).messages.size();
