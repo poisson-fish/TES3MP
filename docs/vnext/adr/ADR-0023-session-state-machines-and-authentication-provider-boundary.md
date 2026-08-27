@@ -1,8 +1,10 @@
 # ADR-0023: Session state machines and authentication-provider boundary
 
-Status: **Proposed**
+Status: **Accepted**
 
 Date opened: 2026-08-27
+
+Date approved: 2026-08-27
 
 Decision owner: project owner
 
@@ -43,7 +45,8 @@ Recommend Option A for Decisions 1 through 6:
    illegal or stale input causing no partial state change and no secret-bearing
    diagnostics.
 
-This is a proposal, not approval. It implements already accepted ADR-0003,
+The project owner approved Option A for Decisions 1 through 6 on 2026-08-27.
+This decision implements already accepted ADR-0003,
 ADR-0005, ADR-0014, ADR-0015, ADR-0017, ADR-0020, and ADR-0022 constraints. It
 does not select a real password provider, resume-token representation, network
 credential schema, release timeout defaults, player identity, gameplay
@@ -263,7 +266,7 @@ allocation, redaction, and stable test assertions depend on every caller.
 This keeps the API small but hides lifecycle defects and attacks, and makes
 timeout/cancellation behavior difficult to diagnose without packet logging.
 
-## Proposed acceptance tests and demo
+## Acceptance tests and demo
 
 1. Exhaustive state/event matrix tests prove every legal transition and prove
    every illegal transition leaves state and effects unchanged.
@@ -353,8 +356,9 @@ Reopen this ADR if:
 
 ## Owner approval
 
-Pending. The project owner has not yet selected Decisions 1 through 6.
+Approved by the project owner in the 2026-08-27 working session: Option A for
+Decisions 1 through 6 without amendment.
 
-Approval of this ADR would not approve a real authentication backend, network
+This approval does not approve a real authentication backend, network
 credential schema, join-password rate limits, resume-token behavior, player or
 canonical identity, gameplay authority/state scope, or release timeout defaults.

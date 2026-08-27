@@ -102,7 +102,7 @@
     {
       "path": "components/tes3mp/CMakeLists.txt",
       "status": "A",
-      "purpose": "Defines the standalone-capable five-library graph, pinned FlatBuffers runtime input, target-scoped safety registration, eight contract executables, and bounded parser fuzz targets."
+      "purpose": "Defines the standalone-capable five-library graph, pinned FlatBuffers runtime input, target-scoped safety registration, nine contract executables, and bounded parser fuzz targets."
     },
     {
       "path": "components/tes3mp/CMakePresets.json",
@@ -118,6 +118,21 @@
       "path": "components/tes3mp/client_session/anchor.cpp",
       "status": "A",
       "purpose": "Behavior-free translation-unit anchor for the engine-independent client-session target."
+    },
+    {
+      "path": "components/tes3mp/client_session/client_session.cpp",
+      "status": "A",
+      "purpose": "Atomic client session-state transitions for encrypted readiness, negotiation, authentication, deadlines, rejection, cancellation, and closure."
+    },
+    {
+      "path": "components/tes3mp/include/tes3mp/authentication.hpp",
+      "status": "A",
+      "purpose": "Move-only bounded opaque authentication material and pollable session-owned provider operation boundary."
+    },
+    {
+      "path": "components/tes3mp/include/tes3mp/client_session.hpp",
+      "status": "A",
+      "purpose": "Closed client session states, typed in-memory events/actions, injected timeout policy, and terminal result interface."
     },
     {
       "path": "components/tes3mp/include/tes3mp/command_primitives.hpp",
@@ -153,6 +168,16 @@
       "path": "components/tes3mp/include/tes3mp/protocol_handshake.hpp",
       "status": "A",
       "purpose": "Owned bounded protocol-version, capability-offer, hello, rejection, pure-negotiation, and initial-peer-classification API."
+    },
+    {
+      "path": "components/tes3mp/include/tes3mp/server_session.hpp",
+      "status": "A",
+      "purpose": "Closed server admission-session states, typed events/actions, provider ownership, and bounded terminal result interface."
+    },
+    {
+      "path": "components/tes3mp/include/tes3mp/session_types.hpp",
+      "status": "A",
+      "purpose": "Shared validated stage-timeout policy, checked monotonic deadlines, rejection categories, and numeric transition errors."
     },
     {
       "path": "components/tes3mp/include/tes3mp/spatial_types.hpp",
@@ -250,6 +275,11 @@
       "purpose": "Behavior-free translation-unit anchor for the deterministic server-core target."
     },
     {
+      "path": "components/tes3mp/server_core/authentication.cpp",
+      "status": "A",
+      "purpose": "Bounded authentication-material construction, move transfer, and best-effort storage clearing implementation."
+    },
+    {
       "path": "components/tes3mp/server_core/deterministic_random.cpp",
       "status": "A",
       "purpose": "Pinned unsigned SplitMix64, numeric V1 stream derivation, xoshiro256**, state restore, and rejection-sampling implementation."
@@ -263,6 +293,11 @@
       "path": "components/tes3mp/server_core/observability.cpp",
       "status": "A",
       "purpose": "Validation and construction for closed metric definitions/dimensions and typed structured events."
+    },
+    {
+      "path": "components/tes3mp/server_core/server_session.cpp",
+      "status": "A",
+      "purpose": "Atomic server session transitions, negotiation composition, provider polling/cancellation, stale-completion rejection, and typed lifecycle observations."
     },
     {
       "path": "components/tes3mp/test_support/anchor.cpp",
@@ -378,6 +413,11 @@
       "path": "components/tes3mp/tests/protocol_handshake_tests.cpp",
       "status": "A",
       "purpose": "Golden, owned round-trip, version-overlap, capability, rejection, malformed-wire, and legacy/no-reply contracts for Slice 4.2."
+    },
+    {
+      "path": "components/tes3mp/tests/session_state_machine_tests.cpp",
+      "status": "A",
+      "purpose": "Client/server ordering, timeout, authentication outcome, secret-bound, stale completion, cancellation, lifetime, observability, and terminal-atomicity contracts."
     },
     {
       "path": "components/tes3mp/tests/spatial_primitive_tests.cpp",
@@ -512,7 +552,7 @@
     {
       "path": "docs/vnext/adr/ADR-0023-session-state-machines-and-authentication-provider-boundary.md",
       "status": "A",
-      "purpose": "Proposed client/server session-state, authentication-provider, opaque-secret, timeout, cancellation, redaction, and Phase 4/6 boundary decision packet."
+      "purpose": "Owner-approved client/server session-state, authentication-provider, opaque-secret, timeout, cancellation, redaction, and Phase 4/6 boundary policy."
     },
     {
       "path": "docs/vnext/proofs/flatbuffers/ANDROID_ARM64.md",
@@ -771,7 +811,7 @@
         },
         {
           "path": "components/tes3mp/CMakeLists.txt",
-          "sha256": "545d840b129c8f6fa259040ca4799ad6a0e8fbde9b001e83a63defb7daaef593"
+          "sha256": "7210db369631b827c4c6d33045b05bebcd43a5001df1335c2e801bcd42150d1d"
         },
         {
           "path": "components/tes3mp/protocol/generated/client_hello_generated.h",

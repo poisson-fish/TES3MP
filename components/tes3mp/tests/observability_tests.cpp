@@ -17,7 +17,7 @@ namespace
 
     static_assert(!std::is_constructible_v<MetricObservation, std::string_view>);
     static_assert(!std::is_constructible_v<StructuredEvent, std::string_view>);
-    static_assert(std::variant_size_v<StructuredEventPayload> == 1);
+    static_assert(std::variant_size_v<StructuredEventPayload> == 2);
 
     MetricObservation metric(MetricKey key, MetricValue value, MetricDimensionValue outcome)
     {
@@ -77,7 +77,20 @@ namespace
             || std::get<ContractObservationEvent>(observation.payload()).result != ObservationResult::Dropped)
             return false;
 
-        return !StructuredEvent::create(static_cast<EventSeverity>(255), std::nullopt, ContractObservationEvent{});
+        const auto lifecycle = StructuredEvent::create(EventSeverity::Info, std::nullopt,
+            SessionLifecycleEvent{ SessionObservationRole::Server, SessionObservationOutcome::AuthenticationSucceeded,
+                SessionObservationStage::Terminal });
+        if (!lifecycle || lifecycle->kind() != EventKind::SessionLifecycle)
+            return false;
+        const auto* payload = std::get_if<SessionLifecycleEvent>(&lifecycle->payload());
+        if (payload == nullptr || payload->role != SessionObservationRole::Server
+            || payload->outcome != SessionObservationOutcome::AuthenticationSucceeded)
+            return false;
+
+        return !StructuredEvent::create(static_cast<EventSeverity>(255), std::nullopt, ContractObservationEvent{})
+            && !StructuredEvent::create(EventSeverity::Info, std::nullopt,
+                SessionLifecycleEvent{ static_cast<SessionObservationRole>(255),
+                    SessionObservationOutcome::TransitionAccepted, SessionObservationStage::TransportAndNegotiation });
     }
 
     bool explicit_no_op_sinks_require_no_global_registry()

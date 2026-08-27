@@ -127,6 +127,7 @@ class RuntimeSafetyRunnerTests(unittest.TestCase):
         self.assertEqual(tsan["TES3MP_BUILD_FUZZERS"], False)
 
     def test_cmake_policy_instruments_owned_targets_and_rejects_bad_profiles(self):
+        data = json.loads(PRESETS_PATH.read_text(encoding="utf-8"))
         module = CMAKE_MODULE_PATH.read_text(encoding="utf-8")
         component = COMPONENT_CMAKE_PATH.read_text(encoding="utf-8")
         self.assertIn("TES3MP_ENABLE_ASAN_UBSAN AND TES3MP_ENABLE_TSAN", module)
@@ -138,6 +139,7 @@ class RuntimeSafetyRunnerTests(unittest.TestCase):
             "tes3mp_protocol_tests",
             "tes3mp_protocol_frame_tests",
             "tes3mp_protocol_handshake_tests",
+            "tes3mp_session_state_tests",
             "tes3mp_spatial_primitive_tests",
             "tes3mp_deterministic_facilities_tests",
             "tes3mp_deterministic_harness_tests",
@@ -149,6 +151,12 @@ class RuntimeSafetyRunnerTests(unittest.TestCase):
         self.assertIn("tes3mp_enable_libfuzzer(tes3mp_spatial_round_trip_fuzz)", component)
         self.assertIn("tes3mp_enable_libfuzzer(tes3mp_protocol_frame_fuzz)", component)
         self.assertIn("tes3mp_enable_libfuzzer(tes3mp_protocol_handshake_fuzz)", component)
+        asan_preset = next(
+            preset
+            for preset in data["buildPresets"]
+            if preset["name"] == "tes3mp-safety-asan-ubsan"
+        )
+        self.assertIn("tes3mp_protocol_handshake_fuzz", asan_preset["targets"])
         adapter = (REPOSITORY_ROOT / "apps" / "openmw" / "tes3mp" / "CMakeLists.txt").read_text(
             encoding="utf-8"
         )

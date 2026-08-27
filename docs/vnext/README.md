@@ -135,6 +135,12 @@ boundaries, adds proportionate tests, records exact evidence, updates statuses,
 and leaves the branch buildable. Hosted vNext workflows are manual phase-exit
 gates; ordinary slice commits must not trigger the full matrix.
 
+Slice 4.3 implements the accepted ADR-0023 client/server session state machines
+and poll-based authentication-provider boundary. This slice keeps authentication
+as typed in-memory events after encrypted transport and bounded hello
+negotiation; it does not introduce credential wire schemas, a real provider,
+resume behavior, player identity, authority, durable state, or gameplay rules.
+
 ## References and license
 
 - [OpenMW 0.51 source](https://gitlab.com/OpenMW/openmw/-/tree/openmw-0.51.0)

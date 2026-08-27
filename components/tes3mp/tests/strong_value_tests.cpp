@@ -34,6 +34,8 @@ namespace
     static_assert(!std::is_convertible_v<std::uint64_t, TES3MP::EntityId>);
     static_assert(!std::is_convertible_v<TES3MP::EntityId, std::uint64_t>);
     static_assert(!std::is_constructible_v<TES3MP::EntityId, TES3MP::PlayerId>);
+    static_assert(!std::is_constructible_v<TES3MP::PrincipalId, TES3MP::PlayerId>);
+    static_assert(!std::is_constructible_v<TES3MP::AuthenticationAttemptId, TES3MP::SessionGeneration>);
     static_assert(!EqualityComparable<TES3MP::EntityId, TES3MP::PlayerId>);
     static_assert(!HasInitial<TES3MP::EntityId>);
     static_assert(!HasNext<TES3MP::EntityId>);
@@ -63,8 +65,7 @@ namespace
     bool nonzero_types_reject_zero_and_have_no_default_constructor()
     {
         return !TES3MP::EntityId::fromValue(0).has_value() && !TES3MP::CommandId::fromValue(0).has_value()
-            && !TES3MP::EntityRevision::fromValue(0).has_value()
-            && !std::is_default_constructible_v<TES3MP::EntityId>;
+            && !TES3MP::EntityRevision::fromValue(0).has_value() && !std::is_default_constructible_v<TES3MP::EntityId>;
     }
 
     bool server_tick_accepts_zero_as_its_initial_value()
@@ -76,8 +77,8 @@ namespace
     bool one_based_counters_expose_value_one_as_initial()
     {
         return TES3MP::SessionGeneration::initial().value() == 1 && TES3MP::CommandSequence::initial().value() == 1
-            && TES3MP::EntityRevision::initial().value() == 1 && TES3MP::AuthorityEpoch::initial().value() == 1
-            && TES3MP::IngressOrdinal::initial().value() == 1;
+            && TES3MP::AuthenticationAttemptId::initial().value() == 1 && TES3MP::EntityRevision::initial().value() == 1
+            && TES3MP::AuthorityEpoch::initial().value() == 1 && TES3MP::IngressOrdinal::initial().value() == 1;
     }
 
     bool same_type_equality_and_total_order_use_unsigned_value_order()
@@ -122,8 +123,8 @@ namespace
     bool counter_next_at_u64_max_returns_empty_without_wrap()
     {
         return rejectsMaximumWithoutWrap<TES3MP::SessionGeneration>()
-            && rejectsMaximumWithoutWrap<TES3MP::ServerTick>()
-            && rejectsMaximumWithoutWrap<TES3MP::CommandSequence>()
+            && rejectsMaximumWithoutWrap<TES3MP::AuthenticationAttemptId>()
+            && rejectsMaximumWithoutWrap<TES3MP::ServerTick>() && rejectsMaximumWithoutWrap<TES3MP::CommandSequence>()
             && rejectsMaximumWithoutWrap<TES3MP::EntityRevision>()
             && rejectsMaximumWithoutWrap<TES3MP::AuthorityEpoch>()
             && rejectsMaximumWithoutWrap<TES3MP::IngressOrdinal>();
@@ -142,8 +143,7 @@ namespace
     bool test_support_can_construct_boundary_and_exhaustion_values_explicitly()
     {
         const auto first = TES3MP::IngressOrdinal::initial();
-        const auto maximum
-            = TES3MP::IngressOrdinal::fromValue(std::numeric_limits<std::uint64_t>::max()).value();
+        const auto maximum = TES3MP::IngressOrdinal::fromValue(std::numeric_limits<std::uint64_t>::max()).value();
         return first.value() == 1 && !maximum.next().has_value();
     }
 }

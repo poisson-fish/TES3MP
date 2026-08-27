@@ -332,7 +332,7 @@ runtime or protocol name.
 | ADR-0020 | Owned observability interfaces and test sinks | Phase 3 | **Implemented** |
 | ADR-0021 | Bounded protocol framing, classification, byte budgets, and decode results | Phase 4 | **Implemented** |
 | ADR-0022 | Version/capability negotiation, hello/rejection schemas, and legacy-input response boundary | Phase 4 | **Implemented** |
-| ADR-0023 | Session state machines and authentication-provider boundary | Phase 4 | **Proposed** |
+| ADR-0023 | Session state machines and authentication-provider boundary | Phase 4 | **Implemented** |
 
 An ADR is complete only when it records considered alternatives, selection
 criteria, consequences, failure modes, a replacement/review trigger, and
@@ -2403,7 +2403,7 @@ Depends on: Phase 3.
 |---|---|---|---|
 | 4.1 | Implement framing/envelopes, message classification, byte budgets, and structured decode errors | **Implemented** | Accepted [`ADR-0021`](adr/ADR-0021-bounded-protocol-framing-and-decode-boundary.md), implementation `98e62f5f19`, all applicable local verification, and owner demo acceptance pass |
 | 4.2 | Implement `ClientHello`, `ServerHello`, and clear rejection with version/capability negotiation | **Implemented** | Accepted [`ADR-0022`](adr/ADR-0022-version-and-capability-negotiation.md), implementation `e89621e970`, all applicable local verification, and owner demo acceptance pass |
-| 4.3 | Implement the client/server session state machines and authentication-provider interface | **In Progress** | Proposed [`ADR-0023`](adr/ADR-0023-session-state-machines-and-authentication-provider-boundary.md) decision packet is pending owner approval; no production behavior has landed |
+| 4.3 | Implement the client/server session state machines and authentication-provider interface | **In Progress** | Accepted [`ADR-0023`](adr/ADR-0023-session-state-machines-and-authentication-provider-boundary.md); implementation and local verification complete, owner demo acceptance pending |
 | 4.4 | Define reliable-operation and latest-wins snapshot envelopes | **Not Started** | Command ID/revision and tick/sequence/epoch rules are enforced separately |
 | 4.5 | Exchange a minimal player command and world snapshot over the in-memory link | **Not Started** | A fake peer completes handshake and state exchange with no sockets or OpenMW |
 | 4.6 | Add round-trip, property, golden-schema, mutation, and fuzz coverage | **Not Started** | Every decoder is registered with a corpus and sanitizer-backed fuzz target |
@@ -2542,7 +2542,8 @@ Implementation notes:
     opaque material/result, deadline/cancellation, and structured-observability
     options. No production session, authentication, protocol, authority, state-
     scope, or gameplay behavior changed.
-  - Decisions: pending explicit project-owner review of ADR-0023 Decisions 1–6.
+  - Decisions: the project owner approved Option A for ADR-0023 Decisions 1–6
+    on 2026-08-27 without amendment.
   - Verification: all 97 repository-owned Python tests pass. Indexed baseline
     provenance accounts for 138 intentional differences and verifies 50
     dependency inputs; indexed legacy exclusion checks 3,832 tracked paths, 59
@@ -2550,10 +2551,49 @@ Implementation notes:
     parses, all 69 local vNext Markdown links resolve, and staged diff checks
     pass. This documentation-only kickoff does not change the retained green
     Slice 4.2 C++ or FlatBuffers evidence.
-  - Owner review: Slice 4.2 completion accepted and Slice 4.3 kickoff authorized;
-    architecture approval remains pending.
-  - Follow-ups: present the ADR-0023 options and recommendation. Production
-    implementation remains gated until approval.
+  - Owner review: Slice 4.2 completion, Slice 4.3 kickoff, and the recommended
+    session/authentication architecture were explicitly approved.
+  - Follow-ups: implement the approved boundary and present its automated/demo
+    evidence before marking Slice 4.3 **Implemented**.
+
+- 2026-08-27 — Slice 4.3 — In Progress
+  - Change: implemented the accepted ADR-0023 role-specific client/server
+    machines in the existing targets, the move-only 0–256-byte authentication
+    material, pollable session-owned provider operation, minimal `PrincipalId`
+    result, three-stage injected timeout policy, stale attempt/generation
+    rejection, idempotent cancellation/terminal handling, and closed typed
+    session observability. Added the ninth standalone contract and registered
+    every new production/test source with runtime-safety enforcement, while
+    closing the existing handshake-fuzzer ASan preset omission. No
+    authentication wire kind/schema, real provider, resume behavior, release
+    timeout default, player identity, authority, durable state, OpenMW, or
+    gameplay behavior was added.
+  - Decisions: implemented the project owner's approved Option A for ADR-0023
+    Decisions 1–6 without amendment. No additional architecture, authority,
+    state-scope, or gameplay-behavior decision arose during implementation.
+  - Verification: from the Visual Studio 2022 v17.14.39/MSVC 19.44.35228
+    x86-64 environment, the standalone `tes3mp_protocol_tests_run` target builds
+    and passes all nine C++ contracts. The session contract covers exhaustive
+    63-cell server and 81-cell client state/event matrices, immediate/delayed
+    success, denial/malformed/unavailable outcomes, empty/exact-256/257-byte
+    bounds, secret-canary ownership, every timeout stage at deadline-minus-one
+    and exact deadline, checked deadline overflow, wrong attempt/generation,
+    duplicate operation, cancellation/destruction/close, non-resurrection,
+    typed observations, and deterministic replay. All 97 repository-owned
+    Python tests pass; the pinned FlatBuffers regeneration and isolated proof
+    pass; indexed provenance accounts for 146 intentional differences and 50
+    dependency inputs; indexed legacy exclusion checks 3,840 tracked paths, 59
+    CMake files, 28 compile commands, and 81 Ninja edges. Changed Python
+    compiles, both changed JSON files parse, all 69 local vNext Markdown links
+    resolve, public-header/observability redaction scans find no forbidden
+    engine/transport/generated/test-support or secret-bearing surface, and
+    staged/worktree diff checks pass.
+  - Owner review: architecture approval is complete. Implementation-demo
+    acceptance remains pending, so Slice 4.3 stays **In Progress**.
+  - Follow-ups: present the successful/delayed/rejected provider paths, exact
+    deadline and secret bounds, stale/cancellation behavior, atomic matrix, and
+    redaction evidence for owner acceptance. Slice 4.4 remains gated until this
+    slice is marked **Implemented**.
 
 ### Phase 5 — Deterministic authoritative server core
 

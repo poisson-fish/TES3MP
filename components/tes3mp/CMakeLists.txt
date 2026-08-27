@@ -66,6 +66,7 @@ target_sources(tes3mp_protocol PRIVATE
     include/tes3mp/command_primitives.hpp
     include/tes3mp/protocol_handshake.hpp
     include/tes3mp/protocol_frame.hpp
+    include/tes3mp/session_types.hpp
     include/tes3mp/spatial_types.hpp
     include/tes3mp/strong_value.hpp
     include/tes3mp/value_types.hpp
@@ -88,17 +89,25 @@ tes3mp_add_engine_independent_library(tes3mp_server_core server_core/anchor.cpp)
 add_library(TES3MP::ServerCore ALIAS tes3mp_server_core)
 target_link_libraries(tes3mp_server_core PUBLIC tes3mp_protocol)
 target_sources(tes3mp_server_core PRIVATE
+    include/tes3mp/authentication.hpp
     include/tes3mp/deterministic_random.hpp
     include/tes3mp/fixed_tick_scheduler.hpp
     include/tes3mp/monotonic_clock.hpp
     include/tes3mp/observability.hpp
+    include/tes3mp/server_session.hpp
+    server_core/authentication.cpp
     server_core/deterministic_random.cpp
     server_core/fixed_tick_scheduler.cpp
     server_core/observability.cpp
+    server_core/server_session.cpp
 )
 
 tes3mp_add_engine_independent_library(tes3mp_client_session client_session/anchor.cpp)
 add_library(TES3MP::ClientSession ALIAS tes3mp_client_session)
+target_sources(tes3mp_client_session PRIVATE
+    include/tes3mp/client_session.hpp
+    client_session/client_session.cpp
+)
 target_link_libraries(tes3mp_client_session
     PUBLIC
         tes3mp_protocol
@@ -192,6 +201,16 @@ tes3mp_verify_target_dependencies(tes3mp_protocol_handshake_tests ALLOWED tes3mp
 tes3mp_verify_target_includes(tes3mp_protocol_handshake_tests
     FORBIDDEN ${TES3MP_ENGINE_INDEPENDENT_FORBIDDEN_INCLUDES})
 
+add_executable(tes3mp_session_state_tests tests/session_state_machine_tests.cpp)
+target_compile_features(tes3mp_session_state_tests PRIVATE cxx_std_20)
+target_link_libraries(tes3mp_session_state_tests PRIVATE tes3mp_test_support)
+set_target_properties(tes3mp_session_state_tests PROPERTIES FOLDER "TES3MP/Tests")
+tes3mp_enable_runtime_safety(tes3mp_session_state_tests)
+
+tes3mp_verify_target_dependencies(tes3mp_session_state_tests ALLOWED tes3mp_test_support)
+tes3mp_verify_target_includes(tes3mp_session_state_tests
+    FORBIDDEN ${TES3MP_ENGINE_INDEPENDENT_FORBIDDEN_INCLUDES})
+
 add_executable(tes3mp_spatial_primitive_tests tests/spatial_primitive_tests.cpp)
 target_compile_features(tes3mp_spatial_primitive_tests PRIVATE cxx_std_20)
 target_link_libraries(tes3mp_spatial_primitive_tests PRIVATE tes3mp_test_support)
@@ -278,6 +297,7 @@ add_custom_target(tes3mp_protocol_tests_run
     COMMAND $<TARGET_FILE:tes3mp_protocol_tests>
     COMMAND $<TARGET_FILE:tes3mp_protocol_frame_tests>
     COMMAND $<TARGET_FILE:tes3mp_protocol_handshake_tests>
+    COMMAND $<TARGET_FILE:tes3mp_session_state_tests>
     COMMAND $<TARGET_FILE:tes3mp_spatial_primitive_tests>
     COMMAND $<TARGET_FILE:tes3mp_deterministic_facilities_tests>
     COMMAND $<TARGET_FILE:tes3mp_deterministic_harness_tests>
@@ -287,6 +307,7 @@ add_custom_target(tes3mp_protocol_tests_run
         tes3mp_protocol_tests
         tes3mp_protocol_frame_tests
         tes3mp_protocol_handshake_tests
+        tes3mp_session_state_tests
         tes3mp_spatial_primitive_tests
         tes3mp_deterministic_facilities_tests
         tes3mp_deterministic_harness_tests

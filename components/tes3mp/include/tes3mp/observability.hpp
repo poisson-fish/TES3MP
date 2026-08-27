@@ -33,12 +33,16 @@ namespace TES3MP
         Nanoseconds,
     };
 
-    // Slice 3.7 contract fixtures. Real metric keys land with their owning behavior.
     enum class MetricKey : std::uint16_t
     {
         ContractCounter = 1,
         ContractGauge = 2,
         ContractDistribution = 3,
+        SessionTransitions = 0x100,
+        SessionAuthenticationOutcomes = 0x101,
+        SessionTimeouts = 0x102,
+        SessionStaleCompletions = 0x103,
+        SessionCancellations = 0x104,
     };
 
     struct MetricDefinition
@@ -59,6 +63,12 @@ namespace TES3MP
                 return MetricDefinition{ MetricOperation::GaugeSet, MetricUnit::Count };
             case MetricKey::ContractDistribution:
                 return MetricDefinition{ MetricOperation::DistributionObserve, MetricUnit::Nanoseconds };
+            case MetricKey::SessionTransitions:
+            case MetricKey::SessionAuthenticationOutcomes:
+            case MetricKey::SessionTimeouts:
+            case MetricKey::SessionStaleCompletions:
+            case MetricKey::SessionCancellations:
+                return MetricDefinition{ MetricOperation::CounterAdd, MetricUnit::Count };
         }
         return std::nullopt;
     }
@@ -66,12 +76,20 @@ namespace TES3MP
     enum class MetricDimensionKey : std::uint8_t
     {
         ContractOutcome = 1,
+        SessionOutcome = 2,
     };
 
     enum class MetricDimensionValue : std::uint8_t
     {
         Accepted = 1,
         Dropped = 2,
+        TransitionAccepted = 10,
+        IllegalTransition = 11,
+        AuthenticationSucceeded = 12,
+        AuthenticationRejected = 13,
+        TimedOut = 14,
+        Cancelled = 15,
+        StaleCompletion = 16,
     };
 
     struct MetricDimension
@@ -142,6 +160,7 @@ namespace TES3MP
     enum class EventKind : std::uint16_t
     {
         ContractObservation = 1,
+        SessionLifecycle = 2,
     };
 
     struct ContractObservationEvent
@@ -151,7 +170,41 @@ namespace TES3MP
         friend constexpr bool operator==(ContractObservationEvent, ContractObservationEvent) noexcept = default;
     };
 
-    using StructuredEventPayload = std::variant<ContractObservationEvent>;
+    enum class SessionObservationRole : std::uint8_t
+    {
+        Client,
+        Server,
+    };
+
+    enum class SessionObservationOutcome : std::uint8_t
+    {
+        TransitionAccepted,
+        IllegalTransition,
+        AuthenticationSucceeded,
+        AuthenticationRejected,
+        TimedOut,
+        Cancelled,
+        StaleCompletion,
+    };
+
+    enum class SessionObservationStage : std::uint8_t
+    {
+        TransportAndNegotiation,
+        AuthenticationInput,
+        AuthenticationProvider,
+        Terminal,
+    };
+
+    struct SessionLifecycleEvent
+    {
+        SessionObservationRole role;
+        SessionObservationOutcome outcome;
+        SessionObservationStage stage;
+
+        friend constexpr bool operator==(SessionLifecycleEvent, SessionLifecycleEvent) noexcept = default;
+    };
+
+    using StructuredEventPayload = std::variant<ContractObservationEvent, SessionLifecycleEvent>;
 
     class StructuredEvent
     {
@@ -159,7 +212,11 @@ namespace TES3MP
         static std::optional<StructuredEvent> create(
             EventSeverity severity, std::optional<ServerTick> tick, StructuredEventPayload payload) noexcept;
 
-        constexpr EventKind kind() const noexcept { return EventKind::ContractObservation; }
+        constexpr EventKind kind() const noexcept
+        {
+            return std::holds_alternative<ContractObservationEvent>(mPayload) ? EventKind::ContractObservation
+                                                                              : EventKind::SessionLifecycle;
+        }
         constexpr EventSeverity severity() const noexcept { return mSeverity; }
         constexpr std::optional<ServerTick> tick() const noexcept { return mTick; }
         constexpr const StructuredEventPayload& payload() const noexcept { return mPayload; }

@@ -138,3 +138,19 @@ short, `T3MP`, and legacy/unknown preambles; non-vNext input produces no wire
 reply. A dedicated eighth contract, generated-code drift check, and bounded
 handshake-decoder fuzz target cover the new boundary without adding session,
 authentication, transport, OpenMW, authority, or gameplay behavior.
+
+Slice 4.3 accepts ADR-0023 and adds explicit client/server session machines in
+the existing `tes3mp_client_session` and `tes3mp_server_core` targets. Both
+require an encrypted-ready event before hello negotiation and authentication.
+The server owns one pollable authentication operation, transfers one move-only
+opaque value of at most 256 bytes, accepts only the matching attempt and session
+generation, and retains only a nonzero `PrincipalId` on success.
+
+Caller-supplied policies bound transport/negotiation, authentication-input, and
+provider stages from 1 millisecond through 120 seconds using the injected
+monotonic clock. Timeout, cancellation, stale completion, illegal transition,
+and lifecycle observations use closed enum/numeric values. The ninth contract
+exercises exact boundaries, terminal atomicity, provider lifetime, and secret
+redaction shape. Authentication remains typed in-memory composition: no new
+wire kind, credential schema, real provider, resumption, authority, durable
+state, or gameplay behavior is introduced.
