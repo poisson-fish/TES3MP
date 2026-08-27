@@ -60,18 +60,23 @@ stall/disconnect controls, and the owner accepted the implementation demo.
 Slice 3.6 sanitizer, race-checking, and fuzz CI plumbing is implemented:
 accepted ADR-0019 fixes target-scoped instrumentation, separate Linux Clang 18
 ASan+UBSan and ThreadSanitizer profiles, per-parser libFuzzer targets, bounded
-per-change jobs, and repository-owned evidence. The local plumbing and its
+hosted jobs, and repository-owned evidence. The local plumbing and its
 uninstrumented Windows proof are implemented, and the owner accepted the local
 implementation demo. Replacement hosted sanitizer/fuzzer execution and retained
 artifact review pass at `fc8f178081`, along with the supported Linux, Windows,
-and macOS baseline matrix. Slice 3.7 observability scaffolding is in progress:
+and macOS baseline matrix. Slice 3.7 observability scaffolding is implemented:
 accepted ADR-0020 fixes server-core-owned typed metrics/events, explicit
 non-blocking sinks, privacy/cardinality constraints, and bounded deterministic
 test recorders. The local implementation and sixth independent contract are
 implemented, the owner accepted the demo, and the hosted six-contract sanitizer,
-race, and fuzz evidence passes at `57973b65c7`. The supported platform baseline
-matrix remains pending. No multiplayer runtime or production transport behavior
-exists yet.
+race, fuzz, Linux GCC/Clang, Windows MSVC, and macOS arm64 evidence passes at
+`e757e063c4`. Existing manually dispatched Intel baseline and five-platform
+dependency-proof evidence remains valid for its declared cadence. The Phase 3
+exit-gate evidence is assembled and awaits explicit owner approval; therefore
+Phase 3 remains in progress. Beginning with Phase 4, vNext hosted workflows run
+once by manual dispatch against each phase-completion candidate rather than on
+every change; local slice verification remains mandatory. No multiplayer runtime
+or production transport behavior exists yet.
 
 See the [implementation plan](IMPLEMENTATION_PLAN.md) for the live phase and
 slice tracker, completion gates, architecture decisions, and implementation

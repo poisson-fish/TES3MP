@@ -129,6 +129,10 @@ class GameNetworkingSocketsProofRunnerTests(unittest.TestCase):
             self.assertIn(value, workflow)
         for compiler in ("gcc-13", "clang-18", "MSVC 2022 v143", "Xcode 16"):
             self.assertIn(compiler, workflow)
+        self.assertIn("on:\n  workflow_dispatch:\n", workflow)
+        for automatic_trigger in ("\n  push:", "\n  pull_request:", "\n  schedule:", "\n  release:"):
+            self.assertNotIn(automatic_trigger, workflow)
+        self.assertNotIn("github.event_name", workflow)
         self.assertIn("--sanitize", workflow)
         self.assertIn("strawberryperl", workflow)
         self.assertNotRegex(workflow, r"uses:\s+[^\s@]+@v\d")

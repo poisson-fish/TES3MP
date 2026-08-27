@@ -6,6 +6,8 @@ Date opened: 2026-08-26
 
 Date approved: 2026-08-26
 
+Date amended: 2026-08-27
+
 Decision owner: project owner
 
 Needed by: Phase 3 Slice 3.6
@@ -41,8 +43,9 @@ The project owner approved Option A for Decisions 1 through 5 on 2026-08-26:
 3. use one Clang libFuzzer executable per bounded parser, beginning with a
    smoke harness around the existing test-support-only spatial decoder and a
    small checked-in seed corpus;
-4. run the dedicated ASan+UBSan/fuzz and ThreadSanitizer jobs on every push and
-   pull request, with short bounded smoke durations and retained evidence; and
+4. run the dedicated ASan+UBSan/fuzz and ThreadSanitizer jobs with short bounded
+   smoke durations and retained evidence—per change through Phase 3, then once
+   by manual dispatch for each Phase 4+ phase-completion candidate; and
 5. expose the behavior through repository-owned CMake options/presets and a
    runner that writes a versioned JSON evidence record, while leaving normal
    developer presets uninstrumented.
@@ -182,7 +185,7 @@ and reproducer behavior already provided by the selected Clang toolchain.
 
 ## Decision 4: CI cadence and bounded workload
 
-### Option A: dedicated per-change safety workflow (approved)
+### Option A: dedicated per-change safety workflow (approved through Phase 3)
 
 Add one dedicated vNext workflow with independent Linux Clang 18
 ASan+UBSan/fuzz and ThreadSanitizer jobs on push, pull request, and manual
@@ -200,10 +203,12 @@ This creates fewer workflow files, but couples a fast independent target gate
 to the full OpenMW dependency build and obscures whether failures came from the
 baseline or the multiplayer safety profile.
 
-### Option C: scheduled/manual jobs only
+### Option C: manual phase-exit jobs (approved beginning with Phase 4)
 
-This minimizes per-change cost but allows memory-safety and race regressions to
-merge before the next run.
+Keep the same two bounded jobs and retained evidence, but expose manual dispatch
+only and run them once against each phase-completion candidate. Applicable local
+contracts and fuzz plumbing still run during slice work. This reduces hosted-CI
+burn while preserving a blocking sanitizer/race/fuzz gate before a phase closes.
 
 ## Decision 5: local entry points and evidence
 
@@ -266,8 +271,8 @@ hosted jobs pass and the owner accepts that demo.
   supported release compiler matrix remains unchanged.
 - Per-parser fuzz targets make ownership and corpus budgets explicit, but each
   later production decoder slice must register its own harness.
-- Per-change safety adds two short Linux jobs. Longer fuzzing remains a later
-  measurable hardening decision.
+- Phase 4+ safety runs add two short Linux jobs once per phase-completion
+  candidate. Longer fuzzing remains a later measurable hardening decision.
 - ThreadSanitizer is initially a plumbing smoke because current deterministic
   facilities intentionally own no threads; keeping it active prevents later
   concurrency from arriving without a gate.
@@ -300,7 +305,8 @@ Reopen this ADR if:
 - a supported compiler exposes a materially valuable sanitizer configuration
   that should become blocking;
 - the standalone graph cannot represent an approved owned-target boundary;
-- fuzz startup/build time makes the per-change duration impractical;
+- phase-exit cadence allows safety regressions to accumulate or makes failures
+  too costly to localize;
 - a production decoder cannot use one bounded byte-span harness;
 - ThreadSanitizer cannot execute once real concurrency lands; or
 - Phase 22 evidence requires continuous/coverage-guided fuzz infrastructure.
@@ -317,3 +323,9 @@ per-change jobs, and repository-owned presets/runner/JSON evidence. It does not
 approve a production wire decoder, full-OpenMW sanitizer gate, runtime
 suppression, threading model, protocol behavior, authority, state scope, or
 gameplay behavior.
+
+The project owner amended Decision 4 in the 2026-08-27 working session. Option
+A remains the historical Phase 3 implementation evidence; Option C is approved
+for Phase 4 and later. The same profiles, bounds, failure policy, and retained
+evidence remain mandatory, but the workflow is manually dispatched once at
+phase exit instead of running on every push or pull request.

@@ -27,32 +27,32 @@
     {
       "path": ".github/workflows/vnext-baseline-linux.yml",
       "status": "A",
-      "purpose": "Ubuntu 24.04 GCC 13 and Clang 18 full-build, install, upstream-test, and retained-evidence CI gates."
+      "purpose": "Manually dispatched phase-exit Ubuntu 24.04 GCC 13 and Clang 18 full-build, install, upstream-test, and retained-evidence CI gates."
     },
     {
       "path": ".github/workflows/vnext-baseline-macos.yml",
       "status": "A",
-      "purpose": "macOS 15 arm64 and Intel Xcode 16 full-build, install, upstream-test, and retained-evidence CI gates on the approved cadences."
+      "purpose": "Manually dispatched phase-exit macOS 15 arm64 and Intel Xcode 16 full-build, install, upstream-test, and retained-evidence CI gates."
     },
     {
       "path": ".github/workflows/vnext-baseline-windows.yml",
       "status": "A",
-      "purpose": "Windows Server 2022 MSVC v143 full-build, install, upstream-test, and retained-evidence CI gate."
+      "purpose": "Manually dispatched phase-exit Windows Server 2022 MSVC v143 full-build, install, upstream-test, and retained-evidence CI gate."
     },
     {
       "path": ".github/workflows/vnext-flatbuffers-proof.yml",
       "status": "A",
-      "purpose": "Supported desktop compiler matrix for the pinned bounded FlatBuffers selection proof, sanitizer-backed fuzz smoke, and retained evidence."
+      "purpose": "Manually dispatched phase-exit supported desktop compiler matrix for the pinned bounded FlatBuffers selection proof, sanitizer-backed fuzz smoke, and retained evidence."
     },
     {
       "path": ".github/workflows/vnext-gamenetworkingsockets-proof.yml",
       "status": "A",
-      "purpose": "Supported desktop compiler matrix for the pinned encrypted GameNetworkingSockets selection proof, sanitizer coverage, and retained evidence."
+      "purpose": "Manually dispatched phase-exit supported desktop compiler matrix for the pinned encrypted GameNetworkingSockets selection proof, sanitizer coverage, and retained evidence."
     },
     {
       "path": ".github/workflows/vnext-runtime-safety.yml",
       "status": "A",
-      "purpose": "Per-change Linux Clang 18 ASan/UBSan/libFuzzer and ThreadSanitizer smoke jobs with retained logs, evidence, and reproducers."
+      "purpose": "Manually dispatched phase-exit Linux Clang 18 ASan/UBSan/libFuzzer and ThreadSanitizer smoke jobs with retained logs, evidence, and reproducers."
     },
     {
       "path": "CI/install_debian_deps.sh",
@@ -662,7 +662,7 @@
         },
         {
           "path": ".github/workflows/vnext-flatbuffers-proof.yml",
-          "sha256": "2f930ba8d3126ef58488bb2eac7ad43743d343768c255626fa1f405c04886ea5"
+          "sha256": "400482dc7dded9419b7ecb07a62c2399f88ac143cea48770b9ebf03dd6d0715e"
         },
         {
           "path": "docs/vnext/proofs/flatbuffers/ANDROID_ARM64.md",
@@ -714,7 +714,7 @@
         },
         {
           "path": "scripts/tests/test_run_vnext_flatbuffers_proof.py",
-          "sha256": "650e54822921b921df025738e9cf7b5048ea32b0e21733dffd026f8a12b90a9e"
+          "sha256": "c8dd11833a9aaa5f475d87004238386ff0ca52868b83909446dfaef377f110c6"
         },
         {
           "path": "scripts/vnext_flatbuffers_proof.json",
@@ -745,7 +745,7 @@
       "files": [
         {
           "path": ".github/workflows/vnext-gamenetworkingsockets-proof.yml",
-          "sha256": "68268029e3e7a0404fc86be90b2bbce735c70f273857666aaabdbf2b44401492"
+          "sha256": "33210ba63be4e5f6b3b5dafa37ae0662e5713b37fec426d5e9944560d5386bb5"
         },
         {
           "path": "docs/vnext/proofs/gamenetworkingsockets/ANDROID_ARM64.md",
@@ -769,7 +769,7 @@
         },
         {
           "path": "scripts/tests/test_run_vnext_gamenetworkingsockets_proof.py",
-          "sha256": "84705c84aec9fd4bf88229bb3432ffffeb17a983fa625bdb04691c15bd7b75fd"
+          "sha256": "93f439553a3a8ba88036a3e52a002f8b07fa643fdf52ebd3eb467aa8e81c8195"
         },
         {
           "path": "scripts/vnext_gamenetworkingsockets_proof.json",
@@ -800,7 +800,7 @@
       "files": [
         {
           "path": ".github/workflows/vnext-baseline-linux.yml",
-          "sha256": "35c12f0806659567fc5cece2e5c390d3de0be51d395444ff1bd2f458b2e4a3f3"
+          "sha256": "59fcf40273587dc9569ea31996e8cf2c6ec07a56646b4bfe4348ed0e1cacd7fe"
         },
         {
           "path": "CI/install_debian_deps.sh",
@@ -836,7 +836,7 @@
         },
         {
           "path": ".github/workflows/vnext-baseline-macos.yml",
-          "sha256": "db87251bf3c0bbf224a7d1c31db78d145fa440512ad604250ff19bdff143761e"
+          "sha256": "1f8746330eee5be44019776670ab259dcbfd889343423ca6c832853e4c22c7ba"
         },
         {
           "path": "CI/before_install.macos.sh",
@@ -892,7 +892,7 @@
       "files": [
         {
           "path": ".github/workflows/vnext-baseline-windows.yml",
-          "sha256": "213f84b8ab3ec8d71b1f04b26d4b55f70fd007b18ad8258338b5cec239c5cc85"
+          "sha256": "f8935c6ca82bf2ad3734c10fd6ab8278d75ba3606fbcbd76bdcf01e98bde67b7"
         },
         {
           "path": ".github/workflows/windows.yml",

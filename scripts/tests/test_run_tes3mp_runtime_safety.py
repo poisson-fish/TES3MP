@@ -147,12 +147,13 @@ class RuntimeSafetyRunnerTests(unittest.TestCase):
             with self.assertRaisesRegex(safety.RuntimeSafetyError, "omitted instrumentation"):
                 safety.verify_instrumented_compile_commands("tsan", build_dir)
 
-    def test_workflow_is_pinned_bounded_per_change_and_retains_failures(self):
+    def test_workflow_is_pinned_bounded_phase_exit_only_and_retains_failures(self):
         workflow = WORKFLOW_PATH.read_text(encoding="utf-8")
         self.assertIn("runs-on: ubuntu-24.04", workflow)
         self.assertEqual(workflow.count("timeout-minutes: 20"), 2)
-        self.assertIn("push:", workflow)
-        self.assertIn("pull_request:", workflow)
+        self.assertIn("on:\n  workflow_dispatch:\n", workflow)
+        for automatic_trigger in ("\n  push:", "\n  pull_request:", "\n  schedule:", "\n  release:"):
+            self.assertNotIn(automatic_trigger, workflow)
         self.assertIn("--profile asan-ubsan --fuzz-seconds 30", workflow)
         self.assertIn("--profile tsan", workflow)
         self.assertEqual(workflow.count("if: always()"), 2)

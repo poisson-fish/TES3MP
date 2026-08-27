@@ -1,12 +1,6 @@
 name: vNext macOS baseline
 
 on:
-  push:
-  pull_request:
-  schedule:
-    - cron: "17 8 * * 1"
-  release:
-    types: [published]
   workflow_dispatch:
 
 permissions:
@@ -51,7 +45,6 @@ jobs:
 
   x86_64:
     name: macOS baseline (x86-64, Xcode 16)
-    if: github.event_name == 'schedule' || github.event_name == 'release' || github.event_name == 'workflow_dispatch'
     runs-on: macos-15-intel
     timeout-minutes: 120
     env:

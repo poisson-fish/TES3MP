@@ -6,6 +6,8 @@ Date opened: 2026-08-25
 
 Date approved: 2026-08-25
 
+Date amended: 2026-08-27
+
 Decision owner: project owner
 
 Needed by: Phase 1
@@ -29,6 +31,15 @@ The approved policy is to:
   and
 - retain OpenMW 0.51's platform-native dependency flows for the baseline, while
   pinning and recording provenance and licenses for every added dependency.
+
+The project owner amended only the hosted-CI cadence on 2026-08-27. Beginning
+with Phase 4, the complete vNext baseline, dependency-proof, and runtime-safety
+matrix runs once by manual dispatch against each phase-completion candidate,
+not automatically on pushes, pull requests, schedules, or release events.
+Every slice still runs its applicable repository-owned local tests and records
+their evidence. A failed phase-exit job is corrected and rerun before the phase
+can close; a supported release requires a fresh manually dispatched full gate.
+Manual dispatch exercises every declared job, including macOS x86-64.
 
 ## Why this decision is needed now
 
@@ -77,8 +88,8 @@ Primary evidence:
 ## Scenarios the policy must cover
 
 1. A desktop change passes locally but breaks C++20 compilation or linkage on
-   one supported operating system or CPU architecture. Required CI must block
-   the change or the release according to the declared cadence.
+   one supported operating system or CPU architecture. The full hosted matrix
+   blocks the phase exit or release according to the declared cadence.
 2. A hosted runner updates its compiler or SDK without changing its broad image
    label. The job records the resolved environment, a failure is reproducible,
    and the project can pin or deliberately migrate the affected tool.
@@ -86,8 +97,9 @@ Primary evidence:
    ARM64 path. The dependency review reports that limitation before adoption;
    Quest work is not silently made impossible even though Android is not yet a
    release gate.
-4. An Intel macOS-only defect is missed by per-change arm64 CI. The scheduled
-   job detects it, and a release cannot proceed until the x86-64 gate passes.
+4. An Intel macOS-only defect is missed by local and arm64 testing. The manual
+   phase-exit matrix detects it, and a release cannot proceed until the x86-64
+   gate passes.
 5. A PC VR patch works on Windows but not Linux. The initial Windows PC VR
    release gate remains actionable; Linux support is not advertised until the
    Phase 9 evidence and owner review promote it.
@@ -97,12 +109,13 @@ Primary evidence:
 
 ## Decision 1: desktop operating systems and architectures
 
-### Option A — balanced supported matrix (recommended)
+### Option A — balanced supported matrix (approved; cadence amended)
 
-- Windows x86-64 and Linux x86-64 are required on every change.
-- macOS arm64 is required on every change.
-- macOS x86-64 remains a supported release architecture, with scheduled and
-  release-gate CI rather than a required job on every change.
+- Windows x86-64, Linux x86-64, macOS arm64, and macOS x86-64 remain supported.
+- During Phases 1–3, Windows, Linux, and macOS arm64 ran per change while
+  macOS x86-64 ran on its scheduled/release/manual cadence.
+- Beginning with Phase 4, the complete supported matrix runs by manual dispatch
+  at phase exit and before a supported release rather than on every change.
 - Windows ARM64 and Linux ARM64 are not initially supported release targets.
 
 This follows OpenMW 0.51's strongest tested paths, covers modern Apple hardware,
@@ -170,8 +183,9 @@ target block the desktop and PC VR release.
 
 - Use GitHub Actions because the shared repository and review workflow are on
   GitHub. Use explicit runner labels, never `*-latest` aliases:
-  `ubuntu-24.04`, `windows-2022`, `macos-15`, and scheduled/release-only
-  `macos-15-intel`.
+  `ubuntu-24.04`, `windows-2022`, `macos-15`, and `macos-15-intel`. Beginning
+  with Phase 4, these vNext workflows expose manual dispatch only and the full
+  matrix is required at phase exit.
 - Keep configure/build/test behavior in versioned CMake presets and
   repository-owned scripts that run outside CI. Workflow YAML composes those
   commands but is not their only definition.
@@ -213,7 +227,8 @@ produce all evidence applicable to their phase:
   SDK, generator, package/dependency versions, and relevant lock or manifest
   hashes;
 - the same named CMake preset and repository script used in CI runs locally;
-- macOS x86-64 scheduled and release-gate jobs pass before a supported release;
+- macOS x86-64 passes in each manual phase-exit gate and before a supported
+  release;
 - unsupported architectures and missing tools fail with bounded, actionable
   configure errors rather than partially building an unsupported artifact;
 - a machine check rejects floating refs or unrecorded new dependencies;
@@ -226,8 +241,8 @@ produce all evidence applicable to their phase:
 
 - Desktop release support is concrete without multiplying every CPU/OS
   combination at project start.
-- Intel macOS regressions may be detected later than arm64 regressions, but they
-  remain release blockers and have a scheduled detection path.
+- Cross-platform regressions may be detected at phase exit rather than on the
+  introducing change, but they remain phase and release blockers.
 - Initial PC VR support is narrower than desktop support and must be described
   accurately in release documentation.
 - Runner labels do not fully pin hosted images. Environment manifests and
@@ -245,8 +260,9 @@ produce all evidence applicable to their phase:
   hashes, licenses, and cache provenance; fail closed when integrity checks fail.
 - **Non-reproducible local/CI behavior:** keep commands in presets/scripts and
   exercise those exact entry points in CI.
-- **Secondary platform bit rot:** make scheduled jobs visible and release
-  blocking; promote them to per-change if failures become frequent or costly.
+- **Secondary platform bit rot:** every phase-exit and release-candidate manual
+  dispatch runs all supported jobs; add an earlier targeted dispatch if local
+  evidence or a failure indicates platform-specific risk.
 - **VR fork lag:** isolate PC VR in the Phase 9 worktree/patch policy and require
   desktop regressions plus interoperability evidence.
 - **Quest accidentally foreclosed:** require Android ARM64 evidence for core
@@ -275,6 +291,11 @@ affected phase.
 
 Approved by the project owner in the 2026-08-25 working session: Option A for
 Decisions 1, 2, 3, and 4.
+
+The project owner approved the cadence amendment in the 2026-08-27 working
+session: after the then-running Phase 3 jobs complete, Phase 4 and later use one
+complete manually dispatched hosted gate at phase exit. Local per-slice testing
+continues, and failed gates must be corrected and rerun before exit approval.
 
 The owner clarified that VR is expected to be nonfunctional on macOS while
 macOS itself must remain a supported desktop platform. Accordingly, this

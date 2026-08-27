@@ -215,6 +215,9 @@ class WindowsCiEvidenceTests(unittest.TestCase):
             "python scripts/capture_vnext_windows_ci.py",
         ):
             self.assertIn(required, workflow)
+        self.assertIn("on:\n  workflow_dispatch:\n", workflow)
+        for automatic_trigger in ("\n  push:", "\n  pull_request:", "\n  schedule:", "\n  release:"):
+            self.assertNotIn(automatic_trigger, workflow)
         self.assertNotIn("windows-latest", workflow)
         self.assertFalse((capture.ROOT / ".github" / "workflows" / "push.yml").exists())
 

@@ -155,7 +155,10 @@ class MacosCiEvidenceTests(unittest.TestCase):
         )
         self.assertIn("runs-on: macos-15\n", workflow)
         self.assertIn("runs-on: macos-15-intel\n", workflow)
-        self.assertIn("github.event_name == 'schedule'", workflow)
+        self.assertIn("on:\n  workflow_dispatch:\n", workflow)
+        for automatic_trigger in ("\n  push:", "\n  pull_request:", "\n  schedule:", "\n  release:"):
+            self.assertNotIn(automatic_trigger, workflow)
+        self.assertNotIn("github.event_name", workflow)
         self.assertIn("python3 scripts/run_vnext_baseline.py provision", workflow)
         self.assertIn("python3 scripts/run_vnext_baseline.py all --ci", workflow)
         self.assertIn("python3 scripts/capture_vnext_macos_ci.py", workflow)

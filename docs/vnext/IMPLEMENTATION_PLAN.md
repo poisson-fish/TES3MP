@@ -2,7 +2,7 @@
 
 Document type: living implementation plan
 
-Updated: 2026-08-26
+Updated: 2026-08-27
 
 Direction source: [`README.md`](README.md)
 
@@ -198,6 +198,13 @@ These rules apply to every phase and are part of every exit gate:
 15. An implementation demo and owner review are completion evidence for
     user-visible or architecturally significant slices; passing tests alone is
     necessary but not sufficient.
+16. Beginning with Phase 4, each slice runs its applicable repository-owned
+    local verification, while the complete vNext baseline, dependency-proof,
+    and runtime-safety workflows run once by manual dispatch against the
+    phase-completion candidate. Every declared job, including macOS x86-64,
+    must pass before exit approval. Push, pull-request, schedule, and release
+    events do not launch these workflows; a failed gate is corrected and rerun
+    before the phase may be marked **Implemented**.
 
 ## Authority, state scope, and presentation
 
@@ -1718,7 +1725,7 @@ Depends on: Phase 2.
 | 3.4 | Add injected clock, deterministic RNG, deterministic scheduler, and in-memory link | **Implemented** | Accepted [`ADR-0017`](adr/ADR-0017-deterministic-facilities-harness-boundaries.md) is implemented by passive server-core clock/scheduler/RNG facilities and a bounded test-support link/exact-trace harness; independent long-run, vector, isolation, backpressure, and repeatability contracts pass and the owner accepted the implementation demo on 2026-08-26 |
 | 3.5 | Add latency/loss/jitter/duplication/reordering/stall/disconnect fault controls | **Implemented** | Accepted [`ADR-0018`](adr/ADR-0018-deterministic-network-fault-controls.md) is implemented by a passive bounded test-support wrapper with independently configurable direction/channel profiles, isolated seeded fault streams, explicit stall/disconnect controls, and passing exact-trace contracts; the owner accepted the implementation demo on 2026-08-26 |
 | 3.6 | Add ASan, UBSan, race-checking where supported, and fuzz-target CI plumbing | **Implemented** | Accepted [`ADR-0019`](adr/ADR-0019-runtime-safety-and-fuzz-ci-policy.md), the owner-accepted demo, and reviewed hosted Clang 18 ASan+UBSan/libFuzzer and ThreadSanitizer evidence all pass at `fc8f178081` |
-| 3.7 | Add owned metrics/logging interfaces and test sinks | **In Progress** | Accepted [`ADR-0020`](adr/ADR-0020-owned-observability-interfaces-and-test-sinks.md), local implementation, owner demo acceptance, and hosted six-contract safety evidence pass; the supported platform baseline matrix remains pending |
+| 3.7 | Add owned metrics/logging interfaces and test sinks | **Implemented** | Accepted [`ADR-0020`](adr/ADR-0020-owned-observability-interfaces-and-test-sinks.md), local implementation, owner demo acceptance, and reviewed hosted six-contract safety plus Linux GCC/Clang, Windows MSVC, and macOS arm64 baseline evidence pass at `e757e063c4` |
 
 Exit gate:
 
@@ -2291,6 +2298,69 @@ Implementation notes:
   - Follow-ups: require the supported platform baseline matrix to pass, review
     its evidence, then change Slice 3.7 to **Implemented** and present the
     complete Phase 3 exit-gate evidence for separate owner approval.
+
+- 2026-08-27 — Slice 3.7 — Implemented
+  - Change: retained accepted ADR-0020 and implementation commit `57973b65c7`
+    without behavioral amendment. Closed the slice after the supported Phase 3
+    platform matrix completed on the demo-accepted tree.
+  - Decisions: none. The owner had already approved ADR-0020 Option A for all
+    five decisions and accepted the implementation demo.
+  - Verification: all six latest vNext workflows completed successfully for
+    `e757e063c461fa6a676f477927633416c9a0996b`: runtime safety
+    [`33095908384`](https://github.com/poisson-fish/TES3MP/actions/runs/33095908384),
+    FlatBuffers proof
+    [`33095908412`](https://github.com/poisson-fish/TES3MP/actions/runs/33095908412),
+    macOS baseline
+    [`33095908403`](https://github.com/poisson-fish/TES3MP/actions/runs/33095908403),
+    GameNetworkingSockets proof
+    [`33095908292`](https://github.com/poisson-fish/TES3MP/actions/runs/33095908292),
+    Windows baseline
+    [`33095908387`](https://github.com/poisson-fish/TES3MP/actions/runs/33095908387),
+    and Linux baseline
+    [`33095908319`](https://github.com/poisson-fish/TES3MP/actions/runs/33095908319).
+    Linux GCC 13/Clang 18, Windows MSVC 2022 v143, macOS arm64 Xcode 16, all
+    four non-Intel jobs in each dependency proof, and both Clang 18 safety jobs
+    passed. The Phase 3 push policy intentionally skipped Intel; the manually
+    dispatched Intel baseline and five-platform dependency proofs retained from
+    Phases 1 and 2 satisfy its declared cadence. Current safety artifacts are
+    `9656379611` (ASan+UBSan/fuzz, SHA-256
+    `6910645bb146cec2ccc4299510a8300b0795d9db6c4f84cfa61d52450aab6cc7`)
+    and `9656367967` (ThreadSanitizer, SHA-256
+    `f1f5881cc07cfb3437a09360279da008b20a55f0732e67f22a34c0be41980921`).
+  - Owner review: implementation-demo acceptance received in the 2026-08-27
+    working session.
+  - Follow-ups: none for Slice 3.7. Phase 3 exit remains a separate owner gate.
+
+- 2026-08-27 — Phase 3 — In Progress
+  - Change: assembled the exit-gate evidence and implemented the owner-approved
+    Phase 4+ CI cadence amendment in ADR-0002 and ADR-0019. All six vNext hosted
+    workflows now expose manual dispatch only. A phase-exit dispatch exercises
+    every declared job, including macOS x86-64; slice work continues to require
+    applicable local verification.
+  - Decisions: the owner explicitly approved one complete hosted CI gate at the
+    end of each Phase 4+ phase instead of automatic push, pull-request,
+    schedule, or release runs. No architecture, authority, state-scope, or
+    gameplay behavior changed.
+  - Gate evidence: protocol and server-core build and test in the standalone
+    graph without OpenMW or GameNetworkingSockets; fail-closed tests reject an
+    introduced OpenMW/transport include or undeclared dependency; and the
+    deterministic harness reproduces exact normal and injected-fault traces and
+    diagnostic checksums from identical seeds. The local six-contract graph,
+    real baseline graph, legacy-exclusion gate, provenance gate, repository
+    tests, and the hosted evidence listed above provide the retained proof.
+  - Verification: all 95 repository-owned Python tests pass, including workflow
+    policy assertions that all six vNext workflows are manual-only and that the
+    Intel jobs are unconditional within a dispatch. Staged provenance accounts
+    for 117 intentional differences and verifies 43 dependency inputs. Legacy
+    exclusion checks 3,811 tracked paths, 59 CMake files, 1,254 compile
+    commands, and 1,971 Ninja edges. The provenance JSON parses, all 63 local
+    vNext Markdown links resolve, changed Python compiles, and staged diff
+    checks pass.
+  - Owner review: explicit Phase 3 exit approval remains pending. Phase 4 is
+    still **Not Started**, and no Phase 4 production work is eligible yet.
+  - Follow-ups: complete local verification of this cadence/status update,
+    publish it without launching automatic vNext workflows, and present the
+    Phase 3 exit gate for owner approval.
 
 ### Phase 4 — Bounded protocol and in-memory session
 
