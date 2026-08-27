@@ -93,5 +93,13 @@ the harness does not define a Phase 4 production decoder or wire format.
 The accepted Slice 3.6 gate passes in hosted CI at `fc8f178081`: all five
 contracts pass under separate Linux Clang 18 ASan+UBSan and ThreadSanitizer
 profiles, and the bounded 30-second spatial-decoder fuzz smoke retains no
-reproducer. Slice 3.7 remains at the ADR-0020 proposal stage; no observability
-API or target dependency is approved yet.
+reproducer.
+
+Slice 3.7 accepts ADR-0020 without changing the target graph. Server core owns
+closed integer metric definitions, typed structured events, explicit non-owning
+sink references, and explicit no-op sinks. Test support owns preallocated
+bounded FIFO recorders with reject-newest overflow and visible dropped counts.
+The interfaces accept no raw text, byte payload, wall-clock timestamp, mutable
+state, or backend type; observations never affect canonical results or
+checksums. No production logging/export backend, dispatcher thread, or queue
+exists yet.

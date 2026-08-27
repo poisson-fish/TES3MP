@@ -112,6 +112,7 @@ class RuntimeSafetyRunnerTests(unittest.TestCase):
             "tes3mp_deterministic_facilities_tests",
             "tes3mp_deterministic_harness_tests",
             "tes3mp_fault_injection_tests",
+            "tes3mp_observability_tests",
         ):
             self.assertIn(f"tes3mp_enable_runtime_safety({target})", component)
         self.assertIn("tes3mp_enable_runtime_safety(${target})", component)

@@ -322,7 +322,7 @@ runtime or protocol name.
 | ADR-0017 | Deterministic facilities and harness boundaries | Phase 3 | **Implemented** |
 | ADR-0018 | Deterministic network fault controls | Phase 3 | **Implemented** |
 | ADR-0019 | Runtime-safety and fuzz CI policy | Phase 3 | **Implemented** |
-| ADR-0020 | Owned observability interfaces and test sinks | Phase 3 | **Proposed** |
+| ADR-0020 | Owned observability interfaces and test sinks | Phase 3 | **Implemented** |
 
 An ADR is complete only when it records considered alternatives, selection
 criteria, consequences, failure modes, a replacement/review trigger, and
@@ -1718,7 +1718,7 @@ Depends on: Phase 2.
 | 3.4 | Add injected clock, deterministic RNG, deterministic scheduler, and in-memory link | **Implemented** | Accepted [`ADR-0017`](adr/ADR-0017-deterministic-facilities-harness-boundaries.md) is implemented by passive server-core clock/scheduler/RNG facilities and a bounded test-support link/exact-trace harness; independent long-run, vector, isolation, backpressure, and repeatability contracts pass and the owner accepted the implementation demo on 2026-08-26 |
 | 3.5 | Add latency/loss/jitter/duplication/reordering/stall/disconnect fault controls | **Implemented** | Accepted [`ADR-0018`](adr/ADR-0018-deterministic-network-fault-controls.md) is implemented by a passive bounded test-support wrapper with independently configurable direction/channel profiles, isolated seeded fault streams, explicit stall/disconnect controls, and passing exact-trace contracts; the owner accepted the implementation demo on 2026-08-26 |
 | 3.6 | Add ASan, UBSan, race-checking where supported, and fuzz-target CI plumbing | **Implemented** | Accepted [`ADR-0019`](adr/ADR-0019-runtime-safety-and-fuzz-ci-policy.md), the owner-accepted demo, and reviewed hosted Clang 18 ASan+UBSan/libFuzzer and ThreadSanitizer evidence all pass at `fc8f178081` |
-| 3.7 | Add owned metrics/logging interfaces and test sinks | **In Progress** | Proposed [`ADR-0020`](adr/ADR-0020-owned-observability-interfaces-and-test-sinks.md) presents five owner decisions; production implementation is approval-gated |
+| 3.7 | Add owned metrics/logging interfaces and test sinks | **In Progress** | Accepted [`ADR-0020`](adr/ADR-0020-owned-observability-interfaces-and-test-sinks.md) is implemented locally; hosted safety evidence and owner implementation-demo acceptance remain pending |
 
 Exit gate:
 
@@ -2231,6 +2231,42 @@ Implementation notes:
   - Follow-ups: present Decisions 1–5 to the owner, accept or amend ADR-0020,
     then implement only the approved Slice 3.7 observability interfaces and test
     sinks. Phase 3 remains **In Progress** until Slice 3.7 and the exit gate pass.
+
+- 2026-08-27 — Slice 3.7 — In Progress
+  - Change: accepted ADR-0020 and added server-core-owned closed metric/event
+    values, explicit metrics/event sink interfaces, explicit no-op sinks, and a
+    non-owning observability bundle. Added test-support-only preallocated metric
+    and event FIFO recorders with a 1,024-observation maximum, reject-newest
+    overflow, saturating dropped counts, clear/reuse, and no allocation after
+    construction. Added a sixth independent contract executable and registered
+    every new source/contract in the ADR-0019 safety evidence. No production
+    backend, exporter, formatting, wall clock, thread, queue, protocol field,
+    canonical mutation, authority, state-scope, or gameplay behavior was added.
+  - Decisions: the owner approved Option A for ADR-0020 Decisions 1–5 without
+    amendment: server-core ownership with test-support recorders; explicit
+    injected non-blocking/noexcept attempts; closed integer metric definitions
+    and enum dimensions; closed typed events without raw strings/bytes; and
+    fixed-capacity deterministic FIFO recorders with explicit overflow evidence.
+  - Verification: the standalone MSVC 19.44/Ninja graph builds the new owned
+    sources and runs all six C++ contracts. The observability contract covers
+    metric operation/unit/value matching, invalid keys and dimensions,
+    duplicate/over-limit dimensions, typed event payloads and semantic ticks,
+    explicit no-op composition, zero/one/1,024/over-limit capacities, FIFO and
+    reject-newest behavior, dropped counts, clear/reuse, identical-run evidence,
+    and canonical-result independence. All 95 repository-owned Python tests
+    pass. The real MSVC/Ninja baseline graph builds the same owned sources and
+    runs all six contracts. Staged provenance accounts for 117 intentional
+    differences and 43 dependency inputs; legacy exclusion checks 3,811 paths,
+    59 CMake files, 1,254 compile commands, and 1,971 Ninja edges. Documentation
+    JSON/path ordering, all 63 local vNext Markdown links, accepted-decision and
+    status assertions, Python compilation, and staged diff checks pass. Hosted
+    safety verification is pending.
+  - Owner review: explicit Option A approval for Decisions 1–5 received in the
+    2026-08-27 working session. Implementation-demo acceptance is pending.
+  - Follow-ups: complete the full local verification set, publish the
+    implementation, require both hosted safety jobs, review their updated six-
+    contract/source evidence, and present the implementation demo before
+    changing Slice 3.7 to **Implemented** or running the Phase 3 exit gate.
 
 ### Phase 4 — Bounded protocol and in-memory session
 

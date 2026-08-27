@@ -64,10 +64,12 @@ per-change jobs, and repository-owned evidence. The local plumbing and its
 uninstrumented Windows proof are implemented, and the owner accepted the local
 implementation demo. Replacement hosted sanitizer/fuzzer execution and retained
 artifact review pass at `fc8f178081`, along with the supported Linux, Windows,
-and macOS baseline matrix. Slice 3.7 observability scaffolding is in progress at
-the decision stage: proposed ADR-0020 awaits owner approval before public APIs
-or test sinks land. No multiplayer runtime or production transport behavior
-exists yet.
+and macOS baseline matrix. Slice 3.7 observability scaffolding is in progress:
+accepted ADR-0020 fixes server-core-owned typed metrics/events, explicit
+non-blocking sinks, privacy/cardinality constraints, and bounded deterministic
+test recorders. The local implementation and sixth independent contract are
+under verification; hosted safety evidence and owner demo acceptance remain
+required. No multiplayer runtime or production transport behavior exists yet.
 
 See the [implementation plan](IMPLEMENTATION_PLAN.md) for the live phase and
 slice tracker, completion gates, architecture decisions, and implementation

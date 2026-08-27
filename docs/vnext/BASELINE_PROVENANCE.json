@@ -102,7 +102,7 @@
     {
       "path": "components/tes3mp/CMakeLists.txt",
       "status": "A",
-      "purpose": "Defines the standalone-capable five-library graph, target-scoped safety registration, contract executables, and bounded spatial fuzz target."
+      "purpose": "Defines the standalone-capable five-library graph, target-scoped safety registration, six contract executables, and bounded spatial fuzz target."
     },
     {
       "path": "components/tes3mp/CMakePresets.json",
@@ -112,7 +112,7 @@
     {
       "path": "components/tes3mp/README.md",
       "status": "A",
-      "purpose": "Documents the approved target graph, boundary enforcement, implemented Slice 3.1-3.6 scope, and local runtime-safety entry points."
+      "purpose": "Documents the approved target graph, boundary enforcement, implemented Slice 3.1-3.7 scope, observability boundary, and runtime-safety entry points."
     },
     {
       "path": "components/tes3mp/client_session/anchor.cpp",
@@ -138,6 +138,11 @@
       "path": "components/tes3mp/include/tes3mp/monotonic_clock.hpp",
       "status": "A",
       "purpose": "Project-owned monotonic nanosecond instant and minimal injected-clock boundary for deterministic host scheduling."
+    },
+    {
+      "path": "components/tes3mp/include/tes3mp/observability.hpp",
+      "status": "A",
+      "purpose": "Owner-approved server-core metric/event values, explicit non-owning sink bundle, and no-op sink interfaces without backend or global state."
     },
     {
       "path": "components/tes3mp/include/tes3mp/spatial_types.hpp",
@@ -170,6 +175,11 @@
       "purpose": "Checked manually advanced implementation of the injected monotonic-clock interface for deterministic tests."
     },
     {
+      "path": "components/tes3mp/include/tes3mp/test_support/recording_observability.hpp",
+      "status": "A",
+      "purpose": "Bounded single-threaded FIFO metric/event recorder interfaces with explicit overflow evidence for deterministic tests."
+    },
+    {
       "path": "components/tes3mp/include/tes3mp/test_support/spatial_round_trip.hpp",
       "status": "A",
       "purpose": "Test-support-only deterministic spatial snapshot byte round-trip interface; explicitly not a released wire schema."
@@ -200,6 +210,11 @@
       "purpose": "Checked rational-deadline 30 Hz scheduler implementation with bounded sequential batches and no sleep, callback, reducer, or thread."
     },
     {
+      "path": "components/tes3mp/server_core/observability.cpp",
+      "status": "A",
+      "purpose": "Validation and construction for closed metric definitions/dimensions and typed structured events."
+    },
+    {
       "path": "components/tes3mp/test_support/anchor.cpp",
       "status": "A",
       "purpose": "Behavior-free translation-unit anchor for reusable multiplayer test support."
@@ -223,6 +238,11 @@
       "path": "components/tes3mp/test_support/manual_clock.cpp",
       "status": "A",
       "purpose": "Overflow-checked nonnegative manual monotonic-clock advancement implementation."
+    },
+    {
+      "path": "components/tes3mp/test_support/recording_observability.cpp",
+      "status": "A",
+      "purpose": "Preallocated bounded FIFO observation recording, reject-newest overflow, saturating drop counts, clear, and reuse."
     },
     {
       "path": "components/tes3mp/test_support/spatial_round_trip.cpp",
@@ -263,6 +283,11 @@
       "path": "components/tes3mp/tests/fuzz/spatial_round_trip_fuzz.cpp",
       "status": "A",
       "purpose": "Clang libFuzzer entry point with a hard pre-parse size bound over the test-support-only spatial decoder."
+    },
+    {
+      "path": "components/tes3mp/tests/observability_tests.cpp",
+      "status": "A",
+      "purpose": "Independent contracts for typed metric/event shapes, explicit injection, no-op sinks, bounded FIFO recording, overflow, privacy shape, and deterministic evidence."
     },
     {
       "path": "components/tes3mp/tests/spatial_primitive_tests.cpp",
@@ -382,7 +407,7 @@
     {
       "path": "docs/vnext/adr/ADR-0020-owned-observability-interfaces-and-test-sinks.md",
       "status": "A",
-      "purpose": "Proposed owner decision packet for server-core observability ownership, injection, typed metrics/events, privacy, and bounded deterministic test sinks."
+      "purpose": "Owner-approved server-core observability ownership, injection, typed metrics/events, privacy, and bounded deterministic test-sink policy."
     },
     {
       "path": "docs/vnext/proofs/flatbuffers/ANDROID_ARM64.md",

@@ -1,10 +1,10 @@
 # ADR-0020: Owned observability interfaces and test sinks
 
-Status: **Proposed**
+Status: **Accepted**
 
 Date opened: 2026-08-27
 
-Date approved: pending
+Date approved: 2026-08-27
 
 Decision owner: project owner
 
@@ -22,6 +22,22 @@ sink contract, test recorder, or target dependency. It defines an architectural
 and diagnostic boundary, but does not define gameplay behavior, canonical state,
 protocol fields, production logging/export backends, administration, persistence,
 or a thread/queue model.
+
+## Decision summary
+
+The project owner approved Option A for Decisions 1 through 5 on 2026-08-27:
+
+1. server core owns the initial observability ports and typed values while test
+   support owns bounded recorders, preserving the ADR-0014 target graph;
+2. explicit non-owning sink references provide direct non-blocking `noexcept`
+   attempts with visible accepted/dropped results and explicit no-op sinks;
+3. metrics use closed keys with fixed integer operations/units and bounded
+   low-cardinality enum dimensions;
+4. structured events use closed kinds and typed payloads with backend-rendered
+   text and no raw strings, bytes, or secrets; and
+5. single-threaded test recorders use fixed-capacity FIFO storage,
+   reject-newest overflow, saturating dropped counts, and deterministic
+   caller-supplied semantic time.
 
 ## Existing constraints
 
@@ -69,7 +85,7 @@ The choice must preserve ADR-0003, ADR-0013, and ADR-0014:
 
 ## Decision 1: interface ownership and target topology
 
-### Option A: server-core-owned ports plus test-support recorders (recommended)
+### Option A: server-core-owned ports plus test-support recorders (approved)
 
 Place the initial metrics/event value types and sink interfaces in
 `tes3mp_server_core`. Place bounded recording implementations in
@@ -103,7 +119,7 @@ contradicting the owned-boundary requirement.
 
 ## Decision 2: injection, lifetime, and failure contract
 
-### Option A: explicit injected sink references with non-blocking `noexcept` attempts (recommended)
+### Option A: explicit injected sink references with non-blocking `noexcept` attempts (approved)
 
 Define separate metrics and structured-event sink interfaces, grouped in a
 small non-owning observability bundle. Construction receives explicit sink
@@ -137,7 +153,7 @@ and backpressure behavior before a production composition root exists.
 
 ## Decision 3: metric model and cardinality
 
-### Option A: closed typed metric keys, operations, units, and enum dimensions (recommended)
+### Option A: closed typed metric keys, operations, units, and enum dimensions (approved)
 
 Use scoped project-owned metric keys whose definition fixes kind and unit.
 Support three integer-only operations: monotonic counter addition, signed gauge
@@ -168,7 +184,7 @@ work but couples core compilation and lifetime to an operational backend.
 
 ## Decision 4: structured-event shape and privacy
 
-### Option A: closed event kinds with typed fields and backend-rendered text (recommended)
+### Option A: closed event kinds with typed fields and backend-rendered text (approved)
 
 Represent each event as a closed project-owned kind, severity, optional semantic
 tick, and a fixed typed payload for that kind. Payloads may contain approved
@@ -198,7 +214,7 @@ or bounded diagnostic identity required to explain later failures.
 
 ## Decision 5: deterministic bounded test sinks
 
-### Option A: fixed-capacity FIFO recorders with reject-newest overflow (recommended)
+### Option A: fixed-capacity FIFO recorders with reject-newest overflow (approved)
 
 Provide separate single-threaded test recorders for metrics and events. Capacity
 is fixed at construction within a declared maximum. Accepted observations are
@@ -227,9 +243,9 @@ short trace.
 Per-test mock callbacks can assert individual calls, but do not establish one
 reusable bounded ordering/overflow contract for later multi-client simulations.
 
-## Proposed acceptance tests and demo
+## Acceptance tests and demo
 
-If the recommended options are approved, Slice 3.7 must demonstrate:
+The approved implementation must demonstrate:
 
 1. server-core observability headers compile without OpenMW, transport-library,
    exporter, formatting-library, platform, or test-support headers;
@@ -259,7 +275,7 @@ identical observation sequence, and compile-time rejection of a free-form or
 test-support dependency. Owner acceptance remains required before Slice 3.7 or
 Phase 3 can be marked **Implemented**.
 
-## Consequences of the recommendation
+## Consequences
 
 - The first observability seam is deliberately server-core-owned; transport and
   client domains do not inherit server taxonomy accidentally.
@@ -308,10 +324,11 @@ Reopen this ADR if:
 
 ## Owner approval
 
-Pending. The recommendation is Option A for Decisions 1 through 5.
+Approved by the project owner in the 2026-08-27 working session: Option A for
+Decisions 1 through 5.
 
-Approval would fix a server-core-owned, explicitly injected, typed,
+Approval fixes a server-core-owned, explicitly injected, typed,
 non-blocking/noexcept observability boundary and bounded deterministic
-test-support recorders. It would not approve a production backend, exporter,
+test-support recorders. It does not approve a production backend, exporter,
 thread, queue, wire schema, canonical-state field, audit guarantee, gameplay
 category, authority rule, or state-scope change.
