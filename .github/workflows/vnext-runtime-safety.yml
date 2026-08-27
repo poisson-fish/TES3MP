@@ -1,0 +1,64 @@
+name: vNext TES3MP runtime safety
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  asan-ubsan-fuzz:
+    name: TES3MP ASan+UBSan and fuzz smoke (Clang 18)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out the exact source revision
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Install the approved safety toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes clang-18 cmake ninja-build
+
+      - name: Run ASan, UBSan, and bounded libFuzzer smoke
+        run: python3 scripts/run_tes3mp_runtime_safety.py --profile asan-ubsan --fuzz-seconds 30
+
+      - name: Retain safety evidence, logs, and reproducers
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: vnext-tes3mp-asan-ubsan-fuzz-${{ github.sha }}
+          path: |
+            build/tes3mp-safety-asan-ubsan/evidence/*
+            build/tes3mp-safety-asan-ubsan/fuzzer-artifacts/*
+          if-no-files-found: warn
+          retention-days: 30
+
+  thread-sanitizer:
+    name: TES3MP ThreadSanitizer smoke (Clang 18)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out the exact source revision
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Install the approved safety toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes clang-18 cmake ninja-build
+
+      - name: Run the ThreadSanitizer contract smoke
+        run: python3 scripts/run_tes3mp_runtime_safety.py --profile tsan
+
+      - name: Retain safety evidence and logs
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: vnext-tes3mp-tsan-${{ github.sha }}
+          path: build/tes3mp-safety-tsan/evidence/*
+          if-no-files-found: warn
+          retention-days: 30

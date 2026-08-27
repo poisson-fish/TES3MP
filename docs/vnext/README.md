@@ -57,10 +57,13 @@ accepted the implementation demo. Slice 3.5 is implemented: accepted ADR-0018
 fixes a passive test-support wrapper with independently bounded
 direction/channel profiles, isolated deterministic fault streams, and explicit
 stall/disconnect controls, and the owner accepted the implementation demo.
-Slice 3.6 sanitizer, race-checking, and fuzz CI plumbing is in progress at its
-required decision gate: proposed ADR-0019 presents target scope, sanitizer,
-fuzzer, CI, and evidence options for owner approval. No production Slice 3.6
-plumbing, multiplayer runtime, or production transport behavior exists yet.
+Slice 3.6 sanitizer, race-checking, and fuzz CI plumbing is in progress:
+accepted ADR-0019 fixes target-scoped instrumentation, separate Linux Clang 18
+ASan+UBSan and ThreadSanitizer profiles, per-parser libFuzzer targets, bounded
+per-change jobs, and repository-owned evidence. The local plumbing and its
+uninstrumented Windows proof are implemented; hosted sanitizer/fuzzer results
+and owner demo acceptance remain required. No multiplayer runtime or production
+transport behavior exists yet.
 
 See the [implementation plan](IMPLEMENTATION_PLAN.md) for the live phase and
 slice tracker, completion gates, architecture decisions, and implementation

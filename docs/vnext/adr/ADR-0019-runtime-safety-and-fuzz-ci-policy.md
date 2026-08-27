@@ -1,8 +1,10 @@
 # ADR-0019: Runtime-safety and fuzz CI policy
 
-Status: **Proposed**
+Status: **Accepted**
 
 Date opened: 2026-08-26
+
+Date approved: 2026-08-26
 
 Decision owner: project owner
 
@@ -27,9 +29,9 @@ libFuzzer for the disposable FlatBuffers selection proof. ADR-0005 accepts a
 narrow sanitizer profile for the pinned GameNetworkingSockets proof. Neither
 decision defines the reusable safety plumbing for project-owned TES3MP targets.
 
-## Recommendation summary
+## Decision summary
 
-Approve Option A for Decisions 1 through 5:
+The project owner approved Option A for Decisions 1 through 5 on 2026-08-26:
 
 1. instrument every project-owned TES3MP target selected by a build, while the
    first fast CI graph builds all five engine-independent libraries and their
@@ -95,7 +97,7 @@ Approve Option A for Decisions 1 through 5:
 
 ## Decision 1: instrumentation scope and target ownership
 
-### Option A: owned-target registration with a fast independent CI graph (recommended)
+### Option A: owned-target registration with a fast independent CI graph (approved)
 
 Add project-owned CMake helpers that apply the selected runtime-safety profile
 to every registered TES3MP library or executable in the configured graph. The
@@ -127,7 +129,7 @@ not contain sanitizer checks and a green result would overstate coverage.
 
 ## Decision 2: sanitizer profiles and support boundary
 
-### Option A: separate Clang 18 ASan+UBSan and ThreadSanitizer profiles (recommended)
+### Option A: separate Clang 18 ASan+UBSan and ThreadSanitizer profiles (approved)
 
 Use Linux `ubuntu-24.04` with Clang 18 for two strict profiles:
 
@@ -156,7 +158,7 @@ multiplayer composition process exists.
 
 ## Decision 3: fuzz engine and initial harness
 
-### Option A: one Clang libFuzzer target per bounded parser (recommended)
+### Option A: one Clang libFuzzer target per bounded parser (approved)
 
 Use compiler-provided libFuzzer with ASan+UBSan. Each target has one semantic
 entry point, a bounded checked-in seed corpus, and explicit maximum input/time
@@ -180,7 +182,7 @@ and reproducer behavior already provided by the selected Clang toolchain.
 
 ## Decision 4: CI cadence and bounded workload
 
-### Option A: dedicated per-change safety workflow (recommended)
+### Option A: dedicated per-change safety workflow (approved)
 
 Add one dedicated vNext workflow with independent Linux Clang 18
 ASan+UBSan/fuzz and ThreadSanitizer jobs on push, pull request, and manual
@@ -205,7 +207,7 @@ merge before the next run.
 
 ## Decision 5: local entry points and evidence
 
-### Option A: CMake presets plus a repository-owned runner and JSON evidence (recommended)
+### Option A: CMake presets plus a repository-owned runner and JSON evidence (approved)
 
 Add hidden/shared presets and named configure/build presets for the two safety
 profiles. A cross-platform Python runner validates the Linux/Clang support
@@ -230,7 +232,7 @@ to compare cross-run findings and prove the completion gate.
 
 ## Proposed acceptance tests and demo
 
-If Option A is approved for all five decisions, Slice 3.6 must demonstrate:
+The approved implementation must demonstrate:
 
 1. ordinary presets contain no TES3MP sanitizer/fuzzer enablement;
 2. ASan+UBSan and ThreadSanitizer profiles are mutually exclusive and reject
@@ -305,6 +307,13 @@ Reopen this ADR if:
 
 ## Owner approval
 
-Pending. The project owner must explicitly approve or amend Decisions 1 through
-5 before Slice 3.6 production CMake, runner, fuzzer, or workflow implementation
-begins.
+Approved by the project owner in the 2026-08-26 working session: Option A for
+Decisions 1 through 5.
+
+Approval fixes owned-target registration with a fast independent safety graph,
+separate Linux Clang 18 ASan+UBSan and ThreadSanitizer profiles, per-parser
+libFuzzer targets beginning at the test-only spatial decoder, two bounded
+per-change jobs, and repository-owned presets/runner/JSON evidence. It does not
+approve a production wire decoder, full-OpenMW sanitizer gate, runtime
+suppression, threading model, protocol behavior, authority, state scope, or
+gameplay behavior.

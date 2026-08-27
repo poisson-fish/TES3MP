@@ -1,0 +1,68 @@
+{
+  "version": 6,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 25,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "tes3mp-standalone-common",
+      "hidden": true,
+      "generator": "Ninja",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+        "CMAKE_CXX_EXTENSIONS": false,
+        "CMAKE_EXPORT_COMPILE_COMMANDS": true
+      }
+    },
+    {
+      "name": "tes3mp-standalone",
+      "displayName": "TES3MP independent contracts (uninstrumented)",
+      "inherits": "tes3mp-standalone-common",
+      "binaryDir": "${sourceDir}/../../build/tes3mp-standalone"
+    },
+    {
+      "name": "tes3mp-safety-asan-ubsan",
+      "displayName": "TES3MP independent contracts (Clang 18 ASan+UBSan)",
+      "inherits": "tes3mp-standalone-common",
+      "binaryDir": "${sourceDir}/../../build/tes3mp-safety-asan-ubsan",
+      "cacheVariables": {
+        "TES3MP_BUILD_FUZZERS": true,
+        "TES3MP_ENABLE_ASAN_UBSAN": true,
+        "TES3MP_ENABLE_TSAN": false
+      }
+    },
+    {
+      "name": "tes3mp-safety-tsan",
+      "displayName": "TES3MP independent contracts (Clang 18 ThreadSanitizer)",
+      "inherits": "tes3mp-standalone-common",
+      "binaryDir": "${sourceDir}/../../build/tes3mp-safety-tsan",
+      "cacheVariables": {
+        "TES3MP_BUILD_FUZZERS": false,
+        "TES3MP_ENABLE_ASAN_UBSAN": false,
+        "TES3MP_ENABLE_TSAN": true
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "tes3mp-standalone",
+      "configurePreset": "tes3mp-standalone",
+      "targets": ["tes3mp_protocol_tests_run"]
+    },
+    {
+      "name": "tes3mp-safety-asan-ubsan",
+      "configurePreset": "tes3mp-safety-asan-ubsan",
+      "targets": [
+        "tes3mp_protocol_tests_run",
+        "tes3mp_spatial_round_trip_fuzz"
+      ]
+    },
+    {
+      "name": "tes3mp-safety-tsan",
+      "configurePreset": "tes3mp-safety-tsan",
+      "targets": ["tes3mp_protocol_tests_run"]
+    }
+  ]
+}

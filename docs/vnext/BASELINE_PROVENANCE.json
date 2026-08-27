@@ -17,7 +17,7 @@
     {
       "path": ".gitattributes",
       "status": "A",
-      "purpose": "Pins byte-hashed disposable FlatBuffers proof inputs to LF so exact cross-platform evidence is independent of Windows checkout conversion."
+      "purpose": "Pins byte-hashed proof inputs to LF and TES3MP fuzz seeds as binary so exact cross-platform evidence is independent of checkout conversion."
     },
     {
       "path": ".github/workflows/push.yml",
@@ -50,6 +50,11 @@
       "purpose": "Supported desktop compiler matrix for the pinned encrypted GameNetworkingSockets selection proof, sanitizer coverage, and retained evidence."
     },
     {
+      "path": ".github/workflows/vnext-runtime-safety.yml",
+      "status": "A",
+      "purpose": "Per-change Linux Clang 18 ASan/UBSan/libFuzzer and ThreadSanitizer smoke jobs with retained logs, evidence, and reproducers."
+    },
+    {
       "path": "CI/install_debian_deps.sh",
       "status": "M",
       "purpose": "OpenMW Debian dependency groups with the approved Linux compiler majors and Ninja named explicitly."
@@ -77,12 +82,17 @@
     {
       "path": "apps/openmw/tes3mp/CMakeLists.txt",
       "status": "A",
-      "purpose": "Defines the approved OpenMW adapter leaf target, build alias, dependency allowlist, and C++20 contract."
+      "purpose": "Defines the approved OpenMW adapter leaf target, build alias, dependency allowlist, C++20 contract, and opt-in owned-target runtime-safety registration."
     },
     {
       "path": "apps/openmw/tes3mp/adapter.cpp",
       "status": "A",
       "purpose": "Behavior-free translation-unit anchor proving the OpenMW adapter participates in compilation and linking."
+    },
+    {
+      "path": "cmake/TES3MPRuntimeSafety.cmake",
+      "status": "A",
+      "purpose": "Owner-approved fail-closed target-scoped ASan/UBSan, ThreadSanitizer, and libFuzzer CMake policy."
     },
     {
       "path": "cmake/TES3MPVerifyTargetBoundaries.cmake",
@@ -92,12 +102,17 @@
     {
       "path": "components/tes3mp/CMakeLists.txt",
       "status": "A",
-      "purpose": "Defines five separate engine-independent TES3MP C++20 targets, aliases, dependency direction, boundary checks, and deterministic facility/fault contract executables."
+      "purpose": "Defines the standalone-capable five-library graph, target-scoped safety registration, contract executables, and bounded spatial fuzz target."
+    },
+    {
+      "path": "components/tes3mp/CMakePresets.json",
+      "status": "A",
+      "purpose": "Named uninstrumented, Clang 18 ASan/UBSan/libFuzzer, and Clang 18 ThreadSanitizer standalone configure/build presets."
     },
     {
       "path": "components/tes3mp/README.md",
       "status": "A",
-      "purpose": "Documents the approved target graph, boundary enforcement, and implemented Slice 3.1-3.5 engine-independent API scope."
+      "purpose": "Documents the approved target graph, boundary enforcement, implemented Slice 3.1-3.6 scope, and local runtime-safety entry points."
     },
     {
       "path": "components/tes3mp/client_session/anchor.cpp",
@@ -230,6 +245,26 @@
       "purpose": "Independent profile/path validation, latency, loss, duplication, jitter, reorder, stall, disconnect, bounds, backpressure, isolation, and exact seeded-trace contracts."
     },
     {
+      "path": "components/tes3mp/tests/fuzz/corpus/spatial_round_trip/interior-sized",
+      "status": "A",
+      "purpose": "Exact interior-record-size seed for the bounded test-only spatial decoder fuzz smoke."
+    },
+    {
+      "path": "components/tes3mp/tests/fuzz/corpus/spatial_round_trip/oversized",
+      "status": "A",
+      "purpose": "Over-limit seed proving the spatial fuzz harness rejects before decoder work."
+    },
+    {
+      "path": "components/tes3mp/tests/fuzz/corpus/spatial_round_trip/truncated",
+      "status": "A",
+      "purpose": "Truncated seed for bounded malformed spatial test-decoder fuzz coverage."
+    },
+    {
+      "path": "components/tes3mp/tests/fuzz/spatial_round_trip_fuzz.cpp",
+      "status": "A",
+      "purpose": "Clang libFuzzer entry point with a hard pre-parse size bound over the test-support-only spatial decoder."
+    },
+    {
       "path": "components/tes3mp/tests/spatial_primitive_tests.cpp",
       "status": "A",
       "purpose": "Independent canonical cell, coordinate, orientation, velocity, command/admission, snapshot, malformed-input, and round-trip contracts."
@@ -342,7 +377,7 @@
     {
       "path": "docs/vnext/adr/ADR-0019-runtime-safety-and-fuzz-ci-policy.md",
       "status": "A",
-      "purpose": "Proposed owner decision packet for project-owned sanitizer, race-checking, fuzz-target, CI-cadence, and retained-evidence policy."
+      "purpose": "Owner-approved project-owned sanitizer, race-checking, fuzz-target, CI-cadence, and retained-evidence policy."
     },
     {
       "path": "docs/vnext/proofs/flatbuffers/ANDROID_ARM64.md",
@@ -440,6 +475,11 @@
       "purpose": "Fail-closed Windows runner, MSVC toolchain, dependency-manifest, package, and license evidence capture."
     },
     {
+      "path": "scripts/run_tes3mp_runtime_safety.py",
+      "status": "A",
+      "purpose": "Repository-owned fail-closed sanitizer/race/fuzz preset runner with corpus, instrumentation, toolchain, log, and JSON evidence checks."
+    },
+    {
       "path": "scripts/run_vnext_baseline.py",
       "status": "A",
       "purpose": "Cross-platform local baseline configure, build, upstream-test, and evidence runner."
@@ -470,6 +510,11 @@
       "purpose": "Unit and workflow-policy tests for the Windows baseline evidence gate."
     },
     {
+      "path": "scripts/tests/test_run_tes3mp_runtime_safety.py",
+      "status": "A",
+      "purpose": "Unit and policy tests for safety profiles, presets, corpus bounds, instrumentation coverage, workflow cadence, and retained evidence."
+    },
+    {
       "path": "scripts/tests/test_run_vnext_baseline.py",
       "status": "A",
       "purpose": "Unit tests for local baseline runner validation and dependency-lock handling."
@@ -487,7 +532,7 @@
     {
       "path": "scripts/tests/test_tes3mp_target_boundaries.py",
       "status": "A",
-      "purpose": "Focused configure/build and intentional-failure tests for the approved target graph, include/link allowlists, and fail-closed reverse test-support boundary."
+      "purpose": "Focused configure/build and intentional-failure tests for target boundaries plus incompatible runtime-safety and fuzz configurations."
     },
     {
       "path": "scripts/tests/test_verify_vnext_baseline.py",
@@ -583,7 +628,7 @@
       "files": [
         {
           "path": ".gitattributes",
-          "sha256": "afc108d737af2f7c9dcc03f7b4141a8b725eab0e415f7b9da722e89d5243878a"
+          "sha256": "0c7d419efdea9c8d47abf262c1797e2e7989edbfcd82f69e1ed2210f65aacc21"
         },
         {
           "path": ".github/workflows/vnext-flatbuffers-proof.yml",

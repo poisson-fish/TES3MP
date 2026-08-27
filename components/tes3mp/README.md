@@ -70,3 +70,22 @@ stall/resume, and disconnect controls remain single-threaded and use the
 injected monotonic clock. These channel and lifecycle types make no production
 transport claim; Phase 4 still owns message classification and Phase 6 owns the
 real transport interface.
+
+Slice 3.6 adds ADR-0019's opt-in target-scoped runtime-safety plumbing. The
+standalone presets in this directory build every engine-independent library and
+contract executable without OpenMW. Linux Clang 18 has separate ASan+UBSan and
+ThreadSanitizer profiles; ASan+UBSan also builds one bounded libFuzzer harness
+over the test-support-only spatial decoder. Normal presets remain
+uninstrumented, incompatible profiles fail configuration, and project-owned
+sources cannot silently omit the selected instrumentation.
+
+The repository-owned entry points are:
+
+```sh
+python3 scripts/run_tes3mp_runtime_safety.py --profile asan-ubsan --fuzz-seconds 30
+python3 scripts/run_tes3mp_runtime_safety.py --profile tsan
+```
+
+Both profiles retain exact toolchain, contract, instrumentation, corpus, log,
+and result evidence under `build/`. Fuzz channels and bytes remain test-only;
+the harness does not define a Phase 4 production decoder or wire format.

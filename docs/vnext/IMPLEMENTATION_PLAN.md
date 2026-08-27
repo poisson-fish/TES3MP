@@ -321,7 +321,7 @@ runtime or protocol name.
 | ADR-0016 | Canonical spatial, command, and snapshot primitives | Phase 3 | **Implemented** |
 | ADR-0017 | Deterministic facilities and harness boundaries | Phase 3 | **Implemented** |
 | ADR-0018 | Deterministic network fault controls | Phase 3 | **Implemented** |
-| ADR-0019 | Runtime-safety and fuzz CI policy | Phase 3 | **In Progress** |
+| ADR-0019 | Runtime-safety and fuzz CI policy | Phase 3 | **Implemented** |
 
 An ADR is complete only when it records considered alternatives, selection
 criteria, consequences, failure modes, a replacement/review trigger, and
@@ -1716,7 +1716,7 @@ Depends on: Phase 2.
 | 3.3 | Add canonical `CellId`, transform, velocity, and platform-neutral command/snapshot primitives | **Implemented** | Accepted [`ADR-0016`](adr/ADR-0016-canonical-spatial-command-snapshot-primitives.md) is implemented by engine-independent spatial/metadata values and a test-support-only byte round trip; the owner accepted the implementation demo on 2026-08-26 |
 | 3.4 | Add injected clock, deterministic RNG, deterministic scheduler, and in-memory link | **Implemented** | Accepted [`ADR-0017`](adr/ADR-0017-deterministic-facilities-harness-boundaries.md) is implemented by passive server-core clock/scheduler/RNG facilities and a bounded test-support link/exact-trace harness; independent long-run, vector, isolation, backpressure, and repeatability contracts pass and the owner accepted the implementation demo on 2026-08-26 |
 | 3.5 | Add latency/loss/jitter/duplication/reordering/stall/disconnect fault controls | **Implemented** | Accepted [`ADR-0018`](adr/ADR-0018-deterministic-network-fault-controls.md) is implemented by a passive bounded test-support wrapper with independently configurable direction/channel profiles, isolated seeded fault streams, explicit stall/disconnect controls, and passing exact-trace contracts; the owner accepted the implementation demo on 2026-08-26 |
-| 3.6 | Add ASan, UBSan, race-checking where supported, and fuzz-target CI plumbing | **In Progress** | Proposed [`ADR-0019`](adr/ADR-0019-runtime-safety-and-fuzz-ci-policy.md) awaits owner approval; production plumbing remains gated |
+| 3.6 | Add ASan, UBSan, race-checking where supported, and fuzz-target CI plumbing | **In Progress** | Accepted [`ADR-0019`](adr/ADR-0019-runtime-safety-and-fuzz-ci-policy.md) is implemented locally; hosted ASan+UBSan/libFuzzer and ThreadSanitizer evidence plus owner demo acceptance remain pending |
 | 3.7 | Add owned metrics/logging interfaces and test sinks | **Not Started** | Core tests can assert metrics and structured events without a production backend |
 
 Exit gate:
@@ -2080,6 +2080,45 @@ Implementation notes:
   - Owner review: pending explicit approval or amendment of Decisions 1–5.
   - Follow-ups: present Decisions 1–5 to the owner, amend or accept ADR-0019,
     then implement only the approved Slice 3.6 safety plumbing and evidence.
+
+- 2026-08-26 — Slice 3.6 — In Progress
+  - Change: accepted ADR-0019 and added fail-closed target-scoped CMake
+    instrumentation for every selected TES3MP library/executable, standalone
+    uninstrumented/ASan+UBSan/ThreadSanitizer presets, a bounded libFuzzer entry
+    over the test-only spatial decoder with three size-boundary seeds, and a
+    repository-owned runner that verifies corpus bounds, all expected compiled
+    sources, exact Clang 18 instrumentation, contract executables, and retained
+    JSON/log/reproducer evidence. Added two dedicated 20-minute per-change
+    Linux jobs and policy/failure tests. No OpenMW-wide flags, third-party
+    instrumentation, production decoder, runtime suppression, thread,
+    protocol behavior, authority, state scope, or gameplay behavior was added.
+  - Decisions: the owner approved Option A for ADR-0019 Decisions 1–5 without
+    amendment: owned-target registration with a fast independent graph;
+    separate Linux Clang 18 ASan+UBSan and ThreadSanitizer profiles; one
+    libFuzzer executable per bounded parser beginning with the test spatial
+    decoder; dedicated bounded per-change jobs; and repository-owned presets,
+    runner, and versioned JSON evidence.
+  - Verification: `python -m unittest discover -s scripts/tests -v` passes all
+    95 repository-owned tests, including 17 focused runtime-safety/target-
+    boundary tests. The uninstrumented standalone preset builds with MSVC
+    19.44/Ninja and runs all five C++ contracts; the real baseline graph
+    configures, builds the adapter, and runs the same contracts. The approved
+    sanitizer preset intentionally rejects local MSVC before generation.
+    Staged legacy exclusion checks 3,805 paths, 59 CMake files, 1,251 compile
+    commands, and 1,965 Ninja edges. Staged provenance passes with 111
+    intentional differences and 43 dependency inputs; all three seed blobs
+    retain exact binary sizes 101/111/2, all 61 local Markdown links resolve,
+    and Python compilation, both JSON documents, manifest ordering, and
+    `git diff --cached --check` pass. Hosted Linux Clang 18
+    ASan+UBSan/libFuzzer and ThreadSanitizer execution is pending publication
+    of this workflow change.
+  - Owner review: explicit Option A approval for Decisions 1–5 received in the
+    2026-08-26 working session. Implementation-demo acceptance is pending the
+    hosted jobs and retained-artifact review.
+  - Follow-ups: publish the implementation, require both hosted safety jobs,
+    review their exact instrumentation/corpus/toolchain evidence and any
+    reproducers, then present the implementation demo before changing Slice 3.6
+    to **Implemented**. Slice 3.7 remains gated.
 
 ### Phase 4 — Bounded protocol and in-memory session
 

@@ -1,4 +1,12 @@
+if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
+    cmake_minimum_required(VERSION 3.16)
+    project(tes3mp_standalone LANGUAGES CXX)
+endif()
+
 include(${CMAKE_CURRENT_LIST_DIR}/../../cmake/TES3MPVerifyTargetBoundaries.cmake)
+include(${CMAKE_CURRENT_LIST_DIR}/../../cmake/TES3MPRuntimeSafety.cmake)
+
+tes3mp_validate_runtime_safety()
 
 set(TES3MP_ENGINE_INDEPENDENT_FORBIDDEN_INCLUDES
     "apps/openmw"
@@ -22,6 +30,7 @@ function(tes3mp_add_engine_independent_library target source)
             $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
     )
     set_target_properties(${target} PROPERTIES FOLDER "TES3MP")
+    tes3mp_enable_runtime_safety(${target})
 endfunction()
 
 tes3mp_add_engine_independent_library(tes3mp_protocol protocol/anchor.cpp)
@@ -115,6 +124,7 @@ add_executable(tes3mp_protocol_tests tests/strong_value_tests.cpp)
 target_compile_features(tes3mp_protocol_tests PRIVATE cxx_std_20)
 target_link_libraries(tes3mp_protocol_tests PRIVATE tes3mp_test_support)
 set_target_properties(tes3mp_protocol_tests PROPERTIES FOLDER "TES3MP/Tests")
+tes3mp_enable_runtime_safety(tes3mp_protocol_tests)
 
 tes3mp_verify_target_dependencies(tes3mp_protocol_tests ALLOWED tes3mp_test_support)
 tes3mp_verify_target_includes(tes3mp_protocol_tests
@@ -124,6 +134,7 @@ add_executable(tes3mp_spatial_primitive_tests tests/spatial_primitive_tests.cpp)
 target_compile_features(tes3mp_spatial_primitive_tests PRIVATE cxx_std_20)
 target_link_libraries(tes3mp_spatial_primitive_tests PRIVATE tes3mp_test_support)
 set_target_properties(tes3mp_spatial_primitive_tests PROPERTIES FOLDER "TES3MP/Tests")
+tes3mp_enable_runtime_safety(tes3mp_spatial_primitive_tests)
 
 tes3mp_verify_target_dependencies(tes3mp_spatial_primitive_tests ALLOWED tes3mp_test_support)
 tes3mp_verify_target_includes(tes3mp_spatial_primitive_tests
@@ -133,6 +144,7 @@ add_executable(tes3mp_deterministic_facilities_tests tests/deterministic_facilit
 target_compile_features(tes3mp_deterministic_facilities_tests PRIVATE cxx_std_20)
 target_link_libraries(tes3mp_deterministic_facilities_tests PRIVATE tes3mp_test_support)
 set_target_properties(tes3mp_deterministic_facilities_tests PROPERTIES FOLDER "TES3MP/Tests")
+tes3mp_enable_runtime_safety(tes3mp_deterministic_facilities_tests)
 
 tes3mp_verify_target_dependencies(tes3mp_deterministic_facilities_tests ALLOWED tes3mp_test_support)
 tes3mp_verify_target_includes(tes3mp_deterministic_facilities_tests
@@ -142,6 +154,7 @@ add_executable(tes3mp_deterministic_harness_tests tests/deterministic_harness_te
 target_compile_features(tes3mp_deterministic_harness_tests PRIVATE cxx_std_20)
 target_link_libraries(tes3mp_deterministic_harness_tests PRIVATE tes3mp_test_support)
 set_target_properties(tes3mp_deterministic_harness_tests PROPERTIES FOLDER "TES3MP/Tests")
+tes3mp_enable_runtime_safety(tes3mp_deterministic_harness_tests)
 
 tes3mp_verify_target_dependencies(tes3mp_deterministic_harness_tests ALLOWED tes3mp_test_support)
 tes3mp_verify_target_includes(tes3mp_deterministic_harness_tests
@@ -151,10 +164,23 @@ add_executable(tes3mp_fault_injection_tests tests/fault_injection_tests.cpp)
 target_compile_features(tes3mp_fault_injection_tests PRIVATE cxx_std_20)
 target_link_libraries(tes3mp_fault_injection_tests PRIVATE tes3mp_test_support)
 set_target_properties(tes3mp_fault_injection_tests PROPERTIES FOLDER "TES3MP/Tests")
+tes3mp_enable_runtime_safety(tes3mp_fault_injection_tests)
 
 tes3mp_verify_target_dependencies(tes3mp_fault_injection_tests ALLOWED tes3mp_test_support)
 tes3mp_verify_target_includes(tes3mp_fault_injection_tests
     FORBIDDEN ${TES3MP_ENGINE_INDEPENDENT_FORBIDDEN_INCLUDES})
+
+if(TES3MP_BUILD_FUZZERS)
+    add_executable(tes3mp_spatial_round_trip_fuzz tests/fuzz/spatial_round_trip_fuzz.cpp)
+    target_compile_features(tes3mp_spatial_round_trip_fuzz PRIVATE cxx_std_20)
+    target_link_libraries(tes3mp_spatial_round_trip_fuzz PRIVATE tes3mp_test_support)
+    set_target_properties(tes3mp_spatial_round_trip_fuzz PROPERTIES FOLDER "TES3MP/Fuzzers")
+    tes3mp_enable_runtime_safety(tes3mp_spatial_round_trip_fuzz)
+    tes3mp_enable_libfuzzer(tes3mp_spatial_round_trip_fuzz)
+    tes3mp_verify_target_dependencies(tes3mp_spatial_round_trip_fuzz ALLOWED tes3mp_test_support)
+    tes3mp_verify_target_includes(tes3mp_spatial_round_trip_fuzz
+        FORBIDDEN ${TES3MP_ENGINE_INDEPENDENT_FORBIDDEN_INCLUDES})
+endif()
 
 add_custom_target(tes3mp_protocol_tests_run
     COMMAND $<TARGET_FILE:tes3mp_protocol_tests>

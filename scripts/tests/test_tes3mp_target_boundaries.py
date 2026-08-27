@@ -251,6 +251,33 @@ class TES3MPTargetBoundaryTests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("forbidden include family", result.stdout + result.stderr)
 
+    def test_runtime_safety_profiles_fail_closed_when_combined(self):
+        result = self._run_project(
+            f"""
+            cmake_minimum_required(VERSION 3.16)
+            project(tes3mp_invalid_safety_profile LANGUAGES CXX)
+            set(TES3MP_ENABLE_ASAN_UBSAN ON CACHE BOOL "")
+            set(TES3MP_ENABLE_TSAN ON CACHE BOOL "")
+            add_subdirectory("{ENGINE_INDEPENDENT_SOURCE.as_posix()}" tes3mp)
+            """,
+        )
+        self.assertNotEqual(result.returncode, 0)
+        output = result.stdout + result.stderr
+        self.assertIn("ASan+UBSan and ThreadSanitizer profiles", output)
+        self.assertIn("separate build", output)
+
+    def test_fuzzer_requires_asan_ubsan_profile(self):
+        result = self._run_project(
+            f"""
+            cmake_minimum_required(VERSION 3.16)
+            project(tes3mp_invalid_fuzzer_profile LANGUAGES CXX)
+            set(TES3MP_BUILD_FUZZERS ON CACHE BOOL "")
+            add_subdirectory("{ENGINE_INDEPENDENT_SOURCE.as_posix()}" tes3mp)
+            """,
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("require the ASan+UBSan profile", result.stdout + result.stderr)
+
 
 if __name__ == "__main__":
     unittest.main()
