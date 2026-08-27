@@ -1718,7 +1718,7 @@ Depends on: Phase 2.
 | 3.4 | Add injected clock, deterministic RNG, deterministic scheduler, and in-memory link | **Implemented** | Accepted [`ADR-0017`](adr/ADR-0017-deterministic-facilities-harness-boundaries.md) is implemented by passive server-core clock/scheduler/RNG facilities and a bounded test-support link/exact-trace harness; independent long-run, vector, isolation, backpressure, and repeatability contracts pass and the owner accepted the implementation demo on 2026-08-26 |
 | 3.5 | Add latency/loss/jitter/duplication/reordering/stall/disconnect fault controls | **Implemented** | Accepted [`ADR-0018`](adr/ADR-0018-deterministic-network-fault-controls.md) is implemented by a passive bounded test-support wrapper with independently configurable direction/channel profiles, isolated seeded fault streams, explicit stall/disconnect controls, and passing exact-trace contracts; the owner accepted the implementation demo on 2026-08-26 |
 | 3.6 | Add ASan, UBSan, race-checking where supported, and fuzz-target CI plumbing | **Implemented** | Accepted [`ADR-0019`](adr/ADR-0019-runtime-safety-and-fuzz-ci-policy.md), the owner-accepted demo, and reviewed hosted Clang 18 ASan+UBSan/libFuzzer and ThreadSanitizer evidence all pass at `fc8f178081` |
-| 3.7 | Add owned metrics/logging interfaces and test sinks | **In Progress** | Accepted [`ADR-0020`](adr/ADR-0020-owned-observability-interfaces-and-test-sinks.md) is implemented locally; hosted safety evidence and owner implementation-demo acceptance remain pending |
+| 3.7 | Add owned metrics/logging interfaces and test sinks | **In Progress** | Accepted [`ADR-0020`](adr/ADR-0020-owned-observability-interfaces-and-test-sinks.md), local implementation, owner demo acceptance, and hosted six-contract safety evidence pass; the supported platform baseline matrix remains pending |
 
 Exit gate:
 
@@ -2267,6 +2267,30 @@ Implementation notes:
     implementation, require both hosted safety jobs, review their updated six-
     contract/source evidence, and present the implementation demo before
     changing Slice 3.7 to **Implemented** or running the Phase 3 exit gate.
+
+- 2026-08-27 — Slice 3.7 — In Progress
+  - Change: retained implementation commit `57973b65c7` and its accepted
+    ADR-0020 interfaces, bounded recorders, and contracts without amendment.
+    This status-only update records owner demo acceptance and review of the
+    hosted sanitizer/race/fuzz artifacts.
+  - Decisions: no amendment. The owner accepted the implemented Option A
+    behavior for Decisions 1–5 as demonstrated.
+  - Verification: [runtime-safety run `33094255400`](https://github.com/poisson-fish/TES3MP/actions/runs/33094255400)
+    passes both Linux Clang 18.1.3 jobs with all six contracts. ThreadSanitizer
+    instruments 20 owned sources; ASan+UBSan instruments 21 including the
+    fuzzer. The bounded 30-second fuzz smoke executes 31,921,040 inputs with the
+    pinned 101/111/2-byte corpus and retains no finding or reproducer.
+    ASan+UBSan artifact `9655707741` has digest
+    `3c3a895577a668caff9e854fb87894863636c2afc24ce6930c31f08eebfe8a2c`;
+    ThreadSanitizer artifact `9655699866` has digest
+    `0df43fa638dc728adc4ae3ea06eb848d785f17fb424f65369f1229193f85d167`.
+    Linux baseline run `33094255420`, Windows baseline run `33094255379`, and
+    macOS baseline run `33094255438` remain in progress.
+  - Owner review: implementation-demo acceptance received in the 2026-08-27
+    working session.
+  - Follow-ups: require the supported platform baseline matrix to pass, review
+    its evidence, then change Slice 3.7 to **Implemented** and present the
+    complete Phase 3 exit-gate evidence for separate owner approval.
 
 ### Phase 4 — Bounded protocol and in-memory session
 

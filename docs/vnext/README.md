@@ -68,8 +68,10 @@ and macOS baseline matrix. Slice 3.7 observability scaffolding is in progress:
 accepted ADR-0020 fixes server-core-owned typed metrics/events, explicit
 non-blocking sinks, privacy/cardinality constraints, and bounded deterministic
 test recorders. The local implementation and sixth independent contract are
-under verification; hosted safety evidence and owner demo acceptance remain
-required. No multiplayer runtime or production transport behavior exists yet.
+implemented, the owner accepted the demo, and the hosted six-contract sanitizer,
+race, and fuzz evidence passes at `57973b65c7`. The supported platform baseline
+matrix remains pending. No multiplayer runtime or production transport behavior
+exists yet.
 
 See the [implementation plan](IMPLEMENTATION_PLAN.md) for the live phase and
 slice tracker, completion gates, architecture decisions, and implementation

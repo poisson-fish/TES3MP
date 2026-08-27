@@ -103,3 +103,7 @@ The interfaces accept no raw text, byte payload, wall-clock timestamp, mutable
 state, or backend type; observations never affect canonical results or
 checksums. No production logging/export backend, dispatcher thread, or queue
 exists yet.
+
+Hosted runtime-safety evidence at `57973b65c7` instruments all three new
+observability sources, runs all six contracts under separate ASan+UBSan and
+ThreadSanitizer profiles, and retains no sanitizer finding or fuzz reproducer.
