@@ -274,3 +274,5 @@ endif()
 if (WIN32 AND BUILD_OPENMW)
     INSTALL(TARGETS openmw RUNTIME DESTINATION ".")
 endif()
+
+add_subdirectory(tes3mp)

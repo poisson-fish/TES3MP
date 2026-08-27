@@ -55,6 +55,11 @@
       "purpose": "OpenMW Debian dependency groups with the approved Linux compiler majors and Ninja named explicitly."
     },
     {
+      "path": "CMakeLists.txt",
+      "status": "M",
+      "purpose": "Adds the owner-approved engine-independent TES3MP target subtree before the monolithic OpenMW components target."
+    },
+    {
       "path": "CMakePresets.json",
       "status": "A",
       "purpose": "Versioned cross-platform configure and build presets for the Phase 1 OpenMW baseline test path."
@@ -63,6 +68,101 @@
       "path": "apps/components_tests/misc/testmathutil.cpp",
       "status": "M",
       "purpose": "Portable single-precision tolerance for upstream Euler-angle assertions on supported macOS arm64 runners."
+    },
+    {
+      "path": "apps/openmw/CMakeLists.txt",
+      "status": "M",
+      "purpose": "Adds the app-local OpenMW-coupled TES3MP adapter target after openmw-lib is defined."
+    },
+    {
+      "path": "apps/openmw/tes3mp/CMakeLists.txt",
+      "status": "A",
+      "purpose": "Defines the approved OpenMW adapter leaf target, build alias, dependency allowlist, and C++20 contract."
+    },
+    {
+      "path": "apps/openmw/tes3mp/adapter.cpp",
+      "status": "A",
+      "purpose": "Behavior-free translation-unit anchor proving the OpenMW adapter participates in compilation and linking."
+    },
+    {
+      "path": "cmake/TES3MPVerifyTargetBoundaries.cmake",
+      "status": "A",
+      "purpose": "Fail-closed direct-link allowlist and forbidden-include-family checks for approved TES3MP target boundaries."
+    },
+    {
+      "path": "components/tes3mp/CMakeLists.txt",
+      "status": "A",
+      "purpose": "Defines five separate engine-independent TES3MP C++20 targets, aliases, dependency direction, and boundary checks."
+    },
+    {
+      "path": "components/tes3mp/README.md",
+      "status": "A",
+      "purpose": "Documents the approved target graph, boundary enforcement, and Slice 3.1-3.3 engine-independent API scope."
+    },
+    {
+      "path": "components/tes3mp/client_session/anchor.cpp",
+      "status": "A",
+      "purpose": "Behavior-free translation-unit anchor for the engine-independent client-session target."
+    },
+    {
+      "path": "components/tes3mp/include/tes3mp/command_primitives.hpp",
+      "status": "A",
+      "purpose": "Owner-approved value-only client-command, entity-precondition, writer-admission, and authoritative spatial-snapshot records."
+    },
+    {
+      "path": "components/tes3mp/include/tes3mp/spatial_types.hpp",
+      "status": "A",
+      "purpose": "Owner-approved engine-independent tagged cell, fixed-point position/orientation/transform, and linear-velocity value types."
+    },
+    {
+      "path": "components/tes3mp/include/tes3mp/strong_value.hpp",
+      "status": "A",
+      "purpose": "Engine-independent explicit semantic-value policy template with validity, ordering, hashing, formatting, and checked counter advancement."
+    },
+    {
+      "path": "components/tes3mp/include/tes3mp/test_support/spatial_round_trip.hpp",
+      "status": "A",
+      "purpose": "Test-support-only deterministic spatial snapshot byte round-trip interface; explicitly not a released wire schema."
+    },
+    {
+      "path": "components/tes3mp/include/tes3mp/value_types.hpp",
+      "status": "A",
+      "purpose": "Owner-approved identity, tick, sequence, revision, command, epoch, generation, ingress-ordinal, and cell-space semantic catalog."
+    },
+    {
+      "path": "components/tes3mp/protocol/anchor.cpp",
+      "status": "A",
+      "purpose": "Behavior-free translation-unit anchor for the engine-independent protocol target."
+    },
+    {
+      "path": "components/tes3mp/server_core/anchor.cpp",
+      "status": "A",
+      "purpose": "Behavior-free translation-unit anchor for the deterministic server-core target."
+    },
+    {
+      "path": "components/tes3mp/test_support/anchor.cpp",
+      "status": "A",
+      "purpose": "Behavior-free translation-unit anchor for reusable multiplayer test support."
+    },
+    {
+      "path": "components/tes3mp/test_support/spatial_round_trip.cpp",
+      "status": "A",
+      "purpose": "Bounded little-endian owned-value round-trip implementation used only by Slice 3.3 independent contract tests."
+    },
+    {
+      "path": "components/tes3mp/tests/spatial_primitive_tests.cpp",
+      "status": "A",
+      "purpose": "Independent canonical cell, coordinate, orientation, velocity, command/admission, snapshot, malformed-input, and round-trip contracts."
+    },
+    {
+      "path": "components/tes3mp/tests/strong_value_tests.cpp",
+      "status": "A",
+      "purpose": "Independent compile-time and runtime tests for semantic separation, validity, ordering, hashing, formatting, advancement, and exhaustion."
+    },
+    {
+      "path": "components/tes3mp/transport/anchor.cpp",
+      "status": "A",
+      "purpose": "Behavior-free translation-unit anchor for the owned transport-abstraction target."
     },
     {
       "path": "docs/vnext/BASELINE_PROVENANCE.json",
@@ -118,6 +218,41 @@
       "path": "docs/vnext/adr/ADR-0005-transport-security-authentication-resumption.md",
       "status": "A",
       "purpose": "Owner-approved transport encryption, join authentication, resumption, dependency, risk, and verification decision."
+    },
+    {
+      "path": "docs/vnext/adr/ADR-0006-authority-state-scope-prediction-presentation.md",
+      "status": "A",
+      "purpose": "Owner-approved authority, state-scope, prediction, presentation, delegation, validation-depth, GDR-question, and acceptance-scenario policy."
+    },
+    {
+      "path": "docs/vnext/adr/ADR-0007-openmw-hook-patch-queue-policy.md",
+      "status": "A",
+      "purpose": "Owner-approved native OpenMW adapter, bounded hook-surface, patch-registry, local upstream-preparation, and acceptance-evidence policy."
+    },
+    {
+      "path": "docs/vnext/adr/ADR-0013-deterministic-simulation-protocol-compatibility.md",
+      "status": "A",
+      "purpose": "Owner-approved deterministic tick, canonical numeric, command-ordering, time/randomness, canonical-encoding, and protocol-compatibility policy."
+    },
+    {
+      "path": "docs/vnext/adr/ADR-0014-phase3-target-topology-boundary-enforcement.md",
+      "status": "A",
+      "purpose": "Owner-approved Phase 3 target topology, naming, dependency allowlist, negative checks, and acceptance-evidence policy."
+    },
+    {
+      "path": "docs/vnext/adr/ADR-0015-strong-value-types-identity-counter-policy.md",
+      "status": "A",
+      "purpose": "Owner-approved strong identity/counter catalog, validity, API, overflow, formatting, and codec/allocation-boundary policy."
+    },
+    {
+      "path": "docs/vnext/adr/ADR-0016-canonical-spatial-command-snapshot-primitives.md",
+      "status": "A",
+      "purpose": "Owner-approved canonical cell, coordinate, transform, velocity, and platform-neutral command/snapshot primitive policy."
+    },
+    {
+      "path": "docs/vnext/adr/ADR-0017-deterministic-facilities-harness-boundaries.md",
+      "status": "A",
+      "purpose": "Proposed deterministic clock, scheduler, RNG stream, in-memory link, and trace-evidence boundary decision packet pending owner approval."
     },
     {
       "path": "docs/vnext/proofs/flatbuffers/ANDROID_ARM64.md",
@@ -260,6 +395,11 @@
       "purpose": "Failure-case tests for the selected transport dependency lock, acquisition, extraction, line-ending, and workflow policies."
     },
     {
+      "path": "scripts/tests/test_tes3mp_target_boundaries.py",
+      "status": "A",
+      "purpose": "Focused configure/build and intentional-failure tests for the owner-approved TES3MP target graph and boundary verifier."
+    },
+    {
       "path": "scripts/tests/test_verify_vnext_baseline.py",
       "status": "A",
       "purpose": "Failure-case tests for the machine-checkable provenance contract."
@@ -307,7 +447,7 @@
       "files": [
         {
           "path": "CMakeLists.txt",
-          "sha256": "a5dd56014b1cf4d98b01ed265aff31e9d7ae15ed2e12a4815457f591dcb361f2"
+          "sha256": "616031f5f5db965c16620dcee06060c277abed924f8ba8b3726f697af4b79a11"
         },
         {
           "path": "CMakePresets.json",

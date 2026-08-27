@@ -674,7 +674,10 @@ if (OPENMW_CXX_FLAGS)
     add_compile_options(${OPENMW_CXX_FLAGS})
 endif()
 
-# Components
+# Engine-independent TES3MP targets
+add_subdirectory(components/tes3mp)
+
+# OpenMW components
 add_subdirectory (components)
 
 # Apps and tools

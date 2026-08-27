@@ -11,7 +11,7 @@ Quest 3 support is a later, conditional stretch target.
 
 ## Project status
 
-Phases 0 and 1 are implemented. The active
+Phases 0 through 2 are implemented. The active
 source tree has been replaced with the provenance-verified OpenMW 0.51 baseline,
 and the machine-checkable baseline manifest now enumerates every intentional
 difference. The documented local Windows baseline path and the supported
@@ -25,7 +25,35 @@ operator-managed certificates or dependency patches, an optional shared join
 password, and automatic single-use resume tokens. The exact five-platform
 transport proof, Clang ASan/UBSan gate, retained-artifact consistency review,
 and owner completion acceptance pass at `d5d7a1d1f4`. Slice 2.4 authority and
-state-scope review is next; no vNext multiplayer target exists yet.
+state-scope review is implemented: ADR-0006 accepts the server command/reducer,
+explicit scope/lifetime, reconciled prediction, non-durable presentation
+sample, and deferred epoch-lease recommendations, with intentionally basic
+friends-server gameplay validation. Slice 2.5 OpenMW hook/patch review is
+implemented: ADR-0007 accepts a native app-local adapter, bounded semantic hook
+surface, and machine-checked patch registry. General OpenMW candidates stay in
+a separate developer-local preparation repository unless later upstream work is
+explicitly approved. Slice 2.6 deterministic simulation and protocol
+compatibility review is implemented: ADR-0013 accepts a 30 Hz bounded-catch-up
+tick, checked fixed-point canonical numerics, writer-assigned command order,
+versioned deterministic inputs/canonical bytes, and current-plus-previous-minor
+protocol compatibility. The Phase 2 exit review is approved. Phase 3 is in
+progress: accepted ADR-0014 defines five engine-independent TES3MP libraries and
+one app-local OpenMW adapter with fail-closed dependency checks. Slice 3.1 is
+implemented: its empty C++20 targets build locally and the owner accepted the
+implementation demo. Slice 3.2 is implemented: ADR-0015 accepts ten scoped
+`uint64_t` semantic types with explicit construction, checked optional-returning
+counter advancement, type-qualified formatting, and codec/allocation separation.
+The approved API and its independent boundary tests are implemented, and the
+owner accepted the implementation demo. Slice 3.3 is implemented: ADR-0016 is
+accepted with Option A for all five decisions. Its engine-independent
+tagged cell, fixed spatial, command/admission metadata, and per-entity snapshot
+values plus test-support-only byte round trip are implemented, and the owner
+accepted the Slice 3.3 implementation demo. Slice 3.4 is in progress: proposed
+ADR-0017 presents the remaining clock, scheduler, RNG-stream, in-memory-link,
+and trace-evidence
+interface/ownership choices while preserving the later fault, server-core,
+transport, and canonical-checksum gates. No Slice 3.4 production API or
+multiplayer runtime behavior exists yet.
 
 See the [implementation plan](IMPLEMENTATION_PLAN.md) for the live phase and
 slice tracker, completion gates, architecture decisions, and implementation

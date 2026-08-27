@@ -1,0 +1,113 @@
+include(${CMAKE_CURRENT_LIST_DIR}/../../cmake/TES3MPVerifyTargetBoundaries.cmake)
+
+set(TES3MP_ENGINE_INDEPENDENT_FORBIDDEN_INCLUDES
+    "apps/openmw"
+    "mwbase/"
+    "mwworld/"
+    "mwmechanics/"
+    "mwrender/"
+    "mwgui/"
+    "SDL"
+    "osg/"
+    "osgViewer/"
+    "GameNetworkingSockets"
+    "steamnetworking"
+)
+
+function(tes3mp_add_engine_independent_library target source)
+    add_library(${target} STATIC ${source})
+    target_compile_features(${target} PUBLIC cxx_std_20)
+    target_include_directories(${target}
+        PUBLIC
+            $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+    )
+    set_target_properties(${target} PROPERTIES FOLDER "TES3MP")
+endfunction()
+
+tes3mp_add_engine_independent_library(tes3mp_protocol protocol/anchor.cpp)
+add_library(TES3MP::Protocol ALIAS tes3mp_protocol)
+target_sources(tes3mp_protocol PRIVATE
+    include/tes3mp/command_primitives.hpp
+    include/tes3mp/spatial_types.hpp
+    include/tes3mp/strong_value.hpp
+    include/tes3mp/value_types.hpp
+)
+
+tes3mp_add_engine_independent_library(tes3mp_transport transport/anchor.cpp)
+add_library(TES3MP::Transport ALIAS tes3mp_transport)
+target_link_libraries(tes3mp_transport PUBLIC tes3mp_protocol)
+
+tes3mp_add_engine_independent_library(tes3mp_server_core server_core/anchor.cpp)
+add_library(TES3MP::ServerCore ALIAS tes3mp_server_core)
+target_link_libraries(tes3mp_server_core PUBLIC tes3mp_protocol)
+
+tes3mp_add_engine_independent_library(tes3mp_client_session client_session/anchor.cpp)
+add_library(TES3MP::ClientSession ALIAS tes3mp_client_session)
+target_link_libraries(tes3mp_client_session
+    PUBLIC
+        tes3mp_protocol
+        tes3mp_transport
+)
+
+tes3mp_add_engine_independent_library(tes3mp_test_support test_support/anchor.cpp)
+add_library(TES3MP::TestSupport ALIAS tes3mp_test_support)
+target_link_libraries(tes3mp_test_support
+    PUBLIC
+        tes3mp_protocol
+        tes3mp_transport
+        tes3mp_server_core
+        tes3mp_client_session
+)
+target_sources(tes3mp_test_support PRIVATE
+    include/tes3mp/test_support/spatial_round_trip.hpp
+    test_support/spatial_round_trip.cpp
+)
+
+tes3mp_verify_target_dependencies(tes3mp_protocol)
+tes3mp_verify_target_dependencies(tes3mp_transport ALLOWED tes3mp_protocol)
+tes3mp_verify_target_dependencies(tes3mp_server_core ALLOWED tes3mp_protocol)
+tes3mp_verify_target_dependencies(tes3mp_client_session
+    ALLOWED tes3mp_protocol tes3mp_transport)
+tes3mp_verify_target_dependencies(tes3mp_test_support
+    ALLOWED
+        tes3mp_protocol
+        tes3mp_transport
+        tes3mp_server_core
+        tes3mp_client_session
+)
+
+foreach(target
+    tes3mp_protocol
+    tes3mp_transport
+    tes3mp_server_core
+    tes3mp_client_session
+    tes3mp_test_support
+)
+    tes3mp_verify_target_includes(${target}
+        FORBIDDEN ${TES3MP_ENGINE_INDEPENDENT_FORBIDDEN_INCLUDES})
+endforeach()
+
+add_executable(tes3mp_protocol_tests tests/strong_value_tests.cpp)
+target_compile_features(tes3mp_protocol_tests PRIVATE cxx_std_20)
+target_link_libraries(tes3mp_protocol_tests PRIVATE tes3mp_test_support)
+set_target_properties(tes3mp_protocol_tests PROPERTIES FOLDER "TES3MP/Tests")
+
+tes3mp_verify_target_dependencies(tes3mp_protocol_tests ALLOWED tes3mp_test_support)
+tes3mp_verify_target_includes(tes3mp_protocol_tests
+    FORBIDDEN ${TES3MP_ENGINE_INDEPENDENT_FORBIDDEN_INCLUDES})
+
+add_executable(tes3mp_spatial_primitive_tests tests/spatial_primitive_tests.cpp)
+target_compile_features(tes3mp_spatial_primitive_tests PRIVATE cxx_std_20)
+target_link_libraries(tes3mp_spatial_primitive_tests PRIVATE tes3mp_test_support)
+set_target_properties(tes3mp_spatial_primitive_tests PROPERTIES FOLDER "TES3MP/Tests")
+
+tes3mp_verify_target_dependencies(tes3mp_spatial_primitive_tests ALLOWED tes3mp_test_support)
+tes3mp_verify_target_includes(tes3mp_spatial_primitive_tests
+    FORBIDDEN ${TES3MP_ENGINE_INDEPENDENT_FORBIDDEN_INCLUDES})
+
+add_custom_target(tes3mp_protocol_tests_run
+    COMMAND $<TARGET_FILE:tes3mp_protocol_tests>
+    COMMAND $<TARGET_FILE:tes3mp_spatial_primitive_tests>
+    DEPENDS tes3mp_protocol_tests tes3mp_spatial_primitive_tests
+    COMMENT "Running TES3MP protocol value contracts"
+)

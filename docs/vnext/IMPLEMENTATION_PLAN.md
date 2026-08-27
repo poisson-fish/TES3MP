@@ -108,8 +108,8 @@ Observed on 2026-08-25 before this plan was added:
 |---|---|---|---|
 | 0 | Archive and cutover preparation | **Implemented** | — |
 | 1 | Clean OpenMW 0.51 baseline | **Implemented** | Phase 0 |
-| 2 | Security and architecture decisions | **In Progress** | Phase 1 |
-| 3 | Independent targets and test scaffold | **Not Started** | Phase 2 |
+| 2 | Security and architecture decisions | **Implemented** | Phase 1 |
+| 3 | Independent targets and test scaffold | **In Progress** | Phase 2 |
 | 4 | Bounded protocol and in-memory session | **Not Started** | Phase 3 |
 | 5 | Deterministic authoritative server core | **Not Started** | Phase 4 |
 | 6 | Maintained transport and secure network session | **Not Started** | Phase 5 |
@@ -308,13 +308,18 @@ runtime or protocol name.
 | ADR-0003 | Threat model and trust boundaries | Phase 3 | **Implemented** |
 | ADR-0004 | Protocol schema, codec, and evolution policy | Phase 4 | **Implemented** |
 | ADR-0005 | Transport, encryption, authentication, and session resumption | Phase 6 | **Implemented** |
-| ADR-0006 | Authority, state-scope, prediction, and presentation policy | Phase 7 | **Not Started** |
-| ADR-0007 | OpenMW hook and patch-queue policy | Phase 8 | **Not Started** |
+| ADR-0006 | Authority, state-scope, prediction, and presentation policy | Phase 7 | **Implemented** |
+| ADR-0007 | OpenMW hook and patch-queue policy | Phase 8 | **Implemented** |
 | ADR-0008 | PC VR fork/worktree maintenance policy | Phase 9 | **Not Started** |
 | ADR-0009 | Scripting language, runtime, isolation, and API model | Phase 19 | **Not Started** |
 | ADR-0010 | Persistence store, schema evolution, backup, and replay model | Phase 20 | **Not Started** |
 | ADR-0011 | Administration authorization, audit, and discovery exposure | Phase 21 | **Not Started** |
 | ADR-0012 | Quest rendering, packaging, and hardware-support policy | Phase 24 | **Not Started** |
+| ADR-0013 | Deterministic simulation, numeric, ordering, and protocol compatibility policy | Phases 3-5 | **Implemented** |
+| ADR-0014 | Phase 3 target topology and boundary enforcement | Phase 3 | **Implemented** |
+| ADR-0015 | Strong value types and identity/counter policy | Phase 3 | **Implemented** |
+| ADR-0016 | Canonical spatial, command, and snapshot primitives | Phase 3 | **Implemented** |
+| ADR-0017 | Deterministic facilities and harness boundaries | Phase 3 | **In Progress** |
 
 An ADR is complete only when it records considered alternatives, selection
 criteria, consequences, failure modes, a replacement/review trigger, and
@@ -1092,7 +1097,7 @@ Implementation notes:
 
 ### Phase 2 — Security and architecture decisions
 
-Status: **In Progress**
+Status: **Implemented**
 
 Outcome: implementation begins with explicit trust boundaries, technology
 choices, ownership rules, and patch policies rather than accidental coupling.
@@ -1104,14 +1109,14 @@ Depends on: Phase 1.
 | 2.1 | Prepare the threat model and obtain owner approval for ADR-0003 | **Implemented** | Owner-approved [`ADR-0003`](adr/ADR-0003-hostile-internet-threat-model.md) records the hostile-Internet boundary, protected assets, attacker capabilities, mitigations, tests, and explicit deferred risks |
 | 2.2 | Evaluate schema/codec candidates with the owner and approve ADR-0004 | **Implemented** | Owner-approved [`ADR-0004`](adr/ADR-0004-protocol-schema-codec-evolution-policy.md) selects restricted verifier-first FlatBuffers; the exact Windows/Linux/macOS/fuzzer proof and retained-artifact consistency gate pass at `da24423a1a`, and the owner accepted the completion evidence on 2026-08-26 |
 | 2.3 | Evaluate transport/security candidates with the owner and approve ADR-0005 | **Implemented** | Owner-approved [`ADR-0005`](adr/ADR-0005-transport-security-authentication-resumption.md) selects standalone GameNetworkingSockets with automatic encryption, no endpoint-certificate operations, an optional shared join password, and automatic single-use resume tokens; the exact five-platform proof and retained-artifact consistency gate pass at `d5d7a1d1f4`, and the owner accepted the completion evidence on 2026-08-26 |
-| 2.4 | Review authority/state-scope options by subsystem and approve ADR-0006 | **Not Started** | Owner-approved authority, scope, prediction, and presentation framework is explicit; domain GDR questions are listed |
-| 2.5 | Review the OpenMW hook/patch options with the owner and approve ADR-0007 | **Not Started** | Owner-approved hook surface, patch organization, and upstreaming criteria are explicit |
-| 2.6 | Review and approve deterministic simulation and protocol compatibility policies | **Not Started** | Owner-approved tick, numeric/ordering, supported-version, and capability behavior is documented |
+| 2.4 | Review authority/state-scope options by subsystem and approve ADR-0006 | **Implemented** | Owner-approved [`ADR-0006`](adr/ADR-0006-authority-state-scope-prediction-presentation.md) selects Option A for all five decisions, records the friends-server validation-depth condition, maps initial subsystems, lists domain GDR questions, and defines named acceptance scenarios |
+| 2.5 | Review the OpenMW hook/patch options with the owner and approve ADR-0007 | **Implemented** | Owner-approved [`ADR-0007`](adr/ADR-0007-openmw-hook-patch-queue-policy.md) selects the native adapter, bounded hook, and machine-checked registry options and keeps possible upstream changes in a separate non-authoritative local OpenMW preparation repository unless later submission is approved |
+| 2.6 | Review and approve deterministic simulation and protocol compatibility policies | **Implemented** | Owner-approved [`ADR-0013`](adr/ADR-0013-deterministic-simulation-protocol-compatibility.md) selects the 30 Hz bounded-catch-up tick, checked integer/fixed-point canonical numerics, writer-owned command ordering, versioned deterministic inputs/canonical bytes, and current-plus-previous-minor capability negotiation |
 
 Exit gate:
 
-- ADR-0003 through ADR-0007 are accepted at the level needed by the first
-  vertical slice.
+- ADR-0003 through ADR-0007 and ADR-0013 are accepted at the level needed by the
+  first vertical slice.
 - Selected libraries build on Linux, Windows, and macOS in a minimal isolated
   proof without OpenMW coupling.
 - The threat model identifies resource exhaustion, malformed input, replay,
@@ -1496,9 +1501,206 @@ Implementation notes:
     next and requires owner review of authority and state-scope options before
     ADR-0006 or dependent implementation work.
 
+- 2026-08-26 — Slice 2.4 — In Progress
+  - Change: added proposed
+    [`ADR-0006`](adr/ADR-0006-authority-state-scope-prediction-presentation.md)
+    with separate proposal/validation/commit authority, state-scope,
+    visibility, lifetime, prediction, presentation, and delegation concepts;
+    five option sets; representative single-player, two-player, late-join,
+    reconnect, contention, hostile-client, VR, delegation, script/admin/replay,
+    and resync scenarios; an initial subsystem mapping; all ten domain GDR
+    question sets; and named acceptance tests/demo steps. No production schema,
+    state model, reducer, API, or multiplayer target was added.
+  - Decisions: none accepted. The proposal recommends Option A for Decisions
+    1–5: server command/reducer mutation; explicit scope and lifetime with
+    global physical-world and per-player progression defaults; reversible local
+    prediction with authoritative reconciliation; typed non-durable
+    presentation samples; and no delegation in the first slice with future
+    server-validated epoch leases. All five remain pending owner review.
+  - Verification: `python -m unittest discover -s scripts/tests -v` passed all
+    78 repository-owned tests. `python scripts/verify_vnext_baseline.py --index`
+    accounted for exactly 57 intentional differences, including the proposed
+    ADR, and verified all 43 dependency-declaration inputs. `python -m
+    json.tool docs/vnext/BASELINE_PROVENANCE.json`, `git diff --cached
+    --check`, a local-link scan across all 16 vNext Markdown files, and focused
+    checks for proposed status, required ADR sections, five decision sets, and
+    GDR-0001 through GDR-0010 coverage all passed. No production target changed,
+    so a product build or runtime test is not applicable to this decision-packet
+    step.
+  - Owner review: decision packet prepared for the 2026-08-26 working session;
+    explicit approval or amendment is pending. Slice 2.4 remains **In Progress**
+    and dependent production work is not authorized.
+  - Follow-ups: review Decisions 1–5 with the owner, amend or accept ADR-0006,
+    run the approved scenario/document checks, and request completion acceptance
+    before marking Slice 2.4 **Implemented**. Slices 2.5 and 2.6 remain gated.
+
+- 2026-08-26 — Slice 2.4 — Implemented
+  - Change: accepted
+    [`ADR-0006`](adr/ADR-0006-authority-state-scope-prediction-presentation.md)
+    and recorded the approved initial authority, state-scope, prediction,
+    presentation-sample, and future-delegation framework. The ADR and project
+    status now make Slice 2.5 the next eligible Phase 2 decision slice. No
+    production schema, state model, reducer, API, or multiplayer target was
+    added.
+  - Decisions: the owner approved Option A for Decisions 1–5. Canonical mutation
+    uses server commands/reducers; scope and lifetime are explicit with the
+    recommended bounded defaults; prediction is reversible presentation;
+    presentation samples are typed, bounded, latest-wins, and non-durable; and
+    the first slice has no delegation while later delegation requires
+    server-validated epoch leases. For Decision 1, the owner required a
+    friends-server validation profile: retain structural/safety, authority,
+    revision/idempotency/epoch, and basic domain checks, but do not add elaborate
+    anti-cheat or duplicate complete OpenMW mechanics solely to police input.
+  - Verification: `python -m unittest discover -s scripts/tests -v` passed all
+    78 repository-owned tests. `python scripts/verify_vnext_baseline.py --index`
+    accounted for exactly 57 intentional differences and verified all 43
+    dependency-declaration inputs. `python -m json.tool
+    docs/vnext/BASELINE_PROVENANCE.json`, `git diff --cached --check`, a
+    local-link scan across all 16 vNext Markdown files, and focused assertions
+    for accepted status/date, all five approvals, the friends-server condition,
+    GDR-0001 through GDR-0010 coverage, Slice 2.4 **Implemented**, Phase 2 **In
+    Progress**, Phase 3 **Not Started**, and the Slice 2.5 next pointer all
+    passed. No production target changed, so a product build or runtime test is
+    not applicable to this decision-only completion.
+  - Owner review: explicit A/A/A/A/A approval received in the 2026-08-26 working
+    session, including the Decision 1 validation-depth condition. The owner
+    approved this architecture framework only; domain gameplay details remain
+    gated by GDR-0001 through GDR-0010.
+  - Follow-ups: none for Slice 2.4. Phase 2 remains **In Progress**; Slice 2.5
+    must present OpenMW hook and patch-queue options for owner approval before
+    ADR-0007 or dependent implementation work.
+
+- 2026-08-26 — Slice 2.5 — In Progress
+  - Change: inspected the pinned OpenMW 0.51 composition, frame ordering, input,
+    world/player/cell operations, Lua synchronization/events, CMake target, and
+    application-test seams; confirmed that the active OpenMW application tree
+    still has no vNext delta; and added proposed
+    [`ADR-0007`](adr/ADR-0007-openmw-hook-patch-queue-policy.md). The packet
+    presents four decision sets, repository-backed scenarios, a bounded initial
+    hook budget, patch-registry fields, upstreaming criteria, named acceptance
+    tests, failure modes, and Phase 8.1's exact-hook review boundary. No adapter,
+    hook, patch registry, CMake target, or production code was added.
+  - Decisions: none accepted. The proposal recommends Option A for Decisions
+    1–4: a native app-local C++ adapter/coordinator; one main-thread frame seam
+    plus feature-specific semantic hooks only as approved behavior requires;
+    normal buildable Git commits plus a machine-checked semantic patch registry;
+    and upstreaming general engine seams/fixes while retaining multiplayer
+    policy locally. All four remain pending owner review.
+  - Verification: `python -m unittest discover -s scripts/tests -v` passed all
+    78 repository-owned tests. `python scripts/verify_vnext_baseline.py --index`
+    accounted for exactly 58 intentional differences and verified all 43
+    dependency-declaration inputs. `python -m json.tool
+    docs/vnext/BASELINE_PROVENANCE.json`, `git diff --cached --check`, a
+    local-link scan across all 17 vNext Markdown files, and focused ADR-0007
+    structure/status and Phase 2/3 gate assertions passed. Repository-source
+    assertions verified input/Lua/state/mechanics/physics/world frame ordering,
+    `main.cpp`/`Engine` composition, Lua's separate-thread and synchronized-
+    update behavior, no active OpenMW application/test delta from pinned
+    `f4bec4144`, and no existing adapter or client-session CMake target.
+  - Owner review: decision packet prepared for the 2026-08-26 working session;
+    explicit approval or amendment is pending. Slice 2.5 remains **In Progress**
+    and no OpenMW hook or dependent adapter implementation is authorized.
+  - Follow-ups: review Decisions 1–4 with the owner, amend or accept ADR-0007,
+    rerun the accepted document/provenance gates, and request completion
+    acceptance before marking Slice 2.5 **Implemented**. Slice 2.6 and all Phase
+    3 production targets remain gated.
+
+- 2026-08-26 — Slice 2.5 — Implemented
+  - Change: accepted
+    [`ADR-0007`](adr/ADR-0007-openmw-hook-patch-queue-policy.md) and recorded the
+    approved native integration, bounded semantic-hook, buildable-commit/patch-
+    registry, and local upstream-candidate preparation framework. No local
+    upstream-preparation clone was created because no engine patch or upstream
+    candidate exists yet; its path remains developer-local and it is created
+    only if a real candidate needs a clean changeset.
+  - Decisions: the owner approved Option A for Decisions 1–3 and amended Option
+    A for Decision 4. The project will not proactively contact OpenMW or submit
+    patches for now. A separate local OpenMW repository may later prepare clean
+    general-purpose changesets, but it is disposable and cannot be a submodule,
+    source of truth, build input, CI requirement, or replacement for vNext's
+    commits, patch registry, and baseline manifest. Upstream contact requires a
+    later explicit owner decision.
+  - Verification: all 78 repository-owned Python tests pass; indexed baseline
+    provenance passes with 59 intentional differences and 43 dependency inputs;
+    JSON parsing/path ordering, all 40 local Markdown links, the accepted ADR-
+    0007/local-repository constraints, Phase 2/3 status gates, the absence of a
+    staged OpenMW source delta, and staged/unstaged diff checks pass. Source
+    inspection reconfirmed the current OpenMW main-thread frame order, Lua's
+    synchronized application point, and the monolithic `openmw-lib` composition.
+  - Owner review: explicit approval received in the 2026-08-26 working session,
+    including the Decision 4 local-repository/no-current-upstreaming amendment.
+    Exact Phase 8 hook call sites and gameplay semantics remain separately
+    gated.
+  - Follow-ups: none for Slice 2.5. Phase 2 remains **In Progress**; Slice 2.6 is
+    the next eligible decision slice and all Phase 3 production targets remain
+    gated until the Phase 2 exit review.
+
+- 2026-08-26 — Slice 2.6 — In Progress
+  - Change: inspected the accepted deterministic, protocol-evolution, and
+    engine-independence constraints and added proposed
+    [`ADR-0013`](adr/ADR-0013-deterministic-simulation-protocol-compatibility.md).
+    It presents five owner-reviewable option sets, adversarial scenarios, named
+    acceptance tests, consequences, failure mitigations, and replacement
+    triggers. No production target or runtime behavior was added.
+  - Decisions: none accepted. The proposal recommends Option A for all five
+    decisions: a 30 Hz logical tick with bounded catch-up; checked integer/fixed-
+    point canonical numerics; writer-assigned eligible tick and ingress order;
+    injected time plus versioned labeled random streams and canonical bytes;
+    and a released current-plus-previous-minor compatibility window with
+    bounded required/optional capability negotiation.
+  - Verification: all 78 repository-owned Python tests pass; indexed baseline
+    provenance passes with 59 intentional differences and 43 dependency inputs;
+    JSON parsing/path ordering, all 40 local Markdown links, ADR-0013's proposed
+    five-decision/owner-pending state, Slice 2.6/Phase 2/Phase 3 status gates,
+    and staged/unstaged diff checks pass.
+  - Owner review: pending explicit approval or amendment of Decisions 1–5.
+    Exact gameplay-domain values remain GDR-gated and are not selected here.
+  - Follow-ups: present the five decision sets to the owner. Slice 2.6 remains
+    **In Progress**, Phase 2 remains **In Progress**, and Phase 3 production work
+    remains gated.
+
+- 2026-08-26 — Slice 2.6 — Implemented
+  - Change: accepted
+    [`ADR-0013`](adr/ADR-0013-deterministic-simulation-protocol-compatibility.md)
+    and recorded the approved deterministic tick, canonical numeric, command-
+    ordering, logical-time/randomness/canonical-encoding, and protocol-
+    compatibility contracts. No production target or runtime behavior was
+    added.
+  - Decisions: the owner approved Option A for Decisions 1–5: 30 Hz with no more
+    than four due ticks per scheduler pump; checked `1/1024`-unit fixed-point
+    positions and 32-bit turn orientation; single-writer eligible-tick/ingress-
+    ordinal order; injected logical time and versioned labeled random streams;
+    and current-plus-previous-minor capability negotiation within one major.
+  - Verification: all 78 repository-owned Python tests pass; indexed baseline
+    provenance passes with 59 intentional differences and 43 dependency inputs;
+    JSON parsing/path ordering, all 41 local Markdown links, ADR-0013's accepted
+    five-decision state, Slice 2.6/Phase 2/Phase 3 status gates, and staged/
+    unstaged diff checks pass.
+  - Owner review: explicit approval received in the 2026-08-26 working session.
+    Exact gameplay-domain values remain GDR-gated. This approval does not itself
+    approve the Phase 2 exit review or Phase 3 kickoff.
+  - Follow-ups: none for Slice 2.6. Every Phase 2 slice is implemented, but Phase
+    2 remains **In Progress** pending its required explicit exit-gate review;
+    Phase 3 remains **Not Started**.
+
+- 2026-08-26 — Phase 2 — Implemented
+  - Exit review: the owner explicitly approved the Phase 2 exit and movement to
+    Phase 3 in the 2026-08-26 working session.
+  - Gate evidence: ADR-0003 through ADR-0007 and ADR-0013 are accepted; the
+    selected FlatBuffers and GameNetworkingSockets proof targets build on the
+    supported Linux, Windows, and macOS matrices without OpenMW coupling; and
+    ADR-0003 covers every threat category named by the exit gate.
+  - Verification: all 78 then-existing repository-owned Python tests passed;
+    indexed baseline provenance passed with 59 intentional differences and 43
+    dependency inputs; JSON, all 41 local Markdown links, accepted-decision,
+    phase-status, and diff checks passed.
+  - Follow-ups: none. Later gameplay decisions remain GDR-gated, OpenMW hook
+    sites remain Phase 8-gated, and the owner separately approved ADR-0014 for
+    the Phase 3 kickoff.
+
 ### Phase 3 — Independent targets and test scaffold
 
-Status: **Not Started**
+Status: **In Progress**
 
 Outcome: dependency boundaries are enforced by the build, and all later work has
 deterministic testing, fuzzing, sanitizers, fault injection, and observability.
@@ -1507,10 +1709,10 @@ Depends on: Phase 2.
 
 | Slice | Deliverable | Status | Completion evidence |
 |---|---|---|---|
-| 3.1 | Add empty protocol, transport, server-core, client-session, adapter, and test-support targets | **Not Started** | Build graph documents and enforces allowed dependencies |
-| 3.2 | Add strong value types for IDs, ticks, sequences, revisions, command IDs, and authority epochs | **Not Started** | Construction, comparison, formatting, overflow, and invalid-value tests pass |
-| 3.3 | Add canonical `CellId`, transform, velocity, and platform-neutral command/snapshot primitives | **Not Started** | Types round-trip without OpenMW, renderer, VR, or transport types |
-| 3.4 | Add injected clock, deterministic RNG, deterministic scheduler, and in-memory link | **Not Started** | Repeated simulations produce identical event logs and checksums |
+| 3.1 | Add empty protocol, transport, server-core, client-session, adapter, and test-support targets | **Implemented** | Accepted [`ADR-0014`](adr/ADR-0014-phase3-target-topology-boundary-enforcement.md) fixes the six-target topology; the independent and adapter graphs build, focused tests prove forbidden direct links/includes fail closed, and the owner accepted the implementation demo on 2026-08-26 |
+| 3.2 | Add strong value types for IDs, ticks, sequences, revisions, command IDs, and authority epochs | **Implemented** | Accepted [`ADR-0015`](adr/ADR-0015-strong-value-types-identity-counter-policy.md) is implemented by ten explicit semantic types and independent compile-time/runtime boundary tests; the owner accepted the implementation demo on 2026-08-26 |
+| 3.3 | Add canonical `CellId`, transform, velocity, and platform-neutral command/snapshot primitives | **Implemented** | Accepted [`ADR-0016`](adr/ADR-0016-canonical-spatial-command-snapshot-primitives.md) is implemented by engine-independent spatial/metadata values and a test-support-only byte round trip; the owner accepted the implementation demo on 2026-08-26 |
+| 3.4 | Add injected clock, deterministic RNG, deterministic scheduler, and in-memory link | **In Progress** | Proposed [`ADR-0017`](adr/ADR-0017-deterministic-facilities-harness-boundaries.md) records the five remaining interface/ownership choices while preserving ADR-0013 and the Phase 3.5/5/6 gates; production work awaits owner approval |
 | 3.5 | Add latency/loss/jitter/duplication/reordering/stall/disconnect fault controls | **Not Started** | Seeded fault profiles are repeatable and independently configurable per direction/channel |
 | 3.6 | Add ASan, UBSan, race-checking where supported, and fuzz-target CI plumbing | **Not Started** | Smoke jobs run even before the full decoder corpus exists |
 | 3.7 | Add owned metrics/logging interfaces and test sinks | **Not Started** | Core tests can assert metrics and structured events without a production backend |
@@ -1534,6 +1736,223 @@ Implementation notes:
   to one integration test.
 - Sanitizer and fuzz options should remain opt-in for local builds and explicit in
   CI presets so normal developer builds stay predictable.
+
+- 2026-08-26 — Slice 3.1 — In Progress
+  - Change: added the accepted
+    [`ADR-0014`](adr/ADR-0014-phase3-target-topology-boundary-enforcement.md)
+    target topology, five engine-independent C++20 static libraries under
+    `components/tes3mp`, one app-local `openmw_tes3mp_adapter`, stable `TES3MP::`
+    aliases, a direct-dependency allowlist, forbidden-include-family checks, and
+    focused fail-closed CMake graph tests. The adapter is not linked into the
+    OpenMW executable and all translation units are behavior-free anchors.
+  - Decisions: the owner approved Phase 3 kickoff and Option A: separate
+    `tes3mp_protocol`, `tes3mp_transport`, `tes3mp_server_core`,
+    `tes3mp_client_session`, and `tes3mp_test_support` targets plus the app-local
+    adapter. GameNetworkingSockets and gameplay/OpenMW lifecycle behavior remain
+    outside this slice.
+  - Verification: all 83 repository-owned Python tests pass, including the five
+    focused boundary tests. Those tests independently
+    configure/build the five non-OpenMW targets, configure/build the adapter
+    against an isolated `openmw-lib` leaf, reject an undeclared direct link,
+    reject a forbidden include family, and reject a reverse production-to-test-
+    support edge. The real `build/vnext-baseline` graph configures and builds
+    `tes3mp_test_support` and `openmw_tes3mp_adapter` with MSVC/Ninja. The real
+    legacy-exclusion gate passes across 3,767 tracked paths, 58 CMake files,
+    1,239 compile commands, and 1,935 Ninja edges. Indexed provenance passes with
+    73 intentional differences and 43 dependency inputs; JSON/path ordering,
+    all 43 local Markdown links, ADR/status/graph assertions, and staged/
+    unstaged diff checks pass.
+  - Owner review: the architecture is approved; implementation-demo acceptance
+    is pending before Slice 3.1 may become **Implemented**.
+  - Follow-ups: run the full repository and provenance gates, present the target
+    graph/failure evidence, and request demo acceptance. Slice 3.2 production
+    work remains gated.
+
+- 2026-08-26 — Slice 3.1 — Implemented
+  - Change: retained the exact accepted ADR-0014 target graph and fail-closed
+    checks demonstrated in the preceding in-progress note; no runtime behavior
+    was added during acceptance.
+  - Decisions: no amendment. The owner accepted the six-target Option A
+    implementation as demonstrated.
+  - Verification: all 83 repository-owned Python tests, focused independent/
+    adapter configure-build checks, intentional forbidden-link/include failures,
+    real MSVC/Ninja targets, real legacy exclusion, indexed provenance with 73
+    intentional differences and 43 dependency inputs, all 43 local Markdown
+    links, graph/status assertions, and diff checks pass.
+  - Owner review: implementation-demo acceptance received in the 2026-08-26
+    working session.
+  - Follow-ups: none for Slice 3.1. Slice 3.2 is the next eligible slice; its
+    strong-type architecture requires owner approval before public APIs land.
+
+- 2026-08-26 — Slice 3.2 — In Progress
+  - Change: inspected OpenMW's existing `Misc::StrongTypedef`, ESM identity,
+    ordering, hashing, formatting, and overflow conventions; added proposed
+    [`ADR-0015`](adr/ADR-0015-strong-value-types-identity-counter-policy.md)
+    with five option sets, scopes, scenarios, acceptance tests, consequences,
+    failure mitigations, and replacement triggers. No production header or
+    strong value implementation was added.
+  - Decisions: none accepted. The proposal recommends Option A for all five
+    decisions: ten scoped `u64` semantic types; zero-invalid identities/one-based
+    counters with tick zero valid; a project-owned explicit policy template;
+    optional-returning checked advancement; and type-qualified debug formatting
+    with codec/allocation separation.
+  - Verification: all 83 repository-owned Python tests pass; indexed provenance
+    passes with 74 intentional differences and 43 dependency inputs; JSON/path
+    ordering, all 45 local Markdown links, ADR-0015's proposed five-decision/
+    owner-pending state, Slice 3.1/3.2 and Phase 2/3 status assertions, and
+    staged/unstaged diff checks pass.
+  - Owner review: pending explicit approval or amendment of Decisions 1–5.
+  - Follow-ups: present the five decisions to the owner. Slice 3.2 production
+    work remains gated.
+
+- 2026-08-26 — Slice 3.2 — In Progress
+  - Change: accepted ADR-0015 and added `tes3mp/strong_value.hpp` plus
+    `tes3mp/value_types.hpp` to `tes3mp_protocol`. The API defines ten scoped
+    semantic `uint64_t` types, zero-invalid named factories except zero-valid
+    `ServerTick`, declared counter `initial()`/checked `next()`, explicit raw
+    access, same-type total ordering/hash, and stable `TypeName{decimal}` text.
+    A standalone C++20 contract executable is composed through
+    `tes3mp_test_support`; codecs, allocation, persistence, schemas, OpenMW, and
+    gameplay behavior remain absent.
+  - Decisions: the owner approved Option A for Decisions 1–5: the ten-type `u64`
+    catalog and scopes, unrepresentable invalid/default state, project-owned
+    explicit policy template, optional-returning no-wrap advancement, and stable
+    type-qualified formatting with explicit external boundaries.
+  - Verification: all 84 repository-owned Python tests pass, including six
+    focused boundary tests. Their isolated CMake
+    projects compile/link all independent targets and aliases, run the C++
+    semantic contract, build the adapter leaf, and prove forbidden direct links
+    and includes fail closed. The C++ contract contains compile-time negative
+    construction/conversion/comparison/arithmetic checks, underlying size/
+    alignment/trivial-copy assertions, plus runtime zero/start/order/hash/
+    formatting/advance/exhaustion checks. The real MSVC/Ninja baseline graph
+    builds and runs `tes3mp_protocol_tests_run`. Real legacy exclusion passes
+    across 3,771 tracked paths, 58 CMake files, 1,240 compile commands, and 1,942
+    Ninja edges. Indexed provenance passes with 77 intentional differences and
+    43 dependency inputs; JSON/path ordering, all 45 local Markdown links,
+    accepted ADR/catalog/isolation/status assertions, and staged/unstaged diff
+    checks pass.
+  - Owner review: ADR approval is recorded; implementation-demo acceptance is
+    pending before Slice 3.2 may become **Implemented**.
+  - Follow-ups: run all gates and present boundary/max-value evidence. Slice 3.3
+    production work remains gated.
+
+- 2026-08-26 — Slice 3.2 — Implemented
+  - Change: retained the exact accepted ADR-0015 API and contract tests
+    demonstrated in the preceding in-progress note; no API or runtime behavior
+    changed during acceptance.
+  - Decisions: no amendment. The owner accepted the ten-type Option A
+    implementation as demonstrated.
+  - Verification: all 84 repository-owned Python tests and six focused target-
+    boundary tests pass. The real MSVC/Ninja graph builds and runs
+    `tes3mp_protocol_tests_run`; real legacy exclusion passes across 3,771
+    tracked paths, 58 CMake files, 1,240 compile commands, and 1,942 Ninja
+    edges. Indexed provenance with 77 intentional differences and 43 dependency
+    inputs, JSON/path ordering, all 45 local Markdown links, status/contract
+    assertions, and staged/unstaged diff checks pass.
+  - Owner review: implementation-demo acceptance received in the 2026-08-26
+    working session.
+  - Follow-ups: none for Slice 3.2. Slice 3.3 is the next eligible slice, and
+    its spatial/state API decisions require owner approval before production
+    headers land.
+
+- 2026-08-26 — Slice 3.3 — In Progress
+  - Change: inspected OpenMW 0.51 cell, worldspace, exterior-grid, position,
+    and rotation representations plus the later protocol, server-core,
+    content-identity, cell/interest, and movement gates. Added proposed
+    [`ADR-0016`](adr/ADR-0016-canonical-spatial-command-snapshot-primitives.md)
+    with five option sets, scenarios, acceptance tests, failure mitigations,
+    and replacement triggers. No Slice 3.3 production header, codec, schema,
+    state storage, reducer, adapter conversion, or gameplay behavior was added.
+  - Decisions: none accepted. The proposal recommends Option A for Decisions
+    1–5: a tagged context-scoped interior/exterior cell value; contextual
+    absolute exterior coordinates; three-axis fixed-point transform values with
+    fixed right-handed composition; linear velocity only; and value-only
+    command/order metadata plus per-entity snapshot values.
+  - Verification: all 84 repository-owned Python tests pass, including the six
+    focused independent-target tests and the existing C++ strong-value
+    contract. Indexed provenance passes with 78 intentional differences and 43
+    dependency inputs; JSON/path ordering, all 55 local Markdown links,
+    ADR-0016's proposed five-decision/owner-pending state, Slice 3.2/3.3 and
+    Phase 3 status assertions, and staged/unstaged diff checks pass. A new
+    product build/runtime test is not applicable because this step changes only
+    the decision packet and production code remains gated.
+  - Owner review: pending explicit approval or amendment of Decisions 1–5.
+  - Follow-ups: present Decisions 1–5 to the owner, amend or accept ADR-0016,
+    then implement only the approved Slice 3.3 value surface and independent
+    contract tests.
+
+- 2026-08-26 — Slice 3.3 — In Progress
+  - Change: accepted ADR-0016 and added `CellSpaceId`, tagged interior/exterior
+    `CellId`, signed fixed-point `Position3`, modular `Turn32`, three-axis
+    `Orientation3`, `Transform`, and per-tick `LinearVelocity3` values to
+    `tes3mp_protocol`. Added fully initialized client-command, optional entity-
+    precondition, writer-admission, and authoritative spatial-snapshot value
+    records. A bounded little-endian snapshot round trip exists only in
+    `tes3mp_test_support`; it is not a protocol schema or wire contract.
+  - Decisions: the owner approved Option A for Decisions 1–5: context-scoped
+    tagged cells, contextual absolute exterior coordinates, right-handed
+    `Rz * Ry * Rx` fixed-turn orientation, linear velocity only, and value-only
+    metadata/snapshot records. Content mapping, final cell rules, gameplay
+    validation, movement, codecs, collection budgets, reducers, delivery, and
+    OpenMW conversions remain deferred to their owning gates.
+  - Verification: all 84 repository-owned Python tests pass, including six
+    focused boundary tests whose independent graph builds and runs both C++
+    value-contract executables without OpenMW. The real MSVC/Ninja baseline
+    graph configures, builds, and runs `tes3mp_protocol_tests_run`. Real legacy
+    exclusion passes across 3,777 tracked paths, 58 CMake files, 1,242 compile
+    commands, and 1,947 Ninja edges. Indexed provenance passes with 83
+    intentional differences and 43 dependency inputs. JSON/path ordering,
+    all 55 local Markdown links, accepted ADR/decision/status assertions, and
+    staged/unstaged diff checks pass.
+  - Owner review: ADR approval is recorded; implementation-demo acceptance is
+    pending before Slice 3.3 may become **Implemented**.
+  - Follow-ups: run all gates and present the interior/exterior, negative-grid,
+    numeric-boundary, orientation-basis, command/admission-separation, malformed
+    test-encoding, and round-trip evidence. Slice 3.4 remains gated.
+
+- 2026-08-26 — Slice 3.3 — Implemented
+  - Change: retained the exact accepted ADR-0016 value surface and independent
+    contract tests demonstrated in the preceding in-progress note; no API or
+    runtime behavior changed during acceptance.
+  - Decisions: no amendment. The owner accepted the five-decision Option A
+    implementation as demonstrated.
+  - Verification: all 84 repository-owned tests, six focused independent-target
+    checks, both C++ contracts in the real MSVC/Ninja graph, real legacy
+    exclusion across 3,777 paths/58 CMake files/1,242 compile commands/1,947
+    Ninja edges, indexed provenance with 83 intentional differences and 43
+    dependency inputs, all 55 local Markdown links, ADR/status assertions, and
+    staged/unstaged diff checks pass.
+  - Owner review: implementation-demo acceptance received in the 2026-08-26
+    working session.
+  - Follow-ups: none for Slice 3.3. Slice 3.4 is the next eligible slice; its
+    deterministic facility interfaces and target ownership require owner
+    approval before production APIs land.
+
+- 2026-08-26 — Slice 3.4 — In Progress
+  - Change: inspected ADR-0013's approved tick/randomness contracts, ADR-0014's
+    target graph, the current engine-independent API, and later scheduler,
+    fault, protocol-session, server-core, transport, and checksum gates. Added
+    proposed [`ADR-0017`](adr/ADR-0017-deterministic-facilities-harness-boundaries.md)
+    with five option sets, exact recommended RNG derivation, scenarios,
+    acceptance tests, failure mitigations, and replacement triggers. No Slice
+    3.4 production facility, link, trace harness, or runtime behavior was added.
+  - Decisions: none accepted. The proposal recommends Option A for Decisions
+    1–5: project-owned monotonic instants/interface; passive bounded server-core
+    scheduler; numeric-keyed versioned server-core RNG streams; a bounded test-
+    support-only duplex byte link; and exact trace bytes plus a non-canonical
+    test diagnostic digest.
+  - Verification: all 84 repository-owned Python tests pass, including the six
+    focused independent-target tests and both existing C++ value contracts.
+    Indexed provenance passes with 84 intentional differences and 43 dependency
+    inputs; JSON/path ordering, all 57 local Markdown links, ADR-0017's proposed
+    five-decision/owner-pending state, Slice 3.3/3.4 and Phase 3 status
+    assertions, and staged/unstaged diff checks pass. A new product build/runtime
+    test is not applicable because this step changes only the decision packet
+    and production code remains gated.
+  - Owner review: pending explicit approval or amendment of Decisions 1–5.
+  - Follow-ups: present Decisions 1–5 to the owner, amend or accept ADR-0017,
+    then implement only the approved deterministic facility and harness APIs.
 
 ### Phase 4 — Bounded protocol and in-memory session
 
