@@ -319,7 +319,7 @@ runtime or protocol name.
 | ADR-0014 | Phase 3 target topology and boundary enforcement | Phase 3 | **Implemented** |
 | ADR-0015 | Strong value types and identity/counter policy | Phase 3 | **Implemented** |
 | ADR-0016 | Canonical spatial, command, and snapshot primitives | Phase 3 | **Implemented** |
-| ADR-0017 | Deterministic facilities and harness boundaries | Phase 3 | **In Progress** |
+| ADR-0017 | Deterministic facilities and harness boundaries | Phase 3 | **Implemented** |
 
 An ADR is complete only when it records considered alternatives, selection
 criteria, consequences, failure modes, a replacement/review trigger, and
@@ -1712,7 +1712,7 @@ Depends on: Phase 2.
 | 3.1 | Add empty protocol, transport, server-core, client-session, adapter, and test-support targets | **Implemented** | Accepted [`ADR-0014`](adr/ADR-0014-phase3-target-topology-boundary-enforcement.md) fixes the six-target topology; the independent and adapter graphs build, focused tests prove forbidden direct links/includes fail closed, and the owner accepted the implementation demo on 2026-08-26 |
 | 3.2 | Add strong value types for IDs, ticks, sequences, revisions, command IDs, and authority epochs | **Implemented** | Accepted [`ADR-0015`](adr/ADR-0015-strong-value-types-identity-counter-policy.md) is implemented by ten explicit semantic types and independent compile-time/runtime boundary tests; the owner accepted the implementation demo on 2026-08-26 |
 | 3.3 | Add canonical `CellId`, transform, velocity, and platform-neutral command/snapshot primitives | **Implemented** | Accepted [`ADR-0016`](adr/ADR-0016-canonical-spatial-command-snapshot-primitives.md) is implemented by engine-independent spatial/metadata values and a test-support-only byte round trip; the owner accepted the implementation demo on 2026-08-26 |
-| 3.4 | Add injected clock, deterministic RNG, deterministic scheduler, and in-memory link | **In Progress** | Proposed [`ADR-0017`](adr/ADR-0017-deterministic-facilities-harness-boundaries.md) records the five remaining interface/ownership choices while preserving ADR-0013 and the Phase 3.5/5/6 gates; production work awaits owner approval |
+| 3.4 | Add injected clock, deterministic RNG, deterministic scheduler, and in-memory link | **Implemented** | Accepted [`ADR-0017`](adr/ADR-0017-deterministic-facilities-harness-boundaries.md) is implemented by passive server-core clock/scheduler/RNG facilities and a bounded test-support link/exact-trace harness; independent long-run, vector, isolation, backpressure, and repeatability contracts pass and the owner accepted the implementation demo on 2026-08-26 |
 | 3.5 | Add latency/loss/jitter/duplication/reordering/stall/disconnect fault controls | **Not Started** | Seeded fault profiles are repeatable and independently configurable per direction/channel |
 | 3.6 | Add ASan, UBSan, race-checking where supported, and fuzz-target CI plumbing | **Not Started** | Smoke jobs run even before the full decoder corpus exists |
 | 3.7 | Add owned metrics/logging interfaces and test sinks | **Not Started** | Core tests can assert metrics and structured events without a production backend |
@@ -1953,6 +1953,42 @@ Implementation notes:
   - Owner review: pending explicit approval or amendment of Decisions 1–5.
   - Follow-ups: present Decisions 1–5 to the owner, amend or accept ADR-0017,
     then implement only the approved deterministic facility and harness APIs.
+
+- 2026-08-26 — Slice 3.4 — Implemented
+  - Change: accepted ADR-0017 and added the project-owned monotonic nanosecond
+    instant/clock seam, passive rational 30 Hz scheduler with four-tick bounded
+    catch-up, numeric-keyed SplitMix64/xoshiro256** V1 streams with snapshot/
+    restore and unbiased bounded sampling, checked manual clock, independently
+    bounded FIFO byte duplex, stable typed test trace, and explicitly non-
+    canonical `TestTraceDigestV1`. Added two independent C++ contract
+    executables and a fail-closed production-to-test-support include check. No
+    wall-clock adapter, thread, reducer, gameplay behavior, fault policy,
+    production transport interface, or canonical checksum was added.
+  - Decisions: the owner approved Option A for ADR-0017 Decisions 1–5 without
+    amendment: project-owned monotonic observation, passive server-core
+    scheduler, numeric-keyed versioned server-core RNG, test-support-only
+    bounded link, and exact trace bytes plus test-only diagnostic digest.
+  - Verification: `python -m unittest discover -s scripts/tests -v` passes all
+    85 repository-owned tests, including seven focused target-boundary tests.
+    The isolated MSVC 19.44/Ninja graph builds and runs all four C++ contract
+    executables. The deterministic contracts prove exact 1/30-second rational
+    boundaries and 18,000 sequential ticks over ten irregularly advanced
+    minutes; four-tick stall batches; backwards-clock, deadline-overflow, and
+    tick-exhaustion errors; pinned SplitMix64/xoshiro/derivation vectors;
+    stream isolation, restore, rejection sampling, and zero-bound behavior;
+    independent message/byte budgets, FIFO boundaries, directional close; and
+    two byte-identical 198-byte scripted traces with pinned diagnostic digest
+    `75802a50e6b6fc66`. The real MSVC/Ninja baseline graph configures, builds,
+    and runs `tes3mp_protocol_tests_run`; real legacy exclusion passes across
+    3,791 tracked paths, 58 CMake files, 1,249 compile commands, and 1,960 Ninja
+    edges. Indexed provenance passes with 97 intentional differences and 43
+    dependency inputs; JSON/path ordering and staged/unstaged diff checks pass.
+  - Owner review: ADR approval and implementation-demo acceptance received in
+    the 2026-08-26 working session. The accepted demo is conditional on the
+    recorded gates passing without behavior or boundary deviations; they pass.
+  - Follow-ups: none for Slice 3.4. Slice 3.5 is the next eligible slice and
+    still owns latency, loss, jitter, duplication, reordering, stall, and
+    disconnect fault controls.
 
 ### Phase 4 — Bounded protocol and in-memory session
 

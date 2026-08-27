@@ -40,6 +40,13 @@ target_link_libraries(tes3mp_transport PUBLIC tes3mp_protocol)
 tes3mp_add_engine_independent_library(tes3mp_server_core server_core/anchor.cpp)
 add_library(TES3MP::ServerCore ALIAS tes3mp_server_core)
 target_link_libraries(tes3mp_server_core PUBLIC tes3mp_protocol)
+target_sources(tes3mp_server_core PRIVATE
+    include/tes3mp/deterministic_random.hpp
+    include/tes3mp/fixed_tick_scheduler.hpp
+    include/tes3mp/monotonic_clock.hpp
+    server_core/deterministic_random.cpp
+    server_core/fixed_tick_scheduler.cpp
+)
 
 tes3mp_add_engine_independent_library(tes3mp_client_session client_session/anchor.cpp)
 add_library(TES3MP::ClientSession ALIAS tes3mp_client_session)
@@ -59,7 +66,13 @@ target_link_libraries(tes3mp_test_support
         tes3mp_client_session
 )
 target_sources(tes3mp_test_support PRIVATE
+    include/tes3mp/test_support/deterministic_harness.hpp
+    include/tes3mp/test_support/in_memory_link.hpp
+    include/tes3mp/test_support/manual_clock.hpp
     include/tes3mp/test_support/spatial_round_trip.hpp
+    test_support/deterministic_harness.cpp
+    test_support/in_memory_link.cpp
+    test_support/manual_clock.cpp
     test_support/spatial_round_trip.cpp
 )
 
@@ -87,6 +100,15 @@ foreach(target
         FORBIDDEN ${TES3MP_ENGINE_INDEPENDENT_FORBIDDEN_INCLUDES})
 endforeach()
 
+foreach(target
+    tes3mp_protocol
+    tes3mp_transport
+    tes3mp_server_core
+    tes3mp_client_session
+)
+    tes3mp_verify_target_includes(${target} FORBIDDEN "tes3mp/test_support")
+endforeach()
+
 add_executable(tes3mp_protocol_tests tests/strong_value_tests.cpp)
 target_compile_features(tes3mp_protocol_tests PRIVATE cxx_std_20)
 target_link_libraries(tes3mp_protocol_tests PRIVATE tes3mp_test_support)
@@ -105,9 +127,33 @@ tes3mp_verify_target_dependencies(tes3mp_spatial_primitive_tests ALLOWED tes3mp_
 tes3mp_verify_target_includes(tes3mp_spatial_primitive_tests
     FORBIDDEN ${TES3MP_ENGINE_INDEPENDENT_FORBIDDEN_INCLUDES})
 
+add_executable(tes3mp_deterministic_facilities_tests tests/deterministic_facilities_tests.cpp)
+target_compile_features(tes3mp_deterministic_facilities_tests PRIVATE cxx_std_20)
+target_link_libraries(tes3mp_deterministic_facilities_tests PRIVATE tes3mp_test_support)
+set_target_properties(tes3mp_deterministic_facilities_tests PROPERTIES FOLDER "TES3MP/Tests")
+
+tes3mp_verify_target_dependencies(tes3mp_deterministic_facilities_tests ALLOWED tes3mp_test_support)
+tes3mp_verify_target_includes(tes3mp_deterministic_facilities_tests
+    FORBIDDEN ${TES3MP_ENGINE_INDEPENDENT_FORBIDDEN_INCLUDES})
+
+add_executable(tes3mp_deterministic_harness_tests tests/deterministic_harness_tests.cpp)
+target_compile_features(tes3mp_deterministic_harness_tests PRIVATE cxx_std_20)
+target_link_libraries(tes3mp_deterministic_harness_tests PRIVATE tes3mp_test_support)
+set_target_properties(tes3mp_deterministic_harness_tests PROPERTIES FOLDER "TES3MP/Tests")
+
+tes3mp_verify_target_dependencies(tes3mp_deterministic_harness_tests ALLOWED tes3mp_test_support)
+tes3mp_verify_target_includes(tes3mp_deterministic_harness_tests
+    FORBIDDEN ${TES3MP_ENGINE_INDEPENDENT_FORBIDDEN_INCLUDES})
+
 add_custom_target(tes3mp_protocol_tests_run
     COMMAND $<TARGET_FILE:tes3mp_protocol_tests>
     COMMAND $<TARGET_FILE:tes3mp_spatial_primitive_tests>
-    DEPENDS tes3mp_protocol_tests tes3mp_spatial_primitive_tests
-    COMMENT "Running TES3MP protocol value contracts"
+    COMMAND $<TARGET_FILE:tes3mp_deterministic_facilities_tests>
+    COMMAND $<TARGET_FILE:tes3mp_deterministic_harness_tests>
+    DEPENDS
+        tes3mp_protocol_tests
+        tes3mp_spatial_primitive_tests
+        tes3mp_deterministic_facilities_tests
+        tes3mp_deterministic_harness_tests
+    COMMENT "Running TES3MP protocol and deterministic facility contracts"
 )

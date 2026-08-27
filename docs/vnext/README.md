@@ -48,12 +48,14 @@ owner accepted the implementation demo. Slice 3.3 is implemented: ADR-0016 is
 accepted with Option A for all five decisions. Its engine-independent
 tagged cell, fixed spatial, command/admission metadata, and per-entity snapshot
 values plus test-support-only byte round trip are implemented, and the owner
-accepted the Slice 3.3 implementation demo. Slice 3.4 is in progress: proposed
-ADR-0017 presents the remaining clock, scheduler, RNG-stream, in-memory-link,
-and trace-evidence
-interface/ownership choices while preserving the later fault, server-core,
-transport, and canonical-checksum gates. No Slice 3.4 production API or
-multiplayer runtime behavior exists yet.
+accepted the Slice 3.3 implementation demo. Slice 3.4 is implemented: accepted
+ADR-0017 fixes the project-owned monotonic clock seam, passive bounded 30 Hz
+scheduler, versioned numeric-keyed deterministic RNG streams,
+test-support-only bounded in-memory link, and exact trace plus non-canonical
+diagnostic-digest boundaries. Their independent contracts pass and the owner
+accepted the implementation demo. Slice 3.5 fault controls are the next
+eligible work; no multiplayer runtime or production transport behavior exists
+yet.
 
 See the [implementation plan](IMPLEMENTATION_PLAN.md) for the live phase and
 slice tracker, completion gates, architecture decisions, and implementation

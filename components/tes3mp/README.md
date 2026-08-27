@@ -30,9 +30,9 @@ sources. `scripts/tests/test_tes3mp_target_boundaries.py` proves both checks fai
 closed using temporary miniature CMake projects. Later Phase 3 slices add
 compile-time public-header isolation checks as real APIs appear.
 
-The current translation units are intentionally empty anchors. They prove that
-each approved target participates in compilation and linking without claiming
-an API or runtime behavior owned by a later slice.
+The Slice 3.1 anchor translation units remain intentionally behavior-free. They
+keep every approved target participating in compilation and linking while the
+later slice sources below add only their explicitly approved APIs.
 
 Slice 3.2 adds the first public API in `include/tes3mp/value_types.hpp`. It owns
 the ten ADR-0015 semantic `uint64_t` types, explicit validity factories,
@@ -48,3 +48,16 @@ entity preconditions, and spatial snapshots carry provenance/state values but
 do not define payloads, collections, codecs, transport delivery, reducers, or
 gameplay validation. The deterministic byte round trip is test-support-only and
 is not a wire format.
+
+Slice 3.4 adds ADR-0017's passive deterministic facilities. Server core owns a
+project-defined monotonic nanosecond observation seam, rational 30 Hz scheduler
+with four-tick bounded catch-up, and numeric-keyed SplitMix64/xoshiro256** V1
+streams with explicit state restore. It still owns no wall-clock adapter,
+thread, sleep loop, reducer, command admission, or canonical checksum.
+
+Test support owns the checked manual clock, independently bounded FIFO byte
+duplex, and scripted exact-byte trace harness. `TestTraceDigestV1` is an FNV-1a
+test diagnostic, not canonical state, protocol, persistence, or replay policy.
+Production targets are checked against both reverse links to test support and
+direct `tes3mp/test_support` includes. Network faults remain Slice 3.5 work and
+production transport semantics remain Phase 6 work.

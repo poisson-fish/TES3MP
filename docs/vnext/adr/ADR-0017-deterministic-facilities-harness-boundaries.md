@@ -1,8 +1,10 @@
 # ADR-0017: Deterministic facilities and harness boundaries
 
-Status: **Proposed**
+Status: **Accepted**
 
 Date opened: 2026-08-26
+
+Date approved: 2026-08-26
 
 Decision owner: project owner
 
@@ -24,8 +26,7 @@ implement and test them.
 
 ## Decision summary
 
-No option is accepted yet. The recommendation is Option A for Decisions 1
-through 5:
+The project owner approved Option A for Decisions 1 through 5 on 2026-08-26:
 
 1. use a project-owned monotonic nanosecond instant plus an injected clock
    interface and a test-support manual clock;
@@ -40,7 +41,7 @@ through 5:
 5. compare exact typed trace bytes and a test-only FNV-1a diagnostic digest,
    explicitly reserving the canonical checksum choice for Phase 5.5.
 
-Approval would authorize only Slice 3.4 deterministic facilities and reusable
+Approval authorizes only Slice 3.4 deterministic facilities and reusable
 test harness. It would not authorize wall-clock gameplay, game-calendar rules,
 threads, reducer behavior, command admission, transport delivery semantics,
 network faults, a production transport interface, or a canonical state
@@ -368,5 +369,12 @@ Reopen this ADR if:
 
 ## Owner approval
 
-Pending. The project owner must approve or amend Decisions 1 through 5 before
-Slice 3.4 production facilities or test-harness APIs are added.
+Approved by the project owner in the 2026-08-26 working session: Option A for
+Decisions 1 through 5.
+
+Approval fixes only the project-owned monotonic clock seam, passive bounded
+scheduler, numeric-keyed versioned RNG streams, test-support-only bounded byte
+link, and exact test trace plus non-canonical diagnostic digest. Gameplay,
+authority, canonical state and checksums, reducer behavior, threading,
+production transport semantics, network faults, and wall-clock game rules
+remain gated by their owning phases.

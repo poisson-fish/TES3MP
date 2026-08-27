@@ -92,12 +92,12 @@
     {
       "path": "components/tes3mp/CMakeLists.txt",
       "status": "A",
-      "purpose": "Defines five separate engine-independent TES3MP C++20 targets, aliases, dependency direction, and boundary checks."
+      "purpose": "Defines five separate engine-independent TES3MP C++20 targets, aliases, dependency direction, boundary checks, and deterministic facility contract executables."
     },
     {
       "path": "components/tes3mp/README.md",
       "status": "A",
-      "purpose": "Documents the approved target graph, boundary enforcement, and Slice 3.1-3.3 engine-independent API scope."
+      "purpose": "Documents the approved target graph, boundary enforcement, and implemented Slice 3.1-3.4 engine-independent API scope."
     },
     {
       "path": "components/tes3mp/client_session/anchor.cpp",
@@ -110,6 +110,21 @@
       "purpose": "Owner-approved value-only client-command, entity-precondition, writer-admission, and authoritative spatial-snapshot records."
     },
     {
+      "path": "components/tes3mp/include/tes3mp/deterministic_random.hpp",
+      "status": "A",
+      "purpose": "Owner-approved versioned SplitMix64 and xoshiro256** streams with numeric domain/subject keys, checked restore, and unbiased bounded sampling."
+    },
+    {
+      "path": "components/tes3mp/include/tes3mp/fixed_tick_scheduler.hpp",
+      "status": "A",
+      "purpose": "Owner-approved passive 30 Hz server-core scheduler API with four-tick catch-up batches, explicit errors, and lag evidence."
+    },
+    {
+      "path": "components/tes3mp/include/tes3mp/monotonic_clock.hpp",
+      "status": "A",
+      "purpose": "Project-owned monotonic nanosecond instant and minimal injected-clock boundary for deterministic host scheduling."
+    },
+    {
       "path": "components/tes3mp/include/tes3mp/spatial_types.hpp",
       "status": "A",
       "purpose": "Owner-approved engine-independent tagged cell, fixed-point position/orientation/transform, and linear-velocity value types."
@@ -118,6 +133,21 @@
       "path": "components/tes3mp/include/tes3mp/strong_value.hpp",
       "status": "A",
       "purpose": "Engine-independent explicit semantic-value policy template with validity, ordering, hashing, formatting, and checked counter advancement."
+    },
+    {
+      "path": "components/tes3mp/include/tes3mp/test_support/deterministic_harness.hpp",
+      "status": "A",
+      "purpose": "Reusable scripted deterministic harness and explicitly non-canonical test trace digest interface."
+    },
+    {
+      "path": "components/tes3mp/include/tes3mp/test_support/in_memory_link.hpp",
+      "status": "A",
+      "purpose": "Test-support-only bounded deterministic byte-message duplex interface with explicit directional backpressure and close state."
+    },
+    {
+      "path": "components/tes3mp/include/tes3mp/test_support/manual_clock.hpp",
+      "status": "A",
+      "purpose": "Checked manually advanced implementation of the injected monotonic-clock interface for deterministic tests."
     },
     {
       "path": "components/tes3mp/include/tes3mp/test_support/spatial_round_trip.hpp",
@@ -140,14 +170,49 @@
       "purpose": "Behavior-free translation-unit anchor for the deterministic server-core target."
     },
     {
+      "path": "components/tes3mp/server_core/deterministic_random.cpp",
+      "status": "A",
+      "purpose": "Pinned unsigned SplitMix64, numeric V1 stream derivation, xoshiro256**, state restore, and rejection-sampling implementation."
+    },
+    {
+      "path": "components/tes3mp/server_core/fixed_tick_scheduler.cpp",
+      "status": "A",
+      "purpose": "Checked rational-deadline 30 Hz scheduler implementation with bounded sequential batches and no sleep, callback, reducer, or thread."
+    },
+    {
       "path": "components/tes3mp/test_support/anchor.cpp",
       "status": "A",
       "purpose": "Behavior-free translation-unit anchor for reusable multiplayer test support."
     },
     {
+      "path": "components/tes3mp/test_support/deterministic_harness.cpp",
+      "status": "A",
+      "purpose": "Stable typed little-endian test trace composition and test-only FNV-1a diagnostic evidence implementation."
+    },
+    {
+      "path": "components/tes3mp/test_support/in_memory_link.cpp",
+      "status": "A",
+      "purpose": "Owned FIFO message queues enforcing independent message/byte budgets, atomic enqueue, and per-direction close semantics."
+    },
+    {
+      "path": "components/tes3mp/test_support/manual_clock.cpp",
+      "status": "A",
+      "purpose": "Overflow-checked nonnegative manual monotonic-clock advancement implementation."
+    },
+    {
       "path": "components/tes3mp/test_support/spatial_round_trip.cpp",
       "status": "A",
       "purpose": "Bounded little-endian owned-value round-trip implementation used only by Slice 3.3 independent contract tests."
+    },
+    {
+      "path": "components/tes3mp/tests/deterministic_facilities_tests.cpp",
+      "status": "A",
+      "purpose": "Independent clock, long-run rational scheduler, bounded catch-up, error, fixed-vector RNG, stream-isolation, restore, and rejection-sampling contracts."
+    },
+    {
+      "path": "components/tes3mp/tests/deterministic_harness_tests.cpp",
+      "status": "A",
+      "purpose": "Independent duplex budget/FIFO/close and repeated exact trace/non-canonical digest harness contracts."
     },
     {
       "path": "components/tes3mp/tests/spatial_primitive_tests.cpp",
@@ -397,7 +462,7 @@
     {
       "path": "scripts/tests/test_tes3mp_target_boundaries.py",
       "status": "A",
-      "purpose": "Focused configure/build and intentional-failure tests for the owner-approved TES3MP target graph and boundary verifier."
+      "purpose": "Focused configure/build and intentional-failure tests for the approved target graph, include/link allowlists, and fail-closed reverse test-support boundary."
     },
     {
       "path": "scripts/tests/test_verify_vnext_baseline.py",

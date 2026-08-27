@@ -229,7 +229,27 @@ class TES3MPTargetBoundaryTests(unittest.TestCase):
             "tes3mp_add_engine_independent_library(tes3mp_test_support", 1
         )[0]
         self.assertNotIn("tes3mp_test_support", production_prefix)
+        self.assertIn(
+            'tes3mp_verify_target_includes(${target} FORBIDDEN "tes3mp/test_support")',
+            cmake_text,
+        )
         self.assertNotIn("vnext", cmake_text.lower())
+
+    def test_production_target_cannot_include_test_support(self):
+        result = self._run_project(
+            f"""
+            cmake_minimum_required(VERSION 3.16)
+            project(tes3mp_reverse_test_include LANGUAGES CXX)
+            include("{BOUNDARY_MODULE.as_posix()}")
+            add_library(server_core STATIC server_core.cpp)
+            tes3mp_verify_target_includes(server_core FORBIDDEN tes3mp/test_support)
+            """,
+            files={
+                "server_core.cpp": '#include <tes3mp/test_support/manual_clock.hpp>\n'
+            },
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("forbidden include family", result.stdout + result.stderr)
 
 
 if __name__ == "__main__":
