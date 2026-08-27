@@ -20,6 +20,7 @@ from typing import Any
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 SOURCE_DIR = ROOT / "components" / "tes3mp"
 CORPUS_DIR = SOURCE_DIR / "tests" / "fuzz" / "corpus" / "spatial_round_trip"
+PROTOCOL_FRAME_CORPUS_DIR = SOURCE_DIR / "tests" / "fuzz" / "corpus" / "protocol_frame"
 PROFILES = {
     "asan-ubsan": {
         "preset": "tes3mp-safety-asan-ubsan",
@@ -34,6 +35,7 @@ PROFILES = {
 }
 CONTRACT_EXECUTABLES = (
     "tes3mp_protocol_tests",
+    "tes3mp_protocol_frame_tests",
     "tes3mp_spatial_primitive_tests",
     "tes3mp_deterministic_facilities_tests",
     "tes3mp_deterministic_harness_tests",
@@ -48,9 +50,11 @@ TSAN_ENVIRONMENT = {"TSAN_OPTIONS": "halt_on_error=1"}
 MAX_CORPUS_FILES = 64
 MAX_CORPUS_FILE_BYTES = 256
 MAX_SPATIAL_SNAPSHOT_BYTES = 109
+MAX_PROTOCOL_FRAME_BYTES = 12 + 64 * 1024
 EXPECTED_COMPILED_SOURCES = {
     "client_session/anchor.cpp",
     "protocol/anchor.cpp",
+    "protocol/protocol_frame.cpp",
     "server_core/anchor.cpp",
     "server_core/deterministic_random.cpp",
     "server_core/fixed_tick_scheduler.cpp",
@@ -66,6 +70,7 @@ EXPECTED_COMPILED_SOURCES = {
     "tests/deterministic_harness_tests.cpp",
     "tests/fault_injection_tests.cpp",
     "tests/observability_tests.cpp",
+    "tests/protocol_frame_tests.cpp",
     "tests/spatial_primitive_tests.cpp",
     "tests/strong_value_tests.cpp",
     "transport/anchor.cpp",
@@ -151,17 +156,48 @@ def verify_corpus() -> list[dict[str, Any]]:
     return records
 
 
-def fuzz_command(profile: str, fuzz_seconds: int, artifact_dir: pathlib.Path) -> list[str]:
-    executable = executable_path(profile, "tes3mp_spatial_round_trip_fuzz")
+def verify_protocol_frame_corpus() -> list[dict[str, Any]]:
+    files = sorted(path for path in PROTOCOL_FRAME_CORPUS_DIR.iterdir() if path.is_file())
+    if not files or len(files) > MAX_CORPUS_FILES:
+        raise RuntimeSafetyError(
+            f"Protocol-frame fuzz corpus must contain 1-{MAX_CORPUS_FILES} files, found {len(files)}"
+        )
+    records = []
+    for path in files:
+        size = path.stat().st_size
+        if size > MAX_CORPUS_FILE_BYTES:
+            raise RuntimeSafetyError(
+                f"Protocol-frame fuzz seed exceeds {MAX_CORPUS_FILE_BYTES} bytes: {path}"
+            )
+        records.append(
+            {
+                "path": str(path.relative_to(ROOT)).replace(os.sep, "/"),
+                "bytes": size,
+                "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+            }
+        )
+    return records
+
+
+def fuzz_command(
+    profile: str,
+    fuzz_seconds: int,
+    artifact_dir: pathlib.Path,
+    *,
+    target: str = "tes3mp_spatial_round_trip_fuzz",
+    corpus_dir: pathlib.Path = CORPUS_DIR,
+    maximum_input_bytes: int = MAX_CORPUS_FILE_BYTES,
+) -> list[str]:
+    executable = executable_path(profile, target)
     return [
         str(executable),
         f"-max_total_time={fuzz_seconds}",
         "-timeout=5",
         "-rss_limit_mb=512",
-        f"-max_len={MAX_CORPUS_FILE_BYTES}",
+        f"-max_len={maximum_input_bytes}",
         "-print_final_stats=1",
         f"-artifact_prefix={artifact_dir}{os.sep}",
-        str(CORPUS_DIR),
+        str(corpus_dir),
     ]
 
 
@@ -219,6 +255,7 @@ def verify_instrumented_compile_commands(profile: str, build_dir: pathlib.Path) 
     expected = set(EXPECTED_COMPILED_SOURCES)
     if profile == "asan-ubsan":
         expected.add("tests/fuzz/spatial_round_trip_fuzz.cpp")
+        expected.add("tests/fuzz/protocol_frame_fuzz.cpp")
         required_flag = "-fsanitize=address,undefined"
     else:
         required_flag = "-fsanitize=thread"
@@ -268,6 +305,7 @@ def execute(profile: str, fuzz_seconds: int) -> pathlib.Path:
     log_path.write_text("", encoding="utf-8")
 
     corpus = verify_corpus()
+    protocol_frame_corpus = verify_protocol_frame_corpus()
     try:
         run_command(configure_command(cmake, profile), environment=environment, cwd=SOURCE_DIR, log_path=log_path)
         run_command(build_command(cmake, profile), environment=environment, cwd=SOURCE_DIR, log_path=log_path)
@@ -278,6 +316,19 @@ def execute(profile: str, fuzz_seconds: int) -> pathlib.Path:
         if fuzz_seconds:
             run_command(
                 fuzz_command(profile, fuzz_seconds, artifact_dir),
+                environment=environment,
+                cwd=SOURCE_DIR,
+                log_path=log_path,
+            )
+            run_command(
+                fuzz_command(
+                    profile,
+                    fuzz_seconds,
+                    artifact_dir,
+                    target="tes3mp_protocol_frame_fuzz",
+                    corpus_dir=PROTOCOL_FRAME_CORPUS_DIR,
+                    maximum_input_bytes=MAX_PROTOCOL_FRAME_BYTES + 1,
+                ),
                 environment=environment,
                 cwd=SOURCE_DIR,
                 log_path=log_path,
@@ -330,11 +381,24 @@ def execute(profile: str, fuzz_seconds: int) -> pathlib.Path:
             "contracts": list(CONTRACT_EXECUTABLES),
             "instrumented_sources": instrumented_sources,
             "fuzz": {
-                "target": "tes3mp_spatial_round_trip_fuzz" if profile == "asan-ubsan" else None,
+                "targets": (
+                    ["tes3mp_spatial_round_trip_fuzz", "tes3mp_protocol_frame_fuzz"]
+                    if profile == "asan-ubsan"
+                    else []
+                ),
                 "seconds": fuzz_seconds,
-                "max_input_bytes": MAX_CORPUS_FILE_BYTES,
-                "parser_max_bytes": MAX_SPATIAL_SNAPSHOT_BYTES,
-                "corpus": corpus,
+                "corpora": {
+                    "spatial_round_trip": corpus,
+                    "protocol_frame": protocol_frame_corpus,
+                },
+                "maximum_input_bytes": {
+                    "spatial_round_trip": MAX_CORPUS_FILE_BYTES,
+                    "protocol_frame": MAX_PROTOCOL_FRAME_BYTES + 1,
+                },
+                "parser_max_bytes": {
+                    "spatial_round_trip": MAX_SPATIAL_SNAPSHOT_BYTES,
+                    "protocol_frame": MAX_PROTOCOL_FRAME_BYTES,
+                },
             },
             "artifacts": {
                 "log": str(log_path.relative_to(ROOT)).replace(os.sep, "/"),

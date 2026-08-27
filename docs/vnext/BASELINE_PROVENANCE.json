@@ -145,6 +145,11 @@
       "purpose": "Owner-approved server-core metric/event values, explicit non-owning sink bundle, and no-op sink interfaces without backend or global state."
     },
     {
+      "path": "components/tes3mp/include/tes3mp/protocol_frame.hpp",
+      "status": "A",
+      "purpose": "Owner-approved fixed vNext frame layout, stable message classification and identifiers, class byte budgets, owned decoded frames, and closed structured error values."
+    },
+    {
       "path": "components/tes3mp/include/tes3mp/spatial_types.hpp",
       "status": "A",
       "purpose": "Owner-approved engine-independent tagged cell, fixed-point position/orientation/transform, and linear-velocity value types."
@@ -193,6 +198,11 @@
       "path": "components/tes3mp/protocol/anchor.cpp",
       "status": "A",
       "purpose": "Behavior-free translation-unit anchor for the engine-independent protocol target."
+    },
+    {
+      "path": "components/tes3mp/protocol/protocol_frame.cpp",
+      "status": "A",
+      "purpose": "Bounded little-endian frame encoding and allocation-after-validation decoding with exact length, class, kind, and payload-budget enforcement."
     },
     {
       "path": "components/tes3mp/server_core/anchor.cpp",
@@ -265,6 +275,16 @@
       "purpose": "Independent profile/path validation, latency, loss, duplication, jitter, reorder, stall, disconnect, bounds, backpressure, isolation, and exact seeded-trace contracts."
     },
     {
+      "path": "components/tes3mp/tests/fuzz/corpus/protocol_frame/truncated-header",
+      "status": "A",
+      "purpose": "Truncated magic/header seed for the bounded production protocol-frame decoder fuzz target."
+    },
+    {
+      "path": "components/tes3mp/tests/fuzz/corpus/protocol_frame/unknown-input",
+      "status": "A",
+      "purpose": "Non-vNext input seed for bounded unknown/malformed production frame fuzz coverage."
+    },
+    {
       "path": "components/tes3mp/tests/fuzz/corpus/spatial_round_trip/interior-sized",
       "status": "A",
       "purpose": "Exact interior-record-size seed for the bounded test-only spatial decoder fuzz smoke."
@@ -280,6 +300,11 @@
       "purpose": "Truncated seed for bounded malformed spatial test-decoder fuzz coverage."
     },
     {
+      "path": "components/tes3mp/tests/fuzz/protocol_frame_fuzz.cpp",
+      "status": "A",
+      "purpose": "Clang libFuzzer entry point with a hard pre-parse bound over the production protocol-frame decoder."
+    },
+    {
       "path": "components/tes3mp/tests/fuzz/spatial_round_trip_fuzz.cpp",
       "status": "A",
       "purpose": "Clang libFuzzer entry point with a hard pre-parse size bound over the test-support-only spatial decoder."
@@ -288,6 +313,11 @@
       "path": "components/tes3mp/tests/observability_tests.cpp",
       "status": "A",
       "purpose": "Independent contracts for typed metric/event shapes, explicit injection, no-op sinks, bounded FIFO recording, overflow, privacy shape, and deterministic evidence."
+    },
+    {
+      "path": "components/tes3mp/tests/protocol_frame_tests.cpp",
+      "status": "A",
+      "purpose": "Golden, round-trip, truncation, malformed, class/kind, exact-budget, allocation, ownership, and mutation contracts for vNext framing."
     },
     {
       "path": "components/tes3mp/tests/spatial_primitive_tests.cpp",
@@ -408,6 +438,11 @@
       "path": "docs/vnext/adr/ADR-0020-owned-observability-interfaces-and-test-sinks.md",
       "status": "A",
       "purpose": "Owner-approved server-core observability ownership, injection, typed metrics/events, privacy, and bounded deterministic test-sink policy."
+    },
+    {
+      "path": "docs/vnext/adr/ADR-0021-bounded-protocol-framing-and-decode-boundary.md",
+      "status": "A",
+      "purpose": "Owner-approved fixed framing, message classification and identifiers, class byte budgets, owned decode results, and structured error policy."
     },
     {
       "path": "docs/vnext/proofs/flatbuffers/ANDROID_ARM64.md",

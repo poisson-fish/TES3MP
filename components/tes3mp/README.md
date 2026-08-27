@@ -107,3 +107,18 @@ exists yet.
 Hosted runtime-safety evidence at `57973b65c7` instruments all three new
 observability sources, runs all six contracts under separate ASan+UBSan and
 ThreadSanitizer profiles, and retains no sanitizer finding or fuzz reproducer.
+
+Phase 4 Slice 4.1 accepts ADR-0021 and adds the first production protocol
+codec boundary. A fixed 12-byte little-endian `T3MP` format-one header selects
+one of three closed message classes and five initial stable kind identifiers
+before payload work. Class payload budgets are fixed at 4 KiB for session
+control, 16 KiB for reliable operations, and 64 KiB for latest-wins snapshots.
+
+The decoder rejects bad magic/version, unknown or mismatched class/kind pairs,
+empty or oversized payloads, truncation, length mismatch, trailing bytes, and
+concatenated frames before allocating a payload. Success returns one owned
+bounded byte vector; failure returns only closed enum and numeric context with
+no text or packet view. FlatBuffers payload schemas and generated headers do not
+land until Slice 4.2. The framing contract and production-decoder fuzz target
+remain independent of OpenMW, transport libraries, platform APIs, and test
+support.

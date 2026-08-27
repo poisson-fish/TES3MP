@@ -110,7 +110,7 @@ Observed on 2026-08-25 before this plan was added:
 | 1 | Clean OpenMW 0.51 baseline | **Implemented** | Phase 0 |
 | 2 | Security and architecture decisions | **Implemented** | Phase 1 |
 | 3 | Independent targets and test scaffold | **Implemented** | Phase 2 |
-| 4 | Bounded protocol and in-memory session | **Not Started** | Phase 3 |
+| 4 | Bounded protocol and in-memory session | **In Progress** | Phase 3 |
 | 5 | Deterministic authoritative server core | **Not Started** | Phase 4 |
 | 6 | Maintained transport and secure network session | **Not Started** | Phase 5 |
 | 7 | Headless end-to-end multiplayer slice | **Not Started** | Phase 6 |
@@ -330,6 +330,7 @@ runtime or protocol name.
 | ADR-0018 | Deterministic network fault controls | Phase 3 | **Implemented** |
 | ADR-0019 | Runtime-safety and fuzz CI policy | Phase 3 | **Implemented** |
 | ADR-0020 | Owned observability interfaces and test sinks | Phase 3 | **Implemented** |
+| ADR-0021 | Bounded protocol framing, classification, byte budgets, and decode results | Phase 4 | **Implemented** |
 
 An ADR is complete only when it records considered alternatives, selection
 criteria, consequences, failure modes, a replacement/review trigger, and
@@ -2389,7 +2390,7 @@ Implementation notes:
 
 ### Phase 4 — Bounded protocol and in-memory session
 
-Status: **Not Started**
+Status: **In Progress**
 
 Outcome: a simulated peer negotiates vNext, authenticates through an interface,
 and exchanges bounded messages entirely in memory.
@@ -2398,7 +2399,7 @@ Depends on: Phase 3.
 
 | Slice | Deliverable | Status | Completion evidence |
 |---|---|---|---|
-| 4.1 | Implement framing/envelopes, message classification, byte budgets, and structured decode errors | **Not Started** | Truncated, oversized, unknown, and malformed inputs fail without partial objects or unbounded allocation |
+| 4.1 | Implement framing/envelopes, message classification, byte budgets, and structured decode errors | **In Progress** | Truncated, oversized, unknown, and malformed inputs fail without partial objects or unbounded allocation |
 | 4.2 | Implement `ClientHello`, `ServerHello`, and clear rejection with version/capability negotiation | **Not Started** | Required/optional/unknown capability and legacy-peer cases have golden tests |
 | 4.3 | Implement the client/server session state machines and authentication-provider interface | **Not Started** | Illegal transitions, timeout, cancellation, rejection, and secret-redaction tests pass |
 | 4.4 | Define reliable-operation and latest-wins snapshot envelopes | **Not Started** | Command ID/revision and tick/sequence/epoch rules are enforced separately |
@@ -2424,6 +2425,41 @@ Implementation notes:
   validated principal/session result but must not know backend credential format.
 - Golden files cover vNext evolution only and must include an explanation when
   intentionally updated.
+
+- 2026-08-27 — Slice 4.1 — In Progress
+  - Change: this implementation commit accepts
+    [`ADR-0021`](adr/ADR-0021-bounded-protocol-framing-and-decode-boundary.md)
+    and adds the production `T3MP` format-one frame encoder/decoder, closed
+    message classes and initial stable kind registry, fixed 4/16/64 KiB class
+    budgets, owned decoded payloads, enum/numeric errors, a seventh standalone
+    contract executable, and a bounded production-decoder fuzz target/corpus.
+    No FlatBuffers payload schema, session transition, transport behavior,
+    authority, state scope, or gameplay behavior is introduced.
+  - Decisions: the owner explicitly approved ADR-0021 Option A for Decisions
+    1–4 and the Phase 4 slice boundaries in the 2026-08-27 working session.
+    The implementation uses the approved 12-byte little-endian header, compiled
+    class/kind mapping, fixed class budgets, and allocation-after-complete-frame-
+    validation owned result boundary without amendment.
+  - Verification: from the MSVC 2022 v143 x86-64 developer environment,
+    `cmake --preset tes3mp-standalone --fresh` and `cmake --build --preset
+    tes3mp-standalone --parallel 4` build and pass all seven contract
+    executables. `python -m unittest discover -s scripts/tests -v` passes all
+    95 repository-owned tests. `python scripts/verify_vnext_baseline.py --index`
+    accounts for 124 intentional differences and verifies 43 dependency inputs.
+    `python scripts/verify_vnext_legacy_exclusion.py --index --build-dir
+    build/tes3mp-standalone` checks 3,818 tracked paths, 59 CMake files, 22
+    compile commands, and 69 Ninja edges. Changed Python compiles, JSON parses,
+    local vNext Markdown links resolve, `git diff --cached --check` passes, and
+    the public protocol header contains no OpenMW, transport-library, platform,
+    FlatBuffers-generated, or test-support include.
+  - Owner review: Phase 4 kickoff and architecture approval received. The Slice
+    4.1 implementation demo and acceptance remain pending, so the slice stays
+    **In Progress**.
+  - Follow-ups: present the golden frame, owned-buffer overwrite, structured
+    malformed-input failures, exact class-limit cases, and fuzz registration for
+    owner demo acceptance; then mark Slice 4.1 **Implemented**. Slice 4.2 still
+    requires its capability/version-negotiation decision packet before schemas
+    or behavior land.
 
 ### Phase 5 — Deterministic authoritative server core
 

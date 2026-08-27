@@ -56,7 +56,8 @@
       "configurePreset": "tes3mp-safety-asan-ubsan",
       "targets": [
         "tes3mp_protocol_tests_run",
-        "tes3mp_spatial_round_trip_fuzz"
+        "tes3mp_spatial_round_trip_fuzz",
+        "tes3mp_protocol_frame_fuzz"
       ]
     },
     {

@@ -37,9 +37,11 @@ tes3mp_add_engine_independent_library(tes3mp_protocol protocol/anchor.cpp)
 add_library(TES3MP::Protocol ALIAS tes3mp_protocol)
 target_sources(tes3mp_protocol PRIVATE
     include/tes3mp/command_primitives.hpp
+    include/tes3mp/protocol_frame.hpp
     include/tes3mp/spatial_types.hpp
     include/tes3mp/strong_value.hpp
     include/tes3mp/value_types.hpp
+    protocol/protocol_frame.cpp
 )
 
 tes3mp_add_engine_independent_library(tes3mp_transport transport/anchor.cpp)
@@ -134,6 +136,16 @@ tes3mp_verify_target_dependencies(tes3mp_protocol_tests ALLOWED tes3mp_test_supp
 tes3mp_verify_target_includes(tes3mp_protocol_tests
     FORBIDDEN ${TES3MP_ENGINE_INDEPENDENT_FORBIDDEN_INCLUDES})
 
+add_executable(tes3mp_protocol_frame_tests tests/protocol_frame_tests.cpp)
+target_compile_features(tes3mp_protocol_frame_tests PRIVATE cxx_std_20)
+target_link_libraries(tes3mp_protocol_frame_tests PRIVATE tes3mp_protocol)
+set_target_properties(tes3mp_protocol_frame_tests PROPERTIES FOLDER "TES3MP/Tests")
+tes3mp_enable_runtime_safety(tes3mp_protocol_frame_tests)
+
+tes3mp_verify_target_dependencies(tes3mp_protocol_frame_tests ALLOWED tes3mp_protocol)
+tes3mp_verify_target_includes(tes3mp_protocol_frame_tests
+    FORBIDDEN ${TES3MP_ENGINE_INDEPENDENT_FORBIDDEN_INCLUDES})
+
 add_executable(tes3mp_spatial_primitive_tests tests/spatial_primitive_tests.cpp)
 target_compile_features(tes3mp_spatial_primitive_tests PRIVATE cxx_std_20)
 target_link_libraries(tes3mp_spatial_primitive_tests PRIVATE tes3mp_test_support)
@@ -194,10 +206,21 @@ if(TES3MP_BUILD_FUZZERS)
     tes3mp_verify_target_dependencies(tes3mp_spatial_round_trip_fuzz ALLOWED tes3mp_test_support)
     tes3mp_verify_target_includes(tes3mp_spatial_round_trip_fuzz
         FORBIDDEN ${TES3MP_ENGINE_INDEPENDENT_FORBIDDEN_INCLUDES})
+
+    add_executable(tes3mp_protocol_frame_fuzz tests/fuzz/protocol_frame_fuzz.cpp)
+    target_compile_features(tes3mp_protocol_frame_fuzz PRIVATE cxx_std_20)
+    target_link_libraries(tes3mp_protocol_frame_fuzz PRIVATE tes3mp_protocol)
+    set_target_properties(tes3mp_protocol_frame_fuzz PROPERTIES FOLDER "TES3MP/Fuzzers")
+    tes3mp_enable_runtime_safety(tes3mp_protocol_frame_fuzz)
+    tes3mp_enable_libfuzzer(tes3mp_protocol_frame_fuzz)
+    tes3mp_verify_target_dependencies(tes3mp_protocol_frame_fuzz ALLOWED tes3mp_protocol)
+    tes3mp_verify_target_includes(tes3mp_protocol_frame_fuzz
+        FORBIDDEN ${TES3MP_ENGINE_INDEPENDENT_FORBIDDEN_INCLUDES})
 endif()
 
 add_custom_target(tes3mp_protocol_tests_run
     COMMAND $<TARGET_FILE:tes3mp_protocol_tests>
+    COMMAND $<TARGET_FILE:tes3mp_protocol_frame_tests>
     COMMAND $<TARGET_FILE:tes3mp_spatial_primitive_tests>
     COMMAND $<TARGET_FILE:tes3mp_deterministic_facilities_tests>
     COMMAND $<TARGET_FILE:tes3mp_deterministic_harness_tests>
@@ -205,6 +228,7 @@ add_custom_target(tes3mp_protocol_tests_run
     COMMAND $<TARGET_FILE:tes3mp_observability_tests>
     DEPENDS
         tes3mp_protocol_tests
+        tes3mp_protocol_frame_tests
         tes3mp_spatial_primitive_tests
         tes3mp_deterministic_facilities_tests
         tes3mp_deterministic_harness_tests
