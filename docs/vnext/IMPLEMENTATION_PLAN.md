@@ -1714,7 +1714,7 @@ Depends on: Phase 2.
 | 3.2 | Add strong value types for IDs, ticks, sequences, revisions, command IDs, and authority epochs | **Implemented** | Accepted [`ADR-0015`](adr/ADR-0015-strong-value-types-identity-counter-policy.md) is implemented by ten explicit semantic types and independent compile-time/runtime boundary tests; the owner accepted the implementation demo on 2026-08-26 |
 | 3.3 | Add canonical `CellId`, transform, velocity, and platform-neutral command/snapshot primitives | **Implemented** | Accepted [`ADR-0016`](adr/ADR-0016-canonical-spatial-command-snapshot-primitives.md) is implemented by engine-independent spatial/metadata values and a test-support-only byte round trip; the owner accepted the implementation demo on 2026-08-26 |
 | 3.4 | Add injected clock, deterministic RNG, deterministic scheduler, and in-memory link | **Implemented** | Accepted [`ADR-0017`](adr/ADR-0017-deterministic-facilities-harness-boundaries.md) is implemented by passive server-core clock/scheduler/RNG facilities and a bounded test-support link/exact-trace harness; independent long-run, vector, isolation, backpressure, and repeatability contracts pass and the owner accepted the implementation demo on 2026-08-26 |
-| 3.5 | Add latency/loss/jitter/duplication/reordering/stall/disconnect fault controls | **In Progress** | Accepted [`ADR-0018`](adr/ADR-0018-deterministic-network-fault-controls.md) fixes a passive bounded test-support wrapper, per-direction/channel profiles, isolated seeded fault streams, and explicit stall/disconnect controls; implementation and independent contracts are under verification |
+| 3.5 | Add latency/loss/jitter/duplication/reordering/stall/disconnect fault controls | **Implemented** | Accepted [`ADR-0018`](adr/ADR-0018-deterministic-network-fault-controls.md) is implemented by a passive bounded test-support wrapper with independently configurable direction/channel profiles, isolated seeded fault streams, explicit stall/disconnect controls, and passing exact-trace contracts; the owner accepted the implementation demo on 2026-08-26 |
 | 3.6 | Add ASan, UBSan, race-checking where supported, and fuzz-target CI plumbing | **Not Started** | Smoke jobs run even before the full decoder corpus exists |
 | 3.7 | Add owned metrics/logging interfaces and test sinks | **Not Started** | Core tests can assert metrics and structured events without a production backend |
 
@@ -2029,6 +2029,26 @@ Implementation notes:
     2026-08-26 working session. Implementation-demo acceptance is pending.
   - Follow-ups: present the implementation demo and obtain owner acceptance
     before changing Slice 3.5 to **Implemented**. Slice 3.6 remains gated.
+
+- 2026-08-26 — Slice 3.5 — Implemented
+  - Change: retained implementation commit `3f572f27f3` and its accepted
+    ADR-0018 fault-wrapper API and contracts without amendment; this status-only
+    follow-up records completion after the required owner demo review.
+  - Decisions: no amendment. The owner accepted the implemented Option A
+    behavior for Decisions 1–5 as demonstrated.
+  - Verification: the committed implementation passes all 85 repository-owned
+    Python tests and all five C++ contracts. The owner-reviewed demo covers
+    independent delayed/immediate paths, exact loss and duplication endpoints,
+    bounded reordered delivery, path-local stall/resume and disconnect,
+    reverse-direction backpressure isolation, checked overflow, and the pinned
+    97-byte trace with digest `935d71908b6496c8`. Committed-tree baseline
+    provenance passes with 101 intentional differences and 43 dependency
+    inputs; legacy exclusion passes across 3,795 paths, 58 CMake files, 1,251
+    compile commands, and 1,965 Ninja edges.
+  - Owner review: implementation-demo acceptance received in the 2026-08-26
+    working session.
+  - Follow-ups: none for Slice 3.5. Slice 3.6 is the next eligible slice; Phase
+    3 remains **In Progress** until Slices 3.6 and 3.7 and the exit gate pass.
 
 ### Phase 4 — Bounded protocol and in-memory session
 
