@@ -1211,7 +1211,7 @@
         },
         {
           "path": "components/tes3mp/CMakeLists.txt",
-          "sha256": "46d71cd153ff099bcf8fcb9d43a7454619340ca58e320f7045b4cefefa3406b7"
+          "sha256": "5225dcffc7db6231ef26fa78a16243895708ff9c414e59005d8fcd2596dcfe79"
         },
         {
           "path": "components/tes3mp/protocol/generated/client_hello_generated.h",

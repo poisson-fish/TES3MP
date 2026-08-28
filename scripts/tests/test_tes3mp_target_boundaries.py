@@ -305,6 +305,19 @@ class TES3MPTargetBoundaryTests(unittest.TestCase):
         self.assertEqual(adapter.count("k_ESteamNetworkingConfig_Unencrypted, 0"), 2)
         self.assertNotIn("k_ESteamNetworkingConfig_Unencrypted, 1", adapter)
 
+    def test_selected_adapter_reuses_verified_abseil_package(self):
+        cmake_text = (ENGINE_INDEPENDENT_SOURCE / "CMakeLists.txt").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn(
+            'set(absl_DIR "${TES3MP_PROTOBUF_ROOT}/lib/cmake/absl"', cmake_text
+        )
+        self.assertIn("find_package(absl CONFIG REQUIRED)", cmake_text)
+        self.assertNotIn('add_subdirectory("${TES3MP_abseil_SOURCE_DIR}"', cmake_text)
+        self.assertIn(
+            "set(CMAKE_MSVC_RUNTIME_LIBRARY MultiThreaded", cmake_text
+        )
+
     def test_production_target_cannot_include_test_support(self):
         result = self._run_project(
             f"""

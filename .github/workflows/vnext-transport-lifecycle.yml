@@ -59,6 +59,7 @@ jobs:
       - name: Configure the selected adapter
         run: >-
           cmake -S components/tes3mp -B build/vnext-transport-lifecycle -G Ninja
+          -DCMAKE_BUILD_TYPE=RelWithDebInfo
           -DTES3MP_ENABLE_GNS_TRANSPORT=ON
           -DTES3MP_TRANSPORT_DEPENDENCY_MANIFEST=${{ github.workspace }}/build/vnext-transport-dependencies/manifest.json
           ${{ matrix.safety_arguments }}
@@ -111,6 +112,8 @@ jobs:
       - name: Configure the selected adapter
         run: >-
           cmake -S components/tes3mp -B build/vnext-transport-lifecycle -G Ninja
+          -DCMAKE_BUILD_TYPE=RelWithDebInfo
+          -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded
           -DTES3MP_ENABLE_GNS_TRANSPORT=ON
           -DTES3MP_TRANSPORT_DEPENDENCY_MANIFEST=${{ github.workspace }}/build/vnext-transport-dependencies/manifest.json
 
@@ -155,7 +158,7 @@ jobs:
           python3 scripts/run_vnext_gamenetworkingsockets_proof.py
           python3 scripts/run_vnext_cares_proof.py
           python3 scripts/provision_vnext_transport.py
-          cmake -S components/tes3mp -B build/vnext-transport-lifecycle -G Ninja -DTES3MP_ENABLE_GNS_TRANSPORT=ON -DTES3MP_TRANSPORT_DEPENDENCY_MANIFEST="$PWD/build/vnext-transport-dependencies/manifest.json"
+          cmake -S components/tes3mp -B build/vnext-transport-lifecycle -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DTES3MP_ENABLE_GNS_TRANSPORT=ON -DTES3MP_TRANSPORT_DEPENDENCY_MANIFEST="$PWD/build/vnext-transport-dependencies/manifest.json"
           cmake --build build/vnext-transport-lifecycle --target tes3mp_transport_lifecycle_tests tes3mp_transport_gns_schedule_tests tes3mp_transport_gns_tests --parallel 2
           ./build/vnext-transport-lifecycle/tes3mp_transport_lifecycle_tests
           ./build/vnext-transport-lifecycle/tes3mp_transport_gns_schedule_tests
@@ -194,7 +197,7 @@ jobs:
           python3 scripts/run_vnext_gamenetworkingsockets_proof.py
           python3 scripts/run_vnext_cares_proof.py
           python3 scripts/provision_vnext_transport.py
-          cmake -S components/tes3mp -B build/vnext-transport-lifecycle -G Ninja -DTES3MP_ENABLE_GNS_TRANSPORT=ON -DTES3MP_TRANSPORT_DEPENDENCY_MANIFEST="$PWD/build/vnext-transport-dependencies/manifest.json"
+          cmake -S components/tes3mp -B build/vnext-transport-lifecycle -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DTES3MP_ENABLE_GNS_TRANSPORT=ON -DTES3MP_TRANSPORT_DEPENDENCY_MANIFEST="$PWD/build/vnext-transport-dependencies/manifest.json"
           cmake --build build/vnext-transport-lifecycle --target tes3mp_transport_lifecycle_tests tes3mp_transport_gns_schedule_tests tes3mp_transport_gns_tests --parallel 2
           ./build/vnext-transport-lifecycle/tes3mp_transport_lifecycle_tests
           ./build/vnext-transport-lifecycle/tes3mp_transport_gns_schedule_tests

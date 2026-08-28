@@ -3498,6 +3498,33 @@ only the relevant phase section here.
     matrix, record retained evidence, then mark only Slice 6.1 **Implemented**.
     Phase 6 remains **In Progress** and Slice 6.2 remains separately gated.
 
+- 2026-08-28 — Slice 6.1 hosted lifecycle repair — In Progress
+  - Change: diagnosed manual lifecycle run
+    [`33208490001`](https://github.com/poisson-fish/TES3MP/actions/runs/33208490001).
+    The Clang ASan/UBSan executable failed before transport initialization
+    because instrumented Protobuf was linked to a separately rebuilt,
+    uninstrumented Abseil implementation. The adapter now consumes the exact
+    verified installed Abseil package that was built with Protobuf. The Windows
+    job also exposed an independent Debug/dynamic-runtime versus verified
+    RelWithDebInfo/static-runtime link mismatch; every single-config lifecycle
+    job now pins `RelWithDebInfo`, and MSVC pins `MultiThreaded`.
+  - Decisions: none. These repairs implement the already owner-approved
+    coherent Protobuf/Abseil instrumentation and static MSVC dependency profile;
+    they change no dependency identity, transport architecture, authority,
+    state scope, security boundary, or gameplay behavior.
+  - Verification: the repaired graph configures and builds all three lifecycle
+    executables under local MSVC 19.44; numeric/DNS encrypted loopback,
+    deterministic resolver/race/generation, and owned lifecycle tests pass. A
+    new boundary regression rejects a second Abseil source build, and all 14
+    focused boundary tests pass. Run `33208490001` retained green GCC 13,
+    Clang 18 TSan, and macOS arm64 evidence but is not completion evidence.
+  - Owner review: the existing Slice 6.1 completion approval applies; final
+    acceptance remains contingent on a replacement exact matrix with every job
+    green and retained artifacts consistent.
+  - Follow-ups: publish the coherent-package/runtime repair, dispatch the full
+    replacement lifecycle matrix, review all six retained artifacts, and only
+    then mark Slice 6.1 **Implemented**.
+
 ## Phase 7 — Headless end-to-end multiplayer slice
 
 [Back to the phase tracker](IMPLEMENTATION_PLAN.md#phase-7--headless-end-to-end-multiplayer-slice)
