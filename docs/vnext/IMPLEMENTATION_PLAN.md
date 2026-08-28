@@ -2986,7 +2986,7 @@ Depends on: Phase 4.
 | 5.3 | Implement command validation and atomic reducer application | **Implemented** | Accepted [`ADR-0028`](adr/ADR-0028-phase5-command-validation-and-atomic-reducer.md) and [`GDR-0012`](gdr/GDR-0012-phase5-minimal-motion-reducer-semantics.md), implementation `f57a4074db`, applicable local verification, and owner demo acceptance pass |
 | 5.4 | Publish immutable snapshots and versioned state-change events | **Implemented** | Accepted [`ADR-0029`](adr/ADR-0029-phase5-immutable-canonical-publication-and-versioned-change-feed.md), implementation `d7e7b25950`, applicable local verification, and owner demo acceptance pass |
 | 5.5 | Add idempotency windows, authority-epoch checks, state checksums, and explicit resync requests | **Implemented** | Accepted [`ADR-0030`](adr/ADR-0030-phase5-idempotency-checksum-and-resync-boundary.md), implementation `ac627deafc`, applicable local verification, and owner demo acceptance pass |
-| 5.6 | Add persistence, replay, script, and metrics sink interfaces without implementations | **In Progress** | Accepted [`ADR-0031`](adr/ADR-0031-phase5-committed-domain-sink-boundary.md), implementation `2905c7a791`, and applicable local verification pass; owner demo acceptance pending |
+| 5.6 | Add persistence, replay, script, and metrics sink interfaces without implementations | **Implemented** | Accepted [`ADR-0031`](adr/ADR-0031-phase5-committed-domain-sink-boundary.md), implementation `2905c7a791`, applicable local verification, and owner demo acceptance pass |
 | 5.7 | Add reducer property tests and deterministic multi-client simulation tests | **Not Started** | Randomized command streams preserve invariants and reproduce by seed |
 
 Exit gate:
@@ -3611,6 +3611,26 @@ Implementation notes:
     multi-change delivery, fixed role order, mixed failure/no-short-circuit,
     canonical/observability independence, retained-handle isolation, explicit
     gap, and no-backend/runtime evidence for owner acceptance.
+
+- 2026-08-28 — Slice 5.6 — Implemented
+  - Change: retained implementation commit `2905c7a791` without production-code
+    changes and marked Slice 5.6 **Implemented** after the required owner demo
+    acceptance.
+  - Decisions: none. Accepted
+    [`ADR-0031`](adr/ADR-0031-phase5-committed-domain-sink-boundary.md) remains
+    authoritative.
+  - Verification: retained the fresh standalone MSVC 19.44 C++20 65-step build,
+    all 16 contract executables, three golden-corpus checks, 13 focused sink
+    scenarios, 98 repository-owned Python tests, staged provenance and legacy-
+    exclusion checks, seven-file formatting check, isolated public-header
+    compilation, JSON validation, target-boundary check, and staged-diff check
+    recorded above. This status-only closeout changes no production or test
+    source.
+  - Owner review: implementation-demo evidence was explicitly accepted by the
+    project owner in the 2026-08-28 working session.
+  - Follow-ups: none for Slice 5.6. Slice 5.7 is now eligible; inspect its
+    property/simulation scope against accepted Phase 5 decisions before adding
+    test-only coverage.
 
 ### Phase 6 — Maintained transport and secure network session
 
