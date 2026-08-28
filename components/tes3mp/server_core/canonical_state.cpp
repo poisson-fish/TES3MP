@@ -10,10 +10,89 @@ namespace
     {
         return { code, index, value, relatedValue };
     }
+
+    std::optional<TES3MP::CanonicalSessionHistoryError> validateHistory(
+        std::optional<TES3MP::CommandSequence> acknowledgement,
+        std::span<const TES3MP::FinalizedCommandRecord> history) noexcept
+    {
+        using namespace TES3MP;
+        if (history.size() > MaximumFinalizedCommandHistory)
+            return CanonicalSessionHistoryError{ CanonicalSessionHistoryErrorCode::LimitExceeded, history.size(),
+                history.size() };
+        if (!history.empty() && !acknowledgement)
+            return CanonicalSessionHistoryError{ CanonicalSessionHistoryErrorCode::WithoutAcknowledgement };
+        for (std::size_t index = 0; index < history.size(); ++index)
+        {
+            const CommandDisposition disposition = history[index].disposition();
+            if (disposition == CommandDisposition::UnknownSession
+                || disposition == CommandDisposition::SessionGenerationMismatch
+                || disposition == CommandDisposition::AlreadyFinalized
+                || disposition == CommandDisposition::SequenceGap)
+                return CanonicalSessionHistoryError{ CanonicalSessionHistoryErrorCode::ContainsNonFinalDisposition,
+                    index, static_cast<std::uint64_t>(disposition) };
+            if (index != 0)
+            {
+                const auto expected = history[index - 1].commandSequence().next();
+                if (!expected || history[index].commandSequence() != *expected)
+                    return CanonicalSessionHistoryError{ CanonicalSessionHistoryErrorCode::NotContiguous, index,
+                        history[index].commandSequence().value(), history[index - 1].commandSequence().value() };
+            }
+        }
+        if (!history.empty() && history.back().commandSequence() != *acknowledgement)
+            return CanonicalSessionHistoryError{ CanonicalSessionHistoryErrorCode::DoesNotEndAtAcknowledgement,
+                history.size() - 1, history.back().commandSequence().value(), acknowledgement->value() };
+        return std::nullopt;
+    }
 }
 
 namespace TES3MP
 {
+    CanonicalSessionProgress::CanonicalSessionProgress(SessionId sessionId, SessionGeneration sessionGeneration,
+        PlayerId playerId, EntityId entityId, std::optional<CommandSequence> highestContiguousFinalizedCommand)
+        : CanonicalSessionProgress(
+              sessionId, sessionGeneration, playerId, entityId, highestContiguousFinalizedCommand, {})
+    {
+    }
+
+    CanonicalSessionProgress::CanonicalSessionProgress(SessionId sessionId, SessionGeneration sessionGeneration,
+        PlayerId playerId, EntityId entityId, std::optional<CommandSequence> highestContiguousFinalizedCommand,
+        std::vector<FinalizedCommandRecord> finalizedCommandHistory)
+        : mSessionId(sessionId)
+        , mSessionGeneration(sessionGeneration)
+        , mPlayerId(playerId)
+        , mEntityId(entityId)
+        , mHighestContiguousFinalizedCommand(highestContiguousFinalizedCommand)
+        , mFinalizedCommandHistory(
+              std::make_shared<const std::vector<FinalizedCommandRecord>>(std::move(finalizedCommandHistory)))
+    {
+    }
+
+    bool CanonicalSessionProgress::containsFinalizedCommandId(CommandId commandId) const noexcept
+    {
+        return std::any_of(mFinalizedCommandHistory->begin(), mFinalizedCommandHistory->end(),
+            [commandId](FinalizedCommandRecord record) { return record.commandId() == commandId; });
+    }
+
+    bool operator==(const CanonicalSessionProgress& left, const CanonicalSessionProgress& right) noexcept
+    {
+        return left.mSessionId == right.mSessionId && left.mSessionGeneration == right.mSessionGeneration
+            && left.mPlayerId == right.mPlayerId && left.mEntityId == right.mEntityId
+            && left.mHighestContiguousFinalizedCommand == right.mHighestContiguousFinalizedCommand
+            && *left.mFinalizedCommandHistory == *right.mFinalizedCommandHistory;
+    }
+
+    CanonicalSessionProgressCreationResult createCanonicalSessionProgress(SessionId sessionId,
+        SessionGeneration sessionGeneration, PlayerId playerId, EntityId entityId,
+        std::optional<CommandSequence> highestContiguousFinalizedCommand,
+        std::span<const FinalizedCommandRecord> finalizedCommandHistory)
+    {
+        if (const auto error = validateHistory(highestContiguousFinalizedCommand, finalizedCommandHistory))
+            return *error;
+        return CanonicalSessionProgress(sessionId, sessionGeneration, playerId, entityId,
+            highestContiguousFinalizedCommand,
+            std::vector<FinalizedCommandRecord>(finalizedCommandHistory.begin(), finalizedCommandHistory.end()));
+    }
+
     SpatialAdvanceResult advanceCanonicalSpatialState(const CanonicalPlayerEntityState& current, ServerTick commitTick,
         Transform replacementTransform, LinearVelocity3 replacementVelocity) noexcept
     {
@@ -97,6 +176,27 @@ namespace TES3MP
         for (std::size_t index = 0; index < activeSessions.size(); ++index)
         {
             const CanonicalSessionProgress& session = activeSessions[index];
+            const auto history = session.finalizedCommandHistory();
+            if (const auto error = validateHistory(session.highestContiguousFinalizedCommand(), history))
+            {
+                switch (error->code)
+                {
+                    case CanonicalSessionHistoryErrorCode::LimitExceeded:
+                        return stateError(CanonicalStateErrorCode::FinalizedHistoryLimitExceeded, index, error->value);
+                    case CanonicalSessionHistoryErrorCode::WithoutAcknowledgement:
+                        return stateError(CanonicalStateErrorCode::FinalizedHistoryWithoutAcknowledgement, index);
+                    case CanonicalSessionHistoryErrorCode::NotContiguous:
+                        return stateError(CanonicalStateErrorCode::FinalizedHistoryNotStrictlyOrdered, index,
+                            error->value, error->relatedValue);
+                    case CanonicalSessionHistoryErrorCode::DoesNotEndAtAcknowledgement:
+                        return stateError(CanonicalStateErrorCode::FinalizedHistoryDoesNotEndAtAcknowledgement, index,
+                            error->value, error->relatedValue);
+                    case CanonicalSessionHistoryErrorCode::ContainsNonFinalDisposition:
+                        return stateError(CanonicalStateErrorCode::FinalizedHistoryContainsNonFinalDisposition, index,
+                            error->index, error->value);
+                }
+            }
+
             const auto player = std::lower_bound(players.begin(), players.end(), session.playerId(),
                 [](const CanonicalPlayerEntityState& candidate, PlayerId playerId) {
                     return candidate.playerId() < playerId;

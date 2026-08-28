@@ -5,6 +5,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <memory>
 #include <optional>
 #include <span>
 #include <variant>
@@ -14,6 +15,64 @@ namespace TES3MP
 {
     inline constexpr std::size_t MaximumCanonicalPlayerEntities = 256;
     inline constexpr std::size_t MaximumCanonicalActiveSessions = 256;
+    inline constexpr std::size_t MaximumFinalizedCommandHistory = 1024;
+
+    enum class CommandDisposition : std::uint8_t
+    {
+        Applied,
+        UnknownSession,
+        SessionGenerationMismatch,
+        AlreadyFinalized,
+        SequenceGap,
+        DuplicateCommandId,
+        EntityBindingMismatch,
+        EntityRevisionMismatch,
+        AuthorityEpochMismatch,
+        SpatialTickRegression,
+        EntityRevisionExhausted,
+    };
+
+    class FinalizedCommandRecord
+    {
+    public:
+        constexpr FinalizedCommandRecord(
+            CommandSequence commandSequence, CommandId commandId, CommandDisposition disposition) noexcept
+            : mCommandSequence(commandSequence)
+            , mCommandId(commandId)
+            , mDisposition(disposition)
+        {
+        }
+
+        constexpr CommandSequence commandSequence() const noexcept { return mCommandSequence; }
+        constexpr CommandId commandId() const noexcept { return mCommandId; }
+        constexpr CommandDisposition disposition() const noexcept { return mDisposition; }
+
+        friend constexpr bool operator==(FinalizedCommandRecord, FinalizedCommandRecord) noexcept = default;
+
+    private:
+        CommandSequence mCommandSequence;
+        CommandId mCommandId;
+        CommandDisposition mDisposition;
+    };
+
+    enum class CanonicalSessionHistoryErrorCode : std::uint8_t
+    {
+        LimitExceeded,
+        WithoutAcknowledgement,
+        NotContiguous,
+        DoesNotEndAtAcknowledgement,
+        ContainsNonFinalDisposition,
+    };
+
+    struct CanonicalSessionHistoryError
+    {
+        CanonicalSessionHistoryErrorCode code;
+        std::size_t index = 0;
+        std::uint64_t value = 0;
+        std::uint64_t relatedValue = 0;
+
+        friend constexpr bool operator==(CanonicalSessionHistoryError, CanonicalSessionHistoryError) noexcept = default;
+    };
 
     class CanonicalPlayerEntityState
     {
@@ -76,15 +135,8 @@ namespace TES3MP
     class CanonicalSessionProgress
     {
     public:
-        constexpr CanonicalSessionProgress(SessionId sessionId, SessionGeneration sessionGeneration, PlayerId playerId,
-            EntityId entityId, std::optional<CommandSequence> highestContiguousFinalizedCommand) noexcept
-            : mSessionId(sessionId)
-            , mSessionGeneration(sessionGeneration)
-            , mPlayerId(playerId)
-            , mEntityId(entityId)
-            , mHighestContiguousFinalizedCommand(highestContiguousFinalizedCommand)
-        {
-        }
+        CanonicalSessionProgress(SessionId sessionId, SessionGeneration sessionGeneration, PlayerId playerId,
+            EntityId entityId, std::optional<CommandSequence> highestContiguousFinalizedCommand);
 
         constexpr SessionId sessionId() const noexcept { return mSessionId; }
         constexpr SessionGeneration sessionGeneration() const noexcept { return mSessionGeneration; }
@@ -94,17 +146,37 @@ namespace TES3MP
         {
             return mHighestContiguousFinalizedCommand;
         }
+        std::span<const FinalizedCommandRecord> finalizedCommandHistory() const noexcept
+        {
+            return *mFinalizedCommandHistory;
+        }
+        bool containsFinalizedCommandId(CommandId commandId) const noexcept;
 
-        friend constexpr bool operator==(const CanonicalSessionProgress&, const CanonicalSessionProgress&) noexcept
-            = default;
+        friend bool operator==(const CanonicalSessionProgress&, const CanonicalSessionProgress&) noexcept;
 
     private:
+        friend std::variant<CanonicalSessionProgress, CanonicalSessionHistoryError> createCanonicalSessionProgress(
+            SessionId, SessionGeneration, PlayerId, EntityId, std::optional<CommandSequence>,
+            std::span<const FinalizedCommandRecord>);
+
+        CanonicalSessionProgress(SessionId sessionId, SessionGeneration sessionGeneration, PlayerId playerId,
+            EntityId entityId, std::optional<CommandSequence> highestContiguousFinalizedCommand,
+            std::vector<FinalizedCommandRecord> finalizedCommandHistory);
+
         SessionId mSessionId;
         SessionGeneration mSessionGeneration;
         PlayerId mPlayerId;
         EntityId mEntityId;
         std::optional<CommandSequence> mHighestContiguousFinalizedCommand;
+        std::shared_ptr<const std::vector<FinalizedCommandRecord>> mFinalizedCommandHistory;
     };
+
+    using CanonicalSessionProgressCreationResult = std::variant<CanonicalSessionProgress, CanonicalSessionHistoryError>;
+
+    CanonicalSessionProgressCreationResult createCanonicalSessionProgress(SessionId sessionId,
+        SessionGeneration sessionGeneration, PlayerId playerId, EntityId entityId,
+        std::optional<CommandSequence> highestContiguousFinalizedCommand,
+        std::span<const FinalizedCommandRecord> finalizedCommandHistory);
 
     enum class CanonicalStateErrorCode : std::uint8_t
     {
@@ -116,6 +188,11 @@ namespace TES3MP
         SessionPlayerMissing,
         SessionEntityMismatch,
         DuplicateActiveBinding,
+        FinalizedHistoryLimitExceeded,
+        FinalizedHistoryWithoutAcknowledgement,
+        FinalizedHistoryNotStrictlyOrdered,
+        FinalizedHistoryDoesNotEndAtAcknowledgement,
+        FinalizedHistoryContainsNonFinalDisposition,
     };
 
     struct CanonicalStateError

@@ -5,9 +5,11 @@
 
 namespace TES3MP
 {
-    CanonicalStatePublication::CanonicalStatePublication(CanonicalStateVersion stateVersion,
-        std::shared_ptr<const CanonicalServerState> state, std::vector<CanonicalStateChangeRecord> changes) noexcept
+    CanonicalStatePublication::CanonicalStatePublication(CanonicalStateVersion stateVersion, ServerTick checkpointTick,
+        std::shared_ptr<const CanonicalServerState> state, std::vector<CanonicalStateChangeRecord> changes)
         : mStateVersion(stateVersion)
+        , mCheckpointTick(checkpointTick)
+        , mChecksum(canonicalStateChecksumV1(stateVersion, checkpointTick, *state))
         , mState(std::move(state))
         , mChanges(std::move(changes))
     {
@@ -15,8 +17,8 @@ namespace TES3MP
 
     bool operator==(const CanonicalStatePublication& left, const CanonicalStatePublication& right) noexcept
     {
-        return left.mStateVersion == right.mStateVersion && *left.mState == *right.mState
-            && left.mChanges == right.mChanges;
+        return left.mStateVersion == right.mStateVersion && left.mCheckpointTick == right.mCheckpointTick
+            && left.mChecksum == right.mChecksum && *left.mState == *right.mState && left.mChanges == right.mChanges;
     }
 
     CanonicalPublicationReadAction classifyCanonicalPublication(

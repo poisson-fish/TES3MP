@@ -81,8 +81,8 @@ namespace TES3MP
     class CanonicalCommandReducer
     {
     public:
-        // Online composition remains gated until Slice 5.5 adds the bounded
-        // cross-batch CommandId idempotency window.
+        // Eligible for later reviewed composition; this type owns no connection,
+        // protocol request, target projection, delivery, or runtime loop.
         CanonicalCommandReducer(CanonicalServerState initialState, Observability& observability);
 
         CanonicalCommandReducer(const CanonicalCommandReducer&) = delete;
@@ -104,6 +104,7 @@ namespace TES3MP
 
         std::shared_ptr<const CanonicalServerState> mState;
         CanonicalStateVersion mStateVersion = CanonicalStateVersion::initial();
+        ServerTick mCheckpointTick = ServerTick::initial();
         std::atomic<std::shared_ptr<const CanonicalStatePublication>> mLatestPublication;
         Observability& mObservability;
     };

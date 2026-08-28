@@ -443,7 +443,7 @@ namespace
         return reducer.state().players().size() == 1;
     }
 
-    bool cross_batch_command_id_reuse_remains_an_explicit_slice55_online_gate()
+    bool cross_batch_command_id_reuse_is_finalized_without_repeating_player_effect()
     {
         const std::array players{ player(1, 101) };
         const std::array sessions{ session(10, 1, 101) };
@@ -463,8 +463,10 @@ namespace
         const auto secondBatch = fixture.pumpNext();
         const auto second = reducer.apply(secondBatch.batches().front());
         return first && second && first.dispositions().front().disposition() == CommandDisposition::Applied
-            && second.dispositions().front().disposition() == CommandDisposition::Applied
-            && reducer.state().activeSessions().front().highestContiguousFinalizedCommand()->value() == 2;
+            && second.dispositions().front().disposition() == CommandDisposition::DuplicateCommandId
+            && reducer.state().activeSessions().front().highestContiguousFinalizedCommand()->value() == 2
+            && reducer.state().players().front().linearVelocity() == LinearVelocity3(1, 0, 0)
+            && reducer.state().players().front().entityRevision().value() == 2;
     }
 
     bool initial_publication_is_version_zero_complete_and_immutable()
@@ -778,8 +780,8 @@ int main()
             &two_bound_players_change_only_their_own_entity_state },
         std::pair{ "reducer_exposes_no_mutable_state_wire_engine_socket_script_or_database_surface",
             &reducer_exposes_no_mutable_state_wire_engine_socket_script_or_database_surface },
-        std::pair{ "cross_batch_command_id_reuse_remains_an_explicit_slice55_online_gate",
-            &cross_batch_command_id_reuse_remains_an_explicit_slice55_online_gate },
+        std::pair{ "cross_batch_command_id_reuse_is_finalized_without_repeating_player_effect",
+            &cross_batch_command_id_reuse_is_finalized_without_repeating_player_effect },
         std::pair{ "initial_publication_is_version_zero_complete_and_immutable",
             &initial_publication_is_version_zero_complete_and_immutable },
         std::pair{ "accepted_command_publishes_player_and_session_replacements_at_one_version",

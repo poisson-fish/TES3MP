@@ -102,7 +102,7 @@
     {
       "path": "components/tes3mp/CMakeLists.txt",
       "status": "A",
-      "purpose": "Defines the standalone-capable five-library graph, pinned FlatBuffers runtime input, target-scoped safety registration including TSan-compatible allocator-test interposition, fourteen contract executables with golden-corpus verification, and bounded parser fuzz targets."
+      "purpose": "Defines the standalone-capable five-library graph, pinned FlatBuffers runtime input, target-scoped safety registration including TSan-compatible allocator-test interposition, fifteen contract executables with golden-corpus verification, and bounded parser fuzz targets."
     },
     {
       "path": "components/tes3mp/CMakePresets.json",
@@ -130,14 +130,24 @@
       "purpose": "Move-only bounded opaque authentication material and pollable session-owned provider operation boundary."
     },
     {
+      "path": "components/tes3mp/include/tes3mp/canonical_checksum.hpp",
+      "status": "A",
+      "purpose": "Owner-approved explicit canonical V1 byte encoding constants, CRC-64/ECMA-182 divergence checksum value, and dependency-free encoder interfaces."
+    },
+    {
       "path": "components/tes3mp/include/tes3mp/canonical_publication.hpp",
       "status": "A",
-      "purpose": "Owner-approved immutable canonical publication, checked version, typed replacement record, latest-handle, and reader gap-classification interfaces."
+      "purpose": "Owner-approved immutable canonical publication with checked version, checkpoint tick, checksum, typed replacement records, latest handle, and reader gap classification."
+    },
+    {
+      "path": "components/tes3mp/include/tes3mp/canonical_resync.hpp",
+      "status": "A",
+      "purpose": "Owner-approved metadata-only current-session resync request and immutable latest-publication result values without client state upload or runtime transport semantics."
     },
     {
       "path": "components/tes3mp/include/tes3mp/canonical_state.hpp",
       "status": "A",
-      "purpose": "Owner-approved immutable canonical player/session state values, hard bounds, closed invariant errors, const access, and checked spatial-advance interface."
+      "purpose": "Owner-approved immutable canonical player/session state, bounded finalized-command history values, closed invariants, const access, and checked spatial advancement."
     },
     {
       "path": "components/tes3mp/include/tes3mp/client_session.hpp",
@@ -197,7 +207,7 @@
     {
       "path": "components/tes3mp/include/tes3mp/server_command_reducer.hpp",
       "status": "A",
-      "purpose": "Owner-approved writer-confined canonical reducer, closed batch errors, immutable shared state/publication access, checked state version, and explicit pre-Slice-5.5 online gate."
+      "purpose": "Owner-approved writer-confined canonical reducer, closed batch errors, immutable shared state/publication access, checked state version, and later-reviewed composition boundary."
     },
     {
       "path": "components/tes3mp/include/tes3mp/server_session.hpp",
@@ -340,14 +350,24 @@
       "purpose": "Bounded authentication-material construction, move transfer, and best-effort storage clearing implementation."
     },
     {
+      "path": "components/tes3mp/server_core/canonical_checksum.cpp",
+      "status": "A",
+      "purpose": "Stable explicit little-endian complete Phase 5 state encoding and allocation-free CRC-64/ECMA-182 V1 checkpoint implementation."
+    },
+    {
       "path": "components/tes3mp/server_core/canonical_publication.cpp",
       "status": "A",
-      "purpose": "Owner-approved immutable publication equality, contiguous-version reader classification, and checked batch version-capacity implementation."
+      "purpose": "Owner-approved immutable checksummed publication equality, contiguous-version reader classification, and checked batch version-capacity implementation."
+    },
+    {
+      "path": "components/tes3mp/server_core/canonical_resync.cpp",
+      "status": "A",
+      "purpose": "Current-session generation validation and immutable latest-publication resync selection without mutation, client-state input, projection, or transport action."
     },
     {
       "path": "components/tes3mp/server_core/canonical_state.cpp",
       "status": "A",
-      "purpose": "Full-input canonical-state validation, deterministic owned construction and lookup, and pure atomic spatial revision advancement implementation."
+      "purpose": "Full-input canonical-state and finalized-history validation, deterministic owned construction and lookup, and pure atomic spatial revision advancement implementation."
     },
     {
       "path": "components/tes3mp/server_core/deterministic_random.cpp",
@@ -372,7 +392,7 @@
     {
       "path": "components/tes3mp/server_core/server_command_reducer.cpp",
       "status": "A",
-      "purpose": "Owner-approved sealed-batch verification, closed validation order, per-command immutable shared candidate/version installation, batch publication, acknowledgement finalization, velocity replacement, and typed observability implementation."
+      "purpose": "Owner-approved sealed-batch validation, bounded cross-batch idempotency, per-command immutable candidate/version installation, checksummed publication, acknowledgement finalization, velocity replacement, and observability."
     },
     {
       "path": "components/tes3mp/server_core/server_session.cpp",
@@ -572,7 +592,12 @@
     {
       "path": "components/tes3mp/tests/server_command_reducer_tests.cpp",
       "status": "A",
-      "purpose": "Atomic validation/reduction plus immutable publication, checked versioning, typed changes, gap recovery, slow-reader isolation, observability, bounds, and explicit Slice 5.5 online-gate contracts."
+      "purpose": "Atomic validation/reduction plus immutable checksummed publication, checked versioning, typed changes, gap recovery, slow-reader isolation, observability, and bounds contracts."
+    },
+    {
+      "path": "components/tes3mp/tests/server_core_safety_tests.cpp",
+      "status": "A",
+      "purpose": "Approved Slice 5.5 idempotency horizon, duplicate finalization, epoch, exact-byte, CRC-64, field-sensitivity, observability-independence, resync, and composition-boundary contracts."
     },
     {
       "path": "components/tes3mp/tests/session_state_machine_tests.cpp",
@@ -1016,7 +1041,7 @@
         },
         {
           "path": "components/tes3mp/CMakeLists.txt",
-          "sha256": "443a2f675d978db294115cc8ed183fef0f6da5fe862c1dad2ee6565addb09d3d"
+          "sha256": "fc7de369d29b5fab2e008fe8e0d0a16953ef98c1640e9b68ab4e4a7601b983da"
         },
         {
           "path": "components/tes3mp/protocol/generated/client_hello_generated.h",

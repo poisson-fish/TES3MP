@@ -2984,7 +2984,7 @@ Depends on: Phase 4.
 | 5.2 | Implement minimal player/session/cell/root-transform/velocity/ack canonical state | **Implemented** | Accepted [`ADR-0027`](adr/ADR-0027-phase5-canonical-player-and-session-state.md), implementation `f1a1f0632e`, applicable local verification, and owner demo acceptance pass |
 | 5.3 | Implement command validation and atomic reducer application | **Implemented** | Accepted [`ADR-0028`](adr/ADR-0028-phase5-command-validation-and-atomic-reducer.md) and [`GDR-0012`](gdr/GDR-0012-phase5-minimal-motion-reducer-semantics.md), implementation `f57a4074db`, applicable local verification, and owner demo acceptance pass |
 | 5.4 | Publish immutable snapshots and versioned state-change events | **Implemented** | Accepted [`ADR-0029`](adr/ADR-0029-phase5-immutable-canonical-publication-and-versioned-change-feed.md), implementation `d7e7b25950`, applicable local verification, and owner demo acceptance pass |
-| 5.5 | Add idempotency windows, authority-epoch checks, state checksums, and explicit resync requests | **In Progress** | Accepted [`ADR-0030`](adr/ADR-0030-phase5-idempotency-checksum-and-resync-boundary.md); implementation pending |
+| 5.5 | Add idempotency windows, authority-epoch checks, state checksums, and explicit resync requests | **In Progress** | Accepted [`ADR-0030`](adr/ADR-0030-phase5-idempotency-checksum-and-resync-boundary.md), implementation candidate, and applicable local verification pass; owner demo acceptance pending |
 | 5.6 | Add persistence, replay, script, and metrics sink interfaces without implementations | **Not Started** | All sinks receive the same committed change record after, never before, commit |
 | 5.7 | Add reducer property tests and deterministic multi-client simulation tests | **Not Started** | Randomized command streams preserve invariants and reproduce by seed |
 
@@ -3466,6 +3466,41 @@ Implementation notes:
     canonical encoding/checksum, resync values, observability, and focused
     tests. Do not add wire, interest, socket, target-projection, automatic-
     delivery, or runtime composition.
+
+- 2026-08-28 — Slice 5.5 — In Progress
+  - Change: implemented the accepted bounded per-generation finalized-command
+    history, unified same/cross-batch duplicate membership, exact-next duplicate
+    finalization, deterministic 1,024/1,025 FIFO eviction, immutable shared
+    history state, and closed invariant validation. Added explicit complete
+    Phase 5 canonical V1 little-endian bytes, allocation-free
+    CRC-64/ECMA-182 V1 publication checkpoints, checkpoint ticks, and
+    metadata-only current-session resync selection returning an existing latest
+    immutable publication. Added one focused executable containing all 15
+    approved Slice 5.5 scenarios and updated the prior reducer gate regression.
+  - Decisions: no new architecture, authority, state-scope, compatibility, or
+    gameplay decisions were made. The implementation follows accepted
+    [`ADR-0030`](adr/ADR-0030-phase5-idempotency-checksum-and-resync-boundary.md)
+    Option A for Decisions 1–5. Canonical history remains active-generation
+    safety state; checksum is divergence evidence, not authentication; resync
+    accepts no client state; and no wire, interest, socket, target projection,
+    delivery action, or runtime loop was added.
+  - Verification: a fresh standalone MSVC 19.44 C++20 configure and 63-step
+    build pass all 15 contract executables and three golden-corpus checks,
+    including all 15 named Slice 5.5 acceptance scenarios. `python -m unittest
+    discover -s scripts/tests -v` passes all 98 repository-owned tests. Staged
+    baseline provenance passes with 192 intentional differences and 54
+    dependency inputs; staged legacy exclusion passes over 3,886 tracked paths,
+    59 CMake files, 1,254 compile commands, and 1,971 Ninja build edges. All 12
+    changed/new C++ headers and sources pass `clang-format --dry-run --Werror`;
+    JSON, whitespace, target-boundary, public-header isolation, and staged-diff
+    checks pass. Schema regeneration, golden-corpus updates, and fuzz runs are
+    not applicable because this slice changes no wire schema or bounded decoder.
+  - Owner review: architecture/authority/state-scope approval is complete.
+    Implementation-demo acceptance remains pending, so Slice 5.5 stays **In
+    Progress** and Slice 5.6 remains gated.
+  - Follow-ups: present duplicate, history-retention/eviction, epoch, exact-byte/
+    CRC, observability-independence, resync, and no-runtime-composition evidence
+    for owner acceptance.
 
 ### Phase 6 — Maintained transport and secure network session
 

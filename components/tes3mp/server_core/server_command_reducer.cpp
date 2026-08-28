@@ -86,7 +86,7 @@ namespace
     }
 
     std::variant<CanonicalServerState, CanonicalStateError> replacementState(const CanonicalServerState& current,
-        std::size_t sessionIndex, CommandSequence finalizedSequence, std::optional<std::size_t> playerIndex,
+        std::size_t sessionIndex, FinalizedCommandRecord finalizedCommand, std::optional<std::size_t> playerIndex,
         std::optional<CanonicalPlayerEntityState> playerReplacement)
     {
         std::vector<CanonicalPlayerEntityState> players(current.players().begin(), current.players().end());
@@ -94,8 +94,17 @@ namespace
             current.activeSessions().begin(), current.activeSessions().end());
 
         const CanonicalSessionProgress& session = sessions[sessionIndex];
-        sessions[sessionIndex] = CanonicalSessionProgress(session.sessionId(), session.sessionGeneration(),
-            session.playerId(), session.entityId(), finalizedSequence);
+        std::vector<FinalizedCommandRecord> history(
+            session.finalizedCommandHistory().begin(), session.finalizedCommandHistory().end());
+        if (history.size() == MaximumFinalizedCommandHistory)
+            history.erase(history.begin());
+        history.push_back(finalizedCommand);
+        auto replacementSession = createCanonicalSessionProgress(session.sessionId(), session.sessionGeneration(),
+            session.playerId(), session.entityId(), finalizedCommand.commandSequence(), history);
+        if (const auto* error = std::get_if<CanonicalSessionHistoryError>(&replacementSession))
+            return CanonicalStateError{ CanonicalStateErrorCode::FinalizedHistoryNotStrictlyOrdered, sessionIndex,
+                error->value, error->relatedValue };
+        sessions[sessionIndex] = std::get<CanonicalSessionProgress>(std::move(replacementSession));
         if (playerIndex && playerReplacement)
             players[*playerIndex] = *playerReplacement;
 
@@ -108,7 +117,7 @@ namespace TES3MP
     CanonicalCommandReducer::CanonicalCommandReducer(CanonicalServerState initialState, Observability& observability)
         : mState(std::make_shared<CanonicalServerState>(std::move(initialState)))
         , mLatestPublication(std::shared_ptr<const CanonicalStatePublication>(
-              new CanonicalStatePublication(mStateVersion, mState, {})))
+              new CanonicalStatePublication(mStateVersion, mCheckpointTick, mState, {})))
         , mObservability(observability)
     {
     }
@@ -123,7 +132,9 @@ namespace TES3MP
         if (publication->mChanges.empty())
             return;
         publication->mStateVersion = mStateVersion;
+        publication->mCheckpointTick = mCheckpointTick;
         publication->mState = mState;
+        publication->mChecksum = canonicalStateChecksumV1(mStateVersion, mCheckpointTick, *mState);
         mLatestPublication.store(std::move(publication), std::memory_order_release);
     }
 
@@ -194,10 +205,8 @@ namespace TES3MP
         }
 
         result.mDispositions.reserve(commands.size());
-        std::vector<CommandId> finalizedCommandIds;
-        finalizedCommandIds.reserve(commands.size());
-        auto publication
-            = std::shared_ptr<CanonicalStatePublication>(new CanonicalStatePublication(mStateVersion, mState, {}));
+        auto publication = std::shared_ptr<CanonicalStatePublication>(
+            new CanonicalStatePublication(mStateVersion, tick, mState, {}));
         publication->mChanges.reserve(commands.size());
 
         try
@@ -223,12 +232,10 @@ namespace TES3MP
                         std::optional<std::size_t> playerIndex;
                         std::optional<CanonicalPlayerEntityState> playerReplacement;
 
-                        if (std::find(finalizedCommandIds.begin(), finalizedCommandIds.end(), proposal.commandId())
-                            != finalizedCommandIds.end())
+                        if (session->containsFinalizedCommandId(proposal.commandId()))
                             disposition = CommandDisposition::DuplicateCommandId;
                         else
                         {
-                            finalizedCommandIds.push_back(proposal.commandId());
                             const EntityPrecondition precondition = proposal.entityPrecondition();
                             if (precondition.entityId() != session->entityId())
                                 disposition = CommandDisposition::EntityBindingMismatch;
@@ -259,8 +266,9 @@ namespace TES3MP
                             }
                         }
 
-                        auto candidate = replacementState(
-                            *mState, sessionIndex, proposal.commandSequence(), playerIndex, playerReplacement);
+                        auto candidate = replacementState(*mState, sessionIndex,
+                            FinalizedCommandRecord(proposal.commandSequence(), proposal.commandId(), disposition),
+                            playerIndex, playerReplacement);
                         if (std::holds_alternative<CanonicalServerState>(candidate))
                         {
                             const CanonicalStateVersion nextVersion = *mStateVersion.next();
@@ -278,6 +286,7 @@ namespace TES3MP
                             publication->mChanges.push_back(std::move(change));
                             mState = std::move(nextState);
                             mStateVersion = nextVersion;
+                            mCheckpointTick = tick;
                             acknowledgementAdvanced = true;
                         }
                         else

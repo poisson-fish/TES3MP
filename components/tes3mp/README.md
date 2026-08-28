@@ -217,9 +217,8 @@ constructs and installs one complete immutable candidate per final command.
 Accepted motion replaces velocity exactly while preserving the complete
 transform; rejected exact-next commands may advance acknowledgement while
 preserving player state. Typed dispositions and bounded observations expose the
-result without publishing snapshots or domain change records. Cross-batch
-command-ID idempotency remains deliberately incomplete, so online reducer
-composition stays prohibited until Slice 5.5; there is still no integration,
+result without publishing snapshots or domain change records. Slice 5.5 adds
+the approved cross-batch command-ID safety state; there is still no integration,
 clamping, collision, cell transition, prediction, persistence, scripting, or
 presentation behavior.
 
@@ -231,7 +230,19 @@ complete final state plus ordered typed replacement records. The core retains
 only that latest bounded batch; readers either consume the exact next versions
 or replace their view from its complete snapshot after a gap. Old immutable
 handles remain valid without reader registration, acknowledgement, callbacks,
-queue waits, shared locks, or writer backpressure. Publication stays domain-only
-and offline: protocol/interest conversion, command-result delivery, checksums,
-explicit network resync, persistence/replay/script sinks, and online composition
-remain later gated work.
+queue waits, shared locks, or writer backpressure. Publication stays domain-only;
+protocol/interest conversion, command-result delivery, persistence/replay/script
+sinks, and online composition remain later gated work.
+
+Phase 5 Slice 5.5 accepts ADR-0030 and extends each active session generation
+with an immutable trailing history of at most 1,024 finalized command records.
+Every exact-next accepted or rejected command enters history; retained duplicate
+IDs finalize once without repeating player effects, and record 1,025 evicts only
+the oldest entry. Complete Phase 5 state, version, checkpoint tick, rules
+version, authority epochs, acknowledgements, and history use an explicit
+little-endian canonical V1 encoding and dependency-free CRC-64/ECMA-182 V1
+divergence checksum. A metadata-only current-session resync request can return
+the latest immutable complete publication to a trusted future adapter without
+accepting client state or mutating the server. These core contracts add no wire
+message, interest projection, socket action, automatic delivery, or runtime
+loop; those remain gated to their owning phases.

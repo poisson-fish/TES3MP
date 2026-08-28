@@ -37,8 +37,9 @@ latest-publication, checked version, typed domain-change, and reader-gap
 contracts with accepted owner demo evidence. See the [implementation
 plan](IMPLEMENTATION_PLAN.md) for the live tracker, phase gates, decision
 records, and verification evidence. Slice 5.5 has accepted
-[`ADR-0030`](adr/ADR-0030-phase5-idempotency-checksum-and-resync-boundary.md)
-and its production implementation is in progress.
+[`ADR-0030`](adr/ADR-0030-phase5-idempotency-checksum-and-resync-boundary.md);
+its production implementation and focused tests pass applicable local
+verification, with owner demo acceptance pending.
 
 Beginning with Phase 4, each slice runs applicable local verification. The full
 vNext hosted matrix runs once by manual dispatch against the phase-completion
@@ -197,7 +198,8 @@ Phase 5 Slice 5.5 has accepted
 for the bounded per-generation command-ID retry horizon, duplicate finalization,
 canonical byte/checksum contract, explicit server-snapshot resync boundary, and
 remaining online-composition gate. Owner architecture approval is complete;
-implementation and demo acceptance remain pending.
+the bounded server-core implementation and focused tests pass applicable local
+verification, and implementation-demo acceptance remains pending.
 
 ## References and license
 

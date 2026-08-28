@@ -1,6 +1,7 @@
 #ifndef TES3MP_CANONICAL_PUBLICATION_HPP
 #define TES3MP_CANONICAL_PUBLICATION_HPP
 
+#include "canonical_checksum.hpp"
 #include "canonical_state.hpp"
 #include "server_command_intake.hpp"
 
@@ -13,28 +14,13 @@
 
 namespace TES3MP
 {
-    enum class CommandDisposition : std::uint8_t
-    {
-        Applied,
-        UnknownSession,
-        SessionGenerationMismatch,
-        AlreadyFinalized,
-        SequenceGap,
-        DuplicateCommandId,
-        EntityBindingMismatch,
-        EntityRevisionMismatch,
-        AuthorityEpochMismatch,
-        SpatialTickRegression,
-        EntityRevisionExhausted,
-    };
-
     class CanonicalStateChangeRecord
     {
     public:
-        constexpr CanonicalStateChangeRecord(const CanonicalStateChangeRecord&) noexcept = default;
-        constexpr CanonicalStateChangeRecord& operator=(const CanonicalStateChangeRecord&) noexcept = default;
-        constexpr CanonicalStateChangeRecord(CanonicalStateChangeRecord&&) noexcept = default;
-        constexpr CanonicalStateChangeRecord& operator=(CanonicalStateChangeRecord&&) noexcept = default;
+        CanonicalStateChangeRecord(const CanonicalStateChangeRecord&) noexcept = default;
+        CanonicalStateChangeRecord& operator=(const CanonicalStateChangeRecord&) noexcept = default;
+        CanonicalStateChangeRecord(CanonicalStateChangeRecord&&) noexcept = default;
+        CanonicalStateChangeRecord& operator=(CanonicalStateChangeRecord&&) noexcept = default;
 
         constexpr CanonicalStateVersion stateVersion() const noexcept { return mStateVersion; }
         constexpr WriterAdmissionStamp stamp() const noexcept { return mStamp; }
@@ -50,15 +36,14 @@ namespace TES3MP
             return mPlayerReplacement;
         }
 
-        friend constexpr bool operator==(const CanonicalStateChangeRecord&, const CanonicalStateChangeRecord&) noexcept
-            = default;
+        friend bool operator==(const CanonicalStateChangeRecord&, const CanonicalStateChangeRecord&) noexcept = default;
 
     private:
         friend class CanonicalCommandReducer;
 
-        constexpr CanonicalStateChangeRecord(CanonicalStateVersion stateVersion, WriterAdmissionStamp stamp,
-            SessionId sessionId, SessionGeneration sessionGeneration, CommandSequence commandSequence,
-            CommandId commandId, CommandDisposition disposition, CanonicalSessionProgress sessionReplacement,
+        CanonicalStateChangeRecord(CanonicalStateVersion stateVersion, WriterAdmissionStamp stamp, SessionId sessionId,
+            SessionGeneration sessionGeneration, CommandSequence commandSequence, CommandId commandId,
+            CommandDisposition disposition, CanonicalSessionProgress sessionReplacement,
             std::optional<CanonicalPlayerEntityState> playerReplacement) noexcept
             : mStateVersion(stateVersion)
             , mStamp(stamp)
@@ -86,6 +71,8 @@ namespace TES3MP
     {
     public:
         constexpr CanonicalStateVersion stateVersion() const noexcept { return mStateVersion; }
+        constexpr ServerTick checkpointTick() const noexcept { return mCheckpointTick; }
+        constexpr CanonicalChecksum checksum() const noexcept { return mChecksum; }
         const CanonicalServerState& state() const noexcept { return *mState; }
         std::span<const CanonicalStateChangeRecord> changes() const noexcept { return mChanges; }
 
@@ -94,10 +81,12 @@ namespace TES3MP
     private:
         friend class CanonicalCommandReducer;
 
-        CanonicalStatePublication(CanonicalStateVersion stateVersion, std::shared_ptr<const CanonicalServerState> state,
-            std::vector<CanonicalStateChangeRecord> changes) noexcept;
+        CanonicalStatePublication(CanonicalStateVersion stateVersion, ServerTick checkpointTick,
+            std::shared_ptr<const CanonicalServerState> state, std::vector<CanonicalStateChangeRecord> changes);
 
         CanonicalStateVersion mStateVersion;
+        ServerTick mCheckpointTick;
+        CanonicalChecksum mChecksum;
         std::shared_ptr<const CanonicalServerState> mState;
         std::vector<CanonicalStateChangeRecord> mChanges;
     };
