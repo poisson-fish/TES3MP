@@ -3525,6 +3525,29 @@ only the relevant phase section here.
     replacement lifecycle matrix, review all six retained artifacts, and only
     then mark Slice 6.1 **Implemented**.
 
+- 2026-08-28 — Slice 6.1 sanitizer API-boundary repair — In Progress
+  - Change: replacement run
+    [`33210477375`](https://github.com/poisson-fish/TES3MP/actions/runs/33210477375)
+    confirmed the coherent Protobuf/Abseil repair, then UBSan rejected the
+    adapter's C++ virtual callback-registration call across
+    GameNetworkingSockets' deliberately RTTI-free build boundary. The adapter
+    now uses the selected library's public flat callback-registration wrapper
+    for setup and teardown and fails initialization closed if setup fails.
+  - Decisions: none. The flat API is part of the pinned public dependency
+    surface and preserves ADR-0032's accepted callback and lifecycle behavior.
+    No sanitizer check or report class is suppressed.
+  - Verification: the correction builds with MSVC 19.44; real encrypted numeric
+    and DNS loopback pass; all 14 focused boundary tests pass; and a regression
+    rejects reintroducing the direct virtual callback call. Run `33210477375`
+    has green GCC 13, Clang 18 TSan, and macOS arm64 jobs but cannot serve as
+    completion evidence because its ASan/UBSan candidate predates this repair.
+  - Owner review: the existing completion approval remains applicable; the
+    change introduces no architecture, authority, state-scope, security, or
+    gameplay decision.
+  - Follow-ups: publish the flat-wrapper repair, dispatch and review another
+    exact six-job matrix, compare retained artifacts, and only then close the
+    slice.
+
 ## Phase 7 — Headless end-to-end multiplayer slice
 
 [Back to the phase tracker](IMPLEMENTATION_PLAN.md#phase-7--headless-end-to-end-multiplayer-slice)

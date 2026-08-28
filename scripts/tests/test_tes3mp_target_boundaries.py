@@ -304,6 +304,16 @@ class TES3MPTargetBoundaryTests(unittest.TestCase):
             self.assertIn(selected_header, adapter)
         self.assertEqual(adapter.count("k_ESteamNetworkingConfig_Unencrypted, 0"), 2)
         self.assertNotIn("k_ESteamNetworkingConfig_Unencrypted, 1", adapter)
+        self.assertEqual(
+            adapter.count(
+                "SteamAPI_ISteamNetworkingUtils_SetGlobalCallback_SteamNetConnectionStatusChanged"
+            ),
+            2,
+        )
+        self.assertNotIn(
+            "SteamNetworkingUtils()->SetGlobalCallback_SteamNetConnectionStatusChanged",
+            adapter,
+        )
 
     def test_selected_adapter_reuses_verified_abseil_package(self):
         cmake_text = (ENGINE_INDEPENDENT_SOURCE / "CMakeLists.txt").read_text(

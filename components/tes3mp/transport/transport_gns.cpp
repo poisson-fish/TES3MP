@@ -31,6 +31,7 @@
 #include <ares.h>
 #include <steam/isteamnetworkingutils.h>
 #include <steam/steamnetworkingsockets.h>
+#include <steam/steamnetworkingsockets_flat.h>
 
 namespace
 {
@@ -320,7 +321,9 @@ namespace
                 return;
             mGnsInitialized = true;
             sActive = this;
-            SteamNetworkingUtils()->SetGlobalCallback_SteamNetConnectionStatusChanged(&statusChangedCallback);
+            if (!SteamAPI_ISteamNetworkingUtils_SetGlobalCallback_SteamNetConnectionStatusChanged(
+                    SteamNetworkingUtils(), &statusChangedCallback))
+                return;
             mValid = true;
         }
 
@@ -329,7 +332,8 @@ namespace
             shutdown();
             if (mGnsInitialized)
             {
-                SteamNetworkingUtils()->SetGlobalCallback_SteamNetConnectionStatusChanged(nullptr);
+                SteamAPI_ISteamNetworkingUtils_SetGlobalCallback_SteamNetConnectionStatusChanged(
+                    SteamNetworkingUtils(), nullptr);
                 if (sActive == this)
                     sActive = nullptr;
                 GameNetworkingSockets_Kill();
