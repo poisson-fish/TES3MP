@@ -337,6 +337,7 @@ runtime or protocol name.
 | ADR-0025 | Minimal player command, world-snapshot roots, session guards, and in-memory exchange | Phase 4 | **Implemented** |
 | ADR-0026 | Phase 5 writer command intake, ordering, limits, and overload policy | Phase 5 | **Implemented** |
 | ADR-0027 | Phase 5 canonical player/session state, scope, invariants, and bounds | Phase 5 | **Implemented** |
+| ADR-0028 | Phase 5 command validation, disposition, acknowledgement, and atomic reducer boundary | Phase 5 | **Proposed** |
 
 An ADR is complete only when it records considered alternatives, selection
 criteria, consequences, failure modes, a replacement/review trigger, and
@@ -360,6 +361,7 @@ production code that depends on the choice cannot.
 | GDR-0009 | Dialogue, journal, faction, quest, and progression state scope | Phase 17 | **Not Started** |
 | GDR-0010 | Time, weather, globals, reset, and shared-world evolution semantics | Phase 18 | **Not Started** |
 | GDR-0011 | Phase 4 minimal player-intent authority and session-targeted snapshot semantics | Phase 4 | **Implemented** |
+| GDR-0012 | Phase 5 minimal motion reducer effect, scope, and contention semantics | Phase 5 | **Proposed** |
 
 A GDR is **Implemented** only after its questions are explicitly approved and
 the approval is recorded. Later code slices remain separate: an approved design
@@ -2978,7 +2980,7 @@ Depends on: Phase 4.
 |---|---|---|---|
 | 5.1 | Implement fixed-tick scheduling, bounded per-tick command intake, and deterministic ordering | **Implemented** | Accepted [`ADR-0026`](adr/ADR-0026-phase5-writer-command-intake-and-ordering.md), implementation `e0dde571f5`, applicable local verification, and owner demo acceptance pass |
 | 5.2 | Implement minimal player/session/cell/root-transform/velocity/ack canonical state | **Implemented** | Accepted [`ADR-0027`](adr/ADR-0027-phase5-canonical-player-and-session-state.md), implementation `f1a1f0632e`, applicable local verification, and owner demo acceptance pass |
-| 5.3 | Implement command validation and atomic reducer application | **Not Started** | Invalid, stale, duplicate, and over-budget commands cause no partial state mutation |
+| 5.3 | Implement command validation and atomic reducer application | **In Progress** | Proposed [`ADR-0028`](adr/ADR-0028-phase5-command-validation-and-atomic-reducer.md) and [`GDR-0012`](gdr/GDR-0012-phase5-minimal-motion-reducer-semantics.md) decision packets are ready for owner review; production reducer remains approval-gated |
 | 5.4 | Publish immutable snapshots and versioned state-change events | **Not Started** | Readers cannot mutate canonical state and slow readers cannot block the writer indefinitely |
 | 5.5 | Add idempotency windows, authority-epoch checks, state checksums, and explicit resync requests | **Not Started** | Duplicate/stale/epoch mismatch and divergence-repair tests pass |
 | 5.6 | Add persistence, replay, script, and metrics sink interfaces without implementations | **Not Started** | All sinks receive the same committed change record after, never before, commit |
@@ -3169,6 +3171,40 @@ Implementation notes:
   - Follow-ups: none for Slice 5.2. Slice 5.3 is now eligible but requires owner
     review of command validation, disposition, acknowledgement progression, and
     atomic reducer installation before production reducer code lands.
+
+- 2026-08-28 — Slice 5.3 — In Progress
+  - Change: inspected the accepted authority, deterministic simulation,
+    protocol envelope, minimal motion intent, writer intake, canonical state,
+    acknowledgement, and observability contracts. Added proposed
+    [`ADR-0028`](adr/ADR-0028-phase5-command-validation-and-atomic-reducer.md)
+    with five owner-gated architecture option sets and proposed
+    [`GDR-0012`](gdr/GDR-0012-phase5-minimal-motion-reducer-semantics.md) with
+    four owner-gated behavior option sets. No production reducer, validation,
+    acknowledgement advancement, canonical mutation, publication, or gameplay
+    code changed.
+  - Decisions: none accepted. The recommendation is a writer-confined owning
+    reducer with sealed-batch invariant verification and per-command atomic installation;
+    closed validation order and dispositions; exact-next finalization with
+    atomic accepted-or-rejected acknowledgement; immutable candidate
+    construction; current-epoch and same-batch duplicate checks while the
+    cross-batch idempotency/online gate remains Slice 5.5; and exact canonical
+    velocity replacement with no position integration, clamp, collision, cell,
+    prediction, or presentation behavior.
+  - Verification: `python -m unittest discover -s scripts/tests` passes all 98
+    repository-owned tests. Staged baseline provenance accounts for 180
+    intentional differences and 54 dependency inputs; staged legacy exclusion
+    checks 3,874 tracked paths, 59 CMake files, 1,254 compile commands, and
+    1,971 Ninja edges. The provenance JSON parses, all 96 local vNext Markdown
+    links resolve, required ADR/GDR sections and proposal/status assertions pass,
+    and staged diff checks pass. A C++ product build, formatting, schema
+    regeneration, corpus, and fuzz verification are not applicable because no
+    production source, schema, decoder, or corpus changes are proposed.
+  - Owner review: pending explicit approval or amendment of ADR-0028 Decisions
+    1–5, GDR-0012 Decisions 1–4, the Slice 5.5 boundary clarification, and the
+    proposed acceptance tests.
+  - Follow-ups: after approval, record the selected options and implement only
+    the approved validation, reducer, acknowledgement, observability, and
+    focused tests. Slice 5.4 and online reducer composition remain gated.
 
 ### Phase 6 — Maintained transport and secure network session
 

@@ -169,6 +169,13 @@ contiguous-finalized acknowledgement progress. It adds no online state install,
 reducer, lifecycle, persistence, publication, movement, or gameplay behavior;
 local verification and owner implementation-demo acceptance pass.
 
+Phase 5 Slice 5.3 is now in decision review. Proposed
+[`ADR-0028`](adr/ADR-0028-phase5-command-validation-and-atomic-reducer.md) and
+[`GDR-0012`](gdr/GDR-0012-phase5-minimal-motion-reducer-semantics.md) present
+the atomic reducer, validation/disposition, acknowledgement, incomplete
+cross-batch idempotency gate, and narrow provisional velocity-replacement
+options. No option is accepted and no production reducer code exists yet.
+
 ## References and license
 
 - [OpenMW 0.51 source](https://gitlab.com/OpenMW/openmw/-/tree/openmw-0.51.0)
