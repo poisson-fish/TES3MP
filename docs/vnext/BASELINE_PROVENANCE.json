@@ -570,6 +570,16 @@
       "purpose": "Owner-approved reliable-operation and latest-wins envelope direction, metadata, validation-ownership, evolution, and slice-boundary policy."
     },
     {
+      "path": "docs/vnext/adr/ADR-0025-minimal-player-command-world-snapshot-exchange.md",
+      "status": "A",
+      "purpose": "Proposed owner-gated typed command/snapshot roots, bounds, role-specific exchange guards, evolution evidence, and deterministic in-memory fake-peer architecture."
+    },
+    {
+      "path": "docs/vnext/gdr/GDR-0011-phase4-minimal-player-exchange-semantics.md",
+      "status": "A",
+      "purpose": "Proposed owner-gated Phase 4 player-motion intent, authority separation, session-targeted snapshot scope, and confirmed-client-state semantics."
+    },
+    {
       "path": "docs/vnext/proofs/flatbuffers/ANDROID_ARM64.md",
       "status": "A",
       "purpose": "ADR-0002-required Android ARM64 feasibility assessment for the selected header-only codec runtime surface."

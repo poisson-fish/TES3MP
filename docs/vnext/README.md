@@ -22,10 +22,12 @@ Phases 0–3 are implemented. The active tree is a provenance-verified OpenMW
 - sanitizer, race, fuzz, and supported desktop build evidence; and
 - owned typed observability interfaces with bounded deterministic test sinks.
 
-Phase 4—bounded protocol and in-memory session—is next. No production
-multiplayer runtime or real transport integration exists yet. See the
-[implementation plan](IMPLEMENTATION_PLAN.md) for the live tracker, phase gates,
-decision records, and verification evidence.
+Phase 4—bounded protocol and in-memory session—is in progress. Slices 4.1–4.4
+are implemented; Slice 4.5 is in decision review before its typed player-command
+and world-snapshot exchange may land. No production multiplayer runtime or real
+transport integration exists yet. See the [implementation
+plan](IMPLEMENTATION_PLAN.md) for the live tracker, phase gates, decision
+records, and verification evidence.
 
 Beginning with Phase 4, each slice runs applicable local verification. The full
 vNext hosted matrix runs once by manual dispatch against the phase-completion
@@ -135,11 +137,14 @@ boundaries, adds proportionate tests, records exact evidence, updates statuses,
 and leaves the branch buildable. Hosted vNext workflows are manual phase-exit
 gates; ordinary slice commits must not trigger the full matrix.
 
-Slice 4.4 implements accepted ADR-0024 with protocol-owned reliable-operation
-and latest-wins-snapshot header values. Command identity remains separate from
-ordering and acknowledgement progress, while complete wire roots and typed
-command/snapshot bodies remain gated on Slice 4.5. No generic payload, new
-schema, authority, state scope, or gameplay behavior is introduced.
+Slice 4.5 is in decision review. Proposed
+[`ADR-0025`](adr/ADR-0025-minimal-player-command-world-snapshot-exchange.md)
+defines the bounded typed-root, role-specific exchange-guard, and deterministic
+in-memory fake-peer options, while proposed
+[`GDR-0011`](gdr/GDR-0011-phase4-minimal-player-exchange-semantics.md) separately
+defines the narrow player-intent, authority, and session-targeted snapshot-scope
+options. No production schema, codec, state, authority, or gameplay behavior is
+authorized until the project owner approves or amends both records.
 
 ## References and license
 

@@ -334,6 +334,7 @@ runtime or protocol name.
 | ADR-0022 | Version/capability negotiation, hello/rejection schemas, and legacy-input response boundary | Phase 4 | **Implemented** |
 | ADR-0023 | Session state machines and authentication-provider boundary | Phase 4 | **Implemented** |
 | ADR-0024 | Reliable-operation and latest-wins envelope contract | Phase 4 | **Implemented** |
+| ADR-0025 | Minimal player command, world-snapshot roots, session guards, and in-memory exchange | Phase 4 | **Proposed** |
 
 An ADR is complete only when it records considered alternatives, selection
 criteria, consequences, failure modes, a replacement/review trigger, and
@@ -356,6 +357,7 @@ production code that depends on the choice cannot.
 | GDR-0008 | Combat resolution, lag handling, effects, projectiles, death, and resurrection semantics | Phase 16 | **Not Started** |
 | GDR-0009 | Dialogue, journal, faction, quest, and progression state scope | Phase 17 | **Not Started** |
 | GDR-0010 | Time, weather, globals, reset, and shared-world evolution semantics | Phase 18 | **Not Started** |
+| GDR-0011 | Phase 4 minimal player-intent authority and session-targeted snapshot semantics | Phase 4 | **Proposed** |
 
 A GDR is **Implemented** only after its questions are explicitly approved and
 the approval is recorded. Later code slices remain separate: an approved design
@@ -2406,7 +2408,7 @@ Depends on: Phase 3.
 | 4.2 | Implement `ClientHello`, `ServerHello`, and clear rejection with version/capability negotiation | **Implemented** | Accepted [`ADR-0022`](adr/ADR-0022-version-and-capability-negotiation.md), implementation `e89621e970`, all applicable local verification, and owner demo acceptance pass |
 | 4.3 | Implement the client/server session state machines and authentication-provider interface | **Implemented** | Accepted [`ADR-0023`](adr/ADR-0023-session-state-machines-and-authentication-provider-boundary.md), implementation `edbedbd632`, all applicable local verification, and owner demo acceptance pass |
 | 4.4 | Define reliable-operation and latest-wins snapshot envelopes | **Implemented** | Accepted [`ADR-0024`](adr/ADR-0024-reliable-operation-latest-wins-envelope-contract.md), implementation `ee17ebdd0a`, all applicable local verification, and owner demo acceptance pass |
-| 4.5 | Exchange a minimal player command and world snapshot over the in-memory link | **Not Started** | A fake peer completes handshake and state exchange with no sockets or OpenMW |
+| 4.5 | Exchange a minimal player command and world snapshot over the in-memory link | **In Progress** | Proposed [`ADR-0025`](adr/ADR-0025-minimal-player-command-world-snapshot-exchange.md) and [`GDR-0011`](gdr/GDR-0011-phase4-minimal-player-exchange-semantics.md) decision packets are ready for owner review; production schemas and behavior remain approval-gated |
 | 4.6 | Add round-trip, property, golden-schema, mutation, and fuzz coverage | **Not Started** | Every decoder is registered with a corpus and sanitizer-backed fuzz target |
 
 Exit gate:
@@ -2696,6 +2698,40 @@ Implementation notes:
   - Follow-ups: none for Slice 4.4. Phase 4 remains **In Progress**; Slice 4.5
     stays **Not Started** and requires a separate behavior/protocol decision
     packet before typed bodies, schemas, or exchange behavior land.
+
+- 2026-08-27 — Slice 4.5 — In Progress
+  - Change: inspected the implemented Phase 4 framing, negotiation, session,
+    envelope, strong-identity, spatial-primitive, in-memory-link, target-policy,
+    and test boundaries. Added proposed
+    [`ADR-0025`](adr/ADR-0025-minimal-player-command-world-snapshot-exchange.md)
+    with five architecture option sets and proposed
+    [`GDR-0011`](gdr/GDR-0011-phase4-minimal-player-exchange-semantics.md) with
+    four separately reviewable gameplay/authority/state-scope option sets. No
+    production schema, generated source, codec, session state, fake peer,
+    authority, canonical mutation, or gameplay behavior changed.
+  - Decisions: none accepted. The recommendation is closed typed `T3RO`/`T3LS`
+    body unions; one velocity-only player motion intent with a required entity
+    precondition; a deterministically ordered, target-session selected spatial
+    view capped at 256 entries; pure codecs plus role-specific established-
+    session/timeline guards; atomic confirmed client state; and a synchronous
+    test-support fake peer composed from the existing framed hello, typed
+    authentication, and in-memory-link boundaries.
+  - Verification: all 97 repository-owned Python tests pass. Indexed baseline
+    provenance accounts for 151 intentional differences and verifies 50
+    dependency inputs. Indexed legacy exclusion checks 3,845 tracked paths, 59
+    CMake files, 29 compile commands, and 85 Ninja edges. The provenance JSON
+    parses, all 80 local vNext Markdown links resolve, both proposed records
+    have the required decision/options, consequences, failure, review-trigger,
+    acceptance-test, and pending-owner sections, only `docs/vnext` paths are
+    staged, and staged diff checks pass. A product build is not applicable
+    because this approval-gated kickoff changes documentation only.
+  - Owner review: pending explicit, independent approval or amendment of
+    ADR-0025 Decisions 1–5 and GDR-0011 Decisions 1–4. Production work remains
+    gated; approval of one record does not imply approval of the other.
+  - Follow-ups: present both decision packets and proposed acceptance tests to
+    the owner, record the chosen options, then implement only the approved
+    schemas, codecs, session guards, and fake-peer exchange. Slice 4.6 remains
+    gated.
 
 ### Phase 5 — Deterministic authoritative server core
 
