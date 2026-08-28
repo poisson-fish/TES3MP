@@ -670,6 +670,11 @@
       "purpose": "Owner-approved typed command/snapshot roots, bounds, role-specific exchange guards, evolution evidence, and deterministic in-memory fake-peer architecture."
     },
     {
+      "path": "docs/vnext/adr/ADR-0026-phase5-writer-command-intake-and-ordering.md",
+      "status": "A",
+      "purpose": "Proposed owner-gated Phase 5 server-core command boundary, writer cutoff and ordering, hard intake limits, overload policy, and coordinator architecture."
+    },
+    {
       "path": "docs/vnext/gdr/GDR-0011-phase4-minimal-player-exchange-semantics.md",
       "status": "A",
       "purpose": "Owner-approved Phase 4 player-motion intent, authority separation, session-targeted snapshot scope, and confirmed-client-state semantics."

@@ -111,7 +111,7 @@ Observed on 2026-08-25 before this plan was added:
 | 2 | Security and architecture decisions | **Implemented** | Phase 1 |
 | 3 | Independent targets and test scaffold | **Implemented** | Phase 2 |
 | 4 | Bounded protocol and in-memory session | **Implemented** | Phase 3 |
-| 5 | Deterministic authoritative server core | **Not Started** | Phase 4 |
+| 5 | Deterministic authoritative server core | **In Progress** | Phase 4 |
 | 6 | Maintained transport and secure network session | **Not Started** | Phase 5 |
 | 7 | Headless end-to-end multiplayer slice | **Not Started** | Phase 6 |
 | 8 | OpenMW desktop vertical slice | **Not Started** | Phase 7 |
@@ -335,6 +335,7 @@ runtime or protocol name.
 | ADR-0023 | Session state machines and authentication-provider boundary | Phase 4 | **Implemented** |
 | ADR-0024 | Reliable-operation and latest-wins envelope contract | Phase 4 | **Implemented** |
 | ADR-0025 | Minimal player command, world-snapshot roots, session guards, and in-memory exchange | Phase 4 | **Implemented** |
+| ADR-0026 | Phase 5 writer command intake, ordering, limits, and overload policy | Phase 5 | **Proposed** |
 
 An ADR is complete only when it records considered alternatives, selection
 criteria, consequences, failure modes, a replacement/review trigger, and
@@ -2965,7 +2966,7 @@ Implementation notes:
 
 ### Phase 5 — Deterministic authoritative server core
 
-Status: **Not Started**
+Status: **In Progress**
 
 Outcome: one deterministic writer validates commands, owns minimal canonical
 player state, publishes immutable snapshots, and emits changes to owned sinks.
@@ -2974,7 +2975,7 @@ Depends on: Phase 4.
 
 | Slice | Deliverable | Status | Completion evidence |
 |---|---|---|---|
-| 5.1 | Implement fixed-tick scheduling, bounded per-tick command intake, and deterministic ordering | **Not Started** | Same initial state and command stream always produce the same result/checksum |
+| 5.1 | Implement fixed-tick scheduling, bounded per-tick command intake, and deterministic ordering | **In Progress** | Proposed [`ADR-0026`](adr/ADR-0026-phase5-writer-command-intake-and-ordering.md) decision packet is ready for owner review; production intake and ordering remain approval-gated |
 | 5.2 | Implement minimal player/session/cell/root-transform/velocity/ack canonical state | **Not Started** | State invariants and revision monotonicity tests pass |
 | 5.3 | Implement command validation and atomic reducer application | **Not Started** | Invalid, stale, duplicate, and over-budget commands cause no partial state mutation |
 | 5.4 | Publish immutable snapshots and versioned state-change events | **Not Started** | Readers cannot mutate canonical state and slow readers cannot block the writer indefinitely |
@@ -3001,6 +3002,33 @@ Implementation notes:
   later phases must extend it whenever they add durable data.
 - Persistence is intentionally only an interface here so Phase 20 does not force
   a later redesign of the server mutation boundary.
+
+- 2026-08-27 — Slice 5.1 — In Progress
+  - Change: confirmed the Phase 4 exit commit and clean active tree, inspected
+    the accepted deterministic scheduler, command/envelope values, target graph,
+    and Phase 4 exchange boundary, and added proposed
+    [`ADR-0026`](adr/ADR-0026-phase5-writer-command-intake-and-ordering.md) with
+    five owner-gated option sets. No production intake, queue, ordering,
+    canonical state, reducer, authority, or gameplay behavior changed.
+  - Decisions: none accepted. The recommendation is an owned typed server-core
+    proposal; writer-context submission with a sealed cutoff and drain-time
+    stamps; hard v1 ceilings of 4,096 global pending, 128 pending per session
+    generation, and 1,024 commands per tick; typed immediate full-queue
+    rejection with FIFO tick deferral; and a dedicated intake/tick coordinator
+    that returns ordered batches without canonical mutation.
+  - Verification: `python -m unittest discover -s scripts/tests` passes all 98
+    repository-owned Python tests. Staged
+    `python scripts/verify_vnext_baseline.py --index` accounts for 171
+    intentional differences and verifies 54 dependency inputs. Staged legacy
+    exclusion checks 3,865 tracked paths, 59 CMake files, 1,254 compile
+    commands, and 1,971 Ninja edges. The provenance JSON parses, all 83 local
+    vNext Markdown links resolve, and staged diff checks pass. A C++ product
+    build is not applicable because production code remains approval-gated.
+  - Owner review: pending explicit Phase 5 kickoff approval or amendment of
+    ADR-0026 Decisions 1–5 and the proposed acceptance tests.
+  - Follow-ups: after approval, record the accepted options and implement only
+    the approved Slice 5.1 intake, ordering, limits, observability, and tests.
+    Slices 5.2–5.7 remain gated in plan order.
 
 ### Phase 6 — Maintained transport and secure network session
 

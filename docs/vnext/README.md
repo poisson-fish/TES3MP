@@ -24,9 +24,10 @@ Phases 0–4 are implemented. The active tree is a provenance-verified OpenMW
 
 Phase 4—bounded protocol and in-memory session—is implemented, including its
 complete manually dispatched hosted phase-exit matrix and owner exit approval.
-Phase 5—deterministic authoritative server core—is the next phase and has not
-started. No production multiplayer runtime or real transport integration exists
-yet. See the [implementation
+Phase 5—deterministic authoritative server core—is in kickoff decision review;
+its first production slice remains gated on owner approval of writer intake,
+ordering, limits, and overload policy. No production multiplayer runtime or real
+transport integration exists yet. See the [implementation
 plan](IMPLEMENTATION_PLAN.md) for the live tracker, phase gates, decision
 records, and verification evidence.
 
@@ -148,6 +149,13 @@ scope. Local verification and the required owner demo acceptance pass. Slice
 4.6 is also **Implemented** with exhaustive property, mutation, golden-corpus,
 and fuzz-registration coverage and introduces no new production protocol,
 architecture, authority, state-scope, or gameplay behavior.
+
+Phase 5 Slice 5.1 is in decision review. Proposed
+[`ADR-0026`](adr/ADR-0026-phase5-writer-command-intake-and-ordering.md) presents
+the server-core command boundary, writer cutoff/order, hard safety ceilings,
+overload behavior, component boundary, and acceptance-test options. No
+production intake or canonical-state behavior is authorized until the project
+owner approves or amends that record.
 
 ## References and license
 
