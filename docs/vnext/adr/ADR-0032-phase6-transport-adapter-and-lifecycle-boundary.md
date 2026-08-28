@@ -35,6 +35,13 @@ ADR-0032 therefore remains **Proposed**. The five accepted decisions are stable,
 but Slice 6.1 production remains gated until the amended Decision 3 resolver,
 address-selection, bounds, dependency, and failure behavior is approved.
 
+Later on 2026-08-28, the project owner approved Option A for amended Decisions
+3.1–3.3 and their expanded acceptance coverage. All six architecture decisions
+are now approved. Decision 3.2 authorizes only a disposable exact-pin c-ares
+selection proof; ADR-0032 remains **Proposed** and Slice 6.1 production remains
+gated until that proof passes and the owner separately accepts the exact c-ares
+dependency profile.
+
 ## Existing approved constraints
 
 1. `tes3mp_transport` remains the project-owned abstraction and continues to
@@ -485,9 +492,8 @@ or test-support dependency.
 
 ## Owner approval gate
 
-Option A is owner-approved for Decisions 1, 2, 4, 5, and 6. Amended Decisions
-3.1–3.3 and their expanded acceptance tests remain pending. Slice 6.1 production
-implementation must not begin until the project owner approves or amends that
-DNS packet. Selecting Decision 3.2 Option A authorizes only a disposable c-ares
-proof; exact dependency acceptance remains a second owner gate before dependent
-production integration.
+Option A is owner-approved for Decisions 1–6, including amended Decisions
+3.1–3.3 and their expanded acceptance tests. The authorized disposable c-ares
+proof is the remaining decision gate. Exact dependency acceptance remains a
+second owner review before ADR-0032 can become **Accepted** or dependent Slice
+6.1 production integration can begin.

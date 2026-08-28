@@ -3902,6 +3902,32 @@ Implementation notes:
     implement only a disposable exact-pin/platform/security proof and return its
     evidence for owner dependency acceptance before Phase 6 production code.
 
+- 2026-08-28 — Phase 6 kickoff / Slice 6.1 — Not Started
+  - Change: recorded owner approval of ADR-0032 Option A for amended Decisions
+    3.1–3.3 and their expanded tests. All six transport-lifecycle architecture
+    decisions are approved; no production or dependency-lock source changed in
+    this approval-only record.
+  - Decisions: connections accept a bounded ASCII hostname/IP string and
+    separate port; numeric input bypasses DNS; the approved research path is a
+    caller-pumped, privately linked c-ares candidate; and bounded dual-stack
+    selection follows the proposed eight-result/two-candidate/50 ms/250 ms
+    Happy Eyeballs profile. This approval authorizes only the disposable
+    resolver proof, not an exact production dependency.
+  - Verification: all 98 repository-owned Python tests pass. Indexed baseline
+    provenance accounts for 197 intentional differences and 54 dependency
+    inputs; indexed legacy exclusion checks 3,891 tracked paths, 59 CMake files,
+    44 compile commands, and 121 Ninja edges. The provenance JSON parses,
+    approval/dependency-gate assertions pass, and indexed diff checks pass.
+    Product builds, dependency proof/provisioning, formatting, schema, corpus,
+    and fuzz checks are not applicable because this approval record changes
+    documentation only.
+  - Owner review: transport-lifecycle architecture approval is complete. Exact
+    c-ares source/profile acceptance remains pending proof evidence, so ADR-0032
+    stays **Proposed** and Phase 6/Slice 6.1 stay **Not Started**.
+  - Follow-ups: implement and run the disposable exact-pin c-ares proof on the
+    supported desktop compiler matrix, retain its evidence, and return the
+    dependency profile to the owner before production integration.
+
 ### Phase 7 — Headless end-to-end multiplayer slice
 
 Status: **Not Started**
