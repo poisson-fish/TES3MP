@@ -795,6 +795,11 @@
       "purpose": "Owner-approved Phase 5 committed domain sink ownership, shared-payload delivery, bounded failure reporting, and retention policy decision."
     },
     {
+      "path": "docs/vnext/adr/ADR-0032-phase6-transport-adapter-and-lifecycle-boundary.md",
+      "status": "A",
+      "purpose": "Proposed owner-gated Phase 6 selected transport adapter topology, verified provisioning, endpoint, lifecycle, pumping, and initial resource-bound decision packet."
+    },
+    {
       "path": "docs/vnext/gdr/GDR-0011-phase4-minimal-player-exchange-semantics.md",
       "status": "A",
       "purpose": "Owner-approved Phase 4 player-motion intent, authority separation, session-targeted snapshot scope, and confirmed-client-state semantics."

@@ -341,6 +341,7 @@ runtime or protocol name.
 | ADR-0029 | Phase 5 immutable canonical publication, versioned change feed, retention, and slow-reader policy | Phase 5 | **Implemented** |
 | ADR-0030 | Phase 5 bounded idempotency, canonical checksum, and resync boundary | Phase 5 | **Implemented** |
 | ADR-0031 | Phase 5 committed domain sink ownership, delivery, failure, and resource-bound policy | Phase 5 | **Implemented** |
+| ADR-0032 | Phase 6 selected transport adapter topology, lifecycle, endpoint, pumping, and initial bounds | Phase 6 | **In Progress** |
 
 An ADR is complete only when it records considered alternatives, selection
 criteria, consequences, failure modes, a replacement/review trigger, and
@@ -3841,6 +3842,35 @@ Implementation notes:
   separately sanitized user-facing message.
 - Android support is a selection constraint, not a Phase 6 deliverable; retain a
   small compile proof if ADR-0005 uses Android portability as a deciding factor.
+
+- 2026-08-28 — Phase 6 kickoff / Slice 6.1 — Not Started
+  - Change: confirmed the accepted Phase 5 exit and inspected ADR-0005,
+    ADR-0014, the pinned GameNetworkingSockets dependency proof/lock, current
+    target enforcement, and the behavior-free transport anchor. Added proposed
+    [`ADR-0032`](adr/ADR-0032-phase6-transport-adapter-and-lifecycle-boundary.md)
+    with six owner-gated option sets. No Phase 6 production source, dependency
+    integration, socket behavior, authority, state, or gameplay code changed.
+  - Decisions: none accepted. The recommendation is a selected-library adapter
+    target behind the unchanged transport abstraction; one verified proof/
+    production provisioner; owned numeric IP endpoints; a command/value-event
+    runtime with never-reused IDs; caller-confined explicit pumping; and an
+    initial proof-bounded 1-listener/8-pending/8-established/128-event profile
+    until Slice 6.4 reviews measured product capacities.
+  - Verification: `python -m unittest discover -s scripts/tests -q` passes all
+    98 repository-owned tests. Indexed baseline provenance accounts for 197
+    intentional differences and verifies 54 dependency inputs; indexed legacy
+    exclusion checks 3,891 tracked paths, 59 CMake files, 44 compile commands,
+    and 121 Ninja edges. The provenance JSON parses, all 122 local Markdown
+    links across 39 files resolve, ADR proposal/decision/owner-gate assertions
+    pass, and indexed diff checks pass. Product builds, dependency provisioning,
+    formatting, schema, corpus, and fuzz verification are not applicable because
+    this kickoff packet changes documentation/provenance only.
+  - Owner review: pending explicit Phase 6 kickoff and approval or amendment of
+    ADR-0032 Decisions 1–6 and the proposed Slice 6.1 acceptance tests. Phase 6
+    and Slice 6.1 remain **Not Started**; dependent production work is gated.
+  - Follow-ups: present the decision packet and scenarios to the project owner.
+    After approval, record the accepted options and implement only the Slice
+    6.1 lifecycle adapter, focused limits, boundary checks, and tests.
 
 ### Phase 7 — Headless end-to-end multiplayer slice
 

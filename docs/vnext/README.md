@@ -223,7 +223,9 @@ canonical invariants after every batch and exact same-seed replay. Implementatio
 The complete Phase 5 hosted manual matrix passes on exact commit
 `8e7ca8ff607f3b95ec8d348919f6c1233a11eb23`, and the project owner approved the
 exit gate. Phase 5 is **Implemented**; Phase 6 remains **Not Started** pending
-its kickoff and owner review of unresolved transport/session decisions.
+its kickoff and owner review of unresolved transport/session decisions. Proposed
+[`ADR-0032`](adr/ADR-0032-phase6-transport-adapter-and-lifecycle-boundary.md)
+contains the first Slice 6.1 decision packet; no option is accepted yet.
 
 ## References and license
 
