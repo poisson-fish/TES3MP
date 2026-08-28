@@ -44,8 +44,9 @@ integration exists yet. Slice 5.6 has accepted
 sink-interface implementation and focused tests pass applicable local
 verification and owner demo acceptance. Slice 5.7's test-only seeded reducer
 property and eight-client deterministic simulation implementation passes
-applicable local verification and owner demo acceptance. Phase 5 remains in
-progress pending its hosted manual matrix and exit gate.
+applicable local verification and owner demo acceptance. The complete Phase 5
+hosted manual matrix is green on the exact portability-repair candidate; Phase
+5 remains in progress pending explicit owner exit-gate approval.
 
 Beginning with Phase 4, each slice runs applicable local verification. The full
 vNext hosted matrix runs once by manual dispatch against the phase-completion
@@ -219,7 +220,9 @@ Its test-only seeded eight-client simulation exercises the accepted intake,
 reducer, publication, checksum, and rejection contracts while checking
 canonical invariants after every batch and exact same-seed replay. Implementation
 `917ecc3278`, applicable local verification, and owner demo acceptance pass.
-Phase 5 remains **In Progress** until its hosted manual matrix and exit gate pass.
+The complete Phase 5 hosted manual matrix passes on exact commit
+`8e7ca8ff607f3b95ec8d348919f6c1233a11eb23`. Phase 5 remains **In Progress**
+pending explicit owner exit-gate approval.
 
 ## References and license
 

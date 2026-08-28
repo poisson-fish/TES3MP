@@ -3731,6 +3731,52 @@ Implementation notes:
     again against that one exact commit; review all declared jobs and retained
     artifacts; then request explicit Phase 5 exit approval.
 
+- 2026-08-28 — Phase 5 exit gate — Awaiting Owner Approval
+  - Change: retained the portability repair as published commit
+    `8e7ca8ff607f3b95ec8d348919f6c1233a11eb23`, manually dispatched the complete
+    replacement hosted matrix against that exact commit, and reviewed every
+    declared job and retained artifact. Phase 5 remains **In Progress** and
+    Phase 6 remains **Not Started**.
+  - Decisions: none. The repair and verification do not amend accepted
+    ADR-0026 through ADR-0031 or GDR-0012 and introduce no architecture,
+    authority, state-scope, compatibility, security, or gameplay-behavior
+    choice.
+  - Gate evidence: all six replacement-candidate workflows completed
+    successfully: Linux baseline
+    [`33189362869`](https://github.com/poisson-fish/TES3MP/actions/runs/33189362869),
+    Windows baseline
+    [`33189365326`](https://github.com/poisson-fish/TES3MP/actions/runs/33189365326),
+    macOS baseline
+    [`33189367352`](https://github.com/poisson-fish/TES3MP/actions/runs/33189367352),
+    FlatBuffers proof
+    [`33189369561`](https://github.com/poisson-fish/TES3MP/actions/runs/33189369561),
+    GameNetworkingSockets proof
+    [`33189371582`](https://github.com/poisson-fish/TES3MP/actions/runs/33189371582),
+    and runtime safety
+    [`33189373947`](https://github.com/poisson-fish/TES3MP/actions/runs/33189373947).
+    All 17 jobs passed: Linux GCC 13 and Clang 18; Windows MSVC 2022 v143;
+    macOS arm64 and x86-64 with Xcode 16; all five FlatBuffers proof jobs; all
+    five GameNetworkingSockets proof jobs including Clang 18 ASan/UBSan; and
+    both TES3MP Clang 18 ThreadSanitizer and ASan/UBSan/fuzz jobs.
+  - Verification: all 17 evidence artifacts are retained, non-expired, and
+    non-empty. Runtime-safety artifact `9693163253` (ASan/UBSan/fuzz) has
+    SHA-256 `095b5785dfc7c3cf1a6589c26f1b4d106ac2959eff4545ef55162829312bdaeb`;
+    artifact `9693103241` (ThreadSanitizer) has SHA-256
+    `9d74a564b4fbb37c39934f9b6633b83a728d2f403d6156ee977fdeb3392b3137`.
+    Local replacement-candidate verification passes all 98 repository-owned
+    Python tests, the standalone aggregate target with all 17 C++ contract
+    executables and three golden-corpus checks, baseline provenance for 196
+    intentional differences and 54 dependency inputs, legacy exclusion over
+    3,890 tracked paths, 59 CMake files, 44 compile commands, and 121 Ninja
+    edges, JSON parsing, 118 local Markdown links across 38 files, and clean
+    diff checks.
+  - Owner review: the automated Phase 5 exit gate is green. Explicit owner exit
+    approval remains pending, so Phase 5 stays **In Progress** and Phase 6
+    remains **Not Started**.
+  - Follow-ups: obtain explicit Phase 5 exit-gate approval, then mark Phase 5
+    **Implemented** in a status-only closeout before holding the Phase 6 kickoff
+    and presenting its unresolved transport/session decision packet.
+
 ### Phase 6 — Maintained transport and secure network session
 
 Status: **Not Started**
