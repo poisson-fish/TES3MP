@@ -3632,7 +3632,7 @@ Implementation notes:
     property/simulation scope against accepted Phase 5 decisions before adding
     test-only coverage.
 
-- 2026-08-28 — Slice 5.7 — In Progress
+- 2026-08-28 — Slice 5.7 — Implemented
   - Change: inspected ADR-0013/0017 deterministic facilities and accepted
     ADR-0026–0031 Phase 5 production contracts, then added a test-only seeded
     eight-client simulation through the real intake and reducer. Bounded random
@@ -3665,6 +3665,36 @@ Implementation notes:
   - Follow-ups: none for Slice 5.7. Phase 5 remains **In Progress** until its
     hosted manual matrix and remaining exit-gate evidence pass; that work is
     intentionally deferred to a fresh session at the project owner's request.
+
+- 2026-08-28 — Phase 5 exit gate — In Progress
+  - Change: confirmed implementation closeout commit `006a3ce7d4` contains all
+    implemented and owner-demo-accepted Phase 5 slices, corrected Slice 5.7's
+    chronological note heading to match its tracker and README status, and
+    prepared the status-only phase-completion candidate. Phase 5 remains **In
+    Progress** and Phase 6 remains **Not Started**.
+  - Decisions: none. No architecture, authority, state-scope, compatibility, or
+    gameplay-behavior decision changed, and accepted ADR-0026 through ADR-0031
+    plus GDR-0012 remain authoritative.
+  - Verification: from the Visual Studio 2022 v17.14.39/MSVC 19.44.35228 x64
+    environment, a fresh `cmake --preset tes3mp-standalone --fresh` configure
+    and `cmake --build --preset tes3mp-standalone --parallel 4` completed all 67
+    build steps and passed all 17 C++ contract executables plus three checked-in
+    golden-corpus checks. `python -m unittest discover -s scripts/tests -v`
+    passed all 98 repository-owned tests. `python
+    scripts/verify_vnext_baseline.py` passed with 196 intentional differences
+    and 54 dependency inputs. `python
+    scripts/verify_vnext_legacy_exclusion.py --build-dir
+    build/tes3mp-standalone` passed over 3,890 tracked paths, 59 CMake files, 44
+    compile commands, and 121 Ninja build edges. The provenance JSON parses, all
+    local links across 38 vNext Markdown files resolve, and diff checks pass.
+  - Owner review: the Phase 5 hosted matrix and explicit exit-gate approval are
+    pending. This local candidate evidence does not authorize Phase 6 kickoff or
+    production work.
+  - Follow-ups: publish the exact phase-completion candidate, manually dispatch
+    all six vNext hosted workflows against it, require every declared job
+    including macOS x86-64 to pass, review and record retained artifact evidence,
+    then obtain explicit owner exit approval before marking Phase 5
+    **Implemented** or beginning Phase 6.
 
 ### Phase 6 — Maintained transport and secure network session
 
