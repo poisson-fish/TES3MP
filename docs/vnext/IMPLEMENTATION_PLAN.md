@@ -2409,7 +2409,7 @@ Depends on: Phase 3.
 | 4.3 | Implement the client/server session state machines and authentication-provider interface | **Implemented** | Accepted [`ADR-0023`](adr/ADR-0023-session-state-machines-and-authentication-provider-boundary.md), implementation `edbedbd632`, all applicable local verification, and owner demo acceptance pass |
 | 4.4 | Define reliable-operation and latest-wins snapshot envelopes | **Implemented** | Accepted [`ADR-0024`](adr/ADR-0024-reliable-operation-latest-wins-envelope-contract.md), implementation `ee17ebdd0a`, all applicable local verification, and owner demo acceptance pass |
 | 4.5 | Exchange a minimal player command and world snapshot over the in-memory link | **Implemented** | Accepted [`ADR-0025`](adr/ADR-0025-minimal-player-command-world-snapshot-exchange.md) and [`GDR-0011`](gdr/GDR-0011-phase4-minimal-player-exchange-semantics.md), implementation `077a08da48`, all applicable local verification, and owner demo acceptance pass |
-| 4.6 | Add round-trip, property, golden-schema, mutation, and fuzz coverage | **Not Started** | Every decoder is registered with a corpus and sanitizer-backed fuzz target |
+| 4.6 | Add round-trip, property, golden-schema, mutation, and fuzz coverage | **In Progress** | Local implementation and verification pass; owner demo acceptance and the Phase 4 hosted exit matrix remain pending |
 
 Exit gate:
 
@@ -2793,6 +2793,52 @@ Implementation notes:
     project owner in the 2026-08-27 working session.
   - Follow-ups: none for Slice 4.5. Phase 4 remains **In Progress**; Slice 4.6
     is the next eligible slice and stays **Not Started** until its work begins.
+
+- 2026-08-27 — Slice 4.6 — In Progress
+  - Change: this implementation commit expands all production Phase 4 codec
+    contracts with deterministic
+    scalar, collection, and payload-boundary properties plus exhaustive
+    single-bit mutation checks that either reject or normalize through a second
+    owned round trip. Added reproducible valid golden seeds for the frame,
+    `T3CH`, `T3SH`, `T3RJ`, `T3RO`, and `T3LS` decoders; each contract can
+    deliberately regenerate those files and the normal CMake contract target
+    verifies their exact current encoding and successful decode. Added
+    decode/encode/decode metamorphic assertions to all three production fuzzer
+    groups and a fail-closed seven-decoder registry that checks source
+    registration, corpus presence, SHA-256-pinned production seeds, target
+    completeness, and retained evidence. The safety inventory now also includes
+    the previously built but omitted Slice 4.4 envelope contract. No production
+    schema, codec, protocol value, session behavior, authority, state scope, or
+    gameplay behavior changed.
+  - Decisions: none. This testing-only implementation follows the already
+    accepted ADR-0004 verifier/fuzz/evolution requirements and ADR-0019
+    sanitizer/fuzz policy without selecting a new architecture or behavior.
+  - Verification: from the Visual Studio 2022 v17.14.39/MSVC 19.44.35228
+    x86-64 environment, `cmake --preset tes3mp-standalone --fresh` and `cmake
+    --build --preset tes3mp-standalone --parallel 4` build and pass all eleven
+    contract executables plus three checked-in golden-corpus verification runs.
+    All three changed production fuzzer translation units compile independently
+    with MSVC C++20. `python -m unittest discover -s scripts/tests -v` passes
+    all 98 repository-owned tests. `python scripts/run_vnext_flatbuffers_proof.py`
+    reproduces all five production generated headers exactly and passes the
+    isolated proof. `python scripts/verify_vnext_baseline.py --index` accounts
+    for 170 intentional differences and verifies 54 dependency inputs. `python
+    scripts/verify_vnext_legacy_exclusion.py --index --build-dir
+    build/tes3mp-standalone` checks 3,864 tracked paths, 59 CMake files, 32
+    compile commands, and 91 Ninja edges. Changed C++ passes
+    `clang-format --dry-run --Werror`; changed Python compiles; JSON parses and
+    retains sorted provenance paths; all 80 local vNext Markdown links resolve;
+    and staged diff checks pass. The Linux Clang 18 ASan/UBSan/libFuzzer and
+    ThreadSanitizer executions remain the manual Phase 4 exit gate rather than
+    a Windows-local slice requirement.
+  - Owner review: no new architecture, authority, state-scope, or gameplay
+    decision is introduced. Implementation-demo acceptance remains pending, so
+    Slice 4.6 and Phase 4 stay **In Progress**.
+  - Follow-ups: present the boundary-property, exhaustive mutation,
+    regenerated/verified golden-corpus, decoder-registry, and metamorphic-fuzz
+    evidence for owner acceptance. After Slice 4.6 acceptance, manually dispatch
+    and review every Phase 4 hosted exit-gate job, including macOS x86-64,
+    before marking Phase 4 **Implemented** or beginning Phase 5.
 
 ### Phase 5 — Deterministic authoritative server core
 

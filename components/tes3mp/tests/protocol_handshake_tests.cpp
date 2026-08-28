@@ -5,7 +5,11 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <filesystem>
+#include <fstream>
 #include <iostream>
+#include <limits>
+#include <optional>
 #include <span>
 #include <string_view>
 #include <type_traits>
@@ -67,6 +71,30 @@ namespace
             return false;
         return std::equal(actual.begin(), actual.end(), expected.begin(),
             [](CapabilityId left, std::uint32_t right) { return left.value() == right; });
+    }
+
+    bool capabilitiesEqual(std::span<const CapabilityId> left, std::span<const CapabilityId> right)
+    {
+        return std::ranges::equal(left, right);
+    }
+
+    bool valuesEqual(const ClientHello& left, const ClientHello& right)
+    {
+        return left.versions() == right.versions()
+            && capabilitiesEqual(left.optionalCapabilities(), right.optionalCapabilities())
+            && capabilitiesEqual(left.requiredCapabilities(), right.requiredCapabilities());
+    }
+
+    bool valuesEqual(const ServerHello& left, const ServerHello& right)
+    {
+        return left.selectedVersion() == right.selectedVersion()
+            && capabilitiesEqual(left.negotiatedCapabilities(), right.negotiatedCapabilities());
+    }
+
+    bool valuesEqual(const SessionRejected& left, const SessionRejected& right)
+    {
+        return left.reason() == right.reason() && left.serverVersions() == right.serverVersions()
+            && left.unsupportedCapability() == right.unsupportedCapability();
     }
 
     bool bytesEqual(std::span<const std::byte> actual, std::initializer_list<std::uint8_t> expected)
@@ -217,6 +245,54 @@ namespace
             && rejected->serverVersions() == versionRange(1, 0, 1) && !rejected->unsupportedCapability();
     }
 
+    bool deterministic_offer_properties_round_trip()
+    {
+        constexpr std::array counts{ std::size_t{ 0 }, std::size_t{ 1 }, std::size_t{ 16 }, std::size_t{ 32 } };
+        constexpr std::array majors{ std::uint16_t{ 1 }, std::numeric_limits<std::uint16_t>::max() };
+        constexpr std::array minimums{ std::uint16_t{ 0 }, std::uint16_t{ 17 },
+            static_cast<std::uint16_t>(std::numeric_limits<std::uint16_t>::max() - 1) };
+        for (const auto major : majors)
+        {
+            for (const auto minimum : minimums)
+            {
+                for (const auto count : counts)
+                {
+                    std::vector<CapabilityId> optional;
+                    std::vector<CapabilityId> required;
+                    optional.reserve(count);
+                    required.reserve(count);
+                    for (std::size_t index = 0; index < count; ++index)
+                    {
+                        optional.push_back(capability(static_cast<std::uint32_t>(index * 2 + 1)));
+                        required.push_back(capability(static_cast<std::uint32_t>(index * 2 + 2)));
+                    }
+                    const auto maximum = static_cast<std::uint16_t>(minimum + 1);
+                    auto created = CapabilityOffer::create(versionRange(major, minimum, maximum), optional, required);
+                    const auto* createdOffer = std::get_if<CapabilityOffer>(&created);
+                    if (createdOffer == nullptr)
+                        return false;
+                    const ClientHello client = ClientHello::fromOffer(*createdOffer);
+                    const auto encodedClient = TES3MP::encodeClientHello(client);
+                    const auto decodedClient = TES3MP::decodeClientHello(encodedClient);
+                    const auto* clientValue = std::get_if<ClientHello>(&decodedClient);
+                    if (clientValue == nullptr || !valuesEqual(client, *clientValue))
+                        return false;
+
+                    const auto negotiated = TES3MP::negotiateClientHello(client, *createdOffer);
+                    const auto* server = std::get_if<ServerHello>(&negotiated);
+                    if (server == nullptr)
+                        return false;
+                    const auto encodedServer = TES3MP::encodeServerHello(*server);
+                    const auto decodedServer = TES3MP::decodeServerHello(encodedServer);
+                    const auto* serverValue = std::get_if<ServerHello>(&decodedServer);
+                    if (serverValue == nullptr || !valuesEqual(*server, *serverValue))
+                        return false;
+                }
+            }
+        }
+        return true;
+    }
+
     bool every_truncation_wrong_identifier_and_trailing_byte_fail_without_partial_value()
     {
         const Fixture fixture;
@@ -287,6 +363,59 @@ namespace
             && hasError(TES3MP::decodeClientHello(overBudget), HandshakeErrorCode::PayloadTooLarge);
     }
 
+    bool every_single_bit_mutation_is_rejected_or_normalizes_to_an_owned_value()
+    {
+        const Fixture fixture;
+        const std::array payloads{ TES3MP::encodeClientHello(fixture.client),
+            TES3MP::encodeServerHello(fixture.accepted), TES3MP::encodeSessionRejected(fixture.rejected) };
+        for (std::size_t payloadIndex = 0; payloadIndex < payloads.size(); ++payloadIndex)
+        {
+            for (std::size_t index = 0; index < payloads[payloadIndex].size(); ++index)
+            {
+                for (unsigned bit = 0; bit < 8; ++bit)
+                {
+                    auto mutated = payloads[payloadIndex];
+                    mutated[index] ^= static_cast<std::byte>(1u << bit);
+                    if (payloadIndex == 0)
+                    {
+                        const auto decoded = TES3MP::decodeClientHello(mutated);
+                        if (const auto* value = std::get_if<ClientHello>(&decoded))
+                        {
+                            const auto normalized = TES3MP::decodeClientHello(TES3MP::encodeClientHello(*value));
+                            const auto* normalizedValue = std::get_if<ClientHello>(&normalized);
+                            if (normalizedValue == nullptr || !valuesEqual(*value, *normalizedValue))
+                                return false;
+                        }
+                    }
+                    else if (payloadIndex == 1)
+                    {
+                        const auto decoded = TES3MP::decodeServerHello(mutated);
+                        if (const auto* value = std::get_if<ServerHello>(&decoded))
+                        {
+                            const auto normalized = TES3MP::decodeServerHello(TES3MP::encodeServerHello(*value));
+                            const auto* normalizedValue = std::get_if<ServerHello>(&normalized);
+                            if (normalizedValue == nullptr || !valuesEqual(*value, *normalizedValue))
+                                return false;
+                        }
+                    }
+                    else
+                    {
+                        const auto decoded = TES3MP::decodeSessionRejected(mutated);
+                        if (const auto* value = std::get_if<SessionRejected>(&decoded))
+                        {
+                            const auto normalized
+                                = TES3MP::decodeSessionRejected(TES3MP::encodeSessionRejected(*value));
+                            const auto* normalizedValue = std::get_if<SessionRejected>(&normalized);
+                            if (normalizedValue == nullptr || !valuesEqual(*value, *normalizedValue))
+                                return false;
+                        }
+                    }
+                }
+            }
+        }
+        return true;
+    }
+
     bool preamble_classification_never_replies_to_legacy_or_unknown_bytes()
     {
         const std::array shortInput{ std::byte{ 'T' }, std::byte{ '3' }, std::byte{ 'M' } };
@@ -314,6 +443,56 @@ namespace
                 { 32, 0, 0, 0, 20, 0, 0, 0, 84, 51, 82, 74, 12, 0, 12, 0, 7, 0, 8, 0, 0, 0, 10, 0, 12, 0, 0, 0, 0, 0, 0,
                     1, 1, 0, 1, 0 });
     }
+
+    bool writeFile(const std::filesystem::path& path, std::span<const std::byte> value)
+    {
+        std::ofstream stream(path, std::ios::binary | std::ios::trunc);
+        stream.write(reinterpret_cast<const char*>(value.data()), static_cast<std::streamsize>(value.size()));
+        return stream.good();
+    }
+
+    bool writeCorpus(const std::filesystem::path& directory)
+    {
+        std::error_code error;
+        std::filesystem::create_directories(directory, error);
+        if (error)
+            return false;
+        const Fixture fixture;
+        const auto client = TES3MP::encodeClientHello(fixture.client);
+        const auto server = TES3MP::encodeServerHello(fixture.accepted);
+        const auto rejected = TES3MP::encodeSessionRejected(fixture.rejected);
+        return writeFile(directory / "valid-client-hello", client)
+            && writeFile(directory / "valid-server-hello", server)
+            && writeFile(directory / "valid-session-rejected", rejected);
+    }
+
+    std::optional<std::vector<std::byte>> readFile(const std::filesystem::path& path)
+    {
+        std::error_code error;
+        const auto size = std::filesystem::file_size(path, error);
+        if (error)
+            return std::nullopt;
+        std::vector<std::byte> value(static_cast<std::size_t>(size));
+        std::ifstream stream(path, std::ios::binary);
+        stream.read(reinterpret_cast<char*>(value.data()), static_cast<std::streamsize>(value.size()));
+        if (!stream || stream.peek() != std::ifstream::traits_type::eof())
+            return std::nullopt;
+        return value;
+    }
+
+    bool verifyCorpus(const std::filesystem::path& directory)
+    {
+        const Fixture fixture;
+        const auto client = readFile(directory / "valid-client-hello");
+        const auto server = readFile(directory / "valid-server-hello");
+        const auto rejected = readFile(directory / "valid-session-rejected");
+        return client && *client == TES3MP::encodeClientHello(fixture.client)
+            && std::holds_alternative<ClientHello>(TES3MP::decodeClientHello(*client)) && server
+            && *server == TES3MP::encodeServerHello(fixture.accepted)
+            && std::holds_alternative<ServerHello>(TES3MP::decodeServerHello(*server)) && rejected
+            && *rejected == TES3MP::encodeSessionRejected(fixture.rejected)
+            && std::holds_alternative<SessionRejected>(TES3MP::decodeSessionRejected(*rejected));
+    }
 }
 
 int main(int argc, char** argv)
@@ -326,13 +505,19 @@ int main(int argc, char** argv)
         printBytes(TES3MP::encodeSessionRejected(fixture.rejected));
         return 0;
     }
+    if (argc == 3 && std::string_view(argv[1]) == "--write-corpus")
+        return writeCorpus(argv[2]) ? 0 : 1;
+    if (argc == 3 && std::string_view(argv[1]) == "--verify-corpus")
+        return verifyCorpus(argv[2]) ? 0 : 1;
 
     return value_factories_reject_invalid_ranges_and_capability_sets()
             && current_and_previous_minor_select_highest_overlap()
             && optional_capabilities_intersect_without_enabling_unknown_ids()
             && version_and_required_capability_failures_are_stable() && all_payloads_round_trip_as_owned_values()
+            && deterministic_offer_properties_round_trip()
             && every_truncation_wrong_identifier_and_trailing_byte_fail_without_partial_value()
             && hostile_capability_vectors_reject_before_negotiation()
+            && every_single_bit_mutation_is_rejected_or_normalizes_to_an_owned_value()
             && preamble_classification_never_replies_to_legacy_or_unknown_bytes() && golden_payloads_are_exact()
         ? 0
         : 1;

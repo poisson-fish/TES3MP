@@ -37,6 +37,7 @@ PROFILES = {
 }
 CONTRACT_EXECUTABLES = (
     "tes3mp_protocol_tests",
+    "tes3mp_protocol_envelope_tests",
     "tes3mp_protocol_frame_tests",
     "tes3mp_protocol_handshake_tests",
     "tes3mp_protocol_exchange_tests",
@@ -58,6 +59,74 @@ MAX_SPATIAL_SNAPSHOT_BYTES = 109
 MAX_PROTOCOL_FRAME_BYTES = 12 + 64 * 1024
 TES3MP_SESSION_CONTROL_MAX_BYTES = 4 * 1024
 TES3MP_LATEST_WINS_SNAPSHOT_MAX_BYTES = 64 * 1024
+DECODER_REGISTRY = {
+    "decodeSpatialEntitySnapshot": {
+        "target": "tes3mp_spatial_round_trip_fuzz",
+        "source": "tests/fuzz/spatial_round_trip_fuzz.cpp",
+        "corpus": "spatial_round_trip",
+        "valid_seed": None,
+    },
+    "decodeProtocolFrame": {
+        "target": "tes3mp_protocol_frame_fuzz",
+        "source": "tests/fuzz/protocol_frame_fuzz.cpp",
+        "corpus": "protocol_frame",
+        "valid_seed": {
+            "name": "valid-client-hello-frame",
+            "sha256": "0e3d0c8071af2aa775c5cf9014c6804e1db4589d887e3f05a2742c2dd4b0b2de",
+        },
+    },
+    "decodeClientHello": {
+        "target": "tes3mp_protocol_handshake_fuzz",
+        "source": "tests/fuzz/protocol_handshake_fuzz.cpp",
+        "corpus": "protocol_handshake",
+        "valid_seed": {
+            "name": "valid-client-hello",
+            "sha256": "039fba4322ac0bcd9f8fb90ece53b7aa3282665a8ade2ef0c56bdad378e2b4db",
+        },
+    },
+    "decodeServerHello": {
+        "target": "tes3mp_protocol_handshake_fuzz",
+        "source": "tests/fuzz/protocol_handshake_fuzz.cpp",
+        "corpus": "protocol_handshake",
+        "valid_seed": {
+            "name": "valid-server-hello",
+            "sha256": "ec2c7986c57309f89bb010a5581867b22cf4aaf0e086ca2f75f9c96f79cb5449",
+        },
+    },
+    "decodeSessionRejected": {
+        "target": "tes3mp_protocol_handshake_fuzz",
+        "source": "tests/fuzz/protocol_handshake_fuzz.cpp",
+        "corpus": "protocol_handshake",
+        "valid_seed": {
+            "name": "valid-session-rejected",
+            "sha256": "97ff29f62842356e8bb826b341b44c568d66e10eb1a28dce328d9a32b03d34b4",
+        },
+    },
+    "decodeReliableOperation": {
+        "target": "tes3mp_protocol_exchange_fuzz",
+        "source": "tests/fuzz/protocol_exchange_fuzz.cpp",
+        "corpus": "protocol_exchange",
+        "valid_seed": {
+            "name": "valid-reliable-operation",
+            "sha256": "0e3b12f0cd4c607788921b6cfb02dbb846f06f3140c823331134424ebb737ece",
+        },
+    },
+    "decodeLatestWinsSnapshot": {
+        "target": "tes3mp_protocol_exchange_fuzz",
+        "source": "tests/fuzz/protocol_exchange_fuzz.cpp",
+        "corpus": "protocol_exchange",
+        "valid_seed": {
+            "name": "valid-latest-wins-snapshot",
+            "sha256": "b5e2a76b0fe100c97c68e98610ed41d38c62f548b89507f2a51ac9d3fa8df3d1",
+        },
+    },
+}
+CORPUS_DIRECTORIES = {
+    "spatial_round_trip": CORPUS_DIR,
+    "protocol_frame": PROTOCOL_FRAME_CORPUS_DIR,
+    "protocol_handshake": PROTOCOL_HANDSHAKE_CORPUS_DIR,
+    "protocol_exchange": PROTOCOL_EXCHANGE_CORPUS_DIR,
+}
 EXPECTED_COMPILED_SOURCES = {
     "client_session/anchor.cpp",
     "client_session/client_session.cpp",
@@ -84,6 +153,7 @@ EXPECTED_COMPILED_SOURCES = {
     "tests/fault_injection_tests.cpp",
     "tests/observability_tests.cpp",
     "tests/protocol_frame_tests.cpp",
+    "tests/protocol_envelope_tests.cpp",
     "tests/protocol_handshake_tests.cpp",
     "tests/protocol_exchange_tests.cpp",
     "tests/session_state_machine_tests.cpp",
@@ -241,6 +311,53 @@ def verify_protocol_exchange_corpus() -> list[dict[str, Any]]:
     return records
 
 
+def verify_decoder_registry() -> list[dict[str, Any]]:
+    records = []
+    targets = set()
+    for decoder, registration in sorted(DECODER_REGISTRY.items()):
+        source = SOURCE_DIR / registration["source"]
+        if not source.is_file() or f"{decoder}(" not in source.read_text(encoding="utf-8"):
+            raise RuntimeSafetyError(f"Decoder {decoder} is not invoked by {registration['source']}")
+        corpus_name = registration["corpus"]
+        corpus_dir = CORPUS_DIRECTORIES.get(corpus_name)
+        if corpus_dir is None or not corpus_dir.is_dir():
+            raise RuntimeSafetyError(f"Decoder {decoder} has no registered corpus directory")
+        seed = registration["valid_seed"]
+        seed_record = None
+        if seed is not None:
+            seed_path = corpus_dir / seed["name"]
+            if not seed_path.is_file():
+                raise RuntimeSafetyError(f"Decoder {decoder} is missing golden seed {seed_path}")
+            actual_hash = hashlib.sha256(seed_path.read_bytes()).hexdigest()
+            if actual_hash != seed["sha256"]:
+                raise RuntimeSafetyError(
+                    f"Decoder {decoder} golden seed differs from the reviewed SHA-256: {seed_path}"
+                )
+            seed_record = {
+                "path": str(seed_path.relative_to(ROOT)).replace(os.sep, "/"),
+                "sha256": actual_hash,
+            }
+        targets.add(registration["target"])
+        records.append(
+            {
+                "decoder": decoder,
+                "target": registration["target"],
+                "source": registration["source"],
+                "corpus": corpus_name,
+                "valid_seed": seed_record,
+            }
+        )
+    expected_targets = {
+        "tes3mp_spatial_round_trip_fuzz",
+        "tes3mp_protocol_frame_fuzz",
+        "tes3mp_protocol_handshake_fuzz",
+        "tes3mp_protocol_exchange_fuzz",
+    }
+    if targets != expected_targets:
+        raise RuntimeSafetyError(f"Decoder registry target mismatch: {sorted(targets)}")
+    return records
+
+
 def fuzz_command(
     profile: str,
     fuzz_seconds: int,
@@ -372,6 +489,7 @@ def execute(profile: str, fuzz_seconds: int) -> pathlib.Path:
     protocol_frame_corpus = verify_protocol_frame_corpus()
     protocol_handshake_corpus = verify_protocol_handshake_corpus()
     protocol_exchange_corpus = verify_protocol_exchange_corpus()
+    decoder_registry = verify_decoder_registry()
     try:
         run_command(configure_command(cmake, profile), environment=environment, cwd=SOURCE_DIR, log_path=log_path)
         run_command(build_command(cmake, profile), environment=environment, cwd=SOURCE_DIR, log_path=log_path)
@@ -502,6 +620,7 @@ def execute(profile: str, fuzz_seconds: int) -> pathlib.Path:
                     "protocol_handshake": TES3MP_SESSION_CONTROL_MAX_BYTES,
                     "protocol_exchange": TES3MP_LATEST_WINS_SNAPSHOT_MAX_BYTES,
                 },
+                "decoder_registry": decoder_registry,
             },
             "artifacts": {
                 "log": str(log_path.relative_to(ROOT)).replace(os.sep, "/"),

@@ -334,8 +334,14 @@ add_custom_target(tes3mp_protocol_tests_run
     COMMAND $<TARGET_FILE:tes3mp_protocol_tests>
     COMMAND $<TARGET_FILE:tes3mp_protocol_envelope_tests>
     COMMAND $<TARGET_FILE:tes3mp_protocol_frame_tests>
+    COMMAND $<TARGET_FILE:tes3mp_protocol_frame_tests> --verify-corpus
+        ${CMAKE_CURRENT_SOURCE_DIR}/tests/fuzz/corpus/protocol_frame
     COMMAND $<TARGET_FILE:tes3mp_protocol_handshake_tests>
+    COMMAND $<TARGET_FILE:tes3mp_protocol_handshake_tests> --verify-corpus
+        ${CMAKE_CURRENT_SOURCE_DIR}/tests/fuzz/corpus/protocol_handshake
     COMMAND $<TARGET_FILE:tes3mp_protocol_exchange_tests>
+    COMMAND $<TARGET_FILE:tes3mp_protocol_exchange_tests> --verify-corpus
+        ${CMAKE_CURRENT_SOURCE_DIR}/tests/fuzz/corpus/protocol_exchange
     COMMAND $<TARGET_FILE:tes3mp_session_state_tests>
     COMMAND $<TARGET_FILE:tes3mp_spatial_primitive_tests>
     COMMAND $<TARGET_FILE:tes3mp_deterministic_facilities_tests>

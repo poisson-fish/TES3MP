@@ -9,7 +9,11 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <filesystem>
+#include <fstream>
 #include <iostream>
+#include <limits>
+#include <optional>
 #include <span>
 #include <string_view>
 #include <type_traits>
@@ -132,6 +136,75 @@ namespace
             && *ownedSnapshot == originalSnapshot;
     }
 
+    bool deterministic_exchange_properties_round_trip()
+    {
+        const auto sessionId = value<SessionId>(1);
+        const auto generation = SessionGeneration::initial();
+        constexpr std::array signedSamples{ std::numeric_limits<std::int64_t>::min(), std::int64_t{ -1 },
+            std::int64_t{ 0 }, std::int64_t{ 1 }, std::numeric_limits<std::int64_t>::max() };
+        for (std::size_t index = 0; index < signedSamples.size(); ++index)
+        {
+            const auto raw = static_cast<std::uint64_t>(index + 1);
+            const ReliableOperationHeader header(ClientCommandHeader(sessionId, generation, value<CommandSequence>(raw),
+                                                     value<CommandId>(raw), *ServerTick::fromValue(raw - 1)),
+                EntityPrecondition(value<EntityId>(raw), value<EntityRevision>(raw), value<AuthorityEpoch>(raw)));
+            const auto created = ReliableOperation::create(header,
+                PlayerMotionIntent(
+                    LinearVelocity3(signedSamples[index], signedSamples[(index + 1) % signedSamples.size()],
+                        signedSamples[(index + 2) % signedSamples.size()])));
+            const auto* original = std::get_if<ReliableOperation>(&created);
+            if (original == nullptr)
+                return false;
+            const auto decoded = decodeReliableOperation(encodeReliableOperation(*original));
+            const auto* roundTripped = std::get_if<ReliableOperation>(&decoded);
+            if (roundTripped == nullptr || *roundTripped != *original)
+                return false;
+        }
+
+        constexpr std::array entryCounts{ std::size_t{ 0 }, std::size_t{ 1 }, std::size_t{ 2 },
+            MaximumSpatialWorldViewEntries };
+        for (const auto count : entryCounts)
+        {
+            std::vector<SpatialEntitySnapshot> entries;
+            entries.reserve(count);
+            for (std::size_t index = 0; index < count; ++index)
+            {
+                const auto raw = static_cast<std::uint64_t>(index + 1);
+                const auto signedValue = signedSamples[index % signedSamples.size()];
+                const auto nextSignedValue = signedSamples[(index + 1) % signedSamples.size()];
+                const auto lastSignedValue = signedSamples[(index + 2) % signedSamples.size()];
+                const auto cell = index % 2 == 0
+                    ? CellId::interior(value<CellSpaceId>(raw))
+                    : CellId::exterior(
+                          value<CellSpaceId>(raw), static_cast<std::int32_t>(index), -static_cast<std::int32_t>(index));
+                entries.emplace_back(*ServerTick::fromValue(raw - 1), value<EntityId>(raw), value<EntityRevision>(raw),
+                    value<AuthorityEpoch>(raw),
+                    Transform(cell, Position3(signedValue, nextSignedValue, lastSignedValue),
+                        Orientation3(Turn32::fromValue(static_cast<std::uint32_t>(index)),
+                            Turn32::fromValue(static_cast<std::uint32_t>(index + 1)),
+                            Turn32::fromValue(
+                                std::numeric_limits<std::uint32_t>::max() - static_cast<std::uint32_t>(index)))),
+                    LinearVelocity3(lastSignedValue, signedValue, nextSignedValue));
+            }
+            const auto createdView = SpatialWorldView::create(entries);
+            const auto* originalView = std::get_if<SpatialWorldView>(&createdView);
+            if (originalView == nullptr)
+                return false;
+            std::optional<CommandSequence> acknowledgement;
+            if (count != 0)
+                acknowledgement = value<CommandSequence>(count);
+            const LatestWinsSnapshot original(
+                LatestWinsSnapshotHeader(
+                    sessionId, generation, *ServerTick::fromValue(static_cast<std::uint64_t>(count)), acknowledgement),
+                *originalView);
+            const auto decoded = decodeLatestWinsSnapshot(encodeLatestWinsSnapshot(original));
+            const auto* roundTripped = std::get_if<LatestWinsSnapshot>(&decoded);
+            if (roundTripped == nullptr || *roundTripped != original)
+                return false;
+        }
+        return true;
+    }
+
     bool view_bounds_ordering_and_payload_budget_are_enforced()
     {
         const auto sessionId = value<SessionId>(21);
@@ -217,6 +290,49 @@ namespace
             || hasError(snapshotBodyResult, ExchangeDecodeErrorCode::VerificationFailed);
         const bool strongValueFailed = hasError(strongValueResult, ExchangeDecodeErrorCode::InvalidStrongValue);
         return reliableFailed && snapshotBodyFailed && strongValueFailed;
+    }
+
+    bool every_single_bit_mutation_is_rejected_or_normalizes_to_an_owned_value()
+    {
+        const auto sessionId = value<SessionId>(21);
+        const auto generation = value<SessionGeneration>(2);
+        const std::array entries{ entry(41) };
+        const std::array payloads{ encodeReliableOperation(operation(sessionId, generation)),
+            encodeLatestWinsSnapshot(snapshot(sessionId, generation, 9, 1, entries)) };
+        for (std::size_t payloadIndex = 0; payloadIndex < payloads.size(); ++payloadIndex)
+        {
+            for (std::size_t index = 0; index < payloads[payloadIndex].size(); ++index)
+            {
+                for (unsigned bit = 0; bit < 8; ++bit)
+                {
+                    auto mutated = payloads[payloadIndex];
+                    mutated[index] ^= static_cast<std::byte>(1u << bit);
+                    if (payloadIndex == 0)
+                    {
+                        const auto decoded = decodeReliableOperation(mutated);
+                        if (const auto* current = std::get_if<ReliableOperation>(&decoded))
+                        {
+                            const auto normalized = decodeReliableOperation(encodeReliableOperation(*current));
+                            const auto* value = std::get_if<ReliableOperation>(&normalized);
+                            if (value == nullptr || *value != *current)
+                                return false;
+                        }
+                    }
+                    else
+                    {
+                        const auto decoded = decodeLatestWinsSnapshot(mutated);
+                        if (const auto* current = std::get_if<LatestWinsSnapshot>(&decoded))
+                        {
+                            const auto normalized = decodeLatestWinsSnapshot(encodeLatestWinsSnapshot(*current));
+                            const auto* value = std::get_if<LatestWinsSnapshot>(&normalized);
+                            if (value == nullptr || *value != *current)
+                                return false;
+                        }
+                    }
+                }
+            }
+        }
+        return true;
     }
 
     bool client_snapshot_guard_is_atomic_and_monotonic()
@@ -343,6 +459,55 @@ namespace
         }
         std::cout << '\n';
     }
+
+    bool writeFile(const std::filesystem::path& path, std::span<const std::byte> value)
+    {
+        std::ofstream stream(path, std::ios::binary | std::ios::trunc);
+        stream.write(reinterpret_cast<const char*>(value.data()), static_cast<std::streamsize>(value.size()));
+        return stream.good();
+    }
+
+    bool writeCorpus(const std::filesystem::path& directory)
+    {
+        std::error_code error;
+        std::filesystem::create_directories(directory, error);
+        if (error)
+            return false;
+        const auto sessionId = value<SessionId>(21);
+        const auto generation = value<SessionGeneration>(2);
+        const std::array entries{ entry(41) };
+        const auto reliable = encodeReliableOperation(operation(sessionId, generation));
+        const auto latestWins = encodeLatestWinsSnapshot(snapshot(sessionId, generation, 9, 1, entries));
+        return writeFile(directory / "valid-reliable-operation", reliable)
+            && writeFile(directory / "valid-latest-wins-snapshot", latestWins);
+    }
+
+    std::optional<std::vector<std::byte>> readFile(const std::filesystem::path& path)
+    {
+        std::error_code error;
+        const auto size = std::filesystem::file_size(path, error);
+        if (error)
+            return std::nullopt;
+        std::vector<std::byte> value(static_cast<std::size_t>(size));
+        std::ifstream stream(path, std::ios::binary);
+        stream.read(reinterpret_cast<char*>(value.data()), static_cast<std::streamsize>(value.size()));
+        if (!stream || stream.peek() != std::ifstream::traits_type::eof())
+            return std::nullopt;
+        return value;
+    }
+
+    bool verifyCorpus(const std::filesystem::path& directory)
+    {
+        const auto sessionId = value<SessionId>(21);
+        const auto generation = value<SessionGeneration>(2);
+        const std::array entries{ entry(41) };
+        const auto reliable = readFile(directory / "valid-reliable-operation");
+        const auto latestWins = readFile(directory / "valid-latest-wins-snapshot");
+        return reliable && *reliable == encodeReliableOperation(operation(sessionId, generation))
+            && std::holds_alternative<ReliableOperation>(decodeReliableOperation(*reliable)) && latestWins
+            && *latestWins == encodeLatestWinsSnapshot(snapshot(sessionId, generation, 9, 1, entries))
+            && std::holds_alternative<LatestWinsSnapshot>(decodeLatestWinsSnapshot(*latestWins));
+    }
 }
 
 int main(int argc, char** argv)
@@ -356,6 +521,10 @@ int main(int argc, char** argv)
         printBytes(encodeLatestWinsSnapshot(snapshot(sessionId, generation, 9, 1, entries)));
         return 0;
     }
+    if (argc == 3 && std::string_view(argv[1]) == "--write-corpus")
+        return writeCorpus(argv[2]) ? 0 : 1;
+    if (argc == 3 && std::string_view(argv[1]) == "--verify-corpus")
+        return verifyCorpus(argv[2]) ? 0 : 1;
 
     const auto check = [](bool passed, std::string_view name) {
         if (!passed)
@@ -365,9 +534,11 @@ int main(int argc, char** argv)
     bool passed = true;
     passed &= check(values_are_typed_bounded_and_not_default_constructible(), "typed bounded values");
     passed &= check(operation_and_snapshot_round_trip_as_owned_values(), "owned round trips");
+    passed &= check(deterministic_exchange_properties_round_trip(), "deterministic properties");
     passed &= check(view_bounds_ordering_and_payload_budget_are_enforced(), "view bounds and ordering");
     passed &= check(every_truncation_identifier_and_trailing_byte_fail_without_partial_value(), "malformed inputs");
     passed &= check(closed_body_and_strong_value_mutations_fail_semantically(), "semantic mutations");
+    passed &= check(every_single_bit_mutation_is_rejected_or_normalizes_to_an_owned_value(), "bit mutations");
     passed &= check(client_snapshot_guard_is_atomic_and_monotonic(), "client snapshot guard");
     passed &= check(fake_peer_negotiates_authenticates_and_exchanges_framed_state_in_memory(), "fake peer exchange");
     passed &= check(old_generation_operation_is_not_delivered(), "old generation operation");

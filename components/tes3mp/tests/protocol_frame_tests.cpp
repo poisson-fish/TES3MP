@@ -5,9 +5,13 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
+#include <filesystem>
+#include <fstream>
 #include <limits>
 #include <new>
+#include <optional>
 #include <span>
+#include <string_view>
 #include <type_traits>
 #include <variant>
 #include <vector>
@@ -115,6 +119,44 @@ namespace
             if (value == nullptr || value->messageClass() != descriptor->messageClass || value->messageKind() != kind
                 || !std::equal(value->payload().begin(), value->payload().end(), payload.begin(), payload.end()))
                 return false;
+        }
+        return true;
+    }
+
+    bool deterministic_payload_properties_round_trip()
+    {
+        constexpr std::array kinds{
+            TES3MP::MessageKind::ClientHello,
+            TES3MP::MessageKind::ServerHello,
+            TES3MP::MessageKind::SessionRejected,
+            TES3MP::MessageKind::ReliableOperation,
+            TES3MP::MessageKind::LatestWinsSnapshot,
+        };
+        constexpr std::array sampleSizes{ std::size_t{ 1 }, std::size_t{ 2 }, std::size_t{ 15 }, std::size_t{ 255 },
+            std::size_t{ 256 }, std::size_t{ 4096 } };
+        for (const auto kind : kinds)
+        {
+            const auto descriptor = TES3MP::messageDescriptor(kind);
+            if (!descriptor)
+                return false;
+            for (const auto requestedSize : sampleSizes)
+            {
+                const auto size = std::min(requestedSize, descriptor->maximumPayloadBytes);
+                std::vector<std::byte> payload(size);
+                for (std::size_t index = 0; index < payload.size(); ++index)
+                    payload[index] = static_cast<std::byte>((index * 131 + static_cast<std::uint16_t>(kind)) & 0xff);
+                const auto frame = encode(descriptor->messageClass, kind, payload);
+                const auto decoded = TES3MP::decodeProtocolFrame(frame);
+                const auto* value = std::get_if<TES3MP::DecodedFrame>(&decoded);
+                if (value == nullptr || value->messageClass() != descriptor->messageClass
+                    || value->messageKind() != kind || !std::ranges::equal(value->payload(), payload))
+                    return false;
+                const auto encodedAgain
+                    = TES3MP::encodeProtocolFrame(value->messageClass(), value->messageKind(), value->payload());
+                const auto* canonical = std::get_if<std::vector<std::byte>>(&encodedAgain);
+                if (canonical == nullptr || *canonical != frame)
+                    return false;
+            }
         }
         return true;
     }
@@ -237,31 +279,83 @@ namespace
             && std::equal(value->payload().begin(), value->payload().end(), payload.begin(), payload.end());
     }
 
-    bool every_single_byte_mutation_is_bounded_and_never_partial()
+    bool every_single_bit_mutation_is_rejected_or_canonical()
     {
         const auto payload = makeBytes({ 1, 2, 3 });
         const auto valid = encode(TES3MP::MessageClass::SessionControl, TES3MP::MessageKind::ClientHello, payload);
         for (std::size_t index = 0; index < valid.size(); ++index)
         {
-            auto mutated = valid;
-            mutated[index] ^= std::byte{ 0xff };
-            const auto result = TES3MP::decodeProtocolFrame(mutated);
-            if (!std::holds_alternative<TES3MP::FrameError>(result)
-                && !std::holds_alternative<TES3MP::DecodedFrame>(result))
-                return false;
+            for (unsigned bit = 0; bit < 8; ++bit)
+            {
+                auto mutated = valid;
+                mutated[index] ^= static_cast<std::byte>(1u << bit);
+                const auto result = TES3MP::decodeProtocolFrame(mutated);
+                if (const auto* decoded = std::get_if<TES3MP::DecodedFrame>(&result))
+                {
+                    const auto encoded = TES3MP::encodeProtocolFrame(
+                        decoded->messageClass(), decoded->messageKind(), decoded->payload());
+                    const auto* canonical = std::get_if<std::vector<std::byte>>(&encoded);
+                    if (canonical == nullptr || *canonical != mutated)
+                        return false;
+                }
+                else if (!std::holds_alternative<TES3MP::FrameError>(result))
+                    return false;
+            }
         }
         return true;
     }
+
+    bool writeCorpus(const std::filesystem::path& directory)
+    {
+        std::error_code error;
+        std::filesystem::create_directories(directory, error);
+        if (error)
+            return false;
+        const auto payload = makeBytes({ 0xaa, 0xbb, 0xcc });
+        const auto frame = encode(TES3MP::MessageClass::SessionControl, TES3MP::MessageKind::ClientHello, payload);
+        std::ofstream stream(directory / "valid-client-hello-frame", std::ios::binary | std::ios::trunc);
+        stream.write(reinterpret_cast<const char*>(frame.data()), static_cast<std::streamsize>(frame.size()));
+        return stream.good();
+    }
+
+    std::optional<std::vector<std::byte>> readFile(const std::filesystem::path& path)
+    {
+        std::error_code error;
+        const auto size = std::filesystem::file_size(path, error);
+        if (error)
+            return std::nullopt;
+        std::vector<std::byte> value(static_cast<std::size_t>(size));
+        std::ifstream stream(path, std::ios::binary);
+        stream.read(reinterpret_cast<char*>(value.data()), static_cast<std::streamsize>(value.size()));
+        if (!stream || stream.peek() != std::ifstream::traits_type::eof())
+            return std::nullopt;
+        return value;
+    }
+
+    bool verifyCorpus(const std::filesystem::path& directory)
+    {
+        const auto stored = readFile(directory / "valid-client-hello-frame");
+        const auto payload = makeBytes({ 0xaa, 0xbb, 0xcc });
+        const auto expected = encode(TES3MP::MessageClass::SessionControl, TES3MP::MessageKind::ClientHello, payload);
+        return stored && *stored == expected
+            && std::holds_alternative<TES3MP::DecodedFrame>(TES3MP::decodeProtocolFrame(*stored));
+    }
 }
 
-int main()
+int main(int argc, char** argv)
 {
+    if (argc == 3 && std::string_view(argv[1]) == "--write-corpus")
+        return writeCorpus(argv[2]) ? 0 : 1;
+    if (argc == 3 && std::string_view(argv[1]) == "--verify-corpus")
+        return verifyCorpus(argv[2]) ? 0 : 1;
+
     return golden_frame_v1_is_exact_and_little_endian() && all_initial_kinds_round_trip_with_their_compiled_class()
-            && every_truncation_is_rejected() && malformed_headers_and_lengths_are_structured_failures()
+            && deterministic_payload_properties_round_trip() && every_truncation_is_rejected()
+            && malformed_headers_and_lengths_are_structured_failures()
             && exact_class_limits_pass_and_limit_plus_one_fails_before_copy()
             && failed_decode_allocates_nothing_and_returns_no_partial_frame()
             && decoded_payload_owns_bytes_after_source_overwrite()
-            && every_single_byte_mutation_is_bounded_and_never_partial()
+            && every_single_bit_mutation_is_rejected_or_canonical()
         ? 0
         : 1;
 }

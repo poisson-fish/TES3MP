@@ -74,8 +74,9 @@ real transport interface.
 Slice 3.6 adds ADR-0019's opt-in target-scoped runtime-safety plumbing. The
 standalone presets in this directory build every engine-independent library and
 contract executable without OpenMW. Linux Clang 18 has separate ASan+UBSan and
-ThreadSanitizer profiles; ASan+UBSan also builds one bounded libFuzzer harness
-over the test-support-only spatial decoder. Normal presets remain
+ThreadSanitizer profiles; ASan+UBSan also builds four bounded libFuzzer harnesses
+covering the test-support spatial decoder and every production Phase 4 decoder.
+Normal presets remain
 uninstrumented, incompatible profiles fail configuration, and project-owned
 sources cannot silently omit the selected instrumentation.
 
@@ -86,9 +87,10 @@ python3 scripts/run_tes3mp_runtime_safety.py --profile asan-ubsan --fuzz-seconds
 python3 scripts/run_tes3mp_runtime_safety.py --profile tsan
 ```
 
-Both profiles retain exact toolchain, contract, instrumentation, corpus, log,
-and result evidence under `build/`. Fuzz channels and bytes remain test-only;
-the harness does not define a Phase 4 production decoder or wire format.
+Both profiles retain exact toolchain, contract, instrumentation, decoder
+registry, corpus, log, and result evidence under `build/`. Fuzz channels and
+bytes remain test-only; the harnesses exercise production decoders but do not
+define wire behavior.
 
 The accepted Slice 3.6 gate passes in hosted CI at `fc8f178081`: all five
 contracts pass under separate Linux Clang 18 ASan+UBSan and ThreadSanitizer
@@ -162,5 +164,22 @@ it cannot carry writer admission, canonical results, a batch, or generic bytes.
 `LatestWinsSnapshotHeader` binds a server publication tick and optional
 highest-contiguous-finalized command acknowledgement to a target session and
 generation; it adds no acceptance flag, global entity revision, or separate
-snapshot sequence. Complete typed `T3RO`/`T3LS` roots remain gated on Slice
-4.5's reviewed command/snapshot bodies.
+snapshot sequence. Complete typed `T3RO`/`T3LS` roots were separately gated on
+Slice 4.5's reviewed command/snapshot bodies and are described below.
+
+Slice 4.5 accepts ADR-0025 and GDR-0011 and adds closed typed `T3RO`
+velocity-intent and `T3LS` spatial-view payloads, verifier-first owned codecs,
+role-specific established-session guards, atomic confirmed client snapshots,
+and a synchronous in-memory fake peer. The exchange remains deliberately
+limited to one velocity intent and a target-session-selected view of at most 256
+strictly entity-ordered entries; it adds no reducer, canonical mutation,
+prediction, rendering, real transport, OpenMW dependency, or broader gameplay.
+
+Slice 4.6 hardens the completed Phase 4 surface without changing production
+behavior. Deterministic property contracts cover scalar and collection
+boundaries, exhaustive single-bit mutations must reject or normalize through an
+owned round trip, and checked-in valid golden seeds are regenerated and verified
+by the contract executables. A fail-closed registry maps all seven bounded
+decoders to one of the four sanitizer-backed fuzz targets and corpora, pins each
+production golden seed by SHA-256, and records that mapping in runtime-safety
+evidence.

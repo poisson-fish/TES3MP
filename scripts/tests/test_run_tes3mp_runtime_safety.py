@@ -127,6 +127,27 @@ class RuntimeSafetyRunnerTests(unittest.TestCase):
             all(record["bytes"] <= safety.MAX_CORPUS_FILE_BYTES for record in exchange_records)
         )
 
+    def test_every_bounded_decoder_has_a_fuzzer_corpus_and_production_golden_seed(self):
+        registry = safety.verify_decoder_registry()
+        self.assertEqual(
+            {record["decoder"] for record in registry},
+            {
+                "decodeSpatialEntitySnapshot",
+                "decodeProtocolFrame",
+                "decodeClientHello",
+                "decodeServerHello",
+                "decodeSessionRejected",
+                "decodeReliableOperation",
+                "decodeLatestWinsSnapshot",
+            },
+        )
+        for record in registry:
+            self.assertTrue((safety.SOURCE_DIR / record["source"]).is_file())
+            self.assertTrue(safety.CORPUS_DIRECTORIES[record["corpus"]].is_dir())
+            if record["decoder"] != "decodeSpatialEntitySnapshot":
+                self.assertIsNotNone(record["valid_seed"])
+                self.assertRegex(record["valid_seed"]["sha256"], r"^[0-9a-f]{64}$")
+
     def test_presets_keep_normal_build_clean_and_safety_profiles_exclusive(self):
         data = json.loads(PRESETS_PATH.read_text(encoding="utf-8"))
         configure = {preset["name"]: preset for preset in data["configurePresets"]}
@@ -152,6 +173,7 @@ class RuntimeSafetyRunnerTests(unittest.TestCase):
         self.assertNotIn("suppress", module.lower())
         for target in (
             "tes3mp_protocol_tests",
+            "tes3mp_protocol_envelope_tests",
             "tes3mp_protocol_frame_tests",
             "tes3mp_protocol_handshake_tests",
             "tes3mp_protocol_exchange_tests",
@@ -168,6 +190,7 @@ class RuntimeSafetyRunnerTests(unittest.TestCase):
         self.assertIn("tes3mp_enable_libfuzzer(tes3mp_protocol_frame_fuzz)", component)
         self.assertIn("tes3mp_enable_libfuzzer(tes3mp_protocol_handshake_fuzz)", component)
         self.assertIn("tes3mp_enable_libfuzzer(tes3mp_protocol_exchange_fuzz)", component)
+        self.assertEqual(component.count("--verify-corpus"), 3)
         asan_preset = next(
             preset
             for preset in data["buildPresets"]

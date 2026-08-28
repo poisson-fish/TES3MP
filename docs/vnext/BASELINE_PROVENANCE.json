@@ -102,7 +102,7 @@
     {
       "path": "components/tes3mp/CMakeLists.txt",
       "status": "A",
-      "purpose": "Defines the standalone-capable five-library graph, pinned FlatBuffers runtime input, target-scoped safety registration, eleven contract executables, and bounded parser fuzz targets."
+      "purpose": "Defines the standalone-capable five-library graph, pinned FlatBuffers runtime input, target-scoped safety registration, eleven contract executables with golden-corpus verification, and bounded parser fuzz targets."
     },
     {
       "path": "components/tes3mp/CMakePresets.json",
@@ -410,6 +410,16 @@
       "purpose": "Truncated size-prefix seed for both production exchange payload decoders."
     },
     {
+      "path": "components/tes3mp/tests/fuzz/corpus/protocol_exchange/valid-latest-wins-snapshot",
+      "status": "A",
+      "purpose": "SHA-locked valid T3LS golden payload seed for latest-wins decoder success-path fuzzing and schema drift detection."
+    },
+    {
+      "path": "components/tes3mp/tests/fuzz/corpus/protocol_exchange/valid-reliable-operation",
+      "status": "A",
+      "purpose": "SHA-locked valid T3RO golden payload seed for reliable-operation decoder success-path fuzzing and schema drift detection."
+    },
+    {
       "path": "components/tes3mp/tests/fuzz/corpus/protocol_frame/truncated-header",
       "status": "A",
       "purpose": "Truncated magic/header seed for the bounded production protocol-frame decoder fuzz target."
@@ -420,6 +430,11 @@
       "purpose": "Non-vNext input seed for bounded unknown/malformed production frame fuzz coverage."
     },
     {
+      "path": "components/tes3mp/tests/fuzz/corpus/protocol_frame/valid-client-hello-frame",
+      "status": "A",
+      "purpose": "SHA-locked valid format-one frame seed for production frame-decoder success-path fuzzing and golden drift detection."
+    },
+    {
       "path": "components/tes3mp/tests/fuzz/corpus/protocol_handshake/identifiers",
       "status": "A",
       "purpose": "Bounded identifier-focused seed for all three production handshake payload decoders."
@@ -428,6 +443,21 @@
       "path": "components/tes3mp/tests/fuzz/corpus/protocol_handshake/truncated",
       "status": "A",
       "purpose": "Truncated size-prefix seed for the production handshake payload decoders."
+    },
+    {
+      "path": "components/tes3mp/tests/fuzz/corpus/protocol_handshake/valid-client-hello",
+      "status": "A",
+      "purpose": "SHA-locked valid T3CH golden payload seed for client-hello decoder success-path fuzzing and schema drift detection."
+    },
+    {
+      "path": "components/tes3mp/tests/fuzz/corpus/protocol_handshake/valid-server-hello",
+      "status": "A",
+      "purpose": "SHA-locked valid T3SH golden payload seed for server-hello decoder success-path fuzzing and schema drift detection."
+    },
+    {
+      "path": "components/tes3mp/tests/fuzz/corpus/protocol_handshake/valid-session-rejected",
+      "status": "A",
+      "purpose": "SHA-locked valid T3RJ golden payload seed for rejection decoder success-path fuzzing and schema drift detection."
     },
     {
       "path": "components/tes3mp/tests/fuzz/corpus/spatial_round_trip/interior-sized",
@@ -477,17 +507,17 @@
     {
       "path": "components/tes3mp/tests/protocol_exchange_tests.cpp",
       "status": "A",
-      "purpose": "Golden, owned round-trip, bounds, ordering, mutation, atomic-session-guard, and end-to-end fake-peer contracts for Slice 4.5 exchange."
+      "purpose": "Golden-corpus, deterministic property, exhaustive bit-mutation, owned round-trip, bounds, ordering, atomic-session-guard, and end-to-end fake-peer contracts for Phase 4 exchange."
     },
     {
       "path": "components/tes3mp/tests/protocol_frame_tests.cpp",
       "status": "A",
-      "purpose": "Golden, round-trip, truncation, malformed, class/kind, exact-budget, allocation, ownership, and mutation contracts for vNext framing."
+      "purpose": "Golden-corpus, deterministic property, exhaustive bit-mutation, round-trip, truncation, malformed, class/kind, exact-budget, allocation, and ownership contracts for vNext framing."
     },
     {
       "path": "components/tes3mp/tests/protocol_handshake_tests.cpp",
       "status": "A",
-      "purpose": "Golden, owned round-trip, version-overlap, capability, rejection, malformed-wire, and legacy/no-reply contracts for Slice 4.2."
+      "purpose": "Golden-corpus, deterministic property, exhaustive bit-mutation, owned round-trip, version-overlap, capability, rejection, malformed-wire, and legacy/no-reply contracts for Phase 4 negotiation."
     },
     {
       "path": "components/tes3mp/tests/session_state_machine_tests.cpp",
@@ -901,7 +931,7 @@
         },
         {
           "path": "components/tes3mp/CMakeLists.txt",
-          "sha256": "059e764f670b58268917e69dc42f5e2a332820d55f943670f7a769f4ba062cfc"
+          "sha256": "767ba985611fece8cd772b25cd9cbf3b27e0dd8e9107b8082367513e7cc1a3ff"
         },
         {
           "path": "components/tes3mp/protocol/generated/client_hello_generated.h",
