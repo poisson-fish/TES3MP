@@ -2984,7 +2984,7 @@ Depends on: Phase 4.
 | 5.2 | Implement minimal player/session/cell/root-transform/velocity/ack canonical state | **Implemented** | Accepted [`ADR-0027`](adr/ADR-0027-phase5-canonical-player-and-session-state.md), implementation `f1a1f0632e`, applicable local verification, and owner demo acceptance pass |
 | 5.3 | Implement command validation and atomic reducer application | **Implemented** | Accepted [`ADR-0028`](adr/ADR-0028-phase5-command-validation-and-atomic-reducer.md) and [`GDR-0012`](gdr/GDR-0012-phase5-minimal-motion-reducer-semantics.md), implementation `f57a4074db`, applicable local verification, and owner demo acceptance pass |
 | 5.4 | Publish immutable snapshots and versioned state-change events | **Implemented** | Accepted [`ADR-0029`](adr/ADR-0029-phase5-immutable-canonical-publication-and-versioned-change-feed.md), implementation `d7e7b25950`, applicable local verification, and owner demo acceptance pass |
-| 5.5 | Add idempotency windows, authority-epoch checks, state checksums, and explicit resync requests | **In Progress** | Accepted [`ADR-0030`](adr/ADR-0030-phase5-idempotency-checksum-and-resync-boundary.md), implementation candidate, and applicable local verification pass; owner demo acceptance pending |
+| 5.5 | Add idempotency windows, authority-epoch checks, state checksums, and explicit resync requests | **In Progress** | Accepted [`ADR-0030`](adr/ADR-0030-phase5-idempotency-checksum-and-resync-boundary.md), implementation `ac627deafc`, and applicable local verification pass; owner demo acceptance pending |
 | 5.6 | Add persistence, replay, script, and metrics sink interfaces without implementations | **Not Started** | All sinks receive the same committed change record after, never before, commit |
 | 5.7 | Add reducer property tests and deterministic multi-client simulation tests | **Not Started** | Randomized command streams preserve invariants and reproduce by seed |
 
@@ -3468,7 +3468,8 @@ Implementation notes:
     delivery, or runtime composition.
 
 - 2026-08-28 — Slice 5.5 — In Progress
-  - Change: implemented the accepted bounded per-generation finalized-command
+  - Change: implementation commit `ac627deafc` adds the accepted bounded
+    per-generation finalized-command
     history, unified same/cross-batch duplicate membership, exact-next duplicate
     finalization, deterministic 1,024/1,025 FIFO eviction, immutable shared
     history state, and closed invariant validation. Added explicit complete
