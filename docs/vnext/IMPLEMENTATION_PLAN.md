@@ -337,7 +337,7 @@ runtime or protocol name.
 | ADR-0025 | Minimal player command, world-snapshot roots, session guards, and in-memory exchange | Phase 4 | **Implemented** |
 | ADR-0026 | Phase 5 writer command intake, ordering, limits, and overload policy | Phase 5 | **Implemented** |
 | ADR-0027 | Phase 5 canonical player/session state, scope, invariants, and bounds | Phase 5 | **Implemented** |
-| ADR-0028 | Phase 5 command validation, disposition, acknowledgement, and atomic reducer boundary | Phase 5 | **Proposed** |
+| ADR-0028 | Phase 5 command validation, disposition, acknowledgement, and atomic reducer boundary | Phase 5 | **Implemented** |
 
 An ADR is complete only when it records considered alternatives, selection
 criteria, consequences, failure modes, a replacement/review trigger, and
@@ -361,7 +361,7 @@ production code that depends on the choice cannot.
 | GDR-0009 | Dialogue, journal, faction, quest, and progression state scope | Phase 17 | **Not Started** |
 | GDR-0010 | Time, weather, globals, reset, and shared-world evolution semantics | Phase 18 | **Not Started** |
 | GDR-0011 | Phase 4 minimal player-intent authority and session-targeted snapshot semantics | Phase 4 | **Implemented** |
-| GDR-0012 | Phase 5 minimal motion reducer effect, scope, and contention semantics | Phase 5 | **Proposed** |
+| GDR-0012 | Phase 5 minimal motion reducer effect, scope, and contention semantics | Phase 5 | **Implemented** |
 
 A GDR is **Implemented** only after its questions are explicitly approved and
 the approval is recorded. Later code slices remain separate: an approved design
@@ -2980,7 +2980,7 @@ Depends on: Phase 4.
 |---|---|---|---|
 | 5.1 | Implement fixed-tick scheduling, bounded per-tick command intake, and deterministic ordering | **Implemented** | Accepted [`ADR-0026`](adr/ADR-0026-phase5-writer-command-intake-and-ordering.md), implementation `e0dde571f5`, applicable local verification, and owner demo acceptance pass |
 | 5.2 | Implement minimal player/session/cell/root-transform/velocity/ack canonical state | **Implemented** | Accepted [`ADR-0027`](adr/ADR-0027-phase5-canonical-player-and-session-state.md), implementation `f1a1f0632e`, applicable local verification, and owner demo acceptance pass |
-| 5.3 | Implement command validation and atomic reducer application | **In Progress** | Proposed [`ADR-0028`](adr/ADR-0028-phase5-command-validation-and-atomic-reducer.md) and [`GDR-0012`](gdr/GDR-0012-phase5-minimal-motion-reducer-semantics.md) decision packets are ready for owner review; production reducer remains approval-gated |
+| 5.3 | Implement command validation and atomic reducer application | **In Progress** | Accepted [`ADR-0028`](adr/ADR-0028-phase5-command-validation-and-atomic-reducer.md) and [`GDR-0012`](gdr/GDR-0012-phase5-minimal-motion-reducer-semantics.md); production reducer and implementation demo pending |
 | 5.4 | Publish immutable snapshots and versioned state-change events | **Not Started** | Readers cannot mutate canonical state and slow readers cannot block the writer indefinitely |
 | 5.5 | Add idempotency windows, authority-epoch checks, state checksums, and explicit resync requests | **Not Started** | Duplicate/stale/epoch mismatch and divergence-repair tests pass |
 | 5.6 | Add persistence, replay, script, and metrics sink interfaces without implementations | **Not Started** | All sinks receive the same committed change record after, never before, commit |
@@ -3205,6 +3205,34 @@ Implementation notes:
   - Follow-ups: after approval, record the selected options and implement only
     the approved validation, reducer, acknowledgement, observability, and
     focused tests. Slice 5.4 and online reducer composition remain gated.
+
+- 2026-08-28 — Slice 5.3 — In Progress
+  - Change: recorded owner approval of
+    [`ADR-0028`](adr/ADR-0028-phase5-command-validation-and-atomic-reducer.md)
+    Option A for Decisions 1–5, its Slice 5.5 boundary clarification and
+    acceptance tests, plus
+    [`GDR-0012`](gdr/GDR-0012-phase5-minimal-motion-reducer-semantics.md)
+    Option A for Decisions 1–4 and its behavior tests. No production reducer or
+    gameplay code changed in this decision-acceptance commit.
+  - Decisions: the approved reducer is writer-confined, verifies sealed intake
+    batches, commits each finalizable command atomically through immutable
+    candidate construction, uses the closed validation order, advances exact-
+    next accepted-or-rejected acknowledgement progress, checks stable authority
+    epoch and same-batch duplicates, and stays offline until Slice 5.5 adds the
+    cross-batch command-ID window. Accepted motion exactly replaces velocity
+    without changing transform or adding integration, clamp, collision, cell,
+    prediction, or presentation behavior.
+  - Verification: staged baseline provenance accounts for 180 intentional
+    differences and 54 dependency inputs. The provenance JSON parses, all 98
+    local vNext Markdown links resolve, accepted ADR/GDR register assertions
+    pass, and staged diff checks pass. A product build and runtime tests are not
+    applicable because this decision-acceptance change modifies no production
+    source, schema, decoder, or corpus.
+  - Owner review: architecture and gameplay approval is complete from the
+    project owner in the 2026-08-28 working session. Implementation and demo
+    acceptance remain pending.
+  - Follow-ups: implement only the approved Slice 5.3 surface and tests. Slice
+    5.4 and online reducer composition remain gated.
 
 ### Phase 6 — Maintained transport and secure network session
 

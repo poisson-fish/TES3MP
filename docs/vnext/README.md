@@ -169,12 +169,12 @@ contiguous-finalized acknowledgement progress. It adds no online state install,
 reducer, lifecycle, persistence, publication, movement, or gameplay behavior;
 local verification and owner implementation-demo acceptance pass.
 
-Phase 5 Slice 5.3 is now in decision review. Proposed
+Phase 5 Slice 5.3 now has accepted
 [`ADR-0028`](adr/ADR-0028-phase5-command-validation-and-atomic-reducer.md) and
-[`GDR-0012`](gdr/GDR-0012-phase5-minimal-motion-reducer-semantics.md) present
+[`GDR-0012`](gdr/GDR-0012-phase5-minimal-motion-reducer-semantics.md), covering
 the atomic reducer, validation/disposition, acknowledgement, incomplete
 cross-batch idempotency gate, and narrow provisional velocity-replacement
-options. No option is accepted and no production reducer code exists yet.
+decisions. Production implementation and owner demo acceptance remain pending.
 
 ## References and license
 

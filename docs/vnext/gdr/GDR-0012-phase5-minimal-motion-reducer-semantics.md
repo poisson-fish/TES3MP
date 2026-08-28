@@ -1,10 +1,10 @@
 # GDR-0012: Phase 5 minimal motion reducer semantics
 
-Status: **Proposed**
+Status: **Accepted**
 
 Date opened: 2026-08-28
 
-Date approved: pending
+Date approved: 2026-08-28
 
 Decision owner: project owner
 
@@ -28,8 +28,7 @@ are approved or amended.
 
 ## Decision summary
 
-No option is accepted yet. The recommendation is Option A for Decisions 1
-through 4:
+The project owner approved Option A for Decisions 1 through 4 on 2026-08-28:
 
 1. an accepted Phase 5 motion command exactly replaces canonical linear
    velocity, preserves the complete transform, and increments the one spatial
@@ -264,6 +263,11 @@ Reopen this GDR if:
 
 ## Owner approval
 
-Pending explicit approval or amendment of Decisions 1 through 4 and the
-proposed behavior acceptance tests. ADR-0028 requires independent explicit
-approval.
+Approved by the project owner in the 2026-08-28 working session: Option A for
+Decisions 1 through 4 and the proposed behavior acceptance tests.
+
+The owner independently approved ADR-0028 Decisions 1 through 5, its Slice 5.5
+boundary clarification, and its acceptance tests. This approval does not
+authorize position integration, clamping, collision, cell transitions,
+prediction, presentation, reconnect, persistence, scripting, or online reducer
+composition.

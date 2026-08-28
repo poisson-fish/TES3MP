@@ -712,7 +712,7 @@
     {
       "path": "docs/vnext/adr/ADR-0028-phase5-command-validation-and-atomic-reducer.md",
       "status": "A",
-      "purpose": "Proposed owner-gated Phase 5 command validation order, disposition, acknowledgement, atomic reducer, and Slice 5.5 safety-boundary decision packet."
+      "purpose": "Owner-approved Phase 5 command validation order, disposition, acknowledgement, atomic reducer, and Slice 5.5 safety-boundary decision."
     },
     {
       "path": "docs/vnext/gdr/GDR-0011-phase4-minimal-player-exchange-semantics.md",
@@ -722,7 +722,7 @@
     {
       "path": "docs/vnext/gdr/GDR-0012-phase5-minimal-motion-reducer-semantics.md",
       "status": "A",
-      "purpose": "Proposed owner-gated Phase 5 minimal motion reducer effect, authority, state-scope, numeric, contention, and acknowledgement behavior packet."
+      "purpose": "Owner-approved Phase 5 minimal motion reducer effect, authority, state-scope, numeric, contention, and acknowledgement behavior."
     },
     {
       "path": "docs/vnext/proofs/flatbuffers/ANDROID_ARM64.md",

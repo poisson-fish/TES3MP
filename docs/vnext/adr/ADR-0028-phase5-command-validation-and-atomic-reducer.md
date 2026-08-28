@@ -1,10 +1,10 @@
 # ADR-0028: Phase 5 command validation and atomic reducer
 
-Status: **Proposed**
+Status: **Accepted**
 
 Date opened: 2026-08-28
 
-Date approved: pending
+Date approved: 2026-08-28
 
 Decision owner: project owner
 
@@ -30,8 +30,7 @@ result delivery, interest, production movement, collision, or resynchronization.
 
 ## Decision summary
 
-No option is accepted yet. The recommendation is Option A for Decisions 1
-through 5:
+The project owner approved Option A for Decisions 1 through 5 on 2026-08-28:
 
 1. add one writer-confined reducer that owns an immutable
    `CanonicalServerState`, verifies one sealed ordered tick batch, and installs one
@@ -347,5 +346,12 @@ Reopen this ADR if:
 
 ## Owner approval
 
-Pending explicit approval or amendment of Decisions 1 through 5 and the
-proposed acceptance tests. GDR-0012 requires independent explicit approval.
+Approved by the project owner in the 2026-08-28 working session: Option A for
+Decisions 1 through 5, the Slice 5.5 boundary clarification, and the proposed
+acceptance tests.
+
+The owner independently approved GDR-0012 Decisions 1 through 4 and its behavior
+tests. This approval authorizes only the Slice 5.3 reducer, validation,
+disposition, acknowledgement, observability, and focused tests described here.
+Online composition remains prohibited until Slice 5.5 adds the bounded
+cross-batch `CommandId` window.
