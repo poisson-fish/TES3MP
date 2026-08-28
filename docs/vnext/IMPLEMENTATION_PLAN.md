@@ -2975,7 +2975,7 @@ Depends on: Phase 4.
 
 | Slice | Deliverable | Status | Completion evidence |
 |---|---|---|---|
-| 5.1 | Implement fixed-tick scheduling, bounded per-tick command intake, and deterministic ordering | **In Progress** | Accepted [`ADR-0026`](adr/ADR-0026-phase5-writer-command-intake-and-ordering.md), production implementation, and applicable local verification pass; owner implementation-demo acceptance remains pending |
+| 5.1 | Implement fixed-tick scheduling, bounded per-tick command intake, and deterministic ordering | **Implemented** | Accepted [`ADR-0026`](adr/ADR-0026-phase5-writer-command-intake-and-ordering.md), implementation `e0dde571f5`, applicable local verification, and owner demo acceptance pass |
 | 5.2 | Implement minimal player/session/cell/root-transform/velocity/ack canonical state | **Not Started** | State invariants and revision monotonicity tests pass |
 | 5.3 | Implement command validation and atomic reducer application | **Not Started** | Invalid, stale, duplicate, and over-budget commands cause no partial state mutation |
 | 5.4 | Publish immutable snapshots and versioned state-change events | **Not Started** | Readers cannot mutate canonical state and slow readers cannot block the writer indefinitely |
@@ -3065,6 +3065,23 @@ Implementation notes:
     implementation commit, and present the approved trace/limit/failure demo
     for owner acceptance. Slice 5.2 remains gated until Slice 5.1 is
     **Implemented**.
+
+- 2026-08-27 — Slice 5.1 — Implemented
+  - Change: retained implementation commit `e0dde571f5` without production-code
+    changes and marked Slice 5.1 **Implemented** after the required owner demo
+    acceptance.
+  - Decisions: none. ADR-0026 remains accepted without amendment.
+  - Verification: the accepted implementation retains a green clean-directory
+    MSVC 19.44 C++20 configure/build and all 12 contract executables, 98 Python
+    tests, provenance with 174 intentional differences and 54 dependency
+    inputs, legacy exclusion over 3,868 tracked paths, 59 CMake files, 1,254
+    compile commands, and 1,971 Ninja edges, six-file formatting, 84 local-link,
+    public-header-isolation, JSON, and staged-diff checks.
+  - Owner review: implementation-demo evidence explicitly accepted by the
+    project owner in the 2026-08-27 working session.
+  - Follow-ups: none for Slice 5.1. Slice 5.2 is now eligible but requires
+    owner review of canonical state ownership, scope, invariants, and API shape
+    before production state code lands.
 
 ### Phase 6 — Maintained transport and secure network session
 

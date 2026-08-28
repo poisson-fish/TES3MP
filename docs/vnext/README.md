@@ -26,7 +26,7 @@ Phase 4—bounded protocol and in-memory session—is implemented, including its
 complete manually dispatched hosted phase-exit matrix and owner exit approval.
 Phase 5—deterministic authoritative server core—is in progress. Its first
 production slice implements the approved writer intake, ordering, limits, and
-overload policy and awaits owner demo acceptance. No canonical player store,
+overload policy with accepted owner demo evidence. No canonical player store,
 reducer, production multiplayer runtime, or real transport integration exists
 yet. See the [implementation
 plan](IMPLEMENTATION_PLAN.md) for the live tracker, phase gates, decision
@@ -154,9 +154,10 @@ architecture, authority, state-scope, or gameplay behavior.
 Phase 5 Slice 5.1 implements accepted
 [`ADR-0026`](adr/ADR-0026-phase5-writer-command-intake-and-ordering.md), which
 defines the server-core command boundary, writer cutoff/order, hard safety
-ceilings, overload behavior, component boundary, and acceptance tests. The
-implementation demo remains pending; canonical state, validation/reduction,
-acknowledgements, and gameplay behavior remain later gated work.
+ceilings, overload behavior, component boundary, and acceptance tests. Local
+verification and owner implementation-demo acceptance pass; canonical state,
+validation/reduction, acknowledgements, and gameplay behavior remain later
+gated work.
 
 ## References and license
 
