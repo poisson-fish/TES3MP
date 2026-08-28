@@ -3481,6 +3481,15 @@ only the relevant phase section here.
     --Werror`; Python compilation; JSON validation; all 180 local Markdown
     links across 41 files; and staged whitespace checks pass. The hosted
     lifecycle run remains pending on the final candidate.
+    Initial hosted candidates exposed and repaired two workflow-evidence gaps:
+    the TSan job now uses the policy-required Clang 18 instead of GCC, and every
+    checkout fetches the historical OpenMW baseline needed by provenance
+    verification. GNS 1.6.0's real loopback reports a third-party internal
+    socket/table lock-order inversion under TSan; no suppression or disabled
+    detector was added. The TSan job therefore builds the fully instrumented
+    adapter and runs the selected-library-free lifecycle plus deterministic
+    resolver/race/generation contracts, while real encrypted GNS loopback runs
+    under GCC, Clang ASan/UBSan, MSVC, and both macOS profiles.
   - Owner review: the project owner explicitly requested that Slice 6.1 be
     closed and approved completion work in the 2026-08-28 working session.
     Implementation-demo acceptance remains contingent on the final exact local
