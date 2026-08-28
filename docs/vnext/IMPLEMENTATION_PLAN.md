@@ -340,6 +340,7 @@ runtime or protocol name.
 | ADR-0028 | Phase 5 command validation, disposition, acknowledgement, and atomic reducer boundary | Phase 5 | **Implemented** |
 | ADR-0029 | Phase 5 immutable canonical publication, versioned change feed, retention, and slow-reader policy | Phase 5 | **Implemented** |
 | ADR-0030 | Phase 5 bounded idempotency, canonical checksum, and resync boundary | Phase 5 | **Implemented** |
+| ADR-0031 | Phase 5 committed domain sink ownership, delivery, failure, and resource-bound policy | Phase 5 | **Proposed** |
 
 An ADR is complete only when it records considered alternatives, selection
 criteria, consequences, failure modes, a replacement/review trigger, and
@@ -2985,7 +2986,7 @@ Depends on: Phase 4.
 | 5.3 | Implement command validation and atomic reducer application | **Implemented** | Accepted [`ADR-0028`](adr/ADR-0028-phase5-command-validation-and-atomic-reducer.md) and [`GDR-0012`](gdr/GDR-0012-phase5-minimal-motion-reducer-semantics.md), implementation `f57a4074db`, applicable local verification, and owner demo acceptance pass |
 | 5.4 | Publish immutable snapshots and versioned state-change events | **Implemented** | Accepted [`ADR-0029`](adr/ADR-0029-phase5-immutable-canonical-publication-and-versioned-change-feed.md), implementation `d7e7b25950`, applicable local verification, and owner demo acceptance pass |
 | 5.5 | Add idempotency windows, authority-epoch checks, state checksums, and explicit resync requests | **Implemented** | Accepted [`ADR-0030`](adr/ADR-0030-phase5-idempotency-checksum-and-resync-boundary.md), implementation `ac627deafc`, applicable local verification, and owner demo acceptance pass |
-| 5.6 | Add persistence, replay, script, and metrics sink interfaces without implementations | **Not Started** | All sinks receive the same committed change record after, never before, commit |
+| 5.6 | Add persistence, replay, script, and metrics sink interfaces without implementations | **In Progress** | Proposed [`ADR-0031`](adr/ADR-0031-phase5-committed-domain-sink-boundary.md); owner architecture/failure-policy review pending before production interfaces |
 | 5.7 | Add reducer property tests and deterministic multi-client simulation tests | **Not Started** | Randomized command streams preserve invariants and reproduce by seed |
 
 Exit gate:
@@ -3521,6 +3522,38 @@ Implementation notes:
   - Follow-ups: none for Slice 5.5. Slice 5.6 is now eligible, but its sink
     ownership, delivery, failure, and resource-bound decisions require owner
     review before dependent production interfaces land.
+
+- 2026-08-28 — Slice 5.6 — In Progress
+  - Change: inspected the accepted reducer, immutable latest-publication,
+    canonical change-record, checksum, observability, target-boundary, and later
+    Phase 19/20 scripting/persistence requirements. Added proposed
+    [`ADR-0031`](adr/ADR-0031-phase5-committed-domain-sink-boundary.md) with five
+    owner-gated option sets. No production sink interface, reducer dispatch,
+    runtime/backend, canonical state, authority, or gameplay behavior changed.
+  - Decisions: none accepted. The recommendation is four nominal server-core
+    sink roles over the same immutable publication handle; reducer-integrated
+    post-publication fan-out in fixed role order; a maximum of one non-owning
+    sink per role and four bounded `noexcept` attempts per committed batch;
+    explicit absent/accepted/backpressured/failed results that never roll back,
+    retry, or short-circuit canonical work; and no core-owned retention beyond
+    the existing latest publication.
+  - Verification: repository inspection confirms that
+    `CanonicalStatePublication` already owns the complete immutable snapshot and
+    ordered `CanonicalStateChangeRecord` values, reducer publication installs
+    only after canonical candidates commit, and ADR-0020 observability remains
+    a separate best-effort diagnostic boundary. `python -m unittest discover -s
+    scripts/tests -q` passes all 98 repository-owned tests. Staged baseline
+    provenance passes with 193 intentional differences and 54 dependency
+    inputs; JSON parsing and staged whitespace/diff checks pass. No C++ build,
+    schema regeneration, golden-corpus update, or fuzz run is applicable to this
+    proposal-only documentation change.
+  - Owner review: pending explicit approval or amendment of ADR-0031 Decisions
+    1–5 and the proposed acceptance scenarios.
+  - Follow-ups: do not add dependent production sink interfaces or reducer
+    fan-out until the owner decision is recorded. Phase 19 still owns script
+    runtime/event API policy; Phase 20 still owns persistence technology,
+    durability acknowledgement, schema, replay format, and operator failure
+    policy.
 
 ### Phase 6 — Maintained transport and secure network session
 

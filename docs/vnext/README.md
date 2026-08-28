@@ -30,16 +30,18 @@ overload policy with accepted owner demo evidence. Slice 5.2 implements the
 approved immutable, bounded canonical player/session state value and invariant
 checks with accepted owner demo evidence. Slice 5.3 implements the approved
 writer-confined command validation and atomic reducer with accepted owner demo
-evidence. The reducer remains offline until Slice 5.5 adds the required cross-
-batch command-ID idempotency window; no production multiplayer runtime or real
-transport integration exists yet. Slice 5.4 implements the approved immutable
+evidence. Slice 5.4 implements the approved immutable
 latest-publication, checked version, typed domain-change, and reader-gap
 contracts with accepted owner demo evidence. See the [implementation
 plan](IMPLEMENTATION_PLAN.md) for the live tracker, phase gates, decision
 records, and verification evidence. Slice 5.5 has accepted
 [`ADR-0030`](adr/ADR-0030-phase5-idempotency-checksum-and-resync-boundary.md);
 its production implementation and focused tests pass applicable local
-verification and owner demo acceptance.
+verification and owner demo acceptance. The reducer core is eligible for later
+reviewed composition, but no production multiplayer runtime or real transport
+integration exists yet. Slice 5.6 has proposed
+[`ADR-0031`](adr/ADR-0031-phase5-committed-domain-sink-boundary.md); production
+sink interfaces remain gated on owner approval.
 
 Beginning with Phase 4, each slice runs applicable local verification. The full
 vNext hosted matrix runs once by manual dispatch against the phase-completion
@@ -200,6 +202,12 @@ canonical byte/checksum contract, explicit server-snapshot resync boundary, and
 remaining online-composition gate. Owner architecture approval is complete;
 the bounded server-core implementation and focused tests pass applicable local
 verification and owner implementation-demo acceptance.
+
+Phase 5 Slice 5.6 is **In Progress** at its architecture gate. Proposed
+[`ADR-0031`](adr/ADR-0031-phase5-committed-domain-sink-boundary.md) presents the
+committed publication payload, four role-specific sink ports, post-commit
+fan-out, bounded failure reporting, and retention choices. No production sink
+interface or reducer dispatch has landed pending owner approval.
 
 ## References and license
 
