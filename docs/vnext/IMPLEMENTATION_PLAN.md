@@ -2409,7 +2409,7 @@ Depends on: Phase 3.
 | 4.3 | Implement the client/server session state machines and authentication-provider interface | **Implemented** | Accepted [`ADR-0023`](adr/ADR-0023-session-state-machines-and-authentication-provider-boundary.md), implementation `edbedbd632`, all applicable local verification, and owner demo acceptance pass |
 | 4.4 | Define reliable-operation and latest-wins snapshot envelopes | **Implemented** | Accepted [`ADR-0024`](adr/ADR-0024-reliable-operation-latest-wins-envelope-contract.md), implementation `ee17ebdd0a`, all applicable local verification, and owner demo acceptance pass |
 | 4.5 | Exchange a minimal player command and world snapshot over the in-memory link | **Implemented** | Accepted [`ADR-0025`](adr/ADR-0025-minimal-player-command-world-snapshot-exchange.md) and [`GDR-0011`](gdr/GDR-0011-phase4-minimal-player-exchange-semantics.md), implementation `077a08da48`, all applicable local verification, and owner demo acceptance pass |
-| 4.6 | Add round-trip, property, golden-schema, mutation, and fuzz coverage | **In Progress** | Local implementation and verification pass; owner demo acceptance and the Phase 4 hosted exit matrix remain pending |
+| 4.6 | Add round-trip, property, golden-schema, mutation, and fuzz coverage | **Implemented** | Implementation `7361a43af7`, all applicable local verification, complete decoder/corpus registration, and owner demo acceptance pass |
 
 Exit gate:
 
@@ -2839,6 +2839,30 @@ Implementation notes:
     evidence for owner acceptance. After Slice 4.6 acceptance, manually dispatch
     and review every Phase 4 hosted exit-gate job, including macOS x86-64,
     before marking Phase 4 **Implemented** or beginning Phase 5.
+
+- 2026-08-27 — Slice 4.6 — Implemented
+  - Change: retained implementation commit `7361a43af7` without production-code
+    changes and marked Slice 4.6 **Implemented** after the required owner demo
+    acceptance.
+  - Decisions: none. ADR-0004 and ADR-0019 remain accepted without amendment;
+    the slice introduced no architecture, authority, state-scope, or gameplay
+    behavior decision.
+  - Verification: the accepted implementation retains the green fresh MSVC
+    build of all eleven contract executables plus three golden-corpus checks,
+    independent MSVC C++20 compilation of all three changed production fuzzer
+    translation units, 98 repository-owned Python tests, exact five-header
+    FlatBuffers regeneration/proof, provenance evidence for 170 intentional
+    differences and 54 dependency inputs, legacy-exclusion evidence for 3,864
+    paths, 59 CMake files, 32 compile commands, and 91 Ninja edges, formatting,
+    JSON/Python validation, 80 resolved local Markdown links, and clean diff
+    checks.
+  - Owner review: implementation-demo evidence explicitly accepted by the
+    project owner in the 2026-08-27 working session.
+  - Follow-ups: all Phase 4 slices are now **Implemented**, but Phase 4 remains
+    **In Progress**. Manually dispatch and review the complete Phase 4 hosted
+    baseline, dependency-proof, and runtime-safety matrix, including macOS
+    x86-64, then obtain explicit Phase 4 exit-gate approval before marking the
+    phase **Implemented** or beginning Phase 5.
 
 ### Phase 5 — Deterministic authoritative server core
 

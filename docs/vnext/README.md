@@ -22,10 +22,10 @@ Phases 0–3 are implemented. The active tree is a provenance-verified OpenMW
 - sanitizer, race, fuzz, and supported desktop build evidence; and
 - owned typed observability interfaces with bounded deterministic test sinks.
 
-Phase 4—bounded protocol and in-memory session—is in progress. Slices 4.1–4.5
-are implemented; Slice 4.6 is adding the phase's exhaustive property, mutation,
-golden-corpus, and fuzz-registration coverage. No production multiplayer runtime
-or real transport integration exists yet. See the [implementation
+Phase 4—bounded protocol and in-memory session—is in progress. Slices 4.1–4.6
+are implemented, and the complete manually dispatched hosted phase-exit matrix
+plus owner exit-gate review remain pending. No production multiplayer runtime or
+real transport integration exists yet. See the [implementation
 plan](IMPLEMENTATION_PLAN.md) for the live tracker, phase gates, decision
 records, and verification evidence.
 
@@ -144,8 +144,9 @@ fake-peer design and accepted
 [`GDR-0011`](gdr/GDR-0011-phase4-minimal-player-exchange-semantics.md) separately
 defined its narrow player-intent, authority, and session-targeted snapshot
 scope. Local verification and the required owner demo acceptance pass. Slice
-4.6 is **In Progress** and introduces no new production protocol, architecture,
-authority, state-scope, or gameplay behavior.
+4.6 is also **Implemented** with exhaustive property, mutation, golden-corpus,
+and fuzz-registration coverage and introduces no new production protocol,
+architecture, authority, state-scope, or gameplay behavior.
 
 ## References and license
 
