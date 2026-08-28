@@ -2980,7 +2980,7 @@ Depends on: Phase 4.
 |---|---|---|---|
 | 5.1 | Implement fixed-tick scheduling, bounded per-tick command intake, and deterministic ordering | **Implemented** | Accepted [`ADR-0026`](adr/ADR-0026-phase5-writer-command-intake-and-ordering.md), implementation `e0dde571f5`, applicable local verification, and owner demo acceptance pass |
 | 5.2 | Implement minimal player/session/cell/root-transform/velocity/ack canonical state | **Implemented** | Accepted [`ADR-0027`](adr/ADR-0027-phase5-canonical-player-and-session-state.md), implementation `f1a1f0632e`, applicable local verification, and owner demo acceptance pass |
-| 5.3 | Implement command validation and atomic reducer application | **In Progress** | Accepted [`ADR-0028`](adr/ADR-0028-phase5-command-validation-and-atomic-reducer.md) and [`GDR-0012`](gdr/GDR-0012-phase5-minimal-motion-reducer-semantics.md); production reducer and implementation demo pending |
+| 5.3 | Implement command validation and atomic reducer application | **In Progress** | Accepted [`ADR-0028`](adr/ADR-0028-phase5-command-validation-and-atomic-reducer.md) and [`GDR-0012`](gdr/GDR-0012-phase5-minimal-motion-reducer-semantics.md); implementation and applicable local verification pass, owner demo pending |
 | 5.4 | Publish immutable snapshots and versioned state-change events | **Not Started** | Readers cannot mutate canonical state and slow readers cannot block the writer indefinitely |
 | 5.5 | Add idempotency windows, authority-epoch checks, state checksums, and explicit resync requests | **Not Started** | Duplicate/stale/epoch mismatch and divergence-repair tests pass |
 | 5.6 | Add persistence, replay, script, and metrics sink interfaces without implementations | **Not Started** | All sinks receive the same committed change record after, never before, commit |
@@ -3233,6 +3233,45 @@ Implementation notes:
     acceptance remain pending.
   - Follow-ups: implement only the approved Slice 5.3 surface and tests. Slice
     5.4 and online reducer composition remain gated.
+
+- 2026-08-28 — Slice 5.3 — In Progress
+  - Change: implemented the approved writer-confined `CanonicalCommandReducer`
+    over immutable canonical state. It verifies sealed-batch limits, scheduled
+    tick, and strict ingress order before mutation; applies the closed command
+    validation order; atomically replaces complete player/session candidates;
+    advances exact-next accepted-or-rejected acknowledgement progress; and
+    emits bounded closed disposition metrics/events. Accepted motion replaces
+    velocity exactly while preserving transform and increments the entity
+    revision once. Fifteen focused contract scenarios cover validation order,
+    acknowledgement, atomicity, contention, intake boundaries, revision/tick
+    failures, observability independence, velocity values, player isolation,
+    dependency isolation, and the explicit Slice 5.5 online gate.
+  - Decisions: no new architecture, authority, state-scope, or gameplay
+    decisions were made. The implementation follows accepted
+    [`ADR-0028`](adr/ADR-0028-phase5-command-validation-and-atomic-reducer.md)
+    and [`GDR-0012`](gdr/GDR-0012-phase5-minimal-motion-reducer-semantics.md)
+    Option A decisions. Same-batch command IDs are checked now; cross-batch ID
+    reuse remains intentionally detectable only after Slice 5.5 adds the
+    approved bounded window, so no online composition is permitted.
+  - Verification: a fresh standalone MSVC 19.44 C++20 configure and 58-step
+    build pass all 14 contract executables and three golden-corpus checks,
+    including all 15 named Slice 5.3 reducer scenarios. `python -m unittest
+    discover -s scripts/tests` passes all 98 repository-owned tests. Staged
+    baseline provenance accounts for 183 intentional differences and verifies
+    54 dependency inputs; staged legacy exclusion checks 3,877 tracked paths,
+    59 CMake files, 1,254 compile commands, and 1,971 Ninja edges. All six
+    changed C++ files pass `clang-format 22.1.3 --dry-run --Werror`; the
+    provenance JSON parses, all 100 local vNext Markdown links resolve, the new
+    public header contains no wire/generated/OpenMW/socket/platform/script/
+    database surface, accepted ADR/GDR assertions pass, and staged diff checks
+    pass. FlatBuffers regeneration and fuzz verification are not applicable
+    because this slice changes no schema, decoder, or corpus.
+  - Owner review: architecture and gameplay approval is complete.
+    Implementation-demo acceptance remains pending, so Slice 5.3 stays **In
+    Progress** and Slice 5.4 remains gated.
+  - Follow-ups: publish the implementation commit and present the accepted,
+    rejected, contention, observability, and Slice 5.5-gate evidence for owner
+    acceptance. Do not compose the reducer into an online runtime.
 
 ### Phase 6 — Maintained transport and secure network session
 

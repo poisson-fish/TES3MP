@@ -17,7 +17,7 @@ namespace
 
     static_assert(!std::is_constructible_v<MetricObservation, std::string_view>);
     static_assert(!std::is_constructible_v<StructuredEvent, std::string_view>);
-    static_assert(std::variant_size_v<StructuredEventPayload> == 3);
+    static_assert(std::variant_size_v<StructuredEventPayload> == 4);
 
     MetricObservation metric(MetricKey key, MetricValue value, MetricDimensionValue outcome)
     {
@@ -90,7 +90,9 @@ namespace
         return !StructuredEvent::create(static_cast<EventSeverity>(255), std::nullopt, ContractObservationEvent{})
             && !StructuredEvent::create(EventSeverity::Info, std::nullopt,
                 SessionLifecycleEvent{ static_cast<SessionObservationRole>(255),
-                    SessionObservationOutcome::TransitionAccepted, SessionObservationStage::TransportAndNegotiation });
+                    SessionObservationOutcome::TransitionAccepted, SessionObservationStage::TransportAndNegotiation })
+            && !StructuredEvent::create(EventSeverity::Info, std::nullopt,
+                CommandReductionEvent{ static_cast<CommandReductionObservationOutcome>(255), 0 });
     }
 
     bool explicit_no_op_sinks_require_no_global_registry()

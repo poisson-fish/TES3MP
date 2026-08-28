@@ -31,6 +31,9 @@ namespace
                     || dimension.value == MetricDimensionValue::CommandDeadlineOverflow
                     || dimension.value == MetricDimensionValue::CommandTickExhausted
                     || dimension.value == MetricDimensionValue::CommandIngressOrdinalExhausted;
+            case MetricDimensionKey::CommandReductionOutcome:
+                return dimension.value >= MetricDimensionValue::CommandReductionApplied
+                    && dimension.value <= MetricDimensionValue::CommandReductionCandidateStateInvalid;
         }
         return false;
     }
@@ -69,6 +72,8 @@ namespace
                 return dimension == MetricDimensionKey::CommandIntakeOutcome;
             case MetricKey::CommandIntakePending:
                 return false;
+            case MetricKey::CommandReductionOutcomes:
+                return dimension == MetricDimensionKey::CommandReductionOutcome;
         }
         return false;
     }
@@ -115,6 +120,13 @@ namespace
             || outcome == CommandIntakeObservationOutcome::TickExhausted
             || outcome == CommandIntakeObservationOutcome::IngressOrdinalExhausted;
     }
+
+    constexpr bool validCommandReductionEvent(TES3MP::CommandReductionEvent event) noexcept
+    {
+        using TES3MP::CommandReductionObservationOutcome;
+        return event.outcome >= CommandReductionObservationOutcome::Applied
+            && event.outcome <= CommandReductionObservationOutcome::CandidateStateInvalid;
+    }
 }
 
 namespace TES3MP
@@ -155,6 +167,9 @@ namespace TES3MP
         if (const auto* session = std::get_if<SessionLifecycleEvent>(&payload); session && !validSessionEvent(*session))
             return std::nullopt;
         if (const auto* intake = std::get_if<CommandIntakeEvent>(&payload); intake && !validCommandIntakeEvent(*intake))
+            return std::nullopt;
+        if (const auto* reduction = std::get_if<CommandReductionEvent>(&payload);
+            reduction && !validCommandReductionEvent(*reduction))
             return std::nullopt;
         return StructuredEvent(severity, tick, payload);
     }

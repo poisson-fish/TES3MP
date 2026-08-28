@@ -45,6 +45,7 @@ namespace TES3MP
         SessionCancellations = 0x104,
         CommandIntakeOutcomes = 0x200,
         CommandIntakePending = 0x201,
+        CommandReductionOutcomes = 0x202,
     };
 
     struct MetricDefinition
@@ -75,6 +76,8 @@ namespace TES3MP
                 return MetricDefinition{ MetricOperation::CounterAdd, MetricUnit::Count };
             case MetricKey::CommandIntakePending:
                 return MetricDefinition{ MetricOperation::GaugeSet, MetricUnit::Count };
+            case MetricKey::CommandReductionOutcomes:
+                return MetricDefinition{ MetricOperation::CounterAdd, MetricUnit::Count };
         }
         return std::nullopt;
     }
@@ -84,6 +87,7 @@ namespace TES3MP
         ContractOutcome = 1,
         SessionOutcome = 2,
         CommandIntakeOutcome = 3,
+        CommandReductionOutcome = 4,
     };
 
     enum class MetricDimensionValue : std::uint8_t
@@ -106,6 +110,21 @@ namespace TES3MP
         CommandDeadlineOverflow = 26,
         CommandTickExhausted = 27,
         CommandIngressOrdinalExhausted = 28,
+        CommandReductionApplied = 40,
+        CommandReductionUnknownSession = 41,
+        CommandReductionSessionGenerationMismatch = 42,
+        CommandReductionAlreadyFinalized = 43,
+        CommandReductionSequenceGap = 44,
+        CommandReductionDuplicateCommandId = 45,
+        CommandReductionEntityBindingMismatch = 46,
+        CommandReductionEntityRevisionMismatch = 47,
+        CommandReductionAuthorityEpochMismatch = 48,
+        CommandReductionSpatialTickRegression = 49,
+        CommandReductionEntityRevisionExhausted = 50,
+        CommandReductionCommandLimitExceeded = 51,
+        CommandReductionEligibleTickMismatch = 52,
+        CommandReductionIngressOrdinalNotStrictlyIncreasing = 53,
+        CommandReductionCandidateStateInvalid = 54,
     };
 
     struct MetricDimension
@@ -178,6 +197,7 @@ namespace TES3MP
         ContractObservation = 1,
         SessionLifecycle = 2,
         CommandIntake = 3,
+        CommandReduction = 4,
     };
 
     struct ContractObservationEvent
@@ -242,7 +262,35 @@ namespace TES3MP
         friend constexpr bool operator==(CommandIntakeEvent, CommandIntakeEvent) noexcept = default;
     };
 
-    using StructuredEventPayload = std::variant<ContractObservationEvent, SessionLifecycleEvent, CommandIntakeEvent>;
+    enum class CommandReductionObservationOutcome : std::uint8_t
+    {
+        Applied,
+        UnknownSession,
+        SessionGenerationMismatch,
+        AlreadyFinalized,
+        SequenceGap,
+        DuplicateCommandId,
+        EntityBindingMismatch,
+        EntityRevisionMismatch,
+        AuthorityEpochMismatch,
+        SpatialTickRegression,
+        EntityRevisionExhausted,
+        CommandLimitExceeded,
+        EligibleTickMismatch,
+        IngressOrdinalNotStrictlyIncreasing,
+        CandidateStateInvalid,
+    };
+
+    struct CommandReductionEvent
+    {
+        CommandReductionObservationOutcome outcome;
+        std::uint64_t processedCommands;
+
+        friend constexpr bool operator==(CommandReductionEvent, CommandReductionEvent) noexcept = default;
+    };
+
+    using StructuredEventPayload
+        = std::variant<ContractObservationEvent, SessionLifecycleEvent, CommandIntakeEvent, CommandReductionEvent>;
 
     class StructuredEvent
     {
@@ -256,7 +304,9 @@ namespace TES3MP
                 return EventKind::ContractObservation;
             if (std::holds_alternative<SessionLifecycleEvent>(mPayload))
                 return EventKind::SessionLifecycle;
-            return EventKind::CommandIntake;
+            if (std::holds_alternative<CommandIntakeEvent>(mPayload))
+                return EventKind::CommandIntake;
+            return EventKind::CommandReduction;
         }
         constexpr EventSeverity severity() const noexcept { return mSeverity; }
         constexpr std::optional<ServerTick> tick() const noexcept { return mTick; }

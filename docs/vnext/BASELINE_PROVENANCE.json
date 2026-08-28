@@ -102,7 +102,7 @@
     {
       "path": "components/tes3mp/CMakeLists.txt",
       "status": "A",
-      "purpose": "Defines the standalone-capable five-library graph, pinned FlatBuffers runtime input, target-scoped safety registration including TSan-compatible allocator-test interposition, thirteen contract executables with golden-corpus verification, and bounded parser fuzz targets."
+      "purpose": "Defines the standalone-capable five-library graph, pinned FlatBuffers runtime input, target-scoped safety registration including TSan-compatible allocator-test interposition, fourteen contract executables with golden-corpus verification, and bounded parser fuzz targets."
     },
     {
       "path": "components/tes3mp/CMakePresets.json",
@@ -188,6 +188,11 @@
       "path": "components/tes3mp/include/tes3mp/server_command_intake.hpp",
       "status": "A",
       "purpose": "Owner-approved typed server command proposal, fixed intake limits, writer-stamped batch, and coordinator result interfaces."
+    },
+    {
+      "path": "components/tes3mp/include/tes3mp/server_command_reducer.hpp",
+      "status": "A",
+      "purpose": "Owner-approved writer-confined canonical reducer, closed batch error and command disposition values, immutable state access, and explicit pre-Slice-5.5 online gate."
     },
     {
       "path": "components/tes3mp/include/tes3mp/server_session.hpp",
@@ -353,6 +358,11 @@
       "path": "components/tes3mp/server_core/server_command_intake.cpp",
       "status": "A",
       "purpose": "Owner-approved bounded writer-context command intake, deterministic tick ordering, overload handling, and typed observability implementation."
+    },
+    {
+      "path": "components/tes3mp/server_core/server_command_reducer.cpp",
+      "status": "A",
+      "purpose": "Owner-approved sealed-batch verification, closed validation order, per-command immutable candidate installation, acknowledgement finalization, velocity replacement, and typed observability implementation."
     },
     {
       "path": "components/tes3mp/server_core/server_session.cpp",
@@ -548,6 +558,11 @@
       "path": "components/tes3mp/tests/server_command_intake_tests.cpp",
       "status": "A",
       "purpose": "Deterministic writer ordering, cutoff, catch-up, queue-limit, lossless deferral, ordinal-exhaustion, ownership, and boundary contracts."
+    },
+    {
+      "path": "components/tes3mp/tests/server_command_reducer_tests.cpp",
+      "status": "A",
+      "purpose": "Atomic validation/reduction, acknowledgement, ordering, contention, bounds, velocity behavior, observability, dependency isolation, and explicit Slice 5.5 online-gate contracts."
     },
     {
       "path": "components/tes3mp/tests/session_state_machine_tests.cpp",
@@ -981,7 +996,7 @@
         },
         {
           "path": "components/tes3mp/CMakeLists.txt",
-          "sha256": "c87d630bea7994caac0a31267839ec190cc23e31c03c41d3a831ffb6f665a190"
+          "sha256": "daf782600a4e76ee45216f67f01be313df33ddfc50f794be4bcf21e70cb43745"
         },
         {
           "path": "components/tes3mp/protocol/generated/client_hello_generated.h",

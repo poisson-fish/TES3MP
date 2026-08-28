@@ -208,3 +208,17 @@ tick regression and revision exhaustion return typed errors. Session-generation
 acknowledgement is optional contiguous-finalized disposition progress only.
 Lifecycle, persistence, reducers, acknowledgement advancement, publication,
 movement, interest, resync, and gameplay remain later gated work.
+
+Phase 5 Slice 5.3 accepts ADR-0028 and GDR-0012 and adds one writer-confined
+canonical command reducer. It verifies sealed intake-batch invariants, validates
+session generation, exact-next sequence, same-batch command ID, explicit entity
+binding, entity revision, and stable authority epoch in a fixed order, then
+constructs and installs one complete immutable candidate per final command.
+Accepted motion replaces velocity exactly while preserving the complete
+transform; rejected exact-next commands may advance acknowledgement while
+preserving player state. Typed dispositions and bounded observations expose the
+result without publishing snapshots or domain change records. Cross-batch
+command-ID idempotency remains deliberately incomplete, so online reducer
+composition stays prohibited until Slice 5.5; there is still no integration,
+clamping, collision, cell transition, prediction, persistence, scripting, or
+presentation behavior.

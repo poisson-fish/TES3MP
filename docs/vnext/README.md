@@ -28,10 +28,12 @@ Phase 5—deterministic authoritative server core—is in progress. Its first
 production slice implements the approved writer intake, ordering, limits, and
 overload policy with accepted owner demo evidence. Slice 5.2 implements the
 approved immutable, bounded canonical player/session state value and invariant
-checks with accepted owner demo evidence. No reducer, production
-multiplayer runtime, or real transport integration exists yet. See the [implementation
-plan](IMPLEMENTATION_PLAN.md) for the live tracker, phase gates, decision
-records, and verification evidence.
+checks with accepted owner demo evidence. Slice 5.3 implements the approved
+writer-confined command validation and atomic reducer, with owner implementation-
+demo acceptance still pending. The reducer remains offline until Slice 5.5 adds
+the required cross-batch command-ID idempotency window; no production multiplayer
+runtime or real transport integration exists yet. See the [implementation plan](IMPLEMENTATION_PLAN.md)
+for the live tracker, phase gates, decision records, and verification evidence.
 
 Beginning with Phase 4, each slice runs applicable local verification. The full
 vNext hosted matrix runs once by manual dispatch against the phase-completion
@@ -174,7 +176,9 @@ Phase 5 Slice 5.3 now has accepted
 [`GDR-0012`](gdr/GDR-0012-phase5-minimal-motion-reducer-semantics.md), covering
 the atomic reducer, validation/disposition, acknowledgement, incomplete
 cross-batch idempotency gate, and narrow provisional velocity-replacement
-decisions. Production implementation and owner demo acceptance remain pending.
+decisions. The writer-confined implementation, closed observability, and focused
+contract tests pass applicable local verification. Owner implementation-demo
+acceptance remains pending, and online composition stays gated on Slice 5.5.
 
 ## References and license
 
