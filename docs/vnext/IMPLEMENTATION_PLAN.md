@@ -339,7 +339,7 @@ runtime or protocol name.
 | ADR-0027 | Phase 5 canonical player/session state, scope, invariants, and bounds | Phase 5 | **Implemented** |
 | ADR-0028 | Phase 5 command validation, disposition, acknowledgement, and atomic reducer boundary | Phase 5 | **Implemented** |
 | ADR-0029 | Phase 5 immutable canonical publication, versioned change feed, retention, and slow-reader policy | Phase 5 | **Implemented** |
-| ADR-0030 | Phase 5 bounded idempotency, canonical checksum, and resync boundary | Phase 5 | **Proposed** |
+| ADR-0030 | Phase 5 bounded idempotency, canonical checksum, and resync boundary | Phase 5 | **Implemented** |
 
 An ADR is complete only when it records considered alternatives, selection
 criteria, consequences, failure modes, a replacement/review trigger, and
@@ -2984,7 +2984,7 @@ Depends on: Phase 4.
 | 5.2 | Implement minimal player/session/cell/root-transform/velocity/ack canonical state | **Implemented** | Accepted [`ADR-0027`](adr/ADR-0027-phase5-canonical-player-and-session-state.md), implementation `f1a1f0632e`, applicable local verification, and owner demo acceptance pass |
 | 5.3 | Implement command validation and atomic reducer application | **Implemented** | Accepted [`ADR-0028`](adr/ADR-0028-phase5-command-validation-and-atomic-reducer.md) and [`GDR-0012`](gdr/GDR-0012-phase5-minimal-motion-reducer-semantics.md), implementation `f57a4074db`, applicable local verification, and owner demo acceptance pass |
 | 5.4 | Publish immutable snapshots and versioned state-change events | **Implemented** | Accepted [`ADR-0029`](adr/ADR-0029-phase5-immutable-canonical-publication-and-versioned-change-feed.md), implementation `d7e7b25950`, applicable local verification, and owner demo acceptance pass |
-| 5.5 | Add idempotency windows, authority-epoch checks, state checksums, and explicit resync requests | **In Progress** | Proposed [`ADR-0030`](adr/ADR-0030-phase5-idempotency-checksum-and-resync-boundary.md); owner approval and implementation pending |
+| 5.5 | Add idempotency windows, authority-epoch checks, state checksums, and explicit resync requests | **In Progress** | Accepted [`ADR-0030`](adr/ADR-0030-phase5-idempotency-checksum-and-resync-boundary.md); implementation pending |
 | 5.6 | Add persistence, replay, script, and metrics sink interfaces without implementations | **Not Started** | All sinks receive the same committed change record after, never before, commit |
 | 5.7 | Add reducer property tests and deterministic multi-client simulation tests | **Not Started** | Randomized command streams preserve invariants and reproduce by seed |
 
@@ -3445,6 +3445,27 @@ Implementation notes:
     ADR is accepted. After approval, implement only the bounded server-core
     idempotency, canonical encoding/checksum, resync values, observability, and
     focused tests; do not add wire, interest, socket, or runtime composition.
+
+- 2026-08-28 — Slice 5.5 — In Progress
+  - Change: recorded owner approval of
+    [`ADR-0030`](adr/ADR-0030-phase5-idempotency-checksum-and-resync-boundary.md)
+    without production-code changes.
+  - Decisions: the project owner approved Option A for Decisions 1–5, the
+    per-active-session-generation immutable 1,024-finalization retry horizon,
+    exact-next duplicate finalization and FIFO eviction, explicit canonical V1
+    bytes with CRC-64/ECMA-182 V1, metadata-only current-session resync, the
+    remaining composition gate, and all 15 proposed acceptance tests.
+  - Verification: baseline provenance and the 98 repository-owned Python tests
+    pass on the decision candidate. Product build, formatting, schema, and fuzz
+    gates are not applicable because this acceptance changes documentation only.
+  - Owner review: architecture, authority, state-scope, compatibility,
+    resource-bound, and recovery approval is complete from the project owner in
+    the 2026-08-28 working session. Implementation and demo acceptance remain
+    pending.
+  - Follow-ups: implement only the approved bounded server-core idempotency,
+    canonical encoding/checksum, resync values, observability, and focused
+    tests. Do not add wire, interest, socket, target-projection, automatic-
+    delivery, or runtime composition.
 
 ### Phase 6 — Maintained transport and secure network session
 

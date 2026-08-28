@@ -1,8 +1,10 @@
 # ADR-0030: Phase 5 bounded idempotency, canonical checksum, and resync boundary
 
-Status: **Proposed**
+Status: **Accepted**
 
 Date opened: 2026-08-28
+
+Date approved: 2026-08-28
 
 Decision owner: project owner
 
@@ -27,8 +29,7 @@ authority transfer, or online transport composition.
 
 ## Decision summary
 
-Pending owner approval. The recommendation is Option A for Decisions 1 through
-5:
+The project owner approved Option A for Decisions 1 through 5 on 2026-08-28:
 
 1. retain an immutable trailing window of at most 1,024 finalized command
    records per active session generation as reducer safety state, published and
@@ -407,7 +408,13 @@ Reopen this ADR if:
 
 ## Owner approval
 
-Pending explicit project-owner approval or amendment of Decisions 1 through 5,
-the 1,024-record bounded retry horizon, CRC-64/ECMA-182 V1 selection, and the
-proposed acceptance tests. No Slice 5.5 production implementation is authorized
-by this proposal.
+Approved by the project owner in the 2026-08-28 working session: Option A for
+Decisions 1 through 5, the 1,024-record bounded retry horizon,
+CRC-64/ECMA-182 V1, and all 15 proposed acceptance tests.
+
+This approval authorizes only the Slice 5.5 bounded server-core idempotency
+history, canonical encoding/checksum, metadata-only resync values,
+observability, focused tests, and removal of the named reducer-core blocker.
+Protocol schemas, interest filtering, client-state upload, socket/transport
+actions, target projection, automatic delivery, and online runtime composition
+remain separately gated.

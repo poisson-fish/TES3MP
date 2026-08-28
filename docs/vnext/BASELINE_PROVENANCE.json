@@ -747,7 +747,7 @@
     {
       "path": "docs/vnext/adr/ADR-0030-phase5-idempotency-checksum-and-resync-boundary.md",
       "status": "A",
-      "purpose": "Proposed Phase 5 bounded idempotency history, canonical encoding and checksum, explicit server-snapshot resync, and remaining composition-gate decision."
+      "purpose": "Owner-approved Phase 5 bounded idempotency history, canonical encoding and checksum, explicit server-snapshot resync, and remaining composition-gate decision."
     },
     {
       "path": "docs/vnext/gdr/GDR-0011-phase4-minimal-player-exchange-semantics.md",
