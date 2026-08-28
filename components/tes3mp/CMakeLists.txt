@@ -95,6 +95,7 @@ add_library(TES3MP::ServerCore ALIAS tes3mp_server_core)
 target_link_libraries(tes3mp_server_core PUBLIC tes3mp_protocol)
 target_sources(tes3mp_server_core PRIVATE
     include/tes3mp/authentication.hpp
+    include/tes3mp/canonical_publication.hpp
     include/tes3mp/canonical_state.hpp
     include/tes3mp/deterministic_random.hpp
     include/tes3mp/fixed_tick_scheduler.hpp
@@ -104,6 +105,7 @@ target_sources(tes3mp_server_core PRIVATE
     include/tes3mp/server_command_reducer.hpp
     include/tes3mp/server_session.hpp
     server_core/authentication.cpp
+    server_core/canonical_publication.cpp
     server_core/canonical_state.cpp
     server_core/deterministic_random.cpp
     server_core/fixed_tick_scheduler.cpp

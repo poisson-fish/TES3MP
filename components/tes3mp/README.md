@@ -222,3 +222,16 @@ command-ID idempotency remains deliberately incomplete, so online reducer
 composition stays prohibited until Slice 5.5; there is still no integration,
 clamping, collision, cell transition, prediction, persistence, scripting, or
 presentation behavior.
+
+Phase 5 Slice 5.4 accepts ADR-0029 and integrates one immutable latest-
+publication slot with the writer-confined reducer. Canonical state is shared
+read-only, a checked global version advances once per installed player/session
+or acknowledgement-only candidate, and each committed batch publishes its
+complete final state plus ordered typed replacement records. The core retains
+only that latest bounded batch; readers either consume the exact next versions
+or replace their view from its complete snapshot after a gap. Old immutable
+handles remain valid without reader registration, acknowledgement, callbacks,
+queue waits, shared locks, or writer backpressure. Publication stays domain-only
+and offline: protocol/interest conversion, command-result delivery, checksums,
+explicit network resync, persistence/replay/script sinks, and online composition
+remain later gated work.

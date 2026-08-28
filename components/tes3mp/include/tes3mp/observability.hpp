@@ -125,6 +125,7 @@ namespace TES3MP
         CommandReductionEligibleTickMismatch = 52,
         CommandReductionIngressOrdinalNotStrictlyIncreasing = 53,
         CommandReductionCandidateStateInvalid = 54,
+        CommandReductionStateVersionCapacityExceeded = 55,
     };
 
     struct MetricDimension
@@ -279,6 +280,7 @@ namespace TES3MP
         EligibleTickMismatch,
         IngressOrdinalNotStrictlyIncreasing,
         CandidateStateInvalid,
+        StateVersionCapacityExceeded,
     };
 
     struct CommandReductionEvent

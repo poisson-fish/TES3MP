@@ -40,6 +40,11 @@ namespace TES3MP::Detail
         static constexpr std::string_view name = "ServerTick";
     };
 
+    struct CanonicalStateVersionTag
+    {
+        static constexpr std::string_view name = "CanonicalStateVersion";
+    };
+
     struct CommandSequenceTag
     {
         static constexpr std::string_view name = "CommandSequence";
@@ -82,6 +87,8 @@ namespace TES3MP
     using AuthenticationAttemptId
         = Detail::StrongValue<Detail::AuthenticationAttemptIdTag, Detail::StrongValuePolicy::CounterFromOne>;
     using ServerTick = Detail::StrongValue<Detail::ServerTickTag, Detail::StrongValuePolicy::CounterFromZero>;
+    using CanonicalStateVersion
+        = Detail::StrongValue<Detail::CanonicalStateVersionTag, Detail::StrongValuePolicy::CounterFromZero>;
     using CommandSequence = Detail::StrongValue<Detail::CommandSequenceTag, Detail::StrongValuePolicy::CounterFromOne>;
     using EntityRevision = Detail::StrongValue<Detail::EntityRevisionTag, Detail::StrongValuePolicy::CounterFromOne>;
     using CommandId = Detail::StrongValue<Detail::CommandIdTag, Detail::StrongValuePolicy::Identity>;

@@ -32,10 +32,11 @@ checks with accepted owner demo evidence. Slice 5.3 implements the approved
 writer-confined command validation and atomic reducer with accepted owner demo
 evidence. The reducer remains offline until Slice 5.5 adds the required cross-
 batch command-ID idempotency window; no production multiplayer runtime or real
-transport integration exists yet. Slice 5.4 publication architecture is now
-under owner review; no publication code has landed. See the [implementation
-plan](IMPLEMENTATION_PLAN.md) for the live tracker, phase gates, decision
-records, and verification evidence.
+transport integration exists yet. Slice 5.4 implements the approved immutable
+latest-publication, checked version, typed domain-change, and reader-gap
+contracts, with owner implementation-demo acceptance still pending. See the
+[implementation plan](IMPLEMENTATION_PLAN.md) for the live tracker, phase gates,
+decision records, and verification evidence.
 
 Beginning with Phase 4, each slice runs applicable local verification. The full
 vNext hosted matrix runs once by manual dispatch against the phase-completion
@@ -186,8 +187,8 @@ Phase 5 Slice 5.4 has accepted
 [`ADR-0029`](adr/ADR-0029-phase5-immutable-canonical-publication-and-versioned-change-feed.md)
 for immutable publication ownership, state versioning, complete domain record
 scope, latest-only retention, gap recovery, and slow-reader isolation. Owner
-architecture approval is complete; production implementation and owner demo
-acceptance remain pending.
+architecture approval is complete. The implementation and focused contract
+tests pass applicable local verification; owner demo acceptance remains pending.
 
 ## References and license
 

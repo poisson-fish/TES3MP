@@ -1,11 +1,12 @@
 #ifndef TES3MP_SERVER_COMMAND_REDUCER_HPP
 #define TES3MP_SERVER_COMMAND_REDUCER_HPP
 
-#include "canonical_state.hpp"
+#include "canonical_publication.hpp"
 #include "observability.hpp"
-#include "server_command_intake.hpp"
 
+#include <atomic>
 #include <cstdint>
+#include <memory>
 #include <span>
 #include <vector>
 
@@ -17,22 +18,8 @@ namespace TES3MP
         CommandLimitExceeded,
         EligibleTickMismatch,
         IngressOrdinalNotStrictlyIncreasing,
+        StateVersionCapacityExceeded,
         CandidateStateInvalid,
-    };
-
-    enum class CommandDisposition : std::uint8_t
-    {
-        Applied,
-        UnknownSession,
-        SessionGenerationMismatch,
-        AlreadyFinalized,
-        SequenceGap,
-        DuplicateCommandId,
-        EntityBindingMismatch,
-        EntityRevisionMismatch,
-        AuthorityEpochMismatch,
-        SpatialTickRegression,
-        EntityRevisionExhausted,
     };
 
     class CommandDispositionRecord
@@ -96,21 +83,28 @@ namespace TES3MP
     public:
         // Online composition remains gated until Slice 5.5 adds the bounded
         // cross-batch CommandId idempotency window.
-        CanonicalCommandReducer(CanonicalServerState initialState, Observability& observability) noexcept;
+        CanonicalCommandReducer(CanonicalServerState initialState, Observability& observability);
 
         CanonicalCommandReducer(const CanonicalCommandReducer&) = delete;
         CanonicalCommandReducer& operator=(const CanonicalCommandReducer&) = delete;
         CanonicalCommandReducer(CanonicalCommandReducer&&) = delete;
         CanonicalCommandReducer& operator=(CanonicalCommandReducer&&) = delete;
 
-        const CanonicalServerState& state() const noexcept { return mState; }
+        // Writer-context inspection only. Cross-thread readers use the immutable
+        // latest publication handle.
+        const CanonicalServerState& state() const noexcept { return *mState; }
+        CanonicalStateVersion stateVersion() const noexcept { return mStateVersion; }
+        std::shared_ptr<const CanonicalStatePublication> latestPublication() const noexcept;
         CommandBatchReductionResult apply(const ServerTickCommandBatch& batch);
 
     private:
+        void publish(std::shared_ptr<CanonicalStatePublication> publication) noexcept;
         void observe(CommandDisposition disposition, ServerTick tick) noexcept;
         void observe(CommandBatchReductionError error, ServerTick tick, std::uint64_t processedCommands) noexcept;
 
-        CanonicalServerState mState;
+        std::shared_ptr<const CanonicalServerState> mState;
+        CanonicalStateVersion mStateVersion = CanonicalStateVersion::initial();
+        std::atomic<std::shared_ptr<const CanonicalStatePublication>> mLatestPublication;
         Observability& mObservability;
     };
 }

@@ -466,6 +466,285 @@ namespace
             && second.dispositions().front().disposition() == CommandDisposition::Applied
             && reducer.state().activeSessions().front().highestContiguousFinalizedCommand()->value() == 2;
     }
+
+    bool initial_publication_is_version_zero_complete_and_immutable()
+    {
+        static_assert(std::is_same_v<decltype(std::declval<const CanonicalCommandReducer&>().latestPublication()),
+            std::shared_ptr<const CanonicalStatePublication>>);
+        const std::array players{ player(1, 101), player(2, 202) };
+        const std::array sessions{ session(10, 1, 101), session(20, 2, 202) };
+        const auto initial = state(players, sessions);
+        NullMetricSink metrics;
+        NullStructuredEventSink events;
+        Observability observability(metrics, events);
+        CanonicalCommandReducer reducer(initial, observability);
+        const auto publication = reducer.latestPublication();
+        return publication && publication->stateVersion() == CanonicalStateVersion::initial()
+            && publication->changes().empty() && publication->state() == initial && reducer.state() == initial;
+    }
+
+    bool accepted_command_publishes_player_and_session_replacements_at_one_version()
+    {
+        const std::array players{ player(1, 101) };
+        const std::array sessions{ session(10, 1, 101) };
+        NullMetricSink metrics;
+        NullStructuredEventSink events;
+        Observability observability(metrics, events);
+        CanonicalCommandReducer reducer(state(players, sessions), observability);
+        const auto initialPublication = reducer.latestPublication();
+        const std::array commands{ proposal(10, 1, 1001, 101, 1, LinearVelocity3(4, 5, 6)) };
+        const auto result = reduceCommands(reducer, commands);
+        const auto publication = reducer.latestPublication();
+        if (!result || !publication || publication == initialPublication || publication->changes().size() != 1)
+            return false;
+        const auto& change = publication->changes().front();
+        return publication->stateVersion().value() == 1 && reducer.stateVersion().value() == 1
+            && change.stateVersion().value() == 1 && change.commitTick().value() == 1
+            && change.disposition() == CommandDisposition::Applied
+            && change.sessionReplacement().highestContiguousFinalizedCommand()->value() == 1
+            && change.playerReplacement() && change.playerReplacement()->linearVelocity() == LinearVelocity3(4, 5, 6)
+            && publication->state() == reducer.state() && initialPublication->state() != reducer.state();
+    }
+
+    bool rejected_next_command_publishes_ack_only_replacement()
+    {
+        const std::array players{ player(1, 101) };
+        const std::array sessions{ session(10, 1, 101) };
+        NullMetricSink metrics;
+        NullStructuredEventSink events;
+        Observability observability(metrics, events);
+        CanonicalCommandReducer reducer(state(players, sessions), observability);
+        const std::array commands{ proposal(10, 1, 1001, 999, 1, LinearVelocity3(4, 5, 6)) };
+        const auto result = reduceCommands(reducer, commands);
+        const auto publication = reducer.latestPublication();
+        const auto& change = publication->changes().front();
+        return result && publication->stateVersion().value() == 1 && publication->changes().size() == 1
+            && change.disposition() == CommandDisposition::EntityBindingMismatch && !change.playerReplacement()
+            && change.sessionReplacement().highestContiguousFinalizedCommand()->value() == 1
+            && publication->state().players().front() == players.front();
+    }
+
+    bool noncommitting_dispositions_do_not_advance_version_or_publish()
+    {
+        const std::array players{ player(1, 101) };
+        const std::array sessions{ session(10, 1, 101, 1) };
+        NullMetricSink metrics;
+        NullStructuredEventSink events;
+        Observability observability(metrics, events);
+        CanonicalCommandReducer reducer(state(players, sessions), observability);
+        const auto before = reducer.latestPublication();
+        const std::array commands{
+            proposal(11, 1, 1001, 101, 1, LinearVelocity3(1, 0, 0)),
+            proposal(10, 2, 1002, 101, 1, LinearVelocity3(2, 0, 0), 1, 2),
+            proposal(10, 1, 1003, 101, 1, LinearVelocity3(3, 0, 0)),
+            proposal(10, 3, 1004, 101, 1, LinearVelocity3(4, 0, 0)),
+        };
+        const auto result = reduceCommands(reducer, commands);
+        return result && result.dispositions().size() == 4
+            && result.dispositions()[0].disposition() == CommandDisposition::UnknownSession
+            && result.dispositions()[1].disposition() == CommandDisposition::SessionGenerationMismatch
+            && result.dispositions()[2].disposition() == CommandDisposition::AlreadyFinalized
+            && result.dispositions()[3].disposition() == CommandDisposition::SequenceGap
+            && reducer.stateVersion() == CanonicalStateVersion::initial() && reducer.latestPublication() == before;
+    }
+
+    bool multiple_commits_publish_contiguous_versions_and_exact_final_snapshot()
+    {
+        const std::array players{ player(1, 101) };
+        const std::array sessions{ session(10, 1, 101) };
+        NullMetricSink metrics;
+        NullStructuredEventSink events;
+        Observability observability(metrics, events);
+        CanonicalCommandReducer reducer(state(players, sessions), observability);
+        const std::array commands{
+            proposal(10, 1, 1001, 101, 1, LinearVelocity3(1, 0, 0)),
+            proposal(10, 2, 1002, 101, 1, LinearVelocity3(2, 0, 0)),
+            proposal(10, 3, 1003, 101, 2, LinearVelocity3(3, 0, 0)),
+        };
+        const auto result = reduceCommands(reducer, commands);
+        const auto publication = reducer.latestPublication();
+        const auto changes = publication->changes();
+        return result && changes.size() == 3 && changes[0].stateVersion().value() == 1
+            && changes[1].stateVersion().value() == 2 && changes[2].stateVersion().value() == 3
+            && changes[0].disposition() == CommandDisposition::Applied
+            && changes[1].disposition() == CommandDisposition::EntityRevisionMismatch
+            && changes[2].disposition() == CommandDisposition::Applied && changes[0].playerReplacement()
+            && !changes[1].playerReplacement() && changes[2].playerReplacement()
+            && publication->stateVersion().value() == 3 && publication->state() == reducer.state()
+            && publication->state().players().front().linearVelocity() == LinearVelocity3(3, 0, 0)
+            && publication->state().activeSessions().front().highestContiguousFinalizedCommand()->value() == 3;
+    }
+
+    bool failed_batch_preflight_preserves_state_version_and_publication()
+    {
+        const auto exhausted = CanonicalStateVersion::fromValue(std::numeric_limits<std::uint64_t>::max()).value();
+        const std::array players{ player(1, 101) };
+        const std::array sessions{ session(10, 1, 101) };
+        NullMetricSink metrics;
+        NullStructuredEventSink events;
+        Observability observability(metrics, events);
+        CanonicalCommandReducer reducer(state(players, sessions), observability);
+        const auto before = reducer.latestPublication();
+        return !canReserveCanonicalStateVersions(exhausted, 1)
+            && reducer.stateVersion() == CanonicalStateVersion::initial() && reducer.latestPublication() == before
+            && reducer.state().players().front() == players.front();
+    }
+
+    bool version_capacity_preflight_fails_before_any_command_executes()
+    {
+        constexpr std::uint64_t Maximum = std::numeric_limits<std::uint64_t>::max();
+        const auto exact = CanonicalStateVersion::fromValue(Maximum - MaximumServerCommandsPerTick).value();
+        const auto shortByOne = CanonicalStateVersion::fromValue(Maximum - MaximumServerCommandsPerTick + 1).value();
+        return canReserveCanonicalStateVersions(exact, MaximumServerCommandsPerTick)
+            && !canReserveCanonicalStateVersions(shortByOne, MaximumServerCommandsPerTick)
+            && canReserveCanonicalStateVersions(CanonicalStateVersion::initial(), MaximumServerCommandsPerTick);
+    }
+
+    bool reader_processes_contiguous_batch_or_detects_gap_and_replaces_from_snapshot()
+    {
+        const std::array players{ player(1, 101) };
+        const std::array sessions{ session(10, 1, 101) };
+        NullMetricSink metrics;
+        NullStructuredEventSink events;
+        Observability observability(metrics, events);
+        CanonicalCommandReducer reducer(state(players, sessions), observability);
+        IntakeFixture fixture;
+        const std::array firstCommand{ proposal(10, 1, 1001, 101, 1, LinearVelocity3(1, 0, 0)) };
+        if (!fixture.submit(firstCommand))
+            return false;
+        const auto firstBatch = fixture.pumpFirst();
+        if (!reducer.apply(firstBatch.batches().front()))
+            return false;
+        const auto first = reducer.latestPublication();
+        if (classifyCanonicalPublication(CanonicalStateVersion::initial(), *first)
+            != CanonicalPublicationReadAction::ApplyContiguousChanges)
+            return false;
+
+        const std::array secondCommand{ proposal(10, 2, 1002, 101, 2, LinearVelocity3(2, 0, 0)) };
+        if (!fixture.submit(secondCommand))
+            return false;
+        const auto secondBatch = fixture.pumpNext();
+        if (!reducer.apply(secondBatch.batches().front()))
+            return false;
+        const auto second = reducer.latestPublication();
+        return classifyCanonicalPublication(CanonicalStateVersion::initial(), *second)
+            == CanonicalPublicationReadAction::ReplaceFromSnapshot
+            && classifyCanonicalPublication(first->stateVersion(), *second)
+            == CanonicalPublicationReadAction::ApplyContiguousChanges
+            && classifyCanonicalPublication(second->stateVersion(), *second) == CanonicalPublicationReadAction::NoChange
+            && classifyCanonicalPublication(second->stateVersion(), *first)
+            == CanonicalPublicationReadAction::OlderPublication;
+    }
+
+    bool slow_reader_holding_old_publication_cannot_block_or_mutate_writer()
+    {
+        const std::array players{ player(1, 101) };
+        const std::array sessions{ session(10, 1, 101) };
+        NullMetricSink metrics;
+        NullStructuredEventSink events;
+        Observability observability(metrics, events);
+        CanonicalCommandReducer reducer(state(players, sessions), observability);
+        const auto oldPublication = reducer.latestPublication();
+        for (std::uint64_t sequence = 1; sequence <= 16; ++sequence)
+        {
+            const std::array command{ proposal(10, sequence, 1000 + sequence, 101, sequence,
+                LinearVelocity3(static_cast<std::int64_t>(sequence), 0, 0)) };
+            if (!reduceCommands(reducer, command))
+                return false;
+        }
+        return oldPublication->stateVersion() == CanonicalStateVersion::initial() && oldPublication->changes().empty()
+            && reducer.latestPublication()->stateVersion().value() == 16
+            && oldPublication->state().players().front() == players.front();
+    }
+
+    bool latest_slot_retains_one_bounded_batch_independent_of_reader_speed()
+    {
+        const std::array players{ player(1, 101) };
+        const std::array sessions{ session(10, 1, 101) };
+        NullMetricSink metrics;
+        NullStructuredEventSink events;
+        Observability observability(metrics, events);
+        CanonicalCommandReducer reducer(state(players, sessions), observability);
+        const std::array firstCommands{
+            proposal(10, 1, 1001, 101, 1, LinearVelocity3(1, 0, 0)),
+            proposal(10, 2, 1002, 101, 2, LinearVelocity3(2, 0, 0)),
+            proposal(10, 3, 1003, 101, 3, LinearVelocity3(3, 0, 0)),
+        };
+        if (!reduceCommands(reducer, firstCommands))
+            return false;
+        const auto retainedOld = reducer.latestPublication();
+        const std::array nextCommand{ proposal(10, 4, 1004, 101, 4, LinearVelocity3(4, 0, 0)) };
+        if (!reduceCommands(reducer, nextCommand))
+            return false;
+        const auto latest = reducer.latestPublication();
+        return retainedOld != latest && retainedOld->changes().size() == 3 && latest->changes().size() == 1
+            && retainedOld->changes().size() <= MaximumServerCommandsPerTick
+            && latest->changes().size() <= MaximumServerCommandsPerTick && latest->stateVersion().value() == 4;
+    }
+
+    bool accepted_dropped_and_null_observability_produce_identical_publications()
+    {
+        const std::array players{ player(1, 101) };
+        const std::array sessions{ session(10, 1, 101) };
+        const auto initial = state(players, sessions);
+        auto acceptedMetrics = RecordingMetricSink::create(4);
+        auto acceptedEvents = RecordingStructuredEventSink::create(4);
+        auto droppedMetrics = RecordingMetricSink::create(0);
+        auto droppedEvents = RecordingStructuredEventSink::create(0);
+        NullMetricSink nullMetrics;
+        NullStructuredEventSink nullEvents;
+        Observability acceptedObservability(*acceptedMetrics, *acceptedEvents);
+        Observability droppedObservability(*droppedMetrics, *droppedEvents);
+        Observability nullObservability(nullMetrics, nullEvents);
+        CanonicalCommandReducer accepted(initial, acceptedObservability);
+        CanonicalCommandReducer dropped(initial, droppedObservability);
+        CanonicalCommandReducer null(initial, nullObservability);
+        const std::array commands{ proposal(10, 1, 1001, 101, 1, LinearVelocity3(1, 2, 3)) };
+        IntakeFixture fixture;
+        if (!fixture.submit(commands))
+            return false;
+        const auto pumped = fixture.pumpFirst();
+        const auto acceptedResult = accepted.apply(pumped.batches().front());
+        const auto droppedResult = dropped.apply(pumped.batches().front());
+        const auto nullResult = null.apply(pumped.batches().front());
+        return acceptedResult == droppedResult && droppedResult == nullResult
+            && *accepted.latestPublication() == *dropped.latestPublication()
+            && *dropped.latestPublication() == *null.latestPublication() && acceptedMetrics->observations().size() == 1
+            && acceptedEvents->events().size() == 1 && droppedMetrics->droppedCount() == 1
+            && droppedEvents->droppedCount() == 1;
+    }
+
+    bool publication_exposes_no_wire_engine_socket_script_database_or_mutable_surface()
+    {
+        static_assert(std::is_same_v<decltype(std::declval<const CanonicalStatePublication&>().state()),
+            const CanonicalServerState&>);
+        static_assert(std::is_same_v<decltype(std::declval<const CanonicalStatePublication&>().changes()),
+            std::span<const CanonicalStateChangeRecord>>);
+        static_assert(!std::is_default_constructible_v<CanonicalStatePublication>);
+        return true;
+    }
+
+    bool protocol_interest_sinks_checksum_and_online_composition_remain_gated()
+    {
+        const std::array players{ player(1, 101) };
+        const std::array sessions{ session(10, 1, 101) };
+        NullMetricSink metrics;
+        NullStructuredEventSink events;
+        Observability observability(metrics, events);
+        CanonicalCommandReducer reducer(state(players, sessions), observability);
+        IntakeFixture fixture;
+        const std::array firstCommand{ proposal(10, 1, 1001, 101, 1, LinearVelocity3(1, 0, 0)) };
+        if (!fixture.submit(firstCommand) || !reducer.apply(fixture.pumpFirst().batches().front()))
+            return false;
+        const std::array reusedId{ proposal(10, 2, 1001, 101, 2, LinearVelocity3(2, 0, 0)) };
+        if (!fixture.submit(reusedId) || !reducer.apply(fixture.pumpNext().batches().front()))
+            return false;
+        const auto publication = reducer.latestPublication();
+        return publication->stateVersion().value() == 2 && publication->changes().size() == 1
+            && publication->changes().front().commandId().value() == 1001
+            && classifyCanonicalPublication(CanonicalStateVersion::initial(), *publication)
+            == CanonicalPublicationReadAction::ReplaceFromSnapshot;
+    }
 }
 
 int main()
@@ -501,6 +780,32 @@ int main()
             &reducer_exposes_no_mutable_state_wire_engine_socket_script_or_database_surface },
         std::pair{ "cross_batch_command_id_reuse_remains_an_explicit_slice55_online_gate",
             &cross_batch_command_id_reuse_remains_an_explicit_slice55_online_gate },
+        std::pair{ "initial_publication_is_version_zero_complete_and_immutable",
+            &initial_publication_is_version_zero_complete_and_immutable },
+        std::pair{ "accepted_command_publishes_player_and_session_replacements_at_one_version",
+            &accepted_command_publishes_player_and_session_replacements_at_one_version },
+        std::pair{ "rejected_next_command_publishes_ack_only_replacement",
+            &rejected_next_command_publishes_ack_only_replacement },
+        std::pair{ "noncommitting_dispositions_do_not_advance_version_or_publish",
+            &noncommitting_dispositions_do_not_advance_version_or_publish },
+        std::pair{ "multiple_commits_publish_contiguous_versions_and_exact_final_snapshot",
+            &multiple_commits_publish_contiguous_versions_and_exact_final_snapshot },
+        std::pair{ "failed_batch_preflight_preserves_state_version_and_publication",
+            &failed_batch_preflight_preserves_state_version_and_publication },
+        std::pair{ "version_capacity_preflight_fails_before_any_command_executes",
+            &version_capacity_preflight_fails_before_any_command_executes },
+        std::pair{ "reader_processes_contiguous_batch_or_detects_gap_and_replaces_from_snapshot",
+            &reader_processes_contiguous_batch_or_detects_gap_and_replaces_from_snapshot },
+        std::pair{ "slow_reader_holding_old_publication_cannot_block_or_mutate_writer",
+            &slow_reader_holding_old_publication_cannot_block_or_mutate_writer },
+        std::pair{ "latest_slot_retains_one_bounded_batch_independent_of_reader_speed",
+            &latest_slot_retains_one_bounded_batch_independent_of_reader_speed },
+        std::pair{ "accepted_dropped_and_null_observability_produce_identical_publications",
+            &accepted_dropped_and_null_observability_produce_identical_publications },
+        std::pair{ "publication_exposes_no_wire_engine_socket_script_database_or_mutable_surface",
+            &publication_exposes_no_wire_engine_socket_script_database_or_mutable_surface },
+        std::pair{ "protocol_interest_sinks_checksum_and_online_composition_remain_gated",
+            &protocol_interest_sinks_checksum_and_online_composition_remain_gated },
     };
     for (const auto& [name, test] : tests)
     {

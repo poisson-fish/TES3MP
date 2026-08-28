@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <array>
+#include <memory>
 #include <optional>
 #include <utility>
 #include <variant>
@@ -50,6 +51,8 @@ namespace
                 return CommandReductionObservationOutcome::EligibleTickMismatch;
             case CommandBatchReductionError::IngressOrdinalNotStrictlyIncreasing:
                 return CommandReductionObservationOutcome::IngressOrdinalNotStrictlyIncreasing;
+            case CommandBatchReductionError::StateVersionCapacityExceeded:
+                return CommandReductionObservationOutcome::StateVersionCapacityExceeded;
             case CommandBatchReductionError::CandidateStateInvalid:
                 return CommandReductionObservationOutcome::CandidateStateInvalid;
             case CommandBatchReductionError::None:
@@ -102,11 +105,26 @@ namespace
 
 namespace TES3MP
 {
-    CanonicalCommandReducer::CanonicalCommandReducer(
-        CanonicalServerState initialState, Observability& observability) noexcept
-        : mState(std::move(initialState))
+    CanonicalCommandReducer::CanonicalCommandReducer(CanonicalServerState initialState, Observability& observability)
+        : mState(std::make_shared<CanonicalServerState>(std::move(initialState)))
+        , mLatestPublication(std::shared_ptr<const CanonicalStatePublication>(
+              new CanonicalStatePublication(mStateVersion, mState, {})))
         , mObservability(observability)
     {
+    }
+
+    std::shared_ptr<const CanonicalStatePublication> CanonicalCommandReducer::latestPublication() const noexcept
+    {
+        return mLatestPublication.load(std::memory_order_acquire);
+    }
+
+    void CanonicalCommandReducer::publish(std::shared_ptr<CanonicalStatePublication> publication) noexcept
+    {
+        if (publication->mChanges.empty())
+            return;
+        publication->mStateVersion = mStateVersion;
+        publication->mState = mState;
+        mLatestPublication.store(std::move(publication), std::memory_order_release);
     }
 
     void CanonicalCommandReducer::observe(CommandDisposition disposition, ServerTick tick) noexcept
@@ -168,88 +186,122 @@ namespace TES3MP
                 return result;
             }
         }
+        if (!canReserveCanonicalStateVersions(mStateVersion, commands.size()))
+        {
+            result.mError = CommandBatchReductionError::StateVersionCapacityExceeded;
+            observe(result.mError, tick, 0);
+            return result;
+        }
 
         result.mDispositions.reserve(commands.size());
         std::vector<CommandId> finalizedCommandIds;
         finalizedCommandIds.reserve(commands.size());
+        auto publication
+            = std::shared_ptr<CanonicalStatePublication>(new CanonicalStatePublication(mStateVersion, mState, {}));
+        publication->mChanges.reserve(commands.size());
 
-        for (const StampedServerCommand& command : commands)
+        try
         {
-            const ServerCommandProposal& proposal = command.proposal();
-            CommandDisposition disposition = CommandDisposition::UnknownSession;
-            bool acknowledgementAdvanced = false;
-            bool playerStateChanged = false;
-
-            const CanonicalSessionProgress* session = mState.findActiveSession(proposal.sessionId());
-            if (session != nullptr)
+            for (const StampedServerCommand& command : commands)
             {
-                if (session->sessionGeneration() != proposal.sessionGeneration())
-                    disposition = CommandDisposition::SessionGenerationMismatch;
-                else if (!finalizableSequence(*session, proposal.commandSequence()))
-                    disposition = nonFinalSequenceDisposition(*session, proposal.commandSequence());
-                else
-                {
-                    const std::size_t sessionIndex = static_cast<std::size_t>(session - mState.activeSessions().data());
-                    std::optional<std::size_t> playerIndex;
-                    std::optional<CanonicalPlayerEntityState> playerReplacement;
+                const ServerCommandProposal& proposal = command.proposal();
+                CommandDisposition disposition = CommandDisposition::UnknownSession;
+                bool acknowledgementAdvanced = false;
+                bool playerStateChanged = false;
 
-                    if (std::find(finalizedCommandIds.begin(), finalizedCommandIds.end(), proposal.commandId())
-                        != finalizedCommandIds.end())
-                        disposition = CommandDisposition::DuplicateCommandId;
+                const CanonicalSessionProgress* session = mState->findActiveSession(proposal.sessionId());
+                if (session != nullptr)
+                {
+                    if (session->sessionGeneration() != proposal.sessionGeneration())
+                        disposition = CommandDisposition::SessionGenerationMismatch;
+                    else if (!finalizableSequence(*session, proposal.commandSequence()))
+                        disposition = nonFinalSequenceDisposition(*session, proposal.commandSequence());
                     else
                     {
-                        finalizedCommandIds.push_back(proposal.commandId());
-                        const EntityPrecondition precondition = proposal.entityPrecondition();
-                        if (precondition.entityId() != session->entityId())
-                            disposition = CommandDisposition::EntityBindingMismatch;
+                        const std::size_t sessionIndex
+                            = static_cast<std::size_t>(session - mState->activeSessions().data());
+                        std::optional<std::size_t> playerIndex;
+                        std::optional<CanonicalPlayerEntityState> playerReplacement;
+
+                        if (std::find(finalizedCommandIds.begin(), finalizedCommandIds.end(), proposal.commandId())
+                            != finalizedCommandIds.end())
+                            disposition = CommandDisposition::DuplicateCommandId;
                         else
                         {
-                            const CanonicalPlayerEntityState* player = mState.findPlayer(session->playerId());
-                            playerIndex = static_cast<std::size_t>(player - mState.players().data());
-                            if (precondition.expectedRevision() != player->entityRevision())
-                                disposition = CommandDisposition::EntityRevisionMismatch;
-                            else if (precondition.expectedAuthorityEpoch() != player->authorityEpoch())
-                                disposition = CommandDisposition::AuthorityEpochMismatch;
+                            finalizedCommandIds.push_back(proposal.commandId());
+                            const EntityPrecondition precondition = proposal.entityPrecondition();
+                            if (precondition.entityId() != session->entityId())
+                                disposition = CommandDisposition::EntityBindingMismatch;
                             else
                             {
-                                const auto advanced = advanceCanonicalSpatialState(
-                                    *player, tick, player->transform(), proposal.motion().desiredVelocity());
-                                if (const auto* value = std::get_if<CanonicalPlayerEntityState>(&advanced))
-                                {
-                                    disposition = CommandDisposition::Applied;
-                                    playerReplacement = *value;
-                                    playerStateChanged = true;
-                                }
-                                else if (std::get<SpatialAdvanceError>(advanced).code
-                                    == SpatialAdvanceErrorCode::TickRegression)
-                                    disposition = CommandDisposition::SpatialTickRegression;
+                                const CanonicalPlayerEntityState* player = mState->findPlayer(session->playerId());
+                                playerIndex = static_cast<std::size_t>(player - mState->players().data());
+                                if (precondition.expectedRevision() != player->entityRevision())
+                                    disposition = CommandDisposition::EntityRevisionMismatch;
+                                else if (precondition.expectedAuthorityEpoch() != player->authorityEpoch())
+                                    disposition = CommandDisposition::AuthorityEpochMismatch;
                                 else
-                                    disposition = CommandDisposition::EntityRevisionExhausted;
+                                {
+                                    const auto advanced = advanceCanonicalSpatialState(
+                                        *player, tick, player->transform(), proposal.motion().desiredVelocity());
+                                    if (const auto* value = std::get_if<CanonicalPlayerEntityState>(&advanced))
+                                    {
+                                        disposition = CommandDisposition::Applied;
+                                        playerReplacement = *value;
+                                        playerStateChanged = true;
+                                    }
+                                    else if (std::get<SpatialAdvanceError>(advanced).code
+                                        == SpatialAdvanceErrorCode::TickRegression)
+                                        disposition = CommandDisposition::SpatialTickRegression;
+                                    else
+                                        disposition = CommandDisposition::EntityRevisionExhausted;
+                                }
                             }
                         }
-                    }
 
-                    auto candidate = replacementState(
-                        mState, sessionIndex, proposal.commandSequence(), playerIndex, playerReplacement);
-                    if (std::holds_alternative<CanonicalServerState>(candidate))
-                    {
-                        mState = std::move(std::get<CanonicalServerState>(candidate));
-                        acknowledgementAdvanced = true;
-                    }
-                    else
-                    {
-                        result.mError = CommandBatchReductionError::CandidateStateInvalid;
-                        observe(result.mError, tick, result.mDispositions.size());
-                        return result;
+                        auto candidate = replacementState(
+                            *mState, sessionIndex, proposal.commandSequence(), playerIndex, playerReplacement);
+                        if (std::holds_alternative<CanonicalServerState>(candidate))
+                        {
+                            const CanonicalStateVersion nextVersion = *mStateVersion.next();
+                            CanonicalServerState& candidateState = std::get<CanonicalServerState>(candidate);
+                            const CanonicalSessionProgress sessionReplacement
+                                = candidateState.activeSessions()[sessionIndex];
+                            std::optional<CanonicalPlayerEntityState> committedPlayerReplacement;
+                            if (playerReplacement)
+                                committedPlayerReplacement = candidateState.players()[*playerIndex];
+
+                            CanonicalStateChangeRecord change(nextVersion, command.stamp(), proposal.sessionId(),
+                                proposal.sessionGeneration(), proposal.commandSequence(), proposal.commandId(),
+                                disposition, sessionReplacement, committedPlayerReplacement);
+                            auto nextState = std::make_shared<CanonicalServerState>(std::move(candidateState));
+                            publication->mChanges.push_back(std::move(change));
+                            mState = std::move(nextState);
+                            mStateVersion = nextVersion;
+                            acknowledgementAdvanced = true;
+                        }
+                        else
+                        {
+                            result.mError = CommandBatchReductionError::CandidateStateInvalid;
+                            publish(std::move(publication));
+                            observe(result.mError, tick, result.mDispositions.size());
+                            return result;
+                        }
                     }
                 }
-            }
 
-            result.mDispositions.emplace_back(command.stamp(), proposal.sessionId(), proposal.sessionGeneration(),
-                proposal.commandSequence(), proposal.commandId(), disposition, acknowledgementAdvanced,
-                playerStateChanged);
-            observe(disposition, tick);
+                result.mDispositions.emplace_back(command.stamp(), proposal.sessionId(), proposal.sessionGeneration(),
+                    proposal.commandSequence(), proposal.commandId(), disposition, acknowledgementAdvanced,
+                    playerStateChanged);
+                observe(disposition, tick);
+            }
         }
+        catch (...)
+        {
+            publish(std::move(publication));
+            throw;
+        }
+        publish(std::move(publication));
         return result;
     }
 }

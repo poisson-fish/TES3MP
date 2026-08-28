@@ -130,6 +130,11 @@
       "purpose": "Move-only bounded opaque authentication material and pollable session-owned provider operation boundary."
     },
     {
+      "path": "components/tes3mp/include/tes3mp/canonical_publication.hpp",
+      "status": "A",
+      "purpose": "Owner-approved immutable canonical publication, checked version, typed replacement record, latest-handle, and reader gap-classification interfaces."
+    },
+    {
       "path": "components/tes3mp/include/tes3mp/canonical_state.hpp",
       "status": "A",
       "purpose": "Owner-approved immutable canonical player/session state values, hard bounds, closed invariant errors, const access, and checked spatial-advance interface."
@@ -192,7 +197,7 @@
     {
       "path": "components/tes3mp/include/tes3mp/server_command_reducer.hpp",
       "status": "A",
-      "purpose": "Owner-approved writer-confined canonical reducer, closed batch error and command disposition values, immutable state access, and explicit pre-Slice-5.5 online gate."
+      "purpose": "Owner-approved writer-confined canonical reducer, closed batch errors, immutable shared state/publication access, checked state version, and explicit pre-Slice-5.5 online gate."
     },
     {
       "path": "components/tes3mp/include/tes3mp/server_session.hpp",
@@ -252,7 +257,7 @@
     {
       "path": "components/tes3mp/include/tes3mp/value_types.hpp",
       "status": "A",
-      "purpose": "Owner-approved identity, tick, sequence, revision, command, epoch, generation, ingress-ordinal, and cell-space semantic catalog."
+      "purpose": "Owner-approved identity, tick, canonical-state-version, sequence, revision, command, epoch, generation, ingress-ordinal, and cell-space semantic catalog."
     },
     {
       "path": "components/tes3mp/protocol/anchor.cpp",
@@ -335,6 +340,11 @@
       "purpose": "Bounded authentication-material construction, move transfer, and best-effort storage clearing implementation."
     },
     {
+      "path": "components/tes3mp/server_core/canonical_publication.cpp",
+      "status": "A",
+      "purpose": "Owner-approved immutable publication equality, contiguous-version reader classification, and checked batch version-capacity implementation."
+    },
+    {
       "path": "components/tes3mp/server_core/canonical_state.cpp",
       "status": "A",
       "purpose": "Full-input canonical-state validation, deterministic owned construction and lookup, and pure atomic spatial revision advancement implementation."
@@ -362,7 +372,7 @@
     {
       "path": "components/tes3mp/server_core/server_command_reducer.cpp",
       "status": "A",
-      "purpose": "Owner-approved sealed-batch verification, closed validation order, per-command immutable candidate installation, acknowledgement finalization, velocity replacement, and typed observability implementation."
+      "purpose": "Owner-approved sealed-batch verification, closed validation order, per-command immutable shared candidate/version installation, batch publication, acknowledgement finalization, velocity replacement, and typed observability implementation."
     },
     {
       "path": "components/tes3mp/server_core/server_session.cpp",
@@ -562,7 +572,7 @@
     {
       "path": "components/tes3mp/tests/server_command_reducer_tests.cpp",
       "status": "A",
-      "purpose": "Atomic validation/reduction, acknowledgement, ordering, contention, bounds, velocity behavior, observability, dependency isolation, and explicit Slice 5.5 online-gate contracts."
+      "purpose": "Atomic validation/reduction plus immutable publication, checked versioning, typed changes, gap recovery, slow-reader isolation, observability, bounds, and explicit Slice 5.5 online-gate contracts."
     },
     {
       "path": "components/tes3mp/tests/session_state_machine_tests.cpp",
@@ -1001,7 +1011,7 @@
         },
         {
           "path": "components/tes3mp/CMakeLists.txt",
-          "sha256": "daf782600a4e76ee45216f67f01be313df33ddfc50f794be4bcf21e70cb43745"
+          "sha256": "443a2f675d978db294115cc8ed183fef0f6da5fe862c1dad2ee6565addb09d3d"
         },
         {
           "path": "components/tes3mp/protocol/generated/client_hello_generated.h",

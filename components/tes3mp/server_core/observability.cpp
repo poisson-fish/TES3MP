@@ -33,7 +33,7 @@ namespace
                     || dimension.value == MetricDimensionValue::CommandIngressOrdinalExhausted;
             case MetricDimensionKey::CommandReductionOutcome:
                 return dimension.value >= MetricDimensionValue::CommandReductionApplied
-                    && dimension.value <= MetricDimensionValue::CommandReductionCandidateStateInvalid;
+                    && dimension.value <= MetricDimensionValue::CommandReductionStateVersionCapacityExceeded;
         }
         return false;
     }
@@ -125,7 +125,7 @@ namespace
     {
         using TES3MP::CommandReductionObservationOutcome;
         return event.outcome >= CommandReductionObservationOutcome::Applied
-            && event.outcome <= CommandReductionObservationOutcome::CandidateStateInvalid;
+            && event.outcome <= CommandReductionObservationOutcome::StateVersionCapacityExceeded;
     }
 }
 
