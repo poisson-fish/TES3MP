@@ -193,6 +193,9 @@ target_compile_features(tes3mp_protocol_frame_tests PRIVATE cxx_std_20)
 target_link_libraries(tes3mp_protocol_frame_tests PRIVATE tes3mp_protocol)
 set_target_properties(tes3mp_protocol_frame_tests PROPERTIES FOLDER "TES3MP/Tests")
 tes3mp_enable_runtime_safety(tes3mp_protocol_frame_tests)
+if(TES3MP_ENABLE_TSAN)
+    target_compile_definitions(tes3mp_protocol_frame_tests PRIVATE TES3MP_TEST_TSAN_ALLOCATOR_INTERPOSITION=1)
+endif()
 
 tes3mp_verify_target_dependencies(tes3mp_protocol_frame_tests ALLOWED tes3mp_protocol)
 tes3mp_verify_target_includes(tes3mp_protocol_frame_tests

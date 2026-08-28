@@ -13,7 +13,8 @@ namespace
         for (std::size_t index = 0; index < sizeof(Value); ++index)
         {
             output.push_back(static_cast<std::byte>(value & static_cast<Value>(0xff)));
-            value >>= 8;
+            if constexpr (sizeof(Value) > 1)
+                value >>= 8;
         }
     }
 
@@ -42,8 +43,7 @@ namespace
             Value result = 0;
             for (std::size_t index = 0; index < sizeof(Value); ++index)
             {
-                result |= static_cast<Value>(std::to_integer<unsigned char>(mBytes[mOffset + index]))
-                    << (index * 8);
+                result |= static_cast<Value>(std::to_integer<unsigned char>(mBytes[mOffset + index])) << (index * 8);
             }
             mOffset += sizeof(Value);
             return result;
@@ -151,14 +151,14 @@ namespace TES3MP::TestSupport
         const auto velocityX = reader.readSigned<std::int64_t>();
         const auto velocityY = reader.readSigned<std::int64_t>();
         const auto velocityZ = reader.readSigned<std::int64_t>();
-        if (!positionX || !positionY || !positionZ || !rotationX || !rotationY || !rotationZ || !velocityX
-            || !velocityY || !velocityZ || !reader.finished())
+        if (!positionX || !positionY || !positionZ || !rotationX || !rotationY || !rotationZ || !velocityX || !velocityY
+            || !velocityZ || !reader.finished())
             return std::nullopt;
 
         return SpatialEntitySnapshot(*tick, *entity, *revision, *epoch,
             Transform(cell, Position3(*positionX, *positionY, *positionZ),
-                Orientation3(Turn32::fromValue(*rotationX), Turn32::fromValue(*rotationY),
-                    Turn32::fromValue(*rotationZ))),
+                Orientation3(
+                    Turn32::fromValue(*rotationX), Turn32::fromValue(*rotationY), Turn32::fromValue(*rotationZ))),
             LinearVelocity3(*velocityX, *velocityY, *velocityZ));
     }
 }

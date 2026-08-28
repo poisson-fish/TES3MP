@@ -102,7 +102,7 @@
     {
       "path": "components/tes3mp/CMakeLists.txt",
       "status": "A",
-      "purpose": "Defines the standalone-capable five-library graph, pinned FlatBuffers runtime input, target-scoped safety registration, eleven contract executables with golden-corpus verification, and bounded parser fuzz targets."
+      "purpose": "Defines the standalone-capable five-library graph, pinned FlatBuffers runtime input, target-scoped safety registration including TSan-compatible allocator-test interposition, eleven contract executables with golden-corpus verification, and bounded parser fuzz targets."
     },
     {
       "path": "components/tes3mp/CMakePresets.json",
@@ -931,7 +931,7 @@
         },
         {
           "path": "components/tes3mp/CMakeLists.txt",
-          "sha256": "767ba985611fece8cd772b25cd9cbf3b27e0dd8e9107b8082367513e7cc1a3ff"
+          "sha256": "856378df25d7804ad04935f65f55823682de6943d224a5ac99699761ea6590df"
         },
         {
           "path": "components/tes3mp/protocol/generated/client_hello_generated.h",

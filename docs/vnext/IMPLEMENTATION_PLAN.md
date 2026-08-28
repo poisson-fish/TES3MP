@@ -2864,6 +2864,36 @@ Implementation notes:
     x86-64, then obtain explicit Phase 4 exit-gate approval before marking the
     phase **Implemented** or beginning Phase 5.
 
+- 2026-08-27 — Phase 4 exit gate — In Progress
+  - Change: pushed phase-completion candidate `035a8932d5` and manually
+    dispatched all six required hosted workflows. Runtime-safety run
+    [33137988875](https://github.com/poisson-fish/TES3MP/actions/runs/33137988875)
+    passed its Clang 18 ASan/UBSan/libFuzzer job but failed its ThreadSanitizer
+    job while linking the protocol-frame contract: that test's global
+    allocation counters collided with the TSan runtime allocator interceptors.
+    The narrow correction disables only those test-owned global allocator
+    replacements in TSan builds, retains the structured fail-closed decode
+    assertion there, and retains the zero-allocation assertion in ordinary and
+    ASan/UBSan builds. It also avoids a Clang warning from shifting a one-byte
+    unsigned value by eight bits in test support. No production schema, codec,
+    protocol value, session behavior, authority, state scope, or gameplay
+    behavior changed.
+  - Decisions: none. This is a mechanical hosted-test compatibility correction
+    under the accepted ADR-0019 sanitizer policy; it does not amend an ADR or
+    GDR and does not weaken production runtime-safety coverage.
+  - Verification: the targeted nine runtime-safety runner tests pass; a fresh
+    MSVC standalone configure/build passes all eleven C++ contracts and all
+    three checked-in golden-corpus verification runs; an explicit MSVC C++20
+    compile/link/run of the protocol-frame contract with the TSan interposition
+    definition proves the conditional contract path; and changed C++ passes
+    `clang-format --dry-run --Werror`.
+  - Owner review: the owner authorized dispatching the hosted matrix. Phase 4
+    remains **In Progress** because the corrected commit must pass the complete
+    six-workflow matrix and then receive explicit exit-gate approval.
+  - Follow-ups: finish reviewing the first dispatch, commit and push the
+    correction, rerun all six hosted workflows against that single corrected
+    candidate, record exact job evidence, and request Phase 4 exit approval.
+
 ### Phase 5 — Deterministic authoritative server core
 
 Status: **Not Started**

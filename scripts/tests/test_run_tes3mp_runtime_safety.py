@@ -190,6 +190,7 @@ class RuntimeSafetyRunnerTests(unittest.TestCase):
         self.assertIn("tes3mp_enable_libfuzzer(tes3mp_protocol_frame_fuzz)", component)
         self.assertIn("tes3mp_enable_libfuzzer(tes3mp_protocol_handshake_fuzz)", component)
         self.assertIn("tes3mp_enable_libfuzzer(tes3mp_protocol_exchange_fuzz)", component)
+        self.assertIn("TES3MP_TEST_TSAN_ALLOCATOR_INTERPOSITION=1", component)
         self.assertEqual(component.count("--verify-corpus"), 3)
         asan_preset = next(
             preset

@@ -18,10 +18,13 @@
 
 namespace
 {
+#if !defined(TES3MP_TEST_TSAN_ALLOCATOR_INTERPOSITION)
     bool gTrackAllocations = false;
     std::size_t gTrackedAllocations = 0;
+#endif
 }
 
+#if !defined(TES3MP_TEST_TSAN_ALLOCATOR_INTERPOSITION)
 void* operator new(std::size_t size)
 {
     if (gTrackAllocations)
@@ -55,6 +58,7 @@ void operator delete[](void* value, std::size_t) noexcept
 {
     ::operator delete(value);
 }
+#endif
 
 namespace
 {
@@ -260,12 +264,18 @@ namespace
         bad[6] = std::byte{ 1 };
         bad[8] = std::byte{ 1 };
 
+#if defined(TES3MP_TEST_TSAN_ALLOCATOR_INTERPOSITION)
+        const auto result = TES3MP::decodeProtocolFrame(bad);
+        return hasError(result, TES3MP::FrameErrorCode::FrameLengthMismatch)
+            && !std::holds_alternative<TES3MP::DecodedFrame>(result);
+#else
         gTrackedAllocations = 0;
         gTrackAllocations = true;
         const auto result = TES3MP::decodeProtocolFrame(bad);
         gTrackAllocations = false;
         return gTrackedAllocations == 0 && hasError(result, TES3MP::FrameErrorCode::FrameLengthMismatch)
             && !std::holds_alternative<TES3MP::DecodedFrame>(result);
+#endif
     }
 
     bool decoded_payload_owns_bytes_after_source_overwrite()
