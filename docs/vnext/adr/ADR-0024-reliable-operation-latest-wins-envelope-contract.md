@@ -1,10 +1,10 @@
 # ADR-0024: Reliable-operation and latest-wins envelope contract
 
-Status: **Proposed**
+Status: **Accepted**
 
 Date opened: 2026-08-27
 
-Date approved: pending
+Date approved: 2026-08-27
 
 Decision owner: project owner
 
@@ -20,12 +20,12 @@ inventing a generic byte payload or prematurely deciding the Slice 4.5 player
 command and world-snapshot bodies?
 
 These are protocol architecture, session-context, idempotency, ordering, and
-evolution decisions. Production envelope APIs or schemas must not land until
-the project owner approves the options below.
+evolution decisions. The project owner approved the options below before the
+production envelope API landed.
 
-## Recommendation summary
+## Decision summary
 
-Recommend Option A for Decisions 1 through 5:
+The project owner approved Option A for Decisions 1 through 5 on 2026-08-27:
 
 1. use separate directional typed compositions: client-to-server reliable
    operations and server-to-client latest-wins canonical snapshots, with no
@@ -45,7 +45,7 @@ Recommend Option A for Decisions 1 through 5:
    their first concrete typed bodies in Slice 4.5 under its separate behavior
    review.
 
-This recommendation preserves ADR-0004's typed verifier-first boundary without
+The approved decision preserves ADR-0004's typed verifier-first boundary without
 adding a `none` operation, opaque nested bytes, a generic variant, or a
 player-movement rule merely to make a metadata-only message encodable. It does
 not define gameplay command contents, movement semantics, snapshot interest or
@@ -114,7 +114,7 @@ or presentation policy.
 
 ## Decision 1: direction and typed payload boundary
 
-### Option A: directional typed compositions without an opaque body (recommended)
+### Option A: directional typed compositions without an opaque body (approved)
 
 Treat `ReliableOperation` as the client-to-server apply-once command class and
 `LatestWinsSnapshot` as the server-to-client canonical snapshot class for the
@@ -144,7 +144,7 @@ and evolution policy harder to review independently.
 
 ## Decision 2: reliable-operation metadata and atomic unit
 
-### Option A: one header, optional precondition, one typed body (recommended)
+### Option A: one header, optional precondition, one typed body (approved)
 
 One reliable operation contains:
 
@@ -176,7 +176,7 @@ logical session generation originated the operation.
 
 ## Decision 3: snapshot context, recency, and acknowledgement
 
-### Option A: session/generation/tick plus contiguous finalized acknowledgement (recommended)
+### Option A: session/generation/tick plus contiguous finalized acknowledgement (approved)
 
 One canonical snapshot header contains:
 
@@ -218,7 +218,7 @@ command processing.
 
 ## Decision 4: validation ownership and atomic delivery
 
-### Option A: layered pure validation before any state change (recommended)
+### Option A: layered pure validation before any state change (approved)
 
 The protocol target owns representational construction and, once roots exist,
 complete structural verification and owned semantic conversion. It does not
@@ -251,7 +251,7 @@ substantially harder to exclude.
 
 ## Decision 5: Slice 4.4/4.5 schema and evolution boundary
 
-### Option A: header values now, complete typed roots with the first bodies (recommended)
+### Option A: header values now, complete typed roots with the first bodies (approved)
 
 Slice 4.4 adds project-owned, fully initialized reliable-operation and
 latest-wins-snapshot header values plus composition and boundary tests. It adds
@@ -284,9 +284,9 @@ Create complete roots now by embedding a bounded byte vector. This avoids an
 empty initial form but permanently adds generic/nested parsing and a second
 identifier/bounds system contrary to the restricted FlatBuffers profile.
 
-## Proposed acceptance tests and demo
+## Approved acceptance tests and demo
 
-If Option A is approved, Slice 4.4 should add tests named for these contracts:
+Slice 4.4 must add tests named for these contracts:
 
 1. `reliable_header_retains_session_generation_sequence_id_and_observed_tick`
 2. `reliable_precondition_is_explicitly_optional`
@@ -308,7 +308,7 @@ compile-time/public-header evidence that no generic payload or generated view
 landed. Owner demo acceptance remains required before Slice 4.4 becomes
 **Implemented**.
 
-## Consequences of the recommendation
+## Consequences of the approved decision
 
 - Slice 4.4 stays behavior-neutral and does not force a placeholder gameplay
   command or empty wire-message compatibility contract.
@@ -366,5 +366,9 @@ Reopen this ADR if:
 
 ## Owner approval
 
-Pending. The project owner must approve or amend Decisions 1 through 5 before
-production envelope headers, schemas, codecs, or behavior land.
+Approved by the project owner in the 2026-08-27 working session: Option A for
+Decisions 1 through 5 without amendment.
+
+This approval does not define a player command or world-snapshot body, gameplay
+authority or state scope, movement/cell/reconnect behavior, transport mapping,
+snapshot collection limits, canonical reducers, or resynchronization behavior.

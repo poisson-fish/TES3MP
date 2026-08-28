@@ -333,7 +333,7 @@ runtime or protocol name.
 | ADR-0021 | Bounded protocol framing, classification, byte budgets, and decode results | Phase 4 | **Implemented** |
 | ADR-0022 | Version/capability negotiation, hello/rejection schemas, and legacy-input response boundary | Phase 4 | **Implemented** |
 | ADR-0023 | Session state machines and authentication-provider boundary | Phase 4 | **Implemented** |
-| ADR-0024 | Reliable-operation and latest-wins envelope contract | Phase 4 | **In Progress** |
+| ADR-0024 | Reliable-operation and latest-wins envelope contract | Phase 4 | **Implemented** |
 
 An ADR is complete only when it records considered alternatives, selection
 criteria, consequences, failure modes, a replacement/review trigger, and
@@ -2641,6 +2641,44 @@ Implementation notes:
   - Follow-ups: present Decisions 1–5 to the owner, accept or amend ADR-0024,
     then implement only the approved Slice 4.4 envelope-header surface and
     independent contract tests. Slice 4.5 remains gated.
+
+- 2026-08-27 — Slice 4.4 — In Progress
+  - Change: accepted
+    [`ADR-0024`](adr/ADR-0024-reliable-operation-latest-wins-envelope-contract.md)
+    and added protocol-owned `ReliableOperationHeader` and
+    `LatestWinsSnapshotHeader` values. The reliable header owns one existing
+    client command header plus an explicit optional entity precondition. The
+    snapshot header binds server tick and optional contiguous-finalized command
+    progress to a target session and generation. Added a tenth standalone
+    contract and registered it with target-boundary and runtime-safety policy.
+    No wire root, schema, decoder, generic payload, batch, snapshot sequence,
+    writer admission, authority, state scope, or gameplay behavior was added.
+  - Decisions: the owner approved Option A for ADR-0024 Decisions 1–5 on
+    2026-08-27 without amendment. Complete typed `T3RO`/`T3LS` roots remain
+    gated on Slice 4.5's separately reviewed command/snapshot bodies and bounds.
+  - Verification: from the Visual Studio 2022 v17.14.39/MSVC 19.44.35228
+    x86-64 environment, a fresh standalone configure/build runs all ten C++
+    contracts successfully. The envelope contract covers required command
+    metadata, optional preconditions, one-operation atomicity, absence of
+    writer/canonical/generic payload fields, target session/generation/tick,
+    absent and present acknowledgements, tick recency without a new sequence,
+    entry-scoped revision/epoch, public-header isolation, and deterministic
+    equality. All 97 repository-owned Python tests pass, and exact pinned
+    FlatBuffers regeneration plus the isolated proof pass without schema drift.
+    Indexed provenance accounts for 149 intentional differences and verifies
+    50 dependency inputs; indexed legacy exclusion checks 3,843 tracked paths,
+    59 CMake files, 29 compile commands, and 85 Ninja edges. Both changed C++
+    files pass `clang-format --dry-run --Werror`; the provenance JSON parses,
+    all 72 local vNext Markdown links resolve, the new public header contains
+    no generated/FlatBuffers, OpenMW, transport-library, test-support, generic
+    byte/string/map include or surface, and staged diff checks pass.
+  - Owner review: architecture approval is complete. Implementation-demo
+    acceptance remains pending, so Slice 4.4 stays **In Progress**.
+  - Follow-ups: present the reliable header with absent/present precondition,
+    command ID/sequence separation, writer-field exclusion, snapshot
+    acknowledgement absence/progress, tick recency, and public-header isolation
+    for owner acceptance. Slice 4.5 remains gated until this slice is
+    **Implemented**.
 
 ### Phase 5 — Deterministic authoritative server core
 

@@ -102,7 +102,7 @@
     {
       "path": "components/tes3mp/CMakeLists.txt",
       "status": "A",
-      "purpose": "Defines the standalone-capable five-library graph, pinned FlatBuffers runtime input, target-scoped safety registration, nine contract executables, and bounded parser fuzz targets."
+      "purpose": "Defines the standalone-capable five-library graph, pinned FlatBuffers runtime input, target-scoped safety registration, ten contract executables, and bounded parser fuzz targets."
     },
     {
       "path": "components/tes3mp/CMakePresets.json",
@@ -158,6 +158,11 @@
       "path": "components/tes3mp/include/tes3mp/observability.hpp",
       "status": "A",
       "purpose": "Owner-approved server-core metric/event values, explicit non-owning sink bundle, and no-op sink interfaces without backend or global state."
+    },
+    {
+      "path": "components/tes3mp/include/tes3mp/protocol_envelope.hpp",
+      "status": "A",
+      "purpose": "Owner-approved reliable-operation and latest-wins-snapshot owned header values with explicit session, command, precondition, tick, and acknowledgement metadata."
     },
     {
       "path": "components/tes3mp/include/tes3mp/protocol_frame.hpp",
@@ -405,6 +410,11 @@
       "purpose": "Independent contracts for typed metric/event shapes, explicit injection, no-op sinks, bounded FIFO recording, overflow, privacy shape, and deterministic evidence."
     },
     {
+      "path": "components/tes3mp/tests/protocol_envelope_tests.cpp",
+      "status": "A",
+      "purpose": "Independent contracts for reliable/snapshot metadata, optional preconditions and acknowledgements, one-operation atomicity, recency, field separation, and public-header isolation."
+    },
+    {
       "path": "components/tes3mp/tests/protocol_frame_tests.cpp",
       "status": "A",
       "purpose": "Golden, round-trip, truncation, malformed, class/kind, exact-budget, allocation, ownership, and mutation contracts for vNext framing."
@@ -557,7 +567,7 @@
     {
       "path": "docs/vnext/adr/ADR-0024-reliable-operation-latest-wins-envelope-contract.md",
       "status": "A",
-      "purpose": "Proposed owner-gated reliable-operation and latest-wins envelope direction, metadata, validation-ownership, evolution, and slice-boundary decision packet."
+      "purpose": "Owner-approved reliable-operation and latest-wins envelope direction, metadata, validation-ownership, evolution, and slice-boundary policy."
     },
     {
       "path": "docs/vnext/proofs/flatbuffers/ANDROID_ARM64.md",
@@ -816,7 +826,7 @@
         },
         {
           "path": "components/tes3mp/CMakeLists.txt",
-          "sha256": "7210db369631b827c4c6d33045b05bebcd43a5001df1335c2e801bcd42150d1d"
+          "sha256": "fa6ec9b1018d1440c5c97887c3096e778e251117ef30b748c4c034ecf3585885"
         },
         {
           "path": "components/tes3mp/protocol/generated/client_hello_generated.h",

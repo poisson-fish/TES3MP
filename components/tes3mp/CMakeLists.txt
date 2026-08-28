@@ -64,6 +64,7 @@ tes3mp_add_engine_independent_library(tes3mp_protocol protocol/anchor.cpp)
 add_library(TES3MP::Protocol ALIAS tes3mp_protocol)
 target_sources(tes3mp_protocol PRIVATE
     include/tes3mp/command_primitives.hpp
+    include/tes3mp/protocol_envelope.hpp
     include/tes3mp/protocol_handshake.hpp
     include/tes3mp/protocol_frame.hpp
     include/tes3mp/session_types.hpp
@@ -191,6 +192,16 @@ tes3mp_verify_target_dependencies(tes3mp_protocol_frame_tests ALLOWED tes3mp_pro
 tes3mp_verify_target_includes(tes3mp_protocol_frame_tests
     FORBIDDEN ${TES3MP_ENGINE_INDEPENDENT_FORBIDDEN_INCLUDES})
 
+add_executable(tes3mp_protocol_envelope_tests tests/protocol_envelope_tests.cpp)
+target_compile_features(tes3mp_protocol_envelope_tests PRIVATE cxx_std_20)
+target_link_libraries(tes3mp_protocol_envelope_tests PRIVATE tes3mp_protocol)
+set_target_properties(tes3mp_protocol_envelope_tests PROPERTIES FOLDER "TES3MP/Tests")
+tes3mp_enable_runtime_safety(tes3mp_protocol_envelope_tests)
+
+tes3mp_verify_target_dependencies(tes3mp_protocol_envelope_tests ALLOWED tes3mp_protocol)
+tes3mp_verify_target_includes(tes3mp_protocol_envelope_tests
+    FORBIDDEN ${TES3MP_ENGINE_INDEPENDENT_FORBIDDEN_INCLUDES})
+
 add_executable(tes3mp_protocol_handshake_tests tests/protocol_handshake_tests.cpp)
 target_compile_features(tes3mp_protocol_handshake_tests PRIVATE cxx_std_20)
 target_link_libraries(tes3mp_protocol_handshake_tests PRIVATE tes3mp_protocol)
@@ -295,6 +306,7 @@ endif()
 
 add_custom_target(tes3mp_protocol_tests_run
     COMMAND $<TARGET_FILE:tes3mp_protocol_tests>
+    COMMAND $<TARGET_FILE:tes3mp_protocol_envelope_tests>
     COMMAND $<TARGET_FILE:tes3mp_protocol_frame_tests>
     COMMAND $<TARGET_FILE:tes3mp_protocol_handshake_tests>
     COMMAND $<TARGET_FILE:tes3mp_session_state_tests>
@@ -305,6 +317,7 @@ add_custom_target(tes3mp_protocol_tests_run
     COMMAND $<TARGET_FILE:tes3mp_observability_tests>
     DEPENDS
         tes3mp_protocol_tests
+        tes3mp_protocol_envelope_tests
         tes3mp_protocol_frame_tests
         tes3mp_protocol_handshake_tests
         tes3mp_session_state_tests

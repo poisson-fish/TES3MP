@@ -154,3 +154,13 @@ exercises exact boundaries, terminal atomicity, provider lifetime, and secret
 redaction shape. Authentication remains typed in-memory composition: no new
 wire kind, credential schema, real provider, resumption, authority, durable
 state, or gameplay behavior is introduced.
+
+Slice 4.4 accepts ADR-0024 and adds two fully initialized protocol-owned header
+values without adding a wire root. `ReliableOperationHeader` carries one
+existing client command header plus an explicit optional entity precondition;
+it cannot carry writer admission, canonical results, a batch, or generic bytes.
+`LatestWinsSnapshotHeader` binds a server publication tick and optional
+highest-contiguous-finalized command acknowledgement to a target session and
+generation; it adds no acceptance flag, global entity revision, or separate
+snapshot sequence. Complete typed `T3RO`/`T3LS` roots remain gated on Slice
+4.5's reviewed command/snapshot bodies.

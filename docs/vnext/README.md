@@ -135,11 +135,11 @@ boundaries, adds proportionate tests, records exact evidence, updates statuses,
 and leaves the branch buildable. Hosted vNext workflows are manual phase-exit
 gates; ordinary slice commits must not trigger the full matrix.
 
-Slice 4.4 is at the owner decision gate for reliable-operation and latest-wins
-snapshot envelope metadata. The proposed ADR-0024 keeps command and snapshot
-bodies typed, separates command identity from ordering and acknowledgements,
-and avoids choosing gameplay semantics or a generic byte payload before the
-owner approves the protocol boundary.
+Slice 4.4 implements accepted ADR-0024 with protocol-owned reliable-operation
+and latest-wins-snapshot header values. Command identity remains separate from
+ordering and acknowledgement progress, while complete wire roots and typed
+command/snapshot bodies remain gated on Slice 4.5. No generic payload, new
+schema, authority, state scope, or gameplay behavior is introduced.
 
 ## References and license
 
