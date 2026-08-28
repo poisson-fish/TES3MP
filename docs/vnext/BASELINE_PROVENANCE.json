@@ -555,6 +555,11 @@
       "purpose": "Owner-approved client/server session-state, authentication-provider, opaque-secret, timeout, cancellation, redaction, and Phase 4/6 boundary policy."
     },
     {
+      "path": "docs/vnext/adr/ADR-0024-reliable-operation-latest-wins-envelope-contract.md",
+      "status": "A",
+      "purpose": "Proposed owner-gated reliable-operation and latest-wins envelope direction, metadata, validation-ownership, evolution, and slice-boundary decision packet."
+    },
+    {
       "path": "docs/vnext/proofs/flatbuffers/ANDROID_ARM64.md",
       "status": "A",
       "purpose": "ADR-0002-required Android ARM64 feasibility assessment for the selected header-only codec runtime surface."

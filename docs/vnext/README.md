@@ -135,11 +135,11 @@ boundaries, adds proportionate tests, records exact evidence, updates statuses,
 and leaves the branch buildable. Hosted vNext workflows are manual phase-exit
 gates; ordinary slice commits must not trigger the full matrix.
 
-Slice 4.3 implements the accepted ADR-0023 client/server session state machines
-and poll-based authentication-provider boundary. This slice keeps authentication
-as typed in-memory events after encrypted transport and bounded hello
-negotiation; it does not introduce credential wire schemas, a real provider,
-resume behavior, player identity, authority, durable state, or gameplay rules.
+Slice 4.4 is at the owner decision gate for reliable-operation and latest-wins
+snapshot envelope metadata. The proposed ADR-0024 keeps command and snapshot
+bodies typed, separates command identity from ordering and acknowledgements,
+and avoids choosing gameplay semantics or a generic byte payload before the
+owner approves the protocol boundary.
 
 ## References and license
 

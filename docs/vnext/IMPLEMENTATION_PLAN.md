@@ -333,6 +333,7 @@ runtime or protocol name.
 | ADR-0021 | Bounded protocol framing, classification, byte budgets, and decode results | Phase 4 | **Implemented** |
 | ADR-0022 | Version/capability negotiation, hello/rejection schemas, and legacy-input response boundary | Phase 4 | **Implemented** |
 | ADR-0023 | Session state machines and authentication-provider boundary | Phase 4 | **Implemented** |
+| ADR-0024 | Reliable-operation and latest-wins envelope contract | Phase 4 | **In Progress** |
 
 An ADR is complete only when it records considered alternatives, selection
 criteria, consequences, failure modes, a replacement/review trigger, and
@@ -2404,7 +2405,7 @@ Depends on: Phase 3.
 | 4.1 | Implement framing/envelopes, message classification, byte budgets, and structured decode errors | **Implemented** | Accepted [`ADR-0021`](adr/ADR-0021-bounded-protocol-framing-and-decode-boundary.md), implementation `98e62f5f19`, all applicable local verification, and owner demo acceptance pass |
 | 4.2 | Implement `ClientHello`, `ServerHello`, and clear rejection with version/capability negotiation | **Implemented** | Accepted [`ADR-0022`](adr/ADR-0022-version-and-capability-negotiation.md), implementation `e89621e970`, all applicable local verification, and owner demo acceptance pass |
 | 4.3 | Implement the client/server session state machines and authentication-provider interface | **Implemented** | Accepted [`ADR-0023`](adr/ADR-0023-session-state-machines-and-authentication-provider-boundary.md), implementation `edbedbd632`, all applicable local verification, and owner demo acceptance pass |
-| 4.4 | Define reliable-operation and latest-wins snapshot envelopes | **Not Started** | Command ID/revision and tick/sequence/epoch rules are enforced separately |
+| 4.4 | Define reliable-operation and latest-wins snapshot envelopes | **In Progress** | Proposed [`ADR-0024`](adr/ADR-0024-reliable-operation-latest-wins-envelope-contract.md) decision packet is ready for owner review; production implementation remains approval-gated |
 | 4.5 | Exchange a minimal player command and world snapshot over the in-memory link | **Not Started** | A fake peer completes handshake and state exchange with no sockets or OpenMW |
 | 4.6 | Add round-trip, property, golden-schema, mutation, and fuzz coverage | **Not Started** | Every decoder is registered with a corpus and sanitizer-backed fuzz target |
 
@@ -2613,6 +2614,33 @@ Implementation notes:
   - Follow-ups: none for Slice 4.3. Phase 4 remains **In Progress**; Slice 4.4
     stays **Not Started** and requires its architecture/protocol decision packet
     before production implementation begins.
+
+- 2026-08-27 — Slice 4.4 — In Progress
+  - Change: inspected the accepted protocol, deterministic-ordering,
+    identity/counter, canonical primitive, authority, transport, framing,
+    negotiation, and session contracts and added proposed
+    [`ADR-0024`](adr/ADR-0024-reliable-operation-latest-wins-envelope-contract.md)
+    with five option sets, scenarios, acceptance tests, consequences, failure
+    mitigations, and review triggers. No production envelope header, schema,
+    codec, message kind, session behavior, authority, state scope, or gameplay
+    behavior was added.
+  - Decisions: none accepted. The proposal recommends separate directional
+    typed compositions; one reliable command header plus optional entity
+    precondition and one later typed body; snapshot session/generation/tick plus
+    optional contiguous-finalized command acknowledgement; layered validation;
+    and deferring complete `T3RO`/`T3LS` roots until Slice 4.5 supplies reviewed
+    concrete bodies.
+  - Verification: all 97 repository-owned Python tests pass. Indexed baseline
+    provenance accounts for 147 intentional differences and verifies 50
+    dependency inputs; indexed legacy exclusion checks 3,841 tracked paths, 59
+    CMake files, 28 compile commands, and 81 Ninja edges. The provenance JSON
+    parses, all 71 local vNext Markdown links resolve, and staged diff checks
+    pass. A new product build is not applicable because production
+    implementation remains approval-gated.
+  - Owner review: pending explicit approval or amendment of Decisions 1–5.
+  - Follow-ups: present Decisions 1–5 to the owner, accept or amend ADR-0024,
+    then implement only the approved Slice 4.4 envelope-header surface and
+    independent contract tests. Slice 4.5 remains gated.
 
 ### Phase 5 — Deterministic authoritative server core
 
