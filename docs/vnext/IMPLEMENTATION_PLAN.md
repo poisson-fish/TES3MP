@@ -2982,7 +2982,7 @@ Depends on: Phase 4.
 | 5.1 | Implement fixed-tick scheduling, bounded per-tick command intake, and deterministic ordering | **Implemented** | Accepted [`ADR-0026`](adr/ADR-0026-phase5-writer-command-intake-and-ordering.md), implementation `e0dde571f5`, applicable local verification, and owner demo acceptance pass |
 | 5.2 | Implement minimal player/session/cell/root-transform/velocity/ack canonical state | **Implemented** | Accepted [`ADR-0027`](adr/ADR-0027-phase5-canonical-player-and-session-state.md), implementation `f1a1f0632e`, applicable local verification, and owner demo acceptance pass |
 | 5.3 | Implement command validation and atomic reducer application | **Implemented** | Accepted [`ADR-0028`](adr/ADR-0028-phase5-command-validation-and-atomic-reducer.md) and [`GDR-0012`](gdr/GDR-0012-phase5-minimal-motion-reducer-semantics.md), implementation `f57a4074db`, applicable local verification, and owner demo acceptance pass |
-| 5.4 | Publish immutable snapshots and versioned state-change events | **In Progress** | Accepted [`ADR-0029`](adr/ADR-0029-phase5-immutable-canonical-publication-and-versioned-change-feed.md); implementation and applicable local verification pass, owner demo pending |
+| 5.4 | Publish immutable snapshots and versioned state-change events | **Implemented** | Accepted [`ADR-0029`](adr/ADR-0029-phase5-immutable-canonical-publication-and-versioned-change-feed.md), implementation `d7e7b25950`, applicable local verification, and owner demo acceptance pass |
 | 5.5 | Add idempotency windows, authority-epoch checks, state checksums, and explicit resync requests | **Not Started** | Duplicate/stale/epoch mismatch and divergence-repair tests pass |
 | 5.6 | Add persistence, replay, script, and metrics sink interfaces without implementations | **Not Started** | All sinks receive the same committed change record after, never before, commit |
 | 5.7 | Add reducer property tests and deterministic multi-client simulation tests | **Not Started** | Randomized command streams preserve invariants and reproduce by seed |
@@ -3392,6 +3392,27 @@ Implementation notes:
     accepted, acknowledgement-only, contiguous/gap, slow-reader, bounded-
     retention, exhaustion, and observability evidence for owner acceptance. Do
     not compose the reducer/publication path into an online runtime.
+
+- 2026-08-28 — Slice 5.4 — Implemented
+  - Change: retained implementation commit `d7e7b25950` without production-code
+    changes and marked Slice 5.4 **Implemented** after the required owner demo
+    acceptance.
+  - Decisions: none. ADR-0029 remains accepted without amendment. Publication
+    remains domain-only and online composition remains prohibited until Slice
+    5.5 supplies cross-batch idempotency, checksum, and resync safety.
+  - Verification: the accepted implementation retains a green fresh standalone
+    MSVC 19.44 C++20 59-step build, all 14 contract executables and three
+    golden-corpus checks, all 98 repository-owned Python tests, provenance with
+    186 intentional differences and 54 dependency inputs, legacy exclusion over
+    3,880 tracked paths, 59 CMake files, 1,254 compile commands, and 1,971 Ninja
+    edges, eight-file formatting, 105 local-link, public-header-isolation, JSON,
+    ADR assertion, and staged-diff checks.
+  - Owner review: implementation-demo evidence explicitly accepted by the
+    project owner in the 2026-08-28 working session.
+  - Follow-ups: none for Slice 5.4. Slice 5.5 is now eligible but requires owner
+    review of cross-batch command-ID retention and duplicate disposition,
+    checksum scope/algorithm/versioning, resync request semantics, and the
+    remaining online-composition gate before production safety code lands.
 
 ### Phase 6 — Maintained transport and secure network session
 
