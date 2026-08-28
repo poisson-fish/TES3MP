@@ -112,7 +112,7 @@ Observed on 2026-08-25 before this plan was added:
 | 3 | Independent targets and test scaffold | **Implemented** | Phase 2 |
 | 4 | Bounded protocol and in-memory session | **Implemented** | Phase 3 |
 | 5 | Deterministic authoritative server core | **Implemented** | Phase 4 |
-| 6 | Maintained transport and secure network session | **Not Started** | Phase 5 |
+| 6 | Maintained transport and secure network session | **In Progress** | Phase 5 |
 | 7 | Headless end-to-end multiplayer slice | **Not Started** | Phase 6 |
 | 8 | OpenMW desktop vertical slice | **Not Started** | Phase 7 |
 | 9 | PC VR interoperability gate | **Not Started** | Phase 8 |
@@ -577,7 +577,7 @@ Implementation history: [Phase 5 notes](IMPLEMENTATION_NOTES.md#phase-5--determi
 
 ### Phase 6 — Maintained transport and secure network session
 
-Status: **Not Started**
+Status: **In Progress**
 
 Outcome: the in-memory session runs over a maintained encrypted real transport
 with application session identity, channel semantics, backpressure, and
@@ -587,7 +587,7 @@ Depends on: Phase 5.
 
 | Slice | Deliverable | Status | Completion evidence |
 |---|---|---|---|
-| 6.1 | Wrap connection/listen/connect/disconnect/cancellation/lifecycle in an owned transport interface | **Not Started** | Exact c-ares 1.34.8 proof matrix is green on candidate `6dcea1b4af`; owner dependency acceptance remains the production gate |
+| 6.1 | Wrap connection/listen/connect/disconnect/cancellation/lifecycle in an owned transport interface | **In Progress** | Accepted [`ADR-0032`](adr/ADR-0032-phase6-transport-adapter-and-lifecycle-boundary.md); owned lifecycle/endpoint APIs, verified adapter provisioning, and focused MSVC loopback checks pass; deterministic resolver/race and supported-platform evidence remain |
 | 6.2 | Map reliable operations and latest-wins snapshots to explicit transport channels | **Not Started** | Loss/reorder tests prove snapshots do not head-of-line block behind operations |
 | 6.3 | Implement required encryption, optional join-password authentication, resume-token handling, and credential redaction per ADR-0005 | **Not Started** | Encryption ordering, unencrypted-mode rejection, password failure/rate-limit, token replay, timeout, and redaction tests pass |
 | 6.4 | Implement bounded queues, priority, rate limits, backpressure, and slow-peer eviction | **Not Started** | Flood/slow-reader tests remain within configured memory/work budgets |

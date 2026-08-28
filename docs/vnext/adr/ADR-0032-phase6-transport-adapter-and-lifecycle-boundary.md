@@ -1,6 +1,6 @@
 # ADR-0032: Phase 6 transport adapter and lifecycle boundary
 
-Status: **Proposed**
+Status: **Accepted**
 
 Date opened: 2026-08-28
 
@@ -47,8 +47,8 @@ targets. Its exact c-ares 1.34.8 release archive, MIT license, restricted static
 profile, local loopback DNS fixture, and 13 public-API scenarios pass locally on
 MSVC 19.44 and in the complete supported five-job hosted matrix on exact candidate
 `6dcea1b4afe2da9ce6005ec80cdb897d98f6739d`. Retained-artifact consistency review
-passes. Owner acceptance of this exact dependency profile remains open; the
-green proof does not accept the ADR or authorize production integration.
+passes. On 2026-08-28 the project owner accepted this exact dependency profile
+and authorized Slice 6.1 production integration under the approved boundaries.
 
 ## Exact-pin resolver proof candidate
 
@@ -528,6 +528,6 @@ Option A is owner-approved for Decisions 1–6, including amended Decisions
 3.1–3.3 and their expanded acceptance tests. The authorized disposable c-ares
 proof passes locally and across its complete supported five-job hosted matrix;
 the five retained artifacts agree on the exact dependency, license, build
-profile, budgets, and 13-scenario test contract. Exact dependency acceptance
-remains the open owner review before ADR-0032 can become **Accepted** or
-dependent Slice 6.1 production integration can begin.
+profile, budgets, and 13-scenario test contract. On 2026-08-28 the project owner
+explicitly accepted the exact c-ares 1.34.8 dependency profile and authorized
+dependent Slice 6.1 production integration. This ADR is **Accepted**.

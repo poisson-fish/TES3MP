@@ -230,8 +230,9 @@ contains the first Slice 6.1 decision packet. Its target, provisioning,
 lifecycle, pumping, initial-bound, and hostname/DNS architecture options are
 owner-approved. Its authorized exact-pin c-ares proof passes locally and across
 the complete five-job supported desktop matrix on exact candidate `6dcea1b4af`.
-Retained artifacts are consistent; separate owner acceptance of the exact
-dependency profile remains pending, so no Phase 6 production code exists.
+Retained artifacts are consistent, and the project owner accepted the exact
+dependency profile. Phase 6 and Slice 6.1 are **In Progress** under accepted
+[`ADR-0032`](adr/ADR-0032-phase6-transport-adapter-and-lifecycle-boundary.md).
 
 ## References and license
 

@@ -3421,6 +3421,40 @@ only the relevant phase section here.
     retained evidence for owner acceptance. After acceptance, mark ADR-0032
     **Accepted** and begin only the approved Slice 6.1 production integration.
 
+- 2026-08-28 — Slice 6.1 — In Progress
+  - Change: recorded explicit owner acceptance of the exact c-ares 1.34.8
+    dependency profile, marked ADR-0032 **Accepted**, and began the approved
+    production lifecycle integration. Added the selected-library-free owned
+    endpoint, limit, identity, command, and value-event interface; the private
+    GameNetworkingSockets/c-ares adapter and factory; a fail-closed verified
+    dependency-manifest provisioner; focused abstraction and real-loopback
+    tests; and CMake target/boundary integration. Tightened pending-inbound
+    cleanup, stopped-listener callback rejection, event-overflow propagation,
+    runtime-failure behavior, and stable concurrent-runtime factory failure.
+  - Decisions: all ADR-0032 Option A decisions are accepted without amendment.
+    Later channel, authentication, queue-productization, telemetry, and fault-
+    harness work remains owned by Slices 6.2–6.6.
+  - Verification: the exact five-job dependency proof and retained-artifact
+    consistency review remain green on candidate `6dcea1b4af`;
+    `python scripts/provision_vnext_transport.py --output build/vnext-transport-dependencies/manifest-verification.json`;
+    MSVC developer environment plus
+    `cmake --build build/slice61-gns --config Debug --target tes3mp_transport_lifecycle_tests tes3mp_transport_gns_tests --parallel 2`;
+    `build/slice61-gns/tes3mp_transport_lifecycle_tests.exe`;
+    `build/slice61-gns/tes3mp_transport_gns_tests.exe`;
+    MSVC developer environment plus
+    `cmake --build build/tes3mp-standalone --config Debug --target tes3mp_protocol_tests_run --parallel 2`;
+    `python -m unittest scripts.tests.test_tes3mp_target_boundaries` (9
+    tests); and `python scripts/verify_vnext_baseline.py` all pass locally.
+  - Owner review: exact dependency-profile approval and Slice 6.1 production
+    authorization received in the 2026-08-28 working session. Implementation
+    demo acceptance has not yet been requested; the slice remains **In
+    Progress**.
+  - Follow-ups: complete the accepted deterministic fake-resolver/candidate
+    scheduling seam and same-seed DNS/Happy-Eyeballs traces; add the remaining
+    cancellation, handle-reuse, counter-exhaustion, dependency-negative, and
+    sanitizer/platform acceptance evidence; then present the Slice 6.1
+    implementation demo. No Slice 6.2 channel behavior is authorized here.
+
 ## Phase 7 — Headless end-to-end multiplayer slice
 
 [Back to the phase tracker](IMPLEMENTATION_PLAN.md#phase-7--headless-end-to-end-multiplayer-slice)
