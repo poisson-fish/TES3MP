@@ -340,7 +340,7 @@ runtime or protocol name.
 | ADR-0028 | Phase 5 command validation, disposition, acknowledgement, and atomic reducer boundary | Phase 5 | **Implemented** |
 | ADR-0029 | Phase 5 immutable canonical publication, versioned change feed, retention, and slow-reader policy | Phase 5 | **Implemented** |
 | ADR-0030 | Phase 5 bounded idempotency, canonical checksum, and resync boundary | Phase 5 | **Implemented** |
-| ADR-0031 | Phase 5 committed domain sink ownership, delivery, failure, and resource-bound policy | Phase 5 | **Accepted** |
+| ADR-0031 | Phase 5 committed domain sink ownership, delivery, failure, and resource-bound policy | Phase 5 | **Implemented** |
 
 An ADR is complete only when it records considered alternatives, selection
 criteria, consequences, failure modes, a replacement/review trigger, and
@@ -2986,7 +2986,7 @@ Depends on: Phase 4.
 | 5.3 | Implement command validation and atomic reducer application | **Implemented** | Accepted [`ADR-0028`](adr/ADR-0028-phase5-command-validation-and-atomic-reducer.md) and [`GDR-0012`](gdr/GDR-0012-phase5-minimal-motion-reducer-semantics.md), implementation `f57a4074db`, applicable local verification, and owner demo acceptance pass |
 | 5.4 | Publish immutable snapshots and versioned state-change events | **Implemented** | Accepted [`ADR-0029`](adr/ADR-0029-phase5-immutable-canonical-publication-and-versioned-change-feed.md), implementation `d7e7b25950`, applicable local verification, and owner demo acceptance pass |
 | 5.5 | Add idempotency windows, authority-epoch checks, state checksums, and explicit resync requests | **Implemented** | Accepted [`ADR-0030`](adr/ADR-0030-phase5-idempotency-checksum-and-resync-boundary.md), implementation `ac627deafc`, applicable local verification, and owner demo acceptance pass |
-| 5.6 | Add persistence, replay, script, and metrics sink interfaces without implementations | **In Progress** | Accepted [`ADR-0031`](adr/ADR-0031-phase5-committed-domain-sink-boundary.md); production implementation and verification pending |
+| 5.6 | Add persistence, replay, script, and metrics sink interfaces without implementations | **In Progress** | Accepted [`ADR-0031`](adr/ADR-0031-phase5-committed-domain-sink-boundary.md), implementation `2905c7a791`, and applicable local verification pass; owner demo acceptance pending |
 | 5.7 | Add reducer property tests and deterministic multi-client simulation tests | **Not Started** | Randomized command streams preserve invariants and reproduce by seed |
 
 Exit gate:
@@ -3574,6 +3574,43 @@ Implementation notes:
     post-publication fan-out/reporting, closed observability additions, bounded
     test fakes, and focused tests. Do not add a backend, runtime, worker, queue,
     persistence technology, script API, or gameplay behavior.
+
+- 2026-08-28 — Slice 5.6 — In Progress
+  - Change: implementation commit `2905c7a791` adds four nominal server-core
+    persistence/replay/script/canonical-metrics sink ports, an explicit maximum-
+    four non-owning bundle, and a complete per-role delivery report. The reducer
+    installs each non-empty immutable publication as latest before offering the
+    exact shared handle once in fixed role order. It attempts later roles after
+    backpressure/failure, normalizes an invalid configured `NotConfigured`
+    response to `Failed`, and exposes results without changing canonical
+    success/error meaning. Added closed low-cardinality delivery observations
+    and one focused executable with all approved scenarios plus invalid-result
+    fail-closed coverage.
+  - Decisions: no new architecture, authority, state-scope, compatibility, or
+    gameplay decisions were made. The implementation follows accepted
+    [`ADR-0031`](adr/ADR-0031-phase5-committed-domain-sink-boundary.md) Option A
+    for Decisions 1–5. Version zero and no-commit work deliver nothing; server
+    core owns no backend, worker, queue, retry, acknowledgement, database,
+    script runtime/API, replay format, durability claim, or added retention.
+  - Verification: a fresh standalone MSVC 19.44 C++20 configure and 65-step
+    build pass all 16 contract executables and three golden-corpus checks,
+    including all 13 focused sink scenarios. `python -m unittest discover -s
+    scripts/tests -q` passes all 98 repository-owned tests. Staged baseline
+    provenance passes with 195 intentional differences and 54 dependency
+    inputs; staged legacy exclusion passes over 3,889 tracked paths, 59 CMake
+    files, 43 compile commands, and 117 Ninja build edges. All seven changed/new
+    C++ headers and sources pass `clang-format --dry-run --Werror`; the new
+    public sink header compiles as an isolated MSVC C++20 translation unit; JSON,
+    whitespace, target-boundary, and staged-diff checks pass. Schema
+    regeneration, golden-corpus updates, and fuzz runs are not applicable
+    because this slice changes no wire schema or bounded decoder.
+  - Owner review: architecture/ownership/state-scope/failure-policy approval is
+    complete. Implementation-demo acceptance remains pending, so Slice 5.6
+    stays **In Progress** and Slice 5.7 remains gated.
+  - Follow-ups: present installed-handle identity, acknowledgement-only and
+    multi-change delivery, fixed role order, mixed failure/no-short-circuit,
+    canonical/observability independence, retained-handle isolation, explicit
+    gap, and no-backend/runtime evidence for owner acceptance.
 
 ### Phase 6 — Maintained transport and secure network session
 

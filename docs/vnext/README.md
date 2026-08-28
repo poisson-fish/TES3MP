@@ -41,7 +41,8 @@ verification and owner demo acceptance. The reducer core is eligible for later
 reviewed composition, but no production multiplayer runtime or real transport
 integration exists yet. Slice 5.6 has accepted
 [`ADR-0031`](adr/ADR-0031-phase5-committed-domain-sink-boundary.md); production
-sink-interface implementation and verification are pending.
+sink-interface implementation and focused tests pass applicable local
+verification, with owner demo acceptance pending.
 
 Beginning with Phase 4, each slice runs applicable local verification. The full
 vNext hosted matrix runs once by manual dispatch against the phase-completion
@@ -207,7 +208,9 @@ Phase 5 Slice 5.6 is **In Progress** under accepted
 [`ADR-0031`](adr/ADR-0031-phase5-committed-domain-sink-boundary.md) presents the
 committed publication payload, four role-specific sink ports, post-commit
 fan-out, bounded failure reporting, and retention decisions. Owner architecture
-approval is complete; production sink-interface implementation is pending.
+approval is complete. The bounded server-core implementation and focused tests
+pass applicable local verification; implementation-demo acceptance remains
+pending.
 
 ## References and license
 
