@@ -2,7 +2,7 @@
 
 Document type: living implementation plan
 
-Updated: 2026-08-27
+Updated: 2026-08-28
 
 Direction source: [`README.md`](README.md)
 
@@ -2977,7 +2977,7 @@ Depends on: Phase 4.
 | Slice | Deliverable | Status | Completion evidence |
 |---|---|---|---|
 | 5.1 | Implement fixed-tick scheduling, bounded per-tick command intake, and deterministic ordering | **Implemented** | Accepted [`ADR-0026`](adr/ADR-0026-phase5-writer-command-intake-and-ordering.md), implementation `e0dde571f5`, applicable local verification, and owner demo acceptance pass |
-| 5.2 | Implement minimal player/session/cell/root-transform/velocity/ack canonical state | **In Progress** | Accepted [`ADR-0027`](adr/ADR-0027-phase5-canonical-player-and-session-state.md), implementation and local contract verification; owner implementation-demo acceptance pending |
+| 5.2 | Implement minimal player/session/cell/root-transform/velocity/ack canonical state | **Implemented** | Accepted [`ADR-0027`](adr/ADR-0027-phase5-canonical-player-and-session-state.md), implementation `f1a1f0632e`, applicable local verification, and owner demo acceptance pass |
 | 5.3 | Implement command validation and atomic reducer application | **Not Started** | Invalid, stale, duplicate, and over-budget commands cause no partial state mutation |
 | 5.4 | Publish immutable snapshots and versioned state-change events | **Not Started** | Readers cannot mutate canonical state and slow readers cannot block the writer indefinitely |
 | 5.5 | Add idempotency windows, authority-epoch checks, state checksums, and explicit resync requests | **Not Started** | Duplicate/stale/epoch mismatch and divergence-repair tests pass |
@@ -3150,6 +3150,25 @@ Implementation notes:
   - Follow-ups: complete the repository gates, publish the implementation
     commit, and present the stable-order/binding/boundary/revision demo for
     owner acceptance. Slice 5.3 remains gated.
+
+- 2026-08-28 — Slice 5.2 — Implemented
+  - Change: retained implementation commit `f1a1f0632e` without production-code
+    changes and marked Slice 5.2 **Implemented** after the required owner demo
+    acceptance.
+  - Decisions: none. ADR-0027 remains accepted without amendment.
+  - Verification: a fresh standalone MSVC 19.44 C++20 configure and 55-step
+    build passed all 13 contract executables and three golden-corpus checks.
+    `python -m unittest discover -s scripts/tests` passed all 98 repository-owned
+    tests. Baseline provenance verified 178 intentional differences and 54
+    dependency inputs; legacy exclusion checked 3,872 tracked paths, 59 CMake
+    files, 1,254 compile commands, and 1,971 Ninja edges. The three Slice 5.2
+    C++ files pass `clang-format --dry-run --Werror`; JSON, all local vNext
+    Markdown links, public-header dependency isolation, and diff checks pass.
+  - Owner review: implementation-demo evidence explicitly accepted by the
+    project owner in the 2026-08-28 working session.
+  - Follow-ups: none for Slice 5.2. Slice 5.3 is now eligible but requires owner
+    review of command validation, disposition, acknowledgement progression, and
+    atomic reducer installation before production reducer code lands.
 
 ### Phase 6 — Maintained transport and secure network session
 

@@ -26,9 +26,9 @@ Phase 4—bounded protocol and in-memory session—is implemented, including its
 complete manually dispatched hosted phase-exit matrix and owner exit approval.
 Phase 5—deterministic authoritative server core—is in progress. Its first
 production slice implements the approved writer intake, ordering, limits, and
-overload policy with accepted owner demo evidence. Slice 5.2 now implements the
+overload policy with accepted owner demo evidence. Slice 5.2 implements the
 approved immutable, bounded canonical player/session state value and invariant
-checks; its owner implementation demo remains pending. No reducer, production
+checks with accepted owner demo evidence. No reducer, production
 multiplayer runtime, or real transport integration exists yet. See the [implementation
 plan](IMPLEMENTATION_PLAN.md) for the live tracker, phase gates, decision
 records, and verification evidence.
@@ -167,7 +167,7 @@ identity ordering, 256/256 hard bounds, explicit unique bindings, one checked
 atomic spatial revision, and session-generation-scoped optional
 contiguous-finalized acknowledgement progress. It adds no online state install,
 reducer, lifecycle, persistence, publication, movement, or gameplay behavior;
-owner implementation-demo acceptance remains pending.
+local verification and owner implementation-demo acceptance pass.
 
 ## References and license
 
