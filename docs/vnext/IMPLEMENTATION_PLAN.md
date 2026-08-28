@@ -110,7 +110,7 @@ Observed on 2026-08-25 before this plan was added:
 | 1 | Clean OpenMW 0.51 baseline | **Implemented** | Phase 0 |
 | 2 | Security and architecture decisions | **Implemented** | Phase 1 |
 | 3 | Independent targets and test scaffold | **Implemented** | Phase 2 |
-| 4 | Bounded protocol and in-memory session | **In Progress** | Phase 3 |
+| 4 | Bounded protocol and in-memory session | **Implemented** | Phase 3 |
 | 5 | Deterministic authoritative server core | **Not Started** | Phase 4 |
 | 6 | Maintained transport and secure network session | **Not Started** | Phase 5 |
 | 7 | Headless end-to-end multiplayer slice | **Not Started** | Phase 6 |
@@ -2395,7 +2395,7 @@ Implementation notes:
 
 ### Phase 4 — Bounded protocol and in-memory session
 
-Status: **In Progress**
+Status: **Implemented**
 
 Outcome: a simulated peer negotiates vNext, authenticates through an interface,
 and exchanges bounded messages entirely in memory.
@@ -2935,6 +2935,33 @@ Implementation notes:
     remains **Not Started**.
   - Follow-ups: obtain explicit Phase 4 exit-gate approval, then mark Phase 4
     **Implemented** in a status-only closeout before beginning any Phase 5 work.
+
+- 2026-08-27 — Phase 4 — Implemented
+  - Change: marked Phase 4 **Implemented** after every Slice 4.1–4.6
+    deliverable was implemented and demo-accepted, the corrected complete
+    hosted matrix passed, and the project owner explicitly approved the phase
+    exit gate. No production code or accepted behavior changed in this
+    status-only closeout.
+  - Decisions: none. ADR-0004, ADR-0019, ADR-0021 through ADR-0025, and
+    GDR-0011 remain accepted without amendment.
+  - Gate evidence: the simulated client handshake, capability negotiation,
+    authentication boundary, reliable/latest-wins envelopes, and bounded
+    in-memory player exchange satisfy the declared functional gate. Malformed,
+    oversized, legacy, stale, duplicate, contradictory, and capability-failure
+    contracts prove fail-closed behavior without partial state commits. The
+    complete 17-job hosted evidence is recorded immediately above.
+  - Verification: retained local verification covers 98 repository-owned
+    Python tests, all eleven MSVC contracts plus three golden-corpus checks,
+    exact five-header FlatBuffers regeneration, provenance for 170 intentional
+    differences and 54 dependency inputs, legacy exclusion over 3,864 paths,
+    59 CMake files, 32 compile commands, and 91 Ninja edges, plus formatting,
+    JSON, Markdown-link, and clean-diff checks. All six corrected-candidate
+    hosted workflows passed on `3fe7ba2986209fe519f660e4d670155382462933`.
+  - Owner review: explicit Phase 4 exit-gate approval received from the project
+    owner in the 2026-08-27 working session.
+  - Follow-ups: none for Phase 4. Phase 5 is now eligible, but its kickoff and
+    any unresolved Slice 5.1 architecture/authority decisions require owner
+    review before production implementation begins.
 
 ### Phase 5 — Deterministic authoritative server core
 
