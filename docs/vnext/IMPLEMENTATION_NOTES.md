@@ -3596,6 +3596,42 @@ only the relevant phase section here.
   - Follow-ups: verify locally, publish, obtain a completely green exact matrix,
     compare all six retained artifacts, and then close Slice 6.1.
 
+- 2026-08-28 — Slice 6.1 — Implemented
+  - Change: closed the approved owned transport lifecycle slice on exact
+    implementation candidate `36c1ac6617d75c8d8ef88d687901c9d73b25d0a0`.
+    The final repair enables GNS's upstream ASan/UBSan integration in the
+    production graph and applies only the function-cast exclusion already
+    accepted and proven in Slice 2.3. Phase 6 remains **In Progress**.
+  - Decisions: none. The implementation conforms to accepted
+    [`ADR-0032`](adr/ADR-0032-phase6-transport-adapter-and-lifecycle-boundary.md)
+    and does not add payload channels, authentication/resumption, product
+    queues, telemetry, gameplay behavior, or another sanitizer exclusion.
+  - Verification: all six jobs in exact manual lifecycle run
+    [`33215346506`](https://github.com/poisson-fish/TES3MP/actions/runs/33215346506)
+    passed: MSVC 2022 v143, GCC 13, Clang 18 ASan/UBSan, Clang 18 TSan, macOS
+    arm64 Xcode 16, and macOS x86-64 Xcode 16. Retained artifact IDs are
+    `9703672808`, `9703585359`, `9703530129`, `9703416747`, `9703364727`, and
+    `9703355615`. All six manifests have identical schema, production profile,
+    locks, build profile, and production claim; every manifest evidence hash
+    matches its retained file. All retain GNS lock SHA-256
+    `367fd5820e41b77c5857ccf1dff9b2d0698cebf8dba5385f81204f1dba64350c`
+    and c-ares lock SHA-256
+    `0ad50cda94dcca45fbfe3a7e166862ef3a572f9362ee3ada487872a6d018fec1`.
+    The retained c-ares archive and license evidence match SHA-256
+    `c222b6d681096f9444d2c4863d2c1174019e27cacca0a4a5c114d36dd7d7bf78`
+    and `460f5e768fda3752ca2169a95df062578a10fb126bfd65f3b9b1a1bed2f84807`.
+    Locally, all three lifecycle executables, all 112 repository Python tests,
+    transport formatting, JSON parsing, indexed provenance, and staged diff
+    checks pass. The real GNS loopback remains excluded only from the TSan run
+    because of the documented dependency-internal lock inversion; the adapter
+    is still instrumented there, no detector suppression was added, and real
+    loopback passes the other five profiles.
+  - Owner review: the project owner explicitly approved closing Slice 6.1 in
+    the 2026-08-28 working session, contingent on the final exact evidence. The
+    green matrix and retained artifacts satisfy that condition.
+  - Follow-ups: Slice 6.2 remains **Not Started**. Present its channel-semantics
+    behavior options and recommendation for owner approval before implementation.
+
 ## Phase 7 — Headless end-to-end multiplayer slice
 
 [Back to the phase tracker](IMPLEMENTATION_PLAN.md#phase-7--headless-end-to-end-multiplayer-slice)

@@ -11,8 +11,8 @@ conditional stretch target.
 
 ## Status
 
-Phases 0–5 are implemented. The active tree is a provenance-verified OpenMW
-0.51 baseline with:
+Phases 0–5 are implemented. Phase 6 is in progress, with Slice 6.1 implemented.
+The active tree is a provenance-verified OpenMW 0.51 baseline with:
 
 - engine-independent protocol, transport, client-session, server-core, and test
   support targets;
@@ -39,15 +39,16 @@ verification and owner-review history. Slice 5.5 has accepted
 [`ADR-0030`](adr/ADR-0030-phase5-idempotency-checksum-and-resync-boundary.md);
 its production implementation and focused tests pass applicable local
 verification and owner demo acceptance. The reducer core is eligible for later
-reviewed composition, but no production multiplayer runtime or real transport
-integration exists yet. Slice 5.6 has accepted
+reviewed composition, but no composed production multiplayer runtime exists
+yet. Slice 5.6 has accepted
 [`ADR-0031`](adr/ADR-0031-phase5-committed-domain-sink-boundary.md); production
 sink-interface implementation and focused tests pass applicable local
 verification and owner demo acceptance. Slice 5.7's test-only seeded reducer
 property and eight-client deterministic simulation implementation passes
 applicable local verification and owner demo acceptance. The complete Phase 5
 hosted manual matrix is green on the exact portability-repair candidate, and
-the project owner approved the Phase 5 exit gate. Phase 6 has not started.
+the project owner approved the Phase 5 exit gate. Phase 6 is in progress;
+Slice 6.1's owned real-transport lifecycle boundary is implemented.
 
 Beginning with Phase 4, each slice runs applicable local verification. The full
 vNext hosted matrix runs once by manual dispatch against the phase-completion
@@ -223,16 +224,20 @@ canonical invariants after every batch and exact same-seed replay. Implementatio
 `917ecc3278`, applicable local verification, and owner demo acceptance pass.
 The complete Phase 5 hosted manual matrix passes on exact commit
 `8e7ca8ff607f3b95ec8d348919f6c1233a11eb23`, and the project owner approved the
-exit gate. Phase 5 is **Implemented**. Phase 6 and Slice 6.1 are **In Progress**
-under accepted
+exit gate. Phase 5 is **Implemented**. Phase 6 is **In Progress** and Slice 6.1
+is **Implemented** under accepted
 [`ADR-0032`](adr/ADR-0032-phase6-transport-adapter-and-lifecycle-boundary.md)
 after owner approval of its target, provisioning, lifecycle, pumping,
 initial-bound, and hostname/DNS decisions. The authorized exact-pin c-ares proof
 passes locally and across the complete five-job supported desktop matrix on
 exact candidate `6dcea1b4af`; retained artifacts are consistent, and the owner
 accepted the dependency profile. The production lifecycle adapter and focused
-deterministic/loopback checks pass locally; Slice 6.1 closure awaits the exact
-supported-platform and sanitizer lifecycle matrix.
+deterministic/loopback checks pass locally. Exact implementation candidate
+`36c1ac6617d75c8d8ef88d687901c9d73b25d0a0` passes the complete six-job
+supported-platform and sanitizer lifecycle matrix in
+[`33215346506`](https://github.com/poisson-fish/TES3MP/actions/runs/33215346506),
+and all six retained artifact sets are internally verified and consistent.
+Slice 6.2 remains **Not Started** and separately gated.
 
 ## References and license
 

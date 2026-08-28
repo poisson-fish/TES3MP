@@ -341,7 +341,7 @@ runtime or protocol name.
 | ADR-0029 | Phase 5 immutable canonical publication, versioned change feed, retention, and slow-reader policy | Phase 5 | **Implemented** |
 | ADR-0030 | Phase 5 bounded idempotency, canonical checksum, and resync boundary | Phase 5 | **Implemented** |
 | ADR-0031 | Phase 5 committed domain sink ownership, delivery, failure, and resource-bound policy | Phase 5 | **Implemented** |
-| ADR-0032 | Phase 6 selected transport adapter topology, lifecycle, endpoint, pumping, and initial bounds | Phase 6 | **In Progress** |
+| ADR-0032 | Phase 6 selected transport adapter topology, lifecycle, endpoint, pumping, and initial bounds | Phase 6 | **Implemented** |
 
 An ADR is complete only when it records considered alternatives, selection
 criteria, consequences, failure modes, a replacement/review trigger, and
@@ -587,7 +587,7 @@ Depends on: Phase 5.
 
 | Slice | Deliverable | Status | Completion evidence |
 |---|---|---|---|
-| 6.1 | Wrap connection/listen/connect/disconnect/cancellation/lifecycle in an owned transport interface | **In Progress** | Accepted [`ADR-0032`](adr/ADR-0032-phase6-transport-adapter-and-lifecycle-boundary.md); owned APIs, verified provisioning, focused MSVC loopback, deterministic resolver/race, stale-generation, bound, and dependency-negative checks pass locally; exact supported-platform/sanitizer lifecycle evidence remains |
+| 6.1 | Wrap connection/listen/connect/disconnect/cancellation/lifecycle in an owned transport interface | **Implemented** | Accepted and implemented [`ADR-0032`](adr/ADR-0032-phase6-transport-adapter-and-lifecycle-boundary.md); owned APIs, verified provisioning, deterministic resolver/race/generation coverage, and numeric/DNS encrypted loopback pass locally; exact candidate `36c1ac6617d75c8d8ef88d687901c9d73b25d0a0` passes all six jobs in [`33215346506`](https://github.com/poisson-fish/TES3MP/actions/runs/33215346506), with all retained artifacts verified and consistent; owner closure approval recorded |
 | 6.2 | Map reliable operations and latest-wins snapshots to explicit transport channels | **Not Started** | Loss/reorder tests prove snapshots do not head-of-line block behind operations |
 | 6.3 | Implement required encryption, optional join-password authentication, resume-token handling, and credential redaction per ADR-0005 | **Not Started** | Encryption ordering, unencrypted-mode rejection, password failure/rate-limit, token replay, timeout, and redaction tests pass |
 | 6.4 | Implement bounded queues, priority, rate limits, backpressure, and slow-peer eviction | **Not Started** | Flood/slow-reader tests remain within configured memory/work budgets |
