@@ -2403,7 +2403,7 @@ Depends on: Phase 3.
 |---|---|---|---|
 | 4.1 | Implement framing/envelopes, message classification, byte budgets, and structured decode errors | **Implemented** | Accepted [`ADR-0021`](adr/ADR-0021-bounded-protocol-framing-and-decode-boundary.md), implementation `98e62f5f19`, all applicable local verification, and owner demo acceptance pass |
 | 4.2 | Implement `ClientHello`, `ServerHello`, and clear rejection with version/capability negotiation | **Implemented** | Accepted [`ADR-0022`](adr/ADR-0022-version-and-capability-negotiation.md), implementation `e89621e970`, all applicable local verification, and owner demo acceptance pass |
-| 4.3 | Implement the client/server session state machines and authentication-provider interface | **In Progress** | Accepted [`ADR-0023`](adr/ADR-0023-session-state-machines-and-authentication-provider-boundary.md); implementation and local verification complete, owner demo acceptance pending |
+| 4.3 | Implement the client/server session state machines and authentication-provider interface | **Implemented** | Accepted [`ADR-0023`](adr/ADR-0023-session-state-machines-and-authentication-provider-boundary.md), implementation `edbedbd632`, all applicable local verification, and owner demo acceptance pass |
 | 4.4 | Define reliable-operation and latest-wins snapshot envelopes | **Not Started** | Command ID/revision and tick/sequence/epoch rules are enforced separately |
 | 4.5 | Exchange a minimal player command and world snapshot over the in-memory link | **Not Started** | A fake peer completes handshake and state exchange with no sockets or OpenMW |
 | 4.6 | Add round-trip, property, golden-schema, mutation, and fuzz coverage | **Not Started** | Every decoder is registered with a corpus and sanitizer-backed fuzz target |
@@ -2594,6 +2594,25 @@ Implementation notes:
     deadline and secret bounds, stale/cancellation behavior, atomic matrix, and
     redaction evidence for owner acceptance. Slice 4.4 remains gated until this
     slice is marked **Implemented**.
+
+- 2026-08-27 — Slice 4.3 — Implemented
+  - Change: retained implementation commit `edbedbd632` without production-code
+    changes and marked Slice 4.3 **Implemented** after the required owner demo
+    acceptance.
+  - Decisions: none. ADR-0023 remains accepted without amendment.
+  - Verification: the accepted implementation retains the green nine-contract
+    MSVC build, exhaustive server/client state-event matrices, provider/secret/
+    timeout/lifetime/redaction coverage, 97 repository-owned Python tests,
+    exact pinned FlatBuffers proof, provenance evidence for 146 intentional
+    differences and 50 dependency inputs, legacy-exclusion evidence for 3,840
+    tracked paths, 59 CMake files, 28 compile commands, and 81 Ninja edges,
+    JSON and Python validation, 69 resolved local Markdown links, public-header
+    isolation, and clean diff checks.
+  - Owner review: implementation-demo evidence explicitly accepted by the
+    project owner in the 2026-08-27 working session.
+  - Follow-ups: none for Slice 4.3. Phase 4 remains **In Progress**; Slice 4.4
+    stays **Not Started** and requires its architecture/protocol decision packet
+    before production implementation begins.
 
 ### Phase 5 — Deterministic authoritative server core
 
