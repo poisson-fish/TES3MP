@@ -2984,7 +2984,7 @@ Depends on: Phase 4.
 | 5.2 | Implement minimal player/session/cell/root-transform/velocity/ack canonical state | **Implemented** | Accepted [`ADR-0027`](adr/ADR-0027-phase5-canonical-player-and-session-state.md), implementation `f1a1f0632e`, applicable local verification, and owner demo acceptance pass |
 | 5.3 | Implement command validation and atomic reducer application | **Implemented** | Accepted [`ADR-0028`](adr/ADR-0028-phase5-command-validation-and-atomic-reducer.md) and [`GDR-0012`](gdr/GDR-0012-phase5-minimal-motion-reducer-semantics.md), implementation `f57a4074db`, applicable local verification, and owner demo acceptance pass |
 | 5.4 | Publish immutable snapshots and versioned state-change events | **Implemented** | Accepted [`ADR-0029`](adr/ADR-0029-phase5-immutable-canonical-publication-and-versioned-change-feed.md), implementation `d7e7b25950`, applicable local verification, and owner demo acceptance pass |
-| 5.5 | Add idempotency windows, authority-epoch checks, state checksums, and explicit resync requests | **In Progress** | Accepted [`ADR-0030`](adr/ADR-0030-phase5-idempotency-checksum-and-resync-boundary.md), implementation `ac627deafc`, and applicable local verification pass; owner demo acceptance pending |
+| 5.5 | Add idempotency windows, authority-epoch checks, state checksums, and explicit resync requests | **Implemented** | Accepted [`ADR-0030`](adr/ADR-0030-phase5-idempotency-checksum-and-resync-boundary.md), implementation `ac627deafc`, applicable local verification, and owner demo acceptance pass |
 | 5.6 | Add persistence, replay, script, and metrics sink interfaces without implementations | **Not Started** | All sinks receive the same committed change record after, never before, commit |
 | 5.7 | Add reducer property tests and deterministic multi-client simulation tests | **Not Started** | Randomized command streams preserve invariants and reproduce by seed |
 
@@ -3502,6 +3502,25 @@ Implementation notes:
   - Follow-ups: present duplicate, history-retention/eviction, epoch, exact-byte/
     CRC, observability-independence, resync, and no-runtime-composition evidence
     for owner acceptance.
+
+- 2026-08-28 — Slice 5.5 — Implemented
+  - Change: retained implementation commit `ac627deafc` without production-code
+    changes and marked Slice 5.5 **Implemented** after the required owner demo
+    acceptance.
+  - Decisions: none. Accepted
+    [`ADR-0030`](adr/ADR-0030-phase5-idempotency-checksum-and-resync-boundary.md)
+    remains authoritative.
+  - Verification: retained the fresh standalone MSVC 19.44 C++20 63-step build,
+    all 15 contract executables, three golden-corpus checks, 98 repository-owned
+    Python tests, staged provenance and legacy-exclusion checks, 12-file
+    formatting check, JSON validation, whitespace check, target-boundary check,
+    public-header isolation, and staged-diff check recorded above. This
+    status-only closeout changes no production or test source.
+  - Owner review: implementation-demo evidence was explicitly accepted by the
+    project owner in the 2026-08-28 working session.
+  - Follow-ups: none for Slice 5.5. Slice 5.6 is now eligible, but its sink
+    ownership, delivery, failure, and resource-bound decisions require owner
+    review before dependent production interfaces land.
 
 ### Phase 6 — Maintained transport and secure network session
 
