@@ -2980,7 +2980,7 @@ Depends on: Phase 4.
 |---|---|---|---|
 | 5.1 | Implement fixed-tick scheduling, bounded per-tick command intake, and deterministic ordering | **Implemented** | Accepted [`ADR-0026`](adr/ADR-0026-phase5-writer-command-intake-and-ordering.md), implementation `e0dde571f5`, applicable local verification, and owner demo acceptance pass |
 | 5.2 | Implement minimal player/session/cell/root-transform/velocity/ack canonical state | **Implemented** | Accepted [`ADR-0027`](adr/ADR-0027-phase5-canonical-player-and-session-state.md), implementation `f1a1f0632e`, applicable local verification, and owner demo acceptance pass |
-| 5.3 | Implement command validation and atomic reducer application | **In Progress** | Accepted [`ADR-0028`](adr/ADR-0028-phase5-command-validation-and-atomic-reducer.md) and [`GDR-0012`](gdr/GDR-0012-phase5-minimal-motion-reducer-semantics.md); implementation and applicable local verification pass, owner demo pending |
+| 5.3 | Implement command validation and atomic reducer application | **Implemented** | Accepted [`ADR-0028`](adr/ADR-0028-phase5-command-validation-and-atomic-reducer.md) and [`GDR-0012`](gdr/GDR-0012-phase5-minimal-motion-reducer-semantics.md), implementation `f57a4074db`, applicable local verification, and owner demo acceptance pass |
 | 5.4 | Publish immutable snapshots and versioned state-change events | **Not Started** | Readers cannot mutate canonical state and slow readers cannot block the writer indefinitely |
 | 5.5 | Add idempotency windows, authority-epoch checks, state checksums, and explicit resync requests | **Not Started** | Duplicate/stale/epoch mismatch and divergence-repair tests pass |
 | 5.6 | Add persistence, replay, script, and metrics sink interfaces without implementations | **Not Started** | All sinks receive the same committed change record after, never before, commit |
@@ -3272,6 +3272,26 @@ Implementation notes:
   - Follow-ups: publish the implementation commit and present the accepted,
     rejected, contention, observability, and Slice 5.5-gate evidence for owner
     acceptance. Do not compose the reducer into an online runtime.
+
+- 2026-08-28 — Slice 5.3 — Implemented
+  - Change: retained implementation commit `f57a4074db` without production-code
+    changes and marked Slice 5.3 **Implemented** after the required owner demo
+    acceptance.
+  - Decisions: none. ADR-0028 and GDR-0012 remain accepted without amendment;
+    online reducer composition remains prohibited until Slice 5.5 supplies the
+    approved cross-batch command-ID idempotency window.
+  - Verification: the accepted implementation retains a green fresh standalone
+    MSVC 19.44 C++20 58-step build, all 14 contract executables and three
+    golden-corpus checks, all 98 repository-owned Python tests, provenance with
+    183 intentional differences and 54 dependency inputs, legacy exclusion over
+    3,877 tracked paths, 59 CMake files, 1,254 compile commands, and 1,971 Ninja
+    edges, six-file formatting, 100 local-link, public-header-isolation, JSON,
+    ADR/GDR assertion, and staged-diff checks.
+  - Owner review: implementation-demo evidence explicitly accepted by the
+    project owner in the 2026-08-28 working session.
+  - Follow-ups: none for Slice 5.3. Slice 5.4 is now eligible but requires owner
+    review of immutable snapshot/event publication ownership, versioning,
+    retention, and slow-reader policy before production publication code lands.
 
 ### Phase 6 — Maintained transport and secure network session
 

@@ -29,10 +29,10 @@ production slice implements the approved writer intake, ordering, limits, and
 overload policy with accepted owner demo evidence. Slice 5.2 implements the
 approved immutable, bounded canonical player/session state value and invariant
 checks with accepted owner demo evidence. Slice 5.3 implements the approved
-writer-confined command validation and atomic reducer, with owner implementation-
-demo acceptance still pending. The reducer remains offline until Slice 5.5 adds
-the required cross-batch command-ID idempotency window; no production multiplayer
-runtime or real transport integration exists yet. See the [implementation plan](IMPLEMENTATION_PLAN.md)
+writer-confined command validation and atomic reducer with accepted owner demo
+evidence. The reducer remains offline until Slice 5.5 adds the required cross-
+batch command-ID idempotency window; no production multiplayer runtime or real
+transport integration exists yet. See the [implementation plan](IMPLEMENTATION_PLAN.md)
 for the live tracker, phase gates, decision records, and verification evidence.
 
 Beginning with Phase 4, each slice runs applicable local verification. The full
@@ -177,8 +177,8 @@ Phase 5 Slice 5.3 now has accepted
 the atomic reducer, validation/disposition, acknowledgement, incomplete
 cross-batch idempotency gate, and narrow provisional velocity-replacement
 decisions. The writer-confined implementation, closed observability, and focused
-contract tests pass applicable local verification. Owner implementation-demo
-acceptance remains pending, and online composition stays gated on Slice 5.5.
+contract tests pass applicable local verification and owner implementation-demo
+acceptance. Online composition stays gated on Slice 5.5.
 
 ## References and license
 
