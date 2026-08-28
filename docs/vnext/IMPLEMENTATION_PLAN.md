@@ -2987,7 +2987,7 @@ Depends on: Phase 4.
 | 5.4 | Publish immutable snapshots and versioned state-change events | **Implemented** | Accepted [`ADR-0029`](adr/ADR-0029-phase5-immutable-canonical-publication-and-versioned-change-feed.md), implementation `d7e7b25950`, applicable local verification, and owner demo acceptance pass |
 | 5.5 | Add idempotency windows, authority-epoch checks, state checksums, and explicit resync requests | **Implemented** | Accepted [`ADR-0030`](adr/ADR-0030-phase5-idempotency-checksum-and-resync-boundary.md), implementation `ac627deafc`, applicable local verification, and owner demo acceptance pass |
 | 5.6 | Add persistence, replay, script, and metrics sink interfaces without implementations | **Implemented** | Accepted [`ADR-0031`](adr/ADR-0031-phase5-committed-domain-sink-boundary.md), implementation `2905c7a791`, applicable local verification, and owner demo acceptance pass |
-| 5.7 | Add reducer property tests and deterministic multi-client simulation tests | **In Progress** | Test-only seeded eight-client property/simulation coverage added; applicable local verification and owner demo acceptance pending |
+| 5.7 | Add reducer property tests and deterministic multi-client simulation tests | **In Progress** | Implementation `917ecc3278` and applicable local verification pass; owner demo acceptance pending |
 
 Exit gate:
 
@@ -3646,17 +3646,23 @@ Implementation notes:
     gameplay decision is introduced. The test uses the approved ADR-0017
     xoshiro256** labeled stream and ADR-0013 writer-order/checksum rules and adds
     no production harness, API, state, target dependency, or behavior.
-  - Verification: the focused property executable builds with MSVC 19.44 and
-    passes 16 randomized seed runs, exact same-seed replay, different-seed trace
-    separation, and an eight-seed disposition-coverage matrix. Complete fresh
-    standalone, policy, provenance, legacy-exclusion, formatting, and diff
-    verification remain required before the implementation commit.
+  - Verification: implementation commit `917ecc3278` passes a fresh MSVC 19.44
+    C++20 67-step aggregate build with 17 contract executables and three corpus
+    checks. The four focused property contracts perform 28 deterministic
+    simulation runs of 48 batches each and cover 16 randomized seeds, exact
+    same-seed command/disposition/final-byte/checksum replay, different-seed
+    trace separation, and an eight-seed disposition-coverage matrix. All 98
+    repository Python policy tests pass. Staged provenance verification reports
+    196 intentional differences and 54 dependency inputs; staged legacy
+    exclusion reports 3,890 tracked paths, 59 CMake files, 44 compile commands,
+    and 121 Ninja edges. The new C++ source passes `clang-format`; JSON and
+    staged-diff checks pass. Schema, golden-vector, and fuzz verification are not
+    applicable because the slice changes no wire schema or bounded decoder.
   - Owner review: no new decision approval is required because this slice is
     test-only and exercises accepted behavior. Implementation-demo acceptance
     remains pending.
-  - Follow-ups: run the applicable local matrix, record the implementation
-    commit and exact evidence, then present seeded replay and invariant coverage
-    for owner acceptance before Phase 5 exit-gate execution.
+  - Follow-ups: present seeded replay and invariant coverage for owner acceptance
+    before Phase 5 exit-gate execution.
 
 ### Phase 6 — Maintained transport and secure network session
 
