@@ -159,6 +159,14 @@ verification and owner implementation-demo acceptance pass; canonical state,
 validation/reduction, acknowledgements, and gameplay behavior remain later
 gated work.
 
+Phase 5 Slice 5.2 is in decision review. Proposed
+[`ADR-0027`](adr/ADR-0027-phase5-canonical-player-and-session-state.md) presents
+the player/session state partition, scope/lifetime separation, deterministic
+identity ordering and bounds, spatial revision invariants, immutable
+construction, explicit binding, and acknowledgement options. No production
+canonical store or state behavior is authorized until the project owner
+approves or amends that record.
+
 ## References and license
 
 - [OpenMW 0.51 source](https://gitlab.com/OpenMW/openmw/-/tree/openmw-0.51.0)

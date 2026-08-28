@@ -336,6 +336,7 @@ runtime or protocol name.
 | ADR-0024 | Reliable-operation and latest-wins envelope contract | Phase 4 | **Implemented** |
 | ADR-0025 | Minimal player command, world-snapshot roots, session guards, and in-memory exchange | Phase 4 | **Implemented** |
 | ADR-0026 | Phase 5 writer command intake, ordering, limits, and overload policy | Phase 5 | **Implemented** |
+| ADR-0027 | Phase 5 canonical player/session state, scope, invariants, and bounds | Phase 5 | **Proposed** |
 
 An ADR is complete only when it records considered alternatives, selection
 criteria, consequences, failure modes, a replacement/review trigger, and
@@ -2976,7 +2977,7 @@ Depends on: Phase 4.
 | Slice | Deliverable | Status | Completion evidence |
 |---|---|---|---|
 | 5.1 | Implement fixed-tick scheduling, bounded per-tick command intake, and deterministic ordering | **Implemented** | Accepted [`ADR-0026`](adr/ADR-0026-phase5-writer-command-intake-and-ordering.md), implementation `e0dde571f5`, applicable local verification, and owner demo acceptance pass |
-| 5.2 | Implement minimal player/session/cell/root-transform/velocity/ack canonical state | **Not Started** | State invariants and revision monotonicity tests pass |
+| 5.2 | Implement minimal player/session/cell/root-transform/velocity/ack canonical state | **In Progress** | Proposed [`ADR-0027`](adr/ADR-0027-phase5-canonical-player-and-session-state.md) decision packet is ready for owner review; production state remains approval-gated |
 | 5.3 | Implement command validation and atomic reducer application | **Not Started** | Invalid, stale, duplicate, and over-budget commands cause no partial state mutation |
 | 5.4 | Publish immutable snapshots and versioned state-change events | **Not Started** | Readers cannot mutate canonical state and slow readers cannot block the writer indefinitely |
 | 5.5 | Add idempotency windows, authority-epoch checks, state checksums, and explicit resync requests | **Not Started** | Duplicate/stale/epoch mismatch and divergence-repair tests pass |
@@ -3082,6 +3083,36 @@ Implementation notes:
   - Follow-ups: none for Slice 5.1. Slice 5.2 is now eligible but requires
     owner review of canonical state ownership, scope, invariants, and API shape
     before production state code lands.
+
+- 2026-08-27 — Slice 5.2 — In Progress
+  - Change: inspected the accepted authority/scope, deterministic simulation,
+    spatial primitive, envelope, minimal exchange, and writer-intake records and
+    implementations. Added proposed
+    [`ADR-0027`](adr/ADR-0027-phase5-canonical-player-and-session-state.md) with
+    five owner-gated option sets. No production canonical state, lifecycle,
+    reducer, acknowledgement behavior, persistence, or gameplay code changed.
+  - Decisions: none accepted. The recommendation is separate per-player entity
+    and active-session-progress partitions; stable sorted vectors with hard
+    256/256 ceilings and explicit unique bindings; one atomic spatial revision,
+    last-change tick, and stable authority epoch; fully validated immutable
+    construction with no general mutation API; and session-generation-scoped
+    optional contiguous-finalized acknowledgement progress.
+  - Verification: `python -m unittest discover -s scripts/tests -v` passes all
+    98 repository-owned tests. Staged baseline provenance accounts for 175
+    intentional differences and 54 dependency inputs; staged legacy exclusion
+    checks 3,869 tracked paths, 59 CMake files, 1,254 compile commands, and
+    1,971 Ninja edges. The provenance JSON parses, all 87 local vNext Markdown
+    links resolve, and staged diff checks pass. A C++ product build, formatting,
+    FlatBuffers regeneration, and fuzz verification are not applicable because
+    this decision-only change adds no production source, schema, or decoder.
+  - Owner review: pending explicit approval or amendment of ADR-0027 Decisions
+    1–5 and the proposed acceptance tests. Identity creation, spawn, reconnect/
+    replacement, persistence lifetime, cell transition, movement, reducer,
+    interest, resync, and presentation behavior remain separately gated.
+  - Follow-ups: present the decision packet and scenarios to the owner, record
+    the chosen options, then implement only the approved Slice 5.2 state values,
+    invariant checks, immutable access, observability, and tests. Slice 5.3
+    remains gated.
 
 ### Phase 6 — Maintained transport and secure network session
 
