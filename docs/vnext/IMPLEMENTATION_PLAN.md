@@ -2987,7 +2987,7 @@ Depends on: Phase 4.
 | 5.4 | Publish immutable snapshots and versioned state-change events | **Implemented** | Accepted [`ADR-0029`](adr/ADR-0029-phase5-immutable-canonical-publication-and-versioned-change-feed.md), implementation `d7e7b25950`, applicable local verification, and owner demo acceptance pass |
 | 5.5 | Add idempotency windows, authority-epoch checks, state checksums, and explicit resync requests | **Implemented** | Accepted [`ADR-0030`](adr/ADR-0030-phase5-idempotency-checksum-and-resync-boundary.md), implementation `ac627deafc`, applicable local verification, and owner demo acceptance pass |
 | 5.6 | Add persistence, replay, script, and metrics sink interfaces without implementations | **Implemented** | Accepted [`ADR-0031`](adr/ADR-0031-phase5-committed-domain-sink-boundary.md), implementation `2905c7a791`, applicable local verification, and owner demo acceptance pass |
-| 5.7 | Add reducer property tests and deterministic multi-client simulation tests | **Not Started** | Randomized command streams preserve invariants and reproduce by seed |
+| 5.7 | Add reducer property tests and deterministic multi-client simulation tests | **In Progress** | Test-only seeded eight-client property/simulation coverage added; applicable local verification and owner demo acceptance pending |
 
 Exit gate:
 
@@ -3631,6 +3631,32 @@ Implementation notes:
   - Follow-ups: none for Slice 5.6. Slice 5.7 is now eligible; inspect its
     property/simulation scope against accepted Phase 5 decisions before adding
     test-only coverage.
+
+- 2026-08-28 — Slice 5.7 — In Progress
+  - Change: inspected ADR-0013/0017 deterministic facilities and accepted
+    ADR-0026–0031 Phase 5 production contracts, then added a test-only seeded
+    eight-client simulation through the real intake and reducer. Bounded random
+    streams generate approved applied, stale, duplicate, gap, session-
+    generation, binding, revision, and epoch cases. The oracle checks complete
+    state reconstruction, exact per-player isolation, session progress/history,
+    state-version/change contiguity, publication completeness, and checksum
+    equality after every batch; exact input/outcome traces and final canonical
+    bytes reproduce from the recorded seed.
+  - Decisions: no new architecture, authority, state-scope, compatibility, or
+    gameplay decision is introduced. The test uses the approved ADR-0017
+    xoshiro256** labeled stream and ADR-0013 writer-order/checksum rules and adds
+    no production harness, API, state, target dependency, or behavior.
+  - Verification: the focused property executable builds with MSVC 19.44 and
+    passes 16 randomized seed runs, exact same-seed replay, different-seed trace
+    separation, and an eight-seed disposition-coverage matrix. Complete fresh
+    standalone, policy, provenance, legacy-exclusion, formatting, and diff
+    verification remain required before the implementation commit.
+  - Owner review: no new decision approval is required because this slice is
+    test-only and exercises accepted behavior. Implementation-demo acceptance
+    remains pending.
+  - Follow-ups: run the applicable local matrix, record the implementation
+    commit and exact evidence, then present seeded replay and invariant coverage
+    for owner acceptance before Phase 5 exit-gate execution.
 
 ### Phase 6 — Maintained transport and secure network session
 

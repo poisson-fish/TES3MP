@@ -258,3 +258,12 @@ retry, short-circuit, or relabel the canonical commit. Closed low-cardinality
 observations describe configured delivery attempts. Server core adds no backend,
 worker, queue, acknowledgement, retry ring, database, script runtime, replay
 format, durability claim, or retention beyond the existing latest publication.
+
+Phase 5 Slice 5.7 adds test-only deterministic property coverage around the
+accepted Phase 5 production surface. A seeded eight-client simulation generates
+bounded mixed valid, stale, duplicate, gap, generation, binding, revision, and
+epoch command streams through the real intake and reducer. After every batch it
+reconstructs canonical invariants, independently tracks per-player effects and
+per-session progress, verifies publication contiguity/completeness and exact
+checksums, and retains an exact integer trace for same-seed replay. The slice
+adds no production harness, API, state, authority, or gameplay rule.

@@ -102,7 +102,7 @@
     {
       "path": "components/tes3mp/CMakeLists.txt",
       "status": "A",
-      "purpose": "Defines the standalone-capable five-library graph, pinned FlatBuffers runtime input, target-scoped safety registration including TSan-compatible allocator-test interposition, sixteen contract executables with golden-corpus verification, and bounded parser fuzz targets."
+      "purpose": "Defines the standalone-capable five-library graph, pinned FlatBuffers runtime input, target-scoped safety registration including TSan-compatible allocator-test interposition, seventeen contract executables with golden-corpus verification, and bounded parser fuzz targets."
     },
     {
       "path": "components/tes3mp/CMakePresets.json",
@@ -605,6 +605,11 @@
       "purpose": "Atomic validation/reduction plus immutable checksummed publication, checked versioning, typed changes, gap recovery, slow-reader isolation, observability, and bounds contracts."
     },
     {
+      "path": "components/tes3mp/tests/server_core_property_tests.cpp",
+      "status": "A",
+      "purpose": "Seed-replayable randomized eight-client intake/reducer simulations covering canonical invariants, isolation, dispositions, publication ordering, exact bytes, and checksums."
+    },
+    {
       "path": "components/tes3mp/tests/server_core_safety_tests.cpp",
       "status": "A",
       "purpose": "Approved Slice 5.5 idempotency horizon, duplicate finalization, epoch, exact-byte, CRC-64, field-sensitivity, observability-independence, resync, and composition-boundary contracts."
@@ -1056,7 +1061,7 @@
         },
         {
           "path": "components/tes3mp/CMakeLists.txt",
-          "sha256": "8d84fa29a1f1f4efc020f77a1329d68b4b90c9553239a4bbed812d2eb281ad22"
+          "sha256": "6fdc0905f5d2d6381a7eb2286ce30a0cc6a364c1fc46880a4559c3977250904d"
         },
         {
           "path": "components/tes3mp/protocol/generated/client_hello_generated.h",
