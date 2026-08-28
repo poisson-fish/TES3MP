@@ -95,6 +95,7 @@ add_library(TES3MP::ServerCore ALIAS tes3mp_server_core)
 target_link_libraries(tes3mp_server_core PUBLIC tes3mp_protocol)
 target_sources(tes3mp_server_core PRIVATE
     include/tes3mp/authentication.hpp
+    include/tes3mp/canonical_state.hpp
     include/tes3mp/deterministic_random.hpp
     include/tes3mp/fixed_tick_scheduler.hpp
     include/tes3mp/monotonic_clock.hpp
@@ -102,6 +103,7 @@ target_sources(tes3mp_server_core PRIVATE
     include/tes3mp/server_command_intake.hpp
     include/tes3mp/server_session.hpp
     server_core/authentication.cpp
+    server_core/canonical_state.cpp
     server_core/deterministic_random.cpp
     server_core/fixed_tick_scheduler.cpp
     server_core/observability.cpp
@@ -303,6 +305,16 @@ tes3mp_verify_target_dependencies(tes3mp_server_command_intake_tests ALLOWED tes
 tes3mp_verify_target_includes(tes3mp_server_command_intake_tests
     FORBIDDEN ${TES3MP_ENGINE_INDEPENDENT_FORBIDDEN_INCLUDES})
 
+add_executable(tes3mp_canonical_state_tests tests/canonical_state_tests.cpp)
+target_compile_features(tes3mp_canonical_state_tests PRIVATE cxx_std_20)
+target_link_libraries(tes3mp_canonical_state_tests PRIVATE tes3mp_test_support)
+set_target_properties(tes3mp_canonical_state_tests PROPERTIES FOLDER "TES3MP/Tests")
+tes3mp_enable_runtime_safety(tes3mp_canonical_state_tests)
+
+tes3mp_verify_target_dependencies(tes3mp_canonical_state_tests ALLOWED tes3mp_test_support)
+tes3mp_verify_target_includes(tes3mp_canonical_state_tests
+    FORBIDDEN ${TES3MP_ENGINE_INDEPENDENT_FORBIDDEN_INCLUDES})
+
 if(TES3MP_BUILD_FUZZERS)
     add_executable(tes3mp_spatial_round_trip_fuzz tests/fuzz/spatial_round_trip_fuzz.cpp)
     target_compile_features(tes3mp_spatial_round_trip_fuzz PRIVATE cxx_std_20)
@@ -364,6 +376,7 @@ add_custom_target(tes3mp_protocol_tests_run
     COMMAND $<TARGET_FILE:tes3mp_fault_injection_tests>
     COMMAND $<TARGET_FILE:tes3mp_observability_tests>
     COMMAND $<TARGET_FILE:tes3mp_server_command_intake_tests>
+    COMMAND $<TARGET_FILE:tes3mp_canonical_state_tests>
     DEPENDS
         tes3mp_protocol_tests
         tes3mp_protocol_envelope_tests
@@ -377,5 +390,6 @@ add_custom_target(tes3mp_protocol_tests_run
         tes3mp_fault_injection_tests
         tes3mp_observability_tests
         tes3mp_server_command_intake_tests
+        tes3mp_canonical_state_tests
     COMMENT "Running TES3MP protocol, deterministic facility, fault, and observability contracts"
 )

@@ -336,7 +336,7 @@ runtime or protocol name.
 | ADR-0024 | Reliable-operation and latest-wins envelope contract | Phase 4 | **Implemented** |
 | ADR-0025 | Minimal player command, world-snapshot roots, session guards, and in-memory exchange | Phase 4 | **Implemented** |
 | ADR-0026 | Phase 5 writer command intake, ordering, limits, and overload policy | Phase 5 | **Implemented** |
-| ADR-0027 | Phase 5 canonical player/session state, scope, invariants, and bounds | Phase 5 | **Proposed** |
+| ADR-0027 | Phase 5 canonical player/session state, scope, invariants, and bounds | Phase 5 | **Implemented** |
 
 An ADR is complete only when it records considered alternatives, selection
 criteria, consequences, failure modes, a replacement/review trigger, and
@@ -2977,7 +2977,7 @@ Depends on: Phase 4.
 | Slice | Deliverable | Status | Completion evidence |
 |---|---|---|---|
 | 5.1 | Implement fixed-tick scheduling, bounded per-tick command intake, and deterministic ordering | **Implemented** | Accepted [`ADR-0026`](adr/ADR-0026-phase5-writer-command-intake-and-ordering.md), implementation `e0dde571f5`, applicable local verification, and owner demo acceptance pass |
-| 5.2 | Implement minimal player/session/cell/root-transform/velocity/ack canonical state | **In Progress** | Proposed [`ADR-0027`](adr/ADR-0027-phase5-canonical-player-and-session-state.md) decision packet is ready for owner review; production state remains approval-gated |
+| 5.2 | Implement minimal player/session/cell/root-transform/velocity/ack canonical state | **In Progress** | Accepted [`ADR-0027`](adr/ADR-0027-phase5-canonical-player-and-session-state.md), implementation and local contract verification; owner implementation-demo acceptance pending |
 | 5.3 | Implement command validation and atomic reducer application | **Not Started** | Invalid, stale, duplicate, and over-budget commands cause no partial state mutation |
 | 5.4 | Publish immutable snapshots and versioned state-change events | **Not Started** | Readers cannot mutate canonical state and slow readers cannot block the writer indefinitely |
 | 5.5 | Add idempotency windows, authority-epoch checks, state checksums, and explicit resync requests | **Not Started** | Duplicate/stale/epoch mismatch and divergence-repair tests pass |
@@ -3113,6 +3113,43 @@ Implementation notes:
     the chosen options, then implement only the approved Slice 5.2 state values,
     invariant checks, immutable access, observability, and tests. Slice 5.3
     remains gated.
+
+- 2026-08-27 — Slice 5.2 — In Progress
+  - Change: recorded owner approval of
+    [`ADR-0027`](adr/ADR-0027-phase5-canonical-player-and-session-state.md)
+    Option A for Decisions 1–5 and the presented acceptance tests. Added
+    immutable player-entity and active-session-progress values, hard 256/256
+    construction limits, strict stable ordering, unique identity and explicit
+    binding checks, const spans and binary-search lookups, and a pure checked
+    atomic spatial-advance operation. No general mutation or online install
+    path exists.
+  - Decisions: player spatial state remains distinct from active-session
+    generation and contiguous-finalized acknowledgement progress. One entity
+    revision covers cell/root transform and velocity; same-tick advances may
+    increment it independently, while tick regression and exhaustion return
+    typed errors. Identity and authority epoch cannot change through the
+    operation. Lifecycle, persistence, reducer, command disposition,
+    acknowledgement advancement, publication, movement, and gameplay remain
+    gated.
+  - Verification: a clean standalone MSVC 19.44 C++20 configure and 54-step
+    build pass all 13 contract executables and three golden-corpus checks,
+    including the 12 named Slice 5.2 scope, binding, ordering, bounds, revision,
+    failure-preservation, acknowledgement, immutability, and dependency-
+    isolation scenarios. `python -m unittest discover -s scripts/tests -v`
+    passes all 98 repository-owned tests. Staged baseline provenance accounts
+    for 178 intentional differences and 54 dependency inputs; staged legacy
+    exclusion checks 3,872 tracked paths, 59 CMake files, 1,254 compile commands,
+    and 1,971 Ninja edges. All three new C++ files pass formatting; the
+    provenance JSON parses, all 88 local vNext Markdown links resolve, the new
+    public header contains no wire/generated/OpenMW/socket/platform/script/
+    database surface, and staged diff checks pass. FlatBuffers regeneration and
+    fuzz verification are not applicable because this slice changes no schema
+    or decoder.
+  - Owner review: architecture approval is complete. Implementation-demo
+    acceptance remains pending, so Slice 5.2 stays **In Progress**.
+  - Follow-ups: complete the repository gates, publish the implementation
+    commit, and present the stable-order/binding/boundary/revision demo for
+    owner acceptance. Slice 5.3 remains gated.
 
 ### Phase 6 — Maintained transport and secure network session
 

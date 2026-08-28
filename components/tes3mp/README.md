@@ -195,3 +195,16 @@ or early stamps. Scheduler and ordinal exhaustion fail closed without publishing
 a partial batch. This slice deliberately adds no canonical store, command
 validation, deduplication, reducer, acknowledgement, disconnect action, or
 gameplay behavior.
+
+Phase 5 Slice 5.2 accepts ADR-0027 and adds one immutable canonical server-state
+value with separately scoped player-entity and active-session-progress
+partitions. Complete inputs must be strictly identity-ordered, remain within
+hard 256/256 limits, use unique player/entity/session identities, and carry
+explicit one-to-one active bindings before owned vectors are constructed.
+Const spans and binary-search lookups expose no general mutation path. A pure
+checked operation atomically replaces cell/root transform and velocity under
+one incremented entity revision while preserving identity and authority epoch;
+tick regression and revision exhaustion return typed errors. Session-generation
+acknowledgement is optional contiguous-finalized disposition progress only.
+Lifecycle, persistence, reducers, acknowledgement advancement, publication,
+movement, interest, resync, and gameplay remain later gated work.

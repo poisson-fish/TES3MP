@@ -1,10 +1,10 @@
 # ADR-0027: Phase 5 canonical player and session state
 
-Status: **Proposed**
+Status: **Accepted**
 
 Date opened: 2026-08-27
 
-Date approved: pending
+Date approved: 2026-08-27
 
 Decision owner: project owner
 
@@ -28,8 +28,7 @@ interest, resynchronization, or gameplay presentation.
 
 ## Decision summary
 
-No option is accepted yet. The recommendation is Option A for Decisions 1
-through 5:
+The project owner approved Option A for Decisions 1 through 5 on 2026-08-27:
 
 1. use separate writer-owned player-entity and active-session-progress
    partitions, with per-player canonical spatial scope and explicitly
@@ -106,7 +105,7 @@ through 5:
 
 ## Decision 1: state partitions, scope, and lifetime
 
-### Option A: separate player-entity and active-session partitions (recommended)
+### Option A: separate player-entity and active-session partitions (approved)
 
 Define one owned `CanonicalServerState` with two explicit partitions:
 
@@ -140,7 +139,7 @@ with stable player/entity identity and explicit lifetime rules.
 
 ## Decision 2: identity indexing, ordering, binding, and bounds
 
-### Option A: sorted owned vectors with 256/256 hard ceilings (recommended)
+### Option A: sorted owned vectors with 256/256 hard ceilings (approved)
 
 Own at most 256 player records strictly sorted by `PlayerId` and at most 256
 active-session records strictly sorted by `SessionId`. Lookups use deterministic
@@ -177,7 +176,7 @@ cross-platform behavior depends on more hidden discipline.
 
 ## Decision 3: spatial revision, tick, and authority-epoch invariants
 
-### Option A: one atomic spatial revision and checked value advance (recommended)
+### Option A: one atomic spatial revision and checked value advance (approved)
 
 One `EntityRevision` covers the complete cell/root transform and linear velocity
 tuple for one player entity. Store the `ServerTick` of its latest committed
@@ -212,7 +211,7 @@ session acknowledgements accidental world-state significance.
 
 ## Decision 4: construction and mutation surface
 
-### Option A: validate complete input, then own immutable values (recommended)
+### Option A: validate complete input, then own immutable values (approved)
 
 Expose a fallible factory taking bounded spans of player and session values.
 Before allocating/copying owned vectors, validate count ceilings and required
@@ -241,7 +240,7 @@ store format and risks accepting client/network state as server authority.
 
 ## Decision 5: active-session binding and acknowledgement meaning
 
-### Option A: explicit binding plus optional disposition progress (recommended)
+### Option A: explicit binding plus optional disposition progress (approved)
 
 Each active-session record contains `SessionId`, `SessionGeneration`, explicit
 `PlayerId`, explicit `EntityId`, and optional `CommandSequence` representing the
@@ -268,10 +267,9 @@ This gives the field a simple success meaning, but breaks the accepted
 highest-contiguous-finalized contract: a rejected command would leave a
 permanent gap and reliable retry/idempotency state could not advance cleanly.
 
-## Proposed acceptance tests and demo
+## Approved acceptance tests and demo
 
-Subject to owner approval or amendment, Slice 5.2 should add tests named for
-these contracts:
+Slice 5.2 adds tests named for these approved contracts:
 
 1. `player_entity_and_active_session_state_have_distinct_scope_and_lifetime`
 2. `player_may_exist_without_session_but_session_requires_matching_player_entity`
@@ -294,7 +292,7 @@ the original value, and an acknowledgement change that leaves player spatial
 state and revision unchanged. Header/dependency evidence should show no mutable
 view, protocol root, generated code, OpenMW, socket, script, or database type.
 
-## Consequences if the recommendation is approved
+## Consequences
 
 - The server gains one deterministic owned state value with explicit player and
   active-session partitions before a mutation path exists.
@@ -346,5 +344,12 @@ Reopen this ADR if:
 
 ## Owner approval
 
-Pending explicit owner approval or amendment of Decisions 1 through 5 and the
-proposed acceptance tests. Slice 5.2 production implementation remains gated.
+Approved by the project owner in the 2026-08-27 working session: Option A for
+Decisions 1 through 5 and the presented acceptance tests.
+
+This approval authorizes Slice 5.2 immutable canonical player/session values,
+bounded full-state construction, invariant checks, pure spatial advancement,
+const lookup/iteration, and focused tests only. It does not authorize online
+installation, command validation or disposition, reducer mutation,
+acknowledgement advancement, lifecycle, persistence, cell-transition,
+movement, interest, resync, publication, or gameplay behavior.

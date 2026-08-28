@@ -102,7 +102,7 @@
     {
       "path": "components/tes3mp/CMakeLists.txt",
       "status": "A",
-      "purpose": "Defines the standalone-capable five-library graph, pinned FlatBuffers runtime input, target-scoped safety registration including TSan-compatible allocator-test interposition, twelve contract executables with golden-corpus verification, and bounded parser fuzz targets."
+      "purpose": "Defines the standalone-capable five-library graph, pinned FlatBuffers runtime input, target-scoped safety registration including TSan-compatible allocator-test interposition, thirteen contract executables with golden-corpus verification, and bounded parser fuzz targets."
     },
     {
       "path": "components/tes3mp/CMakePresets.json",
@@ -112,7 +112,7 @@
     {
       "path": "components/tes3mp/README.md",
       "status": "A",
-      "purpose": "Documents the approved target graph, boundary enforcement, implemented Slice 3.1-3.7 scope, observability boundary, and runtime-safety entry points."
+      "purpose": "Documents the approved target graph, boundary enforcement, implemented engine-independent slices, observability boundary, and runtime-safety entry points."
     },
     {
       "path": "components/tes3mp/client_session/anchor.cpp",
@@ -128,6 +128,11 @@
       "path": "components/tes3mp/include/tes3mp/authentication.hpp",
       "status": "A",
       "purpose": "Move-only bounded opaque authentication material and pollable session-owned provider operation boundary."
+    },
+    {
+      "path": "components/tes3mp/include/tes3mp/canonical_state.hpp",
+      "status": "A",
+      "purpose": "Owner-approved immutable canonical player/session state values, hard bounds, closed invariant errors, const access, and checked spatial-advance interface."
     },
     {
       "path": "components/tes3mp/include/tes3mp/client_session.hpp",
@@ -325,6 +330,11 @@
       "purpose": "Bounded authentication-material construction, move transfer, and best-effort storage clearing implementation."
     },
     {
+      "path": "components/tes3mp/server_core/canonical_state.cpp",
+      "status": "A",
+      "purpose": "Full-input canonical-state validation, deterministic owned construction and lookup, and pure atomic spatial revision advancement implementation."
+    },
+    {
       "path": "components/tes3mp/server_core/deterministic_random.cpp",
       "status": "A",
       "purpose": "Pinned unsigned SplitMix64, numeric V1 stream derivation, xoshiro256**, state restore, and rejection-sampling implementation."
@@ -388,6 +398,11 @@
       "path": "components/tes3mp/test_support/spatial_round_trip.cpp",
       "status": "A",
       "purpose": "Bounded little-endian owned-value round-trip implementation used only by Slice 3.3 independent contract tests."
+    },
+    {
+      "path": "components/tes3mp/tests/canonical_state_tests.cpp",
+      "status": "A",
+      "purpose": "Canonical scope, binding, ordering, hard-bound, atomic-revision, failure-preservation, acknowledgement, immutability, and boundary contracts."
     },
     {
       "path": "components/tes3mp/tests/deterministic_facilities_tests.cpp",
@@ -956,7 +971,7 @@
         },
         {
           "path": "components/tes3mp/CMakeLists.txt",
-          "sha256": "219347f4ca6730c828764a5f35d6259e283dc5815ff1f5797f6b204c86e966a4"
+          "sha256": "c87d630bea7994caac0a31267839ec190cc23e31c03c41d3a831ffb6f665a190"
         },
         {
           "path": "components/tes3mp/protocol/generated/client_hello_generated.h",

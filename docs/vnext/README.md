@@ -26,9 +26,10 @@ Phase 4—bounded protocol and in-memory session—is implemented, including its
 complete manually dispatched hosted phase-exit matrix and owner exit approval.
 Phase 5—deterministic authoritative server core—is in progress. Its first
 production slice implements the approved writer intake, ordering, limits, and
-overload policy with accepted owner demo evidence. No canonical player store,
-reducer, production multiplayer runtime, or real transport integration exists
-yet. See the [implementation
+overload policy with accepted owner demo evidence. Slice 5.2 now implements the
+approved immutable, bounded canonical player/session state value and invariant
+checks; its owner implementation demo remains pending. No reducer, production
+multiplayer runtime, or real transport integration exists yet. See the [implementation
 plan](IMPLEMENTATION_PLAN.md) for the live tracker, phase gates, decision
 records, and verification evidence.
 
@@ -159,13 +160,14 @@ verification and owner implementation-demo acceptance pass; canonical state,
 validation/reduction, acknowledgements, and gameplay behavior remain later
 gated work.
 
-Phase 5 Slice 5.2 is in decision review. Proposed
-[`ADR-0027`](adr/ADR-0027-phase5-canonical-player-and-session-state.md) presents
-the player/session state partition, scope/lifetime separation, deterministic
-identity ordering and bounds, spatial revision invariants, immutable
-construction, explicit binding, and acknowledgement options. No production
-canonical store or state behavior is authorized until the project owner
-approves or amends that record.
+Phase 5 Slice 5.2 implements accepted
+[`ADR-0027`](adr/ADR-0027-phase5-canonical-player-and-session-state.md): separate
+immutable player-entity and active-session-progress partitions, deterministic
+identity ordering, 256/256 hard bounds, explicit unique bindings, one checked
+atomic spatial revision, and session-generation-scoped optional
+contiguous-finalized acknowledgement progress. It adds no online state install,
+reducer, lifecycle, persistence, publication, movement, or gameplay behavior;
+owner implementation-demo acceptance remains pending.
 
 ## References and license
 
