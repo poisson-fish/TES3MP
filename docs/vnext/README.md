@@ -36,7 +36,10 @@ transport integration exists yet. Slice 5.4 implements the approved immutable
 latest-publication, checked version, typed domain-change, and reader-gap
 contracts with accepted owner demo evidence. See the [implementation
 plan](IMPLEMENTATION_PLAN.md) for the live tracker, phase gates, decision
-records, and verification evidence.
+records, and verification evidence. Slice 5.5 is now in decision review under
+proposed
+[`ADR-0030`](adr/ADR-0030-phase5-idempotency-checksum-and-resync-boundary.md);
+no dependent production implementation has started.
 
 Beginning with Phase 4, each slice runs applicable local verification. The full
 vNext hosted matrix runs once by manual dispatch against the phase-completion
@@ -189,6 +192,13 @@ for immutable publication ownership, state versioning, complete domain record
 scope, latest-only retention, gap recovery, and slow-reader isolation. Owner
 architecture approval is complete. The implementation and focused contract
 tests pass applicable local verification and owner demo acceptance.
+
+Phase 5 Slice 5.5 has proposed
+[`ADR-0030`](adr/ADR-0030-phase5-idempotency-checksum-and-resync-boundary.md)
+for the bounded per-generation command-ID retry horizon, duplicate finalization,
+canonical byte/checksum contract, explicit server-snapshot resync boundary, and
+remaining online-composition gate. Owner decision is pending; no production
+idempotency, checksum, or resync code is authorized by the proposal.
 
 ## References and license
 

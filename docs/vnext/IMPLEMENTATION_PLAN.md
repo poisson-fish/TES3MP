@@ -339,6 +339,7 @@ runtime or protocol name.
 | ADR-0027 | Phase 5 canonical player/session state, scope, invariants, and bounds | Phase 5 | **Implemented** |
 | ADR-0028 | Phase 5 command validation, disposition, acknowledgement, and atomic reducer boundary | Phase 5 | **Implemented** |
 | ADR-0029 | Phase 5 immutable canonical publication, versioned change feed, retention, and slow-reader policy | Phase 5 | **Implemented** |
+| ADR-0030 | Phase 5 bounded idempotency, canonical checksum, and resync boundary | Phase 5 | **Proposed** |
 
 An ADR is complete only when it records considered alternatives, selection
 criteria, consequences, failure modes, a replacement/review trigger, and
@@ -2983,7 +2984,7 @@ Depends on: Phase 4.
 | 5.2 | Implement minimal player/session/cell/root-transform/velocity/ack canonical state | **Implemented** | Accepted [`ADR-0027`](adr/ADR-0027-phase5-canonical-player-and-session-state.md), implementation `f1a1f0632e`, applicable local verification, and owner demo acceptance pass |
 | 5.3 | Implement command validation and atomic reducer application | **Implemented** | Accepted [`ADR-0028`](adr/ADR-0028-phase5-command-validation-and-atomic-reducer.md) and [`GDR-0012`](gdr/GDR-0012-phase5-minimal-motion-reducer-semantics.md), implementation `f57a4074db`, applicable local verification, and owner demo acceptance pass |
 | 5.4 | Publish immutable snapshots and versioned state-change events | **Implemented** | Accepted [`ADR-0029`](adr/ADR-0029-phase5-immutable-canonical-publication-and-versioned-change-feed.md), implementation `d7e7b25950`, applicable local verification, and owner demo acceptance pass |
-| 5.5 | Add idempotency windows, authority-epoch checks, state checksums, and explicit resync requests | **Not Started** | Duplicate/stale/epoch mismatch and divergence-repair tests pass |
+| 5.5 | Add idempotency windows, authority-epoch checks, state checksums, and explicit resync requests | **In Progress** | Proposed [`ADR-0030`](adr/ADR-0030-phase5-idempotency-checksum-and-resync-boundary.md); owner approval and implementation pending |
 | 5.6 | Add persistence, replay, script, and metrics sink interfaces without implementations | **Not Started** | All sinks receive the same committed change record after, never before, commit |
 | 5.7 | Add reducer property tests and deterministic multi-client simulation tests | **Not Started** | Randomized command streams preserve invariants and reproduce by seed |
 
@@ -3413,6 +3414,37 @@ Implementation notes:
     review of cross-batch command-ID retention and duplicate disposition,
     checksum scope/algorithm/versioning, resync request semantics, and the
     remaining online-composition gate before production safety code lands.
+
+- 2026-08-28 — Slice 5.5 — In Progress
+  - Change: inspected the accepted Phase 5 intake, state, reducer, and immutable
+    publication contracts and added proposed
+    [`ADR-0030`](adr/ADR-0030-phase5-idempotency-checksum-and-resync-boundary.md).
+    The proposal defines five approval-gated decisions and 15 focused acceptance
+    tests; it makes no production-code, protocol-schema, runtime, transport,
+    interest, persistence, or gameplay-behavior change.
+  - Decisions: recommend Option A for a per-active-session-generation immutable
+    1,024-finalization command history; exact-next retained-ID rejection with a
+    final acknowledgement-only disposition and deterministic FIFO eviction;
+    explicit canonical V1 bytes plus CRC-64/ECMA-182 V1; a metadata-only
+    current-session resync request returning the latest immutable publication;
+    and removal of only the named core blocker while real online composition
+    remains gated. No GDR is proposed because the slice changes committed safety
+    state and recovery mechanics without selecting player-visible gameplay,
+    interest, or presentation behavior.
+  - Verification: all 98 repository-owned Python tests pass; staged baseline
+    provenance passes with 187 intentional differences and 54 dependency
+    inputs; staged legacy exclusion passes over 3,881 tracked paths, 59 CMake
+    files, 1,254 compile commands, and 1,971 Ninja build edges; JSON,
+    whitespace, proposal/owner-gate assertions, and all 109 local Markdown links
+    pass. Product build, formatting, schema, and fuzz gates are not applicable
+    because this decision packet changes documentation/provenance only.
+  - Owner review: pending explicit approval or amendment of ADR-0030 Decisions
+    1–5, the 1,024-record bounded retry horizon, CRC-64/ECMA-182 V1 selection,
+    and the proposed acceptance tests.
+  - Follow-ups: do not implement dependent Slice 5.5 production code until the
+    ADR is accepted. After approval, implement only the bounded server-core
+    idempotency, canonical encoding/checksum, resync values, observability, and
+    focused tests; do not add wire, interest, socket, or runtime composition.
 
 ### Phase 6 — Maintained transport and secure network session
 

@@ -745,6 +745,11 @@
       "purpose": "Owner-approved Phase 5 immutable canonical publication ownership, state version, domain change record, latest-retention, gap-recovery, and slow-reader policy decision."
     },
     {
+      "path": "docs/vnext/adr/ADR-0030-phase5-idempotency-checksum-and-resync-boundary.md",
+      "status": "A",
+      "purpose": "Proposed Phase 5 bounded idempotency history, canonical encoding and checksum, explicit server-snapshot resync, and remaining composition-gate decision."
+    },
+    {
       "path": "docs/vnext/gdr/GDR-0011-phase4-minimal-player-exchange-semantics.md",
       "status": "A",
       "purpose": "Owner-approved Phase 4 player-motion intent, authority separation, session-targeted snapshot scope, and confirmed-client-state semantics."
