@@ -3696,6 +3696,41 @@ Implementation notes:
     then obtain explicit owner exit approval before marking Phase 5
     **Implemented** or beginning Phase 6.
 
+- 2026-08-28 — Phase 5 exit gate — In Progress
+  - Change: published phase-completion candidate `076dd2224a1a855d7c85c836dcb224f80e70161e`
+    and manually dispatched all six vNext workflows. The macOS arm64 baseline
+    exposed that Xcode 16's libc++ rejects the otherwise C++20-valid
+    `std::atomic<std::shared_ptr<...>>` specialization. Replaced that private
+    representation with a plain shared pointer accessed only through the
+    standard acquire-load and release-store atomic shared-pointer operations.
+  - Decisions: none. ADR-0029 requires atomic replacement of one immutable
+    latest-publication handle, not a particular standard-library class-template
+    spelling. The repair preserves immutable shared ownership, release/acquire
+    visibility, latest-only retention, reader isolation, publication ordering,
+    and every accepted architecture/state-scope boundary.
+  - Verification: macOS arm64 job `98906119957` in workflow run
+    [`33188061566`](https://github.com/poisson-fish/TES3MP/actions/runs/33188061566)
+    failed while compiling `server_command_reducer.cpp` because Apple libc++
+    instantiated the primary trivially-copyable-only `std::atomic<T>` template
+    for the shared pointer. The still-running Linux, Windows, macOS, and
+    GameNetworkingSockets workflows were cancelled after the candidate became
+    ineligible; completed FlatBuffers run
+    [`33188063579`](https://github.com/poisson-fish/TES3MP/actions/runs/33188063579)
+    and runtime-safety run
+    [`33188068142`](https://github.com/poisson-fish/TES3MP/actions/runs/33188068142)
+    passed but are diagnostic evidence only and will not be mixed with the
+    replacement matrix. After the repair, a fresh MSVC 19.44 C++20 configure
+    and 67-step build pass all 17 C++ contracts and three corpus checks; all 98
+    repository-owned Python tests pass; both changed C++ files pass
+    `clang-format 22.1.3 --dry-run --Werror`; and diff checks pass.
+  - Owner review: no new architecture, authority, state-scope, compatibility,
+    or gameplay decision arose. The full replacement hosted matrix and explicit
+    Phase 5 exit approval remain pending.
+  - Follow-ups: complete indexed provenance, legacy-exclusion, JSON, and link
+    verification; publish the repair candidate; dispatch all six workflows
+    again against that one exact commit; review all declared jobs and retained
+    artifacts; then request explicit Phase 5 exit approval.
+
 ### Phase 6 — Maintained transport and secure network session
 
 Status: **Not Started**

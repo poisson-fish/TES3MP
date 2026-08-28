@@ -113,7 +113,7 @@ namespace TES3MP
         std::shared_ptr<const CanonicalServerState> mState;
         CanonicalStateVersion mStateVersion = CanonicalStateVersion::initial();
         ServerTick mCheckpointTick = ServerTick::initial();
-        std::atomic<std::shared_ptr<const CanonicalStatePublication>> mLatestPublication;
+        std::shared_ptr<const CanonicalStatePublication> mLatestPublication;
         Observability& mObservability;
         CanonicalSinkBundle mSinks;
     };

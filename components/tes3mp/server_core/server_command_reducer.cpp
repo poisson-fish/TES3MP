@@ -176,7 +176,7 @@ namespace TES3MP
 
     std::shared_ptr<const CanonicalStatePublication> CanonicalCommandReducer::latestPublication() const noexcept
     {
-        return mLatestPublication.load(std::memory_order_acquire);
+        return std::atomic_load_explicit(&mLatestPublication, std::memory_order_acquire);
     }
 
     CanonicalSinkDeliveryReport CanonicalCommandReducer::publish(
@@ -189,7 +189,7 @@ namespace TES3MP
         publication->mState = mState;
         publication->mChecksum = canonicalStateChecksumV1(mStateVersion, mCheckpointTick, *mState);
         std::shared_ptr<const CanonicalStatePublication> committed = std::move(publication);
-        mLatestPublication.store(committed, std::memory_order_release);
+        std::atomic_store_explicit(&mLatestPublication, committed, std::memory_order_release);
         return deliver(committed);
     }
 
