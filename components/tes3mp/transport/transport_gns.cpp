@@ -1,10 +1,12 @@
 #include "tes3mp/transport_gns.hpp"
+#include "transport_gns_detail.hpp"
 
 #include <algorithm>
 #include <array>
 #include <chrono>
 #include <cstdint>
 #include <deque>
+#include <limits>
 #include <map>
 #include <memory>
 #include <set>
@@ -32,16 +34,14 @@
 
 namespace
 {
-    using namespace std::chrono_literals;
+    using NumericAddress = TES3MP::Detail::NumericAddress;
+    using NumericAddressFamily = TES3MP::Detail::NumericAddressFamily;
 
-    constexpr auto kCandidateStagger = 250ms;
-    [[maybe_unused]] constexpr auto kIpv6PreferenceDelay = 50ms;
-
-    struct NumericAddress
+    TES3MP::Detail::HappyEyeballsAttempt::TimePoint monotonicNow()
     {
-        std::string host;
-        std::uint16_t port = 0;
-    };
+        return std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now().time_since_epoch());
+    }
 
 #ifdef _WIN32
     using NativeSocket = SOCKET;
@@ -109,12 +109,14 @@ namespace
     class Resolver
     {
     public:
-        using Completion = void (*)(void*, int, std::vector<NumericAddress>);
+        using Completion = void (*)(void*, int, std::vector<NumericAddress>, bool);
 
         Resolver(void* context, Completion completion)
             : mContext(context)
             , mCompletion(completion)
         {
+            mIpv4 = { this, AF_INET };
+            mIpv6 = { this, AF_INET6 };
             ares_options options{};
             options.flags = ARES_FLAG_NOSEARCH;
             options.qcache_max_ttl = 0;
@@ -139,12 +141,8 @@ namespace
         {
             mHost = endpoint.host();
             mService = std::to_string(endpoint.port());
-            ares_addrinfo_hints hints{};
-            hints.ai_family = AF_UNSPEC;
-            hints.ai_socktype = SOCK_DGRAM;
-            hints.ai_protocol = IPPROTO_UDP;
-            hints.ai_flags = ARES_AI_NUMERICSERV;
-            ares_getaddrinfo(mChannel, mHost.c_str(), mService.c_str(), &hints, &Resolver::addressComplete, this);
+            startFamily(mIpv6);
+            startFamily(mIpv4);
         }
 
         void cancel()
@@ -190,12 +188,30 @@ namespace
                         ready.push_back({ socket, observed });
                 }
             }
-            return ares_process_fds(mChannel, ready.empty() ? nullptr : ready.data(), ready.size(),
-                       ARES_PROCESS_FLAG_NONE)
+            return ares_process_fds(
+                       mChannel, ready.empty() ? nullptr : ready.data(), ready.size(), ARES_PROCESS_FLAG_NONE)
                 == ARES_SUCCESS;
         }
 
     private:
+        struct Query
+        {
+            Resolver* owner = nullptr;
+            int family = AF_UNSPEC;
+            int status = ARES_EDESTRUCTION;
+            bool completed = false;
+        };
+
+        void startFamily(Query& query)
+        {
+            ares_addrinfo_hints hints{};
+            hints.ai_family = query.family;
+            hints.ai_socktype = SOCK_DGRAM;
+            hints.ai_protocol = IPPROTO_UDP;
+            hints.ai_flags = ARES_AI_NUMERICSERV;
+            ares_getaddrinfo(mChannel, mHost.c_str(), mService.c_str(), &hints, &Resolver::addressComplete, &query);
+        }
+
         static void socketStateChanged(void* data, ares_socket_t socket, int readable, int writable)
         {
             auto& self = *static_cast<Resolver*>(data);
@@ -212,18 +228,20 @@ namespace
 
         static void addressComplete(void* data, int status, int, ares_addrinfo* info)
         {
-            auto& self = *static_cast<Resolver*>(data);
+            auto& query = *static_cast<Query*>(data);
+            Resolver& self = *query.owner;
             std::vector<NumericAddress> addresses;
             std::set<std::string> unique;
             if (status == ARES_SUCCESS && info != nullptr)
             {
                 for (ares_addrinfo_node* node = info->nodes;
-                     node != nullptr && addresses.size() < TES3MP::TransportLimits::MaxResolvedAddresses;
-                     node = node->ai_next)
+                    node != nullptr && addresses.size() < TES3MP::TransportLimits::MaxResolvedAddresses;
+                    node = node->ai_next)
                 {
                     std::array<char, INET6_ADDRSTRLEN> text{};
                     const void* raw = nullptr;
                     std::uint16_t port = 0;
+                    NumericAddressFamily family = NumericAddressFamily::Ipv4;
                     if (node->ai_family == AF_INET)
                     {
                         const auto* address = reinterpret_cast<const sockaddr_in*>(node->ai_addr);
@@ -235,21 +253,39 @@ namespace
                         const auto* address = reinterpret_cast<const sockaddr_in6*>(node->ai_addr);
                         raw = &address->sin6_addr;
                         port = ntohs(address->sin6_port);
+                        family = NumericAddressFamily::Ipv6;
                     }
                     if (raw == nullptr
-                        || ares_inet_ntop(node->ai_family, raw, text.data(),
-                               static_cast<ares_socklen_t>(text.size()))
+                        || ares_inet_ntop(node->ai_family, raw, text.data(), static_cast<ares_socklen_t>(text.size()))
                             == nullptr)
                         continue;
                     std::string key(text.data());
                     if (unique.insert(key).second)
-                        addresses.push_back({ std::move(key), port });
+                        addresses.push_back({ std::move(key), port, family });
                 }
             }
             if (info != nullptr)
                 ares_freeaddrinfo(info);
-            self.mCompleted = true;
-            self.mCompletion(self.mContext, status, std::move(addresses));
+            query.status = status;
+            query.completed = true;
+            self.mAnyAddress |= !addresses.empty();
+            self.mCompleted = self.mIpv4.completed && self.mIpv6.completed;
+            if (!self.mCompleted)
+            {
+                if (!addresses.empty())
+                    self.mCompletion(self.mContext, ARES_SUCCESS, std::move(addresses), false);
+                return;
+            }
+
+            int finalStatus = ARES_SUCCESS;
+            if (!self.mAnyAddress)
+            {
+                const auto noData = [](int value) { return value == ARES_ENODATA || value == ARES_ENOTFOUND; };
+                finalStatus = noData(self.mIpv4.status) && noData(self.mIpv6.status) ? ARES_ENODATA
+                    : !noData(self.mIpv6.status)                                     ? self.mIpv6.status
+                                                                                     : self.mIpv4.status;
+            }
+            self.mCompletion(self.mContext, finalStatus, std::move(addresses), true);
         }
 
         void* mContext = nullptr;
@@ -258,8 +294,11 @@ namespace
         std::map<ares_socket_t, unsigned int> mSockets;
         std::string mHost;
         std::string mService;
+        Query mIpv4;
+        Query mIpv6;
         bool mValid = false;
         bool mCompleted = false;
+        bool mAnyAddress = false;
     };
 
     class GameNetworkingSocketsRuntime final : public TES3MP::TransportRuntime
@@ -302,8 +341,7 @@ namespace
         bool valid() const noexcept { return mValid; }
         TES3MP::TransportFactoryFailure factoryFailure() const noexcept { return mFactoryFailure; }
 
-        TES3MP::TransportAdmission<TES3MP::ListenerId> startListener(
-            const TES3MP::ListenerEndpoint& endpoint) override
+        TES3MP::TransportAdmission<TES3MP::ListenerId> startListener(const TES3MP::ListenerEndpoint& endpoint) override
         {
             if (!available())
                 return { TES3MP::TransportResult::RuntimeFailed, std::nullopt };
@@ -312,6 +350,9 @@ namespace
             const auto id = allocate(mNextListener);
             if (!id)
                 return exhausted<TES3MP::ListenerId>();
+            const auto generation = allocateCallbackGeneration();
+            if (!generation)
+                return { TES3MP::TransportResult::CounterExhausted, std::nullopt };
 
             SteamNetworkingIPAddr address;
             address.Clear();
@@ -322,7 +363,11 @@ namespace
             if (!selectedPort)
                 return { TES3MP::TransportResult::RuntimeFailed, std::nullopt };
             address.m_port = *selectedPort;
-            const HSteamListenSocket handle = sockets()->CreateListenSocketIP(address, 0, nullptr);
+            std::array<SteamNetworkingConfigValue_t, 2> options;
+            options[0].SetInt32(k_ESteamNetworkingConfig_Unencrypted, 0);
+            options[1].SetInt64(k_ESteamNetworkingConfig_ConnectionUserData, static_cast<std::int64_t>(*generation));
+            const HSteamListenSocket handle
+                = sockets()->CreateListenSocketIP(address, static_cast<int>(options.size()), options.data());
             if (handle == k_HSteamListenSocket_Invalid)
                 return { TES3MP::TransportResult::RuntimeFailed, std::nullopt };
             if (!sockets()->GetListenSocketAddress(handle, &address))
@@ -339,10 +384,15 @@ namespace
                 sockets()->CloseListenSocket(handle);
                 return { TES3MP::TransportResult::RuntimeFailed, std::nullopt };
             }
-            mListenerHandles.emplace(handle, *id);
-            mListeners.emplace(*id, Listener{ handle, *bound });
-            if (!queue({ TES3MP::TransportEventKind::ListenerStarted, TES3MP::TransportFailure::None, *id,
-                    std::nullopt, std::nullopt, *bound }))
+            if (!mListenerHandles.bind(handle, *id, *generation))
+            {
+                sockets()->CloseListenSocket(handle);
+                failRuntime(TES3MP::TransportFailure::DependencyFailure);
+                return { TES3MP::TransportResult::RuntimeFailed, std::nullopt };
+            }
+            mListeners.emplace(*id, Listener{ handle, *bound, *generation });
+            if (!queue({ TES3MP::TransportEventKind::ListenerStarted, TES3MP::TransportFailure::None, *id, std::nullopt,
+                    std::nullopt, *bound }))
                 return { TES3MP::TransportResult::RuntimeFailed, std::nullopt };
             return { TES3MP::TransportResult::Accepted, *id };
         }
@@ -368,8 +418,7 @@ namespace
             for (const auto connection : pending)
                 closeIncomingPending(connection, TES3MP::TransportFailure::LocalClose);
 
-            if (!queue(
-                    { TES3MP::TransportEventKind::ListenerStopped, TES3MP::TransportFailure::LocalClose, listener }))
+            if (!queue({ TES3MP::TransportEventKind::ListenerStopped, TES3MP::TransportFailure::LocalClose, listener }))
                 return TES3MP::TransportResult::RuntimeFailed;
             return TES3MP::TransportResult::Accepted;
         }
@@ -397,8 +446,11 @@ namespace
             }
             else
             {
-                attempt->resolutionDone = true;
-                attempt->addresses.push_back({ endpoint.host(), endpoint.port() });
+                const NumericAddress address{ endpoint.host(), endpoint.port(),
+                    endpoint.hostKind() == TES3MP::EndpointHostKind::Ipv6 ? NumericAddressFamily::Ipv6
+                                                                          : NumericAddressFamily::Ipv4 };
+                attempt->race.addResolution(std::span<const NumericAddress>(&address, 1),
+                    TES3MP::Detail::ResolutionCompletion::Success, monotonicNow());
             }
             mAttempts.emplace(*id, std::move(attempt));
             if (!endpoint.requiresDns())
@@ -416,6 +468,7 @@ namespace
             found->second->cancelled = true;
             if (found->second->resolver)
                 found->second->resolver->cancel();
+            found->second->race.cancel();
             closeCandidates(*found->second);
             if (!queue({ TES3MP::TransportEventKind::ConnectCancelled, TES3MP::TransportFailure::LocalClose,
                     std::nullopt, attempt }))
@@ -497,9 +550,10 @@ namespace
                 mAttempts.erase(found);
                 if (attempt->resolver)
                     attempt->resolver->cancel();
+                attempt->race.cancel();
                 closeCandidates(*attempt);
-                queue({ TES3MP::TransportEventKind::ConnectCancelled, TES3MP::TransportFailure::Shutdown,
-                    std::nullopt, attempt->id });
+                queue({ TES3MP::TransportEventKind::ConnectCancelled, TES3MP::TransportFailure::Shutdown, std::nullopt,
+                    attempt->id });
                 if (mFailed)
                     return TES3MP::TransportResult::RuntimeFailed;
             }
@@ -512,8 +566,8 @@ namespace
                 sockets()->CloseConnection(connection.handle, 0, nullptr, false);
                 mConnectionHandles.erase(connection.handle);
                 mIncomingListeners.erase(id);
-                queue({ TES3MP::TransportEventKind::ConnectionClosed, TES3MP::TransportFailure::Shutdown,
-                    std::nullopt, std::nullopt, id });
+                queue({ TES3MP::TransportEventKind::ConnectionClosed, TES3MP::TransportFailure::Shutdown, std::nullopt,
+                    std::nullopt, id });
                 if (mFailed)
                     return TES3MP::TransportResult::RuntimeFailed;
             }
@@ -537,19 +591,23 @@ namespace
         {
             HSteamListenSocket handle = k_HSteamListenSocket_Invalid;
             TES3MP::ListenerEndpoint endpoint;
+            std::uint64_t generation = 0;
         };
 
         struct Attempt
         {
+            struct Candidate
+            {
+                HSteamNetConnection handle = k_HSteamNetConnection_Invalid;
+                std::uint64_t ordinal = 0;
+                std::uint64_t generation = 0;
+            };
+
             TES3MP::ConnectAttemptId id = TES3MP::ConnectAttemptId::initial();
             TES3MP::ConnectionEndpoint endpoint = *TES3MP::ConnectionEndpoint::create("127.0.0.1", 1);
             std::unique_ptr<Resolver> resolver;
-            std::vector<NumericAddress> addresses;
-            std::vector<HSteamNetConnection> candidates;
-            std::size_t nextAddress = 0;
-            std::chrono::steady_clock::time_point lastLaunch{};
-            bool resolutionDone = false;
-            int resolutionStatus = ARES_SUCCESS;
+            TES3MP::Detail::HappyEyeballsAttempt race;
+            std::vector<Candidate> candidates;
             bool cancelled = false;
         };
 
@@ -557,11 +615,30 @@ namespace
         {
             HSteamNetConnection handle = k_HSteamNetConnection_Invalid;
             bool incomingPending = false;
+            std::uint64_t generation = 0;
         };
 
         static ISteamNetworkingSockets* sockets() { return SteamNetworkingSockets(); }
 
         bool available() const noexcept { return mValid && !mShutdown && !mFailed; }
+
+        std::optional<std::uint64_t> allocateCallbackGeneration()
+        {
+            const auto generation = mCallbackGenerations.allocate();
+            if (!generation || *generation > static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max()))
+            {
+                failRuntime(TES3MP::TransportFailure::CounterExhausted);
+                return std::nullopt;
+            }
+            return generation;
+        }
+
+        static std::optional<std::uint64_t> callbackGeneration(const SteamNetConnectionInfo_t& info) noexcept
+        {
+            if (info.m_nUserData <= 0)
+                return std::nullopt;
+            return static_cast<std::uint64_t>(info.m_nUserData);
+        }
 
         template <class Id>
         static std::optional<Id> allocate(std::optional<Id>& next)
@@ -627,31 +704,45 @@ namespace
             mEvents.push_back({ TES3MP::TransportEventKind::RuntimeFailed, failure });
         }
 
-        static void resolverComplete(void* context, int status, std::vector<NumericAddress> addresses)
+        static void resolverComplete(void* context, int status, std::vector<NumericAddress> addresses, bool completed)
         {
             auto& attempt = *static_cast<Attempt*>(context);
             if (attempt.cancelled)
                 return;
-            attempt.resolutionDone = true;
-            attempt.resolutionStatus = status;
-            attempt.addresses = std::move(addresses);
+            TES3MP::Detail::ResolutionCompletion completion = TES3MP::Detail::ResolutionCompletion::Pending;
+            if (completed && status == ARES_SUCCESS)
+                completion = TES3MP::Detail::ResolutionCompletion::Success;
+            else if (completed && (status == ARES_ENODATA || status == ARES_ENOTFOUND))
+                completion = TES3MP::Detail::ResolutionCompletion::NoData;
+            else if (completed)
+                completion = TES3MP::Detail::ResolutionCompletion::Failed;
+            attempt.race.addResolution(std::span<const NumericAddress>(addresses), completion, monotonicNow());
         }
 
-        bool startCandidate(Attempt& attempt, const NumericAddress& numeric)
+        bool startCandidate(Attempt& attempt, const TES3MP::Detail::CandidateLaunch& launch)
         {
+            const auto generation = allocateCallbackGeneration();
+            if (!generation)
+                return false;
             SteamNetworkingIPAddr address;
             address.Clear();
-            if (!address.ParseString(numeric.host.c_str()))
+            if (!address.ParseString(launch.address.host.c_str()))
                 return false;
-            address.m_port = numeric.port;
-            SteamNetworkingConfigValue_t encryption;
-            encryption.SetInt32(k_ESteamNetworkingConfig_Unencrypted, 0);
-            const HSteamNetConnection handle = sockets()->ConnectByIPAddress(address, 1, &encryption);
+            address.m_port = launch.address.port;
+            std::array<SteamNetworkingConfigValue_t, 2> options;
+            options[0].SetInt32(k_ESteamNetworkingConfig_Unencrypted, 0);
+            options[1].SetInt64(k_ESteamNetworkingConfig_ConnectionUserData, static_cast<std::int64_t>(*generation));
+            const HSteamNetConnection handle
+                = sockets()->ConnectByIPAddress(address, static_cast<int>(options.size()), options.data());
             if (handle == k_HSteamNetConnection_Invalid)
                 return false;
-            attempt.candidates.push_back(handle);
-            attempt.lastLaunch = std::chrono::steady_clock::now();
-            mCandidateHandles.emplace(handle, attempt.id);
+            if (!mCandidateHandles.bind(handle, attempt.id, *generation))
+            {
+                sockets()->CloseConnection(handle, 0, nullptr, false);
+                failRuntime(TES3MP::TransportFailure::DependencyFailure);
+                return false;
+            }
+            attempt.candidates.push_back({ handle, launch.ordinal, *generation });
             return true;
         }
 
@@ -661,36 +752,34 @@ namespace
             if (found == mAttempts.end())
                 return;
             Attempt& attempt = *found->second;
-            if (!attempt.resolutionDone)
-                return;
-            if (attempt.resolutionStatus != ARES_SUCCESS || attempt.addresses.empty())
+            while (const auto launch = attempt.race.nextLaunch(monotonicNow(), immediate))
             {
-                failAttempt(id, attempt.resolutionStatus == ARES_ENODATA
+                if (startCandidate(attempt, *launch))
+                    break;
+                attempt.race.candidateFailed(launch->ordinal);
+                if (mFailed)
+                    return;
+                immediate = true;
+            }
+            if (attempt.race.shouldFail())
+            {
+                const auto resolution = attempt.race.resolution();
+                failAttempt(id,
+                    resolution == TES3MP::Detail::ResolutionCompletion::NoData
                         ? TES3MP::TransportFailure::ResolutionNoData
-                        : TES3MP::TransportFailure::ResolutionFailed);
-                return;
+                        : resolution == TES3MP::Detail::ResolutionCompletion::Failed
+                        ? TES3MP::TransportFailure::ResolutionFailed
+                        : TES3MP::TransportFailure::ConnectionFailed);
             }
-            const auto now = std::chrono::steady_clock::now();
-            const bool due = attempt.candidates.empty() || immediate
-                || (now - attempt.lastLaunch >= kCandidateStagger);
-            if (due && attempt.candidates.size() < TES3MP::TransportLimits::MaxCandidateHandlesPerAttempt
-                && attempt.nextAddress < attempt.addresses.size())
-            {
-                const NumericAddress& address = attempt.addresses[attempt.nextAddress++];
-                if (!startCandidate(attempt, address))
-                    launchAvailable(id, true);
-            }
-            if (attempt.candidates.empty() && attempt.nextAddress >= attempt.addresses.size())
-                failAttempt(id, TES3MP::TransportFailure::ConnectionFailed);
         }
 
         void closeCandidates(Attempt& attempt, HSteamNetConnection except = k_HSteamNetConnection_Invalid)
         {
-            for (const HSteamNetConnection handle : attempt.candidates)
+            for (const Attempt::Candidate& candidate : attempt.candidates)
             {
-                mCandidateHandles.erase(handle);
-                if (handle != except)
-                    sockets()->CloseConnection(handle, 0, nullptr, false);
+                mCandidateHandles.erase(candidate.handle);
+                if (candidate.handle != except)
+                    sockets()->CloseConnection(candidate.handle, 0, nullptr, false);
             }
             attempt.candidates.clear();
         }
@@ -705,8 +794,7 @@ namespace
             queue({ TES3MP::TransportEventKind::ConnectFailed, failure, std::nullopt, id });
         }
 
-        void closeIncomingPending(
-            TES3MP::TransportConnectionId id, TES3MP::TransportFailure failure)
+        void closeIncomingPending(TES3MP::TransportConnectionId id, TES3MP::TransportFailure failure)
         {
             const auto found = mConnections.find(id);
             if (found == mConnections.end() || !found->second.incomingPending)
@@ -729,20 +817,24 @@ namespace
 
         void statusChanged(const SteamNetConnectionStatusChangedCallback_t& info)
         {
-            const auto candidate = mCandidateHandles.find(info.m_hConn);
-            if (candidate != mCandidateHandles.end())
+            const auto generation = callbackGeneration(info.m_info);
+            if (!generation)
+                return;
+            if (const auto* candidate = mCandidateHandles.find(info.m_hConn, *generation))
             {
-                outgoingStatus(candidate->second, info);
+                outgoingStatus(*candidate, info);
                 return;
             }
-            const auto connection = mConnectionHandles.find(info.m_hConn);
-            if (connection != mConnectionHandles.end())
+            if (const auto* connection = mConnectionHandles.find(info.m_hConn, *generation))
             {
-                connectionStatus(connection->second, info);
+                connectionStatus(*connection, info);
                 return;
             }
             if (info.m_info.m_eState == k_ESteamNetworkingConnectionState_Connecting)
-                incomingStatus(info);
+            {
+                if (const auto* listener = mListenerHandles.find(info.m_info.m_hListenSocket, *generation))
+                    incomingStatus(*listener, *generation, info);
+            }
         }
 
         void outgoingStatus(TES3MP::ConnectAttemptId id, const SteamNetConnectionStatusChangedCallback_t& info)
@@ -764,28 +856,43 @@ namespace
                     failRuntime(TES3MP::TransportFailure::CounterExhausted);
                     return;
                 }
+                const auto winningCandidate = std::ranges::find_if(
+                    attempt.candidates, [&](const Attempt::Candidate& value) { return value.handle == info.m_hConn; });
+                if (winningCandidate == attempt.candidates.end()
+                    || !attempt.race.candidateSucceeded(winningCandidate->ordinal))
+                    return;
+                const std::uint64_t winningGeneration = winningCandidate->generation;
                 closeCandidates(attempt, info.m_hConn);
-                mConnections.emplace(*connection, Connection{ info.m_hConn, false });
-                mConnectionHandles.emplace(info.m_hConn, *connection);
+                mConnections.emplace(*connection, Connection{ info.m_hConn, false, winningGeneration });
+                if (!mConnectionHandles.bind(info.m_hConn, *connection, winningGeneration))
+                {
+                    failRuntime(TES3MP::TransportFailure::DependencyFailure);
+                    return;
+                }
                 mAttempts.erase(found);
-                queue({ TES3MP::TransportEventKind::ConnectSucceeded, TES3MP::TransportFailure::None,
-                    std::nullopt, id, *connection });
+                queue({ TES3MP::TransportEventKind::ConnectSucceeded, TES3MP::TransportFailure::None, std::nullopt, id,
+                    *connection });
                 return;
             }
             if (info.m_info.m_eState == k_ESteamNetworkingConnectionState_ClosedByPeer
                 || info.m_info.m_eState == k_ESteamNetworkingConnectionState_ProblemDetectedLocally)
             {
                 mCandidateHandles.erase(info.m_hConn);
-                std::erase(attempt.candidates, info.m_hConn);
+                const auto failedCandidate = std::ranges::find_if(
+                    attempt.candidates, [&](const Attempt::Candidate& value) { return value.handle == info.m_hConn; });
+                if (failedCandidate == attempt.candidates.end())
+                    return;
+                attempt.race.candidateFailed(failedCandidate->ordinal);
+                attempt.candidates.erase(failedCandidate);
                 sockets()->CloseConnection(info.m_hConn, 0, nullptr, false);
                 launchAvailable(id, true);
             }
         }
 
-        void incomingStatus(const SteamNetConnectionStatusChangedCallback_t& info)
+        void incomingStatus(TES3MP::ListenerId listenerId, std::uint64_t listenerGeneration,
+            const SteamNetConnectionStatusChangedCallback_t& info)
         {
-            const auto listener = mListenerHandles.find(info.m_info.m_hListenSocket);
-            if (listener == mListenerHandles.end() || mIncomingPending + mAttempts.size() >= mLimits.pendingAttempts
+            if (mIncomingPending + mAttempts.size() >= mLimits.pendingAttempts
                 || mConnections.size() >= mLimits.connections)
             {
                 sockets()->CloseConnection(info.m_hConn, 0, "admission-bounded", false);
@@ -797,19 +904,27 @@ namespace
                 failRuntime(TES3MP::TransportFailure::CounterExhausted);
                 return;
             }
+            const auto generation = allocateCallbackGeneration();
+            if (!generation)
+                return;
             if (sockets()->AcceptConnection(info.m_hConn) != k_EResultOK)
             {
                 sockets()->CloseConnection(info.m_hConn, 0, nullptr, false);
                 return;
             }
+            if (!sockets()->SetConnectionUserData(info.m_hConn, static_cast<std::int64_t>(*generation))
+                || !mConnectionHandles.bind(info.m_hConn, *connection, *generation, listenerGeneration))
+            {
+                sockets()->CloseConnection(info.m_hConn, 0, nullptr, false);
+                failRuntime(TES3MP::TransportFailure::DependencyFailure);
+                return;
+            }
             ++mIncomingPending;
-            mConnections.emplace(*connection, Connection{ info.m_hConn, true });
-            mConnectionHandles.emplace(info.m_hConn, *connection);
-            mIncomingListeners.emplace(*connection, listener->second);
+            mConnections.emplace(*connection, Connection{ info.m_hConn, true, *generation });
+            mIncomingListeners.emplace(*connection, listenerId);
         }
 
-        void connectionStatus(
-            TES3MP::TransportConnectionId id, const SteamNetConnectionStatusChangedCallback_t& info)
+        void connectionStatus(TES3MP::TransportConnectionId id, const SteamNetConnectionStatusChangedCallback_t& info)
         {
             auto found = mConnections.find(id);
             if (found == mConnections.end())
@@ -817,12 +932,13 @@ namespace
             if (info.m_info.m_eState == k_ESteamNetworkingConnectionState_Connected && found->second.incomingPending)
             {
                 found->second.incomingPending = false;
+                mConnectionHandles.retireInherited(info.m_hConn);
                 if (mIncomingPending > 0)
                     --mIncomingPending;
                 const auto listener = mIncomingListeners.find(id);
                 queue({ TES3MP::TransportEventKind::ConnectionAccepted, TES3MP::TransportFailure::None,
                     listener == mIncomingListeners.end() ? std::nullopt
-                                                        : std::optional<TES3MP::ListenerId>(listener->second),
+                                                         : std::optional<TES3MP::ListenerId>(listener->second),
                     std::nullopt, id });
                 return;
             }
@@ -846,24 +962,23 @@ namespace
         TES3MP::TransportLimits mLimits;
         std::optional<TES3MP::ListenerId> mNextListener = TES3MP::ListenerId::initial();
         std::optional<TES3MP::ConnectAttemptId> mNextAttempt = TES3MP::ConnectAttemptId::initial();
-        std::optional<TES3MP::TransportConnectionId> mNextConnection
-            = TES3MP::TransportConnectionId::initial();
+        std::optional<TES3MP::TransportConnectionId> mNextConnection = TES3MP::TransportConnectionId::initial();
         std::map<TES3MP::ListenerId, Listener> mListeners;
-        std::map<HSteamListenSocket, TES3MP::ListenerId> mListenerHandles;
+        TES3MP::Detail::GenerationBindingTable<HSteamListenSocket, TES3MP::ListenerId> mListenerHandles;
         std::map<TES3MP::ConnectAttemptId, std::unique_ptr<Attempt>> mAttempts;
-        std::map<HSteamNetConnection, TES3MP::ConnectAttemptId> mCandidateHandles;
+        TES3MP::Detail::GenerationBindingTable<HSteamNetConnection, TES3MP::ConnectAttemptId> mCandidateHandles;
         std::map<TES3MP::TransportConnectionId, Connection> mConnections;
-        std::map<HSteamNetConnection, TES3MP::TransportConnectionId> mConnectionHandles;
+        TES3MP::Detail::GenerationBindingTable<HSteamNetConnection, TES3MP::TransportConnectionId> mConnectionHandles;
         std::map<TES3MP::TransportConnectionId, TES3MP::ListenerId> mIncomingListeners;
         std::deque<TES3MP::TransportEvent> mEvents;
         std::size_t mIncomingPending = 0;
+        TES3MP::Detail::GenerationCounter mCallbackGenerations;
         bool mCaresInitialized = false;
         bool mGnsInitialized = false;
         bool mValid = false;
         bool mShutdown = false;
         bool mFailed = false;
-        TES3MP::TransportFactoryFailure mFactoryFailure
-            = TES3MP::TransportFactoryFailure::DependencyInitialization;
+        TES3MP::TransportFactoryFailure mFactoryFailure = TES3MP::TransportFactoryFailure::DependencyInitialization;
 
         static inline GameNetworkingSocketsRuntime* sActive = nullptr;
     };

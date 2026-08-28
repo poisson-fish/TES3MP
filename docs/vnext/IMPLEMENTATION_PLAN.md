@@ -587,7 +587,7 @@ Depends on: Phase 5.
 
 | Slice | Deliverable | Status | Completion evidence |
 |---|---|---|---|
-| 6.1 | Wrap connection/listen/connect/disconnect/cancellation/lifecycle in an owned transport interface | **In Progress** | Accepted [`ADR-0032`](adr/ADR-0032-phase6-transport-adapter-and-lifecycle-boundary.md); owned lifecycle/endpoint APIs, verified adapter provisioning, and focused MSVC loopback checks pass; deterministic resolver/race and supported-platform evidence remain |
+| 6.1 | Wrap connection/listen/connect/disconnect/cancellation/lifecycle in an owned transport interface | **In Progress** | Accepted [`ADR-0032`](adr/ADR-0032-phase6-transport-adapter-and-lifecycle-boundary.md); owned APIs, verified provisioning, focused MSVC loopback, deterministic resolver/race, stale-generation, bound, and dependency-negative checks pass locally; exact supported-platform/sanitizer lifecycle evidence remains |
 | 6.2 | Map reliable operations and latest-wins snapshots to explicit transport channels | **Not Started** | Loss/reorder tests prove snapshots do not head-of-line block behind operations |
 | 6.3 | Implement required encryption, optional join-password authentication, resume-token handling, and credential redaction per ADR-0005 | **Not Started** | Encryption ordering, unencrypted-mode rejection, password failure/rate-limit, token replay, timeout, and redaction tests pass |
 | 6.4 | Implement bounded queues, priority, rate limits, backpressure, and slow-peer eviction | **Not Started** | Flood/slow-reader tests remain within configured memory/work budgets |

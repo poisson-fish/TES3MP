@@ -60,6 +60,11 @@
       "purpose": "Manually dispatched phase-exit Linux Clang 18 ASan/UBSan/libFuzzer and ThreadSanitizer smoke jobs with retained logs, evidence, and reproducers."
     },
     {
+      "path": ".github/workflows/vnext-transport-lifecycle.yml",
+      "status": "A",
+      "purpose": "Manually dispatched supported desktop compiler, ASan/UBSan, and ThreadSanitizer matrix for the verified Slice 6.1 production adapter and focused lifecycle checks."
+    },
+    {
       "path": "CI/install_debian_deps.sh",
       "status": "M",
       "purpose": "OpenMW Debian dependency groups with the approved Linux compiler majors and Ninja named explicitly."
@@ -107,7 +112,7 @@
     {
       "path": "components/tes3mp/CMakeLists.txt",
       "status": "A",
-      "purpose": "Defines the standalone-capable five-library graph, pinned FlatBuffers runtime input, target-scoped safety registration including TSan-compatible allocator-test interposition, seventeen contract executables with golden-corpus verification, and bounded parser fuzz targets."
+      "purpose": "Defines the standalone-capable owned target graph, pinned FlatBuffers runtime input, opt-in verified GameNetworkingSockets/c-ares adapter leaf, target-scoped safety registration, focused contract executables, golden-corpus verification, and bounded parser fuzz targets."
     },
     {
       "path": "components/tes3mp/CMakePresets.json",
@@ -273,6 +278,16 @@
       "path": "components/tes3mp/include/tes3mp/test_support/spatial_round_trip.hpp",
       "status": "A",
       "purpose": "Test-support-only deterministic spatial snapshot byte round-trip interface; explicitly not a released wire schema."
+    },
+    {
+      "path": "components/tes3mp/include/tes3mp/transport.hpp",
+      "status": "A",
+      "purpose": "Selected-library-free owned endpoint, bounded lifecycle command, opaque identity, closed result, security, failure, and value-event transport interface."
+    },
+    {
+      "path": "components/tes3mp/include/tes3mp/transport_gns.hpp",
+      "status": "A",
+      "purpose": "Selected-library-free factory result and construction surface for the private verified GameNetworkingSockets/c-ares adapter."
     },
     {
       "path": "components/tes3mp/include/tes3mp/value_types.hpp",
@@ -635,9 +650,44 @@
       "purpose": "Independent compile-time and runtime tests for semantic separation, validity, ordering, hashing, formatting, advancement, and exhaustion."
     },
     {
+      "path": "components/tes3mp/tests/transport_gns_schedule_tests.cpp",
+      "status": "A",
+      "purpose": "Deterministic fake-resolution and candidate-race checks for IPv6 preference, staggering, bounds, replay, cancellation, winner finality, handle generations, and exhaustion."
+    },
+    {
+      "path": "components/tes3mp/tests/transport_gns_tests.cpp",
+      "status": "A",
+      "purpose": "Focused verified-adapter loopback, DNS/numeric connection, encryption claim, capacity, cancellation, listener-stop, idempotency, shutdown, and overflow checks."
+    },
+    {
+      "path": "components/tes3mp/tests/transport_lifecycle_tests.cpp",
+      "status": "A",
+      "purpose": "Selected-library-free endpoint validation, listener input, hard-limit, and owned identity contract checks."
+    },
+    {
       "path": "components/tes3mp/transport/anchor.cpp",
       "status": "A",
       "purpose": "Behavior-free translation-unit anchor for the owned transport-abstraction target."
+    },
+    {
+      "path": "components/tes3mp/transport/transport.cpp",
+      "status": "A",
+      "purpose": "Bounded ASCII hostname, numeric address, separate-port, DNS normalization, listener input, and initial transport-limit validation."
+    },
+    {
+      "path": "components/tes3mp/transport/transport_gns.cpp",
+      "status": "A",
+      "purpose": "Private caller-pumped c-ares and encrypted GameNetworkingSockets lifecycle adapter with bounded ownership, DNS, candidate racing, callback generations, and fail-closed events."
+    },
+    {
+      "path": "components/tes3mp/transport/transport_gns_detail.cpp",
+      "status": "A",
+      "purpose": "Selected-library-free bounded Happy Eyeballs scheduling, candidate finalization, and checked adapter callback-generation implementation."
+    },
+    {
+      "path": "components/tes3mp/transport/transport_gns_detail.hpp",
+      "status": "A",
+      "purpose": "Private deterministic address-race, generation counter, and stale-handle binding seam shared by production and focused tests."
     },
     {
       "path": "docs/vnext/BASELINE_PROVENANCE.json",
@@ -930,6 +980,11 @@
       "purpose": "Fail-closed Windows runner, MSVC toolchain, dependency-manifest, package, and license evidence capture."
     },
     {
+      "path": "scripts/provision_vnext_transport.py",
+      "status": "A",
+      "purpose": "Fail-closed production provisioner for the accepted exact GameNetworkingSockets, OpenSSL, Protobuf, Abseil, utf8_range, and c-ares source, install, license, profile, and evidence inputs."
+    },
+    {
       "path": "scripts/run_tes3mp_runtime_safety.py",
       "status": "A",
       "purpose": "Repository-owned fail-closed sanitizer/race/fuzz preset runner with corpus, instrumentation, toolchain, log, and JSON evidence checks."
@@ -1156,7 +1211,7 @@
         },
         {
           "path": "components/tes3mp/CMakeLists.txt",
-          "sha256": "6fdc0905f5d2d6381a7eb2286ce30a0cc6a364c1fc46880a4559c3977250904d"
+          "sha256": "46d71cd153ff099bcf8fcb9d43a7454619340ca58e320f7045b4cefefa3406b7"
         },
         {
           "path": "components/tes3mp/protocol/generated/client_hello_generated.h",

@@ -202,6 +202,8 @@ if(TES3MP_ENABLE_GNS_TRANSPORT)
 
     add_library(tes3mp_transport_gns STATIC
         include/tes3mp/transport_gns.hpp
+        transport/transport_gns_detail.hpp
+        transport/transport_gns_detail.cpp
         transport/transport_gns.cpp
     )
     add_library(TES3MP::GameNetworkingSocketsTransport ALIAS tes3mp_transport_gns)
@@ -220,6 +222,13 @@ if(TES3MP_ENABLE_GNS_TRANSPORT)
     target_link_libraries(tes3mp_transport_gns_tests PRIVATE tes3mp_transport_gns)
     set_target_properties(tes3mp_transport_gns_tests PROPERTIES FOLDER "TES3MP/Tests")
     tes3mp_enable_runtime_safety(tes3mp_transport_gns_tests)
+
+    add_executable(tes3mp_transport_gns_schedule_tests tests/transport_gns_schedule_tests.cpp)
+    target_compile_features(tes3mp_transport_gns_schedule_tests PRIVATE cxx_std_20)
+    target_include_directories(tes3mp_transport_gns_schedule_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
+    target_link_libraries(tes3mp_transport_gns_schedule_tests PRIVATE tes3mp_transport_gns)
+    set_target_properties(tes3mp_transport_gns_schedule_tests PROPERTIES FOLDER "TES3MP/Tests")
+    tes3mp_enable_runtime_safety(tes3mp_transport_gns_schedule_tests)
 endif()
 
 tes3mp_add_engine_independent_library(tes3mp_server_core server_core/anchor.cpp)

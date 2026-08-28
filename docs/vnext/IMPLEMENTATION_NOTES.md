@@ -3455,6 +3455,40 @@ only the relevant phase section here.
     sanitizer/platform acceptance evidence; then present the Slice 6.1
     implementation demo. No Slice 6.2 channel behavior is authorized here.
 
+- 2026-08-28 — Slice 6.1 deterministic lifecycle closure candidate — In Progress
+  - Change: added the selected-library-free deterministic Happy Eyeballs seam
+    used by the production adapter, including the approved 50 ms IPv6
+    preference, 250 ms candidate stagger, eight-address/two-live-candidate
+    limits, immediate failure fallback, cancellation, and single-winner
+    finalization. Added monotonically checked callback generations and exact
+    handle/generation bindings so delayed callbacks cannot target a replacement
+    listener, attempt, or connection. Added same-seed fake-resolution traces,
+    stale-handle and generation-exhaustion checks, public-factory isolation and
+    negative manifest/profile checks, plus a manually dispatched supported
+    desktop lifecycle workflow with ASan/UBSan and TSan jobs.
+  - Decisions: no new architecture, authority, state-scope, or gameplay choice.
+    The work implements ADR-0032's accepted deterministic resolver/race,
+    never-reused private generation, fail-closed provisioning, and focused
+    platform/safety acceptance requirements. It adds no payload channel,
+    authentication/resumption, product queue, telemetry, or gameplay behavior.
+  - Verification: MSVC 19.44 builds
+    `tes3mp_transport_gns_schedule_tests` and `tes3mp_transport_gns_tests`; both
+    focused executables pass with numeric and DNS encrypted loopback scenarios.
+    The exact verified transport provisioner; all three Slice 6.1 lifecycle
+    executables; the full `tes3mp_protocol_tests_run` target; all 111
+    repository-owned Python tests; indexed provenance for 216 intentional
+    differences and 61 dependency inputs; four-file `clang-format --dry-run
+    --Werror`; Python compilation; JSON validation; all 180 local Markdown
+    links across 41 files; and staged whitespace checks pass. The hosted
+    lifecycle run remains pending on the final candidate.
+  - Owner review: the project owner explicitly requested that Slice 6.1 be
+    closed and approved completion work in the 2026-08-28 working session.
+    Implementation-demo acceptance remains contingent on the final exact local
+    and hosted evidence matching the approved scenarios.
+  - Follow-ups: publish the exact candidate, run and review the manual lifecycle
+    matrix, record retained evidence, then mark only Slice 6.1 **Implemented**.
+    Phase 6 remains **In Progress** and Slice 6.2 remains separately gated.
+
 ## Phase 7 — Headless end-to-end multiplayer slice
 
 [Back to the phase tracker](IMPLEMENTATION_PLAN.md#phase-7--headless-end-to-end-multiplayer-slice)

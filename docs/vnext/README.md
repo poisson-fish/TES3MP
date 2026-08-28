@@ -223,16 +223,16 @@ canonical invariants after every batch and exact same-seed replay. Implementatio
 `917ecc3278`, applicable local verification, and owner demo acceptance pass.
 The complete Phase 5 hosted manual matrix passes on exact commit
 `8e7ca8ff607f3b95ec8d348919f6c1233a11eb23`, and the project owner approved the
-exit gate. Phase 5 is **Implemented**; Phase 6 remains **Not Started** pending
-its kickoff and owner review of unresolved transport/session decisions. Proposed
+exit gate. Phase 5 is **Implemented**. Phase 6 and Slice 6.1 are **In Progress**
+under accepted
 [`ADR-0032`](adr/ADR-0032-phase6-transport-adapter-and-lifecycle-boundary.md)
-contains the first Slice 6.1 decision packet. Its target, provisioning,
-lifecycle, pumping, initial-bound, and hostname/DNS architecture options are
-owner-approved. Its authorized exact-pin c-ares proof passes locally and across
-the complete five-job supported desktop matrix on exact candidate `6dcea1b4af`.
-Retained artifacts are consistent, and the project owner accepted the exact
-dependency profile. Phase 6 and Slice 6.1 are **In Progress** under accepted
-[`ADR-0032`](adr/ADR-0032-phase6-transport-adapter-and-lifecycle-boundary.md).
+after owner approval of its target, provisioning, lifecycle, pumping,
+initial-bound, and hostname/DNS decisions. The authorized exact-pin c-ares proof
+passes locally and across the complete five-job supported desktop matrix on
+exact candidate `6dcea1b4af`; retained artifacts are consistent, and the owner
+accepted the dependency profile. The production lifecycle adapter and focused
+deterministic/loopback checks pass locally; Slice 6.1 closure awaits the exact
+supported-platform and sanitizer lifecycle matrix.
 
 ## References and license
 

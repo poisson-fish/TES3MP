@@ -1,5 +1,6 @@
 import ctypes
 import functools
+import json
 import os
 import pathlib
 import shutil
@@ -169,6 +170,58 @@ class TES3MPTargetBoundaryTests(unittest.TestCase):
         )
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
+    def test_transport_factory_header_builds_without_selected_dependencies(self):
+        result = self._run_project(
+            f"""
+            cmake_minimum_required(VERSION 3.16)
+            project(tes3mp_transport_public_header LANGUAGES CXX)
+            add_subdirectory("{ENGINE_INDEPENDENT_SOURCE.as_posix()}" tes3mp)
+            add_executable(transport_header_consumer main.cpp)
+            target_compile_features(transport_header_consumer PRIVATE cxx_std_20)
+            target_link_libraries(transport_header_consumer PRIVATE TES3MP::Transport)
+            """,
+            files={
+                "main.cpp": "#include <tes3mp/transport_gns.hpp>\nint main() { return 0; }\n"
+            },
+            build_target="transport_header_consumer",
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_selected_adapter_fails_closed_without_verified_manifest(self):
+        result = self._run_project(
+            f"""
+            cmake_minimum_required(VERSION 3.24)
+            project(tes3mp_transport_missing_manifest LANGUAGES CXX)
+            set(TES3MP_ENABLE_GNS_TRANSPORT ON CACHE BOOL "")
+            set(TES3MP_TRANSPORT_DEPENDENCY_MANIFEST
+                "${{CMAKE_CURRENT_SOURCE_DIR}}/absent.json" CACHE FILEPATH "")
+            add_subdirectory("{ENGINE_INDEPENDENT_SOURCE.as_posix()}" tes3mp)
+            """,
+        )
+        self.assertNotEqual(result.returncode, 0)
+        output = result.stdout + result.stderr
+        self.assertIn("TES3MP_ENABLE_GNS_TRANSPORT requires", output)
+        self.assertIn("verified transport dependency", output)
+
+    def test_selected_adapter_rejects_unapproved_manifest_profile(self):
+        manifest = {
+            "schema_version": 1,
+            "production_profile": "plaintext-or-system-package-fallback",
+        }
+        result = self._run_project(
+            f"""
+            cmake_minimum_required(VERSION 3.24)
+            project(tes3mp_transport_wrong_profile LANGUAGES CXX)
+            set(TES3MP_ENABLE_GNS_TRANSPORT ON CACHE BOOL "")
+            set(TES3MP_TRANSPORT_DEPENDENCY_MANIFEST
+                "${{CMAKE_CURRENT_SOURCE_DIR}}/manifest.json" CACHE FILEPATH "")
+            add_subdirectory("{ENGINE_INDEPENDENT_SOURCE.as_posix()}" tes3mp)
+            """,
+            files={"manifest.json": json.dumps(manifest)},
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("manifest schema/profile is not approved", result.stdout + result.stderr)
+
     def test_adapter_graph_configures_with_only_approved_leaf_dependencies(self):
         result = self._run_project(
             f"""
@@ -234,6 +287,23 @@ class TES3MPTargetBoundaryTests(unittest.TestCase):
             cmake_text,
         )
         self.assertNotIn("vnext", cmake_text.lower())
+
+    def test_selected_library_includes_are_private_to_adapter_sources(self):
+        public_factory = (
+            ENGINE_INDEPENDENT_SOURCE / "include" / "tes3mp" / "transport_gns.hpp"
+        ).read_text(encoding="utf-8")
+        abstraction = (
+            ENGINE_INDEPENDENT_SOURCE / "include" / "tes3mp" / "transport.hpp"
+        ).read_text(encoding="utf-8")
+        adapter = (
+            ENGINE_INDEPENDENT_SOURCE / "transport" / "transport_gns.cpp"
+        ).read_text(encoding="utf-8")
+        for selected_header in ("<ares.h>", "<steam/isteamnetworkingutils.h>"):
+            self.assertNotIn(selected_header, public_factory)
+            self.assertNotIn(selected_header, abstraction)
+            self.assertIn(selected_header, adapter)
+        self.assertEqual(adapter.count("k_ESteamNetworkingConfig_Unencrypted, 0"), 2)
+        self.assertNotIn("k_ESteamNetworkingConfig_Unencrypted, 1", adapter)
 
     def test_production_target_cannot_include_test_support(self):
         result = self._run_project(
