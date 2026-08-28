@@ -2894,6 +2894,48 @@ Implementation notes:
     correction, rerun all six hosted workflows against that single corrected
     candidate, record exact job evidence, and request Phase 4 exit approval.
 
+- 2026-08-27 — Phase 4 exit gate — Awaiting Owner Approval
+  - Change: committed the TSan contract-harness correction as `3fe7ba2986`,
+    pushed it to `origin/vnext`, and manually dispatched the complete hosted
+    matrix against exact commit
+    `3fe7ba2986209fe519f660e4d670155382462933`. The superseded candidate's three
+    still-running baseline workflows were cancelled after its runtime-safety
+    gate had already failed; none is used as completion evidence.
+  - Decisions: none. ADR-0019 remains accepted without amendment, and no
+    architecture, authority, state-scope, or gameplay-behavior choice changed.
+  - Gate evidence: all six corrected-candidate workflows completed
+    successfully: Linux baseline
+    [`33138536438`](https://github.com/poisson-fish/TES3MP/actions/runs/33138536438),
+    Windows baseline
+    [`33138537847`](https://github.com/poisson-fish/TES3MP/actions/runs/33138537847),
+    macOS baseline
+    [`33138539514`](https://github.com/poisson-fish/TES3MP/actions/runs/33138539514),
+    FlatBuffers proof
+    [`33138541086`](https://github.com/poisson-fish/TES3MP/actions/runs/33138541086),
+    GameNetworkingSockets proof
+    [`33138542487`](https://github.com/poisson-fish/TES3MP/actions/runs/33138542487),
+    and runtime safety
+    [`33138543978`](https://github.com/poisson-fish/TES3MP/actions/runs/33138543978).
+    All 17 jobs passed: Linux GCC 13 and Clang 18; Windows MSVC 2022 v143;
+    macOS arm64 and x86-64 with Xcode 16; all five FlatBuffers proof jobs; all
+    five GameNetworkingSockets proof jobs including Clang 18 ASan/UBSan; and
+    both TES3MP Clang 18 ThreadSanitizer and ASan/UBSan/fuzz jobs.
+  - Verification: all 17 evidence artifacts were retained. Runtime-safety
+    artifact `9673044842` (ASan/UBSan/fuzz) has SHA-256
+    `8b929ddc1d2d6bcf67bb70cc6a8edda7d0aa939a3b9344c355accb54f8d5a7dc`;
+    artifact `9672993368` (ThreadSanitizer) has SHA-256
+    `3bcc2113660e81881c2779a94863e5cbbb4f3a7354f2260752ff4e389ce8ec3b`.
+    The retained local correction evidence is 98 repository-owned Python
+    tests, all eleven MSVC contracts plus three golden-corpus checks,
+    provenance for 170 intentional differences and 54 dependency inputs,
+    legacy exclusion over 3,864 paths, 59 CMake files, 32 compile commands, and
+    91 Ninja edges, formatting, JSON validation, and clean diff checks.
+  - Owner review: the automated Phase 4 exit gate is green. Explicit owner
+    exit approval remains pending, so Phase 4 stays **In Progress** and Phase 5
+    remains **Not Started**.
+  - Follow-ups: obtain explicit Phase 4 exit-gate approval, then mark Phase 4
+    **Implemented** in a status-only closeout before beginning any Phase 5 work.
+
 ### Phase 5 — Deterministic authoritative server core
 
 Status: **Not Started**
