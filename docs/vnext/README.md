@@ -137,14 +137,14 @@ boundaries, adds proportionate tests, records exact evidence, updates statuses,
 and leaves the branch buildable. Hosted vNext workflows are manual phase-exit
 gates; ordinary slice commits must not trigger the full matrix.
 
-Slice 4.5 implements the accepted
+Slice 4.5 is **Implemented** under accepted
 [`ADR-0025`](adr/ADR-0025-minimal-player-command-world-snapshot-exchange.md)
 bounded typed-root, role-specific exchange-guard, and deterministic in-memory
-fake-peer design, while accepted
+fake-peer design and accepted
 [`GDR-0011`](gdr/GDR-0011-phase4-minimal-player-exchange-semantics.md) separately
-defines its narrow player-intent, authority, and session-targeted snapshot
-scope. The implementation is locally verified and remains **In Progress**
-pending the required owner demo acceptance; Slice 4.6 remains gated.
+defined its narrow player-intent, authority, and session-targeted snapshot
+scope. Local verification and the required owner demo acceptance pass. Slice
+4.6 is the next eligible slice and remains **Not Started**.
 
 ## References and license
 

@@ -2408,7 +2408,7 @@ Depends on: Phase 3.
 | 4.2 | Implement `ClientHello`, `ServerHello`, and clear rejection with version/capability negotiation | **Implemented** | Accepted [`ADR-0022`](adr/ADR-0022-version-and-capability-negotiation.md), implementation `e89621e970`, all applicable local verification, and owner demo acceptance pass |
 | 4.3 | Implement the client/server session state machines and authentication-provider interface | **Implemented** | Accepted [`ADR-0023`](adr/ADR-0023-session-state-machines-and-authentication-provider-boundary.md), implementation `edbedbd632`, all applicable local verification, and owner demo acceptance pass |
 | 4.4 | Define reliable-operation and latest-wins snapshot envelopes | **Implemented** | Accepted [`ADR-0024`](adr/ADR-0024-reliable-operation-latest-wins-envelope-contract.md), implementation `ee17ebdd0a`, all applicable local verification, and owner demo acceptance pass |
-| 4.5 | Exchange a minimal player command and world snapshot over the in-memory link | **In Progress** | Accepted [`ADR-0025`](adr/ADR-0025-minimal-player-command-world-snapshot-exchange.md) and [`GDR-0011`](gdr/GDR-0011-phase4-minimal-player-exchange-semantics.md), locally verified implementation, and pending owner demo acceptance |
+| 4.5 | Exchange a minimal player command and world snapshot over the in-memory link | **Implemented** | Accepted [`ADR-0025`](adr/ADR-0025-minimal-player-command-world-snapshot-exchange.md) and [`GDR-0011`](gdr/GDR-0011-phase4-minimal-player-exchange-semantics.md), implementation `077a08da48`, all applicable local verification, and owner demo acceptance pass |
 | 4.6 | Add round-trip, property, golden-schema, mutation, and fuzz coverage | **Not Started** | Every decoder is registered with a corpus and sanitizer-backed fuzz target |
 
 Exit gate:
@@ -2776,6 +2776,23 @@ Implementation notes:
     end-to-end evidence for owner acceptance, then mark Slice 4.5
     **Implemented**. Slice 4.6 remains gated and owns exhaustive property,
     mutation, corpus, and fuzz expansion.
+
+- 2026-08-27 — Slice 4.5 — Implemented
+  - Change: retained implementation commit `077a08da48` without production-code
+    changes and marked Slice 4.5 **Implemented** after the required owner demo
+    acceptance.
+  - Decisions: none. ADR-0025 and GDR-0011 remain accepted without amendment.
+  - Verification: the accepted implementation retains the green eleven-contract
+    fresh MSVC build, exact five-header FlatBuffers regeneration/proof, all 97
+    repository-owned Python tests, provenance evidence for 164 intentional
+    differences and 54 dependency inputs, legacy-exclusion evidence for 3,858
+    tracked paths, 59 CMake files, 32 compile commands, and 91 Ninja edges,
+    formatting, JSON/Python validation, 80 resolved local Markdown links,
+    public-surface isolation, and clean diff checks.
+  - Owner review: implementation-demo evidence explicitly accepted by the
+    project owner in the 2026-08-27 working session.
+  - Follow-ups: none for Slice 4.5. Phase 4 remains **In Progress**; Slice 4.6
+    is the next eligible slice and stays **Not Started** until its work begins.
 
 ### Phase 5 — Deterministic authoritative server core
 
