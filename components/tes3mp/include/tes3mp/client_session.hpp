@@ -2,6 +2,7 @@
 #define TES3MP_CLIENT_SESSION_HPP
 
 #include "monotonic_clock.hpp"
+#include "protocol_exchange.hpp"
 #include "protocol_handshake.hpp"
 #include "session_types.hpp"
 
@@ -102,6 +103,26 @@ namespace TES3MP
         bool accepted() const noexcept { return !error.has_value(); }
     };
 
+    enum class ClientSessionBindingResult : std::uint8_t
+    {
+        Bound,
+        NotEstablished,
+        AlreadyBound,
+    };
+
+    enum class LatestWinsSnapshotReceiveResult : std::uint8_t
+    {
+        Applied,
+        IdenticalDuplicate,
+        NotEstablished,
+        SessionNotBound,
+        SessionMismatch,
+        GenerationMismatch,
+        StaleTick,
+        RegressingAcknowledgement,
+        ContradictorySameTick,
+    };
+
     using ClientSessionCreateResult
         = std::variant<std::unique_ptr<class ClientSessionStateMachine>, SessionTransitionError>;
 
@@ -117,6 +138,8 @@ namespace TES3MP
         ClientSessionStateMachine& operator=(ClientSessionStateMachine&&) = delete;
 
         ClientSessionTransition handle(ClientSessionEvent event) noexcept;
+        ClientSessionBindingResult bindEstablishedSession(SessionId sessionId) noexcept;
+        LatestWinsSnapshotReceiveResult receiveLatestWinsSnapshot(LatestWinsSnapshot snapshot);
 
         ClientSessionState state() const noexcept { return mState; }
         SessionGeneration generation() const noexcept { return mGeneration; }
@@ -127,6 +150,8 @@ namespace TES3MP
         {
             return mAuthenticationRejection;
         }
+        std::optional<SessionId> sessionId() const noexcept { return mSessionId; }
+        const std::optional<LatestWinsSnapshot>& confirmedSnapshot() const noexcept { return mConfirmedSnapshot; }
 
     private:
         ClientSessionStateMachine(MonotonicClock& clock, SessionTimeoutPolicy timeoutPolicy,
@@ -144,6 +169,8 @@ namespace TES3MP
         std::optional<ServerHello> mNegotiatedHello;
         std::optional<SessionRejected> mProtocolRejection;
         std::optional<AuthenticationRejectionReason> mAuthenticationRejection;
+        std::optional<SessionId> mSessionId;
+        std::optional<LatestWinsSnapshot> mConfirmedSnapshot;
     };
 }
 

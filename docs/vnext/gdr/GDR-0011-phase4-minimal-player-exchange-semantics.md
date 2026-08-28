@@ -1,10 +1,10 @@
 # GDR-0011: Phase 4 minimal player-exchange semantics
 
-Status: **Proposed**
+Status: **Accepted**
 
 Date opened: 2026-08-27
 
-Date approved: pending
+Date approved: 2026-08-27
 
 Decision owner: project owner
 
@@ -25,9 +25,9 @@ These are gameplay, authority, state-scope, and presentation-boundary choices.
 Production bodies or exchange behavior must not land until the project owner
 approves or amends them independently from ADR-0025.
 
-## Recommendation summary
+## Decision summary
 
-Recommend Option A for Decisions 1 through 4:
+The project owner approved Option A for Decisions 1 through 4 on 2026-08-27:
 
 1. make the first command a player-root motion intent containing desired linear
    velocity only, with no absolute position, cell, orientation, elapsed time, or
@@ -270,8 +270,9 @@ Reopen this GDR if:
 
 ## Owner approval
 
-Pending explicit project-owner approval or amendment of Decisions 1 through 4.
+Approved by the project owner in the 2026-08-27 working session: Option A for
+Decisions 1 through 4 without amendment.
 
-Approval of this GDR does not approve join, player creation, cell transition,
-interest selection, reconnect, movement validation/simulation, prediction,
-correction, animation, VR pose, or OpenMW presentation behavior.
+This approval does not approve join, player creation, cell transition, interest
+selection, reconnect, movement validation/simulation, prediction, correction,
+animation, VR pose, or OpenMW presentation behavior.

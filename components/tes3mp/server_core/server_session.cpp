@@ -321,4 +321,29 @@ namespace TES3MP
 
         return illegal(kind);
     }
+
+    ServerSessionBindingResult ServerSessionStateMachine::bindEstablishedSession(SessionId sessionId) noexcept
+    {
+        if (mState != ServerSessionState::Established)
+            return ServerSessionBindingResult::NotEstablished;
+        if (mSessionId)
+            return ServerSessionBindingResult::AlreadyBound;
+        mSessionId = sessionId;
+        return ServerSessionBindingResult::Bound;
+    }
+
+    ReliableOperationReceiveResult ServerSessionStateMachine::receiveReliableOperation(
+        const ReliableOperation& operation) const noexcept
+    {
+        if (mState != ServerSessionState::Established)
+            return ReliableOperationReceiveResult::NotEstablished;
+        if (!mSessionId)
+            return ReliableOperationReceiveResult::SessionNotBound;
+        const auto& command = operation.header().commandHeader();
+        if (command.sessionId() != *mSessionId)
+            return ReliableOperationReceiveResult::SessionMismatch;
+        if (command.sessionGeneration() != mGeneration)
+            return ReliableOperationReceiveResult::GenerationMismatch;
+        return ReliableOperationReceiveResult::Delivered;
+    }
 }

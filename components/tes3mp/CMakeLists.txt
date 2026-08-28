@@ -65,6 +65,7 @@ add_library(TES3MP::Protocol ALIAS tes3mp_protocol)
 target_sources(tes3mp_protocol PRIVATE
     include/tes3mp/command_primitives.hpp
     include/tes3mp/protocol_envelope.hpp
+    include/tes3mp/protocol_exchange.hpp
     include/tes3mp/protocol_handshake.hpp
     include/tes3mp/protocol_frame.hpp
     include/tes3mp/session_types.hpp
@@ -72,8 +73,11 @@ target_sources(tes3mp_protocol PRIVATE
     include/tes3mp/strong_value.hpp
     include/tes3mp/value_types.hpp
     protocol/generated/client_hello_generated.h
+    protocol/generated/latest_wins_snapshot_generated.h
+    protocol/generated/reliable_operation_generated.h
     protocol/generated/server_hello_generated.h
     protocol/generated/session_rejected_generated.h
+    protocol/protocol_exchange.cpp
     protocol/protocol_handshake.cpp
     protocol/protocol_frame.cpp
 )
@@ -129,12 +133,14 @@ target_sources(tes3mp_test_support PRIVATE
     include/tes3mp/test_support/fault_injecting_link.hpp
     include/tes3mp/test_support/in_memory_link.hpp
     include/tes3mp/test_support/manual_clock.hpp
+    include/tes3mp/test_support/phase4_in_memory_peer.hpp
     include/tes3mp/test_support/recording_observability.hpp
     include/tes3mp/test_support/spatial_round_trip.hpp
     test_support/deterministic_harness.cpp
     test_support/fault_injecting_link.cpp
     test_support/in_memory_link.cpp
     test_support/manual_clock.cpp
+    test_support/phase4_in_memory_peer.cpp
     test_support/recording_observability.cpp
     test_support/spatial_round_trip.cpp
 )
@@ -210,6 +216,16 @@ tes3mp_enable_runtime_safety(tes3mp_protocol_handshake_tests)
 
 tes3mp_verify_target_dependencies(tes3mp_protocol_handshake_tests ALLOWED tes3mp_protocol)
 tes3mp_verify_target_includes(tes3mp_protocol_handshake_tests
+    FORBIDDEN ${TES3MP_ENGINE_INDEPENDENT_FORBIDDEN_INCLUDES})
+
+add_executable(tes3mp_protocol_exchange_tests tests/protocol_exchange_tests.cpp)
+target_compile_features(tes3mp_protocol_exchange_tests PRIVATE cxx_std_20)
+target_link_libraries(tes3mp_protocol_exchange_tests PRIVATE tes3mp_test_support)
+set_target_properties(tes3mp_protocol_exchange_tests PROPERTIES FOLDER "TES3MP/Tests")
+tes3mp_enable_runtime_safety(tes3mp_protocol_exchange_tests)
+
+tes3mp_verify_target_dependencies(tes3mp_protocol_exchange_tests ALLOWED tes3mp_test_support)
+tes3mp_verify_target_includes(tes3mp_protocol_exchange_tests
     FORBIDDEN ${TES3MP_ENGINE_INDEPENDENT_FORBIDDEN_INCLUDES})
 
 add_executable(tes3mp_session_state_tests tests/session_state_machine_tests.cpp)
@@ -302,6 +318,16 @@ if(TES3MP_BUILD_FUZZERS)
     tes3mp_verify_target_dependencies(tes3mp_protocol_handshake_fuzz ALLOWED tes3mp_protocol)
     tes3mp_verify_target_includes(tes3mp_protocol_handshake_fuzz
         FORBIDDEN ${TES3MP_ENGINE_INDEPENDENT_FORBIDDEN_INCLUDES})
+
+    add_executable(tes3mp_protocol_exchange_fuzz tests/fuzz/protocol_exchange_fuzz.cpp)
+    target_compile_features(tes3mp_protocol_exchange_fuzz PRIVATE cxx_std_20)
+    target_link_libraries(tes3mp_protocol_exchange_fuzz PRIVATE tes3mp_protocol)
+    set_target_properties(tes3mp_protocol_exchange_fuzz PROPERTIES FOLDER "TES3MP/Fuzzers")
+    tes3mp_enable_runtime_safety(tes3mp_protocol_exchange_fuzz)
+    tes3mp_enable_libfuzzer(tes3mp_protocol_exchange_fuzz)
+    tes3mp_verify_target_dependencies(tes3mp_protocol_exchange_fuzz ALLOWED tes3mp_protocol)
+    tes3mp_verify_target_includes(tes3mp_protocol_exchange_fuzz
+        FORBIDDEN ${TES3MP_ENGINE_INDEPENDENT_FORBIDDEN_INCLUDES})
 endif()
 
 add_custom_target(tes3mp_protocol_tests_run
@@ -309,6 +335,7 @@ add_custom_target(tes3mp_protocol_tests_run
     COMMAND $<TARGET_FILE:tes3mp_protocol_envelope_tests>
     COMMAND $<TARGET_FILE:tes3mp_protocol_frame_tests>
     COMMAND $<TARGET_FILE:tes3mp_protocol_handshake_tests>
+    COMMAND $<TARGET_FILE:tes3mp_protocol_exchange_tests>
     COMMAND $<TARGET_FILE:tes3mp_session_state_tests>
     COMMAND $<TARGET_FILE:tes3mp_spatial_primitive_tests>
     COMMAND $<TARGET_FILE:tes3mp_deterministic_facilities_tests>
@@ -320,6 +347,7 @@ add_custom_target(tes3mp_protocol_tests_run
         tes3mp_protocol_envelope_tests
         tes3mp_protocol_frame_tests
         tes3mp_protocol_handshake_tests
+        tes3mp_protocol_exchange_tests
         tes3mp_session_state_tests
         tes3mp_spatial_primitive_tests
         tes3mp_deterministic_facilities_tests

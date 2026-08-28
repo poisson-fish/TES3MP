@@ -93,6 +93,16 @@ class RuntimeSafetyRunnerTests(unittest.TestCase):
         )
         self.assertIn("tes3mp_protocol_handshake_fuzz", handshake_command[0])
         self.assertIn("-max_len=4097", handshake_command)
+        exchange_command = safety.fuzz_command(
+            "asan-ubsan",
+            30,
+            pathlib.Path("artifacts"),
+            target="tes3mp_protocol_exchange_fuzz",
+            corpus_dir=safety.PROTOCOL_EXCHANGE_CORPUS_DIR,
+            maximum_input_bytes=safety.TES3MP_LATEST_WINS_SNAPSHOT_MAX_BYTES + 1,
+        )
+        self.assertIn("tes3mp_protocol_exchange_fuzz", exchange_command[0])
+        self.assertIn("-max_len=65537", exchange_command)
 
     def test_seed_corpus_is_bounded_and_covers_length_boundaries(self):
         records = safety.verify_corpus()
@@ -110,6 +120,11 @@ class RuntimeSafetyRunnerTests(unittest.TestCase):
         self.assertGreaterEqual(len(handshake_records), 2)
         self.assertTrue(
             all(record["bytes"] <= safety.MAX_CORPUS_FILE_BYTES for record in handshake_records)
+        )
+        exchange_records = safety.verify_protocol_exchange_corpus()
+        self.assertGreaterEqual(len(exchange_records), 2)
+        self.assertTrue(
+            all(record["bytes"] <= safety.MAX_CORPUS_FILE_BYTES for record in exchange_records)
         )
 
     def test_presets_keep_normal_build_clean_and_safety_profiles_exclusive(self):
@@ -139,6 +154,7 @@ class RuntimeSafetyRunnerTests(unittest.TestCase):
             "tes3mp_protocol_tests",
             "tes3mp_protocol_frame_tests",
             "tes3mp_protocol_handshake_tests",
+            "tes3mp_protocol_exchange_tests",
             "tes3mp_session_state_tests",
             "tes3mp_spatial_primitive_tests",
             "tes3mp_deterministic_facilities_tests",
@@ -151,12 +167,14 @@ class RuntimeSafetyRunnerTests(unittest.TestCase):
         self.assertIn("tes3mp_enable_libfuzzer(tes3mp_spatial_round_trip_fuzz)", component)
         self.assertIn("tes3mp_enable_libfuzzer(tes3mp_protocol_frame_fuzz)", component)
         self.assertIn("tes3mp_enable_libfuzzer(tes3mp_protocol_handshake_fuzz)", component)
+        self.assertIn("tes3mp_enable_libfuzzer(tes3mp_protocol_exchange_fuzz)", component)
         asan_preset = next(
             preset
             for preset in data["buildPresets"]
             if preset["name"] == "tes3mp-safety-asan-ubsan"
         )
         self.assertIn("tes3mp_protocol_handshake_fuzz", asan_preset["targets"])
+        self.assertIn("tes3mp_protocol_exchange_fuzz", asan_preset["targets"])
         adapter = (REPOSITORY_ROOT / "apps" / "openmw" / "tes3mp" / "CMakeLists.txt").read_text(
             encoding="utf-8"
         )

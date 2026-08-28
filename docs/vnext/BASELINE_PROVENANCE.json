@@ -102,7 +102,7 @@
     {
       "path": "components/tes3mp/CMakeLists.txt",
       "status": "A",
-      "purpose": "Defines the standalone-capable five-library graph, pinned FlatBuffers runtime input, target-scoped safety registration, ten contract executables, and bounded parser fuzz targets."
+      "purpose": "Defines the standalone-capable five-library graph, pinned FlatBuffers runtime input, target-scoped safety registration, eleven contract executables, and bounded parser fuzz targets."
     },
     {
       "path": "components/tes3mp/CMakePresets.json",
@@ -165,6 +165,11 @@
       "purpose": "Owner-approved reliable-operation and latest-wins-snapshot owned header values with explicit session, command, precondition, tick, and acknowledgement metadata."
     },
     {
+      "path": "components/tes3mp/include/tes3mp/protocol_exchange.hpp",
+      "status": "A",
+      "purpose": "Owner-approved closed velocity-intent and bounded spatial-view protocol values plus verifier-first owned T3RO/T3LS codec interfaces."
+    },
+    {
       "path": "components/tes3mp/include/tes3mp/protocol_frame.hpp",
       "status": "A",
       "purpose": "Owner-approved fixed vNext frame layout, stable message classification and identifiers, class byte budgets, owned decoded frames, and closed structured error values."
@@ -215,6 +220,11 @@
       "purpose": "Checked manually advanced implementation of the injected monotonic-clock interface for deterministic tests."
     },
     {
+      "path": "components/tes3mp/include/tes3mp/test_support/phase4_in_memory_peer.hpp",
+      "status": "A",
+      "purpose": "Reusable synchronous deterministic Phase 4 fake-peer interface spanning framed negotiation, typed authentication, session binding, command, and snapshot exchange."
+    },
+    {
       "path": "components/tes3mp/include/tes3mp/test_support/recording_observability.hpp",
       "status": "A",
       "purpose": "Bounded single-threaded FIFO metric/event recorder interfaces with explicit overflow evidence for deterministic tests."
@@ -240,6 +250,16 @@
       "purpose": "Pinned FlatBuffers 25.12.19 generated C++ for the size-prefixed T3CH client-offer schema."
     },
     {
+      "path": "components/tes3mp/protocol/generated/latest_wins_snapshot_generated.h",
+      "status": "A",
+      "purpose": "Pinned FlatBuffers 25.12.19 generated C++ for the size-prefixed closed-union T3LS spatial-view schema."
+    },
+    {
+      "path": "components/tes3mp/protocol/generated/reliable_operation_generated.h",
+      "status": "A",
+      "purpose": "Pinned FlatBuffers 25.12.19 generated C++ for the size-prefixed closed-union T3RO velocity-intent schema."
+    },
+    {
       "path": "components/tes3mp/protocol/generated/server_hello_generated.h",
       "status": "A",
       "purpose": "Pinned FlatBuffers 25.12.19 generated C++ for the size-prefixed T3SH negotiated-result schema."
@@ -248,6 +268,11 @@
       "path": "components/tes3mp/protocol/generated/session_rejected_generated.h",
       "status": "A",
       "purpose": "Pinned FlatBuffers 25.12.19 generated C++ for the size-prefixed T3RJ rejection schema."
+    },
+    {
+      "path": "components/tes3mp/protocol/protocol_exchange.cpp",
+      "status": "A",
+      "purpose": "Verifier-first bounded T3RO/T3LS encoding and decoding with validated temporaries, closed-body dispatch, and allocation-after-bounds enforcement."
     },
     {
       "path": "components/tes3mp/protocol/protocol_frame.cpp",
@@ -263,6 +288,16 @@
       "path": "components/tes3mp/protocol/schema/client_hello.fbs",
       "status": "A",
       "purpose": "Explicit-ID T3CH client protocol-range and bounded optional/required capability offer schema."
+    },
+    {
+      "path": "components/tes3mp/protocol/schema/latest_wins_snapshot.fbs",
+      "status": "A",
+      "purpose": "Explicit-ID T3LS closed-union schema for target-session latest-wins spatial views capped by the public codec contract."
+    },
+    {
+      "path": "components/tes3mp/protocol/schema/reliable_operation.fbs",
+      "status": "A",
+      "purpose": "Explicit-ID T3RO closed-union schema for one preconditioned velocity-only player motion intent."
     },
     {
       "path": "components/tes3mp/protocol/schema/server_hello.fbs",
@@ -330,6 +365,11 @@
       "purpose": "Overflow-checked nonnegative manual monotonic-clock advancement implementation."
     },
     {
+      "path": "components/tes3mp/test_support/phase4_in_memory_peer.cpp",
+      "status": "A",
+      "purpose": "Deterministic no-socket Phase 4 fake-peer composition over existing in-memory link, frame, hello, authentication, exchange-codec, and session-guard boundaries."
+    },
+    {
       "path": "components/tes3mp/test_support/recording_observability.cpp",
       "status": "A",
       "purpose": "Preallocated bounded FIFO observation recording, reject-newest overflow, saturating drop counts, clear, and reuse."
@@ -353,6 +393,21 @@
       "path": "components/tes3mp/tests/fault_injection_tests.cpp",
       "status": "A",
       "purpose": "Independent profile/path validation, latency, loss, duplication, jitter, reorder, stall, disconnect, bounds, backpressure, isolation, and exact seeded-trace contracts."
+    },
+    {
+      "path": "components/tes3mp/tests/fuzz/corpus/protocol_exchange/reliable-identifier",
+      "status": "A",
+      "purpose": "T3RO identifier-focused malformed seed for the bounded reliable-operation decoder fuzz target."
+    },
+    {
+      "path": "components/tes3mp/tests/fuzz/corpus/protocol_exchange/snapshot-identifier",
+      "status": "A",
+      "purpose": "T3LS identifier-focused malformed seed for the bounded latest-wins snapshot decoder fuzz target."
+    },
+    {
+      "path": "components/tes3mp/tests/fuzz/corpus/protocol_exchange/truncated",
+      "status": "A",
+      "purpose": "Truncated size-prefix seed for both production exchange payload decoders."
     },
     {
       "path": "components/tes3mp/tests/fuzz/corpus/protocol_frame/truncated-header",
@@ -390,6 +445,11 @@
       "purpose": "Truncated seed for bounded malformed spatial test-decoder fuzz coverage."
     },
     {
+      "path": "components/tes3mp/tests/fuzz/protocol_exchange_fuzz.cpp",
+      "status": "A",
+      "purpose": "Clang libFuzzer entry point over both bounded production T3RO/T3LS payload decoders."
+    },
+    {
       "path": "components/tes3mp/tests/fuzz/protocol_frame_fuzz.cpp",
       "status": "A",
       "purpose": "Clang libFuzzer entry point with a hard pre-parse bound over the production protocol-frame decoder."
@@ -413,6 +473,11 @@
       "path": "components/tes3mp/tests/protocol_envelope_tests.cpp",
       "status": "A",
       "purpose": "Independent contracts for reliable/snapshot metadata, optional preconditions and acknowledgements, one-operation atomicity, recency, field separation, and public-header isolation."
+    },
+    {
+      "path": "components/tes3mp/tests/protocol_exchange_tests.cpp",
+      "status": "A",
+      "purpose": "Golden, owned round-trip, bounds, ordering, mutation, atomic-session-guard, and end-to-end fake-peer contracts for Slice 4.5 exchange."
     },
     {
       "path": "components/tes3mp/tests/protocol_frame_tests.cpp",
@@ -572,12 +637,12 @@
     {
       "path": "docs/vnext/adr/ADR-0025-minimal-player-command-world-snapshot-exchange.md",
       "status": "A",
-      "purpose": "Proposed owner-gated typed command/snapshot roots, bounds, role-specific exchange guards, evolution evidence, and deterministic in-memory fake-peer architecture."
+      "purpose": "Owner-approved typed command/snapshot roots, bounds, role-specific exchange guards, evolution evidence, and deterministic in-memory fake-peer architecture."
     },
     {
       "path": "docs/vnext/gdr/GDR-0011-phase4-minimal-player-exchange-semantics.md",
       "status": "A",
-      "purpose": "Proposed owner-gated Phase 4 player-motion intent, authority separation, session-targeted snapshot scope, and confirmed-client-state semantics."
+      "purpose": "Owner-approved Phase 4 player-motion intent, authority separation, session-targeted snapshot scope, and confirmed-client-state semantics."
     },
     {
       "path": "docs/vnext/proofs/flatbuffers/ANDROID_ARM64.md",
@@ -836,11 +901,19 @@
         },
         {
           "path": "components/tes3mp/CMakeLists.txt",
-          "sha256": "fa6ec9b1018d1440c5c97887c3096e778e251117ef30b748c4c034ecf3585885"
+          "sha256": "059e764f670b58268917e69dc42f5e2a332820d55f943670f7a769f4ba062cfc"
         },
         {
           "path": "components/tes3mp/protocol/generated/client_hello_generated.h",
           "sha256": "1ca9a4d075ac2b39c4f95bb267a7704ff7fa061ad1fd6ac46c40309fb045c5e1"
+        },
+        {
+          "path": "components/tes3mp/protocol/generated/latest_wins_snapshot_generated.h",
+          "sha256": "841c5a9ef3cf66d01f512f59a3d9fc2150c8a6fe88cb66f4ddab9d909f3fce6d"
+        },
+        {
+          "path": "components/tes3mp/protocol/generated/reliable_operation_generated.h",
+          "sha256": "008eb9e6ed57ccd7d3f867443636214066211733a637c48163232af741ed0d01"
         },
         {
           "path": "components/tes3mp/protocol/generated/server_hello_generated.h",
@@ -853,6 +926,14 @@
         {
           "path": "components/tes3mp/protocol/schema/client_hello.fbs",
           "sha256": "2636d0afc973e49c91ce562e55e937683fce4827b7a234569a56b6b21700905d"
+        },
+        {
+          "path": "components/tes3mp/protocol/schema/latest_wins_snapshot.fbs",
+          "sha256": "459aa04aae56e11860554dbb67138e05a4de4a2c79f53c9fa76afc2ea8ac432a"
+        },
+        {
+          "path": "components/tes3mp/protocol/schema/reliable_operation.fbs",
+          "sha256": "fcc573985d3f37061ca8b0f58757a43c22a0129129a81bedd02f3d45042d89ec"
         },
         {
           "path": "components/tes3mp/protocol/schema/server_hello.fbs",
@@ -912,11 +993,11 @@
         },
         {
           "path": "scripts/tests/test_run_vnext_flatbuffers_proof.py",
-          "sha256": "cb9d591c233597f8e93ea9d163fb0598d682c9a78966d421fc2825ec0f718e88"
+          "sha256": "a436eacf4e29b1ec24f8877f12f15170d4181a8399366464816f2abee227002a"
         },
         {
           "path": "scripts/vnext_flatbuffers_proof.json",
-          "sha256": "c4a886a212297c29cfe1cab4816cbb0c2a27fcbb0a10dcf5e950600cc27f51be"
+          "sha256": "eeee82a57b36ed2da768805b29957e00b3de9358050c8c57d2c7213e6dd08999"
         }
       ],
       "repositories": [

@@ -191,4 +191,50 @@ namespace TES3MP
 
         return illegal(kind);
     }
+
+    ClientSessionBindingResult ClientSessionStateMachine::bindEstablishedSession(SessionId sessionId) noexcept
+    {
+        if (mState != ClientSessionState::Established)
+            return ClientSessionBindingResult::NotEstablished;
+        if (mSessionId)
+            return ClientSessionBindingResult::AlreadyBound;
+        mSessionId = sessionId;
+        return ClientSessionBindingResult::Bound;
+    }
+
+    LatestWinsSnapshotReceiveResult ClientSessionStateMachine::receiveLatestWinsSnapshot(LatestWinsSnapshot snapshot)
+    {
+        if (mState != ClientSessionState::Established)
+            return LatestWinsSnapshotReceiveResult::NotEstablished;
+        if (!mSessionId)
+            return LatestWinsSnapshotReceiveResult::SessionNotBound;
+        if (snapshot.header().targetSessionId() != *mSessionId)
+            return LatestWinsSnapshotReceiveResult::SessionMismatch;
+        if (snapshot.header().targetSessionGeneration() != mGeneration)
+            return LatestWinsSnapshotReceiveResult::GenerationMismatch;
+
+        if (mConfirmedSnapshot)
+        {
+            const auto currentTick = mConfirmedSnapshot->header().serverTick();
+            const auto incomingTick = snapshot.header().serverTick();
+            if (incomingTick < currentTick)
+                return LatestWinsSnapshotReceiveResult::StaleTick;
+            if (incomingTick == currentTick)
+            {
+                return snapshot == *mConfirmedSnapshot ? LatestWinsSnapshotReceiveResult::IdenticalDuplicate
+                                                       : LatestWinsSnapshotReceiveResult::ContradictorySameTick;
+            }
+
+            const auto& currentAcknowledgement = mConfirmedSnapshot->header().acknowledgedCommandSequence();
+            const auto& incomingAcknowledgement = snapshot.header().acknowledgedCommandSequence();
+            if (currentAcknowledgement
+                && (!incomingAcknowledgement || *incomingAcknowledgement < *currentAcknowledgement))
+            {
+                return LatestWinsSnapshotReceiveResult::RegressingAcknowledgement;
+            }
+        }
+
+        mConfirmedSnapshot = std::move(snapshot);
+        return LatestWinsSnapshotReceiveResult::Applied;
+    }
 }

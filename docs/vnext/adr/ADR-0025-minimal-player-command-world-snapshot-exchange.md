@@ -1,10 +1,10 @@
 # ADR-0025: Minimal player command and world-snapshot exchange
 
-Status: **Proposed**
+Status: **Accepted**
 
 Date opened: 2026-08-27
 
-Date approved: pending
+Date approved: 2026-08-27
 
 Decision owner: project owner
 
@@ -28,9 +28,9 @@ separately in GDR-0011. Production schemas, codecs, session exchange APIs, and
 fake-peer behavior must not land until both records are approved or amended by
 the project owner.
 
-## Recommendation summary
+## Decision summary
 
-Recommend Option A for Decisions 1 through 5:
+The project owner approved Option A for Decisions 1 through 5 on 2026-08-27:
 
 1. add closed typed body unions to complete `T3RO` and `T3LS`, with no opaque
    bytes, dynamic map, nested FlatBuffer, or generated view in public APIs;
@@ -336,8 +336,8 @@ Reopen this ADR if:
 
 ## Owner approval
 
-Pending explicit project-owner approval or amendment of Decisions 1 through 5.
+Approved by the project owner in the 2026-08-27 working session: Option A for
+Decisions 1 through 5 without amendment.
 
-Approval of this ADR alone does not approve the GDR-0011 gameplay, authority,
-or state-scope recommendation. Both records must be accepted before dependent
-production code lands.
+The owner independently approved GDR-0011 Decisions 1 through 4. This approval
+does not authorize any behavior excluded by either record.

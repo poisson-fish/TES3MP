@@ -22,6 +22,7 @@ SOURCE_DIR = ROOT / "components" / "tes3mp"
 CORPUS_DIR = SOURCE_DIR / "tests" / "fuzz" / "corpus" / "spatial_round_trip"
 PROTOCOL_FRAME_CORPUS_DIR = SOURCE_DIR / "tests" / "fuzz" / "corpus" / "protocol_frame"
 PROTOCOL_HANDSHAKE_CORPUS_DIR = SOURCE_DIR / "tests" / "fuzz" / "corpus" / "protocol_handshake"
+PROTOCOL_EXCHANGE_CORPUS_DIR = SOURCE_DIR / "tests" / "fuzz" / "corpus" / "protocol_exchange"
 PROFILES = {
     "asan-ubsan": {
         "preset": "tes3mp-safety-asan-ubsan",
@@ -38,6 +39,7 @@ CONTRACT_EXECUTABLES = (
     "tes3mp_protocol_tests",
     "tes3mp_protocol_frame_tests",
     "tes3mp_protocol_handshake_tests",
+    "tes3mp_protocol_exchange_tests",
     "tes3mp_session_state_tests",
     "tes3mp_spatial_primitive_tests",
     "tes3mp_deterministic_facilities_tests",
@@ -55,12 +57,14 @@ MAX_CORPUS_FILE_BYTES = 256
 MAX_SPATIAL_SNAPSHOT_BYTES = 109
 MAX_PROTOCOL_FRAME_BYTES = 12 + 64 * 1024
 TES3MP_SESSION_CONTROL_MAX_BYTES = 4 * 1024
+TES3MP_LATEST_WINS_SNAPSHOT_MAX_BYTES = 64 * 1024
 EXPECTED_COMPILED_SOURCES = {
     "client_session/anchor.cpp",
     "client_session/client_session.cpp",
     "protocol/anchor.cpp",
     "protocol/protocol_frame.cpp",
     "protocol/protocol_handshake.cpp",
+    "protocol/protocol_exchange.cpp",
     "server_core/anchor.cpp",
     "server_core/authentication.cpp",
     "server_core/deterministic_random.cpp",
@@ -72,6 +76,7 @@ EXPECTED_COMPILED_SOURCES = {
     "test_support/fault_injecting_link.cpp",
     "test_support/in_memory_link.cpp",
     "test_support/manual_clock.cpp",
+    "test_support/phase4_in_memory_peer.cpp",
     "test_support/recording_observability.cpp",
     "test_support/spatial_round_trip.cpp",
     "tests/deterministic_facilities_tests.cpp",
@@ -80,6 +85,7 @@ EXPECTED_COMPILED_SOURCES = {
     "tests/observability_tests.cpp",
     "tests/protocol_frame_tests.cpp",
     "tests/protocol_handshake_tests.cpp",
+    "tests/protocol_exchange_tests.cpp",
     "tests/session_state_machine_tests.cpp",
     "tests/spatial_primitive_tests.cpp",
     "tests/strong_value_tests.cpp",
@@ -212,6 +218,29 @@ def verify_protocol_handshake_corpus() -> list[dict[str, Any]]:
     return records
 
 
+def verify_protocol_exchange_corpus() -> list[dict[str, Any]]:
+    files = sorted(path for path in PROTOCOL_EXCHANGE_CORPUS_DIR.iterdir() if path.is_file())
+    if not files or len(files) > MAX_CORPUS_FILES:
+        raise RuntimeSafetyError(
+            f"Protocol-exchange fuzz corpus must contain 1-{MAX_CORPUS_FILES} files, found {len(files)}"
+        )
+    records = []
+    for path in files:
+        size = path.stat().st_size
+        if size > MAX_CORPUS_FILE_BYTES:
+            raise RuntimeSafetyError(
+                f"Protocol-exchange fuzz seed exceeds {MAX_CORPUS_FILE_BYTES} bytes: {path}"
+            )
+        records.append(
+            {
+                "path": str(path.relative_to(ROOT)).replace(os.sep, "/"),
+                "bytes": size,
+                "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+            }
+        )
+    return records
+
+
 def fuzz_command(
     profile: str,
     fuzz_seconds: int,
@@ -290,6 +319,7 @@ def verify_instrumented_compile_commands(profile: str, build_dir: pathlib.Path) 
         expected.add("tests/fuzz/spatial_round_trip_fuzz.cpp")
         expected.add("tests/fuzz/protocol_frame_fuzz.cpp")
         expected.add("tests/fuzz/protocol_handshake_fuzz.cpp")
+        expected.add("tests/fuzz/protocol_exchange_fuzz.cpp")
         required_flag = "-fsanitize=address,undefined"
     else:
         required_flag = "-fsanitize=thread"
@@ -341,6 +371,7 @@ def execute(profile: str, fuzz_seconds: int) -> pathlib.Path:
     corpus = verify_corpus()
     protocol_frame_corpus = verify_protocol_frame_corpus()
     protocol_handshake_corpus = verify_protocol_handshake_corpus()
+    protocol_exchange_corpus = verify_protocol_exchange_corpus()
     try:
         run_command(configure_command(cmake, profile), environment=environment, cwd=SOURCE_DIR, log_path=log_path)
         run_command(build_command(cmake, profile), environment=environment, cwd=SOURCE_DIR, log_path=log_path)
@@ -363,6 +394,19 @@ def execute(profile: str, fuzz_seconds: int) -> pathlib.Path:
                     target="tes3mp_protocol_frame_fuzz",
                     corpus_dir=PROTOCOL_FRAME_CORPUS_DIR,
                     maximum_input_bytes=MAX_PROTOCOL_FRAME_BYTES + 1,
+                ),
+                environment=environment,
+                cwd=SOURCE_DIR,
+                log_path=log_path,
+            )
+            run_command(
+                fuzz_command(
+                    profile,
+                    fuzz_seconds,
+                    artifact_dir,
+                    target="tes3mp_protocol_exchange_fuzz",
+                    corpus_dir=PROTOCOL_EXCHANGE_CORPUS_DIR,
+                    maximum_input_bytes=TES3MP_LATEST_WINS_SNAPSHOT_MAX_BYTES + 1,
                 ),
                 environment=environment,
                 cwd=SOURCE_DIR,
@@ -434,6 +478,7 @@ def execute(profile: str, fuzz_seconds: int) -> pathlib.Path:
                         "tes3mp_spatial_round_trip_fuzz",
                         "tes3mp_protocol_frame_fuzz",
                         "tes3mp_protocol_handshake_fuzz",
+                        "tes3mp_protocol_exchange_fuzz",
                     ]
                     if profile == "asan-ubsan"
                     else []
@@ -443,16 +488,19 @@ def execute(profile: str, fuzz_seconds: int) -> pathlib.Path:
                     "spatial_round_trip": corpus,
                     "protocol_frame": protocol_frame_corpus,
                     "protocol_handshake": protocol_handshake_corpus,
+                    "protocol_exchange": protocol_exchange_corpus,
                 },
                 "maximum_input_bytes": {
                     "spatial_round_trip": MAX_CORPUS_FILE_BYTES,
                     "protocol_frame": MAX_PROTOCOL_FRAME_BYTES + 1,
                     "protocol_handshake": TES3MP_SESSION_CONTROL_MAX_BYTES + 1,
+                    "protocol_exchange": TES3MP_LATEST_WINS_SNAPSHOT_MAX_BYTES + 1,
                 },
                 "parser_max_bytes": {
                     "spatial_round_trip": MAX_SPATIAL_SNAPSHOT_BYTES,
                     "protocol_frame": MAX_PROTOCOL_FRAME_BYTES,
                     "protocol_handshake": TES3MP_SESSION_CONTROL_MAX_BYTES,
+                    "protocol_exchange": TES3MP_LATEST_WINS_SNAPSHOT_MAX_BYTES,
                 },
             },
             "artifacts": {

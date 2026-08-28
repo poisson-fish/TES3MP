@@ -334,7 +334,7 @@ runtime or protocol name.
 | ADR-0022 | Version/capability negotiation, hello/rejection schemas, and legacy-input response boundary | Phase 4 | **Implemented** |
 | ADR-0023 | Session state machines and authentication-provider boundary | Phase 4 | **Implemented** |
 | ADR-0024 | Reliable-operation and latest-wins envelope contract | Phase 4 | **Implemented** |
-| ADR-0025 | Minimal player command, world-snapshot roots, session guards, and in-memory exchange | Phase 4 | **Proposed** |
+| ADR-0025 | Minimal player command, world-snapshot roots, session guards, and in-memory exchange | Phase 4 | **Implemented** |
 
 An ADR is complete only when it records considered alternatives, selection
 criteria, consequences, failure modes, a replacement/review trigger, and
@@ -357,7 +357,7 @@ production code that depends on the choice cannot.
 | GDR-0008 | Combat resolution, lag handling, effects, projectiles, death, and resurrection semantics | Phase 16 | **Not Started** |
 | GDR-0009 | Dialogue, journal, faction, quest, and progression state scope | Phase 17 | **Not Started** |
 | GDR-0010 | Time, weather, globals, reset, and shared-world evolution semantics | Phase 18 | **Not Started** |
-| GDR-0011 | Phase 4 minimal player-intent authority and session-targeted snapshot semantics | Phase 4 | **Proposed** |
+| GDR-0011 | Phase 4 minimal player-intent authority and session-targeted snapshot semantics | Phase 4 | **Implemented** |
 
 A GDR is **Implemented** only after its questions are explicitly approved and
 the approval is recorded. Later code slices remain separate: an approved design
@@ -2408,7 +2408,7 @@ Depends on: Phase 3.
 | 4.2 | Implement `ClientHello`, `ServerHello`, and clear rejection with version/capability negotiation | **Implemented** | Accepted [`ADR-0022`](adr/ADR-0022-version-and-capability-negotiation.md), implementation `e89621e970`, all applicable local verification, and owner demo acceptance pass |
 | 4.3 | Implement the client/server session state machines and authentication-provider interface | **Implemented** | Accepted [`ADR-0023`](adr/ADR-0023-session-state-machines-and-authentication-provider-boundary.md), implementation `edbedbd632`, all applicable local verification, and owner demo acceptance pass |
 | 4.4 | Define reliable-operation and latest-wins snapshot envelopes | **Implemented** | Accepted [`ADR-0024`](adr/ADR-0024-reliable-operation-latest-wins-envelope-contract.md), implementation `ee17ebdd0a`, all applicable local verification, and owner demo acceptance pass |
-| 4.5 | Exchange a minimal player command and world snapshot over the in-memory link | **In Progress** | Proposed [`ADR-0025`](adr/ADR-0025-minimal-player-command-world-snapshot-exchange.md) and [`GDR-0011`](gdr/GDR-0011-phase4-minimal-player-exchange-semantics.md) decision packets are ready for owner review; production schemas and behavior remain approval-gated |
+| 4.5 | Exchange a minimal player command and world snapshot over the in-memory link | **In Progress** | Accepted [`ADR-0025`](adr/ADR-0025-minimal-player-command-world-snapshot-exchange.md) and [`GDR-0011`](gdr/GDR-0011-phase4-minimal-player-exchange-semantics.md), locally verified implementation, and pending owner demo acceptance |
 | 4.6 | Add round-trip, property, golden-schema, mutation, and fuzz coverage | **Not Started** | Every decoder is registered with a corpus and sanitizer-backed fuzz target |
 
 Exit gate:
@@ -2709,7 +2709,9 @@ Implementation notes:
     four separately reviewable gameplay/authority/state-scope option sets. No
     production schema, generated source, codec, session state, fake peer,
     authority, canonical mutation, or gameplay behavior changed.
-  - Decisions: none accepted. The recommendation is closed typed `T3RO`/`T3LS`
+  - Decisions: the project owner approved Option A for ADR-0025 Decisions 1–5
+    and GDR-0011 Decisions 1–4 on 2026-08-27 without amendment. The accepted
+    design is closed typed `T3RO`/`T3LS`
     body unions; one velocity-only player motion intent with a required entity
     precondition; a deterministically ordered, target-session selected spatial
     view capped at 256 entries; pure codecs plus role-specific established-
@@ -2725,13 +2727,55 @@ Implementation notes:
     acceptance-test, and pending-owner sections, only `docs/vnext` paths are
     staged, and staged diff checks pass. A product build is not applicable
     because this approval-gated kickoff changes documentation only.
-  - Owner review: pending explicit, independent approval or amendment of
-    ADR-0025 Decisions 1–5 and GDR-0011 Decisions 1–4. Production work remains
-    gated; approval of one record does not imply approval of the other.
-  - Follow-ups: present both decision packets and proposed acceptance tests to
-    the owner, record the chosen options, then implement only the approved
-    schemas, codecs, session guards, and fake-peer exchange. Slice 4.6 remains
-    gated.
+  - Owner review: explicit, independent approval received for both records.
+    Implementation-demo acceptance remains pending, so Slice 4.5 stays **In
+    Progress**.
+  - Follow-ups: implement only the approved schemas, codecs, session guards,
+    and fake-peer exchange, then present the named behavior and failure evidence
+    for owner acceptance. Slice 4.6 remains gated.
+
+- 2026-08-27 — Slice 4.5 — In Progress
+  - Change: this implementation commit adds the accepted closed-union `T3RO`
+    velocity-intent and `T3LS` spatial-view schemas, exact pinned generated C++,
+    verifier-first owned codecs, required command precondition, strictly entity-
+    ordered 0–256-entry views, explicit post-authentication session binding,
+    role-specific context/timeline guards, atomic client confirmed-state commit,
+    and a reusable synchronous fake peer over the existing framed hello, typed
+    authentication, and in-memory link. It adds an eleventh contract executable
+    and registers both production decoders with a bounded ASan/libFuzzer target
+    and corpus. It does not add a reducer, canonical mutation, prediction,
+    rendering, transport library, socket, OpenMW dependency, or broad gameplay
+    command.
+  - Decisions: implemented the owner's approved ADR-0025 Option A Decisions
+    1–5 and GDR-0011 Option A Decisions 1–4 without amendment. The server guard
+    validates session/generation but remains the sole future mutation boundary;
+    the client stores only a complete confirmed snapshot, and snapshot selection
+    remains target-session specific.
+  - Verification: from the Visual Studio 2022 v17.14.39/MSVC 19.44.35228
+    x86-64 environment, `cmake --preset tes3mp-standalone --fresh` and `cmake
+    --build --preset tes3mp-standalone --parallel 4` build and pass all eleven
+    C++ contracts. The exchange contract covers exact `T3RO`/`T3LS` golden
+    bytes, owned-buffer lifetime, empty/exact-256/257-entry bounds, strict order,
+    truncation and identifier/mutation failures, atomic stale/duplicate/
+    contradictory/acknowledgement guards, old-generation rejection, differing
+    same-tick per-session views, and the complete fake-peer trace. The pinned
+    FlatBuffers proof regenerates all five production headers exactly and its
+    isolated test passes. All 97 repository-owned Python tests pass. Indexed
+    provenance accounts for 164 intentional differences and verifies 54
+    dependency inputs; indexed legacy exclusion checks 3,858 tracked paths, 59
+    CMake files, 32 compile commands, and 91 Ninja edges. All changed C++ passes
+    `clang-format --dry-run --Werror`; changed Python compiles, JSON parses,
+    public-header and reliable-command-surface isolation scans pass, local vNext
+    Markdown links resolve, and staged diff checks pass. The sanitizer-backed
+    fuzzer is registered for the Linux phase-exit profile and is not locally
+    executable in this MSVC environment.
+  - Owner review: architecture, authority, state-scope, and gameplay-behavior
+    approval is complete. Implementation-demo acceptance remains pending, so
+    Slice 4.5 stays **In Progress**.
+  - Follow-ups: present the golden/ownership/bounds/failure/session-isolation/
+    end-to-end evidence for owner acceptance, then mark Slice 4.5
+    **Implemented**. Slice 4.6 remains gated and owns exhaustive property,
+    mutation, corpus, and fuzz expansion.
 
 ### Phase 5 — Deterministic authoritative server core
 

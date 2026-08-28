@@ -1,0 +1,68 @@
+namespace TES3MP.Protocol.Schema.Snapshot;
+
+table LatestWinsSnapshotHeader {
+  target_session_id:ulong (id: 0);
+  target_session_generation:ulong (id: 1);
+  server_tick:ulong (id: 2);
+  has_acknowledged_command_sequence:bool = false (id: 3);
+  acknowledged_command_sequence:ulong (id: 4);
+}
+
+enum CellKind : ubyte {
+  Unknown = 0,
+  Interior = 1,
+  Exterior = 2
+}
+
+struct Cell {
+  cell_space_id:ulong;
+  grid_x:int;
+  grid_y:int;
+  kind:CellKind;
+}
+
+struct Position3 {
+  x:long;
+  y:long;
+  z:long;
+}
+
+struct Orientation3 {
+  x:uint;
+  y:uint;
+  z:uint;
+}
+
+struct LinearVelocity3 {
+  x:long;
+  y:long;
+  z:long;
+}
+
+struct SpatialEntitySnapshot {
+  entity_id:ulong;
+  entity_revision:ulong;
+  authority_epoch:ulong;
+  server_tick:ulong;
+  cell:Cell;
+  position:Position3;
+  orientation:Orientation3;
+  linear_velocity:LinearVelocity3;
+}
+
+table SpatialWorldView {
+  entries:[SpatialEntitySnapshot] (id: 0);
+}
+
+union LatestWinsSnapshotBody {
+  SpatialWorldView = 1
+}
+
+table LatestWinsSnapshot {
+  header:LatestWinsSnapshotHeader (id: 0);
+  body:LatestWinsSnapshotBody (id: 2);
+}
+
+root_type LatestWinsSnapshot;
+file_identifier "T3LS";
+file_extension "t3ls";

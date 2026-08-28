@@ -22,11 +22,15 @@
   ],
   "production_schemas": [
     "client_hello.fbs",
+    "latest_wins_snapshot.fbs",
+    "reliable_operation.fbs",
     "server_hello.fbs",
     "session_rejected.fbs"
   ],
   "production_generated_files": [
     "client_hello_generated.h",
+    "latest_wins_snapshot_generated.h",
+    "reliable_operation_generated.h",
     "server_hello_generated.h",
     "session_rejected_generated.h"
   ],

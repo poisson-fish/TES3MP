@@ -4,6 +4,7 @@
 #include "authentication.hpp"
 #include "monotonic_clock.hpp"
 #include "observability.hpp"
+#include "protocol_exchange.hpp"
 #include "protocol_handshake.hpp"
 #include "session_types.hpp"
 
@@ -94,6 +95,22 @@ namespace TES3MP
         bool accepted() const noexcept { return !error.has_value(); }
     };
 
+    enum class ServerSessionBindingResult : std::uint8_t
+    {
+        Bound,
+        NotEstablished,
+        AlreadyBound,
+    };
+
+    enum class ReliableOperationReceiveResult : std::uint8_t
+    {
+        Delivered,
+        NotEstablished,
+        SessionNotBound,
+        SessionMismatch,
+        GenerationMismatch,
+    };
+
     using ServerSessionCreateResult
         = std::variant<std::unique_ptr<class ServerSessionStateMachine>, SessionTransitionError>;
 
@@ -111,6 +128,8 @@ namespace TES3MP
         ~ServerSessionStateMachine();
 
         ServerSessionTransition handle(ServerSessionEvent event) noexcept;
+        ServerSessionBindingResult bindEstablishedSession(SessionId sessionId) noexcept;
+        ReliableOperationReceiveResult receiveReliableOperation(const ReliableOperation& operation) const noexcept;
 
         ServerSessionState state() const noexcept { return mState; }
         SessionGeneration generation() const noexcept { return mGeneration; }
@@ -122,6 +141,7 @@ namespace TES3MP
             return mAuthenticationRejection;
         }
         const std::optional<AuthenticatedPrincipal>& principal() const noexcept { return mPrincipal; }
+        std::optional<SessionId> sessionId() const noexcept { return mSessionId; }
 
     private:
         ServerSessionStateMachine(MonotonicClock& clock, Observability& observability,
@@ -148,6 +168,7 @@ namespace TES3MP
         std::optional<SessionRejected> mProtocolRejection;
         std::optional<AuthenticationRejected> mAuthenticationRejection;
         std::optional<AuthenticatedPrincipal> mPrincipal;
+        std::optional<SessionId> mSessionId;
     };
 }
 

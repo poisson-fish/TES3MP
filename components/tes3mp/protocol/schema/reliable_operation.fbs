@@ -1,0 +1,39 @@
+namespace TES3MP.Protocol.Schema.Reliable;
+
+table ClientCommandHeader {
+  session_id:ulong (id: 0);
+  session_generation:ulong (id: 1);
+  command_sequence:ulong (id: 2);
+  command_id:ulong (id: 3);
+  observed_server_tick:ulong (id: 4);
+}
+
+table EntityPrecondition {
+  entity_id:ulong (id: 0);
+  expected_revision:ulong (id: 1);
+  expected_authority_epoch:ulong (id: 2);
+}
+
+struct LinearVelocity3 {
+  x:long;
+  y:long;
+  z:long;
+}
+
+table PlayerMotionIntent {
+  desired_velocity:LinearVelocity3 (id: 0);
+}
+
+union ReliableOperationBody {
+  PlayerMotionIntent = 1
+}
+
+table ReliableOperation {
+  command_header:ClientCommandHeader (id: 0);
+  entity_precondition:EntityPrecondition (id: 1);
+  body:ReliableOperationBody (id: 3);
+}
+
+root_type ReliableOperation;
+file_identifier "T3RO";
+file_extension "t3ro";
