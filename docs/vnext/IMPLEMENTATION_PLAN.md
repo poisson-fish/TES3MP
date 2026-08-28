@@ -338,6 +338,7 @@ runtime or protocol name.
 | ADR-0026 | Phase 5 writer command intake, ordering, limits, and overload policy | Phase 5 | **Implemented** |
 | ADR-0027 | Phase 5 canonical player/session state, scope, invariants, and bounds | Phase 5 | **Implemented** |
 | ADR-0028 | Phase 5 command validation, disposition, acknowledgement, and atomic reducer boundary | Phase 5 | **Implemented** |
+| ADR-0029 | Phase 5 immutable canonical publication, versioned change feed, retention, and slow-reader policy | Phase 5 | **Proposed** |
 
 An ADR is complete only when it records considered alternatives, selection
 criteria, consequences, failure modes, a replacement/review trigger, and
@@ -2981,7 +2982,7 @@ Depends on: Phase 4.
 | 5.1 | Implement fixed-tick scheduling, bounded per-tick command intake, and deterministic ordering | **Implemented** | Accepted [`ADR-0026`](adr/ADR-0026-phase5-writer-command-intake-and-ordering.md), implementation `e0dde571f5`, applicable local verification, and owner demo acceptance pass |
 | 5.2 | Implement minimal player/session/cell/root-transform/velocity/ack canonical state | **Implemented** | Accepted [`ADR-0027`](adr/ADR-0027-phase5-canonical-player-and-session-state.md), implementation `f1a1f0632e`, applicable local verification, and owner demo acceptance pass |
 | 5.3 | Implement command validation and atomic reducer application | **Implemented** | Accepted [`ADR-0028`](adr/ADR-0028-phase5-command-validation-and-atomic-reducer.md) and [`GDR-0012`](gdr/GDR-0012-phase5-minimal-motion-reducer-semantics.md), implementation `f57a4074db`, applicable local verification, and owner demo acceptance pass |
-| 5.4 | Publish immutable snapshots and versioned state-change events | **Not Started** | Readers cannot mutate canonical state and slow readers cannot block the writer indefinitely |
+| 5.4 | Publish immutable snapshots and versioned state-change events | **In Progress** | Proposed [`ADR-0029`](adr/ADR-0029-phase5-immutable-canonical-publication-and-versioned-change-feed.md); owner architecture approval and production implementation pending |
 | 5.5 | Add idempotency windows, authority-epoch checks, state checksums, and explicit resync requests | **Not Started** | Duplicate/stale/epoch mismatch and divergence-repair tests pass |
 | 5.6 | Add persistence, replay, script, and metrics sink interfaces without implementations | **Not Started** | All sinks receive the same committed change record after, never before, commit |
 | 5.7 | Add reducer property tests and deterministic multi-client simulation tests | **Not Started** | Randomized command streams preserve invariants and reproduce by seed |
@@ -3292,6 +3293,40 @@ Implementation notes:
   - Follow-ups: none for Slice 5.3. Slice 5.4 is now eligible but requires owner
     review of immutable snapshot/event publication ownership, versioning,
     retention, and slow-reader policy before production publication code lands.
+
+- 2026-08-28 — Slice 5.4 — In Progress
+  - Change: inspected the accepted authority/state-scope, deterministic counter,
+    observability, protocol snapshot timeline, canonical state, reducer, and
+    Slice 5.5/5.6 boundaries. Added proposed
+    [`ADR-0029`](adr/ADR-0029-phase5-immutable-canonical-publication-and-versioned-change-feed.md)
+    with five owner-gated architecture and state-scope option sets. No
+    production publication, reducer, protocol, checksum, resync, persistence,
+    scripting, interest, runtime, or gameplay code changed.
+  - Decisions: none accepted. The recommendation is a reducer-integrated
+    immutable latest-publication slot; a checked global version per installed
+    canonical candidate with batch exhaustion preflight; complete Phase 5 state
+    plus typed replacement records; latest-batch-only retention with explicit
+    version-gap snapshot replacement; and immutable reader handles with no
+    callback, acknowledgement, queue wait, or writer backpressure. The
+    publication remains domain-only and offline through Slice 5.5.
+  - Verification: `python -m unittest discover -s scripts/tests` passes all 98
+    repository-owned tests. Staged baseline provenance accounts for 184
+    intentional differences and verifies 54 dependency inputs; staged legacy
+    exclusion checks 3,878 tracked paths, 59 CMake files, 1,254 compile
+    commands, and 1,971 Ninja edges. The provenance JSON parses, all 103 local
+    vNext Markdown links resolve, ADR proposal/register and slice-status
+    assertions pass, and staged diff checks pass. A C++ product build,
+    formatting, FlatBuffers regeneration, corpus, and fuzz verification are not
+    applicable because this proposal adds no production source, schema,
+    decoder, or corpus.
+  - Owner review: pending explicit approval or amendment of ADR-0029 Decisions
+    1–5 and the proposed acceptance tests. No new GDR is proposed because the
+    record publishes already committed complete domain state without selecting
+    interest, visibility, movement, correction, or presentation behavior.
+  - Follow-ups: after approval, record the selected options and implement only
+    the approved immutable publication, state version, domain change records,
+    reader gap handling, observability, and focused tests. Slice 5.5 and online
+    composition remain gated.
 
 ### Phase 6 — Maintained transport and secure network session
 
