@@ -45,9 +45,10 @@ dependency profile.
 The authorized proof candidate was then implemented without changing production
 targets. Its exact c-ares 1.34.8 release archive, MIT license, restricted static
 profile, local loopback DNS fixture, and 13 public-API scenarios pass locally on
-MSVC 19.44. The supported hosted matrix and owner acceptance of this exact
-dependency profile remain open; this local result does not accept the ADR or
-authorize production integration.
+MSVC 19.44 and in the complete supported five-job hosted matrix on exact candidate
+`6dcea1b4afe2da9ce6005ec80cdb897d98f6739d`. Retained-artifact consistency review
+passes. Owner acceptance of this exact dependency profile remains open; the
+green proof does not accept the ADR or authorize production integration.
 
 ## Exact-pin resolver proof candidate
 
@@ -68,9 +69,10 @@ The disposable [c-ares selection proof](../proofs/cares/README.md) records:
 The exact lock, runner, safe archive extraction, license verification, supported
 five-job desktop workflow, Linux Clang 18 ASan+UBSan profile, and retained JSON
 evidence are part of the proof. It deliberately makes no production integration,
-DNSSEC, encrypted-DNS, application-cache, or connection-race claim. Local MSVC
-verification is selection evidence only; hosted proof evidence is required
-before the exact profile returns to the owner for acceptance.
+DNSSEC, encrypted-DNS, application-cache, or connection-race claim. The
+[supported proof run](https://github.com/poisson-fish/TES3MP/actions/runs/33202049447)
+and its five retained artifacts pass consistency review; exact profile acceptance
+remains a separate owner gate.
 
 ## Existing approved constraints
 
@@ -524,7 +526,8 @@ or test-support dependency.
 
 Option A is owner-approved for Decisions 1–6, including amended Decisions
 3.1–3.3 and their expanded acceptance tests. The authorized disposable c-ares
-proof now passes locally on MSVC 19.44; its supported hosted matrix remains the
-open evidence gate. Exact dependency acceptance remains a second owner review
-after that evidence before ADR-0032 can become **Accepted** or dependent Slice
-6.1 production integration can begin.
+proof passes locally and across its complete supported five-job hosted matrix;
+the five retained artifacts agree on the exact dependency, license, build
+profile, budgets, and 13-scenario test contract. Exact dependency acceptance
+remains the open owner review before ADR-0032 can become **Accepted** or
+dependent Slice 6.1 production integration can begin.

@@ -645,9 +645,14 @@
       "purpose": "Machine-readable OpenMW baseline, cutover, dependency-input, and intentional-difference record."
     },
     {
+      "path": "docs/vnext/IMPLEMENTATION_NOTES.md",
+      "status": "A",
+      "purpose": "Phase-indexed chronological slice logs, verification evidence, owner-review history, and working notes split from the concise implementation tracker."
+    },
+    {
       "path": "docs/vnext/IMPLEMENTATION_PLAN.md",
       "status": "A",
-      "purpose": "Living vNext phase, gate, status, and verification tracker."
+      "purpose": "Concise living vNext phase, gate, status, and current completion-evidence tracker."
     },
     {
       "path": "docs/vnext/LEGACY_GAMEPLAY_FEATURE_INVENTORY.md",

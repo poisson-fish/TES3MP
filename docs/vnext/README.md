@@ -33,8 +33,9 @@ writer-confined command validation and atomic reducer with accepted owner demo
 evidence. Slice 5.4 implements the approved immutable
 latest-publication, checked version, typed domain-change, and reader-gap
 contracts with accepted owner demo evidence. See the [implementation
-plan](IMPLEMENTATION_PLAN.md) for the live tracker, phase gates, decision
-records, and verification evidence. Slice 5.5 has accepted
+plan](IMPLEMENTATION_PLAN.md) for the live tracker, phase gates, and decision
+records, and the [implementation notes](IMPLEMENTATION_NOTES.md) for detailed
+verification and owner-review history. Slice 5.5 has accepted
 [`ADR-0030`](adr/ADR-0030-phase5-idempotency-checksum-and-resync-boundary.md);
 its production implementation and focused tests pass applicable local
 verification and owner demo acceptance. The reducer core is eligible for later
@@ -227,9 +228,10 @@ its kickoff and owner review of unresolved transport/session decisions. Proposed
 [`ADR-0032`](adr/ADR-0032-phase6-transport-adapter-and-lifecycle-boundary.md)
 contains the first Slice 6.1 decision packet. Its target, provisioning,
 lifecycle, pumping, initial-bound, and hostname/DNS architecture options are
-owner-approved. Its authorized exact-pin c-ares proof passes locally on MSVC;
-the supported hosted proof matrix and separate exact-dependency acceptance
-remain pending, so no Phase 6 production code exists.
+owner-approved. Its authorized exact-pin c-ares proof passes locally and across
+the complete five-job supported desktop matrix on exact candidate `6dcea1b4af`.
+Retained artifacts are consistent; separate owner acceptance of the exact
+dependency profile remains pending, so no Phase 6 production code exists.
 
 ## References and license
 
@@ -237,4 +239,5 @@ remain pending, so no Phase 6 production code exists.
 - [OpenMW multiplayer design note](https://gitlab.com/OpenMW/openmw/-/blob/openmw-0.51.0/docs/source/reference/lua-scripting/overview.rst#L85-90)
 - [OpenMW-VR source](https://gitlab.com/madsbuvi/openmw/-/tree/openmw-vr)
 - [Implementation plan](IMPLEMENTATION_PLAN.md)
+- [Implementation notes](IMPLEMENTATION_NOTES.md)
 - [License](../../LICENSE)

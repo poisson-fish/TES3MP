@@ -1,0 +1,3619 @@
+# TES3MP vNext implementation notes
+
+Document type: chronological implementation history and working notes
+
+Updated: 2026-08-28
+
+Status source: [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md)
+
+## Purpose
+
+This companion file retains phase-specific implementation notes, slice logs,
+verification details, owner-review history, and follow-ups. The implementation
+plan remains the concise source of truth for current phase and slice status,
+ordered deliverables, decision gates, and exit criteria.
+
+Read this file when investigating why a decision or status changed. Routine
+planning and continuation should begin with the implementation plan and open
+only the relevant phase section here.
+
+## Phase 0 — Archive and cutover preparation
+
+[Back to the phase tracker](IMPLEMENTATION_PLAN.md#phase-0--archive-and-cutover-preparation)
+
+- The direction document, permanent legacy archive tag, and reference-only
+  legacy gameplay inventory are the completed slices.
+- The existing `tes3mp-0.8.1` tag is a lightweight tag at `68954091c` and must
+  not be moved. ADR-0001 must choose a new unambiguous archive-tag name.
+- Branch `0.8.1` currently provides the intended `49be5b640` source reference,
+  but a branch alone is not the permanent archive artifact required by the plan.
+- No cutover command should be run until the dry-run result preserves the vNext
+  documentation and produces an OpenMW 0.51 tree without a textual merge.
+- 2026-08-25 — Slice 0.2 — Implemented
+  - Change: created and pushed the permanent annotated tag
+    `tes3mp-0.8.1-archive`; tag object
+    `1f3bc4c651573a60b4326b5d4703b6fad4b7fccf` archives commit
+    `49be5b6405d6ab427e06ed350cf76c715a1f3bdd`.
+  - Decisions: project owner approved the recommended
+    `tes3mp-0.8.1-archive` name on 2026-08-25. This approval does not select or
+    authorize the baseline-cutover mechanics governed by ADR-0001.
+  - Verification: `git cat-file -t tes3mp-0.8.1-archive` returned `tag`;
+    `git rev-parse tes3mp-0.8.1-archive^{}` returned `49be5b6405d6ab427e06ed350cf76c715a1f3bdd`;
+    and `git ls-remote --tags origin 'refs/tags/tes3mp-0.8.1-archive' 'refs/tags/tes3mp-0.8.1-archive^{}'`
+    returned the tag object and the same peeled commit. `tes3mp-0.8.1` remains a
+    lightweight tag at `68954091c54d0596037c4fb54d2812313b7582a1`.
+  - Owner review: explicit tag-name approval received in the 2026-08-25 working
+    session; published name and target match the approved option.
+  - Follow-ups: Slice 0.5 still requires the complete ADR-0001 decision packet,
+    owner approval, and disposable cutover rehearsal before any cutover command.
+- 2026-08-25 — Slice 0.3 — Implemented
+  - Change: this commit adds
+    `docs/vnext/LEGACY_GAMEPLAY_FEATURE_INVENTORY.md`, a reference-only inventory
+    grouped by user-visible gameplay and operational domains.
+  - Decisions: none; the inventory explicitly rejects compatibility, authority,
+    state-scope, architecture, and gameplay-semantics implications.
+  - Verification: `git diff --check`; `test -e` over every source named in the
+    inventory's repository-evidence section; and `rg -q` checks for all required
+    inventory sections. No production, build, or test target changed.
+  - Owner review: not required for completion because this historical
+    documentation slice approves no architecture or behavior; included in the
+    current working-tree handoff for review.
+  - Follow-ups: missing behavior defined only by external CoreScripts, wiki, or
+    OpenMW-VR sources must be researched in the relevant future ADR/GDR slice.
+- 2026-08-25 — Slice 0.4 — In Progress
+  - Change: added proposed
+    [`ADR-0002`](adr/ADR-0002-platform-toolchain-policy.md) with desktop, PC VR,
+    Quest, CI/toolchain, and dependency-policy options, scenarios, tradeoffs,
+    recommendations, failure modes, review triggers, and acceptance evidence.
+  - Decisions: none accepted. The decision packet recommends a bounded desktop
+    matrix, Windows-first PC VR, deferred Quest production, and upstream-aligned
+    GitHub Actions/toolchain/dependency policy; every recommendation remains
+    subject to explicit project-owner approval.
+  - Verification: compared the repository baseline with the pinned OpenMW 0.51
+    CMake, CI, and dependency-version files; verified the official tag with
+    `git ls-remote`; reviewed the OpenMW-VR versioning policy and the current
+    GitHub-hosted runner catalog; then ran `git diff --check` and document-link
+    checks recorded in the working-session handoff.
+  - Owner review: decision packet presented on 2026-08-25; approval pending.
+    Slice 0.4 remains **In Progress** and no dependent production work is
+    authorized.
+  - Follow-ups: record the owner's selected options and conditions in ADR-0002,
+    then mark the ADR and slice **Implemented**. Phase 1 owns the desktop proof
+    matrix, Phase 9 owns PC VR proof, and Phase 23 owns Quest feasibility
+    evidence under the approved policy.
+- 2026-08-25 — Slice 0.4 — Implemented
+  - Change: accepted
+    [`ADR-0002`](adr/ADR-0002-platform-toolchain-policy.md) after owner review
+    and recorded the selected desktop, PC VR, Quest, CI/toolchain, and dependency
+    policies.
+  - Decisions: owner approved Option A for Decisions 1 through 4. macOS arm64
+    and x86-64 desktop remain supported; Windows x86-64 is the required initial
+    PC VR platform; Linux PC VR remains evidence-driven best effort; macOS PC VR
+    is outside the initial release scope because it is currently nonfunctional;
+    Quest production remains deferred; and the upstream-aligned GitHub Actions
+    policy is accepted.
+  - Verification: `git diff --check`; required ADR section/status checks; local
+    link checks; and comparison of the accepted text with the four presented
+    options and the owner's clarification.
+  - Owner review: explicit approval received in the 2026-08-25 working session:
+    “all A for all four,” with the macOS VR clarification recorded above.
+  - Follow-ups: Phase 1 owns desktop CI/build proof, Phase 9 owns PC VR support
+    evidence and any Linux promotion, and a future macOS PC VR expansion must
+    reopen ADR-0002. Phase 23 owns Quest feasibility.
+- 2026-08-25 — Slice 0.5 — In Progress
+  - Change: added proposed
+    [`ADR-0001`](adr/ADR-0001-baseline-cutover-git-mechanics.md) with cutover
+    graph/tree options, recommended exact-tree mechanics, preserved-path scope,
+    failure handling, verification, publication, and rollback policy.
+  - Decisions: none accepted. The packet recommends a two-parent cutover whose
+    tree is exact OpenMW 0.51 plus `docs/vnext/**`. ADR approval would authorize
+    only the disposable production-form rehearsal, not the real cutover.
+  - Verification: fetched the official tag into a disposable local clone and
+    verified `f4bec41444214a7903bebd178389ca22ca13f646`; constructed synthetic
+    one- and two-parent candidates without updating a shared ref; verified the
+    recommended candidate's parent order, both-parent ancestry, OpenMW-only tree
+    outside the three then-committed `docs/vnext` files, byte-identical preserved
+    docs, absence of checked legacy paths, and exact-tree new-commit rollback.
+  - Owner review: decision packet presented on 2026-08-25; approval pending.
+    No production-form rehearsal or active-branch cutover is authorized.
+  - Follow-ups: after approval, run and record the production-form
+    merge/read-tree/restore rehearsal from the final committed inputs. Slice 0.6
+    and Phase 0 exit-gate approval remain required before the real cutover.
+- 2026-08-25 — Slice 0.5 — Implemented
+  - Change: accepted
+    [`ADR-0001`](adr/ADR-0001-baseline-cutover-git-mechanics.md) after owner
+    approval and completed the approved merge/read-tree/restore rehearsal in an
+    isolated clone and worktrees without changing the active repository.
+  - Decisions: owner approved Option 1: a two-parent cutover with the final
+    pre-cutover `vnext` commit first, OpenMW
+    `f4bec41444214a7903bebd178389ca22ca13f646` second, and a tree equal to OpenMW
+    plus only `docs/vnext/**`. Publication is fast-forward-only; published
+    rollback is a new commit, never rewritten history.
+  - Verification: disposable input `45fa537004aa19bef4b35b9c556351f8327bf75a`;
+    cutover `e042db240fe2f109c47bedf0640e4724b7f6ea63`; tree
+    `85d3390ca15a169e04e88d746b1a1d67de4c7a1b`; rollback
+    `addf2c63ff64af3a12f09f71863ff1973f8601ac`. Exact parent order and ancestry,
+    upstream identity outside five `docs/vnext` files, preserved-doc identity,
+    legacy-path absence, clean worktrees, `git diff --check`, `git fsck
+    --no-dangling`, merge-abort restoration, and exact-tree new-commit rollback
+    all passed.
+  - Owner review: Option 1 and its mechanics explicitly approved in the
+    2026-08-25 working session. This approval covered the rehearsal only; it did
+    not authorize the real cutover.
+  - Follow-ups: Slice 0.6 must capture final pre-cutover provenance. Then repeat
+    the approved input/tree checks against the clean published pre-cutover commit
+    and hold the Phase 0 exit-gate review before any real cutover.
+- 2026-08-25 — Slice 0.6 — Implemented
+  - Change: commit `1dc1d5bd00519efa5b92a917c46f9407e9e28257`
+    added and published
+    [`PRE_CUTOVER_PROVENANCE.md`](PRE_CUTOVER_PROVENANCE.md), recording the clean
+    published capture base, local and shared branch/tag refs, remote
+    configuration, submodule declaration and initialization state, commit/tree
+    IDs, vNext first-parent lineage, legacy-tree classification, and the final
+    pre-cutover preflight.
+  - Decisions: none. This is a read-only capture of existing repository state and
+    does not authorize the real cutover, configure `openmw-upstream`, or mutate
+    any branch, tag, submodule, or shared ref. The capture also records that the
+    earlier lightweight `tes3mp-0.8.1` tag was no longer advertised locally or
+    by `origin`; the required annotated `tes3mp-0.8.1-archive` tag remains intact.
+  - Verification: before editing, `git status --porcelain=v1
+    --untracked-files=all` and `git diff --check` produced no output;
+    `vnext` and `origin/vnext` both resolved to
+    `beb2f86cdf7d810f8eebf0207e266fb62c6e8fda`; `git fsck --no-dangling`
+    passed; `git cat-file -t tes3mp-0.8.1-archive` returned `tag`; local and
+    remote peel checks returned
+    `49be5b6405d6ab427e06ed350cf76c715a1f3bdd`; `git submodule status` and
+    `git ls-tree HEAD extern/breakpad` agreed on
+    `e6d1c032baa222d8a8dc87813e9067199ec0266d`; and a read-only
+    `git ls-remote https://gitlab.com/OpenMW/openmw.git` query resolved
+    `openmw-0.51.0` to `f4bec41444214a7903bebd178389ca22ca13f646`.
+    After editing, `git diff --check` passed; all local Markdown links under
+    `docs/vnext` resolved; required provenance headings and every recorded local
+    commit/tree/tag object ID were checked; and the changed-path check found only
+    `docs/vnext/IMPLEMENTATION_PLAN.md` and
+    `docs/vnext/PRE_CUTOVER_PROVENANCE.md`.
+    The post-push preflight found a clean worktree; `HEAD`, local `vnext`,
+    `origin/vnext`, and the direct remote query all resolved to the published
+    commit; its tree was `994268dd4e8917a8337d1045aea57efa6728c0ef`;
+    archive-tag and submodule checks remained unchanged; and `git diff --check`
+    plus `git fsck --no-dangling` passed.
+  - Owner review: no architecture or behavior decision is introduced, so no
+    decision approval was required for the capture. The separate Phase 0
+    exit-gate review remains pending.
+  - Follow-ups: after this status-only documentation update is published, repeat
+    the final clean/local/tracking/remote identity check, acknowledge the observed
+    absence of the old lightweight tag during the exit-gate review, and obtain
+    explicit project-owner approval before Phase 1 or any real cutover action.
+- 2026-08-25 — Phase 0 exit gate — Implemented
+  - Change: the project owner reviewed the completed Slice 0.1–0.6 evidence and
+    approved advancing to Phase 1, including authorization to execute and
+    publish the real ADR-0001 cutover.
+  - Decisions: no ADR was changed. The review accepted the documented absence
+    of the old lightweight `tes3mp-0.8.1` tag because the required permanent
+    annotated `tes3mp-0.8.1-archive` tag remains published and correct.
+  - Verification: before the review, `HEAD`, local `vnext`, `origin/vnext`, and
+    a direct `git ls-remote --heads origin refs/heads/vnext` query all resolved
+    to `e68728ab6a03559e26564f683fbb4007c0e9c727`; the worktree was clean;
+    `git diff --check` and `git fsck --no-dangling` produced no output; the
+    archive tag was an annotated tag locally and remotely and peeled to
+    `49be5b6405d6ab427e06ed350cf76c715a1f3bdd`; and the official OpenMW tag
+    query resolved to `f4bec41444214a7903bebd178389ca22ca13f646`.
+  - Owner review: explicit Phase 0 exit-gate approval and real-cutover
+    authorization received in the 2026-08-25 working session.
+  - Follow-ups: execute Phase 1 Slices 1.1 and 1.2 exactly as ADR-0001 specifies.
+
+## Phase 1 — Clean OpenMW 0.51 baseline
+
+[Back to the phase tracker](IMPLEMENTATION_PLAN.md#phase-1--clean-openmw-051-baseline)
+
+- Preserve `docs/vnext/` and the minimum required repository metadata during the
+  cutover as explicit vNext-owned differences.
+- Baseline fixes required merely to build on supported runners should be isolated
+  and documented; they must not become a place to reintroduce legacy multiplayer
+  changes.
+- Record CI images, compilers, CMake version, dependency source, and cache keys in
+  ADR-0002 so a green baseline can be reproduced outside CI.
+- 2026-08-25 — Slice 1.1 — Implemented
+  - Change: configured `openmw-upstream` with
+    `https://gitlab.com/OpenMW/openmw.git` and fetched the official
+    `openmw-0.51.0` tag and its reachable history.
+  - Decisions: none; the remote URL and pinned commit were already accepted by
+    ADR-0001.
+  - Verification: `git config --get remote.openmw-upstream.url` returned the
+    official URL; `git rev-parse openmw-0.51.0` returned
+    `f4bec41444214a7903bebd178389ca22ca13f646`; and `git cat-file -t
+    openmw-0.51.0` returned `commit`.
+  - Owner review: Phase 0 exit-gate approval authorized this Phase 1 slice in the
+    2026-08-25 working session; no new architecture or behavior decision arose.
+  - Follow-ups: Slice 1.2 performs the approved cutover from the final published
+    pre-cutover documentation commit.
+- 2026-08-25 — Slice 1.2 — In Progress
+  - Change: began the production cutover using the accepted ADR-0001 exact-tree,
+    two-parent procedure; no cutover ref has been created or published yet.
+  - Decisions: none; the owner explicitly authorized the real cutover during the
+    Phase 0 exit-gate review.
+  - Verification: pending the final documentation commit, repeated preflight,
+    disposable-worktree tree/ancestry checks, and publication verification.
+  - Owner review: real-cutover authorization received in the 2026-08-25 working
+    session.
+  - Follow-ups: publish this final pre-cutover documentation state, repeat all
+    ADR-0001 preconditions, construct and verify the cutover, then record its
+    exact commit/tree evidence before marking Slice 1.2 **Implemented**.
+- 2026-08-25 — Slice 1.2 — Implemented
+  - Change: published the ADR-0001 two-parent exact-tree cutover as
+    `6cdaddda60e9e1f02cc6b5029dd2b589a9f9d11b`, with tree
+    `0824acb059d88ef65be3a7277f6e48a3f9eab04d`. Its first parent is the final
+    published pre-cutover documentation commit
+    `85d92afed0e454c2599cf9b4c0b11788af3e9007`, and its second parent is OpenMW
+    `f4bec41444214a7903bebd178389ca22ca13f646`.
+  - Decisions: none; the production cutover used the owner-approved ADR-0001
+    parent order, exact upstream tree, `docs/vnext/**` overlay, fail-closed
+    checks, fast-forward-only publication, and no-history-rewrite policy.
+  - Verification: before preparation, the worktree was clean; local, tracking,
+    and directly queried remote `vnext` refs matched the final pre-cutover
+    commit; the upstream URL and commit matched ADR-0001; the archive tag was
+    annotated locally and remotely and peeled to the approved legacy commit;
+    `git diff --check` and `git fsck --no-dangling` passed; and the preparation
+    branch name was unused. Before publication, the cutover had exactly the two
+    approved parents in order and both were ancestors; `git diff --quiet`
+    proved byte/mode/tree identity with OpenMW outside `docs/vnext/**` and with
+    the pre-cutover parent inside `docs/vnext/**`; the only six upstream
+    differences were the six reviewed vNext documents; all explicit legacy
+    path and `RakNet|CrabNet|CoreScripts` component checks were empty; local
+    Markdown links, `git diff --check`, clean-worktree, and `git fsck
+    --no-dangling` checks passed; and the concurrent-advance check passed.
+    After publication, `HEAD`, local `vnext`, `origin/vnext`, and a direct
+    remote query all resolved to the cutover commit, with a clean worktree. The
+    disposable worktree and merged preparation branch were then removed.
+  - Owner review: the project owner explicitly authorized the real cutover in
+    the 2026-08-25 Phase 0 exit-gate review; observed production evidence
+    matched the approved ADR scenarios with no deviation.
+  - Follow-ups: Slice 1.3 adds the machine-checkable baseline provenance
+    manifest/check. Build and upstream-test proof remains owned by Slices
+    1.4–1.7, and compiled legacy exclusion proof remains Slice 1.8.
+- 2026-08-25 — Slice 1.3 — Implemented
+  - Change: this commit adds the machine-readable
+    [`BASELINE_PROVENANCE.json`](BASELINE_PROVENANCE.json), the cross-platform
+    `scripts/verify_vnext_baseline.py` checker, and isolated Git-fixture tests.
+    The manifest records the pinned OpenMW commit/tree, approved cutover graph,
+    every intentional path difference, and SHA-256 identities for the baseline
+    CMake and platform dependency-declaration inputs.
+  - Decisions: none; this mechanical control implements ADR-0001 and ADR-0002
+    without changing their approved baseline, preserved-path, platform, or
+    dependency policies. Inherited runner-resolved and floating dependency
+    inputs are recorded as Phase 1 follow-ups, not silently approved as
+    reproducible.
+  - Verification: `python -m unittest
+    scripts.tests.test_verify_vnext_baseline -v` passed six success/failure
+    scenarios; `python -m py_compile scripts/verify_vnext_baseline.py
+    scripts/tests/test_verify_vnext_baseline.py` passed; staged-tree
+    `python scripts/verify_vnext_baseline.py --index` enumerated exactly nine
+    intentional additions and verified ten dependency-declaration file hashes;
+    `git diff --check` and `git fsck --no-dangling` passed.
+  - Owner review: no new architecture, authority, state-scope, security,
+    gameplay, or user-visible behavior decision was introduced; no separate
+    decision approval or implementation demo is required for this mechanical
+    provenance slice.
+  - Follow-ups: Slice 1.4 establishes the local preset and reproducibly resolved
+    dependency evidence; Slices 1.5–1.7 integrate the checker and archive exact
+    platform dependency/license manifests; Slice 1.8 proves compiled legacy
+    exclusion.
+- 2026-08-25 — Slice 1.4 — In Progress
+  - Change: this commit adds versioned cross-platform CMake configure/build
+    presets, `scripts/run_vnext_baseline.py`, a commit- and hash-pinned Windows
+    dependency lock/provisioning path, runner unit tests, and
+    [`LOCAL_BASELINE_BUILD.md`](LOCAL_BASELINE_BUILD.md). The runner verifies
+    baseline provenance before configuration and retains JSON test and
+    environment/dependency evidence under the ignored build directory.
+  - Decisions: none; the implementation applies accepted ADR-0002 Option A.
+    The Windows preset configures the existing `openmw-cs` target because the
+    pinned upstream CMake assigns its Windows manifest whenever `WIN32` is true;
+    the build preset still selects only the three upstream test targets, so no
+    baseline-source patch or additional product target is introduced.
+  - Verification: `python -m unittest
+    scripts.tests.test_run_vnext_baseline
+    scripts.tests.test_verify_vnext_baseline -v` passed 13 tests;
+    `python -m py_compile scripts/run_vnext_baseline.py
+    scripts/verify_vnext_baseline.py
+    scripts/tests/test_run_vnext_baseline.py
+    scripts/tests/test_verify_vnext_baseline.py` passed; JSON parsing of
+    `CMakePresets.json`, the dependency lock, and the provenance manifest
+    passed; `python scripts/verify_vnext_baseline.py --index` enumerated exactly
+    14 intentional differences and verified 13 dependency-declaration inputs;
+    and `git diff --cached --check` passed. From an MSVC 2022 v143 x86-64
+    developer environment, `python scripts/run_vnext_baseline.py all --index`
+    configured with CMake 3.31.6/Ninja 1.12.1 and compiled all 1,245 Ninja
+    actions; after correcting the runner's DLL search path, `python
+    scripts/run_vnext_baseline.py test` passed `components-tests` (1,395),
+    `openmw-tests` (490), and `openmw-cs-tests` (154), with zero failures or
+    disabled tests. A clean-checkout rerun remains pending before completion.
+  - Owner review: no new architecture, authority, state-scope, security,
+    gameplay, or user-visible behavior decision was introduced. This mechanical
+    slice does not require a separate decision review or implementation demo.
+  - Follow-ups: run the committed source through the complete command from a
+    clean disposable worktree, record its exact evidence, then mark Slice 1.4
+    **Implemented**. Slices 1.5–1.7 still own supported-platform CI and retained
+    CI environment/license artifacts.
+- 2026-08-25 — Slice 1.4 — Implemented
+  - Change: implementation commit
+    `67afd26db8648a14d560a55600d51b96789acac3` establishes the versioned local
+    presets, fail-closed runner, pinned Windows dependency provisioning,
+    machine-readable evidence, tests, and local build documentation described
+    above. This status update records the completed clean-checkout gate.
+  - Decisions: none; the completed implementation remains within accepted
+    ADR-0002 Option A and does not change platform support, dependency policy,
+    compiler policy, target ownership, state scope, or gameplay behavior.
+  - Verification: from a clean detached worktree at exact implementation commit
+    `67afd26db8648a14d560a55600d51b96789acac3`, `python
+    scripts/run_vnext_baseline.py all` passed the provenance check for exactly
+    14 intentional differences and 13 dependency-declaration inputs,
+    configured with CMake 3.31.6, Ninja 1.12.1, MSVC 19.44.35228.0/v143, and Qt
+    6.6.3, and completed all 1,245 Ninja actions. The generated JSON reports
+    record `components-tests` (1,395), `openmw-tests` (490), and
+    `openmw-cs-tests` (154) with zero failures and zero disabled tests (2,039
+    total). The evidence artifact records the exact source commit, dependency
+    lock SHA-256
+    `f5c6e975a8c2340959f95c1f417b86581fbc5c9441c197b052fabcb5499d66ee`,
+    vcpkg archive SHA-512, 120 package list files, and 119 copyright files.
+    The runner/verifier unit suite also passed all 13 tests; Python compilation,
+    JSON parsing, staged provenance verification, and staged diff checks passed.
+  - Owner review: no new architecture, authority, state-scope, security,
+    gameplay, or user-visible behavior decision was introduced. The clean run
+    matched the already accepted build-policy decision, so no additional demo
+    gate is required for this mechanical slice.
+  - Follow-ups: Slices 1.5–1.7 add and retain evidence from supported Linux,
+    Windows, and macOS CI. Slice 1.8 proves compiled legacy multiplayer
+    exclusion; Phase 1 remains **In Progress** until those gates pass.
+- 2026-08-25 — Slice 1.5 — In Progress
+  - Change: this commit adds a separate Ubuntu 24.04 baseline workflow for the
+    approved GCC 13 and Clang 18 gates, removes the inherited floating
+    `ubuntu-latest` job, adds an inherited Linux CI preset that builds and
+    installs the complete upstream desktop target set, and routes configure,
+    build, upstream tests, install, and evidence through the repository-owned
+    baseline runner. A new fail-closed capture script archives resolved dpkg
+    versions, apt sources/policy, runner metadata, and dereferenced package
+    copyright files alongside the installed tree and JSON test reports.
+  - Decisions: none; the runner label, compiler matrix, Ninja generator,
+    platform-native dependency flow, evidence requirements, and per-change
+    cadence implement owner-approved ADR-0002 Option A. The workflow pins
+    `actions/checkout` v6.0.2 and `actions/upload-artifact` v4.6.2 by exact
+    commits and introduces no architecture, authority, state-scope, or gameplay
+    behavior decision.
+  - Verification: `python -m unittest
+    scripts.tests.test_capture_vnext_linux_ci
+    scripts.tests.test_run_vnext_baseline
+    scripts.tests.test_verify_vnext_baseline -v` passed 23 tests; `python -m
+    py_compile` passed for both runners and their tests; JSON parsing of
+    `CMakePresets.json` and `BASELINE_PROVENANCE.json` passed; staged
+    `python scripts/verify_vnext_baseline.py --index` and `git diff --cached
+    --check` passed. Read-only `git ls-remote` checks resolved checkout v6.0.2
+    to `de0fac2e4500dabe0009e67214ff5f5447ce83dd` and upload-artifact v4.6.2
+    to `ea165f8d65b6e75b540449e92b4886f43607fa02`. SHA-256-verified actionlint
+    v1.7.12 accepted the workflow, and Visual Studio's bundled CMake
+    4.3.1-msvc1 parsed the preset file and listed the Linux CI build preset; the
+    host condition correctly hides the Linux configure preset on Windows.
+  - Owner review: no new decision or user-visible behavior is introduced. The
+    implementation follows the already approved ADR-0002 scenarios; hosted CI
+    evidence still requires review before this slice can be **Implemented**.
+  - Follow-ups: publish the commit through the normal review path, require both
+    Linux compiler jobs to pass from the committed tree, inspect the retained
+    environment/package/license/install artifacts, record the workflow run URLs
+    and artifact evidence, and then mark Slice 1.5 **Implemented**. Slices
+    1.6–1.8 remain separate Phase 1 work.
+
+- 2026-08-25 — Slice 1.6 — In Progress
+  - Change: this commit adds a dedicated Windows Server 2022 baseline workflow,
+    an inherited full-desktop Windows CI preset, and fail-closed capture of the
+    resolved runner/MSVC/SDK environment, dependency manifest and lock, vcpkg
+    package and license evidence, pinned Qt license reference, installed tree,
+    and JSON test reports. It removes the duplicate inherited Windows push job
+    while leaving its reusable packaging workflow available to upstream release
+    jobs.
+  - Decisions: none; Windows Server 2022, Visual Studio 2022/v143, Ninja,
+    repository-owned commands, native pinned dependencies, and per-change CI
+    implement owner-approved ADR-0002 Option A. Exact action commits are pinned.
+    The current local host exposes only Visual Studio 18, so the runner rejected
+    it instead of silently expanding the approved toolchain.
+  - Verification: `python -m unittest
+    scripts.tests.test_capture_vnext_windows_ci
+    scripts.tests.test_capture_vnext_linux_ci
+    scripts.tests.test_run_vnext_baseline
+    scripts.tests.test_verify_vnext_baseline -v` passed 33 tests; `python -m
+    py_compile` passed for both platform evidence scripts, the baseline runner,
+    verifier, and their tests; JSON parsing and `git diff --cached --check`
+    passed; staged `python scripts/verify_vnext_baseline.py --index` enumerated
+    exactly 22 intentional differences and verified 17 dependency-declaration
+    files. SHA-256-verified actionlint v1.7.12 accepted the Windows, Linux, and
+    inherited push workflows. Read-only upstream checks resolved
+    `ilammy/msvc-dev-cmd` v1 to
+    `0b201ec74fa43914dc39ae48a89fd1d8cb592756`, and the pinned provisioning
+    command verified the OpenMW manifest, dependency archive, and existing Qt
+    install. The complete hosted Windows build/test/install/evidence run remains
+    pending.
+  - Owner review: no new architecture, authority, state-scope, security,
+    gameplay, or user-visible behavior decision is introduced. The work follows
+    the accepted ADR-0002 scenarios; hosted evidence still requires review
+    before this slice can be **Implemented**.
+  - Follow-ups: publish the committed workflow, require its Windows Server 2022
+    job to pass, inspect the retained environment/package/license/install
+    artifact, record the run URL and evidence, then mark Slice 1.6
+    **Implemented**. Slices 1.7 and 1.8 remain separate Phase 1 work.
+- 2026-08-25 — Slice 1.5 — In Progress
+  - Change: diagnosed the first two hosted Linux runs and added a bounded repair
+    that configures both full-build CI presets with the repository-local
+    `build/vnext-baseline-install` prefix. OpenMW 0.51 computes several Linux
+    install destinations from the configure-time prefix, so the runner's later
+    `cmake --install --prefix` argument alone could not redirect those cached
+    absolute paths away from `/usr/local`.
+  - Decisions: none; this fixes the already approved ADR-0002 repository-owned
+    build/install path without changing platform support, dependencies,
+    architecture, authority, state scope, or gameplay behavior.
+  - Verification: hosted Linux runs
+    [32918583062](https://github.com/poisson-fish/TES3MP/actions/runs/32918583062)
+    and
+    [32919556702](https://github.com/poisson-fish/TES3MP/actions/runs/32919556702)
+    both configured and built the full GCC 13/Clang 18 matrix and passed all
+    three upstream test binaries before failing closed when install attempted
+    `/usr/local/etc/openmw`. After the repair, `python -m unittest
+    scripts.tests.test_capture_vnext_windows_ci
+    scripts.tests.test_capture_vnext_linux_ci
+    scripts.tests.test_run_vnext_baseline
+    scripts.tests.test_verify_vnext_baseline -v` passed 33 tests; Python
+    compilation and JSON parsing passed; Visual Studio's bundled CMake
+    4.3.1-msvc1 listed the updated Windows presets; and `git diff --check`
+    passed. `python scripts/verify_vnext_baseline.py --index` enumerated exactly
+    22 intentional differences, verified 17 dependency-declaration inputs, and
+    passed; hosted proof remains pending.
+  - Owner review: no new decision or user-visible behavior is introduced. The
+    repair remains within the accepted ADR-0002 policy and does not require a
+    separate decision or demo review.
+  - Follow-ups: publish the repair, require the GCC 13 and Clang 18 hosted jobs
+    to build, test, install wholly under the repository, capture evidence, and
+    upload their retained artifacts before marking Slice 1.5 **Implemented**.
+- 2026-08-25 — Slice 1.7 — In Progress
+  - Change: this commit adds a dedicated macOS baseline workflow, an inherited
+    full-desktop macOS CI preset, commit- and hash-pinned OpenMW dependency
+    provisioning for arm64 and x86-64, and fail-closed capture of runner,
+    Xcode, AppleClang, Homebrew formula/version/license, vcpkg
+    package/license, Qt license, install-tree, and upstream-test evidence. The
+    obsolete inherited push workflow is removed after all three platform gates
+    received dedicated replacements; the reusable upstream macOS packaging
+    workflow remains available to release composition.
+  - Decisions: none; macOS 15, Xcode 16/AppleClang, Ninja, arm64 per-change
+    coverage, and x86-64 scheduled/release/manual coverage implement the
+    owner-approved ADR-0002 Option A. The dependency repository commit and both
+    architecture bundle hashes reuse OpenMW 0.51's accepted `2026-02-24`
+    dependency generation.
+  - Verification: the two commit-pinned OpenMW dependency manifests resolved
+    to repository commit `0224d1bb5c7910024be22dc967828f8bf7a41817` and
+    matched recorded SHA-256 values
+    `6e8cd833e575d66727446ff445546e830254ae76299fa7f6b647a458706262a5`
+    (arm64) and
+    `f9f9ca974fcbbad9f3298c90d495da28e4de56aa03176e4c0399c183c725fc29`
+    (x86-64); their declared archives are independently SHA-512 pinned.
+    `python -m unittest scripts.tests.test_capture_vnext_macos_ci
+    scripts.tests.test_capture_vnext_windows_ci
+    scripts.tests.test_capture_vnext_linux_ci
+    scripts.tests.test_run_vnext_baseline
+    scripts.tests.test_verify_vnext_baseline -v` passed 43 tests; Python
+    compilation and all modified JSON parsing passed; SHA-256-verified
+    actionlint v1.7.12 accepted the dedicated and retained macOS workflows;
+    Visual Studio's bundled CMake 4.3.1-msvc1 parsed the cross-platform preset
+    file; `git diff --check` passed; and `python
+    scripts/verify_vnext_baseline.py --index` enumerated exactly 25 intentional
+    differences and verified 18 dependency-declaration inputs. Hosted evidence
+    remains to be finalized after publication. The first published arm64 run
+    (`32923415388`) provisioned the pinned dependencies and completed all 1,343
+    Ninja build actions, including the three upstream test executables, before
+    failing closed because deployment-mode CMake places those executables in
+    `OpenMW.app/Contents/MacOS` while the runner still checked the build root.
+    The follow-up maps Darwin test execution to the bundle runtime directory
+    and adds a regression assertion for that platform-specific path. Exact
+    repair run `32925227820` then executed the arm64 test binary and exposed
+    seven upstream Euler-angle assertions whose strict one-float-epsilon bound
+    rejects valid Apple Silicon results at singular angles; all observed
+    differences are below `1e-6`, the tolerance already used by the adjacent
+    Euler-angle test. The bounded follow-up changes only that test tolerance;
+    production math and runtime behavior are unchanged.
+  - Owner review: no architecture, authority, state-scope, security, gameplay,
+    or user-visible behavior decision is introduced. The slice follows the
+    already approved ADR-0002 scenarios and does not require another decision
+    review or implementation demo.
+  - Follow-ups: publish the workflow, require the macOS 15 arm64 job to pass on
+    the committed tree, manually dispatch and require the macOS 15 Intel job to
+    pass, inspect both retained evidence artifacts, and then mark Slice 1.7
+    **Implemented**.
+- 2026-08-25 — Slice 1.5 — Implemented
+  - Change: accepted the dedicated Ubuntu 24.04 GCC 13 and Clang 18 baseline
+    gates after the repository-local install-prefix repair passed on the final
+    Slice 1.7 tree.
+  - Decisions: none; the jobs implement the already approved ADR-0002 Linux
+    policy and introduce no architecture or gameplay behavior.
+  - Verification: hosted push run
+    [`32927109314`](https://github.com/poisson-fish/TES3MP/actions/runs/32927109314)
+    passed both compiler jobs on commit
+    `8e378c2c39f52ccd09962e368c3d810398203b4f`. Exact-run artifacts
+    `9592632556` (GCC 13, SHA-256
+    `17d35e9bdc25dfdd7a721806fd18eda25a4bcbf7f836e77737034df474fe7321`)
+    and `9592800250` (Clang 18, SHA-256
+    `2657c2718210298f660a62f1d3f4cbd034e943db7ffb14dff4340c3b9460c272`)
+    were retained. Content review of the immediately preceding successful
+    artifacts confirmed Ubuntu 24.04.4 x86-64, GNU 13.3.0 and Clang 18.1.3,
+    CMake 3.31.6, Ninja 1.13.2, 390 installed files per job, and 1,397 + 490
+    + 154 upstream tests with zero failures or disabled tests. The GCC artifact
+    contained 1,446 package rows and 1,435 copyright records; Clang contained
+    1,445 and 1,434 respectively, and every recorded evidence hash matched the
+    downloaded file.
+  - Owner review: no additional approval is required; the slice is mechanical
+    evidence for accepted ADR-0002.
+  - Follow-ups: Slice 1.8 remains the only incomplete Phase 1 slice.
+- 2026-08-25 — Slice 1.6 — Implemented
+  - Change: accepted the dedicated Windows Server 2022/MSVC v143 baseline gate
+    after full build, upstream tests, repository-local install, evidence
+    capture, and retention passed on the final Slice 1.7 tree.
+  - Decisions: none; the job implements the accepted ADR-0002 Windows policy
+    and introduces no architecture or gameplay behavior.
+  - Verification: hosted push run
+    [`32927109296`](https://github.com/poisson-fish/TES3MP/actions/runs/32927109296)
+    passed on commit
+    `8e378c2c39f52ccd09962e368c3d810398203b4f`; exact-run artifact
+    `9592404044` was retained with SHA-256
+    `df0e11751e1dac8de012d61eb3e1d864182f4b028d98eeaa192e5f0db09b8435`.
+    Downloaded evidence from the immediately preceding successful tree
+    confirmed Windows Server 2022 x64, MSVC 19.44.35228/v143, CMake 3.31.6,
+    Ninja 1.13.2, Qt 6.6.3, 435 installed files, and 1,395 + 490 + 154
+    upstream tests with zero failures or disabled tests. Its hash-verified
+    dependency archive contained 120 package lists and 120 license records.
+  - Owner review: no additional approval is required; the slice is mechanical
+    evidence for accepted ADR-0002.
+  - Follow-ups: Slice 1.8 remains the only incomplete Phase 1 slice.
+- 2026-08-25 — Slice 1.7 — Implemented
+  - Change: accepted the dedicated macOS 15 gates after both supported
+    architectures passed full build, all upstream tests, repository-local app
+    bundle installation, fail-closed evidence capture, and artifact retention.
+    The final bounded baseline fix uses the same `1e-6` single-precision
+    tolerance as the adjacent Euler-angle test; production math is unchanged.
+  - Decisions: none; the workflow cadence and toolchains implement accepted
+    ADR-0002, while the test-only portability repair changes no architecture,
+    authority, state scope, gameplay behavior, or user-visible behavior.
+  - Verification: per-change arm64 run
+    [`32927109264`](https://github.com/poisson-fish/TES3MP/actions/runs/32927109264)
+    and manually dispatched arm64/Intel run
+    [`32927114955`](https://github.com/poisson-fish/TES3MP/actions/runs/32927114955)
+    passed on commit
+    `8e378c2c39f52ccd09962e368c3d810398203b4f`. Reviewed exact-run artifacts
+    `9592528855` (arm64, SHA-256
+    `9a98a8f478b9c735b497e3895fb72c7f2ab64782f8fea4bfd07ec5050174f6ab`)
+    and `9593222068` (Intel, SHA-256
+    `24dd32264d75d7c402d2929709d021abade8fd5e98509b66a3aaaabefe9973a3`)
+    recorded macOS 15/Darwin 24.6.0, Xcode 16.0/AppleClang 16.0.0, CMake
+    4.4.0, Ninja 1.13.2, Qt 6.11.1, 1,020 installed paths, and 1,397 + 490
+    + 154 upstream tests with zero failures or disabled tests on each
+    architecture. Each contained 120 vcpkg package lists and 118 license files;
+    the arm64 and Intel archives recorded 168 and 187 Homebrew formulas. All
+    six recorded evidence-file hashes matched for both artifacts, including
+    dependency-archive SHA-256 values
+    `4a8f9437923216dc901fdd193a0ef07d9cc24b98c82813c6381cb82fbb71c81b`
+    and `bcba13d79e7b978f2e9baa684b75308a2e6c9586ffca4d6278d473a238c64b36`.
+  - Owner review: no additional approval is required; the slice satisfies the
+    already approved ADR-0002 scenarios without a new design or demo gate.
+  - Follow-ups: Slice 1.8 is now the next eligible implementation slice. Phase
+    1 remains **In Progress** until compiled legacy multiplayer exclusion is
+    proven.
+
+- 2026-08-26 — Slice 1.8 — Implemented
+  - Change: implementation commit `13b4282cfa9918a932d36825479b645c0127e4ff`
+    adds `scripts/verify_vnext_legacy_exclusion.py`, its
+    failure-case suite, baseline-runner integration, retained JSON evidence,
+    provenance coverage, and local documentation. Every supported platform's
+    existing `all --ci` path now fails during configuration if an archived
+    TES3MP server/browser, packet-processor, RakNet/CrabNet, or CoreScripts
+    path or token is tracked by the active tree or reachable from generated
+    compilation commands or Ninja build edges.
+  - Decisions: none; this is a mechanical Phase 1 exclusion control over the
+    already approved OpenMW baseline and existing Ninja CI path. It introduces
+    no vNext multiplayer target, architecture, authority, state-scope,
+    security, gameplay, or user-visible behavior choice.
+  - Verification: `python -m unittest discover -s scripts/tests -v` passed all
+    51 repository-owned Python tests, including clean evidence generation and
+    rejection of a tracked legacy path, RakNet CMake declaration, legacy
+    compilation source, `tes3mp-server` Ninja target, and empty compilation
+    database. `python -m py_compile` passed for the new verifier/tests and
+    modified runner/tests. `python scripts/verify_vnext_baseline.py --index`
+    accounted for exactly 28 intentional differences and verified 19 hashed
+    dependency-declaration inputs. From an MSVC 2022 v143 x86-64 developer
+    environment, `python scripts/run_vnext_baseline.py all --index` configured
+    with CMake 3.31.6/Ninja 1.12.1 and MSVC 19.44.35228.0, verified 3,724 staged
+    tracked paths, 53 CMake metadata files, 1,232 compilation commands, and
+    1,875 Ninja build edges, rebuilt the affected baseline targets, and passed
+    `components-tests` (1,395), `openmw-tests` (490), and `openmw-cs-tests`
+    (154) with zero failures. `git diff --cached --check` passed.
+    A subsequent committed-tree rerun at
+    `13b4282cfa9918a932d36825479b645c0127e4ff` passed `python -m unittest
+    discover -s scripts/tests -v` (51 tests), Python compilation, `python
+    scripts/verify_vnext_baseline.py`, and `python
+    scripts/verify_vnext_legacy_exclusion.py`. From the same MSVC 2022 v143
+    x86-64 environment, `python scripts/run_vnext_baseline.py all` then passed
+    a fresh configure, the same 3,724-path/53-metadata/1,232-command/1,875-edge
+    exclusion proof, the build, and all 2,039 upstream tests with zero failures.
+    The retained local evidence records exact source commit `13b4282cfa`, CMake
+    3.31.6, Ninja 1.12.1, MSVC 19.44.35228.0, and Qt 6.6.3. `git diff --check`
+    passed before this status update.
+    Hosted push runs
+    [`32934599668`](https://github.com/poisson-fish/TES3MP/actions/runs/32934599668),
+    [`32934599672`](https://github.com/poisson-fish/TES3MP/actions/runs/32934599672),
+    and
+    [`32934599670`](https://github.com/poisson-fish/TES3MP/actions/runs/32934599670)
+    passed on exact source `2cad2dbb28b63848f2b43d533d5ebab26aa79cff`.
+    Linux GCC 13 and Clang 18 each verified 3,724 tracked paths, 53 CMake files,
+    1,216 compile commands, and 1,725 Ninja edges, then passed 1,397 + 490 +
+    154 upstream tests. Windows MSVC 2022 v143 verified 3,724/53/1,310/2,166
+    and passed 1,395 + 490 + 154 tests. macOS 15 arm64/Xcode 16 verified
+    3,724/53/1,284/2,349 and passed 1,397 + 490 + 154 tests. All jobs passed
+    baseline provenance for 19 dependency inputs and uploaded retained evidence
+    artifacts `9595155142`, `9595191295`, `9595061296`, and `9595066122`, whose
+    names bind them to the exact source commit and whose successful upload steps
+    include `vnext-legacy-exclusion.json`.
+  - Owner review: on 2026-08-26 the project owner explicitly directed acceptance
+    of the successful current-HEAD Linux, Windows, and macOS baseline runs for
+    Slice 1.8 and directed that the cancelled manual macOS rerun not be used.
+    This accepts the three-OS implementation evidence; it does not by itself
+    approve the separate Phase 1 exit gate or authorize Phase 2 production.
+  - Follow-ups: Phase 1 exit-gate approval is recorded below; hold the Phase 2
+    kickoff and obtain the required ADR approvals before dependent production
+    implementation begins.
+
+- 2026-08-26 — Phase 1 exit gate — Implemented
+  - Change: marked Phase 1 and its program-tracker row **Implemented** after all
+    Slices 1.1–1.8 and the clean OpenMW 0.51 baseline exit criteria passed.
+  - Decisions: no architecture, authority, state-scope, or gameplay decision
+    changed. The owner accepted the successful current-HEAD Linux, Windows, and
+    macOS arm64 Slice 1.8 matrix and excluded the cancelled manual macOS rerun
+    from evidence; the already accepted Slice 1.7 Intel baseline evidence
+    remains unchanged.
+  - Verification: the active tree remains based on pinned OpenMW commit
+    `f4bec41444214a7903bebd178389ca22ca13f646`; the baseline verifier accounts
+    for exactly 28 intentional differences and 19 dependency-declaration
+    inputs; supported desktop build/install/upstream-test evidence is recorded
+    in Slices 1.4–1.7; and Slice 1.8 records fail-closed tracked-tree,
+    CMake-metadata, compilation-database, and Ninja-graph exclusion proof from
+    local Windows plus hosted Linux GCC/Clang, Windows MSVC, and macOS arm64
+    runs. All accepted jobs passed with retained evidence artifacts.
+  - Owner review: explicit Phase 1 exit-gate approval and authorization to mark
+    the phase complete received on 2026-08-26. This approval makes Phase 2
+    eligible for kickoff; it does not pre-approve any Phase 2 ADR choice or
+    dependent production implementation.
+  - Follow-ups: hold the Phase 2 kickoff, present ADR-0003 through ADR-0007 and
+    deterministic simulation/protocol compatibility decision packets in their
+    eligible order, and obtain explicit owner approval before production work.
+
+## Phase 2 — Security and architecture decisions
+
+[Back to the phase tracker](IMPLEMENTATION_PLAN.md#phase-2--security-and-architecture-decisions)
+
+- Authentication must be an owned interface; choosing a transport does not imply
+  exposing that library's identity or connection types outside the adapter.
+- The protocol version is semantic product metadata, not an engine commit hash.
+- Deferred gameplay-specific details may be appended to ADR-0006 before their
+  phases, but the initial command/state ownership model must be decided now.
+- A selection proof is disposable evidence, not the production wrapper created
+  in Phase 6.
+
+- 2026-08-26 — Slice 2.1 — Implemented
+  - Change: added accepted
+    [`ADR-0003`](adr/ADR-0003-hostile-internet-threat-model.md), defining the
+    hostile-Internet threat posture, assets, trust boundaries, attacker
+    capabilities, abuse scenarios, phase-owned mitigations, required
+    verification, and explicit deferrals.
+  - Decisions: the project owner approved recommended Option A. Every client and
+    network input, including authenticated clients, remains untrusted; the
+    dedicated-server host/operator is the initial trusted boundary; secure
+    transport and authentication do not grant gameplay authority; and future
+    scripts, persistence, metrics, and administration remain behind separate
+    typed least-privilege boundaries.
+  - Verification: `python scripts/verify_vnext_baseline.py --index` accounts for
+    the new ADR as the 29th intentional difference while retaining all 19
+    dependency-input hashes; `git diff --cached --check`, local Markdown-link
+    checks, required ADR section/status checks, and the 51-test repository-owned
+    Python suite pass.
+  - Owner review: Option A explicitly approved in the 2026-08-26 working
+    session after presentation of hostile-Internet, cooperative-client, and
+    hostile-host options with scenarios, tradeoffs, recommendation, and proposed
+    acceptance evidence.
+  - Follow-ups: Slice 2.2 is the next eligible decision slice. ADR-0004 must be
+    approved before a schema/codec selection or dependent production code.
+
+- 2026-08-26 — Slice 2.2 — In Progress
+  - Change: this implementation commit accepted
+    [`ADR-0004`](adr/ADR-0004-protocol-schema-codec-evolution-policy.md); added
+    an exact source/archive/license lock, safe proof runner, explicitly numbered
+    v1/v2 schemas and pinned generated C++, an isolated C++20 proof decoder,
+    schema-policy checks, deterministic fuzz corpus generation, a Clang
+    ASan/UBSan/libFuzzer target, retained evidence, Android ARM64 assessment,
+    and the accepted Windows/Linux/macOS workflow matrix.
+  - Decisions: the project owner approved Option A without changes. FlatBuffers
+    `v25.12.19` is pinned to commit `7e163021e59cca4f8e1e35a7c828b5c6b7915953`;
+    only generated accessors/builders and verifier are permitted; generated
+    views remain private and are converted to owned validated values; explicit
+    stable IDs and additive optional evolution are mandatory; and all excluded
+    dynamic, reflection, nested, mutable, object, RPC, and 64-bit-offset
+    surfaces remain prohibited.
+  - Verification: local Windows x86-64 MSVC 2022 v143 proof builds pinned `flatc`
+    from the SHA-256-verified source, reproduces the committed headers, and
+    passes exact framing, every-truncation, corrupt input, byte/depth/table,
+    unknown-union, UTF-8/numeric, pre-allocation, no-partial-output, owned
+    lifetime, and bidirectional v1/v2 evolution scenarios. The repository-owned
+    Python suite passes 64 tests; Actionlint 1.7.12 accepts the new workflow;
+    `python scripts/verify_vnext_baseline.py --index` accounts for all 45
+    intentional differences and verifies all 34 dependency-input hashes; and
+    local Markdown-link, ADR section/status, generated-drift, JSON/compile,
+    `git diff --cached --check`, and clean staged-tree checks pass.
+  - Owner review: Option A and its complete restricted profile and proposed
+    acceptance tests explicitly approved in the 2026-08-26 working session.
+  - Follow-ups: obtain and review retained GCC 13, Clang 18 sanitizer/fuzzer,
+    macOS arm64, macOS x86-64, and Windows hosted artifacts before changing
+    Slice 2.2 to **Implemented**. No Phase 4 production codec or dependent Phase
+    3 implementation may begin before the remaining Phase 2 gates.
+
+- 2026-08-26 — Slice 2.2 — In Progress
+  - Change: inspected hosted run `32946871261`; Linux GCC 13, Linux Clang 18
+    with the sanitizer/fuzzer smoke, and macOS arm64 passed, while Windows
+    failed the generated-header byte comparison because Git's Windows checkout
+    conversion was not constrained. Added a narrow `.gitattributes` rule that
+    pins only the committed proof headers to LF, plus a regression test and
+    proof documentation.
+  - Decisions: none. This preserves the approved schema, generator arguments,
+    generated output, dependency pin, supported matrix, and exact byte-drift
+    policy; it only makes the repository representation platform-independent.
+  - Verification: hosted run `32946871261` passed Linux GCC 13, Linux Clang 18
+    with its 30-second ASan/UBSan/libFuzzer smoke, and macOS arm64. Locally,
+    `python -m unittest discover -s scripts/tests -v` passes 65 tests;
+    `python scripts/run_vnext_flatbuffers_proof.py` passes from the approved
+    Visual Studio 2022 v143 x64 environment and retains evidence; `python -m
+    py_compile` passes for the proof runner, its tests, and the baseline
+    verifier; JSON parsing passes; cached `git check-attr` reports `text: set`
+    and `eol: lf` for both generated headers; `python
+    scripts/verify_vnext_baseline.py --index` accounts for all 48 intentional
+    differences and verifies all 35 dependency inputs; and `git diff --cached
+    --check` passes. Replacement hosted Windows and macOS x86-64 evidence is
+    still pending.
+  - Owner review: no architecture, authority, state-scope, security, gameplay,
+    or user-visible behavior decision is introduced by the line-ending repair.
+  - Follow-ups: publish the repair so the Windows proof can rerun, then manually
+    dispatch and review the full workflow including macOS x86-64 before marking
+    Slice 2.2 **Implemented**.
+
+- 2026-08-26 — Slice 2.2 — In Progress
+  - Change: push run `32989871740` passed Windows MSVC, Linux GCC 13, Linux
+    Clang 18 with the 30-second sanitizer/fuzzer smoke, and macOS arm64 at
+    `da918dd462`; manually dispatched run `32995432424` then passed the full
+    five-job matrix including macOS x86-64. Retained-artifact review found that
+    Windows checkout conversion changed the recorded lock and schema hashes,
+    and that unspecified C++ function-argument evaluation order made three seed
+    corpus files differ between compiler families. The working-tree repair pins
+    every byte-hashed text input to LF, sequences FlatBuffer builder mutations,
+    pins all five deterministic seed hashes in the dependency lock, fails the
+    proof on seed drift, and excludes libFuzzer-added working entries from the
+    retained seed-corpus identity.
+  - Decisions: none. The change enforces the already approved exact-input and
+    deterministic-corpus proof requirements without altering the schema,
+    protocol evolution policy, dependency selection, or production behavior.
+  - Verification: all five jobs and artifacts from run `32995432424` were
+    reviewed; their dependency, generated-header, compiler, test, corpus, and
+    license fields exposed the two issues above. Locally, the full Windows MSVC
+    2022 v143 selection proof passes with the five pinned seed identities;
+    `python -m unittest discover -s scripts/tests -v` passes 66 tests; `python
+    -m py_compile` passes for the proof runner, its tests, and the baseline
+    verifier; `python scripts/verify_vnext_baseline.py --index` accounts for all
+    48 intentional differences and verifies all 35 dependency inputs; and `git
+    diff --cached --check` passes. Replacement hosted artifact evidence remains
+    pending.
+  - Owner review: no new architecture, authority, state-scope, security,
+    gameplay, or user-visible behavior decision is introduced. Slice 2.2 stays
+    **In Progress** because passing jobs alone did not satisfy retained-evidence
+    consistency.
+  - Follow-ups: publish the determinism repair, rerun the full five-job matrix,
+    and compare retained exact input, generated, seed-corpus, license, compiler,
+    and test identities before owner review and any **Implemented** status
+    change.
+
+- 2026-08-26 — Slice 2.2 — In Progress
+  - Change: commit `da24423a1a56ac0e499eebd962b6499db3866b0f`
+    published the exact-input and deterministic-seed repair. Manually dispatched
+    [run `32996083180`](https://github.com/poisson-fish/TES3MP/actions/runs/32996083180)
+    executed the complete five-job selection-proof matrix at that commit.
+  - Decisions: none; the repair implements the already approved ADR-0004 proof
+    contract and changes no schema, codec selection, protocol behavior, or
+    dependency version.
+  - Verification: Windows MSVC 2022 v143, Linux GCC 13, Linux Clang 18 with the
+    30-second ASan/UBSan/libFuzzer smoke, macOS arm64 Xcode 16, and macOS x86-64
+    Xcode 16 all passed. Retained artifacts `9616640336`, `9616634804`,
+    `9616631479`, `9616613594`, and `9616613060` were downloaded and compared
+    against the committed lock. All five contain the identical lock SHA-256
+    `a1cce8c4475460a5dcc29c0164b6743b3e228019068c08d6453c462512a95766`,
+    two schema hashes, two generated-header hashes, five pinned seed hashes, and
+    Apache-2.0 license SHA-256
+    `cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30`;
+    platform/compiler identities and declared proof/fuzz tests also match the
+    approved matrix.
+  - Owner review: technical completion evidence is ready for review. Explicit
+    owner acceptance is pending, so Slice 2.2 remains **In Progress**.
+  - Follow-ups: obtain owner completion acceptance, then change Slice 2.2 to
+    **Implemented**. Phase 2 still separately requires Slices 2.3–2.6.
+
+- 2026-08-26 — Slice 2.2 — Implemented
+  - Change: recorded completion of the owner-approved restricted FlatBuffers
+    selection and its exact cross-platform proof at implementation commit
+    `da24423a1a56ac0e499eebd962b6499db3866b0f` and evidence-record commit
+    `f99239244cf689cdb494615785a95360520ff2f3`.
+  - Decisions: no new decision; ADR-0004 remains accepted without amendment.
+  - Verification: full five-job run `32996083180`, retained artifacts
+    `9616640336`, `9616634804`, `9616631479`, `9616613594`, and `9616613060`,
+    cross-platform exact-identity comparison, the local Windows proof, 66
+    repository-owned Python tests, Python compilation, baseline provenance,
+    JSON, Markdown-link, and diff checks all passed as recorded above.
+  - Owner review: the project owner explicitly approved the Slice 2.2
+    completion evidence in the 2026-08-26 working session and authorized the
+    **Implemented** status change.
+  - Follow-ups: none for Slice 2.2. Phase 2 remains **In Progress** and next
+    requires completion of Slices 2.3–2.6.
+
+- 2026-08-26 — Slice 2.3 — In Progress
+  - Change: accepted and then amended
+    [`ADR-0005`](adr/ADR-0005-transport-security-authentication-resumption.md)
+    to select standalone GameNetworkingSockets `v1.6.0` direct-IP transport with
+    automatic basic encryption, a separate optional shared join-password
+    authenticator, and automatic short-lived single-use resume tokens. Updated
+    ADR-0003 with the corresponding explicitly accepted active endpoint
+    impersonation risk and retained the trust-integration audit as a resolved
+    historical gate rather than a patch proposal.
+  - Decisions: production transport must be encrypted but is intentionally not
+    endpoint-authenticated for the first community-server milestone. Steam,
+    relay, P2P, operator certificates, trust anchors, pinning, certificate
+    revocation, private upstream APIs, and a maintained GameNetworkingSockets
+    patch are excluded. A join password is sent only after encrypted connection
+    establishment, is treated as a low-value server-specific secret, and is not
+    replaced by a replayable static password hash. Persistent accounts and
+    administrative credentials remain outside this decision.
+  - Verification: primary upstream release, API, platform, build, security,
+    license, maintenance, and standards sources were reviewed on 2026-08-26;
+    the tagged-source public/private certificate paths were audited; the
+    repository-owned Python suite passes 64 tests; local Markdown links and
+    manifest JSON parsing pass; `git diff --cached --check` passes; and
+    `python scripts/verify_vnext_baseline.py --index` accounts for all 47
+    intentional differences and verifies all 34 dependency-declaration inputs.
+    Cross-platform selected-library proof evidence is still pending.
+  - Owner review: the owner explicitly approved the amended automatic-encryption
+    recommendation on 2026-08-26 after reviewing password handling, resume-token
+    behavior, operator burden, the lack of dependency patches, and the active
+    man-in-the-middle limitation. This supersedes the earlier configured-trust
+    profile and rejects all A1 patch/CA work.
+  - Follow-ups: create the disposable GameNetworkingSockets/OpenSSL/Protocol
+    Buffers dependency lock and selection proof against the amended ADR-0005
+    acceptance tests. Slice 2.2 hosted evidence remains independently in
+    progress and was intentionally not monitored in this working session.
+
+- 2026-08-26 — Slice 2.3 — In Progress
+  - Change: added the disposable selected-library proof, exact source/archive/
+    license lock, safe source acquisition and extraction, restricted static
+    build, real encrypted direct-IP client/server capture harness, fault and
+    lifecycle scenarios, retained evidence, Android ARM64 assessment, and the
+    required five-job desktop workflow. This remains selection evidence and
+    creates no production multiplayer target or Phase 6 wrapper.
+  - Decisions: after explicit owner approval of dependency Option A, ADR-0005
+    records GameNetworkingSockets `1.6.0`, OpenSSL `3.5.8` LTS, Protobuf C++
+    `6.33.4`, and Abseil `20250512.1`. The proof uses unmodified upstream
+    sources, static libraries, OpenSSL, and the already approved exclusions.
+    Proof-only resource budgets are test limits, not production interface or
+    gameplay-state decisions.
+  - Verification: a clean local Windows x86-64 MSVC 2022 run verified every
+    pinned archive and license, built all four source dependencies with the
+    approved profile, and passed encryption/plaintext rejection, passive
+    password/token canary capture, authentication ordering and failure,
+    resume-token contention/rotation/invalidation, generation teardown,
+    bounded queue/flood, reliable ordering, separate-lane head-of-line, and
+    stable telemetry scenarios. The lock validator passes; the repository-owned
+    Python suite passes 75 tests; Python compilation passes; Actionlint 1.7.12
+    accepts the workflow; and JSON, Markdown-link, provenance, and diff checks
+    pass. Hosted evidence is still pending.
+  - Owner review: the project owner explicitly approved dependency Option A on
+    2026-08-26 before implementation. No additional architecture, authority,
+    state-scope, or gameplay-behavior decision was made by this proof slice.
+  - Follow-ups: extend the proof through the remaining ADR-0005 slow-reader,
+    excessive-segment, handshake/disconnect-flood, and actual close/unread-data
+    lifecycle cases without treating proof budgets as production policy. Then
+    publish and run the complete Windows, GCC 13, Clang 18 ASan/UBSan, macOS
+    arm64, and scheduled/manual macOS x86-64 matrix; compare retained exact
+    dependency, license, toolchain, build-profile, test, and redaction evidence;
+    and request owner completion acceptance before changing Slice 2.3 to
+    **Implemented**. Slices 2.4–2.6 remain separately required.
+
+- 2026-08-26 — Slice 2.3 — In Progress
+  - Change: completed the remaining disposable hostile-resource and actual
+    lifecycle proof cases. The real GameNetworkingSockets harness now exercises
+    slow-reader receive byte/message limits and recovery, excessive segments per
+    packet, fail-closed maximum-message handling, a 32-connection handshake and
+    disconnect flood behind an eight-connection admission cap and bounded
+    callback drain, and close-with-unread-data handle invalidation. The exact
+    proof budgets and retained scenario list are locked and regression-tested.
+  - Decisions: none. The added numeric limits are disposable proof workloads,
+    not production transport budgets, architecture, authority, state-scope, or
+    gameplay behavior. They exercise the already owner-approved ADR-0005
+    acceptance scenarios without changing the selected dependencies or profile.
+  - Verification: a clean Windows x86-64 MSVC 2022 v143 run of `python
+    scripts/run_vnext_gamenetworkingsockets_proof.py` reverified all four source
+    archives and five licenses, rebuilt OpenSSL 3.5.8, Protobuf 6.33.4/Abseil
+    20250512.1, and unmodified GameNetworkingSockets 1.6.0, then passed all nine
+    proof scenarios in 2.2 seconds and retained lock hash
+    `d5263f5cd197ee39f2ed862097b691396f4ad7759c19d715d98eb3c562ae295c`.
+    An incremental MSVC `/W4 /WX` build passed, and `ctest --repeat
+    until-fail:20` passed 20 consecutive runs in 33.06 seconds. `python -m
+    unittest discover -s scripts/tests` passed 76 tests; both changed Python
+    files passed `py_compile`; lock validation passed; `python
+    scripts/verify_vnext_baseline.py --index` accounted for all 56 intentional
+    differences and verified all 43 dependency inputs; and `git diff --cached
+    --check` passed. Both changed JSON files parsed, all 32 local vNext Markdown
+    links resolved, and the retained proof evidence contained neither password
+    nor resume-token canaries.
+  - Owner review: no new owner decision was required. Slice 2.3 completion
+    acceptance remains pending the approved hosted matrix and retained-artifact
+    consistency review.
+  - Follow-ups: publish the completed proof, run Windows MSVC 2022, Linux GCC
+    13, Linux Clang 18 ASan/UBSan, macOS arm64, and manual macOS x86-64; compare
+    exact dependency, license, lock, toolchain, build-profile, budget, test, and
+    redaction evidence; then request owner completion acceptance before changing
+    Slice 2.3 to **Implemented**. Slices 2.4–2.6 remain separately required.
+
+- 2026-08-26 — Slice 2.3 — In Progress
+  - Change: diagnosed the first complete hosted proof run and corrected one
+    portable API type mismatch in the disposable proof. GameNetworkingSockets'
+    `SendMessages` result parameter uses its public `int64` typedef; using
+    `std::int64_t` happened to match on Windows but is `long` rather than the
+    required `long long` on the hosted Linux ABI.
+  - Decisions: none. The one-line correction adopts the selected library's
+    public API type and changes no dependency, proof budget, transport behavior,
+    architecture, authority, state scope, or gameplay behavior.
+  - Verification: hosted run
+    [`33011891871`](https://github.com/poisson-fish/TES3MP/actions/runs/33011891871)
+    passed Windows MSVC 2022 v143 and macOS arm64 Xcode 16, while GCC 13 job
+    `98320008864` and Clang 18 ASan/UBSan job `98320008970` both failed at the
+    same compile-time pointer-type mismatch; the push-only macOS x86-64 job was
+    correctly skipped. Successful retained artifacts `9623265318` and
+    `9623081766` were downloaded and compared: both retain the identical lock
+    SHA-256 `d5263f5cd197ee39f2ed862097b691396f4ad7759c19d715d98eb3c562ae295c`,
+    dependency and license identities, build profile, budgets, nine-test list,
+    passing CTest output, and no password or resume-token canaries. After the
+    correction, the incremental MSVC 2022 `/W4 /WX` build and all nine proof
+    scenarios passed locally in 2.09 seconds. The 76-test repository-owned
+    Python suite, exact lock validation, both changed JSON files, all 32 local
+    vNext Markdown links, and staged-diff checks passed; baseline provenance
+    accounted for all 56 intentional differences and verified all 43 dependency
+    inputs.
+  - Owner review: no new owner decision was required. Completion acceptance
+    remains pending a fully passing replacement matrix and retained-artifact
+    consistency review.
+  - Follow-ups: publish the portable type correction, require replacement GCC
+    13 and Clang 18 ASan/UBSan evidence plus the already approved Windows and
+    macOS jobs, run the manual macOS x86-64 job, compare all five retained
+    artifacts, and request owner completion acceptance before changing Slice
+    2.3 to **Implemented**.
+
+- 2026-08-26 — Slice 2.3 — In Progress
+  - Change: amended the approved sanitizer proof profile after the first
+    portable replacement run reached execution. The Clang job now builds
+    Protobuf and Abseil with the same ASan/UBSan instrumentation as their
+    GameNetworkingSockets consumers, keeps OpenSSL explicitly unsanitized, and
+    excludes UBSan `function` only on the unmodified GameNetworkingSockets
+    target. The proof harness retains the check; container-overflow, leak, and
+    halt-on-error behavior remain enabled; and regression tests reject broad
+    runtime suppression.
+  - Decisions: the owner explicitly approved recommended sanitizer Option A on
+    2026-08-26. Keep the pinned, unmodified dependency selection and make its
+    C++ instrumentation coherent; document the one narrow upstream callback
+    cast exclusion; and treat any remaining container report as a dependency
+    blocker. The owner rejected immediate patch/upgrade/replacement work and
+    broad process-wide sanitizer suppression.
+  - Verification: hosted run
+    [`33015281679`](https://github.com/poisson-fish/TES3MP/actions/runs/33015281679)
+    passed GCC 13 job `98331778758`, Windows MSVC 2022 v143, and macOS arm64
+    Xcode 16. Clang 18 job `98331778984` compiled successfully, then reported
+    the pinned GameNetworkingSockets callback type-erasure under UBSan and a
+    Protobuf repeated-field container report across the previously mixed
+    instrumentation boundary; manual macOS x86-64 was correctly skipped. After
+    the approved amendment, lock validation and 12 focused runner tests passed,
+    and a clean locked Windows MSVC 2022 dependency rebuild passed all nine
+    scenarios in 2.16 seconds with retained evidence and lock SHA-256
+    `367fd5820e41b77c5857ccf1dff9b2d0698cebf8dba5385f81204f1dba64350c`.
+    The complete repository-owned Python suite passed 78 tests; Python
+    compilation, both changed JSON files, all 32 local vNext Markdown links,
+    retained-evidence canary scanning, and staged-diff checks passed. Baseline
+    provenance accounted for all 56 intentional differences and verified all
+    43 dependency inputs.
+  - Owner review: the sanitizer-scope decision and ADR-0005 amendment are
+    explicitly approved. Slice completion acceptance remains pending a fully
+    passing hosted matrix and five-artifact consistency review.
+  - Follow-ups: publish the approved sanitizer profile, require its replacement
+    Clang 18 ASan/UBSan run to pass without the container report or any broad
+    suppression, run manual macOS x86-64, compare all five retained artifacts,
+    and request owner completion acceptance before changing Slice 2.3 to
+    **Implemented**.
+
+- 2026-08-26 — Slice 2.3 — Implemented
+  - Change: recorded completion of the owner-approved restricted standalone
+    GameNetworkingSockets selection and its five-platform proof at implementation
+    commit `d5d7a1d1f49715bd41f2eb090393785e67924598`.
+  - Decisions: no new transport or security decision was introduced. The owner
+    accepted the completed evidence for ADR-0005 and authorized the Slice 2.3
+    status change. The approved automatic-encryption profile, explicit lack of
+    endpoint authentication, shared join-password boundary, single-use resume
+    tokens, dependency pins, and narrow sanitizer scope remain unchanged.
+  - Verification: push run
+    [`33020799953`](https://github.com/poisson-fish/TES3MP/actions/runs/33020799953)
+    passed Linux GCC 13, Linux Clang 18 ASan/UBSan, Windows MSVC 2022 v143, and
+    macOS arm64. Manually dispatched run
+    [`33022971583`](https://github.com/poisson-fish/TES3MP/actions/runs/33022971583)
+    passed the complete matrix, including macOS x86-64. Retained artifacts
+    `9627645351`, `9627621339`, `9627619303`, `9627437471`, and `9627400661`
+    were downloaded and compared against the committed lock. All five contain
+    identical dependency, transitive-license, build-profile, budget,
+    endpoint-identity-claim, and nine-scenario identities; every embedded lock
+    matches SHA-256
+    `367fd5820e41b77c5857ccf1dff9b2d0698cebf8dba5385f81204f1dba64350c`;
+    every retained license matches its manifest; and every scenario passes.
+    Exactly one artifact uses the approved Clang 18.1.3 ASan/UBSan profile, with
+    no sanitizer report, runtime error, credential canary, or broad suppression.
+  - Owner review: the project owner explicitly approved completion Option A in
+    the 2026-08-26 working session and authorized the **Implemented** status.
+  - Follow-ups: none for Slice 2.3. Phase 2 remains **In Progress**; Slice 2.4 is
+    next and requires owner review of authority and state-scope options before
+    ADR-0006 or dependent implementation work.
+
+- 2026-08-26 — Slice 2.4 — In Progress
+  - Change: added proposed
+    [`ADR-0006`](adr/ADR-0006-authority-state-scope-prediction-presentation.md)
+    with separate proposal/validation/commit authority, state-scope,
+    visibility, lifetime, prediction, presentation, and delegation concepts;
+    five option sets; representative single-player, two-player, late-join,
+    reconnect, contention, hostile-client, VR, delegation, script/admin/replay,
+    and resync scenarios; an initial subsystem mapping; all ten domain GDR
+    question sets; and named acceptance tests/demo steps. No production schema,
+    state model, reducer, API, or multiplayer target was added.
+  - Decisions: none accepted. The proposal recommends Option A for Decisions
+    1–5: server command/reducer mutation; explicit scope and lifetime with
+    global physical-world and per-player progression defaults; reversible local
+    prediction with authoritative reconciliation; typed non-durable
+    presentation samples; and no delegation in the first slice with future
+    server-validated epoch leases. All five remain pending owner review.
+  - Verification: `python -m unittest discover -s scripts/tests -v` passed all
+    78 repository-owned tests. `python scripts/verify_vnext_baseline.py --index`
+    accounted for exactly 57 intentional differences, including the proposed
+    ADR, and verified all 43 dependency-declaration inputs. `python -m
+    json.tool docs/vnext/BASELINE_PROVENANCE.json`, `git diff --cached
+    --check`, a local-link scan across all 16 vNext Markdown files, and focused
+    checks for proposed status, required ADR sections, five decision sets, and
+    GDR-0001 through GDR-0010 coverage all passed. No production target changed,
+    so a product build or runtime test is not applicable to this decision-packet
+    step.
+  - Owner review: decision packet prepared for the 2026-08-26 working session;
+    explicit approval or amendment is pending. Slice 2.4 remains **In Progress**
+    and dependent production work is not authorized.
+  - Follow-ups: review Decisions 1–5 with the owner, amend or accept ADR-0006,
+    run the approved scenario/document checks, and request completion acceptance
+    before marking Slice 2.4 **Implemented**. Slices 2.5 and 2.6 remain gated.
+
+- 2026-08-26 — Slice 2.4 — Implemented
+  - Change: accepted
+    [`ADR-0006`](adr/ADR-0006-authority-state-scope-prediction-presentation.md)
+    and recorded the approved initial authority, state-scope, prediction,
+    presentation-sample, and future-delegation framework. The ADR and project
+    status now make Slice 2.5 the next eligible Phase 2 decision slice. No
+    production schema, state model, reducer, API, or multiplayer target was
+    added.
+  - Decisions: the owner approved Option A for Decisions 1–5. Canonical mutation
+    uses server commands/reducers; scope and lifetime are explicit with the
+    recommended bounded defaults; prediction is reversible presentation;
+    presentation samples are typed, bounded, latest-wins, and non-durable; and
+    the first slice has no delegation while later delegation requires
+    server-validated epoch leases. For Decision 1, the owner required a
+    friends-server validation profile: retain structural/safety, authority,
+    revision/idempotency/epoch, and basic domain checks, but do not add elaborate
+    anti-cheat or duplicate complete OpenMW mechanics solely to police input.
+  - Verification: `python -m unittest discover -s scripts/tests -v` passed all
+    78 repository-owned tests. `python scripts/verify_vnext_baseline.py --index`
+    accounted for exactly 57 intentional differences and verified all 43
+    dependency-declaration inputs. `python -m json.tool
+    docs/vnext/BASELINE_PROVENANCE.json`, `git diff --cached --check`, a
+    local-link scan across all 16 vNext Markdown files, and focused assertions
+    for accepted status/date, all five approvals, the friends-server condition,
+    GDR-0001 through GDR-0010 coverage, Slice 2.4 **Implemented**, Phase 2 **In
+    Progress**, Phase 3 **Not Started**, and the Slice 2.5 next pointer all
+    passed. No production target changed, so a product build or runtime test is
+    not applicable to this decision-only completion.
+  - Owner review: explicit A/A/A/A/A approval received in the 2026-08-26 working
+    session, including the Decision 1 validation-depth condition. The owner
+    approved this architecture framework only; domain gameplay details remain
+    gated by GDR-0001 through GDR-0010.
+  - Follow-ups: none for Slice 2.4. Phase 2 remains **In Progress**; Slice 2.5
+    must present OpenMW hook and patch-queue options for owner approval before
+    ADR-0007 or dependent implementation work.
+
+- 2026-08-26 — Slice 2.5 — In Progress
+  - Change: inspected the pinned OpenMW 0.51 composition, frame ordering, input,
+    world/player/cell operations, Lua synchronization/events, CMake target, and
+    application-test seams; confirmed that the active OpenMW application tree
+    still has no vNext delta; and added proposed
+    [`ADR-0007`](adr/ADR-0007-openmw-hook-patch-queue-policy.md). The packet
+    presents four decision sets, repository-backed scenarios, a bounded initial
+    hook budget, patch-registry fields, upstreaming criteria, named acceptance
+    tests, failure modes, and Phase 8.1's exact-hook review boundary. No adapter,
+    hook, patch registry, CMake target, or production code was added.
+  - Decisions: none accepted. The proposal recommends Option A for Decisions
+    1–4: a native app-local C++ adapter/coordinator; one main-thread frame seam
+    plus feature-specific semantic hooks only as approved behavior requires;
+    normal buildable Git commits plus a machine-checked semantic patch registry;
+    and upstreaming general engine seams/fixes while retaining multiplayer
+    policy locally. All four remain pending owner review.
+  - Verification: `python -m unittest discover -s scripts/tests -v` passed all
+    78 repository-owned tests. `python scripts/verify_vnext_baseline.py --index`
+    accounted for exactly 58 intentional differences and verified all 43
+    dependency-declaration inputs. `python -m json.tool
+    docs/vnext/BASELINE_PROVENANCE.json`, `git diff --cached --check`, a
+    local-link scan across all 17 vNext Markdown files, and focused ADR-0007
+    structure/status and Phase 2/3 gate assertions passed. Repository-source
+    assertions verified input/Lua/state/mechanics/physics/world frame ordering,
+    `main.cpp`/`Engine` composition, Lua's separate-thread and synchronized-
+    update behavior, no active OpenMW application/test delta from pinned
+    `f4bec4144`, and no existing adapter or client-session CMake target.
+  - Owner review: decision packet prepared for the 2026-08-26 working session;
+    explicit approval or amendment is pending. Slice 2.5 remains **In Progress**
+    and no OpenMW hook or dependent adapter implementation is authorized.
+  - Follow-ups: review Decisions 1–4 with the owner, amend or accept ADR-0007,
+    rerun the accepted document/provenance gates, and request completion
+    acceptance before marking Slice 2.5 **Implemented**. Slice 2.6 and all Phase
+    3 production targets remain gated.
+
+- 2026-08-26 — Slice 2.5 — Implemented
+  - Change: accepted
+    [`ADR-0007`](adr/ADR-0007-openmw-hook-patch-queue-policy.md) and recorded the
+    approved native integration, bounded semantic-hook, buildable-commit/patch-
+    registry, and local upstream-candidate preparation framework. No local
+    upstream-preparation clone was created because no engine patch or upstream
+    candidate exists yet; its path remains developer-local and it is created
+    only if a real candidate needs a clean changeset.
+  - Decisions: the owner approved Option A for Decisions 1–3 and amended Option
+    A for Decision 4. The project will not proactively contact OpenMW or submit
+    patches for now. A separate local OpenMW repository may later prepare clean
+    general-purpose changesets, but it is disposable and cannot be a submodule,
+    source of truth, build input, CI requirement, or replacement for vNext's
+    commits, patch registry, and baseline manifest. Upstream contact requires a
+    later explicit owner decision.
+  - Verification: all 78 repository-owned Python tests pass; indexed baseline
+    provenance passes with 59 intentional differences and 43 dependency inputs;
+    JSON parsing/path ordering, all 40 local Markdown links, the accepted ADR-
+    0007/local-repository constraints, Phase 2/3 status gates, the absence of a
+    staged OpenMW source delta, and staged/unstaged diff checks pass. Source
+    inspection reconfirmed the current OpenMW main-thread frame order, Lua's
+    synchronized application point, and the monolithic `openmw-lib` composition.
+  - Owner review: explicit approval received in the 2026-08-26 working session,
+    including the Decision 4 local-repository/no-current-upstreaming amendment.
+    Exact Phase 8 hook call sites and gameplay semantics remain separately
+    gated.
+  - Follow-ups: none for Slice 2.5. Phase 2 remains **In Progress**; Slice 2.6 is
+    the next eligible decision slice and all Phase 3 production targets remain
+    gated until the Phase 2 exit review.
+
+- 2026-08-26 — Slice 2.6 — In Progress
+  - Change: inspected the accepted deterministic, protocol-evolution, and
+    engine-independence constraints and added proposed
+    [`ADR-0013`](adr/ADR-0013-deterministic-simulation-protocol-compatibility.md).
+    It presents five owner-reviewable option sets, adversarial scenarios, named
+    acceptance tests, consequences, failure mitigations, and replacement
+    triggers. No production target or runtime behavior was added.
+  - Decisions: none accepted. The proposal recommends Option A for all five
+    decisions: a 30 Hz logical tick with bounded catch-up; checked integer/fixed-
+    point canonical numerics; writer-assigned eligible tick and ingress order;
+    injected time plus versioned labeled random streams and canonical bytes;
+    and a released current-plus-previous-minor compatibility window with
+    bounded required/optional capability negotiation.
+  - Verification: all 78 repository-owned Python tests pass; indexed baseline
+    provenance passes with 59 intentional differences and 43 dependency inputs;
+    JSON parsing/path ordering, all 40 local Markdown links, ADR-0013's proposed
+    five-decision/owner-pending state, Slice 2.6/Phase 2/Phase 3 status gates,
+    and staged/unstaged diff checks pass.
+  - Owner review: pending explicit approval or amendment of Decisions 1–5.
+    Exact gameplay-domain values remain GDR-gated and are not selected here.
+  - Follow-ups: present the five decision sets to the owner. Slice 2.6 remains
+    **In Progress**, Phase 2 remains **In Progress**, and Phase 3 production work
+    remains gated.
+
+- 2026-08-26 — Slice 2.6 — Implemented
+  - Change: accepted
+    [`ADR-0013`](adr/ADR-0013-deterministic-simulation-protocol-compatibility.md)
+    and recorded the approved deterministic tick, canonical numeric, command-
+    ordering, logical-time/randomness/canonical-encoding, and protocol-
+    compatibility contracts. No production target or runtime behavior was
+    added.
+  - Decisions: the owner approved Option A for Decisions 1–5: 30 Hz with no more
+    than four due ticks per scheduler pump; checked `1/1024`-unit fixed-point
+    positions and 32-bit turn orientation; single-writer eligible-tick/ingress-
+    ordinal order; injected logical time and versioned labeled random streams;
+    and current-plus-previous-minor capability negotiation within one major.
+  - Verification: all 78 repository-owned Python tests pass; indexed baseline
+    provenance passes with 59 intentional differences and 43 dependency inputs;
+    JSON parsing/path ordering, all 41 local Markdown links, ADR-0013's accepted
+    five-decision state, Slice 2.6/Phase 2/Phase 3 status gates, and staged/
+    unstaged diff checks pass.
+  - Owner review: explicit approval received in the 2026-08-26 working session.
+    Exact gameplay-domain values remain GDR-gated. This approval does not itself
+    approve the Phase 2 exit review or Phase 3 kickoff.
+  - Follow-ups: none for Slice 2.6. Every Phase 2 slice is implemented, but Phase
+    2 remains **In Progress** pending its required explicit exit-gate review;
+    Phase 3 remains **Not Started**.
+
+- 2026-08-26 — Phase 2 — Implemented
+  - Exit review: the owner explicitly approved the Phase 2 exit and movement to
+    Phase 3 in the 2026-08-26 working session.
+  - Gate evidence: ADR-0003 through ADR-0007 and ADR-0013 are accepted; the
+    selected FlatBuffers and GameNetworkingSockets proof targets build on the
+    supported Linux, Windows, and macOS matrices without OpenMW coupling; and
+    ADR-0003 covers every threat category named by the exit gate.
+  - Verification: all 78 then-existing repository-owned Python tests passed;
+    indexed baseline provenance passed with 59 intentional differences and 43
+    dependency inputs; JSON, all 41 local Markdown links, accepted-decision,
+    phase-status, and diff checks passed.
+  - Follow-ups: none. Later gameplay decisions remain GDR-gated, OpenMW hook
+    sites remain Phase 8-gated, and the owner separately approved ADR-0014 for
+    the Phase 3 kickoff.
+
+## Phase 3 — Independent targets and test scaffold
+
+[Back to the phase tracker](IMPLEMENTATION_PLAN.md#phase-3--independent-targets-and-test-scaffold)
+
+- Prefer explicit constructors and checked arithmetic for network-visible numeric
+  types. Do not use primitive aliases where IDs or epochs could be mixed.
+- Canonical transforms need a documented coordinate system, units, numeric
+  representation, and normalization rules before they enter a schema.
+- Test support should be a first-class reusable library, not private helpers tied
+  to one integration test.
+- Sanitizer and fuzz options should remain opt-in for local builds and explicit in
+  CI presets so normal developer builds stay predictable.
+
+- 2026-08-26 — Slice 3.1 — In Progress
+  - Change: added the accepted
+    [`ADR-0014`](adr/ADR-0014-phase3-target-topology-boundary-enforcement.md)
+    target topology, five engine-independent C++20 static libraries under
+    `components/tes3mp`, one app-local `openmw_tes3mp_adapter`, stable `TES3MP::`
+    aliases, a direct-dependency allowlist, forbidden-include-family checks, and
+    focused fail-closed CMake graph tests. The adapter is not linked into the
+    OpenMW executable and all translation units are behavior-free anchors.
+  - Decisions: the owner approved Phase 3 kickoff and Option A: separate
+    `tes3mp_protocol`, `tes3mp_transport`, `tes3mp_server_core`,
+    `tes3mp_client_session`, and `tes3mp_test_support` targets plus the app-local
+    adapter. GameNetworkingSockets and gameplay/OpenMW lifecycle behavior remain
+    outside this slice.
+  - Verification: all 83 repository-owned Python tests pass, including the five
+    focused boundary tests. Those tests independently
+    configure/build the five non-OpenMW targets, configure/build the adapter
+    against an isolated `openmw-lib` leaf, reject an undeclared direct link,
+    reject a forbidden include family, and reject a reverse production-to-test-
+    support edge. The real `build/vnext-baseline` graph configures and builds
+    `tes3mp_test_support` and `openmw_tes3mp_adapter` with MSVC/Ninja. The real
+    legacy-exclusion gate passes across 3,767 tracked paths, 58 CMake files,
+    1,239 compile commands, and 1,935 Ninja edges. Indexed provenance passes with
+    73 intentional differences and 43 dependency inputs; JSON/path ordering,
+    all 43 local Markdown links, ADR/status/graph assertions, and staged/
+    unstaged diff checks pass.
+  - Owner review: the architecture is approved; implementation-demo acceptance
+    is pending before Slice 3.1 may become **Implemented**.
+  - Follow-ups: run the full repository and provenance gates, present the target
+    graph/failure evidence, and request demo acceptance. Slice 3.2 production
+    work remains gated.
+
+- 2026-08-26 — Slice 3.1 — Implemented
+  - Change: retained the exact accepted ADR-0014 target graph and fail-closed
+    checks demonstrated in the preceding in-progress note; no runtime behavior
+    was added during acceptance.
+  - Decisions: no amendment. The owner accepted the six-target Option A
+    implementation as demonstrated.
+  - Verification: all 83 repository-owned Python tests, focused independent/
+    adapter configure-build checks, intentional forbidden-link/include failures,
+    real MSVC/Ninja targets, real legacy exclusion, indexed provenance with 73
+    intentional differences and 43 dependency inputs, all 43 local Markdown
+    links, graph/status assertions, and diff checks pass.
+  - Owner review: implementation-demo acceptance received in the 2026-08-26
+    working session.
+  - Follow-ups: none for Slice 3.1. Slice 3.2 is the next eligible slice; its
+    strong-type architecture requires owner approval before public APIs land.
+
+- 2026-08-26 — Slice 3.2 — In Progress
+  - Change: inspected OpenMW's existing `Misc::StrongTypedef`, ESM identity,
+    ordering, hashing, formatting, and overflow conventions; added proposed
+    [`ADR-0015`](adr/ADR-0015-strong-value-types-identity-counter-policy.md)
+    with five option sets, scopes, scenarios, acceptance tests, consequences,
+    failure mitigations, and replacement triggers. No production header or
+    strong value implementation was added.
+  - Decisions: none accepted. The proposal recommends Option A for all five
+    decisions: ten scoped `u64` semantic types; zero-invalid identities/one-based
+    counters with tick zero valid; a project-owned explicit policy template;
+    optional-returning checked advancement; and type-qualified debug formatting
+    with codec/allocation separation.
+  - Verification: all 83 repository-owned Python tests pass; indexed provenance
+    passes with 74 intentional differences and 43 dependency inputs; JSON/path
+    ordering, all 45 local Markdown links, ADR-0015's proposed five-decision/
+    owner-pending state, Slice 3.1/3.2 and Phase 2/3 status assertions, and
+    staged/unstaged diff checks pass.
+  - Owner review: pending explicit approval or amendment of Decisions 1–5.
+  - Follow-ups: present the five decisions to the owner. Slice 3.2 production
+    work remains gated.
+
+- 2026-08-26 — Slice 3.2 — In Progress
+  - Change: accepted ADR-0015 and added `tes3mp/strong_value.hpp` plus
+    `tes3mp/value_types.hpp` to `tes3mp_protocol`. The API defines ten scoped
+    semantic `uint64_t` types, zero-invalid named factories except zero-valid
+    `ServerTick`, declared counter `initial()`/checked `next()`, explicit raw
+    access, same-type total ordering/hash, and stable `TypeName{decimal}` text.
+    A standalone C++20 contract executable is composed through
+    `tes3mp_test_support`; codecs, allocation, persistence, schemas, OpenMW, and
+    gameplay behavior remain absent.
+  - Decisions: the owner approved Option A for Decisions 1–5: the ten-type `u64`
+    catalog and scopes, unrepresentable invalid/default state, project-owned
+    explicit policy template, optional-returning no-wrap advancement, and stable
+    type-qualified formatting with explicit external boundaries.
+  - Verification: all 84 repository-owned Python tests pass, including six
+    focused boundary tests. Their isolated CMake
+    projects compile/link all independent targets and aliases, run the C++
+    semantic contract, build the adapter leaf, and prove forbidden direct links
+    and includes fail closed. The C++ contract contains compile-time negative
+    construction/conversion/comparison/arithmetic checks, underlying size/
+    alignment/trivial-copy assertions, plus runtime zero/start/order/hash/
+    formatting/advance/exhaustion checks. The real MSVC/Ninja baseline graph
+    builds and runs `tes3mp_protocol_tests_run`. Real legacy exclusion passes
+    across 3,771 tracked paths, 58 CMake files, 1,240 compile commands, and 1,942
+    Ninja edges. Indexed provenance passes with 77 intentional differences and
+    43 dependency inputs; JSON/path ordering, all 45 local Markdown links,
+    accepted ADR/catalog/isolation/status assertions, and staged/unstaged diff
+    checks pass.
+  - Owner review: ADR approval is recorded; implementation-demo acceptance is
+    pending before Slice 3.2 may become **Implemented**.
+  - Follow-ups: run all gates and present boundary/max-value evidence. Slice 3.3
+    production work remains gated.
+
+- 2026-08-26 — Slice 3.2 — Implemented
+  - Change: retained the exact accepted ADR-0015 API and contract tests
+    demonstrated in the preceding in-progress note; no API or runtime behavior
+    changed during acceptance.
+  - Decisions: no amendment. The owner accepted the ten-type Option A
+    implementation as demonstrated.
+  - Verification: all 84 repository-owned Python tests and six focused target-
+    boundary tests pass. The real MSVC/Ninja graph builds and runs
+    `tes3mp_protocol_tests_run`; real legacy exclusion passes across 3,771
+    tracked paths, 58 CMake files, 1,240 compile commands, and 1,942 Ninja
+    edges. Indexed provenance with 77 intentional differences and 43 dependency
+    inputs, JSON/path ordering, all 45 local Markdown links, status/contract
+    assertions, and staged/unstaged diff checks pass.
+  - Owner review: implementation-demo acceptance received in the 2026-08-26
+    working session.
+  - Follow-ups: none for Slice 3.2. Slice 3.3 is the next eligible slice, and
+    its spatial/state API decisions require owner approval before production
+    headers land.
+
+- 2026-08-26 — Slice 3.3 — In Progress
+  - Change: inspected OpenMW 0.51 cell, worldspace, exterior-grid, position,
+    and rotation representations plus the later protocol, server-core,
+    content-identity, cell/interest, and movement gates. Added proposed
+    [`ADR-0016`](adr/ADR-0016-canonical-spatial-command-snapshot-primitives.md)
+    with five option sets, scenarios, acceptance tests, failure mitigations,
+    and replacement triggers. No Slice 3.3 production header, codec, schema,
+    state storage, reducer, adapter conversion, or gameplay behavior was added.
+  - Decisions: none accepted. The proposal recommends Option A for Decisions
+    1–5: a tagged context-scoped interior/exterior cell value; contextual
+    absolute exterior coordinates; three-axis fixed-point transform values with
+    fixed right-handed composition; linear velocity only; and value-only
+    command/order metadata plus per-entity snapshot values.
+  - Verification: all 84 repository-owned Python tests pass, including the six
+    focused independent-target tests and the existing C++ strong-value
+    contract. Indexed provenance passes with 78 intentional differences and 43
+    dependency inputs; JSON/path ordering, all 55 local Markdown links,
+    ADR-0016's proposed five-decision/owner-pending state, Slice 3.2/3.3 and
+    Phase 3 status assertions, and staged/unstaged diff checks pass. A new
+    product build/runtime test is not applicable because this step changes only
+    the decision packet and production code remains gated.
+  - Owner review: pending explicit approval or amendment of Decisions 1–5.
+  - Follow-ups: present Decisions 1–5 to the owner, amend or accept ADR-0016,
+    then implement only the approved Slice 3.3 value surface and independent
+    contract tests.
+
+- 2026-08-26 — Slice 3.3 — In Progress
+  - Change: accepted ADR-0016 and added `CellSpaceId`, tagged interior/exterior
+    `CellId`, signed fixed-point `Position3`, modular `Turn32`, three-axis
+    `Orientation3`, `Transform`, and per-tick `LinearVelocity3` values to
+    `tes3mp_protocol`. Added fully initialized client-command, optional entity-
+    precondition, writer-admission, and authoritative spatial-snapshot value
+    records. A bounded little-endian snapshot round trip exists only in
+    `tes3mp_test_support`; it is not a protocol schema or wire contract.
+  - Decisions: the owner approved Option A for Decisions 1–5: context-scoped
+    tagged cells, contextual absolute exterior coordinates, right-handed
+    `Rz * Ry * Rx` fixed-turn orientation, linear velocity only, and value-only
+    metadata/snapshot records. Content mapping, final cell rules, gameplay
+    validation, movement, codecs, collection budgets, reducers, delivery, and
+    OpenMW conversions remain deferred to their owning gates.
+  - Verification: all 84 repository-owned Python tests pass, including six
+    focused boundary tests whose independent graph builds and runs both C++
+    value-contract executables without OpenMW. The real MSVC/Ninja baseline
+    graph configures, builds, and runs `tes3mp_protocol_tests_run`. Real legacy
+    exclusion passes across 3,777 tracked paths, 58 CMake files, 1,242 compile
+    commands, and 1,947 Ninja edges. Indexed provenance passes with 83
+    intentional differences and 43 dependency inputs. JSON/path ordering,
+    all 55 local Markdown links, accepted ADR/decision/status assertions, and
+    staged/unstaged diff checks pass.
+  - Owner review: ADR approval is recorded; implementation-demo acceptance is
+    pending before Slice 3.3 may become **Implemented**.
+  - Follow-ups: run all gates and present the interior/exterior, negative-grid,
+    numeric-boundary, orientation-basis, command/admission-separation, malformed
+    test-encoding, and round-trip evidence. Slice 3.4 remains gated.
+
+- 2026-08-26 — Slice 3.3 — Implemented
+  - Change: retained the exact accepted ADR-0016 value surface and independent
+    contract tests demonstrated in the preceding in-progress note; no API or
+    runtime behavior changed during acceptance.
+  - Decisions: no amendment. The owner accepted the five-decision Option A
+    implementation as demonstrated.
+  - Verification: all 84 repository-owned tests, six focused independent-target
+    checks, both C++ contracts in the real MSVC/Ninja graph, real legacy
+    exclusion across 3,777 paths/58 CMake files/1,242 compile commands/1,947
+    Ninja edges, indexed provenance with 83 intentional differences and 43
+    dependency inputs, all 55 local Markdown links, ADR/status assertions, and
+    staged/unstaged diff checks pass.
+  - Owner review: implementation-demo acceptance received in the 2026-08-26
+    working session.
+  - Follow-ups: none for Slice 3.3. Slice 3.4 is the next eligible slice; its
+    deterministic facility interfaces and target ownership require owner
+    approval before production APIs land.
+
+- 2026-08-26 — Slice 3.4 — In Progress
+  - Change: inspected ADR-0013's approved tick/randomness contracts, ADR-0014's
+    target graph, the current engine-independent API, and later scheduler,
+    fault, protocol-session, server-core, transport, and checksum gates. Added
+    proposed [`ADR-0017`](adr/ADR-0017-deterministic-facilities-harness-boundaries.md)
+    with five option sets, exact recommended RNG derivation, scenarios,
+    acceptance tests, failure mitigations, and replacement triggers. No Slice
+    3.4 production facility, link, trace harness, or runtime behavior was added.
+  - Decisions: none accepted. The proposal recommends Option A for Decisions
+    1–5: project-owned monotonic instants/interface; passive bounded server-core
+    scheduler; numeric-keyed versioned server-core RNG streams; a bounded test-
+    support-only duplex byte link; and exact trace bytes plus a non-canonical
+    test diagnostic digest.
+  - Verification: all 84 repository-owned Python tests pass, including the six
+    focused independent-target tests and both existing C++ value contracts.
+    Indexed provenance passes with 84 intentional differences and 43 dependency
+    inputs; JSON/path ordering, all 57 local Markdown links, ADR-0017's proposed
+    five-decision/owner-pending state, Slice 3.3/3.4 and Phase 3 status
+    assertions, and staged/unstaged diff checks pass. A new product build/runtime
+    test is not applicable because this step changes only the decision packet
+    and production code remains gated.
+  - Owner review: pending explicit approval or amendment of Decisions 1–5.
+  - Follow-ups: present Decisions 1–5 to the owner, amend or accept ADR-0017,
+    then implement only the approved deterministic facility and harness APIs.
+
+- 2026-08-26 — Slice 3.4 — Implemented
+  - Change: accepted ADR-0017 and added the project-owned monotonic nanosecond
+    instant/clock seam, passive rational 30 Hz scheduler with four-tick bounded
+    catch-up, numeric-keyed SplitMix64/xoshiro256** V1 streams with snapshot/
+    restore and unbiased bounded sampling, checked manual clock, independently
+    bounded FIFO byte duplex, stable typed test trace, and explicitly non-
+    canonical `TestTraceDigestV1`. Added two independent C++ contract
+    executables and a fail-closed production-to-test-support include check. No
+    wall-clock adapter, thread, reducer, gameplay behavior, fault policy,
+    production transport interface, or canonical checksum was added.
+  - Decisions: the owner approved Option A for ADR-0017 Decisions 1–5 without
+    amendment: project-owned monotonic observation, passive server-core
+    scheduler, numeric-keyed versioned server-core RNG, test-support-only
+    bounded link, and exact trace bytes plus test-only diagnostic digest.
+  - Verification: `python -m unittest discover -s scripts/tests -v` passes all
+    85 repository-owned tests, including seven focused target-boundary tests.
+    The isolated MSVC 19.44/Ninja graph builds and runs all four C++ contract
+    executables. The deterministic contracts prove exact 1/30-second rational
+    boundaries and 18,000 sequential ticks over ten irregularly advanced
+    minutes; four-tick stall batches; backwards-clock, deadline-overflow, and
+    tick-exhaustion errors; pinned SplitMix64/xoshiro/derivation vectors;
+    stream isolation, restore, rejection sampling, and zero-bound behavior;
+    independent message/byte budgets, FIFO boundaries, directional close; and
+    two byte-identical 198-byte scripted traces with pinned diagnostic digest
+    `75802a50e6b6fc66`. The real MSVC/Ninja baseline graph configures, builds,
+    and runs `tes3mp_protocol_tests_run`; real legacy exclusion passes across
+    3,791 tracked paths, 58 CMake files, 1,249 compile commands, and 1,960 Ninja
+    edges. Indexed provenance passes with 97 intentional differences and 43
+    dependency inputs; JSON/path ordering and staged/unstaged diff checks pass.
+  - Owner review: ADR approval and implementation-demo acceptance received in
+    the 2026-08-26 working session. The accepted demo is conditional on the
+    recorded gates passing without behavior or boundary deviations; they pass.
+  - Follow-ups: none for Slice 3.4. Slice 3.5 is the next eligible slice and
+    still owns latency, loss, jitter, duplication, reordering, stall, and
+    disconnect fault controls.
+
+- 2026-08-26 — Slice 3.5 — In Progress
+  - Change: accepted
+    [`ADR-0018`](adr/ADR-0018-deterministic-network-fault-controls.md) and added
+    a passive test-support-only `FaultInjectingLink` wrapper, test-only numeric
+    channel keys, immutable bounded profiles, isolated per-path/per-dimension
+    deterministic random streams, scheduled latency/jitter/reorder delivery,
+    integer-rate loss/duplication, explicit path stall/disconnect controls, and
+    an independent C++ contract executable. The accepted FIFO byte duplex adds
+    only a read-only budget observer so impossible messages reject before they
+    can become stuck in the wrapper.
+  - Decisions: the owner approved Option A for ADR-0018 Decisions 1–5. Faults
+    wrap rather than modify the base-link semantics; delivery is passive and
+    clock-driven; direction/channel identity is test-only; random decisions are
+    seeded and isolated; and stalls, disconnects, duplication, pending queues,
+    and underlying directional backpressure follow the approved bounded rules.
+    No protocol channel, production transport, authority, state-scope, or
+    gameplay behavior was selected.
+  - Verification: `python -m unittest discover -s scripts/tests -v` passes all
+    85 repository-owned tests, including seven focused target-boundary tests.
+    The isolated and real MSVC 19.44/Ninja engine-independent graphs build and
+    run all five C++ contract executables through
+    `tes3mp_protocol_tests_run`. Fault contracts cover invalid/duplicate/65-path
+    configuration, exact latency, direction/channel isolation, certain loss,
+    certain at-most-one duplication with atomic admission, bounded jitter and
+    reordered delivery, stall/resume, disconnect cleanup, independent reverse-
+    direction progress under base-link backpressure, due-time overflow, and a
+    pinned repeatable 97-byte seeded trace with diagnostic digest
+    `935d71908b6496c8`; another path cannot perturb it and a changed seed changes
+    it. `python scripts/verify_vnext_baseline.py --index` accounts for 101
+    intentional differences and 43 dependency inputs. Fresh supported-preset
+    configuration plus `python scripts/verify_vnext_legacy_exclusion.py
+    --build-dir build/vnext-baseline --index` checks 3,795 staged paths, 58
+    CMake files, 1,251 compile commands, and 1,965 Ninja edges. Manifest JSON,
+    all 59 local vNext Markdown links, formatting, and staged diff checks pass.
+  - Owner review: explicit Option A approval for Decisions 1–5 received in the
+    2026-08-26 working session. Implementation-demo acceptance is pending.
+  - Follow-ups: present the implementation demo and obtain owner acceptance
+    before changing Slice 3.5 to **Implemented**. Slice 3.6 remains gated.
+
+- 2026-08-26 — Slice 3.5 — Implemented
+  - Change: retained implementation commit `3f572f27f3` and its accepted
+    ADR-0018 fault-wrapper API and contracts without amendment; this status-only
+    follow-up records completion after the required owner demo review.
+  - Decisions: no amendment. The owner accepted the implemented Option A
+    behavior for Decisions 1–5 as demonstrated.
+  - Verification: the committed implementation passes all 85 repository-owned
+    Python tests and all five C++ contracts. The owner-reviewed demo covers
+    independent delayed/immediate paths, exact loss and duplication endpoints,
+    bounded reordered delivery, path-local stall/resume and disconnect,
+    reverse-direction backpressure isolation, checked overflow, and the pinned
+    97-byte trace with digest `935d71908b6496c8`. Committed-tree baseline
+    provenance passes with 101 intentional differences and 43 dependency
+    inputs; legacy exclusion passes across 3,795 paths, 58 CMake files, 1,251
+    compile commands, and 1,965 Ninja edges.
+  - Owner review: implementation-demo acceptance received in the 2026-08-26
+    working session.
+  - Follow-ups: none for Slice 3.5. Slice 3.6 is the next eligible slice; Phase
+    3 remains **In Progress** until Slices 3.6 and 3.7 and the exit gate pass.
+
+- 2026-08-26 — Slice 3.6 — In Progress
+  - Change: inspected the accepted platform/toolchain, schema/fuzzer,
+    transport-sanitizer, target-boundary, and deterministic-harness policies;
+    current CMake presets and vNext workflows; the five existing C++ contract
+    executables; and the absence of reusable project-owned sanitizer, race, or
+    fuzz plumbing. Added proposed
+    [`ADR-0019`](adr/ADR-0019-runtime-safety-and-fuzz-ci-policy.md) with five
+    option sets, scenarios, acceptance tests, failure mitigations, and review
+    triggers. No production CMake option, sanitizer flag, runner, fuzz target,
+    seed corpus, or workflow job was added.
+  - Decisions: none accepted. The proposal recommends owned-target
+    registration with a fast independent graph; separate Linux Clang 18
+    ASan+UBSan and ThreadSanitizer profiles; one libFuzzer executable per
+    bounded parser beginning with the test-only spatial decoder; two short
+    per-change safety jobs; and repository-owned presets/runner/JSON evidence.
+  - Verification: `python -m unittest discover -s scripts/tests -v` passes all
+    85 repository-owned tests. Staged-tree
+    `python scripts/verify_vnext_baseline.py --index` passes with 102
+    intentional differences and 43 dependency inputs; JSON parsing and manifest
+    path ordering, all 61 local vNext Markdown links, `git diff --cached
+    --check`, and status/ADR assertions pass. Repository status/history and the
+    accepted ADR plus build/workflow inspection identify Phase 3/Slice 3.6 as
+    the only eligible work and confirm that no existing decision settles these
+    five choices. A new product build or sanitizer run is not applicable
+    because this step changes only the decision packet and production
+    implementation remains gated.
+  - Owner review: pending explicit approval or amendment of Decisions 1–5.
+  - Follow-ups: present Decisions 1–5 to the owner, amend or accept ADR-0019,
+    then implement only the approved Slice 3.6 safety plumbing and evidence.
+
+- 2026-08-26 — Slice 3.6 — In Progress
+  - Change: accepted ADR-0019 and added fail-closed target-scoped CMake
+    instrumentation for every selected TES3MP library/executable, standalone
+    uninstrumented/ASan+UBSan/ThreadSanitizer presets, a bounded libFuzzer entry
+    over the test-only spatial decoder with three size-boundary seeds, and a
+    repository-owned runner that verifies corpus bounds, all expected compiled
+    sources, exact Clang 18 instrumentation, contract executables, and retained
+    JSON/log/reproducer evidence. Added two dedicated 20-minute per-change
+    Linux jobs and policy/failure tests. No OpenMW-wide flags, third-party
+    instrumentation, production decoder, runtime suppression, thread,
+    protocol behavior, authority, state scope, or gameplay behavior was added.
+  - Decisions: the owner approved Option A for ADR-0019 Decisions 1–5 without
+    amendment: owned-target registration with a fast independent graph;
+    separate Linux Clang 18 ASan+UBSan and ThreadSanitizer profiles; one
+    libFuzzer executable per bounded parser beginning with the test spatial
+    decoder; dedicated bounded per-change jobs; and repository-owned presets,
+    runner, and versioned JSON evidence.
+  - Verification: `python -m unittest discover -s scripts/tests -v` passes all
+    95 repository-owned tests, including 17 focused runtime-safety/target-
+    boundary tests. The uninstrumented standalone preset builds with MSVC
+    19.44/Ninja and runs all five C++ contracts; the real baseline graph
+    configures, builds the adapter, and runs the same contracts. The approved
+    sanitizer preset intentionally rejects local MSVC before generation.
+    Staged legacy exclusion checks 3,805 paths, 59 CMake files, 1,251 compile
+    commands, and 1,965 Ninja edges. Staged provenance passes with 111
+    intentional differences and 43 dependency inputs; all three seed blobs
+    retain exact binary sizes 101/111/2, all 61 local Markdown links resolve,
+    and Python compilation, both JSON documents, manifest ordering, and
+    `git diff --cached --check` pass. Hosted Linux Clang 18
+    ASan+UBSan/libFuzzer and ThreadSanitizer execution is pending publication
+    of this workflow change.
+  - Owner review: explicit Option A approval for Decisions 1–5 received in the
+    2026-08-26 working session. Implementation-demo acceptance is pending the
+    hosted jobs and retained-artifact review.
+  - Follow-ups: publish the implementation, require both hosted safety jobs,
+    review their exact instrumentation/corpus/toolchain evidence and any
+    reproducers, then present the implementation demo before changing Slice 3.6
+    to **Implemented**. Slice 3.7 remains gated.
+
+- 2026-08-26 — Slice 3.6 — In Progress
+  - Change: retained implementation commit `1be40d1a4b` and its accepted
+    ADR-0019 safety profiles, fuzz harness, runner, workflow, and contracts
+    without amendment; this status-only follow-up records the owner-reviewed
+    local implementation demo before publication.
+  - Decisions: no amendment. The owner accepted the implemented Option A
+    behavior for Decisions 1–5 as demonstrated.
+  - Verification: the accepted demo covers the ordinary uninstrumented graph,
+    all five instrumented target registrations, separate ASan+UBSan/fuzzer and
+    ThreadSanitizer configurations, bounded 101/111/2-byte seed corpus, strict
+    compiler/profile failures, complete compile-command instrumentation checks,
+    and retained JSON/log/reproducer fields. The committed local evidence
+    remains 95 Python tests, five C++ contracts in standalone and real baseline
+    graphs, 3,805-path legacy exclusion, and provenance with 111 intentional
+    differences and 43 dependency inputs. Hosted safety execution remains
+    pending publication.
+  - Owner review: implementation-demo acceptance received in the 2026-08-26
+    working session.
+  - Follow-ups: publish the commits, wait for both hosted safety jobs, review
+    their retained artifacts, and record the results before changing Slice 3.6
+    to **Implemented**. Slice 3.7 remains gated.
+
+- 2026-08-27 — Slice 3.6 — In Progress
+  - Change: reviewed the first hosted execution of commit `d21b66241f`. Both
+    runtime-safety jobs and the Linux/macOS baseline jobs stopped while compiling
+    `fault_injection_tests.cpp`: GCC 13, Clang 18 with libstdc++ 14, and Apple
+    Clang with libc++ correctly rejected class-template argument deduction of a
+    function type in the test table that MSVC had accepted. Made each test
+    callable an explicit function pointer; production targets, instrumentation,
+    fuzzing policy, and runtime behavior are unchanged.
+  - Decisions: no ADR amendment or new architecture, authority, state-scope, or
+    gameplay-behavior decision. This is a mechanical source-portability repair
+    within the accepted ADR-0019 toolchain matrix.
+  - Verification: failed runtime-safety run `33043774198` records ASan+UBSan
+    artifact `9634839470` (digest
+    `27738fafe1e5db094344ff3dcce072da1d069c63d4b1012ddd5bf9ab8b5b4f60`) and
+    ThreadSanitizer artifact `9634839001` (digest
+    `28470dfd8f5add3c2427eb167ccb2e238c52bf7bc9e074c16499224e4f04b0fb`);
+    both failed during the common contract build before sanitizer execution.
+    Linux baseline run `33043774128` and macOS ARM64 baseline run `33043774191`
+    independently reproduce the same compiler diagnostic. Post-repair local
+    verification passes all 95 repository-owned Python tests and all five C++
+    contracts in both the standalone and real baseline graphs under MSVC
+    19.44/Ninja. Staged provenance accounts for 111 intentional differences and
+    43 dependency inputs; legacy exclusion checks 3,805 paths, 59 CMake files,
+    1,251 compile commands, and 1,965 Ninja edges. Both relevant JSON documents,
+    all 61 local vNext Markdown links, and `git diff --cached --check` pass.
+    Replacement hosted verification is pending.
+  - Owner review: the owner reported CI completion in the 2026-08-27 working
+    session; the previously accepted implementation demo and Decisions 1–5 are
+    unchanged.
+  - Follow-ups: publish the repair, require replacement baseline and safety
+    runs, and review retained safety artifacts before changing Slice 3.6 to
+    **Implemented**. Slice 3.7 remains gated.
+
+- 2026-08-27 — Slice 3.6 — Implemented
+  - Change: retained accepted ADR-0019, implementation commit `1be40d1a4b`,
+    demo-acceptance commit `d21b66241f`, and portability repair commit
+    `fc8f178081` without amendment. This status update closes the slice after
+    reviewing the replacement hosted execution and its retained artifacts.
+  - Decisions: no amendment. The approved target scope, separate sanitizer
+    profiles, per-parser fuzzer, per-change cadence, and evidence contract are
+    satisfied. No production wire, threading, authority, state-scope, or
+    gameplay behavior was introduced.
+  - Verification: [runtime-safety run `33086841428`](https://github.com/poisson-fish/TES3MP/actions/runs/33086841428)
+    passes both Clang 18.1.3 Linux x86-64 jobs. The ThreadSanitizer job runs all
+    five contracts with 17 owned sources instrumented. The ASan+UBSan job runs
+    the same contracts with 18 owned sources instrumented, then executes
+    43,182,600 libFuzzer inputs in 31 seconds with the pinned 101/111/2-byte
+    corpus, 256-byte input cap, 512 MiB RSS cap, and no sanitizer finding or
+    retained reproducer. ASan+UBSan artifact `9652568259` has digest
+    `705b3e86e9e93176bd254376879466635988297bdec8f605303abd65c58d3794`;
+    ThreadSanitizer artifact `9652547046` has digest
+    `6ed693d02d38823cb1de45aed98bcfcf7319214a1ecc266c6eaa980370e0d3a7`.
+    Replacement Linux run `33086841250`, Windows run `33086841350`, and macOS
+    run `33086841457` also pass the portability repair on the supported baseline
+    matrix.
+  - Owner review: implementation-demo acceptance was received in the 2026-08-26
+    working session; the owner confirmed the replacement CI is green on
+    2026-08-27.
+  - Follow-ups: none for Slice 3.6. Slice 3.7 is the next eligible slice and its
+    observability architecture requires owner approval before public APIs land.
+
+- 2026-08-27 — Slice 3.7 — In Progress
+  - Change: inspected the accepted target topology, deterministic-state policy,
+    hostile-Internet/redaction requirements, future committed-change sinks, and
+    transport/admin telemetry ownership. Added proposed
+    [`ADR-0020`](adr/ADR-0020-owned-observability-interfaces-and-test-sinks.md)
+    with five option sets, scenarios, acceptance tests, failure mitigations, and
+    review triggers. No production header, sink, target dependency, metric/event
+    category, backend, thread, queue, or behavior was added.
+  - Decisions: none accepted. The proposal recommends Option A for Decisions
+    1–5: server-core-owned ports plus test-support recorders; explicit injected
+    non-blocking/noexcept sink attempts; closed integer metric operations and
+    low-cardinality enum dimensions; closed typed structured events with no raw
+    text/bytes; and fixed-capacity FIFO test recorders with reject-newest and
+    explicit dropped-count evidence.
+  - Verification: retained CI evidence establishes Slice 3.6 completion and the
+    repository/decision inspection identifies Slice 3.7 as the only eligible
+    implementation work. All 95 repository-owned Python tests pass; staged
+    provenance accounts for 112 intentional differences and 43 dependency
+    inputs; legacy exclusion checks 3,806 paths, 59 CMake files, 1,251 compile
+    commands, and 1,965 Ninja edges; and JSON/path ordering, all 63 local vNext
+    Markdown links, proposal/status assertions, and staged diff checks pass. A
+    new product build is not applicable because production implementation
+    remains approval-gated.
+  - Owner review: pending explicit approval or amendment of Decisions 1–5.
+  - Follow-ups: present Decisions 1–5 to the owner, accept or amend ADR-0020,
+    then implement only the approved Slice 3.7 observability interfaces and test
+    sinks. Phase 3 remains **In Progress** until Slice 3.7 and the exit gate pass.
+
+- 2026-08-27 — Slice 3.7 — In Progress
+  - Change: accepted ADR-0020 and added server-core-owned closed metric/event
+    values, explicit metrics/event sink interfaces, explicit no-op sinks, and a
+    non-owning observability bundle. Added test-support-only preallocated metric
+    and event FIFO recorders with a 1,024-observation maximum, reject-newest
+    overflow, saturating dropped counts, clear/reuse, and no allocation after
+    construction. Added a sixth independent contract executable and registered
+    every new source/contract in the ADR-0019 safety evidence. No production
+    backend, exporter, formatting, wall clock, thread, queue, protocol field,
+    canonical mutation, authority, state-scope, or gameplay behavior was added.
+  - Decisions: the owner approved Option A for ADR-0020 Decisions 1–5 without
+    amendment: server-core ownership with test-support recorders; explicit
+    injected non-blocking/noexcept attempts; closed integer metric definitions
+    and enum dimensions; closed typed events without raw strings/bytes; and
+    fixed-capacity deterministic FIFO recorders with explicit overflow evidence.
+  - Verification: the standalone MSVC 19.44/Ninja graph builds the new owned
+    sources and runs all six C++ contracts. The observability contract covers
+    metric operation/unit/value matching, invalid keys and dimensions,
+    duplicate/over-limit dimensions, typed event payloads and semantic ticks,
+    explicit no-op composition, zero/one/1,024/over-limit capacities, FIFO and
+    reject-newest behavior, dropped counts, clear/reuse, identical-run evidence,
+    and canonical-result independence. All 95 repository-owned Python tests
+    pass. The real MSVC/Ninja baseline graph builds the same owned sources and
+    runs all six contracts. Staged provenance accounts for 117 intentional
+    differences and 43 dependency inputs; legacy exclusion checks 3,811 paths,
+    59 CMake files, 1,254 compile commands, and 1,971 Ninja edges. Documentation
+    JSON/path ordering, all 63 local vNext Markdown links, accepted-decision and
+    status assertions, Python compilation, and staged diff checks pass. Hosted
+    safety verification is pending.
+  - Owner review: explicit Option A approval for Decisions 1–5 received in the
+    2026-08-27 working session. Implementation-demo acceptance is pending.
+  - Follow-ups: complete the full local verification set, publish the
+    implementation, require both hosted safety jobs, review their updated six-
+    contract/source evidence, and present the implementation demo before
+    changing Slice 3.7 to **Implemented** or running the Phase 3 exit gate.
+
+- 2026-08-27 — Slice 3.7 — In Progress
+  - Change: retained implementation commit `57973b65c7` and its accepted
+    ADR-0020 interfaces, bounded recorders, and contracts without amendment.
+    This status-only update records owner demo acceptance and review of the
+    hosted sanitizer/race/fuzz artifacts.
+  - Decisions: no amendment. The owner accepted the implemented Option A
+    behavior for Decisions 1–5 as demonstrated.
+  - Verification: [runtime-safety run `33094255400`](https://github.com/poisson-fish/TES3MP/actions/runs/33094255400)
+    passes both Linux Clang 18.1.3 jobs with all six contracts. ThreadSanitizer
+    instruments 20 owned sources; ASan+UBSan instruments 21 including the
+    fuzzer. The bounded 30-second fuzz smoke executes 31,921,040 inputs with the
+    pinned 101/111/2-byte corpus and retains no finding or reproducer.
+    ASan+UBSan artifact `9655707741` has digest
+    `3c3a895577a668caff9e854fb87894863636c2afc24ce6930c31f08eebfe8a2c`;
+    ThreadSanitizer artifact `9655699866` has digest
+    `0df43fa638dc728adc4ae3ea06eb848d785f17fb424f65369f1229193f85d167`.
+    Linux baseline run `33094255420`, Windows baseline run `33094255379`, and
+    macOS baseline run `33094255438` remain in progress.
+  - Owner review: implementation-demo acceptance received in the 2026-08-27
+    working session.
+  - Follow-ups: require the supported platform baseline matrix to pass, review
+    its evidence, then change Slice 3.7 to **Implemented** and present the
+    complete Phase 3 exit-gate evidence for separate owner approval.
+
+- 2026-08-27 — Slice 3.7 — Implemented
+  - Change: retained accepted ADR-0020 and implementation commit `57973b65c7`
+    without behavioral amendment. Closed the slice after the supported Phase 3
+    platform matrix completed on the demo-accepted tree.
+  - Decisions: none. The owner had already approved ADR-0020 Option A for all
+    five decisions and accepted the implementation demo.
+  - Verification: all six latest vNext workflows completed successfully for
+    `e757e063c461fa6a676f477927633416c9a0996b`: runtime safety
+    [`33095908384`](https://github.com/poisson-fish/TES3MP/actions/runs/33095908384),
+    FlatBuffers proof
+    [`33095908412`](https://github.com/poisson-fish/TES3MP/actions/runs/33095908412),
+    macOS baseline
+    [`33095908403`](https://github.com/poisson-fish/TES3MP/actions/runs/33095908403),
+    GameNetworkingSockets proof
+    [`33095908292`](https://github.com/poisson-fish/TES3MP/actions/runs/33095908292),
+    Windows baseline
+    [`33095908387`](https://github.com/poisson-fish/TES3MP/actions/runs/33095908387),
+    and Linux baseline
+    [`33095908319`](https://github.com/poisson-fish/TES3MP/actions/runs/33095908319).
+    Linux GCC 13/Clang 18, Windows MSVC 2022 v143, macOS arm64 Xcode 16, all
+    four non-Intel jobs in each dependency proof, and both Clang 18 safety jobs
+    passed. The Phase 3 push policy intentionally skipped Intel; the manually
+    dispatched Intel baseline and five-platform dependency proofs retained from
+    Phases 1 and 2 satisfy its declared cadence. Current safety artifacts are
+    `9656379611` (ASan+UBSan/fuzz, SHA-256
+    `6910645bb146cec2ccc4299510a8300b0795d9db6c4f84cfa61d52450aab6cc7`)
+    and `9656367967` (ThreadSanitizer, SHA-256
+    `f1f5881cc07cfb3437a09360279da008b20a55f0732e67f22a34c0be41980921`).
+  - Owner review: implementation-demo acceptance received in the 2026-08-27
+    working session.
+  - Follow-ups: none for Slice 3.7. Phase 3 exit remains a separate owner gate.
+
+- 2026-08-27 — Phase 3 — In Progress
+  - Change: assembled the exit-gate evidence and implemented the owner-approved
+    Phase 4+ CI cadence amendment in ADR-0002 and ADR-0019. All six vNext hosted
+    workflows now expose manual dispatch only. A phase-exit dispatch exercises
+    every declared job, including macOS x86-64; slice work continues to require
+    applicable local verification.
+  - Decisions: the owner explicitly approved one complete hosted CI gate at the
+    end of each Phase 4+ phase instead of automatic push, pull-request,
+    schedule, or release runs. No architecture, authority, state-scope, or
+    gameplay behavior changed.
+  - Gate evidence: protocol and server-core build and test in the standalone
+    graph without OpenMW or GameNetworkingSockets; fail-closed tests reject an
+    introduced OpenMW/transport include or undeclared dependency; and the
+    deterministic harness reproduces exact normal and injected-fault traces and
+    diagnostic checksums from identical seeds. The local six-contract graph,
+    real baseline graph, legacy-exclusion gate, provenance gate, repository
+    tests, and the hosted evidence listed above provide the retained proof.
+  - Verification: all 95 repository-owned Python tests pass, including workflow
+    policy assertions that all six vNext workflows are manual-only and that the
+    Intel jobs are unconditional within a dispatch. Staged provenance accounts
+    for 117 intentional differences and verifies 43 dependency inputs. Legacy
+    exclusion checks 3,811 tracked paths, 59 CMake files, 1,254 compile
+    commands, and 1,971 Ninja edges. The provenance JSON parses, all 63 local
+    vNext Markdown links resolve, changed Python compiles, and staged diff
+    checks pass.
+  - Owner review: explicit Phase 3 exit approval remains pending. Phase 4 is
+    still **Not Started**, and no Phase 4 production work is eligible yet.
+  - Follow-ups: complete local verification of this cadence/status update,
+    publish it without launching automatic vNext workflows, and present the
+    Phase 3 exit gate for owner approval.
+
+- 2026-08-27 — Phase 3 — Implemented
+  - Change: marked Phase 3 implemented after explicit exit approval and replaced
+    the README's historical slice-by-slice status narrative with a concise
+    current-state, product-scope, boundary, invariant, and workflow guide. No
+    production behavior or CI policy changed in this closeout.
+  - Decisions: no ADR or GDR amendment. The owner explicitly approved the Phase
+    3 exit and progression toward Phase 4 in the 2026-08-27 working session.
+  - Gate evidence: every Slice 3.1–3.7 deliverable is implemented and demo-
+    accepted. The independent target graph, fail-closed dependency checks,
+    deterministic normal/fault traces, six contract executables, local and
+    hosted safety profiles, supported Phase 3 platform matrix, provenance, and
+    legacy exclusion satisfy all three exit conditions.
+  - Verification: all 95 repository-owned Python tests pass. Staged provenance
+    accounts for 117 intentional differences and verifies 43 dependency inputs;
+    legacy exclusion checks 3,811 paths, 59 CMake files, 1,254 compile commands,
+    and 1,971 Ninja edges. All 63 local vNext Markdown links resolve, changed
+    Python compiles, and staged diff checks pass. The README is reduced from 265
+    to 144 lines.
+  - Owner review: Phase 3 exit approval received in the 2026-08-27 working
+    session. Phase 4 production remains subject to its kickoff and unresolved
+    protocol/session architecture decisions.
+  - Follow-ups: verify and publish this documentation-only closeout without an
+    automatic hosted run, then present the Phase 4 kickoff and Slice 4.1
+    decision options before production implementation begins.
+
+## Phase 4 — Bounded protocol and in-memory session
+
+[Back to the phase tracker](IMPLEMENTATION_PLAN.md#phase-4--bounded-protocol-and-in-memory-session)
+
+- Decode into validated temporary values; only deliver a message to a session or
+  reducer after the entire envelope and payload pass bounds and semantic checks.
+- Capability negotiation should produce an immutable negotiated-capability set
+  used by encoders and handlers for the lifetime of a connection.
+- Keep authentication claims opaque to protocol code. The session may consume a
+  validated principal/session result but must not know backend credential format.
+- Golden files cover vNext evolution only and must include an explanation when
+  intentionally updated.
+
+- 2026-08-27 — Slice 4.1 — In Progress
+  - Change: this implementation commit accepts
+    [`ADR-0021`](adr/ADR-0021-bounded-protocol-framing-and-decode-boundary.md)
+    and adds the production `T3MP` format-one frame encoder/decoder, closed
+    message classes and initial stable kind registry, fixed 4/16/64 KiB class
+    budgets, owned decoded payloads, enum/numeric errors, a seventh standalone
+    contract executable, and a bounded production-decoder fuzz target/corpus.
+    No FlatBuffers payload schema, session transition, transport behavior,
+    authority, state scope, or gameplay behavior is introduced.
+  - Decisions: the owner explicitly approved ADR-0021 Option A for Decisions
+    1–4 and the Phase 4 slice boundaries in the 2026-08-27 working session.
+    The implementation uses the approved 12-byte little-endian header, compiled
+    class/kind mapping, fixed class budgets, and allocation-after-complete-frame-
+    validation owned result boundary without amendment.
+  - Verification: from the MSVC 2022 v143 x86-64 developer environment,
+    `cmake --preset tes3mp-standalone --fresh` and `cmake --build --preset
+    tes3mp-standalone --parallel 4` build and pass all seven contract
+    executables. `python -m unittest discover -s scripts/tests -v` passes all
+    95 repository-owned tests. `python scripts/verify_vnext_baseline.py --index`
+    accounts for 124 intentional differences and verifies 43 dependency inputs.
+    `python scripts/verify_vnext_legacy_exclusion.py --index --build-dir
+    build/tes3mp-standalone` checks 3,818 tracked paths, 59 CMake files, 22
+    compile commands, and 69 Ninja edges. Changed Python compiles, JSON parses,
+    local vNext Markdown links resolve, `git diff --cached --check` passes, and
+    the public protocol header contains no OpenMW, transport-library, platform,
+    FlatBuffers-generated, or test-support include.
+  - Owner review: Phase 4 kickoff and architecture approval received. The Slice
+    4.1 implementation demo and acceptance remain pending, so the slice stays
+    **In Progress**.
+  - Follow-ups: present the golden frame, owned-buffer overwrite, structured
+    malformed-input failures, exact class-limit cases, and fuzz registration for
+    owner demo acceptance; then mark Slice 4.1 **Implemented**. Slice 4.2 still
+    requires its capability/version-negotiation decision packet before schemas
+    or behavior land.
+
+- 2026-08-27 — Slice 4.1 — Implemented
+  - Change: retained implementation commit `98e62f5f19` without code changes and
+    marked Slice 4.1 **Implemented** after the required owner demo acceptance.
+  - Decisions: none. ADR-0021 remains accepted without amendment; the owner
+    directed that Slice 4.2 must not begin in this session.
+  - Verification: the accepted demo and implementation retain the green seven-
+    contract MSVC build, 95 repository-owned Python tests, provenance evidence
+    for 124 intentional differences and 43 dependency inputs, legacy-exclusion
+    evidence for 3,818 paths, 59 CMake files, 22 compile commands, and 69 Ninja
+    edges, changed-Python compilation, JSON parsing, 64 resolved local vNext
+    Markdown links, and clean diff checks.
+  - Owner review: implementation-demo evidence explicitly accepted by the
+    project owner in the 2026-08-27 working session.
+  - Follow-ups: none for Slice 4.1. Phase 4 remains **In Progress**; Slice 4.2
+    stays **Not Started** and requires its kickoff decision packet in a new
+    session before production schemas or behavior begin.
+
+- 2026-08-27 — Slice 4.2 — In Progress
+  - Change: accepted
+    [`ADR-0022`](adr/ADR-0022-version-and-capability-negotiation.md) and added
+    three size-prefixed/file-identified FlatBuffer schemas, pinned generated
+    C++, owned hello/rejection values, bounded capability offers, deterministic
+    pure negotiation, initial-peer classification, an eighth independent
+    contract, generated-drift enforcement, and a dedicated decoder fuzz target.
+    No authentication, session transition, transport behavior, release-version
+    constant, gameplay capability, authority, state scope, or OpenMW behavior
+    was added.
+  - Decisions: the owner approved Option A for ADR-0022 Decisions 1–5 on
+    2026-08-27. Payloads use `T3CH`/`T3SH`/`T3RJ`; negotiation selects the
+    highest overlapping minor and checks requirements in both directions;
+    capability IDs are nonzero stable `u32` values with separate 32-entry
+    sorted/disjoint optional and required sets; valid vNext incompatibility uses
+    typed numeric rejection while non-vNext/TES3MP 0.8 input receives no wire
+    response; and decoding/negotiation remain separate from Slice 4.3 state.
+  - Verification: from the Visual Studio 2022 v17.14.39/MSVC 19.44.35228
+    x86-64 environment, a fresh standalone configure/build and
+    `tes3mp_protocol_tests_run` pass all eight C++ contracts. A separate fresh
+    configure acquires the SHA-256-pinned FlatBuffers source and passes the same
+    target. The pinned FlatBuffers proof runner reproduces all three production
+    generated headers exactly and passes its isolated proof. All 97 repository-
+    owned Python tests pass. Indexed baseline provenance accounts for 137
+    intentional differences and verifies 50 dependency inputs; indexed legacy
+    exclusion checks 3,831 tracked paths, 59 CMake files, 24 compile commands,
+    and 74 Ninja edges. Both changed JSON files parse, all 67 local vNext
+    Markdown links resolve, changed Python compiles, the public header remains
+    isolated from FlatBuffers/generated, OpenMW, transport, platform, and test-
+    support headers, and `git diff --cached --check` passes.
+  - Owner review: architecture approval received for Option A on 2026-08-27.
+    Implementation-demo acceptance remains pending, so Slice 4.2 stays **In
+    Progress**.
+  - Follow-ups: present the three golden payloads, current/previous-minor
+    selection, optional/required capability cases, typed rejection, malformed
+    input, owned-buffer, and legacy/no-reply evidence for owner acceptance.
+    Slice 4.3 remains gated until Slice 4.2 is **Implemented**.
+
+- 2026-08-27 — Slice 4.2 — Implemented
+  - Change: retained implementation commit `e89621e970` without code changes and
+    marked Slice 4.2 **Implemented** after the required owner demo acceptance.
+  - Decisions: none. ADR-0022 remains accepted without amendment.
+  - Verification: the accepted demo and implementation retain the green eight-
+    contract MSVC builds, exact pinned FlatBuffers regeneration/proof, 97
+    repository-owned Python tests, provenance evidence for 137 intentional
+    differences and 50 dependency inputs, legacy-exclusion evidence for 3,831
+    paths, 59 CMake files, 24 compile commands, and 74 Ninja edges, JSON and
+    Python compilation, 67 resolved local vNext Markdown links, public-header
+    isolation, and clean diff checks.
+  - Owner review: implementation-demo evidence explicitly accepted by the
+    project owner in the 2026-08-27 working session, with direction to begin
+    Slice 4.3.
+  - Follow-ups: none for Slice 4.2. Phase 4 remains **In Progress**.
+
+- 2026-08-27 — Slice 4.3 — In Progress
+  - Change: added proposed
+    [`ADR-0023`](adr/ADR-0023-session-state-machines-and-authentication-provider-boundary.md)
+    with role/state placement, Phase 4/6 wire boundary, asynchronous provider,
+    opaque material/result, deadline/cancellation, and structured-observability
+    options. No production session, authentication, protocol, authority, state-
+    scope, or gameplay behavior changed.
+  - Decisions: the project owner approved Option A for ADR-0023 Decisions 1–6
+    on 2026-08-27 without amendment.
+  - Verification: all 97 repository-owned Python tests pass. Indexed baseline
+    provenance accounts for 138 intentional differences and verifies 50
+    dependency inputs; indexed legacy exclusion checks 3,832 tracked paths, 59
+    CMake files, 24 compile commands, and 74 Ninja edges. The changed JSON
+    parses, all 69 local vNext Markdown links resolve, and staged diff checks
+    pass. This documentation-only kickoff does not change the retained green
+    Slice 4.2 C++ or FlatBuffers evidence.
+  - Owner review: Slice 4.2 completion, Slice 4.3 kickoff, and the recommended
+    session/authentication architecture were explicitly approved.
+  - Follow-ups: implement the approved boundary and present its automated/demo
+    evidence before marking Slice 4.3 **Implemented**.
+
+- 2026-08-27 — Slice 4.3 — In Progress
+  - Change: implemented the accepted ADR-0023 role-specific client/server
+    machines in the existing targets, the move-only 0–256-byte authentication
+    material, pollable session-owned provider operation, minimal `PrincipalId`
+    result, three-stage injected timeout policy, stale attempt/generation
+    rejection, idempotent cancellation/terminal handling, and closed typed
+    session observability. Added the ninth standalone contract and registered
+    every new production/test source with runtime-safety enforcement, while
+    closing the existing handshake-fuzzer ASan preset omission. No
+    authentication wire kind/schema, real provider, resume behavior, release
+    timeout default, player identity, authority, durable state, OpenMW, or
+    gameplay behavior was added.
+  - Decisions: implemented the project owner's approved Option A for ADR-0023
+    Decisions 1–6 without amendment. No additional architecture, authority,
+    state-scope, or gameplay-behavior decision arose during implementation.
+  - Verification: from the Visual Studio 2022 v17.14.39/MSVC 19.44.35228
+    x86-64 environment, the standalone `tes3mp_protocol_tests_run` target builds
+    and passes all nine C++ contracts. The session contract covers exhaustive
+    63-cell server and 81-cell client state/event matrices, immediate/delayed
+    success, denial/malformed/unavailable outcomes, empty/exact-256/257-byte
+    bounds, secret-canary ownership, every timeout stage at deadline-minus-one
+    and exact deadline, checked deadline overflow, wrong attempt/generation,
+    duplicate operation, cancellation/destruction/close, non-resurrection,
+    typed observations, and deterministic replay. All 97 repository-owned
+    Python tests pass; the pinned FlatBuffers regeneration and isolated proof
+    pass; indexed provenance accounts for 146 intentional differences and 50
+    dependency inputs; indexed legacy exclusion checks 3,840 tracked paths, 59
+    CMake files, 28 compile commands, and 81 Ninja edges. Changed Python
+    compiles, both changed JSON files parse, all 69 local vNext Markdown links
+    resolve, public-header/observability redaction scans find no forbidden
+    engine/transport/generated/test-support or secret-bearing surface, and
+    staged/worktree diff checks pass.
+  - Owner review: architecture approval is complete. Implementation-demo
+    acceptance remains pending, so Slice 4.3 stays **In Progress**.
+  - Follow-ups: present the successful/delayed/rejected provider paths, exact
+    deadline and secret bounds, stale/cancellation behavior, atomic matrix, and
+    redaction evidence for owner acceptance. Slice 4.4 remains gated until this
+    slice is marked **Implemented**.
+
+- 2026-08-27 — Slice 4.3 — Implemented
+  - Change: retained implementation commit `edbedbd632` without production-code
+    changes and marked Slice 4.3 **Implemented** after the required owner demo
+    acceptance.
+  - Decisions: none. ADR-0023 remains accepted without amendment.
+  - Verification: the accepted implementation retains the green nine-contract
+    MSVC build, exhaustive server/client state-event matrices, provider/secret/
+    timeout/lifetime/redaction coverage, 97 repository-owned Python tests,
+    exact pinned FlatBuffers proof, provenance evidence for 146 intentional
+    differences and 50 dependency inputs, legacy-exclusion evidence for 3,840
+    tracked paths, 59 CMake files, 28 compile commands, and 81 Ninja edges,
+    JSON and Python validation, 69 resolved local Markdown links, public-header
+    isolation, and clean diff checks.
+  - Owner review: implementation-demo evidence explicitly accepted by the
+    project owner in the 2026-08-27 working session.
+  - Follow-ups: none for Slice 4.3. Phase 4 remains **In Progress**; Slice 4.4
+    stays **Not Started** and requires its architecture/protocol decision packet
+    before production implementation begins.
+
+- 2026-08-27 — Slice 4.4 — In Progress
+  - Change: inspected the accepted protocol, deterministic-ordering,
+    identity/counter, canonical primitive, authority, transport, framing,
+    negotiation, and session contracts and added proposed
+    [`ADR-0024`](adr/ADR-0024-reliable-operation-latest-wins-envelope-contract.md)
+    with five option sets, scenarios, acceptance tests, consequences, failure
+    mitigations, and review triggers. No production envelope header, schema,
+    codec, message kind, session behavior, authority, state scope, or gameplay
+    behavior was added.
+  - Decisions: none accepted. The proposal recommends separate directional
+    typed compositions; one reliable command header plus optional entity
+    precondition and one later typed body; snapshot session/generation/tick plus
+    optional contiguous-finalized command acknowledgement; layered validation;
+    and deferring complete `T3RO`/`T3LS` roots until Slice 4.5 supplies reviewed
+    concrete bodies.
+  - Verification: all 97 repository-owned Python tests pass. Indexed baseline
+    provenance accounts for 147 intentional differences and verifies 50
+    dependency inputs; indexed legacy exclusion checks 3,841 tracked paths, 59
+    CMake files, 28 compile commands, and 81 Ninja edges. The provenance JSON
+    parses, all 71 local vNext Markdown links resolve, and staged diff checks
+    pass. A new product build is not applicable because production
+    implementation remains approval-gated.
+  - Owner review: pending explicit approval or amendment of Decisions 1–5.
+  - Follow-ups: present Decisions 1–5 to the owner, accept or amend ADR-0024,
+    then implement only the approved Slice 4.4 envelope-header surface and
+    independent contract tests. Slice 4.5 remains gated.
+
+- 2026-08-27 — Slice 4.4 — In Progress
+  - Change: accepted
+    [`ADR-0024`](adr/ADR-0024-reliable-operation-latest-wins-envelope-contract.md)
+    and added protocol-owned `ReliableOperationHeader` and
+    `LatestWinsSnapshotHeader` values. The reliable header owns one existing
+    client command header plus an explicit optional entity precondition. The
+    snapshot header binds server tick and optional contiguous-finalized command
+    progress to a target session and generation. Added a tenth standalone
+    contract and registered it with target-boundary and runtime-safety policy.
+    No wire root, schema, decoder, generic payload, batch, snapshot sequence,
+    writer admission, authority, state scope, or gameplay behavior was added.
+  - Decisions: the owner approved Option A for ADR-0024 Decisions 1–5 on
+    2026-08-27 without amendment. Complete typed `T3RO`/`T3LS` roots remain
+    gated on Slice 4.5's separately reviewed command/snapshot bodies and bounds.
+  - Verification: from the Visual Studio 2022 v17.14.39/MSVC 19.44.35228
+    x86-64 environment, a fresh standalone configure/build runs all ten C++
+    contracts successfully. The envelope contract covers required command
+    metadata, optional preconditions, one-operation atomicity, absence of
+    writer/canonical/generic payload fields, target session/generation/tick,
+    absent and present acknowledgements, tick recency without a new sequence,
+    entry-scoped revision/epoch, public-header isolation, and deterministic
+    equality. All 97 repository-owned Python tests pass, and exact pinned
+    FlatBuffers regeneration plus the isolated proof pass without schema drift.
+    Indexed provenance accounts for 149 intentional differences and verifies
+    50 dependency inputs; indexed legacy exclusion checks 3,843 tracked paths,
+    59 CMake files, 29 compile commands, and 85 Ninja edges. Both changed C++
+    files pass `clang-format --dry-run --Werror`; the provenance JSON parses,
+    all 72 local vNext Markdown links resolve, the new public header contains
+    no generated/FlatBuffers, OpenMW, transport-library, test-support, generic
+    byte/string/map include or surface, and staged diff checks pass.
+  - Owner review: architecture approval is complete. Implementation-demo
+    acceptance remains pending, so Slice 4.4 stays **In Progress**.
+  - Follow-ups: present the reliable header with absent/present precondition,
+    command ID/sequence separation, writer-field exclusion, snapshot
+    acknowledgement absence/progress, tick recency, and public-header isolation
+    for owner acceptance. Slice 4.5 remains gated until this slice is
+    **Implemented**.
+
+- 2026-08-27 — Slice 4.4 — Implemented
+  - Change: retained implementation commit `ee17ebdd0a` without production-code
+    changes and marked Slice 4.4 **Implemented** after the required owner demo
+    acceptance.
+  - Decisions: none. ADR-0024 remains accepted without amendment.
+  - Verification: the accepted implementation retains a green fresh MSVC build
+    of all ten C++ contract executables, 97 Python tests, exact FlatBuffers
+    regeneration/proof, provenance checks with 149 intentional differences and
+    50 dependency inputs, legacy-exclusion checks covering 3,843 tracked paths,
+    59 CMake files, 29 compile commands, and 85 Ninja edges, plus formatting,
+    JSON, 72 local-link, public-header-isolation, and staged-diff checks.
+  - Owner review: implementation-demo evidence explicitly accepted by the
+    project owner in the 2026-08-27 working session.
+  - Follow-ups: none for Slice 4.4. Phase 4 remains **In Progress**; Slice 4.5
+    stays **Not Started** and requires a separate behavior/protocol decision
+    packet before typed bodies, schemas, or exchange behavior land.
+
+- 2026-08-27 — Slice 4.5 — In Progress
+  - Change: inspected the implemented Phase 4 framing, negotiation, session,
+    envelope, strong-identity, spatial-primitive, in-memory-link, target-policy,
+    and test boundaries. Added proposed
+    [`ADR-0025`](adr/ADR-0025-minimal-player-command-world-snapshot-exchange.md)
+    with five architecture option sets and proposed
+    [`GDR-0011`](gdr/GDR-0011-phase4-minimal-player-exchange-semantics.md) with
+    four separately reviewable gameplay/authority/state-scope option sets. No
+    production schema, generated source, codec, session state, fake peer,
+    authority, canonical mutation, or gameplay behavior changed.
+  - Decisions: the project owner approved Option A for ADR-0025 Decisions 1–5
+    and GDR-0011 Decisions 1–4 on 2026-08-27 without amendment. The accepted
+    design is closed typed `T3RO`/`T3LS`
+    body unions; one velocity-only player motion intent with a required entity
+    precondition; a deterministically ordered, target-session selected spatial
+    view capped at 256 entries; pure codecs plus role-specific established-
+    session/timeline guards; atomic confirmed client state; and a synchronous
+    test-support fake peer composed from the existing framed hello, typed
+    authentication, and in-memory-link boundaries.
+  - Verification: all 97 repository-owned Python tests pass. Indexed baseline
+    provenance accounts for 151 intentional differences and verifies 50
+    dependency inputs. Indexed legacy exclusion checks 3,845 tracked paths, 59
+    CMake files, 29 compile commands, and 85 Ninja edges. The provenance JSON
+    parses, all 80 local vNext Markdown links resolve, both proposed records
+    have the required decision/options, consequences, failure, review-trigger,
+    acceptance-test, and pending-owner sections, only `docs/vnext` paths are
+    staged, and staged diff checks pass. A product build is not applicable
+    because this approval-gated kickoff changes documentation only.
+  - Owner review: explicit, independent approval received for both records.
+    Implementation-demo acceptance remains pending, so Slice 4.5 stays **In
+    Progress**.
+  - Follow-ups: implement only the approved schemas, codecs, session guards,
+    and fake-peer exchange, then present the named behavior and failure evidence
+    for owner acceptance. Slice 4.6 remains gated.
+
+- 2026-08-27 — Slice 4.5 — In Progress
+  - Change: this implementation commit adds the accepted closed-union `T3RO`
+    velocity-intent and `T3LS` spatial-view schemas, exact pinned generated C++,
+    verifier-first owned codecs, required command precondition, strictly entity-
+    ordered 0–256-entry views, explicit post-authentication session binding,
+    role-specific context/timeline guards, atomic client confirmed-state commit,
+    and a reusable synchronous fake peer over the existing framed hello, typed
+    authentication, and in-memory link. It adds an eleventh contract executable
+    and registers both production decoders with a bounded ASan/libFuzzer target
+    and corpus. It does not add a reducer, canonical mutation, prediction,
+    rendering, transport library, socket, OpenMW dependency, or broad gameplay
+    command.
+  - Decisions: implemented the owner's approved ADR-0025 Option A Decisions
+    1–5 and GDR-0011 Option A Decisions 1–4 without amendment. The server guard
+    validates session/generation but remains the sole future mutation boundary;
+    the client stores only a complete confirmed snapshot, and snapshot selection
+    remains target-session specific.
+  - Verification: from the Visual Studio 2022 v17.14.39/MSVC 19.44.35228
+    x86-64 environment, `cmake --preset tes3mp-standalone --fresh` and `cmake
+    --build --preset tes3mp-standalone --parallel 4` build and pass all eleven
+    C++ contracts. The exchange contract covers exact `T3RO`/`T3LS` golden
+    bytes, owned-buffer lifetime, empty/exact-256/257-entry bounds, strict order,
+    truncation and identifier/mutation failures, atomic stale/duplicate/
+    contradictory/acknowledgement guards, old-generation rejection, differing
+    same-tick per-session views, and the complete fake-peer trace. The pinned
+    FlatBuffers proof regenerates all five production headers exactly and its
+    isolated test passes. All 97 repository-owned Python tests pass. Indexed
+    provenance accounts for 164 intentional differences and verifies 54
+    dependency inputs; indexed legacy exclusion checks 3,858 tracked paths, 59
+    CMake files, 32 compile commands, and 91 Ninja edges. All changed C++ passes
+    `clang-format --dry-run --Werror`; changed Python compiles, JSON parses,
+    public-header and reliable-command-surface isolation scans pass, local vNext
+    Markdown links resolve, and staged diff checks pass. The sanitizer-backed
+    fuzzer is registered for the Linux phase-exit profile and is not locally
+    executable in this MSVC environment.
+  - Owner review: architecture, authority, state-scope, and gameplay-behavior
+    approval is complete. Implementation-demo acceptance remains pending, so
+    Slice 4.5 stays **In Progress**.
+  - Follow-ups: present the golden/ownership/bounds/failure/session-isolation/
+    end-to-end evidence for owner acceptance, then mark Slice 4.5
+    **Implemented**. Slice 4.6 remains gated and owns exhaustive property,
+    mutation, corpus, and fuzz expansion.
+
+- 2026-08-27 — Slice 4.5 — Implemented
+  - Change: retained implementation commit `077a08da48` without production-code
+    changes and marked Slice 4.5 **Implemented** after the required owner demo
+    acceptance.
+  - Decisions: none. ADR-0025 and GDR-0011 remain accepted without amendment.
+  - Verification: the accepted implementation retains the green eleven-contract
+    fresh MSVC build, exact five-header FlatBuffers regeneration/proof, all 97
+    repository-owned Python tests, provenance evidence for 164 intentional
+    differences and 54 dependency inputs, legacy-exclusion evidence for 3,858
+    tracked paths, 59 CMake files, 32 compile commands, and 91 Ninja edges,
+    formatting, JSON/Python validation, 80 resolved local Markdown links,
+    public-surface isolation, and clean diff checks.
+  - Owner review: implementation-demo evidence explicitly accepted by the
+    project owner in the 2026-08-27 working session.
+  - Follow-ups: none for Slice 4.5. Phase 4 remains **In Progress**; Slice 4.6
+    is the next eligible slice and stays **Not Started** until its work begins.
+
+- 2026-08-27 — Slice 4.6 — In Progress
+  - Change: this implementation commit expands all production Phase 4 codec
+    contracts with deterministic
+    scalar, collection, and payload-boundary properties plus exhaustive
+    single-bit mutation checks that either reject or normalize through a second
+    owned round trip. Added reproducible valid golden seeds for the frame,
+    `T3CH`, `T3SH`, `T3RJ`, `T3RO`, and `T3LS` decoders; each contract can
+    deliberately regenerate those files and the normal CMake contract target
+    verifies their exact current encoding and successful decode. Added
+    decode/encode/decode metamorphic assertions to all three production fuzzer
+    groups and a fail-closed seven-decoder registry that checks source
+    registration, corpus presence, SHA-256-pinned production seeds, target
+    completeness, and retained evidence. The safety inventory now also includes
+    the previously built but omitted Slice 4.4 envelope contract. No production
+    schema, codec, protocol value, session behavior, authority, state scope, or
+    gameplay behavior changed.
+  - Decisions: none. This testing-only implementation follows the already
+    accepted ADR-0004 verifier/fuzz/evolution requirements and ADR-0019
+    sanitizer/fuzz policy without selecting a new architecture or behavior.
+  - Verification: from the Visual Studio 2022 v17.14.39/MSVC 19.44.35228
+    x86-64 environment, `cmake --preset tes3mp-standalone --fresh` and `cmake
+    --build --preset tes3mp-standalone --parallel 4` build and pass all eleven
+    contract executables plus three checked-in golden-corpus verification runs.
+    All three changed production fuzzer translation units compile independently
+    with MSVC C++20. `python -m unittest discover -s scripts/tests -v` passes
+    all 98 repository-owned tests. `python scripts/run_vnext_flatbuffers_proof.py`
+    reproduces all five production generated headers exactly and passes the
+    isolated proof. `python scripts/verify_vnext_baseline.py --index` accounts
+    for 170 intentional differences and verifies 54 dependency inputs. `python
+    scripts/verify_vnext_legacy_exclusion.py --index --build-dir
+    build/tes3mp-standalone` checks 3,864 tracked paths, 59 CMake files, 32
+    compile commands, and 91 Ninja edges. Changed C++ passes
+    `clang-format --dry-run --Werror`; changed Python compiles; JSON parses and
+    retains sorted provenance paths; all 80 local vNext Markdown links resolve;
+    and staged diff checks pass. The Linux Clang 18 ASan/UBSan/libFuzzer and
+    ThreadSanitizer executions remain the manual Phase 4 exit gate rather than
+    a Windows-local slice requirement.
+  - Owner review: no new architecture, authority, state-scope, or gameplay
+    decision is introduced. Implementation-demo acceptance remains pending, so
+    Slice 4.6 and Phase 4 stay **In Progress**.
+  - Follow-ups: present the boundary-property, exhaustive mutation,
+    regenerated/verified golden-corpus, decoder-registry, and metamorphic-fuzz
+    evidence for owner acceptance. After Slice 4.6 acceptance, manually dispatch
+    and review every Phase 4 hosted exit-gate job, including macOS x86-64,
+    before marking Phase 4 **Implemented** or beginning Phase 5.
+
+- 2026-08-27 — Slice 4.6 — Implemented
+  - Change: retained implementation commit `7361a43af7` without production-code
+    changes and marked Slice 4.6 **Implemented** after the required owner demo
+    acceptance.
+  - Decisions: none. ADR-0004 and ADR-0019 remain accepted without amendment;
+    the slice introduced no architecture, authority, state-scope, or gameplay
+    behavior decision.
+  - Verification: the accepted implementation retains the green fresh MSVC
+    build of all eleven contract executables plus three golden-corpus checks,
+    independent MSVC C++20 compilation of all three changed production fuzzer
+    translation units, 98 repository-owned Python tests, exact five-header
+    FlatBuffers regeneration/proof, provenance evidence for 170 intentional
+    differences and 54 dependency inputs, legacy-exclusion evidence for 3,864
+    paths, 59 CMake files, 32 compile commands, and 91 Ninja edges, formatting,
+    JSON/Python validation, 80 resolved local Markdown links, and clean diff
+    checks.
+  - Owner review: implementation-demo evidence explicitly accepted by the
+    project owner in the 2026-08-27 working session.
+  - Follow-ups: all Phase 4 slices are now **Implemented**, but Phase 4 remains
+    **In Progress**. Manually dispatch and review the complete Phase 4 hosted
+    baseline, dependency-proof, and runtime-safety matrix, including macOS
+    x86-64, then obtain explicit Phase 4 exit-gate approval before marking the
+    phase **Implemented** or beginning Phase 5.
+
+- 2026-08-27 — Phase 4 exit gate — In Progress
+  - Change: pushed phase-completion candidate `035a8932d5` and manually
+    dispatched all six required hosted workflows. Runtime-safety run
+    [33137988875](https://github.com/poisson-fish/TES3MP/actions/runs/33137988875)
+    passed its Clang 18 ASan/UBSan/libFuzzer job but failed its ThreadSanitizer
+    job while linking the protocol-frame contract: that test's global
+    allocation counters collided with the TSan runtime allocator interceptors.
+    The narrow correction disables only those test-owned global allocator
+    replacements in TSan builds, retains the structured fail-closed decode
+    assertion there, and retains the zero-allocation assertion in ordinary and
+    ASan/UBSan builds. It also avoids a Clang warning from shifting a one-byte
+    unsigned value by eight bits in test support. No production schema, codec,
+    protocol value, session behavior, authority, state scope, or gameplay
+    behavior changed.
+  - Decisions: none. This is a mechanical hosted-test compatibility correction
+    under the accepted ADR-0019 sanitizer policy; it does not amend an ADR or
+    GDR and does not weaken production runtime-safety coverage.
+  - Verification: the targeted nine runtime-safety runner tests pass; a fresh
+    MSVC standalone configure/build passes all eleven C++ contracts and all
+    three checked-in golden-corpus verification runs; an explicit MSVC C++20
+    compile/link/run of the protocol-frame contract with the TSan interposition
+    definition proves the conditional contract path; and changed C++ passes
+    `clang-format --dry-run --Werror`.
+  - Owner review: the owner authorized dispatching the hosted matrix. Phase 4
+    remains **In Progress** because the corrected commit must pass the complete
+    six-workflow matrix and then receive explicit exit-gate approval.
+  - Follow-ups: finish reviewing the first dispatch, commit and push the
+    correction, rerun all six hosted workflows against that single corrected
+    candidate, record exact job evidence, and request Phase 4 exit approval.
+
+- 2026-08-27 — Phase 4 exit gate — Awaiting Owner Approval
+  - Change: committed the TSan contract-harness correction as `3fe7ba2986`,
+    pushed it to `origin/vnext`, and manually dispatched the complete hosted
+    matrix against exact commit
+    `3fe7ba2986209fe519f660e4d670155382462933`. The superseded candidate's three
+    still-running baseline workflows were cancelled after its runtime-safety
+    gate had already failed; none is used as completion evidence.
+  - Decisions: none. ADR-0019 remains accepted without amendment, and no
+    architecture, authority, state-scope, or gameplay-behavior choice changed.
+  - Gate evidence: all six corrected-candidate workflows completed
+    successfully: Linux baseline
+    [`33138536438`](https://github.com/poisson-fish/TES3MP/actions/runs/33138536438),
+    Windows baseline
+    [`33138537847`](https://github.com/poisson-fish/TES3MP/actions/runs/33138537847),
+    macOS baseline
+    [`33138539514`](https://github.com/poisson-fish/TES3MP/actions/runs/33138539514),
+    FlatBuffers proof
+    [`33138541086`](https://github.com/poisson-fish/TES3MP/actions/runs/33138541086),
+    GameNetworkingSockets proof
+    [`33138542487`](https://github.com/poisson-fish/TES3MP/actions/runs/33138542487),
+    and runtime safety
+    [`33138543978`](https://github.com/poisson-fish/TES3MP/actions/runs/33138543978).
+    All 17 jobs passed: Linux GCC 13 and Clang 18; Windows MSVC 2022 v143;
+    macOS arm64 and x86-64 with Xcode 16; all five FlatBuffers proof jobs; all
+    five GameNetworkingSockets proof jobs including Clang 18 ASan/UBSan; and
+    both TES3MP Clang 18 ThreadSanitizer and ASan/UBSan/fuzz jobs.
+  - Verification: all 17 evidence artifacts were retained. Runtime-safety
+    artifact `9673044842` (ASan/UBSan/fuzz) has SHA-256
+    `8b929ddc1d2d6bcf67bb70cc6a8edda7d0aa939a3b9344c355accb54f8d5a7dc`;
+    artifact `9672993368` (ThreadSanitizer) has SHA-256
+    `3bcc2113660e81881c2779a94863e5cbbb4f3a7354f2260752ff4e389ce8ec3b`.
+    The retained local correction evidence is 98 repository-owned Python
+    tests, all eleven MSVC contracts plus three golden-corpus checks,
+    provenance for 170 intentional differences and 54 dependency inputs,
+    legacy exclusion over 3,864 paths, 59 CMake files, 32 compile commands, and
+    91 Ninja edges, formatting, JSON validation, and clean diff checks.
+  - Owner review: the automated Phase 4 exit gate is green. Explicit owner
+    exit approval remains pending, so Phase 4 stays **In Progress** and Phase 5
+    remains **Not Started**.
+  - Follow-ups: obtain explicit Phase 4 exit-gate approval, then mark Phase 4
+    **Implemented** in a status-only closeout before beginning any Phase 5 work.
+
+- 2026-08-27 — Phase 4 — Implemented
+  - Change: marked Phase 4 **Implemented** after every Slice 4.1–4.6
+    deliverable was implemented and demo-accepted, the corrected complete
+    hosted matrix passed, and the project owner explicitly approved the phase
+    exit gate. No production code or accepted behavior changed in this
+    status-only closeout.
+  - Decisions: none. ADR-0004, ADR-0019, ADR-0021 through ADR-0025, and
+    GDR-0011 remain accepted without amendment.
+  - Gate evidence: the simulated client handshake, capability negotiation,
+    authentication boundary, reliable/latest-wins envelopes, and bounded
+    in-memory player exchange satisfy the declared functional gate. Malformed,
+    oversized, legacy, stale, duplicate, contradictory, and capability-failure
+    contracts prove fail-closed behavior without partial state commits. The
+    complete 17-job hosted evidence is recorded immediately above.
+  - Verification: retained local verification covers 98 repository-owned
+    Python tests, all eleven MSVC contracts plus three golden-corpus checks,
+    exact five-header FlatBuffers regeneration, provenance for 170 intentional
+    differences and 54 dependency inputs, legacy exclusion over 3,864 paths,
+    59 CMake files, 32 compile commands, and 91 Ninja edges, plus formatting,
+    JSON, Markdown-link, and clean-diff checks. All six corrected-candidate
+    hosted workflows passed on `3fe7ba2986209fe519f660e4d670155382462933`.
+  - Owner review: explicit Phase 4 exit-gate approval received from the project
+    owner in the 2026-08-27 working session.
+  - Follow-ups: none for Phase 4. Phase 5 is now eligible, but its kickoff and
+    any unresolved Slice 5.1 architecture/authority decisions require owner
+    review before production implementation begins.
+
+## Phase 5 — Deterministic authoritative server core
+
+[Back to the phase tracker](IMPLEMENTATION_PLAN.md#phase-5--deterministic-authoritative-server-core)
+
+- Define total command ordering explicitly, including ties among connections and
+  commands arriving for the same tick. Never depend on hash-container iteration.
+- State-change records should describe domain changes, not serialized network or
+  database bytes. Protocol, scripting, persistence, and metrics adapt from the
+  same committed domain record.
+- The first checksum need cover only canonical state present in this phase, but
+  later phases must extend it whenever they add durable data.
+- Persistence is intentionally only an interface here so Phase 20 does not force
+  a later redesign of the server mutation boundary.
+
+- 2026-08-27 — Slice 5.1 — In Progress
+  - Change: confirmed the Phase 4 exit commit and clean active tree, inspected
+    the accepted deterministic scheduler, command/envelope values, target graph,
+    and Phase 4 exchange boundary, and added proposed
+    [`ADR-0026`](adr/ADR-0026-phase5-writer-command-intake-and-ordering.md) with
+    five owner-gated option sets. No production intake, queue, ordering,
+    canonical state, reducer, authority, or gameplay behavior changed.
+  - Decisions: none accepted. The recommendation is an owned typed server-core
+    proposal; writer-context submission with a sealed cutoff and drain-time
+    stamps; hard v1 ceilings of 4,096 global pending, 128 pending per session
+    generation, and 1,024 commands per tick; typed immediate full-queue
+    rejection with FIFO tick deferral; and a dedicated intake/tick coordinator
+    that returns ordered batches without canonical mutation.
+  - Verification: `python -m unittest discover -s scripts/tests` passes all 98
+    repository-owned Python tests. Staged
+    `python scripts/verify_vnext_baseline.py --index` accounts for 171
+    intentional differences and verifies 54 dependency inputs. Staged legacy
+    exclusion checks 3,865 tracked paths, 59 CMake files, 1,254 compile
+    commands, and 1,971 Ninja edges. The provenance JSON parses, all 83 local
+    vNext Markdown links resolve, and staged diff checks pass. A C++ product
+    build is not applicable because production code remains approval-gated.
+  - Owner review: pending explicit Phase 5 kickoff approval or amendment of
+    ADR-0026 Decisions 1–5 and the proposed acceptance tests.
+  - Follow-ups: after approval, record the accepted options and implement only
+    the approved Slice 5.1 intake, ordering, limits, observability, and tests.
+    Slices 5.2–5.7 remain gated in plan order.
+
+- 2026-08-27 — Slice 5.1 — In Progress
+  - Change: recorded owner approval of
+    [`ADR-0026`](adr/ADR-0026-phase5-writer-command-intake-and-ordering.md) and
+    implemented its five Option A decisions. The server-core-owned
+    `ServerCommandProposal` copies typed session, command, precondition, and
+    motion values without retaining a wire root; the single-threaded
+    `ServerCommandIntakeCoordinator` composes the existing fixed scheduler,
+    applies the 4,096 global/128 per-session-generation/1,024 per-tick limits,
+    stamps sealed FIFO batches at writer drain time, retains deferred suffixes,
+    and fails closed without a partial batch at scheduler or ordinal exhaustion.
+    Closed metrics/events make acceptance, deferral, rejection, pending work,
+    and terminal errors observable without identity labels or user text.
+  - Decisions: the project owner approved ADR-0026 Option A for Decisions 1–5
+    and the proposed acceptance tests on 2026-08-27. The implementation adds no
+    canonical store, validation, deduplication, reducer, acknowledgement,
+    transport action, client disconnect, persistence, or gameplay behavior.
+  - Verification: a clean-directory standalone MSVC 19.44 C++20 configure,
+    52-step build, and run pass all 12 contract executables, including the 12
+    named Slice 5.1 ordering, cutoff, catch-up, limit, conservation, exhaustion,
+    lifetime, no-validation, and dependency-isolation scenarios. `python -m
+    unittest discover -s scripts/tests` passes all 98 repository-owned tests.
+    Staged baseline provenance accounts for 174 intentional differences and 54
+    dependency inputs; staged legacy exclusion checks 3,868 tracked paths, 59
+    CMake files, 1,254 compile commands, and 1,971 Ninja edges. All six changed
+    C++ files pass `clang-format --dry-run --Werror`; the provenance JSON parses,
+    all 84 local vNext Markdown links resolve, the new public header contains no
+    wire/generated/OpenMW/socket/platform/script/database surface, and staged
+    diff checks pass. FlatBuffers regeneration/fuzz verification is not
+    applicable because this slice changes no schema or decoder.
+  - Owner review: architecture approval is complete. Implementation-demo
+    acceptance remains pending, so Slice 5.1 stays **In Progress**.
+  - Follow-ups: complete local repository verification, publish the
+    implementation commit, and present the approved trace/limit/failure demo
+    for owner acceptance. Slice 5.2 remains gated until Slice 5.1 is
+    **Implemented**.
+
+- 2026-08-27 — Slice 5.1 — Implemented
+  - Change: retained implementation commit `e0dde571f5` without production-code
+    changes and marked Slice 5.1 **Implemented** after the required owner demo
+    acceptance.
+  - Decisions: none. ADR-0026 remains accepted without amendment.
+  - Verification: the accepted implementation retains a green clean-directory
+    MSVC 19.44 C++20 configure/build and all 12 contract executables, 98 Python
+    tests, provenance with 174 intentional differences and 54 dependency
+    inputs, legacy exclusion over 3,868 tracked paths, 59 CMake files, 1,254
+    compile commands, and 1,971 Ninja edges, six-file formatting, 84 local-link,
+    public-header-isolation, JSON, and staged-diff checks.
+  - Owner review: implementation-demo evidence explicitly accepted by the
+    project owner in the 2026-08-27 working session.
+  - Follow-ups: none for Slice 5.1. Slice 5.2 is now eligible but requires
+    owner review of canonical state ownership, scope, invariants, and API shape
+    before production state code lands.
+
+- 2026-08-27 — Slice 5.2 — In Progress
+  - Change: inspected the accepted authority/scope, deterministic simulation,
+    spatial primitive, envelope, minimal exchange, and writer-intake records and
+    implementations. Added proposed
+    [`ADR-0027`](adr/ADR-0027-phase5-canonical-player-and-session-state.md) with
+    five owner-gated option sets. No production canonical state, lifecycle,
+    reducer, acknowledgement behavior, persistence, or gameplay code changed.
+  - Decisions: none accepted. The recommendation is separate per-player entity
+    and active-session-progress partitions; stable sorted vectors with hard
+    256/256 ceilings and explicit unique bindings; one atomic spatial revision,
+    last-change tick, and stable authority epoch; fully validated immutable
+    construction with no general mutation API; and session-generation-scoped
+    optional contiguous-finalized acknowledgement progress.
+  - Verification: `python -m unittest discover -s scripts/tests -v` passes all
+    98 repository-owned tests. Staged baseline provenance accounts for 175
+    intentional differences and 54 dependency inputs; staged legacy exclusion
+    checks 3,869 tracked paths, 59 CMake files, 1,254 compile commands, and
+    1,971 Ninja edges. The provenance JSON parses, all 87 local vNext Markdown
+    links resolve, and staged diff checks pass. A C++ product build, formatting,
+    FlatBuffers regeneration, and fuzz verification are not applicable because
+    this decision-only change adds no production source, schema, or decoder.
+  - Owner review: pending explicit approval or amendment of ADR-0027 Decisions
+    1–5 and the proposed acceptance tests. Identity creation, spawn, reconnect/
+    replacement, persistence lifetime, cell transition, movement, reducer,
+    interest, resync, and presentation behavior remain separately gated.
+  - Follow-ups: present the decision packet and scenarios to the owner, record
+    the chosen options, then implement only the approved Slice 5.2 state values,
+    invariant checks, immutable access, observability, and tests. Slice 5.3
+    remains gated.
+
+- 2026-08-27 — Slice 5.2 — In Progress
+  - Change: recorded owner approval of
+    [`ADR-0027`](adr/ADR-0027-phase5-canonical-player-and-session-state.md)
+    Option A for Decisions 1–5 and the presented acceptance tests. Added
+    immutable player-entity and active-session-progress values, hard 256/256
+    construction limits, strict stable ordering, unique identity and explicit
+    binding checks, const spans and binary-search lookups, and a pure checked
+    atomic spatial-advance operation. No general mutation or online install
+    path exists.
+  - Decisions: player spatial state remains distinct from active-session
+    generation and contiguous-finalized acknowledgement progress. One entity
+    revision covers cell/root transform and velocity; same-tick advances may
+    increment it independently, while tick regression and exhaustion return
+    typed errors. Identity and authority epoch cannot change through the
+    operation. Lifecycle, persistence, reducer, command disposition,
+    acknowledgement advancement, publication, movement, and gameplay remain
+    gated.
+  - Verification: a clean standalone MSVC 19.44 C++20 configure and 54-step
+    build pass all 13 contract executables and three golden-corpus checks,
+    including the 12 named Slice 5.2 scope, binding, ordering, bounds, revision,
+    failure-preservation, acknowledgement, immutability, and dependency-
+    isolation scenarios. `python -m unittest discover -s scripts/tests -v`
+    passes all 98 repository-owned tests. Staged baseline provenance accounts
+    for 178 intentional differences and 54 dependency inputs; staged legacy
+    exclusion checks 3,872 tracked paths, 59 CMake files, 1,254 compile commands,
+    and 1,971 Ninja edges. All three new C++ files pass formatting; the
+    provenance JSON parses, all 88 local vNext Markdown links resolve, the new
+    public header contains no wire/generated/OpenMW/socket/platform/script/
+    database surface, and staged diff checks pass. FlatBuffers regeneration and
+    fuzz verification are not applicable because this slice changes no schema
+    or decoder.
+  - Owner review: architecture approval is complete. Implementation-demo
+    acceptance remains pending, so Slice 5.2 stays **In Progress**.
+  - Follow-ups: complete the repository gates, publish the implementation
+    commit, and present the stable-order/binding/boundary/revision demo for
+    owner acceptance. Slice 5.3 remains gated.
+
+- 2026-08-28 — Slice 5.2 — Implemented
+  - Change: retained implementation commit `f1a1f0632e` without production-code
+    changes and marked Slice 5.2 **Implemented** after the required owner demo
+    acceptance.
+  - Decisions: none. ADR-0027 remains accepted without amendment.
+  - Verification: a fresh standalone MSVC 19.44 C++20 configure and 55-step
+    build passed all 13 contract executables and three golden-corpus checks.
+    `python -m unittest discover -s scripts/tests` passed all 98 repository-owned
+    tests. Baseline provenance verified 178 intentional differences and 54
+    dependency inputs; legacy exclusion checked 3,872 tracked paths, 59 CMake
+    files, 1,254 compile commands, and 1,971 Ninja edges. The three Slice 5.2
+    C++ files pass `clang-format --dry-run --Werror`; JSON, all local vNext
+    Markdown links, public-header dependency isolation, and diff checks pass.
+  - Owner review: implementation-demo evidence explicitly accepted by the
+    project owner in the 2026-08-28 working session.
+  - Follow-ups: none for Slice 5.2. Slice 5.3 is now eligible but requires owner
+    review of command validation, disposition, acknowledgement progression, and
+    atomic reducer installation before production reducer code lands.
+
+- 2026-08-28 — Slice 5.3 — In Progress
+  - Change: inspected the accepted authority, deterministic simulation,
+    protocol envelope, minimal motion intent, writer intake, canonical state,
+    acknowledgement, and observability contracts. Added proposed
+    [`ADR-0028`](adr/ADR-0028-phase5-command-validation-and-atomic-reducer.md)
+    with five owner-gated architecture option sets and proposed
+    [`GDR-0012`](gdr/GDR-0012-phase5-minimal-motion-reducer-semantics.md) with
+    four owner-gated behavior option sets. No production reducer, validation,
+    acknowledgement advancement, canonical mutation, publication, or gameplay
+    code changed.
+  - Decisions: none accepted. The recommendation is a writer-confined owning
+    reducer with sealed-batch invariant verification and per-command atomic installation;
+    closed validation order and dispositions; exact-next finalization with
+    atomic accepted-or-rejected acknowledgement; immutable candidate
+    construction; current-epoch and same-batch duplicate checks while the
+    cross-batch idempotency/online gate remains Slice 5.5; and exact canonical
+    velocity replacement with no position integration, clamp, collision, cell,
+    prediction, or presentation behavior.
+  - Verification: `python -m unittest discover -s scripts/tests` passes all 98
+    repository-owned tests. Staged baseline provenance accounts for 180
+    intentional differences and 54 dependency inputs; staged legacy exclusion
+    checks 3,874 tracked paths, 59 CMake files, 1,254 compile commands, and
+    1,971 Ninja edges. The provenance JSON parses, all 96 local vNext Markdown
+    links resolve, required ADR/GDR sections and proposal/status assertions pass,
+    and staged diff checks pass. A C++ product build, formatting, schema
+    regeneration, corpus, and fuzz verification are not applicable because no
+    production source, schema, decoder, or corpus changes are proposed.
+  - Owner review: pending explicit approval or amendment of ADR-0028 Decisions
+    1–5, GDR-0012 Decisions 1–4, the Slice 5.5 boundary clarification, and the
+    proposed acceptance tests.
+  - Follow-ups: after approval, record the selected options and implement only
+    the approved validation, reducer, acknowledgement, observability, and
+    focused tests. Slice 5.4 and online reducer composition remain gated.
+
+- 2026-08-28 — Slice 5.3 — In Progress
+  - Change: recorded owner approval of
+    [`ADR-0028`](adr/ADR-0028-phase5-command-validation-and-atomic-reducer.md)
+    Option A for Decisions 1–5, its Slice 5.5 boundary clarification and
+    acceptance tests, plus
+    [`GDR-0012`](gdr/GDR-0012-phase5-minimal-motion-reducer-semantics.md)
+    Option A for Decisions 1–4 and its behavior tests. No production reducer or
+    gameplay code changed in this decision-acceptance commit.
+  - Decisions: the approved reducer is writer-confined, verifies sealed intake
+    batches, commits each finalizable command atomically through immutable
+    candidate construction, uses the closed validation order, advances exact-
+    next accepted-or-rejected acknowledgement progress, checks stable authority
+    epoch and same-batch duplicates, and stays offline until Slice 5.5 adds the
+    cross-batch command-ID window. Accepted motion exactly replaces velocity
+    without changing transform or adding integration, clamp, collision, cell,
+    prediction, or presentation behavior.
+  - Verification: staged baseline provenance accounts for 180 intentional
+    differences and 54 dependency inputs. The provenance JSON parses, all 98
+    local vNext Markdown links resolve, accepted ADR/GDR register assertions
+    pass, and staged diff checks pass. A product build and runtime tests are not
+    applicable because this decision-acceptance change modifies no production
+    source, schema, decoder, or corpus.
+  - Owner review: architecture and gameplay approval is complete from the
+    project owner in the 2026-08-28 working session. Implementation and demo
+    acceptance remain pending.
+  - Follow-ups: implement only the approved Slice 5.3 surface and tests. Slice
+    5.4 and online reducer composition remain gated.
+
+- 2026-08-28 — Slice 5.3 — In Progress
+  - Change: implemented the approved writer-confined `CanonicalCommandReducer`
+    over immutable canonical state. It verifies sealed-batch limits, scheduled
+    tick, and strict ingress order before mutation; applies the closed command
+    validation order; atomically replaces complete player/session candidates;
+    advances exact-next accepted-or-rejected acknowledgement progress; and
+    emits bounded closed disposition metrics/events. Accepted motion replaces
+    velocity exactly while preserving transform and increments the entity
+    revision once. Fifteen focused contract scenarios cover validation order,
+    acknowledgement, atomicity, contention, intake boundaries, revision/tick
+    failures, observability independence, velocity values, player isolation,
+    dependency isolation, and the explicit Slice 5.5 online gate.
+  - Decisions: no new architecture, authority, state-scope, or gameplay
+    decisions were made. The implementation follows accepted
+    [`ADR-0028`](adr/ADR-0028-phase5-command-validation-and-atomic-reducer.md)
+    and [`GDR-0012`](gdr/GDR-0012-phase5-minimal-motion-reducer-semantics.md)
+    Option A decisions. Same-batch command IDs are checked now; cross-batch ID
+    reuse remains intentionally detectable only after Slice 5.5 adds the
+    approved bounded window, so no online composition is permitted.
+  - Verification: a fresh standalone MSVC 19.44 C++20 configure and 58-step
+    build pass all 14 contract executables and three golden-corpus checks,
+    including all 15 named Slice 5.3 reducer scenarios. `python -m unittest
+    discover -s scripts/tests` passes all 98 repository-owned tests. Staged
+    baseline provenance accounts for 183 intentional differences and verifies
+    54 dependency inputs; staged legacy exclusion checks 3,877 tracked paths,
+    59 CMake files, 1,254 compile commands, and 1,971 Ninja edges. All six
+    changed C++ files pass `clang-format 22.1.3 --dry-run --Werror`; the
+    provenance JSON parses, all 100 local vNext Markdown links resolve, the new
+    public header contains no wire/generated/OpenMW/socket/platform/script/
+    database surface, accepted ADR/GDR assertions pass, and staged diff checks
+    pass. FlatBuffers regeneration and fuzz verification are not applicable
+    because this slice changes no schema, decoder, or corpus.
+  - Owner review: architecture and gameplay approval is complete.
+    Implementation-demo acceptance remains pending, so Slice 5.3 stays **In
+    Progress** and Slice 5.4 remains gated.
+  - Follow-ups: publish the implementation commit and present the accepted,
+    rejected, contention, observability, and Slice 5.5-gate evidence for owner
+    acceptance. Do not compose the reducer into an online runtime.
+
+- 2026-08-28 — Slice 5.3 — Implemented
+  - Change: retained implementation commit `f57a4074db` without production-code
+    changes and marked Slice 5.3 **Implemented** after the required owner demo
+    acceptance.
+  - Decisions: none. ADR-0028 and GDR-0012 remain accepted without amendment;
+    online reducer composition remains prohibited until Slice 5.5 supplies the
+    approved cross-batch command-ID idempotency window.
+  - Verification: the accepted implementation retains a green fresh standalone
+    MSVC 19.44 C++20 58-step build, all 14 contract executables and three
+    golden-corpus checks, all 98 repository-owned Python tests, provenance with
+    183 intentional differences and 54 dependency inputs, legacy exclusion over
+    3,877 tracked paths, 59 CMake files, 1,254 compile commands, and 1,971 Ninja
+    edges, six-file formatting, 100 local-link, public-header-isolation, JSON,
+    ADR/GDR assertion, and staged-diff checks.
+  - Owner review: implementation-demo evidence explicitly accepted by the
+    project owner in the 2026-08-28 working session.
+  - Follow-ups: none for Slice 5.3. Slice 5.4 is now eligible but requires owner
+    review of immutable snapshot/event publication ownership, versioning,
+    retention, and slow-reader policy before production publication code lands.
+
+- 2026-08-28 — Slice 5.4 — In Progress
+  - Change: inspected the accepted authority/state-scope, deterministic counter,
+    observability, protocol snapshot timeline, canonical state, reducer, and
+    Slice 5.5/5.6 boundaries. Added proposed
+    [`ADR-0029`](adr/ADR-0029-phase5-immutable-canonical-publication-and-versioned-change-feed.md)
+    with five owner-gated architecture and state-scope option sets. No
+    production publication, reducer, protocol, checksum, resync, persistence,
+    scripting, interest, runtime, or gameplay code changed.
+  - Decisions: none accepted. The recommendation is a reducer-integrated
+    immutable latest-publication slot; a checked global version per installed
+    canonical candidate with batch exhaustion preflight; complete Phase 5 state
+    plus typed replacement records; latest-batch-only retention with explicit
+    version-gap snapshot replacement; and immutable reader handles with no
+    callback, acknowledgement, queue wait, or writer backpressure. The
+    publication remains domain-only and offline through Slice 5.5.
+  - Verification: `python -m unittest discover -s scripts/tests` passes all 98
+    repository-owned tests. Staged baseline provenance accounts for 184
+    intentional differences and verifies 54 dependency inputs; staged legacy
+    exclusion checks 3,878 tracked paths, 59 CMake files, 1,254 compile
+    commands, and 1,971 Ninja edges. The provenance JSON parses, all 103 local
+    vNext Markdown links resolve, ADR proposal/register and slice-status
+    assertions pass, and staged diff checks pass. A C++ product build,
+    formatting, FlatBuffers regeneration, corpus, and fuzz verification are not
+    applicable because this proposal adds no production source, schema,
+    decoder, or corpus.
+  - Owner review: pending explicit approval or amendment of ADR-0029 Decisions
+    1–5 and the proposed acceptance tests. No new GDR is proposed because the
+    record publishes already committed complete domain state without selecting
+    interest, visibility, movement, correction, or presentation behavior.
+  - Follow-ups: after approval, record the selected options and implement only
+    the approved immutable publication, state version, domain change records,
+    reader gap handling, observability, and focused tests. Slice 5.5 and online
+    composition remain gated.
+
+- 2026-08-28 — Slice 5.4 — In Progress
+  - Change: recorded owner approval of
+    [`ADR-0029`](adr/ADR-0029-phase5-immutable-canonical-publication-and-versioned-change-feed.md)
+    Option A for Decisions 1–5 and the proposed acceptance tests. No production
+    publication or reducer code changed in this decision-acceptance commit.
+  - Decisions: publication is reducer-integrated and immutable; one checked
+    global version advances per installed canonical candidate; snapshots contain
+    complete Phase 5 state and changes contain typed complete replacements; the
+    core retains only the latest bounded batch and recovers version gaps from its
+    snapshot; and readers receive immutable handles with no acknowledgement,
+    callback, queue wait, shared lock, or writer backpressure. Protocol/interest,
+    sinks, checksum/resync, and online composition remain gated.
+  - Verification: staged baseline provenance accounts for 184 intentional
+    differences and verifies 54 dependency inputs. The provenance JSON parses,
+    all 103 local vNext Markdown links resolve, accepted ADR/register assertions
+    pass, and staged diff checks pass. A product build and runtime tests are not
+    applicable because this decision-acceptance change modifies no production
+    source, schema, decoder, or corpus.
+  - Owner review: architecture and state-scope approval is complete from the
+    project owner in the 2026-08-28 working session. Implementation and demo
+    acceptance remain pending.
+  - Follow-ups: implement only the approved Slice 5.4 publication surface and
+    tests. Slice 5.5 and online reducer composition remain gated.
+
+- 2026-08-28 — Slice 5.4 — In Progress
+  - Change: implemented the approved reducer-integrated immutable publication
+    boundary. The reducer now shares immutable canonical state, starts at
+    canonical version zero, conservatively preflights sealed-batch version
+    capacity, increments once per installed player/session or acknowledgement-
+    only candidate, records complete typed replacements in commit order, and
+    atomically replaces one latest complete post-batch publication. Pure reader
+    classification distinguishes no change, contiguous changes, a version gap
+    requiring snapshot replacement, and an older retained publication. Thirteen
+    focused Slice 5.4 scenarios cover initial/accepted/rejected publications,
+    noncommitting dispositions, contiguous multi-commit versions, capacity,
+    gap recovery, retained slow-reader handles, latest-only bounded retention,
+    observability independence, dependency isolation, and later-slice gates.
+  - Decisions: no new architecture, authority, state-scope, or gameplay
+    decisions were made. The implementation follows accepted
+    [`ADR-0029`](adr/ADR-0029-phase5-immutable-canonical-publication-and-versioned-change-feed.md)
+    Option A Decisions 1–5. Publication remains complete Phase 5 domain state,
+    latest-batch-only, immutable, non-backpressuring, and offline. Protocol/
+    interest conversion, command-result delivery, persistence/replay/script
+    sinks, checksum/resync, and cross-batch idempotency remain gated.
+  - Verification: a fresh standalone MSVC 19.44 C++20 configure and 59-step
+    build pass all 14 contract executables and three golden-corpus checks,
+    including the 13 named Slice 5.4 scenarios. `python -m unittest discover -s
+    scripts/tests` passes all 98 repository-owned tests. Staged baseline
+    provenance accounts for 186 intentional differences and verifies 54
+    dependency inputs; staged legacy exclusion checks 3,880 tracked paths, 59
+    CMake files, 1,254 compile commands, and 1,971 Ninja edges. All eight changed
+    C++ files pass `clang-format 22.1.3 --dry-run --Werror`; the provenance JSON
+    parses, all 105 local vNext Markdown links resolve, the publication/reducer
+    public headers contain no wire/generated/OpenMW/socket/platform/script/
+    database surface, accepted ADR/register assertions pass, and staged diff
+    checks pass. FlatBuffers regeneration and fuzz verification are not
+    applicable because this slice changes no schema, decoder, or corpus.
+  - Owner review: architecture and state-scope approval is complete.
+    Implementation-demo acceptance remains pending, so Slice 5.4 stays **In
+    Progress** and Slice 5.5 remains gated.
+  - Follow-ups: publish the implementation commit and present the initial,
+    accepted, acknowledgement-only, contiguous/gap, slow-reader, bounded-
+    retention, exhaustion, and observability evidence for owner acceptance. Do
+    not compose the reducer/publication path into an online runtime.
+
+- 2026-08-28 — Slice 5.4 — Implemented
+  - Change: retained implementation commit `d7e7b25950` without production-code
+    changes and marked Slice 5.4 **Implemented** after the required owner demo
+    acceptance.
+  - Decisions: none. ADR-0029 remains accepted without amendment. Publication
+    remains domain-only and online composition remains prohibited until Slice
+    5.5 supplies cross-batch idempotency, checksum, and resync safety.
+  - Verification: the accepted implementation retains a green fresh standalone
+    MSVC 19.44 C++20 59-step build, all 14 contract executables and three
+    golden-corpus checks, all 98 repository-owned Python tests, provenance with
+    186 intentional differences and 54 dependency inputs, legacy exclusion over
+    3,880 tracked paths, 59 CMake files, 1,254 compile commands, and 1,971 Ninja
+    edges, eight-file formatting, 105 local-link, public-header-isolation, JSON,
+    ADR assertion, and staged-diff checks.
+  - Owner review: implementation-demo evidence explicitly accepted by the
+    project owner in the 2026-08-28 working session.
+  - Follow-ups: none for Slice 5.4. Slice 5.5 is now eligible but requires owner
+    review of cross-batch command-ID retention and duplicate disposition,
+    checksum scope/algorithm/versioning, resync request semantics, and the
+    remaining online-composition gate before production safety code lands.
+
+- 2026-08-28 — Slice 5.5 — In Progress
+  - Change: inspected the accepted Phase 5 intake, state, reducer, and immutable
+    publication contracts and added proposed
+    [`ADR-0030`](adr/ADR-0030-phase5-idempotency-checksum-and-resync-boundary.md).
+    The proposal defines five approval-gated decisions and 15 focused acceptance
+    tests; it makes no production-code, protocol-schema, runtime, transport,
+    interest, persistence, or gameplay-behavior change.
+  - Decisions: recommend Option A for a per-active-session-generation immutable
+    1,024-finalization command history; exact-next retained-ID rejection with a
+    final acknowledgement-only disposition and deterministic FIFO eviction;
+    explicit canonical V1 bytes plus CRC-64/ECMA-182 V1; a metadata-only
+    current-session resync request returning the latest immutable publication;
+    and removal of only the named core blocker while real online composition
+    remains gated. No GDR is proposed because the slice changes committed safety
+    state and recovery mechanics without selecting player-visible gameplay,
+    interest, or presentation behavior.
+  - Verification: all 98 repository-owned Python tests pass; staged baseline
+    provenance passes with 187 intentional differences and 54 dependency
+    inputs; staged legacy exclusion passes over 3,881 tracked paths, 59 CMake
+    files, 1,254 compile commands, and 1,971 Ninja build edges; JSON,
+    whitespace, proposal/owner-gate assertions, and all 109 local Markdown links
+    pass. Product build, formatting, schema, and fuzz gates are not applicable
+    because this decision packet changes documentation/provenance only.
+  - Owner review: pending explicit approval or amendment of ADR-0030 Decisions
+    1–5, the 1,024-record bounded retry horizon, CRC-64/ECMA-182 V1 selection,
+    and the proposed acceptance tests.
+  - Follow-ups: do not implement dependent Slice 5.5 production code until the
+    ADR is accepted. After approval, implement only the bounded server-core
+    idempotency, canonical encoding/checksum, resync values, observability, and
+    focused tests; do not add wire, interest, socket, or runtime composition.
+
+- 2026-08-28 — Slice 5.5 — In Progress
+  - Change: recorded owner approval of
+    [`ADR-0030`](adr/ADR-0030-phase5-idempotency-checksum-and-resync-boundary.md)
+    without production-code changes.
+  - Decisions: the project owner approved Option A for Decisions 1–5, the
+    per-active-session-generation immutable 1,024-finalization retry horizon,
+    exact-next duplicate finalization and FIFO eviction, explicit canonical V1
+    bytes with CRC-64/ECMA-182 V1, metadata-only current-session resync, the
+    remaining composition gate, and all 15 proposed acceptance tests.
+  - Verification: baseline provenance and the 98 repository-owned Python tests
+    pass on the decision candidate. Product build, formatting, schema, and fuzz
+    gates are not applicable because this acceptance changes documentation only.
+  - Owner review: architecture, authority, state-scope, compatibility,
+    resource-bound, and recovery approval is complete from the project owner in
+    the 2026-08-28 working session. Implementation and demo acceptance remain
+    pending.
+  - Follow-ups: implement only the approved bounded server-core idempotency,
+    canonical encoding/checksum, resync values, observability, and focused
+    tests. Do not add wire, interest, socket, target-projection, automatic-
+    delivery, or runtime composition.
+
+- 2026-08-28 — Slice 5.5 — In Progress
+  - Change: implementation commit `ac627deafc` adds the accepted bounded
+    per-generation finalized-command
+    history, unified same/cross-batch duplicate membership, exact-next duplicate
+    finalization, deterministic 1,024/1,025 FIFO eviction, immutable shared
+    history state, and closed invariant validation. Added explicit complete
+    Phase 5 canonical V1 little-endian bytes, allocation-free
+    CRC-64/ECMA-182 V1 publication checkpoints, checkpoint ticks, and
+    metadata-only current-session resync selection returning an existing latest
+    immutable publication. Added one focused executable containing all 15
+    approved Slice 5.5 scenarios and updated the prior reducer gate regression.
+  - Decisions: no new architecture, authority, state-scope, compatibility, or
+    gameplay decisions were made. The implementation follows accepted
+    [`ADR-0030`](adr/ADR-0030-phase5-idempotency-checksum-and-resync-boundary.md)
+    Option A for Decisions 1–5. Canonical history remains active-generation
+    safety state; checksum is divergence evidence, not authentication; resync
+    accepts no client state; and no wire, interest, socket, target projection,
+    delivery action, or runtime loop was added.
+  - Verification: a fresh standalone MSVC 19.44 C++20 configure and 63-step
+    build pass all 15 contract executables and three golden-corpus checks,
+    including all 15 named Slice 5.5 acceptance scenarios. `python -m unittest
+    discover -s scripts/tests -v` passes all 98 repository-owned tests. Staged
+    baseline provenance passes with 192 intentional differences and 54
+    dependency inputs; staged legacy exclusion passes over 3,886 tracked paths,
+    59 CMake files, 1,254 compile commands, and 1,971 Ninja build edges. All 12
+    changed/new C++ headers and sources pass `clang-format --dry-run --Werror`;
+    JSON, whitespace, target-boundary, public-header isolation, and staged-diff
+    checks pass. Schema regeneration, golden-corpus updates, and fuzz runs are
+    not applicable because this slice changes no wire schema or bounded decoder.
+  - Owner review: architecture/authority/state-scope approval is complete.
+    Implementation-demo acceptance remains pending, so Slice 5.5 stays **In
+    Progress** and Slice 5.6 remains gated.
+  - Follow-ups: present duplicate, history-retention/eviction, epoch, exact-byte/
+    CRC, observability-independence, resync, and no-runtime-composition evidence
+    for owner acceptance.
+
+- 2026-08-28 — Slice 5.5 — Implemented
+  - Change: retained implementation commit `ac627deafc` without production-code
+    changes and marked Slice 5.5 **Implemented** after the required owner demo
+    acceptance.
+  - Decisions: none. Accepted
+    [`ADR-0030`](adr/ADR-0030-phase5-idempotency-checksum-and-resync-boundary.md)
+    remains authoritative.
+  - Verification: retained the fresh standalone MSVC 19.44 C++20 63-step build,
+    all 15 contract executables, three golden-corpus checks, 98 repository-owned
+    Python tests, staged provenance and legacy-exclusion checks, 12-file
+    formatting check, JSON validation, whitespace check, target-boundary check,
+    public-header isolation, and staged-diff check recorded above. This
+    status-only closeout changes no production or test source.
+  - Owner review: implementation-demo evidence was explicitly accepted by the
+    project owner in the 2026-08-28 working session.
+  - Follow-ups: none for Slice 5.5. Slice 5.6 is now eligible, but its sink
+    ownership, delivery, failure, and resource-bound decisions require owner
+    review before dependent production interfaces land.
+
+- 2026-08-28 — Slice 5.6 — In Progress
+  - Change: inspected the accepted reducer, immutable latest-publication,
+    canonical change-record, checksum, observability, target-boundary, and later
+    Phase 19/20 scripting/persistence requirements. Added proposed
+    [`ADR-0031`](adr/ADR-0031-phase5-committed-domain-sink-boundary.md) with five
+    owner-gated option sets. No production sink interface, reducer dispatch,
+    runtime/backend, canonical state, authority, or gameplay behavior changed.
+  - Decisions: none accepted. The recommendation is four nominal server-core
+    sink roles over the same immutable publication handle; reducer-integrated
+    post-publication fan-out in fixed role order; a maximum of one non-owning
+    sink per role and four bounded `noexcept` attempts per committed batch;
+    explicit absent/accepted/backpressured/failed results that never roll back,
+    retry, or short-circuit canonical work; and no core-owned retention beyond
+    the existing latest publication.
+  - Verification: repository inspection confirms that
+    `CanonicalStatePublication` already owns the complete immutable snapshot and
+    ordered `CanonicalStateChangeRecord` values, reducer publication installs
+    only after canonical candidates commit, and ADR-0020 observability remains
+    a separate best-effort diagnostic boundary. `python -m unittest discover -s
+    scripts/tests -q` passes all 98 repository-owned tests. Staged baseline
+    provenance passes with 193 intentional differences and 54 dependency
+    inputs; JSON parsing and staged whitespace/diff checks pass. No C++ build,
+    schema regeneration, golden-corpus update, or fuzz run is applicable to this
+    proposal-only documentation change.
+  - Owner review: pending explicit approval or amendment of ADR-0031 Decisions
+    1–5 and the proposed acceptance scenarios.
+  - Follow-ups: do not add dependent production sink interfaces or reducer
+    fan-out until the owner decision is recorded. Phase 19 still owns script
+    runtime/event API policy; Phase 20 still owns persistence technology,
+    durability acknowledgement, schema, replay format, and operator failure
+    policy.
+
+- 2026-08-28 — Slice 5.6 — In Progress
+  - Change: changed ADR-0031 from **Proposed** to **Accepted** after explicit
+    owner review. No production or test source changed in this decision-gate
+    record.
+  - Decisions: the project owner approved Option A for ADR-0031 Decisions 1–5
+    and all 12 proposed acceptance-test contracts in the 2026-08-28 working
+    session.
+  - Verification: staged baseline provenance passes with 193 intentional
+    differences and 54 dependency inputs; JSON parsing and staged
+    whitespace/diff checks pass. No C++ build or test rerun is applicable to
+    this approval-only record; the unchanged proposal already passed all 98
+    repository-owned policy tests.
+  - Owner review: architecture, ownership, state-scope, ordering, lifetime, and
+    failure-policy approval is complete. Implementation and demo acceptance
+    remain pending.
+  - Follow-ups: implement only the approved server-core sink interfaces,
+    post-publication fan-out/reporting, closed observability additions, bounded
+    test fakes, and focused tests. Do not add a backend, runtime, worker, queue,
+    persistence technology, script API, or gameplay behavior.
+
+- 2026-08-28 — Slice 5.6 — In Progress
+  - Change: implementation commit `2905c7a791` adds four nominal server-core
+    persistence/replay/script/canonical-metrics sink ports, an explicit maximum-
+    four non-owning bundle, and a complete per-role delivery report. The reducer
+    installs each non-empty immutable publication as latest before offering the
+    exact shared handle once in fixed role order. It attempts later roles after
+    backpressure/failure, normalizes an invalid configured `NotConfigured`
+    response to `Failed`, and exposes results without changing canonical
+    success/error meaning. Added closed low-cardinality delivery observations
+    and one focused executable with all approved scenarios plus invalid-result
+    fail-closed coverage.
+  - Decisions: no new architecture, authority, state-scope, compatibility, or
+    gameplay decisions were made. The implementation follows accepted
+    [`ADR-0031`](adr/ADR-0031-phase5-committed-domain-sink-boundary.md) Option A
+    for Decisions 1–5. Version zero and no-commit work deliver nothing; server
+    core owns no backend, worker, queue, retry, acknowledgement, database,
+    script runtime/API, replay format, durability claim, or added retention.
+  - Verification: a fresh standalone MSVC 19.44 C++20 configure and 65-step
+    build pass all 16 contract executables and three golden-corpus checks,
+    including all 13 focused sink scenarios. `python -m unittest discover -s
+    scripts/tests -q` passes all 98 repository-owned tests. Staged baseline
+    provenance passes with 195 intentional differences and 54 dependency
+    inputs; staged legacy exclusion passes over 3,889 tracked paths, 59 CMake
+    files, 43 compile commands, and 117 Ninja build edges. All seven changed/new
+    C++ headers and sources pass `clang-format --dry-run --Werror`; the new
+    public sink header compiles as an isolated MSVC C++20 translation unit; JSON,
+    whitespace, target-boundary, and staged-diff checks pass. Schema
+    regeneration, golden-corpus updates, and fuzz runs are not applicable
+    because this slice changes no wire schema or bounded decoder.
+  - Owner review: architecture/ownership/state-scope/failure-policy approval is
+    complete. Implementation-demo acceptance remains pending, so Slice 5.6
+    stays **In Progress** and Slice 5.7 remains gated.
+  - Follow-ups: present installed-handle identity, acknowledgement-only and
+    multi-change delivery, fixed role order, mixed failure/no-short-circuit,
+    canonical/observability independence, retained-handle isolation, explicit
+    gap, and no-backend/runtime evidence for owner acceptance.
+
+- 2026-08-28 — Slice 5.6 — Implemented
+  - Change: retained implementation commit `2905c7a791` without production-code
+    changes and marked Slice 5.6 **Implemented** after the required owner demo
+    acceptance.
+  - Decisions: none. Accepted
+    [`ADR-0031`](adr/ADR-0031-phase5-committed-domain-sink-boundary.md) remains
+    authoritative.
+  - Verification: retained the fresh standalone MSVC 19.44 C++20 65-step build,
+    all 16 contract executables, three golden-corpus checks, 13 focused sink
+    scenarios, 98 repository-owned Python tests, staged provenance and legacy-
+    exclusion checks, seven-file formatting check, isolated public-header
+    compilation, JSON validation, target-boundary check, and staged-diff check
+    recorded above. This status-only closeout changes no production or test
+    source.
+  - Owner review: implementation-demo evidence was explicitly accepted by the
+    project owner in the 2026-08-28 working session.
+  - Follow-ups: none for Slice 5.6. Slice 5.7 is now eligible; inspect its
+    property/simulation scope against accepted Phase 5 decisions before adding
+    test-only coverage.
+
+- 2026-08-28 — Slice 5.7 — Implemented
+  - Change: inspected ADR-0013/0017 deterministic facilities and accepted
+    ADR-0026–0031 Phase 5 production contracts, then added a test-only seeded
+    eight-client simulation through the real intake and reducer. Bounded random
+    streams generate approved applied, stale, duplicate, gap, session-
+    generation, binding, revision, and epoch cases. The oracle checks complete
+    state reconstruction, exact per-player isolation, session progress/history,
+    state-version/change contiguity, publication completeness, and checksum
+    equality after every batch; exact input/outcome traces and final canonical
+    bytes reproduce from the recorded seed.
+  - Decisions: no new architecture, authority, state-scope, compatibility, or
+    gameplay decision is introduced. The test uses the approved ADR-0017
+    xoshiro256** labeled stream and ADR-0013 writer-order/checksum rules and adds
+    no production harness, API, state, target dependency, or behavior.
+  - Verification: implementation commit `917ecc3278` passes a fresh MSVC 19.44
+    C++20 67-step aggregate build with 17 contract executables and three corpus
+    checks. The four focused property contracts perform 28 deterministic
+    simulation runs of 48 batches each and cover 16 randomized seeds, exact
+    same-seed command/disposition/final-byte/checksum replay, different-seed
+    trace separation, and an eight-seed disposition-coverage matrix. All 98
+    repository Python policy tests pass. Staged provenance verification reports
+    196 intentional differences and 54 dependency inputs; staged legacy
+    exclusion reports 3,890 tracked paths, 59 CMake files, 44 compile commands,
+    and 121 Ninja edges. The new C++ source passes `clang-format`; JSON and
+    staged-diff checks pass. Schema, golden-vector, and fuzz verification are not
+    applicable because the slice changes no wire schema or bounded decoder.
+  - Owner review: no new decision approval was required because this slice is
+    test-only and exercises accepted behavior. The project owner explicitly
+    accepted the demonstrated implementation behavior in the 2026-08-28 working
+    session.
+  - Follow-ups: none for Slice 5.7. Phase 5 remains **In Progress** until its
+    hosted manual matrix and remaining exit-gate evidence pass; that work is
+    intentionally deferred to a fresh session at the project owner's request.
+
+- 2026-08-28 — Phase 5 exit gate — In Progress
+  - Change: confirmed implementation closeout commit `006a3ce7d4` contains all
+    implemented and owner-demo-accepted Phase 5 slices, corrected Slice 5.7's
+    chronological note heading to match its tracker and README status, and
+    prepared the status-only phase-completion candidate. Phase 5 remains **In
+    Progress** and Phase 6 remains **Not Started**.
+  - Decisions: none. No architecture, authority, state-scope, compatibility, or
+    gameplay-behavior decision changed, and accepted ADR-0026 through ADR-0031
+    plus GDR-0012 remain authoritative.
+  - Verification: from the Visual Studio 2022 v17.14.39/MSVC 19.44.35228 x64
+    environment, a fresh `cmake --preset tes3mp-standalone --fresh` configure
+    and `cmake --build --preset tes3mp-standalone --parallel 4` completed all 67
+    build steps and passed all 17 C++ contract executables plus three checked-in
+    golden-corpus checks. `python -m unittest discover -s scripts/tests -v`
+    passed all 98 repository-owned tests. `python
+    scripts/verify_vnext_baseline.py` passed with 196 intentional differences
+    and 54 dependency inputs. `python
+    scripts/verify_vnext_legacy_exclusion.py --build-dir
+    build/tes3mp-standalone` passed over 3,890 tracked paths, 59 CMake files, 44
+    compile commands, and 121 Ninja build edges. The provenance JSON parses, all
+    local links across 38 vNext Markdown files resolve, and diff checks pass.
+  - Owner review: the Phase 5 hosted matrix and explicit exit-gate approval are
+    pending. This local candidate evidence does not authorize Phase 6 kickoff or
+    production work.
+  - Follow-ups: publish the exact phase-completion candidate, manually dispatch
+    all six vNext hosted workflows against it, require every declared job
+    including macOS x86-64 to pass, review and record retained artifact evidence,
+    then obtain explicit owner exit approval before marking Phase 5
+    **Implemented** or beginning Phase 6.
+
+- 2026-08-28 — Phase 5 exit gate — In Progress
+  - Change: published phase-completion candidate `076dd2224a1a855d7c85c836dcb224f80e70161e`
+    and manually dispatched all six vNext workflows. The macOS arm64 baseline
+    exposed that Xcode 16's libc++ rejects the otherwise C++20-valid
+    `std::atomic<std::shared_ptr<...>>` specialization. Replaced that private
+    representation with a plain shared pointer accessed only through the
+    standard acquire-load and release-store atomic shared-pointer operations.
+  - Decisions: none. ADR-0029 requires atomic replacement of one immutable
+    latest-publication handle, not a particular standard-library class-template
+    spelling. The repair preserves immutable shared ownership, release/acquire
+    visibility, latest-only retention, reader isolation, publication ordering,
+    and every accepted architecture/state-scope boundary.
+  - Verification: macOS arm64 job `98906119957` in workflow run
+    [`33188061566`](https://github.com/poisson-fish/TES3MP/actions/runs/33188061566)
+    failed while compiling `server_command_reducer.cpp` because Apple libc++
+    instantiated the primary trivially-copyable-only `std::atomic<T>` template
+    for the shared pointer. The still-running Linux, Windows, macOS, and
+    GameNetworkingSockets workflows were cancelled after the candidate became
+    ineligible; completed FlatBuffers run
+    [`33188063579`](https://github.com/poisson-fish/TES3MP/actions/runs/33188063579)
+    and runtime-safety run
+    [`33188068142`](https://github.com/poisson-fish/TES3MP/actions/runs/33188068142)
+    passed but are diagnostic evidence only and will not be mixed with the
+    replacement matrix. After the repair, a fresh MSVC 19.44 C++20 configure
+    and 67-step build pass all 17 C++ contracts and three corpus checks; all 98
+    repository-owned Python tests pass; both changed C++ files pass
+    `clang-format 22.1.3 --dry-run --Werror`; and diff checks pass.
+  - Owner review: no new architecture, authority, state-scope, compatibility,
+    or gameplay decision arose. The full replacement hosted matrix and explicit
+    Phase 5 exit approval remain pending.
+  - Follow-ups: complete indexed provenance, legacy-exclusion, JSON, and link
+    verification; publish the repair candidate; dispatch all six workflows
+    again against that one exact commit; review all declared jobs and retained
+    artifacts; then request explicit Phase 5 exit approval.
+
+- 2026-08-28 — Phase 5 exit gate — Awaiting Owner Approval
+  - Change: retained the portability repair as published commit
+    `8e7ca8ff607f3b95ec8d348919f6c1233a11eb23`, manually dispatched the complete
+    replacement hosted matrix against that exact commit, and reviewed every
+    declared job and retained artifact. Phase 5 remains **In Progress** and
+    Phase 6 remains **Not Started**.
+  - Decisions: none. The repair and verification do not amend accepted
+    ADR-0026 through ADR-0031 or GDR-0012 and introduce no architecture,
+    authority, state-scope, compatibility, security, or gameplay-behavior
+    choice.
+  - Gate evidence: all six replacement-candidate workflows completed
+    successfully: Linux baseline
+    [`33189362869`](https://github.com/poisson-fish/TES3MP/actions/runs/33189362869),
+    Windows baseline
+    [`33189365326`](https://github.com/poisson-fish/TES3MP/actions/runs/33189365326),
+    macOS baseline
+    [`33189367352`](https://github.com/poisson-fish/TES3MP/actions/runs/33189367352),
+    FlatBuffers proof
+    [`33189369561`](https://github.com/poisson-fish/TES3MP/actions/runs/33189369561),
+    GameNetworkingSockets proof
+    [`33189371582`](https://github.com/poisson-fish/TES3MP/actions/runs/33189371582),
+    and runtime safety
+    [`33189373947`](https://github.com/poisson-fish/TES3MP/actions/runs/33189373947).
+    All 17 jobs passed: Linux GCC 13 and Clang 18; Windows MSVC 2022 v143;
+    macOS arm64 and x86-64 with Xcode 16; all five FlatBuffers proof jobs; all
+    five GameNetworkingSockets proof jobs including Clang 18 ASan/UBSan; and
+    both TES3MP Clang 18 ThreadSanitizer and ASan/UBSan/fuzz jobs.
+  - Verification: all 17 evidence artifacts are retained, non-expired, and
+    non-empty. Runtime-safety artifact `9693163253` (ASan/UBSan/fuzz) has
+    SHA-256 `095b5785dfc7c3cf1a6589c26f1b4d106ac2959eff4545ef55162829312bdaeb`;
+    artifact `9693103241` (ThreadSanitizer) has SHA-256
+    `9d74a564b4fbb37c39934f9b6633b83a728d2f403d6156ee977fdeb3392b3137`.
+    Local replacement-candidate verification passes all 98 repository-owned
+    Python tests, the standalone aggregate target with all 17 C++ contract
+    executables and three golden-corpus checks, baseline provenance for 196
+    intentional differences and 54 dependency inputs, legacy exclusion over
+    3,890 tracked paths, 59 CMake files, 44 compile commands, and 121 Ninja
+    edges, JSON parsing, 118 local Markdown links across 38 files, and clean
+    diff checks.
+  - Owner review: the automated Phase 5 exit gate is green. Explicit owner exit
+    approval remains pending, so Phase 5 stays **In Progress** and Phase 6
+    remains **Not Started**.
+  - Follow-ups: obtain explicit Phase 5 exit-gate approval, then mark Phase 5
+    **Implemented** in a status-only closeout before holding the Phase 6 kickoff
+    and presenting its unresolved transport/session decision packet.
+
+- 2026-08-28 — Phase 5 — Implemented
+  - Change: marked Phase 5 **Implemented** after every Slice 5.1–5.7 deliverable
+    was implemented and demo-accepted, the exact replacement-candidate hosted
+    matrix passed, and the project owner explicitly approved the phase exit
+    gate. This status-only closeout changes no production or test source.
+  - Decisions: none. ADR-0026 through ADR-0031 and GDR-0012 remain accepted
+    without amendment.
+  - Gate evidence: the server core retains one writer-confined canonical
+    mutation path; commits are atomic, deterministic, revisioned, and published
+    as immutable state plus ordered domain changes; and bounded post-commit sink
+    failures cannot roll back, mutate, or deadlock canonical state. The complete
+    17-job hosted evidence is recorded immediately above.
+  - Verification: retained local verification covers all 98 repository-owned
+    Python tests, all 17 C++ contract executables and three golden-corpus checks,
+    provenance for 196 intentional differences and 54 dependency inputs,
+    legacy exclusion over 3,890 paths, 59 CMake files, 44 compile commands, and
+    121 Ninja edges, plus JSON, Markdown-link, and clean-diff checks. All six
+    hosted workflows passed on
+    `8e7ca8ff607f3b95ec8d348919f6c1233a11eb23` with all 17 artifacts retained.
+  - Owner review: explicit Phase 5 exit-gate approval received from the project
+    owner in the 2026-08-28 working session.
+  - Follow-ups: none for Phase 5. Phase 6 is now eligible, but its kickoff and
+    unresolved transport/session architecture, security, and resource-bound
+    decisions require owner review before dependent production work begins.
+
+## Phase 6 — Maintained transport and secure network session
+
+[Back to the phase tracker](IMPLEMENTATION_PLAN.md#phase-6--maintained-transport-and-secure-network-session)
+
+- The transport interface should expose product semantics rather than mimic the
+  selected library one method at a time.
+- Session resumption credentials must be short-lived/revocable according to the
+  threat model and must never be persisted or logged in reusable plaintext form.
+- Disconnect and rejection reasons need stable internal categories, with a
+  separately sanitized user-facing message.
+- Android support is a selection constraint, not a Phase 6 deliverable; retain a
+  small compile proof if ADR-0005 uses Android portability as a deciding factor.
+
+- 2026-08-28 — Phase 6 kickoff / Slice 6.1 — Not Started
+  - Change: confirmed the accepted Phase 5 exit and inspected ADR-0005,
+    ADR-0014, the pinned GameNetworkingSockets dependency proof/lock, current
+    target enforcement, and the behavior-free transport anchor. Added proposed
+    [`ADR-0032`](adr/ADR-0032-phase6-transport-adapter-and-lifecycle-boundary.md)
+    with six owner-gated option sets. No Phase 6 production source, dependency
+    integration, socket behavior, authority, state, or gameplay code changed.
+  - Decisions: none accepted. The recommendation is a selected-library adapter
+    target behind the unchanged transport abstraction; one verified proof/
+    production provisioner; owned numeric IP endpoints; a command/value-event
+    runtime with never-reused IDs; caller-confined explicit pumping; and an
+    initial proof-bounded 1-listener/8-pending/8-established/128-event profile
+    until Slice 6.4 reviews measured product capacities.
+  - Verification: `python -m unittest discover -s scripts/tests -q` passes all
+    98 repository-owned tests. Indexed baseline provenance accounts for 197
+    intentional differences and verifies 54 dependency inputs; indexed legacy
+    exclusion checks 3,891 tracked paths, 59 CMake files, 44 compile commands,
+    and 121 Ninja edges. The provenance JSON parses, all 122 local Markdown
+    links across 39 files resolve, ADR proposal/decision/owner-gate assertions
+    pass, and indexed diff checks pass. Product builds, dependency provisioning,
+    formatting, schema, corpus, and fuzz verification are not applicable because
+    this kickoff packet changes documentation/provenance only.
+  - Owner review: pending explicit Phase 6 kickoff and approval or amendment of
+    ADR-0032 Decisions 1–6 and the proposed Slice 6.1 acceptance tests. Phase 6
+    and Slice 6.1 remain **Not Started**; dependent production work is gated.
+  - Follow-ups: present the decision packet and scenarios to the project owner.
+    After approval, record the accepted options and implement only the Slice
+    6.1 lifecycle adapter, focused limits, boundary checks, and tests.
+
+- 2026-08-28 — Phase 6 kickoff / Slice 6.1 — Not Started
+  - Change: recorded owner approval of ADR-0032 Option A for Decisions 1, 2, 4,
+    5, and 6. Reopened Decision 3 after the owner required hostname/DNS
+    resolution from the first connection slice using a host string and separate
+    port. Expanded the proposal with bounded input, resolver-integration, and
+    multi-address connection options. No production source, dependency lock,
+    socket behavior, or gameplay behavior changed.
+  - Decisions: the adapter target split, verified provisioning model,
+    command/value-event lifecycle, caller-confined pump, and initial 1/8/8/128
+    profile are approved. The prior numeric-only endpoint recommendation is not
+    accepted. Recommend bounded ASCII host plus port, a disposable current
+    c-ares selection proof behind the GNS adapter, and a bounded RFC 8305-style
+    dual-stack connection race. Exact resolver dependency acceptance remains a
+    separate owner gate after proof evidence.
+  - Verification: all 98 repository-owned Python tests pass. Indexed baseline
+    provenance accounts for 197 intentional differences and 54 dependency
+    inputs; indexed legacy exclusion checks 3,891 tracked paths, 59 CMake files,
+    44 compile commands, and 121 Ninja edges. The provenance JSON parses, all
+    122 local Markdown links across 39 files resolve, partial-approval/DNS-
+    proposal assertions pass, and indexed diff checks pass. Product builds,
+    dependency proof/provisioning, formatting, schema, corpus, and fuzz checks
+    are not applicable because no production, dependency-lock, schema, or test
+    source changed.
+  - Owner review: partial architecture approval is recorded. ADR-0032 remains
+    **Proposed**; amended Decisions 3.1–3.3 and their expanded tests remain
+    pending, so Phase 6 and Slice 6.1 stay **Not Started**.
+  - Follow-ups: present the focused DNS packet. If its c-ares option is approved,
+    implement only a disposable exact-pin/platform/security proof and return its
+    evidence for owner dependency acceptance before Phase 6 production code.
+
+- 2026-08-28 — Phase 6 kickoff / Slice 6.1 — Not Started
+  - Change: recorded owner approval of ADR-0032 Option A for amended Decisions
+    3.1–3.3 and their expanded tests. All six transport-lifecycle architecture
+    decisions are approved; no production or dependency-lock source changed in
+    this approval-only record.
+  - Decisions: connections accept a bounded ASCII hostname/IP string and
+    separate port; numeric input bypasses DNS; the approved research path is a
+    caller-pumped, privately linked c-ares candidate; and bounded dual-stack
+    selection follows the proposed eight-result/two-candidate/50 ms/250 ms
+    Happy Eyeballs profile. This approval authorizes only the disposable
+    resolver proof, not an exact production dependency.
+  - Verification: all 98 repository-owned Python tests pass. Indexed baseline
+    provenance accounts for 197 intentional differences and 54 dependency
+    inputs; indexed legacy exclusion checks 3,891 tracked paths, 59 CMake files,
+    44 compile commands, and 121 Ninja edges. The provenance JSON parses,
+    approval/dependency-gate assertions pass, and indexed diff checks pass.
+    Product builds, dependency proof/provisioning, formatting, schema, corpus,
+    and fuzz checks are not applicable because this approval record changes
+    documentation only.
+  - Owner review: transport-lifecycle architecture approval is complete. Exact
+    c-ares source/profile acceptance remains pending proof evidence, so ADR-0032
+    stays **Proposed** and Phase 6/Slice 6.1 stay **Not Started**.
+  - Follow-ups: implement and run the disposable exact-pin c-ares proof on the
+    supported desktop compiler matrix, retain its evidence, and return the
+    dependency profile to the owner before production integration.
+
+- 2026-08-28 — Phase 6 resolver selection proof — In Progress
+  - Change: implemented the owner-authorized disposable c-ares selection proof
+    without changing any production target. Added an exact 1.34.8 source and
+    license lock, fail-closed verified-download/safe-extraction runner, isolated
+    static C/C++20 proof build, loopback DNS fixture, repository policy tests,
+    retained JSON evidence, and a manual supported-desktop workflow.
+  - Decisions: no new architecture, authority, state-scope, or gameplay choice.
+    The proof instantiates only the approved research profile: host plus separate
+    port, numeric bypass, caller-pumped `ares_process_fds`, no event thread or
+    application cache, eight owned unique results, and failure/lifecycle
+    categories. It does not select the dependency for production.
+  - Verification: a clean runner-built MSVC 19.44.35228 static c-ares proof
+    passes all 13 loopback scenarios and retains the exact archive, license,
+    compiler, profile, and CTest evidence; the evidence JSON SHA-256 is
+    `cd49ad780cd467969de9b14ec9cfc7179d4192b2cb8225caa87386f26b2bd615`.
+    All 107 repository-owned Python tests pass. Indexed baseline provenance
+    accounts for 204 intentional differences and 61 dependency inputs; indexed
+    legacy exclusion checks 3,898 tracked paths, 60 CMake files, 44 compile
+    commands, and 121 Ninja edges. The exact lock validates, the workflow passes
+    actionlint 1.7.12, both Python files compile, all 125 local Markdown links
+    across 40 files resolve, the provenance JSON parses, and indexed diff checks
+    pass. Production builds, formatting, schema/corpus, and fuzz checks are not
+    applicable to this isolated proof; Linux sanitizer and the other supported
+    compilers remain hosted-matrix gates.
+  - Owner review: exact dependency acceptance remains pending. ADR-0032 stays
+    **Proposed**, Phase 6 and Slice 6.1 stay **Not Started**, and no production
+    c-ares or GameNetworkingSockets adapter integration is authorized yet.
+  - Follow-ups: publish an exact candidate, run and review the five-job hosted
+    proof matrix, then return the exact pin/profile and retained evidence for
+    owner dependency acceptance before starting Slice 6.1 production work.
+
+- 2026-08-28 — Phase 6 resolver selection proof — Hosted evidence complete
+  - Change: published exact proof candidate `6dcea1b4afe2da9ce6005ec80cdb897d98f6739d`
+    and manually dispatched the dedicated
+    [five-job c-ares proof matrix](https://github.com/poisson-fish/TES3MP/actions/runs/33202049447).
+    No production dependency integration or Phase 6 source changed.
+  - Decisions: none. The evidence supports the proposed exact c-ares 1.34.8
+    static, caller-pumped profile but does not itself accept the dependency.
+  - Verification: Windows x86-64 MSVC 19.44.35228, Linux x86-64 GCC 13.3,
+    Linux x86-64 Clang 18.1.3 with ASan+UBSan, macOS arm64 AppleClang 16, and
+    macOS x86-64 AppleClang 16 all passed the same 13 loopback scenarios and
+    retained five artifacts. Artifact review found one identical lock SHA-256
+    `0ad50cda94dcca45fbfe3a7e166862ef3a572f9362ee3ada487872a6d018fec1`,
+    archive SHA-256
+    `c222b6d681096f9444d2c4863d2c1174019e27cacca0a4a5c114d36dd7d7bf78`,
+    MIT license SHA-256
+    `460f5e768fda3752ca2169a95df062578a10fb126bfd65f3b9b1a1bed2f84807`,
+    build profile, budgets, test list, and no-production-claim across all jobs.
+  - Owner review: exact c-ares dependency acceptance remains pending. ADR-0032
+    stays **Proposed**, and Phase 6/Slice 6.1 stay **Not Started**.
+  - Follow-ups: present the exact pin, restricted profile, exclusions, and green
+    retained evidence for owner acceptance. After acceptance, mark ADR-0032
+    **Accepted** and begin only the approved Slice 6.1 production integration.
+
+## Phase 7 — Headless end-to-end multiplayer slice
+
+[Back to the phase tracker](IMPLEMENTATION_PLAN.md#phase-7--headless-end-to-end-multiplayer-slice)
+
+- Keep the initial world fixture deliberately tiny: player identity, session,
+  canonical cell, root transform, velocity, revision, and acknowledgement state.
+- Fake-client scripts should emit a machine-readable timeline so CI failures can
+  be replayed from seed and command trace.
+- Define quantitative pass thresholds for queue depth, correction/convergence,
+  resume time, and soak duration in the test configuration rather than prose-only
+  expectations.
+
+## Phase 8 — OpenMW desktop vertical slice
+
+[Back to the phase tracker](IMPLEMENTATION_PLAN.md#phase-8--openmw-desktop-vertical-slice)
+
+- The adapter translates between OpenMW state/events and owned domain types. It
+  must not become a second canonical simulation or contain packet handling.
+- Rendering and local input continue if the network stalls; network callbacks
+  must not mutate OpenMW presentation state from arbitrary threads.
+- Remote player representation may be minimal in this phase. Correct lifecycle,
+  cell placement, and root motion take priority over animation fidelity.
+- Keep client-session integration reusable so PC VR and a potential Quest client
+  compose the same state machine rather than fork it.
+
+## Phase 9 — PC VR interoperability gate
+
+[Back to the phase tracker](IMPLEMENTATION_PLAN.md#phase-9--pc-vr-interoperability-gate)
+
+- Head and hand transforms are presentation snapshots associated with a player
+  root and authority epoch. They are not persisted as durable world state.
+- Physical reach validation uses the authoritative root plus declared limits;
+  raw tracked coordinates are never accepted as authoritative interaction proof.
+- OpenMW-VR stays outside the multiplayer core. Fork-specific code belongs in the
+  provider/hook layer and maintained patch target.
+
+## Phase 10 — Player lifecycle and content identity
+
+[Back to the phase tracker](IMPLEMENTATION_PLAN.md#phase-10--player-lifecycle-and-content-identity)
+
+- Content identity must not use local file paths. Canonical record references need
+  stable manifest context and explicit collision handling.
+- Moderation primitives belong in canonical server commands now; the secure
+  administrative interface that invokes them arrives in Phase 21.
+- Avoid persisting transport connection identifiers or secrets as player identity.
+
+## Phase 11 — Canonical cells, interest, and resynchronization
+
+[Back to the phase tracker](IMPLEMENTATION_PLAN.md#phase-11--canonical-cells-interest-and-resynchronization)
+
+- Snapshot completion needs an explicit baseline revision/tick. Do not infer
+  completion from a quiet connection.
+- Interest changes are server decisions. Clients may suggest view context only
+  through validated, bounded commands.
+- Resync should be scoped to the smallest sound state domain, with a full session
+  snapshot as the bounded fallback.
+
+## Phase 12 — Production movement, animation, and pose replication
+
+[Back to the phase tracker](IMPLEMENTATION_PLAN.md#phase-12--production-movement-animation-and-pose-replication)
+
+- Snapshot payloads include simulation tick, sequence, transform, velocity, and
+  authority epoch. They are latest-wins and must not use reliable ordered queues.
+- Measure snapshot age, correction distance, hard snaps, jitter-buffer depth, and
+  extrapolation time before tuning rates or compression.
+- Teleport/cell-transition correction is a distinct explicit state change, not an
+  extreme ordinary movement snapshot.
+
+## Phase 13 — Actor lifecycle, AI state, and authority handoff
+
+[Back to the phase tracker](IMPLEMENTATION_PLAN.md#phase-13--actor-lifecycle-ai-state-and-authority-handoff)
+
+- Prefer server-owned actor simulation. Client delegation requires the explicit
+  threat analysis and validation limits required by ADR-0006.
+- A lease transfer commits a complete authoritative snapshot atomically before
+  accepting deltas from the new epoch.
+- Presentation animation is not permission to drive canonical AI or transform
+  state outside the authority policy.
+
+## Phase 14 — Interactive objects, locks, traps, and doors
+
+[Back to the phase tracker](IMPLEMENTATION_PLAN.md#phase-14--interactive-objects-locks-traps-and-doors)
+
+- Separate durable object state from presentation events such as sound or
+  animation triggers. Replaying a snapshot must not replay one-shot effects.
+- Use expected entity revision plus command ID for reliable interactions.
+- VR reach is validated relative to the authoritative player root and declared
+  limits, never solely from controller pose.
+
+## Phase 15 — Inventory, equipment, and container transactions
+
+[Back to the phase tracker](IMPLEMENTATION_PLAN.md#phase-15--inventory-equipment-and-container-transactions)
+
+- Treat an inventory change as a domain transaction with one command ID and one
+  commit result, not a sequence of independently reliable packet mutations.
+- Explicitly define stack equivalence and metadata that prevents unsafe merging.
+- Persistence later stores canonical ownership/revisions, not client UI layout or
+  transport acknowledgement state unless needed for bounded idempotency recovery.
+
+## Phase 16 — Combat, stats, magic, death, and resurrection
+
+[Back to the phase tracker](IMPLEMENTATION_PLAN.md#phase-16--combat-stats-magic-death-and-resurrection)
+
+- Keep command intent, canonical outcome, and presentation event separate. A hit
+  visual is not evidence that canonical damage occurred.
+- Combat validation must use server-known state and explicit lag-handling policy
+  from ADR-0006; do not silently trust client timestamps.
+- Add threat-model cases for rate abuse, forged targets, impossible reach, stale
+  authority, resource bypass, and replayed commands.
+
+## Phase 17 — Dialogue, journals, factions, and quests
+
+[Back to the phase tracker](IMPLEMENTATION_PLAN.md#phase-17--dialogue-journals-factions-and-quests)
+
+- This phase implements canonical state and commands, not the general-purpose
+  server scripting runtime. It must still emit typed domain events for Phase 19.
+- Dialogue presentation stays client-side while dialogue eligibility and durable
+  consequences use validated canonical state.
+- Record intentional differences from single-player behavior as product rules,
+  not undocumented race outcomes.
+
+## Phase 18 — Time, weather, and durable world state
+
+[Back to the phase tracker](IMPLEMENTATION_PLAN.md#phase-18--time-weather-and-durable-world-state)
+
+- Separate canonical transition parameters from client-local visual interpolation.
+- Use typed keys/values or schema-defined records for globals; do not expose an
+  unbounded arbitrary network dictionary.
+- Server maintenance pause and no-player-online policy must be explicit because
+  they affect later persistence/replay behavior.
+
+## Phase 19 — Versioned server scripting
+
+[Back to the phase tracker](IMPLEMENTATION_PLAN.md#phase-19--versioned-server-scripting)
+
+- Reusing Lua as a language is allowed only if selected by ADR-0009; the legacy
+  CoreScripts binding/API is never reused for compatibility.
+- Events should be immutable snapshots or values with bounded lifetime. Commands
+  are queued for a deterministic server tick rather than applied during callbacks.
+- Define callback ordering and script-generated command ordering so replay does
+  not depend on hash order, worker timing, or filesystem enumeration.
+
+## Phase 20 — Transactional persistence and deterministic replay
+
+[Back to the phase tracker](IMPLEMENTATION_PLAN.md#phase-20--transactional-persistence-and-deterministic-replay)
+
+- Persist domain state/change records, not protocol payloads, OpenMW object
+  pointers, renderer state, or transport-library objects.
+- Define the exact durability acknowledgement point: clients/scripts/admin tools
+  must not be told an operation is durable before the selected commit policy is
+  satisfied.
+- Replay inputs include negotiated rules/configuration, content manifest, script
+  bundle/API versions, deterministic seed, and command ordering metadata.
+- TES3MP 0.8.x save or persistence migration is explicitly out of scope.
+
+## Phase 21 — Administration, moderation, and discovery
+
+[Back to the phase tracker](IMPLEMENTATION_PLAN.md#phase-21--administration-moderation-and-discovery)
+
+- Do not expose scripting/runtime internals as the administrative API.
+- Health and metrics endpoints should separate public-safe status from privileged
+  operational detail.
+- The new config/admin/discovery formats have no TES3MP 0.8 compatibility goal.
+
+## Phase 22 — Desktop and PC VR stabilization and release
+
+[Back to the phase tracker](IMPLEMENTATION_PLAN.md#phase-22--desktop-and-pc-vr-stabilization-and-release)
+
+- Quantitative budgets should be established from measured representative scenes
+  before optimization work is accepted as complete.
+- A baseline OpenMW update policy must state how upstream security/stability
+  updates are evaluated without coupling protocol version to engine version.
+- Retain minimized fuzz inputs, failed simulation seeds, replay traces, and soak
+  metrics as regression assets when they expose a defect.
+
+## Phase 23 — Meta Quest 3 feasibility decision
+
+[Back to the phase tracker](IMPLEMENTATION_PLAN.md#phase-23--meta-quest-3-feasibility-decision)
+
+- Community Quest experiments are research references, not dependencies or code
+  templates. Re-evaluate their status/licenses only when this phase begins.
+- Quest constraints may motivate general client optimizations, but must not add
+  Android/OpenXR/headset concepts to protocol or canonical server state.
+- Upstream generally useful OpenMW/OpenMW-VR changes when practical rather than
+  accumulating an unbounded permanent platform fork.
+
+## Phase 24 — Meta Quest 3 multiplayer port
+
+[Back to the phase tracker](IMPLEMENTATION_PLAN.md#phase-24--meta-quest-3-multiplayer-port)
+
+- This phase is conditional and remains **Not Started** unless ADR-0012 records a
+  go decision. A no-go decision in Phase 23 does not block program completion.
+- Reuse the established `vr_pose` capability and platform-neutral authoritative
+  root/capsule. Quest is another provider/composition target, not another core.
+- Device-specific work belongs in the platform/adapter layer and a bounded patch
+  queue with upstream candidates tracked explicitly.
