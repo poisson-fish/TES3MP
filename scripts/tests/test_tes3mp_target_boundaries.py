@@ -314,6 +314,20 @@ class TES3MPTargetBoundaryTests(unittest.TestCase):
             "SteamNetworkingUtils()->SetGlobalCallback_SteamNetConnectionStatusChanged",
             adapter,
         )
+        self.assertNotIn("sockets()->", adapter)
+        for flat_socket_call in (
+            "AcceptConnection",
+            "CloseConnection",
+            "CloseListenSocket",
+            "ConnectByIPAddress",
+            "CreateListenSocketIP",
+            "GetListenSocketAddress",
+            "RunCallbacks",
+            "SetConnectionUserData",
+        ):
+            self.assertIn(
+                f"SteamAPI_ISteamNetworkingSockets_{flat_socket_call}", adapter
+            )
 
     def test_selected_adapter_reuses_verified_abseil_package(self):
         cmake_text = (ENGINE_INDEPENDENT_SOURCE / "CMakeLists.txt").read_text(

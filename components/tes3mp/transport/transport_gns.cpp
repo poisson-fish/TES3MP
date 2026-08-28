@@ -370,13 +370,13 @@ namespace
             std::array<SteamNetworkingConfigValue_t, 2> options;
             options[0].SetInt32(k_ESteamNetworkingConfig_Unencrypted, 0);
             options[1].SetInt64(k_ESteamNetworkingConfig_ConnectionUserData, static_cast<std::int64_t>(*generation));
-            const HSteamListenSocket handle
-                = sockets()->CreateListenSocketIP(address, static_cast<int>(options.size()), options.data());
+            const HSteamListenSocket handle = SteamAPI_ISteamNetworkingSockets_CreateListenSocketIP(
+                sockets(), address, static_cast<int>(options.size()), options.data());
             if (handle == k_HSteamListenSocket_Invalid)
                 return { TES3MP::TransportResult::RuntimeFailed, std::nullopt };
-            if (!sockets()->GetListenSocketAddress(handle, &address))
+            if (!SteamAPI_ISteamNetworkingSockets_GetListenSocketAddress(sockets(), handle, &address))
             {
-                sockets()->CloseListenSocket(handle);
+                SteamAPI_ISteamNetworkingSockets_CloseListenSocket(sockets(), handle);
                 return { TES3MP::TransportResult::RuntimeFailed, std::nullopt };
             }
 
@@ -385,12 +385,12 @@ namespace
             auto bound = TES3MP::ListenerEndpoint::create(text.data(), address.m_port);
             if (!bound)
             {
-                sockets()->CloseListenSocket(handle);
+                SteamAPI_ISteamNetworkingSockets_CloseListenSocket(sockets(), handle);
                 return { TES3MP::TransportResult::RuntimeFailed, std::nullopt };
             }
             if (!mListenerHandles.bind(handle, *id, *generation))
             {
-                sockets()->CloseListenSocket(handle);
+                SteamAPI_ISteamNetworkingSockets_CloseListenSocket(sockets(), handle);
                 failRuntime(TES3MP::TransportFailure::DependencyFailure);
                 return { TES3MP::TransportResult::RuntimeFailed, std::nullopt };
             }
@@ -408,7 +408,7 @@ namespace
             auto found = mListeners.find(listener);
             if (found == mListeners.end())
                 return finalized(listener, mNextListener);
-            sockets()->CloseListenSocket(found->second.handle);
+            SteamAPI_ISteamNetworkingSockets_CloseListenSocket(sockets(), found->second.handle);
             mListenerHandles.erase(found->second.handle);
             mListeners.erase(found);
 
@@ -490,7 +490,8 @@ namespace
             if (found == mConnections.end())
                 return finalized(connection, mNextConnection);
             const HSteamNetConnection handle = found->second.handle;
-            sockets()->CloseConnection(handle, 0, mode == TES3MP::TransportCloseMode::Graceful ? "graceful" : nullptr,
+            SteamAPI_ISteamNetworkingSockets_CloseConnection(sockets(), handle, 0,
+                mode == TES3MP::TransportCloseMode::Graceful ? "graceful" : nullptr,
                 mode == TES3MP::TransportCloseMode::Graceful);
             if (found->second.incomingPending && mIncomingPending > 0)
                 --mIncomingPending;
@@ -520,7 +521,7 @@ namespace
                         continue;
                     }
                 }
-                sockets()->RunCallbacks();
+                SteamAPI_ISteamNetworkingSockets_RunCallbacks(sockets());
                 attempts.clear();
                 for (const auto& [id, _] : mAttempts)
                     attempts.push_back(id);
@@ -567,7 +568,7 @@ namespace
                 const auto id = found->first;
                 const auto connection = found->second;
                 mConnections.erase(found);
-                sockets()->CloseConnection(connection.handle, 0, nullptr, false);
+                SteamAPI_ISteamNetworkingSockets_CloseConnection(sockets(), connection.handle, 0, nullptr, false);
                 mConnectionHandles.erase(connection.handle);
                 mIncomingListeners.erase(id);
                 queue({ TES3MP::TransportEventKind::ConnectionClosed, TES3MP::TransportFailure::Shutdown, std::nullopt,
@@ -581,7 +582,7 @@ namespace
                 const auto id = found->first;
                 const auto listener = found->second;
                 mListeners.erase(found);
-                sockets()->CloseListenSocket(listener.handle);
+                SteamAPI_ISteamNetworkingSockets_CloseListenSocket(sockets(), listener.handle);
                 mListenerHandles.erase(listener.handle);
                 queue({ TES3MP::TransportEventKind::ListenerStopped, TES3MP::TransportFailure::Shutdown, id });
                 if (mFailed)
@@ -694,9 +695,9 @@ namespace
                 closeCandidates(*attempt);
             }
             for (const auto& [_, connection] : mConnections)
-                sockets()->CloseConnection(connection.handle, 0, nullptr, false);
+                SteamAPI_ISteamNetworkingSockets_CloseConnection(sockets(), connection.handle, 0, nullptr, false);
             for (const auto& [_, listener] : mListeners)
-                sockets()->CloseListenSocket(listener.handle);
+                SteamAPI_ISteamNetworkingSockets_CloseListenSocket(sockets(), listener.handle);
             mAttempts.clear();
             mConnections.clear();
             mConnectionHandles.clear();
@@ -736,13 +737,13 @@ namespace
             std::array<SteamNetworkingConfigValue_t, 2> options;
             options[0].SetInt32(k_ESteamNetworkingConfig_Unencrypted, 0);
             options[1].SetInt64(k_ESteamNetworkingConfig_ConnectionUserData, static_cast<std::int64_t>(*generation));
-            const HSteamNetConnection handle
-                = sockets()->ConnectByIPAddress(address, static_cast<int>(options.size()), options.data());
+            const HSteamNetConnection handle = SteamAPI_ISteamNetworkingSockets_ConnectByIPAddress(
+                sockets(), address, static_cast<int>(options.size()), options.data());
             if (handle == k_HSteamNetConnection_Invalid)
                 return false;
             if (!mCandidateHandles.bind(handle, attempt.id, *generation))
             {
-                sockets()->CloseConnection(handle, 0, nullptr, false);
+                SteamAPI_ISteamNetworkingSockets_CloseConnection(sockets(), handle, 0, nullptr, false);
                 failRuntime(TES3MP::TransportFailure::DependencyFailure);
                 return false;
             }
@@ -783,7 +784,7 @@ namespace
             {
                 mCandidateHandles.erase(candidate.handle);
                 if (candidate.handle != except)
-                    sockets()->CloseConnection(candidate.handle, 0, nullptr, false);
+                    SteamAPI_ISteamNetworkingSockets_CloseConnection(sockets(), candidate.handle, 0, nullptr, false);
             }
             attempt.candidates.clear();
         }
@@ -804,7 +805,7 @@ namespace
             if (found == mConnections.end() || !found->second.incomingPending)
                 return;
             const HSteamNetConnection handle = found->second.handle;
-            sockets()->CloseConnection(handle, 0, nullptr, false);
+            SteamAPI_ISteamNetworkingSockets_CloseConnection(sockets(), handle, 0, nullptr, false);
             if (mIncomingPending > 0)
                 --mIncomingPending;
             mConnectionHandles.erase(handle);
@@ -888,7 +889,7 @@ namespace
                     return;
                 attempt.race.candidateFailed(failedCandidate->ordinal);
                 attempt.candidates.erase(failedCandidate);
-                sockets()->CloseConnection(info.m_hConn, 0, nullptr, false);
+                SteamAPI_ISteamNetworkingSockets_CloseConnection(sockets(), info.m_hConn, 0, nullptr, false);
                 launchAvailable(id, true);
             }
         }
@@ -899,7 +900,8 @@ namespace
             if (mIncomingPending + mAttempts.size() >= mLimits.pendingAttempts
                 || mConnections.size() >= mLimits.connections)
             {
-                sockets()->CloseConnection(info.m_hConn, 0, "admission-bounded", false);
+                SteamAPI_ISteamNetworkingSockets_CloseConnection(
+                    sockets(), info.m_hConn, 0, "admission-bounded", false);
                 return;
             }
             const auto connection = allocate(mNextConnection);
@@ -911,15 +913,16 @@ namespace
             const auto generation = allocateCallbackGeneration();
             if (!generation)
                 return;
-            if (sockets()->AcceptConnection(info.m_hConn) != k_EResultOK)
+            if (SteamAPI_ISteamNetworkingSockets_AcceptConnection(sockets(), info.m_hConn) != k_EResultOK)
             {
-                sockets()->CloseConnection(info.m_hConn, 0, nullptr, false);
+                SteamAPI_ISteamNetworkingSockets_CloseConnection(sockets(), info.m_hConn, 0, nullptr, false);
                 return;
             }
-            if (!sockets()->SetConnectionUserData(info.m_hConn, static_cast<std::int64_t>(*generation))
+            if (!SteamAPI_ISteamNetworkingSockets_SetConnectionUserData(
+                    sockets(), info.m_hConn, static_cast<std::int64_t>(*generation))
                 || !mConnectionHandles.bind(info.m_hConn, *connection, *generation, listenerGeneration))
             {
-                sockets()->CloseConnection(info.m_hConn, 0, nullptr, false);
+                SteamAPI_ISteamNetworkingSockets_CloseConnection(sockets(), info.m_hConn, 0, nullptr, false);
                 failRuntime(TES3MP::TransportFailure::DependencyFailure);
                 return;
             }
@@ -954,7 +957,7 @@ namespace
                 mConnectionHandles.erase(info.m_hConn);
                 mIncomingListeners.erase(id);
                 mConnections.erase(found);
-                sockets()->CloseConnection(info.m_hConn, 0, nullptr, false);
+                SteamAPI_ISteamNetworkingSockets_CloseConnection(sockets(), info.m_hConn, 0, nullptr, false);
                 queue({ TES3MP::TransportEventKind::ConnectionClosed,
                     info.m_info.m_eState == k_ESteamNetworkingConnectionState_ClosedByPeer
                         ? TES3MP::TransportFailure::PeerClosed

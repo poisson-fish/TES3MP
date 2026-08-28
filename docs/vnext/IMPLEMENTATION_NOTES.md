@@ -3548,6 +3548,29 @@ only the relevant phase section here.
     exact six-job matrix, compare retained artifacts, and only then close the
     slice.
 
+- 2026-08-28 — Slice 6.1 complete flat-API boundary — In Progress
+  - Change: exact replacement run
+    [`33211614381`](https://github.com/poisson-fish/TES3MP/actions/runs/33211614381)
+    passed MSVC, GCC 13, Clang 18 TSan, macOS arm64, and macOS x86-64. The
+    callback flat-wrapper repair allowed ASan/UBSan to reach listener creation,
+    where UBSan identified the same RTTI-free boundary on the first C++ virtual
+    `ISteamNetworkingSockets` call. Every selected socket operation now uses
+    the pinned library's public flat API, not only callback registration.
+  - Decisions: none. This systematically applies the same public-API integration
+    rule and changes no owned lifecycle result, limit, generation, resolver,
+    racing, encryption, authority, state-scope, or gameplay contract. Sanitizer
+    coverage remains fully enabled with no report suppression.
+  - Verification: all non-ASan jobs in run `33211614381` are green and retained
+    their artifacts. The ASan/UBSan job failed exactly at the first remaining
+    direct virtual call; no project-owned memory error was reported before it.
+    A focused regression now requires flat wrappers for all eight socket
+    operations used by the adapter and rejects any `sockets()->` call.
+  - Owner review: the existing Slice 6.1 completion approval remains applicable;
+    this correction introduces no new decision requiring review.
+  - Follow-ups: build and run the systematic flat-boundary correction locally,
+    publish it, require one exact six-job green matrix, compare all retained
+    artifacts, and only then mark Slice 6.1 **Implemented**.
+
 ## Phase 7 — Headless end-to-end multiplayer slice
 
 [Back to the phase tracker](IMPLEMENTATION_PLAN.md#phase-7--headless-end-to-end-multiplayer-slice)
