@@ -43,6 +43,8 @@ namespace TES3MP
         SessionTimeouts = 0x102,
         SessionStaleCompletions = 0x103,
         SessionCancellations = 0x104,
+        CommandIntakeOutcomes = 0x200,
+        CommandIntakePending = 0x201,
     };
 
     struct MetricDefinition
@@ -69,6 +71,10 @@ namespace TES3MP
             case MetricKey::SessionStaleCompletions:
             case MetricKey::SessionCancellations:
                 return MetricDefinition{ MetricOperation::CounterAdd, MetricUnit::Count };
+            case MetricKey::CommandIntakeOutcomes:
+                return MetricDefinition{ MetricOperation::CounterAdd, MetricUnit::Count };
+            case MetricKey::CommandIntakePending:
+                return MetricDefinition{ MetricOperation::GaugeSet, MetricUnit::Count };
         }
         return std::nullopt;
     }
@@ -77,6 +83,7 @@ namespace TES3MP
     {
         ContractOutcome = 1,
         SessionOutcome = 2,
+        CommandIntakeOutcome = 3,
     };
 
     enum class MetricDimensionValue : std::uint8_t
@@ -90,6 +97,15 @@ namespace TES3MP
         TimedOut = 14,
         Cancelled = 15,
         StaleCompletion = 16,
+        CommandAccepted = 20,
+        CommandPerSessionPendingLimit = 21,
+        CommandGlobalPendingLimit = 22,
+        CommandCoordinatorTerminated = 23,
+        CommandDeferredByTickBudget = 24,
+        CommandClockMovedBackwards = 25,
+        CommandDeadlineOverflow = 26,
+        CommandTickExhausted = 27,
+        CommandIngressOrdinalExhausted = 28,
     };
 
     struct MetricDimension
@@ -161,6 +177,7 @@ namespace TES3MP
     {
         ContractObservation = 1,
         SessionLifecycle = 2,
+        CommandIntake = 3,
     };
 
     struct ContractObservationEvent
@@ -204,7 +221,28 @@ namespace TES3MP
         friend constexpr bool operator==(SessionLifecycleEvent, SessionLifecycleEvent) noexcept = default;
     };
 
-    using StructuredEventPayload = std::variant<ContractObservationEvent, SessionLifecycleEvent>;
+    enum class CommandIntakeObservationOutcome : std::uint8_t
+    {
+        Accepted,
+        PerSessionPendingLimit,
+        GlobalPendingLimit,
+        CoordinatorTerminated,
+        DeferredByTickBudget,
+        ClockMovedBackwards,
+        DeadlineOverflow,
+        TickExhausted,
+        IngressOrdinalExhausted,
+    };
+
+    struct CommandIntakeEvent
+    {
+        CommandIntakeObservationOutcome outcome;
+        std::uint64_t pendingCommands;
+
+        friend constexpr bool operator==(CommandIntakeEvent, CommandIntakeEvent) noexcept = default;
+    };
+
+    using StructuredEventPayload = std::variant<ContractObservationEvent, SessionLifecycleEvent, CommandIntakeEvent>;
 
     class StructuredEvent
     {
@@ -214,8 +252,11 @@ namespace TES3MP
 
         constexpr EventKind kind() const noexcept
         {
-            return std::holds_alternative<ContractObservationEvent>(mPayload) ? EventKind::ContractObservation
-                                                                              : EventKind::SessionLifecycle;
+            if (std::holds_alternative<ContractObservationEvent>(mPayload))
+                return EventKind::ContractObservation;
+            if (std::holds_alternative<SessionLifecycleEvent>(mPayload))
+                return EventKind::SessionLifecycle;
+            return EventKind::CommandIntake;
         }
         constexpr EventSeverity severity() const noexcept { return mSeverity; }
         constexpr std::optional<ServerTick> tick() const noexcept { return mTick; }

@@ -102,7 +102,7 @@
     {
       "path": "components/tes3mp/CMakeLists.txt",
       "status": "A",
-      "purpose": "Defines the standalone-capable five-library graph, pinned FlatBuffers runtime input, target-scoped safety registration including TSan-compatible allocator-test interposition, eleven contract executables with golden-corpus verification, and bounded parser fuzz targets."
+      "purpose": "Defines the standalone-capable five-library graph, pinned FlatBuffers runtime input, target-scoped safety registration including TSan-compatible allocator-test interposition, twelve contract executables with golden-corpus verification, and bounded parser fuzz targets."
     },
     {
       "path": "components/tes3mp/CMakePresets.json",
@@ -178,6 +178,11 @@
       "path": "components/tes3mp/include/tes3mp/protocol_handshake.hpp",
       "status": "A",
       "purpose": "Owned bounded protocol-version, capability-offer, hello, rejection, pure-negotiation, and initial-peer-classification API."
+    },
+    {
+      "path": "components/tes3mp/include/tes3mp/server_command_intake.hpp",
+      "status": "A",
+      "purpose": "Owner-approved typed server command proposal, fixed intake limits, writer-stamped batch, and coordinator result interfaces."
     },
     {
       "path": "components/tes3mp/include/tes3mp/server_session.hpp",
@@ -333,6 +338,11 @@
       "path": "components/tes3mp/server_core/observability.cpp",
       "status": "A",
       "purpose": "Validation and construction for closed metric definitions/dimensions and typed structured events."
+    },
+    {
+      "path": "components/tes3mp/server_core/server_command_intake.cpp",
+      "status": "A",
+      "purpose": "Owner-approved bounded writer-context command intake, deterministic tick ordering, overload handling, and typed observability implementation."
     },
     {
       "path": "components/tes3mp/server_core/server_session.cpp",
@@ -520,6 +530,11 @@
       "purpose": "Golden-corpus, deterministic property, exhaustive bit-mutation, owned round-trip, version-overlap, capability, rejection, malformed-wire, and legacy/no-reply contracts for Phase 4 negotiation."
     },
     {
+      "path": "components/tes3mp/tests/server_command_intake_tests.cpp",
+      "status": "A",
+      "purpose": "Deterministic writer ordering, cutoff, catch-up, queue-limit, lossless deferral, ordinal-exhaustion, ownership, and boundary contracts."
+    },
+    {
       "path": "components/tes3mp/tests/session_state_machine_tests.cpp",
       "status": "A",
       "purpose": "Client/server ordering, timeout, authentication outcome, secret-bound, stale completion, cancellation, lifetime, observability, and terminal-atomicity contracts."
@@ -672,7 +687,7 @@
     {
       "path": "docs/vnext/adr/ADR-0026-phase5-writer-command-intake-and-ordering.md",
       "status": "A",
-      "purpose": "Proposed owner-gated Phase 5 server-core command boundary, writer cutoff and ordering, hard intake limits, overload policy, and coordinator architecture."
+      "purpose": "Owner-approved Phase 5 server-core command boundary, writer cutoff and ordering, hard intake limits, overload policy, and coordinator architecture."
     },
     {
       "path": "docs/vnext/gdr/GDR-0011-phase4-minimal-player-exchange-semantics.md",
@@ -936,7 +951,7 @@
         },
         {
           "path": "components/tes3mp/CMakeLists.txt",
-          "sha256": "856378df25d7804ad04935f65f55823682de6943d224a5ac99699761ea6590df"
+          "sha256": "219347f4ca6730c828764a5f35d6259e283dc5815ff1f5797f6b204c86e966a4"
         },
         {
           "path": "components/tes3mp/protocol/generated/client_hello_generated.h",

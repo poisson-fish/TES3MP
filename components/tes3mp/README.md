@@ -183,3 +183,15 @@ by the contract executables. A fail-closed registry maps all seven bounded
 decoders to one of the four sanitizer-backed fuzz targets and corpora, pins each
 production golden seed by SHA-256, and records that mapping in runtime-safety
 evidence.
+
+Phase 5 Slice 5.1 accepts ADR-0026 and adds a server-core-owned typed command
+proposal plus a single-threaded intake/tick coordinator. The coordinator
+composes the existing 30 Hz scheduler, seals FIFO writer-observed prefixes,
+assigns eligible ticks and global ingress ordinals only while draining, and
+enforces hard ceilings of 4,096 pending commands globally, 128 per session
+generation, and 1,024 per tick. Full queues reject the new proposal with a typed
+observable result; tick-limited suffixes remain queued without loss, overwrite,
+or early stamps. Scheduler and ordinal exhaustion fail closed without publishing
+a partial batch. This slice deliberately adds no canonical store, command
+validation, deduplication, reducer, acknowledgement, disconnect action, or
+gameplay behavior.

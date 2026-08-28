@@ -335,7 +335,7 @@ runtime or protocol name.
 | ADR-0023 | Session state machines and authentication-provider boundary | Phase 4 | **Implemented** |
 | ADR-0024 | Reliable-operation and latest-wins envelope contract | Phase 4 | **Implemented** |
 | ADR-0025 | Minimal player command, world-snapshot roots, session guards, and in-memory exchange | Phase 4 | **Implemented** |
-| ADR-0026 | Phase 5 writer command intake, ordering, limits, and overload policy | Phase 5 | **Proposed** |
+| ADR-0026 | Phase 5 writer command intake, ordering, limits, and overload policy | Phase 5 | **Implemented** |
 
 An ADR is complete only when it records considered alternatives, selection
 criteria, consequences, failure modes, a replacement/review trigger, and
@@ -2975,7 +2975,7 @@ Depends on: Phase 4.
 
 | Slice | Deliverable | Status | Completion evidence |
 |---|---|---|---|
-| 5.1 | Implement fixed-tick scheduling, bounded per-tick command intake, and deterministic ordering | **In Progress** | Proposed [`ADR-0026`](adr/ADR-0026-phase5-writer-command-intake-and-ordering.md) decision packet is ready for owner review; production intake and ordering remain approval-gated |
+| 5.1 | Implement fixed-tick scheduling, bounded per-tick command intake, and deterministic ordering | **In Progress** | Accepted [`ADR-0026`](adr/ADR-0026-phase5-writer-command-intake-and-ordering.md), production implementation, and applicable local verification pass; owner implementation-demo acceptance remains pending |
 | 5.2 | Implement minimal player/session/cell/root-transform/velocity/ack canonical state | **Not Started** | State invariants and revision monotonicity tests pass |
 | 5.3 | Implement command validation and atomic reducer application | **Not Started** | Invalid, stale, duplicate, and over-budget commands cause no partial state mutation |
 | 5.4 | Publish immutable snapshots and versioned state-change events | **Not Started** | Readers cannot mutate canonical state and slow readers cannot block the writer indefinitely |
@@ -3029,6 +3029,42 @@ Implementation notes:
   - Follow-ups: after approval, record the accepted options and implement only
     the approved Slice 5.1 intake, ordering, limits, observability, and tests.
     Slices 5.2–5.7 remain gated in plan order.
+
+- 2026-08-27 — Slice 5.1 — In Progress
+  - Change: recorded owner approval of
+    [`ADR-0026`](adr/ADR-0026-phase5-writer-command-intake-and-ordering.md) and
+    implemented its five Option A decisions. The server-core-owned
+    `ServerCommandProposal` copies typed session, command, precondition, and
+    motion values without retaining a wire root; the single-threaded
+    `ServerCommandIntakeCoordinator` composes the existing fixed scheduler,
+    applies the 4,096 global/128 per-session-generation/1,024 per-tick limits,
+    stamps sealed FIFO batches at writer drain time, retains deferred suffixes,
+    and fails closed without a partial batch at scheduler or ordinal exhaustion.
+    Closed metrics/events make acceptance, deferral, rejection, pending work,
+    and terminal errors observable without identity labels or user text.
+  - Decisions: the project owner approved ADR-0026 Option A for Decisions 1–5
+    and the proposed acceptance tests on 2026-08-27. The implementation adds no
+    canonical store, validation, deduplication, reducer, acknowledgement,
+    transport action, client disconnect, persistence, or gameplay behavior.
+  - Verification: a clean-directory standalone MSVC 19.44 C++20 configure,
+    52-step build, and run pass all 12 contract executables, including the 12
+    named Slice 5.1 ordering, cutoff, catch-up, limit, conservation, exhaustion,
+    lifetime, no-validation, and dependency-isolation scenarios. `python -m
+    unittest discover -s scripts/tests` passes all 98 repository-owned tests.
+    Staged baseline provenance accounts for 174 intentional differences and 54
+    dependency inputs; staged legacy exclusion checks 3,868 tracked paths, 59
+    CMake files, 1,254 compile commands, and 1,971 Ninja edges. All six changed
+    C++ files pass `clang-format --dry-run --Werror`; the provenance JSON parses,
+    all 84 local vNext Markdown links resolve, the new public header contains no
+    wire/generated/OpenMW/socket/platform/script/database surface, and staged
+    diff checks pass. FlatBuffers regeneration/fuzz verification is not
+    applicable because this slice changes no schema or decoder.
+  - Owner review: architecture approval is complete. Implementation-demo
+    acceptance remains pending, so Slice 5.1 stays **In Progress**.
+  - Follow-ups: complete local repository verification, publish the
+    implementation commit, and present the approved trace/limit/failure demo
+    for owner acceptance. Slice 5.2 remains gated until Slice 5.1 is
+    **Implemented**.
 
 ### Phase 6 — Maintained transport and secure network session
 

@@ -21,6 +21,16 @@ namespace
                     || dimension.value == MetricDimensionValue::TimedOut
                     || dimension.value == MetricDimensionValue::Cancelled
                     || dimension.value == MetricDimensionValue::StaleCompletion;
+            case MetricDimensionKey::CommandIntakeOutcome:
+                return dimension.value == MetricDimensionValue::CommandAccepted
+                    || dimension.value == MetricDimensionValue::CommandPerSessionPendingLimit
+                    || dimension.value == MetricDimensionValue::CommandGlobalPendingLimit
+                    || dimension.value == MetricDimensionValue::CommandCoordinatorTerminated
+                    || dimension.value == MetricDimensionValue::CommandDeferredByTickBudget
+                    || dimension.value == MetricDimensionValue::CommandClockMovedBackwards
+                    || dimension.value == MetricDimensionValue::CommandDeadlineOverflow
+                    || dimension.value == MetricDimensionValue::CommandTickExhausted
+                    || dimension.value == MetricDimensionValue::CommandIngressOrdinalExhausted;
         }
         return false;
     }
@@ -55,6 +65,10 @@ namespace
             case MetricKey::SessionStaleCompletions:
             case MetricKey::SessionCancellations:
                 return dimension == MetricDimensionKey::SessionOutcome;
+            case MetricKey::CommandIntakeOutcomes:
+                return dimension == MetricDimensionKey::CommandIntakeOutcome;
+            case MetricKey::CommandIntakePending:
+                return false;
         }
         return false;
     }
@@ -85,6 +99,21 @@ namespace
             || event.stage == SessionObservationStage::AuthenticationProvider
             || event.stage == SessionObservationStage::Terminal;
         return validRole && validOutcome && validStage;
+    }
+
+    constexpr bool validCommandIntakeEvent(TES3MP::CommandIntakeEvent event) noexcept
+    {
+        using TES3MP::CommandIntakeObservationOutcome;
+        const auto outcome = event.outcome;
+        return outcome == CommandIntakeObservationOutcome::Accepted
+            || outcome == CommandIntakeObservationOutcome::PerSessionPendingLimit
+            || outcome == CommandIntakeObservationOutcome::GlobalPendingLimit
+            || outcome == CommandIntakeObservationOutcome::CoordinatorTerminated
+            || outcome == CommandIntakeObservationOutcome::DeferredByTickBudget
+            || outcome == CommandIntakeObservationOutcome::ClockMovedBackwards
+            || outcome == CommandIntakeObservationOutcome::DeadlineOverflow
+            || outcome == CommandIntakeObservationOutcome::TickExhausted
+            || outcome == CommandIntakeObservationOutcome::IngressOrdinalExhausted;
     }
 }
 
@@ -124,6 +153,8 @@ namespace TES3MP
         if (!validSeverity(severity))
             return std::nullopt;
         if (const auto* session = std::get_if<SessionLifecycleEvent>(&payload); session && !validSessionEvent(*session))
+            return std::nullopt;
+        if (const auto* intake = std::get_if<CommandIntakeEvent>(&payload); intake && !validCommandIntakeEvent(*intake))
             return std::nullopt;
         return StructuredEvent(severity, tick, payload);
     }

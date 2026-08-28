@@ -17,7 +17,7 @@ namespace
 
     static_assert(!std::is_constructible_v<MetricObservation, std::string_view>);
     static_assert(!std::is_constructible_v<StructuredEvent, std::string_view>);
-    static_assert(std::variant_size_v<StructuredEventPayload> == 2);
+    static_assert(std::variant_size_v<StructuredEventPayload> == 3);
 
     MetricObservation metric(MetricKey key, MetricValue value, MetricDimensionValue outcome)
     {

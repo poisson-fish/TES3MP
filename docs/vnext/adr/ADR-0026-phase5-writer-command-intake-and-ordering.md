@@ -1,10 +1,10 @@
 # ADR-0026: Phase 5 writer command intake and ordering
 
-Status: **Proposed**
+Status: **Accepted**
 
 Date opened: 2026-08-27
 
-Date approved: pending
+Date approved: 2026-08-27
 
 Decision owner: project owner
 
@@ -27,8 +27,7 @@ their owning slices and GDRs.
 
 ## Decision summary
 
-No option is accepted yet. The recommendation is Option A for Decisions 1
-through 5:
+The project owner approved Option A for Decisions 1 through 5 on 2026-08-27:
 
 1. convert a validated session operation into an owned, typed server-core
    command proposal instead of retaining a wire root or adding a generic
@@ -102,7 +101,7 @@ through 5:
 
 ## Decision 1: session-to-core command boundary
 
-### Option A: owned typed server-core proposal (recommended)
+### Option A: owned typed server-core proposal (approved)
 
 Convert an established, context-guarded `ReliableOperation` at the composition
 boundary into a server-core-owned value containing the source `SessionId` and
@@ -136,7 +135,7 @@ payloads, or a speculative abstraction with no canonical validation contract.
 
 ## Decision 2: writer cutoff and total-order assignment
 
-### Option A: writer-context submit, sealed prefix, drain-time stamps (recommended)
+### Option A: writer-context submit, sealed prefix, drain-time stamps (approved)
 
 Only the authoritative writer context may call `submit`. Each scheduled tick
 seals the pending prefix visible at its cutoff. The writer drains up to the
@@ -166,7 +165,7 @@ contradicts ADR-0013's approved writer-observed ingress order.
 
 ## Decision 3: initial queue and per-tick ceilings
 
-### Option A: fixed hard v1 ceilings (recommended)
+### Option A: fixed hard v1 ceilings (approved)
 
 Use all three independent limits:
 
@@ -198,7 +197,7 @@ rate policy has a chance to act.
 
 ## Decision 4: overload and rejection policy
 
-### Option A: typed immediate rejection plus FIFO deferral (recommended)
+### Option A: typed immediate rejection plus FIFO deferral (approved)
 
 If a pending ceiling is reached, reject the new submission immediately with a
 typed `PerSessionPendingLimit` or `GlobalPendingLimit` result and emit bounded
@@ -230,7 +229,7 @@ policy before Phase 6 defines backpressure, close reasons, and rate handling.
 
 ## Decision 5: Slice 5.1 component and evidence boundary
 
-### Option A: dedicated intake/tick coordinator with ordered batches (recommended)
+### Option A: dedicated intake/tick coordinator with ordered batches (approved)
 
 Add a server-core coordinator that owns the pending queue and next ingress
 ordinal, composes the existing `FixedTickScheduler`, and returns up to four
@@ -333,5 +332,10 @@ Reopen this ADR if:
 
 ## Owner approval
 
-Pending explicit owner approval or amendment of Decisions 1 through 5 and the
-proposed acceptance tests. Phase 5 production implementation remains gated.
+Approved by the project owner in the 2026-08-27 working session: Option A for
+Decisions 1 through 5 and the proposed acceptance tests.
+
+This approval authorizes Slice 5.1 production intake, ordering, limits,
+overload observability, and focused tests only. It does not authorize canonical
+player state, validation/reducer outcomes, acknowledgement semantics, or any
+gameplay behavior reserved for later phase slices and GDRs.
