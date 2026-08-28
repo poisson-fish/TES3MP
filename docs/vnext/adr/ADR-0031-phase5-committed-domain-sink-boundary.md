@@ -1,8 +1,10 @@
 # ADR-0031: Phase 5 committed domain sink boundary
 
-Status: **Proposed**
+Status: **Accepted**
 
 Date opened: 2026-08-28
+
+Date approved: 2026-08-28
 
 Decision owner: project owner
 
@@ -25,9 +27,10 @@ does not select a script runtime, database, durable commit point, replay file
 format, production queue/thread, target-session projection, audit policy,
 canonical state field, authority rule, or gameplay behavior.
 
-## Recommendation summary
+## Decision summary
 
-Approve Option A for Decisions 1 through 5:
+The project owner approved Option A for Decisions 1 through 5 and the proposed
+acceptance scenarios on 2026-08-28:
 
 1. server core owns four nominal role-specific sink ports and one explicit
    non-owning bundle with at most one persistence, replay, script, and metrics
@@ -106,7 +109,7 @@ Approve Option A for Decisions 1 through 5:
 
 ## Decision 1: interface ownership and role topology
 
-### Option A: four server-core-owned nominal ports and a bounded bundle (recommended)
+### Option A: four server-core-owned nominal ports and a bounded bundle (approved)
 
 Define distinct persistence, replay, script, and canonical-metrics sink
 interfaces in `tes3mp_server_core`. Group optional non-owning references in one
@@ -139,7 +142,7 @@ Phase 19/20 dependencies prematurely.
 
 ## Decision 2: common payload and delivery point
 
-### Option A: one shared immutable installed publication per committed batch (recommended)
+### Option A: one shared immutable installed publication per committed batch (approved)
 
 Use the existing `std::shared_ptr<const CanonicalStatePublication>` as the
 delivery value. It already owns the final complete state, state version,
@@ -173,7 +176,7 @@ into mutation authority and imports Phase 20 durability policy into Phase 5.
 
 ## Decision 3: invocation, ordering, and reentrancy boundary
 
-### Option A: fixed post-publication bounded `try` fan-out (recommended)
+### Option A: fixed post-publication bounded `try` fan-out (approved)
 
 After installing a non-empty publication, make one direct `noexcept`
 non-blocking attempt for each configured role in fixed persistence, replay,
@@ -208,7 +211,7 @@ handle, or delivery before latest-publication installation.
 
 ## Decision 4: result and failure policy
 
-### Option A: complete per-role report with no canonical control effect (recommended)
+### Option A: complete per-role report with no canonical control effect (approved)
 
 Define closed per-role results: `NotConfigured`, `Accepted`, `Backpressured`,
 and `Failed`. Return a complete delivery report with the batch reduction result
@@ -243,7 +246,7 @@ silently deprives later sinks of an already committed record.
 
 ## Decision 5: lifetime, retention, retry, and later-role policy
 
-### Option A: existing latest retention with no core retry or redelivery (recommended)
+### Option A: existing latest retention with no core retry or redelivery (approved)
 
 Server core retains only ADR-0029's latest immutable publication. A sink may
 copy the shared handle during its bounded attempt, but its adapter must impose
@@ -274,9 +277,9 @@ on the slowest or failed auxiliary consumer.
 This is bounded and useful for metrics, but persistence/replay can lose causal
 records and scripts can skip behavior without an explicit role policy.
 
-## Proposed acceptance tests and demo
+## Acceptance tests and demo
 
-Subject to owner approval or amendment, Slice 5.6 should add named tests for:
+The approved Slice 5.6 implementation must add named tests for:
 
 1. server-core sink headers compile without OpenMW, transport-library,
    script-runtime, database, exporter, platform, or test-support headers;
@@ -363,6 +366,13 @@ Reopen this ADR if:
 
 ## Owner approval
 
-Pending. Production Slice 5.6 sink interfaces and reducer fan-out remain gated
-until the project owner explicitly approves or amends Decisions 1 through 5 and
-the proposed acceptance tests.
+Approved by the project owner in the 2026-08-28 working session: Option A for
+Decisions 1 through 5 and all 12 proposed acceptance-test contracts.
+
+This approval authorizes only the server-core role-specific sink ports, shared
+immutable installed-publication delivery, bounded fixed-order post-commit
+fan-out, explicit per-role delivery reporting, closed observability additions,
+and focused test-support/test evidence described here. It does not approve a
+backend, queue, worker, database, script runtime/API, durability acknowledgement,
+replay format, audit policy, target projection, authority change, canonical
+state addition, or gameplay behavior.

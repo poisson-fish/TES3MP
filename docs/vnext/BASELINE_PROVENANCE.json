@@ -777,7 +777,7 @@
     {
       "path": "docs/vnext/adr/ADR-0031-phase5-committed-domain-sink-boundary.md",
       "status": "A",
-      "purpose": "Proposed Phase 5 committed domain sink ownership, shared-payload delivery, bounded failure reporting, and retention policy decision."
+      "purpose": "Owner-approved Phase 5 committed domain sink ownership, shared-payload delivery, bounded failure reporting, and retention policy decision."
     },
     {
       "path": "docs/vnext/gdr/GDR-0011-phase4-minimal-player-exchange-semantics.md",

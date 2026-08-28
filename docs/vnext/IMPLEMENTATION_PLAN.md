@@ -340,7 +340,7 @@ runtime or protocol name.
 | ADR-0028 | Phase 5 command validation, disposition, acknowledgement, and atomic reducer boundary | Phase 5 | **Implemented** |
 | ADR-0029 | Phase 5 immutable canonical publication, versioned change feed, retention, and slow-reader policy | Phase 5 | **Implemented** |
 | ADR-0030 | Phase 5 bounded idempotency, canonical checksum, and resync boundary | Phase 5 | **Implemented** |
-| ADR-0031 | Phase 5 committed domain sink ownership, delivery, failure, and resource-bound policy | Phase 5 | **Proposed** |
+| ADR-0031 | Phase 5 committed domain sink ownership, delivery, failure, and resource-bound policy | Phase 5 | **Accepted** |
 
 An ADR is complete only when it records considered alternatives, selection
 criteria, consequences, failure modes, a replacement/review trigger, and
@@ -2986,7 +2986,7 @@ Depends on: Phase 4.
 | 5.3 | Implement command validation and atomic reducer application | **Implemented** | Accepted [`ADR-0028`](adr/ADR-0028-phase5-command-validation-and-atomic-reducer.md) and [`GDR-0012`](gdr/GDR-0012-phase5-minimal-motion-reducer-semantics.md), implementation `f57a4074db`, applicable local verification, and owner demo acceptance pass |
 | 5.4 | Publish immutable snapshots and versioned state-change events | **Implemented** | Accepted [`ADR-0029`](adr/ADR-0029-phase5-immutable-canonical-publication-and-versioned-change-feed.md), implementation `d7e7b25950`, applicable local verification, and owner demo acceptance pass |
 | 5.5 | Add idempotency windows, authority-epoch checks, state checksums, and explicit resync requests | **Implemented** | Accepted [`ADR-0030`](adr/ADR-0030-phase5-idempotency-checksum-and-resync-boundary.md), implementation `ac627deafc`, applicable local verification, and owner demo acceptance pass |
-| 5.6 | Add persistence, replay, script, and metrics sink interfaces without implementations | **In Progress** | Proposed [`ADR-0031`](adr/ADR-0031-phase5-committed-domain-sink-boundary.md); owner architecture/failure-policy review pending before production interfaces |
+| 5.6 | Add persistence, replay, script, and metrics sink interfaces without implementations | **In Progress** | Accepted [`ADR-0031`](adr/ADR-0031-phase5-committed-domain-sink-boundary.md); production implementation and verification pending |
 | 5.7 | Add reducer property tests and deterministic multi-client simulation tests | **Not Started** | Randomized command streams preserve invariants and reproduce by seed |
 
 Exit gate:
@@ -3554,6 +3554,26 @@ Implementation notes:
     runtime/event API policy; Phase 20 still owns persistence technology,
     durability acknowledgement, schema, replay format, and operator failure
     policy.
+
+- 2026-08-28 — Slice 5.6 — In Progress
+  - Change: changed ADR-0031 from **Proposed** to **Accepted** after explicit
+    owner review. No production or test source changed in this decision-gate
+    record.
+  - Decisions: the project owner approved Option A for ADR-0031 Decisions 1–5
+    and all 12 proposed acceptance-test contracts in the 2026-08-28 working
+    session.
+  - Verification: staged baseline provenance passes with 193 intentional
+    differences and 54 dependency inputs; JSON parsing and staged
+    whitespace/diff checks pass. No C++ build or test rerun is applicable to
+    this approval-only record; the unchanged proposal already passed all 98
+    repository-owned policy tests.
+  - Owner review: architecture, ownership, state-scope, ordering, lifetime, and
+    failure-policy approval is complete. Implementation and demo acceptance
+    remain pending.
+  - Follow-ups: implement only the approved server-core sink interfaces,
+    post-publication fan-out/reporting, closed observability additions, bounded
+    test fakes, and focused tests. Do not add a backend, runtime, worker, queue,
+    persistence technology, script API, or gameplay behavior.
 
 ### Phase 6 — Maintained transport and secure network session
 
