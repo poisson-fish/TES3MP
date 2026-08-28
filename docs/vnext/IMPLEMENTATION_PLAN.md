@@ -2987,7 +2987,7 @@ Depends on: Phase 4.
 | 5.4 | Publish immutable snapshots and versioned state-change events | **Implemented** | Accepted [`ADR-0029`](adr/ADR-0029-phase5-immutable-canonical-publication-and-versioned-change-feed.md), implementation `d7e7b25950`, applicable local verification, and owner demo acceptance pass |
 | 5.5 | Add idempotency windows, authority-epoch checks, state checksums, and explicit resync requests | **Implemented** | Accepted [`ADR-0030`](adr/ADR-0030-phase5-idempotency-checksum-and-resync-boundary.md), implementation `ac627deafc`, applicable local verification, and owner demo acceptance pass |
 | 5.6 | Add persistence, replay, script, and metrics sink interfaces without implementations | **Implemented** | Accepted [`ADR-0031`](adr/ADR-0031-phase5-committed-domain-sink-boundary.md), implementation `2905c7a791`, applicable local verification, and owner demo acceptance pass |
-| 5.7 | Add reducer property tests and deterministic multi-client simulation tests | **In Progress** | Implementation `917ecc3278` and applicable local verification pass; owner demo acceptance pending |
+| 5.7 | Add reducer property tests and deterministic multi-client simulation tests | **Implemented** | Implementation `917ecc3278`, applicable local verification, and owner demo acceptance pass |
 
 Exit gate:
 
@@ -3658,11 +3658,13 @@ Implementation notes:
     and 121 Ninja edges. The new C++ source passes `clang-format`; JSON and
     staged-diff checks pass. Schema, golden-vector, and fuzz verification are not
     applicable because the slice changes no wire schema or bounded decoder.
-  - Owner review: no new decision approval is required because this slice is
-    test-only and exercises accepted behavior. Implementation-demo acceptance
-    remains pending.
-  - Follow-ups: present seeded replay and invariant coverage for owner acceptance
-    before Phase 5 exit-gate execution.
+  - Owner review: no new decision approval was required because this slice is
+    test-only and exercises accepted behavior. The project owner explicitly
+    accepted the demonstrated implementation behavior in the 2026-08-28 working
+    session.
+  - Follow-ups: none for Slice 5.7. Phase 5 remains **In Progress** until its
+    hosted manual matrix and remaining exit-gate evidence pass; that work is
+    intentionally deferred to a fresh session at the project owner's request.
 
 ### Phase 6 — Maintained transport and secure network session
 
