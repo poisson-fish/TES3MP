@@ -2,6 +2,7 @@
 #define TES3MP_SERVER_COMMAND_REDUCER_HPP
 
 #include "canonical_publication.hpp"
+#include "canonical_sinks.hpp"
 #include "observability.hpp"
 
 #include <atomic>
@@ -66,6 +67,7 @@ namespace TES3MP
     public:
         constexpr CommandBatchReductionError error() const noexcept { return mError; }
         std::span<const CommandDispositionRecord> dispositions() const noexcept { return mDispositions; }
+        constexpr CanonicalSinkDeliveryReport sinkDeliveryReport() const noexcept { return mSinkDeliveryReport; }
         constexpr explicit operator bool() const noexcept { return mError == CommandBatchReductionError::None; }
 
         friend bool operator==(const CommandBatchReductionResult&, const CommandBatchReductionResult&) noexcept
@@ -76,6 +78,7 @@ namespace TES3MP
 
         CommandBatchReductionError mError = CommandBatchReductionError::None;
         std::vector<CommandDispositionRecord> mDispositions;
+        CanonicalSinkDeliveryReport mSinkDeliveryReport;
     };
 
     class CanonicalCommandReducer
@@ -84,6 +87,8 @@ namespace TES3MP
         // Eligible for later reviewed composition; this type owns no connection,
         // protocol request, target projection, delivery, or runtime loop.
         CanonicalCommandReducer(CanonicalServerState initialState, Observability& observability);
+        CanonicalCommandReducer(
+            CanonicalServerState initialState, Observability& observability, CanonicalSinkBundle sinks);
 
         CanonicalCommandReducer(const CanonicalCommandReducer&) = delete;
         CanonicalCommandReducer& operator=(const CanonicalCommandReducer&) = delete;
@@ -98,15 +103,19 @@ namespace TES3MP
         CommandBatchReductionResult apply(const ServerTickCommandBatch& batch);
 
     private:
-        void publish(std::shared_ptr<CanonicalStatePublication> publication) noexcept;
+        CanonicalSinkDeliveryReport publish(std::shared_ptr<CanonicalStatePublication> publication) noexcept;
+        CanonicalSinkDeliveryReport deliver(
+            const std::shared_ptr<const CanonicalStatePublication>& publication) noexcept;
         void observe(CommandDisposition disposition, ServerTick tick) noexcept;
         void observe(CommandBatchReductionError error, ServerTick tick, std::uint64_t processedCommands) noexcept;
+        void observe(CanonicalSinkRole role, CanonicalSinkDeliveryResult result, ServerTick tick) noexcept;
 
         std::shared_ptr<const CanonicalServerState> mState;
         CanonicalStateVersion mStateVersion = CanonicalStateVersion::initial();
         ServerTick mCheckpointTick = ServerTick::initial();
         std::atomic<std::shared_ptr<const CanonicalStatePublication>> mLatestPublication;
         Observability& mObservability;
+        CanonicalSinkBundle mSinks;
     };
 }
 

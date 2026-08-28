@@ -34,6 +34,12 @@ namespace
             case MetricDimensionKey::CommandReductionOutcome:
                 return dimension.value >= MetricDimensionValue::CommandReductionApplied
                     && dimension.value <= MetricDimensionValue::CommandReductionStateVersionCapacityExceeded;
+            case MetricDimensionKey::CanonicalSinkRole:
+                return dimension.value >= MetricDimensionValue::CanonicalSinkPersistence
+                    && dimension.value <= MetricDimensionValue::CanonicalSinkMetrics;
+            case MetricDimensionKey::CanonicalSinkDeliveryOutcome:
+                return dimension.value >= MetricDimensionValue::CanonicalSinkAccepted
+                    && dimension.value <= MetricDimensionValue::CanonicalSinkFailed;
         }
         return false;
     }
@@ -74,6 +80,9 @@ namespace
                 return false;
             case MetricKey::CommandReductionOutcomes:
                 return dimension == MetricDimensionKey::CommandReductionOutcome;
+            case MetricKey::CanonicalSinkDeliveries:
+                return dimension == MetricDimensionKey::CanonicalSinkRole
+                    || dimension == MetricDimensionKey::CanonicalSinkDeliveryOutcome;
         }
         return false;
     }
@@ -127,6 +136,17 @@ namespace
         return event.outcome >= CommandReductionObservationOutcome::Applied
             && event.outcome <= CommandReductionObservationOutcome::StateVersionCapacityExceeded;
     }
+
+    constexpr bool validCanonicalSinkDeliveryEvent(TES3MP::CanonicalSinkDeliveryEvent event) noexcept
+    {
+        using TES3MP::CanonicalSinkObservationOutcome;
+        using TES3MP::CanonicalSinkObservationRole;
+        const bool validRole = event.role >= CanonicalSinkObservationRole::Persistence
+            && event.role <= CanonicalSinkObservationRole::Metrics;
+        const bool validOutcome = event.outcome >= CanonicalSinkObservationOutcome::Accepted
+            && event.outcome <= CanonicalSinkObservationOutcome::Failed;
+        return validRole && validOutcome;
+    }
 }
 
 namespace TES3MP
@@ -137,6 +157,19 @@ namespace TES3MP
         const auto definition = metricDefinition(key);
         if (!definition || !valueMatches(definition->operation, value) || dimensions.size() > MaximumMetricDimensions)
             return std::nullopt;
+
+        if (key == MetricKey::CanonicalSinkDeliveries)
+        {
+            if (dimensions.size() != 2)
+                return std::nullopt;
+            const bool hasRole = std::any_of(dimensions.begin(), dimensions.end(),
+                [](MetricDimension dimension) { return dimension.key == MetricDimensionKey::CanonicalSinkRole; });
+            const bool hasOutcome = std::any_of(dimensions.begin(), dimensions.end(), [](MetricDimension dimension) {
+                return dimension.key == MetricDimensionKey::CanonicalSinkDeliveryOutcome;
+            });
+            if (!hasRole || !hasOutcome)
+                return std::nullopt;
+        }
 
         for (std::size_t index = 0; index < dimensions.size(); ++index)
         {
@@ -170,6 +203,9 @@ namespace TES3MP
             return std::nullopt;
         if (const auto* reduction = std::get_if<CommandReductionEvent>(&payload);
             reduction && !validCommandReductionEvent(*reduction))
+            return std::nullopt;
+        if (const auto* delivery = std::get_if<CanonicalSinkDeliveryEvent>(&payload);
+            delivery && !validCanonicalSinkDeliveryEvent(*delivery))
             return std::nullopt;
         return StructuredEvent(severity, tick, payload);
     }

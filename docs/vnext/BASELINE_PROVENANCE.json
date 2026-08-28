@@ -102,7 +102,7 @@
     {
       "path": "components/tes3mp/CMakeLists.txt",
       "status": "A",
-      "purpose": "Defines the standalone-capable five-library graph, pinned FlatBuffers runtime input, target-scoped safety registration including TSan-compatible allocator-test interposition, fifteen contract executables with golden-corpus verification, and bounded parser fuzz targets."
+      "purpose": "Defines the standalone-capable five-library graph, pinned FlatBuffers runtime input, target-scoped safety registration including TSan-compatible allocator-test interposition, sixteen contract executables with golden-corpus verification, and bounded parser fuzz targets."
     },
     {
       "path": "components/tes3mp/CMakePresets.json",
@@ -143,6 +143,11 @@
       "path": "components/tes3mp/include/tes3mp/canonical_resync.hpp",
       "status": "A",
       "purpose": "Owner-approved metadata-only current-session resync request and immutable latest-publication result values without client state upload or runtime transport semantics."
+    },
+    {
+      "path": "components/tes3mp/include/tes3mp/canonical_sinks.hpp",
+      "status": "A",
+      "purpose": "Owner-approved nominal persistence, replay, script, and metrics domain sink ports, bounded non-owning bundle, and explicit post-commit delivery report values."
     },
     {
       "path": "components/tes3mp/include/tes3mp/canonical_state.hpp",
@@ -438,6 +443,11 @@
       "path": "components/tes3mp/test_support/spatial_round_trip.cpp",
       "status": "A",
       "purpose": "Bounded little-endian owned-value round-trip implementation used only by Slice 3.3 independent contract tests."
+    },
+    {
+      "path": "components/tes3mp/tests/canonical_sink_tests.cpp",
+      "status": "A",
+      "purpose": "Approved committed-publication sink identity, post-install ordering, mixed failure, acknowledgement-only, observability-independence, retention, gap, and public-surface contracts."
     },
     {
       "path": "components/tes3mp/tests/canonical_state_tests.cpp",
@@ -1046,7 +1056,7 @@
         },
         {
           "path": "components/tes3mp/CMakeLists.txt",
-          "sha256": "fc7de369d29b5fab2e008fe8e0d0a16953ef98c1640e9b68ab4e4a7601b983da"
+          "sha256": "8d84fa29a1f1f4efc020f77a1329d68b4b90c9553239a4bbed812d2eb281ad22"
         },
         {
           "path": "components/tes3mp/protocol/generated/client_hello_generated.h",

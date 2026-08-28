@@ -246,3 +246,15 @@ the latest immutable complete publication to a trusted future adapter without
 accepting client state or mutating the server. These core contracts add no wire
 message, interest projection, socket action, automatic delivery, or runtime
 loop; those remain gated to their owning phases.
+
+Phase 5 Slice 5.6 accepts ADR-0031 and adds four nominal server-core sink ports
+for persistence, replay, script-event, and canonical-metrics adapters. An
+explicit non-owning bundle contains at most one consumer per role. After a
+non-empty immutable batch publication is installed as latest, the reducer
+offers that exact shared handle once in fixed persistence/replay/script/metrics
+order. A complete report distinguishes absent, accepted, backpressured, and
+failed roles; every configured role is attempted, and no outcome can roll back,
+retry, short-circuit, or relabel the canonical commit. Closed low-cardinality
+observations describe configured delivery attempts. Server core adds no backend,
+worker, queue, acknowledgement, retry ring, database, script runtime, replay
+format, durability claim, or retention beyond the existing latest publication.

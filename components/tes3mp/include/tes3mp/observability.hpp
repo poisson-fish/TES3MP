@@ -46,6 +46,7 @@ namespace TES3MP
         CommandIntakeOutcomes = 0x200,
         CommandIntakePending = 0x201,
         CommandReductionOutcomes = 0x202,
+        CanonicalSinkDeliveries = 0x203,
     };
 
     struct MetricDefinition
@@ -77,6 +78,7 @@ namespace TES3MP
             case MetricKey::CommandIntakePending:
                 return MetricDefinition{ MetricOperation::GaugeSet, MetricUnit::Count };
             case MetricKey::CommandReductionOutcomes:
+            case MetricKey::CanonicalSinkDeliveries:
                 return MetricDefinition{ MetricOperation::CounterAdd, MetricUnit::Count };
         }
         return std::nullopt;
@@ -88,6 +90,8 @@ namespace TES3MP
         SessionOutcome = 2,
         CommandIntakeOutcome = 3,
         CommandReductionOutcome = 4,
+        CanonicalSinkRole = 5,
+        CanonicalSinkDeliveryOutcome = 6,
     };
 
     enum class MetricDimensionValue : std::uint8_t
@@ -126,6 +130,13 @@ namespace TES3MP
         CommandReductionIngressOrdinalNotStrictlyIncreasing = 53,
         CommandReductionCandidateStateInvalid = 54,
         CommandReductionStateVersionCapacityExceeded = 55,
+        CanonicalSinkPersistence = 60,
+        CanonicalSinkReplay = 61,
+        CanonicalSinkScript = 62,
+        CanonicalSinkMetrics = 63,
+        CanonicalSinkAccepted = 64,
+        CanonicalSinkBackpressured = 65,
+        CanonicalSinkFailed = 66,
     };
 
     struct MetricDimension
@@ -199,6 +210,7 @@ namespace TES3MP
         SessionLifecycle = 2,
         CommandIntake = 3,
         CommandReduction = 4,
+        CanonicalSinkDelivery = 5,
     };
 
     struct ContractObservationEvent
@@ -291,8 +303,31 @@ namespace TES3MP
         friend constexpr bool operator==(CommandReductionEvent, CommandReductionEvent) noexcept = default;
     };
 
-    using StructuredEventPayload
-        = std::variant<ContractObservationEvent, SessionLifecycleEvent, CommandIntakeEvent, CommandReductionEvent>;
+    enum class CanonicalSinkObservationRole : std::uint8_t
+    {
+        Persistence,
+        Replay,
+        Script,
+        Metrics,
+    };
+
+    enum class CanonicalSinkObservationOutcome : std::uint8_t
+    {
+        Accepted,
+        Backpressured,
+        Failed,
+    };
+
+    struct CanonicalSinkDeliveryEvent
+    {
+        CanonicalSinkObservationRole role;
+        CanonicalSinkObservationOutcome outcome;
+
+        friend constexpr bool operator==(CanonicalSinkDeliveryEvent, CanonicalSinkDeliveryEvent) noexcept = default;
+    };
+
+    using StructuredEventPayload = std::variant<ContractObservationEvent, SessionLifecycleEvent, CommandIntakeEvent,
+        CommandReductionEvent, CanonicalSinkDeliveryEvent>;
 
     class StructuredEvent
     {
@@ -308,7 +343,9 @@ namespace TES3MP
                 return EventKind::SessionLifecycle;
             if (std::holds_alternative<CommandIntakeEvent>(mPayload))
                 return EventKind::CommandIntake;
-            return EventKind::CommandReduction;
+            if (std::holds_alternative<CommandReductionEvent>(mPayload))
+                return EventKind::CommandReduction;
+            return EventKind::CanonicalSinkDelivery;
         }
         constexpr EventSeverity severity() const noexcept { return mSeverity; }
         constexpr std::optional<ServerTick> tick() const noexcept { return mTick; }

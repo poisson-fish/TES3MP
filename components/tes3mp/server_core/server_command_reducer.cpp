@@ -68,6 +68,51 @@ namespace
             + static_cast<std::uint8_t>(outcome));
     }
 
+    CanonicalSinkObservationRole observationRole(CanonicalSinkRole role) noexcept
+    {
+        switch (role)
+        {
+            case CanonicalSinkRole::Persistence:
+                return CanonicalSinkObservationRole::Persistence;
+            case CanonicalSinkRole::Replay:
+                return CanonicalSinkObservationRole::Replay;
+            case CanonicalSinkRole::Script:
+                return CanonicalSinkObservationRole::Script;
+            case CanonicalSinkRole::Metrics:
+                return CanonicalSinkObservationRole::Metrics;
+        }
+        return CanonicalSinkObservationRole::Persistence;
+    }
+
+    CanonicalSinkObservationOutcome observationOutcome(CanonicalSinkDeliveryResult result) noexcept
+    {
+        switch (result)
+        {
+            case CanonicalSinkDeliveryResult::Accepted:
+                return CanonicalSinkObservationOutcome::Accepted;
+            case CanonicalSinkDeliveryResult::Backpressured:
+                return CanonicalSinkObservationOutcome::Backpressured;
+            case CanonicalSinkDeliveryResult::Failed:
+            case CanonicalSinkDeliveryResult::NotConfigured:
+                return CanonicalSinkObservationOutcome::Failed;
+        }
+        return CanonicalSinkObservationOutcome::Failed;
+    }
+
+    MetricDimensionValue metricValue(CanonicalSinkRole role) noexcept
+    {
+        return static_cast<MetricDimensionValue>(
+            static_cast<std::uint8_t>(MetricDimensionValue::CanonicalSinkPersistence)
+            + static_cast<std::uint8_t>(role));
+    }
+
+    MetricDimensionValue metricValue(CanonicalSinkDeliveryResult result) noexcept
+    {
+        const auto outcome = observationOutcome(result);
+        return static_cast<MetricDimensionValue>(static_cast<std::uint8_t>(MetricDimensionValue::CanonicalSinkAccepted)
+            + static_cast<std::uint8_t>(outcome));
+    }
+
     bool finalizableSequence(const CanonicalSessionProgress& session, CommandSequence sequence) noexcept
     {
         const auto finalized = session.highestContiguousFinalizedCommand();
@@ -115,10 +160,17 @@ namespace
 namespace TES3MP
 {
     CanonicalCommandReducer::CanonicalCommandReducer(CanonicalServerState initialState, Observability& observability)
+        : CanonicalCommandReducer(std::move(initialState), observability, CanonicalSinkBundle{})
+    {
+    }
+
+    CanonicalCommandReducer::CanonicalCommandReducer(
+        CanonicalServerState initialState, Observability& observability, CanonicalSinkBundle sinks)
         : mState(std::make_shared<CanonicalServerState>(std::move(initialState)))
         , mLatestPublication(std::shared_ptr<const CanonicalStatePublication>(
               new CanonicalStatePublication(mStateVersion, mCheckpointTick, mState, {})))
         , mObservability(observability)
+        , mSinks(sinks)
     {
     }
 
@@ -127,15 +179,39 @@ namespace TES3MP
         return mLatestPublication.load(std::memory_order_acquire);
     }
 
-    void CanonicalCommandReducer::publish(std::shared_ptr<CanonicalStatePublication> publication) noexcept
+    CanonicalSinkDeliveryReport CanonicalCommandReducer::publish(
+        std::shared_ptr<CanonicalStatePublication> publication) noexcept
     {
         if (publication->mChanges.empty())
-            return;
+            return {};
         publication->mStateVersion = mStateVersion;
         publication->mCheckpointTick = mCheckpointTick;
         publication->mState = mState;
         publication->mChecksum = canonicalStateChecksumV1(mStateVersion, mCheckpointTick, *mState);
-        mLatestPublication.store(std::move(publication), std::memory_order_release);
+        std::shared_ptr<const CanonicalStatePublication> committed = std::move(publication);
+        mLatestPublication.store(committed, std::memory_order_release);
+        return deliver(committed);
+    }
+
+    CanonicalSinkDeliveryReport CanonicalCommandReducer::deliver(
+        const std::shared_ptr<const CanonicalStatePublication>& publication) noexcept
+    {
+        CanonicalSinkDeliveryReport report;
+        report.markPublicationOffered();
+        const auto attempt = [this, &publication, &report](CanonicalSinkRole role, auto* sink) noexcept {
+            if (sink == nullptr)
+                return;
+            CanonicalSinkDeliveryResult result = sink->tryConsume(publication);
+            if (result == CanonicalSinkDeliveryResult::NotConfigured)
+                result = CanonicalSinkDeliveryResult::Failed;
+            report.setResult(role, result);
+            observe(role, result, publication->checkpointTick());
+        };
+        attempt(CanonicalSinkRole::Persistence, mSinks.persistence());
+        attempt(CanonicalSinkRole::Replay, mSinks.replay());
+        attempt(CanonicalSinkRole::Script, mSinks.script());
+        attempt(CanonicalSinkRole::Metrics, mSinks.metrics());
+        return report;
     }
 
     void CanonicalCommandReducer::observe(CommandDisposition disposition, ServerTick tick) noexcept
@@ -168,6 +244,25 @@ namespace TES3MP
             (void)mObservability.metrics().tryRecord(*metric);
         if (const auto event
             = StructuredEvent::create(EventSeverity::Error, tick, CommandReductionEvent{ outcome, processedCommands }))
+            (void)mObservability.events().tryRecord(*event);
+    }
+
+    void CanonicalCommandReducer::observe(
+        CanonicalSinkRole role, CanonicalSinkDeliveryResult result, ServerTick tick) noexcept
+    {
+        const std::array dimensions{
+            MetricDimension{ MetricDimensionKey::CanonicalSinkRole, metricValue(role) },
+            MetricDimension{ MetricDimensionKey::CanonicalSinkDeliveryOutcome, metricValue(result) },
+        };
+        if (const auto metric
+            = MetricObservation::create(MetricKey::CanonicalSinkDeliveries, CounterAddition{ 1 }, dimensions))
+            (void)mObservability.metrics().tryRecord(*metric);
+
+        const EventSeverity severity = result == CanonicalSinkDeliveryResult::Accepted ? EventSeverity::Debug
+            : result == CanonicalSinkDeliveryResult::Backpressured                     ? EventSeverity::Warning
+                                                                                       : EventSeverity::Error;
+        if (const auto event = StructuredEvent::create(
+                severity, tick, CanonicalSinkDeliveryEvent{ observationRole(role), observationOutcome(result) }))
             (void)mObservability.events().tryRecord(*event);
     }
 
@@ -292,7 +387,7 @@ namespace TES3MP
                         else
                         {
                             result.mError = CommandBatchReductionError::CandidateStateInvalid;
-                            publish(std::move(publication));
+                            result.mSinkDeliveryReport = publish(std::move(publication));
                             observe(result.mError, tick, result.mDispositions.size());
                             return result;
                         }
@@ -307,10 +402,10 @@ namespace TES3MP
         }
         catch (...)
         {
-            publish(std::move(publication));
+            (void)publish(std::move(publication));
             throw;
         }
-        publish(std::move(publication));
+        result.mSinkDeliveryReport = publish(std::move(publication));
         return result;
     }
 }
