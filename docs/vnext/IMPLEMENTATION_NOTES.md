@@ -3571,6 +3571,31 @@ only the relevant phase section here.
     publish it, require one exact six-job green matrix, compare all retained
     artifacts, and only then mark Slice 6.1 **Implemented**.
 
+- 2026-08-28 — Slice 6.1 coherent selected-library instrumentation — In Progress
+  - Change: exact run
+    [`33213646234`](https://github.com/poisson-fish/TES3MP/actions/runs/33213646234)
+    passed MSVC, GCC 13, Clang 18 TSan, macOS arm64, and macOS x86-64. Its
+    ASan/UBSan job passed every project-owned flat API boundary, then reported a
+    mixed-instrumentation Protobuf vptr failure inside GNS encrypted connection
+    setup: the verified Protobuf/Abseil pair was instrumented, but the production
+    graph's GNS protobuf consumers were not. The production safety profile now
+    enables GNS's own ASan/UBSan integration and applies the same narrow
+    `function` exclusion accepted and proven in the dependency selection.
+  - Decisions: none. Coherent GNS/Protobuf/Abseil instrumentation and the exact
+    function-cast exclusion were explicitly owner-approved for Slice 2.3. No
+    additional report type, dependency code, runtime path, or project source is
+    excluded from sanitizers.
+  - Verification: all five non-ASan jobs in run `33213646234` are green with
+    retained artifacts. ASan/UBSan reached the selected library's unsigned-cert
+    serialization path before reporting the instrumentation mismatch; no direct
+    virtual call or project-owned memory error remains in its trace. Focused
+    boundary regression now requires both upstream sanitizer switches and the
+    exact approved function-only exclusion.
+  - Owner review: existing Slice 6.1 approval applies because this reuses the
+    accepted dependency safety profile without amendment.
+  - Follow-ups: verify locally, publish, obtain a completely green exact matrix,
+    compare all six retained artifacts, and then close Slice 6.1.
+
 ## Phase 7 — Headless end-to-end multiplayer slice
 
 [Back to the phase tracker](IMPLEMENTATION_PLAN.md#phase-7--headless-end-to-end-multiplayer-slice)

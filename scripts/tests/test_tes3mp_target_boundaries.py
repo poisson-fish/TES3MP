@@ -341,6 +341,12 @@ class TES3MPTargetBoundaryTests(unittest.TestCase):
         self.assertIn(
             "set(CMAKE_MSVC_RUNTIME_LIBRARY MultiThreaded", cmake_text
         )
+        self.assertIn("set(SANITIZE_ADDRESS ON", cmake_text)
+        self.assertIn("set(SANITIZE_UNDEFINED ON", cmake_text)
+        self.assertIn(
+            "target_compile_options(GameNetworkingSockets_s PRIVATE -fno-sanitize=function)",
+            cmake_text,
+        )
 
     def test_production_target_cannot_include_test_support(self):
         result = self._run_project(
