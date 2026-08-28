@@ -24,6 +24,17 @@ one selected-library adapter target. It does not reopen the selected dependency,
 encryption profile, active-MITM limitation, authentication ordering, or protocol
 and server-core boundaries.
 
+## Decision history
+
+On 2026-08-28 the project owner approved Option A for Decisions 1, 2, 4, 5,
+and 6 plus their proposed acceptance coverage. The owner did not approve
+Decision 3 Option A: hostname/DNS resolution must be available from the first
+connection slice, with a connection host string and a separate port number.
+
+ADR-0032 therefore remains **Proposed**. The five accepted decisions are stable,
+but Slice 6.1 production remains gated until the amended Decision 3 resolver,
+address-selection, bounds, dependency, and failure behavior is approved.
+
 ## Existing approved constraints
 
 1. `tes3mp_transport` remains the project-owned abstraction and continues to
@@ -146,38 +157,121 @@ Use discovered OpenSSL, Protobuf, Abseil, and GameNetworkingSockets packages.
 This reduces repository tooling but violates the accepted exact-pin, generated-
 input, static-profile, and cross-platform evidence contract.
 
-## Decision 3: public endpoint value
+## Decision 3: connection host, DNS, and address selection
 
-### Option A: owned numeric IP address plus port (recommended)
+The owner requires a separate connection host string and port from Slice 6.1.
+GameNetworkingSockets' public `SteamNetworkingIPAddr` parser accepts numeric IP
+addresses and optional ports; it does not provide the bounded asynchronous DNS,
+cancellation, and multi-address connection policy required here. The remaining
+decision therefore has three linked parts.
 
-Expose a validated project-owned endpoint with a fixed 16-byte address, an
-explicit IPv4/IPv6 family, and a 16-bit port. Connect rejects port zero; listen
-may request port zero and returns the actual bound endpoint. Parsing user text,
-DNS, discovery, and interface enumeration remain outside the adapter and outside
-Slice 6.1.
+### Decision 3.1: public connection input
 
-Advantages:
+#### Option A: bounded ASCII host plus separate port (recommended)
 
-- exactly matches the approved direct-IP transport scope;
-- has deterministic validation and no raw user/library string lifetime; and
-- avoids making DNS policy or OS resolver behavior part of the core boundary.
+Expose `ConnectionEndpoint` as an owned host string plus a `uint16_t` port. The
+host is 1–253 ASCII bytes, contains either a numeric IPv4/IPv6 literal or a DNS
+name with labels of 1–63 bytes, and contains no scheme, credentials, path, query,
+fragment, whitespace, or embedded port. A DNS trailing root dot is accepted and
+normalized; ASCII letters are compared case-insensitively. Unicode input is
+rejected, while caller-supplied valid ASCII IDNA A-labels (`xn--...`) are
+accepted without project-owned Unicode conversion. Connect rejects port zero.
 
-Tradeoffs:
+Numeric literals take a no-DNS fast path. DNS names resolve A and AAAA records
+asynchronously. Listener configuration remains a numeric owned bind address plus
+port; wildcard/port-zero listen behavior is unchanged and does not perform DNS.
 
-- callers must resolve or parse host input before connecting; and
-- hostname support requires a later reviewed boundary if it enters scope.
+This keeps IPv6 colons unambiguous, bounds untrusted text before allocation, and
+does not turn a connection endpoint into a URI or discovery record.
 
-### Option B: bounded host string plus port
+#### Option B: combined `host:port` connection string
 
-Pass a bounded string to the adapter and let GameNetworkingSockets parse it.
-This is convenient at call sites but makes library parser behavior and raw-text
-error handling part of the production boundary.
+Accept one string and parse brackets, IPv6, port, and host together. This is
+convenient for copy/paste but adds ambiguous formatting and duplicates a port
+field the owner explicitly requested.
 
-### Option C: endpoint plus asynchronous DNS resolver
+#### Option C: URI-style endpoint
 
-Own hostname resolution, cancellation, address ordering, TTLs, and retry policy
-inside transport. This is useful eventually but adds operating-system behavior
-and security/UX policy not required by Slice 6.1.
+Accept a URI with scheme and optional path/query data. This anticipates future
+discovery but adds unused syntax, normalization, and credential-confusion risks.
+
+### Decision 3.2: resolver implementation
+
+#### Option A: prove and pin c-ares behind the GNS adapter (recommended)
+
+Authorize a disposable dependency-selection proof for current c-ares before
+production integration. The candidate is c-ares `1.34.8`, an MIT-licensed,
+actively maintained asynchronous resolver with Windows, Linux, macOS, Android,
+and other supported builds. It supplies asynchronous `getaddrinfo`, explicit
+cancellation, and caller-event-loop integration. If its exact pin, archive and
+license hashes, restricted static build, sanitizer/fuzz evidence, and supported
+desktop matrix pass, extend the Decision 2 verified lock/provisioner and link it
+privately only into `tes3mp_transport_gns`.
+
+Use c-ares without its event thread: socket-state notifications and
+`ares_process_fds` integrate with the already approved caller-confined pump, so
+Decision 5 remains unchanged. Selected-library address/socket/callback/status
+types remain private. Each connect attempt owns a separately cancellable resolver
+channel or equivalent isolated query owner so cancelling one attempt cannot
+cancel another.
+
+This option is not final dependency approval. Exact source and proof evidence
+must return to the owner before c-ares-dependent production code lands.
+
+Primary research evidence:
+
+- [c-ares 1.34.8 release](https://github.com/c-ares/c-ares/releases/tag/v1.34.8)
+- [c-ares project, maintenance, license, and platform overview](https://github.com/c-ares/c-ares)
+- [`ares_getaddrinfo` asynchronous address API](https://c-ares.org/docs/ares_getaddrinfo.html)
+- [`ares_process_fds` caller-event-loop integration](https://c-ares.org/docs/ares_process_fds.html)
+- [`ares_cancel` cancellation behavior](https://c-ares.org/docs/ares_cancel.html)
+
+#### Option B: three native asynchronous resolver backends
+
+Implement and maintain separate cancellable Windows, Linux, and macOS resolver
+adapters. This avoids a new library but creates three platform code paths,
+different callback/lifetime behavior, and a larger cross-platform test surface.
+
+#### Option C: blocking system `getaddrinfo`
+
+Resolve on the transport pump thread. This adds no dependency, but one DNS
+lookup can stall every connection and lifecycle callback, cannot be bounded or
+cancelled portably, and conflicts with the approved explicit-pump lifecycle.
+
+### Decision 3.3: multi-address connection policy
+
+#### Option A: bounded Happy Eyeballs v2 subset (recommended)
+
+Resolve IPv6 and IPv4 asynchronously, preserve the resolver's RFC 6724 ordering,
+retain at most eight unique numeric addresses, and use one owned
+`ConnectAttemptId` for all candidates. Start the first viable candidate without
+waiting for every DNS answer, allow at most two simultaneous GNS candidate
+handles, use a 50 ms IPv6 resolution preference delay and a 250 ms stagger
+between connection candidates, and cancel/close every losing candidate when the
+first encrypted connection succeeds.
+
+The existing eight-pending Slice 6.1 ceiling counts the logical connect attempt,
+while each attempt has a separate hard ceiling of two live candidate handles.
+Cancellation, timeout, shutdown, or terminal DNS failure closes all candidates
+and emits exactly one owned terminal event. DNS uses the host's configured
+resolver and makes no DNSSEC, DoH, endpoint-authentication, or confidentiality
+claim. Slice 6.1 adds no application-level DNS cache; every new logical attempt
+resolves again, subject to bounded resolver-internal behavior proven with the
+selected dependency.
+
+The initial delay and racing policy follows
+[RFC 8305 Happy Eyeballs v2](https://www.rfc-editor.org/rfc/rfc8305.html).
+
+#### Option B: sequential resolver-order attempts
+
+Try one returned address at a time. This is simpler and uses one candidate
+handle, but a broken first IPv6 or IPv4 path can impose the full connection
+timeout before fallback.
+
+#### Option C: first address only
+
+Use only the first DNS answer. This has the smallest implementation but makes
+multi-address and dual-stack hosts unnecessarily fragile.
 
 ## Decision 4: owned lifecycle API
 
@@ -297,20 +391,22 @@ is flexible but violates the hostile-input and bounded-work requirements.
 
 ## Recommendation
 
-Approve Option A for Decisions 1–6:
+The owner has approved Option A for Decisions 1, 2, 4, 5, and 6. For the amended
+Decision 3, recommend Option A for Decisions 3.1–3.3:
 
 1. preserve `tes3mp_transport` and add a private `tes3mp_transport_gns` adapter;
 2. share one verified exact-lock provisioner between proof and production;
-3. expose numeric IPv4/IPv6 endpoints only;
+3. accept a bounded host string and separate port, authorize a c-ares selection
+   proof, and use a bounded Happy Eyeballs v2 subset if that proof is accepted;
 4. use an owning command/value-event runtime with distinct never-reused IDs;
 5. confine it to an explicitly pumped caller-owned I/O context; and
 6. begin with the proof-bounded 1/8/8/128 lifecycle profile until Slice 6.4
    reviews measured product limits.
 
-This is the narrowest path that preserves every accepted dependency boundary,
-turns library callbacks and handle reuse into deterministic owned values, and
-does not preempt later channel, authentication, queue, telemetry, or gameplay
-decisions.
+This preserves every accepted dependency boundary while providing hostname
+connections without blocking the deterministic transport pump. The c-ares
+candidate remains research-only until its exact dependency proof and owner
+review pass.
 
 ## Proposed Slice 6.1 acceptance tests
 
@@ -323,28 +419,44 @@ decisions.
    wrong-profile dependency inputs before compiling production code.
 4. verified exact pins build the adapter and one focused lifecycle executable;
    abstraction-only standalone builds remain network-dependency-free.
-5. numeric IPv4 and IPv6 endpoints round-trip; invalid family/port values and a
-   connect port of zero fail before a library call; listen port zero returns the
-   actual bound port.
-6. a listener and client establish a real loopback connection, and the owned
+5. valid numeric IPv4/IPv6 literals, ordinary DNS names, trailing-root names,
+   and valid ASCII IDNA A-labels pair with a separate nonzero port; empty,
+   oversized, invalid-label, Unicode, URI-like, embedded-port, whitespace, and
+   zero-port inputs fail before resolver or library work.
+6. numeric input bypasses DNS; named input resolves bounded A/AAAA results and a
+   listener still reports its actual numeric bound address and port.
+7. same-seed fake-resolver tests reproduce exact DNS completion, address-order,
+   stagger, cancellation, winning-candidate, and terminal-event traces.
+8. the real resolver proof covers success, NXDOMAIN/no-data, timeout, malformed
+   response, cancellation, destruction, duplicate addresses, more than eight
+   answers, IPv4-only, IPv6-only, and dual-stack cases without leaking resolver
+   types or unbounded work.
+9. the Happy Eyeballs path starts at most two candidate handles, uses the
+   approved delays, closes every loser after one encrypted winner, and emits one
+   terminal result when all candidates fail.
+10. a listener and client establish a real loopback connection, and the owned
    event reports encrypted-but-unauthenticated transport without exposing a
    library state or handle.
-7. cancelling a pending connection emits exactly one terminal cancellation and
+11. cancelling a DNS or connection attempt emits exactly one terminal
+   cancellation, closes every resolver/candidate handle, and ignores delayed DNS
+   and connection-status callbacks.
+12. cancelling a pending numeric connection emits exactly one terminal cancellation and
    ignores its delayed connection-status callback.
-8. stopping a listener prevents later accept events from targeting it while
+13. stopping a listener prevents later accept events from targeting it while
    existing accepted connections retain independent identities.
-9. graceful close, immediate abort, peer close, connection failure, and runtime
+14. graceful close, immediate abort, peer close, connection failure, and runtime
    shutdown each emit one ordered owned terminal event; repeated requests remain
    idempotent.
-10. forced library-handle reuse and delayed callback injection cannot alias a
+15. forced library-handle reuse and delayed callback injection cannot alias a
     new owned listener, attempt, connection, or runtime generation.
-11. the initial listener/attempt/connection/event capacities reject the next
+16. the initial listener/attempt/connection/event and per-attempt candidate
+    capacities reject the next
     item without partial ownership or unbounded allocation.
-12. event-capacity overflow and counter exhaustion fail closed, release every
+17. event-capacity overflow and counter exhaustion fail closed, release every
     library handle, and never invoke user code after terminal runtime failure.
-13. all public adapter-factory headers compile in isolation without selected-
+18. all public adapter-factory headers compile in isolation without selected-
     library, OpenMW, platform, socket, or operating-system types.
-14. focused lifecycle tests pass under applicable MSVC, ASan/UBSan, and TSan
+19. focused resolver/lifecycle tests pass under applicable MSVC, ASan/UBSan, and TSan
     profiles; the complete hosted platform matrix remains the Phase 6 exit gate.
 
 ## Explicit non-decisions
@@ -355,8 +467,10 @@ decisions.
 - Product queue sizes, rate limits, slow-peer eviction, and 256-peer capacity
   remain Slice 6.4.
 - Stable detailed telemetry/disconnect catalogs remain Slice 6.5.
-- DNS, discovery, NAT traversal, Steam services, certificates, and endpoint
-  authentication remain out of scope.
+- Service discovery, SRV/SVCB policy, custom DNS servers, DNSSEC validation,
+  DoH/DoT, NAT traversal, Steam services, certificates, and endpoint
+  authentication remain out of scope. Ordinary A/AAAA hostname resolution is
+  now required by Decision 3.
 - Reconnect grace, replacement, player visibility, and other gameplay behavior
   require their owning later ADR/GDR.
 
@@ -371,7 +485,9 @@ or test-support dependency.
 
 ## Owner approval gate
 
-No option is accepted yet. Slice 6.1 production implementation must not begin
-until the project owner explicitly approves or amends Decisions 1–6 and the
-proposed acceptance tests. Acceptance will also record the narrow ADR-0014
-topology amendment for the selected adapter target.
+Option A is owner-approved for Decisions 1, 2, 4, 5, and 6. Amended Decisions
+3.1–3.3 and their expanded acceptance tests remain pending. Slice 6.1 production
+implementation must not begin until the project owner approves or amends that
+DNS packet. Selecting Decision 3.2 Option A authorizes only a disposable c-ares
+proof; exact dependency acceptance remains a second owner gate before dependent
+production integration.

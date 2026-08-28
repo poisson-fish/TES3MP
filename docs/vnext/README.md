@@ -225,7 +225,9 @@ The complete Phase 5 hosted manual matrix passes on exact commit
 exit gate. Phase 5 is **Implemented**; Phase 6 remains **Not Started** pending
 its kickoff and owner review of unresolved transport/session decisions. Proposed
 [`ADR-0032`](adr/ADR-0032-phase6-transport-adapter-and-lifecycle-boundary.md)
-contains the first Slice 6.1 decision packet; no option is accepted yet.
+contains the first Slice 6.1 decision packet. Its target, provisioning,
+lifecycle, pumping, and initial-bound options are owner-approved; its amended
+hostname/DNS decision remains proposed, so no Phase 6 production code exists.
 
 ## References and license
 

@@ -3872,6 +3872,36 @@ Implementation notes:
     After approval, record the accepted options and implement only the Slice
     6.1 lifecycle adapter, focused limits, boundary checks, and tests.
 
+- 2026-08-28 — Phase 6 kickoff / Slice 6.1 — Not Started
+  - Change: recorded owner approval of ADR-0032 Option A for Decisions 1, 2, 4,
+    5, and 6. Reopened Decision 3 after the owner required hostname/DNS
+    resolution from the first connection slice using a host string and separate
+    port. Expanded the proposal with bounded input, resolver-integration, and
+    multi-address connection options. No production source, dependency lock,
+    socket behavior, or gameplay behavior changed.
+  - Decisions: the adapter target split, verified provisioning model,
+    command/value-event lifecycle, caller-confined pump, and initial 1/8/8/128
+    profile are approved. The prior numeric-only endpoint recommendation is not
+    accepted. Recommend bounded ASCII host plus port, a disposable current
+    c-ares selection proof behind the GNS adapter, and a bounded RFC 8305-style
+    dual-stack connection race. Exact resolver dependency acceptance remains a
+    separate owner gate after proof evidence.
+  - Verification: all 98 repository-owned Python tests pass. Indexed baseline
+    provenance accounts for 197 intentional differences and 54 dependency
+    inputs; indexed legacy exclusion checks 3,891 tracked paths, 59 CMake files,
+    44 compile commands, and 121 Ninja edges. The provenance JSON parses, all
+    122 local Markdown links across 39 files resolve, partial-approval/DNS-
+    proposal assertions pass, and indexed diff checks pass. Product builds,
+    dependency proof/provisioning, formatting, schema, corpus, and fuzz checks
+    are not applicable because no production, dependency-lock, schema, or test
+    source changed.
+  - Owner review: partial architecture approval is recorded. ADR-0032 remains
+    **Proposed**; amended Decisions 3.1–3.3 and their expanded tests remain
+    pending, so Phase 6 and Slice 6.1 stay **Not Started**.
+  - Follow-ups: present the focused DNS packet. If its c-ares option is approved,
+    implement only a disposable exact-pin/platform/security proof and return its
+    evidence for owner dependency acceptance before Phase 6 production code.
+
 ### Phase 7 — Headless end-to-end multiplayer slice
 
 Status: **Not Started**
