@@ -11,7 +11,7 @@ conditional stretch target.
 
 ## Status
 
-Phases 0–4 are implemented. The active tree is a provenance-verified OpenMW
+Phases 0–5 are implemented. The active tree is a provenance-verified OpenMW
 0.51 baseline with:
 
 - engine-independent protocol, transport, client-session, server-core, and test
@@ -24,7 +24,7 @@ Phases 0–4 are implemented. The active tree is a provenance-verified OpenMW
 
 Phase 4—bounded protocol and in-memory session—is implemented, including its
 complete manually dispatched hosted phase-exit matrix and owner exit approval.
-Phase 5—deterministic authoritative server core—is in progress. Its first
+Phase 5—deterministic authoritative server core—is implemented. Its first
 production slice implements the approved writer intake, ordering, limits, and
 overload policy with accepted owner demo evidence. Slice 5.2 implements the
 approved immutable, bounded canonical player/session state value and invariant
@@ -45,8 +45,8 @@ sink-interface implementation and focused tests pass applicable local
 verification and owner demo acceptance. Slice 5.7's test-only seeded reducer
 property and eight-client deterministic simulation implementation passes
 applicable local verification and owner demo acceptance. The complete Phase 5
-hosted manual matrix is green on the exact portability-repair candidate; Phase
-5 remains in progress pending explicit owner exit-gate approval.
+hosted manual matrix is green on the exact portability-repair candidate, and
+the project owner approved the Phase 5 exit gate. Phase 6 has not started.
 
 Beginning with Phase 4, each slice runs applicable local verification. The full
 vNext hosted matrix runs once by manual dispatch against the phase-completion
@@ -221,8 +221,9 @@ reducer, publication, checksum, and rejection contracts while checking
 canonical invariants after every batch and exact same-seed replay. Implementation
 `917ecc3278`, applicable local verification, and owner demo acceptance pass.
 The complete Phase 5 hosted manual matrix passes on exact commit
-`8e7ca8ff607f3b95ec8d348919f6c1233a11eb23`. Phase 5 remains **In Progress**
-pending explicit owner exit-gate approval.
+`8e7ca8ff607f3b95ec8d348919f6c1233a11eb23`, and the project owner approved the
+exit gate. Phase 5 is **Implemented**; Phase 6 remains **Not Started** pending
+its kickoff and owner review of unresolved transport/session decisions.
 
 ## References and license
 

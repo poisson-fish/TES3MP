@@ -111,7 +111,7 @@ Observed on 2026-08-25 before this plan was added:
 | 2 | Security and architecture decisions | **Implemented** | Phase 1 |
 | 3 | Independent targets and test scaffold | **Implemented** | Phase 2 |
 | 4 | Bounded protocol and in-memory session | **Implemented** | Phase 3 |
-| 5 | Deterministic authoritative server core | **In Progress** | Phase 4 |
+| 5 | Deterministic authoritative server core | **Implemented** | Phase 4 |
 | 6 | Maintained transport and secure network session | **Not Started** | Phase 5 |
 | 7 | Headless end-to-end multiplayer slice | **Not Started** | Phase 6 |
 | 8 | OpenMW desktop vertical slice | **Not Started** | Phase 7 |
@@ -2972,7 +2972,7 @@ Implementation notes:
 
 ### Phase 5 — Deterministic authoritative server core
 
-Status: **In Progress**
+Status: **Implemented**
 
 Outcome: one deterministic writer validates commands, owns minimal canonical
 player state, publishes immutable snapshots, and emits changes to owned sinks.
@@ -3776,6 +3776,31 @@ Implementation notes:
   - Follow-ups: obtain explicit Phase 5 exit-gate approval, then mark Phase 5
     **Implemented** in a status-only closeout before holding the Phase 6 kickoff
     and presenting its unresolved transport/session decision packet.
+
+- 2026-08-28 — Phase 5 — Implemented
+  - Change: marked Phase 5 **Implemented** after every Slice 5.1–5.7 deliverable
+    was implemented and demo-accepted, the exact replacement-candidate hosted
+    matrix passed, and the project owner explicitly approved the phase exit
+    gate. This status-only closeout changes no production or test source.
+  - Decisions: none. ADR-0026 through ADR-0031 and GDR-0012 remain accepted
+    without amendment.
+  - Gate evidence: the server core retains one writer-confined canonical
+    mutation path; commits are atomic, deterministic, revisioned, and published
+    as immutable state plus ordered domain changes; and bounded post-commit sink
+    failures cannot roll back, mutate, or deadlock canonical state. The complete
+    17-job hosted evidence is recorded immediately above.
+  - Verification: retained local verification covers all 98 repository-owned
+    Python tests, all 17 C++ contract executables and three golden-corpus checks,
+    provenance for 196 intentional differences and 54 dependency inputs,
+    legacy exclusion over 3,890 paths, 59 CMake files, 44 compile commands, and
+    121 Ninja edges, plus JSON, Markdown-link, and clean-diff checks. All six
+    hosted workflows passed on
+    `8e7ca8ff607f3b95ec8d348919f6c1233a11eb23` with all 17 artifacts retained.
+  - Owner review: explicit Phase 5 exit-gate approval received from the project
+    owner in the 2026-08-28 working session.
+  - Follow-ups: none for Phase 5. Phase 6 is now eligible, but its kickoff and
+    unresolved transport/session architecture, security, and resource-bound
+    decisions require owner review before dependent production work begins.
 
 ### Phase 6 — Maintained transport and secure network session
 
