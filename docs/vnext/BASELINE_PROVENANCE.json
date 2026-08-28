@@ -17,7 +17,7 @@
     {
       "path": ".gitattributes",
       "status": "A",
-      "purpose": "Pins byte-hashed proof inputs to LF and TES3MP fuzz seeds as binary so exact cross-platform evidence is independent of checkout conversion."
+      "purpose": "Pins byte-hashed FlatBuffers, GameNetworkingSockets, and c-ares proof inputs to LF and TES3MP fuzz seeds as binary so exact cross-platform evidence is independent of checkout conversion."
     },
     {
       "path": ".github/workflows/push.yml",
@@ -38,6 +38,11 @@
       "path": ".github/workflows/vnext-baseline-windows.yml",
       "status": "A",
       "purpose": "Manually dispatched phase-exit Windows Server 2022 MSVC v143 full-build, install, upstream-test, and retained-evidence CI gate."
+    },
+    {
+      "path": ".github/workflows/vnext-cares-proof.yml",
+      "status": "A",
+      "purpose": "Manually dispatched supported desktop compiler matrix for the exact-pin caller-pumped c-ares resolver selection proof, sanitizer coverage, and retained evidence."
     },
     {
       "path": ".github/workflows/vnext-flatbuffers-proof.yml",
@@ -810,6 +815,21 @@
       "purpose": "Owner-approved Phase 5 minimal motion reducer effect, authority, state-scope, numeric, contention, and acknowledgement behavior."
     },
     {
+      "path": "docs/vnext/proofs/cares/CMakeLists.txt",
+      "status": "A",
+      "purpose": "Isolated C++20 static c-ares build, strict proof warnings, exact toolchain capture, and CTest entry for the disposable resolver selection proof."
+    },
+    {
+      "path": "docs/vnext/proofs/cares/README.md",
+      "status": "A",
+      "purpose": "Scope, exact dependency, local execution, DNS fixture coverage, exclusions, and retained-evidence instructions for the disposable resolver proof."
+    },
+    {
+      "path": "docs/vnext/proofs/cares/proof.cpp",
+      "status": "A",
+      "purpose": "Loopback DNS fixture and public c-ares API scenarios for bounded host/port input, numeric bypass, dual-stack results, resolver failures, lifecycle, deduplication, and result caps."
+    },
+    {
       "path": "docs/vnext/proofs/flatbuffers/ANDROID_ARM64.md",
       "status": "A",
       "purpose": "ADR-0002-required Android ARM64 feasibility assessment for the selected header-only codec runtime surface."
@@ -915,6 +935,11 @@
       "purpose": "Cross-platform local baseline configure, build, upstream-test, and evidence runner."
     },
     {
+      "path": "scripts/run_vnext_cares_proof.py",
+      "status": "A",
+      "purpose": "Fail-closed c-ares lock validation, verified acquisition, safe extraction, license check, restricted static build, scenario execution, and retained-evidence runner."
+    },
+    {
       "path": "scripts/run_vnext_flatbuffers_proof.py",
       "status": "A",
       "purpose": "Fail-closed source acquisition, safe extraction, schema policy, regeneration, build, test, fuzz, and evidence runner."
@@ -948,6 +973,11 @@
       "path": "scripts/tests/test_run_vnext_baseline.py",
       "status": "A",
       "purpose": "Unit tests for local baseline runner validation and dependency-lock handling."
+    },
+    {
+      "path": "scripts/tests/test_run_vnext_cares_proof.py",
+      "status": "A",
+      "purpose": "Failure-case and policy tests for the exact c-ares lock, acquisition, extraction, line endings, scenario coverage, and manual proof workflow."
     },
     {
       "path": "scripts/tests/test_run_vnext_flatbuffers_proof.py",
@@ -988,6 +1018,11 @@
       "path": "scripts/vnext_baseline_dependencies.json",
       "status": "A",
       "purpose": "Pinned Windows and macOS baseline dependency manifests, archives, Qt inputs, and acquisition-tool identities."
+    },
+    {
+      "path": "scripts/vnext_cares_proof.json",
+      "status": "A",
+      "purpose": "Exact c-ares tag, commit, archive, license, restricted caller-pumped profile, resolver bounds, supported proof matrix, exclusions, vulnerability sources, and update policy."
     },
     {
       "path": "scripts/vnext_flatbuffers_proof.json",
@@ -1047,6 +1082,56 @@
       "phase1_follow_up": "Slices 1.4-1.7 captured and reviewed resolved-tool, dependency, environment, and license evidence for every supported desktop platform; Slice 1.8 remains the Phase 1 exclusion proof."
     },
     {
+      "id": "cares-selection-proof",
+      "platforms": [
+        "Linux x86-64",
+        "Windows x86-64",
+        "macOS arm64",
+        "macOS x86-64"
+      ],
+      "files": [
+        {
+          "path": ".github/workflows/vnext-cares-proof.yml",
+          "sha256": "d4c7313353ba99574758a0d33f98f03cae302df4bc248c08e18461cab9570f74"
+        },
+        {
+          "path": "docs/vnext/proofs/cares/CMakeLists.txt",
+          "sha256": "01702351d9bb78c5c20962791018dacfbe447883b8240eea7ad8fcb1879f484b"
+        },
+        {
+          "path": "docs/vnext/proofs/cares/README.md",
+          "sha256": "622dbf7af61d3c8081dc6fc77af3400ff725a87f352ce9fd80e1ed293f163035"
+        },
+        {
+          "path": "docs/vnext/proofs/cares/proof.cpp",
+          "sha256": "b337695c9c14503b24803eb1c6b5c6c42823321ffba93a652ad0a1e00cdc5802"
+        },
+        {
+          "path": "scripts/run_vnext_cares_proof.py",
+          "sha256": "c2d6345cff096d55d7fe14f033a92d13dfb02a9fde26b535d636d59387ea398a"
+        },
+        {
+          "path": "scripts/tests/test_run_vnext_cares_proof.py",
+          "sha256": "9b58d36be3ee1d467a182c1337b0602c961bc61c4c24655a2f58725eeae2aee0"
+        },
+        {
+          "path": "scripts/vnext_cares_proof.json",
+          "sha256": "0ad50cda94dcca45fbfe3a7e166862ef3a572f9362ee3ada487872a6d018fec1"
+        }
+      ],
+      "repositories": [
+        "https://github.com/c-ares/c-ares",
+        "https://github.com/actions/checkout",
+        "https://github.com/actions/upload-artifact",
+        "https://github.com/ilammy/msvc-dev-cmd",
+        "Ubuntu runner package repositories",
+        "Homebrew package repositories"
+      ],
+      "resolution": "ADR-0032 authorizes a disposable c-ares 1.34.8 selection proof at exact tag commit and SHA-256-verified release archive. The runner safely extracts regular files, verifies the MIT license, builds only the static library, uses the public caller-pumped APIs against a loopback DNS fixture, exercises bounded success/failure/lifecycle/result cases, and retains exact toolchain and scenario evidence. Production dependency acceptance remains an owner gate.",
+      "license_evidence": "The lock records MIT and the exact upstream LICENSE.md SHA-256; every proof job verifies and retains that license beside its dependency, toolchain, profile, and scenario evidence.",
+      "phase1_follow_up": "Local MSVC 19.44 proof evidence passes. The supported five-job hosted matrix and owner acceptance of the exact dependency profile remain pending before ADR-0032 acceptance or production integration."
+    },
+    {
       "id": "flatbuffers-selection-proof",
       "platforms": [
         "Linux x86-64",
@@ -1058,7 +1143,7 @@
       "files": [
         {
           "path": ".gitattributes",
-          "sha256": "87dafaba23b709cbe017cab743f92daaa8753abd11a2d4f0bfe70d1e07da38c0"
+          "sha256": "37ad67ccac88f43bd082464885e2d6ae562f6a8091febde22cb2646fc309aef7"
         },
         {
           "path": ".github/workflows/vnext-flatbuffers-proof.yml",

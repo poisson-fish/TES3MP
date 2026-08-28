@@ -42,6 +42,36 @@ selection proof; ADR-0032 remains **Proposed** and Slice 6.1 production remains
 gated until that proof passes and the owner separately accepts the exact c-ares
 dependency profile.
 
+The authorized proof candidate was then implemented without changing production
+targets. Its exact c-ares 1.34.8 release archive, MIT license, restricted static
+profile, local loopback DNS fixture, and 13 public-API scenarios pass locally on
+MSVC 19.44. The supported hosted matrix and owner acceptance of this exact
+dependency profile remain open; this local result does not accept the ADR or
+authorize production integration.
+
+## Exact-pin resolver proof candidate
+
+The disposable [c-ares selection proof](../proofs/cares/README.md) records:
+
+- tag `v1.34.8` at commit `63a4c4c71b86e448bcc1c55287c35aa4aa0f4246`;
+- release archive SHA-256
+  `c222b6d681096f9444d2c4863d2c1174019e27cacca0a4a5c114d36dd7d7bf78`;
+- MIT `LICENSE.md` SHA-256
+  `460f5e768fda3752ca2169a95df062578a10fb126bfd65f3b9b1a1bed2f84807`;
+- static-only, shared/tools/tests/install-off configuration with the c-ares
+  query cache disabled and no use of `ARES_OPT_EVENT_THREAD`;
+- caller-owned pumping through the socket-state callback and
+  `ares_process_fds`; and
+- loopback-only success, failure, cancellation, destruction, duplicate, and
+  over-bound answer scenarios plus numeric bypass and separate-port checks.
+
+The exact lock, runner, safe archive extraction, license verification, supported
+five-job desktop workflow, Linux Clang 18 ASan+UBSan profile, and retained JSON
+evidence are part of the proof. It deliberately makes no production integration,
+DNSSEC, encrypted-DNS, application-cache, or connection-race claim. Local MSVC
+verification is selection evidence only; hosted proof evidence is required
+before the exact profile returns to the owner for acceptance.
+
 ## Existing approved constraints
 
 1. `tes3mp_transport` remains the project-owned abstraction and continues to
@@ -494,6 +524,7 @@ or test-support dependency.
 
 Option A is owner-approved for Decisions 1–6, including amended Decisions
 3.1–3.3 and their expanded acceptance tests. The authorized disposable c-ares
-proof is the remaining decision gate. Exact dependency acceptance remains a
-second owner review before ADR-0032 can become **Accepted** or dependent Slice
+proof now passes locally on MSVC 19.44; its supported hosted matrix remains the
+open evidence gate. Exact dependency acceptance remains a second owner review
+after that evidence before ADR-0032 can become **Accepted** or dependent Slice
 6.1 production integration can begin.

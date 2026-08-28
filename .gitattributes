@@ -5,4 +5,6 @@ components/tes3mp/protocol/schema/*.fbs text eol=lf
 scripts/vnext_flatbuffers_proof.json text eol=lf
 docs/vnext/proofs/gamenetworkingsockets/** text eol=lf
 scripts/vnext_gamenetworkingsockets_proof.json text eol=lf
+docs/vnext/proofs/cares/** text eol=lf
+scripts/vnext_cares_proof.json text eol=lf
 components/tes3mp/tests/fuzz/corpus/** binary

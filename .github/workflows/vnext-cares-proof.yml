@@ -1,0 +1,128 @@
+name: vNext c-ares selection proof
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  linux:
+    name: c-ares proof (${{ matrix.compiler }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - compiler: gcc-13
+            cc: gcc-13
+            cxx: g++-13
+            proof_arguments: ""
+          - compiler: clang-18-ASan-UBSan
+            cc: clang-18
+            cxx: clang++-18
+            proof_arguments: --sanitize
+    env:
+      CC: ${{ matrix.cc }}
+      CXX: ${{ matrix.cxx }}
+
+    steps:
+      - name: Check out the exact source revision
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Install the approved compiler family and proof tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes "${{ matrix.cc }}" "${{ matrix.cxx }}" cmake ninja-build
+
+      - name: Build and run the pinned selection proof
+        run: python3 scripts/run_vnext_cares_proof.py ${{ matrix.proof_arguments }}
+
+      - name: Retain dependency, license, toolchain, and test evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: vnext-cares-${{ matrix.compiler }}-${{ github.sha }}
+          path: build/vnext-cares-proof/evidence/*
+          if-no-files-found: error
+          retention-days: 30
+
+  windows:
+    name: c-ares proof (MSVC 2022 v143)
+    runs-on: windows-2022
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out the exact source revision
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Enter the Visual Studio 2022 x64 developer environment
+        uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1
+        with:
+          arch: x64
+          vsversion: "2022"
+
+      - name: Build and run the pinned selection proof
+        run: python scripts/run_vnext_cares_proof.py
+
+      - name: Retain dependency, license, toolchain, and test evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: vnext-cares-msvc-2022-v143-${{ github.sha }}
+          path: build/vnext-cares-proof/evidence/*
+          if-no-files-found: error
+          retention-days: 30
+
+  macos-arm64:
+    name: c-ares proof (macOS arm64, Xcode 16)
+    runs-on: macos-15
+    timeout-minutes: 30
+    env:
+      MACOSX_DEPLOYMENT_TARGET: "14.8"
+
+    steps:
+      - name: Check out the exact source revision
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Select Xcode 16 and install proof tools
+        run: |
+          sudo xcode-select -s "$(find /Applications -maxdepth 1 -type d -name 'Xcode_16*.app' | sort | tail -1)/Contents/Developer"
+          brew install cmake ninja
+
+      - name: Build and run the pinned selection proof
+        run: python3 scripts/run_vnext_cares_proof.py
+
+      - name: Retain dependency, license, toolchain, and test evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: vnext-cares-macos-arm64-${{ github.sha }}
+          path: build/vnext-cares-proof/evidence/*
+          if-no-files-found: error
+          retention-days: 30
+
+  macos-x86-64:
+    name: c-ares proof (macOS x86-64, Xcode 16)
+    runs-on: macos-15-intel
+    timeout-minutes: 30
+    env:
+      MACOSX_DEPLOYMENT_TARGET: "13.7"
+
+    steps:
+      - name: Check out the exact source revision
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Select Xcode 16 and install proof tools
+        run: |
+          sudo xcode-select -s "$(find /Applications -maxdepth 1 -type d -name 'Xcode_16*.app' | sort | tail -1)/Contents/Developer"
+          brew install cmake ninja
+
+      - name: Build and run the pinned selection proof
+        run: python3 scripts/run_vnext_cares_proof.py
+
+      - name: Retain dependency, license, toolchain, and test evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: vnext-cares-macos-x86-64-${{ github.sha }}
+          path: build/vnext-cares-proof/evidence/*
+          if-no-files-found: error
+          retention-days: 30

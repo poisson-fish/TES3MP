@@ -3928,6 +3928,37 @@ Implementation notes:
     supported desktop compiler matrix, retain its evidence, and return the
     dependency profile to the owner before production integration.
 
+- 2026-08-28 — Phase 6 resolver selection proof — In Progress
+  - Change: implemented the owner-authorized disposable c-ares selection proof
+    without changing any production target. Added an exact 1.34.8 source and
+    license lock, fail-closed verified-download/safe-extraction runner, isolated
+    static C/C++20 proof build, loopback DNS fixture, repository policy tests,
+    retained JSON evidence, and a manual supported-desktop workflow.
+  - Decisions: no new architecture, authority, state-scope, or gameplay choice.
+    The proof instantiates only the approved research profile: host plus separate
+    port, numeric bypass, caller-pumped `ares_process_fds`, no event thread or
+    application cache, eight owned unique results, and failure/lifecycle
+    categories. It does not select the dependency for production.
+  - Verification: a clean runner-built MSVC 19.44.35228 static c-ares proof
+    passes all 13 loopback scenarios and retains the exact archive, license,
+    compiler, profile, and CTest evidence; the evidence JSON SHA-256 is
+    `cd49ad780cd467969de9b14ec9cfc7179d4192b2cb8225caa87386f26b2bd615`.
+    All 107 repository-owned Python tests pass. Indexed baseline provenance
+    accounts for 204 intentional differences and 61 dependency inputs; indexed
+    legacy exclusion checks 3,898 tracked paths, 60 CMake files, 44 compile
+    commands, and 121 Ninja edges. The exact lock validates, the workflow passes
+    actionlint 1.7.12, both Python files compile, all 125 local Markdown links
+    across 40 files resolve, the provenance JSON parses, and indexed diff checks
+    pass. Production builds, formatting, schema/corpus, and fuzz checks are not
+    applicable to this isolated proof; Linux sanitizer and the other supported
+    compilers remain hosted-matrix gates.
+  - Owner review: exact dependency acceptance remains pending. ADR-0032 stays
+    **Proposed**, Phase 6 and Slice 6.1 stay **Not Started**, and no production
+    c-ares or GameNetworkingSockets adapter integration is authorized yet.
+  - Follow-ups: publish an exact candidate, run and review the five-job hosted
+    proof matrix, then return the exact pin/profile and retained evidence for
+    owner dependency acceptance before starting Slice 6.1 production work.
+
 ### Phase 7 — Headless end-to-end multiplayer slice
 
 Status: **Not Started**

@@ -1,0 +1,63 @@
+{
+  "schema_version": 1,
+  "dependency": {
+    "name": "c-ares",
+    "version": "1.34.8",
+    "tag": "v1.34.8",
+    "commit": "63a4c4c71b86e448bcc1c55287c35aa4aa0f4246",
+    "source_directory": "c-ares-1.34.8",
+    "source_archive": {
+      "url": "https://github.com/c-ares/c-ares/releases/download/v1.34.8/c-ares-1.34.8.tar.gz",
+      "sha256": "c222b6d681096f9444d2c4863d2c1174019e27cacca0a4a5c114d36dd7d7bf78"
+    },
+    "license": {
+      "spdx": "MIT",
+      "path": "LICENSE.md",
+      "sha256": "460f5e768fda3752ca2169a95df062578a10fb126bfd65f3b9b1a1bed2f84807"
+    }
+  },
+  "build_profile": [
+    "static-only",
+    "shared-off",
+    "tools-off",
+    "tests-off",
+    "install-off",
+    "caller-pumped-ares-process-fds",
+    "event-thread-unused",
+    "query-cache-off",
+    "windows-msvc-static-runtime"
+  ],
+  "budgets": {
+    "hostname_bytes": 253,
+    "label_bytes": 63,
+    "resolved_addresses": 8,
+    "live_connection_candidates": 2,
+    "resolution_preference_delay_ms": 50,
+    "connection_attempt_stagger_ms": 250,
+    "proof_query_timeout_ms": 80,
+    "proof_query_tries": 1
+  },
+  "supported_proof_platforms": [
+    "Windows x86-64 / MSVC 2022 v143",
+    "Linux x86-64 / GCC 13",
+    "Linux x86-64 / Clang 18 ASan+UBSan",
+    "macOS arm64 / Xcode 16 AppleClang",
+    "macOS x86-64 / Xcode 16 AppleClang"
+  ],
+  "excluded_surfaces": [
+    "production dependency integration",
+    "resolver event threads",
+    "application DNS cache",
+    "DNSSEC claims",
+    "DNS-over-HTTPS claims",
+    "raw Unicode hostnames",
+    "URI parsing",
+    "service-name lookup",
+    "SRV discovery"
+  ],
+  "vulnerability_sources": [
+    "https://github.com/c-ares/c-ares/security/advisories",
+    "https://c-ares.org/changelog.html"
+  ],
+  "update_policy": "Review c-ares security advisories immediately, the selected release quarterly, and the exact pin before release. Every pin or build-profile change reruns the full five-job proof and retained-artifact consistency review."
+}

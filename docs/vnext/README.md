@@ -227,8 +227,9 @@ its kickoff and owner review of unresolved transport/session decisions. Proposed
 [`ADR-0032`](adr/ADR-0032-phase6-transport-adapter-and-lifecycle-boundary.md)
 contains the first Slice 6.1 decision packet. Its target, provisioning,
 lifecycle, pumping, initial-bound, and hostname/DNS architecture options are
-owner-approved. Its authorized exact-pin c-ares proof and separate dependency
-acceptance remain pending, so no Phase 6 production code exists.
+owner-approved. Its authorized exact-pin c-ares proof passes locally on MSVC;
+the supported hosted proof matrix and separate exact-dependency acceptance
+remain pending, so no Phase 6 production code exists.
 
 ## References and license
 
