@@ -732,7 +732,7 @@
     {
       "path": "docs/vnext/adr/ADR-0029-phase5-immutable-canonical-publication-and-versioned-change-feed.md",
       "status": "A",
-      "purpose": "Proposed Phase 5 immutable canonical publication ownership, state version, domain change record, latest-retention, gap-recovery, and slow-reader policy decision."
+      "purpose": "Owner-approved Phase 5 immutable canonical publication ownership, state version, domain change record, latest-retention, gap-recovery, and slow-reader policy decision."
     },
     {
       "path": "docs/vnext/gdr/GDR-0011-phase4-minimal-player-exchange-semantics.md",

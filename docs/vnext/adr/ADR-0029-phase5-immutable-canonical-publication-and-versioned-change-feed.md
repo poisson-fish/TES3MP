@@ -1,8 +1,10 @@
 # ADR-0029: Phase 5 immutable canonical publication and versioned change feed
 
-Status: **Proposed**
+Status: **Accepted**
 
 Date opened: 2026-08-28
+
+Date approved: 2026-08-28
 
 Decision owner: project owner
 
@@ -26,8 +28,7 @@ runtime composition.
 
 ## Decision summary
 
-Pending owner approval. The recommendation is Option A for Decisions 1 through
-5:
+The project owner approved Option A for Decisions 1 through 5 on 2026-08-28:
 
 1. integrate one immutable latest-publication slot with the writer-confined
    reducer, sharing its immutable canonical state and installing one completed
@@ -370,6 +371,12 @@ Reopen this ADR if:
 
 ## Owner approval
 
-Pending explicit project-owner approval or amendment of Decisions 1 through 5
-and the proposed acceptance tests. No production publication implementation is
-authorized by this proposal.
+Approved by the project owner in the 2026-08-28 working session: Option A for
+Decisions 1 through 5 and the proposed acceptance tests.
+
+This approval authorizes only the Slice 5.4 immutable latest-publication slot,
+checked canonical version, complete Phase 5 snapshot and typed replacement
+records, explicit local feed-gap recovery, reader isolation, observability, and
+focused tests described here. Protocol/interest conversion, command-result
+delivery, persistence/replay/script sinks, checksums, explicit network resync,
+and online reducer composition remain separately gated.

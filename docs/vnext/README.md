@@ -182,12 +182,12 @@ decisions. The writer-confined implementation, closed observability, and focused
 contract tests pass applicable local verification and owner implementation-demo
 acceptance. Online composition stays gated on Slice 5.5.
 
-Phase 5 Slice 5.4 has proposed
+Phase 5 Slice 5.4 has accepted
 [`ADR-0029`](adr/ADR-0029-phase5-immutable-canonical-publication-and-versioned-change-feed.md)
 for immutable publication ownership, state versioning, complete domain record
 scope, latest-only retention, gap recovery, and slow-reader isolation. Owner
-approval is pending; no production snapshot or state-change publication code
-has landed.
+architecture approval is complete; production implementation and owner demo
+acceptance remain pending.
 
 ## References and license
 

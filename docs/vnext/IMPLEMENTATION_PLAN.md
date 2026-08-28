@@ -338,7 +338,7 @@ runtime or protocol name.
 | ADR-0026 | Phase 5 writer command intake, ordering, limits, and overload policy | Phase 5 | **Implemented** |
 | ADR-0027 | Phase 5 canonical player/session state, scope, invariants, and bounds | Phase 5 | **Implemented** |
 | ADR-0028 | Phase 5 command validation, disposition, acknowledgement, and atomic reducer boundary | Phase 5 | **Implemented** |
-| ADR-0029 | Phase 5 immutable canonical publication, versioned change feed, retention, and slow-reader policy | Phase 5 | **Proposed** |
+| ADR-0029 | Phase 5 immutable canonical publication, versioned change feed, retention, and slow-reader policy | Phase 5 | **Implemented** |
 
 An ADR is complete only when it records considered alternatives, selection
 criteria, consequences, failure modes, a replacement/review trigger, and
@@ -2982,7 +2982,7 @@ Depends on: Phase 4.
 | 5.1 | Implement fixed-tick scheduling, bounded per-tick command intake, and deterministic ordering | **Implemented** | Accepted [`ADR-0026`](adr/ADR-0026-phase5-writer-command-intake-and-ordering.md), implementation `e0dde571f5`, applicable local verification, and owner demo acceptance pass |
 | 5.2 | Implement minimal player/session/cell/root-transform/velocity/ack canonical state | **Implemented** | Accepted [`ADR-0027`](adr/ADR-0027-phase5-canonical-player-and-session-state.md), implementation `f1a1f0632e`, applicable local verification, and owner demo acceptance pass |
 | 5.3 | Implement command validation and atomic reducer application | **Implemented** | Accepted [`ADR-0028`](adr/ADR-0028-phase5-command-validation-and-atomic-reducer.md) and [`GDR-0012`](gdr/GDR-0012-phase5-minimal-motion-reducer-semantics.md), implementation `f57a4074db`, applicable local verification, and owner demo acceptance pass |
-| 5.4 | Publish immutable snapshots and versioned state-change events | **In Progress** | Proposed [`ADR-0029`](adr/ADR-0029-phase5-immutable-canonical-publication-and-versioned-change-feed.md); owner architecture approval and production implementation pending |
+| 5.4 | Publish immutable snapshots and versioned state-change events | **In Progress** | Accepted [`ADR-0029`](adr/ADR-0029-phase5-immutable-canonical-publication-and-versioned-change-feed.md); production implementation and owner demo pending |
 | 5.5 | Add idempotency windows, authority-epoch checks, state checksums, and explicit resync requests | **Not Started** | Duplicate/stale/epoch mismatch and divergence-repair tests pass |
 | 5.6 | Add persistence, replay, script, and metrics sink interfaces without implementations | **Not Started** | All sinks receive the same committed change record after, never before, commit |
 | 5.7 | Add reducer property tests and deterministic multi-client simulation tests | **Not Started** | Randomized command streams preserve invariants and reproduce by seed |
@@ -3327,6 +3327,30 @@ Implementation notes:
     the approved immutable publication, state version, domain change records,
     reader gap handling, observability, and focused tests. Slice 5.5 and online
     composition remain gated.
+
+- 2026-08-28 — Slice 5.4 — In Progress
+  - Change: recorded owner approval of
+    [`ADR-0029`](adr/ADR-0029-phase5-immutable-canonical-publication-and-versioned-change-feed.md)
+    Option A for Decisions 1–5 and the proposed acceptance tests. No production
+    publication or reducer code changed in this decision-acceptance commit.
+  - Decisions: publication is reducer-integrated and immutable; one checked
+    global version advances per installed canonical candidate; snapshots contain
+    complete Phase 5 state and changes contain typed complete replacements; the
+    core retains only the latest bounded batch and recovers version gaps from its
+    snapshot; and readers receive immutable handles with no acknowledgement,
+    callback, queue wait, shared lock, or writer backpressure. Protocol/interest,
+    sinks, checksum/resync, and online composition remain gated.
+  - Verification: staged baseline provenance accounts for 184 intentional
+    differences and verifies 54 dependency inputs. The provenance JSON parses,
+    all 103 local vNext Markdown links resolve, accepted ADR/register assertions
+    pass, and staged diff checks pass. A product build and runtime tests are not
+    applicable because this decision-acceptance change modifies no production
+    source, schema, decoder, or corpus.
+  - Owner review: architecture and state-scope approval is complete from the
+    project owner in the 2026-08-28 working session. Implementation and demo
+    acceptance remain pending.
+  - Follow-ups: implement only the approved Slice 5.4 publication surface and
+    tests. Slice 5.5 and online reducer composition remain gated.
 
 ### Phase 6 — Maintained transport and secure network session
 
