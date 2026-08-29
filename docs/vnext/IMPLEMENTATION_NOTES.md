@@ -3879,6 +3879,30 @@ only the relevant phase section here.
     derivation, limiter/provider composition, redaction scan, and focused
     encrypted loopback. The hosted matrix remains the Phase 6 exit gate.
 
+- 2026-08-28 — Slice 6.3 transport admission-scope review — In Progress
+  - Change: repository inspection found that accepted ADR-0034 defines the
+    private IPv4/IPv6 source scope but neither its owned transport handoff nor
+    exact process-keyed derivation. Added proposed
+    [`ADR-0035`](adr/ADR-0035-phase6-transport-admission-scope-handoff-and-derivation.md)
+    with focused options and tests. No production source, target, dependency,
+    authority, state, or gameplay behavior changed.
+  - Decisions: none accepted. Recommend an optional opaque scope carried
+    atomically by only `ConnectionAccepted` events and HMAC-SHA-256 over a
+    fixed domain/family tag plus canonical IPv4 address or IPv6 /64 using a
+    fresh runtime key. Query and separate-event handoffs plus custom keyed-hash
+    and retained-address-map derivations remain viable alternatives.
+  - Verification: `python -m unittest discover -s scripts/tests -q` passes all
+    112 repository-owned tests. `python scripts/verify_vnext_baseline.py
+    --index` accounts for 237 intentional differences, verifies all 67
+    dependency inputs, and passes indexed provenance. `git diff --check`
+    passes. Product build, C++ formatting, loopback, and sanitizer checks are
+    not applicable because dependent production remains gated.
+  - Owner review: pending explicit approval or amendment of ADR-0035 Decisions
+    1 and 2 and the proposed focused tests. Slice 6.3 remains **In Progress**.
+  - Follow-ups: after approval, record the accepted options and implement only
+    scope handoff/derivation plus focused contracts before composing the
+    limiter/provider and encrypted authentication loopback.
+
 ## Phase 7 — Headless end-to-end multiplayer slice
 
 [Back to the phase tracker](IMPLEMENTATION_PLAN.md#phase-7--headless-end-to-end-multiplayer-slice)

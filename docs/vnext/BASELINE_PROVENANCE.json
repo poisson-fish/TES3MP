@@ -960,6 +960,11 @@
       "purpose": "Owner-gated Phase 6 decision packet for bounded join-password messages, routing-only resume claims, token rotation and lifetime, credential rate limiting, cryptographic ownership, and redaction."
     },
     {
+      "path": "docs/vnext/adr/ADR-0035-phase6-transport-admission-scope-handoff-and-derivation.md",
+      "status": "A",
+      "purpose": "Proposed owner-gated Phase 6 decision packet for the opaque transport admission-scope handoff and private process-keyed IPv4/IPv6-prefix derivation."
+    },
+    {
       "path": "docs/vnext/gdr/GDR-0011-phase4-minimal-player-exchange-semantics.md",
       "status": "A",
       "purpose": "Owner-approved Phase 4 player-motion intent, authority separation, session-targeted snapshot scope, and confirmed-client-state semantics."
