@@ -249,9 +249,10 @@ behavior remain separately gated. Slice 6.3 is **In Progress** under accepted
 production artifacts add the approved bounded credential messages, move-only
 secret and admission values, exact generated schemas, corpus/fuzz registration,
 bounded digest-only transactional resume store, and fixed-work optional
-join-password provider with process-local non-reused routing principals.
-Rate-limit, private-crypto, transport scope, composition, and redaction/loopback
-closure work remains.
+join-password provider with process-local non-reused routing principals. The
+approved opaque admission-scope value and bounded global/source token-bucket
+limiter also pass focused contracts. Private crypto, transport scope derivation,
+composition, and redaction/loopback closure work remains.
 
 ## References and license
 

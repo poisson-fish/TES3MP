@@ -135,6 +135,11 @@
       "purpose": "Atomic client session-state transitions for encrypted readiness, negotiation, authentication, deadlines, rejection, cancellation, and closure."
     },
     {
+      "path": "components/tes3mp/include/tes3mp/admission_scope.hpp",
+      "status": "A",
+      "purpose": "Owner-approved opaque fixed-size admission-scope value shared across the existing protocol, transport, and server-core target graph."
+    },
+    {
       "path": "components/tes3mp/include/tes3mp/authentication.hpp",
       "status": "A",
       "purpose": "Move-only bounded opaque authentication material and pollable session-owned provider operation boundary."
@@ -1296,7 +1301,7 @@
         },
         {
           "path": "components/tes3mp/CMakeLists.txt",
-          "sha256": "8ddc407231216bc16313319a2fd6821fbae739a9774aaa19b3443db056fc9ad1"
+          "sha256": "deda03ed211ae66e23b8966597dfe822d1f41a1c158d67879ff3e2a65669e763"
         },
         {
           "path": "components/tes3mp/protocol/generated/authentication_accepted_generated.h",

@@ -1,6 +1,7 @@
 #ifndef TES3MP_SERVER_AUTHENTICATION_HPP
 #define TES3MP_SERVER_AUTHENTICATION_HPP
 
+#include "admission_scope.hpp"
 #include "authentication.hpp"
 #include "monotonic_clock.hpp"
 
@@ -18,6 +19,96 @@ namespace TES3MP
 {
     inline constexpr std::size_t CredentialDigestBytes = 32;
     inline constexpr std::size_t MaximumResumeTokenRecords = 256;
+    inline constexpr std::size_t MaximumAuthenticationAdmissionScopes = 256;
+    inline constexpr std::size_t MinimumSourceAuthenticationBurst = 1;
+    inline constexpr std::size_t MaximumSourceAuthenticationBurst = 16;
+    inline constexpr std::size_t MinimumGlobalAuthenticationBurst = 1;
+    inline constexpr std::size_t MaximumGlobalAuthenticationBurst = 256;
+    inline constexpr std::uint64_t MinimumAuthenticationRefillMilliseconds = 100;
+    inline constexpr std::uint64_t MaximumAuthenticationRefillMilliseconds = 120'000;
+
+    class AuthenticationRateLimitPolicy
+    {
+    public:
+        static std::optional<AuthenticationRateLimitPolicy> create(std::size_t sourceBurst, std::size_t globalBurst,
+            std::uint64_t sourceRefillMilliseconds, std::uint64_t globalRefillMilliseconds) noexcept;
+
+        std::size_t sourceBurst() const noexcept { return mSourceBurst; }
+        std::size_t globalBurst() const noexcept { return mGlobalBurst; }
+        std::uint64_t sourceRefillMilliseconds() const noexcept { return mSourceRefillMilliseconds; }
+        std::uint64_t globalRefillMilliseconds() const noexcept { return mGlobalRefillMilliseconds; }
+
+    private:
+        AuthenticationRateLimitPolicy(std::size_t sourceBurst, std::size_t globalBurst,
+            std::uint64_t sourceRefillMilliseconds, std::uint64_t globalRefillMilliseconds) noexcept
+            : mSourceBurst(sourceBurst)
+            , mGlobalBurst(globalBurst)
+            , mSourceRefillMilliseconds(sourceRefillMilliseconds)
+            , mGlobalRefillMilliseconds(globalRefillMilliseconds)
+        {
+        }
+
+        std::size_t mSourceBurst;
+        std::size_t mGlobalBurst;
+        std::uint64_t mSourceRefillMilliseconds;
+        std::uint64_t mGlobalRefillMilliseconds;
+    };
+
+    enum class AuthenticationRateLimitResult : std::uint8_t
+    {
+        Allowed,
+        GlobalExhausted,
+        SourceExhausted,
+        SourceTableFull,
+        ClockRegressed,
+    };
+
+    class AuthenticationRateLimiter
+    {
+    public:
+        static std::unique_ptr<AuthenticationRateLimiter> create(
+            AuthenticationRateLimitPolicy policy, MonotonicInstant now) noexcept;
+
+        AuthenticationRateLimiter(const AuthenticationRateLimiter&) = delete;
+        AuthenticationRateLimiter& operator=(const AuthenticationRateLimiter&) = delete;
+        AuthenticationRateLimiter(AuthenticationRateLimiter&&) = delete;
+        AuthenticationRateLimiter& operator=(AuthenticationRateLimiter&&) = delete;
+
+        AuthenticationRateLimitResult allow(const AdmissionScopeId& scope, MonotonicInstant now) noexcept;
+        std::size_t trackedScopes() const noexcept;
+
+    private:
+        struct Bucket
+        {
+            std::size_t tokens;
+            MonotonicInstant lastRefill;
+        };
+
+        struct SourceBucket
+        {
+            AdmissionScopeId scope;
+            Bucket bucket;
+        };
+
+        AuthenticationRateLimiter(AuthenticationRateLimitPolicy policy, MonotonicInstant now) noexcept
+            : mPolicy(policy)
+            , mGlobal{ policy.globalBurst(), now }
+            , mLastAttempt(now)
+        {
+        }
+
+        static void refill(
+            Bucket& bucket, std::size_t capacity, std::uint64_t intervalNanoseconds, MonotonicInstant now) noexcept;
+        std::optional<std::size_t> find(const AdmissionScopeId& scope) const noexcept;
+        std::optional<std::size_t> emptySlot() const noexcept;
+
+        AuthenticationRateLimitPolicy mPolicy;
+        Bucket mGlobal;
+        MonotonicInstant mLastAttempt;
+        mutable std::mutex mMutex;
+        std::array<std::optional<SourceBucket>, MaximumAuthenticationAdmissionScopes> mSources{};
+        std::size_t mTrackedScopes = 0;
+    };
 
     struct CredentialDigest
     {

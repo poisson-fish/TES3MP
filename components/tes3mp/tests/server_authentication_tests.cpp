@@ -8,6 +8,7 @@
 #include <iostream>
 #include <limits>
 #include <optional>
+#include <ostream>
 #include <span>
 #include <string_view>
 #include <thread>
@@ -22,6 +23,15 @@ namespace
     static_assert(!std::is_copy_constructible_v<ResumeAdmissionGrant>);
     static_assert(!std::is_copy_constructible_v<AuthenticatedAdmission>);
     static_assert(std::variant_size_v<AuthenticationResult> == 2);
+
+    template <class T>
+    concept Streamable = requires(std::ostream& stream, const T& value) { stream << value; };
+
+    template <class T>
+    concept HasBytesAccessor = requires(const T& value) { value.bytes(); };
+
+    static_assert(!Streamable<AdmissionScopeId>);
+    static_assert(!HasBytesAccessor<AdmissionScopeId>);
 
     class FakeCrypto final : public CredentialCrypto
     {
@@ -101,6 +111,26 @@ namespace
         return *AuthenticationMaterial::create(bytes);
     }
 
+    AdmissionScopeId scope(std::uint64_t value)
+    {
+        std::array<std::byte, AdmissionScopeIdBytes> bytes{};
+        for (std::size_t index = 0; index < sizeof(value); ++index)
+            bytes[index] = static_cast<std::byte>((value >> (index * 8u)) & 0xffu);
+        return *AdmissionScopeId::create(bytes);
+    }
+
+    MonotonicInstant milliseconds(std::uint64_t value)
+    {
+        return MonotonicInstant::fromNanoseconds(value * 1'000'000);
+    }
+
+    AuthenticationRateLimitPolicy ratePolicy(std::size_t sourceBurst = 2, std::size_t globalBurst = 4,
+        std::uint64_t sourceRefill = MinimumAuthenticationRefillMilliseconds,
+        std::uint64_t globalRefill = MinimumAuthenticationRefillMilliseconds)
+    {
+        return *AuthenticationRateLimitPolicy::create(sourceBurst, globalBurst, sourceRefill, globalRefill);
+    }
+
     std::optional<AuthenticatedAdmission> accepted(AuthenticationPollResult result)
     {
         auto* completion = std::get_if<AuthenticationCompletion>(&result);
@@ -165,6 +195,91 @@ namespace
         return completion && completion->attempt == attempt(8, 3) && rejection
             && rejection->reason == AuthenticationRejectionReason::Cancelled
             && std::holds_alternative<AuthenticationPending>(operation->poll());
+    }
+
+    bool admission_scope_is_exact_and_opaque()
+    {
+        std::array<std::byte, AdmissionScopeIdBytes> exact{};
+        std::array<std::byte, AdmissionScopeIdBytes - 1> shortValue{};
+        std::array<std::byte, AdmissionScopeIdBytes + 1> longValue{};
+        auto first = AdmissionScopeId::create(exact);
+        auto same = AdmissionScopeId::create(exact);
+        exact.back() = std::byte{ 1 };
+        auto different = AdmissionScopeId::create(exact);
+        return !AdmissionScopeId::create(shortValue) && first && same && different && *first == *same
+            && *first != *different && !AdmissionScopeId::create(longValue);
+    }
+
+    bool rate_policy_bounds_are_closed()
+    {
+        return !AuthenticationRateLimitPolicy::create(0, 1, 100, 100)
+            && AuthenticationRateLimitPolicy::create(1, 1, 100, 100)
+            && AuthenticationRateLimitPolicy::create(16, 256, 120'000, 120'000)
+            && !AuthenticationRateLimitPolicy::create(17, 256, 120'000, 120'000)
+            && !AuthenticationRateLimitPolicy::create(16, 257, 120'000, 120'000)
+            && !AuthenticationRateLimitPolicy::create(1, 1, 99, 100)
+            && !AuthenticationRateLimitPolicy::create(1, 1, 100, 120'001);
+    }
+
+    bool source_and_global_buckets_refill_at_exact_edges()
+    {
+        auto sourceLimited = AuthenticationRateLimiter::create(ratePolicy(2, 16), milliseconds(0));
+        if (sourceLimited->allow(scope(1), milliseconds(0)) != AuthenticationRateLimitResult::Allowed
+            || sourceLimited->allow(scope(1), milliseconds(0)) != AuthenticationRateLimitResult::Allowed
+            || sourceLimited->allow(scope(1), milliseconds(99)) != AuthenticationRateLimitResult::SourceExhausted
+            || sourceLimited->allow(scope(1), milliseconds(100)) != AuthenticationRateLimitResult::Allowed)
+            return false;
+
+        auto globalLimited = AuthenticationRateLimiter::create(ratePolicy(4, 2), milliseconds(0));
+        return globalLimited->allow(scope(1), milliseconds(0)) == AuthenticationRateLimitResult::Allowed
+            && globalLimited->allow(scope(2), milliseconds(0)) == AuthenticationRateLimitResult::Allowed
+            && globalLimited->allow(scope(3), milliseconds(99)) == AuthenticationRateLimitResult::GlobalExhausted
+            && globalLimited->allow(scope(3), milliseconds(100)) == AuthenticationRateLimitResult::Allowed;
+    }
+
+    bool source_state_survives_repeated_calls_and_table_saturation()
+    {
+        auto limiter = AuthenticationRateLimiter::create(ratePolicy(1, 256), milliseconds(0));
+        if (limiter->allow(scope(1), milliseconds(0)) != AuthenticationRateLimitResult::Allowed
+            || limiter->allow(scope(1), milliseconds(0)) != AuthenticationRateLimitResult::SourceExhausted
+            || limiter->trackedScopes() != 1)
+            return false;
+        for (std::size_t index = 2; index <= MaximumAuthenticationAdmissionScopes; ++index)
+        {
+            if (limiter->allow(scope(index), milliseconds(0)) != AuthenticationRateLimitResult::Allowed)
+                return false;
+        }
+        return limiter->trackedScopes() == MaximumAuthenticationAdmissionScopes
+            && limiter->allow(scope(MaximumAuthenticationAdmissionScopes + 1), milliseconds(100))
+            == AuthenticationRateLimitResult::SourceTableFull
+            && limiter->trackedScopes() == MaximumAuthenticationAdmissionScopes;
+    }
+
+    bool clock_regression_and_concurrent_attempts_fail_closed()
+    {
+        auto regressed = AuthenticationRateLimiter::create(ratePolicy(), milliseconds(10));
+        if (regressed->allow(scope(1), milliseconds(9)) != AuthenticationRateLimitResult::ClockRegressed
+            || regressed->trackedScopes() != 0)
+            return false;
+
+        auto concurrent = AuthenticationRateLimiter::create(ratePolicy(1, 8), milliseconds(0));
+        constexpr std::size_t Threads = 8;
+        std::barrier start(static_cast<std::ptrdiff_t>(Threads + 1));
+        std::array<AuthenticationRateLimitResult, Threads> results{};
+        std::vector<std::thread> workers;
+        for (std::size_t index = 0; index < Threads; ++index)
+        {
+            workers.emplace_back([&, index] {
+                start.arrive_and_wait();
+                results[index] = concurrent->allow(scope(2), milliseconds(0));
+            });
+        }
+        start.arrive_and_wait();
+        for (auto& worker : workers)
+            worker.join();
+        return std::count(results.begin(), results.end(), AuthenticationRateLimitResult::Allowed) == 1
+            && std::count(results.begin(), results.end(), AuthenticationRateLimitResult::SourceExhausted)
+            == Threads - 1;
     }
 
     bool policy_bounds_are_closed()
@@ -353,6 +468,13 @@ int main()
             join_password_provider_handles_open_protected_and_denied_inputs },
         Test{ "join_password_operation_is_cancellable_and_one_shot",
             join_password_operation_is_cancellable_and_one_shot },
+        Test{ "admission_scope_is_exact_and_opaque", admission_scope_is_exact_and_opaque },
+        Test{ "rate_policy_bounds_are_closed", rate_policy_bounds_are_closed },
+        Test{ "source_and_global_buckets_refill_at_exact_edges", source_and_global_buckets_refill_at_exact_edges },
+        Test{ "source_state_survives_repeated_calls_and_table_saturation",
+            source_state_survives_repeated_calls_and_table_saturation },
+        Test{ "clock_regression_and_concurrent_attempts_fail_closed",
+            clock_regression_and_concurrent_attempts_fail_closed },
         Test{ "policy_bounds_are_closed", policy_bounds_are_closed },
         Test{ "issue_resume_rotate_and_replay_are_atomic", issue_resume_rotate_and_replay_are_atomic },
         Test{ "precommit_failures_preserve_the_old_token", precommit_failures_preserve_the_old_token },

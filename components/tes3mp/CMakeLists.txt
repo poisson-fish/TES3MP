@@ -67,6 +67,7 @@ endfunction()
 tes3mp_add_engine_independent_library(tes3mp_protocol protocol/anchor.cpp)
 add_library(TES3MP::Protocol ALIAS tes3mp_protocol)
 target_sources(tes3mp_protocol PRIVATE
+    include/tes3mp/admission_scope.hpp
     include/tes3mp/authentication.hpp
     include/tes3mp/command_primitives.hpp
     include/tes3mp/protocol_envelope.hpp

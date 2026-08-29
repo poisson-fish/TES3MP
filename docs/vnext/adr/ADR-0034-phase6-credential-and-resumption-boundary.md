@@ -6,6 +6,8 @@ Date opened: 2026-08-28
 
 Date approved: 2026-08-28
 
+Date amended: 2026-08-28
+
 Decision owner: project owner
 
 Needed by: Phase 6 Slice 6.3
@@ -42,6 +44,12 @@ The project owner approved Option A for Decisions 1 through 5:
 5. use a bounded global plus privacy-preserving source-scope token-bucket gate,
    configured by validated caller policy, with one authentication submission
    per encrypted connection and no blocking sleeps.
+
+The owner later approved the narrow cross-target representation needed by
+Decision 5: `AdmissionScopeId` is a separate protocol-target-owned opaque
+32-byte value because protocol is the existing common dependency of transport
+and server core. It is not a wire value and exposes no address, byte accessor,
+formatting, or ordering. This preserves ADR-0014's accepted target graph.
 
 ## Existing constraints
 
@@ -289,6 +297,10 @@ cannot become **Implemented** before demo acceptance.
 
 Approved by the project owner in the 2026-08-28 working session: Option A for
 Decisions 1 through 5 and the proposed acceptance tests without amendment.
+
+The owner also approved the opaque common `AdmissionScopeId` representation
+described in the decision summary after implementation exposed its previously
+unspecified owning target.
 
 This approval does not select a release token lifetime or rate-limit default,
 player identity, canonical replacement behavior, reconnect grace/UX, or

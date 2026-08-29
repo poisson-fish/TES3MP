@@ -3817,6 +3817,38 @@ only the relevant phase section here.
     and focused encrypted loopback. The hosted matrix remains the Phase 6 exit
     gate.
 
+- 2026-08-28 — Slice 6.3 admission scope and rate limiter — In Progress
+  - Change: this implementation candidate adds the approved exact 32-byte
+    opaque `AdmissionScopeId` common value and a server-core global/source
+    token-bucket limiter. Caller policy is validated at the accepted 1–16
+    source burst, 1–256 global burst, and 100-millisecond–120-second refill
+    bounds. The limiter uses a fixed 256-entry source table, injected monotonic
+    time, bounded scans, no sleeps, no post-construction allocation, and
+    serialized admission.
+  - Decisions: after options review, the project owner approved the separate
+    protocol-target-owned opaque scope value (Option A), recorded as a narrow
+    ADR-0034 amendment. This preserves ADR-0014's target graph and exposes no
+    address, byte accessor, formatting, ordering, release default, account,
+    player identity, canonical state, authority, or gameplay behavior.
+  - Verification: MSVC 19.44 plus `cmake --build
+    build/tes3mp-standalone --config Debug --target
+    tes3mp_protocol_tests_run --parallel 2` passes the complete standalone
+    contract target. Focused contracts cover exact scope construction and
+    opacity, every policy edge, exact source/global refill edges, repeated-scope
+    bypass resistance, fixed-table saturation, clock regression, and concurrent
+    same-scope attempts. `python -m unittest discover -s scripts/tests -q`
+    passes all 112 repository-owned tests. Indexed baseline provenance accounts
+    for 234 intentional differences and verifies all 67 dependency inputs.
+    Four-file `clang-format --dry-run --Werror` and `git diff --check` pass.
+  - Owner review: accepted ADR-0034 applies, and the project owner explicitly
+    approved Option A for the newly surfaced scope-type placement. Full Slice
+    6.3 implementation-demo acceptance remains pending remaining artifacts and
+    scenarios.
+  - Follow-ups: implement private verified OpenSSL services, transport-side
+    process-keyed IPv4/IPv6 scope derivation, limiter/provider composition,
+    redaction scan, and focused encrypted loopback. The hosted matrix remains
+    the Phase 6 exit gate.
+
 ## Phase 7 — Headless end-to-end multiplayer slice
 
 [Back to the phase tracker](IMPLEMENTATION_PLAN.md#phase-7--headless-end-to-end-multiplayer-slice)

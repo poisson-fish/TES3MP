@@ -8,6 +8,105 @@
 
 namespace TES3MP
 {
+    std::optional<AuthenticationRateLimitPolicy> AuthenticationRateLimitPolicy::create(std::size_t sourceBurst,
+        std::size_t globalBurst, std::uint64_t sourceRefillMilliseconds,
+        std::uint64_t globalRefillMilliseconds) noexcept
+    {
+        if (sourceBurst < MinimumSourceAuthenticationBurst || sourceBurst > MaximumSourceAuthenticationBurst
+            || globalBurst < MinimumGlobalAuthenticationBurst || globalBurst > MaximumGlobalAuthenticationBurst
+            || sourceRefillMilliseconds < MinimumAuthenticationRefillMilliseconds
+            || sourceRefillMilliseconds > MaximumAuthenticationRefillMilliseconds
+            || globalRefillMilliseconds < MinimumAuthenticationRefillMilliseconds
+            || globalRefillMilliseconds > MaximumAuthenticationRefillMilliseconds)
+            return std::nullopt;
+        return AuthenticationRateLimitPolicy(
+            sourceBurst, globalBurst, sourceRefillMilliseconds, globalRefillMilliseconds);
+    }
+
+    std::unique_ptr<AuthenticationRateLimiter> AuthenticationRateLimiter::create(
+        AuthenticationRateLimitPolicy policy, MonotonicInstant now) noexcept
+    {
+        return std::unique_ptr<AuthenticationRateLimiter>(new (std::nothrow) AuthenticationRateLimiter(policy, now));
+    }
+
+    void AuthenticationRateLimiter::refill(
+        Bucket& bucket, std::size_t capacity, std::uint64_t intervalNanoseconds, MonotonicInstant now) noexcept
+    {
+        const auto elapsed = now.nanoseconds() - bucket.lastRefill.nanoseconds();
+        const auto additions = elapsed / intervalNanoseconds;
+        if (additions == 0)
+            return;
+        const auto missing = capacity - bucket.tokens;
+        if (additions >= missing)
+        {
+            bucket.tokens = capacity;
+            bucket.lastRefill = now;
+            return;
+        }
+        bucket.tokens += static_cast<std::size_t>(additions);
+        bucket.lastRefill
+            = MonotonicInstant::fromNanoseconds(bucket.lastRefill.nanoseconds() + additions * intervalNanoseconds);
+    }
+
+    std::optional<std::size_t> AuthenticationRateLimiter::find(const AdmissionScopeId& scope) const noexcept
+    {
+        for (std::size_t index = 0; index < mSources.size(); ++index)
+        {
+            if (mSources[index] && mSources[index]->scope == scope)
+                return index;
+        }
+        return std::nullopt;
+    }
+
+    std::optional<std::size_t> AuthenticationRateLimiter::emptySlot() const noexcept
+    {
+        for (std::size_t index = 0; index < mSources.size(); ++index)
+        {
+            if (!mSources[index])
+                return index;
+        }
+        return std::nullopt;
+    }
+
+    AuthenticationRateLimitResult AuthenticationRateLimiter::allow(
+        const AdmissionScopeId& scope, MonotonicInstant now) noexcept
+    {
+        constexpr std::uint64_t NanosecondsPerMillisecond = 1'000'000;
+        const std::scoped_lock lock(mMutex);
+        if (now < mLastAttempt)
+            return AuthenticationRateLimitResult::ClockRegressed;
+        mLastAttempt = now;
+
+        refill(mGlobal, mPolicy.globalBurst(), mPolicy.globalRefillMilliseconds() * NanosecondsPerMillisecond, now);
+        if (mGlobal.tokens == 0)
+            return AuthenticationRateLimitResult::GlobalExhausted;
+
+        if (const auto existing = find(scope))
+        {
+            auto& source = mSources[*existing]->bucket;
+            refill(source, mPolicy.sourceBurst(), mPolicy.sourceRefillMilliseconds() * NanosecondsPerMillisecond, now);
+            if (source.tokens == 0)
+                return AuthenticationRateLimitResult::SourceExhausted;
+            --source.tokens;
+            --mGlobal.tokens;
+            return AuthenticationRateLimitResult::Allowed;
+        }
+
+        const auto slot = emptySlot();
+        if (!slot)
+            return AuthenticationRateLimitResult::SourceTableFull;
+        mSources[*slot] = SourceBucket{ scope, Bucket{ mPolicy.sourceBurst() - 1, now } };
+        ++mTrackedScopes;
+        --mGlobal.tokens;
+        return AuthenticationRateLimitResult::Allowed;
+    }
+
+    std::size_t AuthenticationRateLimiter::trackedScopes() const noexcept
+    {
+        const std::scoped_lock lock(mMutex);
+        return mTrackedScopes;
+    }
+
     namespace
     {
         constexpr std::size_t ComparedPasswordBytes = MaximumAuthenticationMaterialBytes + sizeof(std::uint16_t);
