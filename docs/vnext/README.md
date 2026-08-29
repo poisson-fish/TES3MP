@@ -11,8 +11,8 @@ conditional stretch target.
 
 ## Status
 
-Phases 0–5 are implemented. Phase 6 is in progress, with Slice 6.1 implemented
-and Slice 6.2 in progress under an accepted channel-semantics decision.
+Phases 0–5 are implemented. Phase 6 is in progress, with Slices 6.1 and 6.2
+implemented.
 The active tree is a provenance-verified OpenMW 0.51 baseline with:
 
 - engine-independent protocol, transport, client-session, server-core, and test
@@ -238,13 +238,13 @@ deterministic/loopback checks pass locally. Exact implementation candidate
 supported-platform and sanitizer lifecycle matrix in
 [`33215346506`](https://github.com/poisson-fish/TES3MP/actions/runs/33215346506),
 and all six retained artifact sets are internally verified and consistent.
-Slice 6.2 is **In Progress** under accepted
+Slice 6.2 is **Implemented** under accepted
 [`ADR-0033`](adr/ADR-0033-phase6-transport-channel-and-delivery-semantics.md):
 two fixed equal-scheduled channels, an owned bounded byte-delivery API, and
 minimal fail-closed semantics. Implementation `2f022fe4ad` and applicable local
-verification pass; owner implementation-demo acceptance remains required.
-Application queue/coalescing policy, product capacity, detailed telemetry, and
-gameplay behavior remain separately gated.
+verification pass, and the owner accepted the implementation demo. Application
+queue/coalescing policy, product capacity, detailed telemetry, and gameplay
+behavior remain separately gated. Slice 6.3 remains **Not Started**.
 
 ## References and license
 
