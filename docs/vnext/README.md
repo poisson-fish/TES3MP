@@ -252,10 +252,11 @@ bounded digest-only transactional resume store, and fixed-work optional
 join-password provider with process-local non-reused routing principals. The
 approved opaque admission-scope value, bounded global/source token-bucket
 limiter, and private exact-pinned OpenSSL 3.5.8 credential crypto provider also
-pass focused contracts. Proposed
+pass focused contracts. Accepted
 [`ADR-0035`](adr/ADR-0035-phase6-transport-admission-scope-handoff-and-derivation.md)
-gates the newly surfaced transport scope handoff and keyed-derivation boundary;
-composition, redaction, and loopback closure work remains.
+adds atomic accepted-event scope handoff and runtime-keyed HMAC-SHA-256 IPv4/
+IPv6-/64 derivation with no exposed address. Composition, redaction, and the
+complete authentication loopback closure work remains.
 
 ## References and license
 

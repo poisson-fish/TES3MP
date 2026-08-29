@@ -285,10 +285,12 @@ recency, idempotency, authority, and mutation. Application queues, coalescing,
 rate limits, slow-peer eviction, product capacity, and detailed telemetry remain
 later Phase 6 work.
 
-Phase 6 Slice 6.3 is in progress under accepted ADR-0034. The real-network
-profile now supplies server core with a private exact-pinned OpenSSL 3.5.8
-credential-crypto implementation for random token bytes, SHA-256 digests,
-constant-time comparison, and temporary-digest cleansing. The owned public
-factory exposes no OpenSSL type, and portable builds retain the injectable fake
-crypto boundary. Credential composition, transport-derived admission scopes,
-redaction closure, and encrypted loopback remain unfinished.
+Phase 6 Slice 6.3 is in progress under accepted ADR-0034 and ADR-0035. The
+real-network profile supplies server core with a private exact-pinned OpenSSL
+3.5.8 credential-crypto implementation for random token bytes, SHA-256 digests,
+constant-time comparison, and temporary-digest cleansing. The transport adapter
+now derives a runtime-keyed HMAC-SHA-256 scope from each inbound IPv4 address or
+IPv6 /64 and carries only the opaque value on its atomic accepted-connection
+event. Outbound and other lifecycle events carry no scope; no address or OpenSSL
+type crosses the public boundary. Credential composition, redaction closure,
+and the complete encrypted authentication loopback remain unfinished.

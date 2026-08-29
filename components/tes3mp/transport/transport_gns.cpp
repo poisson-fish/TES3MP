@@ -34,6 +34,9 @@
 #include <steam/steamnetworkingsockets.h>
 #include <steam/steamnetworkingsockets_flat.h>
 
+#include <openssl/crypto.h>
+#include <openssl/rand.h>
+
 namespace
 {
     using NumericAddress = TES3MP::Detail::NumericAddress;
@@ -337,9 +340,13 @@ namespace
     class GameNetworkingSocketsRuntime final : public TES3MP::TransportRuntime
     {
     public:
-        explicit GameNetworkingSocketsRuntime(TES3MP::TransportLimits limits)
+        GameNetworkingSocketsRuntime(TES3MP::TransportLimits limits, std::span<const std::byte> admissionScopeKey)
             : mLimits(limits)
         {
+            if (admissionScopeKey.size() != mAdmissionScopeKey.size())
+                return;
+            std::ranges::copy(admissionScopeKey, mAdmissionScopeKey.begin());
+            mAdmissionScopeKeyInitialized = true;
             SteamDatagramErrMsg error{};
             if (sActive != nullptr)
             {
@@ -372,6 +379,7 @@ namespace
             }
             if (mCaresInitialized)
                 ares_library_cleanup();
+            OPENSSL_cleanse(mAdmissionScopeKey.data(), mAdmissionScopeKey.size());
         }
 
         bool valid() const noexcept { return mValid; }
@@ -760,6 +768,7 @@ namespace
             HSteamNetConnection handle = k_HSteamNetConnection_Invalid;
             bool incomingPending = false;
             std::uint64_t generation = 0;
+            std::optional<TES3MP::AdmissionScopeId> admissionScope;
         };
 
         static ISteamNetworkingSockets* sockets() { return SteamNetworkingSockets(); }
@@ -782,6 +791,29 @@ namespace
             if (info.m_nUserData <= 0)
                 return std::nullopt;
             return static_cast<std::uint64_t>(info.m_nUserData);
+        }
+
+        std::optional<TES3MP::AdmissionScopeId> admissionScope(const SteamNetworkingIPAddr& address) const noexcept
+        {
+            if (!mAdmissionScopeKeyInitialized)
+                return std::nullopt;
+            if (address.IsIPv4())
+            {
+                const std::uint32_t value = address.GetIPv4();
+                std::array source{ static_cast<std::byte>(value >> 24), static_cast<std::byte>(value >> 16),
+                    static_cast<std::byte>(value >> 8), static_cast<std::byte>(value) };
+                const auto result = TES3MP::Detail::deriveAdmissionScope(
+                    mAdmissionScopeKey, TES3MP::Detail::NumericAddressFamily::Ipv4, source);
+                OPENSSL_cleanse(source.data(), source.size());
+                return result;
+            }
+            std::array<std::byte, 16> source{};
+            for (std::size_t index = 0; index < source.size(); ++index)
+                source[index] = static_cast<std::byte>(address.m_ipv6[index]);
+            const auto result = TES3MP::Detail::deriveAdmissionScope(
+                mAdmissionScopeKey, TES3MP::Detail::NumericAddressFamily::Ipv6, source);
+            OPENSSL_cleanse(source.data(), source.size());
+            return result;
         }
 
         template <class Id>
@@ -1041,7 +1073,7 @@ namespace
                 }
                 const std::uint64_t winningGeneration = winningCandidate->generation;
                 closeCandidates(attempt, info.m_hConn);
-                mConnections.emplace(*connection, Connection{ info.m_hConn, false, winningGeneration });
+                mConnections.emplace(*connection, Connection{ info.m_hConn, false, winningGeneration, std::nullopt });
                 if (!mConnectionHandles.bind(info.m_hConn, *connection, winningGeneration))
                 {
                     failRuntime(TES3MP::TransportFailure::DependencyFailure);
@@ -1086,6 +1118,13 @@ namespace
             const auto generation = allocateCallbackGeneration();
             if (!generation)
                 return;
+            const auto scope = admissionScope(info.m_info.m_addrRemote);
+            if (!scope)
+            {
+                SteamAPI_ISteamNetworkingSockets_CloseConnection(sockets(), info.m_hConn, 0, nullptr, false);
+                failRuntime(TES3MP::TransportFailure::DependencyFailure);
+                return;
+            }
             if (SteamAPI_ISteamNetworkingSockets_AcceptConnection(sockets(), info.m_hConn) != k_EResultOK)
             {
                 SteamAPI_ISteamNetworkingSockets_CloseConnection(sockets(), info.m_hConn, 0, nullptr, false);
@@ -1105,7 +1144,7 @@ namespace
                 return;
             }
             ++mIncomingPending;
-            mConnections.emplace(*connection, Connection{ info.m_hConn, true, *generation });
+            mConnections.emplace(*connection, Connection{ info.m_hConn, true, *generation, *scope });
             mIncomingListeners.emplace(*connection, listenerId);
         }
 
@@ -1124,7 +1163,8 @@ namespace
                 queue({ TES3MP::TransportEventKind::ConnectionAccepted, TES3MP::TransportFailure::None,
                     listener == mIncomingListeners.end() ? std::nullopt
                                                          : std::optional<TES3MP::ListenerId>(listener->second),
-                    std::nullopt, id });
+                    std::nullopt, id, std::nullopt, TES3MP::TransportSecurity::EncryptedUnauthenticated,
+                    found->second.admissionScope });
                 return;
             }
             if (info.m_info.m_eState == k_ESteamNetworkingConnectionState_ClosedByPeer
@@ -1158,6 +1198,8 @@ namespace
         std::deque<TES3MP::TransportEvent> mEvents;
         std::size_t mIncomingPending = 0;
         TES3MP::Detail::GenerationCounter mCallbackGenerations;
+        std::array<std::byte, TES3MP::AdmissionScopeIdBytes> mAdmissionScopeKey{};
+        bool mAdmissionScopeKeyInitialized = false;
         bool mCaresInitialized = false;
         bool mGnsInitialized = false;
         bool mValid = false;
@@ -1178,9 +1220,25 @@ namespace TES3MP
             || limits.connections > TransportLimits::MaxConnections || limits.retainedEvents == 0
             || limits.retainedEvents > TransportLimits::MaxRetainedEvents)
             return { TransportFactoryFailure::InvalidLimits, nullptr };
+        std::array<std::byte, AdmissionScopeIdBytes> key{};
+        if (RAND_bytes(reinterpret_cast<unsigned char*>(key.data()), static_cast<int>(key.size())) != 1)
+            return { TransportFactoryFailure::DependencyInitialization, nullptr };
+        auto result = Detail::makeGameNetworkingSocketsTransportWithAdmissionScopeKey(limits, key);
+        OPENSSL_cleanse(key.data(), key.size());
+        return result;
+    }
+}
+
+namespace TES3MP::Detail
+{
+    TransportFactoryResult makeGameNetworkingSocketsTransportWithAdmissionScopeKey(
+        TransportLimits limits, std::span<const std::byte> key) noexcept
+    {
+        if (key.size() != AdmissionScopeIdBytes)
+            return { TransportFactoryFailure::DependencyInitialization, nullptr };
         try
         {
-            auto runtime = std::make_unique<GameNetworkingSocketsRuntime>(limits);
+            auto runtime = std::make_unique<GameNetworkingSocketsRuntime>(limits, key);
             if (!runtime->valid())
                 return { runtime->factoryFailure(), nullptr };
             return { TransportFactoryFailure::None, std::move(runtime) };

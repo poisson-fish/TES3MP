@@ -112,7 +112,7 @@
     {
       "path": "components/tes3mp/CMakeLists.txt",
       "status": "A",
-      "purpose": "Defines the standalone-capable owned target graph, pinned FlatBuffers runtime input, opt-in verified GameNetworkingSockets/c-ares adapter and private OpenSSL credential crypto, selected-library focused tests, target-scoped safety registration, golden-corpus verification, and bounded parser fuzz targets."
+      "purpose": "Defines the standalone-capable owned target graph, pinned FlatBuffers runtime input, opt-in verified GameNetworkingSockets/c-ares adapter with private OpenSSL credential crypto and admission-scope HMAC, selected-library focused tests, target-scoped safety registration, golden-corpus verification, and bounded parser fuzz targets."
     },
     {
       "path": "components/tes3mp/CMakePresets.json",
@@ -292,7 +292,7 @@
     {
       "path": "components/tes3mp/include/tes3mp/transport.hpp",
       "status": "A",
-      "purpose": "Selected-library-free owned endpoint, bounded lifecycle and two-channel byte-delivery commands, opaque identity, closed result, security, failure, and value-event transport interface."
+      "purpose": "Selected-library-free owned endpoint, bounded lifecycle and two-channel byte-delivery commands, opaque identity and inbound admission scope, closed result, security, failure, and value-event transport interface."
     },
     {
       "path": "components/tes3mp/include/tes3mp/transport_gns.hpp",
@@ -742,12 +742,12 @@
     {
       "path": "components/tes3mp/tests/transport_gns_schedule_tests.cpp",
       "status": "A",
-      "purpose": "Deterministic fake-resolution and candidate-race checks for IPv6 preference, staggering, bounds, replay, cancellation, winner finality, handle generations, and exhaustion."
+      "purpose": "Deterministic fake-resolution, candidate-race, handle-generation, and keyed IPv4/IPv6 admission-scope checks including bounds, replay, cancellation, winner finality, and exhaustion."
     },
     {
       "path": "components/tes3mp/tests/transport_gns_tests.cpp",
       "status": "A",
-      "purpose": "Focused verified-adapter loopback, DNS/numeric connection, encryption claim, two-channel delivery under loss/reordering, size/drain bounds, capacity, cancellation, listener-stop, idempotency, shutdown, and overflow checks."
+      "purpose": "Focused verified-adapter loopback, DNS/numeric connection, encryption and inbound admission-scope claims, two-channel delivery under loss/reordering, size/drain bounds, capacity, cancellation, listener-stop, idempotency, shutdown, and overflow checks."
     },
     {
       "path": "components/tes3mp/tests/transport_lifecycle_tests.cpp",
@@ -767,17 +767,17 @@
     {
       "path": "components/tes3mp/transport/transport_gns.cpp",
       "status": "A",
-      "purpose": "Private caller-pumped c-ares and encrypted GameNetworkingSockets lifecycle adapter with bounded ownership, DNS, candidate racing, callback generations, and fail-closed events."
+      "purpose": "Private caller-pumped c-ares and encrypted GameNetworkingSockets lifecycle adapter with bounded ownership, DNS, candidate racing, callback generations, process-keyed admission scopes, and fail-closed events."
     },
     {
       "path": "components/tes3mp/transport/transport_gns_detail.cpp",
       "status": "A",
-      "purpose": "Selected-library-free bounded Happy Eyeballs scheduling, candidate finalization, and checked adapter callback-generation implementation."
+      "purpose": "Bounded Happy Eyeballs scheduling, candidate finalization, checked callback generations, and private OpenSSL HMAC admission-scope derivation implementation."
     },
     {
       "path": "components/tes3mp/transport/transport_gns_detail.hpp",
       "status": "A",
-      "purpose": "Private deterministic address-race, generation counter, and stale-handle binding seam shared by production and focused tests."
+      "purpose": "Private deterministic address-race, generation counter, stale-handle binding, and admission-scope derivation seam shared by production and focused tests."
     },
     {
       "path": "docs/vnext/BASELINE_PROVENANCE.json",
@@ -1316,7 +1316,7 @@
         },
         {
           "path": "components/tes3mp/CMakeLists.txt",
-          "sha256": "d8f4a7c5b1ba546189a471b70219edfd54096a1b217d789ead793596ce68cd7c"
+          "sha256": "e9a465a056a44044b6ae668d999ddca17e9df9b463c9760262e921f5cca47793"
         },
         {
           "path": "components/tes3mp/protocol/generated/authentication_accepted_generated.h",

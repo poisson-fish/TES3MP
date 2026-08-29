@@ -3903,6 +3903,31 @@ only the relevant phase section here.
     scope handoff/derivation plus focused contracts before composing the
     limiter/provider and encrypted authentication loopback.
 
+- 2026-08-28 — Slice 6.3 transport admission scope — In Progress
+  - Change: recorded owner approval of
+    [`ADR-0035`](adr/ADR-0035-phase6-transport-admission-scope-handoff-and-derivation.md)
+    Option A for both decisions and implemented its narrow boundary. Only
+    inbound `ConnectionAccepted` now carries an opaque `AdmissionScopeId`; the
+    private real adapter derives it with HMAC-SHA-256 from a fresh runtime key,
+    family domain separation, and canonical IPv4 or IPv6 /64 bytes. Key,
+    temporary digest, and construction failures cleanse or fail closed.
+  - Decisions: ADR-0035 is accepted without amendment. This adds no raw address
+    API, query/staleness path, account, player binding, canonical mutation,
+    authority, release default, reconnect UX, or gameplay behavior.
+  - Verification: the real-network MSVC build and focused deterministic scope,
+    encrypted GNS loopback, credential crypto, and server authentication
+    executables pass. The complete portable `tes3mp_protocol_tests_run` target
+    and all 14 target-boundary tests pass. All 112 repository-owned Python
+    tests pass. Indexed baseline provenance accounts for 237 intentional
+    differences and verifies all 67 dependency inputs. Six-file
+    `clang-format --dry-run --Werror` and staged whitespace checks pass.
+  - Owner review: architecture approval received in the 2026-08-28 working
+    session. Full Slice 6.3 implementation-demo acceptance remains pending its
+    remaining composition, redaction, and authentication-loopback scenarios.
+  - Follow-ups: compose the approved limiter/provider/session control path,
+    complete canary redaction scans and encrypted join/resume loopback, then
+    present the Slice 6.3 demo. The hosted matrix remains the Phase 6 exit gate.
+
 ## Phase 7 — Headless end-to-end multiplayer slice
 
 [Back to the phase tracker](IMPLEMENTATION_PLAN.md#phase-7--headless-end-to-end-multiplayer-slice)

@@ -1,7 +1,7 @@
 #ifndef TES3MP_TRANSPORT_GNS_DETAIL_HPP
 #define TES3MP_TRANSPORT_GNS_DETAIL_HPP
 
-#include "tes3mp/transport.hpp"
+#include "tes3mp/transport_gns.hpp"
 
 #include <chrono>
 #include <cstddef>
@@ -29,6 +29,12 @@ namespace TES3MP::Detail
 
         friend bool operator==(const NumericAddress&, const NumericAddress&) = default;
     };
+
+    std::optional<AdmissionScopeId> deriveAdmissionScope(
+        std::span<const std::byte> key, NumericAddressFamily family, std::span<const std::byte> address) noexcept;
+
+    TransportFactoryResult makeGameNetworkingSocketsTransportWithAdmissionScopeKey(
+        TransportLimits limits, std::span<const std::byte> key) noexcept;
 
     enum class ResolutionCompletion
     {

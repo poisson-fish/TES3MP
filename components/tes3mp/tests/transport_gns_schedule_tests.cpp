@@ -159,13 +159,69 @@ namespace
         return check(bindings.find(7, 43) == nullptr && bindings.find(7, 44) != nullptr,
             "retired listener generation still targeted an established connection");
     }
+
+    bool admissionScopeDerivationIsKeyedAndNormalized()
+    {
+        std::array<std::byte, TES3MP::AdmissionScopeIdBytes> key{};
+        std::array<std::byte, TES3MP::AdmissionScopeIdBytes> otherKey{};
+        key.front() = std::byte{ 1 };
+        otherKey.front() = std::byte{ 2 };
+        const std::array ipv4First{ std::byte{ 192 }, std::byte{ 0 }, std::byte{ 2 }, std::byte{ 1 } };
+        const std::array ipv4Other{ std::byte{ 192 }, std::byte{ 0 }, std::byte{ 2 }, std::byte{ 2 } };
+        const std::array ipv6First{ std::byte{ 0x20 }, std::byte{ 0x01 }, std::byte{ 0x0d }, std::byte{ 0xb8 },
+            std::byte{ 0 }, std::byte{ 1 }, std::byte{ 0 }, std::byte{ 2 }, std::byte{ 0 }, std::byte{ 0 },
+            std::byte{ 0 }, std::byte{ 0 }, std::byte{ 0 }, std::byte{ 0 }, std::byte{ 0 }, std::byte{ 1 } };
+        auto ipv6SamePrefix = ipv6First;
+        ipv6SamePrefix.back() = std::byte{ 2 };
+        auto ipv6OtherPrefix = ipv6First;
+        ipv6OtherPrefix[7] = std::byte{ 3 };
+
+        const auto first = TES3MP::Detail::deriveAdmissionScope(key, NumericAddressFamily::Ipv4, ipv4First);
+        const auto replay = TES3MP::Detail::deriveAdmissionScope(key, NumericAddressFamily::Ipv4, ipv4First);
+        const auto differentSource = TES3MP::Detail::deriveAdmissionScope(key, NumericAddressFamily::Ipv4, ipv4Other);
+        const auto differentKey = TES3MP::Detail::deriveAdmissionScope(otherKey, NumericAddressFamily::Ipv4, ipv4First);
+        const auto ipv6 = TES3MP::Detail::deriveAdmissionScope(key, NumericAddressFamily::Ipv6, ipv6First);
+        const auto samePrefix = TES3MP::Detail::deriveAdmissionScope(key, NumericAddressFamily::Ipv6, ipv6SamePrefix);
+        const auto otherPrefix = TES3MP::Detail::deriveAdmissionScope(key, NumericAddressFamily::Ipv6, ipv6OtherPrefix);
+        return check(first && replay && differentSource && differentKey && ipv6 && samePrefix && otherPrefix,
+                   "valid admission scopes did not derive")
+            && check(*first == *replay, "same runtime key and IPv4 source did not reproduce its scope")
+            && check(*first != *differentSource, "different IPv4 sources shared a scope")
+            && check(*first != *differentKey, "new runtime key did not unlink the IPv4 scope")
+            && check(*ipv6 == *samePrefix, "one IPv6 /64 did not share a scope")
+            && check(*ipv6 != *otherPrefix, "different IPv6 /64 values shared a scope")
+            && check(*first != *ipv6, "family domain separation failed");
+    }
+
+    bool admissionScopeDerivationRejectsInvalidKeyAndAddress()
+    {
+        std::array<std::byte, TES3MP::AdmissionScopeIdBytes> key{};
+        std::array<std::byte, TES3MP::AdmissionScopeIdBytes - 1> shortKey{};
+        std::array<std::byte, 4> ipv4{};
+        std::array<std::byte, 16> ipv6{};
+        const auto unknownFamily = static_cast<NumericAddressFamily>(255);
+        const auto invalidFactory = TES3MP::Detail::makeGameNetworkingSocketsTransportWithAdmissionScopeKey(
+            *TES3MP::TransportLimits::create(1, 8, 8, 128), shortKey);
+        return check(!invalidFactory
+                       && invalidFactory.failure == TES3MP::TransportFactoryFailure::DependencyInitialization,
+                   "invalid admission key did not fail runtime creation closed")
+            && check(!TES3MP::Detail::deriveAdmissionScope(shortKey, NumericAddressFamily::Ipv4, ipv4),
+                "short admission key was accepted")
+            && check(!TES3MP::Detail::deriveAdmissionScope(key, NumericAddressFamily::Ipv4, ipv6),
+                "IPv6-sized input was accepted as IPv4")
+            && check(!TES3MP::Detail::deriveAdmissionScope(key, NumericAddressFamily::Ipv6, ipv4),
+                "IPv4-sized input was accepted as IPv6")
+            && check(!TES3MP::Detail::deriveAdmissionScope(key, unknownFamily, ipv6),
+                "unknown admission address family was accepted");
+    }
 }
 
 int main()
 {
     return preferenceStaggerAndCapacityAreExact() && failureRetryWinnerAndCancellationAreTerminal()
             && sameSeedReplaysAndDifferentSeedsVary() && resultBoundsAndGenerationExhaustionFailClosed()
-            && reusedHandlesRejectDelayedGenerations()
+            && reusedHandlesRejectDelayedGenerations() && admissionScopeDerivationIsKeyedAndNormalized()
+            && admissionScopeDerivationRejectsInvalidKeyAndAddress()
         ? 0
         : 1;
 }

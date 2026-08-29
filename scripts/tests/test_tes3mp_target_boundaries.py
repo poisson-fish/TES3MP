@@ -361,6 +361,15 @@ class TES3MPTargetBoundaryTests(unittest.TestCase):
             "target_link_libraries(tes3mp_server_core PRIVATE OpenSSL::Crypto)",
             cmake_text,
         )
+        self.assertIn(
+            "PRIVATE GameNetworkingSockets::static c-ares::cares_static OpenSSL::Crypto",
+            cmake_text,
+        )
+        self.assertNotIn("<openssl/", abstraction)
+        adapter_detail = (
+            ENGINE_INDEPENDENT_SOURCE / "transport" / "transport_gns_detail.cpp"
+        ).read_text(encoding="utf-8")
+        self.assertIn("<openssl/evp.h>", adapter_detail)
 
     def test_selected_adapter_reuses_verified_abseil_package(self):
         cmake_text = (ENGINE_INDEPENDENT_SOURCE / "CMakeLists.txt").read_text(

@@ -1,6 +1,7 @@
 #ifndef TES3MP_TRANSPORT_HPP
 #define TES3MP_TRANSPORT_HPP
 
+#include "admission_scope.hpp"
 #include "protocol_frame.hpp"
 #include "strong_value.hpp"
 
@@ -213,6 +214,7 @@ namespace TES3MP
         std::optional<TransportConnectionId> connection;
         std::optional<ListenerEndpoint> boundEndpoint;
         TransportSecurity security = TransportSecurity::EncryptedUnauthenticated;
+        std::optional<AdmissionScopeId> admissionScope;
     };
 
     struct TransportPollResult

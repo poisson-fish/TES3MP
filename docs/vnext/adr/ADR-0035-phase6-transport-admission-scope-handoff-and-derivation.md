@@ -1,10 +1,12 @@
 # ADR-0035: Phase 6 transport admission-scope handoff and derivation
 
-Status: **Proposed**
+Status: **Accepted**
 
 Date opened: 2026-08-28
 
 Decision owner: project owner
+
+Date approved: 2026-08-28
 
 Needed by: Phase 6 Slice 6.3 closure
 
@@ -95,5 +97,5 @@ events and captured diagnostics.
 
 ## Owner approval gate
 
-Pending explicit owner approval or amendment of Decisions 1 and 2 and the
-focused tests. No dependent production implementation is authorized yet.
+Approved by the project owner in the 2026-08-28 working session: Option A for
+Decisions 1 and 2 and the proposed focused tests without amendment.

@@ -227,7 +227,7 @@ if(TES3MP_ENABLE_GNS_TRANSPORT)
         PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>)
     target_link_libraries(tes3mp_transport_gns
         PUBLIC tes3mp_transport
-        PRIVATE GameNetworkingSockets::static c-ares::cares_static)
+        PRIVATE GameNetworkingSockets::static c-ares::cares_static OpenSSL::Crypto)
     set_target_properties(tes3mp_transport_gns PROPERTIES FOLDER "TES3MP")
     tes3mp_enable_runtime_safety(tes3mp_transport_gns)
 

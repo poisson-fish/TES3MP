@@ -252,6 +252,10 @@ namespace
                 if (!check(event.security == TES3MP::TransportSecurity::EncryptedUnauthenticated,
                         "connection event made an invalid security claim"))
                     return false;
+                if (!check(event.admissionScope.has_value()
+                            == (event.kind == TES3MP::TransportEventKind::ConnectionAccepted),
+                        "admission scope escaped its accepted-inbound event"))
+                    return false;
                 connections.push_back(*event.connection);
                 if (event.kind == TES3MP::TransportEventKind::ConnectSucceeded)
                     clientConnection = event.connection;

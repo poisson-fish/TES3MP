@@ -1,10 +1,73 @@
 #include "transport_gns_detail.hpp"
 
 #include <algorithm>
+#include <array>
 #include <limits>
+#include <memory>
+#include <string_view>
+
+#include <openssl/core_names.h>
+#include <openssl/crypto.h>
+#include <openssl/evp.h>
+#include <openssl/params.h>
 
 namespace TES3MP::Detail
 {
+    std::optional<AdmissionScopeId> deriveAdmissionScope(
+        std::span<const std::byte> key, NumericAddressFamily family, std::span<const std::byte> address) noexcept
+    {
+        constexpr std::string_view Domain = "TES3MP admission scope v1";
+        std::size_t prefixBytes = 0;
+        std::size_t exactAddressBytes = 0;
+        unsigned char familyTag = 0;
+        switch (family)
+        {
+            case NumericAddressFamily::Ipv4:
+                prefixBytes = 4;
+                exactAddressBytes = 4;
+                familyTag = 4;
+                break;
+            case NumericAddressFamily::Ipv6:
+                prefixBytes = 8;
+                exactAddressBytes = 16;
+                familyTag = 6;
+                break;
+            default:
+                return std::nullopt;
+        }
+        if (key.size() != AdmissionScopeIdBytes || address.size() != exactAddressBytes)
+            return std::nullopt;
+
+        using Mac = std::unique_ptr<EVP_MAC, decltype(&EVP_MAC_free)>;
+        using Context = std::unique_ptr<EVP_MAC_CTX, decltype(&EVP_MAC_CTX_free)>;
+        Mac mac(EVP_MAC_fetch(nullptr, "HMAC", nullptr), &EVP_MAC_free);
+        if (!mac)
+            return std::nullopt;
+        Context context(EVP_MAC_CTX_new(mac.get()), &EVP_MAC_CTX_free);
+        if (!context)
+            return std::nullopt;
+
+        char digest[] = "SHA256";
+        OSSL_PARAM parameters[]
+            = { OSSL_PARAM_construct_utf8_string(OSSL_MAC_PARAM_DIGEST, digest, 0), OSSL_PARAM_construct_end() };
+        const auto* keyBytes = reinterpret_cast<const unsigned char*>(key.data());
+        const auto* domainBytes = reinterpret_cast<const unsigned char*>(Domain.data());
+        const auto* sourceBytes = reinterpret_cast<const unsigned char*>(address.data());
+        std::array<std::byte, AdmissionScopeIdBytes> output{};
+        std::size_t outputBytes = 0;
+        const bool completed = EVP_MAC_init(context.get(), keyBytes, key.size(), parameters) == 1
+            && EVP_MAC_update(context.get(), domainBytes, Domain.size()) == 1
+            && EVP_MAC_update(context.get(), &familyTag, 1) == 1
+            && EVP_MAC_update(context.get(), sourceBytes, prefixBytes) == 1
+            && EVP_MAC_final(
+                   context.get(), reinterpret_cast<unsigned char*>(output.data()), &outputBytes, output.size())
+                == 1
+            && outputBytes == output.size();
+        const auto result = completed ? AdmissionScopeId::create(output) : std::nullopt;
+        OPENSSL_cleanse(output.data(), output.size());
+        return result;
+    }
+
     void HappyEyeballsAttempt::addResolution(
         std::span<const NumericAddress> addresses, ResolutionCompletion completion, TimePoint now)
     {
