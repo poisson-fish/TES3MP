@@ -3928,6 +3928,29 @@ only the relevant phase section here.
     complete canary redaction scans and encrypted join/resume loopback, then
     present the Slice 6.3 demo. The hosted matrix remains the Phase 6 exit gate.
 
+- 2026-08-28 — Slice 6.3 authentication composition review — In Progress
+  - Change: inspection after ADR-0035 implementation found that the Phase 4
+    session API carries only untyped bytes and fixes session generation before
+    a resume token is inspected. Added proposed
+    [`ADR-0036`](adr/ADR-0036-phase6-authentication-composition-and-session-finalization.md)
+    with typed input, shared-service, failure, resume-install, and initial-token
+    finalization options. No production source, authority, state, or gameplay
+    behavior changed.
+  - Decisions: none accepted. Recommend one atomic typed submission to a shared
+    server-core service, exactly one global/source gate before join/resume
+    routing, state-machine-owned resume claim installation, and bind-then-issue
+    initial finalization with no tokenless success fallback.
+  - Verification: `python -m unittest discover -s scripts/tests -q` passes all
+    112 repository-owned tests. Indexed baseline provenance accounts for 238
+    intentional differences and verifies all 67 dependency inputs. `git diff
+    --check` passes. Product build, C++ formatting, loopback, and sanitizer
+    checks are not applicable because dependent production remains gated.
+  - Owner review: pending explicit approval or amendment of ADR-0036 Decisions
+    1–3 and the proposed tests. Slice 6.3 remains **In Progress**.
+  - Follow-ups: after approval, record the accepted options and implement only
+    the approved shared composition/finalization before redaction and complete
+    encrypted authentication loopback closure.
+
 ## Phase 7 — Headless end-to-end multiplayer slice
 
 [Back to the phase tracker](IMPLEMENTATION_PLAN.md#phase-7--headless-end-to-end-multiplayer-slice)

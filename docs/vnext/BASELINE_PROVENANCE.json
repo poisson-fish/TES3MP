@@ -965,6 +965,11 @@
       "purpose": "Proposed owner-gated Phase 6 decision packet for the opaque transport admission-scope handoff and private process-keyed IPv4/IPv6-prefix derivation."
     },
     {
+      "path": "docs/vnext/adr/ADR-0036-phase6-authentication-composition-and-session-finalization.md",
+      "status": "A",
+      "purpose": "Proposed owner-gated Phase 6 decision packet for typed authentication submission, shared limiter/provider routing, resume claim installation, and initial session/token finalization."
+    },
+    {
       "path": "docs/vnext/gdr/GDR-0011-phase4-minimal-player-exchange-semantics.md",
       "status": "A",
       "purpose": "Owner-approved Phase 4 player-motion intent, authority separation, session-targeted snapshot scope, and confirmed-client-state semantics."

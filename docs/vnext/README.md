@@ -255,8 +255,10 @@ limiter, and private exact-pinned OpenSSL 3.5.8 credential crypto provider also
 pass focused contracts. Accepted
 [`ADR-0035`](adr/ADR-0035-phase6-transport-admission-scope-handoff-and-derivation.md)
 adds atomic accepted-event scope handoff and runtime-keyed HMAC-SHA-256 IPv4/
-IPv6-/64 derivation with no exposed address. Composition, redaction, and the
-complete authentication loopback closure work remains.
+IPv6-/64 derivation with no exposed address. Proposed
+[`ADR-0036`](adr/ADR-0036-phase6-authentication-composition-and-session-finalization.md)
+gates the newly surfaced typed composition and session-finalization boundary;
+redaction and the complete authentication loopback closure work remains.
 
 ## References and license
 
