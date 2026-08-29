@@ -30,7 +30,7 @@ namespace TES3MP::TestSupport
 
             AuthenticationPollResult poll() noexcept override
             {
-                return AuthenticationCompletion{ mAttempt, AuthenticatedPrincipal{ mPrincipalId } };
+                return AuthenticationCompletion{ mAttempt, AuthenticatedAdmission::initial(mPrincipalId) };
             }
 
             void cancel() noexcept override {}

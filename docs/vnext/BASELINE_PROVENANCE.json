@@ -112,7 +112,7 @@
     {
       "path": "components/tes3mp/CMakeLists.txt",
       "status": "A",
-      "purpose": "Defines the standalone-capable owned target graph, pinned FlatBuffers runtime input, opt-in verified GameNetworkingSockets/c-ares adapter leaf and selected-library channel-fault tests, target-scoped safety registration, focused contract executables, golden-corpus verification, and bounded parser fuzz targets."
+      "purpose": "Defines the standalone-capable owned target graph, pinned FlatBuffers runtime input, opt-in verified GameNetworkingSockets/c-ares adapter leaf and selected-library channel-fault tests, target-scoped safety registration, focused protocol/server credential contracts, golden-corpus verification, and bounded parser fuzz targets."
     },
     {
       "path": "components/tes3mp/CMakePresets.json",
@@ -213,6 +213,11 @@
       "path": "components/tes3mp/include/tes3mp/protocol_handshake.hpp",
       "status": "A",
       "purpose": "Owned bounded protocol-version, capability-offer, hello, rejection, pure-negotiation, and initial-peer-classification API."
+    },
+    {
+      "path": "components/tes3mp/include/tes3mp/server_authentication.hpp",
+      "status": "A",
+      "purpose": "Owner-approved portable credential-crypto service and bounded digest-only transactional resume-token store boundary."
     },
     {
       "path": "components/tes3mp/include/tes3mp/server_command_intake.hpp",
@@ -438,6 +443,11 @@
       "path": "components/tes3mp/server_core/observability.cpp",
       "status": "A",
       "purpose": "Validation and construction for closed metric definitions/dimensions and typed structured events."
+    },
+    {
+      "path": "components/tes3mp/server_core/server_authentication.cpp",
+      "status": "A",
+      "purpose": "Bounded digest-only token issue, expiry, consume, checked generation, atomic rotation, rollback, and restart-invalidating in-memory store implementation."
     },
     {
       "path": "components/tes3mp/server_core/server_command_intake.cpp",
@@ -673,6 +683,11 @@
       "path": "components/tes3mp/tests/protocol_handshake_tests.cpp",
       "status": "A",
       "purpose": "Golden-corpus, deterministic property, exhaustive bit-mutation, owned round-trip, version-overlap, capability, rejection, malformed-wire, and legacy/no-reply contracts for Phase 4 negotiation."
+    },
+    {
+      "path": "components/tes3mp/tests/server_authentication_tests.cpp",
+      "status": "A",
+      "purpose": "Deterministic resume-token issue, rotation, replay, context, expiry, capacity, overflow, rollback, take-once, and restart-invalidation contracts."
     },
     {
       "path": "components/tes3mp/tests/server_command_intake_tests.cpp",
@@ -1281,7 +1296,7 @@
         },
         {
           "path": "components/tes3mp/CMakeLists.txt",
-          "sha256": "7b91586ef19ac9994ac1c061b1edd4a1febffd7efd6078f2a8bca1f229492b79"
+          "sha256": "8ddc407231216bc16313319a2fd6821fbae739a9774aaa19b3443db056fc9ad1"
         },
         {
           "path": "components/tes3mp/protocol/generated/authentication_accepted_generated.h",

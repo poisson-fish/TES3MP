@@ -306,9 +306,10 @@ namespace TES3MP
             }
             mAuthenticationOperation.reset();
             mDeadline.reset();
-            if (auto* principal = std::get_if<AuthenticatedPrincipal>(&completion.result))
+            if (auto* admission = std::get_if<AuthenticatedAdmission>(&completion.result))
             {
-                mPrincipal = *principal;
+                mPrincipal = admission->principal();
+                mResumeGrant = admission->takeResumeGrant();
                 mState = ServerSessionState::Established;
                 observe(SessionObservationOutcome::AuthenticationSucceeded, SessionObservationStage::Terminal);
                 return { ServerSessionAction::SessionEstablished, std::nullopt };

@@ -37,7 +37,7 @@ namespace
     static_assert(!std::is_default_constructible_v<AuthenticationMaterial>);
     static_assert(!EqualityComparable<AuthenticationMaterial>);
     static_assert(!StreamInsertable<AuthenticationMaterial>);
-    static_assert(sizeof(AuthenticatedPrincipal) == sizeof(PrincipalId));
+    static_assert(!std::is_copy_constructible_v<AuthenticatedAdmission>);
     static_assert(std::variant_size_v<AuthenticationResult> == 2);
     static_assert(std::variant_size_v<ServerSessionEvent> == 7);
     static_assert(std::variant_size_v<ClientSessionEvent> == 9);
@@ -130,13 +130,13 @@ namespace
             {
                 const auto wrong = mAttempt.id.next().value();
                 return AuthenticationCompletion{ AuthenticationAttempt{ wrong, mAttempt.generation },
-                    AuthenticatedPrincipal{ principal() } };
+                    AuthenticatedAdmission::initial(principal()) };
             }
             if (mMode == ProviderMode::WrongGenerationThenSuccess && mPollIndex++ == 0)
             {
                 const auto wrong = mAttempt.generation.next().value();
                 return AuthenticationCompletion{ AuthenticationAttempt{ mAttempt.id, wrong },
-                    AuthenticatedPrincipal{ principal() } };
+                    AuthenticatedAdmission::initial(principal()) };
             }
             if (mMode == ProviderMode::Rejected || mMode == ProviderMode::MalformedRejected)
             {
@@ -145,7 +145,7 @@ namespace
                             ? AuthenticationRejectionReason::MalformedInput
                             : AuthenticationRejectionReason::Denied } };
             }
-            return AuthenticationCompletion{ mAttempt, AuthenticatedPrincipal{ principal() } };
+            return AuthenticationCompletion{ mAttempt, AuthenticatedAdmission::initial(principal()) };
         }
 
         void cancel() noexcept override
@@ -414,7 +414,7 @@ namespace
                 return lifecycle != nullptr && lifecycle->outcome == SessionObservationOutcome::AuthenticationSucceeded;
             });
         return server->state() == ServerSessionState::Established && client->state() == ClientSessionState::Established
-            && server->principal() && server->principal()->id == principal() && server->negotiatedHello()
+            && server->principal() && *server->principal() == principal() && server->negotiatedHello()
             && client->negotiatedHello() && server->negotiatedHello()->selectedVersion() == ProtocolVersion{ 1, 1 }
         && provider.control->begins == 1 && provider.control->polls == 2
             && provider.control->observedBytes == canary.size() && provider.control->canaryMatched

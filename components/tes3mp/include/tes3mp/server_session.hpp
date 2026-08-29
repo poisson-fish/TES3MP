@@ -140,7 +140,13 @@ namespace TES3MP
         {
             return mAuthenticationRejection;
         }
-        const std::optional<AuthenticatedPrincipal>& principal() const noexcept { return mPrincipal; }
+        const std::optional<PrincipalId>& principal() const noexcept { return mPrincipal; }
+        std::optional<ResumeAdmissionGrant> takeResumeGrant() noexcept
+        {
+            auto result = std::move(mResumeGrant);
+            mResumeGrant.reset();
+            return result;
+        }
         std::optional<SessionId> sessionId() const noexcept { return mSessionId; }
 
     private:
@@ -167,7 +173,8 @@ namespace TES3MP
         std::optional<ServerHello> mNegotiatedHello;
         std::optional<SessionRejected> mProtocolRejection;
         std::optional<AuthenticationRejected> mAuthenticationRejection;
-        std::optional<AuthenticatedPrincipal> mPrincipal;
+        std::optional<PrincipalId> mPrincipal;
+        std::optional<ResumeAdmissionGrant> mResumeGrant;
         std::optional<SessionId> mSessionId;
     };
 }

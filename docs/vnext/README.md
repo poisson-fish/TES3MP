@@ -246,10 +246,11 @@ verification pass, and the owner accepted the implementation demo. Application
 queue/coalescing policy, product capacity, detailed telemetry, and gameplay
 behavior remain separately gated. Slice 6.3 is **In Progress** under accepted
 [`ADR-0034`](adr/ADR-0034-phase6-credential-and-resumption-boundary.md); its
-first production artifact adds the approved bounded credential messages,
-move-only secret values, exact generated schemas, corpus, and fuzz registration.
-Password-provider, rate-limit, resume-store, private-crypto, composition, and
-redaction/loopback closure work remains.
+production artifacts add the approved bounded credential messages, move-only
+secret and admission values, exact generated schemas, corpus/fuzz registration,
+and bounded digest-only transactional resume store. Password-provider,
+rate-limit, private-crypto, transport scope, composition, and redaction/loopback
+closure work remains.
 
 ## References and license
 

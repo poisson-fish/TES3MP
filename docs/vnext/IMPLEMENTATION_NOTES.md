@@ -3757,6 +3757,37 @@ only the relevant phase section here.
     encrypted loopback. No full hosted matrix runs until the Phase 6 exit
     candidate.
 
+- 2026-08-28 — Slice 6.3 admission result and resume store — In Progress
+  - Change: this implementation candidate replaces the principal-only provider
+    success with the approved move-only `AuthenticatedAdmission`, preserves the
+    initial-join path, and adds take-once resume routing claims. The server core
+    now owns a fixed 256-record, SHA-256-digest-only, in-memory token store with
+    caller-supplied 1-to-120-second lifetime, checked expiry/generation,
+    constant-time digest comparison, atomic consume-and-rotate, collision and
+    crypto-failure rollback, concurrent replay serialization, expiry
+    reclamation, and restart invalidation.
+  - Decisions: implements ADR-0034 Decisions 1, 3, and 4 without amendment. It
+    adds no lifetime default, player binding, canonical mutation, reconnect UX,
+    persistence, gameplay authority, concrete crypto dependency, limiter, or
+    transport composition.
+  - Verification: MSVC 19.44 plus `cmake --build
+    build/tes3mp-standalone --config Debug --target
+    tes3mp_protocol_tests_run --parallel 2` passes the complete standalone
+    contract target, including focused issue, rotation, replay, context,
+    exact-expiry, capacity, generation/deadline overflow, failure rollback,
+    concurrent duplicate, take-once, and restart tests. `python -m unittest
+    discover -s scripts/tests -q` passes all 112 repository-owned tests.
+    Eight-file `clang-format
+    --dry-run --Werror` and `git diff --check` pass. Indexed baseline provenance
+    accounts for 233 intentional differences and verifies all 67 dependency
+    inputs.
+  - Owner review: ADR approval applies. Full Slice 6.3 implementation-demo
+    acceptance remains pending its remaining artifacts and scenarios.
+  - Follow-ups: implement the approved optional password provider, global/source
+    limiter, private verified OpenSSL service, transport admission scope,
+    composition, redaction scan, and focused encrypted loopback. The hosted
+    matrix remains the Phase 6 exit gate.
+
 ## Phase 7 — Headless end-to-end multiplayer slice
 
 [Back to the phase tracker](IMPLEMENTATION_PLAN.md#phase-7--headless-end-to-end-multiplayer-slice)

@@ -23,6 +23,8 @@ namespace TES3MP
 
     class AuthenticationRequest;
     class AuthenticationAcceptedMessage;
+    class ResumeAdmissionGrant;
+    class ResumeTokenStore;
     struct AuthenticationCodecError;
 
     class AuthenticationMaterial
@@ -67,6 +69,7 @@ namespace TES3MP
     private:
         friend class AuthenticationRequest;
         friend class AuthenticationAcceptedMessage;
+        friend class ResumeTokenStore;
         friend std::vector<std::byte> encodeAuthenticationRequest(const AuthenticationRequest& value);
         friend std::vector<std::byte> encodeAuthenticationAccepted(const AuthenticationAcceptedMessage& value);
 
@@ -209,11 +212,75 @@ namespace TES3MP
         friend constexpr bool operator==(AuthenticationAttempt, AuthenticationAttempt) noexcept = default;
     };
 
-    struct AuthenticatedPrincipal
+    class ResumeAdmissionGrant
     {
-        PrincipalId id;
+    public:
+        ResumeAdmissionGrant(const ResumeAdmissionGrant&) = delete;
+        ResumeAdmissionGrant& operator=(const ResumeAdmissionGrant&) = delete;
+        ResumeAdmissionGrant(ResumeAdmissionGrant&&) noexcept = default;
+        ResumeAdmissionGrant& operator=(ResumeAdmissionGrant&&) noexcept = default;
 
-        friend constexpr bool operator==(AuthenticatedPrincipal, AuthenticatedPrincipal) noexcept = default;
+        SessionId sessionId() const noexcept { return mSessionId; }
+        SessionGeneration priorGeneration() const noexcept { return mPriorGeneration; }
+        SessionGeneration nextGeneration() const noexcept { return mNextGeneration; }
+        std::optional<AuthenticationAcceptedMessage> takeResponse() noexcept
+        {
+            auto result = std::move(mResponse);
+            mResponse.reset();
+            return result;
+        }
+
+    private:
+        friend class ResumeTokenStore;
+
+        ResumeAdmissionGrant(SessionId sessionId, SessionGeneration priorGeneration, SessionGeneration nextGeneration,
+            AuthenticationAcceptedMessage response) noexcept
+            : mSessionId(sessionId)
+            , mPriorGeneration(priorGeneration)
+            , mNextGeneration(nextGeneration)
+            , mResponse(std::move(response))
+        {
+        }
+
+        SessionId mSessionId;
+        SessionGeneration mPriorGeneration;
+        SessionGeneration mNextGeneration;
+        std::optional<AuthenticationAcceptedMessage> mResponse;
+    };
+
+    class AuthenticatedAdmission
+    {
+    public:
+        static AuthenticatedAdmission initial(PrincipalId principal) noexcept
+        {
+            return AuthenticatedAdmission(principal, std::nullopt);
+        }
+
+        AuthenticatedAdmission(const AuthenticatedAdmission&) = delete;
+        AuthenticatedAdmission& operator=(const AuthenticatedAdmission&) = delete;
+        AuthenticatedAdmission(AuthenticatedAdmission&&) noexcept = default;
+        AuthenticatedAdmission& operator=(AuthenticatedAdmission&&) noexcept = default;
+
+        PrincipalId principal() const noexcept { return mPrincipal; }
+        bool isResume() const noexcept { return mResume.has_value(); }
+        std::optional<ResumeAdmissionGrant> takeResumeGrant() noexcept
+        {
+            auto result = std::move(mResume);
+            mResume.reset();
+            return result;
+        }
+
+    private:
+        friend class ResumeTokenStore;
+
+        AuthenticatedAdmission(PrincipalId principal, std::optional<ResumeAdmissionGrant> resume) noexcept
+            : mPrincipal(principal)
+            , mResume(std::move(resume))
+        {
+        }
+
+        PrincipalId mPrincipal;
+        std::optional<ResumeAdmissionGrant> mResume;
     };
 
     struct AuthenticationRejected
@@ -223,7 +290,7 @@ namespace TES3MP
         friend constexpr bool operator==(AuthenticationRejected, AuthenticationRejected) noexcept = default;
     };
 
-    using AuthenticationResult = std::variant<AuthenticatedPrincipal, AuthenticationRejected>;
+    using AuthenticationResult = std::variant<AuthenticatedAdmission, AuthenticationRejected>;
 
     struct AuthenticationPending
     {
@@ -234,9 +301,6 @@ namespace TES3MP
     {
         AuthenticationAttempt attempt;
         AuthenticationResult result;
-
-        friend constexpr bool operator==(const AuthenticationCompletion&, const AuthenticationCompletion&) noexcept
-            = default;
     };
 
     using AuthenticationPollResult = std::variant<AuthenticationPending, AuthenticationCompletion>;
