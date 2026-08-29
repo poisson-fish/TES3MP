@@ -865,6 +865,11 @@
       "purpose": "Owner-approved Phase 6 two-channel topology, owned bounded byte delivery, equal lane scheduling, minimal fail-closed behavior, and later queue-policy boundary."
     },
     {
+      "path": "docs/vnext/adr/ADR-0034-phase6-credential-and-resumption-boundary.md",
+      "status": "A",
+      "purpose": "Owner-gated Phase 6 decision packet for bounded join-password messages, routing-only resume claims, token rotation and lifetime, credential rate limiting, cryptographic ownership, and redaction."
+    },
+    {
       "path": "docs/vnext/gdr/GDR-0011-phase4-minimal-player-exchange-semantics.md",
       "status": "A",
       "purpose": "Owner-approved Phase 4 player-motion intent, authority separation, session-targeted snapshot scope, and confirmed-client-state semantics."

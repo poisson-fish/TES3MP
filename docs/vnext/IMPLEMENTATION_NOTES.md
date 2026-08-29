@@ -3693,6 +3693,31 @@ only the relevant phase section here.
   - Follow-ups: Slice 6.3 remains **Not Started** and separately gated. The
     complete hosted platform/sanitizer matrix remains the Phase 6 exit gate.
 
+- 2026-08-28 — Slice 6.3 decision review — Not Started
+  - Change: inspected the accepted transport, session, authentication, identity,
+    and canonical-session boundaries and added proposed
+    [`ADR-0034`](adr/ADR-0034-phase6-credential-and-resumption-boundary.md).
+    No production source, schema, dependency, authority, state, or gameplay
+    behavior changed.
+  - Decisions: none accepted. The proposal recommends existing target ownership
+    with private verified OpenSSL crypto; three bounded credential messages;
+    process-local initial principals plus minimal resume routing claims; a
+    digest-keyed 256-record transactional token store with caller-selected
+    1-to-120-second lifetime; and bounded global/source token buckets with no
+    release defaults.
+  - Verification: `python scripts/verify_vnext_baseline.py --index` passes with
+    218 intentional differences and all 61 dependency inputs verified;
+    `python -m unittest discover -s scripts/tests -q` passes all 112
+    repository-owned tests; the provenance JSON parses; and staged whitespace
+    checks pass. Product build, schema, codec, fuzz, C++ formatting, sanitizer,
+    and loopback checks are not applicable because production work remains
+    owner-gated.
+  - Owner review: pending explicit approval or amendment of ADR-0034 Decisions
+    1–5 and the proposed tests. Slice 6.3 remains **Not Started**.
+  - Follow-ups: present the decision packet. After approval, record accepted
+    options, amend ADR-0023/ADR-0014 only as required by the chosen options, and
+    begin only the approved production implementation.
+
 ## Phase 7 — Headless end-to-end multiplayer slice
 
 [Back to the phase tracker](IMPLEMENTATION_PLAN.md#phase-7--headless-end-to-end-multiplayer-slice)
