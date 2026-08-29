@@ -3849,6 +3849,36 @@ only the relevant phase section here.
     redaction scan, and focused encrypted loopback. The hosted matrix remains
     the Phase 6 exit gate.
 
+- 2026-08-28 — Slice 6.3 production credential crypto — In Progress
+  - Change: this implementation candidate adds an owned production
+    `CredentialCrypto` factory. Portable builds retain the injectable fake
+    boundary; the real-network profile privately links exact verified OpenSSL
+    3.5.8 and implements bounded `RAND_bytes`, SHA-256, `CRYPTO_memcmp`, and
+    temporary-digest cleansing. The real-network CMake profile now selects its
+    MSVC static runtime before creating any TES3MP target, closing a runtime
+    mismatch exposed by the broader authentication link check.
+  - Decisions: accepted ADR-0034 already selects the existing server-core target
+    plus private verified OpenSSL. No OpenSSL type enters a public header, and
+    this change adds no principal policy, authority, canonical state, release
+    default, persistence, compatibility, or gameplay behavior.
+  - Verification: `python -m unittest
+    scripts.tests.test_tes3mp_target_boundaries` passes all 14 boundary tests.
+    MSVC 19.44 plus `cmake --build build/tes3mp-standalone --target
+    tes3mp_protocol_tests_run` passes the complete portable contract target.
+    A fresh `build/slice63-crypto-gns` configure selects exact OpenSSL 3.5.8;
+    `cmake --build build/slice63-crypto-gns --target
+    tes3mp_credential_crypto_tests tes3mp_server_authentication_tests
+    tes3mp_transport_gns_tests` and all three resulting executables pass.
+    `python -m unittest discover -s scripts/tests -q` passes all 112
+    repository-owned tests. Indexed baseline provenance accounts for 236
+    intentional differences and verifies all 67 dependency inputs.
+    Three-file `clang-format --dry-run --Werror` and `git diff --check` pass.
+  - Owner review: accepted ADR-0034 applies. Full Slice 6.3 implementation-demo
+    acceptance remains pending the remaining artifacts and scenarios.
+  - Follow-ups: implement transport-side process-keyed IPv4/IPv6 scope
+    derivation, limiter/provider composition, redaction scan, and focused
+    encrypted loopback. The hosted matrix remains the Phase 6 exit gate.
+
 ## Phase 7 — Headless end-to-end multiplayer slice
 
 [Back to the phase tracker](IMPLEMENTATION_PLAN.md#phase-7--headless-end-to-end-multiplayer-slice)

@@ -134,6 +134,8 @@ namespace TES3MP
         virtual bool constantTimeEqual(std::span<const std::byte> left, std::span<const std::byte> right) noexcept = 0;
     };
 
+    std::unique_ptr<CredentialCrypto> makeProductionCredentialCrypto() noexcept;
+
     class JoinPasswordAuthenticationProvider final : public AuthenticationProvider
     {
     public:

@@ -338,6 +338,30 @@ class TES3MPTargetBoundaryTests(unittest.TestCase):
         self.assertIn("k_nSteamNetworkingSend_Reliable", adapter)
         self.assertIn("k_nSteamNetworkingSend_UnreliableNoDelay", adapter)
 
+        credential_header = (
+            ENGINE_INDEPENDENT_SOURCE
+            / "include"
+            / "tes3mp"
+            / "server_authentication.hpp"
+        ).read_text(encoding="utf-8")
+        credential_source = (
+            ENGINE_INDEPENDENT_SOURCE / "server_core" / "credential_crypto.cpp"
+        ).read_text(encoding="utf-8")
+        cmake_text = (ENGINE_INDEPENDENT_SOURCE / "CMakeLists.txt").read_text(
+            encoding="utf-8"
+        )
+        self.assertNotIn("<openssl/", credential_header)
+        for selected_header in (
+            "<openssl/crypto.h>",
+            "<openssl/rand.h>",
+            "<openssl/sha.h>",
+        ):
+            self.assertIn(selected_header, credential_source)
+        self.assertIn(
+            "target_link_libraries(tes3mp_server_core PRIVATE OpenSSL::Crypto)",
+            cmake_text,
+        )
+
     def test_selected_adapter_reuses_verified_abseil_package(self):
         cmake_text = (ENGINE_INDEPENDENT_SOURCE / "CMakeLists.txt").read_text(
             encoding="utf-8"

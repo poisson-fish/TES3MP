@@ -250,9 +250,10 @@ production artifacts add the approved bounded credential messages, move-only
 secret and admission values, exact generated schemas, corpus/fuzz registration,
 bounded digest-only transactional resume store, and fixed-work optional
 join-password provider with process-local non-reused routing principals. The
-approved opaque admission-scope value and bounded global/source token-bucket
-limiter also pass focused contracts. Private crypto, transport scope derivation,
-composition, and redaction/loopback closure work remains.
+approved opaque admission-scope value, bounded global/source token-bucket
+limiter, and private exact-pinned OpenSSL 3.5.8 credential crypto provider also
+pass focused contracts. Transport scope derivation, composition, and
+redaction/loopback closure work remains.
 
 ## References and license
 

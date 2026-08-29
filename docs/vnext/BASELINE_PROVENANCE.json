@@ -112,7 +112,7 @@
     {
       "path": "components/tes3mp/CMakeLists.txt",
       "status": "A",
-      "purpose": "Defines the standalone-capable owned target graph, pinned FlatBuffers runtime input, opt-in verified GameNetworkingSockets/c-ares adapter leaf and selected-library channel-fault tests, target-scoped safety registration, focused protocol/server credential contracts, golden-corpus verification, and bounded parser fuzz targets."
+      "purpose": "Defines the standalone-capable owned target graph, pinned FlatBuffers runtime input, opt-in verified GameNetworkingSockets/c-ares adapter and private OpenSSL credential crypto, selected-library focused tests, target-scoped safety registration, golden-corpus verification, and bounded parser fuzz targets."
     },
     {
       "path": "components/tes3mp/CMakePresets.json",
@@ -435,6 +435,11 @@
       "purpose": "Full-input canonical-state and finalized-history validation, deterministic owned construction and lookup, and pure atomic spatial revision advancement implementation."
     },
     {
+      "path": "components/tes3mp/server_core/credential_crypto.cpp",
+      "status": "A",
+      "purpose": "Profile-gated private exact-pinned OpenSSL credential crypto implementation with owned factory, bounded random input, SHA-256, constant-time comparison, and temporary cleansing."
+    },
+    {
       "path": "components/tes3mp/server_core/deterministic_random.cpp",
       "status": "A",
       "purpose": "Pinned unsigned SplitMix64, numeric V1 stream derivation, xoshiro256**, state restore, and rejection-sampling implementation."
@@ -518,6 +523,11 @@
       "path": "components/tes3mp/tests/canonical_state_tests.cpp",
       "status": "A",
       "purpose": "Canonical scope, binding, ordering, hard-bound, atomic-revision, failure-preservation, acknowledgement, immutability, and boundary contracts."
+    },
+    {
+      "path": "components/tes3mp/tests/credential_crypto_tests.cpp",
+      "status": "A",
+      "purpose": "Focused real-network-profile contracts for production random bytes, known SHA-256 output, constant-time equality behavior, and owned factory availability."
     },
     {
       "path": "components/tes3mp/tests/deterministic_facilities_tests.cpp",
@@ -1301,7 +1311,7 @@
         },
         {
           "path": "components/tes3mp/CMakeLists.txt",
-          "sha256": "deda03ed211ae66e23b8966597dfe822d1f41a1c158d67879ff3e2a65669e763"
+          "sha256": "d8f4a7c5b1ba546189a471b70219edfd54096a1b217d789ead793596ce68cd7c"
         },
         {
           "path": "components/tes3mp/protocol/generated/authentication_accepted_generated.h",

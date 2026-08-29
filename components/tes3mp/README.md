@@ -284,3 +284,11 @@ receive values. Protocol/session code retains class validation, snapshot
 recency, idempotency, authority, and mutation. Application queues, coalescing,
 rate limits, slow-peer eviction, product capacity, and detailed telemetry remain
 later Phase 6 work.
+
+Phase 6 Slice 6.3 is in progress under accepted ADR-0034. The real-network
+profile now supplies server core with a private exact-pinned OpenSSL 3.5.8
+credential-crypto implementation for random token bytes, SHA-256 digests,
+constant-time comparison, and temporary-digest cleansing. The owned public
+factory exposes no OpenSSL type, and portable builds retain the injectable fake
+crypto boundary. Credential composition, transport-derived admission scopes,
+redaction closure, and encrypted loopback remain unfinished.
