@@ -1,0 +1,15 @@
+namespace TES3MP.Protocol.Schema;
+
+enum AuthenticationPublicRejection : ubyte {
+  Unknown = 0,
+  Denied = 1,
+  TemporarilyUnavailable = 2
+}
+
+table AuthenticationRejected {
+  reason:AuthenticationPublicRejection = Unknown (id: 0);
+}
+
+root_type AuthenticationRejected;
+file_identifier "T3AR";
+file_extension "t3ar";

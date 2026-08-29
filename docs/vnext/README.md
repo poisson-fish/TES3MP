@@ -12,7 +12,7 @@ conditional stretch target.
 ## Status
 
 Phases 0–5 are implemented. Phase 6 is in progress, with Slices 6.1 and 6.2
-implemented.
+implemented and Slice 6.3 in progress.
 The active tree is a provenance-verified OpenMW 0.51 baseline with:
 
 - engine-independent protocol, transport, client-session, server-core, and test
@@ -244,7 +244,12 @@ two fixed equal-scheduled channels, an owned bounded byte-delivery API, and
 minimal fail-closed semantics. Implementation `2f022fe4ad` and applicable local
 verification pass, and the owner accepted the implementation demo. Application
 queue/coalescing policy, product capacity, detailed telemetry, and gameplay
-behavior remain separately gated. Slice 6.3 remains **Not Started**.
+behavior remain separately gated. Slice 6.3 is **In Progress** under accepted
+[`ADR-0034`](adr/ADR-0034-phase6-credential-and-resumption-boundary.md); its
+first production artifact adds the approved bounded credential messages,
+move-only secret values, exact generated schemas, corpus, and fuzz registration.
+Password-provider, rate-limit, resume-store, private-crypto, composition, and
+redaction/loopback closure work remains.
 
 ## References and license
 

@@ -1,0 +1,10 @@
+namespace TES3MP.Protocol.Schema;
+
+table AuthenticationAccepted {
+  resume_token:[ubyte] (id: 0);
+  lifetime_milliseconds:ulong = 0 (id: 1);
+}
+
+root_type AuthenticationAccepted;
+file_identifier "T3AA";
+file_extension "t3aa";

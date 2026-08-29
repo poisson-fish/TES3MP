@@ -33,6 +33,9 @@ namespace TES3MP
         ClientHello = 0x0001,
         ServerHello = 0x0002,
         SessionRejected = 0x0003,
+        AuthenticationRequest = 0x0004,
+        AuthenticationAccepted = 0x0005,
+        AuthenticationRejected = 0x0006,
         ReliableOperation = 0x0100,
         LatestWinsSnapshot = 0x0200,
     };
@@ -53,6 +56,9 @@ namespace TES3MP
             case MessageKind::ClientHello:
             case MessageKind::ServerHello:
             case MessageKind::SessionRejected:
+            case MessageKind::AuthenticationRequest:
+            case MessageKind::AuthenticationAccepted:
+            case MessageKind::AuthenticationRejected:
                 return MessageDescriptor{ kind, MessageClass::SessionControl, SessionControlMaximumPayloadBytes };
             case MessageKind::ReliableOperation:
                 return MessageDescriptor{ kind, MessageClass::ReliableOperation, ReliableOperationMaximumPayloadBytes };

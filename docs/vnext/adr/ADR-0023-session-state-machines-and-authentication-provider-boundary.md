@@ -6,6 +6,8 @@ Date opened: 2026-08-27
 
 Date approved: 2026-08-27
 
+Date amended: 2026-08-28
+
 Decision owner: project owner
 
 Needed by: Phase 4 Slice 4.3
@@ -51,6 +53,14 @@ ADR-0005, ADR-0014, ADR-0015, ADR-0017, ADR-0020, and ADR-0022 constraints. It
 does not select a real password provider, resume-token representation, network
 credential schema, release timeout defaults, player identity, gameplay
 authority, canonical state scope, or replacement/reconnect behavior.
+
+On 2026-08-28 the owner approved the narrow Phase 6 amendment in
+[`ADR-0034`](ADR-0034-phase6-credential-and-resumption-boundary.md): a successful
+provider result may additionally carry optional resume-only `SessionId` and
+checked generation routing claims plus take-once response material. These values
+remain non-authoritative, cannot name a player/entity, and must move immediately
+to composition rather than becoming canonical or diagnostic state. All other
+Option A constraints remain unchanged.
 
 ## Existing constraints
 

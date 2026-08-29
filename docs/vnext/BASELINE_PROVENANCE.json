@@ -300,6 +300,26 @@
       "purpose": "Behavior-free translation-unit anchor for the engine-independent protocol target."
     },
     {
+      "path": "components/tes3mp/protocol/authentication.cpp",
+      "status": "A",
+      "purpose": "Move-only bounded password/token storage plus verifier-first T3AQ/T3AA/T3AR credential encoding, decoding, lifetime validation, and best-effort clearing."
+    },
+    {
+      "path": "components/tes3mp/protocol/generated/authentication_accepted_generated.h",
+      "status": "A",
+      "purpose": "Pinned FlatBuffers 25.12.19 generated C++ for the size-prefixed T3AA fresh-resume-token schema."
+    },
+    {
+      "path": "components/tes3mp/protocol/generated/authentication_rejected_generated.h",
+      "status": "A",
+      "purpose": "Pinned FlatBuffers 25.12.19 generated C++ for the size-prefixed T3AR generic authentication-rejection schema."
+    },
+    {
+      "path": "components/tes3mp/protocol/generated/authentication_request_generated.h",
+      "status": "A",
+      "purpose": "Pinned FlatBuffers 25.12.19 generated C++ for the size-prefixed T3AQ tagged credential schema."
+    },
+    {
       "path": "components/tes3mp/protocol/generated/client_hello_generated.h",
       "status": "A",
       "purpose": "Pinned FlatBuffers 25.12.19 generated C++ for the size-prefixed T3CH client-offer schema."
@@ -340,6 +360,21 @@
       "purpose": "Verifier-first owned hello/rejection codecs, bounded capability validation, deterministic pure negotiation, and legacy/unknown no-reply classification."
     },
     {
+      "path": "components/tes3mp/protocol/schema/authentication_accepted.fbs",
+      "status": "A",
+      "purpose": "Explicit-ID T3AA exact 32-byte fresh resume-token and bounded relative-lifetime schema."
+    },
+    {
+      "path": "components/tes3mp/protocol/schema/authentication_rejected.fbs",
+      "status": "A",
+      "purpose": "Explicit-ID T3AR closed generic public authentication-rejection schema."
+    },
+    {
+      "path": "components/tes3mp/protocol/schema/authentication_request.fbs",
+      "status": "A",
+      "purpose": "Explicit-ID T3AQ tagged join-password or resume-token request schema."
+    },
+    {
       "path": "components/tes3mp/protocol/schema/client_hello.fbs",
       "status": "A",
       "purpose": "Explicit-ID T3CH client protocol-range and bounded optional/required capability offer schema."
@@ -368,11 +403,6 @@
       "path": "components/tes3mp/server_core/anchor.cpp",
       "status": "A",
       "purpose": "Behavior-free translation-unit anchor for the deterministic server-core target."
-    },
-    {
-      "path": "components/tes3mp/server_core/authentication.cpp",
-      "status": "A",
-      "purpose": "Bounded authentication-material construction, move transfer, and best-effort storage clearing implementation."
     },
     {
       "path": "components/tes3mp/server_core/canonical_checksum.cpp",
@@ -490,6 +520,26 @@
       "purpose": "Independent profile/path validation, latency, loss, duplication, jitter, reorder, stall, disconnect, bounds, backpressure, isolation, and exact seeded-trace contracts."
     },
     {
+      "path": "components/tes3mp/tests/fuzz/corpus/protocol_authentication/valid-authentication-accepted",
+      "status": "A",
+      "purpose": "Valid T3AA fresh-token payload for credential decoder success-path fuzzing and schema drift detection."
+    },
+    {
+      "path": "components/tes3mp/tests/fuzz/corpus/protocol_authentication/valid-authentication-rejected",
+      "status": "A",
+      "purpose": "Valid T3AR generic-denial payload for credential decoder success-path fuzzing and schema drift detection."
+    },
+    {
+      "path": "components/tes3mp/tests/fuzz/corpus/protocol_authentication/valid-join-password",
+      "status": "A",
+      "purpose": "Valid empty-password T3AQ payload for open-server credential decoder success-path fuzzing."
+    },
+    {
+      "path": "components/tes3mp/tests/fuzz/corpus/protocol_authentication/valid-resume-token",
+      "status": "A",
+      "purpose": "Valid exact-32-byte resume T3AQ payload for credential decoder success-path fuzzing and schema drift detection."
+    },
+    {
       "path": "components/tes3mp/tests/fuzz/corpus/protocol_exchange/reliable-identifier",
       "status": "A",
       "purpose": "T3RO identifier-focused malformed seed for the bounded reliable-operation decoder fuzz target."
@@ -570,6 +620,11 @@
       "purpose": "Truncated seed for bounded malformed spatial test-decoder fuzz coverage."
     },
     {
+      "path": "components/tes3mp/tests/fuzz/protocol_authentication_fuzz.cpp",
+      "status": "A",
+      "purpose": "Clang libFuzzer entry point over all three bounded production credential payload decoders."
+    },
+    {
       "path": "components/tes3mp/tests/fuzz/protocol_exchange_fuzz.cpp",
       "status": "A",
       "purpose": "Clang libFuzzer entry point over both bounded production T3RO/T3LS payload decoders."
@@ -593,6 +648,11 @@
       "path": "components/tes3mp/tests/observability_tests.cpp",
       "status": "A",
       "purpose": "Independent contracts for typed metric/event shapes, explicit injection, no-op sinks, bounded FIFO recording, overflow, privacy shape, and deterministic evidence."
+    },
+    {
+      "path": "components/tes3mp/tests/protocol_authentication_tests.cpp",
+      "status": "A",
+      "purpose": "Move-only secret shape, exact credential/token/lifetime bounds, round-trip, malformed, exhaustive request-bit mutation, and corpus contracts for Phase 6 authentication messages."
     },
     {
       "path": "components/tes3mp/tests/protocol_envelope_tests.cpp",
@@ -1221,7 +1281,19 @@
         },
         {
           "path": "components/tes3mp/CMakeLists.txt",
-          "sha256": "65d41edb64b7168800732cc382c0a409382c3f50a181bc7e1e72f62548996582"
+          "sha256": "7b91586ef19ac9994ac1c061b1edd4a1febffd7efd6078f2a8bca1f229492b79"
+        },
+        {
+          "path": "components/tes3mp/protocol/generated/authentication_accepted_generated.h",
+          "sha256": "77745f74eaa866d6624698d1db05f6c201decd3e0dbd538352711acd62064aae"
+        },
+        {
+          "path": "components/tes3mp/protocol/generated/authentication_rejected_generated.h",
+          "sha256": "c10ec68dce881d3e59d2a4ad1e4cf8f597eafa627468b7eda6f315d6124dd22d"
+        },
+        {
+          "path": "components/tes3mp/protocol/generated/authentication_request_generated.h",
+          "sha256": "87e8ced423c421c5036f85bb01d1e4d9a29a60ca55ef2f30d76ea5a9618a376f"
         },
         {
           "path": "components/tes3mp/protocol/generated/client_hello_generated.h",
@@ -1242,6 +1314,18 @@
         {
           "path": "components/tes3mp/protocol/generated/session_rejected_generated.h",
           "sha256": "25217117a5fe941d9cf364b00a0a97029bfcc77f003d7ea825feeff53c2847d0"
+        },
+        {
+          "path": "components/tes3mp/protocol/schema/authentication_accepted.fbs",
+          "sha256": "5cba7568bd37844fb32e5a1f81cc7df6ad149cdc5d3a537404152b80eeb97ab9"
+        },
+        {
+          "path": "components/tes3mp/protocol/schema/authentication_rejected.fbs",
+          "sha256": "110b45434cb041b16b38f34d32d7c8985e577aa689196c49ecde4fc8a28659bd"
+        },
+        {
+          "path": "components/tes3mp/protocol/schema/authentication_request.fbs",
+          "sha256": "2408d0b811c1b325dfcf62e7d9f19e8a496a39f074399b5730986d16d756d2cb"
         },
         {
           "path": "components/tes3mp/protocol/schema/client_hello.fbs",
@@ -1313,11 +1397,11 @@
         },
         {
           "path": "scripts/tests/test_run_vnext_flatbuffers_proof.py",
-          "sha256": "a436eacf4e29b1ec24f8877f12f15170d4181a8399366464816f2abee227002a"
+          "sha256": "d777f3793e3d36a381e6b85bd997ad9ee09d5bda666865107cc4413d55c20e41"
         },
         {
           "path": "scripts/vnext_flatbuffers_proof.json",
-          "sha256": "eeee82a57b36ed2da768805b29957e00b3de9358050c8c57d2c7213e6dd08999"
+          "sha256": "03135e8a21cb2b058e6d55f96b96107599a6a2e8816d0261542a334a43cd17b5"
         }
       ],
       "repositories": [

@@ -6,6 +6,8 @@ Date opened: 2026-08-26
 
 Date approved: 2026-08-26
 
+Date amended: 2026-08-28
+
 Decision owner: project owner
 
 Needed by: Phase 3 Slice 3.1
@@ -19,6 +21,13 @@ dependencies?
 This decision fixes build topology only. It does not define protocol fields,
 canonical state, gameplay behavior, OpenMW hook call sites, transport behavior,
 or a server process composition root.
+
+The owner-approved Phase 6 refinement in
+[`ADR-0034`](ADR-0034-phase6-credential-and-resumption-boundary.md) keeps this
+exact project-target graph. It permits `tes3mp_server_core` to use the already
+verified OpenSSL crypto library privately in the real-network profile; no
+OpenSSL type may enter a public header, and canonical reducer APIs/tests remain
+independent of that implementation.
 
 ## Accepted constraints
 

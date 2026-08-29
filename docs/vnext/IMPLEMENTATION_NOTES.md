@@ -3718,6 +3718,45 @@ only the relevant phase section here.
     options, amend ADR-0023/ADR-0014 only as required by the chosen options, and
     begin only the approved production implementation.
 
+- 2026-08-28 — Slice 6.3 credential wire foundation — In Progress
+  - Change: recorded owner approval of
+    [`ADR-0034`](adr/ADR-0034-phase6-credential-and-resumption-boundary.md)
+    Option A for all five decisions and tests, plus the narrow ADR-0014/ADR-0023
+    refinements. Added move-only bounded password and exact-32-byte token values;
+    verifier-first T3AQ request, T3AA accepted, and T3AR generic-rejection
+    codecs; reliable session-control kind mapping; exact pinned generated
+    headers; four golden corpus entries; fuzz registration; and matching safety/
+    schema policy assertions. Authentication material implementation now belongs
+    to the protocol target that owns these wire values. Slice 6.3 is **In
+    Progress**; no provider, limiter, token store, OpenSSL adapter, composition,
+    or new gameplay behavior landed.
+  - Decisions: ADR-0034 Option A Decisions 1–5 and proposed tests are accepted
+    without amendment. This artifact implements only their bounded wire/value
+    portion. It adds no release token lifetime/rate default, player/entity
+    identity, canonical attachment, reconnect grace/UX, or gameplay authority.
+  - Verification: MSVC 19.44 developer environment plus
+    `python scripts/run_vnext_flatbuffers_proof.py --update-generated` passes the
+    exact FlatBuffers 25.12.19 regeneration comparison and isolated proof;
+    `cmake --build build/tes3mp-standalone --config Debug --target
+    tes3mp_protocol_tests_run --parallel 2` passes the complete standalone
+    contract target including new exact bounds, malformed/truncation, full
+    request-bit mutation, and corpus checks. The three existing lifecycle,
+    deterministic schedule, and real encrypted GNS loopback executables rebuild
+    and pass. `python -m unittest discover -s scripts/tests -q` passes all 112
+    repository-owned tests. Indexed baseline provenance accounts for 230
+    intentional differences and verifies 67 dependency inputs. Four-file
+    `clang-format --dry-run --Werror`, JSON parsing, and staged whitespace checks
+    pass.
+  - Owner review: architecture/security/session-scope approval was received in
+    the 2026-08-28 working session. Implementation-demo acceptance remains
+    pending completion of the full Slice 6.3 scenarios.
+  - Follow-ups: implement the approved provider-result amendment, constant-time
+    optional join-password provider, bounded global/source limiter,
+    transactional digest-keyed resume store, private verified OpenSSL services,
+    transport admission scope, composition/redaction checks, and focused
+    encrypted loopback. No full hosted matrix runs until the Phase 6 exit
+    candidate.
+
 ## Phase 7 — Headless end-to-end multiplayer slice
 
 [Back to the phase tracker](IMPLEMENTATION_PLAN.md#phase-7--headless-end-to-end-multiplayer-slice)

@@ -21,6 +21,9 @@
     "v2_generated.h"
   ],
   "production_schemas": [
+    "authentication_accepted.fbs",
+    "authentication_rejected.fbs",
+    "authentication_request.fbs",
     "client_hello.fbs",
     "latest_wins_snapshot.fbs",
     "reliable_operation.fbs",
@@ -28,6 +31,9 @@
     "session_rejected.fbs"
   ],
   "production_generated_files": [
+    "authentication_accepted_generated.h",
+    "authentication_rejected_generated.h",
+    "authentication_request_generated.h",
     "client_hello_generated.h",
     "latest_wins_snapshot_generated.h",
     "reliable_operation_generated.h",

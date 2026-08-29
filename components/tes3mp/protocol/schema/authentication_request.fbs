@@ -1,0 +1,16 @@
+namespace TES3MP.Protocol.Schema;
+
+enum AuthenticationCredentialKind : ubyte {
+  Unknown = 0,
+  JoinPassword = 1,
+  ResumeToken = 2
+}
+
+table AuthenticationRequest {
+  kind:AuthenticationCredentialKind = Unknown (id: 0);
+  material:[ubyte] (id: 1);
+}
+
+root_type AuthenticationRequest;
+file_identifier "T3AQ";
+file_extension "t3aq";

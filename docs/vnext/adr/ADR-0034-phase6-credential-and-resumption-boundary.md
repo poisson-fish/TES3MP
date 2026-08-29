@@ -1,8 +1,10 @@
 # ADR-0034: Phase 6 credential and resumption boundary
 
-Status: **Proposed**
+Status: **Accepted**
 
 Date opened: 2026-08-28
+
+Date approved: 2026-08-28
 
 Decision owner: project owner
 
@@ -16,14 +18,15 @@ how are new and resumed routing identities represented; and what bounded
 rate-limit and token-lifetime policy belongs in Slice 6.3 without deciding
 player replacement or reconnect gameplay?
 
-Production implementation is gated on owner approval. This ADR refines accepted
-ADR-0005 and reopens only the narrow provider-result part of ADR-0023 needed to
-carry resume routing claims. It does not grant gameplay authority, select player
-identity, attach canonical state, or decide visible reconnect/replacement rules.
+The project owner approved Option A for Decisions 1 through 5 and the proposed
+tests on 2026-08-28. This ADR refines accepted ADR-0005 and reopens only the
+narrow provider-result part of ADR-0023 needed to carry resume routing claims.
+It does not grant gameplay authority, select player identity, attach canonical
+state, or decide visible reconnect/replacement rules.
 
-## Recommendation summary
+## Decision summary
 
-Recommend Option A for Decisions 1 through 5:
+The project owner approved Option A for Decisions 1 through 5:
 
 1. keep codecs in `tes3mp_protocol`, credential memory in the client-session
    boundary, and password/token services in `tes3mp_server_core`; use the exact
@@ -284,5 +287,9 @@ cannot become **Implemented** before demo acceptance.
 
 ## Owner approval
 
-Pending explicit owner approval or amendment of Decisions 1 through 5 and the
-proposed acceptance tests.
+Approved by the project owner in the 2026-08-28 working session: Option A for
+Decisions 1 through 5 and the proposed acceptance tests without amendment.
+
+This approval does not select a release token lifetime or rate-limit default,
+player identity, canonical replacement behavior, reconnect grace/UX, or
+gameplay authority. Those remain separately gated as stated above.

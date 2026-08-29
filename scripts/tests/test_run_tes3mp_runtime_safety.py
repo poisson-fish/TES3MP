@@ -176,6 +176,7 @@ class RuntimeSafetyRunnerTests(unittest.TestCase):
             "tes3mp_protocol_envelope_tests",
             "tes3mp_protocol_frame_tests",
             "tes3mp_protocol_handshake_tests",
+            "tes3mp_protocol_authentication_tests",
             "tes3mp_protocol_exchange_tests",
             "tes3mp_session_state_tests",
             "tes3mp_spatial_primitive_tests",
@@ -189,15 +190,17 @@ class RuntimeSafetyRunnerTests(unittest.TestCase):
         self.assertIn("tes3mp_enable_libfuzzer(tes3mp_spatial_round_trip_fuzz)", component)
         self.assertIn("tes3mp_enable_libfuzzer(tes3mp_protocol_frame_fuzz)", component)
         self.assertIn("tes3mp_enable_libfuzzer(tes3mp_protocol_handshake_fuzz)", component)
+        self.assertIn("tes3mp_enable_libfuzzer(tes3mp_protocol_authentication_fuzz)", component)
         self.assertIn("tes3mp_enable_libfuzzer(tes3mp_protocol_exchange_fuzz)", component)
         self.assertIn("TES3MP_TEST_TSAN_ALLOCATOR_INTERPOSITION=1", component)
-        self.assertEqual(component.count("--verify-corpus"), 3)
+        self.assertEqual(component.count("--verify-corpus"), 4)
         asan_preset = next(
             preset
             for preset in data["buildPresets"]
             if preset["name"] == "tes3mp-safety-asan-ubsan"
         )
         self.assertIn("tes3mp_protocol_handshake_fuzz", asan_preset["targets"])
+        self.assertIn("tes3mp_protocol_authentication_fuzz", asan_preset["targets"])
         self.assertIn("tes3mp_protocol_exchange_fuzz", asan_preset["targets"])
         adapter = (REPOSITORY_ROOT / "apps" / "openmw" / "tes3mp" / "CMakeLists.txt").read_text(
             encoding="utf-8"

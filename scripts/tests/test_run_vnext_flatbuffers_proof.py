@@ -25,8 +25,16 @@ class FlatBuffersProofRunnerTests(unittest.TestCase):
         self.assertEqual(lock["generator_arguments"], ["--cpp", "--scoped-enums"])
         self.assertEqual(
             lock["production_schemas"],
-            ["client_hello.fbs", "latest_wins_snapshot.fbs", "reliable_operation.fbs",
-             "server_hello.fbs", "session_rejected.fbs"],
+            [
+                "authentication_accepted.fbs",
+                "authentication_rejected.fbs",
+                "authentication_request.fbs",
+                "client_hello.fbs",
+                "latest_wins_snapshot.fbs",
+                "reliable_operation.fbs",
+                "server_hello.fbs",
+                "session_rejected.fbs",
+            ],
         )
         self.assertEqual(set(lock["seed_corpus"]), set(proof.SEED_CORPUS_FILES))
         for digest in lock["seed_corpus"].values():
