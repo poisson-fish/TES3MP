@@ -112,7 +112,7 @@
     {
       "path": "components/tes3mp/CMakeLists.txt",
       "status": "A",
-      "purpose": "Defines the standalone-capable owned target graph, pinned FlatBuffers runtime input, opt-in verified GameNetworkingSockets/c-ares adapter leaf, target-scoped safety registration, focused contract executables, golden-corpus verification, and bounded parser fuzz targets."
+      "purpose": "Defines the standalone-capable owned target graph, pinned FlatBuffers runtime input, opt-in verified GameNetworkingSockets/c-ares adapter leaf and selected-library channel-fault tests, target-scoped safety registration, focused contract executables, golden-corpus verification, and bounded parser fuzz targets."
     },
     {
       "path": "components/tes3mp/CMakePresets.json",
@@ -282,7 +282,7 @@
     {
       "path": "components/tes3mp/include/tes3mp/transport.hpp",
       "status": "A",
-      "purpose": "Selected-library-free owned endpoint, bounded lifecycle command, opaque identity, closed result, security, failure, and value-event transport interface."
+      "purpose": "Selected-library-free owned endpoint, bounded lifecycle and two-channel byte-delivery commands, opaque identity, closed result, security, failure, and value-event transport interface."
     },
     {
       "path": "components/tes3mp/include/tes3mp/transport_gns.hpp",
@@ -657,7 +657,7 @@
     {
       "path": "components/tes3mp/tests/transport_gns_tests.cpp",
       "status": "A",
-      "purpose": "Focused verified-adapter loopback, DNS/numeric connection, encryption claim, capacity, cancellation, listener-stop, idempotency, shutdown, and overflow checks."
+      "purpose": "Focused verified-adapter loopback, DNS/numeric connection, encryption claim, two-channel delivery under loss/reordering, size/drain bounds, capacity, cancellation, listener-stop, idempotency, shutdown, and overflow checks."
     },
     {
       "path": "components/tes3mp/tests/transport_lifecycle_tests.cpp",
@@ -858,6 +858,11 @@
       "path": "docs/vnext/adr/ADR-0032-phase6-transport-adapter-and-lifecycle-boundary.md",
       "status": "A",
       "purpose": "Proposed owner-gated Phase 6 selected transport adapter topology, verified provisioning, endpoint, lifecycle, pumping, and initial resource-bound decision packet."
+    },
+    {
+      "path": "docs/vnext/adr/ADR-0033-phase6-transport-channel-and-delivery-semantics.md",
+      "status": "A",
+      "purpose": "Owner-approved Phase 6 two-channel topology, owned bounded byte delivery, equal lane scheduling, minimal fail-closed behavior, and later queue-policy boundary."
     },
     {
       "path": "docs/vnext/gdr/GDR-0011-phase4-minimal-player-exchange-semantics.md",
@@ -1211,7 +1216,7 @@
         },
         {
           "path": "components/tes3mp/CMakeLists.txt",
-          "sha256": "3a38079a5c1079e37bfd7af87021e68b776ede2086f68471a3f16f82521bcb2d"
+          "sha256": "65d41edb64b7168800732cc382c0a409382c3f50a181bc7e1e72f62548996582"
         },
         {
           "path": "components/tes3mp/protocol/generated/client_hello_generated.h",

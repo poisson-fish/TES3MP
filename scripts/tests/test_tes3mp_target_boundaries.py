@@ -319,15 +319,24 @@ class TES3MPTargetBoundaryTests(unittest.TestCase):
             "AcceptConnection",
             "CloseConnection",
             "CloseListenSocket",
+            "ConfigureConnectionLanes",
             "ConnectByIPAddress",
             "CreateListenSocketIP",
             "GetListenSocketAddress",
+            "ReceiveMessagesOnConnection",
             "RunCallbacks",
+            "SendMessages",
             "SetConnectionUserData",
         ):
             self.assertIn(
                 f"SteamAPI_ISteamNetworkingSockets_{flat_socket_call}", adapter
             )
+        self.assertIn("SteamAPI_ISteamNetworkingUtils_AllocateMessage", adapter)
+        self.assertNotIn("SteamNetworkingUtils()->AllocateMessage", adapter)
+        self.assertIn("priorities{ 0, 0 }", adapter)
+        self.assertIn("weights{ 1, 1 }", adapter)
+        self.assertIn("k_nSteamNetworkingSend_Reliable", adapter)
+        self.assertIn("k_nSteamNetworkingSend_UnreliableNoDelay", adapter)
 
     def test_selected_adapter_reuses_verified_abseil_package(self):
         cmake_text = (ENGINE_INDEPENDENT_SOURCE / "CMakeLists.txt").read_text(

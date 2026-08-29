@@ -1,6 +1,7 @@
 #ifndef TES3MP_TRANSPORT_HPP
 #define TES3MP_TRANSPORT_HPP
 
+#include "protocol_frame.hpp"
 #include "strong_value.hpp"
 
 #include <cstddef>
@@ -10,6 +11,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace TES3MP::Detail
 {
@@ -118,6 +120,10 @@ namespace TES3MP
     {
         Accepted,
         InvalidInput,
+        MessageTooLarge,
+        WouldBlock,
+        NotReady,
+        ProtocolViolation,
         AtCapacity,
         AlreadyFinalized,
         UnknownId,
@@ -168,6 +174,34 @@ namespace TES3MP
         EventCapacityExceeded,
         CounterExhausted,
         DependencyFailure,
+        InvalidMessage,
+    };
+
+    enum class TransportChannel : std::uint8_t
+    {
+        ReliableOrdered = 1,
+        LatestWins = 2,
+    };
+
+    inline constexpr std::size_t ReliableOrderedMaximumMessageBytes
+        = ProtocolFrameHeaderBytes + ReliableOperationMaximumPayloadBytes;
+    inline constexpr std::size_t LatestWinsMaximumMessageBytes
+        = ProtocolFrameHeaderBytes + LatestWinsSnapshotMaximumPayloadBytes;
+
+    std::optional<TransportChannel> transportChannelFor(MessageClass messageClass) noexcept;
+    std::optional<std::size_t> maximumTransportMessageBytes(TransportChannel channel) noexcept;
+    bool isMessageClassAllowedOnTransportChannel(MessageClass messageClass, TransportChannel channel) noexcept;
+
+    struct TransportMessage
+    {
+        TransportChannel channel = TransportChannel::ReliableOrdered;
+        std::vector<std::byte> bytes;
+    };
+
+    struct TransportReceiveResult
+    {
+        TransportResult result = TransportResult::Accepted;
+        std::size_t messages = 0;
     };
 
     struct TransportEvent
@@ -190,12 +224,19 @@ namespace TES3MP
     class TransportRuntime
     {
     public:
+        static constexpr std::size_t MaxMessagesPerReceive = 128;
+
         virtual ~TransportRuntime() = default;
 
         virtual TransportAdmission<ListenerId> startListener(const ListenerEndpoint& endpoint) = 0;
         virtual TransportResult stopListener(ListenerId listener) = 0;
         virtual TransportAdmission<ConnectAttemptId> connect(const ConnectionEndpoint& endpoint) = 0;
         virtual TransportResult cancelConnect(ConnectAttemptId attempt) = 0;
+        virtual TransportResult send(
+            TransportConnectionId connection, TransportChannel channel, std::span<const std::byte> message)
+            = 0;
+        virtual TransportReceiveResult receive(TransportConnectionId connection, std::span<TransportMessage> output)
+            = 0;
         virtual TransportResult close(TransportConnectionId connection, TransportCloseMode mode) = 0;
         virtual TransportPollResult poll(std::span<TransportEvent> output) = 0;
         virtual TransportResult shutdown() = 0;

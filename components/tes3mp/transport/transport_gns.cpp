@@ -5,6 +5,7 @@
 #include <array>
 #include <chrono>
 #include <cstdint>
+#include <cstring>
 #include <deque>
 #include <limits>
 #include <map>
@@ -37,6 +38,37 @@ namespace
 {
     using NumericAddress = TES3MP::Detail::NumericAddress;
     using NumericAddressFamily = TES3MP::Detail::NumericAddressFamily;
+
+    constexpr std::uint16_t ReliableOrderedLane = 0;
+    constexpr std::uint16_t LatestWinsLane = 1;
+    constexpr int TransportLaneCount = 2;
+
+    std::optional<std::uint16_t> laneFor(TES3MP::TransportChannel channel)
+    {
+        switch (channel)
+        {
+            case TES3MP::TransportChannel::ReliableOrdered:
+                return ReliableOrderedLane;
+            case TES3MP::TransportChannel::LatestWins:
+                return LatestWinsLane;
+        }
+        return std::nullopt;
+    }
+
+    std::optional<TES3MP::TransportChannel> channelFor(std::uint16_t lane)
+    {
+        if (lane == ReliableOrderedLane)
+            return TES3MP::TransportChannel::ReliableOrdered;
+        if (lane == LatestWinsLane)
+            return TES3MP::TransportChannel::LatestWins;
+        return std::nullopt;
+    }
+
+    int sendFlags(TES3MP::TransportChannel channel)
+    {
+        return channel == TES3MP::TransportChannel::ReliableOrdered ? k_nSteamNetworkingSend_Reliable
+                                                                    : k_nSteamNetworkingSend_UnreliableNoDelay;
+    }
 
     TES3MP::Detail::HappyEyeballsAttempt::TimePoint monotonicNow()
     {
@@ -367,9 +399,13 @@ namespace
             if (!selectedPort)
                 return { TES3MP::TransportResult::RuntimeFailed, std::nullopt };
             address.m_port = *selectedPort;
-            std::array<SteamNetworkingConfigValue_t, 2> options;
+            std::array<SteamNetworkingConfigValue_t, 4> options;
             options[0].SetInt32(k_ESteamNetworkingConfig_Unencrypted, 0);
             options[1].SetInt64(k_ESteamNetworkingConfig_ConnectionUserData, static_cast<std::int64_t>(*generation));
+            options[2].SetInt32(k_ESteamNetworkingConfig_RecvMaxMessageSize,
+                static_cast<std::int32_t>(TES3MP::LatestWinsMaximumMessageBytes));
+            options[3].SetInt32(k_ESteamNetworkingConfig_RecvBufferMessages,
+                static_cast<std::int32_t>(TES3MP::TransportRuntime::MaxMessagesPerReceive));
             const HSteamListenSocket handle = SteamAPI_ISteamNetworkingSockets_CreateListenSocketIP(
                 sockets(), address, static_cast<int>(options.size()), options.data());
             if (handle == k_HSteamListenSocket_Invalid)
@@ -479,6 +515,109 @@ namespace
                 return TES3MP::TransportResult::RuntimeFailed;
             mAttempts.erase(found);
             return TES3MP::TransportResult::Accepted;
+        }
+
+        TES3MP::TransportResult send(TES3MP::TransportConnectionId connection, TES3MP::TransportChannel channel,
+            std::span<const std::byte> message) override
+        {
+            if (mFailed)
+                return TES3MP::TransportResult::RuntimeFailed;
+            const auto lane = laneFor(channel);
+            const auto maximumBytes = TES3MP::maximumTransportMessageBytes(channel);
+            if (!lane || !maximumBytes || message.empty())
+                return TES3MP::TransportResult::InvalidInput;
+            if (message.size() > *maximumBytes)
+                return TES3MP::TransportResult::MessageTooLarge;
+            const auto found = mConnections.find(connection);
+            if (found == mConnections.end())
+                return finalized(connection, mNextConnection);
+            if (found->second.incomingPending)
+                return TES3MP::TransportResult::NotReady;
+
+            SteamNetworkingMessage_t* outgoing = SteamAPI_ISteamNetworkingUtils_AllocateMessage(
+                SteamNetworkingUtils(), static_cast<int>(message.size()));
+            if (outgoing == nullptr)
+                return TES3MP::TransportResult::RuntimeFailed;
+            std::memcpy(outgoing->m_pData, message.data(), message.size());
+            outgoing->m_conn = found->second.handle;
+            outgoing->m_nFlags = sendFlags(channel);
+            outgoing->m_idxLane = *lane;
+            std::int64_t result = 0;
+            SteamAPI_ISteamNetworkingSockets_SendMessages(sockets(), 1, &outgoing, &result, true);
+            if (result > 0)
+                return TES3MP::TransportResult::Accepted;
+            const auto failure = static_cast<EResult>(-result);
+            if (failure == k_EResultLimitExceeded || failure == k_EResultIgnored)
+                return TES3MP::TransportResult::WouldBlock;
+            if (failure == k_EResultInvalidParam)
+                return TES3MP::TransportResult::InvalidInput;
+            if (failure == k_EResultInvalidState || failure == k_EResultNoConnection)
+                return TES3MP::TransportResult::NotReady;
+            return TES3MP::TransportResult::RuntimeFailed;
+        }
+
+        TES3MP::TransportReceiveResult receive(
+            TES3MP::TransportConnectionId connection, std::span<TES3MP::TransportMessage> output) override
+        {
+            if (mFailed)
+                return { TES3MP::TransportResult::RuntimeFailed, 0 };
+            if (output.size() > TES3MP::TransportRuntime::MaxMessagesPerReceive)
+                return { TES3MP::TransportResult::InvalidInput, 0 };
+            const auto found = mConnections.find(connection);
+            if (found == mConnections.end())
+                return { finalized(connection, mNextConnection), 0 };
+            if (found->second.incomingPending)
+                return { TES3MP::TransportResult::NotReady, 0 };
+            if (output.empty())
+                return { TES3MP::TransportResult::Accepted, 0 };
+
+            std::array<SteamNetworkingMessage_t*, TES3MP::TransportRuntime::MaxMessagesPerReceive> incoming{};
+            const int received = SteamAPI_ISteamNetworkingSockets_ReceiveMessagesOnConnection(
+                sockets(), found->second.handle, incoming.data(), static_cast<int>(output.size()));
+            if (received < 0)
+            {
+                failRuntime(TES3MP::TransportFailure::DependencyFailure);
+                return { TES3MP::TransportResult::RuntimeFailed, 0 };
+            }
+
+            std::vector<TES3MP::TransportMessage> validated;
+            validated.reserve(static_cast<std::size_t>(received));
+            bool invalid = false;
+            for (int index = 0; index < received; ++index)
+            {
+                SteamNetworkingMessage_t* value = incoming[static_cast<std::size_t>(index)];
+                const auto channel = value == nullptr ? std::nullopt : channelFor(value->m_idxLane);
+                const auto maximumBytes
+                    = channel ? TES3MP::maximumTransportMessageBytes(*channel) : std::optional<std::size_t>{};
+                const bool isReliable = value != nullptr && (value->m_nFlags & k_nSteamNetworkingSend_Reliable) != 0;
+                const bool expectedReliability
+                    = channel && ((*channel == TES3MP::TransportChannel::ReliableOrdered) == isReliable);
+                if (value == nullptr || value->m_cbSize <= 0 || value->m_pData == nullptr || !maximumBytes
+                    || static_cast<std::size_t>(value->m_cbSize) > *maximumBytes || !expectedReliability)
+                {
+                    invalid = true;
+                }
+                else if (!invalid)
+                {
+                    const auto* begin = static_cast<const std::byte*>(value->m_pData);
+                    validated.push_back(
+                        { *channel, std::vector<std::byte>(begin, begin + static_cast<std::size_t>(value->m_cbSize)) });
+                }
+            }
+            for (int index = 0; index < received; ++index)
+            {
+                if (incoming[static_cast<std::size_t>(index)] != nullptr)
+                    incoming[static_cast<std::size_t>(index)]->Release();
+            }
+            if (invalid)
+            {
+                closeInvalidMessage(connection);
+                return { mFailed ? TES3MP::TransportResult::RuntimeFailed : TES3MP::TransportResult::ProtocolViolation,
+                    0 };
+            }
+            for (std::size_t index = 0; index < validated.size(); ++index)
+                output[index] = std::move(validated[index]);
+            return { TES3MP::TransportResult::Accepted, validated.size() };
         }
 
         TES3MP::TransportResult close(
@@ -734,9 +873,13 @@ namespace
             if (!address.ParseString(launch.address.host.c_str()))
                 return false;
             address.m_port = launch.address.port;
-            std::array<SteamNetworkingConfigValue_t, 2> options;
+            std::array<SteamNetworkingConfigValue_t, 4> options;
             options[0].SetInt32(k_ESteamNetworkingConfig_Unencrypted, 0);
             options[1].SetInt64(k_ESteamNetworkingConfig_ConnectionUserData, static_cast<std::int64_t>(*generation));
+            options[2].SetInt32(k_ESteamNetworkingConfig_RecvMaxMessageSize,
+                static_cast<std::int32_t>(TES3MP::LatestWinsMaximumMessageBytes));
+            options[3].SetInt32(k_ESteamNetworkingConfig_RecvBufferMessages,
+                static_cast<std::int32_t>(TES3MP::TransportRuntime::MaxMessagesPerReceive));
             const HSteamNetConnection handle = SteamAPI_ISteamNetworkingSockets_ConnectByIPAddress(
                 sockets(), address, static_cast<int>(options.size()), options.data());
             if (handle == k_HSteamNetConnection_Invalid)
@@ -814,6 +957,31 @@ namespace
             queue({ TES3MP::TransportEventKind::ConnectionClosed, failure, std::nullopt, std::nullopt, id });
         }
 
+        void closeInvalidMessage(TES3MP::TransportConnectionId id)
+        {
+            const auto found = mConnections.find(id);
+            if (found == mConnections.end())
+                return;
+            const HSteamNetConnection handle = found->second.handle;
+            SteamAPI_ISteamNetworkingSockets_CloseConnection(sockets(), handle, 0, nullptr, false);
+            if (found->second.incomingPending && mIncomingPending > 0)
+                --mIncomingPending;
+            mConnectionHandles.erase(handle);
+            mIncomingListeners.erase(id);
+            mConnections.erase(found);
+            queue({ TES3MP::TransportEventKind::ConnectionClosed, TES3MP::TransportFailure::InvalidMessage,
+                std::nullopt, std::nullopt, id });
+        }
+
+        bool configureChannels(HSteamNetConnection handle)
+        {
+            const std::array<int, TransportLaneCount> priorities{ 0, 0 };
+            const std::array<std::uint16_t, TransportLaneCount> weights{ 1, 1 };
+            return SteamAPI_ISteamNetworkingSockets_ConfigureConnectionLanes(
+                       sockets(), handle, TransportLaneCount, priorities.data(), weights.data())
+                == k_EResultOK;
+        }
+
         static void statusChangedCallback(SteamNetConnectionStatusChangedCallback_t* info)
         {
             if (sActive != nullptr && info != nullptr)
@@ -866,6 +1034,11 @@ namespace
                 if (winningCandidate == attempt.candidates.end()
                     || !attempt.race.candidateSucceeded(winningCandidate->ordinal))
                     return;
+                if (!configureChannels(info.m_hConn))
+                {
+                    failAttempt(id, TES3MP::TransportFailure::DependencyFailure);
+                    return;
+                }
                 const std::uint64_t winningGeneration = winningCandidate->generation;
                 closeCandidates(attempt, info.m_hConn);
                 mConnections.emplace(*connection, Connection{ info.m_hConn, false, winningGeneration });
@@ -914,6 +1087,11 @@ namespace
             if (!generation)
                 return;
             if (SteamAPI_ISteamNetworkingSockets_AcceptConnection(sockets(), info.m_hConn) != k_EResultOK)
+            {
+                SteamAPI_ISteamNetworkingSockets_CloseConnection(sockets(), info.m_hConn, 0, nullptr, false);
+                return;
+            }
+            if (!configureChannels(info.m_hConn))
             {
                 SteamAPI_ISteamNetworkingSockets_CloseConnection(sockets(), info.m_hConn, 0, nullptr, false);
                 return;

@@ -2,8 +2,8 @@
 
 #include <algorithm>
 #include <array>
-#include <charconv>
 #include <cctype>
+#include <charconv>
 #include <utility>
 
 namespace
@@ -38,9 +38,8 @@ namespace
 
     bool isHexGroup(std::string_view value)
     {
-        return !value.empty() && value.size() <= 4 && std::all_of(value.begin(), value.end(), [](unsigned char byte) {
-            return std::isxdigit(byte) != 0;
-        });
+        return !value.empty() && value.size() <= 4
+            && std::all_of(value.begin(), value.end(), [](unsigned char byte) { return std::isxdigit(byte) != 0; });
     }
 
     bool isIpv6(std::string_view host)
@@ -96,9 +95,8 @@ namespace
         if (!isAlphaNumeric(static_cast<unsigned char>(label.front()))
             || !isAlphaNumeric(static_cast<unsigned char>(label.back())))
             return false;
-        return std::all_of(label.begin(), label.end(), [&](unsigned char byte) {
-            return isAlphaNumeric(byte) || byte == '-';
-        });
+        return std::all_of(
+            label.begin(), label.end(), [&](unsigned char byte) { return isAlphaNumeric(byte) || byte == '-'; });
     }
 
     std::optional<std::string> normalizeDns(std::string_view host)
@@ -132,7 +130,8 @@ namespace
     {
         if (host.empty() || host.size() > TES3MP::ConnectionEndpoint::MaxHostBytes)
             return std::nullopt;
-        if (std::any_of(host.begin(), host.end(), [](unsigned char byte) { return byte >= 0x80 || std::isspace(byte); }))
+        if (std::any_of(
+                host.begin(), host.end(), [](unsigned char byte) { return byte >= 0x80 || std::isspace(byte); }))
             return std::nullopt;
         if (isIpv4(host))
             return std::pair{ std::string(host), TES3MP::EndpointHostKind::Ipv4 };
@@ -152,6 +151,37 @@ namespace
 
 namespace TES3MP
 {
+    std::optional<TransportChannel> transportChannelFor(MessageClass messageClass) noexcept
+    {
+        switch (messageClass)
+        {
+            case MessageClass::SessionControl:
+            case MessageClass::ReliableOperation:
+                return TransportChannel::ReliableOrdered;
+            case MessageClass::LatestWinsSnapshot:
+                return TransportChannel::LatestWins;
+        }
+        return std::nullopt;
+    }
+
+    std::optional<std::size_t> maximumTransportMessageBytes(TransportChannel channel) noexcept
+    {
+        switch (channel)
+        {
+            case TransportChannel::ReliableOrdered:
+                return ReliableOrderedMaximumMessageBytes;
+            case TransportChannel::LatestWins:
+                return LatestWinsMaximumMessageBytes;
+        }
+        return std::nullopt;
+    }
+
+    bool isMessageClassAllowedOnTransportChannel(MessageClass messageClass, TransportChannel channel) noexcept
+    {
+        const auto expected = transportChannelFor(messageClass);
+        return expected && *expected == channel;
+    }
+
     std::optional<ConnectionEndpoint> ConnectionEndpoint::create(std::string_view host, std::uint16_t port)
     {
         if (port == 0)
@@ -170,13 +200,12 @@ namespace TES3MP
         return ListenerEndpoint(std::move(parsed->first), port, parsed->second);
     }
 
-    std::optional<TransportLimits> TransportLimits::create(std::size_t listenersValue,
-        std::size_t pendingAttemptsValue, std::size_t connectionsValue, std::size_t retainedEventsValue) noexcept
+    std::optional<TransportLimits> TransportLimits::create(std::size_t listenersValue, std::size_t pendingAttemptsValue,
+        std::size_t connectionsValue, std::size_t retainedEventsValue) noexcept
     {
         if (listenersValue == 0 || listenersValue > MaxListeners || pendingAttemptsValue == 0
-            || pendingAttemptsValue > MaxPendingAttempts || connectionsValue == 0
-            || connectionsValue > MaxConnections || retainedEventsValue == 0
-            || retainedEventsValue > MaxRetainedEvents)
+            || pendingAttemptsValue > MaxPendingAttempts || connectionsValue == 0 || connectionsValue > MaxConnections
+            || retainedEventsValue == 0 || retainedEventsValue > MaxRetainedEvents)
             return std::nullopt;
         return TransportLimits{ listenersValue, pendingAttemptsValue, connectionsValue, retainedEventsValue };
     }

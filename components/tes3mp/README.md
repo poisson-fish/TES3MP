@@ -267,3 +267,20 @@ reconstructs canonical invariants, independently tracks per-player effects and
 per-session progress, verifies publication contiguity/completeness and exact
 checksums, and retains an exact integer trace for same-seed replay. The slice
 adds no production harness, API, state, authority, or gameplay rule.
+
+Phase 6 Slice 6.1 accepts ADR-0032 and adds the selected-library-free endpoint,
+lifecycle, identity, limit, command, and value-event transport interface plus a
+private exact-pinned GameNetworkingSockets/c-ares adapter. The explicitly
+pumped runtime owns numeric/DNS connect racing, listen/connect/cancel/close/
+shutdown behavior, never-reused callback generations, and encrypted numeric/DNS
+loopback without exposing selected-library types.
+
+Phase 6 Slice 6.2 accepts ADR-0033 and extends that boundary with two fixed
+owned channels. Session control and reliable operations use `ReliableOrdered`;
+canonical snapshots use `LatestWins`. The private adapter maps them to two
+equal-priority/equal-weight lanes, retains reliable ordering separately from
+unreliable no-delay samples, and exposes bounded send plus caller-drained owned
+receive values. Protocol/session code retains class validation, snapshot
+recency, idempotency, authority, and mutation. Application queues, coalescing,
+rate limits, slow-peer eviction, product capacity, and detailed telemetry remain
+later Phase 6 work.
