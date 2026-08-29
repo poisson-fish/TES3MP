@@ -11,6 +11,7 @@
 #include <mutex>
 #include <optional>
 #include <span>
+#include <utility>
 #include <variant>
 
 namespace TES3MP
@@ -40,6 +41,31 @@ namespace TES3MP
         virtual bool randomBytes(std::span<std::byte> destination) noexcept = 0;
         virtual bool sha256(std::span<const std::byte> source, CredentialDigest& destination) noexcept = 0;
         virtual bool constantTimeEqual(std::span<const std::byte> left, std::span<const std::byte> right) noexcept = 0;
+    };
+
+    class JoinPasswordAuthenticationProvider final : public AuthenticationProvider
+    {
+    public:
+        static std::unique_ptr<JoinPasswordAuthenticationProvider> create(
+            CredentialCrypto& crypto, AuthenticationMaterial expectedPassword) noexcept;
+
+        JoinPasswordAuthenticationProvider(const JoinPasswordAuthenticationProvider&) = delete;
+        JoinPasswordAuthenticationProvider& operator=(const JoinPasswordAuthenticationProvider&) = delete;
+        JoinPasswordAuthenticationProvider(JoinPasswordAuthenticationProvider&&) = delete;
+        JoinPasswordAuthenticationProvider& operator=(JoinPasswordAuthenticationProvider&&) = delete;
+
+        std::unique_ptr<AuthenticationOperation> begin(
+            AuthenticationAttempt attempt, AuthenticationMaterial material) noexcept override;
+
+    private:
+        JoinPasswordAuthenticationProvider(CredentialCrypto& crypto, AuthenticationMaterial expectedPassword) noexcept
+            : mCrypto(crypto)
+            , mExpectedPassword(std::move(expectedPassword))
+        {
+        }
+
+        CredentialCrypto& mCrypto;
+        AuthenticationMaterial mExpectedPassword;
     };
 
     enum class ResumeTokenStoreError : std::uint8_t

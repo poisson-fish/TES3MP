@@ -3788,6 +3788,35 @@ only the relevant phase section here.
     composition, redaction scan, and focused encrypted loopback. The hosted
     matrix remains the Phase 6 exit gate.
 
+- 2026-08-28 — Slice 6.3 optional join-password provider — In Progress
+  - Change: this implementation candidate adds the approved server-core
+    optional join-password provider. It retains the configured secret in the
+    existing move-only cleansing value, compares a fixed 258-byte length-tagged
+    block for every open, exact, wrong, missing, and maximum-size submission,
+    allocates checked never-reused process-local routing principals only after
+    successful comparison, and returns a cancellable one-shot provider
+    operation with closed rejection results.
+  - Decisions: implements the password-provider portion of accepted ADR-0034
+    Decisions 1 and 3 without amendment. It adds no account/player identity,
+    authority, canonical mutation, password format, release policy, rate
+    default, resume composition, transport coupling, or gameplay behavior.
+  - Verification: MSVC 19.44 plus `cmake --build
+    build/tes3mp-standalone --config Debug --target
+    tes3mp_protocol_tests_run --parallel 2` passes the complete standalone
+    contract target, including focused open/protected/denied/exact-maximum,
+    fixed-comparison-work, unique-principal, cancellation, and one-shot checks.
+    `python -m unittest discover -s scripts/tests -q` passes all 112
+    repository-owned tests. Indexed baseline provenance accounts for 233
+    intentional differences and verifies all 67 dependency inputs. Three-file
+    `clang-format --dry-run --Werror` and `git diff --check` pass.
+  - Owner review: accepted ADR approval applies. Full Slice 6.3 implementation
+    demo acceptance remains pending completion of its remaining artifacts and
+    scenarios.
+  - Follow-ups: implement the approved global/source limiter, private verified
+    OpenSSL service, transport admission scope, composition, redaction scan,
+    and focused encrypted loopback. The hosted matrix remains the Phase 6 exit
+    gate.
+
 ## Phase 7 — Headless end-to-end multiplayer slice
 
 [Back to the phase tracker](IMPLEMENTATION_PLAN.md#phase-7--headless-end-to-end-multiplayer-slice)

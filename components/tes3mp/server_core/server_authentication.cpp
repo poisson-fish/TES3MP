@@ -1,12 +1,121 @@
 #include <tes3mp/server_authentication.hpp>
 
 #include <algorithm>
+#include <atomic>
 #include <limits>
 #include <new>
 #include <utility>
 
 namespace TES3MP
 {
+    namespace
+    {
+        constexpr std::size_t ComparedPasswordBytes = MaximumAuthenticationMaterialBytes + sizeof(std::uint16_t);
+
+        void clearBytes(std::span<std::byte> bytes) noexcept
+        {
+            volatile std::byte* destination = bytes.data();
+            for (std::size_t index = 0; index < bytes.size(); ++index)
+                destination[index] = std::byte{ 0 };
+        }
+
+        bool passwordsMatch(
+            CredentialCrypto& crypto, std::span<const std::byte> expected, std::span<const std::byte> supplied) noexcept
+        {
+            std::array<std::byte, ComparedPasswordBytes> expectedBlock{};
+            std::array<std::byte, ComparedPasswordBytes> suppliedBlock{};
+            const auto encode = [](std::span<const std::byte> source, auto& destination) {
+                const auto size = static_cast<std::uint16_t>(source.size());
+                destination[0] = static_cast<std::byte>(size & 0xffu);
+                destination[1] = static_cast<std::byte>((size >> 8u) & 0xffu);
+                std::copy(source.begin(), source.end(), destination.begin() + sizeof(size));
+            };
+            encode(expected, expectedBlock);
+            encode(supplied, suppliedBlock);
+            const bool matched = crypto.constantTimeEqual(expectedBlock, suppliedBlock);
+            clearBytes(expectedBlock);
+            clearBytes(suppliedBlock);
+            return matched;
+        }
+
+        std::optional<PrincipalId> allocatePrincipal() noexcept
+        {
+            static std::atomic<std::uint64_t> next{ 1 };
+            auto candidate = next.load(std::memory_order_relaxed);
+            for (;;)
+            {
+                if (candidate == 0)
+                    return std::nullopt;
+                const auto following = candidate == std::numeric_limits<std::uint64_t>::max() ? 0 : candidate + 1;
+                if (next.compare_exchange_weak(
+                        candidate, following, std::memory_order_relaxed, std::memory_order_relaxed))
+                    return PrincipalId::fromValue(candidate);
+            }
+        }
+
+        enum class PasswordOperationState : std::uint8_t
+        {
+            Ready,
+            Cancelled,
+            Completed,
+        };
+
+        class JoinPasswordAuthenticationOperation final : public AuthenticationOperation
+        {
+        public:
+            JoinPasswordAuthenticationOperation(AuthenticationAttempt attempt, bool matched) noexcept
+                : mAttempt(attempt)
+                , mMatched(matched)
+            {
+            }
+
+            AuthenticationPollResult poll() noexcept override
+            {
+                if (mState == PasswordOperationState::Completed)
+                    return AuthenticationPending{};
+
+                AuthenticationResult result = AuthenticationRejected{ AuthenticationRejectionReason::Cancelled };
+                if (mState != PasswordOperationState::Cancelled)
+                {
+                    if (!mMatched)
+                        result = AuthenticationRejected{ AuthenticationRejectionReason::Denied };
+                    else if (auto principal = allocatePrincipal())
+                        result = AuthenticatedAdmission::initial(*principal);
+                    else
+                        result = AuthenticationRejected{ AuthenticationRejectionReason::ProviderUnavailable };
+                }
+                mState = PasswordOperationState::Completed;
+                return AuthenticationCompletion{ mAttempt, std::move(result) };
+            }
+
+            void cancel() noexcept override
+            {
+                if (mState == PasswordOperationState::Ready)
+                    mState = PasswordOperationState::Cancelled;
+            }
+
+        private:
+            AuthenticationAttempt mAttempt;
+            bool mMatched;
+            PasswordOperationState mState = PasswordOperationState::Ready;
+        };
+    }
+
+    std::unique_ptr<JoinPasswordAuthenticationProvider> JoinPasswordAuthenticationProvider::create(
+        CredentialCrypto& crypto, AuthenticationMaterial expectedPassword) noexcept
+    {
+        return std::unique_ptr<JoinPasswordAuthenticationProvider>(
+            new (std::nothrow) JoinPasswordAuthenticationProvider(crypto, std::move(expectedPassword)));
+    }
+
+    std::unique_ptr<AuthenticationOperation> JoinPasswordAuthenticationProvider::begin(
+        AuthenticationAttempt attempt, AuthenticationMaterial material) noexcept
+    {
+        const bool matched = passwordsMatch(mCrypto, materialBytes(mExpectedPassword), materialBytes(material));
+        return std::unique_ptr<AuthenticationOperation>(
+            new (std::nothrow) JoinPasswordAuthenticationOperation(attempt, matched));
+    }
+
     std::unique_ptr<ResumeTokenStore> ResumeTokenStore::create(
         CredentialCrypto& crypto, std::uint64_t lifetimeMilliseconds) noexcept
     {

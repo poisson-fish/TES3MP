@@ -248,8 +248,9 @@ behavior remain separately gated. Slice 6.3 is **In Progress** under accepted
 [`ADR-0034`](adr/ADR-0034-phase6-credential-and-resumption-boundary.md); its
 production artifacts add the approved bounded credential messages, move-only
 secret and admission values, exact generated schemas, corpus/fuzz registration,
-and bounded digest-only transactional resume store. Password-provider,
-rate-limit, private-crypto, transport scope, composition, and redaction/loopback
+bounded digest-only transactional resume store, and fixed-work optional
+join-password provider with process-local non-reused routing principals.
+Rate-limit, private-crypto, transport scope, composition, and redaction/loopback
 closure work remains.
 
 ## References and license

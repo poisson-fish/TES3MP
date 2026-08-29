@@ -47,6 +47,8 @@ namespace
 
         bool constantTimeEqual(std::span<const std::byte> left, std::span<const std::byte> right) noexcept override
         {
+            ++comparisonCalls;
+            lastComparisonBytes = left.size();
             if (left.size() != right.size())
                 return false;
             std::byte difference{ 0 };
@@ -58,6 +60,8 @@ namespace
         std::uint8_t seed = 1;
         bool failRandom = false;
         bool failDigest = false;
+        std::size_t comparisonCalls = 0;
+        std::size_t lastComparisonBytes = 0;
     };
 
     PrincipalId principal(std::uint64_t value = 1)
@@ -85,6 +89,82 @@ namespace
         FakeCrypto& crypto, std::uint64_t lifetime = MinimumResumeTokenLifetimeMilliseconds)
     {
         return ResumeTokenStore::create(crypto, lifetime);
+    }
+
+    AuthenticationAttempt attempt(std::uint64_t id = 1, std::uint64_t generationValue = 1)
+    {
+        return AuthenticationAttempt{ *AuthenticationAttemptId::fromValue(id), generation(generationValue) };
+    }
+
+    AuthenticationMaterial material(std::span<const std::byte> bytes = {})
+    {
+        return *AuthenticationMaterial::create(bytes);
+    }
+
+    std::optional<AuthenticatedAdmission> accepted(AuthenticationPollResult result)
+    {
+        auto* completion = std::get_if<AuthenticationCompletion>(&result);
+        if (!completion)
+            return std::nullopt;
+        auto* admission = std::get_if<AuthenticatedAdmission>(&completion->result);
+        if (!admission)
+            return std::nullopt;
+        return std::move(*admission);
+    }
+
+    bool join_password_provider_handles_open_protected_and_denied_inputs()
+    {
+        FakeCrypto crypto;
+        auto open = JoinPasswordAuthenticationProvider::create(crypto, material());
+        auto openOperation = open->begin(attempt(), material());
+        auto openAdmission = accepted(openOperation->poll());
+        if (!openAdmission || openAdmission->isResume())
+            return false;
+
+        const std::array expected{ std::byte{ 0x10 }, std::byte{ 0x20 }, std::byte{ 0x30 } };
+        auto protectedProvider = JoinPasswordAuthenticationProvider::create(crypto, material(expected));
+        auto exactOperation = protectedProvider->begin(attempt(2), material(expected));
+        auto exactAdmission = accepted(exactOperation->poll());
+        if (!exactAdmission || exactAdmission->principal() == openAdmission->principal())
+            return false;
+
+        const std::array wrong{ std::byte{ 0x10 }, std::byte{ 0x20 }, std::byte{ 0x31 } };
+        auto wrongOperation = protectedProvider->begin(attempt(3), material(wrong));
+        auto wrongResult = wrongOperation->poll();
+        auto* wrongCompletion = std::get_if<AuthenticationCompletion>(&wrongResult);
+        auto* wrongRejection
+            = wrongCompletion ? std::get_if<AuthenticationRejected>(&wrongCompletion->result) : nullptr;
+        auto missingOperation = protectedProvider->begin(attempt(4), material());
+        auto missingResult = missingOperation->poll();
+        auto* missingCompletion = std::get_if<AuthenticationCompletion>(&missingResult);
+        auto* missingRejection
+            = missingCompletion ? std::get_if<AuthenticationRejected>(&missingCompletion->result) : nullptr;
+
+        std::array<std::byte, MaximumAuthenticationMaterialBytes> maximum{};
+        maximum.fill(std::byte{ 0x42 });
+        auto maximumProvider = JoinPasswordAuthenticationProvider::create(crypto, material(maximum));
+        auto maximumOperation = maximumProvider->begin(attempt(5), material(maximum));
+        auto maximumAdmission = accepted(maximumOperation->poll());
+
+        return wrongRejection && wrongRejection->reason == AuthenticationRejectionReason::Denied && missingRejection
+            && missingRejection->reason == AuthenticationRejectionReason::Denied && maximumAdmission
+            && crypto.comparisonCalls == 5
+            && crypto.lastComparisonBytes == MaximumAuthenticationMaterialBytes + sizeof(std::uint16_t);
+    }
+
+    bool join_password_operation_is_cancellable_and_one_shot()
+    {
+        FakeCrypto crypto;
+        auto provider = JoinPasswordAuthenticationProvider::create(crypto, material());
+        auto operation = provider->begin(attempt(8, 3), material());
+        operation->cancel();
+        operation->cancel();
+        auto result = operation->poll();
+        auto* completion = std::get_if<AuthenticationCompletion>(&result);
+        auto* rejection = completion ? std::get_if<AuthenticationRejected>(&completion->result) : nullptr;
+        return completion && completion->attempt == attempt(8, 3) && rejection
+            && rejection->reason == AuthenticationRejectionReason::Cancelled
+            && std::holds_alternative<AuthenticationPending>(operation->poll());
     }
 
     bool policy_bounds_are_closed()
@@ -269,6 +349,10 @@ int main()
         bool (*run)();
     };
     constexpr std::array tests{
+        Test{ "join_password_provider_handles_open_protected_and_denied_inputs",
+            join_password_provider_handles_open_protected_and_denied_inputs },
+        Test{ "join_password_operation_is_cancellable_and_one_shot",
+            join_password_operation_is_cancellable_and_one_shot },
         Test{ "policy_bounds_are_closed", policy_bounds_are_closed },
         Test{ "issue_resume_rotate_and_replay_are_atomic", issue_resume_rotate_and_replay_are_atomic },
         Test{ "precommit_failures_preserve_the_old_token", precommit_failures_preserve_the_old_token },
