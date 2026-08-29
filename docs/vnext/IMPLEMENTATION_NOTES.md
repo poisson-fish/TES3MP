@@ -3632,6 +3632,44 @@ only the relevant phase section here.
   - Follow-ups: Slice 6.2 remains **Not Started**. Present its channel-semantics
     behavior options and recommendation for owner approval before implementation.
 
+- 2026-08-28 — Slice 6.2 channel delivery candidate — In Progress
+  - Change: implementation `2f022fe4ad` adds accepted
+    [`ADR-0033`](adr/ADR-0033-phase6-transport-channel-and-delivery-semantics.md),
+    the owned `ReliableOrdered`/`LatestWins` channel mapping, whole-frame byte
+    ceilings, typed send/receive results, caller-bounded atomic receive drains,
+    and private two-lane GameNetworkingSockets delivery. The adapter configures
+    equal priority/weight before exposing connections, maps reliable work to
+    ordered delivery and snapshots to unreliable no-delay delivery, and rejects
+    unknown, empty, oversized, stale, pending, or contradictory input without
+    session or canonical mutation.
+  - Decisions: the project owner approved ADR-0033 Option A for Decisions 1–3
+    without amendment. The implementation adds no application retry queue,
+    snapshot coalescer, product capacity, rate policy, slow-peer eviction,
+    authentication/resumption, detailed telemetry, authority, state scope, or
+    gameplay behavior; those remain with Slices 6.3–6.5 and later GDRs.
+  - Verification: MSVC 19.44 developer environment plus
+    `cmake --build build/slice61-gns --config Debug --target
+    tes3mp_transport_lifecycle_tests tes3mp_transport_gns_schedule_tests
+    tes3mp_transport_gns_tests --parallel 2`; all three focused executables pass,
+    including exact channel/budget mapping, bidirectional encrypted loopback,
+    24-message reliable ordering under injected loss/reordering, and a newest
+    latest-wins sample passing a delayed maximum-size reliable fragment. MSVC
+    plus `cmake --build build/tes3mp-standalone --config Debug --target
+    tes3mp_protocol_tests_run --parallel 2` passes the complete standalone
+    contract target. `python -m unittest discover -s scripts/tests` passes all
+    112 repository-owned tests; the 14 focused target-boundary tests separately
+    pass. `python scripts/verify_vnext_baseline.py --index` accounts for 217
+    intentional differences and verifies all 61 dependency inputs.
+    `clang-format --dry-run --Werror` passes all five changed C++ files, JSON
+    parsing succeeds, and staged whitespace checks pass.
+  - Owner review: architecture approval is recorded in ADR-0033. Implementation
+    demo acceptance has not yet been requested, so Slice 6.2 remains **In
+    Progress**.
+  - Follow-ups: present the approved class mapping, exact boundary rejection,
+    reliable fault ordering, snapshot bypass, and absence of queue/gameplay
+    behavior for owner demo acceptance. The complete hosted platform/sanitizer
+    matrix remains the Phase 6 exit gate, not a per-slice trigger.
+
 ## Phase 7 — Headless end-to-end multiplayer slice
 
 [Back to the phase tracker](IMPLEMENTATION_PLAN.md#phase-7--headless-end-to-end-multiplayer-slice)

@@ -241,8 +241,10 @@ and all six retained artifact sets are internally verified and consistent.
 Slice 6.2 is **In Progress** under accepted
 [`ADR-0033`](adr/ADR-0033-phase6-transport-channel-and-delivery-semantics.md):
 two fixed equal-scheduled channels, an owned bounded byte-delivery API, and
-minimal fail-closed semantics. Application queue/coalescing policy, product
-capacity, detailed telemetry, and gameplay behavior remain separately gated.
+minimal fail-closed semantics. Implementation `2f022fe4ad` and applicable local
+verification pass; owner implementation-demo acceptance remains required.
+Application queue/coalescing policy, product capacity, detailed telemetry, and
+gameplay behavior remain separately gated.
 
 ## References and license
 
