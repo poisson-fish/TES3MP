@@ -3988,6 +3988,23 @@ only the relevant phase section here.
     encrypted authentication loopback; hosted matrix remains the Phase 6 exit
     gate.
 
+- 2026-08-30 — Slice 6.3 credential/source redaction contracts — In Progress
+  - Change: added compile-time public-boundary checks proving that join material,
+    resume tokens, authentication requests/results, composed submissions, and
+    opaque admission scopes have no stream insertion surface; raw credentials
+    additionally have no equality, `bytes()`, or `data()` access surface. This
+    adds no production behavior, authority, state, or gameplay decision.
+  - Verification: focused server-authentication build and executable pass in
+    `/tmp/tes3mp-auth-compose`; all 112 repository-owned Python tests pass;
+    `python scripts/verify_vnext_baseline.py` verifies 238 intentional
+    differences and 67 dependency inputs; `git diff --check` passes.
+  - Owner review: accepted ADR-0034/0036 redaction requirements apply. Full
+    Slice 6.3 implementation-demo acceptance remains pending encrypted
+    authentication loopback closure.
+  - Follow-ups: add the complete encrypted protected-join and single-use resume
+    loopback, then present the Slice 6.3 demo. The hosted matrix remains the
+    Phase 6 exit gate.
+
 ## Phase 7 — Headless end-to-end multiplayer slice
 
 [Back to the phase tracker](IMPLEMENTATION_PLAN.md#phase-7--headless-end-to-end-multiplayer-slice)

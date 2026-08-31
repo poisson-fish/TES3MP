@@ -30,8 +30,29 @@ namespace
     template <class T>
     concept HasBytesAccessor = requires(const T& value) { value.bytes(); };
 
+    template <class T>
+    concept HasDataAccessor = requires(const T& value) { value.data(); };
+
+    template <class T>
+    concept EqualityComparable = requires(const T& left, const T& right) { left == right; };
+
     static_assert(!Streamable<AdmissionScopeId>);
     static_assert(!HasBytesAccessor<AdmissionScopeId>);
+    static_assert(!HasDataAccessor<AdmissionScopeId>);
+    static_assert(!Streamable<AuthenticationMaterial>);
+    static_assert(!EqualityComparable<AuthenticationMaterial>);
+    static_assert(!HasBytesAccessor<AuthenticationMaterial>);
+    static_assert(!HasDataAccessor<AuthenticationMaterial>);
+    static_assert(!Streamable<ResumeToken>);
+    static_assert(!EqualityComparable<ResumeToken>);
+    static_assert(!HasBytesAccessor<ResumeToken>);
+    static_assert(!HasDataAccessor<ResumeToken>);
+    static_assert(!Streamable<AuthenticationRequest>);
+    static_assert(!EqualityComparable<AuthenticationRequest>);
+    static_assert(!Streamable<AuthenticationAcceptedMessage>);
+    static_assert(!EqualityComparable<AuthenticationAcceptedMessage>);
+    static_assert(!Streamable<ServerAuthenticationSubmission>);
+    static_assert(!EqualityComparable<ServerAuthenticationSubmission>);
 
     class FakeCrypto final : public CredentialCrypto
     {
