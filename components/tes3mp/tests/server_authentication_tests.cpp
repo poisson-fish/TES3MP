@@ -74,6 +74,13 @@ namespace
         std::size_t lastComparisonBytes = 0;
     };
 
+    class FixedClock final : public MonotonicClock
+    {
+    public:
+        MonotonicInstant now() const noexcept override { return value; }
+        MonotonicInstant value = MonotonicInstant::fromNanoseconds(0);
+    };
+
     PrincipalId principal(std::uint64_t value = 1)
     {
         return *PrincipalId::fromValue(value);
@@ -454,6 +461,40 @@ namespace
                    restarted->consume(*first, context(), MonotonicInstant::fromNanoseconds(1)))
             == ResumeTokenStoreError::Denied;
     }
+
+    bool shared_service_gates_routes_and_defers_resume_consumption()
+    {
+        FakeCrypto crypto;
+        FixedClock clock;
+        auto limiter = AuthenticationRateLimiter::create(ratePolicy(1, 4), clock.now());
+        auto join = JoinPasswordAuthenticationProvider::create(crypto, material());
+        auto tokens = store(crypto);
+        SharedServerAuthenticationService service(*limiter, *join, *tokens, clock);
+
+        auto first = service.begin(attempt(), ServerAuthenticationSubmission(
+            AuthenticationRequest::join(material()), scope(1), context()));
+        if (!first || !accepted(first->poll()) || crypto.comparisonCalls != 1)
+            return false;
+
+        auto limited = service.begin(attempt(2), ServerAuthenticationSubmission(
+            AuthenticationRequest::join(material()), scope(1), context()));
+        auto limitedPoll = limited->poll();
+        auto* limitedCompletion = std::get_if<AuthenticationCompletion>(&limitedPoll);
+        auto* limitedRejection
+            = limitedCompletion ? std::get_if<AuthenticationRejected>(&limitedCompletion->result) : nullptr;
+        if (!limitedRejection || limitedRejection->reason != AuthenticationRejectionReason::ProviderUnavailable
+            || crypto.comparisonCalls != 1)
+            return false;
+
+        auto issued = tokens->issue(principal(), session(), generation(), context(), clock.now());
+        auto token = std::get<AuthenticationAcceptedMessage>(std::move(issued)).takeToken();
+        auto resume = service.begin(attempt(3), ServerAuthenticationSubmission(
+            AuthenticationRequest::resume(std::move(token)), scope(2), context()));
+        if (!resume || tokens->size() != 1)
+            return false;
+        resume->cancel();
+        return tokens->size() == 1 && std::holds_alternative<AuthenticationPending>(resume->poll());
+    }
 }
 
 int main()
@@ -482,6 +523,8 @@ int main()
         Test{ "expiry_overflow_and_crypto_failure_fail_closed", expiry_overflow_and_crypto_failure_fail_closed },
         Test{ "fixed_capacity_and_restart_invalidation_are_enforced",
             fixed_capacity_and_restart_invalidation_are_enforced },
+        Test{ "shared_service_gates_routes_and_defers_resume_consumption",
+            shared_service_gates_routes_and_defers_resume_consumption },
     };
     for (const auto& test : tests)
     {

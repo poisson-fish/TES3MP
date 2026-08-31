@@ -1,7 +1,7 @@
 #ifndef TES3MP_SERVER_SESSION_HPP
 #define TES3MP_SERVER_SESSION_HPP
 
-#include "authentication.hpp"
+#include "server_authentication.hpp"
 #include "monotonic_clock.hpp"
 #include "observability.hpp"
 #include "protocol_exchange.hpp"
@@ -50,7 +50,7 @@ namespace TES3MP
 
     struct ServerAuthenticationSubmitted
     {
-        AuthenticationMaterial material;
+        ServerAuthenticationSubmission submission;
     };
 
     struct ServerPollAuthentication
@@ -102,6 +102,15 @@ namespace TES3MP
         AlreadyBound,
     };
 
+    enum class InitialSessionFinalizationResult : std::uint8_t
+    {
+        Finalized,
+        NotEstablished,
+        ResumeAlreadyFinalized,
+        AlreadyBound,
+        TokenIssueFailed,
+    };
+
     enum class ReliableOperationReceiveResult : std::uint8_t
     {
         Delivered,
@@ -119,7 +128,7 @@ namespace TES3MP
     public:
         static ServerSessionCreateResult create(MonotonicClock& clock, Observability& observability,
             SessionTimeoutPolicy timeoutPolicy, SessionGeneration generation, CapabilityOffer serverOffer,
-            AuthenticationProvider& authenticationProvider);
+            ServerAuthenticationService& authenticationService);
 
         ServerSessionStateMachine(const ServerSessionStateMachine&) = delete;
         ServerSessionStateMachine& operator=(const ServerSessionStateMachine&) = delete;
@@ -129,6 +138,7 @@ namespace TES3MP
 
         ServerSessionTransition handle(ServerSessionEvent event) noexcept;
         ServerSessionBindingResult bindEstablishedSession(SessionId sessionId) noexcept;
+        InitialSessionFinalizationResult finalizeInitialSession(SessionId sessionId) noexcept;
         ReliableOperationReceiveResult receiveReliableOperation(const ReliableOperation& operation) const noexcept;
 
         ServerSessionState state() const noexcept { return mState; }
@@ -141,18 +151,13 @@ namespace TES3MP
             return mAuthenticationRejection;
         }
         const std::optional<PrincipalId>& principal() const noexcept { return mPrincipal; }
-        std::optional<ResumeAdmissionGrant> takeResumeGrant() noexcept
-        {
-            auto result = std::move(mResumeGrant);
-            mResumeGrant.reset();
-            return result;
-        }
+        std::optional<AuthenticationAcceptedMessage> takeAuthenticationAccepted() noexcept;
         std::optional<SessionId> sessionId() const noexcept { return mSessionId; }
 
     private:
         ServerSessionStateMachine(MonotonicClock& clock, Observability& observability,
             SessionTimeoutPolicy timeoutPolicy, SessionGeneration generation, CapabilityOffer serverOffer,
-            AuthenticationProvider& authenticationProvider, MonotonicInstant deadline);
+            ServerAuthenticationService& authenticationService, MonotonicInstant deadline);
 
         ServerSessionTransition illegal(ServerSessionEventKind event) noexcept;
         ServerSessionTransition deadlineOverflow(ServerSessionEventKind event, SessionStage stage) noexcept;
@@ -165,7 +170,7 @@ namespace TES3MP
         SessionTimeoutPolicy mTimeoutPolicy;
         SessionGeneration mGeneration;
         CapabilityOffer mServerOffer;
-        AuthenticationProvider& mAuthenticationProvider;
+        ServerAuthenticationService& mAuthenticationService;
         ServerSessionState mState = ServerSessionState::AwaitingEncryptedTransport;
         std::optional<MonotonicInstant> mDeadline;
         AuthenticationAttempt mActiveAttempt;
@@ -174,7 +179,8 @@ namespace TES3MP
         std::optional<SessionRejected> mProtocolRejection;
         std::optional<AuthenticationRejected> mAuthenticationRejection;
         std::optional<PrincipalId> mPrincipal;
-        std::optional<ResumeAdmissionGrant> mResumeGrant;
+        std::optional<AuthenticationAcceptedMessage> mAuthenticationAccepted;
+        std::optional<ResumeTokenContext> mAuthenticationContext;
         std::optional<SessionId> mSessionId;
     };
 }

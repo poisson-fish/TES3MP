@@ -353,4 +353,99 @@ namespace TES3MP
         const std::scoped_lock lock(mMutex);
         return mSize;
     }
+
+    namespace
+    {
+        class ImmediateAuthenticationOperation final : public AuthenticationOperation
+        {
+        public:
+            ImmediateAuthenticationOperation(AuthenticationAttempt attempt, AuthenticationResult result) noexcept
+                : mAttempt(attempt)
+                , mResult(std::move(result))
+            {
+            }
+
+            AuthenticationPollResult poll() noexcept override
+            {
+                if (!mResult)
+                    return AuthenticationPending{};
+                auto result = std::move(*mResult);
+                mResult.reset();
+                return AuthenticationCompletion{ mAttempt, std::move(result) };
+            }
+
+            void cancel() noexcept override { mResult.reset(); }
+
+        private:
+            AuthenticationAttempt mAttempt;
+            std::optional<AuthenticationResult> mResult;
+        };
+
+        class ResumeAuthenticationOperation final : public AuthenticationOperation
+        {
+        public:
+            ResumeAuthenticationOperation(AuthenticationAttempt attempt, ResumeTokenStore& store, ResumeToken token,
+                ResumeTokenContext context, MonotonicClock& clock) noexcept
+                : mAttempt(attempt)
+                , mStore(store)
+                , mToken(std::move(token))
+                , mContext(context)
+                , mClock(clock)
+            {
+            }
+
+            AuthenticationPollResult poll() noexcept override
+            {
+                if (!mToken)
+                    return AuthenticationPending{};
+                auto consumed = mStore.consume(*mToken, mContext, mClock.now());
+                mToken.reset();
+                if (auto* admission = std::get_if<AuthenticatedAdmission>(&consumed))
+                    return AuthenticationCompletion{ mAttempt, std::move(*admission) };
+                const auto error = std::get<ResumeTokenStoreError>(consumed);
+                return AuthenticationCompletion{ mAttempt,
+                    AuthenticationRejected{ error == ResumeTokenStoreError::Denied
+                            ? AuthenticationRejectionReason::Denied
+                            : AuthenticationRejectionReason::ProviderUnavailable } };
+            }
+
+            void cancel() noexcept override { mToken.reset(); }
+
+        private:
+            AuthenticationAttempt mAttempt;
+            ResumeTokenStore& mStore;
+            std::optional<ResumeToken> mToken;
+            ResumeTokenContext mContext;
+            MonotonicClock& mClock;
+        };
+
+        std::unique_ptr<AuthenticationOperation> immediate(
+            AuthenticationAttempt attempt, AuthenticationResult result) noexcept
+        {
+            return std::unique_ptr<AuthenticationOperation>(
+                new (std::nothrow) ImmediateAuthenticationOperation(attempt, std::move(result)));
+        }
+    }
+
+    std::unique_ptr<AuthenticationOperation> SharedServerAuthenticationService::begin(
+        AuthenticationAttempt attempt, ServerAuthenticationSubmission submission) noexcept
+    {
+        if (mLimiter.allow(submission.mScope, mClock.now()) != AuthenticationRateLimitResult::Allowed)
+            return immediate(attempt, AuthenticationRejected{ AuthenticationRejectionReason::ProviderUnavailable });
+
+        if (submission.mRequest.kind() == AuthenticationCredentialKind::JoinPassword)
+            return mJoinProvider.begin(attempt, submission.mRequest.takeMaterial());
+
+        auto token = submission.mRequest.takeResumeToken();
+        if (!token)
+            return immediate(attempt, AuthenticationRejected{ AuthenticationRejectionReason::Denied });
+        return std::unique_ptr<AuthenticationOperation>(new (std::nothrow) ResumeAuthenticationOperation(
+            attempt, mResumeStore, std::move(*token), submission.mContext, mClock));
+    }
+
+    ResumeTokenIssueResult SharedServerAuthenticationService::issueInitial(PrincipalId principal, SessionId session,
+        SessionGeneration generation, ResumeTokenContext context) noexcept
+    {
+        return mResumeStore.issue(principal, session, generation, context, mClock.now());
+    }
 }

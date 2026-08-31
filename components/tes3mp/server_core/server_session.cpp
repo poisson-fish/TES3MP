@@ -102,7 +102,7 @@ namespace TES3MP
 {
     ServerSessionCreateResult ServerSessionStateMachine::create(MonotonicClock& clock, Observability& observability,
         SessionTimeoutPolicy timeoutPolicy, SessionGeneration generation, CapabilityOffer serverOffer,
-        AuthenticationProvider& authenticationProvider)
+        ServerAuthenticationService& authenticationService)
     {
         const auto deadline
             = sessionDeadline(clock.now(), timeoutPolicy.duration(SessionStage::TransportAndNegotiation));
@@ -113,18 +113,18 @@ namespace TES3MP
                 SessionStage::TransportAndNegotiation };
         }
         return std::unique_ptr<ServerSessionStateMachine>(new ServerSessionStateMachine(clock, observability,
-            timeoutPolicy, generation, std::move(serverOffer), authenticationProvider, *deadline));
+            timeoutPolicy, generation, std::move(serverOffer), authenticationService, *deadline));
     }
 
     ServerSessionStateMachine::ServerSessionStateMachine(MonotonicClock& clock, Observability& observability,
         SessionTimeoutPolicy timeoutPolicy, SessionGeneration generation, CapabilityOffer serverOffer,
-        AuthenticationProvider& authenticationProvider, MonotonicInstant deadline)
+        ServerAuthenticationService& authenticationService, MonotonicInstant deadline)
         : mClock(clock)
         , mObservability(observability)
         , mTimeoutPolicy(timeoutPolicy)
         , mGeneration(generation)
         , mServerOffer(std::move(serverOffer))
-        , mAuthenticationProvider(authenticationProvider)
+        , mAuthenticationService(authenticationService)
         , mDeadline(deadline)
         , mActiveAttempt{ AuthenticationAttemptId::initial(), generation }
     {
@@ -274,7 +274,8 @@ namespace TES3MP
             MonotonicInstant deadline = mClock.now();
             if (!prepareDeadline(SessionStage::AuthenticationProvider, deadline))
                 return deadlineOverflow(kind, SessionStage::AuthenticationProvider);
-            auto operation = mAuthenticationProvider.begin(mActiveAttempt, std::move(submitted->material));
+            mAuthenticationContext = submitted->submission.context();
+            auto operation = mAuthenticationService.begin(mActiveAttempt, std::move(submitted->submission));
             if (!operation)
             {
                 mAuthenticationRejection = AuthenticationRejected{ AuthenticationRejectionReason::ProviderUnavailable };
@@ -309,7 +310,13 @@ namespace TES3MP
             if (auto* admission = std::get_if<AuthenticatedAdmission>(&completion.result))
             {
                 mPrincipal = admission->principal();
-                mResumeGrant = admission->takeResumeGrant();
+                if (auto grant = admission->takeResumeGrant())
+                {
+                    mSessionId = grant->sessionId();
+                    mGeneration = grant->nextGeneration();
+                    mActiveAttempt.generation = mGeneration;
+                    mAuthenticationAccepted = grant->takeResponse();
+                }
                 mState = ServerSessionState::Established;
                 observe(SessionObservationOutcome::AuthenticationSucceeded, SessionObservationStage::Terminal);
                 return { ServerSessionAction::SessionEstablished, std::nullopt };
@@ -325,12 +332,44 @@ namespace TES3MP
 
     ServerSessionBindingResult ServerSessionStateMachine::bindEstablishedSession(SessionId sessionId) noexcept
     {
-        if (mState != ServerSessionState::Established)
-            return ServerSessionBindingResult::NotEstablished;
-        if (mSessionId)
-            return ServerSessionBindingResult::AlreadyBound;
+        switch (finalizeInitialSession(sessionId))
+        {
+            case InitialSessionFinalizationResult::Finalized:
+                return ServerSessionBindingResult::Bound;
+            case InitialSessionFinalizationResult::AlreadyBound:
+            case InitialSessionFinalizationResult::ResumeAlreadyFinalized:
+                return ServerSessionBindingResult::AlreadyBound;
+            case InitialSessionFinalizationResult::NotEstablished:
+            case InitialSessionFinalizationResult::TokenIssueFailed:
+                return ServerSessionBindingResult::NotEstablished;
+        }
+        return ServerSessionBindingResult::NotEstablished;
+    }
+
+    InitialSessionFinalizationResult ServerSessionStateMachine::finalizeInitialSession(SessionId sessionId) noexcept
+    {
+        if (mState != ServerSessionState::Established || !mPrincipal || !mAuthenticationContext)
+            return InitialSessionFinalizationResult::NotEstablished;
+        if (mAuthenticationAccepted || mSessionId)
+            return InitialSessionFinalizationResult::ResumeAlreadyFinalized;
         mSessionId = sessionId;
-        return ServerSessionBindingResult::Bound;
+        auto issued = mAuthenticationService.issueInitial(
+            *mPrincipal, sessionId, mGeneration, *mAuthenticationContext);
+        if (auto* accepted = std::get_if<AuthenticationAcceptedMessage>(&issued))
+        {
+            mAuthenticationAccepted = std::move(*accepted);
+            return InitialSessionFinalizationResult::Finalized;
+        }
+        mSessionId.reset();
+        mState = ServerSessionState::Closed;
+        return InitialSessionFinalizationResult::TokenIssueFailed;
+    }
+
+    std::optional<AuthenticationAcceptedMessage> ServerSessionStateMachine::takeAuthenticationAccepted() noexcept
+    {
+        auto result = std::move(mAuthenticationAccepted);
+        mAuthenticationAccepted.reset();
+        return result;
     }
 
     ReliableOperationReceiveResult ServerSessionStateMachine::receiveReliableOperation(

@@ -125,6 +125,32 @@ namespace TES3MP
         friend constexpr bool operator==(ResumeTokenContext, ResumeTokenContext) noexcept = default;
     };
 
+    class ServerAuthenticationSubmission
+    {
+    public:
+        ServerAuthenticationSubmission(
+            AuthenticationRequest request, AdmissionScopeId scope, ResumeTokenContext context) noexcept
+            : mRequest(std::move(request))
+            , mScope(std::move(scope))
+            , mContext(context)
+        {
+        }
+
+        ServerAuthenticationSubmission(const ServerAuthenticationSubmission&) = delete;
+        ServerAuthenticationSubmission& operator=(const ServerAuthenticationSubmission&) = delete;
+        ServerAuthenticationSubmission(ServerAuthenticationSubmission&&) noexcept = default;
+        ServerAuthenticationSubmission& operator=(ServerAuthenticationSubmission&&) noexcept = default;
+
+        ResumeTokenContext context() const noexcept { return mContext; }
+        AuthenticationRequest takeRequest() noexcept { return std::move(mRequest); }
+
+    private:
+        friend class SharedServerAuthenticationService;
+        AuthenticationRequest mRequest;
+        AdmissionScopeId mScope;
+        ResumeTokenContext mContext;
+    };
+
     class CredentialCrypto
     {
     public:
@@ -222,6 +248,47 @@ namespace TES3MP
         mutable std::mutex mMutex;
         std::array<std::optional<Record>, MaximumResumeTokenRecords> mRecords{};
         std::size_t mSize = 0;
+    };
+
+    class ServerAuthenticationService
+    {
+    public:
+        virtual ~ServerAuthenticationService() = default;
+        virtual std::unique_ptr<AuthenticationOperation> begin(
+            AuthenticationAttempt attempt, ServerAuthenticationSubmission submission) noexcept = 0;
+        virtual ResumeTokenIssueResult issueInitial(PrincipalId principal, SessionId session,
+            SessionGeneration generation, ResumeTokenContext context) noexcept = 0;
+
+    protected:
+        static std::span<const std::byte> materialBytes(const AuthenticationMaterial& material) noexcept
+        {
+            return material.secretBytes();
+        }
+    };
+
+    class SharedServerAuthenticationService final : public ServerAuthenticationService
+    {
+    public:
+        SharedServerAuthenticationService(AuthenticationRateLimiter& limiter,
+            JoinPasswordAuthenticationProvider& joinProvider, ResumeTokenStore& resumeStore,
+            MonotonicClock& clock) noexcept
+            : mLimiter(limiter)
+            , mJoinProvider(joinProvider)
+            , mResumeStore(resumeStore)
+            , mClock(clock)
+        {
+        }
+
+        std::unique_ptr<AuthenticationOperation> begin(
+            AuthenticationAttempt attempt, ServerAuthenticationSubmission submission) noexcept override;
+        ResumeTokenIssueResult issueInitial(PrincipalId principal, SessionId session, SessionGeneration generation,
+            ResumeTokenContext context) noexcept override;
+
+    private:
+        AuthenticationRateLimiter& mLimiter;
+        JoinPasswordAuthenticationProvider& mJoinProvider;
+        ResumeTokenStore& mResumeStore;
+        MonotonicClock& mClock;
     };
 }
 

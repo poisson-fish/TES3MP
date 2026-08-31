@@ -40,7 +40,7 @@ namespace TES3MP::TestSupport
             PrincipalId mPrincipalId;
         };
 
-        class ImmediateProvider final : public AuthenticationProvider
+        class ImmediateProvider final : public ServerAuthenticationService
         {
         public:
             explicit ImmediateProvider(PrincipalId principalId) noexcept
@@ -49,9 +49,18 @@ namespace TES3MP::TestSupport
             }
 
             std::unique_ptr<AuthenticationOperation> begin(
-                AuthenticationAttempt attempt, AuthenticationMaterial) noexcept override
+                AuthenticationAttempt attempt, ServerAuthenticationSubmission) noexcept override
             {
                 return std::make_unique<ImmediateOperation>(attempt, mPrincipalId);
+            }
+
+            ResumeTokenIssueResult issueInitial(
+                PrincipalId, SessionId, SessionGeneration, ResumeTokenContext) noexcept override
+            {
+                std::array<std::byte, ResumeTokenBytes> bytes{};
+                auto token = ResumeToken::create(bytes);
+                return std::move(*AuthenticationAcceptedMessage::create(
+                    std::move(*token), MinimumResumeTokenLifetimeMilliseconds));
             }
 
         private:
@@ -168,8 +177,13 @@ namespace TES3MP::TestSupport
             trace.push_back(Phase4PeerTraceStep::ServerHelloAccepted);
 
             auto authenticationMaterial = AuthenticationMaterial::create({});
-            if (!authenticationMaterial
-                || server->handle(ServerAuthenticationSubmitted{ std::move(*authenticationMaterial) }).action
+            std::array<std::byte, AdmissionScopeIdBytes> scopeBytes{};
+            auto scope = AdmissionScopeId::create(scopeBytes);
+            if (!authenticationMaterial || !scope
+                || server->handle(ServerAuthenticationSubmitted{ ServerAuthenticationSubmission(
+                                      AuthenticationRequest::join(std::move(*authenticationMaterial)),
+                                      std::move(*scope), ResumeTokenContext{}) })
+                           .action
                     != ServerSessionAction::AuthenticationStarted
                 || client->handle(ClientAuthenticationSubmitted{}).action
                     != ClientSessionAction::AuthenticationSubmitted

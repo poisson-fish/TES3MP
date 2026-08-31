@@ -3951,6 +3951,43 @@ only the relevant phase section here.
     the approved shared composition/finalization before redaction and complete
     encrypted authentication loopback closure.
 
+- 2026-08-30 — Slice 6.3 authentication composition approval — In Progress
+  - Change: the project owner approved ADR-0036 Option A for Decisions 1–3 and
+    its proposed focused tests. The decision record and live tracker now record
+    that approval; production composition is unblocked.
+  - Decisions: one atomic typed submission, one process-wide bounded routing
+    service, and state-machine-owned resume installation with bind-then-issue
+    initial finalization and no tokenless success fallback.
+  - Verification: documentation-only approval recording; production evidence
+    follows with the implementation.
+  - Owner review: explicit approval received in the 2026-08-30 implementation
+    discussion.
+  - Follow-ups: implement and verify the accepted boundary, then complete
+    credential redaction and encrypted authentication loopback closure.
+
+- 2026-08-30 — Slice 6.3 authentication composition implementation — In Progress
+  - Change: implemented ADR-0036's move-only typed submission, process-wide
+    shared authentication service, exactly-once global/source gate, closed
+    join/resume routing, deferred cancellable resume consumption,
+    state-machine-owned resumed identity/generation installation, take-once
+    accepted response, and fail-closed bind-then-issue initial finalization.
+    Phase 4 deterministic test composition now supplies the typed boundary.
+  - Tests: added shared-service gate/routing/cancel-before-consume coverage and
+    initial bind/issue success, take-once, and issue-failure closure coverage.
+  - Verification: standalone Debug configure and complete build pass in
+    `/tmp/tes3mp-auth-compose`; `cmake --build /tmp/tes3mp-auth-compose --target
+    tes3mp_protocol_tests_run -j2` passes the complete local C++ contract set;
+    `python -m unittest discover -s scripts/tests -q` passes all 112 tests;
+    `python scripts/verify_vnext_baseline.py` verifies 238 intentional
+    differences and 67 dependency inputs; `git diff --check` passes.
+    `clang-format --dry-run --Werror` was unavailable because no clang-format
+    executable is installed in this environment.
+  - Owner review: ADR approval applies. Full Slice 6.3 implementation-demo
+    acceptance remains pending redaction and encrypted loopback closure.
+  - Follow-ups: implement credential/source redaction checks and the complete
+    encrypted authentication loopback; hosted matrix remains the Phase 6 exit
+    gate.
+
 ## Phase 7 — Headless end-to-end multiplayer slice
 
 [Back to the phase tracker](IMPLEMENTATION_PLAN.md#phase-7--headless-end-to-end-multiplayer-slice)

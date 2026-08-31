@@ -1,6 +1,6 @@
 # ADR-0036: Phase 6 authentication composition and session finalization
 
-Status: **Proposed**
+Status: **Accepted**
 
 Date opened: 2026-08-28
 
@@ -113,5 +113,5 @@ state, and credential/source canary absence.
 
 ## Owner approval gate
 
-Pending explicit owner approval or amendment of Decisions 1 through 3 and the
-focused tests. No dependent production composition is authorized yet.
+Approved by the project owner on 2026-08-30: Option A for Decisions 1 through
+3 and the focused tests above. Dependent production composition is authorized.

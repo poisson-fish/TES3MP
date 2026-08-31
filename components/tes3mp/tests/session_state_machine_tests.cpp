@@ -84,6 +84,13 @@ namespace
         return std::move(*AuthenticationMaterial::create(bytes));
     }
 
+    ServerAuthenticationSubmission submission(AuthenticationMaterial value)
+    {
+        std::array<std::byte, AdmissionScopeIdBytes> scopeBytes{};
+        return ServerAuthenticationSubmission(AuthenticationRequest::join(std::move(value)),
+            std::move(*AdmissionScopeId::create(scopeBytes)), ResumeTokenContext{});
+    }
+
     PrincipalId principal(std::uint64_t value = 7)
     {
         return *PrincipalId::fromValue(value);
@@ -165,7 +172,7 @@ namespace
         bool mCancelled = false;
     };
 
-    class FakeAuthenticationProvider final : public AuthenticationProvider
+    class FakeAuthenticationProvider final : public ServerAuthenticationService
     {
     public:
         FakeAuthenticationProvider(ProviderMode mode, std::span<const std::byte> expected = {})
@@ -176,8 +183,10 @@ namespace
         }
 
         std::unique_ptr<AuthenticationOperation> begin(
-            AuthenticationAttempt attempt, AuthenticationMaterial authenticationMaterial) noexcept override
+            AuthenticationAttempt attempt, ServerAuthenticationSubmission submitted) noexcept override
         {
+            auto request = submitted.takeRequest();
+            auto authenticationMaterial = request.takeMaterial();
             ++control->begins;
             control->lastAttempt = attempt;
             const auto bytes = materialBytes(authenticationMaterial);
@@ -188,7 +197,21 @@ namespace
             return std::make_unique<FakeAuthenticationOperation>(control, attempt, mMode);
         }
 
+        ResumeTokenIssueResult issueInitial(
+            PrincipalId, SessionId, SessionGeneration, ResumeTokenContext) noexcept override
+        {
+            ++issues;
+            if (failIssue)
+                return ResumeTokenStoreError::RandomUnavailable;
+            std::array<std::byte, ResumeTokenBytes> bytes{};
+            auto token = ResumeToken::create(bytes);
+            return std::move(*AuthenticationAcceptedMessage::create(
+                std::move(*token), MinimumResumeTokenLifetimeMilliseconds));
+        }
+
         std::shared_ptr<ProviderControl> control;
+        std::size_t issues = 0;
+        bool failIssue = false;
 
     private:
         ProviderMode mMode;
@@ -257,7 +280,7 @@ namespace
         server.handle(ServerClientHelloReceived{ clientHello() });
         if (destination == ServerSessionState::AwaitingAuthenticationInput)
             return;
-        server.handle(ServerAuthenticationSubmitted{ material() });
+        server.handle(ServerAuthenticationSubmitted{ submission(material()) });
         if (destination == ServerSessionState::AuthenticationPending)
             return;
         server.handle(ServerPollAuthentication{});
@@ -272,7 +295,7 @@ namespace
             case ServerSessionEventKind::ClientHelloReceived:
                 return ServerClientHelloReceived{ clientHello() };
             case ServerSessionEventKind::AuthenticationSubmitted:
-                return ServerAuthenticationSubmitted{ material() };
+                return ServerAuthenticationSubmitted{ submission(material()) };
             case ServerSessionEventKind::PollAuthentication:
                 return ServerPollAuthentication{};
             case ServerSessionEventKind::CheckTimeout:
@@ -385,7 +408,7 @@ namespace
         auto server = makeServer(clock, observations, provider);
         auto client = makeClient(clock);
 
-        const auto early = server->handle(ServerAuthenticationSubmitted{ material(canary) });
+        const auto early = server->handle(ServerAuthenticationSubmitted{ submission(material(canary)) });
         if (early.accepted() || server->state() != ServerSessionState::AwaitingEncryptedTransport
             || provider.control->begins != 0)
             return false;
@@ -400,7 +423,7 @@ namespace
             != ClientSessionAction::AuthenticationInputReady)
             return false;
         if (client->handle(ClientAuthenticationSubmitted{}).action != ClientSessionAction::AuthenticationSubmitted
-            || server->handle(ServerAuthenticationSubmitted{ material(canary) }).action
+            || server->handle(ServerAuthenticationSubmitted{ submission(material(canary)) }).action
                 != ServerSessionAction::AuthenticationStarted)
             return false;
         if (server->handle(ServerPollAuthentication{}).action != ServerSessionAction::AuthenticationPending
@@ -437,7 +460,7 @@ namespace
         auto server = makeServer(clock, observations, provider);
         const auto negotiated = advanceServerToAuthenticationInput(*server);
         (void)negotiated;
-        server->handle(ServerAuthenticationSubmitted{ material() });
+        server->handle(ServerAuthenticationSubmitted{ submission(material()) });
         const auto rejected = server->handle(ServerPollAuthentication{});
         if (rejected.action != ServerSessionAction::AuthenticationRejected
             || server->state() != ServerSessionState::Rejected || !server->authenticationRejection()
@@ -477,7 +500,7 @@ namespace
         FakeAuthenticationProvider immediate(ProviderMode::ImmediateSuccess, exact);
         auto success = makeServer(clock, observations, immediate);
         advanceServerToAuthenticationInput(*success);
-        if (success->handle(ServerAuthenticationSubmitted{ material(exact) }).action
+        if (success->handle(ServerAuthenticationSubmitted{ submission(material(exact)) }).action
                 != ServerSessionAction::AuthenticationStarted
             || success->handle(ServerPollAuthentication{}).action != ServerSessionAction::SessionEstablished
             || immediate.control->begins != 1 || immediate.control->observedBytes != exact.size()
@@ -487,7 +510,7 @@ namespace
         FakeAuthenticationProvider unavailable(ProviderMode::Unavailable);
         auto rejected = makeServer(clock, observations, unavailable);
         advanceServerToAuthenticationInput(*rejected);
-        const auto outcome = rejected->handle(ServerAuthenticationSubmitted{ material() });
+        const auto outcome = rejected->handle(ServerAuthenticationSubmitted{ submission(material()) });
         if (outcome.action != ServerSessionAction::AuthenticationRejected
             || rejected->state() != ServerSessionState::Rejected || unavailable.control->begins != 1
             || !rejected->authenticationRejection()
@@ -497,7 +520,7 @@ namespace
         FakeAuthenticationProvider malformed(ProviderMode::MalformedRejected);
         auto malformedSession = makeServer(clock, observations, malformed);
         advanceServerToAuthenticationInput(*malformedSession);
-        malformedSession->handle(ServerAuthenticationSubmitted{ material() });
+        malformedSession->handle(ServerAuthenticationSubmitted{ submission(material()) });
         const auto malformedOutcome = malformedSession->handle(ServerPollAuthentication{});
         return malformedOutcome.action == ServerSessionAction::AuthenticationRejected
             && malformedSession->authenticationRejection()
@@ -524,7 +547,7 @@ namespace
         FakeAuthenticationProvider pending(ProviderMode::DelayedSuccess);
         auto pendingServer = makeServer(providerClock, providerObservations, pending);
         advanceServerToAuthenticationInput(*pendingServer);
-        pendingServer->handle(ServerAuthenticationSubmitted{ material() });
+        pendingServer->handle(ServerAuthenticationSubmitted{ submission(material()) });
         providerClock.advance(TestTimeoutNanoseconds - 1);
         if (pendingServer->handle(ServerCheckTimeout{}).action != ServerSessionAction::None
             || pending.control->cancellations != 0)
@@ -603,7 +626,7 @@ namespace
         FakeAuthenticationProvider provider(ProviderMode::WrongThenSuccess);
         auto server = makeServer(clock, observations, provider);
         advanceServerToAuthenticationInput(*server);
-        server->handle(ServerAuthenticationSubmitted{ material() });
+        server->handle(ServerAuthenticationSubmitted{ submission(material()) });
         const auto stale = server->handle(ServerPollAuthentication{});
         if (stale.action != ServerSessionAction::AuthenticationStaleCompletion
             || server->state() != ServerSessionState::AuthenticationPending || server->principal())
@@ -615,7 +638,7 @@ namespace
         FakeAuthenticationProvider wrongGeneration(ProviderMode::WrongGenerationThenSuccess);
         auto generationChecked = makeServer(clock, observations, wrongGeneration);
         advanceServerToAuthenticationInput(*generationChecked);
-        generationChecked->handle(ServerAuthenticationSubmitted{ material() });
+        generationChecked->handle(ServerAuthenticationSubmitted{ submission(material()) });
         if (generationChecked->handle(ServerPollAuthentication{}).action
                 != ServerSessionAction::AuthenticationStaleCompletion
             || generationChecked->state() != ServerSessionState::AuthenticationPending
@@ -625,8 +648,8 @@ namespace
         FakeAuthenticationProvider cancellable(ProviderMode::DelayedSuccess);
         auto cancelled = makeServer(clock, observations, cancellable);
         advanceServerToAuthenticationInput(*cancelled);
-        cancelled->handle(ServerAuthenticationSubmitted{ material() });
-        const auto duplicate = cancelled->handle(ServerAuthenticationSubmitted{ material() });
+        cancelled->handle(ServerAuthenticationSubmitted{ submission(material()) });
+        const auto duplicate = cancelled->handle(ServerAuthenticationSubmitted{ submission(material()) });
         if (duplicate.accepted() || cancellable.control->begins != 1)
             return false;
         if (cancelled->handle(ServerCancel{}).action != ServerSessionAction::SessionCancelled
@@ -641,7 +664,7 @@ namespace
         FakeAuthenticationProvider closeable(ProviderMode::DelayedSuccess);
         auto closed = makeServer(clock, observations, closeable);
         advanceServerToAuthenticationInput(*closed);
-        closed->handle(ServerAuthenticationSubmitted{ material() });
+        closed->handle(ServerAuthenticationSubmitted{ submission(material()) });
         if (closed->handle(ServerClose{}).action != ServerSessionAction::SessionClosed
             || closeable.control->cancellations != 1)
             return false;
@@ -657,7 +680,7 @@ namespace
         {
             auto server = makeServer(clock, observations, provider);
             advanceServerToAuthenticationInput(*server);
-            server->handle(ServerAuthenticationSubmitted{ material() });
+            server->handle(ServerAuthenticationSubmitted{ submission(material()) });
         }
         return provider.control->cancellations == 1;
     }
@@ -776,6 +799,34 @@ namespace
         return true;
     }
 
+    bool initial_finalization_is_bind_then_issue_and_fail_closed()
+    {
+        ManualClock clock(MonotonicInstant::fromNanoseconds(0));
+        ObservationFixture observations;
+        FakeAuthenticationProvider provider(ProviderMode::ImmediateSuccess);
+        auto server = makeServer(clock, observations, provider);
+        advanceServerToAuthenticationInput(*server);
+        server->handle(ServerAuthenticationSubmitted{ submission(material()) });
+        if (server->handle(ServerPollAuthentication{}).action != ServerSessionAction::SessionEstablished
+            || server->sessionId() || server->takeAuthenticationAccepted())
+            return false;
+        const auto id = *SessionId::fromValue(91);
+        if (server->finalizeInitialSession(id) != InitialSessionFinalizationResult::Finalized
+            || server->sessionId() != id || provider.issues != 1 || !server->takeAuthenticationAccepted()
+            || server->takeAuthenticationAccepted())
+            return false;
+
+        FakeAuthenticationProvider failing(ProviderMode::ImmediateSuccess);
+        failing.failIssue = true;
+        auto failed = makeServer(clock, observations, failing);
+        advanceServerToAuthenticationInput(*failed);
+        failed->handle(ServerAuthenticationSubmitted{ submission(material()) });
+        failed->handle(ServerPollAuthentication{});
+        return failed->finalizeInitialSession(id) == InitialSessionFinalizationResult::TokenIssueFailed
+            && failed->state() == ServerSessionState::Closed && !failed->sessionId()
+            && !failed->takeAuthenticationAccepted();
+    }
+
     bool identical_event_order_reproduces_the_same_trace()
     {
         const auto run = [] {
@@ -788,7 +839,7 @@ namespace
                 = [&](ServerSessionTransition transition) { trace.emplace_back(server->state(), transition.action); };
             record(server->handle(ServerEncryptedTransportReady{}));
             record(server->handle(ServerClientHelloReceived{ clientHello() }));
-            record(server->handle(ServerAuthenticationSubmitted{ material() }));
+            record(server->handle(ServerAuthenticationSubmitted{ submission(material()) }));
             record(server->handle(ServerPollAuthentication{}));
             record(server->handle(ServerPollAuthentication{}));
             return trace;
@@ -808,7 +859,9 @@ int main()
             && stale_completion_and_cancellation_cannot_resurrect_session()
             && destruction_cancels_one_live_operation_once()
             && illegal_and_terminal_transitions_preserve_state_and_identity()
-            && exhaustive_state_event_matrices_are_atomic() && identical_event_order_reproduces_the_same_trace()
+            && exhaustive_state_event_matrices_are_atomic()
+            && initial_finalization_is_bind_then_issue_and_fail_closed()
+            && identical_event_order_reproduces_the_same_trace()
         ? 0
         : 1;
 }

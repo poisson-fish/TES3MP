@@ -25,6 +25,7 @@ namespace TES3MP
     class AuthenticationAcceptedMessage;
     class ResumeAdmissionGrant;
     class ResumeTokenStore;
+    class ServerAuthenticationService;
     struct AuthenticationCodecError;
 
     class AuthenticationMaterial
@@ -44,6 +45,7 @@ namespace TES3MP
     private:
         friend class AuthenticationProvider;
         friend class AuthenticationRequest;
+        friend class ServerAuthenticationService;
 
         AuthenticationMaterial() noexcept = default;
         std::span<const std::byte> secretBytes() const noexcept { return { mBytes.data(), mSize }; }
@@ -99,6 +101,15 @@ namespace TES3MP
 
         AuthenticationCredentialKind kind() const noexcept { return mKind; }
         std::size_t materialSize() const noexcept { return mMaterial.size(); }
+        AuthenticationMaterial takeMaterial() noexcept { return std::move(mMaterial); }
+        std::optional<ResumeToken> takeResumeToken() noexcept
+        {
+            if (mKind != AuthenticationCredentialKind::ResumeToken)
+                return std::nullopt;
+            auto token = ResumeToken::create(mMaterial.secretBytes());
+            mMaterial.clear();
+            return token;
+        }
 
     private:
         friend std::vector<std::byte> encodeAuthenticationRequest(const AuthenticationRequest& value);
