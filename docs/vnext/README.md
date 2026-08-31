@@ -258,8 +258,9 @@ adds atomic accepted-event scope handoff and runtime-keyed HMAC-SHA-256 IPv4/
 IPv6-/64 derivation with no exposed address. Accepted
 [`ADR-0036`](adr/ADR-0036-phase6-authentication-composition-and-session-finalization.md)
 authorizes the typed shared authentication composition and fail-closed session
-finalization boundary. Its production implementation and focused contracts pass;
-redaction and the complete authentication loopback closure remain.
+finalization boundary. Its production implementation, redaction contracts, and
+complete authentication loopback closure pass applicable local checks. Slice
+6.3 owner implementation-demo acceptance remains.
 
 ## References and license
 

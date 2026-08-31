@@ -2,7 +2,7 @@
 
 Document type: living implementation plan
 
-Updated: 2026-08-28
+Updated: 2026-08-31
 
 Direction source: [`README.md`](README.md)
 
@@ -593,7 +593,7 @@ Depends on: Phase 5.
 |---|---|---|---|
 | 6.1 | Wrap connection/listen/connect/disconnect/cancellation/lifecycle in an owned transport interface | **Implemented** | Accepted and implemented [`ADR-0032`](adr/ADR-0032-phase6-transport-adapter-and-lifecycle-boundary.md); owned APIs, verified provisioning, deterministic resolver/race/generation coverage, and numeric/DNS encrypted loopback pass locally; exact candidate `36c1ac6617d75c8d8ef88d687901c9d73b25d0a0` passes all six jobs in [`33215346506`](https://github.com/poisson-fish/TES3MP/actions/runs/33215346506), with all retained artifacts verified and consistent; owner closure approval recorded |
 | 6.2 | Map reliable operations and latest-wins snapshots to explicit transport channels | **Implemented** | Owner-approved [`ADR-0033`](adr/ADR-0033-phase6-transport-channel-and-delivery-semantics.md), implementation `2f022fe4ad`, applicable local verification, and owner implementation-demo acceptance pass |
-| 6.3 | Implement required encryption, optional join-password authentication, resume-token handling, and credential redaction per ADR-0005 | **In Progress** | Owner-approved and implemented [`ADR-0034`](adr/ADR-0034-phase6-credential-and-resumption-boundary.md), [`ADR-0035`](adr/ADR-0035-phase6-transport-admission-scope-handoff-and-derivation.md), and [`ADR-0036`](adr/ADR-0036-phase6-authentication-composition-and-session-finalization.md); bounded credentials, shared one-gate join/resume routing, state-machine resume installation, fail-closed bind-then-issue initial finalization, and public credential/source redaction contracts pass applicable local checks; complete encrypted authentication loopback closure remains |
+| 6.3 | Implement required encryption, optional join-password authentication, resume-token handling, and credential redaction per ADR-0005 | **In Progress** | Owner-approved and implemented [`ADR-0034`](adr/ADR-0034-phase6-credential-and-resumption-boundary.md), [`ADR-0035`](adr/ADR-0035-phase6-transport-admission-scope-handoff-and-derivation.md), and [`ADR-0036`](adr/ADR-0036-phase6-authentication-composition-and-session-finalization.md); bounded credentials, shared one-gate join/resume routing, state-machine resume installation, fail-closed bind-then-issue initial finalization, public credential/source redaction contracts, and a real encrypted protected-join/single-use-resume loopback pass applicable local checks; owner implementation-demo acceptance remains |
 | 6.4 | Implement bounded queues, priority, rate limits, backpressure, and slow-peer eviction | **Not Started** | Flood/slow-reader tests remain within configured memory/work budgets |
 | 6.5 | Implement network telemetry and stable disconnect/rejection reasons | **Not Started** | Per-channel sent/received/dropped/retransmitted/queued metrics are asserted in tests |
 | 6.6 | Integrate real sockets into the deterministic fault harness | **Not Started** | Localhost tests exercise faults above/below the adapter as supported |

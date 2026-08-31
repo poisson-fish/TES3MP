@@ -4005,6 +4005,29 @@ only the relevant phase section here.
     loopback, then present the Slice 6.3 demo. The hosted matrix remains the
     Phase 6 exit gate.
 
+- 2026-08-31 — Slice 6.3 encrypted authentication loopback — In Progress
+  - Change: composed the real encrypted GameNetworkingSockets loopback with the
+    production OpenSSL credential provider and approved shared authentication
+    service. The focused scenario sends a protected join through the reliable
+    channel, issues and returns a resume token, resumes while preserving the
+    principal/session and advancing generation, rotates the token, then replays
+    the exact consumed wire request and observes generic denial.
+  - Decisions: none; this is test-only closure of the accepted ADR-0034,
+    ADR-0035, and ADR-0036 scenarios and changes no production architecture,
+    authority, state scope, security policy, or gameplay behavior.
+  - Verification: the existing MSVC real-network profile reconfigured against
+    exact OpenSSL 3.5.8; `cmake --build build/slice63-crypto-gns --target
+    tes3mp_transport_gns_tests` passes and
+    `build/slice63-crypto-gns/tes3mp_transport_gns_tests.exe` passes. All 112
+    repository-owned Python tests pass. Baseline provenance verifies 238
+    intentional differences and 67 dependency inputs. One-file
+    `clang-format --dry-run --Werror` and `git diff --check` pass.
+  - Owner review: accepted decisions apply. Full Slice 6.3 implementation-demo
+    acceptance remains pending.
+  - Follow-ups: present the Slice 6.3 protected-join, resume, replay-denial, and
+    redaction evidence for owner acceptance. The hosted matrix remains the
+    Phase 6 exit gate.
+
 ## Phase 7 — Headless end-to-end multiplayer slice
 
 [Back to the phase tracker](IMPLEMENTATION_PLAN.md#phase-7--headless-end-to-end-multiplayer-slice)

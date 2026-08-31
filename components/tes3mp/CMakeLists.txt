@@ -234,7 +234,8 @@ if(TES3MP_ENABLE_GNS_TRANSPORT)
     add_executable(tes3mp_transport_gns_tests tests/transport_gns_tests.cpp)
     target_compile_features(tes3mp_transport_gns_tests PRIVATE cxx_std_20)
     target_compile_definitions(tes3mp_transport_gns_tests PRIVATE STEAMNETWORKINGSOCKETS_OPENSOURCE)
-    target_link_libraries(tes3mp_transport_gns_tests PRIVATE tes3mp_transport_gns GameNetworkingSockets::static)
+    target_link_libraries(tes3mp_transport_gns_tests
+        PRIVATE tes3mp_transport_gns tes3mp_server_core GameNetworkingSockets::static)
     set_target_properties(tes3mp_transport_gns_tests PROPERTIES FOLDER "TES3MP/Tests")
     tes3mp_enable_runtime_safety(tes3mp_transport_gns_tests)
 

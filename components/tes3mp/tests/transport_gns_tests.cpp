@@ -1,3 +1,4 @@
+#include <tes3mp/server_authentication.hpp>
 #include <tes3mp/transport_gns.hpp>
 
 #include <algorithm>
@@ -108,6 +109,136 @@ namespace
         return check(clientMessages.size() == 1 && clientMessages[0].channel == TES3MP::TransportChannel::LatestWins
                 && std::ranges::equal(clientMessages[0].bytes, snapshot),
             "latest-wins channel did not preserve its message boundary");
+    }
+
+    class FixedClock final : public TES3MP::MonotonicClock
+    {
+    public:
+        TES3MP::MonotonicInstant now() const noexcept override { return TES3MP::MonotonicInstant::fromNanoseconds(0); }
+    };
+
+    TES3MP::AuthenticationMaterial password()
+    {
+        constexpr std::array bytes{ std::byte{ 0x70 }, std::byte{ 0x61 }, std::byte{ 0x73 }, std::byte{ 0x73 } };
+        return std::move(*TES3MP::AuthenticationMaterial::create(bytes));
+    }
+
+    TES3MP::ResumeTokenContext resumeContext()
+    {
+        TES3MP::ResumeTokenContext result;
+        result.protocol.bytes.fill(std::byte{ 0x31 });
+        result.content.bytes.fill(std::byte{ 0x51 });
+        return result;
+    }
+
+    std::optional<TES3MP::TransportMessage> exchangeReliable(TES3MP::TransportRuntime& runtime,
+        TES3MP::TransportConnectionId sender, TES3MP::TransportConnectionId receiver, std::span<const std::byte> bytes)
+    {
+        if (!check(runtime.send(sender, TES3MP::TransportChannel::ReliableOrdered, bytes)
+                    == TES3MP::TransportResult::Accepted,
+                "authentication send failed"))
+            return std::nullopt;
+        std::vector<TES3MP::TransportMessage> received;
+        if (!check(receiveUntil(runtime, receiver, 1, received), "authentication message did not arrive")
+            || !check(received[0].channel == TES3MP::TransportChannel::ReliableOrdered,
+                "authentication message escaped the reliable channel"))
+            return std::nullopt;
+        return std::move(received[0]);
+    }
+
+    bool protectedJoinAndSingleUseResume(TES3MP::TransportRuntime& runtime, TES3MP::TransportConnectionId client,
+        TES3MP::TransportConnectionId server, const TES3MP::AdmissionScopeId& scope)
+    {
+        auto crypto = TES3MP::makeProductionCredentialCrypto();
+        auto policy = TES3MP::AuthenticationRateLimitPolicy::create(4, 4, 100, 100);
+        FixedClock clock;
+        auto limiter = policy ? TES3MP::AuthenticationRateLimiter::create(*policy, clock.now()) : nullptr;
+        auto join = crypto ? TES3MP::JoinPasswordAuthenticationProvider::create(*crypto, password()) : nullptr;
+        auto tokens = crypto ? TES3MP::ResumeTokenStore::create(*crypto, TES3MP::MinimumResumeTokenLifetimeMilliseconds)
+                             : nullptr;
+        if (!check(crypto && limiter && join && tokens, "production authentication composition failed"))
+            return false;
+        TES3MP::SharedServerAuthenticationService service(*limiter, *join, *tokens, clock);
+        const auto context = resumeContext();
+
+        auto joinRequest = TES3MP::AuthenticationRequest::join(password());
+        auto joinWire = TES3MP::encodeAuthenticationRequest(joinRequest);
+        auto deliveredJoin = exchangeReliable(runtime, client, server, joinWire);
+        if (!deliveredJoin)
+            return false;
+        auto decodedJoin = TES3MP::decodeAuthenticationRequest(deliveredJoin->bytes);
+        auto* joinInput = std::get_if<TES3MP::AuthenticationRequest>(&decodedJoin);
+        if (!check(joinInput != nullptr, "protected join did not decode"))
+            return false;
+        auto joinOperation
+            = service.begin({ TES3MP::AuthenticationAttemptId::initial(), TES3MP::SessionGeneration::initial() },
+                TES3MP::ServerAuthenticationSubmission(std::move(*joinInput), scope, context));
+        auto joinPoll = joinOperation->poll();
+        auto* joinCompletion = std::get_if<TES3MP::AuthenticationCompletion>(&joinPoll);
+        auto* initial = joinCompletion ? std::get_if<TES3MP::AuthenticatedAdmission>(&joinCompletion->result) : nullptr;
+        if (!check(initial && !initial->isResume(), "protected join was not admitted"))
+            return false;
+
+        const auto session = *TES3MP::SessionId::fromValue(7);
+        auto issued
+            = service.issueInitial(initial->principal(), session, TES3MP::SessionGeneration::initial(), context);
+        auto* accepted = std::get_if<TES3MP::AuthenticationAcceptedMessage>(&issued);
+        if (!check(accepted != nullptr, "initial resume token was not issued"))
+            return false;
+        auto acceptedWire = TES3MP::encodeAuthenticationAccepted(*accepted);
+        auto deliveredAccepted = exchangeReliable(runtime, server, client, acceptedWire);
+        if (!deliveredAccepted)
+            return false;
+        auto decodedAccepted = TES3MP::decodeAuthenticationAccepted(deliveredAccepted->bytes);
+        auto* clientAccepted = std::get_if<TES3MP::AuthenticationAcceptedMessage>(&decodedAccepted);
+        if (!check(clientAccepted != nullptr, "initial accepted response did not decode"))
+            return false;
+
+        auto resumeRequest = TES3MP::AuthenticationRequest::resume(clientAccepted->takeToken());
+        const auto resumeWire = TES3MP::encodeAuthenticationRequest(resumeRequest);
+        auto deliveredResume = exchangeReliable(runtime, client, server, resumeWire);
+        if (!deliveredResume)
+            return false;
+        auto decodedResume = TES3MP::decodeAuthenticationRequest(deliveredResume->bytes);
+        auto* resumeInput = std::get_if<TES3MP::AuthenticationRequest>(&decodedResume);
+        if (!check(resumeInput != nullptr, "resume request did not decode"))
+            return false;
+        auto resumeOperation
+            = service.begin({ *TES3MP::AuthenticationAttemptId::fromValue(2), TES3MP::SessionGeneration::initial() },
+                TES3MP::ServerAuthenticationSubmission(std::move(*resumeInput), scope, context));
+        auto resumePoll = resumeOperation->poll();
+        auto* resumeCompletion = std::get_if<TES3MP::AuthenticationCompletion>(&resumePoll);
+        auto* resumed
+            = resumeCompletion ? std::get_if<TES3MP::AuthenticatedAdmission>(&resumeCompletion->result) : nullptr;
+        auto grant = resumed ? resumed->takeResumeGrant() : std::nullopt;
+        if (!check(grant && resumed->principal() == initial->principal() && grant->sessionId() == session
+                    && grant->priorGeneration() == TES3MP::SessionGeneration::initial()
+                    && grant->nextGeneration() == *TES3MP::SessionGeneration::fromValue(2),
+                "resume did not preserve identity and advance generation"))
+            return false;
+        auto rotated = grant->takeResponse();
+        if (!check(rotated.has_value(), "resume did not rotate its token"))
+            return false;
+        auto rotatedWire = TES3MP::encodeAuthenticationAccepted(*rotated);
+        if (!exchangeReliable(runtime, server, client, rotatedWire))
+            return false;
+
+        auto replayDelivery = exchangeReliable(runtime, client, server, resumeWire);
+        if (!replayDelivery)
+            return false;
+        auto replayDecoded = TES3MP::decodeAuthenticationRequest(replayDelivery->bytes);
+        auto* replayInput = std::get_if<TES3MP::AuthenticationRequest>(&replayDecoded);
+        if (!check(replayInput != nullptr, "replayed resume request did not decode"))
+            return false;
+        auto replayOperation
+            = service.begin({ *TES3MP::AuthenticationAttemptId::fromValue(3), TES3MP::SessionGeneration::initial() },
+                TES3MP::ServerAuthenticationSubmission(std::move(*replayInput), scope, context));
+        auto replayPoll = replayOperation->poll();
+        auto* replayCompletion = std::get_if<TES3MP::AuthenticationCompletion>(&replayPoll);
+        auto* rejected
+            = replayCompletion ? std::get_if<TES3MP::AuthenticationRejected>(&replayCompletion->result) : nullptr;
+        return check(rejected && rejected->reason == TES3MP::AuthenticationRejectionReason::Denied,
+            "single-use resume replay was not generically denied");
     }
 
     bool setFaultProfile(float loss, float reorder, std::int32_t reorderMilliseconds)
@@ -268,6 +399,14 @@ namespace
             return false;
         if (!check(clientConnection && serverConnection, "connection roles were not retained")
             || !channelExchange(*factory.runtime, *clientConnection, *serverConnection))
+            return false;
+        const auto acceptedEvent = std::ranges::find_if(
+            observed, [](const auto& event) { return event.kind == TES3MP::TransportEventKind::ConnectionAccepted; });
+        if (host == "127.0.0.1"
+            && (!check(acceptedEvent != observed.end() && acceptedEvent->admissionScope.has_value(),
+                    "authentication loopback has no admission scope")
+                || !protectedJoinAndSingleUseResume(
+                    *factory.runtime, *clientConnection, *serverConnection, *acceptedEvent->admissionScope)))
             return false;
         if (host == "127.0.0.1" && !deliveryClassesUnderFaults(*factory.runtime, *clientConnection, *serverConnection))
             return false;
