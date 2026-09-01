@@ -11,8 +11,8 @@ conditional stretch target.
 
 ## Status
 
-Phases 0–5 are implemented. Phase 6 is in progress, with Slices 6.1 through 6.3
-implemented and Slice 6.4 in progress under accepted ADR-0037.
+Phases 0–5 are implemented. Phase 6 is in progress, with Slices 6.1 through 6.4
+implemented and Slice 6.5 not started.
 The active tree is a provenance-verified OpenMW 0.51 baseline with:
 
 - engine-independent protocol, transport, client-session, server-core, and test

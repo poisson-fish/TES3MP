@@ -4079,6 +4079,21 @@ only the relevant phase section here.
   - Follow-ups: finish and verify the bounded implementation, then present the
     Slice 6.4 demo. Slice 6.5 remains separately gated.
 
+- 2026-08-31 — Slice 6.4 implementation demo — Implemented
+  - Change: marked Slice 6.4 **Implemented** after owner review of bounded
+    reliable retention, newest-only sampled replacement, fair scheduling,
+    deterministic refill, hard capacity enforcement, and isolated sustained-
+    block eviction.
+  - Decisions: no decision changed; accepted ADR-0037 remains controlling.
+  - Verification: implementation `da8d139ce3`; five focused transport and
+    authentication executables, all 112 repository-owned Python tests,
+    formatting, diff, and indexed provenance gates pass as recorded above.
+  - Owner review: the project owner explicitly accepted the Slice 6.4
+    implementation demo on 2026-08-31.
+  - Follow-ups: Slice 6.5 remains **Not Started** pending its telemetry and
+    stable-reason architecture decision review. The hosted matrix remains the
+    Phase 6 exit gate.
+
 ## Phase 7 — Headless end-to-end multiplayer slice
 
 [Back to the phase tracker](IMPLEMENTATION_PLAN.md#phase-7--headless-end-to-end-multiplayer-slice)
