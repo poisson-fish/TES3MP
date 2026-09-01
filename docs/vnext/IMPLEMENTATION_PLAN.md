@@ -626,7 +626,7 @@ Depends on: Phase 6.
 |---|---|---|---|
 | 7.0 | Review and obtain owner approval for GDR-0001 vertical-slice behavior scenarios | **Implemented** | Accepted [`GDR-0001`](gdr/GDR-0001-phase7-headless-vertical-slice-behavior.md) records approved A/A/A/A/A/A authority, scope, contention, reconnect, and named demo/test scenarios |
 | 7.1 | Add the dedicated-server composition root and new minimal configuration format | **Implemented** | Accepted [`ADR-0040`](adr/ADR-0040-phase7-server-composition-and-configuration.md), implementation `d85d3d07f4`, applicable local verification, real loopback lifecycle evidence, and owner demo acceptance pass |
-| 7.2 | Add a reusable headless client-session library and scripted fake-client driver | **In Progress** | Accepted [`ADR-0041`](adr/ADR-0041-phase7-headless-client-and-script-driver.md); implementation and owner demo evidence pending |
+| 7.2 | Add a reusable headless client-session library and scripted fake-client driver | **Implemented** | Accepted [`ADR-0041`](adr/ADR-0041-phase7-headless-client-and-script-driver.md), implementation `a4e983f5f0`, applicable local verification, and owner demo acceptance pass |
 | 7.3 | Implement authentication, session creation, player creation, and join | **Not Started** | Two clients receive distinct stable identities and negotiated sessions |
 | 7.4 | Implement one interior and one exterior cell fixture plus enter/leave observation | **Not Started** | Both clients receive correct initial and visibility state across transitions |
 | 7.5 | Implement semantic movement commands and sequenced snapshots | **Not Started** | Remote root transform/velocity converges while stale snapshots are rejected |

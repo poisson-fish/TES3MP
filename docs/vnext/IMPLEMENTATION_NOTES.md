@@ -4293,7 +4293,7 @@ only the relevant phase section here.
 
 [Back to the phase tracker](IMPLEMENTATION_PLAN.md#phase-7--headless-end-to-end-multiplayer-slice)
 
-- 2026-09-01 — Slice 7.2 — In Progress
+- 2026-09-01 — Slice 7.2 — Implemented
   - Change: added accepted
     [`ADR-0041`](adr/ADR-0041-phase7-headless-client-and-script-driver.md)
     and began the headless façade/script-driver slice.
@@ -4307,8 +4307,12 @@ only the relevant phase section here.
     fail-closed transport polling. The existing complete protocol target and
     isolated target-boundary build remain green; staged baseline verification
     passes with 258 intentional differences and 67 dependency inputs.
-  - Owner review: architecture approval received; implementation demo pending.
-  - Follow-ups: implement without adding Slice 7.3 lifecycle behavior.
+  - Owner review: architecture approval received before implementation. The
+    owner accepted the connection-establishment, typed session/snapshot seam,
+    identical script replay, capacity rejection, bounded timeline, and
+    transport-failure closure demo after candidate `a4e983f5f0`.
+  - Follow-ups: none for Slice 7.2. Slice 7.3 is next and remains separately
+    authority/state-scope/gameplay gated.
 
 - 2026-09-01 — Slice 7.1 — Implemented
   - Change: added accepted
