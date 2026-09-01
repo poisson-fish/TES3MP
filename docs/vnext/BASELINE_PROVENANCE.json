@@ -755,6 +755,11 @@
       "purpose": "Selected-library-free endpoint validation, listener input, hard-limit, and owned identity contract checks."
     },
     {
+      "path": "components/tes3mp/tests/transport_queue_tests.cpp",
+      "status": "A",
+      "purpose": "Deterministic contracts for bounded reliable/latest outbound retention, fair servicing, rate refill, backpressure, and isolated slow-peer eviction."
+    },
+    {
       "path": "components/tes3mp/transport/anchor.cpp",
       "status": "A",
       "purpose": "Behavior-free translation-unit anchor for the owned transport-abstraction target."
@@ -968,6 +973,11 @@
       "path": "docs/vnext/adr/ADR-0036-phase6-authentication-composition-and-session-finalization.md",
       "status": "A",
       "purpose": "Proposed owner-gated Phase 6 decision packet for typed authentication submission, shared limiter/provider routing, resume claim installation, and initial session/token finalization."
+    },
+    {
+      "path": "docs/vnext/adr/ADR-0037-phase6-bounded-outbound-queue-and-slow-peer-policy.md",
+      "status": "A",
+      "purpose": "Owner-approved Phase 6 per-connection bounded queue, fair scheduling, deterministic rate, overload, and sustained slow-peer eviction policy."
     },
     {
       "path": "docs/vnext/gdr/GDR-0011-phase4-minimal-player-exchange-semantics.md",
@@ -1321,7 +1331,7 @@
         },
         {
           "path": "components/tes3mp/CMakeLists.txt",
-          "sha256": "38274146b0f5e0ed771747293447e285bb6087c916f43d070affd30fe365e0bb"
+          "sha256": "43bfefe5bc74a10dfcda97ccc74c1b9ee177542da4faeddaa13fa496c15dce37"
         },
         {
           "path": "components/tes3mp/protocol/generated/authentication_accepted_generated.h",

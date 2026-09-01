@@ -4058,6 +4058,27 @@ only the relevant phase section here.
   - Follow-ups: Slice 6.4 remains **Not Started** pending its architecture
     decision review. The hosted matrix remains the Phase 6 exit gate.
 
+- 2026-08-31 — Slice 6.4 queue/backpressure decision and implementation — In Progress
+  - Change: accepted ADR-0037 and began the owned per-connection bounded
+    reliable FIFO/latest-wins slot, deterministic rate/refill, fair pump, and
+    sustained reliable-block eviction implementation with focused fake-runtime
+    contracts.
+  - Decisions: the project owner approved Option A for queue ownership,
+    scheduling, rate/overload, and slow-peer eviction, plus the proposed hard
+    ceilings and acceptance tests, on 2026-08-31.
+  - Verification: MSVC builds and passes
+    `tes3mp_transport_queue_tests`, `tes3mp_transport_lifecycle_tests`,
+    `tes3mp_transport_gns_schedule_tests`, `tes3mp_transport_gns_tests`, and
+    `tes3mp_server_authentication_tests` against the exact OpenSSL 3.5.8 real-
+    transport profile. All 112 repository-owned Python tests pass. Three-file
+    `clang-format --dry-run --Werror` and `git diff --check` pass. Indexed
+    baseline provenance verifies 240 intentional differences and all 67
+    dependency inputs.
+  - Owner review: architecture approval recorded; implementation-demo
+    acceptance remains pending.
+  - Follow-ups: finish and verify the bounded implementation, then present the
+    Slice 6.4 demo. Slice 6.5 remains separately gated.
+
 ## Phase 7 — Headless end-to-end multiplayer slice
 
 [Back to the phase tracker](IMPLEMENTATION_PLAN.md#phase-7--headless-end-to-end-multiplayer-slice)

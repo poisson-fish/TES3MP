@@ -107,6 +107,12 @@ target_sources(tes3mp_transport PRIVATE
     transport/transport.cpp
 )
 
+add_executable(tes3mp_transport_queue_tests tests/transport_queue_tests.cpp)
+target_compile_features(tes3mp_transport_queue_tests PRIVATE cxx_std_20)
+target_link_libraries(tes3mp_transport_queue_tests PRIVATE tes3mp_transport)
+set_target_properties(tes3mp_transport_queue_tests PROPERTIES FOLDER "TES3MP/Tests")
+tes3mp_enable_runtime_safety(tes3mp_transport_queue_tests)
+
 if(TES3MP_ENABLE_GNS_TRANSPORT)
     if(CMAKE_VERSION VERSION_LESS 3.24)
         message(FATAL_ERROR "The verified transport adapter requires CMake 3.24 or newer")
