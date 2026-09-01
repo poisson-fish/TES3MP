@@ -4259,6 +4259,19 @@ only the relevant phase section here.
   - Follow-ups: review the completed six-job transport result and artifacts,
     then present the combined exact-candidate gate evidence for owner approval.
 
+- 2026-09-01 — Slice 6.7 Linux transport portability repair — In Progress
+  - Change: transport run `33538915714` passed Windows and both macOS jobs but
+    failed all three Linux jobs at the same GNS flat-API output-parameter type
+    mismatch. Changed the adapter-local result variable from `std::int64_t` to
+    GNS's required `int64` alias; width and result interpretation are unchanged.
+  - Decisions: no architecture, authority, state-scope, security, or gameplay
+    decision changed; this is an ABI-exact LP64 portability repair.
+  - Verification: the GNS and c-ares proofs passed before the Linux compile
+    failure. Exact repaired-candidate matrices remain pending.
+  - Owner review: Phase 6 remains **In Progress** until the repaired exact
+    candidate is green and the owner accepts its exit evidence.
+  - Follow-ups: verify, commit, push, and rerun both manual phase-exit workflows.
+
 ## Phase 7 — Headless end-to-end multiplayer slice
 
 [Back to the phase tracker](IMPLEMENTATION_PLAN.md#phase-7--headless-end-to-end-multiplayer-slice)

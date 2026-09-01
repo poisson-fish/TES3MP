@@ -553,7 +553,7 @@ namespace
             outgoing->m_conn = found->second.handle;
             outgoing->m_nFlags = sendFlags(channel);
             outgoing->m_idxLane = *lane;
-            std::int64_t result = 0;
+            int64 result = 0;
             SteamAPI_ISteamNetworkingSockets_SendMessages(sockets(), 1, &outgoing, &result, true);
             if (result > 0)
                 return TES3MP::TransportResult::Accepted;
