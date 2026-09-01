@@ -45,6 +45,7 @@ namespace
     constexpr std::uint16_t ReliableOrderedLane = 0;
     constexpr std::uint16_t LatestWinsLane = 1;
     constexpr int TransportLaneCount = 2;
+    TES3MP::NullTransportTelemetrySink sNullTransportTelemetry;
 
     std::optional<std::uint16_t> laneFor(TES3MP::TransportChannel channel)
     {
@@ -340,8 +341,10 @@ namespace
     class GameNetworkingSocketsRuntime final : public TES3MP::TransportRuntime
     {
     public:
-        GameNetworkingSocketsRuntime(TES3MP::TransportLimits limits, std::span<const std::byte> admissionScopeKey)
+        GameNetworkingSocketsRuntime(TES3MP::TransportLimits limits, std::span<const std::byte> admissionScopeKey,
+            TES3MP::TransportTelemetrySink& telemetry)
             : mLimits(limits)
+            , mTelemetry(&telemetry)
         {
             if (admissionScopeKey.size() != mAdmissionScopeKey.size())
                 return;
@@ -624,7 +627,11 @@ namespace
                     0 };
             }
             for (std::size_t index = 0; index < validated.size(); ++index)
+            {
+                count(TES3MP::TransportTelemetryKind::Received, TES3MP::TransportTelemetryDirection::Inbound,
+                    validated[index].channel);
                 output[index] = std::move(validated[index]);
+            }
             return { TES3MP::TransportResult::Accepted, validated.size() };
         }
 
@@ -645,7 +652,9 @@ namespace
             mConnectionHandles.erase(handle);
             mIncomingListeners.erase(connection);
             mConnections.erase(found);
-            if (!queue({ TES3MP::TransportEventKind::ConnectionClosed, TES3MP::TransportFailure::LocalClose,
+            if (!queue({ TES3MP::TransportEventKind::ConnectionClosed,
+                    mode == TES3MP::TransportCloseMode::Graceful ? TES3MP::TransportFailure::LocalClose
+                                                                 : TES3MP::TransportFailure::LocalAbort,
                     std::nullopt, std::nullopt, connection }))
                 return TES3MP::TransportResult::RuntimeFailed;
             return TES3MP::TransportResult::Accepted;
@@ -669,6 +678,7 @@ namespace
                     }
                 }
                 SteamAPI_ISteamNetworkingSockets_RunCallbacks(sockets());
+                sampleLanePressure();
                 attempts.clear();
                 for (const auto& [id, _] : mAttempts)
                     attempts.push_back(id);
@@ -1184,7 +1194,50 @@ namespace
             }
         }
 
+        void count(TES3MP::TransportTelemetryKind kind, TES3MP::TransportTelemetryDirection direction,
+            TES3MP::TransportChannel channel) noexcept
+        {
+            const std::size_t kindIndex = static_cast<std::size_t>(kind);
+            if (kindIndex >= mCounters.size())
+                return;
+            const std::size_t directionIndex = direction == TES3MP::TransportTelemetryDirection::Outbound ? 0 : 1;
+            const std::size_t channelIndex = channel == TES3MP::TransportChannel::ReliableOrdered ? 0 : 1;
+            auto& value = mCounters[kindIndex][directionIndex][channelIndex];
+            value = TES3MP::saturatingTelemetryAdd(value, 1);
+            (void)mTelemetry->tryRecord({ kind, direction, channel, value });
+        }
+
+        void gauge(TES3MP::TransportTelemetryKind kind, TES3MP::TransportChannel channel, int value) noexcept
+        {
+            (void)mTelemetry->tryRecord({ kind, TES3MP::TransportTelemetryDirection::Outbound, channel,
+                static_cast<std::uint64_t>(std::max(value, 0)) });
+        }
+
+        void sampleLanePressure() noexcept
+        {
+            for (const auto& [_, connection] : mConnections)
+            {
+                if (connection.incomingPending)
+                    continue;
+                SteamNetConnectionRealTimeStatus_t status{};
+                std::array<SteamNetConnectionRealTimeLaneStatus_t, TransportLaneCount> lanes{};
+                if (SteamAPI_ISteamNetworkingSockets_GetConnectionRealTimeStatus(
+                        sockets(), connection.handle, &status, TransportLaneCount, lanes.data())
+                    != k_EResultOK)
+                    continue;
+                gauge(TES3MP::TransportTelemetryKind::PendingBytes, TES3MP::TransportChannel::ReliableOrdered,
+                    lanes[ReliableOrderedLane].m_cbPendingReliable);
+                gauge(TES3MP::TransportTelemetryKind::UnacknowledgedBytes, TES3MP::TransportChannel::ReliableOrdered,
+                    lanes[ReliableOrderedLane].m_cbSentUnackedReliable);
+                gauge(TES3MP::TransportTelemetryKind::PendingBytes, TES3MP::TransportChannel::LatestWins,
+                    lanes[LatestWinsLane].m_cbPendingUnreliable);
+                gauge(TES3MP::TransportTelemetryKind::UnacknowledgedBytes, TES3MP::TransportChannel::LatestWins, 0);
+            }
+        }
+
         TES3MP::TransportLimits mLimits;
+        TES3MP::TransportTelemetrySink* mTelemetry = nullptr;
+        std::array<std::array<std::array<std::uint64_t, 2>, 2>, 7> mCounters{};
         std::optional<TES3MP::ListenerId> mNextListener = TES3MP::ListenerId::initial();
         std::optional<TES3MP::ConnectAttemptId> mNextAttempt = TES3MP::ConnectAttemptId::initial();
         std::optional<TES3MP::TransportConnectionId> mNextConnection = TES3MP::TransportConnectionId::initial();
@@ -1215,6 +1268,12 @@ namespace TES3MP
 {
     TransportFactoryResult makeGameNetworkingSocketsTransport(TransportLimits limits) noexcept
     {
+        return makeGameNetworkingSocketsTransport(limits, sNullTransportTelemetry);
+    }
+
+    TransportFactoryResult makeGameNetworkingSocketsTransport(
+        TransportLimits limits, TransportTelemetrySink& telemetry) noexcept
+    {
         if (limits.listeners == 0 || limits.listeners > TransportLimits::MaxListeners || limits.pendingAttempts == 0
             || limits.pendingAttempts > TransportLimits::MaxPendingAttempts || limits.connections == 0
             || limits.connections > TransportLimits::MaxConnections || limits.retainedEvents == 0
@@ -1223,7 +1282,7 @@ namespace TES3MP
         std::array<std::byte, AdmissionScopeIdBytes> key{};
         if (RAND_bytes(reinterpret_cast<unsigned char*>(key.data()), static_cast<int>(key.size())) != 1)
             return { TransportFactoryFailure::DependencyInitialization, nullptr };
-        auto result = Detail::makeGameNetworkingSocketsTransportWithAdmissionScopeKey(limits, key);
+        auto result = Detail::makeGameNetworkingSocketsTransportWithAdmissionScopeKey(limits, key, telemetry);
         OPENSSL_cleanse(key.data(), key.size());
         return result;
     }
@@ -1234,11 +1293,17 @@ namespace TES3MP::Detail
     TransportFactoryResult makeGameNetworkingSocketsTransportWithAdmissionScopeKey(
         TransportLimits limits, std::span<const std::byte> key) noexcept
     {
+        return makeGameNetworkingSocketsTransportWithAdmissionScopeKey(limits, key, sNullTransportTelemetry);
+    }
+
+    TransportFactoryResult makeGameNetworkingSocketsTransportWithAdmissionScopeKey(
+        TransportLimits limits, std::span<const std::byte> key, TransportTelemetrySink& telemetry) noexcept
+    {
         if (key.size() != AdmissionScopeIdBytes)
             return { TransportFactoryFailure::DependencyInitialization, nullptr };
         try
         {
-            auto runtime = std::make_unique<GameNetworkingSocketsRuntime>(limits, key);
+            auto runtime = std::make_unique<GameNetworkingSocketsRuntime>(limits, key, telemetry);
             if (!runtime->valid())
                 return { runtime->factoryFailure(), nullptr };
             return { TransportFactoryFailure::None, std::move(runtime) };

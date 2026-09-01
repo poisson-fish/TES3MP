@@ -35,6 +35,8 @@ namespace TES3MP::Detail
 
     TransportFactoryResult makeGameNetworkingSocketsTransportWithAdmissionScopeKey(
         TransportLimits limits, std::span<const std::byte> key) noexcept;
+    TransportFactoryResult makeGameNetworkingSocketsTransportWithAdmissionScopeKey(
+        TransportLimits limits, std::span<const std::byte> key, TransportTelemetrySink& telemetry) noexcept;
 
     enum class ResolutionCompletion
     {

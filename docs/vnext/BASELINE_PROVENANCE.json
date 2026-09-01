@@ -292,7 +292,7 @@
     {
       "path": "components/tes3mp/include/tes3mp/transport.hpp",
       "status": "A",
-      "purpose": "Selected-library-free owned endpoint, bounded lifecycle and two-channel byte-delivery commands, opaque identity and inbound admission scope, closed result, security, failure, and value-event transport interface."
+      "purpose": "Selected-library-free owned endpoint, bounded lifecycle and two-channel byte-delivery commands, opaque identity and inbound admission scope, closed result, security, failure, value-event, stable-reason, and bounded telemetry interfaces."
     },
     {
       "path": "components/tes3mp/include/tes3mp/transport_gns.hpp",
@@ -757,7 +757,7 @@
     {
       "path": "components/tes3mp/tests/transport_queue_tests.cpp",
       "status": "A",
-      "purpose": "Deterministic contracts for bounded reliable/latest outbound retention, fair servicing, rate refill, backpressure, and isolated slow-peer eviction."
+      "purpose": "Deterministic contracts for bounded reliable/latest outbound retention, fair servicing, rate refill, backpressure, isolated slow-peer eviction, exact telemetry, saturation, and sink-failure isolation."
     },
     {
       "path": "components/tes3mp/transport/anchor.cpp",
@@ -767,12 +767,12 @@
     {
       "path": "components/tes3mp/transport/transport.cpp",
       "status": "A",
-      "purpose": "Bounded ASCII hostname, numeric address, separate-port, DNS normalization, listener input, and initial transport-limit validation."
+      "purpose": "Bounded endpoint and limit validation plus reliable/latest queue policy, stable reason mapping, and saturated closed telemetry emission."
     },
     {
       "path": "components/tes3mp/transport/transport_gns.cpp",
       "status": "A",
-      "purpose": "Private caller-pumped c-ares and encrypted GameNetworkingSockets lifecycle adapter with bounded ownership, DNS, candidate racing, callback generations, process-keyed admission scopes, and fail-closed events."
+      "purpose": "Private caller-pumped c-ares and encrypted GameNetworkingSockets lifecycle adapter with bounded ownership, DNS, candidate racing, callback generations, process-keyed admission scopes, fail-closed events, exact received counters, and honest public per-lane pressure gauges."
     },
     {
       "path": "components/tes3mp/transport/transport_gns_detail.cpp",

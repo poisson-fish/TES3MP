@@ -107,14 +107,23 @@ namespace
         TES3MP::NullTransportTelemetrySink sink;
         const TES3MP::TransportTelemetryObservation observation{ TES3MP::TransportTelemetryKind::PendingBytes,
             TES3MP::TransportTelemetryDirection::Outbound, TES3MP::TransportChannel::ReliableOrdered, 17 };
+        using F = TES3MP::TransportFailure;
+        using R = TES3MP::StableNetworkReason;
+        const std::array mappings{ std::pair{ F::None, R::None }, std::pair{ F::PeerClosed, R::PeerClosed },
+            std::pair{ F::LocalClose, R::LocalGracefulClose }, std::pair{ F::LocalAbort, R::LocalAbort },
+            std::pair{ F::TimedOut, R::TimedOut }, std::pair{ F::AuthenticationDenied, R::AuthenticationDenied },
+            std::pair{ F::AuthenticationTemporarilyUnavailable, R::AuthenticationTemporarilyUnavailable },
+            std::pair{ F::SlowPeer, R::SlowPeer }, std::pair{ F::CapacityExhausted, R::CapacityExhausted },
+            std::pair{ F::ResolutionFailed, R::NameResolutionFailed },
+            std::pair{ F::SecuritySetupFailed, R::SecuritySetupFailed },
+            std::pair{ F::InvalidMessage, R::ProtocolViolation }, std::pair{ F::Shutdown, R::RuntimeShutdown },
+            std::pair{ F::DependencyFailure, R::TransportDependencyFailed } };
+        bool mappingsMatch = true;
+        for (const auto& [failure, reason] : mappings)
+            mappingsMatch = mappingsMatch && TES3MP::stableNetworkReason(failure) == reason;
         return check(sink.tryRecord(observation) == TES3MP::TransportTelemetryResult::Accepted,
                    "null transport telemetry sink rejected observation")
-            && check(TES3MP::stableNetworkReason(TES3MP::TransportFailure::PeerClosed)
-                    == TES3MP::StableNetworkReason::PeerClosed,
-                "peer-close reason mapping changed")
-            && check(TES3MP::stableNetworkReason(TES3MP::TransportFailure::InvalidMessage)
-                    == TES3MP::StableNetworkReason::ProtocolViolation,
-                "protocol reason mapping changed")
+            && check(mappingsMatch, "stable reason mapping changed")
             && check(TES3MP::stableNetworkReason(static_cast<TES3MP::TransportFailure>(255))
                     == TES3MP::StableNetworkReason::TransportDependencyFailed,
                 "unknown failure did not fail closed");

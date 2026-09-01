@@ -4,6 +4,7 @@
 #include <array>
 #include <cctype>
 #include <charconv>
+#include <limits>
 #include <utility>
 
 namespace
@@ -151,6 +152,15 @@ namespace
 
 namespace TES3MP
 {
+    namespace
+    {
+        NullTransportTelemetrySink sNullTransportTelemetry;
+
+        constexpr std::size_t channelIndex(TransportChannel channel) noexcept
+        {
+            return channel == TransportChannel::ReliableOrdered ? 0 : 1;
+        }
+    }
     StableNetworkReason stableNetworkReason(TransportFailure failure) noexcept
     {
         switch (failure)
@@ -164,6 +174,20 @@ namespace TES3MP
                 return StableNetworkReason::PeerClosed;
             case TransportFailure::LocalClose:
                 return StableNetworkReason::LocalGracefulClose;
+            case TransportFailure::LocalAbort:
+                return StableNetworkReason::LocalAbort;
+            case TransportFailure::TimedOut:
+                return StableNetworkReason::TimedOut;
+            case TransportFailure::AuthenticationDenied:
+                return StableNetworkReason::AuthenticationDenied;
+            case TransportFailure::AuthenticationTemporarilyUnavailable:
+                return StableNetworkReason::AuthenticationTemporarilyUnavailable;
+            case TransportFailure::SlowPeer:
+                return StableNetworkReason::SlowPeer;
+            case TransportFailure::CapacityExhausted:
+                return StableNetworkReason::CapacityExhausted;
+            case TransportFailure::SecuritySetupFailed:
+                return StableNetworkReason::SecuritySetupFailed;
             case TransportFailure::Shutdown:
                 return StableNetworkReason::RuntimeShutdown;
             case TransportFailure::EventCapacityExceeded:
@@ -177,6 +201,12 @@ namespace TES3MP
                 return StableNetworkReason::TransportDependencyFailed;
         }
         return StableNetworkReason::TransportDependencyFailed;
+    }
+
+    std::uint64_t saturatingTelemetryAdd(std::uint64_t value, std::uint64_t amount) noexcept
+    {
+        return amount > std::numeric_limits<std::uint64_t>::max() - value ? std::numeric_limits<std::uint64_t>::max()
+                                                                          : value + amount;
     }
 
     std::optional<TransportChannel> transportChannelFor(MessageClass messageClass) noexcept
@@ -258,7 +288,13 @@ namespace TES3MP
     }
 
     OutboundTransportQueue::OutboundTransportQueue(OutboundQueuePolicy policy)
+        : OutboundTransportQueue(policy, sNullTransportTelemetry)
+    {
+    }
+
+    OutboundTransportQueue::OutboundTransportQueue(OutboundQueuePolicy policy, TransportTelemetrySink& telemetry)
         : mPolicy(policy)
+        , mTelemetry(&telemetry)
     {
         mReliableRate.tokens = policy.reliableRateBurst;
         mLatestRate.tokens = policy.latestRateBurst;
@@ -267,19 +303,37 @@ namespace TES3MP
     TransportResult OutboundTransportQueue::enqueue(TransportChannel channel, std::span<const std::byte> message)
     {
         const auto maximum = maximumTransportMessageBytes(channel);
-        if (!maximum || message.empty())
+        if (!maximum)
             return TransportResult::InvalidInput;
+        count(TransportTelemetryKind::Submitted, channel);
+        if (message.empty())
+        {
+            count(TransportTelemetryKind::Rejected, channel, 1, StableNetworkReason::ProtocolViolation);
+            return TransportResult::InvalidInput;
+        }
         if (message.size() > *maximum)
+        {
+            count(TransportTelemetryKind::Rejected, channel, 1, StableNetworkReason::ProtocolViolation);
             return TransportResult::MessageTooLarge;
+        }
         if (channel == TransportChannel::LatestWins)
         {
+            if (mLatest)
+                count(TransportTelemetryKind::Coalesced, channel);
             mLatest.emplace(message.begin(), message.end());
+            count(TransportTelemetryKind::Admitted, channel);
+            queueGauges();
             return TransportResult::Accepted;
         }
         if (mReliable.size() >= mPolicy.reliableMessages || message.size() > mPolicy.reliableBytes - mReliableBytes)
+        {
+            count(TransportTelemetryKind::WouldBlock, channel);
             return TransportResult::WouldBlock;
+        }
         mReliable.emplace_back(message.begin(), message.end());
         mReliableBytes += message.size();
+        count(TransportTelemetryKind::Admitted, channel);
+        queueGauges();
         return TransportResult::Accepted;
     }
 
@@ -338,6 +392,7 @@ namespace TES3MP
             }
             if (result == TransportResult::WouldBlock)
             {
+                count(TransportTelemetryKind::WouldBlock, TransportChannel::ReliableOrdered);
                 reliableBlocked = true;
                 break;
             }
@@ -356,6 +411,8 @@ namespace TES3MP
             }
             else if (result != TransportResult::WouldBlock)
                 return OutboundPumpResult::TransportFailed;
+            else
+                count(TransportTelemetryKind::WouldBlock, TransportChannel::LatestWins);
         }
 
         if (reliableBlocked)
@@ -366,6 +423,8 @@ namespace TES3MP
             if (shouldEvict(nowMilliseconds))
             {
                 runtime.close(connection, TransportCloseMode::Abort);
+                count(TransportTelemetryKind::Evicted, TransportChannel::ReliableOrdered, 1,
+                    StableNetworkReason::SlowPeer);
                 clear();
                 return OutboundPumpResult::SlowPeerEvicted;
             }
@@ -377,7 +436,10 @@ namespace TES3MP
             mConsecutiveReliableBlocks = 0;
         }
         if (progressed)
+        {
+            queueGauges();
             return OutboundPumpResult::Progress;
+        }
         return mReliable.empty() && !mLatest ? OutboundPumpResult::Idle : OutboundPumpResult::Blocked;
     }
 
@@ -388,13 +450,48 @@ namespace TES3MP
         mReliableBytes = 0;
         mFirstReliableBlock.reset();
         mConsecutiveReliableBlocks = 0;
+        queueGauges();
+    }
+
+    void OutboundTransportQueue::count(TransportTelemetryKind kind, TransportChannel channel, std::uint64_t amount,
+        StableNetworkReason reason) noexcept
+    {
+        const auto kindIndex = static_cast<std::size_t>(kind);
+        if (kindIndex >= mCounters.size())
+            return;
+        auto& value = mCounters[kindIndex][channelIndex(channel)];
+        value = saturatingTelemetryAdd(value, amount);
+        (void)mTelemetry->tryRecord({ kind, TransportTelemetryDirection::Outbound, channel, value, reason });
+    }
+
+    void OutboundTransportQueue::gauge(
+        TransportTelemetryKind kind, TransportChannel channel, std::uint64_t value) noexcept
+    {
+        (void)mTelemetry->tryRecord(
+            { kind, TransportTelemetryDirection::Outbound, channel, value, StableNetworkReason::None });
+    }
+
+    void OutboundTransportQueue::queueGauges() noexcept
+    {
+        gauge(TransportTelemetryKind::QueuedMessages, TransportChannel::ReliableOrdered, mReliable.size());
+        gauge(TransportTelemetryKind::QueuedBytes, TransportChannel::ReliableOrdered, mReliableBytes);
+        gauge(TransportTelemetryKind::QueuedMessages, TransportChannel::LatestWins, mLatest ? 1 : 0);
+        gauge(TransportTelemetryKind::QueuedBytes, TransportChannel::LatestWins, mLatest ? mLatest->size() : 0);
     }
 
     std::optional<OutboundQueueSet> OutboundQueueSet::create(OutboundQueuePolicy policy, std::size_t connections)
     {
         if (connections == 0 || connections > OutboundQueuePolicy::MaxConnections)
             return std::nullopt;
-        return OutboundQueueSet(policy, connections);
+        return OutboundQueueSet(policy, connections, &sNullTransportTelemetry);
+    }
+
+    std::optional<OutboundQueueSet> OutboundQueueSet::create(
+        OutboundQueuePolicy policy, std::size_t connections, TransportTelemetrySink& telemetry)
+    {
+        if (connections == 0 || connections > OutboundQueuePolicy::MaxConnections)
+            return std::nullopt;
+        return OutboundQueueSet(policy, connections, &telemetry);
     }
 
     TransportResult OutboundQueueSet::attach(TransportConnectionId connection)
@@ -403,7 +500,7 @@ namespace TES3MP
             return TransportResult::AlreadyFinalized;
         if (mQueues.size() >= mConnectionLimit)
             return TransportResult::AtCapacity;
-        mQueues.emplace(connection, mPolicy);
+        mQueues.try_emplace(connection, mPolicy, *mTelemetry);
         return TransportResult::Accepted;
     }
 

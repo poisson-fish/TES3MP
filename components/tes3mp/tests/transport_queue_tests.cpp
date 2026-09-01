@@ -1,5 +1,6 @@
 #include <tes3mp/transport.hpp>
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <iostream>
@@ -59,6 +60,18 @@ namespace
         }
         TES3MP::TransportPollResult poll(std::span<TES3MP::TransportEvent>) override { return {}; }
         TES3MP::TransportResult shutdown() override { return TES3MP::TransportResult::Accepted; }
+    };
+
+    struct RecordingSink final : TES3MP::TransportTelemetrySink
+    {
+        bool drop = false;
+        std::vector<TES3MP::TransportTelemetryObservation> values;
+
+        TES3MP::TransportTelemetryResult tryRecord(const TES3MP::TransportTelemetryObservation& value) noexcept override
+        {
+            values.push_back(value);
+            return drop ? TES3MP::TransportTelemetryResult::Dropped : TES3MP::TransportTelemetryResult::Accepted;
+        }
     };
 
     std::vector<std::byte> bytes(unsigned value, std::size_t count = 1)
@@ -168,12 +181,42 @@ namespace
                 "consecutive slow-peer threshold did not evict")
             && check(slow.reliableMessages() == 0 && !slow.hasLatest(), "eviction retained queued bytes");
     }
+
+    bool telemetryIsExactBoundedAndIsolated()
+    {
+        RecordingSink sink;
+        TES3MP::OutboundTransportQueue queue(policy(), sink);
+        FakeRuntime runtime;
+        const auto connection = TES3MP::TransportConnectionId::initial();
+        queue.enqueue(TES3MP::TransportChannel::ReliableOrdered, bytes(1, 4));
+        queue.enqueue(TES3MP::TransportChannel::LatestWins, bytes(2, 3));
+        queue.enqueue(TES3MP::TransportChannel::LatestWins, bytes(3, 2));
+        sink.drop = true;
+        const auto result = queue.pump(runtime, connection, 0);
+        const auto has
+            = [&](TES3MP::TransportTelemetryKind kind, TES3MP::TransportChannel channel, std::uint64_t value) {
+                  return std::ranges::find(sink.values,
+                             TES3MP::TransportTelemetryObservation{
+                                 kind, TES3MP::TransportTelemetryDirection::Outbound, channel, value })
+                      != sink.values.end();
+              };
+        return check(result == TES3MP::OutboundPumpResult::Progress, "dropping sink changed queue behavior")
+            && check(has(TES3MP::TransportTelemetryKind::Submitted, TES3MP::TransportChannel::LatestWins, 2),
+                "submitted counter is not cumulative")
+            && check(has(TES3MP::TransportTelemetryKind::Coalesced, TES3MP::TransportChannel::LatestWins, 1),
+                "latest replacement was not counted")
+            && check(has(TES3MP::TransportTelemetryKind::QueuedBytes, TES3MP::TransportChannel::ReliableOrdered, 4),
+                "reliable byte gauge missing")
+            && check(has(TES3MP::TransportTelemetryKind::QueuedMessages, TES3MP::TransportChannel::LatestWins, 0),
+                "latest queue drain gauge missing")
+            && check(TES3MP::saturatingTelemetryAdd(UINT64_MAX - 1, 2) == UINT64_MAX, "counter did not saturate");
+    }
 }
 
 int main()
 {
     return policyAndBounds() && connectionSetBounds() && orderingCoalescingAndFairness() && limitsRateAndTime()
-            && isolatedSlowPeerEviction()
+            && isolatedSlowPeerEviction() && telemetryIsExactBoundedAndIsolated()
         ? 0
         : 1;
 }

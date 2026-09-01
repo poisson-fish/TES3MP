@@ -4108,6 +4108,31 @@ only the relevant phase section here.
   - Follow-ups: compose bounded queue/runtime emission and private GNS lane
     sampling, then present the complete Slice 6.5 demo.
 
+- 2026-09-01 — Slice 6.5 telemetry composition — In Progress
+  - Change: composed ADR-0038's injected non-blocking sink with the bounded
+    outbound queue and private real-transport adapter. Exact cumulative queue
+    submitted, admitted, coalesced, rejected, blocked, and evicted observations
+    and exact adapter-received observations saturate; queue gauges are sampled after mutation; and each
+    explicit real-transport poll samples the two public GNS lane pending and
+    reliable-unacknowledged byte fields without claiming an exact retransmit
+    count. The default factory and queue remain source-compatible through a
+    null sink.
+  - Decisions: no new architecture, authority, state-scope, or gameplay choice;
+    implementation follows accepted ADR-0038. GNS's latest-wins lane reports
+    zero unacknowledged bytes because that lane is explicitly unreliable.
+  - Verification: MSVC 19.44 Ninja builds and the focused
+    `tes3mp_transport_queue_tests`, `tes3mp_transport_lifecycle_tests`, and
+    exact-dependency `tes3mp_transport_gns_tests` executables pass. All 112
+    repository-owned Python tests pass in 47.294 seconds. `python
+    scripts/verify_vnext_baseline.py` verifies 241 intentional differences and
+    all 67 dependency inputs. Six-file clang-format and `git diff --check`
+    pass.
+  - Owner review: ADR-0038 architecture approval applies; implementation-demo
+    acceptance remains pending, so Slice 6.5 stays **In Progress**.
+  - Follow-ups: present exact counter/coalescing, dropped-sink isolation,
+    slow-peer reason, and GNS lane-pressure evidence for owner acceptance; the
+    hosted matrix remains the Phase 6 exit gate.
+
 ## Phase 7 — Headless end-to-end multiplayer slice
 
 [Back to the phase tracker](IMPLEMENTATION_PLAN.md#phase-7--headless-end-to-end-multiplayer-slice)

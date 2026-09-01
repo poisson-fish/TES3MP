@@ -24,6 +24,8 @@ namespace TES3MP
     };
 
     TransportFactoryResult makeGameNetworkingSocketsTransport(TransportLimits limits) noexcept;
+    TransportFactoryResult makeGameNetworkingSocketsTransport(
+        TransportLimits limits, TransportTelemetrySink& telemetry) noexcept;
 }
 
 #endif

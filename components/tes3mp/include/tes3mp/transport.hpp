@@ -5,6 +5,7 @@
 #include "protocol_frame.hpp"
 #include "strong_value.hpp"
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <deque>
@@ -173,6 +174,13 @@ namespace TES3MP
         ConnectionFailed,
         PeerClosed,
         LocalClose,
+        LocalAbort,
+        TimedOut,
+        AuthenticationDenied,
+        AuthenticationTemporarilyUnavailable,
+        SlowPeer,
+        CapacityExhausted,
+        SecuritySetupFailed,
         Shutdown,
         EventCapacityExceeded,
         CounterExhausted,
@@ -201,6 +209,7 @@ namespace TES3MP
     };
 
     StableNetworkReason stableNetworkReason(TransportFailure failure) noexcept;
+    std::uint64_t saturatingTelemetryAdd(std::uint64_t value, std::uint64_t amount) noexcept;
 
     enum class TransportTelemetryKind : std::uint8_t
     {
@@ -362,6 +371,7 @@ namespace TES3MP
     {
     public:
         explicit OutboundTransportQueue(OutboundQueuePolicy policy);
+        OutboundTransportQueue(OutboundQueuePolicy policy, TransportTelemetrySink& telemetry);
 
         TransportResult enqueue(TransportChannel channel, std::span<const std::byte> message);
         OutboundPumpResult pump(
@@ -382,6 +392,10 @@ namespace TES3MP
 
         void refill(RateBucket& bucket, std::size_t burst, std::uint64_t interval, std::uint64_t now) noexcept;
         bool shouldEvict(std::uint64_t now) const noexcept;
+        void count(TransportTelemetryKind kind, TransportChannel channel, std::uint64_t amount = 1,
+            StableNetworkReason reason = StableNetworkReason::None) noexcept;
+        void gauge(TransportTelemetryKind kind, TransportChannel channel, std::uint64_t value) noexcept;
+        void queueGauges() noexcept;
 
         OutboundQueuePolicy mPolicy;
         std::deque<std::vector<std::byte>> mReliable;
@@ -392,12 +406,16 @@ namespace TES3MP
         std::optional<std::uint64_t> mFirstReliableBlock;
         std::size_t mConsecutiveReliableBlocks = 0;
         std::optional<std::uint64_t> mLastPumpTime;
+        TransportTelemetrySink* mTelemetry = nullptr;
+        std::array<std::array<std::uint64_t, 2>, 7> mCounters{};
     };
 
     class OutboundQueueSet
     {
     public:
         static std::optional<OutboundQueueSet> create(OutboundQueuePolicy policy, std::size_t connections);
+        static std::optional<OutboundQueueSet> create(
+            OutboundQueuePolicy policy, std::size_t connections, TransportTelemetrySink& telemetry);
         TransportResult attach(TransportConnectionId connection);
         TransportResult detach(TransportConnectionId connection) noexcept;
         TransportResult enqueue(
@@ -407,14 +425,16 @@ namespace TES3MP
         std::size_t connections() const noexcept { return mQueues.size(); }
 
     private:
-        OutboundQueueSet(OutboundQueuePolicy policy, std::size_t connections)
+        OutboundQueueSet(OutboundQueuePolicy policy, std::size_t connections, TransportTelemetrySink* telemetry)
             : mPolicy(policy)
             , mConnectionLimit(connections)
+            , mTelemetry(telemetry)
         {
         }
 
         OutboundQueuePolicy mPolicy;
         std::size_t mConnectionLimit;
+        TransportTelemetrySink* mTelemetry;
         std::map<TransportConnectionId, OutboundTransportQueue> mQueues;
     };
 }
