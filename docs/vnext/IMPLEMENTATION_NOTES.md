@@ -4133,6 +4133,21 @@ only the relevant phase section here.
     slow-peer reason, and GNS lane-pressure evidence for owner acceptance; the
     hosted matrix remains the Phase 6 exit gate.
 
+- 2026-09-01 — Slice 6.5 implementation demo — Implemented
+  - Change: marked Slice 6.5 **Implemented** after owner review of the closed
+    stable-reason mapping, saturated exact application counters, queue gauges,
+    dropped-sink isolation, slow-peer eviction reason, and honest public GNS
+    per-lane pressure sampling.
+  - Decisions: no decision changed; accepted ADR-0038 remains controlling.
+  - Verification: implementation `b4c4201394`; focused queue, lifecycle, and
+    exact-dependency encrypted GNS executables, all 112 repository-owned Python
+    tests, six-file formatting, diff, and indexed provenance gates pass as
+    recorded above.
+  - Owner review: the project owner explicitly accepted the Slice 6.5
+    implementation demo on 2026-09-01.
+  - Follow-ups: Slice 6.6 is the next eligible Phase 6 slice. The complete
+    hosted matrix remains the Phase 6 exit gate.
+
 ## Phase 7 — Headless end-to-end multiplayer slice
 
 [Back to the phase tracker](IMPLEMENTATION_PLAN.md#phase-7--headless-end-to-end-multiplayer-slice)

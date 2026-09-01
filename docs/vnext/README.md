@@ -11,8 +11,8 @@ conditional stretch target.
 
 ## Status
 
-Phases 0–5 are implemented. Phase 6 is in progress, with Slices 6.1 through 6.4
-implemented and Slice 6.5 in progress under accepted ADR-0038.
+Phases 0–5 are implemented. Phase 6 is in progress, with Slices 6.1 through 6.5
+implemented and Slice 6.6 next.
 The active tree is a provenance-verified OpenMW 0.51 baseline with:
 
 - engine-independent protocol, transport, client-session, server-core, and test
@@ -261,6 +261,12 @@ authorizes the typed shared authentication composition and fail-closed session
 finalization boundary. Its production implementation, redaction contracts, and
 complete authentication loopback closure pass applicable local checks, and the
 owner accepted the implementation demo on 2026-08-31.
+Slice 6.5 is **Implemented** under accepted
+[`ADR-0038`](adr/ADR-0038-phase6-network-telemetry-and-stable-reasons.md);
+closed stable reasons, saturated application counters, bounded queue gauges,
+sink-failure isolation, and honest public GNS per-lane pressure sampling pass
+focused local checks, and the owner accepted the implementation demo on
+2026-09-01.
 
 ## References and license
 
