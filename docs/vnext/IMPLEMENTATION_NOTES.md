@@ -4293,7 +4293,7 @@ only the relevant phase section here.
 
 [Back to the phase tracker](IMPLEMENTATION_PLAN.md#phase-7--headless-end-to-end-multiplayer-slice)
 
-- 2026-09-01 — Slice 7.1 — In Progress
+- 2026-09-01 — Slice 7.1 — Implemented
   - Change: added accepted
     [`ADR-0040`](adr/ADR-0040-phase7-server-composition-and-configuration.md)
     and began the bounded dedicated-server composition/configuration slice.
@@ -4312,10 +4312,12 @@ only the relevant phase section here.
     runtime-safety policy tests. Staged baseline verification passes with 252
     intentional differences and 67 dependency inputs; local Markdown links,
     JSON parsing, status assertions, and `git diff --cached --check` pass.
-  - Owner review: architecture approval received on 2026-09-01; implementation
-    demo acceptance remains pending.
-  - Follow-ups: implement and verify Slice 7.1 without adding join/gameplay
-    behavior.
+  - Owner review: architecture approval received on 2026-09-01. The owner
+    accepted the valid startup/stop, invalid configuration/secret, injected
+    listener-failure, and ordered-shutdown implementation demo after candidate
+    `d85d3d07f4`.
+  - Follow-ups: none for Slice 7.1. Slice 7.2 is next and remains separately
+    architecture-gated.
 
 - 2026-09-01 — Slice 7.0 — Implemented
   - Change: added accepted

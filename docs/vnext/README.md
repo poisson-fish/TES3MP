@@ -14,8 +14,9 @@ conditional stretch target.
 Phases 0–6 are implemented. Phase 7 is in progress; Slice 7.0 is implemented
 under accepted
 [`GDR-0001`](gdr/GDR-0001-phase7-headless-vertical-slice-behavior.md), and
-Slice 7.1 is in progress under accepted
-[`ADR-0040`](adr/ADR-0040-phase7-server-composition-and-configuration.md).
+Slice 7.1 is implemented under accepted
+[`ADR-0040`](adr/ADR-0040-phase7-server-composition-and-configuration.md), and
+Slice 7.2 is next.
 The active tree is a provenance-verified OpenMW 0.51 baseline with:
 
 - engine-independent protocol, transport, client-session, server-core, and test
