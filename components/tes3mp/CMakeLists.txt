@@ -298,7 +298,9 @@ tes3mp_add_engine_independent_library(tes3mp_client_session client_session/ancho
 add_library(TES3MP::ClientSession ALIAS tes3mp_client_session)
 target_sources(tes3mp_client_session PRIVATE
     include/tes3mp/client_session.hpp
+    include/tes3mp/headless_client_session.hpp
     client_session/client_session.cpp
+    client_session/headless_client_session.cpp
 )
 target_link_libraries(tes3mp_client_session
     PUBLIC
@@ -323,6 +325,7 @@ target_sources(tes3mp_test_support PRIVATE
     include/tes3mp/test_support/phase4_in_memory_peer.hpp
     include/tes3mp/test_support/recording_observability.hpp
     include/tes3mp/test_support/spatial_round_trip.hpp
+    include/tes3mp/test_support/scripted_fake_client.hpp
     test_support/deterministic_harness.cpp
     test_support/fault_injecting_link.cpp
     test_support/in_memory_link.cpp
@@ -330,6 +333,7 @@ target_sources(tes3mp_test_support PRIVATE
     test_support/phase4_in_memory_peer.cpp
     test_support/recording_observability.cpp
     test_support/spatial_round_trip.cpp
+    test_support/scripted_fake_client.cpp
 )
 
 tes3mp_verify_target_dependencies(tes3mp_protocol)
@@ -374,6 +378,17 @@ target_compile_features(tes3mp_protocol_tests PRIVATE cxx_std_20)
 target_link_libraries(tes3mp_protocol_tests PRIVATE tes3mp_test_support)
 set_target_properties(tes3mp_protocol_tests PROPERTIES FOLDER "TES3MP/Tests")
 tes3mp_enable_runtime_safety(tes3mp_protocol_tests)
+
+add_executable(tes3mp_headless_client_tests tests/headless_client_tests.cpp)
+target_compile_features(tes3mp_headless_client_tests PRIVATE cxx_std_20)
+target_link_libraries(tes3mp_headless_client_tests PRIVATE tes3mp_test_support)
+set_target_properties(tes3mp_headless_client_tests PROPERTIES FOLDER "TES3MP/Tests")
+tes3mp_enable_runtime_safety(tes3mp_headless_client_tests)
+tes3mp_verify_target_dependencies(tes3mp_headless_client_tests ALLOWED tes3mp_test_support)
+add_custom_target(tes3mp_headless_client_tests_run
+    COMMAND $<TARGET_FILE:tes3mp_headless_client_tests>
+    DEPENDS tes3mp_headless_client_tests
+    COMMENT "Running TES3MP headless client contracts")
 
 tes3mp_verify_target_dependencies(tes3mp_protocol_tests ALLOWED tes3mp_test_support)
 tes3mp_verify_target_includes(tes3mp_protocol_tests

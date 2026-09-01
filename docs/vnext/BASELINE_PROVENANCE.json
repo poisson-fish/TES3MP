@@ -170,6 +170,11 @@
       "purpose": "Atomic client session-state transitions for encrypted readiness, negotiation, authentication, deadlines, rejection, cancellation, and closure."
     },
     {
+      "path": "components/tes3mp/client_session/headless_client_session.cpp",
+      "status": "A",
+      "purpose": "Caller-pumped single-attempt/single-connection headless client façade over owned transport and client-session state."
+    },
+    {
       "path": "components/tes3mp/include/tes3mp/admission_scope.hpp",
       "status": "A",
       "purpose": "Owner-approved opaque fixed-size admission-scope value shared across the existing protocol, transport, and server-core target graph."
@@ -223,6 +228,11 @@
       "path": "components/tes3mp/include/tes3mp/fixed_tick_scheduler.hpp",
       "status": "A",
       "purpose": "Owner-approved passive 30 Hz server-core scheduler API with four-tick catch-up batches, explicit errors, and lag evidence."
+    },
+    {
+      "path": "components/tes3mp/include/tes3mp/headless_client_session.hpp",
+      "status": "A",
+      "purpose": "Bounded typed production headless client command, pump, state, and snapshot interface."
     },
     {
       "path": "components/tes3mp/include/tes3mp/monotonic_clock.hpp",
@@ -318,6 +328,11 @@
       "path": "components/tes3mp/include/tes3mp/test_support/recording_observability.hpp",
       "status": "A",
       "purpose": "Bounded single-threaded FIFO metric/event recorder interfaces with explicit overflow evidence for deterministic tests."
+    },
+    {
+      "path": "components/tes3mp/include/tes3mp/test_support/scripted_fake_client.hpp",
+      "status": "A",
+      "purpose": "Fixed-capacity typed fake-client script and bounded deterministic timeline interface."
     },
     {
       "path": "components/tes3mp/include/tes3mp/test_support/spatial_round_trip.hpp",
@@ -545,6 +560,11 @@
       "purpose": "Preallocated bounded FIFO observation recording, reject-newest overflow, saturating drop counts, clear, and reuse."
     },
     {
+      "path": "components/tes3mp/test_support/scripted_fake_client.cpp",
+      "status": "A",
+      "purpose": "Deterministic typed fake-client execution and credential-free bounded NDJSON evidence implementation."
+    },
+    {
       "path": "components/tes3mp/test_support/spatial_round_trip.cpp",
       "status": "A",
       "purpose": "Bounded little-endian owned-value round-trip implementation used only by Slice 3.3 independent contract tests."
@@ -703,6 +723,11 @@
       "path": "components/tes3mp/tests/fuzz/spatial_round_trip_fuzz.cpp",
       "status": "A",
       "purpose": "Clang libFuzzer entry point with a hard pre-parse size bound over the test-support-only spatial decoder."
+    },
+    {
+      "path": "components/tes3mp/tests/headless_client_tests.cpp",
+      "status": "A",
+      "purpose": "Focused single-attempt, transport establishment/failure, fixed script capacity, and bounded timeline contracts."
     },
     {
       "path": "components/tes3mp/tests/observability_tests.cpp",
@@ -1028,6 +1053,11 @@
       "path": "docs/vnext/adr/ADR-0040-phase7-server-composition-and-configuration.md",
       "status": "A",
       "purpose": "Owner-approved Phase 7 dedicated-server composition, strict bounded configuration, file-only secret, and transactional lifecycle policy."
+    },
+    {
+      "path": "docs/vnext/adr/ADR-0041-phase7-headless-client-and-script-driver.md",
+      "status": "A",
+      "purpose": "Owner-approved caller-pumped headless client façade and deterministic fixed-capacity scripted fake-client evidence boundary."
     },
     {
       "path": "docs/vnext/gdr/GDR-0001-phase7-headless-vertical-slice-behavior.md",
@@ -1391,7 +1421,7 @@
         },
         {
           "path": "components/tes3mp/CMakeLists.txt",
-          "sha256": "1db5742e5fbeb631a02f691d72d242239fb8ef6031d7aa9faf475cff2795d1fd"
+          "sha256": "dad33ec41db5226b0c2f6630166ba4fb33eaf90ce801b322a2b58daa53257fbf"
         },
         {
           "path": "components/tes3mp/protocol/generated/authentication_accepted_generated.h",

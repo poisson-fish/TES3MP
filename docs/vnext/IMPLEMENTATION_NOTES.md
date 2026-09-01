@@ -4293,6 +4293,23 @@ only the relevant phase section here.
 
 [Back to the phase tracker](IMPLEMENTATION_PLAN.md#phase-7--headless-end-to-end-multiplayer-slice)
 
+- 2026-09-01 — Slice 7.2 — In Progress
+  - Change: added accepted
+    [`ADR-0041`](adr/ADR-0041-phase7-headless-client-and-script-driver.md)
+    and began the headless façade/script-driver slice.
+  - Decisions: owner approved A/A/A/A/A/A: caller-pumped production façade,
+    borrowed runtime and one connection, bounded typed polling, test-support
+    driver, fixed-capacity typed scripts, and credential-free bounded NDJSON.
+  - Verification: fresh standalone MSVC 19.44 compilation and
+    `tes3mp_headless_client_tests_run` pass. Focused contracts cover duplicate
+    start rejection, matching encrypted establishment, typed session action,
+    fixed script capacity, bounded credential-free NDJSON, close, and
+    fail-closed transport polling. The existing complete protocol target and
+    isolated target-boundary build remain green; staged baseline verification
+    passes with 258 intentional differences and 67 dependency inputs.
+  - Owner review: architecture approval received; implementation demo pending.
+  - Follow-ups: implement without adding Slice 7.3 lifecycle behavior.
+
 - 2026-09-01 — Slice 7.1 — Implemented
   - Change: added accepted
     [`ADR-0040`](adr/ADR-0040-phase7-server-composition-and-configuration.md)
