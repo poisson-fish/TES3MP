@@ -4293,6 +4293,30 @@ only the relevant phase section here.
 
 [Back to the phase tracker](IMPLEMENTATION_PLAN.md#phase-7--headless-end-to-end-multiplayer-slice)
 
+- 2026-09-01 — Slice 7.3 — In Progress
+  - Change: added accepted
+    [`ADR-0042`](adr/ADR-0042-phase7-authenticated-join-and-identity-allocation.md)
+    and began the authenticated atomic-join slice.
+  - Decisions: owner approved A/A/A/A/A/A: server-core coordinator, checked
+    monotonic process-lifetime identities, atomic player/session install, one
+    live binding per principal, fixed authoritative spawn plus complete targeted
+    snapshot, and fail-closed rejection without partial canonical state.
+  - Verification: fresh standalone MSVC 19.44 compilation and
+    `tes3mp_authenticated_join_tests_run` pass. Focused contracts cover two
+    distinct atomic joins, fixed zero-velocity fixture spawn, complete targeted
+    initial snapshots, duplicate-principal rejection, final-valid identity then
+    exhaustion, capacity exhaustion, and unchanged state after rejection.
+    Adjacent canonical-state, server-authentication, and session-state test
+    executables pass. All 114 repository-owned Python tests pass; baseline
+    provenance verification passes with 258 intentional differences and 67
+    dependency inputs. `git diff --check` passes.
+  - Owner review: architecture, authority, state-scope, and fixture behavior
+    approval received on 2026-09-01 before production implementation.
+  - Follow-ups: compose the approved boundary with real authentication, token
+    finalization, and transport, then run and demonstrate the two-client Slice
+    7.3 flow; the slice remains **In Progress** until that evidence and owner
+    demo acceptance pass.
+
 - 2026-09-01 — Slice 7.2 — Implemented
   - Change: added accepted
     [`ADR-0041`](adr/ADR-0041-phase7-headless-client-and-script-driver.md)

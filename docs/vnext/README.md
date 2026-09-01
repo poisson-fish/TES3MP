@@ -18,7 +18,8 @@ Slice 7.1 is implemented under accepted
 [`ADR-0040`](adr/ADR-0040-phase7-server-composition-and-configuration.md), and
 Slice 7.2 is implemented under accepted
 [`ADR-0041`](adr/ADR-0041-phase7-headless-client-and-script-driver.md), and
-Slice 7.3 is next.
+Slice 7.3 is in progress under accepted
+[`ADR-0042`](adr/ADR-0042-phase7-authenticated-join-and-identity-allocation.md).
 The active tree is a provenance-verified OpenMW 0.51 baseline with:
 
 - engine-independent protocol, transport, client-session, server-core, and test
