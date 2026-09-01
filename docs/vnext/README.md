@@ -12,7 +12,7 @@ conditional stretch target.
 ## Status
 
 Phases 0–5 are implemented. Phase 6 is in progress, with Slices 6.1 through 6.5
-implemented and Slice 6.6 next.
+implemented and Slice 6.6 in progress under owner-approved ADR-0039.
 The active tree is a provenance-verified OpenMW 0.51 baseline with:
 
 - engine-independent protocol, transport, client-session, server-core, and test
@@ -267,6 +267,11 @@ closed stable reasons, saturated application counters, bounded queue gauges,
 sink-failure isolation, and honest public GNS per-lane pressure sampling pass
 focused local checks, and the owner accepted the implementation demo on
 2026-09-01.
+Slice 6.6 is **In Progress** under accepted
+[`ADR-0039`](adr/ADR-0039-phase6-deterministic-real-transport-fault-boundary.md);
+the approved boundary composes the repository-owned deterministic fault
+scheduler above real encrypted localhost sockets while retaining native GNS
+fault controls only as supplemental below-adapter coverage.
 
 ## References and license
 

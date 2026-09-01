@@ -238,6 +238,11 @@ if(TES3MP_ENABLE_GNS_TRANSPORT)
     tes3mp_enable_runtime_safety(tes3mp_transport_gns)
 
     add_executable(tes3mp_transport_gns_tests tests/transport_gns_tests.cpp)
+    target_sources(tes3mp_transport_gns_tests PRIVATE
+        test_support/fault_injecting_link.cpp
+        test_support/in_memory_link.cpp
+        test_support/manual_clock.cpp
+    )
     target_compile_features(tes3mp_transport_gns_tests PRIVATE cxx_std_20)
     target_compile_definitions(tes3mp_transport_gns_tests PRIVATE STEAMNETWORKINGSOCKETS_OPENSOURCE)
     target_link_libraries(tes3mp_transport_gns_tests

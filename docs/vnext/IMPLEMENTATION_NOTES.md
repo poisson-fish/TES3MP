@@ -4148,6 +4148,31 @@ only the relevant phase section here.
   - Follow-ups: Slice 6.6 is the next eligible Phase 6 slice. The complete
     hosted matrix remains the Phase 6 exit gate.
 
+- 2026-09-01 — Slice 6.6 deterministic real-transport fault boundary — In Progress
+  - Change: accepted
+    [`ADR-0039`](adr/ADR-0039-phase6-deterministic-real-transport-fault-boundary.md)
+    and began composing the existing repository-owned seeded/manual-clock fault
+    scheduler above the owned real transport. The focused encrypted localhost
+    scenario sends deterministic duplicated/reordered work in both directions
+    and across both approved delivery classes; the existing GNS-native loss and
+    reordering scenario remains supplemental below-adapter coverage.
+  - Decisions: the project owner approved Option A without amendment. No GNS
+    fault type or control enters an owned production or test-support API, and no
+    production transport, authority, state-scope, or gameplay behavior changes.
+  - Verification: MSVC 19.44 RelWithDebInfo builds and passes
+    `tes3mp_fault_injection_tests`, `tes3mp_transport_gns_tests`,
+    `tes3mp_transport_queue_tests`, and `tes3mp_transport_lifecycle_tests` from
+    `build/slice63-crypto-gns`. All 112 repository-owned Python tests pass in
+    43.566 seconds, including target-boundary and legacy-exclusion checks.
+    Clang-format, `git diff --check`, JSON parsing, and indexed baseline
+    provenance pass with 242 intentional differences and all 67 dependency
+    declaration inputs verified.
+  - Owner review: ADR-0039 architecture approval is recorded. Implementation
+    demo acceptance remains pending, so Slice 6.6 stays **In Progress**.
+  - Follow-ups: complete verification and present the deterministic transcript,
+    encrypted real-socket crossing, bounds, and supplemental native-fault
+    evidence. The hosted matrix remains the Phase 6 exit gate.
+
 ## Phase 7 — Headless end-to-end multiplayer slice
 
 [Back to the phase tracker](IMPLEMENTATION_PLAN.md#phase-7--headless-end-to-end-multiplayer-slice)

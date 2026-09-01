@@ -112,7 +112,7 @@
     {
       "path": "components/tes3mp/CMakeLists.txt",
       "status": "A",
-      "purpose": "Defines the standalone-capable owned target graph, pinned FlatBuffers runtime input, opt-in verified GameNetworkingSockets/c-ares adapter with private OpenSSL credential crypto and admission-scope HMAC, selected-library focused tests, target-scoped safety registration, golden-corpus verification, and bounded parser fuzz targets."
+      "purpose": "Defines the standalone-capable owned target graph, pinned FlatBuffers runtime input, opt-in verified GameNetworkingSockets/c-ares adapter with private OpenSSL credential crypto and admission-scope HMAC, test-only deterministic fault-support composition for real-socket checks, selected-library focused tests, target-scoped safety registration, golden-corpus verification, and bounded parser fuzz targets."
     },
     {
       "path": "components/tes3mp/CMakePresets.json",
@@ -747,7 +747,7 @@
     {
       "path": "components/tes3mp/tests/transport_gns_tests.cpp",
       "status": "A",
-      "purpose": "Focused verified-adapter loopback, DNS/numeric connection, encryption and inbound admission-scope claims, two-channel delivery under loss/reordering, size/drain bounds, capacity, cancellation, listener-stop, idempotency, shutdown, and overflow checks."
+      "purpose": "Focused verified-adapter loopback, DNS/numeric connection, encryption and inbound admission-scope claims, repository-owned deterministic faults above real sockets in both directions/channels, supplemental native loss/reordering, size/drain bounds, capacity, cancellation, listener-stop, idempotency, shutdown, and overflow checks."
     },
     {
       "path": "components/tes3mp/tests/transport_lifecycle_tests.cpp",
@@ -983,6 +983,11 @@
       "path": "docs/vnext/adr/ADR-0038-phase6-network-telemetry-and-stable-reasons.md",
       "status": "A",
       "purpose": "Owner-approved Phase 6 transport-owned telemetry, stable reason, bounded-cardinality, sink-isolation, and honest retransmission-pressure policy."
+    },
+    {
+      "path": "docs/vnext/adr/ADR-0039-phase6-deterministic-real-transport-fault-boundary.md",
+      "status": "A",
+      "purpose": "Owner-approved Phase 6 deterministic application-fault composition above real encrypted sockets with supplemental selected-library-native below-adapter coverage."
     },
     {
       "path": "docs/vnext/gdr/GDR-0011-phase4-minimal-player-exchange-semantics.md",
@@ -1336,7 +1341,7 @@
         },
         {
           "path": "components/tes3mp/CMakeLists.txt",
-          "sha256": "43bfefe5bc74a10dfcda97ccc74c1b9ee177542da4faeddaa13fa496c15dce37"
+          "sha256": "d72f8a2136f9074bf3d7c57fa085213d0b67c1085cdb7b41c1112a62dcd4f0f2"
         },
         {
           "path": "components/tes3mp/protocol/generated/authentication_accepted_generated.h",

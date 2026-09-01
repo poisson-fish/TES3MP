@@ -1,4 +1,6 @@
 #include <tes3mp/server_authentication.hpp>
+#include <tes3mp/test_support/fault_injecting_link.hpp>
+#include <tes3mp/test_support/manual_clock.hpp>
 #include <tes3mp/transport_gns.hpp>
 
 #include <algorithm>
@@ -316,6 +318,91 @@ namespace
             "delayed reliable fragment head-of-line blocked the newer snapshot");
     }
 
+    bool deterministicFaultHarnessOverRealSockets(
+        TES3MP::TransportRuntime& runtime, TES3MP::TransportConnectionId client, TES3MP::TransportConnectionId server)
+    {
+        using namespace TES3MP::TestSupport;
+
+        ManualClock clock(TES3MP::MonotonicInstant::fromNanoseconds(0));
+        const LinkBudget budget{ 64, 4096 };
+        auto link = InMemoryDuplexLink::create(budget, budget);
+        const auto profile = FaultProfile::create(1'000'000, 2'000'000, 4'000'000, 0, FaultRateScale, 32, 2048);
+        const auto reliable = FaultChannelId::fromValue(1).value();
+        const auto latest = FaultChannelId::fromValue(2).value();
+        const std::array configurations{
+            FaultPathConfiguration{ { LinkDirection::AtoB, reliable }, *profile },
+            FaultPathConfiguration{ { LinkDirection::AtoB, latest }, *profile },
+            FaultPathConfiguration{ { LinkDirection::BtoA, reliable }, *profile },
+            FaultPathConfiguration{ { LinkDirection::BtoA, latest }, *profile },
+        };
+        auto faults = FaultInjectingLink::create(clock, 0x66362d7265616cULL, std::move(*link), configurations);
+        if (!check(faults != nullptr, "deterministic real-socket fault harness was not created"))
+            return false;
+
+        const std::array<std::byte, 3> reliableMessage{ std::byte{ 0x52 }, std::byte{ 0x45 }, std::byte{ 0x4c } };
+        const std::array<std::byte, 3> latestMessage{ std::byte{ 0x4c }, std::byte{ 0x41 }, std::byte{ 0x54 } };
+        if (!check(faults->send({ LinkDirection::AtoB, reliable }, reliableMessage) == FaultSendResult::Accepted
+                    && faults->send({ LinkDirection::AtoB, latest }, latestMessage) == FaultSendResult::Accepted
+                    && faults->send({ LinkDirection::BtoA, reliable }, reliableMessage) == FaultSendResult::Accepted
+                    && faults->send({ LinkDirection::BtoA, latest }, latestMessage) == FaultSendResult::Accepted,
+                "deterministic real-socket messages were not scheduled"))
+            return false;
+        if (!check(faults->pendingMessages({ LinkDirection::AtoB, reliable }) == 2
+                    && faults->pendingMessages({ LinkDirection::AtoB, latest }) == 2
+                    && faults->pendingMessages({ LinkDirection::BtoA, reliable }) == 2
+                    && faults->pendingMessages({ LinkDirection::BtoA, latest }) == 2,
+                "deterministic duplication schedule was not retained"))
+            return false;
+
+        clock.advance(8'000'000);
+        const auto pumped = faults->pump();
+        if (!check(pumped.deliveredMessages == 8 && pumped.deliveredBytes == 24,
+                "deterministic fault schedule did not release the expected transcript"))
+            return false;
+
+        while (auto message = faults->receive(LinkDirection::AtoB))
+        {
+            const auto channel = message->front() == reliableMessage.front() ? TES3MP::TransportChannel::ReliableOrdered
+                                                                             : TES3MP::TransportChannel::LatestWins;
+            if (!check(runtime.send(client, channel, *message) == TES3MP::TransportResult::Accepted,
+                    "deterministically faulted client message did not enter the real adapter"))
+                return false;
+        }
+        while (auto message = faults->receive(LinkDirection::BtoA))
+        {
+            const auto channel = message->front() == reliableMessage.front() ? TES3MP::TransportChannel::ReliableOrdered
+                                                                             : TES3MP::TransportChannel::LatestWins;
+            if (!check(runtime.send(server, channel, *message) == TES3MP::TransportResult::Accepted,
+                    "deterministically faulted server message did not enter the real adapter"))
+                return false;
+        }
+
+        std::vector<TES3MP::TransportMessage> atServer;
+        std::vector<TES3MP::TransportMessage> atClient;
+        if (!check(receiveUntil(runtime, server, 4, atServer),
+                "deterministically faulted client transcript did not cross real sockets")
+            || !check(receiveUntil(runtime, client, 4, atClient),
+                "deterministically faulted server transcript did not cross real sockets"))
+            return false;
+        const auto transcriptMatches = [&](const auto& transcript) {
+            return transcript.size() == 4
+                && std::ranges::count_if(transcript,
+                       [&](const auto& message) {
+                           return message.channel == TES3MP::TransportChannel::ReliableOrdered
+                               && std::ranges::equal(message.bytes, reliableMessage);
+                       })
+                == 2
+                && std::ranges::count_if(transcript,
+                       [&](const auto& message) {
+                           return message.channel == TES3MP::TransportChannel::LatestWins
+                               && std::ranges::equal(message.bytes, latestMessage);
+                       })
+                == 2;
+        };
+        return check(transcriptMatches(atServer) && transcriptMatches(atClient),
+            "real adapter changed the deterministic fault transcript or channel mapping");
+    }
+
     bool establish(std::string_view host)
     {
         const auto limits = TES3MP::TransportLimits::create(1, 8, 8, 128);
@@ -409,6 +496,9 @@ namespace
                     *factory.runtime, *clientConnection, *serverConnection, *acceptedEvent->admissionScope)))
             return false;
         if (host == "127.0.0.1" && !deliveryClassesUnderFaults(*factory.runtime, *clientConnection, *serverConnection))
+            return false;
+        if (host == "127.0.0.1"
+            && !deterministicFaultHarnessOverRealSockets(*factory.runtime, *clientConnection, *serverConnection))
             return false;
 
         const std::array<std::byte, 1> oneByte{ std::byte{ 1 } };
