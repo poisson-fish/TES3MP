@@ -20,6 +20,14 @@ SPEC.loader.exec_module(safety)
 
 
 class RuntimeSafetyRunnerTests(unittest.TestCase):
+    def test_every_expected_compiled_source_exists(self):
+        missing = [
+            relative
+            for relative in sorted(safety.EXPECTED_COMPILED_SOURCES)
+            if not (safety.SOURCE_DIR / relative).is_file()
+        ]
+        self.assertEqual(missing, [])
+
     def test_profiles_are_separate_and_fuzzing_is_asan_only(self):
         safety.validate_request("asan-ubsan", 30, host="Linux")
         safety.validate_request("tsan", 0, host="Linux")

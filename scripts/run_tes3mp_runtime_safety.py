@@ -131,14 +131,22 @@ EXPECTED_COMPILED_SOURCES = {
     "client_session/anchor.cpp",
     "client_session/client_session.cpp",
     "protocol/anchor.cpp",
+    "protocol/authentication.cpp",
     "protocol/protocol_frame.cpp",
     "protocol/protocol_handshake.cpp",
     "protocol/protocol_exchange.cpp",
     "server_core/anchor.cpp",
-    "server_core/authentication.cpp",
+    "server_core/canonical_checksum.cpp",
+    "server_core/canonical_publication.cpp",
+    "server_core/canonical_resync.cpp",
+    "server_core/canonical_state.cpp",
+    "server_core/credential_crypto.cpp",
     "server_core/deterministic_random.cpp",
     "server_core/fixed_tick_scheduler.cpp",
     "server_core/observability.cpp",
+    "server_core/server_authentication.cpp",
+    "server_core/server_command_intake.cpp",
+    "server_core/server_command_reducer.cpp",
     "server_core/server_session.cpp",
     "test_support/anchor.cpp",
     "test_support/deterministic_harness.cpp",
@@ -150,16 +158,27 @@ EXPECTED_COMPILED_SOURCES = {
     "test_support/spatial_round_trip.cpp",
     "tests/deterministic_facilities_tests.cpp",
     "tests/deterministic_harness_tests.cpp",
+    "tests/canonical_sink_tests.cpp",
+    "tests/canonical_state_tests.cpp",
     "tests/fault_injection_tests.cpp",
     "tests/observability_tests.cpp",
     "tests/protocol_frame_tests.cpp",
     "tests/protocol_envelope_tests.cpp",
+    "tests/protocol_authentication_tests.cpp",
     "tests/protocol_handshake_tests.cpp",
     "tests/protocol_exchange_tests.cpp",
     "tests/session_state_machine_tests.cpp",
+    "tests/server_authentication_tests.cpp",
+    "tests/server_command_intake_tests.cpp",
+    "tests/server_command_reducer_tests.cpp",
+    "tests/server_core_property_tests.cpp",
+    "tests/server_core_safety_tests.cpp",
     "tests/spatial_primitive_tests.cpp",
     "tests/strong_value_tests.cpp",
     "transport/anchor.cpp",
+    "transport/transport.cpp",
+    "tests/transport_lifecycle_tests.cpp",
+    "tests/transport_queue_tests.cpp",
 }
 
 
@@ -436,6 +455,7 @@ def verify_instrumented_compile_commands(profile: str, build_dir: pathlib.Path) 
         expected.add("tests/fuzz/spatial_round_trip_fuzz.cpp")
         expected.add("tests/fuzz/protocol_frame_fuzz.cpp")
         expected.add("tests/fuzz/protocol_handshake_fuzz.cpp")
+        expected.add("tests/fuzz/protocol_authentication_fuzz.cpp")
         expected.add("tests/fuzz/protocol_exchange_fuzz.cpp")
         required_flag = "-fsanitize=address,undefined"
     else:

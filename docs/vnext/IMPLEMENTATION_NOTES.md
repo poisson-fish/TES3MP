@@ -4227,6 +4227,23 @@ only the relevant phase section here.
   - Follow-ups: commit and dispatch both manual matrices on the repaired exact
     candidate, then review all jobs and retained evidence.
 
+- 2026-09-01 — Slice 6.7 second hosted candidate — In Progress
+  - Change: candidate `b2372d4d9f` passed the Clang 18 compile point, then the
+    runtime-safety policy rejected a stale expected source name. Replaced it
+    with the complete current non-GNS production/test source set and added the
+    authentication fuzzer to the ASan/UBSan instrumentation audit.
+  - Decisions: no product decision changed; this restores the accepted rule
+    that every owned source built by the safety presets is instrumented.
+  - Verification: runtime-safety run
+    [33538589016](https://github.com/poisson-fish/TES3MP/actions/runs/33538589016)
+    built all targets under both Clang profiles, then failed only the stale
+    `server_core/authentication.cpp` audit. All nine runtime-safety policy unit
+    tests and `git diff --check` pass after repair.
+  - Owner review: Phase 6 exit-gate approval remains pending; Slice 6.7 and
+    Phase 6 stay **In Progress**.
+  - Follow-ups: run indexed provenance, commit, and redispatch both exact
+    matrices; review all jobs and retained evidence.
+
 ## Phase 7 — Headless end-to-end multiplayer slice
 
 [Back to the phase tracker](IMPLEMENTATION_PLAN.md#phase-7--headless-end-to-end-multiplayer-slice)
