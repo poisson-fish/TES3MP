@@ -151,6 +151,34 @@ namespace
 
 namespace TES3MP
 {
+    StableNetworkReason stableNetworkReason(TransportFailure failure) noexcept
+    {
+        switch (failure)
+        {
+            case TransportFailure::None:
+                return StableNetworkReason::None;
+            case TransportFailure::ResolutionNoData:
+            case TransportFailure::ResolutionFailed:
+                return StableNetworkReason::NameResolutionFailed;
+            case TransportFailure::PeerClosed:
+                return StableNetworkReason::PeerClosed;
+            case TransportFailure::LocalClose:
+                return StableNetworkReason::LocalGracefulClose;
+            case TransportFailure::Shutdown:
+                return StableNetworkReason::RuntimeShutdown;
+            case TransportFailure::EventCapacityExceeded:
+                return StableNetworkReason::CapacityExhausted;
+            case TransportFailure::InvalidMessage:
+                return StableNetworkReason::ProtocolViolation;
+            case TransportFailure::InvalidEndpoint:
+            case TransportFailure::ConnectionFailed:
+            case TransportFailure::CounterExhausted:
+            case TransportFailure::DependencyFailure:
+                return StableNetworkReason::TransportDependencyFailed;
+        }
+        return StableNetworkReason::TransportDependencyFailed;
+    }
+
     std::optional<TransportChannel> transportChannelFor(MessageClass messageClass) noexcept
     {
         switch (messageClass)

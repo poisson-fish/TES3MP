@@ -180,6 +180,83 @@ namespace TES3MP
         InvalidMessage,
     };
 
+    enum class TransportChannel : std::uint8_t;
+
+    enum class StableNetworkReason : std::uint8_t
+    {
+        None,
+        LocalGracefulClose,
+        LocalAbort,
+        PeerClosed,
+        TimedOut,
+        AuthenticationDenied,
+        AuthenticationTemporarilyUnavailable,
+        ProtocolViolation,
+        SlowPeer,
+        CapacityExhausted,
+        NameResolutionFailed,
+        SecuritySetupFailed,
+        TransportDependencyFailed,
+        RuntimeShutdown,
+    };
+
+    StableNetworkReason stableNetworkReason(TransportFailure failure) noexcept;
+
+    enum class TransportTelemetryKind : std::uint8_t
+    {
+        Submitted,
+        Admitted,
+        Received,
+        Coalesced,
+        Rejected,
+        WouldBlock,
+        Evicted,
+        QueuedMessages,
+        QueuedBytes,
+        PendingBytes,
+        UnacknowledgedBytes,
+    };
+
+    enum class TransportTelemetryDirection : std::uint8_t
+    {
+        Outbound,
+        Inbound,
+    };
+
+    struct TransportTelemetryObservation
+    {
+        TransportTelemetryKind kind;
+        TransportTelemetryDirection direction;
+        TransportChannel channel;
+        std::uint64_t value;
+        StableNetworkReason reason = StableNetworkReason::None;
+
+        friend constexpr bool operator==(TransportTelemetryObservation, TransportTelemetryObservation) noexcept
+            = default;
+    };
+
+    enum class TransportTelemetryResult : std::uint8_t
+    {
+        Accepted,
+        Dropped,
+    };
+
+    class TransportTelemetrySink
+    {
+    public:
+        virtual ~TransportTelemetrySink() = default;
+        virtual TransportTelemetryResult tryRecord(const TransportTelemetryObservation& observation) noexcept = 0;
+    };
+
+    class NullTransportTelemetrySink final : public TransportTelemetrySink
+    {
+    public:
+        TransportTelemetryResult tryRecord(const TransportTelemetryObservation&) noexcept override
+        {
+            return TransportTelemetryResult::Accepted;
+        }
+    };
+
     enum class TransportChannel : std::uint8_t
     {
         ReliableOrdered = 1,

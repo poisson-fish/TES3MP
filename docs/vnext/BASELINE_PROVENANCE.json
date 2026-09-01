@@ -980,6 +980,11 @@
       "purpose": "Owner-approved Phase 6 per-connection bounded queue, fair scheduling, deterministic rate, overload, and sustained slow-peer eviction policy."
     },
     {
+      "path": "docs/vnext/adr/ADR-0038-phase6-network-telemetry-and-stable-reasons.md",
+      "status": "A",
+      "purpose": "Owner-approved Phase 6 transport-owned telemetry, stable reason, bounded-cardinality, sink-isolation, and honest retransmission-pressure policy."
+    },
+    {
       "path": "docs/vnext/gdr/GDR-0011-phase4-minimal-player-exchange-semantics.md",
       "status": "A",
       "purpose": "Owner-approved Phase 4 player-motion intent, authority separation, session-targeted snapshot scope, and confirmed-client-state semantics."

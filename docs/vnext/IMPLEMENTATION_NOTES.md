@@ -4094,6 +4094,20 @@ only the relevant phase section here.
     stable-reason architecture decision review. The hosted matrix remains the
     Phase 6 exit gate.
 
+- 2026-08-31 — Slice 6.5 telemetry/reason decision and foundation — In Progress
+  - Change: accepted ADR-0038 and began the selected-library-free stable reason
+    and closed transport telemetry vocabulary.
+  - Decisions: the owner approved Option A for all five decisions, including
+    honest pending/unacknowledged retransmission-pressure gauges.
+  - Verification: MSVC builds and passes the focused lifecycle, bounded queue,
+    and real encrypted GNS transport executables. All 112 repository-owned
+    Python tests pass. Three-file formatting and `git diff --check` pass;
+    indexed provenance verifies 241 intentional differences and 67 dependency
+    inputs.
+  - Owner review: architecture approval recorded; implementation demo remains.
+  - Follow-ups: compose bounded queue/runtime emission and private GNS lane
+    sampling, then present the complete Slice 6.5 demo.
+
 ## Phase 7 — Headless end-to-end multiplayer slice
 
 [Back to the phase tracker](IMPLEMENTATION_PLAN.md#phase-7--headless-end-to-end-multiplayer-slice)

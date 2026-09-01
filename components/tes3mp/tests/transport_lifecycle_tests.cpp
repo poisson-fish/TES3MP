@@ -5,6 +5,7 @@
 #include <limits>
 #include <string>
 #include <string_view>
+#include <type_traits>
 
 namespace
 {
@@ -98,9 +99,32 @@ namespace
             && check(TES3MP::TransportRuntime::MaxMessagesPerReceive == 128,
                 "approved initial receive-drain ceiling changed");
     }
+
+    bool telemetryAndStableReasonContract()
+    {
+        static_assert(std::is_abstract_v<TES3MP::TransportTelemetrySink>);
+        static_assert(!std::is_constructible_v<TES3MP::TransportTelemetryObservation, std::string_view>);
+        TES3MP::NullTransportTelemetrySink sink;
+        const TES3MP::TransportTelemetryObservation observation{ TES3MP::TransportTelemetryKind::PendingBytes,
+            TES3MP::TransportTelemetryDirection::Outbound, TES3MP::TransportChannel::ReliableOrdered, 17 };
+        return check(sink.tryRecord(observation) == TES3MP::TransportTelemetryResult::Accepted,
+                   "null transport telemetry sink rejected observation")
+            && check(TES3MP::stableNetworkReason(TES3MP::TransportFailure::PeerClosed)
+                    == TES3MP::StableNetworkReason::PeerClosed,
+                "peer-close reason mapping changed")
+            && check(TES3MP::stableNetworkReason(TES3MP::TransportFailure::InvalidMessage)
+                    == TES3MP::StableNetworkReason::ProtocolViolation,
+                "protocol reason mapping changed")
+            && check(TES3MP::stableNetworkReason(static_cast<TES3MP::TransportFailure>(255))
+                    == TES3MP::StableNetworkReason::TransportDependencyFailed,
+                "unknown failure did not fail closed");
+    }
 }
 
 int main()
 {
-    return endpointContract() && listenerContract() && limitAndIdentityContract() && channelContract() ? 0 : 1;
+    return endpointContract() && listenerContract() && limitAndIdentityContract() && channelContract()
+            && telemetryAndStableReasonContract()
+        ? 0
+        : 1;
 }
