@@ -4173,6 +4173,22 @@ only the relevant phase section here.
     encrypted real-socket crossing, bounds, and supplemental native-fault
     evidence. The hosted matrix remains the Phase 6 exit gate.
 
+- 2026-09-01 — Slice 6.6 implementation demo — Implemented
+  - Change: marked Slice 6.6 **Implemented** after owner review of the
+    repository-owned deterministic transcript crossing real encrypted sockets
+    in both directions and both channels, plus the supplemental native GNS
+    loss/reordering coverage.
+  - Decisions: no decision changed; accepted ADR-0039 remains controlling.
+  - Verification: implementation `9ab4b6e9ed`; focused fault, encrypted GNS,
+    queue, and lifecycle executables, all 112 repository-owned Python tests,
+    formatting, diff, JSON, target-boundary, legacy-exclusion, and indexed
+    provenance gates pass as recorded above.
+  - Owner review: the project owner explicitly accepted the Slice 6.6
+    implementation demo on 2026-09-01.
+  - Follow-ups: Slice 6.7 is the next eligible Phase 6 slice. The complete
+    hosted supported-platform and sanitizer matrix remains the Phase 6 exit
+    gate.
+
 ## Phase 7 — Headless end-to-end multiplayer slice
 
 [Back to the phase tracker](IMPLEMENTATION_PLAN.md#phase-7--headless-end-to-end-multiplayer-slice)
