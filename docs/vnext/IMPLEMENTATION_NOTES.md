@@ -4244,6 +4244,21 @@ only the relevant phase section here.
   - Follow-ups: run indexed provenance, commit, and redispatch both exact
     matrices; review all jobs and retained evidence.
 
+- 2026-09-01 — Slice 6.7 repaired hosted candidate — In Progress
+  - Change: published exact candidate `f46fa65efe` and redispatched both manual
+    phase-exit workflows.
+  - Decisions: none; accepted Phase 6 contracts remain controlling.
+  - Verification: runtime-safety run
+    [33538919258](https://github.com/poisson-fish/TES3MP/actions/runs/33538919258)
+    passes Clang 18 TSan and Clang 18 ASan+UBSan with all bounded fuzz smokes;
+    retained evidence uploads pass. Transport run
+    [33538915714](https://github.com/poisson-fish/TES3MP/actions/runs/33538915714)
+    is still in progress across all six supported compiler/platform jobs.
+  - Owner review: transport evidence and Phase 6 exit-gate approval remain
+    pending; Slice 6.7 and Phase 6 stay **In Progress**.
+  - Follow-ups: review the completed six-job transport result and artifacts,
+    then present the combined exact-candidate gate evidence for owner approval.
+
 ## Phase 7 — Headless end-to-end multiplayer slice
 
 [Back to the phase tracker](IMPLEMENTATION_PLAN.md#phase-7--headless-end-to-end-multiplayer-slice)
