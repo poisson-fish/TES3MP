@@ -12,7 +12,7 @@ conditional stretch target.
 ## Status
 
 Phases 0–5 are implemented. Phase 6 is in progress, with Slices 6.1 through 6.6
-implemented and Slice 6.7 next.
+implemented and Slice 6.7 in progress.
 The active tree is a provenance-verified OpenMW 0.51 baseline with:
 
 - engine-independent protocol, transport, client-session, server-core, and test
@@ -274,6 +274,10 @@ scheduler above real encrypted localhost sockets while retaining native GNS
 fault controls only as supplemental below-adapter coverage. Implementation
 `9ab4b6e9ed`, applicable local verification, and owner implementation-demo
 acceptance pass.
+Slice 6.7 is **In Progress**: the manual supported-platform transport workflow
+now covers all Phase 6 lifecycle, queue, authentication, scheduling, encrypted-
+loopback, and deterministic real-transport fault contracts. Local policy checks
+pass; hosted matrix evidence remains pending.
 
 ## References and license
 

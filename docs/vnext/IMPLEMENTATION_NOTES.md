@@ -4189,6 +4189,25 @@ only the relevant phase section here.
     hosted supported-platform and sanitizer matrix remains the Phase 6 exit
     gate.
 
+- 2026-09-01 — Slice 6.7 supported-platform matrix coverage — In Progress
+  - Change: expanded the manual transport lifecycle workflow from Slice 6.1's
+    lifecycle/scheduling/loopback subset to the complete Phase 6 lifecycle,
+    bounded-queue, authentication, scheduling, encrypted-loopback, and
+    deterministic real-transport fault contracts on Linux, Windows, macOS
+    arm64, and macOS x86-64. Added a repository policy test for the matrix.
+  - Decisions: no new architecture, authority, state-scope, or gameplay choice;
+    this applies the existing manual phase-exit and supported-platform rules.
+  - Verification: the focused workflow-policy test passes, all 113 repository-
+    owned Python tests pass in 43.957 seconds, `python
+    scripts/verify_vnext_baseline.py --index` verifies 243 intentional
+    differences and all 67 dependency inputs, and `git diff --cached --check`
+    passes.
+  - Owner review: hosted evidence and Phase 6 exit-gate approval remain pending;
+    Slice 6.7 and Phase 6 stay **In Progress**.
+  - Follow-ups: verify locally, commit the phase-completion candidate, then
+    manually dispatch and review the complete hosted transport and runtime-
+    safety matrix before marking Slice 6.7 or Phase 6 **Implemented**.
+
 ## Phase 7 — Headless end-to-end multiplayer slice
 
 [Back to the phase tracker](IMPLEMENTATION_PLAN.md#phase-7--headless-end-to-end-multiplayer-slice)

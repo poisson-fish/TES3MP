@@ -66,8 +66,10 @@ jobs:
 
       - name: Build and run focused lifecycle checks
         run: |
-          cmake --build build/vnext-transport-lifecycle --target tes3mp_transport_lifecycle_tests tes3mp_transport_gns_schedule_tests tes3mp_transport_gns_tests --parallel 2
+          cmake --build build/vnext-transport-lifecycle --target tes3mp_transport_lifecycle_tests tes3mp_transport_queue_tests tes3mp_server_authentication_tests tes3mp_transport_gns_schedule_tests tes3mp_transport_gns_tests --parallel 2
           ./build/vnext-transport-lifecycle/tes3mp_transport_lifecycle_tests
+          ./build/vnext-transport-lifecycle/tes3mp_transport_queue_tests
+          ./build/vnext-transport-lifecycle/tes3mp_server_authentication_tests
           ./build/vnext-transport-lifecycle/tes3mp_transport_gns_schedule_tests
           if [ "${{ matrix.compiler }}" != "clang-18-TSan" ]; then
             ./build/vnext-transport-lifecycle/tes3mp_transport_gns_tests
@@ -119,8 +121,10 @@ jobs:
 
       - name: Build and run focused lifecycle checks
         run: |
-          cmake --build build/vnext-transport-lifecycle --target tes3mp_transport_lifecycle_tests tes3mp_transport_gns_schedule_tests tes3mp_transport_gns_tests --parallel 2
+          cmake --build build/vnext-transport-lifecycle --target tes3mp_transport_lifecycle_tests tes3mp_transport_queue_tests tes3mp_server_authentication_tests tes3mp_transport_gns_schedule_tests tes3mp_transport_gns_tests --parallel 2
           .\build\vnext-transport-lifecycle\tes3mp_transport_lifecycle_tests.exe
+          .\build\vnext-transport-lifecycle\tes3mp_transport_queue_tests.exe
+          .\build\vnext-transport-lifecycle\tes3mp_server_authentication_tests.exe
           .\build\vnext-transport-lifecycle\tes3mp_transport_gns_schedule_tests.exe
           .\build\vnext-transport-lifecycle\tes3mp_transport_gns_tests.exe
           python -m unittest scripts.tests.test_tes3mp_target_boundaries
@@ -159,8 +163,10 @@ jobs:
           python3 scripts/run_vnext_cares_proof.py
           python3 scripts/provision_vnext_transport.py
           cmake -S components/tes3mp -B build/vnext-transport-lifecycle -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DTES3MP_ENABLE_GNS_TRANSPORT=ON -DTES3MP_TRANSPORT_DEPENDENCY_MANIFEST="$PWD/build/vnext-transport-dependencies/manifest.json"
-          cmake --build build/vnext-transport-lifecycle --target tes3mp_transport_lifecycle_tests tes3mp_transport_gns_schedule_tests tes3mp_transport_gns_tests --parallel 2
+          cmake --build build/vnext-transport-lifecycle --target tes3mp_transport_lifecycle_tests tes3mp_transport_queue_tests tes3mp_server_authentication_tests tes3mp_transport_gns_schedule_tests tes3mp_transport_gns_tests --parallel 2
           ./build/vnext-transport-lifecycle/tes3mp_transport_lifecycle_tests
+          ./build/vnext-transport-lifecycle/tes3mp_transport_queue_tests
+          ./build/vnext-transport-lifecycle/tes3mp_server_authentication_tests
           ./build/vnext-transport-lifecycle/tes3mp_transport_gns_schedule_tests
           ./build/vnext-transport-lifecycle/tes3mp_transport_gns_tests
           python3 -m unittest scripts.tests.test_tes3mp_target_boundaries
@@ -198,8 +204,10 @@ jobs:
           python3 scripts/run_vnext_cares_proof.py
           python3 scripts/provision_vnext_transport.py
           cmake -S components/tes3mp -B build/vnext-transport-lifecycle -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DTES3MP_ENABLE_GNS_TRANSPORT=ON -DTES3MP_TRANSPORT_DEPENDENCY_MANIFEST="$PWD/build/vnext-transport-dependencies/manifest.json"
-          cmake --build build/vnext-transport-lifecycle --target tes3mp_transport_lifecycle_tests tes3mp_transport_gns_schedule_tests tes3mp_transport_gns_tests --parallel 2
+          cmake --build build/vnext-transport-lifecycle --target tes3mp_transport_lifecycle_tests tes3mp_transport_queue_tests tes3mp_server_authentication_tests tes3mp_transport_gns_schedule_tests tes3mp_transport_gns_tests --parallel 2
           ./build/vnext-transport-lifecycle/tes3mp_transport_lifecycle_tests
+          ./build/vnext-transport-lifecycle/tes3mp_transport_queue_tests
+          ./build/vnext-transport-lifecycle/tes3mp_server_authentication_tests
           ./build/vnext-transport-lifecycle/tes3mp_transport_gns_schedule_tests
           ./build/vnext-transport-lifecycle/tes3mp_transport_gns_tests
           python3 -m unittest scripts.tests.test_tes3mp_target_boundaries

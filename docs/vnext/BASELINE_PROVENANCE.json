@@ -1195,6 +1195,11 @@
       "purpose": "Failure-case tests for tracked-path, CMake-metadata, compilation-database, and generated-build-graph legacy exclusion."
     },
     {
+      "path": "scripts/tests/test_vnext_transport_lifecycle_workflow.py",
+      "status": "A",
+      "purpose": "Policy test requiring the manually dispatched supported-platform transport matrix to run every Phase 6 lifecycle, queue, authentication, scheduling, encrypted-loopback, and deterministic fault contract."
+    },
+    {
       "path": "scripts/verify_vnext_baseline.py",
       "status": "A",
       "purpose": "Cross-platform verifier that fails on unrecorded tree or dependency-input drift."

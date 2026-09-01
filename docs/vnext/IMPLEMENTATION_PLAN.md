@@ -600,7 +600,7 @@ Depends on: Phase 5.
 | 6.4 | Implement bounded queues, priority, rate limits, backpressure, and slow-peer eviction | **Implemented** | Owner-approved [`ADR-0037`](adr/ADR-0037-phase6-bounded-outbound-queue-and-slow-peer-policy.md), implementation `da8d139ce3`, focused queue/transport/authentication and repository verification, and owner implementation-demo acceptance pass |
 | 6.5 | Implement network telemetry and stable disconnect/rejection reasons | **Implemented** | Owner-approved [`ADR-0038`](adr/ADR-0038-phase6-network-telemetry-and-stable-reasons.md), implementation `b4c4201394`, focused local verification, and owner implementation-demo acceptance pass |
 | 6.6 | Integrate real sockets into the deterministic fault harness | **Implemented** | Owner-approved [`ADR-0039`](adr/ADR-0039-phase6-deterministic-real-transport-fault-boundary.md), implementation `9ab4b6e9ed`, applicable local verification, and owner implementation-demo acceptance pass |
-| 6.7 | Prove Linux, Windows, and macOS build/test support | **Not Started** | Transport integration CI is green on every supported desktop platform |
+| 6.7 | Prove Linux, Windows, and macOS build/test support | **In Progress** | Manual transport integration matrix now covers the complete Phase 6 lifecycle, queue, authentication, scheduling, and encrypted/fault contracts on Linux, Windows, macOS arm64, and macOS x86-64; hosted evidence remains pending |
 
 Exit gate:
 
