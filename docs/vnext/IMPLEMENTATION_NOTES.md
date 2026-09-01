@@ -4293,6 +4293,21 @@ only the relevant phase section here.
 
 [Back to the phase tracker](IMPLEMENTATION_PLAN.md#phase-7--headless-end-to-end-multiplayer-slice)
 
+- 2026-09-01 — Phase 7 kickoff — Approved; implementation not started
+  - Change: the project owner approved the Phase 7 kickoff after the accepted
+    Phase 6 exit. No Phase 7 production artifact or behavior decision landed.
+  - Decisions: kickoff approval covers the declared headless two-client outcome,
+    slice order, dependencies, and risks. GDR-0001 authority, state-scope,
+    contention, reconnect, and named acceptance scenarios remain explicitly
+    pending for a fresh session.
+  - Verification: documentation-only record; the Phase 6 exact-candidate gates
+    and repository verification recorded above remain green.
+  - Owner review: Phase 7 kickoff approved on 2026-09-01. This is not approval
+    of GDR-0001 or authorization for dependent production implementation.
+  - Follow-ups: prepare and review the GDR-0001 decision packet in a fresh
+    session. Phase 7 and Slice 7.0 remain **Not Started** until that approval is
+    recorded.
+
 - Keep the initial world fixture deliberately tiny: player identity, session,
   canonical cell, root transform, velocity, revision, and acknowledgement state.
 - Fake-client scripts should emit a machine-readable timeline so CI failures can
