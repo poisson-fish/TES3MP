@@ -990,6 +990,11 @@
       "purpose": "Owner-approved Phase 6 deterministic application-fault composition above real encrypted sockets with supplemental selected-library-native below-adapter coverage."
     },
     {
+      "path": "docs/vnext/gdr/GDR-0001-phase7-headless-vertical-slice-behavior.md",
+      "status": "A",
+      "purpose": "Owner-approved Phase 7 fixture spawn, readiness, cell visibility, provisional tick integration, headless correction, and bounded resume behavior."
+    },
+    {
       "path": "docs/vnext/gdr/GDR-0011-phase4-minimal-player-exchange-semantics.md",
       "status": "A",
       "purpose": "Owner-approved Phase 4 player-motion intent, authority separation, session-targeted snapshot scope, and confirmed-client-state semantics."

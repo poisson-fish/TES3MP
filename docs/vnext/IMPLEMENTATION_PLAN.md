@@ -2,7 +2,7 @@
 
 Document type: living implementation plan
 
-Updated: 2026-08-31
+Updated: 2026-09-01
 
 Direction source: [`README.md`](README.md)
 
@@ -113,7 +113,7 @@ Observed on 2026-08-25 before this plan was added:
 | 4 | Bounded protocol and in-memory session | **Implemented** | Phase 3 |
 | 5 | Deterministic authoritative server core | **Implemented** | Phase 4 |
 | 6 | Maintained transport and secure network session | **Implemented** | Phase 5 |
-| 7 | Headless end-to-end multiplayer slice | **Not Started** | Phase 6 |
+| 7 | Headless end-to-end multiplayer slice | **In Progress** | Phase 6 |
 | 8 | OpenMW desktop vertical slice | **Not Started** | Phase 7 |
 | 9 | PC VR interoperability gate | **Not Started** | Phase 8 |
 | 10 | Player lifecycle and content identity | **Not Started** | Phase 9 |
@@ -615,7 +615,7 @@ Implementation history: [Phase 6 notes](IMPLEMENTATION_NOTES.md#phase-6--maintai
 
 ### Phase 7 — Headless end-to-end multiplayer slice
 
-Status: **Not Started**
+Status: **In Progress**
 
 Outcome: a dedicated server and two fake clients complete connect, join, cell,
 movement, observation, disconnect, and resume without OpenMW.
@@ -624,7 +624,7 @@ Depends on: Phase 6.
 
 | Slice | Deliverable | Status | Completion evidence |
 |---|---|---|---|
-| 7.0 | Review and obtain owner approval for GDR-0001 vertical-slice behavior scenarios | **Not Started** | Approved authority/scope/contention/reconnect decisions and named demo/tests are recorded |
+| 7.0 | Review and obtain owner approval for GDR-0001 vertical-slice behavior scenarios | **Implemented** | Accepted [`GDR-0001`](gdr/GDR-0001-phase7-headless-vertical-slice-behavior.md) records approved A/A/A/A/A/A authority, scope, contention, reconnect, and named demo/test scenarios |
 | 7.1 | Add the dedicated-server composition root and new minimal configuration format | **Not Started** | Server starts/stops cleanly; invalid config fails with bounded, actionable errors |
 | 7.2 | Add a reusable headless client-session library and scripted fake-client driver | **Not Started** | Fake clients expose commands/snapshots without renderer or engine dependencies |
 | 7.3 | Implement authentication, session creation, player creation, and join | **Not Started** | Two clients receive distinct stable identities and negotiated sessions |
