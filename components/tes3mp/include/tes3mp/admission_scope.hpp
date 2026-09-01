@@ -26,7 +26,7 @@ namespace TES3MP
         friend constexpr bool operator==(AdmissionScopeId, AdmissionScopeId) noexcept = default;
 
     private:
-        AdmissionScopeId() noexcept = default;
+        constexpr AdmissionScopeId() noexcept = default;
 
         std::array<std::byte, AdmissionScopeIdBytes> mBytes{};
     };

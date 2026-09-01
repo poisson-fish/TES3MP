@@ -4208,6 +4208,25 @@ only the relevant phase section here.
     manually dispatch and review the complete hosted transport and runtime-
     safety matrix before marking Slice 6.7 or Phase 6 **Implemented**.
 
+- 2026-09-01 — Slice 6.7 first hosted candidate — In Progress
+  - Change: published candidate `4327655963` and manually dispatched the
+    complete transport and runtime-safety matrices. Clang 18 rejected the
+    defaulted `constexpr` equality for `AdmissionScopeId` because its private
+    default constructor was not `constexpr`; made that constructor `constexpr`
+    so the existing literal-type and equality contract is portable.
+  - Decisions: no architecture, authority, state-scope, security, or gameplay
+    decision changed; this is a compiler-portability repair.
+  - Verification: runtime-safety run
+    [33538310839](https://github.com/poisson-fish/TES3MP/actions/runs/33538310839)
+    failed both Clang 18 jobs at the same compile diagnostic. Focused workflow
+    and target-boundary Python tests, `python scripts/verify_vnext_baseline.py`,
+    and `git diff --check` pass after the repair. Exact Clang and full matrix
+    evidence remain pending on the repaired candidate.
+  - Owner review: Phase 6 exit-gate approval remains pending; Slice 6.7 and
+    Phase 6 stay **In Progress**.
+  - Follow-ups: commit and dispatch both manual matrices on the repaired exact
+    candidate, then review all jobs and retained evidence.
+
 ## Phase 7 — Headless end-to-end multiplayer slice
 
 [Back to the phase tracker](IMPLEMENTATION_PLAN.md#phase-7--headless-end-to-end-multiplayer-slice)
