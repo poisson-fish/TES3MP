@@ -4272,6 +4272,23 @@ only the relevant phase section here.
     candidate is green and the owner accepts its exit evidence.
   - Follow-ups: verify, commit, push, and rerun both manual phase-exit workflows.
 
+- 2026-09-01 — Slice 6.7 / Phase 6 exit gate — Implemented
+  - Change: exact candidate `731bdec782` passes the complete hosted Phase 6
+    matrix; marked Slice 6.7, Phase 6, and the program tracker row
+    **Implemented**.
+  - Decisions: no accepted ADR changed. Phase 7 remains gated by its kickoff
+    and owner-approved GDR-0001 behavior packet.
+  - Verification: transport run
+    [33553049641](https://github.com/poisson-fish/TES3MP/actions/runs/33553049641)
+    passes Windows MSVC, Linux GCC, Linux Clang ASan+UBSan, Linux Clang TSan,
+    macOS arm64, and macOS x86-64. Runtime-safety run
+    [33553053380](https://github.com/poisson-fish/TES3MP/actions/runs/33553053380)
+    passes Clang 18 TSan and ASan+UBSan with bounded fuzz smokes.
+  - Owner review: the project owner approved completion and the Phase 6 exit
+    gate on 2026-09-01 after both exact-candidate runs completed green.
+  - Follow-ups: Phase 7 kickoff and GDR-0001 decision packet; no Phase 7
+    production implementation is authorized before approval.
+
 ## Phase 7 — Headless end-to-end multiplayer slice
 
 [Back to the phase tracker](IMPLEMENTATION_PLAN.md#phase-7--headless-end-to-end-multiplayer-slice)

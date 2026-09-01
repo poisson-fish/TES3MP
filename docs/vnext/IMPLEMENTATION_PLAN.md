@@ -112,7 +112,7 @@ Observed on 2026-08-25 before this plan was added:
 | 3 | Independent targets and test scaffold | **Implemented** | Phase 2 |
 | 4 | Bounded protocol and in-memory session | **Implemented** | Phase 3 |
 | 5 | Deterministic authoritative server core | **Implemented** | Phase 4 |
-| 6 | Maintained transport and secure network session | **In Progress** | Phase 5 |
+| 6 | Maintained transport and secure network session | **Implemented** | Phase 5 |
 | 7 | Headless end-to-end multiplayer slice | **Not Started** | Phase 6 |
 | 8 | OpenMW desktop vertical slice | **Not Started** | Phase 7 |
 | 9 | PC VR interoperability gate | **Not Started** | Phase 8 |
@@ -584,7 +584,7 @@ Implementation history: [Phase 5 notes](IMPLEMENTATION_NOTES.md#phase-5--determi
 
 ### Phase 6 — Maintained transport and secure network session
 
-Status: **In Progress**
+Status: **Implemented**
 
 Outcome: the in-memory session runs over a maintained encrypted real transport
 with application session identity, channel semantics, backpressure, and
@@ -600,7 +600,7 @@ Depends on: Phase 5.
 | 6.4 | Implement bounded queues, priority, rate limits, backpressure, and slow-peer eviction | **Implemented** | Owner-approved [`ADR-0037`](adr/ADR-0037-phase6-bounded-outbound-queue-and-slow-peer-policy.md), implementation `da8d139ce3`, focused queue/transport/authentication and repository verification, and owner implementation-demo acceptance pass |
 | 6.5 | Implement network telemetry and stable disconnect/rejection reasons | **Implemented** | Owner-approved [`ADR-0038`](adr/ADR-0038-phase6-network-telemetry-and-stable-reasons.md), implementation `b4c4201394`, focused local verification, and owner implementation-demo acceptance pass |
 | 6.6 | Integrate real sockets into the deterministic fault harness | **Implemented** | Owner-approved [`ADR-0039`](adr/ADR-0039-phase6-deterministic-real-transport-fault-boundary.md), implementation `9ab4b6e9ed`, applicable local verification, and owner implementation-demo acceptance pass |
-| 6.7 | Prove Linux, Windows, and macOS build/test support | **In Progress** | Manual transport integration matrix now covers the complete Phase 6 lifecycle, queue, authentication, scheduling, and encrypted/fault contracts on Linux, Windows, macOS arm64, and macOS x86-64; hosted evidence remains pending |
+| 6.7 | Prove Linux, Windows, and macOS build/test support | **Implemented** | Exact candidate `731bdec782` passes all six transport jobs and both runtime-safety jobs in hosted runs `33553049641` and `33553053380`; owner exit approval recorded on 2026-09-01 |
 
 Exit gate:
 

@@ -11,8 +11,7 @@ conditional stretch target.
 
 ## Status
 
-Phases 0–5 are implemented. Phase 6 is in progress, with Slices 6.1 through 6.6
-implemented and Slice 6.7 in progress.
+Phases 0–6 are implemented. Phase 7 is not started.
 The active tree is a provenance-verified OpenMW 0.51 baseline with:
 
 - engine-independent protocol, transport, client-session, server-core, and test
@@ -48,8 +47,8 @@ verification and owner demo acceptance. Slice 5.7's test-only seeded reducer
 property and eight-client deterministic simulation implementation passes
 applicable local verification and owner demo acceptance. The complete Phase 5
 hosted manual matrix is green on the exact portability-repair candidate, and
-the project owner approved the Phase 5 exit gate. Phase 6 is in progress;
-Slice 6.1's owned real-transport lifecycle boundary is implemented.
+the project owner approved the Phase 5 exit gate. Phase 6 is implemented;
+its complete exact-candidate hosted matrix and owner exit approval pass.
 
 Beginning with Phase 4, each slice runs applicable local verification. The full
 vNext hosted matrix runs once by manual dispatch against the phase-completion
@@ -225,8 +224,8 @@ canonical invariants after every batch and exact same-seed replay. Implementatio
 `917ecc3278`, applicable local verification, and owner demo acceptance pass.
 The complete Phase 5 hosted manual matrix passes on exact commit
 `8e7ca8ff607f3b95ec8d348919f6c1233a11eb23`, and the project owner approved the
-exit gate. Phase 5 is **Implemented**. Phase 6 is **In Progress** and Slice 6.1
-is **Implemented** under accepted
+exit gate. Phase 5 and Phase 6 are **Implemented**. Slice 6.1 is implemented
+under accepted
 [`ADR-0032`](adr/ADR-0032-phase6-transport-adapter-and-lifecycle-boundary.md)
 after owner approval of its target, provisioning, lifecycle, pumping,
 initial-bound, and hostname/DNS decisions. The authorized exact-pin c-ares proof
@@ -274,10 +273,9 @@ scheduler above real encrypted localhost sockets while retaining native GNS
 fault controls only as supplemental below-adapter coverage. Implementation
 `9ab4b6e9ed`, applicable local verification, and owner implementation-demo
 acceptance pass.
-Slice 6.7 is **In Progress**: the manual supported-platform transport workflow
-now covers all Phase 6 lifecycle, queue, authentication, scheduling, encrypted-
-loopback, and deterministic real-transport fault contracts. Local policy checks
-pass; hosted matrix evidence remains pending.
+Slice 6.7 and Phase 6 are **Implemented**. Exact candidate `731bdec782` passes
+the complete six-job supported-platform transport matrix and both runtime-safety
+jobs; the project owner approved the Phase 6 exit gate on 2026-09-01.
 
 ## References and license
 
