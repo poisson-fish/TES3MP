@@ -4028,6 +4028,21 @@ only the relevant phase section here.
     redaction evidence for owner acceptance. The hosted matrix remains the
     Phase 6 exit gate.
 
+- 2026-08-31 — Slice 6.3 provenance verification repair — In Progress
+  - Change: refreshed the dependency-input hash for
+    `components/tes3mp/CMakeLists.txt` after the encrypted authentication
+    loopback added the approved server-core test linkage.
+  - Decisions: none; this is a mechanical correction to fail-closed provenance
+    evidence and changes no production architecture, authority, state scope,
+    security policy, or gameplay behavior.
+  - Verification: the exact focused transport test executable passes; all 112
+    repository-owned Python tests pass; `python
+    scripts/verify_vnext_baseline.py` verifies 238 intentional differences and
+    67 dependency inputs; and `git diff --check` passes.
+  - Owner review: Slice 6.3 implementation-demo acceptance remains pending.
+  - Follow-ups: present the Slice 6.3 demo evidence for owner acceptance; the
+    hosted matrix remains the Phase 6 exit gate.
+
 ## Phase 7 — Headless end-to-end multiplayer slice
 
 [Back to the phase tracker](IMPLEMENTATION_PLAN.md#phase-7--headless-end-to-end-multiplayer-slice)
