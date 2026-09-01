@@ -4043,6 +4043,21 @@ only the relevant phase section here.
   - Follow-ups: present the Slice 6.3 demo evidence for owner acceptance; the
     hosted matrix remains the Phase 6 exit gate.
 
+- 2026-08-31 — Slice 6.3 implementation demo — Implemented
+  - Change: marked Slice 6.3 **Implemented** after the required owner review of
+    the protected-join, single-use resume/rotation, replay-denial, redaction,
+    and verification evidence.
+  - Decisions: no decision changed; accepted ADR-0034, ADR-0035, and ADR-0036
+    remain controlling.
+  - Verification: the focused real encrypted transport executable passes; all
+    112 repository-owned Python tests pass; baseline provenance verifies 238
+    intentional differences and 67 dependency inputs; and `git diff --check`
+    passes.
+  - Owner review: the project owner explicitly accepted the Slice 6.3
+    implementation demo on 2026-08-31.
+  - Follow-ups: Slice 6.4 remains **Not Started** pending its architecture
+    decision review. The hosted matrix remains the Phase 6 exit gate.
+
 ## Phase 7 — Headless end-to-end multiplayer slice
 
 [Back to the phase tracker](IMPLEMENTATION_PLAN.md#phase-7--headless-end-to-end-multiplayer-slice)
