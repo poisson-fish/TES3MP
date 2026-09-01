@@ -4,6 +4,11 @@ This directory owns the engine-independent TES3MP libraries. They are separate
 from OpenMW's monolithic `components` target and must remain buildable without
 OpenMW, rendering, SDL, OSG, platform, or GameNetworkingSockets types.
 
+The first dedicated-server process composition lives in `apps/tes3mp-server`,
+outside these reusable libraries. Its strict configuration and lifecycle
+contracts build in the standalone tree; the executable itself is available
+only with the verified GameNetworkingSockets transport.
+
 The direct dependency graph is:
 
 ```text

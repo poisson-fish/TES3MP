@@ -100,6 +100,41 @@
       "purpose": "Behavior-free translation-unit anchor proving the OpenMW adapter participates in compilation and linking."
     },
     {
+      "path": "apps/tes3mp-server/CMakeLists.txt",
+      "status": "A",
+      "purpose": "Defines the app-owned testable dedicated-server composition library, focused contracts, and verified-transport executable root."
+    },
+    {
+      "path": "apps/tes3mp-server/main.cpp",
+      "status": "A",
+      "purpose": "Thin single-threaded dedicated-server process root with transactional configuration, secret, transport, listener, and signal-driven shutdown composition."
+    },
+    {
+      "path": "apps/tes3mp-server/server_app_tests.cpp",
+      "status": "A",
+      "purpose": "Focused strict configuration, bounded file-secret, startup, listener-failure, polling-failure, and idempotent ordered-shutdown contracts."
+    },
+    {
+      "path": "apps/tes3mp-server/server_application.cpp",
+      "status": "A",
+      "purpose": "Caller-confined dedicated-server transport lifecycle composition with fail-closed startup/polling and orderly one-shot shutdown."
+    },
+    {
+      "path": "apps/tes3mp-server/server_application.hpp",
+      "status": "A",
+      "purpose": "Testable app-owned dedicated-server lifecycle composition boundary."
+    },
+    {
+      "path": "apps/tes3mp-server/server_config.cpp",
+      "status": "A",
+      "purpose": "Strict bounded closed-key UTF-8 server configuration parser, redacted stable errors, and bounded move-only password-file loader."
+    },
+    {
+      "path": "apps/tes3mp-server/server_config.hpp",
+      "status": "A",
+      "purpose": "Owned minimal server configuration values, limits, errors, and secret-loading interface."
+    },
+    {
       "path": "cmake/TES3MPRuntimeSafety.cmake",
       "status": "A",
       "purpose": "Owner-approved fail-closed target-scoped ASan/UBSan, ThreadSanitizer, and libFuzzer CMake policy."
@@ -990,6 +1025,11 @@
       "purpose": "Owner-approved Phase 6 deterministic application-fault composition above real encrypted sockets with supplemental selected-library-native below-adapter coverage."
     },
     {
+      "path": "docs/vnext/adr/ADR-0040-phase7-server-composition-and-configuration.md",
+      "status": "A",
+      "purpose": "Owner-approved Phase 7 dedicated-server composition, strict bounded configuration, file-only secret, and transactional lifecycle policy."
+    },
+    {
       "path": "docs/vnext/gdr/GDR-0001-phase7-headless-vertical-slice-behavior.md",
       "status": "A",
       "purpose": "Owner-approved Phase 7 fixture spawn, readiness, cell visibility, provisional tick integration, headless correction, and bounded resume behavior."
@@ -1247,7 +1287,7 @@
       "files": [
         {
           "path": "CMakeLists.txt",
-          "sha256": "616031f5f5db965c16620dcee06060c277abed924f8ba8b3726f697af4b79a11"
+          "sha256": "42b936d3fcae7842fa0898df2cd02b4a0e310eb9c44e1b5a58f2e1b96b0f9891"
         },
         {
           "path": "CMakePresets.json",
@@ -1351,7 +1391,7 @@
         },
         {
           "path": "components/tes3mp/CMakeLists.txt",
-          "sha256": "d72f8a2136f9074bf3d7c57fa085213d0b67c1085cdb7b41c1112a62dcd4f0f2"
+          "sha256": "1db5742e5fbeb631a02f691d72d242239fb8ef6031d7aa9faf475cff2795d1fd"
         },
         {
           "path": "components/tes3mp/protocol/generated/authentication_accepted_generated.h",

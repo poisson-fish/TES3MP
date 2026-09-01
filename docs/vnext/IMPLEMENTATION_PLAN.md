@@ -625,7 +625,7 @@ Depends on: Phase 6.
 | Slice | Deliverable | Status | Completion evidence |
 |---|---|---|---|
 | 7.0 | Review and obtain owner approval for GDR-0001 vertical-slice behavior scenarios | **Implemented** | Accepted [`GDR-0001`](gdr/GDR-0001-phase7-headless-vertical-slice-behavior.md) records approved A/A/A/A/A/A authority, scope, contention, reconnect, and named demo/test scenarios |
-| 7.1 | Add the dedicated-server composition root and new minimal configuration format | **Not Started** | Server starts/stops cleanly; invalid config fails with bounded, actionable errors |
+| 7.1 | Add the dedicated-server composition root and new minimal configuration format | **In Progress** | Accepted [`ADR-0040`](adr/ADR-0040-phase7-server-composition-and-configuration.md); implementation and owner demo evidence pending |
 | 7.2 | Add a reusable headless client-session library and scripted fake-client driver | **Not Started** | Fake clients expose commands/snapshots without renderer or engine dependencies |
 | 7.3 | Implement authentication, session creation, player creation, and join | **Not Started** | Two clients receive distinct stable identities and negotiated sessions |
 | 7.4 | Implement one interior and one exterior cell fixture plus enter/leave observation | **Not Started** | Both clients receive correct initial and visibility state across transitions |

@@ -676,6 +676,7 @@ endif()
 
 # Engine-independent TES3MP targets
 add_subdirectory(components/tes3mp)
+add_subdirectory(apps/tes3mp-server)
 
 # OpenMW components
 add_subdirectory (components)

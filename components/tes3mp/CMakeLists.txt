@@ -689,3 +689,8 @@ add_custom_target(tes3mp_protocol_tests_run
         tes3mp_transport_lifecycle_tests
     COMMENT "Running TES3MP protocol, deterministic facility, fault, and observability contracts"
 )
+
+if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
+    add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../../apps/tes3mp-server
+        ${CMAKE_CURRENT_BINARY_DIR}/tes3mp-server)
+endif()

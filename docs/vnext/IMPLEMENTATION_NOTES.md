@@ -4293,6 +4293,30 @@ only the relevant phase section here.
 
 [Back to the phase tracker](IMPLEMENTATION_PLAN.md#phase-7--headless-end-to-end-multiplayer-slice)
 
+- 2026-09-01 — Slice 7.1 — In Progress
+  - Change: added accepted
+    [`ADR-0040`](adr/ADR-0040-phase7-server-composition-and-configuration.md)
+    and began the bounded dedicated-server composition/configuration slice.
+  - Decisions: the owner approved A/A/A/A/A/A: app-owned thin composition,
+    single caller thread, strict closed `key = value` configuration, five-key
+    initial scope, file-only bounded secret, and transactional startup/orderly
+    shutdown.
+  - Verification: fresh standalone MSVC 19.44 configure/build and the complete
+    `tes3mp_protocol_tests_run` plus focused `tes3mp_server_app_tests_run`
+    targets pass. The exact verified GNS/OpenSSL 3.5.8 dependency tree builds
+    the production `tes3mp_server` executable; a real loopback run binds
+    `127.0.0.1:25565`, reports `server started`, handles Ctrl-C, and reports
+    `server stopped`. Focused contracts cover bounded parsing, secret loading,
+    injected listener/poll failure, and exact `LPSX` lifecycle order. Full
+    Python suite passes all 114 tests, including 24 focused target-boundary and
+    runtime-safety policy tests. Staged baseline verification passes with 252
+    intentional differences and 67 dependency inputs; local Markdown links,
+    JSON parsing, status assertions, and `git diff --cached --check` pass.
+  - Owner review: architecture approval received on 2026-09-01; implementation
+    demo acceptance remains pending.
+  - Follow-ups: implement and verify Slice 7.1 without adding join/gameplay
+    behavior.
+
 - 2026-09-01 — Slice 7.0 — Implemented
   - Change: added accepted
     [`GDR-0001`](gdr/GDR-0001-phase7-headless-vertical-slice-behavior.md) and
