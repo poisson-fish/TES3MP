@@ -12,7 +12,7 @@ remains the [implementation plan](IMPLEMENTATION_PLAN.md#phase-7--headless-end-t
 - Slice 7.6: **Implemented**
 - Slice 7.7: **In Progress**
 - Governing decision: [ADR-0046](adr/ADR-0046-phase7-adverse-network-and-soak-matrix.md)
-- Latest implementation commit: `9c75892eb1` (`Prove Phase 7 disconnect lifecycle`)
+- Latest implementation commit: `4dc546b096` (`Begin Phase 7 adverse network matrix`)
 
 ## Working synopsis
 
