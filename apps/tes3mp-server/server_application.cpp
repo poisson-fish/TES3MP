@@ -144,6 +144,40 @@ namespace TES3MP::ServerApp
         return session->finalizePreparedResume();
     }
 
+    bool ServerApplication::expireSessions(ServerTick tick) noexcept
+    {
+        while (true)
+        {
+            const auto before = mWiring->reducer.state();
+            auto prepared = mWiring->lifecycle.prepareNextExpiration(mWiring->clock.now(), tick);
+            if (const auto* error = std::get_if<ServerLifecycleError>(&prepared))
+            {
+                if (*error == ServerLifecycleError::DeadlineReached) return true;
+                return false;
+            }
+            auto* lifecycle = std::get_if<ServerLifecyclePreparation>(&prepared);
+            if (!lifecycle) return false;
+            const auto cancel = [this, id = lifecycle->id]() noexcept { (void)mWiring->lifecycle.cancel(id); };
+            const auto* candidate = mWiring->lifecycle.candidateState(lifecycle->id);
+            auto projected = candidate ? projectFixtureObservations(before, *candidate, tick) : std::nullopt;
+            if (!projected) { cancel(); return false; }
+            std::vector<std::pair<TransportConnectionId, FixtureObservationDelivery>> routed;
+            try
+            {
+                routed.reserve(projected->size());
+                for (auto& delivery : *projected)
+                {
+                    auto target = mWiring->sessions.connectionForSession(delivery.targetSession);
+                    if (!target) { cancel(); return false; }
+                    routed.emplace_back(*target, std::move(delivery));
+                }
+            }
+            catch (...) { cancel(); return false; }
+            if (!admitFixtureObservationsAtomically(mWiring->queues, routed)) { cancel(); return false; }
+            if (!mWiring->lifecycle.commit(lifecycle->id)) return false;
+        }
+    }
+
     bool ServerApplication::pump(ServerTick tick) noexcept
     {
         if (!mRunning) return false;
@@ -187,6 +221,8 @@ namespace TES3MP::ServerApp
                 return false;
             }
         }
+
+        if (!expireSessions(tick)) { mFailure = "expiration lifecycle failed"; return false; }
 
         std::array<TransportMessage, TransportRuntime::MaxMessagesPerReceive> messages{};
         for (const auto connection : mWiring->sessions.connections())

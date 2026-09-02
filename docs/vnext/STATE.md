@@ -17,13 +17,13 @@ remains the [implementation plan](IMPLEMENTATION_PLAN.md#phase-7--headless-end-t
 
 Prepared resume authentication, reversible token rotation, and canonical
 disconnect/resume/expiration transactions exist. Live joins register with the
-lifecycle coordinator. Transport close atomically admits peer leave output and
-hides the session; resume atomically admits its rotated credential, complete
-snapshot, and observation output before token/lifecycle commit.
+lifecycle coordinator. Transport close hides the session; resume atomically
+admits its rotated credential, complete snapshot, and observation output before
+token/lifecycle commit. The server pump drains due expirations in deterministic
+order and atomically admits resulting peer leave output before canonical commit.
 
-Next eligible work is expiration pumping/output, followed by the real two-client
-disconnect/resume/expiration proof. Do not mark Slice 7.6
-**Implemented** before its owner demo acceptance.
+Next eligible work is the real two-client disconnect/resume/expiration proof.
+Do not mark Slice 7.6 **Implemented** before its owner demo acceptance.
 
 ## Active files
 

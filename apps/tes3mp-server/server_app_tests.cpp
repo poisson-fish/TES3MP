@@ -122,7 +122,8 @@ namespace
     class FixedClock final : public MonotonicClock
     {
     public:
-        MonotonicInstant now() const noexcept override { return MonotonicInstant::fromNanoseconds(0); }
+        MonotonicInstant now() const noexcept override { return MonotonicInstant::fromNanoseconds(nanoseconds); }
+        std::uint64_t nanoseconds = 0;
     };
 
     class RecordingCrypto final : public CredentialCrypto
@@ -254,6 +255,17 @@ int main()
         assert((*projected)[1].view.view().entries().size() == 1
             && (*projected)[1].view.view().entries()[0].playerId() == id<PlayerId>(2));
         assert(projectFixtureObservations(after, after, id<ServerTick>(5))->empty());
+
+        const std::array remainingPlayers{ before.players()[0] };
+        const std::array remainingSessions{ before.activeSessions()[0] };
+        const auto expired = std::get<CanonicalServerState>(
+            createCanonicalServerState(remainingPlayers, remainingSessions));
+        auto expirationOutput = projectFixtureObservations(before, expired, id<ServerTick>(5));
+        assert(expirationOutput && expirationOutput->size() == 1
+            && (*expirationOutput)[0].targetSession == id<SessionId>(1));
+        assert(((*expirationOutput)[0].observations.changes().size() == 1
+            && (*expirationOutput)[0].observations.changes()[0]
+                == ObservationChange{ id<PlayerId>(2), id<EntityId>(2), ObservationChangeKind::Leave }));
 
         auto queues = OutboundQueueSet::create(OutboundQueuePolicy{}, 1);
         const auto connection = TransportConnectionId::initial();
@@ -525,6 +537,18 @@ int main()
         assert(sessions.size() == 0 && queues->connections() == 0);
         assert(lifecycle->liveCount() == 0 && lifecycle->hiddenCount() == 1);
         assert(joinFixture.reducer.state().activeSessions().empty());
+        assert(joinFixture.reducer.state().players().size() == 1);
+
+        clock.nanoseconds = config.disconnectGraceMilliseconds * 1'000'000 - 1;
+        assert(wired.pump(id<ServerTick>(2)));
+        assert(lifecycle->hiddenCount() == 1 && joinFixture.reducer.state().players().size() == 1);
+
+        clock.nanoseconds = config.disconnectGraceMilliseconds * 1'000'000;
+        assert(wired.pump(id<ServerTick>(3)));
+        assert(lifecycle->hiddenCount() == 0 && joinFixture.reducer.state().players().empty());
+        const auto publication = joinFixture.reducer.latestPublication();
+        assert(publication && publication->sessionLifecycle().size() == 1
+            && publication->sessionLifecycle()[0].kind == CanonicalSessionLifecycleKind::Expired);
     }
     {
         FixedClock clock;

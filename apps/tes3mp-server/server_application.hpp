@@ -48,6 +48,7 @@ namespace TES3MP::ServerApp
         bool failConnection(TransportConnectionId connection, std::string_view failure) noexcept;
         bool disconnectConnection(TransportConnectionId connection, ServerTick tick) noexcept;
         bool resumeConnection(TransportConnectionId connection, ServerTick tick) noexcept;
+        bool expireSessions(ServerTick tick) noexcept;
     };
 }
 

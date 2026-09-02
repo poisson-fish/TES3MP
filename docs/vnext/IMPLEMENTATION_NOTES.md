@@ -4293,6 +4293,23 @@ only the relevant phase section here.
 
 [Back to the phase tracker](IMPLEMENTATION_PLAN.md#phase-7--headless-end-to-end-multiplayer-slice)
 
+- 2026-09-02 — Slice 7.6 expiration pumping and output — In Progress
+  - Change: the server application now drains every due hidden lifecycle record
+    in deterministic coordinator order, atomically admits projected peer
+    observation output, and commits clean canonical expiration. Exact-deadline
+    expiration runs before message intake in the pump.
+  - Decisions: implements accepted ADR-0045 Option A and its monotonic deadline
+    ordering. No architecture, authority, state-scope, or gameplay behavior
+    changed.
+  - Verification: MSVC 19.51 Debug `tes3mp_server_app_tests_run`,
+    `tes3mp_server_lifecycle_tests`, and `tes3mp_protocol_tests_run` pass.
+    Focused app coverage proves no early expiration, exact-deadline expiration,
+    hidden-record removal, player removal, and canonical `Expired` publication.
+    All 115 repository Python tests pass.
+  - Owner review: Slice 7.6 implementation demo remains required before
+    **Implemented**.
+  - Follow-ups: add the real two-client disconnect/resume/expiration proof.
+
 - 2026-09-02 — Slice 7.6 prepared resume composition — In Progress
   - Change: resume authentication now returns a prepared token transaction;
     server composition prepares canonical resume, atomically admits the rotated
