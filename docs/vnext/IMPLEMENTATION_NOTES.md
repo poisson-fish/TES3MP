@@ -4293,6 +4293,31 @@ only the relevant phase section here.
 
 [Back to the phase tracker](IMPLEMENTATION_PLAN.md#phase-7--headless-end-to-end-multiplayer-slice)
 
+- 2026-09-02 — Slice 7.6 real lifecycle proof — In Progress
+  - Change: implementation `9c75892eb1` adds the credential-free in-memory
+    lifecycle client flow, preserves disconnect-time canonical command progress,
+    batches same-pump disconnects into one canonical transaction, tolerates
+    already-cleaned transport close events, and extends the real two-client
+    process proof through resume, expiration, and fresh creation.
+  - Decisions: owner approved ADR-0045 process-proof Option A and same-pump
+    disconnect Option A. One client process owns sequential single-connection
+    facades and in-memory tokens; simultaneous closes commit as one batch and
+    notify surviving peers atomically. No authority, state-scope, or gameplay
+    behavior changed.
+  - Verification: MSVC 19.51 Debug `tes3mp_server_app_tests_run`,
+    `tes3mp_server_lifecycle_tests`, and `tes3mp_protocol_tests_run` pass; the
+    batch contract proves cancel/commit atomicity and two hidden records. Release
+    server/client builds and `scripts/run_phase7_join_demo.py` pass with distinct
+    players, simultaneous movement, converged views, stale-view rejection,
+    hidden grace, same identity/generation resume, revision and acknowledgement
+    preservation, expired-token rejection, and fresh identity creation. All 115
+    repository Python tests, baseline provenance with 284 intentional
+    differences and 69 dependency inputs, and `git diff --check` pass.
+  - Owner review: automated implementation evidence is ready; Slice 7.6 remains
+    **In Progress** until the project owner accepts the implementation demo.
+  - Follow-ups: owner demo acceptance, then mark Slice 7.6 **Implemented** and
+    begin separately gated Slice 7.7.
+
 - 2026-09-02 — Slice 7.6 expiration pumping and output — In Progress
   - Change: the server application now drains every due hidden lifecycle record
     in deterministic coordinator order, atomically admits projected peer

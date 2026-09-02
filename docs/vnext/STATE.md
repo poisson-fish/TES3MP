@@ -11,19 +11,18 @@ remains the [implementation plan](IMPLEMENTATION_PLAN.md#phase-7--headless-end-t
 - Phase 7: **In Progress**
 - Slice 7.6: **In Progress**
 - Governing decision: [ADR-0045](adr/ADR-0045-phase7-disconnect-resume-and-expiration-composition.md)
-- Latest implementation commit: `5d680b9e78` (`Compose Phase 7 disconnect lifecycle`)
+- Latest implementation commit: `9c75892eb1` (`Prove Phase 7 disconnect lifecycle`)
 
 ## Working synopsis
 
-Prepared resume authentication, reversible token rotation, and canonical
-disconnect/resume/expiration transactions exist. Live joins register with the
-lifecycle coordinator. Transport close hides the session; resume atomically
-admits its rotated credential, complete snapshot, and observation output before
-token/lifecycle commit. The server pump drains due expirations in deterministic
-order and atomically admits resulting peer leave output before canonical commit.
+The complete Slice 7.6 implementation and real two-client process proof pass.
+Same-pump closes use one bounded canonical batch; disconnect captures current
+canonical progress; resume preserves identity, generation progression, revision,
+and acknowledgements; exact expiration rejects the old token and fresh join
+creates a new identity. Credentials remain in memory and absent from evidence.
 
-Next eligible work is the real two-client disconnect/resume/expiration proof.
-Do not mark Slice 7.6 **Implemented** before its owner demo acceptance.
+Next eligible action is owner demo acceptance. Do not mark Slice 7.6
+**Implemented** or begin Slice 7.7 before that acceptance.
 
 ## Active files
 
@@ -37,6 +36,8 @@ Do not mark Slice 7.6 **Implemented** before its owner demo acceptance.
 - Focused tests: `apps/tes3mp-server/server_app_tests.cpp`,
   `components/tes3mp/tests/server_lifecycle_tests.cpp`,
   `components/tes3mp/tests/server_authentication_tests.cpp`
+- Process proof: `apps/tes3mp-headless-client/main.cpp`,
+  `scripts/run_phase7_join_demo.py`
 - Evidence: [Phase 7 notes](IMPLEMENTATION_NOTES.md#phase-7--headless-end-to-end-multiplayer-slice)
 
 ## Last verified
