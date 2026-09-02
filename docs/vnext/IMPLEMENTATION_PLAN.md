@@ -96,7 +96,7 @@ active-tree difference and dependency input.
 The tree contains independent protocol, transport, server-core, client-session,
 OpenMW-adapter, and test-support targets plus the Phase 7 dedicated server and
 headless client applications. Phases 0–6 have passed their exit gates. Phase 7
-is active at Slice 7.6; the plan table below is the authoritative status source.
+is active at Slice 7.7; the plan table below is the authoritative status source.
 
 Historical pre-cutover state and exact Git mechanics remain available in
 [`PRE_CUTOVER_PROVENANCE.md`](PRE_CUTOVER_PROVENANCE.md), ADR-0001, and the
@@ -638,7 +638,7 @@ Depends on: Phase 6.
 | 7.4 | Implement one interior and one exterior cell fixture plus enter/leave observation | **Implemented** | Accepted [`ADR-0043`](adr/ADR-0043-phase7-fixture-cell-transition-and-observation.md); implementation `bd35f2d60c`, shared-writer runtime composition, typed join/transition publication, bounded atomic multi-target delivery, client application, focused contracts, real two-client fixture proof, and owner demo acceptance pass |
 | 7.5 | Implement semantic movement commands and sequenced snapshots | **Implemented** | Accepted [`ADR-0044`](adr/ADR-0044-phase7-movement-tick-and-snapshot-composition.md); implementation `f8b1acee4b`, atomic checked integration, live motion dispatch, complete targeted views, focused tests, real two-client movement/convergence/stale-view proof, and owner demo acceptance pass |
 | 7.6 | Implement disconnect, bounded grace period, resume, and clean expiration | **Implemented** | Accepted [`ADR-0045`](adr/ADR-0045-phase7-disconnect-resume-and-expiration-composition.md); implementation `9c75892eb1`, focused contracts, real two-client disconnect/resume/expiration proof, and owner demo acceptance pass |
-| 7.7 | Add adverse-network matrix, reconnect loop, queue-bound, and soak tests | **In Progress** | Accepted [`ADR-0046`](adr/ADR-0046-phase7-adverse-network-and-soak-matrix.md); typed profile catalog, seeded 10,000-tick deterministic matrix, and paced real-process 32-cycle reconnect proof pass bounded replay, reliable apply-once/order, latest-wins convergence, stall, zero-drain, and identity/progress preservation contracts; queue-drain process proof is next |
+| 7.7 | Add adverse-network matrix, reconnect loop, queue-bound, and soak tests | **In Progress** | Accepted [`ADR-0046`](adr/ADR-0046-phase7-adverse-network-and-soak-matrix.md); typed profile catalog, seeded 10,000-tick deterministic matrix, paced real-process 32-cycle reconnect proof, and real-process queue high-water/zero-drain proof pass; 60-second real-process soak is next |
 
 Exit gate:
 

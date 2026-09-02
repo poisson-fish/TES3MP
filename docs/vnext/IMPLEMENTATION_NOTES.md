@@ -4293,6 +4293,22 @@ only the relevant phase section here.
 
 [Back to the phase tracker](IMPLEMENTATION_PLAN.md#phase-7--headless-end-to-end-multiplayer-slice)
 
+- 2026-09-02 — Slice 7.7 real-process queue drain — In Progress
+  - Change: implementation `7adf261bf5` wires a constant-memory transport
+    telemetry sink into the server process and makes the process driver verify
+    credential-free reliable/latest queue high-water and final zero values.
+  - Decisions: project owner approved Option A before implementation. This uses
+    existing transport telemetry and accepted ADR-0046 caps; no authority,
+    state-scope, or gameplay behavior changed.
+  - Verification: MSVC 19.51 Debug `tes3mp_server_app_tests_run` and Release
+    server/client builds pass. The real server/two-client driver reports reliable
+    high-water 2 messages/232 bytes, latest-wins high-water 1 message/372 bytes,
+    final zero queues, 32 reconnect cycles, and the complete prior lifecycle
+    proof. All 115 repository Python tests and `git diff --check` pass.
+  - Owner review: Slice 7.7 remains **In Progress**; implementation demo remains
+    required after the soak proof.
+  - Follow-ups: implement the approved 60-second real-process soak.
+
 - 2026-09-02 — Slice 7.7 bounded reconnect loop — In Progress
   - Change: implementation `d91f21be44` makes the real-process driver run a
     separate 32-cycle disconnect/resume
