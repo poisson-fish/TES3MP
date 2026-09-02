@@ -4293,6 +4293,28 @@ only the relevant phase section here.
 
 [Back to the phase tracker](IMPLEMENTATION_PLAN.md#phase-7--headless-end-to-end-multiplayer-slice)
 
+- 2026-09-02 — Slice 7.5 real movement proof — In Progress
+  - Change: composed decoded `PlayerMotionIntent` through live server intake and
+    extended the real two-client process proof with both clients authoring
+    motion, complete-view convergence, and stale-view rejection.
+  - Decisions: implements accepted ADR-0044; no architecture, authority,
+    state-scope, or gameplay behavior decision changed.
+  - Verification: MSVC 19.51 Release `tes3mp_server_app_tests_run`,
+    `tes3mp_protocol_tests_run`, and `tes3mp_headless_client_tests_run` pass.
+    `python scripts/run_phase7_join_demo.py --server
+    build/slice74-runtime/tes3mp-server/tes3mp_server.exe --client
+    build/slice74-runtime/tes3mp-headless-client/tes3mp_headless_client.exe`
+    reports two distinct identities, simultaneous movement, converged views,
+    and stale-view rejection. All 114 repository Python tests pass; staged
+    baseline verification passes with 278 intentional differences and 69
+    dependency inputs; staged diff checks pass. The legacy-exclusion checker
+    currently rejects the active vNext `tes3mp-server` CMake target name as a
+    legacy token, so that check is not green for this candidate.
+  - Owner review: implementation-demo acceptance remains pending.
+  - Follow-ups: repair or clarify the legacy-exclusion target-name rule; owner
+    reviews the movement proof and focused atomic-overflow contract; then Slice
+    7.5 may advance to **Implemented**.
+
 - 2026-09-02 — Slice 7.5 movement tick composition — In Progress
   - Change: added accepted ADR-0044; implemented one prepared command/integration transaction, checked position arithmetic, revisioned spatial-tick publication, targeted complete same-cell views, and atomic multi-target output admission.
   - Decisions: owner approved Option A for one failure-atomic command/integration/view tick and Option A for targeted complete same-cell latest-wins views sequenced by `ServerTick`.

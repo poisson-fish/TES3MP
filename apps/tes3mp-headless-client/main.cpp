@@ -49,7 +49,8 @@ int main(int argc, char** argv)
 {
     if (argc != 5 && argc != 6)
     {
-        std::cerr << "usage: tes3mp_headless_client <host> <port> <password-file> <timeout-ms> [mover|observer]\n";
+        std::cerr << "usage: tes3mp_headless_client <host> <port> <password-file> <timeout-ms> "
+                     "[mover|observer|motion-one|motion-two]\n";
         return 2;
     }
     const auto port = number(argv[2]);
@@ -79,13 +80,19 @@ int main(int argc, char** argv)
     auto& session = **sessionValue;
     bool authenticationAccepted = false;
     const std::string_view mode = argc == 6 ? argv[5] : "join";
-    if (mode != "join" && mode != "mover" && mode != "observer") return 2;
+    if (mode != "join" && mode != "mover" && mode != "observer"
+        && mode != "motion-one" && mode != "motion-two") return 2;
     std::optional<TES3MP::LatestWinsSnapshot> snapshot;
     bool bound = false;
     bool sentExterior = false;
     bool sentInterior = false;
     bool sawLeave = false;
     bool sawEnter = false;
+    bool sentMotion = false;
+    bool sawConvergedMovement = false;
+    bool rejectedStaleView = false;
+    std::optional<TES3MP::LatestWinsSnapshot> staleSnapshot;
+    std::optional<std::chrono::steady_clock::time_point> motionNotBefore;
     std::optional<TES3MP::ReliableObservationBatch> pendingObservation;
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(*timeout);
 
@@ -141,6 +148,7 @@ int main(int argc, char** argv)
                     auto value = TES3MP::decodeReliableObservationBatch(frame->payload());
                     auto* batch = std::get_if<TES3MP::ReliableObservationBatch>(&value);
                     if (!batch) return 3;
+                    if (mode == "motion-one" || mode == "motion-two") continue;
                     if (!bound) pendingObservation = std::move(*batch);
                     else
                     {
@@ -159,6 +167,13 @@ int main(int argc, char** argv)
         }
         if (authenticationAccepted && snapshot && !bound)
         {
+            if ((mode == "motion-one" || mode == "motion-two")
+                && snapshot->view().entries().size() != 2)
+            {
+                snapshot.reset();
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+                continue;
+            }
             const auto sessionId = snapshot->header().targetSessionId();
             if (session.bindEstablishedSession(sessionId) != TES3MP::ClientSessionBindingResult::Bound
                 || session.receiveLatestWinsSnapshot(std::move(*snapshot)) != TES3MP::LatestWinsSnapshotReceiveResult::Applied)
@@ -173,6 +188,7 @@ int main(int argc, char** argv)
                       << ",\"player_id\":" << entry.playerId().value()
                       << ",\"entity_id\":" << entry.entityId().value() << "}" << std::endl;
             bound = true;
+            motionNotBefore = std::chrono::steady_clock::now() + std::chrono::milliseconds(50);
             snapshot.reset();
             if (pendingObservation)
             {
@@ -184,6 +200,8 @@ int main(int argc, char** argv)
         }
         else if (bound && snapshot)
         {
+            if (!staleSnapshot)
+                staleSnapshot = *session.stateMachine().confirmedSnapshot();
             const auto result = session.receiveLatestWinsSnapshot(std::move(*snapshot));
             if (result != TES3MP::LatestWinsSnapshotReceiveResult::Applied
                 && result != TES3MP::LatestWinsSnapshotReceiveResult::IdenticalDuplicate)
@@ -219,6 +237,65 @@ int main(int argc, char** argv)
                 }
             }
         }
+        if (bound && (mode == "motion-one" || mode == "motion-two")
+            && !sentMotion && session.connection() && motionNotBefore
+            && std::chrono::steady_clock::now() >= *motionNotBefore)
+        {
+            const auto& confirmed = *session.stateMachine().confirmedSnapshot();
+            if (confirmed.view().entries().size() != 2)
+            {
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+                continue;
+            }
+            if (mode == "motion-two" && std::ranges::none_of(confirmed.view().entries(), [](const auto& entry) {
+                    return entry.playerId().value() == 1 && entry.linearVelocity().x() == 1; }))
+            {
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+                continue;
+            }
+            const auto self = std::ranges::find_if(confirmed.view().entries(), [&](const auto& entry) {
+                return entry.playerId().value() == confirmed.header().targetSessionId().value(); });
+            if (self == confirmed.view().entries().end()) return 3;
+            const auto sequenceValue = 1;
+            TES3MP::ClientCommandHeader header(confirmed.header().targetSessionId(),
+                confirmed.header().targetSessionGeneration(), TES3MP::CommandSequence::fromValue(sequenceValue).value(),
+                TES3MP::CommandId::fromValue(sequenceValue).value(), confirmed.header().serverTick());
+            TES3MP::ReliableOperationHeader reliable(header, TES3MP::EntityPrecondition(
+                self->entityId(), self->entityRevision(), self->authorityEpoch()));
+            auto operation = TES3MP::ReliableOperation::create(reliable,
+                TES3MP::PlayerMotionIntent(TES3MP::LinearVelocity3(mode == "motion-two" ? 2 : 1, 0, 0)));
+            if (!std::holds_alternative<TES3MP::ReliableOperation>(operation)
+                || !sendFrame(*factory.runtime, *session.connection(), TES3MP::MessageClass::ReliableOperation,
+                    TES3MP::MessageKind::ReliableOperation,
+                    TES3MP::encodeReliableOperation(std::get<TES3MP::ReliableOperation>(operation)))) return 3;
+            sentMotion = true;
+        }
+        if (sentMotion)
+        {
+            const auto& entries = session.stateMachine().confirmedSnapshot()->view().entries();
+            bool sawOne = false;
+            bool sawTwo = false;
+            for (const auto& entry : entries)
+            {
+                sawOne = sawOne || (entry.playerId().value() == 1 && entry.linearVelocity().x() == 1
+                    && entry.transform().position().x() > 10);
+                sawTwo = sawTwo || (entry.playerId().value() == 2 && entry.linearVelocity().x() == 2
+                    && entry.transform().position().x() > 10);
+            }
+            sawConvergedMovement = sawOne && sawTwo;
+            if (sawConvergedMovement && staleSnapshot)
+            {
+                rejectedStaleView = session.receiveLatestWinsSnapshot(std::move(*staleSnapshot))
+                    == TES3MP::LatestWinsSnapshotReceiveResult::StaleTick;
+                staleSnapshot.reset();
+            }
+        }
+        if (sawConvergedMovement && rejectedStaleView)
+        {
+            std::cout << "{\"event\":\"movement_flow_complete\",\"role\":\"" << mode
+                      << "\",\"stale_view_rejected\":true}\n";
+            session.close(); factory.runtime->shutdown(); return 0;
+        }
         if (bound && sawLeave && sawEnter && (mode == "observer" || sentInterior))
         {
             std::cout << "{\"event\":\"fixture_flow_complete\",\"role\":\"" << mode << "\"}\n";
@@ -228,6 +305,12 @@ int main(int argc, char** argv)
     }
     session.close();
     factory.runtime->shutdown();
+    if (bound && session.stateMachine().confirmedSnapshot())
+    {
+        for (const auto& entry : session.stateMachine().confirmedSnapshot()->view().entries())
+            std::cerr << "player=" << entry.playerId().value() << " x=" << entry.transform().position().x()
+                      << " vx=" << entry.linearVelocity().x() << '\n';
+    }
     std::cerr << "join failed\n";
     return 3;
 }

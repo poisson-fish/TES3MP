@@ -34,7 +34,8 @@ two-client interior/exterior proof are implemented and owner demo acceptance pas
 Slice 7.5 is in progress under accepted
 [`ADR-0044`](adr/ADR-0044-phase7-movement-tick-and-snapshot-composition.md);
 its atomic checked movement tick, complete targeted views, and focused contracts
-are implemented, while the real two-client movement demo remains pending.
+are implemented. Its real two-client movement/convergence/stale-view proof
+passes; owner implementation-demo acceptance remains pending.
 The active tree is a provenance-verified OpenMW 0.51 baseline with:
 
 - engine-independent protocol, transport, client-session, server-core, and test

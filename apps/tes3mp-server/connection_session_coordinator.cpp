@@ -142,6 +142,15 @@ namespace TES3MP::ServerApp
                 return intake.submit(std::move(proposal)) == CommandSubmissionResult::Accepted
                     ? ConnectionSessionResult::CommandSubmitted : ConnectionSessionResult::QueueRejected;
             }
+            if (const auto* motion = std::get_if<PlayerMotionIntent>(&operation->body()))
+            {
+                ServerCommandProposal proposal(header.sessionId(), header.sessionGeneration(),
+                    header.commandSequence(), header.commandId(), header.observedServerTick(),
+                    *operation->header().entityPrecondition(),
+                    PlayerMotionCommandProposal(motion->desiredVelocity()));
+                return intake.submit(std::move(proposal)) == CommandSubmissionResult::Accepted
+                    ? ConnectionSessionResult::CommandSubmitted : ConnectionSessionResult::QueueRejected;
+            }
             return ConnectionSessionResult::ProtocolRejected;
         }
 
