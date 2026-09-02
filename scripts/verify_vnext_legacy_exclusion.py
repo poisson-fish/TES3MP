@@ -30,7 +30,7 @@ LEGACY_EXACT_PATHS = {
     "tes3mp-credits.md",
 }
 LEGACY_BUILD_PATTERN = re.compile(
-    r"(?i)(?:tes3mp-(?:server|browser)|raknet|crabnet|corescripts|packetprocessor|"
+    r"(?i)(?:tes3mp-browser|raknet|crabnet|corescripts|packetprocessor|"
     r"(?:^|/)apps/openmw-mp(?:/|$)|(?:^|/)components/openmw-mp(?:/|$))"
 )
 
@@ -189,7 +189,6 @@ def verify(
         "excluded_legacy_path_prefixes": list(LEGACY_PATH_PREFIXES),
         "excluded_legacy_exact_paths": sorted(LEGACY_EXACT_PATHS),
         "excluded_build_tokens": [
-            "tes3mp-server",
             "tes3mp-browser",
             "RakNet",
             "CrabNet",

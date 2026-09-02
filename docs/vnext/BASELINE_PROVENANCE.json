@@ -1433,7 +1433,7 @@
         },
         {
           "path": "scripts/verify_vnext_legacy_exclusion.py",
-          "sha256": "8bbc582d967450bfd50aa8225890215bc322554bda3459d246899e99afefbec1"
+          "sha256": "95ba7e3021877a9288bad5dd8ebbec17d7ccfb514fdb44d2e55b125577305e6b"
         }
       ],
       "repositories": [

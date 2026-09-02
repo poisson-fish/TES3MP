@@ -4293,6 +4293,29 @@ only the relevant phase section here.
 
 [Back to the phase tracker](IMPLEMENTATION_PLAN.md#phase-7--headless-end-to-end-multiplayer-slice)
 
+- 2026-09-02 — Slice 7.5 legacy-exclusion verification repair — Implemented
+  - Change: removed the ambiguous `tes3mp-server` product target spelling from
+    the legacy-token denylist while retaining archived path and legacy
+    dependency rejection; added allow/reject regression contracts.
+  - Decisions: target names are not provenance. Archived source paths and
+    RakNet/CrabNet/CoreScripts/packet-processor inputs remain fail closed.
+  - Verification: all 115 repository Python tests pass. Staged legacy exclusion
+    passes across 3,972 tracked paths, 62 CMake files, 62 compile commands, and
+    182 Ninja edges. Staged baseline verification passes with 278 intentional
+    differences and 69 dependency inputs; staged diff checks pass.
+  - Owner review: Slice 7.5 implementation-demo acceptance received before this
+    verification repair.
+  - Follow-ups: none for Slice 7.5.
+
+- 2026-09-02 — Slice 7.5 owner implementation-demo acceptance — Implemented
+  - Change: accepted implementation `f8b1acee4b`; Slice 7.5 advanced to
+    **Implemented**.
+  - Decisions: no accepted ADR/GDR decision changed.
+  - Verification: owner reviewed the real two-client movement, convergence,
+    stale-view rejection, and focused atomic-overflow evidence.
+  - Owner review: implementation-demo acceptance received on 2026-09-02.
+  - Follow-ups: Slice 7.6 is next and remains **Not Started**.
+
 - 2026-09-02 — Slice 7.5 real movement proof — In Progress
   - Change: composed decoded `PlayerMotionIntent` through live server intake and
     extended the real two-client process proof with both clients authoring

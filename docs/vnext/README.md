@@ -31,11 +31,11 @@ canonical reduction, deterministic targeted observation projection, and
 failure-atomic observation/view queue admission. Client application,
 shared-writer runtime composition, atomic join/transition delivery, and the real
 two-client interior/exterior proof are implemented and owner demo acceptance passes.
-Slice 7.5 is in progress under accepted
+Slice 7.5 is implemented under accepted
 [`ADR-0044`](adr/ADR-0044-phase7-movement-tick-and-snapshot-composition.md);
 its atomic checked movement tick, complete targeted views, and focused contracts
 are implemented. Its real two-client movement/convergence/stale-view proof
-passes; owner implementation-demo acceptance remains pending.
+and owner implementation-demo acceptance pass. Slice 7.6 has not started.
 The active tree is a provenance-verified OpenMW 0.51 baseline with:
 
 - engine-independent protocol, transport, client-session, server-core, and test

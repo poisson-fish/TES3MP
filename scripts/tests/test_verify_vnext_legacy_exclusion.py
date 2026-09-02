@@ -78,12 +78,20 @@ class LegacyExclusionTests(unittest.TestCase):
             with self.assertRaisesRegex(exclusion.ExclusionError, "legacy multiplayer source"):
                 exclusion.verify_compile_commands(repository, build)
 
-    def test_rejects_legacy_target_in_ninja_graph(self) -> None:
+    def test_rejects_legacy_path_in_ninja_graph(self) -> None:
         temporary, repository, build = self.make_fixture()
         with temporary:
-            (build / "build.ninja").write_text("build tes3mp-server: LINK main.cpp.obj\n", encoding="utf-8")
-            with self.assertRaisesRegex(exclusion.ExclusionError, "tes3mp-server"):
+            (build / "build.ninja").write_text("build old: LINK /apps/openmw-mp/main.cpp.obj\n", encoding="utf-8")
+            with self.assertRaisesRegex(exclusion.ExclusionError, "apps/openmw-mp"):
                 exclusion.verify_ninja_graph(build)
+
+    def test_allows_vnext_server_target_name(self) -> None:
+        temporary, repository, build = self.make_fixture()
+        with temporary:
+            (build / "build.ninja").write_text("build tes3mp-server: LINK vnext-main.cpp.obj\n", encoding="utf-8")
+            edges, digest = exclusion.verify_ninja_graph(build)
+        self.assertEqual(edges, 1)
+        self.assertRegex(digest, r"^[0-9a-f]{64}$")
 
     def test_rejects_empty_compilation_database(self) -> None:
         temporary, repository, build = self.make_fixture()
