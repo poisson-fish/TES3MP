@@ -4293,6 +4293,20 @@ only the relevant phase section here.
 
 [Back to the phase tracker](IMPLEMENTATION_PLAN.md#phase-7--headless-end-to-end-multiplayer-slice)
 
+- 2026-09-01 — Slice 7.3 live-session composition — In Progress
+  - Change: added the bounded app-local connection coordinator skeleton owning
+    accepted server sessions, admission scopes, and outbound queue lifetime.
+  - Decisions: owner approved Option A on 2026-09-01; transport lifecycle state
+    remains outside `server_core` and `ServerApplication` remains a thin pump.
+  - Verification: MSVC 19.44 focused `tes3mp_server_app_tests_run` passes;
+    contracts cover accepted ownership, duplicate and capacity rejection,
+    session state, admission-scope retention, and queue/session cleanup. All 114
+    repository-owned Python tests and `git diff --check` pass.
+  - Owner review: architecture option approved before implementation; process
+    demo acceptance remains pending.
+  - Follow-ups: dispatch bounded handshake/authentication frames, invoke atomic
+    join composition, pump outbound queues, and run the two-client process demo.
+
 - 2026-09-01 — Slice 7.3 atomic transport admission — In Progress
   - Change: added domain-neutral atomic two-frame admission to each bounded
     outbound connection queue and bound join authentication/snapshot responses

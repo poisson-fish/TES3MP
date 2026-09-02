@@ -4,6 +4,8 @@ include(${CMAKE_CURRENT_LIST_DIR}/../../cmake/TES3MPRuntimeSafety.cmake)
 add_library(tes3mp_server_app STATIC
     authenticated_join_composition.hpp
     authenticated_join_composition.cpp
+    connection_session_coordinator.hpp
+    connection_session_coordinator.cpp
     server_config.hpp
     server_config.cpp
     server_application.hpp

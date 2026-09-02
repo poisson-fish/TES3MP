@@ -115,6 +115,16 @@
       "purpose": "Defines the app-owned authenticated-join composition and atomic response-queue boundary."
     },
     {
+      "path": "apps/tes3mp-server/connection_session_coordinator.cpp",
+      "status": "A",
+      "purpose": "Implements bounded app-local ownership and atomic cleanup for accepted connection sessions, admission scopes, and outbound queues."
+    },
+    {
+      "path": "apps/tes3mp-server/connection_session_coordinator.hpp",
+      "status": "A",
+      "purpose": "Defines the approved app-local live connection and server-session ownership boundary."
+    },
+    {
       "path": "apps/tes3mp-server/main.cpp",
       "status": "A",
       "purpose": "Thin single-threaded dedicated-server process root with transactional configuration, secret, transport, listener, and signal-driven shutdown composition."

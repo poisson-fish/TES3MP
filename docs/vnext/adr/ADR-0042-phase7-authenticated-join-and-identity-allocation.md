@@ -41,6 +41,12 @@ and the server binds the authentication and snapshot frames to one connection.
 Capacity or connection failure admits neither frame and leaves canonical state
 unchanged.
 
+On 2026-09-01 the project owner approved live-session composition Option A: a
+bounded app-local connection coordinator owns each accepted connection's server
+session, admission scope, and outbound queue lifetime. `ServerApplication`
+remains the thin pump/composition root; transport lifecycle state does not move
+into `server_core`.
+
 Rejected alternatives were app-owned join logic, random identifiers, staged
 install with rollback, multiple live players per principal, deferring the
 initial snapshot, and retaining incomplete joins. Identifiers are not restart-

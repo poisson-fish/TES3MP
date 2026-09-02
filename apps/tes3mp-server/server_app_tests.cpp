@@ -1,5 +1,6 @@
 #include "server_application.hpp"
 #include "authenticated_join_composition.hpp"
+#include "connection_session_coordinator.hpp"
 #include "server_config.hpp"
 
 #include <array>
@@ -82,6 +83,25 @@ namespace
         bool reject = false;
         std::size_t issues = 0;
     };
+
+    class FixedClock final : public MonotonicClock
+    {
+    public:
+        MonotonicInstant now() const noexcept override { return MonotonicInstant::fromNanoseconds(0); }
+    };
+
+    CapabilityOffer emptyOffer()
+    {
+        auto versions = std::get<ProtocolVersionRange>(ProtocolVersionRange::create(1, 0, 0));
+        return std::get<CapabilityOffer>(CapabilityOffer::create(versions, {}, {}));
+    }
+
+    AdmissionScopeId scope(std::byte value)
+    {
+        std::array<std::byte, AdmissionScopeIdBytes> bytes{};
+        bytes.fill(value);
+        return *AdmissionScopeId::create(bytes);
+    }
 
     class FakeJoinQueue final : public TES3MP::ServerApp::JoinResponseQueue
     {
@@ -221,5 +241,28 @@ int main()
         assert(rejectedComposition.join(id<PrincipalId>(5), SessionGeneration::initial(), ServerTick::initial(),
                    ResumeTokenContext{}) == JoinCompositionResult::QueueRejected);
         assert(rejectedJoins.liveBindings() == 0 && rejectedJoins.state().players().empty());
+    }
+    {
+        FixedClock clock;
+        NullMetricSink metrics;
+        NullStructuredEventSink events;
+        Observability observability(metrics, events);
+        FakeAuthentication authentication;
+        auto queues = OutboundQueueSet::create(OutboundQueuePolicy{}, 2);
+        auto timeouts = *SessionTimeoutPolicy::create(1'000'000, 1'000'000, 1'000'000);
+        ConnectionSessionCoordinator sessions(
+            clock, observability, timeouts, emptyOffer(), authentication, *queues, 1);
+        const auto first = TransportConnectionId::initial();
+        const auto second = *first.next();
+        assert(sessions.accept(first, scope(std::byte{ 1 })) == ConnectionSessionResult::Accepted);
+        assert(sessions.size() == 1 && queues->connections() == 1);
+        assert(sessions.session(first)->state() == ServerSessionState::AwaitingClientHello);
+        assert(*sessions.admissionScope(first) == scope(std::byte{ 1 }));
+        assert(sessions.accept(first, scope(std::byte{ 2 })) == ConnectionSessionResult::Duplicate);
+        assert(sessions.accept(second, scope(std::byte{ 2 })) == ConnectionSessionResult::AtCapacity);
+        assert(sessions.close(first) == ConnectionSessionResult::Accepted);
+        assert(sessions.size() == 0 && queues->connections() == 0);
+        assert(sessions.close(first) == ConnectionSessionResult::UnknownConnection);
+        assert(sessions.accept(second, scope(std::byte{ 2 })) == ConnectionSessionResult::Accepted);
     }
 }
