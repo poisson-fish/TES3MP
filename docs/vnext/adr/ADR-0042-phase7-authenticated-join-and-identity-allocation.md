@@ -54,6 +54,13 @@ established server session records that already-issued session identifier
 through a narrow initial-only binding operation. The binding never issues a
 second credential and rejects wrong-stage or duplicate use.
 
+On 2026-09-01 the project owner approved resume-context derivation Option A:
+the live server hashes the canonical encoded negotiated `ServerHello` for the
+protocol digest and the fixed versioned Phase 7 fixture-content identifier for
+the content digest. Digest failure closes the authentication path without a
+join. A changed negotiated protocol or fixture identifier cannot resume a token
+issued for the prior context.
+
 Rejected alternatives were app-owned join logic, random identifiers, staged
 install with rollback, multiple live players per principal, deferring the
 initial snapshot, and retaining incomplete joins. Identifiers are not restart-

@@ -1,5 +1,6 @@
 #include "server_application.hpp"
 #include "authenticated_join_composition.hpp"
+#include "resume_token_context.hpp"
 #include "connection_session_coordinator.hpp"
 #include "server_config.hpp"
 
@@ -10,6 +11,7 @@
 #include <fstream>
 #include <string>
 #include <variant>
+#include <vector>
 
 namespace
 {
@@ -90,6 +92,27 @@ namespace
         MonotonicInstant now() const noexcept override { return MonotonicInstant::fromNanoseconds(0); }
     };
 
+    class RecordingCrypto final : public CredentialCrypto
+    {
+    public:
+        bool randomBytes(std::span<std::byte>) noexcept override { return false; }
+        bool sha256(std::span<const std::byte> source, CredentialDigest& destination) noexcept override
+        {
+            inputs.emplace_back(source.begin(), source.end());
+            if (failOnCall == inputs.size()) return false;
+            std::byte folded{};
+            for (const auto byte : source) folded ^= byte;
+            destination.bytes.fill(folded);
+            destination.bytes[0] = static_cast<std::byte>(source.size() & 0xff);
+            return true;
+        }
+        bool constantTimeEqual(std::span<const std::byte>, std::span<const std::byte>) noexcept override
+        { return false; }
+
+        std::size_t failOnCall = 0;
+        std::vector<std::vector<std::byte>> inputs;
+    };
+
     CapabilityOffer emptyOffer()
     {
         auto versions = std::get<ProtocolVersionRange>(ProtocolVersionRange::create(1, 0, 0));
@@ -145,6 +168,33 @@ namespace
 int main()
 {
     using namespace TES3MP::ServerApp;
+    {
+        const auto negotiated
+            = std::get<ServerHello>(negotiateClientHello(ClientHello::fromOffer(emptyOffer()), emptyOffer()));
+        RecordingCrypto first;
+        RecordingCrypto second;
+        const auto firstContext = makePhase7ResumeTokenContext(negotiated, first);
+        const auto secondContext = makePhase7ResumeTokenContext(negotiated, second);
+        assert(firstContext && secondContext && *firstContext == *secondContext);
+        assert(first.inputs.size() == 2);
+        const auto expectedContent
+            = std::as_bytes(std::span(Phase7FixtureContentId.data(), Phase7FixtureContentId.size()));
+        assert(first.inputs[1] == std::vector<std::byte>(expectedContent.begin(), expectedContent.end()));
+
+        auto newerVersions = std::get<ProtocolVersionRange>(ProtocolVersionRange::create(1, 1, 1));
+        auto newerClientOffer = std::get<CapabilityOffer>(CapabilityOffer::create(newerVersions, {}, {}));
+        auto newerServerOffer = std::get<CapabilityOffer>(CapabilityOffer::create(newerVersions, {}, {}));
+        const auto newer = std::get<ServerHello>(negotiateClientHello(
+            ClientHello::fromOffer(std::move(newerClientOffer)), newerServerOffer));
+        RecordingCrypto changed;
+        const auto changedContext = makePhase7ResumeTokenContext(newer, changed);
+        assert(changedContext && changedContext->protocol != firstContext->protocol
+            && changedContext->content == firstContext->content);
+
+        RecordingCrypto failed;
+        failed.failOnCall = 2;
+        assert(!makePhase7ResumeTokenContext(negotiated, failed));
+    }
     {
         auto result = parseServerConfig(validConfig);
         assert(std::holds_alternative<ServerConfig>(result));

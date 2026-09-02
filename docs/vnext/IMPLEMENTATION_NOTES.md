@@ -4293,6 +4293,24 @@ only the relevant phase section here.
 
 [Back to the phase tracker](IMPLEMENTATION_PLAN.md#phase-7--headless-end-to-end-multiplayer-slice)
 
+- 2026-09-01 — Slice 7.3 resume-context derivation — In Progress
+  - Change: added the server-app helper that hashes the canonical negotiated
+    `ServerHello` and fixed versioned Phase 7 fixture-content identifier into
+    the typed resume-token context; failures return no context.
+  - Decisions: owner approved Option A on 2026-09-01 before implementation;
+    [`ADR-0042`](adr/ADR-0042-phase7-authenticated-join-and-identity-allocation.md)
+    records the clarification.
+  - Verification: MSVC 19.44 focused `tes3mp_server_app_tests_run` passes;
+    contracts prove deterministic same-context output, protocol-change
+    sensitivity, exact fixture identifier input, and fail-closed digest failure.
+    All 114 repository-owned Python tests, baseline provenance verification
+    with 266 intentional differences and 67 dependency inputs, and
+    `git diff --check` pass.
+  - Owner review: derivation decision approved; Slice 7.3 demo acceptance
+    remains pending live frame pumping and the two-client process flow.
+  - Follow-ups: feed the derived context through bounded live authentication,
+    join composition, queue pumping, and the required two-client demo.
+
 - 2026-09-01 — Slice 7.3 preissued session binding — In Progress
   - Change: authenticated join composition now returns the committed bounded
     identity result, and an established server session can record that
