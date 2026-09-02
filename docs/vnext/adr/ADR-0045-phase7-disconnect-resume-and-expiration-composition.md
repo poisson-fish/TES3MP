@@ -35,6 +35,12 @@ The project owner approved Option A for all four decisions on 2026-09-02:
    strictly before it; at `now >= deadline`, expiration wins. One writer orders
    lifecycle events and rejects commands from disconnected or stale generations.
 
+On 2026-09-02 the owner also approved the Option A/A1 composition clarification:
+authentication exposes a prepared resume handle to the session/app composition,
+and a narrow coordinator commits token rotation before canonical resume, rolls
+the token back if canonical commit rejects, then finalizes the token transaction.
+This preserves the credential, lifecycle, and application ownership boundaries.
+
 Rejected alternatives were app- or transport-owned lifecycle policy, retaining
 an apparently active canonical session, reconstructing deleted progress,
 consuming a token or committing canonical state before output admission, exact-
@@ -69,5 +75,6 @@ provisional lifecycle.
 
 ## Owner approval
 
-Approved by the project owner on 2026-09-02: Option A for all four decisions and
-the proposed acceptance tests.
+Approved by the project owner on 2026-09-02: Option A for all four decisions,
+Option A for prepared authentication ownership, Option A1 for reversible
+cross-transaction commit coordination, and the proposed acceptance tests.

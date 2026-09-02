@@ -383,11 +383,22 @@ namespace
         auto rotated = response ? response->takeToken() : std::optional<ResumeToken>{};
         if (!rotated || !tokens->commitConsume(replacement->id) || tokens->commitConsume(replacement->id))
             return false;
+        if (!tokens->rollbackConsume(replacement->id) || tokens->rollbackConsume(replacement->id))
+            return false;
+        auto retry = tokens->prepareConsume(original, context(), MonotonicInstant::fromNanoseconds(13));
+        auto* retried = std::get_if<PreparedResumeAdmission>(&retry);
+        if (!retried || !tokens->commitConsume(retried->id) || !tokens->finalizeConsume(retried->id)
+            || tokens->finalizeConsume(retried->id))
+            return false;
+        auto retryGrant = retried->admission.takeResumeGrant();
+        auto retryResponse = retryGrant ? retryGrant->takeResponse() : std::nullopt;
+        rotated = retryResponse ? retryResponse->takeToken() : std::optional<ResumeToken>{};
+        if (!rotated) return false;
         return std::get<ResumeTokenStoreError>(
-                   tokens->prepareConsume(original, context(), MonotonicInstant::fromNanoseconds(13)))
+                   tokens->prepareConsume(original, context(), MonotonicInstant::fromNanoseconds(14)))
                 == ResumeTokenStoreError::Denied
             && std::holds_alternative<PreparedResumeAdmission>(
-                tokens->prepareConsume(*rotated, context(), MonotonicInstant::fromNanoseconds(13)));
+                tokens->prepareConsume(*rotated, context(), MonotonicInstant::fromNanoseconds(14)));
     }
 
     bool precommit_failures_preserve_the_old_token()

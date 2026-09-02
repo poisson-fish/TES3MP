@@ -4293,6 +4293,29 @@ only the relevant phase section here.
 
 [Back to the phase tracker](IMPLEMENTATION_PLAN.md#phase-7--headless-end-to-end-multiplayer-slice)
 
+- 2026-09-02 — Slice 7.6 prepared resume composition — In Progress
+  - Change: resume authentication now returns a prepared token transaction;
+    server composition prepares canonical resume, atomically admits the rotated
+    credential, complete targeted snapshot, initial observation set, and peer
+    observations, then commits token and lifecycle state. Token commit retains a
+    bounded rollback window until canonical commit succeeds.
+  - Decisions: owner approved ADR-0045 clarification Option A for prepared
+    authentication ownership and A1 for reversible cross-transaction commit
+    coordination. No authority, state-scope, or gameplay behavior changed.
+  - Verification: MSVC 19.51 Debug `tes3mp_server_app_tests_run` and
+    `tes3mp_protocol_tests_run` pass; focused `tes3mp_server_authentication_tests`
+    passes with commit rollback, old-token
+    recovery, retry, finalization, and rotated-token acceptance. All 115 Python
+    tests pass. Staged baseline verification passes with 284 intentional
+    differences and 69 dependency inputs; staged legacy exclusion passes across
+    3,977 tracked paths, 62 CMake files, 1,254 compile commands, and 1,971 Ninja
+    edges; the Release `tes3mp_server` executable builds; staged `git diff
+    --check` passes.
+  - Owner review: architecture clarifications approved; Slice 7.6 implementation
+    demo remains required before **Implemented**.
+  - Follow-ups: add expiration pumping/output and the real two-client
+    disconnect/resume/expiration proof.
+
 - 2026-09-02 — Slice 7.6 live disconnect composition — In Progress
   - Change: wired successful joins into the lifecycle coordinator and composed
     transport close through prepared canonical hide, complete peer observation

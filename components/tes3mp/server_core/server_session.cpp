@@ -133,6 +133,7 @@ namespace TES3MP
     ServerSessionStateMachine::~ServerSessionStateMachine()
     {
         cancelAuthentication();
+        if (mPreparedResumeId) (void)cancelPreparedResume();
     }
 
     ServerSessionTransition ServerSessionStateMachine::illegal(ServerSessionEventKind event) noexcept
@@ -197,6 +198,7 @@ namespace TES3MP
             if (mState == ServerSessionState::Closed)
                 return {};
             cancelAuthentication();
+            if (mPreparedResumeId) (void)cancelPreparedResume();
             mState = ServerSessionState::Closed;
             mDeadline.reset();
             observe(SessionObservationOutcome::TransitionAccepted, SessionObservationStage::Terminal);
@@ -312,6 +314,7 @@ namespace TES3MP
                 mPrincipal = admission->principal();
                 if (auto grant = admission->takeResumeGrant())
                 {
+                    mPreparedResumeId = grant->preparationId();
                     mSessionId = grant->sessionId();
                     mGeneration = grant->nextGeneration();
                     mActiveAttempt.generation = mGeneration;
@@ -380,6 +383,33 @@ namespace TES3MP
     {
         auto result = std::move(mAuthenticationAccepted);
         mAuthenticationAccepted.reset();
+        return result;
+    }
+
+    bool ServerSessionStateMachine::commitPreparedResume() noexcept
+    {
+        return mPreparedResumeId && mAuthenticationService.commitResume(*mPreparedResumeId);
+    }
+
+    bool ServerSessionStateMachine::finalizePreparedResume() noexcept
+    {
+        if (!mPreparedResumeId || !mAuthenticationService.finalizeResume(*mPreparedResumeId)) return false;
+        mPreparedResumeId.reset();
+        return true;
+    }
+
+    bool ServerSessionStateMachine::rollbackPreparedResume() noexcept
+    {
+        if (!mPreparedResumeId || !mAuthenticationService.rollbackResume(*mPreparedResumeId)) return false;
+        mPreparedResumeId.reset();
+        return true;
+    }
+
+    bool ServerSessionStateMachine::cancelPreparedResume() noexcept
+    {
+        if (!mPreparedResumeId) return false;
+        const bool result = mAuthenticationService.cancelResume(*mPreparedResumeId);
+        mPreparedResumeId.reset();
         return result;
     }
 

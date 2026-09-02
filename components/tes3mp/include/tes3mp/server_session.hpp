@@ -160,6 +160,11 @@ namespace TES3MP
         }
         const std::optional<PrincipalId>& principal() const noexcept { return mPrincipal; }
         std::optional<AuthenticationAcceptedMessage> takeAuthenticationAccepted() noexcept;
+        std::optional<std::uint64_t> preparedResumeId() const noexcept { return mPreparedResumeId; }
+        bool commitPreparedResume() noexcept;
+        bool finalizePreparedResume() noexcept;
+        bool rollbackPreparedResume() noexcept;
+        bool cancelPreparedResume() noexcept;
         std::optional<SessionId> sessionId() const noexcept { return mSessionId; }
 
     private:
@@ -188,6 +193,7 @@ namespace TES3MP
         std::optional<AuthenticationRejected> mAuthenticationRejection;
         std::optional<PrincipalId> mPrincipal;
         std::optional<AuthenticationAcceptedMessage> mAuthenticationAccepted;
+        std::optional<std::uint64_t> mPreparedResumeId;
         std::optional<ResumeTokenContext> mAuthenticationContext;
         std::optional<SessionId> mSessionId;
     };

@@ -15,14 +15,14 @@ remains the [implementation plan](IMPLEMENTATION_PLAN.md#phase-7--headless-end-t
 
 ## Working synopsis
 
-Prepared resume-token rotation and canonical disconnect/resume/expiration
-transactions exist. Live joins register with the lifecycle coordinator. A live
-transport close now atomically admits peer leave output, hides the canonical
-session, and retains one bounded grace record.
+Prepared resume authentication, reversible token rotation, and canonical
+disconnect/resume/expiration transactions exist. Live joins register with the
+lifecycle coordinator. Transport close atomically admits peer leave output and
+hides the session; resume atomically admits its rotated credential, complete
+snapshot, and observation output before token/lifecycle commit.
 
-Next eligible work is prepared resume authentication plus complete snapshot and
-observation admission, followed by expiration pumping/output and the real
-two-client disconnect/resume/expiration proof. Do not mark Slice 7.6
+Next eligible work is expiration pumping/output, followed by the real two-client
+disconnect/resume/expiration proof. Do not mark Slice 7.6
 **Implemented** before its owner demo acceptance.
 
 ## Active files
@@ -41,8 +41,11 @@ two-client disconnect/resume/expiration proof. Do not mark Slice 7.6
 
 ## Last verified
 
-MSVC 19.51 server-app and lifecycle contracts, all 115 Python tests, staged
-baseline provenance, staged legacy exclusion, and staged diff checks passed.
+MSVC 19.51 server-app, authentication, lifecycle, complete protocol contracts,
+the Release server build, and all 115 Python tests pass. Staged baseline
+provenance passes with 284 intentional
+differences and 69 dependency inputs; staged legacy exclusion and diff checks
+pass.
 
 Refresh this file whenever implementation work changes the active slice,
 governing decision, completed boundary, next work, relevant files, or evidence.

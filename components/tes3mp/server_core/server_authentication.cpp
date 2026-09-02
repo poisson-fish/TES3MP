@@ -327,6 +327,7 @@ namespace TES3MP
         const ResumeToken& token, ResumeTokenContext context, MonotonicInstant now) noexcept
     {
         const std::scoped_lock lock(mMutex);
+        mCommitted.reset();
         CredentialDigest digest;
         if (!digestToken(token, digest))
             return ResumeTokenStoreError::DigestUnavailable;
@@ -374,7 +375,7 @@ namespace TES3MP
         const auto preparationId = mNextPreparationId++;
         mPending[*pendingSlot] = PendingConsume{ preparationId, *slot,
             Record{ replacementDigest, principal, session, *nextGeneration, context, *expiresAt } };
-        ResumeAdmissionGrant grant(session, priorGeneration, *nextGeneration, std::move(*response));
+        ResumeAdmissionGrant grant(preparationId, session, priorGeneration, *nextGeneration, std::move(*response));
         return PreparedResumeAdmission{ preparationId,
             AuthenticatedAdmission(principal, std::optional<ResumeAdmissionGrant>{ std::move(grant) }) };
     }
@@ -385,11 +386,29 @@ namespace TES3MP
         for (auto& pending : mPending)
         {
             if (!pending || pending->id != preparationId) continue;
+            mCommitted = CommittedConsume{ preparationId, pending->recordSlot, *mRecords[pending->recordSlot] };
             mRecords[pending->recordSlot] = std::move(pending->replacement);
             pending.reset();
             return true;
         }
         return false;
+    }
+
+    bool ResumeTokenStore::finalizeConsume(std::uint64_t preparationId) noexcept
+    {
+        const std::scoped_lock lock(mMutex);
+        if (!mCommitted || mCommitted->id != preparationId) return false;
+        mCommitted.reset();
+        return true;
+    }
+
+    bool ResumeTokenStore::rollbackConsume(std::uint64_t preparationId) noexcept
+    {
+        const std::scoped_lock lock(mMutex);
+        if (!mCommitted || mCommitted->id != preparationId) return false;
+        mRecords[mCommitted->recordSlot] = std::move(mCommitted->prior);
+        mCommitted.reset();
+        return true;
     }
 
     bool ResumeTokenStore::cancelConsume(std::uint64_t preparationId) noexcept
@@ -454,10 +473,10 @@ namespace TES3MP
             {
                 if (!mToken)
                     return AuthenticationPending{};
-                auto consumed = mStore.consume(*mToken, mContext, mClock.now());
+                auto consumed = mStore.prepareConsume(*mToken, mContext, mClock.now());
                 mToken.reset();
-                if (auto* admission = std::get_if<AuthenticatedAdmission>(&consumed))
-                    return AuthenticationCompletion{ mAttempt, std::move(*admission) };
+                if (auto* prepared = std::get_if<PreparedResumeAdmission>(&consumed))
+                    return AuthenticationCompletion{ mAttempt, std::move(prepared->admission) };
                 const auto error = std::get<ResumeTokenStoreError>(consumed);
                 return AuthenticationCompletion{ mAttempt,
                     AuthenticationRejected{ error == ResumeTokenStoreError::Denied
@@ -503,5 +522,25 @@ namespace TES3MP
         SessionGeneration generation, ResumeTokenContext context) noexcept
     {
         return mResumeStore.issue(principal, session, generation, context, mClock.now());
+    }
+
+    bool SharedServerAuthenticationService::commitResume(std::uint64_t preparationId) noexcept
+    {
+        return mResumeStore.commitConsume(preparationId);
+    }
+
+    bool SharedServerAuthenticationService::finalizeResume(std::uint64_t preparationId) noexcept
+    {
+        return mResumeStore.finalizeConsume(preparationId);
+    }
+
+    bool SharedServerAuthenticationService::rollbackResume(std::uint64_t preparationId) noexcept
+    {
+        return mResumeStore.rollbackConsume(preparationId);
+    }
+
+    bool SharedServerAuthenticationService::cancelResume(std::uint64_t preparationId) noexcept
+    {
+        return mResumeStore.cancelConsume(preparationId);
     }
 }

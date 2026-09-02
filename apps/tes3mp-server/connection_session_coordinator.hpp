@@ -20,6 +20,7 @@ namespace TES3MP::ServerApp
         UnknownConnection,
         ProtocolRejected,
         AuthenticationPending,
+        ResumePrepared,
         Joined,
         CommandSubmitted,
     };

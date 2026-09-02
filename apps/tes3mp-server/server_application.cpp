@@ -66,6 +66,84 @@ namespace TES3MP::ServerApp
         return mWiring->sessions.close(connection) == ConnectionSessionResult::Accepted;
     }
 
+    bool ServerApplication::resumeConnection(TransportConnectionId connection, ServerTick tick) noexcept
+    {
+        auto* session = mWiring->sessions.session(connection);
+        if (!session || !session->principal() || !session->sessionId() || !session->preparedResumeId()) return false;
+        const auto before = mWiring->reducer.state();
+        auto prepared = mWiring->lifecycle.prepareResume(
+            *session->principal(), *session->sessionId(), mWiring->clock.now(), tick);
+        auto* lifecycle = std::get_if<ServerLifecyclePreparation>(&prepared);
+        if (!lifecycle || lifecycle->generation != session->generation())
+        {
+            if (lifecycle) (void)mWiring->lifecycle.cancel(lifecycle->id);
+            (void)session->cancelPreparedResume();
+            return false;
+        }
+        const auto cancel = [&]() noexcept {
+            (void)mWiring->lifecycle.cancel(lifecycle->id);
+            (void)session->cancelPreparedResume();
+        };
+        const auto* candidate = mWiring->lifecycle.candidateState(lifecycle->id);
+        auto views = candidate ? projectFixtureViews(*candidate, tick) : std::nullopt;
+        auto observations = candidate ? projectFixtureObservations(before, *candidate, tick) : std::nullopt;
+        auto accepted = session->takeAuthenticationAccepted();
+        if (!candidate || !views || !observations || !accepted) { cancel(); return false; }
+        const auto view = std::ranges::find_if(*views,
+            [&](const auto& value) { return value.first == *session->sessionId(); });
+        if (view == views->end()) { cancel(); return false; }
+
+        try
+        {
+            std::vector<ObservationChange> initialChanges;
+            for (const auto& entry : view->second.view().entries())
+                initialChanges.push_back({ entry.playerId(), entry.entityId(), ObservationChangeKind::Enter });
+            auto initial = ReliableObservationBatch::create(
+                *session->sessionId(), session->generation(), tick, initialChanges);
+            if (!std::holds_alternative<ReliableObservationBatch>(initial)) { cancel(); return false; }
+
+            std::vector<std::vector<std::byte>> frames;
+            frames.reserve(3 + observations->size() * 2);
+            auto addFrame = [&](MessageClass messageClass, MessageKind kind, std::vector<std::byte> payload) {
+                auto encoded = encodeProtocolFrame(messageClass, kind, payload);
+                if (!std::holds_alternative<std::vector<std::byte>>(encoded)) return false;
+                frames.push_back(std::get<std::vector<std::byte>>(std::move(encoded)));
+                return true;
+            };
+            if (!addFrame(MessageClass::SessionControl, MessageKind::AuthenticationAccepted,
+                    encodeAuthenticationAccepted(*accepted))
+                || !addFrame(MessageClass::ReliableOperation, MessageKind::ReliableObservationBatch,
+                    encodeReliableObservationBatch(std::get<ReliableObservationBatch>(initial)))
+                || !addFrame(MessageClass::LatestWinsSnapshot, MessageKind::LatestWinsSnapshot,
+                    encodeLatestWinsSnapshot(view->second))) { cancel(); return false; }
+
+            std::vector<OutboundQueueSet::AtomicMessage> messages;
+            messages.reserve(3 + observations->size() * 2);
+            messages.push_back({ connection, TransportChannel::ReliableOrdered, frames[0] });
+            messages.push_back({ connection, TransportChannel::ReliableOrdered, frames[1] });
+            messages.push_back({ connection, TransportChannel::LatestWins, frames[2] });
+            for (const auto& delivery : *observations)
+            {
+                auto target = mWiring->sessions.connectionForSession(delivery.targetSession);
+                if (!target
+                    || !addFrame(MessageClass::ReliableOperation, MessageKind::ReliableObservationBatch,
+                        encodeReliableObservationBatch(delivery.observations))
+                    || !addFrame(MessageClass::LatestWinsSnapshot, MessageKind::LatestWinsSnapshot,
+                        encodeLatestWinsSnapshot(delivery.view))) { cancel(); return false; }
+                messages.push_back({ *target, TransportChannel::ReliableOrdered, frames[frames.size() - 2] });
+                messages.push_back({ *target, TransportChannel::LatestWins, frames.back() });
+            }
+            if (mWiring->queues.enqueueMessagesAtomically(messages) != TransportResult::Accepted)
+            { cancel(); return false; }
+        }
+        catch (...) { cancel(); return false; }
+
+        if (!session->commitPreparedResume()) { (void)mWiring->lifecycle.cancel(lifecycle->id); return false; }
+        if (!mWiring->lifecycle.commit(lifecycle->id))
+        { (void)session->rollbackPreparedResume(); return false; }
+        return session->finalizePreparedResume();
+    }
+
     bool ServerApplication::pump(ServerTick tick) noexcept
     {
         if (!mRunning) return false;
@@ -144,6 +222,15 @@ namespace TES3MP::ServerApp
                         break;
                     }
                 }
+                else if (dispatched == ConnectionSessionResult::ResumePrepared)
+                {
+                    if (!resumeConnection(connection, tick))
+                    {
+                        (void)failConnection(connection, "resume composition failed");
+                        closed = true;
+                        break;
+                    }
+                }
             }
             if (closed) continue;
             auto* session = mWiring->sessions.session(connection);
@@ -152,7 +239,8 @@ namespace TES3MP::ServerApp
                 const auto advanced = mWiring->sessions.pollAuthentication(
                     connection, mWiring->joins, mWiring->crypto, tick);
                 if (advanced != ConnectionSessionResult::AuthenticationPending
-                    && advanced != ConnectionSessionResult::Joined)
+                    && advanced != ConnectionSessionResult::Joined
+                    && advanced != ConnectionSessionResult::ResumePrepared)
                 {
                     (void)failConnection(connection, "authentication rejected");
                     continue;
@@ -166,6 +254,12 @@ namespace TES3MP::ServerApp
                         (void)failConnection(connection, "lifecycle registration failed");
                         continue;
                     }
+                }
+                else if (advanced == ConnectionSessionResult::ResumePrepared
+                    && !resumeConnection(connection, tick))
+                {
+                    (void)failConnection(connection, "resume composition failed");
+                    continue;
                 }
             }
             const auto now = mWiring->clock.now().nanoseconds() / 1'000'000;

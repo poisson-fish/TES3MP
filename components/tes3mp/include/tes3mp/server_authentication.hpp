@@ -230,6 +230,8 @@ namespace TES3MP
         ResumeTokenPrepareResult prepareConsume(
             const ResumeToken& token, ResumeTokenContext context, MonotonicInstant now) noexcept;
         bool commitConsume(std::uint64_t preparationId) noexcept;
+        bool finalizeConsume(std::uint64_t preparationId) noexcept;
+        bool rollbackConsume(std::uint64_t preparationId) noexcept;
         bool cancelConsume(std::uint64_t preparationId) noexcept;
 
         std::size_t size() const noexcept;
@@ -251,6 +253,12 @@ namespace TES3MP
             std::size_t recordSlot;
             Record replacement;
         };
+        struct CommittedConsume
+        {
+            std::uint64_t id;
+            std::size_t recordSlot;
+            Record prior;
+        };
 
         ResumeTokenStore(CredentialCrypto& crypto, std::uint64_t lifetimeMilliseconds) noexcept
             : mCrypto(crypto)
@@ -270,6 +278,7 @@ namespace TES3MP
         mutable std::mutex mMutex;
         std::array<std::optional<Record>, MaximumResumeTokenRecords> mRecords{};
         std::array<std::optional<PendingConsume>, MaximumResumeTokenRecords> mPending{};
+        std::optional<CommittedConsume> mCommitted;
         std::size_t mSize = 0;
         std::uint64_t mNextPreparationId = 1;
     };
@@ -282,6 +291,10 @@ namespace TES3MP
             AuthenticationAttempt attempt, ServerAuthenticationSubmission submission) noexcept = 0;
         virtual ResumeTokenIssueResult issueInitial(PrincipalId principal, SessionId session,
             SessionGeneration generation, ResumeTokenContext context) noexcept = 0;
+        virtual bool commitResume(std::uint64_t) noexcept { return false; }
+        virtual bool finalizeResume(std::uint64_t) noexcept { return false; }
+        virtual bool rollbackResume(std::uint64_t) noexcept { return false; }
+        virtual bool cancelResume(std::uint64_t) noexcept { return false; }
 
     protected:
         static std::span<const std::byte> materialBytes(const AuthenticationMaterial& material) noexcept
@@ -307,6 +320,10 @@ namespace TES3MP
             AuthenticationAttempt attempt, ServerAuthenticationSubmission submission) noexcept override;
         ResumeTokenIssueResult issueInitial(PrincipalId principal, SessionId session, SessionGeneration generation,
             ResumeTokenContext context) noexcept override;
+        bool commitResume(std::uint64_t preparationId) noexcept override;
+        bool finalizeResume(std::uint64_t preparationId) noexcept override;
+        bool rollbackResume(std::uint64_t preparationId) noexcept override;
+        bool cancelResume(std::uint64_t preparationId) noexcept override;
 
     private:
         AuthenticationRateLimiter& mLimiter;

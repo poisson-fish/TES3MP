@@ -195,6 +195,7 @@ namespace TES3MP::ServerApp
         if (transition.action != ServerSessionAction::SessionEstablished || !state->principal()
             || !state->negotiatedHello())
             return ConnectionSessionResult::ProtocolRejected;
+        if (state->preparedResumeId()) return ConnectionSessionResult::ResumePrepared;
         auto context = makePhase7ResumeTokenContext(*state->negotiatedHello(), crypto);
         if (!context) return ConnectionSessionResult::ProtocolRejected;
         TransportJoinResponseQueue responses(mQueues, connection, this);

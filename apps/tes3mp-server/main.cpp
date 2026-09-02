@@ -116,7 +116,9 @@ int main(int argc, char** argv)
     auto joins = TES3MP::AuthenticatedJoinCoordinator::create(fixtureSpawn,
         { *TES3MP::SessionId::fromValue(1), *TES3MP::PlayerId::fromValue(1),
             *TES3MP::EntityId::fromValue(1) }, reducer);
-    if (!crypto || !limiter || !joinProvider || !resumeStore || !queues || !timeouts || !joins
+    auto lifecycle = TES3MP::ServerLifecycleCoordinator::create(
+        config.disconnectGraceMilliseconds * 1'000'000, reducer);
+    if (!crypto || !limiter || !joinProvider || !resumeStore || !queues || !timeouts || !joins || !lifecycle
         || !std::holds_alternative<TES3MP::CapabilityOffer>(offer))
     {
         std::cerr << "server composition failed\n";
@@ -128,7 +130,7 @@ int main(int argc, char** argv)
         std::get<TES3MP::CapabilityOffer>(std::move(offer)), authentication, *queues,
         TES3MP::ServerApp::Phase7ConnectionCapacity);
     TES3MP::ServerApp::ServerApplication application(*factory.runtime, config,
-        { sessions, *joins, *crypto, *queues, clock, intake, reducer });
+        { sessions, *joins, *crypto, *queues, clock, intake, reducer, *lifecycle });
     if (!application.start())
     {
         std::cerr << application.failure() << '\n';

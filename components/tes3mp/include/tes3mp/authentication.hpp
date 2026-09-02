@@ -234,6 +234,7 @@ namespace TES3MP
         SessionId sessionId() const noexcept { return mSessionId; }
         SessionGeneration priorGeneration() const noexcept { return mPriorGeneration; }
         SessionGeneration nextGeneration() const noexcept { return mNextGeneration; }
+        std::uint64_t preparationId() const noexcept { return mPreparationId; }
         std::optional<AuthenticationAcceptedMessage> takeResponse() noexcept
         {
             auto result = std::move(mResponse);
@@ -244,15 +245,17 @@ namespace TES3MP
     private:
         friend class ResumeTokenStore;
 
-        ResumeAdmissionGrant(SessionId sessionId, SessionGeneration priorGeneration, SessionGeneration nextGeneration,
-            AuthenticationAcceptedMessage response) noexcept
-            : mSessionId(sessionId)
+        ResumeAdmissionGrant(std::uint64_t preparationId, SessionId sessionId, SessionGeneration priorGeneration,
+            SessionGeneration nextGeneration, AuthenticationAcceptedMessage response) noexcept
+            : mPreparationId(preparationId)
+            , mSessionId(sessionId)
             , mPriorGeneration(priorGeneration)
             , mNextGeneration(nextGeneration)
             , mResponse(std::move(response))
         {
         }
 
+        std::uint64_t mPreparationId;
         SessionId mSessionId;
         SessionGeneration mPriorGeneration;
         SessionGeneration mNextGeneration;
