@@ -3,6 +3,7 @@
 
 #include "tes3mp/server_session.hpp"
 #include "tes3mp/transport.hpp"
+#include "tes3mp/authenticated_join.hpp"
 
 #include <map>
 
@@ -16,6 +17,9 @@ namespace TES3MP::ServerApp
         QueueRejected,
         SessionRejected,
         UnknownConnection,
+        ProtocolRejected,
+        AuthenticationPending,
+        Joined,
     };
 
     class ConnectionSessionCoordinator
@@ -29,6 +33,10 @@ namespace TES3MP::ServerApp
         ConnectionSessionResult close(TransportConnectionId connection) noexcept;
         ServerSessionStateMachine* session(TransportConnectionId connection) noexcept;
         const AdmissionScopeId* admissionScope(TransportConnectionId connection) const noexcept;
+        ConnectionSessionResult dispatch(TransportConnectionId connection, const TransportMessage& message,
+            AuthenticatedJoinCoordinator& joins, CredentialCrypto& crypto, ServerTick tick) noexcept;
+        ConnectionSessionResult pollAuthentication(TransportConnectionId connection,
+            AuthenticatedJoinCoordinator& joins, CredentialCrypto& crypto, ServerTick tick) noexcept;
         std::size_t size() const noexcept { return mConnections.size(); }
 
     private:
@@ -46,6 +54,7 @@ namespace TES3MP::ServerApp
         OutboundQueueSet& mQueues;
         std::size_t mCapacity;
         std::map<TransportConnectionId, Connection> mConnections;
+
     };
 }
 

@@ -130,6 +130,16 @@
       "purpose": "Thin single-threaded dedicated-server process root with transactional configuration, secret, transport, listener, and signal-driven shutdown composition."
     },
     {
+      "path": "apps/tes3mp-server/resume_token_context.cpp",
+      "status": "A",
+      "purpose": "Derives the approved Phase 7 protocol and fixture-content resume-token context through the credential crypto boundary."
+    },
+    {
+      "path": "apps/tes3mp-server/resume_token_context.hpp",
+      "status": "A",
+      "purpose": "Declares the fixed versioned Phase 7 fixture identifier and fail-closed resume-token context derivation boundary."
+    },
+    {
       "path": "apps/tes3mp-server/server_app_tests.cpp",
       "status": "A",
       "purpose": "Focused configuration, lifecycle, two-client authenticated-join composition, and token/queue failure atomicity contracts."

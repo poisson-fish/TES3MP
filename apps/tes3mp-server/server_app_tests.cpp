@@ -49,7 +49,8 @@ namespace
         TES3MP::TransportResult cancelConnect(TES3MP::ConnectAttemptId) override
         { return TES3MP::TransportResult::UnknownId; }
         TES3MP::TransportResult send(TES3MP::TransportConnectionId, TES3MP::TransportChannel,
-            std::span<const std::byte>) override { return TES3MP::TransportResult::UnknownId; }
+            std::span<const std::byte> bytes) override
+        { sent.emplace_back(bytes.begin(), bytes.end()); return TES3MP::TransportResult::Accepted; }
         TES3MP::TransportReceiveResult receive(
             TES3MP::TransportConnectionId, std::span<TES3MP::TransportMessage>) override
         { return { TES3MP::TransportResult::UnknownId, 0 }; }
@@ -63,13 +64,26 @@ namespace
         bool rejectListen = false;
         TES3MP::TransportResult pollResult = TES3MP::TransportResult::Accepted;
         std::string calls;
+        std::vector<std::vector<std::byte>> sent;
+    };
+
+    class AcceptedOperation final : public AuthenticationOperation
+    {
+    public:
+        explicit AcceptedOperation(AuthenticationAttempt attempt) : mAttempt(attempt) {}
+        AuthenticationPollResult poll() noexcept override
+        { return AuthenticationCompletion{ mAttempt, AuthenticatedAdmission::initial(id<PrincipalId>(9)) }; }
+        void cancel() noexcept override {}
+    private:
+        AuthenticationAttempt mAttempt;
     };
 
     class FakeAuthentication final : public ServerAuthenticationService
     {
     public:
         std::unique_ptr<AuthenticationOperation> begin(
-            AuthenticationAttempt, ServerAuthenticationSubmission) noexcept override { return {}; }
+            AuthenticationAttempt attempt, ServerAuthenticationSubmission) noexcept override
+        { return std::make_unique<AcceptedOperation>(attempt); }
 
         ResumeTokenIssueResult issueInitial(
             PrincipalId, SessionId, SessionGeneration, ResumeTokenContext) noexcept override
@@ -316,5 +330,50 @@ int main()
         assert(sessions.size() == 0 && queues->connections() == 0);
         assert(sessions.close(first) == ConnectionSessionResult::UnknownConnection);
         assert(sessions.accept(second, scope(std::byte{ 2 })) == ConnectionSessionResult::Accepted);
+    }
+    {
+        FixedClock clock;
+        NullMetricSink metrics;
+        NullStructuredEventSink events;
+        Observability observability(metrics, events);
+        FakeAuthentication authentication;
+        RecordingCrypto crypto;
+        auto queues = OutboundQueueSet::create(OutboundQueuePolicy{}, 2);
+        auto timeouts = *SessionTimeoutPolicy::create(1'000'000, 1'000'000, 1'000'000);
+        ConnectionSessionCoordinator sessions(
+            clock, observability, timeouts, emptyOffer(), authentication, *queues, 2);
+        auto joins = joinCoordinator();
+        const auto connection = TransportConnectionId::initial();
+        assert(sessions.accept(connection, scope(std::byte{ 4 })) == ConnectionSessionResult::Accepted);
+
+        const auto helloPayload = encodeClientHello(ClientHello::fromOffer(emptyOffer()));
+        const auto helloFrame = std::get<std::vector<std::byte>>(encodeProtocolFrame(
+            MessageClass::SessionControl, MessageKind::ClientHello, helloPayload));
+        assert(sessions.dispatch(connection,
+                   TransportMessage{ TransportChannel::ReliableOrdered, helloFrame }, joins, crypto,
+                   ServerTick::initial()) == ConnectionSessionResult::Accepted);
+
+        auto material = AuthenticationMaterial::create({});
+        const auto authenticationPayload = encodeAuthenticationRequest(
+            AuthenticationRequest::join(std::move(*material)));
+        const auto authenticationFrame = std::get<std::vector<std::byte>>(encodeProtocolFrame(
+            MessageClass::SessionControl, MessageKind::AuthenticationRequest, authenticationPayload));
+        assert(sessions.dispatch(connection,
+                   TransportMessage{ TransportChannel::ReliableOrdered, authenticationFrame }, joins, crypto,
+                   ServerTick::initial()) == ConnectionSessionResult::Joined);
+        assert(joins.liveBindings() == 1 && sessions.session(connection)->sessionId() == id<SessionId>(1));
+
+        FakeRuntime runtime;
+        assert(queues->pump(runtime, connection, 0) == OutboundPumpResult::Progress);
+        assert(runtime.sent.size() == 3);
+        assert(std::get<DecodedFrame>(decodeProtocolFrame(runtime.sent[0])).messageKind() == MessageKind::ServerHello);
+        assert(std::get<DecodedFrame>(decodeProtocolFrame(runtime.sent[1])).messageKind()
+            == MessageKind::AuthenticationAccepted);
+        assert(std::get<DecodedFrame>(decodeProtocolFrame(runtime.sent[2])).messageKind()
+            == MessageKind::LatestWinsSnapshot);
+
+        assert(sessions.dispatch(connection,
+                   TransportMessage{ TransportChannel::LatestWins, { std::byte{ 1 } } }, joins, crypto,
+                   ServerTick::initial()) == ConnectionSessionResult::ProtocolRejected);
     }
 }

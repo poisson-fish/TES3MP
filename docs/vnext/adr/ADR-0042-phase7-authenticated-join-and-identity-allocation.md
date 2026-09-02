@@ -61,6 +61,13 @@ the content digest. Digest failure closes the authentication path without a
 join. A changed negotiated protocol or fixture identifier cannot resume a token
 issued for the prior context.
 
+On 2026-09-01 the project owner approved live frame-dispatch Option A: the
+app-local connection coordinator dispatches bounded per-connection handshake
+and authentication frames through its owned session, admission scope, and
+outbound queue. `ServerApplication` remains a thin lifecycle/composition pump;
+wrong-lane, malformed, wrong-stage, authentication, derivation, join, binding,
+and queue failures fail closed.
+
 Rejected alternatives were app-owned join logic, random identifiers, staged
 install with rollback, multiple live players per principal, deferring the
 initial snapshot, and retaining incomplete joins. Identifiers are not restart-

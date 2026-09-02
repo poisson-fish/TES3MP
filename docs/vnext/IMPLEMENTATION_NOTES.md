@@ -4293,6 +4293,25 @@ only the relevant phase section here.
 
 [Back to the phase tracker](IMPLEMENTATION_PLAN.md#phase-7--headless-end-to-end-multiplayer-slice)
 
+- 2026-09-01 — Slice 7.3 bounded live frame dispatch — In Progress
+  - Change: the app-local connection coordinator now validates and dispatches
+    bounded reliable handshake/authentication frames through its owned session,
+    admission scope, resume context, atomic join composition, initial session
+    binding, and outbound queue.
+  - Decisions: owner approved Option A on 2026-09-01. The coordinator owns
+    per-connection dispatch; `ServerApplication` remains the thin pump.
+  - Verification: MSVC 19.44 builds and runs
+    `tes3mp_server_app_tests_run`; focused contracts cover hello response,
+    authenticated atomic join, preissued binding, ordered authentication plus
+    latest snapshot output, and wrong-lane fail-closed rejection. All 114
+    repository-owned Python tests pass; staged baseline verification passes
+    with 268 intentional differences and 67 dependency inputs; `git diff
+    --cached --check` passes.
+  - Owner review: architecture approval received before implementation; Slice
+    7.3 process-demo acceptance remains pending.
+  - Follow-ups: wire transport accepted/closed/receive events and queue pumping
+    through `ServerApplication`, then run the real two-client process demo.
+
 - 2026-09-01 — Slice 7.3 resume-context derivation — In Progress
   - Change: added the server-app helper that hashes the canonical negotiated
     `ServerHello` and fixed versioned Phase 7 fixture-content identifier into
