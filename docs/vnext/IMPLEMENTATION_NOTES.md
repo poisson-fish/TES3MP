@@ -4294,7 +4294,7 @@ only the relevant phase section here.
 [Back to the phase tracker](IMPLEMENTATION_PLAN.md#phase-7--headless-end-to-end-multiplayer-slice)
 
 - 2026-09-01 — Slice 7.4 fixture-transition protocol — In Progress
-  - Change: extended the existing bounded reliable-operation union with an
+  - Change: implementation `9380315cd3`; extended the existing bounded reliable-operation union with an
     owned typed fixture-cell transition and exact interior/exterior cell codec;
     regenerated the committed header with pinned `flatc 25.12.19`.
   - Decisions: implements accepted ADR-0043 Decision 1; no new architecture,
