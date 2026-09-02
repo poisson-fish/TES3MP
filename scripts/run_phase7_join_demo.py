@@ -77,9 +77,18 @@ def main() -> int:
             if not lifecycle_event or "fixture_flow_complete" not in observer_output[0]:
                 raise RuntimeError(
                     f"lifecycle evidence missing: lifecycle={lifecycle.stdout!r} observer={observer_output!r}")
+            reconnect = subprocess.run(
+                [str(args.client), "127.0.0.1", str(port), str(good), "5000", "reconnect"],
+                text=True, capture_output=True, timeout=60, check=False)
+            reconnect_lines = [json.loads(line) for line in reconnect.stdout.splitlines() if line]
+            reconnect_event = next((line for line in reconnect_lines
+                                    if line.get("event") == "reconnect_flow_complete"), None)
+            if reconnect.returncode != 0 or not reconnect_event or reconnect_event.get("reconnect_cycles") != 32:
+                raise RuntimeError(f"reconnect cycle threshold failed: {reconnect!r}")
             print(json.dumps({"event": "phase7_lifecycle_demo_passed", "clients": joined,
                               "simultaneous_movement": True, "converged_views": True,
                               "stale_views_rejected": True, "hidden_during_grace": True,
+                              "reconnect_cycles": reconnect_event["reconnect_cycles"],
                               "same_identity_resumed": lifecycle_event["identity_preserved"],
                               "progress_preserved": lifecycle_event["progress_preserved"],
                               "expired_resume_rejected": lifecycle_event["expired_resume_rejected"],

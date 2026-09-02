@@ -16,6 +16,8 @@
 
 namespace
 {
+    constexpr std::size_t Phase7ReconnectCycles = 32;
+
     class SteadyClock final : public TES3MP::MonotonicClock
     {
     public:
@@ -181,7 +183,7 @@ int main(int argc, char** argv)
     if (argc != 5 && argc != 6)
     {
         std::cerr << "usage: tes3mp_headless_client <host> <port> <password-file> <timeout-ms> "
-                     "[mover|observer|motion-one|motion-two|lifecycle]\n";
+                     "[mover|observer|motion-one|motion-two|lifecycle|reconnect]\n";
         return 2;
     }
     const auto port = number(argv[2]);
@@ -212,8 +214,9 @@ int main(int argc, char** argv)
     bool authenticationAccepted = false;
     const std::string_view mode = argc == 6 ? argv[5] : "join";
     if (mode != "join" && mode != "mover" && mode != "observer"
-        && mode != "motion-one" && mode != "motion-two" && mode != "lifecycle") return 2;
-    if (mode == "lifecycle")
+        && mode != "motion-one" && mode != "motion-two" && mode != "lifecycle"
+        && mode != "reconnect") return 2;
+    if (mode == "lifecycle" || mode == "reconnect")
     {
         session.close();
         auto first = runLifecycleAttempt(*factory.runtime, clock, *timeouts, *endpoint,
@@ -221,25 +224,40 @@ int main(int argc, char** argv)
         if (!first.accepted || !first.token || !first.session || !first.player || !first.entity
             || !first.generation || !first.revision || !first.acknowledged)
         { std::cerr << "lifecycle initial join/progress failed\n"; return 3; }
-        std::this_thread::sleep_for(std::chrono::milliseconds(1000));
-        auto resumed = runLifecycleAttempt(*factory.runtime, clock, *timeouts, *endpoint,
-            TES3MP::AuthenticationRequest::resume(std::move(*first.token)), *timeout, false,
-            *first.generation->next());
-        if (!resumed.accepted || !resumed.token || resumed.session != first.session
-            || resumed.player != first.player || resumed.entity != first.entity
-            || !resumed.generation || resumed.generation->value() != first.generation->value() + 1
-            || resumed.revision != first.revision || resumed.acknowledged != first.acknowledged)
+        const auto initialSession = first.session;
+        const auto initialPlayer = first.player;
+        const auto initialEntity = first.entity;
+        const auto initialRevision = first.revision;
+        const auto initialAcknowledged = first.acknowledged;
+        auto resumed = std::move(first);
+        const auto reconnectCycles = mode == "reconnect" ? Phase7ReconnectCycles : 1;
+        for (std::size_t cycle = 1; cycle <= reconnectCycles; ++cycle)
         {
-            std::cerr << "lifecycle resume preservation failed accepted=" << resumed.accepted
-                      << " session=" << (resumed.session ? resumed.session->value() : 0)
-                      << " first_session=" << first.session->value()
-                      << " generation=" << (resumed.generation ? resumed.generation->value() : 0)
-                      << " first_generation=" << first.generation->value()
-                      << " revision=" << (resumed.revision ? resumed.revision->value() : 0)
-                      << " first_revision=" << first.revision->value()
-                      << " ack=" << (resumed.acknowledged ? resumed.acknowledged->value() : 0)
-                      << " first_ack=" << first.acknowledged->value() << '\n';
-            return 3;
+            std::this_thread::sleep_for(std::chrono::milliseconds(mode == "reconnect" ? 1'050 : 1'000));
+            const auto expectedGeneration = resumed.generation->next();
+            auto next = runLifecycleAttempt(*factory.runtime, clock, *timeouts, *endpoint,
+                TES3MP::AuthenticationRequest::resume(std::move(*resumed.token)), *timeout, false,
+                *expectedGeneration);
+            if (!next.accepted || !next.token || next.session != initialSession
+                || next.player != initialPlayer || next.entity != initialEntity
+                || next.generation != expectedGeneration || next.revision != initialRevision
+                || next.acknowledged != initialAcknowledged)
+            {
+                std::cerr << "lifecycle resume preservation failed cycle=" << cycle
+                          << " accepted=" << next.accepted
+                          << " generation=" << (next.generation ? next.generation->value() : 0)
+                          << " expected_generation=" << expectedGeneration->value() << '\n';
+                return 3;
+            }
+            resumed = std::move(next);
+        }
+        if (mode == "reconnect")
+        {
+            std::cout << "{\"event\":\"reconnect_flow_complete\",\"reconnect_cycles\":"
+                      << reconnectCycles << ",\"resumed_session_id\":" << resumed.session->value()
+                      << ",\"identity_preserved\":true,\"progress_preserved\":true}\n";
+            factory.runtime->shutdown();
+            return 0;
         }
         std::this_thread::sleep_for(std::chrono::milliseconds(resumed.lifetimeMilliseconds + 100));
         auto expired = runLifecycleAttempt(*factory.runtime, clock, *timeouts, *endpoint,
@@ -258,7 +276,7 @@ int main(int argc, char** argv)
         auto fresh = runLifecycleAttempt(*factory.runtime, clock, *timeouts, *endpoint,
             TES3MP::AuthenticationRequest::join(std::move(*freshPassword)), *timeout);
         if (!fresh.accepted || !fresh.session || !fresh.player || !fresh.entity
-            || fresh.session == first.session || fresh.player == first.player || fresh.entity == first.entity)
+            || fresh.session == initialSession || fresh.player == initialPlayer || fresh.entity == initialEntity)
         { std::cerr << "fresh identity creation failed\n"; return 3; }
         std::cout << "{\"event\":\"lifecycle_flow_complete\",\"resumed_session_id\":"
                   << resumed.session->value() << ",\"fresh_session_id\":" << fresh.session->value()
