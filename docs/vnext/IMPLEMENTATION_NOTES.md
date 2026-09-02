@@ -4293,6 +4293,27 @@ only the relevant phase section here.
 
 [Back to the phase tracker](IMPLEMENTATION_PLAN.md#phase-7--headless-end-to-end-multiplayer-slice)
 
+- 2026-09-01 — Slice 7.3 atomic transport admission — In Progress
+  - Change: added domain-neutral atomic two-frame admission to each bounded
+    outbound connection queue and bound join authentication/snapshot responses
+    to it through the server-app adapter. Also corrected the stale GDR-0001
+    register status to **Implemented**.
+  - Decisions: the project owner approved Option A on 2026-09-01. Pair
+    admission stages both lanes before commit; capacity or unknown-connection
+    failure admits neither and the join coordinator cancels without canonical
+    mutation.
+  - Verification: MSVC 19.44 builds and runs
+    `tes3mp_transport_queue_tests` and `tes3mp_server_app_tests`; focused tests
+    prove successful two-lane admission, second-lane capacity rejection without
+    a partial latest frame, unknown-connection rejection, and zero canonical
+    bindings after rejected transport admission. All 114 repository-owned
+    Python tests pass. Baseline provenance passes with 264 intentional
+    differences and 67 dependency inputs; `git diff --check` passes.
+  - Owner review: architecture Option A approved before implementation. Full
+    Slice 7.3 process-demo acceptance remains pending.
+  - Follow-ups: drive negotiation and authentication from live per-connection
+    server sessions, pump admitted queues, and run the real two-client demo.
+
 - 2026-09-01 — Slice 7.3 response composition — In Progress
   - Change: added the app-owned authenticated-join composition that prepares
     canonical state, issues the initial resume token, encodes both protocol

@@ -35,6 +35,12 @@ composition issues the token and encodes/enqueues all responses, and the writer
 commits only after every prerequisite succeeds. Any earlier failure cancels the
 preparation. No rollback path or app-owned canonical mutation is introduced.
 
+On 2026-09-01 the project owner also approved transport-enqueue Option A: the
+repository-owned outbound queue exposes domain-neutral atomic pair admission,
+and the server binds the authentication and snapshot frames to one connection.
+Capacity or connection failure admits neither frame and leaves canonical state
+unchanged.
+
 Rejected alternatives were app-owned join logic, random identifiers, staged
 install with rollback, multiple live players per principal, deferring the
 initial snapshot, and retaining incomplete joins. Identifiers are not restart-

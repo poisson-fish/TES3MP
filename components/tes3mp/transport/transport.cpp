@@ -337,6 +337,53 @@ namespace TES3MP
         return TransportResult::Accepted;
     }
 
+    TransportResult OutboundTransportQueue::enqueuePair(TransportChannel firstChannel,
+        std::span<const std::byte> first, TransportChannel secondChannel, std::span<const std::byte> second)
+    {
+        const auto firstMaximum = maximumTransportMessageBytes(firstChannel);
+        const auto secondMaximum = maximumTransportMessageBytes(secondChannel);
+        if (!firstMaximum || !secondMaximum || first.empty() || second.empty())
+            return TransportResult::InvalidInput;
+        if (first.size() > *firstMaximum || second.size() > *secondMaximum)
+            return TransportResult::MessageTooLarge;
+
+        auto reliable = mReliable;
+        auto latest = mLatest;
+        std::size_t reliableBytes = mReliableBytes;
+        const auto stage = [&](TransportChannel channel, std::span<const std::byte> message) {
+            if (channel == TransportChannel::LatestWins)
+            {
+                latest.emplace(message.begin(), message.end());
+                return TransportResult::Accepted;
+            }
+            if (reliable.size() >= mPolicy.reliableMessages
+                || message.size() > mPolicy.reliableBytes - reliableBytes)
+                return TransportResult::WouldBlock;
+            reliable.emplace_back(message.begin(), message.end());
+            reliableBytes += message.size();
+            return TransportResult::Accepted;
+        };
+        if (const auto result = stage(firstChannel, first); result != TransportResult::Accepted)
+            return result;
+        if (const auto result = stage(secondChannel, second); result != TransportResult::Accepted)
+            return result;
+
+        count(TransportTelemetryKind::Submitted, firstChannel);
+        count(TransportTelemetryKind::Submitted, secondChannel);
+        if (firstChannel == TransportChannel::LatestWins && mLatest)
+            count(TransportTelemetryKind::Coalesced, firstChannel);
+        if (secondChannel == TransportChannel::LatestWins
+            && (mLatest || firstChannel == TransportChannel::LatestWins))
+            count(TransportTelemetryKind::Coalesced, secondChannel);
+        mReliable.swap(reliable);
+        mLatest.swap(latest);
+        mReliableBytes = reliableBytes;
+        count(TransportTelemetryKind::Admitted, firstChannel);
+        count(TransportTelemetryKind::Admitted, secondChannel);
+        queueGauges();
+        return TransportResult::Accepted;
+    }
+
     void OutboundTransportQueue::refill(
         RateBucket& bucket, std::size_t burst, std::uint64_t interval, std::uint64_t now) noexcept
     {
@@ -514,6 +561,15 @@ namespace TES3MP
     {
         const auto found = mQueues.find(connection);
         return found == mQueues.end() ? TransportResult::UnknownId : found->second.enqueue(channel, message);
+    }
+
+    TransportResult OutboundQueueSet::enqueuePair(TransportConnectionId connection,
+        TransportChannel firstChannel, std::span<const std::byte> first, TransportChannel secondChannel,
+        std::span<const std::byte> second)
+    {
+        const auto found = mQueues.find(connection);
+        return found == mQueues.end() ? TransportResult::UnknownId
+                                     : found->second.enqueuePair(firstChannel, first, secondChannel, second);
     }
 
     std::optional<OutboundPumpResult> OutboundQueueSet::pump(

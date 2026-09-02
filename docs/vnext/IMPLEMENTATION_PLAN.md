@@ -361,7 +361,7 @@ production code that depends on the choice cannot.
 
 | GDR | Behavior requiring owner approval | First needed by | Status |
 |---|---|---|---|
-| GDR-0001 | First vertical-slice session, cell entry, player visibility, movement, and reconnect semantics | Phase 7 | **Not Started** |
+| GDR-0001 | First vertical-slice session, cell entry, player visibility, movement, and reconnect semantics | Phase 7 | **Implemented** |
 | GDR-0002 | Player identity/lifecycle, content mismatch, replacement connection, and moderation semantics | Phase 10 | **Not Started** |
 | GDR-0003 | Cell transitions, interest visibility, initial state, and resynchronization semantics | Phase 11 | **Not Started** |
 | GDR-0004 | Movement validation, prediction/correction, animation, teleport, and VR pose semantics | Phase 12 | **Not Started** |
@@ -627,7 +627,7 @@ Depends on: Phase 6.
 | 7.0 | Review and obtain owner approval for GDR-0001 vertical-slice behavior scenarios | **Implemented** | Accepted [`GDR-0001`](gdr/GDR-0001-phase7-headless-vertical-slice-behavior.md) records approved A/A/A/A/A/A authority, scope, contention, reconnect, and named demo/test scenarios |
 | 7.1 | Add the dedicated-server composition root and new minimal configuration format | **Implemented** | Accepted [`ADR-0040`](adr/ADR-0040-phase7-server-composition-and-configuration.md), implementation `d85d3d07f4`, applicable local verification, real loopback lifecycle evidence, and owner demo acceptance pass |
 | 7.2 | Add a reusable headless client-session library and scripted fake-client driver | **Implemented** | Accepted [`ADR-0041`](adr/ADR-0041-phase7-headless-client-and-script-driver.md), implementation `a4e983f5f0`, applicable local verification, and owner demo acceptance pass |
-| 7.3 | Implement authentication, session creation, player creation, and join | **In Progress** | Accepted [`ADR-0042`](adr/ADR-0042-phase7-authenticated-join-and-identity-allocation.md); bounded prepare/token/frame/atomic-enqueue/commit composition and focused failure atomicity tests pass; real transport wiring and two-client process demo remain |
+| 7.3 | Implement authentication, session creation, player creation, and join | **In Progress** | Accepted [`ADR-0042`](adr/ADR-0042-phase7-authenticated-join-and-identity-allocation.md); bounded prepare/token/frame/atomic transport-pair enqueue/commit composition and focused failure atomicity tests pass; live authentication/session pumping and two-client process demo remain |
 | 7.4 | Implement one interior and one exterior cell fixture plus enter/leave observation | **Not Started** | Both clients receive correct initial and visibility state across transitions |
 | 7.5 | Implement semantic movement commands and sequenced snapshots | **Not Started** | Remote root transform/velocity converges while stale snapshots are rejected |
 | 7.6 | Implement disconnect, bounded grace period, resume, and clean expiration | **Not Started** | Resume preserves identity/revision/acks; expiration creates an explicit new session path |

@@ -374,6 +374,8 @@ namespace TES3MP
         OutboundTransportQueue(OutboundQueuePolicy policy, TransportTelemetrySink& telemetry);
 
         TransportResult enqueue(TransportChannel channel, std::span<const std::byte> message);
+        TransportResult enqueuePair(TransportChannel firstChannel, std::span<const std::byte> first,
+            TransportChannel secondChannel, std::span<const std::byte> second);
         OutboundPumpResult pump(
             TransportRuntime& runtime, TransportConnectionId connection, std::uint64_t nowMilliseconds);
         void clear() noexcept;
@@ -420,6 +422,8 @@ namespace TES3MP
         TransportResult detach(TransportConnectionId connection) noexcept;
         TransportResult enqueue(
             TransportConnectionId connection, TransportChannel channel, std::span<const std::byte> message);
+        TransportResult enqueuePair(TransportConnectionId connection, TransportChannel firstChannel,
+            std::span<const std::byte> first, TransportChannel secondChannel, std::span<const std::byte> second);
         std::optional<OutboundPumpResult> pump(
             TransportRuntime& runtime, TransportConnectionId connection, std::uint64_t nowMilliseconds);
         std::size_t connections() const noexcept { return mQueues.size(); }

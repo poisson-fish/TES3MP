@@ -6,6 +6,20 @@
 
 namespace TES3MP::ServerApp
 {
+    bool TransportJoinResponseQueue::enqueueJoinResponses(std::span<const std::byte> authentication,
+        std::span<const std::byte> snapshot) noexcept
+    {
+        try
+        {
+            return mQueues.enqueuePair(mConnection, TransportChannel::ReliableOrdered, authentication,
+                       TransportChannel::LatestWins, snapshot) == TransportResult::Accepted;
+        }
+        catch (...)
+        {
+            return false;
+        }
+    }
+
     JoinCompositionResult AuthenticatedJoinComposition::join(PrincipalId principal,
         SessionGeneration generation, ServerTick tick, ResumeTokenContext context) noexcept
     {

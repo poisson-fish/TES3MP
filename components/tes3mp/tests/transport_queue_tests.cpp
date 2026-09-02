@@ -134,6 +134,40 @@ namespace
             && check(queue.reliableMessages() == 0 && !queue.hasLatest(), "sent values retained");
     }
 
+    bool pairAdmissionIsAtomic()
+    {
+        auto queues = TES3MP::OutboundQueueSet::create(policy(), 1);
+        const auto connection = TES3MP::TransportConnectionId::initial();
+        FakeRuntime runtime;
+        if (!check(queues && queues->attach(connection) == TES3MP::TransportResult::Accepted,
+                "pair queue setup failed"))
+            return false;
+        for (unsigned value = 0; value < 4; ++value)
+            queues->enqueue(connection, TES3MP::TransportChannel::ReliableOrdered, bytes(value));
+        const auto blocked = queues->enqueuePair(connection, TES3MP::TransportChannel::LatestWins, bytes(9),
+            TES3MP::TransportChannel::ReliableOrdered, bytes(5));
+        queues->pump(runtime, connection, 0);
+        const bool noPartialLatest = std::ranges::none_of(runtime.sent,
+            [](const auto& message) { return message.channel == TES3MP::TransportChannel::LatestWins; });
+        const auto sentBeforeAcceptedPair = runtime.sent.size();
+
+        auto admitted = TES3MP::OutboundQueueSet::create(policy(), 1);
+        admitted->attach(connection);
+        const auto accepted = admitted->enqueuePair(connection, TES3MP::TransportChannel::ReliableOrdered, bytes(7),
+            TES3MP::TransportChannel::LatestWins, bytes(8));
+        admitted->pump(runtime, connection, 10);
+        return check(blocked == TES3MP::TransportResult::WouldBlock, "full pair was not rejected")
+            && check(noPartialLatest, "rejected pair admitted one lane")
+            && check(accepted == TES3MP::TransportResult::Accepted, "valid pair was rejected")
+            && check(admitted->enqueuePair(*connection.next(), TES3MP::TransportChannel::ReliableOrdered, bytes(1),
+                         TES3MP::TransportChannel::LatestWins, bytes(2)) == TES3MP::TransportResult::UnknownId,
+                "unknown connection pair was admitted")
+            && check(runtime.sent.size() == sentBeforeAcceptedPair + 2
+                    && runtime.sent[sentBeforeAcceptedPair].bytes[0] == std::byte{ 7 }
+                    && runtime.sent[sentBeforeAcceptedPair + 1].bytes[0] == std::byte{ 8 },
+                "accepted pair did not preserve both frames");
+    }
+
     bool limitsRateAndTime()
     {
         TES3MP::OutboundTransportQueue queue(policy());
@@ -215,7 +249,8 @@ namespace
 
 int main()
 {
-    return policyAndBounds() && connectionSetBounds() && orderingCoalescingAndFairness() && limitsRateAndTime()
+    return policyAndBounds() && connectionSetBounds() && orderingCoalescingAndFairness() && pairAdmissionIsAtomic()
+            && limitsRateAndTime()
             && isolatedSlowPeerEviction() && telemetryIsExactBoundedAndIsolated()
         ? 0
         : 1;

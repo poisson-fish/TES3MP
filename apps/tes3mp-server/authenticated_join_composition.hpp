@@ -44,6 +44,20 @@ namespace TES3MP::ServerApp
         ServerAuthenticationService& mAuthentication;
         JoinResponseQueue& mResponses;
     };
+
+    class TransportJoinResponseQueue final : public JoinResponseQueue
+    {
+    public:
+        TransportJoinResponseQueue(OutboundQueueSet& queues, TransportConnectionId connection) noexcept
+            : mQueues(queues), mConnection(connection) {}
+
+        bool enqueueJoinResponses(std::span<const std::byte> authentication,
+            std::span<const std::byte> snapshot) noexcept override;
+
+    private:
+        OutboundQueueSet& mQueues;
+        TransportConnectionId mConnection;
+    };
 }
 
 #endif

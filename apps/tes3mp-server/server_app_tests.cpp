@@ -202,4 +202,24 @@ int main()
                    ServerTick::initial(), ResumeTokenContext{}) == JoinCompositionResult::Committed);
         assert(joins.liveBindings() == 1);
     }
+    {
+        auto queues = OutboundQueueSet::create(
+            *OutboundQueuePolicy::create(1, 64 * 1024, 4, 2, 4, 1, 1, 1, 3, 100), 1);
+        const auto connection = TransportConnectionId::initial();
+        assert(queues && queues->attach(connection) == TransportResult::Accepted);
+        TransportJoinResponseQueue responses(*queues, connection);
+        auto joins = joinCoordinator();
+        FakeAuthentication authentication;
+        AuthenticatedJoinComposition composition(joins, authentication, responses);
+        assert(composition.join(id<PrincipalId>(4), SessionGeneration::initial(), ServerTick::initial(),
+                   ResumeTokenContext{}) == JoinCompositionResult::Committed);
+        assert(joins.liveBindings() == 1);
+
+        auto rejectedJoins = joinCoordinator();
+        TransportJoinResponseQueue missing(*queues, *connection.next());
+        AuthenticatedJoinComposition rejectedComposition(rejectedJoins, authentication, missing);
+        assert(rejectedComposition.join(id<PrincipalId>(5), SessionGeneration::initial(), ServerTick::initial(),
+                   ResumeTokenContext{}) == JoinCompositionResult::QueueRejected);
+        assert(rejectedJoins.liveBindings() == 0 && rejectedJoins.state().players().empty());
+    }
 }
