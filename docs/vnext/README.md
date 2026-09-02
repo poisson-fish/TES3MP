@@ -22,14 +22,15 @@ Slice 7.3 is in progress under accepted
 [`ADR-0042`](adr/ADR-0042-phase7-authenticated-join-and-identity-allocation.md).
 Its real transport event/receive/send pump, approved production proof-profile
 composition, thin client process, and automated two-client join proof are
-implemented; owner implementation-demo acceptance passes. Slice 7.4 is in progress.
+implemented; owner implementation-demo acceptance passes. Slice 7.4 is implemented
+with owner implementation-demo acceptance; Slice 7.5 has not started.
 Its architecture is approved under accepted
 [`ADR-0043`](adr/ADR-0043-phase7-fixture-cell-transition-and-observation.md),
 and its artifacts add typed fixture-transition exchange and intake, atomic
 canonical reduction, deterministic targeted observation projection, and
 failure-atomic observation/view queue admission. Client application,
 shared-writer runtime composition, atomic join/transition delivery, and the real
-two-client interior/exterior proof are implemented; owner demo acceptance remains.
+two-client interior/exterior proof are implemented and owner demo acceptance passes.
 The active tree is a provenance-verified OpenMW 0.51 baseline with:
 
 - engine-independent protocol, transport, client-session, server-core, and test

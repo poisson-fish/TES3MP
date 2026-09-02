@@ -4293,6 +4293,16 @@ only the relevant phase section here.
 
 [Back to the phase tracker](IMPLEMENTATION_PLAN.md#phase-7--headless-end-to-end-multiplayer-slice)
 
+- 2026-09-02 — Slice 7.4 owner implementation-demo acceptance — Implemented
+  - Change: accepted implementation `bd35f2d60c`; Slice 7.4 advanced to
+    **Implemented** in the live tracker.
+  - Decisions: no accepted ADR/GDR decision changed.
+  - Verification: owner reviewed the recorded real two-client
+    interior/exterior/interior proof after focused C++ targets, all 114 Python
+    tests, baseline provenance verification, and diff checks passed.
+  - Owner review: implementation-demo acceptance received on 2026-09-02.
+  - Follow-ups: none for Slice 7.4. Slice 7.5 remains **Not Started**.
+
 - 2026-09-02 — Slice 7.4 runtime composition and real fixture proof — In Progress
   - Change: composed joins and fixture transitions through one canonical reducer
     writer; added typed join publication, move-only reducer preparation, bounded
