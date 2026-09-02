@@ -4293,6 +4293,20 @@ only the relevant phase section here.
 
 [Back to the phase tracker](IMPLEMENTATION_PLAN.md#phase-7--headless-end-to-end-multiplayer-slice)
 
+- 2026-09-02 — Slice 7.7 profile and threshold catalog — In Progress
+  - Change: added accepted ADR-0046 and a typed test-support catalog for the
+    approved seed, named message-class profiles, fault bounds, 32 reconnect
+    cycles, 10,000 deterministic ticks, and 60-second process soak.
+  - Decisions: owner approved layered-matrix Option A and all proposed initial
+    thresholds. Reliable-operation profiles do not inject application-message
+    loss; selected-library encrypted tests retain packet-loss responsibility.
+  - Verification: MSVC 19.51 Debug `tes3mp_fault_injection_tests` passes exact
+    profile, seed, duration, count, and existing queue-cap contracts.
+  - Owner review: architecture and thresholds approved on 2026-09-02; Slice 7.7
+    implementation demo remains required before **Implemented**.
+  - Follow-ups: implement the deterministic matrix, bounded reconnect loop,
+    queue drain proof, and real-process soak.
+
 - 2026-09-02 — Slice 7.6 implementation demo — Implemented
   - Change: accepted implementation `9c75892eb1`; Slice 7.6 advanced to
     **Implemented**.

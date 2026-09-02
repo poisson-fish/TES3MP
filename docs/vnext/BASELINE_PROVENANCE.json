@@ -395,6 +395,11 @@
       "purpose": "Reusable synchronous deterministic Phase 4 fake-peer interface spanning framed negotiation, typed authentication, session binding, command, and snapshot exchange."
     },
     {
+      "path": "components/tes3mp/include/tes3mp/test_support/phase7_adverse_profiles.hpp",
+      "status": "A",
+      "purpose": "Owner-approved typed Slice 7.7 adverse-network profile names, deterministic seed, bounds, reconnect count, and soak thresholds."
+    },
+    {
       "path": "components/tes3mp/include/tes3mp/test_support/recording_observability.hpp",
       "status": "A",
       "purpose": "Bounded single-threaded FIFO metric/event recorder interfaces with explicit overflow evidence for deterministic tests."
@@ -1185,6 +1190,11 @@
       "purpose": "Records the owner-approved Phase 7 server-core lifecycle ownership, hidden grace state, failure-atomic resume composition, exact-deadline ordering, and acceptance tests."
     },
     {
+      "path": "docs/vnext/adr/ADR-0046-phase7-adverse-network-and-soak-matrix.md",
+      "status": "A",
+      "purpose": "Records the owner-approved layered adverse-network matrix, quantitative thresholds, reconnect loop, deterministic soak, and real-process soak boundary."
+    },
+    {
       "path": "docs/vnext/gdr/GDR-0001-phase7-headless-vertical-slice-behavior.md",
       "status": "A",
       "purpose": "Owner-approved Phase 7 fixture spawn, readiness, cell visibility, provisional tick integration, headless correction, and bounded resume behavior."
@@ -1551,7 +1561,7 @@
         },
         {
           "path": "components/tes3mp/CMakeLists.txt",
-          "sha256": "49f4c7730696916ca8e4dbe71db5d6f9649b4329d465fd5704cd47cb8fe0f1bb"
+          "sha256": "c148eac10e5a3e20055524e9bb718b0d210a349c35fdfd5ff9b83395c9160cd0"
         },
         {
           "path": "components/tes3mp/protocol/generated/authentication_accepted_generated.h",

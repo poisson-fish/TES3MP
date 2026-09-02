@@ -10,8 +10,8 @@ remains the [implementation plan](IMPLEMENTATION_PLAN.md#phase-7--headless-end-t
 - Branch: `vnext`
 - Phase 7: **In Progress**
 - Slice 7.6: **Implemented**
-- Slice 7.7: **Not Started**
-- Latest governing decision: [ADR-0045](adr/ADR-0045-phase7-disconnect-resume-and-expiration-composition.md)
+- Slice 7.7: **In Progress**
+- Governing decision: [ADR-0046](adr/ADR-0046-phase7-adverse-network-and-soak-matrix.md)
 - Latest implementation commit: `9c75892eb1` (`Prove Phase 7 disconnect lifecycle`)
 
 ## Working synopsis
@@ -23,9 +23,9 @@ canonical progress; resume preserves identity, generation progression, revision,
 and acknowledgements; exact expiration rejects the old token and fresh join
 creates a new identity. Credentials remain in memory and absent from evidence.
 
-Next eligible work is the separately decision-gated Slice 7.7 adverse-network
-matrix, reconnect-loop, queue-bound, and soak-test design. Present its options
-and recommendation before production implementation.
+Slice 7.7 layered matrix and thresholds are approved. The bounded named profile
+catalog and exact-value contracts pass. Next eligible work is the deterministic
+matrix, followed by reconnect-loop, queue-drain, and real-process soak proofs.
 
 ## Active files
 
@@ -41,6 +41,8 @@ and recommendation before production implementation.
   `components/tes3mp/tests/server_authentication_tests.cpp`
 - Process proof: `apps/tes3mp-headless-client/main.cpp`,
   `scripts/run_phase7_join_demo.py`
+- Adverse profiles: `components/tes3mp/include/tes3mp/test_support/phase7_adverse_profiles.hpp`,
+  `components/tes3mp/tests/fault_injection_tests.cpp`
 - Evidence: [Phase 7 notes](IMPLEMENTATION_NOTES.md#phase-7--headless-end-to-end-multiplayer-slice)
 
 ## Last verified

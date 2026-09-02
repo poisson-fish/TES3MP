@@ -350,6 +350,7 @@ target_sources(tes3mp_test_support PRIVATE
     include/tes3mp/test_support/fault_injecting_link.hpp
     include/tes3mp/test_support/in_memory_link.hpp
     include/tes3mp/test_support/manual_clock.hpp
+    include/tes3mp/test_support/phase7_adverse_profiles.hpp
     include/tes3mp/test_support/phase4_in_memory_peer.hpp
     include/tes3mp/test_support/recording_observability.hpp
     include/tes3mp/test_support/spatial_round_trip.hpp

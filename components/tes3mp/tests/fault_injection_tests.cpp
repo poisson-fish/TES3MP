@@ -1,5 +1,6 @@
 #include <tes3mp/test_support/deterministic_harness.hpp>
 #include <tes3mp/test_support/fault_injecting_link.hpp>
+#include <tes3mp/test_support/phase7_adverse_profiles.hpp>
 #include <tes3mp/test_support/manual_clock.hpp>
 
 #include <array>
@@ -307,6 +308,26 @@ namespace
         return link->send(path, message) == FaultSendResult::TimeOverflow && link->pendingMessages(path) == 0
             && link->pendingBytes(path) == 0;
     }
+
+    bool phase7_named_profiles_match_approved_thresholds()
+    {
+        const auto sampled = makePhase7AdverseProfile(Phase7AdverseProfile::SampledStateLossDuplication);
+        const auto reliable = makePhase7AdverseProfile(Phase7AdverseProfile::ReliableDuplicationReorder);
+        const auto latency = makePhase7AdverseProfile(Phase7AdverseProfile::LatencyJitterReorder);
+        return sampled && reliable && latency && Phase7AdverseSeed == 0x745345334d505f37ULL
+            && Phase7LatencyNanoseconds == 50'000'000 && Phase7JitterNanoseconds == 20'000'000
+            && Phase7ReorderNanoseconds == 30'000'000 && Phase7StallNanoseconds == 500'000'000
+            && Phase7ReconnectCycles == 32 && Phase7DeterministicSoakTicks == 10'000
+            && Phase7RealProcessSoakSeconds == 60
+            && sampled->lossPartsPerMillion() == 50'000
+            && sampled->duplicationPartsPerMillion() == 50'000
+            && reliable->lossPartsPerMillion() == 0
+            && reliable->duplicationPartsPerMillion() == 50'000
+            && latency->lossPartsPerMillion() == 0
+            && latency->duplicationPartsPerMillion() == 0
+            && sampled->maximumPendingMessages() == OutboundQueuePolicy::MaxReliableMessages
+            && sampled->maximumPendingBytes() == OutboundQueuePolicy::MaxReliableBytes;
+    }
 }
 
 int main()
@@ -325,6 +346,8 @@ int main()
         std::pair{ "jitter_and_reorder_are_bounded_and_can_change_delivery_order",
             &jitter_and_reorder_are_bounded_and_can_change_delivery_order },
         std::pair{ "time_overflow_is_explicit_and_atomic", &time_overflow_is_explicit_and_atomic },
+        std::pair{ "phase7_named_profiles_match_approved_thresholds",
+            &phase7_named_profiles_match_approved_thresholds },
     };
     for (const auto& [name, test] : tests)
     {

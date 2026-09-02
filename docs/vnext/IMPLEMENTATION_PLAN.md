@@ -355,6 +355,7 @@ runtime or protocol name.
 | ADR-0043 | Phase 7 fixture transition and observation composition | Phase 7 | **Implemented** |
 | ADR-0044 | Phase 7 movement tick and snapshot composition | Phase 7 | **Implemented** |
 | ADR-0045 | Phase 7 disconnect, resume, and expiration composition | Phase 7 | **Implemented** |
+| ADR-0046 | Phase 7 adverse-network and soak matrix | Phase 7 | **Implemented** |
 
 An ADR is complete only when it records considered alternatives, selection
 criteria, consequences, failure modes, a replacement/review trigger, and
@@ -637,7 +638,7 @@ Depends on: Phase 6.
 | 7.4 | Implement one interior and one exterior cell fixture plus enter/leave observation | **Implemented** | Accepted [`ADR-0043`](adr/ADR-0043-phase7-fixture-cell-transition-and-observation.md); implementation `bd35f2d60c`, shared-writer runtime composition, typed join/transition publication, bounded atomic multi-target delivery, client application, focused contracts, real two-client fixture proof, and owner demo acceptance pass |
 | 7.5 | Implement semantic movement commands and sequenced snapshots | **Implemented** | Accepted [`ADR-0044`](adr/ADR-0044-phase7-movement-tick-and-snapshot-composition.md); implementation `f8b1acee4b`, atomic checked integration, live motion dispatch, complete targeted views, focused tests, real two-client movement/convergence/stale-view proof, and owner demo acceptance pass |
 | 7.6 | Implement disconnect, bounded grace period, resume, and clean expiration | **Implemented** | Accepted [`ADR-0045`](adr/ADR-0045-phase7-disconnect-resume-and-expiration-composition.md); implementation `9c75892eb1`, focused contracts, real two-client disconnect/resume/expiration proof, and owner demo acceptance pass |
-| 7.7 | Add adverse-network matrix, reconnect loop, queue-bound, and soak tests | **Not Started** | Named profiles pass with deterministic seeds and recorded thresholds |
+| 7.7 | Add adverse-network matrix, reconnect loop, queue-bound, and soak tests | **In Progress** | Accepted [`ADR-0046`](adr/ADR-0046-phase7-adverse-network-and-soak-matrix.md); typed named profile/threshold catalog passes focused contracts; deterministic matrix is next |
 
 Exit gate:
 
