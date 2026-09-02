@@ -72,6 +72,18 @@ namespace TES3MP::ServerApp
         return found == mConnections.end() ? nullptr : &found->second.scope;
     }
 
+    std::vector<TransportConnectionId> ConnectionSessionCoordinator::connections() const
+    {
+        std::vector<TransportConnectionId> result;
+        result.reserve(mConnections.size());
+        for (const auto& [connection, ignored] : mConnections)
+        {
+            (void)ignored;
+            result.push_back(connection);
+        }
+        return result;
+    }
+
     ConnectionSessionResult ConnectionSessionCoordinator::dispatch(TransportConnectionId connection,
         const TransportMessage& message, AuthenticatedJoinCoordinator& joins, CredentialCrypto& crypto,
         ServerTick tick) noexcept

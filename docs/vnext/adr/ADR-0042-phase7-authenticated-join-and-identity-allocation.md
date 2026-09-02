@@ -68,6 +68,19 @@ outbound queue. `ServerApplication` remains a thin lifecycle/composition pump;
 wrong-lane, malformed, wrong-stage, authentication, derivation, join, binding,
 and queue failures fail closed.
 
+On 2026-09-01 the project owner approved production-ownership Option A: `main`
+owns the production clock, crypto, authentication, queues, join coordinator,
+and connection-session coordinator and lends one bounded wiring bundle to the
+thin `ServerApplication` pump. The coordinator remains the sole owner of live
+session records.
+
+On 2026-09-01 the project owner approved Phase 7 proof-profile Option A:
+protocol 1.0.0 with no optional capabilities, authentication bursts of four per
+source and 32 global with one-second refill, eight live connections, resume
+lifetime equal to the configured disconnect grace, and session-stage timeouts
+mapped from that grace. Startup rejects grace values outside the already
+accepted resume-token bounds.
+
 Rejected alternatives were app-owned join logic, random identifiers, staged
 install with rollback, multiple live players per principal, deferring the
 initial snapshot, and retaining incomplete joins. Identifiers are not restart-

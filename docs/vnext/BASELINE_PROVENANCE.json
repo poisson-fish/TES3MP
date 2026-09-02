@@ -130,6 +130,11 @@
       "purpose": "Thin single-threaded dedicated-server process root with transactional configuration, secret, transport, listener, and signal-driven shutdown composition."
     },
     {
+      "path": "apps/tes3mp-server/phase7_proof_profile.hpp",
+      "status": "A",
+      "purpose": "Pins the owner-approved bounded Phase 7 protocol, authentication, connection, and grace mapping proof profile."
+    },
+    {
       "path": "apps/tes3mp-server/resume_token_context.cpp",
       "status": "A",
       "purpose": "Derives the approved Phase 7 protocol and fixture-content resume-token context through the credential crypto boundary."

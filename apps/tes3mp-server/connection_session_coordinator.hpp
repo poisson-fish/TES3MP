@@ -6,6 +6,7 @@
 #include "tes3mp/authenticated_join.hpp"
 
 #include <map>
+#include <vector>
 
 namespace TES3MP::ServerApp
 {
@@ -38,6 +39,7 @@ namespace TES3MP::ServerApp
         ConnectionSessionResult pollAuthentication(TransportConnectionId connection,
             AuthenticatedJoinCoordinator& joins, CredentialCrypto& crypto, ServerTick tick) noexcept;
         std::size_t size() const noexcept { return mConnections.size(); }
+        std::vector<TransportConnectionId> connections() const;
 
     private:
         struct Connection

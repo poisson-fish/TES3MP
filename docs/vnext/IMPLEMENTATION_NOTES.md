@@ -4293,6 +4293,26 @@ only the relevant phase section here.
 
 [Back to the phase tracker](IMPLEMENTATION_PLAN.md#phase-7--headless-end-to-end-multiplayer-slice)
 
+- 2026-09-01 — Slice 7.3 live transport pump and production composition — In Progress
+  - Change: wired accepted/closed events, bounded receive/dispatch, pending
+    authentication progress, and outbound queue pumping through the thin server
+    application; production `main` now owns and lends the approved dependency
+    bundle and fixed Phase 7 proof profile.
+  - Decisions: owner approved Option A for production ownership and Option A for
+    protocol 1.0.0, empty optional capabilities, 4/32 one-second authentication
+    buckets, eight connections, and grace-mapped token/session lifetimes.
+  - Verification: MSVC 19.44 builds `tes3mp_server`; focused
+    `tes3mp_server_app_tests_run` passes live accept/hello/send and malformed-lane
+    fail-closed cleanup plus exact proof-profile boundary assertions;
+    `tes3mp_headless_client_tests_run` passes. All 114 repository-owned Python
+    tests pass; baseline verification passes with 269 intentional differences
+    and 67 dependency inputs; `git diff --check` passes.
+  - Owner review: architecture and security/profile approvals received before
+    dependent production implementation; process-demo acceptance remains pending.
+  - Follow-ups: add/compose a real scripted-client process entry point and run
+    the required two-client authentication, distinct-identity, complete-snapshot,
+    and injected-failure demo.
+
 - 2026-09-01 — Slice 7.3 bounded live frame dispatch — In Progress
   - Change: implementation `d366a5078a`; the app-local connection coordinator
     now validates and dispatches

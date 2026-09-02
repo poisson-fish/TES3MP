@@ -2,6 +2,7 @@
 #include "authenticated_join_composition.hpp"
 #include "resume_token_context.hpp"
 #include "connection_session_coordinator.hpp"
+#include "phase7_proof_profile.hpp"
 #include "server_config.hpp"
 
 #include <array>
@@ -52,19 +53,35 @@ namespace
             std::span<const std::byte> bytes) override
         { sent.emplace_back(bytes.begin(), bytes.end()); return TES3MP::TransportResult::Accepted; }
         TES3MP::TransportReceiveResult receive(
-            TES3MP::TransportConnectionId, std::span<TES3MP::TransportMessage>) override
-        { return { TES3MP::TransportResult::UnknownId, 0 }; }
+            TES3MP::TransportConnectionId, std::span<TES3MP::TransportMessage> output) override
+        {
+            if (receiveResult != TES3MP::TransportResult::Accepted) return { receiveResult, 0 };
+            const auto count = std::min(output.size(), incoming.size());
+            for (std::size_t index = 0; index < count; ++index) output[index] = std::move(incoming[index]);
+            incoming.erase(incoming.begin(), incoming.begin() + static_cast<std::ptrdiff_t>(count));
+            return { TES3MP::TransportResult::Accepted, count };
+        }
         TES3MP::TransportResult close(TES3MP::TransportConnectionId, TES3MP::TransportCloseMode) override
-        { return TES3MP::TransportResult::UnknownId; }
-        TES3MP::TransportPollResult poll(std::span<TES3MP::TransportEvent>) override
-        { calls += 'P'; return { pollResult, 0 }; }
+        { ++closes; return TES3MP::TransportResult::Accepted; }
+        TES3MP::TransportPollResult poll(std::span<TES3MP::TransportEvent> output) override
+        {
+            calls += 'P';
+            const auto count = std::min(output.size(), events.size());
+            for (std::size_t index = 0; index < count; ++index) output[index] = events[index];
+            events.erase(events.begin(), events.begin() + static_cast<std::ptrdiff_t>(count));
+            return { pollResult, count };
+        }
         TES3MP::TransportResult shutdown() override
         { calls += 'X'; return TES3MP::TransportResult::Accepted; }
 
         bool rejectListen = false;
         TES3MP::TransportResult pollResult = TES3MP::TransportResult::Accepted;
+        TES3MP::TransportResult receiveResult = TES3MP::TransportResult::Accepted;
         std::string calls;
         std::vector<std::vector<std::byte>> sent;
+        std::vector<TES3MP::TransportEvent> events;
+        std::vector<TES3MP::TransportMessage> incoming;
+        std::size_t closes = 0;
     };
 
     class AcceptedOperation final : public AuthenticationOperation
@@ -182,6 +199,13 @@ namespace
 int main()
 {
     using namespace TES3MP::ServerApp;
+    static_assert(Phase7ProtocolMajor == 1 && Phase7ProtocolMinor == 0 && Phase7ProtocolPatch == 0);
+    static_assert(Phase7SourceAuthenticationBurst == 4 && Phase7GlobalAuthenticationBurst == 32
+        && Phase7AuthenticationRefillMilliseconds == 1'000 && Phase7ConnectionCapacity == 8);
+    static_assert(!phase7ProofDisconnectGraceAccepted(MinimumResumeTokenLifetimeMilliseconds - 1));
+    static_assert(phase7ProofDisconnectGraceAccepted(MinimumResumeTokenLifetimeMilliseconds));
+    static_assert(phase7ProofDisconnectGraceAccepted(MaximumResumeTokenLifetimeMilliseconds));
+    static_assert(!phase7ProofDisconnectGraceAccepted(MaximumResumeTokenLifetimeMilliseconds + 1));
     {
         const auto negotiated
             = std::get<ServerHello>(negotiateClientHello(ClientHello::fromOffer(emptyOffer()), emptyOffer()));
@@ -375,5 +399,38 @@ int main()
         assert(sessions.dispatch(connection,
                    TransportMessage{ TransportChannel::LatestWins, { std::byte{ 1 } } }, joins, crypto,
                    ServerTick::initial()) == ConnectionSessionResult::ProtocolRejected);
+    }
+    {
+        FixedClock clock;
+        NullMetricSink metrics;
+        NullStructuredEventSink events;
+        Observability observability(metrics, events);
+        FakeAuthentication authentication;
+        RecordingCrypto crypto;
+        auto queues = OutboundQueueSet::create(OutboundQueuePolicy{}, 2);
+        auto timeouts = *SessionTimeoutPolicy::create(1'000'000, 1'000'000, 1'000'000);
+        ConnectionSessionCoordinator sessions(
+            clock, observability, timeouts, emptyOffer(), authentication, *queues, 2);
+        auto joins = joinCoordinator();
+        FakeRuntime wiredRuntime;
+        const auto connection = TransportConnectionId::initial();
+        wiredRuntime.events.push_back({ TransportEventKind::ConnectionAccepted, TransportFailure::None,
+            std::nullopt, std::nullopt, connection, std::nullopt,
+            TransportSecurity::EncryptedUnauthenticated, scope(std::byte{ 8 }) });
+        const auto helloPayload = encodeClientHello(ClientHello::fromOffer(emptyOffer()));
+        wiredRuntime.incoming.push_back({ TransportChannel::ReliableOrdered,
+            std::get<std::vector<std::byte>>(encodeProtocolFrame(
+                MessageClass::SessionControl, MessageKind::ClientHello, helloPayload)) });
+        ServerApplication wired(wiredRuntime, config,
+            ServerApplicationWiring{ sessions, joins, crypto, *queues, clock });
+        assert(wired.start() && wired.pump(ServerTick::initial()));
+        assert(sessions.size() == 1 && wiredRuntime.sent.size() == 1);
+        assert(std::get<DecodedFrame>(decodeProtocolFrame(wiredRuntime.sent[0])).messageKind()
+            == MessageKind::ServerHello);
+
+        wiredRuntime.incoming.push_back(
+            { TransportChannel::LatestWins, { std::byte{ 1 } } });
+        assert(wired.pump(ServerTick::initial()));
+        assert(sessions.size() == 0 && queues->connections() == 0 && wiredRuntime.closes == 1);
     }
 }
