@@ -25,9 +25,10 @@ composition, thin client process, and automated two-client join proof are
 implemented; owner implementation-demo acceptance passes. Slice 7.4 is in progress.
 Its architecture is approved under accepted
 [`ADR-0043`](adr/ADR-0043-phase7-fixture-cell-transition-and-observation.md),
-and its first artifacts add typed fixture-transition protocol exchange and
-intake plus atomic canonical reducer behavior. Explicit observation delivery
-and the real two-client proof remain.
+and its artifacts add typed fixture-transition exchange and intake, atomic
+canonical reduction, deterministic targeted observation projection, and
+failure-atomic observation/view queue admission. Client application, runtime
+composition, and the real two-client proof remain.
 The active tree is a provenance-verified OpenMW 0.51 baseline with:
 
 - engine-independent protocol, transport, client-session, server-core, and test

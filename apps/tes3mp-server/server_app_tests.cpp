@@ -2,6 +2,7 @@
 #include "authenticated_join_composition.hpp"
 #include "resume_token_context.hpp"
 #include "connection_session_coordinator.hpp"
+#include "fixture_observation_projection.hpp"
 #include "phase7_proof_profile.hpp"
 #include "server_config.hpp"
 
@@ -194,6 +195,25 @@ namespace
         assert(std::holds_alternative<TES3MP::ServerApp::ServerConfig>(result));
         return std::get<TES3MP::ServerApp::ServerConfig>(std::move(result));
     }
+
+    CanonicalServerState fixtureState(bool secondExterior)
+    {
+        const auto zero = Turn32::fromValue(0);
+        const auto interior = CellId::interior(id<CellSpaceId>(7));
+        const auto exterior = CellId::exterior(id<CellSpaceId>(8), 0, 0);
+        std::vector<CanonicalPlayerEntityState> players{
+            { id<PlayerId>(1), id<EntityId>(1), Transform(interior, Position3(1, 0, 0), Orientation3(zero, zero, zero)),
+                LinearVelocity3(0, 0, 0), id<EntityRevision>(2), AuthorityEpoch::initial(), id<ServerTick>(4) },
+            { id<PlayerId>(2), id<EntityId>(2), Transform(secondExterior ? exterior : interior,
+                Position3(2, 0, 0), Orientation3(zero, zero, zero)), LinearVelocity3(0, 0, 0),
+                id<EntityRevision>(secondExterior ? 2 : 1), AuthorityEpoch::initial(), id<ServerTick>(4) }
+        };
+        std::vector<CanonicalSessionProgress> sessions{
+            { id<SessionId>(1), SessionGeneration::initial(), id<PlayerId>(1), id<EntityId>(1), std::nullopt },
+            { id<SessionId>(2), SessionGeneration::initial(), id<PlayerId>(2), id<EntityId>(2), std::nullopt }
+        };
+        return std::get<CanonicalServerState>(createCanonicalServerState(players, sessions));
+    }
 }
 
 int main()
@@ -206,6 +226,43 @@ int main()
     static_assert(phase7ProofDisconnectGraceAccepted(MinimumResumeTokenLifetimeMilliseconds));
     static_assert(phase7ProofDisconnectGraceAccepted(MaximumResumeTokenLifetimeMilliseconds));
     static_assert(!phase7ProofDisconnectGraceAccepted(MaximumResumeTokenLifetimeMilliseconds + 1));
+    {
+        const auto before = fixtureState(false);
+        const auto after = fixtureState(true);
+        auto projected = projectFixtureObservations(before, after, id<ServerTick>(4));
+        assert(projected && projected->size() == 2);
+        assert((*projected)[0].targetSession == id<SessionId>(1));
+        assert(((*projected)[0].observations.changes().size() == 1
+            && (*projected)[0].observations.changes()[0]
+                == ObservationChange{ id<PlayerId>(2), id<EntityId>(2), ObservationChangeKind::Leave }));
+        assert((*projected)[0].view.view().entries().size() == 1
+            && (*projected)[0].view.view().entries()[0].playerId() == id<PlayerId>(1));
+        assert(((*projected)[1].observations.changes().size() == 1
+            && (*projected)[1].observations.changes()[0]
+                == ObservationChange{ id<PlayerId>(1), id<EntityId>(1), ObservationChangeKind::Leave }));
+        assert((*projected)[1].view.view().entries().size() == 1
+            && (*projected)[1].view.view().entries()[0].playerId() == id<PlayerId>(2));
+        assert(projectFixtureObservations(after, after, id<ServerTick>(5))->empty());
+
+        auto queues = OutboundQueueSet::create(OutboundQueuePolicy{}, 1);
+        const auto connection = TransportConnectionId::initial();
+        assert(queues->attach(connection) == TransportResult::Accepted);
+        assert(admitFixtureObservation(*queues, connection, (*projected)[0]));
+        FakeRuntime runtime;
+        assert(queues->pump(runtime, connection, 0) == OutboundPumpResult::Progress);
+        assert(runtime.sent.size() == 2);
+        assert(std::get<DecodedFrame>(decodeProtocolFrame(runtime.sent[0])).messageKind()
+            == MessageKind::ReliableObservationBatch);
+        assert(std::get<DecodedFrame>(decodeProtocolFrame(runtime.sent[1])).messageKind()
+            == MessageKind::LatestWinsSnapshot);
+
+        auto blockedPolicy = OutboundQueuePolicy{};
+        blockedPolicy.reliableMessages = 0;
+        auto blocked = OutboundQueueSet::create(blockedPolicy, 1);
+        assert(blocked->attach(connection) == TransportResult::Accepted);
+        assert(!admitFixtureObservation(*blocked, connection, (*projected)[0]));
+        assert(blocked->pump(runtime, connection, 1) == OutboundPumpResult::Idle);
+    }
     {
         const auto negotiated
             = std::get<ServerHello>(negotiateClientHello(ClientHello::fromOffer(emptyOffer()), emptyOffer()));

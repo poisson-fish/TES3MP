@@ -135,6 +135,16 @@
       "purpose": "Defines the approved app-local live connection and server-session ownership boundary."
     },
     {
+      "path": "apps/tes3mp-server/fixture_observation_projection.cpp",
+      "status": "A",
+      "purpose": "Derives deterministic per-target Phase 7 fixture enter/leave observations and complete views and admits each pair atomically."
+    },
+    {
+      "path": "apps/tes3mp-server/fixture_observation_projection.hpp",
+      "status": "A",
+      "purpose": "Declares the bounded approved fixture-observation projection and atomic delivery boundary."
+    },
+    {
       "path": "apps/tes3mp-server/main.cpp",
       "status": "A",
       "purpose": "Thin single-threaded dedicated-server process root with transactional configuration, secret, transport, listener, and signal-driven shutdown composition."
@@ -157,7 +167,7 @@
     {
       "path": "apps/tes3mp-server/server_app_tests.cpp",
       "status": "A",
-      "purpose": "Focused configuration, lifecycle, two-client authenticated-join composition, and token/queue failure atomicity contracts."
+      "purpose": "Focused configuration, lifecycle, join, fixture-observation projection, and token/queue failure-atomicity contracts."
     },
     {
       "path": "apps/tes3mp-server/server_application.cpp",

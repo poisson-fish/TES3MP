@@ -4293,6 +4293,22 @@ only the relevant phase section here.
 
 [Back to the phase tracker](IMPLEMENTATION_PLAN.md#phase-7--headless-end-to-end-multiplayer-slice)
 
+- 2026-09-01 — Slice 7.4 observation projection and admission — In Progress
+  - Change: added bounded deterministic before/after canonical-state projection
+    of per-session enter/leave batches and complete same-cell views, plus one
+    atomic reliable/latest queue-admission operation per affected target.
+  - Decisions: implements accepted ADR-0043 and its observation-composition
+    clarification; no new architecture, authority, state-scope, or gameplay
+    behavior decision was made.
+  - Verification: MSVC 19.51 `tes3mp_server_app_tests_run` passes; focused
+    contracts cover two affected targets, exact leave sets, complete targeted
+    views, unchanged-state no-op, paired frame order, and capacity failure
+    admitting neither frame. Repository Python, provenance, and diff checks are
+    recorded in the finishing commit.
+  - Owner review: Slice 7.4 implementation demo remains pending.
+  - Follow-ups: compose projection after the canonical transition, apply both
+    frame types in the headless client, and run the real two-client demo.
+
 - 2026-09-01 — Slice 7.4 reliable observation wire root — In Progress
   - Change: added a distinct bounded server-to-client reliable observation-batch
     schema, owned codec, frame kind, generated header, and focused contracts.
