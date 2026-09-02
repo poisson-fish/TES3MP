@@ -37,7 +37,8 @@ its atomic checked movement tick, complete targeted views, and focused contracts
 are implemented. Its real two-client movement/convergence/stale-view proof
 and owner implementation-demo acceptance pass. Slice 7.6 is in progress under
 accepted [`ADR-0045`](adr/ADR-0045-phase7-disconnect-resume-and-expiration-composition.md);
-its first production artifact adds failure-atomic prepared resume-token rotation.
+its production artifacts add failure-atomic prepared resume-token rotation and
+transactional canonical hide, same-identity resume, and exact-deadline expiration.
 The active tree is a provenance-verified OpenMW 0.51 baseline with:
 
 - engine-independent protocol, transport, client-session, server-core, and test

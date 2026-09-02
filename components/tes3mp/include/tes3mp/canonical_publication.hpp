@@ -31,6 +31,25 @@ namespace TES3MP
         friend bool operator==(const CanonicalSpatialTickRecord&, const CanonicalSpatialTickRecord&) noexcept = default;
     };
 
+    enum class CanonicalSessionLifecycleKind : std::uint8_t
+    {
+        Disconnected,
+        Resumed,
+        Expired,
+    };
+
+    struct CanonicalSessionLifecycleRecord
+    {
+        CanonicalStateVersion stateVersion;
+        ServerTick commitTick;
+        CanonicalSessionLifecycleKind kind;
+        SessionId session;
+        PlayerId player;
+        SessionGeneration generation;
+        friend bool operator==(const CanonicalSessionLifecycleRecord&,
+            const CanonicalSessionLifecycleRecord&) noexcept = default;
+    };
+
     class CanonicalStateChangeRecord
     {
     public:
@@ -94,6 +113,10 @@ namespace TES3MP
         std::span<const CanonicalStateChangeRecord> changes() const noexcept { return mChanges; }
         std::span<const CanonicalSessionJoinedRecord> joinedSessions() const noexcept { return mJoinedSessions; }
         std::span<const CanonicalSpatialTickRecord> spatialTicks() const noexcept { return mSpatialTicks; }
+        std::span<const CanonicalSessionLifecycleRecord> sessionLifecycle() const noexcept
+        {
+            return mSessionLifecycle;
+        }
 
         friend bool operator==(const CanonicalStatePublication&, const CanonicalStatePublication&) noexcept;
 
@@ -110,6 +133,7 @@ namespace TES3MP
         std::vector<CanonicalStateChangeRecord> mChanges;
         std::vector<CanonicalSessionJoinedRecord> mJoinedSessions;
         std::vector<CanonicalSpatialTickRecord> mSpatialTicks;
+        std::vector<CanonicalSessionLifecycleRecord> mSessionLifecycle;
     };
 
     enum class CanonicalPublicationReadAction : std::uint8_t

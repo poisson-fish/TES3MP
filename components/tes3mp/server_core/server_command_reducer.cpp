@@ -239,6 +239,85 @@ namespace TES3MP
         return true;
     }
 
+    std::optional<CanonicalCommandReducer::PreparedLifecycle> CanonicalCommandReducer::prepareLifecycleState(
+        std::vector<CanonicalPlayerEntityState> players, std::vector<CanonicalSessionProgress> sessions,
+        CanonicalSessionLifecycleKind kind, SessionId session, PlayerId player,
+        SessionGeneration generation, ServerTick tick)
+    {
+        auto candidate = createCanonicalServerState(players, sessions);
+        auto* state = std::get_if<CanonicalServerState>(&candidate);
+        if (!state || !mStateVersion.next()) return std::nullopt;
+        PreparedLifecycle prepared;
+        prepared.mBaseVersion = mStateVersion;
+        prepared.mStateVersion = *mStateVersion.next();
+        prepared.mCheckpointTick = tick;
+        prepared.mState = std::make_shared<CanonicalServerState>(std::move(*state));
+        prepared.mPublication = std::shared_ptr<CanonicalStatePublication>(
+            new CanonicalStatePublication(mStateVersion, tick, mState, {}));
+        prepared.mPublication->mSessionLifecycle.push_back(
+            { prepared.mStateVersion, tick, kind, session, player, generation });
+        return prepared;
+    }
+
+    std::optional<CanonicalCommandReducer::PreparedLifecycle> CanonicalCommandReducer::prepareDisconnect(
+        SessionId sessionId, ServerTick tick)
+    {
+        std::vector<CanonicalPlayerEntityState> players(mState->players().begin(), mState->players().end());
+        std::vector<CanonicalSessionProgress> sessions(mState->activeSessions().begin(), mState->activeSessions().end());
+        const auto found = std::find_if(sessions.begin(), sessions.end(),
+            [sessionId](const auto& value) { return value.sessionId() == sessionId; });
+        if (found == sessions.end()) return std::nullopt;
+        const auto player = found->playerId();
+        const auto generation = found->sessionGeneration();
+        sessions.erase(found);
+        return prepareLifecycleState(std::move(players), std::move(sessions),
+            CanonicalSessionLifecycleKind::Disconnected, sessionId, player, generation, tick);
+    }
+
+    std::optional<CanonicalCommandReducer::PreparedLifecycle> CanonicalCommandReducer::prepareResume(
+        CanonicalSessionProgress session, ServerTick tick)
+    {
+        std::vector<CanonicalPlayerEntityState> players(mState->players().begin(), mState->players().end());
+        if (!mState->findPlayer(session.playerId()) || mState->findActiveSession(session.sessionId())) return std::nullopt;
+        std::vector<CanonicalSessionProgress> sessions(mState->activeSessions().begin(), mState->activeSessions().end());
+        sessions.push_back(session);
+        std::sort(sessions.begin(), sessions.end(), [](const auto& a, const auto& b) { return a.sessionId() < b.sessionId(); });
+        return prepareLifecycleState(std::move(players), std::move(sessions),
+            CanonicalSessionLifecycleKind::Resumed, session.sessionId(), session.playerId(),
+            session.sessionGeneration(), tick);
+    }
+
+    std::optional<CanonicalCommandReducer::PreparedLifecycle> CanonicalCommandReducer::prepareExpiration(
+        PlayerId playerId, SessionId sessionId, SessionGeneration generation, ServerTick tick)
+    {
+        std::vector<CanonicalPlayerEntityState> players(mState->players().begin(), mState->players().end());
+        const auto found = std::find_if(players.begin(), players.end(),
+            [playerId](const auto& value) { return value.playerId() == playerId; });
+        if (found == players.end()) return std::nullopt;
+        players.erase(found);
+        std::vector<CanonicalSessionProgress> sessions(mState->activeSessions().begin(), mState->activeSessions().end());
+        if (std::any_of(sessions.begin(), sessions.end(), [playerId](const auto& value) { return value.playerId() == playerId; }))
+            return std::nullopt;
+        return prepareLifecycleState(std::move(players), std::move(sessions),
+            CanonicalSessionLifecycleKind::Expired, sessionId, playerId, generation, tick);
+    }
+
+    bool CanonicalCommandReducer::commit(PreparedLifecycle&& prepared)
+    {
+        if (prepared.mBaseVersion != mStateVersion || !prepared.mState || !prepared.mPublication) return false;
+        mState = std::move(prepared.mState);
+        mStateVersion = prepared.mStateVersion;
+        mCheckpointTick = prepared.mCheckpointTick;
+        prepared.mPublication->mStateVersion = mStateVersion;
+        prepared.mPublication->mCheckpointTick = mCheckpointTick;
+        prepared.mPublication->mState = mState;
+        prepared.mPublication->mChecksum = canonicalStateChecksumV1(mStateVersion, mCheckpointTick, *mState);
+        std::shared_ptr<const CanonicalStatePublication> committed = std::move(prepared.mPublication);
+        std::atomic_store_explicit(&mLatestPublication, committed, std::memory_order_release);
+        (void)deliver(committed);
+        return true;
+    }
+
     CanonicalSinkDeliveryReport CanonicalCommandReducer::publish(
         std::shared_ptr<CanonicalStatePublication> publication) noexcept
     {

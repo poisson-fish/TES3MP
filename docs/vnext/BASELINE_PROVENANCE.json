@@ -340,6 +340,11 @@
       "purpose": "Owner-approved writer-confined canonical reducer, closed batch errors, immutable shared state/publication access, checked state version, and later-reviewed composition boundary."
     },
     {
+      "path": "components/tes3mp/include/tes3mp/server_lifecycle.hpp",
+      "status": "A",
+      "purpose": "Owner-approved bounded server-core disconnect, hidden-grace, resume, and expiration transaction boundary."
+    },
+    {
       "path": "components/tes3mp/include/tes3mp/server_session.hpp",
       "status": "A",
       "purpose": "Closed server admission-session states, typed events/actions, provider ownership, and bounded terminal result interface."
@@ -593,6 +598,11 @@
       "path": "components/tes3mp/server_core/server_command_reducer.cpp",
       "status": "A",
       "purpose": "Owner-approved sealed-batch validation, bounded cross-batch idempotency, per-command immutable candidate/version installation, checksummed publication, acknowledgement finalization, velocity replacement, and observability."
+    },
+    {
+      "path": "components/tes3mp/server_core/server_lifecycle.cpp",
+      "status": "A",
+      "purpose": "Failure-atomic canonical disconnect, bounded hidden grace, same-identity resume, exact-deadline expiration, and deterministic lifecycle publication implementation."
     },
     {
       "path": "components/tes3mp/server_core/server_session.cpp",
@@ -863,6 +873,11 @@
       "path": "components/tes3mp/tests/server_core_safety_tests.cpp",
       "status": "A",
       "purpose": "Approved Slice 5.5 idempotency horizon, duplicate finalization, epoch, exact-byte, CRC-64, field-sensitivity, observability-independence, resync, and composition-boundary contracts."
+    },
+    {
+      "path": "components/tes3mp/tests/server_lifecycle_tests.cpp",
+      "status": "A",
+      "purpose": "Focused disconnect rollback, hidden-state, same-identity resume, generation advance, exact-deadline expiration, and lifecycle publication contracts."
     },
     {
       "path": "components/tes3mp/tests/session_state_machine_tests.cpp",
@@ -1153,6 +1168,11 @@
       "path": "docs/vnext/adr/ADR-0044-phase7-movement-tick-and-snapshot-composition.md",
       "status": "A",
       "purpose": "Records the owner-approved Phase 7 atomic movement tick, checked integration, complete same-cell latest-wins views, and acceptance tests."
+    },
+    {
+      "path": "docs/vnext/adr/ADR-0045-phase7-disconnect-resume-and-expiration-composition.md",
+      "status": "A",
+      "purpose": "Records the owner-approved Phase 7 server-core lifecycle ownership, hidden grace state, failure-atomic resume composition, exact-deadline ordering, and acceptance tests."
     },
     {
       "path": "docs/vnext/gdr/GDR-0001-phase7-headless-vertical-slice-behavior.md",
@@ -1521,7 +1541,7 @@
         },
         {
           "path": "components/tes3mp/CMakeLists.txt",
-          "sha256": "a54999bfdd68bce1d2ec2bef85237c5addccc9f4f58baf3929eab197d8feeefe"
+          "sha256": "49f4c7730696916ca8e4dbe71db5d6f9649b4329d465fd5704cd47cb8fe0f1bb"
         },
         {
           "path": "components/tes3mp/protocol/generated/authentication_accepted_generated.h",

@@ -124,6 +124,24 @@ namespace TES3MP
             std::shared_ptr<CanonicalStatePublication> mPublication;
         };
 
+        class PreparedLifecycle
+        {
+        public:
+            PreparedLifecycle(PreparedLifecycle&&) noexcept = default;
+            PreparedLifecycle& operator=(PreparedLifecycle&&) noexcept = default;
+            PreparedLifecycle(const PreparedLifecycle&) = delete;
+            PreparedLifecycle& operator=(const PreparedLifecycle&) = delete;
+            const CanonicalServerState& candidateState() const noexcept { return *mState; }
+        private:
+            friend class CanonicalCommandReducer;
+            PreparedLifecycle() = default;
+            CanonicalStateVersion mBaseVersion = CanonicalStateVersion::initial();
+            CanonicalStateVersion mStateVersion = CanonicalStateVersion::initial();
+            ServerTick mCheckpointTick = ServerTick::initial();
+            std::shared_ptr<const CanonicalServerState> mState;
+            std::shared_ptr<CanonicalStatePublication> mPublication;
+        };
+
         // Eligible for later reviewed composition; this type owns no connection,
         // protocol request, target projection, delivery, or runtime loop.
         CanonicalCommandReducer(CanonicalServerState initialState, Observability& observability);
@@ -146,9 +164,19 @@ namespace TES3MP
         std::optional<PreparedJoin> prepareJoin(CanonicalPlayerEntityState player,
             CanonicalSessionProgress session, ServerTick tick);
         bool commit(PreparedJoin&& prepared);
+        std::optional<PreparedLifecycle> prepareDisconnect(SessionId session, ServerTick tick);
+        std::optional<PreparedLifecycle> prepareResume(
+            CanonicalSessionProgress session, ServerTick tick);
+        std::optional<PreparedLifecycle> prepareExpiration(PlayerId player, SessionId session,
+            SessionGeneration generation, ServerTick tick);
+        bool commit(PreparedLifecycle&& prepared);
         CommandBatchReductionResult apply(const ServerTickCommandBatch& batch);
 
     private:
+        std::optional<PreparedLifecycle> prepareLifecycleState(
+            std::vector<CanonicalPlayerEntityState> players,
+            std::vector<CanonicalSessionProgress> sessions, CanonicalSessionLifecycleKind kind,
+            SessionId session, PlayerId player, SessionGeneration generation, ServerTick tick);
         CanonicalSinkDeliveryReport publish(std::shared_ptr<CanonicalStatePublication> publication) noexcept;
         CanonicalSinkDeliveryReport deliver(
             const std::shared_ptr<const CanonicalStatePublication>& publication) noexcept;

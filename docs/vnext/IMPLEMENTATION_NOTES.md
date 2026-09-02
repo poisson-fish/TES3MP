@@ -4293,6 +4293,27 @@ only the relevant phase section here.
 
 [Back to the phase tracker](IMPLEMENTATION_PLAN.md#phase-7--headless-end-to-end-multiplayer-slice)
 
+- 2026-09-02 — Slice 7.6 canonical lifecycle transactions — In Progress
+  - Change: added the engine-independent bounded lifecycle coordinator and
+    reducer prepare/commit transactions for disconnect hiding, same-identity
+    resume with checked generation, and deterministic expiration; lifecycle
+    changes now appear in immutable canonical publications.
+  - Decisions: implements accepted ADR-0045 Option A. No architecture,
+    authority, state-scope, or gameplay decision changed. Also repaired the
+    provenance manifest omission for accepted ADR-0045.
+  - Verification: fresh MSVC 19.51 Debug
+    `tes3mp_server_lifecycle_tests` passes; MSVC 19.51 Release
+    `tes3mp_protocol_tests_run` passes. All 115 repository Python tests pass.
+    Staged baseline verification passes with 282 intentional differences and
+    69 dependency inputs; staged legacy exclusion passes across 3,976 tracked
+    paths, 62 CMake files, 1,254 compile commands, and 1,971 Ninja edges;
+    staged `git diff --check` passes.
+  - Owner review: ADR approval is recorded; implementation demo remains
+    required before Slice 7.6 can become **Implemented**.
+  - Follow-ups: compose token rotation, authentication, complete resume
+    snapshot/observations, connection events, expiration pumping, and the real
+    two-client disconnect/resume/expiration proof.
+
 - 2026-09-02 — Slice 7.6 prepared resume-token rotation — In Progress
   - Change: accepted ADR-0045 and added bounded prepare/commit/cancel rotation
     to the production resume-token store. Cancellation preserves the old token;
