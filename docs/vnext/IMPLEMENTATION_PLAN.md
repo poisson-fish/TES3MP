@@ -2,7 +2,7 @@
 
 Document type: living implementation plan
 
-Updated: 2026-09-01
+Updated: 2026-09-02
 
 Direction source: [`README.md`](README.md)
 
@@ -349,6 +349,11 @@ runtime or protocol name.
 | ADR-0037 | Phase 6 bounded outbound queues and slow-peer policy | Phase 6 | **Implemented** |
 | ADR-0038 | Phase 6 network telemetry and stable reasons | Phase 6 | **Implemented** |
 | ADR-0039 | Phase 6 deterministic real-transport fault boundary | Phase 6 | **Implemented** |
+| ADR-0040 | Phase 7 server composition and configuration | Phase 7 | **Implemented** |
+| ADR-0041 | Phase 7 headless client and script driver | Phase 7 | **Implemented** |
+| ADR-0042 | Phase 7 authenticated join and identity allocation | Phase 7 | **Implemented** |
+| ADR-0043 | Phase 7 fixture transition and observation composition | Phase 7 | **Implemented** |
+| ADR-0044 | Phase 7 movement tick and snapshot composition | Phase 7 | **Implemented** |
 
 An ADR is complete only when it records considered alternatives, selection
 criteria, consequences, failure modes, a replacement/review trigger, and
@@ -629,7 +634,7 @@ Depends on: Phase 6.
 | 7.2 | Add a reusable headless client-session library and scripted fake-client driver | **Implemented** | Accepted [`ADR-0041`](adr/ADR-0041-phase7-headless-client-and-script-driver.md), implementation `a4e983f5f0`, applicable local verification, and owner demo acceptance pass |
 | 7.3 | Implement authentication, session creation, player creation, and join | **Implemented** | Accepted [`ADR-0042`](adr/ADR-0042-phase7-authenticated-join-and-identity-allocation.md); implementation `39c6c72095`, applicable local verification, real two-client plus injected-failure process demo, and owner implementation-demo acceptance pass |
 | 7.4 | Implement one interior and one exterior cell fixture plus enter/leave observation | **Implemented** | Accepted [`ADR-0043`](adr/ADR-0043-phase7-fixture-cell-transition-and-observation.md); implementation `bd35f2d60c`, shared-writer runtime composition, typed join/transition publication, bounded atomic multi-target delivery, client application, focused contracts, real two-client fixture proof, and owner demo acceptance pass |
-| 7.5 | Implement semantic movement commands and sequenced snapshots | **Not Started** | Remote root transform/velocity converges while stale snapshots are rejected |
+| 7.5 | Implement semantic movement commands and sequenced snapshots | **In Progress** | Accepted [`ADR-0044`](adr/ADR-0044-phase7-movement-tick-and-snapshot-composition.md); atomic checked integration, domain publication, complete targeted views, and focused tests pass; real two-client demo pending |
 | 7.6 | Implement disconnect, bounded grace period, resume, and clean expiration | **Not Started** | Resume preserves identity/revision/acks; expiration creates an explicit new session path |
 | 7.7 | Add adverse-network matrix, reconnect loop, queue-bound, and soak tests | **Not Started** | Named profiles pass with deterministic seeds and recorded thresholds |
 

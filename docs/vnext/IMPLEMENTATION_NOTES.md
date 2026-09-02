@@ -4293,6 +4293,13 @@ only the relevant phase section here.
 
 [Back to the phase tracker](IMPLEMENTATION_PLAN.md#phase-7--headless-end-to-end-multiplayer-slice)
 
+- 2026-09-02 — Slice 7.5 movement tick composition — In Progress
+  - Change: added accepted ADR-0044; implemented one prepared command/integration transaction, checked position arithmetic, revisioned spatial-tick publication, targeted complete same-cell views, and atomic multi-target output admission.
+  - Decisions: owner approved Option A for one failure-atomic command/integration/view tick and Option A for targeted complete same-cell latest-wins views sequenced by `ServerTick`.
+  - Verification: fresh MSVC 19.51 `tes3mp_server_app_tests_run`, `tes3mp_protocol_tests_run`, and `tes3mp_headless_client_tests_run` pass; focused contracts cover checked integration, revision advance, complete view projection, and whole-tick overflow rollback. All 114 repository Python tests, baseline provenance verification with 277 intentional differences and 69 dependency inputs, legacy exclusion, and `git diff --check` pass.
+  - Owner review: explicit A/A approval received on 2026-09-02.
+  - Follow-ups: extend the real two-client process proof with simultaneous movement, convergence, stale-view rejection, and overflow failure; obtain owner demo acceptance.
+
 - 2026-09-02 — Slice 7.4 owner implementation-demo acceptance — Implemented
   - Change: accepted implementation `bd35f2d60c`; Slice 7.4 advanced to
     **Implemented** in the live tracker.

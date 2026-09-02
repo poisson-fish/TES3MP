@@ -23,6 +23,14 @@ namespace TES3MP
         friend bool operator==(const CanonicalSessionJoinedRecord&, const CanonicalSessionJoinedRecord&) noexcept = default;
     };
 
+    struct CanonicalSpatialTickRecord
+    {
+        CanonicalStateVersion stateVersion;
+        ServerTick commitTick;
+        CanonicalPlayerEntityState player;
+        friend bool operator==(const CanonicalSpatialTickRecord&, const CanonicalSpatialTickRecord&) noexcept = default;
+    };
+
     class CanonicalStateChangeRecord
     {
     public:
@@ -85,6 +93,7 @@ namespace TES3MP
         const CanonicalServerState& state() const noexcept { return *mState; }
         std::span<const CanonicalStateChangeRecord> changes() const noexcept { return mChanges; }
         std::span<const CanonicalSessionJoinedRecord> joinedSessions() const noexcept { return mJoinedSessions; }
+        std::span<const CanonicalSpatialTickRecord> spatialTicks() const noexcept { return mSpatialTicks; }
 
         friend bool operator==(const CanonicalStatePublication&, const CanonicalStatePublication&) noexcept;
 
@@ -100,6 +109,7 @@ namespace TES3MP
         std::shared_ptr<const CanonicalServerState> mState;
         std::vector<CanonicalStateChangeRecord> mChanges;
         std::vector<CanonicalSessionJoinedRecord> mJoinedSessions;
+        std::vector<CanonicalSpatialTickRecord> mSpatialTicks;
     };
 
     enum class CanonicalPublicationReadAction : std::uint8_t

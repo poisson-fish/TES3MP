@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <array>
+#include <limits>
 #include <memory>
 #include <optional>
 #include <utility>
@@ -169,6 +170,16 @@ namespace
 
 namespace TES3MP
 {
+    namespace
+    {
+        std::optional<std::int64_t> checkedAdd(std::int64_t left, std::int64_t right) noexcept
+        {
+            if ((right > 0 && left > std::numeric_limits<std::int64_t>::max() - right)
+                || (right < 0 && left < std::numeric_limits<std::int64_t>::min() - right))
+                return std::nullopt;
+            return left + right;
+        }
+    }
     CanonicalCommandReducer::CanonicalCommandReducer(CanonicalServerState initialState, Observability& observability)
         : CanonicalCommandReducer(std::move(initialState), observability, CanonicalSinkBundle{})
     {
@@ -231,7 +242,7 @@ namespace TES3MP
     CanonicalSinkDeliveryReport CanonicalCommandReducer::publish(
         std::shared_ptr<CanonicalStatePublication> publication) noexcept
     {
-        if (publication->mChanges.empty())
+        if (publication->mChanges.empty() && publication->mSpatialTicks.empty())
             return {};
         publication->mStateVersion = mStateVersion;
         publication->mCheckpointTick = mCheckpointTick;
@@ -486,6 +497,67 @@ namespace TES3MP
             throw;
         }
         prepared.mPublication = std::move(publication);
+        return prepared;
+    }
+
+    CanonicalCommandReducer::PreparedBatch CanonicalCommandReducer::prepareTick(const ServerTickCommandBatch& batch)
+    {
+        auto prepared = prepare(batch);
+        if (!prepared.result()) return prepared;
+        const ServerTick tick = batch.scheduledTick().value();
+        const auto players = prepared.mState->players();
+        std::size_t moving = 0;
+        for (const auto& player : players)
+            if (player.linearVelocity() != LinearVelocity3(0, 0, 0)) ++moving;
+        if (!canReserveCanonicalStateVersions(prepared.mStateVersion, moving))
+        {
+            prepared.mResult.mError = CommandBatchReductionError::StateVersionCapacityExceeded;
+            return prepared;
+        }
+        std::vector<CanonicalPlayerEntityState> replacements(players.begin(), players.end());
+        try
+        {
+            for (std::size_t index = 0; index < replacements.size(); ++index)
+            {
+                const auto current = replacements[index];
+                const auto velocity = current.linearVelocity();
+                if (velocity == LinearVelocity3(0, 0, 0)) continue;
+                const auto position = current.transform().position();
+                const auto x = checkedAdd(position.x(), velocity.x());
+                const auto y = checkedAdd(position.y(), velocity.y());
+                const auto z = checkedAdd(position.z(), velocity.z());
+                if (!x || !y || !z)
+                {
+                    prepared.mResult.mError = CommandBatchReductionError::SpatialIntegrationOverflow;
+                    return prepared;
+                }
+                const Transform transform(current.transform().cell(), Position3(*x, *y, *z),
+                    current.transform().orientation());
+                auto advanced = advanceCanonicalSpatialState(current, tick, transform, velocity);
+                auto* value = std::get_if<CanonicalPlayerEntityState>(&advanced);
+                if (!value)
+                {
+                    prepared.mResult.mError = CommandBatchReductionError::SpatialRevisionExhausted;
+                    return prepared;
+                }
+                replacements[index] = *value;
+                prepared.mStateVersion = *prepared.mStateVersion.next();
+                prepared.mPublication->mSpatialTicks.push_back({ prepared.mStateVersion, tick, *value });
+            }
+            auto candidate = createCanonicalServerState(replacements, prepared.mState->activeSessions());
+            auto* state = std::get_if<CanonicalServerState>(&candidate);
+            if (!state)
+            {
+                prepared.mResult.mError = CommandBatchReductionError::CandidateStateInvalid;
+                return prepared;
+            }
+            prepared.mState = std::make_shared<CanonicalServerState>(std::move(*state));
+            prepared.mCheckpointTick = tick;
+        }
+        catch (...)
+        {
+            prepared.mResult.mError = CommandBatchReductionError::CandidateStateInvalid;
+        }
         return prepared;
     }
 

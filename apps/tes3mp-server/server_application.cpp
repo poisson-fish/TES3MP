@@ -133,7 +133,7 @@ namespace TES3MP::ServerApp
         for (const auto& batch : pumpedCommands.batches())
         {
             const auto before = mWiring->reducer.state();
-            auto prepared = mWiring->reducer.prepare(batch);
+            auto prepared = mWiring->reducer.prepareTick(batch);
             if (!prepared.result()) { mFailure = "command reduction failed"; return false; }
             auto projected = projectFixtureObservations(before, prepared.candidateState(), batch.scheduledTick().value());
             if (!projected) { mFailure = "observation projection failed"; return false; }
@@ -145,8 +145,18 @@ namespace TES3MP::ServerApp
                 if (!connection) { mFailure = "observation target missing"; return false; }
                 routed.emplace_back(*connection, std::move(delivery));
             }
-            if (!routed.empty() && !admitFixtureObservationsAtomically(mWiring->queues, routed))
-            { mFailure = "observation admission failed"; return false; }
+            auto views = projectFixtureViews(prepared.candidateState(), batch.scheduledTick().value());
+            if (!views) { mFailure = "movement view projection failed"; return false; }
+            std::vector<std::pair<TransportConnectionId, LatestWinsSnapshot>> routedViews;
+            routedViews.reserve(views->size());
+            for (auto& delivery : *views)
+            {
+                auto connection = mWiring->sessions.connectionForSession(delivery.first);
+                if (!connection) { mFailure = "movement view target missing"; return false; }
+                routedViews.emplace_back(*connection, std::move(delivery.second));
+            }
+            if (!admitFixtureTickAtomically(mWiring->queues, routed, routedViews))
+            { mFailure = "tick output admission failed"; return false; }
             if (!mWiring->reducer.commit(std::move(prepared)))
             { mFailure = "canonical commit failed"; return false; }
         }

@@ -19,7 +19,7 @@ namespace TES3MP
     {
         return left.mStateVersion == right.mStateVersion && left.mCheckpointTick == right.mCheckpointTick
             && left.mChecksum == right.mChecksum && *left.mState == *right.mState && left.mChanges == right.mChanges
-            && left.mJoinedSessions == right.mJoinedSessions;
+            && left.mJoinedSessions == right.mJoinedSessions && left.mSpatialTicks == right.mSpatialTicks;
     }
 
     CanonicalPublicationReadAction classifyCanonicalPublication(
@@ -38,6 +38,10 @@ namespace TES3MP
         const auto joins = publication.joinedSessions();
         if (expectedVersion && joins.size() == 1 && joins.front().stateVersion == *expectedVersion
             && joins.front().stateVersion == publication.stateVersion())
+            return CanonicalPublicationReadAction::ApplyContiguousChanges;
+        const auto spatialTicks = publication.spatialTicks();
+        if (expectedVersion && !spatialTicks.empty() && spatialTicks.front().stateVersion == *expectedVersion
+            && spatialTicks.back().stateVersion == publication.stateVersion())
             return CanonicalPublicationReadAction::ApplyContiguousChanges;
         return CanonicalPublicationReadAction::ReplaceFromSnapshot;
     }

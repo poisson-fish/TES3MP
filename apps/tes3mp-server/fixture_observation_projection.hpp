@@ -24,6 +24,14 @@ namespace TES3MP::ServerApp
         const FixtureObservationDelivery& delivery);
     bool admitFixtureObservationsAtomically(OutboundQueueSet& queues,
         const std::vector<std::pair<TransportConnectionId, FixtureObservationDelivery>>& deliveries);
+
+    std::optional<std::vector<std::pair<SessionId, LatestWinsSnapshot>>> projectFixtureViews(
+        const CanonicalServerState& state, ServerTick tick);
+    bool admitFixtureViewsAtomically(OutboundQueueSet& queues,
+        const std::vector<std::pair<TransportConnectionId, LatestWinsSnapshot>>& deliveries);
+    bool admitFixtureTickAtomically(OutboundQueueSet& queues,
+        const std::vector<std::pair<TransportConnectionId, FixtureObservationDelivery>>& observations,
+        const std::vector<std::pair<TransportConnectionId, LatestWinsSnapshot>>& views);
 }
 
 #endif

@@ -11,6 +11,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <limits>
 #include <string>
 #include <variant>
 #include <vector>
@@ -509,5 +510,67 @@ int main()
             { TransportChannel::LatestWins, { std::byte{ 1 } } });
         assert(wired.pump(ServerTick::initial()));
         assert(sessions.size() == 0 && queues->connections() == 0 && wiredRuntime.closes == 1);
+    }
+    {
+        FixedClock clock;
+        NullMetricSink metrics;
+        NullStructuredEventSink events;
+        Observability observability(metrics, events);
+        const auto zero = Turn32::fromValue(0);
+        const auto interior = CellId::interior(id<CellSpaceId>(7));
+        std::vector<CanonicalPlayerEntityState> players{
+            { id<PlayerId>(1), id<EntityId>(1), Transform(interior, Position3(10, 20, 30),
+                Orientation3(zero, zero, zero)), LinearVelocity3(2, -3, 4), id<EntityRevision>(1),
+                AuthorityEpoch::initial(), ServerTick::initial() }
+        };
+        std::vector<CanonicalSessionProgress> progress{
+            { id<SessionId>(1), SessionGeneration::initial(), id<PlayerId>(1), id<EntityId>(1), std::nullopt }
+        };
+        CanonicalCommandReducer reducer(
+            std::get<CanonicalServerState>(createCanonicalServerState(players, progress)), observability);
+        ServerCommandIntakeCoordinator intake(
+            clock, observability, clock.now(), ServerTick::initial(), IngressOrdinal::initial());
+        const auto batches = intake.pump();
+        assert(batches && batches.batches().size() == 1);
+        auto prepared = reducer.prepareTick(batches.batches()[0]);
+        assert(prepared.result());
+        const auto* moved = prepared.candidateState().findPlayer(id<PlayerId>(1));
+        assert(moved && moved->transform().position() == Position3(12, 17, 34)
+            && moved->linearVelocity() == LinearVelocity3(2, -3, 4)
+            && moved->entityRevision() == id<EntityRevision>(2));
+        assert(reducer.commit(std::move(prepared)));
+        auto views = projectFixtureViews(reducer.state(), ServerTick::initial());
+        assert(views && views->size() == 1 && (*views)[0].second.view().entries().size() == 1
+            && (*views)[0].second.view().entries()[0].transform().position() == Position3(12, 17, 34));
+    }
+    {
+        FixedClock clock;
+        NullMetricSink metrics;
+        NullStructuredEventSink events;
+        Observability observability(metrics, events);
+        const auto zero = Turn32::fromValue(0);
+        const auto interior = CellId::interior(id<CellSpaceId>(7));
+        std::vector<CanonicalPlayerEntityState> players{
+            { id<PlayerId>(1), id<EntityId>(1), Transform(interior,
+                Position3(std::numeric_limits<std::int64_t>::max(), 0, 0), Orientation3(zero, zero, zero)),
+                LinearVelocity3(1, 0, 0), id<EntityRevision>(1), AuthorityEpoch::initial(), ServerTick::initial() },
+            { id<PlayerId>(2), id<EntityId>(2), Transform(interior, Position3(5, 0, 0),
+                Orientation3(zero, zero, zero)), LinearVelocity3(1, 0, 0), id<EntityRevision>(1),
+                AuthorityEpoch::initial(), ServerTick::initial() }
+        };
+        std::vector<CanonicalSessionProgress> progress{
+            { id<SessionId>(1), SessionGeneration::initial(), id<PlayerId>(1), id<EntityId>(1), std::nullopt },
+            { id<SessionId>(2), SessionGeneration::initial(), id<PlayerId>(2), id<EntityId>(2), std::nullopt }
+        };
+        CanonicalCommandReducer reducer(
+            std::get<CanonicalServerState>(createCanonicalServerState(players, progress)), observability);
+        const auto before = reducer.state();
+        ServerCommandIntakeCoordinator intake(
+            clock, observability, clock.now(), ServerTick::initial(), IngressOrdinal::initial());
+        const auto batches = intake.pump();
+        auto prepared = reducer.prepareTick(batches.batches()[0]);
+        assert(!prepared.result()
+            && prepared.result().error() == CommandBatchReductionError::SpatialIntegrationOverflow
+            && reducer.state() == before);
     }
 }

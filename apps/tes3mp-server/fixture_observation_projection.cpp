@@ -109,4 +109,92 @@ namespace TES3MP::ServerApp
         }
         catch (...) { return false; }
     }
+
+    std::optional<std::vector<std::pair<SessionId, LatestWinsSnapshot>>> projectFixtureViews(
+        const CanonicalServerState& state, ServerTick tick)
+    {
+        try
+        {
+            std::vector<std::pair<SessionId, LatestWinsSnapshot>> result;
+            result.reserve(state.activeSessions().size());
+            for (const auto& target : state.activeSessions())
+            {
+                const auto visible = visibleTo(state, target);
+                std::vector<SpatialEntitySnapshot> entries;
+                entries.reserve(visible.size());
+                for (const auto* player : visible)
+                    entries.emplace_back(tick, player->playerId(), player->entityId(), player->entityRevision(),
+                        player->authorityEpoch(), player->transform(), player->linearVelocity());
+                auto view = SpatialWorldView::create(entries);
+                if (!std::holds_alternative<SpatialWorldView>(view)) return std::nullopt;
+                result.emplace_back(target.sessionId(), LatestWinsSnapshot(
+                    LatestWinsSnapshotHeader(target.sessionId(), target.sessionGeneration(), tick,
+                        target.highestContiguousFinalizedCommand()),
+                    std::get<SpatialWorldView>(std::move(view))));
+            }
+            return result;
+        }
+        catch (...) { return std::nullopt; }
+    }
+
+    bool admitFixtureViewsAtomically(OutboundQueueSet& queues,
+        const std::vector<std::pair<TransportConnectionId, LatestWinsSnapshot>>& deliveries)
+    {
+        try
+        {
+            if (deliveries.empty()) return true;
+            std::vector<std::vector<std::byte>> frames;
+            frames.reserve(deliveries.size());
+            for (const auto& [connection, snapshot] : deliveries)
+            {
+                (void)connection;
+                auto frame = encodeProtocolFrame(MessageClass::LatestWinsSnapshot,
+                    MessageKind::LatestWinsSnapshot, encodeLatestWinsSnapshot(snapshot));
+                if (!std::holds_alternative<std::vector<std::byte>>(frame)) return false;
+                frames.push_back(std::get<std::vector<std::byte>>(std::move(frame)));
+            }
+            std::vector<OutboundQueueSet::AtomicMessage> messages;
+            messages.reserve(deliveries.size());
+            for (std::size_t index = 0; index < deliveries.size(); ++index)
+                messages.push_back({ deliveries[index].first, TransportChannel::LatestWins, frames[index] });
+            return queues.enqueueMessagesAtomically(messages) == TransportResult::Accepted;
+        }
+        catch (...) { return false; }
+    }
+
+    bool admitFixtureTickAtomically(OutboundQueueSet& queues,
+        const std::vector<std::pair<TransportConnectionId, FixtureObservationDelivery>>& observations,
+        const std::vector<std::pair<TransportConnectionId, LatestWinsSnapshot>>& views)
+    {
+        try
+        {
+            std::vector<std::vector<std::byte>> frames;
+            frames.reserve(observations.size() + views.size());
+            for (const auto& [connection, delivery] : observations)
+            {
+                (void)connection;
+                auto frame = encodeProtocolFrame(MessageClass::ReliableOperation,
+                    MessageKind::ReliableObservationBatch, encodeReliableObservationBatch(delivery.observations));
+                if (!std::holds_alternative<std::vector<std::byte>>(frame)) return false;
+                frames.push_back(std::get<std::vector<std::byte>>(std::move(frame)));
+            }
+            for (const auto& [connection, view] : views)
+            {
+                (void)connection;
+                auto frame = encodeProtocolFrame(MessageClass::LatestWinsSnapshot,
+                    MessageKind::LatestWinsSnapshot, encodeLatestWinsSnapshot(view));
+                if (!std::holds_alternative<std::vector<std::byte>>(frame)) return false;
+                frames.push_back(std::get<std::vector<std::byte>>(std::move(frame)));
+            }
+            std::vector<OutboundQueueSet::AtomicMessage> messages;
+            messages.reserve(frames.size());
+            std::size_t index = 0;
+            for (const auto& delivery : observations)
+                messages.push_back({ delivery.first, TransportChannel::ReliableOrdered, frames[index++] });
+            for (const auto& delivery : views)
+                messages.push_back({ delivery.first, TransportChannel::LatestWins, frames[index++] });
+            return messages.empty() || queues.enqueueMessagesAtomically(messages) == TransportResult::Accepted;
+        }
+        catch (...) { return false; }
+    }
 }

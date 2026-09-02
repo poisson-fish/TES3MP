@@ -21,6 +21,8 @@ namespace TES3MP
         IngressOrdinalNotStrictlyIncreasing,
         StateVersionCapacityExceeded,
         CandidateStateInvalid,
+        SpatialIntegrationOverflow,
+        SpatialRevisionExhausted,
     };
 
     class CommandDispositionRecord
@@ -139,6 +141,7 @@ namespace TES3MP
         CanonicalStateVersion stateVersion() const noexcept { return mStateVersion; }
         std::shared_ptr<const CanonicalStatePublication> latestPublication() const noexcept;
         PreparedBatch prepare(const ServerTickCommandBatch& batch);
+        PreparedBatch prepareTick(const ServerTickCommandBatch& batch);
         bool commit(PreparedBatch&& prepared);
         std::optional<PreparedJoin> prepareJoin(CanonicalPlayerEntityState player,
             CanonicalSessionProgress session, ServerTick tick);
