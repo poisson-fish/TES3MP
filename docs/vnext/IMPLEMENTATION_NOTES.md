@@ -4293,6 +4293,21 @@ only the relevant phase section here.
 
 [Back to the phase tracker](IMPLEMENTATION_PLAN.md#phase-7--headless-end-to-end-multiplayer-slice)
 
+- 2026-09-02 — Slice 7.7 deterministic adverse matrix — In Progress
+  - Change: implementation `3484483c17` runs every accepted named profile for
+    10,000 manual-clock ticks, including the approved 500 ms stall, exact seeded
+    replay, a changed-seed control, queue high-water checks, and zero drain.
+  - Decisions: implements accepted ADR-0046 without changing architecture,
+    authority, state scope, gameplay behavior, profiles, or thresholds.
+  - Verification: MSVC 19.51 Debug `tes3mp_protocol_tests_run`, all 115
+    repository Python tests, legacy exclusion, baseline provenance, and
+    `git diff --check` pass. Matrix contracts prove reliable unique ordered
+    application and sampled-state latest-wins convergence.
+  - Owner review: Slice 7.7 remains **In Progress**; implementation demo remains
+    required after the remaining proofs.
+  - Follow-ups: implement the bounded 32-cycle reconnect loop, queue-drain
+    process proof, and 60-second real-process soak.
+
 - 2026-09-02 — Slice 7.7 profile and threshold catalog — In Progress
   - Change: added accepted ADR-0046 and a typed test-support catalog for the
     approved seed, named message-class profiles, fault bounds, 32 reconnect
