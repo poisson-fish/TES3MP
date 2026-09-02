@@ -105,6 +105,16 @@
       "purpose": "Defines the app-owned testable dedicated-server composition library, focused contracts, and verified-transport executable root."
     },
     {
+      "path": "apps/tes3mp-server/authenticated_join_composition.cpp",
+      "status": "A",
+      "purpose": "Implements the approved prepare, token issue, bounded two-frame enqueue, and commit transaction with cancellation on every pre-commit failure."
+    },
+    {
+      "path": "apps/tes3mp-server/authenticated_join_composition.hpp",
+      "status": "A",
+      "purpose": "Defines the app-owned authenticated-join composition and atomic response-queue boundary."
+    },
+    {
       "path": "apps/tes3mp-server/main.cpp",
       "status": "A",
       "purpose": "Thin single-threaded dedicated-server process root with transactional configuration, secret, transport, listener, and signal-driven shutdown composition."
@@ -112,7 +122,7 @@
     {
       "path": "apps/tes3mp-server/server_app_tests.cpp",
       "status": "A",
-      "purpose": "Focused strict configuration, bounded file-secret, startup, listener-failure, polling-failure, and idempotent ordered-shutdown contracts."
+      "purpose": "Focused configuration, lifecycle, two-client authenticated-join composition, and token/queue failure atomicity contracts."
     },
     {
       "path": "apps/tes3mp-server/server_application.cpp",

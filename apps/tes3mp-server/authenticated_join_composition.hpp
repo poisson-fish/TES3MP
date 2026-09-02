@@ -1,0 +1,49 @@
+#ifndef TES3MP_SERVER_AUTHENTICATED_JOIN_COMPOSITION_HPP
+#define TES3MP_SERVER_AUTHENTICATED_JOIN_COMPOSITION_HPP
+
+#include "tes3mp/authenticated_join.hpp"
+#include "tes3mp/server_authentication.hpp"
+#include "tes3mp/transport.hpp"
+
+#include <span>
+
+namespace TES3MP::ServerApp
+{
+    enum class JoinCompositionResult : std::uint8_t
+    {
+        Committed,
+        JoinRejected,
+        TokenRejected,
+        EncodingRejected,
+        QueueRejected,
+        CommitRejected,
+    };
+
+    class JoinResponseQueue
+    {
+    public:
+        virtual ~JoinResponseQueue() = default;
+        virtual bool enqueueJoinResponses(std::span<const std::byte> authentication,
+            std::span<const std::byte> snapshot) noexcept = 0;
+    };
+
+    class AuthenticatedJoinComposition
+    {
+    public:
+        AuthenticatedJoinComposition(AuthenticatedJoinCoordinator& joins,
+            ServerAuthenticationService& authentication, JoinResponseQueue& responses) noexcept
+            : mJoins(joins), mAuthentication(authentication), mResponses(responses)
+        {
+        }
+
+        JoinCompositionResult join(PrincipalId principal, SessionGeneration generation,
+            ServerTick tick, ResumeTokenContext context) noexcept;
+
+    private:
+        AuthenticatedJoinCoordinator& mJoins;
+        ServerAuthenticationService& mAuthentication;
+        JoinResponseQueue& mResponses;
+    };
+}
+
+#endif

@@ -4293,6 +4293,24 @@ only the relevant phase section here.
 
 [Back to the phase tracker](IMPLEMENTATION_PLAN.md#phase-7--headless-end-to-end-multiplayer-slice)
 
+- 2026-09-01 — Slice 7.3 response composition — In Progress
+  - Change: added the app-owned authenticated-join composition that prepares
+    canonical state, issues the initial resume token, encodes both protocol
+    frames, atomically enqueues the response pair, and commits last.
+  - Decisions: implements accepted ADR-0042 composition Option A. The response
+    queue owns all-or-neither admission; no app-owned canonical mutation or
+    rollback path was added.
+  - Verification: MSVC 19.44 focused `tes3mp_server_app_tests_run` passes with
+    two distinct joins plus token and queue rejection proving zero canonical
+    bindings before a later successful retry. `tes3mp_protocol_tests_run` and
+    all 114 repository-owned Python tests pass; `git diff --check` passes.
+  - Owner review: accepted architecture controls this work. Slice demo
+    acceptance remains pending real transport wiring and the two-client process
+    flow.
+  - Follow-ups: bind the atomic response queue to per-connection bounded
+    transport queues, drive it from authenticated session completion, and run
+    the required real two-client demo.
+
 - 2026-09-01 — Slice 7.3 atomic composition boundary — In Progress
   - Change: added a bounded coordinator-owned prepare/commit/cancel join
     transaction. Preparation validates and constructs the complete candidate

@@ -2,6 +2,8 @@ include(${CMAKE_CURRENT_LIST_DIR}/../../cmake/TES3MPVerifyTargetBoundaries.cmake
 include(${CMAKE_CURRENT_LIST_DIR}/../../cmake/TES3MPRuntimeSafety.cmake)
 
 add_library(tes3mp_server_app STATIC
+    authenticated_join_composition.hpp
+    authenticated_join_composition.cpp
     server_config.hpp
     server_config.cpp
     server_application.hpp

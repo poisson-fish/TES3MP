@@ -1,4 +1,5 @@
 #include "server_application.hpp"
+#include "authenticated_join_composition.hpp"
 #include "server_config.hpp"
 
 #include <array>
@@ -11,6 +12,11 @@
 
 namespace
 {
+    using namespace TES3MP;
+
+    template <class Value>
+    Value id(std::uint64_t value) { return Value::fromValue(value).value(); }
+
     void require(bool condition)
     {
         if (!condition)
@@ -55,6 +61,58 @@ namespace
         TES3MP::TransportResult pollResult = TES3MP::TransportResult::Accepted;
         std::string calls;
     };
+
+    class FakeAuthentication final : public ServerAuthenticationService
+    {
+    public:
+        std::unique_ptr<AuthenticationOperation> begin(
+            AuthenticationAttempt, ServerAuthenticationSubmission) noexcept override { return {}; }
+
+        ResumeTokenIssueResult issueInitial(
+            PrincipalId, SessionId, SessionGeneration, ResumeTokenContext) noexcept override
+        {
+            ++issues;
+            if (reject) return ResumeTokenStoreError::RandomUnavailable;
+            std::array<std::byte, ResumeTokenBytes> bytes{};
+            auto token = ResumeToken::create(bytes);
+            return std::move(*AuthenticationAcceptedMessage::create(
+                std::move(*token), MinimumResumeTokenLifetimeMilliseconds));
+        }
+
+        bool reject = false;
+        std::size_t issues = 0;
+    };
+
+    class FakeJoinQueue final : public TES3MP::ServerApp::JoinResponseQueue
+    {
+    public:
+        bool enqueueJoinResponses(std::span<const std::byte> authentication,
+            std::span<const std::byte> snapshot) noexcept override
+        {
+            ++attempts;
+            if (reject) return false;
+            auto authenticationFrame = decodeProtocolFrame(authentication);
+            auto snapshotFrame = decodeProtocolFrame(snapshot);
+            valid = std::holds_alternative<DecodedFrame>(authenticationFrame)
+                && std::get<DecodedFrame>(authenticationFrame).messageKind() == MessageKind::AuthenticationAccepted
+                && std::holds_alternative<DecodedFrame>(snapshotFrame)
+                && std::get<DecodedFrame>(snapshotFrame).messageKind() == MessageKind::LatestWinsSnapshot;
+            return valid;
+        }
+
+        bool reject = false;
+        bool valid = false;
+        std::size_t attempts = 0;
+    };
+
+    AuthenticatedJoinCoordinator joinCoordinator()
+    {
+        const auto zero = Turn32::fromValue(0);
+        auto spawn = Transform(CellId::interior(id<CellSpaceId>(7)), Position3(10, 20, 30),
+            Orientation3(zero, zero, zero));
+        return *AuthenticatedJoinCoordinator::create(spawn,
+            { id<SessionId>(1), id<PlayerId>(1), id<EntityId>(1) });
+    }
 
     TES3MP::ServerApp::ServerConfig parsedConfig()
     {
@@ -112,4 +170,36 @@ int main()
     failed.pollResult = TES3MP::TransportResult::RuntimeFailed;
     assert(!failedApplication.pump());
     assert(failed.calls == "LPSX");
+
+    {
+        auto joins = joinCoordinator();
+        FakeAuthentication authentication;
+        FakeJoinQueue responses;
+        AuthenticatedJoinComposition composition(joins, authentication, responses);
+        assert(composition.join(id<PrincipalId>(1), SessionGeneration::initial(),
+                   ServerTick::initial(), ResumeTokenContext{}) == JoinCompositionResult::Committed);
+        assert(composition.join(id<PrincipalId>(2), SessionGeneration::initial(),
+                   id<ServerTick>(1), ResumeTokenContext{}) == JoinCompositionResult::Committed);
+        assert(authentication.issues == 2 && responses.attempts == 2 && responses.valid);
+        assert(joins.liveBindings() == 2 && joins.state().players().size() == 2);
+    }
+    {
+        auto joins = joinCoordinator();
+        FakeAuthentication authentication;
+        FakeJoinQueue responses;
+        AuthenticatedJoinComposition composition(joins, authentication, responses);
+        authentication.reject = true;
+        assert(composition.join(id<PrincipalId>(3), SessionGeneration::initial(),
+                   ServerTick::initial(), ResumeTokenContext{}) == JoinCompositionResult::TokenRejected);
+        assert(joins.liveBindings() == 0 && joins.state().players().empty());
+        authentication.reject = false;
+        responses.reject = true;
+        assert(composition.join(id<PrincipalId>(3), SessionGeneration::initial(),
+                   ServerTick::initial(), ResumeTokenContext{}) == JoinCompositionResult::QueueRejected);
+        assert(joins.liveBindings() == 0 && joins.state().players().empty());
+        responses.reject = false;
+        assert(composition.join(id<PrincipalId>(3), SessionGeneration::initial(),
+                   ServerTick::initial(), ResumeTokenContext{}) == JoinCompositionResult::Committed);
+        assert(joins.liveBindings() == 1);
+    }
 }
