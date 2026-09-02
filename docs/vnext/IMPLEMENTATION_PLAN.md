@@ -354,6 +354,7 @@ runtime or protocol name.
 | ADR-0042 | Phase 7 authenticated join and identity allocation | Phase 7 | **Implemented** |
 | ADR-0043 | Phase 7 fixture transition and observation composition | Phase 7 | **Implemented** |
 | ADR-0044 | Phase 7 movement tick and snapshot composition | Phase 7 | **Implemented** |
+| ADR-0045 | Phase 7 disconnect, resume, and expiration composition | Phase 7 | **Implemented** |
 
 An ADR is complete only when it records considered alternatives, selection
 criteria, consequences, failure modes, a replacement/review trigger, and
@@ -635,7 +636,7 @@ Depends on: Phase 6.
 | 7.3 | Implement authentication, session creation, player creation, and join | **Implemented** | Accepted [`ADR-0042`](adr/ADR-0042-phase7-authenticated-join-and-identity-allocation.md); implementation `39c6c72095`, applicable local verification, real two-client plus injected-failure process demo, and owner implementation-demo acceptance pass |
 | 7.4 | Implement one interior and one exterior cell fixture plus enter/leave observation | **Implemented** | Accepted [`ADR-0043`](adr/ADR-0043-phase7-fixture-cell-transition-and-observation.md); implementation `bd35f2d60c`, shared-writer runtime composition, typed join/transition publication, bounded atomic multi-target delivery, client application, focused contracts, real two-client fixture proof, and owner demo acceptance pass |
 | 7.5 | Implement semantic movement commands and sequenced snapshots | **Implemented** | Accepted [`ADR-0044`](adr/ADR-0044-phase7-movement-tick-and-snapshot-composition.md); implementation `f8b1acee4b`, atomic checked integration, live motion dispatch, complete targeted views, focused tests, real two-client movement/convergence/stale-view proof, and owner demo acceptance pass |
-| 7.6 | Implement disconnect, bounded grace period, resume, and clean expiration | **Not Started** | Resume preserves identity/revision/acks; expiration creates an explicit new session path |
+| 7.6 | Implement disconnect, bounded grace period, resume, and clean expiration | **In Progress** | Accepted [`ADR-0045`](adr/ADR-0045-phase7-disconnect-resume-and-expiration-composition.md); failure-atomic prepared resume-token rotation and focused contracts pass; canonical lifecycle and live process composition remain |
 | 7.7 | Add adverse-network matrix, reconnect loop, queue-bound, and soak tests | **Not Started** | Named profiles pass with deterministic seeds and recorded thresholds |
 
 Exit gate:

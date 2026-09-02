@@ -4293,6 +4293,27 @@ only the relevant phase section here.
 
 [Back to the phase tracker](IMPLEMENTATION_PLAN.md#phase-7--headless-end-to-end-multiplayer-slice)
 
+- 2026-09-02 — Slice 7.6 prepared resume-token rotation — In Progress
+  - Change: accepted ADR-0045 and added bounded prepare/commit/cancel rotation
+    to the production resume-token store. Cancellation preserves the old token;
+    commit atomically replaces it; duplicate and stale preparations fail closed.
+  - Decisions: project owner approved Option A for server-core lifecycle
+    ownership, hidden grace records, failure-atomic lifecycle/token/output
+    composition, and monotonic expiration ordering.
+  - Verification: MSVC 19.51 build of `tes3mp_server_authentication_tests`
+    passes, and `tes3mp_protocol_tests_run` passes. All 115 repository Python
+    tests, baseline provenance verification with 278 intentional differences
+    and 69 dependency inputs, legacy exclusion across 3,972 tracked paths, 62
+    CMake files, 1,254 compile commands, and 1,971 Ninja edges, and staged
+    `git diff --check` pass. Focused coverage proves
+    reservation exclusion, cancellation recovery, commit rotation, old-token
+    rejection, replacement-token acceptance, and stale-operation rejection.
+  - Owner review: architecture approval received on 2026-09-02; implementation
+    demo remains required before Slice 7.6 can become **Implemented**.
+  - Follow-ups: add canonical hidden lifecycle transactions, compose live
+    disconnect/resume/expiry delivery, extend the headless client/process proof,
+    and run applicable verification.
+
 - 2026-09-02 — Slice 7.5 legacy-exclusion verification repair — Implemented
   - Change: removed the ambiguous `tes3mp-server` product target spelling from
     the legacy-token denylist while retaining archived path and legacy

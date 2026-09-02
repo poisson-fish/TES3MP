@@ -354,6 +354,42 @@ namespace
                 tokens->consume(replacement, context(), MonotonicInstant::fromNanoseconds(12)));
     }
 
+    bool prepared_resume_commit_and_cancel_are_failure_atomic()
+    {
+        FakeCrypto crypto;
+        auto tokens = store(crypto);
+        auto issued = tokens->issue(
+            principal(7), session(9), generation(3), context(), MonotonicInstant::fromNanoseconds(10));
+        auto original = std::get<AuthenticationAcceptedMessage>(std::move(issued)).takeToken();
+
+        auto first = tokens->prepareConsume(original, context(), MonotonicInstant::fromNanoseconds(11));
+        auto* pending = std::get_if<PreparedResumeAdmission>(&first);
+        if (!pending || pending->admission.principal() != principal(7) || !pending->admission.isResume())
+            return false;
+        const auto firstId = pending->id;
+        if (std::get<ResumeTokenStoreError>(
+                tokens->prepareConsume(original, context(), MonotonicInstant::fromNanoseconds(11)))
+            != ResumeTokenStoreError::Denied)
+            return false;
+        if (!tokens->cancelConsume(firstId) || tokens->cancelConsume(firstId))
+            return false;
+
+        auto second = tokens->prepareConsume(original, context(), MonotonicInstant::fromNanoseconds(12));
+        auto* replacement = std::get_if<PreparedResumeAdmission>(&second);
+        if (!replacement)
+            return false;
+        auto grant = replacement->admission.takeResumeGrant();
+        auto response = grant ? grant->takeResponse() : std::nullopt;
+        auto rotated = response ? response->takeToken() : std::optional<ResumeToken>{};
+        if (!rotated || !tokens->commitConsume(replacement->id) || tokens->commitConsume(replacement->id))
+            return false;
+        return std::get<ResumeTokenStoreError>(
+                   tokens->prepareConsume(original, context(), MonotonicInstant::fromNanoseconds(13)))
+                == ResumeTokenStoreError::Denied
+            && std::holds_alternative<PreparedResumeAdmission>(
+                tokens->prepareConsume(*rotated, context(), MonotonicInstant::fromNanoseconds(13)));
+    }
+
     bool precommit_failures_preserve_the_old_token()
     {
         FakeCrypto crypto;
@@ -539,6 +575,8 @@ int main()
             clock_regression_and_concurrent_attempts_fail_closed },
         Test{ "policy_bounds_are_closed", policy_bounds_are_closed },
         Test{ "issue_resume_rotate_and_replay_are_atomic", issue_resume_rotate_and_replay_are_atomic },
+        Test{ "prepared_resume_commit_and_cancel_are_failure_atomic",
+            prepared_resume_commit_and_cancel_are_failure_atomic },
         Test{ "precommit_failures_preserve_the_old_token", precommit_failures_preserve_the_old_token },
         Test{ "concurrent_replay_has_exactly_one_winner", concurrent_replay_has_exactly_one_winner },
         Test{ "expiry_overflow_and_crypto_failure_fail_closed", expiry_overflow_and_crypto_failure_fail_closed },

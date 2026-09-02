@@ -196,10 +196,21 @@ namespace TES3MP
         DigestCollision,
         DeadlineOverflow,
         GenerationOverflow,
+        PreparationFull,
+        PreparationIdOverflow,
+        StalePreparation,
     };
 
     using ResumeTokenIssueResult = std::variant<AuthenticationAcceptedMessage, ResumeTokenStoreError>;
     using ResumeTokenConsumeResult = std::variant<AuthenticatedAdmission, ResumeTokenStoreError>;
+
+    struct PreparedResumeAdmission
+    {
+        std::uint64_t id;
+        AuthenticatedAdmission admission;
+    };
+
+    using ResumeTokenPrepareResult = std::variant<PreparedResumeAdmission, ResumeTokenStoreError>;
 
     class ResumeTokenStore
     {
@@ -216,6 +227,10 @@ namespace TES3MP
             ResumeTokenContext context, MonotonicInstant now) noexcept;
         ResumeTokenConsumeResult consume(
             const ResumeToken& token, ResumeTokenContext context, MonotonicInstant now) noexcept;
+        ResumeTokenPrepareResult prepareConsume(
+            const ResumeToken& token, ResumeTokenContext context, MonotonicInstant now) noexcept;
+        bool commitConsume(std::uint64_t preparationId) noexcept;
+        bool cancelConsume(std::uint64_t preparationId) noexcept;
 
         std::size_t size() const noexcept;
 
@@ -228,6 +243,13 @@ namespace TES3MP
             SessionGeneration generation;
             ResumeTokenContext context;
             MonotonicInstant expiresAt;
+        };
+
+        struct PendingConsume
+        {
+            std::uint64_t id;
+            std::size_t recordSlot;
+            Record replacement;
         };
 
         ResumeTokenStore(CredentialCrypto& crypto, std::uint64_t lifetimeMilliseconds) noexcept
@@ -247,7 +269,9 @@ namespace TES3MP
         std::uint64_t mLifetimeMilliseconds;
         mutable std::mutex mMutex;
         std::array<std::optional<Record>, MaximumResumeTokenRecords> mRecords{};
+        std::array<std::optional<PendingConsume>, MaximumResumeTokenRecords> mPending{};
         std::size_t mSize = 0;
+        std::uint64_t mNextPreparationId = 1;
     };
 
     class ServerAuthenticationService

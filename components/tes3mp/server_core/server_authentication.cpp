@@ -276,9 +276,13 @@ namespace TES3MP
 
     void ResumeTokenStore::purgeExpired(MonotonicInstant now) noexcept
     {
-        for (auto& record : mRecords)
+        for (std::size_t index = 0; index < mRecords.size(); ++index)
         {
-            if (record && now >= record->expiresAt)
+            const bool reserved = std::any_of(mPending.begin(), mPending.end(), [index](const auto& pending) {
+                return pending && pending->recordSlot == index;
+            });
+            auto& record = mRecords[index];
+            if (!reserved && record && now >= record->expiresAt)
             {
                 record.reset();
                 --mSize;
@@ -309,6 +313,19 @@ namespace TES3MP
     ResumeTokenConsumeResult ResumeTokenStore::consume(
         const ResumeToken& token, ResumeTokenContext context, MonotonicInstant now) noexcept
     {
+        auto prepared = prepareConsume(token, context, now);
+        auto* value = std::get_if<PreparedResumeAdmission>(&prepared);
+        if (!value)
+            return std::get<ResumeTokenStoreError>(prepared);
+        auto admission = std::move(value->admission);
+        if (!commitConsume(value->id))
+            return ResumeTokenStoreError::StalePreparation;
+        return admission;
+    }
+
+    ResumeTokenPrepareResult ResumeTokenStore::prepareConsume(
+        const ResumeToken& token, ResumeTokenContext context, MonotonicInstant now) noexcept
+    {
         const std::scoped_lock lock(mMutex);
         CredentialDigest digest;
         if (!digestToken(token, digest))
@@ -325,6 +342,9 @@ namespace TES3MP
         }
         if (current.context != context)
             return ResumeTokenStoreError::Denied;
+        for (const auto& pending : mPending)
+            if (pending && pending->recordSlot == *slot)
+                return ResumeTokenStoreError::Denied;
         const auto nextGeneration = current.generation.next();
         if (!nextGeneration)
             return ResumeTokenStoreError::GenerationOverflow;
@@ -340,12 +360,48 @@ namespace TES3MP
         if (!response)
             return ResumeTokenStoreError::DeadlineOverflow;
 
+        std::optional<std::size_t> pendingSlot;
+        for (std::size_t index = 0; index < mPending.size(); ++index)
+            if (!mPending[index]) { pendingSlot = index; break; }
+        if (!pendingSlot)
+            return ResumeTokenStoreError::PreparationFull;
+        if (mNextPreparationId == 0)
+            return ResumeTokenStoreError::PreparationIdOverflow;
+
         const auto principal = current.principal;
         const auto session = current.session;
         const auto priorGeneration = current.generation;
-        mRecords[*slot] = Record{ replacementDigest, principal, session, *nextGeneration, context, *expiresAt };
+        const auto preparationId = mNextPreparationId++;
+        mPending[*pendingSlot] = PendingConsume{ preparationId, *slot,
+            Record{ replacementDigest, principal, session, *nextGeneration, context, *expiresAt } };
         ResumeAdmissionGrant grant(session, priorGeneration, *nextGeneration, std::move(*response));
-        return AuthenticatedAdmission(principal, std::optional<ResumeAdmissionGrant>{ std::move(grant) });
+        return PreparedResumeAdmission{ preparationId,
+            AuthenticatedAdmission(principal, std::optional<ResumeAdmissionGrant>{ std::move(grant) }) };
+    }
+
+    bool ResumeTokenStore::commitConsume(std::uint64_t preparationId) noexcept
+    {
+        const std::scoped_lock lock(mMutex);
+        for (auto& pending : mPending)
+        {
+            if (!pending || pending->id != preparationId) continue;
+            mRecords[pending->recordSlot] = std::move(pending->replacement);
+            pending.reset();
+            return true;
+        }
+        return false;
+    }
+
+    bool ResumeTokenStore::cancelConsume(std::uint64_t preparationId) noexcept
+    {
+        const std::scoped_lock lock(mMutex);
+        for (auto& pending : mPending)
+        {
+            if (!pending || pending->id != preparationId) continue;
+            pending.reset();
+            return true;
+        }
+        return false;
     }
 
     std::size_t ResumeTokenStore::size() const noexcept
