@@ -4294,7 +4294,8 @@ only the relevant phase section here.
 [Back to the phase tracker](IMPLEMENTATION_PLAN.md#phase-7--headless-end-to-end-multiplayer-slice)
 
 - 2026-09-01 — Slice 7.3 bounded live frame dispatch — In Progress
-  - Change: the app-local connection coordinator now validates and dispatches
+  - Change: implementation `d366a5078a`; the app-local connection coordinator
+    now validates and dispatches
     bounded reliable handshake/authentication frames through its owned session,
     admission scope, resume context, atomic join composition, initial session
     binding, and outbound queue.
