@@ -37,6 +37,18 @@ namespace TES3MP
     AuthenticatedJoinOutcome AuthenticatedJoinCoordinator::join(
         PrincipalId principal, SessionGeneration generation, ServerTick serverTick)
     {
+        auto prepared = prepare(principal, generation, serverTick);
+        auto* value = std::get_if<AuthenticatedJoinPreparation>(&prepared);
+        if (!value)
+            return std::get<AuthenticatedJoinError>(prepared);
+        return commit(value->id);
+    }
+
+    AuthenticatedJoinPrepareOutcome AuthenticatedJoinCoordinator::prepare(
+        PrincipalId principal, SessionGeneration generation, ServerTick serverTick)
+    {
+        if (mPending)
+            return AuthenticatedJoinError::PreparationPending;
         if (std::find(mPrincipals.begin(), mPrincipals.end(), principal) != mPrincipals.end())
             return AuthenticatedJoinError::DuplicatePrincipal;
         if (mState.players().size() >= MaximumCanonicalPlayerEntities
@@ -74,12 +86,36 @@ namespace TES3MP
         LatestWinsSnapshot snapshot(
             LatestWinsSnapshotHeader(session, generation, serverTick, std::nullopt), std::move(*acceptedView));
 
-        mState = std::move(*accepted);
-        mPrincipals.push_back(principal);
+        AuthenticatedJoinResult result{ principal, session, player, entity, std::move(snapshot) };
+        const auto preparationId = mNextPreparationId++;
+        mPending.emplace(PendingJoin{ preparationId, std::move(*accepted), result });
+        return AuthenticatedJoinPreparation{ preparationId, std::move(result) };
+    }
+
+    AuthenticatedJoinOutcome AuthenticatedJoinCoordinator::commit(std::uint64_t preparationId)
+    {
+        if (!mPending || mPending->id != preparationId)
+            return AuthenticatedJoinError::StalePreparation;
+
+        auto result = std::move(mPending->result);
+        mState = std::move(mPending->state);
+        mPending.reset();
+        mPrincipals.push_back(result.principal);
+        const auto nextSession = advance(mSeed.nextSession);
+        const auto nextPlayer = advance(mSeed.nextPlayer);
+        const auto nextEntity = advance(mSeed.nextEntity);
         if (nextSession && nextPlayer && nextEntity)
             mSeed = { *nextSession, *nextPlayer, *nextEntity };
         else
             mIdentityExhausted = true;
-        return AuthenticatedJoinResult{ principal, session, player, entity, std::move(snapshot) };
+        return result;
+    }
+
+    bool AuthenticatedJoinCoordinator::cancel(std::uint64_t preparationId) noexcept
+    {
+        if (!mPending || mPending->id != preparationId)
+            return false;
+        mPending.reset();
+        return true;
     }
 }

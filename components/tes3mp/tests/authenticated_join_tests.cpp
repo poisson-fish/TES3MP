@@ -82,6 +82,46 @@ namespace
         assert(std::get<AuthenticatedJoinError>(rejected) == AuthenticatedJoinError::CapacityExhausted);
         assert(value.state() == before && value.liveBindings() == MaximumCanonicalActiveSessions);
     }
+
+    void preparationIsInvisibleUntilCommit()
+    {
+        auto value = coordinator();
+        const auto before = value.state();
+        auto prepared = value.prepare(
+            id<PrincipalId>(77), SessionGeneration::initial(), ServerTick::initial());
+        const auto& pending = std::get<AuthenticatedJoinPreparation>(prepared);
+        assert(value.state() == before && value.liveBindings() == 0);
+        assert(std::get<AuthenticatedJoinError>(value.prepare(
+                   id<PrincipalId>(78), SessionGeneration::initial(), ServerTick::initial()))
+            == AuthenticatedJoinError::PreparationPending);
+        assert(std::get<AuthenticatedJoinError>(value.commit(pending.id + 1))
+            == AuthenticatedJoinError::StalePreparation);
+        assert(value.state() == before && value.liveBindings() == 0);
+
+        const auto committed = value.commit(pending.id);
+        assert(std::holds_alternative<AuthenticatedJoinResult>(committed));
+        assert(value.state().players().size() == 1 && value.state().activeSessions().size() == 1
+            && value.liveBindings() == 1);
+        assert(std::get<AuthenticatedJoinError>(value.commit(pending.id))
+            == AuthenticatedJoinError::StalePreparation);
+    }
+
+    void cancelledPreparationLeavesNoStateAndReusesIdentity()
+    {
+        auto value = coordinator();
+        const auto before = value.state();
+        auto prepared = value.prepare(
+            id<PrincipalId>(81), SessionGeneration::initial(), ServerTick::initial());
+        const auto& pending = std::get<AuthenticatedJoinPreparation>(prepared);
+        const auto reservedSession = pending.join.session;
+        assert(value.cancel(pending.id));
+        assert(!value.cancel(pending.id));
+        assert(value.state() == before && value.liveBindings() == 0);
+
+        auto replacement = value.prepare(
+            id<PrincipalId>(82), SessionGeneration::initial(), ServerTick::initial());
+        assert(std::get<AuthenticatedJoinPreparation>(replacement).join.session == reservedSession);
+    }
 }
 
 int main()
@@ -90,5 +130,7 @@ int main()
     duplicatePrincipalDoesNotMutate();
     exhaustedIdentityDoesNotMutate();
     capacityFailureDoesNotMutate();
+    preparationIsInvisibleUntilCommit();
+    cancelledPreparationLeavesNoStateAndReusesIdentity();
     std::cout << "authenticated join contracts passed\n";
 }

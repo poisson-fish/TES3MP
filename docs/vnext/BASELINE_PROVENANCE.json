@@ -180,6 +180,11 @@
       "purpose": "Owner-approved opaque fixed-size admission-scope value shared across the existing protocol, transport, and server-core target graph."
     },
     {
+      "path": "components/tes3mp/include/tes3mp/authenticated_join.hpp",
+      "status": "A",
+      "purpose": "Owner-approved bounded authenticated join preparation, commit, cancellation, identity allocation, and initial snapshot boundary."
+    },
+    {
       "path": "components/tes3mp/include/tes3mp/authentication.hpp",
       "status": "A",
       "purpose": "Move-only bounded opaque authentication material and pollable session-owned provider operation boundary."
@@ -465,6 +470,11 @@
       "purpose": "Behavior-free translation-unit anchor for the deterministic server-core target."
     },
     {
+      "path": "components/tes3mp/server_core/authenticated_join.cpp",
+      "status": "A",
+      "purpose": "Atomic prepare-then-commit authenticated player/session installation with checked identities and no mutation on cancellation or failure."
+    },
+    {
       "path": "components/tes3mp/server_core/canonical_checksum.cpp",
       "status": "A",
       "purpose": "Stable explicit little-endian complete Phase 5 state encoding and allocation-free CRC-64/ECMA-182 V1 checkpoint implementation."
@@ -568,6 +578,11 @@
       "path": "components/tes3mp/test_support/spatial_round_trip.cpp",
       "status": "A",
       "purpose": "Bounded little-endian owned-value round-trip implementation used only by Slice 3.3 independent contract tests."
+    },
+    {
+      "path": "components/tes3mp/tests/authenticated_join_tests.cpp",
+      "status": "A",
+      "purpose": "Focused authenticated join identity, fixture snapshot, capacity, exhaustion, preparation visibility, cancellation, and stale-commit contracts."
     },
     {
       "path": "components/tes3mp/tests/canonical_sink_tests.cpp",
@@ -1060,6 +1075,11 @@
       "purpose": "Owner-approved caller-pumped headless client façade and deterministic fixed-capacity scripted fake-client evidence boundary."
     },
     {
+      "path": "docs/vnext/adr/ADR-0042-phase7-authenticated-join-and-identity-allocation.md",
+      "status": "A",
+      "purpose": "Owner-approved Phase 7 authenticated join ownership, checked identities, atomic installation, principal binding, fixture snapshot, and prepare-commit composition policy."
+    },
+    {
       "path": "docs/vnext/gdr/GDR-0001-phase7-headless-vertical-slice-behavior.md",
       "status": "A",
       "purpose": "Owner-approved Phase 7 fixture spawn, readiness, cell visibility, provisional tick integration, headless correction, and bounded resume behavior."
@@ -1421,7 +1441,7 @@
         },
         {
           "path": "components/tes3mp/CMakeLists.txt",
-          "sha256": "dad33ec41db5226b0c2f6630166ba4fb33eaf90ce801b322a2b58daa53257fbf"
+          "sha256": "b559527d15ef4e720346443316f4e86ff1db8d6862d933131087ef5666f5badf"
         },
         {
           "path": "components/tes3mp/protocol/generated/authentication_accepted_generated.h",

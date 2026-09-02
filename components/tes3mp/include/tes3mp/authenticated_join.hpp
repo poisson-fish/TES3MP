@@ -18,6 +18,8 @@ namespace TES3MP
         IdentityExhausted,
         CanonicalStateRejected,
         SnapshotRejected,
+        PreparationPending,
+        StalePreparation,
     };
 
     struct AuthenticatedJoinIdentitySeed
@@ -36,7 +38,14 @@ namespace TES3MP
         LatestWinsSnapshot initialSnapshot;
     };
 
+    struct AuthenticatedJoinPreparation
+    {
+        std::uint64_t id;
+        AuthenticatedJoinResult join;
+    };
+
     using AuthenticatedJoinOutcome = std::variant<AuthenticatedJoinResult, AuthenticatedJoinError>;
+    using AuthenticatedJoinPrepareOutcome = std::variant<AuthenticatedJoinPreparation, AuthenticatedJoinError>;
 
     class AuthenticatedJoinCoordinator
     {
@@ -46,6 +55,10 @@ namespace TES3MP
 
         AuthenticatedJoinOutcome join(
             PrincipalId principal, SessionGeneration generation, ServerTick serverTick);
+        AuthenticatedJoinPrepareOutcome prepare(
+            PrincipalId principal, SessionGeneration generation, ServerTick serverTick);
+        AuthenticatedJoinOutcome commit(std::uint64_t preparationId);
+        bool cancel(std::uint64_t preparationId) noexcept;
 
         const CanonicalServerState& state() const noexcept { return mState; }
         std::size_t liveBindings() const noexcept { return mPrincipals.size(); }
@@ -59,6 +72,14 @@ namespace TES3MP
         bool mIdentityExhausted = false;
         CanonicalServerState mState;
         std::vector<PrincipalId> mPrincipals;
+        struct PendingJoin
+        {
+            std::uint64_t id;
+            CanonicalServerState state;
+            AuthenticatedJoinResult result;
+        };
+        std::optional<PendingJoin> mPending;
+        std::uint64_t mNextPreparationId = 1;
     };
 }
 

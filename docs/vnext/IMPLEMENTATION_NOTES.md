@@ -4293,6 +4293,25 @@ only the relevant phase section here.
 
 [Back to the phase tracker](IMPLEMENTATION_PLAN.md#phase-7--headless-end-to-end-multiplayer-slice)
 
+- 2026-09-01 — Slice 7.3 atomic composition boundary — In Progress
+  - Change: added a bounded coordinator-owned prepare/commit/cancel join
+    transaction. Preparation validates and constructs the complete candidate
+    state and targeted snapshot without canonical mutation; only an exact live
+    preparation can commit, and cancellation leaves identities reusable.
+  - Decisions: the project owner approved Option A on 2026-09-01: prepare in
+    `server_core`, issue the token and encode/enqueue all responses in
+    composition, then commit without app-owned mutation or rollback.
+  - Verification: MSVC 19.44 focused
+    `tes3mp_authenticated_join_tests_run` passes; the complete
+    `tes3mp_protocol_tests_run` target passes; all 114 repository-owned Python
+    tests pass; staged baseline verification and `git diff --check` pass.
+  - Owner review: architecture clarification approved before implementation.
+    Slice implementation demo acceptance remains pending the real two-client
+    authentication/token/transport flow.
+  - Follow-ups: compose token issuance, frame encoding, bounded transport
+    enqueue/send, and commit; inject token/encoding/first-send/second-send
+    failures and demonstrate no orphan canonical state.
+
 - 2026-09-01 — Slice 7.3 — In Progress
   - Change: added accepted
     [`ADR-0042`](adr/ADR-0042-phase7-authenticated-join-and-identity-allocation.md)

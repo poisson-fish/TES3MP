@@ -26,8 +26,14 @@ The project owner approved Option A for all six decisions on 2026-09-01:
    velocity and sends a complete session-targeted initial snapshot; readiness
    follows client application of that snapshot; and
 6. capacity, identifier, token, canonical-validation, encoding, and send
-   failures reject or close without partial canonical state and expose only a
-   bounded stable reason.
+failures reject or close without partial canonical state and expose only a
+bounded stable reason.
+
+On 2026-09-01 the project owner approved the composition clarification Option
+A: the coordinator prepares one bounded provisional join without mutation,
+composition issues the token and encodes/enqueues all responses, and the writer
+commits only after every prerequisite succeeds. Any earlier failure cancels the
+preparation. No rollback path or app-owned canonical mutation is introduced.
 
 Rejected alternatives were app-owned join logic, random identifiers, staged
 install with rollback, multiple live players per principal, deferring the
