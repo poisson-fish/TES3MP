@@ -4293,6 +4293,17 @@ only the relevant phase section here.
 
 [Back to the phase tracker](IMPLEMENTATION_PLAN.md#phase-7--headless-end-to-end-multiplayer-slice)
 
+- 2026-09-01 — Slice 7.4 observation composition clarification — Approved
+  - Change: recorded the owner-approved reliable observation-batch and targeted
+    complete-view atomic queue-admission boundary in ADR-0043.
+  - Decisions: owner approved Option A. Each affected target gets one bounded
+    reliable typed enter/leave batch paired atomically with its latest view;
+    encoding or capacity failure admits neither frame.
+  - Verification: documentation-only gate; `git diff --cached --check` passed.
+  - Owner review: explicit Option A approval received on 2026-09-01.
+  - Follow-ups: implement the typed observation codec, deterministic projection,
+    atomic pair admission, client application, and real two-client demo.
+
 - 2026-09-01 — Slice 7.4 fixture-transition protocol — In Progress
   - Change: implementation `9380315cd3`; extended the existing bounded reliable-operation union with an
     owned typed fixture-cell transition and exact interior/exterior cell codec;
