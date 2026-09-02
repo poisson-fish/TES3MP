@@ -47,6 +47,13 @@ session, admission scope, and outbound queue lifetime. `ServerApplication`
 remains the thin pump/composition root; transport lifecycle state does not move
 into `server_core`.
 
+On 2026-09-01 the project owner approved preissued-session binding Option A:
+after the approved composition path issues the initial token and atomically
+enqueues both responses, the committed join identity is returned and the
+established server session records that already-issued session identifier
+through a narrow initial-only binding operation. The binding never issues a
+second credential and rejects wrong-stage or duplicate use.
+
 Rejected alternatives were app-owned join logic, random identifiers, staged
 install with rollback, multiple live players per principal, deferring the
 initial snapshot, and retaining incomplete joins. Identifiers are not restart-

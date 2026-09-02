@@ -102,6 +102,13 @@ namespace TES3MP
         AlreadyBound,
     };
 
+    enum class PreissuedInitialSessionBindingResult : std::uint8_t
+    {
+        Bound,
+        NotEstablished,
+        AlreadyBound,
+    };
+
     enum class InitialSessionFinalizationResult : std::uint8_t
     {
         Finalized,
@@ -138,6 +145,7 @@ namespace TES3MP
 
         ServerSessionTransition handle(ServerSessionEvent event) noexcept;
         ServerSessionBindingResult bindEstablishedSession(SessionId sessionId) noexcept;
+        PreissuedInitialSessionBindingResult bindPreissuedInitialSession(SessionId sessionId) noexcept;
         InitialSessionFinalizationResult finalizeInitialSession(SessionId sessionId) noexcept;
         ReliableOperationReceiveResult receiveReliableOperation(const ReliableOperation& operation) const noexcept;
 

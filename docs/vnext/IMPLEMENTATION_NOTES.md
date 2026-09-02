@@ -4293,6 +4293,23 @@ only the relevant phase section here.
 
 [Back to the phase tracker](IMPLEMENTATION_PLAN.md#phase-7--headless-end-to-end-multiplayer-slice)
 
+- 2026-09-01 — Slice 7.3 preissued session binding — In Progress
+  - Change: authenticated join composition now returns the committed bounded
+    identity result, and an established server session can record that
+    already-issued initial session identifier exactly once without issuing a
+    second resume credential.
+  - Decisions: owner approved preissued-session binding Option A on 2026-09-01
+    after live wiring exposed the double-issuance conflict. Wrong-stage and
+    duplicate bindings fail closed.
+  - Verification: MSVC 19.44 builds and runs `tes3mp_session_state_tests` and
+    `tes3mp_server_app_tests`; all 114 repository-owned Python tests pass;
+    baseline provenance passes with 266 intentional differences and 67
+    dependency inputs; `git diff --check` passes.
+  - Owner review: architecture option approved before implementation; process
+    demo acceptance remains pending.
+  - Follow-ups: dispatch bounded live frames, invoke the committed binding, pump
+    outbound queues, and run the two-client process demo.
+
 - 2026-09-01 — Slice 7.3 live-session composition — In Progress
   - Change: added the bounded app-local connection coordinator skeleton owning
     accepted server sessions, admission scopes, and outbound queue lifetime.

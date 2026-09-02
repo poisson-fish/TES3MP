@@ -6,6 +6,7 @@
 #include "tes3mp/transport.hpp"
 
 #include <span>
+#include <optional>
 
 namespace TES3MP::ServerApp
 {
@@ -17,6 +18,12 @@ namespace TES3MP::ServerApp
         EncodingRejected,
         QueueRejected,
         CommitRejected,
+    };
+
+    struct JoinCompositionOutcome
+    {
+        JoinCompositionResult result = JoinCompositionResult::JoinRejected;
+        std::optional<AuthenticatedJoinResult> committed;
     };
 
     class JoinResponseQueue
@@ -36,7 +43,7 @@ namespace TES3MP::ServerApp
         {
         }
 
-        JoinCompositionResult join(PrincipalId principal, SessionGeneration generation,
+        JoinCompositionOutcome join(PrincipalId principal, SessionGeneration generation,
             ServerTick tick, ResumeTokenContext context) noexcept;
 
     private:

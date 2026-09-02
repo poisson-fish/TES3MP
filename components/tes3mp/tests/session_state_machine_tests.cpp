@@ -827,6 +827,25 @@ namespace
             && !failed->takeAuthenticationAccepted();
     }
 
+    bool preissued_initial_binding_records_once_without_issuing()
+    {
+        ManualClock clock(MonotonicInstant::fromNanoseconds(0));
+        ObservationFixture observations;
+        FakeAuthenticationProvider provider(ProviderMode::ImmediateSuccess);
+        auto server = makeServer(clock, observations, provider);
+        const auto id = *SessionId::fromValue(92);
+        if (server->bindPreissuedInitialSession(id) != PreissuedInitialSessionBindingResult::NotEstablished)
+            return false;
+        advanceServerToAuthenticationInput(*server);
+        server->handle(ServerAuthenticationSubmitted{ submission(material()) });
+        if (server->handle(ServerPollAuthentication{}).action != ServerSessionAction::SessionEstablished)
+            return false;
+        return server->bindPreissuedInitialSession(id) == PreissuedInitialSessionBindingResult::Bound
+            && server->sessionId() == id && provider.issues == 0
+            && server->bindPreissuedInitialSession(id) == PreissuedInitialSessionBindingResult::AlreadyBound
+            && server->finalizeInitialSession(id) == InitialSessionFinalizationResult::ResumeAlreadyFinalized;
+    }
+
     bool identical_event_order_reproduces_the_same_trace()
     {
         const auto run = [] {
@@ -861,6 +880,7 @@ int main()
             && illegal_and_terminal_transitions_preserve_state_and_identity()
             && exhaustive_state_event_matrices_are_atomic()
             && initial_finalization_is_bind_then_issue_and_fail_closed()
+            && preissued_initial_binding_records_once_without_issuing()
             && identical_event_order_reproduces_the_same_trace()
         ? 0
         : 1;

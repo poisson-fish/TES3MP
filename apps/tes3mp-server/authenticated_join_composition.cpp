@@ -20,12 +20,12 @@ namespace TES3MP::ServerApp
         }
     }
 
-    JoinCompositionResult AuthenticatedJoinComposition::join(PrincipalId principal,
+    JoinCompositionOutcome AuthenticatedJoinComposition::join(PrincipalId principal,
         SessionGeneration generation, ServerTick tick, ResumeTokenContext context) noexcept
     {
         auto prepared = mJoins.prepare(principal, generation, tick);
         if (!std::holds_alternative<AuthenticatedJoinPreparation>(prepared))
-            return JoinCompositionResult::JoinRejected;
+            return { JoinCompositionResult::JoinRejected, std::nullopt };
 
         auto preparation = std::get<AuthenticatedJoinPreparation>(std::move(prepared));
         const auto cancel = [this, id = preparation.id]() noexcept { mJoins.cancel(id); };
@@ -35,7 +35,7 @@ namespace TES3MP::ServerApp
         if (!std::holds_alternative<AuthenticationAcceptedMessage>(issued))
         {
             cancel();
-            return JoinCompositionResult::TokenRejected;
+            return { JoinCompositionResult::TokenRejected, std::nullopt };
         }
 
         try
@@ -51,24 +51,25 @@ namespace TES3MP::ServerApp
                 || !std::holds_alternative<std::vector<std::byte>>(snapshotFrame))
             {
                 cancel();
-                return JoinCompositionResult::EncodingRejected;
+                return { JoinCompositionResult::EncodingRejected, std::nullopt };
             }
             const auto& authenticationBytes = std::get<std::vector<std::byte>>(authenticationFrame);
             const auto& snapshotBytes = std::get<std::vector<std::byte>>(snapshotFrame);
             if (!mResponses.enqueueJoinResponses(authenticationBytes, snapshotBytes))
             {
                 cancel();
-                return JoinCompositionResult::QueueRejected;
+                return { JoinCompositionResult::QueueRejected, std::nullopt };
             }
         }
         catch (...)
         {
             cancel();
-            return JoinCompositionResult::EncodingRejected;
+            return { JoinCompositionResult::EncodingRejected, std::nullopt };
         }
 
         auto committed = mJoins.commit(preparation.id);
-        return std::holds_alternative<AuthenticatedJoinResult>(committed)
-            ? JoinCompositionResult::Committed : JoinCompositionResult::CommitRejected;
+        if (auto* joined = std::get_if<AuthenticatedJoinResult>(&committed))
+            return { JoinCompositionResult::Committed, std::move(*joined) };
+        return { JoinCompositionResult::CommitRejected, std::nullopt };
     }
 }

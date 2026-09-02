@@ -197,9 +197,9 @@ int main()
         FakeJoinQueue responses;
         AuthenticatedJoinComposition composition(joins, authentication, responses);
         assert(composition.join(id<PrincipalId>(1), SessionGeneration::initial(),
-                   ServerTick::initial(), ResumeTokenContext{}) == JoinCompositionResult::Committed);
+                   ServerTick::initial(), ResumeTokenContext{}).result == JoinCompositionResult::Committed);
         assert(composition.join(id<PrincipalId>(2), SessionGeneration::initial(),
-                   id<ServerTick>(1), ResumeTokenContext{}) == JoinCompositionResult::Committed);
+                   id<ServerTick>(1), ResumeTokenContext{}).result == JoinCompositionResult::Committed);
         assert(authentication.issues == 2 && responses.attempts == 2 && responses.valid);
         assert(joins.liveBindings() == 2 && joins.state().players().size() == 2);
     }
@@ -210,16 +210,16 @@ int main()
         AuthenticatedJoinComposition composition(joins, authentication, responses);
         authentication.reject = true;
         assert(composition.join(id<PrincipalId>(3), SessionGeneration::initial(),
-                   ServerTick::initial(), ResumeTokenContext{}) == JoinCompositionResult::TokenRejected);
+                   ServerTick::initial(), ResumeTokenContext{}).result == JoinCompositionResult::TokenRejected);
         assert(joins.liveBindings() == 0 && joins.state().players().empty());
         authentication.reject = false;
         responses.reject = true;
         assert(composition.join(id<PrincipalId>(3), SessionGeneration::initial(),
-                   ServerTick::initial(), ResumeTokenContext{}) == JoinCompositionResult::QueueRejected);
+                   ServerTick::initial(), ResumeTokenContext{}).result == JoinCompositionResult::QueueRejected);
         assert(joins.liveBindings() == 0 && joins.state().players().empty());
         responses.reject = false;
         assert(composition.join(id<PrincipalId>(3), SessionGeneration::initial(),
-                   ServerTick::initial(), ResumeTokenContext{}) == JoinCompositionResult::Committed);
+                   ServerTick::initial(), ResumeTokenContext{}).result == JoinCompositionResult::Committed);
         assert(joins.liveBindings() == 1);
     }
     {
@@ -231,15 +231,17 @@ int main()
         auto joins = joinCoordinator();
         FakeAuthentication authentication;
         AuthenticatedJoinComposition composition(joins, authentication, responses);
-        assert(composition.join(id<PrincipalId>(4), SessionGeneration::initial(), ServerTick::initial(),
-                   ResumeTokenContext{}) == JoinCompositionResult::Committed);
+        auto joined = composition.join(id<PrincipalId>(4), SessionGeneration::initial(), ServerTick::initial(),
+            ResumeTokenContext{});
+        assert(joined.result == JoinCompositionResult::Committed && joined.committed
+            && joined.committed->session == id<SessionId>(1));
         assert(joins.liveBindings() == 1);
 
         auto rejectedJoins = joinCoordinator();
         TransportJoinResponseQueue missing(*queues, *connection.next());
         AuthenticatedJoinComposition rejectedComposition(rejectedJoins, authentication, missing);
         assert(rejectedComposition.join(id<PrincipalId>(5), SessionGeneration::initial(), ServerTick::initial(),
-                   ResumeTokenContext{}) == JoinCompositionResult::QueueRejected);
+                   ResumeTokenContext{}).result == JoinCompositionResult::QueueRejected);
         assert(rejectedJoins.liveBindings() == 0 && rejectedJoins.state().players().empty());
     }
     {

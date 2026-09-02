@@ -346,6 +346,17 @@ namespace TES3MP
         return ServerSessionBindingResult::NotEstablished;
     }
 
+    PreissuedInitialSessionBindingResult ServerSessionStateMachine::bindPreissuedInitialSession(
+        SessionId sessionId) noexcept
+    {
+        if (mState != ServerSessionState::Established || !mPrincipal || !mAuthenticationContext)
+            return PreissuedInitialSessionBindingResult::NotEstablished;
+        if (mAuthenticationAccepted || mSessionId)
+            return PreissuedInitialSessionBindingResult::AlreadyBound;
+        mSessionId = sessionId;
+        return PreissuedInitialSessionBindingResult::Bound;
+    }
+
     InitialSessionFinalizationResult ServerSessionStateMachine::finalizeInitialSession(SessionId sessionId) noexcept
     {
         if (mState != ServerSessionState::Established || !mPrincipal || !mAuthenticationContext)
