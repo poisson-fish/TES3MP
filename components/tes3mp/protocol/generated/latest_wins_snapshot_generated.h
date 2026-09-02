@@ -250,6 +250,7 @@ FLATBUFFERS_STRUCT_END(LinearVelocity3, 24);
 
 FLATBUFFERS_MANUALLY_ALIGNED_STRUCT(8) SpatialEntitySnapshot FLATBUFFERS_FINAL_CLASS {
  private:
+  uint64_t player_id_;
   uint64_t entity_id_;
   uint64_t entity_revision_;
   uint64_t authority_epoch_;
@@ -262,7 +263,8 @@ FLATBUFFERS_MANUALLY_ALIGNED_STRUCT(8) SpatialEntitySnapshot FLATBUFFERS_FINAL_C
 
  public:
   SpatialEntitySnapshot()
-      : entity_id_(0),
+      : player_id_(0),
+        entity_id_(0),
         entity_revision_(0),
         authority_epoch_(0),
         server_tick_(0),
@@ -273,8 +275,9 @@ FLATBUFFERS_MANUALLY_ALIGNED_STRUCT(8) SpatialEntitySnapshot FLATBUFFERS_FINAL_C
         linear_velocity_() {
     (void)padding0__;
   }
-  SpatialEntitySnapshot(uint64_t _entity_id, uint64_t _entity_revision, uint64_t _authority_epoch, uint64_t _server_tick, const TES3MP::Protocol::Schema::Snapshot::Cell &_cell, const TES3MP::Protocol::Schema::Snapshot::Position3 &_position, const TES3MP::Protocol::Schema::Snapshot::Orientation3 &_orientation, const TES3MP::Protocol::Schema::Snapshot::LinearVelocity3 &_linear_velocity)
-      : entity_id_(::flatbuffers::EndianScalar(_entity_id)),
+  SpatialEntitySnapshot(uint64_t _player_id, uint64_t _entity_id, uint64_t _entity_revision, uint64_t _authority_epoch, uint64_t _server_tick, const TES3MP::Protocol::Schema::Snapshot::Cell &_cell, const TES3MP::Protocol::Schema::Snapshot::Position3 &_position, const TES3MP::Protocol::Schema::Snapshot::Orientation3 &_orientation, const TES3MP::Protocol::Schema::Snapshot::LinearVelocity3 &_linear_velocity)
+      : player_id_(::flatbuffers::EndianScalar(_player_id)),
+        entity_id_(::flatbuffers::EndianScalar(_entity_id)),
         entity_revision_(::flatbuffers::EndianScalar(_entity_revision)),
         authority_epoch_(::flatbuffers::EndianScalar(_authority_epoch)),
         server_tick_(::flatbuffers::EndianScalar(_server_tick)),
@@ -284,6 +287,9 @@ FLATBUFFERS_MANUALLY_ALIGNED_STRUCT(8) SpatialEntitySnapshot FLATBUFFERS_FINAL_C
         padding0__(0),
         linear_velocity_(_linear_velocity) {
     (void)padding0__;
+  }
+  uint64_t player_id() const {
+    return ::flatbuffers::EndianScalar(player_id_);
   }
   uint64_t entity_id() const {
     return ::flatbuffers::EndianScalar(entity_id_);
@@ -310,7 +316,7 @@ FLATBUFFERS_MANUALLY_ALIGNED_STRUCT(8) SpatialEntitySnapshot FLATBUFFERS_FINAL_C
     return linear_velocity_;
   }
 };
-FLATBUFFERS_STRUCT_END(SpatialEntitySnapshot, 120);
+FLATBUFFERS_STRUCT_END(SpatialEntitySnapshot, 128);
 
 struct LatestWinsSnapshotHeader FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
   typedef LatestWinsSnapshotHeaderBuilder Builder;

@@ -31,6 +31,13 @@ construction, callbacks, production scripting behavior, and an early JSON or
 custom script dependency. This record adds no authentication, join, player,
 cell, movement, or reconnect behavior.
 
+On 2026-09-01 the project owner approved process-composition Option A: a thin
+`tes3mp_headless_client` executable owns one transport runtime, credential
+input, the fixed typed join script, bounded pumping, and credential-free NDJSON
+evidence. Protocol and session behavior remain in the engine-independent
+libraries. Test-only and existing-test-binary process entry points were
+rejected.
+
 ## Acceptance tests
 
 1. one session owns at most one attempt/connection and rejects duplicate starts;

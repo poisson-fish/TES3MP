@@ -40,6 +40,7 @@ struct LinearVelocity3 {
 }
 
 struct SpatialEntitySnapshot {
+  player_id:ulong;
   entity_id:ulong;
   entity_revision:ulong;
   authority_epoch:ulong;

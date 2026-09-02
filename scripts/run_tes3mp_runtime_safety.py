@@ -117,7 +117,7 @@ DECODER_REGISTRY = {
         "corpus": "protocol_exchange",
         "valid_seed": {
             "name": "valid-latest-wins-snapshot",
-            "sha256": "b5e2a76b0fe100c97c68e98610ed41d38c62f548b89507f2a51ac9d3fa8df3d1",
+            "sha256": "0f33f85009c404421c38c0a56049f5792ec6b20b98eff4e81227669c1c4754fb",
         },
     },
 }

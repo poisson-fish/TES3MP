@@ -58,7 +58,7 @@ namespace
 
     SpatialEntitySnapshot entry(std::uint64_t entityId, std::uint64_t tick = 8)
     {
-        return SpatialEntitySnapshot(value<ServerTick>(tick), value<EntityId>(entityId), value<EntityRevision>(3),
+        return SpatialEntitySnapshot(value<ServerTick>(tick), value<PlayerId>(entityId + 100), value<EntityId>(entityId), value<EntityRevision>(3),
             value<AuthorityEpoch>(2),
             Transform(CellId::exterior(value<CellSpaceId>(51), -2, 7), Position3(1000, -2000, 3000),
                 Orientation3(Turn32::fromValue(11), Turn32::fromValue(12), Turn32::fromValue(13))),
@@ -177,7 +177,7 @@ namespace
                     ? CellId::interior(value<CellSpaceId>(raw))
                     : CellId::exterior(
                           value<CellSpaceId>(raw), static_cast<std::int32_t>(index), -static_cast<std::int32_t>(index));
-                entries.emplace_back(*ServerTick::fromValue(raw - 1), value<EntityId>(raw), value<EntityRevision>(raw),
+                entries.emplace_back(*ServerTick::fromValue(raw - 1), value<PlayerId>(raw), value<EntityId>(raw), value<EntityRevision>(raw),
                     value<AuthorityEpoch>(raw),
                     Transform(cell, Position3(signedValue, nextSignedValue, lastSignedValue),
                         Orientation3(Turn32::fromValue(static_cast<std::uint32_t>(index)),
@@ -266,7 +266,7 @@ namespace
         const std::array entries{ entry(41) };
         auto reliable = encodeReliableOperation(operation(sessionId, generation));
         auto latestWins = encodeLatestWinsSnapshot(snapshot(sessionId, generation, 9, 1, entries));
-        if (reliable.size() != 184 || latestWins.size() != 240)
+        if (reliable.size() != 184 || latestWins.size() != 248)
             return false;
 
         auto unknownReliableBody = reliable;
@@ -274,13 +274,13 @@ namespace
         auto unknownSnapshotBody = latestWins;
         unknownSnapshotBody[31] = std::byte{ 2 };
 
-        const std::array entityPattern{ std::byte{ 41 }, std::byte{ 0 }, std::byte{ 0 }, std::byte{ 0 }, std::byte{ 0 },
+        const std::array playerPattern{ std::byte{ 141 }, std::byte{ 0 }, std::byte{ 0 }, std::byte{ 0 }, std::byte{ 0 },
             std::byte{ 0 }, std::byte{ 0 }, std::byte{ 0 } };
-        const auto entityPosition
-            = std::search(latestWins.begin(), latestWins.end(), entityPattern.begin(), entityPattern.end());
-        if (entityPosition == latestWins.end())
+        const auto playerPosition
+            = std::search(latestWins.begin(), latestWins.end(), playerPattern.begin(), playerPattern.end());
+        if (playerPosition == latestWins.end())
             return false;
-        std::fill(entityPosition, entityPosition + entityPattern.size(), std::byte{ 0 });
+        std::fill(playerPosition, playerPosition + playerPattern.size(), std::byte{ 0 });
 
         const auto reliableResult = decodeReliableOperation(unknownReliableBody);
         const auto snapshotBodyResult = decodeLatestWinsSnapshot(unknownSnapshotBody);
@@ -445,8 +445,8 @@ namespace
         const std::array entries{ entry(41) };
         const auto reliable = encodeReliableOperation(operation(sessionId, generation));
         const auto latestWins = encodeLatestWinsSnapshot(snapshot(sessionId, generation, 9, 1, entries));
-        return reliable.size() == 184 && fnv1a(reliable) == 0x1ad648997dba1cecull && latestWins.size() == 240
-            && fnv1a(latestWins) == 0x9237b44a62e49c50ull;
+        return reliable.size() == 184 && fnv1a(reliable) == 0x1ad648997dba1cecull && latestWins.size() == 248
+            && fnv1a(latestWins) == 0x6d6dcf39ff3271a9ull;
     }
 
     void printBytes(std::span<const std::byte> bytes)

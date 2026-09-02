@@ -84,9 +84,10 @@ namespace TES3MP
     class SpatialEntitySnapshot
     {
     public:
-        constexpr SpatialEntitySnapshot(ServerTick serverTick, EntityId entityId, EntityRevision entityRevision,
+        constexpr SpatialEntitySnapshot(ServerTick serverTick, PlayerId playerId, EntityId entityId, EntityRevision entityRevision,
             AuthorityEpoch authorityEpoch, Transform transform, LinearVelocity3 linearVelocity) noexcept
             : mServerTick(serverTick)
+            , mPlayerId(playerId)
             , mEntityId(entityId)
             , mEntityRevision(entityRevision)
             , mAuthorityEpoch(authorityEpoch)
@@ -96,6 +97,7 @@ namespace TES3MP
         }
 
         constexpr ServerTick serverTick() const noexcept { return mServerTick; }
+        constexpr PlayerId playerId() const noexcept { return mPlayerId; }
         constexpr EntityId entityId() const noexcept { return mEntityId; }
         constexpr EntityRevision entityRevision() const noexcept { return mEntityRevision; }
         constexpr AuthorityEpoch authorityEpoch() const noexcept { return mAuthorityEpoch; }
@@ -109,6 +111,7 @@ namespace TES3MP
 
     private:
         ServerTick mServerTick;
+        PlayerId mPlayerId;
         EntityId mEntityId;
         EntityRevision mEntityRevision;
         AuthorityEpoch mAuthorityEpoch;

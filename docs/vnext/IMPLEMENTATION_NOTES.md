@@ -4293,6 +4293,31 @@ only the relevant phase section here.
 
 [Back to the phase tracker](IMPLEMENTATION_PLAN.md#phase-7--headless-end-to-end-multiplayer-slice)
 
+- 2026-09-01 — Slice 7.3 real client process and identity proof — In Progress
+  - Change: added the thin `tes3mp_headless_client` production process, added
+    canonical player ownership to bounded spatial snapshot entries, and added a
+    real server/two-client process demo with a preceding rejected credential.
+  - Decisions: owner approved Option A for thin client-process composition and
+    Option A for player identity in the initial spatial snapshot entry. ADR-0041
+    and ADR-0042 record both clarifications.
+  - Verification: MSVC 19.44 builds `tes3mp_server`,
+    `tes3mp_headless_client`, `tes3mp_protocol_exchange_tests`, and
+    `tes3mp_authenticated_join_tests`; focused codec and join contracts pass.
+    Full `tes3mp_protocol_tests_run`, `tes3mp_server_app_tests_run`, and
+    `tes3mp_headless_client_tests_run` targets pass. All 114 repository-owned
+    Python tests pass; staged baseline verification passes with 272 intentional
+    differences and 67 dependency inputs; pinned `flatc 25.12.19` regenerated
+    the committed snapshot header; `git diff --cached --check` passes.
+    `python scripts/run_phase7_join_demo.py --server
+    build/slice63-crypto-gns/tes3mp-server/tes3mp_server.exe --client
+    build/slice63-crypto-gns/tes3mp-headless-client/tes3mp_headless_client.exe`
+    passes after one rejected credential and reports session/player/entity IDs
+    `1/1/1` and `2/2/2`, proving no identity was consumed by the failure.
+  - Owner review: architecture and state-scope approvals received before
+    implementation; implementation-demo acceptance remains pending.
+  - Follow-ups: owner implementation-demo review; then mark Slice 7.3
+    **Implemented** and begin separately gated Slice 7.4.
+
 - 2026-09-01 — Slice 7.3 live transport pump and production composition — In Progress
   - Change: wired accepted/closed events, bounded receive/dispatch, pending
     authentication progress, and outbound queue pumping through the thin server

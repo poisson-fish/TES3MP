@@ -107,7 +107,7 @@ namespace
         const auto position = transform.position();
         const auto orientation = transform.orientation();
         const auto velocity = entry.linearVelocity();
-        return { entry.entityId().value(), entry.entityRevision().value(), entry.authorityEpoch().value(),
+        return { entry.playerId().value(), entry.entityId().value(), entry.entityRevision().value(), entry.authorityEpoch().value(),
             entry.serverTick().value(), encodeCell(transform.cell()),
             SnapshotSchema::Position3(position.x(), position.y(), position.z()),
             SnapshotSchema::Orientation3(orientation.x().value(), orientation.y().value(), orientation.z().value()),
@@ -117,11 +117,14 @@ namespace
     std::variant<TES3MP::SpatialEntitySnapshot, ExchangeDecodeError> decodeEntry(
         const SnapshotSchema::SpatialEntitySnapshot& entry, std::size_t index)
     {
+        auto player = strongValue<TES3MP::PlayerId>(entry.player_id(), index);
         auto entity = strongValue<TES3MP::EntityId>(entry.entity_id(), index);
         auto revision = strongValue<TES3MP::EntityRevision>(entry.entity_revision(), index);
         auto epoch = strongValue<TES3MP::AuthorityEpoch>(entry.authority_epoch(), index);
         auto tick = strongValue<TES3MP::ServerTick>(entry.server_tick(), index);
         auto cellSpace = strongValue<TES3MP::CellSpaceId>(entry.cell().cell_space_id(), index);
+        if (const auto* failure = std::get_if<ExchangeDecodeError>(&player))
+            return *failure;
         if (const auto* failure = std::get_if<ExchangeDecodeError>(&entity))
             return *failure;
         if (const auto* failure = std::get_if<ExchangeDecodeError>(&revision))
@@ -154,7 +157,7 @@ namespace
         const auto& position = entry.position();
         const auto& orientation = entry.orientation();
         const auto& velocity = entry.linear_velocity();
-        return TES3MP::SpatialEntitySnapshot(*decodedValue(tick), *decodedValue(entity), *decodedValue(revision),
+        return TES3MP::SpatialEntitySnapshot(*decodedValue(tick), *decodedValue(player), *decodedValue(entity), *decodedValue(revision),
             *decodedValue(epoch),
             TES3MP::Transform(cell, TES3MP::Position3(position.x(), position.y(), position.z()),
                 TES3MP::Orientation3(TES3MP::Turn32::fromValue(orientation.x()),

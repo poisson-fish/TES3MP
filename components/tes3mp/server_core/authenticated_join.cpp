@@ -73,7 +73,7 @@ namespace TES3MP
         if (!accepted)
             return AuthenticatedJoinError::CanonicalStateRejected;
 
-        const SpatialEntitySnapshot entry(serverTick, mSeed.nextEntity, EntityRevision::initial(),
+        const SpatialEntitySnapshot entry(serverTick, mSeed.nextPlayer, mSeed.nextEntity, EntityRevision::initial(),
             AuthorityEpoch::initial(), mFixtureSpawn, LinearVelocity3(0, 0, 0));
         auto view = SpatialWorldView::create(std::span<const SpatialEntitySnapshot>(&entry, 1));
         auto* acceptedView = std::get_if<SpatialWorldView>(&view);

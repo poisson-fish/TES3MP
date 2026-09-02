@@ -100,6 +100,16 @@
       "purpose": "Behavior-free translation-unit anchor proving the OpenMW adapter participates in compilation and linking."
     },
     {
+      "path": "apps/tes3mp-headless-client/CMakeLists.txt",
+      "status": "A",
+      "purpose": "Defines the approved thin real headless-client process target with explicit engine-independent session and verified-transport dependencies."
+    },
+    {
+      "path": "apps/tes3mp-headless-client/main.cpp",
+      "status": "A",
+      "purpose": "Composes one caller-pumped real transport client, bounded fixed join flow, credential input, targeted initial snapshot application, and credential-free identity evidence."
+    },
+    {
       "path": "apps/tes3mp-server/CMakeLists.txt",
       "status": "A",
       "purpose": "Defines the app-owned testable dedicated-server composition library, focused contracts, and verified-transport executable root."
@@ -1245,6 +1255,11 @@
       "purpose": "Fail-closed production provisioner for the accepted exact GameNetworkingSockets, OpenSSL, Protobuf, Abseil, utf8_range, and c-ares source, install, license, profile, and evidence inputs."
     },
     {
+      "path": "scripts/run_phase7_join_demo.py",
+      "status": "A",
+      "purpose": "Runs the bounded real Phase 7 server/client process proof with an injected credential failure and exact distinct non-orphan identity assertions."
+    },
+    {
       "path": "scripts/run_tes3mp_runtime_safety.py",
       "status": "A",
       "purpose": "Repository-owned fail-closed sanitizer/race/fuzz preset runner with corpus, instrumentation, toolchain, log, and JSON evidence checks."
@@ -1476,7 +1491,7 @@
         },
         {
           "path": "components/tes3mp/CMakeLists.txt",
-          "sha256": "b559527d15ef4e720346443316f4e86ff1db8d6862d933131087ef5666f5badf"
+          "sha256": "c600a50d78520caef4376691894e33a7076f1782f82b4c729d9316f2384e3903"
         },
         {
           "path": "components/tes3mp/protocol/generated/authentication_accepted_generated.h",
@@ -1496,7 +1511,7 @@
         },
         {
           "path": "components/tes3mp/protocol/generated/latest_wins_snapshot_generated.h",
-          "sha256": "841c5a9ef3cf66d01f512f59a3d9fc2150c8a6fe88cb66f4ddab9d909f3fce6d"
+          "sha256": "5bc3603c7a3bc0935c5b6ff5f59f099f0196f86d0b68ed33d031a11af11fa192"
         },
         {
           "path": "components/tes3mp/protocol/generated/reliable_operation_generated.h",
@@ -1528,7 +1543,7 @@
         },
         {
           "path": "components/tes3mp/protocol/schema/latest_wins_snapshot.fbs",
-          "sha256": "459aa04aae56e11860554dbb67138e05a4de4a2c79f53c9fa76afc2ea8ac432a"
+          "sha256": "cbcf3268653aebd25767f12c241d335c48cd72b83d776dff81512966741ad338"
         },
         {
           "path": "components/tes3mp/protocol/schema/reliable_operation.fbs",

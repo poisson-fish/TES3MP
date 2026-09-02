@@ -410,6 +410,9 @@ tes3mp_verify_target_dependencies(tes3mp_protocol_tests ALLOWED tes3mp_test_supp
 tes3mp_verify_target_includes(tes3mp_protocol_tests
     FORBIDDEN ${TES3MP_ENGINE_INDEPENDENT_FORBIDDEN_INCLUDES})
 
+add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../../apps/tes3mp-headless-client
+    ${CMAKE_CURRENT_BINARY_DIR}/tes3mp-headless-client)
+
 add_executable(tes3mp_protocol_frame_tests tests/protocol_frame_tests.cpp)
 target_compile_features(tes3mp_protocol_frame_tests PRIVATE cxx_std_20)
 target_link_libraries(tes3mp_protocol_frame_tests PRIVATE tes3mp_protocol)

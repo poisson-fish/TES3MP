@@ -81,6 +81,13 @@ lifetime equal to the configured disconnect grace, and session-stage timeouts
 mapped from that grace. Startup rejects grace values outside the already
 accepted resume-token bounds.
 
+On 2026-09-01 the project owner approved initial-snapshot identity Option A:
+each spatial snapshot entry carries its canonical owning `PlayerId` alongside
+its `EntityId`. This lets a client prove the complete session/player/entity
+binding from its targeted initial snapshot. Missing or invalid player identity
+fails bounded decoding. A separate join-identity frame and server-only demo
+evidence were rejected.
+
 Rejected alternatives were app-owned join logic, random identifiers, staged
 install with rollback, multiple live players per principal, deferring the
 initial snapshot, and retaining incomplete joins. Identifiers are not restart-
@@ -89,7 +96,8 @@ policy.
 
 ## Acceptance tests and demo
 
-Focused tests cover distinct stable identities, the fixed authoritative spawn,
+Focused tests cover distinct stable identities, player-identity snapshot codec
+round trips and invalid values, the fixed authoritative spawn,
 snapshot targeting, duplicate-principal rejection, capacity and identifier
 exhaustion, and atomic failure. The Slice 7.3 demo must show two authenticated
 clients receiving distinct identities, complete initial snapshots, and no
