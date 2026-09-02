@@ -440,6 +440,11 @@
       "purpose": "Pinned FlatBuffers 25.12.19 generated C++ for the size-prefixed closed-union T3LS spatial-view schema."
     },
     {
+      "path": "components/tes3mp/protocol/generated/reliable_observation_batch_generated.h",
+      "status": "A",
+      "purpose": "Pinned FlatBuffers 25.12.19 generated C++ for the bounded server-to-client T3OB observation batch schema."
+    },
+    {
       "path": "components/tes3mp/protocol/generated/reliable_operation_generated.h",
       "status": "A",
       "purpose": "Pinned FlatBuffers 25.12.19 generated C++ for the size-prefixed closed-union T3RO velocity-intent schema."
@@ -493,6 +498,11 @@
       "path": "components/tes3mp/protocol/schema/latest_wins_snapshot.fbs",
       "status": "A",
       "purpose": "Explicit-ID T3LS closed-union schema for target-session latest-wins spatial views capped by the public codec contract."
+    },
+    {
+      "path": "components/tes3mp/protocol/schema/reliable_observation_batch.fbs",
+      "status": "A",
+      "purpose": "Explicit-ID T3OB schema for bounded targeted enter and leave observation batches."
     },
     {
       "path": "components/tes3mp/protocol/schema/reliable_operation.fbs",
@@ -1496,7 +1506,7 @@
         },
         {
           "path": "components/tes3mp/CMakeLists.txt",
-          "sha256": "c600a50d78520caef4376691894e33a7076f1782f82b4c729d9316f2384e3903"
+          "sha256": "a54999bfdd68bce1d2ec2bef85237c5addccc9f4f58baf3929eab197d8feeefe"
         },
         {
           "path": "components/tes3mp/protocol/generated/authentication_accepted_generated.h",
@@ -1519,8 +1529,12 @@
           "sha256": "5bc3603c7a3bc0935c5b6ff5f59f099f0196f86d0b68ed33d031a11af11fa192"
         },
         {
+          "path": "components/tes3mp/protocol/generated/reliable_observation_batch_generated.h",
+          "sha256": "bcd3f6156f0589d042238a0ecfb4b0b5b60a38287e6d48ec8a88c4d98f8762d2"
+        },
+        {
           "path": "components/tes3mp/protocol/generated/reliable_operation_generated.h",
-          "sha256": "008eb9e6ed57ccd7d3f867443636214066211733a637c48163232af741ed0d01"
+          "sha256": "56b53086f13bc2b094a4133753ccf0622be55ba54aed7f601704f8d7be0ff3cc"
         },
         {
           "path": "components/tes3mp/protocol/generated/server_hello_generated.h",
@@ -1551,8 +1565,12 @@
           "sha256": "cbcf3268653aebd25767f12c241d335c48cd72b83d776dff81512966741ad338"
         },
         {
+          "path": "components/tes3mp/protocol/schema/reliable_observation_batch.fbs",
+          "sha256": "eb2878d7a820b7a3df9005ba229b6a245b77a56d16a73498424d0515160ff8fc"
+        },
+        {
           "path": "components/tes3mp/protocol/schema/reliable_operation.fbs",
-          "sha256": "fcc573985d3f37061ca8b0f58757a43c22a0129129a81bedd02f3d45042d89ec"
+          "sha256": "f33559d4c00541b78d0c972368e22e8c2839059c1f15ca4410ec18eb8ea2c728"
         },
         {
           "path": "components/tes3mp/protocol/schema/server_hello.fbs",
@@ -1612,11 +1630,11 @@
         },
         {
           "path": "scripts/tests/test_run_vnext_flatbuffers_proof.py",
-          "sha256": "d777f3793e3d36a381e6b85bd997ad9ee09d5bda666865107cc4413d55c20e41"
+          "sha256": "52087caf025cbf9514e96aa97eff13c7538fdf4afb4cd085db1cb48543f30609"
         },
         {
           "path": "scripts/vnext_flatbuffers_proof.json",
-          "sha256": "03135e8a21cb2b058e6d55f96b96107599a6a2e8816d0261542a334a43cd17b5"
+          "sha256": "44381baf52d835adadf5af660671c3213aa8bb7f459fbb3c7da6978af6ed6014"
         }
       ],
       "repositories": [

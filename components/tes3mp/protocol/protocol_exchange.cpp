@@ -3,6 +3,7 @@
 #include <tes3mp/protocol_frame.hpp>
 
 #include "generated/latest_wins_snapshot_generated.h"
+#include "generated/reliable_observation_batch_generated.h"
 #include "generated/reliable_operation_generated.h"
 
 #include <flatbuffers/flatbuffers.h>
@@ -19,6 +20,7 @@ namespace
     using TES3MP::ExchangeDecodeErrorStage;
     namespace ReliableSchema = TES3MP::Protocol::Schema::Reliable;
     namespace SnapshotSchema = TES3MP::Protocol::Schema::Snapshot;
+    namespace ObservationSchema = TES3MP::Protocol::Schema::Observation;
 
     constexpr std::size_t SizePrefixBytes = sizeof(flatbuffers::uoffset_t);
     constexpr std::size_t MinimumIdentifiedFlatBufferBytes = SizePrefixBytes + sizeof(flatbuffers::uoffset_t) + 4;
@@ -192,6 +194,28 @@ namespace
 
 namespace TES3MP
 {
+    std::variant<ReliableObservationBatch, ExchangeDecodeError> ReliableObservationBatch::create(
+        SessionId targetSessionId, SessionGeneration targetSessionGeneration, ServerTick serverTick,
+        std::span<const ObservationChange> changes)
+    {
+        if (changes.size() > MaximumObservationChanges)
+            return error(ExchangeDecodeErrorStage::SemanticValidation, ExchangeDecodeErrorCode::TooManyObservationChanges,
+                changes.size(), MaximumObservationChanges);
+        for (std::size_t index = 0; index < changes.size(); ++index)
+        {
+            if (changes[index].kind != ObservationChangeKind::Enter
+                && changes[index].kind != ObservationChangeKind::Leave)
+                return error(ExchangeDecodeErrorStage::SemanticValidation,
+                    ExchangeDecodeErrorCode::InvalidObservationChangeKind, static_cast<std::size_t>(changes[index].kind), 0, index);
+            if (index != 0 && changes[index - 1].entityId >= changes[index].entityId)
+                return error(ExchangeDecodeErrorStage::SemanticValidation,
+                    ExchangeDecodeErrorCode::ObservationChangesNotStrictlySorted,
+                    changes[index].entityId.value(), changes[index - 1].entityId.value(), index);
+        }
+        return ReliableObservationBatch(targetSessionId, targetSessionGeneration, serverTick,
+            std::vector<ObservationChange>(changes.begin(), changes.end()));
+    }
+
     std::variant<ReliableOperation, ExchangeDecodeError> ReliableOperation::create(
         ReliableOperationHeader header, PlayerMotionIntent intent) noexcept
     {
@@ -281,6 +305,22 @@ namespace TES3MP
         const auto root = SnapshotSchema::CreateLatestWinsSnapshot(
             builder, encodedHeader, SnapshotSchema::LatestWinsSnapshotBody::SpatialWorldView, view.Union());
         SnapshotSchema::FinishSizePrefixedLatestWinsSnapshotBuffer(builder, root);
+        return takeBuffer(builder);
+    }
+
+    std::vector<std::byte> encodeReliableObservationBatch(const ReliableObservationBatch& value)
+    {
+        flatbuffers::FlatBufferBuilder builder;
+        const auto header = ObservationSchema::CreateReliableObservationHeader(builder,
+            value.targetSessionId().value(), value.targetSessionGeneration().value(), value.serverTick().value());
+        std::vector<ObservationSchema::ObservationChange> changes;
+        changes.reserve(value.changes().size());
+        for (const auto& change : value.changes())
+            changes.emplace_back(change.playerId.value(), change.entityId.value(),
+                static_cast<ObservationSchema::ObservationChangeKind>(change.kind));
+        const auto encodedChanges = builder.CreateVectorOfStructs(changes);
+        const auto root = ObservationSchema::CreateReliableObservationBatch(builder, header, encodedChanges);
+        ObservationSchema::FinishSizePrefixedReliableObservationBatchBuffer(builder, root);
         return takeBuffer(builder);
     }
 
@@ -427,5 +467,46 @@ namespace TES3MP
         return LatestWinsSnapshot(LatestWinsSnapshotHeader(*decodedValue(session), *decodedValue(generation),
                                       *decodedValue(tick), acknowledgement),
             std::get<SpatialWorldView>(std::move(worldView)));
+    }
+
+    ReliableObservationBatchDecodeResult decodeReliableObservationBatch(std::span<const std::byte> payload)
+    {
+        if (const auto prefixError = validatePayloadPrefix(payload, ReliableOperationMaximumPayloadBytes))
+            return *prefixError;
+        const auto* bytes = reinterpret_cast<const std::uint8_t*>(payload.data());
+        if (!ObservationSchema::SizePrefixedReliableObservationBatchBufferHasIdentifier(bytes))
+            return error(ExchangeDecodeErrorStage::Identifier, ExchangeDecodeErrorCode::InvalidIdentifier);
+        auto verifier = makeVerifier(payload, ReliableOperationMaximumPayloadBytes);
+        if (!ObservationSchema::VerifySizePrefixedReliableObservationBatchBuffer(verifier))
+            return error(ExchangeDecodeErrorStage::Verification, ExchangeDecodeErrorCode::VerificationFailed);
+        const auto* root = ObservationSchema::GetSizePrefixedReliableObservationBatch(bytes);
+        const auto* header = root->header();
+        if (header == nullptr)
+            return error(ExchangeDecodeErrorStage::SemanticValidation, ExchangeDecodeErrorCode::MissingObservationHeader);
+        auto session = strongValue<SessionId>(header->target_session_id());
+        auto generation = strongValue<SessionGeneration>(header->target_session_generation());
+        auto tick = strongValue<ServerTick>(header->server_tick());
+        if (const auto* failure = std::get_if<ExchangeDecodeError>(&session)) return *failure;
+        if (const auto* failure = std::get_if<ExchangeDecodeError>(&generation)) return *failure;
+        if (const auto* failure = std::get_if<ExchangeDecodeError>(&tick)) return *failure;
+        const auto* encoded = root->changes();
+        const std::size_t count = encoded == nullptr ? 0 : encoded->size();
+        if (count > MaximumObservationChanges)
+            return error(ExchangeDecodeErrorStage::SemanticValidation, ExchangeDecodeErrorCode::TooManyObservationChanges,
+                count, MaximumObservationChanges);
+        std::vector<ObservationChange> changes;
+        changes.reserve(count);
+        for (std::size_t index = 0; index < count; ++index)
+        {
+            const auto* current = encoded->Get(static_cast<flatbuffers::uoffset_t>(index));
+            auto player = strongValue<PlayerId>(current->player_id(), index);
+            auto entity = strongValue<EntityId>(current->entity_id(), index);
+            if (const auto* failure = std::get_if<ExchangeDecodeError>(&player)) return *failure;
+            if (const auto* failure = std::get_if<ExchangeDecodeError>(&entity)) return *failure;
+            changes.push_back({ *decodedValue(player), *decodedValue(entity),
+                static_cast<ObservationChangeKind>(current->kind()) });
+        }
+        return ReliableObservationBatch::create(*decodedValue(session), *decodedValue(generation),
+            *decodedValue(tick), changes);
     }
 }

@@ -26,6 +26,7 @@
     "authentication_request.fbs",
     "client_hello.fbs",
     "latest_wins_snapshot.fbs",
+    "reliable_observation_batch.fbs",
     "reliable_operation.fbs",
     "server_hello.fbs",
     "session_rejected.fbs"
@@ -36,6 +37,7 @@
     "authentication_request_generated.h",
     "client_hello_generated.h",
     "latest_wins_snapshot_generated.h",
+    "reliable_observation_batch_generated.h",
     "reliable_operation_generated.h",
     "server_hello_generated.h",
     "session_rejected_generated.h"

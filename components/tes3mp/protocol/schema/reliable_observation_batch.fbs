@@ -1,0 +1,28 @@
+namespace TES3MP.Protocol.Schema.Observation;
+
+table ReliableObservationHeader {
+  target_session_id:ulong (id: 0);
+  target_session_generation:ulong (id: 1);
+  server_tick:ulong (id: 2);
+}
+
+enum ObservationChangeKind : ubyte {
+  Unknown = 0,
+  Enter = 1,
+  Leave = 2
+}
+
+struct ObservationChange {
+  player_id:ulong;
+  entity_id:ulong;
+  kind:ObservationChangeKind;
+}
+
+table ReliableObservationBatch {
+  header:ReliableObservationHeader (id: 0);
+  changes:[ObservationChange] (id: 1);
+}
+
+root_type ReliableObservationBatch;
+file_identifier "T3OB";
+file_extension "t3ob";

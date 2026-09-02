@@ -86,6 +86,7 @@ target_sources(tes3mp_protocol PRIVATE
     protocol/generated/authentication_request_generated.h
     protocol/generated/client_hello_generated.h
     protocol/generated/latest_wins_snapshot_generated.h
+    protocol/generated/reliable_observation_batch_generated.h
     protocol/generated/reliable_operation_generated.h
     protocol/generated/server_hello_generated.h
     protocol/generated/session_rejected_generated.h

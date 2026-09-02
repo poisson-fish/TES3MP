@@ -37,6 +37,7 @@ namespace TES3MP
         AuthenticationAccepted = 0x0005,
         AuthenticationRejected = 0x0006,
         ReliableOperation = 0x0100,
+        ReliableObservationBatch = 0x0101,
         LatestWinsSnapshot = 0x0200,
     };
 
@@ -61,6 +62,7 @@ namespace TES3MP
             case MessageKind::AuthenticationRejected:
                 return MessageDescriptor{ kind, MessageClass::SessionControl, SessionControlMaximumPayloadBytes };
             case MessageKind::ReliableOperation:
+            case MessageKind::ReliableObservationBatch:
                 return MessageDescriptor{ kind, MessageClass::ReliableOperation, ReliableOperationMaximumPayloadBytes };
             case MessageKind::LatestWinsSnapshot:
                 return MessageDescriptor{ kind, MessageClass::LatestWinsSnapshot,

@@ -108,6 +108,7 @@ namespace
         static_assert(!std::is_default_constructible_v<ReliableOperation>);
         static_assert(!std::is_default_constructible_v<SpatialWorldView>);
         static_assert(!std::is_default_constructible_v<LatestWinsSnapshot>);
+        static_assert(!std::is_default_constructible_v<ReliableObservationBatch>);
         const auto missing = ReliableOperation::create(
             ReliableOperationHeader(ClientCommandHeader(value<SessionId>(1), SessionGeneration::initial(),
                                         CommandSequence::initial(), value<CommandId>(1), ServerTick::initial()),
@@ -115,6 +116,38 @@ namespace
             PlayerMotionIntent(LinearVelocity3(0, 0, 0)));
         return MaximumSpatialWorldViewEntries == 256
             && hasError(missing, ExchangeDecodeErrorCode::MissingEntityPrecondition);
+    }
+
+    bool reliable_observation_batch_is_distinct_bounded_and_owned()
+    {
+        const std::array changes{ ObservationChange{ value<PlayerId>(101), value<EntityId>(1), ObservationChangeKind::Enter },
+            ObservationChange{ value<PlayerId>(102), value<EntityId>(2), ObservationChangeKind::Leave } };
+        const auto created = ReliableObservationBatch::create(value<SessionId>(21), value<SessionGeneration>(2),
+            value<ServerTick>(9), changes);
+        const auto* original = std::get_if<ReliableObservationBatch>(&created);
+        if (original == nullptr) return false;
+        auto bytes = encodeReliableObservationBatch(*original);
+        auto decoded = decodeReliableObservationBatch(bytes);
+        std::fill(bytes.begin(), bytes.end(), std::byte{ 0 });
+        const auto* owned = std::get_if<ReliableObservationBatch>(&decoded);
+        std::vector<ObservationChange> oversized(MaximumObservationChanges + 1,
+            ObservationChange{ value<PlayerId>(101), value<EntityId>(1), ObservationChangeKind::Enter });
+        const std::array duplicate{ changes[0], changes[0] };
+        const std::array unsorted{ changes[1], changes[0] };
+        const std::array invalid{ ObservationChange{ value<PlayerId>(101), value<EntityId>(1),
+            static_cast<ObservationChangeKind>(255) } };
+        const auto descriptor = messageDescriptor(MessageKind::ReliableObservationBatch);
+        return owned != nullptr && *owned == *original
+            && hasError(ReliableObservationBatch::create(value<SessionId>(21), value<SessionGeneration>(2),
+                value<ServerTick>(9), oversized), ExchangeDecodeErrorCode::TooManyObservationChanges)
+            && hasError(ReliableObservationBatch::create(value<SessionId>(21), value<SessionGeneration>(2),
+                value<ServerTick>(9), duplicate), ExchangeDecodeErrorCode::ObservationChangesNotStrictlySorted)
+            && hasError(ReliableObservationBatch::create(value<SessionId>(21), value<SessionGeneration>(2),
+                value<ServerTick>(9), unsorted), ExchangeDecodeErrorCode::ObservationChangesNotStrictlySorted)
+            && hasError(ReliableObservationBatch::create(value<SessionId>(21), value<SessionGeneration>(2),
+                value<ServerTick>(9), invalid), ExchangeDecodeErrorCode::InvalidObservationChangeKind)
+            && descriptor && descriptor->messageClass == MessageClass::ReliableOperation
+            && std::holds_alternative<ExchangeDecodeError>(decodeReliableOperation(encodeReliableObservationBatch(*original)));
     }
 
     bool operation_and_snapshot_round_trip_as_owned_values()
@@ -557,6 +590,7 @@ int main(int argc, char** argv)
     passed &= check(values_are_typed_bounded_and_not_default_constructible(), "typed bounded values");
     passed &= check(operation_and_snapshot_round_trip_as_owned_values(), "owned round trips");
     passed &= check(fixture_cell_transitions_round_trip_as_typed_owned_values(), "fixture transition round trips");
+    passed &= check(reliable_observation_batch_is_distinct_bounded_and_owned(), "reliable observation batch");
     passed &= check(deterministic_exchange_properties_round_trip(), "deterministic properties");
     passed &= check(view_bounds_ordering_and_payload_budget_are_enforced(), "view bounds and ordering");
     passed &= check(every_truncation_identifier_and_trailing_byte_fail_without_partial_value(), "malformed inputs");

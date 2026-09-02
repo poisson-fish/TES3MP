@@ -67,3 +67,9 @@ bounded reliable typed enter/leave observation batch paired through one atomic
 queue-admission operation with that target's complete latest-wins spatial view.
 Encoding or capacity failure admits neither frame. Separate independently
 admitted lifecycle messages and snapshot-inferred lifecycle remain rejected.
+
+### Observation wire-root clarification
+
+Approved by the project owner on 2026-09-01: use a distinct bounded
+server-to-client reliable observation schema/root and frame kind. Do not mix
+server lifecycle results into the client-command `ReliableOperation` root.

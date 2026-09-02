@@ -13,6 +13,7 @@
 namespace TES3MP
 {
     inline constexpr std::size_t MaximumSpatialWorldViewEntries = 256;
+    inline constexpr std::size_t MaximumObservationChanges = 256;
 
     enum class ExchangeDecodeErrorStage : std::uint8_t
     {
@@ -42,6 +43,10 @@ namespace TES3MP
         SnapshotEntriesNotStrictlySorted,
         InvalidCellKind,
         InvalidInteriorGrid,
+        MissingObservationHeader,
+        TooManyObservationChanges,
+        ObservationChangesNotStrictlySorted,
+        InvalidObservationChangeKind,
     };
 
     class FixtureCellTransition
@@ -152,14 +157,47 @@ namespace TES3MP
         SpatialWorldView mView;
     };
 
+    enum class ObservationChangeKind : std::uint8_t { Enter = 1, Leave = 2 };
+
+    struct ObservationChange
+    {
+        PlayerId playerId;
+        EntityId entityId;
+        ObservationChangeKind kind;
+        friend constexpr bool operator==(ObservationChange, ObservationChange) noexcept = default;
+    };
+
+    class ReliableObservationBatch
+    {
+    public:
+        static std::variant<ReliableObservationBatch, ExchangeDecodeError> create(SessionId targetSessionId,
+            SessionGeneration targetSessionGeneration, ServerTick serverTick, std::span<const ObservationChange> changes);
+        SessionId targetSessionId() const noexcept { return mTargetSessionId; }
+        SessionGeneration targetSessionGeneration() const noexcept { return mTargetSessionGeneration; }
+        ServerTick serverTick() const noexcept { return mServerTick; }
+        std::span<const ObservationChange> changes() const noexcept { return mChanges; }
+        friend bool operator==(const ReliableObservationBatch&, const ReliableObservationBatch&) noexcept = default;
+    private:
+        ReliableObservationBatch(SessionId session, SessionGeneration generation, ServerTick tick,
+            std::vector<ObservationChange> changes) : mTargetSessionId(session), mTargetSessionGeneration(generation),
+            mServerTick(tick), mChanges(std::move(changes)) {}
+        SessionId mTargetSessionId;
+        SessionGeneration mTargetSessionGeneration;
+        ServerTick mServerTick;
+        std::vector<ObservationChange> mChanges;
+    };
+
     using ReliableOperationDecodeResult = std::variant<ReliableOperation, ExchangeDecodeError>;
     using LatestWinsSnapshotDecodeResult = std::variant<LatestWinsSnapshot, ExchangeDecodeError>;
+    using ReliableObservationBatchDecodeResult = std::variant<ReliableObservationBatch, ExchangeDecodeError>;
 
     std::vector<std::byte> encodeReliableOperation(const ReliableOperation& value);
     std::vector<std::byte> encodeLatestWinsSnapshot(const LatestWinsSnapshot& value);
+    std::vector<std::byte> encodeReliableObservationBatch(const ReliableObservationBatch& value);
 
     ReliableOperationDecodeResult decodeReliableOperation(std::span<const std::byte> payload);
     LatestWinsSnapshotDecodeResult decodeLatestWinsSnapshot(std::span<const std::byte> payload);
+    ReliableObservationBatchDecodeResult decodeReliableObservationBatch(std::span<const std::byte> payload);
 }
 
 #endif
