@@ -21,6 +21,7 @@ namespace TES3MP::ServerApp
         ProtocolRejected,
         AuthenticationPending,
         Joined,
+        CommandSubmitted,
     };
 
     class ConnectionSessionCoordinator
@@ -35,11 +36,15 @@ namespace TES3MP::ServerApp
         ServerSessionStateMachine* session(TransportConnectionId connection) noexcept;
         const AdmissionScopeId* admissionScope(TransportConnectionId connection) const noexcept;
         ConnectionSessionResult dispatch(TransportConnectionId connection, const TransportMessage& message,
+            AuthenticatedJoinCoordinator& joins, CredentialCrypto& crypto, ServerCommandIntakeCoordinator& intake,
+            ServerTick tick) noexcept;
+        ConnectionSessionResult dispatch(TransportConnectionId connection, const TransportMessage& message,
             AuthenticatedJoinCoordinator& joins, CredentialCrypto& crypto, ServerTick tick) noexcept;
         ConnectionSessionResult pollAuthentication(TransportConnectionId connection,
             AuthenticatedJoinCoordinator& joins, CredentialCrypto& crypto, ServerTick tick) noexcept;
         std::size_t size() const noexcept { return mConnections.size(); }
         std::vector<TransportConnectionId> connections() const;
+        std::optional<TransportConnectionId> connectionForSession(SessionId session) const noexcept;
 
     private:
         struct Connection

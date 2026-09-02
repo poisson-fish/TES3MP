@@ -572,6 +572,37 @@ namespace TES3MP
                                      : found->second.enqueuePair(firstChannel, first, secondChannel, second);
     }
 
+    TransportResult OutboundQueueSet::enqueuePairsAtomically(std::span<const AtomicPair> pairs)
+    {
+        if (pairs.empty() || pairs.size() > mConnectionLimit) return TransportResult::InvalidInput;
+        auto staged = mQueues;
+        for (const auto& pair : pairs)
+        {
+            const auto found = staged.find(pair.connection);
+            if (found == staged.end()) return TransportResult::UnknownId;
+            const auto result = found->second.enqueuePair(
+                pair.firstChannel, pair.first, pair.secondChannel, pair.second);
+            if (result != TransportResult::Accepted) return result;
+        }
+        mQueues.swap(staged);
+        return TransportResult::Accepted;
+    }
+
+    TransportResult OutboundQueueSet::enqueueMessagesAtomically(std::span<const AtomicMessage> messages)
+    {
+        if (messages.empty() || messages.size() > mConnectionLimit * 3) return TransportResult::InvalidInput;
+        auto staged = mQueues;
+        for (const auto& message : messages)
+        {
+            const auto found = staged.find(message.connection);
+            if (found == staged.end()) return TransportResult::UnknownId;
+            const auto result = found->second.enqueue(message.channel, message.bytes);
+            if (result != TransportResult::Accepted) return result;
+        }
+        mQueues.swap(staged);
+        return TransportResult::Accepted;
+    }
+
     std::optional<OutboundPumpResult> OutboundQueueSet::pump(
         TransportRuntime& runtime, TransportConnectionId connection, std::uint64_t nowMilliseconds)
     {

@@ -106,12 +106,16 @@ int main(int argc, char** argv)
     const auto zero = TES3MP::Turn32::fromValue(0);
     auto fixtureSpawn = TES3MP::Transform(TES3MP::CellId::interior(*TES3MP::CellSpaceId::fromValue(7)),
         TES3MP::Position3(10, 20, 30), TES3MP::Orientation3(zero, zero, zero));
-    auto joins = TES3MP::AuthenticatedJoinCoordinator::create(fixtureSpawn,
-        { *TES3MP::SessionId::fromValue(1), *TES3MP::PlayerId::fromValue(1),
-            *TES3MP::EntityId::fromValue(1) });
     TES3MP::NullMetricSink metrics;
     TES3MP::NullStructuredEventSink events;
     TES3MP::Observability observability(metrics, events);
+    auto emptyState = std::get<TES3MP::CanonicalServerState>(TES3MP::createCanonicalServerState({}, {}));
+    TES3MP::CanonicalCommandReducer reducer(std::move(emptyState), observability);
+    TES3MP::ServerCommandIntakeCoordinator intake(
+        clock, observability, clock.now(), TES3MP::ServerTick::initial(), TES3MP::IngressOrdinal::initial());
+    auto joins = TES3MP::AuthenticatedJoinCoordinator::create(fixtureSpawn,
+        { *TES3MP::SessionId::fromValue(1), *TES3MP::PlayerId::fromValue(1),
+            *TES3MP::EntityId::fromValue(1) }, reducer);
     if (!crypto || !limiter || !joinProvider || !resumeStore || !queues || !timeouts || !joins
         || !std::holds_alternative<TES3MP::CapabilityOffer>(offer))
     {
@@ -124,7 +128,7 @@ int main(int argc, char** argv)
         std::get<TES3MP::CapabilityOffer>(std::move(offer)), authentication, *queues,
         TES3MP::ServerApp::Phase7ConnectionCapacity);
     TES3MP::ServerApp::ServerApplication application(*factory.runtime, config,
-        { sessions, *joins, *crypto, *queues, clock });
+        { sessions, *joins, *crypto, *queues, clock, intake, reducer });
     if (!application.start())
     {
         std::cerr << application.failure() << '\n';
@@ -133,21 +137,13 @@ int main(int argc, char** argv)
     std::signal(SIGINT, requestStop);
     std::signal(SIGTERM, requestStop);
     std::cout << "server started\n";
-    auto tick = TES3MP::ServerTick::initial();
     while (stopRequested == 0)
     {
-        if (!application.pump(tick))
+        if (!application.pump(intake.nextTick()))
         {
             std::cerr << application.failure() << '\n';
             return 3;
         }
-        const auto next = tick.next();
-        if (!next)
-        {
-            std::cerr << "server tick exhausted\n";
-            return 3;
-        }
-        tick = *next;
         std::this_thread::sleep_for(std::chrono::milliseconds(config.tickIntervalMilliseconds));
     }
     if (!application.stop())

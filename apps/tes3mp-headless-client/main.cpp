@@ -9,6 +9,7 @@
 #include <chrono>
 #include <fstream>
 #include <iostream>
+#include <ranges>
 #include <string>
 #include <thread>
 #include <variant>
@@ -27,9 +28,9 @@ namespace
     };
 
     bool sendFrame(TES3MP::TransportRuntime& runtime, TES3MP::TransportConnectionId connection,
-        TES3MP::MessageKind kind, std::span<const std::byte> payload)
+        TES3MP::MessageClass messageClass, TES3MP::MessageKind kind, std::span<const std::byte> payload)
     {
-        auto frame = TES3MP::encodeProtocolFrame(TES3MP::MessageClass::SessionControl, kind, payload);
+        auto frame = TES3MP::encodeProtocolFrame(messageClass, kind, payload);
         const auto* bytes = std::get_if<std::vector<std::byte>>(&frame);
         return bytes && runtime.send(connection, TES3MP::TransportChannel::ReliableOrdered, *bytes)
             == TES3MP::TransportResult::Accepted;
@@ -46,9 +47,9 @@ namespace
 
 int main(int argc, char** argv)
 {
-    if (argc != 5)
+    if (argc != 5 && argc != 6)
     {
-        std::cerr << "usage: tes3mp_headless_client <host> <port> <password-file> <timeout-ms>\n";
+        std::cerr << "usage: tes3mp_headless_client <host> <port> <password-file> <timeout-ms> [mover|observer]\n";
         return 2;
     }
     const auto port = number(argv[2]);
@@ -77,7 +78,15 @@ int main(int argc, char** argv)
     if (!sessionValue || !*sessionValue || (*sessionValue)->connect(*endpoint) != TES3MP::HeadlessClientResult::Accepted) return 3;
     auto& session = **sessionValue;
     bool authenticationAccepted = false;
+    const std::string_view mode = argc == 6 ? argv[5] : "join";
+    if (mode != "join" && mode != "mover" && mode != "observer") return 2;
     std::optional<TES3MP::LatestWinsSnapshot> snapshot;
+    bool bound = false;
+    bool sentExterior = false;
+    bool sentInterior = false;
+    bool sawLeave = false;
+    bool sawEnter = false;
+    std::optional<TES3MP::ReliableObservationBatch> pendingObservation;
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(*timeout);
 
     while (std::chrono::steady_clock::now() < deadline)
@@ -89,7 +98,7 @@ int main(int argc, char** argv)
             auto range = std::get<TES3MP::ProtocolVersionRange>(TES3MP::ProtocolVersionRange::create(1, 0, 0));
             auto offer = std::get<TES3MP::CapabilityOffer>(TES3MP::CapabilityOffer::create(std::move(range), {}, {}));
             const auto payload = TES3MP::encodeClientHello(TES3MP::ClientHello::fromOffer(std::move(offer)));
-            if (!session.connection() || !sendFrame(*factory.runtime, *session.connection(), TES3MP::MessageKind::ClientHello, payload)) break;
+            if (!session.connection() || !sendFrame(*factory.runtime, *session.connection(), TES3MP::MessageClass::SessionControl, TES3MP::MessageKind::ClientHello, payload)) break;
         }
         if (session.connection())
         {
@@ -109,7 +118,7 @@ int main(int argc, char** argv)
                             != TES3MP::ClientSessionAction::AuthenticationInputReady) return 3;
                     auto request = TES3MP::AuthenticationRequest::join(std::move(*password));
                     const auto payload = TES3MP::encodeAuthenticationRequest(request);
-                    if (!sendFrame(*factory.runtime, *session.connection(), TES3MP::MessageKind::AuthenticationRequest, payload)
+                    if (!sendFrame(*factory.runtime, *session.connection(), TES3MP::MessageClass::SessionControl, TES3MP::MessageKind::AuthenticationRequest, payload)
                         || session.handle(TES3MP::ClientAuthenticationSubmitted{}).action
                             != TES3MP::ClientSessionAction::AuthenticationSubmitted) return 3;
                 }
@@ -127,23 +136,93 @@ int main(int argc, char** argv)
                     if (!std::holds_alternative<TES3MP::LatestWinsSnapshot>(value)) return 3;
                     snapshot = std::get<TES3MP::LatestWinsSnapshot>(std::move(value));
                 }
+                else if (frame->messageKind() == TES3MP::MessageKind::ReliableObservationBatch)
+                {
+                    auto value = TES3MP::decodeReliableObservationBatch(frame->payload());
+                    auto* batch = std::get_if<TES3MP::ReliableObservationBatch>(&value);
+                    if (!batch) return 3;
+                    if (!bound) pendingObservation = std::move(*batch);
+                    else
+                    {
+                        const auto applied = session.receiveReliableObservationBatch(std::move(*batch));
+                        if (applied != TES3MP::ReliableObservationReceiveResult::Applied)
+                        { std::cerr << "observation rejected " << static_cast<int>(applied) << '\n'; return 3; }
+                    }
+                    if (!bound) continue;
+                    for (const auto& change : session.stateMachine().confirmedObservationBatch()->changes())
+                    {
+                        sawLeave = sawLeave || change.kind == TES3MP::ObservationChangeKind::Leave;
+                        sawEnter = sawEnter || (sawLeave && change.kind == TES3MP::ObservationChangeKind::Enter);
+                    }
+                }
             }
         }
-        if (authenticationAccepted && snapshot)
+        if (authenticationAccepted && snapshot && !bound)
         {
             const auto sessionId = snapshot->header().targetSessionId();
             if (session.bindEstablishedSession(sessionId) != TES3MP::ClientSessionBindingResult::Bound
                 || session.receiveLatestWinsSnapshot(std::move(*snapshot)) != TES3MP::LatestWinsSnapshotReceiveResult::Applied)
                 return 3;
             const auto& confirmed = *session.stateMachine().confirmedSnapshot();
-            if (confirmed.view().entries().size() != 1) return 3;
-            const auto& entry = confirmed.view().entries().front();
+            const auto foundSelf = std::ranges::find_if(confirmed.view().entries(), [&](const auto& entry) {
+                return entry.playerId().value() == sessionId.value();
+            });
+            if (foundSelf == confirmed.view().entries().end()) return 3;
+            const auto& entry = *foundSelf;
             std::cout << "{\"event\":\"joined\",\"session_id\":" << sessionId.value()
                       << ",\"player_id\":" << entry.playerId().value()
-                      << ",\"entity_id\":" << entry.entityId().value() << "}\n";
-            session.close();
-            factory.runtime->shutdown();
-            return 0;
+                      << ",\"entity_id\":" << entry.entityId().value() << "}" << std::endl;
+            bound = true;
+            snapshot.reset();
+            if (pendingObservation)
+            {
+                if (session.receiveReliableObservationBatch(std::move(*pendingObservation))
+                    != TES3MP::ReliableObservationReceiveResult::Applied) return 3;
+                pendingObservation.reset();
+            }
+            if (mode == "join") { session.close(); factory.runtime->shutdown(); return 0; }
+        }
+        else if (bound && snapshot)
+        {
+            const auto result = session.receiveLatestWinsSnapshot(std::move(*snapshot));
+            if (result != TES3MP::LatestWinsSnapshotReceiveResult::Applied
+                && result != TES3MP::LatestWinsSnapshotReceiveResult::IdenticalDuplicate)
+            { std::cerr << "snapshot rejected " << static_cast<int>(result) << '\n'; return 3; }
+            snapshot.reset();
+        }
+        if (bound && mode == "mover" && session.connection())
+        {
+            const auto& confirmed = *session.stateMachine().confirmedSnapshot();
+            const auto self = std::ranges::find_if(confirmed.view().entries(), [&](const auto& entry) {
+                return entry.playerId().value() == confirmed.header().targetSessionId().value(); });
+            if (self != confirmed.view().entries().end())
+            {
+                const bool exterior = self->transform().cell().kind() == TES3MP::CellId::Kind::Exterior;
+                if (!sentExterior || (exterior && !sentInterior))
+                {
+                    const auto sequence = TES3MP::CommandSequence::fromValue(sentExterior ? 2 : 1).value();
+                    const auto commandId = TES3MP::CommandId::fromValue(sentExterior ? 2 : 1).value();
+                    const auto cell = sentExterior
+                        ? TES3MP::CellId::interior(TES3MP::CellSpaceId::fromValue(7).value())
+                        : TES3MP::CellId::exterior(TES3MP::CellSpaceId::fromValue(8).value(), 0, 0);
+                    TES3MP::ClientCommandHeader header(confirmed.header().targetSessionId(),
+                        confirmed.header().targetSessionGeneration(), sequence, commandId,
+                        confirmed.header().serverTick());
+                    TES3MP::ReliableOperationHeader reliable(header, TES3MP::EntityPrecondition(
+                        self->entityId(), self->entityRevision(), self->authorityEpoch()));
+                    auto operation = TES3MP::ReliableOperation::create(reliable, TES3MP::FixtureCellTransition(cell));
+                    if (!std::holds_alternative<TES3MP::ReliableOperation>(operation)
+                        || !sendFrame(*factory.runtime, *session.connection(), TES3MP::MessageClass::ReliableOperation,
+                            TES3MP::MessageKind::ReliableOperation,
+                            TES3MP::encodeReliableOperation(std::get<TES3MP::ReliableOperation>(operation)))) return 3;
+                    if (!sentExterior) sentExterior = true; else sentInterior = true;
+                }
+            }
+        }
+        if (bound && sawLeave && sawEnter && (mode == "observer" || sentInterior))
+        {
+            std::cout << "{\"event\":\"fixture_flow_complete\",\"role\":\"" << mode << "\"}\n";
+            session.close(); factory.runtime->shutdown(); return 0;
         }
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }

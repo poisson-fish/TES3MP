@@ -16,6 +16,8 @@ namespace TES3MP::ServerApp
         CredentialCrypto& crypto;
         OutboundQueueSet& queues;
         MonotonicClock& clock;
+        ServerCommandIntakeCoordinator& intake;
+        CanonicalCommandReducer& reducer;
     };
 
     class ServerApplication

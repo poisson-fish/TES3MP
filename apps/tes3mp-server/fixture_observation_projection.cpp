@@ -79,4 +79,34 @@ namespace TES3MP::ServerApp
         return queues.enqueuePair(connection, TransportChannel::ReliableOrdered, observationFrame,
                    TransportChannel::LatestWins, viewFrame) == TransportResult::Accepted;
     }
+
+    bool admitFixtureObservationsAtomically(OutboundQueueSet& queues,
+        const std::vector<std::pair<TransportConnectionId, FixtureObservationDelivery>>& deliveries)
+    {
+        try
+        {
+            std::vector<std::vector<std::byte>> reliable;
+            std::vector<std::vector<std::byte>> latest;
+            reliable.reserve(deliveries.size()); latest.reserve(deliveries.size());
+            for (const auto& [connection, delivery] : deliveries)
+            {
+                (void)connection;
+                auto first = encodeProtocolFrame(MessageClass::ReliableOperation,
+                    MessageKind::ReliableObservationBatch, encodeReliableObservationBatch(delivery.observations));
+                auto second = encodeProtocolFrame(MessageClass::LatestWinsSnapshot,
+                    MessageKind::LatestWinsSnapshot, encodeLatestWinsSnapshot(delivery.view));
+                if (!std::holds_alternative<std::vector<std::byte>>(first)
+                    || !std::holds_alternative<std::vector<std::byte>>(second)) return false;
+                reliable.push_back(std::get<std::vector<std::byte>>(std::move(first)));
+                latest.push_back(std::get<std::vector<std::byte>>(std::move(second)));
+            }
+            std::vector<OutboundQueueSet::AtomicPair> pairs;
+            pairs.reserve(deliveries.size());
+            for (std::size_t i = 0; i < deliveries.size(); ++i)
+                pairs.push_back({ deliveries[i].first, TransportChannel::ReliableOrdered, reliable[i],
+                    TransportChannel::LatestWins, latest[i] });
+            return queues.enqueuePairsAtomically(pairs) == TransportResult::Accepted;
+        }
+        catch (...) { return false; }
+    }
 }

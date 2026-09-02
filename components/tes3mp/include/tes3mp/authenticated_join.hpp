@@ -3,6 +3,7 @@
 
 #include "canonical_state.hpp"
 #include "protocol_exchange.hpp"
+#include "server_command_reducer.hpp"
 
 #include <cstdint>
 #include <optional>
@@ -51,7 +52,7 @@ namespace TES3MP
     {
     public:
         static std::optional<AuthenticatedJoinCoordinator> create(
-            Transform fixtureSpawn, AuthenticatedJoinIdentitySeed seed);
+            Transform fixtureSpawn, AuthenticatedJoinIdentitySeed seed, CanonicalCommandReducer& reducer);
 
         AuthenticatedJoinOutcome join(
             PrincipalId principal, SessionGeneration generation, ServerTick serverTick);
@@ -59,23 +60,24 @@ namespace TES3MP
             PrincipalId principal, SessionGeneration generation, ServerTick serverTick);
         AuthenticatedJoinOutcome commit(std::uint64_t preparationId);
         bool cancel(std::uint64_t preparationId) noexcept;
+        const CanonicalServerState* candidateState(std::uint64_t preparationId) const noexcept;
 
-        const CanonicalServerState& state() const noexcept { return mState; }
+        const CanonicalServerState& state() const noexcept { return mReducer.state(); }
         std::size_t liveBindings() const noexcept { return mPrincipals.size(); }
 
     private:
         AuthenticatedJoinCoordinator(Transform fixtureSpawn, AuthenticatedJoinIdentitySeed seed,
-            CanonicalServerState state) noexcept;
+            CanonicalCommandReducer& reducer) noexcept;
 
         Transform mFixtureSpawn;
         AuthenticatedJoinIdentitySeed mSeed;
         bool mIdentityExhausted = false;
-        CanonicalServerState mState;
+        CanonicalCommandReducer& mReducer;
         std::vector<PrincipalId> mPrincipals;
         struct PendingJoin
         {
             std::uint64_t id;
-            CanonicalServerState state;
+            CanonicalCommandReducer::PreparedJoin state;
             AuthenticatedJoinResult result;
         };
         std::optional<PendingJoin> mPending;

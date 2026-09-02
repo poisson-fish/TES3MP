@@ -10,6 +10,19 @@
 
 namespace TES3MP::ServerApp
 {
+    ConnectionSessionResult ConnectionSessionCoordinator::dispatch(TransportConnectionId connection,
+        const TransportMessage& message, AuthenticatedJoinCoordinator& joins, CredentialCrypto& crypto,
+        ServerTick tick) noexcept
+    {
+        try
+        {
+            ServerCommandIntakeCoordinator unused(
+                mClock, mObservability, mClock.now(), tick, IngressOrdinal::initial());
+            return dispatch(connection, message, joins, crypto, unused, tick);
+        }
+        catch (...) { return ConnectionSessionResult::SessionRejected; }
+    }
+
     ConnectionSessionCoordinator::ConnectionSessionCoordinator(MonotonicClock& clock, Observability& observability,
         SessionTimeoutPolicy timeouts, CapabilityOffer offer, ServerAuthenticationService& authentication,
         OutboundQueueSet& queues, std::size_t capacity) noexcept
@@ -84,9 +97,16 @@ namespace TES3MP::ServerApp
         return result;
     }
 
+    std::optional<TransportConnectionId> ConnectionSessionCoordinator::connectionForSession(SessionId value) const noexcept
+    {
+        for (const auto& [connection, state] : mConnections)
+            if (state.session->sessionId() == value) return connection;
+        return std::nullopt;
+    }
+
     ConnectionSessionResult ConnectionSessionCoordinator::dispatch(TransportConnectionId connection,
         const TransportMessage& message, AuthenticatedJoinCoordinator& joins, CredentialCrypto& crypto,
-        ServerTick tick) noexcept
+        ServerCommandIntakeCoordinator& intake, ServerTick tick) noexcept
     {
         auto* state = session(connection);
         const auto* scope = admissionScope(connection);
@@ -96,8 +116,34 @@ namespace TES3MP::ServerApp
 
         auto decoded = decodeProtocolFrame(message.bytes);
         auto* frame = std::get_if<DecodedFrame>(&decoded);
-        if (frame == nullptr || frame->messageClass() != MessageClass::SessionControl)
+        if (frame == nullptr || (frame->messageClass() != MessageClass::SessionControl
+            && frame->messageClass() != MessageClass::ReliableOperation))
             return ConnectionSessionResult::ProtocolRejected;
+
+        if (frame->messageKind() == MessageKind::ReliableOperation)
+        {
+            if (frame->messageClass() != MessageClass::ReliableOperation)
+                return ConnectionSessionResult::ProtocolRejected;
+            if (state->state() != ServerSessionState::Established || !state->sessionId())
+                return ConnectionSessionResult::ProtocolRejected;
+            auto decodedOperation = decodeReliableOperation(frame->payload());
+            auto* operation = std::get_if<ReliableOperation>(&decodedOperation);
+            if (!operation || !operation->header().entityPrecondition()
+                || operation->header().commandHeader().sessionId() != *state->sessionId()
+                || operation->header().commandHeader().sessionGeneration() != state->generation())
+                return ConnectionSessionResult::ProtocolRejected;
+            const auto& header = operation->header().commandHeader();
+            if (const auto* transition = std::get_if<FixtureCellTransition>(&operation->body()))
+            {
+                ServerCommandProposal proposal(header.sessionId(), header.sessionGeneration(),
+                    header.commandSequence(), header.commandId(), header.observedServerTick(),
+                    *operation->header().entityPrecondition(),
+                    FixtureCellTransitionCommandProposal(transition->requestedCell()));
+                return intake.submit(std::move(proposal)) == CommandSubmissionResult::Accepted
+                    ? ConnectionSessionResult::CommandSubmitted : ConnectionSessionResult::QueueRejected;
+            }
+            return ConnectionSessionResult::ProtocolRejected;
+        }
 
         if (frame->messageKind() == MessageKind::ClientHello)
         {
@@ -142,7 +188,7 @@ namespace TES3MP::ServerApp
             return ConnectionSessionResult::ProtocolRejected;
         auto context = makePhase7ResumeTokenContext(*state->negotiatedHello(), crypto);
         if (!context) return ConnectionSessionResult::ProtocolRejected;
-        TransportJoinResponseQueue responses(mQueues, connection);
+        TransportJoinResponseQueue responses(mQueues, connection, this);
         AuthenticatedJoinComposition composition(joins, mAuthentication, responses);
         auto outcome = composition.join(*state->principal(), state->generation(), tick, *context);
         if (outcome.result != JoinCompositionResult::Committed || !outcome.committed)

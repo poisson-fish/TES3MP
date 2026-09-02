@@ -22,6 +22,8 @@ namespace TES3MP::ServerApp
 
     bool admitFixtureObservation(OutboundQueueSet& queues, TransportConnectionId connection,
         const FixtureObservationDelivery& delivery);
+    bool admitFixtureObservationsAtomically(OutboundQueueSet& queues,
+        const std::vector<std::pair<TransportConnectionId, FixtureObservationDelivery>>& deliveries);
 }
 
 #endif

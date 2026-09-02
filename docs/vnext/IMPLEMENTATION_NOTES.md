@@ -4293,6 +4293,27 @@ only the relevant phase section here.
 
 [Back to the phase tracker](IMPLEMENTATION_PLAN.md#phase-7--headless-end-to-end-multiplayer-slice)
 
+- 2026-09-02 — Slice 7.4 runtime composition and real fixture proof — In Progress
+  - Change: composed joins and fixture transitions through one canonical reducer
+    writer; added typed join publication, move-only reducer preparation, bounded
+    atomic multi-target delivery, live transition dispatch, client lifecycle
+    intake, and the real two-client interior/exterior/interior proof.
+  - Decisions: owner approved server-app writer ownership, reducer
+    prepare/commit, one shared join/transition writer, typed `SessionJoined`
+    changes, and bounded multi-frame atomic delivery; ADR-0043 records them.
+  - Verification: fresh MSVC 19.51 `tes3mp_protocol_tests_run`,
+    `tes3mp_server_app_tests_run`, and `tes3mp_headless_client_tests_run` pass.
+    The verified-manifest Release real-process build and
+    `python scripts/run_phase7_join_demo.py --server
+    build/slice74-runtime/tes3mp-server/tes3mp_server.exe --client
+    build/slice74-runtime/tes3mp-headless-client/tes3mp_headless_client.exe`
+    pass with distinct identities and explicit leave/enter convergence. All 114
+    repository Python tests, baseline verification with 277 intentional
+    differences and 69 dependency inputs, and `git diff --check` pass.
+  - Owner review: all architecture/state-scope clarifications approved before
+    implementation; implementation-demo acceptance remains pending.
+  - Follow-ups: owner demo acceptance; then mark Slice 7.4 **Implemented**.
+
 - 2026-09-01 — Slice 7.4 client observation application clarification — Approved
   - Change: recorded the owner-approved contract in ADR-0043 and implemented
     bounded atomic reliable-observation application in the reusable client

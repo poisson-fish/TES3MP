@@ -189,6 +189,45 @@ namespace TES3MP
         return std::atomic_load_explicit(&mLatestPublication, std::memory_order_acquire);
     }
 
+    std::optional<CanonicalCommandReducer::PreparedJoin> CanonicalCommandReducer::prepareJoin(
+        CanonicalPlayerEntityState player, CanonicalSessionProgress session, ServerTick tick)
+    {
+        if (!mStateVersion.next()) return std::nullopt;
+        std::vector<CanonicalPlayerEntityState> players(mState->players().begin(), mState->players().end());
+        std::vector<CanonicalSessionProgress> sessions(mState->activeSessions().begin(), mState->activeSessions().end());
+        players.push_back(player);
+        sessions.push_back(session);
+        auto candidate = createCanonicalServerState(players, sessions);
+        auto* state = std::get_if<CanonicalServerState>(&candidate);
+        if (!state) return std::nullopt;
+        PreparedJoin prepared;
+        prepared.mBaseVersion = mStateVersion;
+        prepared.mStateVersion = *mStateVersion.next();
+        prepared.mCheckpointTick = tick;
+        prepared.mState = std::make_shared<CanonicalServerState>(std::move(*state));
+        prepared.mPublication = std::shared_ptr<CanonicalStatePublication>(
+            new CanonicalStatePublication(mStateVersion, tick, mState, {}));
+        prepared.mPublication->mJoinedSessions.push_back(
+            { prepared.mStateVersion, tick, session, player });
+        return prepared;
+    }
+
+    bool CanonicalCommandReducer::commit(PreparedJoin&& prepared)
+    {
+        if (prepared.mBaseVersion != mStateVersion || !prepared.mState || !prepared.mPublication) return false;
+        mState = std::move(prepared.mState);
+        mStateVersion = prepared.mStateVersion;
+        mCheckpointTick = prepared.mCheckpointTick;
+        prepared.mPublication->mStateVersion = mStateVersion;
+        prepared.mPublication->mCheckpointTick = mCheckpointTick;
+        prepared.mPublication->mState = mState;
+        prepared.mPublication->mChecksum = canonicalStateChecksumV1(mStateVersion, mCheckpointTick, *mState);
+        std::shared_ptr<const CanonicalStatePublication> committed = std::move(prepared.mPublication);
+        std::atomic_store_explicit(&mLatestPublication, committed, std::memory_order_release);
+        (void)deliver(committed);
+        return true;
+    }
+
     CanonicalSinkDeliveryReport CanonicalCommandReducer::publish(
         std::shared_ptr<CanonicalStatePublication> publication) noexcept
     {
@@ -276,42 +315,44 @@ namespace TES3MP
             (void)mObservability.events().tryRecord(*event);
     }
 
-    CommandBatchReductionResult CanonicalCommandReducer::apply(const ServerTickCommandBatch& batch)
+    CanonicalCommandReducer::PreparedBatch CanonicalCommandReducer::prepare(const ServerTickCommandBatch& batch)
     {
-        CommandBatchReductionResult result;
+        PreparedBatch prepared;
+        prepared.mBaseVersion = mStateVersion;
+        prepared.mStateVersion = mStateVersion;
+        prepared.mCheckpointTick = mCheckpointTick;
+        prepared.mState = mState;
+        auto& result = prepared.mResult;
         const auto commands = batch.commands();
         const ServerTick tick = batch.scheduledTick().value();
+        auto publication = std::shared_ptr<CanonicalStatePublication>(
+            new CanonicalStatePublication(prepared.mStateVersion, tick, prepared.mState, {}));
+        prepared.mPublication = publication;
         if (commands.size() > MaximumServerCommandsPerTick)
         {
             result.mError = CommandBatchReductionError::CommandLimitExceeded;
-            observe(result.mError, tick, 0);
-            return result;
+            return prepared;
         }
         for (std::size_t index = 0; index < commands.size(); ++index)
         {
             if (commands[index].stamp().eligibleServerTick() != tick)
             {
                 result.mError = CommandBatchReductionError::EligibleTickMismatch;
-                observe(result.mError, tick, 0);
-                return result;
+                return prepared;
             }
             if (index != 0 && commands[index - 1].stamp().ingressOrdinal() >= commands[index].stamp().ingressOrdinal())
             {
                 result.mError = CommandBatchReductionError::IngressOrdinalNotStrictlyIncreasing;
-                observe(result.mError, tick, 0);
-                return result;
+                return prepared;
             }
         }
-        if (!canReserveCanonicalStateVersions(mStateVersion, commands.size()))
+        if (!canReserveCanonicalStateVersions(prepared.mStateVersion, commands.size()))
         {
             result.mError = CommandBatchReductionError::StateVersionCapacityExceeded;
-            observe(result.mError, tick, 0);
-            return result;
+            return prepared;
         }
 
         result.mDispositions.reserve(commands.size());
-        auto publication = std::shared_ptr<CanonicalStatePublication>(
-            new CanonicalStatePublication(mStateVersion, tick, mState, {}));
         publication->mChanges.reserve(commands.size());
 
         try
@@ -323,7 +364,7 @@ namespace TES3MP
                 bool acknowledgementAdvanced = false;
                 bool playerStateChanged = false;
 
-                const CanonicalSessionProgress* session = mState->findActiveSession(proposal.sessionId());
+                const CanonicalSessionProgress* session = prepared.mState->findActiveSession(proposal.sessionId());
                 if (session != nullptr)
                 {
                     if (session->sessionGeneration() != proposal.sessionGeneration())
@@ -333,7 +374,7 @@ namespace TES3MP
                     else
                     {
                         const std::size_t sessionIndex
-                            = static_cast<std::size_t>(session - mState->activeSessions().data());
+                            = static_cast<std::size_t>(session - prepared.mState->activeSessions().data());
                         std::optional<std::size_t> playerIndex;
                         std::optional<CanonicalPlayerEntityState> playerReplacement;
 
@@ -346,8 +387,8 @@ namespace TES3MP
                                 disposition = CommandDisposition::EntityBindingMismatch;
                             else
                             {
-                                const CanonicalPlayerEntityState* player = mState->findPlayer(session->playerId());
-                                playerIndex = static_cast<std::size_t>(player - mState->players().data());
+                                const CanonicalPlayerEntityState* player = prepared.mState->findPlayer(session->playerId());
+                                playerIndex = static_cast<std::size_t>(player - prepared.mState->players().data());
                                 if (precondition.expectedRevision() != player->entityRevision())
                                     disposition = CommandDisposition::EntityRevisionMismatch;
                                 else if (precondition.expectedAuthorityEpoch() != player->authorityEpoch())
@@ -403,12 +444,12 @@ namespace TES3MP
                             }
                         }
 
-                        auto candidate = replacementState(*mState, sessionIndex,
+                        auto candidate = replacementState(*prepared.mState, sessionIndex,
                             FinalizedCommandRecord(proposal.commandSequence(), proposal.commandId(), disposition),
                             playerIndex, playerReplacement);
                         if (std::holds_alternative<CanonicalServerState>(candidate))
                         {
-                            const CanonicalStateVersion nextVersion = *mStateVersion.next();
+                            const CanonicalStateVersion nextVersion = *prepared.mStateVersion.next();
                             CanonicalServerState& candidateState = std::get<CanonicalServerState>(candidate);
                             const CanonicalSessionProgress sessionReplacement
                                 = candidateState.activeSessions()[sessionIndex];
@@ -421,17 +462,16 @@ namespace TES3MP
                                 disposition, sessionReplacement, committedPlayerReplacement);
                             auto nextState = std::make_shared<CanonicalServerState>(std::move(candidateState));
                             publication->mChanges.push_back(std::move(change));
-                            mState = std::move(nextState);
-                            mStateVersion = nextVersion;
-                            mCheckpointTick = tick;
+                            prepared.mState = std::move(nextState);
+                            prepared.mStateVersion = nextVersion;
+                            prepared.mCheckpointTick = tick;
                             acknowledgementAdvanced = true;
                         }
                         else
                         {
                             result.mError = CommandBatchReductionError::CandidateStateInvalid;
-                            result.mSinkDeliveryReport = publish(std::move(publication));
-                            observe(result.mError, tick, result.mDispositions.size());
-                            return result;
+                            prepared.mPublication = std::move(publication);
+                            return prepared;
                         }
                     }
                 }
@@ -439,15 +479,37 @@ namespace TES3MP
                 result.mDispositions.emplace_back(command.stamp(), proposal.sessionId(), proposal.sessionGeneration(),
                     proposal.commandSequence(), proposal.commandId(), disposition, acknowledgementAdvanced,
                     playerStateChanged);
-                observe(disposition, tick);
             }
         }
         catch (...)
         {
-            (void)publish(std::move(publication));
             throw;
         }
-        result.mSinkDeliveryReport = publish(std::move(publication));
-        return result;
+        prepared.mPublication = std::move(publication);
+        return prepared;
+    }
+
+    bool CanonicalCommandReducer::commit(PreparedBatch&& prepared)
+    {
+        if (prepared.mBaseVersion != mStateVersion || !prepared.mState || !prepared.mPublication)
+            return false;
+        mState = std::move(prepared.mState);
+        mStateVersion = prepared.mStateVersion;
+        mCheckpointTick = prepared.mCheckpointTick;
+        for (const auto& record : prepared.mResult.mDispositions)
+            observe(record.disposition(), mCheckpointTick);
+        if (prepared.mResult.mError != CommandBatchReductionError::None)
+            observe(prepared.mResult.mError, mCheckpointTick, prepared.mResult.mDispositions.size());
+        prepared.mResult.mSinkDeliveryReport = publish(std::move(prepared.mPublication));
+        return true;
+    }
+
+    CommandBatchReductionResult CanonicalCommandReducer::apply(const ServerTickCommandBatch& batch)
+    {
+        auto prepared = prepare(batch);
+        if (commit(std::move(prepared)))
+            return std::move(prepared.mResult);
+        prepared.mResult.mError = CommandBatchReductionError::CandidateStateInvalid;
+        return std::move(prepared.mResult);
     }
 }

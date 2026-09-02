@@ -18,7 +18,8 @@ namespace TES3MP
     bool operator==(const CanonicalStatePublication& left, const CanonicalStatePublication& right) noexcept
     {
         return left.mStateVersion == right.mStateVersion && left.mCheckpointTick == right.mCheckpointTick
-            && left.mChecksum == right.mChecksum && *left.mState == *right.mState && left.mChanges == right.mChanges;
+            && left.mChecksum == right.mChecksum && *left.mState == *right.mState && left.mChanges == right.mChanges
+            && left.mJoinedSessions == right.mJoinedSessions;
     }
 
     CanonicalPublicationReadAction classifyCanonicalPublication(
@@ -33,6 +34,10 @@ namespace TES3MP
         const auto expectedVersion = lastConsumedVersion.next();
         if (expectedVersion && !changes.empty() && changes.front().stateVersion() == *expectedVersion
             && changes.back().stateVersion() == publication.stateVersion())
+            return CanonicalPublicationReadAction::ApplyContiguousChanges;
+        const auto joins = publication.joinedSessions();
+        if (expectedVersion && joins.size() == 1 && joins.front().stateVersion == *expectedVersion
+            && joins.front().stateVersion == publication.stateVersion())
             return CanonicalPublicationReadAction::ApplyContiguousChanges;
         return CanonicalPublicationReadAction::ReplaceFromSnapshot;
     }

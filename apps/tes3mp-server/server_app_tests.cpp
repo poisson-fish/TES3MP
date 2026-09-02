@@ -162,7 +162,8 @@ namespace
     {
     public:
         bool enqueueJoinResponses(std::span<const std::byte> authentication,
-            std::span<const std::byte> snapshot) noexcept override
+            std::span<const std::byte> snapshot, const CanonicalServerState&,
+            const CanonicalServerState&, const AuthenticatedJoinResult&, ServerTick) noexcept override
         {
             ++attempts;
             if (reject) return false;
@@ -180,14 +181,23 @@ namespace
         std::size_t attempts = 0;
     };
 
-    AuthenticatedJoinCoordinator joinCoordinator()
+    AuthenticatedJoinCoordinator joinCoordinator(CanonicalCommandReducer& reducer)
     {
         const auto zero = Turn32::fromValue(0);
         auto spawn = Transform(CellId::interior(id<CellSpaceId>(7)), Position3(10, 20, 30),
             Orientation3(zero, zero, zero));
         return *AuthenticatedJoinCoordinator::create(spawn,
-            { id<SessionId>(1), id<PlayerId>(1), id<EntityId>(1) });
+            { id<SessionId>(1), id<PlayerId>(1), id<EntityId>(1) }, reducer);
     }
+
+    struct JoinFixture
+    {
+        NullMetricSink metrics;
+        NullStructuredEventSink events;
+        Observability observability{ metrics, events };
+        CanonicalCommandReducer reducer{ std::get<CanonicalServerState>(createCanonicalServerState({}, {})), observability };
+        AuthenticatedJoinCoordinator joins{ joinCoordinator(reducer) };
+    };
 
     TES3MP::ServerApp::ServerConfig parsedConfig()
     {
@@ -337,7 +347,8 @@ int main()
     assert(failed.calls == "LPSX");
 
     {
-        auto joins = joinCoordinator();
+        JoinFixture joinFixture;
+        auto& joins = joinFixture.joins;
         FakeAuthentication authentication;
         FakeJoinQueue responses;
         AuthenticatedJoinComposition composition(joins, authentication, responses);
@@ -349,7 +360,8 @@ int main()
         assert(joins.liveBindings() == 2 && joins.state().players().size() == 2);
     }
     {
-        auto joins = joinCoordinator();
+        JoinFixture joinFixture;
+        auto& joins = joinFixture.joins;
         FakeAuthentication authentication;
         FakeJoinQueue responses;
         AuthenticatedJoinComposition composition(joins, authentication, responses);
@@ -373,7 +385,8 @@ int main()
         const auto connection = TransportConnectionId::initial();
         assert(queues && queues->attach(connection) == TransportResult::Accepted);
         TransportJoinResponseQueue responses(*queues, connection);
-        auto joins = joinCoordinator();
+        JoinFixture joinFixture;
+        auto& joins = joinFixture.joins;
         FakeAuthentication authentication;
         AuthenticatedJoinComposition composition(joins, authentication, responses);
         auto joined = composition.join(id<PrincipalId>(4), SessionGeneration::initial(), ServerTick::initial(),
@@ -382,7 +395,8 @@ int main()
             && joined.committed->session == id<SessionId>(1));
         assert(joins.liveBindings() == 1);
 
-        auto rejectedJoins = joinCoordinator();
+        JoinFixture rejectedJoinFixture;
+        auto& rejectedJoins = rejectedJoinFixture.joins;
         TransportJoinResponseQueue missing(*queues, *connection.next());
         AuthenticatedJoinComposition rejectedComposition(rejectedJoins, authentication, missing);
         assert(rejectedComposition.join(id<PrincipalId>(5), SessionGeneration::initial(), ServerTick::initial(),
@@ -423,7 +437,8 @@ int main()
         auto timeouts = *SessionTimeoutPolicy::create(1'000'000, 1'000'000, 1'000'000);
         ConnectionSessionCoordinator sessions(
             clock, observability, timeouts, emptyOffer(), authentication, *queues, 2);
-        auto joins = joinCoordinator();
+        JoinFixture joinFixture;
+        auto& joins = joinFixture.joins;
         const auto connection = TransportConnectionId::initial();
         assert(sessions.accept(connection, scope(std::byte{ 4 })) == ConnectionSessionResult::Accepted);
 
@@ -446,11 +461,13 @@ int main()
 
         FakeRuntime runtime;
         assert(queues->pump(runtime, connection, 0) == OutboundPumpResult::Progress);
-        assert(runtime.sent.size() == 3);
+        assert(runtime.sent.size() == 4);
         assert(std::get<DecodedFrame>(decodeProtocolFrame(runtime.sent[0])).messageKind() == MessageKind::ServerHello);
         assert(std::get<DecodedFrame>(decodeProtocolFrame(runtime.sent[1])).messageKind()
             == MessageKind::AuthenticationAccepted);
         assert(std::get<DecodedFrame>(decodeProtocolFrame(runtime.sent[2])).messageKind()
+            == MessageKind::ReliableObservationBatch);
+        assert(std::get<DecodedFrame>(decodeProtocolFrame(runtime.sent[3])).messageKind()
             == MessageKind::LatestWinsSnapshot);
 
         assert(sessions.dispatch(connection,
@@ -468,7 +485,10 @@ int main()
         auto timeouts = *SessionTimeoutPolicy::create(1'000'000, 1'000'000, 1'000'000);
         ConnectionSessionCoordinator sessions(
             clock, observability, timeouts, emptyOffer(), authentication, *queues, 2);
-        auto joins = joinCoordinator();
+        JoinFixture joinFixture;
+        auto& joins = joinFixture.joins;
+        ServerCommandIntakeCoordinator intake(
+            clock, observability, clock.now(), ServerTick::initial(), IngressOrdinal::initial());
         FakeRuntime wiredRuntime;
         const auto connection = TransportConnectionId::initial();
         wiredRuntime.events.push_back({ TransportEventKind::ConnectionAccepted, TransportFailure::None,
@@ -479,7 +499,7 @@ int main()
             std::get<std::vector<std::byte>>(encodeProtocolFrame(
                 MessageClass::SessionControl, MessageKind::ClientHello, helloPayload)) });
         ServerApplication wired(wiredRuntime, config,
-            ServerApplicationWiring{ sessions, joins, crypto, *queues, clock });
+            ServerApplicationWiring{ sessions, joins, crypto, *queues, clock, intake, joinFixture.reducer });
         assert(wired.start() && wired.pump(ServerTick::initial()));
         assert(sessions.size() == 1 && wiredRuntime.sent.size() == 1);
         assert(std::get<DecodedFrame>(decodeProtocolFrame(wiredRuntime.sent[0])).messageKind()

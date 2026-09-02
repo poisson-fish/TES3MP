@@ -415,6 +415,20 @@ namespace TES3MP
     class OutboundQueueSet
     {
     public:
+        struct AtomicPair
+        {
+            TransportConnectionId connection;
+            TransportChannel firstChannel;
+            std::span<const std::byte> first;
+            TransportChannel secondChannel;
+            std::span<const std::byte> second;
+        };
+        struct AtomicMessage
+        {
+            TransportConnectionId connection;
+            TransportChannel channel;
+            std::span<const std::byte> bytes;
+        };
         static std::optional<OutboundQueueSet> create(OutboundQueuePolicy policy, std::size_t connections);
         static std::optional<OutboundQueueSet> create(
             OutboundQueuePolicy policy, std::size_t connections, TransportTelemetrySink& telemetry);
@@ -424,6 +438,8 @@ namespace TES3MP
             TransportConnectionId connection, TransportChannel channel, std::span<const std::byte> message);
         TransportResult enqueuePair(TransportConnectionId connection, TransportChannel firstChannel,
             std::span<const std::byte> first, TransportChannel secondChannel, std::span<const std::byte> second);
+        TransportResult enqueuePairsAtomically(std::span<const AtomicPair> pairs);
+        TransportResult enqueueMessagesAtomically(std::span<const AtomicMessage> messages);
         std::optional<OutboundPumpResult> pump(
             TransportRuntime& runtime, TransportConnectionId connection, std::uint64_t nowMilliseconds);
         std::size_t connections() const noexcept { return mQueues.size(); }

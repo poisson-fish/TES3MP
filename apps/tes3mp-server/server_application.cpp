@@ -1,4 +1,5 @@
 #include "server_application.hpp"
+#include "fixture_observation_projection.hpp"
 
 #include <array>
 
@@ -93,7 +94,7 @@ namespace TES3MP::ServerApp
             for (std::size_t index = 0; index < received.messages; ++index)
             {
                 const auto dispatched = mWiring->sessions.dispatch(
-                    connection, messages[index], mWiring->joins, mWiring->crypto, tick);
+                    connection, messages[index], mWiring->joins, mWiring->crypto, mWiring->intake, tick);
                 if (dispatched == ConnectionSessionResult::ProtocolRejected
                     || dispatched == ConnectionSessionResult::QueueRejected
                     || dispatched == ConnectionSessionResult::SessionRejected
@@ -126,6 +127,28 @@ namespace TES3MP::ServerApp
                 (void)failConnection(connection, "connection send failed");
                 continue;
             }
+        }
+        const auto pumpedCommands = mWiring->intake.pump();
+        if (!pumpedCommands) { mFailure = "command intake failed"; return false; }
+        for (const auto& batch : pumpedCommands.batches())
+        {
+            const auto before = mWiring->reducer.state();
+            auto prepared = mWiring->reducer.prepare(batch);
+            if (!prepared.result()) { mFailure = "command reduction failed"; return false; }
+            auto projected = projectFixtureObservations(before, prepared.candidateState(), batch.scheduledTick().value());
+            if (!projected) { mFailure = "observation projection failed"; return false; }
+            std::vector<std::pair<TransportConnectionId, FixtureObservationDelivery>> routed;
+            routed.reserve(projected->size());
+            for (auto& delivery : *projected)
+            {
+                auto connection = mWiring->sessions.connectionForSession(delivery.targetSession);
+                if (!connection) { mFailure = "observation target missing"; return false; }
+                routed.emplace_back(*connection, std::move(delivery));
+            }
+            if (!routed.empty() && !admitFixtureObservationsAtomically(mWiring->queues, routed))
+            { mFailure = "observation admission failed"; return false; }
+            if (!mWiring->reducer.commit(std::move(prepared)))
+            { mFailure = "canonical commit failed"; return false; }
         }
         return true;
     }

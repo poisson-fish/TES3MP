@@ -14,6 +14,15 @@
 
 namespace TES3MP
 {
+    struct CanonicalSessionJoinedRecord
+    {
+        CanonicalStateVersion stateVersion;
+        ServerTick commitTick;
+        CanonicalSessionProgress session;
+        CanonicalPlayerEntityState player;
+        friend bool operator==(const CanonicalSessionJoinedRecord&, const CanonicalSessionJoinedRecord&) noexcept = default;
+    };
+
     class CanonicalStateChangeRecord
     {
     public:
@@ -75,6 +84,7 @@ namespace TES3MP
         constexpr CanonicalChecksum checksum() const noexcept { return mChecksum; }
         const CanonicalServerState& state() const noexcept { return *mState; }
         std::span<const CanonicalStateChangeRecord> changes() const noexcept { return mChanges; }
+        std::span<const CanonicalSessionJoinedRecord> joinedSessions() const noexcept { return mJoinedSessions; }
 
         friend bool operator==(const CanonicalStatePublication&, const CanonicalStatePublication&) noexcept;
 
@@ -89,6 +99,7 @@ namespace TES3MP
         CanonicalChecksum mChecksum;
         std::shared_ptr<const CanonicalServerState> mState;
         std::vector<CanonicalStateChangeRecord> mChanges;
+        std::vector<CanonicalSessionJoinedRecord> mJoinedSessions;
     };
 
     enum class CanonicalPublicationReadAction : std::uint8_t

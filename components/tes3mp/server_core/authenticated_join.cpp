@@ -17,21 +17,18 @@ namespace
 namespace TES3MP
 {
     AuthenticatedJoinCoordinator::AuthenticatedJoinCoordinator(Transform fixtureSpawn,
-        AuthenticatedJoinIdentitySeed seed, CanonicalServerState state) noexcept
+        AuthenticatedJoinIdentitySeed seed, CanonicalCommandReducer& reducer) noexcept
         : mFixtureSpawn(fixtureSpawn)
         , mSeed(seed)
-        , mState(std::move(state))
+        , mReducer(reducer)
     {
         mPrincipals.reserve(MaximumCanonicalActiveSessions);
     }
 
     std::optional<AuthenticatedJoinCoordinator> AuthenticatedJoinCoordinator::create(
-        Transform fixtureSpawn, AuthenticatedJoinIdentitySeed seed)
+        Transform fixtureSpawn, AuthenticatedJoinIdentitySeed seed, CanonicalCommandReducer& reducer)
     {
-        auto empty = createCanonicalServerState({}, {});
-        if (const auto* state = std::get_if<CanonicalServerState>(&empty))
-            return AuthenticatedJoinCoordinator(fixtureSpawn, seed, *state);
-        return std::nullopt;
+        return AuthenticatedJoinCoordinator(fixtureSpawn, seed, reducer);
     }
 
     AuthenticatedJoinOutcome AuthenticatedJoinCoordinator::join(
@@ -51,8 +48,8 @@ namespace TES3MP
             return AuthenticatedJoinError::PreparationPending;
         if (std::find(mPrincipals.begin(), mPrincipals.end(), principal) != mPrincipals.end())
             return AuthenticatedJoinError::DuplicatePrincipal;
-        if (mState.players().size() >= MaximumCanonicalPlayerEntities
-            || mState.activeSessions().size() >= MaximumCanonicalActiveSessions)
+        if (mReducer.state().players().size() >= MaximumCanonicalPlayerEntities
+            || mReducer.state().activeSessions().size() >= MaximumCanonicalActiveSessions)
             return AuthenticatedJoinError::CapacityExhausted;
 
         if (mIdentityExhausted)
@@ -61,21 +58,21 @@ namespace TES3MP
         const auto nextPlayer = advance(mSeed.nextPlayer);
         const auto nextEntity = advance(mSeed.nextEntity);
 
-        std::vector<CanonicalPlayerEntityState> players(mState.players().begin(), mState.players().end());
-        players.emplace_back(mSeed.nextPlayer, mSeed.nextEntity, mFixtureSpawn, LinearVelocity3(0, 0, 0),
-            EntityRevision::initial(), AuthorityEpoch::initial(), serverTick);
-        std::vector<CanonicalSessionProgress> sessions(
-            mState.activeSessions().begin(), mState.activeSessions().end());
-        sessions.emplace_back(mSeed.nextSession, generation, mSeed.nextPlayer, mSeed.nextEntity, std::nullopt);
-
-        auto candidate = createCanonicalServerState(players, sessions);
-        auto* accepted = std::get_if<CanonicalServerState>(&candidate);
-        if (!accepted)
+        CanonicalPlayerEntityState canonicalPlayer(mSeed.nextPlayer, mSeed.nextEntity, mFixtureSpawn,
+            LinearVelocity3(0, 0, 0), EntityRevision::initial(), AuthorityEpoch::initial(), serverTick);
+        CanonicalSessionProgress canonicalSession(
+            mSeed.nextSession, generation, mSeed.nextPlayer, mSeed.nextEntity, std::nullopt);
+        auto candidate = mReducer.prepareJoin(canonicalPlayer, canonicalSession, serverTick);
+        if (!candidate)
             return AuthenticatedJoinError::CanonicalStateRejected;
 
-        const SpatialEntitySnapshot entry(serverTick, mSeed.nextPlayer, mSeed.nextEntity, EntityRevision::initial(),
-            AuthorityEpoch::initial(), mFixtureSpawn, LinearVelocity3(0, 0, 0));
-        auto view = SpatialWorldView::create(std::span<const SpatialEntitySnapshot>(&entry, 1));
+        std::vector<SpatialEntitySnapshot> entries;
+        entries.reserve(candidate->candidateState().players().size());
+        for (const auto& visible : candidate->candidateState().players())
+            if (visible.transform().cell() == mFixtureSpawn.cell())
+                entries.emplace_back(serverTick, visible.playerId(), visible.entityId(), visible.entityRevision(),
+                    visible.authorityEpoch(), visible.transform(), visible.linearVelocity());
+        auto view = SpatialWorldView::create(entries);
         auto* acceptedView = std::get_if<SpatialWorldView>(&view);
         if (!acceptedView)
             return AuthenticatedJoinError::SnapshotRejected;
@@ -88,7 +85,7 @@ namespace TES3MP
 
         AuthenticatedJoinResult result{ principal, session, player, entity, std::move(snapshot) };
         const auto preparationId = mNextPreparationId++;
-        mPending.emplace(PendingJoin{ preparationId, std::move(*accepted), result });
+        mPending.emplace(PendingJoin{ preparationId, std::move(*candidate), result });
         return AuthenticatedJoinPreparation{ preparationId, std::move(result) };
     }
 
@@ -98,7 +95,11 @@ namespace TES3MP
             return AuthenticatedJoinError::StalePreparation;
 
         auto result = std::move(mPending->result);
-        mState = std::move(mPending->state);
+        if (!mReducer.commit(std::move(mPending->state)))
+        {
+            mPending.reset();
+            return AuthenticatedJoinError::StalePreparation;
+        }
         mPending.reset();
         mPrincipals.push_back(result.principal);
         const auto nextSession = advance(mSeed.nextSession);
@@ -117,5 +118,10 @@ namespace TES3MP
             return false;
         mPending.reset();
         return true;
+    }
+
+    const CanonicalServerState* AuthenticatedJoinCoordinator::candidateState(std::uint64_t preparationId) const noexcept
+    {
+        return mPending && mPending->id == preparationId ? &mPending->state.candidateState() : nullptr;
     }
 }

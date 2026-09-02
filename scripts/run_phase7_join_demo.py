@@ -30,32 +30,38 @@ def main() -> int:
         good.write_text("phase7-demo-secret\n", encoding="utf-8")
         bad.write_text("wrong-phase7-secret\n", encoding="utf-8")
         config.write_text(
-            f"bind_address=127.0.0.1\nport={port}\ntick_interval_ms=1\n"
+            f"bind_address=127.0.0.1\nport={port}\ntick_interval_ms=16\n"
             f"disconnect_grace_ms=1000\njoin_password_file={good.as_posix()}\n",
             encoding="utf-8")
         server = subprocess.Popen(
             [str(args.server), str(config)], text=True,
             stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         try:
-            time.sleep(0.3)
+            time.sleep(0.5)
             rejected = run_client(args.client, port, bad)
             if rejected.returncode == 0:
                 raise RuntimeError("injected bad credential unexpectedly joined")
             first = subprocess.Popen(
-                [str(args.client), "127.0.0.1", str(port), str(good), "5000"],
+                [str(args.client), "127.0.0.1", str(port), str(good), "5000", "observer"],
                 text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            first_join = first.stdout.readline()
+            if not first_join:
+                _, first_error = first.communicate(timeout=2)
+                raise RuntimeError(f"observer did not join: code={first.returncode} stderr={first_error!r}")
             second = subprocess.Popen(
-                [str(args.client), "127.0.0.1", str(port), str(good), "5000"],
+                [str(args.client), "127.0.0.1", str(port), str(good), "5000", "mover"],
                 text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
             outputs = [first.communicate(timeout=10), second.communicate(timeout=10)]
             if first.returncode != 0 or second.returncode != 0:
                 raise RuntimeError(f"good clients failed: codes={[first.returncode, second.returncode]} outputs={outputs!r} server={server.poll()}")
-            joined = [json.loads(output.strip()) for output, _ in outputs]
+            joined = [json.loads(first_join.strip()), json.loads(outputs[1][0].splitlines()[0])]
             for field in ("session_id", "player_id", "entity_id"):
                 values = sorted(item[field] for item in joined)
                 if values != [1, 2]:
                     raise RuntimeError(f"{field} did not prove distinct non-orphan identities: {values}")
-            print(json.dumps({"event": "phase7_join_demo_passed", "clients": joined}, separators=(",", ":")))
+            if "fixture_flow_complete" not in outputs[0][0] or "fixture_flow_complete" not in outputs[1][0]:
+                raise RuntimeError(f"fixture flow evidence missing: {outputs!r}")
+            print(json.dumps({"event": "phase7_fixture_demo_passed", "clients": joined}, separators=(",", ":")))
             return 0
         finally:
             server.terminate()

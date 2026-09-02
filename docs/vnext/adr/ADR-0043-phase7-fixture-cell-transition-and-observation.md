@@ -82,3 +82,24 @@ session and generation, reject stale or contradictory input without partial
 mutation, and treat an identical duplicate as harmless. Reliable observation
 state and the latest-wins spatial view apply independently so either transport
 lane may arrive first; spatial snapshots do not synthesize lifecycle changes.
+
+### Runtime writer composition clarification
+
+Approved by the project owner on 2026-09-01: `ServerApplication` owns the
+writer-confined transition sequence and `ConnectionSessionCoordinator` supplies
+bounded session-to-connection routing. The canonical reducer exposes one
+move-only prepare/commit transaction: preparation validates and derives the
+exact candidate without mutation or observability, queue admission occurs from
+that candidate, and commit succeeds only against the unchanged base version.
+Cancellation or queue failure leaves canonical state and publication unchanged.
+
+The project owner further approved one shared canonical writer for authenticated
+joins and fixture transitions. A successful join publishes one typed
+`SessionJoined` lifecycle change; it is not represented as a synthetic player
+command. Rejected or cancelled joins publish no state or lifecycle change.
+
+The project owner also approved a bounded multi-connection, multi-frame atomic
+queue transaction. Authenticated join uses it to admit authentication, the
+target's explicit initial `Enter` batch and complete view, plus every affected
+existing target's observation/view pair before the shared canonical commit.
+Any missing/full target or encoding failure admits nothing and cancels the join.

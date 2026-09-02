@@ -10,6 +10,7 @@
 
 namespace TES3MP::ServerApp
 {
+    class ConnectionSessionCoordinator;
     enum class JoinCompositionResult : std::uint8_t
     {
         Committed,
@@ -31,7 +32,8 @@ namespace TES3MP::ServerApp
     public:
         virtual ~JoinResponseQueue() = default;
         virtual bool enqueueJoinResponses(std::span<const std::byte> authentication,
-            std::span<const std::byte> snapshot) noexcept = 0;
+            std::span<const std::byte> snapshot, const CanonicalServerState& before,
+            const CanonicalServerState& after, const AuthenticatedJoinResult& join, ServerTick tick) noexcept = 0;
     };
 
     class AuthenticatedJoinComposition
@@ -55,15 +57,18 @@ namespace TES3MP::ServerApp
     class TransportJoinResponseQueue final : public JoinResponseQueue
     {
     public:
-        TransportJoinResponseQueue(OutboundQueueSet& queues, TransportConnectionId connection) noexcept
-            : mQueues(queues), mConnection(connection) {}
+        TransportJoinResponseQueue(OutboundQueueSet& queues, TransportConnectionId connection,
+            ConnectionSessionCoordinator* sessions = nullptr) noexcept
+            : mQueues(queues), mConnection(connection), mSessions(sessions) {}
 
         bool enqueueJoinResponses(std::span<const std::byte> authentication,
-            std::span<const std::byte> snapshot) noexcept override;
+            std::span<const std::byte> snapshot, const CanonicalServerState& before,
+            const CanonicalServerState& after, const AuthenticatedJoinResult& join, ServerTick tick) noexcept override;
 
     private:
         OutboundQueueSet& mQueues;
         TransportConnectionId mConnection;
+        ConnectionSessionCoordinator* mSessions;
     };
 }
 

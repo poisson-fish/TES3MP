@@ -192,6 +192,36 @@ namespace
             && check(backwards == TES3MP::OutboundPumpResult::InvalidTime, "clock regression accepted");
     }
 
+    bool multiConnectionAdmissionIsAtomic()
+    {
+        auto queues = TES3MP::OutboundQueueSet::create(policy(), 2);
+        const auto first = TES3MP::TransportConnectionId::initial();
+        const auto second = *first.next();
+        queues->attach(first);
+        queues->attach(second);
+        const auto a = bytes(1);
+        const auto b = bytes(2);
+        std::array<TES3MP::OutboundQueueSet::AtomicMessage, 2> invalid{{
+            { first, TES3MP::TransportChannel::ReliableOrdered, a },
+            { *second.next(), TES3MP::TransportChannel::LatestWins, b },
+        }};
+        const auto rejected = queues->enqueueMessagesAtomically(invalid);
+        FakeRuntime runtime;
+        const bool empty = queues->pump(runtime, first, 0) == TES3MP::OutboundPumpResult::Idle
+            && queues->pump(runtime, second, 0) == TES3MP::OutboundPumpResult::Idle;
+        std::array<TES3MP::OutboundQueueSet::AtomicMessage, 2> valid{{
+            { first, TES3MP::TransportChannel::ReliableOrdered, a },
+            { second, TES3MP::TransportChannel::LatestWins, b },
+        }};
+        const auto accepted = queues->enqueueMessagesAtomically(valid);
+        queues->pump(runtime, first, 1);
+        queues->pump(runtime, second, 1);
+        return check(rejected == TES3MP::TransportResult::UnknownId && empty,
+                   "multi-target failure admitted a partial frame")
+            && check(accepted == TES3MP::TransportResult::Accepted && runtime.sent.size() == 2,
+                "multi-target transaction did not admit every frame");
+    }
+
     bool isolatedSlowPeerEviction()
     {
         TES3MP::OutboundTransportQueue slow(policy());
@@ -250,7 +280,7 @@ namespace
 int main()
 {
     return policyAndBounds() && connectionSetBounds() && orderingCoalescingAndFairness() && pairAdmissionIsAtomic()
-            && limitsRateAndTime()
+            && limitsRateAndTime() && multiConnectionAdmissionIsAtomic()
             && isolatedSlowPeerEviction() && telemetryIsExactBoundedAndIsolated()
         ? 0
         : 1;

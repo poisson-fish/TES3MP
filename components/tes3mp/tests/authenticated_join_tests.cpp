@@ -20,22 +20,31 @@ namespace
             Orientation3(zero, zero, zero));
     }
 
-    AuthenticatedJoinCoordinator coordinator(std::uint64_t session = 1, std::uint64_t player = 1,
-        std::uint64_t entity = 1)
+    struct JoinFixture
     {
-        return *AuthenticatedJoinCoordinator::create(
-            spawn(), { id<SessionId>(session), id<PlayerId>(player), id<EntityId>(entity) });
-    }
+        NullMetricSink metrics;
+        NullStructuredEventSink events;
+        Observability observability{ metrics, events };
+        CanonicalCommandReducer reducer{ std::get<CanonicalServerState>(createCanonicalServerState({}, {})), observability };
+        AuthenticatedJoinCoordinator joins;
+        JoinFixture(std::uint64_t session = 1, std::uint64_t player = 1, std::uint64_t entity = 1)
+            : joins(*AuthenticatedJoinCoordinator::create(spawn(),
+                { id<SessionId>(session), id<PlayerId>(player), id<EntityId>(entity) }, reducer)) {}
+    };
 
     void distinctAtomicJoins()
     {
-        auto value = coordinator();
+        JoinFixture fixture;
+        auto& value = fixture.joins;
         auto first = value.join(id<PrincipalId>(41), SessionGeneration::initial(), ServerTick::initial());
         auto second = value.join(id<PrincipalId>(42), SessionGeneration::initial(), id<ServerTick>(1));
         const auto& left = std::get<AuthenticatedJoinResult>(first);
         const auto& right = std::get<AuthenticatedJoinResult>(second);
         assert(left.session != right.session && left.player != right.player && left.entity != right.entity);
         assert(value.state().players().size() == 2 && value.state().activeSessions().size() == 2);
+        const auto publication = fixture.reducer.latestPublication();
+        assert(publication->stateVersion().value() == 2 && publication->joinedSessions().size() == 1
+            && publication->joinedSessions().front().session.sessionId() == right.session);
         assert(left.initialSnapshot.header().targetSessionId() == left.session);
         assert(left.initialSnapshot.view().entries().size() == 1);
         const auto& entry = left.initialSnapshot.view().entries().front();
@@ -46,7 +55,8 @@ namespace
 
     void duplicatePrincipalDoesNotMutate()
     {
-        auto value = coordinator();
+        JoinFixture fixture;
+        auto& value = fixture.joins;
         assert(std::holds_alternative<AuthenticatedJoinResult>(
             value.join(id<PrincipalId>(9), SessionGeneration::initial(), ServerTick::initial())));
         const auto before = value.state();
@@ -58,7 +68,8 @@ namespace
     void exhaustedIdentityDoesNotMutate()
     {
         const auto maximum = std::numeric_limits<std::uint64_t>::max();
-        auto value = coordinator(maximum, 1, 1);
+        JoinFixture fixture(maximum, 1, 1);
+        auto& value = fixture.joins;
         assert(std::holds_alternative<AuthenticatedJoinResult>(
             value.join(id<PrincipalId>(1), SessionGeneration::initial(), ServerTick::initial())));
         const auto before = value.state();
@@ -70,7 +81,8 @@ namespace
 
     void capacityFailureDoesNotMutate()
     {
-        auto value = coordinator();
+        JoinFixture fixture;
+        auto& value = fixture.joins;
         for (std::uint64_t index = 1; index <= MaximumCanonicalActiveSessions; ++index)
         {
             assert(std::holds_alternative<AuthenticatedJoinResult>(value.join(
@@ -85,12 +97,15 @@ namespace
 
     void preparationIsInvisibleUntilCommit()
     {
-        auto value = coordinator();
+        JoinFixture fixture;
+        auto& value = fixture.joins;
         const auto before = value.state();
+        const auto beforePublication = fixture.reducer.latestPublication();
         auto prepared = value.prepare(
             id<PrincipalId>(77), SessionGeneration::initial(), ServerTick::initial());
         const auto& pending = std::get<AuthenticatedJoinPreparation>(prepared);
-        assert(value.state() == before && value.liveBindings() == 0);
+        assert(value.state() == before && value.liveBindings() == 0
+            && fixture.reducer.latestPublication() == beforePublication);
         assert(std::get<AuthenticatedJoinError>(value.prepare(
                    id<PrincipalId>(78), SessionGeneration::initial(), ServerTick::initial()))
             == AuthenticatedJoinError::PreparationPending);
@@ -108,7 +123,8 @@ namespace
 
     void cancelledPreparationLeavesNoStateAndReusesIdentity()
     {
-        auto value = coordinator();
+        JoinFixture fixture;
+        auto& value = fixture.joins;
         const auto before = value.state();
         auto prepared = value.prepare(
             id<PrincipalId>(81), SessionGeneration::initial(), ServerTick::initial());

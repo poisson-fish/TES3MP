@@ -84,6 +84,44 @@ namespace TES3MP
     class CanonicalCommandReducer
     {
     public:
+        class PreparedBatch
+        {
+        public:
+            PreparedBatch(PreparedBatch&&) noexcept = default;
+            PreparedBatch& operator=(PreparedBatch&&) noexcept = default;
+            PreparedBatch(const PreparedBatch&) = delete;
+            PreparedBatch& operator=(const PreparedBatch&) = delete;
+            const CanonicalServerState& candidateState() const noexcept { return *mState; }
+            const CommandBatchReductionResult& result() const noexcept { return mResult; }
+        private:
+            friend class CanonicalCommandReducer;
+            PreparedBatch() = default;
+            CanonicalStateVersion mBaseVersion = CanonicalStateVersion::initial();
+            CanonicalStateVersion mStateVersion = CanonicalStateVersion::initial();
+            ServerTick mCheckpointTick = ServerTick::initial();
+            std::shared_ptr<const CanonicalServerState> mState;
+            std::shared_ptr<CanonicalStatePublication> mPublication;
+            CommandBatchReductionResult mResult;
+        };
+
+        class PreparedJoin
+        {
+        public:
+            PreparedJoin(PreparedJoin&&) noexcept = default;
+            PreparedJoin& operator=(PreparedJoin&&) noexcept = default;
+            PreparedJoin(const PreparedJoin&) = delete;
+            PreparedJoin& operator=(const PreparedJoin&) = delete;
+            const CanonicalServerState& candidateState() const noexcept { return *mState; }
+        private:
+            friend class CanonicalCommandReducer;
+            PreparedJoin() = default;
+            CanonicalStateVersion mBaseVersion = CanonicalStateVersion::initial();
+            CanonicalStateVersion mStateVersion = CanonicalStateVersion::initial();
+            ServerTick mCheckpointTick = ServerTick::initial();
+            std::shared_ptr<const CanonicalServerState> mState;
+            std::shared_ptr<CanonicalStatePublication> mPublication;
+        };
+
         // Eligible for later reviewed composition; this type owns no connection,
         // protocol request, target projection, delivery, or runtime loop.
         CanonicalCommandReducer(CanonicalServerState initialState, Observability& observability);
@@ -100,6 +138,11 @@ namespace TES3MP
         const CanonicalServerState& state() const noexcept { return *mState; }
         CanonicalStateVersion stateVersion() const noexcept { return mStateVersion; }
         std::shared_ptr<const CanonicalStatePublication> latestPublication() const noexcept;
+        PreparedBatch prepare(const ServerTickCommandBatch& batch);
+        bool commit(PreparedBatch&& prepared);
+        std::optional<PreparedJoin> prepareJoin(CanonicalPlayerEntityState player,
+            CanonicalSessionProgress session, ServerTick tick);
+        bool commit(PreparedJoin&& prepared);
         CommandBatchReductionResult apply(const ServerTickCommandBatch& batch);
 
     private:
