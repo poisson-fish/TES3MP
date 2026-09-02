@@ -4,6 +4,7 @@
 #include <tes3mp/test_support/manual_clock.hpp>
 
 #include <array>
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <iostream>
@@ -200,6 +201,115 @@ namespace
             trace.push_back(static_cast<std::byte>(value >> shift));
     }
 
+    std::array<std::byte, 8> sequenceBytes(std::uint64_t value)
+    {
+        std::array<std::byte, 8> result{};
+        for (unsigned shift = 0; shift < 64; shift += 8)
+            result[shift / 8] = static_cast<std::byte>(value >> shift);
+        return result;
+    }
+
+    std::uint64_t readSequence(std::span<const std::byte> bytes)
+    {
+        std::uint64_t result = 0;
+        for (unsigned shift = 0; shift < 64; shift += 8)
+            result |= static_cast<std::uint64_t>(std::to_integer<std::uint8_t>(bytes[shift / 8])) << shift;
+        return result;
+    }
+
+    struct Phase7MatrixResult
+    {
+        std::vector<std::byte> trace;
+        std::size_t maximumPendingMessages = 0;
+        std::size_t maximumPendingBytes = 0;
+        std::size_t remainingPendingMessages = 0;
+        std::size_t remainingPendingBytes = 0;
+        std::vector<std::uint64_t> delivered;
+    };
+
+    Phase7MatrixResult runPhase7Matrix(Phase7AdverseProfile namedProfile, std::uint64_t seed)
+    {
+        ManualClock clock(MonotonicInstant::fromNanoseconds(0));
+        const FaultPath path{ LinkDirection::AtoB, channel(11) };
+        const auto selected = makePhase7AdverseProfile(namedProfile).value();
+        const std::array configurations{ FaultPathConfiguration{ path, selected } };
+        auto link = makeLink(clock, seed, configurations,
+            { selected.maximumPendingMessages(), selected.maximumPendingBytes() });
+        Phase7MatrixResult result{ { std::byte{ 'P' }, std::byte{ '7' }, static_cast<std::byte>(namedProfile) } };
+
+        const auto pumpAndRecord = [&] {
+            const auto pumped = link->pump();
+            appendU64(result.trace, pumped.deliveredMessages);
+            while (auto bytes = link->receive(LinkDirection::AtoB))
+            {
+                const auto sequence = readSequence(*bytes);
+                result.delivered.push_back(sequence);
+                appendU64(result.trace, sequence);
+            }
+            result.maximumPendingMessages = std::max(result.maximumPendingMessages, link->pendingMessages(path));
+            result.maximumPendingBytes = std::max(result.maximumPendingBytes, link->pendingBytes(path));
+        };
+
+        for (std::uint64_t tick = 1; tick <= Phase7DeterministicSoakTicks; ++tick)
+        {
+            if (tick == Phase7DeterministicSoakTicks / 2)
+                link->setStalled(path, true);
+            const auto bytes = sequenceBytes(tick);
+            result.trace.push_back(static_cast<std::byte>(link->send(path, bytes)));
+            if (tick == Phase7DeterministicSoakTicks / 2 + Phase7StallNanoseconds / 10'000'000)
+                link->setStalled(path, false);
+            clock.advance(10'000'000);
+            pumpAndRecord();
+        }
+
+        // Latest-wins convergence must not depend on the last sampled update escaping loss.
+        if (namedProfile == Phase7AdverseProfile::SampledStateLossDuplication)
+        {
+            const auto final = sequenceBytes(Phase7DeterministicSoakTicks);
+            for (std::size_t attempt = 0; attempt < 32; ++attempt)
+            {
+                result.trace.push_back(static_cast<std::byte>(link->send(path, final)));
+                clock.advance(10'000'000);
+                pumpAndRecord();
+            }
+        }
+        clock.advance(Phase7LatencyNanoseconds + Phase7JitterNanoseconds + Phase7ReorderNanoseconds);
+        pumpAndRecord();
+        result.remainingPendingMessages = link->pendingMessages(path);
+        result.remainingPendingBytes = link->pendingBytes(path);
+        return result;
+    }
+
+    bool phase7_deterministic_adverse_matrix_is_reproducible_bounded_and_convergent()
+    {
+        for (const auto namedProfile : { Phase7AdverseProfile::LatencyJitterReorder,
+                 Phase7AdverseProfile::SampledStateLossDuplication,
+                 Phase7AdverseProfile::ReliableDuplicationReorder })
+        {
+            const auto first = runPhase7Matrix(namedProfile, Phase7AdverseSeed);
+            const auto replay = runPhase7Matrix(namedProfile, Phase7AdverseSeed);
+            const auto changedSeed = runPhase7Matrix(namedProfile, Phase7AdverseSeed + 1);
+            const auto selected = makePhase7AdverseProfile(namedProfile).value();
+            if (first.trace != replay.trace || first.trace == changedSeed.trace
+                || first.maximumPendingMessages > selected.maximumPendingMessages()
+                || first.maximumPendingBytes > selected.maximumPendingBytes()
+                || first.remainingPendingMessages != 0 || first.remainingPendingBytes != 0 || first.delivered.empty()
+                || *std::max_element(first.delivered.begin(), first.delivered.end()) != Phase7DeterministicSoakTicks)
+                return false;
+
+            if (namedProfile != Phase7AdverseProfile::SampledStateLossDuplication)
+            {
+                auto applied = first.delivered;
+                std::sort(applied.begin(), applied.end());
+                applied.erase(std::unique(applied.begin(), applied.end()), applied.end());
+                if (applied.size() != Phase7DeterministicSoakTicks || applied.front() != 1
+                    || applied.back() != Phase7DeterministicSoakTicks)
+                    return false;
+            }
+        }
+        return true;
+    }
+
     ScriptResult runSeededScript(std::uint64_t seed, bool exerciseUnrelatedPath)
     {
         ManualClock clock(MonotonicInstant::fromNanoseconds(100));
@@ -348,6 +458,8 @@ int main()
         std::pair{ "time_overflow_is_explicit_and_atomic", &time_overflow_is_explicit_and_atomic },
         std::pair{ "phase7_named_profiles_match_approved_thresholds",
             &phase7_named_profiles_match_approved_thresholds },
+        std::pair{ "phase7_deterministic_adverse_matrix_is_reproducible_bounded_and_convergent",
+            &phase7_deterministic_adverse_matrix_is_reproducible_bounded_and_convergent },
     };
     for (const auto& [name, test] : tests)
     {
