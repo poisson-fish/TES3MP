@@ -136,6 +136,28 @@ namespace
             && *ownedSnapshot == originalSnapshot;
     }
 
+    bool fixture_cell_transitions_round_trip_as_typed_owned_values()
+    {
+        const ReliableOperationHeader header(
+            ClientCommandHeader(value<SessionId>(21), value<SessionGeneration>(2), value<CommandSequence>(2),
+                value<CommandId>(32), value<ServerTick>(5)),
+            EntityPrecondition(value<EntityId>(41), value<EntityRevision>(3), value<AuthorityEpoch>(2)));
+        const std::array cells{ CellId::interior(value<CellSpaceId>(7)),
+            CellId::exterior(value<CellSpaceId>(8), 0, 0) };
+        for (const auto& cell : cells)
+        {
+            const auto created = ReliableOperation::create(header, FixtureCellTransition(cell));
+            const auto* original = std::get_if<ReliableOperation>(&created);
+            if (original == nullptr) return false;
+            const auto decoded = decodeReliableOperation(encodeReliableOperation(*original));
+            const auto* roundTripped = std::get_if<ReliableOperation>(&decoded);
+            if (roundTripped == nullptr || *roundTripped != *original
+                || std::get_if<FixtureCellTransition>(&roundTripped->body()) == nullptr)
+                return false;
+        }
+        return true;
+    }
+
     bool deterministic_exchange_properties_round_trip()
     {
         const auto sessionId = value<SessionId>(1);
@@ -270,7 +292,7 @@ namespace
             return false;
 
         auto unknownReliableBody = reliable;
-        unknownReliableBody[31] = std::byte{ 2 };
+        unknownReliableBody[31] = std::byte{ 3 };
         auto unknownSnapshotBody = latestWins;
         unknownSnapshotBody[31] = std::byte{ 2 };
 
@@ -534,6 +556,7 @@ int main(int argc, char** argv)
     bool passed = true;
     passed &= check(values_are_typed_bounded_and_not_default_constructible(), "typed bounded values");
     passed &= check(operation_and_snapshot_round_trip_as_owned_values(), "owned round trips");
+    passed &= check(fixture_cell_transitions_round_trip_as_typed_owned_values(), "fixture transition round trips");
     passed &= check(deterministic_exchange_properties_round_trip(), "deterministic properties");
     passed &= check(view_bounds_ordering_and_payload_budget_are_enforced(), "view bounds and ordering");
     passed &= check(every_truncation_identifier_and_trailing_byte_fail_without_partial_value(), "malformed inputs");

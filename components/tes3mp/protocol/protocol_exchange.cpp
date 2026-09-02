@@ -101,6 +101,30 @@ namespace
             SnapshotSchema::CellKind::Exterior };
     }
 
+    ReliableSchema::Cell encodeReliableCell(const TES3MP::CellId& cell)
+    {
+        if (const auto* interior = cell.asInterior())
+            return { interior->cellSpace().value(), 0, 0, ReliableSchema::CellKind::Interior };
+        const auto& exterior = *cell.asExterior();
+        return { exterior.worldspace().value(), exterior.gridX(), exterior.gridY(), ReliableSchema::CellKind::Exterior };
+    }
+
+    std::variant<TES3MP::CellId, ExchangeDecodeError> decodeReliableCell(const ReliableSchema::Cell& cell)
+    {
+        auto space = strongValue<TES3MP::CellSpaceId>(cell.cell_space_id());
+        if (const auto* failure = std::get_if<ExchangeDecodeError>(&space)) return *failure;
+        if (cell.kind() == ReliableSchema::CellKind::Interior)
+        {
+            if (cell.grid_x() != 0 || cell.grid_y() != 0)
+                return error(ExchangeDecodeErrorStage::SemanticValidation, ExchangeDecodeErrorCode::InvalidInteriorGrid);
+            return TES3MP::CellId::interior(*decodedValue(space));
+        }
+        if (cell.kind() == ReliableSchema::CellKind::Exterior)
+            return TES3MP::CellId::exterior(*decodedValue(space), cell.grid_x(), cell.grid_y());
+        return error(ExchangeDecodeErrorStage::SemanticValidation, ExchangeDecodeErrorCode::InvalidCellKind,
+            static_cast<std::size_t>(cell.kind()));
+    }
+
     SnapshotSchema::SpatialEntitySnapshot encodeEntry(const TES3MP::SpatialEntitySnapshot& entry)
     {
         const auto& transform = entry.transform();
@@ -179,6 +203,14 @@ namespace TES3MP
         return ReliableOperation(header, intent);
     }
 
+    std::variant<ReliableOperation, ExchangeDecodeError> ReliableOperation::create(
+        ReliableOperationHeader header, FixtureCellTransition transition) noexcept
+    {
+        if (!header.entityPrecondition())
+            return error(ExchangeDecodeErrorStage::SemanticValidation, ExchangeDecodeErrorCode::MissingEntityPrecondition);
+        return ReliableOperation(header, transition);
+    }
+
     std::variant<SpatialWorldView, ExchangeDecodeError> SpatialWorldView::create(
         std::span<const SpatialEntitySnapshot> entries)
     {
@@ -210,11 +242,22 @@ namespace TES3MP
         const auto entityPrecondition
             = ReliableSchema::CreateEntityPrecondition(builder, precondition.entityId().value(),
                 precondition.expectedRevision().value(), precondition.expectedAuthorityEpoch().value());
-        const auto velocity = value.intent().desiredVelocity();
-        const ReliableSchema::LinearVelocity3 encodedVelocity(velocity.x(), velocity.y(), velocity.z());
-        const auto intent = ReliableSchema::CreatePlayerMotionIntent(builder, &encodedVelocity);
-        const auto root = ReliableSchema::CreateReliableOperation(builder, commandHeader, entityPrecondition,
-            ReliableSchema::ReliableOperationBody::PlayerMotionIntent, intent.Union());
+        flatbuffers::Offset<void> body;
+        ReliableSchema::ReliableOperationBody bodyType;
+        if (const auto* intent = std::get_if<PlayerMotionIntent>(&value.body()))
+        {
+            const auto velocity = intent->desiredVelocity();
+            const ReliableSchema::LinearVelocity3 encodedVelocity(velocity.x(), velocity.y(), velocity.z());
+            body = ReliableSchema::CreatePlayerMotionIntent(builder, &encodedVelocity).Union();
+            bodyType = ReliableSchema::ReliableOperationBody::PlayerMotionIntent;
+        }
+        else
+        {
+            const auto cell = encodeReliableCell(std::get<FixtureCellTransition>(value.body()).requestedCell());
+            body = ReliableSchema::CreateFixtureCellTransition(builder, &cell).Union();
+            bodyType = ReliableSchema::ReliableOperationBody::FixtureCellTransition;
+        }
+        const auto root = ReliableSchema::CreateReliableOperation(builder, commandHeader, entityPrecondition, bodyType, body);
         ReliableSchema::FinishSizePrefixedReliableOperationBuffer(builder, root);
         return takeBuffer(builder);
     }
@@ -264,15 +307,11 @@ namespace TES3MP
         }
         if (root->body_type() == ReliableSchema::ReliableOperationBody::NONE || root->body() == nullptr)
             return error(ExchangeDecodeErrorStage::SemanticValidation, ExchangeDecodeErrorCode::MissingBody);
-        if (root->body_type() != ReliableSchema::ReliableOperationBody::PlayerMotionIntent)
+        if (root->body_type() != ReliableSchema::ReliableOperationBody::PlayerMotionIntent
+            && root->body_type() != ReliableSchema::ReliableOperationBody::FixtureCellTransition)
         {
             return error(ExchangeDecodeErrorStage::SemanticValidation, ExchangeDecodeErrorCode::UnknownBody,
                 static_cast<std::size_t>(root->body_type()));
-        }
-        const auto* intent = root->body_as_PlayerMotionIntent();
-        if (intent == nullptr || intent->desired_velocity() == nullptr)
-        {
-            return error(ExchangeDecodeErrorStage::SemanticValidation, ExchangeDecodeErrorCode::MissingDesiredVelocity);
         }
 
         auto session = strongValue<SessionId>(command->session_id());
@@ -294,13 +333,25 @@ namespace TES3MP
                 return *failure;
         }
 
-        const auto* velocity = intent->desired_velocity();
         ReliableOperationHeader header(
             ClientCommandHeader(*decodedValue(session), *decodedValue(generation), *decodedValue(sequence),
                 *decodedValue(commandId), *decodedValue(observedTick)),
             EntityPrecondition(*decodedValue(entity), *decodedValue(revision), *decodedValue(epoch)));
-        return ReliableOperation::create(
-            header, PlayerMotionIntent(LinearVelocity3(velocity->x(), velocity->y(), velocity->z())));
+        if (root->body_type() == ReliableSchema::ReliableOperationBody::PlayerMotionIntent)
+        {
+            const auto* intent = root->body_as_PlayerMotionIntent();
+            if (intent == nullptr || intent->desired_velocity() == nullptr)
+                return error(ExchangeDecodeErrorStage::SemanticValidation, ExchangeDecodeErrorCode::MissingDesiredVelocity);
+            const auto* velocity = intent->desired_velocity();
+            return ReliableOperation::create(header,
+                PlayerMotionIntent(LinearVelocity3(velocity->x(), velocity->y(), velocity->z())));
+        }
+        const auto* transition = root->body_as_FixtureCellTransition();
+        if (transition == nullptr || transition->requested_cell() == nullptr)
+            return error(ExchangeDecodeErrorStage::SemanticValidation, ExchangeDecodeErrorCode::MissingRequestedCell);
+        auto cell = decodeReliableCell(*transition->requested_cell());
+        if (const auto* failure = std::get_if<ExchangeDecodeError>(&cell)) return *failure;
+        return ReliableOperation::create(header, FixtureCellTransition(std::get<CellId>(cell)));
     }
 
     LatestWinsSnapshotDecodeResult decodeLatestWinsSnapshot(std::span<const std::byte> payload)

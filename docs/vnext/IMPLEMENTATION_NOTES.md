@@ -4293,6 +4293,22 @@ only the relevant phase section here.
 
 [Back to the phase tracker](IMPLEMENTATION_PLAN.md#phase-7--headless-end-to-end-multiplayer-slice)
 
+- 2026-09-01 — Slice 7.4 fixture-transition protocol — In Progress
+  - Change: extended the existing bounded reliable-operation union with an
+    owned typed fixture-cell transition and exact interior/exterior cell codec;
+    regenerated the committed header with pinned `flatc 25.12.19`.
+  - Decisions: implements accepted ADR-0043 Decision 1; no new architecture,
+    authority, state-scope, or gameplay decision was made.
+  - Verification: MSVC 19.44 `tes3mp_protocol_tests_run` passed, including
+    both fixed fixture round trips; `python
+    scripts/run_vnext_flatbuffers_proof.py`, all 114 Python tests, `python
+    scripts/verify_vnext_baseline.py`, and `git diff --check` passed.
+  - Owner review: implementation demo remains pending; Slice 7.4 remains
+    **In Progress**.
+  - Follow-ups: decide the exact approved observation protocol/composition
+    shape with the owner before implementing atomic projection and delivery,
+    then run the required real two-client demo.
+
 - 2026-09-01 — Slice 7.4 fixture-transition reducer — In Progress
   - Change: added the typed fixture-cell transition command payload and composed
     it through existing bounded intake and apply-once canonical reduction.

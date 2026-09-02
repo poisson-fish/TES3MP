@@ -35,12 +35,29 @@ namespace TES3MP
         MissingBody,
         UnknownBody,
         MissingDesiredVelocity,
+        MissingRequestedCell,
         InvalidStrongValue,
         InvalidAcknowledgementPresence,
         TooManySnapshotEntries,
         SnapshotEntriesNotStrictlySorted,
         InvalidCellKind,
         InvalidInteriorGrid,
+    };
+
+    class FixtureCellTransition
+    {
+    public:
+        constexpr explicit FixtureCellTransition(CellId requestedCell) noexcept
+            : mRequestedCell(requestedCell)
+        {
+        }
+
+        constexpr const CellId& requestedCell() const noexcept { return mRequestedCell; }
+
+        friend constexpr bool operator==(const FixtureCellTransition&, const FixtureCellTransition&) noexcept = default;
+
+    private:
+        CellId mRequestedCell;
     };
 
     struct ExchangeDecodeError
@@ -71,26 +88,30 @@ namespace TES3MP
         LinearVelocity3 mDesiredVelocity;
     };
 
+    using ReliableOperationBody = std::variant<PlayerMotionIntent, FixtureCellTransition>;
+
     class ReliableOperation
     {
     public:
         static std::variant<ReliableOperation, ExchangeDecodeError> create(
             ReliableOperationHeader header, PlayerMotionIntent intent) noexcept;
+        static std::variant<ReliableOperation, ExchangeDecodeError> create(
+            ReliableOperationHeader header, FixtureCellTransition transition) noexcept;
 
         constexpr const ReliableOperationHeader& header() const noexcept { return mHeader; }
-        constexpr PlayerMotionIntent intent() const noexcept { return mIntent; }
+        constexpr const ReliableOperationBody& body() const noexcept { return mBody; }
 
         friend constexpr bool operator==(const ReliableOperation&, const ReliableOperation&) noexcept = default;
 
     private:
-        ReliableOperation(ReliableOperationHeader header, PlayerMotionIntent intent) noexcept
+        ReliableOperation(ReliableOperationHeader header, ReliableOperationBody body) noexcept
             : mHeader(header)
-            , mIntent(intent)
+            , mBody(std::move(body))
         {
         }
 
         ReliableOperationHeader mHeader;
-        PlayerMotionIntent mIntent;
+        ReliableOperationBody mBody;
     };
 
     class SpatialWorldView

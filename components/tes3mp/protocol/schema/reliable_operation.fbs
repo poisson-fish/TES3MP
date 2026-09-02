@@ -24,8 +24,26 @@ table PlayerMotionIntent {
   desired_velocity:LinearVelocity3 (id: 0);
 }
 
+enum CellKind : ubyte {
+  Unknown = 0,
+  Interior = 1,
+  Exterior = 2
+}
+
+struct Cell {
+  cell_space_id:ulong;
+  grid_x:int;
+  grid_y:int;
+  kind:CellKind;
+}
+
+table FixtureCellTransition {
+  requested_cell:Cell (id: 0);
+}
+
 union ReliableOperationBody {
-  PlayerMotionIntent = 1
+  PlayerMotionIntent = 1,
+  FixtureCellTransition = 2
 }
 
 table ReliableOperation {
