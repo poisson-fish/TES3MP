@@ -2,6 +2,7 @@
 #include "server_config.hpp"
 #include "connection_session_coordinator.hpp"
 #include "phase7_proof_profile.hpp"
+#include "phase7_queue_telemetry.hpp"
 
 #include <tes3mp/observability.hpp>
 #include <tes3mp/server_authentication.hpp>
@@ -69,7 +70,8 @@ int main(int argc, char** argv)
         std::cerr << "invalid compiled transport limits\n";
         return 3;
     }
-    auto factory = TES3MP::makeGameNetworkingSocketsTransport(*limits);
+    TES3MP::ServerApp::Phase7QueueTelemetry queueTelemetry;
+    auto factory = TES3MP::makeGameNetworkingSocketsTransport(*limits, queueTelemetry);
     if (!factory)
     {
         std::cerr << "transport initialization failed\n";
@@ -95,7 +97,7 @@ int main(int argc, char** argv)
     auto resumeStore = crypto ? TES3MP::ResumeTokenStore::create(*crypto, config.disconnectGraceMilliseconds)
                               : nullptr;
     auto queues = TES3MP::OutboundQueueSet::create(
-        TES3MP::OutboundQueuePolicy{}, TES3MP::ServerApp::Phase7ConnectionCapacity);
+        TES3MP::OutboundQueuePolicy{}, TES3MP::ServerApp::Phase7ConnectionCapacity, queueTelemetry);
     const auto timeoutNanoseconds = config.disconnectGraceMilliseconds * 1'000'000;
     auto timeouts = TES3MP::SessionTimeoutPolicy::create(
         timeoutNanoseconds, timeoutNanoseconds, timeoutNanoseconds);
@@ -146,6 +148,14 @@ int main(int argc, char** argv)
             std::cerr << application.failure() << '\n';
             return 3;
         }
+        if (const auto evidence = queueTelemetry.takeDrainEvidence())
+            std::cout << "{\"event\":\"phase7_queue_drain\",\"reliable_high_water_messages\":"
+                      << evidence->reliableHighWaterMessages << ",\"reliable_high_water_bytes\":"
+                      << evidence->reliableHighWaterBytes << ",\"latest_high_water_messages\":"
+                      << evidence->latestHighWaterMessages << ",\"latest_high_water_bytes\":"
+                      << evidence->latestHighWaterBytes
+                      << ",\"final_reliable_messages\":0,\"final_reliable_bytes\":0,"
+                         "\"final_latest_messages\":0,\"final_latest_bytes\":0}" << std::endl;
         std::this_thread::sleep_for(std::chrono::milliseconds(config.tickIntervalMilliseconds));
     }
     if (!application.stop())

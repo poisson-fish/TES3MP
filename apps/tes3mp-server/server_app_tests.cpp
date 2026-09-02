@@ -4,6 +4,7 @@
 #include "connection_session_coordinator.hpp"
 #include "fixture_observation_projection.hpp"
 #include "phase7_proof_profile.hpp"
+#include "phase7_queue_telemetry.hpp"
 #include "server_config.hpp"
 
 #include <array>
@@ -230,6 +231,26 @@ namespace
 
 int main()
 {
+    {
+        TES3MP::ServerApp::Phase7QueueTelemetry telemetry;
+        const auto record = [&](TransportTelemetryKind kind, TransportChannel channel, std::uint64_t value) {
+            assert(telemetry.tryRecord({ kind, TransportTelemetryDirection::Outbound, channel, value })
+                == TransportTelemetryResult::Accepted);
+        };
+        record(TransportTelemetryKind::QueuedMessages, TransportChannel::ReliableOrdered, 3);
+        record(TransportTelemetryKind::QueuedBytes, TransportChannel::ReliableOrdered, 30);
+        record(TransportTelemetryKind::QueuedMessages, TransportChannel::LatestWins, 1);
+        record(TransportTelemetryKind::QueuedBytes, TransportChannel::LatestWins, 10);
+        assert(!telemetry.takeDrainEvidence());
+        record(TransportTelemetryKind::QueuedMessages, TransportChannel::ReliableOrdered, 0);
+        record(TransportTelemetryKind::QueuedBytes, TransportChannel::ReliableOrdered, 0);
+        record(TransportTelemetryKind::QueuedMessages, TransportChannel::LatestWins, 0);
+        record(TransportTelemetryKind::QueuedBytes, TransportChannel::LatestWins, 0);
+        const auto evidence = telemetry.takeDrainEvidence();
+        assert(evidence && evidence->reliableHighWaterMessages == 3
+            && evidence->reliableHighWaterBytes == 30 && evidence->latestHighWaterMessages == 1
+            && evidence->latestHighWaterBytes == 10 && !telemetry.takeDrainEvidence());
+    }
     using namespace TES3MP::ServerApp;
     static_assert(Phase7ProtocolMajor == 1 && Phase7ProtocolMinor == 0 && Phase7ProtocolPatch == 0);
     static_assert(Phase7SourceAuthenticationBurst == 4 && Phase7GlobalAuthenticationBurst == 32

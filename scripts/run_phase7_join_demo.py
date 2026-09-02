@@ -85,23 +85,43 @@ def main() -> int:
                                     if line.get("event") == "reconnect_flow_complete"), None)
             if reconnect.returncode != 0 or not reconnect_event or reconnect_event.get("reconnect_cycles") != 32:
                 raise RuntimeError(f"reconnect cycle threshold failed: {reconnect!r}")
-            print(json.dumps({"event": "phase7_lifecycle_demo_passed", "clients": joined,
+            result = {"event": "phase7_lifecycle_demo_passed", "clients": joined,
                               "simultaneous_movement": True, "converged_views": True,
                               "stale_views_rejected": True, "hidden_during_grace": True,
                               "reconnect_cycles": reconnect_event["reconnect_cycles"],
                               "same_identity_resumed": lifecycle_event["identity_preserved"],
                               "progress_preserved": lifecycle_event["progress_preserved"],
                               "expired_resume_rejected": lifecycle_event["expired_resume_rejected"],
-                              "fresh_identity_created": lifecycle_event["fresh_identity_created"]},
-                             separators=(",", ":")))
-            return 0
+                              "fresh_identity_created": lifecycle_event["fresh_identity_created"]}
         finally:
             server.terminate()
             try:
-                server.communicate(timeout=5)
+                server_output = server.communicate(timeout=5)
             except subprocess.TimeoutExpired:
                 server.kill()
-                server.communicate(timeout=5)
+                server_output = server.communicate(timeout=5)
+        server_lines = [json.loads(line) for line in server_output[0].splitlines()
+                        if line.startswith("{")]
+        queue_event = next((line for line in server_lines
+                            if line.get("event") == "phase7_queue_drain"), None)
+        if not queue_event:
+            raise RuntimeError(f"queue drain evidence missing: server={server_output!r}")
+        caps = {
+            "reliable_high_water_messages": 256,
+            "reliable_high_water_bytes": 4 * 1024 * 1024,
+            "latest_high_water_messages": 1,
+            "latest_high_water_bytes": 65536,
+        }
+        for field, cap in caps.items():
+            if not 0 < queue_event.get(field, 0) <= cap:
+                raise RuntimeError(f"queue bound failed: field={field} evidence={queue_event!r}")
+        final_fields = ("final_reliable_messages", "final_reliable_bytes",
+                        "final_latest_messages", "final_latest_bytes")
+        if any(queue_event.get(field) != 0 for field in final_fields):
+            raise RuntimeError(f"queue zero drain failed: {queue_event!r}")
+        result["queue_drain"] = queue_event
+        print(json.dumps(result, separators=(",", ":")))
+        return 0
 
 
 if __name__ == "__main__":
