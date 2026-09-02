@@ -12,7 +12,7 @@ remains the [implementation plan](IMPLEMENTATION_PLAN.md#phase-7--headless-end-t
 - Slice 7.6: **Implemented**
 - Slice 7.7: **In Progress**
 - Governing decision: [ADR-0046](adr/ADR-0046-phase7-adverse-network-and-soak-matrix.md)
-- Latest implementation commit: `3484483c17` (`Add Phase 7 deterministic adverse matrix`)
+- Latest implementation commit: `d91f21be44` (`Add Phase 7 reconnect process proof`)
 
 ## Working synopsis
 
@@ -24,10 +24,11 @@ and acknowledgements; exact expiration rejects the old token and fresh join
 creates a new identity. Credentials remain in memory and absent from evidence.
 
 Slice 7.7 layered matrix and thresholds are approved. The bounded named profile
-catalog and seeded 10,000-tick deterministic matrix pass exact replay,
-changed-seed, stall, queue-bound/zero-drain, reliable apply-once/order, and
-latest-wins convergence contracts. Next eligible work is the bounded 32-cycle
-reconnect loop, followed by queue-drain and real-process soak proofs.
+catalog, seeded 10,000-tick deterministic matrix, and paced real-process
+32-cycle reconnect loop pass exact replay, changed-seed, stall,
+queue-bound/zero-drain, reliable apply-once/order, latest-wins convergence, and
+identity/progress preservation contracts. Next eligible work is the queue-drain
+process proof, followed by the 60-second real-process soak.
 
 ## Active files
 

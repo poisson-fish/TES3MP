@@ -4293,6 +4293,24 @@ only the relevant phase section here.
 
 [Back to the phase tracker](IMPLEMENTATION_PLAN.md#phase-7--headless-end-to-end-multiplayer-slice)
 
+- 2026-09-02 — Slice 7.7 bounded reconnect loop — In Progress
+  - Change: implementation `d91f21be44` makes the real-process driver run a
+    separate 32-cycle disconnect/resume
+    proof, paced within the existing authentication refill bound, while retaining
+    the short observer, expiration, and fresh-identity lifecycle scenario.
+  - Decisions: implements accepted ADR-0046's approved threshold and real-process
+    layer without changing architecture, authority, state scope, gameplay behavior,
+    authentication policy, or credentials/evidence handling.
+  - Verification: MSVC 19.51 Release headless client build and server-app contracts,
+    all 115 repository Python tests, legacy exclusion, baseline provenance, and
+    `git diff --check` pass. The real server/two-client driver reports 32 reconnect
+    cycles with stable session/player/entity identity, monotonic generation, and
+    preserved revision and acknowledgement progress, followed by the existing
+    lifecycle proof.
+  - Owner review: Slice 7.7 remains **In Progress**; implementation demo remains
+    required after the remaining proofs.
+  - Follow-ups: implement the queue-drain process proof and 60-second real-process soak.
+
 - 2026-09-02 — Slice 7.7 deterministic adverse matrix — In Progress
   - Change: implementation `3484483c17` runs every accepted named profile for
     10,000 manual-clock ticks, including the approved 500 ms stall, exact seeded
