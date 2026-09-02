@@ -76,6 +76,10 @@ namespace TES3MP
     LatestWinsSnapshotReceiveResult HeadlessClientSession::receiveLatestWinsSnapshot(LatestWinsSnapshot snapshot)
     { return mState->receiveLatestWinsSnapshot(std::move(snapshot)); }
 
+    ReliableObservationReceiveResult HeadlessClientSession::receiveReliableObservationBatch(
+        ReliableObservationBatch batch)
+    { return mState->receiveReliableObservationBatch(std::move(batch)); }
+
     HeadlessClientResult HeadlessClientSession::close() noexcept
     {
         if (mAttempt) { mTransport.cancelConnect(*mAttempt); mAttempt.reset(); }

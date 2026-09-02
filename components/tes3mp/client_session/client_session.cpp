@@ -2,6 +2,7 @@
 
 #include <type_traits>
 #include <utility>
+#include <algorithm>
 
 namespace
 {
@@ -236,5 +237,49 @@ namespace TES3MP
 
         mConfirmedSnapshot = std::move(snapshot);
         return LatestWinsSnapshotReceiveResult::Applied;
+    }
+
+    ReliableObservationReceiveResult ClientSessionStateMachine::receiveReliableObservationBatch(
+        ReliableObservationBatch batch)
+    {
+        if (mState != ClientSessionState::Established)
+            return ReliableObservationReceiveResult::NotEstablished;
+        if (!mSessionId)
+            return ReliableObservationReceiveResult::SessionNotBound;
+        if (batch.targetSessionId() != *mSessionId)
+            return ReliableObservationReceiveResult::SessionMismatch;
+        if (batch.targetSessionGeneration() != mGeneration)
+            return ReliableObservationReceiveResult::GenerationMismatch;
+
+        if (mConfirmedObservationBatch)
+        {
+            if (batch.serverTick() < mConfirmedObservationBatch->serverTick())
+                return ReliableObservationReceiveResult::StaleTick;
+            if (batch.serverTick() == mConfirmedObservationBatch->serverTick())
+                return batch == *mConfirmedObservationBatch
+                    ? ReliableObservationReceiveResult::IdenticalDuplicate
+                    : ReliableObservationReceiveResult::ContradictorySameTick;
+        }
+
+        auto next = mObservedPlayers;
+        for (const auto& change : batch.changes())
+        {
+            const auto found = std::ranges::lower_bound(next, change.playerId, {}, &ObservedPlayer::playerId);
+            if (change.kind == ObservationChangeKind::Enter)
+            {
+                if (found != next.end() && found->playerId == change.playerId)
+                    return ReliableObservationReceiveResult::ContradictoryChange;
+                next.insert(found, ObservedPlayer{ change.playerId, change.entityId });
+            }
+            else
+            {
+                if (found == next.end() || found->playerId != change.playerId || found->entityId != change.entityId)
+                    return ReliableObservationReceiveResult::ContradictoryChange;
+                next.erase(found);
+            }
+        }
+        mObservedPlayers = std::move(next);
+        mConfirmedObservationBatch = std::move(batch);
+        return ReliableObservationReceiveResult::Applied;
     }
 }

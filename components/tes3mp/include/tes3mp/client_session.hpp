@@ -123,6 +123,26 @@ namespace TES3MP
         ContradictorySameTick,
     };
 
+    enum class ReliableObservationReceiveResult : std::uint8_t
+    {
+        Applied,
+        IdenticalDuplicate,
+        NotEstablished,
+        SessionNotBound,
+        SessionMismatch,
+        GenerationMismatch,
+        StaleTick,
+        ContradictorySameTick,
+        ContradictoryChange,
+    };
+
+    struct ObservedPlayer
+    {
+        PlayerId playerId;
+        EntityId entityId;
+        friend constexpr bool operator==(ObservedPlayer, ObservedPlayer) noexcept = default;
+    };
+
     using ClientSessionCreateResult
         = std::variant<std::unique_ptr<class ClientSessionStateMachine>, SessionTransitionError>;
 
@@ -140,6 +160,7 @@ namespace TES3MP
         ClientSessionTransition handle(ClientSessionEvent event) noexcept;
         ClientSessionBindingResult bindEstablishedSession(SessionId sessionId) noexcept;
         LatestWinsSnapshotReceiveResult receiveLatestWinsSnapshot(LatestWinsSnapshot snapshot);
+        ReliableObservationReceiveResult receiveReliableObservationBatch(ReliableObservationBatch batch);
 
         ClientSessionState state() const noexcept { return mState; }
         SessionGeneration generation() const noexcept { return mGeneration; }
@@ -152,6 +173,9 @@ namespace TES3MP
         }
         std::optional<SessionId> sessionId() const noexcept { return mSessionId; }
         const std::optional<LatestWinsSnapshot>& confirmedSnapshot() const noexcept { return mConfirmedSnapshot; }
+        const std::optional<ReliableObservationBatch>& confirmedObservationBatch() const noexcept
+        { return mConfirmedObservationBatch; }
+        std::span<const ObservedPlayer> observedPlayers() const noexcept { return mObservedPlayers; }
 
     private:
         ClientSessionStateMachine(MonotonicClock& clock, SessionTimeoutPolicy timeoutPolicy,
@@ -171,6 +195,8 @@ namespace TES3MP
         std::optional<AuthenticationRejectionReason> mAuthenticationRejection;
         std::optional<SessionId> mSessionId;
         std::optional<LatestWinsSnapshot> mConfirmedSnapshot;
+        std::optional<ReliableObservationBatch> mConfirmedObservationBatch;
+        std::vector<ObservedPlayer> mObservedPlayers;
     };
 }
 

@@ -40,11 +40,13 @@ namespace TES3MP
         ClientSessionTransition handle(ClientSessionEvent event) noexcept;
         ClientSessionBindingResult bindEstablishedSession(SessionId session) noexcept;
         LatestWinsSnapshotReceiveResult receiveLatestWinsSnapshot(LatestWinsSnapshot snapshot);
+        ReliableObservationReceiveResult receiveReliableObservationBatch(ReliableObservationBatch batch);
         HeadlessClientResult close() noexcept;
 
         const ClientSessionStateMachine& stateMachine() const noexcept { return *mState; }
         std::optional<ConnectAttemptId> attempt() const noexcept { return mAttempt; }
         std::optional<TransportConnectionId> connection() const noexcept { return mConnection; }
+        std::span<const ObservedPlayer> observedPlayers() const noexcept { return mState->observedPlayers(); }
 
     private:
         HeadlessClientSession(TransportRuntime& transport, std::unique_ptr<ClientSessionStateMachine> state) noexcept;

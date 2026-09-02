@@ -4293,6 +4293,20 @@ only the relevant phase section here.
 
 [Back to the phase tracker](IMPLEMENTATION_PLAN.md#phase-7--headless-end-to-end-multiplayer-slice)
 
+- 2026-09-01 — Slice 7.4 client observation application clarification — Approved
+  - Change: recorded the owner-approved contract in ADR-0043 and implemented
+    bounded atomic reliable-observation application in the reusable client
+    session and headless wrapper.
+  - Decisions: owner approved Option A; wrong-target, stale, and contradictory
+    batches fail atomically, while identical duplicates are harmless.
+  - Verification: fresh MSVC 19.51 `tes3mp_headless_client_tests_run` passes,
+    including target/generation/tick, duplicate, contradiction, bounded-state,
+    and failure-atomic contracts; all 114 repository Python tests,
+    `python scripts/verify_vnext_baseline.py`, and `git diff --check` pass.
+  - Owner review: explicit Option A approval received on 2026-09-01.
+  - Follow-ups: runtime composition and the real two-client fixture-transition
+    demo remain.
+
 - 2026-09-01 — Slice 7.4 observation projection and admission — In Progress
   - Change: added bounded deterministic before/after canonical-state projection
     of per-session enter/leave batches and complete same-cell views, plus one

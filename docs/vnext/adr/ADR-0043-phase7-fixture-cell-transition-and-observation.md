@@ -73,3 +73,12 @@ admitted lifecycle messages and snapshot-inferred lifecycle remain rejected.
 Approved by the project owner on 2026-09-01: use a distinct bounded
 server-to-client reliable observation schema/root and frame kind. Do not mix
 server lifecycle results into the client-command `ReliableOperation` root.
+
+### Client observation application clarification
+
+Approved by the project owner on 2026-09-01: the reusable client session owns a
+bounded observed-player set. Reliable observation batches validate the bound
+session and generation, reject stale or contradictory input without partial
+mutation, and treat an identical duplicate as harmless. Reliable observation
+state and the latest-wins spatial view apply independently so either transport
+lane may arrive first; spatial snapshots do not synthesize lifecycle changes.
