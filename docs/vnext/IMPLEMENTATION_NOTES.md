@@ -4294,7 +4294,8 @@ only the relevant phase section here.
 [Back to the phase tracker](IMPLEMENTATION_PLAN.md#phase-7--headless-end-to-end-multiplayer-slice)
 
 - 2026-09-01 — Slice 7.3 real client process and identity proof — In Progress
-  - Change: added the thin `tes3mp_headless_client` production process, added
+  - Change: implementation `39c6c72095`; added the thin
+    `tes3mp_headless_client` production process, added
     canonical player ownership to bounded spatial snapshot entries, and added a
     real server/two-client process demo with a preceding rejected credential.
   - Decisions: owner approved Option A for thin client-process composition and
