@@ -37,6 +37,8 @@ namespace
                 return CommandReductionObservationOutcome::SpatialTickRegression;
             case CommandDisposition::EntityRevisionExhausted:
                 return CommandReductionObservationOutcome::EntityRevisionExhausted;
+            case CommandDisposition::UnknownFixtureCell:
+                return CommandReductionObservationOutcome::UnknownFixtureCell;
         }
         return CommandReductionObservationOutcome::CandidateStateInvalid;
     }
@@ -120,6 +122,14 @@ namespace
             return sequence == CommandSequence::initial();
         const auto next = finalized->next();
         return next && sequence == *next;
+    }
+
+    constexpr CellId Phase7InteriorFixture = CellId::interior(CellSpaceId::fromValue(7).value());
+    constexpr CellId Phase7ExteriorFixture = CellId::exterior(CellSpaceId::fromValue(8).value(), 0, 0);
+
+    constexpr bool isPhase7Fixture(const CellId& cell) noexcept
+    {
+        return cell == Phase7InteriorFixture || cell == Phase7ExteriorFixture;
     }
 
     CommandDisposition nonFinalSequenceDisposition(
@@ -344,15 +354,47 @@ namespace TES3MP
                                     disposition = CommandDisposition::AuthorityEpochMismatch;
                                 else
                                 {
-                                    const auto advanced = advanceCanonicalSpatialState(
-                                        *player, tick, player->transform(), proposal.motion().desiredVelocity());
-                                    if (const auto* value = std::get_if<CanonicalPlayerEntityState>(&advanced))
+                                    Transform replacementTransform = player->transform();
+                                    LinearVelocity3 replacementVelocity = player->linearVelocity();
+                                    bool requiresSpatialAdvance = true;
+                                    if (const auto* motion
+                                        = std::get_if<PlayerMotionCommandProposal>(&proposal.payload()))
+                                        replacementVelocity = motion->desiredVelocity();
+                                    else
+                                    {
+                                        const auto& requested = std::get<FixtureCellTransitionCommandProposal>(
+                                            proposal.payload()).requestedCell();
+                                        if (!isPhase7Fixture(requested))
+                                        {
+                                            disposition = CommandDisposition::UnknownFixtureCell;
+                                            requiresSpatialAdvance = false;
+                                        }
+                                        else if (requested == player->transform().cell())
+                                        {
+                                            disposition = CommandDisposition::Applied;
+                                            requiresSpatialAdvance = false;
+                                        }
+                                        else
+                                        {
+                                            replacementTransform = Transform(requested, player->transform().position(),
+                                                player->transform().orientation());
+                                        }
+                                    }
+                                    const auto advanced = requiresSpatialAdvance
+                                        ? std::optional<SpatialAdvanceResult>(advanceCanonicalSpatialState(
+                                              *player, tick, replacementTransform, replacementVelocity))
+                                        : std::nullopt;
+                                    if (!advanced)
+                                    {
+                                        // The command is finalized below without a spatial replacement.
+                                    }
+                                    else if (const auto* value = std::get_if<CanonicalPlayerEntityState>(&*advanced))
                                     {
                                         disposition = CommandDisposition::Applied;
                                         playerReplacement = *value;
                                         playerStateChanged = true;
                                     }
-                                    else if (std::get<SpatialAdvanceError>(advanced).code
+                                    else if (std::get<SpatialAdvanceError>(*advanced).code
                                         == SpatialAdvanceErrorCode::TickRegression)
                                         disposition = CommandDisposition::SpatialTickRegression;
                                     else

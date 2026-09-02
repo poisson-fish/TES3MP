@@ -10,6 +10,7 @@
 #include <optional>
 #include <span>
 #include <utility>
+#include <variant>
 #include <vector>
 
 namespace TES3MP
@@ -34,6 +35,25 @@ namespace TES3MP
         LinearVelocity3 mDesiredVelocity;
     };
 
+    class FixtureCellTransitionCommandProposal
+    {
+    public:
+        constexpr explicit FixtureCellTransitionCommandProposal(CellId requestedCell) noexcept
+            : mRequestedCell(requestedCell)
+        {
+        }
+
+        constexpr const CellId& requestedCell() const noexcept { return mRequestedCell; }
+
+        friend constexpr bool operator==(const FixtureCellTransitionCommandProposal&,
+            const FixtureCellTransitionCommandProposal&) noexcept = default;
+
+    private:
+        CellId mRequestedCell;
+    };
+
+    using ServerCommandPayload = std::variant<PlayerMotionCommandProposal, FixtureCellTransitionCommandProposal>;
+
     class ServerCommandProposal
     {
     public:
@@ -46,7 +66,20 @@ namespace TES3MP
             , mCommandId(commandId)
             , mObservedServerTick(observedServerTick)
             , mEntityPrecondition(entityPrecondition)
-            , mMotion(motion)
+            , mPayload(motion)
+        {
+        }
+
+        constexpr ServerCommandProposal(SessionId sessionId, SessionGeneration sessionGeneration,
+            CommandSequence commandSequence, CommandId commandId, ServerTick observedServerTick,
+            EntityPrecondition entityPrecondition, FixtureCellTransitionCommandProposal transition) noexcept
+            : mSessionId(sessionId)
+            , mSessionGeneration(sessionGeneration)
+            , mCommandSequence(commandSequence)
+            , mCommandId(commandId)
+            , mObservedServerTick(observedServerTick)
+            , mEntityPrecondition(entityPrecondition)
+            , mPayload(transition)
         {
         }
 
@@ -56,7 +89,7 @@ namespace TES3MP
         constexpr CommandId commandId() const noexcept { return mCommandId; }
         constexpr ServerTick observedServerTick() const noexcept { return mObservedServerTick; }
         constexpr EntityPrecondition entityPrecondition() const noexcept { return mEntityPrecondition; }
-        constexpr PlayerMotionCommandProposal motion() const noexcept { return mMotion; }
+        constexpr const ServerCommandPayload& payload() const noexcept { return mPayload; }
 
         friend constexpr bool operator==(ServerCommandProposal, ServerCommandProposal) noexcept = default;
 
@@ -67,7 +100,7 @@ namespace TES3MP
         CommandId mCommandId;
         ServerTick mObservedServerTick;
         EntityPrecondition mEntityPrecondition;
-        PlayerMotionCommandProposal mMotion;
+        ServerCommandPayload mPayload;
     };
 
     enum class CommandSubmissionResult : std::uint8_t

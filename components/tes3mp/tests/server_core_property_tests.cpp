@@ -216,7 +216,8 @@ namespace
                     = static_cast<std::size_t>(before.findPlayer(session->playerId()) - before.players().data());
                 auto advanced
                     = advanceCanonicalSpatialState(expectedPlayers[playerIndex], batch.scheduledTick().value(),
-                        expectedPlayers[playerIndex].transform(), command.proposal().motion().desiredVelocity());
+                        expectedPlayers[playerIndex].transform(),
+                        std::get<PlayerMotionCommandProposal>(command.proposal().payload()).desiredVelocity());
                 if (!std::holds_alternative<CanonicalPlayerEntityState>(advanced))
                     return failure("expected_spatial_advance");
                 expectedPlayers[playerIndex] = std::get<CanonicalPlayerEntityState>(advanced);
@@ -315,9 +316,10 @@ namespace
                 appendU64(simulation.trace, proposal.entityPrecondition().entityId().value());
                 appendU64(simulation.trace, proposal.entityPrecondition().expectedRevision().value());
                 appendU64(simulation.trace, proposal.entityPrecondition().expectedAuthorityEpoch().value());
-                appendU64(simulation.trace, static_cast<std::uint64_t>(proposal.motion().desiredVelocity().x()));
-                appendU64(simulation.trace, static_cast<std::uint64_t>(proposal.motion().desiredVelocity().y()));
-                appendU64(simulation.trace, static_cast<std::uint64_t>(proposal.motion().desiredVelocity().z()));
+                const auto& motion = std::get<PlayerMotionCommandProposal>(proposal.payload());
+                appendU64(simulation.trace, static_cast<std::uint64_t>(motion.desiredVelocity().x()));
+                appendU64(simulation.trace, static_cast<std::uint64_t>(motion.desiredVelocity().y()));
+                appendU64(simulation.trace, static_cast<std::uint64_t>(motion.desiredVelocity().z()));
                 if (intake.submit(proposal) != CommandSubmissionResult::Accepted)
                 {
                     simulation.passed = false;

@@ -99,9 +99,10 @@ namespace
                 mix(command.proposal().entityPrecondition().entityId().value());
                 mix(command.proposal().entityPrecondition().expectedRevision().value());
                 mix(command.proposal().entityPrecondition().expectedAuthorityEpoch().value());
-                mix(static_cast<std::uint64_t>(command.proposal().motion().desiredVelocity().x()));
-                mix(static_cast<std::uint64_t>(command.proposal().motion().desiredVelocity().y()));
-                mix(static_cast<std::uint64_t>(command.proposal().motion().desiredVelocity().z()));
+                const auto& motion = std::get<PlayerMotionCommandProposal>(command.proposal().payload());
+                mix(static_cast<std::uint64_t>(motion.desiredVelocity().x()));
+                mix(static_cast<std::uint64_t>(motion.desiredVelocity().y()));
+                mix(static_cast<std::uint64_t>(motion.desiredVelocity().z()));
             }
         }
         return digest;

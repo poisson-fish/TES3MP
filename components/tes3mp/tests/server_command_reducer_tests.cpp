@@ -84,6 +84,17 @@ namespace
             PlayerMotionCommandProposal(velocity));
     }
 
+    ServerCommandProposal transitionProposal(std::uint64_t session, std::uint64_t sequence, std::uint64_t command,
+        std::uint64_t entity, std::uint64_t revision, CellId cell, std::uint64_t epoch = 1,
+        std::uint64_t generation = 1)
+    {
+        return ServerCommandProposal(sessionId(session), SessionGeneration::fromValue(generation).value(),
+            CommandSequence::fromValue(sequence).value(), CommandId::fromValue(command).value(),
+            ServerTick::initial(), EntityPrecondition(entityId(entity), EntityRevision::fromValue(revision).value(),
+                                       AuthorityEpoch::fromValue(epoch).value()),
+            FixtureCellTransitionCommandProposal(cell));
+    }
+
     class IntakeFixture
     {
     public:
@@ -152,6 +163,53 @@ namespace
             && currentPlayer.linearVelocity() == LinearVelocity3(10, -20, 30)
             && currentPlayer.entityRevision().value() == 2 && currentPlayer.lastSpatialChangeTick().value() == 1
             && currentSession.highestContiguousFinalizedCommand()->value() == 1;
+    }
+
+    bool fixture_transition_atomically_changes_cell_revision_and_ack()
+    {
+        const std::array players{ player(1, 101) };
+        const std::array sessions{ session(10, 1, 101) };
+        NullMetricSink metrics;
+        NullStructuredEventSink events;
+        Observability observability(metrics, events);
+        CanonicalCommandReducer reducer(state(players, sessions), observability);
+        const std::array commands{ transitionProposal(10, 1, 1001, 101, 1,
+            CellId::interior(CellSpaceId::fromValue(7).value())) };
+        const auto result = reduceCommands(reducer, commands);
+        const auto& current = reducer.state();
+        return result && result.dispositions().front().disposition() == CommandDisposition::Applied
+            && result.dispositions().front().playerStateChanged()
+            && current.players().front().transform().cell() == CellId::interior(CellSpaceId::fromValue(7).value())
+            && current.players().front().entityRevision().value() == 2
+            && current.activeSessions().front().highestContiguousFinalizedCommand()->value() == 1
+            && reducer.latestPublication()->changes().front().playerReplacement().has_value();
+    }
+
+    bool unknown_and_same_fixture_transitions_finalize_without_spatial_mutation()
+    {
+        const std::array players{ CanonicalPlayerEntityState(playerId(1), entityId(101),
+            Transform(CellId::interior(CellSpaceId::fromValue(7).value()), Position3(1, 2, 3),
+                Orientation3(Turn32::fromValue(0), Turn32::fromValue(0), Turn32::fromValue(0))),
+            LinearVelocity3(4, 5, 6), EntityRevision::fromValue(1).value(), AuthorityEpoch::fromValue(1).value(),
+            ServerTick::initial()) };
+        const std::array sessions{ session(10, 1, 101) };
+        NullMetricSink metrics;
+        NullStructuredEventSink events;
+        Observability observability(metrics, events);
+        CanonicalCommandReducer reducer(state(players, sessions), observability);
+        const std::array unknown{ transitionProposal(10, 1, 1001, 101, 1,
+            CellId::interior(CellSpaceId::fromValue(9).value())) };
+        const auto rejected = reduceCommands(reducer, unknown);
+        const std::array same{ transitionProposal(10, 2, 1002, 101, 1,
+            CellId::interior(CellSpaceId::fromValue(7).value())) };
+        const auto idempotent = reduceCommands(reducer, same);
+        return rejected && idempotent
+            && rejected.dispositions().front().disposition() == CommandDisposition::UnknownFixtureCell
+            && idempotent.dispositions().front().disposition() == CommandDisposition::Applied
+            && !rejected.dispositions().front().playerStateChanged()
+            && !idempotent.dispositions().front().playerStateChanged()
+            && reducer.state().players().front() == players.front()
+            && reducer.state().activeSessions().front().highestContiguousFinalizedCommand()->value() == 2;
     }
 
     bool unknown_or_old_generation_session_cannot_mutate_or_ack_current_state()
@@ -754,6 +812,10 @@ int main()
     const std::array tests{
         std::pair{ "valid_bound_next_command_atomically_replaces_player_and_ack",
             &valid_bound_next_command_atomically_replaces_player_and_ack },
+        std::pair{ "fixture_transition_atomically_changes_cell_revision_and_ack",
+            &fixture_transition_atomically_changes_cell_revision_and_ack },
+        std::pair{ "unknown_and_same_fixture_transitions_finalize_without_spatial_mutation",
+            &unknown_and_same_fixture_transitions_finalize_without_spatial_mutation },
         std::pair{ "unknown_or_old_generation_session_cannot_mutate_or_ack_current_state",
             &unknown_or_old_generation_session_cannot_mutate_or_ack_current_state },
         std::pair{ "unbound_entity_revision_and_epoch_fail_in_closed_validation_order",

@@ -4293,6 +4293,24 @@ only the relevant phase section here.
 
 [Back to the phase tracker](IMPLEMENTATION_PLAN.md#phase-7--headless-end-to-end-multiplayer-slice)
 
+- 2026-09-01 — Slice 7.4 fixture-transition reducer — In Progress
+  - Change: added the typed fixture-cell transition command payload and composed
+    it through existing bounded intake and apply-once canonical reduction.
+    Known interior `7` and exterior worldspace `8` grid `0,0` transitions
+    atomically replace cell/revision and acknowledgement; unknown and same-cell
+    requests finalize without spatial mutation.
+  - Decisions: implements the accepted ADR-0043 reducer and fixture decisions;
+    no architecture, authority, state-scope, or gameplay decision changed.
+  - Verification: fresh MSVC 19.51 standalone build target
+    `tes3mp_protocol_tests_run` passed, including the focused reducer executable;
+    all 114 Python tests, `python scripts/verify_vnext_baseline.py`, and
+    `git diff --check` passed.
+  - Owner review: implementation demo not yet requested; Slice 7.4 remains
+    **In Progress**.
+  - Follow-ups: add bounded protocol exchange, explicit enter/leave observation
+    changes, targeted complete views, failure-atomic delivery, and the required
+    real two-client demo.
+
 - 2026-09-01 — Slice 7.4 architecture gate — Approved; implementation not started
   - Change: added accepted ADR-0043; no Slice 7.4 production artifact landed.
   - Decisions: owner approved Option A for the reliable apply-once reducer

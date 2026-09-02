@@ -30,6 +30,7 @@ namespace TES3MP
         AuthorityEpochMismatch,
         SpatialTickRegression,
         EntityRevisionExhausted,
+        UnknownFixtureCell,
     };
 
     class FinalizedCommandRecord
