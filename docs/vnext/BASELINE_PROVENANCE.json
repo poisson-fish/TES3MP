@@ -980,6 +980,11 @@
       "purpose": "Accepted vNext product direction and architecture boundaries."
     },
     {
+      "path": "docs/vnext/STATE.md",
+      "status": "A",
+      "purpose": "Concise current-slice handoff snapshot linking the authoritative plan, active decisions, working files, next work, and verification evidence."
+    },
+    {
       "path": "docs/vnext/adr/ADR-0001-baseline-cutover-git-mechanics.md",
       "status": "A",
       "purpose": "Owner-approved exact-tree baseline-cutover mechanics."

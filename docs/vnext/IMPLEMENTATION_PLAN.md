@@ -1145,15 +1145,18 @@ change or immediately linked follow-up:
 3. Append an implementation note to [`IMPLEMENTATION_NOTES.md`](IMPLEMENTATION_NOTES.md)
    with the date, commit/PR, important design details, deviations from this
    plan, and exact verification evidence.
-4. Run the approved automated scenarios and demonstrate user-visible or
+4. Refresh [`STATE.md`](STATE.md) so a new session can find the active slice,
+   governing decisions, working boundary, next eligible work, relevant files,
+   and latest verification without reading the full implementation history.
+5. Run the approved automated scenarios and demonstrate user-visible or
    architecturally significant behavior to the owner. Record feedback and any
    required correction.
-5. Change a slice to **Implemented** only when its completion evidence and
+6. Change a slice to **Implemented** only when its completion evidence and
    required owner acceptance exist.
-6. Run the entire phase exit gate after all slices are implemented. Review the
+7. Run the entire phase exit gate after all slices are implemented. Review the
    gate evidence with the owner, record approval to proceed, then change the
    phase and program tracker row to **Implemented**.
-7. Add newly discovered work as a bounded slice in the correct phase. Do not hide
+8. Add newly discovered work as a bounded slice in the correct phase. Do not hide
    required work in an implementation note or mark a phase complete with a known
    unmet gate.
 

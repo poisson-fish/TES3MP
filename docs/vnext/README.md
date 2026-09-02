@@ -143,13 +143,15 @@ python scripts/verify_vnext_baseline.py
 For local configure, build, and test commands, use
 [`LOCAL_BASELINE_BUILD.md`](LOCAL_BASELINE_BUILD.md). New work follows the active
 implementation-plan slice, preserves dependency boundaries, adds proportionate
-tests, records exact evidence in the implementation notes, and leaves the branch
-buildable. Beginning with Phase 4, the complete hosted vNext matrix is a manual
-phase-exit gate and includes macOS x86-64.
+tests, records exact evidence in the implementation notes, refreshes the concise
+[`STATE.md`](STATE.md) handoff snapshot, and leaves the branch buildable.
+Beginning with Phase 4, the complete hosted vNext matrix is a manual phase-exit
+gate and includes macOS x86-64.
 
 ## Documentation map
 
 - [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md): current phase/slice status, ordered work, decision registers, and exit gates
+- [`STATE.md`](STATE.md): concise current-slice handoff; read first in a new session
 - [`IMPLEMENTATION_NOTES.md`](IMPLEMENTATION_NOTES.md): chronological evidence, verification commands, approvals, and follow-ups
 - [`LOCAL_BASELINE_BUILD.md`](LOCAL_BASELINE_BUILD.md): local build and test workflow
 - [`LEGACY_GAMEPLAY_FEATURE_INVENTORY.md`](LEGACY_GAMEPLAY_FEATURE_INVENTORY.md): historical gameplay reference only
