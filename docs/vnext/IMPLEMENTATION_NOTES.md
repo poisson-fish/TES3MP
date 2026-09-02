@@ -4293,6 +4293,18 @@ only the relevant phase section here.
 
 [Back to the phase tracker](IMPLEMENTATION_PLAN.md#phase-7--headless-end-to-end-multiplayer-slice)
 
+- 2026-09-01 — Slice 7.4 architecture gate — Approved; implementation not started
+  - Change: added accepted ADR-0043; no Slice 7.4 production artifact landed.
+  - Decisions: owner approved Option A for the reliable apply-once reducer
+    command, explicit reliable enter/leave plus targeted complete views, fixed
+    interior `7` and exterior worldspace `8` grid `0,0` fixtures, and one atomic
+    writer commit/publication boundary.
+  - Verification: documentation-only change; `git diff --cached --check` and
+    staged baseline verification apply before commit.
+  - Owner review: explicit A/A/A/A approval received on 2026-09-01.
+  - Follow-ups: begin Slice 7.4 implementation in the next session; move it to
+    **In Progress** when the first non-disposable artifact lands.
+
 - 2026-09-01 — Slice 7.3 owner implementation-demo acceptance — Implemented
   - Change: accepted implementation `39c6c72095`; Slice 7.3 advanced to
     **Implemented** in the live tracker.

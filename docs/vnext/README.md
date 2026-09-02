@@ -23,6 +23,9 @@ Slice 7.3 is in progress under accepted
 Its real transport event/receive/send pump, approved production proof-profile
 composition, thin client process, and automated two-client join proof are
 implemented; owner implementation-demo acceptance passes. Slice 7.4 is next.
+Its architecture is approved under accepted
+[`ADR-0043`](adr/ADR-0043-phase7-fixture-cell-transition-and-observation.md),
+but implementation has not started.
 The active tree is a provenance-verified OpenMW 0.51 baseline with:
 
 - engine-independent protocol, transport, client-session, server-core, and test

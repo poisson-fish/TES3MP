@@ -1,0 +1,61 @@
+# ADR-0043: Phase 7 fixture-cell transition and observation
+
+Status: **Accepted**
+
+Date opened: 2026-09-01
+
+Date approved: 2026-09-01
+
+Decision owner: project owner
+
+Needed by: Phase 7 Slice 7.4
+
+## Decision summary
+
+The project owner approved Option A for all four decisions on 2026-09-01:
+
+1. extend the reliable apply-once operation and canonical writer reducer with a
+   typed fixture-cell transition carrying the normal session, command,
+   entity-revision, and authority preconditions;
+2. emit reliable typed enter/leave observation changes and targeted complete
+   latest-wins spatial views rather than requiring clients to infer lifecycle
+   changes from snapshots alone;
+3. use fixed versioned Phase 7 fixtures: interior cell space `7` and exterior
+   worldspace `8` at grid `0,0`; and
+4. one writer commit changes canonical cell/revision and derives every affected
+   observation result, so state and visibility cannot publish partially.
+
+App-local session-control mutation, snapshot-only inference, configuration-
+loaded fixtures, and delayed visibility recomputation were rejected. This is
+the narrow Phase 7 fixture behavior approved by GDR-0001, not the general cell,
+interest, or resynchronization design owned by Phase 11.
+
+## Acceptance tests and demo
+
+1. unknown fixture, wrong session/player/entity, stale revision, and duplicate
+   commands fail or finalize according to existing apply-once rules without
+   unintended mutation;
+2. a same-cell request is deterministic and idempotent;
+3. two ready players receive explicit enter and leave changes exactly when
+   canonical fixture-cell equality changes;
+4. each targeted complete view contains exactly the ready players in the
+   target session's canonical fixture cell;
+5. interior-to-exterior-to-interior transitions preserve deterministic change
+   and snapshot ordering; and
+6. injected encoding, queue, or publication failure cannot expose a partial
+   canonical transition or partial visibility result.
+
+The owner implementation demo must run two real headless clients through the
+interior/exterior flow and show exact enter/leave evidence and converged
+targeted views.
+
+## Review triggers
+
+Reopen before adding more fixtures, configurable fixture identity, client-
+selected cells, cross-cell visibility, snapshot-inferred lifecycle, partial
+publication, or general Phase 11 cell/interest behavior.
+
+## Owner approval
+
+Approved by the project owner on 2026-09-01: Option A for Decisions 1 through 4
+and the acceptance/demo boundary above.

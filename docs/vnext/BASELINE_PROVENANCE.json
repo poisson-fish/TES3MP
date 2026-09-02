@@ -1125,6 +1125,11 @@
       "purpose": "Owner-approved Phase 7 authenticated join ownership, checked identities, atomic installation, principal binding, fixture snapshot, and prepare-commit composition policy."
     },
     {
+      "path": "docs/vnext/adr/ADR-0043-phase7-fixture-cell-transition-and-observation.md",
+      "status": "A",
+      "purpose": "Records the owner-approved Phase 7 reliable fixture-transition reducer path, explicit observation results, fixed fixture identities, atomic publication boundary, and acceptance tests."
+    },
+    {
       "path": "docs/vnext/gdr/GDR-0001-phase7-headless-vertical-slice-behavior.md",
       "status": "A",
       "purpose": "Owner-approved Phase 7 fixture spawn, readiness, cell visibility, provisional tick integration, headless correction, and bounded resume behavior."
