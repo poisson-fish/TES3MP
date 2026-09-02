@@ -2,7 +2,7 @@
 
 Document type: chronological implementation history and working notes
 
-Updated: 2026-08-28
+Updated: 2026-09-02
 
 Status source: [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md)
 

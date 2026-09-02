@@ -1,301 +1,71 @@
-# TES3MP target boundaries
+# TES3MP engine-independent components
 
-This directory owns the engine-independent TES3MP libraries. They are separate
-from OpenMW's monolithic `components` target and must remain buildable without
-OpenMW, rendering, SDL, OSG, platform, or GameNetworkingSockets types.
+This directory owns the reusable TES3MP vNext libraries. They are separate from
+OpenMW's monolithic `components` target and must remain buildable without OpenMW,
+rendering, SDL, OSG, platform, or public GameNetworkingSockets types.
 
-The first dedicated-server process composition lives in `apps/tes3mp-server`,
-outside these reusable libraries. Its strict configuration and lifecycle
-contracts build in the standalone tree; the executable itself is available
-only with the verified GameNetworkingSockets transport.
+Application composition lives outside this directory:
 
-The direct dependency graph is:
+- `apps/tes3mp-server` owns the dedicated-server process, strict configuration,
+  and runtime composition.
+- `apps/tes3mp-headless-client` owns the thin scripted client process.
+- `apps/openmw/tes3mp` owns the OpenMW adapter.
+
+## Target graph
 
 ```text
 tes3mp_protocol
-  ^       ^
-  |       |
-  |   tes3mp_server_core
-  |
-tes3mp_transport
-  ^
-  |
-tes3mp_client_session
+  ├──> tes3mp_transport
+  ├──> tes3mp_server_core
+  └──> tes3mp_client_session <── tes3mp_transport
 
 tes3mp_test_support -> protocol + transport + server_core + client_session
 openmw_tes3mp_adapter -> client_session + openmw-lib
 ```
 
-Arrows point from a target to a target that depends on it. The adapter lives in
-`apps/openmw/tes3mp`; it is not part of this engine-independent directory.
+Arrows point from a dependency to a target that consumes it. The server core
+may depend on protocol value contracts but not on transport. The client session
+composes protocol and transport. Test support may depend on all four production
+libraries; production targets must never depend on test support.
+
+## Responsibilities
+
+- `protocol/` owns bounded framing, version and capability negotiation,
+  authentication, reliable operations, snapshots, observations, generated
+  FlatBuffers code, schemas, and verifier-first codecs.
+- `transport/` owns the project-defined lifecycle and channel boundary plus the
+  private GameNetworkingSockets adapter.
+- `server_core/` owns deterministic scheduling, authentication policy,
+  canonical state, command intake and reduction, publication, lifecycle,
+  checksums, resynchronization, and typed sink boundaries.
+- `client_session/` owns the reusable caller-pumped client session and headless
+  façade.
+- `test_support/` owns deterministic clocks, links, fault injection, scripted
+  clients, recorders, and simulation helpers. It contains no production API.
+- `tests/` owns focused contracts and fuzz corpora for these boundaries.
+
+Library types from FlatBuffers, GameNetworkingSockets, OpenSSL, OpenMW, and
+platform APIs must remain behind their owning private adapters. Public headers
+expose project-owned values only.
+
+## Boundary enforcement
 
 `cmake/TES3MPVerifyTargetBoundaries.cmake` checks every direct link against the
-ADR-0014 allowlist and rejects known forbidden include families in independent
-sources. `scripts/tests/test_tes3mp_target_boundaries.py` proves both checks fail
-closed using temporary miniature CMake projects. Later Phase 3 slices add
-compile-time public-header isolation checks as real APIs appear.
+ADR-0014 allowlist and rejects forbidden include families in independent
+sources. `scripts/tests/test_tes3mp_target_boundaries.py` proves that both checks
+fail closed with temporary miniature CMake projects.
 
-The Slice 3.1 anchor translation units remain intentionally behavior-free. They
-keep every approved target participating in compilation and linking while the
-later slice sources below add only their explicitly approved APIs.
-
-Slice 3.2 adds the first public API in `include/tes3mp/value_types.hpp`. It owns
-the ten ADR-0015 semantic `uint64_t` types, explicit validity factories,
-same-type ordering/hash/debug formatting, and checked counter advancement. The
-types do not allocate identities or include OpenMW, FlatBuffers,
-GameNetworkingSockets, formatting-library, or platform headers.
-
-Slice 3.3 adds ADR-0016's value-only spatial and command/snapshot primitives.
-`CellId` distinguishes a content-context-scoped interior cell from an exterior
-worldspace/grid cell. Fixed-point position, turn orientation, transform, and
-linear-velocity values carry no engine behavior. Command headers, writer stamps,
-entity preconditions, and spatial snapshots carry provenance/state values but
-do not define payloads, collections, codecs, transport delivery, reducers, or
-gameplay validation. The deterministic byte round trip is test-support-only and
-is not a wire format.
-
-Slice 3.4 adds ADR-0017's passive deterministic facilities. Server core owns a
-project-defined monotonic nanosecond observation seam, rational 30 Hz scheduler
-with four-tick bounded catch-up, and numeric-keyed SplitMix64/xoshiro256** V1
-streams with explicit state restore. It still owns no wall-clock adapter,
-thread, sleep loop, reducer, command admission, or canonical checksum.
-
-Test support owns the checked manual clock, independently bounded FIFO byte
-duplex, and scripted exact-byte trace harness. `TestTraceDigestV1` is an FNV-1a
-test diagnostic, not canonical state, protocol, persistence, or replay policy.
-Production targets are checked against both reverse links to test support and
-direct `tes3mp/test_support` includes. Production transport semantics remain
-Phase 6 work.
-
-Slice 3.5 adds ADR-0018's passive `FaultInjectingLink` wrapper in test support.
-Direction plus a test-only numeric channel key selects an immutable bounded
-profile. Separate version-one random streams drive integer-rate loss,
-duplication, jitter, and reorder holds for each path. Explicit pump,
-stall/resume, and disconnect controls remain single-threaded and use the
-injected monotonic clock. These channel and lifecycle types make no production
-transport claim; Phase 4 still owns message classification and Phase 6 owns the
-real transport interface.
-
-Slice 3.6 adds ADR-0019's opt-in target-scoped runtime-safety plumbing. The
-standalone presets in this directory build every engine-independent library and
-contract executable without OpenMW. Linux Clang 18 has separate ASan+UBSan and
-ThreadSanitizer profiles; ASan+UBSan also builds four bounded libFuzzer harnesses
-covering the test-support spatial decoder and every production Phase 4 decoder.
-Normal presets remain
-uninstrumented, incompatible profiles fail configuration, and project-owned
-sources cannot silently omit the selected instrumentation.
-
-The repository-owned entry points are:
+The standalone presets in this directory build the independent libraries and
+their contract executables without OpenMW. Runtime-safety entry points are:
 
 ```sh
-python3 scripts/run_tes3mp_runtime_safety.py --profile asan-ubsan --fuzz-seconds 30
-python3 scripts/run_tes3mp_runtime_safety.py --profile tsan
+python scripts/run_tes3mp_runtime_safety.py --profile asan-ubsan --fuzz-seconds 30
+python scripts/run_tes3mp_runtime_safety.py --profile tsan
 ```
 
-Both profiles retain exact toolchain, contract, instrumentation, decoder
-registry, corpus, log, and result evidence under `build/`. Fuzz channels and
-bytes remain test-only; the harnesses exercise production decoders but do not
-define wire behavior.
-
-The accepted Slice 3.6 gate passes in hosted CI at `fc8f178081`: all five
-contracts pass under separate Linux Clang 18 ASan+UBSan and ThreadSanitizer
-profiles, and the bounded 30-second spatial-decoder fuzz smoke retains no
-reproducer.
-
-Slice 3.7 accepts ADR-0020 without changing the target graph. Server core owns
-closed integer metric definitions, typed structured events, explicit non-owning
-sink references, and explicit no-op sinks. Test support owns preallocated
-bounded FIFO recorders with reject-newest overflow and visible dropped counts.
-The interfaces accept no raw text, byte payload, wall-clock timestamp, mutable
-state, or backend type; observations never affect canonical results or
-checksums. No production logging/export backend, dispatcher thread, or queue
-exists yet.
-
-Hosted runtime-safety evidence at `57973b65c7` instruments all three new
-observability sources, runs all six contracts under separate ASan+UBSan and
-ThreadSanitizer profiles, and retains no sanitizer finding or fuzz reproducer.
-
-Phase 4 Slice 4.1 accepts ADR-0021 and adds the first production protocol
-codec boundary. A fixed 12-byte little-endian `T3MP` format-one header selects
-one of three closed message classes and five initial stable kind identifiers
-before payload work. Class payload budgets are fixed at 4 KiB for session
-control, 16 KiB for reliable operations, and 64 KiB for latest-wins snapshots.
-
-The decoder rejects bad magic/version, unknown or mismatched class/kind pairs,
-empty or oversized payloads, truncation, length mismatch, trailing bytes, and
-concatenated frames before allocating a payload. Success returns one owned
-bounded byte vector; failure returns only closed enum and numeric context with
-no text or packet view. FlatBuffers payload schemas and generated headers do not
-land until Slice 4.2. The framing contract and production-decoder fuzz target
-remain independent of OpenMW, transport libraries, platform APIs, and test
-support.
-
-Slice 4.2 accepts ADR-0022 and adds three separately identified, size-prefixed
-FlatBuffer control payloads: `T3CH` client offers, `T3SH` negotiated results,
-and `T3RJ` typed rejections. The generated FlatBuffers views and pinned
-header-only runtime remain private to `tes3mp_protocol`; callers receive only
-owned version, capability, hello, rejection, or closed error values.
-
-Each offer carries one major, an inclusive minor range, and at most 32 sorted
-nonzero optional plus 32 sorted nonzero required capability IDs. Negotiation is
-a pure operation that selects the highest overlapping minor, checks requirements
-in both directions, and returns the sorted supported intersection. No gameplay
-capability ID or release version is assigned yet. Four initial bytes classify
-short, `T3MP`, and legacy/unknown preambles; non-vNext input produces no wire
-reply. A dedicated eighth contract, generated-code drift check, and bounded
-handshake-decoder fuzz target cover the new boundary without adding session,
-authentication, transport, OpenMW, authority, or gameplay behavior.
-
-Slice 4.3 accepts ADR-0023 and adds explicit client/server session machines in
-the existing `tes3mp_client_session` and `tes3mp_server_core` targets. Both
-require an encrypted-ready event before hello negotiation and authentication.
-The server owns one pollable authentication operation, transfers one move-only
-opaque value of at most 256 bytes, accepts only the matching attempt and session
-generation, and retains only a nonzero `PrincipalId` on success.
-
-Caller-supplied policies bound transport/negotiation, authentication-input, and
-provider stages from 1 millisecond through 120 seconds using the injected
-monotonic clock. Timeout, cancellation, stale completion, illegal transition,
-and lifecycle observations use closed enum/numeric values. The ninth contract
-exercises exact boundaries, terminal atomicity, provider lifetime, and secret
-redaction shape. Authentication remains typed in-memory composition: no new
-wire kind, credential schema, real provider, resumption, authority, durable
-state, or gameplay behavior is introduced.
-
-Slice 4.4 accepts ADR-0024 and adds two fully initialized protocol-owned header
-values without adding a wire root. `ReliableOperationHeader` carries one
-existing client command header plus an explicit optional entity precondition;
-it cannot carry writer admission, canonical results, a batch, or generic bytes.
-`LatestWinsSnapshotHeader` binds a server publication tick and optional
-highest-contiguous-finalized command acknowledgement to a target session and
-generation; it adds no acceptance flag, global entity revision, or separate
-snapshot sequence. Complete typed `T3RO`/`T3LS` roots were separately gated on
-Slice 4.5's reviewed command/snapshot bodies and are described below.
-
-Slice 4.5 accepts ADR-0025 and GDR-0011 and adds closed typed `T3RO`
-velocity-intent and `T3LS` spatial-view payloads, verifier-first owned codecs,
-role-specific established-session guards, atomic confirmed client snapshots,
-and a synchronous in-memory fake peer. The exchange remains deliberately
-limited to one velocity intent and a target-session-selected view of at most 256
-strictly entity-ordered entries; it adds no reducer, canonical mutation,
-prediction, rendering, real transport, OpenMW dependency, or broader gameplay.
-
-Slice 4.6 hardens the completed Phase 4 surface without changing production
-behavior. Deterministic property contracts cover scalar and collection
-boundaries, exhaustive single-bit mutations must reject or normalize through an
-owned round trip, and checked-in valid golden seeds are regenerated and verified
-by the contract executables. A fail-closed registry maps all seven bounded
-decoders to one of the four sanitizer-backed fuzz targets and corpora, pins each
-production golden seed by SHA-256, and records that mapping in runtime-safety
-evidence.
-
-Phase 5 Slice 5.1 accepts ADR-0026 and adds a server-core-owned typed command
-proposal plus a single-threaded intake/tick coordinator. The coordinator
-composes the existing 30 Hz scheduler, seals FIFO writer-observed prefixes,
-assigns eligible ticks and global ingress ordinals only while draining, and
-enforces hard ceilings of 4,096 pending commands globally, 128 per session
-generation, and 1,024 per tick. Full queues reject the new proposal with a typed
-observable result; tick-limited suffixes remain queued without loss, overwrite,
-or early stamps. Scheduler and ordinal exhaustion fail closed without publishing
-a partial batch. This slice deliberately adds no canonical store, command
-validation, deduplication, reducer, acknowledgement, disconnect action, or
-gameplay behavior.
-
-Phase 5 Slice 5.2 accepts ADR-0027 and adds one immutable canonical server-state
-value with separately scoped player-entity and active-session-progress
-partitions. Complete inputs must be strictly identity-ordered, remain within
-hard 256/256 limits, use unique player/entity/session identities, and carry
-explicit one-to-one active bindings before owned vectors are constructed.
-Const spans and binary-search lookups expose no general mutation path. A pure
-checked operation atomically replaces cell/root transform and velocity under
-one incremented entity revision while preserving identity and authority epoch;
-tick regression and revision exhaustion return typed errors. Session-generation
-acknowledgement is optional contiguous-finalized disposition progress only.
-Lifecycle, persistence, reducers, acknowledgement advancement, publication,
-movement, interest, resync, and gameplay remain later gated work.
-
-Phase 5 Slice 5.3 accepts ADR-0028 and GDR-0012 and adds one writer-confined
-canonical command reducer. It verifies sealed intake-batch invariants, validates
-session generation, exact-next sequence, same-batch command ID, explicit entity
-binding, entity revision, and stable authority epoch in a fixed order, then
-constructs and installs one complete immutable candidate per final command.
-Accepted motion replaces velocity exactly while preserving the complete
-transform; rejected exact-next commands may advance acknowledgement while
-preserving player state. Typed dispositions and bounded observations expose the
-result without publishing snapshots or domain change records. Slice 5.5 adds
-the approved cross-batch command-ID safety state; there is still no integration,
-clamping, collision, cell transition, prediction, persistence, scripting, or
-presentation behavior.
-
-Phase 5 Slice 5.4 accepts ADR-0029 and integrates one immutable latest-
-publication slot with the writer-confined reducer. Canonical state is shared
-read-only, a checked global version advances once per installed player/session
-or acknowledgement-only candidate, and each committed batch publishes its
-complete final state plus ordered typed replacement records. The core retains
-only that latest bounded batch; readers either consume the exact next versions
-or replace their view from its complete snapshot after a gap. Old immutable
-handles remain valid without reader registration, acknowledgement, callbacks,
-queue waits, shared locks, or writer backpressure. Publication stays domain-only;
-protocol/interest conversion, command-result delivery, persistence/replay/script
-sinks, and online composition remain later gated work.
-
-Phase 5 Slice 5.5 accepts ADR-0030 and extends each active session generation
-with an immutable trailing history of at most 1,024 finalized command records.
-Every exact-next accepted or rejected command enters history; retained duplicate
-IDs finalize once without repeating player effects, and record 1,025 evicts only
-the oldest entry. Complete Phase 5 state, version, checkpoint tick, rules
-version, authority epochs, acknowledgements, and history use an explicit
-little-endian canonical V1 encoding and dependency-free CRC-64/ECMA-182 V1
-divergence checksum. A metadata-only current-session resync request can return
-the latest immutable complete publication to a trusted future adapter without
-accepting client state or mutating the server. These core contracts add no wire
-message, interest projection, socket action, automatic delivery, or runtime
-loop; those remain gated to their owning phases.
-
-Phase 5 Slice 5.6 accepts ADR-0031 and adds four nominal server-core sink ports
-for persistence, replay, script-event, and canonical-metrics adapters. An
-explicit non-owning bundle contains at most one consumer per role. After a
-non-empty immutable batch publication is installed as latest, the reducer
-offers that exact shared handle once in fixed persistence/replay/script/metrics
-order. A complete report distinguishes absent, accepted, backpressured, and
-failed roles; every configured role is attempted, and no outcome can roll back,
-retry, short-circuit, or relabel the canonical commit. Closed low-cardinality
-observations describe configured delivery attempts. Server core adds no backend,
-worker, queue, acknowledgement, retry ring, database, script runtime, replay
-format, durability claim, or retention beyond the existing latest publication.
-
-Phase 5 Slice 5.7 adds test-only deterministic property coverage around the
-accepted Phase 5 production surface. A seeded eight-client simulation generates
-bounded mixed valid, stale, duplicate, gap, generation, binding, revision, and
-epoch command streams through the real intake and reducer. After every batch it
-reconstructs canonical invariants, independently tracks per-player effects and
-per-session progress, verifies publication contiguity/completeness and exact
-checksums, and retains an exact integer trace for same-seed replay. The slice
-adds no production harness, API, state, authority, or gameplay rule.
-
-Phase 6 Slice 6.1 accepts ADR-0032 and adds the selected-library-free endpoint,
-lifecycle, identity, limit, command, and value-event transport interface plus a
-private exact-pinned GameNetworkingSockets/c-ares adapter. The explicitly
-pumped runtime owns numeric/DNS connect racing, listen/connect/cancel/close/
-shutdown behavior, never-reused callback generations, and encrypted numeric/DNS
-loopback without exposing selected-library types.
-
-Phase 6 Slice 6.2 accepts ADR-0033 and extends that boundary with two fixed
-owned channels. Session control and reliable operations use `ReliableOrdered`;
-canonical snapshots use `LatestWins`. The private adapter maps them to two
-equal-priority/equal-weight lanes, retains reliable ordering separately from
-unreliable no-delay samples, and exposes bounded send plus caller-drained owned
-receive values. Protocol/session code retains class validation, snapshot
-recency, idempotency, authority, and mutation. Application queues, coalescing,
-rate limits, slow-peer eviction, product capacity, and detailed telemetry remain
-later Phase 6 work.
-
-Phase 6 Slice 6.3 is in progress under accepted ADR-0034 and ADR-0035. The
-real-network profile supplies server core with a private exact-pinned OpenSSL
-3.5.8 credential-crypto implementation for random token bytes, SHA-256 digests,
-constant-time comparison, and temporary-digest cleansing. The transport adapter
-now derives a runtime-keyed HMAC-SHA-256 scope from each inbound IPv4 address or
-IPv6 /64 and carries only the opaque value on its atomic accepted-connection
-event. Outbound and other lifecycle events carry no scope; no address or OpenSSL
-type crosses the public boundary. Credential composition, redaction closure,
-and the complete encrypted authentication loopback remain unfinished.
+For the complete local workflow, use
+[`docs/vnext/LOCAL_BASELINE_BUILD.md`](../../docs/vnext/LOCAL_BASELINE_BUILD.md).
+For current phase and slice status, use the
+[`implementation plan`](../../docs/vnext/IMPLEMENTATION_PLAN.md). Historical
+slice-by-slice details belong in the
+[`implementation notes`](../../docs/vnext/IMPLEMENTATION_NOTES.md), not here.

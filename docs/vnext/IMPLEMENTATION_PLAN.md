@@ -87,20 +87,20 @@ decision and must be surfaced.
 
 ## Current repository baseline
 
-Observed on 2026-08-25 before this plan was added:
+The active `vnext` branch is based on OpenMW `openmw-0.51.0` at
+`f4bec41444214a7903bebd178389ca22ca13f646`. The clean cutover is complete, the
+legacy source is preserved by the permanent `tes3mp-0.8.1-archive` tag, and
+[`BASELINE_PROVENANCE.json`](BASELINE_PROVENANCE.json) records every intentional
+active-tree difference and dependency input.
 
-- The active branch is `vnext` at `86cfa5ab3`.
-- The accepted architecture direction is committed in `docs/vnext/README.md`.
-- The archived source branch point is available as branch `0.8.1` at
-  `49be5b640`, but the required permanent annotated archive tag at that commit
-  has not been created.
-- The existing lightweight tag `tes3mp-0.8.1` points to `68954091c`, not to the
-  documented archive branch point. It does not satisfy the archive-tag slice.
-- Only the `origin` remote is configured; `openmw-upstream` is not configured.
-- The active source is still the TES3MP 0.8.1-era tree plus vNext documentation.
-  The OpenMW 0.51 clean baseline cutover has not occurred.
-- No vNext protocol, transport, server-core, client-session, OpenMW adapter, or
-  test-support target exists yet.
+The tree contains independent protocol, transport, server-core, client-session,
+OpenMW-adapter, and test-support targets plus the Phase 7 dedicated server and
+headless client applications. Phases 0–6 have passed their exit gates. Phase 7
+is active at Slice 7.6; the plan table below is the authoritative status source.
+
+Historical pre-cutover state and exact Git mechanics remain available in
+[`PRE_CUTOVER_PROVENANCE.md`](PRE_CUTOVER_PROVENANCE.md), ADR-0001, and the
+implementation notes. They are evidence, not current setup instructions.
 
 ## Program tracker
 

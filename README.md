@@ -1,112 +1,56 @@
-OpenMW
-======
+# TES3MP vNext
 
-OpenMW is an open-source open-world RPG game engine that supports playing Morrowind by Bethesda Softworks. You need to own the game for OpenMW to play Morrowind.
+TES3MP vNext is a clean-break multiplayer architecture for Morrowind, built on
+OpenMW 0.51. It replaces the TES3MP 0.8.x protocol, transport, server, and
+scripting architecture rather than porting those systems forward.
 
-OpenMW also comes with OpenMW-CS, a replacement for Bethesda's Construction Set.
+The project is under active development and is not yet a playable replacement
+for TES3MP 0.8.x. Phases 0–6 are complete. Phase 7 is building the first
+end-to-end headless multiplayer flow; disconnect/resume composition and the
+adverse-network test matrix are the remaining slices.
 
-* Version: 0.51.0
-* License: GPLv3 (see [LICENSE](https://gitlab.com/OpenMW/openmw/-/raw/master/LICENSE) for more information)
-* Website: https://www.openmw.org
-* IRC: #openmw on irc.libera.chat
-* Discord: https://discord.gg/bWuqq2e
+## Start here
 
+- [vNext overview](docs/vnext/README.md) — product scope, architecture, current status, compatibility policy, and repository workflow
+- [Implementation plan](docs/vnext/IMPLEMENTATION_PLAN.md) — authoritative phase and slice tracker, decision register, and exit gates
+- [Implementation notes](docs/vnext/IMPLEMENTATION_NOTES.md) — chronological implementation, verification, and owner-review history
+- [Local baseline build](docs/vnext/LOCAL_BASELINE_BUILD.md) — supported local configure, build, and test workflow
+- [Legacy gameplay inventory](docs/vnext/LEGACY_GAMEPLAY_FEATURE_INVENTORY.md) — reference-only inventory of TES3MP 0.8.x behavior
 
-Font Licenses:
-* DejaVuLGCSansMono.ttf: custom (see [files/data/fonts/DejaVuFontLicense.txt](https://gitlab.com/OpenMW/openmw/-/raw/master/files/data/fonts/DejaVuFontLicense.txt) for more information)
-* DemonicLetters.ttf: SIL Open Font License (see [files/data/fonts/DemonicLettersFontLicense.txt](https://gitlab.com/OpenMW/openmw/-/raw/master/files/data/fonts/DemonicLettersFontLicense.txt) for more information)
-* MysticCards.ttf: SIL Open Font License (see [files/data/fonts/MysticCardsFontLicense.txt](https://gitlab.com/OpenMW/openmw/-/raw/master/files/data/fonts/MysticCardsFontLicense.txt) for more information)
+## Current milestone
 
-Current Status
---------------
+The first milestone is a dedicated server with two deterministic headless clients that can:
 
-The main quests in Morrowind, Tribunal and Bloodmoon are all completable. Some issues with side quests are to be expected (but rare). Check the [bug tracker](https://gitlab.com/OpenMW/openmw/-/issues/?milestone_title=openmw-1.0) for a list of issues we need to resolve before the "1.0" release. Even before the "1.0" release, however, OpenMW boasts some new [features](https://wiki.openmw.org/index.php?title=Features), such as improved graphics and user interfaces.
+1. negotiate and authenticate;
+2. join with distinct server-issued identities;
+3. transition between fixed interior and exterior fixtures;
+4. observe one another only while in the same fixture cell;
+5. exchange semantic movement commands and authoritative snapshots; and
+6. disconnect, resume within a bounded grace period, and expire cleanly.
 
-Pre-existing modifications created for the original Morrowind engine can be hit-and-miss. The OpenMW script compiler performs more thorough error-checking than Morrowind does, meaning that a mod created for Morrowind may not necessarily run in OpenMW. Some mods also rely on quirky behaviour or engine bugs in order to work. We are considering such compatibility issues on a case-by-case basis - in some cases adding a workaround to OpenMW may be feasible, in other cases fixing the mod will be the only option. If you know of any mods that work or don't work, feel free to add them to the [Mod status](https://wiki.openmw.org/index.php?title=Mod_status) wiki page.
+The flow must pass deterministic adverse-network and soak tests before Phase 7
+can close. OpenMW desktop integration begins in Phase 8; PC VR interoperability
+follows in Phase 9.
 
-Getting Started
----------------
+## Compatibility
 
-* [Official forums](https://forum.openmw.org/)
-* [Installation instructions](https://openmw.readthedocs.io/en/latest/manuals/installation/index.html)
-* [Build from source](https://wiki.openmw.org/index.php?title=Development_Environment_Setup)
-* [Testing the game](https://wiki.openmw.org/index.php?title=Testing)
-* [How to contribute](https://wiki.openmw.org/index.php?title=Contribution_Wanted)
-* [Report a bug](https://gitlab.com/OpenMW/openmw/issues) - read the [guidelines](https://wiki.openmw.org/index.php?title=Bug_Reporting_Guidelines) before submitting your first bug!
-* [Known issues](https://gitlab.com/OpenMW/openmw/issues?label_name%5B%5D=Bug)
+vNext intentionally does not preserve TES3MP 0.8.x wire compatibility,
+mixed-version peers, RakNet or CrabNet integration, the legacy server/CoreScripts
+API, legacy saves, or the old engine patch set. Archived TES3MP code may be used
+to understand historical gameplay requirements, but it is not an implementation
+template.
 
-The data path
--------------
+## Baseline and license
 
-The data path tells OpenMW where to find your Morrowind files. If you run the launcher, OpenMW should be able to pick up the location of these files on its own, if both Morrowind and OpenMW are installed properly (installing Morrowind under WINE is considered a proper install).
+The active source baseline is OpenMW 0.51.0 at
+`f4bec41444214a7903bebd178389ca22ca13f646`. Intentional differences are tracked
+by [`docs/vnext/BASELINE_PROVENANCE.json`](docs/vnext/BASELINE_PROVENANCE.json)
+and verified with:
 
-Command line options
---------------------
+```sh
+python scripts/verify_vnext_baseline.py
+```
 
-    Syntax: openmw <options>
-    Allowed options:
-      --config arg                          additional config directories
-      --replace arg                         settings where the values from the
-                                            current source should replace those
-                                            from lower-priority sources instead of
-                                            being appended
-      --user-data arg                       set user data directory (used for
-                                            saves, screenshots, etc)
-      --resources arg (=resources)          set resources directory
-      --help                                print help message
-      --version                             print version information and quit
-      --data arg (=data)                    set data directories (later directories
-                                            have higher priority)
-      --data-local arg                      set local data directory (highest
-                                            priority)
-      --fallback-archive arg (=fallback-archive)
-                                            set fallback BSA archives (later
-                                            archives have higher priority)
-      --start arg                           set initial cell
-      --content arg                         content file(s): esm/esp, or
-                                            omwgame/omwaddon/omwscripts
-      --groundcover arg                     groundcover content file(s): esm/esp,
-                                            or omwgame/omwaddon
-      --no-sound [=arg(=1)] (=0)            disable all sounds
-      --script-all [=arg(=1)] (=0)          compile all scripts (excluding dialogue
-                                            scripts) at startup
-      --script-all-dialogue [=arg(=1)] (=0) compile all dialogue scripts at startup
-      --script-console [=arg(=1)] (=0)      enable console-only script
-                                            functionality
-      --script-run arg                      select a file containing a list of
-                                            console commands that is executed on
-                                            startup
-      --script-warn [=arg(=1)] (=1)         handling of warnings when compiling
-                                            scripts
-                                            0 - ignore warnings
-                                            1 - show warnings but consider script as
-                                            correctly compiled anyway
-                                            2 - treat warnings as errors
-      --load-savegame arg                   load a save game file on game startup
-                                            (specify an absolute filename or a
-                                            filename relative to the current
-                                            working directory)
-      --skip-menu [=arg(=1)] (=0)           skip main menu on game startup
-      --new-game [=arg(=1)] (=0)            run new game sequence (ignored if
-                                            skip-menu=0)
-      --encoding arg (=win1252)             Character encoding used in OpenMW game
-                                            messages:
-
-                                            win1250 - Central and Eastern European
-                                            such as Polish, Czech, Slovak,
-                                            Hungarian, Slovene, Bosnian, Croatian,
-                                            Serbian (Latin script), Romanian and
-                                            Albanian languages
-
-                                            win1251 - Cyrillic alphabet such as
-                                            Russian, Bulgarian, Serbian Cyrillic
-                                            and other languages
-
-                                            win1252 - Western European (Latin)
-                                            alphabet, used by default
-      --fallback arg                        fallback values
-      --no-grab [=arg(=1)] (=0)             Don't grab mouse cursor
-      --export-fonts [=arg(=1)] (=0)        Export Morrowind .fnt fonts to PNG
-                                            image and XML file in current directory
-      --activate-dist arg (=-1)             activation distance override
-      --random-seed arg (=<impl defined>)   seed value for random number generator
+TES3MP vNext and its OpenMW baseline are distributed under the GNU General
+Public License version 3. See [LICENSE](LICENSE). Third-party assets retain the
+licenses documented alongside those assets.
