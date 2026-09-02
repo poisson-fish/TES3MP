@@ -1,6 +1,7 @@
 #include <tes3mp/authenticated_join.hpp>
 #include <tes3mp/server_lifecycle.hpp>
 
+#include <array>
 #include <cassert>
 #include <iostream>
 #include <variant>
@@ -111,6 +112,33 @@ namespace
                    value.joined.session, MonotonicInstant::fromNanoseconds(120), id<ServerTick>(3)))
             == ServerLifecycleError::UnknownPrincipal);
     }
+
+    void simultaneousDisconnectsCommitAsOneBatch()
+    {
+        Fixture value;
+        const auto second = std::get<AuthenticatedJoinResult>(value.joins.join(
+            id<PrincipalId>(32), SessionGeneration::initial(), id<ServerTick>(1)));
+        const bool registered = value.lifecycle.registerJoined(second.principal, second.session);
+        assert(registered);
+        const std::array sessions{ value.joined.session, second.session };
+        const auto before = value.reducer.state();
+        auto result = value.lifecycle.prepareDisconnectBatch(
+            sessions, MonotonicInstant::fromNanoseconds(10), id<ServerTick>(2));
+        auto prepared = std::get<ServerLifecycleBatchPreparation>(std::move(result));
+        const bool cancelled = value.lifecycle.cancel(prepared.id);
+        assert(prepared.entries.size() == 2 && value.lifecycle.liveCount() == 2
+            && value.reducer.state() == before && cancelled);
+        prepared = std::get<ServerLifecycleBatchPreparation>(value.lifecycle.prepareDisconnectBatch(
+            sessions, MonotonicInstant::fromNanoseconds(10), id<ServerTick>(2)));
+        const bool committed = value.lifecycle.commit(prepared.id);
+        assert(committed);
+        assert(value.lifecycle.liveCount() == 0 && value.lifecycle.hiddenCount() == 2
+            && value.reducer.state().activeSessions().empty());
+        const auto publication = value.reducer.latestPublication();
+        assert(publication && publication->sessionLifecycle().size() == 2);
+        for (const auto& change : publication->sessionLifecycle())
+            assert(change.kind == CanonicalSessionLifecycleKind::Disconnected);
+    }
 }
 
 int main()
@@ -118,5 +146,6 @@ int main()
     disconnectIsPreparedAndFailureAtomic();
     resumePreservesIdentityAndRejectsDeadline();
     expirationWinsAtDeadlineAndRemovesPlayer();
+    simultaneousDisconnectsCommitAsOneBatch();
     std::cout << "server lifecycle contracts passed\n";
 }

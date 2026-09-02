@@ -43,13 +43,52 @@ namespace TES3MP
             return ServerLifecycleError::DeadlineOverflow;
         auto canonical = mReducer.prepareDisconnect(sessionId, tick);
         if (!canonical) return ServerLifecycleError::CanonicalStateRejected;
+        const auto* current = mReducer.state().findActiveSession(sessionId);
+        if (!current) return ServerLifecycleError::CanonicalStateRejected;
         const auto index = static_cast<std::size_t>(found - mBindings.begin());
         const auto deadline = MonotonicInstant::fromNanoseconds(now.nanoseconds() + mGraceNanoseconds);
         const auto id = mNextPreparationId++;
         ServerLifecyclePreparation value{ id, ServerLifecycleAction::Disconnect, found->principal,
             sessionId, found->session.playerId(), found->session.sessionGeneration(), deadline };
-        mPending.emplace(Pending{ value, index, found->session, std::move(*canonical) });
+        mPending.emplace(Pending{ { value }, { index }, { *current }, std::move(*canonical) });
         return value;
+    }
+
+    ServerLifecycleBatchPrepareResult ServerLifecycleCoordinator::prepareDisconnectBatch(
+        std::span<const SessionId> sessionIds, MonotonicInstant now, ServerTick tick)
+    {
+        if (mPending) return ServerLifecycleError::PreparationPending;
+        if (sessionIds.empty()) return ServerLifecycleError::UnknownSession;
+        if (now.nanoseconds() > std::numeric_limits<std::uint64_t>::max() - mGraceNanoseconds)
+            return ServerLifecycleError::DeadlineOverflow;
+        std::vector<ServerLifecyclePreparation> values;
+        std::vector<std::size_t> indices;
+        std::vector<CanonicalSessionProgress> replacements;
+        values.reserve(sessionIds.size());
+        indices.reserve(sessionIds.size());
+        replacements.reserve(sessionIds.size());
+        const auto deadline = MonotonicInstant::fromNanoseconds(now.nanoseconds() + mGraceNanoseconds);
+        const auto id = mNextPreparationId;
+        for (const auto sessionId : sessionIds)
+        {
+            const auto found = std::find_if(mBindings.begin(), mBindings.end(),
+                [sessionId](const Binding& value) { return value.session.sessionId() == sessionId; });
+            if (found == mBindings.end()) return ServerLifecycleError::UnknownSession;
+            if (!found->live) return ServerLifecycleError::AlreadyDisconnected;
+            const auto index = static_cast<std::size_t>(found - mBindings.begin());
+            if (std::ranges::find(indices, index) != indices.end()) return ServerLifecycleError::AlreadyDisconnected;
+            indices.push_back(index);
+            const auto* current = mReducer.state().findActiveSession(sessionId);
+            if (!current) return ServerLifecycleError::CanonicalStateRejected;
+            replacements.push_back(*current);
+            values.push_back({ id, ServerLifecycleAction::Disconnect, found->principal, sessionId,
+                found->session.playerId(), found->session.sessionGeneration(), deadline });
+        }
+        auto canonical = mReducer.prepareDisconnectBatch(sessionIds, tick);
+        if (!canonical) return ServerLifecycleError::CanonicalStateRejected;
+        ++mNextPreparationId;
+        mPending.emplace(Pending{ values, indices, replacements, std::move(*canonical) });
+        return ServerLifecycleBatchPreparation{ id, std::move(values) };
     }
 
     ServerLifecyclePrepareResult ServerLifecycleCoordinator::prepareResume(
@@ -76,7 +115,7 @@ namespace TES3MP
         const auto id = mNextPreparationId++;
         ServerLifecyclePreparation value{ id, ServerLifecycleAction::Resume, principal, sessionId,
             session->playerId(), *generation, found->deadline };
-        mPending.emplace(Pending{ value, index, *session, std::move(*canonical) });
+        mPending.emplace(Pending{ { value }, { index }, { *session }, std::move(*canonical) });
         return value;
     }
 
@@ -99,35 +138,40 @@ namespace TES3MP
         const auto id = mNextPreparationId++;
         ServerLifecyclePreparation value{ id, ServerLifecycleAction::Expire, found->principal,
             found->session.sessionId(), found->session.playerId(), found->session.sessionGeneration(), found->deadline };
-        mPending.emplace(Pending{ value, index, found->session, std::move(*canonical) });
+        mPending.emplace(Pending{ { value }, { index }, { found->session }, std::move(*canonical) });
         return value;
     }
 
     bool ServerLifecycleCoordinator::commit(std::uint64_t preparationId) noexcept
     {
-        if (!mPending || mPending->publicValue.id != preparationId) return false;
+        if (!mPending || mPending->publicValues.front().id != preparationId) return false;
         if (!mReducer.commit(std::move(mPending->canonical))) { mPending.reset(); return false; }
-        const auto action = mPending->publicValue.action;
-        const auto index = mPending->bindingIndex;
+        const auto action = mPending->publicValues.front().action;
         if (action == ServerLifecycleAction::Disconnect)
         {
-            mBindings[index].live = false;
-            mBindings[index].deadline = mPending->publicValue.deadline;
+            for (std::size_t value = 0; value < mPending->bindingIndices.size(); ++value)
+            {
+                const auto index = mPending->bindingIndices[value];
+                mBindings[index].session = mPending->replacementSessions[value];
+                mBindings[index].live = false;
+                mBindings[index].deadline = mPending->publicValues[value].deadline;
+            }
         }
         else if (action == ServerLifecycleAction::Resume)
         {
-            mBindings[index].session = mPending->replacementSession;
+            const auto index = mPending->bindingIndices.front();
+            mBindings[index].session = mPending->replacementSessions.front();
             mBindings[index].live = true;
         }
         else
-            mBindings.erase(mBindings.begin() + static_cast<std::ptrdiff_t>(index));
+            mBindings.erase(mBindings.begin() + static_cast<std::ptrdiff_t>(mPending->bindingIndices.front()));
         mPending.reset();
         return true;
     }
 
     bool ServerLifecycleCoordinator::cancel(std::uint64_t preparationId) noexcept
     {
-        if (!mPending || mPending->publicValue.id != preparationId) return false;
+        if (!mPending || mPending->publicValues.front().id != preparationId) return false;
         mPending.reset();
         return true;
     }
@@ -135,7 +179,7 @@ namespace TES3MP
     const CanonicalServerState* ServerLifecycleCoordinator::candidateState(
         std::uint64_t preparationId) const noexcept
     {
-        if (!mPending || mPending->publicValue.id != preparationId) return nullptr;
+        if (!mPending || mPending->publicValues.front().id != preparationId) return nullptr;
         return &mPending->canonical.candidateState();
     }
 

@@ -31,7 +31,7 @@ def main() -> int:
         bad.write_text("wrong-phase7-secret\n", encoding="utf-8")
         config.write_text(
             f"bind_address=127.0.0.1\nport={port}\ntick_interval_ms=16\n"
-            f"disconnect_grace_ms=1000\njoin_password_file={good.as_posix()}\n",
+            f"disconnect_grace_ms=3000\njoin_password_file={good.as_posix()}\n",
             encoding="utf-8")
         server = subprocess.Popen(
             [str(args.server), str(config)], text=True,
@@ -59,9 +59,32 @@ def main() -> int:
                     raise RuntimeError(f"{field} did not prove distinct non-orphan identities: {values}")
             if "movement_flow_complete" not in outputs[0][0] or "movement_flow_complete" not in outputs[1][0]:
                 raise RuntimeError(f"movement flow evidence missing: {outputs!r}")
-            print(json.dumps({"event": "phase7_movement_demo_passed", "clients": joined,
+            time.sleep(4.2)
+            observer = subprocess.Popen(
+                [str(args.client), "127.0.0.1", str(port), str(good), "5000", "observer"],
+                text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            time.sleep(0.1)
+            lifecycle = subprocess.run(
+                [str(args.client), "127.0.0.1", str(port), str(good), "5000", "lifecycle"],
+                text=True, capture_output=True, timeout=20, check=False)
+            observer_output = observer.communicate(timeout=10)
+            if lifecycle.returncode != 0 or observer.returncode != 0:
+                raise RuntimeError(
+                    f"lifecycle clients failed: lifecycle={lifecycle!r} observer={observer_output!r}")
+            lifecycle_lines = [json.loads(line) for line in lifecycle.stdout.splitlines() if line]
+            lifecycle_event = next((line for line in lifecycle_lines
+                                    if line.get("event") == "lifecycle_flow_complete"), None)
+            if not lifecycle_event or "fixture_flow_complete" not in observer_output[0]:
+                raise RuntimeError(
+                    f"lifecycle evidence missing: lifecycle={lifecycle.stdout!r} observer={observer_output!r}")
+            print(json.dumps({"event": "phase7_lifecycle_demo_passed", "clients": joined,
                               "simultaneous_movement": True, "converged_views": True,
-                              "stale_views_rejected": True}, separators=(",", ":")))
+                              "stale_views_rejected": True, "hidden_during_grace": True,
+                              "same_identity_resumed": lifecycle_event["identity_preserved"],
+                              "progress_preserved": lifecycle_event["progress_preserved"],
+                              "expired_resume_rejected": lifecycle_event["expired_resume_rejected"],
+                              "fresh_identity_created": lifecycle_event["fresh_identity_created"]},
+                             separators=(",", ":")))
             return 0
         finally:
             server.terminate()

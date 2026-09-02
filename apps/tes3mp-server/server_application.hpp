@@ -6,6 +6,7 @@
 #include "tes3mp/server_lifecycle.hpp"
 
 #include <optional>
+#include <span>
 #include <string_view>
 
 namespace TES3MP::ServerApp
@@ -47,6 +48,7 @@ namespace TES3MP::ServerApp
 
         bool failConnection(TransportConnectionId connection, std::string_view failure) noexcept;
         bool disconnectConnection(TransportConnectionId connection, ServerTick tick) noexcept;
+        bool disconnectConnections(std::span<const TransportConnectionId> connections, ServerTick tick) noexcept;
         bool resumeConnection(TransportConnectionId connection, ServerTick tick) noexcept;
         bool expireSessions(ServerTick tick) noexcept;
     };

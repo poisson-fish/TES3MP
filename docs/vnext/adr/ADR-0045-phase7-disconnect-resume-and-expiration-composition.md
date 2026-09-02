@@ -41,6 +41,12 @@ and a narrow coordinator commits token rotation before canonical resume, rolls
 the token back if canonical commit rejects, then finalizes the token transaction.
 This preserves the credential, lifecycle, and application ownership boundaries.
 
+On 2026-09-02 the owner approved process-proof Option A: one lifecycle client
+process keeps resume credentials only in memory while it creates sequential
+single-connection headless session facades for disconnect, resume, expiration,
+and fresh join. Credentials remain absent from process arguments, files, and
+NDJSON evidence.
+
 Rejected alternatives were app- or transport-owned lifecycle policy, retaining
 an apparently active canonical session, reconstructing deleted progress,
 consuming a token or committing canonical state before output admission, exact-
@@ -77,4 +83,5 @@ provisional lifecycle.
 
 Approved by the project owner on 2026-09-02: Option A for all four decisions,
 Option A for prepared authentication ownership, Option A1 for reversible
-cross-transaction commit coordination, and the proposed acceptance tests.
+cross-transaction commit coordination, process-proof Option A, and the proposed
+acceptance tests.

@@ -43,6 +43,137 @@ namespace
         if (text.empty() || parsed.ec != std::errc{} || parsed.ptr != text.data() + text.size()) return std::nullopt;
         return value;
     }
+
+    struct LifecycleAttempt
+    {
+        bool accepted = false;
+        std::optional<TES3MP::ResumeToken> token;
+        std::uint64_t lifetimeMilliseconds = 0;
+        std::optional<TES3MP::SessionId> session;
+        std::optional<TES3MP::PlayerId> player;
+        std::optional<TES3MP::EntityId> entity;
+        std::optional<TES3MP::SessionGeneration> generation;
+        std::optional<TES3MP::EntityRevision> revision;
+        std::optional<TES3MP::CommandSequence> acknowledged;
+    };
+
+    LifecycleAttempt runLifecycleAttempt(TES3MP::TransportRuntime& runtime, TES3MP::MonotonicClock& clock,
+        const TES3MP::SessionTimeoutPolicy& timeouts, const TES3MP::ConnectionEndpoint& endpoint,
+        TES3MP::AuthenticationRequest request, std::uint64_t timeoutMilliseconds, bool advanceProgress = false,
+        TES3MP::SessionGeneration generation = TES3MP::SessionGeneration::initial())
+    {
+        LifecycleAttempt result;
+        auto created = TES3MP::HeadlessClientSession::create(
+            runtime, clock, timeouts, generation);
+        auto* value = std::get_if<std::unique_ptr<TES3MP::HeadlessClientSession>>(&created);
+        if (!value || !*value || (*value)->connect(endpoint) != TES3MP::HeadlessClientResult::Accepted) return result;
+        auto& client = **value;
+        bool submitted = false;
+        bool bound = false;
+        std::uint64_t motionCommandsSent = 0;
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(timeoutMilliseconds);
+        while (std::chrono::steady_clock::now() < deadline)
+        {
+            const auto pumped = client.pump();
+            if (pumped.result != TES3MP::HeadlessClientResult::Accepted) break;
+            if (pumped.action == TES3MP::ClientSessionAction::SendClientHello)
+            {
+                auto range = std::get<TES3MP::ProtocolVersionRange>(TES3MP::ProtocolVersionRange::create(1, 0, 0));
+                auto offer = std::get<TES3MP::CapabilityOffer>(TES3MP::CapabilityOffer::create(std::move(range), {}, {}));
+                if (!client.connection() || !sendFrame(runtime, *client.connection(),
+                        TES3MP::MessageClass::SessionControl, TES3MP::MessageKind::ClientHello,
+                        TES3MP::encodeClientHello(TES3MP::ClientHello::fromOffer(std::move(offer))))) break;
+            }
+            if (client.connection())
+            {
+                std::array<TES3MP::TransportMessage, 8> messages{};
+                const auto received = runtime.receive(*client.connection(), messages);
+                if (received.result != TES3MP::TransportResult::Accepted || received.messages > messages.size()) break;
+                for (std::size_t index = 0; index < received.messages; ++index)
+                {
+                    auto decoded = TES3MP::decodeProtocolFrame(messages[index].bytes);
+                    auto* frame = std::get_if<TES3MP::DecodedFrame>(&decoded);
+                    if (!frame) break;
+                    if (frame->messageKind() == TES3MP::MessageKind::ServerHello && !submitted)
+                    {
+                        auto hello = TES3MP::decodeServerHello(frame->payload());
+                        auto* serverHello = std::get_if<TES3MP::ServerHello>(&hello);
+                        if (!serverHello || client.handle(TES3MP::ClientServerHelloReceived{std::move(*serverHello)}).action
+                                != TES3MP::ClientSessionAction::AuthenticationInputReady) break;
+                        if (!sendFrame(runtime, *client.connection(), TES3MP::MessageClass::SessionControl,
+                                TES3MP::MessageKind::AuthenticationRequest, TES3MP::encodeAuthenticationRequest(request))
+                            || client.handle(TES3MP::ClientAuthenticationSubmitted{}).action
+                                != TES3MP::ClientSessionAction::AuthenticationSubmitted) break;
+                        submitted = true;
+                    }
+                    else if (frame->messageKind() == TES3MP::MessageKind::AuthenticationRejected)
+                    {
+                        client.close();
+                        return result;
+                    }
+                    else if (frame->messageKind() == TES3MP::MessageKind::AuthenticationAccepted)
+                    {
+                        auto accepted = TES3MP::decodeAuthenticationAccepted(frame->payload());
+                        auto* message = std::get_if<TES3MP::AuthenticationAcceptedMessage>(&accepted);
+                        if (!message || client.handle(TES3MP::ClientAuthenticationAccepted{}).action
+                                != TES3MP::ClientSessionAction::SessionEstablished) break;
+                        result.lifetimeMilliseconds = message->lifetimeMilliseconds();
+                        result.token = message->takeToken();
+                    }
+                    else if (frame->messageKind() == TES3MP::MessageKind::LatestWinsSnapshot && result.token)
+                    {
+                        auto decodedSnapshot = TES3MP::decodeLatestWinsSnapshot(frame->payload());
+                        auto* snapshot = std::get_if<TES3MP::LatestWinsSnapshot>(&decodedSnapshot);
+                        if (!snapshot) break;
+                        const auto sessionId = snapshot->header().targetSessionId();
+                        if ((!bound && client.bindEstablishedSession(sessionId) != TES3MP::ClientSessionBindingResult::Bound)
+                            || client.receiveLatestWinsSnapshot(std::move(*snapshot))
+                                != TES3MP::LatestWinsSnapshotReceiveResult::Applied) break;
+                        bound = true;
+                        const auto& confirmed = *client.stateMachine().confirmedSnapshot();
+                        const auto self = std::ranges::find_if(confirmed.view().entries(), [&](const auto& entry) {
+                            return entry.playerId().value() == sessionId.value(); });
+                        if (self == confirmed.view().entries().end()) break;
+                        const auto acknowledged = confirmed.header().acknowledgedCommandSequence();
+                        if (advanceProgress && (!acknowledged || acknowledged->value() < 2))
+                        {
+                            const auto next = acknowledged ? 2u : 1u;
+                            if (motionCommandsSent < next)
+                            {
+                                TES3MP::ClientCommandHeader header(sessionId,
+                                    confirmed.header().targetSessionGeneration(),
+                                    *TES3MP::CommandSequence::fromValue(next), *TES3MP::CommandId::fromValue(next),
+                                    confirmed.header().serverTick());
+                                TES3MP::ReliableOperationHeader reliable(header, TES3MP::EntityPrecondition(
+                                    self->entityId(), self->entityRevision(), self->authorityEpoch()));
+                                auto operation = TES3MP::ReliableOperation::create(
+                                    reliable, TES3MP::PlayerMotionIntent(
+                                        TES3MP::LinearVelocity3(next == 1 ? 3 : 0, 0, 0)));
+                                if (!std::holds_alternative<TES3MP::ReliableOperation>(operation)
+                                    || !sendFrame(runtime, *client.connection(), TES3MP::MessageClass::ReliableOperation,
+                                        TES3MP::MessageKind::ReliableOperation,
+                                        TES3MP::encodeReliableOperation(std::get<TES3MP::ReliableOperation>(operation)))) break;
+                                motionCommandsSent = next;
+                            }
+                            continue;
+                        }
+                        result.accepted = true;
+                        result.session = sessionId;
+                        result.player = self->playerId();
+                        result.entity = self->entityId();
+                        result.generation = confirmed.header().targetSessionGeneration();
+                        result.revision = self->entityRevision();
+                        result.acknowledged = confirmed.header().acknowledgedCommandSequence();
+                        client.close();
+                        return result;
+                    }
+                }
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+        client.close();
+        return result;
+    }
 }
 
 int main(int argc, char** argv)
@@ -50,7 +181,7 @@ int main(int argc, char** argv)
     if (argc != 5 && argc != 6)
     {
         std::cerr << "usage: tes3mp_headless_client <host> <port> <password-file> <timeout-ms> "
-                     "[mover|observer|motion-one|motion-two]\n";
+                     "[mover|observer|motion-one|motion-two|lifecycle]\n";
         return 2;
     }
     const auto port = number(argv[2]);
@@ -81,7 +212,61 @@ int main(int argc, char** argv)
     bool authenticationAccepted = false;
     const std::string_view mode = argc == 6 ? argv[5] : "join";
     if (mode != "join" && mode != "mover" && mode != "observer"
-        && mode != "motion-one" && mode != "motion-two") return 2;
+        && mode != "motion-one" && mode != "motion-two" && mode != "lifecycle") return 2;
+    if (mode == "lifecycle")
+    {
+        session.close();
+        auto first = runLifecycleAttempt(*factory.runtime, clock, *timeouts, *endpoint,
+            TES3MP::AuthenticationRequest::join(std::move(*password)), *timeout, true);
+        if (!first.accepted || !first.token || !first.session || !first.player || !first.entity
+            || !first.generation || !first.revision || !first.acknowledged)
+        { std::cerr << "lifecycle initial join/progress failed\n"; return 3; }
+        std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+        auto resumed = runLifecycleAttempt(*factory.runtime, clock, *timeouts, *endpoint,
+            TES3MP::AuthenticationRequest::resume(std::move(*first.token)), *timeout, false,
+            *first.generation->next());
+        if (!resumed.accepted || !resumed.token || resumed.session != first.session
+            || resumed.player != first.player || resumed.entity != first.entity
+            || !resumed.generation || resumed.generation->value() != first.generation->value() + 1
+            || resumed.revision != first.revision || resumed.acknowledged != first.acknowledged)
+        {
+            std::cerr << "lifecycle resume preservation failed accepted=" << resumed.accepted
+                      << " session=" << (resumed.session ? resumed.session->value() : 0)
+                      << " first_session=" << first.session->value()
+                      << " generation=" << (resumed.generation ? resumed.generation->value() : 0)
+                      << " first_generation=" << first.generation->value()
+                      << " revision=" << (resumed.revision ? resumed.revision->value() : 0)
+                      << " first_revision=" << first.revision->value()
+                      << " ack=" << (resumed.acknowledged ? resumed.acknowledged->value() : 0)
+                      << " first_ack=" << first.acknowledged->value() << '\n';
+            return 3;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(resumed.lifetimeMilliseconds + 100));
+        auto expired = runLifecycleAttempt(*factory.runtime, clock, *timeouts, *endpoint,
+            TES3MP::AuthenticationRequest::resume(std::move(*resumed.token)), *timeout);
+        if (expired.accepted) { std::cerr << "expired resume accepted\n"; return 3; }
+        std::ifstream freshPasswordStream(argv[3], std::ios::binary);
+        std::vector<std::byte> freshBytes;
+        while (freshPasswordStream.get(byte) && freshBytes.size() <= TES3MP::MaximumAuthenticationMaterialBytes)
+            freshBytes.push_back(static_cast<std::byte>(static_cast<unsigned char>(byte)));
+        if (!freshBytes.empty() && freshBytes.back() == std::byte{'\n'}) freshBytes.pop_back();
+        if (!freshBytes.empty() && freshBytes.back() == std::byte{'\r'}) freshBytes.pop_back();
+        auto freshPassword = TES3MP::AuthenticationMaterial::create(freshBytes);
+        std::fill(freshBytes.begin(), freshBytes.end(), std::byte{});
+        if (!freshPasswordStream.eof() || !freshPassword)
+        { std::cerr << "fresh credential reload failed\n"; return 3; }
+        auto fresh = runLifecycleAttempt(*factory.runtime, clock, *timeouts, *endpoint,
+            TES3MP::AuthenticationRequest::join(std::move(*freshPassword)), *timeout);
+        if (!fresh.accepted || !fresh.session || !fresh.player || !fresh.entity
+            || fresh.session == first.session || fresh.player == first.player || fresh.entity == first.entity)
+        { std::cerr << "fresh identity creation failed\n"; return 3; }
+        std::cout << "{\"event\":\"lifecycle_flow_complete\",\"resumed_session_id\":"
+                  << resumed.session->value() << ",\"fresh_session_id\":" << fresh.session->value()
+                  << ",\"identity_preserved\":true,\"progress_preserved\":true,"
+                     "\"expired_resume_rejected\":true,\"fresh_identity_created\":true}\n";
+        factory.runtime->shutdown();
+        return 0;
+    }
     std::optional<TES3MP::LatestWinsSnapshot> snapshot;
     bool bound = false;
     bool sentExterior = false;

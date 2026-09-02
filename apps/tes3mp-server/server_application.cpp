@@ -42,12 +42,33 @@ namespace TES3MP::ServerApp
 
     bool ServerApplication::disconnectConnection(TransportConnectionId connection, ServerTick tick) noexcept
     {
-        auto* session = mWiring->sessions.session(connection);
-        if (session == nullptr || !session->sessionId())
-            return mWiring->sessions.close(connection) == ConnectionSessionResult::Accepted;
+        return disconnectConnections(std::span<const TransportConnectionId>(&connection, 1), tick);
+    }
+
+    bool ServerApplication::disconnectConnections(
+        std::span<const TransportConnectionId> connections, ServerTick tick) noexcept
+    {
+        std::vector<SessionId> sessionIds;
+        std::vector<TransportConnectionId> knownConnections;
+        sessionIds.reserve(connections.size());
+        knownConnections.reserve(connections.size());
+        for (const auto connection : connections)
+        {
+            auto* session = mWiring->sessions.session(connection);
+            if (!session) continue;
+            knownConnections.push_back(connection);
+            if (session->sessionId()) sessionIds.push_back(*session->sessionId());
+        }
+        if (knownConnections.empty()) return true;
+        if (sessionIds.empty())
+        {
+            for (const auto connection : knownConnections)
+                if (mWiring->sessions.close(connection) != ConnectionSessionResult::Accepted) return false;
+            return true;
+        }
         const auto before = mWiring->reducer.state();
-        auto prepared = mWiring->lifecycle.prepareDisconnect(*session->sessionId(), mWiring->clock.now(), tick);
-        auto* lifecycle = std::get_if<ServerLifecyclePreparation>(&prepared);
+        auto prepared = mWiring->lifecycle.prepareDisconnectBatch(sessionIds, mWiring->clock.now(), tick);
+        auto* lifecycle = std::get_if<ServerLifecycleBatchPreparation>(&prepared);
         if (!lifecycle) return false;
         const auto cancel = [this, id = lifecycle->id]() noexcept { (void)mWiring->lifecycle.cancel(id); };
         const auto* candidate = mWiring->lifecycle.candidateState(lifecycle->id);
@@ -58,12 +79,14 @@ namespace TES3MP::ServerApp
         for (auto& delivery : *projected)
         {
             auto target = mWiring->sessions.connectionForSession(delivery.targetSession);
-            if (!target || *target == connection) { cancel(); return false; }
+            if (!target || std::ranges::find(knownConnections, *target) != knownConnections.end()) { cancel(); return false; }
             routed.emplace_back(*target, std::move(delivery));
         }
         if (!admitFixtureObservationsAtomically(mWiring->queues, routed)) { cancel(); return false; }
         if (!mWiring->lifecycle.commit(lifecycle->id)) return false;
-        return mWiring->sessions.close(connection) == ConnectionSessionResult::Accepted;
+        for (const auto connection : knownConnections)
+            if (mWiring->sessions.close(connection) != ConnectionSessionResult::Accepted) return false;
+        return true;
     }
 
     bool ServerApplication::resumeConnection(TransportConnectionId connection, ServerTick tick) noexcept
@@ -191,6 +214,8 @@ namespace TES3MP::ServerApp
         }
         if (!mWiring) return true;
 
+        std::vector<TransportConnectionId> closedConnections;
+        closedConnections.reserve(result.events);
         for (std::size_t index = 0; index < result.events; ++index)
         {
             const auto& event = events[index];
@@ -210,10 +235,7 @@ namespace TES3MP::ServerApp
                 }
             }
             else if (event.kind == TransportEventKind::ConnectionClosed && event.connection)
-            {
-                if (!disconnectConnection(*event.connection, tick))
-                { mFailure = "disconnect lifecycle failed"; return false; }
-            }
+                closedConnections.push_back(*event.connection);
             else if (event.kind == TransportEventKind::RuntimeFailed)
             {
                 mFailure = "transport runtime failed";
@@ -221,6 +243,8 @@ namespace TES3MP::ServerApp
                 return false;
             }
         }
+        if (!closedConnections.empty() && !disconnectConnections(closedConnections, tick))
+        { mFailure = "disconnect lifecycle failed"; return false; }
 
         if (!expireSessions(tick)) { mFailure = "expiration lifecycle failed"; return false; }
 

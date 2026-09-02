@@ -6,6 +6,7 @@
 
 #include <cstdint>
 #include <optional>
+#include <span>
 #include <variant>
 #include <vector>
 
@@ -46,6 +47,14 @@ namespace TES3MP
 
     using ServerLifecyclePrepareResult = std::variant<ServerLifecyclePreparation, ServerLifecycleError>;
 
+    struct ServerLifecycleBatchPreparation
+    {
+        std::uint64_t id;
+        std::vector<ServerLifecyclePreparation> entries;
+    };
+
+    using ServerLifecycleBatchPrepareResult = std::variant<ServerLifecycleBatchPreparation, ServerLifecycleError>;
+
     class ServerLifecycleCoordinator
     {
     public:
@@ -55,6 +64,8 @@ namespace TES3MP
         bool registerJoined(PrincipalId principal, SessionId session) noexcept;
         ServerLifecyclePrepareResult prepareDisconnect(
             SessionId session, MonotonicInstant now, ServerTick tick);
+        ServerLifecycleBatchPrepareResult prepareDisconnectBatch(
+            std::span<const SessionId> sessions, MonotonicInstant now, ServerTick tick);
         ServerLifecyclePrepareResult prepareResume(
             PrincipalId principal, SessionId session, MonotonicInstant now, ServerTick tick);
         ServerLifecyclePrepareResult prepareNextExpiration(MonotonicInstant now, ServerTick tick);
@@ -74,9 +85,9 @@ namespace TES3MP
         };
         struct Pending
         {
-            ServerLifecyclePreparation publicValue;
-            std::size_t bindingIndex;
-            CanonicalSessionProgress replacementSession;
+            std::vector<ServerLifecyclePreparation> publicValues;
+            std::vector<std::size_t> bindingIndices;
+            std::vector<CanonicalSessionProgress> replacementSessions;
             CanonicalCommandReducer::PreparedLifecycle canonical;
         };
 

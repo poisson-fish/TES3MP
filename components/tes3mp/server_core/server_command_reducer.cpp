@@ -274,6 +274,39 @@ namespace TES3MP
             CanonicalSessionLifecycleKind::Disconnected, sessionId, player, generation, tick);
     }
 
+    std::optional<CanonicalCommandReducer::PreparedLifecycle> CanonicalCommandReducer::prepareDisconnectBatch(
+        std::span<const SessionId> sessionIds, ServerTick tick)
+    {
+        if (sessionIds.empty() || !mStateVersion.next()) return std::nullopt;
+        std::vector<CanonicalPlayerEntityState> players(mState->players().begin(), mState->players().end());
+        std::vector<CanonicalSessionProgress> sessions(mState->activeSessions().begin(), mState->activeSessions().end());
+        std::vector<CanonicalSessionProgress> removed;
+        removed.reserve(sessionIds.size());
+        for (const auto sessionId : sessionIds)
+        {
+            const auto found = std::find_if(sessions.begin(), sessions.end(),
+                [sessionId](const auto& value) { return value.sessionId() == sessionId; });
+            if (found == sessions.end()) return std::nullopt;
+            removed.push_back(*found);
+            sessions.erase(found);
+        }
+        auto candidate = createCanonicalServerState(players, sessions);
+        auto* state = std::get_if<CanonicalServerState>(&candidate);
+        if (!state) return std::nullopt;
+        PreparedLifecycle prepared;
+        prepared.mBaseVersion = mStateVersion;
+        prepared.mStateVersion = *mStateVersion.next();
+        prepared.mCheckpointTick = tick;
+        prepared.mState = std::make_shared<CanonicalServerState>(std::move(*state));
+        prepared.mPublication = std::shared_ptr<CanonicalStatePublication>(
+            new CanonicalStatePublication(mStateVersion, tick, mState, {}));
+        for (const auto& session : removed)
+            prepared.mPublication->mSessionLifecycle.push_back({ prepared.mStateVersion, tick,
+                CanonicalSessionLifecycleKind::Disconnected, session.sessionId(), session.playerId(),
+                session.sessionGeneration() });
+        return prepared;
+    }
+
     std::optional<CanonicalCommandReducer::PreparedLifecycle> CanonicalCommandReducer::prepareResume(
         CanonicalSessionProgress session, ServerTick tick)
     {
