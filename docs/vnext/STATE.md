@@ -9,20 +9,23 @@ remains the [implementation plan](IMPLEMENTATION_PLAN.md#phase-7--headless-end-t
 
 - Branch: `vnext`
 - Phase 7: **In Progress**
-- Slice 7.6: **In Progress**
-- Governing decision: [ADR-0045](adr/ADR-0045-phase7-disconnect-resume-and-expiration-composition.md)
+- Slice 7.6: **Implemented**
+- Slice 7.7: **Not Started**
+- Latest governing decision: [ADR-0045](adr/ADR-0045-phase7-disconnect-resume-and-expiration-composition.md)
 - Latest implementation commit: `9c75892eb1` (`Prove Phase 7 disconnect lifecycle`)
 
 ## Working synopsis
 
-The complete Slice 7.6 implementation and real two-client process proof pass.
+The complete Slice 7.6 implementation and real two-client process proof pass;
+the project owner accepted the implementation demo on 2026-09-02.
 Same-pump closes use one bounded canonical batch; disconnect captures current
 canonical progress; resume preserves identity, generation progression, revision,
 and acknowledgements; exact expiration rejects the old token and fresh join
 creates a new identity. Credentials remain in memory and absent from evidence.
 
-Next eligible action is owner demo acceptance. Do not mark Slice 7.6
-**Implemented** or begin Slice 7.7 before that acceptance.
+Next eligible work is the separately decision-gated Slice 7.7 adverse-network
+matrix, reconnect-loop, queue-bound, and soak-test design. Present its options
+and recommendation before production implementation.
 
 ## Active files
 

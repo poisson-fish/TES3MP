@@ -4293,6 +4293,17 @@ only the relevant phase section here.
 
 [Back to the phase tracker](IMPLEMENTATION_PLAN.md#phase-7--headless-end-to-end-multiplayer-slice)
 
+- 2026-09-02 — Slice 7.6 implementation demo — Implemented
+  - Change: accepted implementation `9c75892eb1`; Slice 7.6 advanced to
+    **Implemented**.
+  - Decisions: no accepted ADR/GDR decision changed.
+  - Verification: owner reviewed the real two-client disconnect hiding,
+    same-identity resume with revision and acknowledgement preservation,
+    exact expiration rejection, fresh identity creation, and simultaneous-close
+    atomic batch evidence.
+  - Owner review: implementation-demo acceptance received on 2026-09-02.
+  - Follow-ups: Slice 7.7 is next and remains separately decision-gated.
+
 - 2026-09-02 — Slice 7.6 real lifecycle proof — In Progress
   - Change: implementation `9c75892eb1` adds the credential-free in-memory
     lifecycle client flow, preserves disconnect-time canonical command progress,
