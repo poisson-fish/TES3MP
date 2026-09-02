@@ -28,8 +28,9 @@ slice, is **In Progress**.
 Slice 7.6 is governed by accepted
 [`ADR-0045`](adr/ADR-0045-phase7-disconnect-resume-and-expiration-composition.md).
 Failure-atomic resume-token rotation and transactional canonical hide, resume,
-and exact-deadline expiration are implemented. Live authentication/output
-composition and the complete process proof remain before the slice can close.
+and exact-deadline expiration are implemented. Live join registration and
+failure-atomic disconnect hide/output composition are also wired. Resume
+authentication/output, expiration pumping, and the complete process proof remain.
 
 The [implementation plan](IMPLEMENTATION_PLAN.md) is the authoritative status
 tracker. The [implementation notes](IMPLEMENTATION_NOTES.md) retain detailed

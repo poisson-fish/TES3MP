@@ -490,6 +490,9 @@ int main()
         auto& joins = joinFixture.joins;
         ServerCommandIntakeCoordinator intake(
             clock, observability, clock.now(), ServerTick::initial(), IngressOrdinal::initial());
+        auto lifecycle = ServerLifecycleCoordinator::create(
+            config.disconnectGraceMilliseconds * 1'000'000, joinFixture.reducer);
+        assert(lifecycle);
         FakeRuntime wiredRuntime;
         const auto connection = TransportConnectionId::initial();
         wiredRuntime.events.push_back({ TransportEventKind::ConnectionAccepted, TransportFailure::None,
@@ -500,16 +503,28 @@ int main()
             std::get<std::vector<std::byte>>(encodeProtocolFrame(
                 MessageClass::SessionControl, MessageKind::ClientHello, helloPayload)) });
         ServerApplication wired(wiredRuntime, config,
-            ServerApplicationWiring{ sessions, joins, crypto, *queues, clock, intake, joinFixture.reducer });
+            ServerApplicationWiring{ sessions, joins, crypto, *queues, clock, intake, joinFixture.reducer, *lifecycle });
         assert(wired.start() && wired.pump(ServerTick::initial()));
         assert(sessions.size() == 1 && wiredRuntime.sent.size() == 1);
         assert(std::get<DecodedFrame>(decodeProtocolFrame(wiredRuntime.sent[0])).messageKind()
             == MessageKind::ServerHello);
 
-        wiredRuntime.incoming.push_back(
-            { TransportChannel::LatestWins, { std::byte{ 1 } } });
+        auto material = AuthenticationMaterial::create({});
+        const auto authenticationPayload = encodeAuthenticationRequest(
+            AuthenticationRequest::join(std::move(*material)));
+        wiredRuntime.incoming.push_back({ TransportChannel::ReliableOrdered,
+            std::get<std::vector<std::byte>>(encodeProtocolFrame(MessageClass::SessionControl,
+                MessageKind::AuthenticationRequest, authenticationPayload)) });
         assert(wired.pump(ServerTick::initial()));
-        assert(sessions.size() == 0 && queues->connections() == 0 && wiredRuntime.closes == 1);
+        assert(lifecycle->liveCount() == 1 && joinFixture.reducer.state().activeSessions().size() == 1);
+
+        wiredRuntime.events.push_back({ TransportEventKind::ConnectionClosed, TransportFailure::None,
+            std::nullopt, std::nullopt, connection, std::nullopt,
+            TransportSecurity::EncryptedUnauthenticated, std::nullopt });
+        assert(wired.pump(id<ServerTick>(1)));
+        assert(sessions.size() == 0 && queues->connections() == 0);
+        assert(lifecycle->liveCount() == 0 && lifecycle->hiddenCount() == 1);
+        assert(joinFixture.reducer.state().activeSessions().empty());
     }
     {
         FixedClock clock;

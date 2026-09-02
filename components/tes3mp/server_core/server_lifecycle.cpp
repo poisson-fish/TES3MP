@@ -132,6 +132,13 @@ namespace TES3MP
         return true;
     }
 
+    const CanonicalServerState* ServerLifecycleCoordinator::candidateState(
+        std::uint64_t preparationId) const noexcept
+    {
+        if (!mPending || mPending->publicValue.id != preparationId) return nullptr;
+        return &mPending->canonical.candidateState();
+    }
+
     std::size_t ServerLifecycleCoordinator::liveCount() const noexcept
     {
         return static_cast<std::size_t>(std::count_if(mBindings.begin(), mBindings.end(),

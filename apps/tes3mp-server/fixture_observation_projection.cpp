@@ -85,6 +85,7 @@ namespace TES3MP::ServerApp
     {
         try
         {
+            if (deliveries.empty()) return true;
             std::vector<std::vector<std::byte>> reliable;
             std::vector<std::vector<std::byte>> latest;
             reliable.reserve(deliveries.size()); latest.reserve(deliveries.size());

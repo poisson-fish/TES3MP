@@ -80,6 +80,11 @@
       "purpose": "Versioned cross-platform configure and build presets for the Phase 1 OpenMW baseline test path."
     },
     {
+      "path": "README.md",
+      "status": "M",
+      "purpose": "Project landing page redirects contributors from the inherited OpenMW overview to the active TES3MP vNext scope, status, workflow, and compatibility policy."
+    },
+    {
       "path": "apps/components_tests/misc/testmathutil.cpp",
       "status": "M",
       "purpose": "Portable single-precision tolerance for upstream Euler-angle assertions on supported macOS arm64 runners."

@@ -4293,6 +4293,27 @@ only the relevant phase section here.
 
 [Back to the phase tracker](IMPLEMENTATION_PLAN.md#phase-7--headless-end-to-end-multiplayer-slice)
 
+- 2026-09-02 — Slice 7.6 live disconnect composition — In Progress
+  - Change: wired successful joins into the lifecycle coordinator and composed
+    transport close through prepared canonical hide, complete peer observation
+    admission, lifecycle commit, and connection teardown. Empty peer delivery
+    sets are valid atomic admissions. Repaired the provenance manifest omission
+    for the already-landed root vNext landing page.
+  - Decisions: implements accepted ADR-0045 Option A; no architecture,
+    authority, state-scope, or gameplay behavior changed.
+  - Verification: fresh MSVC 19.51 standalone configure; Debug
+    `tes3mp_server_app_tests_run` and `tes3mp_server_lifecycle_tests` pass; all
+    115 repository Python tests pass. Staged baseline verification passes with
+    283 intentional differences and 69 dependency inputs; staged legacy
+    exclusion passes across 3,976 tracked paths, 62 CMake files, 65 compile
+    commands, and 188 Ninja edges; staged `git diff --check` passes.
+    The app contract proves a live joined session becomes one hidden bounded
+    lifecycle record and disappears from active canonical state on close.
+  - Owner review: ADR approval is recorded; implementation demo remains
+    required before Slice 7.6 can become **Implemented**.
+  - Follow-ups: compose prepared resume authentication/token/output commit,
+    expiration pumping/output, and the real two-client process proof.
+
 - 2026-09-02 — Slice 7.6 canonical lifecycle transactions — In Progress
   - Change: added the engine-independent bounded lifecycle coordinator and
     reducer prepare/commit transactions for disconnect hiding, same-identity

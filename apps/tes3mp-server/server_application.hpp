@@ -3,6 +3,7 @@
 
 #include "server_config.hpp"
 #include "connection_session_coordinator.hpp"
+#include "tes3mp/server_lifecycle.hpp"
 
 #include <optional>
 #include <string_view>
@@ -18,6 +19,7 @@ namespace TES3MP::ServerApp
         MonotonicClock& clock;
         ServerCommandIntakeCoordinator& intake;
         CanonicalCommandReducer& reducer;
+        ServerLifecycleCoordinator& lifecycle;
     };
 
     class ServerApplication
@@ -44,6 +46,7 @@ namespace TES3MP::ServerApp
         std::optional<ServerApplicationWiring> mWiring;
 
         bool failConnection(TransportConnectionId connection, std::string_view failure) noexcept;
+        bool disconnectConnection(TransportConnectionId connection, ServerTick tick) noexcept;
     };
 }
 

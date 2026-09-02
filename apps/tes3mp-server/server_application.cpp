@@ -40,6 +40,32 @@ namespace TES3MP::ServerApp
         return true;
     }
 
+    bool ServerApplication::disconnectConnection(TransportConnectionId connection, ServerTick tick) noexcept
+    {
+        auto* session = mWiring->sessions.session(connection);
+        if (session == nullptr || !session->sessionId())
+            return mWiring->sessions.close(connection) == ConnectionSessionResult::Accepted;
+        const auto before = mWiring->reducer.state();
+        auto prepared = mWiring->lifecycle.prepareDisconnect(*session->sessionId(), mWiring->clock.now(), tick);
+        auto* lifecycle = std::get_if<ServerLifecyclePreparation>(&prepared);
+        if (!lifecycle) return false;
+        const auto cancel = [this, id = lifecycle->id]() noexcept { (void)mWiring->lifecycle.cancel(id); };
+        const auto* candidate = mWiring->lifecycle.candidateState(lifecycle->id);
+        auto projected = candidate ? projectFixtureObservations(before, *candidate, tick) : std::nullopt;
+        if (!projected) { cancel(); return false; }
+        std::vector<std::pair<TransportConnectionId, FixtureObservationDelivery>> routed;
+        routed.reserve(projected->size());
+        for (auto& delivery : *projected)
+        {
+            auto target = mWiring->sessions.connectionForSession(delivery.targetSession);
+            if (!target || *target == connection) { cancel(); return false; }
+            routed.emplace_back(*target, std::move(delivery));
+        }
+        if (!admitFixtureObservationsAtomically(mWiring->queues, routed)) { cancel(); return false; }
+        if (!mWiring->lifecycle.commit(lifecycle->id)) return false;
+        return mWiring->sessions.close(connection) == ConnectionSessionResult::Accepted;
+    }
+
     bool ServerApplication::pump(ServerTick tick) noexcept
     {
         if (!mRunning) return false;
@@ -72,7 +98,10 @@ namespace TES3MP::ServerApp
                 }
             }
             else if (event.kind == TransportEventKind::ConnectionClosed && event.connection)
-                (void)mWiring->sessions.close(*event.connection);
+            {
+                if (!disconnectConnection(*event.connection, tick))
+                { mFailure = "disconnect lifecycle failed"; return false; }
+            }
             else if (event.kind == TransportEventKind::RuntimeFailed)
             {
                 mFailure = "transport runtime failed";
@@ -104,6 +133,17 @@ namespace TES3MP::ServerApp
                     closed = true;
                     break;
                 }
+                if (dispatched == ConnectionSessionResult::Joined)
+                {
+                    auto* joined = mWiring->sessions.session(connection);
+                    if (!joined || !joined->principal() || !joined->sessionId()
+                        || !mWiring->lifecycle.registerJoined(*joined->principal(), *joined->sessionId()))
+                    {
+                        (void)failConnection(connection, "lifecycle registration failed");
+                        closed = true;
+                        break;
+                    }
+                }
             }
             if (closed) continue;
             auto* session = mWiring->sessions.session(connection);
@@ -116,6 +156,16 @@ namespace TES3MP::ServerApp
                 {
                     (void)failConnection(connection, "authentication rejected");
                     continue;
+                }
+                if (advanced == ConnectionSessionResult::Joined)
+                {
+                    session = mWiring->sessions.session(connection);
+                    if (!session || !session->principal() || !session->sessionId()
+                        || !mWiring->lifecycle.registerJoined(*session->principal(), *session->sessionId()))
+                    {
+                        (void)failConnection(connection, "lifecycle registration failed");
+                        continue;
+                    }
                 }
             }
             const auto now = mWiring->clock.now().nanoseconds() / 1'000'000;
