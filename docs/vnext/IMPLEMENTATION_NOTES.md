@@ -5032,6 +5032,29 @@ only the relevant phase section here.
 
 ## Phase 8 — OpenMW desktop vertical slice
 
+### 2026-09-03 — Slice 8.7 decision-gate research
+
+- Status: **Not Started**; no production implementation began.
+- Finding: the desktop coordinator owns one transport/runtime attempt, does not
+  retain the server-issued resume token, and closes permanently after disconnect.
+  Presentation clears correctly, but there is no resume attempt or resumed
+  complete-snapshot barrier. The repository also has no two-process OpenMW
+  driver; existing adapter contracts and Phase 7 process proofs do not satisfy
+  the real-desktop automation gate.
+- Decision gate: the owner must approve reconnect/runtime ownership, bounded
+  retry and visible presentation behavior, and a test-only typed desktop driver
+  plus external artifact-capturing harness. These affect architecture and
+  player-visible disconnect behavior. The approved Phase 7 lifecycle remains
+  server-authoritative and resume credentials remain memory-only.
+- Proposed records: ADR-0053 for desktop reconnect and automation composition;
+  GDR-0016 for provisional disconnect/resume presentation. No new OpenMW hook,
+  protocol schema, canonical state, authority, or persistence is proposed.
+- Verification: focused source and accepted-decision inspection, all 124
+  repository-owned Python tests, patch-registry verification, and diff hygiene
+  pass. Prior production verification remains unchanged pending owner approval.
+
+[Back to the phase tracker](IMPLEMENTATION_PLAN.md#phase-8--openmw-desktop-vertical-slice)
+
 ### 2026-09-03 — Slice 8.6 approved remote smoothing implementation
 
 - Status: **In Progress**; owner two-client desktop demo remains.

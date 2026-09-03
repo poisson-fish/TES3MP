@@ -16,6 +16,7 @@ remains the [implementation plan](IMPLEMENTATION_PLAN.md#phase-8--openmw-desktop
 - Slice 8.4: **In Progress**
 - Slice 8.5: **In Progress** (owner desktop demo remains)
 - Slice 8.6: **In Progress** (owner desktop demo remains)
+- Slice 8.7: **Not Started** (decision review pending)
 - Governing decisions: [ADR-0007](adr/ADR-0007-openmw-hook-patch-queue-policy.md),
   [ADR-0047](adr/ADR-0047-phase8-adapter-lifecycle-and-provider-boundary.md),
   [ADR-0048](adr/ADR-0048-canonical-revision-and-simulation-tick-separation.md),
@@ -82,6 +83,14 @@ discontinuous state, clears with observation lifetime, and emits adapter-owned
 typed metrics. Automated gates pass; the owner desktop demo remains. No
 protocol, canonical-state, authority, or OpenMW hook changed.
 
+Slice 8.7 gate research found that the desktop coordinator owns one connection
+attempt, does not retain the resume token, and closes permanently after a
+disconnect. Presentation clears, but resume and its complete-snapshot barrier
+are absent. No real two-process OpenMW driver exists. Reconnect ownership,
+bounded retry/presentation behavior, and the test-only typed automation boundary
+await owner approval. No new OpenMW hook, protocol, canonical state, authority,
+or persistence change is proposed.
+
 ## Active files
 
 - Governing policy: `docs/vnext/adr/ADR-0007-openmw-hook-patch-queue-policy.md`
@@ -101,11 +110,21 @@ protocol, canonical-state, authority, or OpenMW hook changed.
 - Remote smoothing gate seams:
   `apps/openmw/tes3mp/{providers.hpp,desktop_providers.cpp,adapter.cpp,remote_motion.hpp,remote_motion.cpp}` and
   `components/tes3mp/include/tes3mp/{command_primitives.hpp,observability.hpp}`
+- Disconnect/resume and automation gate seams:
+  `apps/openmw/tes3mp/{adapter.cpp,desktop_connection.cpp,providers.hpp}`,
+  `components/tes3mp/{include/tes3mp/client_session_runtime.hpp,client_session/client_session_runtime.cpp}`,
+  `apps/tes3mp-headless-client/main.cpp`, and `scripts/run_phase7_{join_demo,soak}.py`
 - Patch registry: `docs/vnext/OPENMW_PATCH_REGISTRY.json`,
   `scripts/verify_openmw_patch_registry.py`
 - Evidence: [Phase 8 notes](IMPLEMENTATION_NOTES.md#phase-8--openmw-desktop-vertical-slice)
 
 ## Last verified
+
+Slice 8.7 decision-gate research inspected the active desktop coordinator,
+runtime resume-token boundary, Phase 7 lifecycle/process proofs, accepted
+ADR/GDR constraints, and OpenMW patch inventory on 2026-09-03. All 124
+repository-owned Python tests, patch-registry verification, and diff hygiene
+pass. No production code or prior verification claim changed.
 
 Slice 8.6 focused MSVC 19.51 Debug adapter/smoother contracts, full protocol
 aggregate, headless-client contracts, all 124 repository-owned Python tests,
