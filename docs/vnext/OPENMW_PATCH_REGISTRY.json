@@ -16,9 +16,9 @@
       "id": "P8-002",
       "slice": "8.3",
       "owner": "OpenMW adapter",
-      "purpose": "Create and attach one concrete adapter only when explicitly enabled by validated desktop configuration.",
+      "purpose": "Create and attach one concrete adapter only when explicitly enabled by validated desktop configuration, with fixed-role automation options available only in testing builds.",
       "paths": ["apps/openmw/main.cpp", "apps/openmw/options.cpp"],
-      "tests": ["scripts/tests/test_openmw_patch_registry.py", "openmw_tes3mp_adapter_tests"],
+      "tests": ["scripts/tests/test_openmw_patch_registry.py", "scripts/tests/test_phase8_desktop_harness.py", "openmw_tes3mp_adapter_tests"],
       "disposition": "local product composition",
       "removal_condition": "A supported OpenMW plugin or composition facility fully owns multiplayer startup"
     },

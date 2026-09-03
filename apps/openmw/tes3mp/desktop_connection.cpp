@@ -34,7 +34,9 @@ namespace TES3MP::OpenMWAdapter
 
     DesktopCoordinatorResult makeDesktopCoordinator(std::string_view host, std::uint64_t port,
         std::uint64_t timeoutMilliseconds, const std::filesystem::path& passwordFile, SemanticInputProvider& input,
-        PresentationProvider& presentation, ConnectionStatusProvider& status) noexcept try
+        PresentationProvider& presentation, ConnectionStatusProvider& status,
+        ConnectionControlProvider* control) noexcept
+    try
     {
         if (port == 0 || port > std::numeric_limits<std::uint16_t>::max())
             return DesktopConnectionFailure::InvalidEndpoint;
@@ -83,12 +85,12 @@ namespace TES3MP::OpenMWAdapter
             return DesktopConnectionFailure::RuntimeUnavailable;
         auto versions = std::get<ProtocolVersionRange>(ProtocolVersionRange::create(1, 0, 0));
         auto offer = std::get<CapabilityOffer>(CapabilityOffer::create(std::move(versions), {}, {}));
-        if ((*runtime)->start(*endpoint, ClientHello::fromOffer(std::move(offer)),
-                AuthenticationRequest::join(std::move(*password)))
+        if ((*runtime)->start(
+                *endpoint, ClientHello::fromOffer(std::move(offer)), AuthenticationRequest::join(std::move(*password)))
             != HeadlessClientResult::Accepted)
             return DesktopConnectionFailure::ConnectionRejected;
-        return makeCoordinator(
-            std::move(transport.runtime), std::move(clock), std::move(*runtime), input, presentation, status);
+        return makeCoordinator(std::move(transport.runtime), std::move(clock), std::move(*runtime),
+            ReconnectConfiguration{ *endpoint, *timeouts, *queue }, input, presentation, status, control);
 #else
         return DesktopConnectionFailure::TransportUnavailable;
 #endif

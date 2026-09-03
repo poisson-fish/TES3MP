@@ -28,6 +28,8 @@ namespace
         TES3MP::TransportResult stopListener(TES3MP::ListenerId) override { return TES3MP::TransportResult::UnknownId; }
         TES3MP::TransportAdmission<TES3MP::ConnectAttemptId> connect(const TES3MP::ConnectionEndpoint&) override
         {
+            if (!acceptConnect)
+                return { TES3MP::TransportResult::NotReady, std::nullopt };
             return { TES3MP::TransportResult::Accepted, TES3MP::ConnectAttemptId::initial() };
         }
         TES3MP::TransportResult cancelConnect(TES3MP::ConnectAttemptId) override
@@ -68,6 +70,7 @@ namespace
         TES3MP::TransportResult shutdown() override { return TES3MP::TransportResult::Accepted; }
         bool emit = true;
         bool fail = false;
+        bool acceptConnect = true;
         std::vector<TES3MP::TransportMessage> inbound;
         std::vector<std::byte> sent;
         std::optional<TES3MP::TransportChannel> sentChannel;
@@ -221,4 +224,20 @@ int main()
     require(clientRuntime->queue(MessageClass::SessionControl, MessageKind::ClientHello, helloPayload)
         == ClientRuntimeResult::Accepted);
     require(clientRuntime->flushOutbound() == ClientRuntimeResult::NotConnected);
+
+    FakeRuntime retryRuntime;
+    retryRuntime.acceptConnect = false;
+    auto retryCreated
+        = ClientSessionRuntime::create(retryRuntime, clock, policy, SessionGeneration::initial(), *runtimeQueuePolicy);
+    auto retry = std::get<std::unique_ptr<ClientSessionRuntime>>(std::move(retryCreated));
+    std::array<std::byte, ResumeTokenBytes> retryTokenBytes{};
+    retryTokenBytes.fill(std::byte{ 9 });
+    auto retryToken = ResumeToken::create(retryTokenBytes);
+    runtimeVersions = std::get<ProtocolVersionRange>(ProtocolVersionRange::create(1, 0, 0));
+    runtimeClientOffer = std::get<CapabilityOffer>(CapabilityOffer::create(std::move(runtimeVersions), {}, {}));
+    require(retry->start(endpoint, ClientHello::fromOffer(std::move(runtimeClientOffer)),
+                AuthenticationRequest::resume(std::move(*retryToken)))
+        != HeadlessClientResult::Accepted);
+    require(retry->takeUnsubmittedResumeToken().has_value());
+    require(!retry->takeUnsubmittedResumeToken());
 }

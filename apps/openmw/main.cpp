@@ -15,6 +15,9 @@
 #include "options.hpp"
 #include "tes3mp/desktop_connection.hpp"
 #include "tes3mp/desktop_providers.hpp"
+#ifdef TES3MP_OPENMW_DESKTOP_AUTOMATION
+#include "tes3mp/desktop_automation.hpp"
+#endif
 
 #include <boost/program_options/variables_map.hpp>
 
@@ -61,6 +64,12 @@ namespace
                 return "network transport failed";
             case Status::Disconnected:
                 return "server disconnected";
+            case Status::Reconnecting:
+                return "server disconnected; attempting session resume";
+            case Status::Resumed:
+                return "session resumed";
+            case Status::ResumeFailed:
+                return "session resume failed";
             case Status::ContentMappingFailed:
                 return "desktop fixture content mapping is invalid";
             case Status::PresentationFailed:
@@ -96,7 +105,11 @@ namespace
     {
         void report(TES3MP::OpenMWAdapter::ConnectionStatus status) noexcept override
         {
-            const std::string message = std::string("TES3MP connection stopped: ") + describe(status);
+            using Status = TES3MP::OpenMWAdapter::ConnectionStatus;
+            const std::string prefix = status == Status::Reconnecting || status == Status::Resumed
+                ? "TES3MP connection status: "
+                : "TES3MP connection stopped: ";
+            const std::string message = prefix + describe(status);
             Log(Debug::Error) << message;
             try
             {
@@ -113,7 +126,12 @@ namespace
 bool parseOptions(int argc, char** argv, OMW::Engine& engine, Files::ConfigurationManager& cfgMgr,
     TES3MP::OpenMWAdapter::DesktopSemanticInput& multiplayerInput,
     TES3MP::OpenMWAdapter::DesktopPresentation& multiplayerPresentation,
-    TES3MP::OpenMWAdapter::ConnectionStatusProvider& multiplayerStatus)
+    TES3MP::OpenMWAdapter::ConnectionStatusProvider& multiplayerStatus
+#ifdef TES3MP_OPENMW_DESKTOP_AUTOMATION
+    ,
+    std::unique_ptr<TES3MP::OpenMWAdapter::DesktopAutomation>& multiplayerAutomation
+#endif
+)
 {
     // Create a local alias for brevity
     namespace bpo = boost::program_options;
@@ -248,10 +266,39 @@ bool parseOptions(int argc, char** argv, OMW::Engine& engine, Files::Configurati
         }
         multiplayerInput.configure(fixture);
         multiplayerPresentation.configure(fixture);
+
+        TES3MP::OpenMWAdapter::SemanticInputProvider* input = &multiplayerInput;
+        TES3MP::OpenMWAdapter::PresentationProvider* presentation = &multiplayerPresentation;
+        TES3MP::OpenMWAdapter::ConnectionStatusProvider* status = &multiplayerStatus;
+        TES3MP::OpenMWAdapter::ConnectionControlProvider* control = nullptr;
+#ifdef TES3MP_OPENMW_DESKTOP_AUTOMATION
+        const auto automationRole = variables["tes3mp-automation-role"].as<std::string>();
+        const auto automationOutput = variables["tes3mp-automation-output"].as<Files::MaybeQuotedPath>().u8string();
+        if (!automationRole.empty() || !automationOutput.empty())
+        {
+            const auto role = TES3MP::OpenMWAdapter::parseDesktopAutomationRole(automationRole);
+            if (!role || automationOutput.empty())
+            {
+                Log(Debug::Error) << "TES3MP startup failed: automation role or output is invalid";
+                return false;
+            }
+            multiplayerAutomation = std::make_unique<TES3MP::OpenMWAdapter::DesktopAutomation>(
+                *role, automationOutput, multiplayerPresentation, multiplayerStatus);
+            if (!multiplayerAutomation->valid())
+            {
+                Log(Debug::Error) << "TES3MP startup failed: automation evidence path is unavailable";
+                return false;
+            }
+            input = multiplayerAutomation.get();
+            presentation = multiplayerAutomation.get();
+            status = multiplayerAutomation.get();
+            control = multiplayerAutomation.get();
+        }
+#endif
         auto coordinator = TES3MP::OpenMWAdapter::makeDesktopCoordinator(variables["tes3mp-host"].as<std::string>(),
             variables["tes3mp-port"].as<unsigned>(), variables["tes3mp-timeout-ms"].as<unsigned>(),
-            variables["tes3mp-password-file"].as<Files::MaybeQuotedPath>().u8string(), multiplayerInput,
-            multiplayerPresentation, multiplayerStatus);
+            variables["tes3mp-password-file"].as<Files::MaybeQuotedPath>().u8string(), *input, *presentation, *status,
+            control);
         auto* value = std::get_if<std::unique_ptr<TES3MP::OpenMWAdapter::EngineCoordinator>>(&coordinator);
         if (!value || !*value || !engine.attachMultiplayerCoordinator(std::move(*value)))
         {
@@ -327,11 +374,19 @@ int runApplication(int argc, char* argv[])
     TES3MP::OpenMWAdapter::NullRemoteMotionMetricSink multiplayerMotionMetrics;
     TES3MP::OpenMWAdapter::DesktopPresentation multiplayerPresentation(multiplayerMotionMetrics);
     MultiplayerStatus multiplayerStatus;
+#ifdef TES3MP_OPENMW_DESKTOP_AUTOMATION
+    std::unique_ptr<TES3MP::OpenMWAdapter::DesktopAutomation> multiplayerAutomation;
+#endif
     std::unique_ptr<OMW::Engine> engine = std::make_unique<OMW::Engine>(cfgMgr);
 
     engine->setRecastMaxLogLevel(Debug::getRecastMaxLogLevel());
 
-    if (parseOptions(argc, argv, *engine, cfgMgr, multiplayerInput, multiplayerPresentation, multiplayerStatus))
+    if (parseOptions(argc, argv, *engine, cfgMgr, multiplayerInput, multiplayerPresentation, multiplayerStatus
+#ifdef TES3MP_OPENMW_DESKTOP_AUTOMATION
+            ,
+            multiplayerAutomation
+#endif
+            ))
     {
         if (!Misc::checkRequiredOSGPluginsArePresent())
             return 1;

@@ -38,7 +38,8 @@ namespace TES3MP
         if (result != HeadlessClientResult::Accepted)
         {
             mClientHello.reset();
-            mAuthentication.reset();
+            if (mAuthentication->kind() != AuthenticationCredentialKind::ResumeToken)
+                mAuthentication.reset();
         }
         return result;
     }
@@ -165,9 +166,10 @@ namespace TES3MP
         const auto sessionId = mSession->stateMachine().sessionId();
         if (!snapshot || !sessionId)
             return { ClientRuntimeResult::NotConnected, std::nullopt };
-        const auto self = std::ranges::find_if(snapshot->view().entries(),
-            [&](const auto& entry) { return entry.playerId() == snapshot->header().targetPlayerId()
-                && entry.entityId() == snapshot->header().targetEntityId(); });
+        const auto self = std::ranges::find_if(snapshot->view().entries(), [&](const auto& entry) {
+            return entry.playerId() == snapshot->header().targetPlayerId()
+                && entry.entityId() == snapshot->header().targetEntityId();
+        });
         if (self == snapshot->view().entries().end())
             return { ClientRuntimeResult::ProtocolRejected, std::nullopt };
         auto sequence = mLastQueuedSequence ? mLastQueuedSequence->next()
@@ -200,6 +202,15 @@ namespace TES3MP
     {
         auto result = std::move(mResumeToken);
         mResumeToken.reset();
+        return result;
+    }
+
+    std::optional<ResumeToken> ClientSessionRuntime::takeUnsubmittedResumeToken() noexcept
+    {
+        if (!mAuthentication || mAuthentication->kind() != AuthenticationCredentialKind::ResumeToken)
+            return std::nullopt;
+        auto result = mAuthentication->takeResumeToken();
+        mAuthentication.reset();
         return result;
     }
 

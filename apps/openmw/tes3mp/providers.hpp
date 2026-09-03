@@ -16,6 +16,9 @@ namespace TES3MP::OpenMWAdapter
         TimedOut,
         TransportFailed,
         Disconnected,
+        Reconnecting,
+        Resumed,
+        ResumeFailed,
         ContentMappingFailed,
         PresentationFailed,
     };
@@ -38,6 +41,13 @@ namespace TES3MP::OpenMWAdapter
     public:
         virtual ~ConnectionStatusProvider() = default;
         virtual void report(ConnectionStatus status) noexcept = 0;
+    };
+
+    class ConnectionControlProvider
+    {
+    public:
+        virtual ~ConnectionControlProvider() = default;
+        virtual bool disconnectRequested() noexcept = 0;
     };
 
     class SemanticInputProvider

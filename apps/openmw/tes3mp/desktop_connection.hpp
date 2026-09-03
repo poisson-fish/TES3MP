@@ -25,7 +25,8 @@ namespace TES3MP::OpenMWAdapter
 
     DesktopCoordinatorResult makeDesktopCoordinator(std::string_view host, std::uint64_t port,
         std::uint64_t timeoutMilliseconds, const std::filesystem::path& passwordFile, SemanticInputProvider& input,
-        PresentationProvider& presentation, ConnectionStatusProvider& status) noexcept;
+        PresentationProvider& presentation, ConnectionStatusProvider& status,
+        ConnectionControlProvider* control = nullptr) noexcept;
 }
 
 #endif

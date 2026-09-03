@@ -155,6 +155,16 @@
       "purpose": "Focused contracts for the engine coordinator and semantic input provider boundary."
     },
     {
+      "path": "apps/openmw/tes3mp/desktop_automation.cpp",
+      "status": "A",
+      "purpose": "Implements bounded fixed-role desktop flow, reconnect, and soak automation available only to testing builds."
+    },
+    {
+      "path": "apps/openmw/tes3mp/desktop_automation.hpp",
+      "status": "A",
+      "purpose": "Declares the typed test-only OpenMW desktop automation provider and credential-free evidence boundary."
+    },
+    {
       "path": "apps/openmw/tes3mp/desktop_connection.cpp",
       "status": "A",
       "purpose": "Validates desktop connection configuration, bounds credential loading, and composes the verified transport and client runtime."
@@ -1355,6 +1365,11 @@
       "purpose": "Records approved bounded adapter-side remote smoothing ownership, lifetime, and metric boundaries."
     },
     {
+      "path": "docs/vnext/adr/ADR-0053-phase8-desktop-reconnect-and-automation-composition.md",
+      "status": "A",
+      "purpose": "Records approved bounded desktop reconnect ownership, token retry safety, and test-only automation composition."
+    },
+    {
       "path": "docs/vnext/gdr/GDR-0001-phase7-headless-vertical-slice-behavior.md",
       "status": "A",
       "purpose": "Owner-approved Phase 7 fixture spawn, readiness, cell visibility, provisional tick integration, headless correction, and bounded resume behavior."
@@ -1383,6 +1398,11 @@
       "path": "docs/vnext/gdr/GDR-0015-phase8-remote-motion-presentation.md",
       "status": "A",
       "purpose": "Records approved provisional remote interpolation, extrapolation, correction, and hard-snap behavior."
+    },
+    {
+      "path": "docs/vnext/gdr/GDR-0016-phase8-disconnect-and-resume-presentation.md",
+      "status": "A",
+      "purpose": "Records approved provisional disconnect clearing, input suppression, resume barrier, and terminal-failure behavior."
     },
     {
       "path": "docs/vnext/proofs/cares/CMakeLists.txt",
@@ -1510,6 +1530,11 @@
       "purpose": "Runs the 60-second two-client process soak with portable RSS, matching canonical-view, and bounded queue-drain evidence."
     },
     {
+      "path": "scripts/run_phase8_desktop_demo.py",
+      "status": "A",
+      "purpose": "Runs fixed-role real OpenMW flow, reconnect, and soak processes with bounded credential-free evidence, RSS, and queue checks."
+    },
+    {
       "path": "scripts/run_tes3mp_runtime_safety.py",
       "status": "A",
       "purpose": "Repository-owned fail-closed sanitizer/race/fuzz preset runner with corpus, instrumentation, toolchain, log, and JSON evidence checks."
@@ -1553,6 +1578,11 @@
       "path": "scripts/tests/test_openmw_patch_registry.py",
       "status": "A",
       "purpose": "Positive and schema contracts for the OpenMW semantic patch registry verifier."
+    },
+    {
+      "path": "scripts/tests/test_phase8_desktop_harness.py",
+      "status": "A",
+      "purpose": "Contracts for fixed desktop automation roles, credential-file-only launch, bounded typed completion, and testing-only exposure."
     },
     {
       "path": "scripts/tests/test_run_phase7_join_demo.py",

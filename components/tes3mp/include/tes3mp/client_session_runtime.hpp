@@ -73,6 +73,7 @@ namespace TES3MP
         HeadlessClientSession& session() noexcept { return *mSession; }
         const HeadlessClientSession& session() const noexcept { return *mSession; }
         std::optional<ResumeToken> takeResumeToken() noexcept;
+        std::optional<ResumeToken> takeUnsubmittedResumeToken() noexcept;
         std::uint64_t resumeLifetimeMilliseconds() const noexcept { return mResumeLifetimeMilliseconds; }
 
     private:

@@ -35,6 +35,12 @@ namespace OpenMW
             "OpenMW worldspace mapped to the TES3MP fixture exterior");
         addOption("tes3mp-fixture-avatar", bpo::value<std::string>()->default_value(""),
             "OpenMW NPC record used for transient remote-player presentation");
+#ifdef TES3MP_OPENMW_DESKTOP_AUTOMATION
+        addOption("tes3mp-automation-role", bpo::value<std::string>()->default_value(""),
+            "test-only fixed TES3MP desktop automation role");
+        addOption("tes3mp-automation-output", bpo::value<Files::MaybeQuotedPath>()->default_value({}, ""),
+            "test-only TES3MP desktop automation evidence path");
+#endif
 
         addOption("data",
             bpo::value<Files::MaybeQuotedPathContainer>()

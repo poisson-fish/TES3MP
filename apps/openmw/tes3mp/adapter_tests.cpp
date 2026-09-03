@@ -10,6 +10,7 @@
 #include <limits>
 #include <numbers>
 #include <optional>
+#include <vector>
 
 namespace
 {
@@ -34,6 +35,47 @@ namespace
             TES3MP::Transform(TES3MP::CellId::interior(value<TES3MP::CellSpaceId>(7)), TES3MP::Position3(x, 0, 0),
                 TES3MP::Orientation3(zero, zero, zero)),
             TES3MP::LinearVelocity3(velocity, 0, 0));
+    }
+
+    TES3MP::ServerHello serverHello()
+    {
+        auto versions = std::get<TES3MP::ProtocolVersionRange>(TES3MP::ProtocolVersionRange::create(1, 0, 0));
+        auto client = std::get<TES3MP::CapabilityOffer>(TES3MP::CapabilityOffer::create(versions, {}, {}));
+        auto server = std::get<TES3MP::CapabilityOffer>(TES3MP::CapabilityOffer::create(std::move(versions), {}, {}));
+        auto negotiated = TES3MP::negotiateClientHello(TES3MP::ClientHello::fromOffer(std::move(client)), server);
+        return std::get<TES3MP::ServerHello>(std::move(negotiated));
+    }
+
+    std::vector<std::byte> frame(
+        TES3MP::MessageClass messageClass, TES3MP::MessageKind messageKind, std::span<const std::byte> payload)
+    {
+        return std::get<std::vector<std::byte>>(TES3MP::encodeProtocolFrame(messageClass, messageKind, payload));
+    }
+
+    TES3MP::AuthenticationAcceptedMessage accepted(
+        std::byte marker, std::uint64_t lifetime = TES3MP::MinimumResumeTokenLifetimeMilliseconds)
+    {
+        std::array<std::byte, TES3MP::ResumeTokenBytes> bytes{};
+        bytes.fill(marker);
+        auto token = TES3MP::ResumeToken::create(bytes);
+        return std::move(*TES3MP::AuthenticationAcceptedMessage::create(std::move(*token), lifetime));
+    }
+
+    TES3MP::LatestWinsSnapshot selfSnapshot(TES3MP::SessionGeneration generation)
+    {
+        const auto session = value<TES3MP::SessionId>(1);
+        const auto player = value<TES3MP::PlayerId>(1);
+        const auto entity = value<TES3MP::EntityId>(1);
+        const auto zero = TES3MP::Turn32::fromValue(0);
+        const std::array entries{ TES3MP::SpatialEntitySnapshot(TES3MP::ServerTick::initial(), player, entity,
+            TES3MP::EntityRevision::initial(), TES3MP::AuthorityEpoch::initial(),
+            TES3MP::Transform(TES3MP::CellId::interior(value<TES3MP::CellSpaceId>(7)), TES3MP::Position3(0, 0, 0),
+                TES3MP::Orientation3(zero, zero, zero)),
+            TES3MP::LinearVelocity3(0, 0, 0)) };
+        auto view = std::get<TES3MP::SpatialWorldView>(TES3MP::SpatialWorldView::create(entries));
+        return TES3MP::LatestWinsSnapshot(TES3MP::LatestWinsSnapshotHeader(session, generation, player, entity,
+                                              TES3MP::CanonicalRevision::initial(), std::nullopt),
+            std::move(view));
     }
 
     class MotionMetrics final : public TES3MP::OpenMWAdapter::RemoteMotionMetricSink
@@ -102,6 +144,11 @@ namespace
         TES3MP::TransportResult stopListener(TES3MP::ListenerId) override { return TES3MP::TransportResult::NotReady; }
         TES3MP::TransportAdmission<TES3MP::ConnectAttemptId> connect(const TES3MP::ConnectionEndpoint&) override
         {
+            if (acceptConnections)
+            {
+                pendingAttempt = value<TES3MP::ConnectAttemptId>(nextConnection);
+                return { TES3MP::TransportResult::Accepted, pendingAttempt };
+            }
             return { TES3MP::TransportResult::NotReady, std::nullopt };
         }
         TES3MP::TransportResult cancelConnect(TES3MP::ConnectAttemptId) override
@@ -109,26 +156,54 @@ namespace
             return TES3MP::TransportResult::NotReady;
         }
         TES3MP::TransportResult send(
-            TES3MP::TransportConnectionId, TES3MP::TransportChannel, std::span<const std::byte>) override
+            TES3MP::TransportConnectionId, TES3MP::TransportChannel channel, std::span<const std::byte> bytes) override
         {
-            return TES3MP::TransportResult::NotReady;
+            sentChannel = channel;
+            sent.assign(bytes.begin(), bytes.end());
+            return TES3MP::TransportResult::Accepted;
         }
         TES3MP::TransportReceiveResult receive(
-            TES3MP::TransportConnectionId, std::span<TES3MP::TransportMessage>) override
+            TES3MP::TransportConnectionId, std::span<TES3MP::TransportMessage> output) override
         {
-            return { TES3MP::TransportResult::NotReady, 0 };
+            const auto count = std::min(output.size(), inbound.size());
+            for (std::size_t index = 0; index < count; ++index)
+                output[index] = std::move(inbound[index]);
+            inbound.erase(inbound.begin(), inbound.begin() + static_cast<std::ptrdiff_t>(count));
+            return { acceptConnections ? TES3MP::TransportResult::Accepted : TES3MP::TransportResult::NotReady, count };
         }
         TES3MP::TransportResult close(TES3MP::TransportConnectionId, TES3MP::TransportCloseMode) override
         {
             return TES3MP::TransportResult::Accepted;
         }
-        TES3MP::TransportPollResult poll(std::span<TES3MP::TransportEvent>) override
+        TES3MP::TransportPollResult poll(std::span<TES3MP::TransportEvent> output) override
         {
-            return { failPoll ? TES3MP::TransportResult::RuntimeFailed : TES3MP::TransportResult::Accepted, 0 };
+            if (failPoll)
+                return { TES3MP::TransportResult::RuntimeFailed, 0 };
+            if (pendingAttempt && !output.empty())
+            {
+                const auto connection = value<TES3MP::TransportConnectionId>(nextConnection++);
+                output[0] = { TES3MP::TransportEventKind::ConnectSucceeded, TES3MP::TransportFailure::None,
+                    std::nullopt, pendingAttempt, connection };
+                pendingAttempt.reset();
+                return { TES3MP::TransportResult::Accepted, 1 };
+            }
+            return { TES3MP::TransportResult::Accepted, 0 };
         }
         TES3MP::TransportResult shutdown() override { return TES3MP::TransportResult::Accepted; }
 
         bool failPoll = false;
+        bool acceptConnections = false;
+        std::uint64_t nextConnection = 1;
+        std::optional<TES3MP::ConnectAttemptId> pendingAttempt;
+        std::vector<TES3MP::TransportMessage> inbound;
+        std::vector<std::byte> sent;
+        std::optional<TES3MP::TransportChannel> sentChannel;
+
+        void enqueue(TES3MP::MessageClass messageClass, TES3MP::MessageKind messageKind,
+            std::span<const std::byte> payload, TES3MP::TransportChannel channel)
+        {
+            inbound.push_back({ channel, frame(messageClass, messageKind, payload) });
+        }
     };
 
     class Input final : public TES3MP::OpenMWAdapter::SemanticInputProvider
@@ -166,8 +241,26 @@ namespace
     class Status final : public TES3MP::OpenMWAdapter::ConnectionStatusProvider
     {
     public:
-        void report(TES3MP::OpenMWAdapter::ConnectionStatus value) noexcept override { last = value; }
+        void report(TES3MP::OpenMWAdapter::ConnectionStatus value) noexcept override
+        {
+            last = value;
+            values.push_back(value);
+        }
         std::optional<TES3MP::OpenMWAdapter::ConnectionStatus> last;
+        std::vector<TES3MP::OpenMWAdapter::ConnectionStatus> values;
+    };
+
+    class DisconnectOnce final : public TES3MP::OpenMWAdapter::ConnectionControlProvider
+    {
+    public:
+        bool disconnectRequested() noexcept override
+        {
+            if (!pending)
+                return false;
+            pending = false;
+            return true;
+        }
+        bool pending = true;
     };
 
     class Coordinator final : public TES3MP::OpenMWAdapter::EngineCoordinator
@@ -187,6 +280,11 @@ int main()
 {
     using namespace TES3MP;
     using namespace TES3MP::OpenMWAdapter;
+
+    const auto endpoint = *ConnectionEndpoint::create("127.0.0.1", 25560);
+    const auto timeouts = *SessionTimeoutPolicy::create(1'000'000, 1'000'000, 1'000'000);
+    const auto outbound = *OutboundQueuePolicy::create(64, 512 * 1024, 8, 4, 8, 1, 4, 1, 8, 250);
+    const ReconnectConfiguration reconnect{ endpoint, timeouts, outbound };
 
     require(mapPlanarMovement(0, 0, 0).desiredVelocity() == LinearVelocity3(0, 0, 0));
     require(mapPlanarMovement(1, 0, 0).desiredVelocity() == LinearVelocity3(DesktopFixtureSpeedQuantaPerTick, 0, 0));
@@ -290,17 +388,15 @@ int main()
     Coordinator coordinator;
     coordinator.frame(0.25f);
     require(coordinator.calls == 1 && coordinator.lastDuration == 0.25f);
-    require(!TES3MP::OpenMWAdapter::makeCoordinator({}, {}, {}, input, presentation, status));
+    require(!TES3MP::OpenMWAdapter::makeCoordinator({}, {}, {}, reconnect, input, presentation, status));
 
     auto transport = std::make_unique<IdleTransport>();
     auto* transportObserver = transport.get();
     auto clock = std::make_unique<Clock>();
-    auto timeouts = SessionTimeoutPolicy::create(1'000'000, 1'000'000, 1'000'000);
-    auto outbound = OutboundQueuePolicy::create(64, 512 * 1024, 8, 4, 8, 1, 4, 1, 8, 250);
-    auto created = ClientSessionRuntime::create(*transport, *clock, *timeouts, SessionGeneration::initial(), *outbound);
+    auto created = ClientSessionRuntime::create(*transport, *clock, timeouts, SessionGeneration::initial(), outbound);
     auto runtime = std::get<std::unique_ptr<ClientSessionRuntime>>(std::move(created));
-    auto liveCoordinator
-        = makeCoordinator(std::move(transport), std::move(clock), std::move(runtime), input, presentation, status);
+    auto liveCoordinator = makeCoordinator(
+        std::move(transport), std::move(clock), std::move(runtime), reconnect, input, presentation, status);
     require(static_cast<bool>(liveCoordinator));
     liveCoordinator->frame(0.01f);
     require(presentation.advances == 1);
@@ -309,6 +405,74 @@ int main()
     require(presentation.clears == 1 && status.last == ConnectionStatus::Disconnected);
     liveCoordinator.reset();
     require(presentation.clears == 2);
+
+    Input reconnectInput;
+    Presentation reconnectPresentation;
+    Status reconnectStatus;
+    DisconnectOnce disconnect;
+    auto reconnectTransport = std::make_unique<IdleTransport>();
+    auto* reconnectTransportObserver = reconnectTransport.get();
+    reconnectTransportObserver->acceptConnections = true;
+    auto reconnectClock = std::make_unique<Clock>();
+    auto* reconnectClockObserver = reconnectClock.get();
+    auto reconnectCreated = ClientSessionRuntime::create(
+        *reconnectTransport, *reconnectClock, timeouts, SessionGeneration::initial(), outbound);
+    auto reconnectRuntime = std::get<std::unique_ptr<ClientSessionRuntime>>(std::move(reconnectCreated));
+    auto versions = std::get<ProtocolVersionRange>(ProtocolVersionRange::create(1, 0, 0));
+    auto offer = std::get<CapabilityOffer>(CapabilityOffer::create(std::move(versions), {}, {}));
+    const std::array passwordBytes{ std::byte{ 1 } };
+    auto password = AuthenticationMaterial::create(passwordBytes);
+    require(password
+        && reconnectRuntime->start(
+               endpoint, ClientHello::fromOffer(std::move(offer)), AuthenticationRequest::join(std::move(*password)))
+            == HeadlessClientResult::Accepted);
+    auto reconnectCoordinator = makeCoordinator(std::move(reconnectTransport), std::move(reconnectClock),
+        std::move(reconnectRuntime), reconnect, reconnectInput, reconnectPresentation, reconnectStatus, &disconnect);
+    reconnectCoordinator->frame(0.01f);
+    auto helloPayload = encodeServerHello(serverHello());
+    reconnectTransportObserver->enqueue(
+        MessageClass::SessionControl, MessageKind::ServerHello, helloPayload, TransportChannel::ReliableOrdered);
+    reconnectCoordinator->frame(0.01f);
+    auto initialAccepted = accepted(std::byte{ 2 }, 2 * MinimumResumeTokenLifetimeMilliseconds);
+    auto initialAcceptedPayload = encodeAuthenticationAccepted(initialAccepted);
+    reconnectTransportObserver->enqueue(MessageClass::SessionControl, MessageKind::AuthenticationAccepted,
+        initialAcceptedPayload, TransportChannel::ReliableOrdered);
+    auto initialSnapshot = selfSnapshot(SessionGeneration::initial());
+    auto initialSnapshotPayload = encodeLatestWinsSnapshot(initialSnapshot);
+    reconnectTransportObserver->enqueue(MessageClass::LatestWinsSnapshot, MessageKind::LatestWinsSnapshot,
+        initialSnapshotPayload, TransportChannel::LatestWins);
+    reconnectCoordinator->frame(0.01f);
+    require(reconnectPresentation.calls == 1);
+
+    reconnectTransportObserver->acceptConnections = false;
+    reconnectCoordinator->frame(0.01f);
+    require(reconnectPresentation.clears == 1 && reconnectStatus.last == ConnectionStatus::Reconnecting);
+    reconnectTransportObserver->acceptConnections = true;
+    reconnectClockObserver->nanoseconds = 999'999'999;
+    reconnectCoordinator->frame(0.01f);
+    require(!reconnectTransportObserver->pendingAttempt && reconnectTransportObserver->nextConnection == 2);
+    reconnectClockObserver->nanoseconds = 1'000'000'000;
+    reconnectCoordinator->frame(0.01f);
+    require(reconnectTransportObserver->pendingAttempt && reconnectTransportObserver->nextConnection == 2);
+    reconnectCoordinator->frame(0.01f);
+    reconnectTransportObserver->enqueue(
+        MessageClass::SessionControl, MessageKind::ServerHello, helloPayload, TransportChannel::ReliableOrdered);
+    reconnectCoordinator->frame(0.01f);
+    auto sentResumeFrame = decodeProtocolFrame(reconnectTransportObserver->sent);
+    require(std::holds_alternative<DecodedFrame>(sentResumeFrame));
+    auto sentResume = decodeAuthenticationRequest(std::get<DecodedFrame>(sentResumeFrame).payload());
+    require(std::holds_alternative<AuthenticationRequest>(sentResume)
+        && std::get<AuthenticationRequest>(std::move(sentResume)).kind() == AuthenticationCredentialKind::ResumeToken);
+    auto rotatedAccepted = accepted(std::byte{ 3 });
+    auto rotatedAcceptedPayload = encodeAuthenticationAccepted(rotatedAccepted);
+    reconnectTransportObserver->enqueue(MessageClass::SessionControl, MessageKind::AuthenticationAccepted,
+        rotatedAcceptedPayload, TransportChannel::ReliableOrdered);
+    auto resumedSnapshot = selfSnapshot(*SessionGeneration::initial().next());
+    auto resumedSnapshotPayload = encodeLatestWinsSnapshot(resumedSnapshot);
+    reconnectTransportObserver->enqueue(MessageClass::LatestWinsSnapshot, MessageKind::LatestWinsSnapshot,
+        resumedSnapshotPayload, TransportChannel::LatestWins);
+    reconnectCoordinator->frame(0.01f);
+    require(reconnectPresentation.calls == 2 && reconnectStatus.last == ConnectionStatus::Resumed);
 
     require(std::get<TES3MP::OpenMWAdapter::DesktopConnectionFailure>(
                 TES3MP::OpenMWAdapter::makeDesktopCoordinator("", 25560, 1000, {}, input, presentation, status))

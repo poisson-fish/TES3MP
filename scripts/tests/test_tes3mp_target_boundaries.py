@@ -110,7 +110,9 @@ class TES3MPTargetBoundaryTests(unittest.TestCase):
         status_body = source.split("class MultiplayerStatus final", 1)[1].split("};", 1)[0]
         self.assertIn('Log(Debug::Error) << message', status_body)
         self.assertIn('getWindowManager()->messageBox(message)', status_body)
-        self.assertIn('std::string("TES3MP connection stopped: ") + describe(status)', status_body)
+        self.assertIn('"TES3MP connection status: "', status_body)
+        self.assertIn('"TES3MP connection stopped: "', status_body)
+        self.assertIn('prefix + describe(status)', status_body)
         for secret_source in ("tes3mp-password-file", "passwordFile", "AuthenticationMaterial"):
             self.assertNotIn(secret_source, status_body)
 
