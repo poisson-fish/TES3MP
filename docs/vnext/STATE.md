@@ -15,7 +15,7 @@ remains the [implementation plan](IMPLEMENTATION_PLAN.md#phase-8--openmw-desktop
 - Governing decisions: [ADR-0007](adr/ADR-0007-openmw-hook-patch-queue-policy.md),
   [ADR-0047](adr/ADR-0047-phase8-adapter-lifecycle-and-provider-boundary.md),
   [ADR-0048](adr/ADR-0048-canonical-revision-and-simulation-tick-separation.md)
-- Latest implementation commit: `906cfc809a` (`Separate canonical revision from simulation tick`)
+- Latest implementation commit: `eafc110d16` (`Unify client runtime orchestration`)
 
 ## Working synopsis
 
