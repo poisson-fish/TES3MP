@@ -15,6 +15,7 @@ remains the [implementation plan](IMPLEMENTATION_PLAN.md#phase-8--openmw-desktop
 - Slice 8.3: **In Progress**
 - Slice 8.4: **In Progress**
 - Slice 8.5: **In Progress** (owner desktop demo remains)
+- Slice 8.6: **Not Started** (decision review pending)
 - Governing decisions: [ADR-0007](adr/ADR-0007-openmw-hook-patch-queue-policy.md),
   [ADR-0047](adr/ADR-0047-phase8-adapter-lifecycle-and-provider-boundary.md),
   [ADR-0048](adr/ADR-0048-canonical-revision-and-simulation-tick-separation.md),
@@ -71,6 +72,13 @@ bounded world velocity; one pending plus one latest desired intent bounds
 traffic; newer same-cell snapshots correct local position exactly. No new
 OpenMW hook was needed. Automated gates pass; the owner desktop demo remains.
 
+Slice 8.6 gate research found that remote avatars currently update only when a
+new authoritative snapshot is applied. The provider contract has no per-frame
+clock input or bounded sample history. Smoothing ownership, client-local state
+scope, fixture tuning, discontinuity/reset behavior, and metric ownership await
+owner approval. The existing renderer-only avatar update seam appears
+sufficient; no new OpenMW hook is proposed.
+
 ## Active files
 
 - Governing policy: `docs/vnext/adr/ADR-0007-openmw-hook-patch-queue-policy.md`
@@ -87,11 +95,18 @@ OpenMW hook was needed. Automated gates pass; the owner desktop demo remains.
 - Movement gate seams:
   `apps/openmw/tes3mp/{providers.hpp,desktop_providers.cpp,adapter.cpp,movement_mapping.hpp,movement_mapping.cpp}` and
   `components/tes3mp/{client_session/client_session_runtime.cpp,server_core/server_command_reducer.cpp}`
+- Remote smoothing gate seams:
+  `apps/openmw/tes3mp/{providers.hpp,desktop_providers.cpp,adapter.cpp}` and
+  `components/tes3mp/include/tes3mp/{command_primitives.hpp,observability.hpp}`
 - Patch registry: `docs/vnext/OPENMW_PATCH_REGISTRY.json`,
   `scripts/verify_openmw_patch_registry.py`
 - Evidence: [Phase 8 notes](IMPLEMENTATION_NOTES.md#phase-8--openmw-desktop-vertical-slice)
 
 ## Last verified
+
+Slice 8.6 decision-gate research, all 124 repository-owned Python tests, patch
+registry, and diff hygiene pass on 2026-09-03. No production code or prior test
+claim changed.
 
 Slice 8.5's focused reducer/property and movement/coordinator contracts, full
 protocol aggregate, headless-client contracts, adapter contracts, patch

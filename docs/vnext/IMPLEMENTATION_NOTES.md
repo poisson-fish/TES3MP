@@ -5032,6 +5032,24 @@ only the relevant phase section here.
 
 ## Phase 8 — OpenMW desktop vertical slice
 
+### 2026-09-03 — Slice 8.6 decision-gate research
+
+- Status: **Not Started**; no production implementation began.
+- Finding: remote avatars currently move only when a newer authoritative
+  snapshot is applied. The presentation provider owns the renderer-only avatar
+  handles, but its contract has no per-frame clock input or bounded sample
+  history. The existing avatar `update` seam is sufficient; no deeper OpenMW
+  hook appears necessary.
+- Decision gate: the owner must approve smoothing ownership, client-local state
+  scope, fixture delay/extrapolation/correction thresholds, discontinuity and
+  reset behavior, and metric ownership. These are presentation/gameplay and
+  architecture choices; Phase 12 still owns production locomotion tuning.
+- Verification: source and accepted-decision inspection, all 124
+  repository-owned Python tests, patch-registry verification, and diff hygiene
+  pass. The prior Slice 8.5 automated evidence remains current.
+
+[Back to the phase tracker](IMPLEMENTATION_PLAN.md#phase-8--openmw-desktop-vertical-slice)
+
 ### 2026-09-03 — Slice 8.5 approved movement implementation
 
 - Status: **In Progress**; owner two-client desktop demo remains.
