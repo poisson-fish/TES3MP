@@ -10,7 +10,8 @@ remains the [implementation plan](IMPLEMENTATION_PLAN.md#phase-8--openmw-desktop
 - Branch: `vnext`
 - Phase 7: **Implemented**
 - Phase 8: **In Progress**
-- Slice 8.1: **In Progress** (hook inventory and owner review)
+- Slice 8.1: **Implemented**
+- Slice 8.2: **Not Started** (provider-interface decision pending)
 - Governing decision: [ADR-0007](adr/ADR-0007-openmw-hook-patch-queue-policy.md)
 - Latest implementation commit: `e01967ee8e` (`Prevent contradictory same-tick snapshots`)
 
@@ -31,8 +32,9 @@ and queue contracts. An owner-approved two-pass application pump now coalesces
 intermediate same-tick views before transport; the deterministic regression and
 optimized lifecycle demo pass without weakening client contradiction rejection.
 The project owner accepted the Slice 7.7 implementation demo and Phase 7 exit
-gate on 2026-09-02. Phase 8 Slice 8.1 is now active; exact OpenMW hook paths and
-call sites require inventory and owner approval before implementation.
+gate on 2026-09-02. The owner approved the exact Slice 8.1 P8-001 through P8-003
+hook inventory on 2026-09-02. Slice 8.2 is next; provider-interface architecture
+requires approval before implementation.
 
 ## Active files
 

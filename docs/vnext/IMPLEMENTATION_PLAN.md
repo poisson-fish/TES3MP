@@ -661,7 +661,7 @@ Depends on: Phase 7.
 
 | Slice | Deliverable | Status | Completion evidence |
 |---|---|---|---|
-| 8.1 | Inventory the minimum required OpenMW hooks and review the final patch surface with the owner | **In Progress** | Exact composition/lifetime and post-input frame-hook packet prepared from the clean OpenMW baseline; owner approval remains pending |
+| 8.1 | Inventory the minimum required OpenMW hooks and review the final patch surface with the owner | **Implemented** | ADR-0007 records owner-approved Option A and exact P8-001 through P8-003 paths, needs, tests, dispositions, and removal conditions |
 | 8.2 | Implement the adapter lifecycle and desktop input/presentation provider interfaces | **Not Started** | Adapter owns every direct OpenMW dependency; client-session remains headless |
 | 8.3 | Connect/authenticate/join from OpenMW with actionable UI errors | **Not Started** | Version, capability, auth, timeout, and disconnect paths are testable |
 | 8.4 | Map interior/exterior cell changes and spawn/despawn remote player presentation | **Not Started** | Two clients observe correct cell and peer lifecycle behavior |

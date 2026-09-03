@@ -5034,6 +5034,22 @@ only the relevant phase section here.
 
 [Back to the phase tracker](IMPLEMENTATION_PLAN.md#phase-8--openmw-desktop-vertical-slice)
 
+- 2026-09-02 — Slice 8.1 exact-hook inventory — Implemented
+  - Change: amended accepted ADR-0007 with exact P8-001 through P8-003 engine,
+    executable-composition, and target-wiring seams plus their needs, evidence,
+    dispositions, and removal conditions.
+  - Decisions: owner approved Option A: executable-created concrete adapter,
+    engine-owned narrow coordinator, one optional main-thread call immediately
+    after input update and before Lua/world mutation, and coordinator teardown
+    before OpenMW dependencies. No deeper gameplay or presentation hook is
+    authorized.
+  - Verification: the inventory maps every approved non-adapter path to tests
+    and patch policy; all 117 repository-owned Python tests and diff checks pass.
+  - Owner review: explicit Option A and exact-inventory approval received on
+    2026-09-02.
+  - Follow-ups: Slice 8.2 implements only this approved lifecycle/frame boundary
+    and separately reviews provider-interface choices before production code.
+
 - 2026-09-02 — Slice 8.1 exact-hook research — In Progress
   - Change: inspected only the accepted ADR-0007 boundaries, existing adapter
     anchor/target, OpenMW target composition, `Engine` lifetime, and frame order.

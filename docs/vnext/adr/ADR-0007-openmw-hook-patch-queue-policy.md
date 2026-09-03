@@ -6,6 +6,8 @@ Date opened: 2026-08-26
 
 Date approved: 2026-08-26
 
+Phase 8.1 inventory approved: 2026-09-02
+
 Decision owner: project owner
 
 Needed by: Phase 2
@@ -367,6 +369,28 @@ The Phase 8.1 owner review must turn this budget into an exact path/call-site
 inventory. A hook omitted from that inventory remains unauthorized until the
 inventory is amended and reviewed.
 
+## Phase 8.1 approved exact hook inventory
+
+The project owner approved Option A on 2026-09-02. The OpenMW executable creates
+the concrete adapter and attaches one narrow coordinator interface to `Engine`.
+`Engine` owns the coordinator, invokes it once on the main thread immediately
+after `mInputManager->update(frametime, false)` and before the window-visibility
+branch, Lua synchronization, state, scripts, mechanics, physics, or world
+mutation, and destroys it before any OpenMW subsystem dependency.
+
+| Patch | Exact path and seam | Adapter need | Required evidence | Disposition | Removal condition |
+|---|---|---|---|---|---|
+| P8-001 | `apps/openmw/engine.hpp` and `apps/openmw/engine.cpp`: optional owned coordinator attachment, one post-input frame call, and ordered reset at the start of `Engine::~Engine` | Stable main-thread lifetime and frame ordering without concrete adapter/session dependencies | disabled-mode equivalence, post-input/pre-world order, main-thread-only call, and shutdown-before-dependencies tests | local; possible general-purpose upstream candidate, but no contact authorized | OpenMW supplies an equivalent reviewed lifecycle/frame seam |
+| P8-002 | `apps/openmw/main.cpp`: create and attach the concrete adapter only when multiplayer configuration enables it | Executable-level acyclic composition | disabled mode creates no adapter; enabled construction/attachment failure is bounded and actionable | local product composition | a future supported OpenMW plugin/composition facility fully owns this boundary |
+| P8-003 | `apps/openmw/CMakeLists.txt`: link `openmw` to `TES3MP::OpenMWAdapter` after the adapter target is declared, without adding an `openmw-lib` back-edge | Concrete factory availability at the executable boundary | target graph remains acyclic and engine-independent targets remain OpenMW-free | local product build wiring | adapter becomes an independently loaded supported module without a build edge |
+
+The coordinator interface and concrete factory live under `apps/openmw/tes3mp/`.
+Those adapter-owned files are not OpenMW baseline patches, but remain subject to
+the dependency, main-thread, bounded-work, and no-packet-handling constraints.
+No deeper input, cell, world, mechanics, physics, UI, or presentation hook is
+approved by this inventory. Such a hook requires an amended inventory and owner
+review before implementation.
+
 ## Approved acceptance tests and evidence
 
 The owning phases must add these checks:
@@ -473,5 +497,6 @@ upstreaming is later desired. No upstream contact or submission is authorized
 by this ADR; that requires a later explicit owner decision.
 
 This approval establishes the integration and patch-maintenance framework.
-Phase 8 Slice 8.1 still requires an exact path/call-site inventory and owner
-review, and the relevant GDRs still own player-visible behavior.
+The project owner approved the Phase 8 Slice 8.1 exact path/call-site inventory
+and Option A narrow coordinator boundary on 2026-09-02. The relevant GDRs still
+own player-visible behavior.
