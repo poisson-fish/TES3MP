@@ -50,6 +50,16 @@ The owner demo must show two clients moving simultaneously, observing converged
 same-cell roots and velocity, rejecting a stale view, and one atomic overflow
 failure.
 
+## Same-tick publication clarification
+
+The project owner approved Option A on 2026-09-02 after the optimized lifecycle
+demo exposed two different observer views carrying the same `ServerTick`.
+`ServerApplication` completes the pump's connection, lifecycle, and command
+work before pumping any outbound queue. The existing latest-wins queue therefore
+coalesces intermediate same-tick views before transport. The client continues
+to reject a contradictory same-tick view as a producer defect; no protocol
+sequence, authority rule, state scope, or gameplay behavior changes.
+
 ## Review triggers
 
 Reopen before adding partial/delta views, prediction, interpolation, collision,
@@ -59,4 +69,5 @@ or a sequence separate from `ServerTick`.
 ## Owner approval
 
 Approved by the project owner on 2026-09-02: Option A for the atomic writer tick
-and Option A for targeted complete same-cell latest-wins views.
+and Option A for targeted complete same-cell latest-wins views. The owner also
+approved the two-pass outbound-pump clarification on 2026-09-02.

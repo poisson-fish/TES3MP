@@ -12,7 +12,7 @@ remains the [implementation plan](IMPLEMENTATION_PLAN.md#phase-7--headless-end-t
 - Slice 7.6: **Implemented**
 - Slice 7.7: **In Progress**
 - Governing decision: [ADR-0046](adr/ADR-0046-phase7-adverse-network-and-soak-matrix.md)
-- Latest implementation commit: `f30b55c80b` (`Add Phase 7 real-process soak proof`)
+- Latest implementation commit: `e01967ee8e` (`Prevent contradictory same-tick snapshots`)
 
 ## Working synopsis
 
@@ -27,8 +27,10 @@ Slice 7.7 layered matrix, thresholds, and RSS-window rule are approved. The
 bounded named profiles, seeded 10,000-tick matrix, paced 32-cycle reconnect,
 queue high-water/zero-drain proof, and 60-second two-client real-process soak
 pass replay, fault, convergence, identity/progress, matching-view, bounded RSS,
-and queue contracts. Owner implementation-demo and Phase 7 exit-gate reviews
-remain pending.
+and queue contracts. An owner-approved two-pass application pump now coalesces
+intermediate same-tick views before transport; the deterministic regression and
+optimized lifecycle demo pass without weakening client contradiction rejection.
+Owner implementation-demo and Phase 7 exit-gate reviews remain pending.
 
 ## Active files
 

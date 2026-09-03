@@ -4293,6 +4293,26 @@ only the relevant phase section here.
 
 [Back to the phase tracker](IMPLEMENTATION_PLAN.md#phase-7--headless-end-to-end-multiplayer-slice)
 
+- 2026-09-02 — Slice 7.7 same-tick publication correction — In Progress
+  - Change: implementation `e01967ee8e` makes the server application complete
+    connection, lifecycle, and command work before pumping outbound queues.
+    Latest-wins coalescing now prevents intermediate same-tick views from
+    reaching an observer.
+  - Decisions: owner approved Option A on 2026-09-02. ADR-0044 records the
+    two-pass pump clarification. Client contradiction rejection, protocol,
+    authority, state scope, and gameplay behavior remain unchanged.
+  - Verification: the deterministic two-connection regression proves the first
+    observer receives one final two-player snapshot rather than two different
+    same-tick snapshots. MSVC 19.51 RelWithDebInfo builds and passes
+    `tes3mp_server_app_tests_run`; the optimized full lifecycle process demo
+    passes after reproducing `ContradictorySameTick` before the fix. All 117
+    Python tests, baseline provenance with 290 intentional differences and 69
+    dependency inputs, legacy exclusion, and `git diff --check` pass.
+  - Owner review: correction design approved; Slice 7.7 implementation-demo and
+    Phase 7 exit-gate approval remain pending.
+  - Follow-ups: owner reviews the corrected complete evidence; then Slice 7.7
+    and Phase 7 may advance only through their required review gates.
+
 - 2026-09-02 — Slice 7.7 real-process soak — In Progress
   - Change: implementation `f30b55c80b` adds two bounded idle soak-client
     modes, a portable Windows/Linux/macOS RSS sampler, equal-window sustained
