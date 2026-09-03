@@ -51,6 +51,7 @@ namespace TES3MP::OpenMWAdapter
                     return;
                 }
                 const auto& snapshot = mRuntime->session().stateMachine().confirmedSnapshot();
+                const auto now = mClock->now();
                 if (snapshot)
                     mMotion.observeAcknowledgement(snapshot->header().acknowledgedCommandSequence());
                 bool finalizedCellTransition = false;
@@ -62,14 +63,19 @@ namespace TES3MP::OpenMWAdapter
                 }
                 if ((advanced.snapshotApplied || advanced.observationApplied) && snapshot)
                 {
-                    const auto applied = mPresentation.applyAuthoritative(*snapshot,
-                        mRuntime->session().observedPlayers(),
-                        !mPendingCellTransition && !mDeferredCellTransition && !captured.transition);
+                    const auto applied
+                        = mPresentation.applyAuthoritative(*snapshot, mRuntime->session().observedPlayers(),
+                            !mPendingCellTransition && !mDeferredCellTransition && !captured.transition, now);
                     if (applied != ProviderResult::Accepted)
                     {
                         closeForProviderFailure(applied);
                         return;
                     }
+                }
+                if (mPresentation.advance(now) != ProviderResult::Accepted)
+                {
+                    closeForProviderFailure(ProviderResult::PresentationFailed);
+                    return;
                 }
                 if (captured.transition)
                 {
@@ -96,6 +102,7 @@ namespace TES3MP::OpenMWAdapter
                     });
                     if (self == snapshot->view().entries().end())
                     {
+                        mPresentation.clear();
                         mRuntime->close();
                         mStatus.report(ConnectionStatus::TransportFailed);
                         mClosed = true;
@@ -107,6 +114,7 @@ namespace TES3MP::OpenMWAdapter
                         if (queued.result != ClientRuntimeResult::Accepted || !queued.sequence
                             || !mMotion.markQueued(*queued.sequence))
                         {
+                            mPresentation.clear();
                             mRuntime->close();
                             mStatus.report(ConnectionStatus::TransportFailed);
                             mClosed = true;
@@ -116,6 +124,7 @@ namespace TES3MP::OpenMWAdapter
                 }
                 if (mRuntime->flushOutbound() != ClientRuntimeResult::Accepted)
                 {
+                    mPresentation.clear();
                     mStatus.report(ConnectionStatus::TransportFailed);
                     mClosed = true;
                 }
@@ -123,11 +132,12 @@ namespace TES3MP::OpenMWAdapter
 
             void reportFailure(ClientRuntimeResult result, ClientSessionAction action) noexcept
             {
+                mPresentation.clear();
                 if (action == ClientSessionAction::SessionRejected)
                 {
                     const auto& state = mRuntime->session().stateMachine();
                     mStatus.report(state.authenticationRejection() ? ConnectionStatus::AuthenticationRejected
-                                                                  : ConnectionStatus::ProtocolRejected);
+                                                                   : ConnectionStatus::ProtocolRejected);
                 }
                 else if (action == ClientSessionAction::SessionTimedOut)
                     mStatus.report(ConnectionStatus::TimedOut);
@@ -154,9 +164,8 @@ namespace TES3MP::OpenMWAdapter
             {
                 mPresentation.clear();
                 mRuntime->close();
-                mStatus.report(result == ProviderResult::ContentMappingFailed
-                        ? ConnectionStatus::ContentMappingFailed
-                        : ConnectionStatus::PresentationFailed);
+                mStatus.report(result == ProviderResult::ContentMappingFailed ? ConnectionStatus::ContentMappingFailed
+                                                                              : ConnectionStatus::PresentationFailed);
                 mClosed = true;
             }
 

@@ -195,6 +195,16 @@
       "purpose": "Separate semantic input and authoritative presentation provider interfaces using domain types."
     },
     {
+      "path": "apps/openmw/tes3mp/remote_motion.cpp",
+      "status": "A",
+      "purpose": "Implements bounded client-local remote interpolation, extrapolation, correction, reset, and typed metric behavior."
+    },
+    {
+      "path": "apps/openmw/tes3mp/remote_motion.hpp",
+      "status": "A",
+      "purpose": "Declares the engine-independent four-sample remote-motion buffer and adapter-owned metric boundary."
+    },
+    {
       "path": "apps/tes3mp-headless-client/CMakeLists.txt",
       "status": "A",
       "purpose": "Defines the approved thin real headless-client process target with explicit engine-independent session and verified-transport dependencies."
@@ -1340,6 +1350,11 @@
       "purpose": "Records approved provisional spatial-intent concurrency and observed-revision policy."
     },
     {
+      "path": "docs/vnext/adr/ADR-0052-phase8-remote-motion-smoothing.md",
+      "status": "A",
+      "purpose": "Records approved bounded adapter-side remote smoothing ownership, lifetime, and metric boundaries."
+    },
+    {
       "path": "docs/vnext/gdr/GDR-0001-phase7-headless-vertical-slice-behavior.md",
       "status": "A",
       "purpose": "Owner-approved Phase 7 fixture spawn, readiness, cell visibility, provisional tick integration, headless correction, and bounded resume behavior."
@@ -1363,6 +1378,11 @@
       "path": "docs/vnext/gdr/GDR-0014-phase8-desktop-movement-and-correction.md",
       "status": "A",
       "purpose": "Records approved deterministic desktop movement mapping and exact local correction behavior."
+    },
+    {
+      "path": "docs/vnext/gdr/GDR-0015-phase8-remote-motion-presentation.md",
+      "status": "A",
+      "purpose": "Records approved provisional remote interpolation, extrapolation, correction, and hard-snap behavior."
     },
     {
       "path": "docs/vnext/proofs/cares/CMakeLists.txt",
@@ -1736,7 +1756,7 @@
         },
         {
           "path": "components/tes3mp/CMakeLists.txt",
-          "sha256": "18f7e79c624f97ebf384770390871bffb4b2d4a7a08cc3b0d5245764e9c75e4a"
+          "sha256": "434e0b93c057cbdde847e1e8c2466ec4eff114d6aefca441a9acbce85ecbaf3a"
         },
         {
           "path": "components/tes3mp/protocol/generated/authentication_accepted_generated.h",

@@ -11,9 +11,9 @@
 #include "../mwworld/scene.hpp"
 #include "../mwworld/worldmodel.hpp"
 
-#include <components/esm3/loadcell.hpp>
 #include <components/esm/position.hpp>
 #include <components/esm/refid.hpp>
+#include <components/esm3/loadcell.hpp>
 
 #include <algorithm>
 #include <cmath>
@@ -45,8 +45,7 @@ namespace TES3MP::OpenMWAdapter
             }
             if (cell.getWorldSpace() != refId(mapping.exteriorWorldspace))
                 return std::nullopt;
-            return CellId::exterior(
-                *CellSpaceId::fromValue(ExteriorFixture), cell.getGridX(), cell.getGridY());
+            return CellId::exterior(*CellSpaceId::fromValue(ExteriorFixture), cell.getGridX(), cell.getGridY());
         }
 
         ESM::Position toOpenMW(const Transform& transform)
@@ -58,12 +57,26 @@ namespace TES3MP::OpenMWAdapter
             result.pos[2] = static_cast<float>(static_cast<double>(position.z()) / PositionScale);
             const auto orientation = transform.orientation();
             const auto radians = [](Turn32 turn) {
-                return -static_cast<float>(static_cast<double>(turn.value()) / TurnScale
-                    * 2.0 * std::numbers::pi);
+                return -static_cast<float>(static_cast<double>(turn.value()) / TurnScale * 2.0 * std::numbers::pi);
             };
             result.rot[0] = radians(orientation.x());
             result.rot[1] = radians(orientation.y());
             result.rot[2] = radians(orientation.z());
+            return result;
+        }
+
+        ESM::Position toOpenMW(const RemoteMotionPose& pose)
+        {
+            ESM::Position result{};
+            result.pos[0] = static_cast<float>(pose.x / PositionScale);
+            result.pos[1] = static_cast<float>(pose.y / PositionScale);
+            result.pos[2] = static_cast<float>(pose.z / PositionScale);
+            const auto radians = [](Turn32 turn) {
+                return -static_cast<float>(static_cast<double>(turn.value()) / TurnScale * 2.0 * std::numbers::pi);
+            };
+            result.rot[0] = radians(pose.orientation.x());
+            result.rot[1] = radians(pose.orientation.y());
+            result.rot[2] = radians(pose.orientation.z());
             return result;
         }
 
@@ -79,8 +92,8 @@ namespace TES3MP::OpenMWAdapter
             const auto* exterior = cell.asExterior();
             if (!exterior || exterior->worldspace().value() != ExteriorFixture)
                 return nullptr;
-            return &worldModel->getExterior(ESM::ExteriorCellLocation(
-                exterior->gridX(), exterior->gridY(), refId(mapping.exteriorWorldspace)));
+            return &worldModel->getExterior(
+                ESM::ExteriorCellLocation(exterior->gridX(), exterior->gridY(), refId(mapping.exteriorWorldspace)));
         }
     }
 
@@ -148,18 +161,44 @@ namespace TES3MP::OpenMWAdapter
         {
             MWWorld::CellStore* cell = nullptr;
             std::unique_ptr<MWRender::TransientActorPresentation> actor;
+            RemoteMotionBuffer motion;
+
+            Remote(MWWorld::CellStore* targetCell, std::unique_ptr<MWRender::TransientActorPresentation> targetActor,
+                RemoteMotionMetricSink& metrics)
+                : cell(targetCell)
+                , actor(std::move(targetActor))
+                , motion(metrics)
+            {
+            }
         };
 
+        explicit Impl(RemoteMotionMetricSink& targetMetrics)
+            : metrics(targetMetrics)
+        {
+        }
+
         DesktopFixtureMapping mapping;
+        RemoteMotionMetricSink& metrics;
         std::map<EntityId, Remote> remotes;
 
         void clear() noexcept
         {
+            for (auto& [entity, remote] : remotes)
+            {
+                (void)entity;
+                remote.motion.clear();
+            }
             remotes.clear();
         }
 
+        void erase(std::map<EntityId, Remote>::iterator iter) noexcept
+        {
+            iter->second.motion.clear();
+            remotes.erase(iter);
+        }
+
         ProviderResult apply(const LatestWinsSnapshot& snapshot, std::span<const ObservedPlayer> observedPlayers,
-            bool allowLocalCellCorrection)
+            bool allowLocalCellCorrection, MonotonicInstant receivedAt)
         {
             const auto self = std::ranges::find_if(snapshot.view().entries(), [&](const auto& entry) {
                 return entry.playerId() == snapshot.header().targetPlayerId()
@@ -208,25 +247,41 @@ namespace TES3MP::OpenMWAdapter
                 if (found == remotes.end() || found->second.cell != targetCell)
                 {
                     if (found != remotes.end())
-                        remotes.erase(found);
+                        erase(found);
                     auto actor = MWRender::TransientActorPresentation::create(*world->getRenderingManager(),
                         *MWBase::Environment::get().getESMStore(), refId(mapping.avatarNpc), *targetCell, position);
-                    remotes.emplace(observed.entityId, Remote{ targetCell, std::move(actor) });
+                    found = remotes.try_emplace(observed.entityId, targetCell, std::move(actor), metrics).first;
                 }
-                else
-                    found->second.actor->update(position);
+                if (!found->second.motion.observe(*entry, receivedAt))
+                    return ProviderResult::PresentationFailed;
             }
             for (auto iter = remotes.begin(); iter != remotes.end();)
                 if (std::ranges::find(desired, iter->first) == desired.end())
+                {
+                    iter->second.motion.clear();
                     iter = remotes.erase(iter);
+                }
                 else
                     ++iter;
             return ProviderResult::Accepted;
         }
+
+        ProviderResult advance(MonotonicInstant now)
+        {
+            for (auto& [entity, remote] : remotes)
+            {
+                (void)entity;
+                auto pose = remote.motion.advance(now);
+                if (!pose)
+                    return ProviderResult::PresentationFailed;
+                remote.actor->update(toOpenMW(*pose));
+            }
+            return ProviderResult::Accepted;
+        }
     };
 
-    DesktopPresentation::DesktopPresentation()
-        : mImpl(std::make_unique<Impl>())
+    DesktopPresentation::DesktopPresentation(RemoteMotionMetricSink& metrics)
+        : mImpl(std::make_unique<Impl>(metrics))
     {
     }
 
@@ -238,11 +293,28 @@ namespace TES3MP::OpenMWAdapter
     }
 
     ProviderResult DesktopPresentation::applyAuthoritative(const LatestWinsSnapshot& snapshot,
-        std::span<const ObservedPlayer> observedPlayers, bool allowLocalCellCorrection) noexcept
+        std::span<const ObservedPlayer> observedPlayers, bool allowLocalCellCorrection,
+        MonotonicInstant receivedAt) noexcept
     {
         try
         {
-            const auto result = mImpl->apply(snapshot, observedPlayers, allowLocalCellCorrection);
+            const auto result = mImpl->apply(snapshot, observedPlayers, allowLocalCellCorrection, receivedAt);
+            if (result != ProviderResult::Accepted)
+                mImpl->clear();
+            return result;
+        }
+        catch (...)
+        {
+            mImpl->clear();
+            return ProviderResult::PresentationFailed;
+        }
+    }
+
+    ProviderResult DesktopPresentation::advance(MonotonicInstant now) noexcept
+    {
+        try
+        {
+            const auto result = mImpl->advance(now);
             if (result != ProviderResult::Accepted)
                 mImpl->clear();
             return result;

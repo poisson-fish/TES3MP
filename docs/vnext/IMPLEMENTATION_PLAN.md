@@ -359,6 +359,9 @@ runtime or protocol name.
 | ADR-0047 | Phase 8 adapter lifecycle and provider boundary | Phase 8 | **Implemented** |
 | ADR-0048 | Canonical revision and simulation tick separation | Phase 8 | **Implemented** |
 | ADR-0049 | Phase 8 desktop connection composition | Phase 8 | **Implemented** |
+| ADR-0050 | Phase 8 cell and remote presentation | Phase 8 | **Implemented** |
+| ADR-0051 | Phase 8 provisional spatial-intent concurrency | Phase 8 | **Implemented** |
+| ADR-0052 | Phase 8 remote motion smoothing | Phase 8 | **Implemented** |
 
 An ADR is complete only when it records considered alternatives, selection
 criteria, consequences, failure modes, a replacement/review trigger, and
@@ -383,6 +386,9 @@ production code that depends on the choice cannot.
 | GDR-0010 | Time, weather, globals, reset, and shared-world evolution semantics | Phase 18 | **Not Started** |
 | GDR-0011 | Phase 4 minimal player-intent authority and session-targeted snapshot semantics | Phase 4 | **Implemented** |
 | GDR-0012 | Phase 5 minimal motion reducer effect, scope, and contention semantics | Phase 5 | **Implemented** |
+| GDR-0013 | Phase 8 cell-transition presentation | Phase 8 | **Implemented** |
+| GDR-0014 | Phase 8 desktop movement and correction | Phase 8 | **Implemented** |
+| GDR-0015 | Phase 8 remote movement presentation | Phase 8 | **Implemented** |
 
 A GDR is **Implemented** only after its questions are explicitly approved and
 the approval is recorded. Later code slices remain separate: an approved design
@@ -669,7 +675,7 @@ Depends on: Phase 7.
 | 8.3 | Connect/authenticate/join from OpenMW with actionable UI errors | **In Progress** | ADR-0049 records approved configuration, credential, timeout, and status policy; executable connection composition, sanitized visible runtime errors, and the MSVC `/MD` real-network `openmw.exe` link are verified; owner demo remains |
 | 8.4 | Map interior/exterior cell changes and spawn/despawn remote player presentation | **In Progress** | Approved ADR-0050/GDR-0013/P8-004 package implemented: explicit snapshot target identity, tracked/coalesced cell transitions, configured fixture mapping, and renderer-only remote avatars; automated gates and owner two-client demo remain |
 | 8.5 | Convert input to semantic movement commands and apply authoritative local correction | **In Progress** | Approved ADR-0051/GDR-0014 implemented in `c4b9cb1cec`: deterministic planar mapping, one-pending/latest intent coordination, ordered stale-revision convergence, and exact same-cell correction pass automated gates; owner two-client desktop demo remains |
-| 8.6 | Interpolate/extrapolate remote movement through a bounded jitter buffer | **Not Started** | Decision review pending: smoothing ownership, client-local buffer scope, fixed fixture tuning, discontinuity/reset behavior, and metric ownership require owner approval before code |
+| 8.6 | Interpolate/extrapolate remote movement through a bounded jitter buffer | **In Progress** | Owner-approved ADR-0052/GDR-0015 fix provider-owned four-sample client-local buffering, two-tick interpolation, three-tick extrapolation, bounded correction/hard snaps, reset rules, and adapter-owned typed metrics; implementation and demo remain |
 | 8.7 | Implement disconnect/resume presentation and automate the two-client slice | **Not Started** | CI or a documented harness executes the desktop flow and captures artifacts |
 
 Exit gate:

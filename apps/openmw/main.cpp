@@ -158,18 +158,18 @@ bool parseOptions(int argc, char** argv, OMW::Engine& engine, Files::Configurati
     Files::PathContainer dataDirs(asPathContainer(variables["data"].as<Files::MaybeQuotedPathContainer>()));
 
     Files::PathContainer::value_type local(variables["data-local"]
-                                               .as<Files::MaybeQuotedPathContainer::value_type>()
-                                               .u8string()); // This call to u8string is redundant, but required to
-                                                             // build on MSVC 14.26 due to implementation bugs.
+            .as<Files::MaybeQuotedPathContainer::value_type>()
+            .u8string()); // This call to u8string is redundant, but required to
+                          // build on MSVC 14.26 due to implementation bugs.
     if (!local.empty())
         dataDirs.push_back(std::move(local));
 
     cfgMgr.filterOutNonExistingPaths(dataDirs);
 
     engine.setResourceDir(variables["resources"]
-                              .as<Files::MaybeQuotedPath>()
-                              .u8string()); // This call to u8string is redundant, but required to build on MSVC 14.26
-                                            // due to implementation bugs.
+            .as<Files::MaybeQuotedPath>()
+            .u8string()); // This call to u8string is redundant, but required to build on MSVC 14.26
+                          // due to implementation bugs.
     engine.setDataDirs(dataDirs);
 
     // fallback archives
@@ -239,7 +239,8 @@ bool parseOptions(int argc, char** argv, OMW::Engine& engine, Files::Configurati
         const TES3MP::OpenMWAdapter::DesktopFixtureMapping fixture{
             variables["tes3mp-fixture-interior"].as<std::string>(),
             variables["tes3mp-fixture-worldspace"].as<std::string>(),
-            variables["tes3mp-fixture-avatar"].as<std::string>() };
+            variables["tes3mp-fixture-avatar"].as<std::string>()
+        };
         if (fixture.interiorCell.empty() || fixture.exteriorWorldspace.empty() || fixture.avatarNpc.empty())
         {
             Log(Debug::Error) << "TES3MP startup failed: fixture interior, worldspace, and avatar are required";
@@ -323,7 +324,8 @@ int runApplication(int argc, char* argv[])
     osg::setNotifyHandler(new OSGLogHandler());
     Files::ConfigurationManager cfgMgr;
     TES3MP::OpenMWAdapter::DesktopSemanticInput multiplayerInput;
-    TES3MP::OpenMWAdapter::DesktopPresentation multiplayerPresentation;
+    TES3MP::OpenMWAdapter::NullRemoteMotionMetricSink multiplayerMotionMetrics;
+    TES3MP::OpenMWAdapter::DesktopPresentation multiplayerPresentation(multiplayerMotionMetrics);
     MultiplayerStatus multiplayerStatus;
     std::unique_ptr<OMW::Engine> engine = std::make_unique<OMW::Engine>(cfgMgr);
 

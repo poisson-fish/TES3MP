@@ -2,6 +2,7 @@
 #define OPENMW_TES3MP_DESKTOP_PROVIDERS_HPP
 
 #include "providers.hpp"
+#include "remote_motion.hpp"
 
 #include <memory>
 #include <string>
@@ -32,11 +33,13 @@ namespace TES3MP::OpenMWAdapter
     class DesktopPresentation final : public PresentationProvider
     {
     public:
-        DesktopPresentation();
+        explicit DesktopPresentation(RemoteMotionMetricSink& metrics);
         ~DesktopPresentation() override;
         void configure(DesktopFixtureMapping mapping);
         ProviderResult applyAuthoritative(const LatestWinsSnapshot& snapshot,
-            std::span<const ObservedPlayer> observedPlayers, bool allowLocalCellCorrection) noexcept override;
+            std::span<const ObservedPlayer> observedPlayers, bool allowLocalCellCorrection,
+            MonotonicInstant receivedAt) noexcept override;
+        ProviderResult advance(MonotonicInstant now) noexcept override;
         void clear() noexcept override;
 
     private:

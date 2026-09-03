@@ -15,15 +15,17 @@ remains the [implementation plan](IMPLEMENTATION_PLAN.md#phase-8--openmw-desktop
 - Slice 8.3: **In Progress**
 - Slice 8.4: **In Progress**
 - Slice 8.5: **In Progress** (owner desktop demo remains)
-- Slice 8.6: **Not Started** (decision review pending)
+- Slice 8.6: **In Progress**
 - Governing decisions: [ADR-0007](adr/ADR-0007-openmw-hook-patch-queue-policy.md),
   [ADR-0047](adr/ADR-0047-phase8-adapter-lifecycle-and-provider-boundary.md),
   [ADR-0048](adr/ADR-0048-canonical-revision-and-simulation-tick-separation.md),
   [ADR-0049](adr/ADR-0049-phase8-desktop-connection-composition.md),
   [ADR-0050](adr/ADR-0050-phase8-cell-and-remote-presentation.md),
   [ADR-0051](adr/ADR-0051-phase8-provisional-spatial-intent-concurrency.md),
+  [ADR-0052](adr/ADR-0052-phase8-remote-motion-smoothing.md),
   [GDR-0013](gdr/GDR-0013-phase8-cell-transition-presentation.md), and
-  [GDR-0014](gdr/GDR-0014-phase8-desktop-movement-and-correction.md)
+  [GDR-0014](gdr/GDR-0014-phase8-desktop-movement-and-correction.md), and
+  [GDR-0015](gdr/GDR-0015-phase8-remote-motion-presentation.md)
 - Latest implementation commit: `c4b9cb1cec` (`Implement Phase 8 desktop movement`)
 
 ## Working synopsis
@@ -72,12 +74,12 @@ bounded world velocity; one pending plus one latest desired intent bounds
 traffic; newer same-cell snapshots correct local position exactly. No new
 OpenMW hook was needed. Automated gates pass; the owner desktop demo remains.
 
-Slice 8.6 gate research found that remote avatars currently update only when a
-new authoritative snapshot is applied. The provider contract has no per-frame
-clock input or bounded sample history. Smoothing ownership, client-local state
-scope, fixture tuning, discontinuity/reset behavior, and metric ownership await
-owner approval. The existing renderer-only avatar update seam appears
-sufficient; no new OpenMW hook is proposed.
+Slice 8.6 is now in progress under owner-approved ADR-0052/GDR-0015. The
+approved boundary is a provider-owned four-sample client-local buffer, driven
+each frame by the injected monotonic clock, with two-tick interpolation,
+three-tick extrapolation, bounded correction/hard snaps, explicit lifetime
+resets, and adapter-owned typed metrics. No protocol, canonical-state,
+authority, or OpenMW hook change is authorized.
 
 ## Active files
 

@@ -12,6 +12,8 @@ add_library(openmw_tes3mp_adapter STATIC
     movement_mapping.cpp
     movement_mapping.hpp
     providers.hpp
+    remote_motion.cpp
+    remote_motion.hpp
 )
 if(TES3MP_OPENMW_DESKTOP_PROVIDERS)
     target_sources(openmw_tes3mp_adapter PRIVATE desktop_providers.cpp desktop_providers.hpp)

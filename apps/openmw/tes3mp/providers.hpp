@@ -53,7 +53,9 @@ namespace TES3MP::OpenMWAdapter
     public:
         virtual ~PresentationProvider() = default;
         virtual ProviderResult applyAuthoritative(const LatestWinsSnapshot& snapshot,
-            std::span<const ObservedPlayer> observedPlayers, bool allowLocalCellCorrection) noexcept = 0;
+            std::span<const ObservedPlayer> observedPlayers, bool allowLocalCellCorrection,
+            MonotonicInstant receivedAt) noexcept = 0;
+        virtual ProviderResult advance(MonotonicInstant now) noexcept = 0;
         virtual void clear() noexcept = 0;
     };
 }
