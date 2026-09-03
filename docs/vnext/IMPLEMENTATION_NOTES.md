@@ -5034,6 +5034,19 @@ only the relevant phase section here.
 
 [Back to the phase tracker](IMPLEMENTATION_PLAN.md#phase-8--openmw-desktop-vertical-slice)
 
+- 2026-09-02 — Slice 8.2 frame order — Approved; implementation gated
+  - Change: recorded the approved correct-then-command frame order in ADR-0047.
+    Repository inspection found the reusable headless session exposes one
+    combined `pump()` and cannot express separate inbound and outbound passes.
+  - Decisions: owner approved bounded inbound drain, authoritative apply,
+    semantic input sample, command queue, then bounded outbound flush. No code
+    chooses the newly exposed session-pump seam yet.
+  - Verification: direct inspection of `headless_client_session.hpp/.cpp`
+    confirms `pump()` owns combined transport polling and event handling.
+  - Owner review: exact frame order approved on 2026-09-02; reusable session API
+    split versus adapter proxy remains an architecture gate.
+  - Follow-ups: approve the reusable pump seam before production implementation.
+
 - 2026-09-02 — Slice 8.2 provider boundary — In Progress
   - Change: added ADR-0047 and advanced Slice 8.2 to **In Progress**; production
     code remains paused at the exact frame-order gate.
@@ -5045,7 +5058,7 @@ only the relevant phase section here.
   - Owner review: provider architecture Option A approved on 2026-09-02. Exact
     drain/presentation/input ordering remains pending because it affects
     correction and command behavior.
-  - Follow-ups: approve frame order, record it in ADR-0047, then implement named
+  - Follow-ups: approve frame order and reusable pump seam, then implement named
     lifecycle/provider contracts and the approved P8-001 through P8-003 seams.
 
 - 2026-09-02 — Slice 8.1 exact-hook inventory — Implemented

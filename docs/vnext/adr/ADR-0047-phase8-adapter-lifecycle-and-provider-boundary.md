@@ -1,6 +1,6 @@
 # ADR-0047: Phase 8 adapter lifecycle and provider boundary
 
-Status: **Accepted; frame order pending**
+Status: **Accepted; session-pump seam pending**
 
 Date opened: 2026-09-02
 
@@ -34,15 +34,24 @@ lifetime, thread, and bounded-work contracts.
 - Tests cover provider lifetime, call thread/order, bounded work, type boundary,
   feedback suppression, disabled mode, and ordered shutdown.
 
-## Pending decision
+## Approved frame order
 
-Before production implementation, the owner must approve the exact per-frame
-ordering among inbound session drain, authoritative presentation, and current
-input sampling/submission. That order affects correction and command semantics
-and is not inferred from this interface approval.
+The project owner approved Option A on 2026-09-02: bounded inbound drain, apply
+authoritative presentation, sample current semantic input, queue the command,
+then perform a bounded outbound flush. This runs after OpenMW input update.
+Tests must prove the exact order, both work caps, non-blocking behavior, feedback
+suppression, and failure closure.
+
+## Pending session-pump seam
+
+Repository inspection after frame-order approval found that
+`HeadlessClientSession::pump()` combines transport polling and resulting work.
+It cannot express the approved distinct inbound-drain and outbound-flush passes.
+Production implementation therefore remains gated on an owner-approved reusable
+client-session seam; the adapter must not invent a private second session pump.
 
 ## Owner approval
 
 Approved by the project owner on 2026-09-02: Option A, two narrow borrowed
-providers with coordinator-owned session lifecycle. Exact frame order remains
-pending.
+providers with coordinator-owned session lifecycle, followed by Option A exact
+correct-then-command frame order. The reusable session-pump seam remains pending.

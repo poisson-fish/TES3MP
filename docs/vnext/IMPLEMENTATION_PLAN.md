@@ -663,7 +663,7 @@ Depends on: Phase 7.
 | Slice | Deliverable | Status | Completion evidence |
 |---|---|---|---|
 | 8.1 | Inventory the minimum required OpenMW hooks and review the final patch surface with the owner | **Implemented** | ADR-0007 records owner-approved Option A and exact P8-001 through P8-003 paths, needs, tests, dispositions, and removal conditions |
-| 8.2 | Implement the adapter lifecycle and desktop input/presentation provider interfaces | **In Progress** | Accepted ADR-0047 records two narrow borrowed providers and coordinator-owned session lifecycle; exact frame order approval remains pending before code |
+| 8.2 | Implement the adapter lifecycle and desktop input/presentation provider interfaces | **In Progress** | Accepted ADR-0047 records two narrow borrowed providers, coordinator-owned session lifecycle, and approved correct-then-command frame order; reusable session-pump seam approval remains pending before code |
 | 8.3 | Connect/authenticate/join from OpenMW with actionable UI errors | **Not Started** | Version, capability, auth, timeout, and disconnect paths are testable |
 | 8.4 | Map interior/exterior cell changes and spawn/despawn remote player presentation | **Not Started** | Two clients observe correct cell and peer lifecycle behavior |
 | 8.5 | Convert input to semantic movement commands and apply authoritative local correction | **Not Started** | Prediction/reconciliation tests cover correction and hard-snap thresholds |
