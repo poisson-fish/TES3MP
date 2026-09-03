@@ -5034,6 +5034,18 @@ only the relevant phase section here.
 
 [Back to the phase tracker](IMPLEMENTATION_PLAN.md#phase-8--openmw-desktop-vertical-slice)
 
+- 2026-09-02 — Slice 8.2 full-build blocker correction — Verified
+  - Change: replaced the stale full-engine build directory with a fresh MSVC
+    configuration using the pinned Windows dependency bundle. No dependency or
+    bundle-lock change was needed.
+  - Decisions: owner approved replacing and relocking the complete dependency
+    bundle if needed. Inspection and fresh configuration proved that the current
+    bundle already supplies Bullet 3.25 with double precision, so rebuilding an
+    identical bundle would add no value.
+  - Verification: fresh configure reports `Bullet uses double precision`; the
+    MSVC 19.51 RelWithDebInfo `openmw` target compiles and links to `openmw.exe`.
+  - Follow-ups: none for Bullet. Continue Slice 8.2 caller composition.
+
 - 2026-09-02 — Slice 8.2 reusable runtime boundary — In Progress
   - Change: added the owner-approved `ClientSessionRuntime`. It owns the reusable
     session and bounded outbound queue, separates typed inbound drain from
@@ -5062,9 +5074,9 @@ only the relevant phase section here.
   - Verification: focused MSVC 19.51 adapter contracts, all 120 repository-owned
     Python tests, patch-registry schema and exact frame/shutdown-order contracts,
     staged provenance with 299 intentional differences and 69 dependency inputs,
-    staged legacy exclusion, and diff checks pass. The available full OpenMW
-    build directory cannot regenerate because its stale Bullet dependency lacks
-    the required double-precision configuration; no full-engine pass is claimed.
+    staged legacy exclusion, and diff checks pass. A later fresh full-engine
+    configuration and RelWithDebInfo `openmw` build pass with the same pinned
+    dependency bundle and confirm double-precision Bullet.
   - Owner review: provider split, frame order, and reusable runtime architecture
     are approved. Implementation-demo acceptance remains pending.
   - Follow-ups: implement the reusable typed client-session runtime, concrete

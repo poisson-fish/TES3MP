@@ -58,8 +58,8 @@ Fresh MSVC 19.51 Debug headless runtime, full protocol, and focused adapter
 contracts plus all 120 Python tests pass. Staged
 baseline provenance passes with 299 intentional differences and 69 dependency
 inputs; staged legacy exclusion, patch-registry verification, and diff checks
-pass. Full OpenMW build verification awaits a correctly configured
-double-precision Bullet build directory.
+pass. A fresh MSVC 19.51 full configuration confirms the pinned Bullet 3.25
+bundle uses double precision, and the RelWithDebInfo `openmw.exe` build passes.
 
 Refresh this file whenever implementation work changes the active slice,
 governing decision, completed boundary, next work, relevant files, or evidence.
