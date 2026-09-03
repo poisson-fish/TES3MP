@@ -4293,6 +4293,22 @@ only the relevant phase section here.
 
 [Back to the phase tracker](IMPLEMENTATION_PLAN.md#phase-7--headless-end-to-end-multiplayer-slice)
 
+- 2026-09-02 — Slice 7.7 implementation demo and Phase 7 exit — Implemented
+  - Change: advanced Slice 7.7 and Phase 7 to **Implemented** after review of
+    the corrected complete evidence; Phase 8 Slice 8.1 is now eligible.
+  - Decisions: no architecture, authority, state-scope, or gameplay behavior
+    changed. Accepted ADR-0046 and the ADR-0044 two-pass clarification govern
+    the demonstrated implementation.
+  - Verification: accepted evidence includes the seeded 10,000-tick adverse
+    matrix, 32-cycle reconnect proof, bounded queue drain, 60-second two-client
+    real-process soak, matching canonical views, bounded RSS, the same-tick
+    regression, focused MSVC tests, all 117 Python tests, baseline provenance,
+    legacy exclusion, and diff checks.
+  - Owner review: the project owner accepted Option A, the Slice 7.7
+    implementation demo, and the Phase 7 exit gate on 2026-09-02.
+  - Follow-ups: inventory the exact Phase 8.1 OpenMW hook surface and obtain
+    owner approval before engine or adapter implementation.
+
 - 2026-09-02 — Slice 7.7 same-tick publication correction — In Progress
   - Change: implementation `e01967ee8e` makes the server application complete
     connection, lifecycle, and command work before pumping outbound queues.
@@ -5017,6 +5033,24 @@ only the relevant phase section here.
 ## Phase 8 — OpenMW desktop vertical slice
 
 [Back to the phase tracker](IMPLEMENTATION_PLAN.md#phase-8--openmw-desktop-vertical-slice)
+
+- 2026-09-02 — Slice 8.1 exact-hook research — In Progress
+  - Change: inspected only the accepted ADR-0007 boundaries, existing adapter
+    anchor/target, OpenMW target composition, `Engine` lifetime, and frame order.
+    Prepared the exact hook packet for owner review; no engine code changed.
+  - Decisions: pending owner choice. The recommended minimum is executable-side
+    concrete adapter composition, one engine-owned narrow coordinator interface,
+    one optional main-thread call immediately after input update and before Lua
+    or world mutation, and coordinator destruction before OpenMW subsystems.
+  - Verification: repository inspection confirms the adapter currently contains
+    only an anchor, depends inward on `openmw-lib` and client-session, and is not
+    linked into `openmw`; `Engine::frame` provides the required post-input slot.
+    All 117 repository-owned Python tests and `git diff --check` pass for the
+    documentation transition.
+  - Owner review: exact path/call-site approval remains required by ADR-0007
+    before implementation or patch-registry entries land.
+  - Follow-ups: present options and acceptance checks; after approval, amend
+    ADR-0007 with the exact inventory and complete Slice 8.1 evidence.
 
 - The adapter translates between OpenMW state/events and owned domain types. It
   must not become a second canonical simulation or contain packet handling.

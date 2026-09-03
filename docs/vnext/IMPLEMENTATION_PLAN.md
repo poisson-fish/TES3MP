@@ -95,8 +95,8 @@ active-tree difference and dependency input.
 
 The tree contains independent protocol, transport, server-core, client-session,
 OpenMW-adapter, and test-support targets plus the Phase 7 dedicated server and
-headless client applications. Phases 0–6 have passed their exit gates. Phase 7
-is active at Slice 7.7; the plan table below is the authoritative status source.
+headless client applications. Phases 0–7 have passed their exit gates. Phase 8
+is active at Slice 8.1; the plan table below is the authoritative status source.
 
 Historical pre-cutover state and exact Git mechanics remain available in
 [`PRE_CUTOVER_PROVENANCE.md`](PRE_CUTOVER_PROVENANCE.md), ADR-0001, and the
@@ -113,8 +113,8 @@ implementation notes. They are evidence, not current setup instructions.
 | 4 | Bounded protocol and in-memory session | **Implemented** | Phase 3 |
 | 5 | Deterministic authoritative server core | **Implemented** | Phase 4 |
 | 6 | Maintained transport and secure network session | **Implemented** | Phase 5 |
-| 7 | Headless end-to-end multiplayer slice | **In Progress** | Phase 6 |
-| 8 | OpenMW desktop vertical slice | **Not Started** | Phase 7 |
+| 7 | Headless end-to-end multiplayer slice | **Implemented** | Phase 6 |
+| 8 | OpenMW desktop vertical slice | **In Progress** | Phase 7 |
 | 9 | PC VR interoperability gate | **Not Started** | Phase 8 |
 | 10 | Player lifecycle and content identity | **Not Started** | Phase 9 |
 | 11 | Canonical cells, interest, and resynchronization | **Not Started** | Phase 10 |
@@ -622,7 +622,7 @@ Implementation history: [Phase 6 notes](IMPLEMENTATION_NOTES.md#phase-6--maintai
 
 ### Phase 7 — Headless end-to-end multiplayer slice
 
-Status: **In Progress**
+Status: **Implemented**
 
 Outcome: a dedicated server and two fake clients complete connect, join, cell,
 movement, observation, disconnect, and resume without OpenMW.
@@ -638,7 +638,7 @@ Depends on: Phase 6.
 | 7.4 | Implement one interior and one exterior cell fixture plus enter/leave observation | **Implemented** | Accepted [`ADR-0043`](adr/ADR-0043-phase7-fixture-cell-transition-and-observation.md); implementation `bd35f2d60c`, shared-writer runtime composition, typed join/transition publication, bounded atomic multi-target delivery, client application, focused contracts, real two-client fixture proof, and owner demo acceptance pass |
 | 7.5 | Implement semantic movement commands and sequenced snapshots | **Implemented** | Accepted [`ADR-0044`](adr/ADR-0044-phase7-movement-tick-and-snapshot-composition.md); implementation `f8b1acee4b`, atomic checked integration, live motion dispatch, complete targeted views, focused tests, real two-client movement/convergence/stale-view proof, and owner demo acceptance pass |
 | 7.6 | Implement disconnect, bounded grace period, resume, and clean expiration | **Implemented** | Accepted [`ADR-0045`](adr/ADR-0045-phase7-disconnect-resume-and-expiration-composition.md); implementation `9c75892eb1`, focused contracts, real two-client disconnect/resume/expiration proof, and owner demo acceptance pass |
-| 7.7 | Add adverse-network matrix, reconnect loop, queue-bound, and soak tests | **In Progress** | Accepted [`ADR-0046`](adr/ADR-0046-phase7-adverse-network-and-soak-matrix.md); typed profile catalog, seeded 10,000-tick deterministic matrix, paced 32-cycle reconnect proof, queue high-water/zero-drain proof, and 60-second two-client real-process soak with matching views and bounded RSS pass; owner-approved two-pass pump fix `e01967ee8e` prevents contradictory same-tick observer views; owner implementation demo remains pending |
+| 7.7 | Add adverse-network matrix, reconnect loop, queue-bound, and soak tests | **Implemented** | Accepted [`ADR-0046`](adr/ADR-0046-phase7-adverse-network-and-soak-matrix.md); typed profile catalog, seeded 10,000-tick deterministic matrix, paced 32-cycle reconnect proof, queue high-water/zero-drain proof, and 60-second two-client real-process soak with matching views and bounded RSS pass; owner-approved two-pass pump fix `e01967ee8e` prevents contradictory same-tick observer views; owner accepted the implementation demo and Phase 7 exit on 2026-09-02 |
 
 Exit gate:
 
@@ -652,7 +652,7 @@ Implementation history: [Phase 7 notes](IMPLEMENTATION_NOTES.md#phase-7--headles
 
 ### Phase 8 — OpenMW desktop vertical slice
 
-Status: **Not Started**
+Status: **In Progress**
 
 Outcome: a thin OpenMW 0.51 adapter completes the headless slice with two real
 desktop clients while keeping engine-specific behavior isolated.
@@ -661,7 +661,7 @@ Depends on: Phase 7.
 
 | Slice | Deliverable | Status | Completion evidence |
 |---|---|---|---|
-| 8.1 | Inventory the minimum required OpenMW hooks and review the final patch surface with the owner | **Not Started** | Owner-approved hook document maps each patch to an adapter need and upstream strategy |
+| 8.1 | Inventory the minimum required OpenMW hooks and review the final patch surface with the owner | **In Progress** | Exact composition/lifetime and post-input frame-hook packet prepared from the clean OpenMW baseline; owner approval remains pending |
 | 8.2 | Implement the adapter lifecycle and desktop input/presentation provider interfaces | **Not Started** | Adapter owns every direct OpenMW dependency; client-session remains headless |
 | 8.3 | Connect/authenticate/join from OpenMW with actionable UI errors | **Not Started** | Version, capability, auth, timeout, and disconnect paths are testable |
 | 8.4 | Map interior/exterior cell changes and spawn/despawn remote player presentation | **Not Started** | Two clients observe correct cell and peer lifecycle behavior |

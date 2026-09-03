@@ -3,15 +3,15 @@
 Updated: 2026-09-02
 
 Read this first, then only the linked active material. The authoritative tracker
-remains the [implementation plan](IMPLEMENTATION_PLAN.md#phase-7--headless-end-to-end-multiplayer-slice).
+remains the [implementation plan](IMPLEMENTATION_PLAN.md#phase-8--openmw-desktop-vertical-slice).
 
 ## Current position
 
 - Branch: `vnext`
-- Phase 7: **In Progress**
-- Slice 7.6: **Implemented**
-- Slice 7.7: **In Progress**
-- Governing decision: [ADR-0046](adr/ADR-0046-phase7-adverse-network-and-soak-matrix.md)
+- Phase 7: **Implemented**
+- Phase 8: **In Progress**
+- Slice 8.1: **In Progress** (hook inventory and owner review)
+- Governing decision: [ADR-0007](adr/ADR-0007-openmw-hook-patch-queue-policy.md)
 - Latest implementation commit: `e01967ee8e` (`Prevent contradictory same-tick snapshots`)
 
 ## Working synopsis
@@ -30,26 +30,17 @@ pass replay, fault, convergence, identity/progress, matching-view, bounded RSS,
 and queue contracts. An owner-approved two-pass application pump now coalesces
 intermediate same-tick views before transport; the deterministic regression and
 optimized lifecycle demo pass without weakening client contradiction rejection.
-Owner implementation-demo and Phase 7 exit-gate reviews remain pending.
+The project owner accepted the Slice 7.7 implementation demo and Phase 7 exit
+gate on 2026-09-02. Phase 8 Slice 8.1 is now active; exact OpenMW hook paths and
+call sites require inventory and owner approval before implementation.
 
 ## Active files
 
-- Server composition: `apps/tes3mp-server/server_application.{hpp,cpp}`
-- Connection/auth flow: `apps/tes3mp-server/connection_session_coordinator.{hpp,cpp}`
-- Join/output composition: `apps/tes3mp-server/authenticated_join_composition.{hpp,cpp}`
-- Lifecycle core: `components/tes3mp/include/tes3mp/server_lifecycle.hpp`,
-  `components/tes3mp/server_core/server_lifecycle.cpp`
-- Resume tokens: `components/tes3mp/include/tes3mp/server_authentication.hpp`,
-  `components/tes3mp/server_core/server_authentication.cpp`
-- Focused tests: `apps/tes3mp-server/server_app_tests.cpp`,
-  `components/tes3mp/tests/server_lifecycle_tests.cpp`,
-  `components/tes3mp/tests/server_authentication_tests.cpp`
-- Process proof: `apps/tes3mp-headless-client/main.cpp`,
-  `apps/tes3mp-server/phase7_queue_telemetry.{hpp,cpp}`,
-  `scripts/run_phase7_join_demo.py`, `scripts/run_phase7_soak.py`
-- Adverse profiles: `components/tes3mp/include/tes3mp/test_support/phase7_adverse_profiles.hpp`,
-  `components/tes3mp/tests/fault_injection_tests.cpp`
-- Evidence: [Phase 7 notes](IMPLEMENTATION_NOTES.md#phase-7--headless-end-to-end-multiplayer-slice)
+- Governing policy: `docs/vnext/adr/ADR-0007-openmw-hook-patch-queue-policy.md`
+- Adapter anchor/target: `apps/openmw/tes3mp/{adapter.cpp,CMakeLists.txt}`
+- Candidate lifecycle/frame seam: `apps/openmw/engine.{hpp,cpp}`
+- Executable/target composition: `apps/openmw/{main.cpp,CMakeLists.txt}`
+- Evidence: [Phase 8 notes](IMPLEMENTATION_NOTES.md#phase-8--openmw-desktop-vertical-slice)
 
 ## Last verified
 
