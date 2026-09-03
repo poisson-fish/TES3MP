@@ -14,14 +14,16 @@ remains the [implementation plan](IMPLEMENTATION_PLAN.md#phase-8--openmw-desktop
 - Slice 8.2: **In Progress** (owner demo remains)
 - Slice 8.3: **In Progress**
 - Slice 8.4: **In Progress**
-- Slice 8.5: **Not Started** (decision review pending)
+- Slice 8.5: **In Progress** (owner desktop demo remains)
 - Governing decisions: [ADR-0007](adr/ADR-0007-openmw-hook-patch-queue-policy.md),
   [ADR-0047](adr/ADR-0047-phase8-adapter-lifecycle-and-provider-boundary.md),
   [ADR-0048](adr/ADR-0048-canonical-revision-and-simulation-tick-separation.md),
   [ADR-0049](adr/ADR-0049-phase8-desktop-connection-composition.md),
-  [ADR-0050](adr/ADR-0050-phase8-cell-and-remote-presentation.md), and
-  [GDR-0013](gdr/GDR-0013-phase8-cell-transition-presentation.md)
-- Latest implementation commit: `34583e00f0` (`Implement Phase 8 cell and remote presentation`)
+  [ADR-0050](adr/ADR-0050-phase8-cell-and-remote-presentation.md),
+  [ADR-0051](adr/ADR-0051-phase8-provisional-spatial-intent-concurrency.md),
+  [GDR-0013](gdr/GDR-0013-phase8-cell-transition-presentation.md), and
+  [GDR-0014](gdr/GDR-0014-phase8-desktop-movement-and-correction.md)
+- Latest implementation commit: `c4b9cb1cec` (`Implement Phase 8 desktop movement`)
 
 ## Working synopsis
 
@@ -61,12 +63,13 @@ fixture content mapping, typed provider failure closure, and renderer-only
 remote avatar reconciliation are implemented. Automated gates pass; the
 content-backed two-client owner demo remains.
 
-Slice 8.5 gate research found that exact entity-revision preconditions cannot
-converge for continuous motion after more than one server tick of latency,
-because canonical movement advances that revision every tick. Desktop input
-mapping, spatial-command concurrency, and local correction behavior await owner
-approval before production code. Existing public OpenMW action and same-cell
-move APIs appear sufficient; no deeper engine hook is currently proposed.
+Slice 8.5 is now in progress under owner-approved ADR-0051/GDR-0014. The two
+provisional spatial intent bodies treat entity revision as observed context
+while retaining session, generation, entity, authority-epoch, identity,
+sequence, and domain validation. Desktop action input maps deterministically to
+bounded world velocity; one pending plus one latest desired intent bounds
+traffic; newer same-cell snapshots correct local position exactly. No new
+OpenMW hook was needed. Automated gates pass; the owner desktop demo remains.
 
 ## Active files
 
@@ -82,7 +85,7 @@ move APIs appear sufficient; no deeper engine hook is currently proposed.
 - Cell/presentation providers: `apps/openmw/tes3mp/{desktop_providers.hpp,desktop_providers.cpp}`
 - Renderer-only avatar seam: `apps/openmw/mwrender/{transientactorpresentation.hpp,transientactorpresentation.cpp}`
 - Movement gate seams:
-  `apps/openmw/tes3mp/{providers.hpp,desktop_providers.cpp,adapter.cpp}` and
+  `apps/openmw/tes3mp/{providers.hpp,desktop_providers.cpp,adapter.cpp,movement_mapping.hpp,movement_mapping.cpp}` and
   `components/tes3mp/{client_session/client_session_runtime.cpp,server_core/server_command_reducer.cpp}`
 - Patch registry: `docs/vnext/OPENMW_PATCH_REGISTRY.json`,
   `scripts/verify_openmw_patch_registry.py`
@@ -90,9 +93,11 @@ move APIs appear sufficient; no deeper engine hook is currently proposed.
 
 ## Last verified
 
-Slice 8.4's full protocol aggregate, headless-client contracts, adapter
-contracts, patch registry, all 124 repository-owned Python tests, diff hygiene,
-and full RelWithDebInfo `openmw.exe` build/link pass on 2026-09-03.
+Slice 8.5's focused reducer/property and movement/coordinator contracts, full
+protocol aggregate, headless-client contracts, adapter contracts, patch
+registry, all 124 repository-owned Python tests, diff hygiene, staged baseline
+provenance with 321 intentional differences and 69 dependency inputs, and full
+RelWithDebInfo `openmw.exe` build/link pass on 2026-09-03.
 
 Fresh MSVC 19.51 `/MD` GameNetworkingSockets and c-ares dependency proofs pass,
 their exact transport manifest is regenerated, and direct object inspection

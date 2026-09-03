@@ -5032,6 +5032,33 @@ only the relevant phase section here.
 
 ## Phase 8 — OpenMW desktop vertical slice
 
+### 2026-09-03 — Slice 8.5 approved movement implementation
+
+- Status: **In Progress**; owner two-client desktop demo remains.
+- Decisions: owner approved all recommended Option A choices. ADR-0051 records
+  provisional spatial-intent concurrency and observed-revision semantics;
+  GDR-0014 records deterministic planar mapping and exact same-cell correction.
+- Change: desktop action state now maps through normalized yaw-rotated input to
+  4,096 quanta/tick with explicit ties-to-even rounding. The coordinator bounds
+  motion to one pending command plus one latest desired intent. Ordered motion
+  and fixture-transition commands retain session, generation, entity, epoch,
+  identity, sequence, and domain validation without impossible exact revision
+  equality. Newer same-cell snapshots hard-correct local position through the
+  existing position-only OpenMW move API. No engine hook was added. P8-004
+  registry coverage and previously stale provenance entries/hashes were also
+  repaired.
+- Verification: focused reducer/property and movement/coordinator contracts,
+  full protocol aggregate, headless-client and adapter contracts, all 124
+  repository-owned Python tests, patch-registry verification, staged baseline
+  provenance with 321 intentional differences and 69 dependency inputs, diff
+  hygiene, and the full networking-enabled RelWithDebInfo `openmw.exe` link
+  pass.
+- Commit: `c4b9cb1cec` (`Implement Phase 8 desktop movement`).
+- Follow-up: run and obtain owner acceptance for the content-backed two-client
+  desktop movement/convergence demo before marking Slice 8.5 Implemented.
+
+[Back to the phase tracker](IMPLEMENTATION_PLAN.md#phase-8--openmw-desktop-vertical-slice)
+
 ### 2026-09-03 — Slice 8.5 decision-gate research
 
 - Status: **Not Started**; no production implementation began.
