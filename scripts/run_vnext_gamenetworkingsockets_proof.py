@@ -472,7 +472,12 @@ def build_protobuf(
         "-Dprotobuf_WITH_ZLIB=OFF",
     ]
     if os.name == "nt":
-        arguments.append("-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreadedDLL")
+        arguments.extend(
+            [
+                "-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreadedDLL",
+                "-Dprotobuf_MSVC_STATIC_RUNTIME=OFF",
+            ]
+        )
     if sanitize:
         arguments.extend(
             [

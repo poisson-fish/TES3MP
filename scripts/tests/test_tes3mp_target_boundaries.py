@@ -14,6 +14,7 @@ REPOSITORY_ROOT = pathlib.Path(__file__).resolve().parents[2]
 BOUNDARY_MODULE = REPOSITORY_ROOT / "cmake" / "TES3MPVerifyTargetBoundaries.cmake"
 ENGINE_INDEPENDENT_SOURCE = REPOSITORY_ROOT / "components" / "tes3mp"
 OPENMW_ADAPTER_SOURCE = REPOSITORY_ROOT / "apps" / "openmw" / "tes3mp"
+OPENMW_MAIN_SOURCE = REPOSITORY_ROOT / "apps" / "openmw" / "main.cpp"
 
 
 def _find_tool(name, windows_candidates):
@@ -104,6 +105,15 @@ def _build_environment():
 
 
 class TES3MPTargetBoundaryTests(unittest.TestCase):
+    def test_openmw_runtime_failure_is_visible_and_sanitized(self):
+        source = OPENMW_MAIN_SOURCE.read_text(encoding="utf-8")
+        status_body = source.split("class MultiplayerStatus final", 1)[1].split("};", 1)[0]
+        self.assertIn('Log(Debug::Error) << message', status_body)
+        self.assertIn('getWindowManager()->messageBox(message)', status_body)
+        self.assertIn('std::string("TES3MP connection stopped: ") + describe(status)', status_body)
+        for secret_source in ("tes3mp-password-file", "passwordFile", "AuthenticationMaterial"):
+            self.assertNotIn(secret_source, status_body)
+
     def _run_project(self, cmake_lists, files=None, build_target=None):
         if CMAKE is None or NINJA is None:
             self.skipTest("CMake and Ninja are required for target-boundary build tests")
@@ -221,6 +231,20 @@ class TES3MPTargetBoundaryTests(unittest.TestCase):
         )
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("manifest schema/profile is not approved", result.stdout + result.stderr)
+
+    def test_selected_adapter_lock_hashes_match_repository_locks(self):
+        import hashlib
+        import re
+
+        cmake = (ENGINE_INDEPENDENT_SOURCE / "CMakeLists.txt").read_text(encoding="utf-8")
+        for variable, lock_name in (
+            ("tes3mp_expected_gns_lock", "vnext_gamenetworkingsockets_proof.json"),
+            ("tes3mp_expected_cares_lock", "vnext_cares_proof.json"),
+        ):
+            match = re.search(rf'set\({variable}\s+"([0-9a-f]{{64}})"\)', cmake)
+            self.assertIsNotNone(match)
+            lock = REPOSITORY_ROOT / "scripts" / lock_name
+            self.assertEqual(match.group(1), hashlib.sha256(lock.read_bytes()).hexdigest())
 
     def test_adapter_graph_configures_with_only_approved_leaf_dependencies(self):
         result = self._run_project(

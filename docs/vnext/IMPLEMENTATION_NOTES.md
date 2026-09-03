@@ -5034,6 +5034,22 @@ only the relevant phase section here.
 
 [Back to the phase tracker](IMPLEMENTATION_PLAN.md#phase-8--openmw-desktop-vertical-slice)
 
+- 2026-09-03 — Slice 8.3 visible runtime status — Verified
+  - Change: the executable status provider now presents each closed sanitized
+    runtime-failure category through a normal transient OpenMW message box and
+    retains the matching error log. UI failure is contained by the provider's
+    `noexcept` boundary. Startup validation still fails before engine launch.
+  - Decisions: the owner approved Option A on 2026-09-03. The existing
+    main-thread status-provider path owns presentation; no new engine hook,
+    status queue, authority, state scope, or gameplay behavior was added.
+  - Verification: the focused visible/sanitized-source contract passes; all 124
+    repository-owned Python tests and patch-registry verification pass; the
+    networking-enabled MSVC 19.51 RelWithDebInfo build recompiles `main.cpp` and
+    links `build/slice82-openmw-full/RelWithDebInfo/openmw.exe`; diff checks pass.
+  - Owner review: implementation demo acceptance remains pending, so Slices 8.2
+    and 8.3 remain **In Progress**.
+  - Follow-ups: present the two-client desktop implementation demo.
+
 - 2026-09-02 — Slice 8.3 desktop connection composition — In Progress
   - Change: added explicit-disabled OpenMW configuration, separate validated
     host/port, required 1–60,000 ms timeout, bounded password-file loading,
@@ -5211,6 +5227,28 @@ only the relevant phase section here.
     before implementation or patch-registry entries land.
   - Follow-ups: present options and acceptance checks; after approval, amend
     ADR-0007 with the exact inventory and complete Slice 8.1 evidence.
+
+- 2026-09-03 — Slice 8.3 Windows `/MD` dependency and executable-link gate — Verified
+  - Change: rebuilt the exact locked OpenSSL 3.5.8, Protobuf 33.4/Abseil
+    20250512.1, GameNetworkingSockets 1.6.0, and c-ares 1.34.8 inputs with the
+    dynamic MSVC runtime, regenerated the verified transport manifest, and
+    rebuilt the networking-enabled OpenMW target. Corrected two stale recipe
+    overrides (`protobuf_MSVC_STATIC_RUNTIME` and `CARES_MSVC_STATIC_RUNTIME`)
+    plus the fail-closed component lock hashes.
+  - Decisions: none. This implements ADR-0049's already approved one-`/MD`
+    Windows network runtime policy; dependency identities and restricted
+    surfaces are unchanged.
+  - Verification: both exact dependency proofs pass under MSVC 19.51; direct
+    object inspection reports `MD_DynamicRelease`/`MSVCRT`; the full
+    RelWithDebInfo real-network build links
+    `build/slice82-openmw-full/RelWithDebInfo/openmw.exe`; focused OpenMW adapter,
+    GNS transport, and credential-crypto contracts pass. Twenty-three proof
+    runner tests, the lock-hash synchronization regression, all 123
+    repository-owned Python tests, patch-registry verification, and diff checks
+    pass.
+  - Owner review: the dependency/runtime executable-link gate is closed. Slice
+    8.2/8.3 owner-demo acceptance and visible status UI remain separate gates.
+  - Follow-ups: complete the visible status UI and present the owner demo.
 
 - The adapter translates between OpenMW state/events and owned domain types. It
   must not become a second canonical simulation or contain packet handling.

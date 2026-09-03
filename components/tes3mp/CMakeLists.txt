@@ -133,9 +133,9 @@ if(TES3MP_ENABLE_GNS_TRANSPORT)
     endif()
 
     set(tes3mp_expected_gns_lock
-        "367fd5820e41b77c5857ccf1dff9b2d0698cebf8dba5385f81204f1dba64350c")
+        "7f35707a6b4ede9637fa5446abe2ddad2b3df2b3571cd1ef183bad34a9359ecc")
     set(tes3mp_expected_cares_lock
-        "0ad50cda94dcca45fbfe3a7e166862ef3a572f9362ee3ada487872a6d018fec1")
+        "4633ce1c006a1a141971c098b39435b64b4c1e4b6167935f588e395526fc722c")
     string(JSON tes3mp_manifest_gns_lock GET "${tes3mp_transport_manifest}" locks gamenetworkingsockets sha256)
     string(JSON tes3mp_manifest_cares_lock GET "${tes3mp_transport_manifest}" locks cares sha256)
     if(NOT tes3mp_manifest_gns_lock STREQUAL tes3mp_expected_gns_lock

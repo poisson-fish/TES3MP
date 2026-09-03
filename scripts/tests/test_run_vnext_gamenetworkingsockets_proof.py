@@ -172,6 +172,22 @@ class GameNetworkingSocketsProofRunnerTests(unittest.TestCase):
         self.assertIn(f"-DCMAKE_EXE_LINKER_FLAGS={proof.SANITIZER_LINK_FLAGS}", configure)
         self.assertNotIn("-fno-sanitize=function", " ".join(configure))
 
+    @unittest.skipUnless(proof.os.name == "nt", "MSVC runtime policy is Windows-only")
+    def test_windows_protobuf_build_disables_its_static_runtime_override(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            with (
+                mock.patch.object(proof, "PROTOBUF_BUILD_DIR", root / "build"),
+                mock.patch.object(proof, "PROTOBUF_INSTALL_DIR", root / "install"),
+                mock.patch.object(proof, "run") as run,
+            ):
+                proof.build_protobuf(
+                    "cmake", "ninja", {}, root / "protobuf", root / "abseil", sanitize=False
+                )
+        configure = [str(value) for value in run.call_args_list[0].args[0]]
+        self.assertIn("-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreadedDLL", configure)
+        self.assertIn("-Dprotobuf_MSVC_STATIC_RUNTIME=OFF", configure)
+
     def test_hashed_inputs_have_platform_independent_line_endings(self) -> None:
         attributes = (proof.ROOT / ".gitattributes").read_text(encoding="utf-8").splitlines()
         expected = {

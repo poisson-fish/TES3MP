@@ -1,6 +1,6 @@
 # vNext working state
 
-Updated: 2026-09-02
+Updated: 2026-09-03
 
 Read this first, then only the linked active material. The authoritative tracker
 remains the [implementation plan](IMPLEMENTATION_PLAN.md#phase-8--openmw-desktop-vertical-slice).
@@ -43,10 +43,12 @@ Option D after caller migration exposed split orchestration ownership. The
 runtime now owns protocol/session progression, binding/application, command
 sequencing, bounded queues, and failure closure. The headless proof caller and
 the concrete OpenMW coordinator core use that one path. Configuration-gated
-executable attachment is implemented. The owner confirmed one `/MD` Windows
-network runtime policy; the pinned OpenMW dependency bundle must be rebuilt from
-its current `/MT` profile before the real-network executable proof can pass.
-Visible status UI and the owner demo remain.
+executable attachment is implemented. The owner-confirmed `/MD` Windows network
+runtime policy is now applied to the exact locked OpenSSL, Protobuf/Abseil, GNS,
+and c-ares inputs. Both dependency proofs pass, the manifest is regenerated, and
+the real-network RelWithDebInfo `openmw.exe` links. Sanitized runtime failures
+now appear through the approved normal OpenMW message-box path. The owner demo
+remains.
 
 ## Active files
 
@@ -58,18 +60,22 @@ Visible status UI and the owner demo remain.
 - Candidate lifecycle/frame seam: `apps/openmw/engine.{hpp,cpp}`
 - Executable/target composition: `apps/openmw/{main.cpp,CMakeLists.txt}`
 - Desktop options: `apps/openmw/options.cpp`
+- Desktop status presentation: `apps/openmw/main.cpp`
 - Patch registry: `docs/vnext/OPENMW_PATCH_REGISTRY.json`,
   `scripts/verify_openmw_patch_registry.py`
 - Evidence: [Phase 8 notes](IMPLEMENTATION_NOTES.md#phase-8--openmw-desktop-vertical-slice)
 
 ## Last verified
 
-Fresh MSVC 19.51 Debug OpenMW adapter contracts, all 120 Python tests, patch
-registry verification, and diff checks pass for the current slice. RelWithDebInfo
-OpenMW without networking builds. The GNS-backed adapter compiles, but final
-link verification is pending an approved `/MD` rebuild of the pinned OpenMW
-dependency bundle; the installed `/MT` bundle fails the expected runtime-library
-check and is not passing evidence. Earlier verified Phase 7 evidence remains:
+Fresh MSVC 19.51 `/MD` GameNetworkingSockets and c-ares dependency proofs pass,
+their exact transport manifest is regenerated, and direct object inspection
+reports `MD_DynamicRelease`/`MSVCRT`. The full RelWithDebInfo OpenMW tree builds
+with networking enabled and links `build/slice82-openmw-full/RelWithDebInfo/openmw.exe`;
+the adapter, GNS transport, and credential-crypto contracts pass from that tree.
+The same target recompiles and links with sanitized runtime failures presented
+through the normal OpenMW message-box path. All 124 repository-owned Python
+tests and patch-registry verification pass. The dependency/runtime link and
+visible-status gates are closed. Earlier verified Phase 7 evidence remains:
 MSVC headless runtime, server-app, full protocol, and pinned FlatBuffers proof.
 The real-process lifecycle proof passes movement, convergence, stale-view,
 32-cycle reconnect, expiration, fresh identity, and zero final queue depth. Staged

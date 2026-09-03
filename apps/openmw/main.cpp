@@ -7,6 +7,8 @@
 #include <components/platform/platform.hpp>
 #include <components/version/version.hpp>
 
+#include "mwbase/environment.hpp"
+#include "mwbase/windowmanager.hpp"
 #include "mwgui/debugwindow.hpp"
 
 #include "engine.hpp"
@@ -102,7 +104,16 @@ namespace
     {
         void report(TES3MP::OpenMWAdapter::ConnectionStatus status) noexcept override
         {
-            Log(Debug::Error) << "TES3MP connection stopped: " << describe(status);
+            const std::string message = std::string("TES3MP connection stopped: ") + describe(status);
+            Log(Debug::Error) << message;
+            try
+            {
+                MWBase::Environment::get().getWindowManager()->messageBox(message);
+            }
+            catch (...)
+            {
+                Log(Debug::Error) << "TES3MP connection status could not be shown in the OpenMW UI";
+            }
         }
     };
 }

@@ -35,6 +35,10 @@ class CaresProofTests(unittest.TestCase):
         self.assertIn("ares_process_fds", source)
         self.assertNotIn("ARES_OPT_EVENT_THREAD", source)
 
+    def test_windows_cares_build_disables_its_static_runtime_override(self) -> None:
+        cmake = (proof.PROOF_DIR / "CMakeLists.txt").read_text(encoding="utf-8")
+        self.assertIn("set(CARES_MSVC_STATIC_RUNTIME OFF CACHE BOOL \"\" FORCE)", cmake)
+
     def test_lock_rejects_unknown_fields_and_profile_changes(self) -> None:
         lock = json.loads(proof.LOCK_PATH.read_text(encoding="utf-8"))
         with tempfile.TemporaryDirectory() as directory:

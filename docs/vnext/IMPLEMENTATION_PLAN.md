@@ -2,7 +2,7 @@
 
 Document type: living implementation plan
 
-Updated: 2026-09-02
+Updated: 2026-09-03
 
 Direction source: [`README.md`](README.md)
 
@@ -666,7 +666,7 @@ Depends on: Phase 7.
 |---|---|---|---|
 | 8.1 | Inventory the minimum required OpenMW hooks and review the final patch surface with the owner | **Implemented** | ADR-0007 records owner-approved Option A and exact P8-001 through P8-003 paths, needs, tests, dispositions, and removal conditions |
 | 8.2 | Implement the adapter lifecycle and desktop input/presentation provider interfaces | **In Progress** | ADR-0047 orchestration, provider boundary, concrete coordinator, and configuration-gated executable attachment are verified; owner demo remains |
-| 8.3 | Connect/authenticate/join from OpenMW with actionable UI errors | **In Progress** | ADR-0049 records approved configuration, credential, timeout, and status policy; executable connection composition and sanitized status categories are implemented, while visible UI/demo evidence remains |
+| 8.3 | Connect/authenticate/join from OpenMW with actionable UI errors | **In Progress** | ADR-0049 records approved configuration, credential, timeout, and status policy; executable connection composition, sanitized visible runtime errors, and the MSVC `/MD` real-network `openmw.exe` link are verified; owner demo remains |
 | 8.4 | Map interior/exterior cell changes and spawn/despawn remote player presentation | **Not Started** | Two clients observe correct cell and peer lifecycle behavior |
 | 8.5 | Convert input to semantic movement commands and apply authoritative local correction | **Not Started** | Prediction/reconciliation tests cover correction and hard-snap thresholds |
 | 8.6 | Interpolate/extrapolate remote movement through a bounded jitter buffer | **Not Started** | Snapshot-age, buffer-depth, extrapolation, correction, and hard-snap metrics exist |
