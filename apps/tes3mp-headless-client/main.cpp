@@ -17,6 +17,7 @@
 namespace
 {
     constexpr std::size_t Phase7ReconnectCycles = 32;
+    constexpr auto Phase7SoakDuration = std::chrono::seconds(60);
 
     class SteadyClock final : public TES3MP::MonotonicClock
     {
@@ -183,7 +184,7 @@ int main(int argc, char** argv)
     if (argc != 5 && argc != 6)
     {
         std::cerr << "usage: tes3mp_headless_client <host> <port> <password-file> <timeout-ms> "
-                     "[mover|observer|motion-one|motion-two|lifecycle|reconnect]\n";
+                     "[mover|observer|motion-one|motion-two|lifecycle|reconnect|soak-one|soak-two]\n";
         return 2;
     }
     const auto port = number(argv[2]);
@@ -215,7 +216,8 @@ int main(int argc, char** argv)
     const std::string_view mode = argc == 6 ? argv[5] : "join";
     if (mode != "join" && mode != "mover" && mode != "observer"
         && mode != "motion-one" && mode != "motion-two" && mode != "lifecycle"
-        && mode != "reconnect") return 2;
+        && mode != "reconnect" && mode != "soak-one" && mode != "soak-two") return 2;
+    const bool soak = mode == "soak-one" || mode == "soak-two";
     if (mode == "lifecycle" || mode == "reconnect")
     {
         session.close();
@@ -296,8 +298,10 @@ int main(int argc, char** argv)
     bool rejectedStaleView = false;
     std::optional<TES3MP::LatestWinsSnapshot> staleSnapshot;
     std::optional<std::chrono::steady_clock::time_point> motionNotBefore;
+    std::optional<std::chrono::steady_clock::time_point> soakStarted;
     std::optional<TES3MP::ReliableObservationBatch> pendingObservation;
-    const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(*timeout);
+    const auto deadline = std::chrono::steady_clock::now()
+        + (soak ? Phase7SoakDuration + std::chrono::seconds(10) : std::chrono::milliseconds(*timeout));
 
     while (std::chrono::steady_clock::now() < deadline)
     {
@@ -370,7 +374,7 @@ int main(int argc, char** argv)
         }
         if (authenticationAccepted && snapshot && !bound)
         {
-            if ((mode == "motion-one" || mode == "motion-two")
+            if ((mode == "motion-one" || mode == "motion-two" || soak)
                 && snapshot->view().entries().size() != 2)
             {
                 snapshot.reset();
@@ -392,6 +396,7 @@ int main(int argc, char** argv)
                       << ",\"entity_id\":" << entry.entityId().value() << "}" << std::endl;
             bound = true;
             motionNotBefore = std::chrono::steady_clock::now() + std::chrono::milliseconds(50);
+            if (soak) soakStarted = std::chrono::steady_clock::now();
             snapshot.reset();
             if (pendingObservation)
             {
@@ -450,7 +455,8 @@ int main(int argc, char** argv)
                 std::this_thread::sleep_for(std::chrono::milliseconds(1));
                 continue;
             }
-            if (mode == "motion-two" && std::ranges::none_of(confirmed.view().entries(), [](const auto& entry) {
+            if ((mode == "motion-two" || mode == "soak-two")
+                && std::ranges::none_of(confirmed.view().entries(), [](const auto& entry) {
                     return entry.playerId().value() == 1 && entry.linearVelocity().x() == 1; }))
             {
                 std::this_thread::sleep_for(std::chrono::milliseconds(1));
@@ -466,7 +472,8 @@ int main(int argc, char** argv)
             TES3MP::ReliableOperationHeader reliable(header, TES3MP::EntityPrecondition(
                 self->entityId(), self->entityRevision(), self->authorityEpoch()));
             auto operation = TES3MP::ReliableOperation::create(reliable,
-                TES3MP::PlayerMotionIntent(TES3MP::LinearVelocity3(mode == "motion-two" ? 2 : 1, 0, 0)));
+                TES3MP::PlayerMotionIntent(TES3MP::LinearVelocity3(
+                    mode == "motion-two" || mode == "soak-two" ? 2 : 1, 0, 0)));
             if (!std::holds_alternative<TES3MP::ReliableOperation>(operation)
                 || !sendFrame(*factory.runtime, *session.connection(), TES3MP::MessageClass::ReliableOperation,
                     TES3MP::MessageKind::ReliableOperation,
@@ -493,10 +500,38 @@ int main(int argc, char** argv)
                 staleSnapshot.reset();
             }
         }
-        if (sawConvergedMovement && rejectedStaleView)
+        if (!soak && sawConvergedMovement && rejectedStaleView)
         {
             std::cout << "{\"event\":\"movement_flow_complete\",\"role\":\"" << mode
                       << "\",\"stale_view_rejected\":true}\n";
+            session.close(); factory.runtime->shutdown(); return 0;
+        }
+        if (soak && soakStarted
+            && std::chrono::steady_clock::now() >= *soakStarted + Phase7SoakDuration)
+        {
+            const auto& confirmed = *session.stateMachine().confirmedSnapshot();
+            if (confirmed.view().entries().size() != 2
+                || std::ranges::any_of(confirmed.view().entries(), [](const auto& entry) {
+                    return entry.linearVelocity().x() != 0 || entry.linearVelocity().y() != 0
+                        || entry.linearVelocity().z() != 0; }))
+            {
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+                continue;
+            }
+            std::cout << "{\"event\":\"soak_flow_complete\",\"duration_seconds\":60,\"entries\":[";
+            bool firstEntry = true;
+            for (const auto& entry : confirmed.view().entries())
+            {
+                if (!firstEntry) std::cout << ',';
+                firstEntry = false;
+                std::cout << "{\"player_id\":" << entry.playerId().value()
+                          << ",\"entity_id\":" << entry.entityId().value()
+                          << ",\"revision\":" << entry.entityRevision().value()
+                          << ",\"x\":" << entry.transform().position().x()
+                          << ",\"y\":" << entry.transform().position().y()
+                          << ",\"z\":" << entry.transform().position().z() << '}';
+            }
+            std::cout << "]}" << std::endl;
             session.close(); factory.runtime->shutdown(); return 0;
         }
         if (bound && sawLeave && sawEnter && (mode == "observer" || sentInterior))

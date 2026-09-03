@@ -1,8 +1,11 @@
 #!/usr/bin/env python3
 import argparse
+import ctypes
 import json
+import statistics
 import socket
 import subprocess
+import sys
 import tempfile
 import time
 from pathlib import Path
@@ -12,6 +15,67 @@ def run_client(binary: Path, port: int, password: Path) -> subprocess.CompletedP
     return subprocess.run(
         [str(binary), "127.0.0.1", str(port), str(password), "5000"],
         text=True, capture_output=True, timeout=10, check=False)
+
+
+def resident_bytes(pid: int) -> int:
+    if sys.platform == "win32":
+        class ProcessMemoryCounters(ctypes.Structure):
+            _fields_ = [
+                ("cb", ctypes.c_ulong), ("PageFaultCount", ctypes.c_ulong),
+                ("PeakWorkingSetSize", ctypes.c_size_t), ("WorkingSetSize", ctypes.c_size_t),
+                ("QuotaPeakPagedPoolUsage", ctypes.c_size_t),
+                ("QuotaPagedPoolUsage", ctypes.c_size_t),
+                ("QuotaPeakNonPagedPoolUsage", ctypes.c_size_t),
+                ("QuotaNonPagedPoolUsage", ctypes.c_size_t),
+                ("PagefileUsage", ctypes.c_size_t), ("PeakPagefileUsage", ctypes.c_size_t),
+            ]
+        counters = ProcessMemoryCounters()
+        counters.cb = ctypes.sizeof(counters)
+        ctypes.windll.kernel32.OpenProcess.restype = ctypes.c_void_p
+        ctypes.windll.kernel32.CloseHandle.argtypes = [ctypes.c_void_p]
+        ctypes.windll.psapi.GetProcessMemoryInfo.argtypes = [
+            ctypes.c_void_p, ctypes.c_void_p, ctypes.c_ulong]
+        handle = ctypes.windll.kernel32.OpenProcess(0x1000 | 0x0400, False, pid)
+        if not handle:
+            raise RuntimeError(f"cannot inspect process memory: pid={pid}")
+        try:
+            if not ctypes.windll.psapi.GetProcessMemoryInfo(
+                    handle, ctypes.byref(counters), counters.cb):
+                raise RuntimeError(f"cannot sample process memory: pid={pid}")
+            return int(counters.WorkingSetSize)
+        finally:
+            ctypes.windll.kernel32.CloseHandle(handle)
+    if sys.platform.startswith("linux"):
+        for line in Path(f"/proc/{pid}/status").read_text(encoding="ascii").splitlines():
+            if line.startswith("VmRSS:"):
+                return int(line.split()[1]) * 1024
+        raise RuntimeError(f"resident memory unavailable: pid={pid}")
+    if sys.platform == "darwin":
+        measured = subprocess.run(
+            ["ps", "-o", "rss=", "-p", str(pid)], text=True,
+            capture_output=True, timeout=5, check=False)
+        if measured.returncode == 0 and measured.stdout.strip():
+            return int(measured.stdout.strip()) * 1024
+    raise RuntimeError(f"resident memory sampling unsupported: platform={sys.platform}")
+
+
+def bounded_rss(samples: list[int]) -> dict[str, int]:
+    if len(samples) < 40:
+        raise RuntimeError(f"insufficient RSS samples: count={len(samples)}")
+    window = 10
+    reference = samples[len(samples) // 2 - window:len(samples) // 2]
+    final = samples[-window:]
+    reference_median = int(statistics.median(reference))
+    final_median = int(statistics.median(final))
+    observed_noise = max(reference) - min(reference)
+    if final_median > reference_median + observed_noise:
+        raise RuntimeError(
+            "sustained RSS growth: "
+            f"reference_median={reference_median} final_median={final_median} "
+            f"observed_noise={observed_noise}")
+    return {"samples": len(samples), "reference_median_bytes": reference_median,
+            "final_median_bytes": final_median, "observed_noise_bytes": observed_noise,
+            "peak_bytes": max(samples)}
 
 
 def main() -> int:
