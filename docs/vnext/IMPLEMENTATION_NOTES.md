@@ -5034,6 +5034,18 @@ only the relevant phase section here.
 
 [Back to the phase tracker](IMPLEMENTATION_PLAN.md#phase-8--openmw-desktop-vertical-slice)
 
+- 2026-09-02 — Slice 8.2 canonical revision separation — In Progress
+  - Change: accepted ADR-0048 after typed headless runtime migration exposed
+    multiple valid lifecycle publications sharing one fixed simulation tick.
+  - Decisions: owner approved the breaking A3 design: `ServerTick` paces
+    simulation; `CanonicalRevision` orders every authoritative commit,
+    publication, and observed command base.
+  - Verification: focused runtime contracts pass. Real process proof reaches
+    movement and lifecycle, then deterministically rejects the ambiguous
+    same-tick snapshot, proving the pre-migration model is insufficient.
+  - Follow-ups: migrate domain and wire ordering, rerun focused and full real
+    process proofs, then resume OpenMW coordinator composition.
+
 - 2026-09-02 — Slice 8.2 full-build blocker correction — Verified
   - Change: replaced the stale full-engine build directory with a fresh MSVC
     configuration using the pinned Windows dependency bundle. No dependency or

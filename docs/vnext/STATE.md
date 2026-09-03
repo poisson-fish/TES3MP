@@ -13,7 +13,8 @@ remains the [implementation plan](IMPLEMENTATION_PLAN.md#phase-8--openmw-desktop
 - Slice 8.1: **Implemented**
 - Slice 8.2: **In Progress** (headless/OpenMW runtime composition remains)
 - Governing decisions: [ADR-0007](adr/ADR-0007-openmw-hook-patch-queue-policy.md),
-  [ADR-0047](adr/ADR-0047-phase8-adapter-lifecycle-and-provider-boundary.md)
+  [ADR-0047](adr/ADR-0047-phase8-adapter-lifecycle-and-provider-boundary.md),
+  [ADR-0048](adr/ADR-0048-canonical-revision-and-simulation-tick-separation.md)
 - Latest implementation commit: `eaa4df407f` (`Add bounded client session runtime`)
 
 ## Working synopsis
@@ -38,7 +39,9 @@ hook inventory on 2026-09-02. Slice 8.2 two-provider architecture and
 correct-then-command frame order are approved. The reusable client-session
 runtime now owns bounded typed inbound drain and queued outbound flush with
 failure closure. Provider contracts, the optional engine coordinator seam, and
-semantic patch registry are implemented; caller composition remains.
+semantic patch registry are implemented. Headless caller migration exposed the
+need to separate canonical publication revision from simulation tick; the
+owner-approved breaking ADR-0048 migration is now in progress.
 
 ## Active files
 
