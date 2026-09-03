@@ -5032,6 +5032,24 @@ only the relevant phase section here.
 
 ## Phase 8 — OpenMW desktop vertical slice
 
+### 2026-09-03 — Slice 8.5 decision-gate research
+
+- Status: **Not Started**; no production implementation began.
+- Finding: the existing adapter can read desktop action state and use the
+  existing same-cell player move API without a deeper OpenMW hook. However,
+  each non-zero server movement tick advances the entity revision while every
+  motion command requires the client's exact observed revision. With more than
+  one tick of network delay, a changed or zero/stop intent can therefore remain
+  stale and fail to converge.
+- Decision gate: the owner must approve command concurrency/precondition
+  behavior, desktop control-to-velocity mapping, and authoritative local
+  correction behavior. GDR-0001/GDR-0012 do not authorize OpenMW engine use or
+  correction tuning, and Phase 12 still owns production locomotion.
+- Verification: source/decision inspection only; the prior Slice 8.4 automated
+  evidence remains current and no test claim changed.
+
+[Back to the phase tracker](IMPLEMENTATION_PLAN.md#phase-8--openmw-desktop-vertical-slice)
+
 ### 2026-09-03 — Slice 8.4 approved package and P8-004 implementation
 
 - Status: **In Progress**; owner two-client demo remains.

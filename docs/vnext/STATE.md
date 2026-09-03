@@ -14,6 +14,7 @@ remains the [implementation plan](IMPLEMENTATION_PLAN.md#phase-8--openmw-desktop
 - Slice 8.2: **In Progress** (owner demo remains)
 - Slice 8.3: **In Progress**
 - Slice 8.4: **In Progress**
+- Slice 8.5: **Not Started** (decision review pending)
 - Governing decisions: [ADR-0007](adr/ADR-0007-openmw-hook-patch-queue-policy.md),
   [ADR-0047](adr/ADR-0047-phase8-adapter-lifecycle-and-provider-boundary.md),
   [ADR-0048](adr/ADR-0048-canonical-revision-and-simulation-tick-separation.md),
@@ -60,6 +61,13 @@ fixture content mapping, typed provider failure closure, and renderer-only
 remote avatar reconciliation are implemented. Automated gates pass; the
 content-backed two-client owner demo remains.
 
+Slice 8.5 gate research found that exact entity-revision preconditions cannot
+converge for continuous motion after more than one server tick of latency,
+because canonical movement advances that revision every tick. Desktop input
+mapping, spatial-command concurrency, and local correction behavior await owner
+approval before production code. Existing public OpenMW action and same-cell
+move APIs appear sufficient; no deeper engine hook is currently proposed.
+
 ## Active files
 
 - Governing policy: `docs/vnext/adr/ADR-0007-openmw-hook-patch-queue-policy.md`
@@ -73,6 +81,9 @@ content-backed two-client owner demo remains.
 - Desktop status presentation: `apps/openmw/main.cpp`
 - Cell/presentation providers: `apps/openmw/tes3mp/{desktop_providers.hpp,desktop_providers.cpp}`
 - Renderer-only avatar seam: `apps/openmw/mwrender/{transientactorpresentation.hpp,transientactorpresentation.cpp}`
+- Movement gate seams:
+  `apps/openmw/tes3mp/{providers.hpp,desktop_providers.cpp,adapter.cpp}` and
+  `components/tes3mp/{client_session/client_session_runtime.cpp,server_core/server_command_reducer.cpp}`
 - Patch registry: `docs/vnext/OPENMW_PATCH_REGISTRY.json`,
   `scripts/verify_openmw_patch_registry.py`
 - Evidence: [Phase 8 notes](IMPLEMENTATION_NOTES.md#phase-8--openmw-desktop-vertical-slice)
