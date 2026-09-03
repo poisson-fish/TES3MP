@@ -5032,6 +5032,31 @@ only the relevant phase section here.
 
 ## Phase 8 — OpenMW desktop vertical slice
 
+### 2026-09-03 — Slice 8.7 first content-backed run
+
+- Status: **In Progress**; the flow fails before bounded evidence completes.
+- Finding: licensed Steam content appeared at the default path after the prior
+  search. The first process attempt exposed missing runtime DLL search paths;
+  using the pinned dependency `bin` directories on `PATH` makes the executable
+  smoke test pass. The next attempt loaded `Morrowind.esm` but lacked
+  `Morrowind.bsa`, so remote meshes were unavailable. The runner now accepts
+  explicit repeatable `--fallback-archive` values and its focused contract
+  covers `Morrowind.bsa`. With that archive mounted, both clients reach
+  `Seyda Neen, Census and Excise Office`, then the adapter closes with the
+  sanitized `remote player presentation failed` reason while using approved
+  avatar record `player`.
+- Decisions: none beyond the already approved mapping. No alternate NPC record,
+  presentation fallback, or broader diagnostic surface was chosen.
+- Verification: `openmw.exe --version` passes with pinned dependency paths;
+  `python -m unittest scripts.tests.test_phase8_desktop_harness -v` passes 4/4;
+  real two-client attempts reproduce the missing-archive failure and then the
+  post-load remote-presentation failure. No completion artifact was emitted.
+- Follow-up: owner review is required before trying a different avatar record or
+  changing presentation/diagnostic behavior. After approval, isolate the
+  failure, rerun flow/reconnect/soak, and retain credential-free evidence.
+
+[Back to the phase tracker](IMPLEMENTATION_PLAN.md#phase-8--openmw-desktop-vertical-slice)
+
 ### 2026-09-03 — Slice 8.7 demo mapping approval
 
 - Status: **In Progress**; licensed content, process evidence, and owner demo

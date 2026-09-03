@@ -20,6 +20,7 @@ class Phase8DesktopHarnessTests(unittest.TestCase):
         return argparse.Namespace(
             openmw=pathlib.Path("openmw"), resources=pathlib.Path("resources"),
             data=[pathlib.Path("data")], content=["Morrowind.esm"],
+            fallback_archive=["Morrowind.bsa"],
             interior="Balmora", worldspace="Wilderness", avatar="player")
 
     def test_command_is_fixed_role_and_credential_file_only(self):
@@ -28,6 +29,7 @@ class Phase8DesktopHarnessTests(unittest.TestCase):
         joined = " ".join(command)
         self.assertIn("--tes3mp-automation-role=flow-one", joined)
         self.assertIn("--tes3mp-password-file=secret-file", joined)
+        self.assertIn("--fallback-archive=Morrowind.bsa", joined)
         self.assertNotIn("phase8-desktop-secret", joined)
 
     def test_unknown_role_is_rejected(self):

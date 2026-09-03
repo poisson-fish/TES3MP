@@ -94,15 +94,14 @@ and external flow/reconnect/soak harness are implemented. Automated gates pass;
 the content-backed run and owner demo remain. No new OpenMW hook, protocol,
 canonical state, authority, or persistence was added.
 
-The content-backed Slice 8.7 demo preflight rebuilt the current RelWithDebInfo
-server and passed all four focused harness contracts. Both required binaries
-are ready, but the local Steam libraries and checked conventional install paths
-contain no licensed Morrowind content, so the process run and owner review are
-still gated. Phase 9 cannot begin before that Phase 8 exit evidence is accepted.
 The owner approved the GDR-0013 Option A demo mapping: interior
 `Seyda Neen, Census and Excise Office`, worldspace `sys::default`, and avatar
-NPC `player`. An exact-name search across all four local filesystem drives also
-found no `Morrowind.esm`; record validation and the demo remain pending.
+NPC `player`. Licensed Steam content later appeared at the default path. The
+runner now forwards explicit fallback archives; with the pinned dependency
+runtime paths and `Morrowind.bsa`, both clients reach the approved interior but
+close on remote presentation with avatar `player`. No alternate content record
+or presentation behavior has been chosen. Phase 9 remains gated on diagnosis,
+the complete content-backed run, and owner acceptance.
 
 ## Active files
 
@@ -132,6 +131,12 @@ found no `Morrowind.esm`; record validation and the demo remain pending.
 - Evidence: [Phase 8 notes](IMPLEMENTATION_NOTES.md#phase-8--openmw-desktop-vertical-slice)
 
 ## Last verified
+
+The first content-backed Slice 8.7 flow reaches the approved interior in two
+real OpenMW processes after mounting `Morrowind.bsa`, then both connections
+close with sanitized reason `remote player presentation failed` while using
+avatar `player`. The focused four-test harness contract passes with explicit
+fallback-archive forwarding. No complete evidence or owner-demo claim was made.
 
 Slice 8.7 content-backed demo preflight rebuilt the MSVC 19.51 RelWithDebInfo
 `tes3mp_server.exe` and passed all four focused desktop-harness Python contracts

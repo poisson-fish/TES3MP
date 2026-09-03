@@ -40,6 +40,8 @@ def client_command(args: argparse.Namespace, port: int, password: Path,
     ]
     for data in args.data:
         command.append(f"--data={data}")
+    for archive in args.fallback_archive:
+        command.append(f"--fallback-archive={archive}")
     for content in args.content:
         command.append(f"--content={content}")
     return command
@@ -111,6 +113,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--openmw", type=Path, required=True)
     parser.add_argument("--resources", type=Path, required=True)
     parser.add_argument("--data", type=Path, action="append", required=True)
+    parser.add_argument("--fallback-archive", action="append", default=[])
     parser.add_argument("--content", action="append", required=True)
     parser.add_argument("--interior", required=True)
     parser.add_argument("--worldspace", required=True)
