@@ -5034,6 +5034,26 @@ only the relevant phase section here.
 
 [Back to the phase tracker](IMPLEMENTATION_PLAN.md#phase-8--openmw-desktop-vertical-slice)
 
+- 2026-09-02 — Slice 8.2 complete client orchestrator correction — Verified
+  - Change: implemented owner-approved breaking Option D. The reusable runtime
+    now owns handshake/authentication progression, initial binding,
+    snapshot/observation application, command envelope sequencing, bounded
+    queues, and failure closure. The headless proof caller no longer assembles
+    protocol/session transitions. The concrete OpenMW coordinator core owns
+    transport/clock/runtime lifetimes and uses the approved frame order.
+  - Decisions: ADR-0047 records the amendment. Endpoint, credential acquisition,
+    OpenMW enablement, and UI-error policy remain Slice 8.3 decisions.
+  - Verification: fresh MSVC 19.51 Debug headless-runtime and adapter contracts
+    pass; the RelWithDebInfo OpenMW adapter compiles; the real two-client proof
+    passes movement, convergence, stale-view rejection, 32 reconnects,
+    expiration/fresh identity, and zero queue drain. All 120 Python tests,
+    staged baseline provenance with 303 intentional differences and 69 inputs,
+    staged legacy exclusion, patch-registry verification, and diff checks pass.
+  - Owner review: architecture approved before implementation; implementation
+    demo acceptance remains pending.
+  - Follow-ups: configuration-gated executable composition after Slice 8.3
+    endpoint/authentication/UI decisions, then the desktop demo.
+
 - 2026-09-02 — Slice 8.2 headless runtime caller migration — Verified
   - Change: migrated the headless executable from direct transport polling and
     frame decoding to the reusable `ClientSessionRuntime` typed inbound drain,

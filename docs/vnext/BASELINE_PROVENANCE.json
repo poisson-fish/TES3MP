@@ -112,7 +112,12 @@
     {
       "path": "apps/openmw/tes3mp/adapter.cpp",
       "status": "A",
-      "purpose": "Behavior-free translation-unit anchor proving the OpenMW adapter participates in compilation and linking."
+      "purpose": "Implements the bounded correct-then-command coordinator over the shared client orchestrator and borrowed providers."
+    },
+    {
+      "path": "apps/openmw/tes3mp/adapter.hpp",
+      "status": "A",
+      "purpose": "Declares the concrete coordinator factory with owned transport, clock, and reusable client-runtime lifetimes."
     },
     {
       "path": "apps/openmw/tes3mp/adapter_tests.cpp",
@@ -137,7 +142,7 @@
     {
       "path": "apps/tes3mp-headless-client/main.cpp",
       "status": "A",
-      "purpose": "Composes one caller-pumped real transport client, bounded fixed join flow, credential input, targeted initial snapshot application, and credential-free identity evidence."
+      "purpose": "Composes the reusable complete client orchestrator with bounded proof scenarios, credential input, and credential-free identity evidence."
     },
     {
       "path": "apps/tes3mp-server/CMakeLists.txt",
@@ -265,6 +270,11 @@
       "purpose": "Atomic client session-state transitions for encrypted readiness, negotiation, authentication, deadlines, rejection, cancellation, and closure."
     },
     {
+      "path": "components/tes3mp/client_session/client_session_runtime.cpp",
+      "status": "A",
+      "purpose": "Reusable bounded client orchestration for transport, negotiation, authentication, canonical application, command sequencing, and failure closure."
+    },
+    {
       "path": "components/tes3mp/client_session/headless_client_session.cpp",
       "status": "A",
       "purpose": "Caller-pumped single-attempt/single-connection headless client façade over owned transport and client-session state."
@@ -313,6 +323,11 @@
       "path": "components/tes3mp/include/tes3mp/client_session.hpp",
       "status": "A",
       "purpose": "Closed client session states, typed in-memory events/actions, injected timeout policy, and terminal result interface."
+    },
+    {
+      "path": "components/tes3mp/include/tes3mp/client_session_runtime.hpp",
+      "status": "A",
+      "purpose": "Engine-independent complete client orchestration boundary and bounded typed outcomes."
     },
     {
       "path": "components/tes3mp/include/tes3mp/command_primitives.hpp",
@@ -1240,6 +1255,11 @@
       "purpose": "Records the approved Phase 8 provider split, lifecycle, frame order, and reusable runtime gate."
     },
     {
+      "path": "docs/vnext/adr/ADR-0048-canonical-revision-and-simulation-tick-separation.md",
+      "status": "A",
+      "purpose": "Separates fixed simulation scheduling ticks from monotonic authoritative publication revisions."
+    },
+    {
       "path": "docs/vnext/gdr/GDR-0001-phase7-headless-vertical-slice-behavior.md",
       "status": "A",
       "purpose": "Owner-approved Phase 7 fixture spawn, readiness, cell visibility, provisional tick integration, headless correction, and bounded resume behavior."
@@ -1626,7 +1646,7 @@
         },
         {
           "path": "components/tes3mp/CMakeLists.txt",
-          "sha256": "82c25d34d654583c8478d30f2b5da9caf3a2b45d47a75c498d942bede512c976"
+          "sha256": "fe0a8c14fbf362b2024a9b166c14c8002c45c544abf439180801881829bf76cd"
         },
         {
           "path": "components/tes3mp/protocol/generated/authentication_accepted_generated.h",
@@ -1646,15 +1666,15 @@
         },
         {
           "path": "components/tes3mp/protocol/generated/latest_wins_snapshot_generated.h",
-          "sha256": "5bc3603c7a3bc0935c5b6ff5f59f099f0196f86d0b68ed33d031a11af11fa192"
+          "sha256": "76cd7992d38b0b999cdb0a15e191f6100b39ec0a9fa1aa893d15b701496d9c1a"
         },
         {
           "path": "components/tes3mp/protocol/generated/reliable_observation_batch_generated.h",
-          "sha256": "bcd3f6156f0589d042238a0ecfb4b0b5b60a38287e6d48ec8a88c4d98f8762d2"
+          "sha256": "0d8fd88198d713a459bd04b09e250d089b5f58311f74ea6cfa7f23ec909e226d"
         },
         {
           "path": "components/tes3mp/protocol/generated/reliable_operation_generated.h",
-          "sha256": "56b53086f13bc2b094a4133753ccf0622be55ba54aed7f601704f8d7be0ff3cc"
+          "sha256": "2b37ce6eec582df00f2f8d621700fd7759d20631f945e5f1383ca2ed555742f1"
         },
         {
           "path": "components/tes3mp/protocol/generated/server_hello_generated.h",
@@ -1682,15 +1702,15 @@
         },
         {
           "path": "components/tes3mp/protocol/schema/latest_wins_snapshot.fbs",
-          "sha256": "cbcf3268653aebd25767f12c241d335c48cd72b83d776dff81512966741ad338"
+          "sha256": "2477021e9fe4b2778b8b81443f8c81d15e5a659302128067298aac1b45775562"
         },
         {
           "path": "components/tes3mp/protocol/schema/reliable_observation_batch.fbs",
-          "sha256": "eb2878d7a820b7a3df9005ba229b6a245b77a56d16a73498424d0515160ff8fc"
+          "sha256": "ddbbe9f816bd5dbffaaff625d51d23236f78a8cb1b5ac68bf781fa542ee24976"
         },
         {
           "path": "components/tes3mp/protocol/schema/reliable_operation.fbs",
-          "sha256": "f33559d4c00541b78d0c972368e22e8c2839059c1f15ca4410ec18eb8ea2c728"
+          "sha256": "32183cb97c180a32a9f367ed6a5ef8b814ba8b40c2b3f87503880ef8e71d5063"
         },
         {
           "path": "components/tes3mp/protocol/schema/server_hello.fbs",

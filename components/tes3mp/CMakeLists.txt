@@ -422,6 +422,7 @@ add_custom_target(tes3mp_headless_client_tests_run
     COMMENT "Running TES3MP headless client contracts")
 
 add_executable(openmw_tes3mp_adapter_tests
+    ${CMAKE_CURRENT_LIST_DIR}/../../apps/openmw/tes3mp/adapter.cpp
     ${CMAKE_CURRENT_LIST_DIR}/../../apps/openmw/tes3mp/adapter_tests.cpp)
 target_compile_features(openmw_tes3mp_adapter_tests PRIVATE cxx_std_20)
 target_include_directories(openmw_tes3mp_adapter_tests PRIVATE

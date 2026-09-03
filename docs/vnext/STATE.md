@@ -36,18 +36,17 @@ optimized lifecycle demo pass without weakening client contradiction rejection.
 The project owner accepted the Slice 7.7 implementation demo and Phase 7 exit
 gate on 2026-09-02. The owner approved the exact Slice 8.1 P8-001 through P8-003
 hook inventory on 2026-09-02. Slice 8.2 two-provider architecture and
-correct-then-command frame order are approved. The reusable client-session
-runtime now owns bounded typed inbound drain and queued outbound flush with
-failure closure, and the headless executable uses that boundary. Provider
-contracts, the optional engine coordinator seam, and semantic patch registry
-are implemented. The caller migration reproduced the different-publication,
-same-tick contradiction. The owner-approved breaking ADR-0048 domain/wire
-migration is implemented and verified; concrete OpenMW composition is next.
+correct-then-command frame order are approved. The owner then approved breaking
+Option D after caller migration exposed split orchestration ownership. The
+runtime now owns protocol/session progression, binding/application, command
+sequencing, bounded queues, and failure closure. The headless proof caller and
+the concrete OpenMW coordinator core use that one path. Configuration-gated
+executable attachment and the owner demo remain.
 
 ## Active files
 
 - Governing policy: `docs/vnext/adr/ADR-0007-openmw-hook-patch-queue-policy.md`
-- Adapter anchor/target: `apps/openmw/tes3mp/{adapter.cpp,CMakeLists.txt}`
+- Adapter coordinator/target: `apps/openmw/tes3mp/{adapter.hpp,adapter.cpp,CMakeLists.txt}`
 - Reusable runtime: `components/tes3mp/{include/tes3mp/client_session_runtime.hpp,client_session/client_session_runtime.cpp,tests/headless_client_tests.cpp}`
 - Provider/coordinator contracts: `apps/openmw/tes3mp/{providers.hpp,engine_coordinator.hpp,adapter_tests.cpp}`
 - Candidate lifecycle/frame seam: `apps/openmw/engine.{hpp,cpp}`

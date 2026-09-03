@@ -62,8 +62,31 @@ Putting transport composition in the OpenMW adapter was rejected because it
 violates ADR-0007. Retaining the combined caller-owned flow was rejected because
 it cannot guarantee the approved frame order.
 
+## 2026-09-02 owner-approved runtime amendment
+
+After the first caller migration exposed duplicated protocol progression in the
+headless executable, the owner approved a breaking correction (Option D). The
+reusable runtime is the complete client orchestrator, not merely a typed codec
+and transport queue. It owns connection and negotiation progression,
+authentication submission, initial session binding, authoritative snapshot and
+observation application, command sequencing, bounded transport work, and
+failure closure. Callers supply configuration/credentials and semantic intent;
+they consume typed state and presentation events. They do not drive the session
+state machine or assemble protocol envelopes.
+
+The runtime remains engine-independent and transport-injected. OpenMW owns the
+concrete transport/clock/runtime aggregate through its coordinator; headless and
+OpenMW callers use the same orchestration API. Endpoint selection, credential
+acquisition, and actionable OpenMW UI policy remain Slice 8.3 decisions.
+
+Alternatives rejected by the owner were retaining duplicated caller
+orchestration, adding a partial helper while ownership stayed split, and
+unconditionally attaching a dormant OpenMW coordinator.
+
 ## Owner approval
 
 Approved by the project owner on 2026-09-02: Option A, two narrow borrowed
 providers with coordinator-owned session lifecycle, followed by Option A exact
-correct-then-command frame order and Option A reusable client-session runtime.
+correct-then-command frame order and the original Option A runtime. The owner
+then approved the breaking Option D amendment above after caller migration
+revealed split orchestration ownership.

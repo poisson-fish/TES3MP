@@ -5,6 +5,7 @@ tes3mp_validate_runtime_safety()
 
 add_library(openmw_tes3mp_adapter STATIC
     adapter.cpp
+    adapter.hpp
     engine_coordinator.hpp
     providers.hpp
 )

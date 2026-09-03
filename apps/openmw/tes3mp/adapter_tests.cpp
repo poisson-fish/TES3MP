@@ -1,4 +1,4 @@
-#include "engine_coordinator.hpp"
+#include "adapter.hpp"
 #include "providers.hpp"
 
 #include <cstdlib>
@@ -6,7 +6,11 @@
 
 namespace
 {
-    void require(bool value) { if (!value) std::abort(); }
+    void require(bool value)
+    {
+        if (!value)
+            std::abort();
+    }
 
     class Input final : public TES3MP::OpenMWAdapter::SemanticInputProvider
     {
@@ -22,8 +26,8 @@ namespace
     class Presentation final : public TES3MP::OpenMWAdapter::PresentationProvider
     {
     public:
-        void applyAuthoritative(const TES3MP::LatestWinsSnapshot&,
-            std::span<const TES3MP::ObservedPlayer>) noexcept override
+        void applyAuthoritative(
+            const TES3MP::LatestWinsSnapshot&, std::span<const TES3MP::ObservedPlayer>) noexcept override
         {
             ++calls;
         }
@@ -48,7 +52,9 @@ int main()
     Input input;
     auto intent = input.sampleCurrentIntent();
     require(input.calls == 1 && intent && intent->desiredVelocity() == TES3MP::LinearVelocity3(1, 2, 3));
+    Presentation presentation;
     Coordinator coordinator;
     coordinator.frame(0.25f);
     require(coordinator.calls == 1 && coordinator.lastDuration == 0.25f);
+    require(!TES3MP::OpenMWAdapter::makeCoordinator({}, {}, {}, input, presentation));
 }
