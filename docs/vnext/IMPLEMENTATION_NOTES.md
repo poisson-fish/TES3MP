@@ -5034,6 +5034,20 @@ only the relevant phase section here.
 
 [Back to the phase tracker](IMPLEMENTATION_PLAN.md#phase-8--openmw-desktop-vertical-slice)
 
+- 2026-09-02 — Slice 8.2 provider boundary — In Progress
+  - Change: added ADR-0047 and advanced Slice 8.2 to **In Progress**; production
+    code remains paused at the exact frame-order gate.
+  - Decisions: owner approved two narrow borrowed semantic-input and
+    presentation providers with coordinator-owned session lifecycle. Combined
+    facade and loose callbacks were rejected.
+  - Verification: all 117 repository-owned Python tests, documentation links,
+    ADR register status, and diff checks pass.
+  - Owner review: provider architecture Option A approved on 2026-09-02. Exact
+    drain/presentation/input ordering remains pending because it affects
+    correction and command behavior.
+  - Follow-ups: approve frame order, record it in ADR-0047, then implement named
+    lifecycle/provider contracts and the approved P8-001 through P8-003 seams.
+
 - 2026-09-02 — Slice 8.1 exact-hook inventory — Implemented
   - Change: amended accepted ADR-0007 with exact P8-001 through P8-003 engine,
     executable-composition, and target-wiring seams plus their needs, evidence,
