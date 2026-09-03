@@ -96,9 +96,8 @@ active-tree difference and dependency input.
 The tree contains independent protocol, transport, server-core, client-session,
 OpenMW-adapter, and test-support targets plus the Phase 7 dedicated server and
 headless client applications. Phases 0–7 have passed their exit gates. Phase 8
-is active: Slice 8.1 is implemented, Slices 8.2–8.6 await owner demos, and Slice
-8.7 awaits decision review; the plan table below is the authoritative status
-source.
+is active: Slice 8.1 is implemented and Slices 8.2–8.7 await content-backed
+owner demos; the plan table below is the authoritative status source.
 
 Historical pre-cutover state and exact Git mechanics remain available in
 [`PRE_CUTOVER_PROVENANCE.md`](PRE_CUTOVER_PROVENANCE.md), ADR-0001, and the
@@ -680,7 +679,7 @@ Depends on: Phase 7.
 | 8.4 | Map interior/exterior cell changes and spawn/despawn remote player presentation | **In Progress** | Approved ADR-0050/GDR-0013/P8-004 package implemented: explicit snapshot target identity, tracked/coalesced cell transitions, configured fixture mapping, and renderer-only remote avatars; automated gates and owner two-client demo remain |
 | 8.5 | Convert input to semantic movement commands and apply authoritative local correction | **In Progress** | Approved ADR-0051/GDR-0014 implemented in `c4b9cb1cec`: deterministic planar mapping, one-pending/latest intent coordination, ordered stale-revision convergence, and exact same-cell correction pass automated gates; owner two-client desktop demo remains |
 | 8.6 | Interpolate/extrapolate remote movement through a bounded jitter buffer | **In Progress** | Approved ADR-0052/GDR-0015 implemented in `ceb8e11d1f`: provider-owned four-sample client-local buffering, two-tick interpolation, three-tick extrapolation/hold, bounded correction/hard snaps, reset rules, and typed metrics pass automated gates; owner demo remains |
-| 8.7 | Implement disconnect/resume presentation and automate the two-client slice | **Not Started** | Owner-approved ADR-0053/GDR-0016 govern the reconnect supervisor and test-only typed automation harness; implementation not yet begun |
+| 8.7 | Implement disconnect/resume presentation and automate the two-client slice | **In Progress** | Approved ADR-0053/GDR-0016 implemented in `4735938383`: bounded sequential-runtime resume, original token deadline and one-second pre-auth retry, complete-snapshot continuity barrier, testing-only typed driver, and external flow/reconnect/soak harness pass automated gates; content-backed run and owner demo remain |
 
 Exit gate:
 

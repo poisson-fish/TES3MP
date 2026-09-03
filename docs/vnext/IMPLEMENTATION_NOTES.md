@@ -5032,6 +5032,36 @@ only the relevant phase section here.
 
 ## Phase 8 — OpenMW desktop vertical slice
 
+### 2026-09-03 — Slice 8.7 approved reconnect automation implementation
+
+- Status: **In Progress**; content-backed harness run and owner demo remain.
+- Decisions: owner approved recommended Option A. ADR-0053 places bounded
+  reconnect supervision and test-only automation in the app-local adapter;
+  GDR-0016 requires immediate remote clearing, multiplayer-input suppression,
+  and a complete-snapshot continuity barrier before resumed presentation.
+- Change: the coordinator now retains one rotating memory-only token and its
+  original deadline, owns one sequential runtime attempt, retries failed
+  pre-authentication connects no faster than once per second, and never replays
+  a submitted token or silently performs a fresh join. Resume validates session,
+  player, entity, generation, entity revision, and acknowledgement continuity.
+  A `BUILD_TESTING`-only typed OpenMW driver and external process harness cover
+  two-client movement/cell flow, 32 resumes, 60-second soak, client/server RSS,
+  bounded queue drain, and credential-free evidence. No new OpenMW hook,
+  protocol, canonical state, authority, or persistence was added.
+- Verification: focused MSVC 19.51 Debug adapter/reconnect and token-recovery
+  contracts, full protocol aggregate, headless-client contracts, all 128
+  repository-owned Python tests, patch-registry verification, staged baseline
+  provenance with 331 intentional differences and 69 dependency inputs,
+  staged legacy exclusion over 4,018 paths, 62 CMake files, 1,254 compile
+  commands, and 1,971 Ninja edges, diff hygiene, and networking-enabled
+  RelWithDebInfo `openmw.exe` links with `BUILD_TESTING` on and off pass.
+- Commit: `4735938383` (`Implement Phase 8 desktop reconnect automation`).
+- Follow-up: run the content-backed desktop harness with licensed game data and
+  obtain owner acceptance before marking Slice 8.7 Implemented or closing the
+  Phase 8 exit gate.
+
+[Back to the phase tracker](IMPLEMENTATION_PLAN.md#phase-8--openmw-desktop-vertical-slice)
+
 ### 2026-09-03 — Slice 8.7 decision-gate research
 
 - Status: **Not Started**; no production implementation began.

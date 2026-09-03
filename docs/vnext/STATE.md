@@ -16,7 +16,7 @@ remains the [implementation plan](IMPLEMENTATION_PLAN.md#phase-8--openmw-desktop
 - Slice 8.4: **In Progress**
 - Slice 8.5: **In Progress** (owner desktop demo remains)
 - Slice 8.6: **In Progress** (owner desktop demo remains)
-- Slice 8.7: **Not Started** (decision approved; implementation next)
+- Slice 8.7: **In Progress** (content-backed owner demo remains)
 - Governing decisions: [ADR-0007](adr/ADR-0007-openmw-hook-patch-queue-policy.md),
   [ADR-0047](adr/ADR-0047-phase8-adapter-lifecycle-and-provider-boundary.md),
   [ADR-0048](adr/ADR-0048-canonical-revision-and-simulation-tick-separation.md),
@@ -29,7 +29,7 @@ remains the [implementation plan](IMPLEMENTATION_PLAN.md#phase-8--openmw-desktop
   [GDR-0014](gdr/GDR-0014-phase8-desktop-movement-and-correction.md), and
   [GDR-0015](gdr/GDR-0015-phase8-remote-motion-presentation.md), and
   [GDR-0016](gdr/GDR-0016-phase8-disconnect-and-resume-presentation.md)
-- Latest implementation commit: `ceb8e11d1f` (`Implement Phase 8 remote movement smoothing`)
+- Latest implementation commit: `4735938383` (`Implement Phase 8 desktop reconnect automation`)
 
 ## Working synopsis
 
@@ -85,13 +85,14 @@ discontinuous state, clears with observation lifetime, and emits adapter-owned
 typed metrics. Automated gates pass; the owner desktop demo remains. No
 protocol, canonical-state, authority, or OpenMW hook changed.
 
-Slice 8.7 is approved under ADR-0053/GDR-0016. The adapter will own one bounded
-sequential-runtime reconnect supervisor, memory-only rotating credentials, and
-the resumed complete-snapshot barrier. Disconnect clears remotes immediately;
-local OpenMW remains responsive while multiplayer input is suppressed, and the
-resumed snapshot replaces speculative presentation. A `BUILD_TESTING`-only
-typed driver plus external two-process harness will capture evidence. No new
-OpenMW hook, protocol, canonical state, authority, or persistence is approved.
+Slice 8.7 is now in progress under ADR-0053/GDR-0016. The adapter owns one
+bounded sequential-runtime reconnect supervisor, memory-only rotating
+credentials, the original token deadline, one-second pre-auth retry pacing, and
+a resumed complete-snapshot continuity barrier. Disconnect clears remotes and
+suppresses multiplayer input until resume. A `BUILD_TESTING`-only typed driver
+and external flow/reconnect/soak harness are implemented. Automated gates pass;
+the content-backed run and owner demo remain. No new OpenMW hook, protocol,
+canonical state, authority, or persistence was added.
 
 ## Active files
 
@@ -113,20 +114,22 @@ OpenMW hook, protocol, canonical state, authority, or persistence is approved.
   `apps/openmw/tes3mp/{providers.hpp,desktop_providers.cpp,adapter.cpp,remote_motion.hpp,remote_motion.cpp}` and
   `components/tes3mp/include/tes3mp/{command_primitives.hpp,observability.hpp}`
 - Disconnect/resume and automation gate seams:
-  `apps/openmw/tes3mp/{adapter.cpp,desktop_connection.cpp,providers.hpp}`,
+  `apps/openmw/tes3mp/{adapter.cpp,desktop_connection.cpp,desktop_automation.hpp,desktop_automation.cpp,providers.hpp}`,
   `components/tes3mp/{include/tes3mp/client_session_runtime.hpp,client_session/client_session_runtime.cpp}`,
-  `apps/tes3mp-headless-client/main.cpp`, and `scripts/run_phase7_{join_demo,soak}.py`
+  `scripts/run_phase8_desktop_demo.py`, and `scripts/tests/test_phase8_desktop_harness.py`
 - Patch registry: `docs/vnext/OPENMW_PATCH_REGISTRY.json`,
   `scripts/verify_openmw_patch_registry.py`
 - Evidence: [Phase 8 notes](IMPLEMENTATION_NOTES.md#phase-8--openmw-desktop-vertical-slice)
 
 ## Last verified
 
-Slice 8.7 decision-gate research inspected the active desktop coordinator,
-runtime resume-token boundary, Phase 7 lifecycle/process proofs, accepted
-ADR/GDR constraints, and OpenMW patch inventory on 2026-09-03. All 124
-repository-owned Python tests, patch-registry verification, and diff hygiene
-pass. No production code or prior verification claim changed.
+Slice 8.7 focused MSVC 19.51 Debug reconnect/coordinator and token-recovery
+contracts, full protocol aggregate, headless-client contracts, all 128
+repository-owned Python tests, patch registry, staged baseline provenance with
+331 intentional differences and 69 dependency inputs, staged legacy exclusion,
+diff hygiene, and networking-enabled RelWithDebInfo `openmw.exe` links with
+`BUILD_TESTING` both on and off pass on 2026-09-03. The content-backed desktop
+harness and owner demo remain.
 
 Slice 8.6 focused MSVC 19.51 Debug adapter/smoother contracts, full protocol
 aggregate, headless-client contracts, all 124 repository-owned Python tests,
