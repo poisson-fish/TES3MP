@@ -94,6 +94,12 @@ and external flow/reconnect/soak harness are implemented. Automated gates pass;
 the content-backed run and owner demo remain. No new OpenMW hook, protocol,
 canonical state, authority, or persistence was added.
 
+The content-backed Slice 8.7 demo preflight rebuilt the current RelWithDebInfo
+server and passed all four focused harness contracts. Both required binaries
+are ready, but the local Steam libraries and checked conventional install paths
+contain no licensed Morrowind content, so the process run and owner review are
+still gated. Phase 9 cannot begin before that Phase 8 exit evidence is accepted.
+
 ## Active files
 
 - Governing policy: `docs/vnext/adr/ADR-0007-openmw-hook-patch-queue-policy.md`
@@ -122,6 +128,12 @@ canonical state, authority, or persistence was added.
 - Evidence: [Phase 8 notes](IMPLEMENTATION_NOTES.md#phase-8--openmw-desktop-vertical-slice)
 
 ## Last verified
+
+Slice 8.7 content-backed demo preflight rebuilt the MSVC 19.51 RelWithDebInfo
+`tes3mp_server.exe` and passed all four focused desktop-harness Python contracts
+on 2026-09-03. The matching `openmw.exe` is present. Licensed `Morrowind.esm`
+was not found in the local Steam libraries or checked conventional install
+paths, so no content-backed result or owner-demo claim was made.
 
 Slice 8.7 focused MSVC 19.51 Debug reconnect/coordinator and token-recovery
 contracts, full protocol aggregate, headless-client contracts, all 128

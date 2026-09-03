@@ -5032,6 +5032,28 @@ only the relevant phase section here.
 
 ## Phase 8 — OpenMW desktop vertical slice
 
+### 2026-09-03 — Slice 8.7 content-backed demo preflight
+
+- Status: **In Progress**; the content-backed harness and owner demo remain.
+- Finding: the current RelWithDebInfo `openmw.exe` is present and the matching
+  `tes3mp_server.exe` rebuild passes. The focused desktop-harness contracts pass
+  all four tests. Local Steam libraries and the checked conventional install
+  paths contain no Morrowind installation or `Morrowind.esm`, so the licensed
+  content-backed process run cannot begin on this machine yet.
+- Decisions: none. Accepted ADR-0053 and GDR-0013 through GDR-0016 remain
+  unchanged; no architecture, authority, state scope, gameplay behavior, or
+  production source changed.
+- Verification: MSVC 19.51 RelWithDebInfo `tes3mp_server` rebuild passed in
+  `build/slice82-openmw-full`; `python -m unittest
+  scripts.tests.test_phase8_desktop_harness -v` passed 4/4 tests; both required
+  executables exist in the same configuration directory.
+- Follow-up: provide licensed Morrowind data plus the approved interior,
+  worldspace, and fixture-avatar record identifiers, run
+  `scripts/run_phase8_desktop_demo.py`, and obtain owner acceptance. Phase 9
+  remains gated until the Phase 8 exit gate passes.
+
+[Back to the phase tracker](IMPLEMENTATION_PLAN.md#phase-8--openmw-desktop-vertical-slice)
+
 ### 2026-09-03 — Slice 8.7 approved reconnect automation implementation
 
 - Status: **In Progress**; content-backed harness run and owner demo remain.
