@@ -165,7 +165,7 @@ namespace
             && currentSession.highestContiguousFinalizedCommand()->value() == 1;
     }
 
-    bool fixture_transition_atomically_changes_cell_revision_and_ack()
+    bool stale_observed_revision_fixture_transition_still_changes_cell_and_ack()
     {
         const std::array players{ player(1, 101) };
         const std::array sessions{ session(10, 1, 101) };
@@ -173,7 +173,7 @@ namespace
         NullStructuredEventSink events;
         Observability observability(metrics, events);
         CanonicalCommandReducer reducer(state(players, sessions), observability);
-        const std::array commands{ transitionProposal(10, 1, 1001, 101, 1,
+        const std::array commands{ transitionProposal(10, 1, 1001, 101, 999,
             CellId::interior(CellSpaceId::fromValue(7).value())) };
         const auto result = reduceCommands(reducer, commands);
         const auto& current = reducer.state();
@@ -232,7 +232,7 @@ namespace
             && reducer.state() == initial;
     }
 
-    bool unbound_entity_revision_and_epoch_fail_in_closed_validation_order()
+    bool binding_and_epoch_fail_while_revision_is_observed_context()
     {
         const std::array players{ player(1, 101) };
         const std::array sessions{ session(10, 1, 101) };
@@ -242,15 +242,16 @@ namespace
         CanonicalCommandReducer reducer(state(players, sessions), observability);
         const std::array commands{
             proposal(10, 1, 1001, 999, 999, LinearVelocity3(1, 0, 0), 999),
-            proposal(10, 2, 1002, 101, 999, LinearVelocity3(2, 0, 0), 999),
+            proposal(10, 2, 1002, 101, 999, LinearVelocity3(2, 0, 0)),
             proposal(10, 3, 1003, 101, 1, LinearVelocity3(3, 0, 0), 999),
         };
         const auto result = reduceCommands(reducer, commands);
         return result && result.dispositions().size() == 3
             && result.dispositions()[0].disposition() == CommandDisposition::EntityBindingMismatch
-            && result.dispositions()[1].disposition() == CommandDisposition::EntityRevisionMismatch
+            && result.dispositions()[1].disposition() == CommandDisposition::Applied
             && result.dispositions()[2].disposition() == CommandDisposition::AuthorityEpochMismatch
-            && reducer.state().players().front() == players.front()
+            && reducer.state().players().front().linearVelocity() == LinearVelocity3(2, 0, 0)
+            && reducer.state().players().front().entityRevision().value() == 2
             && reducer.state().activeSessions().front().highestContiguousFinalizedCommand()->value() == 3;
     }
 
@@ -310,7 +311,7 @@ namespace
             && reducer.state().activeSessions().front().highestContiguousFinalizedCommand()->value() == 2;
     }
 
-    bool two_same_revision_commands_commit_first_and_reject_second_stale()
+    bool ordered_motion_start_and_stop_with_same_observed_revision_both_apply()
     {
         const std::array players{ player(1, 101) };
         const std::array sessions{ session(10, 1, 101) };
@@ -320,13 +321,13 @@ namespace
         CanonicalCommandReducer reducer(state(players, sessions), observability);
         const std::array commands{
             proposal(10, 1, 1001, 101, 1, LinearVelocity3(10, 0, 0)),
-            proposal(10, 2, 1002, 101, 1, LinearVelocity3(20, 0, 0)),
+            proposal(10, 2, 1002, 101, 1, LinearVelocity3(0, 0, 0)),
         };
         const auto result = reduceCommands(reducer, commands);
         return result && result.dispositions()[0].disposition() == CommandDisposition::Applied
-            && result.dispositions()[1].disposition() == CommandDisposition::EntityRevisionMismatch
-            && reducer.state().players().front().linearVelocity() == LinearVelocity3(10, 0, 0)
-            && reducer.state().players().front().entityRevision().value() == 2
+            && result.dispositions()[1].disposition() == CommandDisposition::Applied
+            && reducer.state().players().front().linearVelocity() == LinearVelocity3(0, 0, 0)
+            && reducer.state().players().front().entityRevision().value() == 3
             && reducer.state().activeSessions().front().highestContiguousFinalizedCommand()->value() == 2;
     }
 
@@ -627,9 +628,9 @@ namespace
         return result && changes.size() == 3 && changes[0].stateVersion().value() == 1
             && changes[1].stateVersion().value() == 2 && changes[2].stateVersion().value() == 3
             && changes[0].disposition() == CommandDisposition::Applied
-            && changes[1].disposition() == CommandDisposition::EntityRevisionMismatch
+            && changes[1].disposition() == CommandDisposition::Applied
             && changes[2].disposition() == CommandDisposition::Applied && changes[0].playerReplacement()
-            && !changes[1].playerReplacement() && changes[2].playerReplacement()
+            && changes[1].playerReplacement() && changes[2].playerReplacement()
             && publication->stateVersion().value() == 3 && reducer.canonicalRevision().value() == 1
             && publication->state() == reducer.state()
             && publication->state().players().front().linearVelocity() == LinearVelocity3(3, 0, 0)
@@ -813,22 +814,22 @@ int main()
     const std::array tests{
         std::pair{ "valid_bound_next_command_atomically_replaces_player_and_ack",
             &valid_bound_next_command_atomically_replaces_player_and_ack },
-        std::pair{ "fixture_transition_atomically_changes_cell_revision_and_ack",
-            &fixture_transition_atomically_changes_cell_revision_and_ack },
+        std::pair{ "stale_observed_revision_fixture_transition_still_changes_cell_and_ack",
+            &stale_observed_revision_fixture_transition_still_changes_cell_and_ack },
         std::pair{ "unknown_and_same_fixture_transitions_finalize_without_spatial_mutation",
             &unknown_and_same_fixture_transitions_finalize_without_spatial_mutation },
         std::pair{ "unknown_or_old_generation_session_cannot_mutate_or_ack_current_state",
             &unknown_or_old_generation_session_cannot_mutate_or_ack_current_state },
-        std::pair{ "unbound_entity_revision_and_epoch_fail_in_closed_validation_order",
-            &unbound_entity_revision_and_epoch_fail_in_closed_validation_order },
+        std::pair{ "binding_and_epoch_fail_while_revision_is_observed_context",
+            &binding_and_epoch_fail_while_revision_is_observed_context },
         std::pair{ "rejected_next_command_advances_ack_while_preserving_player_exactly",
             &rejected_next_command_advances_ack_while_preserving_player_exactly },
         std::pair{ "already_finalized_and_sequence_gap_commands_change_no_state",
             &already_finalized_and_sequence_gap_commands_change_no_state },
         std::pair{ "same_batch_duplicate_id_or_sequence_cannot_commit_twice",
             &same_batch_duplicate_id_or_sequence_cannot_commit_twice },
-        std::pair{ "two_same_revision_commands_commit_first_and_reject_second_stale",
-            &two_same_revision_commands_commit_first_and_reject_second_stale },
+        std::pair{ "ordered_motion_start_and_stop_with_same_observed_revision_both_apply",
+            &ordered_motion_start_and_stop_with_same_observed_revision_both_apply },
         std::pair{ "sealed_intake_batches_preserve_1025_as_1024_then_1_without_partial_command_state",
             &sealed_intake_batches_preserve_1025_as_1024_then_1_without_partial_command_state },
         std::pair{ "revision_exhaustion_rejects_player_change_and_atomically_finalizes_ack",

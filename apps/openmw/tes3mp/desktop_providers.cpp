@@ -1,7 +1,10 @@
 #include "desktop_providers.hpp"
+#include "movement_mapping.hpp"
 
 #include "../mwbase/environment.hpp"
+#include "../mwbase/inputmanager.hpp"
 #include "../mwbase/world.hpp"
+#include "../mwinput/actions.hpp"
 #include "../mwrender/transientactorpresentation.hpp"
 #include "../mwworld/cell.hpp"
 #include "../mwworld/cellstore.hpp"
@@ -120,7 +123,22 @@ namespace TES3MP::OpenMWAdapter
 
     std::optional<PlayerMotionIntent> DesktopSemanticInput::sampleCurrentIntent() noexcept
     {
-        return std::nullopt;
+        try
+        {
+            auto input = MWBase::Environment::get().getInputManager();
+            if (input->controlsDisabled() || !input->getControlSwitch("playercontrols"))
+                return PlayerMotionIntent(LinearVelocity3(0, 0, 0));
+            const double right = static_cast<double>(input->getActionValue(MWInput::A_MoveRight))
+                - static_cast<double>(input->getActionValue(MWInput::A_MoveLeft));
+            const double forward = static_cast<double>(input->getActionValue(MWInput::A_MoveForward))
+                - static_cast<double>(input->getActionValue(MWInput::A_MoveBackward));
+            const auto player = MWBase::Environment::get().getWorld()->getPlayerPtr();
+            return mapPlanarMovement(right, forward, player.getRefData().getPosition().rot[2]);
+        }
+        catch (...)
+        {
+            return PlayerMotionIntent(LinearVelocity3(0, 0, 0));
+        }
     }
 
     class DesktopPresentation::Impl
@@ -169,6 +187,8 @@ namespace TES3MP::OpenMWAdapter
                 player = world->getPlayerPtr();
                 targetCell = player.getCell();
             }
+            else if (player.getCell() == targetCell)
+                world->moveObject(player, selfPosition.asVec3());
 
             std::vector<EntityId> desired;
             desired.reserve(observedPlayers.size());

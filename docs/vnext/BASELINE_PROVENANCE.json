@@ -110,6 +110,26 @@
       "purpose": "Composes the explicitly enabled desktop multiplayer coordinator with sanitized startup and runtime status reporting."
     },
     {
+      "path": "apps/openmw/mwclass/npc.cpp",
+      "status": "M",
+      "purpose": "Exposes the approved renderer-only transient NPC model and animation helpers without gameplay registration."
+    },
+    {
+      "path": "apps/openmw/mwclass/npc.hpp",
+      "status": "M",
+      "purpose": "Declares the narrow renderer-only transient NPC presentation helpers."
+    },
+    {
+      "path": "apps/openmw/mwrender/transientactorpresentation.cpp",
+      "status": "A",
+      "purpose": "Implements renderer-only remote avatar creation, update, and cleanup outside gameplay systems."
+    },
+    {
+      "path": "apps/openmw/mwrender/transientactorpresentation.hpp",
+      "status": "A",
+      "purpose": "Declares the opaque renderer-only transient remote-avatar seam."
+    },
+    {
       "path": "apps/openmw/options.cpp",
       "status": "M",
       "purpose": "Declares the approved explicit desktop multiplayer enablement, endpoint, timeout, and password-file options."
@@ -145,9 +165,29 @@
       "purpose": "Declares stable sanitized desktop connection startup outcomes and the composition factory."
     },
     {
+      "path": "apps/openmw/tes3mp/desktop_providers.cpp",
+      "status": "A",
+      "purpose": "Implements fixture cell mapping, semantic desktop movement input, exact local correction, and renderer-only remote presentation."
+    },
+    {
+      "path": "apps/openmw/tes3mp/desktop_providers.hpp",
+      "status": "A",
+      "purpose": "Declares concrete OpenMW semantic input, presentation, and fixture mapping providers."
+    },
+    {
       "path": "apps/openmw/tes3mp/engine_coordinator.hpp",
       "status": "A",
       "purpose": "Narrow engine-facing frame coordinator interface without transport or packet types."
+    },
+    {
+      "path": "apps/openmw/tes3mp/movement_mapping.cpp",
+      "status": "A",
+      "purpose": "Implements deterministic planar movement mapping and bounded pending/latest intent coordination."
+    },
+    {
+      "path": "apps/openmw/tes3mp/movement_mapping.hpp",
+      "status": "A",
+      "purpose": "Declares engine-independent desktop movement mapping and intent tracking helpers."
     },
     {
       "path": "apps/openmw/tes3mp/providers.hpp",
@@ -1290,6 +1330,16 @@
       "purpose": "Records approved desktop enablement, endpoint, credential, timeout, status, and Windows runtime composition policy."
     },
     {
+      "path": "docs/vnext/adr/ADR-0050-phase8-cell-and-remote-presentation.md",
+      "status": "A",
+      "purpose": "Records approved fixture cell mapping, transition coordination, and renderer-only remote presentation policy."
+    },
+    {
+      "path": "docs/vnext/adr/ADR-0051-phase8-provisional-spatial-intent-concurrency.md",
+      "status": "A",
+      "purpose": "Records approved provisional spatial-intent concurrency and observed-revision policy."
+    },
+    {
       "path": "docs/vnext/gdr/GDR-0001-phase7-headless-vertical-slice-behavior.md",
       "status": "A",
       "purpose": "Owner-approved Phase 7 fixture spawn, readiness, cell visibility, provisional tick integration, headless correction, and bounded resume behavior."
@@ -1303,6 +1353,16 @@
       "path": "docs/vnext/gdr/GDR-0012-phase5-minimal-motion-reducer-semantics.md",
       "status": "A",
       "purpose": "Owner-approved Phase 5 minimal motion reducer effect, authority, state-scope, numeric, contention, and acknowledgement behavior."
+    },
+    {
+      "path": "docs/vnext/gdr/GDR-0013-phase8-cell-transition-presentation.md",
+      "status": "A",
+      "purpose": "Records approved Phase 8 fixture cell transition and local presentation behavior."
+    },
+    {
+      "path": "docs/vnext/gdr/GDR-0014-phase8-desktop-movement-and-correction.md",
+      "status": "A",
+      "purpose": "Records approved deterministic desktop movement mapping and exact local correction behavior."
     },
     {
       "path": "docs/vnext/proofs/cares/CMakeLists.txt",
@@ -1621,7 +1681,7 @@
         },
         {
           "path": "docs/vnext/proofs/cares/CMakeLists.txt",
-          "sha256": "01702351d9bb78c5c20962791018dacfbe447883b8240eea7ad8fcb1879f484b"
+          "sha256": "c31a6df779c6d6ded37b68a4bd7f90789d268c43fa31528569aa154ba36fc214"
         },
         {
           "path": "docs/vnext/proofs/cares/README.md",
@@ -1637,7 +1697,7 @@
         },
         {
           "path": "scripts/tests/test_run_vnext_cares_proof.py",
-          "sha256": "9b58d36be3ee1d467a182c1337b0602c961bc61c4c24655a2f58725eeae2aee0"
+          "sha256": "e291ba2ee0312a26736419e12c577f9f9f19bc6e4d4284f1a5f5572747395e59"
         },
         {
           "path": "scripts/vnext_cares_proof.json",
@@ -1676,7 +1736,7 @@
         },
         {
           "path": "components/tes3mp/CMakeLists.txt",
-          "sha256": "98ddeab38dd294d427c071d6164daa9cc52adcd904a36768322e7e45324d7fa5"
+          "sha256": "18f7e79c624f97ebf384770390871bffb4b2d4a7a08cc3b0d5245764e9c75e4a"
         },
         {
           "path": "components/tes3mp/protocol/generated/authentication_accepted_generated.h",
@@ -1696,7 +1756,7 @@
         },
         {
           "path": "components/tes3mp/protocol/generated/latest_wins_snapshot_generated.h",
-          "sha256": "76cd7992d38b0b999cdb0a15e191f6100b39ec0a9fa1aa893d15b701496d9c1a"
+          "sha256": "cc96cce7410475e22d8c11bb674161f0655f2a27cfc626913dc3af48cbfcb75a"
         },
         {
           "path": "components/tes3mp/protocol/generated/reliable_observation_batch_generated.h",
@@ -1732,7 +1792,7 @@
         },
         {
           "path": "components/tes3mp/protocol/schema/latest_wins_snapshot.fbs",
-          "sha256": "2477021e9fe4b2778b8b81443f8c81d15e5a659302128067298aac1b45775562"
+          "sha256": "848aa1a437c59f074c657e76e966125475742dd2ad7e0ea0125283c63aa7c4e0"
         },
         {
           "path": "components/tes3mp/protocol/schema/reliable_observation_batch.fbs",
@@ -1851,11 +1911,11 @@
         },
         {
           "path": "scripts/run_vnext_gamenetworkingsockets_proof.py",
-          "sha256": "e862cc386eaac8abe91b775ab53f45a1f9668a3825fcf88ff0fdc6753970c877"
+          "sha256": "ee1a6129b60f0dbf1ca5a6169e7a8d6b731f7d4ca4cd8d9197f3aeeb092c9195"
         },
         {
           "path": "scripts/tests/test_run_vnext_gamenetworkingsockets_proof.py",
-          "sha256": "93f439553a3a8ba88036a3e52a002f8b07fa643fdf52ebd3eb467aa8e81c8195"
+          "sha256": "ded2fc811c7c7237bb3d5886679e21283ee69b101f10e82aca7e357f25889b65"
         },
         {
           "path": "scripts/vnext_gamenetworkingsockets_proof.json",

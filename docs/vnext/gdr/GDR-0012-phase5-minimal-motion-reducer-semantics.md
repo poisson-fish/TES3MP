@@ -271,3 +271,11 @@ boundary clarification, and its acceptance tests. This approval does not
 authorize position integration, clamping, collision, cell transitions,
 prediction, presentation, reconnect, persistence, scripting, or online reducer
 composition.
+
+## 2026-09-03 Phase 8 amendment
+
+ADR-0051/GDR-0014 replace exact entity-revision equality and first-wins stale
+rejection for provisional ordered motion intents. Current session/entity/epoch
+authorization and reliable sequence/idempotency checks remain mandatory. The
+change permits delayed desktop movement and stop intent to converge; it does
+not authorize production locomotion rules.

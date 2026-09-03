@@ -1,4 +1,7 @@
 #include "adapter.hpp"
+#include "movement_mapping.hpp"
+
+#include <ranges>
 
 namespace TES3MP::OpenMWAdapter
 {
@@ -48,6 +51,8 @@ namespace TES3MP::OpenMWAdapter
                     return;
                 }
                 const auto& snapshot = mRuntime->session().stateMachine().confirmedSnapshot();
+                if (snapshot)
+                    mMotion.observeAcknowledgement(snapshot->header().acknowledgedCommandSequence());
                 bool finalizedCellTransition = false;
                 if (snapshot && mPendingCellTransition && snapshot->header().acknowledgedCommandSequence()
                     && *snapshot->header().acknowledgedCommandSequence() >= *mPendingCellTransition)
@@ -83,13 +88,30 @@ namespace TES3MP::OpenMWAdapter
                     return;
                 if (snapshot)
                 {
-                    if (auto intent = mInput.sampleCurrentIntent();
-                        intent && mRuntime->queueMotionIntent(std::move(*intent)).result != ClientRuntimeResult::Accepted)
+                    if (auto intent = mInput.sampleCurrentIntent())
+                        mMotion.sample(std::move(*intent));
+                    const auto self = std::ranges::find_if(snapshot->view().entries(), [&](const auto& entry) {
+                        return entry.playerId() == snapshot->header().targetPlayerId()
+                            && entry.entityId() == snapshot->header().targetEntityId();
+                    });
+                    if (self == snapshot->view().entries().end())
                     {
                         mRuntime->close();
                         mStatus.report(ConnectionStatus::TransportFailed);
                         mClosed = true;
                         return;
+                    }
+                    if (auto intent = mMotion.next(self->linearVelocity()))
+                    {
+                        const auto queued = mRuntime->queueMotionIntent(std::move(*intent));
+                        if (queued.result != ClientRuntimeResult::Accepted || !queued.sequence
+                            || !mMotion.markQueued(*queued.sequence))
+                        {
+                            mRuntime->close();
+                            mStatus.report(ConnectionStatus::TransportFailed);
+                            mClosed = true;
+                            return;
+                        }
                     }
                 }
                 if (mRuntime->flushOutbound() != ClientRuntimeResult::Accepted)
@@ -148,6 +170,7 @@ namespace TES3MP::OpenMWAdapter
             bool mClosed = false;
             std::optional<CommandSequence> mPendingCellTransition;
             std::optional<FixtureCellTransition> mDeferredCellTransition;
+            MotionIntentTracker mMotion;
         };
     }
 

@@ -37,7 +37,12 @@
       "slice": "8.4",
       "owner": "OpenMW adapter",
       "purpose": "Expose a narrow renderer-only transient NPC presentation seam that does not register remote avatars with gameplay, world-model, physics, navigation, scripting, or persistence systems.",
-      "paths": ["apps/openmw/mwclass/npc.cpp", "apps/openmw/mwclass/npc.hpp"],
+      "paths": [
+        "apps/openmw/mwclass/npc.cpp",
+        "apps/openmw/mwclass/npc.hpp",
+        "apps/openmw/mwrender/transientactorpresentation.cpp",
+        "apps/openmw/mwrender/transientactorpresentation.hpp"
+      ],
       "tests": ["scripts/tests/test_openmw_patch_registry.py", "openmw_tes3mp_adapter_tests", "openmw RelWithDebInfo link"],
       "disposition": "local; possible general-purpose upstream candidate; no upstream contact authorized",
       "removal_condition": "OpenMW supplies an equivalent reviewed renderer-only transient actor API"

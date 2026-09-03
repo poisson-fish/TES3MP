@@ -524,9 +524,7 @@ namespace TES3MP
                             {
                                 const CanonicalPlayerEntityState* player = prepared.mState->findPlayer(session->playerId());
                                 playerIndex = static_cast<std::size_t>(player - prepared.mState->players().data());
-                                if (precondition.expectedRevision() != player->entityRevision())
-                                    disposition = CommandDisposition::EntityRevisionMismatch;
-                                else if (precondition.expectedAuthorityEpoch() != player->authorityEpoch())
+                                if (precondition.expectedAuthorityEpoch() != player->authorityEpoch())
                                     disposition = CommandDisposition::AuthorityEpochMismatch;
                                 else
                                 {

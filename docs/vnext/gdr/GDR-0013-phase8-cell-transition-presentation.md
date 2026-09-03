@@ -33,3 +33,10 @@ combat, activation, or inventory behavior. Those remain later gated slices.
 
 Approved by the project owner on 2026-09-03 as part of the breaking Slice 8.4
 package, including P8-004.
+
+## 2026-09-03 Slice 8.5 amendment
+
+ADR-0051 treats the fixture transition's entity revision as observed context
+rather than an equality gate, while retaining current session, binding, epoch,
+sequence, and domain validation. This lets a transition converge while server
+movement continues; all presentation behavior above is unchanged.

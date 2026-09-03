@@ -9,6 +9,8 @@ add_library(openmw_tes3mp_adapter STATIC
     desktop_connection.cpp
     desktop_connection.hpp
     engine_coordinator.hpp
+    movement_mapping.cpp
+    movement_mapping.hpp
     providers.hpp
 )
 if(TES3MP_OPENMW_DESKTOP_PROVIDERS)

@@ -1,8 +1,11 @@
 #include "adapter.hpp"
 #include "desktop_connection.hpp"
+#include "movement_mapping.hpp"
 #include "providers.hpp"
 
 #include <cstdlib>
+#include <limits>
+#include <numbers>
 #include <optional>
 
 namespace
@@ -61,6 +64,37 @@ namespace
 
 int main()
 {
+    using namespace TES3MP;
+    using namespace TES3MP::OpenMWAdapter;
+
+    require(mapPlanarMovement(0, 0, 0).desiredVelocity() == LinearVelocity3(0, 0, 0));
+    require(mapPlanarMovement(1, 0, 0).desiredVelocity()
+        == LinearVelocity3(DesktopFixtureSpeedQuantaPerTick, 0, 0));
+    require(mapPlanarMovement(0, 1, 0).desiredVelocity()
+        == LinearVelocity3(0, DesktopFixtureSpeedQuantaPerTick, 0));
+    require(mapPlanarMovement(1, 1, 0).desiredVelocity() == LinearVelocity3(2896, 2896, 0));
+    require(mapPlanarMovement(0, 1, std::numbers::pi / 2).desiredVelocity()
+        == LinearVelocity3(DesktopFixtureSpeedQuantaPerTick, 0, 0));
+    require(mapPlanarMovement(0.5 / DesktopFixtureSpeedQuantaPerTick, 0, 0).desiredVelocity()
+        == LinearVelocity3(0, 0, 0));
+    require(mapPlanarMovement(1.5 / DesktopFixtureSpeedQuantaPerTick, 0, 0).desiredVelocity()
+        == LinearVelocity3(2, 0, 0));
+    require(mapPlanarMovement(std::numeric_limits<double>::infinity(), 1, 0).desiredVelocity()
+        == LinearVelocity3(0, 0, 0));
+
+    MotionIntentTracker motion;
+    motion.sample(PlayerMotionIntent(LinearVelocity3(10, 0, 0)));
+    require(motion.next(LinearVelocity3(0, 0, 0)).has_value());
+    require(motion.markQueued(CommandSequence::initial()) && motion.pending());
+    motion.sample(PlayerMotionIntent(LinearVelocity3(0, 0, 0)));
+    require(!motion.next(LinearVelocity3(0, 0, 0)));
+    motion.observeAcknowledgement(CommandSequence::initial());
+    require(!motion.pending());
+    require(motion.next(LinearVelocity3(10, 0, 0))->desiredVelocity() == LinearVelocity3(0, 0, 0));
+    require(motion.markQueued(*CommandSequence::initial().next()));
+    motion.observeAcknowledgement(*CommandSequence::initial().next());
+    require(!motion.next(LinearVelocity3(0, 0, 0)));
+
     Input input;
     auto intent = input.sampleCurrentIntent();
     require(input.calls == 1 && intent && intent->desiredVelocity() == TES3MP::LinearVelocity3(1, 2, 3));

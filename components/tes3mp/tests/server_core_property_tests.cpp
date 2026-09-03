@@ -416,7 +416,6 @@ namespace
             CommandDisposition::SequenceGap,
             CommandDisposition::DuplicateCommandId,
             CommandDisposition::EntityBindingMismatch,
-            CommandDisposition::EntityRevisionMismatch,
             CommandDisposition::AuthorityEpochMismatch,
         };
         return std::all_of(required.begin(), required.end(), [&coverage](CommandDisposition disposition) {

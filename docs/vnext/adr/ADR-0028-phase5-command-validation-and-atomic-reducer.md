@@ -355,3 +355,10 @@ tests. This approval authorizes only the Slice 5.3 reducer, validation,
 disposition, acknowledgement, observability, and focused tests described here.
 Online composition remains prohibited until Slice 5.5 adds the bounded
 cross-batch `CommandId` window.
+
+## 2026-09-03 Phase 8 amendment
+
+ADR-0051 replaces exact entity-revision equality only for the two provisional
+Phase 7 spatial intent bodies. They remain session/entity/epoch authorized and
+reliable-sequence ordered. Future command bodies retain the original exact
+revision rule unless separately approved.
