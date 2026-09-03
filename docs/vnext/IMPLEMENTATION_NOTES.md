@@ -5032,6 +5032,32 @@ only the relevant phase section here.
 
 ## Phase 8 — OpenMW desktop vertical slice
 
+### 2026-09-03 — Slice 8.6 approved remote smoothing implementation
+
+- Status: **In Progress**; owner two-client desktop demo remains.
+- Decisions: owner approved the recommended Option A package. ADR-0052 records
+  provider-owned bounded buffering and adapter-owned typed metrics; GDR-0015
+  records provisional two-tick interpolation, three-tick extrapolation, bounded
+  correction, and hard-snap behavior.
+- Change: added a pure four-sample per-entity remote-motion buffer driven each
+  frame by the injected monotonic clock. It interpolates position, caps
+  authoritative-velocity extrapolation at 100 ms, holds afterward, blends
+  corrections through 16 OpenMW units over two ticks, and hard-snaps larger or
+  discontinuous state. Desktop presentation owns and clears buffers with remote
+  renderer handles. Closed adapter-local metrics report snapshot age, depth,
+  extrapolation, correction distance, and hard snaps without identity fields.
+- Verification: focused MSVC 19.51 Debug adapter/smoother contracts, the full
+  protocol aggregate, headless-client contracts, all 124 repository-owned
+  Python tests, patch-registry verification, staged baseline provenance with
+  325 intentional differences and 69 dependency inputs, staged legacy
+  exclusion, diff hygiene, and the networking-enabled RelWithDebInfo
+  `openmw.exe` build/link pass.
+- Commit: `ceb8e11d1f` (`Implement Phase 8 remote movement smoothing`).
+- Follow-up: run and obtain owner acceptance for the content-backed two-client
+  desktop smoothing/convergence demo before marking Slice 8.6 Implemented.
+
+[Back to the phase tracker](IMPLEMENTATION_PLAN.md#phase-8--openmw-desktop-vertical-slice)
+
 ### 2026-09-03 — Slice 8.6 decision-gate research
 
 - Status: **Not Started**; no production implementation began.

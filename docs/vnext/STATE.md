@@ -15,7 +15,7 @@ remains the [implementation plan](IMPLEMENTATION_PLAN.md#phase-8--openmw-desktop
 - Slice 8.3: **In Progress**
 - Slice 8.4: **In Progress**
 - Slice 8.5: **In Progress** (owner desktop demo remains)
-- Slice 8.6: **In Progress**
+- Slice 8.6: **In Progress** (owner desktop demo remains)
 - Governing decisions: [ADR-0007](adr/ADR-0007-openmw-hook-patch-queue-policy.md),
   [ADR-0047](adr/ADR-0047-phase8-adapter-lifecycle-and-provider-boundary.md),
   [ADR-0048](adr/ADR-0048-canonical-revision-and-simulation-tick-separation.md),
@@ -26,7 +26,7 @@ remains the [implementation plan](IMPLEMENTATION_PLAN.md#phase-8--openmw-desktop
   [GDR-0013](gdr/GDR-0013-phase8-cell-transition-presentation.md), and
   [GDR-0014](gdr/GDR-0014-phase8-desktop-movement-and-correction.md), and
   [GDR-0015](gdr/GDR-0015-phase8-remote-motion-presentation.md)
-- Latest implementation commit: `c4b9cb1cec` (`Implement Phase 8 desktop movement`)
+- Latest implementation commit: `ceb8e11d1f` (`Implement Phase 8 remote movement smoothing`)
 
 ## Working synopsis
 
@@ -74,12 +74,13 @@ bounded world velocity; one pending plus one latest desired intent bounds
 traffic; newer same-cell snapshots correct local position exactly. No new
 OpenMW hook was needed. Automated gates pass; the owner desktop demo remains.
 
-Slice 8.6 is now in progress under owner-approved ADR-0052/GDR-0015. The
-approved boundary is a provider-owned four-sample client-local buffer, driven
-each frame by the injected monotonic clock, with two-tick interpolation,
-three-tick extrapolation, bounded correction/hard snaps, explicit lifetime
-resets, and adapter-owned typed metrics. No protocol, canonical-state,
-authority, or OpenMW hook change is authorized.
+Slice 8.6 is now in progress under owner-approved ADR-0052/GDR-0015. A
+provider-owned four-sample client-local buffer now advances each frame from the
+injected monotonic clock, interpolates two ticks behind, extrapolates at most
+three ticks before holding, blends bounded corrections, hard-snaps larger or
+discontinuous state, clears with observation lifetime, and emits adapter-owned
+typed metrics. Automated gates pass; the owner desktop demo remains. No
+protocol, canonical-state, authority, or OpenMW hook changed.
 
 ## Active files
 
@@ -98,7 +99,7 @@ authority, or OpenMW hook change is authorized.
   `apps/openmw/tes3mp/{providers.hpp,desktop_providers.cpp,adapter.cpp,movement_mapping.hpp,movement_mapping.cpp}` and
   `components/tes3mp/{client_session/client_session_runtime.cpp,server_core/server_command_reducer.cpp}`
 - Remote smoothing gate seams:
-  `apps/openmw/tes3mp/{providers.hpp,desktop_providers.cpp,adapter.cpp}` and
+  `apps/openmw/tes3mp/{providers.hpp,desktop_providers.cpp,adapter.cpp,remote_motion.hpp,remote_motion.cpp}` and
   `components/tes3mp/include/tes3mp/{command_primitives.hpp,observability.hpp}`
 - Patch registry: `docs/vnext/OPENMW_PATCH_REGISTRY.json`,
   `scripts/verify_openmw_patch_registry.py`
@@ -106,9 +107,11 @@ authority, or OpenMW hook change is authorized.
 
 ## Last verified
 
-Slice 8.6 decision-gate research, all 124 repository-owned Python tests, patch
-registry, and diff hygiene pass on 2026-09-03. No production code or prior test
-claim changed.
+Slice 8.6 focused MSVC 19.51 Debug adapter/smoother contracts, full protocol
+aggregate, headless-client contracts, all 124 repository-owned Python tests,
+patch registry, staged baseline provenance with 325 intentional differences and
+69 dependency inputs, staged legacy exclusion, diff hygiene, and the full
+networking-enabled RelWithDebInfo `openmw.exe` build/link pass on 2026-09-03.
 
 Slice 8.5's focused reducer/property and movement/coordinator contracts, full
 protocol aggregate, headless-client contracts, adapter contracts, patch
