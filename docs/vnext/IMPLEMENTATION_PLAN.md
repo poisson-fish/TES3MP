@@ -364,6 +364,7 @@ runtime or protocol name.
 | ADR-0050 | Phase 8 cell and remote presentation | Phase 8 | **Implemented** |
 | ADR-0051 | Phase 8 provisional spatial-intent concurrency | Phase 8 | **Implemented** |
 | ADR-0052 | Phase 8 remote motion smoothing | Phase 8 | **Implemented** |
+| ADR-0053 | Phase 8 desktop reconnect and automation composition | Phase 8 | **Implemented** |
 
 An ADR is complete only when it records considered alternatives, selection
 criteria, consequences, failure modes, a replacement/review trigger, and
@@ -391,6 +392,7 @@ production code that depends on the choice cannot.
 | GDR-0013 | Phase 8 cell-transition presentation | Phase 8 | **Implemented** |
 | GDR-0014 | Phase 8 desktop movement and correction | Phase 8 | **Implemented** |
 | GDR-0015 | Phase 8 remote movement presentation | Phase 8 | **Implemented** |
+| GDR-0016 | Phase 8 disconnect and resume presentation | Phase 8 | **Implemented** |
 
 A GDR is **Implemented** only after its questions are explicitly approved and
 the approval is recorded. Later code slices remain separate: an approved design
@@ -678,7 +680,7 @@ Depends on: Phase 7.
 | 8.4 | Map interior/exterior cell changes and spawn/despawn remote player presentation | **In Progress** | Approved ADR-0050/GDR-0013/P8-004 package implemented: explicit snapshot target identity, tracked/coalesced cell transitions, configured fixture mapping, and renderer-only remote avatars; automated gates and owner two-client demo remain |
 | 8.5 | Convert input to semantic movement commands and apply authoritative local correction | **In Progress** | Approved ADR-0051/GDR-0014 implemented in `c4b9cb1cec`: deterministic planar mapping, one-pending/latest intent coordination, ordered stale-revision convergence, and exact same-cell correction pass automated gates; owner two-client desktop demo remains |
 | 8.6 | Interpolate/extrapolate remote movement through a bounded jitter buffer | **In Progress** | Approved ADR-0052/GDR-0015 implemented in `ceb8e11d1f`: provider-owned four-sample client-local buffering, two-tick interpolation, three-tick extrapolation/hold, bounded correction/hard snaps, reset rules, and typed metrics pass automated gates; owner demo remains |
-| 8.7 | Implement disconnect/resume presentation and automate the two-client slice | **Not Started** | Decision review pending for reconnect ownership/presentation and the test-only desktop automation boundary; no production implementation begun |
+| 8.7 | Implement disconnect/resume presentation and automate the two-client slice | **Not Started** | Owner-approved ADR-0053/GDR-0016 govern the reconnect supervisor and test-only typed automation harness; implementation not yet begun |
 
 Exit gate:
 

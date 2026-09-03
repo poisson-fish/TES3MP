@@ -16,7 +16,7 @@ remains the [implementation plan](IMPLEMENTATION_PLAN.md#phase-8--openmw-desktop
 - Slice 8.4: **In Progress**
 - Slice 8.5: **In Progress** (owner desktop demo remains)
 - Slice 8.6: **In Progress** (owner desktop demo remains)
-- Slice 8.7: **Not Started** (decision review pending)
+- Slice 8.7: **Not Started** (decision approved; implementation next)
 - Governing decisions: [ADR-0007](adr/ADR-0007-openmw-hook-patch-queue-policy.md),
   [ADR-0047](adr/ADR-0047-phase8-adapter-lifecycle-and-provider-boundary.md),
   [ADR-0048](adr/ADR-0048-canonical-revision-and-simulation-tick-separation.md),
@@ -24,9 +24,11 @@ remains the [implementation plan](IMPLEMENTATION_PLAN.md#phase-8--openmw-desktop
   [ADR-0050](adr/ADR-0050-phase8-cell-and-remote-presentation.md),
   [ADR-0051](adr/ADR-0051-phase8-provisional-spatial-intent-concurrency.md),
   [ADR-0052](adr/ADR-0052-phase8-remote-motion-smoothing.md),
+  [ADR-0053](adr/ADR-0053-phase8-desktop-reconnect-and-automation-composition.md),
   [GDR-0013](gdr/GDR-0013-phase8-cell-transition-presentation.md), and
   [GDR-0014](gdr/GDR-0014-phase8-desktop-movement-and-correction.md), and
-  [GDR-0015](gdr/GDR-0015-phase8-remote-motion-presentation.md)
+  [GDR-0015](gdr/GDR-0015-phase8-remote-motion-presentation.md), and
+  [GDR-0016](gdr/GDR-0016-phase8-disconnect-and-resume-presentation.md)
 - Latest implementation commit: `ceb8e11d1f` (`Implement Phase 8 remote movement smoothing`)
 
 ## Working synopsis
@@ -83,13 +85,13 @@ discontinuous state, clears with observation lifetime, and emits adapter-owned
 typed metrics. Automated gates pass; the owner desktop demo remains. No
 protocol, canonical-state, authority, or OpenMW hook changed.
 
-Slice 8.7 gate research found that the desktop coordinator owns one connection
-attempt, does not retain the resume token, and closes permanently after a
-disconnect. Presentation clears, but resume and its complete-snapshot barrier
-are absent. No real two-process OpenMW driver exists. Reconnect ownership,
-bounded retry/presentation behavior, and the test-only typed automation boundary
-await owner approval. No new OpenMW hook, protocol, canonical state, authority,
-or persistence change is proposed.
+Slice 8.7 is approved under ADR-0053/GDR-0016. The adapter will own one bounded
+sequential-runtime reconnect supervisor, memory-only rotating credentials, and
+the resumed complete-snapshot barrier. Disconnect clears remotes immediately;
+local OpenMW remains responsive while multiplayer input is suppressed, and the
+resumed snapshot replaces speculative presentation. A `BUILD_TESTING`-only
+typed driver plus external two-process harness will capture evidence. No new
+OpenMW hook, protocol, canonical state, authority, or persistence is approved.
 
 ## Active files
 
