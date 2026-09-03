@@ -13,6 +13,7 @@
 #include <filesystem>
 #include <fstream>
 #include <limits>
+#include <map>
 #include <string>
 #include <variant>
 #include <vector>
@@ -52,16 +53,22 @@ namespace
         { return { TES3MP::TransportResult::InvalidInput, std::nullopt }; }
         TES3MP::TransportResult cancelConnect(TES3MP::ConnectAttemptId) override
         { return TES3MP::TransportResult::UnknownId; }
-        TES3MP::TransportResult send(TES3MP::TransportConnectionId, TES3MP::TransportChannel,
+        TES3MP::TransportResult send(TES3MP::TransportConnectionId connection, TES3MP::TransportChannel channel,
             std::span<const std::byte> bytes) override
-        { sent.emplace_back(bytes.begin(), bytes.end()); return TES3MP::TransportResult::Accepted; }
+        {
+            sentConnections.push_back(connection);
+            sentChannels.push_back(channel);
+            sent.emplace_back(bytes.begin(), bytes.end());
+            return TES3MP::TransportResult::Accepted;
+        }
         TES3MP::TransportReceiveResult receive(
-            TES3MP::TransportConnectionId, std::span<TES3MP::TransportMessage> output) override
+            TES3MP::TransportConnectionId connection, std::span<TES3MP::TransportMessage> output) override
         {
             if (receiveResult != TES3MP::TransportResult::Accepted) return { receiveResult, 0 };
-            const auto count = std::min(output.size(), incoming.size());
-            for (std::size_t index = 0; index < count; ++index) output[index] = std::move(incoming[index]);
-            incoming.erase(incoming.begin(), incoming.begin() + static_cast<std::ptrdiff_t>(count));
+            auto& source = incomingByConnection.contains(connection) ? incomingByConnection[connection] : incoming;
+            const auto count = std::min(output.size(), source.size());
+            for (std::size_t index = 0; index < count; ++index) output[index] = std::move(source[index]);
+            source.erase(source.begin(), source.begin() + static_cast<std::ptrdiff_t>(count));
             return { TES3MP::TransportResult::Accepted, count };
         }
         TES3MP::TransportResult close(TES3MP::TransportConnectionId, TES3MP::TransportCloseMode) override
@@ -82,20 +89,25 @@ namespace
         TES3MP::TransportResult receiveResult = TES3MP::TransportResult::Accepted;
         std::string calls;
         std::vector<std::vector<std::byte>> sent;
+        std::vector<TES3MP::TransportConnectionId> sentConnections;
+        std::vector<TES3MP::TransportChannel> sentChannels;
         std::vector<TES3MP::TransportEvent> events;
         std::vector<TES3MP::TransportMessage> incoming;
+        std::map<TES3MP::TransportConnectionId, std::vector<TES3MP::TransportMessage>> incomingByConnection;
         std::size_t closes = 0;
     };
 
     class AcceptedOperation final : public AuthenticationOperation
     {
     public:
-        explicit AcceptedOperation(AuthenticationAttempt attempt) : mAttempt(attempt) {}
+        AcceptedOperation(AuthenticationAttempt attempt, PrincipalId principal)
+            : mAttempt(attempt), mPrincipal(principal) {}
         AuthenticationPollResult poll() noexcept override
-        { return AuthenticationCompletion{ mAttempt, AuthenticatedAdmission::initial(id<PrincipalId>(9)) }; }
+        { return AuthenticationCompletion{ mAttempt, AuthenticatedAdmission::initial(mPrincipal) }; }
         void cancel() noexcept override {}
     private:
         AuthenticationAttempt mAttempt;
+        PrincipalId mPrincipal;
     };
 
     class FakeAuthentication final : public ServerAuthenticationService
@@ -103,7 +115,10 @@ namespace
     public:
         std::unique_ptr<AuthenticationOperation> begin(
             AuthenticationAttempt attempt, ServerAuthenticationSubmission) noexcept override
-        { return std::make_unique<AcceptedOperation>(attempt); }
+        {
+            const auto principal = id<PrincipalId>(nextPrincipal++);
+            return std::make_unique<AcceptedOperation>(attempt, principal);
+        }
 
         ResumeTokenIssueResult issueInitial(
             PrincipalId, SessionId, SessionGeneration, ResumeTokenContext) noexcept override
@@ -118,6 +133,7 @@ namespace
 
         bool reject = false;
         std::size_t issues = 0;
+        std::uint64_t nextPrincipal = 9;
     };
 
     class FixedClock final : public MonotonicClock
@@ -570,6 +586,68 @@ int main()
         const auto publication = joinFixture.reducer.latestPublication();
         assert(publication && publication->sessionLifecycle().size() == 1
             && publication->sessionLifecycle()[0].kind == CanonicalSessionLifecycleKind::Expired);
+    }
+    {
+        FixedClock clock;
+        NullMetricSink metrics;
+        NullStructuredEventSink events;
+        Observability observability(metrics, events);
+        FakeAuthentication authentication;
+        RecordingCrypto crypto;
+        auto queues = OutboundQueueSet::create(OutboundQueuePolicy{}, 2);
+        auto timeouts = *SessionTimeoutPolicy::create(1'000'000, 1'000'000, 1'000'000);
+        ConnectionSessionCoordinator sessions(
+            clock, observability, timeouts, emptyOffer(), authentication, *queues, 2);
+        JoinFixture joinFixture;
+        ServerCommandIntakeCoordinator intake(
+            clock, observability, clock.now(), ServerTick::initial(), IngressOrdinal::initial());
+        auto lifecycle = ServerLifecycleCoordinator::create(
+            config.disconnectGraceMilliseconds * 1'000'000, joinFixture.reducer);
+        assert(lifecycle);
+        FakeRuntime runtime;
+        const auto first = id<TransportConnectionId>(1);
+        const auto second = id<TransportConnectionId>(2);
+        runtime.events = {
+            { TransportEventKind::ConnectionAccepted, TransportFailure::None, std::nullopt, std::nullopt,
+                first, std::nullopt, TransportSecurity::EncryptedUnauthenticated, scope(std::byte{ 1 }) },
+            { TransportEventKind::ConnectionAccepted, TransportFailure::None, std::nullopt, std::nullopt,
+                second, std::nullopt, TransportSecurity::EncryptedUnauthenticated, scope(std::byte{ 2 }) }
+        };
+        const auto hello = TransportMessage{ TransportChannel::ReliableOrdered,
+            std::get<std::vector<std::byte>>(encodeProtocolFrame(MessageClass::SessionControl,
+                MessageKind::ClientHello, encodeClientHello(ClientHello::fromOffer(emptyOffer())))) };
+        runtime.incomingByConnection[first].push_back(hello);
+        runtime.incomingByConnection[second].push_back(hello);
+        ServerApplication application(runtime, config, ServerApplicationWiring{
+            sessions, joinFixture.joins, crypto, *queues, clock, intake, joinFixture.reducer, *lifecycle });
+        assert(application.start() && application.pump(ServerTick::initial()));
+
+        const auto authenticationPayload = encodeAuthenticationRequest(
+            AuthenticationRequest::join(std::move(*AuthenticationMaterial::create({}))));
+        const auto authenticationFrame = std::get<std::vector<std::byte>>(encodeProtocolFrame(
+            MessageClass::SessionControl, MessageKind::AuthenticationRequest, authenticationPayload));
+        runtime.incomingByConnection[first].push_back(
+            { TransportChannel::ReliableOrdered, authenticationFrame });
+        runtime.incomingByConnection[second].push_back(
+            { TransportChannel::ReliableOrdered, authenticationFrame });
+        runtime.sent.clear();
+        runtime.sentConnections.clear();
+        runtime.sentChannels.clear();
+        assert(application.pump(ServerTick::initial()));
+
+        std::size_t firstSnapshots = 0;
+        for (std::size_t index = 0; index < runtime.sent.size(); ++index)
+        {
+            if (runtime.sentConnections[index] != first
+                || runtime.sentChannels[index] != TransportChannel::LatestWins) continue;
+            const auto frame = decodeProtocolFrame(runtime.sent[index]);
+            assert(std::holds_alternative<DecodedFrame>(frame));
+            const auto snapshot = decodeLatestWinsSnapshot(std::get<DecodedFrame>(frame).payload());
+            assert(std::holds_alternative<LatestWinsSnapshot>(snapshot));
+            assert(std::get<LatestWinsSnapshot>(snapshot).view().entries().size() == 2);
+            ++firstSnapshots;
+        }
+        assert(firstSnapshots == 1);
     }
     {
         FixedClock clock;

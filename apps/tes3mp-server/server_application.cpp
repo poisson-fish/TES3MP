@@ -322,15 +322,6 @@ namespace TES3MP::ServerApp
                     continue;
                 }
             }
-            const auto now = mWiring->clock.now().nanoseconds() / 1'000'000;
-            const auto pumped = mWiring->queues.pump(mTransport, connection, now);
-            if (!pumped || *pumped == OutboundPumpResult::TransportFailed
-                || *pumped == OutboundPumpResult::InvalidTime
-                || *pumped == OutboundPumpResult::SlowPeerEvicted)
-            {
-                (void)failConnection(connection, "connection send failed");
-                continue;
-            }
         }
         const auto pumpedCommands = mWiring->intake.pump();
         if (!pumpedCommands) { mFailure = "command intake failed"; return false; }
@@ -363,6 +354,18 @@ namespace TES3MP::ServerApp
             { mFailure = "tick output admission failed"; return false; }
             if (!mWiring->reducer.commit(std::move(prepared)))
             { mFailure = "canonical commit failed"; return false; }
+        }
+        for (const auto connection : mWiring->sessions.connections())
+        {
+            const auto now = mWiring->clock.now().nanoseconds() / 1'000'000;
+            const auto pumped = mWiring->queues.pump(mTransport, connection, now);
+            if (!pumped || *pumped == OutboundPumpResult::TransportFailed
+                || *pumped == OutboundPumpResult::InvalidTime
+                || *pumped == OutboundPumpResult::SlowPeerEvicted)
+            {
+                (void)failConnection(connection, "connection send failed");
+                continue;
+            }
         }
         return true;
     }
