@@ -419,6 +419,22 @@ add_custom_target(tes3mp_headless_client_tests_run
     DEPENDS tes3mp_headless_client_tests
     COMMENT "Running TES3MP headless client contracts")
 
+add_executable(openmw_tes3mp_adapter_tests
+    ${CMAKE_CURRENT_LIST_DIR}/../../apps/openmw/tes3mp/adapter_tests.cpp)
+target_compile_features(openmw_tes3mp_adapter_tests PRIVATE cxx_std_20)
+target_include_directories(openmw_tes3mp_adapter_tests PRIVATE
+    ${CMAKE_CURRENT_LIST_DIR}/../../apps/openmw/tes3mp)
+target_link_libraries(openmw_tes3mp_adapter_tests PRIVATE tes3mp_client_session)
+set_target_properties(openmw_tes3mp_adapter_tests PROPERTIES FOLDER "TES3MP/Tests")
+tes3mp_enable_runtime_safety(openmw_tes3mp_adapter_tests)
+tes3mp_verify_target_dependencies(openmw_tes3mp_adapter_tests
+    ALLOWED tes3mp_client_session tes3mp_protocol tes3mp_transport)
+
+add_custom_target(openmw_tes3mp_adapter_tests_run
+    COMMAND $<TARGET_FILE:openmw_tes3mp_adapter_tests>
+    DEPENDS openmw_tes3mp_adapter_tests
+    COMMENT "Running OpenMW TES3MP adapter contracts")
+
 tes3mp_verify_target_dependencies(tes3mp_protocol_tests ALLOWED tes3mp_test_support)
 tes3mp_verify_target_includes(tes3mp_protocol_tests
     FORBIDDEN ${TES3MP_ENGINE_INDEPENDENT_FORBIDDEN_INCLUDES})

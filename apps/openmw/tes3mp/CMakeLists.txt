@@ -3,7 +3,11 @@ include(${CMAKE_CURRENT_LIST_DIR}/../../../cmake/TES3MPRuntimeSafety.cmake)
 
 tes3mp_validate_runtime_safety()
 
-add_library(openmw_tes3mp_adapter STATIC adapter.cpp)
+add_library(openmw_tes3mp_adapter STATIC
+    adapter.cpp
+    engine_coordinator.hpp
+    providers.hpp
+)
 add_library(TES3MP::OpenMWAdapter ALIAS openmw_tes3mp_adapter)
 
 target_compile_features(openmw_tes3mp_adapter PUBLIC cxx_std_20)

@@ -11,7 +11,7 @@ remains the [implementation plan](IMPLEMENTATION_PLAN.md#phase-8--openmw-desktop
 - Phase 7: **Implemented**
 - Phase 8: **In Progress**
 - Slice 8.1: **Implemented**
-- Slice 8.2: **In Progress** (session-pump seam decision pending)
+- Slice 8.2: **In Progress** (runtime composition remains)
 - Governing decisions: [ADR-0007](adr/ADR-0007-openmw-hook-patch-queue-policy.md),
   [ADR-0047](adr/ADR-0047-phase8-adapter-lifecycle-and-provider-boundary.md)
 - Latest implementation commit: `e01967ee8e` (`Prevent contradictory same-tick snapshots`)
@@ -36,23 +36,27 @@ The project owner accepted the Slice 7.7 implementation demo and Phase 7 exit
 gate on 2026-09-02. The owner approved the exact Slice 8.1 P8-001 through P8-003
 hook inventory on 2026-09-02. Slice 8.2 two-provider architecture and
 correct-then-command frame order are approved. Production code waits for the
-reusable client-session pump seam needed to express separate bounded passes.
+approved reusable client-session runtime. Provider contracts, the optional
+engine coordinator seam, and semantic patch registry are implemented.
 
 ## Active files
 
 - Governing policy: `docs/vnext/adr/ADR-0007-openmw-hook-patch-queue-policy.md`
 - Adapter anchor/target: `apps/openmw/tes3mp/{adapter.cpp,CMakeLists.txt}`
+- Provider/coordinator contracts: `apps/openmw/tes3mp/{providers.hpp,engine_coordinator.hpp,adapter_tests.cpp}`
 - Candidate lifecycle/frame seam: `apps/openmw/engine.{hpp,cpp}`
 - Executable/target composition: `apps/openmw/{main.cpp,CMakeLists.txt}`
+- Patch registry: `docs/vnext/OPENMW_PATCH_REGISTRY.json`,
+  `scripts/verify_openmw_patch_registry.py`
 - Evidence: [Phase 8 notes](IMPLEMENTATION_NOTES.md#phase-8--openmw-desktop-vertical-slice)
 
 ## Last verified
 
-MSVC 19.51 server-app, authentication, lifecycle, complete protocol contracts,
-the real-process queue-drain and 60-second soak proofs, and all 117 Python tests pass. Staged baseline
-provenance passes with 290 intentional
-differences and 69 dependency inputs; staged legacy exclusion and diff checks
-pass.
+MSVC 19.51 focused adapter contracts and all 120 Python tests pass. Staged
+baseline provenance passes with 299 intentional differences and 69 dependency
+inputs; staged legacy exclusion, patch-registry verification, and diff checks
+pass. Full OpenMW build verification awaits a correctly configured
+double-precision Bullet build directory.
 
 Refresh this file whenever implementation work changes the active slice,
 governing decision, completed boundary, next work, relevant files, or evidence.

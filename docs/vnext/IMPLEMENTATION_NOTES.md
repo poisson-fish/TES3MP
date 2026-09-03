@@ -5034,6 +5034,25 @@ only the relevant phase section here.
 
 [Back to the phase tracker](IMPLEMENTATION_PLAN.md#phase-8--openmw-desktop-vertical-slice)
 
+- 2026-09-02 — Slice 8.2 provider and engine-seam foundation — In Progress
+  - Change: added separate domain-typed input/presentation provider contracts,
+    the optional single-owner engine coordinator seam, exact post-input frame
+    call, ordered teardown, focused contracts, and the first machine-checked
+    OpenMW semantic patch registry.
+  - Decisions: owner approved the reusable client-session runtime Option A.
+    This foundation adds no packet handling to the adapter and no gameplay
+    mapping; runtime composition remains in Slice 8.2.
+  - Verification: focused MSVC 19.51 adapter contracts, all 120 repository-owned
+    Python tests, patch-registry schema and exact frame/shutdown-order contracts,
+    staged provenance with 299 intentional differences and 69 dependency inputs,
+    staged legacy exclusion, and diff checks pass. The available full OpenMW
+    build directory cannot regenerate because its stale Bullet dependency lacks
+    the required double-precision configuration; no full-engine pass is claimed.
+  - Owner review: provider split, frame order, and reusable runtime architecture
+    are approved. Implementation-demo acceptance remains pending.
+  - Follow-ups: implement the reusable typed client-session runtime, concrete
+    coordinator composition, and remaining lifecycle/failure contracts.
+
 - 2026-09-02 — Slice 8.2 frame order — Approved; implementation gated
   - Change: recorded the approved correct-then-command frame order in ADR-0047.
     Repository inspection found the reusable headless session exposes one
@@ -5043,9 +5062,10 @@ only the relevant phase section here.
     chooses the newly exposed session-pump seam yet.
   - Verification: direct inspection of `headless_client_session.hpp/.cpp`
     confirms `pump()` owns combined transport polling and event handling.
-  - Owner review: exact frame order approved on 2026-09-02; reusable session API
-    split versus adapter proxy remains an architecture gate.
-  - Follow-ups: approve the reusable pump seam before production implementation.
+  - Owner review: exact frame order and reusable runtime Option A approved on
+    2026-09-02.
+  - Follow-ups: implement the approved reusable runtime without adapter packet
+    ownership.
 
 - 2026-09-02 — Slice 8.2 provider boundary — In Progress
   - Change: added ADR-0047 and advanced Slice 8.2 to **In Progress**; production

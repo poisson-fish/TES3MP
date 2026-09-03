@@ -1,4 +1,5 @@
 #include "engine.hpp"
+#include "tes3mp/engine_coordinator.hpp"
 
 #include <cerrno>
 #include <chrono>
@@ -203,6 +204,9 @@ bool OMW::Engine::frame(unsigned frameNumber, float frametime)
             mInputManager->update(frametime, false);
         }
 
+        if (mMultiplayerCoordinator)
+            mMultiplayerCoordinator->frame(frametime);
+
         // When the window is minimized, pause the game. Currently this *has* to be here to work around a MyGUI bug.
         // If we are not currently rendering, then RenderItems will not be reused resulting in a memory leak upon
         // changing widget textures (fixed in MyGUI 3.3.2), and destroyed widgets will not be deleted (not fixed yet,
@@ -398,6 +402,8 @@ OMW::Engine::Engine(Files::ConfigurationManager& configurationManager)
 
 OMW::Engine::~Engine()
 {
+    mMultiplayerCoordinator.reset();
+
     if (mScreenCaptureOperation != nullptr)
     {
         mScreenCaptureOperation->stop();
@@ -439,6 +445,15 @@ OMW::Engine::~Engine()
     SDL_Quit();
 
     Log(Debug::Info) << "Quitting peacefully.";
+}
+
+bool OMW::Engine::attachMultiplayerCoordinator(
+    std::unique_ptr<TES3MP::OpenMWAdapter::EngineCoordinator> coordinator) noexcept
+{
+    if (!coordinator || mMultiplayerCoordinator)
+        return false;
+    mMultiplayerCoordinator = std::move(coordinator);
+    return true;
 }
 
 // Set data dir

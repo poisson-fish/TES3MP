@@ -2,6 +2,7 @@
 #define ENGINE_H
 
 #include <filesystem>
+#include <memory>
 
 #include <components/compiler/extensions.hpp>
 #include <components/debug/debuglog.hpp>
@@ -118,6 +119,11 @@ namespace L10n
     class Manager;
 }
 
+namespace TES3MP::OpenMWAdapter
+{
+    class EngineCoordinator;
+}
+
 struct SDL_Window;
 
 namespace OMW
@@ -158,6 +164,7 @@ namespace OMW
         std::vector<std::string> mGroundcoverFiles;
 
         std::unique_ptr<Stereo::Manager> mStereoManager;
+        std::unique_ptr<TES3MP::OpenMWAdapter::EngineCoordinator> mMultiplayerCoordinator;
 
         bool mSkipMenu;
         bool mUseSound;
@@ -203,6 +210,9 @@ namespace OMW
     public:
         Engine(Files::ConfigurationManager& configurationManager);
         virtual ~Engine();
+
+        bool attachMultiplayerCoordinator(
+            std::unique_ptr<TES3MP::OpenMWAdapter::EngineCoordinator> coordinator) noexcept;
 
         /// Set data dirs
         void setDataDirs(const Files::PathContainer& dataDirs);

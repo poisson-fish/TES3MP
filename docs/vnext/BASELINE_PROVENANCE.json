@@ -95,6 +95,16 @@
       "purpose": "Adds the app-local OpenMW-coupled TES3MP adapter target after openmw-lib is defined."
     },
     {
+      "path": "apps/openmw/engine.cpp",
+      "status": "M",
+      "purpose": "Adds the approved post-input coordinator call and ordered teardown before OpenMW dependencies."
+    },
+    {
+      "path": "apps/openmw/engine.hpp",
+      "status": "M",
+      "purpose": "Adds the approved single-owner optional multiplayer coordinator attachment seam."
+    },
+    {
       "path": "apps/openmw/tes3mp/CMakeLists.txt",
       "status": "A",
       "purpose": "Defines the approved OpenMW adapter leaf target, build alias, dependency allowlist, C++20 contract, and opt-in owned-target runtime-safety registration."
@@ -103,6 +113,21 @@
       "path": "apps/openmw/tes3mp/adapter.cpp",
       "status": "A",
       "purpose": "Behavior-free translation-unit anchor proving the OpenMW adapter participates in compilation and linking."
+    },
+    {
+      "path": "apps/openmw/tes3mp/adapter_tests.cpp",
+      "status": "A",
+      "purpose": "Focused contracts for the engine coordinator and semantic input provider boundary."
+    },
+    {
+      "path": "apps/openmw/tes3mp/engine_coordinator.hpp",
+      "status": "A",
+      "purpose": "Narrow engine-facing frame coordinator interface without transport or packet types."
+    },
+    {
+      "path": "apps/openmw/tes3mp/providers.hpp",
+      "status": "A",
+      "purpose": "Separate semantic input and authoritative presentation provider interfaces using domain types."
     },
     {
       "path": "apps/tes3mp-headless-client/CMakeLists.txt",
@@ -217,7 +242,7 @@
     {
       "path": "components/tes3mp/CMakeLists.txt",
       "status": "A",
-      "purpose": "Defines the standalone-capable owned target graph, pinned FlatBuffers runtime input, opt-in verified GameNetworkingSockets/c-ares adapter with private OpenSSL credential crypto and admission-scope HMAC, test-only deterministic fault-support composition for real-socket checks, selected-library focused tests, target-scoped safety registration, golden-corpus verification, and bounded parser fuzz targets."
+      "purpose": "Defines the standalone-capable owned target graph, pinned FlatBuffers runtime input, opt-in verified GameNetworkingSockets/c-ares adapter, focused OpenMW adapter-provider contracts, target-scoped safety registration, golden-corpus verification, and bounded parser fuzz targets."
     },
     {
       "path": "components/tes3mp/CMakePresets.json",
@@ -985,6 +1010,11 @@
       "purpose": "Documented local configure, build, test, provisioning, and evidence procedure for the pinned baseline."
     },
     {
+      "path": "docs/vnext/OPENMW_PATCH_REGISTRY.json",
+      "status": "A",
+      "purpose": "Machine-checked semantic registry for every non-adapter OpenMW delta."
+    },
+    {
       "path": "docs/vnext/PRE_CUTOVER_PROVENANCE.md",
       "status": "A",
       "purpose": "Recorded pre-cutover repository and archive provenance."
@@ -1205,6 +1235,11 @@
       "purpose": "Records the owner-approved layered adverse-network matrix, quantitative thresholds, reconnect loop, deterministic soak, and real-process soak boundary."
     },
     {
+      "path": "docs/vnext/adr/ADR-0047-phase8-adapter-lifecycle-and-provider-boundary.md",
+      "status": "A",
+      "purpose": "Records the approved Phase 8 provider split, lifecycle, frame order, and reusable runtime gate."
+    },
+    {
       "path": "docs/vnext/gdr/GDR-0001-phase7-headless-vertical-slice-behavior.md",
       "status": "A",
       "purpose": "Owner-approved Phase 7 fixture spawn, readiness, cell visibility, provisional tick integration, headless correction, and bounded resume behavior."
@@ -1385,6 +1420,11 @@
       "purpose": "Unit and workflow-policy tests for the Windows baseline evidence gate."
     },
     {
+      "path": "scripts/tests/test_openmw_patch_registry.py",
+      "status": "A",
+      "purpose": "Positive and schema contracts for the OpenMW semantic patch registry verifier."
+    },
+    {
       "path": "scripts/tests/test_run_phase7_join_demo.py",
       "status": "A",
       "purpose": "Unit tests for the Phase 7 soak RSS-window bound and insufficient-sample rejection."
@@ -1433,6 +1473,11 @@
       "path": "scripts/tests/test_vnext_transport_lifecycle_workflow.py",
       "status": "A",
       "purpose": "Policy test requiring the manually dispatched supported-platform transport matrix to run every Phase 6 lifecycle, queue, authentication, scheduling, encrypted-loopback, and deterministic fault contract."
+    },
+    {
+      "path": "scripts/verify_openmw_patch_registry.py",
+      "status": "A",
+      "purpose": "Fail-closed verifier for semantic ownership of every non-adapter OpenMW delta."
     },
     {
       "path": "scripts/verify_vnext_baseline.py",
@@ -1581,7 +1626,7 @@
         },
         {
           "path": "components/tes3mp/CMakeLists.txt",
-          "sha256": "c148eac10e5a3e20055524e9bb718b0d210a349c35fdfd5ff9b83395c9160cd0"
+          "sha256": "82c25d34d654583c8478d30f2b5da9caf3a2b45d47a75c498d942bede512c976"
         },
         {
           "path": "components/tes3mp/protocol/generated/authentication_accepted_generated.h",

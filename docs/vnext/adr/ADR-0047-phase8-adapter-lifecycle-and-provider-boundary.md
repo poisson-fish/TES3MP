@@ -1,6 +1,6 @@
 # ADR-0047: Phase 8 adapter lifecycle and provider boundary
 
-Status: **Accepted; session-pump seam pending**
+Status: **Accepted**
 
 Date opened: 2026-09-02
 
@@ -42,16 +42,22 @@ then perform a bounded outbound flush. This runs after OpenMW input update.
 Tests must prove the exact order, both work caps, non-blocking behavior, feedback
 suppression, and failure closure.
 
-## Pending session-pump seam
+## Approved reusable session runtime
 
 Repository inspection after frame-order approval found that
 `HeadlessClientSession::pump()` combines transport polling and resulting work.
 It cannot express the approved distinct inbound-drain and outbound-flush passes.
-Production implementation therefore remains gated on an owner-approved reusable
-client-session seam; the adapter must not invent a private second session pump.
+The project owner approved Option A on 2026-09-02: add a reusable client-session
+runtime that owns bounded inbound receive/decode and outbound encode/queue/flush,
+then compose both headless and OpenMW clients through it. The adapter receives
+typed domain results and must not own a private packet or transport pump.
+
+Putting transport composition in the OpenMW adapter was rejected because it
+violates ADR-0007. Retaining the combined caller-owned flow was rejected because
+it cannot guarantee the approved frame order.
 
 ## Owner approval
 
 Approved by the project owner on 2026-09-02: Option A, two narrow borrowed
 providers with coordinator-owned session lifecycle, followed by Option A exact
-correct-then-command frame order. The reusable session-pump seam remains pending.
+correct-then-command frame order and Option A reusable client-session runtime.

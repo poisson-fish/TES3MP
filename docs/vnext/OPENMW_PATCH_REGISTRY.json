@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "baseline_commit": "f4bec41444214a7903bebd178389ca22ca13f646",
+  "patches": [
+    {
+      "id": "P8-001",
+      "slice": "8.2",
+      "owner": "OpenMW adapter",
+      "purpose": "Own one optional coordinator and invoke it on the main thread after input and before world mutation, with teardown before OpenMW dependencies.",
+      "paths": ["apps/openmw/engine.cpp", "apps/openmw/engine.hpp"],
+      "tests": ["scripts/tests/test_openmw_patch_registry.py", "openmw_tes3mp_adapter_tests"],
+      "disposition": "local; possible general-purpose upstream candidate; no upstream contact authorized",
+      "removal_condition": "OpenMW supplies an equivalent reviewed lifecycle and frame seam"
+    },
+    {
+      "id": "P8-003",
+      "slice": "3.1/8.2",
+      "owner": "OpenMW adapter",
+      "purpose": "Declare the app-local adapter leaf target after openmw-lib without a dependency back-edge.",
+      "paths": ["apps/openmw/CMakeLists.txt"],
+      "tests": ["scripts/tests/test_tes3mp_target_boundaries.py", "scripts/tests/test_openmw_patch_registry.py"],
+      "disposition": "local product build wiring",
+      "removal_condition": "The adapter becomes an independently loaded supported module without this build edge"
+    }
+  ]
+}
