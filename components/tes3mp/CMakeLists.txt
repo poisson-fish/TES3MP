@@ -325,9 +325,11 @@ endif()
 tes3mp_add_engine_independent_library(tes3mp_client_session client_session/anchor.cpp)
 add_library(TES3MP::ClientSession ALIAS tes3mp_client_session)
 target_sources(tes3mp_client_session PRIVATE
+    include/tes3mp/client_session_runtime.hpp
     include/tes3mp/client_session.hpp
     include/tes3mp/headless_client_session.hpp
     client_session/client_session.cpp
+    client_session/client_session_runtime.cpp
     client_session/headless_client_session.cpp
 )
 target_link_libraries(tes3mp_client_session
