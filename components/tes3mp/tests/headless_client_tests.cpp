@@ -58,7 +58,7 @@ int main()
     using namespace TES3MP;
     FakeRuntime runtime;
     TestSupport::ManualClock clock(MonotonicInstant::fromNanoseconds(0));
-    const auto policy = *SessionTimeoutPolicy::create(100, 100, 100);
+    const auto policy = *SessionTimeoutPolicy::create(1'000'000, 1'000'000, 1'000'000);
     auto created = HeadlessClientSession::create(runtime, clock, policy, SessionGeneration::initial());
     require(std::holds_alternative<std::unique_ptr<HeadlessClientSession>>(created));
     auto session = std::get<std::unique_ptr<HeadlessClientSession>>(std::move(created));
@@ -153,10 +153,13 @@ int main()
     require(failed->stateMachine().state() == ClientSessionState::Closed);
 
     FakeRuntime runtimeTransport;
+    const auto runtimeQueuePolicy = OutboundQueuePolicy::create(64, 512 * 1024, 8, 4, 8, 1, 4, 1, 8, 250);
+    require(runtimeQueuePolicy.has_value());
     auto runtimeCreated = ClientSessionRuntime::create(runtimeTransport, clock, policy,
-        SessionGeneration::initial(), OutboundQueuePolicy{});
+        SessionGeneration::initial(), *runtimeQueuePolicy);
     require(std::holds_alternative<std::unique_ptr<ClientSessionRuntime>>(runtimeCreated));
     auto clientRuntime = std::get<std::unique_ptr<ClientSessionRuntime>>(std::move(runtimeCreated));
+    require(clientRuntime->flushOutbound() == ClientRuntimeResult::Accepted);
     require(clientRuntime->connect(endpoint) == HeadlessClientResult::Accepted);
     require(clientRuntime->drainInbound().action == ClientSessionAction::SendClientHello);
 
@@ -183,4 +186,7 @@ int main()
     runtimeTransport.inbound.push_back({ TransportChannel::LatestWins, runtimeTransport.sent });
     require(clientRuntime->drainInbound().result == ClientRuntimeResult::ProtocolRejected);
     require(clientRuntime->session().stateMachine().state() == ClientSessionState::Closed);
+    require(clientRuntime->queue(MessageClass::SessionControl, MessageKind::ClientHello, helloPayload)
+        == ClientRuntimeResult::Accepted);
+    require(clientRuntime->flushOutbound() == ClientRuntimeResult::NotConnected);
 }

@@ -115,7 +115,9 @@ namespace TES3MP
     ClientRuntimeResult ClientSessionRuntime::flushOutbound() noexcept
     {
         const auto connection = mSession->connection();
-        if (!connection) return ClientRuntimeResult::NotConnected;
+        if (!connection)
+            return mOutbound.reliableMessages() == 0 && !mOutbound.hasLatest()
+                ? ClientRuntimeResult::Accepted : ClientRuntimeResult::NotConnected;
         const auto nowMilliseconds = mClock.now().nanoseconds() / 1'000'000;
         const auto result = mOutbound.pump(mTransport, *connection, nowMilliseconds);
         if (result == OutboundPumpResult::Progress || result == OutboundPumpResult::Idle

@@ -1,5 +1,5 @@
 #include <tes3mp/authentication.hpp>
-#include <tes3mp/headless_client_session.hpp>
+#include <tes3mp/client_session_runtime.hpp>
 #include <tes3mp/protocol_frame.hpp>
 #include <tes3mp/protocol_handshake.hpp>
 #include <tes3mp/transport_gns.hpp>
@@ -30,13 +30,15 @@ namespace
         }
     };
 
-    bool sendFrame(TES3MP::TransportRuntime& runtime, TES3MP::TransportConnectionId connection,
-        TES3MP::MessageClass messageClass, TES3MP::MessageKind kind, std::span<const std::byte> payload)
+    std::optional<TES3MP::OutboundQueuePolicy> outboundPolicy()
     {
-        auto frame = TES3MP::encodeProtocolFrame(messageClass, kind, payload);
-        const auto* bytes = std::get_if<std::vector<std::byte>>(&frame);
-        return bytes && runtime.send(connection, TES3MP::TransportChannel::ReliableOrdered, *bytes)
-            == TES3MP::TransportResult::Accepted;
+        return TES3MP::OutboundQueuePolicy::create(64, 512 * 1024, 8, 4, 8, 1, 4, 1, 8, 250);
+    }
+
+    bool queueFrame(TES3MP::ClientSessionRuntime& runtime, TES3MP::MessageClass messageClass,
+        TES3MP::MessageKind kind, std::span<const std::byte> payload)
+    {
+        return runtime.queue(messageClass, kind, payload) == TES3MP::ClientRuntimeResult::Accepted;
     }
 
     std::optional<std::uint64_t> number(std::string_view text)
@@ -66,71 +68,58 @@ namespace
         TES3MP::SessionGeneration generation = TES3MP::SessionGeneration::initial())
     {
         LifecycleAttempt result;
-        auto created = TES3MP::HeadlessClientSession::create(
-            runtime, clock, timeouts, generation);
-        auto* value = std::get_if<std::unique_ptr<TES3MP::HeadlessClientSession>>(&created);
+        const auto policy = outboundPolicy();
+        auto created = policy ? TES3MP::ClientSessionRuntime::create(
+            runtime, clock, timeouts, generation, *policy) : TES3MP::ClientRuntimeCreateResult{TES3MP::SessionTransitionError{}};
+        auto* value = std::get_if<std::unique_ptr<TES3MP::ClientSessionRuntime>>(&created);
         if (!value || !*value || (*value)->connect(endpoint) != TES3MP::HeadlessClientResult::Accepted) return result;
-        auto& client = **value;
+        auto& clientRuntime = **value;
+        auto& client = clientRuntime.session();
         bool submitted = false;
         bool bound = false;
         std::uint64_t motionCommandsSent = 0;
         const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(timeoutMilliseconds);
         while (std::chrono::steady_clock::now() < deadline)
         {
-            const auto pumped = client.pump();
-            if (pumped.result != TES3MP::HeadlessClientResult::Accepted) break;
+            auto pumped = clientRuntime.drainInbound();
+            if (pumped.result != TES3MP::ClientRuntimeResult::Accepted) break;
             if (pumped.action == TES3MP::ClientSessionAction::SendClientHello)
             {
                 auto range = std::get<TES3MP::ProtocolVersionRange>(TES3MP::ProtocolVersionRange::create(1, 0, 0));
                 auto offer = std::get<TES3MP::CapabilityOffer>(TES3MP::CapabilityOffer::create(std::move(range), {}, {}));
-                if (!client.connection() || !sendFrame(runtime, *client.connection(),
+                if (!queueFrame(clientRuntime,
                         TES3MP::MessageClass::SessionControl, TES3MP::MessageKind::ClientHello,
                         TES3MP::encodeClientHello(TES3MP::ClientHello::fromOffer(std::move(offer))))) break;
             }
-            if (client.connection())
+            for (auto& message : pumped.messages)
             {
-                std::array<TES3MP::TransportMessage, 8> messages{};
-                const auto received = runtime.receive(*client.connection(), messages);
-                if (received.result != TES3MP::TransportResult::Accepted || received.messages > messages.size()) break;
-                for (std::size_t index = 0; index < received.messages; ++index)
+                if (auto* serverHello = std::get_if<TES3MP::ServerHello>(&message); serverHello && !submitted)
                 {
-                    auto decoded = TES3MP::decodeProtocolFrame(messages[index].bytes);
-                    auto* frame = std::get_if<TES3MP::DecodedFrame>(&decoded);
-                    if (!frame) break;
-                    if (frame->messageKind() == TES3MP::MessageKind::ServerHello && !submitted)
-                    {
-                        auto hello = TES3MP::decodeServerHello(frame->payload());
-                        auto* serverHello = std::get_if<TES3MP::ServerHello>(&hello);
-                        if (!serverHello || client.handle(TES3MP::ClientServerHelloReceived{std::move(*serverHello)}).action
+                        if (client.handle(TES3MP::ClientServerHelloReceived{std::move(*serverHello)}).action
                                 != TES3MP::ClientSessionAction::AuthenticationInputReady) break;
-                        if (!sendFrame(runtime, *client.connection(), TES3MP::MessageClass::SessionControl,
+                        if (!queueFrame(clientRuntime, TES3MP::MessageClass::SessionControl,
                                 TES3MP::MessageKind::AuthenticationRequest, TES3MP::encodeAuthenticationRequest(request))
                             || client.handle(TES3MP::ClientAuthenticationSubmitted{}).action
                                 != TES3MP::ClientSessionAction::AuthenticationSubmitted) break;
                         submitted = true;
-                    }
-                    else if (frame->messageKind() == TES3MP::MessageKind::AuthenticationRejected)
+                }
+                else if (std::holds_alternative<TES3MP::AuthenticationRejectedMessage>(message))
                     {
                         client.close();
                         return result;
                     }
-                    else if (frame->messageKind() == TES3MP::MessageKind::AuthenticationAccepted)
+                else if (auto* accepted = std::get_if<TES3MP::AuthenticationAcceptedMessage>(&message))
                     {
-                        auto accepted = TES3MP::decodeAuthenticationAccepted(frame->payload());
-                        auto* message = std::get_if<TES3MP::AuthenticationAcceptedMessage>(&accepted);
-                        if (!message || client.handle(TES3MP::ClientAuthenticationAccepted{}).action
+                        if (client.handle(TES3MP::ClientAuthenticationAccepted{}).action
                                 != TES3MP::ClientSessionAction::SessionEstablished) break;
-                        result.lifetimeMilliseconds = message->lifetimeMilliseconds();
-                        result.token = message->takeToken();
+                        result.lifetimeMilliseconds = accepted->lifetimeMilliseconds();
+                        result.token = accepted->takeToken();
                     }
-                    else if (frame->messageKind() == TES3MP::MessageKind::LatestWinsSnapshot && result.token)
+                else if (auto* runtimeSnapshot = std::get_if<TES3MP::LatestWinsSnapshot>(&message); runtimeSnapshot && result.token)
                     {
-                        auto decodedSnapshot = TES3MP::decodeLatestWinsSnapshot(frame->payload());
-                        auto* snapshot = std::get_if<TES3MP::LatestWinsSnapshot>(&decodedSnapshot);
-                        if (!snapshot) break;
-                        const auto sessionId = snapshot->header().targetSessionId();
+                        const auto sessionId = runtimeSnapshot->header().targetSessionId();
                         if ((!bound && client.bindEstablishedSession(sessionId) != TES3MP::ClientSessionBindingResult::Bound)
-                            || client.receiveLatestWinsSnapshot(std::move(*snapshot))
+                            || client.receiveLatestWinsSnapshot(std::move(*runtimeSnapshot))
                                 != TES3MP::LatestWinsSnapshotReceiveResult::Applied) break;
                         bound = true;
                         const auto& confirmed = *client.stateMachine().confirmedSnapshot();
@@ -153,7 +142,7 @@ namespace
                                     reliable, TES3MP::PlayerMotionIntent(
                                         TES3MP::LinearVelocity3(next == 1 ? 3 : 0, 0, 0)));
                                 if (!std::holds_alternative<TES3MP::ReliableOperation>(operation)
-                                    || !sendFrame(runtime, *client.connection(), TES3MP::MessageClass::ReliableOperation,
+                                    || !queueFrame(clientRuntime, TES3MP::MessageClass::ReliableOperation,
                                         TES3MP::MessageKind::ReliableOperation,
                                         TES3MP::encodeReliableOperation(std::get<TES3MP::ReliableOperation>(operation)))) break;
                                 motionCommandsSent = next;
@@ -170,8 +159,8 @@ namespace
                         client.close();
                         return result;
                     }
-                }
             }
+            if (clientRuntime.flushOutbound() != TES3MP::ClientRuntimeResult::Accepted) break;
             std::this_thread::sleep_for(std::chrono::milliseconds(1));
         }
         client.close();
@@ -207,11 +196,14 @@ int main(int argc, char** argv)
     auto factory = limits ? TES3MP::makeGameNetworkingSocketsTransport(*limits) : TES3MP::TransportFactoryResult{};
     SteadyClock clock;
     auto timeouts = TES3MP::SessionTimeoutPolicy::create(*timeout * 1'000'000, *timeout * 1'000'000, *timeout * 1'000'000);
-    auto created = factory && timeouts ? TES3MP::HeadlessClientSession::create(
-        *factory.runtime, clock, *timeouts, TES3MP::SessionGeneration::initial()) : TES3MP::HeadlessClientCreateResult{TES3MP::SessionTransitionError{}};
-    auto* sessionValue = std::get_if<std::unique_ptr<TES3MP::HeadlessClientSession>>(&created);
+    const auto queuePolicy = outboundPolicy();
+    auto created = factory && timeouts && queuePolicy ? TES3MP::ClientSessionRuntime::create(
+        *factory.runtime, clock, *timeouts, TES3MP::SessionGeneration::initial(), *queuePolicy)
+        : TES3MP::ClientRuntimeCreateResult{TES3MP::SessionTransitionError{}};
+    auto* sessionValue = std::get_if<std::unique_ptr<TES3MP::ClientSessionRuntime>>(&created);
     if (!sessionValue || !*sessionValue || (*sessionValue)->connect(*endpoint) != TES3MP::HeadlessClientResult::Accepted) return 3;
-    auto& session = **sessionValue;
+    auto& clientRuntime = **sessionValue;
+    auto& session = clientRuntime.session();
     bool authenticationAccepted = false;
     const std::string_view mode = argc == 6 ? argv[5] : "join";
     if (mode != "join" && mode != "mover" && mode != "observer"
@@ -305,56 +297,45 @@ int main(int argc, char** argv)
 
     while (std::chrono::steady_clock::now() < deadline)
     {
-        const auto pumped = session.pump();
-        if (pumped.result != TES3MP::HeadlessClientResult::Accepted) break;
+        auto pumped = clientRuntime.drainInbound();
+        if (pumped.result != TES3MP::ClientRuntimeResult::Accepted)
+        {
+            std::cerr << "inbound drain failed " << static_cast<int>(pumped.result) << '\n';
+            break;
+        }
         if (pumped.action == TES3MP::ClientSessionAction::SendClientHello)
         {
             auto range = std::get<TES3MP::ProtocolVersionRange>(TES3MP::ProtocolVersionRange::create(1, 0, 0));
             auto offer = std::get<TES3MP::CapabilityOffer>(TES3MP::CapabilityOffer::create(std::move(range), {}, {}));
             const auto payload = TES3MP::encodeClientHello(TES3MP::ClientHello::fromOffer(std::move(offer)));
-            if (!session.connection() || !sendFrame(*factory.runtime, *session.connection(), TES3MP::MessageClass::SessionControl, TES3MP::MessageKind::ClientHello, payload)) break;
+            if (!queueFrame(clientRuntime, TES3MP::MessageClass::SessionControl,
+                    TES3MP::MessageKind::ClientHello, payload)) break;
         }
-        if (session.connection())
+        for (auto& message : pumped.messages)
         {
-            std::array<TES3MP::TransportMessage, 8> messages{};
-            const auto received = factory.runtime->receive(*session.connection(), messages);
-            if (received.result != TES3MP::TransportResult::Accepted || received.messages > messages.size()) break;
-            for (std::size_t index = 0; index < received.messages; ++index)
+            if (auto* value = std::get_if<TES3MP::ServerHello>(&message))
             {
-                auto decoded = TES3MP::decodeProtocolFrame(messages[index].bytes);
-                auto* frame = std::get_if<TES3MP::DecodedFrame>(&decoded);
-                if (!frame) return 3;
-                if (frame->messageKind() == TES3MP::MessageKind::ServerHello)
-                {
-                    auto hello = TES3MP::decodeServerHello(frame->payload());
-                    auto* value = std::get_if<TES3MP::ServerHello>(&hello);
-                    if (!value || session.handle(TES3MP::ClientServerHelloReceived{std::move(*value)}).action
+                    if (session.handle(TES3MP::ClientServerHelloReceived{std::move(*value)}).action
                             != TES3MP::ClientSessionAction::AuthenticationInputReady) return 3;
                     auto request = TES3MP::AuthenticationRequest::join(std::move(*password));
                     const auto payload = TES3MP::encodeAuthenticationRequest(request);
-                    if (!sendFrame(*factory.runtime, *session.connection(), TES3MP::MessageClass::SessionControl, TES3MP::MessageKind::AuthenticationRequest, payload)
+                    if (!queueFrame(clientRuntime, TES3MP::MessageClass::SessionControl,
+                            TES3MP::MessageKind::AuthenticationRequest, payload)
                         || session.handle(TES3MP::ClientAuthenticationSubmitted{}).action
                             != TES3MP::ClientSessionAction::AuthenticationSubmitted) return 3;
-                }
-                else if (frame->messageKind() == TES3MP::MessageKind::AuthenticationAccepted)
+            }
+            else if (std::holds_alternative<TES3MP::AuthenticationAcceptedMessage>(message))
                 {
-                    auto accepted = TES3MP::decodeAuthenticationAccepted(frame->payload());
-                    if (!std::holds_alternative<TES3MP::AuthenticationAcceptedMessage>(accepted)
-                        || session.handle(TES3MP::ClientAuthenticationAccepted{}).action
+                    if (session.handle(TES3MP::ClientAuthenticationAccepted{}).action
                             != TES3MP::ClientSessionAction::SessionEstablished) return 3;
                     authenticationAccepted = true;
                 }
-                else if (frame->messageKind() == TES3MP::MessageKind::LatestWinsSnapshot)
+            else if (auto* value = std::get_if<TES3MP::LatestWinsSnapshot>(&message))
                 {
-                    auto value = TES3MP::decodeLatestWinsSnapshot(frame->payload());
-                    if (!std::holds_alternative<TES3MP::LatestWinsSnapshot>(value)) return 3;
-                    snapshot = std::get<TES3MP::LatestWinsSnapshot>(std::move(value));
+                    snapshot = std::move(*value);
                 }
-                else if (frame->messageKind() == TES3MP::MessageKind::ReliableObservationBatch)
+            else if (auto* batch = std::get_if<TES3MP::ReliableObservationBatch>(&message))
                 {
-                    auto value = TES3MP::decodeReliableObservationBatch(frame->payload());
-                    auto* batch = std::get_if<TES3MP::ReliableObservationBatch>(&value);
-                    if (!batch) return 3;
                     if (mode == "motion-one" || mode == "motion-two") continue;
                     if (!bound) pendingObservation = std::move(*batch);
                     else
@@ -370,7 +351,6 @@ int main(int argc, char** argv)
                         sawEnter = sawEnter || (sawLeave && change.kind == TES3MP::ObservationChangeKind::Enter);
                     }
                 }
-            }
         }
         if (authenticationAccepted && snapshot && !bound)
         {
@@ -438,7 +418,7 @@ int main(int argc, char** argv)
                         self->entityId(), self->entityRevision(), self->authorityEpoch()));
                     auto operation = TES3MP::ReliableOperation::create(reliable, TES3MP::FixtureCellTransition(cell));
                     if (!std::holds_alternative<TES3MP::ReliableOperation>(operation)
-                        || !sendFrame(*factory.runtime, *session.connection(), TES3MP::MessageClass::ReliableOperation,
+                        || !queueFrame(clientRuntime, TES3MP::MessageClass::ReliableOperation,
                             TES3MP::MessageKind::ReliableOperation,
                             TES3MP::encodeReliableOperation(std::get<TES3MP::ReliableOperation>(operation)))) return 3;
                     if (!sentExterior) sentExterior = true; else sentInterior = true;
@@ -475,7 +455,7 @@ int main(int argc, char** argv)
                 TES3MP::PlayerMotionIntent(TES3MP::LinearVelocity3(
                     mode == "motion-two" || mode == "soak-two" ? 2 : 1, 0, 0)));
             if (!std::holds_alternative<TES3MP::ReliableOperation>(operation)
-                || !sendFrame(*factory.runtime, *session.connection(), TES3MP::MessageClass::ReliableOperation,
+                || !queueFrame(clientRuntime, TES3MP::MessageClass::ReliableOperation,
                     TES3MP::MessageKind::ReliableOperation,
                     TES3MP::encodeReliableOperation(std::get<TES3MP::ReliableOperation>(operation)))) return 3;
             sentMotion = true;
@@ -538,6 +518,12 @@ int main(int argc, char** argv)
         {
             std::cout << "{\"event\":\"fixture_flow_complete\",\"role\":\"" << mode << "\"}\n";
             session.close(); factory.runtime->shutdown(); return 0;
+        }
+        const auto flushed = clientRuntime.flushOutbound();
+        if (flushed != TES3MP::ClientRuntimeResult::Accepted)
+        {
+            std::cerr << "outbound flush failed " << static_cast<int>(flushed) << '\n';
+            break;
         }
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }

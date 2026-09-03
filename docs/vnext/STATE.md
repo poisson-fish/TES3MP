@@ -11,11 +11,11 @@ remains the [implementation plan](IMPLEMENTATION_PLAN.md#phase-8--openmw-desktop
 - Phase 7: **Implemented**
 - Phase 8: **In Progress**
 - Slice 8.1: **Implemented**
-- Slice 8.2: **In Progress** (headless/OpenMW runtime composition remains)
+- Slice 8.2: **In Progress** (canonical-revision migration and OpenMW composition remain)
 - Governing decisions: [ADR-0007](adr/ADR-0007-openmw-hook-patch-queue-policy.md),
   [ADR-0047](adr/ADR-0047-phase8-adapter-lifecycle-and-provider-boundary.md),
   [ADR-0048](adr/ADR-0048-canonical-revision-and-simulation-tick-separation.md)
-- Latest implementation commit: `eaa4df407f` (`Add bounded client session runtime`)
+- Latest implementation commit: `bf9a7bbd3f` (`Migrate headless client to bounded runtime`)
 
 ## Working synopsis
 
@@ -38,10 +38,11 @@ gate on 2026-09-02. The owner approved the exact Slice 8.1 P8-001 through P8-003
 hook inventory on 2026-09-02. Slice 8.2 two-provider architecture and
 correct-then-command frame order are approved. The reusable client-session
 runtime now owns bounded typed inbound drain and queued outbound flush with
-failure closure. Provider contracts, the optional engine coordinator seam, and
-semantic patch registry are implemented. Headless caller migration exposed the
-need to separate canonical publication revision from simulation tick; the
-owner-approved breaking ADR-0048 migration is now in progress.
+failure closure, and the headless executable uses that boundary. Provider
+contracts, the optional engine coordinator seam, and semantic patch registry
+are implemented. The caller migration reproduced the different-publication,
+same-tick contradiction; the owner-approved breaking ADR-0048 domain/wire
+migration is now the next work before OpenMW composition.
 
 ## Active files
 
@@ -57,8 +58,9 @@ owner-approved breaking ADR-0048 migration is now in progress.
 
 ## Last verified
 
-Fresh MSVC 19.51 Debug headless runtime, full protocol, and focused adapter
-contracts plus all 120 Python tests pass. Staged
+Fresh MSVC 19.51 Debug headless runtime and full protocol contracts, the GNS
+headless/server build, and all 120 Python tests pass. The real-process proof
+reproduces the expected ADR-0048 same-tick contradiction gate. Staged
 baseline provenance passes with 299 intentional differences and 69 dependency
 inputs; staged legacy exclusion, patch-registry verification, and diff checks
 pass. A fresh MSVC 19.51 full configuration confirms the pinned Bullet 3.25

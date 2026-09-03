@@ -5034,6 +5034,20 @@ only the relevant phase section here.
 
 [Back to the phase tracker](IMPLEMENTATION_PLAN.md#phase-8--openmw-desktop-vertical-slice)
 
+- 2026-09-02 — Slice 8.2 headless runtime caller migration — Verified
+  - Change: migrated the headless executable from direct transport polling and
+    frame decoding to the reusable `ClientSessionRuntime` typed inbound drain,
+    bounded queue, and outbound flush. Empty pre-connect flush is an idle
+    success; queued work without a connection remains a failure.
+  - Decisions: no new decision. This implements the owner-approved ADR-0047
+    runtime boundary and preserves its correct-then-command order.
+  - Verification: fresh MSVC 19.51 Debug focused and full protocol contracts,
+    the GNS headless/server build, all 120 repository-owned Python tests, and
+    `git diff --check` pass. The real-process lifecycle proof reaches the known
+    ADR-0048 gate and rejects a different same-tick snapshot as expected.
+  - Follow-ups: complete the accepted ADR-0048 domain/wire migration, rerun the
+    real-process proofs, then compose the concrete OpenMW coordinator.
+
 - 2026-09-02 — Slice 8.2 canonical revision separation — In Progress
   - Change: accepted ADR-0048 after typed headless runtime migration exposed
     multiple valid lifecycle publications sharing one fixed simulation tick.
