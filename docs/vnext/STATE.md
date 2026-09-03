@@ -20,7 +20,7 @@ remains the [implementation plan](IMPLEMENTATION_PLAN.md#phase-8--openmw-desktop
   [ADR-0049](adr/ADR-0049-phase8-desktop-connection-composition.md),
   [ADR-0050](adr/ADR-0050-phase8-cell-and-remote-presentation.md), and
   [GDR-0013](gdr/GDR-0013-phase8-cell-transition-presentation.md)
-- Latest implementation commit: `81b0067c9a` (`Implement Phase 8 cell and remote presentation`)
+- Latest implementation commit: `34583e00f0` (`Implement Phase 8 cell and remote presentation`)
 
 ## Working synopsis
 
