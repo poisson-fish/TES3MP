@@ -88,6 +88,12 @@ binding from its targeted initial snapshot. Missing or invalid player identity
 fails bounded decoding. A separate join-identity frame and server-only demo
 evidence were rejected.
 
+On 2026-09-03 the project owner approved a breaking clarification: every
+session-targeted snapshot header explicitly names its target `PlayerId` and
+`EntityId`, and the named binding must exist in the view. Clients bind from
+these fields and reject missing or changing bindings. Numeric equality between
+session, player, and entity identifiers is never identity evidence.
+
 Rejected alternatives were app-owned join logic, random identifiers, staged
 install with rollback, multiple live players per principal, deferring the
 initial snapshot, and retaining incomplete joins. Identifiers are not restart-

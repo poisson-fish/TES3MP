@@ -62,6 +62,22 @@ Putting transport composition in the OpenMW adapter was rejected because it
 violates ADR-0007. Retaining the combined caller-owned flow was rejected because
 it cannot guarantee the approved frame order.
 
+## 2026-09-03 Slice 8.4 amendment
+
+The owner approved the breaking corrective package. The coordinator captures
+OpenMW's semantic cell-change latch before authoritative correction, queues one
+tracked transition, coalesces at most one deferred transition, and suppresses
+stale correction until acknowledgement finalizes the tracked command. Provider
+application returns typed content/presentation failures and presentation is
+cleared before borrowed OpenMW dependencies are destroyed. Runtime queue calls
+return the assigned command sequence so callers never infer it.
+
+Snapshot headers carry explicit target player/entity identity. Desktop content
+mapping is explicit configuration for the fixture interior, exterior
+worldspace, and avatar NPC. Remote avatars use the approved P8-004 opaque
+renderer-only transient actor seam; they must not enter `WorldModel`, cell
+stores, physics, navigation, mechanics, Lua, or persistence.
+
 ## 2026-09-02 owner-approved runtime amendment
 
 After the first caller migration exposed duplicated protocol progression in the
@@ -90,3 +106,5 @@ providers with coordinator-owned session lifecycle, followed by Option A exact
 correct-then-command frame order and the original Option A runtime. The owner
 then approved the breaking Option D amendment above after caller migration
 revealed split orchestration ownership.
+
+The owner approved the Slice 8.4 corrective package and P8-004 on 2026-09-03.

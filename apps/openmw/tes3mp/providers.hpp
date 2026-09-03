@@ -16,6 +16,21 @@ namespace TES3MP::OpenMWAdapter
         TimedOut,
         TransportFailed,
         Disconnected,
+        ContentMappingFailed,
+        PresentationFailed,
+    };
+
+    enum class ProviderResult
+    {
+        Accepted,
+        ContentMappingFailed,
+        PresentationFailed,
+    };
+
+    struct CellTransitionCapture
+    {
+        ProviderResult result = ProviderResult::Accepted;
+        std::optional<FixtureCellTransition> transition;
     };
 
     class ConnectionStatusProvider
@@ -29,6 +44,7 @@ namespace TES3MP::OpenMWAdapter
     {
     public:
         virtual ~SemanticInputProvider() = default;
+        virtual CellTransitionCapture captureCellTransition() noexcept = 0;
         virtual std::optional<PlayerMotionIntent> sampleCurrentIntent() noexcept = 0;
     };
 
@@ -36,8 +52,9 @@ namespace TES3MP::OpenMWAdapter
     {
     public:
         virtual ~PresentationProvider() = default;
-        virtual void applyAuthoritative(const LatestWinsSnapshot& snapshot,
-            std::span<const ObservedPlayer> observedPlayers) noexcept = 0;
+        virtual ProviderResult applyAuthoritative(const LatestWinsSnapshot& snapshot,
+            std::span<const ObservedPlayer> observedPlayers, bool allowLocalCellCorrection) noexcept = 0;
+        virtual void clear() noexcept = 0;
     };
 }
 

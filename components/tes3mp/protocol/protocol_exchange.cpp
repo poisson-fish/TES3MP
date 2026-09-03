@@ -294,7 +294,7 @@ namespace TES3MP
         const std::uint64_t acknowledgement = hasAcknowledgement ? header.acknowledgedCommandSequence()->value() : 0;
         const auto encodedHeader = SnapshotSchema::CreateLatestWinsSnapshotHeader(builder,
             header.targetSessionId().value(), header.targetSessionGeneration().value(), header.canonicalRevision().value(),
-            hasAcknowledgement, acknowledgement);
+            hasAcknowledgement, acknowledgement, header.targetPlayerId().value(), header.targetEntityId().value());
 
         std::vector<SnapshotSchema::SpatialEntitySnapshot> entries;
         entries.reserve(value.view().entries().size());
@@ -422,10 +422,16 @@ namespace TES3MP
 
         auto session = strongValue<SessionId>(header->target_session_id());
         auto generation = strongValue<SessionGeneration>(header->target_session_generation());
+        auto player = strongValue<PlayerId>(header->target_player_id());
+        auto entity = strongValue<EntityId>(header->target_entity_id());
         auto revision = strongValue<CanonicalRevision>(header->canonical_revision());
         if (const auto* failure = std::get_if<ExchangeDecodeError>(&session))
             return *failure;
         if (const auto* failure = std::get_if<ExchangeDecodeError>(&generation))
+            return *failure;
+        if (const auto* failure = std::get_if<ExchangeDecodeError>(&player))
+            return *failure;
+        if (const auto* failure = std::get_if<ExchangeDecodeError>(&entity))
             return *failure;
         if (const auto* failure = std::get_if<ExchangeDecodeError>(&revision))
             return *failure;
@@ -465,7 +471,7 @@ namespace TES3MP
             return *failure;
 
         return LatestWinsSnapshot(LatestWinsSnapshotHeader(*decodedValue(session), *decodedValue(generation),
-                                      *decodedValue(revision), acknowledgement),
+                                      *decodedValue(player), *decodedValue(entity), *decodedValue(revision), acknowledgement),
             std::get<SpatialWorldView>(std::move(worldView)));
     }
 

@@ -121,6 +121,8 @@ namespace TES3MP
         StaleTick,
         RegressingAcknowledgement,
         ContradictorySameTick,
+        TargetBindingMissing,
+        TargetBindingMismatch,
     };
 
     enum class ReliableObservationReceiveResult : std::uint8_t
@@ -172,6 +174,8 @@ namespace TES3MP
             return mAuthenticationRejection;
         }
         std::optional<SessionId> sessionId() const noexcept { return mSessionId; }
+        std::optional<PlayerId> targetPlayerId() const noexcept { return mTargetPlayerId; }
+        std::optional<EntityId> targetEntityId() const noexcept { return mTargetEntityId; }
         const std::optional<LatestWinsSnapshot>& confirmedSnapshot() const noexcept { return mConfirmedSnapshot; }
         const std::optional<ReliableObservationBatch>& confirmedObservationBatch() const noexcept
         { return mConfirmedObservationBatch; }
@@ -194,6 +198,8 @@ namespace TES3MP
         std::optional<SessionRejected> mProtocolRejection;
         std::optional<AuthenticationRejectionReason> mAuthenticationRejection;
         std::optional<SessionId> mSessionId;
+        std::optional<PlayerId> mTargetPlayerId;
+        std::optional<EntityId> mTargetEntityId;
         std::optional<LatestWinsSnapshot> mConfirmedSnapshot;
         std::optional<ReliableObservationBatch> mConfirmedObservationBatch;
         std::vector<ObservedPlayer> mObservedPlayers;

@@ -14,6 +14,7 @@
 #include "engine.hpp"
 #include "options.hpp"
 #include "tes3mp/desktop_connection.hpp"
+#include "tes3mp/desktop_providers.hpp"
 
 #include <boost/program_options/variables_map.hpp>
 
@@ -60,6 +61,10 @@ namespace
                 return "network transport failed";
             case Status::Disconnected:
                 return "server disconnected";
+            case Status::ContentMappingFailed:
+                return "desktop fixture content mapping is invalid";
+            case Status::PresentationFailed:
+                return "remote player presentation failed";
         }
         return "unknown connection failure";
     }
@@ -87,19 +92,6 @@ namespace
         return "unknown startup failure";
     }
 
-    class MultiplayerInput final : public TES3MP::OpenMWAdapter::SemanticInputProvider
-    {
-        std::optional<TES3MP::PlayerMotionIntent> sampleCurrentIntent() noexcept override { return std::nullopt; }
-    };
-
-    class MultiplayerPresentation final : public TES3MP::OpenMWAdapter::PresentationProvider
-    {
-        void applyAuthoritative(const TES3MP::LatestWinsSnapshot&,
-            std::span<const TES3MP::ObservedPlayer>) noexcept override
-        {
-        }
-    };
-
     class MultiplayerStatus final : public TES3MP::OpenMWAdapter::ConnectionStatusProvider
     {
         void report(TES3MP::OpenMWAdapter::ConnectionStatus status) noexcept override
@@ -119,8 +111,8 @@ namespace
 }
 
 bool parseOptions(int argc, char** argv, OMW::Engine& engine, Files::ConfigurationManager& cfgMgr,
-    TES3MP::OpenMWAdapter::SemanticInputProvider& multiplayerInput,
-    TES3MP::OpenMWAdapter::PresentationProvider& multiplayerPresentation,
+    TES3MP::OpenMWAdapter::DesktopSemanticInput& multiplayerInput,
+    TES3MP::OpenMWAdapter::DesktopPresentation& multiplayerPresentation,
     TES3MP::OpenMWAdapter::ConnectionStatusProvider& multiplayerStatus)
 {
     // Create a local alias for brevity
@@ -244,6 +236,17 @@ bool parseOptions(int argc, char** argv, OMW::Engine& engine, Files::Configurati
 
     if (variables["tes3mp-enable"].as<bool>())
     {
+        const TES3MP::OpenMWAdapter::DesktopFixtureMapping fixture{
+            variables["tes3mp-fixture-interior"].as<std::string>(),
+            variables["tes3mp-fixture-worldspace"].as<std::string>(),
+            variables["tes3mp-fixture-avatar"].as<std::string>() };
+        if (fixture.interiorCell.empty() || fixture.exteriorWorldspace.empty() || fixture.avatarNpc.empty())
+        {
+            Log(Debug::Error) << "TES3MP startup failed: fixture interior, worldspace, and avatar are required";
+            return false;
+        }
+        multiplayerInput.configure(fixture);
+        multiplayerPresentation.configure(fixture);
         auto coordinator = TES3MP::OpenMWAdapter::makeDesktopCoordinator(variables["tes3mp-host"].as<std::string>(),
             variables["tes3mp-port"].as<unsigned>(), variables["tes3mp-timeout-ms"].as<unsigned>(),
             variables["tes3mp-password-file"].as<Files::MaybeQuotedPath>().u8string(), multiplayerInput,
@@ -319,8 +322,8 @@ int runApplication(int argc, char* argv[])
 
     osg::setNotifyHandler(new OSGLogHandler());
     Files::ConfigurationManager cfgMgr;
-    MultiplayerInput multiplayerInput;
-    MultiplayerPresentation multiplayerPresentation;
+    TES3MP::OpenMWAdapter::DesktopSemanticInput multiplayerInput;
+    TES3MP::OpenMWAdapter::DesktopPresentation multiplayerPresentation;
     MultiplayerStatus multiplayerStatus;
     std::unique_ptr<OMW::Engine> engine = std::make_unique<OMW::Engine>(cfgMgr);
 

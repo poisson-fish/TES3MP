@@ -65,6 +65,15 @@ namespace
             LinearVelocity3(14, 15, -16));
     }
 
+    SpatialEntitySnapshot goldenEntry()
+    {
+        return SpatialEntitySnapshot(*ServerTick::fromValue(0), value<PlayerId>(101), value<EntityId>(1),
+            value<EntityRevision>(1), value<AuthorityEpoch>(1),
+            Transform(CellId::interior(value<CellSpaceId>(1)), Position3(0, 0, 0),
+                Orientation3(Turn32::fromValue(0), Turn32::fromValue(0), Turn32::fromValue(0))),
+            LinearVelocity3(0, 0, 0));
+    }
+
     SpatialWorldView view(std::span<const SpatialEntitySnapshot> entries)
     {
         return std::get<SpatialWorldView>(SpatialWorldView::create(entries));
@@ -76,8 +85,11 @@ namespace
         std::optional<CommandSequence> acknowledged;
         if (acknowledgement)
             acknowledged = value<CommandSequence>(*acknowledgement);
+        const PlayerId targetPlayer = entries.empty() ? value<PlayerId>(1) : entries.front().playerId();
+        const EntityId targetEntity = entries.empty() ? value<EntityId>(1) : entries.front().entityId();
         return LatestWinsSnapshot(
-            LatestWinsSnapshotHeader(sessionId, generation, value<CanonicalRevision>(tick), acknowledged), view(entries));
+            LatestWinsSnapshotHeader(sessionId, generation, targetPlayer, targetEntity,
+                value<CanonicalRevision>(tick), acknowledged), view(entries));
     }
 
     bool hasError(const auto& result, ExchangeDecodeErrorCode code)
@@ -250,7 +262,8 @@ namespace
                 acknowledgement = value<CommandSequence>(count);
             const LatestWinsSnapshot original(
                 LatestWinsSnapshotHeader(
-                    sessionId, generation, *CanonicalRevision::fromValue(static_cast<std::uint64_t>(count)), acknowledgement),
+                    sessionId, generation, value<PlayerId>(1), value<EntityId>(1),
+                    *CanonicalRevision::fromValue(static_cast<std::uint64_t>(count)), acknowledgement),
                 *originalView);
             const auto decoded = decodeLatestWinsSnapshot(encodeLatestWinsSnapshot(original));
             const auto* roundTripped = std::get_if<LatestWinsSnapshot>(&decoded);
@@ -279,7 +292,8 @@ namespace
             || !hasError(SpatialWorldView::create(unsorted), ExchangeDecodeErrorCode::SnapshotEntriesNotStrictlySorted))
             return false;
         const LatestWinsSnapshot maximumSnapshot(
-            LatestWinsSnapshotHeader(sessionId, generation, value<CanonicalRevision>(9), std::nullopt),
+            LatestWinsSnapshotHeader(sessionId, generation, value<PlayerId>(101), value<EntityId>(1),
+                value<CanonicalRevision>(9), std::nullopt),
             std::get<SpatialWorldView>(std::move(accepted)));
         return encodeLatestWinsSnapshot(maximumSnapshot).size() <= LatestWinsSnapshotMaximumPayloadBytes;
     }
@@ -321,7 +335,7 @@ namespace
         const std::array entries{ entry(41) };
         auto reliable = encodeReliableOperation(operation(sessionId, generation));
         auto latestWins = encodeLatestWinsSnapshot(snapshot(sessionId, generation, 9, 1, entries));
-        if (reliable.size() != 184 || latestWins.size() != 248)
+        if (reliable.size() != 184 || latestWins.size() != 272)
             return false;
 
         auto unknownReliableBody = reliable;
@@ -406,12 +420,18 @@ namespace
         if (client->receiveLatestWinsSnapshot(first) != LatestWinsSnapshotReceiveResult::IdenticalDuplicate)
             return false;
 
-        const std::array changedEntries{ entry(42, 8) };
+        const std::array changedEntries{ entry(41, 9) };
         const auto contradictory = snapshot(sessionId, generation, 9, 2, changedEntries);
         const auto stale = snapshot(sessionId, generation, 8, 2, firstEntries);
         const auto regressingAck = snapshot(sessionId, generation, 10, 1, firstEntries);
         const auto wrongSession = snapshot(value<SessionId>(22), generation, 10, 2, firstEntries);
         const auto wrongGeneration = snapshot(sessionId, value<SessionGeneration>(3), 10, 2, firstEntries);
+        const LatestWinsSnapshot missingBinding(
+            LatestWinsSnapshotHeader(sessionId, generation, value<PlayerId>(999), value<EntityId>(999),
+                value<CanonicalRevision>(10), value<CommandSequence>(2)),
+            view(firstEntries));
+        const std::array changedBindingEntries{ entry(42, 9) };
+        const auto changedBinding = snapshot(sessionId, generation, 10, 2, std::span(changedBindingEntries));
         return client->receiveLatestWinsSnapshot(contradictory)
             == LatestWinsSnapshotReceiveResult::ContradictorySameTick
             && client->receiveLatestWinsSnapshot(stale) == LatestWinsSnapshotReceiveResult::StaleTick
@@ -419,6 +439,10 @@ namespace
             == LatestWinsSnapshotReceiveResult::RegressingAcknowledgement
             && client->receiveLatestWinsSnapshot(wrongSession) == LatestWinsSnapshotReceiveResult::SessionMismatch
             && client->receiveLatestWinsSnapshot(wrongGeneration) == LatestWinsSnapshotReceiveResult::GenerationMismatch
+            && client->receiveLatestWinsSnapshot(missingBinding)
+            == LatestWinsSnapshotReceiveResult::TargetBindingMissing
+            && client->receiveLatestWinsSnapshot(changedBinding)
+            == LatestWinsSnapshotReceiveResult::TargetBindingMismatch
             && *client->confirmedSnapshot() == confirmed;
     }
 
@@ -497,11 +521,11 @@ namespace
     {
         const auto sessionId = value<SessionId>(21);
         const auto generation = value<SessionGeneration>(2);
-        const std::array entries{ entry(41) };
+        const std::array entries{ goldenEntry() };
         const auto reliable = encodeReliableOperation(operation(sessionId, generation));
         const auto latestWins = encodeLatestWinsSnapshot(snapshot(sessionId, generation, 9, 1, entries));
-        return reliable.size() == 184 && fnv1a(reliable) == 0x1ad648997dba1cecull && latestWins.size() == 248
-            && fnv1a(latestWins) == 0x6d6dcf39ff3271a9ull;
+        return reliable.size() == 184 && fnv1a(reliable) == 0x1ad648997dba1cecull && latestWins.size() == 272
+            && fnv1a(latestWins) == 0xcef2161072b6273aull;
     }
 
     void printBytes(std::span<const std::byte> bytes)
@@ -530,7 +554,7 @@ namespace
             return false;
         const auto sessionId = value<SessionId>(21);
         const auto generation = value<SessionGeneration>(2);
-        const std::array entries{ entry(41) };
+        const std::array<SpatialEntitySnapshot, 0> entries{};
         const auto reliable = encodeReliableOperation(operation(sessionId, generation));
         const auto latestWins = encodeLatestWinsSnapshot(snapshot(sessionId, generation, 9, 1, entries));
         return writeFile(directory / "valid-reliable-operation", reliable)
@@ -555,7 +579,7 @@ namespace
     {
         const auto sessionId = value<SessionId>(21);
         const auto generation = value<SessionGeneration>(2);
-        const std::array entries{ entry(41) };
+        const std::array<SpatialEntitySnapshot, 0> entries{};
         const auto reliable = readFile(directory / "valid-reliable-operation");
         const auto latestWins = readFile(directory / "valid-latest-wins-snapshot");
         return reliable && *reliable == encodeReliableOperation(operation(sessionId, generation))
@@ -571,7 +595,7 @@ int main(int argc, char** argv)
     {
         const auto sessionId = value<SessionId>(21);
         const auto generation = value<SessionGeneration>(2);
-        const std::array entries{ entry(41) };
+        const std::array entries{ goldenEntry() };
         printBytes(encodeReliableOperation(operation(sessionId, generation)));
         printBytes(encodeLatestWinsSnapshot(snapshot(sessionId, generation, 9, 1, entries)));
         return 0;

@@ -43,6 +43,12 @@ namespace TES3MP
         bool authenticationAccepted = false;
     };
 
+    struct ClientRuntimeQueueResult
+    {
+        ClientRuntimeResult result = ClientRuntimeResult::Accepted;
+        std::optional<CommandSequence> sequence;
+    };
+
     using ClientRuntimeCreateResult = std::variant<std::unique_ptr<class ClientSessionRuntime>, SessionTransitionError>;
 
     class ClientSessionRuntime
@@ -57,8 +63,8 @@ namespace TES3MP
         HeadlessClientResult start(
             const ConnectionEndpoint& endpoint, ClientHello hello, AuthenticationRequest authentication) noexcept;
         ClientRuntimeAdvanceResult advance();
-        ClientRuntimeResult queueMotionIntent(PlayerMotionIntent intent);
-        ClientRuntimeResult queueCellTransition(FixtureCellTransition transition);
+        ClientRuntimeQueueResult queueMotionIntent(PlayerMotionIntent intent);
+        ClientRuntimeQueueResult queueCellTransition(FixtureCellTransition transition);
         ClientRuntimeDrainResult drainInbound();
         ClientRuntimeResult queue(MessageClass messageClass, MessageKind kind, std::span<const std::byte> payload);
         ClientRuntimeResult flushOutbound() noexcept;
@@ -73,7 +79,7 @@ namespace TES3MP
         ClientSessionRuntime(TransportRuntime& transport, MonotonicClock& clock,
             std::unique_ptr<HeadlessClientSession> session, OutboundQueuePolicy outboundPolicy) noexcept;
         ClientRuntimeDrainResult fail(ClientRuntimeResult result) noexcept;
-        ClientRuntimeResult queueReliable(ReliableOperationBody body);
+        ClientRuntimeQueueResult queueReliable(ReliableOperationBody body);
 
         TransportRuntime& mTransport;
         MonotonicClock& mClock;

@@ -38,9 +38,12 @@ namespace TES3MP
     {
     public:
         constexpr LatestWinsSnapshotHeader(SessionId targetSessionId, SessionGeneration targetSessionGeneration,
-            CanonicalRevision canonicalRevision, std::optional<CommandSequence> acknowledgedCommandSequence) noexcept
+            PlayerId targetPlayerId, EntityId targetEntityId, CanonicalRevision canonicalRevision,
+            std::optional<CommandSequence> acknowledgedCommandSequence) noexcept
             : mTargetSessionId(targetSessionId)
             , mTargetSessionGeneration(targetSessionGeneration)
+            , mTargetPlayerId(targetPlayerId)
+            , mTargetEntityId(targetEntityId)
             , mCanonicalRevision(canonicalRevision)
             , mAcknowledgedCommandSequence(acknowledgedCommandSequence)
         {
@@ -48,6 +51,8 @@ namespace TES3MP
 
         constexpr SessionId targetSessionId() const noexcept { return mTargetSessionId; }
         constexpr SessionGeneration targetSessionGeneration() const noexcept { return mTargetSessionGeneration; }
+        constexpr PlayerId targetPlayerId() const noexcept { return mTargetPlayerId; }
+        constexpr EntityId targetEntityId() const noexcept { return mTargetEntityId; }
         constexpr CanonicalRevision canonicalRevision() const noexcept { return mCanonicalRevision; }
         constexpr const std::optional<CommandSequence>& acknowledgedCommandSequence() const noexcept
         {
@@ -60,6 +65,8 @@ namespace TES3MP
     private:
         SessionId mTargetSessionId;
         SessionGeneration mTargetSessionGeneration;
+        PlayerId mTargetPlayerId;
+        EntityId mTargetEntityId;
         CanonicalRevision mCanonicalRevision;
         std::optional<CommandSequence> mAcknowledgedCommandSequence;
     };

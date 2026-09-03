@@ -316,9 +316,20 @@ namespace MWClass
 
     void Npc::ensureCustomData(const MWWorld::Ptr& ptr) const
     {
+        initializeCustomData(ptr, true);
+    }
+
+    void Npc::ensureTransientPresentationData(const MWWorld::Ptr& ptr) const
+    {
+        initializeCustomData(ptr, false);
+    }
+
+    void Npc::initializeCustomData(const MWWorld::Ptr& ptr, bool registerPtr) const
+    {
         if (!ptr.getRefData().getCustomData())
         {
-            MWBase::Environment::get().getWorldModel()->registerPtr(ptr);
+            if (registerPtr)
+                MWBase::Environment::get().getWorldModel()->registerPtr(ptr);
             bool recalculate = false;
             auto tempData = std::make_unique<NpcCustomData>();
             NpcCustomData* data = tempData.get();

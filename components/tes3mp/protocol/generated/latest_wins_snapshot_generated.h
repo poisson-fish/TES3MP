@@ -325,7 +325,9 @@ struct LatestWinsSnapshotHeader FLATBUFFERS_FINAL_CLASS : private ::flatbuffers:
     VT_TARGET_SESSION_GENERATION = 6,
     VT_CANONICAL_REVISION = 8,
     VT_HAS_ACKNOWLEDGED_COMMAND_SEQUENCE = 10,
-    VT_ACKNOWLEDGED_COMMAND_SEQUENCE = 12
+    VT_ACKNOWLEDGED_COMMAND_SEQUENCE = 12,
+    VT_TARGET_PLAYER_ID = 14,
+    VT_TARGET_ENTITY_ID = 16
   };
   uint64_t target_session_id() const {
     return GetField<uint64_t>(VT_TARGET_SESSION_ID, 0);
@@ -342,6 +344,12 @@ struct LatestWinsSnapshotHeader FLATBUFFERS_FINAL_CLASS : private ::flatbuffers:
   uint64_t acknowledged_command_sequence() const {
     return GetField<uint64_t>(VT_ACKNOWLEDGED_COMMAND_SEQUENCE, 0);
   }
+  uint64_t target_player_id() const {
+    return GetField<uint64_t>(VT_TARGET_PLAYER_ID, 0);
+  }
+  uint64_t target_entity_id() const {
+    return GetField<uint64_t>(VT_TARGET_ENTITY_ID, 0);
+  }
   template <bool B = false>
   bool Verify(::flatbuffers::VerifierTemplate<B> &verifier) const {
     return VerifyTableStart(verifier) &&
@@ -350,6 +358,8 @@ struct LatestWinsSnapshotHeader FLATBUFFERS_FINAL_CLASS : private ::flatbuffers:
            VerifyField<uint64_t>(verifier, VT_CANONICAL_REVISION, 8) &&
            VerifyField<uint8_t>(verifier, VT_HAS_ACKNOWLEDGED_COMMAND_SEQUENCE, 1) &&
            VerifyField<uint64_t>(verifier, VT_ACKNOWLEDGED_COMMAND_SEQUENCE, 8) &&
+           VerifyField<uint64_t>(verifier, VT_TARGET_PLAYER_ID, 8) &&
+           VerifyField<uint64_t>(verifier, VT_TARGET_ENTITY_ID, 8) &&
            verifier.EndTable();
   }
 };
@@ -373,6 +383,12 @@ struct LatestWinsSnapshotHeaderBuilder {
   void add_acknowledged_command_sequence(uint64_t acknowledged_command_sequence) {
     fbb_.AddElement<uint64_t>(LatestWinsSnapshotHeader::VT_ACKNOWLEDGED_COMMAND_SEQUENCE, acknowledged_command_sequence, 0);
   }
+  void add_target_player_id(uint64_t target_player_id) {
+    fbb_.AddElement<uint64_t>(LatestWinsSnapshotHeader::VT_TARGET_PLAYER_ID, target_player_id, 0);
+  }
+  void add_target_entity_id(uint64_t target_entity_id) {
+    fbb_.AddElement<uint64_t>(LatestWinsSnapshotHeader::VT_TARGET_ENTITY_ID, target_entity_id, 0);
+  }
   explicit LatestWinsSnapshotHeaderBuilder(::flatbuffers::FlatBufferBuilder &_fbb)
         : fbb_(_fbb) {
     start_ = fbb_.StartTable();
@@ -390,8 +406,12 @@ inline ::flatbuffers::Offset<LatestWinsSnapshotHeader> CreateLatestWinsSnapshotH
     uint64_t target_session_generation = 0,
     uint64_t canonical_revision = 0,
     bool has_acknowledged_command_sequence = false,
-    uint64_t acknowledged_command_sequence = 0) {
+    uint64_t acknowledged_command_sequence = 0,
+    uint64_t target_player_id = 0,
+    uint64_t target_entity_id = 0) {
   LatestWinsSnapshotHeaderBuilder builder_(_fbb);
+  builder_.add_target_entity_id(target_entity_id);
+  builder_.add_target_player_id(target_player_id);
   builder_.add_acknowledged_command_sequence(acknowledged_command_sequence);
   builder_.add_canonical_revision(canonical_revision);
   builder_.add_target_session_generation(target_session_generation);

@@ -81,7 +81,7 @@ namespace TES3MP
         const auto player = mSeed.nextPlayer;
         const auto entity = mSeed.nextEntity;
         LatestWinsSnapshot snapshot(
-            LatestWinsSnapshotHeader(session, generation, candidate->candidateRevision(), std::nullopt),
+            LatestWinsSnapshotHeader(session, generation, player, entity, candidate->candidateRevision(), std::nullopt),
             std::move(*acceptedView));
 
         AuthenticatedJoinResult result{ principal, session, player, entity, std::move(snapshot) };

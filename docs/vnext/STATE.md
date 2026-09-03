@@ -13,11 +13,14 @@ remains the [implementation plan](IMPLEMENTATION_PLAN.md#phase-8--openmw-desktop
 - Slice 8.1: **Implemented**
 - Slice 8.2: **In Progress** (owner demo remains)
 - Slice 8.3: **In Progress**
+- Slice 8.4: **In Progress**
 - Governing decisions: [ADR-0007](adr/ADR-0007-openmw-hook-patch-queue-policy.md),
   [ADR-0047](adr/ADR-0047-phase8-adapter-lifecycle-and-provider-boundary.md),
   [ADR-0048](adr/ADR-0048-canonical-revision-and-simulation-tick-separation.md),
-  [ADR-0049](adr/ADR-0049-phase8-desktop-connection-composition.md)
-- Latest implementation commit: `39a176d697` (`Complete OpenMW desktop connection gate`)
+  [ADR-0049](adr/ADR-0049-phase8-desktop-connection-composition.md),
+  [ADR-0050](adr/ADR-0050-phase8-cell-and-remote-presentation.md), and
+  [GDR-0013](gdr/GDR-0013-phase8-cell-transition-presentation.md)
+- Latest implementation commit: `81b0067c9a` (`Implement Phase 8 cell and remote presentation`)
 
 ## Working synopsis
 
@@ -50,6 +53,13 @@ the real-network RelWithDebInfo `openmw.exe` links. Sanitized runtime failures
 now appear through the approved normal OpenMW message-box path. The owner demo
 remains.
 
+Slice 8.4 is now in progress. The owner approved the breaking corrective
+package and P8-004 on 2026-09-03. Explicit snapshot target identity, tracked
+cell-transition receipts with one coalesced deferred transition, explicit
+fixture content mapping, typed provider failure closure, and renderer-only
+remote avatar reconciliation are implemented. Automated gates pass; the
+content-backed two-client owner demo remains.
+
 ## Active files
 
 - Governing policy: `docs/vnext/adr/ADR-0007-openmw-hook-patch-queue-policy.md`
@@ -61,11 +71,17 @@ remains.
 - Executable/target composition: `apps/openmw/{main.cpp,CMakeLists.txt}`
 - Desktop options: `apps/openmw/options.cpp`
 - Desktop status presentation: `apps/openmw/main.cpp`
+- Cell/presentation providers: `apps/openmw/tes3mp/{desktop_providers.hpp,desktop_providers.cpp}`
+- Renderer-only avatar seam: `apps/openmw/mwrender/{transientactorpresentation.hpp,transientactorpresentation.cpp}`
 - Patch registry: `docs/vnext/OPENMW_PATCH_REGISTRY.json`,
   `scripts/verify_openmw_patch_registry.py`
 - Evidence: [Phase 8 notes](IMPLEMENTATION_NOTES.md#phase-8--openmw-desktop-vertical-slice)
 
 ## Last verified
+
+Slice 8.4's full protocol aggregate, headless-client contracts, adapter
+contracts, patch registry, all 124 repository-owned Python tests, diff hygiene,
+and full RelWithDebInfo `openmw.exe` build/link pass on 2026-09-03.
 
 Fresh MSVC 19.51 `/MD` GameNetworkingSockets and c-ares dependency proofs pass,
 their exact transport manifest is regenerated, and direct object inspection

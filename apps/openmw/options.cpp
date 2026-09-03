@@ -29,6 +29,12 @@ namespace OpenMW
             "TES3MP connection timeout in milliseconds (1-60000; required when enabled)");
         addOption("tes3mp-password-file", bpo::value<Files::MaybeQuotedPath>()->default_value({}, ""),
             "file containing optional TES3MP join password");
+        addOption("tes3mp-fixture-interior", bpo::value<std::string>()->default_value(""),
+            "OpenMW interior cell mapped to the TES3MP fixture interior");
+        addOption("tes3mp-fixture-worldspace", bpo::value<std::string>()->default_value(""),
+            "OpenMW worldspace mapped to the TES3MP fixture exterior");
+        addOption("tes3mp-fixture-avatar", bpo::value<std::string>()->default_value(""),
+            "OpenMW NPC record used for transient remote-player presentation");
 
         addOption("data",
             bpo::value<Files::MaybeQuotedPathContainer>()

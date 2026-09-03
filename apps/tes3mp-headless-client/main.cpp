@@ -95,7 +95,8 @@ namespace
                 bound = true;
                 const auto& confirmed = *client.stateMachine().confirmedSnapshot();
                 const auto self = std::ranges::find_if(confirmed.view().entries(),
-                    [&](const auto& entry) { return entry.playerId().value() == sessionId.value(); });
+                    [&](const auto& entry) { return entry.playerId() == confirmed.header().targetPlayerId()
+                        && entry.entityId() == confirmed.header().targetEntityId(); });
                 if (self == confirmed.view().entries().end())
                     break;
                 const auto acknowledged = confirmed.header().acknowledgedCommandSequence();
@@ -105,7 +106,7 @@ namespace
                     if (motionCommandsSent < next)
                     {
                         if (clientRuntime.queueMotionIntent(
-                                TES3MP::PlayerMotionIntent(TES3MP::LinearVelocity3(next == 1 ? 3 : 0, 0, 0)))
+                                TES3MP::PlayerMotionIntent(TES3MP::LinearVelocity3(next == 1 ? 3 : 0, 0, 0))).result
                             != TES3MP::ClientRuntimeResult::Accepted)
                             break;
                         motionCommandsSent = next;
@@ -335,7 +336,8 @@ int main(int argc, char** argv)
         {
             const auto& confirmed = *session.stateMachine().confirmedSnapshot();
             const auto self = std::ranges::find_if(confirmed.view().entries(), [&](const auto& entry) {
-                return entry.playerId().value() == confirmed.header().targetSessionId().value();
+                return entry.playerId() == confirmed.header().targetPlayerId()
+                    && entry.entityId() == confirmed.header().targetEntityId();
             });
             if (self != confirmed.view().entries().end())
             {
@@ -345,7 +347,7 @@ int main(int argc, char** argv)
                     const auto cell = sentExterior
                         ? TES3MP::CellId::interior(TES3MP::CellSpaceId::fromValue(7).value())
                         : TES3MP::CellId::exterior(TES3MP::CellSpaceId::fromValue(8).value(), 0, 0);
-                    if (clientRuntime.queueCellTransition(TES3MP::FixtureCellTransition(cell))
+                    if (clientRuntime.queueCellTransition(TES3MP::FixtureCellTransition(cell)).result
                         != TES3MP::ClientRuntimeResult::Accepted)
                         return 3;
                     if (!sentExterior)
@@ -372,12 +374,13 @@ int main(int argc, char** argv)
                 continue;
             }
             const auto self = std::ranges::find_if(confirmed.view().entries(), [&](const auto& entry) {
-                return entry.playerId().value() == confirmed.header().targetSessionId().value();
+                return entry.playerId() == confirmed.header().targetPlayerId()
+                    && entry.entityId() == confirmed.header().targetEntityId();
             });
             if (self == confirmed.view().entries().end())
                 return 3;
             if (clientRuntime.queueMotionIntent(TES3MP::PlayerMotionIntent(
-                    TES3MP::LinearVelocity3(mode == "motion-two" || mode == "soak-two" ? 2 : 1, 0, 0)))
+                    TES3MP::LinearVelocity3(mode == "motion-two" || mode == "soak-two" ? 2 : 1, 0, 0))).result
                 != TES3MP::ClientRuntimeResult::Accepted)
                 return 3;
             sentMotion = true;

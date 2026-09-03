@@ -11,6 +11,9 @@ add_library(openmw_tes3mp_adapter STATIC
     engine_coordinator.hpp
     providers.hpp
 )
+if(TES3MP_OPENMW_DESKTOP_PROVIDERS)
+    target_sources(openmw_tes3mp_adapter PRIVATE desktop_providers.cpp desktop_providers.hpp)
+endif()
 add_library(TES3MP::OpenMWAdapter ALIAS openmw_tes3mp_adapter)
 
 target_compile_features(openmw_tes3mp_adapter PUBLIC cxx_std_20)

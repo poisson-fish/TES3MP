@@ -5032,6 +5032,21 @@ only the relevant phase section here.
 
 ## Phase 8 — OpenMW desktop vertical slice
 
+### 2026-09-03 — Slice 8.4 approved package and P8-004 implementation
+
+- Status: **In Progress**; owner two-client demo remains.
+- Decisions: owner approved the breaking package recorded by ADR-0050,
+  GDR-0013, ADR-0042/ADR-0047 amendments, and registry entry P8-004.
+- Change: snapshots now carry explicit target player/entity identity; runtime
+  queue calls return command-sequence receipts; the coordinator captures cell
+  events before correction and bounds pending/deferred transitions; fixture
+  content mapping is explicit; remote avatars reconcile through an opaque
+  renderer-only transient NPC seam with typed failure cleanup.
+- Verification: the full protocol aggregate, headless-client contracts, adapter
+  contracts, patch registry, all 124 repository Python tests, and full
+  RelWithDebInfo `openmw.exe` build/link pass. Diff hygiene passes. The
+  content-backed two-client owner demo remains.
+
 [Back to the phase tracker](IMPLEMENTATION_PLAN.md#phase-8--openmw-desktop-vertical-slice)
 
 - 2026-09-03 — Slice 8.3 visible runtime status — Verified

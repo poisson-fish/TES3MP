@@ -19,12 +19,27 @@ namespace TES3MP::OpenMWAdapter
             {
             }
 
-            ~Coordinator() override { mRuntime->close(); }
+            ~Coordinator() override
+            {
+                mPresentation.clear();
+                mRuntime->close();
+            }
 
             void frame(float) noexcept override
             {
                 if (mClosed)
                     return;
+                const bool hadSnapshot = mRuntime->session().stateMachine().confirmedSnapshot().has_value();
+                CellTransitionCapture captured;
+                if (hadSnapshot)
+                {
+                    captured = mInput.captureCellTransition();
+                    if (captured.result != ProviderResult::Accepted)
+                    {
+                        closeForProviderFailure(captured.result);
+                        return;
+                    }
+                }
                 const auto advanced = mRuntime->advance();
                 if (advanced.result != ClientRuntimeResult::Accepted)
                 {
@@ -33,12 +48,43 @@ namespace TES3MP::OpenMWAdapter
                     return;
                 }
                 const auto& snapshot = mRuntime->session().stateMachine().confirmedSnapshot();
+                bool finalizedCellTransition = false;
+                if (snapshot && mPendingCellTransition && snapshot->header().acknowledgedCommandSequence()
+                    && *snapshot->header().acknowledgedCommandSequence() >= *mPendingCellTransition)
+                {
+                    mPendingCellTransition.reset();
+                    finalizedCellTransition = true;
+                }
                 if ((advanced.snapshotApplied || advanced.observationApplied) && snapshot)
-                    mPresentation.applyAuthoritative(*snapshot, mRuntime->session().observedPlayers());
+                {
+                    const auto applied = mPresentation.applyAuthoritative(*snapshot,
+                        mRuntime->session().observedPlayers(),
+                        !mPendingCellTransition && !mDeferredCellTransition && !captured.transition);
+                    if (applied != ProviderResult::Accepted)
+                    {
+                        closeForProviderFailure(applied);
+                        return;
+                    }
+                }
+                if (captured.transition)
+                {
+                    if (mPendingCellTransition)
+                        mDeferredCellTransition = std::move(captured.transition);
+                    else
+                        queueCellTransition(std::move(*captured.transition));
+                }
+                else if (finalizedCellTransition && mDeferredCellTransition)
+                {
+                    auto deferred = std::move(*mDeferredCellTransition);
+                    mDeferredCellTransition.reset();
+                    queueCellTransition(std::move(deferred));
+                }
+                if (mClosed)
+                    return;
                 if (snapshot)
                 {
                     if (auto intent = mInput.sampleCurrentIntent();
-                        intent && mRuntime->queueMotionIntent(std::move(*intent)) != ClientRuntimeResult::Accepted)
+                        intent && mRuntime->queueMotionIntent(std::move(*intent)).result != ClientRuntimeResult::Accepted)
                     {
                         mRuntime->close();
                         mStatus.report(ConnectionStatus::TransportFailed);
@@ -71,6 +117,27 @@ namespace TES3MP::OpenMWAdapter
                     mStatus.report(ConnectionStatus::TransportFailed);
             }
 
+            void queueCellTransition(FixtureCellTransition transition) noexcept
+            {
+                const auto queued = mRuntime->queueCellTransition(std::move(transition));
+                if (queued.result != ClientRuntimeResult::Accepted || !queued.sequence)
+                {
+                    closeForProviderFailure(ProviderResult::PresentationFailed);
+                    return;
+                }
+                mPendingCellTransition = queued.sequence;
+            }
+
+            void closeForProviderFailure(ProviderResult result) noexcept
+            {
+                mPresentation.clear();
+                mRuntime->close();
+                mStatus.report(result == ProviderResult::ContentMappingFailed
+                        ? ConnectionStatus::ContentMappingFailed
+                        : ConnectionStatus::PresentationFailed);
+                mClosed = true;
+            }
+
         private:
             std::unique_ptr<TransportRuntime> mTransport;
             std::unique_ptr<MonotonicClock> mClock;
@@ -79,6 +146,8 @@ namespace TES3MP::OpenMWAdapter
             PresentationProvider& mPresentation;
             ConnectionStatusProvider& mStatus;
             bool mClosed = false;
+            std::optional<CommandSequence> mPendingCellTransition;
+            std::optional<FixtureCellTransition> mDeferredCellTransition;
         };
     }
 

@@ -149,35 +149,36 @@ namespace TES3MP
         return result;
     }
 
-    ClientRuntimeResult ClientSessionRuntime::queueMotionIntent(PlayerMotionIntent intent)
+    ClientRuntimeQueueResult ClientSessionRuntime::queueMotionIntent(PlayerMotionIntent intent)
     {
         return queueReliable(ReliableOperationBody(std::move(intent)));
     }
 
-    ClientRuntimeResult ClientSessionRuntime::queueCellTransition(FixtureCellTransition transition)
+    ClientRuntimeQueueResult ClientSessionRuntime::queueCellTransition(FixtureCellTransition transition)
     {
         return queueReliable(ReliableOperationBody(std::move(transition)));
     }
 
-    ClientRuntimeResult ClientSessionRuntime::queueReliable(ReliableOperationBody body)
+    ClientRuntimeQueueResult ClientSessionRuntime::queueReliable(ReliableOperationBody body)
     {
         const auto& snapshot = mSession->stateMachine().confirmedSnapshot();
         const auto sessionId = mSession->stateMachine().sessionId();
         if (!snapshot || !sessionId)
-            return ClientRuntimeResult::NotConnected;
+            return { ClientRuntimeResult::NotConnected, std::nullopt };
         const auto self = std::ranges::find_if(snapshot->view().entries(),
-            [&](const auto& entry) { return entry.playerId().value() == sessionId->value(); });
+            [&](const auto& entry) { return entry.playerId() == snapshot->header().targetPlayerId()
+                && entry.entityId() == snapshot->header().targetEntityId(); });
         if (self == snapshot->view().entries().end())
-            return ClientRuntimeResult::ProtocolRejected;
+            return { ClientRuntimeResult::ProtocolRejected, std::nullopt };
         auto sequence = mLastQueuedSequence ? mLastQueuedSequence->next()
             : snapshot->header().acknowledgedCommandSequence()
             ? snapshot->header().acknowledgedCommandSequence()->next()
             : std::optional<CommandSequence>(CommandSequence::initial());
         if (!sequence)
-            return ClientRuntimeResult::EncodeRejected;
+            return { ClientRuntimeResult::EncodeRejected, std::nullopt };
         auto commandId = CommandId::fromValue(sequence->value());
         if (!commandId)
-            return ClientRuntimeResult::EncodeRejected;
+            return { ClientRuntimeResult::EncodeRejected, std::nullopt };
         ClientCommandHeader header(*sessionId, snapshot->header().targetSessionGeneration(), *sequence, *commandId,
             snapshot->header().canonicalRevision());
         ReliableOperationHeader reliable(
@@ -187,12 +188,12 @@ namespace TES3MP
             std::move(body));
         auto* value = std::get_if<ReliableOperation>(&operation);
         if (!value)
-            return ClientRuntimeResult::EncodeRejected;
+            return { ClientRuntimeResult::EncodeRejected, std::nullopt };
         const auto queued
             = queue(MessageClass::ReliableOperation, MessageKind::ReliableOperation, encodeReliableOperation(*value));
         if (queued == ClientRuntimeResult::Accepted)
             mLastQueuedSequence = *sequence;
-        return queued;
+        return { queued, queued == ClientRuntimeResult::Accepted ? sequence : std::nullopt };
     }
 
     std::optional<ResumeToken> ClientSessionRuntime::takeResumeToken() noexcept

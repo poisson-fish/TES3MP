@@ -16,6 +16,7 @@ namespace
     class Input final : public TES3MP::OpenMWAdapter::SemanticInputProvider
     {
     public:
+        TES3MP::OpenMWAdapter::CellTransitionCapture captureCellTransition() noexcept override { return {}; }
         std::optional<TES3MP::PlayerMotionIntent> sampleCurrentIntent() noexcept override
         {
             ++calls;
@@ -27,12 +28,15 @@ namespace
     class Presentation final : public TES3MP::OpenMWAdapter::PresentationProvider
     {
     public:
-        void applyAuthoritative(
-            const TES3MP::LatestWinsSnapshot&, std::span<const TES3MP::ObservedPlayer>) noexcept override
+        TES3MP::OpenMWAdapter::ProviderResult applyAuthoritative(const TES3MP::LatestWinsSnapshot&,
+            std::span<const TES3MP::ObservedPlayer>, bool) noexcept override
         {
             ++calls;
+            return TES3MP::OpenMWAdapter::ProviderResult::Accepted;
         }
+        void clear() noexcept override { ++clears; }
         unsigned calls = 0;
+        unsigned clears = 0;
     };
 
     class Status final : public TES3MP::OpenMWAdapter::ConnectionStatusProvider

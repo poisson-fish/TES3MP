@@ -60,8 +60,9 @@ namespace TES3MP::ServerApp
                 || !std::holds_alternative<SpatialWorldView>(view)) return std::nullopt;
             deliveries.push_back({ target.sessionId(),
                 std::get<ReliableObservationBatch>(std::move(batch)),
-                LatestWinsSnapshot(LatestWinsSnapshotHeader(target.sessionId(), target.sessionGeneration(), revision,
-                    target.highestContiguousFinalizedCommand()), std::get<SpatialWorldView>(std::move(view))) });
+                LatestWinsSnapshot(LatestWinsSnapshotHeader(target.sessionId(), target.sessionGeneration(),
+                    target.playerId(), target.entityId(), revision, target.highestContiguousFinalizedCommand()),
+                    std::get<SpatialWorldView>(std::move(view))) });
         }
         return deliveries;
     }
@@ -130,8 +131,8 @@ namespace TES3MP::ServerApp
                 auto view = SpatialWorldView::create(entries);
                 if (!std::holds_alternative<SpatialWorldView>(view)) return std::nullopt;
                 result.emplace_back(target.sessionId(), LatestWinsSnapshot(
-                    LatestWinsSnapshotHeader(target.sessionId(), target.sessionGeneration(), revision,
-                        target.highestContiguousFinalizedCommand()),
+                    LatestWinsSnapshotHeader(target.sessionId(), target.sessionGeneration(), target.playerId(),
+                        target.entityId(), revision, target.highestContiguousFinalizedCommand()),
                     std::get<SpatialWorldView>(std::move(view))));
             }
             return result;

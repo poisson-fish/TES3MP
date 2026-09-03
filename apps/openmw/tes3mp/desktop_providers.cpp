@@ -1,0 +1,241 @@
+#include "desktop_providers.hpp"
+
+#include "../mwbase/environment.hpp"
+#include "../mwbase/world.hpp"
+#include "../mwrender/transientactorpresentation.hpp"
+#include "../mwworld/cell.hpp"
+#include "../mwworld/cellstore.hpp"
+#include "../mwworld/scene.hpp"
+#include "../mwworld/worldmodel.hpp"
+
+#include <components/esm3/loadcell.hpp>
+#include <components/esm/position.hpp>
+#include <components/esm/refid.hpp>
+
+#include <algorithm>
+#include <cmath>
+#include <map>
+#include <numbers>
+#include <ranges>
+
+namespace TES3MP::OpenMWAdapter
+{
+    namespace
+    {
+        constexpr std::uint64_t InteriorFixture = 7;
+        constexpr std::uint64_t ExteriorFixture = 8;
+        constexpr double PositionScale = 1024.0;
+        constexpr double TurnScale = 4294967296.0;
+
+        ESM::RefId refId(std::string_view value)
+        {
+            return ESM::RefId::stringRefId(value);
+        }
+
+        std::optional<CellId> toCanonical(const MWWorld::Cell& cell, const DesktopFixtureMapping& mapping)
+        {
+            if (!cell.isExterior())
+            {
+                if (cell.getId() != refId(mapping.interiorCell))
+                    return std::nullopt;
+                return CellId::interior(*CellSpaceId::fromValue(InteriorFixture));
+            }
+            if (cell.getWorldSpace() != refId(mapping.exteriorWorldspace))
+                return std::nullopt;
+            return CellId::exterior(
+                *CellSpaceId::fromValue(ExteriorFixture), cell.getGridX(), cell.getGridY());
+        }
+
+        ESM::Position toOpenMW(const Transform& transform)
+        {
+            ESM::Position result{};
+            const auto position = transform.position();
+            result.pos[0] = static_cast<float>(static_cast<double>(position.x()) / PositionScale);
+            result.pos[1] = static_cast<float>(static_cast<double>(position.y()) / PositionScale);
+            result.pos[2] = static_cast<float>(static_cast<double>(position.z()) / PositionScale);
+            const auto orientation = transform.orientation();
+            const auto radians = [](Turn32 turn) {
+                return -static_cast<float>(static_cast<double>(turn.value()) / TurnScale
+                    * 2.0 * std::numbers::pi);
+            };
+            result.rot[0] = radians(orientation.x());
+            result.rot[1] = radians(orientation.y());
+            result.rot[2] = radians(orientation.z());
+            return result;
+        }
+
+        MWWorld::CellStore* resolveCell(const CellId& cell, const DesktopFixtureMapping& mapping)
+        {
+            auto worldModel = MWBase::Environment::get().getWorldModel();
+            if (const auto* interior = cell.asInterior())
+            {
+                if (interior->cellSpace().value() != InteriorFixture)
+                    return nullptr;
+                return worldModel->findCell(refId(mapping.interiorCell));
+            }
+            const auto* exterior = cell.asExterior();
+            if (!exterior || exterior->worldspace().value() != ExteriorFixture)
+                return nullptr;
+            return &worldModel->getExterior(ESM::ExteriorCellLocation(
+                exterior->gridX(), exterior->gridY(), refId(mapping.exteriorWorldspace)));
+        }
+    }
+
+    class DesktopSemanticInput::Impl
+    {
+    public:
+        DesktopFixtureMapping mapping;
+    };
+
+    DesktopSemanticInput::DesktopSemanticInput()
+        : mImpl(std::make_unique<Impl>())
+    {
+    }
+
+    DesktopSemanticInput::~DesktopSemanticInput() = default;
+
+    void DesktopSemanticInput::configure(DesktopFixtureMapping mapping)
+    {
+        mImpl->mapping = std::move(mapping);
+    }
+
+    CellTransitionCapture DesktopSemanticInput::captureCellTransition() noexcept
+    {
+        try
+        {
+            auto scene = MWBase::Environment::get().getWorldScene();
+            auto* current = scene->getCurrentCell();
+            if (!scene->hasCellChanged() || !current)
+                return {};
+            auto cell = toCanonical(*current->getCell(), mImpl->mapping);
+            if (!cell)
+                return { ProviderResult::ContentMappingFailed, std::nullopt };
+            return { ProviderResult::Accepted, FixtureCellTransition(*cell) };
+        }
+        catch (...)
+        {
+            return { ProviderResult::ContentMappingFailed, std::nullopt };
+        }
+    }
+
+    std::optional<PlayerMotionIntent> DesktopSemanticInput::sampleCurrentIntent() noexcept
+    {
+        return std::nullopt;
+    }
+
+    class DesktopPresentation::Impl
+    {
+    public:
+        struct Remote
+        {
+            MWWorld::CellStore* cell = nullptr;
+            std::unique_ptr<MWRender::TransientActorPresentation> actor;
+        };
+
+        DesktopFixtureMapping mapping;
+        std::map<EntityId, Remote> remotes;
+
+        void clear() noexcept
+        {
+            remotes.clear();
+        }
+
+        ProviderResult apply(const LatestWinsSnapshot& snapshot, std::span<const ObservedPlayer> observedPlayers,
+            bool allowLocalCellCorrection)
+        {
+            const auto self = std::ranges::find_if(snapshot.view().entries(), [&](const auto& entry) {
+                return entry.playerId() == snapshot.header().targetPlayerId()
+                    && entry.entityId() == snapshot.header().targetEntityId();
+            });
+            if (self == snapshot.view().entries().end())
+                return ProviderResult::PresentationFailed;
+
+            auto* targetCell = resolveCell(self->transform().cell(), mapping);
+            if (!targetCell)
+                return ProviderResult::ContentMappingFailed;
+
+            auto world = MWBase::Environment::get().getWorld();
+            const auto selfPosition = toOpenMW(self->transform());
+            auto player = world->getPlayerPtr();
+            if (!allowLocalCellCorrection && player.getCell() != targetCell)
+            {
+                clear();
+                return ProviderResult::Accepted;
+            }
+            if (allowLocalCellCorrection && player.getCell() != targetCell)
+            {
+                clear();
+                world->changeToCell(targetCell->getCell()->getId(), selfPosition, false, false);
+                player = world->getPlayerPtr();
+                targetCell = player.getCell();
+            }
+
+            std::vector<EntityId> desired;
+            desired.reserve(observedPlayers.size());
+            for (const auto& observed : observedPlayers)
+            {
+                if (observed.playerId == snapshot.header().targetPlayerId()
+                    && observed.entityId == snapshot.header().targetEntityId())
+                    continue;
+                const auto entry = std::ranges::find_if(snapshot.view().entries(), [&](const auto& candidate) {
+                    return candidate.playerId() == observed.playerId && candidate.entityId() == observed.entityId;
+                });
+                if (entry == snapshot.view().entries().end() || entry->transform().cell() != self->transform().cell())
+                    continue;
+                desired.push_back(observed.entityId);
+                auto found = remotes.find(observed.entityId);
+                const auto position = toOpenMW(entry->transform());
+                if (found == remotes.end() || found->second.cell != targetCell)
+                {
+                    if (found != remotes.end())
+                        remotes.erase(found);
+                    auto actor = MWRender::TransientActorPresentation::create(*world->getRenderingManager(),
+                        *MWBase::Environment::get().getESMStore(), refId(mapping.avatarNpc), *targetCell, position);
+                    remotes.emplace(observed.entityId, Remote{ targetCell, std::move(actor) });
+                }
+                else
+                    found->second.actor->update(position);
+            }
+            for (auto iter = remotes.begin(); iter != remotes.end();)
+                if (std::ranges::find(desired, iter->first) == desired.end())
+                    iter = remotes.erase(iter);
+                else
+                    ++iter;
+            return ProviderResult::Accepted;
+        }
+    };
+
+    DesktopPresentation::DesktopPresentation()
+        : mImpl(std::make_unique<Impl>())
+    {
+    }
+
+    DesktopPresentation::~DesktopPresentation() = default;
+
+    void DesktopPresentation::configure(DesktopFixtureMapping mapping)
+    {
+        mImpl->mapping = std::move(mapping);
+    }
+
+    ProviderResult DesktopPresentation::applyAuthoritative(const LatestWinsSnapshot& snapshot,
+        std::span<const ObservedPlayer> observedPlayers, bool allowLocalCellCorrection) noexcept
+    {
+        try
+        {
+            const auto result = mImpl->apply(snapshot, observedPlayers, allowLocalCellCorrection);
+            if (result != ProviderResult::Accepted)
+                mImpl->clear();
+            return result;
+        }
+        catch (...)
+        {
+            mImpl->clear();
+            return ProviderResult::PresentationFailed;
+        }
+    }
+
+    void DesktopPresentation::clear() noexcept
+    {
+        mImpl->clear();
+    }
+}

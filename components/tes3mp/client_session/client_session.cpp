@@ -213,6 +213,15 @@ namespace TES3MP
             return LatestWinsSnapshotReceiveResult::SessionMismatch;
         if (snapshot.header().targetSessionGeneration() != mGeneration)
             return LatestWinsSnapshotReceiveResult::GenerationMismatch;
+        const auto target = std::ranges::find_if(snapshot.view().entries(), [&](const auto& entry) {
+            return entry.playerId() == snapshot.header().targetPlayerId()
+                && entry.entityId() == snapshot.header().targetEntityId();
+        });
+        if (target == snapshot.view().entries().end())
+            return LatestWinsSnapshotReceiveResult::TargetBindingMissing;
+        if ((mTargetPlayerId && *mTargetPlayerId != snapshot.header().targetPlayerId())
+            || (mTargetEntityId && *mTargetEntityId != snapshot.header().targetEntityId()))
+            return LatestWinsSnapshotReceiveResult::TargetBindingMismatch;
 
         if (mConfirmedSnapshot)
         {
@@ -235,6 +244,8 @@ namespace TES3MP
             }
         }
 
+        mTargetPlayerId = snapshot.header().targetPlayerId();
+        mTargetEntityId = snapshot.header().targetEntityId();
         mConfirmedSnapshot = std::move(snapshot);
         return LatestWinsSnapshotReceiveResult::Applied;
     }
