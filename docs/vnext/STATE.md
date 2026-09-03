@@ -11,10 +11,10 @@ remains the [implementation plan](IMPLEMENTATION_PLAN.md#phase-8--openmw-desktop
 - Phase 7: **Implemented**
 - Phase 8: **In Progress**
 - Slice 8.1: **Implemented**
-- Slice 8.2: **In Progress** (runtime composition remains)
+- Slice 8.2: **In Progress** (headless/OpenMW runtime composition remains)
 - Governing decisions: [ADR-0007](adr/ADR-0007-openmw-hook-patch-queue-policy.md),
   [ADR-0047](adr/ADR-0047-phase8-adapter-lifecycle-and-provider-boundary.md)
-- Latest implementation commit: `e01967ee8e` (`Prevent contradictory same-tick snapshots`)
+- Latest implementation commit: `eaa4df407f` (`Add bounded client session runtime`)
 
 ## Working synopsis
 
@@ -35,14 +35,16 @@ optimized lifecycle demo pass without weakening client contradiction rejection.
 The project owner accepted the Slice 7.7 implementation demo and Phase 7 exit
 gate on 2026-09-02. The owner approved the exact Slice 8.1 P8-001 through P8-003
 hook inventory on 2026-09-02. Slice 8.2 two-provider architecture and
-correct-then-command frame order are approved. Production code waits for the
-approved reusable client-session runtime. Provider contracts, the optional
-engine coordinator seam, and semantic patch registry are implemented.
+correct-then-command frame order are approved. The reusable client-session
+runtime now owns bounded typed inbound drain and queued outbound flush with
+failure closure. Provider contracts, the optional engine coordinator seam, and
+semantic patch registry are implemented; caller composition remains.
 
 ## Active files
 
 - Governing policy: `docs/vnext/adr/ADR-0007-openmw-hook-patch-queue-policy.md`
 - Adapter anchor/target: `apps/openmw/tes3mp/{adapter.cpp,CMakeLists.txt}`
+- Reusable runtime: `components/tes3mp/{include/tes3mp/client_session_runtime.hpp,client_session/client_session_runtime.cpp,tests/headless_client_tests.cpp}`
 - Provider/coordinator contracts: `apps/openmw/tes3mp/{providers.hpp,engine_coordinator.hpp,adapter_tests.cpp}`
 - Candidate lifecycle/frame seam: `apps/openmw/engine.{hpp,cpp}`
 - Executable/target composition: `apps/openmw/{main.cpp,CMakeLists.txt}`
@@ -52,7 +54,8 @@ engine coordinator seam, and semantic patch registry are implemented.
 
 ## Last verified
 
-MSVC 19.51 focused adapter contracts and all 120 Python tests pass. Staged
+Fresh MSVC 19.51 Debug headless runtime, full protocol, and focused adapter
+contracts plus all 120 Python tests pass. Staged
 baseline provenance passes with 299 intentional differences and 69 dependency
 inputs; staged legacy exclusion, patch-registry verification, and diff checks
 pass. Full OpenMW build verification awaits a correctly configured

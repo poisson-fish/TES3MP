@@ -5034,6 +5034,23 @@ only the relevant phase section here.
 
 [Back to the phase tracker](IMPLEMENTATION_PLAN.md#phase-8--openmw-desktop-vertical-slice)
 
+- 2026-09-02 — Slice 8.2 reusable runtime boundary — In Progress
+  - Change: added the owner-approved `ClientSessionRuntime`. It owns the reusable
+    session and bounded outbound queue, separates typed inbound drain from
+    encode/queue/outbound flush, validates frame/channel pairing, and closes on
+    protocol or transport failure. Headless and OpenMW caller migration remain.
+  - Decisions: owner approved new owning runtime Option A; expanding the
+    headless-only class and a borrowing pump helper were rejected.
+  - Verification: fresh MSVC 19.51 Debug `tes3mp_headless_client_tests`, full
+    `tes3mp_protocol_tests_run`, and `openmw_tes3mp_adapter_tests_run` pass. All
+    120 repository-owned Python tests and `git diff --check` pass. Focused tests
+    prove typed decode, queue-before-flush order, transport-channel selection,
+    protocol rejection, and failure closure.
+  - Owner review: runtime boundary approved before implementation. Slice 8.2
+    demo acceptance remains pending.
+  - Follow-ups: migrate the headless executable, compose the concrete OpenMW
+    coordinator, and finish lifecycle/frame-order failure contracts.
+
 - 2026-09-02 — Slice 8.2 provider and engine-seam foundation — In Progress
   - Change: added separate domain-typed input/presentation provider contracts,
     the optional single-owner engine coordinator seam, exact post-input frame

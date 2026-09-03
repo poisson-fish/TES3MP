@@ -52,6 +52,12 @@ runtime that owns bounded inbound receive/decode and outbound encode/queue/flush
 then compose both headless and OpenMW clients through it. The adapter receives
 typed domain results and must not own a private packet or transport pump.
 
+The owner further approved the concrete Option A boundary on 2026-09-02: a new
+`ClientSessionRuntime` owns the existing session and outbound queue, exposes
+separate bounded typed `drainInbound`, `queue`, and `flushOutbound` passes, and
+closes the session on transport or protocol failure. Expanding the headless-only
+class and using a borrowing pump helper were rejected.
+
 Putting transport composition in the OpenMW adapter was rejected because it
 violates ADR-0007. Retaining the combined caller-owned flow was rejected because
 it cannot guarantee the approved frame order.
