@@ -26,6 +26,14 @@ a 500 ms stall, 32 reconnect cycles, existing hard queue capacities with zero
 growth after drain, 10,000 deterministic ticks, a 60-second real-process soak,
 fixed recorded seeds, and zero durable divergence.
 
+For the real-process memory bound, the project owner approved Option A on
+2026-09-02: sample resident memory once per second on the server and both
+clients, compare equal ten-sample reference and final windows, and reject a
+sustained final-median increase larger than the reference window's observed
+range. Record sample count, medians, observed range, and peak without process
+payloads. A fixed machine-dependent RSS cap and queue-only inference were
+rejected.
+
 Real-process-only fault control was rejected because timing and replay would be
 nondeterministic. An operating-system proxy was rejected because it adds a
 platform-specific boundary already excluded by ADR-0039.
@@ -52,4 +60,5 @@ or gameplay recovery semantics.
 ## Owner approval
 
 Approved by the project owner on 2026-09-02: Option A and all proposed initial
-thresholds and acceptance scenarios.
+thresholds and acceptance scenarios. The owner separately approved Option A
+for the portable RSS-window rule on 2026-09-02.

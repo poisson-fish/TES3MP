@@ -4293,6 +4293,26 @@ only the relevant phase section here.
 
 [Back to the phase tracker](IMPLEMENTATION_PLAN.md#phase-7--headless-end-to-end-multiplayer-slice)
 
+- 2026-09-02 — Slice 7.7 real-process soak — In Progress
+  - Change: implementation `f30b55c80b` adds two bounded idle soak-client
+    modes, a portable Windows/Linux/macOS RSS sampler, equal-window sustained
+    growth check, exact 60-second process driver, matching canonical-view
+    comparison, queue-cap/zero-drain checks, and focused RSS contracts.
+  - Decisions: project owner approved ADR-0046 Option A for sampled RSS and the
+    reference-window observed-range rule. No authority, state scope, or gameplay
+    behavior changed. Idle clients exercise sustained snapshot receipt; the
+    existing deterministic matrix separately proves motion and convergence.
+  - Verification: MSVC 19.51 RelWithDebInfo builds the server and headless
+    client and passes `tes3mp_server_app_tests_run`. The real server/two-client
+    soak passes 60 seconds with 61 samples per process, matching canonical
+    views, lower final RSS medians, reliable queue high water 2 messages/232
+    bytes, latest-wins high water 1 message/372 bytes, and zero final queues.
+    All 117 Python tests, baseline/legacy verification, and diff checks pass.
+  - Owner review: implementation demo and Phase 7 exit-gate approval remain
+    pending; Slice 7.7 stays **In Progress**.
+  - Follow-ups: owner reviews the recorded soak evidence; then Slice 7.7 and
+    Phase 7 may advance only through their required review gates.
+
 - 2026-09-02 — Slice 7.7 real-process queue drain — In Progress
   - Change: implementation `7adf261bf5` wires a constant-memory transport
     telemetry sink into the server process and makes the process driver verify

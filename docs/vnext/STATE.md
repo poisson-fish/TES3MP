@@ -12,7 +12,7 @@ remains the [implementation plan](IMPLEMENTATION_PLAN.md#phase-7--headless-end-t
 - Slice 7.6: **Implemented**
 - Slice 7.7: **In Progress**
 - Governing decision: [ADR-0046](adr/ADR-0046-phase7-adverse-network-and-soak-matrix.md)
-- Latest implementation commit: `7adf261bf5` (`Add Phase 7 queue drain process proof`)
+- Latest implementation commit: `f30b55c80b` (`Add Phase 7 real-process soak proof`)
 
 ## Working synopsis
 
@@ -23,12 +23,12 @@ canonical progress; resume preserves identity, generation progression, revision,
 and acknowledgements; exact expiration rejects the old token and fresh join
 creates a new identity. Credentials remain in memory and absent from evidence.
 
-Slice 7.7 layered matrix and thresholds are approved. The bounded named profile
-catalog, seeded 10,000-tick deterministic matrix, paced real-process 32-cycle
-reconnect loop, and real-process queue high-water/zero-drain proof pass exact
-replay, changed-seed, stall, queue bounds, reliable apply-once/order,
-latest-wins convergence, and identity/progress preservation contracts. Next
-eligible work is the 60-second real-process soak.
+Slice 7.7 layered matrix, thresholds, and RSS-window rule are approved. The
+bounded named profiles, seeded 10,000-tick matrix, paced 32-cycle reconnect,
+queue high-water/zero-drain proof, and 60-second two-client real-process soak
+pass replay, fault, convergence, identity/progress, matching-view, bounded RSS,
+and queue contracts. Owner implementation-demo and Phase 7 exit-gate reviews
+remain pending.
 
 ## Active files
 
@@ -44,7 +44,7 @@ eligible work is the 60-second real-process soak.
   `components/tes3mp/tests/server_authentication_tests.cpp`
 - Process proof: `apps/tes3mp-headless-client/main.cpp`,
   `apps/tes3mp-server/phase7_queue_telemetry.{hpp,cpp}`,
-  `scripts/run_phase7_join_demo.py`
+  `scripts/run_phase7_join_demo.py`, `scripts/run_phase7_soak.py`
 - Adverse profiles: `components/tes3mp/include/tes3mp/test_support/phase7_adverse_profiles.hpp`,
   `components/tes3mp/tests/fault_injection_tests.cpp`
 - Evidence: [Phase 7 notes](IMPLEMENTATION_NOTES.md#phase-7--headless-end-to-end-multiplayer-slice)
@@ -52,8 +52,8 @@ eligible work is the 60-second real-process soak.
 ## Last verified
 
 MSVC 19.51 server-app, authentication, lifecycle, complete protocol contracts,
-the Release server build, real-process queue-drain proof, and all 115 Python tests pass. Staged baseline
-provenance passes with 284 intentional
+the real-process queue-drain and 60-second soak proofs, and all 117 Python tests pass. Staged baseline
+provenance passes with 290 intentional
 differences and 69 dependency inputs; staged legacy exclusion and diff checks
 pass.
 

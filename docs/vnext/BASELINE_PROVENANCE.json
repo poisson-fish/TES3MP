@@ -160,6 +160,16 @@
       "purpose": "Pins the owner-approved bounded Phase 7 protocol, authentication, connection, and grace mapping proof profile."
     },
     {
+      "path": "apps/tes3mp-server/phase7_queue_telemetry.cpp",
+      "status": "A",
+      "purpose": "Captures bounded Phase 7 outbound queue high-water and zero-drain process evidence."
+    },
+    {
+      "path": "apps/tes3mp-server/phase7_queue_telemetry.hpp",
+      "status": "A",
+      "purpose": "Declares the bounded Phase 7 queue-drain telemetry sink and evidence value."
+    },
+    {
       "path": "apps/tes3mp-server/resume_token_context.cpp",
       "status": "A",
       "purpose": "Derives the approved Phase 7 protocol and fixture-content resume-token context through the credential crypto boundary."
@@ -1330,6 +1340,11 @@
       "purpose": "Runs the bounded real Phase 7 server/client process proof with an injected credential failure and exact distinct non-orphan identity assertions."
     },
     {
+      "path": "scripts/run_phase7_soak.py",
+      "status": "A",
+      "purpose": "Runs the 60-second two-client process soak with portable RSS, matching canonical-view, and bounded queue-drain evidence."
+    },
+    {
       "path": "scripts/run_tes3mp_runtime_safety.py",
       "status": "A",
       "purpose": "Repository-owned fail-closed sanitizer/race/fuzz preset runner with corpus, instrumentation, toolchain, log, and JSON evidence checks."
@@ -1368,6 +1383,11 @@
       "path": "scripts/tests/test_capture_vnext_windows_ci.py",
       "status": "A",
       "purpose": "Unit and workflow-policy tests for the Windows baseline evidence gate."
+    },
+    {
+      "path": "scripts/tests/test_run_phase7_join_demo.py",
+      "status": "A",
+      "purpose": "Unit tests for the Phase 7 soak RSS-window bound and insufficient-sample rejection."
     },
     {
       "path": "scripts/tests/test_run_tes3mp_runtime_safety.py",
