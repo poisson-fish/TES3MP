@@ -5032,6 +5032,23 @@ only the relevant phase section here.
 
 ## Phase 8 — OpenMW desktop vertical slice
 
+### 2026-09-03 — Slice 8.7 demo mapping approval
+
+- Status: **In Progress**; licensed content, process evidence, and owner demo
+  acceptance remain.
+- Decision: the owner approved Option A: interior cell
+  `Seyda Neen, Census and Excise Office`, exterior worldspace `sys::default`,
+  and remote avatar NPC `player`. GDR-0013 records the exact mapping and review
+  trigger. No production behavior, architecture, authority, or state changed.
+- Verification: an exact-name read-only search across local C:, D:, F:, and G:
+  drives found no `Morrowind.esm`; therefore the records and content-backed flow
+  could not be validated and no demo claim was made.
+- Follow-up: provide a licensed Morrowind `Data Files` path, validate the three
+  approved records, and run the complete desktop harness. Do not substitute
+  different content records without owner review.
+
+[Back to the phase tracker](IMPLEMENTATION_PLAN.md#phase-8--openmw-desktop-vertical-slice)
+
 ### 2026-09-03 — Slice 8.7 content-backed demo preflight
 
 - Status: **In Progress**; the content-backed harness and owner demo remain.

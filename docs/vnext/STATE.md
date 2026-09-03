@@ -99,6 +99,10 @@ server and passed all four focused harness contracts. Both required binaries
 are ready, but the local Steam libraries and checked conventional install paths
 contain no licensed Morrowind content, so the process run and owner review are
 still gated. Phase 9 cannot begin before that Phase 8 exit evidence is accepted.
+The owner approved the GDR-0013 Option A demo mapping: interior
+`Seyda Neen, Census and Excise Office`, worldspace `sys::default`, and avatar
+NPC `player`. An exact-name search across all four local filesystem drives also
+found no `Morrowind.esm`; record validation and the demo remain pending.
 
 ## Active files
 
@@ -132,8 +136,10 @@ still gated. Phase 9 cannot begin before that Phase 8 exit evidence is accepted.
 Slice 8.7 content-backed demo preflight rebuilt the MSVC 19.51 RelWithDebInfo
 `tes3mp_server.exe` and passed all four focused desktop-harness Python contracts
 on 2026-09-03. The matching `openmw.exe` is present. Licensed `Morrowind.esm`
-was not found in the local Steam libraries or checked conventional install
-paths, so no content-backed result or owner-demo claim was made.
+was not found in the local Steam libraries, checked conventional install paths,
+or an exact-name search across local C:, D:, F:, and G: drives. The owner
+approved the exact Option A fixture mapping, but no content-backed result or
+owner-demo claim was made.
 
 Slice 8.7 focused MSVC 19.51 Debug reconnect/coordinator and token-recovery
 contracts, full protocol aggregate, headless-client contracts, all 128

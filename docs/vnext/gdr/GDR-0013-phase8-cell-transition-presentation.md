@@ -40,3 +40,16 @@ ADR-0051 treats the fixture transition's entity revision as observed context
 rather than an equality gate, while retaining current session, binding, epoch,
 sequence, and domain validation. This lets a transition converge while server
 movement continues; all presentation behavior above is unchanged.
+
+## 2026-09-03 content-backed demo mapping
+
+The owner approved the base-game Option A mapping for the Phase 8 demo:
+
+- interior cell `Seyda Neen, Census and Excise Office`;
+- exterior worldspace `sys::default`; and
+- remote avatar NPC `player`.
+
+These remain explicit command-line fixture values, not protocol or canonical
+state. Their content records must be validated against licensed `Morrowind.esm`
+before the demo can count as evidence. Any replacement mapping requires owner
+review before use.
