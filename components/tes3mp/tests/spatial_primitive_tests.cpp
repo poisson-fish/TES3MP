@@ -211,10 +211,10 @@ namespace
     {
         const TES3MP::ClientCommandHeader header(TES3MP::SessionId::fromValue(4).value(),
             TES3MP::SessionGeneration::fromValue(2).value(), TES3MP::CommandSequence::fromValue(8).value(),
-            TES3MP::CommandId::fromValue(12).value(), TES3MP::ServerTick::fromValue(33).value());
+            TES3MP::CommandId::fromValue(12).value(), TES3MP::CanonicalRevision::fromValue(33).value());
         return !HasTransform<TES3MP::ClientCommandHeader> && header.sessionId().value() == 4
             && header.sessionGeneration().value() == 2 && header.commandSequence().value() == 8
-            && header.commandId().value() == 12 && header.observedServerTick().value() == 33;
+            && header.commandId().value() == 12 && header.observedCanonicalRevision().value() == 33;
     }
 
     bool writer_admission_stamp_is_separate_from_client_observation()

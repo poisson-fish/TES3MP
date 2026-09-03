@@ -216,8 +216,8 @@ namespace TES3MP
 
         if (mConfirmedSnapshot)
         {
-            const auto currentTick = mConfirmedSnapshot->header().serverTick();
-            const auto incomingTick = snapshot.header().serverTick();
+            const auto currentTick = mConfirmedSnapshot->header().canonicalRevision();
+            const auto incomingTick = snapshot.header().canonicalRevision();
             if (incomingTick < currentTick)
                 return LatestWinsSnapshotReceiveResult::StaleTick;
             if (incomingTick == currentTick)
@@ -253,9 +253,9 @@ namespace TES3MP
 
         if (mConfirmedObservationBatch)
         {
-            if (batch.serverTick() < mConfirmedObservationBatch->serverTick())
+            if (batch.canonicalRevision() < mConfirmedObservationBatch->canonicalRevision())
                 return ReliableObservationReceiveResult::StaleTick;
-            if (batch.serverTick() == mConfirmedObservationBatch->serverTick())
+            if (batch.canonicalRevision() == mConfirmedObservationBatch->canonicalRevision())
                 return batch == *mConfirmedObservationBatch
                     ? ReliableObservationReceiveResult::IdenticalDuplicate
                     : ReliableObservationReceiveResult::ContradictorySameTick;

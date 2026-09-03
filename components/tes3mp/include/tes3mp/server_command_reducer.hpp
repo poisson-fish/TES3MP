@@ -94,12 +94,15 @@ namespace TES3MP
             PreparedBatch(const PreparedBatch&) = delete;
             PreparedBatch& operator=(const PreparedBatch&) = delete;
             const CanonicalServerState& candidateState() const noexcept { return *mState; }
+            CanonicalRevision candidateRevision() const noexcept { return mCanonicalRevision; }
             const CommandBatchReductionResult& result() const noexcept { return mResult; }
         private:
             friend class CanonicalCommandReducer;
             PreparedBatch() = default;
             CanonicalStateVersion mBaseVersion = CanonicalStateVersion::initial();
             CanonicalStateVersion mStateVersion = CanonicalStateVersion::initial();
+            CanonicalRevision mBaseCanonicalRevision = CanonicalRevision::initial();
+            CanonicalRevision mCanonicalRevision = CanonicalRevision::initial();
             ServerTick mCheckpointTick = ServerTick::initial();
             std::shared_ptr<const CanonicalServerState> mState;
             std::shared_ptr<CanonicalStatePublication> mPublication;
@@ -114,11 +117,14 @@ namespace TES3MP
             PreparedJoin(const PreparedJoin&) = delete;
             PreparedJoin& operator=(const PreparedJoin&) = delete;
             const CanonicalServerState& candidateState() const noexcept { return *mState; }
+            CanonicalRevision candidateRevision() const noexcept { return mCanonicalRevision; }
         private:
             friend class CanonicalCommandReducer;
             PreparedJoin() = default;
             CanonicalStateVersion mBaseVersion = CanonicalStateVersion::initial();
             CanonicalStateVersion mStateVersion = CanonicalStateVersion::initial();
+            CanonicalRevision mBaseCanonicalRevision = CanonicalRevision::initial();
+            CanonicalRevision mCanonicalRevision = CanonicalRevision::initial();
             ServerTick mCheckpointTick = ServerTick::initial();
             std::shared_ptr<const CanonicalServerState> mState;
             std::shared_ptr<CanonicalStatePublication> mPublication;
@@ -132,11 +138,14 @@ namespace TES3MP
             PreparedLifecycle(const PreparedLifecycle&) = delete;
             PreparedLifecycle& operator=(const PreparedLifecycle&) = delete;
             const CanonicalServerState& candidateState() const noexcept { return *mState; }
+            CanonicalRevision candidateRevision() const noexcept { return mCanonicalRevision; }
         private:
             friend class CanonicalCommandReducer;
             PreparedLifecycle() = default;
             CanonicalStateVersion mBaseVersion = CanonicalStateVersion::initial();
             CanonicalStateVersion mStateVersion = CanonicalStateVersion::initial();
+            CanonicalRevision mBaseCanonicalRevision = CanonicalRevision::initial();
+            CanonicalRevision mCanonicalRevision = CanonicalRevision::initial();
             ServerTick mCheckpointTick = ServerTick::initial();
             std::shared_ptr<const CanonicalServerState> mState;
             std::shared_ptr<CanonicalStatePublication> mPublication;
@@ -157,6 +166,7 @@ namespace TES3MP
         // latest publication handle.
         const CanonicalServerState& state() const noexcept { return *mState; }
         CanonicalStateVersion stateVersion() const noexcept { return mStateVersion; }
+        CanonicalRevision canonicalRevision() const noexcept { return mCanonicalRevision; }
         std::shared_ptr<const CanonicalStatePublication> latestPublication() const noexcept;
         PreparedBatch prepare(const ServerTickCommandBatch& batch);
         PreparedBatch prepareTick(const ServerTickCommandBatch& batch);
@@ -188,6 +198,7 @@ namespace TES3MP
 
         std::shared_ptr<const CanonicalServerState> mState;
         CanonicalStateVersion mStateVersion = CanonicalStateVersion::initial();
+        CanonicalRevision mCanonicalRevision = CanonicalRevision::initial();
         ServerTick mCheckpointTick = ServerTick::initial();
         std::shared_ptr<const CanonicalStatePublication> mLatestPublication;
         Observability& mObservability;

@@ -5048,17 +5048,21 @@ only the relevant phase section here.
   - Follow-ups: complete the accepted ADR-0048 domain/wire migration, rerun the
     real-process proofs, then compose the concrete OpenMW coordinator.
 
-- 2026-09-02 — Slice 8.2 canonical revision separation — In Progress
-  - Change: accepted ADR-0048 after typed headless runtime migration exposed
-    multiple valid lifecycle publications sharing one fixed simulation tick.
+- 2026-09-02 — Slice 8.2 canonical revision separation — Verified
+  - Change: implemented ADR-0048 with a distinct one-per-authoritative-commit
+    `CanonicalRevision`, retained per-change canonical state versions and fixed
+    `ServerTick` pacing, migrated command/snapshot/observation domain and wire
+    fields, and regenerated pinned FlatBuffers headers.
   - Decisions: owner approved the breaking A3 design: `ServerTick` paces
     simulation; `CanonicalRevision` orders every authoritative commit,
     publication, and observed command base.
-  - Verification: focused runtime contracts pass. Real process proof reaches
-    movement and lifecycle, then deterministically rejects the ambiguous
-    same-tick snapshot, proving the pre-migration model is insufficient.
-  - Follow-ups: migrate domain and wire ordering, rerun focused and full real
-    process proofs, then resume OpenMW coordinator composition.
+  - Verification: MSVC 19.51 Debug full protocol, server-app, headless-runtime,
+    and OpenMW adapter contracts pass; two joins in one simulation tick receive
+    increasing revisions and a multi-change command batch advances one revision.
+    Pinned FlatBuffers generation/proof, all 120 Python tests, RelWithDebInfo
+    `openmw`, and the real two-client 32-cycle lifecycle/convergence/queue-drain
+    proof pass.
+  - Follow-ups: compose the concrete OpenMW coordinator within approved ADR-0047.
 
 - 2026-09-02 — Slice 8.2 full-build blocker correction — Verified
   - Change: replaced the stale full-engine build directory with a fresh MSVC

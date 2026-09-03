@@ -136,7 +136,7 @@ namespace TES3MP::ServerApp
             if (const auto* transition = std::get_if<FixtureCellTransition>(&operation->body()))
             {
                 ServerCommandProposal proposal(header.sessionId(), header.sessionGeneration(),
-                    header.commandSequence(), header.commandId(), header.observedServerTick(),
+                    header.commandSequence(), header.commandId(), header.observedCanonicalRevision(),
                     *operation->header().entityPrecondition(),
                     FixtureCellTransitionCommandProposal(transition->requestedCell()));
                 return intake.submit(std::move(proposal)) == CommandSubmissionResult::Accepted
@@ -145,7 +145,7 @@ namespace TES3MP::ServerApp
             if (const auto* motion = std::get_if<PlayerMotionIntent>(&operation->body()))
             {
                 ServerCommandProposal proposal(header.sessionId(), header.sessionGeneration(),
-                    header.commandSequence(), header.commandId(), header.observedServerTick(),
+                    header.commandSequence(), header.commandId(), header.observedCanonicalRevision(),
                     *operation->header().entityPrecondition(),
                     PlayerMotionCommandProposal(motion->desiredVelocity()));
                 return intake.submit(std::move(proposal)) == CommandSubmissionResult::Accepted

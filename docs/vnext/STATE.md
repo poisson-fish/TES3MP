@@ -11,7 +11,7 @@ remains the [implementation plan](IMPLEMENTATION_PLAN.md#phase-8--openmw-desktop
 - Phase 7: **Implemented**
 - Phase 8: **In Progress**
 - Slice 8.1: **Implemented**
-- Slice 8.2: **In Progress** (canonical-revision migration and OpenMW composition remain)
+- Slice 8.2: **In Progress** (OpenMW composition remains)
 - Governing decisions: [ADR-0007](adr/ADR-0007-openmw-hook-patch-queue-policy.md),
   [ADR-0047](adr/ADR-0047-phase8-adapter-lifecycle-and-provider-boundary.md),
   [ADR-0048](adr/ADR-0048-canonical-revision-and-simulation-tick-separation.md)
@@ -41,8 +41,8 @@ runtime now owns bounded typed inbound drain and queued outbound flush with
 failure closure, and the headless executable uses that boundary. Provider
 contracts, the optional engine coordinator seam, and semantic patch registry
 are implemented. The caller migration reproduced the different-publication,
-same-tick contradiction; the owner-approved breaking ADR-0048 domain/wire
-migration is now the next work before OpenMW composition.
+same-tick contradiction. The owner-approved breaking ADR-0048 domain/wire
+migration is implemented and verified; concrete OpenMW composition is next.
 
 ## Active files
 
@@ -58,9 +58,10 @@ migration is now the next work before OpenMW composition.
 
 ## Last verified
 
-Fresh MSVC 19.51 Debug headless runtime and full protocol contracts, the GNS
-headless/server build, and all 120 Python tests pass. The real-process proof
-reproduces the expected ADR-0048 same-tick contradiction gate. Staged
+Fresh MSVC 19.51 Debug headless runtime, server-app, full protocol, and OpenMW
+adapter contracts, all 120 Python tests, and the pinned FlatBuffers proof pass.
+The real-process lifecycle proof passes movement, convergence, stale-view,
+32-cycle reconnect, expiration, fresh identity, and zero final queue depth. Staged
 baseline provenance passes with 299 intentional differences and 69 dependency
 inputs; staged legacy exclusion, patch-registry verification, and diff checks
 pass. A fresh MSVC 19.51 full configuration confirms the pinned Bullet 3.25

@@ -5,7 +5,7 @@ table ClientCommandHeader {
   session_generation:ulong (id: 1);
   command_sequence:ulong (id: 2);
   command_id:ulong (id: 3);
-  observed_server_tick:ulong (id: 4);
+  observed_canonical_revision:ulong (id: 4);
 }
 
 table EntityPrecondition {

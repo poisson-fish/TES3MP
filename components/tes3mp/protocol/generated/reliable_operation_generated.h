@@ -204,7 +204,7 @@ struct ClientCommandHeader FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Tabl
     VT_SESSION_GENERATION = 6,
     VT_COMMAND_SEQUENCE = 8,
     VT_COMMAND_ID = 10,
-    VT_OBSERVED_SERVER_TICK = 12
+    VT_OBSERVED_CANONICAL_REVISION = 12
   };
   uint64_t session_id() const {
     return GetField<uint64_t>(VT_SESSION_ID, 0);
@@ -218,8 +218,8 @@ struct ClientCommandHeader FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Tabl
   uint64_t command_id() const {
     return GetField<uint64_t>(VT_COMMAND_ID, 0);
   }
-  uint64_t observed_server_tick() const {
-    return GetField<uint64_t>(VT_OBSERVED_SERVER_TICK, 0);
+  uint64_t observed_canonical_revision() const {
+    return GetField<uint64_t>(VT_OBSERVED_CANONICAL_REVISION, 0);
   }
   template <bool B = false>
   bool Verify(::flatbuffers::VerifierTemplate<B> &verifier) const {
@@ -228,7 +228,7 @@ struct ClientCommandHeader FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Tabl
            VerifyField<uint64_t>(verifier, VT_SESSION_GENERATION, 8) &&
            VerifyField<uint64_t>(verifier, VT_COMMAND_SEQUENCE, 8) &&
            VerifyField<uint64_t>(verifier, VT_COMMAND_ID, 8) &&
-           VerifyField<uint64_t>(verifier, VT_OBSERVED_SERVER_TICK, 8) &&
+           VerifyField<uint64_t>(verifier, VT_OBSERVED_CANONICAL_REVISION, 8) &&
            verifier.EndTable();
   }
 };
@@ -249,8 +249,8 @@ struct ClientCommandHeaderBuilder {
   void add_command_id(uint64_t command_id) {
     fbb_.AddElement<uint64_t>(ClientCommandHeader::VT_COMMAND_ID, command_id, 0);
   }
-  void add_observed_server_tick(uint64_t observed_server_tick) {
-    fbb_.AddElement<uint64_t>(ClientCommandHeader::VT_OBSERVED_SERVER_TICK, observed_server_tick, 0);
+  void add_observed_canonical_revision(uint64_t observed_canonical_revision) {
+    fbb_.AddElement<uint64_t>(ClientCommandHeader::VT_OBSERVED_CANONICAL_REVISION, observed_canonical_revision, 0);
   }
   explicit ClientCommandHeaderBuilder(::flatbuffers::FlatBufferBuilder &_fbb)
         : fbb_(_fbb) {
@@ -269,9 +269,9 @@ inline ::flatbuffers::Offset<ClientCommandHeader> CreateClientCommandHeader(
     uint64_t session_generation = 0,
     uint64_t command_sequence = 0,
     uint64_t command_id = 0,
-    uint64_t observed_server_tick = 0) {
+    uint64_t observed_canonical_revision = 0) {
   ClientCommandHeaderBuilder builder_(_fbb);
-  builder_.add_observed_server_tick(observed_server_tick);
+  builder_.add_observed_canonical_revision(observed_canonical_revision);
   builder_.add_command_id(command_id);
   builder_.add_command_sequence(command_sequence);
   builder_.add_session_generation(session_generation);

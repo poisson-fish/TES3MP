@@ -72,7 +72,9 @@ namespace TES3MP::ServerApp
         if (!lifecycle) return false;
         const auto cancel = [this, id = lifecycle->id]() noexcept { (void)mWiring->lifecycle.cancel(id); };
         const auto* candidate = mWiring->lifecycle.candidateState(lifecycle->id);
-        auto projected = candidate ? projectFixtureObservations(before, *candidate, tick) : std::nullopt;
+        const auto revision = mWiring->lifecycle.candidateRevision(lifecycle->id);
+        auto projected = candidate && revision
+            ? projectFixtureObservations(before, *candidate, tick, *revision) : std::nullopt;
         if (!projected) { cancel(); return false; }
         std::vector<std::pair<TransportConnectionId, FixtureObservationDelivery>> routed;
         routed.reserve(projected->size());
@@ -108,8 +110,10 @@ namespace TES3MP::ServerApp
             (void)session->cancelPreparedResume();
         };
         const auto* candidate = mWiring->lifecycle.candidateState(lifecycle->id);
-        auto views = candidate ? projectFixtureViews(*candidate, tick) : std::nullopt;
-        auto observations = candidate ? projectFixtureObservations(before, *candidate, tick) : std::nullopt;
+        const auto revision = mWiring->lifecycle.candidateRevision(lifecycle->id);
+        auto views = candidate && revision ? projectFixtureViews(*candidate, tick, *revision) : std::nullopt;
+        auto observations = candidate && revision
+            ? projectFixtureObservations(before, *candidate, tick, *revision) : std::nullopt;
         auto accepted = session->takeAuthenticationAccepted();
         if (!candidate || !views || !observations || !accepted) { cancel(); return false; }
         const auto view = std::ranges::find_if(*views,
@@ -122,7 +126,7 @@ namespace TES3MP::ServerApp
             for (const auto& entry : view->second.view().entries())
                 initialChanges.push_back({ entry.playerId(), entry.entityId(), ObservationChangeKind::Enter });
             auto initial = ReliableObservationBatch::create(
-                *session->sessionId(), session->generation(), tick, initialChanges);
+                *session->sessionId(), session->generation(), *revision, initialChanges);
             if (!std::holds_alternative<ReliableObservationBatch>(initial)) { cancel(); return false; }
 
             std::vector<std::vector<std::byte>> frames;
@@ -182,7 +186,9 @@ namespace TES3MP::ServerApp
             if (!lifecycle) return false;
             const auto cancel = [this, id = lifecycle->id]() noexcept { (void)mWiring->lifecycle.cancel(id); };
             const auto* candidate = mWiring->lifecycle.candidateState(lifecycle->id);
-            auto projected = candidate ? projectFixtureObservations(before, *candidate, tick) : std::nullopt;
+            const auto revision = mWiring->lifecycle.candidateRevision(lifecycle->id);
+            auto projected = candidate && revision
+                ? projectFixtureObservations(before, *candidate, tick, *revision) : std::nullopt;
             if (!projected) { cancel(); return false; }
             std::vector<std::pair<TransportConnectionId, FixtureObservationDelivery>> routed;
             try
@@ -328,9 +334,17 @@ namespace TES3MP::ServerApp
         for (const auto& batch : pumpedCommands.batches())
         {
             const auto before = mWiring->reducer.state();
+            const auto revisionBefore = mWiring->reducer.canonicalRevision();
             auto prepared = mWiring->reducer.prepareTick(batch);
             if (!prepared.result()) { mFailure = "command reduction failed"; return false; }
-            auto projected = projectFixtureObservations(before, prepared.candidateState(), batch.scheduledTick().value());
+            if (prepared.candidateRevision() == revisionBefore)
+            {
+                if (!mWiring->reducer.commit(std::move(prepared)))
+                { mFailure = "canonical commit failed"; return false; }
+                continue;
+            }
+            auto projected = projectFixtureObservations(before, prepared.candidateState(),
+                batch.scheduledTick().value(), prepared.candidateRevision());
             if (!projected) { mFailure = "observation projection failed"; return false; }
             std::vector<std::pair<TransportConnectionId, FixtureObservationDelivery>> routed;
             routed.reserve(projected->size());
@@ -340,7 +354,8 @@ namespace TES3MP::ServerApp
                 if (!connection) { mFailure = "observation target missing"; return false; }
                 routed.emplace_back(*connection, std::move(delivery));
             }
-            auto views = projectFixtureViews(prepared.candidateState(), batch.scheduledTick().value());
+            auto views = projectFixtureViews(prepared.candidateState(), batch.scheduledTick().value(),
+                prepared.candidateRevision());
             if (!views) { mFailure = "movement view projection failed"; return false; }
             std::vector<std::pair<TransportConnectionId, LatestWinsSnapshot>> routedViews;
             routedViews.reserve(views->size());

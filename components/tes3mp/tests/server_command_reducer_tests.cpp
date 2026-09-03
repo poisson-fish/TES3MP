@@ -78,7 +78,7 @@ namespace
     {
         return ServerCommandProposal(sessionId(session), SessionGeneration::fromValue(generation).value(),
             CommandSequence::fromValue(sequence).value(), CommandId::fromValue(command).value(),
-            ServerTick::fromValue(observedTick).value(),
+            CanonicalRevision::fromValue(observedTick).value(),
             EntityPrecondition(entityId(entity), EntityRevision::fromValue(revision).value(),
                 AuthorityEpoch::fromValue(epoch).value()),
             PlayerMotionCommandProposal(velocity));
@@ -90,7 +90,7 @@ namespace
     {
         return ServerCommandProposal(sessionId(session), SessionGeneration::fromValue(generation).value(),
             CommandSequence::fromValue(sequence).value(), CommandId::fromValue(command).value(),
-            ServerTick::initial(), EntityPrecondition(entityId(entity), EntityRevision::fromValue(revision).value(),
+            CanonicalRevision::initial(), EntityPrecondition(entityId(entity), EntityRevision::fromValue(revision).value(),
                                        AuthorityEpoch::fromValue(epoch).value()),
             FixtureCellTransitionCommandProposal(cell));
     }
@@ -630,7 +630,8 @@ namespace
             && changes[1].disposition() == CommandDisposition::EntityRevisionMismatch
             && changes[2].disposition() == CommandDisposition::Applied && changes[0].playerReplacement()
             && !changes[1].playerReplacement() && changes[2].playerReplacement()
-            && publication->stateVersion().value() == 3 && publication->state() == reducer.state()
+            && publication->stateVersion().value() == 3 && reducer.canonicalRevision().value() == 1
+            && publication->state() == reducer.state()
             && publication->state().players().front().linearVelocity() == LinearVelocity3(3, 0, 0)
             && publication->state().activeSessions().front().highestContiguousFinalizedCommand()->value() == 3;
     }

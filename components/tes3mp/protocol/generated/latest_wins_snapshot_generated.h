@@ -323,7 +323,7 @@ struct LatestWinsSnapshotHeader FLATBUFFERS_FINAL_CLASS : private ::flatbuffers:
   enum FlatBuffersVTableOffset FLATBUFFERS_VTABLE_UNDERLYING_TYPE {
     VT_TARGET_SESSION_ID = 4,
     VT_TARGET_SESSION_GENERATION = 6,
-    VT_SERVER_TICK = 8,
+    VT_CANONICAL_REVISION = 8,
     VT_HAS_ACKNOWLEDGED_COMMAND_SEQUENCE = 10,
     VT_ACKNOWLEDGED_COMMAND_SEQUENCE = 12
   };
@@ -333,8 +333,8 @@ struct LatestWinsSnapshotHeader FLATBUFFERS_FINAL_CLASS : private ::flatbuffers:
   uint64_t target_session_generation() const {
     return GetField<uint64_t>(VT_TARGET_SESSION_GENERATION, 0);
   }
-  uint64_t server_tick() const {
-    return GetField<uint64_t>(VT_SERVER_TICK, 0);
+  uint64_t canonical_revision() const {
+    return GetField<uint64_t>(VT_CANONICAL_REVISION, 0);
   }
   bool has_acknowledged_command_sequence() const {
     return GetField<uint8_t>(VT_HAS_ACKNOWLEDGED_COMMAND_SEQUENCE, 0) != 0;
@@ -347,7 +347,7 @@ struct LatestWinsSnapshotHeader FLATBUFFERS_FINAL_CLASS : private ::flatbuffers:
     return VerifyTableStart(verifier) &&
            VerifyField<uint64_t>(verifier, VT_TARGET_SESSION_ID, 8) &&
            VerifyField<uint64_t>(verifier, VT_TARGET_SESSION_GENERATION, 8) &&
-           VerifyField<uint64_t>(verifier, VT_SERVER_TICK, 8) &&
+           VerifyField<uint64_t>(verifier, VT_CANONICAL_REVISION, 8) &&
            VerifyField<uint8_t>(verifier, VT_HAS_ACKNOWLEDGED_COMMAND_SEQUENCE, 1) &&
            VerifyField<uint64_t>(verifier, VT_ACKNOWLEDGED_COMMAND_SEQUENCE, 8) &&
            verifier.EndTable();
@@ -364,8 +364,8 @@ struct LatestWinsSnapshotHeaderBuilder {
   void add_target_session_generation(uint64_t target_session_generation) {
     fbb_.AddElement<uint64_t>(LatestWinsSnapshotHeader::VT_TARGET_SESSION_GENERATION, target_session_generation, 0);
   }
-  void add_server_tick(uint64_t server_tick) {
-    fbb_.AddElement<uint64_t>(LatestWinsSnapshotHeader::VT_SERVER_TICK, server_tick, 0);
+  void add_canonical_revision(uint64_t canonical_revision) {
+    fbb_.AddElement<uint64_t>(LatestWinsSnapshotHeader::VT_CANONICAL_REVISION, canonical_revision, 0);
   }
   void add_has_acknowledged_command_sequence(bool has_acknowledged_command_sequence) {
     fbb_.AddElement<uint8_t>(LatestWinsSnapshotHeader::VT_HAS_ACKNOWLEDGED_COMMAND_SEQUENCE, static_cast<uint8_t>(has_acknowledged_command_sequence), 0);
@@ -388,12 +388,12 @@ inline ::flatbuffers::Offset<LatestWinsSnapshotHeader> CreateLatestWinsSnapshotH
     ::flatbuffers::FlatBufferBuilder &_fbb,
     uint64_t target_session_id = 0,
     uint64_t target_session_generation = 0,
-    uint64_t server_tick = 0,
+    uint64_t canonical_revision = 0,
     bool has_acknowledged_command_sequence = false,
     uint64_t acknowledged_command_sequence = 0) {
   LatestWinsSnapshotHeaderBuilder builder_(_fbb);
   builder_.add_acknowledged_command_sequence(acknowledged_command_sequence);
-  builder_.add_server_tick(server_tick);
+  builder_.add_canonical_revision(canonical_revision);
   builder_.add_target_session_generation(target_session_generation);
   builder_.add_target_session_id(target_session_id);
   builder_.add_has_acknowledged_command_sequence(has_acknowledged_command_sequence);

@@ -67,7 +67,7 @@ namespace
     {
         return ServerCommandProposal(sessionId(session), SessionGeneration::fromValue(1).value(),
             CommandSequence::fromValue(sequence).value(), CommandId::fromValue(commandId).value(),
-            ServerTick::initial(),
+            CanonicalRevision::initial(),
             EntityPrecondition(
                 entityId(101), EntityRevision::fromValue(revision).value(), AuthorityEpoch::fromValue(epoch).value()),
             PlayerMotionCommandProposal(

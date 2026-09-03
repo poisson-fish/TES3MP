@@ -71,7 +71,7 @@ namespace
         std::uint64_t generation = 1, std::uint64_t entityValue = 101)
     {
         return ServerCommandProposal(sessionId(sessionValue), SessionGeneration::fromValue(generation).value(),
-            CommandSequence::fromValue(sequence).value(), CommandId::fromValue(command).value(), ServerTick::initial(),
+            CommandSequence::fromValue(sequence).value(), CommandId::fromValue(command).value(), CanonicalRevision::initial(),
             EntityPrecondition(entityId(entityValue), EntityRevision::fromValue(revision).value(),
                 AuthorityEpoch::fromValue(epoch).value()),
             PlayerMotionCommandProposal(velocity));

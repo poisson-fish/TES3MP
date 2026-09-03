@@ -135,7 +135,7 @@ namespace
                                 TES3MP::ClientCommandHeader header(sessionId,
                                     confirmed.header().targetSessionGeneration(),
                                     *TES3MP::CommandSequence::fromValue(next), *TES3MP::CommandId::fromValue(next),
-                                    confirmed.header().serverTick());
+                                    confirmed.header().canonicalRevision());
                                 TES3MP::ReliableOperationHeader reliable(header, TES3MP::EntityPrecondition(
                                     self->entityId(), self->entityRevision(), self->authorityEpoch()));
                                 auto operation = TES3MP::ReliableOperation::create(
@@ -390,10 +390,19 @@ int main(int argc, char** argv)
         {
             if (!staleSnapshot)
                 staleSnapshot = *session.stateMachine().confirmedSnapshot();
+            const auto incomingRevision = snapshot->header().canonicalRevision();
+            const auto& currentSnapshot = *session.stateMachine().confirmedSnapshot();
+            const auto currentRevision = currentSnapshot.header().canonicalRevision();
+            const auto currentEntries = currentSnapshot.view().entries().size();
+            const auto incomingEntries = snapshot->view().entries().size();
             const auto result = session.receiveLatestWinsSnapshot(std::move(*snapshot));
             if (result != TES3MP::LatestWinsSnapshotReceiveResult::Applied
                 && result != TES3MP::LatestWinsSnapshotReceiveResult::IdenticalDuplicate)
-            { std::cerr << "snapshot rejected " << static_cast<int>(result) << '\n'; return 3; }
+            { std::cerr << "snapshot rejected " << static_cast<int>(result)
+                        << " current_revision=" << currentRevision.value()
+                        << " incoming_revision=" << incomingRevision.value()
+                        << " current_entries=" << currentEntries
+                        << " incoming_entries=" << incomingEntries << '\n'; return 3; }
             snapshot.reset();
         }
         if (bound && mode == "mover" && session.connection())
@@ -413,7 +422,7 @@ int main(int argc, char** argv)
                         : TES3MP::CellId::exterior(TES3MP::CellSpaceId::fromValue(8).value(), 0, 0);
                     TES3MP::ClientCommandHeader header(confirmed.header().targetSessionId(),
                         confirmed.header().targetSessionGeneration(), sequence, commandId,
-                        confirmed.header().serverTick());
+                        confirmed.header().canonicalRevision());
                     TES3MP::ReliableOperationHeader reliable(header, TES3MP::EntityPrecondition(
                         self->entityId(), self->entityRevision(), self->authorityEpoch()));
                     auto operation = TES3MP::ReliableOperation::create(reliable, TES3MP::FixtureCellTransition(cell));
@@ -448,7 +457,7 @@ int main(int argc, char** argv)
             const auto sequenceValue = 1;
             TES3MP::ClientCommandHeader header(confirmed.header().targetSessionId(),
                 confirmed.header().targetSessionGeneration(), TES3MP::CommandSequence::fromValue(sequenceValue).value(),
-                TES3MP::CommandId::fromValue(sequenceValue).value(), confirmed.header().serverTick());
+                TES3MP::CommandId::fromValue(sequenceValue).value(), confirmed.header().canonicalRevision());
             TES3MP::ReliableOperationHeader reliable(header, TES3MP::EntityPrecondition(
                 self->entityId(), self->entityRevision(), self->authorityEpoch()));
             auto operation = TES3MP::ReliableOperation::create(reliable,

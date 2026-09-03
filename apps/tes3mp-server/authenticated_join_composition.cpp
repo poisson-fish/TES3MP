@@ -17,7 +17,8 @@ namespace TES3MP::ServerApp
             if (!mSessions)
                 return mQueues.enqueuePair(mConnection, TransportChannel::ReliableOrdered, authentication,
                            TransportChannel::LatestWins, snapshot) == TransportResult::Accepted;
-            auto projected = projectFixtureObservations(before, after, tick);
+            const auto revision = join.initialSnapshot.header().canonicalRevision();
+            auto projected = projectFixtureObservations(before, after, tick, revision);
             if (!projected) return false;
             std::vector<std::vector<std::byte>> owned;
             std::vector<OutboundQueueSet::AtomicMessage> messages;
@@ -30,7 +31,7 @@ namespace TES3MP::ServerApp
             for (const auto& entry : join.initialSnapshot.view().entries())
                 initialChanges.push_back({ entry.playerId(), entry.entityId(), ObservationChangeKind::Enter });
             auto initial = ReliableObservationBatch::create(
-                join.session, join.initialSnapshot.header().targetSessionGeneration(), tick, initialChanges);
+                join.session, join.initialSnapshot.header().targetSessionGeneration(), revision, initialChanges);
             if (!std::holds_alternative<ReliableObservationBatch>(initial)) return false;
             auto initialFrame = encodeProtocolFrame(MessageClass::ReliableOperation,
                 MessageKind::ReliableObservationBatch,

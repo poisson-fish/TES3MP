@@ -357,7 +357,7 @@ runtime or protocol name.
 | ADR-0045 | Phase 7 disconnect, resume, and expiration composition | Phase 7 | **Implemented** |
 | ADR-0046 | Phase 7 adverse-network and soak matrix | Phase 7 | **Implemented** |
 | ADR-0047 | Phase 8 adapter lifecycle and provider boundary | Phase 8 | **Implemented** |
-| ADR-0048 | Canonical revision and simulation tick separation | Phase 8 | **In Progress** |
+| ADR-0048 | Canonical revision and simulation tick separation | Phase 8 | **Implemented** |
 
 An ADR is complete only when it records considered alternatives, selection
 criteria, consequences, failure modes, a replacement/review trigger, and
@@ -664,7 +664,7 @@ Depends on: Phase 7.
 | Slice | Deliverable | Status | Completion evidence |
 |---|---|---|---|
 | 8.1 | Inventory the minimum required OpenMW hooks and review the final patch surface with the owner | **Implemented** | ADR-0007 records owner-approved Option A and exact P8-001 through P8-003 paths, needs, tests, dispositions, and removal conditions |
-| 8.2 | Implement the adapter lifecycle and desktop input/presentation provider interfaces | **In Progress** | Accepted ADR-0047 governs provider/runtime composition; the headless executable now uses the reusable bounded runtime; accepted ADR-0048 canonical-revision domain/wire migration and OpenMW composition remain |
+| 8.2 | Implement the adapter lifecycle and desktop input/presentation provider interfaces | **In Progress** | ADR-0047 provider/runtime foundation and ADR-0048 canonical-revision domain/wire migration are implemented and verified; concrete OpenMW composition remains |
 | 8.3 | Connect/authenticate/join from OpenMW with actionable UI errors | **Not Started** | Version, capability, auth, timeout, and disconnect paths are testable |
 | 8.4 | Map interior/exterior cell changes and spawn/despawn remote player presentation | **Not Started** | Two clients observe correct cell and peer lifecycle behavior |
 | 8.5 | Convert input to semantic movement commands and apply authoritative local correction | **Not Started** | Prediction/reconciliation tests cover correction and hard-snap thresholds |

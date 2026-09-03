@@ -171,19 +171,20 @@ namespace TES3MP
     {
     public:
         static std::variant<ReliableObservationBatch, ExchangeDecodeError> create(SessionId targetSessionId,
-            SessionGeneration targetSessionGeneration, ServerTick serverTick, std::span<const ObservationChange> changes);
+            SessionGeneration targetSessionGeneration, CanonicalRevision canonicalRevision,
+            std::span<const ObservationChange> changes);
         SessionId targetSessionId() const noexcept { return mTargetSessionId; }
         SessionGeneration targetSessionGeneration() const noexcept { return mTargetSessionGeneration; }
-        ServerTick serverTick() const noexcept { return mServerTick; }
+        CanonicalRevision canonicalRevision() const noexcept { return mCanonicalRevision; }
         std::span<const ObservationChange> changes() const noexcept { return mChanges; }
         friend bool operator==(const ReliableObservationBatch&, const ReliableObservationBatch&) noexcept = default;
     private:
-        ReliableObservationBatch(SessionId session, SessionGeneration generation, ServerTick tick,
+        ReliableObservationBatch(SessionId session, SessionGeneration generation, CanonicalRevision revision,
             std::vector<ObservationChange> changes) : mTargetSessionId(session), mTargetSessionGeneration(generation),
-            mServerTick(tick), mChanges(std::move(changes)) {}
+            mCanonicalRevision(revision), mChanges(std::move(changes)) {}
         SessionId mTargetSessionId;
         SessionGeneration mTargetSessionGeneration;
-        ServerTick mServerTick;
+        CanonicalRevision mCanonicalRevision;
         std::vector<ObservationChange> mChanges;
     };
 

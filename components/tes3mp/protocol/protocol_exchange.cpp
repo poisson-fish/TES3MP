@@ -195,7 +195,7 @@ namespace
 namespace TES3MP
 {
     std::variant<ReliableObservationBatch, ExchangeDecodeError> ReliableObservationBatch::create(
-        SessionId targetSessionId, SessionGeneration targetSessionGeneration, ServerTick serverTick,
+        SessionId targetSessionId, SessionGeneration targetSessionGeneration, CanonicalRevision canonicalRevision,
         std::span<const ObservationChange> changes)
     {
         if (changes.size() > MaximumObservationChanges)
@@ -212,7 +212,7 @@ namespace TES3MP
                     ExchangeDecodeErrorCode::ObservationChangesNotStrictlySorted,
                     changes[index].entityId.value(), changes[index - 1].entityId.value(), index);
         }
-        return ReliableObservationBatch(targetSessionId, targetSessionGeneration, serverTick,
+        return ReliableObservationBatch(targetSessionId, targetSessionGeneration, canonicalRevision,
             std::vector<ObservationChange>(changes.begin(), changes.end()));
     }
 
@@ -261,7 +261,7 @@ namespace TES3MP
         const auto& command = value.header().commandHeader();
         const auto commandHeader = ReliableSchema::CreateClientCommandHeader(builder, command.sessionId().value(),
             command.sessionGeneration().value(), command.commandSequence().value(), command.commandId().value(),
-            command.observedServerTick().value());
+            command.observedCanonicalRevision().value());
         const auto& precondition = *value.header().entityPrecondition();
         const auto entityPrecondition
             = ReliableSchema::CreateEntityPrecondition(builder, precondition.entityId().value(),
@@ -293,7 +293,7 @@ namespace TES3MP
         const bool hasAcknowledgement = header.acknowledgedCommandSequence().has_value();
         const std::uint64_t acknowledgement = hasAcknowledgement ? header.acknowledgedCommandSequence()->value() : 0;
         const auto encodedHeader = SnapshotSchema::CreateLatestWinsSnapshotHeader(builder,
-            header.targetSessionId().value(), header.targetSessionGeneration().value(), header.serverTick().value(),
+            header.targetSessionId().value(), header.targetSessionGeneration().value(), header.canonicalRevision().value(),
             hasAcknowledgement, acknowledgement);
 
         std::vector<SnapshotSchema::SpatialEntitySnapshot> entries;
@@ -312,7 +312,7 @@ namespace TES3MP
     {
         flatbuffers::FlatBufferBuilder builder;
         const auto header = ObservationSchema::CreateReliableObservationHeader(builder,
-            value.targetSessionId().value(), value.targetSessionGeneration().value(), value.serverTick().value());
+            value.targetSessionId().value(), value.targetSessionGeneration().value(), value.canonicalRevision().value());
         std::vector<ObservationSchema::ObservationChange> changes;
         changes.reserve(value.changes().size());
         for (const auto& change : value.changes())
@@ -358,13 +358,13 @@ namespace TES3MP
         auto generation = strongValue<SessionGeneration>(command->session_generation());
         auto sequence = strongValue<CommandSequence>(command->command_sequence());
         auto commandId = strongValue<CommandId>(command->command_id());
-        auto observedTick = strongValue<ServerTick>(command->observed_server_tick());
+        auto observedRevision = strongValue<CanonicalRevision>(command->observed_canonical_revision());
         auto entity = strongValue<EntityId>(precondition->entity_id());
         auto revision = strongValue<EntityRevision>(precondition->expected_revision());
         auto epoch = strongValue<AuthorityEpoch>(precondition->expected_authority_epoch());
         const std::array failures{ std::get_if<ExchangeDecodeError>(&session),
             std::get_if<ExchangeDecodeError>(&generation), std::get_if<ExchangeDecodeError>(&sequence),
-            std::get_if<ExchangeDecodeError>(&commandId), std::get_if<ExchangeDecodeError>(&observedTick),
+            std::get_if<ExchangeDecodeError>(&commandId), std::get_if<ExchangeDecodeError>(&observedRevision),
             std::get_if<ExchangeDecodeError>(&entity), std::get_if<ExchangeDecodeError>(&revision),
             std::get_if<ExchangeDecodeError>(&epoch) };
         for (const auto* failure : failures)
@@ -375,7 +375,7 @@ namespace TES3MP
 
         ReliableOperationHeader header(
             ClientCommandHeader(*decodedValue(session), *decodedValue(generation), *decodedValue(sequence),
-                *decodedValue(commandId), *decodedValue(observedTick)),
+                *decodedValue(commandId), *decodedValue(observedRevision)),
             EntityPrecondition(*decodedValue(entity), *decodedValue(revision), *decodedValue(epoch)));
         if (root->body_type() == ReliableSchema::ReliableOperationBody::PlayerMotionIntent)
         {
@@ -422,12 +422,12 @@ namespace TES3MP
 
         auto session = strongValue<SessionId>(header->target_session_id());
         auto generation = strongValue<SessionGeneration>(header->target_session_generation());
-        auto tick = strongValue<ServerTick>(header->server_tick());
+        auto revision = strongValue<CanonicalRevision>(header->canonical_revision());
         if (const auto* failure = std::get_if<ExchangeDecodeError>(&session))
             return *failure;
         if (const auto* failure = std::get_if<ExchangeDecodeError>(&generation))
             return *failure;
-        if (const auto* failure = std::get_if<ExchangeDecodeError>(&tick))
+        if (const auto* failure = std::get_if<ExchangeDecodeError>(&revision))
             return *failure;
 
         std::optional<CommandSequence> acknowledgement;
@@ -465,7 +465,7 @@ namespace TES3MP
             return *failure;
 
         return LatestWinsSnapshot(LatestWinsSnapshotHeader(*decodedValue(session), *decodedValue(generation),
-                                      *decodedValue(tick), acknowledgement),
+                                      *decodedValue(revision), acknowledgement),
             std::get<SpatialWorldView>(std::move(worldView)));
     }
 
@@ -485,10 +485,10 @@ namespace TES3MP
             return error(ExchangeDecodeErrorStage::SemanticValidation, ExchangeDecodeErrorCode::MissingObservationHeader);
         auto session = strongValue<SessionId>(header->target_session_id());
         auto generation = strongValue<SessionGeneration>(header->target_session_generation());
-        auto tick = strongValue<ServerTick>(header->server_tick());
+        auto revision = strongValue<CanonicalRevision>(header->canonical_revision());
         if (const auto* failure = std::get_if<ExchangeDecodeError>(&session)) return *failure;
         if (const auto* failure = std::get_if<ExchangeDecodeError>(&generation)) return *failure;
-        if (const auto* failure = std::get_if<ExchangeDecodeError>(&tick)) return *failure;
+        if (const auto* failure = std::get_if<ExchangeDecodeError>(&revision)) return *failure;
         const auto* encoded = root->changes();
         const std::size_t count = encoded == nullptr ? 0 : encoded->size();
         if (count > MaximumObservationChanges)
@@ -507,6 +507,6 @@ namespace TES3MP
                 static_cast<ObservationChangeKind>(current->kind()) });
         }
         return ReliableObservationBatch::create(*decodedValue(session), *decodedValue(generation),
-            *decodedValue(tick), changes);
+            *decodedValue(revision), changes);
     }
 }

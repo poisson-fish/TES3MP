@@ -170,7 +170,7 @@ namespace
 
         const auto velocityComponent = [&random] { return static_cast<std::int64_t>(drawBelow(random, 2001)) - 1000; };
         return ServerCommandProposal(proposalSession, generation, sequence, commandId,
-            ServerTick::fromValue(drawBelow(random, 64)).value(), EntityPrecondition(proposalEntity, revision, epoch),
+            CanonicalRevision::fromValue(drawBelow(random, 64)).value(), EntityPrecondition(proposalEntity, revision, epoch),
             PlayerMotionCommandProposal(
                 LinearVelocity3(velocityComponent(), velocityComponent(), velocityComponent())));
     }
@@ -312,7 +312,7 @@ namespace
                 appendU64(simulation.trace, proposal.sessionGeneration().value());
                 appendU64(simulation.trace, proposal.commandSequence().value());
                 appendU64(simulation.trace, proposal.commandId().value());
-                appendU64(simulation.trace, proposal.observedServerTick().value());
+                appendU64(simulation.trace, proposal.observedCanonicalRevision().value());
                 appendU64(simulation.trace, proposal.entityPrecondition().entityId().value());
                 appendU64(simulation.trace, proposal.entityPrecondition().expectedRevision().value());
                 appendU64(simulation.trace, proposal.entityPrecondition().expectedAuthorityEpoch().value());

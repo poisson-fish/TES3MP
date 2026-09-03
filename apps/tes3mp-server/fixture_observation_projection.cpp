@@ -27,7 +27,8 @@ namespace TES3MP::ServerApp
     }
 
     std::optional<std::vector<FixtureObservationDelivery>> projectFixtureObservations(
-        const CanonicalServerState& before, const CanonicalServerState& after, ServerTick tick)
+        const CanonicalServerState& before, const CanonicalServerState& after, ServerTick tick,
+        CanonicalRevision revision)
     {
         std::vector<FixtureObservationDelivery> deliveries;
         deliveries.reserve(after.activeSessions().size());
@@ -53,13 +54,13 @@ namespace TES3MP::ServerApp
                 entries.emplace_back(tick, player->playerId(), player->entityId(), player->entityRevision(),
                     player->authorityEpoch(), player->transform(), player->linearVelocity());
             auto batch = ReliableObservationBatch::create(
-                target.sessionId(), target.sessionGeneration(), tick, changes);
+                target.sessionId(), target.sessionGeneration(), revision, changes);
             auto view = SpatialWorldView::create(entries);
             if (!std::holds_alternative<ReliableObservationBatch>(batch)
                 || !std::holds_alternative<SpatialWorldView>(view)) return std::nullopt;
             deliveries.push_back({ target.sessionId(),
                 std::get<ReliableObservationBatch>(std::move(batch)),
-                LatestWinsSnapshot(LatestWinsSnapshotHeader(target.sessionId(), target.sessionGeneration(), tick,
+                LatestWinsSnapshot(LatestWinsSnapshotHeader(target.sessionId(), target.sessionGeneration(), revision,
                     target.highestContiguousFinalizedCommand()), std::get<SpatialWorldView>(std::move(view))) });
         }
         return deliveries;
@@ -112,7 +113,7 @@ namespace TES3MP::ServerApp
     }
 
     std::optional<std::vector<std::pair<SessionId, LatestWinsSnapshot>>> projectFixtureViews(
-        const CanonicalServerState& state, ServerTick tick)
+        const CanonicalServerState& state, ServerTick tick, CanonicalRevision revision)
     {
         try
         {
@@ -129,7 +130,7 @@ namespace TES3MP::ServerApp
                 auto view = SpatialWorldView::create(entries);
                 if (!std::holds_alternative<SpatialWorldView>(view)) return std::nullopt;
                 result.emplace_back(target.sessionId(), LatestWinsSnapshot(
-                    LatestWinsSnapshotHeader(target.sessionId(), target.sessionGeneration(), tick,
+                    LatestWinsSnapshotHeader(target.sessionId(), target.sessionGeneration(), revision,
                         target.highestContiguousFinalizedCommand()),
                     std::get<SpatialWorldView>(std::move(view))));
             }

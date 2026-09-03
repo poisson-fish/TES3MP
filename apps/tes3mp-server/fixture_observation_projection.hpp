@@ -18,7 +18,8 @@ namespace TES3MP::ServerApp
     };
 
     std::optional<std::vector<FixtureObservationDelivery>> projectFixtureObservations(
-        const CanonicalServerState& before, const CanonicalServerState& after, ServerTick tick);
+        const CanonicalServerState& before, const CanonicalServerState& after, ServerTick tick,
+        CanonicalRevision revision);
 
     bool admitFixtureObservation(OutboundQueueSet& queues, TransportConnectionId connection,
         const FixtureObservationDelivery& delivery);
@@ -26,7 +27,7 @@ namespace TES3MP::ServerApp
         const std::vector<std::pair<TransportConnectionId, FixtureObservationDelivery>>& deliveries);
 
     std::optional<std::vector<std::pair<SessionId, LatestWinsSnapshot>>> projectFixtureViews(
-        const CanonicalServerState& state, ServerTick tick);
+        const CanonicalServerState& state, ServerTick tick, CanonicalRevision revision);
     bool admitFixtureViewsAtomically(OutboundQueueSet& queues,
         const std::vector<std::pair<TransportConnectionId, LatestWinsSnapshot>>& deliveries);
     bool admitFixtureTickAtomically(OutboundQueueSet& queues,

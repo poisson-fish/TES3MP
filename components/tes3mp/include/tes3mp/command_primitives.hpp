@@ -11,12 +11,12 @@ namespace TES3MP
     {
     public:
         constexpr ClientCommandHeader(SessionId sessionId, SessionGeneration sessionGeneration,
-            CommandSequence commandSequence, CommandId commandId, ServerTick observedServerTick) noexcept
+            CommandSequence commandSequence, CommandId commandId, CanonicalRevision observedCanonicalRevision) noexcept
             : mSessionId(sessionId)
             , mSessionGeneration(sessionGeneration)
             , mCommandSequence(commandSequence)
             , mCommandId(commandId)
-            , mObservedServerTick(observedServerTick)
+            , mObservedCanonicalRevision(observedCanonicalRevision)
         {
         }
 
@@ -24,7 +24,7 @@ namespace TES3MP
         constexpr SessionGeneration sessionGeneration() const noexcept { return mSessionGeneration; }
         constexpr CommandSequence commandSequence() const noexcept { return mCommandSequence; }
         constexpr CommandId commandId() const noexcept { return mCommandId; }
-        constexpr ServerTick observedServerTick() const noexcept { return mObservedServerTick; }
+        constexpr CanonicalRevision observedCanonicalRevision() const noexcept { return mObservedCanonicalRevision; }
 
         friend constexpr bool operator==(ClientCommandHeader, ClientCommandHeader) noexcept = default;
         friend constexpr auto operator<=>(ClientCommandHeader, ClientCommandHeader) noexcept = default;
@@ -34,7 +34,7 @@ namespace TES3MP
         SessionGeneration mSessionGeneration;
         CommandSequence mCommandSequence;
         CommandId mCommandId;
-        ServerTick mObservedServerTick;
+        CanonicalRevision mObservedCanonicalRevision;
     };
 
     class EntityPrecondition

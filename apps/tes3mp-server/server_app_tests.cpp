@@ -182,7 +182,7 @@ namespace
     public:
         bool enqueueJoinResponses(std::span<const std::byte> authentication,
             std::span<const std::byte> snapshot, const CanonicalServerState&,
-            const CanonicalServerState&, const AuthenticatedJoinResult&, ServerTick) noexcept override
+            const CanonicalServerState&, const AuthenticatedJoinResult& join, ServerTick) noexcept override
         {
             ++attempts;
             if (reject) return false;
@@ -192,12 +192,14 @@ namespace
                 && std::get<DecodedFrame>(authenticationFrame).messageKind() == MessageKind::AuthenticationAccepted
                 && std::holds_alternative<DecodedFrame>(snapshotFrame)
                 && std::get<DecodedFrame>(snapshotFrame).messageKind() == MessageKind::LatestWinsSnapshot;
+            revisions.push_back(join.initialSnapshot.header().canonicalRevision());
             return valid;
         }
 
         bool reject = false;
         bool valid = false;
         std::size_t attempts = 0;
+        std::vector<CanonicalRevision> revisions;
     };
 
     AuthenticatedJoinCoordinator joinCoordinator(CanonicalCommandReducer& reducer)
@@ -278,7 +280,7 @@ int main()
     {
         const auto before = fixtureState(false);
         const auto after = fixtureState(true);
-        auto projected = projectFixtureObservations(before, after, id<ServerTick>(4));
+        auto projected = projectFixtureObservations(before, after, id<ServerTick>(4), id<CanonicalRevision>(4));
         assert(projected && projected->size() == 2);
         assert((*projected)[0].targetSession == id<SessionId>(1));
         assert(((*projected)[0].observations.changes().size() == 1
@@ -291,13 +293,14 @@ int main()
                 == ObservationChange{ id<PlayerId>(1), id<EntityId>(1), ObservationChangeKind::Leave }));
         assert((*projected)[1].view.view().entries().size() == 1
             && (*projected)[1].view.view().entries()[0].playerId() == id<PlayerId>(2));
-        assert(projectFixtureObservations(after, after, id<ServerTick>(5))->empty());
+        assert(projectFixtureObservations(after, after, id<ServerTick>(5), id<CanonicalRevision>(5))->empty());
 
         const std::array remainingPlayers{ before.players()[0] };
         const std::array remainingSessions{ before.activeSessions()[0] };
         const auto expired = std::get<CanonicalServerState>(
             createCanonicalServerState(remainingPlayers, remainingSessions));
-        auto expirationOutput = projectFixtureObservations(before, expired, id<ServerTick>(5));
+        auto expirationOutput = projectFixtureObservations(
+            before, expired, id<ServerTick>(5), id<CanonicalRevision>(5));
         assert(expirationOutput && expirationOutput->size() == 1
             && (*expirationOutput)[0].targetSession == id<SessionId>(1));
         assert(((*expirationOutput)[0].observations.changes().size() == 1
@@ -405,8 +408,9 @@ int main()
         assert(composition.join(id<PrincipalId>(1), SessionGeneration::initial(),
                    ServerTick::initial(), ResumeTokenContext{}).result == JoinCompositionResult::Committed);
         assert(composition.join(id<PrincipalId>(2), SessionGeneration::initial(),
-                   id<ServerTick>(1), ResumeTokenContext{}).result == JoinCompositionResult::Committed);
-        assert(authentication.issues == 2 && responses.attempts == 2 && responses.valid);
+                   ServerTick::initial(), ResumeTokenContext{}).result == JoinCompositionResult::Committed);
+        assert(authentication.issues == 2 && responses.attempts == 2 && responses.valid
+            && responses.revisions.size() == 2 && responses.revisions[0] < responses.revisions[1]);
         assert(joins.liveBindings() == 2 && joins.state().players().size() == 2);
     }
     {
@@ -677,7 +681,7 @@ int main()
             && moved->linearVelocity() == LinearVelocity3(2, -3, 4)
             && moved->entityRevision() == id<EntityRevision>(2));
         assert(reducer.commit(std::move(prepared)));
-        auto views = projectFixtureViews(reducer.state(), ServerTick::initial());
+        auto views = projectFixtureViews(reducer.state(), ServerTick::initial(), reducer.canonicalRevision());
         assert(views && views->size() == 1 && (*views)[0].second.view().entries().size() == 1
             && (*views)[0].second.view().entries()[0].transform().position() == Position3(12, 17, 34));
     }

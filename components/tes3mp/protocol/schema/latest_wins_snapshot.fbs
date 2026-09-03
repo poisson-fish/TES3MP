@@ -3,7 +3,7 @@ namespace TES3MP.Protocol.Schema.Snapshot;
 table LatestWinsSnapshotHeader {
   target_session_id:ulong (id: 0);
   target_session_generation:ulong (id: 1);
-  server_tick:ulong (id: 2);
+  canonical_revision:ulong (id: 2);
   has_acknowledged_command_sequence:bool = false (id: 3);
   acknowledged_command_sequence:ulong (id: 4);
 }

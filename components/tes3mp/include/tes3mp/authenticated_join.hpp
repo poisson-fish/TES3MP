@@ -61,6 +61,7 @@ namespace TES3MP
         AuthenticatedJoinOutcome commit(std::uint64_t preparationId);
         bool cancel(std::uint64_t preparationId) noexcept;
         const CanonicalServerState* candidateState(std::uint64_t preparationId) const noexcept;
+        std::optional<CanonicalRevision> candidateRevision(std::uint64_t preparationId) const noexcept;
 
         const CanonicalServerState& state() const noexcept { return mReducer.state(); }
         std::size_t liveBindings() const noexcept { return mPrincipals.size(); }

@@ -84,40 +84,40 @@ int main()
     const std::array enterChanges{ObservationChange{playerId, entityId,
         ObservationChangeKind::Enter}};
     auto entered = std::get<ReliableObservationBatch>(ReliableObservationBatch::create(sessionId,
-        SessionGeneration::initial(), ServerTick::initial(), enterChanges));
+        SessionGeneration::initial(), CanonicalRevision::initial(), enterChanges));
     require(session->receiveReliableObservationBatch(entered) == ReliableObservationReceiveResult::Applied);
     require(session->observedPlayers().size() == 1);
     require(session->receiveReliableObservationBatch(entered)
         == ReliableObservationReceiveResult::IdenticalDuplicate);
-    const auto tickOne = *ServerTick::initial().next();
+    const auto revisionOne = *CanonicalRevision::initial().next();
     const std::array secondEnter{ObservationChange{value<PlayerId>(2), value<EntityId>(2),
         ObservationChangeKind::Enter}};
     auto wrongSession = std::get<ReliableObservationBatch>(ReliableObservationBatch::create(value<SessionId>(2),
-        SessionGeneration::initial(), tickOne, secondEnter));
+        SessionGeneration::initial(), revisionOne, secondEnter));
     require(session->receiveReliableObservationBatch(std::move(wrongSession))
         == ReliableObservationReceiveResult::SessionMismatch);
     auto wrongGeneration = std::get<ReliableObservationBatch>(ReliableObservationBatch::create(sessionId,
-        *SessionGeneration::initial().next(), tickOne, secondEnter));
+        *SessionGeneration::initial().next(), revisionOne, secondEnter));
     require(session->receiveReliableObservationBatch(std::move(wrongGeneration))
         == ReliableObservationReceiveResult::GenerationMismatch);
     const std::array badLeave{ObservationChange{playerId, value<EntityId>(2),
         ObservationChangeKind::Leave}};
     auto contradictory = std::get<ReliableObservationBatch>(ReliableObservationBatch::create(sessionId,
-        SessionGeneration::initial(), tickOne, badLeave));
+        SessionGeneration::initial(), revisionOne, badLeave));
     require(session->receiveReliableObservationBatch(std::move(contradictory))
         == ReliableObservationReceiveResult::ContradictoryChange);
     require(session->observedPlayers().size() == 1);
     auto second = std::get<ReliableObservationBatch>(ReliableObservationBatch::create(sessionId,
-        SessionGeneration::initial(), tickOne, secondEnter));
+        SessionGeneration::initial(), revisionOne, secondEnter));
     require(session->receiveReliableObservationBatch(std::move(second)) == ReliableObservationReceiveResult::Applied);
     require(session->observedPlayers().size() == 2);
     auto stale = std::get<ReliableObservationBatch>(ReliableObservationBatch::create(sessionId,
-        SessionGeneration::initial(), ServerTick::initial(), enterChanges));
+        SessionGeneration::initial(), CanonicalRevision::initial(), enterChanges));
     require(session->receiveReliableObservationBatch(std::move(stale))
         == ReliableObservationReceiveResult::StaleTick);
     const std::array sameTickLeave{ObservationChange{playerId, entityId, ObservationChangeKind::Leave}};
     auto sameTick = std::get<ReliableObservationBatch>(ReliableObservationBatch::create(sessionId,
-        SessionGeneration::initial(), tickOne, sameTickLeave));
+        SessionGeneration::initial(), revisionOne, sameTickLeave));
     require(session->receiveReliableObservationBatch(std::move(sameTick))
         == ReliableObservationReceiveResult::ContradictorySameTick);
     require(session->observedPlayers().size() == 2);

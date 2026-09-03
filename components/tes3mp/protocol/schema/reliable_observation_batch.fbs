@@ -3,7 +3,7 @@ namespace TES3MP.Protocol.Schema.Observation;
 table ReliableObservationHeader {
   target_session_id:ulong (id: 0);
   target_session_generation:ulong (id: 1);
-  server_tick:ulong (id: 2);
+  canonical_revision:ulong (id: 2);
 }
 
 enum ObservationChangeKind : ubyte {

@@ -106,7 +106,7 @@ struct ReliableObservationHeader FLATBUFFERS_FINAL_CLASS : private ::flatbuffers
   enum FlatBuffersVTableOffset FLATBUFFERS_VTABLE_UNDERLYING_TYPE {
     VT_TARGET_SESSION_ID = 4,
     VT_TARGET_SESSION_GENERATION = 6,
-    VT_SERVER_TICK = 8
+    VT_CANONICAL_REVISION = 8
   };
   uint64_t target_session_id() const {
     return GetField<uint64_t>(VT_TARGET_SESSION_ID, 0);
@@ -114,15 +114,15 @@ struct ReliableObservationHeader FLATBUFFERS_FINAL_CLASS : private ::flatbuffers
   uint64_t target_session_generation() const {
     return GetField<uint64_t>(VT_TARGET_SESSION_GENERATION, 0);
   }
-  uint64_t server_tick() const {
-    return GetField<uint64_t>(VT_SERVER_TICK, 0);
+  uint64_t canonical_revision() const {
+    return GetField<uint64_t>(VT_CANONICAL_REVISION, 0);
   }
   template <bool B = false>
   bool Verify(::flatbuffers::VerifierTemplate<B> &verifier) const {
     return VerifyTableStart(verifier) &&
            VerifyField<uint64_t>(verifier, VT_TARGET_SESSION_ID, 8) &&
            VerifyField<uint64_t>(verifier, VT_TARGET_SESSION_GENERATION, 8) &&
-           VerifyField<uint64_t>(verifier, VT_SERVER_TICK, 8) &&
+           VerifyField<uint64_t>(verifier, VT_CANONICAL_REVISION, 8) &&
            verifier.EndTable();
   }
 };
@@ -137,8 +137,8 @@ struct ReliableObservationHeaderBuilder {
   void add_target_session_generation(uint64_t target_session_generation) {
     fbb_.AddElement<uint64_t>(ReliableObservationHeader::VT_TARGET_SESSION_GENERATION, target_session_generation, 0);
   }
-  void add_server_tick(uint64_t server_tick) {
-    fbb_.AddElement<uint64_t>(ReliableObservationHeader::VT_SERVER_TICK, server_tick, 0);
+  void add_canonical_revision(uint64_t canonical_revision) {
+    fbb_.AddElement<uint64_t>(ReliableObservationHeader::VT_CANONICAL_REVISION, canonical_revision, 0);
   }
   explicit ReliableObservationHeaderBuilder(::flatbuffers::FlatBufferBuilder &_fbb)
         : fbb_(_fbb) {
@@ -155,9 +155,9 @@ inline ::flatbuffers::Offset<ReliableObservationHeader> CreateReliableObservatio
     ::flatbuffers::FlatBufferBuilder &_fbb,
     uint64_t target_session_id = 0,
     uint64_t target_session_generation = 0,
-    uint64_t server_tick = 0) {
+    uint64_t canonical_revision = 0) {
   ReliableObservationHeaderBuilder builder_(_fbb);
-  builder_.add_server_tick(server_tick);
+  builder_.add_canonical_revision(canonical_revision);
   builder_.add_target_session_generation(target_session_generation);
   builder_.add_target_session_id(target_session_id);
   return builder_.Finish();

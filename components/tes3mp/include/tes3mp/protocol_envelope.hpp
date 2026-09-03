@@ -38,17 +38,17 @@ namespace TES3MP
     {
     public:
         constexpr LatestWinsSnapshotHeader(SessionId targetSessionId, SessionGeneration targetSessionGeneration,
-            ServerTick serverTick, std::optional<CommandSequence> acknowledgedCommandSequence) noexcept
+            CanonicalRevision canonicalRevision, std::optional<CommandSequence> acknowledgedCommandSequence) noexcept
             : mTargetSessionId(targetSessionId)
             , mTargetSessionGeneration(targetSessionGeneration)
-            , mServerTick(serverTick)
+            , mCanonicalRevision(canonicalRevision)
             , mAcknowledgedCommandSequence(acknowledgedCommandSequence)
         {
         }
 
         constexpr SessionId targetSessionId() const noexcept { return mTargetSessionId; }
         constexpr SessionGeneration targetSessionGeneration() const noexcept { return mTargetSessionGeneration; }
-        constexpr ServerTick serverTick() const noexcept { return mServerTick; }
+        constexpr CanonicalRevision canonicalRevision() const noexcept { return mCanonicalRevision; }
         constexpr const std::optional<CommandSequence>& acknowledgedCommandSequence() const noexcept
         {
             return mAcknowledgedCommandSequence;
@@ -60,7 +60,7 @@ namespace TES3MP
     private:
         SessionId mTargetSessionId;
         SessionGeneration mTargetSessionGeneration;
-        ServerTick mServerTick;
+        CanonicalRevision mCanonicalRevision;
         std::optional<CommandSequence> mAcknowledgedCommandSequence;
     };
 }

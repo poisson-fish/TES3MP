@@ -81,7 +81,8 @@ namespace TES3MP
         const auto player = mSeed.nextPlayer;
         const auto entity = mSeed.nextEntity;
         LatestWinsSnapshot snapshot(
-            LatestWinsSnapshotHeader(session, generation, serverTick, std::nullopt), std::move(*acceptedView));
+            LatestWinsSnapshotHeader(session, generation, candidate->candidateRevision(), std::nullopt),
+            std::move(*acceptedView));
 
         AuthenticatedJoinResult result{ principal, session, player, entity, std::move(snapshot) };
         const auto preparationId = mNextPreparationId++;
@@ -123,5 +124,12 @@ namespace TES3MP
     const CanonicalServerState* AuthenticatedJoinCoordinator::candidateState(std::uint64_t preparationId) const noexcept
     {
         return mPending && mPending->id == preparationId ? &mPending->state.candidateState() : nullptr;
+    }
+
+    std::optional<CanonicalRevision> AuthenticatedJoinCoordinator::candidateRevision(
+        std::uint64_t preparationId) const noexcept
+    {
+        return mPending && mPending->id == preparationId
+            ? std::optional<CanonicalRevision>(mPending->state.candidateRevision()) : std::nullopt;
     }
 }

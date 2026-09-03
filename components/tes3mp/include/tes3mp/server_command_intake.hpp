@@ -58,26 +58,26 @@ namespace TES3MP
     {
     public:
         constexpr ServerCommandProposal(SessionId sessionId, SessionGeneration sessionGeneration,
-            CommandSequence commandSequence, CommandId commandId, ServerTick observedServerTick,
+            CommandSequence commandSequence, CommandId commandId, CanonicalRevision observedCanonicalRevision,
             EntityPrecondition entityPrecondition, PlayerMotionCommandProposal motion) noexcept
             : mSessionId(sessionId)
             , mSessionGeneration(sessionGeneration)
             , mCommandSequence(commandSequence)
             , mCommandId(commandId)
-            , mObservedServerTick(observedServerTick)
+            , mObservedCanonicalRevision(observedCanonicalRevision)
             , mEntityPrecondition(entityPrecondition)
             , mPayload(motion)
         {
         }
 
         constexpr ServerCommandProposal(SessionId sessionId, SessionGeneration sessionGeneration,
-            CommandSequence commandSequence, CommandId commandId, ServerTick observedServerTick,
+            CommandSequence commandSequence, CommandId commandId, CanonicalRevision observedCanonicalRevision,
             EntityPrecondition entityPrecondition, FixtureCellTransitionCommandProposal transition) noexcept
             : mSessionId(sessionId)
             , mSessionGeneration(sessionGeneration)
             , mCommandSequence(commandSequence)
             , mCommandId(commandId)
-            , mObservedServerTick(observedServerTick)
+            , mObservedCanonicalRevision(observedCanonicalRevision)
             , mEntityPrecondition(entityPrecondition)
             , mPayload(transition)
         {
@@ -87,7 +87,7 @@ namespace TES3MP
         constexpr SessionGeneration sessionGeneration() const noexcept { return mSessionGeneration; }
         constexpr CommandSequence commandSequence() const noexcept { return mCommandSequence; }
         constexpr CommandId commandId() const noexcept { return mCommandId; }
-        constexpr ServerTick observedServerTick() const noexcept { return mObservedServerTick; }
+        constexpr CanonicalRevision observedCanonicalRevision() const noexcept { return mObservedCanonicalRevision; }
         constexpr EntityPrecondition entityPrecondition() const noexcept { return mEntityPrecondition; }
         constexpr const ServerCommandPayload& payload() const noexcept { return mPayload; }
 
@@ -98,7 +98,7 @@ namespace TES3MP
         SessionGeneration mSessionGeneration;
         CommandSequence mCommandSequence;
         CommandId mCommandId;
-        ServerTick mObservedServerTick;
+        CanonicalRevision mObservedCanonicalRevision;
         EntityPrecondition mEntityPrecondition;
         ServerCommandPayload mPayload;
     };

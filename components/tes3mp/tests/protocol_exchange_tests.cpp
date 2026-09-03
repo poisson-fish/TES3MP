@@ -50,7 +50,7 @@ namespace
     {
         const ReliableOperationHeader header(
             ClientCommandHeader(sessionId, generation, value<CommandSequence>(commandSequence), value<CommandId>(31),
-                value<ServerTick>(4)),
+                value<CanonicalRevision>(4)),
             EntityPrecondition(value<EntityId>(41), value<EntityRevision>(3), value<AuthorityEpoch>(2)));
         return std::get<ReliableOperation>(
             ReliableOperation::create(header, PlayerMotionIntent(LinearVelocity3(100, -200, 300))));
@@ -77,7 +77,7 @@ namespace
         if (acknowledgement)
             acknowledged = value<CommandSequence>(*acknowledgement);
         return LatestWinsSnapshot(
-            LatestWinsSnapshotHeader(sessionId, generation, value<ServerTick>(tick), acknowledged), view(entries));
+            LatestWinsSnapshotHeader(sessionId, generation, value<CanonicalRevision>(tick), acknowledged), view(entries));
     }
 
     bool hasError(const auto& result, ExchangeDecodeErrorCode code)
@@ -111,7 +111,7 @@ namespace
         static_assert(!std::is_default_constructible_v<ReliableObservationBatch>);
         const auto missing = ReliableOperation::create(
             ReliableOperationHeader(ClientCommandHeader(value<SessionId>(1), SessionGeneration::initial(),
-                                        CommandSequence::initial(), value<CommandId>(1), ServerTick::initial()),
+                                        CommandSequence::initial(), value<CommandId>(1), CanonicalRevision::initial()),
                 std::nullopt),
             PlayerMotionIntent(LinearVelocity3(0, 0, 0)));
         return MaximumSpatialWorldViewEntries == 256
@@ -123,7 +123,7 @@ namespace
         const std::array changes{ ObservationChange{ value<PlayerId>(101), value<EntityId>(1), ObservationChangeKind::Enter },
             ObservationChange{ value<PlayerId>(102), value<EntityId>(2), ObservationChangeKind::Leave } };
         const auto created = ReliableObservationBatch::create(value<SessionId>(21), value<SessionGeneration>(2),
-            value<ServerTick>(9), changes);
+            value<CanonicalRevision>(9), changes);
         const auto* original = std::get_if<ReliableObservationBatch>(&created);
         if (original == nullptr) return false;
         auto bytes = encodeReliableObservationBatch(*original);
@@ -139,13 +139,13 @@ namespace
         const auto descriptor = messageDescriptor(MessageKind::ReliableObservationBatch);
         return owned != nullptr && *owned == *original
             && hasError(ReliableObservationBatch::create(value<SessionId>(21), value<SessionGeneration>(2),
-                value<ServerTick>(9), oversized), ExchangeDecodeErrorCode::TooManyObservationChanges)
+                value<CanonicalRevision>(9), oversized), ExchangeDecodeErrorCode::TooManyObservationChanges)
             && hasError(ReliableObservationBatch::create(value<SessionId>(21), value<SessionGeneration>(2),
-                value<ServerTick>(9), duplicate), ExchangeDecodeErrorCode::ObservationChangesNotStrictlySorted)
+                value<CanonicalRevision>(9), duplicate), ExchangeDecodeErrorCode::ObservationChangesNotStrictlySorted)
             && hasError(ReliableObservationBatch::create(value<SessionId>(21), value<SessionGeneration>(2),
-                value<ServerTick>(9), unsorted), ExchangeDecodeErrorCode::ObservationChangesNotStrictlySorted)
+                value<CanonicalRevision>(9), unsorted), ExchangeDecodeErrorCode::ObservationChangesNotStrictlySorted)
             && hasError(ReliableObservationBatch::create(value<SessionId>(21), value<SessionGeneration>(2),
-                value<ServerTick>(9), invalid), ExchangeDecodeErrorCode::InvalidObservationChangeKind)
+                value<CanonicalRevision>(9), invalid), ExchangeDecodeErrorCode::InvalidObservationChangeKind)
             && descriptor && descriptor->messageClass == MessageClass::ReliableOperation
             && std::holds_alternative<ExchangeDecodeError>(decodeReliableOperation(encodeReliableObservationBatch(*original)));
     }
@@ -173,7 +173,7 @@ namespace
     {
         const ReliableOperationHeader header(
             ClientCommandHeader(value<SessionId>(21), value<SessionGeneration>(2), value<CommandSequence>(2),
-                value<CommandId>(32), value<ServerTick>(5)),
+                value<CommandId>(32), value<CanonicalRevision>(5)),
             EntityPrecondition(value<EntityId>(41), value<EntityRevision>(3), value<AuthorityEpoch>(2)));
         const std::array cells{ CellId::interior(value<CellSpaceId>(7)),
             CellId::exterior(value<CellSpaceId>(8), 0, 0) };
@@ -201,7 +201,7 @@ namespace
         {
             const auto raw = static_cast<std::uint64_t>(index + 1);
             const ReliableOperationHeader header(ClientCommandHeader(sessionId, generation, value<CommandSequence>(raw),
-                                                     value<CommandId>(raw), *ServerTick::fromValue(raw - 1)),
+                                                     value<CommandId>(raw), *CanonicalRevision::fromValue(raw - 1)),
                 EntityPrecondition(value<EntityId>(raw), value<EntityRevision>(raw), value<AuthorityEpoch>(raw)));
             const auto created = ReliableOperation::create(header,
                 PlayerMotionIntent(
@@ -250,7 +250,7 @@ namespace
                 acknowledgement = value<CommandSequence>(count);
             const LatestWinsSnapshot original(
                 LatestWinsSnapshotHeader(
-                    sessionId, generation, *ServerTick::fromValue(static_cast<std::uint64_t>(count)), acknowledgement),
+                    sessionId, generation, *CanonicalRevision::fromValue(static_cast<std::uint64_t>(count)), acknowledgement),
                 *originalView);
             const auto decoded = decodeLatestWinsSnapshot(encodeLatestWinsSnapshot(original));
             const auto* roundTripped = std::get_if<LatestWinsSnapshot>(&decoded);
@@ -279,7 +279,7 @@ namespace
             || !hasError(SpatialWorldView::create(unsorted), ExchangeDecodeErrorCode::SnapshotEntriesNotStrictlySorted))
             return false;
         const LatestWinsSnapshot maximumSnapshot(
-            LatestWinsSnapshotHeader(sessionId, generation, value<ServerTick>(9), std::nullopt),
+            LatestWinsSnapshotHeader(sessionId, generation, value<CanonicalRevision>(9), std::nullopt),
             std::get<SpatialWorldView>(std::move(accepted)));
         return encodeLatestWinsSnapshot(maximumSnapshot).size() <= LatestWinsSnapshotMaximumPayloadBytes;
     }

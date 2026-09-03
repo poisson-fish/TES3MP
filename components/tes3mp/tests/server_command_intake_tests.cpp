@@ -31,7 +31,7 @@ namespace
         const std::uint64_t identity = (source - 1) * MaximumPendingServerCommandsPerSessionGeneration + sequence;
         return ServerCommandProposal(SessionId::fromValue(source).value(),
             SessionGeneration::fromValue(generation).value(), CommandSequence::fromValue(sequence).value(),
-            CommandId::fromValue(identity).value(), ServerTick::fromValue(observedTick).value(),
+            CommandId::fromValue(identity).value(), CanonicalRevision::fromValue(observedTick).value(),
             EntityPrecondition(
                 EntityId::fromValue(source).value(), EntityRevision::initial(), AuthorityEpoch::initial()),
             PlayerMotionCommandProposal(
@@ -95,7 +95,7 @@ namespace
                 mix(command.proposal().sessionGeneration().value());
                 mix(command.proposal().commandSequence().value());
                 mix(command.proposal().commandId().value());
-                mix(command.proposal().observedServerTick().value());
+                mix(command.proposal().observedCanonicalRevision().value());
                 mix(command.proposal().entityPrecondition().entityId().value());
                 mix(command.proposal().entityPrecondition().expectedRevision().value());
                 mix(command.proposal().entityPrecondition().expectedAuthorityEpoch().value());

@@ -203,7 +203,7 @@ namespace TES3MP
     std::optional<CanonicalCommandReducer::PreparedJoin> CanonicalCommandReducer::prepareJoin(
         CanonicalPlayerEntityState player, CanonicalSessionProgress session, ServerTick tick)
     {
-        if (!mStateVersion.next()) return std::nullopt;
+        if (!mStateVersion.next() || !mCanonicalRevision.next()) return std::nullopt;
         std::vector<CanonicalPlayerEntityState> players(mState->players().begin(), mState->players().end());
         std::vector<CanonicalSessionProgress> sessions(mState->activeSessions().begin(), mState->activeSessions().end());
         players.push_back(player);
@@ -214,6 +214,8 @@ namespace TES3MP
         PreparedJoin prepared;
         prepared.mBaseVersion = mStateVersion;
         prepared.mStateVersion = *mStateVersion.next();
+        prepared.mBaseCanonicalRevision = mCanonicalRevision;
+        prepared.mCanonicalRevision = *mCanonicalRevision.next();
         prepared.mCheckpointTick = tick;
         prepared.mState = std::make_shared<CanonicalServerState>(std::move(*state));
         prepared.mPublication = std::shared_ptr<CanonicalStatePublication>(
@@ -225,9 +227,11 @@ namespace TES3MP
 
     bool CanonicalCommandReducer::commit(PreparedJoin&& prepared)
     {
-        if (prepared.mBaseVersion != mStateVersion || !prepared.mState || !prepared.mPublication) return false;
+        if (prepared.mBaseVersion != mStateVersion || prepared.mBaseCanonicalRevision != mCanonicalRevision
+            || !prepared.mState || !prepared.mPublication) return false;
         mState = std::move(prepared.mState);
         mStateVersion = prepared.mStateVersion;
+        mCanonicalRevision = prepared.mCanonicalRevision;
         mCheckpointTick = prepared.mCheckpointTick;
         prepared.mPublication->mStateVersion = mStateVersion;
         prepared.mPublication->mCheckpointTick = mCheckpointTick;
@@ -246,10 +250,12 @@ namespace TES3MP
     {
         auto candidate = createCanonicalServerState(players, sessions);
         auto* state = std::get_if<CanonicalServerState>(&candidate);
-        if (!state || !mStateVersion.next()) return std::nullopt;
+        if (!state || !mStateVersion.next() || !mCanonicalRevision.next()) return std::nullopt;
         PreparedLifecycle prepared;
         prepared.mBaseVersion = mStateVersion;
         prepared.mStateVersion = *mStateVersion.next();
+        prepared.mBaseCanonicalRevision = mCanonicalRevision;
+        prepared.mCanonicalRevision = *mCanonicalRevision.next();
         prepared.mCheckpointTick = tick;
         prepared.mState = std::make_shared<CanonicalServerState>(std::move(*state));
         prepared.mPublication = std::shared_ptr<CanonicalStatePublication>(
@@ -277,7 +283,7 @@ namespace TES3MP
     std::optional<CanonicalCommandReducer::PreparedLifecycle> CanonicalCommandReducer::prepareDisconnectBatch(
         std::span<const SessionId> sessionIds, ServerTick tick)
     {
-        if (sessionIds.empty() || !mStateVersion.next()) return std::nullopt;
+        if (sessionIds.empty() || !mStateVersion.next() || !mCanonicalRevision.next()) return std::nullopt;
         std::vector<CanonicalPlayerEntityState> players(mState->players().begin(), mState->players().end());
         std::vector<CanonicalSessionProgress> sessions(mState->activeSessions().begin(), mState->activeSessions().end());
         std::vector<CanonicalSessionProgress> removed;
@@ -296,6 +302,8 @@ namespace TES3MP
         PreparedLifecycle prepared;
         prepared.mBaseVersion = mStateVersion;
         prepared.mStateVersion = *mStateVersion.next();
+        prepared.mBaseCanonicalRevision = mCanonicalRevision;
+        prepared.mCanonicalRevision = *mCanonicalRevision.next();
         prepared.mCheckpointTick = tick;
         prepared.mState = std::make_shared<CanonicalServerState>(std::move(*state));
         prepared.mPublication = std::shared_ptr<CanonicalStatePublication>(
@@ -337,9 +345,11 @@ namespace TES3MP
 
     bool CanonicalCommandReducer::commit(PreparedLifecycle&& prepared)
     {
-        if (prepared.mBaseVersion != mStateVersion || !prepared.mState || !prepared.mPublication) return false;
+        if (prepared.mBaseVersion != mStateVersion || prepared.mBaseCanonicalRevision != mCanonicalRevision
+            || !prepared.mState || !prepared.mPublication) return false;
         mState = std::move(prepared.mState);
         mStateVersion = prepared.mStateVersion;
+        mCanonicalRevision = prepared.mCanonicalRevision;
         mCheckpointTick = prepared.mCheckpointTick;
         prepared.mPublication->mStateVersion = mStateVersion;
         prepared.mPublication->mCheckpointTick = mCheckpointTick;
@@ -443,6 +453,8 @@ namespace TES3MP
         PreparedBatch prepared;
         prepared.mBaseVersion = mStateVersion;
         prepared.mStateVersion = mStateVersion;
+        prepared.mBaseCanonicalRevision = mCanonicalRevision;
+        prepared.mCanonicalRevision = mCanonicalRevision;
         prepared.mCheckpointTick = mCheckpointTick;
         prepared.mState = mState;
         auto& result = prepared.mResult;
@@ -587,6 +599,17 @@ namespace TES3MP
                             publication->mChanges.push_back(std::move(change));
                             prepared.mState = std::move(nextState);
                             prepared.mStateVersion = nextVersion;
+                            if (prepared.mCanonicalRevision == prepared.mBaseCanonicalRevision)
+                            {
+                                const auto nextRevision = prepared.mCanonicalRevision.next();
+                                if (!nextRevision)
+                                {
+                                    result.mError = CommandBatchReductionError::StateVersionCapacityExceeded;
+                                    prepared.mPublication = std::move(publication);
+                                    return prepared;
+                                }
+                                prepared.mCanonicalRevision = *nextRevision;
+                            }
                             prepared.mCheckpointTick = tick;
                             acknowledgementAdvanced = true;
                         }
@@ -654,6 +677,16 @@ namespace TES3MP
                 }
                 replacements[index] = *value;
                 prepared.mStateVersion = *prepared.mStateVersion.next();
+                if (prepared.mCanonicalRevision == prepared.mBaseCanonicalRevision)
+                {
+                    const auto nextRevision = prepared.mCanonicalRevision.next();
+                    if (!nextRevision)
+                    {
+                        prepared.mResult.mError = CommandBatchReductionError::StateVersionCapacityExceeded;
+                        return prepared;
+                    }
+                    prepared.mCanonicalRevision = *nextRevision;
+                }
                 prepared.mPublication->mSpatialTicks.push_back({ prepared.mStateVersion, tick, *value });
             }
             auto candidate = createCanonicalServerState(replacements, prepared.mState->activeSessions());
@@ -675,10 +708,12 @@ namespace TES3MP
 
     bool CanonicalCommandReducer::commit(PreparedBatch&& prepared)
     {
-        if (prepared.mBaseVersion != mStateVersion || !prepared.mState || !prepared.mPublication)
+        if (prepared.mBaseVersion != mStateVersion || prepared.mBaseCanonicalRevision != mCanonicalRevision
+            || !prepared.mState || !prepared.mPublication)
             return false;
         mState = std::move(prepared.mState);
         mStateVersion = prepared.mStateVersion;
+        mCanonicalRevision = prepared.mCanonicalRevision;
         mCheckpointTick = prepared.mCheckpointTick;
         for (const auto& record : prepared.mResult.mDispositions)
             observe(record.disposition(), mCheckpointTick);
