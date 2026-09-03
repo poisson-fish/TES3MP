@@ -17,7 +17,7 @@ remains the [implementation plan](IMPLEMENTATION_PLAN.md#phase-8--openmw-desktop
   [ADR-0047](adr/ADR-0047-phase8-adapter-lifecycle-and-provider-boundary.md),
   [ADR-0048](adr/ADR-0048-canonical-revision-and-simulation-tick-separation.md),
   [ADR-0049](adr/ADR-0049-phase8-desktop-connection-composition.md)
-- Latest implementation commit: `eafc110d16` (`Unify client runtime orchestration`)
+- Latest implementation commit: `b1c01eee66` (`Compose OpenMW desktop connection`)
 
 ## Working synopsis
 
