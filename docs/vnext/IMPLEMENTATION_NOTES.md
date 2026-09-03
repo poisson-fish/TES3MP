@@ -5034,6 +5034,24 @@ only the relevant phase section here.
 
 [Back to the phase tracker](IMPLEMENTATION_PLAN.md#phase-8--openmw-desktop-vertical-slice)
 
+- 2026-09-02 — Slice 8.3 desktop connection composition — In Progress
+  - Change: added explicit-disabled OpenMW configuration, separate validated
+    host/port, required 1–60,000 ms timeout, bounded password-file loading,
+    GNS-backed runtime startup, executable coordinator attachment, and closed
+    sanitized startup/runtime status categories. Empty providers intentionally
+    defer cell presentation and movement input to Slices 8.4 and 8.5.
+  - Decisions: ADR-0049 records owner-approved Option A for enablement,
+    endpoint, credentials, errors, and timeout. P8-002 is now registered.
+  - Verification: focused Debug adapter contracts, all 120 repository Python
+    tests, patch-registry verification, and RelWithDebInfo OpenMW without the
+    real-network profile pass. The real-network build corrected a Windows
+    lean-header/GNS timer declaration conflict, then confirmed the approved
+    `/MD` policy requires an `/MD` OpenMW dependency bundle; the currently
+    installed `/MT` bundle cannot link and is not accepted as passing evidence.
+  - Follow-ups: provision and verify the approved `/MD` OpenMW dependency
+    bundle, finish the real-network executable proof, add visible OpenMW status
+    presentation, and obtain the Slice 8.2/8.3 implementation demo acceptance.
+
 - 2026-09-02 — Slice 8.2 complete client orchestrator correction — Verified
   - Change: implemented owner-approved breaking Option D. The reusable runtime
     now owns handshake/authentication progression, initial binding,

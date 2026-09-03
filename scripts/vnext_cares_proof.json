@@ -25,7 +25,7 @@
     "caller-pumped-ares-process-fds",
     "event-thread-unused",
     "query-cache-off",
-    "windows-msvc-static-runtime"
+    "windows-msvc-dynamic-runtime"
   ],
   "budgets": {
     "hostname_bytes": 253,

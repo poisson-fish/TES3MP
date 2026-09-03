@@ -276,3 +276,5 @@ if (WIN32 AND BUILD_OPENMW)
 endif()
 
 add_subdirectory(tes3mp)
+
+target_link_libraries(openmw TES3MP::OpenMWAdapter)

@@ -13,6 +13,16 @@
       "removal_condition": "OpenMW supplies an equivalent reviewed lifecycle and frame seam"
     },
     {
+      "id": "P8-002",
+      "slice": "8.3",
+      "owner": "OpenMW adapter",
+      "purpose": "Create and attach one concrete adapter only when explicitly enabled by validated desktop configuration.",
+      "paths": ["apps/openmw/main.cpp", "apps/openmw/options.cpp"],
+      "tests": ["scripts/tests/test_openmw_patch_registry.py", "openmw_tes3mp_adapter_tests"],
+      "disposition": "local product composition",
+      "removal_condition": "A supported OpenMW plugin or composition facility fully owns multiplayer startup"
+    },
+    {
       "id": "P8-003",
       "slice": "3.1/8.2",
       "owner": "OpenMW adapter",

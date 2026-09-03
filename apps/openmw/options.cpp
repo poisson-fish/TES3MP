@@ -21,6 +21,15 @@ namespace OpenMW
         addOption("help", "print help message");
         addOption("version", "print version information and quit");
 
+        addOption("tes3mp-enable", bpo::value<bool>()->implicit_value(true)->default_value(false),
+            "enable TES3MP multiplayer");
+        addOption("tes3mp-host", bpo::value<std::string>()->default_value(""), "TES3MP server host");
+        addOption("tes3mp-port", bpo::value<unsigned>()->default_value(0), "TES3MP server port");
+        addOption("tes3mp-timeout-ms", bpo::value<unsigned>()->default_value(0),
+            "TES3MP connection timeout in milliseconds (1-60000; required when enabled)");
+        addOption("tes3mp-password-file", bpo::value<Files::MaybeQuotedPath>()->default_value({}, ""),
+            "file containing optional TES3MP join password");
+
         addOption("data",
             bpo::value<Files::MaybeQuotedPathContainer>()
                 ->default_value(Files::MaybeQuotedPathContainer(), "data")

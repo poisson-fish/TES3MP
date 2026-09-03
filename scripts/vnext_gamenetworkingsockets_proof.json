@@ -85,7 +85,7 @@
       "zlib-off",
       "pinned-local-abseil",
       "bundled-utf8-range",
-      "windows-msvc-static-runtime"
+      "windows-msvc-dynamic-runtime"
     ],
     "gamenetworkingsockets": [
       "static-only",
@@ -95,7 +95,7 @@
       "examples-off",
       "tests-off",
       "tools-off",
-      "windows-msvc-static-runtime"
+      "windows-msvc-dynamic-runtime"
     ],
     "sanitizer": [
       "linux-clang-18-only",

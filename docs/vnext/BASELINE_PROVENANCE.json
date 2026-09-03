@@ -105,6 +105,16 @@
       "purpose": "Adds the approved single-owner optional multiplayer coordinator attachment seam."
     },
     {
+      "path": "apps/openmw/main.cpp",
+      "status": "M",
+      "purpose": "Composes the explicitly enabled desktop multiplayer coordinator with sanitized startup and runtime status reporting."
+    },
+    {
+      "path": "apps/openmw/options.cpp",
+      "status": "M",
+      "purpose": "Declares the approved explicit desktop multiplayer enablement, endpoint, timeout, and password-file options."
+    },
+    {
       "path": "apps/openmw/tes3mp/CMakeLists.txt",
       "status": "A",
       "purpose": "Defines the approved OpenMW adapter leaf target, build alias, dependency allowlist, C++20 contract, and opt-in owned-target runtime-safety registration."
@@ -123,6 +133,16 @@
       "path": "apps/openmw/tes3mp/adapter_tests.cpp",
       "status": "A",
       "purpose": "Focused contracts for the engine coordinator and semantic input provider boundary."
+    },
+    {
+      "path": "apps/openmw/tes3mp/desktop_connection.cpp",
+      "status": "A",
+      "purpose": "Validates desktop connection configuration, bounds credential loading, and composes the verified transport and client runtime."
+    },
+    {
+      "path": "apps/openmw/tes3mp/desktop_connection.hpp",
+      "status": "A",
+      "purpose": "Declares stable sanitized desktop connection startup outcomes and the composition factory."
     },
     {
       "path": "apps/openmw/tes3mp/engine_coordinator.hpp",
@@ -1000,6 +1020,11 @@
       "purpose": "Private deterministic address-race, generation counter, stale-handle binding, and admission-scope derivation seam shared by production and focused tests."
     },
     {
+      "path": "components/tes3mp/transport/windows_gns_compat.hpp",
+      "status": "A",
+      "purpose": "Restores Windows multimedia timer declarations hidden by OpenMW lean-header policy for the pinned GNS build."
+    },
+    {
       "path": "docs/vnext/BASELINE_PROVENANCE.json",
       "status": "A",
       "purpose": "Machine-readable OpenMW baseline, cutover, dependency-input, and intentional-difference record."
@@ -1258,6 +1283,11 @@
       "path": "docs/vnext/adr/ADR-0048-canonical-revision-and-simulation-tick-separation.md",
       "status": "A",
       "purpose": "Separates fixed simulation scheduling ticks from monotonic authoritative publication revisions."
+    },
+    {
+      "path": "docs/vnext/adr/ADR-0049-phase8-desktop-connection-composition.md",
+      "status": "A",
+      "purpose": "Records approved desktop enablement, endpoint, credential, timeout, status, and Windows runtime composition policy."
     },
     {
       "path": "docs/vnext/gdr/GDR-0001-phase7-headless-vertical-slice-behavior.md",
@@ -1603,7 +1633,7 @@
         },
         {
           "path": "scripts/run_vnext_cares_proof.py",
-          "sha256": "c2d6345cff096d55d7fe14f033a92d13dfb02a9fde26b535d636d59387ea398a"
+          "sha256": "8f98c710cafa2a316d39608b27fbd2d4aae1c913bff823457c5df5d485f82db8"
         },
         {
           "path": "scripts/tests/test_run_vnext_cares_proof.py",
@@ -1611,7 +1641,7 @@
         },
         {
           "path": "scripts/vnext_cares_proof.json",
-          "sha256": "0ad50cda94dcca45fbfe3a7e166862ef3a572f9362ee3ada487872a6d018fec1"
+          "sha256": "4633ce1c006a1a141971c098b39435b64b4c1e4b6167935f588e395526fc722c"
         }
       ],
       "repositories": [
@@ -1821,7 +1851,7 @@
         },
         {
           "path": "scripts/run_vnext_gamenetworkingsockets_proof.py",
-          "sha256": "cab1da5188fb6c6c49a1b15778059cc6902f6390ef3c04eecb8b5040095b273e"
+          "sha256": "e862cc386eaac8abe91b775ab53f45a1f9668a3825fcf88ff0fdc6753970c877"
         },
         {
           "path": "scripts/tests/test_run_vnext_gamenetworkingsockets_proof.py",
@@ -1829,7 +1859,7 @@
         },
         {
           "path": "scripts/vnext_gamenetworkingsockets_proof.json",
-          "sha256": "367fd5820e41b77c5857ccf1dff9b2d0698cebf8dba5385f81204f1dba64350c"
+          "sha256": "7f35707a6b4ede9637fa5446abe2ddad2b3df2b3571cd1ef183bad34a9359ecc"
         }
       ],
       "repositories": [

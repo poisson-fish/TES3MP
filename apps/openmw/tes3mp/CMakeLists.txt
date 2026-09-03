@@ -6,6 +6,8 @@ tes3mp_validate_runtime_safety()
 add_library(openmw_tes3mp_adapter STATIC
     adapter.cpp
     adapter.hpp
+    desktop_connection.cpp
+    desktop_connection.hpp
     engine_coordinator.hpp
     providers.hpp
 )
@@ -16,8 +18,17 @@ target_link_libraries(openmw_tes3mp_adapter
     PUBLIC tes3mp_client_session
     PRIVATE openmw-lib
 )
+if(TARGET TES3MP::GameNetworkingSocketsTransport)
+    target_link_libraries(openmw_tes3mp_adapter PRIVATE TES3MP::GameNetworkingSocketsTransport)
+    target_compile_definitions(openmw_tes3mp_adapter PRIVATE TES3MP_OPENMW_HAS_GNS)
+endif()
 set_target_properties(openmw_tes3mp_adapter PROPERTIES FOLDER "TES3MP")
 tes3mp_enable_runtime_safety(openmw_tes3mp_adapter)
 
-tes3mp_verify_target_dependencies(openmw_tes3mp_adapter
-    ALLOWED tes3mp_client_session openmw-lib)
+if(TARGET TES3MP::GameNetworkingSocketsTransport)
+    tes3mp_verify_target_dependencies(openmw_tes3mp_adapter
+        ALLOWED tes3mp_client_session openmw-lib TES3MP::GameNetworkingSocketsTransport)
+else()
+    tes3mp_verify_target_dependencies(openmw_tes3mp_adapter
+        ALLOWED tes3mp_client_session openmw-lib)
+endif()

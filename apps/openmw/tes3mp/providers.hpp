@@ -9,6 +9,22 @@
 
 namespace TES3MP::OpenMWAdapter
 {
+    enum class ConnectionStatus
+    {
+        ProtocolRejected,
+        AuthenticationRejected,
+        TimedOut,
+        TransportFailed,
+        Disconnected,
+    };
+
+    class ConnectionStatusProvider
+    {
+    public:
+        virtual ~ConnectionStatusProvider() = default;
+        virtual void report(ConnectionStatus status) noexcept = 0;
+    };
+
     class SemanticInputProvider
     {
     public:

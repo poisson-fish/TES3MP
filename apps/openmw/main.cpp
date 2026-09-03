@@ -11,6 +11,7 @@
 
 #include "engine.hpp"
 #include "options.hpp"
+#include "tes3mp/desktop_connection.hpp"
 
 #include <boost/program_options/variables_map.hpp>
 
@@ -23,6 +24,9 @@ extern "C" __declspec(dllexport) DWORD AmdPowerXpressRequestHighPerformance = 0x
 #endif
 
 #include <filesystem>
+#include <optional>
+#include <span>
+#include <variant>
 
 #if (defined(__APPLE__) || defined(__linux) || defined(__unix) || defined(__posix))
 #include <unistd.h>
@@ -37,7 +41,76 @@ extern "C" __declspec(dllexport) DWORD AmdPowerXpressRequestHighPerformance = 0x
  * \retval true - Everything goes OK
  * \retval false - Error
  */
-bool parseOptions(int argc, char** argv, OMW::Engine& engine, Files::ConfigurationManager& cfgMgr)
+namespace
+{
+    const char* describe(TES3MP::OpenMWAdapter::ConnectionStatus status) noexcept
+    {
+        using Status = TES3MP::OpenMWAdapter::ConnectionStatus;
+        switch (status)
+        {
+            case Status::ProtocolRejected:
+                return "server protocol or capabilities are incompatible";
+            case Status::AuthenticationRejected:
+                return "server denied authentication";
+            case Status::TimedOut:
+                return "connection timed out";
+            case Status::TransportFailed:
+                return "network transport failed";
+            case Status::Disconnected:
+                return "server disconnected";
+        }
+        return "unknown connection failure";
+    }
+
+    const char* describe(TES3MP::OpenMWAdapter::DesktopConnectionFailure failure) noexcept
+    {
+        using Failure = TES3MP::OpenMWAdapter::DesktopConnectionFailure;
+        switch (failure)
+        {
+            case Failure::InvalidEndpoint:
+                return "tes3mp-host or tes3mp-port is invalid";
+            case Failure::InvalidTimeout:
+                return "tes3mp-timeout-ms must be between 1 and 60000";
+            case Failure::CredentialReadFailed:
+                return "tes3mp-password-file could not be read";
+            case Failure::CredentialRejected:
+                return "tes3mp-password-file exceeds the credential limit";
+            case Failure::TransportUnavailable:
+                return "this build has no usable multiplayer transport";
+            case Failure::RuntimeUnavailable:
+                return "multiplayer runtime initialization failed";
+            case Failure::ConnectionRejected:
+                return "the connection could not be started";
+        }
+        return "unknown startup failure";
+    }
+
+    class MultiplayerInput final : public TES3MP::OpenMWAdapter::SemanticInputProvider
+    {
+        std::optional<TES3MP::PlayerMotionIntent> sampleCurrentIntent() noexcept override { return std::nullopt; }
+    };
+
+    class MultiplayerPresentation final : public TES3MP::OpenMWAdapter::PresentationProvider
+    {
+        void applyAuthoritative(const TES3MP::LatestWinsSnapshot&,
+            std::span<const TES3MP::ObservedPlayer>) noexcept override
+        {
+        }
+    };
+
+    class MultiplayerStatus final : public TES3MP::OpenMWAdapter::ConnectionStatusProvider
+    {
+        void report(TES3MP::OpenMWAdapter::ConnectionStatus status) noexcept override
+        {
+            Log(Debug::Error) << "TES3MP connection stopped: " << describe(status);
+        }
+    };
+}
+
+bool parseOptions(int argc, char** argv, OMW::Engine& engine, Files::ConfigurationManager& cfgMgr,
+    TES3MP::OpenMWAdapter::SemanticInputProvider& multiplayerInput,
+    TES3MP::OpenMWAdapter::PresentationProvider& multiplayerPresentation,
+    TES3MP::OpenMWAdapter::ConnectionStatusProvider& multiplayerStatus)
 {
     // Create a local alias for brevity
     namespace bpo = boost::program_options;
@@ -158,6 +231,22 @@ bool parseOptions(int argc, char** argv, OMW::Engine& engine, Files::Configurati
     engine.enableFontExport(variables["export-fonts"].as<bool>());
     engine.setRandomSeed(variables["random-seed"].as<unsigned int>());
 
+    if (variables["tes3mp-enable"].as<bool>())
+    {
+        auto coordinator = TES3MP::OpenMWAdapter::makeDesktopCoordinator(variables["tes3mp-host"].as<std::string>(),
+            variables["tes3mp-port"].as<unsigned>(), variables["tes3mp-timeout-ms"].as<unsigned>(),
+            variables["tes3mp-password-file"].as<Files::MaybeQuotedPath>().u8string(), multiplayerInput,
+            multiplayerPresentation, multiplayerStatus);
+        auto* value = std::get_if<std::unique_ptr<TES3MP::OpenMWAdapter::EngineCoordinator>>(&coordinator);
+        if (!value || !*value || !engine.attachMultiplayerCoordinator(std::move(*value)))
+        {
+            const auto failure = std::get_if<TES3MP::OpenMWAdapter::DesktopConnectionFailure>(&coordinator);
+            Log(Debug::Error) << "TES3MP startup failed: "
+                              << (failure ? describe(*failure) : "coordinator attachment failed");
+            return false;
+        }
+    }
+
     return true;
 }
 
@@ -219,11 +308,14 @@ int runApplication(int argc, char* argv[])
 
     osg::setNotifyHandler(new OSGLogHandler());
     Files::ConfigurationManager cfgMgr;
+    MultiplayerInput multiplayerInput;
+    MultiplayerPresentation multiplayerPresentation;
+    MultiplayerStatus multiplayerStatus;
     std::unique_ptr<OMW::Engine> engine = std::make_unique<OMW::Engine>(cfgMgr);
 
     engine->setRecastMaxLogLevel(Debug::getRecastMaxLogLevel());
 
-    if (parseOptions(argc, argv, *engine, cfgMgr))
+    if (parseOptions(argc, argv, *engine, cfgMgr, multiplayerInput, multiplayerPresentation, multiplayerStatus))
     {
         if (!Misc::checkRequiredOSGPluginsArePresent())
             return 1;

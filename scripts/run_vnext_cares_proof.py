@@ -40,7 +40,7 @@ EXPECTED_BUILD_PROFILE = [
     "caller-pumped-ares-process-fds",
     "event-thread-unused",
     "query-cache-off",
-    "windows-msvc-static-runtime",
+    "windows-msvc-dynamic-runtime",
 ]
 EXPECTED_BUDGETS = {
     "hostname_bytes": 253,
@@ -360,7 +360,7 @@ def build_and_test(
         f"-DVNEXT_CARES_SOURCE_DIR={source.resolve()}",
     ]
     if os.name == "nt":
-        arguments.append("-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded")
+        arguments.append("-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreadedDLL")
     if sanitize:
         if platform.system() != "Linux":
             raise ProofError("--sanitize is supported only by the Linux Clang proof job")

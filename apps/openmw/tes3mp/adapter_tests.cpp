@@ -1,4 +1,5 @@
 #include "adapter.hpp"
+#include "desktop_connection.hpp"
 #include "providers.hpp"
 
 #include <cstdlib>
@@ -34,6 +35,13 @@ namespace
         unsigned calls = 0;
     };
 
+    class Status final : public TES3MP::OpenMWAdapter::ConnectionStatusProvider
+    {
+    public:
+        void report(TES3MP::OpenMWAdapter::ConnectionStatus value) noexcept override { last = value; }
+        std::optional<TES3MP::OpenMWAdapter::ConnectionStatus> last;
+    };
+
     class Coordinator final : public TES3MP::OpenMWAdapter::EngineCoordinator
     {
     public:
@@ -53,8 +61,17 @@ int main()
     auto intent = input.sampleCurrentIntent();
     require(input.calls == 1 && intent && intent->desiredVelocity() == TES3MP::LinearVelocity3(1, 2, 3));
     Presentation presentation;
+    Status status;
     Coordinator coordinator;
     coordinator.frame(0.25f);
     require(coordinator.calls == 1 && coordinator.lastDuration == 0.25f);
-    require(!TES3MP::OpenMWAdapter::makeCoordinator({}, {}, {}, input, presentation));
+    require(!TES3MP::OpenMWAdapter::makeCoordinator({}, {}, {}, input, presentation, status));
+    require(std::get<TES3MP::OpenMWAdapter::DesktopConnectionFailure>(
+                TES3MP::OpenMWAdapter::makeDesktopCoordinator(
+                    "", 25560, 1000, {}, input, presentation, status))
+        == TES3MP::OpenMWAdapter::DesktopConnectionFailure::InvalidEndpoint);
+    require(std::get<TES3MP::OpenMWAdapter::DesktopConnectionFailure>(
+                TES3MP::OpenMWAdapter::makeDesktopCoordinator(
+                    "127.0.0.1", 25560, 0, {}, input, presentation, status))
+        == TES3MP::OpenMWAdapter::DesktopConnectionFailure::InvalidTimeout);
 }

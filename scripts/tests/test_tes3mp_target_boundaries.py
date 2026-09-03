@@ -381,7 +381,7 @@ class TES3MPTargetBoundaryTests(unittest.TestCase):
         self.assertIn("find_package(absl CONFIG REQUIRED)", cmake_text)
         self.assertNotIn('add_subdirectory("${TES3MP_abseil_SOURCE_DIR}"', cmake_text)
         self.assertIn(
-            "set(CMAKE_MSVC_RUNTIME_LIBRARY MultiThreaded", cmake_text
+            'set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL"', cmake_text
         )
         self.assertIn("set(SANITIZE_ADDRESS ON", cmake_text)
         self.assertIn("set(SANITIZE_UNDEFINED ON", cmake_text)

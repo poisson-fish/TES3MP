@@ -46,7 +46,7 @@ EXPECTED_BUILD_PROFILE = {
         "zlib-off",
         "pinned-local-abseil",
         "bundled-utf8-range",
-        "windows-msvc-static-runtime",
+        "windows-msvc-dynamic-runtime",
     ],
     "gamenetworkingsockets": [
         "static-only",
@@ -56,7 +56,7 @@ EXPECTED_BUILD_PROFILE = {
         "examples-off",
         "tests-off",
         "tools-off",
-        "windows-msvc-static-runtime",
+        "windows-msvc-dynamic-runtime",
     ],
     "sanitizer": [
         "linux-clang-18-only",
@@ -417,6 +417,7 @@ def build_openssl(perl: str, environment: dict[str, str], source: Path) -> None:
         make = find_tool("nmake", "VNEXT_MAKE")
         configuration = "VC-WIN64A"
         options.append("no-asm")
+        options.append("/MD")
     else:
         make = find_tool("make", "VNEXT_MAKE")
         configuration = ""
@@ -471,7 +472,7 @@ def build_protobuf(
         "-Dprotobuf_WITH_ZLIB=OFF",
     ]
     if os.name == "nt":
-        arguments.append("-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded")
+        arguments.append("-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreadedDLL")
     if sanitize:
         arguments.extend(
             [
@@ -511,7 +512,7 @@ def build_and_test_proof(
         f"-DVNEXT_GNS_SOURCE_DIR={gns_source.resolve()}",
     ]
     if os.name == "nt":
-        arguments.append("-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded")
+        arguments.append("-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreadedDLL")
     if sanitize:
         if platform.system() != "Linux":
             raise ProofError("--sanitize is supported only by the Linux Clang proof job")
