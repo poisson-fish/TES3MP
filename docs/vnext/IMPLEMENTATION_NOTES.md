@@ -5924,6 +5924,27 @@ only the relevant phase section here.
   - Follow-ups: begin Slice 9.4 research only; present provider, authority,
     state-scope, or gameplay-behavior options before production implementation.
 
+- 2026-09-04 — Slice 9.4 provider and behavior research — **Not Started**
+  - Finding: the VR fork already maps handed controller bindings into ordinary
+    OpenMW movement actions. The accepted desktop provider source and C-R1
+    canonical presentation compile against the fork, while `openmw_vr` still
+    supplies empty providers and fails before network creation.
+  - Architecture proposal: [ADR-0056](adr/ADR-0056-phase9-vr-provider-composition.md)
+    recommends Option A: a distinct fork-local VR provider leaf compiling the
+    same shared provider source, thin retained VR names, unchanged shared core,
+    and exact P9-003 registry coverage. Direct desktop-target reuse and a new
+    fork-aware reimplementation are alternatives.
+  - Behavior proposal: [GDR-0017](gdr/GDR-0017-phase9-vr-fixture-input-and-presentation.md)
+    recommends A/A: exact desktop root-yaw semantic movement and canonical
+    presentation parity only. Pose-derived direction and pose presentation stay
+    behind later gates.
+  - Verification: read-only source/target/registry inspection and clean-tree
+    checks. No production source, target, registry, protocol, authority, state,
+    or gameplay behavior changed.
+  - Owner review: ADR-0056 Option A, GDR-0017 Decisions 1–2 A/A, and all proposed
+    acceptance tests/scenarios require explicit approval.
+  - Follow-ups: after approval, record decisions before changing `vnext-vr`.
+
 - Head and hand transforms are presentation snapshots associated with a player
   root and authority epoch. They are not persisted as durable world state.
 - Physical reach validation uses the authoritative root plus declared limits;
