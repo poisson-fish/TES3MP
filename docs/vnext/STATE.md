@@ -22,6 +22,7 @@ is the [implementation plan](IMPLEMENTATION_PLAN.md#phase-9--pc-vr-interoperabil
 - Slice 8.7: **Implemented**
 - Governing decisions: [ADR-0007](adr/ADR-0007-openmw-hook-patch-queue-policy.md),
   [ADR-0008](adr/ADR-0008-pc-vr-fork-worktree-maintenance-policy.md),
+  proposed [ADR-0054](adr/ADR-0054-phase9-dual-engine-adapter-composition.md),
   [ADR-0047](adr/ADR-0047-phase8-adapter-lifecycle-and-provider-boundary.md),
   [ADR-0048](adr/ADR-0048-canonical-revision-and-simulation-tick-separation.md),
   [ADR-0049](adr/ADR-0049-phase8-desktop-connection-composition.md),
@@ -159,9 +160,9 @@ accepted and complete at implementation `93690354d1`. Slice 9.1's approved
 maintenance target and verified candidate are complete on `vnext-vr` at
 `c590e81cc5`, with rehearsal-safety proof at `ff04803ec2`; owner implementation
 acceptance is recorded. Slice 9.2 is next, but present its architecture/build
-options before adding VR multiplayer composition. Retain desktop regression
-evidence and C-R1 boundaries; do not choose VR authority, state, pose,
-locomotion, interaction, or gameplay behavior implicitly.
+options in proposed ADR-0054 before adding VR multiplayer composition. Retain
+desktop regression evidence and C-R1 boundaries; do not choose VR authority,
+state, pose, locomotion, interaction, or gameplay behavior implicitly.
 
 ## Active files
 
@@ -176,6 +177,8 @@ locomotion, interaction, or gameplay behavior implicitly.
   `scripts/verify_openmw_patch_registry.py`
 - Phase 9 decision packet:
   `docs/vnext/adr/ADR-0008-pc-vr-fork-worktree-maintenance-policy.md`
+- Slice 9.2 decision packet:
+  `docs/vnext/adr/ADR-0054-phase9-dual-engine-adapter-composition.md`
 - VR target records (on `vnext-vr`): `docs/vnext/OPENMW_VR_PROVENANCE.json`,
   `docs/vnext/OPENMW_VR_PATCH_REGISTRY.json`, and
   `scripts/verify_openmw_vr_target.py`

@@ -365,6 +365,7 @@ runtime or protocol name.
 | ADR-0051 | Phase 8 provisional spatial-intent concurrency | Phase 8 | **Implemented** |
 | ADR-0052 | Phase 8 remote motion smoothing | Phase 8 | **Implemented** |
 | ADR-0053 | Phase 8 desktop reconnect and automation composition | Phase 8 | **Implemented** |
+| ADR-0054 | Phase 9 dual-engine adapter composition | Phase 9 | **Proposed** |
 
 An ADR is complete only when it records considered alternatives, selection
 criteria, consequences, failure modes, a replacement/review trigger, and
@@ -704,7 +705,7 @@ Depends on: Phase 8.
 | Slice | Deliverable | Status | Completion evidence |
 |---|---|---|---|
 | 9.1 | Review PC VR maintenance options with the owner, approve ADR-0008, and create the worktree/patch target | **Implemented** | ADR-0008 A/A/A and temporary composition A approved; `vnext-vr` records exact two-parent merge `0e8e85e0b5`, proof `c590e81cc5`, and rehearsal-safety test `ff04803ec2`; immutable OpenXR acquisition/offline reuse, registry verification, fresh MSVC 19.51 `openmw_vr.exe` link, all 137 desktop Python regressions, and owner implementation acceptance pass |
-| 9.2 | Build the same adapter/client-session targets against desktop and PC VR engines | **Not Started** | Shared code is not copied; both targets build in their supported environments |
+| 9.2 | Build the same adapter/client-session targets against desktop and PC VR engines | **Not Started** | Proposed ADR-0054 awaits owner approval; no production code has started |
 | 9.3 | Add optional `vr_pose` capability and bounded head/hand pose snapshot schema | **Not Started** | Negotiation, absent/unknown capability, bounds, round-trip, and fuzz tests pass |
 | 9.4 | Implement VR input and presentation providers using semantic commands | **Not Started** | Locomotion command behavior matches desktop authority rules |
 | 9.5 | Sample pose data independently of tracking/render rate and network snapshot rate | **Not Started** | Rate-limit, latest-wins, stale-pose, and buffer tests pass |
