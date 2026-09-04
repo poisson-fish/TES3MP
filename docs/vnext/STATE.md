@@ -12,7 +12,8 @@ is the [implementation plan](IMPLEMENTATION_PLAN.md#phase-9--pc-vr-interoperabil
 - Phase 8: **Implemented**
 - Phase 9: **In Progress** (Slice 9.2 implementation)
 - Slice 9.1: **Implemented**
-- Slice 9.2: **In Progress** (ADR-0054 Option A approved)
+- Slice 9.2: **In Progress** (verified implementation candidate; owner
+  acceptance remains)
 - Slice 8.1: **Implemented**
 - Slice 8.2: **Implemented**
 - Slice 8.3: **Implemented**
@@ -34,9 +35,10 @@ is the [implementation plan](IMPLEMENTATION_PLAN.md#phase-9--pc-vr-interoperabil
   [GDR-0014](gdr/GDR-0014-phase8-desktop-movement-and-correction.md), and
   [GDR-0015](gdr/GDR-0015-phase8-remote-motion-presentation.md), and
   [GDR-0016](gdr/GDR-0016-phase8-disconnect-and-resume-presentation.md)
-- Latest implementation commit: `93690354d1` (`Implement C-R1 replicated actors`)
-- Latest VR implementation candidate: `ff04803ec2` (`Prove VR update rehearsal
-  safety`)
+- Latest implementation commit: `54999379a2` (`Share adapter composition across
+  desktop and VR`)
+- Latest VR implementation candidate: `44c8d7d8ea` (`Merge Slice 9.2 shared
+  composition`)
 
 ## Working synopsis
 
@@ -128,6 +130,15 @@ Slice 9.2. No authority, canonical state, protocol, pose, locomotion,
 interaction, or gameplay behavior changed. The owner accepted the verified
 implementation on 2026-09-03.
 
+Slice 9.2 has a verified implementation candidate under approved ADR-0054
+Option A. One engine-neutral adapter/client-connection target is shared by both
+executables; desktop concrete providers live in a separate target, while VR
+links the same adapter and fails explicit multiplayer enable before credential,
+transport, or runtime work until Slice 9.4 provides approved VR providers. The
+desktop and VR executables link, focused contracts and registries pass, and the
+shared implementation commit is in VR history. No new hook or gameplay/state
+behavior was added. Owner implementation acceptance remains.
+
 The remote-avatar architecture decision was reopened. Legacy TES3MP used real
 dynamic NPC actors and then patched dedicated-player exceptions through 16
 OpenMW engine files. The superseded nominal renderer-only seam avoided world
@@ -160,10 +171,11 @@ accepted and complete at implementation `93690354d1`. Slice 9.1's approved
 maintenance target and verified candidate are complete on `vnext-vr` at
 `c590e81cc5`, with rehearsal-safety proof at `ff04803ec2`; owner implementation
 acceptance is recorded. Slice 9.2 is next, but present its architecture/build
-options in ADR-0054 are approved. Implement its shared adapter/composition and
-separate-provider target boundary without adding VR multiplayer behavior. Retain
-desktop regression evidence and C-R1 boundaries; do not choose VR authority,
-state, pose, locomotion, interaction, or gameplay behavior implicitly.
+options in ADR-0054 are approved and implemented at `54999379a2`, merged to VR
+at `44c8d7d8ea`. Owner implementation acceptance remains. After acceptance,
+Slice 9.3 needs its optional-pose capability/schema decision packet before code.
+Retain desktop regression evidence and C-R1 boundaries; do not choose VR
+authority, state, pose, locomotion, interaction, or gameplay behavior implicitly.
 
 ## Active files
 
@@ -185,6 +197,16 @@ state, pose, locomotion, interaction, or gameplay behavior implicitly.
   `scripts/verify_openmw_vr_target.py`
 
 ## Last verified
+
+Slice 9.2 separates the engine-neutral adapter/client connection from the
+desktop provider target and links the same adapter/session lineage into desktop
+and VR. MSVC 19.51 RelWithDebInfo `openmw.exe` and `openmw_vr.exe` link with
+SHA-256 `c1d1240cee9ccbea75566f054d11befba22603efbebce5d96533ec5a1c114523`
+and `74c7862860d0dfaa8f0db5451e6e705e5bd4c642914d453d75f1a3482ee7b9ce`.
+Desktop Debug adapter contracts, all 141 desktop repository Python tests, the
+desktop registry, VR Debug adapter contracts, the exact 11 VR tests, the VR
+registry/verifier, shared-commit ancestry, and diff hygiene pass. Slice 9.2
+remains **In Progress** pending owner implementation acceptance.
 
 Slice 9.1 pins the VR source to
 `56a8e01390507375c9c2f2593e1c09e0df88c505`, the OpenXR-SDK tag used by that

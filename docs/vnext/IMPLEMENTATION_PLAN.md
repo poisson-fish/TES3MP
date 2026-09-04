@@ -705,7 +705,7 @@ Depends on: Phase 8.
 | Slice | Deliverable | Status | Completion evidence |
 |---|---|---|---|
 | 9.1 | Review PC VR maintenance options with the owner, approve ADR-0008, and create the worktree/patch target | **Implemented** | ADR-0008 A/A/A and temporary composition A approved; `vnext-vr` records exact two-parent merge `0e8e85e0b5`, proof `c590e81cc5`, and rehearsal-safety test `ff04803ec2`; immutable OpenXR acquisition/offline reuse, registry verification, fresh MSVC 19.51 `openmw_vr.exe` link, all 137 desktop Python regressions, and owner implementation acceptance pass |
-| 9.2 | Build the same adapter/client-session targets against desktop and PC VR engines | **In Progress** | ADR-0054 Option A and its acceptance tests are approved; implementation and verification remain |
+| 9.2 | Build the same adapter/client-session targets against desktop and PC VR engines | **In Progress** | ADR-0054 Option A is implemented at shared commit `54999379a2` and VR merge `44c8d7d8ea`; desktop/VR links, adapter contracts, target boundaries, registries, and focused regressions pass; owner implementation acceptance remains |
 | 9.3 | Add optional `vr_pose` capability and bounded head/hand pose snapshot schema | **Not Started** | Negotiation, absent/unknown capability, bounds, round-trip, and fuzz tests pass |
 | 9.4 | Implement VR input and presentation providers using semantic commands | **Not Started** | Locomotion command behavior matches desktop authority rules |
 | 9.5 | Sample pose data independently of tracking/render rate and network snapshot rate | **Not Started** | Rate-limit, latest-wins, stale-pose, and buffer tests pass |

@@ -5796,6 +5796,35 @@ only the relevant phase section here.
   - Follow-ups: implement on `vnext`, merge the shared commit into `vnext-vr`,
     and run desktop/VR build and boundary gates without adding gameplay behavior.
 
+- 2026-09-03 — Slice 9.2 implementation candidate — **In Progress**
+  - Change: shared commit `54999379a2` splits the engine-neutral adapter and
+    client connection from `TES3MP::OpenMWDesktopProviders`, renames the common
+    connection surface, and makes desktop and VR link the same adapter/session
+    targets. Missing providers fail before endpoint, credential, transport, or
+    runtime work. VR merge `44c8d7d8ea` retains fork startup and records the two
+    expected `main.cpp`/CMake resolutions as P9-002 with both exact parents.
+  - Decisions: implemented only approved ADR-0054 Option A. VR concrete
+    providers remain absent; explicit VR multiplayer enable returns the
+    sanitized unavailable-provider failure. No new engine hook, protocol,
+    authority, canonical state, pose, input, locomotion, interaction,
+    presentation, or gameplay behavior was added.
+  - Desktop verification: MSVC 19.51 Debug adapter contracts pass; MSVC 19.51
+    RelWithDebInfo `openmw.exe` links with SHA-256
+    `c1d1240cee9ccbea75566f054d11befba22603efbebce5d96533ec5a1c114523`;
+    all 141 repository Python tests pass in 48.270 seconds; and the desktop patch
+    registry plus diff hygiene pass.
+  - VR verification: MSVC 19.51 Debug adapter contracts pass; MSVC 19.51
+    RelWithDebInfo `openmw_vr.exe` links with SHA-256
+    `74c7862860d0dfaa8f0db5451e6e705e5bd4c642914d453d75f1a3482ee7b9ce`;
+    the exact 11 VR target/dependency/composition tests, VR registry verifier,
+    shared-commit ancestry, and diff hygiene pass. Desktop baseline-provenance
+    verification remains a desktop-worktree gate and is not run against the
+    intentionally different upstream VR tree.
+  - Owner review: implementation evidence is ready; Slice 9.2 remains **In
+    Progress** pending explicit owner acceptance.
+  - Follow-ups: obtain Slice 9.2 implementation acceptance before beginning the
+    Slice 9.3 optional pose-capability decision packet.
+
 - Head and hand transforms are presentation snapshots associated with a player
   root and authority epoch. They are not persisted as durable world state.
 - Physical reach validation uses the authoritative root plus declared limits;
