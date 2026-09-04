@@ -1,6 +1,6 @@
 # ADR-0055: Phase 9 optional VR pose capability and schema
 
-Status: **Approved**
+Status: **Implemented**
 
 Date opened: 2026-09-03
 
@@ -212,6 +212,16 @@ in Slice 9.5.
   fidelity. Phase 12 must use a new versioned contract if it replaces it.
 - Sequence exhaustion disables further pose samples for that generation; it
   never wraps.
+
+## Implementation evidence
+
+Shared commit `c229946842` implements the approved protocol-only boundary and VR
+merge `eda058b92e` consumes it unchanged. Full desktop and VR protocol aggregates,
+all 145 desktop repository Python tests, 31 focused VR protocol/safety/proof
+tests, exact pinned FlatBuffers regeneration, desktop and VR boundary verifiers,
+and both RelWithDebInfo engine links pass. Runtime capability advertising,
+dispatch, transport mapping, authority, persistence, and gameplay behavior remain
+absent. Slice implementation acceptance remains a separate owner gate.
 
 ## Review and replacement triggers
 

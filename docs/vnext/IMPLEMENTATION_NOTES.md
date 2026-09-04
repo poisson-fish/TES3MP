@@ -5891,6 +5891,29 @@ only the relevant phase section here.
   - Follow-ups: finish the protocol-only candidate, run all required gates, and
     present implementation evidence for owner acceptance.
 
+- 2026-09-04 — Slice 9.3 implementation candidate — **In Progress**
+  - Change: shared commit `c229946842` adds stable optional `vr_pose` capability
+    ID 1, a 1 KiB presentation frame class, distinct `T3VP`/`T3VR` FlatBuffer
+    roots, owned bounded pose values, pure verifier-first codecs, recency
+    classification, mutation corpus, fuzzer entrypoint, and contract tests.
+    VR merge `eda058b92e` carries the same shared implementation.
+  - Boundary: production offers remain empty; presentation frames have no
+    transport mapping or runtime dispatch. Pose remains ephemeral and cannot
+    mutate canonical state, authority, persistence, replay, reach, interaction,
+    or gameplay behavior. No GDR was needed.
+  - Verification: full desktop and VR MSVC 19.51 protocol aggregates pass; all
+    145 desktop repository Python tests and 31 focused VR protocol/safety/proof
+    tests pass; exact `flatc` 25.12.19 regeneration/proof, staged baseline,
+    desktop patch registry, VR target verifier, and diff hygiene pass.
+    RelWithDebInfo `openmw.exe` and `openmw_vr.exe` link with SHA-256
+    `c53fa7538a1ffc8cdcd88c74ef47127d023c9a72884d9a2dbe820b1093a4fd15` and
+    `504910034174f9696488beb69949155cc76b68940871af94a303df377ff89e19`.
+    Actual libFuzzer smoke remains Linux Clang 18 CI-only by policy; local
+    mutation/corpus and registration gates pass.
+  - Owner review: implementation evidence is ready; explicit acceptance remains.
+  - Follow-ups: obtain Slice 9.3 acceptance before beginning Slice 9.4 provider
+    decisions or implementation.
+
 - Head and hand transforms are presentation snapshots associated with a player
   root and authority epoch. They are not persisted as durable world state.
 - Physical reach validation uses the authoritative root plus declared limits;

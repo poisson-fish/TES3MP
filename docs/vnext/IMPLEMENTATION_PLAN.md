@@ -96,9 +96,9 @@ active-tree difference and dependency input.
 The tree contains independent protocol, transport, server-core, client-session,
 OpenMW-adapter, and test-support targets plus the Phase 7 dedicated server and
 headless client applications. Phases 0–8 have passed their exit gates. Phase 9
-is in progress. Slices 9.1 and 9.2 are implemented, and Slice 9.3 is at its
-owner-gated capability/schema decision; the plan table below is the authoritative
-status source.
+is in progress. Slices 9.1 and 9.2 are implemented, and Slice 9.3 has a verified
+implementation candidate pending owner acceptance; the plan table below is the
+authoritative status source.
 
 Historical pre-cutover state and exact Git mechanics remain available in
 [`PRE_CUTOVER_PROVENANCE.md`](PRE_CUTOVER_PROVENANCE.md), ADR-0001, and the
@@ -366,7 +366,7 @@ runtime or protocol name.
 | ADR-0052 | Phase 8 remote motion smoothing | Phase 8 | **Implemented** |
 | ADR-0053 | Phase 8 desktop reconnect and automation composition | Phase 8 | **Implemented** |
 | ADR-0054 | Phase 9 dual-engine adapter composition | Phase 9 | **Implemented** |
-| ADR-0055 | Phase 9 optional VR pose capability and schema | Phase 9 | **Approved** |
+| ADR-0055 | Phase 9 optional VR pose capability and schema | Phase 9 | **Implemented** |
 
 An ADR is complete only when it records considered alternatives, selection
 criteria, consequences, failure modes, a replacement/review trigger, and
@@ -707,7 +707,7 @@ Depends on: Phase 8.
 |---|---|---|---|
 | 9.1 | Review PC VR maintenance options with the owner, approve ADR-0008, and create the worktree/patch target | **Implemented** | ADR-0008 A/A/A and temporary composition A approved; `vnext-vr` records exact two-parent merge `0e8e85e0b5`, proof `c590e81cc5`, and rehearsal-safety test `ff04803ec2`; immutable OpenXR acquisition/offline reuse, registry verification, fresh MSVC 19.51 `openmw_vr.exe` link, all 137 desktop Python regressions, and owner implementation acceptance pass |
 | 9.2 | Build the same adapter/client-session targets against desktop and PC VR engines | **Implemented** | ADR-0054 Option A is implemented at shared commit `54999379a2` and VR merge `44c8d7d8ea`; desktop/VR links, adapter contracts, target boundaries, registries, focused regressions, and owner implementation acceptance pass |
-| 9.3 | Add optional `vr_pose` capability and bounded head/hand pose snapshot schema | **In Progress** | ADR-0055 Options A/A/A/A/A and corrected additive-compatibility test 8 approved; implementation and verification underway |
+| 9.3 | Add optional `vr_pose` capability and bounded head/hand pose snapshot schema | **In Progress** | ADR-0055 A/A/A/A/A is implemented at shared commit `c229946842` and VR merge `eda058b92e`; protocol, codec, corpus, compatibility, boundary, desktop/VR link, and repository gates pass; owner implementation acceptance remains |
 | 9.4 | Implement VR input and presentation providers using semantic commands | **Not Started** | Locomotion command behavior matches desktop authority rules |
 | 9.5 | Sample pose data independently of tracking/render rate and network snapshot rate | **Not Started** | Rate-limit, latest-wins, stale-pose, and buffer tests pass |
 | 9.6 | Implement desktop fallback pose and non-VR ignore behavior | **Not Started** | Desktop peers render safely; clients without capability ignore pose data |

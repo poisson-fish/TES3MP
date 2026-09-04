@@ -1,6 +1,6 @@
 # vNext working state
 
-Updated: 2026-09-03
+Updated: 2026-09-04
 
 Read this first, then only the linked active material. The authoritative tracker
 is the [implementation plan](IMPLEMENTATION_PLAN.md#phase-9--pc-vr-interoperability-gate).
@@ -10,10 +10,10 @@ is the [implementation plan](IMPLEMENTATION_PLAN.md#phase-9--pc-vr-interoperabil
 - Branch: `vnext`
 - Phase 7: **Implemented**
 - Phase 8: **Implemented**
-- Phase 9: **In Progress** (Slice 9.3 capability/schema decision gate)
+- Phase 9: **In Progress** (Slice 9.3 implementation acceptance gate)
 - Slice 9.1: **Implemented**
 - Slice 9.2: **Implemented**
-- Slice 9.3: **In Progress** (ADR-0055 Options A/A/A/A/A approved)
+- Slice 9.3: **In Progress** (verified candidate pending owner acceptance)
 - Slice 8.1: **Implemented**
 - Slice 8.2: **Implemented**
 - Slice 8.3: **Implemented**
@@ -36,9 +36,11 @@ is the [implementation plan](IMPLEMENTATION_PLAN.md#phase-9--pc-vr-interoperabil
   [GDR-0014](gdr/GDR-0014-phase8-desktop-movement-and-correction.md), and
   [GDR-0015](gdr/GDR-0015-phase8-remote-motion-presentation.md), and
   [GDR-0016](gdr/GDR-0016-phase8-disconnect-and-resume-presentation.md)
-- Latest implementation commit: `54999379a2` (`Share adapter composition across
-  desktop and VR`)
+- Latest implementation commit: `c229946842` (`Add optional bounded VR pose
+  protocol`)
 - Latest accepted VR target: `6945e9bf48` (`Merge Slice 9.2 acceptance`)
+- Latest VR implementation candidate: `eda058b92e` (`Merge Slice 9.3 optional VR
+  pose protocol`)
 
 ## Working synopsis
 
@@ -171,10 +173,11 @@ accepted and complete at implementation `93690354d1`. Slice 9.1's approved
 maintenance target and verified candidate are complete on `vnext-vr` at
 `c590e81cc5`, with rehearsal-safety proof at `ff04803ec2`; owner implementation
 acceptance is recorded. Slice 9.2's ADR-0054 Option A is implemented at
-`54999379a2` and owner-accepted on the VR target at `6945e9bf48`. Slice 9.3 now
-has approved capability/schema Options A/A/A/A/A in ADR-0055, including the
-Decision 5 correction that preserves ADR-0004 additive compatibility. Complete
-the protocol-only implementation and verification. Retain desktop regression evidence and C-R1 boundaries;
+`54999379a2` and owner-accepted on the VR target at `6945e9bf48`. Slice 9.3's
+approved ADR-0055 A/A/A/A/A package is implemented at `c229946842` and merged
+into `vnext-vr` at `eda058b92e`. All applicable protocol, compatibility,
+boundary, desktop/VR build, and repository gates pass. Obtain explicit owner
+implementation acceptance before Slice 9.4. Retain desktop regression evidence and C-R1 boundaries;
 do not choose VR authority, state, pose, locomotion, interaction, or gameplay
 behavior implicitly.
 
@@ -200,6 +203,22 @@ behavior implicitly.
   `scripts/verify_openmw_vr_target.py`
 
 ## Last verified
+
+Slice 9.3 reserves optional capability ID 1 and adds distinct bounded client and
+server pose roots under a 1 KiB presentation frame class. The pure verifier-first
+codecs own all values, require head tracking, preserve independently absent hands,
+enforce root-relative numeric and sequence/generation bounds, accept verified
+additive optional fields, and reject malformed classification or payload data.
+Production capability offers, dispatch, transport mapping, persistence,
+authority, and gameplay behavior remain absent. Commit `c229946842` passes the
+full MSVC 19.51 protocol aggregate and all 145 repository Python tests; the exact
+pinned FlatBuffers regeneration/proof passes with `flatc` 25.12.19. The same
+commit is merged into `vnext-vr` at `eda058b92e`; its full protocol aggregate and
+31 focused protocol/safety/proof tests pass, and the VR target verifier passes.
+RelWithDebInfo `openmw.exe` and `openmw_vr.exe` link with SHA-256
+`c53fa7538a1ffc8cdcd88c74ef47127d023c9a72884d9a2dbe820b1093a4fd15` and
+`504910034174f9696488beb69949155cc76b68940871af94a303df377ff89e19`.
+Slice 9.3 remains **In Progress** pending owner implementation acceptance.
 
 Slice 9.2 separates the engine-neutral adapter/client connection from the
 desktop provider target and links the same adapter/session lineage into desktop
