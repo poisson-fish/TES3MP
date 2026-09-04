@@ -96,8 +96,8 @@ active-tree difference and dependency input.
 The tree contains independent protocol, transport, server-core, client-session,
 OpenMW-adapter, and test-support targets plus the Phase 7 dedicated server and
 headless client applications. Phases 0–8 have passed their exit gates. Phase 9
-is next and begins with the owner-gated PC VR maintenance decision in Slice 9.1;
-the plan table below is the authoritative status source.
+is in progress at the owner-gated PC VR maintenance decision in Slice 9.1; the
+plan table below is the authoritative status source.
 
 Historical pre-cutover state and exact Git mechanics remain available in
 [`PRE_CUTOVER_PROVENANCE.md`](PRE_CUTOVER_PROVENANCE.md), ADR-0001, and the
@@ -116,7 +116,7 @@ implementation notes. They are evidence, not current setup instructions.
 | 6 | Maintained transport and secure network session | **Implemented** | Phase 5 |
 | 7 | Headless end-to-end multiplayer slice | **Implemented** | Phase 6 |
 | 8 | OpenMW desktop vertical slice | **Implemented** | Phase 7 |
-| 9 | PC VR interoperability gate | **Not Started** | Phase 8 |
+| 9 | PC VR interoperability gate | **In Progress** | Phase 8 |
 | 10 | Player lifecycle and content identity | **Not Started** | Phase 9 |
 | 11 | Canonical cells, interest, and resynchronization | **Not Started** | Phase 10 |
 | 12 | Production movement, animation, and pose replication | **Not Started** | Phase 11 |
@@ -318,7 +318,7 @@ runtime or protocol name.
 | ADR-0005 | Transport, encryption, authentication, and session resumption | Phase 6 | **Implemented** |
 | ADR-0006 | Authority, state-scope, prediction, and presentation policy | Phase 7 | **Implemented** |
 | ADR-0007 | OpenMW hook and patch-queue policy | Phase 8 | **Implemented** |
-| ADR-0008 | PC VR fork/worktree maintenance policy | Phase 9 | **Not Started** |
+| ADR-0008 | PC VR fork/worktree maintenance policy | Phase 9 | **In Progress** |
 | ADR-0009 | Scripting language, runtime, isolation, and API model | Phase 19 | **Not Started** |
 | ADR-0010 | Persistence store, schema evolution, backup, and replay model | Phase 20 | **Not Started** |
 | ADR-0011 | Administration authorization, audit, and discovery exposure | Phase 21 | **Not Started** |
@@ -693,7 +693,7 @@ Implementation history: [Phase 8 notes](IMPLEMENTATION_NOTES.md#phase-8--openmw-
 
 ### Phase 9 — PC VR interoperability gate
 
-Status: **Not Started**
+Status: **In Progress**
 
 Outcome: desktop OpenMW and the maintained PC OpenMW-VR target interoperate using
 one protocol, one client session, and optional sampled pose presentation.
@@ -702,7 +702,7 @@ Depends on: Phase 8.
 
 | Slice | Deliverable | Status | Completion evidence |
 |---|---|---|---|
-| 9.1 | Review PC VR maintenance options with the owner, approve ADR-0008, and create the worktree/patch target | **Not Started** | Owner-approved fork revision, rebase/update procedure, and patch ownership are recorded |
+| 9.1 | Review PC VR maintenance options with the owner, approve ADR-0008, and create the worktree/patch target | **In Progress** | [ADR-0008](adr/ADR-0008-pc-vr-fork-worktree-maintenance-policy.md) decision packet prepared; owner approval, worktree/patch target, and verification remain |
 | 9.2 | Build the same adapter/client-session targets against desktop and PC VR engines | **Not Started** | Shared code is not copied; both targets build in their supported environments |
 | 9.3 | Add optional `vr_pose` capability and bounded head/hand pose snapshot schema | **Not Started** | Negotiation, absent/unknown capability, bounds, round-trip, and fuzz tests pass |
 | 9.4 | Implement VR input and presentation providers using semantic commands | **Not Started** | Locomotion command behavior matches desktop authority rules |

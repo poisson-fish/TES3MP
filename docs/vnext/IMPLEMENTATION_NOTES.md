@@ -5669,6 +5669,33 @@ only the relevant phase section here.
 
 [Back to the phase tracker](IMPLEMENTATION_PLAN.md#phase-9--pc-vr-interoperability-gate)
 
+- 2026-09-03 — Slice 9.1 — **In Progress**
+  - Change: completed read-only maintained-fork research and prepared the full
+    proposed [ADR-0008](adr/ADR-0008-pc-vr-fork-worktree-maintenance-policy.md)
+    owner decision packet. No remote, branch, worktree, registry schema,
+    dependency lock, merge, or production code was changed.
+  - Decisions: pending owner review. The packet recommends immutable OpenMW-VR
+    tag `openmw-vr-0.51-rc1` at `56a8e01390507375c9c2f2593e1c09e0df88c505`,
+    a same-repository `vnext-vr` merge-overlay branch in a sibling worktree, and
+    the retained vNext dependency locks plus an exact OpenXR-SDK commit lock.
+  - Verification: `git status --short --branch`; `git worktree list
+    --porcelain`; exact `git ls-remote` queries against OpenMW, OpenMW-VR, and
+    Khronos OpenXR-SDK; GitLab project/ref/merge-base/compare/pipeline APIs;
+    GitHub Actions run/job/artifact APIs; SHA-256 verification of the exact VR
+    source archive; SHA-512 verification of the fork `m1.0` Windows bundle;
+    SHA-256 verification of OpenXR-SDK commit
+    `1ca7bec6b531185530c9b4f1e7a50e1fd55e7641`; and local VR/desktop path-
+    collision comparison. The exact VR tag passed upstream GitHub Ubuntu and
+    Windows 2022 jobs; its GitLab pipeline had passing Linux and Windows MSBuild
+    jobs but failing Windows Ninja jobs. The VR tree overlaps 10 registered P8
+    paths, all named in ADR-0008. Local relative-link and trailing-whitespace
+    checks, `git diff --check`, `python scripts/verify_openmw_patch_registry.py`,
+    and `python -m unittest scripts.tests.test_openmw_patch_registry` pass.
+  - Owner review: requested for ADR-0008 Decisions 1 through 3. No approval is
+    inferred from this packet.
+  - Follow-ups: after explicit approval, create and verify only the approved
+    Slice 9.1 remote/branch/worktree, provenance, registry, and baseline proof.
+
 - Head and hand transforms are presentation snapshots associated with a player
   root and authority epoch. They are not persisted as durable world state.
 - Physical reach validation uses the authoritative root plus declared limits;
