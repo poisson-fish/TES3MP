@@ -5032,6 +5032,40 @@ only the relevant phase section here.
 
 ## Phase 8 — OpenMW desktop vertical slice
 
+### 2026-09-03 — Remote-replica architecture review reopened
+
+- Status: **In Progress**; production correction is paused at an owner decision
+  gate. ADR-0050, GDR-0013, and P8-004 require review before more remote-avatar
+  implementation.
+- Legacy finding: archived TES3MP 0.8.1 represented each remote player as a
+  real dynamically created NPC reference placed in the world. It reused normal
+  movement, animation, equipment, spells, death, collision, cell movement, and
+  map-marker facilities while overwriting state from network data. Containing
+  local simulation then required `DedicatedPlayer` checks across 16 OpenMW
+  engine files spanning classes, mechanics, combat, spellcasting, physics,
+  scripts, inventory, and world movement.
+- Current finding: vNext avoided that cross-cutting model by specifying a
+  renderer-only transient NPC. The implementation nevertheless constructs an
+  `MWWorld::ManualRef`, initializes NPC stats, spells, race powers, AI packages,
+  inventory and auto-equipment, consumes the engine PRNG, and attaches an
+  inventory listener before rendering. The real-content failure is collapsed
+  to one generic presentation error, and current automated tests do not create
+  the concrete provider against real content.
+- Decision gate: choose between retaining the renderer-only proxy, restoring a
+  legacy-style normal actor with exclusions, or designing a first-class
+  ephemeral replicated-actor role with explicit subsystem participation. The
+  last option is recommended for research, but no role model, subsystem scope,
+  or behavior has been selected.
+- Verification: read-only `git show`/`git grep` inspection of the permanent
+  `tes3mp-0.8.1-archive` tag and current OpenMW 0.51 source; the archive contains
+  16 engine files that directly classify dedicated players. No legacy packet,
+  processor, or implementation was copied.
+- Follow-up: owner selects review scope. Then inventory OpenMW 0.51 registration
+  boundaries and approve authority, lifecycle, subsystem-participation, and
+  compatibility contracts before rewriting decisions or production code.
+
+[Back to the phase tracker](IMPLEMENTATION_PLAN.md#phase-8--openmw-desktop-vertical-slice)
+
 ### 2026-09-03 — Slice 8.7 first content-backed run
 
 - Status: **In Progress**; the flow fails before bounded evidence completes.

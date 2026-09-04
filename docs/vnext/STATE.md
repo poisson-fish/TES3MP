@@ -100,8 +100,15 @@ NPC `player`. Licensed Steam content later appeared at the default path. The
 runner now forwards explicit fallback archives; with the pinned dependency
 runtime paths and `Morrowind.bsa`, both clients reach the approved interior but
 close on remote presentation with avatar `player`. No alternate content record
-or presentation behavior has been chosen. Phase 9 remains gated on diagnosis,
-the complete content-backed run, and owner acceptance.
+or presentation behavior has been chosen.
+
+The remote-avatar architecture decision is reopened. Legacy TES3MP used real
+dynamic NPC actors and then patched dedicated-player exceptions through 16
+OpenMW engine files. The current nominal renderer-only seam avoids world
+registration but still initializes full NPC stats, spells, AI, inventory,
+auto-equipment, PRNG state, and an inventory render listener. ADR-0050,
+GDR-0013, and P8-004 require owner review before correction. Phase 9 remains
+gated on that decision, the complete content-backed run, and owner acceptance.
 
 ## Active files
 
@@ -131,6 +138,13 @@ the complete content-backed run, and owner acceptance.
 - Evidence: [Phase 8 notes](IMPLEMENTATION_NOTES.md#phase-8--openmw-desktop-vertical-slice)
 
 ## Last verified
+
+Read-only inspection of `tes3mp-0.8.1-archive` confirms remote players were
+normal dynamically created world actors whose local behavior was constrained
+by direct dedicated-player checks across 16 OpenMW engine files. Current-source
+inspection confirms P8-004's renderer-only claim does not match its full NPC
+custom-data initialization path. No legacy implementation was copied and no
+replacement architecture has been selected.
 
 The first content-backed Slice 8.7 flow reaches the approved interior in two
 real OpenMW processes after mounting `Morrowind.bsa`, then both connections
