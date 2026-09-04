@@ -5783,6 +5783,19 @@ only the relevant phase section here.
     the selected target/composition boundary on `vnext`, merge that commit into
     `vnext-vr`, and run both supported build gates.
 
+- 2026-09-03 — Slice 9.2 ADR-0054 Option A approved — **In Progress**
+  - Change: recorded owner approval of the dual-engine target/composition
+    boundary and proposed acceptance tests. Production implementation begins
+    only after this gate record.
+  - Decisions: one shared adapter/composition target, separate desktop and
+    future VR provider targets, and fail-closed VR enable until approved Slice
+    9.4 providers exist.
+  - Verification: documentation-only gate; `git diff --check` and relative-link
+    validation pass.
+  - Owner review: explicit `a approved` response on 2026-09-03.
+  - Follow-ups: implement on `vnext`, merge the shared commit into `vnext-vr`,
+    and run desktop/VR build and boundary gates without adding gameplay behavior.
+
 - Head and hand transforms are presentation snapshots associated with a player
   root and authority epoch. They are not persisted as durable world state.
 - Physical reach validation uses the authoritative root plus declared limits;

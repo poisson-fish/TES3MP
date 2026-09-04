@@ -10,9 +10,9 @@ is the [implementation plan](IMPLEMENTATION_PLAN.md#phase-9--pc-vr-interoperabil
 - Branch: `vnext`
 - Phase 7: **Implemented**
 - Phase 8: **Implemented**
-- Phase 9: **In Progress** (Slice 9.2 architecture/build decision gate)
+- Phase 9: **In Progress** (Slice 9.2 implementation)
 - Slice 9.1: **Implemented**
-- Slice 9.2: **Not Started** (architecture/build options require owner approval)
+- Slice 9.2: **In Progress** (ADR-0054 Option A approved)
 - Slice 8.1: **Implemented**
 - Slice 8.2: **Implemented**
 - Slice 8.3: **Implemented**
@@ -22,7 +22,7 @@ is the [implementation plan](IMPLEMENTATION_PLAN.md#phase-9--pc-vr-interoperabil
 - Slice 8.7: **Implemented**
 - Governing decisions: [ADR-0007](adr/ADR-0007-openmw-hook-patch-queue-policy.md),
   [ADR-0008](adr/ADR-0008-pc-vr-fork-worktree-maintenance-policy.md),
-  proposed [ADR-0054](adr/ADR-0054-phase9-dual-engine-adapter-composition.md),
+  [ADR-0054](adr/ADR-0054-phase9-dual-engine-adapter-composition.md),
   [ADR-0047](adr/ADR-0047-phase8-adapter-lifecycle-and-provider-boundary.md),
   [ADR-0048](adr/ADR-0048-canonical-revision-and-simulation-tick-separation.md),
   [ADR-0049](adr/ADR-0049-phase8-desktop-connection-composition.md),
@@ -160,7 +160,8 @@ accepted and complete at implementation `93690354d1`. Slice 9.1's approved
 maintenance target and verified candidate are complete on `vnext-vr` at
 `c590e81cc5`, with rehearsal-safety proof at `ff04803ec2`; owner implementation
 acceptance is recorded. Slice 9.2 is next, but present its architecture/build
-options in proposed ADR-0054 before adding VR multiplayer composition. Retain
+options in ADR-0054 are approved. Implement its shared adapter/composition and
+separate-provider target boundary without adding VR multiplayer behavior. Retain
 desktop regression evidence and C-R1 boundaries; do not choose VR authority,
 state, pose, locomotion, interaction, or gameplay behavior implicitly.
 

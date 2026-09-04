@@ -1,6 +1,6 @@
 # ADR-0054: Phase 9 dual-engine adapter composition
 
-Status: **Proposed**
+Status: **Accepted**
 
 Date opened: 2026-09-03
 
@@ -144,4 +144,8 @@ replaces the local executable seam.
 
 ## Owner approval
 
-Pending. No option is approved by this proposal.
+The project owner approved Option A and the proposed acceptance tests on
+2026-09-03. This approval covers only the shared adapter/composition target,
+separate provider targets, and fail-closed VR enable boundary described above.
+It does not approve VR input, locomotion, pose, interaction, presentation, or
+other gameplay behavior.
