@@ -95,10 +95,9 @@ active-tree difference and dependency input.
 
 The tree contains independent protocol, transport, server-core, client-session,
 OpenMW-adapter, and test-support targets plus the Phase 7 dedicated server and
-headless client applications. Phases 0–7 have passed their exit gates. Phase 8
-is active: Slice 8.1 is implemented and Slices 8.2–8.7 have complete local
-content-backed evidence but await owner acceptance; the plan table below is the
-authoritative status source.
+headless client applications. Phases 0–8 have passed their exit gates. Phase 9
+is next and begins with the owner-gated PC VR maintenance decision in Slice 9.1;
+the plan table below is the authoritative status source.
 
 Historical pre-cutover state and exact Git mechanics remain available in
 [`PRE_CUTOVER_PROVENANCE.md`](PRE_CUTOVER_PROVENANCE.md), ADR-0001, and the
@@ -116,7 +115,7 @@ implementation notes. They are evidence, not current setup instructions.
 | 5 | Deterministic authoritative server core | **Implemented** | Phase 4 |
 | 6 | Maintained transport and secure network session | **Implemented** | Phase 5 |
 | 7 | Headless end-to-end multiplayer slice | **Implemented** | Phase 6 |
-| 8 | OpenMW desktop vertical slice | **In Progress** | Phase 7 |
+| 8 | OpenMW desktop vertical slice | **Implemented** | Phase 7 |
 | 9 | PC VR interoperability gate | **Not Started** | Phase 8 |
 | 10 | Player lifecycle and content identity | **Not Started** | Phase 9 |
 | 11 | Canonical cells, interest, and resynchronization | **Not Started** | Phase 10 |
@@ -665,7 +664,7 @@ Implementation history: [Phase 7 notes](IMPLEMENTATION_NOTES.md#phase-7--headles
 
 ### Phase 8 — OpenMW desktop vertical slice
 
-Status: **In Progress**
+Status: **Implemented**
 
 Outcome: a thin OpenMW 0.51 adapter completes the headless slice with two real
 desktop clients while keeping engine-specific behavior isolated.
@@ -675,12 +674,12 @@ Depends on: Phase 7.
 | Slice | Deliverable | Status | Completion evidence |
 |---|---|---|---|
 | 8.1 | Inventory the minimum required OpenMW hooks and review the final patch surface with the owner | **Implemented** | ADR-0007 records owner-approved Option A and exact P8-001 through P8-003 paths, needs, tests, dispositions, and removal conditions |
-| 8.2 | Implement the adapter lifecycle and desktop input/presentation provider interfaces | **In Progress** | ADR-0047 orchestration, provider boundary, concrete coordinator, and configuration-gated executable attachment are verified; owner demo remains |
-| 8.3 | Connect/authenticate/join from OpenMW with actionable UI errors | **In Progress** | ADR-0049 records approved configuration, credential, timeout, and status policy; executable connection composition, sanitized visible runtime errors, and the MSVC `/MD` real-network `openmw.exe` link are verified; owner demo remains |
-| 8.4 | Map interior/exterior cell changes and spawn/despawn remote player presentation | **In Progress** | Owner-approved C-R1 is implemented: a first-class default-deny replicated-actor render role with passive local idle only, typed failures, non-interactive visibility, and no gameplay registration. Focused/negative gates and the two-client content-backed cell flow pass; owner acceptance remains |
-| 8.5 | Convert input to semantic movement commands and apply authoritative local correction | **In Progress** | Approved ADR-0051/GDR-0014 implemented in `c4b9cb1cec`: deterministic planar mapping, one-pending/latest intent coordination, ordered stale-revision convergence, and exact same-cell correction pass automated gates; owner two-client desktop demo remains |
-| 8.6 | Interpolate/extrapolate remote movement through a bounded jitter buffer | **In Progress** | Approved ADR-0052/GDR-0015 implemented in `ceb8e11d1f`: provider-owned four-sample client-local buffering, two-tick interpolation, three-tick extrapolation/hold, bounded correction/hard snaps, reset rules, and typed metrics pass automated gates; owner demo remains |
-| 8.7 | Implement disconnect/resume presentation and automate the two-client slice | **In Progress** | Approved ADR-0053/GDR-0016 plus C-R1 pass the complete real-content gate: two-client cell flow, 32 resumes, 60-second soak, unchanged bounded-RSS rule, and zero queue drain. Testing-only diagnostics retain logs and bounded samples; owner acceptance remains |
+| 8.2 | Implement the adapter lifecycle and desktop input/presentation provider interfaces | **Implemented** | ADR-0047 orchestration, provider boundary, concrete coordinator, configuration-gated attachment, focused contracts, and the accepted two-client demonstration pass |
+| 8.3 | Connect/authenticate/join from OpenMW with actionable UI errors | **Implemented** | ADR-0049 configuration, bounded credential loading, executable composition, sanitized visible failures, `/MD` real-network link, and accepted live connection evidence pass |
+| 8.4 | Map interior/exterior cell changes and spawn/despawn remote player presentation | **Implemented** | Accepted C-R1 provides a first-class default-deny replicated-actor render role with passive local idle, typed failures, non-interactive visibility, and no gameplay registration; focused/negative and real-content cell-flow gates pass |
+| 8.5 | Convert input to semantic movement commands and apply authoritative local correction | **Implemented** | ADR-0051/GDR-0014 deterministic planar mapping, bounded intent coordination, stale-revision convergence, exact correction, and accepted two-client movement evidence pass |
+| 8.6 | Interpolate/extrapolate remote movement through a bounded jitter buffer | **Implemented** | ADR-0052/GDR-0015 four-sample buffering, interpolation/extrapolation/hold, correction/hard snaps, reset rules, typed metrics, and accepted live remote-motion evidence pass |
+| 8.7 | Implement disconnect/resume presentation and automate the two-client slice | **Implemented** | ADR-0053/GDR-0016 plus C-R1 pass the accepted complete real-content gate: two-client cell flow, 32 resumes, 60-second soak, unchanged bounded-RSS rule, and zero queue drain |
 
 Exit gate:
 

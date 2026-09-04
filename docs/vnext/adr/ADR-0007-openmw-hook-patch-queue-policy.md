@@ -532,3 +532,11 @@ protocol, server-core, or transport change is approved. Discovering that one of
 those paths is necessary reopens owner review before implementation expands.
 P8-001 through P8-003 and all dependency, main-thread, bounded-work, registry,
 and upstream-contact rules remain unchanged.
+
+## 2026-09-03 C-R1 implementation acceptance
+
+The project owner accepted implementation `93690354d1` after the exact P8-004
+registry, provenance, negative-registration, build, and real-content gates
+passed. The accepted implementation did not add an unlisted OpenMW subsystem
+path. Phase 8 is complete; ADR-0008 and Phase 9 now own any PC VR fork,
+worktree, or provider expansion.

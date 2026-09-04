@@ -5032,6 +5032,34 @@ only the relevant phase section here.
 
 ## Phase 8 — OpenMW desktop vertical slice
 
+### 2026-09-03 — Phase 8 C-R1 implementation accepted and exit gate closed
+
+- Status: **Implemented**. Slices 8.2–8.7 and Phase 8 are complete; Phase 9 is
+  next but remains **Not Started**.
+- Owner review: the project owner explicitly accepted C-R1 implementation
+  `93690354d1` and its retained real-content evidence on 2026-09-03.
+- Exit decision: the accepted desktop flow covers the engine-specific boundary;
+  the same engine-independent protocol, transport, and client-session runtime
+  already passes the approved deterministic adverse-network matrix from Phase
+  7, and OpenMW adds no alternate network/session path. Independent target
+  boundary tests still build without OpenMW, while P8-001 through P8-004 remain
+  fully documented and registry-verified. All three Phase 8 exit conditions are
+  therefore satisfied without waiving or changing a threshold.
+- Evidence: implementation `93690354d1`; `c-r1-final-5` two-client movement and
+  interior/exterior leave-return; 32/32 resumes; two successful 60-second soak
+  clients; unchanged RSS-window rule; reliable/latest queue high water within
+  cap and zero final depth; 4/4 focused engine tests; adapter contracts; 137/137
+  repository-owned Python tests; 342-entry staged provenance with 69 dependency
+  inputs; 4,021-path staged legacy exclusion; and clean staged diff/registry
+  checks.
+- Boundaries retained: server authority, client-local replica lifetime, C-R1's
+  default-deny subsystem matrix, memory-only credentials, platform-neutral
+  protocol/session targets, and no legacy source remain unchanged.
+- Follow-up: begin Phase 9 Slice 9.1 with read-only PC OpenMW-VR maintenance
+  research and a complete ADR-0008 owner decision packet. Do not select a fork,
+  create the worktree/patch target, change production code, or choose VR
+  subsystem behavior before owner approval.
+
 ### 2026-09-03 — C-R1 replicated actor implemented and locally verified
 
 - Status: **In Progress**; the approved implementation and complete local

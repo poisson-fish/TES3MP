@@ -3,20 +3,21 @@
 Updated: 2026-09-03
 
 Read this first, then only the linked active material. The authoritative tracker
-remains the [implementation plan](IMPLEMENTATION_PLAN.md#phase-8--openmw-desktop-vertical-slice).
+is the [implementation plan](IMPLEMENTATION_PLAN.md#phase-9--pc-vr-interoperability-gate).
 
 ## Current position
 
 - Branch: `vnext`
 - Phase 7: **Implemented**
-- Phase 8: **In Progress**
+- Phase 8: **Implemented**
+- Phase 9: **Not Started** (next; Slice 9.1 owner decision gate)
 - Slice 8.1: **Implemented**
-- Slice 8.2: **In Progress** (owner acceptance remains)
-- Slice 8.3: **In Progress**
-- Slice 8.4: **In Progress**
-- Slice 8.5: **In Progress** (owner acceptance remains)
-- Slice 8.6: **In Progress** (owner acceptance remains)
-- Slice 8.7: **In Progress** (owner acceptance remains)
+- Slice 8.2: **Implemented**
+- Slice 8.3: **Implemented**
+- Slice 8.4: **Implemented**
+- Slice 8.5: **Implemented**
+- Slice 8.6: **Implemented**
+- Slice 8.7: **Implemented**
 - Governing decisions: [ADR-0007](adr/ADR-0007-openmw-hook-patch-queue-policy.md),
   [ADR-0047](adr/ADR-0047-phase8-adapter-lifecycle-and-provider-boundary.md),
   [ADR-0048](adr/ADR-0048-canonical-revision-and-simulation-tick-separation.md),
@@ -29,7 +30,7 @@ remains the [implementation plan](IMPLEMENTATION_PLAN.md#phase-8--openmw-desktop
   [GDR-0014](gdr/GDR-0014-phase8-desktop-movement-and-correction.md), and
   [GDR-0015](gdr/GDR-0015-phase8-remote-motion-presentation.md), and
   [GDR-0016](gdr/GDR-0016-phase8-disconnect-and-resume-presentation.md)
-- Latest implementation commit: `4735938383` (`Implement Phase 8 desktop reconnect automation`)
+- Latest implementation commit: `93690354d1` (`Implement C-R1 replicated actors`)
 
 ## Working synopsis
 
@@ -59,42 +60,40 @@ executable attachment is implemented. The owner-confirmed `/MD` Windows network
 runtime policy is now applied to the exact locked OpenSSL, Protobuf/Abseil, GNS,
 and c-ares inputs. Both dependency proofs pass, the manifest is regenerated, and
 the real-network RelWithDebInfo `openmw.exe` links. Sanitized runtime failures
-now appear through the approved normal OpenMW message-box path. The owner demo
-remains.
+now appear through the approved normal OpenMW message-box path. The accepted
+content-backed run exercises this complete composition.
 
-Slice 8.4 is now in progress. The owner approved the breaking corrective
+Slice 8.4 is implemented. The owner approved the breaking corrective
 package and P8-004 on 2026-09-03. Explicit snapshot target identity, tracked
 cell-transition receipts with one coalesced deferred transition, explicit
 fixture content mapping, typed provider failure closure, and renderer-only
 remote avatar reconciliation are implemented. C-R1 replaces the proxy with a
-first-class default-deny replica and the complete content-backed run passes;
-owner acceptance remains.
+first-class default-deny replica and the complete content-backed run passes.
 
-Slice 8.5 is now in progress under owner-approved ADR-0051/GDR-0014. The two
+Slice 8.5 is implemented under owner-approved ADR-0051/GDR-0014. The two
 provisional spatial intent bodies treat entity revision as observed context
 while retaining session, generation, entity, authority-epoch, identity,
 sequence, and domain validation. Desktop action input maps deterministically to
 bounded world velocity; one pending plus one latest desired intent bounds
 traffic; newer same-cell snapshots correct local position exactly. No new
-OpenMW hook was needed. Automated gates pass; the owner desktop demo remains.
+OpenMW hook was needed. Automated and accepted content-backed gates pass.
 
-Slice 8.6 is now in progress under owner-approved ADR-0052/GDR-0015. A
+Slice 8.6 is implemented under owner-approved ADR-0052/GDR-0015. A
 provider-owned four-sample client-local buffer now advances each frame from the
 injected monotonic clock, interpolates two ticks behind, extrapolates at most
 three ticks before holding, blends bounded corrections, hard-snaps larger or
 discontinuous state, clears with observation lifetime, and emits adapter-owned
-typed metrics. Automated and content-backed gates pass; owner acceptance remains. No
+typed metrics. Automated and content-backed gates pass. No
 protocol, canonical-state, authority, or OpenMW hook changed.
 
-Slice 8.7 is now in progress under ADR-0053/GDR-0016. The adapter owns one
+Slice 8.7 is implemented under ADR-0053/GDR-0016. The adapter owns one
 bounded sequential-runtime reconnect supervisor, memory-only rotating
 credentials, the original token deadline, one-second pre-auth retry pacing, and
 a resumed complete-snapshot continuity barrier. Disconnect clears remotes and
 suppresses multiplayer input until resume. A `BUILD_TESTING`-only typed driver
 and external flow/reconnect/soak harness are implemented. Automated and
-content-backed gates pass, including 32 resumes and the 60-second soak; owner
-acceptance remains. No new OpenMW hook, protocol,
-canonical state, authority, or persistence was added.
+content-backed gates pass, including 32 resumes and the 60-second soak. No new
+OpenMW hook, protocol, canonical state, authority, or persistence was added.
 
 The owner approved the GDR-0013 Option A demo mapping: interior
 `Seyda Neen, Census and Excise Office`, worldspace `sys::default`, and avatar
@@ -106,14 +105,15 @@ passes. No alternate content record or presentation behavior was chosen.
 
 The remote-avatar architecture decision was reopened. Legacy TES3MP used real
 dynamic NPC actors and then patched dedicated-player exceptions through 16
-OpenMW engine files. The current nominal renderer-only seam avoids world
-registration but still initializes full NPC stats, spells, AI, inventory,
+OpenMW engine files. The superseded nominal renderer-only seam avoided world
+registration but still initialized full NPC stats, spells, AI, inventory,
 auto-equipment, PRNG state, and an inventory render listener. ADR-0050,
 GDR-0013, and P8-004 require correction. The owner approved focused Option B
 research and then explicitly approved package C-R1 on 2026-09-03: a
 first-class, protocol-agnostic, default-deny replicated actor with rendering and
 passive renderer-local neutral idle only. The exact replacement and complete
-content-backed evidence now pass; Phase 9 remains gated on owner acceptance.
+content-backed evidence pass. The owner accepted the implementation and Phase 8
+exit evidence on 2026-09-03; Phase 9 is now eligible to begin.
 
 The focused OpenMW 0.51 boundary audit and complete
 [remote actor owner decision packet](REMOTE_ACTOR_OWNER_DECISION_PACKET.md) are
@@ -124,46 +124,32 @@ is focus/activation-visible through a renderer `PtrHolder`, and lacks the normal
 mechanics animation controller. The packet compares all three models,
 recommends default-deny package C-R1, names the exact replacement patch surface,
 and defines 16 acceptance scenarios. C-R1 is approved and implemented with its
-focused and real-content evidence; owner review is the active gate.
+focused and real-content evidence. The owner accepted the implementation and
+Phase 8 exit on 2026-09-03.
 
 ## Next-session handoff
 
 Read this file, the newest Phase 8 implementation note, and the
 [remote actor owner decision packet](REMOTE_ACTOR_OWNER_DECISION_PACKET.md).
-Review the implemented C-R1 replacement and retained `c-r1-final-5` evidence.
-If accepted, record owner acceptance and decide whether the shared content-backed
-run closes Slices 8.2–8.7 and the Phase 8 exit gate. Stop for owner review before
-adding any unlisted production subsystem path or behavior. Keep Phase 8
-**In Progress** and Phase 9 gated until that review is recorded.
+Phase 8 is accepted and complete at implementation `93690354d1`. Begin Phase 9
+with Slice 9.1 only: research maintained PC OpenMW-VR fork/worktree options and
+present the complete ADR-0008 owner decision packet before selecting a fork,
+creating a worktree/patch target, changing production code, or choosing VR
+subsystem behavior. Retain the desktop regression evidence and C-R1 boundaries.
 
 ## Active files
 
-- Governing policy: `docs/vnext/adr/ADR-0007-openmw-hook-patch-queue-policy.md`
-- Approved C-R1 specification:
-  `docs/vnext/REMOTE_ACTOR_OWNER_DECISION_PACKET.md`
-- Adapter coordinator/target: `apps/openmw/tes3mp/{adapter.hpp,adapter.cpp,CMakeLists.txt}`
-- Desktop composition: `apps/openmw/tes3mp/{desktop_connection.hpp,desktop_connection.cpp}`
-- Reusable runtime: `components/tes3mp/{include/tes3mp/client_session_runtime.hpp,client_session/client_session_runtime.cpp,tests/headless_client_tests.cpp}`
-- Provider/coordinator contracts: `apps/openmw/tes3mp/{providers.hpp,engine_coordinator.hpp,adapter_tests.cpp}`
-- Candidate lifecycle/frame seam: `apps/openmw/engine.{hpp,cpp}`
-- Executable/target composition: `apps/openmw/{main.cpp,CMakeLists.txt}`
-- Desktop options: `apps/openmw/options.cpp`
-- Desktop status presentation: `apps/openmw/main.cpp`
-- Cell/presentation providers: `apps/openmw/tes3mp/{desktop_providers.hpp,desktop_providers.cpp}`
-- Replicated-actor seam: `apps/openmw/mwrender/{replicatedactor.hpp,replicatedactor.cpp,objects.hpp,objects.cpp,animation.hpp,animation.cpp}`
-- Movement gate seams:
-  `apps/openmw/tes3mp/{providers.hpp,desktop_providers.cpp,adapter.cpp,movement_mapping.hpp,movement_mapping.cpp}` and
-  `components/tes3mp/{client_session/client_session_runtime.cpp,server_core/server_command_reducer.cpp}`
-- Remote smoothing gate seams:
-  `apps/openmw/tes3mp/{providers.hpp,desktop_providers.cpp,adapter.cpp,remote_motion.hpp,remote_motion.cpp}` and
-  `components/tes3mp/include/tes3mp/{command_primitives.hpp,observability.hpp}`
-- Disconnect/resume and automation gate seams:
-  `apps/openmw/tes3mp/{adapter.cpp,desktop_connection.cpp,desktop_automation.hpp,desktop_automation.cpp,providers.hpp}`,
-  `components/tes3mp/{include/tes3mp/client_session_runtime.hpp,client_session/client_session_runtime.cpp}`,
-  `scripts/run_phase8_desktop_demo.py`, and `scripts/tests/test_phase8_desktop_harness.py`
-- Patch registry: `docs/vnext/OPENMW_PATCH_REGISTRY.json`,
+- Phase 9 tracker: [implementation plan](IMPLEMENTATION_PLAN.md#phase-9--pc-vr-interoperability-gate)
+- Platform scope: `docs/vnext/adr/ADR-0002-platform-toolchain-policy.md`
+- OpenMW hook/VR boundary: `docs/vnext/adr/ADR-0007-openmw-hook-patch-queue-policy.md`
+- Accepted desktop baseline:
+  `docs/vnext/REMOTE_ACTOR_OWNER_DECISION_PACKET.md` and
+  [Phase 8 notes](IMPLEMENTATION_NOTES.md#phase-8--openmw-desktop-vertical-slice)
+- Maintained patch/provenance policy: `docs/vnext/OPENMW_PATCH_REGISTRY.json`,
+  `docs/vnext/BASELINE_PROVENANCE.json`, and
   `scripts/verify_openmw_patch_registry.py`
-- Evidence: [Phase 8 notes](IMPLEMENTATION_NOTES.md#phase-8--openmw-desktop-vertical-slice)
+- Phase 9 decision target: `docs/vnext/adr/ADR-0008-*.md` does not exist yet;
+  create it only as the complete owner decision packet after research.
 
 ## Last verified
 
@@ -182,8 +168,9 @@ clients and 13,791,232 bytes for the server, each within its observed reference
 window range. The retained evidence contains no credential and no typed replica
 failure. All 137 repository-owned Python tests, patch-registry verification,
 staged 342-entry provenance with 69 dependency inputs, staged legacy exclusion,
-and diff hygiene pass. Owner acceptance remains; no Phase 8 or Phase 9 status
-was advanced.
+and diff hygiene pass. The owner accepted this implementation and the shared
+Slices 8.2–8.7 demonstration on 2026-09-03. The Phase 8 exit gate is closed;
+Phase 9 remains **Not Started** pending its Slice 9.1 decision packet.
 
 Slice 8.7 content-backed demo preflight rebuilt the MSVC 19.51 RelWithDebInfo
 `tes3mp_server.exe` and passed all four focused desktop-harness Python contracts

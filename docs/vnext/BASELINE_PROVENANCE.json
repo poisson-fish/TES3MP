@@ -1172,7 +1172,7 @@
     {
       "path": "docs/vnext/REMOTE_ACTOR_OWNER_DECISION_PACKET.md",
       "status": "A",
-      "purpose": "OpenMW 0.51 three-model remote-actor comparison, owner-approved C-R1 decision, exact patch surface, acceptance scenarios, and implementation result."
+      "purpose": "OpenMW 0.51 three-model remote-actor comparison, owner-approved and accepted C-R1 decision, exact patch surface, acceptance scenarios, and implementation result."
     },
     {
       "path": "docs/vnext/STATE.md",

@@ -74,3 +74,10 @@ typed and fail-closed, and lifecycle misuse is observable. The exact approved
 surface and acceptance scenarios are normative in the
 [owner decision packet](../REMOTE_ACTOR_OWNER_DECISION_PACKET.md). Any need for
 an unlisted production subsystem path reopens owner review.
+
+## Implementation acceptance
+
+The project owner accepted C-R1 implementation `93690354d1` and the retained
+two-client cell-flow, reconnect, soak, bounded-RSS, and queue-drain evidence on
+2026-09-03. Slice 8.4 and the shared Phase 8 demonstration are complete. This
+acceptance does not broaden replica participation beyond the matrix above.

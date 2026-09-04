@@ -1,6 +1,6 @@
 # Remote actor owner decision packet
 
-Status: **C-R1 approved and implemented; owner acceptance remains gated**
+Status: **C-R1 implemented and accepted**
 
 Prepared: 2026-09-03
 
@@ -30,7 +30,7 @@ The explicit C-R1 approval and implementation result are recorded below.
 
 ## Retained decisions and non-decisions
 
-The following remain accepted and are not reopened:
+The following remained accepted during the decision and were not reopened:
 
 - the server is authoritative and an OpenMW object is client-local presentation,
   never canonical state;
@@ -45,10 +45,11 @@ The following remain accepted and are not reopened:
   session do not gain OpenMW types;
 - the approved fixture remains NPC record `player`; changing that record is a
   separate owner decision; and
-- Phase 8 stays **In Progress** and Phase 9 stays gated.
+- Phase 8 stays **In Progress** and Phase 9 stays gated until implementation
+  evidence and owner acceptance pass.
 
-At preparation time, the following were not approved: the replacement actor role, any new engine
-hook, actor collision, mechanics participation, Lua/script visibility,
+At preparation time, the following were not approved: the replacement actor
+role, any new engine hook, actor collision, mechanics participation, Lua/script visibility,
 activation, equipment behavior, locomotion animation semantics, persistence,
 or fallback to a different content record.
 
@@ -474,5 +475,10 @@ The focused engine, adapter, negative-registration, build, registry, and
 provenance gates pass. Retained real-content evidence in `c-r1-final-5` passes
 two-client movement and cell leave/return, exactly 32 resumes, two 60-second
 soak clients under the unchanged RSS-window rule, bounded queue high-water, and
-zero final queue depth. This evidence does not itself record owner acceptance or
-advance Phase 8.
+zero final queue depth.
+
+## Implementation acceptance
+
+The project owner accepted implementation `93690354d1` and its retained C-R1 /
+Phase 8 evidence on 2026-09-03. This closes the implementation acceptance gate
+without expanding the approved subsystem profile or patch surface.

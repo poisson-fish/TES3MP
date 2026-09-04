@@ -81,3 +81,11 @@ and lifecycle misuse follow the typed, fail-closed policy in the
 [owner decision packet](../REMOTE_ACTOR_OWNER_DECISION_PACKET.md). The two-client
 content-backed demo and negative-registration checks remain completion evidence,
 not waived by this approval.
+
+## 2026-09-03 C-R1 implementation acceptance
+
+The project owner accepted implementation `93690354d1` after both real-content
+clients passed authoritative movement and interior/exterior leave-return, the
+32-cycle resume proof passed, and both 60-second soak clients satisfied the
+unchanged memory and queue bounds. Slices 8.2–8.7 and the Phase 8 exit gate are
+complete without changing the approved player-visible or subsystem behavior.
