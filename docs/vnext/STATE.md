@@ -25,6 +25,7 @@ is the [implementation plan](IMPLEMENTATION_PLAN.md#phase-9--pc-vr-interoperabil
   [ADR-0008](adr/ADR-0008-pc-vr-fork-worktree-maintenance-policy.md),
   [ADR-0054](adr/ADR-0054-phase9-dual-engine-adapter-composition.md),
   [ADR-0055](adr/ADR-0055-phase9-optional-vr-pose-capability-and-schema.md),
+  proposed [ADR-0056](adr/ADR-0056-phase9-vr-provider-composition.md),
   [ADR-0047](adr/ADR-0047-phase8-adapter-lifecycle-and-provider-boundary.md),
   [ADR-0048](adr/ADR-0048-canonical-revision-and-simulation-tick-separation.md),
   [ADR-0049](adr/ADR-0049-phase8-desktop-connection-composition.md),
@@ -35,12 +36,11 @@ is the [implementation plan](IMPLEMENTATION_PLAN.md#phase-9--pc-vr-interoperabil
   [GDR-0013](gdr/GDR-0013-phase8-cell-transition-presentation.md), and
   [GDR-0014](gdr/GDR-0014-phase8-desktop-movement-and-correction.md), and
   [GDR-0015](gdr/GDR-0015-phase8-remote-motion-presentation.md), and
-  [GDR-0016](gdr/GDR-0016-phase8-disconnect-and-resume-presentation.md)
+  [GDR-0016](gdr/GDR-0016-phase8-disconnect-and-resume-presentation.md), and
+  proposed [GDR-0017](gdr/GDR-0017-phase9-vr-fixture-input-and-presentation.md)
 - Latest implementation commit: `c229946842` (`Add optional bounded VR pose
   protocol`)
-- Latest accepted VR target: `6945e9bf48` (`Merge Slice 9.2 acceptance`)
-- Latest VR implementation candidate: `eda058b92e` (`Merge Slice 9.3 optional VR
-  pose protocol`)
+- Latest accepted VR target: `9ff97375a7` (`Merge Slice 9.3 acceptance`)
 
 ## Working synopsis
 
@@ -177,8 +177,11 @@ acceptance is recorded. Slice 9.2's ADR-0054 Option A is implemented at
 approved ADR-0055 A/A/A/A/A package is implemented at `c229946842` and merged
 into `vnext-vr` at `eda058b92e`. All applicable protocol, compatibility,
 boundary, desktop/VR build, and repository gates pass; owner implementation
-acceptance is recorded. Inspect Slice 9.4 and present any provider, authority,
-state, or gameplay behavior choices before production code. Retain desktop regression evidence and C-R1 boundaries;
+acceptance is recorded. Slice 9.4 read-only research found that VR already maps
+controller bindings to ordinary OpenMW movement actions and that accepted C-R1
+presentation compiles in the fork. ADR-0056 proposes a separate VR provider leaf
+over shared source; GDR-0017 proposes exact root-yaw fixture parity and canonical
+presentation only. Obtain explicit owner approval before production code. Retain desktop regression evidence and C-R1 boundaries;
 do not choose VR authority, state, pose, locomotion, interaction, or gameplay
 behavior implicitly.
 
@@ -199,6 +202,9 @@ behavior implicitly.
   `docs/vnext/adr/ADR-0054-phase9-dual-engine-adapter-composition.md`
 - Slice 9.3 decision packet:
   `docs/vnext/adr/ADR-0055-phase9-optional-vr-pose-capability-and-schema.md`
+- Slice 9.4 decision packets:
+  `docs/vnext/adr/ADR-0056-phase9-vr-provider-composition.md` and
+  `docs/vnext/gdr/GDR-0017-phase9-vr-fixture-input-and-presentation.md`
 - VR target records (on `vnext-vr`): `docs/vnext/OPENMW_VR_PROVENANCE.json`,
   `docs/vnext/OPENMW_VR_PATCH_REGISTRY.json`, and
   `scripts/verify_openmw_vr_target.py`

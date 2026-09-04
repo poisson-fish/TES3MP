@@ -367,6 +367,7 @@ runtime or protocol name.
 | ADR-0053 | Phase 8 desktop reconnect and automation composition | Phase 8 | **Implemented** |
 | ADR-0054 | Phase 9 dual-engine adapter composition | Phase 9 | **Implemented** |
 | ADR-0055 | Phase 9 optional VR pose capability and schema | Phase 9 | **Implemented** |
+| ADR-0056 | Phase 9 VR provider composition | Phase 9 | **Proposed** |
 
 An ADR is complete only when it records considered alternatives, selection
 criteria, consequences, failure modes, a replacement/review trigger, and
@@ -395,6 +396,7 @@ production code that depends on the choice cannot.
 | GDR-0014 | Phase 8 desktop movement and correction | Phase 8 | **Implemented** |
 | GDR-0015 | Phase 8 remote movement presentation | Phase 8 | **Implemented** |
 | GDR-0016 | Phase 8 disconnect and resume presentation | Phase 8 | **Implemented** |
+| GDR-0017 | Phase 9 VR fixture input and presentation | Phase 9 | **Proposed** |
 
 A GDR is **Implemented** only after its questions are explicitly approved and
 the approval is recorded. Later code slices remain separate: an approved design
@@ -708,7 +710,7 @@ Depends on: Phase 8.
 | 9.1 | Review PC VR maintenance options with the owner, approve ADR-0008, and create the worktree/patch target | **Implemented** | ADR-0008 A/A/A and temporary composition A approved; `vnext-vr` records exact two-parent merge `0e8e85e0b5`, proof `c590e81cc5`, and rehearsal-safety test `ff04803ec2`; immutable OpenXR acquisition/offline reuse, registry verification, fresh MSVC 19.51 `openmw_vr.exe` link, all 137 desktop Python regressions, and owner implementation acceptance pass |
 | 9.2 | Build the same adapter/client-session targets against desktop and PC VR engines | **Implemented** | ADR-0054 Option A is implemented at shared commit `54999379a2` and VR merge `44c8d7d8ea`; desktop/VR links, adapter contracts, target boundaries, registries, focused regressions, and owner implementation acceptance pass |
 | 9.3 | Add optional `vr_pose` capability and bounded head/hand pose snapshot schema | **Implemented** | ADR-0055 A/A/A/A/A is implemented at shared commit `c229946842` and VR merge `eda058b92e`; protocol, codec, corpus, compatibility, boundary, desktop/VR link, repository gates, and owner implementation acceptance pass |
-| 9.4 | Implement VR input and presentation providers using semantic commands | **Not Started** | Locomotion command behavior matches desktop authority rules |
+| 9.4 | Implement VR input and presentation providers using semantic commands | **Not Started** | ADR-0056 and GDR-0017 options/scenarios await owner approval; no production implementation has begun |
 | 9.5 | Sample pose data independently of tracking/render rate and network snapshot rate | **Not Started** | Rate-limit, latest-wins, stale-pose, and buffer tests pass |
 | 9.6 | Implement desktop fallback pose and non-VR ignore behavior | **Not Started** | Desktop peers render safely; clients without capability ignore pose data |
 | 9.7 | Run desktop/desktop regression and desktop/VR interoperability suites | **Not Started** | Both suites pass without server-side platform branches |

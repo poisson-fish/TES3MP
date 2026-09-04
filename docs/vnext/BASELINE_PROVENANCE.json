@@ -1490,6 +1490,11 @@
       "purpose": "Records the approved optional VR pose capability, directional schema, bounded transform, recency, and additive evolution policy."
     },
     {
+      "path": "docs/vnext/adr/ADR-0056-phase9-vr-provider-composition.md",
+      "status": "A",
+      "purpose": "Proposes the Slice 9.4 VR provider leaf, shared-source reuse, fork-local composition, and boundary tests for owner review."
+    },
+    {
       "path": "docs/vnext/gdr/GDR-0001-phase7-headless-vertical-slice-behavior.md",
       "status": "A",
       "purpose": "Owner-approved Phase 7 fixture spawn, readiness, cell visibility, provisional tick integration, headless correction, and bounded resume behavior."
@@ -1523,6 +1528,11 @@
       "path": "docs/vnext/gdr/GDR-0016-phase8-disconnect-and-resume-presentation.md",
       "status": "A",
       "purpose": "Records approved provisional disconnect clearing, input suppression, resume barrier, and terminal-failure behavior."
+    },
+    {
+      "path": "docs/vnext/gdr/GDR-0017-phase9-vr-fixture-input-and-presentation.md",
+      "status": "A",
+      "purpose": "Proposes provisional VR root-yaw semantic input and canonical presentation parity for owner review."
     },
     {
       "path": "docs/vnext/proofs/cares/CMakeLists.txt",
