@@ -370,3 +370,19 @@ The project owner approved Option A for Decisions 1 through 3 on 2026-09-03:
 This approval authorizes the Slice 9.1 maintenance target and proof only. It
 does not approve protocol, pose, locomotion, interaction, authority, state-
 scope, or other gameplay behavior for later Phase 9 slices.
+
+## Initial merge composition clarification
+
+The initial merge showed that `apps/openmw/main.cpp` is shared by the desktop
+and VR executables while only the desktop target links the Phase 8 adapter.
+Before resolution, the owner reviewed:
+
+- Option A (recommended): exclude desktop multiplayer composition under
+  `OPENMW_VR` for Slice 9.1; Slice 9.2 adds the real shared-session VR
+  composition.
+- Option B: temporarily link desktop providers into the VR executable.
+- Option C: retain the unresolved, unbuildable composition.
+
+The owner approved Option A on 2026-09-03. This is a temporary build-boundary
+choice only. It does not select VR authority, state scope, pose, input,
+locomotion, interaction, or gameplay behavior.
