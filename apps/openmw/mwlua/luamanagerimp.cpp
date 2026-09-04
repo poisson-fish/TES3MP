@@ -40,6 +40,9 @@
 #include "types/types.hpp"
 #include "userdataserializer.hpp"
 
+#include "../mwvr/vrgui.hpp"
+#include <components/vr/vr.hpp>
+
 namespace MWLua
 {
     namespace
@@ -92,6 +95,15 @@ namespace MWLua
     LuaManager::~LuaManager()
     {
         LuaUi::clearSettings();
+    }
+
+    void LuaManager::onVRFrame() 
+    {
+        mMenuScripts.onVRFrame();
+        PlayerScripts* playerScripts
+            = mPlayer.isEmpty() ? nullptr : dynamic_cast<PlayerScripts*>(mPlayer.getRefData().getLuaScripts());
+        if (playerScripts)
+            playerScripts->onVRFrame();
     }
 
     void LuaManager::initConfiguration(bool reload)
@@ -384,6 +396,8 @@ namespace MWLua
 
     void LuaManager::clear()
     {
+        if (VR::getVR())
+            MWVR::VRGUIManager::instance().clearLua();
         LuaUi::clearGameInterface();
         mUiResourceManager.clear();
         MWBase::Environment::get().getWorld()->getPostProcessor()->disableDynamicShaders();
@@ -477,6 +491,16 @@ namespace MWLua
         PlayerScripts* playerScripts = dynamic_cast<PlayerScripts*>(mPlayer.getRefData().getLuaScripts());
         if (playerScripts)
             playerScripts->uiModeChanged(argId, false);
+    }
+
+    void LuaManager::vrRecentered(bool vertical, bool horizontal)
+    {
+        mMenuScripts.onVRRecenter(vertical, horizontal);
+        if (mPlayer.isEmpty())
+            return;
+        PlayerScripts* playerScripts = dynamic_cast<PlayerScripts*>(mPlayer.getRefData().getLuaScripts());
+        if (playerScripts)
+            playerScripts->onVRRecenter(vertical, horizontal);
     }
 
     void LuaManager::actorDied(const MWWorld::Ptr& actor)
@@ -799,6 +823,8 @@ namespace MWLua
     {
         Log(Debug::Info) << "Reload Lua";
 
+        if (VR::getVR())
+            MWVR::VRGUIManager::instance().clearLua();
         LuaUi::clearGameInterface();
         LuaUi::clearMenuInterface();
         LuaUi::clearSettings();

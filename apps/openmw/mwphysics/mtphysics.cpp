@@ -36,6 +36,11 @@
 #include "physicssystem.hpp"
 #include "projectile.hpp"
 
+//## VR_PATCH BEGIN
+#include <components/vr/session.hpp>
+#include <components/vr/vr.hpp>
+
+//## VR_PATCH END
 namespace MWPhysics
 {
     namespace
@@ -188,6 +193,12 @@ namespace
                 frameData.mOldHeight = frameData.mPosition.z();
                 const auto rotation = actor->getPtr().getRefData().getPosition().asRotationVec3();
                 frameData.mRotation = osg::Vec2f(rotation.x(), rotation.z());
+                if (VR::getVR() && actor->getPtr() == MWMechanics::getPlayer()
+                    && Settings::vr().mHandDirectedMovement)
+                {
+                    frameData.mRotation += VR::Session::instance().movementAngleOffset();
+                }
+
                 frameData.mInertia = actor->getInertialForce();
                 frameData.mStuckFrames = actor->getStuckFrames();
                 frameData.mLastStuckPosition = actor->getLastStuckPosition();

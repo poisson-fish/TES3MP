@@ -3,6 +3,7 @@
 
 #include <osg/Math>
 #include <osg/Matrixf>
+#include <osg/Matrixd>
 #include <osg/Quat>
 #include <osg/Vec2f>
 #include <osg/Vec3f>
@@ -73,6 +74,41 @@ namespace Misc
         forward.normalize();
         up.normalize();
         return toEulerAnglesZYX(forward, up);
+    }
+
+    inline void getEulerAngles(const osg::Quat& quat, float& yaw, float& pitch, float& roll)
+    {
+        // Now do the computation
+        osg::Matrixd m2(osg::Matrixd::rotate(quat));
+        double* mat = (double*)m2.ptr();
+        double angleX = 0.0;
+        double angleY = 0.0;
+        double angleZ = 0.0;
+        double c, trX, trY;
+        angleY = asin(mat[2]); /* Calculate Y-axis angle */
+        c = cos(angleY);
+        if (fabs(c) > 0.005) /* Test for Gimball lock? */
+        {
+            trX = mat[10] / c; /* No, so get X-axis angle */
+            trY = -mat[6] / c;
+            angleX = atan2(trY, trX);
+            trX = mat[0] / c; /* Get Z-axis angle */
+            trY = -mat[1] / c;
+            angleZ = atan2(trY, trX);
+        }
+        else /* Gimball lock has occurred */
+        {
+            angleX = 0; /* Set X-axis angle to zero
+                          */
+            trX = mat[5]; /* And calculate Z-axis angle
+                            */
+            trY = mat[4];
+            angleZ = atan2(trY, trX);
+        }
+
+        yaw = static_cast<float>(angleZ);
+        pitch = static_cast<float>(angleX);
+        roll = static_cast<float>(angleY);
     }
 
     template <class T>

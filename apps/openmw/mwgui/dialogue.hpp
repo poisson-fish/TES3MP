@@ -172,7 +172,7 @@ namespace MWGui
         void onSelectListItem(const std::string& topic, int id);
         void onByeClicked(MyGUI::Widget* sender);
         void onMouseWheel(MyGUI::Widget* sender, int rel);
-        void onWindowResize(MyGUI::Window* sender);
+        void onWindowResize(MyGUI::Window* sender) override;
         void onTopicActivated(const std::string& topicId);
         void onChoiceActivated(int id);
         void onGoodbyeActivated();

@@ -1,5 +1,6 @@
 #include "localscripts.hpp"
 
+#include <components/vr/vr.hpp>
 #include "../mwbase/environment.hpp"
 #include "../mwbase/mechanicsmanager.hpp"
 #include "../mwmechanics/aicombat.hpp"

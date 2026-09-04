@@ -90,6 +90,10 @@ set(BUILTIN_DATA_FILES
     l10n/OMWControls/ru.yaml
     l10n/OMWControls/sv.yaml
     l10n/OMWControls/pl.yaml
+    
+    l10n/OMWVRInput/en.yaml
+    l10n/OMWVRTutorial/en.yaml
+    l10n/OMWVRUI/en.yaml
 
     # L10n for OpenMW menus and non-game-specific messages
     l10n/OMWEngine/de.yaml
@@ -163,6 +167,19 @@ set(BUILTIN_DATA_FILES
     scripts/omw/input/actionbindings.lua
     scripts/omw/input/smoothmovement.lua
     scripts/omw/input/gamepadcontrols.lua
+    scripts/omw/vr/spaces.lua
+    scripts/omw/vr/ui/button.lua
+    scripts/omw/vr/ui/common.lua
+    scripts/omw/vr/ui/menu.lua
+    scripts/omw/vr/ui/player.lua
+    scripts/omw/vr/ui/settingsrenderer.lua
+    scripts/omw/vr/ui/tooltipRecorderHandler.lua
+    scripts/omw/vr/inputs/player.lua
+    scripts/omw/vr/inputs/common.lua
+    scripts/omw/vr/inputs/defaultBindingsLeftHanded.lua
+    scripts/omw/vr/inputs/defaultBindingsRightHanded.lua
+    scripts/omw/vr/inputs/menu.lua
+    scripts/omw/vr/inputs/settingsrenderer.lua
     
     shaders/adjustments.omwfx
     shaders/bloomlinear.omwfx
@@ -228,6 +245,7 @@ set(BUILTIN_DATA_FILES
     mygui/openmw_trade_window.layout
     mygui/openmw_spell_buying_window.layout
     mygui/openmw_windows.skin.xml
+    mygui/openmw_windows_vr.skin.xml
     mygui/openmw_quickkeys_menu.layout
     mygui/openmw_quickkeys_menu_assign.layout
     mygui/openmw_itemselection_dialog.layout
@@ -258,6 +276,25 @@ set(BUILTIN_DATA_FILES
     mygui/openmw_jail_screen.layout
     mygui/OpenMWResourcePlugin.xml
     mygui/skins.xml
+    mygui/skins_vr.xml
+	
+    mygui/core_vr.xml
+    mygui/openmw_alchemy_window_vr.layout
+    mygui/openmw_container_window_vr.layout
+    mygui/openmw_dialogue_window_vr.layout
+    mygui/openmw_hud_vr.layout
+    mygui/openmw_inventory_window_vr.layout
+    mygui/openmw_layers_vr.xml
+    mygui/openmw_map_window_vr.layout
+    mygui/openmw_settings_window_vr.layout
+    mygui/openmw_spell_window_vr.layout
+    mygui/openmw_stats_window_vr.layout
+    mygui/openmw_tooltips_vr.layout
+    mygui/openmw_trade_window_vr.layout
+    mygui/openmw_vr_listbox.layout
+    mygui/openmw_vr_metamenu.layout
+    mygui/openmw_vr_virtual_keyboard.layout
+    mygui/openmw_vr_radial_menu.layout
 )
 
 foreach (f ${BUILTIN_DATA_FILES})

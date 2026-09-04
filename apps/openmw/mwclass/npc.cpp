@@ -24,6 +24,7 @@
 
 #include "../mwbase/dialoguemanager.hpp"
 #include "../mwbase/environment.hpp"
+#include "../mwbase/inputmanager.hpp"
 #include "../mwbase/luamanager.hpp"
 #include "../mwbase/mechanicsmanager.hpp"
 #include "../mwbase/soundmanager.hpp"
@@ -569,11 +570,11 @@ namespace MWClass
         return ptr.getRefData().getCustomData()->asNpcCustomData().mNpcStats;
     }
 
-    bool Npc::evaluateHit(const MWWorld::Ptr& ptr, MWWorld::Ptr& victim, osg::Vec3f& hitPosition) const
+    //## VR_PATCH BEGIN
+    // split evaluateHit into evaluateHit and findMeleeVictim so VR realistic combat can provide
+    // its victim as a parameter.
+    std::optional<std::pair<MWWorld::Ptr, osg::Vec3f>> Npc::findMeleeVictim(const MWWorld::Ptr& ptr) const
     {
-        victim = MWWorld::Ptr();
-        hitPosition = osg::Vec3f();
-
         // Get the weapon used (if hand-to-hand, weapon = inv.end())
         MWWorld::InventoryStore& inv = getInventoryStore(ptr);
         MWWorld::ContainerStoreIterator weaponslot = inv.getSlot(MWWorld::InventoryStore::Slot_CarriedRight);
@@ -581,29 +582,50 @@ namespace MWClass
         if (weaponslot != inv.end() && weaponslot->getType() == ESM::Weapon::sRecordId)
             weapon = *weaponslot;
 
-        MWBase::World* world = MWBase::Environment::get().getWorld();
-
         const float dist = MWMechanics::getMeleeWeaponReach(ptr, weapon);
         const std::pair<MWWorld::Ptr, osg::Vec3f> result = MWMechanics::getHitContact(ptr, dist);
         if (result.first.isEmpty()) // Didn't hit anything
-            return true;
+            return std::nullopt;
+        return result;
+    }
 
-        // Note that earlier we returned true in spite of an apparent failure to hit anything alive.
-        // This is because hitting nothing is not a "miss" and should be handled as such character controller-side.
-        victim = result.first;
-        hitPosition = result.second;
+    MWWorld::MeleeHit Npc::evaluateHit(const MWWorld::Ptr& ptr, std::optional<std::pair<MWWorld::Ptr, osg::Vec3f>> victim) const
+    {
+        MWWorld::MeleeHit result = {
+            .mVictim = MWWorld::Ptr(),
+            .mHitPosition = osg::Vec3f(),
+            .mSuccess = true
+        };
+        if (!victim)
+            victim = findMeleeVictim(ptr);
+        // Note that we return true in spite of an apparent failure to hit anything alive.
+        // This is because hitting nothing is not a "miss" and should be handled as such character-controller-side.
+        if (!victim)
+            return result;
+        result.mVictim = victim->first;
+        result.mHitPosition = victim->second;
 
+        // Note: If getHitChance was moved into Class, we could move evaluateHit and findMeleeVictim to Actor instead of duplicating a lot of logic like this.
+        // But this would diverge me from upstream more than i already am. And maybe it'll be dehardcoded by .50 anyway.
+        MWWorld::InventoryStore& inv = getInventoryStore(ptr);
+        MWWorld::ContainerStoreIterator weaponslot = inv.getSlot(MWWorld::InventoryStore::Slot_CarriedRight);
+        MWWorld::Ptr weapon;
+        if (weaponslot != inv.end() && weaponslot->getType() == ESM::Weapon::sRecordId)
+            weapon = *weaponslot;
         ESM::RefId weapskill = ESM::Skill::HandToHand;
         if (!weapon.isEmpty())
             weapskill = weapon.getClass().getEquipmentSkill(weapon);
 
-        float hitchance = MWMechanics::getHitChance(ptr, victim, static_cast<int>(getSkill(ptr, weapskill)));
+        float hitchance = MWMechanics::getHitChance(ptr, victim->first, static_cast<int>(getSkill(ptr, weapskill)));
 
-        return Misc::Rng::roll0to99(world->getPrng()) < hitchance;
+        MWBase::World* world = MWBase::Environment::get().getWorld();
+        result.mSuccess = Misc::Rng::roll0to99(world->getPrng()) < hitchance;
+        return result;
     }
+    // ## VR_PATCH END
 
     void Npc::hit(const MWWorld::Ptr& ptr, float attackStrength, int type, const MWWorld::Ptr& victim,
-        const osg::Vec3f& hitPosition, bool success) const
+        const osg::Vec3f& hitPosition, bool success, bool ignoreReach) const
     {
         MWWorld::InventoryStore& inv = getInventoryStore(ptr);
         MWWorld::ContainerStoreIterator weaponslot = inv.getSlot(MWWorld::InventoryStore::Slot_CarriedRight);
@@ -621,7 +643,7 @@ namespace MWClass
         if (otherstats.isDead()) // Can't hit dead actors
             return;
 
-        if (!MWMechanics::isInMeleeReach(ptr, victim, MWMechanics::getMeleeWeaponReach(ptr, weapon)))
+        if (!ignoreReach && !MWMechanics::isInMeleeReach(ptr, victim, MWMechanics::getMeleeWeaponReach(ptr, weapon)))
             return;
 
         if (ptr == MWMechanics::getPlayer())
@@ -713,6 +735,10 @@ namespace MWClass
     {
         MWMechanics::CreatureStats& stats = getCreatureStats(ptr);
         bool wasDead = stats.isDead();
+//## VR_PATCH BEGIN
+// Set aside raw damage before adjustments, to use for haptics
+        //float rawDamage = damage;
+//## VR_PATCH END
 
         bool setOnPcHitMe = true;
 
@@ -839,6 +865,25 @@ namespace MWClass
 
             MWBase::Environment::get().getMechanicsManager()->actorKilled(ptr, attacker);
         }
+//## VR_PATCH BEGIN
+        // TODO: Port to lua
+        // Apply haptics
+        // if (successful)
+        // {
+        //     auto inputManager = MWBase::Environment::get().getInputManager();
+        //     if (ptr == MWMechanics::getPlayer())
+        //     {
+        //         float maxHealth = getCreatureStats(ptr).getHealth().getModified();
+        //         float hapticIntensity = std::max(0.25f, std::min(1.f, rawDamage / (maxHealth / 4.f)));
+        //         inputManager->applyHapticsLeftHand(hapticIntensity);
+        //     }
+        //     else if (attacker == MWMechanics::getPlayer() && hitStrength > 0.f)
+        //     {
+        //         float hapticIntensity = std::max(0.25f, std::min(1.f, hitStrength));
+        //         inputManager->applyHapticsRightHand(hapticIntensity);
+        //     }
+        // }
+//## VR_PATCH END
     }
 
     std::unique_ptr<MWWorld::Action> Npc::activate(const MWWorld::Ptr& ptr, const MWWorld::Ptr& actor) const

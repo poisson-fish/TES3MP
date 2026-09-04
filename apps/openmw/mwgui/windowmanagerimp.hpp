@@ -10,6 +10,7 @@
 #include <memory>
 #include <vector>
 
+#include <osg/Vec4>
 #include <osg/ref_ptr>
 
 #include "../mwbase/windowmanager.hpp"
@@ -86,6 +87,18 @@ namespace Gui
 {
     class FontLoader;
 }
+
+//## VR_PATCH BEGIN
+namespace Gui
+{
+    class VirtualKeyboardManager;
+}
+namespace MWVR
+{
+    class VrMetaMenu;
+    class RadialMenu;
+}
+//## VR_PATCH END
 
 namespace MWGui
 {
@@ -166,6 +179,7 @@ namespace MWGui
         bool isPostProcessorHudVisible() const override;
         bool isSettingsWindowVisible() const override;
         bool isInteractiveMessageBoxActive() const override;
+        void closeInteractiveMessageBoxWithDefaultButton() override;
 
         void toggleVisible(GuiWindow wnd) override;
 
@@ -278,7 +292,7 @@ namespace MWGui
         int readPressedButton() override; ///< returns the index of the pressed button or -1 if no button was pressed
                                           ///< (->MessageBoxmanager->InteractiveMessageBox)
 
-        void update(float duration);
+        void update(float duration) override;
 
         /**
          * Fetches a GMST string from the store, if there is no setting with the given
@@ -408,6 +422,9 @@ namespace MWGui
         bool isWindowVisible(std::string_view windowId) const override;
         std::vector<std::string_view> getAllWindowIds() const override;
         std::vector<std::string_view> getAllowedWindowIds(GuiMode mode) const override;
+        const std::map<MWGui::GuiMode, std::string_view>& guiModeToName() const override;
+
+        void skipVideo() override;
 
     private:
         unsigned int mOldUpdateMask;
@@ -619,6 +636,24 @@ namespace MWGui
         void inventoryUpdated(const MWWorld::Ptr& ptr) const override;
 
         Files::ConfigurationManager& mCfgMgr;
+
+//## VR_PATCH BEGIN
+    public:
+        bool isPlayingVideo(void) const override;
+        DragAndDrop& getDragAndDrop(void) override;
+        void viewerTraversals() override;
+        void enterVoid() override;
+        bool isInVoid() override;
+        void exitVoid() override;
+    private:
+        osg::Vec4 mOldClearColor;
+        bool mVRMode;
+        MWVR::VrMetaMenu* mVrMetaMenu;
+        MWVR::RadialMenu* mRadialMenu;
+        Gui::VirtualKeyboardManager* mVirtualKeyboardManager;
+        bool mVideoEnabled;
+        bool mTheVoid = false;
+//## VR_PATCH END
     };
 }
 

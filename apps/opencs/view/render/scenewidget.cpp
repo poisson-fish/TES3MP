@@ -53,6 +53,10 @@
 #include <components/sceneutil/stateupdater.hpp>
 #include <components/shader/removedalphafunc.hpp>
 
+//## VR_PATCH BEGIN
+#include <components/sdlutil/sdlgraphicswindow.hpp>
+//## VR_PATCH END
+
 #include "../widget/scenetoolmode.hpp"
 
 #include "../../model/prefs/shortcut.hpp"
@@ -235,7 +239,10 @@ namespace CSVRender
     void RenderWidget::toggleRenderStats()
     {
         osgViewer::GraphicsWindow* window
-            = static_cast<osgViewer::GraphicsWindow*>(mView->getCamera()->getGraphicsContext());
+//## VR_PATCH BEGIN
+// context may be located in slave cameras instead of main camera
+            = static_cast<osgViewer::GraphicsWindow*>(SDLUtil::GraphicsWindowSDL2::findContext(*mView));
+//## VR_PATCH END
 
         window->getEventQueue()->keyPress(osgGA::GUIEventAdapter::KEY_S);
         window->getEventQueue()->keyRelease(osgGA::GUIEventAdapter::KEY_S);
@@ -311,7 +318,10 @@ namespace CSVRender
     {
         // Since we're holding on to the resources past the existence of this graphics context, we'll need to manually
         // release the created objects
-        mResourceSystem->releaseGLObjects(mView->getCamera()->getGraphicsContext()->getState());
+//## VR_PATCH BEGIN
+// context may be located in slave cameras instead of main camera
+        mResourceSystem->releaseGLObjects(SDLUtil::GraphicsWindowSDL2::findContext(*mView)->getState());
+//## VR_PATCH END
     }
 
     osg::ref_ptr<osg::Geometry> SceneWidget::createGradientRectangle(QColor& bgColour, QColor& gradientColour)

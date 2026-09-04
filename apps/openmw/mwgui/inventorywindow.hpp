@@ -144,7 +144,7 @@ namespace MWGui
         void dropItem(MyGUI::Widget* sender, std::size_t count);
         void equipItem(std::size_t count);
 
-        void onWindowResize(MyGUI::Window* sender);
+        void onWindowResize(MyGUI::Window* sender) override;
         void onFilterChanged(MyGUI::Widget* sender);
         void onNameFilterChanged(MyGUI::EditBox* sender);
         void onAvatarClicked(MyGUI::Widget* sender);

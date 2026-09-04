@@ -39,6 +39,11 @@
 #include "transparentpass.hpp"
 #include "vismask.hpp"
 
+//## VR_PATCH BEGIN
+#include <components/vr/vr.hpp>
+#include "../mwvr/vrpingpongcallback.hpp"
+
+//## VR_PATCH END
 namespace
 {
     struct ResizedCallback : osg::GraphicsContext::ResizedCallback
@@ -220,6 +225,15 @@ namespace MWRender
 
         if (mUsePostProcessing)
             enable();
+
+        // ## VR_PATCH BEGIN
+        // VR needs to override the final output FBO
+        if (VR::getVR())
+        {
+            mCanvases[0]->setPingPongCallback(std::make_unique<MWVR::PingPongCallback>(this));
+            mCanvases[1]->setPingPongCallback(std::make_unique<MWVR::PingPongCallback>(this));
+        }
+        // ## VR_PATCH END
     }
 
     PostProcessor::~PostProcessor()
@@ -302,18 +316,29 @@ namespace MWRender
         mCanvases[frameId]->setTextureDepth(getTexture(Tex_OpaqueDepth, frameId));
         mCanvases[frameId]->setTextureDistortion(getTexture(Tex_Distortion, frameId));
 
-        mTransparentDepthPostPass->mFbo[frameId] = mFbos[frameId][FBO_Primary];
-        mTransparentDepthPostPass->mMsaaFbo[frameId] = mFbos[frameId][FBO_Multisample];
-        mTransparentDepthPostPass->mOpaqueFbo[frameId] = mFbos[frameId][FBO_OpaqueDepth];
-
+//## VR_PATCH BEGIN
+// VR-TODO: Why this change?
+        if (mTransparentDepthPostPass->mFbo[frameId] != mFbos[frameId][FBO_Primary])
+        {
+            mTransparentDepthPostPass->mFbo[frameId] = mFbos[frameId][FBO_Primary];
+            mTransparentDepthPostPass->mMsaaFbo[frameId] = mFbos[frameId][FBO_Multisample];
+            mTransparentDepthPostPass->mOpaqueFbo[frameId] = mFbos[frameId][FBO_OpaqueDepth];
+        }
+//## VR_PATCH END
         mDistortionCallback->setFBO(mFbos[frameId][FBO_Distortion], frameId);
         mDistortionCallback->setOriginalFBO(mFbos[frameId][FBO_Primary], frameId);
 
         size_t frame = cv->getTraversalNumber();
 
-        mStateUpdater->setResolution(osg::Vec2f(
-            static_cast<float>(cv->getViewport()->width()), static_cast<float>(cv->getViewport()->height())));
-
+// ## VR_PATCH BEGIN
+        if (VR::getVR())
+            mStateUpdater->setResolution(
+                osg::Vec2f(static_cast<float>(renderWidth()), static_cast<float>(renderHeight())));
+        else
+// ## VR_PATCH END
+            mStateUpdater->setResolution(osg::Vec2f(
+                static_cast<float>(cv->getViewport()->width()), static_cast<float>(cv->getViewport()->height())));
+        
         // per-frame data
         if (frame != mLastFrameNumber)
         {

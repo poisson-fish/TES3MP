@@ -70,6 +70,13 @@ namespace MWInput
         bool mGamepadMousePressed;
         bool mLeftTriggerGuiPressed;
         bool mRightTriggerGuiPressed;
+//## VR_PATCH BEGIN
+    public:
+        void setThumbstickAutoRun(bool enabled);
+        bool thumbstickAutoRun() const { return mThumbstickAutoRun; }
+    private:
+        bool mThumbstickAutoRun;
+//## VR_PATCH END
     };
 }
 #endif

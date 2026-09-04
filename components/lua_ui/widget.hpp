@@ -82,6 +82,8 @@ namespace LuaUi
         bool collectWarnings(Warnings& warnings, int depth, bool generateWarningStrings) const;
         std::string diagnosticName() const;
 
+        virtual bool isVisible() const { return mVisible; }
+
     protected:
         virtual void initialize();
         void registerEvents(MyGUI::Widget* w);
@@ -177,6 +179,22 @@ namespace LuaUi
         bool mTemplateChild;
         bool mElementRoot;
 
+//## VR_PATCH BEGIN
+        MyGUI::EventHandle_WidgetKeyCodeChar::IDelegate* mEventKeyButtonPressed = nullptr;
+        MyGUI::EventHandle_WidgetKeyCode::IDelegate* mEventKeyButtonReleased = nullptr;
+        MyGUI::EventHandle_WidgetVoid::IDelegate* mEventMouseButtonClick = nullptr;
+        MyGUI::EventHandle_WidgetVoid::IDelegate* mEventMouseButtonDoubleClick = nullptr;
+        MyGUI::EventHandle_WidgetIntIntButton::IDelegate* mEventMouseButtonPressed = nullptr;
+        MyGUI::EventHandle_WidgetIntIntButton::IDelegate* mEventMouseButtonReleased = nullptr;
+        MyGUI::EventHandle_WidgetIntInt::IDelegate* mEventMouseMove = nullptr;
+        MyGUI::EventHandle_WidgetIntIntButton::IDelegate* mEventMouseDrag = nullptr;
+        MyGUI::EventHandle_WidgetWidget::IDelegate* mEventMouseSetFocus = nullptr;
+        MyGUI::EventHandle_WidgetWidget::IDelegate* mEventMouseLostFocus = nullptr;
+        MyGUI::EventHandle_WidgetWidget::IDelegate* mEventKeySetFocusDelegate = nullptr;
+        MyGUI::EventHandle_WidgetWidget::IDelegate* mEventKeyLostFocusDelegate = nullptr;
+        bool mEventsInitialized = false;
+
+//## VR_PATCH END
         void attach(WidgetExtension* ext);
         void attachTemplate(WidgetExtension* ext);
 

@@ -109,6 +109,7 @@ namespace MWLua
         void objectTeleported(const MWWorld::Ptr& ptr) override;
         void questUpdated(const ESM::RefId& questId, int stage) override;
         void uiModeChanged(const MWWorld::Ptr& arg) override;
+        void vrRecentered(bool vertical, bool horizontal) override;
         void actorDied(const MWWorld::Ptr& actor) override;
         void onDialogueResponse(
             const MWWorld::Ptr& actor, const ESM::DialInfo& info, const ESM::Dialogue& record) override;
@@ -177,6 +178,8 @@ namespace MWLua
 
         LuaUtil::InputAction::Registry& inputActions() { return mInputActions; }
         LuaUtil::InputTrigger::Registry& inputTriggers() { return mInputTriggers; }
+
+        void onVRFrame();
 
         void sendLocalEvent(
             const MWWorld::Ptr& target, const std::string& name, const std::optional<sol::table>& data = std::nullopt);

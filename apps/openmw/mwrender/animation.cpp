@@ -65,6 +65,11 @@
 #include "util.hpp"
 #include "vismask.hpp"
 
+//## VR_PATCH BEGIN
+#include <components/vr/vr.hpp>
+#include "../mwmechanics/actorutil.hpp"
+//## VR_PATCH END
+
 namespace
 {
     /// Removes all particle systems and related nodes in a subgraph.
@@ -471,19 +476,6 @@ namespace MWRender
         float mAlpha;
     };
 
-    struct Animation::AnimSource
-    {
-        osg::ref_ptr<const SceneUtil::KeyframeHolder> mKeyframes;
-
-        typedef std::map<std::string, osg::ref_ptr<SceneUtil::KeyframeController>> ControllerMap;
-
-        ControllerMap mControllerMap[sNumBlendMasks];
-
-        const SceneUtil::TextKeyMap& getTextKeys() const;
-
-        osg::ref_ptr<const SceneUtil::AnimBlendRules> mAnimBlendRules;
-    };
-
     void UpdateVfxCallback::operator()(osg::Node* node, osg::NodeVisitor* nv)
     {
         traverse(node, nv);
@@ -747,7 +739,7 @@ namespace MWRender
         }
 
         // Get the blending rules
-        if (Settings::game().mSmoothAnimTransitions)
+        if (useSmoothAnimationTransitions())
         {
             constexpr VFS::Path::ExtensionView yaml("yaml");
 
@@ -1077,6 +1069,36 @@ namespace MWRender
         return mNodeMap;
     }
 
+//## VR_PATCH BEGIN
+// VR needs some bones to just do nothing.
+    static bool vrOverride(const std::string& groupname, const std::string& bone)
+    {
+        if (VR::getKBMouseModeActive() || !VR::getVR())
+            return false;
+
+        // TODO: It's difficult to design a good override system when
+        // I don't have a good understanding of the animation code. So for
+        // now i just hardcode blocking of updaters for nodes that should not be animated in VR.
+        // Add any bone+groupname pair that is messing with Vr comfort here.
+        using Overrides = std::set<std::string>;
+        using GroupOverrides = std::map<std::string, Overrides>;
+        static GroupOverrides sVrOverrides = {
+            { "crossbow", { "weapon bone" } },
+            { "throwweapon", { "weapon bone" } },
+            { "bowandarrow", { "weapon bone" } },
+        };
+
+        bool override = false;
+        auto find = sVrOverrides.find(groupname);
+        if (find != sVrOverrides.end())
+        {
+            override = !!find->second.count(bone);
+        }
+
+        return override;
+    }
+
+//## VR_PATCH END
     template <typename ControllerType>
     inline osg::Callback* Animation::handleBlendTransform(const osg::ref_ptr<osg::Node>& node,
         osg::ref_ptr<SceneUtil::KeyframeController> keyframeController,
@@ -1121,6 +1143,10 @@ namespace MWRender
 
     void Animation::resetActiveGroups()
     {
+//## VR_PATCH BEGIN
+        const bool isPlayer = (mPtr == MWMechanics::getPlayer());
+
+//## VR_PATCH END
         // remove all previous external controllers from the scene graph
         for (auto it = mActiveControllers.begin(); it != mActiveControllers.end(); ++it)
         {
@@ -1166,7 +1192,7 @@ namespace MWRender
                     osg::ref_ptr<osg::Node> node = getNodeMap().at(
                         it->first); // this should not throw, we already checked for the node existing in addAnimSource
 
-                    const bool useSmoothAnims = Settings::game().mSmoothAnimTransitions;
+                    const bool useSmoothAnims = useSmoothAnimationTransitions();
 
                     osg::Callback* callback = it->second->getAsCallback();
                     if (useSmoothAnims)
@@ -1182,8 +1208,12 @@ namespace MWRender
                                 mBoneAnimBlendControllers, stateData, animsrc->mAnimBlendRules, active->second);
                         }
                     }
-
-                    node->addUpdateCallback(callback);
+//## VR_PATCH BEGIN
+                    // Some bones need to be still and do nothing in VR
+                    // I'm SURE we'll TOTALLY make a cleaner solution for this before the end of 2090
+                    if (!isPlayer || !vrOverride(active->first, it->first))
+//## VR_PATCH END
+                        node->addUpdateCallback(callback);
                     mActiveControllers.emplace_back(node, callback);
 
                     if (blendMask == 0 && node == mAccumRoot)
@@ -1995,6 +2025,11 @@ namespace MWRender
     void Animation::removeFromScene()
     {
         removeFromSceneImpl();
+    }
+
+    bool Animation::useSmoothAnimationTransitions() const
+    {
+        return Settings::game().mSmoothAnimTransitions && !(VR::getVR() && mPtr == MWMechanics::getPlayer());
     }
 
     void Animation::removeFromSceneImpl()

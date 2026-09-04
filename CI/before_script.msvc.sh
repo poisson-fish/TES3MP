@@ -63,9 +63,10 @@ CONFIGURATIONS=()
 TEST_FRAMEWORK=""
 INSTALL_PREFIX="."
 BUILD_BENCHMARKS=""
+SKIP_VR=""
 USE_WERROR=""
 USE_CLANG_TIDY=""
-
+OSG_MULTIVIEW_BUILD=""
 ACTIVATE_MSVC=""
 SINGLE_CONFIG=""
 
@@ -136,6 +137,9 @@ while [ $# -gt 0 ]; do
 
 			T )
 				USE_CLANG_TIDY=true ;;
+
+            M )
+                OSG_MULTIVIEW_BUILD=true ;;
 
 			h )
 				cat <<EOF
@@ -556,11 +560,21 @@ source "$(dirname -- "${BASH_SOURCE[0]}")/deps_versions.msvc.sh"
 
 # versions that don't affect the CI cache can go here
 AQT_VERSION='v3.1.15'
+if [[ -n "$OSG_MULTIVIEW_BUILD" ]]; then
+    VCPKG_TAG="m1.0"
+fi
 
 VCPKG_PATH="vcpkg-x64-windows-${DEPS_MSVC_YEAR:?}-${VCPKG_TAG:?}"
 VCPKG_PDB_PATH="vcpkg-x64-windows-${DEPS_MSVC_YEAR:?}-pdb-${VCPKG_TAG:?}"
 VCPKG_MANIFEST="${VCPKG_PATH:?}-manifest.txt"
 VCPKG_PDB_MANIFEST="${VCPKG_PDB_PATH:?}-manifest.txt"
+
+if [[ -n "$OSG_MULTIVIEW_BUILD" ]]; then
+    # TODO: Upstream changed how manifest files are formatted, but i'm not going to retroactively change my builds.
+    # This will need to be updated whenever i rebuild dependencies
+    VCPKG_MANIFEST="vcpkg-x64-${DEPS_MSVC_YEAR:?}-${VCPKG_TAG:?}.txt"
+    VCPKG_PDB_MANIFEST="vcpkg-x64-${DEPS_MSVC_YEAR:?}-pdb-${VCPKG_TAG:?}.txt"
+fi
 
 echo
 echo "==================================="
@@ -578,6 +592,9 @@ if [ -z $SKIP_DOWNLOAD ]; then
 	echo
 
 	DEPS_BASE_URL="https://gitlab.com/OpenMW/openmw-deps/-/raw/main/windows"
+    if [[ -n "$OSG_MULTIVIEW_BUILD" ]]; then
+        DEPS_BASE_URL="https://gitlab.com/madsbuvi/openmw-deps/-/raw/openmw-vr/windows"
+    fi
 
 	download "${VCPKG_MANIFEST:?}" \
 		"${DEPS_BASE_URL}/${VCPKG_MANIFEST:?}" \
@@ -751,6 +768,7 @@ if [ ! -z $CI ]; then
 				-DBUILD_MWINIIMPORTER=no \
 				-DBUILD_OPENCS=no \
 				-DBUILD_OPENMW=no \
+				-DBUILD_OPENMW_VR=no \
 				-DBUILD_WIZARD=no
 			;;
 		openmw )
@@ -767,12 +785,14 @@ if [ ! -z $CI ]; then
 				-DBUILD_LAUNCHER=no \
 				-DBUILD_MWINIIMPORTER=no \
 				-DBUILD_OPENMW=no \
+				-DBUILD_OPENMW_VR=no \
 				-DBUILD_WIZARD=no
 			;;
 		misc )
 			echo "  Building subprojects: Misc."
 			add_cmake_opts -DBUILD_OPENCS=no \
 				-DBUILD_OPENMW=no
+				-DBUILD_OPENMW_VR=no
 			;;
 	esac
 fi

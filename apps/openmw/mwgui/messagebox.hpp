@@ -76,8 +76,11 @@ namespace MWGui
         const std::string& getMessage() { return mMessage; }
         int getHeight();
         void update(int height);
-        void setVisible(bool value);
-
+//## VR_PATCH BEGIN
+// Rewrote handling of setVisible, now handled by base class.
+        ~MessageBox();
+//        void setVisible(bool value);
+//## VR_PATCH END
         float mCurrentTime;
         float mMaxTime;
 
@@ -100,6 +103,8 @@ namespace MWGui
         MyGUI::Widget* getDefaultKeyFocus() override;
 
         bool exit() override { return false; }
+
+        void closeDefault();
 
         bool mMarkedToDelete;
 

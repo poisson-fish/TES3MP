@@ -89,6 +89,10 @@ namespace MWGui
     };
 
     struct TextColours;
+
+//## VR_PATCH BEGIN
+    class DragAndDrop;
+//## VR_PATCH END
 }
 
 namespace SFO
@@ -117,6 +121,7 @@ namespace MWBase
         /// @note This method will block until the video finishes playing
         /// (and will continually update the window while doing so)
         virtual void playVideo(std::string_view name, bool allowSkipping, bool overrideSounds = true) = 0;
+        virtual void skipVideo() = 0;
 
         virtual void setNewGame(bool newgame) = 0;
 
@@ -140,6 +145,7 @@ namespace MWBase
         virtual bool isPostProcessorHudVisible() const = 0;
         virtual bool isSettingsWindowVisible() const = 0;
         virtual bool isInteractiveMessageBoxActive() const = 0;
+        virtual void closeInteractiveMessageBoxWithDefaultButton() = 0;
 
         virtual void toggleVisible(MWGui::GuiWindow wnd) = 0;
 
@@ -235,6 +241,16 @@ namespace MWBase
         virtual void showCrosshair(bool show) = 0;
         virtual bool setHudVisibility(bool show) = 0;
         virtual bool isHudVisible() const = 0;
+//## VR_PATCH BEGIN
+        virtual MWGui::DragAndDrop& getDragAndDrop(void) = 0;
+        virtual bool isPlayingVideo(void) const = 0;
+        virtual void update(float duration) = 0;
+        virtual void viewerTraversals() = 0;
+        // Disables the scene until exitVoid() is called
+        virtual void enterVoid() = 0;
+        virtual bool isInVoid() = 0;
+        virtual void exitVoid() = 0;
+//## VR_PATCH END
 
         virtual void disallowMouse() = 0;
         virtual void allowMouse() = 0;
@@ -408,6 +424,7 @@ namespace MWBase
         virtual bool isWindowVisible(std::string_view windowId) const = 0;
         virtual std::vector<std::string_view> getAllWindowIds() const = 0;
         virtual std::vector<std::string_view> getAllowedWindowIds(MWGui::GuiMode mode) const = 0;
+        virtual const std::map<MWGui::GuiMode, std::string_view>& guiModeToName() const = 0;
     };
 }
 

@@ -26,6 +26,10 @@
 #include "vfsbindings.hpp"
 #include "worldbindings.hpp"
 
+//## VR_PATCH BEGIN
+#include "vrbindings.hpp"
+//## VR_PATCH END
+
 namespace MWLua
 {
     std::map<std::string, sol::object> initCommonPackages(const Context& context)
@@ -75,6 +79,9 @@ namespace MWLua
             { "openmw.input", initInputPackage(context) },
             { "openmw.postprocessing", initPostprocessingPackage(context) },
             { "openmw.ui", initUserInterfacePackage(context) },
+//## VR_PATCH BEGIN
+            { "openmw.vr", initVRPackage(context) },
+//## VR_PATCH END
         };
     }
 
@@ -86,6 +93,9 @@ namespace MWLua
             { "openmw.ui", initUserInterfacePackage(context) },
             { "openmw.menu", initMenuPackage(context) },
             { "openmw.input", initInputPackage(context) },
+            // ## VR_PATCH BEGIN
+            { "openmw.vr", initVRPackage(context) },
+            // ## VR_PATCH END
         };
     }
 

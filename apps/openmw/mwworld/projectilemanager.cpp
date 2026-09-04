@@ -60,6 +60,12 @@
 #include "../mwphysics/physicssystem.hpp"
 #include "../mwphysics/projectile.hpp"
 
+//## VR_PATCH BEGIN
+#include <components/vr/vr.hpp>
+#include "../mwvr/vrutil.hpp"
+#include "../mwvr/openxrinput.hpp"
+
+//## VR_PATCH END
 namespace
 {
     ESM::EffectList getMagicBoltData(std::vector<ESM::RefId>& projectileIDs, std::set<ESM::RefId>& sounds, float& speed,
@@ -304,7 +310,25 @@ namespace MWWorld
             return;
 
         osg::Quat orient;
-        if (caster.getClass().isActor())
+//## VR_PATCH BEGIN
+        if (VR::getVR() && !VR::getKBMouseModeActive()
+            && caster == MWBase::Environment::get().getWorld()->getPlayerPtr())
+        {
+            auto tp = MWVR::OpenXRInput::instance().getSpace(VR::getPreferredAimPath())->locateInWorld();
+            if (!!tp.status)
+            {
+                pos = tp.pose.position.asMWUnits();
+                orient = tp.pose.orientation;
+            }
+            // TODO:
+            //MWVR::Util::getWeaponPose()
+            //Stereo::Pose weaponPose = MWBase::Environment::get().getWorld()->getVRWeaponPose();
+            //pos = weaponPose.position.asMWUnits();
+            //orient = weaponPose.orientation;
+        }
+        else
+            if (caster.getClass().isActor())
+//## VR_PATCH END
             orient = osg::Quat(caster.getRefData().getPosition().rot[0], osg::Vec3f(-1, 0, 0))
                 * osg::Quat(caster.getRefData().getPosition().rot[2], osg::Vec3f(0, 0, -1));
         else

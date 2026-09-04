@@ -41,6 +41,14 @@
 #include "confirmationdialog.hpp"
 #include "weightedsearch.hpp"
 
+//## VR_PATCH BEGIN
+#include "../mwvr/vrgui.hpp"
+#include "../mwvr/vrinputmanager.hpp"
+#include <components/vr/session.hpp>
+#include <components/vr/viewer.hpp>
+#include <components/vr/vr.hpp>
+
+//## VR_PATCH END
 namespace
 {
     std::string_view textureFilteringToStr(const std::string& mipFilter, const std::string& magFilter)
@@ -245,7 +253,9 @@ namespace MWGui
     }
 
     SettingsWindow::SettingsWindow(Files::ConfigurationManager& cfgMgr)
-        : WindowBase("openmw_settings_window.layout")
+//## VR_PATCH BEGIN
+        : WindowBase(VR::getVR() ? "openmw_settings_window_vr.layout" : "openmw_settings_window.layout")
+//## VR_PATCH END
         , mKeyboardMode(true)
         , mCurrentPage(static_cast<size_t>(-1))
         , mCfgMgr(cfgMgr)
@@ -374,6 +384,22 @@ namespace MWGui
             textureFilteringToStr(Settings::general().mTextureMipmap, Settings::general().mTextureMinFilter));
 
         int waterTextureSize = Settings::water().mRttSize;
+//## VR_PATCH BEGIN
+        if (VR::getVR())
+        {
+            getWidget(mVRMirrorTextureEye, "VRMirrorTextureEye");
+
+            mVRMirrorTextureEye->eventComboChangePosition
+                += MyGUI::newDelegate(this, &SettingsWindow::onVRMirrorTextureEyeChanged);
+
+            std::string mirrorTextureEye = Settings::Manager::getString("mirror texture eye", "VR");
+            for (unsigned i = 0; i < mVRMirrorTextureEye->getItemCount(); i++)
+                if (Misc::StringUtils::ciEqual(
+                        mirrorTextureEye, mVRMirrorTextureEye->getItemNameAt(i).asUTF8()))
+                    mVRMirrorTextureEye->setIndexSelected(i);
+        }
+
+//## VR_PATCH END
         if (waterTextureSize >= 512)
             mWaterTextureSize->setIndexSelected(0);
         if (waterTextureSize >= 1024)
@@ -528,6 +554,17 @@ namespace MWGui
         mSunlightScatteringButton->setEnabled(refractionEnabled);
         mWobblyShoresButton->setEnabled(refractionEnabled);
     }
+
+//## VR_PATCH BEGIN
+    void SettingsWindow::onVRMirrorTextureEyeChanged(MyGUI::ComboBox* _sender, size_t pos)
+    {
+        std::string settingString = _sender->getItemNameAt(pos);
+        settingString = Misc::StringUtils::lowerCase(settingString);
+        Settings::Manager::setString("mirror texture eye", "VR", settingString);
+        apply();
+    }
+
+//## VR_PATCH END
 
     void SettingsWindow::onWaterTextureSizeChanged(MyGUI::ComboBox* /*sender*/, size_t pos)
     {
@@ -778,6 +815,14 @@ namespace MWGui
         MWBase::Environment::get().getWindowManager()->processChangedSettings(changed);
         MWBase::Environment::get().getInputManager()->processChangedSettings(changed);
         MWBase::Environment::get().getMechanicsManager()->processChangedSettings(changed);
+//## VR_PATCH BEGIN
+        if (VR::getVR())
+        {
+            VR::Session::instance().processChangedSettings(changed);
+            VR::Viewer::instance().processChangedSettings(changed);
+            MWVR::VRGUIManager::instance().processChangedSettings(changed);
+        }
+//## VR_PATCH END
         Settings::Manager::resetPendingChanges();
     }
 

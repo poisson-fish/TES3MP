@@ -48,7 +48,9 @@ namespace MWGui
 
         std::string_view getWindowIdForLua() const override { return "QuickKeys"; }
 
-    private:
+//## VR_PATCH BEGIN
+// Public keyData
+// QuickKeysMenu destructor
         struct keyData
         {
             int index = -1;
@@ -57,7 +59,10 @@ namespace MWGui
             ESM::RefId id;
             std::string name;
         };
-
+        const keyData* keyAt(int index) const;
+        ~QuickKeysMenu();
+//## VR_PATCH END
+    private:
         std::vector<keyData> mKey;
         std::vector<MWWorld::ManualRef> mTemp;
         keyData* mSelected;

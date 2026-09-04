@@ -12,6 +12,7 @@
 #include <components/misc/rng.hpp>
 #include <components/sceneutil/positionattitudetransform.hpp>
 #include <components/settings/values.hpp>
+#include <components/vr/vr.hpp>
 
 #include <components/esm3/loadcrea.hpp>
 #include <components/esm3/loadgmst.hpp>
@@ -41,6 +42,8 @@
 #include "../mwrender/vismask.hpp"
 
 #include "../mwsound/constants.hpp"
+
+#include "../mwvr/vrinputmanager.hpp"
 
 #include "actor.hpp"
 #include "actorutil.hpp"

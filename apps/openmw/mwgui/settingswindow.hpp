@@ -88,6 +88,13 @@ namespace MWGui
         void onWaterTextureSizeChanged(MyGUI::ComboBox* sender, size_t pos);
         void onWaterReflectionDetailChanged(MyGUI::ComboBox* sender, size_t pos);
         void onWaterRainRippleDetailChanged(MyGUI::ComboBox* sender, size_t pos);
+//## VR_PATCH BEGIN
+        // MERGETODO: Upstream added the 4 onRefaction, onWater handlers above. Test
+        MyGUI::ComboBox* mVRMirrorTextureEye;
+
+        void onVRMirrorTextureEyeChanged(MyGUI::ComboBox* _sender, size_t pos);
+//## VR_PATCH END
+
 
         void onLightingMethodButtonChanged(MyGUI::ComboBox* sender, size_t pos);
         void onLightsResetButtonClicked(MyGUI::Widget* sender);
@@ -108,7 +115,9 @@ namespace MWGui
         void onKeyboardSwitchClicked(MyGUI::Widget* sender);
         void onControllerSwitchClicked(MyGUI::Widget* sender);
 
-        void onWindowResize(MyGUI::Window* sender);
+//## VR_PATCH BEGIN
+        void onWindowResize(MyGUI::Window* sender) override;
+//## VR_PATCH END
 
         void onScriptFilterChange(MyGUI::EditBox*);
         void onScriptListSelection(MyGUI::ListBox*, size_t index);

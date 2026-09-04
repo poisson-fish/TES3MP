@@ -5,6 +5,9 @@
 #include <SDL_keyboard.h>
 
 #include <components/settings/values.hpp>
+//## VR_PATCH BEGIN
+#include <components/vr/vr.hpp>
+//## VR_PATCH END
 
 #include "../mwbase/environment.hpp"
 #include "../mwbase/inputmanager.hpp"
@@ -74,7 +77,8 @@ namespace MWInput
                 break;
             case A_Activate:
                 inputManager->resetIdleTime();
-                activate();
+                if (!VR::getVR())
+                    activate();
                 break;
             case A_MoveLeft:
             case A_MoveRight:
@@ -194,7 +198,13 @@ namespace MWInput
 
         if (!MWBase::Environment::get().getWindowManager()->isGuiMode()) // No open GUIs, open up the MainMenu
         {
-            MWBase::Environment::get().getWindowManager()->pushGuiMode(MWGui::GM_MainMenu);
+//## VR_PATCH BEGIN
+// Vr opens a different menu with more options, normally accessed using a keybind
+            if (VR::getVR())
+                MWBase::Environment::get().getWindowManager()->pushGuiMode(MWGui::GM_VrMetaMenu);
+            else
+                MWBase::Environment::get().getWindowManager()->pushGuiMode(MWGui::GM_MainMenu);
+//## VR_PATCH END
         }
         else // Close current GUI
         {

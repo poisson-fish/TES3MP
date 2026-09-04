@@ -28,6 +28,7 @@ set(LUA_API_FILES
     openmw/ui.lua
     openmw/util.lua
     openmw/vfs.lua
+    openmw/vr.lua
     openmw/world.lua
 )
 

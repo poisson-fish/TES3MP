@@ -47,6 +47,10 @@
 #include "tradeitemmodel.hpp"
 #include "tradewindow.hpp"
 
+//## VR_PATCH BEGIN
+#include <components/vr/vr.hpp>
+//## VR_PATCH END
+
 namespace
 {
 
@@ -82,7 +86,9 @@ namespace MWGui
 
     InventoryWindow::InventoryWindow(DragAndDrop& dragAndDrop, ItemTransfer& itemTransfer, osg::Group* parent,
         Resource::ResourceSystem* resourceSystem)
-        : WindowPinnableBase("openmw_inventory_window.layout")
+//## VR_PATCH BEGIN
+        : WindowPinnableBase(VR::getVR() ? "openmw_inventory_window_vr.layout" : "openmw_inventory_window.layout")
+//## VR_PATCH END
         , mDragAndDrop(&dragAndDrop)
         , mItemTransfer(&itemTransfer)
         , mSelectedItem(-1)
@@ -216,6 +222,12 @@ namespace MWGui
         const WindowSettingValues settings = getModeSettings(mGuiMode);
         const WindowRectSettingValues& rect = settings.mIsMaximized ? settings.mRegular : settings.mMaximized;
 
+        // ## VR_PATCH BEGIN
+        //  Windows are always maximized in VR
+        if (VR::getVR() && settings.mIsMaximized)
+            return;
+        // ## VR_PATCH END
+
         MyGUI::IntSize viewSize = MyGUI::RenderManager::getInstance().getViewSize();
         const int x = static_cast<int>(rect.mX * viewSize.width);
         const int y = static_cast<int>(rect.mY * viewSize.height);
@@ -238,7 +250,7 @@ namespace MWGui
         mGuiMode = mode;
         const WindowSettingValues settings = getModeSettings(mGuiMode);
         setPinButtonVisible(
-            mode != GM_Container && mode != GM_Companion && mode != GM_Barter && !Settings::gui().mControllerMenus);
+            mode != GM_Container && mode != GM_Companion && mode != GM_Barter && !Settings::gui().mControllerMenus && !VR::getVR());
 
         const WindowRectSettingValues& rect = settings.mIsMaximized ? settings.mMaximized : settings.mRegular;
 

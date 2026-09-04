@@ -21,13 +21,15 @@ namespace MyGUIPlatform
 
     void AdditiveLayer::renderToTarget(MyGUI::IRenderTarget* target, bool update)
     {
-        RenderManager& renderManager = static_cast<RenderManager&>(MyGUI::RenderManager::getInstance());
+//## VR_PATCH BEGIN
+        StateInjectableRenderTarget* injectableTarget = static_cast<StateInjectableRenderTarget*>(target);
 
-        renderManager.setInjectState(mStateSet.get());
+        injectableTarget->setInjectState(mStateSet.get());
 
         MyGUI::OverlappedLayer::renderToTarget(target, update);
 
-        renderManager.setInjectState(nullptr);
+        injectableTarget->setInjectState(nullptr);
+//## VR_PATCH END
     }
 
 }

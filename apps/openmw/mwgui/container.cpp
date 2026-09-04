@@ -31,11 +31,17 @@
 #include "sortfilteritemmodel.hpp"
 #include "tooltips.hpp"
 
+//## VR_PATCH BEGIN
+#include <components/vr/vr.hpp>
+//## VR_PATCH END
+
 namespace MWGui
 {
 
     ContainerWindow::ContainerWindow(DragAndDrop& dragAndDrop, ItemTransfer& itemTransfer)
-        : WindowBase("openmw_container_window.layout")
+//## VR_PATCH BEGIN
+        : WindowBase(VR::getVR() ? "openmw_container_window_vr.layout" : "openmw_container_window.layout")
+//## VR_PATCH END
         , mDragAndDrop(&dragAndDrop)
         , mItemTransfer(&itemTransfer)
         , mSortModel(nullptr)

@@ -7,16 +7,25 @@
 #include <components/platform/platform.hpp>
 #include <components/version/version.hpp>
 
+#ifndef OPENMW_VR
 #include "mwbase/environment.hpp"
 #include "mwbase/windowmanager.hpp"
+#endif
+
+//## VR_PATCH BEGIN
+#include <components/vr/vr.hpp>
+//## VR_PATCH END
+
 #include "mwgui/debugwindow.hpp"
 
 #include "engine.hpp"
 #include "options.hpp"
+#ifndef OPENMW_VR
 #include "tes3mp/desktop_connection.hpp"
 #include "tes3mp/desktop_providers.hpp"
 #ifdef TES3MP_OPENMW_DESKTOP_AUTOMATION
 #include "tes3mp/desktop_automation.hpp"
+#endif
 #endif
 
 #include <boost/program_options/variables_map.hpp>
@@ -47,6 +56,7 @@ extern "C" __declspec(dllexport) DWORD AmdPowerXpressRequestHighPerformance = 0x
  * \retval true - Everything goes OK
  * \retval false - Error
  */
+#ifndef OPENMW_VR
 namespace
 {
     const char* describe(TES3MP::OpenMWAdapter::ConnectionStatus status) noexcept
@@ -122,14 +132,18 @@ namespace
         }
     };
 }
+#endif
 
-bool parseOptions(int argc, char** argv, OMW::Engine& engine, Files::ConfigurationManager& cfgMgr,
+bool parseOptions(int argc, char** argv, OMW::Engine& engine, Files::ConfigurationManager& cfgMgr
+#ifndef OPENMW_VR
+    ,
     TES3MP::OpenMWAdapter::DesktopSemanticInput& multiplayerInput,
     TES3MP::OpenMWAdapter::DesktopPresentation& multiplayerPresentation,
     TES3MP::OpenMWAdapter::ConnectionStatusProvider& multiplayerStatus
 #ifdef TES3MP_OPENMW_DESKTOP_AUTOMATION
     ,
     std::unique_ptr<TES3MP::OpenMWAdapter::DesktopAutomation>& multiplayerAutomation
+#endif
 #endif
 )
 {
@@ -252,6 +266,7 @@ bool parseOptions(int argc, char** argv, OMW::Engine& engine, Files::Configurati
     engine.enableFontExport(variables["export-fonts"].as<bool>());
     engine.setRandomSeed(variables["random-seed"].as<unsigned int>());
 
+#ifndef OPENMW_VR
     if (variables["tes3mp-enable"].as<bool>())
     {
         const TES3MP::OpenMWAdapter::DesktopFixtureMapping fixture{
@@ -308,6 +323,7 @@ bool parseOptions(int argc, char** argv, OMW::Engine& engine, Files::Configurati
             return false;
         }
     }
+#endif
 
     return true;
 }
@@ -368,8 +384,14 @@ int runApplication(int argc, char* argv[])
     setenv("OSG_GL_TEXTURE_STORAGE", "OFF", 0);
 #endif
 
+//## VR_PATCH BEGIN
+#ifdef OPENMW_VR
+    VR::setVR(true);
+#endif
+//## VR_PATCH END
     osg::setNotifyHandler(new OSGLogHandler());
     Files::ConfigurationManager cfgMgr;
+#ifndef OPENMW_VR
     TES3MP::OpenMWAdapter::DesktopSemanticInput multiplayerInput;
     TES3MP::OpenMWAdapter::NullRemoteMotionMetricSink multiplayerMotionMetrics;
     TES3MP::OpenMWAdapter::DesktopPresentation multiplayerPresentation(multiplayerMotionMetrics);
@@ -377,14 +399,18 @@ int runApplication(int argc, char* argv[])
 #ifdef TES3MP_OPENMW_DESKTOP_AUTOMATION
     std::unique_ptr<TES3MP::OpenMWAdapter::DesktopAutomation> multiplayerAutomation;
 #endif
+#endif
     std::unique_ptr<OMW::Engine> engine = std::make_unique<OMW::Engine>(cfgMgr);
 
     engine->setRecastMaxLogLevel(Debug::getRecastMaxLogLevel());
 
-    if (parseOptions(argc, argv, *engine, cfgMgr, multiplayerInput, multiplayerPresentation, multiplayerStatus
+    if (parseOptions(argc, argv, *engine, cfgMgr
+#ifndef OPENMW_VR
+            , multiplayerInput, multiplayerPresentation, multiplayerStatus
 #ifdef TES3MP_OPENMW_DESKTOP_AUTOMATION
             ,
             multiplayerAutomation
+#endif
 #endif
             ))
     {

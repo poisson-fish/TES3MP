@@ -20,7 +20,6 @@
 #include "character.hpp"
 
 #include <array>
-#include <unordered_set>
 
 #include <components/esm/records.hpp>
 #include <components/misc/mathutil.hpp>
@@ -56,6 +55,15 @@
 #include "security.hpp"
 #include "spellcasting.hpp"
 #include "weapontype.hpp"
+
+//## VR_PATCH BEGIN
+#include <components/vr/vr.hpp>
+#include <components/vr/session.hpp>
+//#include "../mwvr/vrutil.hpp"
+#include "../mwrender/npcanimation.hpp"
+#include "../mwvr/openxrinput.hpp"
+#include "../mwvr/vranimation.hpp"
+//## VR_PATCH END
 
 namespace
 {
@@ -1260,7 +1268,14 @@ namespace MWMechanics
         {
             if (weapclass != ESM::WeaponType::Thrown)
             {
-                mAttackSuccess = mPtr.getClass().evaluateHit(mPtr, mAttackVictim, mAttackHitPos);
+                // ## VR_PATCH BEGIN
+                //  split evaluateHit into evaluateHit and findMeleeVictim so VR realistic combat can provide
+                //  its victim as a parameter.
+                auto res = mPtr.getClass().evaluateHit(mPtr);
+                mAttackSuccess = res.mSuccess;
+                mAttackVictim = res.mVictim;
+                mAttackHitPos = res.mHitPosition;
+                // ## VR_PATCH END
                 if (!mAttackSuccess)
                     mAttackStrength = 0.f;
             }
@@ -1665,6 +1680,12 @@ namespace MWMechanics
                 {
                     std::string startKey = "start";
                     std::string stopKey = "stop";
+//## VR_PATCH BEGIN
+// MERGETODO: upstream removed or moved the target part of this.
+// Read what .48 VR changed here and reproduce it i guess?
+                    //if(VR::getVR())
+                        //MWWorld::Ptr target = MWVR::Util::getWeaponTarget().first;
+//## VR_PATCH END
 
                     MWBase::LuaManager::ActorControls* actorControls
                         = MWBase::Environment::get().getLuaManager()->getActorControls(mPtr);
@@ -2024,6 +2045,8 @@ namespace MWMechanics
             }
 
             osg::Vec3f rot = cls.getRotationVector(mPtr);
+            //if ((rot.x() != 0 || rot.y() != 0 || rot.z() != 0) && isPlayer)
+            //    Log(Debug::Verbose) << "breakpoint";
             osg::Vec3f vec(movementSettings.asVec3());
             movementSettings.mSpeedFactor = std::min(vec.length(), 1.f);
             vec.normalize();
@@ -2412,7 +2435,9 @@ namespace MWMechanics
                 if (!isKnockedDown() && !isKnockedOut())
                 {
                     if (rot != osg::Vec3f())
+                    {
                         world->rotateObject(mPtr, rot, true);
+                    }
                 }
                 else // avoid z-rotating for knockdown
                 {
@@ -2502,12 +2527,31 @@ namespace MWMechanics
 
             movement.x() *= scale;
             movement.y() *= scale;
+
+            if (VR::getVR() && isPlayer)
+            {
+                static_cast<MWVR::VRAnimation*>(mAnimation)->modifyMovement(movement);
+            }
+
             world->queueMovement(mPtr, movement);
         }
 
         mSkipAnim = false;
 
         mAnimation->enableHeadAnimation(cls.isActor() && !cls.getCreatureStats(mPtr).isDead());
+//## VR_PATCH BEGIN
+// Switch to VRNormal, making the character visible, if disabled for any reason such as paralysis, or daeth.
+// VR-TODO: This code should probably be elsewhere.
+        if (VR::getVR() && isPlayer)
+        {
+            auto disabled = MWBase::Environment::get().getWorld()->getPlayer().isDisabled();
+            auto animation = static_cast<MWRender::NpcAnimation*>(mAnimation);
+            if (disabled)
+                animation->setViewMode(MWRender::NpcAnimation::VM_VRNormal);
+            else
+                animation->setViewMode(MWRender::NpcAnimation::VM_VRFirstPerson);
+        }
+//## VR_PATCH END
     }
 
     void CharacterController::persistAnimationState() const
@@ -2718,6 +2762,10 @@ namespace MWMechanics
 
     bool CharacterController::isMovementAnimationControlled() const
     {
+        // Movement is never animation controlled in VR. This would induce extreme motion sickness.
+        if (mPtr == getPlayer() && VR::getVR())
+            return false;
+
         if (mHitState != CharState_None || mDeathState != CharState_None)
             return true;
 

@@ -35,6 +35,10 @@
 
 #include <numeric>
 
+//## VR_PATCH BEGIN
+#include <components/vr/vr.hpp>
+//## VR_PATCH END
+
 namespace
 {
 
@@ -624,7 +628,10 @@ namespace MWGui
                     requestMapRender(&MWBase::Environment::get().getWorldModel()->getExterior(
                         ESM::ExteriorCellLocation(entry.mCellX, entry.mCellY, ESM::Cell::sDefaultWorldspaceId)));
 
-                osg::ref_ptr<osg::Texture2D> texture = mLocalMapRender->getMapTexture(entry.mCellX, entry.mCellY);
+//## VR_PATCH BEGIN
+// Support Texture2DArray
+                osg::ref_ptr<osg::Texture> texture = mLocalMapRender->getMapTexture(entry.mCellX, entry.mCellY);
+//## VR_PATCH END
                 if (texture)
                 {
                     entry.mMapTexture = std::make_unique<MyGUIPlatform::OSGTexture>(texture);
@@ -638,7 +645,10 @@ namespace MWGui
             }
             if (!entry.mFogTexture && mFogOfWarToggled && mFogOfWarEnabled)
             {
-                osg::ref_ptr<osg::Texture2D> tex = mLocalMapRender->getFogOfWarTexture(entry.mCellX, entry.mCellY);
+//## VR_PATCH BEGIN
+// Support Texture2DArray
+                osg::ref_ptr<osg::Texture> tex = mLocalMapRender->getFogOfWarTexture(entry.mCellX, entry.mCellY);
+//## VR_PATCH END
                 if (tex)
                 {
                     entry.mFogTexture = std::make_unique<MyGUIPlatform::OSGTexture>(tex);
@@ -787,11 +797,9 @@ namespace MWGui
     // ------------------------------------------------------------------------------------------
     MapWindow::MapWindow(CustomMarkerCollection& customMarkers, DragAndDrop* drag, MWRender::LocalMap* localMapRender,
         SceneUtil::WorkQueue* workQueue)
-#ifdef USE_OPENXR
-        : WindowPinnableBase("openmw_map_window_vr.layout")
-#else
-        : WindowPinnableBase("openmw_map_window.layout")
-#endif
+//## VR_PATCH BEGIN
+        : WindowPinnableBase(VR::getVR() ? "openmw_map_window_vr.layout" : "openmw_map_window.layout")
+//## VR_PATCH END
         , LocalMapBase(customMarkers, localMapRender, true)
         , NoDrop(drag, mMainWidget)
         , mGlobalMap(nullptr)

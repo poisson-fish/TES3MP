@@ -12,6 +12,8 @@
 
 #include "../mwbase/world.hpp"
 
+#include "../mwrender/renderingmanager.hpp"
+
 #include "contentloader.hpp"
 #include "esmstore.hpp"
 #include "globals.hpp"
@@ -202,7 +204,7 @@ namespace MWWorld
 
         // Must be called after `loadData`.
         void init(Debug::Level maxRecastLogLevel, osgViewer::Viewer* viewer, osg::ref_ptr<osg::Group> rootNode,
-            SceneUtil::WorkQueue* workQueue, SceneUtil::UnrefQueue& unrefQueue);
+            SceneUtil::WorkQueue* workQueue, SceneUtil::UnrefQueue& unrefQueue, std::unique_ptr<MWRender::Camera> camera);
 
         virtual ~World();
 
@@ -676,6 +678,27 @@ namespace MWWorld
         DateTimeManager* getTimeManager() override { return mTimeManager.get(); }
 
         void setActorActive(const MWWorld::Ptr& ptr, bool value) override;
+
+//## VR_PATCH BEGIN
+        /// Intersects the scene from the origin, in the specified orientation and distance, storing the %result in the
+        /// result structure.
+        /// @Return distance to the target object, or -1 if no object was targeted / in range
+        float getTargetObject(MWRender::RayResult& result, const osg::Vec3f& origin, const osg::Quat& orientation,
+            float maxDistance, bool ignorePlayer, uint32_t ignoreMask) override;
+
+        MWWorld::Ptr placeObject(const MWWorld::ConstPtr& object, const MWRender::RayResult& ray, int amount) override;
+        ///< copy and place an object into the gameworld based on the given intersection
+        /// @param object
+        /// @param world position to place object
+        /// @param number of objects to place
+
+        /// @Return ESM::Weapon::Type enum describing the type of weapon currently drawn by the player.
+        int getActiveWeaponType(void) override;
+
+        void enableVRPointer(bool left, bool right) override;
+
+        std::optional<std::pair<MWWorld::Ptr, osg::Vec3f>> getVRMeleeHitContact(MWWorld::Ptr ptr) override;
+//## VR_PATCH END
     };
 }
 

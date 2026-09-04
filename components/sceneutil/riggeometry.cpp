@@ -18,6 +18,10 @@ namespace SceneUtil
     {
         setNumChildrenRequiringUpdateTraversal(1);
         // update done in accept(NodeVisitor&)
+//## VR_PATCH BEGIN
+// VR-TODO: What was the motivation for this?
+        //setCullingActive(false);
+//## VR_PATCH END
     }
 
     RigGeometry::RigGeometry(const RigGeometry& copy, const osg::CopyOp& copyop)
@@ -160,6 +164,12 @@ namespace SceneUtil
 
         mSkeleton->updateBoneMatrices(traversalNumber);
 
+//## VR_PATCH BEGIN
+        // Tracking in VR updates bone matrices out of order, and forces bounds to be recalculated during cull.
+        if (mSkeleton->isTracked())
+            updateBounds(nv);
+
+//## VR_PATCH END
         // skinning
         const osg::Vec3Array* positionSrc = static_cast<osg::Vec3Array*>(mSourceGeometry->getVertexArray());
         const osg::Vec3Array* normalSrc = static_cast<osg::Vec3Array*>(mSourceGeometry->getNormalArray());

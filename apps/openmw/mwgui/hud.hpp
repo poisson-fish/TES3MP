@@ -89,6 +89,10 @@ namespace MWGui
         int mHealthManaStaminaBaseLeft, mWeapBoxBaseLeft, mSpellBoxBaseLeft, mSneakBoxBaseLeft;
         // bottom right elements
         int mMinimapBoxBaseRight, mEffectBoxBaseRight;
+//## VR_PATCH BEGIN
+// Set aside initial size to use for sizing the hud in VR
+        MyGUI::IntSize mMainWidgetBaseSize;
+//## VR_PATCH END
 
         float mCellNameTimer = 0.f;
         float mWeaponSpellTimer = 0.f;

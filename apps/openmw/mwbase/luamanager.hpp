@@ -12,6 +12,7 @@
 #include "../mwmechanics/attacktype.hpp"
 #include "../mwmechanics/damagesourcetype.hpp"
 #include "../mwrender/animationpriority.hpp"
+#include "../mwworld/ptr.hpp"
 #include <components/sdlutil/events.hpp>
 
 namespace MWWorld
@@ -98,6 +99,7 @@ namespace MWBase
         // `arg` is either forwarded from MWGui::pushGuiMode or empty
         virtual void uiModeChanged(const MWWorld::Ptr& arg) = 0;
         virtual void savePermanentStorage(const std::filesystem::path& userConfigPath) = 0;
+        virtual void vrRecentered(bool vertical, bool horizontal) = 0;
 
         // TODO: notify LuaManager about other events
         // virtual void objectOnHit(const MWWorld::Ptr &ptr, float damage, bool ishealth, const MWWorld::Ptr &object,
