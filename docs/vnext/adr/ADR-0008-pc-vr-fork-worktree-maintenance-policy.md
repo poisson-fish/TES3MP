@@ -1,8 +1,10 @@
 # ADR-0008: PC VR fork, worktree, and patch maintenance policy
 
-Status: **Proposed — project-owner decision required**
+Status: **Accepted**
 
 Date opened: 2026-09-03
+
+Date approved: 2026-09-03
 
 Decision owner: project owner
 
@@ -356,6 +358,15 @@ Reopen this ADR when:
 
 ## Owner approval
 
-Pending. The project owner must explicitly approve one option for each decision
-before any VR remote, branch, worktree, registry schema, dependency lock, merge,
-or production code is created.
+The project owner approved Option A for Decisions 1 through 3 on 2026-09-03:
+
+1. pin OpenMW-VR tag `openmw-vr-0.51-rc1` at
+   `56a8e01390507375c9c2f2593e1c09e0df88c505`;
+2. maintain a same-repository `vnext-vr` merge-overlay branch in a local sibling
+   worktree, without rebasing published history; and
+3. retain vNext dependency locks and add an exact OpenXR-SDK commit/hash/license
+   lock instead of adopting the fork bundle as dependency authority.
+
+This approval authorizes the Slice 9.1 maintenance target and proof only. It
+does not approve protocol, pose, locomotion, interaction, authority, state-
+scope, or other gameplay behavior for later Phase 9 slices.

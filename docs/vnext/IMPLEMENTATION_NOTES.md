@@ -5696,6 +5696,16 @@ only the relevant phase section here.
   - Follow-ups: after explicit approval, create and verify only the approved
     Slice 9.1 remote/branch/worktree, provenance, registry, and baseline proof.
 
+- 2026-09-03 — Slice 9.1 ADR-0008 package approved
+  - Change: owner approved the proposed maintenance package; implementation has
+    not yet been accepted.
+  - Decisions: ADR-0008 Decision 1 Option A, Decision 2 Option A, and Decision 3
+    Option A are approved exactly as presented.
+  - Verification: approval recorded in ADR-0008; no implementation evidence yet.
+  - Owner review: explicit `approved` response in the 2026-09-03 working session.
+  - Follow-ups: create the approved target, stop on any new architecture or
+    behavior choice, and run the proposed Slice 9.1 acceptance gates.
+
 - Head and hand transforms are presentation snapshots associated with a player
   root and authority epoch. They are not persisted as durable world state.
 - Physical reach validation uses the authoritative root plus declared limits;
