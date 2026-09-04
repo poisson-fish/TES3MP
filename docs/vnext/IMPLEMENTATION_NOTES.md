@@ -5839,6 +5839,28 @@ only the relevant phase section here.
   - Follow-ups: prepare and review the Slice 9.3 optional pose capability/schema
     decision packet before production schema code.
 
+- 2026-09-03 — Slice 9.3 optional pose capability/schema proposal — **Not Started**
+  - Change: inspected the accepted capability, framing, typed-envelope, numeric,
+    session, and queue boundaries; added proposed
+    [ADR-0055](adr/ADR-0055-phase9-optional-vr-pose-capability-and-schema.md).
+    No production schema, codec, queue, session, server, or adapter code changed.
+  - Decisions: pending owner review. The recommended A/A/A/A package reserves
+    optional capability ID 1, adds separate client/server typed pose roots in a
+    1 KiB presentation frame class, uses bounded root-relative fixed transforms
+    with required head/optional hands, and orders ephemeral samples by a nonzero
+    sequence scoped to source session generation.
+  - Finding: the current one-slot latest-wins queue cannot safely carry pose
+    because pose could replace canonical world state. The proposal therefore
+    keeps runtime pose routing disabled until Slice 9.5 adds approved keyed
+    coalescing and rate policy.
+  - Verification: repository inspection only; `git diff --check` and relative
+    document-link validation apply. Slice 9.3 stays **Not Started** because
+    documentation alone is not its named deliverable.
+  - Owner review: requested for ADR-0055 Decisions 1 through 4 and all proposed
+    acceptance tests. No approval is inferred.
+  - Follow-ups: after explicit approval, implement only the capability/framing/
+    value/codec boundary and keep production offers and runtime routing disabled.
+
 - Head and hand transforms are presentation snapshots associated with a player
   root and authority epoch. They are not persisted as durable world state.
 - Physical reach validation uses the authoritative root plus declared limits;
