@@ -10,10 +10,10 @@ is the [implementation plan](IMPLEMENTATION_PLAN.md#phase-9--pc-vr-interoperabil
 - Branch: `vnext`
 - Phase 7: **Implemented**
 - Phase 8: **Implemented**
-- Phase 9: **In Progress** (Slice 9.2 implementation)
+- Phase 9: **In Progress** (Slice 9.3 capability/schema decision gate)
 - Slice 9.1: **Implemented**
-- Slice 9.2: **In Progress** (verified implementation candidate; owner
-  acceptance remains)
+- Slice 9.2: **Implemented**
+- Slice 9.3: **Not Started** (capability/schema options require owner approval)
 - Slice 8.1: **Implemented**
 - Slice 8.2: **Implemented**
 - Slice 8.3: **Implemented**
@@ -130,14 +130,14 @@ Slice 9.2. No authority, canonical state, protocol, pose, locomotion,
 interaction, or gameplay behavior changed. The owner accepted the verified
 implementation on 2026-09-03.
 
-Slice 9.2 has a verified implementation candidate under approved ADR-0054
-Option A. One engine-neutral adapter/client-connection target is shared by both
+Slice 9.2 is implemented under approved ADR-0054 Option A. One engine-neutral
+adapter/client-connection target is shared by both
 executables; desktop concrete providers live in a separate target, while VR
 links the same adapter and fails explicit multiplayer enable before credential,
 transport, or runtime work until Slice 9.4 provides approved VR providers. The
 desktop and VR executables link, focused contracts and registries pass, and the
 shared implementation commit is in VR history. No new hook or gameplay/state
-behavior was added. Owner implementation acceptance remains.
+behavior was added. The owner accepted Slice 9.2 implementation on 2026-09-03.
 
 The remote-avatar architecture decision was reopened. Legacy TES3MP used real
 dynamic NPC actors and then patched dedicated-player exceptions through 16
@@ -172,10 +172,10 @@ maintenance target and verified candidate are complete on `vnext-vr` at
 `c590e81cc5`, with rehearsal-safety proof at `ff04803ec2`; owner implementation
 acceptance is recorded. Slice 9.2 is next, but present its architecture/build
 options in ADR-0054 are approved and implemented at `54999379a2`, merged to VR
-at `44c8d7d8ea`. Owner implementation acceptance remains. After acceptance,
-Slice 9.3 needs its optional-pose capability/schema decision packet before code.
-Retain desktop regression evidence and C-R1 boundaries; do not choose VR
-authority, state, pose, locomotion, interaction, or gameplay behavior implicitly.
+at `44c8d7d8ea`, and owner-accepted. Slice 9.3 now needs its optional-pose
+capability/schema decision packet before code. Retain desktop regression evidence
+and C-R1 boundaries; do not choose VR authority, state, pose, locomotion,
+interaction, or gameplay behavior implicitly.
 
 ## Active files
 
@@ -206,7 +206,7 @@ and `74c7862860d0dfaa8f0db5451e6e705e5bd4c642914d453d75f1a3482ee7b9ce`.
 Desktop Debug adapter contracts, all 141 desktop repository Python tests, the
 desktop registry, VR Debug adapter contracts, the exact 11 VR tests, the VR
 registry/verifier, shared-commit ancestry, and diff hygiene pass. Slice 9.2
-remains **In Progress** pending owner implementation acceptance.
+is **Implemented** after owner acceptance on 2026-09-03.
 
 Slice 9.1 pins the VR source to
 `56a8e01390507375c9c2f2593e1c09e0df88c505`, the OpenXR-SDK tag used by that
