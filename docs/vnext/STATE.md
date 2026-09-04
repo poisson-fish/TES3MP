@@ -24,6 +24,7 @@ is the [implementation plan](IMPLEMENTATION_PLAN.md#phase-9--pc-vr-interoperabil
 - Governing decisions: [ADR-0007](adr/ADR-0007-openmw-hook-patch-queue-policy.md),
   [ADR-0008](adr/ADR-0008-pc-vr-fork-worktree-maintenance-policy.md),
   [ADR-0054](adr/ADR-0054-phase9-dual-engine-adapter-composition.md),
+  proposed [ADR-0055](adr/ADR-0055-phase9-optional-vr-pose-capability-and-schema.md),
   [ADR-0047](adr/ADR-0047-phase8-adapter-lifecycle-and-provider-boundary.md),
   [ADR-0048](adr/ADR-0048-canonical-revision-and-simulation-tick-separation.md),
   [ADR-0049](adr/ADR-0049-phase8-desktop-connection-composition.md),
@@ -37,8 +38,7 @@ is the [implementation plan](IMPLEMENTATION_PLAN.md#phase-9--pc-vr-interoperabil
   [GDR-0016](gdr/GDR-0016-phase8-disconnect-and-resume-presentation.md)
 - Latest implementation commit: `54999379a2` (`Share adapter composition across
   desktop and VR`)
-- Latest VR implementation candidate: `44c8d7d8ea` (`Merge Slice 9.2 shared
-  composition`)
+- Latest accepted VR target: `6945e9bf48` (`Merge Slice 9.2 acceptance`)
 
 ## Working synopsis
 
@@ -170,12 +170,12 @@ Read this file and accepted
 accepted and complete at implementation `93690354d1`. Slice 9.1's approved
 maintenance target and verified candidate are complete on `vnext-vr` at
 `c590e81cc5`, with rehearsal-safety proof at `ff04803ec2`; owner implementation
-acceptance is recorded. Slice 9.2 is next, but present its architecture/build
-options in ADR-0054 are approved and implemented at `54999379a2`, merged to VR
-at `44c8d7d8ea`, and owner-accepted. Slice 9.3 now needs its optional-pose
-capability/schema decision packet before code. Retain desktop regression evidence
-and C-R1 boundaries; do not choose VR authority, state, pose, locomotion,
-interaction, or gameplay behavior implicitly.
+acceptance is recorded. Slice 9.2's ADR-0054 Option A is implemented at
+`54999379a2` and owner-accepted on the VR target at `6945e9bf48`. Slice 9.3 now
+needs approval of the optional-pose capability/schema options in proposed
+ADR-0055 before code. Retain desktop regression evidence and C-R1 boundaries;
+do not choose VR authority, state, pose, locomotion, interaction, or gameplay
+behavior implicitly.
 
 ## Active files
 
@@ -192,6 +192,8 @@ interaction, or gameplay behavior implicitly.
   `docs/vnext/adr/ADR-0008-pc-vr-fork-worktree-maintenance-policy.md`
 - Slice 9.2 decision packet:
   `docs/vnext/adr/ADR-0054-phase9-dual-engine-adapter-composition.md`
+- Slice 9.3 decision packet:
+  `docs/vnext/adr/ADR-0055-phase9-optional-vr-pose-capability-and-schema.md`
 - VR target records (on `vnext-vr`): `docs/vnext/OPENMW_VR_PROVENANCE.json`,
   `docs/vnext/OPENMW_VR_PATCH_REGISTRY.json`, and
   `scripts/verify_openmw_vr_target.py`
