@@ -148,11 +148,39 @@ and network rates must remain independent of the 30 Hz canonical scheduler.
 Peer clocks are not comparable or trusted, and timestamps would create clock
 sync, privacy, range, and replay rules without improving latest-wins ordering.
 
+## Decision 5: unknown additive FlatBuffer fields
+
+Implementation review found a conflict between proposed acceptance test 8,
+which says unknown fields reject, and retained ADR-0004, which requires
+additive optional-field evolution and current/previous-minor compatibility.
+
+### Option A — preserve ADR-0004 additive compatibility (recommended)
+
+Verified unknown additive table fields are ignored by an older codec. Unknown
+frame classes, message kinds, file identifiers, enum/union discriminants, and
+malformed fields still reject. Acceptance test 8 becomes: `all truncations,
+bad identifiers, unknown classifications, and trailing bytes reject; verified
+additive optional fields remain compatible`.
+
+### Option B — reject every unknown table field
+
+Inspect and pin exact vtable shapes after structural verification. This makes
+the first pose schema closed, but violates ADR-0004's approved additive
+evolution rule and prevents an older minor from reading a newer additive pose
+message.
+
+### Option C — issue a new capability and root for every additive field
+
+Keep each pose table closed and version every addition with new identifiers.
+This avoids unknown-field acceptance but expands negotiation and schema surface
+for changes that ADR-0004 already permits within one protocol major.
+
 ## Recommendation
 
-Approve Option A for Decisions 1 through 4. This gives a small, deterministic,
-capability-gated codec while keeping pose noncanonical and transport-disabled
-until queue isolation and sampling policy are approved in Slice 9.5.
+Decisions 1 through 4 use approved Option A. Approve Option A for Decision 5 so
+ADR-0004 remains governing. This gives a small, deterministic, capability-gated
+codec while keeping pose noncanonical and transport-disabled until queue
+isolation and sampling policy are approved in Slice 9.5.
 
 ## Proposed acceptance tests
 
@@ -195,5 +223,8 @@ encoding.
 
 ## Owner approval
 
-Approved on 2026-09-03: Option A for Decisions 1 through 4 and all proposed
-acceptance tests. Implementation acceptance remains separate.
+Approved on 2026-09-03: Option A for Decisions 1 through 4. The original
+acceptance tests were approved, but implementation found test 8 conflicts with
+governing ADR-0004. Decision 5 and its corrected test 8 wording await explicit
+owner approval. No choice is inferred. Implementation acceptance remains
+separate.

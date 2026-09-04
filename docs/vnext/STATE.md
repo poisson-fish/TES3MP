@@ -13,7 +13,7 @@ is the [implementation plan](IMPLEMENTATION_PLAN.md#phase-9--pc-vr-interoperabil
 - Phase 9: **In Progress** (Slice 9.3 capability/schema decision gate)
 - Slice 9.1: **Implemented**
 - Slice 9.2: **Implemented**
-- Slice 9.3: **In Progress** (ADR-0055 approved; implementation underway)
+- Slice 9.3: **In Progress** (ADR-0055 Decisions 1–4 approved; Decision 5 pending)
 - Slice 8.1: **Implemented**
 - Slice 8.2: **Implemented**
 - Slice 8.3: **Implemented**
@@ -172,8 +172,9 @@ maintenance target and verified candidate are complete on `vnext-vr` at
 `c590e81cc5`, with rehearsal-safety proof at `ff04803ec2`; owner implementation
 acceptance is recorded. Slice 9.2's ADR-0054 Option A is implemented at
 `54999379a2` and owner-accepted on the VR target at `6945e9bf48`. Slice 9.3 now
-needs approval of the optional-pose capability/schema options in proposed
-ADR-0055 before code. Retain desktop regression evidence and C-R1 boundaries;
+has approved capability/schema Decisions 1–4 in ADR-0055. Implementation found
+its unknown-field acceptance wording conflicts with governing ADR-0004;
+Decision 5 now needs owner approval. Retain desktop regression evidence and C-R1 boundaries;
 do not choose VR authority, state, pose, locomotion, interaction, or gameplay
 behavior implicitly.
 

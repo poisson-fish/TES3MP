@@ -5871,6 +5871,19 @@ only the relevant phase section here.
   - Verification: decision gate only; implementation evidence pending.
   - Follow-ups: implement and verify the bounded protocol-only slice.
 
+- 2026-09-03 — Slice 9.3 additive-field compatibility conflict — **In Progress**
+  - Finding: approved acceptance test 8 says unknown fields reject, while
+    governing ADR-0004 requires older readers to accept verified additive
+    optional table fields. Both cannot hold for one FlatBuffer root.
+  - Decision: added ADR-0055 Decision 5. Option A is recommended: preserve
+    ADR-0004 additive compatibility while still rejecting unknown framing,
+    identifiers, discriminants, and malformed fields. Options B and C either
+    violate ADR-0004 or version every additive field.
+  - Progress: the non-conflicting capability, schema, owned-value, codec,
+    framing, recency-classification, corpus, and boundary work is locally built
+    and focused tests pass, but remains an implementation candidate.
+  - Owner review: Decision 5 requires explicit approval; no choice is inferred.
+
 - Head and hand transforms are presentation snapshots associated with a player
   root and authority epoch. They are not persisted as durable world state.
 - Physical reach validation uses the authoritative root plus declared limits;
