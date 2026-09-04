@@ -1,4 +1,4 @@
-#include "desktop_connection.hpp"
+#include "client_connection.hpp"
 
 #ifdef TES3MP_OPENMW_HAS_GNS
 #include <tes3mp/transport_gns.hpp>
@@ -32,19 +32,20 @@ namespace TES3MP::OpenMWAdapter
         }
     }
 
-    DesktopCoordinatorResult makeDesktopCoordinator(std::string_view host, std::uint64_t port,
-        std::uint64_t timeoutMilliseconds, const std::filesystem::path& passwordFile, SemanticInputProvider& input,
-        PresentationProvider& presentation, ConnectionStatusProvider& status,
-        ConnectionControlProvider* control) noexcept
+    ClientCoordinatorResult makeClientCoordinator(std::string_view host, std::uint64_t port,
+        std::uint64_t timeoutMilliseconds, const std::filesystem::path& passwordFile,
+        ClientProviders providers) noexcept
     try
     {
+        if (!providers.input || !providers.presentation || !providers.status)
+            return ClientCompositionFailure::ProvidersUnavailable;
         if (port == 0 || port > std::numeric_limits<std::uint16_t>::max())
-            return DesktopConnectionFailure::InvalidEndpoint;
+            return ClientCompositionFailure::InvalidEndpoint;
         auto endpoint = ConnectionEndpoint::create(host, static_cast<std::uint16_t>(port));
         if (!endpoint)
-            return DesktopConnectionFailure::InvalidEndpoint;
+            return ClientCompositionFailure::InvalidEndpoint;
         if (timeoutMilliseconds == 0 || timeoutMilliseconds > 60'000)
-            return DesktopConnectionFailure::InvalidTimeout;
+            return ClientCompositionFailure::InvalidTimeout;
 
         std::vector<std::byte> bytes;
         if (!passwordFile.empty())
@@ -56,7 +57,7 @@ namespace TES3MP::OpenMWAdapter
             if (!stream.eof())
             {
                 std::fill(bytes.begin(), bytes.end(), std::byte{});
-                return DesktopConnectionFailure::CredentialReadFailed;
+                return ClientCompositionFailure::CredentialReadFailed;
             }
             if (!bytes.empty() && bytes.back() == std::byte{ '\n' })
                 bytes.pop_back();
@@ -66,13 +67,13 @@ namespace TES3MP::OpenMWAdapter
         auto password = AuthenticationMaterial::create(bytes);
         std::fill(bytes.begin(), bytes.end(), std::byte{});
         if (!password)
-            return DesktopConnectionFailure::CredentialRejected;
+            return ClientCompositionFailure::CredentialRejected;
 
 #ifdef TES3MP_OPENMW_HAS_GNS
         auto limits = TransportLimits::create(1, 1, 1, 32);
         auto transport = limits ? makeGameNetworkingSocketsTransport(*limits) : TransportFactoryResult{};
         if (!transport)
-            return DesktopConnectionFailure::TransportUnavailable;
+            return ClientCompositionFailure::TransportUnavailable;
         auto clock = std::make_unique<SteadyClock>();
         auto timeouts = SessionTimeoutPolicy::create(
             timeoutMilliseconds * 1'000'000, timeoutMilliseconds * 1'000'000, timeoutMilliseconds * 1'000'000);
@@ -82,21 +83,22 @@ namespace TES3MP::OpenMWAdapter
             : ClientRuntimeCreateResult{ SessionTransitionError{} };
         auto* runtime = std::get_if<std::unique_ptr<ClientSessionRuntime>>(&created);
         if (!runtime || !*runtime)
-            return DesktopConnectionFailure::RuntimeUnavailable;
+            return ClientCompositionFailure::RuntimeUnavailable;
         auto versions = std::get<ProtocolVersionRange>(ProtocolVersionRange::create(1, 0, 0));
         auto offer = std::get<CapabilityOffer>(CapabilityOffer::create(std::move(versions), {}, {}));
         if ((*runtime)->start(
                 *endpoint, ClientHello::fromOffer(std::move(offer)), AuthenticationRequest::join(std::move(*password)))
             != HeadlessClientResult::Accepted)
-            return DesktopConnectionFailure::ConnectionRejected;
+            return ClientCompositionFailure::ConnectionRejected;
         return makeCoordinator(std::move(transport.runtime), std::move(clock), std::move(*runtime),
-            ReconnectConfiguration{ *endpoint, *timeouts, *queue }, input, presentation, status, control);
+            ReconnectConfiguration{ *endpoint, *timeouts, *queue }, *providers.input, *providers.presentation,
+            *providers.status, providers.control);
 #else
-        return DesktopConnectionFailure::TransportUnavailable;
+        return ClientCompositionFailure::TransportUnavailable;
 #endif
     }
     catch (...)
     {
-        return DesktopConnectionFailure::RuntimeUnavailable;
+        return ClientCompositionFailure::RuntimeUnavailable;
     }
 }

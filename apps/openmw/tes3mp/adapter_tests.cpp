@@ -1,5 +1,5 @@
 #include "adapter.hpp"
-#include "desktop_connection.hpp"
+#include "client_connection.hpp"
 #include "movement_mapping.hpp"
 #include "providers.hpp"
 #include "remote_motion.hpp"
@@ -474,10 +474,15 @@ int main()
     reconnectCoordinator->frame(0.01f);
     require(reconnectPresentation.calls == 2 && reconnectStatus.last == ConnectionStatus::Resumed);
 
-    require(std::get<TES3MP::OpenMWAdapter::DesktopConnectionFailure>(
-                TES3MP::OpenMWAdapter::makeDesktopCoordinator("", 25560, 1000, {}, input, presentation, status))
-        == TES3MP::OpenMWAdapter::DesktopConnectionFailure::InvalidEndpoint);
-    require(std::get<TES3MP::OpenMWAdapter::DesktopConnectionFailure>(
-                TES3MP::OpenMWAdapter::makeDesktopCoordinator("127.0.0.1", 25560, 0, {}, input, presentation, status))
-        == TES3MP::OpenMWAdapter::DesktopConnectionFailure::InvalidTimeout);
+    require(std::get<TES3MP::OpenMWAdapter::ClientCompositionFailure>(
+                TES3MP::OpenMWAdapter::makeClientCoordinator(
+                    "", 0, 0, "unreachable/credential", TES3MP::OpenMWAdapter::ClientProviders{}))
+        == TES3MP::OpenMWAdapter::ClientCompositionFailure::ProvidersUnavailable);
+    const TES3MP::OpenMWAdapter::ClientProviders providers{ &input, &presentation, &status, nullptr };
+    require(std::get<TES3MP::OpenMWAdapter::ClientCompositionFailure>(
+                TES3MP::OpenMWAdapter::makeClientCoordinator("", 25560, 1000, {}, providers))
+        == TES3MP::OpenMWAdapter::ClientCompositionFailure::InvalidEndpoint);
+    require(std::get<TES3MP::OpenMWAdapter::ClientCompositionFailure>(
+                TES3MP::OpenMWAdapter::makeClientCoordinator("127.0.0.1", 25560, 0, {}, providers))
+        == TES3MP::OpenMWAdapter::ClientCompositionFailure::InvalidTimeout);
 }

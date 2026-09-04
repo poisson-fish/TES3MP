@@ -275,11 +275,14 @@ if (WIN32 AND BUILD_OPENMW)
     INSTALL(TARGETS openmw RUNTIME DESTINATION ".")
 endif()
 
-set(TES3MP_OPENMW_DESKTOP_PROVIDERS ON)
 add_subdirectory(tes3mp)
 
 if(BUILD_TESTING)
     target_compile_definitions(openmw-lib PRIVATE TES3MP_OPENMW_DESKTOP_AUTOMATION)
 endif()
 
-target_link_libraries(openmw TES3MP::OpenMWAdapter)
+target_link_libraries(openmw TES3MP::OpenMWAdapter TES3MP::OpenMWDesktopProviders)
+
+if(BUILD_OPENMW_VR AND TARGET openmw_vr)
+    target_link_libraries(openmw_vr TES3MP::OpenMWAdapter)
+endif()
