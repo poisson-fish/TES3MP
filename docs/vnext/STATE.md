@@ -10,9 +10,9 @@ is the [implementation plan](IMPLEMENTATION_PLAN.md#phase-9--pc-vr-interoperabil
 - Branch: `vnext`
 - Phase 7: **Implemented**
 - Phase 8: **Implemented**
-- Phase 9: **In Progress** (Slice 9.1 implementation acceptance gate)
-- Slice 9.1: **In Progress** (approved implementation candidate and verification
-  complete; owner acceptance remains)
+- Phase 9: **In Progress** (Slice 9.2 architecture/build decision gate)
+- Slice 9.1: **Implemented**
+- Slice 9.2: **Not Started** (architecture/build options require owner approval)
 - Slice 8.1: **Implemented**
 - Slice 8.2: **Implemented**
 - Slice 8.3: **Implemented**
@@ -108,7 +108,7 @@ server disconnect grace. With the pinned dependency runtime paths,
 `Morrowind.bsa`, and avatar `player`, the complete flow/reconnect/soak gate now
 passes. No alternate content record or presentation behavior was chosen.
 
-Phase 9 Slice 9.1 has an implementation candidate. Primary-source research found
+Phase 9 Slice 9.1 is implemented. Primary-source research found
 the newest immutable OpenMW 0.51 VR target at `openmw-vr-0.51-rc1`, commit
 `56a8e01390507375c9c2f2593e1c09e0df88c505`. Its exact GitHub Windows 2022 and
 Ubuntu workflow passed, but retained artifacts have expired; its GitLab
@@ -124,7 +124,8 @@ offline-reusable OpenXR acquisition. Fresh Windows RelWithDebInfo
 `openmw_vr.exe` link and desktop regressions pass. The owner separately approved
 temporary composition Option A: VR excludes desktop-only composition until
 Slice 9.2. No authority, canonical state, protocol, pose, locomotion,
-interaction, or gameplay behavior changed.
+interaction, or gameplay behavior changed. The owner accepted the verified
+implementation on 2026-09-03.
 
 The remote-avatar architecture decision was reopened. Legacy TES3MP used real
 dynamic NPC actors and then patched dedicated-player exceptions through 16
@@ -156,11 +157,11 @@ Read this file and accepted
 [ADR-0008](adr/ADR-0008-pc-vr-fork-worktree-maintenance-policy.md). Phase 8 is
 accepted and complete at implementation `93690354d1`. Slice 9.1's approved
 maintenance target and verified candidate are complete on `vnext-vr` at
-`c590e81cc5`; owner implementation acceptance remains. After acceptance, Slice
-9.2 is next, but present its architecture/build options before adding VR
-multiplayer composition. Retain desktop regression evidence and C-R1 boundaries;
-do not choose VR authority, state, pose, locomotion, interaction, or gameplay
-behavior implicitly.
+`c590e81cc5`, with rehearsal-safety proof at `ff04803ec2`; owner implementation
+acceptance is recorded. Slice 9.2 is next, but present its architecture/build
+options before adding VR multiplayer composition. Retain desktop regression
+evidence and C-R1 boundaries; do not choose VR authority, state, pose,
+locomotion, interaction, or gameplay behavior implicitly.
 
 ## Active files
 
@@ -193,7 +194,8 @@ reuse, and the verified source rebuilt and linked MSVC 19.51 RelWithDebInfo
 `openmw_vr.exe` with SHA-256
 `283e8974ddee1c696381315f02138b624873896a2f7f28653f3a4dae4324bc1c`.
 The VR six-test gate, desktop patch registry, and all 137 desktop Python tests
-pass. Slice 9.1 remains **In Progress** pending owner implementation acceptance.
+pass. The owner accepted Slice 9.1 implementation on 2026-09-03; it is
+**Implemented**.
 
 C-R1 is implemented without copying the legacy actor model. The old transient
 proxy and NPC custom-data initializer delta are removed. A separate renderer
@@ -212,8 +214,7 @@ failure. All 137 repository-owned Python tests, patch-registry verification,
 staged 342-entry provenance with 69 dependency inputs, staged legacy exclusion,
 and diff hygiene pass. The owner accepted this implementation and the shared
 Slices 8.2–8.7 demonstration on 2026-09-03. The Phase 8 exit gate is closed;
-Phase 9 Slice 9.1 is **In Progress** pending owner acceptance of the verified
-implementation candidate.
+Phase 9 Slice 9.1 is **Implemented**.
 
 Slice 8.7 content-backed demo preflight rebuilt the MSVC 19.51 RelWithDebInfo
 `tes3mp_server.exe` and passed all four focused desktop-harness Python contracts

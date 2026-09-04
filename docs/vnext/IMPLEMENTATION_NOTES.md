@@ -5744,6 +5744,22 @@ only the relevant phase section here.
   - Follow-ups: accept Slice 9.1, then present Slice 9.2 architecture/build
     options before adding VR multiplayer composition.
 
+- 2026-09-03 — Slice 9.1 owner implementation acceptance — **Implemented**
+  - Change: recorded owner acceptance of the verified PC VR maintenance target,
+    reproducible build proof, and failed-update rehearsal safety evidence.
+  - Decisions: none. This closure accepts only the ADR-0008 maintenance and
+    temporary composition boundaries already approved. It adds no authority,
+    canonical state, protocol, pose, input, locomotion, interaction, or gameplay
+    behavior.
+  - Verification: current `vnext` and `vnext-vr` worktrees are clean; the desktop
+    patch registry and its three focused tests pass; the VR target verifier and
+    its four focused tests pass; the read-only VR remote still has push disabled;
+    and current desktop commit `9c81e62380` is present in `vnext-vr` history.
+  - Owner review: explicit Slice 9.1 implementation acceptance received on
+    2026-09-03.
+  - Follow-ups: present Slice 9.2 architecture/build options and obtain owner
+    approval before adding VR multiplayer composition.
+
 - Head and hand transforms are presentation snapshots associated with a player
   root and authority epoch. They are not persisted as durable world state.
 - Physical reach validation uses the authoritative root plus declared limits;

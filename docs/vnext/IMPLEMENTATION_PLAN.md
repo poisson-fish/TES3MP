@@ -96,8 +96,9 @@ active-tree difference and dependency input.
 The tree contains independent protocol, transport, server-core, client-session,
 OpenMW-adapter, and test-support targets plus the Phase 7 dedicated server and
 headless client applications. Phases 0–8 have passed their exit gates. Phase 9
-is in progress at the owner-gated PC VR maintenance decision in Slice 9.1; the
-plan table below is the authoritative status source.
+is in progress. Slice 9.1 is implemented, and Slice 9.2 is at its owner-gated
+architecture/build decision; the plan table below is the authoritative status
+source.
 
 Historical pre-cutover state and exact Git mechanics remain available in
 [`PRE_CUTOVER_PROVENANCE.md`](PRE_CUTOVER_PROVENANCE.md), ADR-0001, and the
@@ -318,7 +319,7 @@ runtime or protocol name.
 | ADR-0005 | Transport, encryption, authentication, and session resumption | Phase 6 | **Implemented** |
 | ADR-0006 | Authority, state-scope, prediction, and presentation policy | Phase 7 | **Implemented** |
 | ADR-0007 | OpenMW hook and patch-queue policy | Phase 8 | **Implemented** |
-| ADR-0008 | PC VR fork/worktree maintenance policy | Phase 9 | **In Progress** |
+| ADR-0008 | PC VR fork/worktree maintenance policy | Phase 9 | **Implemented** |
 | ADR-0009 | Scripting language, runtime, isolation, and API model | Phase 19 | **Not Started** |
 | ADR-0010 | Persistence store, schema evolution, backup, and replay model | Phase 20 | **Not Started** |
 | ADR-0011 | Administration authorization, audit, and discovery exposure | Phase 21 | **Not Started** |
@@ -702,7 +703,7 @@ Depends on: Phase 8.
 
 | Slice | Deliverable | Status | Completion evidence |
 |---|---|---|---|
-| 9.1 | Review PC VR maintenance options with the owner, approve ADR-0008, and create the worktree/patch target | **In Progress** | ADR-0008 A/A/A and temporary composition A approved; `vnext-vr` records exact two-parent merge `0e8e85e0b5`, proof `c590e81cc5`, and rehearsal-safety test `ff04803ec2`; immutable OpenXR acquisition/offline reuse, registry verification, fresh MSVC 19.51 `openmw_vr.exe` link, and all 137 desktop Python regressions pass; owner implementation acceptance remains |
+| 9.1 | Review PC VR maintenance options with the owner, approve ADR-0008, and create the worktree/patch target | **Implemented** | ADR-0008 A/A/A and temporary composition A approved; `vnext-vr` records exact two-parent merge `0e8e85e0b5`, proof `c590e81cc5`, and rehearsal-safety test `ff04803ec2`; immutable OpenXR acquisition/offline reuse, registry verification, fresh MSVC 19.51 `openmw_vr.exe` link, all 137 desktop Python regressions, and owner implementation acceptance pass |
 | 9.2 | Build the same adapter/client-session targets against desktop and PC VR engines | **Not Started** | Shared code is not copied; both targets build in their supported environments |
 | 9.3 | Add optional `vr_pose` capability and bounded head/hand pose snapshot schema | **Not Started** | Negotiation, absent/unknown capability, bounds, round-trip, and fuzz tests pass |
 | 9.4 | Implement VR input and presentation providers using semantic commands | **Not Started** | Locomotion command behavior matches desktop authority rules |
