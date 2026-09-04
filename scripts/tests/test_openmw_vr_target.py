@@ -37,6 +37,19 @@ class OpenMWVRTargetTests(unittest.TestCase):
             "apps/openmw/mwrender/vismask.hpp",
         })
 
+    def test_vr_update_rehearsal_does_not_move_the_maintained_target_on_failure(self):
+        branch = "refs/heads/vnext-vr"
+        before = subprocess.check_output(
+            ["git", "rev-parse", branch], cwd=ROOT, text=True).strip()
+        data = json.loads((ROOT / "docs/vnext/OPENMW_VR_PROVENANCE.json").read_text(encoding="utf-8"))
+        rehearsal = subprocess.run(
+            ["git", "merge-tree", "--write-tree", *data["integration"]["parents"]],
+            cwd=ROOT, capture_output=True, text=True)
+        after = subprocess.check_output(
+            ["git", "rev-parse", branch], cwd=ROOT, text=True).strip()
+        self.assertNotEqual(rehearsal.returncode, 0)
+        self.assertEqual(before, after)
+
 
 if __name__ == "__main__":
     unittest.main()
