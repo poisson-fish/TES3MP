@@ -30,10 +30,12 @@ class FlatBuffersProofRunnerTests(unittest.TestCase):
                 "authentication_rejected.fbs",
                 "authentication_request.fbs",
                 "client_hello.fbs",
+                "client_vr_pose_sample.fbs",
                 "latest_wins_snapshot.fbs",
                 "reliable_observation_batch.fbs",
                 "reliable_operation.fbs",
                 "server_hello.fbs",
+                "server_vr_pose_snapshot.fbs",
                 "session_rejected.fbs",
             ],
         )

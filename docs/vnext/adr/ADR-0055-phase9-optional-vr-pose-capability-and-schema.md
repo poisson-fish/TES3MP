@@ -177,10 +177,10 @@ for changes that ADR-0004 already permits within one protocol major.
 
 ## Recommendation
 
-Decisions 1 through 4 use approved Option A. Approve Option A for Decision 5 so
-ADR-0004 remains governing. This gives a small, deterministic, capability-gated
-codec while keeping pose noncanonical and transport-disabled until queue
-isolation and sampling policy are approved in Slice 9.5.
+Decisions 1 through 5 use approved Option A, preserving ADR-0004. This gives a
+small, deterministic, capability-gated codec while keeping pose noncanonical
+and transport-disabled until queue isolation and sampling policy are approved
+in Slice 9.5.
 
 ## Proposed acceptance tests
 
@@ -191,7 +191,7 @@ isolation and sampling policy are approved in Slice 9.5.
 5. `presentation_frames_reject_over_1024_bytes`
 6. `pose_round_trip_owns_root_relative_head_and_optional_hands`
 7. `missing_head_zero_sequence_and_out_of_range_offsets_reject`
-8. `all_truncations_bad_identifiers_unknown_fields_and_trailing_bytes_reject`
+8. `truncations_bad_identifiers_unknown_classifications_and_trailing_bytes_reject_while_additive_fields_remain_compatible`
 9. `equal_sequence_requires_identical_content_and_older_sequence_is_stale`
 10. `generation_change_clears_pose_recency_without_persistence`
 11. `pose_values_expose_no_canonical_revision_tick_ack_or_platform_type`
@@ -223,8 +223,7 @@ encoding.
 
 ## Owner approval
 
-Approved on 2026-09-03: Option A for Decisions 1 through 4. The original
-acceptance tests were approved, but implementation found test 8 conflicts with
-governing ADR-0004. Decision 5 and its corrected test 8 wording await explicit
-owner approval. No choice is inferred. Implementation acceptance remains
-separate.
+Approved on 2026-09-03: Option A for Decisions 1 through 4 and the proposed
+acceptance tests. Approved on 2026-09-04: Option A for Decision 5 and its
+corrected test 8 wording, resolving the implementation conflict in favor of
+governing ADR-0004. Implementation acceptance remains separate.

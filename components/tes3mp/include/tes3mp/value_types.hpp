@@ -70,6 +70,11 @@ namespace TES3MP::Detail
         static constexpr std::string_view name = "AuthorityEpoch";
     };
 
+    struct PoseSampleSequenceTag
+    {
+        static constexpr std::string_view name = "PoseSampleSequence";
+    };
+
     struct IngressOrdinalTag
     {
         static constexpr std::string_view name = "IngressOrdinal";
@@ -100,6 +105,8 @@ namespace TES3MP
     using EntityRevision = Detail::StrongValue<Detail::EntityRevisionTag, Detail::StrongValuePolicy::CounterFromOne>;
     using CommandId = Detail::StrongValue<Detail::CommandIdTag, Detail::StrongValuePolicy::Identity>;
     using AuthorityEpoch = Detail::StrongValue<Detail::AuthorityEpochTag, Detail::StrongValuePolicy::CounterFromOne>;
+    using PoseSampleSequence
+        = Detail::StrongValue<Detail::PoseSampleSequenceTag, Detail::StrongValuePolicy::CounterFromOne>;
     using IngressOrdinal = Detail::StrongValue<Detail::IngressOrdinalTag, Detail::StrongValuePolicy::CounterFromOne>;
     using CellSpaceId = Detail::StrongValue<Detail::CellSpaceIdTag, Detail::StrongValuePolicy::Identity>;
 }

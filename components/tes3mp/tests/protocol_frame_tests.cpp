@@ -69,6 +69,7 @@ namespace
     static_assert(TES3MP::SessionControlMaximumPayloadBytes == 4096);
     static_assert(TES3MP::ReliableOperationMaximumPayloadBytes == 16384);
     static_assert(TES3MP::LatestWinsSnapshotMaximumPayloadBytes == 65536);
+    static_assert(TES3MP::PresentationSampleMaximumPayloadBytes == 1024);
 
     std::vector<std::byte> makeBytes(std::initializer_list<std::uint8_t> values)
     {
@@ -110,6 +111,8 @@ namespace
             TES3MP::MessageKind::SessionRejected,
             TES3MP::MessageKind::ReliableOperation,
             TES3MP::MessageKind::LatestWinsSnapshot,
+            TES3MP::MessageKind::ClientVrPoseSample,
+            TES3MP::MessageKind::ServerVrPoseSnapshot,
         };
         const auto payload = makeBytes({ 1, 2, 3, 4 });
         for (const auto kind : kinds)
@@ -135,6 +138,8 @@ namespace
             TES3MP::MessageKind::SessionRejected,
             TES3MP::MessageKind::ReliableOperation,
             TES3MP::MessageKind::LatestWinsSnapshot,
+            TES3MP::MessageKind::ClientVrPoseSample,
+            TES3MP::MessageKind::ServerVrPoseSnapshot,
         };
         constexpr std::array sampleSizes{ std::size_t{ 1 }, std::size_t{ 2 }, std::size_t{ 15 }, std::size_t{ 255 },
             std::size_t{ 256 }, std::size_t{ 4096 } };
@@ -232,6 +237,8 @@ namespace
                 TES3MP::ReliableOperationMaximumPayloadBytes },
             Case{ TES3MP::MessageClass::LatestWinsSnapshot, TES3MP::MessageKind::LatestWinsSnapshot,
                 TES3MP::LatestWinsSnapshotMaximumPayloadBytes },
+            Case{ TES3MP::MessageClass::PresentationSample, TES3MP::MessageKind::ClientVrPoseSample,
+                TES3MP::PresentationSampleMaximumPayloadBytes },
         };
 
         for (const auto& current : cases)

@@ -20,12 +20,14 @@ namespace TES3MP
     inline constexpr std::size_t SessionControlMaximumPayloadBytes = 4 * 1024;
     inline constexpr std::size_t ReliableOperationMaximumPayloadBytes = 16 * 1024;
     inline constexpr std::size_t LatestWinsSnapshotMaximumPayloadBytes = 64 * 1024;
+    inline constexpr std::size_t PresentationSampleMaximumPayloadBytes = 1024;
 
     enum class MessageClass : std::uint8_t
     {
         SessionControl = 1,
         ReliableOperation = 2,
         LatestWinsSnapshot = 3,
+        PresentationSample = 4,
     };
 
     enum class MessageKind : std::uint16_t
@@ -39,6 +41,8 @@ namespace TES3MP
         ReliableOperation = 0x0100,
         ReliableObservationBatch = 0x0101,
         LatestWinsSnapshot = 0x0200,
+        ClientVrPoseSample = 0x0300,
+        ServerVrPoseSnapshot = 0x0301,
     };
 
     struct MessageDescriptor
@@ -67,6 +71,10 @@ namespace TES3MP
             case MessageKind::LatestWinsSnapshot:
                 return MessageDescriptor{ kind, MessageClass::LatestWinsSnapshot,
                     LatestWinsSnapshotMaximumPayloadBytes };
+            case MessageKind::ClientVrPoseSample:
+            case MessageKind::ServerVrPoseSnapshot:
+                return MessageDescriptor{ kind, MessageClass::PresentationSample,
+                    PresentationSampleMaximumPayloadBytes };
         }
         return std::nullopt;
     }
@@ -81,6 +89,8 @@ namespace TES3MP
                 return ReliableOperationMaximumPayloadBytes;
             case MessageClass::LatestWinsSnapshot:
                 return LatestWinsSnapshotMaximumPayloadBytes;
+            case MessageClass::PresentationSample:
+                return PresentationSampleMaximumPayloadBytes;
         }
         return std::nullopt;
     }

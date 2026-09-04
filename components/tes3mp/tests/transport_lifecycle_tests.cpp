@@ -78,6 +78,8 @@ namespace
                 "reliable operation is not mapped to the reliable channel")
             && check(TES3MP::transportChannelFor(MessageClass::LatestWinsSnapshot) == TransportChannel::LatestWins,
                 "snapshot is not mapped to the latest-wins channel")
+            && check(!TES3MP::transportChannelFor(MessageClass::PresentationSample),
+                "presentation samples must remain transport-disabled until Slice 9.5")
             && check(!TES3MP::transportChannelFor(invalidClass), "unknown message class acquired a channel")
             && check(TES3MP::maximumTransportMessageBytes(TransportChannel::ReliableOrdered)
                     == TES3MP::ProtocolFrameHeaderBytes + TES3MP::ReliableOperationMaximumPayloadBytes,

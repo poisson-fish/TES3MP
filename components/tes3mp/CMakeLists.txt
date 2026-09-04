@@ -77,6 +77,7 @@ target_sources(tes3mp_protocol PRIVATE
     include/tes3mp/protocol_exchange.hpp
     include/tes3mp/protocol_handshake.hpp
     include/tes3mp/protocol_frame.hpp
+    include/tes3mp/protocol_pose.hpp
     include/tes3mp/session_types.hpp
     include/tes3mp/spatial_types.hpp
     include/tes3mp/strong_value.hpp
@@ -85,15 +86,18 @@ target_sources(tes3mp_protocol PRIVATE
     protocol/generated/authentication_rejected_generated.h
     protocol/generated/authentication_request_generated.h
     protocol/generated/client_hello_generated.h
+    protocol/generated/client_vr_pose_sample_generated.h
     protocol/generated/latest_wins_snapshot_generated.h
     protocol/generated/reliable_observation_batch_generated.h
     protocol/generated/reliable_operation_generated.h
     protocol/generated/server_hello_generated.h
+    protocol/generated/server_vr_pose_snapshot_generated.h
     protocol/generated/session_rejected_generated.h
     protocol/authentication.cpp
     protocol/protocol_exchange.cpp
     protocol/protocol_handshake.cpp
     protocol/protocol_frame.cpp
+    protocol/protocol_pose.cpp
 )
 target_include_directories(tes3mp_protocol PRIVATE
     "${tes3mp_flatbuffers_SOURCE_DIR}/include"
@@ -506,6 +510,19 @@ tes3mp_verify_target_dependencies(tes3mp_protocol_exchange_tests ALLOWED tes3mp_
 tes3mp_verify_target_includes(tes3mp_protocol_exchange_tests
     FORBIDDEN ${TES3MP_ENGINE_INDEPENDENT_FORBIDDEN_INCLUDES})
 
+add_executable(tes3mp_protocol_pose_tests tests/protocol_pose_tests.cpp)
+target_compile_features(tes3mp_protocol_pose_tests PRIVATE cxx_std_20)
+target_link_libraries(tes3mp_protocol_pose_tests PRIVATE tes3mp_protocol)
+target_include_directories(tes3mp_protocol_pose_tests PRIVATE
+    "${tes3mp_flatbuffers_SOURCE_DIR}/include"
+    "${CMAKE_CURRENT_SOURCE_DIR}/protocol")
+set_target_properties(tes3mp_protocol_pose_tests PROPERTIES FOLDER "TES3MP/Tests")
+tes3mp_enable_runtime_safety(tes3mp_protocol_pose_tests)
+
+tes3mp_verify_target_dependencies(tes3mp_protocol_pose_tests ALLOWED tes3mp_protocol)
+tes3mp_verify_target_includes(tes3mp_protocol_pose_tests
+    FORBIDDEN ${TES3MP_ENGINE_INDEPENDENT_FORBIDDEN_INCLUDES})
+
 add_executable(tes3mp_session_state_tests tests/session_state_machine_tests.cpp)
 target_compile_features(tes3mp_session_state_tests PRIVATE cxx_std_20)
 target_link_libraries(tes3mp_session_state_tests PRIVATE tes3mp_test_support)
@@ -709,6 +726,16 @@ if(TES3MP_BUILD_FUZZERS)
     tes3mp_verify_target_dependencies(tes3mp_protocol_exchange_fuzz ALLOWED tes3mp_protocol)
     tes3mp_verify_target_includes(tes3mp_protocol_exchange_fuzz
         FORBIDDEN ${TES3MP_ENGINE_INDEPENDENT_FORBIDDEN_INCLUDES})
+
+    add_executable(tes3mp_protocol_pose_fuzz tests/fuzz/protocol_pose_fuzz.cpp)
+    target_compile_features(tes3mp_protocol_pose_fuzz PRIVATE cxx_std_20)
+    target_link_libraries(tes3mp_protocol_pose_fuzz PRIVATE tes3mp_protocol)
+    set_target_properties(tes3mp_protocol_pose_fuzz PROPERTIES FOLDER "TES3MP/Fuzzers")
+    tes3mp_enable_runtime_safety(tes3mp_protocol_pose_fuzz)
+    tes3mp_enable_libfuzzer(tes3mp_protocol_pose_fuzz)
+    tes3mp_verify_target_dependencies(tes3mp_protocol_pose_fuzz ALLOWED tes3mp_protocol)
+    tes3mp_verify_target_includes(tes3mp_protocol_pose_fuzz
+        FORBIDDEN ${TES3MP_ENGINE_INDEPENDENT_FORBIDDEN_INCLUDES})
 endif()
 
 add_custom_target(tes3mp_protocol_tests_run
@@ -726,6 +753,9 @@ add_custom_target(tes3mp_protocol_tests_run
     COMMAND $<TARGET_FILE:tes3mp_protocol_exchange_tests>
     COMMAND $<TARGET_FILE:tes3mp_protocol_exchange_tests> --verify-corpus
         ${CMAKE_CURRENT_SOURCE_DIR}/tests/fuzz/corpus/protocol_exchange
+    COMMAND $<TARGET_FILE:tes3mp_protocol_pose_tests>
+    COMMAND $<TARGET_FILE:tes3mp_protocol_pose_tests> --verify-corpus
+        ${CMAKE_CURRENT_SOURCE_DIR}/tests/fuzz/corpus/protocol_pose
     COMMAND $<TARGET_FILE:tes3mp_session_state_tests>
     COMMAND $<TARGET_FILE:tes3mp_spatial_primitive_tests>
     COMMAND $<TARGET_FILE:tes3mp_deterministic_facilities_tests>
@@ -748,6 +778,7 @@ add_custom_target(tes3mp_protocol_tests_run
         tes3mp_protocol_handshake_tests
         tes3mp_protocol_authentication_tests
         tes3mp_protocol_exchange_tests
+        tes3mp_protocol_pose_tests
         tes3mp_session_state_tests
         tes3mp_spatial_primitive_tests
         tes3mp_deterministic_facilities_tests

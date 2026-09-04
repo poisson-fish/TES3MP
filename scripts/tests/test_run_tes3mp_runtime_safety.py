@@ -111,6 +111,16 @@ class RuntimeSafetyRunnerTests(unittest.TestCase):
         )
         self.assertIn("tes3mp_protocol_exchange_fuzz", exchange_command[0])
         self.assertIn("-max_len=65537", exchange_command)
+        pose_command = safety.fuzz_command(
+            "asan-ubsan",
+            30,
+            pathlib.Path("artifacts"),
+            target="tes3mp_protocol_pose_fuzz",
+            corpus_dir=safety.PROTOCOL_POSE_CORPUS_DIR,
+            maximum_input_bytes=safety.TES3MP_PRESENTATION_SAMPLE_MAX_BYTES + 1,
+        )
+        self.assertIn("tes3mp_protocol_pose_fuzz", pose_command[0])
+        self.assertIn("-max_len=1025", pose_command)
 
     def test_seed_corpus_is_bounded_and_covers_length_boundaries(self):
         records = safety.verify_corpus()
@@ -134,6 +144,11 @@ class RuntimeSafetyRunnerTests(unittest.TestCase):
         self.assertTrue(
             all(record["bytes"] <= safety.MAX_CORPUS_FILE_BYTES for record in exchange_records)
         )
+        pose_records = safety.verify_protocol_pose_corpus()
+        self.assertGreaterEqual(len(pose_records), 2)
+        self.assertTrue(
+            all(record["bytes"] <= safety.MAX_CORPUS_FILE_BYTES for record in pose_records)
+        )
 
     def test_every_bounded_decoder_has_a_fuzzer_corpus_and_production_golden_seed(self):
         registry = safety.verify_decoder_registry()
@@ -147,6 +162,8 @@ class RuntimeSafetyRunnerTests(unittest.TestCase):
                 "decodeSessionRejected",
                 "decodeReliableOperation",
                 "decodeLatestWinsSnapshot",
+                "decodeClientVrPoseSample",
+                "decodeServerVrPoseSnapshot",
             },
         )
         for record in registry:
@@ -186,6 +203,7 @@ class RuntimeSafetyRunnerTests(unittest.TestCase):
             "tes3mp_protocol_handshake_tests",
             "tes3mp_protocol_authentication_tests",
             "tes3mp_protocol_exchange_tests",
+            "tes3mp_protocol_pose_tests",
             "tes3mp_session_state_tests",
             "tes3mp_spatial_primitive_tests",
             "tes3mp_deterministic_facilities_tests",
@@ -200,8 +218,9 @@ class RuntimeSafetyRunnerTests(unittest.TestCase):
         self.assertIn("tes3mp_enable_libfuzzer(tes3mp_protocol_handshake_fuzz)", component)
         self.assertIn("tes3mp_enable_libfuzzer(tes3mp_protocol_authentication_fuzz)", component)
         self.assertIn("tes3mp_enable_libfuzzer(tes3mp_protocol_exchange_fuzz)", component)
+        self.assertIn("tes3mp_enable_libfuzzer(tes3mp_protocol_pose_fuzz)", component)
         self.assertIn("TES3MP_TEST_TSAN_ALLOCATOR_INTERPOSITION=1", component)
-        self.assertEqual(component.count("--verify-corpus"), 4)
+        self.assertEqual(component.count("--verify-corpus"), 5)
         asan_preset = next(
             preset
             for preset in data["buildPresets"]
@@ -210,6 +229,7 @@ class RuntimeSafetyRunnerTests(unittest.TestCase):
         self.assertIn("tes3mp_protocol_handshake_fuzz", asan_preset["targets"])
         self.assertIn("tes3mp_protocol_authentication_fuzz", asan_preset["targets"])
         self.assertIn("tes3mp_protocol_exchange_fuzz", asan_preset["targets"])
+        self.assertIn("tes3mp_protocol_pose_fuzz", asan_preset["targets"])
         adapter = (REPOSITORY_ROOT / "apps" / "openmw" / "tes3mp" / "CMakeLists.txt").read_text(
             encoding="utf-8"
         )

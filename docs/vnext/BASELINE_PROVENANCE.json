@@ -190,6 +190,16 @@
       "purpose": "Focused contracts for the engine coordinator and semantic input provider boundary."
     },
     {
+      "path": "apps/openmw/tes3mp/client_connection.cpp",
+      "status": "A",
+      "purpose": "Implements engine-neutral client connection validation and composes the verified transport and client runtime from injected providers."
+    },
+    {
+      "path": "apps/openmw/tes3mp/client_connection.hpp",
+      "status": "A",
+      "purpose": "Declares stable sanitized client composition outcomes, provider injection, and the shared coordinator factory."
+    },
+    {
       "path": "apps/openmw/tes3mp/desktop_automation.cpp",
       "status": "A",
       "purpose": "Implements bounded fixed-role desktop flow, reconnect, and soak automation with peer evidence that excludes the target player, available only to testing builds."
@@ -198,16 +208,6 @@
       "path": "apps/openmw/tes3mp/desktop_automation.hpp",
       "status": "A",
       "purpose": "Declares the typed test-only OpenMW desktop automation provider and credential-free evidence boundary."
-    },
-    {
-      "path": "apps/openmw/tes3mp/desktop_connection.cpp",
-      "status": "A",
-      "purpose": "Validates desktop connection configuration, bounds credential loading, and composes the verified transport and client runtime."
-    },
-    {
-      "path": "apps/openmw/tes3mp/desktop_connection.hpp",
-      "status": "A",
-      "purpose": "Declares stable sanitized desktop connection startup outcomes and the composition factory."
     },
     {
       "path": "apps/openmw/tes3mp/desktop_providers.cpp",
@@ -505,6 +505,11 @@
       "purpose": "Owned bounded protocol-version, capability-offer, hello, rejection, pure-negotiation, and initial-peer-classification API."
     },
     {
+      "path": "components/tes3mp/include/tes3mp/protocol_pose.hpp",
+      "status": "A",
+      "purpose": "Declares bounded owned presentation-only VR pose values, directional codec APIs, and source-generation recency classification."
+    },
+    {
       "path": "components/tes3mp/include/tes3mp/server_authentication.hpp",
       "status": "A",
       "purpose": "Owner-approved portable credential-crypto service and bounded digest-only transactional resume-token store boundary."
@@ -635,6 +640,11 @@
       "purpose": "Pinned FlatBuffers 25.12.19 generated C++ for the size-prefixed T3CH client-offer schema."
     },
     {
+      "path": "components/tes3mp/protocol/generated/client_vr_pose_sample_generated.h",
+      "status": "A",
+      "purpose": "Pinned FlatBuffers 25.12.19 generated C++ for the size-prefixed T3VP client pose schema."
+    },
+    {
       "path": "components/tes3mp/protocol/generated/latest_wins_snapshot_generated.h",
       "status": "A",
       "purpose": "Pinned FlatBuffers 25.12.19 generated C++ for the size-prefixed closed-union T3LS spatial-view schema."
@@ -653,6 +663,11 @@
       "path": "components/tes3mp/protocol/generated/server_hello_generated.h",
       "status": "A",
       "purpose": "Pinned FlatBuffers 25.12.19 generated C++ for the size-prefixed T3SH negotiated-result schema."
+    },
+    {
+      "path": "components/tes3mp/protocol/generated/server_vr_pose_snapshot_generated.h",
+      "status": "A",
+      "purpose": "Pinned FlatBuffers 25.12.19 generated C++ for the size-prefixed T3VR server pose schema."
     },
     {
       "path": "components/tes3mp/protocol/generated/session_rejected_generated.h",
@@ -675,6 +690,11 @@
       "purpose": "Verifier-first owned hello/rejection codecs, bounded capability validation, deterministic pure negotiation, and legacy/unknown no-reply classification."
     },
     {
+      "path": "components/tes3mp/protocol/protocol_pose.cpp",
+      "status": "A",
+      "purpose": "Implements verifier-first bounded directional VR pose codecs and stateless byte-equivalent recency classification."
+    },
+    {
       "path": "components/tes3mp/protocol/schema/authentication_accepted.fbs",
       "status": "A",
       "purpose": "Explicit-ID T3AA exact 32-byte fresh resume-token and bounded relative-lifetime schema."
@@ -695,6 +715,11 @@
       "purpose": "Explicit-ID T3CH client protocol-range and bounded optional/required capability offer schema."
     },
     {
+      "path": "components/tes3mp/protocol/schema/client_vr_pose_sample.fbs",
+      "status": "A",
+      "purpose": "Explicit-ID T3VP presentation-only client head and optional-hand pose schema."
+    },
+    {
       "path": "components/tes3mp/protocol/schema/latest_wins_snapshot.fbs",
       "status": "A",
       "purpose": "Explicit-ID T3LS closed-union schema for target-session latest-wins spatial views capped by the public codec contract."
@@ -713,6 +738,11 @@
       "path": "components/tes3mp/protocol/schema/server_hello.fbs",
       "status": "A",
       "purpose": "Explicit-ID T3SH selected protocol version and immutable negotiated-capability schema."
+    },
+    {
+      "path": "components/tes3mp/protocol/schema/server_vr_pose_snapshot.fbs",
+      "status": "A",
+      "purpose": "Explicit-ID T3VR presentation-only server-targeted remote pose schema."
     },
     {
       "path": "components/tes3mp/protocol/schema/session_rejected.fbs",
@@ -960,6 +990,21 @@
       "purpose": "SHA-locked valid T3RJ golden payload seed for rejection decoder success-path fuzzing and schema drift detection."
     },
     {
+      "path": "components/tes3mp/tests/fuzz/corpus/protocol_pose/truncated",
+      "status": "A",
+      "purpose": "Truncated size-prefix seed for both bounded presentation-pose decoders."
+    },
+    {
+      "path": "components/tes3mp/tests/fuzz/corpus/protocol_pose/valid-client-vr-pose",
+      "status": "A",
+      "purpose": "SHA-locked valid T3VP golden payload seed for client-pose decoder success-path fuzzing and schema drift detection."
+    },
+    {
+      "path": "components/tes3mp/tests/fuzz/corpus/protocol_pose/valid-server-vr-pose",
+      "status": "A",
+      "purpose": "SHA-locked valid T3VR golden payload seed for server-pose decoder success-path fuzzing and schema drift detection."
+    },
+    {
       "path": "components/tes3mp/tests/fuzz/corpus/spatial_round_trip/interior-sized",
       "status": "A",
       "purpose": "Exact interior-record-size seed for the bounded test-only spatial decoder fuzz smoke."
@@ -993,6 +1038,11 @@
       "path": "components/tes3mp/tests/fuzz/protocol_handshake_fuzz.cpp",
       "status": "A",
       "purpose": "Clang libFuzzer entry point over all three bounded production handshake payload decoders."
+    },
+    {
+      "path": "components/tes3mp/tests/fuzz/protocol_pose_fuzz.cpp",
+      "status": "A",
+      "purpose": "Clang libFuzzer entry point over both bounded presentation-pose payload decoders."
     },
     {
       "path": "components/tes3mp/tests/fuzz/spatial_round_trip_fuzz.cpp",
@@ -1033,6 +1083,11 @@
       "path": "components/tes3mp/tests/protocol_handshake_tests.cpp",
       "status": "A",
       "purpose": "Golden-corpus, deterministic property, exhaustive bit-mutation, owned round-trip, version-overlap, capability, rejection, malformed-wire, and legacy/no-reply contracts for Phase 4 negotiation."
+    },
+    {
+      "path": "components/tes3mp/tests/protocol_pose_tests.cpp",
+      "status": "A",
+      "purpose": "Capability, directional root, bounds, owned round-trip, malformed input, additive compatibility, recency, deterministic property, and golden corpus contracts for VR pose."
     },
     {
       "path": "components/tes3mp/tests/server_authentication_tests.cpp",
@@ -1213,6 +1268,11 @@
       "path": "docs/vnext/adr/ADR-0007-openmw-hook-patch-queue-policy.md",
       "status": "A",
       "purpose": "Owner-approved native OpenMW adapter, bounded hook-surface, patch-registry, local upstream-preparation, and acceptance-evidence policy."
+    },
+    {
+      "path": "docs/vnext/adr/ADR-0008-pc-vr-fork-worktree-maintenance-policy.md",
+      "status": "A",
+      "purpose": "Records the approved immutable OpenMW-VR target, worktree, merge, registry, verification, and rehearsal policy."
     },
     {
       "path": "docs/vnext/adr/ADR-0013-deterministic-simulation-protocol-compatibility.md",
@@ -1418,6 +1478,16 @@
       "path": "docs/vnext/adr/ADR-0053-phase8-desktop-reconnect-and-automation-composition.md",
       "status": "A",
       "purpose": "Records approved bounded desktop reconnect ownership, token retry safety, and test-only automation composition."
+    },
+    {
+      "path": "docs/vnext/adr/ADR-0054-phase9-dual-engine-adapter-composition.md",
+      "status": "A",
+      "purpose": "Records the approved shared adapter, separate desktop provider, and fail-closed VR composition boundary."
+    },
+    {
+      "path": "docs/vnext/adr/ADR-0055-phase9-optional-vr-pose-capability-and-schema.md",
+      "status": "A",
+      "purpose": "Records the approved optional VR pose capability, directional schema, bounded transform, recency, and additive evolution policy."
     },
     {
       "path": "docs/vnext/gdr/GDR-0001-phase7-headless-vertical-slice-behavior.md",
@@ -1635,6 +1705,16 @@
       "purpose": "Contracts for fixed desktop automation roles, credential-file-only launch, disconnect-grace phase isolation, retained diagnostics, bounded typed completion, and testing-only exposure."
     },
     {
+      "path": "scripts/tests/test_phase9_dual_engine_composition.py",
+      "status": "A",
+      "purpose": "Contracts for shared adapter, separate desktop provider, dual executable linkage, and fail-closed VR composition."
+    },
+    {
+      "path": "scripts/tests/test_phase9_pose_protocol.py",
+      "status": "A",
+      "purpose": "Contracts for presentation-only directional pose schemas, protocol dependency isolation, and disabled production routing."
+    },
+    {
       "path": "scripts/tests/test_replicated_actor_contract.py",
       "status": "A",
       "purpose": "Source-level negative-registration, visibility, typed-result, idempotent-reconcile, bounded-scratch, and retired-proxy contracts for C-R1."
@@ -1841,7 +1921,7 @@
         },
         {
           "path": "components/tes3mp/CMakeLists.txt",
-          "sha256": "434e0b93c057cbdde847e1e8c2466ec4eff114d6aefca441a9acbce85ecbaf3a"
+          "sha256": "4d051bb5f7dc0c65f6a7a5ce9f81ff8e89ebcb72ee52728309c0a20b8e977968"
         },
         {
           "path": "components/tes3mp/protocol/generated/authentication_accepted_generated.h",
@@ -1860,6 +1940,10 @@
           "sha256": "1ca9a4d075ac2b39c4f95bb267a7704ff7fa061ad1fd6ac46c40309fb045c5e1"
         },
         {
+          "path": "components/tes3mp/protocol/generated/client_vr_pose_sample_generated.h",
+          "sha256": "b1ac92e791922b4cbf42a7f4ae27b3d0ee318f6e893ee3cf6d520cd5d7ce3927"
+        },
+        {
           "path": "components/tes3mp/protocol/generated/latest_wins_snapshot_generated.h",
           "sha256": "cc96cce7410475e22d8c11bb674161f0655f2a27cfc626913dc3af48cbfcb75a"
         },
@@ -1874,6 +1958,10 @@
         {
           "path": "components/tes3mp/protocol/generated/server_hello_generated.h",
           "sha256": "9617ce574881f2f5bdbb020978b04670cb748d0622c295a96f83e8da71f425b2"
+        },
+        {
+          "path": "components/tes3mp/protocol/generated/server_vr_pose_snapshot_generated.h",
+          "sha256": "b48acfc09c0bee19d58370eef7c16f3b9659111324a7150d93d7a18286629cc1"
         },
         {
           "path": "components/tes3mp/protocol/generated/session_rejected_generated.h",
@@ -1896,6 +1984,10 @@
           "sha256": "2636d0afc973e49c91ce562e55e937683fce4827b7a234569a56b6b21700905d"
         },
         {
+          "path": "components/tes3mp/protocol/schema/client_vr_pose_sample.fbs",
+          "sha256": "8a41fd9287361e87a03e602244754ff070f7f28b9a473ca92ef8e9ec6358c942"
+        },
+        {
           "path": "components/tes3mp/protocol/schema/latest_wins_snapshot.fbs",
           "sha256": "848aa1a437c59f074c657e76e966125475742dd2ad7e0ea0125283c63aa7c4e0"
         },
@@ -1910,6 +2002,10 @@
         {
           "path": "components/tes3mp/protocol/schema/server_hello.fbs",
           "sha256": "eb6730b9ec03e9468ea6f0964bbf76f58e5acbf191f1a847afe69f6d10e0721a"
+        },
+        {
+          "path": "components/tes3mp/protocol/schema/server_vr_pose_snapshot.fbs",
+          "sha256": "ebcb063edc95803fe493f495eb27602dedf0e021902eb5e9fac13abcb6fd0d48"
         },
         {
           "path": "components/tes3mp/protocol/schema/session_rejected.fbs",
@@ -1965,11 +2061,11 @@
         },
         {
           "path": "scripts/tests/test_run_vnext_flatbuffers_proof.py",
-          "sha256": "52087caf025cbf9514e96aa97eff13c7538fdf4afb4cd085db1cb48543f30609"
+          "sha256": "bee2264c46d7ab22e0efe879ea63a0fb9157785f9ca6acb594ecd16e5f97a355"
         },
         {
           "path": "scripts/vnext_flatbuffers_proof.json",
-          "sha256": "44381baf52d835adadf5af660671c3213aa8bb7f459fbb3c7da6978af6ed6014"
+          "sha256": "57716b4460250fdaecbe64b1539a904a1898ecde828d9443081bbe80d199e08a"
         }
       ],
       "repositories": [

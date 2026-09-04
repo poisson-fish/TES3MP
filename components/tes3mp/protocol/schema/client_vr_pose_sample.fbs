@@ -1,0 +1,33 @@
+namespace TES3MP.Protocol.Schema.ClientPose;
+
+struct RelativePosition3 {
+  x:long;
+  y:long;
+  z:long;
+}
+
+struct Orientation3 {
+  x:uint;
+  y:uint;
+  z:uint;
+}
+
+table TrackedTransform {
+  position:RelativePosition3 (id: 0);
+  orientation:Orientation3 (id: 1);
+}
+
+table ClientVrPoseSample {
+  source_session_id:ulong (id: 0);
+  source_session_generation:ulong (id: 1);
+  root_entity_id:ulong (id: 2);
+  root_authority_epoch:ulong (id: 3);
+  sample_sequence:ulong (id: 4);
+  head:TrackedTransform (id: 5);
+  left_hand:TrackedTransform (id: 6);
+  right_hand:TrackedTransform (id: 7);
+}
+
+root_type ClientVrPoseSample;
+file_identifier "T3VP";
+file_extension "t3vp";
