@@ -25,10 +25,12 @@
     "authentication_rejected.fbs",
     "authentication_request.fbs",
     "client_hello.fbs",
+    "client_vr_pose_sample.fbs",
     "latest_wins_snapshot.fbs",
     "reliable_observation_batch.fbs",
     "reliable_operation.fbs",
     "server_hello.fbs",
+    "server_vr_pose_snapshot.fbs",
     "session_rejected.fbs"
   ],
   "production_generated_files": [
@@ -36,10 +38,12 @@
     "authentication_rejected_generated.h",
     "authentication_request_generated.h",
     "client_hello_generated.h",
+    "client_vr_pose_sample_generated.h",
     "latest_wins_snapshot_generated.h",
     "reliable_observation_batch_generated.h",
     "reliable_operation_generated.h",
     "server_hello_generated.h",
+    "server_vr_pose_snapshot_generated.h",
     "session_rejected_generated.h"
   ],
   "generator_arguments": [
