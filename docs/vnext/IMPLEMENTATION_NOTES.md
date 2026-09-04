@@ -5825,6 +5825,20 @@ only the relevant phase section here.
   - Follow-ups: obtain Slice 9.2 implementation acceptance before beginning the
     Slice 9.3 optional pose-capability decision packet.
 
+- 2026-09-03 — Slice 9.2 owner implementation acceptance — **Implemented**
+  - Change: recorded owner acceptance of the verified shared desktop/VR
+    adapter composition and fail-closed missing-provider behavior.
+  - Decisions: none. This closes only approved ADR-0054 Option A and adds no
+    protocol, authority, canonical state, pose, locomotion, interaction,
+    presentation, or gameplay behavior.
+  - Verification: desktop 141-test and VR 11-test Python gates, both Debug
+    adapter contracts, both RelWithDebInfo executable links, both registries,
+    shared ancestry, and clean worktrees remain the accepted evidence.
+  - Owner review: explicit Slice 9.2 implementation acceptance received on
+    2026-09-03.
+  - Follow-ups: prepare and review the Slice 9.3 optional pose capability/schema
+    decision packet before production schema code.
+
 - Head and hand transforms are presentation snapshots associated with a player
   root and authority epoch. They are not persisted as durable world state.
 - Physical reach validation uses the authoritative root plus declared limits;
