@@ -1,0 +1,92 @@
+{
+  "schema_version": 1,
+  "target": "pc-vr",
+  "upstream_commit": "56a8e01390507375c9c2f2593e1c09e0df88c505",
+  "integration_commit": "0e8e85e0b59cd746018b0124754cf18db87b4c20",
+  "excluded_prefixes": ["apps/openmw/tes3mp/"],
+  "observed_p8_overlap_paths": [
+    "apps/openmw/CMakeLists.txt",
+    "apps/openmw/engine.cpp",
+    "apps/openmw/engine.hpp",
+    "apps/openmw/main.cpp",
+    "apps/openmw/mwrender/animation.cpp",
+    "apps/openmw/mwrender/animation.hpp",
+    "apps/openmw/mwrender/npcanimation.cpp",
+    "apps/openmw/mwrender/npcanimation.hpp",
+    "apps/openmw/mwrender/renderingmanager.cpp",
+    "apps/openmw/mwrender/vismask.hpp"
+  ],
+  "patches": [
+    {
+      "id": "P8-001",
+      "slice": "8.2",
+      "owner": "OpenMW adapter",
+      "purpose": "Own one optional coordinator and invoke it after input and before world mutation, with teardown before OpenMW dependencies.",
+      "paths": ["apps/openmw/engine.cpp", "apps/openmw/engine.hpp"],
+      "tests": ["openmw_tes3mp_adapter_tests", "scripts/tests/test_openmw_vr_target.py"],
+      "disposition": "carried desktop patch; local possible upstream candidate; no upstream contact authorized",
+      "removal_condition": "OpenMW and OpenMW-VR supply an equivalent reviewed lifecycle and frame seam"
+    },
+    {
+      "id": "P8-002",
+      "slice": "8.3/9.1",
+      "owner": "OpenMW adapter",
+      "purpose": "Compose desktop multiplayer only in the desktop executable; keep the VR executable at its fork baseline until Slice 9.2 adds its approved composition.",
+      "paths": ["apps/openmw/main.cpp", "apps/openmw/options.cpp"],
+      "tests": ["scripts/tests/test_openmw_vr_target.py", "openmw_vr RelWithDebInfo link"],
+      "disposition": "carried desktop composition plus owner-approved temporary VR exclusion",
+      "removal_condition": "Slice 9.2 replaces the temporary VR exclusion with approved shared-session VR composition"
+    },
+    {
+      "id": "P8-003",
+      "slice": "3.1/8.2/9.1",
+      "owner": "OpenMW adapter",
+      "purpose": "Declare the adapter leaf without a dependency back-edge, link it only to the enabled desktop executable in Slice 9.1, and preserve the independent VR executable.",
+      "paths": ["apps/openmw/CMakeLists.txt"],
+      "tests": ["scripts/tests/test_tes3mp_target_boundaries.py", "scripts/tests/test_openmw_vr_target.py"],
+      "disposition": "carried desktop build wiring plus mechanical dual-executable merge resolution",
+      "removal_condition": "The adapter becomes an independently loaded supported module without this build edge"
+    },
+    {
+      "id": "P8-004",
+      "slice": "8.4/9.1",
+      "owner": "OpenMW adapter replicated-actor renderer",
+      "purpose": "Preserve the C-R1 non-gameplay replicated-actor render role while assigning a unique mask beside the fork's VR GUI and pointer masks.",
+      "paths": [
+        "apps/openmw/mwrender/animation.cpp",
+        "apps/openmw/mwrender/animation.hpp",
+        "apps/openmw/mwrender/npcanimation.cpp",
+        "apps/openmw/mwrender/npcanimation.hpp",
+        "apps/openmw/mwrender/objects.cpp",
+        "apps/openmw/mwrender/objects.hpp",
+        "apps/openmw/mwrender/renderingmanager.cpp",
+        "apps/openmw/mwrender/replicatedactor.cpp",
+        "apps/openmw/mwrender/replicatedactor.hpp",
+        "apps/openmw/mwrender/vismask.hpp",
+        "apps/openmw/mwrender/water.cpp"
+      ],
+      "tests": ["scripts/tests/test_replicated_actor_contract.py", "scripts/tests/test_openmw_vr_target.py", "openmw_vr RelWithDebInfo link"],
+      "disposition": "carried desktop patch with mechanical VR visibility-mask integration",
+      "removal_condition": "OpenMW supplies an equivalent reviewed ephemeral replicated-actor role for desktop and VR"
+    }
+  ],
+  "merge_resolutions": [
+    {
+      "id": "P9-001",
+      "slice": "9.1",
+      "owner": "PC VR integration",
+      "paths": [
+        ".github/workflows/push.yml",
+        "README.md",
+        "apps/openmw/CMakeLists.txt",
+        "apps/openmw/main.cpp",
+        "apps/openmw/mwrender/renderingmanager.cpp",
+        "apps/openmw/mwrender/vismask.hpp"
+      ],
+      "purpose": "Record every initial two-parent merge conflict and preserve vNext workflow/docs, both executables, fork pointer exclusion, and C-R1 default-deny rendering.",
+      "tests": ["scripts/tests/test_openmw_vr_target.py", "openmw_vr RelWithDebInfo link"],
+      "disposition": "local merge resolution; main.cpp temporary VR exclusion explicitly owner-approved on 2026-09-03",
+      "removal_condition": "Replaced only by a tested later immutable fork integration or the approved Slice 9.2 VR composition"
+    }
+  ]
+}

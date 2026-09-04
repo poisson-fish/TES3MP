@@ -1,0 +1,69 @@
+{
+  "schema_version": 1,
+  "target": "pc-vr",
+  "upstream": {
+    "repository": "https://gitlab.com/madsbuvi/openmw.git",
+    "mirror": "https://github.com/madsbuvi/openmw.git",
+    "ref": "openmw-vr-0.51-rc1",
+    "commit": "56a8e01390507375c9c2f2593e1c09e0df88c505",
+    "tree": "181958b121142c614a762ea794ecb066d29a7984",
+    "archive_url": "https://gitlab.com/madsbuvi/openmw/-/archive/openmw-vr-0.51-rc1/openmw-openmw-vr-0.51-rc1.tar.gz",
+    "archive_sha256": "ac5fa7314cf54bbe123abe0c21b9dcf23cf31722ccc2a89b8b455511920253ea",
+    "license": "GPL-3.0"
+  },
+  "desktop_product_parent": {
+    "branch": "vnext",
+    "commit": "411c93594b29883fbddae51b7a253789cb20ffa6",
+    "tree": "6fcd89b8373460c80d8dfbc0e1dc3917f9eec9a0"
+  },
+  "integration": {
+    "branch": "vnext-vr",
+    "commit": "0e8e85e0b59cd746018b0124754cf18db87b4c20",
+    "tree": "4a83df7c325db32354cf90a4a521d04880b6804b",
+    "parents": [
+      "411c93594b29883fbddae51b7a253789cb20ffa6",
+      "56a8e01390507375c9c2f2593e1c09e0df88c505"
+    ],
+    "merge_base": "e0efd3b114cf15b01aa6bd9b6c27a386161430c9",
+    "worktree_policy": "developer-local sibling path; never a submodule, nested clone, build input, or portable recorded path",
+    "update_policy": "merge owner-reviewed immutable VR commits with --no-ff in a disposable rehearsal first; never rebase or force-push published vnext-vr history"
+  },
+  "observed_relationship": {
+    "desktop_commits_after_merge_base": 2,
+    "desktop_paths_after_merge_base": 7,
+    "vr_commits_after_merge_base": 197,
+    "vr_paths_after_merge_base": 341,
+    "straight_vr_to_desktop_path_count": 348
+  },
+  "openxr": {
+    "repository": "https://github.com/KhronosGroup/OpenXR-SDK.git",
+    "fork_source_ref": "release-1.0.24",
+    "commit": "1ca7bec6b531185530c9b4f1e7a50e1fd55e7641",
+    "archive_url": "https://codeload.github.com/KhronosGroup/OpenXR-SDK/tar.gz/1ca7bec6b531185530c9b4f1e7a50e1fd55e7641",
+    "archive_sha256": "afc4c7c59dc0e427f03fc655e84d4394eb2d6070630924a63e547e4055ab816d",
+    "license": "Apache-2.0",
+    "license_path": "LICENSE",
+    "license_sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+    "acquisition_command": "python scripts/prepare_openmw_vr_dependencies.py",
+    "cmake_path": "extern/CMakeLists.txt"
+  },
+  "dependencies": {
+    "desktop_lock_path": "scripts/vnext_baseline_dependencies.json",
+    "desktop_lock_sha256": "ea0e9f4f105d2db9e91959cbec9b583cd1f3ef33ea6d9afe158f3a1fe8715b09",
+    "fork_bundle_disposition": "research signal only; not a build or release authority",
+    "fork_bundle_url": "https://github.com/madsbuvi/openmw-deps-build/releases/download/m1.0/vcpkg-x64-windows-2022-m1.0.7z",
+    "fork_bundle_sha512": "8fcb43afa8e07dc9a9d7177ed610f1d0c7fa023922c9f6031583b79eb784d66d54157641d7c52ccaacfda7ea14bc9c2607c8d27c86d4e18a60e18ec4f1a24c78"
+  },
+  "observed_upstream_ci": [
+    {
+      "url": "https://github.com/madsbuvi/openmw/actions/runs/26336246109",
+      "commit": "56a8e01390507375c9c2f2593e1c09e0df88c505",
+      "result": "Ubuntu and Windows Server 2022 jobs passed; retained artifacts expired 2026-08-21"
+    },
+    {
+      "url": "https://gitlab.com/madsbuvi/openmw/-/pipelines/2548200125",
+      "commit": "56a8e01390507375c9c2f2593e1c09e0df88c505",
+      "result": "Linux and Windows MSBuild jobs passed; both Windows Ninja groups failed"
+    }
+  ]
+}
