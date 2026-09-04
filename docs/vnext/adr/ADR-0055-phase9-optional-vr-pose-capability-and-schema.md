@@ -221,7 +221,7 @@ all 145 desktop repository Python tests, 31 focused VR protocol/safety/proof
 tests, exact pinned FlatBuffers regeneration, desktop and VR boundary verifiers,
 and both RelWithDebInfo engine links pass. Runtime capability advertising,
 dispatch, transport mapping, authority, persistence, and gameplay behavior remain
-absent. Slice implementation acceptance remains a separate owner gate.
+absent. The owner accepted the verified slice implementation on 2026-09-04.
 
 ## Review and replacement triggers
 
@@ -236,4 +236,4 @@ encoding.
 Approved on 2026-09-03: Option A for Decisions 1 through 4 and the proposed
 acceptance tests. Approved on 2026-09-04: Option A for Decision 5 and its
 corrected test 8 wording, resolving the implementation conflict in favor of
-governing ADR-0004. Implementation acceptance remains separate.
+governing ADR-0004. The owner accepted implementation evidence on 2026-09-04.

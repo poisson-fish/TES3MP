@@ -5914,6 +5914,16 @@ only the relevant phase section here.
   - Follow-ups: obtain Slice 9.3 acceptance before beginning Slice 9.4 provider
     decisions or implementation.
 
+- 2026-09-04 — Slice 9.3 owner implementation acceptance — **Implemented**
+  - Change: recorded owner acceptance of the verified optional VR pose protocol
+    boundary at shared implementation `c229946842` and VR merge `eda058b92e`.
+  - Evidence: the accepted candidate retains all protocol, compatibility,
+    corpus, boundary, repository, and desktop/VR executable-link evidence from
+    the preceding entry.
+  - Owner review: explicit `i accept` response received on 2026-09-04.
+  - Follow-ups: begin Slice 9.4 research only; present provider, authority,
+    state-scope, or gameplay-behavior options before production implementation.
+
 - Head and hand transforms are presentation snapshots associated with a player
   root and authority epoch. They are not persisted as durable world state.
 - Physical reach validation uses the authoritative root plus declared limits;
