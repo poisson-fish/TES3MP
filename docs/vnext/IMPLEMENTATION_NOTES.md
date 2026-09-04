@@ -5032,6 +5032,29 @@ only the relevant phase section here.
 
 ## Phase 8 — OpenMW desktop vertical slice
 
+### 2026-09-03 — Replicated-remote-actor research approved
+
+- Status: **In Progress**; no replacement architecture or production code is
+  approved yet.
+- Decision: the owner selected focused Option B research. The next work designs
+  a first-class, protocol-agnostic replicated remote actor and compares it with
+  the current renderer-only proxy and legacy-style normal actor. ADR-0007,
+  ADR-0050, and GDR-0013 record the reopened boundary and retained constraints.
+- Scope: map identity, lifetime, engine registration, rendering, animation,
+  mechanics, physics, scripts, persistence, interaction, error reporting, and
+  real-content testing. Preserve server authority, main-thread application,
+  client-local replica state, engine-independent protocol/session targets, and
+  the patch registry.
+- Gate: present concrete alternatives and a recommendation before changing the
+  actor role, subsystem participation, gameplay behavior, or production hooks.
+  Do not copy legacy code or reproduce scattered `isDedicatedPlayer` checks.
+- Verification: documentation-only approval annotation; prior archive/current-
+  source findings and green 128-test repository evidence remain current.
+- Follow-up: perform the bounded OpenMW 0.51 subsystem-boundary audit, draft the
+  replacement decision packet, and request owner approval before implementation.
+
+[Back to the phase tracker](IMPLEMENTATION_PLAN.md#phase-8--openmw-desktop-vertical-slice)
+
 ### 2026-09-03 — Remote-replica architecture review reopened
 
 - Status: **In Progress**; production correction is paused at an owner decision

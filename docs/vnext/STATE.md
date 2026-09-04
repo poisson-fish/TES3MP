@@ -107,8 +107,28 @@ dynamic NPC actors and then patched dedicated-player exceptions through 16
 OpenMW engine files. The current nominal renderer-only seam avoids world
 registration but still initializes full NPC stats, spells, AI, inventory,
 auto-equipment, PRNG state, and an inventory render listener. ADR-0050,
-GDR-0013, and P8-004 require owner review before correction. Phase 9 remains
-gated on that decision, the complete content-backed run, and owner acceptance.
+GDR-0013, and P8-004 require correction. The owner approved focused Option B
+research into a first-class, protocol-agnostic replicated remote actor, but no
+exact role, lifecycle, subsystem participation, or production hook is approved.
+Phase 9 remains gated on that decision, the complete content-backed run, and
+owner acceptance.
+
+## Next-session handoff
+
+Read this file, then the reopened sections in ADR-0007, ADR-0050, GDR-0013, and
+the newest Phase 8 implementation note. Inspect only the OpenMW 0.51 actor
+creation/registration boundaries needed to compare:
+
+1. the current renderer-only proxy;
+2. a normal actor with explicit exclusions; and
+3. a first-class ephemeral replicated-remote-actor role.
+
+Produce an owner decision packet covering authority, identity, lifetime,
+registration, rendering, animation, mechanics, physics/collision, scripts,
+persistence/save exclusion, interaction, error taxonomy, and real-content
+tests. Recommend a migration and exact patch surface. Do not rewrite accepted
+records, change production code, choose subsystem participation, or copy legacy
+code before owner approval. Keep Phase 8 **In Progress** and Phase 9 gated.
 
 ## Active files
 

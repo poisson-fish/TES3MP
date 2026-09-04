@@ -4,6 +4,8 @@ Status: **Accepted**
 
 Date opened/approved: 2026-09-03
 
+Review reopened: 2026-09-03
+
 Decision owner: project owner
 
 Needed by: Phase 8 Slice 8.4
@@ -36,3 +38,16 @@ Runtime and adapter contracts cover returned sequence ownership, bounded
 transition handling, failure closure, and cleanup. Patch-registry verification
 and a full RelWithDebInfo OpenMW link cover P8-004. The Slice 8.4 owner demo must
 still show interior/exterior correction and peer spawn/despawn with two clients.
+
+## Reopened remote-replica boundary
+
+The real-content Phase 8 run showed that the nominal renderer-only seam closes
+during remote creation. Inspection also showed that it initializes full NPC
+custom data, including mechanics and inventory state, despite the boundary
+claimed above. Archived TES3MP used normal dynamic NPC actors but required
+dedicated-player exceptions across 16 engine files.
+
+The owner approved focused replicated-actor architecture research on 2026-09-03.
+The accepted cell-transition behavior and server authority remain in force, but
+P8-004's remote representation mechanism is not sufficient completion evidence.
+No replacement role, hook surface, or subsystem participation has been approved.

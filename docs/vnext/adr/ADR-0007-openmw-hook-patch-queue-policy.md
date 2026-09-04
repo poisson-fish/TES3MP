@@ -500,3 +500,17 @@ This approval establishes the integration and patch-maintenance framework.
 The project owner approved the Phase 8 Slice 8.1 exact path/call-site inventory
 and Option A narrow coordinator boundary on 2026-09-02. The relevant GDRs still
 own player-visible behavior.
+
+## 2026-09-03 remote-replica review authorization
+
+The owner approved focused Option B research into a first-class, protocol-
+agnostic replicated-remote-actor role. This reopens the adequacy of the P8-004
+renderer-only seam without replacing this ADR's adapter, main-thread ownership,
+dependency-direction, or patch-registry rules. No new engine hook or subsystem
+participation is approved yet.
+
+The research must compare a renderer-only proxy, a normal actor with exclusions,
+and a first-class ephemeral replica role. It must present authority, lifetime,
+identity, registration, rendering, animation, mechanics, physics, scripts,
+persistence, interaction, and testing choices for owner approval before ADR,
+GDR, registry, plan, or production implementation selects a replacement.

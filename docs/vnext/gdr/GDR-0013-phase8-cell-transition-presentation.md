@@ -4,6 +4,8 @@ Status: **Accepted**
 
 Date opened/approved: 2026-09-03
 
+Review reopened: 2026-09-03
+
 Decision owner: project owner
 
 Needed by: Phase 8 Slice 8.4
@@ -53,3 +55,11 @@ These remain explicit command-line fixture values, not protocol or canonical
 state. Their content records must be validated against licensed `Morrowind.esm`
 before the demo can count as evidence. Any replacement mapping requires owner
 review before use.
+
+## 2026-09-03 remote-replica review
+
+The owner approved focused research into a first-class replicated remote actor.
+The player-visible cell, observation-lifetime, correction, and no-local-authority
+requirements remain accepted. The renderer-only implementation mechanism and
+fixture avatar are under review after the real-content creation failure. No
+replacement behavior or subsystem participation is approved yet.
