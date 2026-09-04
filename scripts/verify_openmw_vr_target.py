@@ -120,9 +120,13 @@ def verify() -> None:
     vismask = (ROOT / "apps/openmw/mwrender/vismask.hpp").read_text(encoding="utf-8")
     rendering = (ROOT / "apps/openmw/mwrender/renderingmanager.cpp").read_text(encoding="utf-8")
     if main.count("#ifndef OPENMW_VR") < 4 or "#include <components/vr/vr.hpp>" not in main:
-        raise ValueError("VR executable does not keep desktop composition excluded")
-    if "if(BUILD_OPENMW)\n    target_link_libraries(openmw TES3MP::OpenMWAdapter)" not in cmake:
-        raise ValueError("desktop-only adapter link guard is missing")
+        raise ValueError("VR executable does not keep desktop providers excluded")
+    if ("if(BUILD_OPENMW)\n    target_link_libraries(openmw TES3MP::OpenMWAdapter "
+            "TES3MP::OpenMWDesktopProviders)" not in cmake):
+        raise ValueError("desktop provider link guard is missing")
+    if ("if(BUILD_OPENMW_VR AND TARGET openmw_vr)\n"
+            "    target_link_libraries(openmw_vr TES3MP::OpenMWAdapter)" not in cmake):
+        raise ValueError("VR shared-adapter link guard is missing")
     for value in ("Mask_3DGUI = (1 << 21)", "Mask_3DGUI_NonIntersectable = (1 << 22)",
                   "Mask_Pointer = (1 << 23)", "Mask_ReplicatedActor = (1 << 24)"):
         if value not in vismask:

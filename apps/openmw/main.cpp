@@ -20,8 +20,8 @@
 
 #include "engine.hpp"
 #include "options.hpp"
+#include "tes3mp/client_connection.hpp"
 #ifndef OPENMW_VR
-#include "tes3mp/desktop_connection.hpp"
 #include "tes3mp/desktop_providers.hpp"
 #ifdef TES3MP_OPENMW_DESKTOP_AUTOMATION
 #include "tes3mp/desktop_automation.hpp"
@@ -59,6 +59,7 @@ extern "C" __declspec(dllexport) DWORD AmdPowerXpressRequestHighPerformance = 0x
 #ifndef OPENMW_VR
 namespace
 {
+#ifndef OPENMW_VR
     const char* describe(TES3MP::OpenMWAdapter::ConnectionStatus status) noexcept
     {
         using Status = TES3MP::OpenMWAdapter::ConnectionStatus;
@@ -87,12 +88,15 @@ namespace
         }
         return "unknown connection failure";
     }
+#endif
 
-    const char* describe(TES3MP::OpenMWAdapter::DesktopConnectionFailure failure) noexcept
+    const char* describe(TES3MP::OpenMWAdapter::ClientCompositionFailure failure) noexcept
     {
-        using Failure = TES3MP::OpenMWAdapter::DesktopConnectionFailure;
+        using Failure = TES3MP::OpenMWAdapter::ClientCompositionFailure;
         switch (failure)
         {
+            case Failure::ProvidersUnavailable:
+                return "this build has no approved multiplayer providers";
             case Failure::InvalidEndpoint:
                 return "tes3mp-host or tes3mp-port is invalid";
             case Failure::InvalidTimeout:
@@ -111,6 +115,7 @@ namespace
         return "unknown startup failure";
     }
 
+#ifndef OPENMW_VR
     class MultiplayerStatus final : public TES3MP::OpenMWAdapter::ConnectionStatusProvider
     {
         void report(TES3MP::OpenMWAdapter::ConnectionStatus status) noexcept override
@@ -131,6 +136,7 @@ namespace
             }
         }
     };
+#endif
 }
 #endif
 
@@ -269,6 +275,7 @@ bool parseOptions(int argc, char** argv, OMW::Engine& engine, Files::Configurati
 #ifndef OPENMW_VR
     if (variables["tes3mp-enable"].as<bool>())
     {
+#ifndef OPENMW_VR
         const TES3MP::OpenMWAdapter::DesktopFixtureMapping fixture{
             variables["tes3mp-fixture-interior"].as<std::string>(),
             variables["tes3mp-fixture-worldspace"].as<std::string>(),
@@ -310,14 +317,17 @@ bool parseOptions(int argc, char** argv, OMW::Engine& engine, Files::Configurati
             control = multiplayerAutomation.get();
         }
 #endif
-        auto coordinator = TES3MP::OpenMWAdapter::makeDesktopCoordinator(variables["tes3mp-host"].as<std::string>(),
+        const TES3MP::OpenMWAdapter::ClientProviders providers{ input, presentation, status, control };
+#else
+        const TES3MP::OpenMWAdapter::ClientProviders providers{};
+#endif
+        auto coordinator = TES3MP::OpenMWAdapter::makeClientCoordinator(variables["tes3mp-host"].as<std::string>(),
             variables["tes3mp-port"].as<unsigned>(), variables["tes3mp-timeout-ms"].as<unsigned>(),
-            variables["tes3mp-password-file"].as<Files::MaybeQuotedPath>().u8string(), *input, *presentation, *status,
-            control);
+            variables["tes3mp-password-file"].as<Files::MaybeQuotedPath>().u8string(), providers);
         auto* value = std::get_if<std::unique_ptr<TES3MP::OpenMWAdapter::EngineCoordinator>>(&coordinator);
         if (!value || !*value || !engine.attachMultiplayerCoordinator(std::move(*value)))
         {
-            const auto failure = std::get_if<TES3MP::OpenMWAdapter::DesktopConnectionFailure>(&coordinator);
+            const auto failure = std::get_if<TES3MP::OpenMWAdapter::ClientCompositionFailure>(&coordinator);
             Log(Debug::Error) << "TES3MP startup failed: "
                               << (failure ? describe(*failure) : "coordinator attachment failed");
             return false;

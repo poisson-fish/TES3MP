@@ -5744,6 +5744,58 @@ only the relevant phase section here.
   - Follow-ups: accept Slice 9.1, then present Slice 9.2 architecture/build
     options before adding VR multiplayer composition.
 
+- 2026-09-03 — Slice 9.1 owner implementation acceptance — **Implemented**
+  - Change: recorded owner acceptance of the verified PC VR maintenance target,
+    reproducible build proof, and failed-update rehearsal safety evidence.
+  - Decisions: none. This closure accepts only the ADR-0008 maintenance and
+    temporary composition boundaries already approved. It adds no authority,
+    canonical state, protocol, pose, input, locomotion, interaction, or gameplay
+    behavior.
+  - Verification: current `vnext` and `vnext-vr` worktrees are clean; the desktop
+    patch registry and its three focused tests pass; the VR target verifier and
+    its four focused tests pass; the read-only VR remote still has push disabled;
+    and current desktop commit `9c81e62380` is present in `vnext-vr` history.
+  - Owner review: explicit Slice 9.1 implementation acceptance received on
+    2026-09-03.
+  - Follow-ups: present Slice 9.2 architecture/build options and obtain owner
+    approval before adding VR multiplayer composition.
+
+- 2026-09-03 — Slice 9.2 dual-engine composition proposal — **Not Started**
+  - Change: inspected the accepted VR target's executable, adapter, provider,
+    connection, engine-hook, and CMake seams; added proposed
+    [ADR-0054](adr/ADR-0054-phase9-dual-engine-adapter-composition.md). No
+    production code or build target changed.
+  - Decisions: pending owner review. Option A is recommended: one shared
+    adapter/composition target, separate desktop and future VR provider targets,
+    and fail-closed explicit VR enable until Slice 9.4 supplies approved
+    providers. Options B and C respectively use preprocessor-selected monolithic
+    composition or two complete adapter libraries.
+  - Finding: the VR tree already compiles the shared adapter and accepted P8-001
+    engine hook, but only desktop links concrete composition. Reusing
+    `DesktopSemanticInput` in VR would implicitly select locomotion behavior and
+    is therefore outside Slice 9.2.
+  - Verification: repository inspection only; `git diff --check` and relative
+    document-link validation apply to this proposal. Slice 9.2 stays **Not
+    Started** because documentation alone is not its named deliverable.
+  - Owner review: requested for ADR-0054 Option A, B, or C and the proposed
+    acceptance tests. No approval is inferred.
+  - Follow-ups: after explicit approval, record the decision and implement only
+    the selected target/composition boundary on `vnext`, merge that commit into
+    `vnext-vr`, and run both supported build gates.
+
+- 2026-09-03 — Slice 9.2 ADR-0054 Option A approved — **In Progress**
+  - Change: recorded owner approval of the dual-engine target/composition
+    boundary and proposed acceptance tests. Production implementation begins
+    only after this gate record.
+  - Decisions: one shared adapter/composition target, separate desktop and
+    future VR provider targets, and fail-closed VR enable until approved Slice
+    9.4 providers exist.
+  - Verification: documentation-only gate; `git diff --check` and relative-link
+    validation pass.
+  - Owner review: explicit `a approved` response on 2026-09-03.
+  - Follow-ups: implement on `vnext`, merge the shared commit into `vnext-vr`,
+    and run desktop/VR build and boundary gates without adding gameplay behavior.
+
 - Head and hand transforms are presentation snapshots associated with a player
   root and authority epoch. They are not persisted as durable world state.
 - Physical reach validation uses the authoritative root plus declared limits;

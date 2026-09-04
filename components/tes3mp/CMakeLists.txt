@@ -428,7 +428,7 @@ add_custom_target(tes3mp_headless_client_tests_run
 
 add_executable(openmw_tes3mp_adapter_tests
     ${CMAKE_CURRENT_LIST_DIR}/../../apps/openmw/tes3mp/adapter.cpp
-    ${CMAKE_CURRENT_LIST_DIR}/../../apps/openmw/tes3mp/desktop_connection.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/../../apps/openmw/tes3mp/client_connection.cpp
     ${CMAKE_CURRENT_LIST_DIR}/../../apps/openmw/tes3mp/movement_mapping.cpp
     ${CMAKE_CURRENT_LIST_DIR}/../../apps/openmw/tes3mp/remote_motion.cpp
     ${CMAKE_CURRENT_LIST_DIR}/../../apps/openmw/tes3mp/adapter_tests.cpp)

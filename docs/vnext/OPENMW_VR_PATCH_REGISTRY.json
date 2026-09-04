@@ -29,22 +29,22 @@
     },
     {
       "id": "P8-002",
-      "slice": "8.3/9.1",
+      "slice": "8.3/9.1/9.2",
       "owner": "OpenMW adapter",
-      "purpose": "Compose desktop multiplayer only in the desktop executable; keep the VR executable at its fork baseline until Slice 9.2 adds its approved composition.",
+      "purpose": "Compose desktop with its concrete providers and route VR through the same client composition with an explicit fail-closed unavailable-provider result until Slice 9.4.",
       "paths": ["apps/openmw/main.cpp", "apps/openmw/options.cpp"],
-      "tests": ["scripts/tests/test_openmw_vr_target.py", "openmw_vr RelWithDebInfo link"],
-      "disposition": "carried desktop composition plus owner-approved temporary VR exclusion",
-      "removal_condition": "Slice 9.2 replaces the temporary VR exclusion with approved shared-session VR composition"
+      "tests": ["scripts/tests/test_openmw_vr_target.py", "scripts/tests/test_phase9_dual_engine_composition.py", "openmw_vr RelWithDebInfo link"],
+      "disposition": "carried desktop composition plus owner-approved shared VR composition and temporary unavailable-provider closure",
+      "removal_condition": "Slice 9.4 supplies approved VR providers or a supported module facility replaces executable composition"
     },
     {
       "id": "P8-003",
-      "slice": "3.1/8.2/9.1",
+      "slice": "3.1/8.2/9.1/9.2",
       "owner": "OpenMW adapter",
-      "purpose": "Declare the adapter leaf without a dependency back-edge, link it only to the enabled desktop executable in Slice 9.1, and preserve the independent VR executable.",
+      "purpose": "Declare one engine-neutral adapter leaf plus a desktop provider leaf without a dependency back-edge, and link the same adapter target to desktop and VR executables.",
       "paths": ["apps/openmw/CMakeLists.txt"],
-      "tests": ["scripts/tests/test_tes3mp_target_boundaries.py", "scripts/tests/test_openmw_vr_target.py"],
-      "disposition": "carried desktop build wiring plus mechanical dual-executable merge resolution",
+      "tests": ["scripts/tests/test_tes3mp_target_boundaries.py", "scripts/tests/test_phase9_dual_engine_composition.py", "scripts/tests/test_openmw_vr_target.py"],
+      "disposition": "carried desktop build wiring plus approved shared-adapter/separate-provider VR composition",
       "removal_condition": "The adapter becomes an independently loaded supported module without this build edge"
     },
     {
@@ -86,7 +86,20 @@
       "purpose": "Record every initial two-parent merge conflict and preserve vNext workflow/docs, both executables, fork pointer exclusion, and C-R1 default-deny rendering.",
       "tests": ["scripts/tests/test_openmw_vr_target.py", "openmw_vr RelWithDebInfo link"],
       "disposition": "local merge resolution; main.cpp temporary VR exclusion explicitly owner-approved on 2026-09-03",
-      "removal_condition": "Replaced only by a tested later immutable fork integration or the approved Slice 9.2 VR composition"
+      "removal_condition": "Replaced only by a tested later immutable fork integration or a supported upstream composition facility"
+    },
+    {
+      "id": "P9-002",
+      "slice": "9.2",
+      "owner": "PC VR integration",
+      "paths": [
+        "apps/openmw/CMakeLists.txt",
+        "apps/openmw/main.cpp"
+      ],
+      "purpose": "Resolve the merge of vnext-vr parent 2b866511bba6b72e2ae85f28216a8a94982fcae7 with shared vnext parent 54999379a2f7ee7aa5c10beee3ca8a741a70bf80 while retaining VR startup and adding the approved shared adapter/fail-closed provider composition.",
+      "tests": ["scripts/tests/test_phase9_dual_engine_composition.py", "scripts/tests/test_openmw_vr_target.py", "openmw_vr RelWithDebInfo link"],
+      "disposition": "local mechanical merge resolution under approved ADR-0054 Option A",
+      "removal_condition": "Replaced only by a tested later immutable fork integration or a supported upstream composition facility"
     }
   ]
 }

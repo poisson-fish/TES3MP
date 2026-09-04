@@ -37,6 +37,13 @@ class OpenMWVRTargetTests(unittest.TestCase):
             "apps/openmw/mwrender/vismask.hpp",
         })
 
+    def test_registry_records_slice92_merge_parents(self):
+        data = json.loads((ROOT / "docs/vnext/OPENMW_VR_PATCH_REGISTRY.json").read_text(encoding="utf-8"))
+        resolution = next(value for value in data["merge_resolutions"] if value["id"] == "P9-002")
+        self.assertEqual(set(resolution["paths"]), {"apps/openmw/CMakeLists.txt", "apps/openmw/main.cpp"})
+        self.assertIn("2b866511bba6b72e2ae85f28216a8a94982fcae7", resolution["purpose"])
+        self.assertIn("54999379a2f7ee7aa5c10beee3ca8a741a70bf80", resolution["purpose"])
+
     def test_vr_update_rehearsal_does_not_move_the_maintained_target_on_failure(self):
         branch = "refs/heads/vnext-vr"
         before = subprocess.check_output(
