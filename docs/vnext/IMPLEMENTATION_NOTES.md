@@ -5884,6 +5884,13 @@ only the relevant phase section here.
     and focused tests pass, but remains an implementation candidate.
   - Owner review: Decision 5 requires explicit approval; no choice is inferred.
 
+- 2026-09-04 — Slice 9.3 ADR-0055 Decision 5 Option A approved — **In Progress**
+  - Decision: preserve ADR-0004 additive optional-field compatibility. Unknown
+    framing, identifiers, discriminants, and malformed fields still reject.
+  - Verification: implementation and full gate evidence pending.
+  - Follow-ups: finish the protocol-only candidate, run all required gates, and
+    present implementation evidence for owner acceptance.
+
 - Head and hand transforms are presentation snapshots associated with a player
   root and authority epoch. They are not persisted as durable world state.
 - Physical reach validation uses the authoritative root plus declared limits;
