@@ -1,6 +1,6 @@
 # ADR-0055: Phase 9 optional VR pose capability and schema
 
-Status: **Proposed**
+Status: **Approved**
 
 Date opened: 2026-09-03
 
@@ -195,4 +195,5 @@ encoding.
 
 ## Owner approval
 
-Pending. No option is approved by this proposal.
+Approved on 2026-09-03: Option A for Decisions 1 through 4 and all proposed
+acceptance tests. Implementation acceptance remains separate.

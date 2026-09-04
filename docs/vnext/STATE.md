@@ -13,7 +13,7 @@ is the [implementation plan](IMPLEMENTATION_PLAN.md#phase-9--pc-vr-interoperabil
 - Phase 9: **In Progress** (Slice 9.3 capability/schema decision gate)
 - Slice 9.1: **Implemented**
 - Slice 9.2: **Implemented**
-- Slice 9.3: **Not Started** (capability/schema options require owner approval)
+- Slice 9.3: **In Progress** (ADR-0055 approved; implementation underway)
 - Slice 8.1: **Implemented**
 - Slice 8.2: **Implemented**
 - Slice 8.3: **Implemented**
@@ -24,7 +24,7 @@ is the [implementation plan](IMPLEMENTATION_PLAN.md#phase-9--pc-vr-interoperabil
 - Governing decisions: [ADR-0007](adr/ADR-0007-openmw-hook-patch-queue-policy.md),
   [ADR-0008](adr/ADR-0008-pc-vr-fork-worktree-maintenance-policy.md),
   [ADR-0054](adr/ADR-0054-phase9-dual-engine-adapter-composition.md),
-  proposed [ADR-0055](adr/ADR-0055-phase9-optional-vr-pose-capability-and-schema.md),
+  [ADR-0055](adr/ADR-0055-phase9-optional-vr-pose-capability-and-schema.md),
   [ADR-0047](adr/ADR-0047-phase8-adapter-lifecycle-and-provider-boundary.md),
   [ADR-0048](adr/ADR-0048-canonical-revision-and-simulation-tick-separation.md),
   [ADR-0049](adr/ADR-0049-phase8-desktop-connection-composition.md),
