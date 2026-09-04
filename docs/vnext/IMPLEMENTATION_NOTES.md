@@ -5733,8 +5733,10 @@ only the relevant phase section here.
     The only compiler warning was inherited fork C4244 in
     `mwvr/vrinputmanager.cpp`. Imported upstream whitespace remains upstream
     history; all new local staged diffs passed `git diff --check`.
-  - Regression verification: VR verifier plus five acquisition/target tests
-    pass. On authoritative desktop `vnext`, patch-registry verification and all
+  - Regression verification: VR verifier plus six acquisition/target tests
+    pass at `ff04803ec222d169343b019b2bbc87d8658af282`, including proof that a
+    failed non-mutating merge rehearsal leaves `vnext-vr` unchanged. On
+    authoritative desktop `vnext`, patch-registry verification and all
     137 repository-owned Python tests pass in 50.977 seconds, including legacy
     exclusion. Desktop does not depend on the VR remote, worktree, or cache.
   - Owner review: implementation evidence is ready; Slice 9.1 remains **In

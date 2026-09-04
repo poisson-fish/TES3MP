@@ -34,8 +34,8 @@ is the [implementation plan](IMPLEMENTATION_PLAN.md#phase-9--pc-vr-interoperabil
   [GDR-0015](gdr/GDR-0015-phase8-remote-motion-presentation.md), and
   [GDR-0016](gdr/GDR-0016-phase8-disconnect-and-resume-presentation.md)
 - Latest implementation commit: `93690354d1` (`Implement C-R1 replicated actors`)
-- Latest VR implementation candidate: `c590e81cc5` (`Record reproducible PC VR
-  target`)
+- Latest VR implementation candidate: `ff04803ec2` (`Prove VR update rehearsal
+  safety`)
 
 ## Working synopsis
 
@@ -192,7 +192,7 @@ maintenance surface. Repository-owned acquisition passed online and offline
 reuse, and the verified source rebuilt and linked MSVC 19.51 RelWithDebInfo
 `openmw_vr.exe` with SHA-256
 `283e8974ddee1c696381315f02138b624873896a2f7f28653f3a4dae4324bc1c`.
-The VR five-test gate, desktop patch registry, and all 137 desktop Python tests
+The VR six-test gate, desktop patch registry, and all 137 desktop Python tests
 pass. Slice 9.1 remains **In Progress** pending owner implementation acceptance.
 
 C-R1 is implemented without copying the legacy actor model. The old transient
