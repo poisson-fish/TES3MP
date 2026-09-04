@@ -172,7 +172,7 @@ namespace MWRender
 
         int shadowCastingTraversalMask = Mask_Scene;
         if (Settings::shadows().mActorShadows)
-            shadowCastingTraversalMask |= Mask_Actor;
+            shadowCastingTraversalMask |= Mask_Actor | Mask_ReplicatedActor;
         if (Settings::shadows().mPlayerShadows)
             shadowCastingTraversalMask |= Mask_Player;
 
@@ -958,7 +958,7 @@ namespace MWRender
 
         unsigned int mask = ~0u;
         mask &= ~(Mask_RenderToTexture | Mask_Sky | Mask_Debug | Mask_Effect | Mask_Water | Mask_SimpleWater
-            | Mask_Groundcover);
+            | Mask_Groundcover | Mask_ReplicatedActor);
         if (ignorePlayer)
             mask &= ~(Mask_Player);
         if (ignoreActors)

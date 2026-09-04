@@ -36,16 +36,23 @@
       "id": "P8-004",
       "slice": "8.4",
       "owner": "OpenMW adapter",
-      "purpose": "Expose a narrow renderer-only transient NPC presentation seam that does not register remote avatars with gameplay, world-model, physics, navigation, scripting, or persistence systems.",
+      "purpose": "Provide the owner-approved C-R1 first-class ephemeral replicated-actor rendering role: immutable NPC appearance projection, passive renderer-local idle, typed fail-closed lifecycle, a distinct non-interactive visibility mask, and no gameplay/world registration.",
       "paths": [
-        "apps/openmw/mwclass/npc.cpp",
-        "apps/openmw/mwclass/npc.hpp",
-        "apps/openmw/mwrender/transientactorpresentation.cpp",
-        "apps/openmw/mwrender/transientactorpresentation.hpp"
+        "apps/openmw/mwrender/animation.cpp",
+        "apps/openmw/mwrender/animation.hpp",
+        "apps/openmw/mwrender/npcanimation.cpp",
+        "apps/openmw/mwrender/npcanimation.hpp",
+        "apps/openmw/mwrender/objects.cpp",
+        "apps/openmw/mwrender/objects.hpp",
+        "apps/openmw/mwrender/renderingmanager.cpp",
+        "apps/openmw/mwrender/replicatedactor.cpp",
+        "apps/openmw/mwrender/replicatedactor.hpp",
+        "apps/openmw/mwrender/vismask.hpp",
+        "apps/openmw/mwrender/water.cpp"
       ],
-      "tests": ["scripts/tests/test_openmw_patch_registry.py", "openmw_tes3mp_adapter_tests", "openmw RelWithDebInfo link"],
+      "tests": ["scripts/tests/test_openmw_patch_registry.py", "scripts/tests/test_replicated_actor_contract.py", "openmw-tests ReplicatedActor.*", "openmw_tes3mp_adapter_tests", "content-backed two-client desktop flow/reconnect/soak", "openmw RelWithDebInfo link"],
       "disposition": "local; possible general-purpose upstream candidate; no upstream contact authorized",
-      "removal_condition": "OpenMW supplies an equivalent reviewed renderer-only transient actor API"
+      "removal_condition": "OpenMW supplies an equivalent reviewed ephemeral replicated-actor render role with explicit non-gameplay registration and visibility contracts"
     }
   ]
 }

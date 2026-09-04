@@ -56,11 +56,14 @@ namespace MWRender
         Mask_Lighting = (1 << 19),
 
         Mask_Groundcover = (1 << 20),
+
+        // Ephemeral remote replicas: visible as actors, but never traversed by picking/activation rays.
+        Mask_ReplicatedActor = (1 << 21),
     };
 
     // Defines masks to remove when using ToggleWorld command
     constexpr inline unsigned int sToggleWorldMask
-        = Mask_Actor | Mask_Terrain | Mask_Object | Mask_Static | Mask_Groundcover;
+        = Mask_Actor | Mask_ReplicatedActor | Mask_Terrain | Mask_Object | Mask_Static | Mask_Groundcover;
 
 }
 

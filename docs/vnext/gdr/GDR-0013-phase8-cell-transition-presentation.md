@@ -63,3 +63,21 @@ The player-visible cell, observation-lifetime, correction, and no-local-authorit
 requirements remain accepted. The renderer-only implementation mechanism and
 fixture avatar are under review after the real-content creation failure. No
 replacement behavior or subsystem participation is approved yet.
+
+## 2026-09-03 C-R1 approval
+
+The owner approved C-R1. Remote avatars retain their configured `player`
+appearance and authoritative observation lifetime, but are represented by a
+first-class ephemeral replicated-actor render role rather than a transient
+normal NPC. They render and may play only a passive renderer-local neutral idle;
+they cannot be focused, activated, collided with, scripted, persisted, or
+observed by mechanics/navigation/gameplay systems. Appearance projection is
+read-only and deterministic, including record-declared visible clothing/armor,
+and must not create gameplay stats, inventory, AI, spells, generated reference
+identity, or consume gameplay PRNG state.
+
+Capacity, invalid content, missing resources, invalid pose, animation fallback,
+and lifecycle misuse follow the typed, fail-closed policy in the
+[owner decision packet](../REMOTE_ACTOR_OWNER_DECISION_PACKET.md). The two-client
+content-backed demo and negative-registration checks remain completion evidence,
+not waived by this approval.

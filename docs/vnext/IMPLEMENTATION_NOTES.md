@@ -5032,6 +5032,106 @@ only the relevant phase section here.
 
 ## Phase 8 — OpenMW desktop vertical slice
 
+### 2026-09-03 — C-R1 replicated actor implemented and locally verified
+
+- Status: **In Progress**; the approved implementation and complete local
+  evidence pass, while owner acceptance remains.
+- Change: replaced the transient renderer proxy with the first-class C-R1
+  replicated-actor role. The renderer now owns a separate 255-entry collection,
+  a non-interactive visibility mask, read-only deterministic NPC appearance,
+  passive local idle animation, and typed create/update/lifecycle results. The
+  desktop provider owns one RAII handle per `EntityId`, rejects contradictory
+  same-revision state, treats field-identical re-timestamped observations as
+  idempotent, advances animation from the injected monotonic clock, and uses
+  capacity-sized allocation-free reconcile scratch space. The old NPC custom-
+  data initializer delta and transient proxy are removed.
+- Boundaries: no protocol, canonical state, authority, normal `CellStore` /
+  `WorldModel` registration, gameplay scene insertion, mechanics, collision,
+  navigation, Lua/scripts, persistence, interaction, sound, gameplay particles,
+  stats, spells, AI, gameplay inventory, generated reference identity, or game
+  PRNG was added. Internal typed diagnostics map to the existing sanitized
+  connection statuses.
+- Verification: the MSVC 19.51 RelWithDebInfo `openmw.exe`, adapter test target,
+  and `openmw-tests` target build. `ReplicatedActor.*` passes 4/4; the adapter
+  executable passes; replicated-actor source contracts pass 6/6; desktop harness
+  contracts pass 7/7; all 137 repository-owned Python tests pass. Patch-registry
+  verification, staged provenance with 342 intentional differences and 69
+  dependency inputs, staged legacy exclusion across 4,021 paths / 62 CMake
+  files / 1,254 compile commands / 1,971 Ninja edges, and staged diff hygiene
+  pass. The retained `c-r1-final-5` run passes both real-content
+  cell flows, 32/32 resumes, both 60-second soak clients, the unchanged RSS-
+  window rule, reliable high water 3 messages / 324 bytes, latest high water 1
+  message / 396 bytes, and zero final queue depth. Final RSS medians are
+  536,868,864 and 540,196,864 client bytes and 13,791,232 server bytes.
+- Findings: sequential proof phases must drain the server's three-second
+  disconnect grace before reusing one server. Re-timestamping an unchanged
+  entity revision is projection metadata, not a new motion sample; field-exact
+  validation preserves contradiction rejection. Per-view heap churn in desired-
+  set reconciliation was removed after retained RSS samples exposed an 84 KiB
+  allocator drift against an unusually narrow 16 KiB reference window.
+- Owner review: C-R1 architecture was approved on 2026-09-03. Implementation
+  acceptance and any Phase 8 status advance remain pending.
+- Follow-up: review the C-R1 diff and retained evidence. If accepted, record
+  owner acceptance and decide whether the shared demonstration closes Slices
+  8.2–8.7 and the Phase 8 exit gate; otherwise amend only the reviewed surface.
+
+### 2026-09-03 — Remote actor owner decision packet prepared
+
+- Status: **In Progress**; bounded architecture research is complete and owner
+  approval remains required before production implementation.
+- Decisions: none. The
+  [owner decision packet](REMOTE_ACTOR_OWNER_DECISION_PACKET.md) compares the
+  current renderer proxy, a normal actor with exclusions, and a first-class
+  ephemeral replicated actor across authority, identity, lifetime,
+  registration, rendering, animation, mechanics, physics, scripts,
+  persistence, interaction, errors, migration, VR, and operations. It
+  recommends package C-R1: a default-deny replica with rendering and passive
+  renderer-local idle animation only.
+- Findings: OpenMW's normal active-scene insertion fans a registered pointer
+  into rendering, mechanics, water, particles, physics/navigation, and Lua.
+  The current proxy bypasses that fan-out, but full NPC initialization registers
+  nested inventory pointers and consumes the world PRNG; renderer insertion
+  also installs inventory listeners and exposes a normal `PtrHolder` to focus
+  and activation rays. Its `NpcAnimation` is not owned by a mechanics
+  `CharacterController`, so normal animation advancement is not supplied by the
+  nominal renderer-only path.
+- Verification: read-only current-source inspection at `c507eb01fd`, pinned
+  OpenMW 0.51.0 baseline confirmation at `f4bec41444`, read-only
+  `tes3mp-0.8.1-archive` inspection, licensed `Morrowind.esm` `player` record
+  inspection with the existing `esmtool`, `git diff --check`, documentation
+  link/status review, JSON parse and sorted 332-entry provenance check, 9/9
+  focused baseline/patch-registry unit tests, and patch-registry verification.
+  Baseline provenance names the new research document. No production source,
+  accepted record, patch registry, plan status, or subsystem behavior changed.
+- Owner review: packet prepared for review; approval pending.
+- Follow-up: owner chooses or amends the packet. Only after explicit approval,
+  amend ADR-0007/ADR-0050/GDR-0013, replace P8-004, implement the approved exact
+  patch surface, and run all named real-content and negative-registration gates.
+
+### 2026-09-03 — C-R1 remote actor package approved
+
+- Status: **In Progress**; the architecture gate is cleared, while replacement
+  implementation and complete evidence remain.
+- Owner decision: the project owner explicitly approved package C-R1. The
+  authoritative observed set owns lifetime; the adapter owns one opaque RAII
+  handle per `EntityId`; the renderer owns a separate capacity-bounded replica
+  collection. Rendering and passive renderer-local neutral idle are the only
+  Phase 8 subsystem participation.
+- Exclusions: no `CellStore`, `WorldModel`, scene, mechanics, physics,
+  navigation, Lua/scripts, persistence, interaction, sound, gameplay particles,
+  gameplay stats/inventory/AI/spells, generated reference identity, or gameplay
+  PRNG. A distinct visibility role must remain outside focus/activation and
+  intersection traversal while participating in the approved main-camera,
+  shadow, reflection, and ToggleWorld paths.
+- Patch policy: ADR-0007, ADR-0050, GDR-0013, the plan, and P8-004 are amended
+  only to the exact packet surface. Any discovered need outside that surface
+  returns to owner review.
+- Follow-up: implement the C-R1 replacement, migrate the desktop provider, run
+  all typed-error, lifecycle, negative-registration, build, registry,
+  provenance, and real-content two-client gates, and keep Phase 9 gated.
+
+[Back to the phase tracker](IMPLEMENTATION_PLAN.md#phase-8--openmw-desktop-vertical-slice)
+
 ### 2026-09-03 — Replicated-remote-actor research approved
 
 - Status: **In Progress**; no replacement architecture or production code is

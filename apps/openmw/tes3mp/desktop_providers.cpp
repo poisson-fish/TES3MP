@@ -5,7 +5,7 @@
 #include "../mwbase/inputmanager.hpp"
 #include "../mwbase/world.hpp"
 #include "../mwinput/actions.hpp"
-#include "../mwrender/transientactorpresentation.hpp"
+#include "../mwrender/replicatedactor.hpp"
 #include "../mwworld/cell.hpp"
 #include "../mwworld/cellstore.hpp"
 #include "../mwworld/scene.hpp"
@@ -14,11 +14,14 @@
 #include <components/esm/position.hpp>
 #include <components/esm/refid.hpp>
 #include <components/esm3/loadcell.hpp>
+#include <components/debug/debuglog.hpp>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <map>
 #include <numbers>
+#include <optional>
 #include <ranges>
 
 namespace TES3MP::OpenMWAdapter
@@ -95,6 +98,58 @@ namespace TES3MP::OpenMWAdapter
             return &worldModel->getExterior(
                 ESM::ExteriorCellLocation(exterior->gridX(), exterior->gridY(), refId(mapping.exteriorWorldspace)));
         }
+
+        ProviderResult mapReplicatedActorResult(MWRender::ReplicatedActorResult result)
+        {
+            using Result = MWRender::ReplicatedActorResult;
+            switch (result)
+            {
+                case Result::Accepted:
+                case Result::AnimationFallback:
+                    return ProviderResult::Accepted;
+                case Result::InvalidAppearanceRecord:
+                case Result::MissingAppearanceDependency:
+                    return ProviderResult::ContentMappingFailed;
+                case Result::ResourceLoadFailed:
+                case Result::CapacityExceeded:
+                case Result::InvalidPose:
+                case Result::LifecycleViolation:
+                    return ProviderResult::PresentationFailed;
+            }
+            return ProviderResult::PresentationFailed;
+        }
+
+        const char* replicatedActorResultName(MWRender::ReplicatedActorResult result) noexcept
+        {
+            using Result = MWRender::ReplicatedActorResult;
+            switch (result)
+            {
+                case Result::Accepted:
+                    return "accepted";
+                case Result::InvalidAppearanceRecord:
+                    return "invalid_appearance_record";
+                case Result::MissingAppearanceDependency:
+                    return "missing_appearance_dependency";
+                case Result::ResourceLoadFailed:
+                    return "resource_load_failed";
+                case Result::CapacityExceeded:
+                    return "capacity_exceeded";
+                case Result::InvalidPose:
+                    return "invalid_pose";
+                case Result::LifecycleViolation:
+                    return "lifecycle_violation";
+                case Result::AnimationFallback:
+                    return "animation_fallback";
+            }
+            return "unknown";
+        }
+
+        bool sameReplicatedState(const SpatialEntitySnapshot& left, const SpatialEntitySnapshot& right) noexcept
+        {
+            return left.playerId() == right.playerId() && left.entityId() == right.entityId()
+                && left.entityRevision() == right.entityRevision() && left.authorityEpoch() == right.authorityEpoch()
+                && left.transform() == right.transform() && left.linearVelocity() == right.linearVelocity();
+        }
     }
 
     class DesktopSemanticInput::Impl
@@ -160,10 +215,12 @@ namespace TES3MP::OpenMWAdapter
         struct Remote
         {
             MWWorld::CellStore* cell = nullptr;
-            std::unique_ptr<MWRender::TransientActorPresentation> actor;
+            std::unique_ptr<MWRender::ReplicatedActor> actor;
             RemoteMotionBuffer motion;
+            std::optional<SpatialEntitySnapshot> lastObserved;
+            std::optional<MonotonicInstant> lastAdvance;
 
-            Remote(MWWorld::CellStore* targetCell, std::unique_ptr<MWRender::TransientActorPresentation> targetActor,
+            Remote(MWWorld::CellStore* targetCell, std::unique_ptr<MWRender::ReplicatedActor> targetActor,
                 RemoteMotionMetricSink& metrics)
                 : cell(targetCell)
                 , actor(std::move(targetActor))
@@ -229,8 +286,8 @@ namespace TES3MP::OpenMWAdapter
             else if (player.getCell() == targetCell)
                 world->moveObject(player, selfPosition.asVec3());
 
-            std::vector<EntityId> desired;
-            desired.reserve(observedPlayers.size());
+            std::array<std::optional<EntityId>, MWRender::MaximumReplicatedActors> desired;
+            std::size_t desiredCount = 0;
             for (const auto& observed : observedPlayers)
             {
                 if (observed.playerId == snapshot.header().targetPlayerId()
@@ -241,22 +298,52 @@ namespace TES3MP::OpenMWAdapter
                 });
                 if (entry == snapshot.view().entries().end() || entry->transform().cell() != self->transform().cell())
                     continue;
-                desired.push_back(observed.entityId);
+                if (desiredCount == desired.size())
+                    return ProviderResult::PresentationFailed;
+                desired[desiredCount++].emplace(observed.entityId);
                 auto found = remotes.find(observed.entityId);
                 const auto position = toOpenMW(entry->transform());
                 if (found == remotes.end() || found->second.cell != targetCell)
                 {
                     if (found != remotes.end())
                         erase(found);
-                    auto actor = MWRender::TransientActorPresentation::create(*world->getRenderingManager(),
+                    auto [actorResult, actor] = MWRender::ReplicatedActor::create(*world->getRenderingManager(),
                         *MWBase::Environment::get().getESMStore(), refId(mapping.avatarNpc), *targetCell, position);
+                    const ProviderResult mappedResult = mapReplicatedActorResult(actorResult);
+                    if (mappedResult != ProviderResult::Accepted || !actor)
+                    {
+                        Log(Debug::Error) << "TES3MP replicated actor create failed: entity="
+                                          << observed.entityId.value() << " result="
+                                          << replicatedActorResultName(actorResult);
+                        return mappedResult;
+                    }
                     found = remotes.try_emplace(observed.entityId, targetCell, std::move(actor), metrics).first;
                 }
+                if (found->second.lastObserved
+                    && entry->entityRevision() == found->second.lastObserved->entityRevision())
+                {
+                    if (!sameReplicatedState(*entry, *found->second.lastObserved))
+                    {
+                        Log(Debug::Error) << "TES3MP replicated actor contradictory same-revision observation: entity="
+                                          << observed.entityId.value() << " revision="
+                                          << entry->entityRevision().value();
+                        return ProviderResult::PresentationFailed;
+                    }
+                    continue;
+                }
                 if (!found->second.motion.observe(*entry, receivedAt))
+                {
+                    Log(Debug::Error) << "TES3MP replicated actor motion observation rejected: entity="
+                                      << observed.entityId.value() << " revision=" << entry->entityRevision().value()
+                                      << " tick=" << entry->serverTick().value();
                     return ProviderResult::PresentationFailed;
+                }
+                found->second.lastObserved = *entry;
             }
             for (auto iter = remotes.begin(); iter != remotes.end();)
-                if (std::ranges::find(desired, iter->first) == desired.end())
+                if (std::find_if(desired.begin(), desired.begin() + desiredCount,
+                        [&](const auto& value) { return value && *value == iter->first; })
+                    == desired.begin() + desiredCount)
                 {
                     iter->second.motion.clear();
                     iter = remotes.erase(iter);
@@ -273,8 +360,23 @@ namespace TES3MP::OpenMWAdapter
                 (void)entity;
                 auto pose = remote.motion.advance(now);
                 if (!pose)
+                {
+                    Log(Debug::Error) << "TES3MP replicated actor motion resolve failed: entity=" << entity.value();
                     return ProviderResult::PresentationFailed;
-                remote.actor->update(toOpenMW(*pose));
+                }
+                float animationSeconds = 0.f;
+                if (remote.lastAdvance && now >= *remote.lastAdvance)
+                    animationSeconds = static_cast<float>(now.nanoseconds() - remote.lastAdvance->nanoseconds()) / 1e9f;
+                remote.lastAdvance = now;
+                const MWRender::ReplicatedActorResult actorResult
+                    = remote.actor->update(toOpenMW(*pose), animationSeconds);
+                const ProviderResult result = mapReplicatedActorResult(actorResult);
+                if (result != ProviderResult::Accepted)
+                {
+                    Log(Debug::Error) << "TES3MP replicated actor update failed: entity=" << entity.value()
+                                      << " result=" << replicatedActorResultName(actorResult);
+                    return result;
+                }
             }
             return ProviderResult::Accepted;
         }

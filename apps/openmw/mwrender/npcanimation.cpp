@@ -252,6 +252,11 @@ namespace MWRender
     }
     const NpcAnimation::PartBoneMap NpcAnimation::sPartList = createPartListMap();
 
+    std::string_view NpcAnimation::getBodyPartBone(ESM::PartReferenceType type)
+    {
+        return sPartList.at(type);
+    }
+
     NpcAnimation::~NpcAnimation()
     {
         mAmmunition.reset();

@@ -51,3 +51,26 @@ The owner approved focused replicated-actor architecture research on 2026-09-03.
 The accepted cell-transition behavior and server authority remain in force, but
 P8-004's remote representation mechanism is not sufficient completion evidence.
 No replacement role, hook surface, or subsystem participation has been approved.
+
+## Approved C-R1 replacement
+
+The project owner approved package C-R1 on 2026-09-03. It replaces the
+renderer-only transient-NPC mechanism, while retaining authoritative-set
+reconciliation and `EntityId` identity.
+
+Each remote is an opaque, adapter-owned RAII replicated-actor handle in a
+separate renderer collection, with a hard capacity of 255. Its appearance is a
+pure, read-only projection of the configured NPC record and record-declared
+visible clothing/armor. Phase 8 permits normal rendering plus passive
+renderer-local neutral idle animation only. A distinct replicated-actor
+visibility mask makes it visible to the main camera, configured actor shadows
+and reflections, and ToggleWorld, while excluding it from focus, activation,
+and intersection traversal.
+
+It has no `CellStore` or `WorldModel` registration, mechanics, physics or
+collision, navigation, Lua or script presence, persistence, gameplay inventory
+or stats, interaction, sound, or gameplay particles. Creation/update failure is
+typed and fail-closed, and lifecycle misuse is observable. The exact approved
+surface and acceptance scenarios are normative in the
+[owner decision packet](../REMOTE_ACTOR_OWNER_DECISION_PACKET.md). Any need for
+an unlisted production subsystem path reopens owner review.

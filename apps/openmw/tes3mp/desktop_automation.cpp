@@ -139,7 +139,10 @@ namespace TES3MP::OpenMWAdapter
         mSelfCell = self->transform().cell();
         if (*mSelfCell == Exterior && !mExteriorAt)
             mExteriorAt = receivedAt;
-        const bool hasPeer = !observedPlayers.empty();
+        const bool hasPeer = std::ranges::any_of(observedPlayers, [&](const ObservedPlayer& observed) {
+            return observed.playerId != snapshot.header().targetPlayerId()
+                || observed.entityId != snapshot.header().targetEntityId();
+        });
         if (hasPeer)
         {
             if (mSawLeave)

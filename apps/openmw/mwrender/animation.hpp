@@ -103,6 +103,12 @@ namespace MWRender
     class Animation : public osg::Referenced
     {
     public:
+        enum class Context
+        {
+            Gameplay,
+            ReplicatedActor,
+        };
+
         using BlendMask = MWRender::BlendMask;
         using BoneGroup = MWRender::BoneGroup;
         using AnimPriority = MWRender::AnimPriority;
@@ -216,6 +222,7 @@ namespace MWRender
         MWWorld::Ptr mPtr;
 
         Resource::ResourceSystem* mResourceSystem;
+        Context mContext;
 
         osg::Vec3f mAccumulate;
 
@@ -322,6 +329,8 @@ namespace MWRender
     public:
         Animation(
             const MWWorld::Ptr& ptr, osg::ref_ptr<osg::Group> parentNode, Resource::ResourceSystem* resourceSystem);
+        Animation(const MWWorld::Ptr& ptr, osg::ref_ptr<osg::Group> parentNode,
+            Resource::ResourceSystem* resourceSystem, Context context);
 
         /// Must be thread safe
         virtual ~Animation();

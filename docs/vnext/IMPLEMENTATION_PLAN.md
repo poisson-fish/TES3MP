@@ -96,8 +96,9 @@ active-tree difference and dependency input.
 The tree contains independent protocol, transport, server-core, client-session,
 OpenMW-adapter, and test-support targets plus the Phase 7 dedicated server and
 headless client applications. Phases 0–7 have passed their exit gates. Phase 8
-is active: Slice 8.1 is implemented and Slices 8.2–8.7 await content-backed
-owner demos; the plan table below is the authoritative status source.
+is active: Slice 8.1 is implemented and Slices 8.2–8.7 have complete local
+content-backed evidence but await owner acceptance; the plan table below is the
+authoritative status source.
 
 Historical pre-cutover state and exact Git mechanics remain available in
 [`PRE_CUTOVER_PROVENANCE.md`](PRE_CUTOVER_PROVENANCE.md), ADR-0001, and the
@@ -676,10 +677,10 @@ Depends on: Phase 7.
 | 8.1 | Inventory the minimum required OpenMW hooks and review the final patch surface with the owner | **Implemented** | ADR-0007 records owner-approved Option A and exact P8-001 through P8-003 paths, needs, tests, dispositions, and removal conditions |
 | 8.2 | Implement the adapter lifecycle and desktop input/presentation provider interfaces | **In Progress** | ADR-0047 orchestration, provider boundary, concrete coordinator, and configuration-gated executable attachment are verified; owner demo remains |
 | 8.3 | Connect/authenticate/join from OpenMW with actionable UI errors | **In Progress** | ADR-0049 records approved configuration, credential, timeout, and status policy; executable connection composition, sanitized visible runtime errors, and the MSVC `/MD` real-network `openmw.exe` link are verified; owner demo remains |
-| 8.4 | Map interior/exterior cell changes and spawn/despawn remote player presentation | **In Progress** | Explicit snapshot identity and tracked/coalesced cell transitions remain verified. The owner approved focused Option B research after the real-content failure and legacy audit showed that the nominal renderer-only seam initializes full NPC gameplay data; a first-class replicated-actor role is the research direction, but exact authority/lifecycle/subsystem choices, replacement implementation, automated gates, and two-client demo remain |
+| 8.4 | Map interior/exterior cell changes and spawn/despawn remote player presentation | **In Progress** | Owner-approved C-R1 is implemented: a first-class default-deny replicated-actor render role with passive local idle only, typed failures, non-interactive visibility, and no gameplay registration. Focused/negative gates and the two-client content-backed cell flow pass; owner acceptance remains |
 | 8.5 | Convert input to semantic movement commands and apply authoritative local correction | **In Progress** | Approved ADR-0051/GDR-0014 implemented in `c4b9cb1cec`: deterministic planar mapping, one-pending/latest intent coordination, ordered stale-revision convergence, and exact same-cell correction pass automated gates; owner two-client desktop demo remains |
 | 8.6 | Interpolate/extrapolate remote movement through a bounded jitter buffer | **In Progress** | Approved ADR-0052/GDR-0015 implemented in `ceb8e11d1f`: provider-owned four-sample client-local buffering, two-tick interpolation, three-tick extrapolation/hold, bounded correction/hard snaps, reset rules, and typed metrics pass automated gates; owner demo remains |
-| 8.7 | Implement disconnect/resume presentation and automate the two-client slice | **In Progress** | Approved ADR-0053/GDR-0016 implemented in `4735938383`: bounded sequential-runtime resume, original token deadline and one-second pre-auth retry, complete-snapshot continuity barrier, testing-only typed driver, and external flow/reconnect/soak harness pass automated gates; the runner now accepts explicit fallback archives, and the content-backed Option A flow reaches the approved interior but closes on remote presentation with avatar `player`; diagnosis, complete run, and owner demo remain |
+| 8.7 | Implement disconnect/resume presentation and automate the two-client slice | **In Progress** | Approved ADR-0053/GDR-0016 plus C-R1 pass the complete real-content gate: two-client cell flow, 32 resumes, 60-second soak, unchanged bounded-RSS rule, and zero queue drain. Testing-only diagnostics retain logs and bounded samples; owner acceptance remains |
 
 Exit gate:
 

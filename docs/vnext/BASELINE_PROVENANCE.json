@@ -92,7 +92,7 @@
     {
       "path": "apps/openmw/CMakeLists.txt",
       "status": "M",
-      "purpose": "Adds the app-local OpenMW-coupled TES3MP adapter target after openmw-lib is defined."
+      "purpose": "Adds the app-local OpenMW-coupled TES3MP adapter target after openmw-lib is defined and keeps testing-only automation option registration aligned across the library/executable boundary."
     },
     {
       "path": "apps/openmw/engine.cpp",
@@ -110,24 +110,59 @@
       "purpose": "Composes the explicitly enabled desktop multiplayer coordinator with sanitized startup and runtime status reporting."
     },
     {
-      "path": "apps/openmw/mwclass/npc.cpp",
+      "path": "apps/openmw/mwrender/animation.cpp",
       "status": "M",
-      "purpose": "Exposes the approved renderer-only transient NPC model and animation helpers without gameplay registration."
+      "purpose": "Adds the explicit replicated-actor animation context and prevents replica animation completion from reaching Lua."
     },
     {
-      "path": "apps/openmw/mwclass/npc.hpp",
+      "path": "apps/openmw/mwrender/animation.hpp",
       "status": "M",
-      "purpose": "Declares the narrow renderer-only transient NPC presentation helpers."
+      "purpose": "Declares the explicit gameplay-versus-replicated-actor rendering context."
     },
     {
-      "path": "apps/openmw/mwrender/transientactorpresentation.cpp",
-      "status": "A",
-      "purpose": "Implements renderer-only remote avatar creation, update, and cleanup outside gameplay systems."
+      "path": "apps/openmw/mwrender/npcanimation.cpp",
+      "status": "M",
+      "purpose": "Shares the canonical NPC body-part attachment mapping with immutable replica appearance assembly."
     },
     {
-      "path": "apps/openmw/mwrender/transientactorpresentation.hpp",
+      "path": "apps/openmw/mwrender/npcanimation.hpp",
+      "status": "M",
+      "purpose": "Exposes the read-only NPC body-part attachment lookup used by replicated actors."
+    },
+    {
+      "path": "apps/openmw/mwrender/objects.cpp",
+      "status": "M",
+      "purpose": "Keeps replicated actors in a separate renderer collection without interactive PtrHolder metadata."
+    },
+    {
+      "path": "apps/openmw/mwrender/objects.hpp",
+      "status": "M",
+      "purpose": "Declares the bounded separate replicated-actor render collection and lifecycle seam."
+    },
+    {
+      "path": "apps/openmw/mwrender/renderingmanager.cpp",
+      "status": "M",
+      "purpose": "Includes replicas in configured actor shadows while excluding them from all intersection traversal."
+    },
+    {
+      "path": "apps/openmw/mwrender/replicatedactor.cpp",
       "status": "A",
-      "purpose": "Declares the opaque renderer-only transient remote-avatar seam."
+      "purpose": "Implements C-R1 immutable appearance projection, passive neutral idle, typed lifecycle, and RAII cleanup without gameplay state."
+    },
+    {
+      "path": "apps/openmw/mwrender/replicatedactor.hpp",
+      "status": "A",
+      "purpose": "Declares the opaque capacity-bounded replicated-actor API and typed outcomes."
+    },
+    {
+      "path": "apps/openmw/mwrender/vismask.hpp",
+      "status": "M",
+      "purpose": "Defines the distinct replicated-actor visibility role and ToggleWorld participation."
+    },
+    {
+      "path": "apps/openmw/mwrender/water.cpp",
+      "status": "M",
+      "purpose": "Includes replicas in the same configured water render passes as ordinary actors."
     },
     {
       "path": "apps/openmw/options.cpp",
@@ -157,7 +192,7 @@
     {
       "path": "apps/openmw/tes3mp/desktop_automation.cpp",
       "status": "A",
-      "purpose": "Implements bounded fixed-role desktop flow, reconnect, and soak automation available only to testing builds."
+      "purpose": "Implements bounded fixed-role desktop flow, reconnect, and soak automation with peer evidence that excludes the target player, available only to testing builds."
     },
     {
       "path": "apps/openmw/tes3mp/desktop_automation.hpp",
@@ -177,7 +212,7 @@
     {
       "path": "apps/openmw/tes3mp/desktop_providers.cpp",
       "status": "A",
-      "purpose": "Implements fixture cell mapping, semantic desktop movement input, exact local correction, and renderer-only remote presentation."
+      "purpose": "Implements fixture cell mapping, semantic desktop movement input, exact local correction, and typed C-R1 replicated-actor presentation with field-exact idempotent observations and allocation-free bounded reconciliation."
     },
     {
       "path": "apps/openmw/tes3mp/desktop_providers.hpp",
@@ -213,6 +248,16 @@
       "path": "apps/openmw/tes3mp/remote_motion.hpp",
       "status": "A",
       "purpose": "Declares the engine-independent four-sample remote-motion buffer and adapter-owned metric boundary."
+    },
+    {
+      "path": "apps/openmw_tests/CMakeLists.txt",
+      "status": "M",
+      "purpose": "Registers focused C-R1 replicated-actor unit contracts."
+    },
+    {
+      "path": "apps/openmw_tests/mwrender/testreplicatedactor.cpp",
+      "status": "A",
+      "purpose": "Tests finite-pose validation, capacity, visibility-role separation, and animation fallback semantics."
     },
     {
       "path": "apps/tes3mp-headless-client/CMakeLists.txt",
@@ -1125,6 +1170,11 @@
       "purpose": "Accepted vNext product direction and architecture boundaries."
     },
     {
+      "path": "docs/vnext/REMOTE_ACTOR_OWNER_DECISION_PACKET.md",
+      "status": "A",
+      "purpose": "OpenMW 0.51 three-model remote-actor comparison, owner-approved C-R1 decision, exact patch surface, acceptance scenarios, and implementation result."
+    },
+    {
       "path": "docs/vnext/STATE.md",
       "status": "A",
       "purpose": "Concise current-slice handoff snapshot linking the authoritative plan, active decisions, working files, next work, and verification evidence."
@@ -1532,7 +1582,7 @@
     {
       "path": "scripts/run_phase8_desktop_demo.py",
       "status": "A",
-      "purpose": "Runs fixed-role real OpenMW flow, reconnect, and soak processes with bounded credential-free evidence, RSS, and queue checks."
+      "purpose": "Runs phase-isolated fixed-role real OpenMW flow, reconnect, and soak processes with retained diagnostics plus bounded credential-free RSS and queue evidence."
     },
     {
       "path": "scripts/run_tes3mp_runtime_safety.py",
@@ -1582,7 +1632,12 @@
     {
       "path": "scripts/tests/test_phase8_desktop_harness.py",
       "status": "A",
-      "purpose": "Contracts for fixed desktop automation roles, credential-file-only launch, bounded typed completion, and testing-only exposure."
+      "purpose": "Contracts for fixed desktop automation roles, credential-file-only launch, disconnect-grace phase isolation, retained diagnostics, bounded typed completion, and testing-only exposure."
+    },
+    {
+      "path": "scripts/tests/test_replicated_actor_contract.py",
+      "status": "A",
+      "purpose": "Source-level negative-registration, visibility, typed-result, idempotent-reconcile, bounded-scratch, and retired-proxy contracts for C-R1."
     },
     {
       "path": "scripts/tests/test_run_phase7_join_demo.py",

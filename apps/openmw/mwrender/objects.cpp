@@ -30,6 +30,7 @@ namespace MWRender
 
     Objects::~Objects()
     {
+        mReplicatedActors.clear();
         mObjects.clear();
 
         for (CellMap::iterator iter = mCellSceneNodes.begin(); iter != mCellSceneNodes.end(); ++iter)
@@ -37,9 +38,10 @@ namespace MWRender
         mCellSceneNodes.clear();
     }
 
-    void Objects::insertBegin(const MWWorld::Ptr& ptr)
+    void Objects::insertBegin(const MWWorld::Ptr& ptr, bool interactive)
     {
         assert(mObjects.find(ptr.mRef) == mObjects.end());
+        assert(mReplicatedActors.find(ptr.mRef) == mReplicatedActors.end());
 
         osg::ref_ptr<osg::Group> cellnode;
 
@@ -57,7 +59,8 @@ namespace MWRender
         osg::ref_ptr<SceneUtil::PositionAttitudeTransform> insert(new SceneUtil::PositionAttitudeTransform);
         cellnode->addChild(insert);
 
-        insert->getOrCreateUserDataContainer()->addUserObject(new PtrHolder(ptr));
+        if (interactive)
+            insert->getOrCreateUserDataContainer()->addUserObject(new PtrHolder(ptr));
 
         const float* f = ptr.getRefData().getPosition().pos;
 
@@ -168,6 +171,20 @@ namespace MWRender
 
     void Objects::removeCell(const MWWorld::CellStore* store)
     {
+        for (PtrAnimationMap::iterator iter = mReplicatedActors.begin(); iter != mReplicatedActors.end();)
+        {
+            MWWorld::Ptr ptr = iter->second->getPtr();
+            if (ptr.getCell() == store)
+            {
+                iter->second->removeFromScene();
+                mUnrefQueue.push(std::move(iter->second));
+                iter = mReplicatedActors.erase(iter);
+                ptr.getRefData().setBaseNode(nullptr);
+            }
+            else
+                ++iter;
+        }
+
         for (PtrAnimationMap::iterator iter = mObjects.begin(); iter != mObjects.end();)
         {
             MWWorld::Ptr ptr = iter->second->getPtr();

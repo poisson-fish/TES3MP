@@ -13,6 +13,8 @@ from run_phase7_join_demo import bounded_rss, resident_bytes
 
 
 ROLES = {"flow-one", "flow-two", "reconnect", "soak-one", "soak-two"}
+DISCONNECT_GRACE_SECONDS = 3.0
+PHASE_SETTLE_SECONDS = DISCONNECT_GRACE_SECONDS + 0.25
 
 
 def client_command(args: argparse.Namespace, port: int, password: Path,
@@ -32,6 +34,7 @@ def client_command(args: argparse.Namespace, port: int, password: Path,
         f"--tes3mp-automation-role={role}",
         f"--tes3mp-automation-output={evidence}",
         f"--resources={args.resources}",
+        f"--user-data={evidence.parent / (role + '-user')}",
         f"--start={args.interior}",
         "--skip-menu=1",
         "--new-game=1",
@@ -64,15 +67,20 @@ def run_clients(args: argparse.Namespace, port: int, password: Path,
                 server: subprocess.Popen[str] | None = None) -> tuple[list[dict], dict[str, dict[str, int]]]:
     processes: list[subprocess.Popen[bytes]] = []
     paths: list[Path] = []
+    streams = []
     samples: dict[str, list[int]] = {}
     try:
         for role in roles:
             path = artifacts / f"{role}.ndjson"
             paths.append(path)
+            (artifacts / f"{role}-user").mkdir(exist_ok=True)
+            stdout_stream = (artifacts / f"{role}.stdout.log").open("wb")
+            stderr_stream = (artifacts / f"{role}.stderr.log").open("wb")
+            streams.extend((stdout_stream, stderr_stream))
             process = subprocess.Popen(
                 client_command(args, port, password, role, path),
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
+                stdout=stdout_stream,
+                stderr=stderr_stream,
             )
             processes.append(process)
             samples[role] = []
@@ -92,6 +100,11 @@ def run_clients(args: argparse.Namespace, port: int, password: Path,
             raise RuntimeError(
                 f"desktop process failed: roles={roles!r} codes={[process.returncode for process in processes]!r}")
         evidence = [read_completion(path, role) for path, role in zip(paths, roles)]
+        if sample_rss:
+            diagnostic_samples = {role: values for role, values in samples.items()}
+            diagnostic_samples["server"] = server_samples
+            (artifacts / "rss-samples.json").write_text(
+                json.dumps(diagnostic_samples, separators=(",", ":")) + "\n", encoding="utf-8")
         memory = {role: bounded_rss(values) for role, values in samples.items()} if sample_rss else {}
         if sample_rss and server is not None:
             memory["server"] = bounded_rss(server_samples)
@@ -105,6 +118,8 @@ def run_clients(args: argparse.Namespace, port: int, password: Path,
                 except subprocess.TimeoutExpired:
                     process.kill()
                     process.wait(timeout=5)
+        for stream in streams:
+            stream.close()
 
 
 def parse_args() -> argparse.Namespace:
@@ -136,7 +151,8 @@ def main() -> int:
         password.write_text(secret + "\n", encoding="utf-8")
         config.write_text(
             f"bind_address=127.0.0.1\nport={port}\ntick_interval_ms=16\n"
-            f"disconnect_grace_ms=3000\njoin_password_file={password.as_posix()}\n",
+            f"disconnect_grace_ms={int(DISCONNECT_GRACE_SECONDS * 1000)}\n"
+            f"join_password_file={password.as_posix()}\n",
             encoding="utf-8",
         )
         server = subprocess.Popen(
@@ -149,10 +165,12 @@ def main() -> int:
             time.sleep(0.5)
             flow, _ = run_clients(
                 args, port, password, args.artifacts, ("flow-one", "flow-two"), 30)
+            time.sleep(PHASE_SETTLE_SECONDS)
             reconnect, _ = run_clients(
                 args, port, password, args.artifacts, ("reconnect",), 90)
             if reconnect[0].get("resumes") != 32:
                 raise RuntimeError(f"desktop reconnect threshold failed: {reconnect[0]!r}")
+            time.sleep(PHASE_SETTLE_SECONDS)
             soak, memory = run_clients(
                 args, port, password, args.artifacts, ("soak-one", "soak-two"), 80,
                 sample_rss=True, server=server)

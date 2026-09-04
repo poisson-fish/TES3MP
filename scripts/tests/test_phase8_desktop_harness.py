@@ -16,6 +16,23 @@ SPEC.loader.exec_module(MODULE)
 
 
 class Phase8DesktopHarnessTests(unittest.TestCase):
+    def test_harness_retains_per_role_diagnostics(self):
+        source = (ROOT / "scripts/run_phase8_desktop_demo.py").read_text(encoding="utf-8")
+        self.assertIn('f"{role}.stdout.log"', source)
+        self.assertIn('f"{role}.stderr.log"', source)
+        self.assertIn('artifacts / "rss-samples.json"', source)
+
+    def test_proof_phases_are_isolated_across_disconnect_grace(self):
+        self.assertGreater(MODULE.PHASE_SETTLE_SECONDS, MODULE.DISCONNECT_GRACE_SECONDS)
+        source = (ROOT / "scripts/run_phase8_desktop_demo.py").read_text(encoding="utf-8")
+        self.assertEqual(source.count("time.sleep(PHASE_SETTLE_SECONDS)"), 2)
+
+    def test_flow_peer_evidence_excludes_the_target_player(self):
+        source = (ROOT / "apps/openmw/tes3mp/desktop_automation.cpp").read_text(encoding="utf-8")
+        self.assertIn("std::ranges::any_of(observedPlayers", source)
+        self.assertIn("snapshot.header().targetPlayerId()", source)
+        self.assertIn("snapshot.header().targetEntityId()", source)
+
     def args(self):
         return argparse.Namespace(
             openmw=pathlib.Path("openmw"), resources=pathlib.Path("resources"),
@@ -30,6 +47,7 @@ class Phase8DesktopHarnessTests(unittest.TestCase):
         self.assertIn("--tes3mp-automation-role=flow-one", joined)
         self.assertIn("--tes3mp-password-file=secret-file", joined)
         self.assertIn("--fallback-archive=Morrowind.bsa", joined)
+        self.assertIn("--user-data=flow-one-user", joined)
         self.assertNotIn("phase8-desktop-secret", joined)
 
     def test_unknown_role_is_rejected(self):

@@ -19,7 +19,6 @@ namespace MWClass
         Npc();
 
         void ensureCustomData(const MWWorld::Ptr& ptr) const;
-        void initializeCustomData(const MWWorld::Ptr& ptr, bool registerPtr) const;
 
         MWWorld::Ptr copyToCellImpl(const MWWorld::ConstPtr& ptr, MWWorld::CellStore& cell) const override;
 
@@ -50,8 +49,6 @@ namespace MWClass
         static const GMST& getGmst();
 
     public:
-        void ensureTransientPresentationData(const MWWorld::Ptr& ptr) const;
-
         void insertObjectRendering(const MWWorld::Ptr& ptr, const std::string& model,
             MWRender::RenderingInterface& renderingInterface) const override;
         ///< Add reference into a cell for rendering

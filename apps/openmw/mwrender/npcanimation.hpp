@@ -10,6 +10,7 @@
 #include "../mwworld/inventorystore.hpp"
 
 #include <array>
+#include <string_view>
 
 namespace ESM
 {
@@ -178,6 +179,9 @@ namespace MWRender
         /// parts.
         static const std::vector<const ESM::BodyPart*>& getBodyParts(
             const ESM::RefId& raceId, bool female, bool firstperson, bool werewolf);
+
+        /// Shared attachment mapping for gameplay NPCs and read-only replicated-actor appearances.
+        static std::string_view getBodyPartBone(ESM::PartReferenceType type);
     };
 
 }

@@ -514,3 +514,21 @@ and a first-class ephemeral replica role. It must present authority, lifetime,
 identity, registration, rendering, animation, mechanics, physics, scripts,
 persistence, interaction, and testing choices for owner approval before ADR,
 GDR, registry, plan, or production implementation selects a replacement.
+
+## 2026-09-03 C-R1 remote-replica approval
+
+The project owner approved package C-R1 in the
+[remote actor owner decision packet](../REMOTE_ACTOR_OWNER_DECISION_PACKET.md).
+P8-004 is superseded in place by a first-class, ephemeral replicated-actor
+render role. The adapter owns one opaque RAII handle per authoritative
+`EntityId`; the role is client-local, main-thread-only, capacity-bounded, and
+default-deny outside rendering and passive renderer-local neutral idle
+animation.
+
+The approved patch surface is limited to the exact OpenMW rendering, visibility,
+build, and focused test paths named by that packet. No `CellStore`, `WorldModel`,
+scene insertion, mechanics, physics, navigation, Lua/script, persistence,
+protocol, server-core, or transport change is approved. Discovering that one of
+those paths is necessary reopens owner review before implementation expands.
+P8-001 through P8-003 and all dependency, main-thread, bounded-work, registry,
+and upstream-contact rules remain unchanged.

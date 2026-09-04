@@ -3,11 +3,13 @@
 
 #include <map>
 #include <string>
+#include <utility>
 
 #include <osg/Object>
 #include <osg/ref_ptr>
 
 #include "../mwworld/ptr.hpp"
+#include "replicatedactor.hpp"
 
 namespace osg
 {
@@ -61,11 +63,12 @@ namespace MWRender
         typedef std::map<const MWWorld::CellStore*, osg::ref_ptr<osg::Group>> CellMap;
         CellMap mCellSceneNodes;
         PtrAnimationMap mObjects;
+        PtrAnimationMap mReplicatedActors;
         osg::ref_ptr<osg::Group> mRootNode;
         Resource::ResourceSystem* mResourceSystem;
         SceneUtil::UnrefQueue& mUnrefQueue;
 
-        void insertBegin(const MWWorld::Ptr& ptr);
+        void insertBegin(const MWWorld::Ptr& ptr, bool interactive = true);
 
     public:
         Objects(Resource::ResourceSystem* resourceSystem, const osg::ref_ptr<osg::Group>& rootNode,
@@ -77,6 +80,12 @@ namespace MWRender
 
         void insertNPC(const MWWorld::Ptr& ptr);
         void insertCreature(const MWWorld::Ptr& ptr, const std::string& model, bool weaponsShields);
+
+        ReplicatedActorResult insertReplicatedActor(const MWWorld::Ptr& ptr, const MWWorld::ESMStore& store);
+        ReplicatedActorResult advanceReplicatedActor(
+            const MWWorld::Ptr& ptr, const ESM::Position& position, float animationSeconds) noexcept;
+        bool removeReplicatedActor(const MWWorld::Ptr& ptr) noexcept;
+        std::size_t replicatedActorCount() const noexcept { return mReplicatedActors.size(); }
 
         Animation* getAnimation(const MWWorld::Ptr& ptr);
         const Animation* getAnimation(const MWWorld::ConstPtr& ptr) const;

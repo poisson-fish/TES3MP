@@ -548,11 +548,18 @@ namespace MWRender
 
     Animation::Animation(
         const MWWorld::Ptr& ptr, osg::ref_ptr<osg::Group> parentNode, Resource::ResourceSystem* resourceSystem)
+        : Animation(ptr, std::move(parentNode), resourceSystem, Context::Gameplay)
+    {
+    }
+
+    Animation::Animation(const MWWorld::Ptr& ptr, osg::ref_ptr<osg::Group> parentNode,
+        Resource::ResourceSystem* resourceSystem, Context context)
         : mInsert(std::move(parentNode))
         , mSkeleton(nullptr)
         , mNodeMapCreated(false)
         , mPtr(ptr)
         , mResourceSystem(resourceSystem)
+        , mContext(context)
         , mAccumulate(1.f, 1.f, 0.f)
         , mTextKeyListener(nullptr)
         , mHeadYawRadians(0.f)
@@ -753,7 +760,7 @@ namespace MWRender
             constexpr VFS::Path::NormalizedView globalBlendConfigPath("animations/animation-config.yaml");
 
             osg::ref_ptr<const SceneUtil::AnimBlendRules> blendRules;
-            if (mPtr.getClass().isActor())
+            if (mContext == Context::ReplicatedActor || mPtr.getClass().isActor())
             {
                 blendRules
                     = mResourceSystem->getAnimBlendRulesManager()->getRules(globalBlendConfigPath, blendConfigPath);
@@ -1572,7 +1579,8 @@ namespace MWRender
         std::string defaultSkeleton;
         bool inject = false;
 
-        if (Settings::game().mUseAdditionalAnimSources && mPtr.getClass().isActor())
+        if (Settings::game().mUseAdditionalAnimSources
+            && (mContext == Context::ReplicatedActor || mPtr.getClass().isActor()))
         {
             if (isCreature)
             {
@@ -2000,6 +2008,8 @@ namespace MWRender
 
     void Animation::animationEnded(AnimState& state) const
     {
+        if (mContext == Context::ReplicatedActor)
+            return;
         MWBase::Environment::get().getLuaManager()->animationEnded(
             mPtr, state.mGroupname, state.getTime(), state.getCompletion(), state.mStartKey, state.mStopKey);
     }
