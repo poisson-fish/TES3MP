@@ -10,9 +10,9 @@ is the [implementation plan](IMPLEMENTATION_PLAN.md#phase-9--pc-vr-interoperabil
 - Branch: `vnext`
 - Phase 7: **Implemented**
 - Phase 8: **Implemented**
-- Phase 9: **In Progress** (Slice 9.1 owner decision gate)
-- Slice 9.1: **In Progress** (research and proposed ADR-0008 packet complete;
-  owner approval and implementation remain)
+- Phase 9: **In Progress** (Slice 9.1 implementation acceptance gate)
+- Slice 9.1: **In Progress** (approved implementation candidate and verification
+  complete; owner acceptance remains)
 - Slice 8.1: **Implemented**
 - Slice 8.2: **Implemented**
 - Slice 8.3: **Implemented**
@@ -21,7 +21,7 @@ is the [implementation plan](IMPLEMENTATION_PLAN.md#phase-9--pc-vr-interoperabil
 - Slice 8.6: **Implemented**
 - Slice 8.7: **Implemented**
 - Governing decisions: [ADR-0007](adr/ADR-0007-openmw-hook-patch-queue-policy.md),
-  proposed [ADR-0008](adr/ADR-0008-pc-vr-fork-worktree-maintenance-policy.md),
+  [ADR-0008](adr/ADR-0008-pc-vr-fork-worktree-maintenance-policy.md),
   [ADR-0047](adr/ADR-0047-phase8-adapter-lifecycle-and-provider-boundary.md),
   [ADR-0048](adr/ADR-0048-canonical-revision-and-simulation-tick-separation.md),
   [ADR-0049](adr/ADR-0049-phase8-desktop-connection-composition.md),
@@ -34,6 +34,8 @@ is the [implementation plan](IMPLEMENTATION_PLAN.md#phase-9--pc-vr-interoperabil
   [GDR-0015](gdr/GDR-0015-phase8-remote-motion-presentation.md), and
   [GDR-0016](gdr/GDR-0016-phase8-disconnect-and-resume-presentation.md)
 - Latest implementation commit: `93690354d1` (`Implement C-R1 replicated actors`)
+- Latest VR implementation candidate: `c590e81cc5` (`Record reproducible PC VR
+  target`)
 
 ## Working synopsis
 
@@ -106,17 +108,23 @@ server disconnect grace. With the pinned dependency runtime paths,
 `Morrowind.bsa`, and avatar `player`, the complete flow/reconnect/soak gate now
 passes. No alternate content record or presentation behavior was chosen.
 
-Phase 9 Slice 9.1 is now in progress. Read-only primary-source research found
+Phase 9 Slice 9.1 has an implementation candidate. Primary-source research found
 the newest immutable OpenMW 0.51 VR target at `openmw-vr-0.51-rc1`, commit
 `56a8e01390507375c9c2f2593e1c09e0df88c505`. Its exact GitHub Windows 2022 and
 Ubuntu workflow passed, but retained artifacts have expired; its GitLab
 pipeline passed Linux and Windows MSBuild jobs but failed Windows Ninja jobs.
 The fork and desktop baseline diverge after common commit `e0efd3b1`; the VR
 side has 197 commits / 341 changed paths and overlaps 10 registered P8 patch
-paths. The complete ADR-0008 packet recommends the immutable tag, a same-repo
-merge-overlay `vnext-vr` sibling worktree, and a locked OpenXR-SDK input. These
-are recommendations only. No remote, branch, worktree, merge, dependency,
-registry, production code, authority, state, or gameplay decision changed.
+paths. The owner approved ADR-0008 A/A/A. Read-only remote
+`openmw-vr-upstream` has push disabled. Same-repository sibling worktree
+`TES3MP-vr` uses `vnext-vr`; merge `0e8e85e0b5` records desktop and exact VR
+parents. Proof commit `c590e81cc5` owns every local non-adapter OpenMW delta,
+records all 10 P8 overlaps and six merge conflicts, and adds exact verified,
+offline-reusable OpenXR acquisition. Fresh Windows RelWithDebInfo
+`openmw_vr.exe` link and desktop regressions pass. The owner separately approved
+temporary composition Option A: VR excludes desktop-only composition until
+Slice 9.2. No authority, canonical state, protocol, pose, locomotion,
+interaction, or gameplay behavior changed.
 
 The remote-avatar architecture decision was reopened. Legacy TES3MP used real
 dynamic NPC actors and then patched dedicated-player exceptions through 16
@@ -144,14 +152,15 @@ Phase 8 exit on 2026-09-03.
 
 ## Next-session handoff
 
-Read this file and proposed
+Read this file and accepted
 [ADR-0008](adr/ADR-0008-pc-vr-fork-worktree-maintenance-policy.md). Phase 8 is
-accepted and complete at implementation `93690354d1`. Slice 9.1 research and its
-decision packet are complete, but owner approval is pending. Present or resolve
-ADR-0008 Decisions 1 through 3 before selecting a fork, adding a remote,
-creating a branch/worktree/patch target, changing registry schema or production
-code, or choosing VR subsystem behavior. Retain the desktop regression evidence
-and C-R1 boundaries.
+accepted and complete at implementation `93690354d1`. Slice 9.1's approved
+maintenance target and verified candidate are complete on `vnext-vr` at
+`c590e81cc5`; owner implementation acceptance remains. After acceptance, Slice
+9.2 is next, but present its architecture/build options before adding VR
+multiplayer composition. Retain desktop regression evidence and C-R1 boundaries;
+do not choose VR authority, state, pose, locomotion, interaction, or gameplay
+behavior implicitly.
 
 ## Active files
 
@@ -166,17 +175,25 @@ and C-R1 boundaries.
   `scripts/verify_openmw_patch_registry.py`
 - Phase 9 decision packet:
   `docs/vnext/adr/ADR-0008-pc-vr-fork-worktree-maintenance-policy.md`
+- VR target records (on `vnext-vr`): `docs/vnext/OPENMW_VR_PROVENANCE.json`,
+  `docs/vnext/OPENMW_VR_PATCH_REGISTRY.json`, and
+  `scripts/verify_openmw_vr_target.py`
 
 ## Last verified
 
-Slice 9.1 primary-source research resolves the proposed VR pin to
+Slice 9.1 pins the VR source to
 `56a8e01390507375c9c2f2593e1c09e0df88c505`, the OpenXR-SDK tag used by that
 tree to commit `1ca7bec6b531185530c9b4f1e7a50e1fd55e7641`, and its observed source
 archive SHA-256 to
 `afc4c7c59dc0e427f03fc655e84d4394eb2d6070630924a63e547e4055ab816d`.
-The local repository was clean at research start, contains only the `vnext`
-worktree, and has no VR branch or remote. Approval and all Slice 9.1
-implementation/verification remain.
+The explicit merge `0e8e85e0b5` has desktop parent `411c93594b` and exact VR
+parent `56a8e01390`; proof commit `c590e81cc5` records and verifies its complete
+maintenance surface. Repository-owned acquisition passed online and offline
+reuse, and the verified source rebuilt and linked MSVC 19.51 RelWithDebInfo
+`openmw_vr.exe` with SHA-256
+`283e8974ddee1c696381315f02138b624873896a2f7f28653f3a4dae4324bc1c`.
+The VR five-test gate, desktop patch registry, and all 137 desktop Python tests
+pass. Slice 9.1 remains **In Progress** pending owner implementation acceptance.
 
 C-R1 is implemented without copying the legacy actor model. The old transient
 proxy and NPC custom-data initializer delta are removed. A separate renderer
@@ -195,7 +212,8 @@ failure. All 137 repository-owned Python tests, patch-registry verification,
 staged 342-entry provenance with 69 dependency inputs, staged legacy exclusion,
 and diff hygiene pass. The owner accepted this implementation and the shared
 Slices 8.2–8.7 demonstration on 2026-09-03. The Phase 8 exit gate is closed;
-Phase 9 Slice 9.1 is **In Progress** pending ADR-0008 owner approval.
+Phase 9 Slice 9.1 is **In Progress** pending owner acceptance of the verified
+implementation candidate.
 
 Slice 8.7 content-backed demo preflight rebuilt the MSVC 19.51 RelWithDebInfo
 `tes3mp_server.exe` and passed all four focused desktop-harness Python contracts

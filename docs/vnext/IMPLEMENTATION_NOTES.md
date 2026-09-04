@@ -5706,6 +5706,42 @@ only the relevant phase section here.
   - Follow-ups: create the approved target, stop on any new architecture or
     behavior choice, and run the proposed Slice 9.1 acceptance gates.
 
+- 2026-09-03 — Slice 9.1 implementation candidate — **In Progress**
+  - Change: added read-only remote `openmw-vr-upstream` with push URL disabled;
+    created same-repository sibling worktree `TES3MP-vr` on `vnext-vr`; merged
+    exact tag commit `56a8e01390507375c9c2f2593e1c09e0df88c505` in two-parent
+    commit `0e8e85e0b59cd746018b0124754cf18db87b4c20`; and recorded provenance,
+    all 10 P8 overlap paths, all six merge conflicts, complete non-adapter
+    OpenMW delta ownership, and machine verification in
+    `c590e81cc5b5ce3a3175b1d42c680e8f599f2c96`.
+  - Decisions: owner approved merge-composition Option A after the shared
+    `main.cpp` conflict exposed a target-link boundary: desktop composition is
+    excluded under `OPENMW_VR` only until Slice 9.2 adds the approved real VR
+    composition. No authority, canonical state, protocol, pose, input,
+    locomotion, interaction, or gameplay behavior was selected.
+  - Dependency proof: OpenXR-SDK is pinned to commit
+    `1ca7bec6b531185530c9b4f1e7a50e1fd55e7641`, archive SHA-256
+    `afc4c7c59dc0e427f03fc655e84d4394eb2d6070630924a63e547e4055ab816d`,
+    and Apache-2.0 license SHA-256
+    `cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30`.
+    The repository-owned preparer verifies before extraction, fails closed,
+    retries safely, and passed a second `--offline` cache-reuse run.
+  - Build verification: fresh Visual Studio 18 2026 / MSVC 19.51 / Windows SDK
+    10.0.26100 RelWithDebInfo configuration and build from the verified local
+    OpenXR source linked `openmw_vr.exe` (77,351,424 bytes, SHA-256
+    `283e8974ddee1c696381315f02138b624873896a2f7f28653f3a4dae4324bc1c`).
+    The only compiler warning was inherited fork C4244 in
+    `mwvr/vrinputmanager.cpp`. Imported upstream whitespace remains upstream
+    history; all new local staged diffs passed `git diff --check`.
+  - Regression verification: VR verifier plus five acquisition/target tests
+    pass. On authoritative desktop `vnext`, patch-registry verification and all
+    137 repository-owned Python tests pass in 50.977 seconds, including legacy
+    exclusion. Desktop does not depend on the VR remote, worktree, or cache.
+  - Owner review: implementation evidence is ready; Slice 9.1 remains **In
+    Progress** pending explicit owner acceptance.
+  - Follow-ups: accept Slice 9.1, then present Slice 9.2 architecture/build
+    options before adding VR multiplayer composition.
+
 - Head and hand transforms are presentation snapshots associated with a player
   root and authority epoch. They are not persisted as durable world state.
 - Physical reach validation uses the authoritative root plus declared limits;
