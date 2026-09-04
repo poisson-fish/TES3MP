@@ -10,10 +10,10 @@ is the [implementation plan](IMPLEMENTATION_PLAN.md#phase-9--pc-vr-interoperabil
 - Branch: `vnext`
 - Phase 7: **Implemented**
 - Phase 8: **Implemented**
-- Phase 9: **In Progress** (Slice 9.3 implementation acceptance gate)
+- Phase 9: **In Progress** (Slice 9.4 provider/behavior decision gate)
 - Slice 9.1: **Implemented**
 - Slice 9.2: **Implemented**
-- Slice 9.3: **In Progress** (verified candidate pending owner acceptance)
+- Slice 9.3: **Implemented**
 - Slice 8.1: **Implemented**
 - Slice 8.2: **Implemented**
 - Slice 8.3: **Implemented**
@@ -176,8 +176,9 @@ acceptance is recorded. Slice 9.2's ADR-0054 Option A is implemented at
 `54999379a2` and owner-accepted on the VR target at `6945e9bf48`. Slice 9.3's
 approved ADR-0055 A/A/A/A/A package is implemented at `c229946842` and merged
 into `vnext-vr` at `eda058b92e`. All applicable protocol, compatibility,
-boundary, desktop/VR build, and repository gates pass. Obtain explicit owner
-implementation acceptance before Slice 9.4. Retain desktop regression evidence and C-R1 boundaries;
+boundary, desktop/VR build, and repository gates pass; owner implementation
+acceptance is recorded. Inspect Slice 9.4 and present any provider, authority,
+state, or gameplay behavior choices before production code. Retain desktop regression evidence and C-R1 boundaries;
 do not choose VR authority, state, pose, locomotion, interaction, or gameplay
 behavior implicitly.
 
@@ -218,7 +219,8 @@ commit is merged into `vnext-vr` at `eda058b92e`; its full protocol aggregate an
 RelWithDebInfo `openmw.exe` and `openmw_vr.exe` link with SHA-256
 `c53fa7538a1ffc8cdcd88c74ef47127d023c9a72884d9a2dbe820b1093a4fd15` and
 `504910034174f9696488beb69949155cc76b68940871af94a303df377ff89e19`.
-Slice 9.3 remains **In Progress** pending owner implementation acceptance.
+The owner accepted Slice 9.3 implementation on 2026-09-04; it is
+**Implemented**.
 
 Slice 9.2 separates the engine-neutral adapter/client connection from the
 desktop provider target and links the same adapter/session lineage into desktop
