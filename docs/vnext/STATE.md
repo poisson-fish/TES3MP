@@ -5,8 +5,9 @@ Updated: 2026-09-05
 ## Current status
 
 - Phases 0–9: **Complete**
-- Active work: **none**
-- Next pass: **Phase 10 player lifecycle and content identity discovery**
+- Phase 10 discovery: **Complete**
+- Active work: **player/content identity foundation awaiting owner approval**
+- Next pass: **implement the approved identity foundation**
 - Authoritative tracker: [rolling implementation plan](IMPLEMENTATION_PLAN.md)
 - Historical evidence: [implementation notes](IMPLEMENTATION_NOTES.md)
 
@@ -14,6 +15,31 @@ The repository now uses a rolling **Now / Next / Later** workflow. Only the
 active pass is specified in implementation detail. The next few passes are
 tentative, and later work stays at outcome level until evidence makes it timely.
 ADRs and GDRs are required only for consequential, hard-to-reverse decisions.
+
+## Phase 10 discovery result
+
+- Authentication currently produces a new process-local routing principal for
+  every successful password join; it is not a durable player subject.
+- Join allocates independent monotonic process-local session, player, and entity
+  IDs and installs one fixed fixture spawn. Its retained principal list is not
+  pruned when lifecycle expiration removes the player.
+- Disconnect/resume preserves the session/player/entity binding only within the
+  in-memory grace window. Expiration deletes the player; restart restores no
+  player, lifecycle, token, or allocation state.
+- The resume content digest comes from a fixed server-only fixture string. It is
+  not peer-negotiated or tied to the client's actual mapping.
+- Canonical movement accepts only cell-space IDs `7` and `8`; the OpenMW adapter
+  maps those IDs and every remote avatar through three local command-line values.
+- The production boundary is join composition: resolve a stable authenticated
+  player subject and exact manifest context before canonical allocation or
+  reattachment. Protocol state should carry only context-scoped opaque content
+  IDs; OpenMW record names stay in the adapter manifest.
+
+Recommended next increment: a dedicated durable player credential layered after
+ordinary authentication, plus exact manifest-digest negotiation and opaque
+cell/appearance IDs. This changes credential security, durable identity,
+protocol compatibility, and visible avatar selection, so implementation awaits
+owner approval. Alternatives are recorded in the rolling plan.
 
 ## Phase 9 result
 
@@ -50,6 +76,15 @@ work.
 
 ## Last verified
 
+- Phase 10 discovery traced production join allocation, connection/session
+  composition, disconnect/resume/expiration, resume-token context, fixture cell
+  validation, and desktop cell/avatar mapping.
+- Repository search found no canonical player restore path or client/server
+  content-manifest agreement path.
+- No build or runtime test was run: this pass changed documentation only.
+
+Phase 9's last implementation verification remains:
+
 - Shared MSVC 19.51 standalone targets build.
 - Shared transport, protocol-pose, headless-client, adapter, and server
   behavioral executables pass.
@@ -72,15 +107,16 @@ runtime are available.
 ## Next pass
 
 Read the Phase 10 **Now** section in
-[IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md). Begin with a read-only trace of
-join identity, player/entity allocation, fixture avatar mapping, resume, and
-expiration. Do not revive the old preplanned slice ledger.
+[IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md). Obtain the two recorded owner
+choices, then implement the approved narrow identity foundation. Do not broaden
+the pass into character creation, inventory, scripting, moderation, or general
+persistence.
 
 ## Working-tree expectation
 
 Before starting the next pass:
 
-- `vnext` should contain the rolling-plan/status documentation commit;
+- `vnext` should contain the Phase 10 discovery documentation commit;
 - `vnext-vr` should contain the shared Phase 9 merge, VR provider commit, and
   the rolling-plan/status merge;
 - both worktrees should be clean.

@@ -5981,7 +5981,41 @@ only the relevant phase section here.
 
 ## Phase 10 — Player lifecycle and content identity
 
-[Back to the phase tracker](IMPLEMENTATION_PLAN.md#phase-10--player-lifecycle-and-content-identity)
+[Back to the active phase tracker](IMPLEMENTATION_PLAN.md#now)
+
+### 2026-09-05 discovery pass
+
+- Trace: successful password authentication allocates a never-reused
+  process-local routing `PrincipalId`. `AuthenticatedJoinCoordinator` then
+  independently allocates monotonic session/player/entity IDs, installs the
+  fixed interior spawn, and retains the principal after lifecycle expiration.
+- Lifecycle: disconnect removes the active canonical session and retains the
+  player plus session progress in memory; resume restores the same binding with
+  the next generation; exact-deadline expiration removes the player and hidden
+  binding. Resume tokens and all canonical/lifecycle state are process-local.
+- Content: `makePhase7ResumeTokenContext` hashes a fixed fixture string, not a
+  peer-declared manifest. The reducer accepts only cell IDs `7`/`8`; the desktop
+  adapter maps those IDs and a single avatar NPC through local command-line
+  configuration. Player state and snapshots carry no appearance/content record
+  identity.
+- Boundary: stable player-subject lookup and exact content-context agreement
+  belong in join composition before canonical allocation or reattachment.
+  Manifest-scoped opaque IDs cross shared protocol/state; OpenMW record IDs stay
+  in the adapter mapping.
+- Recommended implementation: add a bounded dedicated player credential after
+  ordinary authentication, a server-owned player registry, exact versioned
+  manifest-digest negotiation, one canonical appearance ID, and explicit
+  manifest mappings for the initial cell/worldspace/avatar records. Preserve
+  atomic join/resume behavior and fail closed on credential or content mismatch.
+- Approval required: durable player credential versus account-provider subject
+  versus process-local identity; negotiated opaque manifest IDs versus wire
+  record keys versus the current unverified mapping. These affect credential
+  security, durable identity, compatibility, and player-visible appearance.
+- Verification: read-only inspection of authentication, join, canonical state,
+  lifecycle, server composition, resume context, fixture reducer, protocol
+  handshake/snapshot, and desktop adapter/configuration paths. Repository search
+  found no player restore or content-manifest agreement path. No build or runtime
+  test was run because production code did not change.
 
 - Content identity must not use local file paths. Canonical record references need
   stable manifest context and explicit collision handling.
