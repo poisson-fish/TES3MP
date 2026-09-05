@@ -5,14 +5,14 @@ OpenMW 0.51. It replaces the TES3MP 0.8.x protocol, transport, server, and
 scripting architecture rather than porting those systems forward.
 
 The project is under active development and is not yet a playable replacement
-for TES3MP 0.8.x. Phases 0–6 are complete. Phase 7 is building the first
-end-to-end headless multiplayer flow; disconnect/resume composition and the
-adverse-network test matrix are the remaining slices.
+for TES3MP 0.8.x. Phases 0–9 are complete: the headless, OpenMW desktop, and PC
+VR vertical slices now share one bounded protocol, client runtime, and
+authoritative server path. Phase 10 player/content identity discovery is next.
 
 ## Start here
 
 - [vNext overview](docs/vnext/README.md) — product scope, architecture, current status, compatibility policy, and repository workflow
-- [Implementation plan](docs/vnext/IMPLEMENTATION_PLAN.md) — authoritative phase and slice tracker, decision register, and exit gates
+- [Rolling implementation plan](docs/vnext/IMPLEMENTATION_PLAN.md) — authoritative Now / Next / Later tracker
 - [Implementation notes](docs/vnext/IMPLEMENTATION_NOTES.md) — chronological implementation, verification, and owner-review history
 - [Local baseline build](docs/vnext/LOCAL_BASELINE_BUILD.md) — supported local configure, build, and test workflow
 - [Legacy gameplay inventory](docs/vnext/LEGACY_GAMEPLAY_FEATURE_INVENTORY.md) — reference-only inventory of TES3MP 0.8.x behavior
@@ -28,9 +28,9 @@ The first milestone is a dedicated server with two deterministic headless client
 5. exchange semantic movement commands and authoritative snapshots; and
 6. disconnect, resume within a bounded grace period, and expire cleanly.
 
-The flow must pass deterministic adverse-network and soak tests before Phase 7
-can close. OpenMW desktop integration begins in Phase 8; PC VR interoperability
-follows in Phase 9.
+That first flow, its OpenMW desktop composition, and the PC VR interoperability
+gate are complete. The next pass replaces fixture-only player/content identity
+assumptions without prematurely specifying the rest of the gameplay roadmap.
 
 ## Compatibility
 

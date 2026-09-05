@@ -83,6 +83,7 @@ namespace
             { std::byte{ 7 }, std::byte{ 8 }, std::byte{ 9 } },
         } };
         const std::array<std::byte, 4> snapshot{ std::byte{ 10 }, std::byte{ 11 }, std::byte{ 12 }, std::byte{ 13 } };
+        const std::array<std::byte, 2> pose{ std::byte{ 14 }, std::byte{ 15 } };
         for (const auto& message : reliable)
         {
             if (!check(runtime.send(client, TES3MP::TransportChannel::ReliableOrdered, message)
@@ -94,12 +95,16 @@ namespace
                     == TES3MP::TransportResult::Accepted,
                 "latest-wins channel send failed"))
             return false;
+        if (!check(runtime.send(server, TES3MP::TransportChannel::PresentationLatest, pose)
+                    == TES3MP::TransportResult::Accepted,
+                "presentation-latest channel send failed"))
+            return false;
 
         std::vector<TES3MP::TransportMessage> serverMessages;
         std::vector<TES3MP::TransportMessage> clientMessages;
         if (!check(receiveUntil(runtime, server, reliable.size(), serverMessages), "reliable messages did not arrive"))
             return false;
-        if (!check(receiveUntil(runtime, client, 1, clientMessages), "latest-wins message did not arrive"))
+        if (!check(receiveUntil(runtime, client, 2, clientMessages), "latest-wins messages did not arrive"))
             return false;
         for (std::size_t index = 0; index < reliable.size(); ++index)
         {
@@ -108,9 +113,16 @@ namespace
                     "reliable channel did not preserve message order and boundaries"))
                 return false;
         }
-        return check(clientMessages.size() == 1 && clientMessages[0].channel == TES3MP::TransportChannel::LatestWins
-                && std::ranges::equal(clientMessages[0].bytes, snapshot),
-            "latest-wins channel did not preserve its message boundary");
+        const auto world = std::ranges::find_if(clientMessages, [&](const auto& message) {
+            return message.channel == TES3MP::TransportChannel::LatestWins
+                && std::ranges::equal(message.bytes, snapshot);
+        });
+        const auto presentation = std::ranges::find_if(clientMessages, [&](const auto& message) {
+            return message.channel == TES3MP::TransportChannel::PresentationLatest
+                && std::ranges::equal(message.bytes, pose);
+        });
+        return check(world != clientMessages.end() && presentation != clientMessages.end(),
+            "latest-wins lanes did not preserve their distinct message boundaries");
     }
 
     class FixedClock final : public TES3MP::MonotonicClock

@@ -11,30 +11,15 @@ conditional stretch target.
 
 ## Current status
 
-Phases 0–6 are **Implemented**. Phase 7, the headless end-to-end multiplayer
-slice, is **In Progress**.
+Phases 0–9 are **Complete**. The headless, OpenMW desktop, and PC VR vertical
+slices share one bounded protocol, reusable client session, and authoritative
+server path. Optional OpenXR head/hand samples are isolated presentation data;
+they cannot author canonical movement or gameplay.
 
-| Slice | Outcome | Status |
-|---|---|---|
-| 7.0 | Approve the vertical-slice behavior | **Implemented** |
-| 7.1 | Compose the dedicated server and configuration | **Implemented** |
-| 7.2 | Add the reusable headless client and script driver | **Implemented** |
-| 7.3 | Authenticate, allocate identities, and join | **Implemented** |
-| 7.4 | Transition fixtures and project observations | **Implemented** |
-| 7.5 | Integrate movement and deliver snapshots | **Implemented** |
-| 7.6 | Disconnect, resume, and expire sessions | **In Progress** |
-| 7.7 | Run adverse-network, reconnect, bound, and soak tests | **Not Started** |
-
-Slice 7.6 is governed by accepted
-[`ADR-0045`](adr/ADR-0045-phase7-disconnect-resume-and-expiration-composition.md).
-Failure-atomic resume-token rotation and transactional canonical hide, resume,
-and exact-deadline expiration are implemented. Live join registration and
-failure-atomic disconnect hide/output composition are also wired. Resume
-authentication/output, expiration pumping, and the complete process proof remain.
-
-The [implementation plan](IMPLEMENTATION_PLAN.md) is the authoritative status
-tracker. The [implementation notes](IMPLEMENTATION_NOTES.md) retain detailed
-verification and owner-review history.
+Phase 10 player lifecycle and content identity discovery is next. The
+[rolling implementation plan](IMPLEMENTATION_PLAN.md) is the authoritative
+Now / Next / Later tracker. The [implementation notes](IMPLEMENTATION_NOTES.md)
+retain detailed historical evidence and owner-review history.
 
 ## Product scope
 
@@ -141,18 +126,17 @@ python scripts/verify_vnext_baseline.py
 ```
 
 For local configure, build, and test commands, use
-[`LOCAL_BASELINE_BUILD.md`](LOCAL_BASELINE_BUILD.md). New work follows the active
-implementation-plan slice, preserves dependency boundaries, adds proportionate
-tests, records exact evidence in the implementation notes, refreshes the concise
-[`STATE.md`](STATE.md) handoff snapshot, and leaves the branch buildable.
-Beginning with Phase 4, the complete hosted vNext matrix is a manual phase-exit
-gate and includes macOS x86-64.
+[`LOCAL_BASELINE_BUILD.md`](LOCAL_BASELINE_BUILD.md). New work follows one active
+rolling pass, preserves dependency boundaries, adds proportionate tests,
+refreshes the concise [`STATE.md`](STATE.md) handoff, and leaves the branch
+buildable. Full hosted/platform matrices are milestone gates rather than a
+requirement for every small pass.
 
 ## Documentation map
 
-- [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md): current phase/slice status, ordered work, decision registers, and exit gates
-- [`STATE.md`](STATE.md): concise current-slice handoff; read first in a new session
-- [`IMPLEMENTATION_NOTES.md`](IMPLEMENTATION_NOTES.md): chronological evidence, verification commands, approvals, and follow-ups
+- [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md): rolling Now / Next / Later status and outcome tracker
+- [`STATE.md`](STATE.md): concise current-pass handoff; read first in a new session
+- [`IMPLEMENTATION_NOTES.md`](IMPLEMENTATION_NOTES.md): historical chronological evidence, commands, approvals, and follow-ups
 - [`LOCAL_BASELINE_BUILD.md`](LOCAL_BASELINE_BUILD.md): local build and test workflow
 - [`LEGACY_GAMEPLAY_FEATURE_INVENTORY.md`](LEGACY_GAMEPLAY_FEATURE_INVENTORY.md): historical gameplay reference only
 - [`PRE_CUTOVER_PROVENANCE.md`](PRE_CUTOVER_PROVENANCE.md): historical cutover provenance

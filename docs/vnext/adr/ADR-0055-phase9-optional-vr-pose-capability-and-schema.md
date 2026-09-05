@@ -220,8 +220,10 @@ merge `eda058b92e` consumes it unchanged. Full desktop and VR protocol aggregate
 all 145 desktop repository Python tests, 31 focused VR protocol/safety/proof
 tests, exact pinned FlatBuffers regeneration, desktop and VR boundary verifiers,
 and both RelWithDebInfo engine links pass. Runtime capability advertising,
-dispatch, transport mapping, authority, persistence, and gameplay behavior remain
-absent. The owner accepted the verified slice implementation on 2026-09-04.
+dispatch, transport mapping, and authority checks were subsequently implemented
+in the Phase 9 rolling pose pass at `617b8bc3a1`. Pose remains absent from
+canonical state, persistence, replay, and gameplay authority. The owner accepted
+the verified protocol slice implementation on 2026-09-04.
 
 ## Review and replacement triggers
 

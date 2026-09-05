@@ -5667,7 +5667,33 @@ only the relevant phase section here.
 
 ## Phase 9 — PC VR interoperability gate
 
-[Back to the phase tracker](IMPLEMENTATION_PLAN.md#phase-9--pc-vr-interoperability-gate)
+[Back to the rolling tracker](IMPLEMENTATION_PLAN.md#completed-foundation)
+
+- 2026-09-05 — Phase 9 rolling closure — **Complete**
+  - Change: replaced the remaining 9.4–9.7 ceremony with three implementation
+    passes: VR provider composition, the capability-gated sampled pose loop, and
+    desktop/VR interoperability closure. Shared commit `617b8bc3a1` adds the
+    isolated presentation lane, 20 Hz client sampling, runtime dispatch,
+    authority/cell/recency-checked server relay, resume clearing, desktop safe
+    fallback, and behavioral coverage. VR commit `af52e60659` removes the dead
+    compile guard, links a distinct provider leaf that reuses shared semantic /
+    canonical provider source, and converts fork-local OpenXR head/hand tracking
+    into bounded pose values.
+  - Decisions: ADR-0056 Option A and GDR-0017 A/A are accepted through the
+    owner's direction to finish the phase using rolling passes. Pose remains
+    ephemeral and non-authoritative. Remote articulated skeleton rendering,
+    loss blending, compression hardening, and reach semantics remain later
+    movement/presentation work.
+  - Verification: shared MSVC 19.51 standalone build; focused transport,
+    protocol-pose, headless-client, adapter, and server executables; VR
+    RelWithDebInfo provider and `openmw_vr.exe` link; the same focused
+    executables in the VR tree; Phase 9 source/boundary tests; VR registry and
+    provenance verification. The VR executable SHA-256 is
+    `2a17b1d43abcfca433cbe78bf87d1c6c06a03a178bbf68dfaba8819a53b3baf2`.
+  - Limit: no licensed-content/hardware VR visual run was available. No claim
+    is made for remote skeleton articulation, which remains outside this gate.
+  - Workflow: `IMPLEMENTATION_PLAN.md` is now the short authoritative Now /
+    Next / Later tracker; this file remains historical evidence only.
 
 - 2026-09-03 — Slice 9.1 — **In Progress**
   - Change: completed read-only maintained-fork research and prepared the full

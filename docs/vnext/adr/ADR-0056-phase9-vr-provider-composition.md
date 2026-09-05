@@ -1,6 +1,6 @@
 # ADR-0056: Phase 9 VR provider composition
 
-Status: **Proposed**
+Status: **Implemented**
 
 Date opened: 2026-09-04
 
@@ -109,4 +109,15 @@ needs a new engine hook, or OpenMW gains a supported plugin/provider facility.
 
 ## Owner approval
 
-Pending. No option or acceptance test is approved yet.
+Approved through the 2026-09-04 direction to migrate to rolling passes and
+finish Phase 9. Option A is implemented and the old temporary unavailable-
+provider path is removed.
+
+## Implementation evidence
+
+Option A is implemented on the PC VR branch at `af52e60659`. The distinct
+`TES3MP::OpenMWVrProviders` leaf compiles the shared semantic/canonical provider
+source and adds only a fork-local OpenXR pose sampler. `openmw_vr.exe` links in
+RelWithDebInfo, the focused adapter/runtime/server/transport executables pass,
+the Phase 9 composition tests pass, and the VR patch/provenance verifier records
+P9-003.

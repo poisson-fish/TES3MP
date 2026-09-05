@@ -1,6 +1,6 @@
 # GDR-0017: Phase 9 VR fixture input and presentation
 
-Status: **Proposed**
+Status: **Implemented**
 
 Date opened: 2026-09-04
 
@@ -114,4 +114,16 @@ gameplay registration.
 
 ## Owner approval
 
-Pending. Neither decision nor the proposed scenarios are approved yet.
+Approved through the 2026-09-04 direction to migrate to rolling passes and
+finish Phase 9. The recommended A/A fixture behavior is implemented.
+
+## Implementation evidence
+
+Movement Decision A and canonical-presentation Decision A are implemented. The
+VR leaf reuses the exact desktop semantic action/root-yaw and canonical
+presentation source, so raw head/hand tracking cannot change movement commands.
+The later Phase 9 pose pass adds a capability-gated, 20 Hz presentation stream
+on an isolated queue lane; desktop presentation safely ignores articulated pose
+and production skeleton articulation remains later movement/presentation work.
+The shared runtime implementation is `617b8bc3a1`; VR composition and OpenXR
+sampling are `af52e60659`.
