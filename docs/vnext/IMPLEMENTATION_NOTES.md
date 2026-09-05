@@ -5686,10 +5686,11 @@ only the relevant phase section here.
     movement/presentation work.
   - Verification: shared MSVC 19.51 standalone build; focused transport,
     protocol-pose, headless-client, adapter, and server executables; VR
-    RelWithDebInfo provider and `openmw_vr.exe` link; the same focused
-    executables in the VR tree; Phase 9 source/boundary tests; VR registry and
-    provenance verification. The VR executable SHA-256 is
-    `2a17b1d43abcfca433cbe78bf87d1c6c06a03a178bbf68dfaba8819a53b3baf2`.
+    networking-enabled RelWithDebInfo provider and `openmw_vr.exe` link; the
+    same focused executables plus encrypted GNS loopback in that VR build;
+    Phase 9 source/boundary tests; VR registry and provenance verification. The
+    VR executable SHA-256 is
+    `82bfc2946c29dee76ed54d2b465601a59e0fbd5ef921706136865f3754d13bbd`.
   - Limit: no licensed-content/hardware VR visual run was available. No claim
     is made for remote skeleton articulation, which remains outside this gate.
   - Workflow: `IMPLEMENTATION_PLAN.md` is now the short authoritative Now /

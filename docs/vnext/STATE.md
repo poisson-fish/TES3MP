@@ -53,12 +53,14 @@ work.
 - Shared MSVC 19.51 standalone targets build.
 - Shared transport, protocol-pose, headless-client, adapter, and server
   behavioral executables pass.
-- PC VR RelWithDebInfo `openmw_vr.exe` builds and links.
-- The same focused runtime/server/transport tests pass from the VR tree.
+- PC VR RelWithDebInfo `openmw_vr.exe` builds and links with the production GNS
+  transport enabled.
+- The same focused runtime/server/transport tests, including encrypted GNS
+  loopback, pass from that networking-enabled VR build.
 - Phase 9 composition/protocol tests and the OpenMW-VR provenance/patch verifier
   pass.
 - Built VR executable SHA-256:
-  `2a17b1d43abcfca433cbe78bf87d1c6c06a03a178bbf68dfaba8819a53b3baf2`.
+  `82bfc2946c29dee76ed54d2b465601a59e0fbd5ef921706136865f3754d13bbd`.
 - Built desktop executable SHA-256:
   `32ce0139a805749c1521e4810eb1db4c816474ee5bca8a7e795e52c61f93c978`.
 
