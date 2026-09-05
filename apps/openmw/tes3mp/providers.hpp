@@ -3,6 +3,7 @@
 
 #include <tes3mp/client_session.hpp>
 #include <tes3mp/protocol_exchange.hpp>
+#include <tes3mp/protocol_pose.hpp>
 
 #include <optional>
 #include <span>
@@ -36,6 +37,13 @@ namespace TES3MP::OpenMWAdapter
         std::optional<FixtureCellTransition> transition;
     };
 
+    struct LocalVrPose
+    {
+        VrTrackedTransform head;
+        std::optional<VrTrackedTransform> leftHand;
+        std::optional<VrTrackedTransform> rightHand;
+    };
+
     class ConnectionStatusProvider
     {
     public:
@@ -58,6 +66,13 @@ namespace TES3MP::OpenMWAdapter
         virtual std::optional<PlayerMotionIntent> sampleCurrentIntent() noexcept = 0;
     };
 
+    class VrPoseInputProvider
+    {
+    public:
+        virtual ~VrPoseInputProvider() = default;
+        virtual std::optional<LocalVrPose> sampleVrPose() noexcept = 0;
+    };
+
     class PresentationProvider
     {
     public:
@@ -66,6 +81,10 @@ namespace TES3MP::OpenMWAdapter
             std::span<const ObservedPlayer> observedPlayers, bool allowLocalCellCorrection,
             MonotonicInstant receivedAt) noexcept = 0;
         virtual ProviderResult advance(MonotonicInstant now) noexcept = 0;
+        virtual ProviderResult applyVrPose(const ServerVrPoseSnapshot&, MonotonicInstant) noexcept
+        {
+            return ProviderResult::Accepted;
+        }
         virtual void clear() noexcept = 0;
     };
 }

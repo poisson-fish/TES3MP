@@ -21,6 +21,7 @@ namespace
         TES3MP::TransportResult sendResult = TES3MP::TransportResult::Accepted;
         bool blockReliable = false;
         bool blockLatest = false;
+        bool blockPresentation = false;
         bool closed = false;
         std::vector<TES3MP::TransportMessage> sent;
 
@@ -41,7 +42,8 @@ namespace
             TES3MP::TransportConnectionId, TES3MP::TransportChannel channel, std::span<const std::byte> bytes) override
         {
             if ((channel == TES3MP::TransportChannel::ReliableOrdered && blockReliable)
-                || (channel == TES3MP::TransportChannel::LatestWins && blockLatest))
+                || (channel == TES3MP::TransportChannel::LatestWins && blockLatest)
+                || (channel == TES3MP::TransportChannel::PresentationLatest && blockPresentation))
                 return TES3MP::TransportResult::WouldBlock;
             if (sendResult != TES3MP::TransportResult::Accepted)
                 return sendResult;
@@ -132,6 +134,26 @@ namespace
                     && runtime.sent[2].bytes[0] == std::byte{ 19 },
                 "latest-wins coalescing failed")
             && check(queue.reliableMessages() == 0 && !queue.hasLatest(), "sent values retained");
+    }
+
+    bool presentationIsCoalescedAndIndependent()
+    {
+        TES3MP::OutboundTransportQueue queue(policy());
+        FakeRuntime runtime;
+        const auto connection = TES3MP::TransportConnectionId::initial();
+        runtime.blockLatest = true;
+        queue.enqueue(TES3MP::TransportChannel::LatestWins, bytes(5));
+        queue.enqueue(TES3MP::TransportChannel::PresentationLatest, bytes(6));
+        queue.enqueue(TES3MP::TransportChannel::PresentationLatest, bytes(7));
+        const auto result = queue.pump(runtime, connection, 0);
+        return check(result == TES3MP::OutboundPumpResult::Progress,
+                   "blocked world snapshot prevented presentation progress")
+            && check(queue.hasWorldLatest() && !queue.hasPresentationLatest(),
+                "independent latest-wins slots did not retain only the blocked world snapshot")
+            && check(runtime.sent.size() == 1
+                    && runtime.sent[0].channel == TES3MP::TransportChannel::PresentationLatest
+                    && runtime.sent[0].bytes[0] == std::byte{ 7 },
+                "presentation latest-wins coalescing failed");
     }
 
     bool pairAdmissionIsAtomic()
@@ -279,7 +301,8 @@ namespace
 
 int main()
 {
-    return policyAndBounds() && connectionSetBounds() && orderingCoalescingAndFairness() && pairAdmissionIsAtomic()
+    return policyAndBounds() && connectionSetBounds() && orderingCoalescingAndFairness()
+            && presentationIsCoalescedAndIndependent() && pairAdmissionIsAtomic()
             && limitsRateAndTime() && multiConnectionAdmissionIsAtomic()
             && isolatedSlowPeerEviction() && telemetryIsExactBoundedAndIsolated()
         ? 0

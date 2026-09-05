@@ -9,6 +9,8 @@ namespace TES3MP::ServerApp
     {
         if (observation.direction != TransportTelemetryDirection::Outbound)
             return TransportTelemetryResult::Accepted;
+        if (observation.channel == TransportChannel::PresentationLatest)
+            return TransportTelemetryResult::Accepted;
         const auto channel = observation.channel == TransportChannel::ReliableOrdered ? 0u : 1u;
         if (observation.kind == TransportTelemetryKind::QueuedMessages)
         {

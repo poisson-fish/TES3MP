@@ -359,8 +359,8 @@ class TES3MPTargetBoundaryTests(unittest.TestCase):
             )
         self.assertIn("SteamAPI_ISteamNetworkingUtils_AllocateMessage", adapter)
         self.assertNotIn("SteamNetworkingUtils()->AllocateMessage", adapter)
-        self.assertIn("priorities{ 0, 0 }", adapter)
-        self.assertIn("weights{ 1, 1 }", adapter)
+        self.assertIn("priorities{ 0, 0, 0 }", adapter)
+        self.assertIn("weights{ 1, 1, 1 }", adapter)
         self.assertIn("k_nSteamNetworkingSend_Reliable", adapter)
         self.assertIn("k_nSteamNetworkingSend_UnreliableNoDelay", adapter)
 

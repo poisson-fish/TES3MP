@@ -46,22 +46,26 @@ class Phase9PoseProtocolTests(unittest.TestCase):
         ):
             self.assertNotIn(forbidden, (client + server).lower())
 
-    def test_runtime_advertising_dispatch_and_transport_mapping_remain_disabled(self):
-        production = "\n".join(
-            path.read_text(encoding="utf-8")
-            for path in (
-                ROOT / "apps" / "openmw" / "tes3mp" / "adapter.cpp",
-                ROOT / "apps" / "openmw" / "tes3mp" / "client_connection.cpp",
-                ROOT / "apps" / "tes3mp-headless-client" / "main.cpp",
-                ROOT / "apps" / "tes3mp-server" / "main.cpp",
-                TES3MP / "client_session" / "client_session_runtime.cpp",
-                TES3MP / "transport" / "transport.cpp",
-            )
+    def test_runtime_pose_path_is_capability_gated_and_transport_isolated(self):
+        adapter = (ROOT / "apps" / "openmw" / "tes3mp" / "adapter.cpp").read_text(
+            encoding="utf-8"
         )
-        self.assertNotIn("vrPoseCapability", production)
-        self.assertNotIn("MessageKind::ClientVrPoseSample", production)
-        self.assertNotIn("MessageKind::ServerVrPoseSnapshot", production)
-        self.assertNotIn("case MessageClass::PresentationSample", production)
+        server = (ROOT / "apps" / "tes3mp-server" / "server_application.cpp").read_text(
+            encoding="utf-8"
+        )
+        transport = (TES3MP / "transport" / "transport.cpp").read_text(
+            encoding="utf-8"
+        )
+        headless = (ROOT / "apps" / "tes3mp-headless-client" / "main.cpp").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("poseNegotiated", adapter)
+        self.assertIn("queuePoseSample", adapter)
+        self.assertIn("supportsPose", server)
+        self.assertIn("classifyPoseSample", server)
+        self.assertIn("case MessageClass::PresentationSample", transport)
+        self.assertIn("TransportChannel::PresentationLatest", transport)
+        self.assertNotIn("vrPoseCapability", headless)
 
     def test_pose_codec_target_has_only_protocol_dependencies(self):
         cmake = (TES3MP / "CMakeLists.txt").read_text(encoding="utf-8")

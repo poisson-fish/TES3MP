@@ -1,6 +1,8 @@
 #include "adapter.hpp"
 #include "movement_mapping.hpp"
 
+#include <algorithm>
+#include <array>
 #include <limits>
 #include <ranges>
 
@@ -9,12 +11,21 @@ namespace TES3MP::OpenMWAdapter
     namespace
     {
         constexpr std::uint64_t RetryIntervalNanoseconds = 1'000'000'000;
+        constexpr std::uint64_t PoseSampleIntervalNanoseconds = 50'000'000;
 
         ClientHello makeClientHello()
         {
             auto versions = std::get<ProtocolVersionRange>(ProtocolVersionRange::create(1, 0, 0));
-            auto offer = std::get<CapabilityOffer>(CapabilityOffer::create(std::move(versions), {}, {}));
+            const std::array optional{ vrPoseCapability() };
+            auto offer = std::get<CapabilityOffer>(CapabilityOffer::create(std::move(versions), optional, {}));
             return ClientHello::fromOffer(std::move(offer));
+        }
+
+        bool poseNegotiated(const ClientSessionRuntime& runtime) noexcept
+        {
+            const auto& hello = runtime.session().stateMachine().negotiatedHello();
+            return hello && std::binary_search(
+                hello->negotiatedCapabilities().begin(), hello->negotiatedCapabilities().end(), vrPoseCapability());
         }
 
         struct ResumeContinuity
@@ -60,7 +71,7 @@ namespace TES3MP::OpenMWAdapter
             Coordinator(std::unique_ptr<TransportRuntime> transport, std::unique_ptr<MonotonicClock> clock,
                 std::unique_ptr<ClientSessionRuntime> runtime, ReconnectConfiguration reconnect,
                 SemanticInputProvider& input, PresentationProvider& presentation, ConnectionStatusProvider& status,
-                ConnectionControlProvider* control) noexcept
+                ConnectionControlProvider* control, VrPoseInputProvider* poseInput) noexcept
                 : mTransport(std::move(transport))
                 , mClock(std::move(clock))
                 , mRuntime(std::move(runtime))
@@ -69,6 +80,7 @@ namespace TES3MP::OpenMWAdapter
                 , mPresentation(presentation)
                 , mStatus(status)
                 , mControl(control)
+                , mPoseInput(poseInput)
             {
             }
 
@@ -186,6 +198,23 @@ namespace TES3MP::OpenMWAdapter
                         mReady = true;
                     }
                 }
+                if (snapshot)
+                {
+                    for (const auto& pose : advanced.poseSnapshots)
+                    {
+                        const auto observed = std::ranges::find_if(snapshot->view().entries(), [&](const auto& entry) {
+                            return entry.playerId() == pose.sourcePlayerId()
+                                && entry.entityId() == pose.rootEntityId()
+                                && entry.authorityEpoch() == pose.rootAuthorityEpoch();
+                        });
+                        if (observed == snapshot->view().entries().end()
+                            || mPresentation.applyVrPose(pose, now) != ProviderResult::Accepted)
+                        {
+                            closeForProviderFailure(ProviderResult::PresentationFailed);
+                            return;
+                        }
+                    }
+                }
                 if (mPresentation.advance(now) != ProviderResult::Accepted)
                 {
                     closeForProviderFailure(ProviderResult::PresentationFailed);
@@ -228,6 +257,36 @@ namespace TES3MP::OpenMWAdapter
                         const auto queued = mRuntime->queueMotionIntent(std::move(*intent));
                         if (queued.result != ClientRuntimeResult::Accepted || !queued.sequence
                             || !mMotion.markQueued(*queued.sequence))
+                        {
+                            closeTerminal(ConnectionStatus::TransportFailed);
+                            return;
+                        }
+                    }
+                    if (mPoseInput && poseNegotiated(*mRuntime)
+                        && (!mNextPoseSample || now >= *mNextPoseSample))
+                    {
+                        if (auto pose = mPoseInput->sampleVrPose())
+                        {
+                            const auto sequence = mPoseSequence ? mPoseSequence->next()
+                                                                : std::optional(PoseSampleSequence::initial());
+                            if (!sequence
+                                || mRuntime->queuePoseSample(ClientVrPoseSample(
+                                       snapshot->header().targetSessionId(),
+                                       snapshot->header().targetSessionGeneration(), self->entityId(),
+                                       self->authorityEpoch(), *sequence, pose->head, pose->leftHand,
+                                       pose->rightHand))
+                                    != ClientRuntimeResult::Accepted)
+                            {
+                                closeTerminal(ConnectionStatus::TransportFailed);
+                                return;
+                            }
+                            mPoseSequence = *sequence;
+                        }
+                        if (now.nanoseconds()
+                            <= std::numeric_limits<std::uint64_t>::max() - PoseSampleIntervalNanoseconds)
+                            mNextPoseSample = MonotonicInstant::fromNanoseconds(
+                                now.nanoseconds() + PoseSampleIntervalNanoseconds);
+                        else
                         {
                             closeTerminal(ConnectionStatus::TransportFailed);
                             return;
@@ -283,6 +342,8 @@ namespace TES3MP::OpenMWAdapter
                 }
                 mPresentation.clear();
                 mMotion = {};
+                mPoseSequence.reset();
+                mNextPoseSample.reset();
                 mPendingCellTransition.reset();
                 mDeferredCellTransition.reset();
                 mReady = false;
@@ -384,12 +445,15 @@ namespace TES3MP::OpenMWAdapter
             PresentationProvider& mPresentation;
             ConnectionStatusProvider& mStatus;
             ConnectionControlProvider* mControl = nullptr;
+            VrPoseInputProvider* mPoseInput = nullptr;
             bool mClosed = false;
             bool mReady = false;
             bool mResuming = false;
             std::optional<CommandSequence> mPendingCellTransition;
             std::optional<FixtureCellTransition> mDeferredCellTransition;
             MotionIntentTracker mMotion;
+            std::optional<PoseSampleSequence> mPoseSequence;
+            std::optional<MonotonicInstant> mNextPoseSample;
             std::optional<ResumeToken> mResumeToken;
             std::optional<MonotonicInstant> mTokenDeadline;
             std::optional<SessionGeneration> mAttemptGeneration;
@@ -402,11 +466,11 @@ namespace TES3MP::OpenMWAdapter
     std::unique_ptr<EngineCoordinator> makeCoordinator(std::unique_ptr<TransportRuntime> transport,
         std::unique_ptr<MonotonicClock> clock, std::unique_ptr<ClientSessionRuntime> runtime,
         ReconnectConfiguration reconnect, SemanticInputProvider& input, PresentationProvider& presentation,
-        ConnectionStatusProvider& status, ConnectionControlProvider* control) noexcept
+        ConnectionStatusProvider& status, ConnectionControlProvider* control, VrPoseInputProvider* poseInput) noexcept
     {
         if (!transport || !clock || !runtime)
             return {};
         return std::make_unique<Coordinator>(std::move(transport), std::move(clock), std::move(runtime),
-            std::move(reconnect), input, presentation, status, control);
+            std::move(reconnect), input, presentation, status, control, poseInput);
     }
 }

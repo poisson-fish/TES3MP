@@ -37,11 +37,16 @@ namespace
             TES3MP::LinearVelocity3(velocity, 0, 0));
     }
 
-    TES3MP::ServerHello serverHello()
+    TES3MP::ServerHello serverHello(bool pose = false)
     {
         auto versions = std::get<TES3MP::ProtocolVersionRange>(TES3MP::ProtocolVersionRange::create(1, 0, 0));
-        auto client = std::get<TES3MP::CapabilityOffer>(TES3MP::CapabilityOffer::create(versions, {}, {}));
-        auto server = std::get<TES3MP::CapabilityOffer>(TES3MP::CapabilityOffer::create(std::move(versions), {}, {}));
+        const std::array poseCapabilities{ TES3MP::vrPoseCapability() };
+        const std::span<const TES3MP::CapabilityId> capabilities
+            = pose ? std::span<const TES3MP::CapabilityId>(poseCapabilities) : std::span<const TES3MP::CapabilityId>{};
+        auto client = std::get<TES3MP::CapabilityOffer>(
+            TES3MP::CapabilityOffer::create(versions, capabilities, {}));
+        auto server = std::get<TES3MP::CapabilityOffer>(
+            TES3MP::CapabilityOffer::create(std::move(versions), capabilities, {}));
         auto negotiated = TES3MP::negotiateClientHello(TES3MP::ClientHello::fromOffer(std::move(client)), server);
         return std::get<TES3MP::ServerHello>(std::move(negotiated));
     }
@@ -232,10 +237,32 @@ namespace
             ++advances;
             return TES3MP::OpenMWAdapter::ProviderResult::Accepted;
         }
+        TES3MP::OpenMWAdapter::ProviderResult applyVrPose(
+            const TES3MP::ServerVrPoseSnapshot&, TES3MP::MonotonicInstant) noexcept override
+        {
+            ++poses;
+            return TES3MP::OpenMWAdapter::ProviderResult::Accepted;
+        }
         void clear() noexcept override { ++clears; }
         unsigned calls = 0;
         unsigned advances = 0;
         unsigned clears = 0;
+        unsigned poses = 0;
+    };
+
+    class PoseInput final : public TES3MP::OpenMWAdapter::VrPoseInputProvider
+    {
+    public:
+        std::optional<TES3MP::OpenMWAdapter::LocalVrPose> sampleVrPose() noexcept override
+        {
+            ++calls;
+            const auto offset = *TES3MP::VrPoseOffset3::create(1, 2, 3);
+            const auto zero = TES3MP::Turn32::fromValue(0);
+            return TES3MP::OpenMWAdapter::LocalVrPose{
+                TES3MP::VrTrackedTransform(offset, TES3MP::Orientation3(zero, zero, zero)), std::nullopt,
+                std::nullopt };
+        }
+        unsigned calls = 0;
     };
 
     class Status final : public TES3MP::OpenMWAdapter::ConnectionStatusProvider
@@ -410,6 +437,7 @@ int main()
     Presentation reconnectPresentation;
     Status reconnectStatus;
     DisconnectOnce disconnect;
+    PoseInput poseInput;
     auto reconnectTransport = std::make_unique<IdleTransport>();
     auto* reconnectTransportObserver = reconnectTransport.get();
     reconnectTransportObserver->acceptConnections = true;
@@ -419,7 +447,9 @@ int main()
         *reconnectTransport, *reconnectClock, timeouts, SessionGeneration::initial(), outbound);
     auto reconnectRuntime = std::get<std::unique_ptr<ClientSessionRuntime>>(std::move(reconnectCreated));
     auto versions = std::get<ProtocolVersionRange>(ProtocolVersionRange::create(1, 0, 0));
-    auto offer = std::get<CapabilityOffer>(CapabilityOffer::create(std::move(versions), {}, {}));
+    const std::array poseCapabilities{ vrPoseCapability() };
+    auto offer = std::get<CapabilityOffer>(
+        CapabilityOffer::create(std::move(versions), poseCapabilities, {}));
     const std::array passwordBytes{ std::byte{ 1 } };
     auto password = AuthenticationMaterial::create(passwordBytes);
     require(password
@@ -427,9 +457,10 @@ int main()
                endpoint, ClientHello::fromOffer(std::move(offer)), AuthenticationRequest::join(std::move(*password)))
             == HeadlessClientResult::Accepted);
     auto reconnectCoordinator = makeCoordinator(std::move(reconnectTransport), std::move(reconnectClock),
-        std::move(reconnectRuntime), reconnect, reconnectInput, reconnectPresentation, reconnectStatus, &disconnect);
+        std::move(reconnectRuntime), reconnect, reconnectInput, reconnectPresentation, reconnectStatus, &disconnect,
+        &poseInput);
     reconnectCoordinator->frame(0.01f);
-    auto helloPayload = encodeServerHello(serverHello());
+    auto helloPayload = encodeServerHello(serverHello(true));
     reconnectTransportObserver->enqueue(
         MessageClass::SessionControl, MessageKind::ServerHello, helloPayload, TransportChannel::ReliableOrdered);
     reconnectCoordinator->frame(0.01f);
@@ -441,8 +472,19 @@ int main()
     auto initialSnapshotPayload = encodeLatestWinsSnapshot(initialSnapshot);
     reconnectTransportObserver->enqueue(MessageClass::LatestWinsSnapshot, MessageKind::LatestWinsSnapshot,
         initialSnapshotPayload, TransportChannel::LatestWins);
+    const auto zero = Turn32::fromValue(0);
+    const auto head = VrTrackedTransform(*VrPoseOffset3::create(4, 5, 6), Orientation3(zero, zero, zero));
+    const auto remotePose = ServerVrPoseSnapshot(value<SessionId>(1), SessionGeneration::initial(),
+        value<PlayerId>(1), value<SessionId>(1), SessionGeneration::initial(), value<EntityId>(1),
+        AuthorityEpoch::initial(), PoseSampleSequence::initial(), head, std::nullopt, std::nullopt);
+    reconnectTransportObserver->enqueue(MessageClass::PresentationSample, MessageKind::ServerVrPoseSnapshot,
+        encodeServerVrPoseSnapshot(remotePose), TransportChannel::PresentationLatest);
     reconnectCoordinator->frame(0.01f);
-    require(reconnectPresentation.calls == 1);
+    require(reconnectPresentation.calls == 1 && reconnectPresentation.poses == 1 && poseInput.calls == 1);
+    require(reconnectTransportObserver->sentChannel == TransportChannel::PresentationLatest);
+    const auto sentPoseFrame = decodeProtocolFrame(reconnectTransportObserver->sent);
+    require(std::holds_alternative<DecodedFrame>(sentPoseFrame)
+        && std::get<DecodedFrame>(sentPoseFrame).messageKind() == MessageKind::ClientVrPoseSample);
 
     reconnectTransportObserver->acceptConnections = false;
     reconnectCoordinator->frame(0.01f);

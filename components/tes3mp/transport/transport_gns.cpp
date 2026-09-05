@@ -44,7 +44,8 @@ namespace
 
     constexpr std::uint16_t ReliableOrderedLane = 0;
     constexpr std::uint16_t LatestWinsLane = 1;
-    constexpr int TransportLaneCount = 2;
+    constexpr std::uint16_t PresentationLatestLane = 2;
+    constexpr int TransportLaneCount = 3;
     TES3MP::NullTransportTelemetrySink sNullTransportTelemetry;
 
     std::optional<std::uint16_t> laneFor(TES3MP::TransportChannel channel)
@@ -55,6 +56,8 @@ namespace
                 return ReliableOrderedLane;
             case TES3MP::TransportChannel::LatestWins:
                 return LatestWinsLane;
+            case TES3MP::TransportChannel::PresentationLatest:
+                return PresentationLatestLane;
         }
         return std::nullopt;
     }
@@ -65,6 +68,8 @@ namespace
             return TES3MP::TransportChannel::ReliableOrdered;
         if (lane == LatestWinsLane)
             return TES3MP::TransportChannel::LatestWins;
+        if (lane == PresentationLatestLane)
+            return TES3MP::TransportChannel::PresentationLatest;
         return std::nullopt;
     }
 
@@ -1017,8 +1022,8 @@ namespace
 
         bool configureChannels(HSteamNetConnection handle)
         {
-            const std::array<int, TransportLaneCount> priorities{ 0, 0 };
-            const std::array<std::uint16_t, TransportLaneCount> weights{ 1, 1 };
+            const std::array<int, TransportLaneCount> priorities{ 0, 0, 0 };
+            const std::array<std::uint16_t, TransportLaneCount> weights{ 1, 1, 1 };
             return SteamAPI_ISteamNetworkingSockets_ConfigureConnectionLanes(
                        sockets(), handle, TransportLaneCount, priorities.data(), weights.data())
                 == k_EResultOK;
@@ -1201,7 +1206,7 @@ namespace
             if (kindIndex >= mCounters.size())
                 return;
             const std::size_t directionIndex = direction == TES3MP::TransportTelemetryDirection::Outbound ? 0 : 1;
-            const std::size_t channelIndex = channel == TES3MP::TransportChannel::ReliableOrdered ? 0 : 1;
+            const std::size_t channelIndex = static_cast<std::size_t>(channel) - 1;
             auto& value = mCounters[kindIndex][directionIndex][channelIndex];
             value = TES3MP::saturatingTelemetryAdd(value, 1);
             (void)mTelemetry->tryRecord({ kind, direction, channel, value });
@@ -1232,12 +1237,16 @@ namespace
                 gauge(TES3MP::TransportTelemetryKind::PendingBytes, TES3MP::TransportChannel::LatestWins,
                     lanes[LatestWinsLane].m_cbPendingUnreliable);
                 gauge(TES3MP::TransportTelemetryKind::UnacknowledgedBytes, TES3MP::TransportChannel::LatestWins, 0);
+                gauge(TES3MP::TransportTelemetryKind::PendingBytes, TES3MP::TransportChannel::PresentationLatest,
+                    lanes[PresentationLatestLane].m_cbPendingUnreliable);
+                gauge(TES3MP::TransportTelemetryKind::UnacknowledgedBytes,
+                    TES3MP::TransportChannel::PresentationLatest, 0);
             }
         }
 
         TES3MP::TransportLimits mLimits;
         TES3MP::TransportTelemetrySink* mTelemetry = nullptr;
-        std::array<std::array<std::array<std::uint64_t, 2>, 2>, 7> mCounters{};
+        std::array<std::array<std::array<std::uint64_t, 3>, 2>, 7> mCounters{};
         std::optional<TES3MP::ListenerId> mNextListener = TES3MP::ListenerId::initial();
         std::optional<TES3MP::ConnectAttemptId> mNextAttempt = TES3MP::ConnectAttemptId::initial();
         std::optional<TES3MP::TransportConnectionId> mNextConnection = TES3MP::TransportConnectionId::initial();

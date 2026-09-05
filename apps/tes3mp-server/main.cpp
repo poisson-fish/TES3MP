@@ -8,6 +8,7 @@
 #include <tes3mp/server_authentication.hpp>
 #include <tes3mp/transport_gns.hpp>
 
+#include <array>
 #include <csignal>
 #include <fstream>
 #include <iostream>
@@ -104,7 +105,8 @@ int main(int argc, char** argv)
     auto versions = std::get<TES3MP::ProtocolVersionRange>(TES3MP::ProtocolVersionRange::create(
         TES3MP::ServerApp::Phase7ProtocolMajor, TES3MP::ServerApp::Phase7ProtocolMinor,
         TES3MP::ServerApp::Phase7ProtocolPatch));
-    auto offer = TES3MP::CapabilityOffer::create(std::move(versions), {}, {});
+    const std::array optionalCapabilities{ TES3MP::vrPoseCapability() };
+    auto offer = TES3MP::CapabilityOffer::create(std::move(versions), optionalCapabilities, {});
     const auto zero = TES3MP::Turn32::fromValue(0);
     auto fixtureSpawn = TES3MP::Transform(TES3MP::CellId::interior(*TES3MP::CellSpaceId::fromValue(7)),
         TES3MP::Position3(10, 20, 30), TES3MP::Orientation3(zero, zero, zero));

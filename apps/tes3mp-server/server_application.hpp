@@ -4,10 +4,13 @@
 #include "server_config.hpp"
 #include "connection_session_coordinator.hpp"
 #include "tes3mp/server_lifecycle.hpp"
+#include "tes3mp/protocol_pose.hpp"
 
+#include <map>
 #include <optional>
 #include <span>
 #include <string_view>
+#include <vector>
 
 namespace TES3MP::ServerApp
 {
@@ -39,18 +42,26 @@ namespace TES3MP::ServerApp
         std::string_view failure() const noexcept { return mFailure; }
 
     private:
+        struct RetainedPose
+        {
+            ClientVrPoseSample sample;
+            std::vector<std::byte> payload;
+        };
+
         TransportRuntime& mTransport;
         const ServerConfig& mConfig;
         std::optional<ListenerId> mListener;
         bool mRunning = false;
         std::string_view mFailure;
         std::optional<ServerApplicationWiring> mWiring;
+        std::map<SessionId, RetainedPose> mLatestPoses;
 
         bool failConnection(TransportConnectionId connection, std::string_view failure) noexcept;
         bool disconnectConnection(TransportConnectionId connection, ServerTick tick) noexcept;
         bool disconnectConnections(std::span<const TransportConnectionId> connections, ServerTick tick) noexcept;
         bool resumeConnection(TransportConnectionId connection, ServerTick tick) noexcept;
         bool expireSessions(ServerTick tick) noexcept;
+        bool relayPose(TransportConnectionId connection, const TransportMessage& message) noexcept;
     };
 }
 

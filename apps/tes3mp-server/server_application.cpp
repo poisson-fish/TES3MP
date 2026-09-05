@@ -2,9 +2,21 @@
 #include "fixture_observation_projection.hpp"
 
 #include <array>
+#include <algorithm>
+#include <ranges>
 
 namespace TES3MP::ServerApp
 {
+    namespace
+    {
+        bool supportsPose(const ServerSessionStateMachine& session) noexcept
+        {
+            const auto& hello = session.negotiatedHello();
+            return hello && std::binary_search(
+                hello->negotiatedCapabilities().begin(), hello->negotiatedCapabilities().end(), vrPoseCapability());
+        }
+    }
+
     ServerApplication::ServerApplication(TransportRuntime& transport, const ServerConfig& config) noexcept
         : mTransport(transport), mConfig(config) {}
 
@@ -34,7 +46,12 @@ namespace TES3MP::ServerApp
 
     bool ServerApplication::failConnection(TransportConnectionId connection, std::string_view failure) noexcept
     {
-        if (mWiring) (void)mWiring->sessions.close(connection);
+        if (mWiring)
+        {
+            if (auto* session = mWiring->sessions.session(connection); session && session->sessionId())
+                mLatestPoses.erase(*session->sessionId());
+            (void)mWiring->sessions.close(connection);
+        }
         (void)mTransport.close(connection, TransportCloseMode::Abort);
         mFailure = failure;
         return true;
@@ -88,7 +105,92 @@ namespace TES3MP::ServerApp
         if (!mWiring->lifecycle.commit(lifecycle->id)) return false;
         for (const auto connection : knownConnections)
             if (mWiring->sessions.close(connection) != ConnectionSessionResult::Accepted) return false;
+        for (const auto session : sessionIds)
+            mLatestPoses.erase(session);
         return true;
+    }
+
+    bool ServerApplication::relayPose(
+        TransportConnectionId connection, const TransportMessage& message) noexcept
+    try
+    {
+        if (!mWiring || message.channel != TransportChannel::PresentationLatest)
+            return false;
+        auto* sourceState = mWiring->sessions.session(connection);
+        if (!sourceState || sourceState->state() != ServerSessionState::Established || !sourceState->sessionId()
+            || !supportsPose(*sourceState))
+            return false;
+        auto decodedFrame = decodeProtocolFrame(message.bytes);
+        auto* frame = std::get_if<DecodedFrame>(&decodedFrame);
+        if (!frame || frame->messageClass() != MessageClass::PresentationSample
+            || frame->messageKind() != MessageKind::ClientVrPoseSample)
+            return false;
+        auto decodedPose = decodeClientVrPoseSample(frame->payload());
+        auto* pose = std::get_if<ClientVrPoseSample>(&decodedPose);
+        if (!pose || pose->sourceSessionId() != *sourceState->sessionId()
+            || pose->sourceSessionGeneration() != sourceState->generation())
+            return false;
+
+        const auto& canonical = mWiring->reducer.state();
+        const auto* sourceSession = canonical.findActiveSession(*sourceState->sessionId());
+        const auto* sourcePlayer = sourceSession ? canonical.findPlayer(sourceSession->playerId()) : nullptr;
+        if (!sourceSession || !sourcePlayer
+            || sourceSession->sessionGeneration() != pose->sourceSessionGeneration()
+            || sourceSession->entityId() != pose->rootEntityId()
+            || sourcePlayer->entityId() != pose->rootEntityId()
+            || sourcePlayer->authorityEpoch() != pose->rootAuthorityEpoch())
+            return false;
+
+        const auto retained = mLatestPoses.find(pose->sourceSessionId());
+        if (retained != mLatestPoses.end())
+        {
+            const auto recency = classifyPoseSample(
+                retained->second.sample, retained->second.payload, *pose, frame->payload());
+            if (recency == PoseSampleRecency::Duplicate || recency == PoseSampleRecency::Stale)
+                return true;
+            if (recency == PoseSampleRecency::ConflictingDuplicate)
+                return false;
+        }
+
+        std::vector<std::vector<std::byte>> ownedFrames;
+        std::vector<OutboundQueueSet::AtomicMessage> messages;
+        ownedFrames.reserve(mWiring->sessions.size());
+        messages.reserve(mWiring->sessions.size());
+        for (const auto targetConnection : mWiring->sessions.connections())
+        {
+            if (targetConnection == connection)
+                continue;
+            auto* targetState = mWiring->sessions.session(targetConnection);
+            if (!targetState || targetState->state() != ServerSessionState::Established || !targetState->sessionId()
+                || !supportsPose(*targetState))
+                continue;
+            const auto* targetSession = canonical.findActiveSession(*targetState->sessionId());
+            const auto* targetPlayer = targetSession ? canonical.findPlayer(targetSession->playerId()) : nullptr;
+            if (!targetSession || !targetPlayer
+                || targetPlayer->transform().cell() != sourcePlayer->transform().cell())
+                continue;
+            ServerVrPoseSnapshot snapshot(*targetState->sessionId(), targetState->generation(),
+                sourcePlayer->playerId(), pose->sourceSessionId(), pose->sourceSessionGeneration(),
+                pose->rootEntityId(), pose->rootAuthorityEpoch(), pose->sampleSequence(), pose->head(),
+                pose->leftHand(), pose->rightHand());
+            auto encoded = encodeProtocolFrame(MessageClass::PresentationSample, MessageKind::ServerVrPoseSnapshot,
+                encodeServerVrPoseSnapshot(snapshot));
+            auto* bytes = std::get_if<std::vector<std::byte>>(&encoded);
+            if (!bytes)
+                return false;
+            ownedFrames.emplace_back(std::move(*bytes));
+            messages.push_back({ targetConnection, TransportChannel::PresentationLatest, ownedFrames.back() });
+        }
+        if (!messages.empty()
+            && mWiring->queues.enqueueMessagesAtomically(messages) != TransportResult::Accepted)
+            return false;
+        mLatestPoses.insert_or_assign(pose->sourceSessionId(),
+            RetainedPose{ std::move(*pose), std::vector<std::byte>(frame->payload().begin(), frame->payload().end()) });
+        return true;
+    }
+    catch (...)
+    {
+        return false;
     }
 
     bool ServerApplication::resumeConnection(TransportConnectionId connection, ServerTick tick) noexcept
@@ -266,6 +368,16 @@ namespace TES3MP::ServerApp
             bool closed = false;
             for (std::size_t index = 0; index < received.messages; ++index)
             {
+                if (messages[index].channel == TransportChannel::PresentationLatest)
+                {
+                    if (!relayPose(connection, messages[index]))
+                    {
+                        (void)failConnection(connection, "pose relay rejected");
+                        closed = true;
+                        break;
+                    }
+                    continue;
+                }
                 const auto dispatched = mWiring->sessions.dispatch(
                     connection, messages[index], mWiring->joins, mWiring->crypto, mWiring->intake, tick);
                 if (dispatched == ConnectionSessionResult::ProtocolRejected
@@ -397,6 +509,7 @@ namespace TES3MP::ServerApp
             mListener.reset();
         }
         const auto shutDown = mTransport.shutdown();
+        mLatestPoses.clear();
         success = success && (shutDown == TransportResult::Accepted || shutDown == TransportResult::AlreadyFinalized);
         if (!success) mFailure = "transport shutdown failed";
         return success;

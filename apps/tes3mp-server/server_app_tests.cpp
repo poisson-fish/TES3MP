@@ -170,6 +170,13 @@ namespace
         return std::get<CapabilityOffer>(CapabilityOffer::create(versions, {}, {}));
     }
 
+    CapabilityOffer poseOffer()
+    {
+        auto versions = std::get<ProtocolVersionRange>(ProtocolVersionRange::create(1, 0, 0));
+        const std::array capabilities{ vrPoseCapability() };
+        return std::get<CapabilityOffer>(CapabilityOffer::create(versions, capabilities, {}));
+    }
+
     AdmissionScopeId scope(std::byte value)
     {
         std::array<std::byte, AdmissionScopeIdBytes> bytes{};
@@ -601,7 +608,7 @@ int main()
         auto queues = OutboundQueueSet::create(OutboundQueuePolicy{}, 2);
         auto timeouts = *SessionTimeoutPolicy::create(1'000'000, 1'000'000, 1'000'000);
         ConnectionSessionCoordinator sessions(
-            clock, observability, timeouts, emptyOffer(), authentication, *queues, 2);
+            clock, observability, timeouts, poseOffer(), authentication, *queues, 2);
         JoinFixture joinFixture;
         ServerCommandIntakeCoordinator intake(
             clock, observability, clock.now(), ServerTick::initial(), IngressOrdinal::initial());
@@ -619,7 +626,7 @@ int main()
         };
         const auto hello = TransportMessage{ TransportChannel::ReliableOrdered,
             std::get<std::vector<std::byte>>(encodeProtocolFrame(MessageClass::SessionControl,
-                MessageKind::ClientHello, encodeClientHello(ClientHello::fromOffer(emptyOffer())))) };
+                MessageKind::ClientHello, encodeClientHello(ClientHello::fromOffer(poseOffer())))) };
         runtime.incomingByConnection[first].push_back(hello);
         runtime.incomingByConnection[second].push_back(hello);
         ServerApplication application(runtime, config, ServerApplicationWiring{
@@ -652,6 +659,35 @@ int main()
             ++firstSnapshots;
         }
         assert(firstSnapshots == 1);
+
+        runtime.sent.clear();
+        runtime.sentConnections.clear();
+        runtime.sentChannels.clear();
+        const auto zero = Turn32::fromValue(0);
+        const auto tracked = VrTrackedTransform(
+            *VrPoseOffset3::create(10, 20, 30), Orientation3(zero, zero, zero));
+        const auto sample = ClientVrPoseSample(id<SessionId>(1), SessionGeneration::initial(), id<EntityId>(1),
+            AuthorityEpoch::initial(), PoseSampleSequence::initial(), tracked, std::nullopt, std::nullopt);
+        runtime.incomingByConnection[first].push_back({ TransportChannel::PresentationLatest,
+            std::get<std::vector<std::byte>>(encodeProtocolFrame(MessageClass::PresentationSample,
+                MessageKind::ClientVrPoseSample, encodeClientVrPoseSample(sample))) });
+        assert(application.pump(id<ServerTick>(1)));
+        std::size_t relayed = 0;
+        for (std::size_t index = 0; index < runtime.sent.size(); ++index)
+        {
+            if (runtime.sentConnections[index] != second
+                || runtime.sentChannels[index] != TransportChannel::PresentationLatest) continue;
+            const auto poseFrame = decodeProtocolFrame(runtime.sent[index]);
+            assert(std::holds_alternative<DecodedFrame>(poseFrame));
+            const auto pose = decodeServerVrPoseSnapshot(std::get<DecodedFrame>(poseFrame).payload());
+            assert(std::holds_alternative<ServerVrPoseSnapshot>(pose));
+            const auto& value = std::get<ServerVrPoseSnapshot>(pose);
+            assert(value.targetSessionId() == id<SessionId>(2)
+                && value.sourcePlayerId() == id<PlayerId>(1) && value.rootEntityId() == id<EntityId>(1)
+                && value.sampleSequence() == PoseSampleSequence::initial());
+            ++relayed;
+        }
+        assert(relayed == 1);
     }
     {
         FixedClock clock;

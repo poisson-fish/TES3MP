@@ -20,7 +20,8 @@ namespace TES3MP::OpenMWAdapter
     std::unique_ptr<EngineCoordinator> makeCoordinator(std::unique_ptr<TransportRuntime> transport,
         std::unique_ptr<MonotonicClock> clock, std::unique_ptr<ClientSessionRuntime> runtime,
         ReconnectConfiguration reconnect, SemanticInputProvider& input, PresentationProvider& presentation,
-        ConnectionStatusProvider& status, ConnectionControlProvider* control = nullptr) noexcept;
+        ConnectionStatusProvider& status, ConnectionControlProvider* control = nullptr,
+        VrPoseInputProvider* poseInput = nullptr) noexcept;
 }
 
 #endif

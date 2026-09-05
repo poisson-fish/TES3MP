@@ -5,6 +5,7 @@
 #endif
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <fstream>
 #include <limits>
@@ -85,14 +86,15 @@ namespace TES3MP::OpenMWAdapter
         if (!runtime || !*runtime)
             return ClientCompositionFailure::RuntimeUnavailable;
         auto versions = std::get<ProtocolVersionRange>(ProtocolVersionRange::create(1, 0, 0));
-        auto offer = std::get<CapabilityOffer>(CapabilityOffer::create(std::move(versions), {}, {}));
+        const std::array optional{ vrPoseCapability() };
+        auto offer = std::get<CapabilityOffer>(CapabilityOffer::create(std::move(versions), optional, {}));
         if ((*runtime)->start(
                 *endpoint, ClientHello::fromOffer(std::move(offer)), AuthenticationRequest::join(std::move(*password)))
             != HeadlessClientResult::Accepted)
             return ClientCompositionFailure::ConnectionRejected;
         return makeCoordinator(std::move(transport.runtime), std::move(clock), std::move(*runtime),
             ReconnectConfiguration{ *endpoint, *timeouts, *queue }, *providers.input, *providers.presentation,
-            *providers.status, providers.control);
+            *providers.status, providers.control, providers.poseInput);
 #else
         return ClientCompositionFailure::TransportUnavailable;
 #endif

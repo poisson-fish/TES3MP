@@ -78,8 +78,9 @@ namespace
                 "reliable operation is not mapped to the reliable channel")
             && check(TES3MP::transportChannelFor(MessageClass::LatestWinsSnapshot) == TransportChannel::LatestWins,
                 "snapshot is not mapped to the latest-wins channel")
-            && check(!TES3MP::transportChannelFor(MessageClass::PresentationSample),
-                "presentation samples must remain transport-disabled until Slice 9.5")
+            && check(TES3MP::transportChannelFor(MessageClass::PresentationSample)
+                    == TransportChannel::PresentationLatest,
+                "presentation sample is not mapped to its isolated latest-wins channel")
             && check(!TES3MP::transportChannelFor(invalidClass), "unknown message class acquired a channel")
             && check(TES3MP::maximumTransportMessageBytes(TransportChannel::ReliableOrdered)
                     == TES3MP::ProtocolFrameHeaderBytes + TES3MP::ReliableOperationMaximumPayloadBytes,
@@ -87,6 +88,9 @@ namespace
             && check(TES3MP::maximumTransportMessageBytes(TransportChannel::LatestWins)
                     == TES3MP::ProtocolFrameHeaderBytes + TES3MP::LatestWinsSnapshotMaximumPayloadBytes,
                 "snapshot channel maximum does not match the protocol frame budget")
+            && check(TES3MP::maximumTransportMessageBytes(TransportChannel::PresentationLatest)
+                    == TES3MP::ProtocolFrameHeaderBytes + TES3MP::PresentationSampleMaximumPayloadBytes,
+                "presentation channel maximum does not match the protocol frame budget")
             && check(!TES3MP::maximumTransportMessageBytes(invalidChannel),
                 "unknown transport channel acquired a message budget")
             && check(TES3MP::isMessageClassAllowedOnTransportChannel(
@@ -98,6 +102,12 @@ namespace
             && check(!TES3MP::isMessageClassAllowedOnTransportChannel(
                          MessageClass::LatestWinsSnapshot, TransportChannel::ReliableOrdered),
                 "snapshot was accepted on the reliable channel")
+            && check(TES3MP::isMessageClassAllowedOnTransportChannel(
+                         MessageClass::PresentationSample, TransportChannel::PresentationLatest),
+                "presentation sample was rejected from its channel")
+            && check(!TES3MP::isMessageClassAllowedOnTransportChannel(
+                         MessageClass::PresentationSample, TransportChannel::LatestWins),
+                "presentation sample was accepted on the world snapshot channel")
             && check(TES3MP::TransportRuntime::MaxMessagesPerReceive == 128,
                 "approved initial receive-drain ceiling changed");
     }

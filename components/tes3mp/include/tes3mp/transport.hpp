@@ -270,12 +270,15 @@ namespace TES3MP
     {
         ReliableOrdered = 1,
         LatestWins = 2,
+        PresentationLatest = 3,
     };
 
     inline constexpr std::size_t ReliableOrderedMaximumMessageBytes
         = ProtocolFrameHeaderBytes + ReliableOperationMaximumPayloadBytes;
     inline constexpr std::size_t LatestWinsMaximumMessageBytes
         = ProtocolFrameHeaderBytes + LatestWinsSnapshotMaximumPayloadBytes;
+    inline constexpr std::size_t PresentationLatestMaximumMessageBytes
+        = ProtocolFrameHeaderBytes + PresentationSampleMaximumPayloadBytes;
 
     std::optional<TransportChannel> transportChannelFor(MessageClass messageClass) noexcept;
     std::optional<std::size_t> maximumTransportMessageBytes(TransportChannel channel) noexcept;
@@ -382,7 +385,9 @@ namespace TES3MP
 
         std::size_t reliableMessages() const noexcept { return mReliable.size(); }
         std::size_t reliableBytes() const noexcept { return mReliableBytes; }
-        bool hasLatest() const noexcept { return mLatest.has_value(); }
+        bool hasLatest() const noexcept { return mLatest.has_value() || mPresentationLatest.has_value(); }
+        bool hasWorldLatest() const noexcept { return mLatest.has_value(); }
+        bool hasPresentationLatest() const noexcept { return mPresentationLatest.has_value(); }
 
     private:
         struct RateBucket
@@ -402,14 +407,16 @@ namespace TES3MP
         OutboundQueuePolicy mPolicy;
         std::deque<std::vector<std::byte>> mReliable;
         std::optional<std::vector<std::byte>> mLatest;
+        std::optional<std::vector<std::byte>> mPresentationLatest;
         std::size_t mReliableBytes = 0;
         RateBucket mReliableRate;
         RateBucket mLatestRate;
+        RateBucket mPresentationRate;
         std::optional<std::uint64_t> mFirstReliableBlock;
         std::size_t mConsecutiveReliableBlocks = 0;
         std::optional<std::uint64_t> mLastPumpTime;
         TransportTelemetrySink* mTelemetry = nullptr;
-        std::array<std::array<std::uint64_t, 2>, 7> mCounters{};
+        std::array<std::array<std::uint64_t, 3>, 7> mCounters{};
     };
 
     class OutboundQueueSet

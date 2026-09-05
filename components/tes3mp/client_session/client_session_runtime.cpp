@@ -1,10 +1,21 @@
 #include <tes3mp/client_session_runtime.hpp>
 
 #include <array>
+#include <algorithm>
 #include <ranges>
 
 namespace TES3MP
 {
+    namespace
+    {
+        bool negotiated(const ClientSessionStateMachine& session, CapabilityId capability) noexcept
+        {
+            const auto& hello = session.negotiatedHello();
+            return hello && std::binary_search(
+                hello->negotiatedCapabilities().begin(), hello->negotiatedCapabilities().end(), capability);
+        }
+    }
+
     ClientRuntimeCreateResult ClientSessionRuntime::create(TransportRuntime& transport, MonotonicClock& clock,
         SessionTimeoutPolicy timeoutPolicy, SessionGeneration generation, OutboundQueuePolicy outboundPolicy)
     {
@@ -146,6 +157,16 @@ namespace TES3MP
                 result.observationApplied
                     = result.observationApplied || applied == ReliableObservationReceiveResult::Applied;
             }
+            else if (auto* pose = std::get_if<ServerVrPoseSnapshot>(&message))
+            {
+                const auto sessionId = mSession->stateMachine().sessionId();
+                if (mSession->stateMachine().state() != ClientSessionState::Established || !sessionId
+                    || !negotiated(mSession->stateMachine(), vrPoseCapability())
+                    || pose->targetSessionId() != *sessionId
+                    || pose->targetSessionGeneration() != mSession->stateMachine().generation())
+                    return reject();
+                result.poseSnapshots.emplace_back(std::move(*pose));
+            }
         }
         return result;
     }
@@ -158,6 +179,18 @@ namespace TES3MP
     ClientRuntimeQueueResult ClientSessionRuntime::queueCellTransition(FixtureCellTransition transition)
     {
         return queueReliable(ReliableOperationBody(std::move(transition)));
+    }
+
+    ClientRuntimeResult ClientSessionRuntime::queuePoseSample(const ClientVrPoseSample& sample)
+    {
+        const auto sessionId = mSession->stateMachine().sessionId();
+        if (mSession->stateMachine().state() != ClientSessionState::Established || !sessionId)
+            return ClientRuntimeResult::NotConnected;
+        if (!negotiated(mSession->stateMachine(), vrPoseCapability()) || sample.sourceSessionId() != *sessionId
+            || sample.sourceSessionGeneration() != mSession->stateMachine().generation())
+            return ClientRuntimeResult::ProtocolRejected;
+        return queue(MessageClass::PresentationSample, MessageKind::ClientVrPoseSample,
+            encodeClientVrPoseSample(sample));
     }
 
     ClientRuntimeQueueResult ClientSessionRuntime::queueReliable(ReliableOperationBody body)
@@ -294,6 +327,15 @@ namespace TES3MP
                 {
                     auto value = decodeReliableObservationBatch(frame->payload());
                     if (auto* typed = std::get_if<ReliableObservationBatch>(&value))
+                        result.messages.emplace_back(std::move(*typed));
+                    else
+                        return fail(ClientRuntimeResult::ProtocolRejected);
+                    break;
+                }
+                case MessageKind::ServerVrPoseSnapshot:
+                {
+                    auto value = decodeServerVrPoseSnapshot(frame->payload());
+                    if (auto* typed = std::get_if<ServerVrPoseSnapshot>(&value))
                         result.messages.emplace_back(std::move(*typed));
                     else
                         return fail(ClientRuntimeResult::ProtocolRejected);

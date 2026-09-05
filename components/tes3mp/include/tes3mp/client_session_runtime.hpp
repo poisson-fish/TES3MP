@@ -4,6 +4,7 @@
 #include "authentication.hpp"
 #include "headless_client_session.hpp"
 #include "protocol_handshake.hpp"
+#include "protocol_pose.hpp"
 
 #include <memory>
 #include <optional>
@@ -13,7 +14,7 @@
 namespace TES3MP
 {
     using ClientRuntimeMessage = std::variant<ServerHello, SessionRejected, AuthenticationAcceptedMessage,
-        AuthenticationRejectedMessage, LatestWinsSnapshot, ReliableObservationBatch>;
+        AuthenticationRejectedMessage, LatestWinsSnapshot, ReliableObservationBatch, ServerVrPoseSnapshot>;
 
     enum class ClientRuntimeResult : std::uint8_t
     {
@@ -41,6 +42,7 @@ namespace TES3MP
         bool snapshotApplied = false;
         bool observationApplied = false;
         bool authenticationAccepted = false;
+        std::vector<ServerVrPoseSnapshot> poseSnapshots;
     };
 
     struct ClientRuntimeQueueResult
@@ -65,6 +67,7 @@ namespace TES3MP
         ClientRuntimeAdvanceResult advance();
         ClientRuntimeQueueResult queueMotionIntent(PlayerMotionIntent intent);
         ClientRuntimeQueueResult queueCellTransition(FixtureCellTransition transition);
+        ClientRuntimeResult queuePoseSample(const ClientVrPoseSample& sample);
         ClientRuntimeDrainResult drainInbound();
         ClientRuntimeResult queue(MessageClass messageClass, MessageKind kind, std::span<const std::byte> payload);
         ClientRuntimeResult flushOutbound() noexcept;
