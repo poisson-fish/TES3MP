@@ -17,6 +17,7 @@
 
 namespace TES3MP
 {
+    class PlayerIdentityRegistry;
     inline constexpr std::size_t CredentialDigestBytes = 32;
     inline constexpr std::size_t MaximumResumeTokenRecords = 256;
     inline constexpr std::size_t MaximumAuthenticationAdmissionScopes = 256;
@@ -129,10 +130,12 @@ namespace TES3MP
     {
     public:
         ServerAuthenticationSubmission(
-            AuthenticationRequest request, AdmissionScopeId scope, ResumeTokenContext context) noexcept
+            AuthenticationRequest request, AdmissionScopeId scope, ResumeTokenContext context,
+            ContentManifestId contentManifest = testContentManifestId()) noexcept
             : mRequest(std::move(request))
             , mScope(std::move(scope))
             , mContext(context)
+            , mContentManifest(contentManifest)
         {
         }
 
@@ -149,6 +152,7 @@ namespace TES3MP
         AuthenticationRequest mRequest;
         AdmissionScopeId mScope;
         ResumeTokenContext mContext;
+        ContentManifestId mContentManifest;
     };
 
     class CredentialCrypto
@@ -308,11 +312,12 @@ namespace TES3MP
     public:
         SharedServerAuthenticationService(AuthenticationRateLimiter& limiter,
             JoinPasswordAuthenticationProvider& joinProvider, ResumeTokenStore& resumeStore,
-            MonotonicClock& clock) noexcept
+            MonotonicClock& clock, PlayerIdentityRegistry* playerIdentities = nullptr) noexcept
             : mLimiter(limiter)
             , mJoinProvider(joinProvider)
             , mResumeStore(resumeStore)
             , mClock(clock)
+            , mPlayerIdentities(playerIdentities)
         {
         }
 
@@ -330,6 +335,7 @@ namespace TES3MP
         JoinPasswordAuthenticationProvider& mJoinProvider;
         ResumeTokenStore& mResumeStore;
         MonotonicClock& mClock;
+        PlayerIdentityRegistry* mPlayerIdentities;
     };
 }
 

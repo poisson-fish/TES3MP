@@ -26,7 +26,7 @@ namespace
         NullStructuredEventSink events;
         Observability observability{ metrics, events };
         CanonicalCommandReducer reducer{ std::get<CanonicalServerState>(createCanonicalServerState({}, {})), observability };
-        AuthenticatedJoinCoordinator joins{ *AuthenticatedJoinCoordinator::create(spawn(),
+        AuthenticatedJoinCoordinator joins{ *AuthenticatedJoinCoordinator::create(spawn(), id<AppearanceId>(1),
             { id<SessionId>(1), id<PlayerId>(11), id<EntityId>(21) }, reducer) };
         ServerLifecycleCoordinator lifecycle{ *ServerLifecycleCoordinator::create(100, reducer) };
         AuthenticatedJoinResult joined;

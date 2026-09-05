@@ -312,6 +312,7 @@ namespace TES3MP
             if (auto* admission = std::get_if<AuthenticatedAdmission>(&completion.result))
             {
                 mPrincipal = admission->principal();
+                mPlayerClaim = admission->playerClaim();
                 if (auto grant = admission->takeResumeGrant())
                 {
                     mPreparedResumeId = grant->preparationId();

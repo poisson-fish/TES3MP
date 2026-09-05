@@ -2,6 +2,7 @@
 #define TES3MP_SERVER_CONFIG_HPP
 
 #include <tes3mp/authentication.hpp>
+#include <tes3mp/content_identity.hpp>
 #include <tes3mp/transport.hpp>
 
 #include <cstddef>
@@ -17,6 +18,7 @@ namespace TES3MP::ServerApp
     inline constexpr std::size_t MaximumConfigBytes = 4096;
     inline constexpr std::size_t MaximumConfigLineBytes = 512;
     inline constexpr std::size_t MaximumPasswordPathBytes = 1024;
+    inline constexpr std::size_t MaximumIdentityPathBytes = 1024;
 
     enum class ConfigErrorCode : std::uint8_t
     {
@@ -47,6 +49,8 @@ namespace TES3MP::ServerApp
         std::uint64_t tickIntervalMilliseconds = 0;
         std::uint64_t disconnectGraceMilliseconds = 0;
         std::filesystem::path joinPasswordFile;
+        ContentManifest contentManifest;
+        std::filesystem::path playerIdentityFile;
     };
 
     using ConfigParseResult = std::variant<ServerConfig, ConfigError>;

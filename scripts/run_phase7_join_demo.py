@@ -10,6 +10,7 @@ import tempfile
 import time
 from pathlib import Path
 
+TEST_CONTENT_MANIFEST = "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20"
 
 def run_client(binary: Path, port: int, password: Path) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
@@ -95,7 +96,10 @@ def main() -> int:
         bad.write_text("wrong-phase7-secret\n", encoding="utf-8")
         config.write_text(
             f"bind_address=127.0.0.1\nport={port}\ntick_interval_ms=16\n"
-            f"disconnect_grace_ms=3000\njoin_password_file={good.as_posix()}\n",
+            f"disconnect_grace_ms=3000\njoin_password_file={good.as_posix()}\n"
+            f"content_manifest_id={TEST_CONTENT_MANIFEST}\ninterior_cell_id=7\n"
+            f"exterior_worldspace_id=8\ndefault_appearance_id=1\n"
+            f"player_identity_file={(root / 'player-identities').as_posix()}\n",
             encoding="utf-8")
         server = subprocess.Popen(
             [str(args.server), str(config)], text=True,

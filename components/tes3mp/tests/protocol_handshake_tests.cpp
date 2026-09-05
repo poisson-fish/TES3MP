@@ -21,6 +21,7 @@ namespace
     using TES3MP::CapabilityId;
     using TES3MP::CapabilityOffer;
     using TES3MP::ClientHello;
+    using TES3MP::ContentManifestId;
     using TES3MP::HandshakeError;
     using TES3MP::HandshakeErrorCode;
     using TES3MP::ProtocolVersionRange;
@@ -47,7 +48,8 @@ namespace
     }
 
     CapabilityOffer offer(ProtocolVersionRange versions, std::initializer_list<std::uint32_t> optional,
-        std::initializer_list<std::uint32_t> required)
+        std::initializer_list<std::uint32_t> required,
+        ContentManifestId manifest = TES3MP::testContentManifestId())
     {
         std::vector<CapabilityId> optionalValues;
         std::vector<CapabilityId> requiredValues;
@@ -55,7 +57,7 @@ namespace
             optionalValues.push_back(capability(value));
         for (const auto value : required)
             requiredValues.push_back(capability(value));
-        auto result = CapabilityOffer::create(versions, optionalValues, requiredValues);
+        auto result = CapabilityOffer::create(versions, optionalValues, requiredValues, manifest);
         return std::get<CapabilityOffer>(std::move(result));
     }
 
@@ -82,13 +84,15 @@ namespace
     {
         return left.versions() == right.versions()
             && capabilitiesEqual(left.optionalCapabilities(), right.optionalCapabilities())
-            && capabilitiesEqual(left.requiredCapabilities(), right.requiredCapabilities());
+            && capabilitiesEqual(left.requiredCapabilities(), right.requiredCapabilities())
+            && left.contentManifest() == right.contentManifest();
     }
 
     bool valuesEqual(const ServerHello& left, const ServerHello& right)
     {
         return left.selectedVersion() == right.selectedVersion()
-            && capabilitiesEqual(left.negotiatedCapabilities(), right.negotiatedCapabilities());
+            && capabilitiesEqual(left.negotiatedCapabilities(), right.negotiatedCapabilities())
+            && left.contentManifest() == right.contentManifest();
     }
 
     bool valuesEqual(const SessionRejected& left, const SessionRejected& right)
@@ -218,6 +222,18 @@ namespace
             && decodedCapabilityRejected->reason() == TES3MP::SessionRejectionReason::UnsupportedRequiredCapability
             && decodedCapabilityRejected->unsupportedCapability()
             && decodedCapabilityRejected->unsupportedCapability()->value() == 5;
+    }
+
+    bool content_manifest_mismatch_rejects_before_admission()
+    {
+        std::array<std::byte, TES3MP::ContentManifestIdBytes> bytes{};
+        bytes.fill(std::byte{ 0x5a });
+        const auto other = *ContentManifestId::fromBytes(bytes);
+        const auto server = offer(versionRange(1, 1, 1), {}, {});
+        const auto mismatch = TES3MP::negotiateClientHello(
+            ClientHello::fromOffer(offer(versionRange(1, 1, 1), {}, {}, other)), server);
+        const auto* rejected = std::get_if<SessionRejected>(&mismatch);
+        return rejected && rejected->reason() == TES3MP::SessionRejectionReason::ContentManifestMismatch;
     }
 
     bool all_payloads_round_trip_as_owned_values()
@@ -433,12 +449,15 @@ namespace
         const auto server = TES3MP::encodeServerHello(fixture.accepted);
         const auto rejected = TES3MP::encodeSessionRejected(fixture.rejected);
         return bytesEqual(client,
-                   { 60, 0, 0, 0, 24, 0, 0, 0, 84, 51, 67, 72, 0, 0, 14, 0, 16, 0, 4, 0, 0, 0, 6, 0, 8, 0, 12, 0, 14, 0,
-                       0, 0, 1, 0, 1, 0, 16, 0, 0, 0, 4, 0, 0, 0, 1, 0, 0, 0, 5, 0, 0, 0, 2, 0, 0, 0, 1, 0, 0, 0, 3, 0,
-                       0, 0 })
+                   { 100, 0, 0, 0, 24, 0, 0, 0, 84, 51, 67, 72, 16, 0, 20, 0, 4, 0, 0, 0, 6, 0, 8, 0,
+                       12, 0, 16, 0, 16, 0, 0, 0, 1, 0, 1, 0, 56, 0, 0, 0, 44, 0, 0, 0, 4, 0, 0, 0, 32, 0, 0, 0,
+                       1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24,
+                       25, 26, 27, 28, 29, 30, 31, 32, 1, 0, 0, 0, 5, 0, 0, 0, 2, 0, 0, 0, 1, 0, 0, 0, 3, 0, 0, 0 })
             && bytesEqual(server,
-                { 48, 0, 0, 0, 20, 0, 0, 0, 84, 51, 83, 72, 0, 0, 10, 0, 12, 0, 4, 0, 6, 0, 8, 0, 10, 0, 0, 0, 1, 0, 1,
-                    0, 4, 0, 0, 0, 3, 0, 0, 0, 1, 0, 0, 0, 3, 0, 0, 0, 5, 0, 0, 0 })
+                { 88, 0, 0, 0, 20, 0, 0, 0, 84, 51, 83, 72, 12, 0, 16, 0, 4, 0, 6, 0, 8, 0, 12, 0,
+                    12, 0, 0, 0, 1, 0, 1, 0, 8, 0, 0, 0, 20, 0, 0, 0, 3, 0, 0, 0, 1, 0, 0, 0, 3, 0, 0, 0,
+                    5, 0, 0, 0, 32, 0, 0, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16,
+                    17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32 })
             && bytesEqual(rejected,
                 { 32, 0, 0, 0, 20, 0, 0, 0, 84, 51, 82, 74, 12, 0, 12, 0, 7, 0, 8, 0, 0, 0, 10, 0, 12, 0, 0, 0, 0, 0, 0,
                     1, 1, 0, 1, 0 });
@@ -513,7 +532,8 @@ int main(int argc, char** argv)
     return value_factories_reject_invalid_ranges_and_capability_sets()
             && current_and_previous_minor_select_highest_overlap()
             && optional_capabilities_intersect_without_enabling_unknown_ids()
-            && version_and_required_capability_failures_are_stable() && all_payloads_round_trip_as_owned_values()
+            && version_and_required_capability_failures_are_stable()
+            && content_manifest_mismatch_rejects_before_admission() && all_payloads_round_trip_as_owned_values()
             && deterministic_offer_properties_round_trip()
             && every_truncation_wrong_identifier_and_trailing_byte_fail_without_partial_value()
             && hostile_capability_vectors_reject_before_negotiation()

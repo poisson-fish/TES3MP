@@ -305,7 +305,8 @@ namespace TES3MP::ServerApp
             }
             catch (...) { cancel(); return false; }
             if (!admitFixtureObservationsAtomically(mWiring->queues, routed)) { cancel(); return false; }
-            if (!mWiring->lifecycle.commit(lifecycle->id)) return false;
+            if (!mWiring->lifecycle.commit(lifecycle->id)
+                || !mWiring->joins.releasePrincipal(lifecycle->principal)) return false;
         }
     }
 

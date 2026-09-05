@@ -78,11 +78,12 @@ namespace TES3MP
     class CanonicalPlayerEntityState
     {
     public:
-        constexpr CanonicalPlayerEntityState(PlayerId playerId, EntityId entityId, Transform transform,
-            LinearVelocity3 linearVelocity, EntityRevision entityRevision, AuthorityEpoch authorityEpoch,
-            ServerTick lastSpatialChangeTick) noexcept
+        constexpr CanonicalPlayerEntityState(PlayerId playerId, EntityId entityId, AppearanceId appearanceId,
+            Transform transform, LinearVelocity3 linearVelocity, EntityRevision entityRevision,
+            AuthorityEpoch authorityEpoch, ServerTick lastSpatialChangeTick) noexcept
             : mPlayerId(playerId)
             , mEntityId(entityId)
+            , mAppearanceId(appearanceId)
             , mTransform(transform)
             , mLinearVelocity(linearVelocity)
             , mEntityRevision(entityRevision)
@@ -93,6 +94,7 @@ namespace TES3MP
 
         constexpr PlayerId playerId() const noexcept { return mPlayerId; }
         constexpr EntityId entityId() const noexcept { return mEntityId; }
+        constexpr AppearanceId appearanceId() const noexcept { return mAppearanceId; }
         constexpr const Transform& transform() const noexcept { return mTransform; }
         constexpr LinearVelocity3 linearVelocity() const noexcept { return mLinearVelocity; }
         constexpr EntityRevision entityRevision() const noexcept { return mEntityRevision; }
@@ -105,6 +107,7 @@ namespace TES3MP
     private:
         PlayerId mPlayerId;
         EntityId mEntityId;
+        AppearanceId mAppearanceId;
         Transform mTransform;
         LinearVelocity3 mLinearVelocity;
         EntityRevision mEntityRevision;

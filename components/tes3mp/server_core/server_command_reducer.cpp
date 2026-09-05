@@ -125,14 +125,6 @@ namespace
         return next && sequence == *next;
     }
 
-    constexpr CellId Phase7InteriorFixture = CellId::interior(CellSpaceId::fromValue(7).value());
-    constexpr CellId Phase7ExteriorFixture = CellId::exterior(CellSpaceId::fromValue(8).value(), 0, 0);
-
-    constexpr bool isPhase7Fixture(const CellId& cell) noexcept
-    {
-        return cell == Phase7InteriorFixture || cell == Phase7ExteriorFixture;
-    }
-
     CommandDisposition nonFinalSequenceDisposition(
         const CanonicalSessionProgress& session, CommandSequence sequence) noexcept
     {
@@ -181,17 +173,30 @@ namespace TES3MP
         }
     }
     CanonicalCommandReducer::CanonicalCommandReducer(CanonicalServerState initialState, Observability& observability)
-        : CanonicalCommandReducer(std::move(initialState), observability, CanonicalSinkBundle{})
+        : CanonicalCommandReducer(std::move(initialState), observability, CanonicalSinkBundle{}, testContentManifest())
+    {
+    }
+
+    CanonicalCommandReducer::CanonicalCommandReducer(CanonicalServerState initialState, Observability& observability,
+        ContentManifest contentManifest)
+        : CanonicalCommandReducer(std::move(initialState), observability, CanonicalSinkBundle{}, contentManifest)
     {
     }
 
     CanonicalCommandReducer::CanonicalCommandReducer(
         CanonicalServerState initialState, Observability& observability, CanonicalSinkBundle sinks)
+        : CanonicalCommandReducer(std::move(initialState), observability, sinks, testContentManifest())
+    {
+    }
+
+    CanonicalCommandReducer::CanonicalCommandReducer(CanonicalServerState initialState, Observability& observability,
+        CanonicalSinkBundle sinks, ContentManifest contentManifest)
         : mState(std::make_shared<CanonicalServerState>(std::move(initialState)))
         , mLatestPublication(std::shared_ptr<const CanonicalStatePublication>(
               new CanonicalStatePublication(mStateVersion, mCheckpointTick, mState, {})))
         , mObservability(observability)
         , mSinks(sinks)
+        , mContentManifest(contentManifest)
     {
     }
 
@@ -206,7 +211,13 @@ namespace TES3MP
         if (!mStateVersion.next() || !mCanonicalRevision.next()) return std::nullopt;
         std::vector<CanonicalPlayerEntityState> players(mState->players().begin(), mState->players().end());
         std::vector<CanonicalSessionProgress> sessions(mState->activeSessions().begin(), mState->activeSessions().end());
-        players.push_back(player);
+        const auto existing = std::find_if(players.begin(), players.end(), [&](const auto& value) {
+            return value.playerId() == player.playerId();
+        });
+        if (existing == players.end())
+            players.push_back(player);
+        else if (*existing != player)
+            return std::nullopt;
         sessions.push_back(session);
         auto candidate = createCanonicalServerState(players, sessions);
         auto* state = std::get_if<CanonicalServerState>(&candidate);
@@ -236,7 +247,7 @@ namespace TES3MP
         prepared.mPublication->mStateVersion = mStateVersion;
         prepared.mPublication->mCheckpointTick = mCheckpointTick;
         prepared.mPublication->mState = mState;
-        prepared.mPublication->mChecksum = canonicalStateChecksumV1(mStateVersion, mCheckpointTick, *mState);
+        prepared.mPublication->mChecksum = canonicalStateChecksumV2(mStateVersion, mCheckpointTick, *mState);
         std::shared_ptr<const CanonicalStatePublication> committed = std::move(prepared.mPublication);
         std::atomic_store_explicit(&mLatestPublication, committed, std::memory_order_release);
         (void)deliver(committed);
@@ -354,7 +365,7 @@ namespace TES3MP
         prepared.mPublication->mStateVersion = mStateVersion;
         prepared.mPublication->mCheckpointTick = mCheckpointTick;
         prepared.mPublication->mState = mState;
-        prepared.mPublication->mChecksum = canonicalStateChecksumV1(mStateVersion, mCheckpointTick, *mState);
+        prepared.mPublication->mChecksum = canonicalStateChecksumV2(mStateVersion, mCheckpointTick, *mState);
         std::shared_ptr<const CanonicalStatePublication> committed = std::move(prepared.mPublication);
         std::atomic_store_explicit(&mLatestPublication, committed, std::memory_order_release);
         (void)deliver(committed);
@@ -369,7 +380,7 @@ namespace TES3MP
         publication->mStateVersion = mStateVersion;
         publication->mCheckpointTick = mCheckpointTick;
         publication->mState = mState;
-        publication->mChecksum = canonicalStateChecksumV1(mStateVersion, mCheckpointTick, *mState);
+        publication->mChecksum = canonicalStateChecksumV2(mStateVersion, mCheckpointTick, *mState);
         std::shared_ptr<const CanonicalStatePublication> committed = std::move(publication);
         std::atomic_store_explicit(&mLatestPublication, committed, std::memory_order_release);
         return deliver(committed);
@@ -538,7 +549,7 @@ namespace TES3MP
                                     {
                                         const auto& requested = std::get<FixtureCellTransitionCommandProposal>(
                                             proposal.payload()).requestedCell();
-                                        if (!isPhase7Fixture(requested))
+                                        if (!mContentManifest.contains(requested))
                                         {
                                             disposition = CommandDisposition::UnknownFixtureCell;
                                             requiresSpatialAdvance = false;

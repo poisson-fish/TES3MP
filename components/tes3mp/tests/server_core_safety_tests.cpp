@@ -42,7 +42,7 @@ namespace
         std::uint64_t revision = 1, std::uint64_t epoch = 1, std::uint64_t tick = 0,
         LinearVelocity3 velocity = LinearVelocity3(0, 0, 0))
     {
-        return CanonicalPlayerEntityState(playerId(playerValue), entityId(entityValue),
+        return CanonicalPlayerEntityState(playerId(playerValue), entityId(entityValue), AppearanceId::fromValue(1).value(),
             transform(playerValue, static_cast<std::int64_t>(playerValue * 100)), velocity,
             EntityRevision::fromValue(revision).value(), AuthorityEpoch::fromValue(epoch).value(),
             ServerTick::fromValue(tick).value());
@@ -274,11 +274,11 @@ namespace
         const std::array players{ player(1, 101, 1, 1, 0, LinearVelocity3(1, 2, 3)) };
         const std::array sessions{ session(10, 1, 101, 1, 1, history) };
         const auto canonical = state(players, sessions);
-        const auto bytes = canonicalStateBytesV1(
+        const auto bytes = canonicalStateBytesV2(
             CanonicalStateVersion::fromValue(7).value(), ServerTick::fromValue(9).value(), canonical);
 
         std::vector<std::uint8_t> expected{ 'T', '3', 'C', 'S' };
-        appendLittleEndian(expected, std::uint16_t{ 1 });
+        appendLittleEndian(expected, std::uint16_t{ 2 });
         appendLittleEndian(expected, std::uint16_t{ 1 });
         appendLittleEndian(expected, std::uint32_t{ 1 });
         appendLittleEndian(expected, std::uint64_t{ 7 });
@@ -286,6 +286,7 @@ namespace
         appendLittleEndian(expected, std::uint32_t{ 1 });
         appendLittleEndian(expected, std::uint64_t{ 1 });
         appendLittleEndian(expected, std::uint64_t{ 101 });
+        appendLittleEndian(expected, std::uint64_t{ 1 });
         expected.push_back(0);
         appendLittleEndian(expected, std::uint64_t{ 1 });
         appendLittleEndian(expected, std::int64_t{ 100 });
@@ -321,9 +322,9 @@ namespace
         const std::array players{ player() };
         const std::array sessions{ session() };
         const auto canonical = state(players, sessions);
-        const auto bytes = canonicalStateBytesV1(CanonicalStateVersion::initial(), ServerTick::initial(), canonical);
+        const auto bytes = canonicalStateBytesV2(CanonicalStateVersion::initial(), ServerTick::initial(), canonical);
         return crc64Ecma182(Check).value() == 0x6C40DF5F0B497347ULL
-            && canonicalStateChecksumV1(CanonicalStateVersion::initial(), ServerTick::initial(), canonical)
+            && canonicalStateChecksumV2(CanonicalStateVersion::initial(), ServerTick::initial(), canonical)
             == crc64Ecma182(bytes);
     }
 
@@ -344,13 +345,13 @@ namespace
         const auto revision = fieldState(1, 2, 1, 1, 10);
         const auto epoch = fieldState(1, 1, 2, 1, 10);
         const auto ackHistory = fieldState(1, 1, 1, 2, 11);
-        const auto bytes = canonicalStateBytesV1(CanonicalStateVersion::initial(), ServerTick::initial(), base);
-        return bytes != canonicalStateBytesV1(CanonicalStateVersion::initial(), ServerTick::initial(), identity)
-            && bytes != canonicalStateBytesV1(CanonicalStateVersion::initial(), ServerTick::initial(), revision)
-            && bytes != canonicalStateBytesV1(CanonicalStateVersion::initial(), ServerTick::initial(), epoch)
-            && bytes != canonicalStateBytesV1(CanonicalStateVersion::initial(), ServerTick::initial(), ackHistory)
-            && bytes != canonicalStateBytesV1(CanonicalStateVersion::fromValue(1).value(), ServerTick::initial(), base)
-            && bytes != canonicalStateBytesV1(CanonicalStateVersion::initial(), ServerTick::fromValue(1).value(), base);
+        const auto bytes = canonicalStateBytesV2(CanonicalStateVersion::initial(), ServerTick::initial(), base);
+        return bytes != canonicalStateBytesV2(CanonicalStateVersion::initial(), ServerTick::initial(), identity)
+            && bytes != canonicalStateBytesV2(CanonicalStateVersion::initial(), ServerTick::initial(), revision)
+            && bytes != canonicalStateBytesV2(CanonicalStateVersion::initial(), ServerTick::initial(), epoch)
+            && bytes != canonicalStateBytesV2(CanonicalStateVersion::initial(), ServerTick::initial(), ackHistory)
+            && bytes != canonicalStateBytesV2(CanonicalStateVersion::fromValue(1).value(), ServerTick::initial(), base)
+            && bytes != canonicalStateBytesV2(CanonicalStateVersion::initial(), ServerTick::fromValue(1).value(), base);
     }
 
     bool observability_allocation_and_publication_handle_do_not_change_checksum()
@@ -371,9 +372,9 @@ namespace
         const auto firstPublication = first.latestPublication();
         const auto secondPublication = second.latestPublication();
         return firstPublication != secondPublication && firstPublication->checksum() == secondPublication->checksum()
-            && canonicalStateBytesV1(
+            && canonicalStateBytesV2(
                    firstPublication->stateVersion(), firstPublication->checkpointTick(), firstPublication->state())
-            == canonicalStateBytesV1(
+            == canonicalStateBytesV2(
                 secondPublication->stateVersion(), secondPublication->checkpointTick(), secondPublication->state());
     }
 
@@ -443,7 +444,7 @@ namespace
         const std::array sessions{ session() };
         const auto canonical = state(players, sessions);
         return canonical.activeSessions().front().finalizedCommandHistory().empty()
-            && CanonicalStateEncodingVersion == 1 && CanonicalChecksumAlgorithmVersion == 1
+            && CanonicalStateEncodingVersion == 2 && CanonicalChecksumAlgorithmVersion == 1
             && CanonicalRulesVersion == 1;
     }
 }

@@ -40,6 +40,12 @@ namespace
         return std::move(*ResumeToken::create(value));
     }
 
+    PlayerCredential playerCredential(unsigned seed)
+    {
+        const auto value = bytes(PlayerCredentialBytes, seed);
+        return std::move(*PlayerCredential::create(value));
+    }
+
     bool values_round_trip_without_exposing_secret_views()
     {
         const auto password = bytes(MaximumAuthenticationMaterialBytes, 17);
@@ -76,6 +82,34 @@ namespace
                 return false;
         }
         return true;
+    }
+
+    bool durable_player_credentials_round_trip_only_on_join_paths()
+    {
+        const auto password = bytes(7, 11);
+        const auto requestBytes = encodeAuthenticationRequest(
+            AuthenticationRequest::join(material(password), playerCredential(29)));
+        auto decodedRequest = decodeAuthenticationRequest(requestBytes);
+        auto* request = std::get_if<AuthenticationRequest>(&decodedRequest);
+        if (!request || !request->hasPlayerCredential())
+            return false;
+        auto credential = request->takePlayerCredential();
+        std::array<std::byte, PlayerCredentialBytes> copied{};
+        if (!credential || !credential->copyTo(copied)
+            || !std::ranges::equal(copied, bytes(PlayerCredentialBytes, 29)))
+            return false;
+
+        auto accepted = AuthenticationAcceptedMessage::create(
+            token(41), MinimumResumeTokenLifetimeMilliseconds, playerCredential(43));
+        const auto acceptedBytes = encodeAuthenticationAccepted(*accepted);
+        auto decodedAccepted = decodeAuthenticationAccepted(acceptedBytes);
+        auto* acceptedValue = std::get_if<AuthenticationAcceptedMessage>(&decodedAccepted);
+        if (!acceptedValue || !acceptedValue->hasPlayerCredential())
+            return false;
+        auto returned = acceptedValue->takePlayerCredential();
+        copied.fill(std::byte{});
+        return returned && returned->copyTo(copied) && std::ranges::equal(copied, bytes(PlayerCredentialBytes, 43))
+            && !AuthenticationRequest::resume(token(3)).hasPlayerCredential();
     }
 
     bool exact_bounds_are_enforced()
@@ -217,7 +251,8 @@ int main(int argc, char** argv)
     if (argc == 3 && std::string_view(argv[1]) == "--verify-corpus")
         return verifyCorpus(argv[2]) ? 0 : 1;
 
-    return values_round_trip_without_exposing_secret_views() && exact_bounds_are_enforced()
+    return values_round_trip_without_exposing_secret_views()
+            && durable_player_credentials_round_trip_only_on_join_paths() && exact_bounds_are_enforced()
             && malformed_payloads_fail_closed() && every_single_bit_mutation_rejects_or_normalizes()
         ? 0
         : 1;

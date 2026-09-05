@@ -10,7 +10,7 @@
 
 namespace TES3MP
 {
-    inline constexpr std::uint16_t CanonicalStateEncodingVersion = 1;
+    inline constexpr std::uint16_t CanonicalStateEncodingVersion = 2;
     inline constexpr std::uint16_t CanonicalChecksumAlgorithmVersion = 1;
     inline constexpr std::uint32_t CanonicalRulesVersion = 1;
 
@@ -31,10 +31,10 @@ namespace TES3MP
         std::uint64_t mValue;
     };
 
-    std::vector<std::uint8_t> canonicalStateBytesV1(
+    std::vector<std::uint8_t> canonicalStateBytesV2(
         CanonicalStateVersion stateVersion, ServerTick checkpointTick, const CanonicalServerState& state);
     CanonicalChecksum crc64Ecma182(std::span<const std::uint8_t> bytes) noexcept;
-    CanonicalChecksum canonicalStateChecksumV1(
+    CanonicalChecksum canonicalStateChecksumV2(
         CanonicalStateVersion stateVersion, ServerTick checkpointTick, const CanonicalServerState& state) noexcept;
 }
 

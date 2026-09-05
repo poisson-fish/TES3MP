@@ -45,7 +45,8 @@ namespace
 
     CanonicalPlayerEntityState player()
     {
-        return CanonicalPlayerEntityState(playerId(1), entityId(101), transform(1, 100), LinearVelocity3(0, 0, 0),
+        return CanonicalPlayerEntityState(playerId(1), entityId(101), AppearanceId::fromValue(1).value(),
+            transform(1, 100), LinearVelocity3(0, 0, 0),
             EntityRevision::fromValue(1).value(), AuthorityEpoch::fromValue(1).value(), ServerTick::initial());
     }
 
@@ -343,7 +344,7 @@ namespace
             && publication->changes()[1].stateVersion().value() == 2 && publication->stateVersion().value() == 2
             && publication->state() == reducer.state()
             && publication->checksum()
-            == canonicalStateChecksumV1(publication->stateVersion(), publication->checkpointTick(), reducer.state());
+            == canonicalStateChecksumV2(publication->stateVersion(), publication->checkpointTick(), reducer.state());
     }
 
     bool fanout_order_is_persistence_replay_script_metrics()

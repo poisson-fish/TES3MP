@@ -5,6 +5,7 @@
 #include "fixture_observation_projection.hpp"
 #include "phase7_proof_profile.hpp"
 #include "phase7_queue_telemetry.hpp"
+#include "player_identity_file.hpp"
 #include "server_config.hpp"
 
 #include <array>
@@ -12,6 +13,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <iostream>
 #include <limits>
 #include <map>
 #include <string>
@@ -25,18 +27,24 @@ namespace
     template <class Value>
     Value id(std::uint64_t value) { return Value::fromValue(value).value(); }
 
-    void require(bool condition)
+    void require(bool condition, int line)
     {
         if (!condition)
+        {
+            std::cerr << "server_app_tests failure at line " << line << '\n';
             std::abort();
+        }
     }
 
 #undef assert
-#define assert(condition) require(static_cast<bool>(condition))
+#define assert(condition) require(static_cast<bool>(condition), __LINE__)
 
     constexpr std::string_view validConfig =
         "bind_address = 127.0.0.1\nport = 25565\ntick_interval_ms = 16\n"
-        "disconnect_grace_ms = 30000\njoin_password_file = password.txt\n";
+        "disconnect_grace_ms = 30000\njoin_password_file = password.txt\n"
+        "content_manifest_id = 0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20\n"
+        "interior_cell_id = 7\nexterior_worldspace_id = 8\ndefault_appearance_id = 1\n"
+        "player_identity_file = players.txt\n";
 
     class FakeRuntime final : public TES3MP::TransportRuntime
     {
@@ -214,7 +222,7 @@ namespace
         const auto zero = Turn32::fromValue(0);
         auto spawn = Transform(CellId::interior(id<CellSpaceId>(7)), Position3(10, 20, 30),
             Orientation3(zero, zero, zero));
-        return *AuthenticatedJoinCoordinator::create(spawn,
+        return *AuthenticatedJoinCoordinator::create(spawn, id<AppearanceId>(1),
             { id<SessionId>(1), id<PlayerId>(1), id<EntityId>(1) }, reducer);
     }
 
@@ -240,9 +248,9 @@ namespace
         const auto interior = CellId::interior(id<CellSpaceId>(7));
         const auto exterior = CellId::exterior(id<CellSpaceId>(8), 0, 0);
         std::vector<CanonicalPlayerEntityState> players{
-            { id<PlayerId>(1), id<EntityId>(1), Transform(interior, Position3(1, 0, 0), Orientation3(zero, zero, zero)),
+            { id<PlayerId>(1), id<EntityId>(1), id<AppearanceId>(1), Transform(interior, Position3(1, 0, 0), Orientation3(zero, zero, zero)),
                 LinearVelocity3(0, 0, 0), id<EntityRevision>(2), AuthorityEpoch::initial(), id<ServerTick>(4) },
-            { id<PlayerId>(2), id<EntityId>(2), Transform(secondExterior ? exterior : interior,
+            { id<PlayerId>(2), id<EntityId>(2), id<AppearanceId>(1), Transform(secondExterior ? exterior : interior,
                 Position3(2, 0, 0), Orientation3(zero, zero, zero)), LinearVelocity3(0, 0, 0),
                 id<EntityRevision>(secondExterior ? 2 : 1), AuthorityEpoch::initial(), id<ServerTick>(4) }
         };
@@ -277,7 +285,8 @@ int main()
             && evidence->latestHighWaterBytes == 10 && !telemetry.takeDrainEvidence());
     }
     using namespace TES3MP::ServerApp;
-    static_assert(Phase7ProtocolMajor == 1 && Phase7ProtocolMinor == 0 && Phase7ProtocolPatch == 0);
+    static_assert(Phase7ProtocolMajor == 1 && Phase7ProtocolMinimumMinor == 1
+        && Phase7ProtocolMaximumMinor == 1);
     static_assert(Phase7SourceAuthenticationBurst == 4 && Phase7GlobalAuthenticationBurst == 32
         && Phase7AuthenticationRefillMilliseconds == 1'000 && Phase7ConnectionCapacity == 8);
     static_assert(!phase7ProofDisconnectGraceAccepted(MinimumResumeTokenLifetimeMilliseconds - 1));
@@ -338,12 +347,11 @@ int main()
             = std::get<ServerHello>(negotiateClientHello(ClientHello::fromOffer(emptyOffer()), emptyOffer()));
         RecordingCrypto first;
         RecordingCrypto second;
-        const auto firstContext = makePhase7ResumeTokenContext(negotiated, first);
-        const auto secondContext = makePhase7ResumeTokenContext(negotiated, second);
+        const auto firstContext = makeResumeTokenContext(negotiated, first);
+        const auto secondContext = makeResumeTokenContext(negotiated, second);
         assert(firstContext && secondContext && *firstContext == *secondContext);
         assert(first.inputs.size() == 2);
-        const auto expectedContent
-            = std::as_bytes(std::span(Phase7FixtureContentId.data(), Phase7FixtureContentId.size()));
+        const auto expectedContent = negotiated.contentManifest().bytes();
         assert(first.inputs[1] == std::vector<std::byte>(expectedContent.begin(), expectedContent.end()));
 
         auto newerVersions = std::get<ProtocolVersionRange>(ProtocolVersionRange::create(1, 1, 1));
@@ -352,13 +360,13 @@ int main()
         const auto newer = std::get<ServerHello>(negotiateClientHello(
             ClientHello::fromOffer(std::move(newerClientOffer)), newerServerOffer));
         RecordingCrypto changed;
-        const auto changedContext = makePhase7ResumeTokenContext(newer, changed);
+        const auto changedContext = makeResumeTokenContext(newer, changed);
         assert(changedContext && changedContext->protocol != firstContext->protocol
             && changedContext->content == firstContext->content);
 
         RecordingCrypto failed;
         failed.failOnCall = 2;
-        assert(!makePhase7ResumeTokenContext(negotiated, failed));
+        assert(!makeResumeTokenContext(negotiated, failed));
     }
     {
         auto result = parseServerConfig(validConfig);
@@ -377,6 +385,10 @@ int main()
     assert(std::holds_alternative<ConfigError>(parseServerConfig(std::string(MaximumConfigBytes + 1, 'x'))));
     assert(std::holds_alternative<ConfigError>(parseServerConfig(std::string(MaximumConfigLineBytes + 1, 'x'))));
     assert(std::holds_alternative<ConfigError>(parseServerConfig(std::string("\xc0\x80", 2))));
+    auto duplicateContentIds = std::string(validConfig);
+    duplicateContentIds.replace(duplicateContentIds.find("exterior_worldspace_id = 8"),
+        std::string("exterior_worldspace_id = 8").size(), "exterior_worldspace_id = 7");
+    assert(std::holds_alternative<ConfigError>(parseServerConfig(duplicateContentIds)));
 
     const auto temporary = std::filesystem::temp_directory_path() / "tes3mp-server-password-test";
     { std::ofstream stream(temporary, std::ios::binary); stream << "secret\r\n"; }
@@ -385,6 +397,24 @@ int main()
     assert(std::get<TES3MP::AuthenticationMaterial>(password).size() == 6);
     std::filesystem::remove(temporary);
     assert(std::holds_alternative<ConfigError>(loadJoinPassword(temporary)));
+
+    const auto identityPath = std::filesystem::temp_directory_path() / "tes3mp-server-player-identities-test";
+    std::filesystem::remove(identityPath);
+    auto identityFileResult = PlayerIdentityFile::open(identityPath);
+    assert(std::holds_alternative<std::unique_ptr<PlayerIdentityFile>>(identityFileResult));
+    auto identityFile = std::move(std::get<std::unique_ptr<PlayerIdentityFile>>(identityFileResult));
+    CredentialDigest identityDigest;
+    identityDigest.bytes.fill(std::byte{ 0x4a });
+    const std::array identityRecords{ PersistedPlayerIdentity{
+        { id<PlayerId>(3), id<EntityId>(5), id<AppearanceId>(7), testContentManifestId() }, identityDigest } };
+    assert(identityFile->replace(identityRecords));
+    auto reopenedResult = PlayerIdentityFile::open(identityPath);
+    assert(std::holds_alternative<std::unique_ptr<PlayerIdentityFile>>(reopenedResult));
+    auto reopened = std::move(std::get<std::unique_ptr<PlayerIdentityFile>>(reopenedResult));
+    assert(reopened->records().size() == 1 && reopened->records()[0] == identityRecords[0]);
+    { std::ofstream stream(identityPath, std::ios::binary | std::ios::trunc); stream << "malformed\n"; }
+    assert(std::holds_alternative<PlayerIdentityFileError>(PlayerIdentityFile::open(identityPath)));
+    std::filesystem::remove(identityPath);
 
     auto config = parsedConfig();
     FakeRuntime runtime;
@@ -697,7 +727,7 @@ int main()
         const auto zero = Turn32::fromValue(0);
         const auto interior = CellId::interior(id<CellSpaceId>(7));
         std::vector<CanonicalPlayerEntityState> players{
-            { id<PlayerId>(1), id<EntityId>(1), Transform(interior, Position3(10, 20, 30),
+            { id<PlayerId>(1), id<EntityId>(1), id<AppearanceId>(1), Transform(interior, Position3(10, 20, 30),
                 Orientation3(zero, zero, zero)), LinearVelocity3(2, -3, 4), id<EntityRevision>(1),
                 AuthorityEpoch::initial(), ServerTick::initial() }
         };
@@ -729,10 +759,10 @@ int main()
         const auto zero = Turn32::fromValue(0);
         const auto interior = CellId::interior(id<CellSpaceId>(7));
         std::vector<CanonicalPlayerEntityState> players{
-            { id<PlayerId>(1), id<EntityId>(1), Transform(interior,
+            { id<PlayerId>(1), id<EntityId>(1), id<AppearanceId>(1), Transform(interior,
                 Position3(std::numeric_limits<std::int64_t>::max(), 0, 0), Orientation3(zero, zero, zero)),
                 LinearVelocity3(1, 0, 0), id<EntityRevision>(1), AuthorityEpoch::initial(), ServerTick::initial() },
-            { id<PlayerId>(2), id<EntityId>(2), Transform(interior, Position3(5, 0, 0),
+            { id<PlayerId>(2), id<EntityId>(2), id<AppearanceId>(1), Transform(interior, Position3(5, 0, 0),
                 Orientation3(zero, zero, zero)), LinearVelocity3(1, 0, 0), id<EntityRevision>(1),
                 AuthorityEpoch::initial(), ServerTick::initial() }
         };

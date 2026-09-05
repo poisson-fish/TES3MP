@@ -4,7 +4,8 @@ enum SessionRejectionReason : ubyte {
   Unknown = 0,
   ProtocolMajorMismatch = 1,
   NoCompatibleMinor = 2,
-  UnsupportedRequiredCapability = 3
+  UnsupportedRequiredCapability = 3,
+  ContentManifestMismatch = 4
 }
 
 table SessionRejected {

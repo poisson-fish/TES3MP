@@ -30,7 +30,7 @@ namespace TES3MP::OpenMWAdapter
         static constexpr std::size_t MaximumEvidenceEvents = 128;
 
         DesktopAutomation(DesktopAutomationRole role, const std::filesystem::path& output,
-            DesktopPresentation& presentation, ConnectionStatusProvider& status);
+            ContentManifest contentManifest, DesktopPresentation& presentation, ConnectionStatusProvider& status);
 
         bool valid() const noexcept { return mOutput.is_open(); }
         CellTransitionCapture captureCellTransition() noexcept override;
@@ -49,6 +49,8 @@ namespace TES3MP::OpenMWAdapter
         void finish(bool success) noexcept;
 
         DesktopAutomationRole mRole;
+        CellId mInterior;
+        CellId mExterior;
         std::ofstream mOutput;
         DesktopPresentation& mPresentation;
         ConnectionStatusProvider& mStatus;

@@ -35,6 +35,7 @@ namespace TES3MP::OpenMWAdapter
 
     ClientCoordinatorResult makeClientCoordinator(std::string_view host, std::uint64_t port,
         std::uint64_t timeoutMilliseconds, const std::filesystem::path& passwordFile,
+        const std::filesystem::path& playerCredentialFile, ContentManifestId contentManifest,
         ClientProviders providers) noexcept;
 }
 

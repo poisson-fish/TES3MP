@@ -36,67 +36,39 @@ Verification scales with risk:
 
 ## Now
 
-### Phase 10 — player lifecycle and content identity: foundation decision
+### Phase 10 — player lifecycle and content identity foundation
 
-Status: **Awaiting owner approval**
+Status: **Complete**
 
-Outcome: replace fixture-only identity assumptions with the smallest durable
-player/content identity model that can support later gameplay domains without
-coupling protocol identity to OpenMW records.
+Outcome: the approved A/A model now replaces fixture-only identity assumptions.
 
-Discovery found:
+- Fresh password joins receive a dedicated opaque player credential. The client
+  persists the secret; the bounded server registry atomically persists only its
+  digest with stable player/entity/appearance and manifest identity.
+- Credential reattachment still requires ordinary password authentication and
+  restores the same player/entity IDs across expiration and server restart.
+  Routing principals and grace-window resume tokens remain separate.
+- Handshake protocol 1.1 requires exact 32-byte content-manifest agreement before
+  authentication. Manifest-scoped opaque IDs replace magic cell/avatar constants;
+  OpenMW record names remain local adapter configuration.
+- Canonical appearance is explicit and checksum encoding is version 2. The pass
+  retains one configured appearance and spawn; character creation and general
+  character/world persistence remain out of scope.
 
-1. Password authentication creates a new process-local routing `PrincipalId`.
-   Join independently allocates monotonic process-local session, player, and
-   entity IDs, installs one fixed spawn, and never releases its retained
-   principal list after lifecycle expiration.
-2. Disconnect hides the active session but retains its player through the
-   grace window. Resume preserves session/player/entity and advances generation.
-   Expiration deletes the player and lifecycle binding; restart restores none of
-   these records.
-3. Content context is a fixed server-only string hashed into resume tokens. The
-   peer never proves the same content context. Cells are magic IDs `7` and `8`,
-   while every remote actor uses one client-local configured OpenMW NPC record.
-
-The first production boundary is server join composition: a stable authenticated
-player subject and an agreed content context must be resolved there before the
-writer creates or reattaches canonical player/entity state. OpenMW record names
-remain behind a client adapter manifest that maps context-scoped opaque IDs.
-
-Approval choices:
-
-1. **Durable player subject — A recommended:** issue and persist a dedicated
-   opaque player credential, distinct from routing principal and resume token;
-   it selects one server-owned `PlayerId` after ordinary authentication. This is
-   the smallest path compatible with the current shared-password provider.
-   **B:** require a future account provider to supply a stable subject first;
-   cleaner account integration, but Phase 10 cannot advance with the current
-   provider. **C:** retain process-local identity; smallest change, but does not
-   meet the durable-player outcome.
-2. **Content context — A recommended:** negotiate an exact versioned manifest
-   digest and use manifest-scoped opaque numeric cell/appearance IDs on the
-   wire; duplicate IDs, kinds, or mappings reject the manifest. **B:** send
-   normalized record keys on the wire; simpler authoring, but larger schemas and
-   record-normalization coupling. **C:** retain server-only digest plus local
-   command-line mappings; compatible, but cannot detect peer mismatch.
-
-After approval, implement the narrow A/A increment: bounded credential and
-player-registry contracts, exact content-context negotiation, one canonical
-appearance ID, manifest-backed replacement of fixture cell/avatar constants,
-and atomic fresh-join / resume / credential-reattach tests. Character creation,
-inventory, scripting, moderation, and general persistence remain out of scope.
-
-The completed discovery pass was read-only. It did not select character creation,
-inventory, persistence, scripting, moderation, or gameplay policy.
+Evidence: focused protocol/server/client/adapter contracts pass; networking-enabled
+server and headless client builds pass; the lifecycle integration flow passes all
+join, resume, expiry, fresh-identity, and queue-drain checks; full OpenMW desktop
+RelWithDebInfo builds. Decision and limits are in
+[ADR-0057](adr/ADR-0057-phase10-durable-player-and-content-identity.md).
 
 ## Next
 
 These are candidates, not locked slices:
 
-1. Implement the approved Phase 10 identity foundation and prove fresh join,
-   resume, durable reattachment, mismatch rejection, and atomic failure.
-2. Run the Phase 10 milestone gate and decide whether canonical cells/interest
-   or production movement is the better next vertical pass.
+1. Run the Phase 10 milestone gate and audit the new credential/registry format,
+   manifest compatibility boundary, and cross-platform client secret handling.
+2. Decide whether canonical cells/interest or production movement is the next
+   vertical pass, then specify only that selected slice.
 
 The list is rewritten after each completed pass. New evidence may reorder,
 combine, or remove items.

@@ -76,12 +76,17 @@ namespace TES3MP::ServerApp
         if (text.size() > MaximumConfigBytes) return error(ConfigErrorCode::TooLarge);
         if (!validUtf8(text)) return error(ConfigErrorCode::InvalidUtf8);
 
-        std::array<bool, 5> seen{};
+        std::array<bool, 10> seen{};
         std::string bindAddress;
         std::uint16_t port = 0;
         std::uint64_t tick = 0;
         std::uint64_t grace = 0;
         std::filesystem::path passwordPath;
+        std::optional<ContentManifestId> contentManifestId;
+        std::optional<CellSpaceId> interiorCellId;
+        std::optional<CellSpaceId> exteriorWorldspaceId;
+        std::optional<AppearanceId> defaultAppearanceId;
+        std::filesystem::path playerIdentityPath;
         std::size_t lineNumber = 0;
         std::size_t begin = 0;
         while (begin <= text.size())
@@ -104,6 +109,11 @@ namespace TES3MP::ServerApp
                 else if (key == "tick_interval_ms") slot = 2;
                 else if (key == "disconnect_grace_ms") slot = 3;
                 else if (key == "join_password_file") slot = 4;
+                else if (key == "content_manifest_id") slot = 5;
+                else if (key == "interior_cell_id") slot = 6;
+                else if (key == "exterior_worldspace_id") slot = 7;
+                else if (key == "default_appearance_id") slot = 8;
+                else if (key == "player_identity_file") slot = 9;
                 else return error(ConfigErrorCode::UnknownKey, lineNumber, key);
                 if (seen[slot]) return error(ConfigErrorCode::DuplicateKey, lineNumber, key);
                 if (value.empty() || value.find('#') != std::string_view::npos
@@ -129,11 +139,30 @@ namespace TES3MP::ServerApp
                     if (!parsed) return error(ConfigErrorCode::InvalidValue, lineNumber, key);
                     grace = *parsed;
                 }
-                else
+                else if (slot == 4)
                 {
                     if (value.size() > MaximumPasswordPathBytes)
                         return error(ConfigErrorCode::InvalidValue, lineNumber, key);
                     passwordPath = std::filesystem::u8path(value);
+                }
+                else if (slot == 5)
+                {
+                    contentManifestId = ContentManifestId::fromHex(value);
+                    if (!contentManifestId) return error(ConfigErrorCode::InvalidValue, lineNumber, key);
+                }
+                else if (slot >= 6 && slot <= 8)
+                {
+                    const auto parsed = unsignedValue(value, std::numeric_limits<std::uint64_t>::max());
+                    if (!parsed || *parsed == 0) return error(ConfigErrorCode::InvalidValue, lineNumber, key);
+                    if (slot == 6) interiorCellId = CellSpaceId::fromValue(*parsed);
+                    else if (slot == 7) exteriorWorldspaceId = CellSpaceId::fromValue(*parsed);
+                    else defaultAppearanceId = AppearanceId::fromValue(*parsed);
+                }
+                else
+                {
+                    if (value.size() > MaximumIdentityPathBytes)
+                        return error(ConfigErrorCode::InvalidValue, lineNumber, key);
+                    playerIdentityPath = std::filesystem::u8path(value);
                 }
             }
             if (end == std::string_view::npos) break;
@@ -142,11 +171,16 @@ namespace TES3MP::ServerApp
         for (std::size_t slot = 0; slot < seen.size(); ++slot)
             if (!seen[slot])
                 return error(ConfigErrorCode::MissingKey, 0,
-                    std::array<std::string_view, 5>{ "bind_address", "port", "tick_interval_ms",
-                        "disconnect_grace_ms", "join_password_file" }[slot]);
+                    std::array<std::string_view, 10>{ "bind_address", "port", "tick_interval_ms",
+                        "disconnect_grace_ms", "join_password_file", "content_manifest_id", "interior_cell_id",
+                        "exterior_worldspace_id", "default_appearance_id", "player_identity_file" }[slot]);
         auto endpoint = ListenerEndpoint::create(bindAddress, port);
         if (!endpoint) return error(ConfigErrorCode::InvalidValue, 0, "bind_address");
-        return ServerConfig{ std::move(*endpoint), tick, grace, std::move(passwordPath) };
+        auto manifest = ContentManifest::create(*contentManifestId, *interiorCellId,
+            *exteriorWorldspaceId, *defaultAppearanceId);
+        if (!manifest) return error(ConfigErrorCode::InvalidValue, 0, "content_manifest_id");
+        return ServerConfig{ std::move(*endpoint), tick, grace, std::move(passwordPath), *manifest,
+            std::move(playerIdentityPath) };
     }
 
     PasswordLoadResult loadJoinPassword(const std::filesystem::path& path)

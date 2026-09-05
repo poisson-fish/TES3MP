@@ -109,8 +109,8 @@ namespace TES3MP
                 commitTick, current.entityRevision() };
         }
 
-        return CanonicalPlayerEntityState(current.playerId(), current.entityId(), replacementTransform,
-            replacementVelocity, *nextRevision, current.authorityEpoch(), commitTick);
+        return CanonicalPlayerEntityState(current.playerId(), current.entityId(), current.appearanceId(),
+            replacementTransform, replacementVelocity, *nextRevision, current.authorityEpoch(), commitTick);
     }
 
     CanonicalServerState::CanonicalServerState(

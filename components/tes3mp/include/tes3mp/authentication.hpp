@@ -2,6 +2,7 @@
 #define TES3MP_AUTHENTICATION_HPP
 
 #include "session_types.hpp"
+#include "content_identity.hpp"
 #include "value_types.hpp"
 
 #include <array>
@@ -18,11 +19,13 @@ namespace TES3MP
 {
     inline constexpr std::size_t MaximumAuthenticationMaterialBytes = 256;
     inline constexpr std::size_t ResumeTokenBytes = 32;
+    inline constexpr std::size_t PlayerCredentialBytes = 32;
     inline constexpr std::uint64_t MinimumResumeTokenLifetimeMilliseconds = 1'000;
     inline constexpr std::uint64_t MaximumResumeTokenLifetimeMilliseconds = 120'000;
 
     class AuthenticationRequest;
     class AuthenticationAcceptedMessage;
+    class PlayerCredential;
     class ResumeAdmissionGrant;
     class ResumeTokenStore;
     class ServerAuthenticationService;
@@ -82,6 +85,40 @@ namespace TES3MP
         std::array<std::byte, ResumeTokenBytes> mBytes{};
     };
 
+    class PlayerCredential
+    {
+    public:
+        static std::optional<PlayerCredential> create(std::span<const std::byte> bytes) noexcept;
+
+        PlayerCredential(const PlayerCredential&) = delete;
+        PlayerCredential& operator=(const PlayerCredential&) = delete;
+        PlayerCredential(PlayerCredential&& other) noexcept;
+        PlayerCredential& operator=(PlayerCredential&& other) noexcept;
+        ~PlayerCredential();
+
+        constexpr std::size_t size() const noexcept { return PlayerCredentialBytes; }
+        bool copyTo(std::span<std::byte> destination) const noexcept
+        {
+            if (destination.size() != mBytes.size())
+                return false;
+            std::copy(mBytes.begin(), mBytes.end(), destination.begin());
+            return true;
+        }
+
+    private:
+        friend class AuthenticationRequest;
+        friend class AuthenticationAcceptedMessage;
+        friend class PlayerIdentityRegistry;
+        friend std::vector<std::byte> encodeAuthenticationRequest(const AuthenticationRequest& value);
+        friend std::vector<std::byte> encodeAuthenticationAccepted(const AuthenticationAcceptedMessage& value);
+
+        PlayerCredential() noexcept = default;
+        std::span<const std::byte> secretBytes() const noexcept { return mBytes; }
+        void clear() noexcept;
+
+        std::array<std::byte, PlayerCredentialBytes> mBytes{};
+    };
+
     enum class AuthenticationCredentialKind : std::uint8_t
     {
         JoinPassword = 1,
@@ -91,7 +128,8 @@ namespace TES3MP
     class AuthenticationRequest
     {
     public:
-        static AuthenticationRequest join(AuthenticationMaterial material) noexcept;
+        static AuthenticationRequest join(AuthenticationMaterial material,
+            std::optional<PlayerCredential> playerCredential = std::nullopt) noexcept;
         static AuthenticationRequest resume(ResumeToken token) noexcept;
 
         AuthenticationRequest(const AuthenticationRequest&) = delete;
@@ -110,6 +148,13 @@ namespace TES3MP
             mMaterial.clear();
             return token;
         }
+        bool hasPlayerCredential() const noexcept { return mPlayerCredential.has_value(); }
+        std::optional<PlayerCredential> takePlayerCredential() noexcept
+        {
+            auto result = std::move(mPlayerCredential);
+            mPlayerCredential.reset();
+            return result;
+        }
 
     private:
         friend std::vector<std::byte> encodeAuthenticationRequest(const AuthenticationRequest& value);
@@ -118,21 +163,25 @@ namespace TES3MP
 
         std::span<const std::byte> materialBytes() const noexcept { return mMaterial.secretBytes(); }
 
-        AuthenticationRequest(AuthenticationCredentialKind kind, AuthenticationMaterial material) noexcept
+        AuthenticationRequest(AuthenticationCredentialKind kind, AuthenticationMaterial material,
+            std::optional<PlayerCredential> playerCredential = std::nullopt) noexcept
             : mKind(kind)
             , mMaterial(std::move(material))
+            , mPlayerCredential(std::move(playerCredential))
         {
         }
 
         AuthenticationCredentialKind mKind;
         AuthenticationMaterial mMaterial;
+        std::optional<PlayerCredential> mPlayerCredential;
     };
 
     class AuthenticationAcceptedMessage
     {
     public:
         static std::optional<AuthenticationAcceptedMessage> create(
-            ResumeToken token, std::uint64_t lifetimeMilliseconds) noexcept;
+            ResumeToken token, std::uint64_t lifetimeMilliseconds,
+            std::optional<PlayerCredential> playerCredential = std::nullopt) noexcept;
 
         AuthenticationAcceptedMessage(const AuthenticationAcceptedMessage&) = delete;
         AuthenticationAcceptedMessage& operator=(const AuthenticationAcceptedMessage&) = delete;
@@ -141,20 +190,30 @@ namespace TES3MP
 
         std::uint64_t lifetimeMilliseconds() const noexcept { return mLifetimeMilliseconds; }
         ResumeToken takeToken() noexcept { return std::move(mToken); }
+        bool hasPlayerCredential() const noexcept { return mPlayerCredential.has_value(); }
+        std::optional<PlayerCredential> takePlayerCredential() noexcept
+        {
+            auto result = std::move(mPlayerCredential);
+            mPlayerCredential.reset();
+            return result;
+        }
 
     private:
         friend std::vector<std::byte> encodeAuthenticationAccepted(const AuthenticationAcceptedMessage& value);
         friend std::variant<AuthenticationAcceptedMessage, struct AuthenticationCodecError>
         decodeAuthenticationAccepted(std::span<const std::byte> payload);
 
-        AuthenticationAcceptedMessage(ResumeToken token, std::uint64_t lifetimeMilliseconds) noexcept
+        AuthenticationAcceptedMessage(ResumeToken token, std::uint64_t lifetimeMilliseconds,
+            std::optional<PlayerCredential> playerCredential) noexcept
             : mToken(std::move(token))
             , mLifetimeMilliseconds(lifetimeMilliseconds)
+            , mPlayerCredential(std::move(playerCredential))
         {
         }
 
         ResumeToken mToken;
         std::uint64_t mLifetimeMilliseconds;
+        std::optional<PlayerCredential> mPlayerCredential;
     };
 
     enum class AuthenticationPublicRejection : std::uint8_t
@@ -189,6 +248,8 @@ namespace TES3MP
         UnknownCredentialKind,
         InvalidCredentialSize,
         InvalidResumeTokenSize,
+        InvalidPlayerCredentialSize,
+        UnexpectedPlayerCredential,
         InvalidLifetime,
         UnknownRejectionReason,
     };
@@ -270,6 +331,21 @@ namespace TES3MP
             return AuthenticatedAdmission(principal, std::nullopt);
         }
 
+        struct PlayerClaim
+        {
+            PlayerId player;
+            EntityId entity;
+            AppearanceId appearance;
+            ContentManifestId contentManifest;
+
+            friend constexpr bool operator==(PlayerClaim, PlayerClaim) noexcept = default;
+        };
+
+        static AuthenticatedAdmission reattach(PrincipalId principal, PlayerClaim claim) noexcept
+        {
+            return AuthenticatedAdmission(principal, std::nullopt, claim);
+        }
+
         AuthenticatedAdmission(const AuthenticatedAdmission&) = delete;
         AuthenticatedAdmission& operator=(const AuthenticatedAdmission&) = delete;
         AuthenticatedAdmission(AuthenticatedAdmission&&) noexcept = default;
@@ -277,6 +353,7 @@ namespace TES3MP
 
         PrincipalId principal() const noexcept { return mPrincipal; }
         bool isResume() const noexcept { return mResume.has_value(); }
+        const std::optional<PlayerClaim>& playerClaim() const noexcept { return mPlayerClaim; }
         std::optional<ResumeAdmissionGrant> takeResumeGrant() noexcept
         {
             auto result = std::move(mResume);
@@ -287,14 +364,17 @@ namespace TES3MP
     private:
         friend class ResumeTokenStore;
 
-        AuthenticatedAdmission(PrincipalId principal, std::optional<ResumeAdmissionGrant> resume) noexcept
+        AuthenticatedAdmission(PrincipalId principal, std::optional<ResumeAdmissionGrant> resume,
+            std::optional<PlayerClaim> playerClaim = std::nullopt) noexcept
             : mPrincipal(principal)
             , mResume(std::move(resume))
+            , mPlayerClaim(playerClaim)
         {
         }
 
         PrincipalId mPrincipal;
         std::optional<ResumeAdmissionGrant> mResume;
+        std::optional<PlayerClaim> mPlayerClaim;
     };
 
     struct AuthenticationRejected

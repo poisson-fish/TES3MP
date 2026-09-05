@@ -43,12 +43,15 @@ namespace TES3MP
     HeadlessClientResult ClientSessionRuntime::start(
         const ConnectionEndpoint& endpoint, ClientHello hello, AuthenticationRequest authentication) noexcept
     {
+        mMayAcceptPlayerCredential = authentication.kind() == AuthenticationCredentialKind::JoinPassword
+            && !authentication.hasPlayerCredential();
         mClientHello.emplace(std::move(hello));
         mAuthentication.emplace(std::move(authentication));
         const auto result = connect(endpoint);
         if (result != HeadlessClientResult::Accepted)
         {
             mClientHello.reset();
+            mMayAcceptPlayerCredential = false;
             if (mAuthentication->kind() != AuthenticationCredentialKind::ResumeToken)
                 mAuthentication.reset();
         }
@@ -95,6 +98,7 @@ namespace TES3MP
             else if (auto* rejected = std::get_if<SessionRejected>(&message))
             {
                 mSession->handle(ClientSessionRejectedReceived{ std::move(*rejected) });
+                mMayAcceptPlayerCredential = false;
                 mOutbound.clear();
                 mSession->close();
                 return { ClientRuntimeResult::ProtocolRejected, ClientSessionAction::SessionRejected };
@@ -105,6 +109,7 @@ namespace TES3MP
                     ? AuthenticationRejectionReason::Denied
                     : AuthenticationRejectionReason::ProviderUnavailable;
                 mSession->handle(ClientAuthenticationRejected{ reason });
+                mMayAcceptPlayerCredential = false;
                 mOutbound.clear();
                 mSession->close();
                 return { ClientRuntimeResult::ProtocolRejected, ClientSessionAction::SessionRejected };
@@ -116,6 +121,13 @@ namespace TES3MP
                     return reject();
                 mResumeLifetimeMilliseconds = accepted->lifetimeMilliseconds();
                 mResumeToken.emplace(accepted->takeToken());
+                if (auto playerCredential = accepted->takePlayerCredential())
+                {
+                    if (!mMayAcceptPlayerCredential)
+                        return reject();
+                    mPlayerCredential = std::move(playerCredential);
+                }
+                mMayAcceptPlayerCredential = false;
                 result.authenticationAccepted = true;
             }
             else if (auto* snapshot = std::get_if<LatestWinsSnapshot>(&message))
@@ -249,6 +261,7 @@ namespace TES3MP
 
     ClientRuntimeDrainResult ClientSessionRuntime::fail(ClientRuntimeResult result) noexcept
     {
+        mMayAcceptPlayerCredential = false;
         mOutbound.clear();
         mSession->close();
         return { result, ClientSessionAction::SessionClosed };
@@ -378,7 +391,15 @@ namespace TES3MP
 
     HeadlessClientResult ClientSessionRuntime::close() noexcept
     {
+        mMayAcceptPlayerCredential = false;
         mOutbound.clear();
         return mSession->close();
+    }
+
+    std::optional<PlayerCredential> ClientSessionRuntime::takePlayerCredential() noexcept
+    {
+        auto result = std::move(mPlayerCredential);
+        mPlayerCredential.reset();
+        return result;
     }
 }

@@ -2,6 +2,7 @@
 #define TES3MP_SERVER_COMMAND_REDUCER_HPP
 
 #include "canonical_publication.hpp"
+#include "content_identity.hpp"
 #include "canonical_sinks.hpp"
 #include "observability.hpp"
 
@@ -154,8 +155,12 @@ namespace TES3MP
         // Eligible for later reviewed composition; this type owns no connection,
         // protocol request, target projection, delivery, or runtime loop.
         CanonicalCommandReducer(CanonicalServerState initialState, Observability& observability);
+        CanonicalCommandReducer(CanonicalServerState initialState, Observability& observability,
+            ContentManifest contentManifest);
         CanonicalCommandReducer(
             CanonicalServerState initialState, Observability& observability, CanonicalSinkBundle sinks);
+        CanonicalCommandReducer(CanonicalServerState initialState, Observability& observability,
+            CanonicalSinkBundle sinks, ContentManifest contentManifest);
 
         CanonicalCommandReducer(const CanonicalCommandReducer&) = delete;
         CanonicalCommandReducer& operator=(const CanonicalCommandReducer&) = delete;
@@ -203,6 +208,7 @@ namespace TES3MP
         std::shared_ptr<const CanonicalStatePublication> mLatestPublication;
         Observability& mObservability;
         CanonicalSinkBundle mSinks;
+        ContentManifest mContentManifest;
     };
 }
 

@@ -159,9 +159,39 @@ namespace TES3MP
         clearBytes(mBytes);
     }
 
-    AuthenticationRequest AuthenticationRequest::join(AuthenticationMaterial material) noexcept
+    std::optional<PlayerCredential> PlayerCredential::create(std::span<const std::byte> bytes) noexcept
     {
-        return AuthenticationRequest(AuthenticationCredentialKind::JoinPassword, std::move(material));
+        if (bytes.size() != PlayerCredentialBytes)
+            return std::nullopt;
+        PlayerCredential result;
+        std::copy(bytes.begin(), bytes.end(), result.mBytes.begin());
+        return result;
+    }
+
+    PlayerCredential::PlayerCredential(PlayerCredential&& other) noexcept : mBytes(other.mBytes)
+    {
+        other.clear();
+    }
+
+    PlayerCredential& PlayerCredential::operator=(PlayerCredential&& other) noexcept
+    {
+        if (this == &other)
+            return *this;
+        clear();
+        mBytes = other.mBytes;
+        other.clear();
+        return *this;
+    }
+
+    PlayerCredential::~PlayerCredential() { clear(); }
+
+    void PlayerCredential::clear() noexcept { clearBytes(mBytes); }
+
+    AuthenticationRequest AuthenticationRequest::join(
+        AuthenticationMaterial material, std::optional<PlayerCredential> playerCredential) noexcept
+    {
+        return AuthenticationRequest(AuthenticationCredentialKind::JoinPassword,
+            std::move(material), std::move(playerCredential));
     }
 
     AuthenticationRequest AuthenticationRequest::resume(ResumeToken token) noexcept
@@ -171,12 +201,14 @@ namespace TES3MP
     }
 
     std::optional<AuthenticationAcceptedMessage> AuthenticationAcceptedMessage::create(
-        ResumeToken token, std::uint64_t lifetimeMilliseconds) noexcept
+        ResumeToken token, std::uint64_t lifetimeMilliseconds,
+        std::optional<PlayerCredential> playerCredential) noexcept
     {
         if (lifetimeMilliseconds < MinimumResumeTokenLifetimeMilliseconds
             || lifetimeMilliseconds > MaximumResumeTokenLifetimeMilliseconds)
             return std::nullopt;
-        return AuthenticationAcceptedMessage(std::move(token), lifetimeMilliseconds);
+        return AuthenticationAcceptedMessage(
+            std::move(token), lifetimeMilliseconds, std::move(playerCredential));
     }
 
     std::vector<std::byte> encodeAuthenticationRequest(const AuthenticationRequest& value)
@@ -185,8 +217,16 @@ namespace TES3MP
         const auto material = value.materialBytes();
         const auto encodedMaterial
             = builder.CreateVector(reinterpret_cast<const std::uint8_t*>(material.data()), material.size());
+        flatbuffers::Offset<flatbuffers::Vector<std::uint8_t>> encodedPlayerCredential;
+        if (value.mPlayerCredential)
+        {
+            const auto credential = value.mPlayerCredential->secretBytes();
+            encodedPlayerCredential = builder.CreateVector(
+                reinterpret_cast<const std::uint8_t*>(credential.data()), credential.size());
+        }
         const auto root = Protocol::Schema::CreateAuthenticationRequest(
-            builder, static_cast<Protocol::Schema::AuthenticationCredentialKind>(value.kind()), encodedMaterial);
+            builder, static_cast<Protocol::Schema::AuthenticationCredentialKind>(value.kind()), encodedMaterial,
+            encodedPlayerCredential);
         Protocol::Schema::FinishSizePrefixedAuthenticationRequestBuffer(builder, root);
         return takeBuffer(builder);
     }
@@ -197,8 +237,15 @@ namespace TES3MP
         const auto token = value.mToken.secretBytes();
         const auto encodedToken
             = builder.CreateVector(reinterpret_cast<const std::uint8_t*>(token.data()), token.size());
-        const auto root
-            = Protocol::Schema::CreateAuthenticationAccepted(builder, encodedToken, value.lifetimeMilliseconds());
+        flatbuffers::Offset<flatbuffers::Vector<std::uint8_t>> encodedPlayerCredential;
+        if (value.mPlayerCredential)
+        {
+            const auto credential = value.mPlayerCredential->secretBytes();
+            encodedPlayerCredential = builder.CreateVector(
+                reinterpret_cast<const std::uint8_t*>(credential.data()), credential.size());
+        }
+        const auto root = Protocol::Schema::CreateAuthenticationAccepted(
+            builder, encodedToken, value.lifetimeMilliseconds(), encodedPlayerCredential);
         Protocol::Schema::FinishSizePrefixedAuthenticationAcceptedBuffer(builder, root);
         return takeBuffer(builder);
     }
@@ -229,6 +276,7 @@ namespace TES3MP
 
         const auto* value = Protocol::Schema::GetSizePrefixedAuthenticationRequest(bytes);
         const auto materialBytes = byteSpan(value->material());
+        const auto playerCredentialBytes = byteSpan(value->player_credential());
         AuthenticationCredentialKind kind;
         switch (value->kind())
         {
@@ -240,6 +288,10 @@ namespace TES3MP
                         AuthenticationCodecErrorCode::InvalidCredentialSize, materialBytes.size(),
                         MaximumAuthenticationMaterialBytes);
                 }
+                if (!playerCredentialBytes.empty() && playerCredentialBytes.size() != PlayerCredentialBytes)
+                    return error(AuthenticationCodecErrorStage::SemanticValidation,
+                        AuthenticationCodecErrorCode::InvalidPlayerCredentialSize, playerCredentialBytes.size(),
+                        PlayerCredentialBytes);
                 break;
             case Protocol::Schema::AuthenticationCredentialKind::ResumeToken:
                 kind = AuthenticationCredentialKind::ResumeToken;
@@ -248,6 +300,9 @@ namespace TES3MP
                     return error(AuthenticationCodecErrorStage::SemanticValidation,
                         AuthenticationCodecErrorCode::InvalidResumeTokenSize, materialBytes.size(), ResumeTokenBytes);
                 }
+                if (!playerCredentialBytes.empty())
+                    return error(AuthenticationCodecErrorStage::SemanticValidation,
+                        AuthenticationCodecErrorCode::UnexpectedPlayerCredential, playerCredentialBytes.size(), 0);
                 break;
             default:
                 return error(AuthenticationCodecErrorStage::SemanticValidation,
@@ -255,7 +310,10 @@ namespace TES3MP
         }
 
         auto material = AuthenticationMaterial::create(materialBytes);
-        return AuthenticationRequest(kind, std::move(*material));
+        auto playerCredential = playerCredentialBytes.empty()
+            ? std::optional<PlayerCredential>{}
+            : PlayerCredential::create(playerCredentialBytes);
+        return AuthenticationRequest(kind, std::move(*material), std::move(playerCredential));
     }
 
     AuthenticationAcceptedDecodeResult decodeAuthenticationAccepted(std::span<const std::byte> payload)
@@ -275,13 +333,22 @@ namespace TES3MP
 
         const auto* value = Protocol::Schema::GetSizePrefixedAuthenticationAccepted(bytes);
         const auto tokenBytes = byteSpan(value->resume_token());
+        const auto playerCredentialBytes = byteSpan(value->player_credential());
         auto token = ResumeToken::create(tokenBytes);
         if (!token)
         {
             return error(AuthenticationCodecErrorStage::SemanticValidation,
                 AuthenticationCodecErrorCode::InvalidResumeTokenSize, tokenBytes.size(), ResumeTokenBytes);
         }
-        auto accepted = AuthenticationAcceptedMessage::create(std::move(*token), value->lifetime_milliseconds());
+        if (!playerCredentialBytes.empty() && playerCredentialBytes.size() != PlayerCredentialBytes)
+            return error(AuthenticationCodecErrorStage::SemanticValidation,
+                AuthenticationCodecErrorCode::InvalidPlayerCredentialSize, playerCredentialBytes.size(),
+                PlayerCredentialBytes);
+        auto playerCredential = playerCredentialBytes.empty()
+            ? std::optional<PlayerCredential>{}
+            : PlayerCredential::create(playerCredentialBytes);
+        auto accepted = AuthenticationAcceptedMessage::create(
+            std::move(*token), value->lifetime_milliseconds(), std::move(playerCredential));
         if (!accepted)
         {
             return error(AuthenticationCodecErrorStage::SemanticValidation,

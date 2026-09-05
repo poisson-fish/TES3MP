@@ -7,9 +7,16 @@
 #include <algorithm>
 #include <array>
 #include <chrono>
+#include <cstdio>
 #include <fstream>
 #include <limits>
 #include <vector>
+
+#ifdef _WIN32
+#include <windows.h>
+#else
+#include <sys/stat.h>
+#endif
 
 namespace TES3MP::OpenMWAdapter
 {
@@ -31,16 +38,85 @@ namespace TES3MP::OpenMWAdapter
         {
             return OutboundQueuePolicy::create(64, 512 * 1024, 8, 4, 8, 1, 4, 1, 8, 250);
         }
+
+        bool replaceCredentialFile(
+            const std::filesystem::path& temporary, const std::filesystem::path& target) noexcept
+        {
+#ifdef _WIN32
+            return MoveFileExW(temporary.c_str(), target.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)
+                != 0;
+#else
+            return std::rename(temporary.c_str(), target.c_str()) == 0;
+#endif
+        }
+
+        class FilePlayerCredentialPersistence final : public PlayerCredentialPersistence
+        {
+        public:
+            explicit FilePlayerCredentialPersistence(std::filesystem::path path) : mPath(std::move(path)) {}
+
+            bool store(PlayerCredential credential) noexcept override
+            try
+            {
+                std::array<std::byte, PlayerCredentialBytes> bytes{};
+                if (!credential.copyTo(bytes))
+                    return false;
+                auto temporary = mPath;
+                temporary += ".tmp";
+                {
+                    std::ofstream stream(temporary, std::ios::binary | std::ios::trunc);
+                    stream.write(reinterpret_cast<const char*>(bytes.data()), bytes.size());
+                    stream.flush();
+                    std::fill(bytes.begin(), bytes.end(), std::byte{});
+                    if (!stream)
+                        return false;
+                }
+#ifndef _WIN32
+                if (::chmod(temporary.c_str(), S_IRUSR | S_IWUSR) != 0)
+                    return false;
+#endif
+                return replaceCredentialFile(temporary, mPath);
+            }
+            catch (...)
+            {
+                return false;
+            }
+
+        private:
+            std::filesystem::path mPath;
+        };
+
+        std::optional<PlayerCredential> loadPlayerCredential(const std::filesystem::path& path) noexcept
+        try
+        {
+            if (path.empty() || !std::filesystem::exists(path))
+                return std::nullopt;
+            if (!std::filesystem::is_regular_file(path)
+                || std::filesystem::file_size(path) != PlayerCredentialBytes)
+                return std::nullopt;
+            std::array<std::byte, PlayerCredentialBytes> bytes{};
+            std::ifstream stream(path, std::ios::binary);
+            stream.read(reinterpret_cast<char*>(bytes.data()), bytes.size());
+            auto credential = stream && stream.peek() == std::char_traits<char>::eof()
+                ? PlayerCredential::create(bytes) : std::nullopt;
+            std::fill(bytes.begin(), bytes.end(), std::byte{});
+            return credential;
+        }
+        catch (...)
+        {
+            return std::nullopt;
+        }
     }
 
     ClientCoordinatorResult makeClientCoordinator(std::string_view host, std::uint64_t port,
         std::uint64_t timeoutMilliseconds, const std::filesystem::path& passwordFile,
+        const std::filesystem::path& playerCredentialFile, ContentManifestId contentManifest,
         ClientProviders providers) noexcept
     try
     {
         if (!providers.input || !providers.presentation || !providers.status)
             return ClientCompositionFailure::ProvidersUnavailable;
-        if (port == 0 || port > std::numeric_limits<std::uint16_t>::max())
+        if (port == 0 || port > (std::numeric_limits<std::uint16_t>::max)())
             return ClientCompositionFailure::InvalidEndpoint;
         auto endpoint = ConnectionEndpoint::create(host, static_cast<std::uint16_t>(port));
         if (!endpoint)
@@ -69,6 +145,12 @@ namespace TES3MP::OpenMWAdapter
         std::fill(bytes.begin(), bytes.end(), std::byte{});
         if (!password)
             return ClientCompositionFailure::CredentialRejected;
+        if (playerCredentialFile.empty())
+            return ClientCompositionFailure::CredentialRejected;
+        const bool playerCredentialExists = std::filesystem::exists(playerCredentialFile);
+        auto playerCredential = loadPlayerCredential(playerCredentialFile);
+        if (playerCredentialExists && !playerCredential)
+            return ClientCompositionFailure::CredentialReadFailed;
 
 #ifdef TES3MP_OPENMW_HAS_GNS
         auto limits = TransportLimits::create(1, 1, 1, 32);
@@ -85,16 +167,20 @@ namespace TES3MP::OpenMWAdapter
         auto* runtime = std::get_if<std::unique_ptr<ClientSessionRuntime>>(&created);
         if (!runtime || !*runtime)
             return ClientCompositionFailure::RuntimeUnavailable;
-        auto versions = std::get<ProtocolVersionRange>(ProtocolVersionRange::create(1, 0, 0));
+        auto versions = std::get<ProtocolVersionRange>(ProtocolVersionRange::create(1, 1, 1));
         const std::array optional{ vrPoseCapability() };
-        auto offer = std::get<CapabilityOffer>(CapabilityOffer::create(std::move(versions), optional, {}));
+        auto offer = std::get<CapabilityOffer>(
+            CapabilityOffer::create(std::move(versions), optional, {}, contentManifest));
         if ((*runtime)->start(
-                *endpoint, ClientHello::fromOffer(std::move(offer)), AuthenticationRequest::join(std::move(*password)))
+                *endpoint, ClientHello::fromOffer(std::move(offer)),
+                AuthenticationRequest::join(std::move(*password), std::move(playerCredential)))
             != HeadlessClientResult::Accepted)
             return ClientCompositionFailure::ConnectionRejected;
         return makeCoordinator(std::move(transport.runtime), std::move(clock), std::move(*runtime),
-            ReconnectConfiguration{ *endpoint, *timeouts, *queue }, *providers.input, *providers.presentation,
-            *providers.status, providers.control, providers.poseInput);
+            ReconnectConfiguration{ *endpoint, *timeouts, *queue, contentManifest },
+            *providers.input, *providers.presentation,
+            *providers.status, providers.control, providers.poseInput,
+            std::make_unique<FilePlayerCredentialPersistence>(playerCredentialFile));
 #else
         return ClientCompositionFailure::TransportUnavailable;
 #endif

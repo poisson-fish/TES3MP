@@ -51,8 +51,8 @@ namespace TES3MP::ServerApp
             std::vector<SpatialEntitySnapshot> entries;
             entries.reserve(newVisible.size());
             for (const auto* player : newVisible)
-                entries.emplace_back(tick, player->playerId(), player->entityId(), player->entityRevision(),
-                    player->authorityEpoch(), player->transform(), player->linearVelocity());
+                entries.emplace_back(tick, player->playerId(), player->entityId(), player->appearanceId(),
+                    player->entityRevision(), player->authorityEpoch(), player->transform(), player->linearVelocity());
             auto batch = ReliableObservationBatch::create(
                 target.sessionId(), target.sessionGeneration(), revision, changes);
             auto view = SpatialWorldView::create(entries);
@@ -126,8 +126,8 @@ namespace TES3MP::ServerApp
                 std::vector<SpatialEntitySnapshot> entries;
                 entries.reserve(visible.size());
                 for (const auto* player : visible)
-                    entries.emplace_back(tick, player->playerId(), player->entityId(), player->entityRevision(),
-                        player->authorityEpoch(), player->transform(), player->linearVelocity());
+                    entries.emplace_back(tick, player->playerId(), player->entityId(), player->appearanceId(),
+                        player->entityRevision(), player->authorityEpoch(), player->transform(), player->linearVelocity());
                 auto view = SpatialWorldView::create(entries);
                 if (!std::holds_alternative<SpatialWorldView>(view)) return std::nullopt;
                 result.emplace_back(target.sessionId(), LatestWinsSnapshot(

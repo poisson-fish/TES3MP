@@ -69,7 +69,7 @@ namespace
     }
 
     template <class Writer>
-    void encodeCanonicalStateV1(Writer& writer, TES3MP::CanonicalStateVersion stateVersion,
+    void encodeCanonicalStateV2(Writer& writer, TES3MP::CanonicalStateVersion stateVersion,
         TES3MP::ServerTick checkpointTick, const TES3MP::CanonicalServerState& state)
     {
         using namespace TES3MP;
@@ -88,6 +88,7 @@ namespace
         {
             writer.fixed(player.playerId().value());
             writer.fixed(player.entityId().value());
+            writer.fixed(player.appearanceId().value());
             encodeCell(writer, player.transform().cell());
             const Position3 position = player.transform().position();
             writer.fixed(position.x());
@@ -132,11 +133,11 @@ namespace
 
 namespace TES3MP
 {
-    std::vector<std::uint8_t> canonicalStateBytesV1(
+    std::vector<std::uint8_t> canonicalStateBytesV2(
         CanonicalStateVersion stateVersion, ServerTick checkpointTick, const CanonicalServerState& state)
     {
         CanonicalByteWriter writer;
-        encodeCanonicalStateV1(writer, stateVersion, checkpointTick, state);
+        encodeCanonicalStateV2(writer, stateVersion, checkpointTick, state);
         return writer.take();
     }
 
@@ -148,11 +149,11 @@ namespace TES3MP
         return writer.checksum();
     }
 
-    CanonicalChecksum canonicalStateChecksumV1(
+    CanonicalChecksum canonicalStateChecksumV2(
         CanonicalStateVersion stateVersion, ServerTick checkpointTick, const CanonicalServerState& state) noexcept
     {
         CanonicalChecksumWriter writer;
-        encodeCanonicalStateV1(writer, stateVersion, checkpointTick, state);
+        encodeCanonicalStateV2(writer, stateVersion, checkpointTick, state);
         return writer.checksum();
     }
 }

@@ -9,7 +9,7 @@ namespace TES3MP
         std::shared_ptr<const CanonicalServerState> state, std::vector<CanonicalStateChangeRecord> changes)
         : mStateVersion(stateVersion)
         , mCheckpointTick(checkpointTick)
-        , mChecksum(canonicalStateChecksumV1(stateVersion, checkpointTick, *state))
+        , mChecksum(canonicalStateChecksumV2(stateVersion, checkpointTick, *state))
         , mState(std::move(state))
         , mChanges(std::move(changes))
     {

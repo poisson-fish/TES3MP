@@ -267,19 +267,41 @@ bool parseOptions(int argc, char** argv, OMW::Engine& engine, Files::Configurati
 
     if (variables["tes3mp-enable"].as<bool>())
     {
-#ifndef OPENMW_VR
-        const TES3MP::OpenMWAdapter::DesktopFixtureMapping fixture{
-            variables["tes3mp-fixture-interior"].as<std::string>(),
-            variables["tes3mp-fixture-worldspace"].as<std::string>(),
-            variables["tes3mp-fixture-avatar"].as<std::string>()
-        };
-        if (fixture.interiorCell.empty() || fixture.exteriorWorldspace.empty() || fixture.avatarNpc.empty())
+        const auto manifestId = TES3MP::ContentManifestId::fromHex(
+            variables["tes3mp-content-manifest-id"].as<std::string>());
+        const auto interiorId = TES3MP::CellSpaceId::fromValue(
+            variables["tes3mp-content-interior-id"].as<unsigned long long>());
+        const auto exteriorId = TES3MP::CellSpaceId::fromValue(
+            variables["tes3mp-content-exterior-id"].as<unsigned long long>());
+        const auto appearanceId = TES3MP::AppearanceId::fromValue(
+            variables["tes3mp-content-appearance-id"].as<unsigned long long>());
+        const auto contentManifest = manifestId && interiorId && exteriorId && appearanceId
+            ? TES3MP::ContentManifest::create(*manifestId, *interiorId, *exteriorId, *appearanceId)
+            : std::nullopt;
+        if (!contentManifest)
         {
-            Log(Debug::Error) << "TES3MP startup failed: fixture interior, worldspace, and avatar are required";
+            Log(Debug::Error) << "TES3MP startup failed: content manifest identity is invalid";
             return false;
         }
-        multiplayerInput.configure(fixture);
-        multiplayerPresentation.configure(fixture);
+#ifndef OPENMW_VR
+        const TES3MP::OpenMWAdapter::DesktopContentMapping contentMapping{
+            contentManifest->interiorCell(),
+            variables["tes3mp-content-interior-record"].as<std::string>(),
+            contentManifest->exteriorWorldspace(),
+            variables["tes3mp-content-worldspace-record"].as<std::string>(),
+            contentManifest->defaultAppearance(),
+            variables["tes3mp-content-appearance-record"].as<std::string>()
+        };
+        if (contentMapping.interiorCell.empty() || contentMapping.exteriorWorldspace.empty()
+            || contentMapping.avatarNpc.empty() || contentMapping.interiorCell == contentMapping.exteriorWorldspace
+            || contentMapping.interiorCell == contentMapping.avatarNpc
+            || contentMapping.exteriorWorldspace == contentMapping.avatarNpc)
+        {
+            Log(Debug::Error) << "TES3MP startup failed: content record mappings are required";
+            return false;
+        }
+        multiplayerInput.configure(contentMapping);
+        multiplayerPresentation.configure(contentMapping);
 
         TES3MP::OpenMWAdapter::SemanticInputProvider* input = &multiplayerInput;
         TES3MP::OpenMWAdapter::PresentationProvider* presentation = &multiplayerPresentation;
@@ -297,7 +319,7 @@ bool parseOptions(int argc, char** argv, OMW::Engine& engine, Files::Configurati
                 return false;
             }
             multiplayerAutomation = std::make_unique<TES3MP::OpenMWAdapter::DesktopAutomation>(
-                *role, automationOutput, multiplayerPresentation, multiplayerStatus);
+                *role, automationOutput, *contentManifest, multiplayerPresentation, multiplayerStatus);
             if (!multiplayerAutomation->valid())
             {
                 Log(Debug::Error) << "TES3MP startup failed: automation evidence path is unavailable";
@@ -315,7 +337,9 @@ bool parseOptions(int argc, char** argv, OMW::Engine& engine, Files::Configurati
 #endif
         auto coordinator = TES3MP::OpenMWAdapter::makeClientCoordinator(variables["tes3mp-host"].as<std::string>(),
             variables["tes3mp-port"].as<unsigned>(), variables["tes3mp-timeout-ms"].as<unsigned>(),
-            variables["tes3mp-password-file"].as<Files::MaybeQuotedPath>().u8string(), providers);
+            variables["tes3mp-password-file"].as<Files::MaybeQuotedPath>().u8string(),
+            variables["tes3mp-player-credential-file"].as<Files::MaybeQuotedPath>().u8string(),
+            contentManifest->id(), providers);
         auto* value = std::get_if<std::unique_ptr<TES3MP::OpenMWAdapter::EngineCoordinator>>(&coordinator);
         if (!value || !*value || !engine.attachMultiplayerCoordinator(std::move(*value)))
         {

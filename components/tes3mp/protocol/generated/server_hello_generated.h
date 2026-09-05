@@ -25,7 +25,8 @@ struct ServerHello FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
   enum FlatBuffersVTableOffset FLATBUFFERS_VTABLE_UNDERLYING_TYPE {
     VT_PROTOCOL_MAJOR = 4,
     VT_SELECTED_MINOR = 6,
-    VT_NEGOTIATED_CAPABILITIES = 8
+    VT_NEGOTIATED_CAPABILITIES = 8,
+    VT_CONTENT_MANIFEST_ID = 10
   };
   uint16_t protocol_major() const {
     return GetField<uint16_t>(VT_PROTOCOL_MAJOR, 0);
@@ -36,6 +37,9 @@ struct ServerHello FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
   const ::flatbuffers::Vector<uint32_t> *negotiated_capabilities() const {
     return GetPointer<const ::flatbuffers::Vector<uint32_t> *>(VT_NEGOTIATED_CAPABILITIES);
   }
+  const ::flatbuffers::Vector<uint8_t> *content_manifest_id() const {
+    return GetPointer<const ::flatbuffers::Vector<uint8_t> *>(VT_CONTENT_MANIFEST_ID);
+  }
   template <bool B = false>
   bool Verify(::flatbuffers::VerifierTemplate<B> &verifier) const {
     return VerifyTableStart(verifier) &&
@@ -43,6 +47,8 @@ struct ServerHello FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
            VerifyField<uint16_t>(verifier, VT_SELECTED_MINOR, 2) &&
            VerifyOffset(verifier, VT_NEGOTIATED_CAPABILITIES) &&
            verifier.VerifyVector(negotiated_capabilities()) &&
+           VerifyOffset(verifier, VT_CONTENT_MANIFEST_ID) &&
+           verifier.VerifyVector(content_manifest_id()) &&
            verifier.EndTable();
   }
 };
@@ -60,6 +66,9 @@ struct ServerHelloBuilder {
   void add_negotiated_capabilities(::flatbuffers::Offset<::flatbuffers::Vector<uint32_t>> negotiated_capabilities) {
     fbb_.AddOffset(ServerHello::VT_NEGOTIATED_CAPABILITIES, negotiated_capabilities);
   }
+  void add_content_manifest_id(::flatbuffers::Offset<::flatbuffers::Vector<uint8_t>> content_manifest_id) {
+    fbb_.AddOffset(ServerHello::VT_CONTENT_MANIFEST_ID, content_manifest_id);
+  }
   explicit ServerHelloBuilder(::flatbuffers::FlatBufferBuilder &_fbb)
         : fbb_(_fbb) {
     start_ = fbb_.StartTable();
@@ -75,8 +84,10 @@ inline ::flatbuffers::Offset<ServerHello> CreateServerHello(
     ::flatbuffers::FlatBufferBuilder &_fbb,
     uint16_t protocol_major = 0,
     uint16_t selected_minor = 0,
-    ::flatbuffers::Offset<::flatbuffers::Vector<uint32_t>> negotiated_capabilities = 0) {
+    ::flatbuffers::Offset<::flatbuffers::Vector<uint32_t>> negotiated_capabilities = 0,
+    ::flatbuffers::Offset<::flatbuffers::Vector<uint8_t>> content_manifest_id = 0) {
   ServerHelloBuilder builder_(_fbb);
+  builder_.add_content_manifest_id(content_manifest_id);
   builder_.add_negotiated_capabilities(negotiated_capabilities);
   builder_.add_selected_minor(selected_minor);
   builder_.add_protocol_major(protocol_major);
@@ -87,13 +98,16 @@ inline ::flatbuffers::Offset<ServerHello> CreateServerHelloDirect(
     ::flatbuffers::FlatBufferBuilder &_fbb,
     uint16_t protocol_major = 0,
     uint16_t selected_minor = 0,
-    const std::vector<uint32_t> *negotiated_capabilities = nullptr) {
+    const std::vector<uint32_t> *negotiated_capabilities = nullptr,
+    const std::vector<uint8_t> *content_manifest_id = nullptr) {
   auto negotiated_capabilities__ = negotiated_capabilities ? _fbb.CreateVector<uint32_t>(*negotiated_capabilities) : 0;
+  auto content_manifest_id__ = content_manifest_id ? _fbb.CreateVector<uint8_t>(*content_manifest_id) : 0;
   return TES3MP::Protocol::Schema::CreateServerHello(
       _fbb,
       protocol_major,
       selected_minor,
-      negotiated_capabilities__);
+      negotiated_capabilities__,
+      content_manifest_id__);
 }
 
 inline const TES3MP::Protocol::Schema::ServerHello *GetServerHello(const void *buf) {

@@ -159,6 +159,10 @@ namespace TES3MP
             return mAuthenticationRejection;
         }
         const std::optional<PrincipalId>& principal() const noexcept { return mPrincipal; }
+        const std::optional<AuthenticatedAdmission::PlayerClaim>& playerClaim() const noexcept
+        {
+            return mPlayerClaim;
+        }
         std::optional<AuthenticationAcceptedMessage> takeAuthenticationAccepted() noexcept;
         std::optional<std::uint64_t> preparedResumeId() const noexcept { return mPreparedResumeId; }
         bool commitPreparedResume() noexcept;
@@ -192,6 +196,7 @@ namespace TES3MP
         std::optional<SessionRejected> mProtocolRejection;
         std::optional<AuthenticationRejected> mAuthenticationRejection;
         std::optional<PrincipalId> mPrincipal;
+        std::optional<AuthenticatedAdmission::PlayerClaim> mPlayerClaim;
         std::optional<AuthenticationAcceptedMessage> mAuthenticationAccepted;
         std::optional<std::uint64_t> mPreparedResumeId;
         std::optional<ResumeTokenContext> mAuthenticationContext;

@@ -1,4 +1,5 @@
 #include <tes3mp/server_authentication.hpp>
+#include <tes3mp/player_identity.hpp>
 
 #include <algorithm>
 #include <array>
@@ -100,6 +101,17 @@ namespace
     public:
         MonotonicInstant now() const noexcept override { return value; }
         MonotonicInstant value = MonotonicInstant::fromNanoseconds(0);
+    };
+
+    class MemoryIdentityPersistence final : public PlayerIdentityPersistence
+    {
+    public:
+        bool replace(std::span<const PersistedPlayerIdentity> replacement) noexcept override
+        {
+            records.assign(replacement.begin(), replacement.end());
+            return true;
+        }
+        std::vector<PersistedPlayerIdentity> records;
     };
 
     PrincipalId principal(std::uint64_t value = 1)
@@ -563,6 +575,43 @@ namespace
         resume->cancel();
         return tokens->size() == 1 && std::holds_alternative<AuthenticationPending>(resume->poll());
     }
+
+    bool shared_service_resolves_durable_player_after_password_authentication()
+    {
+        FakeCrypto crypto;
+        MemoryIdentityPersistence persistence;
+        auto identities = std::move(std::get<std::unique_ptr<PlayerIdentityRegistry>>(
+            PlayerIdentityRegistry::create(crypto, persistence, {})));
+        auto prepared = std::get<PreparedPlayerIdentity>(identities->prepareCreate(testContentManifest()));
+        auto credential = identities->copyPreparedCredential(prepared.id);
+        std::array<std::byte, PlayerCredentialBytes> credentialBytes{};
+        if (!credential || !credential->copyTo(credentialBytes)
+            || !identities->commit(prepared.id) || !identities->finalize(prepared.id))
+            return false;
+
+        FixedClock clock;
+        auto limiter = AuthenticationRateLimiter::create(ratePolicy(4, 4), clock.now());
+        const std::array password{ std::byte{ 1 }, std::byte{ 2 } };
+        auto join = JoinPasswordAuthenticationProvider::create(crypto, material(password));
+        auto tokens = store(crypto);
+        SharedServerAuthenticationService service(*limiter, *join, *tokens, clock, identities.get());
+        auto valid = service.begin(attempt(), ServerAuthenticationSubmission(
+            AuthenticationRequest::join(material(password), PlayerCredential::create(credentialBytes)),
+            scope(1), context(), testContentManifestId()));
+        auto admission = accepted(valid->poll());
+        if (!admission || !admission->playerClaim() || *admission->playerClaim() != prepared.claim)
+            return false;
+
+        auto wrongBytes = credentialBytes;
+        wrongBytes[0] ^= std::byte{ 0xff };
+        auto invalid = service.begin(attempt(2), ServerAuthenticationSubmission(
+            AuthenticationRequest::join(material(password), PlayerCredential::create(wrongBytes)),
+            scope(2), context(), testContentManifestId()));
+        auto invalidPoll = invalid->poll();
+        auto* completion = std::get_if<AuthenticationCompletion>(&invalidPoll);
+        auto* rejection = completion ? std::get_if<AuthenticationRejected>(&completion->result) : nullptr;
+        return rejection && rejection->reason == AuthenticationRejectionReason::Denied;
+    }
 }
 
 int main()
@@ -595,6 +644,8 @@ int main()
             fixed_capacity_and_restart_invalidation_are_enforced },
         Test{ "shared_service_gates_routes_and_defers_resume_consumption",
             shared_service_gates_routes_and_defers_resume_consumption },
+        Test{ "shared_service_resolves_durable_player_after_password_authentication",
+            shared_service_resolves_durable_player_after_password_authentication },
     };
     for (const auto& test : tests)
     {

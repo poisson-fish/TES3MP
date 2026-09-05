@@ -28,8 +28,6 @@ namespace TES3MP::OpenMWAdapter
 {
     namespace
     {
-        constexpr std::uint64_t InteriorFixture = 7;
-        constexpr std::uint64_t ExteriorFixture = 8;
         constexpr double PositionScale = 1024.0;
         constexpr double TurnScale = 4294967296.0;
 
@@ -38,17 +36,17 @@ namespace TES3MP::OpenMWAdapter
             return ESM::RefId::stringRefId(value);
         }
 
-        std::optional<CellId> toCanonical(const MWWorld::Cell& cell, const DesktopFixtureMapping& mapping)
+        std::optional<CellId> toCanonical(const MWWorld::Cell& cell, const DesktopContentMapping& mapping)
         {
             if (!cell.isExterior())
             {
                 if (cell.getId() != refId(mapping.interiorCell))
                     return std::nullopt;
-                return CellId::interior(*CellSpaceId::fromValue(InteriorFixture));
+                return CellId::interior(mapping.interiorId);
             }
             if (cell.getWorldSpace() != refId(mapping.exteriorWorldspace))
                 return std::nullopt;
-            return CellId::exterior(*CellSpaceId::fromValue(ExteriorFixture), cell.getGridX(), cell.getGridY());
+            return CellId::exterior(mapping.exteriorId, cell.getGridX(), cell.getGridY());
         }
 
         ESM::Position toOpenMW(const Transform& transform)
@@ -83,17 +81,17 @@ namespace TES3MP::OpenMWAdapter
             return result;
         }
 
-        MWWorld::CellStore* resolveCell(const CellId& cell, const DesktopFixtureMapping& mapping)
+        MWWorld::CellStore* resolveCell(const CellId& cell, const DesktopContentMapping& mapping)
         {
             auto worldModel = MWBase::Environment::get().getWorldModel();
             if (const auto* interior = cell.asInterior())
             {
-                if (interior->cellSpace().value() != InteriorFixture)
+                if (interior->cellSpace() != mapping.interiorId)
                     return nullptr;
                 return worldModel->findCell(refId(mapping.interiorCell));
             }
             const auto* exterior = cell.asExterior();
-            if (!exterior || exterior->worldspace().value() != ExteriorFixture)
+            if (!exterior || exterior->worldspace() != mapping.exteriorId)
                 return nullptr;
             return &worldModel->getExterior(
                 ESM::ExteriorCellLocation(exterior->gridX(), exterior->gridY(), refId(mapping.exteriorWorldspace)));
@@ -155,7 +153,7 @@ namespace TES3MP::OpenMWAdapter
     class DesktopSemanticInput::Impl
     {
     public:
-        DesktopFixtureMapping mapping;
+        std::optional<DesktopContentMapping> mapping;
     };
 
     DesktopSemanticInput::DesktopSemanticInput()
@@ -165,7 +163,7 @@ namespace TES3MP::OpenMWAdapter
 
     DesktopSemanticInput::~DesktopSemanticInput() = default;
 
-    void DesktopSemanticInput::configure(DesktopFixtureMapping mapping)
+    void DesktopSemanticInput::configure(DesktopContentMapping mapping)
     {
         mImpl->mapping = std::move(mapping);
     }
@@ -178,7 +176,9 @@ namespace TES3MP::OpenMWAdapter
             auto* current = scene->getCurrentCell();
             if (!scene->hasCellChanged() || !current)
                 return {};
-            auto cell = toCanonical(*current->getCell(), mImpl->mapping);
+            if (!mImpl->mapping)
+                return { ProviderResult::ContentMappingFailed, std::nullopt };
+            auto cell = toCanonical(*current->getCell(), *mImpl->mapping);
             if (!cell)
                 return { ProviderResult::ContentMappingFailed, std::nullopt };
             return { ProviderResult::Accepted, FixtureCellTransition(*cell) };
@@ -234,7 +234,7 @@ namespace TES3MP::OpenMWAdapter
         {
         }
 
-        DesktopFixtureMapping mapping;
+        std::optional<DesktopContentMapping> mapping;
         RemoteMotionMetricSink& metrics;
         std::map<EntityId, Remote> remotes;
 
@@ -257,6 +257,9 @@ namespace TES3MP::OpenMWAdapter
         ProviderResult apply(const LatestWinsSnapshot& snapshot, std::span<const ObservedPlayer> observedPlayers,
             bool allowLocalCellCorrection, MonotonicInstant receivedAt)
         {
+            if (!mapping)
+                return ProviderResult::ContentMappingFailed;
+            const auto& content = *mapping;
             const auto self = std::ranges::find_if(snapshot.view().entries(), [&](const auto& entry) {
                 return entry.playerId() == snapshot.header().targetPlayerId()
                     && entry.entityId() == snapshot.header().targetEntityId();
@@ -264,7 +267,7 @@ namespace TES3MP::OpenMWAdapter
             if (self == snapshot.view().entries().end())
                 return ProviderResult::PresentationFailed;
 
-            auto* targetCell = resolveCell(self->transform().cell(), mapping);
+            auto* targetCell = resolveCell(self->transform().cell(), content);
             if (!targetCell)
                 return ProviderResult::ContentMappingFailed;
 
@@ -298,6 +301,8 @@ namespace TES3MP::OpenMWAdapter
                 });
                 if (entry == snapshot.view().entries().end() || entry->transform().cell() != self->transform().cell())
                     continue;
+                if (entry->appearanceId() != content.appearanceId)
+                    return ProviderResult::ContentMappingFailed;
                 if (desiredCount == desired.size())
                     return ProviderResult::PresentationFailed;
                 desired[desiredCount++].emplace(observed.entityId);
@@ -308,7 +313,7 @@ namespace TES3MP::OpenMWAdapter
                     if (found != remotes.end())
                         erase(found);
                     auto [actorResult, actor] = MWRender::ReplicatedActor::create(*world->getRenderingManager(),
-                        *MWBase::Environment::get().getESMStore(), refId(mapping.avatarNpc), *targetCell, position);
+                        *MWBase::Environment::get().getESMStore(), refId(content.avatarNpc), *targetCell, position);
                     const ProviderResult mappedResult = mapReplicatedActorResult(actorResult);
                     if (mappedResult != ProviderResult::Accepted || !actor)
                     {
@@ -389,7 +394,7 @@ namespace TES3MP::OpenMWAdapter
 
     DesktopPresentation::~DesktopPresentation() = default;
 
-    void DesktopPresentation::configure(DesktopFixtureMapping mapping)
+    void DesktopPresentation::configure(DesktopContentMapping mapping)
     {
         mImpl->mapping = std::move(mapping);
     }

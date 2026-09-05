@@ -126,7 +126,8 @@ namespace
 
     std::variant<TES3MP::CapabilityOffer, HandshakeError> makeOffer(std::uint16_t major, std::uint16_t minimumMinor,
         std::uint16_t maximumMinor, const flatbuffers::Vector<std::uint32_t>* optionalCapabilities,
-        const flatbuffers::Vector<std::uint32_t>* requiredCapabilities)
+        const flatbuffers::Vector<std::uint32_t>* requiredCapabilities,
+        const flatbuffers::Vector<std::uint8_t>* contentManifest)
     {
         auto versions = TES3MP::ProtocolVersionRange::create(major, minimumMinor, maximumMinor);
         if (const auto* rangeError = std::get_if<HandshakeError>(&versions))
@@ -139,8 +140,16 @@ namespace
         if (const auto* capabilityError = std::get_if<HandshakeError>(&required))
             return *capabilityError;
 
+        if (contentManifest == nullptr)
+            return error(HandshakeErrorStage::SemanticValidation, HandshakeErrorCode::InvalidContentManifestId);
+        const auto manifestBytes = std::as_bytes(std::span(contentManifest->data(), contentManifest->size()));
+        const auto manifest = TES3MP::ContentManifestId::fromBytes(manifestBytes);
+        if (!manifest)
+            return error(HandshakeErrorStage::SemanticValidation, HandshakeErrorCode::InvalidContentManifestId,
+                contentManifest->size(), TES3MP::ContentManifestIdBytes);
+
         return TES3MP::CapabilityOffer::create(std::get<TES3MP::ProtocolVersionRange>(versions),
-            std::get<std::vector<CapabilityId>>(optional), std::get<std::vector<CapabilityId>>(required));
+            std::get<std::vector<CapabilityId>>(optional), std::get<std::vector<CapabilityId>>(required), *manifest);
     }
 
     std::vector<std::uint32_t> rawCapabilities(std::span<const CapabilityId> capabilities)
@@ -149,6 +158,15 @@ namespace
         result.reserve(capabilities.size());
         for (const CapabilityId capability : capabilities)
             result.push_back(capability.value());
+        return result;
+    }
+
+    std::vector<std::uint8_t> rawManifest(TES3MP::ContentManifestId manifest)
+    {
+        std::vector<std::uint8_t> result;
+        result.reserve(TES3MP::ContentManifestIdBytes);
+        for (const auto value : manifest.bytes())
+            result.push_back(std::to_integer<std::uint8_t>(value));
         return result;
     }
 
@@ -195,7 +213,8 @@ namespace TES3MP
     }
 
     std::variant<CapabilityOffer, HandshakeError> CapabilityOffer::create(ProtocolVersionRange versions,
-        std::span<const CapabilityId> optionalCapabilities, std::span<const CapabilityId> requiredCapabilities)
+        std::span<const CapabilityId> optionalCapabilities, std::span<const CapabilityId> requiredCapabilities,
+        ContentManifestId contentManifest)
     {
         if (optionalCapabilities.size() > MaximumOptionalCapabilityCount)
         {
@@ -221,7 +240,7 @@ namespace TES3MP
 
         return CapabilityOffer(versions,
             std::vector<CapabilityId>(optionalCapabilities.begin(), optionalCapabilities.end()),
-            std::vector<CapabilityId>(requiredCapabilities.begin(), requiredCapabilities.end()));
+            std::vector<CapabilityId>(requiredCapabilities.begin(), requiredCapabilities.end()), contentManifest);
     }
 
     std::vector<std::byte> encodeClientHello(const ClientHello& value)
@@ -231,8 +250,10 @@ namespace TES3MP
         const auto required = rawCapabilities(value.requiredCapabilities());
         const auto encodedOptional = builder.CreateVector(optional);
         const auto encodedRequired = builder.CreateVector(required);
+        const auto manifest = rawManifest(value.contentManifest());
         const auto root = Protocol::Schema::CreateClientHello(builder, value.versions().major(),
-            value.versions().minimumMinor(), value.versions().maximumMinor(), encodedOptional, encodedRequired);
+            value.versions().minimumMinor(), value.versions().maximumMinor(), encodedOptional, encodedRequired,
+            builder.CreateVector(manifest));
         Protocol::Schema::FinishSizePrefixedClientHelloBuffer(builder, root);
         return takeBuffer(builder);
     }
@@ -241,8 +262,10 @@ namespace TES3MP
     {
         flatbuffers::FlatBufferBuilder builder;
         const auto capabilities = rawCapabilities(value.negotiatedCapabilities());
+        const auto manifest = rawManifest(value.contentManifest());
         const auto root = Protocol::Schema::CreateServerHello(
-            builder, value.selectedVersion().major, value.selectedVersion().minor, builder.CreateVector(capabilities));
+            builder, value.selectedVersion().major, value.selectedVersion().minor, builder.CreateVector(capabilities),
+            builder.CreateVector(manifest));
         Protocol::Schema::FinishSizePrefixedServerHelloBuffer(builder, root);
         return takeBuffer(builder);
     }
@@ -271,7 +294,7 @@ namespace TES3MP
 
         const auto* value = Protocol::Schema::GetSizePrefixedClientHello(bytes);
         auto offer = makeOffer(value->protocol_major(), value->minimum_minor(), value->maximum_minor(),
-            value->optional_capabilities(), value->required_capabilities());
+            value->optional_capabilities(), value->required_capabilities(), value->content_manifest_id());
         if (const auto* decodeError = std::get_if<HandshakeError>(&offer))
             return *decodeError;
         return ClientHello::fromOffer(std::get<CapabilityOffer>(std::move(offer)));
@@ -292,8 +315,15 @@ namespace TES3MP
         auto capabilities = decodeCapabilityVector(value->negotiated_capabilities(), MaximumNegotiatedCapabilityCount);
         if (const auto* decodeError = std::get_if<HandshakeError>(&capabilities))
             return *decodeError;
+        const auto* manifestValue = value->content_manifest_id();
+        const auto manifest = manifestValue
+            ? ContentManifestId::fromBytes(std::as_bytes(std::span(manifestValue->data(), manifestValue->size())))
+            : std::nullopt;
+        if (!manifest)
+            return error(HandshakeErrorStage::SemanticValidation, HandshakeErrorCode::InvalidContentManifestId,
+                manifestValue ? manifestValue->size() : 0, ContentManifestIdBytes);
         return ServerHello(ProtocolVersion{ value->protocol_major(), value->selected_minor() },
-            std::get<std::vector<CapabilityId>>(std::move(capabilities)));
+            std::get<std::vector<CapabilityId>>(std::move(capabilities)), *manifest);
     }
 
     SessionRejectedDecodeResult decodeSessionRejected(std::span<const std::byte> payload)
@@ -325,6 +355,9 @@ namespace TES3MP
             case Protocol::Schema::SessionRejectionReason::UnsupportedRequiredCapability:
                 reason = SessionRejectionReason::UnsupportedRequiredCapability;
                 break;
+            case Protocol::Schema::SessionRejectionReason::ContentManifestMismatch:
+                reason = SessionRejectionReason::ContentManifestMismatch;
+                break;
             default:
                 return error(HandshakeErrorStage::SemanticValidation, HandshakeErrorCode::UnknownRejectionReason,
                     static_cast<std::size_t>(value->reason()));
@@ -354,6 +387,8 @@ namespace TES3MP
         const std::uint16_t highestMinor = std::min(client.versions().maximumMinor(), server.versions().maximumMinor());
         if (lowestMinor > highestMinor)
             return SessionRejected(SessionRejectionReason::NoCompatibleMinor, server.versions(), std::nullopt);
+        if (client.contentManifest() != server.contentManifest())
+            return SessionRejected(SessionRejectionReason::ContentManifestMismatch, server.versions(), std::nullopt);
 
         const auto clientSupported
             = supportedCapabilities(client.optionalCapabilities(), client.requiredCapabilities());
@@ -377,7 +412,8 @@ namespace TES3MP
         negotiated.reserve(std::min(clientSupported.size(), serverSupported.size()));
         std::set_intersection(clientSupported.begin(), clientSupported.end(), serverSupported.begin(),
             serverSupported.end(), std::back_inserter(negotiated));
-        return ServerHello(ProtocolVersion{ server.versions().major(), highestMinor }, std::move(negotiated));
+        return ServerHello(ProtocolVersion{ server.versions().major(), highestMinor }, std::move(negotiated),
+            server.contentManifest());
     }
 
     InitialPeerProtocol classifyInitialPeerProtocol(std::span<const std::byte> bytes) noexcept

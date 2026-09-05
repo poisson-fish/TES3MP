@@ -6017,6 +6017,35 @@ only the relevant phase section here.
   found no player restore or content-manifest agreement path. No build or runtime
   test was run because production code did not change.
 
+### 2026-09-05 identity foundation pass
+
+- Owner decision: approved A/A — dedicated durable player credential plus exact
+  negotiated manifest identity and manifest-scoped opaque content IDs. Recorded
+  in [`ADR-0057`](adr/ADR-0057-phase10-durable-player-and-content-identity.md).
+- Player identity: added a bounded server registry with random client credential,
+  persisted SHA-256 digest, stable player/entity/appearance claim, atomic
+  prepare/commit/rollback persistence, monotonic allocation, and restart reload.
+  Ordinary password authentication remains mandatory; routing principal and
+  grace-window resume token remain separate identities.
+- Content identity: protocol 1.1 client/server hellos carry the exact 32-byte
+  manifest identity and reject mismatch before admission. Resume context uses
+  the negotiated identity. Typed interior, exterior-worldspace, and appearance
+  IDs replace production fixture constants; OpenMW record names remain local.
+- Lifecycle/client: grace expiration still removes the canonical avatar. A valid
+  durable credential recreates the same player/entity at the configured spawn,
+  including after restart. Desktop clients atomically persist a newly issued
+  credential and reject unexpected credential replacement on resume/reattach.
+- Canonical compatibility: snapshots carry `AppearanceId`; deterministic checksum
+  encoding advances to version 2. No character creation, appearance selection,
+  inventory, stats, transform persistence, account recovery, or world persistence
+  was added.
+- Verification: standalone protocol/determinism/fault/observability,
+  authenticated-join, server-app, and adapter contract targets pass; GNS-enabled
+  server/headless builds and affected tests pass; the Phase 7 lifecycle demo
+  passes all scenarios including 32 reconnects and empty final queues; full
+  RelWithDebInfo OpenMW desktop builds and links. Hardware/content visual proof
+  was not run.
+
 - Content identity must not use local file paths. Canonical record references need
   stable manifest context and explicit collision handling.
 - Moderation primitives belong in canonical server commands now; the secure

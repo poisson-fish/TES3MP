@@ -11,12 +11,14 @@ conditional stretch target.
 
 ## Current status
 
-Phases 0–9 are **Complete**. The headless, OpenMW desktop, and PC VR vertical
+Phases 0–10 are **Complete**. The headless, OpenMW desktop, and PC VR vertical
 slices share one bounded protocol, reusable client session, and authoritative
 server path. Optional OpenXR head/hand samples are isolated presentation data;
 they cannot author canonical movement or gameplay.
 
-Phase 10 player lifecycle and content identity discovery is next. The
+Phase 10 adds durable player credential reattachment and exact negotiated
+content-manifest identity while keeping local OpenMW record names out of the
+protocol. The next pass is the Phase 10 milestone gate and vertical-slice choice. The
 [rolling implementation plan](IMPLEMENTATION_PLAN.md) is the authoritative
 Now / Next / Later tracker. The [implementation notes](IMPLEMENTATION_NOTES.md)
 retain detailed historical evidence and owner-review history.

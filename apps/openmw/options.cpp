@@ -29,12 +29,22 @@ namespace OpenMW
             "TES3MP connection timeout in milliseconds (1-60000; required when enabled)");
         addOption("tes3mp-password-file", bpo::value<Files::MaybeQuotedPath>()->default_value({}, ""),
             "file containing optional TES3MP join password");
-        addOption("tes3mp-fixture-interior", bpo::value<std::string>()->default_value(""),
-            "OpenMW interior cell mapped to the TES3MP fixture interior");
-        addOption("tes3mp-fixture-worldspace", bpo::value<std::string>()->default_value(""),
-            "OpenMW worldspace mapped to the TES3MP fixture exterior");
-        addOption("tes3mp-fixture-avatar", bpo::value<std::string>()->default_value(""),
-            "OpenMW NPC record used for transient remote-player presentation");
+        addOption("tes3mp-player-credential-file", bpo::value<Files::MaybeQuotedPath>()->default_value({}, ""),
+            "private TES3MP durable player credential file");
+        addOption("tes3mp-content-manifest-id", bpo::value<std::string>()->default_value(""),
+            "exact TES3MP content manifest SHA-256 in hexadecimal");
+        addOption("tes3mp-content-interior-id", bpo::value<unsigned long long>()->default_value(0),
+            "manifest-scoped TES3MP interior cell ID");
+        addOption("tes3mp-content-exterior-id", bpo::value<unsigned long long>()->default_value(0),
+            "manifest-scoped TES3MP exterior worldspace ID");
+        addOption("tes3mp-content-appearance-id", bpo::value<unsigned long long>()->default_value(0),
+            "manifest-scoped TES3MP default appearance ID");
+        addOption("tes3mp-content-interior-record", bpo::value<std::string>()->default_value(""),
+            "OpenMW interior record mapped by the TES3MP content manifest");
+        addOption("tes3mp-content-worldspace-record", bpo::value<std::string>()->default_value(""),
+            "OpenMW worldspace record mapped by the TES3MP content manifest");
+        addOption("tes3mp-content-appearance-record", bpo::value<std::string>()->default_value(""),
+            "OpenMW NPC record mapped by the TES3MP content manifest");
 #ifdef TES3MP_OPENMW_DESKTOP_AUTOMATION
         addOption("tes3mp-automation-role", bpo::value<std::string>()->default_value(""),
             "test-only fixed TES3MP desktop automation role");

@@ -36,7 +36,8 @@ namespace
     TES3MP::CanonicalPlayerEntityState player(std::uint64_t player, std::uint64_t entity, std::uint64_t revision = 1,
         std::uint64_t tick = 0, std::uint64_t epoch = 1)
     {
-        return TES3MP::CanonicalPlayerEntityState(playerId(player), entityId(entity), transform(player, player * 10),
+        return TES3MP::CanonicalPlayerEntityState(playerId(player), entityId(entity),
+            TES3MP::AppearanceId::fromValue(1).value(), transform(player, player * 10),
             TES3MP::LinearVelocity3(static_cast<std::int64_t>(player), 0, 0),
             TES3MP::EntityRevision::fromValue(revision).value(), TES3MP::AuthorityEpoch::fromValue(epoch).value(),
             TES3MP::ServerTick::fromValue(tick).value());

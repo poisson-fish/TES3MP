@@ -13,11 +13,12 @@ namespace TES3MP::OpenMWAdapter
         constexpr std::uint64_t RetryIntervalNanoseconds = 1'000'000'000;
         constexpr std::uint64_t PoseSampleIntervalNanoseconds = 50'000'000;
 
-        ClientHello makeClientHello()
+        ClientHello makeClientHello(ContentManifestId contentManifest)
         {
-            auto versions = std::get<ProtocolVersionRange>(ProtocolVersionRange::create(1, 0, 0));
+            auto versions = std::get<ProtocolVersionRange>(ProtocolVersionRange::create(1, 1, 1));
             const std::array optional{ vrPoseCapability() };
-            auto offer = std::get<CapabilityOffer>(CapabilityOffer::create(std::move(versions), optional, {}));
+            auto offer = std::get<CapabilityOffer>(
+                CapabilityOffer::create(std::move(versions), optional, {}, contentManifest));
             return ClientHello::fromOffer(std::move(offer));
         }
 
@@ -71,7 +72,8 @@ namespace TES3MP::OpenMWAdapter
             Coordinator(std::unique_ptr<TransportRuntime> transport, std::unique_ptr<MonotonicClock> clock,
                 std::unique_ptr<ClientSessionRuntime> runtime, ReconnectConfiguration reconnect,
                 SemanticInputProvider& input, PresentationProvider& presentation, ConnectionStatusProvider& status,
-                ConnectionControlProvider* control, VrPoseInputProvider* poseInput) noexcept
+                ConnectionControlProvider* control, VrPoseInputProvider* poseInput,
+                std::unique_ptr<PlayerCredentialPersistence> playerCredentials) noexcept
                 : mTransport(std::move(transport))
                 , mClock(std::move(clock))
                 , mRuntime(std::move(runtime))
@@ -81,6 +83,7 @@ namespace TES3MP::OpenMWAdapter
                 , mStatus(status)
                 , mControl(control)
                 , mPoseInput(poseInput)
+                , mPlayerCredentials(std::move(playerCredentials))
             {
             }
 
@@ -132,6 +135,14 @@ namespace TES3MP::OpenMWAdapter
                 }
                 if (advanced.authenticationAccepted)
                 {
+                    if (auto playerCredential = mRuntime->takePlayerCredential())
+                    {
+                        if (!mPlayerCredentials || !mPlayerCredentials->store(std::move(*playerCredential)))
+                        {
+                            closeTerminal(ConnectionStatus::TransportFailed);
+                            return;
+                        }
+                    }
                     auto token = mRuntime->takeResumeToken();
                     const auto lifetime = mRuntime->resumeLifetimeMilliseconds();
                     if (!token || lifetime < MinimumResumeTokenLifetimeMilliseconds
@@ -376,7 +387,8 @@ namespace TES3MP::OpenMWAdapter
                 auto token = std::move(*mResumeToken);
                 mResumeToken.reset();
                 if (attempt->start(
-                        mReconnect.endpoint, makeClientHello(), AuthenticationRequest::resume(std::move(token)))
+                        mReconnect.endpoint, makeClientHello(mReconnect.contentManifest),
+                        AuthenticationRequest::resume(std::move(token)))
                     != HeadlessClientResult::Accepted)
                 {
                     mRuntime = std::move(attempt);
@@ -446,6 +458,7 @@ namespace TES3MP::OpenMWAdapter
             ConnectionStatusProvider& mStatus;
             ConnectionControlProvider* mControl = nullptr;
             VrPoseInputProvider* mPoseInput = nullptr;
+            std::unique_ptr<PlayerCredentialPersistence> mPlayerCredentials;
             bool mClosed = false;
             bool mReady = false;
             bool mResuming = false;
@@ -466,11 +479,12 @@ namespace TES3MP::OpenMWAdapter
     std::unique_ptr<EngineCoordinator> makeCoordinator(std::unique_ptr<TransportRuntime> transport,
         std::unique_ptr<MonotonicClock> clock, std::unique_ptr<ClientSessionRuntime> runtime,
         ReconnectConfiguration reconnect, SemanticInputProvider& input, PresentationProvider& presentation,
-        ConnectionStatusProvider& status, ConnectionControlProvider* control, VrPoseInputProvider* poseInput) noexcept
+        ConnectionStatusProvider& status, ConnectionControlProvider* control, VrPoseInputProvider* poseInput,
+        std::unique_ptr<PlayerCredentialPersistence> playerCredentials) noexcept
     {
         if (!transport || !clock || !runtime)
             return {};
         return std::make_unique<Coordinator>(std::move(transport), std::move(clock), std::move(runtime),
-            std::move(reconnect), input, presentation, status, control, poseInput);
+            std::move(reconnect), input, presentation, status, control, poseInput, std::move(playerCredentials));
     }
 }

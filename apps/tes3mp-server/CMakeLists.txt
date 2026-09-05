@@ -11,6 +11,8 @@ add_library(tes3mp_server_app STATIC
     phase7_proof_profile.hpp
     phase7_queue_telemetry.hpp
     phase7_queue_telemetry.cpp
+    player_identity_file.hpp
+    player_identity_file.cpp
     resume_token_context.hpp
     resume_token_context.cpp
     server_config.hpp

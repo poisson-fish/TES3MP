@@ -51,7 +51,8 @@ namespace
     CanonicalPlayerEntityState player(std::uint64_t player, std::uint64_t entity, std::uint64_t revision = 1,
         std::uint64_t tick = 0, std::uint64_t epoch = 1, LinearVelocity3 velocity = LinearVelocity3(0, 0, 0))
     {
-        return CanonicalPlayerEntityState(playerId(player), entityId(entity), transform(player, player * 100), velocity,
+        return CanonicalPlayerEntityState(playerId(player), entityId(entity), AppearanceId::fromValue(1).value(),
+            transform(player, player * 100), velocity,
             EntityRevision::fromValue(revision).value(), AuthorityEpoch::fromValue(epoch).value(),
             ServerTick::fromValue(tick).value());
     }
@@ -187,7 +188,7 @@ namespace
 
     bool unknown_and_same_fixture_transitions_finalize_without_spatial_mutation()
     {
-        const std::array players{ CanonicalPlayerEntityState(playerId(1), entityId(101),
+        const std::array players{ CanonicalPlayerEntityState(playerId(1), entityId(101), AppearanceId::fromValue(1).value(),
             Transform(CellId::interior(CellSpaceId::fromValue(7).value()), Position3(1, 2, 3),
                 Orientation3(Turn32::fromValue(0), Turn32::fromValue(0), Turn32::fromValue(0))),
             LinearVelocity3(4, 5, 6), EntityRevision::fromValue(1).value(), AuthorityEpoch::fromValue(1).value(),

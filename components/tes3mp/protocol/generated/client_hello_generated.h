@@ -27,7 +27,8 @@ struct ClientHello FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
     VT_MINIMUM_MINOR = 6,
     VT_MAXIMUM_MINOR = 8,
     VT_OPTIONAL_CAPABILITIES = 10,
-    VT_REQUIRED_CAPABILITIES = 12
+    VT_REQUIRED_CAPABILITIES = 12,
+    VT_CONTENT_MANIFEST_ID = 14
   };
   uint16_t protocol_major() const {
     return GetField<uint16_t>(VT_PROTOCOL_MAJOR, 0);
@@ -44,6 +45,9 @@ struct ClientHello FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
   const ::flatbuffers::Vector<uint32_t> *required_capabilities() const {
     return GetPointer<const ::flatbuffers::Vector<uint32_t> *>(VT_REQUIRED_CAPABILITIES);
   }
+  const ::flatbuffers::Vector<uint8_t> *content_manifest_id() const {
+    return GetPointer<const ::flatbuffers::Vector<uint8_t> *>(VT_CONTENT_MANIFEST_ID);
+  }
   template <bool B = false>
   bool Verify(::flatbuffers::VerifierTemplate<B> &verifier) const {
     return VerifyTableStart(verifier) &&
@@ -54,6 +58,8 @@ struct ClientHello FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
            verifier.VerifyVector(optional_capabilities()) &&
            VerifyOffset(verifier, VT_REQUIRED_CAPABILITIES) &&
            verifier.VerifyVector(required_capabilities()) &&
+           VerifyOffset(verifier, VT_CONTENT_MANIFEST_ID) &&
+           verifier.VerifyVector(content_manifest_id()) &&
            verifier.EndTable();
   }
 };
@@ -77,6 +83,9 @@ struct ClientHelloBuilder {
   void add_required_capabilities(::flatbuffers::Offset<::flatbuffers::Vector<uint32_t>> required_capabilities) {
     fbb_.AddOffset(ClientHello::VT_REQUIRED_CAPABILITIES, required_capabilities);
   }
+  void add_content_manifest_id(::flatbuffers::Offset<::flatbuffers::Vector<uint8_t>> content_manifest_id) {
+    fbb_.AddOffset(ClientHello::VT_CONTENT_MANIFEST_ID, content_manifest_id);
+  }
   explicit ClientHelloBuilder(::flatbuffers::FlatBufferBuilder &_fbb)
         : fbb_(_fbb) {
     start_ = fbb_.StartTable();
@@ -94,8 +103,10 @@ inline ::flatbuffers::Offset<ClientHello> CreateClientHello(
     uint16_t minimum_minor = 0,
     uint16_t maximum_minor = 0,
     ::flatbuffers::Offset<::flatbuffers::Vector<uint32_t>> optional_capabilities = 0,
-    ::flatbuffers::Offset<::flatbuffers::Vector<uint32_t>> required_capabilities = 0) {
+    ::flatbuffers::Offset<::flatbuffers::Vector<uint32_t>> required_capabilities = 0,
+    ::flatbuffers::Offset<::flatbuffers::Vector<uint8_t>> content_manifest_id = 0) {
   ClientHelloBuilder builder_(_fbb);
+  builder_.add_content_manifest_id(content_manifest_id);
   builder_.add_required_capabilities(required_capabilities);
   builder_.add_optional_capabilities(optional_capabilities);
   builder_.add_maximum_minor(maximum_minor);
@@ -110,16 +121,19 @@ inline ::flatbuffers::Offset<ClientHello> CreateClientHelloDirect(
     uint16_t minimum_minor = 0,
     uint16_t maximum_minor = 0,
     const std::vector<uint32_t> *optional_capabilities = nullptr,
-    const std::vector<uint32_t> *required_capabilities = nullptr) {
+    const std::vector<uint32_t> *required_capabilities = nullptr,
+    const std::vector<uint8_t> *content_manifest_id = nullptr) {
   auto optional_capabilities__ = optional_capabilities ? _fbb.CreateVector<uint32_t>(*optional_capabilities) : 0;
   auto required_capabilities__ = required_capabilities ? _fbb.CreateVector<uint32_t>(*required_capabilities) : 0;
+  auto content_manifest_id__ = content_manifest_id ? _fbb.CreateVector<uint8_t>(*content_manifest_id) : 0;
   return TES3MP::Protocol::Schema::CreateClientHello(
       _fbb,
       protocol_major,
       minimum_minor,
       maximum_minor,
       optional_capabilities__,
-      required_capabilities__);
+      required_capabilities__,
+      content_manifest_id__);
 }
 
 inline const TES3MP::Protocol::Schema::ClientHello *GetClientHello(const void *buf) {

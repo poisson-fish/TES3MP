@@ -84,11 +84,13 @@ namespace TES3MP
     class SpatialEntitySnapshot
     {
     public:
-        constexpr SpatialEntitySnapshot(ServerTick serverTick, PlayerId playerId, EntityId entityId, EntityRevision entityRevision,
-            AuthorityEpoch authorityEpoch, Transform transform, LinearVelocity3 linearVelocity) noexcept
+        constexpr SpatialEntitySnapshot(ServerTick serverTick, PlayerId playerId, EntityId entityId,
+            AppearanceId appearanceId, EntityRevision entityRevision, AuthorityEpoch authorityEpoch,
+            Transform transform, LinearVelocity3 linearVelocity) noexcept
             : mServerTick(serverTick)
             , mPlayerId(playerId)
             , mEntityId(entityId)
+            , mAppearanceId(appearanceId)
             , mEntityRevision(entityRevision)
             , mAuthorityEpoch(authorityEpoch)
             , mTransform(transform)
@@ -99,6 +101,7 @@ namespace TES3MP
         constexpr ServerTick serverTick() const noexcept { return mServerTick; }
         constexpr PlayerId playerId() const noexcept { return mPlayerId; }
         constexpr EntityId entityId() const noexcept { return mEntityId; }
+        constexpr AppearanceId appearanceId() const noexcept { return mAppearanceId; }
         constexpr EntityRevision entityRevision() const noexcept { return mEntityRevision; }
         constexpr AuthorityEpoch authorityEpoch() const noexcept { return mAuthorityEpoch; }
         constexpr const Transform& transform() const noexcept { return mTransform; }
@@ -113,6 +116,7 @@ namespace TES3MP
         ServerTick mServerTick;
         PlayerId mPlayerId;
         EntityId mEntityId;
+        AppearanceId mAppearanceId;
         EntityRevision mEntityRevision;
         AuthorityEpoch mAuthorityEpoch;
         Transform mTransform;

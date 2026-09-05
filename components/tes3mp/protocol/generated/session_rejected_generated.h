@@ -25,33 +25,36 @@ enum class SessionRejectionReason : uint8_t {
   ProtocolMajorMismatch = 1,
   NoCompatibleMinor = 2,
   UnsupportedRequiredCapability = 3,
+  ContentManifestMismatch = 4,
   MIN = Unknown,
-  MAX = UnsupportedRequiredCapability
+  MAX = ContentManifestMismatch
 };
 
-inline const SessionRejectionReason (&EnumValuesSessionRejectionReason())[4] {
+inline const SessionRejectionReason (&EnumValuesSessionRejectionReason())[5] {
   static const SessionRejectionReason values[] = {
     SessionRejectionReason::Unknown,
     SessionRejectionReason::ProtocolMajorMismatch,
     SessionRejectionReason::NoCompatibleMinor,
-    SessionRejectionReason::UnsupportedRequiredCapability
+    SessionRejectionReason::UnsupportedRequiredCapability,
+    SessionRejectionReason::ContentManifestMismatch
   };
   return values;
 }
 
 inline const char * const *EnumNamesSessionRejectionReason() {
-  static const char * const names[5] = {
+  static const char * const names[6] = {
     "Unknown",
     "ProtocolMajorMismatch",
     "NoCompatibleMinor",
     "UnsupportedRequiredCapability",
+    "ContentManifestMismatch",
     nullptr
   };
   return names;
 }
 
 inline const char *EnumNameSessionRejectionReason(SessionRejectionReason e) {
-  if (::flatbuffers::IsOutRange(e, SessionRejectionReason::Unknown, SessionRejectionReason::UnsupportedRequiredCapability)) return "";
+  if (::flatbuffers::IsOutRange(e, SessionRejectionReason::Unknown, SessionRejectionReason::ContentManifestMismatch)) return "";
   const size_t index = static_cast<size_t>(e);
   return EnumNamesSessionRejectionReason()[index];
 }

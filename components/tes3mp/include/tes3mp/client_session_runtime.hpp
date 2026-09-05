@@ -77,6 +77,7 @@ namespace TES3MP
         const HeadlessClientSession& session() const noexcept { return *mSession; }
         std::optional<ResumeToken> takeResumeToken() noexcept;
         std::optional<ResumeToken> takeUnsubmittedResumeToken() noexcept;
+        std::optional<PlayerCredential> takePlayerCredential() noexcept;
         std::uint64_t resumeLifetimeMilliseconds() const noexcept { return mResumeLifetimeMilliseconds; }
 
     private:
@@ -92,6 +93,8 @@ namespace TES3MP
         std::optional<ClientHello> mClientHello;
         std::optional<AuthenticationRequest> mAuthentication;
         std::optional<ResumeToken> mResumeToken;
+        std::optional<PlayerCredential> mPlayerCredential;
+        bool mMayAcceptPlayerCredential = false;
         std::uint64_t mResumeLifetimeMilliseconds = 0;
         std::vector<ReliableObservationBatch> mPendingObservations;
         std::optional<CommandSequence> mLastQueuedSequence;

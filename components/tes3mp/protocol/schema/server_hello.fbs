@@ -4,6 +4,7 @@ table ServerHello {
   protocol_major:ushort (id: 0);
   selected_minor:ushort (id: 1);
   negotiated_capabilities:[uint] (id: 2);
+  content_manifest_id:[ubyte] (id: 3);
 }
 
 root_type ServerHello;

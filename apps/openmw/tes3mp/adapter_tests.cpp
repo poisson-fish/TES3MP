@@ -7,6 +7,7 @@
 #include <array>
 #include <cmath>
 #include <cstdlib>
+#include <iostream>
 #include <limits>
 #include <numbers>
 #include <optional>
@@ -14,10 +15,13 @@
 
 namespace
 {
-    void require(bool value)
+    void require(bool value, int line)
     {
         if (!value)
+        {
+            std::cerr << "adapter_tests failure at line " << line << std::endl;
             std::abort();
+        }
     }
 
     template <class T>
@@ -31,7 +35,8 @@ namespace
     {
         const auto zero = TES3MP::Turn32::fromValue(0);
         return TES3MP::SpatialEntitySnapshot(value<TES3MP::ServerTick>(tick), value<TES3MP::PlayerId>(1),
-            value<TES3MP::EntityId>(2), value<TES3MP::EntityRevision>(revision), value<TES3MP::AuthorityEpoch>(epoch),
+            value<TES3MP::EntityId>(2), value<TES3MP::AppearanceId>(1), value<TES3MP::EntityRevision>(revision),
+            value<TES3MP::AuthorityEpoch>(epoch),
             TES3MP::Transform(TES3MP::CellId::interior(value<TES3MP::CellSpaceId>(7)), TES3MP::Position3(x, 0, 0),
                 TES3MP::Orientation3(zero, zero, zero)),
             TES3MP::LinearVelocity3(velocity, 0, 0));
@@ -39,7 +44,7 @@ namespace
 
     TES3MP::ServerHello serverHello(bool pose = false)
     {
-        auto versions = std::get<TES3MP::ProtocolVersionRange>(TES3MP::ProtocolVersionRange::create(1, 0, 0));
+        auto versions = std::get<TES3MP::ProtocolVersionRange>(TES3MP::ProtocolVersionRange::create(1, 1, 1));
         const std::array poseCapabilities{ TES3MP::vrPoseCapability() };
         const std::span<const TES3MP::CapabilityId> capabilities
             = pose ? std::span<const TES3MP::CapabilityId>(poseCapabilities) : std::span<const TES3MP::CapabilityId>{};
@@ -58,13 +63,30 @@ namespace
     }
 
     TES3MP::AuthenticationAcceptedMessage accepted(
-        std::byte marker, std::uint64_t lifetime = TES3MP::MinimumResumeTokenLifetimeMilliseconds)
+        std::byte marker, std::uint64_t lifetime = TES3MP::MinimumResumeTokenLifetimeMilliseconds,
+        bool includePlayerCredential = false)
     {
         std::array<std::byte, TES3MP::ResumeTokenBytes> bytes{};
         bytes.fill(marker);
         auto token = TES3MP::ResumeToken::create(bytes);
-        return std::move(*TES3MP::AuthenticationAcceptedMessage::create(std::move(*token), lifetime));
+        std::optional<TES3MP::PlayerCredential> playerCredential;
+        if (includePlayerCredential)
+            playerCredential = TES3MP::PlayerCredential::create(bytes);
+        return std::move(*TES3MP::AuthenticationAcceptedMessage::create(
+            std::move(*token), lifetime, std::move(playerCredential)));
     }
+
+    class RecordingPlayerCredentialPersistence final : public TES3MP::OpenMWAdapter::PlayerCredentialPersistence
+    {
+    public:
+        bool store(TES3MP::PlayerCredential credential) noexcept override
+        {
+            ++calls;
+            return credential.copyTo(bytes);
+        }
+        std::size_t calls = 0;
+        std::array<std::byte, TES3MP::PlayerCredentialBytes> bytes{};
+    };
 
     TES3MP::LatestWinsSnapshot selfSnapshot(TES3MP::SessionGeneration generation)
     {
@@ -73,7 +95,7 @@ namespace
         const auto entity = value<TES3MP::EntityId>(1);
         const auto zero = TES3MP::Turn32::fromValue(0);
         const std::array entries{ TES3MP::SpatialEntitySnapshot(TES3MP::ServerTick::initial(), player, entity,
-            TES3MP::EntityRevision::initial(), TES3MP::AuthorityEpoch::initial(),
+            value<TES3MP::AppearanceId>(1), TES3MP::EntityRevision::initial(), TES3MP::AuthorityEpoch::initial(),
             TES3MP::Transform(TES3MP::CellId::interior(value<TES3MP::CellSpaceId>(7)), TES3MP::Position3(0, 0, 0),
                 TES3MP::Orientation3(zero, zero, zero)),
             TES3MP::LinearVelocity3(0, 0, 0)) };
@@ -303,6 +325,8 @@ namespace
     };
 }
 
+#define require(value) require(static_cast<bool>(value), __LINE__)
+
 int main()
 {
     using namespace TES3MP;
@@ -311,7 +335,7 @@ int main()
     const auto endpoint = *ConnectionEndpoint::create("127.0.0.1", 25560);
     const auto timeouts = *SessionTimeoutPolicy::create(1'000'000, 1'000'000, 1'000'000);
     const auto outbound = *OutboundQueuePolicy::create(64, 512 * 1024, 8, 4, 8, 1, 4, 1, 8, 250);
-    const ReconnectConfiguration reconnect{ endpoint, timeouts, outbound };
+    const ReconnectConfiguration reconnect{ endpoint, timeouts, outbound, testContentManifestId() };
 
     require(mapPlanarMovement(0, 0, 0).desiredVelocity() == LinearVelocity3(0, 0, 0));
     require(mapPlanarMovement(1, 0, 0).desiredVelocity() == LinearVelocity3(DesktopFixtureSpeedQuantaPerTick, 0, 0));
@@ -446,7 +470,7 @@ int main()
     auto reconnectCreated = ClientSessionRuntime::create(
         *reconnectTransport, *reconnectClock, timeouts, SessionGeneration::initial(), outbound);
     auto reconnectRuntime = std::get<std::unique_ptr<ClientSessionRuntime>>(std::move(reconnectCreated));
-    auto versions = std::get<ProtocolVersionRange>(ProtocolVersionRange::create(1, 0, 0));
+    auto versions = std::get<ProtocolVersionRange>(ProtocolVersionRange::create(1, 1, 1));
     const std::array poseCapabilities{ vrPoseCapability() };
     auto offer = std::get<CapabilityOffer>(
         CapabilityOffer::create(std::move(versions), poseCapabilities, {}));
@@ -456,15 +480,18 @@ int main()
         && reconnectRuntime->start(
                endpoint, ClientHello::fromOffer(std::move(offer)), AuthenticationRequest::join(std::move(*password)))
             == HeadlessClientResult::Accepted);
+    auto credentialPersistence = std::make_unique<RecordingPlayerCredentialPersistence>();
+    auto* credentialPersistenceObserver = credentialPersistence.get();
     auto reconnectCoordinator = makeCoordinator(std::move(reconnectTransport), std::move(reconnectClock),
         std::move(reconnectRuntime), reconnect, reconnectInput, reconnectPresentation, reconnectStatus, &disconnect,
-        &poseInput);
+        &poseInput, std::move(credentialPersistence));
     reconnectCoordinator->frame(0.01f);
     auto helloPayload = encodeServerHello(serverHello(true));
     reconnectTransportObserver->enqueue(
         MessageClass::SessionControl, MessageKind::ServerHello, helloPayload, TransportChannel::ReliableOrdered);
     reconnectCoordinator->frame(0.01f);
-    auto initialAccepted = accepted(std::byte{ 2 }, 2 * MinimumResumeTokenLifetimeMilliseconds);
+    auto initialAccepted = accepted(
+        std::byte{ 2 }, 2 * MinimumResumeTokenLifetimeMilliseconds, true);
     auto initialAcceptedPayload = encodeAuthenticationAccepted(initialAccepted);
     reconnectTransportObserver->enqueue(MessageClass::SessionControl, MessageKind::AuthenticationAccepted,
         initialAcceptedPayload, TransportChannel::ReliableOrdered);
@@ -480,7 +507,9 @@ int main()
     reconnectTransportObserver->enqueue(MessageClass::PresentationSample, MessageKind::ServerVrPoseSnapshot,
         encodeServerVrPoseSnapshot(remotePose), TransportChannel::PresentationLatest);
     reconnectCoordinator->frame(0.01f);
-    require(reconnectPresentation.calls == 1 && reconnectPresentation.poses == 1 && poseInput.calls == 1);
+    require(reconnectPresentation.calls == 1 && reconnectPresentation.poses == 1 && poseInput.calls == 1
+        && credentialPersistenceObserver->calls == 1
+        && credentialPersistenceObserver->bytes.front() == std::byte{ 2 });
     require(reconnectTransportObserver->sentChannel == TransportChannel::PresentationLatest);
     const auto sentPoseFrame = decodeProtocolFrame(reconnectTransportObserver->sent);
     require(std::holds_alternative<DecodedFrame>(sentPoseFrame)
@@ -518,13 +547,16 @@ int main()
 
     require(std::get<TES3MP::OpenMWAdapter::ClientCompositionFailure>(
                 TES3MP::OpenMWAdapter::makeClientCoordinator(
-                    "", 0, 0, "unreachable/credential", TES3MP::OpenMWAdapter::ClientProviders{}))
+                    "", 0, 0, "unreachable/credential", {}, TES3MP::testContentManifestId(),
+                    TES3MP::OpenMWAdapter::ClientProviders{}))
         == TES3MP::OpenMWAdapter::ClientCompositionFailure::ProvidersUnavailable);
     const TES3MP::OpenMWAdapter::ClientProviders providers{ &input, &presentation, &status, nullptr };
     require(std::get<TES3MP::OpenMWAdapter::ClientCompositionFailure>(
-                TES3MP::OpenMWAdapter::makeClientCoordinator("", 25560, 1000, {}, providers))
+                TES3MP::OpenMWAdapter::makeClientCoordinator(
+                    "", 25560, 1000, {}, {}, TES3MP::testContentManifestId(), providers))
         == TES3MP::OpenMWAdapter::ClientCompositionFailure::InvalidEndpoint);
     require(std::get<TES3MP::OpenMWAdapter::ClientCompositionFailure>(
-                TES3MP::OpenMWAdapter::makeClientCoordinator("127.0.0.1", 25560, 0, {}, providers))
+                TES3MP::OpenMWAdapter::makeClientCoordinator(
+                    "127.0.0.1", 25560, 0, {}, {}, TES3MP::testContentManifestId(), providers))
         == TES3MP::OpenMWAdapter::ClientCompositionFailure::InvalidTimeout);
 }

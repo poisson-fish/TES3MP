@@ -72,11 +72,12 @@ namespace TES3MP::TestSupport
     std::vector<std::byte> encodeSpatialEntitySnapshot(const SpatialEntitySnapshot& snapshot)
     {
         std::vector<std::byte> output;
-        output.reserve(117);
+        output.reserve(125);
 
         appendUnsigned(output, snapshot.serverTick().value());
         appendUnsigned(output, snapshot.playerId().value());
         appendUnsigned(output, snapshot.entityId().value());
+        appendUnsigned(output, snapshot.appearanceId().value());
         appendUnsigned(output, snapshot.entityRevision().value());
         appendUnsigned(output, snapshot.authorityEpoch().value());
 
@@ -117,20 +118,23 @@ namespace TES3MP::TestSupport
         const auto tickValue = reader.readUnsigned<std::uint64_t>();
         const auto playerValue = reader.readUnsigned<std::uint64_t>();
         const auto entityValue = reader.readUnsigned<std::uint64_t>();
+        const auto appearanceValue = reader.readUnsigned<std::uint64_t>();
         const auto revisionValue = reader.readUnsigned<std::uint64_t>();
         const auto epochValue = reader.readUnsigned<std::uint64_t>();
         const auto cellKind = reader.readUnsigned<std::uint8_t>();
         const auto cellSpaceValue = reader.readUnsigned<std::uint64_t>();
-        if (!tickValue || !playerValue || !entityValue || !revisionValue || !epochValue || !cellKind || !cellSpaceValue)
+        if (!tickValue || !playerValue || !entityValue || !appearanceValue || !revisionValue || !epochValue
+            || !cellKind || !cellSpaceValue)
             return std::nullopt;
 
         const auto tick = ServerTick::fromValue(*tickValue);
         const auto player = PlayerId::fromValue(*playerValue);
         const auto entity = EntityId::fromValue(*entityValue);
+        const auto appearance = AppearanceId::fromValue(*appearanceValue);
         const auto revision = EntityRevision::fromValue(*revisionValue);
         const auto epoch = AuthorityEpoch::fromValue(*epochValue);
         const auto cellSpace = CellSpaceId::fromValue(*cellSpaceValue);
-        if (!tick || !player || !entity || !revision || !epoch || !cellSpace)
+        if (!tick || !player || !entity || !appearance || !revision || !epoch || !cellSpace)
             return std::nullopt;
 
         CellId cell = CellId::interior(*cellSpace);
@@ -158,7 +162,7 @@ namespace TES3MP::TestSupport
             || !velocityZ || !reader.finished())
             return std::nullopt;
 
-        return SpatialEntitySnapshot(*tick, *player, *entity, *revision, *epoch,
+        return SpatialEntitySnapshot(*tick, *player, *entity, *appearance, *revision, *epoch,
             Transform(cell, Position3(*positionX, *positionY, *positionZ),
                 Orientation3(
                     Turn32::fromValue(*rotationX), Turn32::fromValue(*rotationY), Turn32::fromValue(*rotationZ))),

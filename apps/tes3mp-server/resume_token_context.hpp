@@ -8,9 +8,7 @@
 
 namespace TES3MP::ServerApp
 {
-    inline constexpr std::string_view Phase7FixtureContentId = "tes3mp-vnext-phase7-fixture-v1";
-
-    std::optional<ResumeTokenContext> makePhase7ResumeTokenContext(
+    std::optional<ResumeTokenContext> makeResumeTokenContext(
         const ServerHello& negotiated, CredentialCrypto& crypto) noexcept;
 }
 

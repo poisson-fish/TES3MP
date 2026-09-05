@@ -5,14 +5,18 @@
 #include "remote_motion.hpp"
 
 #include <memory>
+#include <optional>
 #include <string>
 
 namespace TES3MP::OpenMWAdapter
 {
-    struct DesktopFixtureMapping
+    struct DesktopContentMapping
     {
+        CellSpaceId interiorId;
         std::string interiorCell;
+        CellSpaceId exteriorId;
         std::string exteriorWorldspace;
+        AppearanceId appearanceId;
         std::string avatarNpc;
     };
 
@@ -21,7 +25,7 @@ namespace TES3MP::OpenMWAdapter
     public:
         DesktopSemanticInput();
         ~DesktopSemanticInput() override;
-        void configure(DesktopFixtureMapping mapping);
+        void configure(DesktopContentMapping mapping);
         CellTransitionCapture captureCellTransition() noexcept override;
         std::optional<PlayerMotionIntent> sampleCurrentIntent() noexcept override;
 
@@ -35,7 +39,7 @@ namespace TES3MP::OpenMWAdapter
     public:
         explicit DesktopPresentation(RemoteMotionMetricSink& metrics);
         ~DesktopPresentation() override;
-        void configure(DesktopFixtureMapping mapping);
+        void configure(DesktopContentMapping mapping);
         ProviderResult applyAuthoritative(const LatestWinsSnapshot& snapshot,
             std::span<const ObservedPlayer> observedPlayers, bool allowLocalCellCorrection,
             MonotonicInstant receivedAt) noexcept override;

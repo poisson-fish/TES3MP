@@ -1,4 +1,5 @@
 #include <tes3mp/server_authentication.hpp>
+#include <tes3mp/player_identity.hpp>
 
 #include <algorithm>
 #include <atomic>
@@ -494,6 +495,45 @@ namespace TES3MP
             MonotonicClock& mClock;
         };
 
+        class PlayerClaimAuthenticationOperation final : public AuthenticationOperation
+        {
+        public:
+            PlayerClaimAuthenticationOperation(std::unique_ptr<AuthenticationOperation> underlying,
+                std::optional<AuthenticatedAdmission::PlayerClaim> claim) noexcept
+                : mUnderlying(std::move(underlying)), mClaim(claim) {}
+
+            AuthenticationPollResult poll() noexcept override
+            {
+                if (!mUnderlying)
+                    return AuthenticationPending{};
+                auto result = mUnderlying->poll();
+                auto* completion = std::get_if<AuthenticationCompletion>(&result);
+                if (!completion)
+                    return result;
+                mUnderlying.reset();
+                auto* admission = std::get_if<AuthenticatedAdmission>(&completion->result);
+                if (!admission || !mClaim)
+                {
+                    if (admission)
+                        completion->result = AuthenticationRejected{ AuthenticationRejectionReason::Denied };
+                    return result;
+                }
+                completion->result = AuthenticatedAdmission::reattach(admission->principal(), *mClaim);
+                return result;
+            }
+
+            void cancel() noexcept override
+            {
+                if (mUnderlying) mUnderlying->cancel();
+                mUnderlying.reset();
+                mClaim.reset();
+            }
+
+        private:
+            std::unique_ptr<AuthenticationOperation> mUnderlying;
+            std::optional<AuthenticatedAdmission::PlayerClaim> mClaim;
+        };
+
         std::unique_ptr<AuthenticationOperation> immediate(
             AuthenticationAttempt attempt, AuthenticationResult result) noexcept
         {
@@ -509,7 +549,16 @@ namespace TES3MP
             return immediate(attempt, AuthenticationRejected{ AuthenticationRejectionReason::ProviderUnavailable });
 
         if (submission.mRequest.kind() == AuthenticationCredentialKind::JoinPassword)
-            return mJoinProvider.begin(attempt, submission.mRequest.takeMaterial());
+        {
+            auto playerCredential = submission.mRequest.takePlayerCredential();
+            auto operation = mJoinProvider.begin(attempt, submission.mRequest.takeMaterial());
+            if (!playerCredential)
+                return operation;
+            const auto claim = mPlayerIdentities
+                ? mPlayerIdentities->authenticate(*playerCredential, submission.mContentManifest) : std::nullopt;
+            return std::unique_ptr<AuthenticationOperation>(
+                new (std::nothrow) PlayerClaimAuthenticationOperation(std::move(operation), claim));
+        }
 
         auto token = submission.mRequest.takeResumeToken();
         if (!token)

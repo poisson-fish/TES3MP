@@ -6,6 +6,7 @@ table ClientHello {
   maximum_minor:ushort (id: 2);
   optional_capabilities:[uint] (id: 3);
   required_capabilities:[uint] (id: 4);
+  content_manifest_id:[ubyte] (id: 5);
 }
 
 root_type ClientHello;

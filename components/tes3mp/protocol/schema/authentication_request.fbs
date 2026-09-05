@@ -9,6 +9,7 @@ enum AuthenticationCredentialKind : ubyte {
 table AuthenticationRequest {
   kind:AuthenticationCredentialKind = Unknown (id: 0);
   material:[ubyte] (id: 1);
+  player_credential:[ubyte] (id: 2);
 }
 
 root_type AuthenticationRequest;

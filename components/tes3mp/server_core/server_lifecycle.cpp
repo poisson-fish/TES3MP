@@ -22,11 +22,13 @@ namespace TES3MP
     bool ServerLifecycleCoordinator::registerJoined(PrincipalId principal, SessionId sessionId) noexcept
     {
         if (mPending || mBindings.size() >= MaximumCanonicalActiveSessions) return false;
-        if (std::any_of(mBindings.begin(), mBindings.end(), [principal, sessionId](const Binding& value) {
-                return value.principal == principal || value.session.sessionId() == sessionId;
-            })) return false;
         const auto* session = mReducer.state().findActiveSession(sessionId);
         if (!session) return false;
+        if (std::any_of(mBindings.begin(), mBindings.end(), [principal, session](const Binding& value) {
+                return value.principal == principal || value.session.sessionId() == session->sessionId()
+                    || value.session.playerId() == session->playerId()
+                    || value.session.entityId() == session->entityId();
+            })) return false;
         mBindings.push_back({ principal, *session, true, MonotonicInstant::fromNanoseconds(0) });
         return true;
     }

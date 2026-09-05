@@ -15,9 +15,6 @@ namespace TES3MP::OpenMWAdapter
         constexpr std::uint64_t FlowDuration = 8 * Second;
         constexpr std::uint64_t SoakDuration = 60 * Second;
         constexpr std::int64_t AutomationSpeed = 4096;
-        constexpr CellId Interior = CellId::interior(CellSpaceId::fromValue(7).value());
-        constexpr CellId Exterior = CellId::exterior(CellSpaceId::fromValue(8).value(), 0, 0);
-
         std::optional<MonotonicInstant> add(MonotonicInstant value, std::uint64_t duration) noexcept
         {
             if (duration > std::numeric_limits<std::uint64_t>::max() - value.nanoseconds())
@@ -70,8 +67,10 @@ namespace TES3MP::OpenMWAdapter
     }
 
     DesktopAutomation::DesktopAutomation(DesktopAutomationRole role, const std::filesystem::path& output,
-        DesktopPresentation& presentation, ConnectionStatusProvider& status)
+        ContentManifest contentManifest, DesktopPresentation& presentation, ConnectionStatusProvider& status)
         : mRole(role)
+        , mInterior(CellId::interior(contentManifest.interiorCell()))
+        , mExterior(CellId::exterior(contentManifest.exteriorWorldspace(), 0, 0))
         , mOutput(output, std::ios::out | std::ios::trunc)
         , mPresentation(presentation)
         , mStatus(status)
@@ -92,13 +91,13 @@ namespace TES3MP::OpenMWAdapter
         if (!mSentExterior && mSawPeer && elapsed >= Second)
         {
             mSentExterior = true;
-            return { ProviderResult::Accepted, FixtureCellTransition(Exterior) };
+            return { ProviderResult::Accepted, FixtureCellTransition(mExterior) };
         }
-        if (mSentExterior && !mSentInterior && *mSelfCell == Exterior && mExteriorAt
+        if (mSentExterior && !mSentInterior && *mSelfCell == mExterior && mExteriorAt
             && mNow->nanoseconds() - mExteriorAt->nanoseconds() >= Second)
         {
             mSentInterior = true;
-            return { ProviderResult::Accepted, FixtureCellTransition(Interior) };
+            return { ProviderResult::Accepted, FixtureCellTransition(mInterior) };
         }
         return {};
     }
@@ -137,7 +136,7 @@ namespace TES3MP::OpenMWAdapter
         else if (self->transform().position() != *mInitialPosition)
             mMoved = true;
         mSelfCell = self->transform().cell();
-        if (*mSelfCell == Exterior && !mExteriorAt)
+        if (*mSelfCell == mExterior && !mExteriorAt)
             mExteriorAt = receivedAt;
         const bool hasPeer = std::ranges::any_of(observedPlayers, [&](const ObservedPlayer& observed) {
             return observed.playerId != snapshot.header().targetPlayerId()

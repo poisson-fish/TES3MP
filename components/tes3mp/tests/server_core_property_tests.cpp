@@ -52,21 +52,21 @@ namespace
     CanonicalServerState initialState()
     {
         std::array<CanonicalPlayerEntityState, ClientCount> players{
-            CanonicalPlayerEntityState(playerId(0), entityId(0), transform(0), LinearVelocity3(0, 0, 0),
+            CanonicalPlayerEntityState(playerId(0), entityId(0), AppearanceId::fromValue(1).value(), transform(0), LinearVelocity3(0, 0, 0),
                 EntityRevision::initial(), AuthorityEpoch::initial(), ServerTick::initial()),
-            CanonicalPlayerEntityState(playerId(1), entityId(1), transform(1), LinearVelocity3(0, 0, 0),
+            CanonicalPlayerEntityState(playerId(1), entityId(1), AppearanceId::fromValue(1).value(), transform(1), LinearVelocity3(0, 0, 0),
                 EntityRevision::initial(), AuthorityEpoch::initial(), ServerTick::initial()),
-            CanonicalPlayerEntityState(playerId(2), entityId(2), transform(2), LinearVelocity3(0, 0, 0),
+            CanonicalPlayerEntityState(playerId(2), entityId(2), AppearanceId::fromValue(1).value(), transform(2), LinearVelocity3(0, 0, 0),
                 EntityRevision::initial(), AuthorityEpoch::initial(), ServerTick::initial()),
-            CanonicalPlayerEntityState(playerId(3), entityId(3), transform(3), LinearVelocity3(0, 0, 0),
+            CanonicalPlayerEntityState(playerId(3), entityId(3), AppearanceId::fromValue(1).value(), transform(3), LinearVelocity3(0, 0, 0),
                 EntityRevision::initial(), AuthorityEpoch::initial(), ServerTick::initial()),
-            CanonicalPlayerEntityState(playerId(4), entityId(4), transform(4), LinearVelocity3(0, 0, 0),
+            CanonicalPlayerEntityState(playerId(4), entityId(4), AppearanceId::fromValue(1).value(), transform(4), LinearVelocity3(0, 0, 0),
                 EntityRevision::initial(), AuthorityEpoch::initial(), ServerTick::initial()),
-            CanonicalPlayerEntityState(playerId(5), entityId(5), transform(5), LinearVelocity3(0, 0, 0),
+            CanonicalPlayerEntityState(playerId(5), entityId(5), AppearanceId::fromValue(1).value(), transform(5), LinearVelocity3(0, 0, 0),
                 EntityRevision::initial(), AuthorityEpoch::initial(), ServerTick::initial()),
-            CanonicalPlayerEntityState(playerId(6), entityId(6), transform(6), LinearVelocity3(0, 0, 0),
+            CanonicalPlayerEntityState(playerId(6), entityId(6), AppearanceId::fromValue(1).value(), transform(6), LinearVelocity3(0, 0, 0),
                 EntityRevision::initial(), AuthorityEpoch::initial(), ServerTick::initial()),
-            CanonicalPlayerEntityState(playerId(7), entityId(7), transform(7), LinearVelocity3(0, 0, 0),
+            CanonicalPlayerEntityState(playerId(7), entityId(7), AppearanceId::fromValue(1).value(), transform(7), LinearVelocity3(0, 0, 0),
                 EntityRevision::initial(), AuthorityEpoch::initial(), ServerTick::initial()),
         };
         std::array<CanonicalSessionProgress, ClientCount> sessions{
@@ -232,7 +232,7 @@ namespace
             || reducer.stateVersion().value() != versionBefore.value() + committed
             || publication->stateVersion() != reducer.stateVersion() || publication->state() != reducer.state()
             || publication->checksum()
-                != canonicalStateChecksumV1(
+                != canonicalStateChecksumV2(
                     publication->stateVersion(), publication->checkpointTick(), reducer.state()))
             return failure("publication_complete");
 
@@ -361,7 +361,7 @@ namespace
         simulation.failedBatch = BatchesPerSimulation;
         simulation.finalVersion = reducer.stateVersion();
         simulation.finalChecksum = reducer.latestPublication()->checksum();
-        simulation.finalStateBytes = canonicalStateBytesV1(
+        simulation.finalStateBytes = canonicalStateBytesV2(
             reducer.stateVersion(), reducer.latestPublication()->checkpointTick(), reducer.state());
         return simulation;
     }

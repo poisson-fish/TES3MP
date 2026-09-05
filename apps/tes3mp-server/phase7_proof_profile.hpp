@@ -9,8 +9,8 @@
 namespace TES3MP::ServerApp
 {
     inline constexpr std::uint16_t Phase7ProtocolMajor = 1;
-    inline constexpr std::uint16_t Phase7ProtocolMinor = 0;
-    inline constexpr std::uint16_t Phase7ProtocolPatch = 0;
+    inline constexpr std::uint16_t Phase7ProtocolMinimumMinor = 1;
+    inline constexpr std::uint16_t Phase7ProtocolMaximumMinor = 1;
     inline constexpr std::size_t Phase7SourceAuthenticationBurst = 4;
     inline constexpr std::size_t Phase7GlobalAuthenticationBurst = 32;
     inline constexpr std::uint64_t Phase7AuthenticationRefillMilliseconds = 1'000;

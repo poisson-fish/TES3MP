@@ -1,6 +1,8 @@
 #ifndef TES3MP_PROTOCOL_HANDSHAKE_HPP
 #define TES3MP_PROTOCOL_HANDSHAKE_HPP
 
+#include "content_identity.hpp"
+
 #include <compare>
 #include <cstddef>
 #include <cstdint>
@@ -78,6 +80,7 @@ namespace TES3MP
         UnknownRejectionReason,
         MissingRejectionCapability,
         UnexpectedRejectionCapability,
+        InvalidContentManifestId,
     };
 
     struct HandshakeError
@@ -121,26 +124,30 @@ namespace TES3MP
     {
     public:
         static std::variant<CapabilityOffer, HandshakeError> create(ProtocolVersionRange versions,
-            std::span<const CapabilityId> optionalCapabilities, std::span<const CapabilityId> requiredCapabilities);
+            std::span<const CapabilityId> optionalCapabilities, std::span<const CapabilityId> requiredCapabilities,
+            ContentManifestId contentManifest = testContentManifestId());
 
         const ProtocolVersionRange& versions() const noexcept { return mVersions; }
         std::span<const CapabilityId> optionalCapabilities() const noexcept { return mOptionalCapabilities; }
         std::span<const CapabilityId> requiredCapabilities() const noexcept { return mRequiredCapabilities; }
+        const ContentManifestId& contentManifest() const noexcept { return mContentManifest; }
 
     private:
         friend class ClientHello;
 
         CapabilityOffer(ProtocolVersionRange versions, std::vector<CapabilityId> optionalCapabilities,
-            std::vector<CapabilityId> requiredCapabilities)
+            std::vector<CapabilityId> requiredCapabilities, ContentManifestId contentManifest)
             : mVersions(versions)
             , mOptionalCapabilities(std::move(optionalCapabilities))
             , mRequiredCapabilities(std::move(requiredCapabilities))
+            , mContentManifest(contentManifest)
         {
         }
 
         ProtocolVersionRange mVersions;
         std::vector<CapabilityId> mOptionalCapabilities;
         std::vector<CapabilityId> mRequiredCapabilities;
+        ContentManifestId mContentManifest;
     };
 
     class ClientHello
@@ -151,6 +158,7 @@ namespace TES3MP
         const ProtocolVersionRange& versions() const noexcept { return mOffer.versions(); }
         std::span<const CapabilityId> optionalCapabilities() const noexcept { return mOffer.optionalCapabilities(); }
         std::span<const CapabilityId> requiredCapabilities() const noexcept { return mOffer.requiredCapabilities(); }
+        const ContentManifestId& contentManifest() const noexcept { return mOffer.contentManifest(); }
 
     private:
         friend std::variant<ClientHello, HandshakeError> decodeClientHello(std::span<const std::byte> payload);
@@ -168,20 +176,24 @@ namespace TES3MP
     public:
         ProtocolVersion selectedVersion() const noexcept { return mSelectedVersion; }
         std::span<const CapabilityId> negotiatedCapabilities() const noexcept { return mNegotiatedCapabilities; }
+        const ContentManifestId& contentManifest() const noexcept { return mContentManifest; }
 
     private:
         friend std::variant<ServerHello, HandshakeError> decodeServerHello(std::span<const std::byte> payload);
         friend std::variant<ServerHello, class SessionRejected> negotiateClientHello(
             const ClientHello& client, const CapabilityOffer& server);
 
-        ServerHello(ProtocolVersion selectedVersion, std::vector<CapabilityId> negotiatedCapabilities)
+        ServerHello(ProtocolVersion selectedVersion, std::vector<CapabilityId> negotiatedCapabilities,
+            ContentManifestId contentManifest)
             : mSelectedVersion(selectedVersion)
             , mNegotiatedCapabilities(std::move(negotiatedCapabilities))
+            , mContentManifest(contentManifest)
         {
         }
 
         ProtocolVersion mSelectedVersion;
         std::vector<CapabilityId> mNegotiatedCapabilities;
+        ContentManifestId mContentManifest;
     };
 
     enum class SessionRejectionReason : std::uint8_t
@@ -189,6 +201,7 @@ namespace TES3MP
         ProtocolMajorMismatch = 1,
         NoCompatibleMinor = 2,
         UnsupportedRequiredCapability = 3,
+        ContentManifestMismatch = 4,
     };
 
     class SessionRejected

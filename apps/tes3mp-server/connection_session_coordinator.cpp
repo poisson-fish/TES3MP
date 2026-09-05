@@ -176,10 +176,11 @@ namespace TES3MP::ServerApp
             return ConnectionSessionResult::ProtocolRejected;
         auto request = decodeAuthenticationRequest(frame->payload());
         auto* value = std::get_if<AuthenticationRequest>(&request);
-        auto context = makePhase7ResumeTokenContext(*state->negotiatedHello(), crypto);
+        auto context = makeResumeTokenContext(*state->negotiatedHello(), crypto);
         if (value == nullptr || !context
-            || state->handle(ServerAuthenticationSubmitted{ ServerAuthenticationSubmission(
-                   std::move(*value), *scope, *context) }).action != ServerSessionAction::AuthenticationStarted)
+            || state->handle(ServerAuthenticationSubmitted{ ServerAuthenticationSubmission(std::move(*value),
+                   *scope, *context, state->negotiatedHello()->contentManifest()) })
+                    .action != ServerSessionAction::AuthenticationStarted)
             return ConnectionSessionResult::ProtocolRejected;
         return pollAuthentication(connection, joins, crypto, tick);
     }
@@ -196,11 +197,12 @@ namespace TES3MP::ServerApp
             || !state->negotiatedHello())
             return ConnectionSessionResult::ProtocolRejected;
         if (state->preparedResumeId()) return ConnectionSessionResult::ResumePrepared;
-        auto context = makePhase7ResumeTokenContext(*state->negotiatedHello(), crypto);
+        auto context = makeResumeTokenContext(*state->negotiatedHello(), crypto);
         if (!context) return ConnectionSessionResult::ProtocolRejected;
         TransportJoinResponseQueue responses(mQueues, connection, this);
         AuthenticatedJoinComposition composition(joins, mAuthentication, responses);
-        auto outcome = composition.join(*state->principal(), state->generation(), tick, *context);
+        auto outcome = composition.join(
+            *state->principal(), state->generation(), tick, *context, state->playerClaim());
         if (outcome.result != JoinCompositionResult::Committed || !outcome.committed)
             return ConnectionSessionResult::ProtocolRejected;
         if (state->bindPreissuedInitialSession(outcome.committed->session)

@@ -68,7 +68,7 @@ namespace
         auto created = policy ? TES3MP::ClientSessionRuntime::create(runtime, clock, timeouts, generation, *policy)
                               : TES3MP::ClientRuntimeCreateResult{ TES3MP::SessionTransitionError{} };
         auto* value = std::get_if<std::unique_ptr<TES3MP::ClientSessionRuntime>>(&created);
-        auto range = std::get<TES3MP::ProtocolVersionRange>(TES3MP::ProtocolVersionRange::create(1, 0, 0));
+        auto range = std::get<TES3MP::ProtocolVersionRange>(TES3MP::ProtocolVersionRange::create(1, 1, 1));
         auto offer = std::get<TES3MP::CapabilityOffer>(TES3MP::CapabilityOffer::create(std::move(range), {}, {}));
         if (!value || !*value
             || (*value)->start(endpoint, TES3MP::ClientHello::fromOffer(std::move(offer)), std::move(request))
@@ -263,7 +263,7 @@ int main(int argc, char** argv)
         factory.runtime->shutdown();
         return 0;
     }
-    auto versions = std::get<TES3MP::ProtocolVersionRange>(TES3MP::ProtocolVersionRange::create(1, 0, 0));
+    auto versions = std::get<TES3MP::ProtocolVersionRange>(TES3MP::ProtocolVersionRange::create(1, 1, 1));
     auto offer = std::get<TES3MP::CapabilityOffer>(TES3MP::CapabilityOffer::create(std::move(versions), {}, {}));
     if (clientRuntime.start(*endpoint, TES3MP::ClientHello::fromOffer(std::move(offer)),
             TES3MP::AuthenticationRequest::join(std::move(*password)))
@@ -345,8 +345,9 @@ int main(int argc, char** argv)
                 if (!sentExterior || (exterior && !sentInterior))
                 {
                     const auto cell = sentExterior
-                        ? TES3MP::CellId::interior(TES3MP::CellSpaceId::fromValue(7).value())
-                        : TES3MP::CellId::exterior(TES3MP::CellSpaceId::fromValue(8).value(), 0, 0);
+                        ? TES3MP::CellId::interior(TES3MP::testContentManifest().interiorCell())
+                        : TES3MP::CellId::exterior(
+                            TES3MP::testContentManifest().exteriorWorldspace(), 0, 0);
                     if (clientRuntime.queueCellTransition(TES3MP::FixtureCellTransition(cell)).result
                         != TES3MP::ClientRuntimeResult::Accepted)
                         return 3;

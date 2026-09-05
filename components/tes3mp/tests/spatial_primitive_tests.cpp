@@ -92,7 +92,8 @@ namespace
     {
         return TES3MP::SpatialEntitySnapshot(TES3MP::ServerTick::fromValue(47).value(),
             TES3MP::PlayerId::fromValue(5).value(),
-            TES3MP::EntityId::fromValue(11).value(), TES3MP::EntityRevision::fromValue(9).value(),
+            TES3MP::EntityId::fromValue(11).value(), TES3MP::AppearanceId::fromValue(1).value(),
+            TES3MP::EntityRevision::fromValue(9).value(),
             TES3MP::AuthorityEpoch::fromValue(3).value(),
             TES3MP::Transform(cell,
                 TES3MP::Position3(std::numeric_limits<std::int64_t>::min(), 8'388'608,
@@ -203,7 +204,7 @@ namespace
         const auto exteriorBytes = TES3MP::TestSupport::encodeSpatialEntitySnapshot(exterior);
         const auto decodedInterior = TES3MP::TestSupport::decodeSpatialEntitySnapshot(interiorBytes);
         const auto decodedExterior = TES3MP::TestSupport::decodeSpatialEntitySnapshot(exteriorBytes);
-        return interiorBytes.size() == 109 && exteriorBytes.size() == 117 && decodedInterior == interior
+        return interiorBytes.size() == 117 && exteriorBytes.size() == 125 && decodedInterior == interior
             && decodedExterior == exterior;
     }
 
@@ -240,7 +241,8 @@ namespace
         const auto snapshot = makeSnapshot(
             TES3MP::CellId::interior(TES3MP::CellSpaceId::fromValue(17).value()));
         return !std::is_default_constructible_v<TES3MP::SpatialEntitySnapshot> && snapshot.serverTick().value() == 47
-            && snapshot.playerId().value() == 5 && snapshot.entityId().value() == 11 && snapshot.entityRevision().value() == 9
+            && snapshot.playerId().value() == 5 && snapshot.entityId().value() == 11
+            && snapshot.appearanceId().value() == 1 && snapshot.entityRevision().value() == 9
             && snapshot.authorityEpoch().value() == 3 && snapshot.linearVelocity().x() == -1024;
     }
 
@@ -254,7 +256,7 @@ namespace
         bytes.pop_back();
         const auto truncated = TES3MP::TestSupport::decodeSpatialEntitySnapshot(bytes);
         auto invalidTag = TES3MP::TestSupport::encodeSpatialEntitySnapshot(snapshot);
-        invalidTag[40] = std::byte{ 2 };
+        invalidTag[48] = std::byte{ 2 };
         const auto rejectedTag = TES3MP::TestSupport::decodeSpatialEntitySnapshot(invalidTag);
         return valid == snapshot && !truncated && !rejectedTag;
     }

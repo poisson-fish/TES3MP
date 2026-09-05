@@ -73,6 +73,7 @@ target_sources(tes3mp_protocol PRIVATE
     include/tes3mp/admission_scope.hpp
     include/tes3mp/authentication.hpp
     include/tes3mp/command_primitives.hpp
+    include/tes3mp/content_identity.hpp
     include/tes3mp/protocol_envelope.hpp
     include/tes3mp/protocol_exchange.hpp
     include/tes3mp/protocol_handshake.hpp
@@ -94,6 +95,7 @@ target_sources(tes3mp_protocol PRIVATE
     protocol/generated/server_vr_pose_snapshot_generated.h
     protocol/generated/session_rejected_generated.h
     protocol/authentication.cpp
+    protocol/content_identity.cpp
     protocol/protocol_exchange.cpp
     protocol/protocol_handshake.cpp
     protocol/protocol_frame.cpp
@@ -237,7 +239,7 @@ if(TES3MP_ENABLE_GNS_TRANSPORT)
     if(MSVC)
         # OpenMW's lean Windows headers hide the timer declarations used by GNS.
         target_compile_options(GameNetworkingSockets_s PRIVATE
-            /FI"${CMAKE_CURRENT_SOURCE_DIR}/transport/windows_gns_compat.hpp")
+            /FI${CMAKE_CURRENT_SOURCE_DIR}/transport/windows_gns_compat.hpp)
     endif()
     target_include_directories(tes3mp_transport_gns
         PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>)
@@ -282,6 +284,7 @@ target_sources(tes3mp_server_core PRIVATE
     include/tes3mp/fixed_tick_scheduler.hpp
     include/tes3mp/monotonic_clock.hpp
     include/tes3mp/observability.hpp
+    include/tes3mp/player_identity.hpp
     include/tes3mp/server_command_intake.hpp
     include/tes3mp/server_command_reducer.hpp
     include/tes3mp/server_authentication.hpp
@@ -296,6 +299,7 @@ target_sources(tes3mp_server_core PRIVATE
     server_core/deterministic_random.cpp
     server_core/fixed_tick_scheduler.cpp
     server_core/observability.cpp
+    server_core/player_identity.cpp
     server_core/server_command_intake.cpp
     server_core/server_command_reducer.cpp
     server_core/server_authentication.cpp

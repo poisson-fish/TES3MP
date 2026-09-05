@@ -7,7 +7,7 @@ import tempfile
 import time
 from pathlib import Path
 
-from run_phase7_join_demo import bounded_rss, resident_bytes
+from run_phase7_join_demo import TEST_CONTENT_MANIFEST, bounded_rss, resident_bytes
 
 
 def main() -> int:
@@ -25,7 +25,10 @@ def main() -> int:
         password.write_text("phase7-soak-secret\n", encoding="utf-8")
         config.write_text(
             f"bind_address=127.0.0.1\nport={port}\ntick_interval_ms=16\n"
-            f"disconnect_grace_ms=3000\njoin_password_file={password.as_posix()}\n",
+            f"disconnect_grace_ms=3000\njoin_password_file={password.as_posix()}\n"
+            f"content_manifest_id={TEST_CONTENT_MANIFEST}\ninterior_cell_id=7\n"
+            f"exterior_worldspace_id=8\ndefault_appearance_id=1\n"
+            f"player_identity_file={(root / 'player-identities').as_posix()}\n",
             encoding="utf-8")
         server = subprocess.Popen([str(args.server), str(config)], text=True,
                                   stdout=subprocess.PIPE, stderr=subprocess.PIPE)

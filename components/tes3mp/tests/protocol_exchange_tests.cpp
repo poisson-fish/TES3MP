@@ -58,7 +58,8 @@ namespace
 
     SpatialEntitySnapshot entry(std::uint64_t entityId, std::uint64_t tick = 8)
     {
-        return SpatialEntitySnapshot(value<ServerTick>(tick), value<PlayerId>(entityId + 100), value<EntityId>(entityId), value<EntityRevision>(3),
+        return SpatialEntitySnapshot(value<ServerTick>(tick), value<PlayerId>(entityId + 100), value<EntityId>(entityId),
+            value<AppearanceId>(1), value<EntityRevision>(3),
             value<AuthorityEpoch>(2),
             Transform(CellId::exterior(value<CellSpaceId>(51), -2, 7), Position3(1000, -2000, 3000),
                 Orientation3(Turn32::fromValue(11), Turn32::fromValue(12), Turn32::fromValue(13))),
@@ -68,7 +69,7 @@ namespace
     SpatialEntitySnapshot goldenEntry()
     {
         return SpatialEntitySnapshot(*ServerTick::fromValue(0), value<PlayerId>(101), value<EntityId>(1),
-            value<EntityRevision>(1), value<AuthorityEpoch>(1),
+            value<AppearanceId>(1), value<EntityRevision>(1), value<AuthorityEpoch>(1),
             Transform(CellId::interior(value<CellSpaceId>(1)), Position3(0, 0, 0),
                 Orientation3(Turn32::fromValue(0), Turn32::fromValue(0), Turn32::fromValue(0))),
             LinearVelocity3(0, 0, 0));
@@ -244,7 +245,8 @@ namespace
                     ? CellId::interior(value<CellSpaceId>(raw))
                     : CellId::exterior(
                           value<CellSpaceId>(raw), static_cast<std::int32_t>(index), -static_cast<std::int32_t>(index));
-                entries.emplace_back(*ServerTick::fromValue(raw - 1), value<PlayerId>(raw), value<EntityId>(raw), value<EntityRevision>(raw),
+                entries.emplace_back(*ServerTick::fromValue(raw - 1), value<PlayerId>(raw), value<EntityId>(raw),
+                    value<AppearanceId>(raw), value<EntityRevision>(raw),
                     value<AuthorityEpoch>(raw),
                     Transform(cell, Position3(signedValue, nextSignedValue, lastSignedValue),
                         Orientation3(Turn32::fromValue(static_cast<std::uint32_t>(index)),
@@ -335,7 +337,7 @@ namespace
         const std::array entries{ entry(41) };
         auto reliable = encodeReliableOperation(operation(sessionId, generation));
         auto latestWins = encodeLatestWinsSnapshot(snapshot(sessionId, generation, 9, 1, entries));
-        if (reliable.size() != 184 || latestWins.size() != 272)
+        if (reliable.size() != 184 || latestWins.size() != 280)
             return false;
 
         auto unknownReliableBody = reliable;
@@ -524,8 +526,8 @@ namespace
         const std::array entries{ goldenEntry() };
         const auto reliable = encodeReliableOperation(operation(sessionId, generation));
         const auto latestWins = encodeLatestWinsSnapshot(snapshot(sessionId, generation, 9, 1, entries));
-        return reliable.size() == 184 && fnv1a(reliable) == 0x1ad648997dba1cecull && latestWins.size() == 272
-            && fnv1a(latestWins) == 0xcef2161072b6273aull;
+        return reliable.size() == 184 && fnv1a(reliable) == 0x1ad648997dba1cecull
+            && latestWins.size() == 280 && fnv1a(latestWins) == 0x9ec2baecbde16577ull;
     }
 
     void printBytes(std::span<const std::byte> bytes)

@@ -3,6 +3,7 @@
 #include "connection_session_coordinator.hpp"
 #include "phase7_proof_profile.hpp"
 #include "phase7_queue_telemetry.hpp"
+#include "player_identity_file.hpp"
 
 #include <tes3mp/observability.hpp>
 #include <tes3mp/server_authentication.hpp>
@@ -97,39 +98,51 @@ int main(int argc, char** argv)
                                : nullptr;
     auto resumeStore = crypto ? TES3MP::ResumeTokenStore::create(*crypto, config.disconnectGraceMilliseconds)
                               : nullptr;
+    auto identityFileResult = TES3MP::ServerApp::PlayerIdentityFile::open(config.playerIdentityFile);
+    auto* identityFileValue
+        = std::get_if<std::unique_ptr<TES3MP::ServerApp::PlayerIdentityFile>>(&identityFileResult);
+    auto identityFile = identityFileValue ? std::move(*identityFileValue) : nullptr;
+    auto playerIdentityResult = crypto && identityFile
+        ? TES3MP::PlayerIdentityRegistry::create(*crypto, *identityFile, identityFile->records())
+        : std::variant<std::unique_ptr<TES3MP::PlayerIdentityRegistry>, TES3MP::PlayerIdentityError>(
+              TES3MP::PlayerIdentityError::InvalidInitialState);
+    auto* playerIdentityValue
+        = std::get_if<std::unique_ptr<TES3MP::PlayerIdentityRegistry>>(&playerIdentityResult);
+    auto playerIdentities = playerIdentityValue ? std::move(*playerIdentityValue) : nullptr;
     auto queues = TES3MP::OutboundQueueSet::create(
         TES3MP::OutboundQueuePolicy{}, TES3MP::ServerApp::Phase7ConnectionCapacity, queueTelemetry);
     const auto timeoutNanoseconds = config.disconnectGraceMilliseconds * 1'000'000;
     auto timeouts = TES3MP::SessionTimeoutPolicy::create(
         timeoutNanoseconds, timeoutNanoseconds, timeoutNanoseconds);
     auto versions = std::get<TES3MP::ProtocolVersionRange>(TES3MP::ProtocolVersionRange::create(
-        TES3MP::ServerApp::Phase7ProtocolMajor, TES3MP::ServerApp::Phase7ProtocolMinor,
-        TES3MP::ServerApp::Phase7ProtocolPatch));
+        TES3MP::ServerApp::Phase7ProtocolMajor, TES3MP::ServerApp::Phase7ProtocolMinimumMinor,
+        TES3MP::ServerApp::Phase7ProtocolMaximumMinor));
     const std::array optionalCapabilities{ TES3MP::vrPoseCapability() };
-    auto offer = TES3MP::CapabilityOffer::create(std::move(versions), optionalCapabilities, {});
+    auto offer = TES3MP::CapabilityOffer::create(
+        std::move(versions), optionalCapabilities, {}, config.contentManifest.id());
     const auto zero = TES3MP::Turn32::fromValue(0);
-    auto fixtureSpawn = TES3MP::Transform(TES3MP::CellId::interior(*TES3MP::CellSpaceId::fromValue(7)),
+    auto fixtureSpawn = TES3MP::Transform(TES3MP::CellId::interior(config.contentManifest.interiorCell()),
         TES3MP::Position3(10, 20, 30), TES3MP::Orientation3(zero, zero, zero));
     TES3MP::NullMetricSink metrics;
     TES3MP::NullStructuredEventSink events;
     TES3MP::Observability observability(metrics, events);
     auto emptyState = std::get<TES3MP::CanonicalServerState>(TES3MP::createCanonicalServerState({}, {}));
-    TES3MP::CanonicalCommandReducer reducer(std::move(emptyState), observability);
+    TES3MP::CanonicalCommandReducer reducer(std::move(emptyState), observability, config.contentManifest);
     TES3MP::ServerCommandIntakeCoordinator intake(
         clock, observability, clock.now(), TES3MP::ServerTick::initial(), TES3MP::IngressOrdinal::initial());
-    auto joins = TES3MP::AuthenticatedJoinCoordinator::create(fixtureSpawn,
-        { *TES3MP::SessionId::fromValue(1), *TES3MP::PlayerId::fromValue(1),
-            *TES3MP::EntityId::fromValue(1) }, reducer);
+    auto joins = playerIdentities ? TES3MP::AuthenticatedJoinCoordinator::create(fixtureSpawn,
+        config.contentManifest, *TES3MP::SessionId::fromValue(1), *playerIdentities, reducer) : std::nullopt;
     auto lifecycle = TES3MP::ServerLifecycleCoordinator::create(
         config.disconnectGraceMilliseconds * 1'000'000, reducer);
-    if (!crypto || !limiter || !joinProvider || !resumeStore || !queues || !timeouts || !joins || !lifecycle
+    if (!crypto || !limiter || !joinProvider || !resumeStore || !identityFile || !playerIdentities
+        || !queues || !timeouts || !joins || !lifecycle
         || !std::holds_alternative<TES3MP::CapabilityOffer>(offer))
     {
         std::cerr << "server composition failed\n";
         return 3;
     }
     TES3MP::SharedServerAuthenticationService authentication(
-        *limiter, *joinProvider, *resumeStore, clock);
+        *limiter, *joinProvider, *resumeStore, clock, playerIdentities.get());
     TES3MP::ServerApp::ConnectionSessionCoordinator sessions(clock, observability, *timeouts,
         std::get<TES3MP::CapabilityOffer>(std::move(offer)), authentication, *queues,
         TES3MP::ServerApp::Phase7ConnectionCapacity);

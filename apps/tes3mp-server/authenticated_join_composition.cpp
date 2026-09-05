@@ -65,9 +65,11 @@ namespace TES3MP::ServerApp
     }
 
     JoinCompositionOutcome AuthenticatedJoinComposition::join(PrincipalId principal,
-        SessionGeneration generation, ServerTick tick, ResumeTokenContext context) noexcept
+        SessionGeneration generation, ServerTick tick, ResumeTokenContext context,
+        std::optional<AuthenticatedAdmission::PlayerClaim> playerClaim) noexcept
     {
-        auto prepared = mJoins.prepare(principal, generation, tick);
+        auto prepared = playerClaim ? mJoins.prepareReattach(principal, *playerClaim, generation, tick)
+                                    : mJoins.prepare(principal, generation, tick);
         if (!std::holds_alternative<AuthenticatedJoinPreparation>(prepared))
             return { JoinCompositionResult::JoinRejected, std::nullopt };
 
@@ -84,8 +86,26 @@ namespace TES3MP::ServerApp
 
         try
         {
+            auto accepted = std::get<AuthenticationAcceptedMessage>(std::move(issued));
+            auto playerCredential = mJoins.copyPendingPlayerCredential(preparation.id);
+            if (mJoins.pendingCreatesPersistentIdentity(preparation.id) && !playerCredential)
+            {
+                cancel();
+                return { JoinCompositionResult::EncodingRejected, std::nullopt };
+            }
+            if (playerCredential)
+            {
+                auto withPlayerCredential = AuthenticationAcceptedMessage::create(
+                    accepted.takeToken(), accepted.lifetimeMilliseconds(), std::move(*playerCredential));
+                if (!withPlayerCredential)
+                {
+                    cancel();
+                    return { JoinCompositionResult::EncodingRejected, std::nullopt };
+                }
+                accepted = std::move(*withPlayerCredential);
+            }
             const auto authenticationPayload = encodeAuthenticationAccepted(
-                std::get<AuthenticationAcceptedMessage>(issued));
+                accepted);
             const auto snapshotPayload = encodeLatestWinsSnapshot(preparation.join.initialSnapshot);
             auto authenticationFrame = encodeProtocolFrame(MessageClass::SessionControl,
                 MessageKind::AuthenticationAccepted, authenticationPayload);

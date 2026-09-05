@@ -24,7 +24,8 @@ struct AuthenticationAccepted FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::T
   typedef AuthenticationAcceptedBuilder Builder;
   enum FlatBuffersVTableOffset FLATBUFFERS_VTABLE_UNDERLYING_TYPE {
     VT_RESUME_TOKEN = 4,
-    VT_LIFETIME_MILLISECONDS = 6
+    VT_LIFETIME_MILLISECONDS = 6,
+    VT_PLAYER_CREDENTIAL = 8
   };
   const ::flatbuffers::Vector<uint8_t> *resume_token() const {
     return GetPointer<const ::flatbuffers::Vector<uint8_t> *>(VT_RESUME_TOKEN);
@@ -32,12 +33,17 @@ struct AuthenticationAccepted FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::T
   uint64_t lifetime_milliseconds() const {
     return GetField<uint64_t>(VT_LIFETIME_MILLISECONDS, 0);
   }
+  const ::flatbuffers::Vector<uint8_t> *player_credential() const {
+    return GetPointer<const ::flatbuffers::Vector<uint8_t> *>(VT_PLAYER_CREDENTIAL);
+  }
   template <bool B = false>
   bool Verify(::flatbuffers::VerifierTemplate<B> &verifier) const {
     return VerifyTableStart(verifier) &&
            VerifyOffset(verifier, VT_RESUME_TOKEN) &&
            verifier.VerifyVector(resume_token()) &&
            VerifyField<uint64_t>(verifier, VT_LIFETIME_MILLISECONDS, 8) &&
+           VerifyOffset(verifier, VT_PLAYER_CREDENTIAL) &&
+           verifier.VerifyVector(player_credential()) &&
            verifier.EndTable();
   }
 };
@@ -51,6 +57,9 @@ struct AuthenticationAcceptedBuilder {
   }
   void add_lifetime_milliseconds(uint64_t lifetime_milliseconds) {
     fbb_.AddElement<uint64_t>(AuthenticationAccepted::VT_LIFETIME_MILLISECONDS, lifetime_milliseconds, 0);
+  }
+  void add_player_credential(::flatbuffers::Offset<::flatbuffers::Vector<uint8_t>> player_credential) {
+    fbb_.AddOffset(AuthenticationAccepted::VT_PLAYER_CREDENTIAL, player_credential);
   }
   explicit AuthenticationAcceptedBuilder(::flatbuffers::FlatBufferBuilder &_fbb)
         : fbb_(_fbb) {
@@ -66,9 +75,11 @@ struct AuthenticationAcceptedBuilder {
 inline ::flatbuffers::Offset<AuthenticationAccepted> CreateAuthenticationAccepted(
     ::flatbuffers::FlatBufferBuilder &_fbb,
     ::flatbuffers::Offset<::flatbuffers::Vector<uint8_t>> resume_token = 0,
-    uint64_t lifetime_milliseconds = 0) {
+    uint64_t lifetime_milliseconds = 0,
+    ::flatbuffers::Offset<::flatbuffers::Vector<uint8_t>> player_credential = 0) {
   AuthenticationAcceptedBuilder builder_(_fbb);
   builder_.add_lifetime_milliseconds(lifetime_milliseconds);
+  builder_.add_player_credential(player_credential);
   builder_.add_resume_token(resume_token);
   return builder_.Finish();
 }
@@ -76,12 +87,15 @@ inline ::flatbuffers::Offset<AuthenticationAccepted> CreateAuthenticationAccepte
 inline ::flatbuffers::Offset<AuthenticationAccepted> CreateAuthenticationAcceptedDirect(
     ::flatbuffers::FlatBufferBuilder &_fbb,
     const std::vector<uint8_t> *resume_token = nullptr,
-    uint64_t lifetime_milliseconds = 0) {
+    uint64_t lifetime_milliseconds = 0,
+    const std::vector<uint8_t> *player_credential = nullptr) {
   auto resume_token__ = resume_token ? _fbb.CreateVector<uint8_t>(*resume_token) : 0;
+  auto player_credential__ = player_credential ? _fbb.CreateVector<uint8_t>(*player_credential) : 0;
   return TES3MP::Protocol::Schema::CreateAuthenticationAccepted(
       _fbb,
       resume_token__,
-      lifetime_milliseconds);
+      lifetime_milliseconds,
+      player_credential__);
 }
 
 inline const TES3MP::Protocol::Schema::AuthenticationAccepted *GetAuthenticationAccepted(const void *buf) {
