@@ -14,7 +14,8 @@
 namespace TES3MP
 {
     using ClientRuntimeMessage = std::variant<ServerHello, SessionRejected, AuthenticationAcceptedMessage,
-        AuthenticationRejectedMessage, LatestWinsSnapshot, ReliableObservationBatch, ServerVrPoseSnapshot>;
+        AuthenticationRejectedMessage, LatestWinsSnapshot, ReliableObservationBatch, ReliableInterestBaseline,
+        ServerVrPoseSnapshot>;
 
     enum class ClientRuntimeResult : std::uint8_t
     {
@@ -41,6 +42,9 @@ namespace TES3MP
         std::size_t transportEvents = 0;
         bool snapshotApplied = false;
         bool observationApplied = false;
+        bool baselineApplied = false;
+        bool baselineCompleted = false;
+        bool resyncRequested = false;
         bool authenticationAccepted = false;
         std::vector<ServerVrPoseSnapshot> poseSnapshots;
     };
@@ -66,7 +70,8 @@ namespace TES3MP
             const ConnectionEndpoint& endpoint, ClientHello hello, AuthenticationRequest authentication) noexcept;
         ClientRuntimeAdvanceResult advance();
         ClientRuntimeQueueResult queueMotionIntent(PlayerMotionIntent intent);
-        ClientRuntimeQueueResult queueCellTransition(FixtureCellTransition transition);
+        ClientRuntimeQueueResult queueCellTransition(CellTransition transition);
+        ClientRuntimeResult requestResync(ResyncReason reason);
         ClientRuntimeResult queuePoseSample(const ClientVrPoseSample& sample);
         ClientRuntimeDrainResult drainInbound();
         ClientRuntimeResult queue(MessageClass messageClass, MessageKind kind, std::span<const std::byte> payload);
@@ -97,6 +102,7 @@ namespace TES3MP
         bool mMayAcceptPlayerCredential = false;
         std::uint64_t mResumeLifetimeMilliseconds = 0;
         std::vector<ReliableObservationBatch> mPendingObservations;
+        bool mResyncPending = false;
         std::optional<CommandSequence> mLastQueuedSequence;
     };
 }

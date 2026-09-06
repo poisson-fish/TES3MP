@@ -7,15 +7,25 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <vector>
 
 namespace TES3MP::OpenMWAdapter
 {
+    struct DesktopCellSpaceMapping
+    {
+        CellSpaceId id;
+        CellSpaceKind kind;
+        std::string record;
+    };
+
     struct DesktopContentMapping
     {
-        CellSpaceId interiorId;
-        std::string interiorCell;
-        CellSpaceId exteriorId;
-        std::string exteriorWorldspace;
+        static std::optional<DesktopContentMapping> create(ContentManifest manifest,
+            std::span<const DesktopCellSpaceMapping> cellSpaces, AppearanceId appearanceId,
+            std::string avatarNpc);
+
+        ContentManifest manifest;
+        std::vector<DesktopCellSpaceMapping> cellSpaces;
         AppearanceId appearanceId;
         std::string avatarNpc;
     };

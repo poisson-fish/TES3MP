@@ -97,8 +97,8 @@ def main() -> int:
         config.write_text(
             f"bind_address=127.0.0.1\nport={port}\ntick_interval_ms=16\n"
             f"disconnect_grace_ms=3000\njoin_password_file={good.as_posix()}\n"
-            f"content_manifest_id={TEST_CONTENT_MANIFEST}\ninterior_cell_id=7\n"
-            f"exterior_worldspace_id=8\ndefault_appearance_id=1\n"
+            f"content_manifest_id={TEST_CONTENT_MANIFEST}\ncell_spaces=interior:7;exterior:8\n"
+            f"allowed_cells=interior:7;exterior:8:0:0\nspawn_cell=interior:7\ndefault_appearance_id=1\n"
             f"player_identity_file={(root / 'player-identities').as_posix()}\n",
             encoding="utf-8")
         server = subprocess.Popen(

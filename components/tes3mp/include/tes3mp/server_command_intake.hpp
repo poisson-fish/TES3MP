@@ -35,24 +35,24 @@ namespace TES3MP
         LinearVelocity3 mDesiredVelocity;
     };
 
-    class FixtureCellTransitionCommandProposal
+    class CellTransitionCommandProposal
     {
     public:
-        constexpr explicit FixtureCellTransitionCommandProposal(CellId requestedCell) noexcept
+        constexpr explicit CellTransitionCommandProposal(CellId requestedCell) noexcept
             : mRequestedCell(requestedCell)
         {
         }
 
         constexpr const CellId& requestedCell() const noexcept { return mRequestedCell; }
 
-        friend constexpr bool operator==(const FixtureCellTransitionCommandProposal&,
-            const FixtureCellTransitionCommandProposal&) noexcept = default;
+        friend constexpr bool operator==(const CellTransitionCommandProposal&,
+            const CellTransitionCommandProposal&) noexcept = default;
 
     private:
         CellId mRequestedCell;
     };
 
-    using ServerCommandPayload = std::variant<PlayerMotionCommandProposal, FixtureCellTransitionCommandProposal>;
+    using ServerCommandPayload = std::variant<PlayerMotionCommandProposal, CellTransitionCommandProposal>;
 
     class ServerCommandProposal
     {
@@ -72,7 +72,7 @@ namespace TES3MP
 
         constexpr ServerCommandProposal(SessionId sessionId, SessionGeneration sessionGeneration,
             CommandSequence commandSequence, CommandId commandId, CanonicalRevision observedCanonicalRevision,
-            EntityPrecondition entityPrecondition, FixtureCellTransitionCommandProposal transition) noexcept
+            EntityPrecondition entityPrecondition, CellTransitionCommandProposal transition) noexcept
             : mSessionId(sessionId)
             , mSessionGeneration(sessionGeneration)
             , mCommandSequence(commandSequence)

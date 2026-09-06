@@ -93,7 +93,7 @@ namespace
             CommandSequence::fromValue(sequence).value(), CommandId::fromValue(command).value(),
             CanonicalRevision::initial(), EntityPrecondition(entityId(entity), EntityRevision::fromValue(revision).value(),
                                        AuthorityEpoch::fromValue(epoch).value()),
-            FixtureCellTransitionCommandProposal(cell));
+            CellTransitionCommandProposal(cell));
     }
 
     class IntakeFixture
@@ -205,7 +205,7 @@ namespace
             CellId::interior(CellSpaceId::fromValue(7).value())) };
         const auto idempotent = reduceCommands(reducer, same);
         return rejected && idempotent
-            && rejected.dispositions().front().disposition() == CommandDisposition::UnknownFixtureCell
+            && rejected.dispositions().front().disposition() == CommandDisposition::UnknownCell
             && idempotent.dispositions().front().disposition() == CommandDisposition::Applied
             && !rejected.dispositions().front().playerStateChanged()
             && !idempotent.dispositions().front().playerStateChanged()

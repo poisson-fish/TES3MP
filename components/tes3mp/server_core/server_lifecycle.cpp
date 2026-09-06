@@ -193,6 +193,14 @@ namespace TES3MP
         return mPending->canonical.candidateRevision();
     }
 
+    std::optional<CanonicalStateVersion> ServerLifecycleCoordinator::candidateStateVersion(
+        std::uint64_t preparationId) const noexcept
+    {
+        if (!mPending || mPending->publicValues.empty() || mPending->publicValues.front().id != preparationId)
+            return std::nullopt;
+        return mPending->canonical.candidateStateVersion();
+    }
+
     std::size_t ServerLifecycleCoordinator::liveCount() const noexcept
     {
         return static_cast<std::size_t>(std::count_if(mBindings.begin(), mBindings.end(),

@@ -15,7 +15,7 @@ namespace TES3MP::OpenMWAdapter
 
         ClientHello makeClientHello(ContentManifestId contentManifest)
         {
-            auto versions = std::get<ProtocolVersionRange>(ProtocolVersionRange::create(1, 1, 1));
+            auto versions = std::get<ProtocolVersionRange>(ProtocolVersionRange::create(1, 2, 2));
             const std::array optional{ vrPoseCapability() };
             auto offer = std::get<CapabilityOffer>(
                 CapabilityOffer::create(std::move(versions), optional, {}, contentManifest));
@@ -116,7 +116,7 @@ namespace TES3MP::OpenMWAdapter
                     return;
                 }
 
-                const bool hadSnapshot = mRuntime->session().stateMachine().confirmedSnapshot().has_value();
+                const bool hadSnapshot = mRuntime->session().stateMachine().interestBaselineComplete();
                 CellTransitionCapture captured;
                 if (hadSnapshot && !mResuming)
                 {
@@ -175,7 +175,7 @@ namespace TES3MP::OpenMWAdapter
                     mPendingCellTransition.reset();
                     finalizedCellTransition = true;
                 }
-                if (mResuming && advanced.snapshotApplied)
+                if (mResuming && advanced.baselineCompleted)
                 {
                     if (!mAttemptGeneration || !mContinuity || !preserves(*snapshot, *mAttemptGeneration, *mContinuity))
                     {
@@ -186,7 +186,8 @@ namespace TES3MP::OpenMWAdapter
                     mReady = true;
                     mStatus.report(ConnectionStatus::Resumed);
                 }
-                if ((advanced.snapshotApplied || advanced.observationApplied) && snapshot)
+                if ((advanced.baselineCompleted || advanced.snapshotApplied || advanced.observationApplied)
+                    && snapshot && mRuntime->session().stateMachine().interestBaselineComplete())
                 {
                     const auto applied
                         = mPresentation.applyAuthoritative(*snapshot, mRuntime->session().observedPlayers(),
@@ -196,7 +197,7 @@ namespace TES3MP::OpenMWAdapter
                         closeForProviderFailure(applied);
                         return;
                     }
-                    if (advanced.snapshotApplied)
+                    if (advanced.baselineCompleted)
                     {
                         auto current = continuity(*snapshot);
                         if (!current)
@@ -420,7 +421,7 @@ namespace TES3MP::OpenMWAdapter
                     mStatus.report(ConnectionStatus::TransportFailed);
             }
 
-            void queueCellTransition(FixtureCellTransition transition) noexcept
+            void queueCellTransition(CellTransition transition) noexcept
             {
                 const auto queued = mRuntime->queueCellTransition(std::move(transition));
                 if (queued.result != ClientRuntimeResult::Accepted || !queued.sequence)
@@ -463,7 +464,7 @@ namespace TES3MP::OpenMWAdapter
             bool mReady = false;
             bool mResuming = false;
             std::optional<CommandSequence> mPendingCellTransition;
-            std::optional<FixtureCellTransition> mDeferredCellTransition;
+            std::optional<CellTransition> mDeferredCellTransition;
             MotionIntentTracker mMotion;
             std::optional<PoseSampleSequence> mPoseSequence;
             std::optional<MonotonicInstant> mNextPoseSample;

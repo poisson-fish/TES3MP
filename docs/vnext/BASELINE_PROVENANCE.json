@@ -295,14 +295,14 @@
       "purpose": "Defines the approved app-local live connection and server-session ownership boundary."
     },
     {
-      "path": "apps/tes3mp-server/fixture_observation_projection.cpp",
+      "path": "apps/tes3mp-server/interest_projection.cpp",
       "status": "A",
-      "purpose": "Derives deterministic per-target Phase 7 fixture enter/leave observations and complete views and admits each pair atomically."
+      "purpose": "Derives deterministic server-owned exact-cell interest deltas, complete baselines and scoped views, and admits paired output atomically."
     },
     {
-      "path": "apps/tes3mp-server/fixture_observation_projection.hpp",
+      "path": "apps/tes3mp-server/interest_projection.hpp",
       "status": "A",
-      "purpose": "Declares the bounded approved fixture-observation projection and atomic delivery boundary."
+      "purpose": "Declares bounded exact-cell interest projection, baseline, and atomic delivery boundaries."
     },
     {
       "path": "apps/tes3mp-server/main.cpp",
@@ -675,6 +675,11 @@
       "purpose": "Pinned FlatBuffers 25.12.19 generated C++ for the size-prefixed closed-union T3LS spatial-view schema."
     },
     {
+      "path": "components/tes3mp/protocol/generated/reliable_interest_baseline_generated.h",
+      "status": "A",
+      "purpose": "Pinned FlatBuffers 25.12.19 generated C++ for the bounded T3IB complete interest baseline schema."
+    },
+    {
       "path": "components/tes3mp/protocol/generated/reliable_observation_batch_generated.h",
       "status": "A",
       "purpose": "Pinned FlatBuffers 25.12.19 generated C++ for the bounded server-to-client T3OB observation batch schema."
@@ -698,6 +703,11 @@
       "path": "components/tes3mp/protocol/generated/session_rejected_generated.h",
       "status": "A",
       "purpose": "Pinned FlatBuffers 25.12.19 generated C++ for the size-prefixed T3RJ rejection schema."
+    },
+    {
+      "path": "components/tes3mp/protocol/generated/session_resync_request_generated.h",
+      "status": "A",
+      "purpose": "Pinned FlatBuffers 25.12.19 generated C++ for the metadata-only T3RS session resync request schema."
     },
     {
       "path": "components/tes3mp/protocol/protocol_exchange.cpp",
@@ -750,6 +760,11 @@
       "purpose": "Explicit-ID T3LS closed-union schema for target-session latest-wins spatial views capped by the public codec contract."
     },
     {
+      "path": "components/tes3mp/protocol/schema/reliable_interest_baseline.fbs",
+      "status": "A",
+      "purpose": "Explicit-ID T3IB schema for bounded complete session interest membership and completion metadata."
+    },
+    {
       "path": "components/tes3mp/protocol/schema/reliable_observation_batch.fbs",
       "status": "A",
       "purpose": "Explicit-ID T3OB schema for bounded targeted enter and leave observation batches."
@@ -773,6 +788,11 @@
       "path": "components/tes3mp/protocol/schema/session_rejected.fbs",
       "status": "A",
       "purpose": "Explicit-ID T3RJ closed negotiation rejection and bounded numeric context schema."
+    },
+    {
+      "path": "components/tes3mp/protocol/schema/session_resync_request.fbs",
+      "status": "A",
+      "purpose": "Explicit-ID T3RS schema for authenticated metadata-only bounded session resync requests."
     },
     {
       "path": "components/tes3mp/server_core/anchor.cpp",
@@ -975,9 +995,24 @@
       "purpose": "SHA-locked valid T3LS golden payload seed for latest-wins decoder success-path fuzzing and schema drift detection."
     },
     {
+      "path": "components/tes3mp/tests/fuzz/corpus/protocol_exchange/valid-reliable-interest-baseline",
+      "status": "A",
+      "purpose": "SHA-locked valid T3IB payload seed for complete-interest baseline decoder success-path fuzzing."
+    },
+    {
+      "path": "components/tes3mp/tests/fuzz/corpus/protocol_exchange/valid-reliable-observation-batch",
+      "status": "A",
+      "purpose": "SHA-locked valid T3OB payload seed for reliable interest-delta decoder success-path fuzzing."
+    },
+    {
       "path": "components/tes3mp/tests/fuzz/corpus/protocol_exchange/valid-reliable-operation",
       "status": "A",
       "purpose": "SHA-locked valid T3RO golden payload seed for reliable-operation decoder success-path fuzzing and schema drift detection."
+    },
+    {
+      "path": "components/tes3mp/tests/fuzz/corpus/protocol_exchange/valid-session-resync-request",
+      "status": "A",
+      "purpose": "SHA-locked valid T3RS payload seed for metadata-only resync decoder success-path fuzzing."
     },
     {
       "path": "components/tes3mp/tests/fuzz/corpus/protocol_frame/truncated-header",
@@ -1530,6 +1565,11 @@
       "purpose": "Records the approved durable player credential and exact manifest-scoped content identity foundation."
     },
     {
+      "path": "docs/vnext/adr/ADR-0058-phase11-cell-catalog-interest-baseline.md",
+      "status": "A",
+      "purpose": "Records the approved exact cell catalog, server-owned interest, reliable baseline, and bounded resync architecture."
+    },
+    {
       "path": "docs/vnext/gdr/GDR-0001-phase7-headless-vertical-slice-behavior.md",
       "status": "A",
       "purpose": "Owner-approved Phase 7 fixture spawn, readiness, cell visibility, provisional tick integration, headless correction, and bounded resume behavior."
@@ -1568,6 +1608,11 @@
       "path": "docs/vnext/gdr/GDR-0017-phase9-vr-fixture-input-and-presentation.md",
       "status": "A",
       "purpose": "Proposes provisional VR root-yaw semantic input and canonical presentation parity for owner review."
+    },
+    {
+      "path": "docs/vnext/gdr/GDR-0018-phase11-production-cell-interest-resync.md",
+      "status": "A",
+      "purpose": "Records owner approval of exact cell catalog, exact-cell interest, and explicit baseline/resync gameplay behavior."
     },
     {
       "path": "docs/vnext/proofs/cares/CMakeLists.txt",
@@ -1966,7 +2011,7 @@
         },
         {
           "path": "components/tes3mp/CMakeLists.txt",
-          "sha256": "15f9f6dd621494f72578ef14b3ac1d0e914a6fd73e6cbe909afb901ec584e492"
+          "sha256": "a6fe1d1b7e07c081b10a41513e7b9a349a026da693ecbbb62898e9943d9d79ef"
         },
         {
           "path": "components/tes3mp/protocol/generated/authentication_accepted_generated.h",
@@ -1993,12 +2038,16 @@
           "sha256": "385885bb1fd9776b8220f710f82f30dfc1addd93f070ee0230252ac09b303e82"
         },
         {
+          "path": "components/tes3mp/protocol/generated/reliable_interest_baseline_generated.h",
+          "sha256": "c4df9c08ca84eaf99d35431738bd8d6081491b0010317b662ce1c91c73dd51b1"
+        },
+        {
           "path": "components/tes3mp/protocol/generated/reliable_observation_batch_generated.h",
           "sha256": "0d8fd88198d713a459bd04b09e250d089b5f58311f74ea6cfa7f23ec909e226d"
         },
         {
           "path": "components/tes3mp/protocol/generated/reliable_operation_generated.h",
-          "sha256": "2b37ce6eec582df00f2f8d621700fd7759d20631f945e5f1383ca2ed555742f1"
+          "sha256": "4681505b7b21eda0d7f92c8475122a7e67fe7141b792c2f746f64d983e8dee4c"
         },
         {
           "path": "components/tes3mp/protocol/generated/server_hello_generated.h",
@@ -2011,6 +2060,10 @@
         {
           "path": "components/tes3mp/protocol/generated/session_rejected_generated.h",
           "sha256": "696392846800ae677246ae316c7d76c5d3e00965362cf03eed4ac9bc072462c9"
+        },
+        {
+          "path": "components/tes3mp/protocol/generated/session_resync_request_generated.h",
+          "sha256": "d55ea2caeb7ea4c7d5d2e1a7b1ea48e2345a05aaee0d6c7519ee8abea444b803"
         },
         {
           "path": "components/tes3mp/protocol/schema/authentication_accepted.fbs",
@@ -2037,12 +2090,16 @@
           "sha256": "e1e27381cf9d4115a205353aa0c5d6067cff5ddfa1dec9005ff815ab5e6fc6c7"
         },
         {
+          "path": "components/tes3mp/protocol/schema/reliable_interest_baseline.fbs",
+          "sha256": "17c6d9dd97143548c2ce472a4e8d5b4cd737853b6f1f943ca712c05a15a68837"
+        },
+        {
           "path": "components/tes3mp/protocol/schema/reliable_observation_batch.fbs",
           "sha256": "ddbbe9f816bd5dbffaaff625d51d23236f78a8cb1b5ac68bf781fa542ee24976"
         },
         {
           "path": "components/tes3mp/protocol/schema/reliable_operation.fbs",
-          "sha256": "32183cb97c180a32a9f367ed6a5ef8b814ba8b40c2b3f87503880ef8e71d5063"
+          "sha256": "67f1ee1e337801c229cb32018991585a824a9a505955473baf7b4fd60a85bbc3"
         },
         {
           "path": "components/tes3mp/protocol/schema/server_hello.fbs",
@@ -2055,6 +2112,10 @@
         {
           "path": "components/tes3mp/protocol/schema/session_rejected.fbs",
           "sha256": "8e55447120862b016d2e6ec50389fcc76a2878ed8f121637f311e74e82c241c0"
+        },
+        {
+          "path": "components/tes3mp/protocol/schema/session_resync_request.fbs",
+          "sha256": "ae11b8f78ddde0f8c4354c5720575fd9c904c056dccddd5c9507a9ba782f8f2c"
         },
         {
           "path": "docs/vnext/proofs/flatbuffers/ANDROID_ARM64.md",
@@ -2106,11 +2167,11 @@
         },
         {
           "path": "scripts/tests/test_run_vnext_flatbuffers_proof.py",
-          "sha256": "bee2264c46d7ab22e0efe879ea63a0fb9157785f9ca6acb594ecd16e5f97a355"
+          "sha256": "b513a79771a529ea785aba180d421fd0cfc4f8a1f47a0e278f4cff5aa7d54711"
         },
         {
           "path": "scripts/vnext_flatbuffers_proof.json",
-          "sha256": "57716b4460250fdaecbe64b1539a904a1898ecde828d9443081bbe80d199e08a"
+          "sha256": "e39b4b2065fe2f26fcc6c6e8545a304b13c8aab765f439aea38019764967a4fa"
         }
       ],
       "repositories": [

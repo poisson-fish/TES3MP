@@ -37,13 +37,13 @@ struct Cell {
   kind:CellKind;
 }
 
-table FixtureCellTransition {
+table CellTransition {
   requested_cell:Cell (id: 0);
 }
 
 union ReliableOperationBody {
   PlayerMotionIntent = 1,
-  FixtureCellTransition = 2
+  CellTransition = 2
 }
 
 table ReliableOperation {

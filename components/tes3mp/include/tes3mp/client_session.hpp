@@ -136,13 +136,21 @@ namespace TES3MP
         StaleTick,
         ContradictorySameTick,
         ContradictoryChange,
+        BaselineMissing,
     };
 
-    struct ObservedPlayer
+    using ObservedPlayer = InterestMember;
+
+    enum class ReliableInterestBaselineReceiveResult : std::uint8_t
     {
-        PlayerId playerId;
-        EntityId entityId;
-        friend constexpr bool operator==(ObservedPlayer, ObservedPlayer) noexcept = default;
+        Applied,
+        IdenticalDuplicate,
+        NotEstablished,
+        SessionNotBound,
+        SessionMismatch,
+        GenerationMismatch,
+        StaleRevision,
+        ContradictorySameRevision,
     };
 
     using ClientSessionCreateResult
@@ -163,6 +171,7 @@ namespace TES3MP
         ClientSessionBindingResult bindEstablishedSession(SessionId sessionId) noexcept;
         LatestWinsSnapshotReceiveResult receiveLatestWinsSnapshot(LatestWinsSnapshot snapshot);
         ReliableObservationReceiveResult receiveReliableObservationBatch(ReliableObservationBatch batch);
+        ReliableInterestBaselineReceiveResult receiveReliableInterestBaseline(ReliableInterestBaseline baseline);
 
         ClientSessionState state() const noexcept { return mState; }
         SessionGeneration generation() const noexcept { return mGeneration; }
@@ -180,6 +189,9 @@ namespace TES3MP
         const std::optional<ReliableObservationBatch>& confirmedObservationBatch() const noexcept
         { return mConfirmedObservationBatch; }
         std::span<const ObservedPlayer> observedPlayers() const noexcept { return mObservedPlayers; }
+        const std::optional<ReliableInterestBaseline>& confirmedInterestBaseline() const noexcept
+        { return mConfirmedInterestBaseline; }
+        bool interestBaselineComplete() const noexcept;
 
     private:
         ClientSessionStateMachine(MonotonicClock& clock, SessionTimeoutPolicy timeoutPolicy,
@@ -202,6 +214,7 @@ namespace TES3MP
         std::optional<EntityId> mTargetEntityId;
         std::optional<LatestWinsSnapshot> mConfirmedSnapshot;
         std::optional<ReliableObservationBatch> mConfirmedObservationBatch;
+        std::optional<ReliableInterestBaseline> mConfirmedInterestBaseline;
         std::vector<ObservedPlayer> mObservedPlayers;
     };
 }

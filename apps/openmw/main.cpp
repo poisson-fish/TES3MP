@@ -34,7 +34,9 @@ extern "C" __declspec(dllexport) DWORD AmdPowerXpressRequestHighPerformance = 0x
 #endif
 
 #include <filesystem>
+#include <charconv>
 #include <optional>
+#include <ranges>
 #include <span>
 #include <variant>
 
@@ -269,14 +271,14 @@ bool parseOptions(int argc, char** argv, OMW::Engine& engine, Files::Configurati
     {
         const auto manifestId = TES3MP::ContentManifestId::fromHex(
             variables["tes3mp-content-manifest-id"].as<std::string>());
-        const auto interiorId = TES3MP::CellSpaceId::fromValue(
-            variables["tes3mp-content-interior-id"].as<unsigned long long>());
-        const auto exteriorId = TES3MP::CellSpaceId::fromValue(
-            variables["tes3mp-content-exterior-id"].as<unsigned long long>());
+        const auto cellSpaces = TES3MP::parseCellSpaceDeclarations(
+            variables["tes3mp-content-cell-spaces"].as<std::string>());
+        const auto allowedCells = TES3MP::parseContentCells(
+            variables["tes3mp-content-allowed-cells"].as<std::string>());
         const auto appearanceId = TES3MP::AppearanceId::fromValue(
             variables["tes3mp-content-appearance-id"].as<unsigned long long>());
-        const auto contentManifest = manifestId && interiorId && exteriorId && appearanceId
-            ? TES3MP::ContentManifest::create(*manifestId, *interiorId, *exteriorId, *appearanceId)
+        const auto contentManifest = manifestId && cellSpaces && allowedCells && appearanceId
+            ? TES3MP::ContentManifest::create(*manifestId, *cellSpaces, *allowedCells, *appearanceId)
             : std::nullopt;
         if (!contentManifest)
         {
@@ -284,24 +286,34 @@ bool parseOptions(int argc, char** argv, OMW::Engine& engine, Files::Configurati
             return false;
         }
 #ifndef OPENMW_VR
-        const TES3MP::OpenMWAdapter::DesktopContentMapping contentMapping{
-            contentManifest->interiorCell(),
-            variables["tes3mp-content-interior-record"].as<std::string>(),
-            contentManifest->exteriorWorldspace(),
-            variables["tes3mp-content-worldspace-record"].as<std::string>(),
-            contentManifest->defaultAppearance(),
-            variables["tes3mp-content-appearance-record"].as<std::string>()
-        };
-        if (contentMapping.interiorCell.empty() || contentMapping.exteriorWorldspace.empty()
-            || contentMapping.avatarNpc.empty() || contentMapping.interiorCell == contentMapping.exteriorWorldspace
-            || contentMapping.interiorCell == contentMapping.avatarNpc
-            || contentMapping.exteriorWorldspace == contentMapping.avatarNpc)
+        std::vector<TES3MP::OpenMWAdapter::DesktopCellSpaceMapping> localMappings;
+        for (const auto& entry : variables["tes3mp-content-cell-space-map"].as<StringsVector>())
+        {
+            const auto equal = entry.find('=');
+            std::uint64_t rawId = 0;
+            const auto parsed = equal == std::string::npos ? std::from_chars_result{}
+                : std::from_chars(entry.data(), entry.data() + equal, rawId);
+            const auto id = equal != std::string::npos && parsed.ec == std::errc{}
+                && parsed.ptr == entry.data() + equal ? TES3MP::CellSpaceId::fromValue(rawId) : std::nullopt;
+            const auto declaration = id ? std::ranges::lower_bound(
+                contentManifest->cellSpaces(), *id, {}, &TES3MP::CellSpaceDeclaration::id)
+                : contentManifest->cellSpaces().end();
+            if (!id || declaration == contentManifest->cellSpaces().end() || declaration->id != *id)
+            {
+                Log(Debug::Error) << "TES3MP startup failed: invalid content cell-space mapping";
+                return false;
+            }
+            localMappings.push_back({ *id, declaration->kind, entry.substr(equal + 1) });
+        }
+        auto contentMapping = TES3MP::OpenMWAdapter::DesktopContentMapping::create(*contentManifest, localMappings,
+            contentManifest->defaultAppearance(), variables["tes3mp-content-appearance-record"].as<std::string>());
+        if (!contentMapping)
         {
             Log(Debug::Error) << "TES3MP startup failed: content record mappings are required";
             return false;
         }
-        multiplayerInput.configure(contentMapping);
-        multiplayerPresentation.configure(contentMapping);
+        multiplayerInput.configure(*contentMapping);
+        multiplayerPresentation.configure(*contentMapping);
 
         TES3MP::OpenMWAdapter::SemanticInputProvider* input = &multiplayerInput;
         TES3MP::OpenMWAdapter::PresentationProvider* presentation = &multiplayerPresentation;

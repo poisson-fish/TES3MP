@@ -10,6 +10,14 @@ namespace TES3MP::OpenMWAdapter
 {
     namespace
     {
+        CellId firstCell(const ContentManifest& manifest, CellId::Kind kind)
+        {
+            return *std::ranges::find_if(manifest.cells(),
+                [&](const CellId& cell) { return cell.kind() == kind; });
+        }
+    }
+    namespace
+    {
         constexpr std::uint64_t Second = 1'000'000'000;
         constexpr std::uint64_t ReconnectCadence = 1'050'000'000;
         constexpr std::uint64_t FlowDuration = 8 * Second;
@@ -69,8 +77,8 @@ namespace TES3MP::OpenMWAdapter
     DesktopAutomation::DesktopAutomation(DesktopAutomationRole role, const std::filesystem::path& output,
         ContentManifest contentManifest, DesktopPresentation& presentation, ConnectionStatusProvider& status)
         : mRole(role)
-        , mInterior(CellId::interior(contentManifest.interiorCell()))
-        , mExterior(CellId::exterior(contentManifest.exteriorWorldspace(), 0, 0))
+        , mInterior(firstCell(contentManifest, CellId::Kind::Interior))
+        , mExterior(firstCell(contentManifest, CellId::Kind::Exterior))
         , mOutput(output, std::ios::out | std::ios::trunc)
         , mPresentation(presentation)
         , mStatus(status)
@@ -91,13 +99,13 @@ namespace TES3MP::OpenMWAdapter
         if (!mSentExterior && mSawPeer && elapsed >= Second)
         {
             mSentExterior = true;
-            return { ProviderResult::Accepted, FixtureCellTransition(mExterior) };
+            return { ProviderResult::Accepted, CellTransition(mExterior) };
         }
         if (mSentExterior && !mSentInterior && *mSelfCell == mExterior && mExteriorAt
             && mNow->nanoseconds() - mExteriorAt->nanoseconds() >= Second)
         {
             mSentInterior = true;
-            return { ProviderResult::Accepted, FixtureCellTransition(mInterior) };
+            return { ProviderResult::Accepted, CellTransition(mInterior) };
         }
         return {};
     }

@@ -132,6 +132,7 @@ namespace TES3MP
             }
             else if (auto* snapshot = std::get_if<LatestWinsSnapshot>(&message))
             {
+                const auto wasComplete = mSession->stateMachine().interestBaselineComplete();
                 if (!mSession->stateMachine().sessionId())
                 {
                     if (mSession->bindEstablishedSession(snapshot->header().targetSessionId())
@@ -152,6 +153,11 @@ namespace TES3MP
                     result.observationApplied = true;
                 }
                 mPendingObservations.clear();
+                if (!wasComplete && mSession->stateMachine().interestBaselineComplete())
+                {
+                    result.baselineCompleted = true;
+                    mResyncPending = false;
+                }
             }
             else if (auto* observation = std::get_if<ReliableObservationBatch>(&message))
             {
@@ -168,6 +174,27 @@ namespace TES3MP
                     return reject();
                 result.observationApplied
                     = result.observationApplied || applied == ReliableObservationReceiveResult::Applied;
+            }
+            else if (auto* baseline = std::get_if<ReliableInterestBaseline>(&message))
+            {
+                const auto wasComplete = mSession->stateMachine().interestBaselineComplete();
+                if (!mSession->stateMachine().sessionId())
+                {
+                    if (mSession->bindEstablishedSession(baseline->targetSessionId())
+                        != ClientSessionBindingResult::Bound)
+                        return reject();
+                }
+                const auto applied = mSession->receiveReliableInterestBaseline(std::move(*baseline));
+                if (applied != ReliableInterestBaselineReceiveResult::Applied
+                    && applied != ReliableInterestBaselineReceiveResult::IdenticalDuplicate)
+                    return reject();
+                result.baselineApplied = result.baselineApplied
+                    || applied == ReliableInterestBaselineReceiveResult::Applied;
+                if (mSession->stateMachine().interestBaselineComplete())
+                {
+                    result.baselineCompleted = result.baselineCompleted || !wasComplete;
+                    mResyncPending = false;
+                }
             }
             else if (auto* pose = std::get_if<ServerVrPoseSnapshot>(&message))
             {
@@ -188,7 +215,7 @@ namespace TES3MP
         return queueReliable(ReliableOperationBody(std::move(intent)));
     }
 
-    ClientRuntimeQueueResult ClientSessionRuntime::queueCellTransition(FixtureCellTransition transition)
+    ClientRuntimeQueueResult ClientSessionRuntime::queueCellTransition(CellTransition transition)
     {
         return queueReliable(ReliableOperationBody(std::move(transition)));
     }
@@ -205,11 +232,32 @@ namespace TES3MP
             encodeClientVrPoseSample(sample));
     }
 
+    ClientRuntimeResult ClientSessionRuntime::requestResync(ResyncReason reason)
+    {
+        const auto sessionId = mSession->stateMachine().sessionId();
+        if (mSession->stateMachine().state() != ClientSessionState::Established || !sessionId)
+            return ClientRuntimeResult::NotConnected;
+        if (mResyncPending)
+            return ClientRuntimeResult::Accepted;
+        const auto version = mSession->stateMachine().confirmedInterestBaseline()
+            ? mSession->stateMachine().confirmedInterestBaseline()->canonicalStateVersion()
+            : CanonicalStateVersion::initial();
+        auto created = SessionResyncRequest::create(*sessionId, mSession->stateMachine().generation(), reason, version);
+        auto* request = std::get_if<SessionResyncRequest>(&created);
+        if (!request)
+            return ClientRuntimeResult::EncodeRejected;
+        const auto result = queue(MessageClass::SessionControl, MessageKind::SessionResyncRequest,
+            encodeSessionResyncRequest(*request));
+        if (result == ClientRuntimeResult::Accepted)
+            mResyncPending = true;
+        return result;
+    }
+
     ClientRuntimeQueueResult ClientSessionRuntime::queueReliable(ReliableOperationBody body)
     {
         const auto& snapshot = mSession->stateMachine().confirmedSnapshot();
         const auto sessionId = mSession->stateMachine().sessionId();
-        if (!snapshot || !sessionId)
+        if (!snapshot || !sessionId || !mSession->stateMachine().interestBaselineComplete())
             return { ClientRuntimeResult::NotConnected, std::nullopt };
         const auto self = std::ranges::find_if(snapshot->view().entries(), [&](const auto& entry) {
             return entry.playerId() == snapshot->header().targetPlayerId()
@@ -340,6 +388,15 @@ namespace TES3MP
                 {
                     auto value = decodeReliableObservationBatch(frame->payload());
                     if (auto* typed = std::get_if<ReliableObservationBatch>(&value))
+                        result.messages.emplace_back(std::move(*typed));
+                    else
+                        return fail(ClientRuntimeResult::ProtocolRejected);
+                    break;
+                }
+                case MessageKind::ReliableInterestBaseline:
+                {
+                    auto value = decodeReliableInterestBaseline(frame->payload());
+                    if (auto* typed = std::get_if<ReliableInterestBaseline>(&value))
                         result.messages.emplace_back(std::move(*typed));
                     else
                         return fail(ClientRuntimeResult::ProtocolRejected);

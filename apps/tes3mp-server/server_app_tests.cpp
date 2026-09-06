@@ -2,7 +2,7 @@
 #include "authenticated_join_composition.hpp"
 #include "resume_token_context.hpp"
 #include "connection_session_coordinator.hpp"
-#include "fixture_observation_projection.hpp"
+#include "interest_projection.hpp"
 #include "phase7_proof_profile.hpp"
 #include "phase7_queue_telemetry.hpp"
 #include "player_identity_file.hpp"
@@ -43,7 +43,8 @@ namespace
         "bind_address = 127.0.0.1\nport = 25565\ntick_interval_ms = 16\n"
         "disconnect_grace_ms = 30000\njoin_password_file = password.txt\n"
         "content_manifest_id = 0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20\n"
-        "interior_cell_id = 7\nexterior_worldspace_id = 8\ndefault_appearance_id = 1\n"
+        "cell_spaces = interior:7;exterior:8\nallowed_cells = interior:7;exterior:8:0:0\n"
+        "spawn_cell = interior:7\ndefault_appearance_id = 1\n"
         "player_identity_file = players.txt\n";
 
     class FakeRuntime final : public TES3MP::TransportRuntime
@@ -197,7 +198,8 @@ namespace
     public:
         bool enqueueJoinResponses(std::span<const std::byte> authentication,
             std::span<const std::byte> snapshot, const CanonicalServerState&,
-            const CanonicalServerState&, const AuthenticatedJoinResult& join, ServerTick) noexcept override
+            const CanonicalServerState&, const AuthenticatedJoinResult& join, ServerTick,
+            CanonicalStateVersion) noexcept override
         {
             ++attempts;
             if (reject) return false;
@@ -285,8 +287,8 @@ int main()
             && evidence->latestHighWaterBytes == 10 && !telemetry.takeDrainEvidence());
     }
     using namespace TES3MP::ServerApp;
-    static_assert(Phase7ProtocolMajor == 1 && Phase7ProtocolMinimumMinor == 1
-        && Phase7ProtocolMaximumMinor == 1);
+    static_assert(Phase7ProtocolMajor == 1 && Phase7ProtocolMinimumMinor == 2
+        && Phase7ProtocolMaximumMinor == 2);
     static_assert(Phase7SourceAuthenticationBurst == 4 && Phase7GlobalAuthenticationBurst == 32
         && Phase7AuthenticationRefillMilliseconds == 1'000 && Phase7ConnectionCapacity == 8);
     static_assert(!phase7ProofDisconnectGraceAccepted(MinimumResumeTokenLifetimeMilliseconds - 1));
@@ -296,7 +298,13 @@ int main()
     {
         const auto before = fixtureState(false);
         const auto after = fixtureState(true);
-        auto projected = projectFixtureObservations(before, after, id<ServerTick>(4), id<CanonicalRevision>(4));
+        auto baseline = projectInterestBaseline(before, id<SessionId>(1), id<ServerTick>(4),
+            id<CanonicalRevision>(4), id<CanonicalStateVersion>(4));
+        assert(baseline && baseline->baseline.members().size() == 2
+            && baseline->view.view().entries().size() == 2
+            && sharesInterest(before, id<SessionId>(1), id<SessionId>(2))
+            && !sharesInterest(after, id<SessionId>(1), id<SessionId>(2)));
+        auto projected = projectInterestChanges(before, after, id<ServerTick>(4), id<CanonicalRevision>(4));
         assert(projected && projected->size() == 2);
         assert((*projected)[0].targetSession == id<SessionId>(1));
         assert(((*projected)[0].observations.changes().size() == 1
@@ -309,13 +317,13 @@ int main()
                 == ObservationChange{ id<PlayerId>(1), id<EntityId>(1), ObservationChangeKind::Leave }));
         assert((*projected)[1].view.view().entries().size() == 1
             && (*projected)[1].view.view().entries()[0].playerId() == id<PlayerId>(2));
-        assert(projectFixtureObservations(after, after, id<ServerTick>(5), id<CanonicalRevision>(5))->empty());
+        assert(projectInterestChanges(after, after, id<ServerTick>(5), id<CanonicalRevision>(5))->empty());
 
         const std::array remainingPlayers{ before.players()[0] };
         const std::array remainingSessions{ before.activeSessions()[0] };
         const auto expired = std::get<CanonicalServerState>(
             createCanonicalServerState(remainingPlayers, remainingSessions));
-        auto expirationOutput = projectFixtureObservations(
+        auto expirationOutput = projectInterestChanges(
             before, expired, id<ServerTick>(5), id<CanonicalRevision>(5));
         assert(expirationOutput && expirationOutput->size() == 1
             && (*expirationOutput)[0].targetSession == id<SessionId>(1));
@@ -326,7 +334,7 @@ int main()
         auto queues = OutboundQueueSet::create(OutboundQueuePolicy{}, 1);
         const auto connection = TransportConnectionId::initial();
         assert(queues->attach(connection) == TransportResult::Accepted);
-        assert(admitFixtureObservation(*queues, connection, (*projected)[0]));
+        assert(admitInterestChange(*queues, connection, (*projected)[0]));
         FakeRuntime runtime;
         assert(queues->pump(runtime, connection, 0) == OutboundPumpResult::Progress);
         assert(runtime.sent.size() == 2);
@@ -339,7 +347,7 @@ int main()
         blockedPolicy.reliableMessages = 0;
         auto blocked = OutboundQueueSet::create(blockedPolicy, 1);
         assert(blocked->attach(connection) == TransportResult::Accepted);
-        assert(!admitFixtureObservation(*blocked, connection, (*projected)[0]));
+        assert(!admitInterestChange(*blocked, connection, (*projected)[0]));
         assert(blocked->pump(runtime, connection, 1) == OutboundPumpResult::Idle);
     }
     {
@@ -386,8 +394,9 @@ int main()
     assert(std::holds_alternative<ConfigError>(parseServerConfig(std::string(MaximumConfigLineBytes + 1, 'x'))));
     assert(std::holds_alternative<ConfigError>(parseServerConfig(std::string("\xc0\x80", 2))));
     auto duplicateContentIds = std::string(validConfig);
-    duplicateContentIds.replace(duplicateContentIds.find("exterior_worldspace_id = 8"),
-        std::string("exterior_worldspace_id = 8").size(), "exterior_worldspace_id = 7");
+    duplicateContentIds.replace(duplicateContentIds.find("cell_spaces = interior:7;exterior:8"),
+        std::string("cell_spaces = interior:7;exterior:8").size(),
+        "cell_spaces = interior:7;exterior:7");
     assert(std::holds_alternative<ConfigError>(parseServerConfig(duplicateContentIds)));
 
     const auto temporary = std::filesystem::temp_directory_path() / "tes3mp-server-password-test";
@@ -563,9 +572,23 @@ int main()
         assert(std::get<DecodedFrame>(decodeProtocolFrame(runtime.sent[1])).messageKind()
             == MessageKind::AuthenticationAccepted);
         assert(std::get<DecodedFrame>(decodeProtocolFrame(runtime.sent[2])).messageKind()
-            == MessageKind::ReliableObservationBatch);
+            == MessageKind::ReliableInterestBaseline);
         assert(std::get<DecodedFrame>(decodeProtocolFrame(runtime.sent[3])).messageKind()
             == MessageKind::LatestWinsSnapshot);
+
+        const SessionResyncRequest resync(id<SessionId>(1), SessionGeneration::initial(),
+            ResyncReason::LocalFeedGap, joinFixture.reducer.stateVersion());
+        const auto resyncFrame = std::get<std::vector<std::byte>>(encodeProtocolFrame(
+            MessageClass::SessionControl, MessageKind::SessionResyncRequest,
+            encodeSessionResyncRequest(resync)));
+        assert(sessions.dispatch(connection,
+                   TransportMessage{ TransportChannel::ReliableOrdered, resyncFrame }, joins, crypto,
+                   ServerTick::initial()) == ConnectionSessionResult::ResyncRequested);
+        assert(sessions.dispatch(connection,
+                   TransportMessage{ TransportChannel::ReliableOrdered, resyncFrame }, joins, crypto,
+                   ServerTick::initial()) == ConnectionSessionResult::ResyncCoalesced);
+        assert(sessions.takeResyncRequest(connection) == resync);
+        assert(!sessions.takeResyncRequest(connection));
 
         assert(sessions.dispatch(connection,
                    TransportMessage{ TransportChannel::LatestWins, { std::byte{ 1 } } }, joins, crypto,
@@ -753,7 +776,7 @@ int main()
             && moved->linearVelocity() == LinearVelocity3(2, -3, 4)
             && moved->entityRevision() == id<EntityRevision>(2));
         assert(reducer.commit(std::move(prepared)));
-        auto views = projectFixtureViews(reducer.state(), ServerTick::initial(), reducer.canonicalRevision());
+        auto views = projectInterestViews(reducer.state(), ServerTick::initial(), reducer.canonicalRevision());
         assert(views && views->size() == 1 && (*views)[0].second.view().entries().size() == 1
             && (*views)[0].second.view().entries()[0].transform().position() == Position3(12, 17, 34));
     }

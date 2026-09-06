@@ -26,5 +26,17 @@ extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t* data, std::size_t size
         if (normalizedValue == nullptr || *normalizedValue != *value)
             std::abort();
     }
+    const auto observations = TES3MP::decodeReliableObservationBatch(bytes);
+    if (const auto* value = std::get_if<TES3MP::ReliableObservationBatch>(&observations))
+        if (TES3MP::decodeReliableObservationBatch(TES3MP::encodeReliableObservationBatch(*value)) != observations)
+            std::abort();
+    const auto baseline = TES3MP::decodeReliableInterestBaseline(bytes);
+    if (const auto* value = std::get_if<TES3MP::ReliableInterestBaseline>(&baseline))
+        if (TES3MP::decodeReliableInterestBaseline(TES3MP::encodeReliableInterestBaseline(*value)) != baseline)
+            std::abort();
+    const auto resync = TES3MP::decodeSessionResyncRequest(bytes);
+    if (const auto* value = std::get_if<TES3MP::SessionResyncRequest>(&resync))
+        if (TES3MP::decodeSessionResyncRequest(TES3MP::encodeSessionResyncRequest(*value)) != resync)
+            std::abort();
     return 0;
 }

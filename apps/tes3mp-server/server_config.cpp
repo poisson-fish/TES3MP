@@ -76,15 +76,16 @@ namespace TES3MP::ServerApp
         if (text.size() > MaximumConfigBytes) return error(ConfigErrorCode::TooLarge);
         if (!validUtf8(text)) return error(ConfigErrorCode::InvalidUtf8);
 
-        std::array<bool, 10> seen{};
+        std::array<bool, 11> seen{};
         std::string bindAddress;
         std::uint16_t port = 0;
         std::uint64_t tick = 0;
         std::uint64_t grace = 0;
         std::filesystem::path passwordPath;
         std::optional<ContentManifestId> contentManifestId;
-        std::optional<CellSpaceId> interiorCellId;
-        std::optional<CellSpaceId> exteriorWorldspaceId;
+        std::optional<std::vector<CellSpaceDeclaration>> cellSpaces;
+        std::optional<std::vector<CellId>> allowedCells;
+        std::optional<CellId> spawnCell;
         std::optional<AppearanceId> defaultAppearanceId;
         std::filesystem::path playerIdentityPath;
         std::size_t lineNumber = 0;
@@ -110,10 +111,11 @@ namespace TES3MP::ServerApp
                 else if (key == "disconnect_grace_ms") slot = 3;
                 else if (key == "join_password_file") slot = 4;
                 else if (key == "content_manifest_id") slot = 5;
-                else if (key == "interior_cell_id") slot = 6;
-                else if (key == "exterior_worldspace_id") slot = 7;
-                else if (key == "default_appearance_id") slot = 8;
-                else if (key == "player_identity_file") slot = 9;
+                else if (key == "cell_spaces") slot = 6;
+                else if (key == "allowed_cells") slot = 7;
+                else if (key == "spawn_cell") slot = 8;
+                else if (key == "default_appearance_id") slot = 9;
+                else if (key == "player_identity_file") slot = 10;
                 else return error(ConfigErrorCode::UnknownKey, lineNumber, key);
                 if (seen[slot]) return error(ConfigErrorCode::DuplicateKey, lineNumber, key);
                 if (value.empty() || value.find('#') != std::string_view::npos
@@ -150,13 +152,28 @@ namespace TES3MP::ServerApp
                     contentManifestId = ContentManifestId::fromHex(value);
                     if (!contentManifestId) return error(ConfigErrorCode::InvalidValue, lineNumber, key);
                 }
-                else if (slot >= 6 && slot <= 8)
+                else if (slot == 6)
+                {
+                    cellSpaces = parseCellSpaceDeclarations(value);
+                    if (!cellSpaces) return error(ConfigErrorCode::InvalidValue, lineNumber, key);
+                }
+                else if (slot == 7)
+                {
+                    allowedCells = parseContentCells(value);
+                    if (!allowedCells) return error(ConfigErrorCode::InvalidValue, lineNumber, key);
+                }
+                else if (slot == 8)
+                {
+                    auto parsed = parseContentCells(value);
+                    if (!parsed || parsed->size() != 1)
+                        return error(ConfigErrorCode::InvalidValue, lineNumber, key);
+                    spawnCell = parsed->front();
+                }
+                else if (slot == 9)
                 {
                     const auto parsed = unsignedValue(value, std::numeric_limits<std::uint64_t>::max());
                     if (!parsed || *parsed == 0) return error(ConfigErrorCode::InvalidValue, lineNumber, key);
-                    if (slot == 6) interiorCellId = CellSpaceId::fromValue(*parsed);
-                    else if (slot == 7) exteriorWorldspaceId = CellSpaceId::fromValue(*parsed);
-                    else defaultAppearanceId = AppearanceId::fromValue(*parsed);
+                    defaultAppearanceId = AppearanceId::fromValue(*parsed);
                 }
                 else
                 {
@@ -171,16 +188,16 @@ namespace TES3MP::ServerApp
         for (std::size_t slot = 0; slot < seen.size(); ++slot)
             if (!seen[slot])
                 return error(ConfigErrorCode::MissingKey, 0,
-                    std::array<std::string_view, 10>{ "bind_address", "port", "tick_interval_ms",
-                        "disconnect_grace_ms", "join_password_file", "content_manifest_id", "interior_cell_id",
-                        "exterior_worldspace_id", "default_appearance_id", "player_identity_file" }[slot]);
+                    std::array<std::string_view, 11>{ "bind_address", "port", "tick_interval_ms",
+                        "disconnect_grace_ms", "join_password_file", "content_manifest_id", "cell_spaces",
+                        "allowed_cells", "spawn_cell", "default_appearance_id", "player_identity_file" }[slot]);
         auto endpoint = ListenerEndpoint::create(bindAddress, port);
         if (!endpoint) return error(ConfigErrorCode::InvalidValue, 0, "bind_address");
-        auto manifest = ContentManifest::create(*contentManifestId, *interiorCellId,
-            *exteriorWorldspaceId, *defaultAppearanceId);
-        if (!manifest) return error(ConfigErrorCode::InvalidValue, 0, "content_manifest_id");
+        auto manifest = ContentManifest::create(*contentManifestId, *cellSpaces, *allowedCells, *defaultAppearanceId);
+        if (!manifest || !manifest->contains(*spawnCell))
+            return error(ConfigErrorCode::InvalidValue, 0, "content_manifest_id");
         return ServerConfig{ std::move(*endpoint), tick, grace, std::move(passwordPath), *manifest,
-            std::move(playerIdentityPath) };
+            *spawnCell, std::move(playerIdentityPath) };
     }
 
     PasswordLoadResult loadJoinPassword(const std::filesystem::path& path)

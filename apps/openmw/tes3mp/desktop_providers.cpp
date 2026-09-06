@@ -36,17 +36,31 @@ namespace TES3MP::OpenMWAdapter
             return ESM::RefId::stringRefId(value);
         }
 
+        const DesktopCellSpaceMapping* mappingFor(
+            const DesktopContentMapping& mapping, CellSpaceId id, CellSpaceKind kind)
+        {
+            const auto found = std::ranges::find_if(mapping.cellSpaces,
+                [&](const auto& value) { return value.id == id && value.kind == kind; });
+            return found == mapping.cellSpaces.end() ? nullptr : &*found;
+        }
+
         std::optional<CellId> toCanonical(const MWWorld::Cell& cell, const DesktopContentMapping& mapping)
         {
             if (!cell.isExterior())
             {
-                if (cell.getId() != refId(mapping.interiorCell))
-                    return std::nullopt;
-                return CellId::interior(mapping.interiorId);
+                const auto found = std::ranges::find_if(mapping.cellSpaces, [&](const auto& value) {
+                    return value.kind == CellSpaceKind::Interior && cell.getId() == refId(value.record);
+                });
+                if (found == mapping.cellSpaces.end()) return std::nullopt;
+                const auto result = CellId::interior(found->id);
+                return mapping.manifest.contains(result) ? std::optional(result) : std::nullopt;
             }
-            if (cell.getWorldSpace() != refId(mapping.exteriorWorldspace))
-                return std::nullopt;
-            return CellId::exterior(mapping.exteriorId, cell.getGridX(), cell.getGridY());
+            const auto found = std::ranges::find_if(mapping.cellSpaces, [&](const auto& value) {
+                return value.kind == CellSpaceKind::Exterior && cell.getWorldSpace() == refId(value.record);
+            });
+            if (found == mapping.cellSpaces.end()) return std::nullopt;
+            const auto result = CellId::exterior(found->id, cell.getGridX(), cell.getGridY());
+            return mapping.manifest.contains(result) ? std::optional(result) : std::nullopt;
         }
 
         ESM::Position toOpenMW(const Transform& transform)
@@ -83,18 +97,19 @@ namespace TES3MP::OpenMWAdapter
 
         MWWorld::CellStore* resolveCell(const CellId& cell, const DesktopContentMapping& mapping)
         {
+            if (!mapping.manifest.contains(cell)) return nullptr;
             auto worldModel = MWBase::Environment::get().getWorldModel();
             if (const auto* interior = cell.asInterior())
             {
-                if (interior->cellSpace() != mapping.interiorId)
-                    return nullptr;
-                return worldModel->findCell(refId(mapping.interiorCell));
+                const auto* local = mappingFor(mapping, interior->cellSpace(), CellSpaceKind::Interior);
+                return local ? worldModel->findCell(refId(local->record)) : nullptr;
             }
             const auto* exterior = cell.asExterior();
-            if (!exterior || exterior->worldspace() != mapping.exteriorId)
-                return nullptr;
+            const auto* local = exterior
+                ? mappingFor(mapping, exterior->worldspace(), CellSpaceKind::Exterior) : nullptr;
+            if (!local) return nullptr;
             return &worldModel->getExterior(
-                ESM::ExteriorCellLocation(exterior->gridX(), exterior->gridY(), refId(mapping.exteriorWorldspace)));
+                ESM::ExteriorCellLocation(exterior->gridX(), exterior->gridY(), refId(local->record)));
         }
 
         ProviderResult mapReplicatedActorResult(MWRender::ReplicatedActorResult result)
@@ -150,6 +165,32 @@ namespace TES3MP::OpenMWAdapter
         }
     }
 
+    std::optional<DesktopContentMapping> DesktopContentMapping::create(ContentManifest manifest,
+        std::span<const DesktopCellSpaceMapping> cellSpaces, AppearanceId appearanceId, std::string avatarNpc)
+    try
+    {
+        if (appearanceId != manifest.defaultAppearance() || avatarNpc.empty()
+            || cellSpaces.size() != manifest.cellSpaces().size()) return std::nullopt;
+        std::vector<DesktopCellSpaceMapping> mappings(cellSpaces.begin(), cellSpaces.end());
+        std::ranges::sort(mappings, {}, &DesktopCellSpaceMapping::id);
+        for (std::size_t index = 0; index < mappings.size(); ++index)
+        {
+            const auto& mapping = mappings[index];
+            const auto declaration = std::ranges::lower_bound(
+                manifest.cellSpaces(), mapping.id, {}, &CellSpaceDeclaration::id);
+            if (mapping.record.empty() || declaration == manifest.cellSpaces().end()
+                || declaration->id != mapping.id || declaration->kind != mapping.kind
+                || (index != 0 && mappings[index - 1].id == mapping.id)) return std::nullopt;
+            const auto local = refId(mapping.record);
+            if (local == refId(avatarNpc)) return std::nullopt;
+            for (std::size_t prior = 0; prior < index; ++prior)
+                if (local == refId(mappings[prior].record)) return std::nullopt;
+        }
+        return DesktopContentMapping{ std::move(manifest), std::move(mappings), appearanceId,
+            std::move(avatarNpc) };
+    }
+    catch (...) { return std::nullopt; }
+
     class DesktopSemanticInput::Impl
     {
     public:
@@ -181,7 +222,7 @@ namespace TES3MP::OpenMWAdapter
             auto cell = toCanonical(*current->getCell(), *mImpl->mapping);
             if (!cell)
                 return { ProviderResult::ContentMappingFailed, std::nullopt };
-            return { ProviderResult::Accepted, FixtureCellTransition(*cell) };
+            return { ProviderResult::Accepted, CellTransition(*cell) };
         }
         catch (...)
         {

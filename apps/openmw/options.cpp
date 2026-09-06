@@ -33,16 +33,15 @@ namespace OpenMW
             "private TES3MP durable player credential file");
         addOption("tes3mp-content-manifest-id", bpo::value<std::string>()->default_value(""),
             "exact TES3MP content manifest SHA-256 in hexadecimal");
-        addOption("tes3mp-content-interior-id", bpo::value<unsigned long long>()->default_value(0),
-            "manifest-scoped TES3MP interior cell ID");
-        addOption("tes3mp-content-exterior-id", bpo::value<unsigned long long>()->default_value(0),
-            "manifest-scoped TES3MP exterior worldspace ID");
+        addOption("tes3mp-content-cell-spaces", bpo::value<std::string>()->default_value(""),
+            "TES3MP cell-space catalog: interior:<id>;exterior:<id>");
+        addOption("tes3mp-content-allowed-cells", bpo::value<std::string>()->default_value(""),
+            "TES3MP exact cell catalog: interior:<id>;exterior:<id>:<x>:<y>");
         addOption("tes3mp-content-appearance-id", bpo::value<unsigned long long>()->default_value(0),
             "manifest-scoped TES3MP default appearance ID");
-        addOption("tes3mp-content-interior-record", bpo::value<std::string>()->default_value(""),
-            "OpenMW interior record mapped by the TES3MP content manifest");
-        addOption("tes3mp-content-worldspace-record", bpo::value<std::string>()->default_value(""),
-            "OpenMW worldspace record mapped by the TES3MP content manifest");
+        addOption("tes3mp-content-cell-space-map",
+            bpo::value<StringsVector>()->default_value(StringsVector(), "")->multitoken()->composing(),
+            "OpenMW cell-space mapping entries: <id>=<record>");
         addOption("tes3mp-content-appearance-record", bpo::value<std::string>()->default_value(""),
             "OpenMW NPC record mapped by the TES3MP content manifest");
 #ifdef TES3MP_OPENMW_DESKTOP_AUTOMATION

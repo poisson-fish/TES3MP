@@ -80,6 +80,10 @@ namespace TES3MP
         ReliableObservationBatch batch)
     { return mState->receiveReliableObservationBatch(std::move(batch)); }
 
+    ReliableInterestBaselineReceiveResult HeadlessClientSession::receiveReliableInterestBaseline(
+        ReliableInterestBaseline baseline)
+    { return mState->receiveReliableInterestBaseline(std::move(baseline)); }
+
     HeadlessClientResult HeadlessClientSession::close() noexcept
     {
         if (mAttempt) { mTransport.cancelConnect(*mAttempt); mAttempt.reset(); }

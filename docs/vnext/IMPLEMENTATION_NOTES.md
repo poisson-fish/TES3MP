@@ -6145,6 +6145,29 @@ only the relevant phase section here.
   lifecycle compositions, manifest/configuration, and resync helper. No build or
   runtime test ran because production behavior did not change.
 
+### 2026-09-06 implementation pass
+
+- Implemented the approved A/A/A package from GDR-0018 and ADR-0058. The exact
+  manifest catalog is bounded to 256 typed cell spaces and 4,096 cells; server
+  config supplies an explicit spawn, while OpenMW validates complete injective
+  local record mappings.
+- Replaced fixture cell-transition and projection names in production code.
+  Canonical transitions reject cells outside the manifest, and observation,
+  latest-view, and optional pose routing use one exact same-cell predicate.
+- Added protocol 1.2 reliable membership baselines and authenticated metadata-only
+  resync requests. Join, resume, and resync compose a scoped baseline with a
+  latest snapshot; clients become ready only when the snapshot covers the
+  baseline revision. Resync requests coalesce to one pending response per
+  session generation and never mutate canonical state.
+- Verification: MSVC Release builds and affected protocol/frame/handshake,
+  session, headless, reducer, server-app, and OpenMW adapter tests passed. The
+  full networking server, headless client, and OpenMW desktop executable built.
+  The pinned FlatBuffers build/codegen/contract proof passed, as did 36 affected
+  Python tests and the Phase 7 lifecycle integration with 32 reconnects, stable
+  identity/progress, expiry/fresh-identity checks, converged views, stale-view
+  rejection, and zero final queue depth. Indexed provenance passed with 376
+  intentional differences and 77 dependency declaration inputs.
+
 - Snapshot completion needs an explicit baseline revision/tick. Do not infer
   completion from a quiet connection.
 - Interest changes are server decisions. Clients may suggest view context only

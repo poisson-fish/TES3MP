@@ -68,7 +68,7 @@ namespace
         auto created = policy ? TES3MP::ClientSessionRuntime::create(runtime, clock, timeouts, generation, *policy)
                               : TES3MP::ClientRuntimeCreateResult{ TES3MP::SessionTransitionError{} };
         auto* value = std::get_if<std::unique_ptr<TES3MP::ClientSessionRuntime>>(&created);
-        auto range = std::get<TES3MP::ProtocolVersionRange>(TES3MP::ProtocolVersionRange::create(1, 1, 1));
+        auto range = std::get<TES3MP::ProtocolVersionRange>(TES3MP::ProtocolVersionRange::create(1, 2, 2));
         auto offer = std::get<TES3MP::CapabilityOffer>(TES3MP::CapabilityOffer::create(std::move(range), {}, {}));
         if (!value || !*value
             || (*value)->start(endpoint, TES3MP::ClientHello::fromOffer(std::move(offer)), std::move(request))
@@ -76,7 +76,6 @@ namespace
             return result;
         auto& clientRuntime = **value;
         auto& client = clientRuntime.session();
-        bool bound = false;
         std::uint64_t motionCommandsSent = 0;
         const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(timeoutMilliseconds);
         while (std::chrono::steady_clock::now() < deadline)
@@ -89,10 +88,9 @@ namespace
                 result.lifetimeMilliseconds = clientRuntime.resumeLifetimeMilliseconds();
                 result.token = clientRuntime.takeResumeToken();
             }
-            if (advanced.snapshotApplied && result.token)
+            if (result.token && client.stateMachine().interestBaselineComplete())
             {
                 const auto sessionId = *client.stateMachine().sessionId();
-                bound = true;
                 const auto& confirmed = *client.stateMachine().confirmedSnapshot();
                 const auto self = std::ranges::find_if(confirmed.view().entries(),
                     [&](const auto& entry) { return entry.playerId() == confirmed.header().targetPlayerId()
@@ -110,6 +108,8 @@ namespace
                             != TES3MP::ClientRuntimeResult::Accepted)
                             break;
                         motionCommandsSent = next;
+                        if (clientRuntime.flushOutbound() != TES3MP::ClientRuntimeResult::Accepted)
+                            break;
                     }
                     continue;
                 }
@@ -263,7 +263,7 @@ int main(int argc, char** argv)
         factory.runtime->shutdown();
         return 0;
     }
-    auto versions = std::get<TES3MP::ProtocolVersionRange>(TES3MP::ProtocolVersionRange::create(1, 1, 1));
+    auto versions = std::get<TES3MP::ProtocolVersionRange>(TES3MP::ProtocolVersionRange::create(1, 2, 2));
     auto offer = std::get<TES3MP::CapabilityOffer>(TES3MP::CapabilityOffer::create(std::move(versions), {}, {}));
     if (clientRuntime.start(*endpoint, TES3MP::ClientHello::fromOffer(std::move(offer)),
             TES3MP::AuthenticationRequest::join(std::move(*password)))
@@ -304,7 +304,7 @@ int main(int argc, char** argv)
                 }
             }
         }
-        if (authenticationAccepted && pumped.snapshotApplied && !bound)
+        if (authenticationAccepted && pumped.baselineCompleted && !bound)
         {
             const auto sessionId = *session.stateMachine().sessionId();
             const auto& confirmed = *session.stateMachine().confirmedSnapshot();
@@ -344,11 +344,12 @@ int main(int argc, char** argv)
                 const bool exterior = self->transform().cell().kind() == TES3MP::CellId::Kind::Exterior;
                 if (!sentExterior || (exterior && !sentInterior))
                 {
-                    const auto cell = sentExterior
-                        ? TES3MP::CellId::interior(TES3MP::testContentManifest().interiorCell())
-                        : TES3MP::CellId::exterior(
-                            TES3MP::testContentManifest().exteriorWorldspace(), 0, 0);
-                    if (clientRuntime.queueCellTransition(TES3MP::FixtureCellTransition(cell)).result
+                    const auto manifest = TES3MP::testContentManifest();
+                    const auto cell = *std::ranges::find_if(manifest.cells(), [&](const auto& value) {
+                        return sentExterior ? value.kind() == TES3MP::CellId::Kind::Interior
+                                            : value.kind() == TES3MP::CellId::Kind::Exterior;
+                    });
+                    if (clientRuntime.queueCellTransition(TES3MP::CellTransition(cell)).result
                         != TES3MP::ClientRuntimeResult::Accepted)
                         return 3;
                     if (!sentExterior)

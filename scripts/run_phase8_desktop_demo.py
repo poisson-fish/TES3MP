@@ -30,11 +30,11 @@ def client_command(args: argparse.Namespace, port: int, password: Path,
         f"--tes3mp-password-file={password}",
         f"--tes3mp-player-credential-file={evidence.parent / (role + '-player-credential')}",
         f"--tes3mp-content-manifest-id={TEST_CONTENT_MANIFEST}",
-        "--tes3mp-content-interior-id=7",
-        "--tes3mp-content-exterior-id=8",
+        "--tes3mp-content-cell-spaces=interior:7;exterior:8",
+        "--tes3mp-content-allowed-cells=interior:7;exterior:8:0:0",
         "--tes3mp-content-appearance-id=1",
-        f"--tes3mp-content-interior-record={args.interior}",
-        f"--tes3mp-content-worldspace-record={args.worldspace}",
+        f"--tes3mp-content-cell-space-map=7={args.interior}",
+        f"--tes3mp-content-cell-space-map=8={args.worldspace}",
         f"--tes3mp-content-appearance-record={args.avatar}",
         f"--tes3mp-automation-role={role}",
         f"--tes3mp-automation-output={evidence}",
@@ -158,7 +158,8 @@ def main() -> int:
             f"bind_address=127.0.0.1\nport={port}\ntick_interval_ms=16\n"
             f"disconnect_grace_ms={int(DISCONNECT_GRACE_SECONDS * 1000)}\n"
             f"join_password_file={password.as_posix()}\ncontent_manifest_id={TEST_CONTENT_MANIFEST}\n"
-            f"interior_cell_id=7\nexterior_worldspace_id=8\ndefault_appearance_id=1\n"
+            f"cell_spaces=interior:7;exterior:8\nallowed_cells=interior:7;exterior:8:0:0\n"
+            f"spawn_cell=interior:7\ndefault_appearance_id=1\n"
             f"player_identity_file={(root / 'player-identities').as_posix()}\n",
             encoding="utf-8",
         )

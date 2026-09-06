@@ -6,8 +6,8 @@ add_library(tes3mp_server_app STATIC
     authenticated_join_composition.cpp
     connection_session_coordinator.hpp
     connection_session_coordinator.cpp
-    fixture_observation_projection.hpp
-    fixture_observation_projection.cpp
+    interest_projection.hpp
+    interest_projection.cpp
     phase7_proof_profile.hpp
     phase7_queue_telemetry.hpp
     phase7_queue_telemetry.cpp

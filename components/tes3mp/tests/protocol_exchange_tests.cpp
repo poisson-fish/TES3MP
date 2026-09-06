@@ -122,6 +122,7 @@ namespace
         static_assert(!std::is_default_constructible_v<SpatialWorldView>);
         static_assert(!std::is_default_constructible_v<LatestWinsSnapshot>);
         static_assert(!std::is_default_constructible_v<ReliableObservationBatch>);
+        static_assert(!std::is_default_constructible_v<ReliableInterestBaseline>);
         const auto missing = ReliableOperation::create(
             ReliableOperationHeader(ClientCommandHeader(value<SessionId>(1), SessionGeneration::initial(),
                                         CommandSequence::initial(), value<CommandId>(1), CanonicalRevision::initial()),
@@ -163,6 +164,46 @@ namespace
             && std::holds_alternative<ExchangeDecodeError>(decodeReliableOperation(encodeReliableObservationBatch(*original)));
     }
 
+    bool interest_baseline_resync_and_cell_catalog_are_bounded_owned_values()
+    {
+        const std::array members{ InterestMember{ value<PlayerId>(101), value<EntityId>(1) },
+            InterestMember{ value<PlayerId>(102), value<EntityId>(2) } };
+        const auto baseline = ReliableInterestBaseline::create(value<SessionId>(21), value<SessionGeneration>(2),
+            value<CanonicalRevision>(9), value<CanonicalStateVersion>(7), value<ServerTick>(8), members);
+        const auto* original = std::get_if<ReliableInterestBaseline>(&baseline);
+        if (!original) return false;
+        auto baselineBytes = encodeReliableInterestBaseline(*original);
+        auto decodedBaseline = decodeReliableInterestBaseline(baselineBytes);
+        std::fill(baselineBytes.begin(), baselineBytes.end(), std::byte{});
+        const auto* owned = std::get_if<ReliableInterestBaseline>(&decodedBaseline);
+        const SessionResyncRequest request(value<SessionId>(21), value<SessionGeneration>(2),
+            ResyncReason::LocalFeedGap, value<CanonicalStateVersion>(7));
+        const auto decodedRequest = decodeSessionResyncRequest(encodeSessionResyncRequest(request));
+        const std::array duplicateEntity{ members[0],
+            InterestMember{ value<PlayerId>(102), value<EntityId>(2) },
+            InterestMember{ value<PlayerId>(103), value<EntityId>(1) } };
+        const auto spaces = parseCellSpaceDeclarations("exterior:8;interior:7");
+        const auto cells = parseContentCells("exterior:8:-1:2;interior:7");
+        const auto manifest = spaces && cells ? ContentManifest::create(
+            testContentManifestId(), *spaces, *cells, value<AppearanceId>(1)) : std::nullopt;
+        const bool result = owned && *owned == *original
+            && std::get_if<SessionResyncRequest>(&decodedRequest)
+            && *std::get_if<SessionResyncRequest>(&decodedRequest) == request
+            && hasError(ReliableInterestBaseline::create(value<SessionId>(21), value<SessionGeneration>(2),
+                value<CanonicalRevision>(9), value<CanonicalStateVersion>(7), value<ServerTick>(8), duplicateEntity),
+                ExchangeDecodeErrorCode::InterestMembersNotStrictlySorted)
+            && hasError(SessionResyncRequest::create(value<SessionId>(21), value<SessionGeneration>(2),
+                static_cast<ResyncReason>(255), value<CanonicalStateVersion>(7)),
+                ExchangeDecodeErrorCode::InvalidResyncReason)
+            && messageDescriptor(MessageKind::ReliableInterestBaseline)->messageClass
+                == MessageClass::ReliableOperation
+            && messageDescriptor(MessageKind::SessionResyncRequest)->messageClass == MessageClass::SessionControl
+            && manifest && manifest->contains(CellId::interior(value<CellSpaceId>(7)))
+            && manifest->contains(CellId::exterior(value<CellSpaceId>(8), -1, 2))
+            && !manifest->contains(CellId::exterior(value<CellSpaceId>(8), 0, 0));
+        return result;
+    }
+
     bool operation_and_snapshot_round_trip_as_owned_values()
     {
         const auto sessionId = value<SessionId>(21);
@@ -182,7 +223,7 @@ namespace
             && *ownedSnapshot == originalSnapshot;
     }
 
-    bool fixture_cell_transitions_round_trip_as_typed_owned_values()
+    bool cell_transitions_round_trip_as_typed_owned_values()
     {
         const ReliableOperationHeader header(
             ClientCommandHeader(value<SessionId>(21), value<SessionGeneration>(2), value<CommandSequence>(2),
@@ -192,13 +233,13 @@ namespace
             CellId::exterior(value<CellSpaceId>(8), 0, 0) };
         for (const auto& cell : cells)
         {
-            const auto created = ReliableOperation::create(header, FixtureCellTransition(cell));
+            const auto created = ReliableOperation::create(header, CellTransition(cell));
             const auto* original = std::get_if<ReliableOperation>(&created);
             if (original == nullptr) return false;
             const auto decoded = decodeReliableOperation(encodeReliableOperation(*original));
             const auto* roundTripped = std::get_if<ReliableOperation>(&decoded);
             if (roundTripped == nullptr || *roundTripped != *original
-                || std::get_if<FixtureCellTransition>(&roundTripped->body()) == nullptr)
+                || std::get_if<CellTransition>(&roundTripped->body()) == nullptr)
                 return false;
         }
         return true;
@@ -418,6 +459,14 @@ namespace
         const auto first = snapshot(sessionId, generation, 9, 2, firstEntries);
         if (client->receiveLatestWinsSnapshot(first) != LatestWinsSnapshotReceiveResult::Applied)
             return false;
+        const std::array members{ InterestMember{ firstEntries[0].playerId(), firstEntries[0].entityId() } };
+        auto baseline = ReliableInterestBaseline::create(sessionId, generation, value<CanonicalRevision>(9),
+            value<CanonicalStateVersion>(9), value<ServerTick>(9), members);
+        if (client->interestBaselineComplete()
+            || client->receiveReliableInterestBaseline(std::get<ReliableInterestBaseline>(std::move(baseline)))
+                != ReliableInterestBaselineReceiveResult::Applied
+            || !client->interestBaselineComplete())
+            return false;
         const auto confirmed = *client->confirmedSnapshot();
         if (client->receiveLatestWinsSnapshot(first) != LatestWinsSnapshotReceiveResult::IdenticalDuplicate)
             return false;
@@ -559,8 +608,19 @@ namespace
         const std::array<SpatialEntitySnapshot, 0> entries{};
         const auto reliable = encodeReliableOperation(operation(sessionId, generation));
         const auto latestWins = encodeLatestWinsSnapshot(snapshot(sessionId, generation, 9, 1, entries));
+        const std::array<ObservationChange, 0> changes{};
+        const auto observations = std::get<ReliableObservationBatch>(ReliableObservationBatch::create(
+            sessionId, generation, value<CanonicalRevision>(9), changes));
+        const std::array<InterestMember, 0> members{};
+        const auto baseline = std::get<ReliableInterestBaseline>(ReliableInterestBaseline::create(sessionId,
+            generation, value<CanonicalRevision>(9), value<CanonicalStateVersion>(9), value<ServerTick>(9), members));
+        const SessionResyncRequest resync(sessionId, generation, ResyncReason::LocalFeedGap,
+            value<CanonicalStateVersion>(9));
         return writeFile(directory / "valid-reliable-operation", reliable)
-            && writeFile(directory / "valid-latest-wins-snapshot", latestWins);
+            && writeFile(directory / "valid-latest-wins-snapshot", latestWins)
+            && writeFile(directory / "valid-reliable-observation-batch", encodeReliableObservationBatch(observations))
+            && writeFile(directory / "valid-reliable-interest-baseline", encodeReliableInterestBaseline(baseline))
+            && writeFile(directory / "valid-session-resync-request", encodeSessionResyncRequest(resync));
     }
 
     std::optional<std::vector<std::byte>> readFile(const std::filesystem::path& path)
@@ -584,10 +644,16 @@ namespace
         const std::array<SpatialEntitySnapshot, 0> entries{};
         const auto reliable = readFile(directory / "valid-reliable-operation");
         const auto latestWins = readFile(directory / "valid-latest-wins-snapshot");
+        const auto observations = readFile(directory / "valid-reliable-observation-batch");
+        const auto baseline = readFile(directory / "valid-reliable-interest-baseline");
+        const auto resync = readFile(directory / "valid-session-resync-request");
         return reliable && *reliable == encodeReliableOperation(operation(sessionId, generation))
             && std::holds_alternative<ReliableOperation>(decodeReliableOperation(*reliable)) && latestWins
             && *latestWins == encodeLatestWinsSnapshot(snapshot(sessionId, generation, 9, 1, entries))
-            && std::holds_alternative<LatestWinsSnapshot>(decodeLatestWinsSnapshot(*latestWins));
+            && std::holds_alternative<LatestWinsSnapshot>(decodeLatestWinsSnapshot(*latestWins))
+            && observations && std::holds_alternative<ReliableObservationBatch>(decodeReliableObservationBatch(*observations))
+            && baseline && std::holds_alternative<ReliableInterestBaseline>(decodeReliableInterestBaseline(*baseline))
+            && resync && std::holds_alternative<SessionResyncRequest>(decodeSessionResyncRequest(*resync));
     }
 }
 
@@ -615,8 +681,10 @@ int main(int argc, char** argv)
     bool passed = true;
     passed &= check(values_are_typed_bounded_and_not_default_constructible(), "typed bounded values");
     passed &= check(operation_and_snapshot_round_trip_as_owned_values(), "owned round trips");
-    passed &= check(fixture_cell_transitions_round_trip_as_typed_owned_values(), "fixture transition round trips");
+    passed &= check(cell_transitions_round_trip_as_typed_owned_values(), "cell transition round trips");
     passed &= check(reliable_observation_batch_is_distinct_bounded_and_owned(), "reliable observation batch");
+    passed &= check(interest_baseline_resync_and_cell_catalog_are_bounded_owned_values(),
+        "interest baseline resync and cell catalog");
     passed &= check(deterministic_exchange_properties_round_trip(), "deterministic properties");
     passed &= check(view_bounds_ordering_and_payload_budget_are_enforced(), "view bounds and ordering");
     passed &= check(every_truncation_identifier_and_trailing_byte_fail_without_partial_value(), "malformed inputs");

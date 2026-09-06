@@ -73,6 +73,7 @@ namespace TES3MP
         bool cancel(std::uint64_t preparationId) noexcept;
         const CanonicalServerState* candidateState(std::uint64_t preparationId) const noexcept;
         std::optional<CanonicalRevision> candidateRevision(std::uint64_t preparationId) const noexcept;
+        std::optional<CanonicalStateVersion> candidateStateVersion(std::uint64_t preparationId) const noexcept;
         std::size_t liveCount() const noexcept;
         std::size_t hiddenCount() const noexcept;
 

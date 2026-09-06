@@ -1,0 +1,23 @@
+namespace TES3MP.Protocol.Schema.InterestBaseline;
+
+table InterestBaselineHeader {
+  target_session_id:ulong (id: 0);
+  target_session_generation:ulong (id: 1);
+  canonical_revision:ulong (id: 2);
+  canonical_state_version:ulong (id: 3);
+  server_tick:ulong (id: 4);
+}
+
+struct InterestMember {
+  player_id:ulong;
+  entity_id:ulong;
+}
+
+table ReliableInterestBaseline {
+  header:InterestBaselineHeader (id: 0);
+  members:[InterestMember] (id: 1);
+}
+
+root_type ReliableInterestBaseline;
+file_identifier "T3IB";
+file_extension "t3ib";

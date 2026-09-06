@@ -123,6 +123,33 @@ DECODER_REGISTRY = {
             "sha256": "a1656424143ddebc41057252a42eef6523d12adec87cf1ab3ebe13428f3a4751",
         },
     },
+    "decodeReliableObservationBatch": {
+        "target": "tes3mp_protocol_exchange_fuzz",
+        "source": "tests/fuzz/protocol_exchange_fuzz.cpp",
+        "corpus": "protocol_exchange",
+        "valid_seed": {
+            "name": "valid-reliable-observation-batch",
+            "sha256": "477de2bf6b7e6a035b4618e0bb9e46e802544f90dbc1497317304b15b79e18cd",
+        },
+    },
+    "decodeReliableInterestBaseline": {
+        "target": "tes3mp_protocol_exchange_fuzz",
+        "source": "tests/fuzz/protocol_exchange_fuzz.cpp",
+        "corpus": "protocol_exchange",
+        "valid_seed": {
+            "name": "valid-reliable-interest-baseline",
+            "sha256": "a14784ace390365d998499c8031e3540829040a2121a619265d6df6b4fc50b28",
+        },
+    },
+    "decodeSessionResyncRequest": {
+        "target": "tes3mp_protocol_exchange_fuzz",
+        "source": "tests/fuzz/protocol_exchange_fuzz.cpp",
+        "corpus": "protocol_exchange",
+        "valid_seed": {
+            "name": "valid-session-resync-request",
+            "sha256": "aa4a0ca1e573c528c3594488ed9ce75f53fa8c865ba6705f6fb74406364206c8",
+        },
+    },
     "decodeClientVrPoseSample": {
         "target": "tes3mp_protocol_pose_fuzz",
         "source": "tests/fuzz/protocol_pose_fuzz.cpp",

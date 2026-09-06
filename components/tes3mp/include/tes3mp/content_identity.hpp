@@ -9,10 +9,29 @@
 #include <optional>
 #include <span>
 #include <string_view>
+#include <utility>
+#include <vector>
 
 namespace TES3MP
 {
     inline constexpr std::size_t ContentManifestIdBytes = 32;
+    inline constexpr std::size_t MaximumContentCellSpaces = 256;
+    inline constexpr std::size_t MaximumContentCells = 4096;
+
+    enum class CellSpaceKind : std::uint8_t
+    {
+        Interior = 0,
+        Exterior = 1,
+    };
+
+    struct CellSpaceDeclaration
+    {
+        CellSpaceId id;
+        CellSpaceKind kind;
+
+        friend constexpr bool operator==(CellSpaceDeclaration, CellSpaceDeclaration) noexcept = default;
+        friend constexpr auto operator<=>(CellSpaceDeclaration, CellSpaceDeclaration) noexcept = default;
+    };
 
     class ContentManifestId
     {
@@ -34,40 +53,36 @@ namespace TES3MP
     class ContentManifest
     {
     public:
-        static std::optional<ContentManifest> create(ContentManifestId id, CellSpaceId interiorCell,
-            CellSpaceId exteriorWorldspace, AppearanceId defaultAppearance) noexcept;
+        static std::optional<ContentManifest> create(ContentManifestId id,
+            std::span<const CellSpaceDeclaration> cellSpaces, std::span<const CellId> cells,
+            AppearanceId defaultAppearance) noexcept;
 
         constexpr ContentManifestId id() const noexcept { return mId; }
-        constexpr CellSpaceId interiorCell() const noexcept { return mInteriorCell; }
-        constexpr CellSpaceId exteriorWorldspace() const noexcept { return mExteriorWorldspace; }
         constexpr AppearanceId defaultAppearance() const noexcept { return mDefaultAppearance; }
+        std::span<const CellSpaceDeclaration> cellSpaces() const noexcept { return mCellSpaces; }
+        std::span<const CellId> cells() const noexcept { return mCells; }
+        bool contains(const CellId& cell) const noexcept;
+        std::optional<CellSpaceKind> kind(CellSpaceId id) const noexcept;
 
-        constexpr bool contains(const CellId& cell) const noexcept
-        {
-            if (const auto* interior = cell.asInterior())
-                return interior->cellSpace() == mInteriorCell;
-            const auto* exterior = cell.asExterior();
-            return exterior && exterior->worldspace() == mExteriorWorldspace
-                && exterior->gridX() == 0 && exterior->gridY() == 0;
-        }
-
-        friend constexpr bool operator==(ContentManifest, ContentManifest) noexcept = default;
+        friend bool operator==(const ContentManifest&, const ContentManifest&) noexcept = default;
 
     private:
-        constexpr ContentManifest(ContentManifestId id, CellSpaceId interiorCell,
-            CellSpaceId exteriorWorldspace, AppearanceId defaultAppearance) noexcept
-            : mId(id), mInteriorCell(interiorCell), mExteriorWorldspace(exteriorWorldspace),
-              mDefaultAppearance(defaultAppearance) {}
+        ContentManifest(ContentManifestId id, std::vector<CellSpaceDeclaration> cellSpaces,
+            std::vector<CellId> cells, AppearanceId defaultAppearance) noexcept
+            : mId(id), mDefaultAppearance(defaultAppearance), mCellSpaces(std::move(cellSpaces)),
+              mCells(std::move(cells)) {}
 
         ContentManifestId mId;
-        CellSpaceId mInteriorCell;
-        CellSpaceId mExteriorWorldspace;
         AppearanceId mDefaultAppearance;
+        std::vector<CellSpaceDeclaration> mCellSpaces;
+        std::vector<CellId> mCells;
     };
 
     // Deterministic identity for engine-independent tests and proof fixtures only.
     ContentManifestId testContentManifestId() noexcept;
     ContentManifest testContentManifest() noexcept;
+    std::optional<std::vector<CellSpaceDeclaration>> parseCellSpaceDeclarations(std::string_view value);
+    std::optional<std::vector<CellId>> parseContentCells(std::string_view value);
 }
 
 #endif

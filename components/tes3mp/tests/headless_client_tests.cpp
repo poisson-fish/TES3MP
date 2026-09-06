@@ -108,6 +108,15 @@ int main()
     const std::array enterChanges{ ObservationChange{ playerId, entityId, ObservationChangeKind::Enter } };
     auto entered = std::get<ReliableObservationBatch>(ReliableObservationBatch::create(
         sessionId, SessionGeneration::initial(), CanonicalRevision::initial(), enterChanges));
+    require(session->receiveReliableObservationBatch(entered) == ReliableObservationReceiveResult::BaselineMissing);
+    const std::array<InterestMember, 0> emptyMembers{};
+    auto baseline = std::get<ReliableInterestBaseline>(ReliableInterestBaseline::create(sessionId,
+        SessionGeneration::initial(), CanonicalRevision::initial(), CanonicalStateVersion::initial(),
+        ServerTick::initial(), emptyMembers));
+    require(session->receiveReliableInterestBaseline(baseline)
+        == ReliableInterestBaselineReceiveResult::Applied);
+    require(session->receiveReliableInterestBaseline(baseline)
+        == ReliableInterestBaselineReceiveResult::IdenticalDuplicate);
     require(session->receiveReliableObservationBatch(entered) == ReliableObservationReceiveResult::Applied);
     require(session->observedPlayers().size() == 1);
     require(session->receiveReliableObservationBatch(entered) == ReliableObservationReceiveResult::IdenticalDuplicate);

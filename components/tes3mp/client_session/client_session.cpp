@@ -261,6 +261,8 @@ namespace TES3MP
             return ReliableObservationReceiveResult::SessionMismatch;
         if (batch.targetSessionGeneration() != mGeneration)
             return ReliableObservationReceiveResult::GenerationMismatch;
+        if (!mConfirmedInterestBaseline)
+            return ReliableObservationReceiveResult::BaselineMissing;
 
         if (mConfirmedObservationBatch)
         {
@@ -292,5 +294,37 @@ namespace TES3MP
         mObservedPlayers = std::move(next);
         mConfirmedObservationBatch = std::move(batch);
         return ReliableObservationReceiveResult::Applied;
+    }
+
+    ReliableInterestBaselineReceiveResult ClientSessionStateMachine::receiveReliableInterestBaseline(
+        ReliableInterestBaseline baseline)
+    {
+        if (mState != ClientSessionState::Established)
+            return ReliableInterestBaselineReceiveResult::NotEstablished;
+        if (!mSessionId)
+            return ReliableInterestBaselineReceiveResult::SessionNotBound;
+        if (baseline.targetSessionId() != *mSessionId)
+            return ReliableInterestBaselineReceiveResult::SessionMismatch;
+        if (baseline.targetSessionGeneration() != mGeneration)
+            return ReliableInterestBaselineReceiveResult::GenerationMismatch;
+        if (mConfirmedInterestBaseline)
+        {
+            if (baseline.canonicalRevision() < mConfirmedInterestBaseline->canonicalRevision())
+                return ReliableInterestBaselineReceiveResult::StaleRevision;
+            if (baseline.canonicalRevision() == mConfirmedInterestBaseline->canonicalRevision())
+                return baseline == *mConfirmedInterestBaseline
+                    ? ReliableInterestBaselineReceiveResult::IdenticalDuplicate
+                    : ReliableInterestBaselineReceiveResult::ContradictorySameRevision;
+        }
+        mObservedPlayers.assign(baseline.members().begin(), baseline.members().end());
+        mConfirmedObservationBatch.reset();
+        mConfirmedInterestBaseline = std::move(baseline);
+        return ReliableInterestBaselineReceiveResult::Applied;
+    }
+
+    bool ClientSessionStateMachine::interestBaselineComplete() const noexcept
+    {
+        return mConfirmedInterestBaseline && mConfirmedSnapshot
+            && mConfirmedSnapshot->header().canonicalRevision() >= mConfirmedInterestBaseline->canonicalRevision();
     }
 }

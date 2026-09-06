@@ -2,7 +2,7 @@
 
 #include "tes3mp/protocol_frame.hpp"
 #include "connection_session_coordinator.hpp"
-#include "fixture_observation_projection.hpp"
+#include "interest_projection.hpp"
 
 #include <variant>
 
@@ -10,7 +10,8 @@ namespace TES3MP::ServerApp
 {
     bool TransportJoinResponseQueue::enqueueJoinResponses(std::span<const std::byte> authentication,
         std::span<const std::byte> snapshot, const CanonicalServerState& before,
-        const CanonicalServerState& after, const AuthenticatedJoinResult& join, ServerTick tick) noexcept
+        const CanonicalServerState& after, const AuthenticatedJoinResult& join, ServerTick tick,
+        CanonicalStateVersion stateVersion) noexcept
     {
         try
         {
@@ -18,28 +19,24 @@ namespace TES3MP::ServerApp
                 return mQueues.enqueuePair(mConnection, TransportChannel::ReliableOrdered, authentication,
                            TransportChannel::LatestWins, snapshot) == TransportResult::Accepted;
             const auto revision = join.initialSnapshot.header().canonicalRevision();
-            auto projected = projectFixtureObservations(before, after, tick, revision);
-            if (!projected) return false;
+            auto baseline = projectInterestBaseline(after, join.session, tick, revision, stateVersion);
+            auto projected = projectInterestChanges(before, after, tick, revision);
+            if (!baseline || !projected) return false;
             std::vector<std::vector<std::byte>> owned;
             std::vector<OutboundQueueSet::AtomicMessage> messages;
             owned.reserve(3 + projected->size() * 2);
             owned.emplace_back(authentication.begin(), authentication.end());
-            owned.emplace_back(snapshot.begin(), snapshot.end());
+            auto baselineFrame = encodeProtocolFrame(MessageClass::ReliableOperation,
+                MessageKind::ReliableInterestBaseline, encodeReliableInterestBaseline(baseline->baseline));
+            auto viewFrame = encodeProtocolFrame(MessageClass::LatestWinsSnapshot,
+                MessageKind::LatestWinsSnapshot, encodeLatestWinsSnapshot(baseline->view));
+            if (!std::holds_alternative<std::vector<std::byte>>(baselineFrame)
+                || !std::holds_alternative<std::vector<std::byte>>(viewFrame)) return false;
+            owned.push_back(std::get<std::vector<std::byte>>(std::move(baselineFrame)));
+            owned.push_back(std::get<std::vector<std::byte>>(std::move(viewFrame)));
             messages.push_back({ mConnection, TransportChannel::ReliableOrdered, owned[0] });
-
-            std::vector<ObservationChange> initialChanges;
-            for (const auto& entry : join.initialSnapshot.view().entries())
-                initialChanges.push_back({ entry.playerId(), entry.entityId(), ObservationChangeKind::Enter });
-            auto initial = ReliableObservationBatch::create(
-                join.session, join.initialSnapshot.header().targetSessionGeneration(), revision, initialChanges);
-            if (!std::holds_alternative<ReliableObservationBatch>(initial)) return false;
-            auto initialFrame = encodeProtocolFrame(MessageClass::ReliableOperation,
-                MessageKind::ReliableObservationBatch,
-                encodeReliableObservationBatch(std::get<ReliableObservationBatch>(initial)));
-            if (!std::holds_alternative<std::vector<std::byte>>(initialFrame)) return false;
-            owned.push_back(std::get<std::vector<std::byte>>(std::move(initialFrame)));
-            messages.push_back({ mConnection, TransportChannel::ReliableOrdered, owned.back() });
-            messages.push_back({ mConnection, TransportChannel::LatestWins, owned[1] });
+            messages.push_back({ mConnection, TransportChannel::ReliableOrdered, owned[1] });
+            messages.push_back({ mConnection, TransportChannel::LatestWins, owned[2] });
 
             for (const auto& delivery : *projected)
             {
@@ -120,8 +117,9 @@ namespace TES3MP::ServerApp
             const auto& authenticationBytes = std::get<std::vector<std::byte>>(authenticationFrame);
             const auto& snapshotBytes = std::get<std::vector<std::byte>>(snapshotFrame);
             const auto* candidate = mJoins.candidateState(preparation.id);
-            if (!candidate || !mResponses.enqueueJoinResponses(authenticationBytes, snapshotBytes,
-                    mJoins.state(), *candidate, preparation.join, tick))
+            const auto stateVersion = mJoins.candidateStateVersion(preparation.id);
+            if (!candidate || !stateVersion || !mResponses.enqueueJoinResponses(authenticationBytes, snapshotBytes,
+                    mJoins.state(), *candidate, preparation.join, tick, *stateVersion))
             {
                 cancel();
                 return { JoinCompositionResult::QueueRejected, std::nullopt };

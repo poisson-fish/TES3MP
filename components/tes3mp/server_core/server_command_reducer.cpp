@@ -38,8 +38,8 @@ namespace
                 return CommandReductionObservationOutcome::SpatialTickRegression;
             case CommandDisposition::EntityRevisionExhausted:
                 return CommandReductionObservationOutcome::EntityRevisionExhausted;
-            case CommandDisposition::UnknownFixtureCell:
-                return CommandReductionObservationOutcome::UnknownFixtureCell;
+            case CommandDisposition::UnknownCell:
+                return CommandReductionObservationOutcome::UnknownCell;
         }
         return CommandReductionObservationOutcome::CandidateStateInvalid;
     }
@@ -547,11 +547,11 @@ namespace TES3MP
                                         replacementVelocity = motion->desiredVelocity();
                                     else
                                     {
-                                        const auto& requested = std::get<FixtureCellTransitionCommandProposal>(
+                                        const auto& requested = std::get<CellTransitionCommandProposal>(
                                             proposal.payload()).requestedCell();
                                         if (!mContentManifest.contains(requested))
                                         {
-                                            disposition = CommandDisposition::UnknownFixtureCell;
+                                            disposition = CommandDisposition::UnknownCell;
                                             requiresSpatialAdvance = false;
                                         }
                                         else if (requested == player->transform().cell())

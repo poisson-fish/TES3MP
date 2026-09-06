@@ -33,7 +33,8 @@ namespace TES3MP::ServerApp
         virtual ~JoinResponseQueue() = default;
         virtual bool enqueueJoinResponses(std::span<const std::byte> authentication,
             std::span<const std::byte> snapshot, const CanonicalServerState& before,
-            const CanonicalServerState& after, const AuthenticatedJoinResult& join, ServerTick tick) noexcept = 0;
+            const CanonicalServerState& after, const AuthenticatedJoinResult& join, ServerTick tick,
+            CanonicalStateVersion stateVersion) noexcept = 0;
     };
 
     class AuthenticatedJoinComposition
@@ -64,7 +65,8 @@ namespace TES3MP::ServerApp
 
         bool enqueueJoinResponses(std::span<const std::byte> authentication,
             std::span<const std::byte> snapshot, const CanonicalServerState& before,
-            const CanonicalServerState& after, const AuthenticatedJoinResult& join, ServerTick tick) noexcept override;
+            const CanonicalServerState& after, const AuthenticatedJoinResult& join, ServerTick tick,
+            CanonicalStateVersion stateVersion) noexcept override;
 
     private:
         OutboundQueueSet& mQueues;

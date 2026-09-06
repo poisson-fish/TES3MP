@@ -31,8 +31,8 @@ struct PlayerMotionIntentBuilder;
 
 struct Cell;
 
-struct FixtureCellTransition;
-struct FixtureCellTransitionBuilder;
+struct CellTransition;
+struct CellTransitionBuilder;
 
 struct ReliableOperation;
 struct ReliableOperationBuilder;
@@ -73,16 +73,16 @@ inline const char *EnumNameCellKind(CellKind e) {
 enum class ReliableOperationBody : uint8_t {
   NONE = 0,
   PlayerMotionIntent = 1,
-  FixtureCellTransition = 2,
+  CellTransition = 2,
   MIN = NONE,
-  MAX = FixtureCellTransition
+  MAX = CellTransition
 };
 
 inline const ReliableOperationBody (&EnumValuesReliableOperationBody())[3] {
   static const ReliableOperationBody values[] = {
     ReliableOperationBody::NONE,
     ReliableOperationBody::PlayerMotionIntent,
-    ReliableOperationBody::FixtureCellTransition
+    ReliableOperationBody::CellTransition
   };
   return values;
 }
@@ -91,14 +91,14 @@ inline const char * const *EnumNamesReliableOperationBody() {
   static const char * const names[4] = {
     "NONE",
     "PlayerMotionIntent",
-    "FixtureCellTransition",
+    "CellTransition",
     nullptr
   };
   return names;
 }
 
 inline const char *EnumNameReliableOperationBody(ReliableOperationBody e) {
-  if (::flatbuffers::IsOutRange(e, ReliableOperationBody::NONE, ReliableOperationBody::FixtureCellTransition)) return "";
+  if (::flatbuffers::IsOutRange(e, ReliableOperationBody::NONE, ReliableOperationBody::CellTransition)) return "";
   const size_t index = static_cast<size_t>(e);
   return EnumNamesReliableOperationBody()[index];
 }
@@ -111,8 +111,8 @@ template<> struct ReliableOperationBodyTraits<TES3MP::Protocol::Schema::Reliable
   static const ReliableOperationBody enum_value = ReliableOperationBody::PlayerMotionIntent;
 };
 
-template<> struct ReliableOperationBodyTraits<TES3MP::Protocol::Schema::Reliable::FixtureCellTransition> {
-  static const ReliableOperationBody enum_value = ReliableOperationBody::FixtureCellTransition;
+template<> struct ReliableOperationBodyTraits<TES3MP::Protocol::Schema::Reliable::CellTransition> {
+  static const ReliableOperationBody enum_value = ReliableOperationBody::CellTransition;
 };
 
 template <bool B = false>
@@ -383,8 +383,8 @@ inline ::flatbuffers::Offset<PlayerMotionIntent> CreatePlayerMotionIntent(
   return builder_.Finish();
 }
 
-struct FixtureCellTransition FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
-  typedef FixtureCellTransitionBuilder Builder;
+struct CellTransition FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
+  typedef CellTransitionBuilder Builder;
   enum FlatBuffersVTableOffset FLATBUFFERS_VTABLE_UNDERLYING_TYPE {
     VT_REQUESTED_CELL = 4
   };
@@ -399,28 +399,28 @@ struct FixtureCellTransition FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Ta
   }
 };
 
-struct FixtureCellTransitionBuilder {
-  typedef FixtureCellTransition Table;
+struct CellTransitionBuilder {
+  typedef CellTransition Table;
   ::flatbuffers::FlatBufferBuilder &fbb_;
   ::flatbuffers::uoffset_t start_;
   void add_requested_cell(const TES3MP::Protocol::Schema::Reliable::Cell *requested_cell) {
-    fbb_.AddStruct(FixtureCellTransition::VT_REQUESTED_CELL, requested_cell);
+    fbb_.AddStruct(CellTransition::VT_REQUESTED_CELL, requested_cell);
   }
-  explicit FixtureCellTransitionBuilder(::flatbuffers::FlatBufferBuilder &_fbb)
+  explicit CellTransitionBuilder(::flatbuffers::FlatBufferBuilder &_fbb)
         : fbb_(_fbb) {
     start_ = fbb_.StartTable();
   }
-  ::flatbuffers::Offset<FixtureCellTransition> Finish() {
+  ::flatbuffers::Offset<CellTransition> Finish() {
     const auto end = fbb_.EndTable(start_);
-    auto o = ::flatbuffers::Offset<FixtureCellTransition>(end);
+    auto o = ::flatbuffers::Offset<CellTransition>(end);
     return o;
   }
 };
 
-inline ::flatbuffers::Offset<FixtureCellTransition> CreateFixtureCellTransition(
+inline ::flatbuffers::Offset<CellTransition> CreateCellTransition(
     ::flatbuffers::FlatBufferBuilder &_fbb,
     const TES3MP::Protocol::Schema::Reliable::Cell *requested_cell = nullptr) {
-  FixtureCellTransitionBuilder builder_(_fbb);
+  CellTransitionBuilder builder_(_fbb);
   builder_.add_requested_cell(requested_cell);
   return builder_.Finish();
 }
@@ -449,8 +449,8 @@ struct ReliableOperation FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table 
   const TES3MP::Protocol::Schema::Reliable::PlayerMotionIntent *body_as_PlayerMotionIntent() const {
     return body_type() == TES3MP::Protocol::Schema::Reliable::ReliableOperationBody::PlayerMotionIntent ? static_cast<const TES3MP::Protocol::Schema::Reliable::PlayerMotionIntent *>(body()) : nullptr;
   }
-  const TES3MP::Protocol::Schema::Reliable::FixtureCellTransition *body_as_FixtureCellTransition() const {
-    return body_type() == TES3MP::Protocol::Schema::Reliable::ReliableOperationBody::FixtureCellTransition ? static_cast<const TES3MP::Protocol::Schema::Reliable::FixtureCellTransition *>(body()) : nullptr;
+  const TES3MP::Protocol::Schema::Reliable::CellTransition *body_as_CellTransition() const {
+    return body_type() == TES3MP::Protocol::Schema::Reliable::ReliableOperationBody::CellTransition ? static_cast<const TES3MP::Protocol::Schema::Reliable::CellTransition *>(body()) : nullptr;
   }
   template <bool B = false>
   bool Verify(::flatbuffers::VerifierTemplate<B> &verifier) const {
@@ -470,8 +470,8 @@ template<> inline const TES3MP::Protocol::Schema::Reliable::PlayerMotionIntent *
   return body_as_PlayerMotionIntent();
 }
 
-template<> inline const TES3MP::Protocol::Schema::Reliable::FixtureCellTransition *ReliableOperation::body_as<TES3MP::Protocol::Schema::Reliable::FixtureCellTransition>() const {
-  return body_as_FixtureCellTransition();
+template<> inline const TES3MP::Protocol::Schema::Reliable::CellTransition *ReliableOperation::body_as<TES3MP::Protocol::Schema::Reliable::CellTransition>() const {
+  return body_as_CellTransition();
 }
 
 struct ReliableOperationBuilder {
@@ -525,8 +525,8 @@ inline bool VerifyReliableOperationBody(::flatbuffers::VerifierTemplate<B> &veri
       auto ptr = reinterpret_cast<const TES3MP::Protocol::Schema::Reliable::PlayerMotionIntent *>(obj);
       return verifier.VerifyTable(ptr);
     }
-    case ReliableOperationBody::FixtureCellTransition: {
-      auto ptr = reinterpret_cast<const TES3MP::Protocol::Schema::Reliable::FixtureCellTransition *>(obj);
+    case ReliableOperationBody::CellTransition: {
+      auto ptr = reinterpret_cast<const TES3MP::Protocol::Schema::Reliable::CellTransition *>(obj);
       return verifier.VerifyTable(ptr);
     }
     default: return true;

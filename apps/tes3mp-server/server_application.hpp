@@ -60,6 +60,7 @@ namespace TES3MP::ServerApp
         bool disconnectConnection(TransportConnectionId connection, ServerTick tick) noexcept;
         bool disconnectConnections(std::span<const TransportConnectionId> connections, ServerTick tick) noexcept;
         bool resumeConnection(TransportConnectionId connection, ServerTick tick) noexcept;
+        bool resyncConnection(TransportConnectionId connection, ServerTick tick) noexcept;
         bool expireSessions(ServerTick tick) noexcept;
         bool relayPose(TransportConnectionId connection, const TransportMessage& message) noexcept;
     };

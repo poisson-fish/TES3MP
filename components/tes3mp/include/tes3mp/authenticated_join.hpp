@@ -53,7 +53,7 @@ namespace TES3MP
     {
     public:
         static std::optional<AuthenticatedJoinCoordinator> create(
-            Transform fixtureSpawn, AppearanceId fixtureAppearance, AuthenticatedJoinIdentitySeed seed,
+            Transform spawn, AppearanceId appearance, AuthenticatedJoinIdentitySeed seed,
             CanonicalCommandReducer& reducer);
         static std::optional<AuthenticatedJoinCoordinator> create(Transform spawn, ContentManifest contentManifest,
             SessionId nextSession, PlayerIdentityRegistry& playerIdentities, CanonicalCommandReducer& reducer);
@@ -68,6 +68,7 @@ namespace TES3MP
         bool cancel(std::uint64_t preparationId) noexcept;
         const CanonicalServerState* candidateState(std::uint64_t preparationId) const noexcept;
         std::optional<CanonicalRevision> candidateRevision(std::uint64_t preparationId) const noexcept;
+        std::optional<CanonicalStateVersion> candidateStateVersion(std::uint64_t preparationId) const noexcept;
         std::optional<PlayerCredential> copyPendingPlayerCredential(std::uint64_t preparationId) const noexcept;
         bool pendingCreatesPersistentIdentity(std::uint64_t preparationId) const noexcept;
         bool releasePrincipal(PrincipalId principal) noexcept;
@@ -76,7 +77,7 @@ namespace TES3MP
         std::size_t liveBindings() const noexcept { return mPrincipals.size(); }
 
     private:
-        AuthenticatedJoinCoordinator(Transform fixtureSpawn, AppearanceId fixtureAppearance,
+        AuthenticatedJoinCoordinator(Transform spawn, AppearanceId appearance,
             AuthenticatedJoinIdentitySeed seed,
             CanonicalCommandReducer& reducer, ContentManifest contentManifest,
             PlayerIdentityRegistry* playerIdentities) noexcept;
@@ -84,8 +85,8 @@ namespace TES3MP
             AuthenticatedAdmission::PlayerClaim claim, bool createsIdentity,
             std::optional<std::uint64_t> identityPreparation, SessionGeneration generation, ServerTick serverTick);
 
-        Transform mFixtureSpawn;
-        AppearanceId mFixtureAppearance;
+        Transform mSpawn;
+        AppearanceId mAppearance;
         AuthenticatedJoinIdentitySeed mSeed;
         bool mIdentityExhausted = false;
         CanonicalCommandReducer& mReducer;

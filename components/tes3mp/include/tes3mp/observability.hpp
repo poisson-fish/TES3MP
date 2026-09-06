@@ -130,7 +130,7 @@ namespace TES3MP
         CommandReductionIngressOrdinalNotStrictlyIncreasing = 53,
         CommandReductionCandidateStateInvalid = 54,
         CommandReductionStateVersionCapacityExceeded = 55,
-        CommandReductionUnknownFixtureCell = 56,
+        CommandReductionUnknownCell = 56,
         CanonicalSinkPersistence = 60,
         CanonicalSinkReplay = 61,
         CanonicalSinkScript = 62,
@@ -294,7 +294,7 @@ namespace TES3MP
         IngressOrdinalNotStrictlyIncreasing,
         CandidateStateInvalid,
         StateVersionCapacityExceeded,
-        UnknownFixtureCell,
+        UnknownCell,
     };
 
     struct CommandReductionEvent

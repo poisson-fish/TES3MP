@@ -121,7 +121,7 @@ int main(int argc, char** argv)
     auto offer = TES3MP::CapabilityOffer::create(
         std::move(versions), optionalCapabilities, {}, config.contentManifest.id());
     const auto zero = TES3MP::Turn32::fromValue(0);
-    auto fixtureSpawn = TES3MP::Transform(TES3MP::CellId::interior(config.contentManifest.interiorCell()),
+    auto spawn = TES3MP::Transform(config.spawnCell,
         TES3MP::Position3(10, 20, 30), TES3MP::Orientation3(zero, zero, zero));
     TES3MP::NullMetricSink metrics;
     TES3MP::NullStructuredEventSink events;
@@ -130,7 +130,7 @@ int main(int argc, char** argv)
     TES3MP::CanonicalCommandReducer reducer(std::move(emptyState), observability, config.contentManifest);
     TES3MP::ServerCommandIntakeCoordinator intake(
         clock, observability, clock.now(), TES3MP::ServerTick::initial(), TES3MP::IngressOrdinal::initial());
-    auto joins = playerIdentities ? TES3MP::AuthenticatedJoinCoordinator::create(fixtureSpawn,
+    auto joins = playerIdentities ? TES3MP::AuthenticatedJoinCoordinator::create(spawn,
         config.contentManifest, *TES3MP::SessionId::fromValue(1), *playerIdentities, reducer) : std::nullopt;
     auto lifecycle = TES3MP::ServerLifecycleCoordinator::create(
         config.disconnectGraceMilliseconds * 1'000'000, reducer);

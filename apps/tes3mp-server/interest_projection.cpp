@@ -1,4 +1,4 @@
-#include "fixture_observation_projection.hpp"
+#include "interest_projection.hpp"
 
 #include "tes3mp/protocol_frame.hpp"
 
@@ -26,11 +26,68 @@ namespace TES3MP::ServerApp
         }
     }
 
-    std::optional<std::vector<FixtureObservationDelivery>> projectFixtureObservations(
+    bool sharesInterest(const CanonicalServerState& state, SessionId target, SessionId source) noexcept
+    {
+        const auto* targetSession = state.findActiveSession(target);
+        const auto* sourceSession = state.findActiveSession(source);
+        const auto* targetPlayer = targetSession ? playerFor(state, *targetSession) : nullptr;
+        const auto* sourcePlayer = sourceSession ? playerFor(state, *sourceSession) : nullptr;
+        return targetPlayer && sourcePlayer && targetPlayer->transform().cell() == sourcePlayer->transform().cell();
+    }
+
+    std::optional<InterestBaselineDelivery> projectInterestBaseline(const CanonicalServerState& state,
+        SessionId targetId, ServerTick tick, CanonicalRevision revision, CanonicalStateVersion stateVersion)
+    {
+        try
+        {
+            const auto* target = state.findActiveSession(targetId);
+            if (!target) return std::nullopt;
+            const auto visible = visibleTo(state, *target);
+            std::vector<InterestMember> members;
+            std::vector<SpatialEntitySnapshot> entries;
+            members.reserve(visible.size());
+            entries.reserve(visible.size());
+            for (const auto* player : visible)
+            {
+                members.push_back({ player->playerId(), player->entityId() });
+                entries.emplace_back(tick, player->playerId(), player->entityId(), player->appearanceId(),
+                    player->entityRevision(), player->authorityEpoch(), player->transform(), player->linearVelocity());
+            }
+            std::ranges::sort(members);
+            auto baseline = ReliableInterestBaseline::create(target->sessionId(), target->sessionGeneration(),
+                revision, stateVersion, tick, members);
+            auto view = SpatialWorldView::create(entries);
+            if (!std::holds_alternative<ReliableInterestBaseline>(baseline)
+                || !std::holds_alternative<SpatialWorldView>(view)) return std::nullopt;
+            return InterestBaselineDelivery{ target->sessionId(),
+                std::get<ReliableInterestBaseline>(std::move(baseline)),
+                LatestWinsSnapshot(LatestWinsSnapshotHeader(target->sessionId(), target->sessionGeneration(),
+                    target->playerId(), target->entityId(), revision,
+                    target->highestContiguousFinalizedCommand()),
+                    std::get<SpatialWorldView>(std::move(view))) };
+        }
+        catch (...) { return std::nullopt; }
+    }
+
+    bool admitInterestBaseline(OutboundQueueSet& queues, TransportConnectionId connection,
+        const InterestBaselineDelivery& delivery)
+    {
+        auto baseline = encodeProtocolFrame(MessageClass::ReliableOperation, MessageKind::ReliableInterestBaseline,
+            encodeReliableInterestBaseline(delivery.baseline));
+        auto view = encodeProtocolFrame(MessageClass::LatestWinsSnapshot, MessageKind::LatestWinsSnapshot,
+            encodeLatestWinsSnapshot(delivery.view));
+        if (!std::holds_alternative<std::vector<std::byte>>(baseline)
+            || !std::holds_alternative<std::vector<std::byte>>(view)) return false;
+        return queues.enqueuePair(connection, TransportChannel::ReliableOrdered,
+                   std::get<std::vector<std::byte>>(baseline), TransportChannel::LatestWins,
+                   std::get<std::vector<std::byte>>(view)) == TransportResult::Accepted;
+    }
+
+    std::optional<std::vector<InterestDelivery>> projectInterestChanges(
         const CanonicalServerState& before, const CanonicalServerState& after, ServerTick tick,
         CanonicalRevision revision)
     {
-        std::vector<FixtureObservationDelivery> deliveries;
+        std::vector<InterestDelivery> deliveries;
         deliveries.reserve(after.activeSessions().size());
         for (const auto& target : after.activeSessions())
         {
@@ -67,8 +124,8 @@ namespace TES3MP::ServerApp
         return deliveries;
     }
 
-    bool admitFixtureObservation(OutboundQueueSet& queues, TransportConnectionId connection,
-        const FixtureObservationDelivery& delivery)
+    bool admitInterestChange(OutboundQueueSet& queues, TransportConnectionId connection,
+        const InterestDelivery& delivery)
     {
         const auto observation = encodeProtocolFrame(MessageClass::ReliableOperation,
             MessageKind::ReliableObservationBatch, encodeReliableObservationBatch(delivery.observations));
@@ -82,8 +139,8 @@ namespace TES3MP::ServerApp
                    TransportChannel::LatestWins, viewFrame) == TransportResult::Accepted;
     }
 
-    bool admitFixtureObservationsAtomically(OutboundQueueSet& queues,
-        const std::vector<std::pair<TransportConnectionId, FixtureObservationDelivery>>& deliveries)
+    bool admitInterestChangesAtomically(OutboundQueueSet& queues,
+        const std::vector<std::pair<TransportConnectionId, InterestDelivery>>& deliveries)
     {
         try
         {
@@ -113,7 +170,7 @@ namespace TES3MP::ServerApp
         catch (...) { return false; }
     }
 
-    std::optional<std::vector<std::pair<SessionId, LatestWinsSnapshot>>> projectFixtureViews(
+    std::optional<std::vector<std::pair<SessionId, LatestWinsSnapshot>>> projectInterestViews(
         const CanonicalServerState& state, ServerTick tick, CanonicalRevision revision)
     {
         try
@@ -140,7 +197,7 @@ namespace TES3MP::ServerApp
         catch (...) { return std::nullopt; }
     }
 
-    bool admitFixtureViewsAtomically(OutboundQueueSet& queues,
+    bool admitInterestViewsAtomically(OutboundQueueSet& queues,
         const std::vector<std::pair<TransportConnectionId, LatestWinsSnapshot>>& deliveries)
     {
         try
@@ -165,8 +222,8 @@ namespace TES3MP::ServerApp
         catch (...) { return false; }
     }
 
-    bool admitFixtureTickAtomically(OutboundQueueSet& queues,
-        const std::vector<std::pair<TransportConnectionId, FixtureObservationDelivery>>& observations,
+    bool admitInterestTickAtomically(OutboundQueueSet& queues,
+        const std::vector<std::pair<TransportConnectionId, InterestDelivery>>& observations,
         const std::vector<std::pair<TransportConnectionId, LatestWinsSnapshot>>& views)
     {
         try

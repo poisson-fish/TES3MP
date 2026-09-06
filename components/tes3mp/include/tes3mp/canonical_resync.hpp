@@ -2,6 +2,7 @@
 #define TES3MP_CANONICAL_RESYNC_HPP
 
 #include "canonical_publication.hpp"
+#include "protocol_exchange.hpp"
 
 #include <cstdint>
 #include <memory>
@@ -9,38 +10,8 @@
 
 namespace TES3MP
 {
-    enum class CanonicalResyncReason : std::uint8_t
-    {
-        LocalFeedGap,
-        EntityRevisionMismatch,
-        ChecksumMismatch,
-    };
-
-    class CanonicalResyncRequest
-    {
-    public:
-        constexpr CanonicalResyncRequest(SessionId sessionId, SessionGeneration sessionGeneration,
-            CanonicalResyncReason reason, CanonicalStateVersion lastObservedStateVersion) noexcept
-            : mSessionId(sessionId)
-            , mSessionGeneration(sessionGeneration)
-            , mReason(reason)
-            , mLastObservedStateVersion(lastObservedStateVersion)
-        {
-        }
-
-        constexpr SessionId sessionId() const noexcept { return mSessionId; }
-        constexpr SessionGeneration sessionGeneration() const noexcept { return mSessionGeneration; }
-        constexpr CanonicalResyncReason reason() const noexcept { return mReason; }
-        constexpr CanonicalStateVersion lastObservedStateVersion() const noexcept { return mLastObservedStateVersion; }
-
-        friend constexpr bool operator==(CanonicalResyncRequest, CanonicalResyncRequest) noexcept = default;
-
-    private:
-        SessionId mSessionId;
-        SessionGeneration mSessionGeneration;
-        CanonicalResyncReason mReason;
-        CanonicalStateVersion mLastObservedStateVersion;
-    };
+    using CanonicalResyncReason = ResyncReason;
+    using CanonicalResyncRequest = SessionResyncRequest;
 
     enum class CanonicalResyncDisposition : std::uint8_t
     {

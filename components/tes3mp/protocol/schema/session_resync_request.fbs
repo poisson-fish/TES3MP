@@ -1,0 +1,19 @@
+namespace TES3MP.Protocol.Schema.Resync;
+
+enum ResyncReason : ubyte {
+  Unknown = 0,
+  LocalFeedGap = 1,
+  EntityRevisionMismatch = 2,
+  ChecksumMismatch = 3
+}
+
+table SessionResyncRequest {
+  session_id:ulong (id: 0);
+  session_generation:ulong (id: 1);
+  reason:ResyncReason (id: 2);
+  last_observed_state_version:ulong (id: 3);
+}
+
+root_type SessionResyncRequest;
+file_identifier "T3RS";
+file_extension "t3rs";

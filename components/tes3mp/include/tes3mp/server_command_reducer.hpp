@@ -95,6 +95,7 @@ namespace TES3MP
             PreparedBatch(const PreparedBatch&) = delete;
             PreparedBatch& operator=(const PreparedBatch&) = delete;
             const CanonicalServerState& candidateState() const noexcept { return *mState; }
+            CanonicalStateVersion candidateStateVersion() const noexcept { return mStateVersion; }
             CanonicalRevision candidateRevision() const noexcept { return mCanonicalRevision; }
             const CommandBatchReductionResult& result() const noexcept { return mResult; }
         private:
@@ -118,6 +119,7 @@ namespace TES3MP
             PreparedJoin(const PreparedJoin&) = delete;
             PreparedJoin& operator=(const PreparedJoin&) = delete;
             const CanonicalServerState& candidateState() const noexcept { return *mState; }
+            CanonicalStateVersion candidateStateVersion() const noexcept { return mStateVersion; }
             CanonicalRevision candidateRevision() const noexcept { return mCanonicalRevision; }
         private:
             friend class CanonicalCommandReducer;
@@ -139,6 +141,7 @@ namespace TES3MP
             PreparedLifecycle(const PreparedLifecycle&) = delete;
             PreparedLifecycle& operator=(const PreparedLifecycle&) = delete;
             const CanonicalServerState& candidateState() const noexcept { return *mState; }
+            CanonicalStateVersion candidateStateVersion() const noexcept { return mStateVersion; }
             CanonicalRevision candidateRevision() const noexcept { return mCanonicalRevision; }
         private:
             friend class CanonicalCommandReducer;

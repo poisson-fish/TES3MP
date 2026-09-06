@@ -89,11 +89,13 @@ target_sources(tes3mp_protocol PRIVATE
     protocol/generated/client_hello_generated.h
     protocol/generated/client_vr_pose_sample_generated.h
     protocol/generated/latest_wins_snapshot_generated.h
+    protocol/generated/reliable_interest_baseline_generated.h
     protocol/generated/reliable_observation_batch_generated.h
     protocol/generated/reliable_operation_generated.h
     protocol/generated/server_hello_generated.h
     protocol/generated/server_vr_pose_snapshot_generated.h
     protocol/generated/session_rejected_generated.h
+    protocol/generated/session_resync_request_generated.h
     protocol/authentication.cpp
     protocol/content_identity.cpp
     protocol/protocol_exchange.cpp

@@ -23,6 +23,8 @@ namespace TES3MP::ServerApp
         ResumePrepared,
         Joined,
         CommandSubmitted,
+        ResyncRequested,
+        ResyncCoalesced,
     };
 
     class ConnectionSessionCoordinator
@@ -46,12 +48,14 @@ namespace TES3MP::ServerApp
         std::size_t size() const noexcept { return mConnections.size(); }
         std::vector<TransportConnectionId> connections() const;
         std::optional<TransportConnectionId> connectionForSession(SessionId session) const noexcept;
+        std::optional<SessionResyncRequest> takeResyncRequest(TransportConnectionId connection) noexcept;
 
     private:
         struct Connection
         {
             AdmissionScopeId scope;
             std::unique_ptr<ServerSessionStateMachine> session;
+            std::optional<SessionResyncRequest> pendingResync;
         };
 
         MonotonicClock& mClock;

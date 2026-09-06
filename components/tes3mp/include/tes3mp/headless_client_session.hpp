@@ -41,6 +41,7 @@ namespace TES3MP
         ClientSessionBindingResult bindEstablishedSession(SessionId session) noexcept;
         LatestWinsSnapshotReceiveResult receiveLatestWinsSnapshot(LatestWinsSnapshot snapshot);
         ReliableObservationReceiveResult receiveReliableObservationBatch(ReliableObservationBatch batch);
+        ReliableInterestBaselineReceiveResult receiveReliableInterestBaseline(ReliableInterestBaseline baseline);
         HeadlessClientResult close() noexcept;
 
         const ClientSessionStateMachine& stateMachine() const noexcept { return *mState; }

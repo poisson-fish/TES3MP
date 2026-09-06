@@ -1,5 +1,6 @@
 #include "server_application.hpp"
-#include "fixture_observation_projection.hpp"
+#include "interest_projection.hpp"
+#include "tes3mp/canonical_resync.hpp"
 
 #include <array>
 #include <algorithm>
@@ -91,9 +92,9 @@ namespace TES3MP::ServerApp
         const auto* candidate = mWiring->lifecycle.candidateState(lifecycle->id);
         const auto revision = mWiring->lifecycle.candidateRevision(lifecycle->id);
         auto projected = candidate && revision
-            ? projectFixtureObservations(before, *candidate, tick, *revision) : std::nullopt;
+            ? projectInterestChanges(before, *candidate, tick, *revision) : std::nullopt;
         if (!projected) { cancel(); return false; }
-        std::vector<std::pair<TransportConnectionId, FixtureObservationDelivery>> routed;
+        std::vector<std::pair<TransportConnectionId, InterestDelivery>> routed;
         routed.reserve(projected->size());
         for (auto& delivery : *projected)
         {
@@ -101,7 +102,7 @@ namespace TES3MP::ServerApp
             if (!target || std::ranges::find(knownConnections, *target) != knownConnections.end()) { cancel(); return false; }
             routed.emplace_back(*target, std::move(delivery));
         }
-        if (!admitFixtureObservationsAtomically(mWiring->queues, routed)) { cancel(); return false; }
+        if (!admitInterestChangesAtomically(mWiring->queues, routed)) { cancel(); return false; }
         if (!mWiring->lifecycle.commit(lifecycle->id)) return false;
         for (const auto connection : knownConnections)
             if (mWiring->sessions.close(connection) != ConnectionSessionResult::Accepted) return false;
@@ -164,10 +165,7 @@ namespace TES3MP::ServerApp
             if (!targetState || targetState->state() != ServerSessionState::Established || !targetState->sessionId()
                 || !supportsPose(*targetState))
                 continue;
-            const auto* targetSession = canonical.findActiveSession(*targetState->sessionId());
-            const auto* targetPlayer = targetSession ? canonical.findPlayer(targetSession->playerId()) : nullptr;
-            if (!targetSession || !targetPlayer
-                || targetPlayer->transform().cell() != sourcePlayer->transform().cell())
+            if (!sharesInterest(canonical, *targetState->sessionId(), *sourceState->sessionId()))
                 continue;
             ServerVrPoseSnapshot snapshot(*targetState->sessionId(), targetState->generation(),
                 sourcePlayer->playerId(), pose->sourceSessionId(), pose->sourceSessionGeneration(),
@@ -213,24 +211,17 @@ namespace TES3MP::ServerApp
         };
         const auto* candidate = mWiring->lifecycle.candidateState(lifecycle->id);
         const auto revision = mWiring->lifecycle.candidateRevision(lifecycle->id);
-        auto views = candidate && revision ? projectFixtureViews(*candidate, tick, *revision) : std::nullopt;
+        const auto stateVersion = mWiring->lifecycle.candidateStateVersion(lifecycle->id);
+        auto baseline = candidate && revision && stateVersion
+            ? projectInterestBaseline(*candidate, *session->sessionId(), tick, *revision, *stateVersion)
+            : std::nullopt;
         auto observations = candidate && revision
-            ? projectFixtureObservations(before, *candidate, tick, *revision) : std::nullopt;
+            ? projectInterestChanges(before, *candidate, tick, *revision) : std::nullopt;
         auto accepted = session->takeAuthenticationAccepted();
-        if (!candidate || !views || !observations || !accepted) { cancel(); return false; }
-        const auto view = std::ranges::find_if(*views,
-            [&](const auto& value) { return value.first == *session->sessionId(); });
-        if (view == views->end()) { cancel(); return false; }
+        if (!candidate || !baseline || !observations || !accepted) { cancel(); return false; }
 
         try
         {
-            std::vector<ObservationChange> initialChanges;
-            for (const auto& entry : view->second.view().entries())
-                initialChanges.push_back({ entry.playerId(), entry.entityId(), ObservationChangeKind::Enter });
-            auto initial = ReliableObservationBatch::create(
-                *session->sessionId(), session->generation(), *revision, initialChanges);
-            if (!std::holds_alternative<ReliableObservationBatch>(initial)) { cancel(); return false; }
-
             std::vector<std::vector<std::byte>> frames;
             frames.reserve(3 + observations->size() * 2);
             auto addFrame = [&](MessageClass messageClass, MessageKind kind, std::vector<std::byte> payload) {
@@ -241,10 +232,10 @@ namespace TES3MP::ServerApp
             };
             if (!addFrame(MessageClass::SessionControl, MessageKind::AuthenticationAccepted,
                     encodeAuthenticationAccepted(*accepted))
-                || !addFrame(MessageClass::ReliableOperation, MessageKind::ReliableObservationBatch,
-                    encodeReliableObservationBatch(std::get<ReliableObservationBatch>(initial)))
+                || !addFrame(MessageClass::ReliableOperation, MessageKind::ReliableInterestBaseline,
+                    encodeReliableInterestBaseline(baseline->baseline))
                 || !addFrame(MessageClass::LatestWinsSnapshot, MessageKind::LatestWinsSnapshot,
-                    encodeLatestWinsSnapshot(view->second))) { cancel(); return false; }
+                    encodeLatestWinsSnapshot(baseline->view))) { cancel(); return false; }
 
             std::vector<OutboundQueueSet::AtomicMessage> messages;
             messages.reserve(3 + observations->size() * 2);
@@ -273,6 +264,18 @@ namespace TES3MP::ServerApp
         return session->finalizePreparedResume();
     }
 
+    bool ServerApplication::resyncConnection(TransportConnectionId connection, ServerTick tick) noexcept
+    {
+        auto request = mWiring->sessions.takeResyncRequest(connection);
+        if (!request) return true;
+        const auto resolved = resolveCanonicalResync(*request, mWiring->reducer.latestPublication());
+        if (resolved.disposition() != CanonicalResyncDisposition::SnapshotRequired || !resolved.publication())
+            return false;
+        auto delivery = projectInterestBaseline(resolved.publication()->state(), request->sessionId(), tick,
+            mWiring->reducer.canonicalRevision(), resolved.publication()->stateVersion());
+        return delivery && admitInterestBaseline(mWiring->queues, connection, *delivery);
+    }
+
     bool ServerApplication::expireSessions(ServerTick tick) noexcept
     {
         while (true)
@@ -290,9 +293,9 @@ namespace TES3MP::ServerApp
             const auto* candidate = mWiring->lifecycle.candidateState(lifecycle->id);
             const auto revision = mWiring->lifecycle.candidateRevision(lifecycle->id);
             auto projected = candidate && revision
-                ? projectFixtureObservations(before, *candidate, tick, *revision) : std::nullopt;
+                ? projectInterestChanges(before, *candidate, tick, *revision) : std::nullopt;
             if (!projected) { cancel(); return false; }
-            std::vector<std::pair<TransportConnectionId, FixtureObservationDelivery>> routed;
+            std::vector<std::pair<TransportConnectionId, InterestDelivery>> routed;
             try
             {
                 routed.reserve(projected->size());
@@ -304,7 +307,7 @@ namespace TES3MP::ServerApp
                 }
             }
             catch (...) { cancel(); return false; }
-            if (!admitFixtureObservationsAtomically(mWiring->queues, routed)) { cancel(); return false; }
+            if (!admitInterestChangesAtomically(mWiring->queues, routed)) { cancel(); return false; }
             if (!mWiring->lifecycle.commit(lifecycle->id)
                 || !mWiring->joins.releasePrincipal(lifecycle->principal)) return false;
         }
@@ -367,6 +370,7 @@ namespace TES3MP::ServerApp
                 continue;
             }
             bool closed = false;
+            bool resyncRequested = false;
             for (std::size_t index = 0; index < received.messages; ++index)
             {
                 if (messages[index].channel == TransportChannel::PresentationLatest)
@@ -390,6 +394,9 @@ namespace TES3MP::ServerApp
                     closed = true;
                     break;
                 }
+                if (dispatched == ConnectionSessionResult::ResyncRequested
+                    || dispatched == ConnectionSessionResult::ResyncCoalesced)
+                    resyncRequested = true;
                 if (dispatched == ConnectionSessionResult::Joined)
                 {
                     auto* joined = mWiring->sessions.session(connection);
@@ -412,6 +419,11 @@ namespace TES3MP::ServerApp
                 }
             }
             if (closed) continue;
+            if (resyncRequested && !resyncConnection(connection, tick))
+            {
+                (void)failConnection(connection, "resync composition failed");
+                continue;
+            }
             auto* session = mWiring->sessions.session(connection);
             if (session != nullptr && session->state() == ServerSessionState::AuthenticationPending)
             {
@@ -456,10 +468,10 @@ namespace TES3MP::ServerApp
                 { mFailure = "canonical commit failed"; return false; }
                 continue;
             }
-            auto projected = projectFixtureObservations(before, prepared.candidateState(),
+            auto projected = projectInterestChanges(before, prepared.candidateState(),
                 batch.scheduledTick().value(), prepared.candidateRevision());
             if (!projected) { mFailure = "observation projection failed"; return false; }
-            std::vector<std::pair<TransportConnectionId, FixtureObservationDelivery>> routed;
+            std::vector<std::pair<TransportConnectionId, InterestDelivery>> routed;
             routed.reserve(projected->size());
             for (auto& delivery : *projected)
             {
@@ -467,7 +479,7 @@ namespace TES3MP::ServerApp
                 if (!connection) { mFailure = "observation target missing"; return false; }
                 routed.emplace_back(*connection, std::move(delivery));
             }
-            auto views = projectFixtureViews(prepared.candidateState(), batch.scheduledTick().value(),
+            auto views = projectInterestViews(prepared.candidateState(), batch.scheduledTick().value(),
                 prepared.candidateRevision());
             if (!views) { mFailure = "movement view projection failed"; return false; }
             std::vector<std::pair<TransportConnectionId, LatestWinsSnapshot>> routedViews;
@@ -478,7 +490,7 @@ namespace TES3MP::ServerApp
                 if (!connection) { mFailure = "movement view target missing"; return false; }
                 routedViews.emplace_back(*connection, std::move(delivery.second));
             }
-            if (!admitFixtureTickAtomically(mWiring->queues, routed, routedViews))
+            if (!admitInterestTickAtomically(mWiring->queues, routed, routedViews))
             { mFailure = "tick output admission failed"; return false; }
             if (!mWiring->reducer.commit(std::move(prepared)))
             { mFailure = "canonical commit failed"; return false; }

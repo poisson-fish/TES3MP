@@ -32,11 +32,13 @@ class FlatBuffersProofRunnerTests(unittest.TestCase):
                 "client_hello.fbs",
                 "client_vr_pose_sample.fbs",
                 "latest_wins_snapshot.fbs",
+                "reliable_interest_baseline.fbs",
                 "reliable_observation_batch.fbs",
                 "reliable_operation.fbs",
                 "server_hello.fbs",
                 "server_vr_pose_snapshot.fbs",
                 "session_rejected.fbs",
+                "session_resync_request.fbs",
             ],
         )
         self.assertEqual(set(lock["seed_corpus"]), set(proof.SEED_CORPUS_FILES))

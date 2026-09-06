@@ -1,13 +1,13 @@
 # TES3MP vNext state
 
-Updated: 2026-09-05
+Updated: 2026-09-06
 
 ## Current status
 
 - Phases 0–10: **Complete**
-- Phase 11 discovery: **Complete**
-- Active work: **production cell/interest/resync package awaiting owner approval**
-- Last pass: **Phase 11 repository trace and bounded implementation design complete**
+- Phase 11: **Complete**
+- Active work: **Phase 12 production movement discovery ready**
+- Last pass: **Phase 11 exact cell catalog, interest baseline, and resync complete**
 - Authoritative tracker: [rolling implementation plan](IMPLEMENTATION_PLAN.md)
 - Historical evidence: [implementation notes](IMPLEMENTATION_NOTES.md)
 
@@ -16,33 +16,25 @@ active pass is specified in implementation detail. The next few passes are
 tentative, and later work stays at outcome level until evidence makes it timely.
 ADRs and GDRs are required only for consequential, hard-to-reverse decisions.
 
-## Phase 11 discovery result
+## Phase 11 result
 
-- OpenMW cell changes flow through one pending plus one deferred reliable fixture
-  transition. The server validates the current session/generation and one
-  manifest interior or exterior `(0,0)`, prepares canonical state, derives every
-  target's same-cell deltas/view, admits output, then commits.
-- The client independently applies reliable membership changes and complete
-  latest-wins spatial views. Presentation uses their intersection. Join and resume
-  fake a baseline with ordinary `Enter` changes; quiet input has no explicit
-  completion meaning.
-- The existing core resync helper validates session/generation and returns the
-  latest unfiltered publication only. It has no protocol, routing, interest
-  projection, request bound, or client replacement path.
-- Recommended cell catalog: at most 256 unique cell spaces and 4,096 exact allowed
-  cells, with complete local OpenMW mappings. IDs and cells are sorted/unique;
-  missing records, kind mismatches, unknown grids, and collisions after OpenMW's
-  case-insensitive `ESM::RefId` comparison fail startup or command admission.
-- Recommended interest remains exact canonical-cell equality and server-owned.
-  Adjacent-grid visibility and client-selected interest stay out of scope.
-- Recommended resync adds a reliable membership-only baseline plus a latest
-  snapshot. Initial/resume/resync completion requires both; a metadata-only
-  authenticated request permits one pending response per session generation and
-  cannot upload state.
-- The A/A/A package advances protocol 1.1 to 1.2 and replaces scalar cell config,
-  but does not migrate the player registry, alter canonical checksum encoding, or
-  add movement/teleport/world-object behavior. Alternatives and named failures are
-  in the rolling plan.
+- The approved A/A/A package is implemented in [GDR-0018](gdr/GDR-0018-phase11-production-cell-interest-resync.md)
+  and [ADR-0058](adr/ADR-0058-phase11-cell-catalog-interest-baseline.md).
+- Manifests now carry at most 256 typed cell spaces and 4,096 sorted unique exact
+  cells. Server config declares the catalog and explicit spawn; unknown proposals
+  fail before canonical mutation. OpenMW owns complete injective local record maps.
+- Interest remains server-owned exact canonical-cell equality. Membership deltas,
+  complete views, and the optional pose relay share that predicate.
+- Join, resume, and authenticated resync now deliver a reliable complete-membership
+  baseline plus a latest-wins scoped snapshot. Client readiness requires both and
+  a snapshot revision at or beyond the baseline; a newer baseline atomically
+  replaces membership.
+- Metadata-only resync requests are session/generation checked and coalesced to one
+  pending request. They cannot upload state or mutate canonical state.
+- Protocol advances from 1.1 to 1.2 and scalar cell config is replaced. The player
+  registry, canonical checksum encoding, authority model, and pose lane do not
+  change. Movement, teleport policy, adjacent interest, persistence, and world
+  objects remain out of scope.
 
 ## Phase 10 result
 
@@ -103,47 +95,30 @@ work.
 
 ## Last verified
 
-- Phase 11 discovery inspected the OpenMW provider/adapter, reusable client
-  runtime/state, protocol roots, server dispatch/intake/reducer, projection,
-  join/resume/disconnect/expiration composition, manifest config, and core resync
-  helper.
-- Current bounds were confirmed at 256 canonical players/sessions/view entries/
-  observation changes, 128 pending commands per session generation, 32 inbound
-  messages per client drain, and 16/64 KiB reliable/latest payloads.
-- No build or runtime test was run because production code did not change. The
-  Phase 10 milestone evidence below remains the last implementation verification.
-
-- Standalone protocol/determinism/fault/observability, authenticated-join,
-  server-app, and OpenMW adapter contract targets pass under MSVC RelWithDebInfo.
-- Player identity tests cover issue, digest lookup, expiration, same-ID
-  reattachment, process restart reload, persistence failure rollback, and ID reuse
-  only after an uncommitted failure.
-- Networking-enabled server/headless binaries and their affected contract targets
-  build and pass. The Phase 7 lifecycle integration flow passes 32 reconnects,
-  resume/expiry/fresh identity, converged views, stale rejection, and zero final
-  queue depth.
-- Full OpenMW desktop `openmw.exe` builds and links in RelWithDebInfo with the
-  production GameNetworkingSockets transport.
-- GCC 16.2.1 on Linux builds and passes authenticated-join, server-app, and
-  OpenMW adapter contracts, including owner-only credential permissions and
-  failed-replacement cleanup.
-- All 145 repository-owned Python tests pass, including decoder golden-corpus
-  registry verification.
-- Indexed baseline provenance passes with 367 intentional differences and 73
-  dependency inputs; the OpenMW patch registry passes.
+- MSVC Release builds and affected protocol exchange/frame/handshake, session,
+  headless, reducer, server-app, and OpenMW adapter tests pass.
+- Networking-enabled server/headless binaries and full OpenMW desktop
+  `openmw.exe` build and link with the production GameNetworkingSockets path.
+- The pinned FlatBuffers dependency, exact production schema generation, proof
+  build, contract test, and corpus check pass. All 36 affected Python tests pass.
+- Indexed baseline provenance passes with 376 intentional differences and 77
+  dependency declaration inputs.
+- The Phase 7 lifecycle integration passes simultaneous movement, converged and
+  stale-rejected views, 32 reconnects, stable identity/progress, resume expiry,
+  fresh identity, and zero final queue depth.
 - Hardware/content-backed desktop and desktop-to-VR visual proof was not run.
 
 ## Next pass
 
 Read the rolling **Now** section in
-[IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md). Obtain the three recorded owner
-choices, record the approved GDR/ADR package, then implement only that bounded
-cell/interest/resync pass. Do not begin production movement, teleport policy,
-world-object streaming, or broader persistence.
+[IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md). Perform the Phase 12 production
+movement discovery pass only. Do not change movement, collision, correction,
+animation, or player-facing lag behavior without the resulting evidence and any
+required owner decisions.
 
 ## Working-tree expectation
 
-Before starting the next pass, `vnext` should contain the Phase 11 discovery
+Before starting the next pass, `vnext` should contain the Phase 11 implementation
 commit and be clean. The separate
 `vnext-vr` worktree remains at the completed Phase 9 baseline until a later shared
 merge is deliberately made.

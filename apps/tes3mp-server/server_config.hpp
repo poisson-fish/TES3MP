@@ -15,8 +15,8 @@
 
 namespace TES3MP::ServerApp
 {
-    inline constexpr std::size_t MaximumConfigBytes = 4096;
-    inline constexpr std::size_t MaximumConfigLineBytes = 512;
+    inline constexpr std::size_t MaximumConfigBytes = 256 * 1024;
+    inline constexpr std::size_t MaximumConfigLineBytes = 240 * 1024;
     inline constexpr std::size_t MaximumPasswordPathBytes = 1024;
     inline constexpr std::size_t MaximumIdentityPathBytes = 1024;
 
@@ -50,6 +50,7 @@ namespace TES3MP::ServerApp
         std::uint64_t disconnectGraceMilliseconds = 0;
         std::filesystem::path joinPasswordFile;
         ContentManifest contentManifest;
+        CellId spawnCell;
         std::filesystem::path playerIdentityFile;
     };
 

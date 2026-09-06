@@ -16,11 +16,11 @@ namespace
 
 namespace TES3MP
 {
-    AuthenticatedJoinCoordinator::AuthenticatedJoinCoordinator(Transform fixtureSpawn,
-        AppearanceId fixtureAppearance, AuthenticatedJoinIdentitySeed seed, CanonicalCommandReducer& reducer,
+    AuthenticatedJoinCoordinator::AuthenticatedJoinCoordinator(Transform spawn,
+        AppearanceId appearance, AuthenticatedJoinIdentitySeed seed, CanonicalCommandReducer& reducer,
         ContentManifest contentManifest, PlayerIdentityRegistry* playerIdentities) noexcept
-        : mFixtureSpawn(fixtureSpawn)
-        , mFixtureAppearance(fixtureAppearance)
+        : mSpawn(spawn)
+        , mAppearance(appearance)
         , mSeed(seed)
         , mReducer(reducer)
         , mContentManifest(contentManifest)
@@ -30,11 +30,11 @@ namespace TES3MP
     }
 
     std::optional<AuthenticatedJoinCoordinator> AuthenticatedJoinCoordinator::create(
-        Transform fixtureSpawn, AppearanceId fixtureAppearance, AuthenticatedJoinIdentitySeed seed,
+        Transform spawn, AppearanceId appearance, AuthenticatedJoinIdentitySeed seed,
         CanonicalCommandReducer& reducer)
     {
         return AuthenticatedJoinCoordinator(
-            fixtureSpawn, fixtureAppearance, seed, reducer, testContentManifest(), nullptr);
+            spawn, appearance, seed, reducer, testContentManifest(), nullptr);
     }
 
     std::optional<AuthenticatedJoinCoordinator> AuthenticatedJoinCoordinator::create(Transform spawn,
@@ -83,7 +83,7 @@ namespace TES3MP
             return result;
         }
         const AuthenticatedAdmission::PlayerClaim claim{ mSeed.nextPlayer, mSeed.nextEntity,
-            mFixtureAppearance, mContentManifest.id() };
+            mAppearance, mContentManifest.id() };
         return prepareIdentity(principal, claim, true, std::nullopt, generation, serverTick);
     }
 
@@ -110,7 +110,7 @@ namespace TES3MP
         if (mNextPreparationId == 0)
             return AuthenticatedJoinError::IdentityExhausted;
 
-        CanonicalPlayerEntityState canonicalPlayer(claim.player, claim.entity, claim.appearance, mFixtureSpawn,
+        CanonicalPlayerEntityState canonicalPlayer(claim.player, claim.entity, claim.appearance, mSpawn,
             LinearVelocity3(0, 0, 0), EntityRevision::initial(), AuthorityEpoch::initial(), serverTick);
         if (const auto* existing = mReducer.state().findPlayer(claim.player))
         {
@@ -126,7 +126,7 @@ namespace TES3MP
         std::vector<SpatialEntitySnapshot> entries;
         entries.reserve(candidate->candidateState().players().size());
         for (const auto& visible : candidate->candidateState().players())
-            if (visible.transform().cell() == mFixtureSpawn.cell())
+            if (visible.transform().cell() == mSpawn.cell())
                 entries.emplace_back(serverTick, visible.playerId(), visible.entityId(), visible.appearanceId(),
                     visible.entityRevision(), visible.authorityEpoch(), visible.transform(), visible.linearVelocity());
         auto view = SpatialWorldView::create(entries);
@@ -202,6 +202,14 @@ namespace TES3MP
     {
         return mPending && mPending->id == preparationId
             ? std::optional<CanonicalRevision>(mPending->state.candidateRevision()) : std::nullopt;
+    }
+
+    std::optional<CanonicalStateVersion> AuthenticatedJoinCoordinator::candidateStateVersion(
+        std::uint64_t preparationId) const noexcept
+    {
+        if (!mPending || mPending->id != preparationId)
+            return std::nullopt;
+        return mPending->state.candidateStateVersion();
     }
 
     std::optional<PlayerCredential> AuthenticatedJoinCoordinator::copyPendingPlayerCredential(

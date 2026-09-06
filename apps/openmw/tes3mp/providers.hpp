@@ -34,7 +34,7 @@ namespace TES3MP::OpenMWAdapter
     struct CellTransitionCapture
     {
         ProviderResult result = ProviderResult::Accepted;
-        std::optional<FixtureCellTransition> transition;
+        std::optional<CellTransition> transition;
     };
 
     struct LocalVrPose

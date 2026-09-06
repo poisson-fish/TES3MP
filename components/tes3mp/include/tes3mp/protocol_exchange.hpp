@@ -14,6 +14,7 @@ namespace TES3MP
 {
     inline constexpr std::size_t MaximumSpatialWorldViewEntries = 256;
     inline constexpr std::size_t MaximumObservationChanges = 256;
+    inline constexpr std::size_t MaximumInterestMembers = 256;
 
     enum class ExchangeDecodeErrorStage : std::uint8_t
     {
@@ -47,22 +48,33 @@ namespace TES3MP
         TooManyObservationChanges,
         ObservationChangesNotStrictlySorted,
         InvalidObservationChangeKind,
+        MissingInterestBaselineHeader,
+        TooManyInterestMembers,
+        InterestMembersNotStrictlySorted,
+        InvalidResyncReason,
     };
 
-    class FixtureCellTransition
+    class CellTransition
     {
     public:
-        constexpr explicit FixtureCellTransition(CellId requestedCell) noexcept
+        constexpr explicit CellTransition(CellId requestedCell) noexcept
             : mRequestedCell(requestedCell)
         {
         }
 
         constexpr const CellId& requestedCell() const noexcept { return mRequestedCell; }
 
-        friend constexpr bool operator==(const FixtureCellTransition&, const FixtureCellTransition&) noexcept = default;
+        friend constexpr bool operator==(const CellTransition&, const CellTransition&) noexcept = default;
 
     private:
         CellId mRequestedCell;
+    };
+
+    enum class ResyncReason : std::uint8_t
+    {
+        LocalFeedGap = 1,
+        EntityRevisionMismatch = 2,
+        ChecksumMismatch = 3,
     };
 
     struct ExchangeDecodeError
@@ -74,6 +86,32 @@ namespace TES3MP
         std::size_t index = 0;
 
         friend constexpr bool operator==(ExchangeDecodeError, ExchangeDecodeError) noexcept = default;
+    };
+
+    class SessionResyncRequest
+    {
+    public:
+        static std::variant<SessionResyncRequest, ExchangeDecodeError> create(SessionId sessionId,
+            SessionGeneration sessionGeneration, ResyncReason reason,
+            CanonicalStateVersion lastObservedStateVersion) noexcept;
+
+        constexpr SessionResyncRequest(SessionId sessionId, SessionGeneration sessionGeneration,
+            ResyncReason reason, CanonicalStateVersion lastObservedStateVersion) noexcept
+            : mSessionId(sessionId), mSessionGeneration(sessionGeneration), mReason(reason),
+              mLastObservedStateVersion(lastObservedStateVersion) {}
+        constexpr SessionId sessionId() const noexcept { return mSessionId; }
+        constexpr SessionGeneration sessionGeneration() const noexcept { return mSessionGeneration; }
+        constexpr ResyncReason reason() const noexcept { return mReason; }
+        constexpr CanonicalStateVersion lastObservedStateVersion() const noexcept
+        { return mLastObservedStateVersion; }
+
+        friend constexpr bool operator==(SessionResyncRequest, SessionResyncRequest) noexcept = default;
+
+    private:
+        SessionId mSessionId;
+        SessionGeneration mSessionGeneration;
+        ResyncReason mReason;
+        CanonicalStateVersion mLastObservedStateVersion;
     };
 
     class PlayerMotionIntent
@@ -93,7 +131,7 @@ namespace TES3MP
         LinearVelocity3 mDesiredVelocity;
     };
 
-    using ReliableOperationBody = std::variant<PlayerMotionIntent, FixtureCellTransition>;
+    using ReliableOperationBody = std::variant<PlayerMotionIntent, CellTransition>;
 
     class ReliableOperation
     {
@@ -101,7 +139,7 @@ namespace TES3MP
         static std::variant<ReliableOperation, ExchangeDecodeError> create(
             ReliableOperationHeader header, PlayerMotionIntent intent) noexcept;
         static std::variant<ReliableOperation, ExchangeDecodeError> create(
-            ReliableOperationHeader header, FixtureCellTransition transition) noexcept;
+            ReliableOperationHeader header, CellTransition transition) noexcept;
 
         constexpr const ReliableOperationHeader& header() const noexcept { return mHeader; }
         constexpr const ReliableOperationBody& body() const noexcept { return mBody; }
@@ -167,6 +205,45 @@ namespace TES3MP
         friend constexpr bool operator==(ObservationChange, ObservationChange) noexcept = default;
     };
 
+    struct InterestMember
+    {
+        PlayerId playerId;
+        EntityId entityId;
+        friend constexpr bool operator==(InterestMember, InterestMember) noexcept = default;
+        friend constexpr auto operator<=>(InterestMember, InterestMember) noexcept = default;
+    };
+
+    class ReliableInterestBaseline
+    {
+    public:
+        static std::variant<ReliableInterestBaseline, ExchangeDecodeError> create(SessionId targetSessionId,
+            SessionGeneration targetSessionGeneration, CanonicalRevision canonicalRevision,
+            CanonicalStateVersion canonicalStateVersion, ServerTick serverTick,
+            std::span<const InterestMember> members);
+
+        constexpr SessionId targetSessionId() const noexcept { return mTargetSessionId; }
+        constexpr SessionGeneration targetSessionGeneration() const noexcept { return mTargetSessionGeneration; }
+        constexpr CanonicalRevision canonicalRevision() const noexcept { return mCanonicalRevision; }
+        constexpr CanonicalStateVersion canonicalStateVersion() const noexcept { return mCanonicalStateVersion; }
+        constexpr ServerTick serverTick() const noexcept { return mServerTick; }
+        std::span<const InterestMember> members() const noexcept { return mMembers; }
+
+        friend bool operator==(const ReliableInterestBaseline&, const ReliableInterestBaseline&) noexcept = default;
+
+    private:
+        ReliableInterestBaseline(SessionId session, SessionGeneration generation, CanonicalRevision revision,
+            CanonicalStateVersion stateVersion, ServerTick tick, std::vector<InterestMember> members)
+            : mTargetSessionId(session), mTargetSessionGeneration(generation), mCanonicalRevision(revision),
+              mCanonicalStateVersion(stateVersion), mServerTick(tick), mMembers(std::move(members)) {}
+
+        SessionId mTargetSessionId;
+        SessionGeneration mTargetSessionGeneration;
+        CanonicalRevision mCanonicalRevision;
+        CanonicalStateVersion mCanonicalStateVersion;
+        ServerTick mServerTick;
+        std::vector<InterestMember> mMembers;
+    };
+
     class ReliableObservationBatch
     {
     public:
@@ -191,14 +268,20 @@ namespace TES3MP
     using ReliableOperationDecodeResult = std::variant<ReliableOperation, ExchangeDecodeError>;
     using LatestWinsSnapshotDecodeResult = std::variant<LatestWinsSnapshot, ExchangeDecodeError>;
     using ReliableObservationBatchDecodeResult = std::variant<ReliableObservationBatch, ExchangeDecodeError>;
+    using ReliableInterestBaselineDecodeResult = std::variant<ReliableInterestBaseline, ExchangeDecodeError>;
+    using SessionResyncRequestDecodeResult = std::variant<SessionResyncRequest, ExchangeDecodeError>;
 
     std::vector<std::byte> encodeReliableOperation(const ReliableOperation& value);
     std::vector<std::byte> encodeLatestWinsSnapshot(const LatestWinsSnapshot& value);
     std::vector<std::byte> encodeReliableObservationBatch(const ReliableObservationBatch& value);
+    std::vector<std::byte> encodeReliableInterestBaseline(const ReliableInterestBaseline& value);
+    std::vector<std::byte> encodeSessionResyncRequest(const SessionResyncRequest& value);
 
     ReliableOperationDecodeResult decodeReliableOperation(std::span<const std::byte> payload);
     LatestWinsSnapshotDecodeResult decodeLatestWinsSnapshot(std::span<const std::byte> payload);
     ReliableObservationBatchDecodeResult decodeReliableObservationBatch(std::span<const std::byte> payload);
+    ReliableInterestBaselineDecodeResult decodeReliableInterestBaseline(std::span<const std::byte> payload);
+    SessionResyncRequestDecodeResult decodeSessionResyncRequest(std::span<const std::byte> payload);
 }
 
 #endif

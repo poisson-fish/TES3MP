@@ -3,8 +3,10 @@
 #include <tes3mp/protocol_frame.hpp>
 
 #include "generated/latest_wins_snapshot_generated.h"
+#include "generated/reliable_interest_baseline_generated.h"
 #include "generated/reliable_observation_batch_generated.h"
 #include "generated/reliable_operation_generated.h"
+#include "generated/session_resync_request_generated.h"
 
 #include <flatbuffers/flatbuffers.h>
 
@@ -21,6 +23,8 @@ namespace
     namespace ReliableSchema = TES3MP::Protocol::Schema::Reliable;
     namespace SnapshotSchema = TES3MP::Protocol::Schema::Snapshot;
     namespace ObservationSchema = TES3MP::Protocol::Schema::Observation;
+    namespace BaselineSchema = TES3MP::Protocol::Schema::InterestBaseline;
+    namespace ResyncSchema = TES3MP::Protocol::Schema::Resync;
 
     constexpr std::size_t SizePrefixBytes = sizeof(flatbuffers::uoffset_t);
     constexpr std::size_t MinimumIdentifiedFlatBufferBytes = SizePrefixBytes + sizeof(flatbuffers::uoffset_t) + 4;
@@ -198,6 +202,39 @@ namespace
 
 namespace TES3MP
 {
+    std::variant<SessionResyncRequest, ExchangeDecodeError> SessionResyncRequest::create(SessionId sessionId,
+        SessionGeneration sessionGeneration, ResyncReason reason,
+        CanonicalStateVersion lastObservedStateVersion) noexcept
+    {
+        if (reason != ResyncReason::LocalFeedGap && reason != ResyncReason::EntityRevisionMismatch
+            && reason != ResyncReason::ChecksumMismatch)
+            return error(ExchangeDecodeErrorStage::SemanticValidation, ExchangeDecodeErrorCode::InvalidResyncReason,
+                static_cast<std::size_t>(reason));
+        return SessionResyncRequest(sessionId, sessionGeneration, reason, lastObservedStateVersion);
+    }
+
+    std::variant<ReliableInterestBaseline, ExchangeDecodeError> ReliableInterestBaseline::create(
+        SessionId targetSessionId, SessionGeneration targetSessionGeneration, CanonicalRevision canonicalRevision,
+        CanonicalStateVersion canonicalStateVersion, ServerTick serverTick,
+        std::span<const InterestMember> members)
+    {
+        if (members.size() > MaximumInterestMembers)
+            return error(ExchangeDecodeErrorStage::SemanticValidation, ExchangeDecodeErrorCode::TooManyInterestMembers,
+                members.size(), MaximumInterestMembers);
+        for (std::size_t index = 1; index < members.size(); ++index)
+        {
+            if (members[index - 1].playerId >= members[index].playerId
+                || std::ranges::any_of(members.first(index), [&](const auto& prior) {
+                    return prior.entityId == members[index].entityId;
+                }))
+                return error(ExchangeDecodeErrorStage::SemanticValidation,
+                    ExchangeDecodeErrorCode::InterestMembersNotStrictlySorted,
+                    members[index].playerId.value(), members[index - 1].playerId.value(), index);
+        }
+        return ReliableInterestBaseline(targetSessionId, targetSessionGeneration, canonicalRevision,
+            canonicalStateVersion, serverTick, std::vector<InterestMember>(members.begin(), members.end()));
+    }
+
     std::variant<ReliableObservationBatch, ExchangeDecodeError> ReliableObservationBatch::create(
         SessionId targetSessionId, SessionGeneration targetSessionGeneration, CanonicalRevision canonicalRevision,
         std::span<const ObservationChange> changes)
@@ -232,7 +269,7 @@ namespace TES3MP
     }
 
     std::variant<ReliableOperation, ExchangeDecodeError> ReliableOperation::create(
-        ReliableOperationHeader header, FixtureCellTransition transition) noexcept
+        ReliableOperationHeader header, CellTransition transition) noexcept
     {
         if (!header.entityPrecondition())
             return error(ExchangeDecodeErrorStage::SemanticValidation, ExchangeDecodeErrorCode::MissingEntityPrecondition);
@@ -281,9 +318,9 @@ namespace TES3MP
         }
         else
         {
-            const auto cell = encodeReliableCell(std::get<FixtureCellTransition>(value.body()).requestedCell());
-            body = ReliableSchema::CreateFixtureCellTransition(builder, &cell).Union();
-            bodyType = ReliableSchema::ReliableOperationBody::FixtureCellTransition;
+            const auto cell = encodeReliableCell(std::get<CellTransition>(value.body()).requestedCell());
+            body = ReliableSchema::CreateCellTransition(builder, &cell).Union();
+            bodyType = ReliableSchema::ReliableOperationBody::CellTransition;
         }
         const auto root = ReliableSchema::CreateReliableOperation(builder, commandHeader, entityPrecondition, bodyType, body);
         ReliableSchema::FinishSizePrefixedReliableOperationBuffer(builder, root);
@@ -328,6 +365,32 @@ namespace TES3MP
         return takeBuffer(builder);
     }
 
+    std::vector<std::byte> encodeReliableInterestBaseline(const ReliableInterestBaseline& value)
+    {
+        flatbuffers::FlatBufferBuilder builder;
+        const auto header = BaselineSchema::CreateInterestBaselineHeader(builder,
+            value.targetSessionId().value(), value.targetSessionGeneration().value(),
+            value.canonicalRevision().value(), value.canonicalStateVersion().value(), value.serverTick().value());
+        std::vector<BaselineSchema::InterestMember> members;
+        members.reserve(value.members().size());
+        for (const auto& member : value.members())
+            members.emplace_back(member.playerId.value(), member.entityId.value());
+        const auto encodedMembers = builder.CreateVectorOfStructs(members);
+        const auto root = BaselineSchema::CreateReliableInterestBaseline(builder, header, encodedMembers);
+        BaselineSchema::FinishSizePrefixedReliableInterestBaselineBuffer(builder, root);
+        return takeBuffer(builder);
+    }
+
+    std::vector<std::byte> encodeSessionResyncRequest(const SessionResyncRequest& value)
+    {
+        flatbuffers::FlatBufferBuilder builder;
+        const auto root = ResyncSchema::CreateSessionResyncRequest(builder, value.sessionId().value(),
+            value.sessionGeneration().value(), static_cast<ResyncSchema::ResyncReason>(value.reason()),
+            value.lastObservedStateVersion().value());
+        ResyncSchema::FinishSizePrefixedSessionResyncRequestBuffer(builder, root);
+        return takeBuffer(builder);
+    }
+
     ReliableOperationDecodeResult decodeReliableOperation(std::span<const std::byte> payload)
     {
         if (const auto prefixError = validatePayloadPrefix(payload, ReliableOperationMaximumPayloadBytes))
@@ -352,7 +415,7 @@ namespace TES3MP
         if (root->body_type() == ReliableSchema::ReliableOperationBody::NONE || root->body() == nullptr)
             return error(ExchangeDecodeErrorStage::SemanticValidation, ExchangeDecodeErrorCode::MissingBody);
         if (root->body_type() != ReliableSchema::ReliableOperationBody::PlayerMotionIntent
-            && root->body_type() != ReliableSchema::ReliableOperationBody::FixtureCellTransition)
+            && root->body_type() != ReliableSchema::ReliableOperationBody::CellTransition)
         {
             return error(ExchangeDecodeErrorStage::SemanticValidation, ExchangeDecodeErrorCode::UnknownBody,
                 static_cast<std::size_t>(root->body_type()));
@@ -390,12 +453,12 @@ namespace TES3MP
             return ReliableOperation::create(header,
                 PlayerMotionIntent(LinearVelocity3(velocity->x(), velocity->y(), velocity->z())));
         }
-        const auto* transition = root->body_as_FixtureCellTransition();
+        const auto* transition = root->body_as_CellTransition();
         if (transition == nullptr || transition->requested_cell() == nullptr)
             return error(ExchangeDecodeErrorStage::SemanticValidation, ExchangeDecodeErrorCode::MissingRequestedCell);
         auto cell = decodeReliableCell(*transition->requested_cell());
         if (const auto* failure = std::get_if<ExchangeDecodeError>(&cell)) return *failure;
-        return ReliableOperation::create(header, FixtureCellTransition(std::get<CellId>(cell)));
+        return ReliableOperation::create(header, CellTransition(std::get<CellId>(cell)));
     }
 
     LatestWinsSnapshotDecodeResult decodeLatestWinsSnapshot(std::span<const std::byte> payload)
@@ -518,5 +581,71 @@ namespace TES3MP
         }
         return ReliableObservationBatch::create(*decodedValue(session), *decodedValue(generation),
             *decodedValue(revision), changes);
+    }
+
+    ReliableInterestBaselineDecodeResult decodeReliableInterestBaseline(std::span<const std::byte> payload)
+    {
+        if (const auto prefixError = validatePayloadPrefix(payload, ReliableOperationMaximumPayloadBytes))
+            return *prefixError;
+        const auto* bytes = reinterpret_cast<const std::uint8_t*>(payload.data());
+        if (!BaselineSchema::SizePrefixedReliableInterestBaselineBufferHasIdentifier(bytes))
+            return error(ExchangeDecodeErrorStage::Identifier, ExchangeDecodeErrorCode::InvalidIdentifier);
+        auto verifier = makeVerifier(payload, ReliableOperationMaximumPayloadBytes);
+        if (!BaselineSchema::VerifySizePrefixedReliableInterestBaselineBuffer(verifier))
+            return error(ExchangeDecodeErrorStage::Verification, ExchangeDecodeErrorCode::VerificationFailed);
+        const auto* root = BaselineSchema::GetSizePrefixedReliableInterestBaseline(bytes);
+        const auto* header = root->header();
+        if (!header)
+            return error(ExchangeDecodeErrorStage::SemanticValidation,
+                ExchangeDecodeErrorCode::MissingInterestBaselineHeader);
+        auto session = strongValue<SessionId>(header->target_session_id());
+        auto generation = strongValue<SessionGeneration>(header->target_session_generation());
+        auto revision = strongValue<CanonicalRevision>(header->canonical_revision());
+        auto stateVersion = strongValue<CanonicalStateVersion>(header->canonical_state_version());
+        auto tick = strongValue<ServerTick>(header->server_tick());
+        const std::array failures{ std::get_if<ExchangeDecodeError>(&session),
+            std::get_if<ExchangeDecodeError>(&generation), std::get_if<ExchangeDecodeError>(&revision),
+            std::get_if<ExchangeDecodeError>(&stateVersion), std::get_if<ExchangeDecodeError>(&tick) };
+        for (const auto* failure : failures)
+            if (failure) return *failure;
+        const auto* encoded = root->members();
+        const std::size_t count = encoded ? encoded->size() : 0;
+        if (count > MaximumInterestMembers)
+            return error(ExchangeDecodeErrorStage::SemanticValidation, ExchangeDecodeErrorCode::TooManyInterestMembers,
+                count, MaximumInterestMembers);
+        std::vector<InterestMember> members;
+        members.reserve(count);
+        for (std::size_t index = 0; index < count; ++index)
+        {
+            const auto* current = encoded->Get(static_cast<flatbuffers::uoffset_t>(index));
+            auto player = strongValue<PlayerId>(current->player_id(), index);
+            auto entity = strongValue<EntityId>(current->entity_id(), index);
+            if (const auto* failure = std::get_if<ExchangeDecodeError>(&player)) return *failure;
+            if (const auto* failure = std::get_if<ExchangeDecodeError>(&entity)) return *failure;
+            members.push_back({ *decodedValue(player), *decodedValue(entity) });
+        }
+        return ReliableInterestBaseline::create(*decodedValue(session), *decodedValue(generation),
+            *decodedValue(revision), *decodedValue(stateVersion), *decodedValue(tick), members);
+    }
+
+    SessionResyncRequestDecodeResult decodeSessionResyncRequest(std::span<const std::byte> payload)
+    {
+        if (const auto prefixError = validatePayloadPrefix(payload, ReliableOperationMaximumPayloadBytes))
+            return *prefixError;
+        const auto* bytes = reinterpret_cast<const std::uint8_t*>(payload.data());
+        if (!ResyncSchema::SizePrefixedSessionResyncRequestBufferHasIdentifier(bytes))
+            return error(ExchangeDecodeErrorStage::Identifier, ExchangeDecodeErrorCode::InvalidIdentifier);
+        auto verifier = makeVerifier(payload, ReliableOperationMaximumPayloadBytes);
+        if (!ResyncSchema::VerifySizePrefixedSessionResyncRequestBuffer(verifier))
+            return error(ExchangeDecodeErrorStage::Verification, ExchangeDecodeErrorCode::VerificationFailed);
+        const auto* root = ResyncSchema::GetSizePrefixedSessionResyncRequest(bytes);
+        auto session = strongValue<SessionId>(root->session_id());
+        auto generation = strongValue<SessionGeneration>(root->session_generation());
+        auto stateVersion = strongValue<CanonicalStateVersion>(root->last_observed_state_version());
+        if (const auto* failure = std::get_if<ExchangeDecodeError>(&session)) return *failure;
+        if (const auto* failure = std::get_if<ExchangeDecodeError>(&generation)) return *failure;
+        if (const auto* failure = std::get_if<ExchangeDecodeError>(&stateVersion)) return *failure;
+        return SessionResyncRequest::create(*decodedValue(session), *decodedValue(generation),
+            static_cast<ResyncReason>(root->reason()), *decodedValue(stateVersion));
     }
 }

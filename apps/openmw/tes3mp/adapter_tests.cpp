@@ -46,7 +46,7 @@ namespace
 
     TES3MP::ServerHello serverHello(bool pose = false)
     {
-        auto versions = std::get<TES3MP::ProtocolVersionRange>(TES3MP::ProtocolVersionRange::create(1, 1, 1));
+        auto versions = std::get<TES3MP::ProtocolVersionRange>(TES3MP::ProtocolVersionRange::create(1, 2, 2));
         const std::array poseCapabilities{ TES3MP::vrPoseCapability() };
         const std::span<const TES3MP::CapabilityId> capabilities
             = pose ? std::span<const TES3MP::CapabilityId>(poseCapabilities) : std::span<const TES3MP::CapabilityId>{};
@@ -105,6 +105,15 @@ namespace
         return TES3MP::LatestWinsSnapshot(TES3MP::LatestWinsSnapshotHeader(session, generation, player, entity,
                                               TES3MP::CanonicalRevision::initial(), std::nullopt),
             std::move(view));
+    }
+
+    TES3MP::ReliableInterestBaseline selfBaseline(TES3MP::SessionGeneration generation)
+    {
+        const std::array members{ TES3MP::InterestMember{
+            value<TES3MP::PlayerId>(1), value<TES3MP::EntityId>(1) } };
+        return std::get<TES3MP::ReliableInterestBaseline>(TES3MP::ReliableInterestBaseline::create(
+            value<TES3MP::SessionId>(1), generation, TES3MP::CanonicalRevision::initial(),
+            TES3MP::CanonicalStateVersion::initial(), TES3MP::ServerTick::initial(), members));
     }
 
     class MotionMetrics final : public TES3MP::OpenMWAdapter::RemoteMotionMetricSink
@@ -501,7 +510,7 @@ int main()
     auto reconnectCreated = ClientSessionRuntime::create(
         *reconnectTransport, *reconnectClock, timeouts, SessionGeneration::initial(), outbound);
     auto reconnectRuntime = std::get<std::unique_ptr<ClientSessionRuntime>>(std::move(reconnectCreated));
-    auto versions = std::get<ProtocolVersionRange>(ProtocolVersionRange::create(1, 1, 1));
+    auto versions = std::get<ProtocolVersionRange>(ProtocolVersionRange::create(1, 2, 2));
     const std::array poseCapabilities{ vrPoseCapability() };
     auto offer = std::get<CapabilityOffer>(
         CapabilityOffer::create(std::move(versions), poseCapabilities, {}));
@@ -526,6 +535,8 @@ int main()
     auto initialAcceptedPayload = encodeAuthenticationAccepted(initialAccepted);
     reconnectTransportObserver->enqueue(MessageClass::SessionControl, MessageKind::AuthenticationAccepted,
         initialAcceptedPayload, TransportChannel::ReliableOrdered);
+    reconnectTransportObserver->enqueue(MessageClass::ReliableOperation, MessageKind::ReliableInterestBaseline,
+        encodeReliableInterestBaseline(selfBaseline(SessionGeneration::initial())), TransportChannel::ReliableOrdered);
     auto initialSnapshot = selfSnapshot(SessionGeneration::initial());
     auto initialSnapshotPayload = encodeLatestWinsSnapshot(initialSnapshot);
     reconnectTransportObserver->enqueue(MessageClass::LatestWinsSnapshot, MessageKind::LatestWinsSnapshot,
@@ -569,6 +580,9 @@ int main()
     auto rotatedAcceptedPayload = encodeAuthenticationAccepted(rotatedAccepted);
     reconnectTransportObserver->enqueue(MessageClass::SessionControl, MessageKind::AuthenticationAccepted,
         rotatedAcceptedPayload, TransportChannel::ReliableOrdered);
+    reconnectTransportObserver->enqueue(MessageClass::ReliableOperation, MessageKind::ReliableInterestBaseline,
+        encodeReliableInterestBaseline(selfBaseline(*SessionGeneration::initial().next())),
+        TransportChannel::ReliableOrdered);
     auto resumedSnapshot = selfSnapshot(*SessionGeneration::initial().next());
     auto resumedSnapshotPayload = encodeLatestWinsSnapshot(resumedSnapshot);
     reconnectTransportObserver->enqueue(MessageClass::LatestWinsSnapshot, MessageKind::LatestWinsSnapshot,

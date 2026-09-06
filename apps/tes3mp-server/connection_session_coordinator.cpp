@@ -104,6 +104,16 @@ namespace TES3MP::ServerApp
         return std::nullopt;
     }
 
+    std::optional<SessionResyncRequest> ConnectionSessionCoordinator::takeResyncRequest(
+        TransportConnectionId connection) noexcept
+    {
+        const auto found = mConnections.find(connection);
+        if (found == mConnections.end()) return std::nullopt;
+        auto result = std::move(found->second.pendingResync);
+        found->second.pendingResync.reset();
+        return result;
+    }
+
     ConnectionSessionResult ConnectionSessionCoordinator::dispatch(TransportConnectionId connection,
         const TransportMessage& message, AuthenticatedJoinCoordinator& joins, CredentialCrypto& crypto,
         ServerCommandIntakeCoordinator& intake, ServerTick tick) noexcept
@@ -120,6 +130,23 @@ namespace TES3MP::ServerApp
             && frame->messageClass() != MessageClass::ReliableOperation))
             return ConnectionSessionResult::ProtocolRejected;
 
+        if (frame->messageKind() == MessageKind::SessionResyncRequest)
+        {
+            if (frame->messageClass() != MessageClass::SessionControl
+                || state->state() != ServerSessionState::Established || !state->sessionId())
+                return ConnectionSessionResult::ProtocolRejected;
+            auto decodedRequest = decodeSessionResyncRequest(frame->payload());
+            auto* request = std::get_if<SessionResyncRequest>(&decodedRequest);
+            if (!request || request->sessionId() != *state->sessionId()
+                || request->sessionGeneration() != state->generation())
+                return ConnectionSessionResult::ProtocolRejected;
+            auto found = mConnections.find(connection);
+            if (found->second.pendingResync)
+                return ConnectionSessionResult::ResyncCoalesced;
+            found->second.pendingResync = std::move(*request);
+            return ConnectionSessionResult::ResyncRequested;
+        }
+
         if (frame->messageKind() == MessageKind::ReliableOperation)
         {
             if (frame->messageClass() != MessageClass::ReliableOperation)
@@ -133,12 +160,12 @@ namespace TES3MP::ServerApp
                 || operation->header().commandHeader().sessionGeneration() != state->generation())
                 return ConnectionSessionResult::ProtocolRejected;
             const auto& header = operation->header().commandHeader();
-            if (const auto* transition = std::get_if<FixtureCellTransition>(&operation->body()))
+            if (const auto* transition = std::get_if<CellTransition>(&operation->body()))
             {
                 ServerCommandProposal proposal(header.sessionId(), header.sessionGeneration(),
                     header.commandSequence(), header.commandId(), header.observedCanonicalRevision(),
                     *operation->header().entityPrecondition(),
-                    FixtureCellTransitionCommandProposal(transition->requestedCell()));
+                    CellTransitionCommandProposal(transition->requestedCell()));
                 return intake.submit(std::move(proposal)) == CommandSubmissionResult::Accepted
                     ? ConnectionSessionResult::CommandSubmitted : ConnectionSessionResult::QueueRejected;
             }

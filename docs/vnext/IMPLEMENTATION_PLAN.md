@@ -1,6 +1,6 @@
 # TES3MP vNext rolling implementation plan
 
-Updated: 2026-09-05
+Updated: 2026-09-06
 
 This is the authoritative implementation tracker. It deliberately plans one
 useful pass at a time instead of pre-authoring every future slice. Detailed
@@ -36,83 +36,29 @@ Verification scales with risk:
 
 ## Now
 
-### Phase 11 — production cells, interest, and resync decision
+### Phase 12 — production movement discovery
 
-Status: **Awaiting owner approval**
+Status: **Ready**
 
-The discovery pass is complete. It found one end-to-end fixture path:
+Phase 11 is complete. The next pass traces the current motion intent, canonical
+spatial advance, correction, smoothing, animation, and optional pose paths. It
+will measure existing limits and identify only the decisions needed to replace
+fixture movement without changing cell, interest, or resync semantics.
 
-1. OpenMW reports `Scene::hasCellChanged`; the desktop provider maps only one
-   interior record or one exterior worldspace into `FixtureCellTransition`.
-2. The client queues one reliable transition plus one coalesced deferred value.
-   Server dispatch validates session/generation and the reducer admits only the
-   manifest's interior or exterior `(0,0)` cell before changing canonical state.
-3. Server-app projection recomputes same-cell equality, emits reliable deltas and
-   a complete latest-wins view, admits output before the canonical commit, and the
-   client intersects both feeds for presentation.
-4. Join and resume synthesize ordinary `Enter` batches. The only resync API returns
-   an unfiltered internal publication; no wire request or explicit completion
-   marker exists.
-
-Approval choices:
-
-1. **Cell catalog — A recommended:** a bounded, sorted manifest catalog declares
-   up to 256 unique cell spaces and 4,096 exact allowed cells. Interior IDs and
-   exterior worldspace/grid tuples are explicit. The OpenMW leaf owns a complete
-   injective ID-to-`ESM::RefId` map, rejects missing records and case-insensitive
-   record collisions, and sends no record names or paths. **B:** exterior bounding
-   rectangles; smaller authoring data, but admits holes and arbitrary empty cells.
-   **C:** any signed-32-bit grid in a known worldspace; simplest, but too broad for
-   hostile client proposals.
-2. **Interest — A recommended:** active players observe exactly the active players
-   in their canonical `CellId`; the server alone derives membership. This preserves
-   current visible behavior while removing fixture identity. **B:** include adjacent
-   exterior grids; useful at cell edges, but selects a new visibility radius and
-   inactive-cell presentation policy. **C:** client-selected sets; rejected because
-   clients would choose authoritative visibility.
-3. **Baseline/resync — A recommended:** add a dedicated reliable complete-membership
-   baseline carrying session/generation, canonical revision, state version, tick,
-   and a sorted bounded member set. Initial join, resume, and an authenticated,
-   one-pending-per-generation metadata-only resync request produce that baseline
-   plus a latest snapshot. Readiness/resync completes only after both the baseline
-   and a snapshot at or after its revision; applying a baseline atomically replaces
-   membership. **B:** mark the existing delta batch and match it to an exact
-   latest-wins snapshot; smaller schema growth, but that snapshot may be coalesced
-   before delivery. **C:** infer completion from snapshot contents or silence;
-   rejected because loss and empty sets are ambiguous.
-
-Recommended bounded implementation: record A/A/A in GDR-0003 and a compact ADR,
-replace the scalar manifest/mapping and every production `Fixture*` seam, add the
-baseline and metadata-only resync roots, and compose them through join, resume,
-runtime resync, client readiness, and presentation replacement. Keep the existing
-256-player/view/change bounds and 16/64 KiB reliable/latest payload budgets; the
-membership-only baseline fits the reliable budget without moving spatial samples
-off the latest-wins lane.
-
-Named proof: catalog empty/overflow/duplicate/kind/mapping/coordinate failures; multiple
-interiors and negative/boundary exterior grids; unknown-cell atomic rejection;
-same-cell-only membership; baseline-before/after-snapshot ordering; quiet-stream
-non-completion; duplicate/stale/contradictory baseline handling; wrong-generation,
-state-upload, and resync-flood rejection; join/resume/disconnect/expiration
-reconstruction; and encoding/queue failure without partial commit.
-
-Compatibility: this deliberately advances protocol 1.1 to 1.2 and replaces the
-single-cell server/client configuration. The player registry remains keyed by the
-same exact manifest ID and needs no format migration. Canonical authority and
-checksum encoding do not change.
-
-Limits: no movement tuning, collision, prediction, teleport legality, persistence,
-world-object streaming, adjacent-cell visibility, or general character state.
+Expected output: one concise repository-backed movement design, named proof
+scenarios, and owner options only where speed, collision, prediction, lag policy,
+or player-facing correction behavior requires a durable choice. No production
+movement behavior changes during discovery.
 
 ## Next
 
 These are candidates, not locked slices:
 
-1. Record the approved Phase 11 cell/interest/resync package and implement it.
-2. Run focused protocol/server/client/adapter tests plus the lifecycle integration
-   proof with multi-interior and negative-grid transitions.
-3. Reassess production movement after production cell and visibility semantics
-   exist.
+1. Trace and measure production movement/correction seams on desktop and PC VR.
+2. Decide bounded movement, collision, lag, and correction policy where evidence
+   shows a durable choice is required.
+3. Implement the approved movement package without extending world-object or
+   persistence scope.
 
 The list is rewritten after each completed pass. New evidence may reorder,
 combine, or remove items.
@@ -143,6 +89,8 @@ but they no longer force a predetermined sequence of micro-slices.
 | Phase 7 | **Complete** | Headless authenticated join, observation, movement, disconnect/resume, fault, and soak flow |
 | Phase 8 | **Complete** | OpenMW desktop vertical slice with semantic input and renderer-only remote actors |
 | Phase 9 | **Complete** | Shared desktop/PC-VR client composition, optional bounded pose protocol, isolated pose transport, authority-checked relay, sampled OpenXR input, and desktop safe fallback |
+| Phase 10 | **Complete** | Durable player credential identity and exact content-manifest negotiation |
+| Phase 11 | **Complete** | Exact bounded cell catalog, server-owned same-cell interest, reliable membership baseline, and bounded authenticated resync |
 
 ### Phase 9 completion record
 
