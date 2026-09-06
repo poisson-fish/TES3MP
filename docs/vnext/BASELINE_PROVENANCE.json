@@ -325,6 +325,16 @@
       "purpose": "Declares the bounded Phase 7 queue-drain telemetry sink and evidence value."
     },
     {
+      "path": "apps/tes3mp-server/player_identity_file.cpp",
+      "status": "A",
+      "purpose": "Implements the bounded versioned digest-only player identity registry file with atomic replacement and fail-closed parsing."
+    },
+    {
+      "path": "apps/tes3mp-server/player_identity_file.hpp",
+      "status": "A",
+      "purpose": "Declares the dedicated-server player identity file persistence boundary and closed load errors."
+    },
+    {
       "path": "apps/tes3mp-server/resume_token_context.cpp",
       "status": "A",
       "purpose": "Derives the approved Phase 7 protocol and fixture-content resume-token context through the credential crypto boundary."
@@ -460,6 +470,11 @@
       "purpose": "Owner-approved value-only client-command, entity-precondition, writer-admission, and authoritative spatial-snapshot records."
     },
     {
+      "path": "components/tes3mp/include/tes3mp/content_identity.hpp",
+      "status": "A",
+      "purpose": "Declares exact content-manifest identity and manifest-scoped initial cell, worldspace, and appearance mappings."
+    },
+    {
       "path": "components/tes3mp/include/tes3mp/deterministic_random.hpp",
       "status": "A",
       "purpose": "Owner-approved versioned SplitMix64 and xoshiro256** streams with numeric domain/subject keys, checked restore, and unbiased bounded sampling."
@@ -483,6 +498,11 @@
       "path": "components/tes3mp/include/tes3mp/observability.hpp",
       "status": "A",
       "purpose": "Owner-approved server-core metric/event values, explicit non-owning sink bundle, and no-op sink interfaces without backend or global state."
+    },
+    {
+      "path": "components/tes3mp/include/tes3mp/player_identity.hpp",
+      "status": "A",
+      "purpose": "Declares the bounded transactional player credential digest registry and stable identity claims."
     },
     {
       "path": "components/tes3mp/include/tes3mp/protocol_envelope.hpp",
@@ -618,6 +638,11 @@
       "path": "components/tes3mp/protocol/authentication.cpp",
       "status": "A",
       "purpose": "Move-only bounded password/token storage plus verifier-first T3AQ/T3AA/T3AR credential encoding, decoding, lifetime validation, and best-effort clearing."
+    },
+    {
+      "path": "components/tes3mp/protocol/content_identity.cpp",
+      "status": "A",
+      "purpose": "Implements exact nonzero manifest parsing and bounded manifest-scoped initial content identity validation."
     },
     {
       "path": "components/tes3mp/protocol/generated/authentication_accepted_generated.h",
@@ -798,6 +823,11 @@
       "path": "components/tes3mp/server_core/observability.cpp",
       "status": "A",
       "purpose": "Validation and construction for closed metric definitions/dimensions and typed structured events."
+    },
+    {
+      "path": "components/tes3mp/server_core/player_identity.cpp",
+      "status": "A",
+      "purpose": "Implements random credential issue, digest authentication, monotonic identity allocation, and atomic persistence rollback."
     },
     {
       "path": "components/tes3mp/server_core/server_authentication.cpp",
@@ -1495,6 +1525,11 @@
       "purpose": "Proposes the Slice 9.4 VR provider leaf, shared-source reuse, fork-local composition, and boundary tests for owner review."
     },
     {
+      "path": "docs/vnext/adr/ADR-0057-phase10-durable-player-and-content-identity.md",
+      "status": "A",
+      "purpose": "Records the approved durable player credential and exact manifest-scoped content identity foundation."
+    },
+    {
       "path": "docs/vnext/gdr/GDR-0001-phase7-headless-vertical-slice-behavior.md",
       "status": "A",
       "purpose": "Owner-approved Phase 7 fixture spawn, readiness, cell visibility, provisional tick integration, headless correction, and bounded resume behavior."
@@ -1931,11 +1966,11 @@
         },
         {
           "path": "components/tes3mp/CMakeLists.txt",
-          "sha256": "4d051bb5f7dc0c65f6a7a5ce9f81ff8e89ebcb72ee52728309c0a20b8e977968"
+          "sha256": "15f9f6dd621494f72578ef14b3ac1d0e914a6fd73e6cbe909afb901ec584e492"
         },
         {
           "path": "components/tes3mp/protocol/generated/authentication_accepted_generated.h",
-          "sha256": "77745f74eaa866d6624698d1db05f6c201decd3e0dbd538352711acd62064aae"
+          "sha256": "678461d1648782d3d273d8e79f328ef51e4964a42298d62abbe54baaa5d1ea52"
         },
         {
           "path": "components/tes3mp/protocol/generated/authentication_rejected_generated.h",
@@ -1943,11 +1978,11 @@
         },
         {
           "path": "components/tes3mp/protocol/generated/authentication_request_generated.h",
-          "sha256": "87e8ced423c421c5036f85bb01d1e4d9a29a60ca55ef2f30d76ea5a9618a376f"
+          "sha256": "c10f1429e9f357110a69b2e64e18658b76138b0e8429b7418986600ab5e6a52a"
         },
         {
           "path": "components/tes3mp/protocol/generated/client_hello_generated.h",
-          "sha256": "1ca9a4d075ac2b39c4f95bb267a7704ff7fa061ad1fd6ac46c40309fb045c5e1"
+          "sha256": "951236d2cda2f5c8c5f4253021b8a7a6e2e53dd654c2688acd3c90d64d2f7e69"
         },
         {
           "path": "components/tes3mp/protocol/generated/client_vr_pose_sample_generated.h",
@@ -1955,7 +1990,7 @@
         },
         {
           "path": "components/tes3mp/protocol/generated/latest_wins_snapshot_generated.h",
-          "sha256": "cc96cce7410475e22d8c11bb674161f0655f2a27cfc626913dc3af48cbfcb75a"
+          "sha256": "385885bb1fd9776b8220f710f82f30dfc1addd93f070ee0230252ac09b303e82"
         },
         {
           "path": "components/tes3mp/protocol/generated/reliable_observation_batch_generated.h",
@@ -1967,7 +2002,7 @@
         },
         {
           "path": "components/tes3mp/protocol/generated/server_hello_generated.h",
-          "sha256": "9617ce574881f2f5bdbb020978b04670cb748d0622c295a96f83e8da71f425b2"
+          "sha256": "13616640cf18c6bbcae36cdddc8018be0f9921f435aff2f81a4e8d21c8d70575"
         },
         {
           "path": "components/tes3mp/protocol/generated/server_vr_pose_snapshot_generated.h",
@@ -1975,11 +2010,11 @@
         },
         {
           "path": "components/tes3mp/protocol/generated/session_rejected_generated.h",
-          "sha256": "25217117a5fe941d9cf364b00a0a97029bfcc77f003d7ea825feeff53c2847d0"
+          "sha256": "696392846800ae677246ae316c7d76c5d3e00965362cf03eed4ac9bc072462c9"
         },
         {
           "path": "components/tes3mp/protocol/schema/authentication_accepted.fbs",
-          "sha256": "5cba7568bd37844fb32e5a1f81cc7df6ad149cdc5d3a537404152b80eeb97ab9"
+          "sha256": "f4726874c43b7be450039344670c4ca93800035ae67f33c6b6fa40847708ebc1"
         },
         {
           "path": "components/tes3mp/protocol/schema/authentication_rejected.fbs",
@@ -1987,11 +2022,11 @@
         },
         {
           "path": "components/tes3mp/protocol/schema/authentication_request.fbs",
-          "sha256": "2408d0b811c1b325dfcf62e7d9f19e8a496a39f074399b5730986d16d756d2cb"
+          "sha256": "273faa5c65ab8e6737dd334ff8433e1b24a430a5d72a44b6e938e85914731c79"
         },
         {
           "path": "components/tes3mp/protocol/schema/client_hello.fbs",
-          "sha256": "2636d0afc973e49c91ce562e55e937683fce4827b7a234569a56b6b21700905d"
+          "sha256": "4d8a39efd176aa720a628d6bec7f008c7d0d1e5f908ddcc5c4f29f76f30b2ba9"
         },
         {
           "path": "components/tes3mp/protocol/schema/client_vr_pose_sample.fbs",
@@ -1999,7 +2034,7 @@
         },
         {
           "path": "components/tes3mp/protocol/schema/latest_wins_snapshot.fbs",
-          "sha256": "848aa1a437c59f074c657e76e966125475742dd2ad7e0ea0125283c63aa7c4e0"
+          "sha256": "e1e27381cf9d4115a205353aa0c5d6067cff5ddfa1dec9005ff815ab5e6fc6c7"
         },
         {
           "path": "components/tes3mp/protocol/schema/reliable_observation_batch.fbs",
@@ -2011,7 +2046,7 @@
         },
         {
           "path": "components/tes3mp/protocol/schema/server_hello.fbs",
-          "sha256": "eb6730b9ec03e9468ea6f0964bbf76f58e5acbf191f1a847afe69f6d10e0721a"
+          "sha256": "95249e083292942b8b5a5beed05a8851f51823f1720686d4ce48213aecce3f8c"
         },
         {
           "path": "components/tes3mp/protocol/schema/server_vr_pose_snapshot.fbs",
@@ -2019,7 +2054,7 @@
         },
         {
           "path": "components/tes3mp/protocol/schema/session_rejected.fbs",
-          "sha256": "a99918041b00518ec8def440eef71f4e5652fc5595fb7fe0ae16640ce043e027"
+          "sha256": "8e55447120862b016d2e6ec50389fcc76a2878ed8f121637f311e74e82c241c0"
         },
         {
           "path": "docs/vnext/proofs/flatbuffers/ANDROID_ARM64.md",

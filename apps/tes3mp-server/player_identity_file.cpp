@@ -17,6 +17,29 @@ namespace
     constexpr std::string_view Header = "TES3MP_PLAYER_IDENTITIES_V1";
     constexpr std::size_t MaximumFileBytes = 64 * 1024;
 
+    class TemporaryFileCleanup
+    {
+    public:
+        explicit TemporaryFileCleanup(std::filesystem::path path) noexcept
+            : mPath(std::move(path))
+        {
+        }
+
+        void activate() noexcept { mActive = true; }
+
+        ~TemporaryFileCleanup()
+        {
+            if (!mActive)
+                return;
+            std::error_code ignored;
+            std::filesystem::remove(mPath, ignored);
+        }
+
+    private:
+        std::filesystem::path mPath;
+        bool mActive = false;
+    };
+
     std::optional<std::uint64_t> number(std::string_view value) noexcept
     {
         std::uint64_t result = 0;
@@ -123,14 +146,17 @@ namespace TES3MP::ServerApp
     {
         if (records.size() > MaximumPlayerIdentityRecords)
             return false;
+        std::vector<PersistedPlayerIdentity> candidate(records.begin(), records.end());
         auto temporary = mPath;
         temporary += ".tmp";
+        TemporaryFileCleanup cleanup(temporary);
         {
             std::ofstream stream(temporary, std::ios::binary | std::ios::trunc);
             if (!stream)
                 return false;
+            cleanup.activate();
             stream << Header << '\n';
-            for (const auto& record : records)
+            for (const auto& record : candidate)
                 stream << record.claim.player.value() << ' ' << record.claim.entity.value() << ' '
                        << record.claim.appearance.value() << ' ' << hex(record.claim.contentManifest.bytes()) << ' '
                        << hex(record.credentialDigest.bytes) << '\n';
@@ -140,7 +166,7 @@ namespace TES3MP::ServerApp
         }
         if (!replaceFile(temporary, mPath))
             return false;
-        mRecords.assign(records.begin(), records.end());
+        mRecords = std::move(candidate);
         return true;
     }
     catch (...)

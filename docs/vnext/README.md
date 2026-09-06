@@ -18,10 +18,11 @@ they cannot author canonical movement or gameplay.
 
 Phase 10 adds durable player credential reattachment and exact negotiated
 content-manifest identity while keeping local OpenMW record names out of the
-protocol. The next pass is the Phase 10 milestone gate and vertical-slice choice. The
-[rolling implementation plan](IMPLEMENTATION_PLAN.md) is the authoritative
-Now / Next / Later tracker. The [implementation notes](IMPLEMENTATION_NOTES.md)
-retain detailed historical evidence and owner-review history.
+protocol. Its milestone gate is complete; canonical cells, interest, and
+resynchronization are the selected next discovery pass. The [rolling
+implementation plan](IMPLEMENTATION_PLAN.md) is the authoritative Now / Next /
+Later tracker. The [implementation notes](IMPLEMENTATION_NOTES.md) retain
+detailed historical evidence and owner-review history.
 
 ## Product scope
 

@@ -119,10 +119,11 @@ namespace TES3MP
         std::sort(candidate.begin(), candidate.end(), [](const auto& left, const auto& right) {
             return left.claim.player < right.claim.player;
         });
+        Committed committed{
+            preparationId, mRecords, mNextPlayer, mNextEntity, mIdentityExhausted };
         if (!mPersistence.replace(candidate))
             return false;
-        mCommitted.emplace(Committed{
-            preparationId, mRecords, mNextPlayer, mNextEntity, mIdentityExhausted });
+        mCommitted.emplace(std::move(committed));
         mRecords = std::move(candidate);
         const auto nextPlayer = advance(mNextPlayer);
         const auto nextEntity = advance(mNextEntity);

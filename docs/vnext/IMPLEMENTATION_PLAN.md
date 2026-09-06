@@ -36,39 +36,40 @@ Verification scales with risk:
 
 ## Now
 
-### Phase 10 — player lifecycle and content identity foundation
+### Phase 11 discovery — canonical cells, interest, and resynchronization
 
-Status: **Complete**
+Status: **Ready**
 
-Outcome: the approved A/A model now replaces fixture-only identity assumptions.
+Outcome: replace the remaining two-cell observation fixture with a decision-ready
+production cell/visibility slice before production movement depends on it.
 
-- Fresh password joins receive a dedicated opaque player credential. The client
-  persists the secret; the bounded server registry atomically persists only its
-  digest with stable player/entity/appearance and manifest identity.
-- Credential reattachment still requires ordinary password authentication and
-  restores the same player/entity IDs across expiration and server restart.
-  Routing principals and grace-window resume tokens remain separate.
-- Handshake protocol 1.1 requires exact 32-byte content-manifest agreement before
-  authentication. Manifest-scoped opaque IDs replace magic cell/avatar constants;
-  OpenMW record names remain local adapter configuration.
-- Canonical appearance is explicit and checksum encoding is version 2. The pass
-  retains one configured appearance and spawn; character creation and general
-  character/world persistence remain out of scope.
+- Trace the OpenMW semantic cell-transition source through command validation,
+  canonical state, per-session projection, reliable enter/leave delivery, latest
+  snapshots, and reconnect/resume reconstruction.
+- Inventory the minimum manifest-backed cell catalog needed for multiple interior
+  cells and exterior grids, including normalization, collision handling, bounds,
+  and local OpenMW record mapping. Do not put record names or paths on the wire.
+- Specify server-owned interest membership and an explicit initial/resync baseline
+  marker. Snapshot silence must not mean completion; clients may not upload state
+  or choose their authoritative interest set.
+- Present concise options only for unresolved choices that change compatibility,
+  authority, durable state, or player-visible cell/visibility behavior. End with
+  one bounded implementation pass and named failure/acceptance scenarios.
 
-Evidence: focused protocol/server/client/adapter contracts pass; networking-enabled
-server and headless client builds pass; the lifecycle integration flow passes all
-join, resume, expiry, fresh-identity, and queue-drain checks; full OpenMW desktop
-RelWithDebInfo builds. Decision and limits are in
-[ADR-0057](adr/ADR-0057-phase10-durable-player-and-content-identity.md).
+Proof: a repository-backed flow map, explicit fixture-removal list, bounds and
+failure inventory, compatibility impact, and an updated rolling handoff. No
+production behavior changes in this discovery pass.
+
+Limits: no movement tuning, collision, prediction, teleport policy, persistence,
+world-object streaming, or general character state.
 
 ## Next
 
 These are candidates, not locked slices:
 
-1. Run the Phase 10 milestone gate and audit the new credential/registry format,
-   manifest compatibility boundary, and cross-platform client secret handling.
-2. Decide whether canonical cells/interest or production movement is the next
-   vertical pass, then specify only that selected slice.
+1. Implement the first approved canonical-cell/interest/resync vertical pass.
+2. Run its focused protocol/server/client/adapter and lifecycle integration proof.
+3. Reassess production movement after final cell and visibility semantics exist.
 
 The list is rewritten after each completed pass. New evidence may reorder,
 combine, or remove items.

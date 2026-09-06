@@ -33,6 +33,9 @@ namespace TES3MP::OpenMWAdapter
 
     using ClientCoordinatorResult = std::variant<std::unique_ptr<EngineCoordinator>, ClientCompositionFailure>;
 
+    std::unique_ptr<PlayerCredentialPersistence> makeFilePlayerCredentialPersistence(
+        std::filesystem::path path);
+
     ClientCoordinatorResult makeClientCoordinator(std::string_view host, std::uint64_t port,
         std::uint64_t timeoutMilliseconds, const std::filesystem::path& passwordFile,
         const std::filesystem::path& playerCredentialFile, ContentManifestId contentManifest,

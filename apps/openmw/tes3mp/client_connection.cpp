@@ -50,6 +50,40 @@ namespace TES3MP::OpenMWAdapter
 #endif
         }
 
+        class TemporaryCredentialFileCleanup
+        {
+        public:
+            explicit TemporaryCredentialFileCleanup(std::filesystem::path path) noexcept
+                : mPath(std::move(path))
+            {
+            }
+
+            void activate() noexcept { mActive = true; }
+
+            ~TemporaryCredentialFileCleanup()
+            {
+                if (!mActive)
+                    return;
+                std::error_code ignored;
+                std::filesystem::remove(mPath, ignored);
+            }
+
+        private:
+            std::filesystem::path mPath;
+            bool mActive = false;
+        };
+
+        struct CredentialBuffer
+        {
+            ~CredentialBuffer()
+            {
+                volatile std::byte* destination = bytes.data();
+                for (std::size_t index = 0; index < bytes.size(); ++index)
+                    destination[index] = std::byte{};
+            }
+            std::array<std::byte, PlayerCredentialBytes> bytes{};
+        };
+
         class FilePlayerCredentialPersistence final : public PlayerCredentialPersistence
         {
         public:
@@ -58,23 +92,26 @@ namespace TES3MP::OpenMWAdapter
             bool store(PlayerCredential credential) noexcept override
             try
             {
-                std::array<std::byte, PlayerCredentialBytes> bytes{};
-                if (!credential.copyTo(bytes))
+                CredentialBuffer buffer;
+                if (!credential.copyTo(buffer.bytes))
                     return false;
                 auto temporary = mPath;
                 temporary += ".tmp";
+                TemporaryCredentialFileCleanup cleanup(temporary);
                 {
                     std::ofstream stream(temporary, std::ios::binary | std::ios::trunc);
-                    stream.write(reinterpret_cast<const char*>(bytes.data()), bytes.size());
+                    if (!stream)
+                        return false;
+                    cleanup.activate();
+#ifndef _WIN32
+                    if (::chmod(temporary.c_str(), S_IRUSR | S_IWUSR) != 0)
+                        return false;
+#endif
+                    stream.write(reinterpret_cast<const char*>(buffer.bytes.data()), buffer.bytes.size());
                     stream.flush();
-                    std::fill(bytes.begin(), bytes.end(), std::byte{});
                     if (!stream)
                         return false;
                 }
-#ifndef _WIN32
-                if (::chmod(temporary.c_str(), S_IRUSR | S_IWUSR) != 0)
-                    return false;
-#endif
                 return replaceCredentialFile(temporary, mPath);
             }
             catch (...)
@@ -106,6 +143,12 @@ namespace TES3MP::OpenMWAdapter
         {
             return std::nullopt;
         }
+    }
+
+    std::unique_ptr<PlayerCredentialPersistence> makeFilePlayerCredentialPersistence(
+        std::filesystem::path path)
+    {
+        return std::make_unique<FilePlayerCredentialPersistence>(std::move(path));
     }
 
     ClientCoordinatorResult makeClientCoordinator(std::string_view host, std::uint64_t port,
@@ -180,7 +223,7 @@ namespace TES3MP::OpenMWAdapter
             ReconnectConfiguration{ *endpoint, *timeouts, *queue, contentManifest },
             *providers.input, *providers.presentation,
             *providers.status, providers.control, providers.poseInput,
-            std::make_unique<FilePlayerCredentialPersistence>(playerCredentialFile));
+            makeFilePlayerCredentialPersistence(playerCredentialFile));
 #else
         return ClientCompositionFailure::TransportUnavailable;
 #endif

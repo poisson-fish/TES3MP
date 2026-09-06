@@ -6046,6 +6046,37 @@ only the relevant phase section here.
   RelWithDebInfo OpenMW desktop builds and links. Hardware/content visual proof
   was not run.
 
+### 2026-09-05 milestone gate and next-slice selection
+
+- Audit: protocol 1.1 rejects exact manifest mismatch before authentication;
+  registry V1 is bounded and rejects malformed, duplicate, future-version, and
+  wrong-manifest state; production apps pass explicit manifest identity; the
+  server persists only credential digests and stable identity claims.
+- Hardening: registry/file state now completes fallible allocation before disk
+  replacement, failed temporary files are removed, client credential copy buffers
+  are scrubbed, and POSIX owner-only mode is applied before secret bytes are
+  written. Reviewed decoder-registry pins now match the protocol 1.1 manifest-aware
+  client/server hello golden files, and Phase 10's new identity paths plus changed
+  CMake dependency declaration are recorded in baseline provenance. The file
+  format, credential model, and gameplay behavior are unchanged.
+- Selection: canonical cells/interest/resynchronization precedes production
+  movement. Current observation is same-cell fixture projection, resync returns an
+  unfiltered canonical publication, and no explicit snapshot-complete marker
+  exists. Finalizing these boundaries first avoids movement depending on fixture
+  cell and visibility semantics.
+- Verification: MSVC 19.51 RelWithDebInfo portable protocol, authenticated-join,
+  server-app, headless-client, and OpenMW adapter contract targets pass. The
+  GNS-enabled server/headless and affected contracts build and pass; full
+  `openmw.exe` links; the lifecycle process proof passes 32 reconnects, identity
+  resume/expiry/fresh creation, convergence, stale rejection, and zero final queue
+  depth. GCC 16.2.1 Linux builds and passes authenticated-join, server-app, and
+  adapter contracts, including credential permission and cleanup checks.
+  All 145 repository-owned Python tests pass, including golden-corpus registry
+  verification. Indexed baseline provenance passes with 367 intentional
+  differences and 73 dependency inputs; the OpenMW patch registry passes.
+- Limit: no hardware/content visual run or hosted platform matrix was performed;
+  neither is needed for this file-safety hardening and scheduling pass.
+
 - Content identity must not use local file paths. Canonical record references need
   stable manifest context and explicit collision handling.
 - Moderation primitives belong in canonical server commands now; the secure

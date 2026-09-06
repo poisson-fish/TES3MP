@@ -84,7 +84,7 @@ DECODER_REGISTRY = {
         "corpus": "protocol_handshake",
         "valid_seed": {
             "name": "valid-client-hello",
-            "sha256": "039fba4322ac0bcd9f8fb90ece53b7aa3282665a8ade2ef0c56bdad378e2b4db",
+            "sha256": "42d2abfeec34a81b288f7c9b301e33435b768703d3d82996e19ce97f3a6a87fd",
         },
     },
     "decodeServerHello": {
@@ -93,7 +93,7 @@ DECODER_REGISTRY = {
         "corpus": "protocol_handshake",
         "valid_seed": {
             "name": "valid-server-hello",
-            "sha256": "ec2c7986c57309f89bb010a5581867b22cf4aaf0e086ca2f75f9c96f79cb5449",
+            "sha256": "8f9cdd2d159f17db6fc0d7a722a333d512ce9ab56fa6d3d13c7a09dfe18cd6f1",
         },
     },
     "decodeSessionRejected": {

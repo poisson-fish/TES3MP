@@ -7,6 +7,8 @@
 #include <array>
 #include <cmath>
 #include <cstdlib>
+#include <filesystem>
+#include <fstream>
 #include <iostream>
 #include <limits>
 #include <numbers>
@@ -331,6 +333,35 @@ int main()
 {
     using namespace TES3MP;
     using namespace TES3MP::OpenMWAdapter;
+
+    const auto credentialDirectory
+        = std::filesystem::temp_directory_path() / "tes3mp-openmw-player-credential-test";
+    std::filesystem::remove_all(credentialDirectory);
+    std::filesystem::create_directory(credentialDirectory);
+    const auto credentialPath = credentialDirectory / "player.bin";
+    std::array<std::byte, PlayerCredentialBytes> credentialBytes{};
+    credentialBytes.fill(std::byte{ 0x5a });
+    auto credentialStore = makeFilePlayerCredentialPersistence(credentialPath);
+    require(credentialStore->store(std::move(*PlayerCredential::create(credentialBytes))));
+    std::array<std::byte, PlayerCredentialBytes> storedCredential{};
+    {
+        std::ifstream stream(credentialPath, std::ios::binary);
+        stream.read(reinterpret_cast<char*>(storedCredential.data()), storedCredential.size());
+        require(stream && stream.peek() == std::char_traits<char>::eof());
+    }
+    require(storedCredential == credentialBytes);
+#ifndef _WIN32
+    const auto publicPermissions = std::filesystem::perms::group_all | std::filesystem::perms::others_all;
+    require((std::filesystem::status(credentialPath).permissions() & publicPermissions)
+        == std::filesystem::perms::none);
+#endif
+    std::filesystem::remove(credentialPath);
+    std::filesystem::create_directory(credentialPath);
+    require(!credentialStore->store(std::move(*PlayerCredential::create(credentialBytes))));
+    auto credentialTemporaryPath = credentialPath;
+    credentialTemporaryPath += ".tmp";
+    require(!std::filesystem::exists(credentialTemporaryPath));
+    std::filesystem::remove_all(credentialDirectory);
 
     const auto endpoint = *ConnectionEndpoint::create("127.0.0.1", 25560);
     const auto timeouts = *SessionTimeoutPolicy::create(1'000'000, 1'000'000, 1'000'000);

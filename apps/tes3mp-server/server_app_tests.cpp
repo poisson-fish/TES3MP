@@ -408,11 +408,17 @@ int main()
     const std::array identityRecords{ PersistedPlayerIdentity{
         { id<PlayerId>(3), id<EntityId>(5), id<AppearanceId>(7), testContentManifestId() }, identityDigest } };
     assert(identityFile->replace(identityRecords));
+    auto identityTemporaryPath = identityPath;
+    identityTemporaryPath += ".tmp";
+    assert(!std::filesystem::exists(identityTemporaryPath));
     auto reopenedResult = PlayerIdentityFile::open(identityPath);
     assert(std::holds_alternative<std::unique_ptr<PlayerIdentityFile>>(reopenedResult));
     auto reopened = std::move(std::get<std::unique_ptr<PlayerIdentityFile>>(reopenedResult));
     assert(reopened->records().size() == 1 && reopened->records()[0] == identityRecords[0]);
-    { std::ofstream stream(identityPath, std::ios::binary | std::ios::trunc); stream << "malformed\n"; }
+    {
+        std::ofstream stream(identityPath, std::ios::binary | std::ios::trunc);
+        stream << "TES3MP_PLAYER_IDENTITIES_V2\n";
+    }
     assert(std::holds_alternative<PlayerIdentityFileError>(PlayerIdentityFile::open(identityPath)));
     std::filesystem::remove(identityPath);
 

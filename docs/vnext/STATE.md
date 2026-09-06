@@ -5,8 +5,8 @@ Updated: 2026-09-05
 ## Current status
 
 - Phases 0–10: **Complete**
-- Active work: **none; Phase 10 identity foundation is implemented**
-- Next pass: **run the Phase 10 milestone gate and select the next vertical slice**
+- Active work: **Phase 11 canonical cells/interest discovery is ready**
+- Last pass: **Phase 10 milestone gate, identity audit, and hardening complete**
 - Authoritative tracker: [rolling implementation plan](IMPLEMENTATION_PLAN.md)
 - Historical evidence: [implementation notes](IMPLEMENTATION_NOTES.md)
 
@@ -32,6 +32,12 @@ ADRs and GDRs are required only for consequential, hard-to-reverse decisions.
 - The pass retains one configured spawn and appearance. It does not add character
   creation, inventory, account recovery, scripting, moderation, or general
   character/world persistence. See [ADR-0057](adr/ADR-0057-phase10-durable-player-and-content-identity.md).
+- The milestone audit keeps the V1 registry format fail-closed, moves all
+  fallible in-memory allocation before atomic replacement, removes failed
+  temporary files, scrubs client copy buffers, and applies POSIX owner-only mode
+  before credential bytes are written. Manifest-aware handshake corpus hashes are
+  pinned in the decoder safety registry, and Phase 10 identity paths/dependency
+  input are recorded in baseline provenance.
 
 ## Phase 9 result
 
@@ -79,17 +85,26 @@ work.
   queue depth.
 - Full OpenMW desktop `openmw.exe` builds and links in RelWithDebInfo with the
   production GameNetworkingSockets transport.
+- GCC 16.2.1 on Linux builds and passes authenticated-join, server-app, and
+  OpenMW adapter contracts, including owner-only credential permissions and
+  failed-replacement cleanup.
+- All 145 repository-owned Python tests pass, including decoder golden-corpus
+  registry verification.
+- Indexed baseline provenance passes with 367 intentional differences and 73
+  dependency inputs; the OpenMW patch registry passes.
 - Hardware/content-backed desktop and desktop-to-VR visual proof was not run.
 
 ## Next pass
 
 Read the rolling **Now** section in
-[IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md). Run the Phase 10 milestone gate,
-then select and specify either the canonical cells/interest or production movement
-vertical pass. Do not broaden identity persistence before a new decision.
+[IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md). Trace the full canonical
+cell/interest/resync path and prepare only the bounded decision and implementation
+slice specified there. Do not begin production movement or broaden identity
+persistence.
 
 ## Working-tree expectation
 
-Before starting the next pass, `vnext` should contain the Phase 10 discovery and
-identity-foundation commits and be clean. The separate `vnext-vr` worktree remains
-at the completed Phase 9 baseline until a later shared merge is deliberately made.
+Before starting the next pass, `vnext` should contain the Phase 10 discovery,
+identity foundation, and milestone-gate commits and be clean. The separate
+`vnext-vr` worktree remains at the completed Phase 9 baseline until a later shared
+merge is deliberately made.
