@@ -36,40 +36,83 @@ Verification scales with risk:
 
 ## Now
 
-### Phase 11 discovery — canonical cells, interest, and resynchronization
+### Phase 11 — production cells, interest, and resync decision
 
-Status: **Ready**
+Status: **Awaiting owner approval**
 
-Outcome: replace the remaining two-cell observation fixture with a decision-ready
-production cell/visibility slice before production movement depends on it.
+The discovery pass is complete. It found one end-to-end fixture path:
 
-- Trace the OpenMW semantic cell-transition source through command validation,
-  canonical state, per-session projection, reliable enter/leave delivery, latest
-  snapshots, and reconnect/resume reconstruction.
-- Inventory the minimum manifest-backed cell catalog needed for multiple interior
-  cells and exterior grids, including normalization, collision handling, bounds,
-  and local OpenMW record mapping. Do not put record names or paths on the wire.
-- Specify server-owned interest membership and an explicit initial/resync baseline
-  marker. Snapshot silence must not mean completion; clients may not upload state
-  or choose their authoritative interest set.
-- Present concise options only for unresolved choices that change compatibility,
-  authority, durable state, or player-visible cell/visibility behavior. End with
-  one bounded implementation pass and named failure/acceptance scenarios.
+1. OpenMW reports `Scene::hasCellChanged`; the desktop provider maps only one
+   interior record or one exterior worldspace into `FixtureCellTransition`.
+2. The client queues one reliable transition plus one coalesced deferred value.
+   Server dispatch validates session/generation and the reducer admits only the
+   manifest's interior or exterior `(0,0)` cell before changing canonical state.
+3. Server-app projection recomputes same-cell equality, emits reliable deltas and
+   a complete latest-wins view, admits output before the canonical commit, and the
+   client intersects both feeds for presentation.
+4. Join and resume synthesize ordinary `Enter` batches. The only resync API returns
+   an unfiltered internal publication; no wire request or explicit completion
+   marker exists.
 
-Proof: a repository-backed flow map, explicit fixture-removal list, bounds and
-failure inventory, compatibility impact, and an updated rolling handoff. No
-production behavior changes in this discovery pass.
+Approval choices:
 
-Limits: no movement tuning, collision, prediction, teleport policy, persistence,
-world-object streaming, or general character state.
+1. **Cell catalog — A recommended:** a bounded, sorted manifest catalog declares
+   up to 256 unique cell spaces and 4,096 exact allowed cells. Interior IDs and
+   exterior worldspace/grid tuples are explicit. The OpenMW leaf owns a complete
+   injective ID-to-`ESM::RefId` map, rejects missing records and case-insensitive
+   record collisions, and sends no record names or paths. **B:** exterior bounding
+   rectangles; smaller authoring data, but admits holes and arbitrary empty cells.
+   **C:** any signed-32-bit grid in a known worldspace; simplest, but too broad for
+   hostile client proposals.
+2. **Interest — A recommended:** active players observe exactly the active players
+   in their canonical `CellId`; the server alone derives membership. This preserves
+   current visible behavior while removing fixture identity. **B:** include adjacent
+   exterior grids; useful at cell edges, but selects a new visibility radius and
+   inactive-cell presentation policy. **C:** client-selected sets; rejected because
+   clients would choose authoritative visibility.
+3. **Baseline/resync — A recommended:** add a dedicated reliable complete-membership
+   baseline carrying session/generation, canonical revision, state version, tick,
+   and a sorted bounded member set. Initial join, resume, and an authenticated,
+   one-pending-per-generation metadata-only resync request produce that baseline
+   plus a latest snapshot. Readiness/resync completes only after both the baseline
+   and a snapshot at or after its revision; applying a baseline atomically replaces
+   membership. **B:** mark the existing delta batch and match it to an exact
+   latest-wins snapshot; smaller schema growth, but that snapshot may be coalesced
+   before delivery. **C:** infer completion from snapshot contents or silence;
+   rejected because loss and empty sets are ambiguous.
+
+Recommended bounded implementation: record A/A/A in GDR-0003 and a compact ADR,
+replace the scalar manifest/mapping and every production `Fixture*` seam, add the
+baseline and metadata-only resync roots, and compose them through join, resume,
+runtime resync, client readiness, and presentation replacement. Keep the existing
+256-player/view/change bounds and 16/64 KiB reliable/latest payload budgets; the
+membership-only baseline fits the reliable budget without moving spatial samples
+off the latest-wins lane.
+
+Named proof: catalog empty/overflow/duplicate/kind/mapping/coordinate failures; multiple
+interiors and negative/boundary exterior grids; unknown-cell atomic rejection;
+same-cell-only membership; baseline-before/after-snapshot ordering; quiet-stream
+non-completion; duplicate/stale/contradictory baseline handling; wrong-generation,
+state-upload, and resync-flood rejection; join/resume/disconnect/expiration
+reconstruction; and encoding/queue failure without partial commit.
+
+Compatibility: this deliberately advances protocol 1.1 to 1.2 and replaces the
+single-cell server/client configuration. The player registry remains keyed by the
+same exact manifest ID and needs no format migration. Canonical authority and
+checksum encoding do not change.
+
+Limits: no movement tuning, collision, prediction, teleport legality, persistence,
+world-object streaming, adjacent-cell visibility, or general character state.
 
 ## Next
 
 These are candidates, not locked slices:
 
-1. Implement the first approved canonical-cell/interest/resync vertical pass.
-2. Run its focused protocol/server/client/adapter and lifecycle integration proof.
-3. Reassess production movement after final cell and visibility semantics exist.
+1. Record the approved Phase 11 cell/interest/resync package and implement it.
+2. Run focused protocol/server/client/adapter tests plus the lifecycle integration
+   proof with multi-interior and negative-grid transitions.
+3. Reassess production movement after production cell and visibility semantics
+   exist.
 
 The list is rewritten after each completed pass. New evidence may reorder,
 combine, or remove items.

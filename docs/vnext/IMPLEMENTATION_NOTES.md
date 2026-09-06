@@ -6085,7 +6085,65 @@ only the relevant phase section here.
 
 ## Phase 11 — Canonical cells, interest, and resynchronization
 
-[Back to the phase tracker](IMPLEMENTATION_PLAN.md#phase-11--canonical-cells-interest-and-resynchronization)
+[Back to the active phase tracker](IMPLEMENTATION_PLAN.md#now)
+
+### 2026-09-05 discovery pass
+
+- Flow: `DesktopSemanticInput` observes `Scene::hasCellChanged`, converts the
+  current OpenMW cell through one scalar `DesktopContentMapping`, and the adapter
+  retains one in-flight plus one coalesced deferred `FixtureCellTransition` while
+  suppressing authoritative local-cell correction. `ClientSessionRuntime` adds
+  session/generation, command sequence/ID, canonical revision, entity binding,
+  observed entity revision, and authority epoch before reliable encoding.
+- Writer: `ConnectionSessionCoordinator` validates reliable framing and current
+  session/generation, then `ServerCommandIntakeCoordinator` bounds/stamps the
+  proposal. `CanonicalCommandReducer` preserves position/orientation, checks the
+  manifest's one interior or exterior `(0,0)`, advances entity revision, and
+  prepares immutable canonical state without mutation.
+- Projection: `ServerApplication` compares old/candidate states before commit.
+  `fixture_observation_projection` derives same-cell membership for every active
+  session, emits sorted reliable enter/leave changes and a sorted complete latest
+  view, atomically admits all routed frames, then commits. Join, resume,
+  disconnect, and expiration use the same projection; new/resumed clients receive
+  synthetic all-`Enter` batches plus a latest view.
+- Client: the runtime accepts observation and snapshot lanes independently and
+  buffers pre-binding observations. `ClientSessionStateMachine` applies deltas to
+  a bounded observed-player set and separately replaces the latest spatial view.
+  OpenMW presentation renders only their same-cell intersection. Neither feed has
+  an explicit initial/resync completion marker.
+- Resync gap: `resolveCanonicalResync` only checks current session/generation and
+  returns the latest complete internal publication. There is no request schema,
+  connection routing, interest projection, rate bound, baseline response, or
+  client atomic-replacement composition.
+- Fixture removal: widen `ContentManifest` and server/OpenMW configuration;
+  replace `FixtureCellTransition`, `FixtureCellTransitionCommandProposal`,
+  `UnknownFixtureCell`, `fixture_observation_projection`, scalar desktop mapping,
+  headless two-cell toggles, and their contract assumptions. Historical ADR/GDR
+  names stay unchanged.
+- Bounds: current hard limits are 256 canonical players, active sessions, spatial
+  view entries, and observation changes; 128 pending commands per session
+  generation; 32 inbound messages per client drain; and 16/64 KiB reliable/latest
+  payloads. The recommended catalog adds at most 256 sorted unique cell spaces and
+  4,096 sorted unique exact cells. Overflow fails startup; signed-32-bit exterior
+  coordinates retain existing wire representation.
+- Mapping failures: zero/duplicate IDs, cross-kind reuse, duplicate exact cells,
+  missing cell-space declarations, missing local records, kind mismatch, unknown
+  exterior grids, and two configured names equal under OpenMW's case-insensitive
+  `ESM::RefId` rules all fail closed. Record names and paths remain client-local.
+- Decision: recommend A/A/A — exact allowed-cell catalog, server-owned exact-cell
+  interest, and a dedicated reliable complete-membership baseline paired with a
+  latest snapshot. Initial/resume/resync completes only after both baseline and a
+  snapshot at or beyond its revision; baseline application replaces membership.
+  An authenticated metadata-only resync request allows one pending response per
+  session generation and cannot carry client state.
+- Compatibility: the new roots and completion semantics require protocol 1.2 and
+  scalar content configuration is replaced. The registry's exact manifest ID,
+  canonical state/checksum encoding, server-only commit authority, and ephemeral
+  pose lane remain unchanged.
+- Verification: read-only repository inspection covered the provider/adapter,
+  protocol, client session/runtime, server dispatch/intake/reducer/projection,
+  lifecycle compositions, manifest/configuration, and resync helper. No build or
+  runtime test ran because production behavior did not change.
 
 - Snapshot completion needs an explicit baseline revision/tick. Do not infer
   completion from a quiet connection.

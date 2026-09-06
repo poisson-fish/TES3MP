@@ -5,8 +5,9 @@ Updated: 2026-09-05
 ## Current status
 
 - Phases 0–10: **Complete**
-- Active work: **Phase 11 canonical cells/interest discovery is ready**
-- Last pass: **Phase 10 milestone gate, identity audit, and hardening complete**
+- Phase 11 discovery: **Complete**
+- Active work: **production cell/interest/resync package awaiting owner approval**
+- Last pass: **Phase 11 repository trace and bounded implementation design complete**
 - Authoritative tracker: [rolling implementation plan](IMPLEMENTATION_PLAN.md)
 - Historical evidence: [implementation notes](IMPLEMENTATION_NOTES.md)
 
@@ -14,6 +15,34 @@ The repository now uses a rolling **Now / Next / Later** workflow. Only the
 active pass is specified in implementation detail. The next few passes are
 tentative, and later work stays at outcome level until evidence makes it timely.
 ADRs and GDRs are required only for consequential, hard-to-reverse decisions.
+
+## Phase 11 discovery result
+
+- OpenMW cell changes flow through one pending plus one deferred reliable fixture
+  transition. The server validates the current session/generation and one
+  manifest interior or exterior `(0,0)`, prepares canonical state, derives every
+  target's same-cell deltas/view, admits output, then commits.
+- The client independently applies reliable membership changes and complete
+  latest-wins spatial views. Presentation uses their intersection. Join and resume
+  fake a baseline with ordinary `Enter` changes; quiet input has no explicit
+  completion meaning.
+- The existing core resync helper validates session/generation and returns the
+  latest unfiltered publication only. It has no protocol, routing, interest
+  projection, request bound, or client replacement path.
+- Recommended cell catalog: at most 256 unique cell spaces and 4,096 exact allowed
+  cells, with complete local OpenMW mappings. IDs and cells are sorted/unique;
+  missing records, kind mismatches, unknown grids, and collisions after OpenMW's
+  case-insensitive `ESM::RefId` comparison fail startup or command admission.
+- Recommended interest remains exact canonical-cell equality and server-owned.
+  Adjacent-grid visibility and client-selected interest stay out of scope.
+- Recommended resync adds a reliable membership-only baseline plus a latest
+  snapshot. Initial/resume/resync completion requires both; a metadata-only
+  authenticated request permits one pending response per session generation and
+  cannot upload state.
+- The A/A/A package advances protocol 1.1 to 1.2 and replaces scalar cell config,
+  but does not migrate the player registry, alter canonical checksum encoding, or
+  add movement/teleport/world-object behavior. Alternatives and named failures are
+  in the rolling plan.
 
 ## Phase 10 result
 
@@ -74,6 +103,16 @@ work.
 
 ## Last verified
 
+- Phase 11 discovery inspected the OpenMW provider/adapter, reusable client
+  runtime/state, protocol roots, server dispatch/intake/reducer, projection,
+  join/resume/disconnect/expiration composition, manifest config, and core resync
+  helper.
+- Current bounds were confirmed at 256 canonical players/sessions/view entries/
+  observation changes, 128 pending commands per session generation, 32 inbound
+  messages per client drain, and 16/64 KiB reliable/latest payloads.
+- No build or runtime test was run because production code did not change. The
+  Phase 10 milestone evidence below remains the last implementation verification.
+
 - Standalone protocol/determinism/fault/observability, authenticated-join,
   server-app, and OpenMW adapter contract targets pass under MSVC RelWithDebInfo.
 - Player identity tests cover issue, digest lookup, expiration, same-ID
@@ -97,14 +136,14 @@ work.
 ## Next pass
 
 Read the rolling **Now** section in
-[IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md). Trace the full canonical
-cell/interest/resync path and prepare only the bounded decision and implementation
-slice specified there. Do not begin production movement or broaden identity
-persistence.
+[IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md). Obtain the three recorded owner
+choices, record the approved GDR/ADR package, then implement only that bounded
+cell/interest/resync pass. Do not begin production movement, teleport policy,
+world-object streaming, or broader persistence.
 
 ## Working-tree expectation
 
-Before starting the next pass, `vnext` should contain the Phase 10 discovery,
-identity foundation, and milestone-gate commits and be clean. The separate
+Before starting the next pass, `vnext` should contain the Phase 11 discovery
+commit and be clean. The separate
 `vnext-vr` worktree remains at the completed Phase 9 baseline until a later shared
 merge is deliberately made.
