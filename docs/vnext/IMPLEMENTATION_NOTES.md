@@ -6488,13 +6488,62 @@ only the relevant phase section here.
 
 ## Phase 14 — Interactive objects, locks, traps, and doors
 
-[Back to the phase tracker](IMPLEMENTATION_PLAN.md#phase-14--interactive-objects-locks-traps-and-doors)
+[Back to the active phase tracker](IMPLEMENTATION_PLAN.md#now)
 
-- Separate durable object state from presentation events such as sound or
-  animation triggers. Replaying a snapshot must not replay one-shot effects.
-- Use expected entity revision plus command ID for reliable interactions.
-- VR reach is validated relative to the authoritative player root and declared
-  limits, never solely from controller pose.
+### 2026-09-07 — interactive-object discovery — Complete
+
+- Trace: traced OpenMW door (`MWClass::Door`, `World::activateDoor`, `World::processDoors`),
+  lock/trap (`MWWorld::CellRef`, `MWMechanics::Security`), and player activation
+  (`MWInput::ActionManager`, `MWWorld::Player::activate`, `_runStandardActivationAction`).
+  Archived TES3MP 0.8.1 used client-authored packets (`PacketDoorState`, `PacketObjectLock`,
+  `PacketObjectTrap`, `PacketObjectActivate`) without server authority, reach validation,
+  or key verification.
+- Seam: recommend Package A in [the interactive-object discovery](PHASE14_OBJECT_DISCOVERY.md):
+  a bounded manifest-scoped object catalog, discrete canonical states (Closed/Open,
+  Locked/Unlocked, Armed/Disarmed), server-owned reliable interaction commands with
+  same-cell and bounded reach checks, client-local 90-degree visual animation interpolation,
+  unloaded-cell simulation freeze, and idempotent revision-checked commands.
+- Boundary: inventory, containers, combat, scripting, persistence, physics, and client
+  authority are strictly excluded from this package. No protocol, runtime, gameplay,
+  or rendering behavior changed. Twelve named proof scenarios define the implementation gate.
+
+### 2026-09-07 — interactive-object canonical core (Package A) — Complete
+
+- Approval: owner explicitly approved Package A. Recorded in
+  [ADR-0061](adr/ADR-0061-phase14-server-authoritative-interactive-objects.md) and
+  [GDR-0021](gdr/GDR-0021-phase14-interactive-objects-locks-traps-doors.md).
+- Types: added `InteractiveObjectId`, `KeyPrototypeId`, `TrapPrototypeId`, and
+  `ObjectRevision` strong value types in `components/tes3mp/include/tes3mp/value_types.hpp`.
+- Catalog: implemented `InteractiveObjectCatalog` in
+  `components/tes3mp/include/tes3mp/interactive_object_catalog.hpp` and
+  `components/tes3mp/protocol/interactive_object_catalog.cpp`. Validates manifest
+  binding, ordered object IDs, cell space validity, exact-cell consistency for
+  object and destination transforms, and lock/trap declarations up to 16,384
+  objects per world and 512 per cell.
+- World state: implemented `CanonicalInteractiveObjectWorld` and reducer in
+  `components/tes3mp/include/tes3mp/interactive_object_world.hpp` and
+  `components/tes3mp/server_core/interactive_object_world.cpp`. Discrete door state
+  (`Closed`, `Open`), lock state (`Unlocked`, `Locked`), and trap state (`Disarmed`,
+  `Armed`).
+- Interaction Reducer: `applyObjectInteraction` validates player presence,
+  catalog/state and exact-cell consistency, overflow-safe Euclidean reach from both
+  the server-known player root and client-reported interaction origin to the object,
+  a bounded root-relative origin envelope, monotonic commit ticks, and expected
+  revision matching. Unlocking requires both a matching requested key and possession
+  supplied from independently verified server-owned state. Revision exhaustion and
+  internal failures produce distinct fail-closed outcomes.
+- Verification evidence:
+  - Full standalone TES3MP MSVC RelWithDebInfo build completed cleanly in
+    `build/slice51-msvc`.
+  - `tes3mp_interactive_object_catalog_tests.exe`: all unit tests pass (exit code 0).
+  - `tes3mp_interactive_object_world_tests.exe`: focused canonical-world and reducer scenarios pass (exit code 0).
+  - Python tests: all 158 tests passed (`python -m unittest discover -s scripts/tests`),
+    including new boundary contract test `scripts/tests/test_interactive_object_contract.py`.
+  - Baseline verification passed: `python scripts/verify_vnext_baseline.py` (81 files checked).
+  - Legacy exclusion passed: `python scripts/verify_vnext_legacy_exclusion.py` (4,096 tracked paths,
+    62 CMake files, 1,254 compile commands, 1,971 Ninja build edges checked).
+- Exclusions verified: zero OpenMW, rendering, container, inventory, combat, or persistence
+  dependencies in engine-independent `tes3mp` components.
 
 ## Phase 15 — Inventory, equipment, and container transactions
 

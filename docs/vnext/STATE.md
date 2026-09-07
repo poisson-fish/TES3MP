@@ -13,8 +13,10 @@ Updated: 2026-09-07
 - Phase 13 actor core: **Complete**
 - Phase 13 actor composition/replication: **Complete**
 - Phase 13 lifecycle proof: **Complete**
-- Active work: **Phase 14 interactive-object discovery**
-- Last pass: **Phase 13 live presentation and spawn follow-up complete**
+- Phase 14 discovery: **Complete**
+- Phase 14 canonical core: **Complete**
+- Active work: **Phase 14 interactive-object replication and server composition**
+- Last pass: **Phase 14 canonical core complete (Package A implemented)**
 - Authoritative tracker: [rolling implementation plan](IMPLEMENTATION_PLAN.md)
 - Historical evidence: [implementation notes](IMPLEMENTATION_NOTES.md)
 
@@ -260,6 +262,46 @@ ADRs and GDRs are required only for consequential, hard-to-reverse decisions.
 - Focused actor contract, authenticated-join, and server-app tests pass. The
   RelWithDebInfo dedicated server and full OpenMW targets build and link.
 
+## Phase 14 discovery result
+
+- Traced OpenMW door activation/rotation (`MWClass::Door`, `World::activateDoor`,
+  `World::processDoors`), locks/traps (`MWWorld::CellRef`, `MWMechanics::Security`),
+  and raycast activation (`ActionManager::activate`, `Player::activate`).
+- Archived TES3MP 0.8.1 used client-authored packets (`PacketDoorState`,
+  `PacketObjectLock`, `PacketObjectTrap`, `PacketObjectActivate`) without server
+  authority, reach validation, key verification, or concurrency control.
+- The recommended seam uses a bounded manifest-scoped object catalog, separate
+  canonical object state, discrete door states (Closed/Open), server-owned
+  reliable interaction commands with same-cell and reach checks, client-local
+  visual animation interpolation, and inactive-cell simulation freeze.
+- Three owner options and twelve named proof scenarios are recorded in
+  [the interactive-object discovery](PHASE14_OBJECT_DISCOVERY.md). No runtime,
+  protocol, gameplay, authority, or rendering behavior changed.
+- Inventory, containers, combat, scripting, persistence, physics, and client
+  authority remain strictly excluded from the Phase 14 package.
+
+## Phase 14 canonical core result
+
+- The owner approved Package A in [ADR-0061](adr/ADR-0061-phase14-server-authoritative-interactive-objects.md)
+  and [GDR-0021](gdr/GDR-0021-phase14-interactive-objects-locks-traps-doors.md).
+- Added `InteractiveObjectId`, `KeyPrototypeId`, `TrapPrototypeId`, and `ObjectRevision`
+  strong value types.
+- Manifest-bound `InteractiveObjectCatalog` validates ordered, unique entries up
+  to 16,384 objects per world with exact-cell-consistent static transforms,
+  teleport destinations, lock declarations, and trap declarations.
+- Separate immutable `CanonicalInteractiveObjectWorld` manages runtime object state
+  with discrete `DoorState`, `LockState`, and `TrapState`, initialized deterministically
+  from catalog declarations.
+- Server-authoritative `applyObjectInteraction` reducer processes reliable client
+  interaction commands with mandatory validation: player existence, catalog/state and
+  same-cell matching, overflow-safe Euclidean reach enforcement (<= 384 units by default)
+  from the server player root and the reported interaction origin, a root-relative origin
+  envelope, monotonic ticks, optimistic concurrency checking via expected revision,
+  server-verified key possession for locks, and trap sprung triggers. Revision exhaustion
+  and internal reducer failures have explicit fail-closed outcomes.
+- Inventory, containers, combat, scripting, persistence, physics, and client authority
+  remain strictly excluded.
+
 ## Phase 10 result
 
 - Fresh password joins issue a random 32-byte player credential after ordinary
@@ -322,26 +364,25 @@ work.
 
 ## Last verified
 
-- MSVC Release protocol, authenticated-join, OpenMW adapter, and movement
-  evidence aggregates pass, including actor replication, queue fairness,
-  fixed-tick catch-up, and exact-cell lifecycle contracts.
-- RelWithDebInfo `tes3mp_server`, desktop `openmw`, and merged `openmw_vr`
-  targets build and link.
-- All 154 repository Python tests, indexed baseline provenance, legacy exclusion,
-  target boundaries, and changed-line diff hygiene pass.
-- Representative-content desktop direct/jitter/loss/stall capture remains green.
-  PC-VR hardware and visual proof remain intentionally deferred while the
-  headset charges.
+- Full standalone TES3MP MSVC RelWithDebInfo build completed cleanly in
+  `build/slice51-msvc`.
+- `tes3mp_interactive_object_catalog_tests` and `tes3mp_interactive_object_world_tests`
+  executables pass cleanly (returncode 0).
+- All 158 repository Python tests pass (`python -m unittest discover -s scripts/tests`).
+- `verify_vnext_legacy_exclusion.py` passes (4,096 tracked paths, 62 CMake files,
+  1,254 compile commands, and 1,971 Ninja build edges checked).
+- `verify_vnext_baseline.py` passes with 81 verified input dependency declarations.
+- Target boundary verification and forbidden include checks enforced in CMake.
 
 ## Next pass
 
-Read the rolling **Now** section in
-[IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md). Discover the smallest bounded
-server-authoritative package for interactive objects, locks, traps, and doors;
-return with owner options and named proof scenarios before runtime changes.
+Compose interactive-object state into server tick and exact-cell baseline replication:
+integrate `CanonicalInteractiveObjectWorld` into server application state, wire cell
+entry snapshots to include interactive objects, and forward interaction commands
+from client session intake.
 
 ## Working-tree expectation
 
-`vnext` should contain the committed Phase 13 closure and rolling handoff and be
+`vnext` contains the committed Phase 14 Package A canonical core and should be
 clean. The separate `vnext-vr` worktree remains clean at Phase 13 integration
-merge `2762445c8b`; merge the closure before later VR presentation work.
+merge `2762445c8b`.

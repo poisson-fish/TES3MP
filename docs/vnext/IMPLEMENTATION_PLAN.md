@@ -36,33 +36,27 @@ Verification scales with risk:
 
 ## Now
 
-### Phase 14 — interactive objects, locks, traps, and doors discovery
+### Phase 14 — interactive-object replication and server composition
 
-Status: **Ready**
+Status: **Ready to implement**
 
-Phase 13 is closed with representative two-client lifecycle evidence plus live
-presentation follow-up: canonical actor root motion no longer fights animation
-root motion, and optional collision-validated spawn lists place concurrent demo
-players deterministically. Discover the smallest server-authoritative
-interactive-object package before choosing a state or protocol shape:
+Package A (Canonical Core + Catalog) is complete and verified:
 
-1. trace current OpenMW door, lock, trap, activation, cell, and renderer seams,
-   using archived TES3MP behavior only as requirements evidence;
-2. separate durable object state, reliable interaction commands, canonical
-   outcomes, one-shot presentation effects, and exact-cell interest;
-3. identify bounded identity/content requirements, unloaded-cell behavior,
-   revision/idempotency rules, VR reach validation, and compatibility choices;
-4. record owner options and named proof scenarios, with no runtime behavior
-   change; and
-5. keep inventory, containers, combat, scripting, persistence, physics, and
-   client authority out of the first discovery package.
+- Added `InteractiveObjectId`, `KeyPrototypeId`, `TrapPrototypeId`, and `ObjectRevision` strong value types.
+- Implemented `InteractiveObjectCatalog` with manifest binding, spatial transforms, lock declarations, and trap declarations.
+- Implemented `CanonicalInteractiveObjectWorld` with discrete door, lock, and trap states initialized from catalog defaults.
+- Implemented `applyObjectInteraction` reducer enforcing player presence, catalog/state and same-cell matching,
+  overflow-safe reach checks (<= 384 units by default), root-bounded interaction origins, monotonic ticks,
+  optimistic revision concurrency, server-verified key possession, and trap firing.
+- Acceptance decisions recorded in [ADR-0061](adr/ADR-0061-phase14-server-authoritative-interactive-objects.md) and [GDR-0021](gdr/GDR-0021-phase14-interactive-objects-locks-traps-doors.md).
+- Ready to wire into server application state, cell entry baseline replication, and client session intake.
 
 ## Next
 
 These are candidates, not locked slices:
 
-1. Present the Phase 14 authority/state/content package for owner decision.
-2. Implement the approved bounded interactive-object canonical core.
+1. Compose interactive-object state into server tick and exact-cell baseline replication.
+2. Wire desktop/PC-VR presentation smoothing and 90-degree visual door swing interpolation.
 3. Revisit Phase 12 PC-VR hardware capture before Phase 22 stabilization if
    hardware remains unavailable during Phase 14 presentation work.
 
@@ -108,6 +102,8 @@ but they no longer force a predetermined sequence of micro-slices.
 | Phase 13 actor composition/replication | **Complete** | Required bounded actor content, fixed-tick server composition, optional separate actor replication, exact-cell lifecycle completion, and shared renderer-only desktop/PC-VR presentation |
 | Phase 13 lifecycle closure | **Complete** | Representative-content two-client cell leave/re-entry, four resumes, authenticated resync/rejoin, stable actor identity/revisions, and cross-lane ordering fixes |
 | Phase 13 live presentation follow-up | **Complete** | Canonical-only actor translation, deterministic bounded multi-player spawn points, and representative interior demo placement |
+| Phase 14 discovery | **Complete** | OpenMW door/lock/trap/activation trace, legacy requirements evidence, clean lane separation, named proofs, and owner decision options |
+| Phase 14 canonical core | **Complete** | Manifest-bound catalog, immutable canonical object world, reach/cell/revision/key validation, and discrete state outcomes |
 
 ### Phase 9 completion record
 

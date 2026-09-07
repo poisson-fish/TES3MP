@@ -99,6 +99,26 @@ namespace TES3MP::Detail
     {
         static constexpr std::string_view name = "ActorPrototypeId";
     };
+
+    struct InteractiveObjectIdTag
+    {
+        static constexpr std::string_view name = "InteractiveObjectId";
+    };
+
+    struct KeyPrototypeIdTag
+    {
+        static constexpr std::string_view name = "KeyPrototypeId";
+    };
+
+    struct TrapPrototypeIdTag
+    {
+        static constexpr std::string_view name = "TrapPrototypeId";
+    };
+
+    struct ObjectRevisionTag
+    {
+        static constexpr std::string_view name = "ObjectRevision";
+    };
 }
 
 namespace TES3MP
@@ -128,6 +148,11 @@ namespace TES3MP
     using ActorId = Detail::StrongValue<Detail::ActorIdTag, Detail::StrongValuePolicy::Identity>;
     using ActorPrototypeId
         = Detail::StrongValue<Detail::ActorPrototypeIdTag, Detail::StrongValuePolicy::Identity>;
+    using InteractiveObjectId
+        = Detail::StrongValue<Detail::InteractiveObjectIdTag, Detail::StrongValuePolicy::Identity>;
+    using KeyPrototypeId = Detail::StrongValue<Detail::KeyPrototypeIdTag, Detail::StrongValuePolicy::Identity>;
+    using TrapPrototypeId = Detail::StrongValue<Detail::TrapPrototypeIdTag, Detail::StrongValuePolicy::Identity>;
+    using ObjectRevision = Detail::StrongValue<Detail::ObjectRevisionTag, Detail::StrongValuePolicy::CounterFromOne>;
 }
 
 #endif
