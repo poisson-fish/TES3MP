@@ -1,4 +1,5 @@
 #include <tes3mp/protocol_exchange.hpp>
+#include <tes3mp/actor_replication.hpp>
 
 #include <cstddef>
 #include <cstdint>
@@ -38,5 +39,13 @@ extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t* data, std::size_t size
     if (const auto* value = std::get_if<TES3MP::SessionResyncRequest>(&resync))
         if (TES3MP::decodeSessionResyncRequest(TES3MP::encodeSessionResyncRequest(*value)) != resync)
             std::abort();
+    const auto actorBaseline = TES3MP::decodeReliableActorInterestBaseline(bytes);
+    if (const auto* value = std::get_if<TES3MP::ReliableActorInterestBaseline>(&actorBaseline))
+        if (TES3MP::decodeReliableActorInterestBaseline(TES3MP::encodeReliableActorInterestBaseline(*value))
+            != actorBaseline) std::abort();
+    const auto actorSnapshot = TES3MP::decodeLatestWinsActorSnapshot(bytes);
+    if (const auto* value = std::get_if<TES3MP::LatestWinsActorSnapshot>(&actorSnapshot))
+        if (TES3MP::decodeLatestWinsActorSnapshot(TES3MP::encodeLatestWinsActorSnapshot(*value))
+            != actorSnapshot) std::abort();
     return 0;
 }

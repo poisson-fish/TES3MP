@@ -1,5 +1,6 @@
 #include "server_application.hpp"
 #include "server_config.hpp"
+#include "actor_content.hpp"
 #include "content_collision.hpp"
 #include "connection_session_coordinator.hpp"
 #include "phase7_proof_profile.hpp"
@@ -72,6 +73,36 @@ int main(int argc, char** argv)
         std::cerr << "collision content initialization failed\n";
         return 2;
     }
+    auto actorContent = TES3MP::ServerApp::loadActorContent(config.actorContentFile, config.contentManifest);
+    auto* actorCatalogValue = std::get_if<TES3MP::ActorCatalog>(&actorContent);
+    if (!actorCatalogValue)
+    {
+        std::cerr << "actor content initialization failed\n";
+        return 2;
+    }
+    auto actorCatalog = std::move(*actorCatalogValue);
+    for (const auto& actor : actorCatalog.entries())
+    {
+        if (!collision->canOccupy(actor.initialRoot.cell(), actor.initialRoot.position()))
+        {
+            std::cerr << "actor content collision validation failed\n";
+            return 2;
+        }
+        for (const auto& waypoint : actor.aiPackage.waypoints())
+            if (!collision->canOccupy(actor.initialRoot.cell(), waypoint))
+            {
+                std::cerr << "actor waypoint collision validation failed\n";
+                return 2;
+            }
+    }
+    auto initialActorWorld = TES3MP::createInitialCanonicalActorWorld(actorCatalog);
+    auto* actorWorldValue = std::get_if<TES3MP::CanonicalActorWorld>(&initialActorWorld);
+    if (!actorWorldValue)
+    {
+        std::cerr << "actor world initialization failed\n";
+        return 3;
+    }
+    auto actorWorld = std::move(*actorWorldValue);
     auto password = TES3MP::ServerApp::loadJoinPassword(config.joinPasswordFile);
     if (const auto* error = std::get_if<TES3MP::ServerApp::ConfigError>(&password))
     {
@@ -114,8 +145,12 @@ int main(int argc, char** argv)
     auto* identityFileValue
         = std::get_if<std::unique_ptr<TES3MP::ServerApp::PlayerIdentityFile>>(&identityFileResult);
     auto identityFile = identityFileValue ? std::move(*identityFileValue) : nullptr;
+    std::vector<TES3MP::EntityId> actorEntityIds;
+    actorEntityIds.reserve(actorCatalog.entries().size());
+    for (const auto& actor : actorCatalog.entries()) actorEntityIds.push_back(actor.entityId);
     auto playerIdentityResult = crypto && identityFile
-        ? TES3MP::PlayerIdentityRegistry::create(*crypto, *identityFile, identityFile->records())
+        ? TES3MP::PlayerIdentityRegistry::create(
+            *crypto, *identityFile, identityFile->records(), actorEntityIds)
         : std::variant<std::unique_ptr<TES3MP::PlayerIdentityRegistry>, TES3MP::PlayerIdentityError>(
               TES3MP::PlayerIdentityError::InvalidInitialState);
     auto* playerIdentityValue
@@ -129,7 +164,7 @@ int main(int argc, char** argv)
     auto versions = std::get<TES3MP::ProtocolVersionRange>(TES3MP::ProtocolVersionRange::create(
         TES3MP::ServerApp::Phase7ProtocolMajor, TES3MP::ServerApp::Phase7ProtocolMinimumMinor,
         TES3MP::ServerApp::Phase7ProtocolMaximumMinor));
-    const std::array optionalCapabilities{ TES3MP::vrPoseCapability() };
+    const std::array optionalCapabilities{ TES3MP::vrPoseCapability(), TES3MP::actorReplicationCapability() };
     auto offer = TES3MP::CapabilityOffer::create(
         std::move(versions), optionalCapabilities, {}, config.contentManifest.id());
     const auto zero = TES3MP::Turn32::fromValue(0);
@@ -157,9 +192,10 @@ int main(int argc, char** argv)
         *limiter, *joinProvider, *resumeStore, clock, playerIdentities.get());
     TES3MP::ServerApp::ConnectionSessionCoordinator sessions(clock, observability, *timeouts,
         std::get<TES3MP::CapabilityOffer>(std::move(offer)), authentication, *queues,
-        TES3MP::ServerApp::Phase7ConnectionCapacity);
+        TES3MP::ServerApp::Phase7ConnectionCapacity, &actorWorld);
     TES3MP::ServerApp::ServerApplication application(*factory.runtime, config,
-        { sessions, *joins, *crypto, *queues, clock, intake, reducer, *lifecycle });
+        { sessions, *joins, *crypto, *queues, clock, intake, reducer, *lifecycle,
+            &actorCatalog, &actorWorld, collision.get() });
     if (!application.start())
     {
         std::cerr << application.failure() << '\n';

@@ -2,8 +2,10 @@
 
 #include "tes3mp/protocol_frame.hpp"
 #include "connection_session_coordinator.hpp"
+#include "actor_interest_projection.hpp"
 #include "interest_projection.hpp"
 
+#include <algorithm>
 #include <variant>
 
 namespace TES3MP::ServerApp
@@ -22,9 +24,17 @@ namespace TES3MP::ServerApp
             auto baseline = projectInterestBaseline(after, join.session, tick, revision, stateVersion);
             auto projected = projectInterestChanges(before, after, tick, revision);
             if (!baseline || !projected) return false;
+            const auto* joiningSession = mSessions->session(mConnection);
+            const auto actorCapable = joiningSession && joiningSession->negotiatedHello()
+                && std::ranges::binary_search(joiningSession->negotiatedHello()->negotiatedCapabilities(),
+                    actorReplicationCapability());
+            auto actorBaseline = actorCapable && mActors
+                ? projectActorInterestBaseline(after, *mActors, join.session, tick, revision)
+                : std::optional<ActorInterestBaselineDelivery>{};
+            if (actorCapable && (!mActors || !actorBaseline)) return false;
             std::vector<std::vector<std::byte>> owned;
             std::vector<OutboundQueueSet::AtomicMessage> messages;
-            owned.reserve(3 + projected->size() * 2);
+            owned.reserve(5 + projected->size() * 2);
             owned.emplace_back(authentication.begin(), authentication.end());
             auto baselineFrame = encodeProtocolFrame(MessageClass::ReliableOperation,
                 MessageKind::ReliableInterestBaseline, encodeReliableInterestBaseline(baseline->baseline));
@@ -37,6 +47,22 @@ namespace TES3MP::ServerApp
             messages.push_back({ mConnection, TransportChannel::ReliableOrdered, owned[0] });
             messages.push_back({ mConnection, TransportChannel::ReliableOrdered, owned[1] });
             messages.push_back({ mConnection, TransportChannel::LatestWins, owned[2] });
+
+            if (actorBaseline)
+            {
+                auto actorBaselineFrame = encodeProtocolFrame(MessageClass::ReliableOperation,
+                    MessageKind::ReliableActorInterestBaseline,
+                    encodeReliableActorInterestBaseline(actorBaseline->baseline));
+                auto actorViewFrame = encodeProtocolFrame(MessageClass::LatestWinsSnapshot,
+                    MessageKind::LatestWinsActorSnapshot,
+                    encodeLatestWinsActorSnapshot(actorBaseline->view));
+                if (!std::holds_alternative<std::vector<std::byte>>(actorBaselineFrame)
+                    || !std::holds_alternative<std::vector<std::byte>>(actorViewFrame)) return false;
+                owned.push_back(std::get<std::vector<std::byte>>(std::move(actorBaselineFrame)));
+                messages.push_back({ mConnection, TransportChannel::ReliableOrdered, owned.back() });
+                owned.push_back(std::get<std::vector<std::byte>>(std::move(actorViewFrame)));
+                messages.push_back({ mConnection, TransportChannel::LatestWins, owned.back() });
+            }
 
             for (const auto& delivery : *projected)
             {

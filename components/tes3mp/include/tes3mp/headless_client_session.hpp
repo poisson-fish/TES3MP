@@ -42,6 +42,9 @@ namespace TES3MP
         LatestWinsSnapshotReceiveResult receiveLatestWinsSnapshot(LatestWinsSnapshot snapshot);
         ReliableObservationReceiveResult receiveReliableObservationBatch(ReliableObservationBatch batch);
         ReliableInterestBaselineReceiveResult receiveReliableInterestBaseline(ReliableInterestBaseline baseline);
+        ActorReplicationReceiveResult receiveLatestWinsActorSnapshot(LatestWinsActorSnapshot snapshot);
+        ActorReplicationReceiveResult receiveReliableActorInterestBaseline(
+            ReliableActorInterestBaseline baseline);
         HeadlessClientResult close() noexcept;
 
         const ClientSessionStateMachine& stateMachine() const noexcept { return *mState; }

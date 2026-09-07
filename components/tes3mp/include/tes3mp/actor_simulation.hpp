@@ -15,13 +15,6 @@
 
 namespace TES3MP
 {
-    enum class ActorActivity : std::uint8_t
-    {
-        Idle,
-        Travel,
-        Wander,
-    };
-
     class CanonicalActorEntityState
     {
     public:

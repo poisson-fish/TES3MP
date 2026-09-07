@@ -204,10 +204,19 @@ namespace TES3MP::OpenMWAdapter
                 && left.transform() == right.transform() && left.linearVelocity() == right.linearVelocity()
                 && left.locomotionMode() == right.locomotionMode();
         }
+
+        bool sameReplicatedState(const ActorSpatialSnapshot& left, const ActorSpatialSnapshot& right) noexcept
+        {
+            return left.actorId() == right.actorId() && left.entityId() == right.entityId()
+                && left.prototypeId() == right.prototypeId() && left.entityRevision() == right.entityRevision()
+                && left.authorityEpoch() == right.authorityEpoch() && left.transform() == right.transform()
+                && left.linearVelocity() == right.linearVelocity() && left.activity() == right.activity();
+        }
     }
 
     std::optional<DesktopContentMapping> DesktopContentMapping::create(ContentManifest manifest,
-        std::span<const DesktopCellSpaceMapping> cellSpaces, AppearanceId appearanceId, std::string avatarNpc)
+        std::span<const DesktopCellSpaceMapping> cellSpaces, AppearanceId appearanceId, std::string avatarNpc,
+        std::span<const DesktopActorPrototypeMapping> actorPrototypes)
     try
     {
         if (appearanceId != manifest.defaultAppearance() || avatarNpc.empty()
@@ -227,8 +236,21 @@ namespace TES3MP::OpenMWAdapter
             for (std::size_t prior = 0; prior < index; ++prior)
                 if (local == refId(mappings[prior].record)) return std::nullopt;
         }
+        std::vector<DesktopActorPrototypeMapping> prototypes(actorPrototypes.begin(), actorPrototypes.end());
+        std::ranges::sort(prototypes, {}, &DesktopActorPrototypeMapping::id);
+        for (std::size_t index = 0; index < prototypes.size(); ++index)
+        {
+            if (prototypes[index].record.empty()
+                || (index != 0 && prototypes[index - 1].id == prototypes[index].id)) return std::nullopt;
+            const auto local = refId(prototypes[index].record);
+            if (local == refId(avatarNpc)) return std::nullopt;
+            for (const auto& mapping : mappings)
+                if (local == refId(mapping.record)) return std::nullopt;
+            for (std::size_t prior = 0; prior < index; ++prior)
+                if (local == refId(prototypes[prior].record)) return std::nullopt;
+        }
         return DesktopContentMapping{ std::move(manifest), std::move(mappings), appearanceId,
-            std::move(avatarNpc) };
+            std::move(avatarNpc), std::move(prototypes) };
     }
     catch (...) { return std::nullopt; }
 
@@ -311,6 +333,19 @@ namespace TES3MP::OpenMWAdapter
             }
         };
 
+        struct ActorRemote
+        {
+            MWWorld::CellStore* cell = nullptr;
+            std::unique_ptr<MWRender::ReplicatedActor> actor;
+            RemoteMotionBuffer motion;
+            std::optional<ActorSpatialSnapshot> lastObserved;
+            std::optional<MonotonicInstant> lastAdvance;
+
+            ActorRemote(MWWorld::CellStore* targetCell, std::unique_ptr<MWRender::ReplicatedActor> targetActor,
+                RemoteMotionMetricSink& metrics)
+                : cell(targetCell), actor(std::move(targetActor)), motion(metrics) {}
+        };
+
         explicit Impl(RemoteMotionMetricSink& targetMetrics)
             : metrics(targetMetrics)
         {
@@ -319,6 +354,7 @@ namespace TES3MP::OpenMWAdapter
         std::optional<DesktopContentMapping> mapping;
         RemoteMotionMetricSink& metrics;
         std::map<EntityId, Remote> remotes;
+        std::map<EntityId, ActorRemote> actorRemotes;
 
         void clear() noexcept
         {
@@ -328,6 +364,18 @@ namespace TES3MP::OpenMWAdapter
                 remote.motion.clear();
             }
             remotes.clear();
+            for (auto& [entity, remote] : actorRemotes)
+            {
+                (void)entity;
+                remote.motion.clear();
+            }
+            actorRemotes.clear();
+        }
+
+        void erase(std::map<EntityId, ActorRemote>::iterator iter) noexcept
+        {
+            iter->second.motion.clear();
+            actorRemotes.erase(iter);
         }
 
         void erase(std::map<EntityId, Remote>::iterator iter) noexcept
@@ -450,6 +498,69 @@ namespace TES3MP::OpenMWAdapter
             return ProviderResult::Accepted;
         }
 
+        ProviderResult applyActors(const LatestWinsActorSnapshot& snapshot,
+            std::span<const ActorInterestMember> observedActors, MonotonicInstant receivedAt)
+        {
+            if (!mapping) return ProviderResult::ContentMappingFailed;
+            const auto& content = *mapping;
+            std::array<std::optional<EntityId>, MaximumActorInterestMembers> desired;
+            std::size_t desiredCount = 0;
+            for (const auto& observed : observedActors)
+            {
+                const auto entry = std::ranges::find_if(snapshot.view().entries(), [&](const auto& candidate) {
+                    return candidate.actorId() == observed.actorId && candidate.entityId() == observed.entityId
+                        && candidate.prototypeId() == observed.prototypeId;
+                });
+                if (entry == snapshot.view().entries().end()) return ProviderResult::PresentationFailed;
+                const auto prototype = std::ranges::lower_bound(
+                    content.actorPrototypes, observed.prototypeId, {}, &DesktopActorPrototypeMapping::id);
+                if (prototype == content.actorPrototypes.end() || prototype->id != observed.prototypeId)
+                    return ProviderResult::ContentMappingFailed;
+                auto* targetCell = resolveCell(entry->transform().cell(), content);
+                if (!targetCell) return ProviderResult::ContentMappingFailed;
+                if (desiredCount == desired.size())
+                    return ProviderResult::PresentationFailed;
+                desired[desiredCount++].emplace(observed.entityId);
+                auto found = actorRemotes.find(observed.entityId);
+                const auto position = toOpenMW(entry->transform());
+                if (found == actorRemotes.end() || found->second.cell != targetCell)
+                {
+                    if (found != actorRemotes.end()) erase(found);
+                    if (remotes.size() + actorRemotes.size() >= MWRender::MaximumReplicatedActors)
+                        return ProviderResult::PresentationFailed;
+                    auto [actorResult, actor] = MWRender::ReplicatedActor::create(*MWBase::Environment::get()
+                        .getWorld()->getRenderingManager(), *MWBase::Environment::get().getESMStore(),
+                        refId(prototype->record), *targetCell, position);
+                    const auto mapped = mapReplicatedActorResult(actorResult);
+                    if (mapped != ProviderResult::Accepted || !actor) return mapped;
+                    found = actorRemotes.try_emplace(
+                        observed.entityId, targetCell, std::move(actor), metrics).first;
+                }
+                if (found->second.lastObserved
+                    && entry->entityRevision() == found->second.lastObserved->entityRevision())
+                {
+                    if (!sameReplicatedState(*entry, *found->second.lastObserved))
+                        return ProviderResult::PresentationFailed;
+                    continue;
+                }
+                if (!found->second.motion.observe(*entry, receivedAt))
+                    return ProviderResult::PresentationFailed;
+                found->second.lastObserved = *entry;
+            }
+            if (snapshot.view().entries().size() != observedActors.size())
+                return ProviderResult::PresentationFailed;
+            for (auto iter = actorRemotes.begin(); iter != actorRemotes.end();)
+                if (std::find_if(desired.begin(), desired.begin() + desiredCount,
+                        [&](const auto& value) { return value && *value == iter->first; })
+                    == desired.begin() + desiredCount)
+                {
+                    iter->second.motion.clear();
+                    iter = actorRemotes.erase(iter);
+                }
+                else ++iter;
+            return ProviderResult::Accepted;
+        }
+
         ProviderResult advance(MonotonicInstant now)
         {
             for (auto& [entity, remote] : remotes)
@@ -472,6 +583,25 @@ namespace TES3MP::OpenMWAdapter
                 {
                     Log(Debug::Error) << "TES3MP replicated actor update failed: entity=" << entity.value()
                                       << " result=" << replicatedActorResultName(actorResult);
+                    return result;
+                }
+            }
+            for (auto& [entity, remote] : actorRemotes)
+            {
+                auto pose = remote.motion.advance(now);
+                if (!pose) return ProviderResult::PresentationFailed;
+                float animationSeconds = 0.f;
+                if (remote.lastAdvance && now >= *remote.lastAdvance)
+                    animationSeconds = static_cast<float>(now.nanoseconds()
+                        - remote.lastAdvance->nanoseconds()) / 1e9f;
+                remote.lastAdvance = now;
+                const auto actorResult = remote.actor->update(
+                    toOpenMW(*pose), toOpenMW(remoteLocomotionAnimation(*pose)), animationSeconds);
+                const auto result = mapReplicatedActorResult(actorResult);
+                if (result != ProviderResult::Accepted)
+                {
+                    Log(Debug::Error) << "TES3MP replicated content actor update failed: entity="
+                                      << entity.value() << " result=" << replicatedActorResultName(actorResult);
                     return result;
                 }
             }
@@ -518,6 +648,22 @@ namespace TES3MP::OpenMWAdapter
             const auto result = mImpl->advance(now);
             if (result != ProviderResult::Accepted)
                 mImpl->clear();
+            return result;
+        }
+        catch (...)
+        {
+            mImpl->clear();
+            return ProviderResult::PresentationFailed;
+        }
+    }
+
+    ProviderResult DesktopPresentation::applyActors(const LatestWinsActorSnapshot& snapshot,
+        std::span<const ActorInterestMember> observedActors, MonotonicInstant receivedAt) noexcept
+    {
+        try
+        {
+            const auto result = mImpl->applyActors(snapshot, observedActors, receivedAt);
+            if (result != ProviderResult::Accepted) mImpl->clear();
             return result;
         }
         catch (...)

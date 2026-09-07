@@ -76,7 +76,7 @@ namespace TES3MP::ServerApp
         if (text.size() > MaximumConfigBytes) return error(ConfigErrorCode::TooLarge);
         if (!validUtf8(text)) return error(ConfigErrorCode::InvalidUtf8);
 
-        std::array<bool, 13> seen{};
+        std::array<bool, 14> seen{};
         std::string bindAddress;
         std::uint16_t port = 0;
         std::uint64_t tick = 0;
@@ -89,6 +89,7 @@ namespace TES3MP::ServerApp
         std::optional<AppearanceId> defaultAppearanceId;
         std::optional<MovementProfile> movementProfile;
         std::filesystem::path collisionContentPath;
+        std::filesystem::path actorContentPath;
         std::filesystem::path playerIdentityPath;
         std::size_t lineNumber = 0;
         std::size_t begin = 0;
@@ -119,7 +120,8 @@ namespace TES3MP::ServerApp
                 else if (key == "default_appearance_id") slot = 9;
                 else if (key == "movement_profile") slot = 10;
                 else if (key == "collision_content_file") slot = 11;
-                else if (key == "player_identity_file") slot = 12;
+                else if (key == "actor_content_file") slot = 12;
+                else if (key == "player_identity_file") slot = 13;
                 else return error(ConfigErrorCode::UnknownKey, lineNumber, key);
                 if (seen[slot]) return error(ConfigErrorCode::DuplicateKey, lineNumber, key);
                 if (value.empty() || value.find('#') != std::string_view::npos
@@ -190,6 +192,12 @@ namespace TES3MP::ServerApp
                         return error(ConfigErrorCode::InvalidValue, lineNumber, key);
                     collisionContentPath = std::filesystem::u8path(value);
                 }
+                else if (slot == 12)
+                {
+                    if (value.size() > MaximumActorContentPathBytes)
+                        return error(ConfigErrorCode::InvalidValue, lineNumber, key);
+                    actorContentPath = std::filesystem::u8path(value);
+                }
                 else
                 {
                     if (value.size() > MaximumIdentityPathBytes)
@@ -203,10 +211,10 @@ namespace TES3MP::ServerApp
         for (std::size_t slot = 0; slot < seen.size(); ++slot)
             if (!seen[slot])
                 return error(ConfigErrorCode::MissingKey, 0,
-                    std::array<std::string_view, 13>{ "bind_address", "port", "tick_interval_ms",
+                    std::array<std::string_view, 14>{ "bind_address", "port", "tick_interval_ms",
                         "disconnect_grace_ms", "join_password_file", "content_manifest_id", "cell_spaces",
                         "allowed_cells", "spawn_cell", "default_appearance_id", "movement_profile",
-                        "collision_content_file", "player_identity_file" }[slot]);
+                        "collision_content_file", "actor_content_file", "player_identity_file" }[slot]);
         auto endpoint = ListenerEndpoint::create(bindAddress, port);
         if (!endpoint) return error(ConfigErrorCode::InvalidValue, 0, "bind_address");
         auto manifest = ContentManifest::create(
@@ -214,7 +222,8 @@ namespace TES3MP::ServerApp
         if (!manifest || !manifest->contains(*spawnCell))
             return error(ConfigErrorCode::InvalidValue, 0, "content_manifest_id");
         return ServerConfig{ std::move(*endpoint), tick, grace, std::move(passwordPath), *manifest,
-            *spawnCell, std::move(collisionContentPath), std::move(playerIdentityPath) };
+            *spawnCell, std::move(collisionContentPath), std::move(actorContentPath),
+            std::move(playerIdentityPath) };
     }
 
     PasswordLoadResult loadJoinPassword(const std::filesystem::path& path)

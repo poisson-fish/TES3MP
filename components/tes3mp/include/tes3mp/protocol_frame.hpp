@@ -42,7 +42,9 @@ namespace TES3MP
         ReliableObservationBatch = 0x0101,
         SessionResyncRequest = 0x0102,
         ReliableInterestBaseline = 0x0103,
+        ReliableActorInterestBaseline = 0x0104,
         LatestWinsSnapshot = 0x0200,
+        LatestWinsActorSnapshot = 0x0201,
         ClientVrPoseSample = 0x0300,
         ServerVrPoseSnapshot = 0x0301,
     };
@@ -71,8 +73,10 @@ namespace TES3MP
             case MessageKind::ReliableOperation:
             case MessageKind::ReliableObservationBatch:
             case MessageKind::ReliableInterestBaseline:
+            case MessageKind::ReliableActorInterestBaseline:
                 return MessageDescriptor{ kind, MessageClass::ReliableOperation, ReliableOperationMaximumPayloadBytes };
             case MessageKind::LatestWinsSnapshot:
+            case MessageKind::LatestWinsActorSnapshot:
                 return MessageDescriptor{ kind, MessageClass::LatestWinsSnapshot,
                     LatestWinsSnapshotMaximumPayloadBytes };
             case MessageKind::ClientVrPoseSample:

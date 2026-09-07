@@ -1,0 +1,23 @@
+namespace TES3MP.Protocol.Schema.ActorBaseline;
+
+table ActorBaselineHeader {
+  target_session_id:ulong (id: 0);
+  target_session_generation:ulong (id: 1);
+  server_tick:ulong (id: 2);
+  canonical_revision:ulong (id: 3);
+}
+
+struct ActorInterestMember {
+  actor_id:ulong;
+  entity_id:ulong;
+  prototype_id:ulong;
+}
+
+table ReliableActorInterestBaseline {
+  header:ActorBaselineHeader (id: 0);
+  members:[ActorInterestMember] (id: 1);
+}
+
+root_type ReliableActorInterestBaseline;
+file_identifier "T3AB";
+file_extension "t3ab";

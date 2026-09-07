@@ -25,9 +25,9 @@ namespace TES3MP::ServerApp
 
     ConnectionSessionCoordinator::ConnectionSessionCoordinator(MonotonicClock& clock, Observability& observability,
         SessionTimeoutPolicy timeouts, CapabilityOffer offer, ServerAuthenticationService& authentication,
-        OutboundQueueSet& queues, std::size_t capacity) noexcept
+        OutboundQueueSet& queues, std::size_t capacity, const CanonicalActorWorld* actors) noexcept
         : mClock(clock), mObservability(observability), mTimeouts(timeouts), mOffer(std::move(offer)),
-          mAuthentication(authentication), mQueues(queues), mCapacity(capacity)
+          mAuthentication(authentication), mQueues(queues), mCapacity(capacity), mActors(actors)
     {
     }
 
@@ -252,7 +252,7 @@ namespace TES3MP::ServerApp
         if (state->preparedResumeId()) return ConnectionSessionResult::ResumePrepared;
         auto context = makeResumeTokenContext(*state->negotiatedHello(), crypto);
         if (!context) return ConnectionSessionResult::ProtocolRejected;
-        TransportJoinResponseQueue responses(mQueues, connection, this);
+        TransportJoinResponseQueue responses(mQueues, connection, this, mActors);
         AuthenticatedJoinComposition composition(joins, mAuthentication, responses);
         auto outcome = composition.join(
             *state->principal(), state->generation(), tick, *context, state->playerClaim());

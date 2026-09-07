@@ -2,6 +2,7 @@
 #define TES3MP_CLIENT_SESSION_RUNTIME_HPP
 
 #include "authentication.hpp"
+#include "actor_replication.hpp"
 #include "client_locomotion.hpp"
 #include "headless_client_session.hpp"
 #include "protocol_handshake.hpp"
@@ -16,7 +17,7 @@ namespace TES3MP
 {
     using ClientRuntimeMessage = std::variant<ServerHello, SessionRejected, AuthenticationAcceptedMessage,
         AuthenticationRejectedMessage, LatestWinsSnapshot, ReliableObservationBatch, ReliableInterestBaseline,
-        ServerVrPoseSnapshot>;
+        LatestWinsActorSnapshot, ReliableActorInterestBaseline, ServerVrPoseSnapshot>;
 
     enum class ClientRuntimeResult : std::uint8_t
     {
@@ -45,6 +46,9 @@ namespace TES3MP
         bool observationApplied = false;
         bool baselineApplied = false;
         bool baselineCompleted = false;
+        bool actorSnapshotApplied = false;
+        bool actorBaselineApplied = false;
+        bool actorBaselineCompleted = false;
         bool resyncRequested = false;
         bool authenticationAccepted = false;
         std::vector<ServerVrPoseSnapshot> poseSnapshots;

@@ -1,5 +1,6 @@
 #include "server_application.hpp"
 #include "interest_projection.hpp"
+#include "actor_interest_projection.hpp"
 #include "tes3mp/canonical_resync.hpp"
 
 #include <array>
@@ -26,6 +27,16 @@ namespace TES3MP::ServerApp
         : mTransport(transport), mConfig(config), mWiring(wiring) {}
 
     ServerApplication::~ServerApplication() { stop(); }
+
+    bool ServerApplication::supportsActors(TransportConnectionId connection) const noexcept
+    {
+        if (!mWiring) return false;
+        const auto* session = mWiring->sessions.session(connection);
+        if (!session || session->state() != ServerSessionState::Established || !session->sessionId()) return false;
+        const auto& hello = session->negotiatedHello();
+        return hello && std::ranges::binary_search(
+            hello->negotiatedCapabilities(), actorReplicationCapability());
+    }
 
     bool ServerApplication::start() noexcept
     {
@@ -218,12 +229,17 @@ namespace TES3MP::ServerApp
         auto observations = candidate && revision
             ? projectInterestChanges(before, *candidate, tick, *revision) : std::nullopt;
         auto accepted = session->takeAuthenticationAccepted();
-        if (!candidate || !baseline || !observations || !accepted) { cancel(); return false; }
+        auto actorBaseline = candidate && mWiring->actors && supportsActors(connection)
+            ? projectActorInterestBaseline(
+                *candidate, *mWiring->actors, *session->sessionId(), tick, *revision)
+            : std::optional<ActorInterestBaselineDelivery>{};
+        if (!candidate || !baseline || !observations || !accepted
+            || (supportsActors(connection) && !actorBaseline)) { cancel(); return false; }
 
         try
         {
             std::vector<std::vector<std::byte>> frames;
-            frames.reserve(3 + observations->size() * 2);
+            frames.reserve(5 + observations->size() * 2);
             auto addFrame = [&](MessageClass messageClass, MessageKind kind, std::vector<std::byte> payload) {
                 auto encoded = encodeProtocolFrame(messageClass, kind, payload);
                 if (!std::holds_alternative<std::vector<std::byte>>(encoded)) return false;
@@ -236,12 +252,22 @@ namespace TES3MP::ServerApp
                     encodeReliableInterestBaseline(baseline->baseline))
                 || !addFrame(MessageClass::LatestWinsSnapshot, MessageKind::LatestWinsSnapshot,
                     encodeLatestWinsSnapshot(baseline->view))) { cancel(); return false; }
+            if (actorBaseline
+                && (!addFrame(MessageClass::ReliableOperation, MessageKind::ReliableActorInterestBaseline,
+                        encodeReliableActorInterestBaseline(actorBaseline->baseline))
+                    || !addFrame(MessageClass::LatestWinsSnapshot, MessageKind::LatestWinsActorSnapshot,
+                        encodeLatestWinsActorSnapshot(actorBaseline->view)))) { cancel(); return false; }
 
             std::vector<OutboundQueueSet::AtomicMessage> messages;
-            messages.reserve(3 + observations->size() * 2);
+            messages.reserve(5 + observations->size() * 2);
             messages.push_back({ connection, TransportChannel::ReliableOrdered, frames[0] });
             messages.push_back({ connection, TransportChannel::ReliableOrdered, frames[1] });
             messages.push_back({ connection, TransportChannel::LatestWins, frames[2] });
+            if (actorBaseline)
+            {
+                messages.push_back({ connection, TransportChannel::ReliableOrdered, frames[3] });
+                messages.push_back({ connection, TransportChannel::LatestWins, frames[4] });
+            }
             for (const auto& delivery : *observations)
             {
                 auto target = mWiring->sessions.connectionForSession(delivery.targetSession);
@@ -273,7 +299,40 @@ namespace TES3MP::ServerApp
             return false;
         auto delivery = projectInterestBaseline(resolved.publication()->state(), request->sessionId(), tick,
             mWiring->reducer.canonicalRevision(), resolved.publication()->stateVersion());
-        return delivery && admitInterestBaseline(mWiring->queues, connection, *delivery);
+        if (!delivery) return false;
+        if (!supportsActors(connection)) return admitInterestBaseline(mWiring->queues, connection, *delivery);
+        if (!mWiring->actors) return false;
+        auto actorDelivery = projectActorInterestBaseline(
+            resolved.publication()->state(), *mWiring->actors, request->sessionId(), tick,
+            mWiring->reducer.canonicalRevision());
+        if (!actorDelivery) return false;
+        try
+        {
+            std::vector<std::vector<std::byte>> frames;
+            frames.reserve(4);
+            const auto add = [&](MessageClass messageClass, MessageKind kind, std::vector<std::byte> payload) {
+                auto frame = encodeProtocolFrame(messageClass, kind, payload);
+                if (!std::holds_alternative<std::vector<std::byte>>(frame)) return false;
+                frames.push_back(std::get<std::vector<std::byte>>(std::move(frame)));
+                return true;
+            };
+            if (!add(MessageClass::ReliableOperation, MessageKind::ReliableInterestBaseline,
+                    encodeReliableInterestBaseline(delivery->baseline))
+                || !add(MessageClass::LatestWinsSnapshot, MessageKind::LatestWinsSnapshot,
+                    encodeLatestWinsSnapshot(delivery->view))
+                || !add(MessageClass::ReliableOperation, MessageKind::ReliableActorInterestBaseline,
+                    encodeReliableActorInterestBaseline(actorDelivery->baseline))
+                || !add(MessageClass::LatestWinsSnapshot, MessageKind::LatestWinsActorSnapshot,
+                    encodeLatestWinsActorSnapshot(actorDelivery->view))) return false;
+            const std::array<OutboundQueueSet::AtomicMessage, 4> messages{{
+                { connection, TransportChannel::ReliableOrdered, frames[0] },
+                { connection, TransportChannel::LatestWins, frames[1] },
+                { connection, TransportChannel::ReliableOrdered, frames[2] },
+                { connection, TransportChannel::LatestWins, frames[3] },
+            }};
+            return mWiring->queues.enqueueMessagesAtomically(messages) == TransportResult::Accepted;
+        }
+        catch (...) { return false; }
     }
 
     bool ServerApplication::expireSessions(ServerTick tick) noexcept
@@ -454,6 +513,9 @@ namespace TES3MP::ServerApp
                 }
             }
         }
+        if ((mWiring->actorCatalog || mWiring->actors || mWiring->actorCollision)
+            && (!mWiring->actorCatalog || !mWiring->actors || !mWiring->actorCollision))
+        { mFailure = "actor composition incomplete"; return false; }
         const auto pumpedCommands = mWiring->intake.pump();
         if (!pumpedCommands) { mFailure = "command intake failed"; return false; }
         for (const auto& batch : pumpedCommands.batches())
@@ -462,38 +524,75 @@ namespace TES3MP::ServerApp
             const auto revisionBefore = mWiring->reducer.canonicalRevision();
             auto prepared = mWiring->reducer.prepareTick(batch);
             if (!prepared.result()) { mFailure = "command reduction failed"; return false; }
-            if (prepared.candidateRevision() == revisionBefore)
-            {
-                if (!mWiring->reducer.commit(std::move(prepared)))
-                { mFailure = "canonical commit failed"; return false; }
-                continue;
-            }
-            auto projected = projectInterestChanges(before, prepared.candidateState(),
-                batch.scheduledTick().value(), prepared.candidateRevision());
-            if (!projected) { mFailure = "observation projection failed"; return false; }
             std::vector<std::pair<TransportConnectionId, InterestDelivery>> routed;
-            routed.reserve(projected->size());
-            for (auto& delivery : *projected)
-            {
-                auto connection = mWiring->sessions.connectionForSession(delivery.targetSession);
-                if (!connection) { mFailure = "observation target missing"; return false; }
-                routed.emplace_back(*connection, std::move(delivery));
-            }
-            auto views = projectInterestViews(prepared.candidateState(), batch.scheduledTick().value(),
-                prepared.candidateRevision());
-            if (!views) { mFailure = "movement view projection failed"; return false; }
             std::vector<std::pair<TransportConnectionId, LatestWinsSnapshot>> routedViews;
-            routedViews.reserve(views->size());
-            for (auto& delivery : *views)
+            std::vector<std::pair<TransportConnectionId, ActorInterestBaselineDelivery>> actorBaselines;
+            if (prepared.candidateRevision() != revisionBefore)
             {
-                auto connection = mWiring->sessions.connectionForSession(delivery.first);
-                if (!connection) { mFailure = "movement view target missing"; return false; }
-                routedViews.emplace_back(*connection, std::move(delivery.second));
+                auto projected = projectInterestChanges(before, prepared.candidateState(),
+                    batch.scheduledTick().value(), prepared.candidateRevision());
+                if (!projected) { mFailure = "observation projection failed"; return false; }
+                routed.reserve(projected->size());
+                for (auto& delivery : *projected)
+                {
+                    auto connection = mWiring->sessions.connectionForSession(delivery.targetSession);
+                    if (!connection) { mFailure = "observation target missing"; return false; }
+                    routed.emplace_back(*connection, std::move(delivery));
+                }
+                auto views = projectInterestViews(prepared.candidateState(), batch.scheduledTick().value(),
+                    prepared.candidateRevision());
+                if (!views) { mFailure = "movement view projection failed"; return false; }
+                routedViews.reserve(views->size());
+                for (auto& delivery : *views)
+                {
+                    auto connection = mWiring->sessions.connectionForSession(delivery.first);
+                    if (!connection) { mFailure = "movement view target missing"; return false; }
+                    routedViews.emplace_back(*connection, std::move(delivery.second));
+                }
+                if (mWiring->actors)
+                    for (const auto& target : prepared.candidateState().activeSessions())
+                    {
+                        const auto connection = mWiring->sessions.connectionForSession(target.sessionId());
+                        const auto* oldSession = before.findActiveSession(target.sessionId());
+                        const auto* oldPlayer = oldSession ? before.findPlayer(oldSession->playerId()) : nullptr;
+                        const auto* newPlayer = prepared.candidateState().findPlayer(target.playerId());
+                        if (!connection || !oldPlayer || !newPlayer
+                            || oldPlayer->transform().cell() == newPlayer->transform().cell()
+                            || !supportsActors(*connection)) continue;
+                        auto baseline = projectActorInterestBaseline(prepared.candidateState(), *mWiring->actors,
+                            target.sessionId(), batch.scheduledTick().value(), prepared.candidateRevision());
+                        if (!baseline) { mFailure = "actor baseline projection failed"; return false; }
+                        actorBaselines.emplace_back(*connection, std::move(*baseline));
+                    }
             }
-            if (!admitInterestTickAtomically(mWiring->queues, routed, routedViews))
+            std::optional<CanonicalActorWorld> actorCandidate;
+            std::vector<std::pair<TransportConnectionId, LatestWinsActorSnapshot>> actorViews;
+            if (mWiring->actors)
+            {
+                auto advanced = advanceActorSimulation(*mWiring->actors, *mWiring->actorCatalog,
+                    prepared.candidateState(), batch.scheduledTick().value(),
+                    mConfig.contentManifest.movementProfile(), *mWiring->actorCollision);
+                auto* candidate = std::get_if<CanonicalActorWorld>(&advanced);
+                if (!candidate) { mFailure = "actor simulation failed"; return false; }
+                actorCandidate.emplace(std::move(*candidate));
+                for (const auto connection : mWiring->sessions.connections())
+                {
+                    if (!supportsActors(connection)) continue;
+                    const auto* session = mWiring->sessions.session(connection);
+                    auto view = session && session->sessionId()
+                        ? projectActorInterestView(prepared.candidateState(), *actorCandidate, *session->sessionId(),
+                            batch.scheduledTick().value(), prepared.candidateRevision())
+                        : std::nullopt;
+                    if (!view) { mFailure = "actor view projection failed"; return false; }
+                    actorViews.emplace_back(connection, std::move(*view));
+                }
+            }
+            if (!admitCombinedInterestTickAtomically(
+                    mWiring->queues, routed, routedViews, actorBaselines, actorViews))
             { mFailure = "tick output admission failed"; return false; }
             if (!mWiring->reducer.commit(std::move(prepared)))
             { mFailure = "canonical commit failed"; return false; }
+            if (actorCandidate) *mWiring->actors = std::move(*actorCandidate);
         }
         for (const auto connection : mWiring->sessions.connections())
         {

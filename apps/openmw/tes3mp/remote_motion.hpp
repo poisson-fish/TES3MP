@@ -2,6 +2,7 @@
 #define OPENMW_TES3MP_REMOTE_MOTION_HPP
 
 #include <tes3mp/command_primitives.hpp>
+#include <tes3mp/actor_replication.hpp>
 #include <tes3mp/monotonic_clock.hpp>
 #include <tes3mp/observability.hpp>
 
@@ -132,12 +133,26 @@ namespace TES3MP::OpenMWAdapter
 
     RemoteLocomotionAnimation remoteLocomotionAnimation(const RemoteMotionPose& pose) noexcept;
 
+    struct RemoteMotionSample
+    {
+        ServerTick serverTick;
+        EntityId entityId;
+        EntityRevision entityRevision;
+        AuthorityEpoch authorityEpoch;
+        Transform transform;
+        LinearVelocity3 linearVelocity;
+        LocomotionMode locomotionMode;
+
+        friend constexpr bool operator==(const RemoteMotionSample&, const RemoteMotionSample&) noexcept = default;
+    };
+
     class RemoteMotionBuffer
     {
     public:
         explicit RemoteMotionBuffer(RemoteMotionMetricSink& metrics) noexcept;
 
         bool observe(const SpatialEntitySnapshot& sample, MonotonicInstant receivedAt) noexcept;
+        bool observe(const ActorSpatialSnapshot& sample, MonotonicInstant receivedAt) noexcept;
         std::optional<RemoteMotionPose> advance(MonotonicInstant now) noexcept;
         void clear() noexcept;
         std::size_t sampleCount() const noexcept { return mSampleCount; }
@@ -146,7 +161,7 @@ namespace TES3MP::OpenMWAdapter
     private:
         struct Sample
         {
-            SpatialEntitySnapshot snapshot;
+            RemoteMotionSample snapshot;
             MonotonicInstant receivedAt;
         };
 
@@ -156,8 +171,9 @@ namespace TES3MP::OpenMWAdapter
             std::uint64_t extrapolationNanoseconds;
         };
 
-        void resetTo(const SpatialEntitySnapshot& sample, MonotonicInstant receivedAt) noexcept;
-        void adaptPlaybackDelay(const SpatialEntitySnapshot& sample, MonotonicInstant receivedAt) noexcept;
+        bool observe(RemoteMotionSample sample, MonotonicInstant receivedAt) noexcept;
+        void resetTo(const RemoteMotionSample& sample, MonotonicInstant receivedAt) noexcept;
+        void adaptPlaybackDelay(const RemoteMotionSample& sample, MonotonicInstant receivedAt) noexcept;
         void advanceCursor(MonotonicInstant now) noexcept;
         std::optional<ResolvedPose> resolve() const noexcept;
         RemoteMotionPose applyCorrection(RemoteMotionPose pose, MonotonicInstant now) noexcept;

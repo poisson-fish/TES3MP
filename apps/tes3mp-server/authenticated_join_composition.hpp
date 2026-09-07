@@ -2,6 +2,7 @@
 #define TES3MP_SERVER_AUTHENTICATED_JOIN_COMPOSITION_HPP
 
 #include "tes3mp/authenticated_join.hpp"
+#include "tes3mp/actor_simulation.hpp"
 #include "tes3mp/server_authentication.hpp"
 #include "tes3mp/transport.hpp"
 
@@ -60,8 +61,8 @@ namespace TES3MP::ServerApp
     {
     public:
         TransportJoinResponseQueue(OutboundQueueSet& queues, TransportConnectionId connection,
-            ConnectionSessionCoordinator* sessions = nullptr) noexcept
-            : mQueues(queues), mConnection(connection), mSessions(sessions) {}
+            ConnectionSessionCoordinator* sessions = nullptr, const CanonicalActorWorld* actors = nullptr) noexcept
+            : mQueues(queues), mConnection(connection), mSessions(sessions), mActors(actors) {}
 
         bool enqueueJoinResponses(std::span<const std::byte> authentication,
             std::span<const std::byte> snapshot, const CanonicalServerState& before,
@@ -72,6 +73,7 @@ namespace TES3MP::ServerApp
         OutboundQueueSet& mQueues;
         TransportConnectionId mConnection;
         ConnectionSessionCoordinator* mSessions;
+        const CanonicalActorWorld* mActors;
     };
 }
 

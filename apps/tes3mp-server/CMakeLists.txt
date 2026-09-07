@@ -2,6 +2,10 @@ include(${CMAKE_CURRENT_LIST_DIR}/../../cmake/TES3MPVerifyTargetBoundaries.cmake
 include(${CMAKE_CURRENT_LIST_DIR}/../../cmake/TES3MPRuntimeSafety.cmake)
 
 add_library(tes3mp_server_app STATIC
+    actor_content.hpp
+    actor_content.cpp
+    actor_interest_projection.hpp
+    actor_interest_projection.cpp
     authenticated_join_composition.hpp
     authenticated_join_composition.cpp
     connection_session_coordinator.hpp

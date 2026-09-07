@@ -18,20 +18,25 @@ namespace TES3MP
 {
     PlayerIdentityRegistry::PlayerIdentityRegistry(CredentialCrypto& crypto,
         PlayerIdentityPersistence& persistence, std::vector<PersistedPlayerIdentity> records,
-        PlayerId nextPlayer, EntityId nextEntity) noexcept
+        std::vector<EntityId> reservedEntityIds, PlayerId nextPlayer, EntityId nextEntity) noexcept
         : mCrypto(crypto), mPersistence(persistence), mRecords(std::move(records)),
-          mNextPlayer(nextPlayer), mNextEntity(nextEntity)
+          mReservedEntityIds(std::move(reservedEntityIds)), mNextPlayer(nextPlayer), mNextEntity(nextEntity)
     {
     }
 
     std::variant<std::unique_ptr<PlayerIdentityRegistry>, PlayerIdentityError> PlayerIdentityRegistry::create(
         CredentialCrypto& crypto, PlayerIdentityPersistence& persistence,
-        std::span<const PersistedPlayerIdentity> initialRecords) noexcept
+        std::span<const PersistedPlayerIdentity> initialRecords,
+        std::span<const EntityId> reservedEntityIds) noexcept
     try
     {
         if (initialRecords.size() > MaximumPlayerIdentityRecords)
             return PlayerIdentityError::InvalidInitialState;
         std::vector<PersistedPlayerIdentity> records(initialRecords.begin(), initialRecords.end());
+        std::vector<EntityId> reserved(reservedEntityIds.begin(), reservedEntityIds.end());
+        std::ranges::sort(reserved);
+        if (std::ranges::adjacent_find(reserved) != reserved.end())
+            return PlayerIdentityError::InvalidInitialState;
         std::sort(records.begin(), records.end(), [](const auto& left, const auto& right) {
             return left.claim.player < right.claim.player;
         });
@@ -45,6 +50,8 @@ namespace TES3MP
                     [&](const auto& previous) { return previous.claim.entity == record.claim.entity
                         || previous.credentialDigest == record.credentialDigest; }))
                 return PlayerIdentityError::InvalidInitialState;
+            if (std::ranges::binary_search(reserved, record.claim.entity))
+                return PlayerIdentityError::InvalidInitialState;
             maximumPlayer = std::max(maximumPlayer, record.claim.player.value());
             maximumEntity = std::max(maximumEntity, record.claim.entity.value());
         }
@@ -52,11 +59,16 @@ namespace TES3MP
             || maximumEntity == std::numeric_limits<std::uint64_t>::max())
             return PlayerIdentityError::IdentityExhausted;
         const auto nextPlayer = PlayerId::fromValue(maximumPlayer == 0 ? 1 : maximumPlayer + 1);
-        const auto nextEntity = EntityId::fromValue(maximumEntity == 0 ? 1 : maximumEntity + 1);
+        auto nextEntity = EntityId::fromValue(maximumEntity == 0 ? 1 : maximumEntity + 1);
         if (!nextPlayer || !nextEntity)
             return PlayerIdentityError::IdentityExhausted;
+        while (std::ranges::binary_search(reserved, *nextEntity))
+        {
+            nextEntity = advance(*nextEntity);
+            if (!nextEntity) return PlayerIdentityError::IdentityExhausted;
+        }
         return std::unique_ptr<PlayerIdentityRegistry>(new PlayerIdentityRegistry(
-            crypto, persistence, std::move(records), *nextPlayer, *nextEntity));
+            crypto, persistence, std::move(records), std::move(reserved), *nextPlayer, *nextEntity));
     }
     catch (...)
     {
@@ -67,6 +79,22 @@ namespace TES3MP
         const PlayerCredential& credential, CredentialDigest& destination) noexcept
     {
         return mCrypto.sha256(credential.secretBytes(), destination);
+    }
+
+    bool PlayerIdentityRegistry::advanceIdentities() noexcept
+    {
+        auto nextPlayer = advance(mNextPlayer);
+        auto nextEntity = advance(mNextEntity);
+        while (nextEntity && std::ranges::binary_search(mReservedEntityIds, *nextEntity))
+            nextEntity = advance(*nextEntity);
+        if (!nextPlayer || !nextEntity)
+        {
+            mIdentityExhausted = true;
+            return false;
+        }
+        mNextPlayer = *nextPlayer;
+        mNextEntity = *nextEntity;
+        return true;
     }
 
     PlayerIdentityPrepareResult PlayerIdentityRegistry::prepareCreate(ContentManifest contentManifest) noexcept
@@ -125,15 +153,7 @@ namespace TES3MP
             return false;
         mCommitted.emplace(std::move(committed));
         mRecords = std::move(candidate);
-        const auto nextPlayer = advance(mNextPlayer);
-        const auto nextEntity = advance(mNextEntity);
-        if (nextPlayer && nextEntity)
-        {
-            mNextPlayer = *nextPlayer;
-            mNextEntity = *nextEntity;
-        }
-        else
-            mIdentityExhausted = true;
+        (void)advanceIdentities();
         mPending.reset();
         return true;
     }

@@ -18,16 +18,23 @@ namespace TES3MP::OpenMWAdapter
         std::string record;
     };
 
+    struct DesktopActorPrototypeMapping
+    {
+        ActorPrototypeId id;
+        std::string record;
+    };
+
     struct DesktopContentMapping
     {
         static std::optional<DesktopContentMapping> create(ContentManifest manifest,
             std::span<const DesktopCellSpaceMapping> cellSpaces, AppearanceId appearanceId,
-            std::string avatarNpc);
+            std::string avatarNpc, std::span<const DesktopActorPrototypeMapping> actorPrototypes = {});
 
         ContentManifest manifest;
         std::vector<DesktopCellSpaceMapping> cellSpaces;
         AppearanceId appearanceId;
         std::string avatarNpc;
+        std::vector<DesktopActorPrototypeMapping> actorPrototypes;
     };
 
     class DesktopSemanticInput final : public SemanticInputProvider
@@ -55,6 +62,8 @@ namespace TES3MP::OpenMWAdapter
             MonotonicInstant receivedAt,
             const std::optional<LocalLocomotionReconciliation>& localReconciliation = std::nullopt) noexcept override;
         ProviderResult advance(MonotonicInstant now) noexcept override;
+        ProviderResult applyActors(const LatestWinsActorSnapshot& snapshot,
+            std::span<const ActorInterestMember> observedActors, MonotonicInstant receivedAt) noexcept override;
         void clear() noexcept override;
 
     private:

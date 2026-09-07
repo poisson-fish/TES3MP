@@ -46,6 +46,9 @@ namespace OpenMW
             "OpenMW cell-space mapping entries: <id>=<record>");
         addOption("tes3mp-content-appearance-record", bpo::value<std::string>()->default_value(""),
             "OpenMW NPC record mapped by the TES3MP content manifest");
+        addOption("tes3mp-content-actor-prototype-map",
+            bpo::value<StringsVector>()->default_value(StringsVector(), "")->multitoken()->composing(),
+            "OpenMW actor prototype mappings: <id>=<NPC-or-creature-record>");
 #ifdef TES3MP_OPENMW_DESKTOP_AUTOMATION
         addOption("tes3mp-automation-role", bpo::value<std::string>()->default_value(""),
             "test-only fixed TES3MP desktop automation role");

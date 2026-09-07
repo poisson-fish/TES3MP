@@ -309,8 +309,25 @@ bool parseOptions(int argc, char** argv, OMW::Engine& engine, Files::Configurati
             }
             localMappings.push_back({ *id, declaration->kind, entry.substr(equal + 1) });
         }
+        std::vector<TES3MP::OpenMWAdapter::DesktopActorPrototypeMapping> actorMappings;
+        for (const auto& entry : variables["tes3mp-content-actor-prototype-map"].as<StringsVector>())
+        {
+            const auto equal = entry.find('=');
+            std::uint64_t rawId = 0;
+            const auto parsed = equal == std::string::npos ? std::from_chars_result{}
+                : std::from_chars(entry.data(), entry.data() + equal, rawId);
+            const auto id = equal != std::string::npos && parsed.ec == std::errc{}
+                && parsed.ptr == entry.data() + equal ? TES3MP::ActorPrototypeId::fromValue(rawId) : std::nullopt;
+            if (!id || equal + 1 == entry.size())
+            {
+                Log(Debug::Error) << "TES3MP startup failed: invalid actor prototype mapping";
+                return false;
+            }
+            actorMappings.push_back({ *id, entry.substr(equal + 1) });
+        }
         auto contentMapping = TES3MP::OpenMWAdapter::DesktopContentMapping::create(*contentManifest, localMappings,
-            contentManifest->defaultAppearance(), variables["tes3mp-content-appearance-record"].as<std::string>());
+            contentManifest->defaultAppearance(), variables["tes3mp-content-appearance-record"].as<std::string>(),
+            actorMappings);
         if (!contentMapping)
         {
             Log(Debug::Error) << "TES3MP startup failed: content record mappings are required";

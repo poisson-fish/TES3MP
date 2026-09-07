@@ -2,6 +2,7 @@
 #define TES3MP_CLIENT_SESSION_HPP
 
 #include "monotonic_clock.hpp"
+#include "actor_replication.hpp"
 #include "protocol_exchange.hpp"
 #include "protocol_handshake.hpp"
 #include "session_types.hpp"
@@ -153,6 +154,19 @@ namespace TES3MP
         ContradictorySameRevision,
     };
 
+    enum class ActorReplicationReceiveResult : std::uint8_t
+    {
+        Applied,
+        IdenticalDuplicate,
+        NotEstablished,
+        CapabilityNotNegotiated,
+        SessionNotBound,
+        SessionMismatch,
+        GenerationMismatch,
+        StaleTick,
+        ContradictorySameTick,
+    };
+
     using ClientSessionCreateResult
         = std::variant<std::unique_ptr<class ClientSessionStateMachine>, SessionTransitionError>;
 
@@ -172,6 +186,9 @@ namespace TES3MP
         LatestWinsSnapshotReceiveResult receiveLatestWinsSnapshot(LatestWinsSnapshot snapshot);
         ReliableObservationReceiveResult receiveReliableObservationBatch(ReliableObservationBatch batch);
         ReliableInterestBaselineReceiveResult receiveReliableInterestBaseline(ReliableInterestBaseline baseline);
+        ActorReplicationReceiveResult receiveLatestWinsActorSnapshot(LatestWinsActorSnapshot snapshot);
+        ActorReplicationReceiveResult receiveReliableActorInterestBaseline(
+            ReliableActorInterestBaseline baseline);
 
         ClientSessionState state() const noexcept { return mState; }
         SessionGeneration generation() const noexcept { return mGeneration; }
@@ -192,6 +209,12 @@ namespace TES3MP
         const std::optional<ReliableInterestBaseline>& confirmedInterestBaseline() const noexcept
         { return mConfirmedInterestBaseline; }
         bool interestBaselineComplete() const noexcept;
+        std::span<const ActorInterestMember> observedActors() const noexcept { return mObservedActors; }
+        const std::optional<LatestWinsActorSnapshot>& confirmedActorSnapshot() const noexcept
+        { return mConfirmedActorSnapshot; }
+        const std::optional<ReliableActorInterestBaseline>& confirmedActorInterestBaseline() const noexcept
+        { return mConfirmedActorInterestBaseline; }
+        bool actorInterestBaselineComplete() const noexcept;
 
     private:
         ClientSessionStateMachine(MonotonicClock& clock, SessionTimeoutPolicy timeoutPolicy,
@@ -216,6 +239,9 @@ namespace TES3MP
         std::optional<ReliableObservationBatch> mConfirmedObservationBatch;
         std::optional<ReliableInterestBaseline> mConfirmedInterestBaseline;
         std::vector<ObservedPlayer> mObservedPlayers;
+        std::optional<LatestWinsActorSnapshot> mConfirmedActorSnapshot;
+        std::optional<ReliableActorInterestBaseline> mConfirmedActorInterestBaseline;
+        std::vector<ActorInterestMember> mObservedActors;
     };
 }
 

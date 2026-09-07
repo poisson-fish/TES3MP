@@ -16,7 +16,7 @@ namespace TES3MP::OpenMWAdapter
         ClientHello makeClientHello(ContentManifestId contentManifest)
         {
             auto versions = std::get<ProtocolVersionRange>(ProtocolVersionRange::create(1, 2, 3));
-            const std::array optional{ vrPoseCapability() };
+            const std::array optional{ vrPoseCapability(), actorReplicationCapability() };
             auto offer = std::get<CapabilityOffer>(
                 CapabilityOffer::create(std::move(versions), optional, {}, contentManifest));
             return ClientHello::fromOffer(std::move(offer));
@@ -215,6 +215,19 @@ namespace TES3MP::OpenMWAdapter
                         mContinuity = std::move(current);
                         mAttemptGeneration = snapshot->header().targetSessionGeneration();
                         mReady = true;
+                    }
+                }
+                const auto& actorSnapshot = mRuntime->session().stateMachine().confirmedActorSnapshot();
+                if ((advanced.actorBaselineCompleted || advanced.actorBaselineApplied
+                        || advanced.actorSnapshotApplied)
+                    && actorSnapshot && mRuntime->session().stateMachine().actorInterestBaselineComplete())
+                {
+                    const auto applied = mPresentation.applyActors(*actorSnapshot,
+                        mRuntime->session().stateMachine().observedActors(), now);
+                    if (applied != ProviderResult::Accepted)
+                    {
+                        closeForProviderFailure(applied);
+                        return;
                     }
                 }
                 if (snapshot)

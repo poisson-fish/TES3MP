@@ -211,7 +211,7 @@ namespace TES3MP::OpenMWAdapter
         if (!runtime || !*runtime)
             return ClientCompositionFailure::RuntimeUnavailable;
         auto versions = std::get<ProtocolVersionRange>(ProtocolVersionRange::create(1, 2, 3));
-        const std::array optional{ vrPoseCapability() };
+        const std::array optional{ vrPoseCapability(), actorReplicationCapability() };
         auto offer = std::get<CapabilityOffer>(
             CapabilityOffer::create(std::move(versions), optional, {}, contentManifest));
         if ((*runtime)->start(

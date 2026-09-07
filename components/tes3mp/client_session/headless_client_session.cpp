@@ -84,6 +84,14 @@ namespace TES3MP
         ReliableInterestBaseline baseline)
     { return mState->receiveReliableInterestBaseline(std::move(baseline)); }
 
+    ActorReplicationReceiveResult HeadlessClientSession::receiveLatestWinsActorSnapshot(
+        LatestWinsActorSnapshot snapshot)
+    { return mState->receiveLatestWinsActorSnapshot(std::move(snapshot)); }
+
+    ActorReplicationReceiveResult HeadlessClientSession::receiveReliableActorInterestBaseline(
+        ReliableActorInterestBaseline baseline)
+    { return mState->receiveReliableActorInterestBaseline(std::move(baseline)); }
+
     HeadlessClientResult HeadlessClientSession::close() noexcept
     {
         if (mAttempt) { mTransport.cancelConnect(*mAttempt); mAttempt.reset(); }

@@ -5,6 +5,7 @@
 #include "connection_session_coordinator.hpp"
 #include "tes3mp/server_lifecycle.hpp"
 #include "tes3mp/protocol_pose.hpp"
+#include "tes3mp/actor_simulation.hpp"
 
 #include <map>
 #include <optional>
@@ -24,6 +25,9 @@ namespace TES3MP::ServerApp
         ServerCommandIntakeCoordinator& intake;
         CanonicalCommandReducer& reducer;
         ServerLifecycleCoordinator& lifecycle;
+        const ActorCatalog* actorCatalog = nullptr;
+        CanonicalActorWorld* actors = nullptr;
+        ServerCollisionQuery* actorCollision = nullptr;
     };
 
     class ServerApplication
@@ -63,6 +67,7 @@ namespace TES3MP::ServerApp
         bool resyncConnection(TransportConnectionId connection, ServerTick tick) noexcept;
         bool expireSessions(ServerTick tick) noexcept;
         bool relayPose(TransportConnectionId connection, const TransportMessage& message) noexcept;
+        bool supportsActors(TransportConnectionId connection) const noexcept;
     };
 }
 

@@ -327,4 +327,64 @@ namespace TES3MP
         return mConfirmedInterestBaseline && mConfirmedSnapshot
             && mConfirmedSnapshot->header().canonicalRevision() >= mConfirmedInterestBaseline->canonicalRevision();
     }
+
+    ActorReplicationReceiveResult ClientSessionStateMachine::receiveLatestWinsActorSnapshot(
+        LatestWinsActorSnapshot snapshot)
+    {
+        if (mState != ClientSessionState::Established)
+            return ActorReplicationReceiveResult::NotEstablished;
+        if (!mNegotiatedHello || !std::ranges::binary_search(
+                mNegotiatedHello->negotiatedCapabilities(), actorReplicationCapability()))
+            return ActorReplicationReceiveResult::CapabilityNotNegotiated;
+        if (!mSessionId) return ActorReplicationReceiveResult::SessionNotBound;
+        if (snapshot.targetSessionId() != *mSessionId) return ActorReplicationReceiveResult::SessionMismatch;
+        if (snapshot.targetSessionGeneration() != mGeneration)
+            return ActorReplicationReceiveResult::GenerationMismatch;
+        if (mConfirmedActorSnapshot)
+        {
+            if (snapshot.serverTick() < mConfirmedActorSnapshot->serverTick())
+                return ActorReplicationReceiveResult::StaleTick;
+            if (snapshot.serverTick() == mConfirmedActorSnapshot->serverTick())
+                return snapshot == *mConfirmedActorSnapshot ? ActorReplicationReceiveResult::IdenticalDuplicate
+                    : ActorReplicationReceiveResult::ContradictorySameTick;
+        }
+        mConfirmedActorSnapshot = std::move(snapshot);
+        return ActorReplicationReceiveResult::Applied;
+    }
+
+    ActorReplicationReceiveResult ClientSessionStateMachine::receiveReliableActorInterestBaseline(
+        ReliableActorInterestBaseline baseline)
+    {
+        if (mState != ClientSessionState::Established)
+            return ActorReplicationReceiveResult::NotEstablished;
+        if (!mNegotiatedHello || !std::ranges::binary_search(
+                mNegotiatedHello->negotiatedCapabilities(), actorReplicationCapability()))
+            return ActorReplicationReceiveResult::CapabilityNotNegotiated;
+        if (!mSessionId) return ActorReplicationReceiveResult::SessionNotBound;
+        if (baseline.targetSessionId() != *mSessionId) return ActorReplicationReceiveResult::SessionMismatch;
+        if (baseline.targetSessionGeneration() != mGeneration)
+            return ActorReplicationReceiveResult::GenerationMismatch;
+        if (mConfirmedActorInterestBaseline)
+        {
+            if (baseline.canonicalRevision() < mConfirmedActorInterestBaseline->canonicalRevision())
+                return ActorReplicationReceiveResult::StaleTick;
+            if (baseline.canonicalRevision() == mConfirmedActorInterestBaseline->canonicalRevision())
+                return baseline.members().size() == mConfirmedActorInterestBaseline->members().size()
+                        && std::ranges::equal(baseline.members(), mConfirmedActorInterestBaseline->members())
+                    ? ActorReplicationReceiveResult::IdenticalDuplicate
+                    : ActorReplicationReceiveResult::ContradictorySameTick;
+            if (baseline.serverTick() < mConfirmedActorInterestBaseline->serverTick())
+                return ActorReplicationReceiveResult::StaleTick;
+        }
+        mObservedActors.assign(baseline.members().begin(), baseline.members().end());
+        mConfirmedActorInterestBaseline = std::move(baseline);
+        return ActorReplicationReceiveResult::Applied;
+    }
+
+    bool ClientSessionStateMachine::actorInterestBaselineComplete() const noexcept
+    {
+        return mConfirmedActorInterestBaseline && mConfirmedActorSnapshot
+            && mConfirmedActorSnapshot->canonicalRevision()
+                >= mConfirmedActorInterestBaseline->canonicalRevision();
+    }
 }

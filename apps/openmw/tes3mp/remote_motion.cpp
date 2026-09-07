@@ -12,15 +12,15 @@ namespace TES3MP::OpenMWAdapter
         constexpr std::uint64_t NanosecondsPerSecond = 1'000'000'000;
         constexpr std::uint64_t ServerTicksPerSecond = 30;
 
-        RemoteMotionPose poseFrom(const SpatialEntitySnapshot& sample, double x, double y, double z) noexcept
+        RemoteMotionPose poseFrom(const RemoteMotionSample& sample, double x, double y, double z) noexcept
         {
-            return { sample.transform().cell(), x, y, z, sample.transform().orientation(), sample.linearVelocity(),
-                sample.locomotionMode() };
+            return { sample.transform.cell(), x, y, z, sample.transform.orientation(), sample.linearVelocity,
+                sample.locomotionMode };
         }
 
-        RemoteMotionPose exactPose(const SpatialEntitySnapshot& sample) noexcept
+        RemoteMotionPose exactPose(const RemoteMotionSample& sample) noexcept
         {
-            const auto position = sample.transform().position();
+            const auto position = sample.transform.position();
             return poseFrom(sample, static_cast<double>(position.x()), static_cast<double>(position.y()),
                 static_cast<double>(position.z()));
         }
@@ -144,14 +144,14 @@ namespace TES3MP::OpenMWAdapter
         (void)mMetrics.tryRecord({ key, value });
     }
 
-    void RemoteMotionBuffer::resetTo(const SpatialEntitySnapshot& sample, MonotonicInstant receivedAt) noexcept
+    void RemoteMotionBuffer::resetTo(const RemoteMotionSample& sample, MonotonicInstant receivedAt) noexcept
     {
         for (auto& value : mSamples)
             value.reset();
         mSamples[0].emplace(Sample{ sample, receivedAt });
         mSampleCount = 1;
         mStarted = false;
-        mCursorTick = sample.serverTick().value();
+        mCursorTick = sample.serverTick.value();
         mCursorFraction = 0;
         mPlaybackDelayTicks = RemotePlaybackDelayFloorTicks;
         mStableArrivalSamples = 0;
@@ -165,14 +165,14 @@ namespace TES3MP::OpenMWAdapter
     }
 
     void RemoteMotionBuffer::adaptPlaybackDelay(
-        const SpatialEntitySnapshot& sample, MonotonicInstant receivedAt) noexcept
+        const RemoteMotionSample& sample, MonotonicInstant receivedAt) noexcept
     {
         if (mSampleCount == 0)
             return;
         const Sample& newest = *mSamples[mSampleCount - 1];
-        if (sample.serverTick() <= newest.snapshot.serverTick() || receivedAt < newest.receivedAt)
+        if (sample.serverTick <= newest.snapshot.serverTick || receivedAt < newest.receivedAt)
             return;
-        const std::uint64_t tickDelta = sample.serverTick().value() - newest.snapshot.serverTick().value();
+        const std::uint64_t tickDelta = sample.serverTick.value() - newest.snapshot.serverTick.value();
         const std::uint64_t arrivalTicks
             = roundedServerTicks(receivedAt.nanoseconds() - newest.receivedAt.nanoseconds());
         if (arrivalTicks > tickDelta)
@@ -194,7 +194,7 @@ namespace TES3MP::OpenMWAdapter
         {
             --mPlaybackDelayTicks;
             mStableArrivalSamples = 0;
-            if (mStarted && mCursorTick < sample.serverTick().value())
+            if (mStarted && mCursorTick < sample.serverTick.value())
             {
                 ++mCursorTick;
                 mCursorFraction = 0;
@@ -245,7 +245,7 @@ namespace TES3MP::OpenMWAdapter
                 mCursorTick += whole;
         }
 
-        const std::uint64_t newest = mSamples[mSampleCount - 1]->snapshot.serverTick().value();
+        const std::uint64_t newest = mSamples[mSampleCount - 1]->snapshot.serverTick.value();
         const std::uint64_t maximum = saturatingAdd(newest, MaximumRemoteExtrapolationTicks);
         if (mCursorTick > maximum || (mCursorTick == maximum && mCursorFraction != 0))
         {
@@ -262,14 +262,14 @@ namespace TES3MP::OpenMWAdapter
             return ResolvedPose{ exactPose(mSamples[0]->snapshot), 0 };
 
         const auto& first = mSamples[0]->snapshot;
-        if (mCursorTick < first.serverTick().value())
+        if (mCursorTick < first.serverTick.value())
             return ResolvedPose{ exactPose(first), 0 };
 
         std::size_t lowerIndex = 0;
         for (std::size_t index = 1; index < mSampleCount; ++index)
         {
-            if (mSamples[index]->snapshot.serverTick().value() > mCursorTick
-                || (mSamples[index]->snapshot.serverTick().value() == mCursorTick && mCursorFraction == 0))
+            if (mSamples[index]->snapshot.serverTick.value() > mCursorTick
+                || (mSamples[index]->snapshot.serverTick.value() == mCursorTick && mCursorFraction == 0))
                 break;
             lowerIndex = index;
         }
@@ -278,14 +278,14 @@ namespace TES3MP::OpenMWAdapter
         if (lowerIndex + 1 < mSampleCount)
         {
             const auto& upper = mSamples[lowerIndex + 1]->snapshot;
-            const std::uint64_t tickSpan = upper.serverTick().value() - lower.serverTick().value();
+            const std::uint64_t tickSpan = upper.serverTick.value() - lower.serverTick.value();
             if (tickSpan != 0)
             {
-                const long double cursorDistance = static_cast<long double>(mCursorTick - lower.serverTick().value())
+                const long double cursorDistance = static_cast<long double>(mCursorTick - lower.serverTick.value())
                     + static_cast<long double>(mCursorFraction) / NanosecondsPerSecond;
                 const double ratio = static_cast<double>(cursorDistance / tickSpan);
-                const auto from = lower.transform().position();
-                const auto to = upper.transform().position();
+                const auto from = lower.transform.position();
+                const auto to = upper.transform.position();
                 const auto interpolate = [ratio](std::int64_t a, std::int64_t b) {
                     return static_cast<double>(a) + (static_cast<double>(b) - static_cast<double>(a)) * ratio;
                 };
@@ -297,13 +297,13 @@ namespace TES3MP::OpenMWAdapter
         }
 
         const auto& newest = mSamples[mSampleCount - 1]->snapshot;
-        const long double ahead = static_cast<long double>(mCursorTick - newest.serverTick().value())
+        const long double ahead = static_cast<long double>(mCursorTick - newest.serverTick.value())
             + static_cast<long double>(mCursorFraction) / NanosecondsPerSecond;
-        const auto position = newest.transform().position();
-        const auto velocity = newest.linearVelocity();
+        const auto position = newest.transform.position();
+        const auto velocity = newest.linearVelocity;
         const double ticks = static_cast<double>(std::max<long double>(0, ahead));
         const std::uint64_t aheadNumerator
-            = (mCursorTick - newest.serverTick().value()) * NanosecondsPerSecond + mCursorFraction;
+            = (mCursorTick - newest.serverTick.value()) * NanosecondsPerSecond + mCursorFraction;
         return ResolvedPose{ poseFrom(newest,
                                  static_cast<double>(position.x()) + static_cast<double>(velocity.x()) * ticks,
                                  static_cast<double>(position.y()) + static_cast<double>(velocity.y()) * ticks,
@@ -332,6 +332,18 @@ namespace TES3MP::OpenMWAdapter
 
     bool RemoteMotionBuffer::observe(const SpatialEntitySnapshot& sample, MonotonicInstant receivedAt) noexcept
     {
+        return observe({ sample.serverTick(), sample.entityId(), sample.entityRevision(), sample.authorityEpoch(),
+            sample.transform(), sample.linearVelocity(), sample.locomotionMode() }, receivedAt);
+    }
+
+    bool RemoteMotionBuffer::observe(const ActorSpatialSnapshot& sample, MonotonicInstant receivedAt) noexcept
+    {
+        return observe({ sample.serverTick(), sample.entityId(), sample.entityRevision(), sample.authorityEpoch(),
+            sample.transform(), sample.linearVelocity(), LocomotionMode::Walk }, receivedAt);
+    }
+
+    bool RemoteMotionBuffer::observe(RemoteMotionSample sample, MonotonicInstant receivedAt) noexcept
+    {
         if (mSampleCount == 0)
         {
             resetTo(sample, receivedAt);
@@ -339,19 +351,19 @@ namespace TES3MP::OpenMWAdapter
         }
 
         const auto& newest = mSamples[mSampleCount - 1]->snapshot;
-        if (sample.playerId() != newest.playerId() || sample.entityId() != newest.entityId())
+        if (sample.entityId != newest.entityId)
             return false;
-        if (sample.entityRevision() < newest.entityRevision())
+        if (sample.entityRevision < newest.entityRevision)
             return false;
-        if (sample.entityRevision() == newest.entityRevision())
+        if (sample.entityRevision == newest.entityRevision)
         {
             if (sample != newest)
                 return false;
             mLastSnapshot = receivedAt;
             return true;
         }
-        if (sample.transform().cell() != newest.transform().cell() || sample.authorityEpoch() != newest.authorityEpoch()
-            || sample.serverTick() < newest.serverTick())
+        if (sample.transform.cell() != newest.transform.cell() || sample.authorityEpoch != newest.authorityEpoch
+            || sample.serverTick < newest.serverTick)
         {
             resetTo(sample, receivedAt);
             return true;
@@ -364,7 +376,7 @@ namespace TES3MP::OpenMWAdapter
             : std::nullopt;
 
         adaptPlaybackDelay(sample, receivedAt);
-        if (sample.serverTick() == newest.serverTick())
+        if (sample.serverTick == newest.serverTick)
             mSamples[mSampleCount - 1].emplace(Sample{ sample, receivedAt });
         else if (mSampleCount < MaximumRemoteMotionSamples)
             mSamples[mSampleCount++].emplace(Sample{ sample, receivedAt });
@@ -376,8 +388,8 @@ namespace TES3MP::OpenMWAdapter
         }
         mLastSnapshot = receivedAt;
 
-        const std::uint64_t oldestTick = mSamples[0]->snapshot.serverTick().value();
-        const std::uint64_t newestTick = mSamples[mSampleCount - 1]->snapshot.serverTick().value();
+        const std::uint64_t oldestTick = mSamples[0]->snapshot.serverTick.value();
+        const std::uint64_t newestTick = mSamples[mSampleCount - 1]->snapshot.serverTick.value();
         if (!mStarted && newestTick - oldestTick >= mPlaybackDelayTicks)
         {
             mStarted = true;

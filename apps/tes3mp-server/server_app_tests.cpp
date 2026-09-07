@@ -1,4 +1,6 @@
 #include "authenticated_join_composition.hpp"
+#include "actor_content.hpp"
+#include "actor_interest_projection.hpp"
 #include "connection_session_coordinator.hpp"
 #include "content_collision.hpp"
 #include "interest_projection.hpp"
@@ -48,6 +50,7 @@ namespace
         "spawn_cell = interior:7\ndefault_appearance_id = 1\n"
         "movement_profile = sneak:1024;walk:4097;run:8192;jump:4096\n"
         "collision_content_file = collision.txt\n"
+        "actor_content_file = actors.txt\n"
         "player_identity_file = players.txt\n";
 
     class FakeRuntime final : public TES3MP::TransportRuntime
@@ -186,6 +189,13 @@ namespace
     {
         auto versions = std::get<ProtocolVersionRange>(ProtocolVersionRange::create(1, 0, 0));
         const std::array capabilities{ vrPoseCapability() };
+        return std::get<CapabilityOffer>(CapabilityOffer::create(versions, capabilities, {}));
+    }
+
+    CapabilityOffer actorOffer()
+    {
+        auto versions = std::get<ProtocolVersionRange>(ProtocolVersionRange::create(1, 2, 3));
+        const std::array capabilities{ actorReplicationCapability() };
         return std::get<CapabilityOffer>(CapabilityOffer::create(versions, capabilities, {}));
     }
 
@@ -392,6 +402,7 @@ int main()
         assert(config.endpoint.address() == "127.0.0.1" && config.endpoint.port() == 25565);
         assert(config.tickIntervalMilliseconds == 16 && config.disconnectGraceMilliseconds == 30000);
         assert(config.collisionContentFile == std::filesystem::path("collision.txt"));
+        assert(config.actorContentFile == std::filesystem::path("actors.txt"));
         assert(config.contentManifest.movementProfile().speed(LocomotionMode::Sneak) == 1024
             && config.contentManifest.movementProfile().speed(LocomotionMode::Jump) == 4096);
     }
@@ -474,6 +485,33 @@ int main()
     assert(std::get<ContentCollisionError>(
         ContentCollisionProvider::load(collisionPath, parsedConfig().contentManifest))
         == ContentCollisionError::Unavailable);
+
+    const auto actorPath = std::filesystem::temp_directory_path() / "tes3mp-server-actor-content-test";
+    const auto writeActors = [&](std::string_view content) {
+        std::ofstream stream(actorPath, std::ios::binary | std::ios::trunc);
+        stream << content;
+        assert(static_cast<bool>(stream));
+    };
+    constexpr std::string_view actorHeader =
+        "TES3MP_ACTORS_V1\n"
+        "manifest 0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20\n";
+    writeActors(std::string(actorHeader) + "actor 1 100 200 interior 7 10 20 30 0 0 0 travel 10 25 30\n");
+    auto actorContent = loadActorContent(actorPath, parsedConfig().contentManifest);
+    assert(std::holds_alternative<ActorCatalog>(actorContent));
+    const auto& actorCatalog = std::get<ActorCatalog>(actorContent);
+    assert(actorCatalog.entries().size() == 1 && actorCatalog.entries()[0].entityId == id<EntityId>(100));
+    auto actorWorld = createInitialCanonicalActorWorld(actorCatalog);
+    assert(std::holds_alternative<CanonicalActorWorld>(actorWorld));
+    auto actors = std::get<CanonicalActorWorld>(std::move(actorWorld));
+    const auto players = fixtureState(false);
+    auto actorBaseline = projectActorInterestBaseline(
+        players, actors, id<SessionId>(1), id<ServerTick>(4), id<CanonicalRevision>(2));
+    assert(actorBaseline && actorBaseline->baseline.members().size() == 1
+        && actorBaseline->view.view().entries().size() == 1);
+    writeActors(std::string(actorHeader) + "actor 1 100 200 interior 9 10 20 30 0 0 0 idle\n");
+    assert(std::get<ActorContentError>(loadActorContent(actorPath, parsedConfig().contentManifest))
+        == ActorContentError::Malformed);
+    std::filesystem::remove(actorPath);
 
     const auto temporary = std::filesystem::temp_directory_path() / "tes3mp-server-password-test";
     { std::ofstream stream(temporary, std::ios::binary); stream << "secret\r\n"; }
@@ -698,7 +736,7 @@ int main()
         auto queues = OutboundQueueSet::create(OutboundQueuePolicy{}, 2);
         auto timeouts = *SessionTimeoutPolicy::create(1'000'000, 1'000'000, 1'000'000);
         ConnectionSessionCoordinator sessions(
-            clock, observability, timeouts, emptyOffer(), authentication, *queues, 2);
+            clock, observability, timeouts, actorOffer(), authentication, *queues, 2, &actors);
         JoinFixture joinFixture;
         auto& joins = joinFixture.joins;
         ServerCommandIntakeCoordinator intake(
@@ -711,12 +749,13 @@ int main()
         wiredRuntime.events.push_back({ TransportEventKind::ConnectionAccepted, TransportFailure::None,
             std::nullopt, std::nullopt, connection, std::nullopt,
             TransportSecurity::EncryptedUnauthenticated, scope(std::byte{ 8 }) });
-        const auto helloPayload = encodeClientHello(ClientHello::fromOffer(emptyOffer()));
+        const auto helloPayload = encodeClientHello(ClientHello::fromOffer(actorOffer()));
         wiredRuntime.incoming.push_back({ TransportChannel::ReliableOrdered,
             std::get<std::vector<std::byte>>(encodeProtocolFrame(
                 MessageClass::SessionControl, MessageKind::ClientHello, helloPayload)) });
         ServerApplication wired(wiredRuntime, config,
-            ServerApplicationWiring{ sessions, joins, crypto, *queues, clock, intake, joinFixture.reducer, *lifecycle });
+            ServerApplicationWiring{ sessions, joins, crypto, *queues, clock, intake, joinFixture.reducer, *lifecycle,
+                &actorCatalog, &actors, collision.get() });
         assert(wired.start() && wired.pump(ServerTick::initial()));
         assert(sessions.size() == 1 && wiredRuntime.sent.size() == 1);
         assert(std::get<DecodedFrame>(decodeProtocolFrame(wiredRuntime.sent[0])).messageKind()
@@ -730,22 +769,44 @@ int main()
                 MessageKind::AuthenticationRequest, authenticationPayload)) });
         assert(wired.pump(ServerTick::initial()));
         assert(lifecycle->liveCount() == 1 && joinFixture.reducer.state().activeSessions().size() == 1);
+        assert(actors.find(id<ActorId>(1))->root().position() == Position3(10, 20, 30));
+        clock.nanoseconds = 34'000'000;
+        assert(wired.pump(id<ServerTick>(1)));
+        assert(actors.find(id<ActorId>(1))->root().position() == Position3(10, 25, 30));
+        bool sawActorBaseline = false;
+        bool sawActorView = false;
+        for (const auto& bytes : wiredRuntime.sent)
+        {
+            const auto frame = decodeProtocolFrame(bytes);
+            if (!std::holds_alternative<DecodedFrame>(frame)) continue;
+            sawActorBaseline = sawActorBaseline
+                || std::get<DecodedFrame>(frame).messageKind() == MessageKind::ReliableActorInterestBaseline;
+            sawActorView = sawActorView
+                || std::get<DecodedFrame>(frame).messageKind() == MessageKind::LatestWinsActorSnapshot;
+        }
+        assert(sawActorBaseline && sawActorView);
+
+        const auto movedRevision = actors.find(id<ActorId>(1))->revision();
+        clock.nanoseconds = 100'000'000;
+        assert(wired.pump(id<ServerTick>(2)));
+        assert(actors.find(id<ActorId>(1))->activity() == ActorActivity::Idle
+            && actors.find(id<ActorId>(1))->revision() > movedRevision);
 
         wiredRuntime.events.push_back({ TransportEventKind::ConnectionClosed, TransportFailure::None,
             std::nullopt, std::nullopt, connection, std::nullopt,
             TransportSecurity::EncryptedUnauthenticated, std::nullopt });
-        assert(wired.pump(id<ServerTick>(1)));
+        assert(wired.pump(id<ServerTick>(3)));
         assert(sessions.size() == 0 && queues->connections() == 0);
         assert(lifecycle->liveCount() == 0 && lifecycle->hiddenCount() == 1);
         assert(joinFixture.reducer.state().activeSessions().empty());
         assert(joinFixture.reducer.state().players().size() == 1);
 
-        clock.nanoseconds = config.disconnectGraceMilliseconds * 1'000'000 - 1;
-        assert(wired.pump(id<ServerTick>(2)));
+        clock.nanoseconds = (config.disconnectGraceMilliseconds + 100) * 1'000'000 - 1;
+        assert(wired.pump(id<ServerTick>(4)));
         assert(lifecycle->hiddenCount() == 1 && joinFixture.reducer.state().players().size() == 1);
 
-        clock.nanoseconds = config.disconnectGraceMilliseconds * 1'000'000;
-        assert(wired.pump(id<ServerTick>(3)));
+        clock.nanoseconds = (config.disconnectGraceMilliseconds + 100) * 1'000'000;
+        assert(wired.pump(id<ServerTick>(5)));
         assert(lifecycle->hiddenCount() == 0 && joinFixture.reducer.state().players().empty());
         const auto publication = joinFixture.reducer.latestPublication();
         assert(publication && publication->sessionLifecycle().size() == 1

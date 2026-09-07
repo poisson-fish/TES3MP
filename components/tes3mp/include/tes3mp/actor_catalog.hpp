@@ -22,6 +22,13 @@ namespace TES3MP
         Wander,
     };
 
+    enum class ActorActivity : std::uint8_t
+    {
+        Idle,
+        Travel,
+        Wander,
+    };
+
     class ActorAiPackage
     {
     public:

@@ -196,6 +196,44 @@ namespace TES3MP
                     mResyncPending = false;
                 }
             }
+            else if (auto* actorSnapshot = std::get_if<LatestWinsActorSnapshot>(&message))
+            {
+                const auto wasComplete = mSession->stateMachine().actorInterestBaselineComplete();
+                if (!mSession->stateMachine().sessionId())
+                {
+                    if (mSession->bindEstablishedSession(actorSnapshot->targetSessionId())
+                        != ClientSessionBindingResult::Bound)
+                        return reject();
+                }
+                const auto applied = mSession->receiveLatestWinsActorSnapshot(
+                    std::move(*actorSnapshot));
+                if (applied != ActorReplicationReceiveResult::Applied
+                    && applied != ActorReplicationReceiveResult::IdenticalDuplicate)
+                    return reject();
+                result.actorSnapshotApplied = result.actorSnapshotApplied
+                    || applied == ActorReplicationReceiveResult::Applied;
+                result.actorBaselineCompleted = result.actorBaselineCompleted
+                    || (!wasComplete && mSession->stateMachine().actorInterestBaselineComplete());
+            }
+            else if (auto* actorBaseline = std::get_if<ReliableActorInterestBaseline>(&message))
+            {
+                const auto wasComplete = mSession->stateMachine().actorInterestBaselineComplete();
+                if (!mSession->stateMachine().sessionId())
+                {
+                    if (mSession->bindEstablishedSession(actorBaseline->targetSessionId())
+                        != ClientSessionBindingResult::Bound)
+                        return reject();
+                }
+                const auto applied = mSession->receiveReliableActorInterestBaseline(
+                    std::move(*actorBaseline));
+                if (applied != ActorReplicationReceiveResult::Applied
+                    && applied != ActorReplicationReceiveResult::IdenticalDuplicate)
+                    return reject();
+                result.actorBaselineApplied = result.actorBaselineApplied
+                    || applied == ActorReplicationReceiveResult::Applied;
+                result.actorBaselineCompleted = result.actorBaselineCompleted
+                    || (!wasComplete && mSession->stateMachine().actorInterestBaselineComplete());
+            }
             else if (auto* pose = std::get_if<ServerVrPoseSnapshot>(&message))
             {
                 const auto sessionId = mSession->stateMachine().sessionId();
@@ -454,6 +492,24 @@ namespace TES3MP
                 {
                     auto value = decodeReliableInterestBaseline(frame->payload());
                     if (auto* typed = std::get_if<ReliableInterestBaseline>(&value))
+                        result.messages.emplace_back(std::move(*typed));
+                    else
+                        return fail(ClientRuntimeResult::ProtocolRejected);
+                    break;
+                }
+                case MessageKind::LatestWinsActorSnapshot:
+                {
+                    auto value = decodeLatestWinsActorSnapshot(frame->payload());
+                    if (auto* typed = std::get_if<LatestWinsActorSnapshot>(&value))
+                        result.messages.emplace_back(std::move(*typed));
+                    else
+                        return fail(ClientRuntimeResult::ProtocolRejected);
+                    break;
+                }
+                case MessageKind::ReliableActorInterestBaseline:
+                {
+                    auto value = decodeReliableActorInterestBaseline(frame->payload());
+                    if (auto* typed = std::get_if<ReliableActorInterestBaseline>(&value))
                         result.messages.emplace_back(std::move(*typed));
                     else
                         return fail(ClientRuntimeResult::ProtocolRejected);

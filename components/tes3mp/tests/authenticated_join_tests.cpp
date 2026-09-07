@@ -263,6 +263,31 @@ namespace
             failingJoins.prepare(id<PrincipalId>(3), SessionGeneration::initial(), ServerTick::initial()));
         assert(retry.join.player == id<PlayerId>(1) && retry.join.entity == id<EntityId>(1));
     }
+
+    void persistent_identity_skips_reserved_actor_entities()
+    {
+        FakeCrypto crypto;
+        MemoryPersistence persistence;
+        const std::array reserved{ id<EntityId>(1), id<EntityId>(3) };
+        auto registryResult = PlayerIdentityRegistry::create(crypto, persistence, {}, reserved);
+        auto registry = std::move(std::get<std::unique_ptr<PlayerIdentityRegistry>>(registryResult));
+
+        const auto first = std::get<PreparedPlayerIdentity>(registry->prepareCreate(testContentManifest()));
+        assert(first.claim.entity == id<EntityId>(2));
+        assert(registry->commit(first.id) && registry->finalize(first.id));
+        const auto second = std::get<PreparedPlayerIdentity>(registry->prepareCreate(testContentManifest()));
+        assert(second.claim.entity == id<EntityId>(4));
+        assert(registry->cancel(second.id));
+
+        const std::array conflicting{ id<EntityId>(2) };
+        assert(std::get<PlayerIdentityError>(PlayerIdentityRegistry::create(
+                   crypto, persistence, persistence.records, conflicting))
+            == PlayerIdentityError::InvalidInitialState);
+        const std::array duplicate{ id<EntityId>(5), id<EntityId>(5) };
+        assert(std::get<PlayerIdentityError>(PlayerIdentityRegistry::create(
+                   crypto, persistence, persistence.records, duplicate))
+            == PlayerIdentityError::InvalidInitialState);
+    }
 }
 
 int main()
@@ -274,5 +299,6 @@ int main()
     preparationIsInvisibleUntilCommit();
     cancelledPreparationLeavesNoStateAndReusesIdentity();
     persistent_identity_reattaches_and_failed_commit_is_atomic();
+    persistent_identity_skips_reserved_actor_entities();
     std::cout << "authenticated join contracts passed\n";
 }

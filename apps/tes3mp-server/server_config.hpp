@@ -20,6 +20,7 @@ namespace TES3MP::ServerApp
     inline constexpr std::size_t MaximumPasswordPathBytes = 1024;
     inline constexpr std::size_t MaximumIdentityPathBytes = 1024;
     inline constexpr std::size_t MaximumCollisionContentPathBytes = 1024;
+    inline constexpr std::size_t MaximumActorContentPathBytes = 1024;
 
     enum class ConfigErrorCode : std::uint8_t
     {
@@ -53,6 +54,7 @@ namespace TES3MP::ServerApp
         ContentManifest contentManifest;
         CellId spawnCell;
         std::filesystem::path collisionContentFile;
+        std::filesystem::path actorContentFile;
         std::filesystem::path playerIdentityFile;
     };
 

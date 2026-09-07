@@ -19,6 +19,7 @@ namespace TES3MP
     inline constexpr std::size_t MaximumNegotiatedCapabilityCount
         = MaximumOptionalCapabilityCount + MaximumRequiredCapabilityCount;
     inline constexpr std::uint32_t VrPoseCapabilityValue = 1;
+    inline constexpr std::uint32_t ActorReplicationCapabilityValue = 2;
 
     class CapabilityId
     {
@@ -47,6 +48,11 @@ namespace TES3MP
     inline constexpr CapabilityId vrPoseCapability() noexcept
     {
         return *CapabilityId::fromValue(VrPoseCapabilityValue);
+    }
+
+    inline constexpr CapabilityId actorReplicationCapability() noexcept
+    {
+        return *CapabilityId::fromValue(ActorReplicationCapabilityValue);
     }
 
     struct ProtocolVersion

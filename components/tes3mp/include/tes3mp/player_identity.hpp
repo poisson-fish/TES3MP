@@ -56,7 +56,8 @@ namespace TES3MP
     public:
         static std::variant<std::unique_ptr<PlayerIdentityRegistry>, PlayerIdentityError> create(
             CredentialCrypto& crypto, PlayerIdentityPersistence& persistence,
-            std::span<const PersistedPlayerIdentity> initialRecords) noexcept;
+            std::span<const PersistedPlayerIdentity> initialRecords,
+            std::span<const EntityId> reservedEntityIds = {}) noexcept;
 
         PlayerIdentityPrepareResult prepareCreate(ContentManifest contentManifest) noexcept;
         std::optional<PlayerCredential> copyPreparedCredential(std::uint64_t preparationId) const noexcept;
@@ -85,12 +86,15 @@ namespace TES3MP
         };
 
         PlayerIdentityRegistry(CredentialCrypto& crypto, PlayerIdentityPersistence& persistence,
-            std::vector<PersistedPlayerIdentity> records, PlayerId nextPlayer, EntityId nextEntity) noexcept;
+            std::vector<PersistedPlayerIdentity> records, std::vector<EntityId> reservedEntityIds,
+            PlayerId nextPlayer, EntityId nextEntity) noexcept;
+        bool advanceIdentities() noexcept;
         bool digest(const PlayerCredential& credential, CredentialDigest& destination) noexcept;
 
         CredentialCrypto& mCrypto;
         PlayerIdentityPersistence& mPersistence;
         std::vector<PersistedPlayerIdentity> mRecords;
+        std::vector<EntityId> mReservedEntityIds;
         PlayerId mNextPlayer;
         EntityId mNextEntity;
         std::optional<Pending> mPending;

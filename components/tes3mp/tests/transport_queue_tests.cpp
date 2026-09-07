@@ -156,6 +156,32 @@ namespace
                 "presentation latest-wins coalescing failed");
     }
 
+    bool actorAndPlayerLatestAreCoalescedSeparatelyAndDrainFairly()
+    {
+        TES3MP::OutboundTransportQueue queue(policy());
+        FakeRuntime runtime;
+        const auto connection = TES3MP::TransportConnectionId::initial();
+        const auto player = std::get<std::vector<std::byte>>(TES3MP::encodeProtocolFrame(
+            TES3MP::MessageClass::LatestWinsSnapshot, TES3MP::MessageKind::LatestWinsSnapshot, bytes(1)));
+        const auto actor = std::get<std::vector<std::byte>>(TES3MP::encodeProtocolFrame(
+            TES3MP::MessageClass::LatestWinsSnapshot, TES3MP::MessageKind::LatestWinsActorSnapshot, bytes(2)));
+        queue.enqueue(TES3MP::TransportChannel::LatestWins, player);
+        queue.enqueue(TES3MP::TransportChannel::LatestWins, actor);
+        const auto first = queue.pump(runtime, connection, 0);
+        const auto second = queue.pump(runtime, connection, 10);
+        if (runtime.sent.size() != 2) return false;
+        const auto firstFrame = TES3MP::decodeProtocolFrame(runtime.sent[0].bytes);
+        const auto secondFrame = TES3MP::decodeProtocolFrame(runtime.sent[1].bytes);
+        return check(first == TES3MP::OutboundPumpResult::Progress
+                && second == TES3MP::OutboundPumpResult::Progress, "separate latest records did not drain")
+            && check(std::get<TES3MP::DecodedFrame>(firstFrame).messageKind()
+                    == TES3MP::MessageKind::LatestWinsSnapshot
+                && std::get<TES3MP::DecodedFrame>(secondFrame).messageKind()
+                    == TES3MP::MessageKind::LatestWinsActorSnapshot,
+                "latest record drain was not fair")
+            && check(!queue.hasWorldLatest(), "latest records retained after fair drain");
+    }
+
     bool pairAdmissionIsAtomic()
     {
         auto queues = TES3MP::OutboundQueueSet::create(policy(), 1);
@@ -302,6 +328,7 @@ namespace
 int main()
 {
     return policyAndBounds() && connectionSetBounds() && orderingCoalescingAndFairness()
+            && actorAndPlayerLatestAreCoalescedSeparatelyAndDrainFairly()
             && presentationIsCoalescedAndIndependent() && pairAdmissionIsAtomic()
             && limitsRateAndTime() && multiConnectionAdmissionIsAtomic()
             && isolatedSlowPeerEviction() && telemetryIsExactBoundedAndIsolated()
