@@ -2,6 +2,7 @@
 #include "authenticated_join_composition.hpp"
 #include "resume_token_context.hpp"
 #include "connection_session_coordinator.hpp"
+#include "content_collision.hpp"
 #include "interest_projection.hpp"
 #include "phase7_proof_profile.hpp"
 #include "phase7_queue_telemetry.hpp"
@@ -46,6 +47,7 @@ namespace
         "cell_spaces = interior:7;exterior:8\nallowed_cells = interior:7;exterior:8:0:0\n"
         "spawn_cell = interior:7\ndefault_appearance_id = 1\n"
         "movement_profile = sneak:1024;walk:4097;run:8192;jump:4096\n"
+        "collision_content_file = collision.txt\n"
         "player_identity_file = players.txt\n";
 
     class FakeRuntime final : public TES3MP::TransportRuntime
@@ -389,6 +391,7 @@ int main()
         const auto& config = std::get<ServerConfig>(result);
         assert(config.endpoint.address() == "127.0.0.1" && config.endpoint.port() == 25565);
         assert(config.tickIntervalMilliseconds == 16 && config.disconnectGraceMilliseconds == 30000);
+        assert(config.collisionContentFile == std::filesystem::path("collision.txt"));
         assert(config.contentManifest.movementProfile().speed(LocomotionMode::Sneak) == 1024
             && config.contentManifest.movementProfile().speed(LocomotionMode::Jump) == 4096);
     }
@@ -412,6 +415,65 @@ int main()
         std::string("sneak:1024;walk:4097;run:8192;jump:4096").size(),
         "sneak:4097;walk:1024;run:8192;jump:4096");
     assert(std::holds_alternative<ConfigError>(parseServerConfig(invalidMovementProfile)));
+
+    const auto collisionPath = std::filesystem::temp_directory_path() / "tes3mp-server-collision-content-test";
+    const auto writeCollision = [&](std::string_view content) {
+        std::ofstream stream(collisionPath, std::ios::binary | std::ios::trunc);
+        stream << content;
+        assert(static_cast<bool>(stream));
+    };
+    constexpr std::string_view collisionHeader =
+        "TES3MP_COLLISION_V1\n"
+        "manifest 0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20\n";
+    writeCollision(std::string(collisionHeader)
+        + "cell interior 7\ncell exterior 8 0 0\nsolid interior 7 15 0 0 20 40 60\n");
+    auto collisionResult = ContentCollisionProvider::load(collisionPath, parsedConfig().contentManifest);
+    assert(std::holds_alternative<std::unique_ptr<ContentCollisionProvider>>(collisionResult));
+    auto collision = std::move(std::get<std::unique_ptr<ContentCollisionProvider>>(collisionResult));
+    const auto zero = Turn32::fromValue(0);
+    const auto interior = CellId::interior(id<CellSpaceId>(7));
+    const auto root = Transform(interior, Position3(10, 20, 30), Orientation3(zero, zero, zero));
+    assert(collision->canOccupy(interior, root.position())
+        && !collision->canOccupy(interior, Position3(16, 20, 30)));
+    const auto blocked = collision->resolve({ testContentManifestId(), id<EntityId>(1), ServerTick::initial(),
+        root, Position3(25, 20, 30), LinearVelocity3(15, 0, 0), LocomotionMode::Walk });
+    assert(blocked && blocked->position == root.position() && blocked->velocity == LinearVelocity3(0, 0, 0));
+    const auto clear = collision->resolve({ testContentManifestId(), id<EntityId>(1), ServerTick::initial(),
+        root, Position3(10, 25, 30), LinearVelocity3(0, 5, 0), LocomotionMode::Walk });
+    assert(clear && clear->position == Position3(10, 25, 30) && clear->velocity == LinearVelocity3(0, 5, 0));
+    assert(!collision->resolve({ testContentManifestId(), id<EntityId>(1), ServerTick::initial(),
+        root, Position3(25, 20, 30), LinearVelocity3(14, 0, 0), LocomotionMode::Walk }));
+    const auto boundaryRoot = Transform(interior, Position3(MaximumCollisionCoordinate, 20, 30),
+        Orientation3(zero, zero, zero));
+    const auto boundary = collision->resolve({ testContentManifestId(), id<EntityId>(1),
+        ServerTick::initial(), boundaryRoot, Position3(MaximumCollisionCoordinate + 1, 20, 30),
+        LinearVelocity3(1, 0, 0), LocomotionMode::Walk });
+    assert(boundary && boundary->position == boundaryRoot.position()
+        && boundary->velocity == LinearVelocity3(0, 0, 0));
+    writeCollision(std::string(collisionHeader) + "cell interior 7\n");
+    assert(std::get<ContentCollisionError>(
+        ContentCollisionProvider::load(collisionPath, parsedConfig().contentManifest))
+        == ContentCollisionError::IncompleteCells);
+    writeCollision(
+        "TES3MP_COLLISION_V1\n"
+        "manifest 0202030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20\n"
+        "cell interior 7\ncell exterior 8 0 0\n");
+    assert(std::get<ContentCollisionError>(
+        ContentCollisionProvider::load(collisionPath, parsedConfig().contentManifest))
+        == ContentCollisionError::ManifestMismatch);
+    writeCollision(std::string(collisionHeader)
+        + "cell interior 7\ncell exterior 8 0 0\nsolid interior 7 20 0 0 15 40 60\n");
+    assert(std::get<ContentCollisionError>(
+        ContentCollisionProvider::load(collisionPath, parsedConfig().contentManifest))
+        == ContentCollisionError::Malformed);
+    writeCollision(std::string(MaximumCollisionContentBytes + 1, 'x'));
+    assert(std::get<ContentCollisionError>(
+        ContentCollisionProvider::load(collisionPath, parsedConfig().contentManifest))
+        == ContentCollisionError::TooLarge);
+    std::filesystem::remove(collisionPath);
+    assert(std::get<ContentCollisionError>(
+        ContentCollisionProvider::load(collisionPath, parsedConfig().contentManifest))
+        == ContentCollisionError::Unavailable);
 
     const auto temporary = std::filesystem::temp_directory_path() / "tes3mp-server-password-test";
     { std::ofstream stream(temporary, std::ios::binary); stream << "secret\r\n"; }

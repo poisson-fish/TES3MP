@@ -295,6 +295,16 @@
       "purpose": "Defines the approved app-local live connection and server-session ownership boundary."
     },
     {
+      "path": "apps/tes3mp-server/content_collision.cpp",
+      "status": "A",
+      "purpose": "Loads bounded manifest-bound collision content and deterministically resolves swept canonical root steps against pre-inflated static volumes."
+    },
+    {
+      "path": "apps/tes3mp-server/content_collision.hpp",
+      "status": "A",
+      "purpose": "Declares the app-layer content collision provider, hard bounds, and closed startup failure categories."
+    },
+    {
       "path": "apps/tes3mp-server/interest_projection.cpp",
       "status": "A",
       "purpose": "Derives deterministic server-owned exact-cell interest deltas, complete baselines and scoped views, and admits paired output atomically."
@@ -307,7 +317,7 @@
     {
       "path": "apps/tes3mp-server/main.cpp",
       "status": "A",
-      "purpose": "Thin single-threaded dedicated-server process root with transactional configuration, secret, transport, listener, and signal-driven shutdown composition."
+      "purpose": "Thin single-threaded dedicated-server process root with fail-closed content collision, transactional configuration, secret, transport, listener, and signal-driven shutdown composition."
     },
     {
       "path": "apps/tes3mp-server/phase7_proof_profile.hpp",
@@ -347,7 +357,7 @@
     {
       "path": "apps/tes3mp-server/server_app_tests.cpp",
       "status": "A",
-      "purpose": "Focused configuration, lifecycle, join, fixture-observation projection, and token/queue failure-atomicity contracts."
+      "purpose": "Focused collision content, configuration, lifecycle, join, fixture-observation projection, and token/queue failure-atomicity contracts."
     },
     {
       "path": "apps/tes3mp-server/server_application.cpp",
@@ -362,7 +372,7 @@
     {
       "path": "apps/tes3mp-server/server_config.cpp",
       "status": "A",
-      "purpose": "Strict bounded closed-key UTF-8 server configuration parser including manifest movement profiles, redacted stable errors, and bounded move-only password-file loader."
+      "purpose": "Strict bounded closed-key UTF-8 server configuration parser including manifest movement and collision inputs, redacted stable errors, and bounded move-only password-file loader."
     },
     {
       "path": "apps/tes3mp-server/server_config.hpp",
@@ -1288,6 +1298,11 @@
       "path": "docs/vnext/BASELINE_PROVENANCE.json",
       "status": "A",
       "purpose": "Machine-readable OpenMW baseline, cutover, dependency-input, and intentional-difference record."
+    },
+    {
+      "path": "docs/vnext/COLLISION_CONTENT_V1.md",
+      "status": "A",
+      "purpose": "Documents the bounded manifest-scoped static collision artifact format, deterministic root-sweep semantics, and explicit exclusions."
     },
     {
       "path": "docs/vnext/IMPLEMENTATION_NOTES.md",

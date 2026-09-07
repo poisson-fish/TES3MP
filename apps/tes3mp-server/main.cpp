@@ -1,5 +1,6 @@
 #include "server_application.hpp"
 #include "server_config.hpp"
+#include "content_collision.hpp"
 #include "connection_session_coordinator.hpp"
 #include "phase7_proof_profile.hpp"
 #include "phase7_queue_telemetry.hpp"
@@ -60,6 +61,17 @@ int main(int argc, char** argv)
         return 2;
     }
     auto config = std::get<TES3MP::ServerApp::ServerConfig>(std::move(parsed));
+    auto collisionResult = TES3MP::ServerApp::ContentCollisionProvider::load(
+        config.collisionContentFile, config.contentManifest);
+    auto* collisionValue = std::get_if<std::unique_ptr<TES3MP::ServerApp::ContentCollisionProvider>>(
+        &collisionResult);
+    auto collision = collisionValue ? std::move(*collisionValue) : nullptr;
+    const auto spawnPosition = TES3MP::Position3(10, 20, 30);
+    if (!collision || !collision->canOccupy(config.spawnCell, spawnPosition))
+    {
+        std::cerr << "collision content initialization failed\n";
+        return 2;
+    }
     auto password = TES3MP::ServerApp::loadJoinPassword(config.joinPasswordFile);
     if (const auto* error = std::get_if<TES3MP::ServerApp::ConfigError>(&password))
     {
@@ -121,15 +133,13 @@ int main(int argc, char** argv)
     auto offer = TES3MP::CapabilityOffer::create(
         std::move(versions), optionalCapabilities, {}, config.contentManifest.id());
     const auto zero = TES3MP::Turn32::fromValue(0);
-    auto spawn = TES3MP::Transform(config.spawnCell,
-        TES3MP::Position3(10, 20, 30), TES3MP::Orientation3(zero, zero, zero));
+    auto spawn = TES3MP::Transform(config.spawnCell, spawnPosition, TES3MP::Orientation3(zero, zero, zero));
     TES3MP::NullMetricSink metrics;
     TES3MP::NullStructuredEventSink events;
     TES3MP::Observability observability(metrics, events);
     auto emptyState = std::get<TES3MP::CanonicalServerState>(TES3MP::createCanonicalServerState({}, {}));
-    TES3MP::UnobstructedServerCollisionQuery collision;
     TES3MP::CanonicalCommandReducer reducer(
-        std::move(emptyState), observability, config.contentManifest, collision);
+        std::move(emptyState), observability, config.contentManifest, *collision);
     TES3MP::ServerCommandIntakeCoordinator intake(
         clock, observability, clock.now(), TES3MP::ServerTick::initial(), TES3MP::IngressOrdinal::initial());
     auto joins = playerIdentities ? TES3MP::AuthenticatedJoinCoordinator::create(spawn,

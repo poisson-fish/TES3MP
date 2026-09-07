@@ -6179,6 +6179,29 @@ only the relevant phase section here.
 
 [Back to the phase tracker](IMPLEMENTATION_PLAN.md#now)
 
+### 2026-09-06 — content-backed server collision provider — Complete
+
+- Change: the dedicated server now requires the bounded
+  [collision content V1](COLLISION_CONTENT_V1.md) artifact. Startup validates
+  its exact manifest binding, complete allowed-cell coverage, unique bounded
+  blocked-root volumes, and file/work limits before listen.
+- Change: the app-layer provider binds the existing engine-neutral collision
+  seam and deterministically sweeps each attempted fixed-tick root segment.
+  Contact retains the current position and installs zero velocity; clear steps
+  retain the kernel attempt. Invalid runtime scope or step invariants return
+  collision unavailable before canonical mutation.
+- Boundary: explicit empty cells preserve existing version 1.2/demo movement.
+  No protocol, local replay, correction tuning, remote playback, animation,
+  pose, cell traversal, dynamic bodies, gravity, world objects, or persistence
+  behavior changed.
+- Verification: MSVC RelWithDebInfo focused dedicated-server app contracts and
+  the complete engine-independent protocol/server aggregate pass. MSVC Release
+  networking-enabled `tes3mp_server.exe` builds and links with the production
+  provider. The real encrypted Phase 7 lifecycle integration passes 32
+  reconnects with converged views and zero final queue depth. All 145 repository
+  Python tests, including legacy exclusion, pass; indexed provenance and diff
+  hygiene pass on the final staged tree.
+
 ### 2026-09-06 — manifest movement profiles and collision kernel seam — Complete
 
 - Change: content manifests now carry ordered, bounded sneak/walk/run/jump

@@ -91,15 +91,21 @@ def main() -> int:
         root = Path(temporary)
         good = root / "join-password"
         bad = root / "wrong-password"
+        collision = root / "collision-content"
         config = root / "server.cfg"
         good.write_text("phase7-demo-secret\n", encoding="utf-8")
         bad.write_text("wrong-phase7-secret\n", encoding="utf-8")
+        collision.write_text(
+            f"TES3MP_COLLISION_V1\nmanifest {TEST_CONTENT_MANIFEST}\n"
+            "cell interior 7\ncell exterior 8 0 0\n",
+            encoding="utf-8")
         config.write_text(
             f"bind_address=127.0.0.1\nport={port}\ntick_interval_ms=16\n"
             f"disconnect_grace_ms=3000\njoin_password_file={good.as_posix()}\n"
             f"content_manifest_id={TEST_CONTENT_MANIFEST}\ncell_spaces=interior:7;exterior:8\n"
             f"allowed_cells=interior:7;exterior:8:0:0\nspawn_cell=interior:7\ndefault_appearance_id=1\n"
             f"movement_profile=sneak:1024;walk:4097;run:8192;jump:4096\n"
+            f"collision_content_file={collision.as_posix()}\n"
             f"player_identity_file={(root / 'player-identities').as_posix()}\n",
             encoding="utf-8")
         server = subprocess.Popen(

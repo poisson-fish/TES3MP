@@ -36,28 +36,27 @@ Verification scales with risk:
 
 ## Now
 
-### Phase 12 — content-backed server collision provider
+### Phase 12 — bounded remote playback, animation, and pose fallback
 
 Status: **Ready**
 
-Manifest-scoped movement profiles, additive version 1.3 locomotion input, and
-bounded replay-only local reconciliation are complete. Version 1.2 remains the
+Manifest-scoped movement profiles, additive version 1.3 locomotion input,
+bounded replay-only local reconciliation, and the first deterministic
+content-backed server collision provider are complete. Version 1.2 remains the
 bounded walk-compatibility path.
 
-Bind the first content-backed server collision provider at the completed
-engine-neutral query seam. Keep collision resolution server-only,
-manifest-scoped, deterministic, and fail-closed for unavailable or invalid
-content. Preserve client input/replay, exact-cell interest/resync, and the
-version 1.2 compatibility path. Do not tune correction, remote playback,
-animation, pose, world objects, or persistence in this pass.
+Add bounded adaptive remote playback inside measured floors and ceilings, drive
+shared remote locomotion animation from canonical mode/velocity, keep reliable
+one-shots separate from snapshots, and add stale optional-pose fallback without
+granting pose authority. Preserve server collision, local replay, exact-cell
+interest/resync, and the version 1.2 compatibility path. Do not add world
+objects, persistence, or unmeasured player-facing tuning in this pass.
 
 ## Next
 
 These are candidates, not locked slices:
 
-1. Add bounded adaptive remote playback, canonical locomotion-driven animation,
-   reliable one-shots, and stale-pose fallback without pose authority.
-2. Run hardware/content-backed desktop and PC-VR captures, then ratify measured
+1. Run hardware/content-backed desktop and PC-VR captures, then ratify measured
    profile and presentation budgets.
 
 The list is rewritten after each completed pass. New evidence may reorder,
@@ -70,7 +69,7 @@ The remaining roadmap is kept at outcome level:
 | Horizon | Intended outcome |
 |---|---|
 | Player foundation | Player lifecycle, content identity, and non-fixture world visibility |
-| Movement | Content-backed server collision, measured correction/remote playback, animation, and hardened optional pose presentation |
+| Movement | Measured correction/remote playback, animation, and hardened optional pose presentation |
 | World gameplay | Actors, cells, object state, inventory, equipment, and containers |
 | Rules | Combat, magic, death, respawn, dialogue, quests, factions, reputation, and time/weather |
 | Platform services | Scripting, persistence/replay, administration, moderation, observability, and security hardening |
@@ -96,6 +95,7 @@ but they no longer force a predetermined sequence of micro-slices.
 | Phase 12 decision/safety | **Complete** | Approved production movement package plus a reducer-owned legacy velocity envelope that rejects unsafe input before spatial mutation |
 | Phase 12 profiles/kernel | **Complete** | Manifest locomotion profiles and a deterministic collision-query movement kernel with a bounded version 1.2 compatibility path |
 | Phase 12 input/replay | **Complete** | Additive version 1.3 locomotion semantics, ordered bounded input, and shared replay-only local reconciliation |
+| Phase 12 collision provider | **Complete** | Manifest-bound static collision content with complete exact-cell coverage, bounded swept root volumes, and fail-closed server composition |
 
 ### Phase 9 completion record
 

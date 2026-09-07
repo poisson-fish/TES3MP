@@ -6,6 +6,8 @@ add_library(tes3mp_server_app STATIC
     authenticated_join_composition.cpp
     connection_session_coordinator.hpp
     connection_session_coordinator.cpp
+    content_collision.hpp
+    content_collision.cpp
     interest_projection.hpp
     interest_projection.cpp
     phase7_proof_profile.hpp

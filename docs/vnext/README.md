@@ -140,6 +140,7 @@ requirement for every small pass.
 - [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md): rolling Now / Next / Later status and outcome tracker
 - [`STATE.md`](STATE.md): concise current-pass handoff; read first in a new session
 - [`IMPLEMENTATION_NOTES.md`](IMPLEMENTATION_NOTES.md): historical chronological evidence, commands, approvals, and follow-ups
+- [`COLLISION_CONTENT_V1.md`](COLLISION_CONTENT_V1.md): bounded manifest-scoped server collision artifact contract
 - [`LOCAL_BASELINE_BUILD.md`](LOCAL_BASELINE_BUILD.md): local build and test workflow
 - [`LEGACY_GAMEPLAY_FEATURE_INVENTORY.md`](LEGACY_GAMEPLAY_FEATURE_INVENTORY.md): historical gameplay reference only
 - [`PRE_CUTOVER_PROVENANCE.md`](PRE_CUTOVER_PROVENANCE.md): historical cutover provenance

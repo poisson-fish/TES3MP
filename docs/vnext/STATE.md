@@ -9,8 +9,8 @@ Updated: 2026-09-06
 - Phase 12 discovery: **Complete**
 - Phase 12 evidence: **Complete**
 - Phase 12 package decision/safety: **Complete**
-- Active work: **Phase 12 content-backed server collision provider**
-- Last pass: **Phase 12 versioned locomotion input and bounded local replay complete**
+- Active work: **Phase 12 bounded remote playback, animation, and pose fallback**
+- Last pass: **Phase 12 content-backed server collision provider complete**
 - Authoritative tracker: [rolling implementation plan](IMPLEMENTATION_PLAN.md)
 - Historical evidence: [implementation notes](IMPLEMENTATION_NOTES.md)
 
@@ -116,6 +116,25 @@ ADRs and GDRs are required only for consequential, hard-to-reverse decisions.
   playback, animation, pose, exact-cell interest/resync, persistence, and world
   objects remain unchanged.
 
+## Phase 12 content collision result
+
+- The dedicated server now requires a bounded V1 collision-content artifact
+  whose exact manifest ID and complete exact-cell declarations are validated
+  before listen. Missing, oversized, malformed, mismatched, or incomplete
+  content fails composition closed.
+- Static pre-inflated blocked-root volumes use bounded signed integer AABBs. The
+  deterministic provider sweeps each attempted fixed-tick segment in the
+  current cell; contact retains the current position with zero velocity, while
+  clear movement accepts the kernel attempt.
+- Runtime manifest, cell, coordinate, and step-integrity violations return
+  collision unavailable before canonical mutation. The provider remains in the
+  app layer and binds the existing engine-neutral server query without OpenMW,
+  Bullet, client, or protocol types.
+- Explicit cells with no solids retain the version 1.2 and demo fixture path.
+  Cell traversal, dynamic bodies, gravity, slopes, capsule dimensions, world
+  objects, persistence, client replay, presentation, animation, and pose remain
+  unchanged.
+
 ## Phase 10 result
 
 - Fresh password joins issue a random 32-byte player credential after ordinary
@@ -176,8 +195,9 @@ work.
 ## Last verified
 
 - MSVC RelWithDebInfo full engine-independent protocol/server aggregate and
-  focused protocol, client replay, reducer, movement-evidence, server-app, and
-  OpenMW adapter contracts pass.
+  focused server collision/configuration contracts pass.
+- The real encrypted Phase 7 lifecycle integration passes 32 reconnects with
+  converged views and zero final queue depth using explicit collision content.
 - The deterministic movement capture still emits all eight expected
   desktop/PC-VR platform/profile records.
 - The pinned FlatBuffers 25.12.19 production-schema proof passes. MSVC Release
@@ -190,14 +210,14 @@ work.
 ## Next pass
 
 Read the rolling **Now** section in
-[IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md). Bind the first content-backed
-server collision provider at the existing engine-neutral query seam without
-extending correction, remote presentation, animation, pose, world-object, or
+[IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md). Add bounded adaptive remote
+playback, canonical locomotion-driven animation, reliable one-shots, and stale
+optional-pose fallback without extending authority, world-object, or
 persistence scope.
 
 ## Working-tree expectation
 
 Before starting the next pass, `vnext` should contain the completed Phase 12
-locomotion-input/replay commit and be clean. The separate
+content-collision commit and be clean. The separate
 `vnext-vr` worktree remains at the completed Phase 9 baseline until a later shared
 merge is deliberately made.

@@ -153,8 +153,13 @@ def main() -> int:
     with tempfile.TemporaryDirectory(prefix="tes3mp-phase8-") as temporary:
         root = Path(temporary)
         password = root / "join-password"
+        collision = root / "collision-content"
         config = root / "server.cfg"
         password.write_text(secret + "\n", encoding="utf-8")
+        collision.write_text(
+            f"TES3MP_COLLISION_V1\nmanifest {TEST_CONTENT_MANIFEST}\n"
+            "cell interior 7\ncell exterior 8 0 0\n",
+            encoding="utf-8")
         config.write_text(
             f"bind_address=127.0.0.1\nport={port}\ntick_interval_ms=16\n"
             f"disconnect_grace_ms={int(DISCONNECT_GRACE_SECONDS * 1000)}\n"
@@ -162,6 +167,7 @@ def main() -> int:
             f"cell_spaces=interior:7;exterior:8\nallowed_cells=interior:7;exterior:8:0:0\n"
             f"spawn_cell=interior:7\ndefault_appearance_id=1\n"
             f"movement_profile=sneak:1024;walk:4097;run:8192;jump:4096\n"
+            f"collision_content_file={collision.as_posix()}\n"
             f"player_identity_file={(root / 'player-identities').as_posix()}\n",
             encoding="utf-8",
         )
