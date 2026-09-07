@@ -430,6 +430,16 @@
       "purpose": "Caller-pumped single-attempt/single-connection headless client façade over owned transport and client-session state."
     },
     {
+      "path": "components/tes3mp/include/tes3mp/actor_catalog.hpp",
+      "status": "A",
+      "purpose": "Declares the bounded manifest-bound stable actor catalog and closed idle, travel, and wander package values."
+    },
+    {
+      "path": "components/tes3mp/include/tes3mp/actor_simulation.hpp",
+      "status": "A",
+      "purpose": "Declares separate immutable canonical actor state and the deterministic server-only simulation boundary."
+    },
+    {
       "path": "components/tes3mp/include/tes3mp/admission_scope.hpp",
       "status": "A",
       "purpose": "Owner-approved opaque fixed-size admission-scope value shared across the existing protocol, transport, and server-core target graph."
@@ -657,7 +667,12 @@
     {
       "path": "components/tes3mp/include/tes3mp/value_types.hpp",
       "status": "A",
-      "purpose": "Owner-approved identity, tick, canonical-state-version, sequence, revision, command, epoch, generation, ingress-ordinal, and cell-space semantic catalog."
+      "purpose": "Owner-approved player, actor, prototype, entity, tick, canonical-state-version, sequence, revision, command, epoch, generation, ingress-ordinal, and cell-space semantic catalog."
+    },
+    {
+      "path": "components/tes3mp/protocol/actor_catalog.cpp",
+      "status": "A",
+      "purpose": "Validates bounded actor packages, stable actor/entity uniqueness, and exact manifest-cell catalog binding."
     },
     {
       "path": "components/tes3mp/protocol/anchor.cpp",
@@ -825,6 +840,11 @@
       "purpose": "Explicit-ID T3RS schema for authenticated metadata-only bounded session resync requests."
     },
     {
+      "path": "components/tes3mp/server_core/actor_simulation.cpp",
+      "status": "A",
+      "purpose": "Implements atomic server-owned actor idle, travel, and wander simulation with exact-cell freeze and checked collision movement."
+    },
+    {
       "path": "components/tes3mp/server_core/anchor.cpp",
       "status": "A",
       "purpose": "Behavior-free translation-unit anchor for the deterministic server-core target."
@@ -953,6 +973,16 @@
       "path": "components/tes3mp/test_support/spatial_round_trip.cpp",
       "status": "A",
       "purpose": "Bounded little-endian owned-value round-trip implementation used only by Slice 3.3 independent contract tests."
+    },
+    {
+      "path": "components/tes3mp/tests/actor_catalog_tests.cpp",
+      "status": "A",
+      "purpose": "Focused actor package, manifest binding, identity uniqueness, ordering, lookup, and capacity contracts."
+    },
+    {
+      "path": "components/tes3mp/tests/actor_simulation_tests.cpp",
+      "status": "A",
+      "purpose": "Focused actor identity separation, inactive freeze, AI movement, collision, lifecycle, overflow, and atomic failure contracts."
     },
     {
       "path": "components/tes3mp/tests/authenticated_join_tests.cpp",
@@ -1330,6 +1360,11 @@
       "purpose": "Machine-checked semantic registry for every non-adapter OpenMW delta."
     },
     {
+      "path": "docs/vnext/PHASE12_HARDWARE_CAPTURE.md",
+      "status": "A",
+      "purpose": "Records representative-content desktop capture evidence, maintained VR integration readiness, and the explicit no-HMD hardware deferral."
+    },
+    {
       "path": "docs/vnext/PHASE12_MOVEMENT_DISCOVERY.md",
       "status": "A",
       "purpose": "Repository-backed Phase 12 movement trace, production seam, evidence gaps, owner choices, and named proof scenarios."
@@ -1338,6 +1373,11 @@
       "path": "docs/vnext/PHASE12_MOVEMENT_EVIDENCE.md",
       "status": "A",
       "purpose": "Deterministic identity-free desktop/PC-VR movement and pose evidence baseline retained before player-facing tuning."
+    },
+    {
+      "path": "docs/vnext/PHASE13_ACTOR_DISCOVERY.md",
+      "status": "A",
+      "purpose": "Repository-backed actor identity, canonical state, authority, interest, replication, content, and presentation discovery with owner package choices."
     },
     {
       "path": "docs/vnext/PRE_CUTOVER_PROVENANCE.md",
@@ -1635,6 +1675,11 @@
       "purpose": "Records the approved server collision, manifest profile, bounded reconciliation, adaptive playback, locomotion state, and ephemeral pose architecture."
     },
     {
+      "path": "docs/vnext/adr/ADR-0060-phase13-server-owned-actor-foundation.md",
+      "status": "A",
+      "purpose": "Records the approved separate actor state, server-only simulation authority, additive compatibility, and no-client-lease architecture."
+    },
+    {
       "path": "docs/vnext/gdr/GDR-0001-phase7-headless-vertical-slice-behavior.md",
       "status": "A",
       "purpose": "Owner-approved Phase 7 fixture spawn, readiness, cell visibility, provisional tick integration, headless correction, and bounded resume behavior."
@@ -1683,6 +1728,11 @@
       "path": "docs/vnext/gdr/GDR-0019-phase12-production-movement-package.md",
       "status": "A",
       "purpose": "Records owner approval of manifest locomotion profiles, server collision, bounded correction/playback, locomotion animation, and pose authority limits."
+    },
+    {
+      "path": "docs/vnext/gdr/GDR-0020-phase13-actor-lifecycle-and-ai.md",
+      "status": "A",
+      "purpose": "Records owner approval of manifest-created actors, bounded idle/travel/wander, inactive-cell freeze, and no client simulation."
     },
     {
       "path": "docs/vnext/proofs/cares/CMakeLists.txt",
@@ -1800,6 +1850,11 @@
       "purpose": "Fail-closed production provisioner for the accepted exact GameNetworkingSockets, OpenSSL, Protobuf, Abseil, utf8_range, and c-ares source, install, license, profile, and evidence inputs."
     },
     {
+      "path": "scripts/run_phase12_movement_capture.py",
+      "status": "A",
+      "purpose": "Runs bounded two-peer desktop or PC-VR movement capture through deterministic localhost direct, jitter, loss, and stall relay profiles."
+    },
+    {
       "path": "scripts/run_phase7_join_demo.py",
       "status": "A",
       "purpose": "Runs the bounded real Phase 7 server/client process proof with an injected credential failure and exact distinct non-orphan identity assertions."
@@ -1858,6 +1913,11 @@
       "path": "scripts/tests/test_openmw_patch_registry.py",
       "status": "A",
       "purpose": "Positive and schema contracts for the OpenMW semantic patch registry verifier."
+    },
+    {
+      "path": "scripts/tests/test_phase12_movement_capture.py",
+      "status": "A",
+      "purpose": "Contracts for bounded movement-capture routing, profile validation, evidence completeness, and safe process cleanup."
     },
     {
       "path": "scripts/tests/test_phase8_desktop_harness.py",
@@ -2081,7 +2141,7 @@
         },
         {
           "path": "components/tes3mp/CMakeLists.txt",
-          "sha256": "c069fa568488463d696530a31b5fbe418dc0b7c2273bad08bb1e30a382a5c04b"
+          "sha256": "9cefd8bde9cc130488d6ff23c4f805cc3839cbdfabcbfdba12fad9a568d19351"
         },
         {
           "path": "components/tes3mp/protocol/generated/authentication_accepted_generated.h",

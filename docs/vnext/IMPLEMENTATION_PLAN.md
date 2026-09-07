@@ -36,32 +36,36 @@ Verification scales with risk:
 
 ## Now
 
-### Phase 13 — actor lifecycle and server-owned AI package decision
+### Phase 13 — content-backed actor composition and additive replication
 
-Status: **Blocked — owner package decision required**
+Status: **Ready**
 
-Discovery confirms the current canonical, command, interest, resync, protocol,
-content, and renderer paths are explicitly player-shaped. Actors need separate
-stable identity and canonical state; they must not acquire fake player/session
-identity. The existing server-owned movement/collision kernel and renderer-only
-presentation seam are reusable.
+The owner approved Package A. The engine-independent foundation now provides a
+manifest-bound bounded actor catalog, separate immutable canonical actor world,
+server-owned idle/travel/wander scheduler, checked movement/collision, exact-cell
+inactive freeze, and atomic failure. Actors have no player/session identity and
+no client proposal or lease surface.
 
-Select the Phase 13 package in
-[the actor discovery](PHASE13_ACTOR_DISCOVERY.md). Package A is recommended:
-manifest-bound stable actors, separate additive actor state/protocol, server-owned
-idle and bounded waypoint travel/wander, exact-cell inactive freeze, and no
-client delegation. Packages B and C respectively introduce active-cell proposal
-leases or broad always-running server simulation. Do not implement until the
-owner selects a package because simulation authority, unloaded-cell behavior,
-compatibility, and AI semantics are material choices.
+Complete the first usable actor vertical slice:
+
+1. load a bounded actor catalog from server content and compose its canonical
+   world beside the player reducer at the fixed server tick;
+2. negotiate an optional actor capability with separate reliable membership and
+   latest-wins actor view records, including complete exact-cell baseline/resync;
+3. map prototypes locally and present actors through the existing renderer-only
+   desktop/PC-VR seam; and
+4. preserve protocol 1.2/1.3 player behavior and keep combat, deletion, scripts,
+   persistence, pathfinding, and client simulation out of scope.
 
 ## Next
 
 These are candidates, not locked slices:
 
-1. Implement and prove the selected Phase 13 actor foundation.
+1. Prove actor presentation and lifecycle with two desktop clients, then the VR
+   build without requiring hardware.
 2. Revisit Phase 12 PC-VR capture after the first actor desktop/VR presentation
    demo, or before Phase 22 stabilization if hardware is still unavailable.
+3. Close Phase 13 before selecting the first interactive-object pass.
 
 The list is rewritten after each completed pass. New evidence may reorder,
 combine, or remove items.
@@ -101,6 +105,7 @@ but they no longer force a predetermined sequence of micro-slices.
 | Phase 12 input/replay | **Complete** | Additive version 1.3 locomotion semantics, ordered bounded input, and shared replay-only local reconciliation |
 | Phase 12 collision provider | **Complete** | Manifest-bound static collision content with complete exact-cell coverage, bounded swept root volumes, and fail-closed server composition |
 | Phase 12 remote presentation | **Complete** | Fixture-bounded adaptive playback, additive canonical locomotion snapshots, shared remote animation selection, reliable one-shot separation, and stale optional-pose fallback |
+| Phase 13 actor core | **Complete** | Manifest-bound actor identity/catalog, separate canonical actor world, server-only bounded idle/travel/wander simulation, checked collision, inactive-cell freeze, and atomic failure |
 
 ### Phase 9 completion record
 

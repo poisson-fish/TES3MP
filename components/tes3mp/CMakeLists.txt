@@ -70,6 +70,7 @@ endfunction()
 tes3mp_add_engine_independent_library(tes3mp_protocol protocol/anchor.cpp)
 add_library(TES3MP::Protocol ALIAS tes3mp_protocol)
 target_sources(tes3mp_protocol PRIVATE
+    include/tes3mp/actor_catalog.hpp
     include/tes3mp/admission_scope.hpp
     include/tes3mp/authentication.hpp
     include/tes3mp/command_primitives.hpp
@@ -97,6 +98,7 @@ target_sources(tes3mp_protocol PRIVATE
     protocol/generated/session_rejected_generated.h
     protocol/generated/session_resync_request_generated.h
     protocol/authentication.cpp
+    protocol/actor_catalog.cpp
     protocol/content_identity.cpp
     protocol/protocol_exchange.cpp
     protocol/protocol_handshake.cpp
@@ -276,6 +278,7 @@ tes3mp_add_engine_independent_library(tes3mp_server_core server_core/anchor.cpp)
 add_library(TES3MP::ServerCore ALIAS tes3mp_server_core)
 target_link_libraries(tes3mp_server_core PUBLIC tes3mp_protocol)
 target_sources(tes3mp_server_core PRIVATE
+    include/tes3mp/actor_simulation.hpp
     include/tes3mp/authenticated_join.hpp
     include/tes3mp/canonical_checksum.hpp
     include/tes3mp/canonical_publication.hpp
@@ -295,6 +298,7 @@ target_sources(tes3mp_server_core PRIVATE
     include/tes3mp/server_session.hpp
     include/tes3mp/server_lifecycle.hpp
     server_core/authenticated_join.cpp
+    server_core/actor_simulation.cpp
     server_core/canonical_checksum.cpp
     server_core/canonical_publication.cpp
     server_core/canonical_resync.cpp
@@ -319,6 +323,24 @@ set_target_properties(tes3mp_server_lifecycle_tests PROPERTIES FOLDER "TES3MP/Te
 tes3mp_enable_runtime_safety(tes3mp_server_lifecycle_tests)
 tes3mp_verify_target_dependencies(tes3mp_server_lifecycle_tests ALLOWED tes3mp_server_core tes3mp_protocol)
 tes3mp_verify_target_includes(tes3mp_server_lifecycle_tests
+    FORBIDDEN ${TES3MP_ENGINE_INDEPENDENT_FORBIDDEN_INCLUDES})
+
+add_executable(tes3mp_actor_catalog_tests tests/actor_catalog_tests.cpp)
+target_compile_features(tes3mp_actor_catalog_tests PRIVATE cxx_std_20)
+target_link_libraries(tes3mp_actor_catalog_tests PRIVATE tes3mp_protocol)
+set_target_properties(tes3mp_actor_catalog_tests PROPERTIES FOLDER "TES3MP/Tests")
+tes3mp_enable_runtime_safety(tes3mp_actor_catalog_tests)
+tes3mp_verify_target_dependencies(tes3mp_actor_catalog_tests ALLOWED tes3mp_protocol)
+tes3mp_verify_target_includes(tes3mp_actor_catalog_tests
+    FORBIDDEN ${TES3MP_ENGINE_INDEPENDENT_FORBIDDEN_INCLUDES})
+
+add_executable(tes3mp_actor_simulation_tests tests/actor_simulation_tests.cpp)
+target_compile_features(tes3mp_actor_simulation_tests PRIVATE cxx_std_20)
+target_link_libraries(tes3mp_actor_simulation_tests PRIVATE tes3mp_server_core)
+set_target_properties(tes3mp_actor_simulation_tests PROPERTIES FOLDER "TES3MP/Tests")
+tes3mp_enable_runtime_safety(tes3mp_actor_simulation_tests)
+tes3mp_verify_target_dependencies(tes3mp_actor_simulation_tests ALLOWED tes3mp_server_core tes3mp_protocol)
+tes3mp_verify_target_includes(tes3mp_actor_simulation_tests
     FORBIDDEN ${TES3MP_ENGINE_INDEPENDENT_FORBIDDEN_INCLUDES})
 
 add_executable(tes3mp_authenticated_join_tests tests/authenticated_join_tests.cpp)
@@ -808,6 +830,8 @@ add_custom_target(tes3mp_protocol_tests_run
     COMMAND $<TARGET_FILE:tes3mp_server_core_safety_tests>
     COMMAND $<TARGET_FILE:tes3mp_server_authentication_tests>
     COMMAND $<TARGET_FILE:tes3mp_server_lifecycle_tests>
+    COMMAND $<TARGET_FILE:tes3mp_actor_catalog_tests>
+    COMMAND $<TARGET_FILE:tes3mp_actor_simulation_tests>
     COMMAND $<TARGET_FILE:tes3mp_canonical_sink_tests>
     COMMAND $<TARGET_FILE:tes3mp_server_core_property_tests>
     COMMAND $<TARGET_FILE:tes3mp_transport_lifecycle_tests>
@@ -832,6 +856,8 @@ add_custom_target(tes3mp_protocol_tests_run
         tes3mp_server_core_safety_tests
         tes3mp_server_authentication_tests
         tes3mp_server_lifecycle_tests
+        tes3mp_actor_catalog_tests
+        tes3mp_actor_simulation_tests
         tes3mp_canonical_sink_tests
         tes3mp_server_core_property_tests
         tes3mp_transport_lifecycle_tests

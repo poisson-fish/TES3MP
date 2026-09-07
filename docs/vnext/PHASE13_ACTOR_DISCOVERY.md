@@ -66,6 +66,12 @@ Package A is the recommendation. Delegation stays available as a later measured
 optimization; adopting it now would make handoff correctness part of the first
 actor vertical slice without evidence that server-owned bounded AI is inadequate.
 
+## Owner decision
+
+The project owner approved Package A on 2026-09-07. The durable decision is
+recorded in [ADR-0060](adr/ADR-0060-phase13-server-owned-actor-foundation.md)
+and [GDR-0020](gdr/GDR-0020-phase13-actor-lifecycle-and-ai.md).
+
 ## Named proof scenarios
 
 1. `actor_catalog_is_manifest_bound_bounded_and_unique`

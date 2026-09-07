@@ -5,9 +5,10 @@ OpenMW 0.51. It replaces the TES3MP 0.8.x protocol, transport, server, and
 scripting architecture rather than porting those systems forward.
 
 The project is under active development and is not yet a playable replacement
-for TES3MP 0.8.x. Phases 0–9 are complete: the headless, OpenMW desktop, and PC
-VR vertical slices now share one bounded protocol, client runtime, and
-authoritative server path. Phase 10 player/content identity discovery is next.
+for TES3MP 0.8.x. The headless, OpenMW desktop, and PC VR paths share one bounded
+protocol, client runtime, and authoritative server. Player/content identity,
+exact-cell interest, production movement foundations, and the server-owned actor
+core are complete. Actor content composition and additive replication are next.
 
 ## Start here
 
@@ -29,8 +30,8 @@ The first milestone is a dedicated server with two deterministic headless client
 6. disconnect, resume within a bounded grace period, and expire cleanly.
 
 That first flow, its OpenMW desktop composition, and the PC VR interoperability
-gate are complete. The next pass replaces fixture-only player/content identity
-assumptions without prematurely specifying the rest of the gameplay roadmap.
+gate are complete. The active pass composes the approved server-owned actor core
+with additive interest, replication, and renderer-only presentation.
 
 ## Compatibility
 

@@ -89,6 +89,16 @@ namespace TES3MP::Detail
     {
         static constexpr std::string_view name = "AppearanceId";
     };
+
+    struct ActorIdTag
+    {
+        static constexpr std::string_view name = "ActorId";
+    };
+
+    struct ActorPrototypeIdTag
+    {
+        static constexpr std::string_view name = "ActorPrototypeId";
+    };
 }
 
 namespace TES3MP
@@ -115,6 +125,9 @@ namespace TES3MP
     using IngressOrdinal = Detail::StrongValue<Detail::IngressOrdinalTag, Detail::StrongValuePolicy::CounterFromOne>;
     using CellSpaceId = Detail::StrongValue<Detail::CellSpaceIdTag, Detail::StrongValuePolicy::Identity>;
     using AppearanceId = Detail::StrongValue<Detail::AppearanceIdTag, Detail::StrongValuePolicy::Identity>;
+    using ActorId = Detail::StrongValue<Detail::ActorIdTag, Detail::StrongValuePolicy::Identity>;
+    using ActorPrototypeId
+        = Detail::StrongValue<Detail::ActorPrototypeIdTag, Detail::StrongValuePolicy::Identity>;
 }
 
 #endif

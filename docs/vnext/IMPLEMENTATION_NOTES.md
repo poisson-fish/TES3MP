@@ -6375,6 +6375,28 @@ only the relevant phase section here.
 
 [Back to the active phase tracker](IMPLEMENTATION_PLAN.md#now)
 
+### 2026-09-07 — server-owned actor canonical foundation — Complete
+
+- Decision: the owner approved discovery Package A. The durable authority and
+  compatibility boundary is recorded in
+  [ADR-0060](adr/ADR-0060-phase13-server-owned-actor-foundation.md); actor
+  lifecycle and AI semantics are recorded in
+  [GDR-0020](gdr/GDR-0020-phase13-actor-lifecycle-and-ai.md).
+- Change: added non-player actor/prototype identities, a bounded manifest actor
+  catalog, separate immutable canonical actor state, and a server-only scheduler
+  for idle, ordered travel, and looping wander through the existing movement and
+  collision seam.
+- Safety: inactive exact cells freeze without revision churn; actor/player entity
+  IDs must be disjoint; stale ticks, exhausted revisions, collision failures, or
+  invalid result construction reject the whole batch without partial replacement.
+  No proposal packet, client lease, protocol record, app composition, or renderer
+  authority was introduced.
+- Verification: focused actor catalog/simulation tests and the MSVC Release full
+  engine-independent aggregate pass. Dedicated-server app tests pass; server,
+  headless client, and full OpenMW targets build and link. All 150 repository
+  Python tests, indexed provenance, legacy exclusion, target boundaries, and diff
+  hygiene pass.
+
 ### 2026-09-07 — actor lifecycle and AI discovery — Complete
 
 - Finding: canonical state, interest membership, latest-wins snapshots, resync,

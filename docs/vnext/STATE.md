@@ -10,8 +10,9 @@ Updated: 2026-09-07
 - Phase 12 evidence: **Complete**
 - Phase 12 package decision/safety: **Complete**
 - Phase 13 discovery: **Complete**
-- Active work: **Phase 13 actor lifecycle and server-owned AI package decision**
-- Last pass: **Phase 13 actor lifecycle and AI discovery complete**
+- Phase 13 actor core: **Complete**
+- Active work: **Phase 13 content-backed actor composition and additive replication**
+- Last pass: **Phase 13 server-owned actor canonical foundation complete**
 - Authoritative tracker: [rolling implementation plan](IMPLEMENTATION_PLAN.md)
 - Historical evidence: [implementation notes](IMPLEMENTATION_NOTES.md)
 
@@ -192,6 +193,22 @@ ADRs and GDRs are required only for consequential, hard-to-reverse decisions.
   Phase 12 PC-VR capture is deferred until the first actor desktop/VR presentation
   demo, or Phase 22 stabilization at the latest.
 
+## Phase 13 actor core result
+
+- The owner approved Package A in [ADR-0060](adr/ADR-0060-phase13-server-owned-actor-foundation.md)
+  and [GDR-0020](gdr/GDR-0020-phase13-actor-lifecycle-and-ai.md).
+- New strong actor/prototype identities and a manifest-bound catalog keep actors
+  separate from player/session identity. Catalogs are capped at 4,096 actors;
+  travel/wander packages are capped at 32 waypoints.
+- A separate immutable canonical actor world validates ordered actor IDs, unique
+  entity IDs, and disjoint actor/player entities. Initial actors come only from
+  validated catalog content.
+- The server-only scheduler runs idle, ordered travel, and looping wander through
+  manifest walk speed plus the existing checked collision kernel. Cells with no
+  active player freeze exactly; failed batches do not partially replace actors.
+- No client proposal, authority lease, protocol record, app composition,
+  renderer behavior, combat, deletion, scripting, or persistence was added.
+
 ## Phase 10 result
 
 - Fresh password joins issue a random 32-byte player credential after ordinary
@@ -252,28 +269,25 @@ work.
 
 ## Last verified
 
-- MSVC RelWithDebInfo full engine-independent protocol/server aggregate,
-  adapter, movement-evidence, and dedicated-server contracts pass.
-- The deterministic movement capture emits all eight desktop/PC-VR records;
-  adaptive jitter and stall correction peak at 4,096 quanta and extrapolation
-  remains capped at 100 ms.
-- The pinned FlatBuffers 25.12.19 production-schema proof passes. MSVC Release
-  networking server, headless client, and full OpenMW `openmw.exe` build and
-  link with GameNetworkingSockets.
-- All 150 repository Python tests, focused replicated-actor tests, indexed
-  baseline provenance, legacy exclusion, and changed-line formatting/diff hygiene pass.
-- Representative-content desktop direct/jitter/loss/stall capture passes. PC-VR
-  hardware and desktop-to-VR visual proof were not run because no HMD was present.
+- MSVC Release engine-independent protocol/server aggregate passes, including
+  the new actor catalog and actor simulation contracts.
+- MSVC Release dedicated-server app tests pass; `tes3mp_server`,
+  `tes3mp_headless_client`, and full OpenMW `openmw.exe` build and link.
+- All 150 repository Python tests, indexed baseline provenance, legacy exclusion,
+  target boundaries, and changed-line diff hygiene pass.
+- Representative-content desktop direct/jitter/loss/stall capture remains green.
+  PC-VR hardware and visual proof remain intentionally deferred while the
+  headset charges.
 
 ## Next pass
 
 Read the rolling **Now** section in
-[IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md). Select the Phase 13 actor/AI
-package; Package A is recommended. Implementation begins only after that
-architecture and gameplay choice is ratified.
+[IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md). Compose the validated catalog
+and actor world in the dedicated server, then add negotiated actor membership,
+latest-wins views, exact-cell baseline/resync, and renderer-only presentation.
 
 ## Working-tree expectation
 
-Before implementing Phase 13, `vnext` should contain the actor-discovery commit
-and be clean. The separate `vnext-vr` worktree contains the deliberately
-rehearsed Phase 12 integration and capture tooling and should also be clean.
+`vnext` should contain the committed actor core and be clean. The separate
+`vnext-vr` worktree remains clean at the Phase 13 discovery boundary; merge the
+shared actor work there when the presentation pass reaches the VR build.
