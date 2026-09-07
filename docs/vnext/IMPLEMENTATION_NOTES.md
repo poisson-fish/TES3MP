@@ -6375,6 +6375,34 @@ only the relevant phase section here.
 
 [Back to the active phase tracker](IMPLEMENTATION_PLAN.md#now)
 
+### 2026-09-07 — content-backed actor composition and additive replication — Complete
+
+- Change: the dedicated server now loads the required bounded
+  [actor content V1](ACTOR_CONTENT_V1.md), validates it against manifest cells
+  and collision, reserves actor entities, advances actor simulation inside every
+  due fixed tick, and atomically admits player and actor publication before
+  canonical commit.
+- Replication: optional `actorReplication` capability clients receive separate
+  reliable membership and latest-wins actor views keyed by canonical revision
+  and server tick. Join, exact-cell transitions, resume, and authenticated
+  resync deliver complete actor state; player protocol 1.2/1.3 remains intact.
+- Presentation: desktop and PC-VR share typed local prototype maps, canonical
+  smoothing and animation selection, renderer-only actor creation, and bounded
+  cleanup. No renderer or OpenXR type entered the protocol, client-session, or
+  server-core graph.
+- Safety: missing or invalid content fails before listen; fixed-tick catch-up is
+  deterministic; queue lanes remain bounded and fair; no combat, deletion,
+  scripts, persistence, pathfinding, dynamic bodies, client simulation, or
+  authority lease was introduced.
+- Verification: focused actor replication, join, queue, server-app, and OpenMW
+  adapter tests; protocol, authenticated-join, OpenMW adapter, and deterministic
+  movement aggregates; RelWithDebInfo dedicated server and full desktop OpenMW
+  builds; merged `vnext-vr` `openmw_vr` build; repository Python/provenance gate.
+  Shared implementation is `ae6c6717ff`; VR integration is `2762445c8b`.
+- Follow-up: run the representative two-desktop lifecycle route through cell
+  leave/re-entry, disconnect/resume, and authenticated resync, then close Phase
+  13 if the bounded evidence stays green.
+
 ### 2026-09-07 — server-owned actor canonical foundation — Complete
 
 - Decision: the owner approved discovery Package A. The durable authority and

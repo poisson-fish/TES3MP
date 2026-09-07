@@ -275,6 +275,26 @@
       "purpose": "Defines the app-owned testable dedicated-server composition library, focused contracts, and verified-transport executable root."
     },
     {
+      "path": "apps/tes3mp-server/actor_content.cpp",
+      "status": "A",
+      "purpose": "Loads and validates the bounded manifest-scoped actor artifact, exact cells, AI packages, and collision-occupiable points before server listen."
+    },
+    {
+      "path": "apps/tes3mp-server/actor_content.hpp",
+      "status": "A",
+      "purpose": "Declares the dedicated-server actor content loader and closed startup failure boundary."
+    },
+    {
+      "path": "apps/tes3mp-server/actor_interest_projection.cpp",
+      "status": "A",
+      "purpose": "Derives deterministic exact-cell actor membership and views with atomic bounded output admission."
+    },
+    {
+      "path": "apps/tes3mp-server/actor_interest_projection.hpp",
+      "status": "A",
+      "purpose": "Declares separate capability-gated actor baseline, view, and projection boundaries."
+    },
+    {
       "path": "apps/tes3mp-server/authenticated_join_composition.cpp",
       "status": "A",
       "purpose": "Implements the approved prepare, token issue, bounded two-frame enqueue, and commit transaction with cancellation on every pre-commit failure."
@@ -433,6 +453,11 @@
       "path": "components/tes3mp/include/tes3mp/actor_catalog.hpp",
       "status": "A",
       "purpose": "Declares the bounded manifest-bound stable actor catalog and closed idle, travel, and wander package values."
+    },
+    {
+      "path": "components/tes3mp/include/tes3mp/actor_replication.hpp",
+      "status": "A",
+      "purpose": "Declares bounded actor membership and latest-view wire values separate from player replication."
     },
     {
       "path": "components/tes3mp/include/tes3mp/actor_simulation.hpp",
@@ -675,6 +700,11 @@
       "purpose": "Validates bounded actor packages, stable actor/entity uniqueness, and exact manifest-cell catalog binding."
     },
     {
+      "path": "components/tes3mp/protocol/actor_replication.cpp",
+      "status": "A",
+      "purpose": "Encodes and decodes capability-gated reliable actor baselines and latest-wins actor snapshots with strict bounds."
+    },
+    {
       "path": "components/tes3mp/protocol/anchor.cpp",
       "status": "A",
       "purpose": "Behavior-free translation-unit anchor for the engine-independent protocol target."
@@ -715,9 +745,19 @@
       "purpose": "Pinned FlatBuffers 25.12.19 generated C++ for the size-prefixed T3VP client pose schema."
     },
     {
+      "path": "components/tes3mp/protocol/generated/latest_wins_actor_snapshot_generated.h",
+      "status": "A",
+      "purpose": "Pinned FlatBuffers 25.12.19 generated C++ for bounded latest-wins actor views."
+    },
+    {
       "path": "components/tes3mp/protocol/generated/latest_wins_snapshot_generated.h",
       "status": "A",
       "purpose": "Pinned FlatBuffers 25.12.19 generated C++ for the size-prefixed closed-union T3LS spatial-view schema."
+    },
+    {
+      "path": "components/tes3mp/protocol/generated/reliable_actor_interest_baseline_generated.h",
+      "status": "A",
+      "purpose": "Pinned FlatBuffers 25.12.19 generated C++ for bounded complete actor membership."
     },
     {
       "path": "components/tes3mp/protocol/generated/reliable_interest_baseline_generated.h",
@@ -800,9 +840,19 @@
       "purpose": "Explicit-ID T3VP presentation-only client head and optional-hand pose schema."
     },
     {
+      "path": "components/tes3mp/protocol/schema/latest_wins_actor_snapshot.fbs",
+      "status": "A",
+      "purpose": "Explicit-ID schema for bounded capability-gated latest-wins actor views."
+    },
+    {
       "path": "components/tes3mp/protocol/schema/latest_wins_snapshot.fbs",
       "status": "A",
       "purpose": "Explicit-ID T3LS schema for bounded latest-wins spatial views with additive canonical locomotion metadata and no one-shot events."
+    },
+    {
+      "path": "components/tes3mp/protocol/schema/reliable_actor_interest_baseline.fbs",
+      "status": "A",
+      "purpose": "Explicit-ID schema for bounded complete actor membership and completion metadata."
     },
     {
       "path": "components/tes3mp/protocol/schema/reliable_interest_baseline.fbs",
@@ -978,6 +1028,11 @@
       "path": "components/tes3mp/tests/actor_catalog_tests.cpp",
       "status": "A",
       "purpose": "Focused actor package, manifest binding, identity uniqueness, ordering, lookup, and capacity contracts."
+    },
+    {
+      "path": "components/tes3mp/tests/actor_replication_tests.cpp",
+      "status": "A",
+      "purpose": "Focused actor baseline/snapshot codec bounds, capability completion, stale handling, and client application contracts."
     },
     {
       "path": "components/tes3mp/tests/actor_simulation_tests.cpp",
@@ -1323,6 +1378,11 @@
       "path": "components/tes3mp/transport/windows_gns_compat.hpp",
       "status": "A",
       "purpose": "Restores Windows multimedia timer declarations hidden by OpenMW lean-header policy for the pinned GNS build."
+    },
+    {
+      "path": "docs/vnext/ACTOR_CONTENT_V1.md",
+      "status": "A",
+      "purpose": "Documents the bounded manifest-scoped actor artifact, validation, local prototype mapping, and explicit exclusions."
     },
     {
       "path": "docs/vnext/BASELINE_PROVENANCE.json",
@@ -2141,7 +2201,7 @@
         },
         {
           "path": "components/tes3mp/CMakeLists.txt",
-          "sha256": "9cefd8bde9cc130488d6ff23c4f805cc3839cbdfabcbfdba12fad9a568d19351"
+          "sha256": "e5e2948f66125d5ee4be995494fc1ad674cd800bdf2e144c52c359049cfadaba"
         },
         {
           "path": "components/tes3mp/protocol/generated/authentication_accepted_generated.h",
@@ -2164,8 +2224,16 @@
           "sha256": "b1ac92e791922b4cbf42a7f4ae27b3d0ee318f6e893ee3cf6d520cd5d7ce3927"
         },
         {
+          "path": "components/tes3mp/protocol/generated/latest_wins_actor_snapshot_generated.h",
+          "sha256": "e6d272936e5ff1681d3f36167c74c50159544554bf4bd5a1ed4e8d55eff59b49"
+        },
+        {
           "path": "components/tes3mp/protocol/generated/latest_wins_snapshot_generated.h",
           "sha256": "9b1135ccb51a371dad5afc1df794c9c78872f3fcc9a7e2b0c6c4840023ae5c5a"
+        },
+        {
+          "path": "components/tes3mp/protocol/generated/reliable_actor_interest_baseline_generated.h",
+          "sha256": "dc03796473e9e3de898c507b871cbb2b218815347ea036ff843391290d696c3e"
         },
         {
           "path": "components/tes3mp/protocol/generated/reliable_interest_baseline_generated.h",
@@ -2216,8 +2284,16 @@
           "sha256": "8a41fd9287361e87a03e602244754ff070f7f28b9a473ca92ef8e9ec6358c942"
         },
         {
+          "path": "components/tes3mp/protocol/schema/latest_wins_actor_snapshot.fbs",
+          "sha256": "3cc114af9f9cd585a82e8bd4f457e5561f057e41df7e1cf38dcedd92bc4d5a7f"
+        },
+        {
           "path": "components/tes3mp/protocol/schema/latest_wins_snapshot.fbs",
           "sha256": "2cd9d65f3550a27f04335511dc33754e5e8315c788822931310119b5bd8f2f2b"
+        },
+        {
+          "path": "components/tes3mp/protocol/schema/reliable_actor_interest_baseline.fbs",
+          "sha256": "ac77f035e9c2c200b183f060dbb6641d5fcd92d4eabeff1bc5c4ebf5425239ce"
         },
         {
           "path": "components/tes3mp/protocol/schema/reliable_interest_baseline.fbs",

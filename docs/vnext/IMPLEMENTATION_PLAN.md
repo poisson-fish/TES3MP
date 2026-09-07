@@ -36,36 +36,35 @@ Verification scales with risk:
 
 ## Now
 
-### Phase 13 — content-backed actor composition and additive replication
+### Phase 13 — content-backed two-client lifecycle proof and closure
 
 Status: **Ready**
 
-The owner approved Package A. The engine-independent foundation now provides a
-manifest-bound bounded actor catalog, separate immutable canonical actor world,
-server-owned idle/travel/wander scheduler, checked movement/collision, exact-cell
-inactive freeze, and atomic failure. Actors have no player/session identity and
-no client proposal or lease surface.
+The content-backed actor vertical slice is complete. The server loads and
+collision-validates a bounded manifest artifact, composes actor simulation into
+every due fixed tick, and publishes capability-gated actor membership and views.
+Desktop and PC-VR share local prototype mapping and renderer-only presentation.
 
-Complete the first usable actor vertical slice:
+Close the phase with representative lifecycle evidence:
 
-1. load a bounded actor catalog from server content and compose its canonical
-   world beside the player reducer at the fixed server tick;
-2. negotiate an optional actor capability with separate reliable membership and
-   latest-wins actor view records, including complete exact-cell baseline/resync;
-3. map prototypes locally and present actors through the existing renderer-only
-   desktop/PC-VR seam; and
-4. preserve protocol 1.2/1.3 player behavior and keep combat, deletion, scripts,
-   persistence, pathfinding, and client simulation out of scope.
+1. configure a representative actor artifact and local prototype maps, then run
+   two desktop clients against one dedicated server;
+2. prove exact-cell enter, leave, and re-entry plus disconnect, resume, and
+   authenticated resync without actor deletion, reset, or divergent motion;
+3. retain bounded evidence, fix only defects exposed by the proof, and close
+   Phase 13 when the scenarios remain green; and
+4. keep combat, deletion, scripts, persistence, pathfinding, dynamic bodies,
+   client simulation, and authority leases out of scope.
 
 ## Next
 
 These are candidates, not locked slices:
 
-1. Prove actor presentation and lifecycle with two desktop clients, then the VR
-   build without requiring hardware.
-2. Revisit Phase 12 PC-VR capture after the first actor desktop/VR presentation
-   demo, or before Phase 22 stabilization if hardware is still unavailable.
-3. Close Phase 13 before selecting the first interactive-object pass.
+1. Revisit Phase 12 PC-VR hardware capture after the actor lifecycle proof, or
+   before Phase 22 stabilization if hardware remains unavailable.
+2. Select the first interactive-object discovery pass after Phase 13 closes.
+3. Promote the representative actor lifecycle route into a stable bounded
+   regression only if the proof exposes coverage not already held by tests.
 
 The list is rewritten after each completed pass. New evidence may reorder,
 combine, or remove items.
@@ -106,6 +105,7 @@ but they no longer force a predetermined sequence of micro-slices.
 | Phase 12 collision provider | **Complete** | Manifest-bound static collision content with complete exact-cell coverage, bounded swept root volumes, and fail-closed server composition |
 | Phase 12 remote presentation | **Complete** | Fixture-bounded adaptive playback, additive canonical locomotion snapshots, shared remote animation selection, reliable one-shot separation, and stale optional-pose fallback |
 | Phase 13 actor core | **Complete** | Manifest-bound actor identity/catalog, separate canonical actor world, server-only bounded idle/travel/wander simulation, checked collision, inactive-cell freeze, and atomic failure |
+| Phase 13 actor composition/replication | **Complete** | Required bounded actor content, fixed-tick server composition, optional separate actor replication, exact-cell lifecycle completion, and shared renderer-only desktop/PC-VR presentation |
 
 ### Phase 9 completion record
 

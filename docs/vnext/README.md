@@ -17,10 +17,11 @@ protocol, reusable client session, and authoritative server path. Optional
 OpenXR head/hand samples are isolated presentation data; they cannot author
 canonical movement or gameplay.
 
-Phase 13 actor lifecycle and server-owned AI discovery is complete and awaiting
-the owner package decision. The recommended package keeps actors server-owned,
-manifest-bound, additive to the player protocol, and frozen in inactive exact
-cells without introducing client simulation leases. The [rolling
+Phase 13 actor discovery, canonical core, content composition, additive
+replication, and shared desktop/PC-VR presentation are complete. The current
+pass proves the actor lifecycle with two desktop clients before closing the
+phase. Actors remain server-owned, manifest-bound, and frozen in inactive exact
+cells without client simulation leases. The [rolling
 implementation plan](IMPLEMENTATION_PLAN.md) is the authoritative Now / Next /
 Later tracker. The [implementation notes](IMPLEMENTATION_NOTES.md) retain
 detailed historical evidence and owner-review history.
@@ -141,6 +142,7 @@ requirement for every small pass.
 - [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md): rolling Now / Next / Later status and outcome tracker
 - [`STATE.md`](STATE.md): concise current-pass handoff; read first in a new session
 - [`IMPLEMENTATION_NOTES.md`](IMPLEMENTATION_NOTES.md): historical chronological evidence, commands, approvals, and follow-ups
+- [`ACTOR_CONTENT_V1.md`](ACTOR_CONTENT_V1.md): bounded manifest-scoped server actor artifact contract
 - [`COLLISION_CONTENT_V1.md`](COLLISION_CONTENT_V1.md): bounded manifest-scoped server collision artifact contract
 - [`LOCAL_BASELINE_BUILD.md`](LOCAL_BASELINE_BUILD.md): local build and test workflow
 - [`LEGACY_GAMEPLAY_FEATURE_INVENTORY.md`](LEGACY_GAMEPLAY_FEATURE_INVENTORY.md): historical gameplay reference only

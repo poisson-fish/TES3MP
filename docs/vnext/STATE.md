@@ -11,8 +11,9 @@ Updated: 2026-09-07
 - Phase 12 package decision/safety: **Complete**
 - Phase 13 discovery: **Complete**
 - Phase 13 actor core: **Complete**
-- Active work: **Phase 13 content-backed actor composition and additive replication**
-- Last pass: **Phase 13 server-owned actor canonical foundation complete**
+- Phase 13 actor composition/replication: **Complete**
+- Active work: **Phase 13 content-backed two-client lifecycle proof and closure**
+- Last pass: **Phase 13 content-backed actor vertical slice complete**
 - Authoritative tracker: [rolling implementation plan](IMPLEMENTATION_PLAN.md)
 - Historical evidence: [implementation notes](IMPLEMENTATION_NOTES.md)
 
@@ -209,6 +210,25 @@ ADRs and GDRs are required only for consequential, hard-to-reverse decisions.
 - No client proposal, authority lease, protocol record, app composition,
   renderer behavior, combat, deletion, scripting, or persistence was added.
 
+## Phase 13 content-backed actor vertical slice result
+
+- The dedicated server requires the bounded manifest-scoped artifact documented
+  in [ACTOR_CONTENT_V1.md](ACTOR_CONTENT_V1.md). It collision-validates every
+  spawn and waypoint before listen and reserves actor entity IDs away from
+  durable player allocation.
+- Actor simulation runs inside every due fixed scheduler tick, including bounded
+  catch-up. Player and actor output admission is atomic before either canonical
+  world commits; actor motion remains wholly server-owned.
+- Optional `actorReplication` capability negotiation adds separate reliable
+  actor membership and latest-wins actor views. Canonical revision and server
+  tick completion cover join, exact-cell transitions, resume, and authenticated
+  resync without changing player protocol 1.2/1.3 behavior.
+- The transport keeps distinct bounded player and actor latest slots. Shared
+  desktop/PC-VR presentation maps prototype IDs locally, smooths canonical
+  motion, selects animation, and owns renderer objects only.
+- Combat, death, deletion, inventory, scripts, persistence, pathfinding, dynamic
+  bodies, client simulation, and authority delegation remain excluded.
+
 ## Phase 10 result
 
 - Fresh password joins issue a random 32-byte player credential after ordinary
@@ -262,6 +282,8 @@ work.
 - Shared pose runtime: `617b8bc3a1`
 - VR provider/composition: `af52e60659`
 - Phase 12 VR integration merge: `223d5a74e9`
+- Phase 13 actor vertical slice: `ae6c6717ff`
+- Phase 13 VR integration merge: `2762445c8b`
 - Shared branch: `vnext`
 - VR branch/worktree: `vnext-vr` / `../TES3MP-vr`
 - VR source baseline: `56a8e01390507375c9c2f2593e1c09e0df88c505`
@@ -269,10 +291,11 @@ work.
 
 ## Last verified
 
-- MSVC Release engine-independent protocol/server aggregate passes, including
-  the new actor catalog and actor simulation contracts.
-- MSVC Release dedicated-server app tests pass; `tes3mp_server`,
-  `tes3mp_headless_client`, and full OpenMW `openmw.exe` build and link.
+- MSVC Release protocol, authenticated-join, OpenMW adapter, and movement
+  evidence aggregates pass, including actor replication, queue fairness,
+  fixed-tick catch-up, and exact-cell lifecycle contracts.
+- RelWithDebInfo `tes3mp_server`, desktop `openmw`, and merged `openmw_vr`
+  targets build and link.
 - All 150 repository Python tests, indexed baseline provenance, legacy exclusion,
   target boundaries, and changed-line diff hygiene pass.
 - Representative-content desktop direct/jitter/loss/stall capture remains green.
@@ -282,12 +305,12 @@ work.
 ## Next pass
 
 Read the rolling **Now** section in
-[IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md). Compose the validated catalog
-and actor world in the dedicated server, then add negotiated actor membership,
-latest-wins views, exact-cell baseline/resync, and renderer-only presentation.
+[IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md). Run the representative
+two-desktop actor lifecycle route through cell transitions, disconnect/resume,
+and authenticated resync, retain bounded evidence, then close Phase 13 if green.
 
 ## Working-tree expectation
 
-`vnext` should contain the committed actor core and be clean. The separate
-`vnext-vr` worktree remains clean at the Phase 13 discovery boundary; merge the
-shared actor work there when the presentation pass reaches the VR build.
+`vnext` should contain the committed actor vertical slice and rolling handoff and
+be clean. The separate `vnext-vr` worktree should remain clean at Phase 13
+integration merge `2762445c8b`.
