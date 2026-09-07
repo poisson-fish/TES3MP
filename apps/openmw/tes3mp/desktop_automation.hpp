@@ -17,6 +17,8 @@ namespace TES3MP::OpenMWAdapter
         Reconnect,
         SoakOne,
         SoakTwo,
+        CaptureOne,
+        CaptureTwo,
     };
 
     std::optional<DesktopAutomationRole> parseDesktopAutomationRole(std::string_view value) noexcept;

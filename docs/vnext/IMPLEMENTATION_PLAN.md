@@ -38,7 +38,7 @@ Verification scales with risk:
 
 ### Phase 12 — hardware/content movement capture and budget ratification
 
-Status: **Ready**
+Status: **Blocked — PC-VR headset unavailable**
 
 The production movement path now includes content collision, bounded local
 replay, fixture-bounded adaptive remote playback, canonical locomotion-driven
@@ -46,12 +46,20 @@ remote animation, and stale optional-pose fallback. Version 1.2 remains the
 bounded walk-compatibility path. The current presentation bounds are provisional
 reuse of measured fixture limits, not ratified production tuning.
 
-Run representative content-backed desktop and PC-VR captures under direct,
-jitter, loss, and stall schedules. Record correction, playback, animation, and
-pose-fallback evidence, then present concise production-budget options for owner
-ratification before changing player-facing values. Preserve authority, collision,
-exact-cell interest/resync, reliable/latest-wins lane separation, and the version
-1.2 compatibility path. Do not add world objects or persistence.
+The bounded capture runner and representative-content desktop matrix now pass
+under direct, jitter, loss, and stall schedules. The owner approved merging the
+shared Phase 12 path into the maintained VR fork; the rehearsed merge builds the
+VR client and server and passes the fork provenance/contract gates. No connected
+headset was detected, so PC-VR capture, visual animation/fallback review, and
+budget ratification remain.
+
+Connect the headset and run the same four profiles with the merged VR target.
+Record correction, playback, animation, and pose-fallback evidence, then present
+concise production-budget options for owner ratification before changing
+player-facing values. Preserve authority, collision, exact-cell interest/resync,
+reliable/latest-wins lane separation, and the version 1.2 compatibility path.
+Do not add world objects or persistence. See the
+[hardware capture record](PHASE12_HARDWARE_CAPTURE.md).
 
 ## Next
 

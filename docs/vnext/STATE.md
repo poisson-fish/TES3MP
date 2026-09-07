@@ -9,8 +9,8 @@ Updated: 2026-09-07
 - Phase 12 discovery: **Complete**
 - Phase 12 evidence: **Complete**
 - Phase 12 package decision/safety: **Complete**
-- Active work: **Phase 12 hardware/content movement capture and budget ratification**
-- Last pass: **Phase 12 bounded remote playback, animation, and pose fallback complete**
+- Active work: **Phase 12 PC-VR hardware capture and budget ratification**
+- Last pass: **Phase 12 desktop hardware/content capture and VR merge readiness complete**
 - Authoritative tracker: [rolling implementation plan](IMPLEMENTATION_PLAN.md)
 - Historical evidence: [implementation notes](IMPLEMENTATION_NOTES.md)
 
@@ -66,7 +66,7 @@ ADRs and GDRs are required only for consequential, hard-to-reverse decisions.
   interest, or resync behavior changed.
 - The deterministic walk/turn/stop capture covers desktop and PC-VR under direct,
   jitter, loss, and stall schedules. Shared non-pose evidence is identical; loss
-  reports two pose gaps; stall reaches 100 ms extrapolation, 8,192-quanta remote
+  reports two pose gaps; stall reaches 100 ms extrapolation, 4,096-quanta remote
   correction, and seven ticks of scheduler lag. These are evidence, not budgets.
 - Hardware/content-backed capture is still required before player-facing tuning.
 
@@ -155,6 +155,24 @@ ADRs and GDRs are required only for consequential, hard-to-reverse decisions.
 - These are bounded fixture defaults, not ratified production tuning. Hardware
   and representative-content desktop/PC-VR capture remains required.
 
+## Phase 12 capture readiness result
+
+- A test-only five-second desktop route walks, turns, stops, and exits before a
+  stale tail can overflow or dominate the fixed metric sink. A bounded localhost
+  UDP relay supplies fixed direct, alternating 5/45 ms jitter, every-twentieth-
+  datagram loss, and one 250 ms bidirectional stall schedules.
+- Representative Morrowind content passes all four desktop profiles with two
+  peers, complete metric sets, one initial-placement hard snap per client, and no
+  sink drops. The retained maxima are recorded in
+  [the hardware capture record](PHASE12_HARDWARE_CAPTURE.md); they are not budgets.
+- Owner-approved Option A was rehearsed in a disposable worktree. The maintained
+  `vnext-vr` branch now includes shared Phase 10–12 content, protocol, collision,
+  replay, presentation, and metric composition at merge `223d5a74e9`, while
+  retaining the fork-local OpenXR providers and startup path.
+- No headset/HMD device or SteamVR compositor was present. PC-VR metrics, visual
+  animation/fallback review, and player-facing budget ratification remain blocked
+  on a connected headset. No movement or presentation policy changed.
+
 ## Phase 10 result
 
 - Fresh password joins issue a random 32-byte player credential after ordinary
@@ -207,6 +225,7 @@ work.
 
 - Shared pose runtime: `617b8bc3a1`
 - VR provider/composition: `af52e60659`
+- Phase 12 VR integration merge: `223d5a74e9`
 - Shared branch: `vnext`
 - VR branch/worktree: `vnext-vr` / `../TES3MP-vr`
 - VR source baseline: `56a8e01390507375c9c2f2593e1c09e0df88c505`
@@ -222,20 +241,20 @@ work.
 - The pinned FlatBuffers 25.12.19 production-schema proof passes. MSVC Release
   networking server, headless client, and full OpenMW `openmw.exe` build and
   link with GameNetworkingSockets.
-- All 145 repository Python tests, focused replicated-actor tests, indexed
+- All 150 repository Python tests, focused replicated-actor tests, indexed
   baseline provenance, legacy exclusion, and changed-line formatting/diff hygiene pass.
-- Hardware/content-backed desktop and desktop-to-VR visual proof was not run.
+- Representative-content desktop direct/jitter/loss/stall capture passes. PC-VR
+  hardware and desktop-to-VR visual proof were not run because no HMD was present.
 
 ## Next pass
 
 Read the rolling **Now** section in
-[IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md). Run representative
-hardware/content-backed desktop and PC-VR captures, then present measured
-movement and presentation budgets for owner ratification.
+[IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md). Run PC-VR direct/jitter/loss/
+stall captures with a connected headset, then present measured movement and
+presentation budgets for owner ratification.
 
 ## Working-tree expectation
 
-Before starting the next pass, `vnext` should contain the completed Phase 12
-remote-presentation commit and be clean. The separate
-`vnext-vr` worktree remains at the completed Phase 9 baseline until a later shared
-merge is deliberately made.
+Before resuming the hardware gate, `vnext` should contain the capture-readiness
+commit and be clean. The separate `vnext-vr` worktree contains the deliberately
+rehearsed Phase 12 integration merge `223d5a74e9` and should also be clean.

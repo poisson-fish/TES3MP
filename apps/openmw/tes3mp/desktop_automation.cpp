@@ -22,6 +22,8 @@ namespace TES3MP::OpenMWAdapter
         constexpr std::uint64_t ReconnectCadence = 1'050'000'000;
         constexpr std::uint64_t FlowDuration = 8 * Second;
         constexpr std::uint64_t SoakDuration = 60 * Second;
+        constexpr std::uint64_t CaptureStopAt = 4 * Second;
+        constexpr std::uint64_t CaptureDuration = 5 * Second;
         constexpr std::int64_t AutomationSpeed = 4096;
         std::optional<MonotonicInstant> add(MonotonicInstant value, std::uint64_t duration) noexcept
         {
@@ -71,6 +73,10 @@ namespace TES3MP::OpenMWAdapter
             return DesktopAutomationRole::SoakOne;
         if (value == "soak-two")
             return DesktopAutomationRole::SoakTwo;
+        if (value == "capture-one")
+            return DesktopAutomationRole::CaptureOne;
+        if (value == "capture-two")
+            return DesktopAutomationRole::CaptureTwo;
         return std::nullopt;
     }
 
@@ -114,7 +120,18 @@ namespace TES3MP::OpenMWAdapter
     {
         if (!mStartedAt || !mNow || mRole == DesktopAutomationRole::Reconnect)
             return LocomotionIntent(LocomotionMode::Walk, Turn32::fromValue(0), LinearVelocity3(0, 0, 0));
-        const auto moving = mNow->nanoseconds() - mStartedAt->nanoseconds() < 2 * Second;
+        const auto elapsed = mNow->nanoseconds() - mStartedAt->nanoseconds();
+        if ((mRole == DesktopAutomationRole::CaptureOne || mRole == DesktopAutomationRole::CaptureTwo)
+            && elapsed < CaptureStopAt)
+        {
+            const bool turned = elapsed >= 2 * Second;
+            if (mRole == DesktopAutomationRole::CaptureOne)
+                return LocomotionIntent(LocomotionMode::Walk, Turn32::fromValue(turned ? 0x40000000u : 0),
+                    LinearVelocity3(turned ? 0 : AutomationSpeed, turned ? AutomationSpeed : 0, 0));
+            return LocomotionIntent(LocomotionMode::Walk, Turn32::fromValue(turned ? 0xc0000000u : 0),
+                LinearVelocity3(turned ? -AutomationSpeed : 0, turned ? 0 : AutomationSpeed, 0));
+        }
+        const auto moving = elapsed < 2 * Second;
         const auto x = (mRole == DesktopAutomationRole::FlowOne || mRole == DesktopAutomationRole::SoakOne) && moving
             ? AutomationSpeed
             : 0;
@@ -200,6 +217,9 @@ namespace TES3MP::OpenMWAdapter
                 : mSawLeave && mSawReturn;
             finish(mMoved && mSawPeer && cellFlow);
         }
+        else if ((mRole == DesktopAutomationRole::CaptureOne || mRole == DesktopAutomationRole::CaptureTwo)
+            && elapsed >= CaptureDuration)
+            finish(mMoved && mSawPeer);
         return ProviderResult::Accepted;
     }
 
@@ -247,6 +267,10 @@ namespace TES3MP::OpenMWAdapter
                 return "soak-one";
             case DesktopAutomationRole::SoakTwo:
                 return "soak-two";
+            case DesktopAutomationRole::CaptureOne:
+                return "capture-one";
+            case DesktopAutomationRole::CaptureTwo:
+                return "capture-two";
         }
         return "unknown";
     }

@@ -40,9 +40,9 @@ Desktop and PC-VR values are identical for every non-pose field:
 | Profile | Ack / stop max | Local correction max | Remote age max | Buffer max | Extrapolation max | Remote correction max | Hard snaps | Tick lag max |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|
 | Direct | 20 ms | 128 quanta | 116.7 ms | 4 | 50.0 ms | 0 | 1 | 2 ticks |
-| Jitter | 85 ms | 512 quanta | 126.7 ms | 4 | 80.0 ms | 0 | 1 | 2 ticks |
+| Jitter | 85 ms | 512 quanta | 126.7 ms | 4 | 40.0 ms | 4,096 quanta | 1 | 2 ticks |
 | Loss | 180 ms | 1,024 quanta | 116.7 ms | 4 | 50.0 ms | 0 | 1 | 2 ticks |
-| Stall | 350 ms | 4,096 quanta | 233.3 ms | 4 | 100.0 ms | 8,192 quanta | 1 | 7 ticks |
+| Stall | 350 ms | 4,096 quanta | 233.3 ms | 4 | 100.0 ms | 4,096 quanta | 1 | 7 ticks |
 
 The initial remote placement accounts for the one hard snap in each row. The
 capture includes a short no-update tail, so remote and pose age maxima also

@@ -6179,6 +6179,27 @@ only the relevant phase section here.
 
 [Back to the phase tracker](IMPLEMENTATION_PLAN.md#now)
 
+### 2026-09-07 — desktop capture and PC-VR merge readiness — Partial
+
+- Change: added a bounded content-backed capture runner, deterministic localhost
+  direct/jitter/loss/stall relay, and a five-second test-only desktop walk/turn/
+  stop route. It rejects incomplete evidence, process failure, missing metrics,
+  sink overflow, relay failure, and timeout. Production policy is unchanged.
+- Capture: licensed representative Morrowind content passes all four two-client
+  desktop profiles with complete metric sets, no sink drops, and one expected
+  initial-placement hard snap per client. Results and the remaining operator
+  checklist are in [the hardware capture record](PHASE12_HARDWARE_CAPTURE.md).
+- VR integration: owner-approved Option A was rehearsed from `vnext-vr`
+  `bff4287cdc` and shared `vnext` `33d68d330b`. The sole `main.cpp` conflict kept
+  VR/OpenXR startup and providers while adopting Phase 12 content, movement,
+  metrics, and protocol composition. Fresh VR/server links, focused executables,
+  the provenance verifier, and 33 fork contracts pass. The maintained branch was
+  fast-forwarded to tested merge `223d5a74e9`; nothing was pushed.
+- Blocker: Oculus runtime service is present, but no HMD or SteamVR compositor is
+  connected. PC-VR direct/jitter/loss/stall capture, visual animation/fallback
+  review, and budget ratification remain. All 150 repository Python tests and
+  diff hygiene pass. No player-facing value was changed.
+
 ### 2026-09-07 — bounded remote playback, animation, and pose fallback — Complete
 
 - Change: latest-wins views add canonical locomotion mode as optional parallel
@@ -6298,7 +6319,7 @@ only the relevant phase section here.
   executable and [capture record](PHASE12_MOVEMENT_EVIDENCE.md). Desktop and
   PC-VR shared evidence is identical under direct, jitter, loss, and stall
   schedules; PC-VR loss records two sequence gaps; the stall reaches the existing
-  100 ms extrapolation cap, 8,192-quanta correction, and seven-tick lag.
+  100 ms extrapolation cap, 4,096-quanta correction, and seven-tick lag.
 - Decisions: none. The results are fixture baselines, not approved budgets. No
   protocol, authority, movement, correction, animation, pose, interest, resync,
   persistence, or world-object behavior changed. Hardware/content capture and

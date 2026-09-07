@@ -12,7 +12,7 @@ from pathlib import Path
 from run_phase7_join_demo import TEST_CONTENT_MANIFEST, bounded_rss, resident_bytes
 
 
-ROLES = {"flow-one", "flow-two", "reconnect", "soak-one", "soak-two"}
+ROLES = {"flow-one", "flow-two", "reconnect", "soak-one", "soak-two", "capture-one", "capture-two"}
 DISCONNECT_GRACE_SECONDS = 3.0
 PHASE_SETTLE_SECONDS = DISCONNECT_GRACE_SECONDS + 0.25
 
