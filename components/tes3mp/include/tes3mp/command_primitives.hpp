@@ -1,6 +1,7 @@
 #ifndef TES3MP_COMMAND_PRIMITIVES_HPP
 #define TES3MP_COMMAND_PRIMITIVES_HPP
 
+#include "movement_policy.hpp"
 #include "spatial_types.hpp"
 
 #include <compare>
@@ -86,7 +87,8 @@ namespace TES3MP
     public:
         constexpr SpatialEntitySnapshot(ServerTick serverTick, PlayerId playerId, EntityId entityId,
             AppearanceId appearanceId, EntityRevision entityRevision, AuthorityEpoch authorityEpoch,
-            Transform transform, LinearVelocity3 linearVelocity) noexcept
+            Transform transform, LinearVelocity3 linearVelocity,
+            LocomotionMode locomotionMode = LocomotionMode::Walk) noexcept
             : mServerTick(serverTick)
             , mPlayerId(playerId)
             , mEntityId(entityId)
@@ -95,6 +97,7 @@ namespace TES3MP
             , mAuthorityEpoch(authorityEpoch)
             , mTransform(transform)
             , mLinearVelocity(linearVelocity)
+            , mLocomotionMode(locomotionMode)
         {
         }
 
@@ -106,6 +109,7 @@ namespace TES3MP
         constexpr AuthorityEpoch authorityEpoch() const noexcept { return mAuthorityEpoch; }
         constexpr const Transform& transform() const noexcept { return mTransform; }
         constexpr LinearVelocity3 linearVelocity() const noexcept { return mLinearVelocity; }
+        constexpr LocomotionMode locomotionMode() const noexcept { return mLocomotionMode; }
 
         friend constexpr bool operator==(const SpatialEntitySnapshot&, const SpatialEntitySnapshot&) noexcept
             = default;
@@ -121,6 +125,7 @@ namespace TES3MP
         AuthorityEpoch mAuthorityEpoch;
         Transform mTransform;
         LinearVelocity3 mLinearVelocity;
+        LocomotionMode mLocomotionMode;
     };
 }
 

@@ -1,6 +1,6 @@
 # TES3MP vNext state
 
-Updated: 2026-09-06
+Updated: 2026-09-07
 
 ## Current status
 
@@ -9,8 +9,8 @@ Updated: 2026-09-06
 - Phase 12 discovery: **Complete**
 - Phase 12 evidence: **Complete**
 - Phase 12 package decision/safety: **Complete**
-- Active work: **Phase 12 bounded remote playback, animation, and pose fallback**
-- Last pass: **Phase 12 content-backed server collision provider complete**
+- Active work: **Phase 12 hardware/content movement capture and budget ratification**
+- Last pass: **Phase 12 bounded remote playback, animation, and pose fallback complete**
 - Authoritative tracker: [rolling implementation plan](IMPLEMENTATION_PLAN.md)
 - Historical evidence: [implementation notes](IMPLEMENTATION_NOTES.md)
 
@@ -135,6 +135,26 @@ ADRs and GDRs are required only for consequential, hard-to-reverse decisions.
   objects, persistence, client replay, presentation, animation, and pose remain
   unchanged.
 
+## Phase 12 remote presentation result
+
+- Latest-wins views additively carry canonical locomotion mode beside the fixed
+  spatial entry vector. Missing metadata decodes as legacy walk, non-walk modes
+  round-trip in bounded parallel metadata, and version 1.2 payloads remain
+  readable. No one-shot trigger enters the snapshot lane.
+- Remote playback adapts from two to three ticks using arrival timing, pays added
+  delay without reversing presentation, and returns after four stable samples.
+  The existing three-tick extrapolation, correction blend, and hard-snap bounds
+  remain in force.
+- Replicated actors select idle, sneak, walk, run, direction, and jump loops from
+  canonical mode/velocity with content fallbacks and zero root accumulation.
+  Animation remains presentation-only and cannot author canonical transform.
+- Optional remote pose stays latest-wins and ephemeral. Shared presentation now
+  emits a pose weight: full through 100 ms, blended to canonical locomotion over
+  the existing 66.7 ms correction window, then fully canonical. Missing pose is
+  canonical immediately; pose still cannot move root or prove reach.
+- These are bounded fixture defaults, not ratified production tuning. Hardware
+  and representative-content desktop/PC-VR capture remains required.
+
 ## Phase 10 result
 
 - Fresh password joins issue a random 32-byte player credential after ordinary
@@ -194,30 +214,28 @@ work.
 
 ## Last verified
 
-- MSVC RelWithDebInfo full engine-independent protocol/server aggregate and
-  focused server collision/configuration contracts pass.
-- The real encrypted Phase 7 lifecycle integration passes 32 reconnects with
-  converged views and zero final queue depth using explicit collision content.
-- The deterministic movement capture still emits all eight expected
-  desktop/PC-VR platform/profile records.
+- MSVC RelWithDebInfo full engine-independent protocol/server aggregate,
+  adapter, movement-evidence, and dedicated-server contracts pass.
+- The deterministic movement capture emits all eight desktop/PC-VR records;
+  adaptive jitter and stall correction peak at 4,096 quanta and extrapolation
+  remains capped at 100 ms.
 - The pinned FlatBuffers 25.12.19 production-schema proof passes. MSVC Release
   networking server, headless client, and full OpenMW `openmw.exe` build and
   link with GameNetworkingSockets.
-- All 145 repository Python tests, indexed baseline provenance, legacy
-  exclusion, and diff hygiene pass.
+- All 145 repository Python tests, focused replicated-actor tests, indexed
+  baseline provenance, legacy exclusion, and changed-line formatting/diff hygiene pass.
 - Hardware/content-backed desktop and desktop-to-VR visual proof was not run.
 
 ## Next pass
 
 Read the rolling **Now** section in
-[IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md). Add bounded adaptive remote
-playback, canonical locomotion-driven animation, reliable one-shots, and stale
-optional-pose fallback without extending authority, world-object, or
-persistence scope.
+[IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md). Run representative
+hardware/content-backed desktop and PC-VR captures, then present measured
+movement and presentation budgets for owner ratification.
 
 ## Working-tree expectation
 
 Before starting the next pass, `vnext` should contain the completed Phase 12
-content-collision commit and be clean. The separate
+remote-presentation commit and be clean. The separate
 `vnext-vr` worktree remains at the completed Phase 9 baseline until a later shared
 merge is deliberately made.

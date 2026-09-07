@@ -1,8 +1,8 @@
 #ifndef TES3MP_PROTOCOL_EXCHANGE_HPP
 #define TES3MP_PROTOCOL_EXCHANGE_HPP
 
-#include "protocol_envelope.hpp"
 #include "movement_policy.hpp"
+#include "protocol_envelope.hpp"
 
 #include <cstddef>
 #include <cstdint>
@@ -46,6 +46,7 @@ namespace TES3MP
         InvalidAcknowledgementPresence,
         TooManySnapshotEntries,
         SnapshotEntriesNotStrictlySorted,
+        SnapshotLocomotionModesSizeMismatch,
         InvalidCellKind,
         InvalidInteriorGrid,
         MissingObservationHeader,

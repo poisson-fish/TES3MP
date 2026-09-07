@@ -39,6 +39,44 @@
 
 namespace MWRender
 {
+    std::string_view replicatedActorAnimationGroup(ReplicatedActorLocomotion locomotion) noexcept
+    {
+        switch (locomotion)
+        {
+            case ReplicatedActorLocomotion::Idle:
+                return "idle";
+            case ReplicatedActorLocomotion::SneakIdle:
+                return "idlesneak";
+            case ReplicatedActorLocomotion::WalkForward:
+                return "walkforward";
+            case ReplicatedActorLocomotion::WalkBack:
+                return "walkback";
+            case ReplicatedActorLocomotion::WalkLeft:
+                return "walkleft";
+            case ReplicatedActorLocomotion::WalkRight:
+                return "walkright";
+            case ReplicatedActorLocomotion::RunForward:
+                return "runforward";
+            case ReplicatedActorLocomotion::RunBack:
+                return "runback";
+            case ReplicatedActorLocomotion::RunLeft:
+                return "runleft";
+            case ReplicatedActorLocomotion::RunRight:
+                return "runright";
+            case ReplicatedActorLocomotion::SneakForward:
+                return "sneakforward";
+            case ReplicatedActorLocomotion::SneakBack:
+                return "sneakback";
+            case ReplicatedActorLocomotion::SneakLeft:
+                return "sneakleft";
+            case ReplicatedActorLocomotion::SneakRight:
+                return "sneakright";
+            case ReplicatedActorLocomotion::Jump:
+                return "jump";
+        }
+        return "idle";
+    }
+
     namespace
     {
         class BuildFailure final : public std::runtime_error
@@ -188,11 +226,69 @@ namespace MWRender
                 setAccumulation(osg::Vec3f(0.f, 0.f, 0.f));
                 mAnimationFallback = !hasAnimation("idle");
                 if (!mAnimationFallback)
-                    play("idle", 1, BlendMask_All, false, 1.f, "start", "stop", 0.f,
-                        std::numeric_limits<std::uint32_t>::max(), true);
+                    setLocomotion(ReplicatedActorLocomotion::Idle);
             }
 
             bool animationFallback() const noexcept { return mAnimationFallback; }
+
+            void setLocomotion(ReplicatedActorLocomotion locomotion)
+            {
+                if (mAnimationFallback || (mLocomotion && *mLocomotion == locomotion))
+                    return;
+                std::array<std::string_view, 3> candidates{ replicatedActorAnimationGroup(locomotion), "idle", {} };
+                switch (locomotion)
+                {
+                    case ReplicatedActorLocomotion::RunForward:
+                        candidates[1] = "walkforward";
+                        candidates[2] = "idle";
+                        break;
+                    case ReplicatedActorLocomotion::RunBack:
+                        candidates[1] = "walkback";
+                        candidates[2] = "idle";
+                        break;
+                    case ReplicatedActorLocomotion::RunLeft:
+                        candidates[1] = "walkleft";
+                        candidates[2] = "idle";
+                        break;
+                    case ReplicatedActorLocomotion::RunRight:
+                        candidates[1] = "walkright";
+                        candidates[2] = "idle";
+                        break;
+                    case ReplicatedActorLocomotion::SneakForward:
+                        candidates[1] = "walkforward";
+                        candidates[2] = "idle";
+                        break;
+                    case ReplicatedActorLocomotion::SneakBack:
+                        candidates[1] = "walkback";
+                        candidates[2] = "idle";
+                        break;
+                    case ReplicatedActorLocomotion::SneakLeft:
+                        candidates[1] = "walkleft";
+                        candidates[2] = "idle";
+                        break;
+                    case ReplicatedActorLocomotion::SneakRight:
+                        candidates[1] = "walkright";
+                        candidates[2] = "idle";
+                        break;
+                    default:
+                        break;
+                }
+                const auto selected = std::ranges::find_if(
+                    candidates, [&](std::string_view group) { return !group.empty() && hasAnimation(group); });
+                if (selected == candidates.end())
+                    return;
+                if (mCurrentGroup == *selected)
+                {
+                    mLocomotion = locomotion;
+                    return;
+                }
+                if (!mCurrentGroup.empty())
+                    disable(mCurrentGroup);
+                play(*selected, 1, BlendMask_All, false, 1.f, "start", "stop", 0.f,
+                    std::numeric_limits<std::uint32_t>::max(), true);
+                mCurrentGroup = *selected;
+                mLocomotion = locomotion;
+            }
 
         private:
             void requireResource(VFS::Path::NormalizedView mesh) const
@@ -331,6 +427,8 @@ namespace MWRender
 
             std::shared_ptr<NullAnimationTime> mStaticControllerTime;
             bool mAnimationFallback = false;
+            std::optional<ReplicatedActorLocomotion> mLocomotion;
+            std::string_view mCurrentGroup;
         };
     }
 
@@ -374,8 +472,8 @@ namespace MWRender
         }
     }
 
-    ReplicatedActorResult Objects::advanceReplicatedActor(
-        const MWWorld::Ptr& ptr, const ESM::Position& position, float animationSeconds) noexcept
+    ReplicatedActorResult Objects::advanceReplicatedActor(const MWWorld::Ptr& ptr, const ESM::Position& position,
+        ReplicatedActorLocomotion locomotion, float animationSeconds) noexcept
     {
         const auto found = mReplicatedActors.find(ptr.mRef);
         if (found == mReplicatedActors.end() || ptr.getRefData().getBaseNode() == nullptr)
@@ -383,6 +481,14 @@ namespace MWRender
         if (!isValidReplicatedActorPose(position) || !std::isfinite(animationSeconds) || animationSeconds < 0.f)
             return ReplicatedActorResult::InvalidPose;
 
+        try
+        {
+            static_cast<ReplicatedActorAnimation*>(found->second.get())->setLocomotion(locomotion);
+        }
+        catch (...)
+        {
+            return ReplicatedActorResult::ResourceLoadFailed;
+        }
         ptr.getRefData().setPosition(position);
         ptr.getRefData().getBaseNode()->setPosition(position.asVec3());
         ptr.getRefData().getBaseNode()->setAttitude(Misc::Convert::makeOsgQuat(position.rot));
@@ -428,9 +534,10 @@ namespace MWRender
 
         ~Impl() { mRendering.getObjects().removeReplicatedActor(mPtr); }
 
-        ReplicatedActorResult update(const ESM::Position& position, float animationSeconds) noexcept
+        ReplicatedActorResult update(
+            const ESM::Position& position, ReplicatedActorLocomotion locomotion, float animationSeconds) noexcept
         {
-            return mRendering.getObjects().advanceReplicatedActor(mPtr, position, animationSeconds);
+            return mRendering.getObjects().advanceReplicatedActor(mPtr, position, locomotion, animationSeconds);
         }
 
         ReplicatedActorResult createResult() const noexcept { return mCreateResult; }
@@ -449,11 +556,12 @@ namespace MWRender
 
     ReplicatedActor::~ReplicatedActor() = default;
 
-    ReplicatedActorResult ReplicatedActor::update(const ESM::Position& position, float animationSeconds) noexcept
+    ReplicatedActorResult ReplicatedActor::update(
+        const ESM::Position& position, ReplicatedActorLocomotion locomotion, float animationSeconds) noexcept
     {
         if (!mImpl)
             return ReplicatedActorResult::LifecycleViolation;
-        return mImpl->update(position, animationSeconds);
+        return mImpl->update(position, locomotion, animationSeconds);
     }
 
     ReplicatedActor::CreateResult ReplicatedActor::create(RenderingManager& rendering,

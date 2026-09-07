@@ -145,8 +145,31 @@ namespace
             SnapshotSchema::LinearVelocity3(velocity.x(), velocity.y(), velocity.z()) };
     }
 
+    SnapshotSchema::LocomotionMode encodeLocomotionMode(TES3MP::LocomotionMode mode) noexcept
+    {
+        return static_cast<SnapshotSchema::LocomotionMode>(static_cast<std::uint8_t>(mode) + 1);
+    }
+
+    std::optional<TES3MP::LocomotionMode> decodeLocomotionMode(SnapshotSchema::LocomotionMode mode) noexcept
+    {
+        switch (mode)
+        {
+            case SnapshotSchema::LocomotionMode::Sneak:
+                return TES3MP::LocomotionMode::Sneak;
+            case SnapshotSchema::LocomotionMode::Walk:
+                return TES3MP::LocomotionMode::Walk;
+            case SnapshotSchema::LocomotionMode::Run:
+                return TES3MP::LocomotionMode::Run;
+            case SnapshotSchema::LocomotionMode::Jump:
+                return TES3MP::LocomotionMode::Jump;
+            case SnapshotSchema::LocomotionMode::Unknown:
+                return std::nullopt;
+        }
+        return std::nullopt;
+    }
+
     std::variant<TES3MP::SpatialEntitySnapshot, ExchangeDecodeError> decodeEntry(
-        const SnapshotSchema::SpatialEntitySnapshot& entry, std::size_t index)
+        const SnapshotSchema::SpatialEntitySnapshot& entry, TES3MP::LocomotionMode locomotionMode, std::size_t index)
     {
         auto player = strongValue<TES3MP::PlayerId>(entry.player_id(), index);
         auto entity = strongValue<TES3MP::EntityId>(entry.entity_id(), index);
@@ -196,7 +219,7 @@ namespace
             TES3MP::Transform(cell, TES3MP::Position3(position.x(), position.y(), position.z()),
                 TES3MP::Orientation3(TES3MP::Turn32::fromValue(orientation.x()),
                     TES3MP::Turn32::fromValue(orientation.y()), TES3MP::Turn32::fromValue(orientation.z()))),
-            TES3MP::LinearVelocity3(velocity.x(), velocity.y(), velocity.z()));
+            TES3MP::LinearVelocity3(velocity.x(), velocity.y(), velocity.z()), locomotionMode);
     }
 }
 
@@ -292,6 +315,17 @@ namespace TES3MP
             return error(ExchangeDecodeErrorStage::SemanticValidation, ExchangeDecodeErrorCode::TooManySnapshotEntries,
                 entries.size(), MaximumSpatialWorldViewEntries);
         }
+        for (std::size_t index = 0; index < entries.size(); ++index)
+        {
+            if (static_cast<std::uint8_t>(entries[index].locomotionMode())
+                > static_cast<std::uint8_t>(LocomotionMode::Jump))
+            {
+                return error(ExchangeDecodeErrorStage::SemanticValidation,
+                    ExchangeDecodeErrorCode::InvalidLocomotionMode,
+                    static_cast<std::size_t>(entries[index].locomotionMode()),
+                    static_cast<std::size_t>(LocomotionMode::Jump), index);
+            }
+        }
         for (std::size_t index = 1; index < entries.size(); ++index)
         {
             if (entries[index - 1].entityId() >= entries[index].entityId())
@@ -360,7 +394,17 @@ namespace TES3MP
         std::transform(value.view().entries().begin(), value.view().entries().end(), std::back_inserter(entries),
             [](const SpatialEntitySnapshot& entry) { return encodeEntry(entry); });
         const auto encodedEntries = builder.CreateVectorOfStructs(entries);
-        const auto view = SnapshotSchema::CreateSpatialWorldView(builder, encodedEntries);
+        flatbuffers::Offset<flatbuffers::Vector<SnapshotSchema::LocomotionMode>> encodedModes;
+        if (std::ranges::any_of(value.view().entries(),
+                [](const SpatialEntitySnapshot& entry) { return entry.locomotionMode() != LocomotionMode::Walk; }))
+        {
+            std::vector<SnapshotSchema::LocomotionMode> modes;
+            modes.reserve(value.view().entries().size());
+            std::transform(value.view().entries().begin(), value.view().entries().end(), std::back_inserter(modes),
+                [](const SpatialEntitySnapshot& entry) { return encodeLocomotionMode(entry.locomotionMode()); });
+            encodedModes = builder.CreateVector(modes);
+        }
+        const auto view = SnapshotSchema::CreateSpatialWorldView(builder, encodedEntries, encodedModes);
         const auto root = SnapshotSchema::CreateLatestWinsSnapshot(
             builder, encodedHeader, SnapshotSchema::LatestWinsSnapshotBody::SpatialWorldView, view.Union());
         SnapshotSchema::FinishSizePrefixedLatestWinsSnapshotBuffer(builder, root);
@@ -570,11 +614,31 @@ namespace TES3MP
             return error(ExchangeDecodeErrorStage::SemanticValidation, ExchangeDecodeErrorCode::TooManySnapshotEntries,
                 entryCount, MaximumSpatialWorldViewEntries);
         }
+        const auto* encodedModes = view->locomotion_modes();
+        if (encodedModes != nullptr && encodedModes->size() != entryCount)
+        {
+            return error(ExchangeDecodeErrorStage::SemanticValidation,
+                ExchangeDecodeErrorCode::SnapshotLocomotionModesSizeMismatch, encodedModes->size(), entryCount);
+        }
         std::vector<SpatialEntitySnapshot> entries;
         entries.reserve(entryCount);
         for (std::size_t index = 0; index < entryCount; ++index)
         {
-            auto decoded = decodeEntry(*encodedEntries->Get(static_cast<flatbuffers::uoffset_t>(index)), index);
+            LocomotionMode mode = LocomotionMode::Walk;
+            if (encodedModes != nullptr)
+            {
+                const auto decodedMode
+                    = decodeLocomotionMode(encodedModes->Get(static_cast<flatbuffers::uoffset_t>(index)));
+                if (!decodedMode)
+                {
+                    return error(ExchangeDecodeErrorStage::SemanticValidation,
+                        ExchangeDecodeErrorCode::InvalidLocomotionMode,
+                        static_cast<std::size_t>(encodedModes->Get(static_cast<flatbuffers::uoffset_t>(index))),
+                        static_cast<std::size_t>(SnapshotSchema::LocomotionMode::Jump), index);
+                }
+                mode = *decodedMode;
+            }
+            auto decoded = decodeEntry(*encodedEntries->Get(static_cast<flatbuffers::uoffset_t>(index)), mode, index);
             if (const auto* failure = std::get_if<ExchangeDecodeError>(&decoded))
                 return *failure;
             entries.push_back(std::get<SpatialEntitySnapshot>(std::move(decoded)));

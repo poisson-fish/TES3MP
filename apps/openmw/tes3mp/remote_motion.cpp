@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
+#include <numbers>
 
 namespace TES3MP::OpenMWAdapter
 {
@@ -13,7 +14,8 @@ namespace TES3MP::OpenMWAdapter
 
         RemoteMotionPose poseFrom(const SpatialEntitySnapshot& sample, double x, double y, double z) noexcept
         {
-            return { sample.transform().cell(), x, y, z, sample.transform().orientation() };
+            return { sample.transform().cell(), x, y, z, sample.transform().orientation(), sample.linearVelocity(),
+                sample.locomotionMode() };
         }
 
         RemoteMotionPose exactPose(const SpatialEntitySnapshot& sample) noexcept
@@ -36,6 +38,49 @@ namespace TES3MP::OpenMWAdapter
                 return std::numeric_limits<std::uint64_t>::max();
             return left + right;
         }
+
+        std::uint64_t roundedServerTicks(std::uint64_t nanoseconds) noexcept
+        {
+            const std::uint64_t seconds = nanoseconds / NanosecondsPerSecond;
+            const std::uint64_t remainder = nanoseconds % NanosecondsPerSecond;
+            if (seconds > (std::numeric_limits<std::uint64_t>::max() - ServerTicksPerSecond) / ServerTicksPerSecond)
+                return std::numeric_limits<std::uint64_t>::max();
+            return seconds * ServerTicksPerSecond
+                + (remainder * ServerTicksPerSecond + NanosecondsPerSecond / 2) / NanosecondsPerSecond;
+        }
+    }
+
+    RemoteLocomotionAnimation remoteLocomotionAnimation(const RemoteMotionPose& pose) noexcept
+    {
+        if (pose.locomotionMode == LocomotionMode::Jump)
+            return RemoteLocomotionAnimation::Jump;
+        const double worldX = static_cast<double>(pose.velocity.x());
+        const double worldY = static_cast<double>(pose.velocity.y());
+        if (worldX == 0.0 && worldY == 0.0)
+        {
+            return pose.locomotionMode == LocomotionMode::Sneak ? RemoteLocomotionAnimation::SneakIdle
+                                                                : RemoteLocomotionAnimation::Idle;
+        }
+
+        constexpr double TurnScale = 2.0 * std::numbers::pi / 4294967296.0;
+        const double yaw = static_cast<double>(pose.orientation.z().value()) * TurnScale;
+        const double sine = std::sin(yaw);
+        const double cosine = std::cos(yaw);
+        const double right = cosine * worldX - sine * worldY;
+        const double forward = sine * worldX + cosine * worldY;
+        const bool longitudinal = std::abs(forward) >= std::abs(right);
+        const std::size_t direction = longitudinal ? (forward >= 0.0 ? 0 : 1) : (right < 0.0 ? 2 : 3);
+        constexpr std::array walk{ RemoteLocomotionAnimation::WalkForward, RemoteLocomotionAnimation::WalkBack,
+            RemoteLocomotionAnimation::WalkLeft, RemoteLocomotionAnimation::WalkRight };
+        constexpr std::array run{ RemoteLocomotionAnimation::RunForward, RemoteLocomotionAnimation::RunBack,
+            RemoteLocomotionAnimation::RunLeft, RemoteLocomotionAnimation::RunRight };
+        constexpr std::array sneak{ RemoteLocomotionAnimation::SneakForward, RemoteLocomotionAnimation::SneakBack,
+            RemoteLocomotionAnimation::SneakLeft, RemoteLocomotionAnimation::SneakRight };
+        if (pose.locomotionMode == LocomotionMode::Run)
+            return run[direction];
+        if (pose.locomotionMode == LocomotionMode::Sneak)
+            return sneak[direction];
+        return walk[direction];
     }
 
     ObservationResult BoundedMovementMetricSink::tryRecord(MovementMetric metric) noexcept
@@ -108,12 +153,53 @@ namespace TES3MP::OpenMWAdapter
         mStarted = false;
         mCursorTick = sample.serverTick().value();
         mCursorFraction = 0;
+        mPlaybackDelayTicks = RemotePlaybackDelayFloorTicks;
+        mStableArrivalSamples = 0;
+        mDelayDebtNanoseconds = 0;
         mLastAdvance = receivedAt;
         mLastSnapshot = receivedAt;
         mCorrection = {};
         mCorrectionEnds.reset();
         record(RemoteMotionMetricKey::BufferDepth, 1);
         record(RemoteMotionMetricKey::HardSnaps, 1);
+    }
+
+    void RemoteMotionBuffer::adaptPlaybackDelay(
+        const SpatialEntitySnapshot& sample, MonotonicInstant receivedAt) noexcept
+    {
+        if (mSampleCount == 0)
+            return;
+        const Sample& newest = *mSamples[mSampleCount - 1];
+        if (sample.serverTick() <= newest.snapshot.serverTick() || receivedAt < newest.receivedAt)
+            return;
+        const std::uint64_t tickDelta = sample.serverTick().value() - newest.snapshot.serverTick().value();
+        const std::uint64_t arrivalTicks
+            = roundedServerTicks(receivedAt.nanoseconds() - newest.receivedAt.nanoseconds());
+        if (arrivalTicks > tickDelta)
+        {
+            const std::uint64_t next = std::min(RemotePlaybackDelayCeilingTicks,
+                saturatingAdd(RemotePlaybackDelayFloorTicks, arrivalTicks - tickDelta));
+            if (next > mPlaybackDelayTicks)
+            {
+                mDelayDebtNanoseconds = saturatingAdd(mDelayDebtNanoseconds,
+                    (next - mPlaybackDelayTicks) * (NanosecondsPerSecond / ServerTicksPerSecond));
+                mPlaybackDelayTicks = next;
+            }
+            mStableArrivalSamples = 0;
+            return;
+        }
+        if (mPlaybackDelayTicks == RemotePlaybackDelayFloorTicks)
+            return;
+        if (++mStableArrivalSamples >= RemotePlaybackStableSamples)
+        {
+            --mPlaybackDelayTicks;
+            mStableArrivalSamples = 0;
+            if (mStarted && mCursorTick < sample.serverTick().value())
+            {
+                ++mCursorTick;
+                mCursorFraction = 0;
+            }
+        }
     }
 
     void RemoteMotionBuffer::advanceCursor(MonotonicInstant now) noexcept
@@ -133,8 +219,12 @@ namespace TES3MP::OpenMWAdapter
         if (!mStarted || mSampleCount == 0)
             return;
 
-        const std::uint64_t seconds = elapsed / NanosecondsPerSecond;
-        const std::uint64_t remainder = elapsed % NanosecondsPerSecond;
+        const std::uint64_t debtPaid = std::min(elapsed, mDelayDebtNanoseconds);
+        mDelayDebtNanoseconds -= debtPaid;
+        const std::uint64_t playableElapsed = elapsed - debtPaid;
+
+        const std::uint64_t seconds = playableElapsed / NanosecondsPerSecond;
+        const std::uint64_t remainder = playableElapsed % NanosecondsPerSecond;
         if (seconds > (std::numeric_limits<std::uint64_t>::max() - mCursorTick) / ServerTicksPerSecond)
         {
             mCursorTick = std::numeric_limits<std::uint64_t>::max();
@@ -199,7 +289,8 @@ namespace TES3MP::OpenMWAdapter
                 const auto interpolate = [ratio](std::int64_t a, std::int64_t b) {
                     return static_cast<double>(a) + (static_cast<double>(b) - static_cast<double>(a)) * ratio;
                 };
-                return ResolvedPose{ poseFrom(lower, interpolate(from.x(), to.x()), interpolate(from.y(), to.y()),
+                const auto& state = ratio < 1.0 ? lower : upper;
+                return ResolvedPose{ poseFrom(state, interpolate(from.x(), to.x()), interpolate(from.y(), to.y()),
                                          interpolate(from.z(), to.z())),
                     0 };
             }
@@ -272,6 +363,7 @@ namespace TES3MP::OpenMWAdapter
             ? std::optional<RemoteMotionPose>(applyCorrection(oldResolved->pose, receivedAt))
             : std::nullopt;
 
+        adaptPlaybackDelay(sample, receivedAt);
         if (sample.serverTick() == newest.serverTick())
             mSamples[mSampleCount - 1].emplace(Sample{ sample, receivedAt });
         else if (mSampleCount < MaximumRemoteMotionSamples)
@@ -286,10 +378,10 @@ namespace TES3MP::OpenMWAdapter
 
         const std::uint64_t oldestTick = mSamples[0]->snapshot.serverTick().value();
         const std::uint64_t newestTick = mSamples[mSampleCount - 1]->snapshot.serverTick().value();
-        if (!mStarted && newestTick - oldestTick >= RemotePlaybackDelayTicks)
+        if (!mStarted && newestTick - oldestTick >= mPlaybackDelayTicks)
         {
             mStarted = true;
-            mCursorTick = newestTick - RemotePlaybackDelayTicks;
+            mCursorTick = newestTick - mPlaybackDelayTicks;
             if (mCursorTick < oldestTick)
                 mCursorTick = oldestTick;
             mCursorFraction = 0;
@@ -354,6 +446,9 @@ namespace TES3MP::OpenMWAdapter
         mStarted = false;
         mCursorTick = 0;
         mCursorFraction = 0;
+        mPlaybackDelayTicks = RemotePlaybackDelayFloorTicks;
+        mStableArrivalSamples = 0;
+        mDelayDebtNanoseconds = 0;
         mLastAdvance.reset();
         mLastSnapshot.reset();
         mCorrection = {};

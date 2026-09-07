@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <string_view>
 #include <utility>
 
 namespace ESM
@@ -23,6 +24,27 @@ namespace MWRender
     class RenderingManager;
 
     inline constexpr std::size_t MaximumReplicatedActors = 255;
+
+    enum class ReplicatedActorLocomotion : std::uint8_t
+    {
+        Idle,
+        SneakIdle,
+        WalkForward,
+        WalkBack,
+        WalkLeft,
+        WalkRight,
+        RunForward,
+        RunBack,
+        RunLeft,
+        RunRight,
+        SneakForward,
+        SneakBack,
+        SneakLeft,
+        SneakRight,
+        Jump,
+    };
+
+    std::string_view replicatedActorAnimationGroup(ReplicatedActorLocomotion locomotion) noexcept;
 
     enum class ReplicatedActorResult : std::uint8_t
     {
@@ -58,7 +80,8 @@ namespace MWRender
         ReplicatedActor(const ReplicatedActor&) = delete;
         ReplicatedActor& operator=(const ReplicatedActor&) = delete;
 
-        ReplicatedActorResult update(const ESM::Position& position, float animationSeconds) noexcept;
+        ReplicatedActorResult update(
+            const ESM::Position& position, ReplicatedActorLocomotion locomotion, float animationSeconds) noexcept;
 
         static CreateResult create(RenderingManager& rendering, const MWWorld::ESMStore& store,
             const ESM::RefId& npcRecord, MWWorld::CellStore& cell, const ESM::Position& position) noexcept;

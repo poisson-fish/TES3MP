@@ -14,7 +14,9 @@
 namespace TES3MP::OpenMWAdapter
 {
     inline constexpr std::size_t MaximumRemoteMotionSamples = 4;
-    inline constexpr std::uint64_t RemotePlaybackDelayTicks = 2;
+    inline constexpr std::uint64_t RemotePlaybackDelayFloorTicks = 2;
+    inline constexpr std::uint64_t RemotePlaybackDelayCeilingTicks = 3;
+    inline constexpr std::size_t RemotePlaybackStableSamples = MaximumRemoteMotionSamples;
     inline constexpr std::uint64_t MaximumRemoteExtrapolationTicks = 3;
     inline constexpr std::uint64_t RemoteCorrectionBlendNanoseconds = 66'666'667;
     inline constexpr std::uint64_t RemoteHardSnapDistanceQuanta = 16 * 1024;
@@ -105,7 +107,30 @@ namespace TES3MP::OpenMWAdapter
         double y;
         double z;
         Orientation3 orientation;
+        LinearVelocity3 velocity;
+        LocomotionMode locomotionMode;
     };
+
+    enum class RemoteLocomotionAnimation : std::uint8_t
+    {
+        Idle,
+        SneakIdle,
+        WalkForward,
+        WalkBack,
+        WalkLeft,
+        WalkRight,
+        RunForward,
+        RunBack,
+        RunLeft,
+        RunRight,
+        SneakForward,
+        SneakBack,
+        SneakLeft,
+        SneakRight,
+        Jump,
+    };
+
+    RemoteLocomotionAnimation remoteLocomotionAnimation(const RemoteMotionPose& pose) noexcept;
 
     class RemoteMotionBuffer
     {
@@ -116,6 +141,7 @@ namespace TES3MP::OpenMWAdapter
         std::optional<RemoteMotionPose> advance(MonotonicInstant now) noexcept;
         void clear() noexcept;
         std::size_t sampleCount() const noexcept { return mSampleCount; }
+        std::uint64_t playbackDelayTicks() const noexcept { return mPlaybackDelayTicks; }
 
     private:
         struct Sample
@@ -131,6 +157,7 @@ namespace TES3MP::OpenMWAdapter
         };
 
         void resetTo(const SpatialEntitySnapshot& sample, MonotonicInstant receivedAt) noexcept;
+        void adaptPlaybackDelay(const SpatialEntitySnapshot& sample, MonotonicInstant receivedAt) noexcept;
         void advanceCursor(MonotonicInstant now) noexcept;
         std::optional<ResolvedPose> resolve() const noexcept;
         RemoteMotionPose applyCorrection(RemoteMotionPose pose, MonotonicInstant now) noexcept;
@@ -142,6 +169,9 @@ namespace TES3MP::OpenMWAdapter
         bool mStarted = false;
         std::uint64_t mCursorTick = 0;
         std::uint64_t mCursorFraction = 0;
+        std::uint64_t mPlaybackDelayTicks = RemotePlaybackDelayFloorTicks;
+        std::size_t mStableArrivalSamples = 0;
+        std::uint64_t mDelayDebtNanoseconds = 0;
         std::optional<MonotonicInstant> mLastAdvance;
         std::optional<MonotonicInstant> mLastSnapshot;
         std::array<double, 3> mCorrection{};

@@ -33,7 +33,8 @@ namespace
     }
 
     TES3MP::SpatialEntitySnapshot remoteSample(std::uint64_t tick, std::uint64_t revision, std::int64_t x,
-        std::int64_t velocity = 4096, std::uint64_t epoch = 1)
+        std::int64_t velocity = 4096, std::uint64_t epoch = 1,
+        TES3MP::LocomotionMode mode = TES3MP::LocomotionMode::Walk)
     {
         const auto zero = TES3MP::Turn32::fromValue(0);
         return TES3MP::SpatialEntitySnapshot(value<TES3MP::ServerTick>(tick), value<TES3MP::PlayerId>(1),
@@ -41,7 +42,7 @@ namespace
             value<TES3MP::AuthorityEpoch>(epoch),
             TES3MP::Transform(TES3MP::CellId::interior(value<TES3MP::CellSpaceId>(7)), TES3MP::Position3(x, 0, 0),
                 TES3MP::Orientation3(zero, zero, zero)),
-            TES3MP::LinearVelocity3(velocity, 0, 0));
+            TES3MP::LinearVelocity3(velocity, 0, 0), mode);
     }
 
     TES3MP::ServerHello serverHello(bool pose = false)
@@ -90,27 +91,35 @@ namespace
         std::array<std::byte, TES3MP::PlayerCredentialBytes> bytes{};
     };
 
-    TES3MP::LatestWinsSnapshot selfSnapshot(TES3MP::SessionGeneration generation)
+    TES3MP::LatestWinsSnapshot selfSnapshot(TES3MP::SessionGeneration generation, bool includeRemote = false)
     {
         const auto session = value<TES3MP::SessionId>(1);
         const auto player = value<TES3MP::PlayerId>(1);
         const auto entity = value<TES3MP::EntityId>(1);
         const auto zero = TES3MP::Turn32::fromValue(0);
-        const std::array entries{ TES3MP::SpatialEntitySnapshot(TES3MP::ServerTick::initial(), player, entity,
+        std::vector entries{ TES3MP::SpatialEntitySnapshot(TES3MP::ServerTick::initial(), player, entity,
             value<TES3MP::AppearanceId>(1), TES3MP::EntityRevision::initial(), TES3MP::AuthorityEpoch::initial(),
             TES3MP::Transform(TES3MP::CellId::interior(value<TES3MP::CellSpaceId>(7)), TES3MP::Position3(0, 0, 0),
                 TES3MP::Orientation3(zero, zero, zero)),
             TES3MP::LinearVelocity3(0, 0, 0)) };
+        if (includeRemote)
+            entries.push_back(TES3MP::SpatialEntitySnapshot(TES3MP::ServerTick::initial(), value<TES3MP::PlayerId>(2),
+                value<TES3MP::EntityId>(2), value<TES3MP::AppearanceId>(1), TES3MP::EntityRevision::initial(),
+                TES3MP::AuthorityEpoch::initial(),
+                TES3MP::Transform(TES3MP::CellId::interior(value<TES3MP::CellSpaceId>(7)), TES3MP::Position3(0, 0, 0),
+                    TES3MP::Orientation3(zero, zero, zero)),
+                TES3MP::LinearVelocity3(0, 0, 0)));
         auto view = std::get<TES3MP::SpatialWorldView>(TES3MP::SpatialWorldView::create(entries));
         return TES3MP::LatestWinsSnapshot(TES3MP::LatestWinsSnapshotHeader(session, generation, player, entity,
                                               TES3MP::CanonicalRevision::initial(), std::nullopt),
             std::move(view));
     }
 
-    TES3MP::ReliableInterestBaseline selfBaseline(TES3MP::SessionGeneration generation)
+    TES3MP::ReliableInterestBaseline selfBaseline(TES3MP::SessionGeneration generation, bool includeRemote = false)
     {
-        const std::array members{ TES3MP::InterestMember{
-            value<TES3MP::PlayerId>(1), value<TES3MP::EntityId>(1) } };
+        std::vector members{ TES3MP::InterestMember{ value<TES3MP::PlayerId>(1), value<TES3MP::EntityId>(1) } };
+        if (includeRemote)
+            members.push_back({ value<TES3MP::PlayerId>(2), value<TES3MP::EntityId>(2) });
         return std::get<TES3MP::ReliableInterestBaseline>(TES3MP::ReliableInterestBaseline::create(
             value<TES3MP::SessionId>(1), generation, TES3MP::CanonicalRevision::initial(),
             TES3MP::CanonicalStateVersion::initial(), TES3MP::ServerTick::initial(), members));
@@ -287,11 +296,20 @@ namespace
             ++poses;
             return TES3MP::OpenMWAdapter::ProviderResult::Accepted;
         }
+        TES3MP::OpenMWAdapter::ProviderResult applyVrPoseWeight(
+            TES3MP::EntityId, TES3MP::AuthorityEpoch, double weight) noexcept override
+        {
+            ++poseFallbacks;
+            lastPoseWeight = weight;
+            return TES3MP::OpenMWAdapter::ProviderResult::Accepted;
+        }
         void clear() noexcept override { ++clears; }
         unsigned calls = 0;
         unsigned advances = 0;
         unsigned clears = 0;
         unsigned poses = 0;
+        unsigned poseFallbacks = 0;
+        double lastPoseWeight = 0.0;
     };
 
     class PoseInput final : public TES3MP::OpenMWAdapter::VrPoseInputProvider
@@ -413,6 +431,28 @@ int main()
     require(remote.observe(remoteSample(3, 4, 12'288), MonotonicInstant::fromNanoseconds(100'000'000)));
     require(remote.observe(remoteSample(4, 5, 16'384), MonotonicInstant::fromNanoseconds(133'333'334)));
     require(remote.sampleCount() == MaximumRemoteMotionSamples);
+
+    RemoteMotionBuffer adaptive(motionMetrics);
+    require(adaptive.observe(remoteSample(0, 1, 0), MonotonicInstant::fromNanoseconds(0)));
+    require(adaptive.observe(remoteSample(1, 2, 4096), MonotonicInstant::fromNanoseconds(33'333'333)));
+    require(adaptive.playbackDelayTicks() == RemotePlaybackDelayFloorTicks);
+    require(adaptive.observe(remoteSample(2, 3, 8192), MonotonicInstant::fromNanoseconds(100'000'000)));
+    require(adaptive.playbackDelayTicks() == RemotePlaybackDelayCeilingTicks);
+    for (std::uint64_t tick = 3; tick < 7; ++tick)
+        require(adaptive.observe(remoteSample(tick, tick + 2, static_cast<std::int64_t>(tick * 4096)),
+            MonotonicInstant::fromNanoseconds(100'000'000 + (tick - 2) * 33'333'333)));
+    require(adaptive.playbackDelayTicks() == RemotePlaybackDelayFloorTicks);
+
+    auto locomotionPose = *remote.advance(MonotonicInstant::fromNanoseconds(166'666'667));
+    require(remoteLocomotionAnimation(locomotionPose) == RemoteLocomotionAnimation::WalkRight);
+    locomotionPose.velocity = LinearVelocity3(0, 0, 0);
+    locomotionPose.locomotionMode = LocomotionMode::Sneak;
+    require(remoteLocomotionAnimation(locomotionPose) == RemoteLocomotionAnimation::SneakIdle);
+    locomotionPose.velocity = LinearVelocity3(0, 4096, 0);
+    locomotionPose.locomotionMode = LocomotionMode::Run;
+    require(remoteLocomotionAnimation(locomotionPose) == RemoteLocomotionAnimation::RunForward);
+    locomotionPose.locomotionMode = LocomotionMode::Jump;
+    require(remoteLocomotionAnimation(locomotionPose) == RemoteLocomotionAnimation::Jump);
     require(remote.observe(remoteSample(5, 6, 20'480), MonotonicInstant::fromNanoseconds(166'666'667)));
     require(remote.sampleCount() == MaximumRemoteMotionSamples);
 
@@ -502,6 +542,19 @@ int main()
     PoseEvidenceTracker poseEvidence(&trackerMetrics);
     poseEvidence.observe(value<EntityId>(9), AuthorityEpoch::initial(), PoseSampleSequence::initial(),
         MonotonicInstant::fromNanoseconds(400));
+    require(poseEvidence.poseWeight(value<EntityId>(9), AuthorityEpoch::initial(),
+                MonotonicInstant::fromNanoseconds(400 + RemotePoseFreshNanoseconds))
+        == 1.0);
+    const double blendingPoseWeight = poseEvidence.poseWeight(value<EntityId>(9), AuthorityEpoch::initial(),
+        MonotonicInstant::fromNanoseconds(400 + RemotePoseFreshNanoseconds + RemotePoseFallbackBlendNanoseconds / 2));
+    require(blendingPoseWeight > 0.49 && blendingPoseWeight < 0.51);
+    require(
+        poseEvidence.poseWeight(value<EntityId>(9), AuthorityEpoch::initial(),
+            MonotonicInstant::fromNanoseconds(400 + RemotePoseFreshNanoseconds + RemotePoseFallbackBlendNanoseconds))
+        == 0.0);
+    require(
+        poseEvidence.poseWeight(value<EntityId>(10), AuthorityEpoch::initial(), MonotonicInstant::fromNanoseconds(400))
+        == 0.0);
     poseEvidence.advance(MonotonicInstant::fromNanoseconds(425));
     poseEvidence.observe(value<EntityId>(9), AuthorityEpoch::initial(), value<PoseSampleSequence>(3),
         MonotonicInstant::fromNanoseconds(450));
@@ -585,21 +638,23 @@ int main()
     reconnectTransportObserver->enqueue(MessageClass::SessionControl, MessageKind::AuthenticationAccepted,
         initialAcceptedPayload, TransportChannel::ReliableOrdered);
     reconnectTransportObserver->enqueue(MessageClass::ReliableOperation, MessageKind::ReliableInterestBaseline,
-        encodeReliableInterestBaseline(selfBaseline(SessionGeneration::initial())), TransportChannel::ReliableOrdered);
-    auto initialSnapshot = selfSnapshot(SessionGeneration::initial());
+        encodeReliableInterestBaseline(selfBaseline(SessionGeneration::initial(), true)),
+        TransportChannel::ReliableOrdered);
+    auto initialSnapshot = selfSnapshot(SessionGeneration::initial(), true);
     auto initialSnapshotPayload = encodeLatestWinsSnapshot(initialSnapshot);
     reconnectTransportObserver->enqueue(MessageClass::LatestWinsSnapshot, MessageKind::LatestWinsSnapshot,
         initialSnapshotPayload, TransportChannel::LatestWins);
     const auto zero = Turn32::fromValue(0);
     const auto head = VrTrackedTransform(*VrPoseOffset3::create(4, 5, 6), Orientation3(zero, zero, zero));
-    const auto remotePose = ServerVrPoseSnapshot(value<SessionId>(1), SessionGeneration::initial(),
-        value<PlayerId>(1), value<SessionId>(1), SessionGeneration::initial(), value<EntityId>(1),
-        AuthorityEpoch::initial(), PoseSampleSequence::initial(), head, std::nullopt, std::nullopt);
+    const auto remotePose = ServerVrPoseSnapshot(value<SessionId>(1), SessionGeneration::initial(), value<PlayerId>(2),
+        value<SessionId>(1), SessionGeneration::initial(), value<EntityId>(2), AuthorityEpoch::initial(),
+        PoseSampleSequence::initial(), head, std::nullopt, std::nullopt);
     reconnectTransportObserver->enqueue(MessageClass::PresentationSample, MessageKind::ServerVrPoseSnapshot,
         encodeServerVrPoseSnapshot(remotePose), TransportChannel::PresentationLatest);
     reconnectCoordinator->frame(0.01f);
-    require(reconnectPresentation.calls == 1 && reconnectPresentation.poses == 1 && poseInput.calls == 1
-        && credentialPersistenceObserver->calls == 1
+    require(reconnectPresentation.calls == 1 && reconnectPresentation.poses == 1
+        && reconnectPresentation.poseFallbacks == 1 && reconnectPresentation.lastPoseWeight == 1.0
+        && poseInput.calls == 1 && credentialPersistenceObserver->calls == 1
         && credentialPersistenceObserver->bytes.front() == std::byte{ 2 });
     require(trackerMetrics.has(MovementMetricKey::PoseAgeNanoseconds));
     require(reconnectTransportObserver->sentChannel == TransportChannel::PresentationLatest);
@@ -631,14 +686,15 @@ int main()
     reconnectTransportObserver->enqueue(MessageClass::SessionControl, MessageKind::AuthenticationAccepted,
         rotatedAcceptedPayload, TransportChannel::ReliableOrdered);
     reconnectTransportObserver->enqueue(MessageClass::ReliableOperation, MessageKind::ReliableInterestBaseline,
-        encodeReliableInterestBaseline(selfBaseline(*SessionGeneration::initial().next())),
+        encodeReliableInterestBaseline(selfBaseline(*SessionGeneration::initial().next(), true)),
         TransportChannel::ReliableOrdered);
-    auto resumedSnapshot = selfSnapshot(*SessionGeneration::initial().next());
+    auto resumedSnapshot = selfSnapshot(*SessionGeneration::initial().next(), true);
     auto resumedSnapshotPayload = encodeLatestWinsSnapshot(resumedSnapshot);
     reconnectTransportObserver->enqueue(MessageClass::LatestWinsSnapshot, MessageKind::LatestWinsSnapshot,
         resumedSnapshotPayload, TransportChannel::LatestWins);
     reconnectCoordinator->frame(0.01f);
-    require(reconnectPresentation.calls == 2 && reconnectStatus.last == ConnectionStatus::Resumed);
+    require(reconnectPresentation.calls == 2 && reconnectPresentation.poseFallbacks == 2
+        && reconnectPresentation.lastPoseWeight == 0.0 && reconnectStatus.last == ConnectionStatus::Resumed);
 
     require(std::get<TES3MP::OpenMWAdapter::ClientCompositionFailure>(
                 TES3MP::OpenMWAdapter::makeClientCoordinator(

@@ -54,6 +54,8 @@ namespace TES3MP::OpenMWAdapter
     };
 
     inline constexpr std::size_t MaximumPoseEvidenceSources = 256;
+    inline constexpr std::uint64_t RemotePoseFreshNanoseconds = 100'000'000;
+    inline constexpr std::uint64_t RemotePoseFallbackBlendNanoseconds = RemoteCorrectionBlendNanoseconds;
 
     class PoseEvidenceTracker
     {
@@ -67,6 +69,7 @@ namespace TES3MP::OpenMWAdapter
             MonotonicInstant receivedAt) noexcept;
         void retain(std::span<const SpatialEntitySnapshot> visible) noexcept;
         void advance(MonotonicInstant now) noexcept;
+        double poseWeight(EntityId source, AuthorityEpoch epoch, MonotonicInstant now) const noexcept;
         void clear() noexcept;
 
     private:

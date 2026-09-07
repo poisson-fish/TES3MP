@@ -77,14 +77,33 @@ namespace
             && !LocomotionInputSequence::fromValue(MaximumLocomotionInputOrdinal + 1);
     }
 
-    SpatialEntitySnapshot entry(std::uint64_t entityId, std::uint64_t tick = 8)
+    bool canonical_locomotion_round_trips_without_snapshot_one_shots()
     {
-        return SpatialEntitySnapshot(value<ServerTick>(tick), value<PlayerId>(entityId + 100), value<EntityId>(entityId),
-            value<AppearanceId>(1), value<EntityRevision>(3),
-            value<AuthorityEpoch>(2),
+        const auto session = value<SessionId>(1);
+        const auto generation = value<SessionGeneration>(2);
+        const std::array entries{ SpatialEntitySnapshot(value<ServerTick>(3), value<PlayerId>(4), value<EntityId>(5),
+            value<AppearanceId>(6), value<EntityRevision>(7), value<AuthorityEpoch>(8),
+            Transform(CellId::interior(value<CellSpaceId>(9)), Position3(10, 11, 12),
+                Orientation3(Turn32::fromValue(13), Turn32::fromValue(14), Turn32::fromValue(15))),
+            LinearVelocity3(16, 17, 18), LocomotionMode::Run) };
+        auto view = std::get<SpatialWorldView>(SpatialWorldView::create(entries));
+        const LatestWinsSnapshot source(LatestWinsSnapshotHeader(session, generation, entries[0].playerId(),
+                                            entries[0].entityId(), value<CanonicalRevision>(3), std::nullopt),
+            std::move(view));
+        const auto decoded = decodeLatestWinsSnapshot(encodeLatestWinsSnapshot(source));
+        const auto* value = std::get_if<LatestWinsSnapshot>(&decoded);
+        return value && value->view().entries().size() == 1
+            && value->view().entries().front().locomotionMode() == LocomotionMode::Run;
+    }
+
+    SpatialEntitySnapshot entry(
+        std::uint64_t entityId, std::uint64_t tick = 8, LocomotionMode mode = LocomotionMode::Walk)
+    {
+        return SpatialEntitySnapshot(value<ServerTick>(tick), value<PlayerId>(entityId + 100),
+            value<EntityId>(entityId), value<AppearanceId>(1), value<EntityRevision>(3), value<AuthorityEpoch>(2),
             Transform(CellId::exterior(value<CellSpaceId>(51), -2, 7), Position3(1000, -2000, 3000),
                 Orientation3(Turn32::fromValue(11), Turn32::fromValue(12), Turn32::fromValue(13))),
-            LinearVelocity3(14, 15, -16));
+            LinearVelocity3(14, 15, -16), mode);
     }
 
     SpatialEntitySnapshot goldenEntry()
@@ -350,13 +369,17 @@ namespace
         std::vector<SpatialEntitySnapshot> maximum;
         maximum.reserve(MaximumSpatialWorldViewEntries + 1);
         for (std::size_t index = 0; index < MaximumSpatialWorldViewEntries + 1; ++index)
-            maximum.push_back(entry(index + 1));
+            maximum.push_back(entry(index + 1, 8, LocomotionMode::Run));
         const auto accepted = SpatialWorldView::create(std::span(maximum).first(MaximumSpatialWorldViewEntries));
         const auto oversized = SpatialWorldView::create(maximum);
         const std::array duplicate{ entry(1), entry(1) };
         const std::array unsorted{ entry(2), entry(1) };
+        const std::array invalidMode{ SpatialEntitySnapshot(value<ServerTick>(8), value<PlayerId>(101),
+            value<EntityId>(1), value<AppearanceId>(1), value<EntityRevision>(3), value<AuthorityEpoch>(2),
+            entry(1).transform(), LinearVelocity3(0, 0, 0), static_cast<LocomotionMode>(255)) };
         if (!std::holds_alternative<SpatialWorldView>(empty) || !std::holds_alternative<SpatialWorldView>(accepted)
             || !hasError(oversized, ExchangeDecodeErrorCode::TooManySnapshotEntries)
+            || !hasError(SpatialWorldView::create(invalidMode), ExchangeDecodeErrorCode::InvalidLocomotionMode)
             || !hasError(SpatialWorldView::create(duplicate), ExchangeDecodeErrorCode::SnapshotEntriesNotStrictlySorted)
             || !hasError(SpatialWorldView::create(unsorted), ExchangeDecodeErrorCode::SnapshotEntriesNotStrictlySorted))
             return false;
@@ -709,6 +732,7 @@ int main(int argc, char** argv)
     passed &= check(operation_and_snapshot_round_trip_as_owned_values(), "owned round trips");
     passed &= check(versioned_locomotion_input_round_trips_with_bounded_ordinals(),
         "versioned locomotion input");
+    passed &= check(canonical_locomotion_round_trips_without_snapshot_one_shots(), "canonical locomotion snapshot");
     passed &= check(cell_transitions_round_trip_as_typed_owned_values(), "cell transition round trips");
     passed &= check(reliable_observation_batch_is_distinct_bounded_and_owned(), "reliable observation batch");
     passed &= check(interest_baseline_resync_and_cell_catalog_are_bounded_owned_values(),

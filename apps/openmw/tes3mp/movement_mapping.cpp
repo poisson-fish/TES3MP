@@ -151,6 +151,22 @@ namespace TES3MP::OpenMWAdapter
             }
     }
 
+    double PoseEvidenceTracker::poseWeight(EntityId source, AuthorityEpoch epoch, MonotonicInstant now) const noexcept
+    {
+        const auto found = std::find_if(mSources.begin(), mSources.end(),
+            [&](const auto& value) { return value && value->entity == source && value->epoch == epoch; });
+        if (found == mSources.end())
+            return 0.0;
+        const std::uint64_t age
+            = now >= (*found)->receivedAt ? now.nanoseconds() - (*found)->receivedAt.nanoseconds() : 0;
+        if (age <= RemotePoseFreshNanoseconds)
+            return 1.0;
+        const std::uint64_t blendAge = age - RemotePoseFreshNanoseconds;
+        if (blendAge >= RemotePoseFallbackBlendNanoseconds)
+            return 0.0;
+        return 1.0 - static_cast<double>(blendAge) / static_cast<double>(RemotePoseFallbackBlendNanoseconds);
+    }
+
     void PoseEvidenceTracker::clear() noexcept
     {
         for (auto& source : mSources)

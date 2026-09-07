@@ -51,7 +51,8 @@ namespace TES3MP::ServerApp
             {
                 members.push_back({ player->playerId(), player->entityId() });
                 entries.emplace_back(tick, player->playerId(), player->entityId(), player->appearanceId(),
-                    player->entityRevision(), player->authorityEpoch(), player->transform(), player->linearVelocity());
+                    player->entityRevision(), player->authorityEpoch(), player->transform(), player->linearVelocity(),
+                    player->locomotionMode());
             }
             std::ranges::sort(members);
             auto baseline = ReliableInterestBaseline::create(target->sessionId(), target->sessionGeneration(),
@@ -109,7 +110,8 @@ namespace TES3MP::ServerApp
             entries.reserve(newVisible.size());
             for (const auto* player : newVisible)
                 entries.emplace_back(tick, player->playerId(), player->entityId(), player->appearanceId(),
-                    player->entityRevision(), player->authorityEpoch(), player->transform(), player->linearVelocity());
+                    player->entityRevision(), player->authorityEpoch(), player->transform(), player->linearVelocity(),
+                    player->locomotionMode());
             auto batch = ReliableObservationBatch::create(
                 target.sessionId(), target.sessionGeneration(), revision, changes);
             auto view = SpatialWorldView::create(entries);
@@ -184,7 +186,8 @@ namespace TES3MP::ServerApp
                 entries.reserve(visible.size());
                 for (const auto* player : visible)
                     entries.emplace_back(tick, player->playerId(), player->entityId(), player->appearanceId(),
-                        player->entityRevision(), player->authorityEpoch(), player->transform(), player->linearVelocity());
+                        player->entityRevision(), player->authorityEpoch(), player->transform(),
+                        player->linearVelocity(), player->locomotionMode());
                 auto view = SpatialWorldView::create(entries);
                 if (!std::holds_alternative<SpatialWorldView>(view)) return std::nullopt;
                 result.emplace_back(target.sessionId(), LatestWinsSnapshot(

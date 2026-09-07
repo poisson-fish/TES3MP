@@ -238,6 +238,22 @@ namespace TES3MP::OpenMWAdapter
                     }
                 }
                 mPoseEvidence.advance(now);
+                if (snapshot)
+                {
+                    for (const auto& entry : snapshot->view().entries())
+                    {
+                        if (entry.playerId() == snapshot->header().targetPlayerId()
+                            && entry.entityId() == snapshot->header().targetEntityId())
+                            continue;
+                        if (mPresentation.applyVrPoseWeight(entry.entityId(), entry.authorityEpoch(),
+                                mPoseEvidence.poseWeight(entry.entityId(), entry.authorityEpoch(), now))
+                            != ProviderResult::Accepted)
+                        {
+                            closeForProviderFailure(ProviderResult::PresentationFailed);
+                            return;
+                        }
+                    }
+                }
                 if (mPresentation.advance(now) != ProviderResult::Accepted)
                 {
                     closeForProviderFailure(ProviderResult::PresentationFailed);

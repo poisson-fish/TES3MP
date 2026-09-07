@@ -11,10 +11,10 @@
 #include "../mwworld/scene.hpp"
 #include "../mwworld/worldmodel.hpp"
 
+#include <components/debug/debuglog.hpp>
 #include <components/esm/position.hpp>
 #include <components/esm/refid.hpp>
 #include <components/esm3/loadcell.hpp>
-#include <components/debug/debuglog.hpp>
 
 #include <algorithm>
 #include <array>
@@ -157,11 +157,52 @@ namespace TES3MP::OpenMWAdapter
             return "unknown";
         }
 
+        MWRender::ReplicatedActorLocomotion toOpenMW(RemoteLocomotionAnimation animation) noexcept
+        {
+            using Source = RemoteLocomotionAnimation;
+            using Target = MWRender::ReplicatedActorLocomotion;
+            switch (animation)
+            {
+                case Source::Idle:
+                    return Target::Idle;
+                case Source::SneakIdle:
+                    return Target::SneakIdle;
+                case Source::WalkForward:
+                    return Target::WalkForward;
+                case Source::WalkBack:
+                    return Target::WalkBack;
+                case Source::WalkLeft:
+                    return Target::WalkLeft;
+                case Source::WalkRight:
+                    return Target::WalkRight;
+                case Source::RunForward:
+                    return Target::RunForward;
+                case Source::RunBack:
+                    return Target::RunBack;
+                case Source::RunLeft:
+                    return Target::RunLeft;
+                case Source::RunRight:
+                    return Target::RunRight;
+                case Source::SneakForward:
+                    return Target::SneakForward;
+                case Source::SneakBack:
+                    return Target::SneakBack;
+                case Source::SneakLeft:
+                    return Target::SneakLeft;
+                case Source::SneakRight:
+                    return Target::SneakRight;
+                case Source::Jump:
+                    return Target::Jump;
+            }
+            return Target::Idle;
+        }
+
         bool sameReplicatedState(const SpatialEntitySnapshot& left, const SpatialEntitySnapshot& right) noexcept
         {
             return left.playerId() == right.playerId() && left.entityId() == right.entityId()
                 && left.entityRevision() == right.entityRevision() && left.authorityEpoch() == right.authorityEpoch()
-                && left.transform() == right.transform() && left.linearVelocity() == right.linearVelocity();
+                && left.transform() == right.transform() && left.linearVelocity() == right.linearVelocity()
+                && left.locomotionMode() == right.locomotionMode();
         }
     }
 
@@ -424,8 +465,8 @@ namespace TES3MP::OpenMWAdapter
                 if (remote.lastAdvance && now >= *remote.lastAdvance)
                     animationSeconds = static_cast<float>(now.nanoseconds() - remote.lastAdvance->nanoseconds()) / 1e9f;
                 remote.lastAdvance = now;
-                const MWRender::ReplicatedActorResult actorResult
-                    = remote.actor->update(toOpenMW(*pose), animationSeconds);
+                const MWRender::ReplicatedActorResult actorResult = remote.actor->update(
+                    toOpenMW(*pose), toOpenMW(remoteLocomotionAnimation(*pose)), animationSeconds);
                 const ProviderResult result = mapReplicatedActorResult(actorResult);
                 if (result != ProviderResult::Accepted)
                 {

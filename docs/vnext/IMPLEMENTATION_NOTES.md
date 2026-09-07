@@ -6179,6 +6179,32 @@ only the relevant phase section here.
 
 [Back to the phase tracker](IMPLEMENTATION_PLAN.md#now)
 
+### 2026-09-07 — bounded remote playback, animation, and pose fallback — Complete
+
+- Change: latest-wins views add canonical locomotion mode as optional parallel
+  metadata. Legacy payloads default to walk; malformed size/mode data fails
+  before an owned view is produced. One-shot animation triggers remain absent
+  from snapshots and reserved for reliable domain events.
+- Change: remote playback adapts inside the measured two-to-three-tick fixture
+  bounds, absorbs added delay without timeline reversal, and returns after one
+  four-sample stable window. Canonical mode/velocity selects directional
+  idle/sneak/walk/run/jump loops while renderer root accumulation remains zero.
+- Change: shared pose presentation emits a bounded pose weight for every visible
+  remote: full through the existing 100 ms stale ceiling, blended over the
+  existing 66.7 ms correction window, then canonical locomotion only. Missing
+  pose is canonical immediately; pose remains ephemeral and non-authoritative.
+- Boundary: these values reuse captured fixture limits and are not production
+  tuning. Server collision, local replay, version 1.2 behavior, exact-cell
+  interest/resync, durable state, world objects, and gameplay reach are unchanged.
+  No new ADR or GDR was needed under accepted ADR-0059/GDR-0019.
+- Verification: MSVC RelWithDebInfo full engine-independent aggregate, adapter,
+  movement-evidence, and server-app contracts pass. The pinned FlatBuffers
+  25.12.19 regeneration/compatibility proof passes. MSVC Release OpenMW,
+  networking server, and headless client build and link; focused replicated-actor
+  tests, all 145 repository Python tests, indexed baseline provenance, legacy
+  exclusion, and changed-line formatting/diff hygiene pass. Hardware/content-backed
+  desktop/PC-VR visual capture was not run.
+
 ### 2026-09-06 — content-backed server collision provider — Complete
 
 - Change: the dedicated server now requires the bounded

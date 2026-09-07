@@ -1,12 +1,12 @@
-#include "server_application.hpp"
 #include "authenticated_join_composition.hpp"
-#include "resume_token_context.hpp"
 #include "connection_session_coordinator.hpp"
 #include "content_collision.hpp"
 #include "interest_projection.hpp"
 #include "phase7_proof_profile.hpp"
 #include "phase7_queue_telemetry.hpp"
 #include "player_identity_file.hpp"
+#include "resume_token_context.hpp"
+#include "server_application.hpp"
 #include "server_config.hpp"
 
 #include <array>
@@ -872,7 +872,8 @@ int main()
         assert(reducer.commit(std::move(prepared)));
         auto views = projectInterestViews(reducer.state(), ServerTick::initial(), reducer.canonicalRevision());
         assert(views && views->size() == 1 && (*views)[0].second.view().entries().size() == 1
-            && (*views)[0].second.view().entries()[0].transform().position() == Position3(12, 17, 34));
+            && (*views)[0].second.view().entries()[0].transform().position() == Position3(12, 17, 34)
+            && (*views)[0].second.view().entries()[0].locomotionMode() == LocomotionMode::Walk);
     }
     {
         FixedClock clock;

@@ -70,6 +70,45 @@ inline const char *EnumNameCellKind(CellKind e) {
   return EnumNamesCellKind()[index];
 }
 
+enum class LocomotionMode : uint8_t {
+  Unknown = 0,
+  Sneak = 1,
+  Walk = 2,
+  Run = 3,
+  Jump = 4,
+  MIN = Unknown,
+  MAX = Jump
+};
+
+inline const LocomotionMode (&EnumValuesLocomotionMode())[5] {
+  static const LocomotionMode values[] = {
+    LocomotionMode::Unknown,
+    LocomotionMode::Sneak,
+    LocomotionMode::Walk,
+    LocomotionMode::Run,
+    LocomotionMode::Jump
+  };
+  return values;
+}
+
+inline const char * const *EnumNamesLocomotionMode() {
+  static const char * const names[6] = {
+    "Unknown",
+    "Sneak",
+    "Walk",
+    "Run",
+    "Jump",
+    nullptr
+  };
+  return names;
+}
+
+inline const char *EnumNameLocomotionMode(LocomotionMode e) {
+  if (::flatbuffers::IsOutRange(e, LocomotionMode::Unknown, LocomotionMode::Jump)) return "";
+  const size_t index = static_cast<size_t>(e);
+  return EnumNamesLocomotionMode()[index];
+}
+
 enum class LatestWinsSnapshotBody : uint8_t {
   NONE = 0,
   SpatialWorldView = 1,
@@ -429,16 +468,22 @@ inline ::flatbuffers::Offset<LatestWinsSnapshotHeader> CreateLatestWinsSnapshotH
 struct SpatialWorldView FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
   typedef SpatialWorldViewBuilder Builder;
   enum FlatBuffersVTableOffset FLATBUFFERS_VTABLE_UNDERLYING_TYPE {
-    VT_ENTRIES = 4
+    VT_ENTRIES = 4,
+    VT_LOCOMOTION_MODES = 6
   };
   const ::flatbuffers::Vector<const TES3MP::Protocol::Schema::Snapshot::SpatialEntitySnapshot *> *entries() const {
     return GetPointer<const ::flatbuffers::Vector<const TES3MP::Protocol::Schema::Snapshot::SpatialEntitySnapshot *> *>(VT_ENTRIES);
+  }
+  const ::flatbuffers::Vector<TES3MP::Protocol::Schema::Snapshot::LocomotionMode> *locomotion_modes() const {
+    return GetPointer<const ::flatbuffers::Vector<TES3MP::Protocol::Schema::Snapshot::LocomotionMode> *>(VT_LOCOMOTION_MODES);
   }
   template <bool B = false>
   bool Verify(::flatbuffers::VerifierTemplate<B> &verifier) const {
     return VerifyTableStart(verifier) &&
            VerifyOffset(verifier, VT_ENTRIES) &&
            verifier.VerifyVector(entries()) &&
+           VerifyOffset(verifier, VT_LOCOMOTION_MODES) &&
+           verifier.VerifyVector(locomotion_modes()) &&
            verifier.EndTable();
   }
 };
@@ -449,6 +494,9 @@ struct SpatialWorldViewBuilder {
   ::flatbuffers::uoffset_t start_;
   void add_entries(::flatbuffers::Offset<::flatbuffers::Vector<const TES3MP::Protocol::Schema::Snapshot::SpatialEntitySnapshot *>> entries) {
     fbb_.AddOffset(SpatialWorldView::VT_ENTRIES, entries);
+  }
+  void add_locomotion_modes(::flatbuffers::Offset<::flatbuffers::Vector<TES3MP::Protocol::Schema::Snapshot::LocomotionMode>> locomotion_modes) {
+    fbb_.AddOffset(SpatialWorldView::VT_LOCOMOTION_MODES, locomotion_modes);
   }
   explicit SpatialWorldViewBuilder(::flatbuffers::FlatBufferBuilder &_fbb)
         : fbb_(_fbb) {
@@ -463,19 +511,24 @@ struct SpatialWorldViewBuilder {
 
 inline ::flatbuffers::Offset<SpatialWorldView> CreateSpatialWorldView(
     ::flatbuffers::FlatBufferBuilder &_fbb,
-    ::flatbuffers::Offset<::flatbuffers::Vector<const TES3MP::Protocol::Schema::Snapshot::SpatialEntitySnapshot *>> entries = 0) {
+    ::flatbuffers::Offset<::flatbuffers::Vector<const TES3MP::Protocol::Schema::Snapshot::SpatialEntitySnapshot *>> entries = 0,
+    ::flatbuffers::Offset<::flatbuffers::Vector<TES3MP::Protocol::Schema::Snapshot::LocomotionMode>> locomotion_modes = 0) {
   SpatialWorldViewBuilder builder_(_fbb);
+  builder_.add_locomotion_modes(locomotion_modes);
   builder_.add_entries(entries);
   return builder_.Finish();
 }
 
 inline ::flatbuffers::Offset<SpatialWorldView> CreateSpatialWorldViewDirect(
     ::flatbuffers::FlatBufferBuilder &_fbb,
-    const std::vector<TES3MP::Protocol::Schema::Snapshot::SpatialEntitySnapshot> *entries = nullptr) {
+    const std::vector<TES3MP::Protocol::Schema::Snapshot::SpatialEntitySnapshot> *entries = nullptr,
+    const std::vector<TES3MP::Protocol::Schema::Snapshot::LocomotionMode> *locomotion_modes = nullptr) {
   auto entries__ = entries ? _fbb.CreateVectorOfStructs<TES3MP::Protocol::Schema::Snapshot::SpatialEntitySnapshot>(*entries) : 0;
+  auto locomotion_modes__ = locomotion_modes ? _fbb.CreateVector<TES3MP::Protocol::Schema::Snapshot::LocomotionMode>(*locomotion_modes) : 0;
   return TES3MP::Protocol::Schema::Snapshot::CreateSpatialWorldView(
       _fbb,
-      entries__);
+      entries__,
+      locomotion_modes__);
 }
 
 struct LatestWinsSnapshot FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {

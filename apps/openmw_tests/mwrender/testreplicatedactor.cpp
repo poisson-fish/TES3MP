@@ -47,4 +47,12 @@ namespace
         EXPECT_FALSE(MWRender::replicatedActorResultAccepted(MWRender::ReplicatedActorResult::CapacityExceeded));
         EXPECT_FALSE(MWRender::replicatedActorResultAccepted(MWRender::ReplicatedActorResult::LifecycleViolation));
     }
+
+    TEST(ReplicatedActor, CanonicalLocomotionMapsOnlyToLoopingPresentationGroups)
+    {
+        EXPECT_EQ(MWRender::replicatedActorAnimationGroup(MWRender::ReplicatedActorLocomotion::Idle), "idle");
+        EXPECT_EQ(MWRender::replicatedActorAnimationGroup(MWRender::ReplicatedActorLocomotion::SneakIdle), "idlesneak");
+        EXPECT_EQ(MWRender::replicatedActorAnimationGroup(MWRender::ReplicatedActorLocomotion::RunLeft), "runleft");
+        EXPECT_EQ(MWRender::replicatedActorAnimationGroup(MWRender::ReplicatedActorLocomotion::Jump), "jump");
+    }
 }

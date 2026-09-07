@@ -72,7 +72,7 @@ namespace TES3MP::TestSupport
     std::vector<std::byte> encodeSpatialEntitySnapshot(const SpatialEntitySnapshot& snapshot)
     {
         std::vector<std::byte> output;
-        output.reserve(125);
+        output.reserve(126);
 
         appendUnsigned(output, snapshot.serverTick().value());
         appendUnsigned(output, snapshot.playerId().value());
@@ -109,6 +109,7 @@ namespace TES3MP::TestSupport
         appendSigned(output, velocity.x());
         appendSigned(output, velocity.y());
         appendSigned(output, velocity.z());
+        appendUnsigned(output, static_cast<std::uint8_t>(snapshot.locomotionMode()));
         return output;
     }
 
@@ -158,14 +159,16 @@ namespace TES3MP::TestSupport
         const auto velocityX = reader.readSigned<std::int64_t>();
         const auto velocityY = reader.readSigned<std::int64_t>();
         const auto velocityZ = reader.readSigned<std::int64_t>();
+        const auto locomotionMode = reader.readUnsigned<std::uint8_t>();
         if (!positionX || !positionY || !positionZ || !rotationX || !rotationY || !rotationZ || !velocityX || !velocityY
-            || !velocityZ || !reader.finished())
+            || !velocityZ || !locomotionMode || *locomotionMode > static_cast<std::uint8_t>(LocomotionMode::Jump)
+            || !reader.finished())
             return std::nullopt;
 
         return SpatialEntitySnapshot(*tick, *player, *entity, *appearance, *revision, *epoch,
             Transform(cell, Position3(*positionX, *positionY, *positionZ),
                 Orientation3(
                     Turn32::fromValue(*rotationX), Turn32::fromValue(*rotationY), Turn32::fromValue(*rotationZ))),
-            LinearVelocity3(*velocityX, *velocityY, *velocityZ));
+            LinearVelocity3(*velocityX, *velocityY, *velocityZ), static_cast<LocomotionMode>(*locomotionMode));
     }
 }

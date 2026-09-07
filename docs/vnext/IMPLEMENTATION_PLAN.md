@@ -1,6 +1,6 @@
 # TES3MP vNext rolling implementation plan
 
-Updated: 2026-09-06
+Updated: 2026-09-07
 
 This is the authoritative implementation tracker. It deliberately plans one
 useful pass at a time instead of pre-authoring every future slice. Detailed
@@ -36,28 +36,29 @@ Verification scales with risk:
 
 ## Now
 
-### Phase 12 — bounded remote playback, animation, and pose fallback
+### Phase 12 — hardware/content movement capture and budget ratification
 
 Status: **Ready**
 
-Manifest-scoped movement profiles, additive version 1.3 locomotion input,
-bounded replay-only local reconciliation, and the first deterministic
-content-backed server collision provider are complete. Version 1.2 remains the
-bounded walk-compatibility path.
+The production movement path now includes content collision, bounded local
+replay, fixture-bounded adaptive remote playback, canonical locomotion-driven
+remote animation, and stale optional-pose fallback. Version 1.2 remains the
+bounded walk-compatibility path. The current presentation bounds are provisional
+reuse of measured fixture limits, not ratified production tuning.
 
-Add bounded adaptive remote playback inside measured floors and ceilings, drive
-shared remote locomotion animation from canonical mode/velocity, keep reliable
-one-shots separate from snapshots, and add stale optional-pose fallback without
-granting pose authority. Preserve server collision, local replay, exact-cell
-interest/resync, and the version 1.2 compatibility path. Do not add world
-objects, persistence, or unmeasured player-facing tuning in this pass.
+Run representative content-backed desktop and PC-VR captures under direct,
+jitter, loss, and stall schedules. Record correction, playback, animation, and
+pose-fallback evidence, then present concise production-budget options for owner
+ratification before changing player-facing values. Preserve authority, collision,
+exact-cell interest/resync, reliable/latest-wins lane separation, and the version
+1.2 compatibility path. Do not add world objects or persistence.
 
 ## Next
 
 These are candidates, not locked slices:
 
-1. Run hardware/content-backed desktop and PC-VR captures, then ratify measured
-   profile and presentation budgets.
+1. Begin Phase 13 actor-lifecycle and server-owned AI-state discovery after the
+   movement budgets are ratified.
 
 The list is rewritten after each completed pass. New evidence may reorder,
 combine, or remove items.
@@ -96,6 +97,7 @@ but they no longer force a predetermined sequence of micro-slices.
 | Phase 12 profiles/kernel | **Complete** | Manifest locomotion profiles and a deterministic collision-query movement kernel with a bounded version 1.2 compatibility path |
 | Phase 12 input/replay | **Complete** | Additive version 1.3 locomotion semantics, ordered bounded input, and shared replay-only local reconciliation |
 | Phase 12 collision provider | **Complete** | Manifest-bound static collision content with complete exact-cell coverage, bounded swept root volumes, and fail-closed server composition |
+| Phase 12 remote presentation | **Complete** | Fixture-bounded adaptive playback, additive canonical locomotion snapshots, shared remote animation selection, reliable one-shot separation, and stale optional-pose fallback |
 
 ### Phase 9 completion record
 

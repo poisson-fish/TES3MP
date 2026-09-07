@@ -82,8 +82,8 @@ namespace MWRender
         void insertCreature(const MWWorld::Ptr& ptr, const std::string& model, bool weaponsShields);
 
         ReplicatedActorResult insertReplicatedActor(const MWWorld::Ptr& ptr, const MWWorld::ESMStore& store);
-        ReplicatedActorResult advanceReplicatedActor(
-            const MWWorld::Ptr& ptr, const ESM::Position& position, float animationSeconds) noexcept;
+        ReplicatedActorResult advanceReplicatedActor(const MWWorld::Ptr& ptr, const ESM::Position& position,
+            ReplicatedActorLocomotion locomotion, float animationSeconds) noexcept;
         bool removeReplicatedActor(const MWWorld::Ptr& ptr) noexcept;
         std::size_t replicatedActorCount() const noexcept { return mReplicatedActors.size(); }
 

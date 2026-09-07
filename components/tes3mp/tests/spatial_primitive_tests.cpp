@@ -204,7 +204,7 @@ namespace
         const auto exteriorBytes = TES3MP::TestSupport::encodeSpatialEntitySnapshot(exterior);
         const auto decodedInterior = TES3MP::TestSupport::decodeSpatialEntitySnapshot(interiorBytes);
         const auto decodedExterior = TES3MP::TestSupport::decodeSpatialEntitySnapshot(exteriorBytes);
-        return interiorBytes.size() == 117 && exteriorBytes.size() == 125 && decodedInterior == interior
+        return interiorBytes.size() == 118 && exteriorBytes.size() == 126 && decodedInterior == interior
             && decodedExterior == exterior;
     }
 
@@ -243,7 +243,8 @@ namespace
         return !std::is_default_constructible_v<TES3MP::SpatialEntitySnapshot> && snapshot.serverTick().value() == 47
             && snapshot.playerId().value() == 5 && snapshot.entityId().value() == 11
             && snapshot.appearanceId().value() == 1 && snapshot.entityRevision().value() == 9
-            && snapshot.authorityEpoch().value() == 3 && snapshot.linearVelocity().x() == -1024;
+            && snapshot.authorityEpoch().value() == 3 && snapshot.linearVelocity().x() == -1024
+            && snapshot.locomotionMode() == TES3MP::LocomotionMode::Walk;
     }
 
     bool primitives_compile_without_openmw_osg_bullet_flatbuffers_transport_or_vr_headers()

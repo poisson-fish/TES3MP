@@ -137,7 +137,7 @@
     {
       "path": "apps/openmw/mwrender/objects.hpp",
       "status": "M",
-      "purpose": "Declares the bounded separate replicated-actor render collection and lifecycle seam."
+      "purpose": "Declares the bounded separate replicated-actor render collection, locomotion presentation, and lifecycle seam."
     },
     {
       "path": "apps/openmw/mwrender/renderingmanager.cpp",
@@ -147,7 +147,7 @@
     {
       "path": "apps/openmw/mwrender/replicatedactor.cpp",
       "status": "A",
-      "purpose": "Implements C-R1 immutable appearance projection, passive neutral idle, typed lifecycle, and RAII cleanup without gameplay state."
+      "purpose": "Implements C-R1 immutable appearance projection, canonical locomotion-driven loop selection, typed lifecycle, and RAII cleanup without gameplay authority."
     },
     {
       "path": "apps/openmw/mwrender/replicatedactor.hpp",
@@ -177,7 +177,7 @@
     {
       "path": "apps/openmw/tes3mp/adapter.cpp",
       "status": "A",
-      "purpose": "Implements the bounded correct-then-command coordinator over the shared client orchestrator and borrowed providers."
+      "purpose": "Implements the bounded correct-then-command coordinator, optional pose weighting, and borrowed-provider orchestration."
     },
     {
       "path": "apps/openmw/tes3mp/adapter.hpp",
@@ -212,7 +212,7 @@
     {
       "path": "apps/openmw/tes3mp/desktop_providers.cpp",
       "status": "A",
-      "purpose": "Implements fixture cell mapping, semantic desktop movement input, exact local correction, and typed C-R1 replicated-actor presentation with field-exact idempotent observations and allocation-free bounded reconciliation."
+      "purpose": "Implements fixture cell mapping, semantic desktop input, exact local correction, and canonical locomotion-driven C-R1 replicated-actor presentation."
     },
     {
       "path": "apps/openmw/tes3mp/desktop_providers.hpp",
@@ -227,7 +227,7 @@
     {
       "path": "apps/openmw/tes3mp/movement_mapping.cpp",
       "status": "A",
-      "purpose": "Implements deterministic planar movement mapping and bounded pending/latest intent coordination."
+      "purpose": "Implements deterministic planar movement mapping, bounded intent coordination, pose evidence, and stale-pose weighting."
     },
     {
       "path": "apps/openmw/tes3mp/movement_mapping.hpp",
@@ -237,12 +237,12 @@
     {
       "path": "apps/openmw/tes3mp/providers.hpp",
       "status": "A",
-      "purpose": "Separate semantic input and authoritative presentation provider interfaces using domain types."
+      "purpose": "Separates semantic input, authoritative presentation, optional pose samples, and pose-weight fallback using domain types."
     },
     {
       "path": "apps/openmw/tes3mp/remote_motion.cpp",
       "status": "A",
-      "purpose": "Implements bounded client-local remote interpolation, extrapolation, correction, reset, and typed metric behavior."
+      "purpose": "Implements bounded adaptive remote playback, canonical locomotion animation selection, correction, reset, and typed metrics."
     },
     {
       "path": "apps/openmw/tes3mp/remote_motion.hpp",
@@ -787,7 +787,7 @@
     {
       "path": "components/tes3mp/protocol/schema/latest_wins_snapshot.fbs",
       "status": "A",
-      "purpose": "Explicit-ID T3LS closed-union schema for target-session latest-wins spatial views capped by the public codec contract."
+      "purpose": "Explicit-ID T3LS schema for bounded latest-wins spatial views with additive canonical locomotion metadata and no one-shot events."
     },
     {
       "path": "components/tes3mp/protocol/schema/reliable_interest_baseline.fbs",
@@ -2105,7 +2105,7 @@
         },
         {
           "path": "components/tes3mp/protocol/generated/latest_wins_snapshot_generated.h",
-          "sha256": "385885bb1fd9776b8220f710f82f30dfc1addd93f070ee0230252ac09b303e82"
+          "sha256": "9b1135ccb51a371dad5afc1df794c9c78872f3fcc9a7e2b0c6c4840023ae5c5a"
         },
         {
           "path": "components/tes3mp/protocol/generated/reliable_interest_baseline_generated.h",
@@ -2157,7 +2157,7 @@
         },
         {
           "path": "components/tes3mp/protocol/schema/latest_wins_snapshot.fbs",
-          "sha256": "e1e27381cf9d4115a205353aa0c5d6067cff5ddfa1dec9005ff815ab5e6fc6c7"
+          "sha256": "2cd9d65f3550a27f04335511dc33754e5e8315c788822931310119b5bd8f2f2b"
         },
         {
           "path": "components/tes3mp/protocol/schema/reliable_interest_baseline.fbs",
