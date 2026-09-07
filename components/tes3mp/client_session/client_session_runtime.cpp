@@ -215,9 +215,65 @@ namespace TES3MP
         return queueReliable(ReliableOperationBody(std::move(intent)));
     }
 
+    ClientRuntimeQueueResult ClientSessionRuntime::queueLocomotionIntent(LocomotionIntent intent)
+    {
+        const auto& snapshot = mSession->stateMachine().confirmedSnapshot();
+        const auto& negotiatedHello = mSession->stateMachine().negotiatedHello();
+        if (!snapshot || !negotiatedHello || negotiatedHello->selectedVersion().major != 1
+            || negotiatedHello->selectedVersion().minor < 3 || mLocomotionHistory.size() == MaximumRetainedLocomotionInputs)
+            return { ClientRuntimeResult::NotConnected, std::nullopt };
+        const auto self = std::ranges::find_if(snapshot->view().entries(), [&](const auto& entry) {
+            return entry.playerId() == snapshot->header().targetPlayerId()
+                && entry.entityId() == snapshot->header().targetEntityId();
+        });
+        if (self == snapshot->view().entries().end())
+            return { ClientRuntimeResult::ProtocolRejected, std::nullopt };
+
+        std::uint64_t tickValue = self->serverTick().value();
+        if (mLastLocomotionInputTick && tickValue <= mLastLocomotionInputTick->value())
+            tickValue = mLastLocomotionInputTick->value() + 1;
+        const auto inputTick = LocomotionInputTick::fromValue(tickValue);
+        const auto inputSequence = mLastLocomotionInputSequence
+            ? mLastLocomotionInputSequence->next()
+            : std::optional<LocomotionInputSequence>(LocomotionInputSequence::initial());
+        if (!inputTick || !inputSequence)
+            return { ClientRuntimeResult::EncodeRejected, std::nullopt };
+
+        const PlayerLocomotionInput input(*inputTick, *inputSequence, intent);
+        auto queued = queueReliable(ReliableOperationBody(input));
+        if (queued.result == ClientRuntimeResult::Accepted
+            && (!queued.sequence || !mLocomotionHistory.retain(*queued.sequence, input)))
+            return { ClientRuntimeResult::QueueRejected, std::nullopt };
+        if (queued.result == ClientRuntimeResult::Accepted)
+        {
+            mLastLocomotionInputTick = *inputTick;
+            mLastLocomotionInputSequence = *inputSequence;
+        }
+        return queued;
+    }
+
     ClientRuntimeQueueResult ClientSessionRuntime::queueCellTransition(CellTransition transition)
     {
-        return queueReliable(ReliableOperationBody(std::move(transition)));
+        auto queued = queueReliable(ReliableOperationBody(std::move(transition)));
+        if (queued.result == ClientRuntimeResult::Accepted)
+            mLocomotionHistory.clear();
+        return queued;
+    }
+
+    std::optional<LocalLocomotionReconciliation> ClientSessionRuntime::reconcileLocalPresentation(
+        bool hardDiscontinuity) noexcept
+    {
+        const auto& snapshot = mSession->stateMachine().confirmedSnapshot();
+        if (!snapshot)
+            return std::nullopt;
+        const auto self = std::ranges::find_if(snapshot->view().entries(), [&](const auto& entry) {
+            return entry.playerId() == snapshot->header().targetPlayerId()
+                && entry.entityId() == snapshot->header().targetEntityId();
+        });
+        if (self == snapshot->view().entries().end())
+            return std::nullopt;
+        return mLocomotionHistory.reconcile(
+            *self, snapshot->header().acknowledgedCommandSequence(), hardDiscontinuity);
     }
 
     ClientRuntimeResult ClientSessionRuntime::queuePoseSample(const ClientVrPoseSample& sample)
@@ -311,6 +367,7 @@ namespace TES3MP
     {
         mMayAcceptPlayerCredential = false;
         mOutbound.clear();
+        mLocomotionHistory.clear();
         mSession->close();
         return { result, ClientSessionAction::SessionClosed };
     }
@@ -450,6 +507,7 @@ namespace TES3MP
     {
         mMayAcceptPlayerCredential = false;
         mOutbound.clear();
+        mLocomotionHistory.clear();
         return mSession->close();
     }
 

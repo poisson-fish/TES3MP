@@ -29,6 +29,9 @@ struct LinearVelocity3;
 struct PlayerMotionIntent;
 struct PlayerMotionIntentBuilder;
 
+struct PlayerLocomotionInput;
+struct PlayerLocomotionInputBuilder;
+
 struct Cell;
 
 struct CellTransition;
@@ -36,6 +39,45 @@ struct CellTransitionBuilder;
 
 struct ReliableOperation;
 struct ReliableOperationBuilder;
+
+enum class LocomotionMode : uint8_t {
+  Unknown = 0,
+  Sneak = 1,
+  Walk = 2,
+  Run = 3,
+  Jump = 4,
+  MIN = Unknown,
+  MAX = Jump
+};
+
+inline const LocomotionMode (&EnumValuesLocomotionMode())[5] {
+  static const LocomotionMode values[] = {
+    LocomotionMode::Unknown,
+    LocomotionMode::Sneak,
+    LocomotionMode::Walk,
+    LocomotionMode::Run,
+    LocomotionMode::Jump
+  };
+  return values;
+}
+
+inline const char * const *EnumNamesLocomotionMode() {
+  static const char * const names[6] = {
+    "Unknown",
+    "Sneak",
+    "Walk",
+    "Run",
+    "Jump",
+    nullptr
+  };
+  return names;
+}
+
+inline const char *EnumNameLocomotionMode(LocomotionMode e) {
+  if (::flatbuffers::IsOutRange(e, LocomotionMode::Unknown, LocomotionMode::Jump)) return "";
+  const size_t index = static_cast<size_t>(e);
+  return EnumNamesLocomotionMode()[index];
+}
 
 enum class CellKind : uint8_t {
   Unknown = 0,
@@ -74,31 +116,34 @@ enum class ReliableOperationBody : uint8_t {
   NONE = 0,
   PlayerMotionIntent = 1,
   CellTransition = 2,
+  PlayerLocomotionInput = 3,
   MIN = NONE,
-  MAX = CellTransition
+  MAX = PlayerLocomotionInput
 };
 
-inline const ReliableOperationBody (&EnumValuesReliableOperationBody())[3] {
+inline const ReliableOperationBody (&EnumValuesReliableOperationBody())[4] {
   static const ReliableOperationBody values[] = {
     ReliableOperationBody::NONE,
     ReliableOperationBody::PlayerMotionIntent,
-    ReliableOperationBody::CellTransition
+    ReliableOperationBody::CellTransition,
+    ReliableOperationBody::PlayerLocomotionInput
   };
   return values;
 }
 
 inline const char * const *EnumNamesReliableOperationBody() {
-  static const char * const names[4] = {
+  static const char * const names[5] = {
     "NONE",
     "PlayerMotionIntent",
     "CellTransition",
+    "PlayerLocomotionInput",
     nullptr
   };
   return names;
 }
 
 inline const char *EnumNameReliableOperationBody(ReliableOperationBody e) {
-  if (::flatbuffers::IsOutRange(e, ReliableOperationBody::NONE, ReliableOperationBody::CellTransition)) return "";
+  if (::flatbuffers::IsOutRange(e, ReliableOperationBody::NONE, ReliableOperationBody::PlayerLocomotionInput)) return "";
   const size_t index = static_cast<size_t>(e);
   return EnumNamesReliableOperationBody()[index];
 }
@@ -113,6 +158,10 @@ template<> struct ReliableOperationBodyTraits<TES3MP::Protocol::Schema::Reliable
 
 template<> struct ReliableOperationBodyTraits<TES3MP::Protocol::Schema::Reliable::CellTransition> {
   static const ReliableOperationBody enum_value = ReliableOperationBody::CellTransition;
+};
+
+template<> struct ReliableOperationBodyTraits<TES3MP::Protocol::Schema::Reliable::PlayerLocomotionInput> {
+  static const ReliableOperationBody enum_value = ReliableOperationBody::PlayerLocomotionInput;
 };
 
 template <bool B = false>
@@ -383,6 +432,88 @@ inline ::flatbuffers::Offset<PlayerMotionIntent> CreatePlayerMotionIntent(
   return builder_.Finish();
 }
 
+struct PlayerLocomotionInput FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
+  typedef PlayerLocomotionInputBuilder Builder;
+  enum FlatBuffersVTableOffset FLATBUFFERS_VTABLE_UNDERLYING_TYPE {
+    VT_INPUT_TICK = 4,
+    VT_INPUT_SEQUENCE = 6,
+    VT_LOCOMOTION_MODE = 8,
+    VT_ROOT_FACING = 10,
+    VT_DESIRED_VELOCITY = 12
+  };
+  uint64_t input_tick() const {
+    return GetField<uint64_t>(VT_INPUT_TICK, 0);
+  }
+  uint64_t input_sequence() const {
+    return GetField<uint64_t>(VT_INPUT_SEQUENCE, 0);
+  }
+  TES3MP::Protocol::Schema::Reliable::LocomotionMode locomotion_mode() const {
+    return static_cast<TES3MP::Protocol::Schema::Reliable::LocomotionMode>(GetField<uint8_t>(VT_LOCOMOTION_MODE, 0));
+  }
+  uint32_t root_facing() const {
+    return GetField<uint32_t>(VT_ROOT_FACING, 0);
+  }
+  const TES3MP::Protocol::Schema::Reliable::LinearVelocity3 *desired_velocity() const {
+    return GetStruct<const TES3MP::Protocol::Schema::Reliable::LinearVelocity3 *>(VT_DESIRED_VELOCITY);
+  }
+  template <bool B = false>
+  bool Verify(::flatbuffers::VerifierTemplate<B> &verifier) const {
+    return VerifyTableStart(verifier) &&
+           VerifyField<uint64_t>(verifier, VT_INPUT_TICK, 8) &&
+           VerifyField<uint64_t>(verifier, VT_INPUT_SEQUENCE, 8) &&
+           VerifyField<uint8_t>(verifier, VT_LOCOMOTION_MODE, 1) &&
+           VerifyField<uint32_t>(verifier, VT_ROOT_FACING, 4) &&
+           VerifyField<TES3MP::Protocol::Schema::Reliable::LinearVelocity3>(verifier, VT_DESIRED_VELOCITY, 8) &&
+           verifier.EndTable();
+  }
+};
+
+struct PlayerLocomotionInputBuilder {
+  typedef PlayerLocomotionInput Table;
+  ::flatbuffers::FlatBufferBuilder &fbb_;
+  ::flatbuffers::uoffset_t start_;
+  void add_input_tick(uint64_t input_tick) {
+    fbb_.AddElement<uint64_t>(PlayerLocomotionInput::VT_INPUT_TICK, input_tick, 0);
+  }
+  void add_input_sequence(uint64_t input_sequence) {
+    fbb_.AddElement<uint64_t>(PlayerLocomotionInput::VT_INPUT_SEQUENCE, input_sequence, 0);
+  }
+  void add_locomotion_mode(TES3MP::Protocol::Schema::Reliable::LocomotionMode locomotion_mode) {
+    fbb_.AddElement<uint8_t>(PlayerLocomotionInput::VT_LOCOMOTION_MODE, static_cast<uint8_t>(locomotion_mode), 0);
+  }
+  void add_root_facing(uint32_t root_facing) {
+    fbb_.AddElement<uint32_t>(PlayerLocomotionInput::VT_ROOT_FACING, root_facing, 0);
+  }
+  void add_desired_velocity(const TES3MP::Protocol::Schema::Reliable::LinearVelocity3 *desired_velocity) {
+    fbb_.AddStruct(PlayerLocomotionInput::VT_DESIRED_VELOCITY, desired_velocity);
+  }
+  explicit PlayerLocomotionInputBuilder(::flatbuffers::FlatBufferBuilder &_fbb)
+        : fbb_(_fbb) {
+    start_ = fbb_.StartTable();
+  }
+  ::flatbuffers::Offset<PlayerLocomotionInput> Finish() {
+    const auto end = fbb_.EndTable(start_);
+    auto o = ::flatbuffers::Offset<PlayerLocomotionInput>(end);
+    return o;
+  }
+};
+
+inline ::flatbuffers::Offset<PlayerLocomotionInput> CreatePlayerLocomotionInput(
+    ::flatbuffers::FlatBufferBuilder &_fbb,
+    uint64_t input_tick = 0,
+    uint64_t input_sequence = 0,
+    TES3MP::Protocol::Schema::Reliable::LocomotionMode locomotion_mode = TES3MP::Protocol::Schema::Reliable::LocomotionMode::Unknown,
+    uint32_t root_facing = 0,
+    const TES3MP::Protocol::Schema::Reliable::LinearVelocity3 *desired_velocity = nullptr) {
+  PlayerLocomotionInputBuilder builder_(_fbb);
+  builder_.add_input_sequence(input_sequence);
+  builder_.add_input_tick(input_tick);
+  builder_.add_desired_velocity(desired_velocity);
+  builder_.add_root_facing(root_facing);
+  builder_.add_locomotion_mode(locomotion_mode);
+  return builder_.Finish();
+}
+
 struct CellTransition FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
   typedef CellTransitionBuilder Builder;
   enum FlatBuffersVTableOffset FLATBUFFERS_VTABLE_UNDERLYING_TYPE {
@@ -452,6 +583,9 @@ struct ReliableOperation FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table 
   const TES3MP::Protocol::Schema::Reliable::CellTransition *body_as_CellTransition() const {
     return body_type() == TES3MP::Protocol::Schema::Reliable::ReliableOperationBody::CellTransition ? static_cast<const TES3MP::Protocol::Schema::Reliable::CellTransition *>(body()) : nullptr;
   }
+  const TES3MP::Protocol::Schema::Reliable::PlayerLocomotionInput *body_as_PlayerLocomotionInput() const {
+    return body_type() == TES3MP::Protocol::Schema::Reliable::ReliableOperationBody::PlayerLocomotionInput ? static_cast<const TES3MP::Protocol::Schema::Reliable::PlayerLocomotionInput *>(body()) : nullptr;
+  }
   template <bool B = false>
   bool Verify(::flatbuffers::VerifierTemplate<B> &verifier) const {
     return VerifyTableStart(verifier) &&
@@ -472,6 +606,10 @@ template<> inline const TES3MP::Protocol::Schema::Reliable::PlayerMotionIntent *
 
 template<> inline const TES3MP::Protocol::Schema::Reliable::CellTransition *ReliableOperation::body_as<TES3MP::Protocol::Schema::Reliable::CellTransition>() const {
   return body_as_CellTransition();
+}
+
+template<> inline const TES3MP::Protocol::Schema::Reliable::PlayerLocomotionInput *ReliableOperation::body_as<TES3MP::Protocol::Schema::Reliable::PlayerLocomotionInput>() const {
+  return body_as_PlayerLocomotionInput();
 }
 
 struct ReliableOperationBuilder {
@@ -527,6 +665,10 @@ inline bool VerifyReliableOperationBody(::flatbuffers::VerifierTemplate<B> &veri
     }
     case ReliableOperationBody::CellTransition: {
       auto ptr = reinterpret_cast<const TES3MP::Protocol::Schema::Reliable::CellTransition *>(obj);
+      return verifier.VerifyTable(ptr);
+    }
+    case ReliableOperationBody::PlayerLocomotionInput: {
+      auto ptr = reinterpret_cast<const TES3MP::Protocol::Schema::Reliable::PlayerLocomotionInput *>(obj);
       return verifier.VerifyTable(ptr);
     }
     default: return true;

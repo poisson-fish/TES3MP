@@ -24,6 +24,22 @@ table PlayerMotionIntent {
   desired_velocity:LinearVelocity3 (id: 0);
 }
 
+enum LocomotionMode : ubyte {
+  Unknown = 0,
+  Sneak = 1,
+  Walk = 2,
+  Run = 3,
+  Jump = 4
+}
+
+table PlayerLocomotionInput {
+  input_tick:ulong (id: 0);
+  input_sequence:ulong (id: 1);
+  locomotion_mode:LocomotionMode (id: 2);
+  root_facing:uint (id: 3);
+  desired_velocity:LinearVelocity3 (id: 4);
+}
+
 enum CellKind : ubyte {
   Unknown = 0,
   Interior = 1,
@@ -43,7 +59,8 @@ table CellTransition {
 
 union ReliableOperationBody {
   PlayerMotionIntent = 1,
-  CellTransition = 2
+  CellTransition = 2,
+  PlayerLocomotionInput = 3
 }
 
 table ReliableOperation {

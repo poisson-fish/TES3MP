@@ -14,7 +14,8 @@ namespace TES3MP::OpenMWAdapter
 {
     constexpr std::int64_t DesktopFixtureSpeedQuantaPerTick = 4096;
 
-    PlayerMotionIntent mapPlanarMovement(double right, double forward, double yawRadians) noexcept;
+    LocomotionIntent mapPlanarMovement(double right, double forward, double yawRadians,
+        LocomotionMode mode = LocomotionMode::Walk) noexcept;
     std::uint64_t movementCorrectionDistanceQuanta(
         Position3 authoritative, double localXQuanta, double localYQuanta, double localZQuanta) noexcept;
 
@@ -26,11 +27,11 @@ namespace TES3MP::OpenMWAdapter
         {
         }
 
-        void sample(PlayerMotionIntent intent, MonotonicInstant sampledAt) noexcept;
+        void sample(LocomotionIntent intent, MonotonicInstant sampledAt) noexcept;
         void observeAcknowledgement(
             std::optional<CommandSequence> acknowledgement, MonotonicInstant observedAt) noexcept;
-        std::optional<PlayerMotionIntent> next(LinearVelocity3 authoritativeVelocity) const noexcept;
-        bool markQueued(CommandSequence sequence, PlayerMotionIntent intent, MonotonicInstant queuedAt) noexcept;
+        std::optional<LocomotionIntent> next(LinearVelocity3 authoritativeVelocity) const noexcept;
+        bool markQueued(CommandSequence sequence, LocomotionIntent intent, MonotonicInstant queuedAt) noexcept;
         bool pending() const noexcept { return mPending.has_value(); }
 
     private:
@@ -43,7 +44,7 @@ namespace TES3MP::OpenMWAdapter
 
         struct DesiredIntent
         {
-            PlayerMotionIntent intent;
+            LocomotionIntent intent;
             MonotonicInstant sampledAt;
         };
 

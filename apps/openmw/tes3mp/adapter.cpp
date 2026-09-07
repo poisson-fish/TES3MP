@@ -15,7 +15,7 @@ namespace TES3MP::OpenMWAdapter
 
         ClientHello makeClientHello(ContentManifestId contentManifest)
         {
-            auto versions = std::get<ProtocolVersionRange>(ProtocolVersionRange::create(1, 2, 2));
+            auto versions = std::get<ProtocolVersionRange>(ProtocolVersionRange::create(1, 2, 3));
             const std::array optional{ vrPoseCapability() };
             auto offer = std::get<CapabilityOffer>(
                 CapabilityOffer::create(std::move(versions), optional, {}, contentManifest));
@@ -193,9 +193,12 @@ namespace TES3MP::OpenMWAdapter
                 if ((advanced.baselineCompleted || advanced.snapshotApplied || advanced.observationApplied)
                     && snapshot && mRuntime->session().stateMachine().interestBaselineComplete())
                 {
+                    const auto localReconciliation
+                        = mRuntime->reconcileLocalPresentation(advanced.baselineCompleted && !mReady);
                     const auto applied
                         = mPresentation.applyAuthoritative(*snapshot, mRuntime->session().observedPlayers(),
-                            !mPendingCellTransition && !mDeferredCellTransition && !captured.transition, now);
+                            !mPendingCellTransition && !mDeferredCellTransition && !captured.transition, now,
+                            localReconciliation);
                     if (applied != ProviderResult::Accepted)
                     {
                         closeForProviderFailure(applied);
@@ -274,8 +277,11 @@ namespace TES3MP::OpenMWAdapter
                     }
                     if (auto intent = mMotion.next(self->linearVelocity()))
                     {
-                        const PlayerMotionIntent queuedIntent = *intent;
-                        const auto queued = mRuntime->queueMotionIntent(std::move(*intent));
+                        const LocomotionIntent queuedIntent = *intent;
+                        const auto& hello = mRuntime->session().stateMachine().negotiatedHello();
+                        const auto queued = hello && hello->selectedVersion().minor >= 3
+                            ? mRuntime->queueLocomotionIntent(std::move(*intent))
+                            : mRuntime->queueMotionIntent(PlayerMotionIntent(intent->desiredVelocity()));
                         if (queued.result != ClientRuntimeResult::Accepted || !queued.sequence
                             || !mMotion.markQueued(*queued.sequence, queuedIntent, now))
                         {

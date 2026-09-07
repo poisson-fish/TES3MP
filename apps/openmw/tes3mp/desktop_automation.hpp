@@ -34,10 +34,11 @@ namespace TES3MP::OpenMWAdapter
 
         bool valid() const noexcept { return mOutput.is_open(); }
         CellTransitionCapture captureCellTransition() noexcept override;
-        std::optional<PlayerMotionIntent> sampleCurrentIntent() noexcept override;
+        std::optional<LocomotionIntent> sampleCurrentIntent() noexcept override;
         ProviderResult applyAuthoritative(const LatestWinsSnapshot& snapshot,
             std::span<const ObservedPlayer> observedPlayers, bool allowLocalCellCorrection,
-            MonotonicInstant receivedAt) noexcept override;
+            MonotonicInstant receivedAt,
+            const std::optional<LocalLocomotionReconciliation>& localReconciliation = std::nullopt) noexcept override;
         ProviderResult advance(MonotonicInstant now) noexcept override;
         void clear() noexcept override;
         void report(ConnectionStatus status) noexcept override;

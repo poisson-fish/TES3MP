@@ -187,6 +187,12 @@ namespace
         return std::get<CapabilityOffer>(CapabilityOffer::create(versions, capabilities, {}));
     }
 
+    CapabilityOffer locomotionOffer()
+    {
+        auto versions = std::get<ProtocolVersionRange>(ProtocolVersionRange::create(1, 3, 3));
+        return std::get<CapabilityOffer>(CapabilityOffer::create(versions, {}, {}));
+    }
+
     AdmissionScopeId scope(std::byte value)
     {
         std::array<std::byte, AdmissionScopeIdBytes> bytes{};
@@ -289,7 +295,7 @@ int main()
     }
     using namespace TES3MP::ServerApp;
     static_assert(Phase7ProtocolMajor == 1 && Phase7ProtocolMinimumMinor == 2
-        && Phase7ProtocolMaximumMinor == 2);
+        && Phase7ProtocolMaximumMinor == 3);
     static_assert(Phase7SourceAuthenticationBurst == 4 && Phase7GlobalAuthenticationBurst == 32
         && Phase7AuthenticationRefillMilliseconds == 1'000 && Phase7ConnectionCapacity == 8);
     static_assert(!phase7ProofDisconnectGraceAccepted(MinimumResumeTokenLifetimeMilliseconds - 1));
@@ -550,13 +556,13 @@ int main()
         auto queues = OutboundQueueSet::create(OutboundQueuePolicy{}, 2);
         auto timeouts = *SessionTimeoutPolicy::create(1'000'000, 1'000'000, 1'000'000);
         ConnectionSessionCoordinator sessions(
-            clock, observability, timeouts, emptyOffer(), authentication, *queues, 2);
+            clock, observability, timeouts, locomotionOffer(), authentication, *queues, 2);
         JoinFixture joinFixture;
         auto& joins = joinFixture.joins;
         const auto connection = TransportConnectionId::initial();
         assert(sessions.accept(connection, scope(std::byte{ 4 })) == ConnectionSessionResult::Accepted);
 
-        const auto helloPayload = encodeClientHello(ClientHello::fromOffer(emptyOffer()));
+        const auto helloPayload = encodeClientHello(ClientHello::fromOffer(locomotionOffer()));
         const auto helloFrame = std::get<std::vector<std::byte>>(encodeProtocolFrame(
             MessageClass::SessionControl, MessageKind::ClientHello, helloPayload));
         assert(sessions.dispatch(connection,
@@ -597,6 +603,24 @@ int main()
                    ServerTick::initial()) == ConnectionSessionResult::ResyncCoalesced);
         assert(sessions.takeResyncRequest(connection) == resync);
         assert(!sessions.takeResyncRequest(connection));
+
+        ServerCommandIntakeCoordinator intake(
+            clock, observability, clock.now(), ServerTick::initial(), IngressOrdinal::initial());
+        const ReliableOperationHeader operationHeader(
+            ClientCommandHeader(id<SessionId>(1), SessionGeneration::initial(), CommandSequence::initial(),
+                id<CommandId>(1), id<CanonicalRevision>(1)),
+            EntityPrecondition(id<EntityId>(1), EntityRevision::initial(), AuthorityEpoch::initial()));
+        const PlayerLocomotionInput locomotion(*LocomotionInputTick::fromValue(1), LocomotionInputSequence::initial(),
+            LocomotionIntent(LocomotionMode::Run, Turn32::fromValue(7), LinearVelocity3(100, 0, 0)));
+        const auto operation = std::get<ReliableOperation>(ReliableOperation::create(operationHeader, locomotion));
+        const auto operationFrame = std::get<std::vector<std::byte>>(encodeProtocolFrame(
+            MessageClass::ReliableOperation, MessageKind::ReliableOperation, encodeReliableOperation(operation)));
+        assert(sessions.dispatch(connection,
+                   TransportMessage{ TransportChannel::ReliableOrdered, operationFrame }, joins, crypto, intake,
+                   ServerTick::initial()) == ConnectionSessionResult::CommandSubmitted);
+        assert(sessions.dispatch(connection,
+                   TransportMessage{ TransportChannel::ReliableOrdered, operationFrame }, joins, crypto, intake,
+                   ServerTick::initial()) == ConnectionSessionResult::ProtocolRejected);
 
         assert(sessions.dispatch(connection,
                    TransportMessage{ TransportChannel::LatestWins, { std::byte{ 1 } } }, joins, crypto,

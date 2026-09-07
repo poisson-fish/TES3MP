@@ -345,8 +345,10 @@ add_library(TES3MP::ClientSession ALIAS tes3mp_client_session)
 target_sources(tes3mp_client_session PRIVATE
     include/tes3mp/client_session_runtime.hpp
     include/tes3mp/client_session.hpp
+    include/tes3mp/client_locomotion.hpp
     include/tes3mp/headless_client_session.hpp
     client_session/client_session.cpp
+    client_session/client_locomotion.cpp
     client_session/client_session_runtime.cpp
     client_session/headless_client_session.cpp
 )
@@ -434,6 +436,15 @@ target_link_libraries(tes3mp_headless_client_tests PRIVATE tes3mp_test_support)
 set_target_properties(tes3mp_headless_client_tests PROPERTIES FOLDER "TES3MP/Tests")
 tes3mp_enable_runtime_safety(tes3mp_headless_client_tests)
 tes3mp_verify_target_dependencies(tes3mp_headless_client_tests ALLOWED tes3mp_test_support)
+
+add_executable(tes3mp_client_locomotion_tests tests/client_locomotion_tests.cpp)
+target_compile_features(tes3mp_client_locomotion_tests PRIVATE cxx_std_20)
+target_link_libraries(tes3mp_client_locomotion_tests PRIVATE tes3mp_client_session)
+set_target_properties(tes3mp_client_locomotion_tests PROPERTIES FOLDER "TES3MP/Tests")
+tes3mp_enable_runtime_safety(tes3mp_client_locomotion_tests)
+tes3mp_verify_target_dependencies(tes3mp_client_locomotion_tests ALLOWED tes3mp_client_session)
+tes3mp_verify_target_includes(tes3mp_client_locomotion_tests
+    FORBIDDEN ${TES3MP_ENGINE_INDEPENDENT_FORBIDDEN_INCLUDES})
 add_custom_target(tes3mp_headless_client_tests_run
     COMMAND $<TARGET_FILE:tes3mp_headless_client_tests>
     DEPENDS tes3mp_headless_client_tests
@@ -785,6 +796,7 @@ add_custom_target(tes3mp_protocol_tests_run
     COMMAND $<TARGET_FILE:tes3mp_protocol_pose_tests> --verify-corpus
         ${CMAKE_CURRENT_SOURCE_DIR}/tests/fuzz/corpus/protocol_pose
     COMMAND $<TARGET_FILE:tes3mp_session_state_tests>
+    COMMAND $<TARGET_FILE:tes3mp_client_locomotion_tests>
     COMMAND $<TARGET_FILE:tes3mp_spatial_primitive_tests>
     COMMAND $<TARGET_FILE:tes3mp_deterministic_facilities_tests>
     COMMAND $<TARGET_FILE:tes3mp_deterministic_harness_tests>
@@ -808,6 +820,7 @@ add_custom_target(tes3mp_protocol_tests_run
         tes3mp_protocol_exchange_tests
         tes3mp_protocol_pose_tests
         tes3mp_session_state_tests
+        tes3mp_client_locomotion_tests
         tes3mp_spatial_primitive_tests
         tes3mp_deterministic_facilities_tests
         tes3mp_deterministic_harness_tests

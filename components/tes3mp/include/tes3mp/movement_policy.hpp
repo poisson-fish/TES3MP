@@ -3,7 +3,9 @@
 
 #include "spatial_types.hpp"
 
+#include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <optional>
 
 namespace TES3MP
@@ -14,6 +16,9 @@ namespace TES3MP
     inline constexpr std::int64_t LegacyMotionAxisQuantaPerTick = 4096;
     inline constexpr std::uint64_t LegacyMotionRadiusQuantaPerTick = 4097;
     inline constexpr std::uint64_t MaximumMovementProfileQuantaPerTick = 65536;
+    inline constexpr std::uint64_t MaximumLocomotionInputOrdinal
+        = std::numeric_limits<std::uint32_t>::max();
+    inline constexpr std::size_t MaximumRetainedLocomotionInputs = 128;
 
     enum class LocomotionMode : std::uint8_t
     {
@@ -21,6 +26,64 @@ namespace TES3MP
         Walk,
         Run,
         Jump,
+    };
+
+    class LocomotionInputTick
+    {
+    public:
+        static constexpr std::optional<LocomotionInputTick> fromValue(std::uint64_t value) noexcept
+        {
+            if (value == 0 || value > MaximumLocomotionInputOrdinal)
+                return std::nullopt;
+            return LocomotionInputTick(value);
+        }
+
+        constexpr std::uint64_t value() const noexcept { return mValue; }
+        constexpr std::optional<LocomotionInputTick> next() const noexcept { return fromValue(mValue + 1); }
+        friend constexpr bool operator==(LocomotionInputTick, LocomotionInputTick) noexcept = default;
+        friend constexpr auto operator<=>(LocomotionInputTick, LocomotionInputTick) noexcept = default;
+
+    private:
+        constexpr explicit LocomotionInputTick(std::uint64_t value) noexcept : mValue(value) {}
+        std::uint64_t mValue;
+    };
+
+    class LocomotionInputSequence
+    {
+    public:
+        static constexpr std::optional<LocomotionInputSequence> fromValue(std::uint64_t value) noexcept
+        {
+            if (value == 0 || value > MaximumLocomotionInputOrdinal)
+                return std::nullopt;
+            return LocomotionInputSequence(value);
+        }
+
+        static constexpr LocomotionInputSequence initial() noexcept { return LocomotionInputSequence(1); }
+        constexpr std::uint64_t value() const noexcept { return mValue; }
+        constexpr std::optional<LocomotionInputSequence> next() const noexcept { return fromValue(mValue + 1); }
+        friend constexpr bool operator==(LocomotionInputSequence, LocomotionInputSequence) noexcept = default;
+        friend constexpr auto operator<=>(LocomotionInputSequence, LocomotionInputSequence) noexcept = default;
+
+    private:
+        constexpr explicit LocomotionInputSequence(std::uint64_t value) noexcept : mValue(value) {}
+        std::uint64_t mValue;
+    };
+
+    class LocomotionIntent
+    {
+    public:
+        constexpr LocomotionIntent(LocomotionMode mode, Turn32 rootFacing, LinearVelocity3 desiredVelocity) noexcept
+            : mMode(mode), mRootFacing(rootFacing), mDesiredVelocity(desiredVelocity) {}
+
+        constexpr LocomotionMode mode() const noexcept { return mMode; }
+        constexpr Turn32 rootFacing() const noexcept { return mRootFacing; }
+        constexpr LinearVelocity3 desiredVelocity() const noexcept { return mDesiredVelocity; }
+        friend constexpr bool operator==(LocomotionIntent, LocomotionIntent) noexcept = default;
+
+    private:
+        LocomotionMode mMode;
+        Turn32 mRootFacing;
+        LinearVelocity3 mDesiredVelocity;
     };
 
     class MovementProfile

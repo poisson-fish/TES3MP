@@ -10,9 +10,9 @@
 
 namespace TES3MP
 {
-    inline constexpr std::uint16_t CanonicalStateEncodingVersion = 2;
+    inline constexpr std::uint16_t CanonicalStateEncodingVersion = 3;
     inline constexpr std::uint16_t CanonicalChecksumAlgorithmVersion = 1;
-    inline constexpr std::uint32_t CanonicalRulesVersion = 1;
+    inline constexpr std::uint32_t CanonicalRulesVersion = 2;
 
     class CanonicalChecksum
     {

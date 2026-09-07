@@ -2,6 +2,7 @@
 #define TES3MP_CANONICAL_STATE_HPP
 
 #include "spatial_types.hpp"
+#include "movement_policy.hpp"
 
 #include <cstddef>
 #include <cstdint>
@@ -81,7 +82,8 @@ namespace TES3MP
     public:
         constexpr CanonicalPlayerEntityState(PlayerId playerId, EntityId entityId, AppearanceId appearanceId,
             Transform transform, LinearVelocity3 linearVelocity, EntityRevision entityRevision,
-            AuthorityEpoch authorityEpoch, ServerTick lastSpatialChangeTick) noexcept
+            AuthorityEpoch authorityEpoch, ServerTick lastSpatialChangeTick,
+            LocomotionMode locomotionMode = LocomotionMode::Walk) noexcept
             : mPlayerId(playerId)
             , mEntityId(entityId)
             , mAppearanceId(appearanceId)
@@ -90,6 +92,7 @@ namespace TES3MP
             , mEntityRevision(entityRevision)
             , mAuthorityEpoch(authorityEpoch)
             , mLastSpatialChangeTick(lastSpatialChangeTick)
+            , mLocomotionMode(locomotionMode)
         {
         }
 
@@ -101,6 +104,7 @@ namespace TES3MP
         constexpr EntityRevision entityRevision() const noexcept { return mEntityRevision; }
         constexpr AuthorityEpoch authorityEpoch() const noexcept { return mAuthorityEpoch; }
         constexpr ServerTick lastSpatialChangeTick() const noexcept { return mLastSpatialChangeTick; }
+        constexpr LocomotionMode locomotionMode() const noexcept { return mLocomotionMode; }
 
         friend constexpr bool operator==(const CanonicalPlayerEntityState&, const CanonicalPlayerEntityState&) noexcept
             = default;
@@ -114,6 +118,7 @@ namespace TES3MP
         EntityRevision mEntityRevision;
         AuthorityEpoch mAuthorityEpoch;
         ServerTick mLastSpatialChangeTick;
+        LocomotionMode mLocomotionMode;
     };
 
     enum class SpatialAdvanceErrorCode : std::uint8_t
@@ -136,6 +141,8 @@ namespace TES3MP
 
     SpatialAdvanceResult advanceCanonicalSpatialState(const CanonicalPlayerEntityState& current, ServerTick commitTick,
         Transform replacementTransform, LinearVelocity3 replacementVelocity) noexcept;
+    SpatialAdvanceResult advanceCanonicalSpatialState(const CanonicalPlayerEntityState& current, ServerTick commitTick,
+        Transform replacementTransform, LinearVelocity3 replacementVelocity, LocomotionMode locomotionMode) noexcept;
 
     class CanonicalSessionProgress
     {

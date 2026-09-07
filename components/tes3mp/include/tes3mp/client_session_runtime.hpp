@@ -2,6 +2,7 @@
 #define TES3MP_CLIENT_SESSION_RUNTIME_HPP
 
 #include "authentication.hpp"
+#include "client_locomotion.hpp"
 #include "headless_client_session.hpp"
 #include "protocol_handshake.hpp"
 #include "protocol_pose.hpp"
@@ -70,7 +71,10 @@ namespace TES3MP
             const ConnectionEndpoint& endpoint, ClientHello hello, AuthenticationRequest authentication) noexcept;
         ClientRuntimeAdvanceResult advance();
         ClientRuntimeQueueResult queueMotionIntent(PlayerMotionIntent intent);
+        ClientRuntimeQueueResult queueLocomotionIntent(LocomotionIntent intent);
         ClientRuntimeQueueResult queueCellTransition(CellTransition transition);
+        std::optional<LocalLocomotionReconciliation> reconcileLocalPresentation(
+            bool hardDiscontinuity = false) noexcept;
         ClientRuntimeResult requestResync(ResyncReason reason);
         ClientRuntimeResult queuePoseSample(const ClientVrPoseSample& sample);
         ClientRuntimeDrainResult drainInbound();
@@ -104,6 +108,9 @@ namespace TES3MP
         std::vector<ReliableObservationBatch> mPendingObservations;
         bool mResyncPending = false;
         std::optional<CommandSequence> mLastQueuedSequence;
+        ClientLocomotionHistory mLocomotionHistory;
+        std::optional<LocomotionInputTick> mLastLocomotionInputTick;
+        std::optional<LocomotionInputSequence> mLastLocomotionInputSequence;
     };
 }
 

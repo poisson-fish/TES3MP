@@ -267,7 +267,7 @@ namespace
             bytes.push_back(static_cast<std::uint8_t>(bits >> (index * 8)));
     }
 
-    bool canonical_v1_bytes_are_explicit_stable_and_cover_complete_phase5_state()
+    bool canonical_v3_bytes_are_explicit_stable_and_cover_locomotion_state()
     {
         const std::vector history{ FinalizedCommandRecord(
             CommandSequence::initial(), CommandId::fromValue(1001).value(), CommandDisposition::Applied) };
@@ -278,9 +278,9 @@ namespace
             CanonicalStateVersion::fromValue(7).value(), ServerTick::fromValue(9).value(), canonical);
 
         std::vector<std::uint8_t> expected{ 'T', '3', 'C', 'S' };
-        appendLittleEndian(expected, std::uint16_t{ 2 });
+        appendLittleEndian(expected, std::uint16_t{ 3 });
         appendLittleEndian(expected, std::uint16_t{ 1 });
-        appendLittleEndian(expected, std::uint32_t{ 1 });
+        appendLittleEndian(expected, std::uint32_t{ 2 });
         appendLittleEndian(expected, std::uint64_t{ 7 });
         appendLittleEndian(expected, std::uint64_t{ 9 });
         appendLittleEndian(expected, std::uint32_t{ 1 });
@@ -301,6 +301,7 @@ namespace
         appendLittleEndian(expected, std::uint64_t{ 1 });
         appendLittleEndian(expected, std::uint64_t{ 1 });
         appendLittleEndian(expected, std::uint64_t{ 0 });
+        expected.push_back(static_cast<std::uint8_t>(LocomotionMode::Walk));
         appendLittleEndian(expected, std::uint32_t{ 1 });
         appendLittleEndian(expected, std::uint64_t{ 10 });
         appendLittleEndian(expected, std::uint64_t{ 1 });
@@ -444,8 +445,8 @@ namespace
         const std::array sessions{ session() };
         const auto canonical = state(players, sessions);
         return canonical.activeSessions().front().finalizedCommandHistory().empty()
-            && CanonicalStateEncodingVersion == 2 && CanonicalChecksumAlgorithmVersion == 1
-            && CanonicalRulesVersion == 1;
+            && CanonicalStateEncodingVersion == 3 && CanonicalChecksumAlgorithmVersion == 1
+            && CanonicalRulesVersion == 2;
     }
 }
 
@@ -466,8 +467,8 @@ int main()
             &same_batch_and_cross_batch_duplicates_use_one_membership_rule },
         std::pair{ "stale_and_future_authority_epochs_finalize_without_player_mutation",
             &stale_and_future_authority_epochs_finalize_without_player_mutation },
-        std::pair{ "canonical_v1_bytes_are_explicit_stable_and_cover_complete_phase5_state",
-            &canonical_v1_bytes_are_explicit_stable_and_cover_complete_phase5_state },
+        std::pair{ "canonical_v3_bytes_are_explicit_stable_and_cover_locomotion_state",
+            &canonical_v3_bytes_are_explicit_stable_and_cover_locomotion_state },
         std::pair{ "crc64_ecma_check_vector_and_canonical_checksum_are_stable",
             &crc64_ecma_check_vector_and_canonical_checksum_are_stable },
         std::pair{ "identity_revision_epoch_ack_history_version_or_tick_change_changes_bytes",

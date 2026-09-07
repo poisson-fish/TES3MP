@@ -56,6 +56,8 @@ namespace TES3MP::ServerApp
             AdmissionScopeId scope;
             std::unique_ptr<ServerSessionStateMachine> session;
             std::optional<SessionResyncRequest> pendingResync;
+            std::optional<LocomotionInputTick> lastLocomotionInputTick;
+            std::optional<LocomotionInputSequence> lastLocomotionInputSequence;
         };
 
         MonotonicClock& mClock;

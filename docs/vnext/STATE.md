@@ -9,8 +9,8 @@ Updated: 2026-09-06
 - Phase 12 discovery: **Complete**
 - Phase 12 evidence: **Complete**
 - Phase 12 package decision/safety: **Complete**
-- Active work: **Phase 12 versioned locomotion input and bounded local replay**
-- Last pass: **Phase 12 manifest movement profiles and collision kernel seam complete**
+- Active work: **Phase 12 content-backed server collision provider**
+- Last pass: **Phase 12 versioned locomotion input and bounded local replay complete**
 - Authoritative tracker: [rolling implementation plan](IMPLEMENTATION_PLAN.md)
 - Historical evidence: [implementation notes](IMPLEMENTATION_NOTES.md)
 
@@ -99,6 +99,23 @@ ADRs and GDRs are required only for consequential, hard-to-reverse decisions.
 - Protocol schema, exact-cell interest/resync, client prediction, presentation,
   animation, pose, persistence, and world objects are unchanged.
 
+## Phase 12 locomotion input and replay result
+
+- Protocol 1.3 additively carries bounded input tick/sequence, explicit
+  sneak/walk/run/jump mode, root-facing intent, and desired velocity. Protocol
+  1.2 remains the exact legacy walk path.
+- The server requires ordered per-connection input ordinals, validates velocity
+  against the negotiated manifest mode, and installs canonical mode/facing only
+  through the reducer. Canonical checksum encoding advances to version 3 with
+  movement rules version 2.
+- The shared client retains at most 128 unacknowledged semantic inputs and
+  rebuilds local presentation from each authoritative baseline. Replay never
+  re-enters command input; authority, entity, cell, tick, overflow, and explicit
+  hard discontinuities clear inapplicable history.
+- Desktop and PC-VR use the same semantic input and reconciliation path. Remote
+  playback, animation, pose, exact-cell interest/resync, persistence, and world
+  objects remain unchanged.
+
 ## Phase 10 result
 
 - Fresh password joins issue a random 32-byte player credential after ordinary
@@ -158,54 +175,29 @@ work.
 
 ## Last verified
 
-- MSVC RelWithDebInfo full engine-independent protocol/server contracts and the
-  dedicated-server app integration pass after movement-kernel integration.
-- The named server-collision authority regression, invalid manifest-profile
-  cases, and existing exact-cell interest/resync contracts pass.
-- MSVC Release networking server, headless client, and full OpenMW `openmw.exe`
-  build and link; the Phase 7 lifecycle integration passes 32 reconnects and
-  drains both queues to zero.
+- MSVC RelWithDebInfo full engine-independent protocol/server aggregate and
+  focused protocol, client replay, reducer, movement-evidence, server-app, and
+  OpenMW adapter contracts pass.
+- The deterministic movement capture still emits all eight expected
+  desktop/PC-VR platform/profile records.
+- The pinned FlatBuffers 25.12.19 production-schema proof passes. MSVC Release
+  networking server, headless client, and full OpenMW `openmw.exe` build and
+  link with GameNetworkingSockets.
 - All 145 repository Python tests, indexed baseline provenance, legacy
   exclusion, and diff hygiene pass.
-- MSVC RelWithDebInfo full engine-independent protocol/server contracts and the
-  dedicated-server app integration pass after the movement safety gate.
-- Both named input safety regressions pass; all 145 repository Python tests and
-  diff hygiene pass.
-- Phase 12 movement evidence, adapter, observability, command-intake, and
-  server-app contracts pass. The deterministic capture emits all eight expected
-  desktop/PC-VR platform/profile records.
-- MSVC Release full OpenMW `openmw.exe` builds and links with the production
-  GameNetworkingSockets path after the evidence wiring.
-- The networking-enabled `tes3mp_server.exe`, all 145 repository Python tests,
-  and diff hygiene pass.
-- Phase 12 discovery claims were checked against the desktop/VR adapter, protocol,
-  server intake/reducer/application, replicated actor, and focused movement tests.
-- Release adapter, reducer, server-app, and pose contract executables pass; all
-  145 repository Python tests and diff hygiene pass.
-- MSVC Release builds and affected protocol exchange/frame/handshake, session,
-  headless, reducer, server-app, and OpenMW adapter tests pass.
-- Networking-enabled server/headless binaries and full OpenMW desktop
-  `openmw.exe` build and link with the production GameNetworkingSockets path.
-- The pinned FlatBuffers dependency, exact production schema generation, proof
-  build, contract test, and corpus check pass. All 36 affected Python tests pass.
-- Indexed baseline provenance passes with 376 intentional differences and 77
-  dependency declaration inputs.
-- The Phase 7 lifecycle integration passes simultaneous movement, converged and
-  stale-rejected views, 32 reconnects, stable identity/progress, resume expiry,
-  fresh identity, and zero final queue depth.
 - Hardware/content-backed desktop and desktop-to-VR visual proof was not run.
 
 ## Next pass
 
 Read the rolling **Now** section in
-[IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md). Add versioned locomotion input,
-bounded shared client input history, and replay-only local reconciliation without
-extending remote presentation, animation, pose, world-object, or persistence
-scope.
+[IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md). Bind the first content-backed
+server collision provider at the existing engine-neutral query seam without
+extending correction, remote presentation, animation, pose, world-object, or
+persistence scope.
 
 ## Working-tree expectation
 
 Before starting the next pass, `vnext` should contain the completed Phase 12
-movement-profile/kernel commit and be clean. The separate
+locomotion-input/replay commit and be clean. The separate
 `vnext-vr` worktree remains at the completed Phase 9 baseline until a later shared
 merge is deliberately made.

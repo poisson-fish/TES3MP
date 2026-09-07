@@ -108,6 +108,18 @@ namespace
             CellTransitionCommandProposal(cell));
     }
 
+    ServerCommandProposal locomotionProposal(std::uint64_t session, std::uint64_t sequence,
+        std::uint64_t command, std::uint64_t entity, std::uint64_t revision, LocomotionMode mode,
+        Turn32 facing, LinearVelocity3 velocity)
+    {
+        return ServerCommandProposal(sessionId(session), SessionGeneration::initial(),
+            CommandSequence::fromValue(sequence).value(), CommandId::fromValue(command).value(),
+            CanonicalRevision::initial(), EntityPrecondition(entityId(entity),
+                EntityRevision::fromValue(revision).value(), AuthorityEpoch::initial()),
+            PlayerLocomotionCommandProposal(*LocomotionInputTick::fromValue(sequence),
+                *LocomotionInputSequence::fromValue(sequence), LocomotionIntent(mode, facing, velocity)));
+    }
+
     class IntakeFixture
     {
     public:
@@ -595,6 +607,32 @@ namespace
             && unavailable.state().activeSessions().front() == sessions.front();
     }
 
+    bool versioned_locomotion_applies_mode_facing_and_manifest_speed()
+    {
+        const auto profile = *MovementProfile::create(10, 20, 30, 40);
+        const std::array players{ player(1, 101) };
+        const std::array sessions{ session(10, 1, 101) };
+        NullMetricSink metrics;
+        NullStructuredEventSink events;
+        Observability observability(metrics, events);
+        CanonicalCommandReducer reducer(state(players, sessions), observability, contentManifest(profile));
+        const std::array accepted{ locomotionProposal(10, 1, 1001, 101, 1, LocomotionMode::Run,
+            Turn32::fromValue(123), LinearVelocity3(30, 0, 0)) };
+        const auto result = reduceCommands(reducer, accepted);
+        const auto current = reducer.state().players().front();
+        if (!result || result.dispositions().front().disposition() != CommandDisposition::Applied
+            || current.locomotionMode() != LocomotionMode::Run
+            || current.transform().orientation().z() != Turn32::fromValue(123)
+            || current.linearVelocity() != LinearVelocity3(30, 0, 0))
+            return false;
+
+        const std::array rejected{ locomotionProposal(10, 2, 1002, 101, 2, LocomotionMode::Sneak,
+            Turn32::fromValue(456), LinearVelocity3(11, 0, 0)) };
+        const auto rejection = reduceCommands(reducer, rejected);
+        return rejection && rejection.dispositions().front().disposition() == CommandDisposition::MotionOutOfRange
+            && reducer.state().players().front() == current;
+    }
+
     bool two_bound_players_change_only_their_own_entity_state()
     {
         const std::array players{ player(1, 101), player(2, 202) };
@@ -971,6 +1009,8 @@ int main()
             &server_collision_is_the_only_canonical_root_result },
         std::pair{ "manifest_walk_profile_and_collision_failure_are_fail_closed",
             &manifest_walk_profile_and_collision_failure_are_fail_closed },
+        std::pair{ "versioned_locomotion_applies_mode_facing_and_manifest_speed",
+            &versioned_locomotion_applies_mode_facing_and_manifest_speed },
         std::pair{ "two_bound_players_change_only_their_own_entity_state",
             &two_bound_players_change_only_their_own_entity_state },
         std::pair{ "reducer_exposes_no_mutable_state_wire_engine_socket_script_or_database_surface",

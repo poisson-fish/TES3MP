@@ -400,6 +400,11 @@
       "purpose": "Behavior-free translation-unit anchor for the engine-independent client-session target."
     },
     {
+      "path": "components/tes3mp/client_session/client_locomotion.cpp",
+      "status": "A",
+      "purpose": "Bounded shared-client semantic input retention and replay-only local reconciliation with explicit hard-discontinuity clearing."
+    },
+    {
       "path": "components/tes3mp/client_session/client_session.cpp",
       "status": "A",
       "purpose": "Atomic client session-state transitions for encrypted readiness, negotiation, authentication, deadlines, rejection, cancellation, and closure."
@@ -407,7 +412,7 @@
     {
       "path": "components/tes3mp/client_session/client_session_runtime.cpp",
       "status": "A",
-      "purpose": "Reusable bounded client orchestration for transport, negotiation, authentication, canonical application, command sequencing, and failure closure."
+      "purpose": "Reusable bounded client orchestration for transport, negotiation, authentication, canonical application, command sequencing, locomotion retention/replay, and failure closure."
     },
     {
       "path": "components/tes3mp/client_session/headless_client_session.cpp",
@@ -452,7 +457,12 @@
     {
       "path": "components/tes3mp/include/tes3mp/canonical_state.hpp",
       "status": "A",
-      "purpose": "Owner-approved immutable canonical player/session state, bounded finalized-command history values, closed invariants, const access, and checked spatial advancement."
+      "purpose": "Owner-approved immutable canonical player/session state including locomotion mode, bounded finalized-command history values, closed invariants, const access, and checked spatial advancement."
+    },
+    {
+      "path": "components/tes3mp/include/tes3mp/client_locomotion.hpp",
+      "status": "A",
+      "purpose": "Declares the platform-neutral bounded locomotion history and presentation-only reconciliation result."
     },
     {
       "path": "components/tes3mp/include/tes3mp/client_session.hpp",
@@ -502,7 +512,7 @@
     {
       "path": "components/tes3mp/include/tes3mp/movement_policy.hpp",
       "status": "A",
-      "purpose": "Declares bounded manifest movement profiles, explicit locomotion modes, and the version 1.2 velocity safety envelope."
+      "purpose": "Declares bounded manifest movement profiles, input ordinals, semantic locomotion intent, and the version 1.2 velocity safety envelope."
     },
     {
       "path": "components/tes3mp/include/tes3mp/observability.hpp",
@@ -522,7 +532,7 @@
     {
       "path": "components/tes3mp/include/tes3mp/protocol_exchange.hpp",
       "status": "A",
-      "purpose": "Owner-approved closed velocity-intent and bounded spatial-view protocol values plus verifier-first owned T3RO/T3LS codec interfaces."
+      "purpose": "Owner-approved closed legacy and versioned locomotion-input protocol values plus bounded spatial-view and verifier-first owned T3RO/T3LS codec interfaces."
     },
     {
       "path": "components/tes3mp/include/tes3mp/protocol_frame.hpp",
@@ -697,7 +707,7 @@
     {
       "path": "components/tes3mp/protocol/generated/reliable_operation_generated.h",
       "status": "A",
-      "purpose": "Pinned FlatBuffers 25.12.19 generated C++ for the size-prefixed closed-union T3RO velocity-intent schema."
+      "purpose": "Pinned FlatBuffers 25.12.19 generated C++ for the size-prefixed closed-union T3RO legacy and versioned locomotion-input schema."
     },
     {
       "path": "components/tes3mp/protocol/generated/server_hello_generated.h",
@@ -722,7 +732,7 @@
     {
       "path": "components/tes3mp/protocol/protocol_exchange.cpp",
       "status": "A",
-      "purpose": "Verifier-first bounded T3RO/T3LS encoding and decoding with validated temporaries, closed-body dispatch, and allocation-after-bounds enforcement."
+      "purpose": "Verifier-first bounded T3RO/T3LS encoding and decoding including versioned locomotion fields, closed-body dispatch, and allocation-after-bounds enforcement."
     },
     {
       "path": "components/tes3mp/protocol/protocol_frame.cpp",
@@ -782,7 +792,7 @@
     {
       "path": "components/tes3mp/protocol/schema/reliable_operation.fbs",
       "status": "A",
-      "purpose": "Explicit-ID T3RO closed-union schema for one preconditioned velocity-only player motion intent."
+      "purpose": "Explicit-ID T3RO closed-union schema for preconditioned legacy motion and versioned locomotion input."
     },
     {
       "path": "components/tes3mp/protocol/schema/server_hello.fbs",
@@ -948,6 +958,11 @@
       "path": "components/tes3mp/tests/canonical_state_tests.cpp",
       "status": "A",
       "purpose": "Canonical scope, binding, ordering, hard-bound, atomic-revision, failure-preservation, acknowledgement, immutability, and boundary contracts."
+    },
+    {
+      "path": "components/tes3mp/tests/client_locomotion_tests.cpp",
+      "status": "A",
+      "purpose": "Focused bounded input-history, acknowledgement replay, no-feedback, and hard-discontinuity clearing contracts."
     },
     {
       "path": "components/tes3mp/tests/credential_crypto_tests.cpp",
@@ -2051,7 +2066,7 @@
         },
         {
           "path": "components/tes3mp/CMakeLists.txt",
-          "sha256": "f449bd971e5b8c9056023971ba67c364a4c5269045713067e127bad3fcf5b02c"
+          "sha256": "c069fa568488463d696530a31b5fbe418dc0b7c2273bad08bb1e30a382a5c04b"
         },
         {
           "path": "components/tes3mp/protocol/generated/authentication_accepted_generated.h",
@@ -2087,7 +2102,7 @@
         },
         {
           "path": "components/tes3mp/protocol/generated/reliable_operation_generated.h",
-          "sha256": "4681505b7b21eda0d7f92c8475122a7e67fe7141b792c2f746f64d983e8dee4c"
+          "sha256": "0db954c6d22a4815562ceece3e5a6f1c24558dc53721b8c91721d178ac5d6704"
         },
         {
           "path": "components/tes3mp/protocol/generated/server_hello_generated.h",
@@ -2139,7 +2154,7 @@
         },
         {
           "path": "components/tes3mp/protocol/schema/reliable_operation.fbs",
-          "sha256": "67f1ee1e337801c229cb32018991585a824a9a505955473baf7b4fd60a85bbc3"
+          "sha256": "a73083a63cd7dc0b3939f605ec10654658d28c3f73cf9f7927a4ec300106fa56"
         },
         {
           "path": "components/tes3mp/protocol/schema/server_hello.fbs",

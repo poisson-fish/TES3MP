@@ -110,10 +110,10 @@ namespace TES3MP::OpenMWAdapter
         return {};
     }
 
-    std::optional<PlayerMotionIntent> DesktopAutomation::sampleCurrentIntent() noexcept
+    std::optional<LocomotionIntent> DesktopAutomation::sampleCurrentIntent() noexcept
     {
         if (!mStartedAt || !mNow || mRole == DesktopAutomationRole::Reconnect)
-            return PlayerMotionIntent(LinearVelocity3(0, 0, 0));
+            return LocomotionIntent(LocomotionMode::Walk, Turn32::fromValue(0), LinearVelocity3(0, 0, 0));
         const auto moving = mNow->nanoseconds() - mStartedAt->nanoseconds() < 2 * Second;
         const auto x = (mRole == DesktopAutomationRole::FlowOne || mRole == DesktopAutomationRole::SoakOne) && moving
             ? AutomationSpeed
@@ -121,15 +121,17 @@ namespace TES3MP::OpenMWAdapter
         const auto y = (mRole == DesktopAutomationRole::FlowTwo || mRole == DesktopAutomationRole::SoakTwo) && moving
             ? AutomationSpeed
             : 0;
-        return PlayerMotionIntent(LinearVelocity3(x, y, 0));
+        return LocomotionIntent(LocomotionMode::Walk, Turn32::fromValue(0), LinearVelocity3(x, y, 0));
     }
 
     ProviderResult DesktopAutomation::applyAuthoritative(const LatestWinsSnapshot& snapshot,
         std::span<const ObservedPlayer> observedPlayers, bool allowLocalCellCorrection,
-        MonotonicInstant receivedAt) noexcept
+        MonotonicInstant receivedAt,
+        const std::optional<LocalLocomotionReconciliation>& localReconciliation) noexcept
     {
         const auto applied
-            = mPresentation.applyAuthoritative(snapshot, observedPlayers, allowLocalCellCorrection, receivedAt);
+            = mPresentation.applyAuthoritative(
+                snapshot, observedPlayers, allowLocalCellCorrection, receivedAt, localReconciliation);
         if (applied != ProviderResult::Accepted)
             return applied;
         ++mSnapshots;

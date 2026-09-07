@@ -3,6 +3,7 @@
 
 #include "command_primitives.hpp"
 #include "fixed_tick_scheduler.hpp"
+#include "movement_policy.hpp"
 #include "observability.hpp"
 
 #include <cstddef>
@@ -52,7 +53,27 @@ namespace TES3MP
         CellId mRequestedCell;
     };
 
-    using ServerCommandPayload = std::variant<PlayerMotionCommandProposal, CellTransitionCommandProposal>;
+    class PlayerLocomotionCommandProposal
+    {
+    public:
+        constexpr PlayerLocomotionCommandProposal(LocomotionInputTick inputTick,
+            LocomotionInputSequence inputSequence, LocomotionIntent intent) noexcept
+            : mInputTick(inputTick), mInputSequence(inputSequence), mIntent(intent) {}
+
+        constexpr LocomotionInputTick inputTick() const noexcept { return mInputTick; }
+        constexpr LocomotionInputSequence inputSequence() const noexcept { return mInputSequence; }
+        constexpr const LocomotionIntent& intent() const noexcept { return mIntent; }
+        friend constexpr bool operator==(PlayerLocomotionCommandProposal,
+            PlayerLocomotionCommandProposal) noexcept = default;
+
+    private:
+        LocomotionInputTick mInputTick;
+        LocomotionInputSequence mInputSequence;
+        LocomotionIntent mIntent;
+    };
+
+    using ServerCommandPayload = std::variant<PlayerMotionCommandProposal, CellTransitionCommandProposal,
+        PlayerLocomotionCommandProposal>;
 
     class ServerCommandProposal
     {
@@ -67,6 +88,19 @@ namespace TES3MP
             , mObservedCanonicalRevision(observedCanonicalRevision)
             , mEntityPrecondition(entityPrecondition)
             , mPayload(motion)
+        {
+        }
+
+        constexpr ServerCommandProposal(SessionId sessionId, SessionGeneration sessionGeneration,
+            CommandSequence commandSequence, CommandId commandId, CanonicalRevision observedCanonicalRevision,
+            EntityPrecondition entityPrecondition, PlayerLocomotionCommandProposal locomotion) noexcept
+            : mSessionId(sessionId)
+            , mSessionGeneration(sessionGeneration)
+            , mCommandSequence(commandSequence)
+            , mCommandId(commandId)
+            , mObservedCanonicalRevision(observedCanonicalRevision)
+            , mEntityPrecondition(entityPrecondition)
+            , mPayload(locomotion)
         {
         }
 

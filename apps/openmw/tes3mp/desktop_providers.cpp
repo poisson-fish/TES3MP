@@ -230,13 +230,13 @@ namespace TES3MP::OpenMWAdapter
         }
     }
 
-    std::optional<PlayerMotionIntent> DesktopSemanticInput::sampleCurrentIntent() noexcept
+    std::optional<LocomotionIntent> DesktopSemanticInput::sampleCurrentIntent() noexcept
     {
         try
         {
             auto input = MWBase::Environment::get().getInputManager();
             if (input->controlsDisabled() || !input->getControlSwitch("playercontrols"))
-                return PlayerMotionIntent(LinearVelocity3(0, 0, 0));
+                return LocomotionIntent(LocomotionMode::Walk, Turn32::fromValue(0), LinearVelocity3(0, 0, 0));
             const double right = static_cast<double>(input->getActionValue(MWInput::A_MoveRight))
                 - static_cast<double>(input->getActionValue(MWInput::A_MoveLeft));
             const double forward = static_cast<double>(input->getActionValue(MWInput::A_MoveForward))
@@ -246,7 +246,7 @@ namespace TES3MP::OpenMWAdapter
         }
         catch (...)
         {
-            return PlayerMotionIntent(LinearVelocity3(0, 0, 0));
+            return LocomotionIntent(LocomotionMode::Walk, Turn32::fromValue(0), LinearVelocity3(0, 0, 0));
         }
     }
 
@@ -296,7 +296,8 @@ namespace TES3MP::OpenMWAdapter
         }
 
         ProviderResult apply(const LatestWinsSnapshot& snapshot, std::span<const ObservedPlayer> observedPlayers,
-            bool allowLocalCellCorrection, MonotonicInstant receivedAt)
+            bool allowLocalCellCorrection, MonotonicInstant receivedAt,
+            const std::optional<LocalLocomotionReconciliation>& localReconciliation)
         {
             if (!mapping)
                 return ProviderResult::ContentMappingFailed;
@@ -308,12 +309,13 @@ namespace TES3MP::OpenMWAdapter
             if (self == snapshot.view().entries().end())
                 return ProviderResult::PresentationFailed;
 
-            auto* targetCell = resolveCell(self->transform().cell(), content);
+            const Transform& localRoot = localReconciliation ? localReconciliation->root : self->transform();
+            auto* targetCell = resolveCell(localRoot.cell(), content);
             if (!targetCell)
                 return ProviderResult::ContentMappingFailed;
 
             auto world = MWBase::Environment::get().getWorld();
-            const auto selfPosition = toOpenMW(self->transform());
+            const auto selfPosition = toOpenMW(localRoot);
             auto player = world->getPlayerPtr();
             if (!allowLocalCellCorrection && player.getCell() != targetCell)
             {
@@ -331,7 +333,7 @@ namespace TES3MP::OpenMWAdapter
             {
                 const auto& local = player.getRefData().getPosition();
                 (void)metrics.tryRecord({ MovementMetricKey::LocalCorrectionDistanceQuanta,
-                    movementCorrectionDistanceQuanta(self->transform().position(),
+                    movementCorrectionDistanceQuanta(localRoot.position(),
                         static_cast<double>(local.pos[0]) * PositionScale,
                         static_cast<double>(local.pos[1]) * PositionScale,
                         static_cast<double>(local.pos[2]) * PositionScale) });
@@ -450,11 +452,13 @@ namespace TES3MP::OpenMWAdapter
 
     ProviderResult DesktopPresentation::applyAuthoritative(const LatestWinsSnapshot& snapshot,
         std::span<const ObservedPlayer> observedPlayers, bool allowLocalCellCorrection,
-        MonotonicInstant receivedAt) noexcept
+        MonotonicInstant receivedAt,
+        const std::optional<LocalLocomotionReconciliation>& localReconciliation) noexcept
     {
         try
         {
-            const auto result = mImpl->apply(snapshot, observedPlayers, allowLocalCellCorrection, receivedAt);
+            const auto result = mImpl->apply(
+                snapshot, observedPlayers, allowLocalCellCorrection, receivedAt, localReconciliation);
             if (result != ProviderResult::Accepted)
                 mImpl->clear();
             return result;

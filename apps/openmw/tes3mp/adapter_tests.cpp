@@ -257,10 +257,11 @@ namespace
     {
     public:
         TES3MP::OpenMWAdapter::CellTransitionCapture captureCellTransition() noexcept override { return {}; }
-        std::optional<TES3MP::PlayerMotionIntent> sampleCurrentIntent() noexcept override
+        std::optional<TES3MP::LocomotionIntent> sampleCurrentIntent() noexcept override
         {
             ++calls;
-            return TES3MP::PlayerMotionIntent(TES3MP::LinearVelocity3(1, 2, 3));
+            return TES3MP::LocomotionIntent(TES3MP::LocomotionMode::Walk, TES3MP::Turn32::fromValue(0),
+                TES3MP::LinearVelocity3(1, 2, 3));
         }
         unsigned calls = 0;
     };
@@ -269,7 +270,8 @@ namespace
     {
     public:
         TES3MP::OpenMWAdapter::ProviderResult applyAuthoritative(const TES3MP::LatestWinsSnapshot&,
-            std::span<const TES3MP::ObservedPlayer>, bool, TES3MP::MonotonicInstant) noexcept override
+            std::span<const TES3MP::ObservedPlayer>, bool, TES3MP::MonotonicInstant,
+            const std::optional<TES3MP::LocalLocomotionReconciliation>&) noexcept override
         {
             ++calls;
             return TES3MP::OpenMWAdapter::ProviderResult::Accepted;
@@ -474,18 +476,22 @@ int main()
 
     MotionMetrics trackerMetrics;
     MotionIntentTracker motion(&trackerMetrics);
-    motion.sample(PlayerMotionIntent(LinearVelocity3(10, 0, 0)), MonotonicInstant::fromNanoseconds(90));
+    const auto moving = LocomotionIntent(
+        LocomotionMode::Walk, Turn32::fromValue(0), LinearVelocity3(10, 0, 0));
+    const auto stopped = LocomotionIntent(
+        LocomotionMode::Walk, Turn32::fromValue(0), LinearVelocity3(0, 0, 0));
+    motion.sample(moving, MonotonicInstant::fromNanoseconds(90));
     require(motion.next(LinearVelocity3(0, 0, 0)).has_value());
-    require(motion.markQueued(CommandSequence::initial(), PlayerMotionIntent(LinearVelocity3(10, 0, 0)),
+    require(motion.markQueued(CommandSequence::initial(), moving,
                 MonotonicInstant::fromNanoseconds(100))
         && motion.pending());
-    motion.sample(PlayerMotionIntent(LinearVelocity3(0, 0, 0)), MonotonicInstant::fromNanoseconds(125));
+    motion.sample(stopped, MonotonicInstant::fromNanoseconds(125));
     require(!motion.next(LinearVelocity3(0, 0, 0)));
     motion.observeAcknowledgement(CommandSequence::initial(), MonotonicInstant::fromNanoseconds(175));
     require(!motion.pending());
     require(trackerMetrics.has(MovementMetricKey::CommandAcknowledgementNanoseconds));
     require(motion.next(LinearVelocity3(10, 0, 0))->desiredVelocity() == LinearVelocity3(0, 0, 0));
-    require(motion.markQueued(*CommandSequence::initial().next(), PlayerMotionIntent(LinearVelocity3(0, 0, 0)),
+    require(motion.markQueued(*CommandSequence::initial().next(), stopped,
         MonotonicInstant::fromNanoseconds(200)));
     motion.observeAcknowledgement(
         *CommandSequence::initial().next(), MonotonicInstant::fromNanoseconds(300));

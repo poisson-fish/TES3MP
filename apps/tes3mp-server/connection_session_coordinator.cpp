@@ -160,6 +160,7 @@ namespace TES3MP::ServerApp
                 || operation->header().commandHeader().sessionGeneration() != state->generation())
                 return ConnectionSessionResult::ProtocolRejected;
             const auto& header = operation->header().commandHeader();
+            const auto negotiated = state->negotiatedHello()->selectedVersion();
             if (const auto* transition = std::get_if<CellTransition>(&operation->body()))
             {
                 ServerCommandProposal proposal(header.sessionId(), header.sessionGeneration(),
@@ -171,12 +172,37 @@ namespace TES3MP::ServerApp
             }
             if (const auto* motion = std::get_if<PlayerMotionIntent>(&operation->body()))
             {
+                if (negotiated.major != 1 || negotiated.minor != 2)
+                    return ConnectionSessionResult::ProtocolRejected;
                 ServerCommandProposal proposal(header.sessionId(), header.sessionGeneration(),
                     header.commandSequence(), header.commandId(), header.observedCanonicalRevision(),
                     *operation->header().entityPrecondition(),
                     PlayerMotionCommandProposal(motion->desiredVelocity()));
                 return intake.submit(std::move(proposal)) == CommandSubmissionResult::Accepted
                     ? ConnectionSessionResult::CommandSubmitted : ConnectionSessionResult::QueueRejected;
+            }
+            if (const auto* locomotion = std::get_if<PlayerLocomotionInput>(&operation->body()))
+            {
+                if (negotiated.major != 1 || negotiated.minor < 3)
+                    return ConnectionSessionResult::ProtocolRejected;
+                auto& connectionState = mConnections.find(connection)->second;
+                const auto expectedSequence = connectionState.lastLocomotionInputSequence
+                    ? connectionState.lastLocomotionInputSequence->next()
+                    : std::optional<LocomotionInputSequence>(LocomotionInputSequence::initial());
+                if (!expectedSequence || locomotion->inputSequence() != *expectedSequence
+                    || (connectionState.lastLocomotionInputTick
+                        && locomotion->inputTick() <= *connectionState.lastLocomotionInputTick))
+                    return ConnectionSessionResult::ProtocolRejected;
+                ServerCommandProposal proposal(header.sessionId(), header.sessionGeneration(),
+                    header.commandSequence(), header.commandId(), header.observedCanonicalRevision(),
+                    *operation->header().entityPrecondition(),
+                    PlayerLocomotionCommandProposal(locomotion->inputTick(), locomotion->inputSequence(),
+                        locomotion->intent()));
+                if (intake.submit(std::move(proposal)) != CommandSubmissionResult::Accepted)
+                    return ConnectionSessionResult::QueueRejected;
+                connectionState.lastLocomotionInputTick = locomotion->inputTick();
+                connectionState.lastLocomotionInputSequence = locomotion->inputSequence();
+                return ConnectionSessionResult::CommandSubmitted;
             }
             return ConnectionSessionResult::ProtocolRejected;
         }

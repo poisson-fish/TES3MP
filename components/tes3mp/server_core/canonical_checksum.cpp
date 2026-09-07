@@ -105,6 +105,7 @@ namespace
             writer.fixed(player.entityRevision().value());
             writer.fixed(player.authorityEpoch().value());
             writer.fixed(player.lastSpatialChangeTick().value());
+            writer.byte(static_cast<std::uint8_t>(player.locomotionMode()));
         }
 
         writer.fixed(static_cast<std::uint32_t>(state.activeSessions().size()));

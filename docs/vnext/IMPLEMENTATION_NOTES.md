@@ -6200,6 +6200,26 @@ only the relevant phase section here.
   integration passes 32 reconnects with zero final queue depth; all 145 Python
   tests, indexed provenance, legacy exclusion, and diff hygiene pass.
 
+### 2026-09-06 — versioned locomotion input and bounded local replay — Complete
+
+- Change: protocol 1.3 additively carries bounded input tick/sequence, explicit
+  locomotion mode, root-facing intent, and desired velocity. The server enforces
+  per-connection order and manifest-mode speed before canonical mutation;
+  protocol 1.2 remains the bounded legacy walk path.
+- Change: canonical player state now records locomotion mode and root facing;
+  checksum encoding advances to version 3 with movement rules version 2. The
+  shared client retains at most 128 unacknowledged semantic inputs and rebuilds
+  local presentation from authoritative snapshots without feeding replay into
+  input. Hard discontinuities clear history.
+- Boundary: desktop and PC-VR share the path. Exact-cell interest/resync, remote
+  playback, animation, pose, world objects, persistence, and correction tuning
+  are unchanged.
+- Verification: MSVC RelWithDebInfo full engine-independent contracts and the
+  focused protocol, replay, reducer, movement-evidence, server-app, and adapter
+  tests pass. The FlatBuffers 25.12.19 schema proof passes; MSVC Release full
+  OpenMW, networking server, and headless client build and link; all 145 Python
+  tests, indexed provenance, legacy exclusion, and diff hygiene pass.
+
 ### 2026-09-06 — movement package decision and input safety gate — Complete
 
 - Decision: the owner approved A/A/A/A/A. [ADR-0059](adr/ADR-0059-phase12-production-movement-architecture.md)

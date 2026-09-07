@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
+#include <numbers>
 
 namespace TES3MP::OpenMWAdapter
 {
@@ -19,12 +20,23 @@ namespace TES3MP::OpenMWAdapter
             const auto lowerInteger = static_cast<std::int64_t>(lower);
             return lowerInteger % 2 == 0 ? lowerInteger : lowerInteger + 1;
         }
+
+        Turn32 rootFacing(double yawRadians) noexcept
+        {
+            constexpr double Tau = 2.0 * std::numbers::pi;
+            double turns = std::fmod(yawRadians / Tau, 1.0);
+            if (turns < 0.0)
+                turns += 1.0;
+            return Turn32::fromUnnormalized(static_cast<std::uint64_t>(
+                std::floor(turns * 4294967296.0 + 0.5)));
+        }
     }
 
-    PlayerMotionIntent mapPlanarMovement(double right, double forward, double yawRadians) noexcept
+    LocomotionIntent mapPlanarMovement(
+        double right, double forward, double yawRadians, LocomotionMode mode) noexcept
     {
         if (!std::isfinite(right) || !std::isfinite(forward) || !std::isfinite(yawRadians))
-            return PlayerMotionIntent(LinearVelocity3(0, 0, 0));
+            return LocomotionIntent(mode, Turn32::fromValue(0), LinearVelocity3(0, 0, 0));
         right = std::clamp(right, -1.0, 1.0);
         forward = std::clamp(forward, -1.0, 1.0);
         const double length = std::hypot(right, forward);
@@ -37,8 +49,9 @@ namespace TES3MP::OpenMWAdapter
         const double cosine = std::cos(yawRadians);
         const double worldX = cosine * right + sine * forward;
         const double worldY = -sine * right + cosine * forward;
-        return PlayerMotionIntent(LinearVelocity3(roundTiesToEven(worldX * DesktopFixtureSpeedQuantaPerTick),
-            roundTiesToEven(worldY * DesktopFixtureSpeedQuantaPerTick), 0));
+        return LocomotionIntent(mode, rootFacing(yawRadians),
+            LinearVelocity3(roundTiesToEven(worldX * DesktopFixtureSpeedQuantaPerTick),
+                roundTiesToEven(worldY * DesktopFixtureSpeedQuantaPerTick), 0));
     }
 
     std::uint64_t movementCorrectionDistanceQuanta(
@@ -52,9 +65,9 @@ namespace TES3MP::OpenMWAdapter
         return static_cast<std::uint64_t>(std::floor(distance + 0.5));
     }
 
-    void MotionIntentTracker::sample(PlayerMotionIntent intent, MonotonicInstant sampledAt) noexcept
+    void MotionIntentTracker::sample(LocomotionIntent intent, MonotonicInstant sampledAt) noexcept
     {
-        if (!mDesired || mDesired->intent.desiredVelocity() != intent.desiredVelocity())
+        if (!mDesired || mDesired->intent != intent)
             mDesired.emplace(DesiredIntent{ intent, sampledAt });
     }
 
@@ -75,7 +88,7 @@ namespace TES3MP::OpenMWAdapter
         }
     }
 
-    std::optional<PlayerMotionIntent> MotionIntentTracker::next(LinearVelocity3 authoritativeVelocity) const noexcept
+    std::optional<LocomotionIntent> MotionIntentTracker::next(LinearVelocity3 authoritativeVelocity) const noexcept
     {
         if (mPending || !mDesired || mDesired->intent.desiredVelocity() == authoritativeVelocity)
             return std::nullopt;
@@ -83,7 +96,7 @@ namespace TES3MP::OpenMWAdapter
     }
 
     bool MotionIntentTracker::markQueued(
-        CommandSequence sequence, PlayerMotionIntent intent, MonotonicInstant queuedAt) noexcept
+        CommandSequence sequence, LocomotionIntent intent, MonotonicInstant queuedAt) noexcept
     {
         if (mPending)
             return false;

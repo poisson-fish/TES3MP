@@ -2,6 +2,7 @@
 #define TES3MP_PROTOCOL_EXCHANGE_HPP
 
 #include "protocol_envelope.hpp"
+#include "movement_policy.hpp"
 
 #include <cstddef>
 #include <cstdint>
@@ -37,6 +38,9 @@ namespace TES3MP
         MissingBody,
         UnknownBody,
         MissingDesiredVelocity,
+        InvalidLocomotionInputTick,
+        InvalidLocomotionInputSequence,
+        InvalidLocomotionMode,
         MissingRequestedCell,
         InvalidStrongValue,
         InvalidAcknowledgementPresence,
@@ -131,7 +135,25 @@ namespace TES3MP
         LinearVelocity3 mDesiredVelocity;
     };
 
-    using ReliableOperationBody = std::variant<PlayerMotionIntent, CellTransition>;
+    class PlayerLocomotionInput
+    {
+    public:
+        constexpr PlayerLocomotionInput(LocomotionInputTick inputTick, LocomotionInputSequence inputSequence,
+            LocomotionIntent intent) noexcept
+            : mInputTick(inputTick), mInputSequence(inputSequence), mIntent(intent) {}
+
+        constexpr LocomotionInputTick inputTick() const noexcept { return mInputTick; }
+        constexpr LocomotionInputSequence inputSequence() const noexcept { return mInputSequence; }
+        constexpr const LocomotionIntent& intent() const noexcept { return mIntent; }
+        friend constexpr bool operator==(PlayerLocomotionInput, PlayerLocomotionInput) noexcept = default;
+
+    private:
+        LocomotionInputTick mInputTick;
+        LocomotionInputSequence mInputSequence;
+        LocomotionIntent mIntent;
+    };
+
+    using ReliableOperationBody = std::variant<PlayerMotionIntent, CellTransition, PlayerLocomotionInput>;
 
     class ReliableOperation
     {
@@ -140,6 +162,8 @@ namespace TES3MP
             ReliableOperationHeader header, PlayerMotionIntent intent) noexcept;
         static std::variant<ReliableOperation, ExchangeDecodeError> create(
             ReliableOperationHeader header, CellTransition transition) noexcept;
+        static std::variant<ReliableOperation, ExchangeDecodeError> create(
+            ReliableOperationHeader header, PlayerLocomotionInput input) noexcept;
 
         constexpr const ReliableOperationHeader& header() const noexcept { return mHeader; }
         constexpr const ReliableOperationBody& body() const noexcept { return mBody; }

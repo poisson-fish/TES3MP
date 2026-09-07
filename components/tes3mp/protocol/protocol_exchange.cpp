@@ -276,6 +276,14 @@ namespace TES3MP
         return ReliableOperation(header, transition);
     }
 
+    std::variant<ReliableOperation, ExchangeDecodeError> ReliableOperation::create(
+        ReliableOperationHeader header, PlayerLocomotionInput input) noexcept
+    {
+        if (!header.entityPrecondition())
+            return error(ExchangeDecodeErrorStage::SemanticValidation, ExchangeDecodeErrorCode::MissingEntityPrecondition);
+        return ReliableOperation(header, input);
+    }
+
     std::variant<SpatialWorldView, ExchangeDecodeError> SpatialWorldView::create(
         std::span<const SpatialEntitySnapshot> entries)
     {
@@ -315,6 +323,16 @@ namespace TES3MP
             const ReliableSchema::LinearVelocity3 encodedVelocity(velocity.x(), velocity.y(), velocity.z());
             body = ReliableSchema::CreatePlayerMotionIntent(builder, &encodedVelocity).Union();
             bodyType = ReliableSchema::ReliableOperationBody::PlayerMotionIntent;
+        }
+        else if (const auto* input = std::get_if<PlayerLocomotionInput>(&value.body()))
+        {
+            const auto velocity = input->intent().desiredVelocity();
+            const ReliableSchema::LinearVelocity3 encodedVelocity(velocity.x(), velocity.y(), velocity.z());
+            const auto mode = static_cast<ReliableSchema::LocomotionMode>(
+                static_cast<std::uint8_t>(input->intent().mode()) + 1);
+            body = ReliableSchema::CreatePlayerLocomotionInput(builder, input->inputTick().value(),
+                input->inputSequence().value(), mode, input->intent().rootFacing().value(), &encodedVelocity).Union();
+            bodyType = ReliableSchema::ReliableOperationBody::PlayerLocomotionInput;
         }
         else
         {
@@ -415,7 +433,8 @@ namespace TES3MP
         if (root->body_type() == ReliableSchema::ReliableOperationBody::NONE || root->body() == nullptr)
             return error(ExchangeDecodeErrorStage::SemanticValidation, ExchangeDecodeErrorCode::MissingBody);
         if (root->body_type() != ReliableSchema::ReliableOperationBody::PlayerMotionIntent
-            && root->body_type() != ReliableSchema::ReliableOperationBody::CellTransition)
+            && root->body_type() != ReliableSchema::ReliableOperationBody::CellTransition
+            && root->body_type() != ReliableSchema::ReliableOperationBody::PlayerLocomotionInput)
         {
             return error(ExchangeDecodeErrorStage::SemanticValidation, ExchangeDecodeErrorCode::UnknownBody,
                 static_cast<std::size_t>(root->body_type()));
@@ -452,6 +471,33 @@ namespace TES3MP
             const auto* velocity = intent->desired_velocity();
             return ReliableOperation::create(header,
                 PlayerMotionIntent(LinearVelocity3(velocity->x(), velocity->y(), velocity->z())));
+        }
+        if (root->body_type() == ReliableSchema::ReliableOperationBody::PlayerLocomotionInput)
+        {
+            const auto* input = root->body_as_PlayerLocomotionInput();
+            if (input == nullptr || input->desired_velocity() == nullptr)
+                return error(ExchangeDecodeErrorStage::SemanticValidation, ExchangeDecodeErrorCode::MissingDesiredVelocity);
+            const auto inputTick = LocomotionInputTick::fromValue(input->input_tick());
+            if (!inputTick)
+                return error(ExchangeDecodeErrorStage::SemanticValidation,
+                    ExchangeDecodeErrorCode::InvalidLocomotionInputTick, input->input_tick(),
+                    MaximumLocomotionInputOrdinal);
+            const auto inputSequence = LocomotionInputSequence::fromValue(input->input_sequence());
+            if (!inputSequence)
+                return error(ExchangeDecodeErrorStage::SemanticValidation,
+                    ExchangeDecodeErrorCode::InvalidLocomotionInputSequence, input->input_sequence(),
+                    MaximumLocomotionInputOrdinal);
+            if (input->locomotion_mode() < ReliableSchema::LocomotionMode::Sneak
+                || input->locomotion_mode() > ReliableSchema::LocomotionMode::Jump)
+                return error(ExchangeDecodeErrorStage::SemanticValidation,
+                    ExchangeDecodeErrorCode::InvalidLocomotionMode,
+                    static_cast<std::size_t>(input->locomotion_mode()));
+            const auto mode = static_cast<LocomotionMode>(
+                static_cast<std::uint8_t>(input->locomotion_mode()) - 1);
+            const auto* velocity = input->desired_velocity();
+            return ReliableOperation::create(header, PlayerLocomotionInput(*inputTick, *inputSequence,
+                LocomotionIntent(mode, Turn32::fromValue(input->root_facing()),
+                    LinearVelocity3(velocity->x(), velocity->y(), velocity->z()))));
         }
         const auto* transition = root->body_as_CellTransition();
         if (transition == nullptr || transition->requested_cell() == nullptr)

@@ -56,6 +56,27 @@ namespace
             ReliableOperation::create(header, PlayerMotionIntent(LinearVelocity3(100, -200, 300))));
     }
 
+    bool versioned_locomotion_input_round_trips_with_bounded_ordinals()
+    {
+        const ReliableOperationHeader header(
+            ClientCommandHeader(value<SessionId>(1), value<SessionGeneration>(2), value<CommandSequence>(3),
+                value<CommandId>(4), value<CanonicalRevision>(5)),
+            EntityPrecondition(value<EntityId>(6), value<EntityRevision>(7), value<AuthorityEpoch>(8)));
+        const PlayerLocomotionInput input(*LocomotionInputTick::fromValue(9),
+            *LocomotionInputSequence::fromValue(10),
+            LocomotionIntent(LocomotionMode::Run, Turn32::fromValue(11), LinearVelocity3(12, -13, 14)));
+        const auto created = ReliableOperation::create(header, input);
+        const auto* operation = std::get_if<ReliableOperation>(&created);
+        if (!operation)
+            return false;
+        const auto decoded = decodeReliableOperation(encodeReliableOperation(*operation));
+        return std::get_if<ReliableOperation>(&decoded) && std::get<ReliableOperation>(decoded) == *operation
+            && !LocomotionInputTick::fromValue(0)
+            && !LocomotionInputTick::fromValue(MaximumLocomotionInputOrdinal + 1)
+            && !LocomotionInputSequence::fromValue(0)
+            && !LocomotionInputSequence::fromValue(MaximumLocomotionInputOrdinal + 1);
+    }
+
     SpatialEntitySnapshot entry(std::uint64_t entityId, std::uint64_t tick = 8)
     {
         return SpatialEntitySnapshot(value<ServerTick>(tick), value<PlayerId>(entityId + 100), value<EntityId>(entityId),
@@ -387,7 +408,7 @@ namespace
             return false;
 
         auto unknownReliableBody = reliable;
-        unknownReliableBody[31] = std::byte{ 3 };
+        unknownReliableBody[31] = std::byte{ 4 };
         auto unknownSnapshotBody = latestWins;
         unknownSnapshotBody[31] = std::byte{ 2 };
 
@@ -686,6 +707,8 @@ int main(int argc, char** argv)
     bool passed = true;
     passed &= check(values_are_typed_bounded_and_not_default_constructible(), "typed bounded values");
     passed &= check(operation_and_snapshot_round_trip_as_owned_values(), "owned round trips");
+    passed &= check(versioned_locomotion_input_round_trips_with_bounded_ordinals(),
+        "versioned locomotion input");
     passed &= check(cell_transitions_round_trip_as_typed_owned_values(), "cell transition round trips");
     passed &= check(reliable_observation_batch_is_distinct_bounded_and_owned(), "reliable observation batch");
     passed &= check(interest_baseline_resync_and_cell_catalog_are_bounded_owned_values(),

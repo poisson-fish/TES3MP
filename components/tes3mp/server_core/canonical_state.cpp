@@ -96,6 +96,13 @@ namespace TES3MP
     SpatialAdvanceResult advanceCanonicalSpatialState(const CanonicalPlayerEntityState& current, ServerTick commitTick,
         Transform replacementTransform, LinearVelocity3 replacementVelocity) noexcept
     {
+        return advanceCanonicalSpatialState(
+            current, commitTick, replacementTransform, replacementVelocity, current.locomotionMode());
+    }
+
+    SpatialAdvanceResult advanceCanonicalSpatialState(const CanonicalPlayerEntityState& current, ServerTick commitTick,
+        Transform replacementTransform, LinearVelocity3 replacementVelocity, LocomotionMode locomotionMode) noexcept
+    {
         if (commitTick < current.lastSpatialChangeTick())
         {
             return SpatialAdvanceError{ SpatialAdvanceErrorCode::TickRegression, current.lastSpatialChangeTick(),
@@ -110,7 +117,8 @@ namespace TES3MP
         }
 
         return CanonicalPlayerEntityState(current.playerId(), current.entityId(), current.appearanceId(),
-            replacementTransform, replacementVelocity, *nextRevision, current.authorityEpoch(), commitTick);
+            replacementTransform, replacementVelocity, *nextRevision, current.authorityEpoch(), commitTick,
+            locomotionMode);
     }
 
     CanonicalServerState::CanonicalServerState(

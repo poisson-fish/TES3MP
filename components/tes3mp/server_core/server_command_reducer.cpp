@@ -557,6 +557,7 @@ namespace TES3MP
                                 {
                                     Transform replacementTransform = player->transform();
                                     LinearVelocity3 replacementVelocity = player->linearVelocity();
+                                    LocomotionMode replacementLocomotionMode = player->locomotionMode();
                                     bool requiresSpatialAdvance = true;
                                     if (const auto* motion
                                         = std::get_if<PlayerMotionCommandProposal>(&proposal.payload()))
@@ -569,7 +570,30 @@ namespace TES3MP
                                             requiresSpatialAdvance = false;
                                         }
                                         else
+                                        {
                                             replacementVelocity = motion->desiredVelocity();
+                                            replacementLocomotionMode = LocomotionMode::Walk;
+                                        }
+                                    }
+                                    else if (const auto* locomotion
+                                        = std::get_if<PlayerLocomotionCommandProposal>(&proposal.payload()))
+                                    {
+                                        const auto& intent = locomotion->intent();
+                                        if (!mContentManifest.movementProfile().allows(
+                                                intent.mode(), intent.desiredVelocity()))
+                                        {
+                                            disposition = CommandDisposition::MotionOutOfRange;
+                                            requiresSpatialAdvance = false;
+                                        }
+                                        else
+                                        {
+                                            const auto currentOrientation = player->transform().orientation();
+                                            replacementTransform = Transform(player->transform().cell(),
+                                                player->transform().position(), Orientation3(currentOrientation.x(),
+                                                    currentOrientation.y(), intent.rootFacing()));
+                                            replacementVelocity = intent.desiredVelocity();
+                                            replacementLocomotionMode = intent.mode();
+                                        }
                                     }
                                     else
                                     {
@@ -593,7 +617,8 @@ namespace TES3MP
                                     }
                                     const auto advanced = requiresSpatialAdvance
                                         ? std::optional<SpatialAdvanceResult>(advanceCanonicalSpatialState(
-                                              *player, tick, replacementTransform, replacementVelocity))
+                                              *player, tick, replacementTransform, replacementVelocity,
+                                              replacementLocomotionMode))
                                         : std::nullopt;
                                     if (!advanced)
                                     {
@@ -693,7 +718,7 @@ namespace TES3MP
                 const auto velocity = current.linearVelocity();
                 if (velocity == LinearVelocity3(0, 0, 0)) continue;
                 auto kernel = advanceMovementKernel(mContentManifest.id(), mContentManifest.movementProfile(),
-                    LocomotionMode::Walk, current.entityId(), tick, current.transform(), velocity, *mCollision);
+                    current.locomotionMode(), current.entityId(), tick, current.transform(), velocity, *mCollision);
                 const auto* step = std::get_if<MovementKernelStep>(&kernel);
                 if (!step)
                 {
