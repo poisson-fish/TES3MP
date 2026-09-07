@@ -24,6 +24,11 @@ class ReplicatedActorContractTests(unittest.TestCase):
         self.assertIn("insertBegin(ptr, false)", source)
         self.assertIn("Context::ReplicatedActor", source)
 
+    def test_canonical_root_motion_is_not_reapplied_by_animation(self):
+        source = (ROOT / "apps/openmw/mwrender/replicatedactor.cpp").read_text(encoding="utf-8")
+        self.assertIn("setAccumulation(osg::Vec3f(1.f, 1.f, 0.f))", source)
+        self.assertNotIn("setAccumulation(osg::Vec3f(0.f, 0.f, 0.f))", source)
+
     def test_visibility_role_is_rendered_but_not_intersected(self):
         vismask = (ROOT / "apps/openmw/mwrender/vismask.hpp").read_text(encoding="utf-8")
         rendering = (ROOT / "apps/openmw/mwrender/renderingmanager.cpp").read_text(encoding="utf-8")

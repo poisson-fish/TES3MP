@@ -6375,6 +6375,23 @@ only the relevant phase section here.
 
 [Back to the active phase tracker](IMPLEMENTATION_PLAN.md#now)
 
+### 2026-09-07 — live actor presentation and spawn follow-up — Complete
+
+- Cause/fix: replicated walk animation was allowed to apply horizontal root
+  motion on top of canonical snapshot translation, so each animation loop
+  visibly drifted and reset. Horizontal animation accumulation is now consumed
+  locally; canonical snapshots remain the only world-translation source.
+- Spawn composition: optional bounded `spawn_positions=x:y:z;...` config is
+  parsed as canonical coordinates, collision-validated before listen, and
+  assigned deterministically by stable player ID. Existing canonical transforms
+  win on reattach, and omission preserves the legacy single point.
+- Live check: two clients were relaunched at neighboring content-backed floor
+  points inside `Balmora, Guild of Mages`; the replicated Ajira prototype starts
+  nearby on a short two-waypoint route. Demo artifacts remain ignored.
+- Verification: replicated-actor Python contract; authenticated-join and
+  server-app tests; RelWithDebInfo dedicated-server and full OpenMW builds; diff
+  hygiene. No protocol, authority, persistence, collision, or AI rule changed.
+
 ### 2026-09-07 — content-backed two-client actor lifecycle proof — Complete
 
 - Capture: added the bounded representative-content

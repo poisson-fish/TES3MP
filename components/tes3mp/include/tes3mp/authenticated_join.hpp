@@ -8,6 +8,7 @@
 
 #include <cstdint>
 #include <optional>
+#include <span>
 #include <variant>
 #include <vector>
 
@@ -57,6 +58,9 @@ namespace TES3MP
             CanonicalCommandReducer& reducer);
         static std::optional<AuthenticatedJoinCoordinator> create(Transform spawn, ContentManifest contentManifest,
             SessionId nextSession, PlayerIdentityRegistry& playerIdentities, CanonicalCommandReducer& reducer);
+        static std::optional<AuthenticatedJoinCoordinator> create(std::span<const Transform> spawns,
+            ContentManifest contentManifest, SessionId nextSession, PlayerIdentityRegistry& playerIdentities,
+            CanonicalCommandReducer& reducer);
 
         AuthenticatedJoinOutcome join(
             PrincipalId principal, SessionGeneration generation, ServerTick serverTick);
@@ -77,7 +81,7 @@ namespace TES3MP
         std::size_t liveBindings() const noexcept { return mPrincipals.size(); }
 
     private:
-        AuthenticatedJoinCoordinator(Transform spawn, AppearanceId appearance,
+        AuthenticatedJoinCoordinator(std::vector<Transform> spawns, AppearanceId appearance,
             AuthenticatedJoinIdentitySeed seed,
             CanonicalCommandReducer& reducer, ContentManifest contentManifest,
             PlayerIdentityRegistry* playerIdentities) noexcept;
@@ -85,7 +89,7 @@ namespace TES3MP
             AuthenticatedAdmission::PlayerClaim claim, bool createsIdentity,
             std::optional<std::uint64_t> identityPreparation, SessionGeneration generation, ServerTick serverTick);
 
-        Transform mSpawn;
+        std::vector<Transform> mSpawns;
         AppearanceId mAppearance;
         AuthenticatedJoinIdentitySeed mSeed;
         bool mIdentityExhausted = false;

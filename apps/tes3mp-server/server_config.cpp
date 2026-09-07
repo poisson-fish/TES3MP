@@ -64,6 +64,43 @@ namespace TES3MP::ServerApp
             return result;
         }
 
+        std::optional<std::int64_t> signedValue(std::string_view value)
+        {
+            std::int64_t result = 0;
+            const auto parsed = std::from_chars(value.data(), value.data() + value.size(), result);
+            if (value.empty() || parsed.ec != std::errc{} || parsed.ptr != value.data() + value.size())
+                return std::nullopt;
+            return result;
+        }
+
+        std::optional<std::vector<Position3>> spawnPositions(std::string_view value)
+        {
+            std::vector<Position3> result;
+            std::size_t begin = 0;
+            while (begin <= value.size())
+            {
+                const auto end = value.find(';', begin);
+                const auto point = value.substr(begin,
+                    (end == std::string_view::npos ? value.size() : end) - begin);
+                const auto first = point.find(':');
+                const auto second = first == std::string_view::npos
+                    ? std::string_view::npos : point.find(':', first + 1);
+                if (first == std::string_view::npos || second == std::string_view::npos
+                    || point.find(':', second + 1) != std::string_view::npos)
+                    return std::nullopt;
+                const auto x = signedValue(trim(point.substr(0, first)));
+                const auto y = signedValue(trim(point.substr(first + 1, second - first - 1)));
+                const auto z = signedValue(trim(point.substr(second + 1)));
+                if (!x || !y || !z || result.size() >= 64)
+                    return std::nullopt;
+                result.emplace_back(*x, *y, *z);
+                if (end == std::string_view::npos)
+                    break;
+                begin = end + 1;
+            }
+            return result.empty() ? std::nullopt : std::optional<std::vector<Position3>>(std::move(result));
+        }
+
         ConfigError error(ConfigErrorCode code, std::size_t line = 0, std::string_view key = {})
         {
             return ConfigError{ code, line, std::string(key) };
@@ -76,7 +113,7 @@ namespace TES3MP::ServerApp
         if (text.size() > MaximumConfigBytes) return error(ConfigErrorCode::TooLarge);
         if (!validUtf8(text)) return error(ConfigErrorCode::InvalidUtf8);
 
-        std::array<bool, 14> seen{};
+        std::array<bool, 15> seen{};
         std::string bindAddress;
         std::uint16_t port = 0;
         std::uint64_t tick = 0;
@@ -86,6 +123,7 @@ namespace TES3MP::ServerApp
         std::optional<std::vector<CellSpaceDeclaration>> cellSpaces;
         std::optional<std::vector<CellId>> allowedCells;
         std::optional<CellId> spawnCell;
+        std::vector<Position3> configuredSpawnPositions{ Position3(10, 20, 30) };
         std::optional<AppearanceId> defaultAppearanceId;
         std::optional<MovementProfile> movementProfile;
         std::filesystem::path collisionContentPath;
@@ -122,6 +160,7 @@ namespace TES3MP::ServerApp
                 else if (key == "collision_content_file") slot = 11;
                 else if (key == "actor_content_file") slot = 12;
                 else if (key == "player_identity_file") slot = 13;
+                else if (key == "spawn_positions") slot = 14;
                 else return error(ConfigErrorCode::UnknownKey, lineNumber, key);
                 if (seen[slot]) return error(ConfigErrorCode::DuplicateKey, lineNumber, key);
                 if (value.empty() || value.find('#') != std::string_view::npos
@@ -198,17 +237,23 @@ namespace TES3MP::ServerApp
                         return error(ConfigErrorCode::InvalidValue, lineNumber, key);
                     actorContentPath = std::filesystem::u8path(value);
                 }
-                else
+                else if (slot == 13)
                 {
                     if (value.size() > MaximumIdentityPathBytes)
                         return error(ConfigErrorCode::InvalidValue, lineNumber, key);
                     playerIdentityPath = std::filesystem::u8path(value);
                 }
+                else
+                {
+                    auto parsed = spawnPositions(value);
+                    if (!parsed) return error(ConfigErrorCode::InvalidValue, lineNumber, key);
+                    configuredSpawnPositions = std::move(*parsed);
+                }
             }
             if (end == std::string_view::npos) break;
             begin = end + 1;
         }
-        for (std::size_t slot = 0; slot < seen.size(); ++slot)
+        for (std::size_t slot = 0; slot < 14; ++slot)
             if (!seen[slot])
                 return error(ConfigErrorCode::MissingKey, 0,
                     std::array<std::string_view, 14>{ "bind_address", "port", "tick_interval_ms",
@@ -222,8 +267,8 @@ namespace TES3MP::ServerApp
         if (!manifest || !manifest->contains(*spawnCell))
             return error(ConfigErrorCode::InvalidValue, 0, "content_manifest_id");
         return ServerConfig{ std::move(*endpoint), tick, grace, std::move(passwordPath), *manifest,
-            *spawnCell, std::move(collisionContentPath), std::move(actorContentPath),
-            std::move(playerIdentityPath) };
+            *spawnCell, std::move(configuredSpawnPositions), std::move(collisionContentPath),
+            std::move(actorContentPath), std::move(playerIdentityPath) };
     }
 
     PasswordLoadResult loadJoinPassword(const std::filesystem::path& path)

@@ -16,10 +16,10 @@ namespace
 
 namespace TES3MP
 {
-    AuthenticatedJoinCoordinator::AuthenticatedJoinCoordinator(Transform spawn,
+    AuthenticatedJoinCoordinator::AuthenticatedJoinCoordinator(std::vector<Transform> spawns,
         AppearanceId appearance, AuthenticatedJoinIdentitySeed seed, CanonicalCommandReducer& reducer,
         ContentManifest contentManifest, PlayerIdentityRegistry* playerIdentities) noexcept
-        : mSpawn(spawn)
+        : mSpawns(std::move(spawns))
         , mAppearance(appearance)
         , mSeed(seed)
         , mReducer(reducer)
@@ -34,14 +34,26 @@ namespace TES3MP
         CanonicalCommandReducer& reducer)
     {
         return AuthenticatedJoinCoordinator(
-            spawn, appearance, seed, reducer, testContentManifest(), nullptr);
+            { spawn }, appearance, seed, reducer, testContentManifest(), nullptr);
     }
 
     std::optional<AuthenticatedJoinCoordinator> AuthenticatedJoinCoordinator::create(Transform spawn,
         ContentManifest contentManifest, SessionId nextSession, PlayerIdentityRegistry& playerIdentities,
         CanonicalCommandReducer& reducer)
     {
-        return AuthenticatedJoinCoordinator(spawn, contentManifest.defaultAppearance(),
+        return create(std::span<const Transform>(&spawn, 1), contentManifest, nextSession, playerIdentities, reducer);
+    }
+
+    std::optional<AuthenticatedJoinCoordinator> AuthenticatedJoinCoordinator::create(std::span<const Transform> spawns,
+        ContentManifest contentManifest, SessionId nextSession, PlayerIdentityRegistry& playerIdentities,
+        CanonicalCommandReducer& reducer)
+    {
+        if (spawns.empty() || std::any_of(spawns.begin(), spawns.end(), [&](const auto& spawn) {
+                return !contentManifest.contains(spawn.cell());
+            }))
+            return std::nullopt;
+        return AuthenticatedJoinCoordinator(std::vector<Transform>(spawns.begin(), spawns.end()),
+            contentManifest.defaultAppearance(),
             { nextSession, PlayerId::fromValue(1).value(), EntityId::fromValue(1).value() },
             reducer, contentManifest, &playerIdentities);
     }
@@ -110,7 +122,8 @@ namespace TES3MP
         if (mNextPreparationId == 0)
             return AuthenticatedJoinError::IdentityExhausted;
 
-        CanonicalPlayerEntityState canonicalPlayer(claim.player, claim.entity, claim.appearance, mSpawn,
+        const auto& spawn = mSpawns[(claim.player.value() - 1) % mSpawns.size()];
+        CanonicalPlayerEntityState canonicalPlayer(claim.player, claim.entity, claim.appearance, spawn,
             LinearVelocity3(0, 0, 0), EntityRevision::initial(), AuthorityEpoch::initial(), serverTick);
         if (const auto* existing = mReducer.state().findPlayer(claim.player))
         {
@@ -126,7 +139,7 @@ namespace TES3MP
         std::vector<SpatialEntitySnapshot> entries;
         entries.reserve(candidate->candidateState().players().size());
         for (const auto& visible : candidate->candidateState().players())
-            if (visible.transform().cell() == mSpawn.cell())
+            if (visible.transform().cell() == canonicalPlayer.transform().cell())
                 entries.emplace_back(serverTick, visible.playerId(), visible.entityId(), visible.appearanceId(),
                     visible.entityRevision(), visible.authorityEpoch(), visible.transform(), visible.linearVelocity());
         auto view = SpatialWorldView::create(entries);

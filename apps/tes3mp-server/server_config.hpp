@@ -12,6 +12,7 @@
 #include <string>
 #include <string_view>
 #include <variant>
+#include <vector>
 
 namespace TES3MP::ServerApp
 {
@@ -53,6 +54,7 @@ namespace TES3MP::ServerApp
         std::filesystem::path joinPasswordFile;
         ContentManifest contentManifest;
         CellId spawnCell;
+        std::vector<Position3> spawnPositions;
         std::filesystem::path collisionContentFile;
         std::filesystem::path actorContentFile;
         std::filesystem::path playerIdentityFile;

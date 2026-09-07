@@ -40,9 +40,11 @@ Verification scales with risk:
 
 Status: **Ready**
 
-Phase 13 is closed with representative two-client lifecycle evidence. Discover
-the smallest server-authoritative interactive-object package before choosing a
-state or protocol shape:
+Phase 13 is closed with representative two-client lifecycle evidence plus live
+presentation follow-up: canonical actor root motion no longer fights animation
+root motion, and optional collision-validated spawn lists place concurrent demo
+players deterministically. Discover the smallest server-authoritative
+interactive-object package before choosing a state or protocol shape:
 
 1. trace current OpenMW door, lock, trap, activation, cell, and renderer seams,
    using archived TES3MP behavior only as requirements evidence;
@@ -105,6 +107,7 @@ but they no longer force a predetermined sequence of micro-slices.
 | Phase 13 actor core | **Complete** | Manifest-bound actor identity/catalog, separate canonical actor world, server-only bounded idle/travel/wander simulation, checked collision, inactive-cell freeze, and atomic failure |
 | Phase 13 actor composition/replication | **Complete** | Required bounded actor content, fixed-tick server composition, optional separate actor replication, exact-cell lifecycle completion, and shared renderer-only desktop/PC-VR presentation |
 | Phase 13 lifecycle closure | **Complete** | Representative-content two-client cell leave/re-entry, four resumes, authenticated resync/rejoin, stable actor identity/revisions, and cross-lane ordering fixes |
+| Phase 13 live presentation follow-up | **Complete** | Canonical-only actor translation, deterministic bounded multi-player spawn points, and representative interior demo placement |
 
 ### Phase 9 completion record
 

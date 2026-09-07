@@ -223,7 +223,8 @@ namespace MWRender
                 if (customModel)
                     addAnimSource(skeleton, skeleton);
 
-                setAccumulation(osg::Vec3f(0.f, 0.f, 0.f));
+                // Canonical snapshots own horizontal root motion. Reset the animation root each frame.
+                setAccumulation(osg::Vec3f(1.f, 1.f, 0.f));
                 mAnimationFallback = !hasAnimation("idle");
                 if (!mAnimationFallback)
                     setLocomotion(ReplicatedActorLocomotion::Idle);

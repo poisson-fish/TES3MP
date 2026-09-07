@@ -11,6 +11,7 @@
 #include <tes3mp/server_authentication.hpp>
 #include <tes3mp/transport_gns.hpp>
 
+#include <algorithm>
 #include <array>
 #include <csignal>
 #include <fstream>
@@ -19,6 +20,7 @@
 #include <string>
 #include <thread>
 #include <variant>
+#include <vector>
 
 namespace
 {
@@ -67,8 +69,8 @@ int main(int argc, char** argv)
     auto* collisionValue = std::get_if<std::unique_ptr<TES3MP::ServerApp::ContentCollisionProvider>>(
         &collisionResult);
     auto collision = collisionValue ? std::move(*collisionValue) : nullptr;
-    const auto spawnPosition = TES3MP::Position3(10, 20, 30);
-    if (!collision || !collision->canOccupy(config.spawnCell, spawnPosition))
+    if (!collision || std::any_of(config.spawnPositions.begin(), config.spawnPositions.end(),
+            [&](const auto& position) { return !collision->canOccupy(config.spawnCell, position); }))
     {
         std::cerr << "collision content initialization failed\n";
         return 2;
@@ -168,7 +170,10 @@ int main(int argc, char** argv)
     auto offer = TES3MP::CapabilityOffer::create(
         std::move(versions), optionalCapabilities, {}, config.contentManifest.id());
     const auto zero = TES3MP::Turn32::fromValue(0);
-    auto spawn = TES3MP::Transform(config.spawnCell, spawnPosition, TES3MP::Orientation3(zero, zero, zero));
+    std::vector<TES3MP::Transform> spawns;
+    spawns.reserve(config.spawnPositions.size());
+    for (const auto& position : config.spawnPositions)
+        spawns.emplace_back(config.spawnCell, position, TES3MP::Orientation3(zero, zero, zero));
     TES3MP::NullMetricSink metrics;
     TES3MP::NullStructuredEventSink events;
     TES3MP::Observability observability(metrics, events);
@@ -177,7 +182,7 @@ int main(int argc, char** argv)
         std::move(emptyState), observability, config.contentManifest, *collision);
     TES3MP::ServerCommandIntakeCoordinator intake(
         clock, observability, clock.now(), TES3MP::ServerTick::initial(), TES3MP::IngressOrdinal::initial());
-    auto joins = playerIdentities ? TES3MP::AuthenticatedJoinCoordinator::create(spawn,
+    auto joins = playerIdentities ? TES3MP::AuthenticatedJoinCoordinator::create(spawns,
         config.contentManifest, *TES3MP::SessionId::fromValue(1), *playerIdentities, reducer) : std::nullopt;
     auto lifecycle = TES3MP::ServerLifecycleCoordinator::create(
         config.disconnectGraceMilliseconds * 1'000'000, reducer);

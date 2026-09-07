@@ -14,7 +14,7 @@ Updated: 2026-09-07
 - Phase 13 actor composition/replication: **Complete**
 - Phase 13 lifecycle proof: **Complete**
 - Active work: **Phase 14 interactive-object discovery**
-- Last pass: **Phase 13 closed with content-backed two-client lifecycle evidence**
+- Last pass: **Phase 13 live presentation and spawn follow-up complete**
 - Authoritative tracker: [rolling implementation plan](IMPLEMENTATION_PLAN.md)
 - Historical evidence: [implementation notes](IMPLEMENTATION_NOTES.md)
 
@@ -244,6 +244,21 @@ ADRs and GDRs are required only for consequential, hard-to-reverse decisions.
 - No protocol schema, authority, AI, collision, persistence, gameplay, or
   player-facing tuning changed. Phase 13 is complete; evidence is recorded in
   [the lifecycle capture](PHASE13_ACTOR_LIFECYCLE_CAPTURE.md).
+
+## Phase 13 live presentation follow-up result
+
+- Replicated actor animation now consumes horizontal root motion locally while
+  canonical snapshots remain the only owner of world translation. This removes
+  the walk-cycle drift and reset that appeared as repeated rubber-banding.
+- Server config accepts an optional bounded `spawn_positions=x:y:z;...` list.
+  New and durable-credential rejoin identities select stable points by player
+  ID; existing canonical players retain their transform. Omitting the key keeps
+  the prior single spawn for compatibility.
+- Every configured point is collision-checked before listen. The representative
+  two-client demo was relaunched with neighboring Guild of Mages floor points
+  and a nearby two-waypoint actor route.
+- Focused actor contract, authenticated-join, and server-app tests pass. The
+  RelWithDebInfo dedicated server and full OpenMW targets build and link.
 
 ## Phase 10 result
 

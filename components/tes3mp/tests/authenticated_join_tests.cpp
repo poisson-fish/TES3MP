@@ -105,6 +105,32 @@ namespace
             && entry.authorityEpoch() == AuthorityEpoch::initial());
     }
 
+    void configuredSpawnsAreDeterministic()
+    {
+        FakeCrypto crypto;
+        MemoryPersistence persistence;
+        auto registry = std::move(std::get<std::unique_ptr<PlayerIdentityRegistry>>(
+            PlayerIdentityRegistry::create(crypto, persistence, {})));
+        NullMetricSink metrics;
+        NullStructuredEventSink events;
+        Observability observability{ metrics, events };
+        CanonicalCommandReducer reducer(
+            std::get<CanonicalServerState>(createCanonicalServerState({}, {})), observability, testContentManifest());
+        const auto zero = Turn32::fromValue(0);
+        const std::array spawns{
+            Transform(CellId::interior(id<CellSpaceId>(7)), Position3(10, 20, 30), Orientation3(zero, zero, zero)),
+            Transform(CellId::interior(id<CellSpaceId>(7)), Position3(40, 50, 60), Orientation3(zero, zero, zero)) };
+        auto joins = *AuthenticatedJoinCoordinator::create(
+            spawns, testContentManifest(), id<SessionId>(1), *registry, reducer);
+
+        assert(std::holds_alternative<AuthenticatedJoinResult>(
+            joins.join(id<PrincipalId>(1), SessionGeneration::initial(), ServerTick::initial())));
+        assert(std::holds_alternative<AuthenticatedJoinResult>(
+            joins.join(id<PrincipalId>(2), SessionGeneration::initial(), ServerTick::initial())));
+        assert(joins.state().findPlayer(id<PlayerId>(1))->transform() == spawns[0]);
+        assert(joins.state().findPlayer(id<PlayerId>(2))->transform() == spawns[1]);
+    }
+
     void duplicatePrincipalDoesNotMutate()
     {
         JoinFixture fixture;
@@ -293,6 +319,7 @@ namespace
 int main()
 {
     distinctAtomicJoins();
+    configuredSpawnsAreDeterministic();
     duplicatePrincipalDoesNotMutate();
     exhaustedIdentityDoesNotMutate();
     capacityFailureDoesNotMutate();

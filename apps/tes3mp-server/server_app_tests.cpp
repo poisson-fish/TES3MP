@@ -51,6 +51,7 @@ namespace
           "content_manifest_id = 0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20\n"
           "cell_spaces = interior:7;exterior:8\nallowed_cells = interior:7;exterior:8:0:0\n"
           "spawn_cell = interior:7\ndefault_appearance_id = 1\n"
+          "spawn_positions = -10:20:30;40:50:60\n"
           "movement_profile = sneak:1024;walk:4097;run:8192;jump:4096\n"
           "collision_content_file = collision.txt\n"
           "actor_content_file = actors.txt\n"
@@ -433,6 +434,8 @@ int main()
         assert(config.tickIntervalMilliseconds == 16 && config.disconnectGraceMilliseconds == 30000);
         assert(config.collisionContentFile == std::filesystem::path("collision.txt"));
         assert(config.actorContentFile == std::filesystem::path("actors.txt"));
+        const std::vector<Position3> expectedSpawns{ Position3(-10, 20, 30), Position3(40, 50, 60) };
+        assert(config.spawnPositions == expectedSpawns);
         assert(config.contentManifest.movementProfile().speed(LocomotionMode::Sneak) == 1024
             && config.contentManifest.movementProfile().speed(LocomotionMode::Jump) == 4096);
     }
@@ -453,6 +456,10 @@ int main()
     invalidMovementProfile.replace(invalidMovementProfile.find("sneak:1024;walk:4097;run:8192;jump:4096"),
         std::string("sneak:1024;walk:4097;run:8192;jump:4096").size(), "sneak:4097;walk:1024;run:8192;jump:4096");
     assert(std::holds_alternative<ConfigError>(parseServerConfig(invalidMovementProfile)));
+    auto invalidSpawnPositions = std::string(validConfig);
+    invalidSpawnPositions.replace(invalidSpawnPositions.find("-10:20:30;40:50:60"),
+        std::string("-10:20:30;40:50:60").size(), "1:2");
+    assert(std::holds_alternative<ConfigError>(parseServerConfig(invalidSpawnPositions)));
 
     const auto collisionPath = std::filesystem::temp_directory_path() / "tes3mp-server-collision-content-test";
     const auto writeCollision = [&](std::string_view content) {
