@@ -18,10 +18,10 @@ OpenXR head/hand samples are isolated presentation data; they cannot author
 canonical movement or gameplay.
 
 Phase 13 actor discovery, canonical core, content composition, additive
-replication, and shared desktop/PC-VR presentation are complete. The current
-pass proves the actor lifecycle with two desktop clients before closing the
-phase. Actors remain server-owned, manifest-bound, and frozen in inactive exact
-cells without client simulation leases. The [rolling
+replication, shared desktop/PC-VR presentation, and representative two-client
+lifecycle proof are complete. Actors remain server-owned, manifest-bound, and
+frozen in inactive exact cells without client simulation leases. Phase 14 now
+discovers the first bounded interactive-object package. The [rolling
 implementation plan](IMPLEMENTATION_PLAN.md) is the authoritative Now / Next /
 Later tracker. The [implementation notes](IMPLEMENTATION_NOTES.md) retain
 detailed historical evidence and owner-review history.
@@ -44,7 +44,7 @@ The first end-to-end milestone is deliberately small:
 This flow passes first with deterministic headless clients, then with OpenMW
 desktop clients, and finally with one desktop and one PC VR client. Initial
 canonical state is limited to player/session identity, cell, root transform,
-velocity, revisions, and acknowledgements. Inventory, actors, combat, quests,
+velocity, revisions, and acknowledgements. Inventory, combat, quests,
 scripting, and persistence arrive in later gated phases.
 
 ## Architecture
@@ -143,6 +143,7 @@ requirement for every small pass.
 - [`STATE.md`](STATE.md): concise current-pass handoff; read first in a new session
 - [`IMPLEMENTATION_NOTES.md`](IMPLEMENTATION_NOTES.md): historical chronological evidence, commands, approvals, and follow-ups
 - [`ACTOR_CONTENT_V1.md`](ACTOR_CONTENT_V1.md): bounded manifest-scoped server actor artifact contract
+- [`PHASE13_ACTOR_LIFECYCLE_CAPTURE.md`](PHASE13_ACTOR_LIFECYCLE_CAPTURE.md): representative two-client actor lifecycle evidence
 - [`COLLISION_CONTENT_V1.md`](COLLISION_CONTENT_V1.md): bounded manifest-scoped server collision artifact contract
 - [`LOCAL_BASELINE_BUILD.md`](LOCAL_BASELINE_BUILD.md): local build and test workflow
 - [`LEGACY_GAMEPLAY_FEATURE_INVENTORY.md`](LEGACY_GAMEPLAY_FEATURE_INVENTORY.md): historical gameplay reference only

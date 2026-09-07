@@ -1,8 +1,8 @@
 #ifndef TES3MP_CLIENT_SESSION_RUNTIME_HPP
 #define TES3MP_CLIENT_SESSION_RUNTIME_HPP
 
-#include "authentication.hpp"
 #include "actor_replication.hpp"
+#include "authentication.hpp"
 #include "client_locomotion.hpp"
 #include "headless_client_session.hpp"
 #include "protocol_handshake.hpp"
@@ -111,6 +111,8 @@ namespace TES3MP
         std::uint64_t mResumeLifetimeMilliseconds = 0;
         std::vector<ReliableObservationBatch> mPendingObservations;
         bool mResyncPending = false;
+        bool mResyncPlayerBaselineObserved = false;
+        bool mResyncActorBaselineObserved = false;
         std::optional<CommandSequence> mLastQueuedSequence;
         ClientLocomotionHistory mLocomotionHistory;
         std::optional<LocomotionInputTick> mLastLocomotionInputTick;

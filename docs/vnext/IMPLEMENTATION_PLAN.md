@@ -36,35 +36,33 @@ Verification scales with risk:
 
 ## Now
 
-### Phase 13 — content-backed two-client lifecycle proof and closure
+### Phase 14 — interactive objects, locks, traps, and doors discovery
 
 Status: **Ready**
 
-The content-backed actor vertical slice is complete. The server loads and
-collision-validates a bounded manifest artifact, composes actor simulation into
-every due fixed tick, and publishes capability-gated actor membership and views.
-Desktop and PC-VR share local prototype mapping and renderer-only presentation.
+Phase 13 is closed with representative two-client lifecycle evidence. Discover
+the smallest server-authoritative interactive-object package before choosing a
+state or protocol shape:
 
-Close the phase with representative lifecycle evidence:
-
-1. configure a representative actor artifact and local prototype maps, then run
-   two desktop clients against one dedicated server;
-2. prove exact-cell enter, leave, and re-entry plus disconnect, resume, and
-   authenticated resync without actor deletion, reset, or divergent motion;
-3. retain bounded evidence, fix only defects exposed by the proof, and close
-   Phase 13 when the scenarios remain green; and
-4. keep combat, deletion, scripts, persistence, pathfinding, dynamic bodies,
-   client simulation, and authority leases out of scope.
+1. trace current OpenMW door, lock, trap, activation, cell, and renderer seams,
+   using archived TES3MP behavior only as requirements evidence;
+2. separate durable object state, reliable interaction commands, canonical
+   outcomes, one-shot presentation effects, and exact-cell interest;
+3. identify bounded identity/content requirements, unloaded-cell behavior,
+   revision/idempotency rules, VR reach validation, and compatibility choices;
+4. record owner options and named proof scenarios, with no runtime behavior
+   change; and
+5. keep inventory, containers, combat, scripting, persistence, physics, and
+   client authority out of the first discovery package.
 
 ## Next
 
 These are candidates, not locked slices:
 
-1. Revisit Phase 12 PC-VR hardware capture after the actor lifecycle proof, or
-   before Phase 22 stabilization if hardware remains unavailable.
-2. Select the first interactive-object discovery pass after Phase 13 closes.
-3. Promote the representative actor lifecycle route into a stable bounded
-   regression only if the proof exposes coverage not already held by tests.
+1. Present the Phase 14 authority/state/content package for owner decision.
+2. Implement the approved bounded interactive-object canonical core.
+3. Revisit Phase 12 PC-VR hardware capture before Phase 22 stabilization if
+   hardware remains unavailable during Phase 14 presentation work.
 
 The list is rewritten after each completed pass. New evidence may reorder,
 combine, or remove items.
@@ -77,7 +75,7 @@ The remaining roadmap is kept at outcome level:
 |---|---|
 | Player foundation | Player lifecycle, content identity, and non-fixture world visibility |
 | Movement | Measured correction/remote playback, animation, and hardened optional pose presentation |
-| World gameplay | Actors, cells, object state, inventory, equipment, and containers |
+| World gameplay | Interactive object state, inventory, equipment, and containers |
 | Rules | Combat, magic, death, respawn, dialogue, quests, factions, reputation, and time/weather |
 | Platform services | Scripting, persistence/replay, administration, moderation, observability, and security hardening |
 | Release | Cross-platform packaging, upgrades, performance/soak evidence, and migration documentation |
@@ -106,6 +104,7 @@ but they no longer force a predetermined sequence of micro-slices.
 | Phase 12 remote presentation | **Complete** | Fixture-bounded adaptive playback, additive canonical locomotion snapshots, shared remote animation selection, reliable one-shot separation, and stale optional-pose fallback |
 | Phase 13 actor core | **Complete** | Manifest-bound actor identity/catalog, separate canonical actor world, server-only bounded idle/travel/wander simulation, checked collision, inactive-cell freeze, and atomic failure |
 | Phase 13 actor composition/replication | **Complete** | Required bounded actor content, fixed-tick server composition, optional separate actor replication, exact-cell lifecycle completion, and shared renderer-only desktop/PC-VR presentation |
+| Phase 13 lifecycle closure | **Complete** | Representative-content two-client cell leave/re-entry, four resumes, authenticated resync/rejoin, stable actor identity/revisions, and cross-lane ordering fixes |
 
 ### Phase 9 completion record
 

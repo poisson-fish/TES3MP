@@ -6375,6 +6375,25 @@ only the relevant phase section here.
 
 [Back to the active phase tracker](IMPLEMENTATION_PLAN.md#now)
 
+### 2026-09-07 — content-backed two-client actor lifecycle proof — Complete
+
+- Capture: added the bounded representative-content
+  [actor lifecycle route](PHASE13_ACTOR_LIFECYCLE_CAPTURE.md). Two desktop
+  clients matched 33 shared canonical samples through exact-cell leave and
+  re-entry; stable actor `1/9001/1` advanced across four resumes, authenticated
+  resync, grace expiration, and durable-credential rejoin.
+- Fixes: automation now forwards actor presentation; the adapter gates actor
+  presentation until player/actor membership revisions converge in either lane
+  order; resync uses the canonical player publication tick; and pending resync
+  accepts applied or identical complete player/actor baselines.
+- Compatibility: legacy desktop and movement captures now compose the required
+  empty actor artifact. No authority, protocol schema, AI, collision, gameplay,
+  persistence, or player-facing tuning changed.
+- Verification: representative Morrowind/Tribunal/Bloodmoon two-client route;
+  focused RelWithDebInfo server-app and OpenMW adapter tests and full targets;
+  repository Python/provenance and diff-hygiene gates.
+- Result: Phase 13 is complete. Phase 14 interactive-object discovery is next.
+
 ### 2026-09-07 — content-backed actor composition and additive replication — Complete
 
 - Change: the dedicated server now loads the required bounded

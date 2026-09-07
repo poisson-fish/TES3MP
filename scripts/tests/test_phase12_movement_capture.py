@@ -81,6 +81,13 @@ class Phase12MovementCaptureTests(unittest.TestCase):
         self.assertIn('parser.add_argument("--runtime-dir"', source)
         self.assertIn('environment["PATH"] =', source)
 
+    def test_server_config_supplies_empty_actor_catalog(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            config = MODULE.write_server_config(root, 25570, root / "password").read_text(encoding="utf-8")
+            self.assertIn("actor_content_file=", config)
+            self.assertTrue((root / "actor-content").read_text(encoding="utf-8").startswith("TES3MP_ACTORS_V1"))
+
 
 if __name__ == "__main__":
     unittest.main()

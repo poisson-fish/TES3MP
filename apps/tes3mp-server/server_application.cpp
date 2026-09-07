@@ -1,10 +1,10 @@
 #include "server_application.hpp"
-#include "interest_projection.hpp"
 #include "actor_interest_projection.hpp"
+#include "interest_projection.hpp"
 #include "tes3mp/canonical_resync.hpp"
 
-#include <array>
 #include <algorithm>
+#include <array>
 #include <ranges>
 
 namespace TES3MP::ServerApp
@@ -14,33 +14,49 @@ namespace TES3MP::ServerApp
         bool supportsPose(const ServerSessionStateMachine& session) noexcept
         {
             const auto& hello = session.negotiatedHello();
-            return hello && std::binary_search(
-                hello->negotiatedCapabilities().begin(), hello->negotiatedCapabilities().end(), vrPoseCapability());
+            return hello
+                && std::binary_search(
+                    hello->negotiatedCapabilities().begin(), hello->negotiatedCapabilities().end(), vrPoseCapability());
         }
     }
 
     ServerApplication::ServerApplication(TransportRuntime& transport, const ServerConfig& config) noexcept
-        : mTransport(transport), mConfig(config) {}
+        : mTransport(transport)
+        , mConfig(config)
+    {
+    }
 
-    ServerApplication::ServerApplication(TransportRuntime& transport, const ServerConfig& config,
-        ServerApplicationWiring wiring) noexcept
-        : mTransport(transport), mConfig(config), mWiring(wiring) {}
+    ServerApplication::ServerApplication(
+        TransportRuntime& transport, const ServerConfig& config, ServerApplicationWiring wiring) noexcept
+        : mTransport(transport)
+        , mConfig(config)
+        , mWiring(wiring)
+    {
+    }
 
-    ServerApplication::~ServerApplication() { stop(); }
+    ServerApplication::~ServerApplication()
+    {
+        stop();
+    }
 
     bool ServerApplication::supportsActors(TransportConnectionId connection) const noexcept
     {
-        if (!mWiring) return false;
+        if (!mWiring)
+            return false;
         const auto* session = mWiring->sessions.session(connection);
-        if (!session || session->state() != ServerSessionState::Established || !session->sessionId()) return false;
+        if (!session || session->state() != ServerSessionState::Established || !session->sessionId())
+            return false;
         const auto& hello = session->negotiatedHello();
-        return hello && std::ranges::binary_search(
-            hello->negotiatedCapabilities(), actorReplicationCapability());
+        return hello && std::ranges::binary_search(hello->negotiatedCapabilities(), actorReplicationCapability());
     }
 
     bool ServerApplication::start() noexcept
     {
-        if (mRunning || mListener) { mFailure = "server already started"; return false; }
+        if (mRunning || mListener)
+        {
+            mFailure = "server already started";
+            return false;
+        }
         const auto admitted = mTransport.startListener(mConfig.endpoint);
         if (admitted.result != TransportResult::Accepted || !admitted.id)
         {
@@ -54,7 +70,10 @@ namespace TES3MP::ServerApp
         return true;
     }
 
-    bool ServerApplication::pump() noexcept { return pump(ServerTick::initial()); }
+    bool ServerApplication::pump() noexcept
+    {
+        return pump(ServerTick::initial());
+    }
 
     bool ServerApplication::failConnection(TransportConnectionId connection, std::string_view failure) noexcept
     {
@@ -84,46 +103,64 @@ namespace TES3MP::ServerApp
         for (const auto connection : connections)
         {
             auto* session = mWiring->sessions.session(connection);
-            if (!session) continue;
+            if (!session)
+                continue;
             knownConnections.push_back(connection);
-            if (session->sessionId()) sessionIds.push_back(*session->sessionId());
+            if (session->sessionId())
+                sessionIds.push_back(*session->sessionId());
         }
-        if (knownConnections.empty()) return true;
+        if (knownConnections.empty())
+            return true;
         if (sessionIds.empty())
         {
             for (const auto connection : knownConnections)
-                if (mWiring->sessions.close(connection) != ConnectionSessionResult::Accepted) return false;
+                if (mWiring->sessions.close(connection) != ConnectionSessionResult::Accepted)
+                    return false;
             return true;
         }
         const auto before = mWiring->reducer.state();
         auto prepared = mWiring->lifecycle.prepareDisconnectBatch(sessionIds, mWiring->clock.now(), tick);
         auto* lifecycle = std::get_if<ServerLifecycleBatchPreparation>(&prepared);
-        if (!lifecycle) return false;
+        if (!lifecycle)
+            return false;
         const auto cancel = [this, id = lifecycle->id]() noexcept { (void)mWiring->lifecycle.cancel(id); };
         const auto* candidate = mWiring->lifecycle.candidateState(lifecycle->id);
         const auto revision = mWiring->lifecycle.candidateRevision(lifecycle->id);
-        auto projected = candidate && revision
-            ? projectInterestChanges(before, *candidate, tick, *revision) : std::nullopt;
-        if (!projected) { cancel(); return false; }
+        auto projected
+            = candidate && revision ? projectInterestChanges(before, *candidate, tick, *revision) : std::nullopt;
+        if (!projected)
+        {
+            cancel();
+            return false;
+        }
         std::vector<std::pair<TransportConnectionId, InterestDelivery>> routed;
         routed.reserve(projected->size());
         for (auto& delivery : *projected)
         {
             auto target = mWiring->sessions.connectionForSession(delivery.targetSession);
-            if (!target || std::ranges::find(knownConnections, *target) != knownConnections.end()) { cancel(); return false; }
+            if (!target || std::ranges::find(knownConnections, *target) != knownConnections.end())
+            {
+                cancel();
+                return false;
+            }
             routed.emplace_back(*target, std::move(delivery));
         }
-        if (!admitInterestChangesAtomically(mWiring->queues, routed)) { cancel(); return false; }
-        if (!mWiring->lifecycle.commit(lifecycle->id)) return false;
+        if (!admitInterestChangesAtomically(mWiring->queues, routed))
+        {
+            cancel();
+            return false;
+        }
+        if (!mWiring->lifecycle.commit(lifecycle->id))
+            return false;
         for (const auto connection : knownConnections)
-            if (mWiring->sessions.close(connection) != ConnectionSessionResult::Accepted) return false;
+            if (mWiring->sessions.close(connection) != ConnectionSessionResult::Accepted)
+                return false;
         for (const auto session : sessionIds)
             mLatestPoses.erase(session);
         return true;
     }
 
-    bool ServerApplication::relayPose(
-        TransportConnectionId connection, const TransportMessage& message) noexcept
+    bool ServerApplication::relayPose(TransportConnectionId connection, const TransportMessage& message) noexcept
     try
     {
         if (!mWiring || message.channel != TransportChannel::PresentationLatest)
@@ -146,18 +183,16 @@ namespace TES3MP::ServerApp
         const auto& canonical = mWiring->reducer.state();
         const auto* sourceSession = canonical.findActiveSession(*sourceState->sessionId());
         const auto* sourcePlayer = sourceSession ? canonical.findPlayer(sourceSession->playerId()) : nullptr;
-        if (!sourceSession || !sourcePlayer
-            || sourceSession->sessionGeneration() != pose->sourceSessionGeneration()
-            || sourceSession->entityId() != pose->rootEntityId()
-            || sourcePlayer->entityId() != pose->rootEntityId()
+        if (!sourceSession || !sourcePlayer || sourceSession->sessionGeneration() != pose->sourceSessionGeneration()
+            || sourceSession->entityId() != pose->rootEntityId() || sourcePlayer->entityId() != pose->rootEntityId()
             || sourcePlayer->authorityEpoch() != pose->rootAuthorityEpoch())
             return false;
 
         const auto retained = mLatestPoses.find(pose->sourceSessionId());
         if (retained != mLatestPoses.end())
         {
-            const auto recency = classifyPoseSample(
-                retained->second.sample, retained->second.payload, *pose, frame->payload());
+            const auto recency
+                = classifyPoseSample(retained->second.sample, retained->second.payload, *pose, frame->payload());
             if (recency == PoseSampleRecency::Duplicate || recency == PoseSampleRecency::Stale)
                 return true;
             if (recency == PoseSampleRecency::ConflictingDuplicate)
@@ -190,8 +225,7 @@ namespace TES3MP::ServerApp
             ownedFrames.emplace_back(std::move(*bytes));
             messages.push_back({ targetConnection, TransportChannel::PresentationLatest, ownedFrames.back() });
         }
-        if (!messages.empty()
-            && mWiring->queues.enqueueMessagesAtomically(messages) != TransportResult::Accepted)
+        if (!messages.empty() && mWiring->queues.enqueueMessagesAtomically(messages) != TransportResult::Accepted)
             return false;
         mLatestPoses.insert_or_assign(pose->sourceSessionId(),
             RetainedPose{ std::move(*pose), std::vector<std::byte>(frame->payload().begin(), frame->payload().end()) });
@@ -205,14 +239,16 @@ namespace TES3MP::ServerApp
     bool ServerApplication::resumeConnection(TransportConnectionId connection, ServerTick tick) noexcept
     {
         auto* session = mWiring->sessions.session(connection);
-        if (!session || !session->principal() || !session->sessionId() || !session->preparedResumeId()) return false;
+        if (!session || !session->principal() || !session->sessionId() || !session->preparedResumeId())
+            return false;
         const auto before = mWiring->reducer.state();
         auto prepared = mWiring->lifecycle.prepareResume(
             *session->principal(), *session->sessionId(), mWiring->clock.now(), tick);
         auto* lifecycle = std::get_if<ServerLifecyclePreparation>(&prepared);
         if (!lifecycle || lifecycle->generation != session->generation())
         {
-            if (lifecycle) (void)mWiring->lifecycle.cancel(lifecycle->id);
+            if (lifecycle)
+                (void)mWiring->lifecycle.cancel(lifecycle->id);
             (void)session->cancelPreparedResume();
             return false;
         }
@@ -226,15 +262,17 @@ namespace TES3MP::ServerApp
         auto baseline = candidate && revision && stateVersion
             ? projectInterestBaseline(*candidate, *session->sessionId(), tick, *revision, *stateVersion)
             : std::nullopt;
-        auto observations = candidate && revision
-            ? projectInterestChanges(before, *candidate, tick, *revision) : std::nullopt;
+        auto observations
+            = candidate && revision ? projectInterestChanges(before, *candidate, tick, *revision) : std::nullopt;
         auto accepted = session->takeAuthenticationAccepted();
         auto actorBaseline = candidate && mWiring->actors && supportsActors(connection)
-            ? projectActorInterestBaseline(
-                *candidate, *mWiring->actors, *session->sessionId(), tick, *revision)
+            ? projectActorInterestBaseline(*candidate, *mWiring->actors, *session->sessionId(), tick, *revision)
             : std::optional<ActorInterestBaselineDelivery>{};
-        if (!candidate || !baseline || !observations || !accepted
-            || (supportsActors(connection) && !actorBaseline)) { cancel(); return false; }
+        if (!candidate || !baseline || !observations || !accepted || (supportsActors(connection) && !actorBaseline))
+        {
+            cancel();
+            return false;
+        }
 
         try
         {
@@ -242,7 +280,8 @@ namespace TES3MP::ServerApp
             frames.reserve(5 + observations->size() * 2);
             auto addFrame = [&](MessageClass messageClass, MessageKind kind, std::vector<std::byte> payload) {
                 auto encoded = encodeProtocolFrame(messageClass, kind, payload);
-                if (!std::holds_alternative<std::vector<std::byte>>(encoded)) return false;
+                if (!std::holds_alternative<std::vector<std::byte>>(encoded))
+                    return false;
                 frames.push_back(std::get<std::vector<std::byte>>(std::move(encoded)));
                 return true;
             };
@@ -251,12 +290,20 @@ namespace TES3MP::ServerApp
                 || !addFrame(MessageClass::ReliableOperation, MessageKind::ReliableInterestBaseline,
                     encodeReliableInterestBaseline(baseline->baseline))
                 || !addFrame(MessageClass::LatestWinsSnapshot, MessageKind::LatestWinsSnapshot,
-                    encodeLatestWinsSnapshot(baseline->view))) { cancel(); return false; }
+                    encodeLatestWinsSnapshot(baseline->view)))
+            {
+                cancel();
+                return false;
+            }
             if (actorBaseline
                 && (!addFrame(MessageClass::ReliableOperation, MessageKind::ReliableActorInterestBaseline,
                         encodeReliableActorInterestBaseline(actorBaseline->baseline))
                     || !addFrame(MessageClass::LatestWinsSnapshot, MessageKind::LatestWinsActorSnapshot,
-                        encodeLatestWinsActorSnapshot(actorBaseline->view)))) { cancel(); return false; }
+                        encodeLatestWinsActorSnapshot(actorBaseline->view))))
+            {
+                cancel();
+                return false;
+            }
 
             std::vector<OutboundQueueSet::AtomicMessage> messages;
             messages.reserve(5 + observations->size() * 2);
@@ -275,44 +322,68 @@ namespace TES3MP::ServerApp
                     || !addFrame(MessageClass::ReliableOperation, MessageKind::ReliableObservationBatch,
                         encodeReliableObservationBatch(delivery.observations))
                     || !addFrame(MessageClass::LatestWinsSnapshot, MessageKind::LatestWinsSnapshot,
-                        encodeLatestWinsSnapshot(delivery.view))) { cancel(); return false; }
+                        encodeLatestWinsSnapshot(delivery.view)))
+                {
+                    cancel();
+                    return false;
+                }
                 messages.push_back({ *target, TransportChannel::ReliableOrdered, frames[frames.size() - 2] });
                 messages.push_back({ *target, TransportChannel::LatestWins, frames.back() });
             }
             if (mWiring->queues.enqueueMessagesAtomically(messages) != TransportResult::Accepted)
-            { cancel(); return false; }
+            {
+                cancel();
+                return false;
+            }
         }
-        catch (...) { cancel(); return false; }
+        catch (...)
+        {
+            cancel();
+            return false;
+        }
 
-        if (!session->commitPreparedResume()) { (void)mWiring->lifecycle.cancel(lifecycle->id); return false; }
+        if (!session->commitPreparedResume())
+        {
+            (void)mWiring->lifecycle.cancel(lifecycle->id);
+            return false;
+        }
         if (!mWiring->lifecycle.commit(lifecycle->id))
-        { (void)session->rollbackPreparedResume(); return false; }
+        {
+            (void)session->rollbackPreparedResume();
+            return false;
+        }
         return session->finalizePreparedResume();
     }
 
     bool ServerApplication::resyncConnection(TransportConnectionId connection, ServerTick tick) noexcept
     {
         auto request = mWiring->sessions.takeResyncRequest(connection);
-        if (!request) return true;
+        if (!request)
+            return true;
         const auto resolved = resolveCanonicalResync(*request, mWiring->reducer.latestPublication());
         if (resolved.disposition() != CanonicalResyncDisposition::SnapshotRequired || !resolved.publication())
             return false;
-        auto delivery = projectInterestBaseline(resolved.publication()->state(), request->sessionId(), tick,
-            mWiring->reducer.canonicalRevision(), resolved.publication()->stateVersion());
-        if (!delivery) return false;
-        if (!supportsActors(connection)) return admitInterestBaseline(mWiring->queues, connection, *delivery);
-        if (!mWiring->actors) return false;
-        auto actorDelivery = projectActorInterestBaseline(
-            resolved.publication()->state(), *mWiring->actors, request->sessionId(), tick,
-            mWiring->reducer.canonicalRevision());
-        if (!actorDelivery) return false;
+        auto delivery = projectInterestBaseline(resolved.publication()->state(), request->sessionId(),
+            resolved.publication()->checkpointTick(), mWiring->reducer.canonicalRevision(),
+            resolved.publication()->stateVersion());
+        if (!delivery)
+            return false;
+        if (!supportsActors(connection))
+            return admitInterestBaseline(mWiring->queues, connection, *delivery);
+        if (!mWiring->actors)
+            return false;
+        auto actorDelivery = projectActorInterestBaseline(resolved.publication()->state(), *mWiring->actors,
+            request->sessionId(), tick, mWiring->reducer.canonicalRevision());
+        if (!actorDelivery)
+            return false;
         try
         {
             std::vector<std::vector<std::byte>> frames;
             frames.reserve(4);
             const auto add = [&](MessageClass messageClass, MessageKind kind, std::vector<std::byte> payload) {
                 auto frame = encodeProtocolFrame(messageClass, kind, payload);
-                if (!std::holds_alternative<std::vector<std::byte>>(frame)) return false;
+                if (!std::holds_alternative<std::vector<std::byte>>(frame))
+                    return false;
                 frames.push_back(std::get<std::vector<std::byte>>(std::move(frame)));
                 return true;
             };
@@ -323,16 +394,20 @@ namespace TES3MP::ServerApp
                 || !add(MessageClass::ReliableOperation, MessageKind::ReliableActorInterestBaseline,
                     encodeReliableActorInterestBaseline(actorDelivery->baseline))
                 || !add(MessageClass::LatestWinsSnapshot, MessageKind::LatestWinsActorSnapshot,
-                    encodeLatestWinsActorSnapshot(actorDelivery->view))) return false;
-            const std::array<OutboundQueueSet::AtomicMessage, 4> messages{{
+                    encodeLatestWinsActorSnapshot(actorDelivery->view)))
+                return false;
+            const std::array<OutboundQueueSet::AtomicMessage, 4> messages{ {
                 { connection, TransportChannel::ReliableOrdered, frames[0] },
                 { connection, TransportChannel::LatestWins, frames[1] },
                 { connection, TransportChannel::ReliableOrdered, frames[2] },
                 { connection, TransportChannel::LatestWins, frames[3] },
-            }};
+            } };
             return mWiring->queues.enqueueMessagesAtomically(messages) == TransportResult::Accepted;
         }
-        catch (...) { return false; }
+        catch (...)
+        {
+            return false;
+        }
     }
 
     bool ServerApplication::expireSessions(ServerTick tick) noexcept
@@ -343,17 +418,23 @@ namespace TES3MP::ServerApp
             auto prepared = mWiring->lifecycle.prepareNextExpiration(mWiring->clock.now(), tick);
             if (const auto* error = std::get_if<ServerLifecycleError>(&prepared))
             {
-                if (*error == ServerLifecycleError::DeadlineReached) return true;
+                if (*error == ServerLifecycleError::DeadlineReached)
+                    return true;
                 return false;
             }
             auto* lifecycle = std::get_if<ServerLifecyclePreparation>(&prepared);
-            if (!lifecycle) return false;
+            if (!lifecycle)
+                return false;
             const auto cancel = [this, id = lifecycle->id]() noexcept { (void)mWiring->lifecycle.cancel(id); };
             const auto* candidate = mWiring->lifecycle.candidateState(lifecycle->id);
             const auto revision = mWiring->lifecycle.candidateRevision(lifecycle->id);
-            auto projected = candidate && revision
-                ? projectInterestChanges(before, *candidate, tick, *revision) : std::nullopt;
-            if (!projected) { cancel(); return false; }
+            auto projected
+                = candidate && revision ? projectInterestChanges(before, *candidate, tick, *revision) : std::nullopt;
+            if (!projected)
+            {
+                cancel();
+                return false;
+            }
             std::vector<std::pair<TransportConnectionId, InterestDelivery>> routed;
             try
             {
@@ -361,20 +442,33 @@ namespace TES3MP::ServerApp
                 for (auto& delivery : *projected)
                 {
                     auto target = mWiring->sessions.connectionForSession(delivery.targetSession);
-                    if (!target) { cancel(); return false; }
+                    if (!target)
+                    {
+                        cancel();
+                        return false;
+                    }
                     routed.emplace_back(*target, std::move(delivery));
                 }
             }
-            catch (...) { cancel(); return false; }
-            if (!admitInterestChangesAtomically(mWiring->queues, routed)) { cancel(); return false; }
-            if (!mWiring->lifecycle.commit(lifecycle->id)
-                || !mWiring->joins.releasePrincipal(lifecycle->principal)) return false;
+            catch (...)
+            {
+                cancel();
+                return false;
+            }
+            if (!admitInterestChangesAtomically(mWiring->queues, routed))
+            {
+                cancel();
+                return false;
+            }
+            if (!mWiring->lifecycle.commit(lifecycle->id) || !mWiring->joins.releasePrincipal(lifecycle->principal))
+                return false;
         }
     }
 
     bool ServerApplication::pump(ServerTick tick) noexcept
     {
-        if (!mRunning) return false;
+        if (!mRunning)
+            return false;
         std::array<TransportEvent, 128> events{};
         const auto result = mTransport.poll(events);
         if (result.result != TransportResult::Accepted)
@@ -383,7 +477,8 @@ namespace TES3MP::ServerApp
             stop();
             return false;
         }
-        if (!mWiring) return true;
+        if (!mWiring)
+            return true;
 
         std::vector<TransportConnectionId> closedConnections;
         closedConnections.reserve(result.events);
@@ -415,9 +510,16 @@ namespace TES3MP::ServerApp
             }
         }
         if (!closedConnections.empty() && !disconnectConnections(closedConnections, tick))
-        { mFailure = "disconnect lifecycle failed"; return false; }
+        {
+            mFailure = "disconnect lifecycle failed";
+            return false;
+        }
 
-        if (!expireSessions(tick)) { mFailure = "expiration lifecycle failed"; return false; }
+        if (!expireSessions(tick))
+        {
+            mFailure = "expiration lifecycle failed";
+            return false;
+        }
 
         std::array<TransportMessage, TransportRuntime::MaxMessagesPerReceive> messages{};
         for (const auto connection : mWiring->sessions.connections())
@@ -477,7 +579,8 @@ namespace TES3MP::ServerApp
                     }
                 }
             }
-            if (closed) continue;
+            if (closed)
+                continue;
             if (resyncRequested && !resyncConnection(connection, tick))
             {
                 (void)failConnection(connection, "resync composition failed");
@@ -486,8 +589,8 @@ namespace TES3MP::ServerApp
             auto* session = mWiring->sessions.session(connection);
             if (session != nullptr && session->state() == ServerSessionState::AuthenticationPending)
             {
-                const auto advanced = mWiring->sessions.pollAuthentication(
-                    connection, mWiring->joins, mWiring->crypto, tick);
+                const auto advanced
+                    = mWiring->sessions.pollAuthentication(connection, mWiring->joins, mWiring->crypto, tick);
                 if (advanced != ConnectionSessionResult::AuthenticationPending
                     && advanced != ConnectionSessionResult::Joined
                     && advanced != ConnectionSessionResult::ResumePrepared)
@@ -505,8 +608,7 @@ namespace TES3MP::ServerApp
                         continue;
                     }
                 }
-                else if (advanced == ConnectionSessionResult::ResumePrepared
-                    && !resumeConnection(connection, tick))
+                else if (advanced == ConnectionSessionResult::ResumePrepared && !resumeConnection(connection, tick))
                 {
                     (void)failConnection(connection, "resume composition failed");
                     continue;
@@ -515,38 +617,65 @@ namespace TES3MP::ServerApp
         }
         if ((mWiring->actorCatalog || mWiring->actors || mWiring->actorCollision)
             && (!mWiring->actorCatalog || !mWiring->actors || !mWiring->actorCollision))
-        { mFailure = "actor composition incomplete"; return false; }
+        {
+            mFailure = "actor composition incomplete";
+            return false;
+        }
         const auto pumpedCommands = mWiring->intake.pump();
-        if (!pumpedCommands) { mFailure = "command intake failed"; return false; }
+        if (!pumpedCommands)
+        {
+            mFailure = "command intake failed";
+            return false;
+        }
         for (const auto& batch : pumpedCommands.batches())
         {
             const auto before = mWiring->reducer.state();
             const auto revisionBefore = mWiring->reducer.canonicalRevision();
             auto prepared = mWiring->reducer.prepareTick(batch);
-            if (!prepared.result()) { mFailure = "command reduction failed"; return false; }
+            if (!prepared.result())
+            {
+                mFailure = "command reduction failed";
+                return false;
+            }
             std::vector<std::pair<TransportConnectionId, InterestDelivery>> routed;
             std::vector<std::pair<TransportConnectionId, LatestWinsSnapshot>> routedViews;
             std::vector<std::pair<TransportConnectionId, ActorInterestBaselineDelivery>> actorBaselines;
             if (prepared.candidateRevision() != revisionBefore)
             {
-                auto projected = projectInterestChanges(before, prepared.candidateState(),
-                    batch.scheduledTick().value(), prepared.candidateRevision());
-                if (!projected) { mFailure = "observation projection failed"; return false; }
+                auto projected = projectInterestChanges(
+                    before, prepared.candidateState(), batch.scheduledTick().value(), prepared.candidateRevision());
+                if (!projected)
+                {
+                    mFailure = "observation projection failed";
+                    return false;
+                }
                 routed.reserve(projected->size());
                 for (auto& delivery : *projected)
                 {
                     auto connection = mWiring->sessions.connectionForSession(delivery.targetSession);
-                    if (!connection) { mFailure = "observation target missing"; return false; }
+                    if (!connection)
+                    {
+                        mFailure = "observation target missing";
+                        return false;
+                    }
                     routed.emplace_back(*connection, std::move(delivery));
                 }
-                auto views = projectInterestViews(prepared.candidateState(), batch.scheduledTick().value(),
-                    prepared.candidateRevision());
-                if (!views) { mFailure = "movement view projection failed"; return false; }
+                auto views = projectInterestViews(
+                    prepared.candidateState(), batch.scheduledTick().value(), prepared.candidateRevision());
+                if (!views)
+                {
+                    mFailure = "movement view projection failed";
+                    return false;
+                }
                 routedViews.reserve(views->size());
                 for (auto& delivery : *views)
                 {
                     auto connection = mWiring->sessions.connectionForSession(delivery.first);
-                    if (!connection) { mFailure = "movement view target missing"; return false; }
+                    if (!connection)
+                    {
+                        mFailure = "movement view target missing";
+                        return false;
+                    }
                     routedViews.emplace_back(*connection, std::move(delivery.second));
                 }
                 if (mWiring->actors)
@@ -558,10 +687,15 @@ namespace TES3MP::ServerApp
                         const auto* newPlayer = prepared.candidateState().findPlayer(target.playerId());
                         if (!connection || !oldPlayer || !newPlayer
                             || oldPlayer->transform().cell() == newPlayer->transform().cell()
-                            || !supportsActors(*connection)) continue;
+                            || !supportsActors(*connection))
+                            continue;
                         auto baseline = projectActorInterestBaseline(prepared.candidateState(), *mWiring->actors,
                             target.sessionId(), batch.scheduledTick().value(), prepared.candidateRevision());
-                        if (!baseline) { mFailure = "actor baseline projection failed"; return false; }
+                        if (!baseline)
+                        {
+                            mFailure = "actor baseline projection failed";
+                            return false;
+                        }
                         actorBaselines.emplace_back(*connection, std::move(*baseline));
                     }
             }
@@ -570,36 +704,50 @@ namespace TES3MP::ServerApp
             if (mWiring->actors)
             {
                 auto advanced = advanceActorSimulation(*mWiring->actors, *mWiring->actorCatalog,
-                    prepared.candidateState(), batch.scheduledTick().value(),
-                    mConfig.contentManifest.movementProfile(), *mWiring->actorCollision);
+                    prepared.candidateState(), batch.scheduledTick().value(), mConfig.contentManifest.movementProfile(),
+                    *mWiring->actorCollision);
                 auto* candidate = std::get_if<CanonicalActorWorld>(&advanced);
-                if (!candidate) { mFailure = "actor simulation failed"; return false; }
+                if (!candidate)
+                {
+                    mFailure = "actor simulation failed";
+                    return false;
+                }
                 actorCandidate.emplace(std::move(*candidate));
                 for (const auto connection : mWiring->sessions.connections())
                 {
-                    if (!supportsActors(connection)) continue;
+                    if (!supportsActors(connection))
+                        continue;
                     const auto* session = mWiring->sessions.session(connection);
                     auto view = session && session->sessionId()
                         ? projectActorInterestView(prepared.candidateState(), *actorCandidate, *session->sessionId(),
-                            batch.scheduledTick().value(), prepared.candidateRevision())
+                              batch.scheduledTick().value(), prepared.candidateRevision())
                         : std::nullopt;
-                    if (!view) { mFailure = "actor view projection failed"; return false; }
+                    if (!view)
+                    {
+                        mFailure = "actor view projection failed";
+                        return false;
+                    }
                     actorViews.emplace_back(connection, std::move(*view));
                 }
             }
-            if (!admitCombinedInterestTickAtomically(
-                    mWiring->queues, routed, routedViews, actorBaselines, actorViews))
-            { mFailure = "tick output admission failed"; return false; }
+            if (!admitCombinedInterestTickAtomically(mWiring->queues, routed, routedViews, actorBaselines, actorViews))
+            {
+                mFailure = "tick output admission failed";
+                return false;
+            }
             if (!mWiring->reducer.commit(std::move(prepared)))
-            { mFailure = "canonical commit failed"; return false; }
-            if (actorCandidate) *mWiring->actors = std::move(*actorCandidate);
+            {
+                mFailure = "canonical commit failed";
+                return false;
+            }
+            if (actorCandidate)
+                *mWiring->actors = std::move(*actorCandidate);
         }
         for (const auto connection : mWiring->sessions.connections())
         {
             const auto now = mWiring->clock.now().nanoseconds() / 1'000'000;
             const auto pumped = mWiring->queues.pump(mTransport, connection, now);
-            if (!pumped || *pumped == OutboundPumpResult::TransportFailed
-                || *pumped == OutboundPumpResult::InvalidTime
+            if (!pumped || *pumped == OutboundPumpResult::TransportFailed || *pumped == OutboundPumpResult::InvalidTime
                 || *pumped == OutboundPumpResult::SlowPeerEvicted)
             {
                 (void)failConnection(connection, "connection send failed");
@@ -611,7 +759,8 @@ namespace TES3MP::ServerApp
 
     bool ServerApplication::stop() noexcept
     {
-        if (!mRunning && !mListener) return true;
+        if (!mRunning && !mListener)
+            return true;
         mRunning = false;
         bool success = true;
         if (mListener)
@@ -623,7 +772,8 @@ namespace TES3MP::ServerApp
         const auto shutDown = mTransport.shutdown();
         mLatestPoses.clear();
         success = success && (shutDown == TransportResult::Accepted || shutDown == TransportResult::AlreadyFinalized);
-        if (!success) mFailure = "transport shutdown failed";
+        if (!success)
+            mFailure = "transport shutdown failed";
         return success;
     }
 }

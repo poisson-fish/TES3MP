@@ -1440,6 +1440,11 @@
       "purpose": "Repository-backed actor identity, canonical state, authority, interest, replication, content, and presentation discovery with owner package choices."
     },
     {
+      "path": "docs/vnext/PHASE13_ACTOR_LIFECYCLE_CAPTURE.md",
+      "status": "A",
+      "purpose": "Records the bounded representative-content two-client actor cell, resume, authenticated resync, durable rejoin, and canonical continuity proof."
+    },
+    {
       "path": "docs/vnext/PRE_CUTOVER_PROVENANCE.md",
       "status": "A",
       "purpose": "Recorded pre-cutover repository and archive provenance."
@@ -1915,6 +1920,11 @@
       "purpose": "Runs bounded two-peer desktop or PC-VR movement capture through deterministic localhost direct, jitter, loss, and stall relay profiles."
     },
     {
+      "path": "scripts/run_phase13_actor_lifecycle_capture.py",
+      "status": "A",
+      "purpose": "Runs the bounded representative-content two-desktop actor lifecycle, resume, authenticated resync, and durable-credential rejoin proof."
+    },
+    {
       "path": "scripts/run_phase7_join_demo.py",
       "status": "A",
       "purpose": "Runs the bounded real Phase 7 server/client process proof with an injected credential failure and exact distinct non-orphan identity assertions."
@@ -1978,6 +1988,11 @@
       "path": "scripts/tests/test_phase12_movement_capture.py",
       "status": "A",
       "purpose": "Contracts for bounded movement-capture routing, profile validation, evidence completeness, and safe process cleanup."
+    },
+    {
+      "path": "scripts/tests/test_phase13_actor_lifecycle_capture.py",
+      "status": "A",
+      "purpose": "Contracts for actor lifecycle capture configuration, credential-file isolation, bounded evidence, and exact shared canonical samples."
     },
     {
       "path": "scripts/tests/test_phase8_desktop_harness.py",

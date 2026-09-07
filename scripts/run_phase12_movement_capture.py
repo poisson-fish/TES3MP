@@ -195,6 +195,9 @@ def write_server_config(root: Path, port: int, password: Path) -> Path:
     collision.write_text(
         f"TES3MP_COLLISION_V1\nmanifest {TEST_CONTENT_MANIFEST}\ncell interior 7\ncell exterior 8 0 0\n",
         encoding="utf-8")
+    actors = root / "actor-content"
+    actors.write_text(
+        f"TES3MP_ACTORS_V1\nmanifest {TEST_CONTENT_MANIFEST}\n", encoding="utf-8")
     config = root / "server.cfg"
     config.write_text(
         f"bind_address=127.0.0.1\nport={port}\ntick_interval_ms=16\ndisconnect_grace_ms=3000\n"
@@ -203,6 +206,7 @@ def write_server_config(root: Path, port: int, password: Path) -> Path:
         "spawn_cell=interior:7\ndefault_appearance_id=1\n"
         "movement_profile=sneak:1024;walk:4097;run:8192;jump:4096\n"
         f"collision_content_file={collision.as_posix()}\n"
+        f"actor_content_file={actors.as_posix()}\n"
         f"player_identity_file={(root / 'player-identities').as_posix()}\n", encoding="utf-8")
     return config
 

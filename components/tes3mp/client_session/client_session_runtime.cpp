@@ -1,7 +1,7 @@
 #include <tes3mp/client_session_runtime.hpp>
 
-#include <array>
 #include <algorithm>
+#include <array>
 #include <ranges>
 
 namespace TES3MP
@@ -11,8 +11,9 @@ namespace TES3MP
         bool negotiated(const ClientSessionStateMachine& session, CapabilityId capability) noexcept
         {
             const auto& hello = session.negotiatedHello();
-            return hello && std::binary_search(
-                hello->negotiatedCapabilities().begin(), hello->negotiatedCapabilities().end(), capability);
+            return hello
+                && std::binary_search(
+                    hello->negotiatedCapabilities().begin(), hello->negotiatedCapabilities().end(), capability);
         }
     }
 
@@ -154,10 +155,10 @@ namespace TES3MP
                 }
                 mPendingObservations.clear();
                 if (!wasComplete && mSession->stateMachine().interestBaselineComplete())
-                {
                     result.baselineCompleted = true;
-                    mResyncPending = false;
-                }
+                if (mResyncPending && mResyncPlayerBaselineObserved
+                    && mSession->stateMachine().interestBaselineComplete())
+                    result.baselineCompleted = true;
             }
             else if (auto* observation = std::get_if<ReliableObservationBatch>(&message))
             {
@@ -188,12 +189,13 @@ namespace TES3MP
                 if (applied != ReliableInterestBaselineReceiveResult::Applied
                     && applied != ReliableInterestBaselineReceiveResult::IdenticalDuplicate)
                     return reject();
-                result.baselineApplied = result.baselineApplied
-                    || applied == ReliableInterestBaselineReceiveResult::Applied;
+                result.baselineApplied
+                    = result.baselineApplied || applied == ReliableInterestBaselineReceiveResult::Applied;
+                if (mResyncPending)
+                    mResyncPlayerBaselineObserved = true;
                 if (mSession->stateMachine().interestBaselineComplete())
                 {
-                    result.baselineCompleted = result.baselineCompleted || !wasComplete;
-                    mResyncPending = false;
+                    result.baselineCompleted = result.baselineCompleted || !wasComplete || mResyncPending;
                 }
             }
             else if (auto* actorSnapshot = std::get_if<LatestWinsActorSnapshot>(&message))
@@ -205,15 +207,17 @@ namespace TES3MP
                         != ClientSessionBindingResult::Bound)
                         return reject();
                 }
-                const auto applied = mSession->receiveLatestWinsActorSnapshot(
-                    std::move(*actorSnapshot));
+                const auto applied = mSession->receiveLatestWinsActorSnapshot(std::move(*actorSnapshot));
                 if (applied != ActorReplicationReceiveResult::Applied
                     && applied != ActorReplicationReceiveResult::IdenticalDuplicate)
                     return reject();
-                result.actorSnapshotApplied = result.actorSnapshotApplied
-                    || applied == ActorReplicationReceiveResult::Applied;
+                result.actorSnapshotApplied
+                    = result.actorSnapshotApplied || applied == ActorReplicationReceiveResult::Applied;
                 result.actorBaselineCompleted = result.actorBaselineCompleted
                     || (!wasComplete && mSession->stateMachine().actorInterestBaselineComplete());
+                if (mResyncPending && mResyncActorBaselineObserved
+                    && mSession->stateMachine().actorInterestBaselineComplete())
+                    result.actorBaselineCompleted = true;
             }
             else if (auto* actorBaseline = std::get_if<ReliableActorInterestBaseline>(&message))
             {
@@ -224,15 +228,16 @@ namespace TES3MP
                         != ClientSessionBindingResult::Bound)
                         return reject();
                 }
-                const auto applied = mSession->receiveReliableActorInterestBaseline(
-                    std::move(*actorBaseline));
+                const auto applied = mSession->receiveReliableActorInterestBaseline(std::move(*actorBaseline));
                 if (applied != ActorReplicationReceiveResult::Applied
                     && applied != ActorReplicationReceiveResult::IdenticalDuplicate)
                     return reject();
-                result.actorBaselineApplied = result.actorBaselineApplied
-                    || applied == ActorReplicationReceiveResult::Applied;
+                result.actorBaselineApplied
+                    = result.actorBaselineApplied || applied == ActorReplicationReceiveResult::Applied;
+                if (mResyncPending)
+                    mResyncActorBaselineObserved = true;
                 result.actorBaselineCompleted = result.actorBaselineCompleted
-                    || (!wasComplete && mSession->stateMachine().actorInterestBaselineComplete());
+                    || ((!wasComplete || mResyncPending) && mSession->stateMachine().actorInterestBaselineComplete());
             }
             else if (auto* pose = std::get_if<ServerVrPoseSnapshot>(&message))
             {
@@ -244,6 +249,14 @@ namespace TES3MP
                     return reject();
                 result.poseSnapshots.emplace_back(std::move(*pose));
             }
+        }
+        if (mResyncPending && mResyncPlayerBaselineObserved && mSession->stateMachine().interestBaselineComplete()
+            && (!negotiated(mSession->stateMachine(), actorReplicationCapability())
+                || (mResyncActorBaselineObserved && mSession->stateMachine().actorInterestBaselineComplete())))
+        {
+            mResyncPending = false;
+            mResyncPlayerBaselineObserved = false;
+            mResyncActorBaselineObserved = false;
         }
         return result;
     }
@@ -258,7 +271,8 @@ namespace TES3MP
         const auto& snapshot = mSession->stateMachine().confirmedSnapshot();
         const auto& negotiatedHello = mSession->stateMachine().negotiatedHello();
         if (!snapshot || !negotiatedHello || negotiatedHello->selectedVersion().major != 1
-            || negotiatedHello->selectedVersion().minor < 3 || mLocomotionHistory.size() == MaximumRetainedLocomotionInputs)
+            || negotiatedHello->selectedVersion().minor < 3
+            || mLocomotionHistory.size() == MaximumRetainedLocomotionInputs)
             return { ClientRuntimeResult::NotConnected, std::nullopt };
         const auto self = std::ranges::find_if(snapshot->view().entries(), [&](const auto& entry) {
             return entry.playerId() == snapshot->header().targetPlayerId()
@@ -310,8 +324,7 @@ namespace TES3MP
         });
         if (self == snapshot->view().entries().end())
             return std::nullopt;
-        return mLocomotionHistory.reconcile(
-            *self, snapshot->header().acknowledgedCommandSequence(), hardDiscontinuity);
+        return mLocomotionHistory.reconcile(*self, snapshot->header().acknowledgedCommandSequence(), hardDiscontinuity);
     }
 
     ClientRuntimeResult ClientSessionRuntime::queuePoseSample(const ClientVrPoseSample& sample)
@@ -322,8 +335,8 @@ namespace TES3MP
         if (!negotiated(mSession->stateMachine(), vrPoseCapability()) || sample.sourceSessionId() != *sessionId
             || sample.sourceSessionGeneration() != mSession->stateMachine().generation())
             return ClientRuntimeResult::ProtocolRejected;
-        return queue(MessageClass::PresentationSample, MessageKind::ClientVrPoseSample,
-            encodeClientVrPoseSample(sample));
+        return queue(
+            MessageClass::PresentationSample, MessageKind::ClientVrPoseSample, encodeClientVrPoseSample(sample));
     }
 
     ClientRuntimeResult ClientSessionRuntime::requestResync(ResyncReason reason)
@@ -340,10 +353,14 @@ namespace TES3MP
         auto* request = std::get_if<SessionResyncRequest>(&created);
         if (!request)
             return ClientRuntimeResult::EncodeRejected;
-        const auto result = queue(MessageClass::SessionControl, MessageKind::SessionResyncRequest,
-            encodeSessionResyncRequest(*request));
+        const auto result = queue(
+            MessageClass::SessionControl, MessageKind::SessionResyncRequest, encodeSessionResyncRequest(*request));
         if (result == ClientRuntimeResult::Accepted)
+        {
             mResyncPending = true;
+            mResyncPlayerBaselineObserved = false;
+            mResyncActorBaselineObserved = false;
+        }
         return result;
     }
 

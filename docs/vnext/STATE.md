@@ -12,8 +12,9 @@ Updated: 2026-09-07
 - Phase 13 discovery: **Complete**
 - Phase 13 actor core: **Complete**
 - Phase 13 actor composition/replication: **Complete**
-- Active work: **Phase 13 content-backed two-client lifecycle proof and closure**
-- Last pass: **Phase 13 content-backed actor vertical slice complete**
+- Phase 13 lifecycle proof: **Complete**
+- Active work: **Phase 14 interactive-object discovery**
+- Last pass: **Phase 13 closed with content-backed two-client lifecycle evidence**
 - Authoritative tracker: [rolling implementation plan](IMPLEMENTATION_PLAN.md)
 - Historical evidence: [implementation notes](IMPLEMENTATION_NOTES.md)
 
@@ -229,6 +230,21 @@ ADRs and GDRs are required only for consequential, hard-to-reverse decisions.
 - Combat, death, deletion, inventory, scripts, persistence, pathfinding, dynamic
   bodies, client simulation, and authority delegation remain excluded.
 
+## Phase 13 lifecycle closure result
+
+- A bounded representative Morrowind/Tribunal/Bloodmoon route ran two real
+  desktop clients against one dedicated server with a locally mapped wandering
+  actor. Thirty-three shared canonical samples matched exactly.
+- Exact-cell leave/re-entry, four disconnect/resume cycles, authenticated
+  resync, grace expiration, and durable-credential rejoin retained actor
+  identity `1/9001/1`; revision checkpoints advanced `238 -> 244 -> 367 -> 374`.
+- The proof fixed cross-lane player/actor membership ordering, same-revision
+  resync publication ticks, and identical-baseline resync completion. Automation
+  now forwards production actor presentation and retains bounded evidence.
+- No protocol schema, authority, AI, collision, persistence, gameplay, or
+  player-facing tuning changed. Phase 13 is complete; evidence is recorded in
+  [the lifecycle capture](PHASE13_ACTOR_LIFECYCLE_CAPTURE.md).
+
 ## Phase 10 result
 
 - Fresh password joins issue a random 32-byte player credential after ordinary
@@ -296,7 +312,7 @@ work.
   fixed-tick catch-up, and exact-cell lifecycle contracts.
 - RelWithDebInfo `tes3mp_server`, desktop `openmw`, and merged `openmw_vr`
   targets build and link.
-- All 150 repository Python tests, indexed baseline provenance, legacy exclusion,
+- All 154 repository Python tests, indexed baseline provenance, legacy exclusion,
   target boundaries, and changed-line diff hygiene pass.
 - Representative-content desktop direct/jitter/loss/stall capture remains green.
   PC-VR hardware and visual proof remain intentionally deferred while the
@@ -305,12 +321,12 @@ work.
 ## Next pass
 
 Read the rolling **Now** section in
-[IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md). Run the representative
-two-desktop actor lifecycle route through cell transitions, disconnect/resume,
-and authenticated resync, retain bounded evidence, then close Phase 13 if green.
+[IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md). Discover the smallest bounded
+server-authoritative package for interactive objects, locks, traps, and doors;
+return with owner options and named proof scenarios before runtime changes.
 
 ## Working-tree expectation
 
-`vnext` should contain the committed actor vertical slice and rolling handoff and
-be clean. The separate `vnext-vr` worktree should remain clean at Phase 13
-integration merge `2762445c8b`.
+`vnext` should contain the committed Phase 13 closure and rolling handoff and be
+clean. The separate `vnext-vr` worktree remains clean at Phase 13 integration
+merge `2762445c8b`; merge the closure before later VR presentation work.

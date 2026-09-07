@@ -25,8 +25,17 @@ namespace TES3MP::OpenMWAdapter
         bool poseNegotiated(const ClientSessionRuntime& runtime) noexcept
         {
             const auto& hello = runtime.session().stateMachine().negotiatedHello();
-            return hello && std::binary_search(
-                hello->negotiatedCapabilities().begin(), hello->negotiatedCapabilities().end(), vrPoseCapability());
+            return hello
+                && std::binary_search(
+                    hello->negotiatedCapabilities().begin(), hello->negotiatedCapabilities().end(), vrPoseCapability());
+        }
+
+        bool actorsNegotiated(const ClientSessionRuntime& runtime) noexcept
+        {
+            const auto& hello = runtime.session().stateMachine().negotiatedHello();
+            return hello
+                && std::binary_search(hello->negotiatedCapabilities().begin(), hello->negotiatedCapabilities().end(),
+                    actorReplicationCapability());
         }
 
         struct ResumeContinuity
@@ -137,6 +146,11 @@ namespace TES3MP::OpenMWAdapter
                     handleRuntimeFailure(advanced.result, advanced.action, now);
                     return;
                 }
+                if (mAwaitingResync)
+                {
+                    mResyncPlayerBaseline = mResyncPlayerBaseline || advanced.baselineCompleted;
+                    mResyncActorBaseline = mResyncActorBaseline || advanced.actorBaselineCompleted;
+                }
                 if (advanced.authenticationAccepted)
                 {
                     if (auto playerCredential = mRuntime->takePlayerCredential())
@@ -178,6 +192,7 @@ namespace TES3MP::OpenMWAdapter
                 {
                     mPendingCellTransition.reset();
                     finalizedCellTransition = true;
+                    mMinimumActorBaselineRevision = snapshot->header().canonicalRevision();
                 }
                 if (mResuming && advanced.baselineCompleted)
                 {
@@ -190,8 +205,8 @@ namespace TES3MP::OpenMWAdapter
                     mReady = true;
                     mStatus.report(ConnectionStatus::Resumed);
                 }
-                if ((advanced.baselineCompleted || advanced.snapshotApplied || advanced.observationApplied)
-                    && snapshot && mRuntime->session().stateMachine().interestBaselineComplete())
+                if ((advanced.baselineCompleted || advanced.snapshotApplied || advanced.observationApplied) && snapshot
+                    && mRuntime->session().stateMachine().interestBaselineComplete())
                 {
                     const auto localReconciliation
                         = mRuntime->reconcileLocalPresentation(advanced.baselineCompleted && !mReady);
@@ -218,12 +233,19 @@ namespace TES3MP::OpenMWAdapter
                     }
                 }
                 const auto& actorSnapshot = mRuntime->session().stateMachine().confirmedActorSnapshot();
-                if ((advanced.actorBaselineCompleted || advanced.actorBaselineApplied
-                        || advanced.actorSnapshotApplied)
-                    && actorSnapshot && mRuntime->session().stateMachine().actorInterestBaselineComplete())
+                const auto& playerBaseline = mRuntime->session().stateMachine().confirmedInterestBaseline();
+                const auto& actorBaseline = mRuntime->session().stateMachine().confirmedActorInterestBaseline();
+                if ((advanced.actorBaselineCompleted || advanced.actorBaselineApplied || advanced.actorSnapshotApplied
+                        || advanced.baselineCompleted || advanced.snapshotApplied)
+                    && actorSnapshot && playerBaseline && actorBaseline
+                    && actorBaseline->canonicalRevision() >= playerBaseline->canonicalRevision() && snapshot
+                    && actorBaseline->canonicalRevision() <= snapshot->header().canonicalRevision()
+                    && (!mMinimumActorBaselineRevision
+                        || actorBaseline->canonicalRevision() >= *mMinimumActorBaselineRevision)
+                    && mRuntime->session().stateMachine().actorInterestBaselineComplete())
                 {
-                    const auto applied = mPresentation.applyActors(*actorSnapshot,
-                        mRuntime->session().stateMachine().observedActors(), now);
+                    const auto applied = mPresentation.applyActors(
+                        *actorSnapshot, mRuntime->session().stateMachine().observedActors(), now);
                     if (applied != ProviderResult::Accepted)
                     {
                         closeForProviderFailure(applied);
@@ -236,8 +258,7 @@ namespace TES3MP::OpenMWAdapter
                     for (const auto& pose : advanced.poseSnapshots)
                     {
                         const auto observed = std::ranges::find_if(snapshot->view().entries(), [&](const auto& entry) {
-                            return entry.playerId() == pose.sourcePlayerId()
-                                && entry.entityId() == pose.rootEntityId()
+                            return entry.playerId() == pose.sourcePlayerId() && entry.entityId() == pose.rootEntityId()
                                 && entry.authorityEpoch() == pose.rootAuthorityEpoch();
                         });
                         if (observed == snapshot->view().entries().end()
@@ -272,6 +293,11 @@ namespace TES3MP::OpenMWAdapter
                     closeForProviderFailure(ProviderResult::PresentationFailed);
                     return;
                 }
+                if (mAwaitingResync && mResyncPlayerBaseline && (!actorsNegotiated(*mRuntime) || mResyncActorBaseline))
+                {
+                    mAwaitingResync = false;
+                    mControl->resyncCompleted();
+                }
                 if (mResuming || !mReady)
                 {
                     if (mRuntime->flushOutbound() != ClientRuntimeResult::Accepted)
@@ -294,6 +320,20 @@ namespace TES3MP::OpenMWAdapter
                 }
                 if (mClosed)
                     return;
+                if (mControl)
+                {
+                    if (auto reason = mControl->resyncRequested())
+                    {
+                        if (mAwaitingResync || mRuntime->requestResync(*reason) != ClientRuntimeResult::Accepted)
+                        {
+                            closeTerminal(ConnectionStatus::TransportFailed);
+                            return;
+                        }
+                        mAwaitingResync = true;
+                        mResyncPlayerBaseline = false;
+                        mResyncActorBaseline = false;
+                    }
+                }
                 if (snapshot)
                 {
                     if (auto intent = mInput.sampleCurrentIntent())
@@ -318,19 +358,16 @@ namespace TES3MP::OpenMWAdapter
                             return;
                         }
                     }
-                    if (mPoseInput && poseNegotiated(*mRuntime)
-                        && (!mNextPoseSample || now >= *mNextPoseSample))
+                    if (mPoseInput && poseNegotiated(*mRuntime) && (!mNextPoseSample || now >= *mNextPoseSample))
                     {
                         if (auto pose = mPoseInput->sampleVrPose())
                         {
-                            const auto sequence = mPoseSequence ? mPoseSequence->next()
-                                                                : std::optional(PoseSampleSequence::initial());
+                            const auto sequence
+                                = mPoseSequence ? mPoseSequence->next() : std::optional(PoseSampleSequence::initial());
                             if (!sequence
-                                || mRuntime->queuePoseSample(ClientVrPoseSample(
-                                       snapshot->header().targetSessionId(),
+                                || mRuntime->queuePoseSample(ClientVrPoseSample(snapshot->header().targetSessionId(),
                                        snapshot->header().targetSessionGeneration(), self->entityId(),
-                                       self->authorityEpoch(), *sequence, pose->head, pose->leftHand,
-                                       pose->rightHand))
+                                       self->authorityEpoch(), *sequence, pose->head, pose->leftHand, pose->rightHand))
                                     != ClientRuntimeResult::Accepted)
                             {
                                 closeTerminal(ConnectionStatus::TransportFailed);
@@ -340,8 +377,8 @@ namespace TES3MP::OpenMWAdapter
                         }
                         if (now.nanoseconds()
                             <= std::numeric_limits<std::uint64_t>::max() - PoseSampleIntervalNanoseconds)
-                            mNextPoseSample = MonotonicInstant::fromNanoseconds(
-                                now.nanoseconds() + PoseSampleIntervalNanoseconds);
+                            mNextPoseSample
+                                = MonotonicInstant::fromNanoseconds(now.nanoseconds() + PoseSampleIntervalNanoseconds);
                         else
                         {
                             closeTerminal(ConnectionStatus::TransportFailed);
@@ -403,6 +440,10 @@ namespace TES3MP::OpenMWAdapter
                 mNextPoseSample.reset();
                 mPendingCellTransition.reset();
                 mDeferredCellTransition.reset();
+                mAwaitingResync = false;
+                mResyncPlayerBaseline = false;
+                mResyncActorBaseline = false;
+                mMinimumActorBaselineRevision.reset();
                 mReady = false;
                 mResuming = true;
                 mAttemptGeneration = *nextGeneration;
@@ -432,8 +473,7 @@ namespace TES3MP::OpenMWAdapter
                 auto attempt = std::move(*runtime);
                 auto token = std::move(*mResumeToken);
                 mResumeToken.reset();
-                if (attempt->start(
-                        mReconnect.endpoint, makeClientHello(mReconnect.contentManifest),
+                if (attempt->start(mReconnect.endpoint, makeClientHello(mReconnect.contentManifest),
                         AuthenticationRequest::resume(std::move(token)))
                     != HeadlessClientResult::Accepted)
                 {
@@ -509,6 +549,10 @@ namespace TES3MP::OpenMWAdapter
             MotionIntentTracker mMotion;
             PoseEvidenceTracker mPoseEvidence;
             bool mClosed = false;
+            bool mAwaitingResync = false;
+            bool mResyncPlayerBaseline = false;
+            bool mResyncActorBaseline = false;
+            std::optional<CanonicalRevision> mMinimumActorBaselineRevision;
             bool mReady = false;
             bool mResuming = false;
             std::optional<CommandSequence> mPendingCellTransition;

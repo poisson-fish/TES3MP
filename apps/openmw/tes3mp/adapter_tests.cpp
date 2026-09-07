@@ -45,16 +45,17 @@ namespace
             TES3MP::LinearVelocity3(velocity, 0, 0), mode);
     }
 
-    TES3MP::ServerHello serverHello(bool pose = false)
+    TES3MP::ServerHello serverHello(bool pose = false, bool actors = false)
     {
         auto versions = std::get<TES3MP::ProtocolVersionRange>(TES3MP::ProtocolVersionRange::create(1, 2, 2));
-        const std::array poseCapabilities{ TES3MP::vrPoseCapability() };
-        const std::span<const TES3MP::CapabilityId> capabilities
-            = pose ? std::span<const TES3MP::CapabilityId>(poseCapabilities) : std::span<const TES3MP::CapabilityId>{};
-        auto client = std::get<TES3MP::CapabilityOffer>(
-            TES3MP::CapabilityOffer::create(versions, capabilities, {}));
-        auto server = std::get<TES3MP::CapabilityOffer>(
-            TES3MP::CapabilityOffer::create(std::move(versions), capabilities, {}));
+        std::vector<TES3MP::CapabilityId> capabilities;
+        if (pose)
+            capabilities.push_back(TES3MP::vrPoseCapability());
+        if (actors)
+            capabilities.push_back(TES3MP::actorReplicationCapability());
+        auto client = std::get<TES3MP::CapabilityOffer>(TES3MP::CapabilityOffer::create(versions, capabilities, {}));
+        auto server
+            = std::get<TES3MP::CapabilityOffer>(TES3MP::CapabilityOffer::create(std::move(versions), capabilities, {}));
         auto negotiated = TES3MP::negotiateClientHello(TES3MP::ClientHello::fromOffer(std::move(client)), server);
         return std::get<TES3MP::ServerHello>(std::move(negotiated));
     }
@@ -65,9 +66,8 @@ namespace
         return std::get<std::vector<std::byte>>(TES3MP::encodeProtocolFrame(messageClass, messageKind, payload));
     }
 
-    TES3MP::AuthenticationAcceptedMessage accepted(
-        std::byte marker, std::uint64_t lifetime = TES3MP::MinimumResumeTokenLifetimeMilliseconds,
-        bool includePlayerCredential = false)
+    TES3MP::AuthenticationAcceptedMessage accepted(std::byte marker,
+        std::uint64_t lifetime = TES3MP::MinimumResumeTokenLifetimeMilliseconds, bool includePlayerCredential = false)
     {
         std::array<std::byte, TES3MP::ResumeTokenBytes> bytes{};
         bytes.fill(marker);
@@ -75,8 +75,8 @@ namespace
         std::optional<TES3MP::PlayerCredential> playerCredential;
         if (includePlayerCredential)
             playerCredential = TES3MP::PlayerCredential::create(bytes);
-        return std::move(*TES3MP::AuthenticationAcceptedMessage::create(
-            std::move(*token), lifetime, std::move(playerCredential)));
+        return std::move(
+            *TES3MP::AuthenticationAcceptedMessage::create(std::move(*token), lifetime, std::move(playerCredential)));
     }
 
     class RecordingPlayerCredentialPersistence final : public TES3MP::OpenMWAdapter::PlayerCredentialPersistence
@@ -91,38 +91,67 @@ namespace
         std::array<std::byte, TES3MP::PlayerCredentialBytes> bytes{};
     };
 
-    TES3MP::LatestWinsSnapshot selfSnapshot(TES3MP::SessionGeneration generation, bool includeRemote = false)
+    TES3MP::LatestWinsSnapshot selfSnapshot(TES3MP::SessionGeneration generation, bool includeRemote = false,
+        std::uint64_t canonicalRevision = 1, std::uint64_t serverTick = 1)
     {
         const auto session = value<TES3MP::SessionId>(1);
         const auto player = value<TES3MP::PlayerId>(1);
         const auto entity = value<TES3MP::EntityId>(1);
         const auto zero = TES3MP::Turn32::fromValue(0);
-        std::vector entries{ TES3MP::SpatialEntitySnapshot(TES3MP::ServerTick::initial(), player, entity,
+        std::vector entries{ TES3MP::SpatialEntitySnapshot(value<TES3MP::ServerTick>(serverTick), player, entity,
             value<TES3MP::AppearanceId>(1), TES3MP::EntityRevision::initial(), TES3MP::AuthorityEpoch::initial(),
             TES3MP::Transform(TES3MP::CellId::interior(value<TES3MP::CellSpaceId>(7)), TES3MP::Position3(0, 0, 0),
                 TES3MP::Orientation3(zero, zero, zero)),
             TES3MP::LinearVelocity3(0, 0, 0)) };
         if (includeRemote)
-            entries.push_back(TES3MP::SpatialEntitySnapshot(TES3MP::ServerTick::initial(), value<TES3MP::PlayerId>(2),
-                value<TES3MP::EntityId>(2), value<TES3MP::AppearanceId>(1), TES3MP::EntityRevision::initial(),
-                TES3MP::AuthorityEpoch::initial(),
+            entries.push_back(TES3MP::SpatialEntitySnapshot(value<TES3MP::ServerTick>(serverTick),
+                value<TES3MP::PlayerId>(2), value<TES3MP::EntityId>(2), value<TES3MP::AppearanceId>(1),
+                TES3MP::EntityRevision::initial(), TES3MP::AuthorityEpoch::initial(),
                 TES3MP::Transform(TES3MP::CellId::interior(value<TES3MP::CellSpaceId>(7)), TES3MP::Position3(0, 0, 0),
                     TES3MP::Orientation3(zero, zero, zero)),
                 TES3MP::LinearVelocity3(0, 0, 0)));
         auto view = std::get<TES3MP::SpatialWorldView>(TES3MP::SpatialWorldView::create(entries));
         return TES3MP::LatestWinsSnapshot(TES3MP::LatestWinsSnapshotHeader(session, generation, player, entity,
-                                              TES3MP::CanonicalRevision::initial(), std::nullopt),
+                                              value<TES3MP::CanonicalRevision>(canonicalRevision), std::nullopt),
             std::move(view));
     }
 
-    TES3MP::ReliableInterestBaseline selfBaseline(TES3MP::SessionGeneration generation, bool includeRemote = false)
+    TES3MP::ReliableInterestBaseline selfBaseline(TES3MP::SessionGeneration generation, bool includeRemote = false,
+        std::uint64_t canonicalRevision = 1, std::uint64_t serverTick = 1)
     {
         std::vector members{ TES3MP::InterestMember{ value<TES3MP::PlayerId>(1), value<TES3MP::EntityId>(1) } };
         if (includeRemote)
             members.push_back({ value<TES3MP::PlayerId>(2), value<TES3MP::EntityId>(2) });
         return std::get<TES3MP::ReliableInterestBaseline>(TES3MP::ReliableInterestBaseline::create(
-            value<TES3MP::SessionId>(1), generation, TES3MP::CanonicalRevision::initial(),
-            TES3MP::CanonicalStateVersion::initial(), TES3MP::ServerTick::initial(), members));
+            value<TES3MP::SessionId>(1), generation, value<TES3MP::CanonicalRevision>(canonicalRevision),
+            value<TES3MP::CanonicalStateVersion>(canonicalRevision), value<TES3MP::ServerTick>(serverTick), members));
+    }
+
+    TES3MP::LatestWinsActorSnapshot actorSnapshot(
+        TES3MP::SessionGeneration generation, std::uint64_t canonicalRevision, std::uint64_t serverTick)
+    {
+        const auto zero = TES3MP::Turn32::fromValue(0);
+        const std::array entries{ TES3MP::ActorSpatialSnapshot(value<TES3MP::ServerTick>(serverTick),
+            value<TES3MP::ActorId>(1), value<TES3MP::EntityId>(9), value<TES3MP::ActorPrototypeId>(1),
+            value<TES3MP::EntityRevision>(canonicalRevision), TES3MP::AuthorityEpoch::initial(),
+            TES3MP::Transform(TES3MP::CellId::interior(value<TES3MP::CellSpaceId>(7)),
+                TES3MP::Position3(static_cast<std::int64_t>(canonicalRevision), 0, 0),
+                TES3MP::Orientation3(zero, zero, zero)),
+            TES3MP::LinearVelocity3(1, 0, 0), TES3MP::ActorActivity::Wander) };
+        auto view = std::get<TES3MP::ActorWorldView>(TES3MP::ActorWorldView::create(entries));
+        return TES3MP::LatestWinsActorSnapshot(value<TES3MP::SessionId>(1), generation,
+            value<TES3MP::ServerTick>(serverTick), value<TES3MP::CanonicalRevision>(canonicalRevision),
+            std::move(view));
+    }
+
+    TES3MP::ReliableActorInterestBaseline actorBaseline(
+        TES3MP::SessionGeneration generation, std::uint64_t canonicalRevision, std::uint64_t serverTick)
+    {
+        const std::array members{ TES3MP::ActorInterestMember{
+            value<TES3MP::ActorId>(1), value<TES3MP::EntityId>(9), value<TES3MP::ActorPrototypeId>(1) } };
+        return std::get<TES3MP::ReliableActorInterestBaseline>(
+            TES3MP::ReliableActorInterestBaseline::create(value<TES3MP::SessionId>(1), generation,
+                value<TES3MP::ServerTick>(serverTick), value<TES3MP::CanonicalRevision>(canonicalRevision), members));
     }
 
     class MotionMetrics final : public TES3MP::OpenMWAdapter::RemoteMotionMetricSink
@@ -216,6 +245,7 @@ namespace
         {
             sentChannel = channel;
             sent.assign(bytes.begin(), bytes.end());
+            sentFrames.emplace_back(sent);
             return TES3MP::TransportResult::Accepted;
         }
         TES3MP::TransportReceiveResult receive(
@@ -253,6 +283,7 @@ namespace
         std::optional<TES3MP::ConnectAttemptId> pendingAttempt;
         std::vector<TES3MP::TransportMessage> inbound;
         std::vector<std::byte> sent;
+        std::vector<std::vector<std::byte>> sentFrames;
         std::optional<TES3MP::TransportChannel> sentChannel;
 
         void enqueue(TES3MP::MessageClass messageClass, TES3MP::MessageKind messageKind,
@@ -269,8 +300,8 @@ namespace
         std::optional<TES3MP::LocomotionIntent> sampleCurrentIntent() noexcept override
         {
             ++calls;
-            return TES3MP::LocomotionIntent(TES3MP::LocomotionMode::Walk, TES3MP::Turn32::fromValue(0),
-                TES3MP::LinearVelocity3(1, 2, 3));
+            return TES3MP::LocomotionIntent(
+                TES3MP::LocomotionMode::Walk, TES3MP::Turn32::fromValue(0), TES3MP::LinearVelocity3(1, 2, 3));
         }
         unsigned calls = 0;
     };
@@ -296,6 +327,12 @@ namespace
             ++poses;
             return TES3MP::OpenMWAdapter::ProviderResult::Accepted;
         }
+        TES3MP::OpenMWAdapter::ProviderResult applyActors(const TES3MP::LatestWinsActorSnapshot&,
+            std::span<const TES3MP::ActorInterestMember>, TES3MP::MonotonicInstant) noexcept override
+        {
+            ++actors;
+            return TES3MP::OpenMWAdapter::ProviderResult::Accepted;
+        }
         TES3MP::OpenMWAdapter::ProviderResult applyVrPoseWeight(
             TES3MP::EntityId, TES3MP::AuthorityEpoch, double weight) noexcept override
         {
@@ -308,6 +345,7 @@ namespace
         unsigned advances = 0;
         unsigned clears = 0;
         unsigned poses = 0;
+        unsigned actors = 0;
         unsigned poseFallbacks = 0;
         double lastPoseWeight = 0.0;
     };
@@ -321,8 +359,8 @@ namespace
             const auto offset = *TES3MP::VrPoseOffset3::create(1, 2, 3);
             const auto zero = TES3MP::Turn32::fromValue(0);
             return TES3MP::OpenMWAdapter::LocalVrPose{
-                TES3MP::VrTrackedTransform(offset, TES3MP::Orientation3(zero, zero, zero)), std::nullopt,
-                std::nullopt };
+                TES3MP::VrTrackedTransform(offset, TES3MP::Orientation3(zero, zero, zero)), std::nullopt, std::nullopt
+            };
         }
         unsigned calls = 0;
     };
@@ -349,7 +387,17 @@ namespace
             pending = false;
             return true;
         }
+        std::optional<TES3MP::ResyncReason> resyncRequested() noexcept override
+        {
+            if (!resyncPending)
+                return std::nullopt;
+            resyncPending = false;
+            return TES3MP::ResyncReason::LocalFeedGap;
+        }
+        void resyncCompleted() noexcept override { ++resyncCompletions; }
         bool pending = true;
+        bool resyncPending = false;
+        unsigned resyncCompletions = 0;
     };
 
     class Coordinator final : public TES3MP::OpenMWAdapter::EngineCoordinator
@@ -372,8 +420,7 @@ int main()
     using namespace TES3MP;
     using namespace TES3MP::OpenMWAdapter;
 
-    const auto credentialDirectory
-        = std::filesystem::temp_directory_path() / "tes3mp-openmw-player-credential-test";
+    const auto credentialDirectory = std::filesystem::temp_directory_path() / "tes3mp-openmw-player-credential-test";
     std::filesystem::remove_all(credentialDirectory);
     std::filesystem::create_directory(credentialDirectory);
     const auto credentialPath = credentialDirectory / "player.bin";
@@ -390,8 +437,8 @@ int main()
     require(storedCredential == credentialBytes);
 #ifndef _WIN32
     const auto publicPermissions = std::filesystem::perms::group_all | std::filesystem::perms::others_all;
-    require((std::filesystem::status(credentialPath).permissions() & publicPermissions)
-        == std::filesystem::perms::none);
+    require(
+        (std::filesystem::status(credentialPath).permissions() & publicPermissions) == std::filesystem::perms::none);
 #endif
     std::filesystem::remove(credentialPath);
     std::filesystem::create_directory(credentialPath);
@@ -510,20 +557,16 @@ int main()
     require(dropsDoNotChangePresentation.advance(MonotonicInstant::fromNanoseconds(0))->x == 7.0);
 
     require(movementCorrectionDistanceQuanta(Position3(3, 4, 0), 0, 0, 0) == 5);
-    require(movementCorrectionDistanceQuanta(Position3(0, 0, 0),
-                std::numeric_limits<double>::infinity(), 0, 0)
+    require(movementCorrectionDistanceQuanta(Position3(0, 0, 0), std::numeric_limits<double>::infinity(), 0, 0)
         == std::numeric_limits<std::uint64_t>::max());
 
     MotionMetrics trackerMetrics;
     MotionIntentTracker motion(&trackerMetrics);
-    const auto moving = LocomotionIntent(
-        LocomotionMode::Walk, Turn32::fromValue(0), LinearVelocity3(10, 0, 0));
-    const auto stopped = LocomotionIntent(
-        LocomotionMode::Walk, Turn32::fromValue(0), LinearVelocity3(0, 0, 0));
+    const auto moving = LocomotionIntent(LocomotionMode::Walk, Turn32::fromValue(0), LinearVelocity3(10, 0, 0));
+    const auto stopped = LocomotionIntent(LocomotionMode::Walk, Turn32::fromValue(0), LinearVelocity3(0, 0, 0));
     motion.sample(moving, MonotonicInstant::fromNanoseconds(90));
     require(motion.next(LinearVelocity3(0, 0, 0)).has_value());
-    require(motion.markQueued(CommandSequence::initial(), moving,
-                MonotonicInstant::fromNanoseconds(100))
+    require(motion.markQueued(CommandSequence::initial(), moving, MonotonicInstant::fromNanoseconds(100))
         && motion.pending());
     motion.sample(stopped, MonotonicInstant::fromNanoseconds(125));
     require(!motion.next(LinearVelocity3(0, 0, 0)));
@@ -531,10 +574,8 @@ int main()
     require(!motion.pending());
     require(trackerMetrics.has(MovementMetricKey::CommandAcknowledgementNanoseconds));
     require(motion.next(LinearVelocity3(10, 0, 0))->desiredVelocity() == LinearVelocity3(0, 0, 0));
-    require(motion.markQueued(*CommandSequence::initial().next(), stopped,
-        MonotonicInstant::fromNanoseconds(200)));
-    motion.observeAcknowledgement(
-        *CommandSequence::initial().next(), MonotonicInstant::fromNanoseconds(300));
+    require(motion.markQueued(*CommandSequence::initial().next(), stopped, MonotonicInstant::fromNanoseconds(200)));
+    motion.observeAcknowledgement(*CommandSequence::initial().next(), MonotonicInstant::fromNanoseconds(300));
     require(!motion.next(LinearVelocity3(0, 0, 0)));
     require(trackerMetrics.has(MovementMetricKey::StopAcknowledgementNanoseconds));
     require(trackerMetrics.maximum(MovementMetricKey::StopAcknowledgementNanoseconds) == 175);
@@ -613,9 +654,8 @@ int main()
         *reconnectTransport, *reconnectClock, timeouts, SessionGeneration::initial(), outbound);
     auto reconnectRuntime = std::get<std::unique_ptr<ClientSessionRuntime>>(std::move(reconnectCreated));
     auto versions = std::get<ProtocolVersionRange>(ProtocolVersionRange::create(1, 2, 2));
-    const std::array poseCapabilities{ vrPoseCapability() };
-    auto offer = std::get<CapabilityOffer>(
-        CapabilityOffer::create(std::move(versions), poseCapabilities, {}));
+    const std::array poseCapabilities{ vrPoseCapability(), actorReplicationCapability() };
+    auto offer = std::get<CapabilityOffer>(CapabilityOffer::create(std::move(versions), poseCapabilities, {}));
     const std::array passwordBytes{ std::byte{ 1 } };
     auto password = AuthenticationMaterial::create(passwordBytes);
     require(password
@@ -628,12 +668,11 @@ int main()
         std::move(reconnectRuntime), reconnect, reconnectInput, reconnectPresentation, reconnectStatus, &disconnect,
         &poseInput, std::move(credentialPersistence), &trackerMetrics);
     reconnectCoordinator->frame(0.01f);
-    auto helloPayload = encodeServerHello(serverHello(true));
+    auto helloPayload = encodeServerHello(serverHello(true, true));
     reconnectTransportObserver->enqueue(
         MessageClass::SessionControl, MessageKind::ServerHello, helloPayload, TransportChannel::ReliableOrdered);
     reconnectCoordinator->frame(0.01f);
-    auto initialAccepted = accepted(
-        std::byte{ 2 }, 2 * MinimumResumeTokenLifetimeMilliseconds, true);
+    auto initialAccepted = accepted(std::byte{ 2 }, 2 * MinimumResumeTokenLifetimeMilliseconds, true);
     auto initialAcceptedPayload = encodeAuthenticationAccepted(initialAccepted);
     reconnectTransportObserver->enqueue(MessageClass::SessionControl, MessageKind::AuthenticationAccepted,
         initialAcceptedPayload, TransportChannel::ReliableOrdered);
@@ -644,6 +683,11 @@ int main()
     auto initialSnapshotPayload = encodeLatestWinsSnapshot(initialSnapshot);
     reconnectTransportObserver->enqueue(MessageClass::LatestWinsSnapshot, MessageKind::LatestWinsSnapshot,
         initialSnapshotPayload, TransportChannel::LatestWins);
+    reconnectTransportObserver->enqueue(MessageClass::ReliableOperation, MessageKind::ReliableActorInterestBaseline,
+        encodeReliableActorInterestBaseline(actorBaseline(SessionGeneration::initial(), 1, 1)),
+        TransportChannel::ReliableOrdered);
+    reconnectTransportObserver->enqueue(MessageClass::LatestWinsSnapshot, MessageKind::LatestWinsActorSnapshot,
+        encodeLatestWinsActorSnapshot(actorSnapshot(SessionGeneration::initial(), 1, 1)), TransportChannel::LatestWins);
     const auto zero = Turn32::fromValue(0);
     const auto head = VrTrackedTransform(*VrPoseOffset3::create(4, 5, 6), Orientation3(zero, zero, zero));
     const auto remotePose = ServerVrPoseSnapshot(value<SessionId>(1), SessionGeneration::initial(), value<PlayerId>(2),
@@ -652,7 +696,7 @@ int main()
     reconnectTransportObserver->enqueue(MessageClass::PresentationSample, MessageKind::ServerVrPoseSnapshot,
         encodeServerVrPoseSnapshot(remotePose), TransportChannel::PresentationLatest);
     reconnectCoordinator->frame(0.01f);
-    require(reconnectPresentation.calls == 1 && reconnectPresentation.poses == 1
+    require(reconnectPresentation.calls == 1 && reconnectPresentation.actors == 1 && reconnectPresentation.poses == 1
         && reconnectPresentation.poseFallbacks == 1 && reconnectPresentation.lastPoseWeight == 1.0
         && poseInput.calls == 1 && credentialPersistenceObserver->calls == 1
         && credentialPersistenceObserver->bytes.front() == std::byte{ 2 });
@@ -692,22 +736,55 @@ int main()
     auto resumedSnapshotPayload = encodeLatestWinsSnapshot(resumedSnapshot);
     reconnectTransportObserver->enqueue(MessageClass::LatestWinsSnapshot, MessageKind::LatestWinsSnapshot,
         resumedSnapshotPayload, TransportChannel::LatestWins);
+    reconnectTransportObserver->enqueue(MessageClass::ReliableOperation, MessageKind::ReliableActorInterestBaseline,
+        encodeReliableActorInterestBaseline(actorBaseline(*SessionGeneration::initial().next(), 1, 1)),
+        TransportChannel::ReliableOrdered);
+    reconnectTransportObserver->enqueue(MessageClass::LatestWinsSnapshot, MessageKind::LatestWinsActorSnapshot,
+        encodeLatestWinsActorSnapshot(actorSnapshot(*SessionGeneration::initial().next(), 1, 1)),
+        TransportChannel::LatestWins);
     reconnectCoordinator->frame(0.01f);
-    require(reconnectPresentation.calls == 2 && reconnectPresentation.poseFallbacks == 2
-        && reconnectPresentation.lastPoseWeight == 0.0 && reconnectStatus.last == ConnectionStatus::Resumed);
+    require(reconnectPresentation.calls == 2 && reconnectPresentation.actors == 2
+        && reconnectPresentation.poseFallbacks == 2 && reconnectPresentation.lastPoseWeight == 0.0
+        && reconnectStatus.last == ConnectionStatus::Resumed);
 
-    require(std::get<TES3MP::OpenMWAdapter::ClientCompositionFailure>(
-                TES3MP::OpenMWAdapter::makeClientCoordinator(
-                    "", 0, 0, "unreachable/credential", {}, TES3MP::testContentManifestId(),
-                    TES3MP::OpenMWAdapter::ClientProviders{}))
+    disconnect.resyncPending = true;
+    const auto sentBeforeResync = reconnectTransportObserver->sentFrames.size();
+    reconnectCoordinator->frame(0.01f);
+    bool sentResync = false;
+    for (std::size_t index = sentBeforeResync; index < reconnectTransportObserver->sentFrames.size(); ++index)
+    {
+        const auto decoded = decodeProtocolFrame(reconnectTransportObserver->sentFrames[index]);
+        sentResync = sentResync
+            || (std::holds_alternative<DecodedFrame>(decoded)
+                && std::get<DecodedFrame>(decoded).messageKind() == MessageKind::SessionResyncRequest);
+    }
+    require(sentResync && disconnect.resyncCompletions == 0);
+    reconnectTransportObserver->enqueue(MessageClass::ReliableOperation, MessageKind::ReliableActorInterestBaseline,
+        encodeReliableActorInterestBaseline(actorBaseline(*SessionGeneration::initial().next(), 1, 2)),
+        TransportChannel::ReliableOrdered);
+    reconnectTransportObserver->enqueue(MessageClass::LatestWinsSnapshot, MessageKind::LatestWinsActorSnapshot,
+        encodeLatestWinsActorSnapshot(actorSnapshot(*SessionGeneration::initial().next(), 1, 2)),
+        TransportChannel::LatestWins);
+    reconnectCoordinator->frame(0.01f);
+    require(disconnect.resyncCompletions == 0 && reconnectPresentation.calls == 2 && reconnectPresentation.actors == 3);
+    reconnectTransportObserver->enqueue(MessageClass::ReliableOperation, MessageKind::ReliableInterestBaseline,
+        encodeReliableInterestBaseline(selfBaseline(*SessionGeneration::initial().next(), true, 1, 1)),
+        TransportChannel::ReliableOrdered);
+    reconnectTransportObserver->enqueue(MessageClass::LatestWinsSnapshot, MessageKind::LatestWinsSnapshot,
+        encodeLatestWinsSnapshot(selfSnapshot(*SessionGeneration::initial().next(), true, 1, 1)),
+        TransportChannel::LatestWins);
+    reconnectCoordinator->frame(0.01f);
+    require(disconnect.resyncCompletions == 1 && reconnectPresentation.calls == 3 && reconnectPresentation.actors == 4);
+
+    require(
+        std::get<TES3MP::OpenMWAdapter::ClientCompositionFailure>(TES3MP::OpenMWAdapter::makeClientCoordinator("", 0, 0,
+            "unreachable/credential", {}, TES3MP::testContentManifestId(), TES3MP::OpenMWAdapter::ClientProviders{}))
         == TES3MP::OpenMWAdapter::ClientCompositionFailure::ProvidersUnavailable);
     const TES3MP::OpenMWAdapter::ClientProviders providers{ &input, &presentation, &status, nullptr };
-    require(std::get<TES3MP::OpenMWAdapter::ClientCompositionFailure>(
-                TES3MP::OpenMWAdapter::makeClientCoordinator(
-                    "", 25560, 1000, {}, {}, TES3MP::testContentManifestId(), providers))
+    require(std::get<TES3MP::OpenMWAdapter::ClientCompositionFailure>(TES3MP::OpenMWAdapter::makeClientCoordinator(
+                "", 25560, 1000, {}, {}, TES3MP::testContentManifestId(), providers))
         == TES3MP::OpenMWAdapter::ClientCompositionFailure::InvalidEndpoint);
-    require(std::get<TES3MP::OpenMWAdapter::ClientCompositionFailure>(
-                TES3MP::OpenMWAdapter::makeClientCoordinator(
-                    "127.0.0.1", 25560, 0, {}, {}, TES3MP::testContentManifestId(), providers))
+    require(std::get<TES3MP::OpenMWAdapter::ClientCompositionFailure>(TES3MP::OpenMWAdapter::makeClientCoordinator(
+                "127.0.0.1", 25560, 0, {}, {}, TES3MP::testContentManifestId(), providers))
         == TES3MP::OpenMWAdapter::ClientCompositionFailure::InvalidTimeout);
 }

@@ -1,8 +1,8 @@
 #ifndef OPENMW_TES3MP_PROVIDERS_HPP
 #define OPENMW_TES3MP_PROVIDERS_HPP
 
-#include <tes3mp/client_locomotion.hpp>
 #include <tes3mp/actor_replication.hpp>
+#include <tes3mp/client_locomotion.hpp>
 #include <tes3mp/client_session.hpp>
 #include <tes3mp/protocol_exchange.hpp>
 #include <tes3mp/protocol_pose.hpp>
@@ -58,6 +58,8 @@ namespace TES3MP::OpenMWAdapter
     public:
         virtual ~ConnectionControlProvider() = default;
         virtual bool disconnectRequested() noexcept = 0;
+        virtual std::optional<ResyncReason> resyncRequested() noexcept { return std::nullopt; }
+        virtual void resyncCompleted() noexcept {}
     };
 
     class SemanticInputProvider
@@ -80,12 +82,11 @@ namespace TES3MP::OpenMWAdapter
     public:
         virtual ~PresentationProvider() = default;
         virtual ProviderResult applyAuthoritative(const LatestWinsSnapshot& snapshot,
-            std::span<const ObservedPlayer> observedPlayers, bool allowLocalCellCorrection,
-            MonotonicInstant receivedAt,
+            std::span<const ObservedPlayer> observedPlayers, bool allowLocalCellCorrection, MonotonicInstant receivedAt,
             const std::optional<LocalLocomotionReconciliation>& localReconciliation = std::nullopt) noexcept = 0;
         virtual ProviderResult advance(MonotonicInstant now) noexcept = 0;
-        virtual ProviderResult applyActors(const LatestWinsActorSnapshot&,
-            std::span<const ActorInterestMember>, MonotonicInstant) noexcept
+        virtual ProviderResult applyActors(
+            const LatestWinsActorSnapshot&, std::span<const ActorInterestMember>, MonotonicInstant) noexcept
         {
             return ProviderResult::Accepted;
         }

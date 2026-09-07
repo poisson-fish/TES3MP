@@ -1,6 +1,6 @@
-#include "authenticated_join_composition.hpp"
 #include "actor_content.hpp"
 #include "actor_interest_projection.hpp"
+#include "authenticated_join_composition.hpp"
 #include "connection_session_coordinator.hpp"
 #include "content_collision.hpp"
 #include "interest_projection.hpp"
@@ -28,7 +28,10 @@ namespace
     using namespace TES3MP;
 
     template <class Value>
-    Value id(std::uint64_t value) { return Value::fromValue(value).value(); }
+    Value id(std::uint64_t value)
+    {
+        return Value::fromValue(value).value();
+    }
 
     void require(bool condition, int line)
     {
@@ -42,16 +45,16 @@ namespace
 #undef assert
 #define assert(condition) require(static_cast<bool>(condition), __LINE__)
 
-    constexpr std::string_view validConfig =
-        "bind_address = 127.0.0.1\nport = 25565\ntick_interval_ms = 16\n"
-        "disconnect_grace_ms = 30000\njoin_password_file = password.txt\n"
-        "content_manifest_id = 0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20\n"
-        "cell_spaces = interior:7;exterior:8\nallowed_cells = interior:7;exterior:8:0:0\n"
-        "spawn_cell = interior:7\ndefault_appearance_id = 1\n"
-        "movement_profile = sneak:1024;walk:4097;run:8192;jump:4096\n"
-        "collision_content_file = collision.txt\n"
-        "actor_content_file = actors.txt\n"
-        "player_identity_file = players.txt\n";
+    constexpr std::string_view validConfig
+        = "bind_address = 127.0.0.1\nport = 25565\ntick_interval_ms = 16\n"
+          "disconnect_grace_ms = 30000\njoin_password_file = password.txt\n"
+          "content_manifest_id = 0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20\n"
+          "cell_spaces = interior:7;exterior:8\nallowed_cells = interior:7;exterior:8:0:0\n"
+          "spawn_cell = interior:7\ndefault_appearance_id = 1\n"
+          "movement_profile = sneak:1024;walk:4097;run:8192;jump:4096\n"
+          "collision_content_file = collision.txt\n"
+          "actor_content_file = actors.txt\n"
+          "player_identity_file = players.txt\n";
 
     class FakeRuntime final : public TES3MP::TransportRuntime
     {
@@ -59,15 +62,23 @@ namespace
         TES3MP::TransportAdmission<TES3MP::ListenerId> startListener(const TES3MP::ListenerEndpoint&) override
         {
             calls += 'L';
-            if (rejectListen) return { TES3MP::TransportResult::AtCapacity, std::nullopt };
+            if (rejectListen)
+                return { TES3MP::TransportResult::AtCapacity, std::nullopt };
             return { TES3MP::TransportResult::Accepted, TES3MP::ListenerId::initial() };
         }
         TES3MP::TransportResult stopListener(TES3MP::ListenerId) override
-        { calls += 'S'; return TES3MP::TransportResult::Accepted; }
+        {
+            calls += 'S';
+            return TES3MP::TransportResult::Accepted;
+        }
         TES3MP::TransportAdmission<TES3MP::ConnectAttemptId> connect(const TES3MP::ConnectionEndpoint&) override
-        { return { TES3MP::TransportResult::InvalidInput, std::nullopt }; }
+        {
+            return { TES3MP::TransportResult::InvalidInput, std::nullopt };
+        }
         TES3MP::TransportResult cancelConnect(TES3MP::ConnectAttemptId) override
-        { return TES3MP::TransportResult::UnknownId; }
+        {
+            return TES3MP::TransportResult::UnknownId;
+        }
         TES3MP::TransportResult send(TES3MP::TransportConnectionId connection, TES3MP::TransportChannel channel,
             std::span<const std::byte> bytes) override
         {
@@ -79,25 +90,34 @@ namespace
         TES3MP::TransportReceiveResult receive(
             TES3MP::TransportConnectionId connection, std::span<TES3MP::TransportMessage> output) override
         {
-            if (receiveResult != TES3MP::TransportResult::Accepted) return { receiveResult, 0 };
+            if (receiveResult != TES3MP::TransportResult::Accepted)
+                return { receiveResult, 0 };
             auto& source = incomingByConnection.contains(connection) ? incomingByConnection[connection] : incoming;
             const auto count = std::min(output.size(), source.size());
-            for (std::size_t index = 0; index < count; ++index) output[index] = std::move(source[index]);
+            for (std::size_t index = 0; index < count; ++index)
+                output[index] = std::move(source[index]);
             source.erase(source.begin(), source.begin() + static_cast<std::ptrdiff_t>(count));
             return { TES3MP::TransportResult::Accepted, count };
         }
         TES3MP::TransportResult close(TES3MP::TransportConnectionId, TES3MP::TransportCloseMode) override
-        { ++closes; return TES3MP::TransportResult::Accepted; }
+        {
+            ++closes;
+            return TES3MP::TransportResult::Accepted;
+        }
         TES3MP::TransportPollResult poll(std::span<TES3MP::TransportEvent> output) override
         {
             calls += 'P';
             const auto count = std::min(output.size(), events.size());
-            for (std::size_t index = 0; index < count; ++index) output[index] = events[index];
+            for (std::size_t index = 0; index < count; ++index)
+                output[index] = events[index];
             events.erase(events.begin(), events.begin() + static_cast<std::ptrdiff_t>(count));
             return { pollResult, count };
         }
         TES3MP::TransportResult shutdown() override
-        { calls += 'X'; return TES3MP::TransportResult::Accepted; }
+        {
+            calls += 'X';
+            return TES3MP::TransportResult::Accepted;
+        }
 
         bool rejectListen = false;
         TES3MP::TransportResult pollResult = TES3MP::TransportResult::Accepted;
@@ -116,10 +136,16 @@ namespace
     {
     public:
         AcceptedOperation(AuthenticationAttempt attempt, PrincipalId principal)
-            : mAttempt(attempt), mPrincipal(principal) {}
+            : mAttempt(attempt)
+            , mPrincipal(principal)
+        {
+        }
         AuthenticationPollResult poll() noexcept override
-        { return AuthenticationCompletion{ mAttempt, AuthenticatedAdmission::initial(mPrincipal) }; }
+        {
+            return AuthenticationCompletion{ mAttempt, AuthenticatedAdmission::initial(mPrincipal) };
+        }
         void cancel() noexcept override {}
+
     private:
         AuthenticationAttempt mAttempt;
         PrincipalId mPrincipal;
@@ -139,11 +165,12 @@ namespace
             PrincipalId, SessionId, SessionGeneration, ResumeTokenContext) noexcept override
         {
             ++issues;
-            if (reject) return ResumeTokenStoreError::RandomUnavailable;
+            if (reject)
+                return ResumeTokenStoreError::RandomUnavailable;
             std::array<std::byte, ResumeTokenBytes> bytes{};
             auto token = ResumeToken::create(bytes);
-            return std::move(*AuthenticationAcceptedMessage::create(
-                std::move(*token), MinimumResumeTokenLifetimeMilliseconds));
+            return std::move(
+                *AuthenticationAcceptedMessage::create(std::move(*token), MinimumResumeTokenLifetimeMilliseconds));
         }
 
         bool reject = false;
@@ -165,15 +192,19 @@ namespace
         bool sha256(std::span<const std::byte> source, CredentialDigest& destination) noexcept override
         {
             inputs.emplace_back(source.begin(), source.end());
-            if (failOnCall == inputs.size()) return false;
+            if (failOnCall == inputs.size())
+                return false;
             std::byte folded{};
-            for (const auto byte : source) folded ^= byte;
+            for (const auto byte : source)
+                folded ^= byte;
             destination.bytes.fill(folded);
             destination.bytes[0] = static_cast<std::byte>(source.size() & 0xff);
             return true;
         }
         bool constantTimeEqual(std::span<const std::byte>, std::span<const std::byte>) noexcept override
-        { return false; }
+        {
+            return false;
+        }
 
         std::size_t failOnCall = 0;
         std::vector<std::vector<std::byte>> inputs;
@@ -215,13 +246,13 @@ namespace
     class FakeJoinQueue final : public TES3MP::ServerApp::JoinResponseQueue
     {
     public:
-        bool enqueueJoinResponses(std::span<const std::byte> authentication,
-            std::span<const std::byte> snapshot, const CanonicalServerState&,
-            const CanonicalServerState&, const AuthenticatedJoinResult& join, ServerTick,
+        bool enqueueJoinResponses(std::span<const std::byte> authentication, std::span<const std::byte> snapshot,
+            const CanonicalServerState&, const CanonicalServerState&, const AuthenticatedJoinResult& join, ServerTick,
             CanonicalStateVersion) noexcept override
         {
             ++attempts;
-            if (reject) return false;
+            if (reject)
+                return false;
             auto authenticationFrame = decodeProtocolFrame(authentication);
             auto snapshotFrame = decodeProtocolFrame(snapshot);
             valid = std::holds_alternative<DecodedFrame>(authenticationFrame)
@@ -241,10 +272,10 @@ namespace
     AuthenticatedJoinCoordinator joinCoordinator(CanonicalCommandReducer& reducer)
     {
         const auto zero = Turn32::fromValue(0);
-        auto spawn = Transform(CellId::interior(id<CellSpaceId>(7)), Position3(10, 20, 30),
-            Orientation3(zero, zero, zero));
-        return *AuthenticatedJoinCoordinator::create(spawn, id<AppearanceId>(1),
-            { id<SessionId>(1), id<PlayerId>(1), id<EntityId>(1) }, reducer);
+        auto spawn
+            = Transform(CellId::interior(id<CellSpaceId>(7)), Position3(10, 20, 30), Orientation3(zero, zero, zero));
+        return *AuthenticatedJoinCoordinator::create(
+            spawn, id<AppearanceId>(1), { id<SessionId>(1), id<PlayerId>(1), id<EntityId>(1) }, reducer);
     }
 
     struct JoinFixture
@@ -252,7 +283,8 @@ namespace
         NullMetricSink metrics;
         NullStructuredEventSink events;
         Observability observability{ metrics, events };
-        CanonicalCommandReducer reducer{ std::get<CanonicalServerState>(createCanonicalServerState({}, {})), observability };
+        CanonicalCommandReducer reducer{ std::get<CanonicalServerState>(createCanonicalServerState({}, {})),
+            observability };
         AuthenticatedJoinCoordinator joins{ joinCoordinator(reducer) };
     };
 
@@ -269,16 +301,17 @@ namespace
         const auto interior = CellId::interior(id<CellSpaceId>(7));
         const auto exterior = CellId::exterior(id<CellSpaceId>(8), 0, 0);
         std::vector<CanonicalPlayerEntityState> players{
-            { id<PlayerId>(1), id<EntityId>(1), id<AppearanceId>(1), Transform(interior, Position3(1, 0, 0), Orientation3(zero, zero, zero)),
-                LinearVelocity3(0, 0, 0), id<EntityRevision>(2), AuthorityEpoch::initial(), id<ServerTick>(4) },
-            { id<PlayerId>(2), id<EntityId>(2), id<AppearanceId>(1), Transform(secondExterior ? exterior : interior,
-                Position3(2, 0, 0), Orientation3(zero, zero, zero)), LinearVelocity3(0, 0, 0),
-                id<EntityRevision>(secondExterior ? 2 : 1), AuthorityEpoch::initial(), id<ServerTick>(4) }
+            { id<PlayerId>(1), id<EntityId>(1), id<AppearanceId>(1),
+                Transform(interior, Position3(1, 0, 0), Orientation3(zero, zero, zero)), LinearVelocity3(0, 0, 0),
+                id<EntityRevision>(2), AuthorityEpoch::initial(), id<ServerTick>(4) },
+            { id<PlayerId>(2), id<EntityId>(2), id<AppearanceId>(1),
+                Transform(secondExterior ? exterior : interior, Position3(2, 0, 0), Orientation3(zero, zero, zero)),
+                LinearVelocity3(0, 0, 0), id<EntityRevision>(secondExterior ? 2 : 1), AuthorityEpoch::initial(),
+                id<ServerTick>(4) }
         };
-        std::vector<CanonicalSessionProgress> sessions{
-            { id<SessionId>(1), SessionGeneration::initial(), id<PlayerId>(1), id<EntityId>(1), std::nullopt },
-            { id<SessionId>(2), SessionGeneration::initial(), id<PlayerId>(2), id<EntityId>(2), std::nullopt }
-        };
+        std::vector<CanonicalSessionProgress> sessions{ { id<SessionId>(1), SessionGeneration::initial(),
+                                                            id<PlayerId>(1), id<EntityId>(1), std::nullopt },
+            { id<SessionId>(2), SessionGeneration::initial(), id<PlayerId>(2), id<EntityId>(2), std::nullopt } };
         return std::get<CanonicalServerState>(createCanonicalServerState(players, sessions));
     }
 }
@@ -301,13 +334,12 @@ int main()
         record(TransportTelemetryKind::QueuedMessages, TransportChannel::LatestWins, 0);
         record(TransportTelemetryKind::QueuedBytes, TransportChannel::LatestWins, 0);
         const auto evidence = telemetry.takeDrainEvidence();
-        assert(evidence && evidence->reliableHighWaterMessages == 3
-            && evidence->reliableHighWaterBytes == 30 && evidence->latestHighWaterMessages == 1
-            && evidence->latestHighWaterBytes == 10 && !telemetry.takeDrainEvidence());
+        assert(evidence && evidence->reliableHighWaterMessages == 3 && evidence->reliableHighWaterBytes == 30
+            && evidence->latestHighWaterMessages == 1 && evidence->latestHighWaterBytes == 10
+            && !telemetry.takeDrainEvidence());
     }
     using namespace TES3MP::ServerApp;
-    static_assert(Phase7ProtocolMajor == 1 && Phase7ProtocolMinimumMinor == 2
-        && Phase7ProtocolMaximumMinor == 3);
+    static_assert(Phase7ProtocolMajor == 1 && Phase7ProtocolMinimumMinor == 2 && Phase7ProtocolMaximumMinor == 3);
     static_assert(Phase7SourceAuthenticationBurst == 4 && Phase7GlobalAuthenticationBurst == 32
         && Phase7AuthenticationRefillMilliseconds == 1'000 && Phase7ConnectionCapacity == 8);
     static_assert(!phase7ProofDisconnectGraceAccepted(MinimumResumeTokenLifetimeMilliseconds - 1));
@@ -317,10 +349,9 @@ int main()
     {
         const auto before = fixtureState(false);
         const auto after = fixtureState(true);
-        auto baseline = projectInterestBaseline(before, id<SessionId>(1), id<ServerTick>(4),
-            id<CanonicalRevision>(4), id<CanonicalStateVersion>(4));
-        assert(baseline && baseline->baseline.members().size() == 2
-            && baseline->view.view().entries().size() == 2
+        auto baseline = projectInterestBaseline(
+            before, id<SessionId>(1), id<ServerTick>(4), id<CanonicalRevision>(4), id<CanonicalStateVersion>(4));
+        assert(baseline && baseline->baseline.members().size() == 2 && baseline->view.view().entries().size() == 2
             && sharesInterest(before, id<SessionId>(1), id<SessionId>(2))
             && !sharesInterest(after, id<SessionId>(1), id<SessionId>(2)));
         auto projected = projectInterestChanges(before, after, id<ServerTick>(4), id<CanonicalRevision>(4));
@@ -340,10 +371,9 @@ int main()
 
         const std::array remainingPlayers{ before.players()[0] };
         const std::array remainingSessions{ before.activeSessions()[0] };
-        const auto expired = std::get<CanonicalServerState>(
-            createCanonicalServerState(remainingPlayers, remainingSessions));
-        auto expirationOutput = projectInterestChanges(
-            before, expired, id<ServerTick>(5), id<CanonicalRevision>(5));
+        const auto expired
+            = std::get<CanonicalServerState>(createCanonicalServerState(remainingPlayers, remainingSessions));
+        auto expirationOutput = projectInterestChanges(before, expired, id<ServerTick>(5), id<CanonicalRevision>(5));
         assert(expirationOutput && expirationOutput->size() == 1
             && (*expirationOutput)[0].targetSession == id<SessionId>(1));
         assert(((*expirationOutput)[0].observations.changes().size() == 1
@@ -384,8 +414,8 @@ int main()
         auto newerVersions = std::get<ProtocolVersionRange>(ProtocolVersionRange::create(1, 1, 1));
         auto newerClientOffer = std::get<CapabilityOffer>(CapabilityOffer::create(newerVersions, {}, {}));
         auto newerServerOffer = std::get<CapabilityOffer>(CapabilityOffer::create(newerVersions, {}, {}));
-        const auto newer = std::get<ServerHello>(negotiateClientHello(
-            ClientHello::fromOffer(std::move(newerClientOffer)), newerServerOffer));
+        const auto newer = std::get<ServerHello>(
+            negotiateClientHello(ClientHello::fromOffer(std::move(newerClientOffer)), newerServerOffer));
         RecordingCrypto changed;
         const auto changedContext = makeResumeTokenContext(newer, changed);
         assert(changedContext && changedContext->protocol != firstContext->protocol
@@ -406,8 +436,7 @@ int main()
         assert(config.contentManifest.movementProfile().speed(LocomotionMode::Sneak) == 1024
             && config.contentManifest.movementProfile().speed(LocomotionMode::Jump) == 4096);
     }
-    for (const auto invalid : { std::string{}, std::string("unknown = x\n"),
-             std::string(validConfig) + "port = 2\n",
+    for (const auto invalid : { std::string{}, std::string("unknown = x\n"), std::string(validConfig) + "port = 2\n",
              std::string("bind_address = host\nport = 1\ntick_interval_ms = 1\n"
                          "disconnect_grace_ms = 0\njoin_password_file = p\n"),
              std::string("bind_address = 127.0.0.1 # no inline comment\nport = 1\n"
@@ -418,13 +447,11 @@ int main()
     assert(std::holds_alternative<ConfigError>(parseServerConfig(std::string("\xc0\x80", 2))));
     auto duplicateContentIds = std::string(validConfig);
     duplicateContentIds.replace(duplicateContentIds.find("cell_spaces = interior:7;exterior:8"),
-        std::string("cell_spaces = interior:7;exterior:8").size(),
-        "cell_spaces = interior:7;exterior:7");
+        std::string("cell_spaces = interior:7;exterior:8").size(), "cell_spaces = interior:7;exterior:7");
     assert(std::holds_alternative<ConfigError>(parseServerConfig(duplicateContentIds)));
     auto invalidMovementProfile = std::string(validConfig);
     invalidMovementProfile.replace(invalidMovementProfile.find("sneak:1024;walk:4097;run:8192;jump:4096"),
-        std::string("sneak:1024;walk:4097;run:8192;jump:4096").size(),
-        "sneak:4097;walk:1024;run:8192;jump:4096");
+        std::string("sneak:1024;walk:4097;run:8192;jump:4096").size(), "sneak:4097;walk:1024;run:8192;jump:4096");
     assert(std::holds_alternative<ConfigError>(parseServerConfig(invalidMovementProfile)));
 
     const auto collisionPath = std::filesystem::temp_directory_path() / "tes3mp-server-collision-content-test";
@@ -433,57 +460,55 @@ int main()
         stream << content;
         assert(static_cast<bool>(stream));
     };
-    constexpr std::string_view collisionHeader =
-        "TES3MP_COLLISION_V1\n"
-        "manifest 0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20\n";
-    writeCollision(std::string(collisionHeader)
-        + "cell interior 7\ncell exterior 8 0 0\nsolid interior 7 15 0 0 20 40 60\n");
+    constexpr std::string_view collisionHeader
+        = "TES3MP_COLLISION_V1\n"
+          "manifest 0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20\n";
+    writeCollision(
+        std::string(collisionHeader) + "cell interior 7\ncell exterior 8 0 0\nsolid interior 7 15 0 0 20 40 60\n");
     auto collisionResult = ContentCollisionProvider::load(collisionPath, parsedConfig().contentManifest);
     assert(std::holds_alternative<std::unique_ptr<ContentCollisionProvider>>(collisionResult));
     auto collision = std::move(std::get<std::unique_ptr<ContentCollisionProvider>>(collisionResult));
     const auto zero = Turn32::fromValue(0);
     const auto interior = CellId::interior(id<CellSpaceId>(7));
     const auto root = Transform(interior, Position3(10, 20, 30), Orientation3(zero, zero, zero));
-    assert(collision->canOccupy(interior, root.position())
-        && !collision->canOccupy(interior, Position3(16, 20, 30)));
-    const auto blocked = collision->resolve({ testContentManifestId(), id<EntityId>(1), ServerTick::initial(),
-        root, Position3(25, 20, 30), LinearVelocity3(15, 0, 0), LocomotionMode::Walk });
+    assert(collision->canOccupy(interior, root.position()) && !collision->canOccupy(interior, Position3(16, 20, 30)));
+    const auto blocked = collision->resolve({ testContentManifestId(), id<EntityId>(1), ServerTick::initial(), root,
+        Position3(25, 20, 30), LinearVelocity3(15, 0, 0), LocomotionMode::Walk });
     assert(blocked && blocked->position == root.position() && blocked->velocity == LinearVelocity3(0, 0, 0));
-    const auto clear = collision->resolve({ testContentManifestId(), id<EntityId>(1), ServerTick::initial(),
-        root, Position3(10, 25, 30), LinearVelocity3(0, 5, 0), LocomotionMode::Walk });
+    const auto clear = collision->resolve({ testContentManifestId(), id<EntityId>(1), ServerTick::initial(), root,
+        Position3(10, 25, 30), LinearVelocity3(0, 5, 0), LocomotionMode::Walk });
     assert(clear && clear->position == Position3(10, 25, 30) && clear->velocity == LinearVelocity3(0, 5, 0));
-    assert(!collision->resolve({ testContentManifestId(), id<EntityId>(1), ServerTick::initial(),
-        root, Position3(25, 20, 30), LinearVelocity3(14, 0, 0), LocomotionMode::Walk }));
-    const auto boundaryRoot = Transform(interior, Position3(MaximumCollisionCoordinate, 20, 30),
-        Orientation3(zero, zero, zero));
-    const auto boundary = collision->resolve({ testContentManifestId(), id<EntityId>(1),
-        ServerTick::initial(), boundaryRoot, Position3(MaximumCollisionCoordinate + 1, 20, 30),
-        LinearVelocity3(1, 0, 0), LocomotionMode::Walk });
-    assert(boundary && boundary->position == boundaryRoot.position()
-        && boundary->velocity == LinearVelocity3(0, 0, 0));
+    assert(!collision->resolve({ testContentManifestId(), id<EntityId>(1), ServerTick::initial(), root,
+        Position3(25, 20, 30), LinearVelocity3(14, 0, 0), LocomotionMode::Walk }));
+    const auto boundaryRoot
+        = Transform(interior, Position3(MaximumCollisionCoordinate, 20, 30), Orientation3(zero, zero, zero));
+    const auto boundary
+        = collision->resolve({ testContentManifestId(), id<EntityId>(1), ServerTick::initial(), boundaryRoot,
+            Position3(MaximumCollisionCoordinate + 1, 20, 30), LinearVelocity3(1, 0, 0), LocomotionMode::Walk });
+    assert(boundary && boundary->position == boundaryRoot.position() && boundary->velocity == LinearVelocity3(0, 0, 0));
     writeCollision(std::string(collisionHeader) + "cell interior 7\n");
-    assert(std::get<ContentCollisionError>(
-        ContentCollisionProvider::load(collisionPath, parsedConfig().contentManifest))
+    assert(
+        std::get<ContentCollisionError>(ContentCollisionProvider::load(collisionPath, parsedConfig().contentManifest))
         == ContentCollisionError::IncompleteCells);
     writeCollision(
         "TES3MP_COLLISION_V1\n"
         "manifest 0202030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20\n"
         "cell interior 7\ncell exterior 8 0 0\n");
-    assert(std::get<ContentCollisionError>(
-        ContentCollisionProvider::load(collisionPath, parsedConfig().contentManifest))
+    assert(
+        std::get<ContentCollisionError>(ContentCollisionProvider::load(collisionPath, parsedConfig().contentManifest))
         == ContentCollisionError::ManifestMismatch);
-    writeCollision(std::string(collisionHeader)
-        + "cell interior 7\ncell exterior 8 0 0\nsolid interior 7 20 0 0 15 40 60\n");
-    assert(std::get<ContentCollisionError>(
-        ContentCollisionProvider::load(collisionPath, parsedConfig().contentManifest))
+    writeCollision(
+        std::string(collisionHeader) + "cell interior 7\ncell exterior 8 0 0\nsolid interior 7 20 0 0 15 40 60\n");
+    assert(
+        std::get<ContentCollisionError>(ContentCollisionProvider::load(collisionPath, parsedConfig().contentManifest))
         == ContentCollisionError::Malformed);
     writeCollision(std::string(MaximumCollisionContentBytes + 1, 'x'));
-    assert(std::get<ContentCollisionError>(
-        ContentCollisionProvider::load(collisionPath, parsedConfig().contentManifest))
+    assert(
+        std::get<ContentCollisionError>(ContentCollisionProvider::load(collisionPath, parsedConfig().contentManifest))
         == ContentCollisionError::TooLarge);
     std::filesystem::remove(collisionPath);
-    assert(std::get<ContentCollisionError>(
-        ContentCollisionProvider::load(collisionPath, parsedConfig().contentManifest))
+    assert(
+        std::get<ContentCollisionError>(ContentCollisionProvider::load(collisionPath, parsedConfig().contentManifest))
         == ContentCollisionError::Unavailable);
 
     const auto actorPath = std::filesystem::temp_directory_path() / "tes3mp-server-actor-content-test";
@@ -492,9 +517,9 @@ int main()
         stream << content;
         assert(static_cast<bool>(stream));
     };
-    constexpr std::string_view actorHeader =
-        "TES3MP_ACTORS_V1\n"
-        "manifest 0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20\n";
+    constexpr std::string_view actorHeader
+        = "TES3MP_ACTORS_V1\n"
+          "manifest 0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20\n";
     writeActors(std::string(actorHeader) + "actor 1 100 200 interior 7 10 20 30 0 0 0 travel 10 25 30\n");
     auto actorContent = loadActorContent(actorPath, parsedConfig().contentManifest);
     assert(std::holds_alternative<ActorCatalog>(actorContent));
@@ -504,8 +529,8 @@ int main()
     assert(std::holds_alternative<CanonicalActorWorld>(actorWorld));
     auto actors = std::get<CanonicalActorWorld>(std::move(actorWorld));
     const auto players = fixtureState(false);
-    auto actorBaseline = projectActorInterestBaseline(
-        players, actors, id<SessionId>(1), id<ServerTick>(4), id<CanonicalRevision>(2));
+    auto actorBaseline
+        = projectActorInterestBaseline(players, actors, id<SessionId>(1), id<ServerTick>(4), id<CanonicalRevision>(2));
     assert(actorBaseline && actorBaseline->baseline.members().size() == 1
         && actorBaseline->view.view().entries().size() == 1);
     writeActors(std::string(actorHeader) + "actor 1 100 200 interior 9 10 20 30 0 0 0 idle\n");
@@ -514,7 +539,10 @@ int main()
     std::filesystem::remove(actorPath);
 
     const auto temporary = std::filesystem::temp_directory_path() / "tes3mp-server-password-test";
-    { std::ofstream stream(temporary, std::ios::binary); stream << "secret\r\n"; }
+    {
+        std::ofstream stream(temporary, std::ios::binary);
+        stream << "secret\r\n";
+    }
     auto password = loadJoinPassword(temporary);
     assert(std::holds_alternative<TES3MP::AuthenticationMaterial>(password));
     assert(std::get<TES3MP::AuthenticationMaterial>(password).size() == 6);
@@ -571,10 +599,14 @@ int main()
         FakeAuthentication authentication;
         FakeJoinQueue responses;
         AuthenticatedJoinComposition composition(joins, authentication, responses);
-        assert(composition.join(id<PrincipalId>(1), SessionGeneration::initial(),
-                   ServerTick::initial(), ResumeTokenContext{}).result == JoinCompositionResult::Committed);
-        assert(composition.join(id<PrincipalId>(2), SessionGeneration::initial(),
-                   ServerTick::initial(), ResumeTokenContext{}).result == JoinCompositionResult::Committed);
+        assert(composition
+                   .join(id<PrincipalId>(1), SessionGeneration::initial(), ServerTick::initial(), ResumeTokenContext{})
+                   .result
+            == JoinCompositionResult::Committed);
+        assert(composition
+                   .join(id<PrincipalId>(2), SessionGeneration::initial(), ServerTick::initial(), ResumeTokenContext{})
+                   .result
+            == JoinCompositionResult::Committed);
         assert(authentication.issues == 2 && responses.attempts == 2 && responses.valid
             && responses.revisions.size() == 2 && responses.revisions[0] < responses.revisions[1]);
         assert(joins.liveBindings() == 2 && joins.state().players().size() == 2);
@@ -586,22 +618,27 @@ int main()
         FakeJoinQueue responses;
         AuthenticatedJoinComposition composition(joins, authentication, responses);
         authentication.reject = true;
-        assert(composition.join(id<PrincipalId>(3), SessionGeneration::initial(),
-                   ServerTick::initial(), ResumeTokenContext{}).result == JoinCompositionResult::TokenRejected);
+        assert(composition
+                   .join(id<PrincipalId>(3), SessionGeneration::initial(), ServerTick::initial(), ResumeTokenContext{})
+                   .result
+            == JoinCompositionResult::TokenRejected);
         assert(joins.liveBindings() == 0 && joins.state().players().empty());
         authentication.reject = false;
         responses.reject = true;
-        assert(composition.join(id<PrincipalId>(3), SessionGeneration::initial(),
-                   ServerTick::initial(), ResumeTokenContext{}).result == JoinCompositionResult::QueueRejected);
+        assert(composition
+                   .join(id<PrincipalId>(3), SessionGeneration::initial(), ServerTick::initial(), ResumeTokenContext{})
+                   .result
+            == JoinCompositionResult::QueueRejected);
         assert(joins.liveBindings() == 0 && joins.state().players().empty());
         responses.reject = false;
-        assert(composition.join(id<PrincipalId>(3), SessionGeneration::initial(),
-                   ServerTick::initial(), ResumeTokenContext{}).result == JoinCompositionResult::Committed);
+        assert(composition
+                   .join(id<PrincipalId>(3), SessionGeneration::initial(), ServerTick::initial(), ResumeTokenContext{})
+                   .result
+            == JoinCompositionResult::Committed);
         assert(joins.liveBindings() == 1);
     }
     {
-        auto queues = OutboundQueueSet::create(
-            *OutboundQueuePolicy::create(1, 64 * 1024, 4, 2, 4, 1, 1, 1, 3, 100), 1);
+        auto queues = OutboundQueueSet::create(*OutboundQueuePolicy::create(1, 64 * 1024, 4, 2, 4, 1, 1, 1, 3, 100), 1);
         const auto connection = TransportConnectionId::initial();
         assert(queues && queues->attach(connection) == TransportResult::Accepted);
         TransportJoinResponseQueue responses(*queues, connection);
@@ -609,8 +646,8 @@ int main()
         auto& joins = joinFixture.joins;
         FakeAuthentication authentication;
         AuthenticatedJoinComposition composition(joins, authentication, responses);
-        auto joined = composition.join(id<PrincipalId>(4), SessionGeneration::initial(), ServerTick::initial(),
-            ResumeTokenContext{});
+        auto joined = composition.join(
+            id<PrincipalId>(4), SessionGeneration::initial(), ServerTick::initial(), ResumeTokenContext{});
         assert(joined.result == JoinCompositionResult::Committed && joined.committed
             && joined.committed->session == id<SessionId>(1));
         assert(joins.liveBindings() == 1);
@@ -619,8 +656,10 @@ int main()
         auto& rejectedJoins = rejectedJoinFixture.joins;
         TransportJoinResponseQueue missing(*queues, *connection.next());
         AuthenticatedJoinComposition rejectedComposition(rejectedJoins, authentication, missing);
-        assert(rejectedComposition.join(id<PrincipalId>(5), SessionGeneration::initial(), ServerTick::initial(),
-                   ResumeTokenContext{}).result == JoinCompositionResult::QueueRejected);
+        assert(rejectedComposition
+                   .join(id<PrincipalId>(5), SessionGeneration::initial(), ServerTick::initial(), ResumeTokenContext{})
+                   .result
+            == JoinCompositionResult::QueueRejected);
         assert(rejectedJoins.liveBindings() == 0 && rejectedJoins.state().players().empty());
     }
     {
@@ -631,8 +670,7 @@ int main()
         FakeAuthentication authentication;
         auto queues = OutboundQueueSet::create(OutboundQueuePolicy{}, 2);
         auto timeouts = *SessionTimeoutPolicy::create(1'000'000, 1'000'000, 1'000'000);
-        ConnectionSessionCoordinator sessions(
-            clock, observability, timeouts, emptyOffer(), authentication, *queues, 1);
+        ConnectionSessionCoordinator sessions(clock, observability, timeouts, emptyOffer(), authentication, *queues, 1);
         const auto first = TransportConnectionId::initial();
         const auto second = *first.next();
         assert(sessions.accept(first, scope(std::byte{ 1 })) == ConnectionSessionResult::Accepted);
@@ -663,20 +701,20 @@ int main()
         assert(sessions.accept(connection, scope(std::byte{ 4 })) == ConnectionSessionResult::Accepted);
 
         const auto helloPayload = encodeClientHello(ClientHello::fromOffer(locomotionOffer()));
-        const auto helloFrame = std::get<std::vector<std::byte>>(encodeProtocolFrame(
-            MessageClass::SessionControl, MessageKind::ClientHello, helloPayload));
-        assert(sessions.dispatch(connection,
-                   TransportMessage{ TransportChannel::ReliableOrdered, helloFrame }, joins, crypto,
-                   ServerTick::initial()) == ConnectionSessionResult::Accepted);
+        const auto helloFrame = std::get<std::vector<std::byte>>(
+            encodeProtocolFrame(MessageClass::SessionControl, MessageKind::ClientHello, helloPayload));
+        assert(sessions.dispatch(connection, TransportMessage{ TransportChannel::ReliableOrdered, helloFrame }, joins,
+                   crypto, ServerTick::initial())
+            == ConnectionSessionResult::Accepted);
 
         auto material = AuthenticationMaterial::create({});
-        const auto authenticationPayload = encodeAuthenticationRequest(
-            AuthenticationRequest::join(std::move(*material)));
+        const auto authenticationPayload
+            = encodeAuthenticationRequest(AuthenticationRequest::join(std::move(*material)));
         const auto authenticationFrame = std::get<std::vector<std::byte>>(encodeProtocolFrame(
             MessageClass::SessionControl, MessageKind::AuthenticationRequest, authenticationPayload));
-        assert(sessions.dispatch(connection,
-                   TransportMessage{ TransportChannel::ReliableOrdered, authenticationFrame }, joins, crypto,
-                   ServerTick::initial()) == ConnectionSessionResult::Joined);
+        assert(sessions.dispatch(connection, TransportMessage{ TransportChannel::ReliableOrdered, authenticationFrame },
+                   joins, crypto, ServerTick::initial())
+            == ConnectionSessionResult::Joined);
         assert(joins.liveBindings() == 1 && sessions.session(connection)->sessionId() == id<SessionId>(1));
 
         FakeRuntime runtime;
@@ -690,17 +728,16 @@ int main()
         assert(std::get<DecodedFrame>(decodeProtocolFrame(runtime.sent[3])).messageKind()
             == MessageKind::LatestWinsSnapshot);
 
-        const SessionResyncRequest resync(id<SessionId>(1), SessionGeneration::initial(),
-            ResyncReason::LocalFeedGap, joinFixture.reducer.stateVersion());
+        const SessionResyncRequest resync(id<SessionId>(1), SessionGeneration::initial(), ResyncReason::LocalFeedGap,
+            joinFixture.reducer.stateVersion());
         const auto resyncFrame = std::get<std::vector<std::byte>>(encodeProtocolFrame(
-            MessageClass::SessionControl, MessageKind::SessionResyncRequest,
-            encodeSessionResyncRequest(resync)));
-        assert(sessions.dispatch(connection,
-                   TransportMessage{ TransportChannel::ReliableOrdered, resyncFrame }, joins, crypto,
-                   ServerTick::initial()) == ConnectionSessionResult::ResyncRequested);
-        assert(sessions.dispatch(connection,
-                   TransportMessage{ TransportChannel::ReliableOrdered, resyncFrame }, joins, crypto,
-                   ServerTick::initial()) == ConnectionSessionResult::ResyncCoalesced);
+            MessageClass::SessionControl, MessageKind::SessionResyncRequest, encodeSessionResyncRequest(resync)));
+        assert(sessions.dispatch(connection, TransportMessage{ TransportChannel::ReliableOrdered, resyncFrame }, joins,
+                   crypto, ServerTick::initial())
+            == ConnectionSessionResult::ResyncRequested);
+        assert(sessions.dispatch(connection, TransportMessage{ TransportChannel::ReliableOrdered, resyncFrame }, joins,
+                   crypto, ServerTick::initial())
+            == ConnectionSessionResult::ResyncCoalesced);
         assert(sessions.takeResyncRequest(connection) == resync);
         assert(!sessions.takeResyncRequest(connection));
 
@@ -715,16 +752,16 @@ int main()
         const auto operation = std::get<ReliableOperation>(ReliableOperation::create(operationHeader, locomotion));
         const auto operationFrame = std::get<std::vector<std::byte>>(encodeProtocolFrame(
             MessageClass::ReliableOperation, MessageKind::ReliableOperation, encodeReliableOperation(operation)));
-        assert(sessions.dispatch(connection,
-                   TransportMessage{ TransportChannel::ReliableOrdered, operationFrame }, joins, crypto, intake,
-                   ServerTick::initial()) == ConnectionSessionResult::CommandSubmitted);
-        assert(sessions.dispatch(connection,
-                   TransportMessage{ TransportChannel::ReliableOrdered, operationFrame }, joins, crypto, intake,
-                   ServerTick::initial()) == ConnectionSessionResult::ProtocolRejected);
+        assert(sessions.dispatch(connection, TransportMessage{ TransportChannel::ReliableOrdered, operationFrame },
+                   joins, crypto, intake, ServerTick::initial())
+            == ConnectionSessionResult::CommandSubmitted);
+        assert(sessions.dispatch(connection, TransportMessage{ TransportChannel::ReliableOrdered, operationFrame },
+                   joins, crypto, intake, ServerTick::initial())
+            == ConnectionSessionResult::ProtocolRejected);
 
-        assert(sessions.dispatch(connection,
-                   TransportMessage{ TransportChannel::LatestWins, { std::byte{ 1 } } }, joins, crypto,
-                   ServerTick::initial()) == ConnectionSessionResult::ProtocolRejected);
+        assert(sessions.dispatch(connection, TransportMessage{ TransportChannel::LatestWins, { std::byte{ 1 } } },
+                   joins, crypto, ServerTick::initial())
+            == ConnectionSessionResult::ProtocolRejected);
     }
     {
         FixedClock clock;
@@ -741,18 +778,18 @@ int main()
         auto& joins = joinFixture.joins;
         ServerCommandIntakeCoordinator intake(
             clock, observability, clock.now(), ServerTick::initial(), IngressOrdinal::initial());
-        auto lifecycle = ServerLifecycleCoordinator::create(
-            config.disconnectGraceMilliseconds * 1'000'000, joinFixture.reducer);
+        auto lifecycle
+            = ServerLifecycleCoordinator::create(config.disconnectGraceMilliseconds * 1'000'000, joinFixture.reducer);
         assert(lifecycle);
         FakeRuntime wiredRuntime;
         const auto connection = TransportConnectionId::initial();
-        wiredRuntime.events.push_back({ TransportEventKind::ConnectionAccepted, TransportFailure::None,
-            std::nullopt, std::nullopt, connection, std::nullopt,
-            TransportSecurity::EncryptedUnauthenticated, scope(std::byte{ 8 }) });
+        wiredRuntime.events.push_back(
+            { TransportEventKind::ConnectionAccepted, TransportFailure::None, std::nullopt, std::nullopt, connection,
+                std::nullopt, TransportSecurity::EncryptedUnauthenticated, scope(std::byte{ 8 }) });
         const auto helloPayload = encodeClientHello(ClientHello::fromOffer(actorOffer()));
         wiredRuntime.incoming.push_back({ TransportChannel::ReliableOrdered,
-            std::get<std::vector<std::byte>>(encodeProtocolFrame(
-                MessageClass::SessionControl, MessageKind::ClientHello, helloPayload)) });
+            std::get<std::vector<std::byte>>(
+                encodeProtocolFrame(MessageClass::SessionControl, MessageKind::ClientHello, helloPayload)) });
         ServerApplication wired(wiredRuntime, config,
             ServerApplicationWiring{ sessions, joins, crypto, *queues, clock, intake, joinFixture.reducer, *lifecycle,
                 &actorCatalog, &actors, collision.get() });
@@ -762,11 +799,11 @@ int main()
             == MessageKind::ServerHello);
 
         auto material = AuthenticationMaterial::create({});
-        const auto authenticationPayload = encodeAuthenticationRequest(
-            AuthenticationRequest::join(std::move(*material)));
+        const auto authenticationPayload
+            = encodeAuthenticationRequest(AuthenticationRequest::join(std::move(*material)));
         wiredRuntime.incoming.push_back({ TransportChannel::ReliableOrdered,
-            std::get<std::vector<std::byte>>(encodeProtocolFrame(MessageClass::SessionControl,
-                MessageKind::AuthenticationRequest, authenticationPayload)) });
+            std::get<std::vector<std::byte>>(encodeProtocolFrame(
+                MessageClass::SessionControl, MessageKind::AuthenticationRequest, authenticationPayload)) });
         assert(wired.pump(ServerTick::initial()));
         assert(lifecycle->liveCount() == 1 && joinFixture.reducer.state().activeSessions().size() == 1);
         assert(actors.find(id<ActorId>(1))->root().position() == Position3(10, 20, 30));
@@ -778,11 +815,12 @@ int main()
         for (const auto& bytes : wiredRuntime.sent)
         {
             const auto frame = decodeProtocolFrame(bytes);
-            if (!std::holds_alternative<DecodedFrame>(frame)) continue;
+            if (!std::holds_alternative<DecodedFrame>(frame))
+                continue;
             sawActorBaseline = sawActorBaseline
                 || std::get<DecodedFrame>(frame).messageKind() == MessageKind::ReliableActorInterestBaseline;
-            sawActorView = sawActorView
-                || std::get<DecodedFrame>(frame).messageKind() == MessageKind::LatestWinsActorSnapshot;
+            sawActorView
+                = sawActorView || std::get<DecodedFrame>(frame).messageKind() == MessageKind::LatestWinsActorSnapshot;
         }
         assert(sawActorBaseline && sawActorView);
 
@@ -792,21 +830,69 @@ int main()
         assert(actors.find(id<ActorId>(1))->activity() == ActorActivity::Idle
             && actors.find(id<ActorId>(1))->revision() > movedRevision);
 
-        wiredRuntime.events.push_back({ TransportEventKind::ConnectionClosed, TransportFailure::None,
-            std::nullopt, std::nullopt, connection, std::nullopt,
-            TransportSecurity::EncryptedUnauthenticated, std::nullopt });
+        const auto publicationBeforeResync = joinFixture.reducer.latestPublication();
+        assert(publicationBeforeResync);
+        const SessionResyncRequest resync(id<SessionId>(1), SessionGeneration::initial(), ResyncReason::LocalFeedGap,
+            publicationBeforeResync->stateVersion());
+        wiredRuntime.incoming.push_back({ TransportChannel::ReliableOrdered,
+            std::get<std::vector<std::byte>>(encodeProtocolFrame(MessageClass::SessionControl,
+                MessageKind::SessionResyncRequest, encodeSessionResyncRequest(resync))) });
+        wiredRuntime.sent.clear();
         assert(wired.pump(id<ServerTick>(3)));
+        for (std::uint64_t now = 101; now < 109; ++now)
+        {
+            const auto drained = queues->pump(wiredRuntime, connection, now);
+            assert(drained && *drained != OutboundPumpResult::TransportFailed
+                && *drained != OutboundPumpResult::InvalidTime);
+            if (*drained == OutboundPumpResult::Idle)
+                break;
+        }
+        bool sawCheckpointPlayerBaseline = false;
+        bool sawCheckpointPlayerView = false;
+        bool sawCurrentActorView = false;
+        for (const auto& bytes : wiredRuntime.sent)
+        {
+            const auto decoded = decodeProtocolFrame(bytes);
+            if (!std::holds_alternative<DecodedFrame>(decoded))
+                continue;
+            const auto& value = std::get<DecodedFrame>(decoded);
+            if (value.messageKind() == MessageKind::ReliableInterestBaseline)
+            {
+                const auto baseline = decodeReliableInterestBaseline(value.payload());
+                const auto* accepted = std::get_if<ReliableInterestBaseline>(&baseline);
+                sawCheckpointPlayerBaseline
+                    = accepted && accepted->serverTick() == publicationBeforeResync->checkpointTick();
+            }
+            else if (value.messageKind() == MessageKind::LatestWinsSnapshot)
+            {
+                const auto snapshot = decodeLatestWinsSnapshot(value.payload());
+                const auto* accepted = std::get_if<LatestWinsSnapshot>(&snapshot);
+                sawCheckpointPlayerView = accepted && !accepted->view().entries().empty()
+                    && accepted->view().entries().front().serverTick() == publicationBeforeResync->checkpointTick();
+            }
+            else if (value.messageKind() == MessageKind::LatestWinsActorSnapshot)
+            {
+                const auto snapshot = decodeLatestWinsActorSnapshot(value.payload());
+                const auto* accepted = std::get_if<LatestWinsActorSnapshot>(&snapshot);
+                sawCurrentActorView = accepted != nullptr;
+            }
+        }
+        assert(sawCheckpointPlayerBaseline && sawCheckpointPlayerView && sawCurrentActorView);
+
+        wiredRuntime.events.push_back({ TransportEventKind::ConnectionClosed, TransportFailure::None, std::nullopt,
+            std::nullopt, connection, std::nullopt, TransportSecurity::EncryptedUnauthenticated, std::nullopt });
+        assert(wired.pump(id<ServerTick>(4)));
         assert(sessions.size() == 0 && queues->connections() == 0);
         assert(lifecycle->liveCount() == 0 && lifecycle->hiddenCount() == 1);
         assert(joinFixture.reducer.state().activeSessions().empty());
         assert(joinFixture.reducer.state().players().size() == 1);
 
         clock.nanoseconds = (config.disconnectGraceMilliseconds + 100) * 1'000'000 - 1;
-        assert(wired.pump(id<ServerTick>(4)));
+        assert(wired.pump(id<ServerTick>(5)));
         assert(lifecycle->hiddenCount() == 1 && joinFixture.reducer.state().players().size() == 1);
 
         clock.nanoseconds = (config.disconnectGraceMilliseconds + 100) * 1'000'000;
-        assert(wired.pump(id<ServerTick>(5)));
+        assert(wired.pump(id<ServerTick>(6)));
         assert(lifecycle->hiddenCount() == 0 && joinFixture.reducer.state().players().empty());
         const auto publication = joinFixture.reducer.latestPublication();
         assert(publication && publication->sessionLifecycle().size() == 1
@@ -821,40 +907,37 @@ int main()
         RecordingCrypto crypto;
         auto queues = OutboundQueueSet::create(OutboundQueuePolicy{}, 2);
         auto timeouts = *SessionTimeoutPolicy::create(1'000'000, 1'000'000, 1'000'000);
-        ConnectionSessionCoordinator sessions(
-            clock, observability, timeouts, poseOffer(), authentication, *queues, 2);
+        ConnectionSessionCoordinator sessions(clock, observability, timeouts, poseOffer(), authentication, *queues, 2);
         JoinFixture joinFixture;
         ServerCommandIntakeCoordinator intake(
             clock, observability, clock.now(), ServerTick::initial(), IngressOrdinal::initial());
-        auto lifecycle = ServerLifecycleCoordinator::create(
-            config.disconnectGraceMilliseconds * 1'000'000, joinFixture.reducer);
+        auto lifecycle
+            = ServerLifecycleCoordinator::create(config.disconnectGraceMilliseconds * 1'000'000, joinFixture.reducer);
         assert(lifecycle);
         FakeRuntime runtime;
         const auto first = id<TransportConnectionId>(1);
         const auto second = id<TransportConnectionId>(2);
-        runtime.events = {
-            { TransportEventKind::ConnectionAccepted, TransportFailure::None, std::nullopt, std::nullopt,
-                first, std::nullopt, TransportSecurity::EncryptedUnauthenticated, scope(std::byte{ 1 }) },
-            { TransportEventKind::ConnectionAccepted, TransportFailure::None, std::nullopt, std::nullopt,
-                second, std::nullopt, TransportSecurity::EncryptedUnauthenticated, scope(std::byte{ 2 }) }
-        };
+        runtime.events
+            = { { TransportEventKind::ConnectionAccepted, TransportFailure::None, std::nullopt, std::nullopt, first,
+                    std::nullopt, TransportSecurity::EncryptedUnauthenticated, scope(std::byte{ 1 }) },
+                  { TransportEventKind::ConnectionAccepted, TransportFailure::None, std::nullopt, std::nullopt, second,
+                      std::nullopt, TransportSecurity::EncryptedUnauthenticated, scope(std::byte{ 2 }) } };
         const auto hello = TransportMessage{ TransportChannel::ReliableOrdered,
-            std::get<std::vector<std::byte>>(encodeProtocolFrame(MessageClass::SessionControl,
-                MessageKind::ClientHello, encodeClientHello(ClientHello::fromOffer(poseOffer())))) };
+            std::get<std::vector<std::byte>>(encodeProtocolFrame(MessageClass::SessionControl, MessageKind::ClientHello,
+                encodeClientHello(ClientHello::fromOffer(poseOffer())))) };
         runtime.incomingByConnection[first].push_back(hello);
         runtime.incomingByConnection[second].push_back(hello);
-        ServerApplication application(runtime, config, ServerApplicationWiring{
-            sessions, joinFixture.joins, crypto, *queues, clock, intake, joinFixture.reducer, *lifecycle });
+        ServerApplication application(runtime, config,
+            ServerApplicationWiring{
+                sessions, joinFixture.joins, crypto, *queues, clock, intake, joinFixture.reducer, *lifecycle });
         assert(application.start() && application.pump(ServerTick::initial()));
 
-        const auto authenticationPayload = encodeAuthenticationRequest(
-            AuthenticationRequest::join(std::move(*AuthenticationMaterial::create({}))));
+        const auto authenticationPayload
+            = encodeAuthenticationRequest(AuthenticationRequest::join(std::move(*AuthenticationMaterial::create({}))));
         const auto authenticationFrame = std::get<std::vector<std::byte>>(encodeProtocolFrame(
             MessageClass::SessionControl, MessageKind::AuthenticationRequest, authenticationPayload));
-        runtime.incomingByConnection[first].push_back(
-            { TransportChannel::ReliableOrdered, authenticationFrame });
-        runtime.incomingByConnection[second].push_back(
-            { TransportChannel::ReliableOrdered, authenticationFrame });
+        runtime.incomingByConnection[first].push_back({ TransportChannel::ReliableOrdered, authenticationFrame });
+        runtime.incomingByConnection[second].push_back({ TransportChannel::ReliableOrdered, authenticationFrame });
         runtime.sent.clear();
         runtime.sentConnections.clear();
         runtime.sentChannels.clear();
@@ -863,8 +946,8 @@ int main()
         std::size_t firstSnapshots = 0;
         for (std::size_t index = 0; index < runtime.sent.size(); ++index)
         {
-            if (runtime.sentConnections[index] != first
-                || runtime.sentChannels[index] != TransportChannel::LatestWins) continue;
+            if (runtime.sentConnections[index] != first || runtime.sentChannels[index] != TransportChannel::LatestWins)
+                continue;
             const auto frame = decodeProtocolFrame(runtime.sent[index]);
             assert(std::holds_alternative<DecodedFrame>(frame));
             const auto snapshot = decodeLatestWinsSnapshot(std::get<DecodedFrame>(frame).payload());
@@ -878,8 +961,7 @@ int main()
         runtime.sentConnections.clear();
         runtime.sentChannels.clear();
         const auto zero = Turn32::fromValue(0);
-        const auto tracked = VrTrackedTransform(
-            *VrPoseOffset3::create(10, 20, 30), Orientation3(zero, zero, zero));
+        const auto tracked = VrTrackedTransform(*VrPoseOffset3::create(10, 20, 30), Orientation3(zero, zero, zero));
         const auto sample = ClientVrPoseSample(id<SessionId>(1), SessionGeneration::initial(), id<EntityId>(1),
             AuthorityEpoch::initial(), PoseSampleSequence::initial(), tracked, std::nullopt, std::nullopt);
         runtime.incomingByConnection[first].push_back({ TransportChannel::PresentationLatest,
@@ -890,15 +972,15 @@ int main()
         for (std::size_t index = 0; index < runtime.sent.size(); ++index)
         {
             if (runtime.sentConnections[index] != second
-                || runtime.sentChannels[index] != TransportChannel::PresentationLatest) continue;
+                || runtime.sentChannels[index] != TransportChannel::PresentationLatest)
+                continue;
             const auto poseFrame = decodeProtocolFrame(runtime.sent[index]);
             assert(std::holds_alternative<DecodedFrame>(poseFrame));
             const auto pose = decodeServerVrPoseSnapshot(std::get<DecodedFrame>(poseFrame).payload());
             assert(std::holds_alternative<ServerVrPoseSnapshot>(pose));
             const auto& value = std::get<ServerVrPoseSnapshot>(pose);
-            assert(value.targetSessionId() == id<SessionId>(2)
-                && value.sourcePlayerId() == id<PlayerId>(1) && value.rootEntityId() == id<EntityId>(1)
-                && value.sampleSequence() == PoseSampleSequence::initial());
+            assert(value.targetSessionId() == id<SessionId>(2) && value.sourcePlayerId() == id<PlayerId>(1)
+                && value.rootEntityId() == id<EntityId>(1) && value.sampleSequence() == PoseSampleSequence::initial());
             ++relayed;
         }
         assert(relayed == 1);
@@ -910,14 +992,11 @@ int main()
         Observability observability(metrics, events);
         const auto zero = Turn32::fromValue(0);
         const auto interior = CellId::interior(id<CellSpaceId>(7));
-        std::vector<CanonicalPlayerEntityState> players{
-            { id<PlayerId>(1), id<EntityId>(1), id<AppearanceId>(1), Transform(interior, Position3(10, 20, 30),
-                Orientation3(zero, zero, zero)), LinearVelocity3(2, -3, 4), id<EntityRevision>(1),
-                AuthorityEpoch::initial(), ServerTick::initial() }
-        };
-        std::vector<CanonicalSessionProgress> progress{
-            { id<SessionId>(1), SessionGeneration::initial(), id<PlayerId>(1), id<EntityId>(1), std::nullopt }
-        };
+        std::vector<CanonicalPlayerEntityState> players{ { id<PlayerId>(1), id<EntityId>(1), id<AppearanceId>(1),
+            Transform(interior, Position3(10, 20, 30), Orientation3(zero, zero, zero)), LinearVelocity3(2, -3, 4),
+            id<EntityRevision>(1), AuthorityEpoch::initial(), ServerTick::initial() } };
+        std::vector<CanonicalSessionProgress> progress{ { id<SessionId>(1), SessionGeneration::initial(),
+            id<PlayerId>(1), id<EntityId>(1), std::nullopt } };
         CanonicalCommandReducer reducer(
             std::get<CanonicalServerState>(createCanonicalServerState(players, progress)), observability);
         ServerCommandIntakeCoordinator intake(
@@ -944,17 +1023,17 @@ int main()
         const auto zero = Turn32::fromValue(0);
         const auto interior = CellId::interior(id<CellSpaceId>(7));
         std::vector<CanonicalPlayerEntityState> players{
-            { id<PlayerId>(1), id<EntityId>(1), id<AppearanceId>(1), Transform(interior,
-                Position3(std::numeric_limits<std::int64_t>::max(), 0, 0), Orientation3(zero, zero, zero)),
+            { id<PlayerId>(1), id<EntityId>(1), id<AppearanceId>(1),
+                Transform(interior, Position3(std::numeric_limits<std::int64_t>::max(), 0, 0),
+                    Orientation3(zero, zero, zero)),
                 LinearVelocity3(1, 0, 0), id<EntityRevision>(1), AuthorityEpoch::initial(), ServerTick::initial() },
-            { id<PlayerId>(2), id<EntityId>(2), id<AppearanceId>(1), Transform(interior, Position3(5, 0, 0),
-                Orientation3(zero, zero, zero)), LinearVelocity3(1, 0, 0), id<EntityRevision>(1),
-                AuthorityEpoch::initial(), ServerTick::initial() }
+            { id<PlayerId>(2), id<EntityId>(2), id<AppearanceId>(1),
+                Transform(interior, Position3(5, 0, 0), Orientation3(zero, zero, zero)), LinearVelocity3(1, 0, 0),
+                id<EntityRevision>(1), AuthorityEpoch::initial(), ServerTick::initial() }
         };
-        std::vector<CanonicalSessionProgress> progress{
-            { id<SessionId>(1), SessionGeneration::initial(), id<PlayerId>(1), id<EntityId>(1), std::nullopt },
-            { id<SessionId>(2), SessionGeneration::initial(), id<PlayerId>(2), id<EntityId>(2), std::nullopt }
-        };
+        std::vector<CanonicalSessionProgress> progress{ { id<SessionId>(1), SessionGeneration::initial(),
+                                                            id<PlayerId>(1), id<EntityId>(1), std::nullopt },
+            { id<SessionId>(2), SessionGeneration::initial(), id<PlayerId>(2), id<EntityId>(2), std::nullopt } };
         CanonicalCommandReducer reducer(
             std::get<CanonicalServerState>(createCanonicalServerState(players, progress)), observability);
         const auto before = reducer.state();
@@ -962,8 +1041,7 @@ int main()
             clock, observability, clock.now(), ServerTick::initial(), IngressOrdinal::initial());
         const auto batches = intake.pump();
         auto prepared = reducer.prepareTick(batches.batches()[0]);
-        assert(!prepared.result()
-            && prepared.result().error() == CommandBatchReductionError::SpatialIntegrationOverflow
+        assert(!prepared.result() && prepared.result().error() == CommandBatchReductionError::SpatialIntegrationOverflow
             && reducer.state() == before);
     }
 }
