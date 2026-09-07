@@ -3,6 +3,7 @@
 
 #include "engine_coordinator.hpp"
 #include "providers.hpp"
+#include "remote_motion.hpp"
 
 #include <tes3mp/client_session_runtime.hpp>
 
@@ -29,8 +30,8 @@ namespace TES3MP::OpenMWAdapter
         std::unique_ptr<MonotonicClock> clock, std::unique_ptr<ClientSessionRuntime> runtime,
         ReconnectConfiguration reconnect, SemanticInputProvider& input, PresentationProvider& presentation,
         ConnectionStatusProvider& status, ConnectionControlProvider* control = nullptr,
-        VrPoseInputProvider* poseInput = nullptr,
-        std::unique_ptr<PlayerCredentialPersistence> playerCredentials = {}) noexcept;
+        VrPoseInputProvider* poseInput = nullptr, std::unique_ptr<PlayerCredentialPersistence> playerCredentials = {},
+        MovementMetricSink* movementMetrics = nullptr) noexcept;
 }
 
 #endif

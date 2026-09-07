@@ -140,7 +140,8 @@ bool parseOptions(int argc, char** argv, OMW::Engine& engine, Files::Configurati
     ,
     TES3MP::OpenMWAdapter::DesktopSemanticInput& multiplayerInput,
     TES3MP::OpenMWAdapter::DesktopPresentation& multiplayerPresentation,
-    TES3MP::OpenMWAdapter::ConnectionStatusProvider& multiplayerStatus
+    TES3MP::OpenMWAdapter::ConnectionStatusProvider& multiplayerStatus,
+    TES3MP::OpenMWAdapter::MovementMetricSink& multiplayerMovementMetrics
 #ifdef TES3MP_OPENMW_DESKTOP_AUTOMATION
     ,
     std::unique_ptr<TES3MP::OpenMWAdapter::DesktopAutomation>& multiplayerAutomation
@@ -343,7 +344,8 @@ bool parseOptions(int argc, char** argv, OMW::Engine& engine, Files::Configurati
             control = multiplayerAutomation.get();
         }
 #endif
-        const TES3MP::OpenMWAdapter::ClientProviders providers{ input, presentation, status, control };
+        const TES3MP::OpenMWAdapter::ClientProviders providers{
+            input, presentation, status, control, nullptr, &multiplayerMovementMetrics };
 #else
         const TES3MP::OpenMWAdapter::ClientProviders providers{};
 #endif
@@ -425,7 +427,7 @@ int runApplication(int argc, char* argv[])
     Files::ConfigurationManager cfgMgr;
 #ifndef OPENMW_VR
     TES3MP::OpenMWAdapter::DesktopSemanticInput multiplayerInput;
-    TES3MP::OpenMWAdapter::NullRemoteMotionMetricSink multiplayerMotionMetrics;
+    TES3MP::OpenMWAdapter::BoundedMovementMetricSink multiplayerMotionMetrics;
     TES3MP::OpenMWAdapter::DesktopPresentation multiplayerPresentation(multiplayerMotionMetrics);
     MultiplayerStatus multiplayerStatus;
 #ifdef TES3MP_OPENMW_DESKTOP_AUTOMATION
@@ -438,7 +440,7 @@ int runApplication(int argc, char* argv[])
 
     if (parseOptions(argc, argv, *engine, cfgMgr
 #ifndef OPENMW_VR
-            , multiplayerInput, multiplayerPresentation, multiplayerStatus
+            , multiplayerInput, multiplayerPresentation, multiplayerStatus, multiplayerMotionMetrics
 #ifdef TES3MP_OPENMW_DESKTOP_AUTOMATION
             ,
             multiplayerAutomation
@@ -450,6 +452,22 @@ int runApplication(int argc, char* argv[])
             return 1;
 
         engine->go();
+#ifndef OPENMW_VR
+        for (std::size_t index = 0;
+             index < static_cast<std::size_t>(TES3MP::OpenMWAdapter::MovementMetricKey::Count); ++index)
+        {
+            const auto key = static_cast<TES3MP::OpenMWAdapter::MovementMetricKey>(index);
+            const auto& summary = multiplayerMotionMetrics.summary(key);
+            if (summary.samples != 0)
+                Log(Debug::Info) << "TES3MP movement evidence: metric="
+                                 << TES3MP::OpenMWAdapter::movementMetricName(key)
+                                 << " samples=" << summary.samples << " min=" << summary.minimum
+                                 << " max=" << summary.maximum << " total=" << summary.total;
+        }
+        if (multiplayerMotionMetrics.droppedCount() != 0)
+            Log(Debug::Warning) << "TES3MP movement evidence dropped observations: "
+                                << multiplayerMotionMetrics.droppedCount();
+#endif
     }
 
     return 0;

@@ -7,8 +7,9 @@ Updated: 2026-09-06
 - Phases 0–10: **Complete**
 - Phase 11: **Complete**
 - Phase 12 discovery: **Complete**
-- Active work: **Phase 12 movement evidence baseline ready**
-- Last pass: **Phase 12 production movement discovery complete**
+- Phase 12 evidence: **Complete**
+- Active work: **Phase 12 production movement package decision**
+- Last pass: **Phase 12 movement evidence baseline complete**
 - Authoritative tracker: [rolling implementation plan](IMPLEMENTATION_PLAN.md)
 - Historical evidence: [implementation notes](IMPLEMENTATION_NOTES.md)
 
@@ -49,10 +50,26 @@ ADRs and GDRs are required only for consequential, hard-to-reverse decisions.
   signed 64-bit components, and a later checked integration overflow is fatal to
   the composed server pump. Production movement must validate magnitude before
   canonical mutation.
-- Runtime correction distributions are not yet available: remote motion metrics
-  use a null production sink, while command latency and local correction have no
-  observation seam. The next pass instruments and captures evidence before any
-  player-facing tuning or owner choice.
+- Discovery found that production remote motion used a null sink and command
+  latency, local correction, tick lag, and pose loss lacked one combined capture.
+  The completed evidence baseline below closes that instrumentation gap.
+
+## Phase 12 evidence result
+
+- The behavior-neutral baseline adds one bounded, identity-free client metric
+  vocabulary for command acknowledgement/stop latency, local correction, remote
+  motion, and pose age/loss. OpenMW retains fixed summaries and emits them only
+  at exit; dropped observations cannot alter presentation.
+- Server due-tick lag now enters the existing injected typed metric sink on every
+  scheduler pump. No protocol, authority, movement, correction, animation, pose,
+  interest, or resync behavior changed.
+- The deterministic walk/turn/stop capture covers desktop and PC-VR under direct,
+  jitter, loss, and stall schedules. Shared non-pose evidence is identical; loss
+  reports two pose gaps; stall reaches 100 ms extrapolation, 8,192-quanta remote
+  correction, and seven ticks of scheduler lag. These are evidence, not budgets.
+- Hardware/content-backed capture is still required before player-facing tuning.
+  The next implementation is blocked on the documented movement package owner
+  choice; A/A/A/A/A remains recommended.
 
 ## Phase 10 result
 
@@ -113,6 +130,13 @@ work.
 
 ## Last verified
 
+- Phase 12 movement evidence, adapter, observability, command-intake, and
+  server-app contracts pass. The deterministic capture emits all eight expected
+  desktop/PC-VR platform/profile records.
+- MSVC Release full OpenMW `openmw.exe` builds and links with the production
+  GameNetworkingSockets path after the evidence wiring.
+- The networking-enabled `tes3mp_server.exe`, all 145 repository Python tests,
+  and diff hygiene pass.
 - Phase 12 discovery claims were checked against the desktop/VR adapter, protocol,
   server intake/reducer/application, replicated actor, and focused movement tests.
 - Release adapter, reducer, server-app, and pose contract executables pass; all
@@ -133,14 +157,14 @@ work.
 ## Next pass
 
 Read the rolling **Now** section in
-[IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md). Perform the behavior-neutral
-Phase 12 movement evidence baseline only. Do not tune movement, collision,
-correction, animation, pose, or player-facing lag behavior before the evidence
-and required owner decisions.
+[IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md). Resolve the Phase 12 collision,
+speed/locomotion, local correction, remote lag,
+and animation/pose package. Do not implement player-facing movement policy until
+the owner approves that package.
 
 ## Working-tree expectation
 
-Before starting the next pass, `vnext` should contain the Phase 11 implementation
-commit and be clean. The separate
+Before starting the next pass, `vnext` should contain the completed Phase 12
+evidence commit and be clean. The separate
 `vnext-vr` worktree remains at the completed Phase 9 baseline until a later shared
 merge is deliberately made.

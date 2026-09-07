@@ -29,6 +29,7 @@ namespace TES3MP::OpenMWAdapter
         ConnectionStatusProvider* status = nullptr;
         ConnectionControlProvider* control = nullptr;
         VrPoseInputProvider* poseInput = nullptr;
+        MovementMetricSink* movementMetrics = nullptr;
     };
 
     using ClientCoordinatorResult = std::variant<std::unique_ptr<EngineCoordinator>, ClientCompositionFailure>;

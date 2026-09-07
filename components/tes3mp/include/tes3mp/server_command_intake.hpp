@@ -203,6 +203,7 @@ namespace TES3MP
         std::size_t pendingFor(SessionId sessionId, SessionGeneration generation) const noexcept;
         void observeOutcome(CommandIntakeObservationOutcome outcome, std::uint64_t amount = 1) noexcept;
         void observePending() noexcept;
+        void observeTickLag(std::uint64_t dueTickLag) noexcept;
         void observeEvent(CommandIntakeObservationOutcome outcome, EventSeverity severity) noexcept;
         ServerCommandPumpResult terminate(
             ServerCommandPumpError error, CommandIntakeObservationOutcome outcome, std::uint64_t dueTickLag) noexcept;

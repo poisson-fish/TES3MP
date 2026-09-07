@@ -223,7 +223,7 @@ namespace TES3MP::OpenMWAdapter
             ReconnectConfiguration{ *endpoint, *timeouts, *queue, contentManifest },
             *providers.input, *providers.presentation,
             *providers.status, providers.control, providers.poseInput,
-            makeFilePlayerCredentialPersistence(playerCredentialFile));
+            makeFilePlayerCredentialPersistence(playerCredentialFile), providers.movementMetrics);
 #else
         return ClientCompositionFailure::TransportUnavailable;
 #endif

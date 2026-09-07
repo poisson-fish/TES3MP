@@ -38,6 +38,57 @@ namespace TES3MP::OpenMWAdapter
         }
     }
 
+    ObservationResult BoundedMovementMetricSink::tryRecord(MovementMetric metric) noexcept
+    {
+        const auto index = static_cast<std::size_t>(metric.key);
+        if (index >= mSummaries.size() || mAccepted == mCapacity)
+        {
+            if (mDropped != std::numeric_limits<std::size_t>::max())
+                ++mDropped;
+            return ObservationResult::Dropped;
+        }
+        auto& summary = mSummaries[index];
+        if (summary.samples == 0)
+            summary.minimum = metric.value;
+        else
+            summary.minimum = std::min(summary.minimum, metric.value);
+        summary.maximum = std::max(summary.maximum, metric.value);
+        summary.total = saturatingAdd(summary.total, metric.value);
+        ++summary.samples;
+        ++mAccepted;
+        return ObservationResult::Accepted;
+    }
+
+    const char* movementMetricName(MovementMetricKey key) noexcept
+    {
+        switch (key)
+        {
+            case MovementMetricKey::CommandAcknowledgementNanoseconds:
+                return "command_ack_nanoseconds";
+            case MovementMetricKey::StopAcknowledgementNanoseconds:
+                return "stop_ack_nanoseconds";
+            case MovementMetricKey::LocalCorrectionDistanceQuanta:
+                return "local_correction_distance_quanta";
+            case MovementMetricKey::SnapshotAgeNanoseconds:
+                return "remote_snapshot_age_nanoseconds";
+            case MovementMetricKey::BufferDepth:
+                return "remote_buffer_depth";
+            case MovementMetricKey::ExtrapolationNanoseconds:
+                return "remote_extrapolation_nanoseconds";
+            case MovementMetricKey::CorrectionDistanceQuanta:
+                return "remote_correction_distance_quanta";
+            case MovementMetricKey::HardSnaps:
+                return "remote_hard_snaps";
+            case MovementMetricKey::PoseAgeNanoseconds:
+                return "pose_age_nanoseconds";
+            case MovementMetricKey::PoseLostSamples:
+                return "pose_lost_samples";
+            case MovementMetricKey::Count:
+                return "unknown";
+        }
+        return "unknown";
+    }
+
     RemoteMotionBuffer::RemoteMotionBuffer(RemoteMotionMetricSink& metrics) noexcept
         : mMetrics(metrics)
     {

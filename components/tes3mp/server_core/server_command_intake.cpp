@@ -110,6 +110,12 @@ namespace TES3MP
             (void)mObservability.metrics().tryRecord(*metric);
     }
 
+    void ServerCommandIntakeCoordinator::observeTickLag(std::uint64_t dueTickLag) noexcept
+    {
+        if (const auto metric = MetricObservation::create(MetricKey::ServerTickLag, DistributionSample{ dueTickLag }))
+            (void)mObservability.metrics().tryRecord(*metric);
+    }
+
     void ServerCommandIntakeCoordinator::observeEvent(
         CommandIntakeObservationOutcome outcome, EventSeverity severity) noexcept
     {
@@ -175,6 +181,7 @@ namespace TES3MP
         }
 
         const auto scheduled = mScheduler.pump();
+        observeTickLag(scheduled.dueTickLag());
         if (!scheduled)
             return terminate(
                 pumpError(scheduled.error()), observationOutcome(scheduled.error()), scheduled.dueTickLag());

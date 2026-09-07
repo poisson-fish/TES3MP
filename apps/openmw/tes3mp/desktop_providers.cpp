@@ -328,7 +328,15 @@ namespace TES3MP::OpenMWAdapter
                 targetCell = player.getCell();
             }
             else if (player.getCell() == targetCell)
+            {
+                const auto& local = player.getRefData().getPosition();
+                (void)metrics.tryRecord({ MovementMetricKey::LocalCorrectionDistanceQuanta,
+                    movementCorrectionDistanceQuanta(self->transform().position(),
+                        static_cast<double>(local.pos[0]) * PositionScale,
+                        static_cast<double>(local.pos[1]) * PositionScale,
+                        static_cast<double>(local.pos[2]) * PositionScale) });
                 world->moveObject(player, selfPosition.asVec3());
+            }
 
             std::array<std::optional<EntityId>, MWRender::MaximumReplicatedActors> desired;
             std::size_t desiredCount = 0;

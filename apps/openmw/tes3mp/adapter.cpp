@@ -73,7 +73,8 @@ namespace TES3MP::OpenMWAdapter
                 std::unique_ptr<ClientSessionRuntime> runtime, ReconnectConfiguration reconnect,
                 SemanticInputProvider& input, PresentationProvider& presentation, ConnectionStatusProvider& status,
                 ConnectionControlProvider* control, VrPoseInputProvider* poseInput,
-                std::unique_ptr<PlayerCredentialPersistence> playerCredentials) noexcept
+                std::unique_ptr<PlayerCredentialPersistence> playerCredentials,
+                MovementMetricSink* movementMetrics) noexcept
                 : mTransport(std::move(transport))
                 , mClock(std::move(clock))
                 , mRuntime(std::move(runtime))
@@ -84,6 +85,9 @@ namespace TES3MP::OpenMWAdapter
                 , mControl(control)
                 , mPoseInput(poseInput)
                 , mPlayerCredentials(std::move(playerCredentials))
+                , mMovementMetrics(movementMetrics)
+                , mMotion(movementMetrics)
+                , mPoseEvidence(movementMetrics)
             {
             }
 
@@ -167,7 +171,7 @@ namespace TES3MP::OpenMWAdapter
 
                 const auto& snapshot = mRuntime->session().stateMachine().confirmedSnapshot();
                 if (snapshot)
-                    mMotion.observeAcknowledgement(snapshot->header().acknowledgedCommandSequence());
+                    mMotion.observeAcknowledgement(snapshot->header().acknowledgedCommandSequence(), now);
                 bool finalizedCellTransition = false;
                 if (snapshot && mPendingCellTransition && snapshot->header().acknowledgedCommandSequence()
                     && *snapshot->header().acknowledgedCommandSequence() >= *mPendingCellTransition)
@@ -212,6 +216,7 @@ namespace TES3MP::OpenMWAdapter
                 }
                 if (snapshot)
                 {
+                    mPoseEvidence.retain(snapshot->view().entries());
                     for (const auto& pose : advanced.poseSnapshots)
                     {
                         const auto observed = std::ranges::find_if(snapshot->view().entries(), [&](const auto& entry) {
@@ -225,8 +230,11 @@ namespace TES3MP::OpenMWAdapter
                             closeForProviderFailure(ProviderResult::PresentationFailed);
                             return;
                         }
+                        mPoseEvidence.observe(
+                            pose.rootEntityId(), pose.rootAuthorityEpoch(), pose.sampleSequence(), now);
                     }
                 }
+                mPoseEvidence.advance(now);
                 if (mPresentation.advance(now) != ProviderResult::Accepted)
                 {
                     closeForProviderFailure(ProviderResult::PresentationFailed);
@@ -257,7 +265,7 @@ namespace TES3MP::OpenMWAdapter
                 if (snapshot)
                 {
                     if (auto intent = mInput.sampleCurrentIntent())
-                        mMotion.sample(std::move(*intent));
+                        mMotion.sample(std::move(*intent), now);
                     const auto* self = selfEntry(*snapshot);
                     if (!self)
                     {
@@ -266,9 +274,10 @@ namespace TES3MP::OpenMWAdapter
                     }
                     if (auto intent = mMotion.next(self->linearVelocity()))
                     {
+                        const PlayerMotionIntent queuedIntent = *intent;
                         const auto queued = mRuntime->queueMotionIntent(std::move(*intent));
                         if (queued.result != ClientRuntimeResult::Accepted || !queued.sequence
-                            || !mMotion.markQueued(*queued.sequence))
+                            || !mMotion.markQueued(*queued.sequence, queuedIntent, now))
                         {
                             closeTerminal(ConnectionStatus::TransportFailed);
                             return;
@@ -353,7 +362,8 @@ namespace TES3MP::OpenMWAdapter
                     return;
                 }
                 mPresentation.clear();
-                mMotion = {};
+                mMotion = MotionIntentTracker(mMovementMetrics);
+                mPoseEvidence.clear();
                 mPoseSequence.reset();
                 mNextPoseSample.reset();
                 mPendingCellTransition.reset();
@@ -460,12 +470,14 @@ namespace TES3MP::OpenMWAdapter
             ConnectionControlProvider* mControl = nullptr;
             VrPoseInputProvider* mPoseInput = nullptr;
             std::unique_ptr<PlayerCredentialPersistence> mPlayerCredentials;
+            MovementMetricSink* mMovementMetrics = nullptr;
+            MotionIntentTracker mMotion;
+            PoseEvidenceTracker mPoseEvidence;
             bool mClosed = false;
             bool mReady = false;
             bool mResuming = false;
             std::optional<CommandSequence> mPendingCellTransition;
             std::optional<CellTransition> mDeferredCellTransition;
-            MotionIntentTracker mMotion;
             std::optional<PoseSampleSequence> mPoseSequence;
             std::optional<MonotonicInstant> mNextPoseSample;
             std::optional<ResumeToken> mResumeToken;
@@ -481,11 +493,12 @@ namespace TES3MP::OpenMWAdapter
         std::unique_ptr<MonotonicClock> clock, std::unique_ptr<ClientSessionRuntime> runtime,
         ReconnectConfiguration reconnect, SemanticInputProvider& input, PresentationProvider& presentation,
         ConnectionStatusProvider& status, ConnectionControlProvider* control, VrPoseInputProvider* poseInput,
-        std::unique_ptr<PlayerCredentialPersistence> playerCredentials) noexcept
+        std::unique_ptr<PlayerCredentialPersistence> playerCredentials, MovementMetricSink* movementMetrics) noexcept
     {
         if (!transport || !clock || !runtime)
             return {};
         return std::make_unique<Coordinator>(std::move(transport), std::move(clock), std::move(runtime),
-            std::move(reconnect), input, presentation, status, control, poseInput, std::move(playerCredentials));
+            std::move(reconnect), input, presentation, status, control, poseInput, std::move(playerCredentials),
+            movementMetrics);
     }
 }

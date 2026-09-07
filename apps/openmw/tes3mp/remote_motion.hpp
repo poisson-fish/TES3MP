@@ -5,6 +5,7 @@
 #include <tes3mp/monotonic_clock.hpp>
 #include <tes3mp/observability.hpp>
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -18,35 +19,84 @@ namespace TES3MP::OpenMWAdapter
     inline constexpr std::uint64_t RemoteCorrectionBlendNanoseconds = 66'666'667;
     inline constexpr std::uint64_t RemoteHardSnapDistanceQuanta = 16 * 1024;
 
-    enum class RemoteMotionMetricKey : std::uint8_t
+    enum class MovementMetricKey : std::uint8_t
     {
+        CommandAcknowledgementNanoseconds,
+        StopAcknowledgementNanoseconds,
+        LocalCorrectionDistanceQuanta,
         SnapshotAgeNanoseconds,
         BufferDepth,
         ExtrapolationNanoseconds,
         CorrectionDistanceQuanta,
         HardSnaps,
+        PoseAgeNanoseconds,
+        PoseLostSamples,
+        Count,
     };
 
-    struct RemoteMotionMetric
+    struct MovementMetric
     {
-        RemoteMotionMetricKey key;
+        MovementMetricKey key;
         std::uint64_t value;
 
-        friend constexpr bool operator==(RemoteMotionMetric, RemoteMotionMetric) noexcept = default;
+        friend constexpr bool operator==(MovementMetric, MovementMetric) noexcept = default;
     };
 
-    class RemoteMotionMetricSink
+    class MovementMetricSink
     {
     public:
-        virtual ~RemoteMotionMetricSink() = default;
-        virtual ObservationResult tryRecord(RemoteMotionMetric metric) noexcept = 0;
+        virtual ~MovementMetricSink() = default;
+        virtual ObservationResult tryRecord(MovementMetric metric) noexcept = 0;
     };
 
-    class NullRemoteMotionMetricSink final : public RemoteMotionMetricSink
+    class NullMovementMetricSink final : public MovementMetricSink
     {
     public:
-        ObservationResult tryRecord(RemoteMotionMetric) noexcept override { return ObservationResult::Accepted; }
+        ObservationResult tryRecord(MovementMetric) noexcept override { return ObservationResult::Accepted; }
     };
+
+    inline constexpr std::size_t MaximumMovementEvidenceObservations = 16'384;
+
+    struct MovementMetricSummary
+    {
+        std::uint64_t samples = 0;
+        std::uint64_t minimum = 0;
+        std::uint64_t maximum = 0;
+        std::uint64_t total = 0;
+
+        friend constexpr bool operator==(MovementMetricSummary, MovementMetricSummary) noexcept = default;
+    };
+
+    class BoundedMovementMetricSink final : public MovementMetricSink
+    {
+    public:
+        explicit constexpr BoundedMovementMetricSink(
+            std::size_t capacity = MaximumMovementEvidenceObservations) noexcept
+            : mCapacity(std::min(capacity, MaximumMovementEvidenceObservations))
+        {
+        }
+
+        ObservationResult tryRecord(MovementMetric metric) noexcept override;
+        constexpr const MovementMetricSummary& summary(MovementMetricKey key) const noexcept
+        {
+            return mSummaries[static_cast<std::size_t>(key)];
+        }
+        constexpr std::size_t acceptedCount() const noexcept { return mAccepted; }
+        constexpr std::size_t droppedCount() const noexcept { return mDropped; }
+
+    private:
+        std::array<MovementMetricSummary, static_cast<std::size_t>(MovementMetricKey::Count)> mSummaries{};
+        std::size_t mCapacity = 0;
+        std::size_t mAccepted = 0;
+        std::size_t mDropped = 0;
+    };
+
+    const char* movementMetricName(MovementMetricKey key) noexcept;
+
+    using RemoteMotionMetricKey = MovementMetricKey;
+    using RemoteMotionMetric = MovementMetric;
+    using RemoteMotionMetricSink = MovementMetricSink;
+    using NullRemoteMotionMetricSink = NullMovementMetricSink;
 
     struct RemoteMotionPose
     {

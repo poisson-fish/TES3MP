@@ -456,6 +456,25 @@ add_custom_target(openmw_tes3mp_adapter_tests_run
     DEPENDS openmw_tes3mp_adapter_tests
     COMMENT "Running OpenMW TES3MP adapter contracts")
 
+add_executable(tes3mp_movement_evidence_tests
+    ${CMAKE_CURRENT_LIST_DIR}/../../apps/openmw/tes3mp/movement_mapping.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/../../apps/openmw/tes3mp/remote_motion.cpp
+    tests/movement_evidence_tests.cpp)
+target_compile_features(tes3mp_movement_evidence_tests PRIVATE cxx_std_20)
+target_include_directories(tes3mp_movement_evidence_tests PRIVATE
+    ${CMAKE_CURRENT_LIST_DIR}/../../apps/openmw/tes3mp)
+target_link_libraries(tes3mp_movement_evidence_tests PRIVATE tes3mp_test_support)
+set_target_properties(tes3mp_movement_evidence_tests PROPERTIES FOLDER "TES3MP/Tests")
+tes3mp_enable_runtime_safety(tes3mp_movement_evidence_tests)
+tes3mp_verify_target_dependencies(tes3mp_movement_evidence_tests
+    ALLOWED tes3mp_test_support tes3mp_server_core tes3mp_protocol tes3mp_transport)
+tes3mp_verify_target_includes(tes3mp_movement_evidence_tests
+    FORBIDDEN ${TES3MP_ENGINE_INDEPENDENT_FORBIDDEN_INCLUDES})
+add_custom_target(tes3mp_movement_evidence_tests_run
+    COMMAND $<TARGET_FILE:tes3mp_movement_evidence_tests>
+    DEPENDS tes3mp_movement_evidence_tests
+    COMMENT "Capturing deterministic desktop and PC-VR movement evidence")
+
 tes3mp_verify_target_dependencies(tes3mp_protocol_tests ALLOWED tes3mp_test_support)
 tes3mp_verify_target_includes(tes3mp_protocol_tests
     FORBIDDEN ${TES3MP_ENGINE_INDEPENDENT_FORBIDDEN_INCLUDES})

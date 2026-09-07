@@ -77,6 +77,7 @@ namespace
             case MetricKey::CommandIntakeOutcomes:
                 return dimension == MetricDimensionKey::CommandIntakeOutcome;
             case MetricKey::CommandIntakePending:
+            case MetricKey::ServerTickLag:
                 return false;
             case MetricKey::CommandReductionOutcomes:
                 return dimension == MetricDimensionKey::CommandReductionOutcome;

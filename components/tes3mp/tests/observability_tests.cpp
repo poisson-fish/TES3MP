@@ -49,6 +49,9 @@ namespace
 
         if (MetricObservation::create(MetricKey::ContractCounter, GaugeValue{}))
             return false;
+        const auto tickLag = MetricObservation::create(MetricKey::ServerTickLag, DistributionSample{ 4 });
+        if (!tickLag || tickLag->unit() != MetricUnit::Count || !tickLag->dimensions().empty())
+            return false;
         if (MetricObservation::create(static_cast<MetricKey>(0), CounterAddition{}))
             return false;
 

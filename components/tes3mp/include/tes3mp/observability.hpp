@@ -47,6 +47,7 @@ namespace TES3MP
         CommandIntakePending = 0x201,
         CommandReductionOutcomes = 0x202,
         CanonicalSinkDeliveries = 0x203,
+        ServerTickLag = 0x204,
     };
 
     struct MetricDefinition
@@ -80,6 +81,8 @@ namespace TES3MP
             case MetricKey::CommandReductionOutcomes:
             case MetricKey::CanonicalSinkDeliveries:
                 return MetricDefinition{ MetricOperation::CounterAdd, MetricUnit::Count };
+            case MetricKey::ServerTickLag:
+                return MetricDefinition{ MetricOperation::DistributionObserve, MetricUnit::Count };
         }
         return std::nullopt;
     }

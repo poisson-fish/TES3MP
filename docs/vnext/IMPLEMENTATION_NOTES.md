@@ -6177,7 +6177,29 @@ only the relevant phase section here.
 
 ## Phase 12 — Production movement, animation, and pose replication
 
-[Back to the phase tracker](IMPLEMENTATION_PLAN.md#phase-12--movement-evidence-baseline)
+[Back to the phase tracker](IMPLEMENTATION_PLAN.md#phase-12--production-movement-package-decision)
+
+### 2026-09-06 — movement evidence baseline — Complete
+
+- Change: added bounded identity-free command acknowledgement/stop, local
+  correction, remote motion, server tick lag, and pose age/loss observations.
+  OpenMW now composes the fixed-capacity summary sink instead of the remote-motion
+  null sink and reports aggregate fields only at exit. Pose tracking is bounded,
+  authority-epoch aware, and pruned to the current view.
+- Capture: added the repository-owned deterministic walk/turn/stop evidence
+  executable and [capture record](PHASE12_MOVEMENT_EVIDENCE.md). Desktop and
+  PC-VR shared evidence is identical under direct, jitter, loss, and stall
+  schedules; PC-VR loss records two sequence gaps; the stall reaches the existing
+  100 ms extrapolation cap, 8,192-quanta correction, and seven-tick lag.
+- Decisions: none. The results are fixture baselines, not approved budgets. No
+  protocol, authority, movement, correction, animation, pose, interest, resync,
+  persistence, or world-object behavior changed. Hardware/content capture and
+  the documented A/A/A/A/A owner package remain next.
+- Verification: focused adapter, movement-evidence, observability,
+  command-intake, and server-app executables pass. MSVC Release full OpenMW
+  `openmw.exe` and networking-enabled `tes3mp_server.exe` build and link with
+  production GameNetworkingSockets; all 145 repository Python tests and diff
+  hygiene pass.
 
 ### 2026-09-06 — production movement discovery — Complete
 

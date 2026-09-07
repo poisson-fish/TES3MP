@@ -330,6 +330,30 @@ namespace
         IntakeFixture fixture;
         return fixture.intake.pendingCount() == 0 && fixture.intake.terminalError() == ServerCommandPumpError::None;
     }
+
+    bool every_scheduler_pump_observes_identity_free_tick_lag()
+    {
+        ManualClock clock(MonotonicInstant::fromNanoseconds(0));
+        auto metrics = RecordingMetricSink::create(4);
+        NullStructuredEventSink events;
+        Observability observability(*metrics, events);
+        ServerCommandIntakeCoordinator intake(
+            clock, observability, clock.now(), ServerTick::initial(), IngressOrdinal::initial());
+        const auto firstPump = intake.pump();
+        if (!firstPump)
+            return false;
+        clock.advance(10'000'000'000ULL);
+        const auto secondPump = intake.pump();
+        if (!secondPump)
+            return false;
+        std::array<std::uint64_t, 2> lag{};
+        std::size_t count = 0;
+        for (const auto& observation : metrics->observations())
+            if (observation.key() == MetricKey::ServerTickLag && observation.dimensions().empty()
+                && count != lag.size())
+                lag[count++] = std::get<DistributionSample>(observation.value()).value;
+        return count == 2 && lag[0] == firstPump.dueTickLag() && lag[1] == secondPump.dueTickLag();
+    }
 }
 
 int main()
@@ -359,6 +383,8 @@ int main()
             &intake_does_not_deduplicate_validate_or_mutate_canonical_state },
         std::pair{ "server_core_intake_has_no_openmw_socket_platform_script_or_database_dependency",
             &server_core_intake_has_no_openmw_socket_platform_script_or_database_dependency },
+        std::pair{ "every_scheduler_pump_observes_identity_free_tick_lag",
+            &every_scheduler_pump_observes_identity_free_tick_lag },
     };
     for (const auto& [name, test] : tests)
     {

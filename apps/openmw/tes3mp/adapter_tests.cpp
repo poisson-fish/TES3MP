@@ -147,6 +147,15 @@ namespace
             return result;
         }
 
+        std::uint64_t maximum(TES3MP::OpenMWAdapter::RemoteMotionMetricKey key) const
+        {
+            std::uint64_t result = 0;
+            for (std::size_t index = 0; index < size; ++index)
+                if (values[index]->key == key)
+                    result = std::max(result, values[index]->value);
+            return result;
+        }
+
         std::array<std::optional<TES3MP::OpenMWAdapter::RemoteMotionMetric>, 128> values{};
         std::size_t size = 0;
         std::size_t dropped = 0;
@@ -458,18 +467,52 @@ int main()
     require(dropsDoNotChangePresentation.observe(remoteSample(0, 1, 7), MonotonicInstant::fromNanoseconds(0)));
     require(dropsDoNotChangePresentation.advance(MonotonicInstant::fromNanoseconds(0))->x == 7.0);
 
-    MotionIntentTracker motion;
-    motion.sample(PlayerMotionIntent(LinearVelocity3(10, 0, 0)));
+    require(movementCorrectionDistanceQuanta(Position3(3, 4, 0), 0, 0, 0) == 5);
+    require(movementCorrectionDistanceQuanta(Position3(0, 0, 0),
+                std::numeric_limits<double>::infinity(), 0, 0)
+        == std::numeric_limits<std::uint64_t>::max());
+
+    MotionMetrics trackerMetrics;
+    MotionIntentTracker motion(&trackerMetrics);
+    motion.sample(PlayerMotionIntent(LinearVelocity3(10, 0, 0)), MonotonicInstant::fromNanoseconds(90));
     require(motion.next(LinearVelocity3(0, 0, 0)).has_value());
-    require(motion.markQueued(CommandSequence::initial()) && motion.pending());
-    motion.sample(PlayerMotionIntent(LinearVelocity3(0, 0, 0)));
+    require(motion.markQueued(CommandSequence::initial(), PlayerMotionIntent(LinearVelocity3(10, 0, 0)),
+                MonotonicInstant::fromNanoseconds(100))
+        && motion.pending());
+    motion.sample(PlayerMotionIntent(LinearVelocity3(0, 0, 0)), MonotonicInstant::fromNanoseconds(125));
     require(!motion.next(LinearVelocity3(0, 0, 0)));
-    motion.observeAcknowledgement(CommandSequence::initial());
+    motion.observeAcknowledgement(CommandSequence::initial(), MonotonicInstant::fromNanoseconds(175));
     require(!motion.pending());
+    require(trackerMetrics.has(MovementMetricKey::CommandAcknowledgementNanoseconds));
     require(motion.next(LinearVelocity3(10, 0, 0))->desiredVelocity() == LinearVelocity3(0, 0, 0));
-    require(motion.markQueued(*CommandSequence::initial().next()));
-    motion.observeAcknowledgement(*CommandSequence::initial().next());
+    require(motion.markQueued(*CommandSequence::initial().next(), PlayerMotionIntent(LinearVelocity3(0, 0, 0)),
+        MonotonicInstant::fromNanoseconds(200)));
+    motion.observeAcknowledgement(
+        *CommandSequence::initial().next(), MonotonicInstant::fromNanoseconds(300));
     require(!motion.next(LinearVelocity3(0, 0, 0)));
+    require(trackerMetrics.has(MovementMetricKey::StopAcknowledgementNanoseconds));
+    require(trackerMetrics.maximum(MovementMetricKey::StopAcknowledgementNanoseconds) == 175);
+
+    PoseEvidenceTracker poseEvidence(&trackerMetrics);
+    poseEvidence.observe(value<EntityId>(9), AuthorityEpoch::initial(), PoseSampleSequence::initial(),
+        MonotonicInstant::fromNanoseconds(400));
+    poseEvidence.advance(MonotonicInstant::fromNanoseconds(425));
+    poseEvidence.observe(value<EntityId>(9), AuthorityEpoch::initial(), value<PoseSampleSequence>(3),
+        MonotonicInstant::fromNanoseconds(450));
+    require(trackerMetrics.has(MovementMetricKey::PoseAgeNanoseconds));
+    require(trackerMetrics.has(MovementMetricKey::PoseLostSamples));
+    const auto poseAges = trackerMetrics.count(MovementMetricKey::PoseAgeNanoseconds);
+    poseEvidence.retain({});
+    poseEvidence.advance(MonotonicInstant::fromNanoseconds(500));
+    require(trackerMetrics.count(MovementMetricKey::PoseAgeNanoseconds) == poseAges);
+    poseEvidence.clear();
+
+    BoundedMovementMetricSink bounded(1);
+    require(bounded.tryRecord({ MovementMetricKey::BufferDepth, 3 }) == ObservationResult::Accepted);
+    require(bounded.tryRecord({ MovementMetricKey::BufferDepth, 4 }) == ObservationResult::Dropped);
+    require((bounded.summary(MovementMetricKey::BufferDepth) == MovementMetricSummary{ 1, 3, 3, 3 }));
+    require(bounded.acceptedCount() == 1 && bounded.droppedCount() == 1
+        && std::string_view(movementMetricName(MovementMetricKey::BufferDepth)) == "remote_buffer_depth");
 
     Input input;
     auto intent = input.sampleCurrentIntent();
@@ -524,7 +567,7 @@ int main()
     auto* credentialPersistenceObserver = credentialPersistence.get();
     auto reconnectCoordinator = makeCoordinator(std::move(reconnectTransport), std::move(reconnectClock),
         std::move(reconnectRuntime), reconnect, reconnectInput, reconnectPresentation, reconnectStatus, &disconnect,
-        &poseInput, std::move(credentialPersistence));
+        &poseInput, std::move(credentialPersistence), &trackerMetrics);
     reconnectCoordinator->frame(0.01f);
     auto helloPayload = encodeServerHello(serverHello(true));
     reconnectTransportObserver->enqueue(
@@ -552,6 +595,7 @@ int main()
     require(reconnectPresentation.calls == 1 && reconnectPresentation.poses == 1 && poseInput.calls == 1
         && credentialPersistenceObserver->calls == 1
         && credentialPersistenceObserver->bytes.front() == std::byte{ 2 });
+    require(trackerMetrics.has(MovementMetricKey::PoseAgeNanoseconds));
     require(reconnectTransportObserver->sentChannel == TransportChannel::PresentationLatest);
     const auto sentPoseFrame = decodeProtocolFrame(reconnectTransportObserver->sent);
     require(std::holds_alternative<DecodedFrame>(sentPoseFrame)
