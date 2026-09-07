@@ -6179,6 +6179,27 @@ only the relevant phase section here.
 
 [Back to the phase tracker](IMPLEMENTATION_PLAN.md#now)
 
+### 2026-09-06 — manifest movement profiles and collision kernel seam — Complete
+
+- Change: content manifests now carry ordered, bounded sneak/walk/run/jump
+  speeds, parsed fail-closed by the dedicated server and OpenMW. Version 1.2
+  remains the stricter legacy walk envelope.
+- Change: added a deterministic checked fixed-tick movement kernel and an
+  engine-neutral, manifest-scoped server collision query. The reducer accepts
+  only the query's resolved position/velocity while preserving cell and
+  orientation; the current executable binds an unobstructed compatibility query.
+- Boundary: no schema, client prediction, correction tuning, remote playback,
+  animation, pose, interest/resync, persistence, or world-object behavior
+  changed. A content-backed collision provider remains a candidate at the
+  completed seam.
+- Verification: MSVC RelWithDebInfo full engine-independent protocol/server and
+  dedicated-server app contracts pass, including
+  `server_collision_is_the_only_canonical_root_result`, invalid profile cases,
+  and existing exact-cell interest/resync coverage. MSVC Release networking
+  server, headless client, and full OpenMW build and link. The Phase 7 lifecycle
+  integration passes 32 reconnects with zero final queue depth; all 145 Python
+  tests, indexed provenance, legacy exclusion, and diff hygiene pass.
+
 ### 2026-09-06 — movement package decision and input safety gate — Complete
 
 - Decision: the owner approved A/A/A/A/A. [ADR-0059](adr/ADR-0059-phase12-production-movement-architecture.md)

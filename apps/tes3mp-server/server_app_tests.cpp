@@ -45,6 +45,7 @@ namespace
         "content_manifest_id = 0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20\n"
         "cell_spaces = interior:7;exterior:8\nallowed_cells = interior:7;exterior:8:0:0\n"
         "spawn_cell = interior:7\ndefault_appearance_id = 1\n"
+        "movement_profile = sneak:1024;walk:4097;run:8192;jump:4096\n"
         "player_identity_file = players.txt\n";
 
     class FakeRuntime final : public TES3MP::TransportRuntime
@@ -382,6 +383,8 @@ int main()
         const auto& config = std::get<ServerConfig>(result);
         assert(config.endpoint.address() == "127.0.0.1" && config.endpoint.port() == 25565);
         assert(config.tickIntervalMilliseconds == 16 && config.disconnectGraceMilliseconds == 30000);
+        assert(config.contentManifest.movementProfile().speed(LocomotionMode::Sneak) == 1024
+            && config.contentManifest.movementProfile().speed(LocomotionMode::Jump) == 4096);
     }
     for (const auto invalid : { std::string{}, std::string("unknown = x\n"),
              std::string(validConfig) + "port = 2\n",
@@ -398,6 +401,11 @@ int main()
         std::string("cell_spaces = interior:7;exterior:8").size(),
         "cell_spaces = interior:7;exterior:7");
     assert(std::holds_alternative<ConfigError>(parseServerConfig(duplicateContentIds)));
+    auto invalidMovementProfile = std::string(validConfig);
+    invalidMovementProfile.replace(invalidMovementProfile.find("sneak:1024;walk:4097;run:8192;jump:4096"),
+        std::string("sneak:1024;walk:4097;run:8192;jump:4096").size(),
+        "sneak:4097;walk:1024;run:8192;jump:4096");
+    assert(std::holds_alternative<ConfigError>(parseServerConfig(invalidMovementProfile)));
 
     const auto temporary = std::filesystem::temp_directory_path() / "tes3mp-server-password-test";
     { std::ofstream stream(temporary, std::ios::binary); stream << "secret\r\n"; }

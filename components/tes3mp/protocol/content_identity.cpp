@@ -26,7 +26,7 @@ namespace TES3MP
     }
     std::optional<ContentManifest> ContentManifest::create(ContentManifestId id,
         std::span<const CellSpaceDeclaration> cellSpaces, std::span<const CellId> cells,
-        AppearanceId defaultAppearance) noexcept
+        AppearanceId defaultAppearance, MovementProfile movementProfile) noexcept
     {
         if (cellSpaces.empty() || cellSpaces.size() > MaximumContentCellSpaces
             || cells.empty() || cells.size() > MaximumContentCells)
@@ -69,7 +69,8 @@ namespace TES3MP
                     }))
                     return std::nullopt;
             }
-            return ContentManifest(id, std::move(sortedSpaces), std::move(sortedCells), defaultAppearance);
+            return ContentManifest(
+                id, std::move(sortedSpaces), std::move(sortedCells), defaultAppearance, movementProfile);
         }
         catch (...)
         {
@@ -135,7 +136,8 @@ namespace TES3MP
         const std::array spaces{ CellSpaceDeclaration{ interior, CellSpaceKind::Interior },
             CellSpaceDeclaration{ exterior, CellSpaceKind::Exterior } };
         const std::array cells{ CellId::interior(interior), CellId::exterior(exterior, 0, 0) };
-        return *ContentManifest::create(testContentManifestId(), spaces, cells, *AppearanceId::fromValue(1));
+        return *ContentManifest::create(
+            testContentManifestId(), spaces, cells, *AppearanceId::fromValue(1), testMovementProfile());
     }
 
     std::optional<std::vector<CellSpaceDeclaration>> parseCellSpaceDeclarations(std::string_view value)
@@ -203,4 +205,33 @@ namespace TES3MP
         return result.empty() ? std::nullopt : std::optional(std::move(result));
     }
     catch (...) { return std::nullopt; }
+
+    std::optional<MovementProfile> parseMovementProfile(std::string_view value) noexcept
+    {
+        constexpr std::array<std::string_view, 4> names{ "sneak", "walk", "run", "jump" };
+        std::array<std::uint64_t, names.size()> speeds{};
+        std::size_t begin = 0;
+        for (std::size_t index = 0; index < names.size(); ++index)
+        {
+            const auto end = value.find(';', begin);
+            const auto entry = value.substr(begin, end == std::string_view::npos ? value.size() - begin : end - begin);
+            const auto colon = entry.find(':');
+            if (colon == std::string_view::npos || entry.substr(0, colon) != names[index]
+                || entry.find(':', colon + 1) != std::string_view::npos)
+                return std::nullopt;
+            const auto speed = decimal<std::uint64_t>(entry.substr(colon + 1));
+            if (!speed) return std::nullopt;
+            speeds[index] = *speed;
+            if (index + 1 == names.size())
+            {
+                if (end != std::string_view::npos) return std::nullopt;
+            }
+            else
+            {
+                if (end == std::string_view::npos) return std::nullopt;
+                begin = end + 1;
+            }
+        }
+        return MovementProfile::create(speeds[0], speeds[1], speeds[2], speeds[3]);
+    }
 }

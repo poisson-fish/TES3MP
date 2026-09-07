@@ -33,6 +33,7 @@ def client_command(args: argparse.Namespace, port: int, password: Path,
         "--tes3mp-content-cell-spaces=interior:7;exterior:8",
         "--tes3mp-content-allowed-cells=interior:7;exterior:8:0:0",
         "--tes3mp-content-appearance-id=1",
+        "--tes3mp-content-movement-profile=sneak:1024;walk:4097;run:8192;jump:4096",
         f"--tes3mp-content-cell-space-map=7={args.interior}",
         f"--tes3mp-content-cell-space-map=8={args.worldspace}",
         f"--tes3mp-content-appearance-record={args.avatar}",
@@ -160,6 +161,7 @@ def main() -> int:
             f"join_password_file={password.as_posix()}\ncontent_manifest_id={TEST_CONTENT_MANIFEST}\n"
             f"cell_spaces=interior:7;exterior:8\nallowed_cells=interior:7;exterior:8:0:0\n"
             f"spawn_cell=interior:7\ndefault_appearance_id=1\n"
+            f"movement_profile=sneak:1024;walk:4097;run:8192;jump:4096\n"
             f"player_identity_file={(root / 'player-identities').as_posix()}\n",
             encoding="utf-8",
         )

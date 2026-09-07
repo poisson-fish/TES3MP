@@ -362,7 +362,7 @@
     {
       "path": "apps/tes3mp-server/server_config.cpp",
       "status": "A",
-      "purpose": "Strict bounded closed-key UTF-8 server configuration parser, redacted stable errors, and bounded move-only password-file loader."
+      "purpose": "Strict bounded closed-key UTF-8 server configuration parser including manifest movement profiles, redacted stable errors, and bounded move-only password-file loader."
     },
     {
       "path": "apps/tes3mp-server/server_config.hpp",
@@ -472,7 +472,7 @@
     {
       "path": "components/tes3mp/include/tes3mp/content_identity.hpp",
       "status": "A",
-      "purpose": "Declares exact content-manifest identity and manifest-scoped initial cell, worldspace, and appearance mappings."
+      "purpose": "Declares exact content-manifest identity and manifest-scoped cell, worldspace, appearance, and movement-profile inputs."
     },
     {
       "path": "components/tes3mp/include/tes3mp/deterministic_random.hpp",
@@ -493,6 +493,16 @@
       "path": "components/tes3mp/include/tes3mp/monotonic_clock.hpp",
       "status": "A",
       "purpose": "Project-owned monotonic nanosecond instant and minimal injected-clock boundary for deterministic host scheduling."
+    },
+    {
+      "path": "components/tes3mp/include/tes3mp/movement_kernel.hpp",
+      "status": "A",
+      "purpose": "Declares the deterministic fixed-tick movement kernel and manifest-scoped engine-neutral server collision query boundary."
+    },
+    {
+      "path": "components/tes3mp/include/tes3mp/movement_policy.hpp",
+      "status": "A",
+      "purpose": "Declares bounded manifest movement profiles, explicit locomotion modes, and the version 1.2 velocity safety envelope."
     },
     {
       "path": "components/tes3mp/include/tes3mp/observability.hpp",
@@ -840,6 +850,11 @@
       "purpose": "Checked rational-deadline 30 Hz scheduler implementation with bounded sequential batches and no sleep, callback, reducer, or thread."
     },
     {
+      "path": "components/tes3mp/server_core/movement_kernel.cpp",
+      "status": "A",
+      "purpose": "Implements checked fixed-tick movement and delegates the sole canonical root result to the injected server collision query."
+    },
+    {
       "path": "components/tes3mp/server_core/observability.cpp",
       "status": "A",
       "purpose": "Validation and construction for closed metric definitions/dimensions and typed structured events."
@@ -862,7 +877,7 @@
     {
       "path": "components/tes3mp/server_core/server_command_reducer.cpp",
       "status": "A",
-      "purpose": "Owner-approved sealed-batch validation, bounded cross-batch idempotency, per-command immutable candidate/version installation, checksummed publication, acknowledgement finalization, velocity replacement, and observability."
+      "purpose": "Owner-approved sealed-batch validation, bounded idempotency, movement-kernel and server-collision integration, immutable candidate/version installation, publication, acknowledgement finalization, and observability."
     },
     {
       "path": "components/tes3mp/server_core/server_lifecycle.cpp",
@@ -1120,6 +1135,11 @@
       "purpose": "Focused single-attempt, transport establishment/failure, fixed script capacity, and bounded timeline contracts."
     },
     {
+      "path": "components/tes3mp/tests/movement_evidence_tests.cpp",
+      "status": "A",
+      "purpose": "Deterministic desktop/PC-VR walk-turn-stop capture under direct, jitter, loss, and stall schedules with bounded movement and pose observations."
+    },
+    {
       "path": "components/tes3mp/tests/observability_tests.cpp",
       "status": "A",
       "purpose": "Independent contracts for typed metric/event shapes, explicit injection, no-op sinks, bounded FIFO recording, overflow, privacy shape, and deterministic evidence."
@@ -1278,6 +1298,16 @@
       "path": "docs/vnext/OPENMW_PATCH_REGISTRY.json",
       "status": "A",
       "purpose": "Machine-checked semantic registry for every non-adapter OpenMW delta."
+    },
+    {
+      "path": "docs/vnext/PHASE12_MOVEMENT_DISCOVERY.md",
+      "status": "A",
+      "purpose": "Repository-backed Phase 12 movement trace, production seam, evidence gaps, owner choices, and named proof scenarios."
+    },
+    {
+      "path": "docs/vnext/PHASE12_MOVEMENT_EVIDENCE.md",
+      "status": "A",
+      "purpose": "Deterministic identity-free desktop/PC-VR movement and pose evidence baseline retained before player-facing tuning."
     },
     {
       "path": "docs/vnext/PRE_CUTOVER_PROVENANCE.md",
@@ -1570,6 +1600,11 @@
       "purpose": "Records the approved exact cell catalog, server-owned interest, reliable baseline, and bounded resync architecture."
     },
     {
+      "path": "docs/vnext/adr/ADR-0059-phase12-production-movement-architecture.md",
+      "status": "A",
+      "purpose": "Records the approved server collision, manifest profile, bounded reconciliation, adaptive playback, locomotion state, and ephemeral pose architecture."
+    },
+    {
       "path": "docs/vnext/gdr/GDR-0001-phase7-headless-vertical-slice-behavior.md",
       "status": "A",
       "purpose": "Owner-approved Phase 7 fixture spawn, readiness, cell visibility, provisional tick integration, headless correction, and bounded resume behavior."
@@ -1613,6 +1648,11 @@
       "path": "docs/vnext/gdr/GDR-0018-phase11-production-cell-interest-resync.md",
       "status": "A",
       "purpose": "Records owner approval of exact cell catalog, exact-cell interest, and explicit baseline/resync gameplay behavior."
+    },
+    {
+      "path": "docs/vnext/gdr/GDR-0019-phase12-production-movement-package.md",
+      "status": "A",
+      "purpose": "Records owner approval of manifest locomotion profiles, server collision, bounded correction/playback, locomotion animation, and pose authority limits."
     },
     {
       "path": "docs/vnext/proofs/cares/CMakeLists.txt",
@@ -2011,7 +2051,7 @@
         },
         {
           "path": "components/tes3mp/CMakeLists.txt",
-          "sha256": "a6fe1d1b7e07c081b10a41513e7b9a349a026da693ecbbb62898e9943d9d79ef"
+          "sha256": "f449bd971e5b8c9056023971ba67c364a4c5269045713067e127bad3fcf5b02c"
         },
         {
           "path": "components/tes3mp/protocol/generated/authentication_accepted_generated.h",

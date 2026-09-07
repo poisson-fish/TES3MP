@@ -285,6 +285,7 @@ target_sources(tes3mp_server_core PRIVATE
     include/tes3mp/deterministic_random.hpp
     include/tes3mp/fixed_tick_scheduler.hpp
     include/tes3mp/monotonic_clock.hpp
+    include/tes3mp/movement_kernel.hpp
     include/tes3mp/movement_policy.hpp
     include/tes3mp/observability.hpp
     include/tes3mp/player_identity.hpp
@@ -301,6 +302,7 @@ target_sources(tes3mp_server_core PRIVATE
     server_core/credential_crypto.cpp
     server_core/deterministic_random.cpp
     server_core/fixed_tick_scheduler.cpp
+    server_core/movement_kernel.cpp
     server_core/observability.cpp
     server_core/player_identity.cpp
     server_core/server_command_intake.cpp

@@ -3,7 +3,6 @@
 
 #include <algorithm>
 #include <array>
-#include <limits>
 #include <memory>
 #include <optional>
 #include <utility>
@@ -167,12 +166,10 @@ namespace TES3MP
 {
     namespace
     {
-        std::optional<std::int64_t> checkedAdd(std::int64_t left, std::int64_t right) noexcept
+        ServerCollisionQuery& compatibilityCollision() noexcept
         {
-            if ((right > 0 && left > std::numeric_limits<std::int64_t>::max() - right)
-                || (right < 0 && left < std::numeric_limits<std::int64_t>::min() - right))
-                return std::nullopt;
-            return left + right;
+            static UnobstructedServerCollisionQuery query;
+            return query;
         }
     }
     CanonicalCommandReducer::CanonicalCommandReducer(CanonicalServerState initialState, Observability& observability)
@@ -182,7 +179,15 @@ namespace TES3MP
 
     CanonicalCommandReducer::CanonicalCommandReducer(CanonicalServerState initialState, Observability& observability,
         ContentManifest contentManifest)
-        : CanonicalCommandReducer(std::move(initialState), observability, CanonicalSinkBundle{}, contentManifest)
+        : CanonicalCommandReducer(
+              std::move(initialState), observability, CanonicalSinkBundle{}, contentManifest, compatibilityCollision())
+    {
+    }
+
+    CanonicalCommandReducer::CanonicalCommandReducer(CanonicalServerState initialState, Observability& observability,
+        ContentManifest contentManifest, ServerCollisionQuery& collision)
+        : CanonicalCommandReducer(
+              std::move(initialState), observability, CanonicalSinkBundle{}, contentManifest, collision)
     {
     }
 
@@ -194,12 +199,20 @@ namespace TES3MP
 
     CanonicalCommandReducer::CanonicalCommandReducer(CanonicalServerState initialState, Observability& observability,
         CanonicalSinkBundle sinks, ContentManifest contentManifest)
+        : CanonicalCommandReducer(
+              std::move(initialState), observability, sinks, contentManifest, compatibilityCollision())
+    {
+    }
+
+    CanonicalCommandReducer::CanonicalCommandReducer(CanonicalServerState initialState, Observability& observability,
+        CanonicalSinkBundle sinks, ContentManifest contentManifest, ServerCollisionQuery& collision)
         : mState(std::make_shared<CanonicalServerState>(std::move(initialState)))
         , mLatestPublication(std::shared_ptr<const CanonicalStatePublication>(
               new CanonicalStatePublication(mStateVersion, mCheckpointTick, mState, {})))
         , mObservability(observability)
         , mSinks(sinks)
         , mContentManifest(contentManifest)
+        , mCollision(&collision)
     {
     }
 
@@ -548,7 +561,9 @@ namespace TES3MP
                                     if (const auto* motion
                                         = std::get_if<PlayerMotionCommandProposal>(&proposal.payload()))
                                     {
-                                        if (!isLegacyMotionVelocitySafe(motion->desiredVelocity()))
+                                        if (!isLegacyMotionVelocitySafe(motion->desiredVelocity())
+                                            || !mContentManifest.movementProfile().allows(
+                                                LocomotionMode::Walk, motion->desiredVelocity()))
                                         {
                                             disposition = CommandDisposition::MotionOutOfRange;
                                             requiresSpatialAdvance = false;
@@ -677,18 +692,18 @@ namespace TES3MP
                 const auto current = replacements[index];
                 const auto velocity = current.linearVelocity();
                 if (velocity == LinearVelocity3(0, 0, 0)) continue;
-                const auto position = current.transform().position();
-                const auto x = checkedAdd(position.x(), velocity.x());
-                const auto y = checkedAdd(position.y(), velocity.y());
-                const auto z = checkedAdd(position.z(), velocity.z());
-                if (!x || !y || !z)
+                auto kernel = advanceMovementKernel(mContentManifest.id(), mContentManifest.movementProfile(),
+                    LocomotionMode::Walk, current.entityId(), tick, current.transform(), velocity, *mCollision);
+                const auto* step = std::get_if<MovementKernelStep>(&kernel);
+                if (!step)
                 {
-                    prepared.mResult.mError = CommandBatchReductionError::SpatialIntegrationOverflow;
+                    prepared.mResult.mError = std::get<MovementKernelError>(kernel)
+                            == MovementKernelError::IntegrationOverflow
+                        ? CommandBatchReductionError::SpatialIntegrationOverflow
+                        : CommandBatchReductionError::CandidateStateInvalid;
                     return prepared;
                 }
-                const Transform transform(current.transform().cell(), Position3(*x, *y, *z),
-                    current.transform().orientation());
-                auto advanced = advanceCanonicalSpatialState(current, tick, transform, velocity);
+                auto advanced = advanceCanonicalSpatialState(current, tick, step->root, step->velocity);
                 auto* value = std::get_if<CanonicalPlayerEntityState>(&advanced);
                 if (!value)
                 {

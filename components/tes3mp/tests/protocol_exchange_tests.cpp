@@ -184,8 +184,9 @@ namespace
             InterestMember{ value<PlayerId>(103), value<EntityId>(1) } };
         const auto spaces = parseCellSpaceDeclarations("exterior:8;interior:7");
         const auto cells = parseContentCells("exterior:8:-1:2;interior:7");
-        const auto manifest = spaces && cells ? ContentManifest::create(
-            testContentManifestId(), *spaces, *cells, value<AppearanceId>(1)) : std::nullopt;
+        const auto movement = parseMovementProfile("sneak:1024;walk:2048;run:8192;jump:3072");
+        const auto manifest = spaces && cells && movement ? ContentManifest::create(
+            testContentManifestId(), *spaces, *cells, value<AppearanceId>(1), *movement) : std::nullopt;
         const bool result = owned && *owned == *original
             && std::get_if<SessionResyncRequest>(&decodedRequest)
             && *std::get_if<SessionResyncRequest>(&decodedRequest) == request
@@ -199,6 +200,10 @@ namespace
                 == MessageClass::ReliableOperation
             && messageDescriptor(MessageKind::SessionResyncRequest)->messageClass == MessageClass::SessionControl
             && manifest && manifest->contains(CellId::interior(value<CellSpaceId>(7)))
+            && manifest->movementProfile().speed(LocomotionMode::Walk) == 2048
+            && !parseMovementProfile("sneak:2048;walk:1024;run:8192;jump:3072")
+            && !parseMovementProfile("sneak:1024;walk:2048;run:65537;jump:3072")
+            && !parseMovementProfile("walk:2048;sneak:1024;run:8192;jump:3072")
             && manifest->contains(CellId::exterior(value<CellSpaceId>(8), -1, 2))
             && !manifest->contains(CellId::exterior(value<CellSpaceId>(8), 0, 0));
         return result;

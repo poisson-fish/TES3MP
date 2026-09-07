@@ -99,6 +99,7 @@ def main() -> int:
             f"disconnect_grace_ms=3000\njoin_password_file={good.as_posix()}\n"
             f"content_manifest_id={TEST_CONTENT_MANIFEST}\ncell_spaces=interior:7;exterior:8\n"
             f"allowed_cells=interior:7;exterior:8:0:0\nspawn_cell=interior:7\ndefault_appearance_id=1\n"
+            f"movement_profile=sneak:1024;walk:4097;run:8192;jump:4096\n"
             f"player_identity_file={(root / 'player-identities').as_posix()}\n",
             encoding="utf-8")
         server = subprocess.Popen(

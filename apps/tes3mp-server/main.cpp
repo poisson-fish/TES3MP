@@ -127,7 +127,9 @@ int main(int argc, char** argv)
     TES3MP::NullStructuredEventSink events;
     TES3MP::Observability observability(metrics, events);
     auto emptyState = std::get<TES3MP::CanonicalServerState>(TES3MP::createCanonicalServerState({}, {}));
-    TES3MP::CanonicalCommandReducer reducer(std::move(emptyState), observability, config.contentManifest);
+    TES3MP::UnobstructedServerCollisionQuery collision;
+    TES3MP::CanonicalCommandReducer reducer(
+        std::move(emptyState), observability, config.contentManifest, collision);
     TES3MP::ServerCommandIntakeCoordinator intake(
         clock, observability, clock.now(), TES3MP::ServerTick::initial(), TES3MP::IngressOrdinal::initial());
     auto joins = playerIdentities ? TES3MP::AuthenticatedJoinCoordinator::create(spawn,

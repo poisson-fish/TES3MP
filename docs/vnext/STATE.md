@@ -9,8 +9,8 @@ Updated: 2026-09-06
 - Phase 12 discovery: **Complete**
 - Phase 12 evidence: **Complete**
 - Phase 12 package decision/safety: **Complete**
-- Active work: **Phase 12 manifest movement profiles and collision kernel seam**
-- Last pass: **Phase 12 A/A/A/A/A decision and input safety gate complete**
+- Active work: **Phase 12 versioned locomotion input and bounded local replay**
+- Last pass: **Phase 12 manifest movement profiles and collision kernel seam complete**
 - Authoritative tracker: [rolling implementation plan](IMPLEMENTATION_PLAN.md)
 - Historical evidence: [implementation notes](IMPLEMENTATION_NOTES.md)
 
@@ -84,6 +84,21 @@ ADRs and GDRs are required only for consequential, hard-to-reverse decisions.
 - Protocol, collision, profiles, correction, animation, pose, interest, resync,
   persistence, and world-object behavior otherwise remain unchanged.
 
+## Phase 12 movement profile and kernel result
+
+- Content manifests now own bounded sneak/walk/run/jump speeds. Server config and
+  OpenMW require the same ordered profile; zero, misordered, malformed, and
+  over-limit profiles fail before startup composition.
+- A deterministic engine-neutral kernel performs checked fixed-tick integration
+  and delegates the resolved position and velocity to an injected server
+  collision query. The result preserves canonical cell and orientation; clients
+  have no collision-result or root-transform input.
+- Version 1.2 raw velocity maps to the manifest walk profile while retaining its
+  stricter safety envelope. The executable uses an explicit unobstructed
+  compatibility query until a content-backed provider binds at the same seam.
+- Protocol schema, exact-cell interest/resync, client prediction, presentation,
+  animation, pose, persistence, and world objects are unchanged.
+
 ## Phase 10 result
 
 - Fresh password joins issue a random 32-byte player credential after ordinary
@@ -144,6 +159,15 @@ work.
 ## Last verified
 
 - MSVC RelWithDebInfo full engine-independent protocol/server contracts and the
+  dedicated-server app integration pass after movement-kernel integration.
+- The named server-collision authority regression, invalid manifest-profile
+  cases, and existing exact-cell interest/resync contracts pass.
+- MSVC Release networking server, headless client, and full OpenMW `openmw.exe`
+  build and link; the Phase 7 lifecycle integration passes 32 reconnects and
+  drains both queues to zero.
+- All 145 repository Python tests, indexed baseline provenance, legacy
+  exclusion, and diff hygiene pass.
+- MSVC RelWithDebInfo full engine-independent protocol/server contracts and the
   dedicated-server app integration pass after the movement safety gate.
 - Both named input safety regressions pass; all 145 repository Python tests and
   diff hygiene pass.
@@ -174,13 +198,14 @@ work.
 ## Next pass
 
 Read the rolling **Now** section in
-[IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md). Add manifest movement profiles,
-the engine-neutral server collision query, and the deterministic movement kernel
-without extending client presentation, world-object, or persistence scope.
+[IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md). Add versioned locomotion input,
+bounded shared client input history, and replay-only local reconciliation without
+extending remote presentation, animation, pose, world-object, or persistence
+scope.
 
 ## Working-tree expectation
 
 Before starting the next pass, `vnext` should contain the completed Phase 12
-decision/safety commit and be clean. The separate
+movement-profile/kernel commit and be clean. The separate
 `vnext-vr` worktree remains at the completed Phase 9 baseline until a later shared
 merge is deliberately made.

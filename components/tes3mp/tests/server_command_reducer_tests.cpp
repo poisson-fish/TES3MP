@@ -74,6 +74,17 @@ namespace
         return std::get<CanonicalServerState>(createCanonicalServerState(players, sessions));
     }
 
+    ContentManifest contentManifest(MovementProfile movement)
+    {
+        const auto interior = *CellSpaceId::fromValue(7);
+        const auto exterior = *CellSpaceId::fromValue(8);
+        const std::array spaces{ CellSpaceDeclaration{ interior, CellSpaceKind::Interior },
+            CellSpaceDeclaration{ exterior, CellSpaceKind::Exterior } };
+        const std::array cells{ CellId::interior(interior), CellId::exterior(exterior, 0, 0) };
+        return *ContentManifest::create(
+            testContentManifestId(), spaces, cells, *AppearanceId::fromValue(1), movement);
+    }
+
     ServerCommandProposal proposal(std::uint64_t session, std::uint64_t sequence, std::uint64_t command,
         std::uint64_t entity, std::uint64_t revision, LinearVelocity3 velocity, std::uint64_t epoch = 1,
         std::uint64_t generation = 1, std::uint64_t observedTick = 0)
@@ -131,6 +142,31 @@ namespace
         NullStructuredEventSink events;
         Observability observability;
         ServerCommandIntakeCoordinator intake;
+    };
+
+    class AuthoritativeCollision final : public ServerCollisionQuery
+    {
+    public:
+        std::optional<ServerCollisionResult> resolve(const ServerCollisionRequest& request) noexcept override
+        {
+            ++calls;
+            lastRequest = request;
+            const auto position = request.currentRoot.position();
+            return ServerCollisionResult{ Position3(position.x() + 2, position.y(), position.z()),
+                LinearVelocity3(0, 0, 0) };
+        }
+
+        std::size_t calls = 0;
+        std::optional<ServerCollisionRequest> lastRequest;
+    };
+
+    class UnavailableCollision final : public ServerCollisionQuery
+    {
+    public:
+        std::optional<ServerCollisionResult> resolve(const ServerCollisionRequest&) noexcept override
+        {
+            return std::nullopt;
+        }
     };
 
     CommandBatchReductionResult reduceCommands(
@@ -502,6 +538,61 @@ namespace
             && prepared.candidateState().players().front() == players.front()
             && prepared.candidateState().activeSessions().front().highestContiguousFinalizedCommand()->value() == 1
             && reducer.commit(std::move(prepared));
+    }
+
+    bool server_collision_is_the_only_canonical_root_result()
+    {
+        const std::array players{ player(1, 101) };
+        const std::array sessions{ session(10, 1, 101) };
+        NullMetricSink metrics;
+        NullStructuredEventSink events;
+        Observability observability(metrics, events);
+        AuthoritativeCollision collision;
+        CanonicalCommandReducer reducer(
+            state(players, sessions), observability, testContentManifest(), collision);
+        const std::array commands{ proposal(10, 1, 1001, 101, 1, LinearVelocity3(100, 0, 0)) };
+        IntakeFixture fixture;
+        if (!fixture.submit(commands))
+            return false;
+        const auto pumped = fixture.pumpFirst();
+        auto prepared = reducer.prepareTick(pumped.batches().front());
+        const auto& root = prepared.candidateState().players().front();
+        return prepared.result() && collision.calls == 1 && collision.lastRequest
+            && collision.lastRequest->contentManifest == testContentManifestId()
+            && collision.lastRequest->attemptedPosition.x() == players.front().transform().position().x() + 100
+            && root.transform().position().x() == players.front().transform().position().x() + 2
+            && root.transform().cell() == players.front().transform().cell()
+            && root.transform().orientation() == players.front().transform().orientation()
+            && root.linearVelocity() == LinearVelocity3(0, 0, 0)
+            && reducer.commit(std::move(prepared));
+    }
+
+    bool manifest_walk_profile_and_collision_failure_are_fail_closed()
+    {
+        const auto profile = *MovementProfile::create(10, 20, 30, 40);
+        const std::array players{ player(1, 101) };
+        const std::array sessions{ session(10, 1, 101) };
+        NullMetricSink metrics;
+        NullStructuredEventSink events;
+        Observability observability(metrics, events);
+        CanonicalCommandReducer bounded(state(players, sessions), observability, contentManifest(profile));
+        const std::array rejected{ proposal(10, 1, 1001, 101, 1, LinearVelocity3(21, 0, 0)) };
+        const auto rejection = reduceCommands(bounded, rejected);
+        if (!rejection || rejection.dispositions().front().disposition() != CommandDisposition::MotionOutOfRange
+            || bounded.state().players().front() != players.front())
+            return false;
+
+        UnavailableCollision collision;
+        CanonicalCommandReducer unavailable(
+            state(players, sessions), observability, contentManifest(profile), collision);
+        const std::array accepted{ proposal(10, 1, 1002, 101, 1, LinearVelocity3(20, 0, 0)) };
+        IntakeFixture fixture;
+        if (!fixture.submit(accepted))
+            return false;
+        auto prepared = unavailable.prepareTick(fixture.pumpFirst().batches().front());
+        return !prepared.result() && prepared.result().error() == CommandBatchReductionError::CandidateStateInvalid
+            && unavailable.state().players().front() == players.front()
+            && unavailable.state().activeSessions().front() == sessions.front();
     }
 
     bool two_bound_players_change_only_their_own_entity_state()
@@ -876,6 +967,10 @@ int main()
             &motion_magnitude_is_bounded_before_canonical_mutation },
         std::pair{
             "extreme_motion_input_cannot_fail_the_server_tick", &extreme_motion_input_cannot_fail_the_server_tick },
+        std::pair{ "server_collision_is_the_only_canonical_root_result",
+            &server_collision_is_the_only_canonical_root_result },
+        std::pair{ "manifest_walk_profile_and_collision_failure_are_fail_closed",
+            &manifest_walk_profile_and_collision_failure_are_fail_closed },
         std::pair{ "two_bound_players_change_only_their_own_entity_state",
             &two_bound_players_change_only_their_own_entity_state },
         std::pair{ "reducer_exposes_no_mutable_state_wire_engine_socket_script_or_database_surface",

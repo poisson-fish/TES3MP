@@ -36,29 +36,28 @@ Verification scales with risk:
 
 ## Now
 
-### Phase 12 — manifest movement profiles and collision kernel seam
+### Phase 12 — versioned locomotion input and bounded local replay
 
 Status: **Ready**
 
-The owner-approved A/A/A/A/A package is recorded in
-[ADR-0059](adr/ADR-0059-phase12-production-movement-architecture.md) and
-[GDR-0019](gdr/GDR-0019-phase12-production-movement-package.md). The unsafe
-signed-64-bit version 1.2 input path is closed by a checked compatibility
-envelope before player spatial mutation.
+Manifest-scoped movement profiles and the deterministic server movement/collision
+kernel are complete. Version 1.2 remains a bounded walk-compatibility path.
 
-Add bounded manifest-scoped walk/run/sneak/jump profiles and an engine-neutral
-content-collision query boundary. Implement the deterministic fixed-tick kernel
-behind that boundary with tests proving that only server collision can author
-the canonical root, invalid profiles fail closed, and Phase 11 exact-cell
-interest/resync behavior is unchanged. Do not add client prediction,
-presentation tuning, world objects, or persistence in this pass.
+Add an additive versioned locomotion input carrying bounded input tick/sequence,
+explicit sneak/walk/run/jump mode, and root-facing intent. Retain bounded
+unacknowledged semantic input on the shared client path and reconcile local
+presentation by replay from an authoritative baseline. Replayed correction must
+not re-enter input, and cell transition or another hard discontinuity must clear
+inapplicable history. Keep exact-cell interest/resync unchanged. Do not tune
+soft correction, adaptive remote playback, animation, pose, world objects, or
+persistence in this pass.
 
 ## Next
 
 These are candidates, not locked slices:
 
-1. Add the versioned locomotion input/schema and bounded client input history,
-   then reconcile local prediction by replay without feedback into input.
+1. Bind the first content-backed server collision provider at the completed
+   engine-neutral query seam.
 2. Add bounded adaptive remote playback, canonical locomotion-driven animation,
    reliable one-shots, and stale-pose fallback without pose authority.
 3. Run hardware/content-backed desktop and PC-VR captures, then ratify measured

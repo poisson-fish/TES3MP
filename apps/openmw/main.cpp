@@ -278,8 +278,11 @@ bool parseOptions(int argc, char** argv, OMW::Engine& engine, Files::Configurati
             variables["tes3mp-content-allowed-cells"].as<std::string>());
         const auto appearanceId = TES3MP::AppearanceId::fromValue(
             variables["tes3mp-content-appearance-id"].as<unsigned long long>());
-        const auto contentManifest = manifestId && cellSpaces && allowedCells && appearanceId
-            ? TES3MP::ContentManifest::create(*manifestId, *cellSpaces, *allowedCells, *appearanceId)
+        const auto movementProfile = TES3MP::parseMovementProfile(
+            variables["tes3mp-content-movement-profile"].as<std::string>());
+        const auto contentManifest = manifestId && cellSpaces && allowedCells && appearanceId && movementProfile
+            ? TES3MP::ContentManifest::create(
+                *manifestId, *cellSpaces, *allowedCells, *appearanceId, *movementProfile)
             : std::nullopt;
         if (!contentManifest)
         {

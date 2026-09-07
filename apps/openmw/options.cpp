@@ -39,6 +39,8 @@ namespace OpenMW
             "TES3MP exact cell catalog: interior:<id>;exterior:<id>:<x>:<y>");
         addOption("tes3mp-content-appearance-id", bpo::value<unsigned long long>()->default_value(0),
             "manifest-scoped TES3MP default appearance ID");
+        addOption("tes3mp-content-movement-profile", bpo::value<std::string>()->default_value(""),
+            "TES3MP movement profile: sneak:<speed>;walk:<speed>;run:<speed>;jump:<speed>");
         addOption("tes3mp-content-cell-space-map",
             bpo::value<StringsVector>()->default_value(StringsVector(), "")->multitoken()->composing(),
             "OpenMW cell-space mapping entries: <id>=<record>");

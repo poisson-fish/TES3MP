@@ -2,8 +2,8 @@
 #define TES3MP_SERVER_COMMAND_REDUCER_HPP
 
 #include "canonical_publication.hpp"
-#include "content_identity.hpp"
 #include "canonical_sinks.hpp"
+#include "movement_kernel.hpp"
 #include "observability.hpp"
 
 #include <atomic>
@@ -160,10 +160,14 @@ namespace TES3MP
         CanonicalCommandReducer(CanonicalServerState initialState, Observability& observability);
         CanonicalCommandReducer(CanonicalServerState initialState, Observability& observability,
             ContentManifest contentManifest);
+        CanonicalCommandReducer(CanonicalServerState initialState, Observability& observability,
+            ContentManifest contentManifest, ServerCollisionQuery& collision);
         CanonicalCommandReducer(
             CanonicalServerState initialState, Observability& observability, CanonicalSinkBundle sinks);
         CanonicalCommandReducer(CanonicalServerState initialState, Observability& observability,
             CanonicalSinkBundle sinks, ContentManifest contentManifest);
+        CanonicalCommandReducer(CanonicalServerState initialState, Observability& observability,
+            CanonicalSinkBundle sinks, ContentManifest contentManifest, ServerCollisionQuery& collision);
 
         CanonicalCommandReducer(const CanonicalCommandReducer&) = delete;
         CanonicalCommandReducer& operator=(const CanonicalCommandReducer&) = delete;
@@ -212,6 +216,7 @@ namespace TES3MP
         Observability& mObservability;
         CanonicalSinkBundle mSinks;
         ContentManifest mContentManifest;
+        ServerCollisionQuery* mCollision;
     };
 }
 
