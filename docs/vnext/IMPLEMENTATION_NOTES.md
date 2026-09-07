@@ -6199,6 +6199,9 @@ only the relevant phase section here.
   connected. PC-VR direct/jitter/loss/stall capture, visual animation/fallback
   review, and budget ratification remain. All 150 repository Python tests and
   diff hygiene pass. No player-facing value was changed.
+- Disposition: the owner deferred the PC-VR gate while the headset charges. It
+  returns after the first Phase 13 actor desktop/VR presentation demo, or during
+  Phase 22 stabilization at the latest.
 
 ### 2026-09-07 — bounded remote playback, animation, and pose fallback — Complete
 
@@ -6370,7 +6373,25 @@ only the relevant phase section here.
 
 ## Phase 13 — Actor lifecycle, AI state, and authority handoff
 
-[Back to the phase tracker](IMPLEMENTATION_PLAN.md#phase-13--actor-lifecycle-ai-state-and-authority-handoff)
+[Back to the active phase tracker](IMPLEMENTATION_PLAN.md#now)
+
+### 2026-09-07 — actor lifecycle and AI discovery — Complete
+
+- Finding: canonical state, interest membership, latest-wins snapshots, resync,
+  content mapping, and replicated presentation are all explicitly player-shaped.
+  Actors need separate stable identity/state and cannot borrow player/session
+  identity. The server movement/collision and renderer presentation seams are
+  reusable without transferring authority.
+- Recommendation: Package A in
+  [the actor discovery](PHASE13_ACTOR_DISCOVERY.md): a bounded manifest actor
+  catalog, additive actor protocol/state, server-owned idle plus waypoint travel/
+  wander, inactive exact-cell freeze, and no proposal leases. Package B adds
+  active-cell client leases and atomic handoff; Package C adds broad continuous
+  server simulation.
+- Boundary: no protocol, runtime, gameplay, authority, persistence, interest,
+  movement, or rendering behavior changed. Twelve named proof scenarios define
+  the first implementation gate. Owner selection is required because authority,
+  unloaded-cell behavior, compatibility, and AI semantics are material.
 
 - Prefer server-owned actor simulation. Client delegation requires the explicit
   threat analysis and validation limits required by ADR-0006.

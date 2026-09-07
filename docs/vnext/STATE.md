@@ -9,8 +9,9 @@ Updated: 2026-09-07
 - Phase 12 discovery: **Complete**
 - Phase 12 evidence: **Complete**
 - Phase 12 package decision/safety: **Complete**
-- Active work: **Phase 12 PC-VR hardware capture and budget ratification**
-- Last pass: **Phase 12 desktop hardware/content capture and VR merge readiness complete**
+- Phase 13 discovery: **Complete**
+- Active work: **Phase 13 actor lifecycle and server-owned AI package decision**
+- Last pass: **Phase 13 actor lifecycle and AI discovery complete**
 - Authoritative tracker: [rolling implementation plan](IMPLEMENTATION_PLAN.md)
 - Historical evidence: [implementation notes](IMPLEMENTATION_NOTES.md)
 
@@ -173,6 +174,24 @@ ADRs and GDRs are required only for consequential, hard-to-reverse decisions.
   animation/fallback review, and player-facing budget ratification remain blocked
   on a connected headset. No movement or presentation policy changed.
 
+## Phase 13 discovery result
+
+- Current canonical state, reliable membership, latest-wins views, resync, and
+  presentation are player-shaped. Actors need separate stable identity and
+  canonical state; they cannot reuse player/session identity without breaking
+  authority and compatibility semantics.
+- The recommended first package uses a manifest-bound bounded actor catalog,
+  separate additive actor records, the existing server movement/collision seam,
+  server-owned idle plus waypoint travel/wander, exact-cell inactive freeze, and
+  no client delegation. Renderer state remains presentation-only.
+- Alternatives are active-cell client proposal leases with atomic handoff, or a
+  broad always-running server simulation. Both materially expand authority,
+  security, content-parity, and gameplay obligations.
+- The decision surface and twelve named proofs are recorded in
+  [the actor discovery](PHASE13_ACTOR_DISCOVERY.md). No runtime behavior changed.
+  Phase 12 PC-VR capture is deferred until the first actor desktop/VR presentation
+  demo, or Phase 22 stabilization at the latest.
+
 ## Phase 10 result
 
 - Fresh password joins issue a random 32-byte player credential after ordinary
@@ -249,12 +268,12 @@ work.
 ## Next pass
 
 Read the rolling **Now** section in
-[IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md). Run PC-VR direct/jitter/loss/
-stall captures with a connected headset, then present measured movement and
-presentation budgets for owner ratification.
+[IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md). Select the Phase 13 actor/AI
+package; Package A is recommended. Implementation begins only after that
+architecture and gameplay choice is ratified.
 
 ## Working-tree expectation
 
-Before resuming the hardware gate, `vnext` should contain the capture-readiness
-commit and be clean. The separate `vnext-vr` worktree contains the deliberately
-rehearsed Phase 12 integration merge `223d5a74e9` and should also be clean.
+Before implementing Phase 13, `vnext` should contain the actor-discovery commit
+and be clean. The separate `vnext-vr` worktree contains the deliberately
+rehearsed Phase 12 integration and capture tooling and should also be clean.

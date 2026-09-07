@@ -2,7 +2,7 @@
 
 Date: 2026-09-07
 
-Status: **Desktop complete; PC-VR blocked on connected headset**
+Status: **Desktop complete; PC-VR deferred until a later presentation gate**
 
 No movement, correction, playback, animation, pose, authority, collision,
 interest, resync, or compatibility value changed in this pass.
@@ -53,3 +53,7 @@ timeout long enough to walk, turn, stop, and close both clients. Review the
 desktop peer for walk/turn/idle animation, the stall for canonical fallback, and
 the VR log for pose age/loss. Do not ratify budgets until all four summaries and
 the visual review are complete.
+
+The owner deferred this gate on 2026-09-07 while the headset charges. Revisit it
+after the first Phase 13 actor desktop/VR presentation demo, or during Phase 22
+stabilization at the latest.

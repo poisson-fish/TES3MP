@@ -36,37 +36,32 @@ Verification scales with risk:
 
 ## Now
 
-### Phase 12 — hardware/content movement capture and budget ratification
+### Phase 13 — actor lifecycle and server-owned AI package decision
 
-Status: **Blocked — PC-VR headset unavailable**
+Status: **Blocked — owner package decision required**
 
-The production movement path now includes content collision, bounded local
-replay, fixture-bounded adaptive remote playback, canonical locomotion-driven
-remote animation, and stale optional-pose fallback. Version 1.2 remains the
-bounded walk-compatibility path. The current presentation bounds are provisional
-reuse of measured fixture limits, not ratified production tuning.
+Discovery confirms the current canonical, command, interest, resync, protocol,
+content, and renderer paths are explicitly player-shaped. Actors need separate
+stable identity and canonical state; they must not acquire fake player/session
+identity. The existing server-owned movement/collision kernel and renderer-only
+presentation seam are reusable.
 
-The bounded capture runner and representative-content desktop matrix now pass
-under direct, jitter, loss, and stall schedules. The owner approved merging the
-shared Phase 12 path into the maintained VR fork; the rehearsed merge builds the
-VR client and server and passes the fork provenance/contract gates. No connected
-headset was detected, so PC-VR capture, visual animation/fallback review, and
-budget ratification remain.
-
-Connect the headset and run the same four profiles with the merged VR target.
-Record correction, playback, animation, and pose-fallback evidence, then present
-concise production-budget options for owner ratification before changing
-player-facing values. Preserve authority, collision, exact-cell interest/resync,
-reliable/latest-wins lane separation, and the version 1.2 compatibility path.
-Do not add world objects or persistence. See the
-[hardware capture record](PHASE12_HARDWARE_CAPTURE.md).
+Select the Phase 13 package in
+[the actor discovery](PHASE13_ACTOR_DISCOVERY.md). Package A is recommended:
+manifest-bound stable actors, separate additive actor state/protocol, server-owned
+idle and bounded waypoint travel/wander, exact-cell inactive freeze, and no
+client delegation. Packages B and C respectively introduce active-cell proposal
+leases or broad always-running server simulation. Do not implement until the
+owner selects a package because simulation authority, unloaded-cell behavior,
+compatibility, and AI semantics are material choices.
 
 ## Next
 
 These are candidates, not locked slices:
 
-1. Begin Phase 13 actor-lifecycle and server-owned AI-state discovery after the
-   movement budgets are ratified.
+1. Implement and prove the selected Phase 13 actor foundation.
+2. Revisit Phase 12 PC-VR capture after the first actor desktop/VR presentation
+   demo, or before Phase 22 stabilization if hardware is still unavailable.
 
 The list is rewritten after each completed pass. New evidence may reorder,
 combine, or remove items.

@@ -11,15 +11,16 @@ conditional stretch target.
 
 ## Current status
 
-Phases 0–10 are **Complete**. The headless, OpenMW desktop, and PC VR vertical
-slices share one bounded protocol, reusable client session, and authoritative
-server path. Optional OpenXR head/hand samples are isolated presentation data;
-they cannot author canonical movement or gameplay.
+Phases 0–12 are **Complete** except for deferred PC-VR hardware budget capture.
+The headless, OpenMW desktop, and PC VR vertical slices share one bounded
+protocol, reusable client session, and authoritative server path. Optional
+OpenXR head/hand samples are isolated presentation data; they cannot author
+canonical movement or gameplay.
 
-Phase 10 adds durable player credential reattachment and exact negotiated
-content-manifest identity while keeping local OpenMW record names out of the
-protocol. Its milestone gate is complete; canonical cells, interest, and
-resynchronization are the selected next discovery pass. The [rolling
+Phase 13 actor lifecycle and server-owned AI discovery is complete and awaiting
+the owner package decision. The recommended package keeps actors server-owned,
+manifest-bound, additive to the player protocol, and frozen in inactive exact
+cells without introducing client simulation leases. The [rolling
 implementation plan](IMPLEMENTATION_PLAN.md) is the authoritative Now / Next /
 Later tracker. The [implementation notes](IMPLEMENTATION_NOTES.md) retain
 detailed historical evidence and owner-review history.
