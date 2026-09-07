@@ -135,7 +135,7 @@ namespace
     {
         using TES3MP::CommandReductionObservationOutcome;
         return event.outcome >= CommandReductionObservationOutcome::Applied
-            && event.outcome <= CommandReductionObservationOutcome::UnknownCell;
+            && event.outcome <= CommandReductionObservationOutcome::MotionOutOfRange;
     }
 
     constexpr bool validCanonicalSinkDeliveryEvent(TES3MP::CanonicalSinkDeliveryEvent event) noexcept

@@ -36,34 +36,33 @@ Verification scales with risk:
 
 ## Now
 
-### Phase 12 — production movement package decision
+### Phase 12 — manifest movement profiles and collision kernel seam
 
-Status: **Awaiting owner decision**
+Status: **Ready**
 
-The behavior-neutral [movement evidence baseline](PHASE12_MOVEMENT_EVIDENCE.md)
-is complete. Bounded identity-free observations now cover command
-acknowledgement and stop latency, local correction, remote motion, server tick
-lag, and pose age/loss. Deterministic desktop and PC-VR captures match on their
-shared root path under direct, jitter, loss, and stall profiles.
+The owner-approved A/A/A/A/A package is recorded in
+[ADR-0059](adr/ADR-0059-phase12-production-movement-architecture.md) and
+[GDR-0019](gdr/GDR-0019-phase12-production-movement-package.md). The unsafe
+signed-64-bit version 1.2 input path is closed by a checked compatibility
+envelope before player spatial mutation.
 
-The next implementation changes authority and player-facing behavior, so it is
-blocked on the collision, speed/locomotion, local correction, remote lag, and
-animation/pose package documented in
-[the movement discovery](PHASE12_MOVEMENT_DISCOVERY.md#owner-choices-after-evidence).
-The recommended package remains A/A/A/A/A: content-backed server collision,
-manifest movement profiles, bounded input replay, bounded adaptive remote
-playback, and small canonical locomotion state with ephemeral pose.
+Add bounded manifest-scoped walk/run/sneak/jump profiles and an engine-neutral
+content-collision query boundary. Implement the deterministic fixed-tick kernel
+behind that boundary with tests proving that only server collision can author
+the canonical root, invalid profiles fail closed, and Phase 11 exact-cell
+interest/resync behavior is unchanged. Do not add client prediction,
+presentation tuning, world objects, or persistence in this pass.
 
 ## Next
 
 These are candidates, not locked slices:
 
-1. Record the approved Phase 12 movement package and implement the signed-64-bit
-   input safety gate before canonical mutation.
-2. Implement the approved server movement/collision and client reconciliation
-   path without extending world-object or persistence scope.
-3. Run hardware/content-backed desktop and PC-VR captures, then propose measured
-   player-facing budgets instead of ratifying fixture values.
+1. Add the versioned locomotion input/schema and bounded client input history,
+   then reconcile local prediction by replay without feedback into input.
+2. Add bounded adaptive remote playback, canonical locomotion-driven animation,
+   reliable one-shots, and stale-pose fallback without pose authority.
+3. Run hardware/content-backed desktop and PC-VR captures, then ratify measured
+   profile and presentation budgets.
 
 The list is rewritten after each completed pass. New evidence may reorder,
 combine, or remove items.
@@ -98,6 +97,7 @@ but they no longer force a predetermined sequence of micro-slices.
 | Phase 11 | **Complete** | Exact bounded cell catalog, server-owned same-cell interest, reliable membership baseline, and bounded authenticated resync |
 | Phase 12 discovery | **Complete** | Repository-backed movement trace, measured fixture bounds, production seams, named proofs, and owner decision options |
 | Phase 12 evidence | **Complete** | Bounded identity-free movement observations and comparable deterministic desktop/PC-VR direct, jitter, loss, and stall captures |
+| Phase 12 decision/safety | **Complete** | Approved production movement package plus a reducer-owned legacy velocity envelope that rejects unsafe input before spatial mutation |
 
 ### Phase 9 completion record
 

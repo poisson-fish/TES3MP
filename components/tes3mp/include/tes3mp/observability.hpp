@@ -134,6 +134,7 @@ namespace TES3MP
         CommandReductionCandidateStateInvalid = 54,
         CommandReductionStateVersionCapacityExceeded = 55,
         CommandReductionUnknownCell = 56,
+        CommandReductionMotionOutOfRange = 57,
         CanonicalSinkPersistence = 60,
         CanonicalSinkReplay = 61,
         CanonicalSinkScript = 62,
@@ -298,6 +299,7 @@ namespace TES3MP
         CandidateStateInvalid,
         StateVersionCapacityExceeded,
         UnknownCell,
+        MotionOutOfRange,
     };
 
     struct CommandReductionEvent

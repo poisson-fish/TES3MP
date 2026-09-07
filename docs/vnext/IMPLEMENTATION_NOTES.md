@@ -6177,7 +6177,25 @@ only the relevant phase section here.
 
 ## Phase 12 — Production movement, animation, and pose replication
 
-[Back to the phase tracker](IMPLEMENTATION_PLAN.md#phase-12--production-movement-package-decision)
+[Back to the phase tracker](IMPLEMENTATION_PLAN.md#now)
+
+### 2026-09-06 — movement package decision and input safety gate — Complete
+
+- Decision: the owner approved A/A/A/A/A. [ADR-0059](adr/ADR-0059-phase12-production-movement-architecture.md)
+  records server content collision, bounded local replay, adaptive remote
+  playback, and ephemeral pose; [GDR-0019](gdr/GDR-0019-phase12-production-movement-package.md)
+  records manifest locomotion profiles and canonical locomotion state.
+- Change: the canonical reducer now final-rejects version 1.2 motion outside the
+  checked legacy compatibility envelope before player spatial mutation. Rejected
+  input advances ordered acknowledgement but cannot install velocity or reach
+  fixed-tick integration.
+- Boundary: this pass does not add profiles, collision, schema fields,
+  reconciliation, animation, pose articulation, tuning, persistence, or
+  world-object behavior. Existing protocol and exact-cell interest are unchanged.
+- Verification: MSVC RelWithDebInfo full engine-independent protocol/server
+  contracts and dedicated-server app integration pass, including the named
+  magnitude and extreme-input tick regressions. All 145 repository Python tests
+  and diff hygiene pass.
 
 ### 2026-09-06 — movement evidence baseline — Complete
 

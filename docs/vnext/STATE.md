@@ -8,8 +8,9 @@ Updated: 2026-09-06
 - Phase 11: **Complete**
 - Phase 12 discovery: **Complete**
 - Phase 12 evidence: **Complete**
-- Active work: **Phase 12 production movement package decision**
-- Last pass: **Phase 12 movement evidence baseline complete**
+- Phase 12 package decision/safety: **Complete**
+- Active work: **Phase 12 manifest movement profiles and collision kernel seam**
+- Last pass: **Phase 12 A/A/A/A/A decision and input safety gate complete**
 - Authoritative tracker: [rolling implementation plan](IMPLEMENTATION_PLAN.md)
 - Historical evidence: [implementation notes](IMPLEMENTATION_NOTES.md)
 
@@ -68,8 +69,20 @@ ADRs and GDRs are required only for consequential, hard-to-reverse decisions.
   reports two pose gaps; stall reaches 100 ms extrapolation, 8,192-quanta remote
   correction, and seven ticks of scheduler lag. These are evidence, not budgets.
 - Hardware/content-backed capture is still required before player-facing tuning.
-  The next implementation is blocked on the documented movement package owner
-  choice; A/A/A/A/A remains recommended.
+
+## Phase 12 decision and safety result
+
+- The owner approved A/A/A/A/A: server content collision, manifest movement
+  profiles, bounded local replay, bounded adaptive remote playback, and small
+  canonical locomotion state with ephemeral pose. [ADR-0059](adr/ADR-0059-phase12-production-movement-architecture.md)
+  and [GDR-0019](gdr/GDR-0019-phase12-production-movement-package.md) are accepted.
+- Version 1.2 raw velocity is now checked at the canonical reducer. Components
+  must stay within 4,096 quanta/tick and magnitude within 4,097; the radial
+  allowance covers ties-to-even yaw rounding and is not a production profile.
+- Out-of-range exact-next commands final-reject as `MotionOutOfRange`, advance
+  acknowledgement, preserve player spatial state, and never reach integration.
+- Protocol, collision, profiles, correction, animation, pose, interest, resync,
+  persistence, and world-object behavior otherwise remain unchanged.
 
 ## Phase 10 result
 
@@ -130,6 +143,10 @@ work.
 
 ## Last verified
 
+- MSVC RelWithDebInfo full engine-independent protocol/server contracts and the
+  dedicated-server app integration pass after the movement safety gate.
+- Both named input safety regressions pass; all 145 repository Python tests and
+  diff hygiene pass.
 - Phase 12 movement evidence, adapter, observability, command-intake, and
   server-app contracts pass. The deterministic capture emits all eight expected
   desktop/PC-VR platform/profile records.
@@ -157,14 +174,13 @@ work.
 ## Next pass
 
 Read the rolling **Now** section in
-[IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md). Resolve the Phase 12 collision,
-speed/locomotion, local correction, remote lag,
-and animation/pose package. Do not implement player-facing movement policy until
-the owner approves that package.
+[IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md). Add manifest movement profiles,
+the engine-neutral server collision query, and the deterministic movement kernel
+without extending client presentation, world-object, or persistence scope.
 
 ## Working-tree expectation
 
 Before starting the next pass, `vnext` should contain the completed Phase 12
-evidence commit and be clean. The separate
+decision/safety commit and be clean. The separate
 `vnext-vr` worktree remains at the completed Phase 9 baseline until a later shared
 merge is deliberately made.

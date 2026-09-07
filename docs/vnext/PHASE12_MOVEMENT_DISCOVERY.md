@@ -93,6 +93,10 @@ before production implementation:
   all animation locally from velocity; C) make pose canonical, which conflicts
   with ADR-0006 and ADR-0055.
 
+The project owner approved A/A/A/A/A on 2026-09-06. The durable decision is
+recorded in [ADR-0059](adr/ADR-0059-phase12-production-movement-architecture.md)
+and [GDR-0019](gdr/GDR-0019-phase12-production-movement-package.md).
+
 ## Named proof scenarios
 
 1. `motion_magnitude_is_bounded_before_canonical_mutation`

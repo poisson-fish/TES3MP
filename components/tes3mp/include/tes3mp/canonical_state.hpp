@@ -31,6 +31,7 @@ namespace TES3MP
         SpatialTickRegression,
         EntityRevisionExhausted,
         UnknownCell,
+        MotionOutOfRange,
     };
 
     class FinalizedCommandRecord

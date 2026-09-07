@@ -285,6 +285,7 @@ target_sources(tes3mp_server_core PRIVATE
     include/tes3mp/deterministic_random.hpp
     include/tes3mp/fixed_tick_scheduler.hpp
     include/tes3mp/monotonic_clock.hpp
+    include/tes3mp/movement_policy.hpp
     include/tes3mp/observability.hpp
     include/tes3mp/player_identity.hpp
     include/tes3mp/server_command_intake.hpp

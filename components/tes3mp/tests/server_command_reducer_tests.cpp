@@ -1,4 +1,5 @@
 #include <tes3mp/server_command_reducer.hpp>
+#include <tes3mp/movement_policy.hpp>
 #include <tes3mp/test_support/manual_clock.hpp>
 #include <tes3mp/test_support/recording_observability.hpp>
 
@@ -445,8 +446,14 @@ namespace
             && droppedEvents->droppedCount() == 1;
     }
 
-    bool zero_negative_vertical_and_extreme_representable_velocity_are_preserved()
+    bool motion_magnitude_is_bounded_before_canonical_mutation()
     {
+        static_assert(isLegacyMotionVelocitySafe(LinearVelocity3(0, 0, 0)));
+        static_assert(isLegacyMotionVelocitySafe(LinearVelocity3(3010, 2779, 0)));
+        static_assert(isLegacyMotionVelocitySafe(LinearVelocity3(0, 0, LegacyMotionAxisQuantaPerTick)));
+        static_assert(!isLegacyMotionVelocitySafe(LinearVelocity3(4096, 4096, 0)));
+        static_assert(!isLegacyMotionVelocitySafe(LinearVelocity3(std::numeric_limits<std::int64_t>::min(), 0, 0)));
+
         const std::array players{ player(1, 101) };
         const std::array sessions{ session(10, 1, 101) };
         NullMetricSink metrics;
@@ -463,12 +470,38 @@ namespace
         };
         const auto originalTransform = players.front().transform();
         const auto result = reduceCommands(reducer, commands);
-        return result
-            && std::all_of(result.dispositions().begin(), result.dispositions().end(),
-                [](CommandDispositionRecord value) { return value.disposition() == CommandDisposition::Applied; })
-            && reducer.state().players().front().linearVelocity()
-            == LinearVelocity3(std::numeric_limits<std::int64_t>::min(), std::numeric_limits<std::int64_t>::max(), -9)
-            && reducer.state().players().front().transform() == originalTransform;
+        return result && result.dispositions().size() == 4
+            && result.dispositions()[0].disposition() == CommandDisposition::Applied
+            && result.dispositions()[1].disposition() == CommandDisposition::Applied
+            && result.dispositions()[2].disposition() == CommandDisposition::Applied
+            && result.dispositions()[3].disposition() == CommandDisposition::MotionOutOfRange
+            && result.dispositions()[3].acknowledgementAdvanced() && !result.dispositions()[3].playerStateChanged()
+            && reducer.state().players().front().linearVelocity() == LinearVelocity3(0, 0, 1)
+            && reducer.state().players().front().transform() == originalTransform
+            && reducer.state().activeSessions().front().highestContiguousFinalizedCommand()->value() == 4;
+    }
+
+    bool extreme_motion_input_cannot_fail_the_server_tick()
+    {
+        const std::array players{ player(1, 101) };
+        const std::array sessions{ session(10, 1, 101) };
+        NullMetricSink metrics;
+        NullStructuredEventSink events;
+        Observability observability(metrics, events);
+        CanonicalCommandReducer reducer(state(players, sessions), observability);
+        const std::array commands{ proposal(10, 1, 1001, 101, 1,
+            LinearVelocity3(std::numeric_limits<std::int64_t>::max(), std::numeric_limits<std::int64_t>::min(),
+                std::numeric_limits<std::int64_t>::max())) };
+        IntakeFixture fixture;
+        if (!fixture.submit(commands))
+            return false;
+        const auto pumped = fixture.pumpFirst();
+        auto prepared = reducer.prepareTick(pumped.batches().front());
+        return prepared.result() && prepared.result().dispositions().size() == 1
+            && prepared.result().dispositions().front().disposition() == CommandDisposition::MotionOutOfRange
+            && prepared.candidateState().players().front() == players.front()
+            && prepared.candidateState().activeSessions().front().highestContiguousFinalizedCommand()->value() == 1
+            && reducer.commit(std::move(prepared));
     }
 
     bool two_bound_players_change_only_their_own_entity_state()
@@ -839,8 +872,10 @@ int main()
             &tick_regression_rejects_player_change_and_finalizes_ack },
         std::pair{ "accepted_dropped_and_null_observability_produce_identical_state_and_dispositions",
             &accepted_dropped_and_null_observability_produce_identical_state_and_dispositions },
-        std::pair{ "zero_negative_vertical_and_extreme_representable_velocity_are_preserved",
-            &zero_negative_vertical_and_extreme_representable_velocity_are_preserved },
+        std::pair{ "motion_magnitude_is_bounded_before_canonical_mutation",
+            &motion_magnitude_is_bounded_before_canonical_mutation },
+        std::pair{
+            "extreme_motion_input_cannot_fail_the_server_tick", &extreme_motion_input_cannot_fail_the_server_tick },
         std::pair{ "two_bound_players_change_only_their_own_entity_state",
             &two_bound_players_change_only_their_own_entity_state },
         std::pair{ "reducer_exposes_no_mutable_state_wire_engine_socket_script_or_database_surface",

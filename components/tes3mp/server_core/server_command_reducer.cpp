@@ -1,4 +1,5 @@
 #include <tes3mp/server_command_reducer.hpp>
+#include <tes3mp/movement_policy.hpp>
 
 #include <algorithm>
 #include <array>
@@ -40,6 +41,8 @@ namespace
                 return CommandReductionObservationOutcome::EntityRevisionExhausted;
             case CommandDisposition::UnknownCell:
                 return CommandReductionObservationOutcome::UnknownCell;
+            case CommandDisposition::MotionOutOfRange:
+                return CommandReductionObservationOutcome::MotionOutOfRange;
         }
         return CommandReductionObservationOutcome::CandidateStateInvalid;
     }
@@ -544,7 +547,15 @@ namespace TES3MP
                                     bool requiresSpatialAdvance = true;
                                     if (const auto* motion
                                         = std::get_if<PlayerMotionCommandProposal>(&proposal.payload()))
-                                        replacementVelocity = motion->desiredVelocity();
+                                    {
+                                        if (!isLegacyMotionVelocitySafe(motion->desiredVelocity()))
+                                        {
+                                            disposition = CommandDisposition::MotionOutOfRange;
+                                            requiresSpatialAdvance = false;
+                                        }
+                                        else
+                                            replacementVelocity = motion->desiredVelocity();
+                                    }
                                     else
                                     {
                                         const auto& requested = std::get<CellTransitionCommandProposal>(
