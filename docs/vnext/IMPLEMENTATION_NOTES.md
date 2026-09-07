@@ -6177,7 +6177,38 @@ only the relevant phase section here.
 
 ## Phase 12 — Production movement, animation, and pose replication
 
-[Back to the phase tracker](IMPLEMENTATION_PLAN.md#phase-12--production-movement-animation-and-pose-replication)
+[Back to the phase tracker](IMPLEMENTATION_PLAN.md#phase-12--movement-evidence-baseline)
+
+### 2026-09-06 — production movement discovery — Complete
+
+- Change: added the repository-backed
+  [movement discovery](PHASE12_MOVEMENT_DISCOVERY.md), including the end-to-end
+  desktop/VR trace, measured fixture bounds, production seam, owner options, and
+  twelve named proof scenarios. No runtime behavior changed.
+- Finding: semantic input is fixed planar velocity; reliable intent permits one
+  pending command; the 30 Hz reducer performs unchecked-magnitude integer
+  integration without acceleration, collision, gravity, orientation, or cell
+  traversal; local correction is exact; remote presentation uses a four-sample
+  66.7 ms delay/100 ms extrapolation/16-unit correction policy; replicated actors
+  loop idle; and 20 Hz VR pose is relayed but not articulated.
+- Safety gate: signed 64-bit velocity has no domain or magnitude clamp. The
+  reducer's checked overflow is atomic, but `ServerApplication` treats that tick
+  failure as fatal. Production movement must reject unsafe magnitude before
+  mutation.
+- Evidence gap: production uses `NullRemoteMotionMetricSink`; command latency,
+  stop latency, local correction, server tick lag, and pose loss lack one combined
+  capture. Tuning therefore remains unapproved pending a behavior-neutral
+  evidence pass.
+- Decisions: none. Collision authority, server speed profile, local correction,
+  remote lag policy, animation, and pose fallback are documented options for
+  owner review after capture; ADR-0006 authority and Phase 11 cell/interest/resync
+  semantics remain unchanged.
+- Verification: focused source inspection covered `movement_mapping`, adapter
+  orchestration, protocol decode, command intake/reduction, server publication,
+  remote motion, replicated actors, and pose relay. Release adapter, reducer,
+  server-app, and pose contract executables pass; all 145 repository Python
+  tests and diff hygiene pass. The focused tests pin the stated fixture constants
+  and atomic overflow behavior.
 
 - Snapshot payloads include simulation tick, sequence, transform, velocity, and
   authority epoch. They are latest-wins and must not use reliable ordered queues.

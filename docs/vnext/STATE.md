@@ -6,8 +6,9 @@ Updated: 2026-09-06
 
 - Phases 0–10: **Complete**
 - Phase 11: **Complete**
-- Active work: **Phase 12 production movement discovery ready**
-- Last pass: **Phase 11 exact cell catalog, interest baseline, and resync complete**
+- Phase 12 discovery: **Complete**
+- Active work: **Phase 12 movement evidence baseline ready**
+- Last pass: **Phase 12 production movement discovery complete**
 - Authoritative tracker: [rolling implementation plan](IMPLEMENTATION_PLAN.md)
 - Historical evidence: [implementation notes](IMPLEMENTATION_NOTES.md)
 
@@ -35,6 +36,23 @@ ADRs and GDRs are required only for consequential, hard-to-reverse decisions.
   registry, canonical checksum encoding, authority model, and pose lane do not
   change. Movement, teleport policy, adjacent interest, persistence, and world
   objects remain out of scope.
+
+## Phase 12 discovery result
+
+- The fixture path is traced from shared desktop/VR semantic input through the
+  reliable intent, 30 Hz canonical advance, latest-wins snapshots, exact local
+  correction, bounded remote smoothing, idle animation, and optional 20 Hz pose.
+- Existing bounds are recorded in
+  [the movement discovery](PHASE12_MOVEMENT_DISCOVERY.md), with a platform-neutral
+  production seam and twelve named proof scenarios. No runtime behavior changed.
+- The first safety gate is explicit: desired velocity currently accepts any
+  signed 64-bit components, and a later checked integration overflow is fatal to
+  the composed server pump. Production movement must validate magnitude before
+  canonical mutation.
+- Runtime correction distributions are not yet available: remote motion metrics
+  use a null production sink, while command latency and local correction have no
+  observation seam. The next pass instruments and captures evidence before any
+  player-facing tuning or owner choice.
 
 ## Phase 10 result
 
@@ -95,6 +113,10 @@ work.
 
 ## Last verified
 
+- Phase 12 discovery claims were checked against the desktop/VR adapter, protocol,
+  server intake/reducer/application, replicated actor, and focused movement tests.
+- Release adapter, reducer, server-app, and pose contract executables pass; all
+  145 repository Python tests and diff hygiene pass.
 - MSVC Release builds and affected protocol exchange/frame/handshake, session,
   headless, reducer, server-app, and OpenMW adapter tests pass.
 - Networking-enabled server/headless binaries and full OpenMW desktop
@@ -111,10 +133,10 @@ work.
 ## Next pass
 
 Read the rolling **Now** section in
-[IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md). Perform the Phase 12 production
-movement discovery pass only. Do not change movement, collision, correction,
-animation, or player-facing lag behavior without the resulting evidence and any
-required owner decisions.
+[IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md). Perform the behavior-neutral
+Phase 12 movement evidence baseline only. Do not tune movement, collision,
+correction, animation, pose, or player-facing lag behavior before the evidence
+and required owner decisions.
 
 ## Working-tree expectation
 

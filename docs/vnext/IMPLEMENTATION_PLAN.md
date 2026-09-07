@@ -36,28 +36,30 @@ Verification scales with risk:
 
 ## Now
 
-### Phase 12 — production movement discovery
+### Phase 12 — movement evidence baseline
 
 Status: **Ready**
 
-Phase 11 is complete. The next pass traces the current motion intent, canonical
-spatial advance, correction, smoothing, animation, and optional pose paths. It
-will measure existing limits and identify only the decisions needed to replace
-fixture movement without changing cell, interest, or resync semantics.
+Production movement discovery is complete in
+[the movement discovery](PHASE12_MOVEMENT_DISCOVERY.md). The next pass adds
+bounded, identity-free observations at existing seams and captures comparable
+desktop and PC-VR evidence. It does not tune or change movement behavior.
 
-Expected output: one concise repository-backed movement design, named proof
-scenarios, and owner options only where speed, collision, prediction, lag policy,
-or player-facing correction behavior requires a durable choice. No production
-movement behavior changes during discovery.
+Expected output: command acknowledgement/stop latency, local correction distance,
+remote snapshot/buffer/extrapolation/snap data, server tick lag, and pose age/loss
+under direct, jitter, loss, and stall profiles. The existing unchecked signed
+64-bit velocity path is the first safety gate; production movement cannot ship
+until input is bounded before canonical mutation.
 
 ## Next
 
 These are candidates, not locked slices:
 
-1. Trace and measure production movement/correction seams on desktop and PC VR.
-2. Decide bounded movement, collision, lag, and correction policy where evidence
-   shows a durable choice is required.
-3. Implement the approved movement package without extending world-object or
+1. Capture the same scripted movement route on desktop and PC VR without changing
+   player-facing behavior.
+2. Decide the collision, speed, prediction/correction, remote-lag, animation, and
+   pose package using the captured evidence and documented owner options.
+3. Implement the approved package without extending world-object or
    persistence scope.
 
 The list is rewritten after each completed pass. New evidence may reorder,
@@ -70,7 +72,7 @@ The remaining roadmap is kept at outcome level:
 | Horizon | Intended outcome |
 |---|---|
 | Player foundation | Player lifecycle, content identity, and non-fixture world visibility |
-| Movement | Production movement, animation, correction, and hardened optional pose presentation |
+| Movement | Bounded server-authored locomotion and collision, measured reconciliation, animation, and hardened optional pose presentation |
 | World gameplay | Actors, cells, object state, inventory, equipment, and containers |
 | Rules | Combat, magic, death, respawn, dialogue, quests, factions, reputation, and time/weather |
 | Platform services | Scripting, persistence/replay, administration, moderation, observability, and security hardening |
@@ -91,6 +93,7 @@ but they no longer force a predetermined sequence of micro-slices.
 | Phase 9 | **Complete** | Shared desktop/PC-VR client composition, optional bounded pose protocol, isolated pose transport, authority-checked relay, sampled OpenXR input, and desktop safe fallback |
 | Phase 10 | **Complete** | Durable player credential identity and exact content-manifest negotiation |
 | Phase 11 | **Complete** | Exact bounded cell catalog, server-owned same-cell interest, reliable membership baseline, and bounded authenticated resync |
+| Phase 12 discovery | **Complete** | Repository-backed movement trace, measured fixture bounds, production seams, named proofs, and owner decision options |
 
 ### Phase 9 completion record
 
