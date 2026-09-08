@@ -2,8 +2,8 @@
 
 Date assessed: 2026-08-26
 
-Android ARM64 is not a primary-platform gate for ADR-0005. Standalone Meta Quest
-3 remains a later conditional stretch target.
+Android ARM64 is not a primary-platform gate. Standalone Meta Quest 3 remains a
+later conditional target.
 
 The exact OpenSSL 3.5.8 source supports Android ARM64 through its documented NDK
 targets, and the pinned Protobuf/Abseil sources are CMake-based and can be

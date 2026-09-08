@@ -10,7 +10,7 @@ This retained fail-fast research evidence asked whether GameNetworkingSockets
 `v1.6.0` could receive per-deployment endpoint trust through its supported public
 API without Steam, a universal signing secret, or an invasive dependency patch.
 
-The assessment originally reopened ADR-0005. The owner subsequently approved a
+The assessment originally reopened the transport-security decision. The owner subsequently approved a
 simpler community-server security profile that uses the library's automatic
 basic encryption without authenticated endpoint identity. The missing trust
 integration is therefore no longer a selection gate, and no upstream or local
@@ -60,7 +60,7 @@ community-server milestone.
 
 ## Approved disposition
 
-On 2026-08-26 the owner approved amending ADR-0005 to use the supported
+On 2026-08-26 the owner approved using the supported
 unauthenticated direct-IP mode with automatic encryption. The decision explicitly
 accepts active endpoint impersonation risk for the first milestone while keeping
 encryption against passive observation, application-level join authentication,
@@ -77,5 +77,4 @@ Consequently:
   production operation fails, but it must not claim authenticated server
   identity.
 
-The accepted boundary and review triggers are authoritative in
-[ADR-0005](../../adr/ADR-0005-transport-security-authentication-resumption.md).
+The accepted boundary is summarized in [DECISIONS.md](../../DECISIONS.md).

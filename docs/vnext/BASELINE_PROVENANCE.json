@@ -65,6 +65,11 @@
       "purpose": "Manually dispatched supported desktop compiler, ASan/UBSan, and ThreadSanitizer matrix for the verified Slice 6.1 production adapter and focused lifecycle checks."
     },
     {
+      "path": "AGENTS.md",
+      "status": "A",
+      "purpose": "Small repository instruction router that limits LLM context to the active vNext truth, workflow, decisions, and specialist content contract."
+    },
+    {
       "path": "CI/install_debian_deps.sh",
       "status": "M",
       "purpose": "OpenMW Debian dependency groups with the approved Linux compiler majors and Ninja named explicitly."
@@ -542,7 +547,7 @@
     {
       "path": "components/tes3mp/client_session/headless_client_session.cpp",
       "status": "A",
-      "purpose": "Caller-pumped single-attempt/single-connection headless client fa\u00e7ade over owned transport and client-session state."
+      "purpose": "Caller-pumped single-attempt/single-connection headless client façade over owned transport and client-session state."
     },
     {
       "path": "components/tes3mp/include/tes3mp/actor_catalog.hpp",
@@ -1635,49 +1640,29 @@
       "purpose": "Restores Windows multimedia timer declarations hidden by OpenMW lean-header policy for the pinned GNS build."
     },
     {
-      "path": "docs/vnext/ACTOR_CONTENT_V1.md",
-      "status": "A",
-      "purpose": "Documents the bounded manifest-scoped actor artifact, validation, local prototype mapping, and explicit exclusions."
-    },
-    {
       "path": "docs/vnext/BASELINE_PROVENANCE.json",
       "status": "A",
       "purpose": "Machine-readable OpenMW baseline, cutover, dependency-input, and intentional-difference record."
     },
     {
-      "path": "docs/vnext/COLLISION_CONTENT_V1.md",
+      "path": "docs/vnext/CONTENT_FORMATS.md",
       "status": "A",
-      "purpose": "Documents the bounded manifest-scoped static collision artifact format, deterministic root-sweep semantics, and explicit exclusions."
+      "purpose": "Consolidated bounded collision, actor, interactive-object, and inventory server content contracts."
     },
     {
-      "path": "docs/vnext/IMPLEMENTATION_NOTES.md",
+      "path": "docs/vnext/CURRENT.md",
       "status": "A",
-      "purpose": "Phase-indexed chronological slice logs, verification evidence, owner-review history, and working notes split from the concise implementation tracker."
+      "purpose": "Single code-backed inventory of implemented, partial, and unfinished TES3MP behavior plus the active milestone."
     },
     {
-      "path": "docs/vnext/IMPLEMENTATION_PLAN.md",
+      "path": "docs/vnext/DECISIONS.md",
       "status": "A",
-      "purpose": "Concise living vNext phase, gate, status, and current completion-evidence tracker."
+      "purpose": "Compact ledger of non-obvious durable architecture, authority, compatibility, security, and future-system constraints."
     },
     {
-      "path": "docs/vnext/INTERACTIVE_OBJECT_CONTENT_V1.md",
+      "path": "docs/vnext/DEVELOPMENT.md",
       "status": "A",
-      "purpose": "Documents the optional bounded manifest-scoped interactive-object artifact and authoritative key-unlock boundary."
-    },
-    {
-      "path": "docs/vnext/INVENTORY_CONTENT_V1.md",
-      "status": "A",
-      "purpose": "Documents the optional bounded manifest-scoped inventory artifact and fail-closed production composition."
-    },
-    {
-      "path": "docs/vnext/LEGACY_GAMEPLAY_FEATURE_INVENTORY.md",
-      "status": "A",
-      "purpose": "Reference-only inventory of archived TES3MP gameplay behavior."
-    },
-    {
-      "path": "docs/vnext/LOCAL_BASELINE_BUILD.md",
-      "status": "A",
-      "purpose": "Documented local configure, build, test, provisioning, and evidence procedure for the pinned baseline."
+      "purpose": "Single development, dependency-boundary, verification, and documentation-budget workflow."
     },
     {
       "path": "docs/vnext/OPENMW_PATCH_REGISTRY.json",
@@ -1685,414 +1670,9 @@
       "purpose": "Machine-checked semantic registry for every non-adapter OpenMW delta."
     },
     {
-      "path": "docs/vnext/PHASE12_HARDWARE_CAPTURE.md",
-      "status": "A",
-      "purpose": "Records representative-content desktop capture evidence, maintained VR integration readiness, and the explicit no-HMD hardware deferral."
-    },
-    {
-      "path": "docs/vnext/PHASE12_MOVEMENT_DISCOVERY.md",
-      "status": "A",
-      "purpose": "Repository-backed Phase 12 movement trace, production seam, evidence gaps, owner choices, and named proof scenarios."
-    },
-    {
-      "path": "docs/vnext/PHASE12_MOVEMENT_EVIDENCE.md",
-      "status": "A",
-      "purpose": "Deterministic identity-free desktop/PC-VR movement and pose evidence baseline retained before player-facing tuning."
-    },
-    {
-      "path": "docs/vnext/PHASE13_ACTOR_DISCOVERY.md",
-      "status": "A",
-      "purpose": "Repository-backed actor identity, canonical state, authority, interest, replication, content, and presentation discovery with owner package choices."
-    },
-    {
-      "path": "docs/vnext/PHASE13_ACTOR_LIFECYCLE_CAPTURE.md",
-      "status": "A",
-      "purpose": "Records the bounded representative-content two-client actor cell, resume, authenticated resync, durable rejoin, and canonical continuity proof."
-    },
-    {
-      "path": "docs/vnext/PHASE14_OBJECT_DISCOVERY.md",
-      "status": "A",
-      "purpose": "Repository-backed interactive object discovery, discrete state model, reach validation, and owner package choices."
-    },
-    {
-      "path": "docs/vnext/PHASE15_INVENTORY_DISCOVERY.md",
-      "status": "A",
-      "purpose": "Repository-backed inventory, equipment, container, and ground-item discovery with authority lanes, risks, and owner package choices."
-    },
-    {
-      "path": "docs/vnext/PRE_CUTOVER_PROVENANCE.md",
-      "status": "A",
-      "purpose": "Recorded pre-cutover repository and archive provenance."
-    },
-    {
       "path": "docs/vnext/README.md",
       "status": "A",
       "purpose": "Accepted vNext product direction and architecture boundaries."
-    },
-    {
-      "path": "docs/vnext/REMOTE_ACTOR_OWNER_DECISION_PACKET.md",
-      "status": "A",
-      "purpose": "OpenMW 0.51 three-model remote-actor comparison, owner-approved and accepted C-R1 decision, exact patch surface, acceptance scenarios, and implementation result."
-    },
-    {
-      "path": "docs/vnext/STATE.md",
-      "status": "A",
-      "purpose": "Concise current-slice handoff snapshot linking the authoritative plan, active decisions, working files, next work, and verification evidence."
-    },
-    {
-      "path": "docs/vnext/adr/ADR-0001-baseline-cutover-git-mechanics.md",
-      "status": "A",
-      "purpose": "Owner-approved exact-tree baseline-cutover mechanics."
-    },
-    {
-      "path": "docs/vnext/adr/ADR-0002-platform-toolchain-policy.md",
-      "status": "A",
-      "purpose": "Owner-approved platform, CI, toolchain, and dependency policy."
-    },
-    {
-      "path": "docs/vnext/adr/ADR-0003-hostile-internet-threat-model.md",
-      "status": "A",
-      "purpose": "Owner-approved hostile-Internet trust boundaries, assets, attacker capabilities, mitigations, verification, and deferred risks."
-    },
-    {
-      "path": "docs/vnext/adr/ADR-0004-protocol-schema-codec-evolution-policy.md",
-      "status": "A",
-      "purpose": "Owner-approved restricted FlatBuffers schema, bounded codec, evolution, generation, dependency, and verification policy."
-    },
-    {
-      "path": "docs/vnext/adr/ADR-0005-transport-security-authentication-resumption.md",
-      "status": "A",
-      "purpose": "Owner-approved transport encryption, join authentication, resumption, dependency, risk, and verification decision."
-    },
-    {
-      "path": "docs/vnext/adr/ADR-0006-authority-state-scope-prediction-presentation.md",
-      "status": "A",
-      "purpose": "Owner-approved authority, state-scope, prediction, presentation, delegation, validation-depth, GDR-question, and acceptance-scenario policy."
-    },
-    {
-      "path": "docs/vnext/adr/ADR-0007-openmw-hook-patch-queue-policy.md",
-      "status": "A",
-      "purpose": "Owner-approved native OpenMW adapter, bounded hook-surface, patch-registry, local upstream-preparation, and acceptance-evidence policy."
-    },
-    {
-      "path": "docs/vnext/adr/ADR-0008-pc-vr-fork-worktree-maintenance-policy.md",
-      "status": "A",
-      "purpose": "Records the approved immutable OpenMW-VR target, worktree, merge, registry, verification, and rehearsal policy."
-    },
-    {
-      "path": "docs/vnext/adr/ADR-0013-deterministic-simulation-protocol-compatibility.md",
-      "status": "A",
-      "purpose": "Owner-approved deterministic tick, canonical numeric, command-ordering, time/randomness, canonical-encoding, and protocol-compatibility policy."
-    },
-    {
-      "path": "docs/vnext/adr/ADR-0014-phase3-target-topology-boundary-enforcement.md",
-      "status": "A",
-      "purpose": "Owner-approved Phase 3 target topology, naming, dependency allowlist, negative checks, and acceptance-evidence policy."
-    },
-    {
-      "path": "docs/vnext/adr/ADR-0015-strong-value-types-identity-counter-policy.md",
-      "status": "A",
-      "purpose": "Owner-approved strong identity/counter catalog, validity, API, overflow, formatting, and codec/allocation-boundary policy."
-    },
-    {
-      "path": "docs/vnext/adr/ADR-0016-canonical-spatial-command-snapshot-primitives.md",
-      "status": "A",
-      "purpose": "Owner-approved canonical cell, coordinate, transform, velocity, and platform-neutral command/snapshot primitive policy."
-    },
-    {
-      "path": "docs/vnext/adr/ADR-0017-deterministic-facilities-harness-boundaries.md",
-      "status": "A",
-      "purpose": "Owner-approved deterministic clock, scheduler, RNG stream, in-memory link, and trace-evidence boundary policy."
-    },
-    {
-      "path": "docs/vnext/adr/ADR-0018-deterministic-network-fault-controls.md",
-      "status": "A",
-      "purpose": "Owner-approved deterministic fault-wrapper, timing/order, test-path identity, random isolation, stall/disconnect, and bounded-backpressure policy."
-    },
-    {
-      "path": "docs/vnext/adr/ADR-0019-runtime-safety-and-fuzz-ci-policy.md",
-      "status": "A",
-      "purpose": "Owner-approved project-owned sanitizer, race-checking, fuzz-target, CI-cadence, and retained-evidence policy."
-    },
-    {
-      "path": "docs/vnext/adr/ADR-0020-owned-observability-interfaces-and-test-sinks.md",
-      "status": "A",
-      "purpose": "Owner-approved server-core observability ownership, injection, typed metrics/events, privacy, and bounded deterministic test-sink policy."
-    },
-    {
-      "path": "docs/vnext/adr/ADR-0021-bounded-protocol-framing-and-decode-boundary.md",
-      "status": "A",
-      "purpose": "Owner-approved fixed framing, message classification and identifiers, class byte budgets, owned decode results, and structured error policy."
-    },
-    {
-      "path": "docs/vnext/adr/ADR-0022-version-and-capability-negotiation.md",
-      "status": "A",
-      "purpose": "Owner-approved hello schemas, version/capability negotiation, rejection, legacy/no-reply, and pure API-boundary policy."
-    },
-    {
-      "path": "docs/vnext/adr/ADR-0023-session-state-machines-and-authentication-provider-boundary.md",
-      "status": "A",
-      "purpose": "Owner-approved client/server session-state, authentication-provider, opaque-secret, timeout, cancellation, redaction, and Phase 4/6 boundary policy."
-    },
-    {
-      "path": "docs/vnext/adr/ADR-0024-reliable-operation-latest-wins-envelope-contract.md",
-      "status": "A",
-      "purpose": "Owner-approved reliable-operation and latest-wins envelope direction, metadata, validation-ownership, evolution, and slice-boundary policy."
-    },
-    {
-      "path": "docs/vnext/adr/ADR-0025-minimal-player-command-world-snapshot-exchange.md",
-      "status": "A",
-      "purpose": "Owner-approved typed command/snapshot roots, bounds, role-specific exchange guards, evolution evidence, and deterministic in-memory fake-peer architecture."
-    },
-    {
-      "path": "docs/vnext/adr/ADR-0026-phase5-writer-command-intake-and-ordering.md",
-      "status": "A",
-      "purpose": "Owner-approved Phase 5 server-core command boundary, writer cutoff and ordering, hard intake limits, overload policy, and coordinator architecture."
-    },
-    {
-      "path": "docs/vnext/adr/ADR-0027-phase5-canonical-player-and-session-state.md",
-      "status": "A",
-      "purpose": "Owner-approved Phase 5 canonical player/session state partitions, deterministic bounds, spatial invariants, immutable construction, binding, and acknowledgement architecture."
-    },
-    {
-      "path": "docs/vnext/adr/ADR-0028-phase5-command-validation-and-atomic-reducer.md",
-      "status": "A",
-      "purpose": "Owner-approved Phase 5 command validation order, disposition, acknowledgement, atomic reducer, and Slice 5.5 safety-boundary decision."
-    },
-    {
-      "path": "docs/vnext/adr/ADR-0029-phase5-immutable-canonical-publication-and-versioned-change-feed.md",
-      "status": "A",
-      "purpose": "Owner-approved Phase 5 immutable canonical publication ownership, state version, domain change record, latest-retention, gap-recovery, and slow-reader policy decision."
-    },
-    {
-      "path": "docs/vnext/adr/ADR-0030-phase5-idempotency-checksum-and-resync-boundary.md",
-      "status": "A",
-      "purpose": "Owner-approved Phase 5 bounded idempotency history, canonical encoding and checksum, explicit server-snapshot resync, and remaining composition-gate decision."
-    },
-    {
-      "path": "docs/vnext/adr/ADR-0031-phase5-committed-domain-sink-boundary.md",
-      "status": "A",
-      "purpose": "Owner-approved Phase 5 committed domain sink ownership, shared-payload delivery, bounded failure reporting, and retention policy decision."
-    },
-    {
-      "path": "docs/vnext/adr/ADR-0032-phase6-transport-adapter-and-lifecycle-boundary.md",
-      "status": "A",
-      "purpose": "Proposed owner-gated Phase 6 selected transport adapter topology, verified provisioning, endpoint, lifecycle, pumping, and initial resource-bound decision packet."
-    },
-    {
-      "path": "docs/vnext/adr/ADR-0033-phase6-transport-channel-and-delivery-semantics.md",
-      "status": "A",
-      "purpose": "Owner-approved Phase 6 two-channel topology, owned bounded byte delivery, equal lane scheduling, minimal fail-closed behavior, and later queue-policy boundary."
-    },
-    {
-      "path": "docs/vnext/adr/ADR-0034-phase6-credential-and-resumption-boundary.md",
-      "status": "A",
-      "purpose": "Owner-gated Phase 6 decision packet for bounded join-password messages, routing-only resume claims, token rotation and lifetime, credential rate limiting, cryptographic ownership, and redaction."
-    },
-    {
-      "path": "docs/vnext/adr/ADR-0035-phase6-transport-admission-scope-handoff-and-derivation.md",
-      "status": "A",
-      "purpose": "Proposed owner-gated Phase 6 decision packet for the opaque transport admission-scope handoff and private process-keyed IPv4/IPv6-prefix derivation."
-    },
-    {
-      "path": "docs/vnext/adr/ADR-0036-phase6-authentication-composition-and-session-finalization.md",
-      "status": "A",
-      "purpose": "Proposed owner-gated Phase 6 decision packet for typed authentication submission, shared limiter/provider routing, resume claim installation, and initial session/token finalization."
-    },
-    {
-      "path": "docs/vnext/adr/ADR-0037-phase6-bounded-outbound-queue-and-slow-peer-policy.md",
-      "status": "A",
-      "purpose": "Owner-approved Phase 6 per-connection bounded queue, fair scheduling, deterministic rate, overload, and sustained slow-peer eviction policy."
-    },
-    {
-      "path": "docs/vnext/adr/ADR-0038-phase6-network-telemetry-and-stable-reasons.md",
-      "status": "A",
-      "purpose": "Owner-approved Phase 6 transport-owned telemetry, stable reason, bounded-cardinality, sink-isolation, and honest retransmission-pressure policy."
-    },
-    {
-      "path": "docs/vnext/adr/ADR-0039-phase6-deterministic-real-transport-fault-boundary.md",
-      "status": "A",
-      "purpose": "Owner-approved Phase 6 deterministic application-fault composition above real encrypted sockets with supplemental selected-library-native below-adapter coverage."
-    },
-    {
-      "path": "docs/vnext/adr/ADR-0040-phase7-server-composition-and-configuration.md",
-      "status": "A",
-      "purpose": "Owner-approved Phase 7 dedicated-server composition, strict bounded configuration, file-only secret, and transactional lifecycle policy."
-    },
-    {
-      "path": "docs/vnext/adr/ADR-0041-phase7-headless-client-and-script-driver.md",
-      "status": "A",
-      "purpose": "Owner-approved caller-pumped headless client fa\u00e7ade and deterministic fixed-capacity scripted fake-client evidence boundary."
-    },
-    {
-      "path": "docs/vnext/adr/ADR-0042-phase7-authenticated-join-and-identity-allocation.md",
-      "status": "A",
-      "purpose": "Owner-approved Phase 7 authenticated join ownership, checked identities, atomic installation, principal binding, fixture snapshot, and prepare-commit composition policy."
-    },
-    {
-      "path": "docs/vnext/adr/ADR-0043-phase7-fixture-cell-transition-and-observation.md",
-      "status": "A",
-      "purpose": "Records the owner-approved Phase 7 reliable fixture-transition reducer path, explicit observation results, fixed fixture identities, atomic publication boundary, and acceptance tests."
-    },
-    {
-      "path": "docs/vnext/adr/ADR-0044-phase7-movement-tick-and-snapshot-composition.md",
-      "status": "A",
-      "purpose": "Records the owner-approved Phase 7 atomic movement tick, checked integration, complete same-cell latest-wins views, and acceptance tests."
-    },
-    {
-      "path": "docs/vnext/adr/ADR-0045-phase7-disconnect-resume-and-expiration-composition.md",
-      "status": "A",
-      "purpose": "Records the owner-approved Phase 7 server-core lifecycle ownership, hidden grace state, failure-atomic resume composition, exact-deadline ordering, and acceptance tests."
-    },
-    {
-      "path": "docs/vnext/adr/ADR-0046-phase7-adverse-network-and-soak-matrix.md",
-      "status": "A",
-      "purpose": "Records the owner-approved layered adverse-network matrix, quantitative thresholds, reconnect loop, deterministic soak, and real-process soak boundary."
-    },
-    {
-      "path": "docs/vnext/adr/ADR-0047-phase8-adapter-lifecycle-and-provider-boundary.md",
-      "status": "A",
-      "purpose": "Records the approved Phase 8 provider split, lifecycle, frame order, and reusable runtime gate."
-    },
-    {
-      "path": "docs/vnext/adr/ADR-0048-canonical-revision-and-simulation-tick-separation.md",
-      "status": "A",
-      "purpose": "Separates fixed simulation scheduling ticks from monotonic authoritative publication revisions."
-    },
-    {
-      "path": "docs/vnext/adr/ADR-0049-phase8-desktop-connection-composition.md",
-      "status": "A",
-      "purpose": "Records approved desktop enablement, endpoint, credential, timeout, status, and Windows runtime composition policy."
-    },
-    {
-      "path": "docs/vnext/adr/ADR-0050-phase8-cell-and-remote-presentation.md",
-      "status": "A",
-      "purpose": "Records approved fixture cell mapping, transition coordination, and renderer-only remote presentation policy."
-    },
-    {
-      "path": "docs/vnext/adr/ADR-0051-phase8-provisional-spatial-intent-concurrency.md",
-      "status": "A",
-      "purpose": "Records approved provisional spatial-intent concurrency and observed-revision policy."
-    },
-    {
-      "path": "docs/vnext/adr/ADR-0052-phase8-remote-motion-smoothing.md",
-      "status": "A",
-      "purpose": "Records approved bounded adapter-side remote smoothing ownership, lifetime, and metric boundaries."
-    },
-    {
-      "path": "docs/vnext/adr/ADR-0053-phase8-desktop-reconnect-and-automation-composition.md",
-      "status": "A",
-      "purpose": "Records approved bounded desktop reconnect ownership, token retry safety, and test-only automation composition."
-    },
-    {
-      "path": "docs/vnext/adr/ADR-0054-phase9-dual-engine-adapter-composition.md",
-      "status": "A",
-      "purpose": "Records the approved shared adapter, separate desktop provider, and fail-closed VR composition boundary."
-    },
-    {
-      "path": "docs/vnext/adr/ADR-0055-phase9-optional-vr-pose-capability-and-schema.md",
-      "status": "A",
-      "purpose": "Records the approved optional VR pose capability, directional schema, bounded transform, recency, and additive evolution policy."
-    },
-    {
-      "path": "docs/vnext/adr/ADR-0056-phase9-vr-provider-composition.md",
-      "status": "A",
-      "purpose": "Proposes the Slice 9.4 VR provider leaf, shared-source reuse, fork-local composition, and boundary tests for owner review."
-    },
-    {
-      "path": "docs/vnext/adr/ADR-0057-phase10-durable-player-and-content-identity.md",
-      "status": "A",
-      "purpose": "Records the approved durable player credential and exact manifest-scoped content identity foundation."
-    },
-    {
-      "path": "docs/vnext/adr/ADR-0058-phase11-cell-catalog-interest-baseline.md",
-      "status": "A",
-      "purpose": "Records the approved exact cell catalog, server-owned interest, reliable baseline, and bounded resync architecture."
-    },
-    {
-      "path": "docs/vnext/adr/ADR-0059-phase12-production-movement-architecture.md",
-      "status": "A",
-      "purpose": "Records the approved server collision, manifest profile, bounded reconciliation, adaptive playback, locomotion state, and ephemeral pose architecture."
-    },
-    {
-      "path": "docs/vnext/adr/ADR-0060-phase13-server-owned-actor-foundation.md",
-      "status": "A",
-      "purpose": "Records the approved separate actor state, server-only simulation authority, additive compatibility, and no-client-lease architecture."
-    },
-    {
-      "path": "docs/vnext/adr/ADR-0061-phase14-server-authoritative-interactive-objects.md",
-      "status": "A",
-      "purpose": "Architectural decision record for server-authoritative interactive objects, discrete states, and bounded interaction."
-    },
-    {
-      "path": "docs/vnext/adr/ADR-0062-phase15-server-authoritative-inventory-transactions.md",
-      "status": "A",
-      "purpose": "Architectural decision record for canonical inventory ownership, exact-stack identity, and atomic server transactions."
-    },
-    {
-      "path": "docs/vnext/gdr/GDR-0001-phase7-headless-vertical-slice-behavior.md",
-      "status": "A",
-      "purpose": "Owner-approved Phase 7 fixture spawn, readiness, cell visibility, provisional tick integration, headless correction, and bounded resume behavior."
-    },
-    {
-      "path": "docs/vnext/gdr/GDR-0011-phase4-minimal-player-exchange-semantics.md",
-      "status": "A",
-      "purpose": "Owner-approved Phase 4 player-motion intent, authority separation, session-targeted snapshot scope, and confirmed-client-state semantics."
-    },
-    {
-      "path": "docs/vnext/gdr/GDR-0012-phase5-minimal-motion-reducer-semantics.md",
-      "status": "A",
-      "purpose": "Owner-approved Phase 5 minimal motion reducer effect, authority, state-scope, numeric, contention, and acknowledgement behavior."
-    },
-    {
-      "path": "docs/vnext/gdr/GDR-0013-phase8-cell-transition-presentation.md",
-      "status": "A",
-      "purpose": "Records approved Phase 8 fixture cell transition and local presentation behavior."
-    },
-    {
-      "path": "docs/vnext/gdr/GDR-0014-phase8-desktop-movement-and-correction.md",
-      "status": "A",
-      "purpose": "Records approved deterministic desktop movement mapping and exact local correction behavior."
-    },
-    {
-      "path": "docs/vnext/gdr/GDR-0015-phase8-remote-motion-presentation.md",
-      "status": "A",
-      "purpose": "Records approved provisional remote interpolation, extrapolation, correction, and hard-snap behavior."
-    },
-    {
-      "path": "docs/vnext/gdr/GDR-0016-phase8-disconnect-and-resume-presentation.md",
-      "status": "A",
-      "purpose": "Records approved provisional disconnect clearing, input suppression, resume barrier, and terminal-failure behavior."
-    },
-    {
-      "path": "docs/vnext/gdr/GDR-0017-phase9-vr-fixture-input-and-presentation.md",
-      "status": "A",
-      "purpose": "Proposes provisional VR root-yaw semantic input and canonical presentation parity for owner review."
-    },
-    {
-      "path": "docs/vnext/gdr/GDR-0018-phase11-production-cell-interest-resync.md",
-      "status": "A",
-      "purpose": "Records owner approval of exact cell catalog, exact-cell interest, and explicit baseline/resync gameplay behavior."
-    },
-    {
-      "path": "docs/vnext/gdr/GDR-0019-phase12-production-movement-package.md",
-      "status": "A",
-      "purpose": "Records owner approval of manifest locomotion profiles, server collision, bounded correction/playback, locomotion animation, and pose authority limits."
-    },
-    {
-      "path": "docs/vnext/gdr/GDR-0020-phase13-actor-lifecycle-and-ai.md",
-      "status": "A",
-      "purpose": "Records owner approval of manifest-created actors, bounded idle/travel/wander, inactive-cell freeze, and no client simulation."
-    },
-    {
-      "path": "docs/vnext/gdr/GDR-0021-phase14-interactive-objects-locks-traps-doors.md",
-      "status": "A",
-      "purpose": "Gameplay decision record for interactive objects, doors, locks, and traps authority model."
-    },
-    {
-      "path": "docs/vnext/gdr/GDR-0022-phase15-inventory-equipment-containers.md",
-      "status": "A",
-      "purpose": "Gameplay decision record for bounded inventory, equipment, container, and ground-item transaction behavior."
     },
     {
       "path": "docs/vnext/proofs/cares/CMakeLists.txt",
@@ -2365,6 +1945,11 @@
       "purpose": "Failure-case tests for tracked-path, CMake-metadata, compilation-database, and generated-build-graph legacy exclusion."
     },
     {
+      "path": "scripts/tests/test_vnext_documentation.py",
+      "status": "A",
+      "purpose": "Enforces the active vNext document allowlist, combined word budget, and local-link integrity."
+    },
+    {
       "path": "scripts/tests/test_vnext_transport_lifecycle_workflow.py",
       "status": "A",
       "purpose": "Policy test requiring the manually dispatched supported-platform transport matrix to run every Phase 6 lifecycle, queue, authentication, scheduling, encrypted-loopback, and deterministic fault contract."
@@ -2470,7 +2055,7 @@
         },
         {
           "path": "docs/vnext/proofs/cares/README.md",
-          "sha256": "622dbf7af61d3c8081dc6fc77af3400ff725a87f352ce9fd80e1ed293f163035"
+          "sha256": "c5c64ab77fb0d48b15bc610a558f8ee82f9e70cb8deda74706f3fe1153afcea9"
         },
         {
           "path": "docs/vnext/proofs/cares/proof.cpp",
@@ -2701,7 +2286,7 @@
         },
         {
           "path": "docs/vnext/proofs/flatbuffers/ANDROID_ARM64.md",
-          "sha256": "435ba5ac5fef3bcaa49cff582fe414e2262d831902bee87963ab827f2101cac0"
+          "sha256": "194d59ef9ba9d63eb4af5e1f032de3437e6b24a6946014e53bd4f1ff5286ad03"
         },
         {
           "path": "docs/vnext/proofs/flatbuffers/CMakeLists.txt",
@@ -2709,7 +2294,7 @@
         },
         {
           "path": "docs/vnext/proofs/flatbuffers/README.md",
-          "sha256": "00a82424bcca78f4b9092f6ef4faa207f79f841f0f5fa7fdfc8e27cdca247590"
+          "sha256": "4a061ce09ce8ef714e0f716e78031adc7471f69b3216dcb939ce4ca4a90c4354"
         },
         {
           "path": "docs/vnext/proofs/flatbuffers/fuzz.cpp",
@@ -2784,7 +2369,7 @@
         },
         {
           "path": "docs/vnext/proofs/gamenetworkingsockets/ANDROID_ARM64.md",
-          "sha256": "34fefaaf02ba823791d894874e74784d7c34a503a812a6eeca8971b30a61d9a5"
+          "sha256": "e9cd56237b7c056ea41478455bd7ad347d180716502214d52b95a12e063c1112"
         },
         {
           "path": "docs/vnext/proofs/gamenetworkingsockets/CMakeLists.txt",
@@ -2792,7 +2377,7 @@
         },
         {
           "path": "docs/vnext/proofs/gamenetworkingsockets/README.md",
-          "sha256": "01390e234bc450060dd55519630982b4b5840224166ced543e6cbe732bca5e9e"
+          "sha256": "2cf440325d9eb8c7727608b3127b9974e8654122f8a4028fcd0d8c8d68ae860a"
         },
         {
           "path": "docs/vnext/proofs/gamenetworkingsockets/proof.cpp",

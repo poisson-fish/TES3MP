@@ -144,11 +144,6 @@ class InventoryContractTests(unittest.TestCase):
             self.assertIn("#undef assert", source)
             self.assertIn("#define assert(condition) require", source)
 
-    def test_inventory_discovery_contains_no_embedded_control_characters(self):
-        discovery = (ROOT / "docs/vnext/PHASE15_INVENTORY_DISCOVERY.md").read_text(encoding="utf-8")
-        invalid = [character for character in discovery if ord(character) < 32 and character != "\n"]
-        self.assertEqual([], invalid)
-
     def test_openmw_client_inventory_path_is_authoritative_and_complete(self):
         session = (ROOT / "components/tes3mp/include/tes3mp/client_session.hpp").read_text(encoding="utf-8")
         session_source = (ROOT / "components/tes3mp/client_session/client_session.cpp").read_text(encoding="utf-8")

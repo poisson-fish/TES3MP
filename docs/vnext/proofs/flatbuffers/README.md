@@ -1,8 +1,8 @@
-# ADR-0004 FlatBuffers selection proof
+# FlatBuffers selection proof
 
 This directory is disposable selection evidence for the restricted FlatBuffers
-profile approved in ADR-0004. It is not the Phase 4 production codec, protocol
-schema, or a reusable runtime wrapper.
+profile summarized in [DECISIONS.md](../../DECISIONS.md). It is not the
+production codec, protocol schema, or a reusable runtime wrapper.
 
 The proof:
 

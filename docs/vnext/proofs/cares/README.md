@@ -1,9 +1,9 @@
 # c-ares selection proof
 
-This directory contains disposable dependency-selection evidence authorized by
-[ADR-0032](../../adr/ADR-0032-phase6-transport-adapter-and-lifecycle-boundary.md).
-It is not the Phase 6 resolver or transport adapter, and none of its fixture
-types are a production interface.
+This directory contains disposable dependency-selection evidence for the owned
+transport boundary summarized in [DECISIONS.md](../../DECISIONS.md). It is not
+the production resolver or transport adapter, and none of its fixture types are
+a production interface.
 
 The exact lock is
 [`scripts/vnext_cares_proof.json`](../../../../scripts/vnext_cares_proof.json).

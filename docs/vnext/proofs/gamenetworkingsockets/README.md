@@ -1,9 +1,9 @@
 # GameNetworkingSockets selection proof
 
 This directory contains disposable evidence for the restricted transport profile
-accepted by [ADR-0005](../../adr/ADR-0005-transport-security-authentication-resumption.md).
-It is not the production Phase 6 transport wrapper, and none of its proof-only
-types or budgets are a production interface.
+summarized in [DECISIONS.md](../../DECISIONS.md). It is not the production
+transport wrapper, and none of its proof-only types or budgets are a production
+interface.
 
 The exact dependency lock is
 [`scripts/vnext_gamenetworkingsockets_proof.json`](../../../../scripts/vnext_gamenetworkingsockets_proof.json).
@@ -64,13 +64,13 @@ work, and the documented close behavior that discards unread data and
 invalidates the connection handle.
 
 The capture proves resistance to passive observation for the exercised
-canaries. It makes no endpoint-authentication claim; ADR-0005 explicitly accepts
-active server impersonation for the first milestone.
+canaries. It makes no endpoint-authentication claim; the current first-release
+profile explicitly accepts active server impersonation risk.
 
 All approved scenarios pass on Windows MSVC 2022, Linux GCC 13, Linux Clang 18
 with ASan/UBSan, macOS arm64, and macOS x86-64. The complete hosted matrix and
 five retained artifacts passed consistency review at commit
 `d5d7a1d1f49715bd41f2eb090393785e67924598`, and the owner accepted the
-completion evidence on 2026-08-26. Slice 2.3 is **Implemented**. Android ARM64
-is a separate feasibility result, recorded in
+completion evidence on 2026-08-26. Android ARM64 is a separate feasibility
+result, recorded in
 [ANDROID_ARM64.md](ANDROID_ARM64.md).

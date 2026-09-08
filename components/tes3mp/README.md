@@ -51,9 +51,9 @@ expose project-owned values only.
 ## Boundary enforcement
 
 `cmake/TES3MPVerifyTargetBoundaries.cmake` checks every direct link against the
-ADR-0014 allowlist and rejects forbidden include families in independent
-sources. `scripts/tests/test_tes3mp_target_boundaries.py` proves that both checks
-fail closed with temporary miniature CMake projects.
+target allowlist and rejects forbidden include families in independent sources.
+`scripts/tests/test_tes3mp_target_boundaries.py` proves that both checks fail
+closed with temporary miniature CMake projects.
 
 The standalone presets in this directory build the independent libraries and
 their contract executables without OpenMW. Runtime-safety entry points are:
@@ -64,8 +64,6 @@ python scripts/run_tes3mp_runtime_safety.py --profile tsan
 ```
 
 For the complete local workflow, use
-[`docs/vnext/LOCAL_BASELINE_BUILD.md`](../../docs/vnext/LOCAL_BASELINE_BUILD.md).
-For current phase and slice status, use the
-[`implementation plan`](../../docs/vnext/IMPLEMENTATION_PLAN.md). Historical
-slice-by-slice details belong in the
-[`implementation notes`](../../docs/vnext/IMPLEMENTATION_NOTES.md), not here.
+[`docs/vnext/DEVELOPMENT.md`](../../docs/vnext/DEVELOPMENT.md). The implemented
+surface and unfinished work are tracked only in
+[`docs/vnext/CURRENT.md`](../../docs/vnext/CURRENT.md).
