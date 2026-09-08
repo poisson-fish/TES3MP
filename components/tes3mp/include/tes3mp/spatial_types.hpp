@@ -58,10 +58,7 @@ namespace TES3MP
             Exterior = 1,
         };
 
-        static constexpr CellId interior(CellSpaceId cellSpace) noexcept
-        {
-            return CellId(InteriorCell(cellSpace));
-        }
+        static constexpr CellId interior(CellSpaceId cellSpace) noexcept { return CellId(InteriorCell(cellSpace)); }
 
         static constexpr CellId exterior(CellSpaceId worldspace, std::int32_t gridX, std::int32_t gridY) noexcept
         {
@@ -115,6 +112,41 @@ namespace TES3MP
         std::int64_t mY;
         std::int64_t mZ;
     };
+
+    constexpr std::uint64_t orderedCoordinate(std::int64_t value) noexcept
+    {
+        constexpr std::uint64_t SignBit = std::uint64_t{ 1 } << 63u;
+        return static_cast<std::uint64_t>(value) ^ SignBit;
+    }
+
+    constexpr std::uint64_t coordinateDistance(std::int64_t left, std::int64_t right) noexcept
+    {
+        const auto orderedLeft = orderedCoordinate(left);
+        const auto orderedRight = orderedCoordinate(right);
+        return orderedLeft >= orderedRight ? orderedLeft - orderedRight : orderedRight - orderedLeft;
+    }
+
+    constexpr bool positionsWithinReach(Position3 left, Position3 right, std::uint32_t maxReach) noexcept
+    {
+        const std::uint64_t limit = maxReach;
+        const auto dx = coordinateDistance(left.x(), right.x());
+        const auto dy = coordinateDistance(left.y(), right.y());
+        const auto dz = coordinateDistance(left.z(), right.z());
+        if (dx > limit || dy > limit || dz > limit)
+            return false;
+
+        std::uint64_t remainingSquared = limit * limit;
+        const auto dxSquared = dx * dx;
+        if (dxSquared > remainingSquared)
+            return false;
+        remainingSquared -= dxSquared;
+
+        const auto dySquared = dy * dy;
+        if (dySquared > remainingSquared)
+            return false;
+        remainingSquared -= dySquared;
+        return dz * dz <= remainingSquared;
+    }
 
     class Turn32
     {

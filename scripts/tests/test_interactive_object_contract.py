@@ -27,6 +27,7 @@ class InteractiveObjectContractTests(unittest.TestCase):
 
     def test_interactive_object_world_enforces_authoritative_state_model(self):
         catalog_src = (ROOT / "components/tes3mp/protocol/interactive_object_catalog.cpp").read_text(encoding="utf-8")
+        spatial_hdr = (ROOT / "components/tes3mp/include/tes3mp/spatial_types.hpp").read_text(encoding="utf-8")
         world_hdr = (ROOT / "components/tes3mp/include/tes3mp/interactive_object_world.hpp").read_text(encoding="utf-8")
         world_src = (ROOT / "components/tes3mp/server_core/interactive_object_world.cpp").read_text(encoding="utf-8")
 
@@ -45,7 +46,9 @@ class InteractiveObjectContractTests(unittest.TestCase):
         self.assertIn("verifiedPlayerKeys", world_src)
         self.assertIn("TickRegression", world_src)
         self.assertIn("RevisionExhausted", world_src)
-        self.assertIn("coordinateDistance", world_src)
+        self.assertIn("positionsWithinReach", world_src)
+        self.assertIn("coordinateDistance", spatial_hdr)
+        self.assertIn("positionsWithinReach", spatial_hdr)
         self.assertNotIn("dx * dx + dy * dy + dz * dz", world_src)
         self.assertIn("entry.transform.cell() != entry.cell", catalog_src)
         self.assertIn("entry.destination->transform.cell() != entry.destination->cell", catalog_src)

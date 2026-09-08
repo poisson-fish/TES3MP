@@ -18,8 +18,10 @@ Updated: 2026-09-08
 - Phase 14 interactive-object replication and server composition: **Complete**
 - Phase 14 client reception and OpenMW presentation: **Complete**
 - Phase 14 client activation and round-trip verification: **Complete**
-- Active work: **None — Phase 14 client activation and round-trip verification pass is ready for commit**
-- Last pass: **Client door activation raycast interception, client-server round-trip verification, and production capability advertisement**
+- Phase 15 discovery: **Complete**
+- Phase 15 canonical core: **Complete**
+- Active work: **None — Phase 15 canonical core complete**
+- Last pass: **Phase 15 canonical core: manifest-bound item prototype catalog, canonical player, container, and ground-item storage, key verification bridge, and atomic transfer reducer**
 - Authoritative tracker: [rolling implementation plan](IMPLEMENTATION_PLAN.md)
 - Historical evidence: [implementation notes](IMPLEMENTATION_NOTES.md)
 
@@ -345,6 +347,26 @@ ADRs and GDRs are required only for consequential, hard-to-reverse decisions.
 - Enabled `interactiveObjectReplicationCapability()` across production client hello arrays in `adapter.cpp` and `client_connection.cpp`.
 - Verified the client round-trip boundary in `openmw_tes3mp_adapter_tests`: activation proposal -> `ClientInteractObjectCommand` wire transmission and FlatBuffers decoding -> simulated server baseline response with object revision advance -> presentation observation. Verified unnegotiated rejection and input cleanup on reconnect.
 
+## Phase 15 discovery result
+
+- Traced OpenMW player inventory, container store, equipment slots, container
+  activation, item stacking, and looting mechanics (`MWWorld::InventoryStore`,
+  `MWWorld::ContainerStore`, `MWClass::Container`, `MWGui::ContainerItemModel`).
+- Archived TES3MP 0.8.1 relied on uncoupled client-authored packets
+  (`PacketPlayerInventory`, `PacketContainer`, `PacketPlayerEquipment`) forwarded
+  directly to Lua scripts, lacking transactional atomicity and causing item
+  duplication and race conditions.
+- Traced authoritative key ownership for Phase 14 object unlocking: player canonical
+  inventory keys will populate `ObjectInteractionValidationContext::verifiedPlayerKeys`,
+  resolving `UnlockWithKey` commands authoritatively.
+- Defined five clean lanes: server-owned canonical inventory/container world, reliable
+  client transaction commands, server-evaluated atomic transfer reducer, interest
+  projection (private backpacks vs. public equipment), and client presentation.
+- Three owner options and thirteen named proof scenarios are recorded in
+  [the inventory discovery](PHASE15_INVENTORY_DISCOVERY.md). No runtime, protocol,
+  gameplay, authority, or rendering behavior changed.
+- Scripting, durable disk persistence, and client authority remain strictly excluded.
+
 ## Phase 10 result
 
 - Fresh password joins issue a random 32-byte player credential after ordinary
@@ -407,27 +429,20 @@ work.
 
 ## Last verified
 
-- Full OpenMW MSVC RelWithDebInfo build completed cleanly (`openmw` and
-  `openmw_tes3mp_adapter_tests` targets in `build/slice82-openmw-full`).
-- `openmw_tes3mp_adapter_tests.exe` passes cleanly (returncode 0).
-- Full standalone TES3MP MSVC RelWithDebInfo build completed cleanly in
-  `build/slice51-msvc`.
-- `tes3mp_interactive_object_replication_tests` and `tes3mp_interactive_object_world_tests`
-  executables pass cleanly (returncode 0).
-- `tes3mp_server_app_tests` passes cleanly (returncode 0), including Scenarios 11 & 12.
-- `tes3mp_interactive_object_catalog_tests` passes cleanly (returncode 0).
+- Standalone TES3MP MSVC C++20 build completed cleanly in `build/slice51-msvc`.
+- `tes3mp_item_catalog_tests.exe` and `tes3mp_inventory_world_tests.exe` pass cleanly (returncode 0).
+- `tes3mp_protocol_tests_run` custom target builds and runs all component tests cleanly, including all protocol, deterministic facility, fault, server lifecycle, interactive object, and inventory tests.
+- Python unit contract `test_inventory_contract.py` passes cleanly (9 tests).
+- All 172 repository Python tests pass (`python -m unittest discover -s scripts/tests`).
 - `verify_openmw_patch_registry.py` passes cleanly with `P14-001` covering `player.cpp` and `player.hpp`.
-- All 163 repository Python tests pass (`python -m unittest discover -s scripts/tests`),
-  including updated `test_interactive_object_contract.py` and `test_openmw_patch_registry.py`.
-- `verify_vnext_legacy_exclusion.py` passes (4,118 tracked paths, 62 CMake files,
-  1,254 compile commands, and 1,971 Ninja build edges checked).
+- `verify_vnext_legacy_exclusion.py` passes (4,118 tracked paths, 62 CMake files, 1,254 compile commands, and 1,971 Ninja build edges checked).
 - `verify_vnext_baseline.py` passes with 81 verified input dependency declarations.
 - Target boundary verification and forbidden include checks enforced in CMake.
 
 ## Next pass
 
-Phase 15 discovery and foundational scope: inventory, containers, and equipment baseline replication, including authoritative key ownership for object unlock commands.
+Phase 15 replication and server composition: reliable player inventory and container baselines, public equipment and cell ground-item views, wire schemas, and server command intake.
 
 ## Working-tree expectation
 
-`vnext` contains the completed and verified Phase 14 client activation raycast interception, client-server round-trip verification, and production capability advertisement pass ready for commit. The separate `vnext-vr` worktree remains clean at Phase 13 integration merge `2762445c8b`.
+`vnext` contains the completed and verified Phase 15 inventory canonical core pass ready for commit, including canonical spatial authority, exact-stack transactions, and encapsulated mutation. The separate `vnext-vr` worktree remains clean at Phase 13 integration merge `2762445c8b`.

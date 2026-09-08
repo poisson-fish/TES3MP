@@ -6666,6 +6666,39 @@ only the relevant phase section here.
 - Persistence later stores canonical ownership/revisions, not client UI layout or
   transport acknowledgement state unless needed for bounded idempotency recovery.
 
+### 2026-09-08 — Phase 15 inventory, equipment, and container discovery — Complete
+
+- Repository trace:
+  - Traced OpenMW inventory and container structures (MWWorld::InventoryStore, MWWorld::ContainerStore, MWClass::Container, MWGui::ContainerItemModel).
+  - Analyzed stacking rules: items merge only when prototype RefId, health/condition, enchantment charge, and trapped soul gem properties match exactly.
+  - Traced equipment model: 19 distinct slots in InventoryStore driving stat calculations, active magic effects, and 3D visual attachments (MWRender::NpcAnimation).
+  - Traced container activation: Container::activate checks lock/trap data and key presence, delegating to ActionOpen and GUI mode GM_Container.
+  - Audited legacy TES3MP 0.8.x vulnerabilities: decoupled client-authored packets (PacketPlayerInventory, PacketContainer, PacketPlayerEquipment) passed to Lua scripting without transaction atomicity, resulting in pervasive item duplication and race conditions.
+  - Linked Phase 14 door key unlocking: Phase 15 provides the canonical inventory key query to populate ObjectInteractionValidationContext::verifiedPlayerKeys, authoritatively resolving current UnlockWithKey commands and preparing the future container interaction path.
+- Boundaries and Lanes:
+  - Defined five distinct lanes: server-owned canonical inventory/container world, reliable client transaction commands (ClientTransferItemCommand, ClientEquipItemCommand, ClientDropItemCommand, ClientPickupItemCommand), server-evaluated atomic transfer reducer, interest projection (private backpack baselines vs. public equipment views), and client-local presentation.
+  - Formulated owner package choices: Package A (server-authoritative transactional inventory with single-command atomic commit, recommended), Package B (client-optimistic inventory with delayed server reconciliation), and Package C (legacy-style decoupled packet streaming).
+  - Defined 13 named proof scenarios in docs/vnext/PHASE15_INVENTORY_DISCOVERY.md.
+
+### 2026-09-08 — Phase 15 canonical core — Complete
+
+- Implemented approved Package A:
+  - Strong value types added to `value_types.hpp`: `ItemPrototypeId`, `ItemStackId`, `InventoryRevision`, `ContainerRevision`, `WorldItemRevision`, and `ContainerId`.
+  - Item prototype catalog (`ItemPrototypeCatalog`) defined in `tes3mp_protocol`, declaring item categories, 19 canonical equipment slots, prototype weights, max condition, slot bitmasks, stackability, and optional key IDs bound to `ContentManifest`.
+  - Canonical inventory world (`CanonicalInventoryWorld`) implemented in `tes3mp_server_core`, storing bounded `CanonicalPlayerInventoryState`, `CanonicalContainerInventoryState`, and cell-scoped `CanonicalWorldItemState` with discrete equipment slot maps and globally unique stack IDs.
+  - Key verification bridge (`collectVerifiedKeys`): authoritatively inspects player inventory against `ItemPrototypeCatalog` and returns a verified key list directly consumed by Phase 14 `ObjectInteractionValidationContext::verifiedPlayerKeys` to unlock locked doors without client trust and support the future container interaction path.
+  - Atomic transfer reducer (`applyInventoryTransaction`): handles `TakeFromContainer`, `PutIntoContainer`, `EquipItem`, `UnequipItem`, `DropItem`, and `PickupItem` with player location derived from canonical server state, exact source stack selection, mandatory source revision fencing, overflow-safe preflight before mutation, 384-unit reach and exact-cell validation, equipment quantity checks, container weight capacities, exact stack merging, stable whole-stack identity, and canonical ground-item conservation.
+  - Review hardening: canonical world lookup APIs expose only const state; reducer-only mutable lookups prevent callers from bypassing validation. Trapped souls use `ActorPrototypeId`, avoiding accidental coupling to the item catalog namespace.
+  - Canonical factories reject zero-count or invalid stacks, duplicate IDs, dangling or overcommitted equipment bindings, invalid cells/prototypes, over-capacity containers, and allocator cursors that could collide; the world owns the exact validated catalog snapshot, and stack ID exhaustion or tick regression fails closed.
+- Verification:
+  - C++ unit tests `tes3mp_item_catalog_tests.exe` and `tes3mp_inventory_world_tests.exe` build and pass cleanly (exit code 0).
+  - `tes3mp_protocol_tests_run` runner builds and runs all component tests cleanly.
+  - Python contract test `scripts/tests/test_inventory_contract.py` passes cleanly (9 tests).
+  - Full Python discovery test suite passes completely (`python -m unittest discover -s scripts/tests`, 172 tests in 59s).
+  - `verify_openmw_patch_registry.py` passes cleanly.
+  - `verify_vnext_legacy_exclusion.py` passes (4,118 tracked paths, 62 CMake files, 1,254 compile commands, 1,971 Ninja build edges checked).
+  - `verify_vnext_baseline.py` passes with 81 verified input dependency declarations.
+
 ## Phase 16 — Combat, stats, magic, death, and resurrection
 
 [Back to the phase tracker](IMPLEMENTATION_PLAN.md#phase-16--combat-stats-magic-death-and-resurrection)

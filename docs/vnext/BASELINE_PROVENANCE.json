@@ -165,6 +165,16 @@
       "purpose": "Includes replicas in the same configured water render passes as ordinary actors."
     },
     {
+      "path": "apps/openmw/mwworld/player.cpp",
+      "status": "M",
+      "purpose": "Provides the clean activation interceptor seam on MWWorld::Player to route interactive object activation raycasts to multiplayer input before stock single-player activation."
+    },
+    {
+      "path": "apps/openmw/mwworld/player.hpp",
+      "status": "M",
+      "purpose": "Declares the activation interceptor callback and setter/clearer methods on MWWorld::Player."
+    },
+    {
       "path": "apps/openmw/options.cpp",
       "status": "M",
       "purpose": "Declares the approved explicit desktop multiplayer enablement, endpoint, timeout, and password-file options."
@@ -580,6 +590,16 @@
       "purpose": "Declares server-authoritative canonical interactive object world, discrete states, and interaction reducer."
     },
     {
+      "path": "components/tes3mp/include/tes3mp/inventory_world.hpp",
+      "status": "A",
+      "purpose": "Declares bounded canonical player, container, equipment, and ground-item state plus the server-authoritative atomic transaction reducer."
+    },
+    {
+      "path": "components/tes3mp/include/tes3mp/item_catalog.hpp",
+      "status": "A",
+      "purpose": "Declares the bounded manifest-scoped item prototype catalog, item categories, equipment slots, and stack metadata."
+    },
+    {
       "path": "components/tes3mp/include/tes3mp/monotonic_clock.hpp",
       "status": "A",
       "purpose": "Project-owned monotonic nanosecond instant and minimal injected-clock boundary for deterministic host scheduling."
@@ -850,6 +870,11 @@
       "purpose": "Implements size-prefixed verified FlatBuffers encoding and decoding for interactive object replication."
     },
     {
+      "path": "components/tes3mp/protocol/item_catalog.cpp",
+      "status": "A",
+      "purpose": "Implements bounded item prototype catalog validation, canonical ordering, and lookup."
+    },
+    {
       "path": "components/tes3mp/protocol/protocol_exchange.cpp",
       "status": "A",
       "purpose": "Verifier-first bounded T3RO/T3LS encoding and decoding including versioned locomotion fields, closed-body dispatch, and allocation-after-bounds enforcement."
@@ -1008,6 +1033,11 @@
       "path": "components/tes3mp/server_core/interactive_object_world.cpp",
       "status": "A",
       "purpose": "Implements canonical interactive object world state, spatial reach validation, key verification, trap triggers, and reducer transitions."
+    },
+    {
+      "path": "components/tes3mp/server_core/inventory_world.cpp",
+      "status": "A",
+      "purpose": "Implements validated canonical inventories and atomic exact-stack transactions using canonical player location and revision fencing."
     },
     {
       "path": "components/tes3mp/server_core/movement_kernel.cpp",
@@ -1330,6 +1360,16 @@
       "purpose": "Focused unit contracts for canonical interactive object world state, door opening, locking, trapping, and reach checks."
     },
     {
+      "path": "components/tes3mp/tests/inventory_catalog_tests.cpp",
+      "status": "A",
+      "purpose": "Focused unit contracts for item prototype catalog validation, lookup, category, and equipment-slot bounds."
+    },
+    {
+      "path": "components/tes3mp/tests/inventory_world_tests.cpp",
+      "status": "A",
+      "purpose": "Focused unit contracts for canonical inventory validation, transaction atomicity, authority, concurrency, equipment, and item conservation."
+    },
+    {
       "path": "components/tes3mp/tests/movement_evidence_tests.cpp",
       "status": "A",
       "purpose": "Deterministic desktop/PC-VR walk-turn-stop capture under direct, jitter, loss, and stall schedules with bounded movement and pose observations."
@@ -1538,6 +1578,11 @@
       "path": "docs/vnext/PHASE14_OBJECT_DISCOVERY.md",
       "status": "A",
       "purpose": "Repository-backed interactive object discovery, discrete state model, reach validation, and owner package choices."
+    },
+    {
+      "path": "docs/vnext/PHASE15_INVENTORY_DISCOVERY.md",
+      "status": "A",
+      "purpose": "Repository-backed inventory, equipment, container, and ground-item discovery with authority lanes, risks, and owner package choices."
     },
     {
       "path": "docs/vnext/PRE_CUTOVER_PROVENANCE.md",
@@ -1845,6 +1890,11 @@
       "purpose": "Architectural decision record for server-authoritative interactive objects, discrete states, and bounded interaction."
     },
     {
+      "path": "docs/vnext/adr/ADR-0062-phase15-server-authoritative-inventory-transactions.md",
+      "status": "A",
+      "purpose": "Architectural decision record for canonical inventory ownership, exact-stack identity, and atomic server transactions."
+    },
+    {
       "path": "docs/vnext/gdr/GDR-0001-phase7-headless-vertical-slice-behavior.md",
       "status": "A",
       "purpose": "Owner-approved Phase 7 fixture spawn, readiness, cell visibility, provisional tick integration, headless correction, and bounded resume behavior."
@@ -1903,6 +1953,11 @@
       "path": "docs/vnext/gdr/GDR-0021-phase14-interactive-objects-locks-traps-doors.md",
       "status": "A",
       "purpose": "Gameplay decision record for interactive objects, doors, locks, and traps authority model."
+    },
+    {
+      "path": "docs/vnext/gdr/GDR-0022-phase15-inventory-equipment-containers.md",
+      "status": "A",
+      "purpose": "Gameplay decision record for bounded inventory, equipment, container, and ground-item transaction behavior."
     },
     {
       "path": "docs/vnext/proofs/cares/CMakeLists.txt",
@@ -2088,6 +2143,11 @@
       "path": "scripts/tests/test_interactive_object_contract.py",
       "status": "A",
       "purpose": "Unit test contract verifying interactive object components have no forbidden engine or OpenMW dependencies."
+    },
+    {
+      "path": "scripts/tests/test_inventory_contract.py",
+      "status": "A",
+      "purpose": "Unit contract for inventory target boundaries, canonical authority, mutation encapsulation, and release-active C++ assertions."
     },
     {
       "path": "scripts/tests/test_openmw_patch_registry.py",
@@ -2326,7 +2386,7 @@
         },
         {
           "path": "components/tes3mp/CMakeLists.txt",
-          "sha256": "36b5c3f39009bc513d53d20388311cc60da573f66b8db67314b36042ebd18311"
+          "sha256": "2f1381d4a9839ca5dee2b7e8bb9813bfb0025a626183d94a859874755db0cccf"
         },
         {
           "path": "components/tes3mp/protocol/generated/authentication_accepted_generated.h",

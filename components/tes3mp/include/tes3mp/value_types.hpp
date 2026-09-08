@@ -119,6 +119,36 @@ namespace TES3MP::Detail
     {
         static constexpr std::string_view name = "ObjectRevision";
     };
+
+    struct ItemPrototypeIdTag
+    {
+        static constexpr std::string_view name = "ItemPrototypeId";
+    };
+
+    struct ItemStackIdTag
+    {
+        static constexpr std::string_view name = "ItemStackId";
+    };
+
+    struct InventoryRevisionTag
+    {
+        static constexpr std::string_view name = "InventoryRevision";
+    };
+
+    struct ContainerRevisionTag
+    {
+        static constexpr std::string_view name = "ContainerRevision";
+    };
+
+    struct WorldItemRevisionTag
+    {
+        static constexpr std::string_view name = "WorldItemRevision";
+    };
+
+    struct ContainerIdTag
+    {
+        static constexpr std::string_view name = "ContainerId";
+    };
 }
 
 namespace TES3MP
@@ -146,13 +176,21 @@ namespace TES3MP
     using CellSpaceId = Detail::StrongValue<Detail::CellSpaceIdTag, Detail::StrongValuePolicy::Identity>;
     using AppearanceId = Detail::StrongValue<Detail::AppearanceIdTag, Detail::StrongValuePolicy::Identity>;
     using ActorId = Detail::StrongValue<Detail::ActorIdTag, Detail::StrongValuePolicy::Identity>;
-    using ActorPrototypeId
-        = Detail::StrongValue<Detail::ActorPrototypeIdTag, Detail::StrongValuePolicy::Identity>;
+    using ActorPrototypeId = Detail::StrongValue<Detail::ActorPrototypeIdTag, Detail::StrongValuePolicy::Identity>;
     using InteractiveObjectId
         = Detail::StrongValue<Detail::InteractiveObjectIdTag, Detail::StrongValuePolicy::Identity>;
     using KeyPrototypeId = Detail::StrongValue<Detail::KeyPrototypeIdTag, Detail::StrongValuePolicy::Identity>;
     using TrapPrototypeId = Detail::StrongValue<Detail::TrapPrototypeIdTag, Detail::StrongValuePolicy::Identity>;
     using ObjectRevision = Detail::StrongValue<Detail::ObjectRevisionTag, Detail::StrongValuePolicy::CounterFromOne>;
+    using ItemPrototypeId = Detail::StrongValue<Detail::ItemPrototypeIdTag, Detail::StrongValuePolicy::Identity>;
+    using ItemStackId = Detail::StrongValue<Detail::ItemStackIdTag, Detail::StrongValuePolicy::CounterFromOne>;
+    using InventoryRevision
+        = Detail::StrongValue<Detail::InventoryRevisionTag, Detail::StrongValuePolicy::CounterFromOne>;
+    using ContainerRevision
+        = Detail::StrongValue<Detail::ContainerRevisionTag, Detail::StrongValuePolicy::CounterFromOne>;
+    using WorldItemRevision
+        = Detail::StrongValue<Detail::WorldItemRevisionTag, Detail::StrongValuePolicy::CounterFromOne>;
+    using ContainerId = Detail::StrongValue<Detail::ContainerIdTag, Detail::StrongValuePolicy::Identity>;
 }
 
 #endif

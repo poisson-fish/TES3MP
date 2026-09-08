@@ -6,41 +6,6 @@ namespace TES3MP
 {
     namespace
     {
-        std::uint64_t orderedCoordinate(std::int64_t value) noexcept
-        {
-            constexpr std::uint64_t SignBit = std::uint64_t{ 1 } << 63u;
-            return static_cast<std::uint64_t>(value) ^ SignBit;
-        }
-
-        std::uint64_t coordinateDistance(std::int64_t left, std::int64_t right) noexcept
-        {
-            const auto orderedLeft = orderedCoordinate(left);
-            const auto orderedRight = orderedCoordinate(right);
-            return orderedLeft >= orderedRight ? orderedLeft - orderedRight : orderedRight - orderedLeft;
-        }
-
-        bool withinReach(Position3 left, Position3 right, std::uint32_t maxReach) noexcept
-        {
-            const std::uint64_t limit = maxReach;
-            const auto dx = coordinateDistance(left.x(), right.x());
-            const auto dy = coordinateDistance(left.y(), right.y());
-            const auto dz = coordinateDistance(left.z(), right.z());
-            if (dx > limit || dy > limit || dz > limit)
-                return false;
-
-            std::uint64_t remainingSquared = limit * limit;
-            const auto dxSquared = dx * dx;
-            if (dxSquared > remainingSquared)
-                return false;
-            remainingSquared -= dxSquared;
-
-            const auto dySquared = dy * dy;
-            if (dySquared > remainingSquared)
-                return false;
-            remainingSquared -= dySquared;
-            return dz * dz <= remainingSquared;
-        }
-
         bool stateMatchesCatalog(
             const CanonicalInteractiveObjectState& state, const InteractiveObjectCatalogEntry& entry) noexcept
         {
@@ -151,9 +116,9 @@ namespace TES3MP
 
         const auto playerPosition = playerState->transform().position();
         const auto objectPosition = catalogEntry->transform.position();
-        if (!withinReach(playerPosition, objectPosition, validation.maxReach)
-            || !withinReach(playerPosition, command.interactionOrigin, validation.maxReach)
-            || !withinReach(command.interactionOrigin, objectPosition, validation.maxReach))
+        if (!positionsWithinReach(playerPosition, objectPosition, validation.maxReach)
+            || !positionsWithinReach(playerPosition, command.interactionOrigin, validation.maxReach)
+            || !positionsWithinReach(command.interactionOrigin, objectPosition, validation.maxReach))
         {
             outcome.code = ObjectInteractionResultCode::PlayerOutOfReach;
             return { outcome, false };

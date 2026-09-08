@@ -36,36 +36,27 @@ Verification scales with risk:
 
 ## Now
 
-### Phase 14 — interactive-object OpenMW client integration
+### Phase 15 — inventory canonical core
 
-Status: **Complete — ready for commit**
+Status: **Complete**
 
-Client session reception and OpenMW-local presentation of interactive objects are implemented and verified:
-- Ingestion and decoding of `MessageKind::ReliableInteractiveObjectInterestBaseline` across `ClientSession`, `HeadlessClientSession`, and `ClientSessionRuntime`.
-- Reception, presentation, and interaction dispatch remain capability-gated, and production clients advertise `interactiveObjectReplicationCapability()`.
-- Desktop content mapping extended with `--tes3mp-content-interactive-object-map` CLI parsing (`<id>=<refNumIndex>[:<contentFile>]`) and fallback mapping (`refNumIndex == objectId.value()`).
-- `PresentationProvider::applyInteractiveObjects` implemented in `DesktopPresentation`: resolves doors in current and active cells via `MWWorld::Scene`, synchronizes lock/trap state on cell refs, snaps door rotation on cell entry (`world->rotateObject` + `activateDoor(Idle)`), smoothly interpolates door swings (`world->activateDoor(Opening/Closing)`), and triggers 3D sound effects (`MWBase::SoundManager`).
-- OpenMW `Coordinator` enforces baseline revision monotonicity, gates resync completion on interactive-object baseline arrival when negotiated, and clears door state tracking on cell transitions and session reset.
-- Client command generation seam added (`queueInteractObject`) in `ClientSessionRuntime`.
-- Strict authority and security boundaries preserved: mapped or authoritatively observed doors are intercepted before stock OpenMW activation can mutate presentation; no intermediate network door angles and zero legacy multiplayer networking packets.
-OpenMW activation raycast interception, client interaction dispatch, unnegotiated rejection, round-trip door activation verification, and production capability advertisement are implemented and verified:
-- Added non-intrusive `ActivationInterceptor` seam on `MWWorld::Player` to intercept door activation before stock single-player activation or Lua `objectActivated` callbacks run, cleanly intercepting local door rotation and teleportation.
-- Registered patch `P14-001` in `docs/vnext/OPENMW_PATCH_REGISTRY.json` for `apps/openmw/mwworld/player.cpp` and `player.hpp`.
-- Implemented `DesktopSemanticInput::handleActivation` and `queueObjectActivation` translating door activation raycasts into `ObjectInteractionCapture` with observed revision from `DesktopPresentation`.
-- Added session-lifecycle cleanup so disconnect and resume clear pending interactions and remove the OpenMW activation interceptor while the engine is alive.
-- Reject ambiguous reverse object mappings and leave unmapped, unobserved doors on the stock OpenMW activation path.
-- In `Coordinator::frame`, sampled object interaction and queued via `mRuntime->queueInteractObject(...)` when negotiated and no cell transition is pending.
-- Enabled `interactiveObjectReplicationCapability()` across production client hello arrays in `apps/openmw/tes3mp/adapter.cpp` and `apps/openmw/tes3mp/client_connection.cpp`.
-- Extended `openmw_tes3mp_adapter_tests` to verify command queueing, wire encoding/decoding, server baseline response application, door state progression, unnegotiated capability rejection, and input cleanup on reconnect.
+Manifest-bound item prototype catalog, canonical player inventory, container and ground-item storage, key verification bridge, and atomic transfer reducer implemented with full engine independence and proven against race conditions, desyncs, and duplicate transactions:
+- **Strong Value Types**: Added `ItemPrototypeId`, `ItemStackId`, `InventoryRevision`, `ContainerRevision`, `WorldItemRevision`, and `ContainerId` in `value_types.hpp`.
+- **Item Prototype Catalog**: Defined `ItemPrototypeDeclaration`, `ItemCategory`, `EquipmentSlot` (19 canonical slots), and `ItemPrototypeCatalog` bound immutably to `ContentManifest` in `tes3mp_protocol`.
+- **Canonical Inventory World**: Implemented `CanonicalItemStack`, `CanonicalPlayerInventoryState`, `CanonicalContainerInventoryState`, `CanonicalWorldItemState`, and `CanonicalInventoryWorld` with manifest/catalog validation, globally unique stack IDs, and bounded capacities in `tes3mp_server_core`.
+- **Key Verification Bridge**: Built `collectVerifiedKeys(PlayerId)` over the world's owned catalog snapshot, producing authoritative key lists directly consumable by Phase 14 `ObjectInteractionValidationContext::verifiedPlayerKeys` for door unlocking without client trust.
+- **Atomic Transaction Reducer**: Implemented `applyInventoryTransaction` executing atomic `TakeFromContainer`, `PutIntoContainer`, `EquipItem`, `UnequipItem`, `DropItem`, and `PickupItem` transactions with server-derived player location, strict reach (384 units), exact-cell matching, exact source stack identity, mandatory source revision fencing, equipment quantity checks, overflow-safe preflight, stable whole-stack identity, and canonical ground-item conservation.
+- **Verification**: Unit tests `tes3mp_item_catalog_tests` and `tes3mp_inventory_world_tests` remain active in release builds and cover adversarial rollback, authority, identity exhaustion, equipment, and extreme-coordinate cases; Python contract `test_inventory_contract.py` includes 9 checks; all 172 repository Python tests pass.
 
 ## Next
 
 These are candidates, not locked slices:
 
-1. Phase 15 discovery and foundational scope: inventory, containers, and equipment baseline replication, including authoritative key ownership for object unlock commands.
-2. Revisit Phase 12 PC-VR hardware capture before Phase 22 stabilization if
-   hardware remains unavailable during Phase 14 presentation work.
-3. Phase 16 — combat, stats, magic, death, and resurrection.
+1. Phase 15 replication and server composition: reliable player inventory and container baselines, public equipment and cell ground-item views, wire schemas, and server command intake.
+2. Phase 15 OpenMW client integration: inventory/container session ingestion, GUI reconciliation, and equipment presentation.
+3. Revisit Phase 12 PC-VR hardware capture before Phase 22 stabilization if
+   hardware remains unavailable during Phase 15 presentation work.
+4. Phase 16 — combat, stats, magic, death, and resurrection.
 
 The list is rewritten after each completed pass. New evidence may reorder,
 combine, or remove items.
@@ -114,6 +105,8 @@ but they no longer force a predetermined sequence of micro-slices.
 | Phase 14 replication/server composition | **Complete** | Capability-gated wire protocol, exact-cell baselines, shared canonical command ordering/idempotency, atomic player/object commit, teleport replacement, and trap outcome publication |
 | Phase 14 client reception/presentation | **Complete** | Client session baseline ingestion, desktop content mapping, OpenMW scene door rotation/sound sync, and resync/revision gating |
 | Phase 14 activation and round-trip | **Complete** | Activation raycast interception via `MWWorld::Player`, client `queueInteractObject` dispatch, unnegotiated and round-trip verification, and production capability advertisement |
+| Phase 15 discovery | **Complete** | Inventory/container/equipment trace, legacy vulnerability audit, lane separation, owner package choices, and named proofs |
+| Phase 15 canonical core | **Complete** | Manifest-bound catalog, validated player/container/ground-item state, globally unique stack identity, authoritative key query, and atomic inventory transactions |
 
 ### Phase 9 completion record
 
