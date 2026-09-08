@@ -4,8 +4,10 @@
 #include "actor_simulation.hpp"
 #include "canonical_state.hpp"
 #include "deterministic_random.hpp"
+#include "inventory_world.hpp"
 #include "melee_combat.hpp"
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <optional>
@@ -18,12 +20,70 @@ namespace TES3MP
     inline constexpr std::size_t MaximumPlayerCombatants = 256;
     inline constexpr std::size_t MaximumActorCombatants = MaximumActorCatalogEntries;
 
+    enum class MeleeWeaponSkill : std::uint8_t
+    {
+        ShortBlade = 0,
+        LongBlade = 1,
+        BluntWeapon = 2,
+        Axe = 3,
+        Spear = 4,
+        Count = 5,
+    };
+
+    struct MeleeWeaponProfile
+    {
+        ItemPrototypeId prototypeId;
+        MeleeWeaponSkill skill = MeleeWeaponSkill::ShortBlade;
+        float chopMinimum = 0.f;
+        float chopMaximum = 0.f;
+        float slashMinimum = 0.f;
+        float slashMaximum = 0.f;
+        float thrustMinimum = 0.f;
+        float thrustMaximum = 0.f;
+        float weight = 0.f;
+        float reach = 0.f;
+        bool normalWeapon = true;
+
+        friend constexpr bool operator==(MeleeWeaponProfile, MeleeWeaponProfile) noexcept = default;
+    };
+
+    class MeleeWeaponCatalog
+    {
+    public:
+        static std::optional<MeleeWeaponCatalog> create(
+            const ItemPrototypeCatalog& items, std::span<const MeleeWeaponProfile> profiles) noexcept;
+
+        ContentManifestId contentManifestId() const noexcept { return mContentManifestId; }
+        std::span<const MeleeWeaponProfile> profiles() const noexcept { return mProfiles; }
+        const MeleeWeaponProfile* find(ItemPrototypeId id) const noexcept;
+
+        friend bool operator==(const MeleeWeaponCatalog&, const MeleeWeaponCatalog&) noexcept = default;
+
+    private:
+        MeleeWeaponCatalog(ContentManifestId contentManifestId, std::vector<MeleeWeaponProfile> profiles) noexcept
+            : mContentManifestId(contentManifestId), mProfiles(std::move(profiles)) {}
+
+        ContentManifestId mContentManifestId;
+        std::vector<MeleeWeaponProfile> mProfiles;
+    };
+
+    struct CanonicalPlayerCombatTemplate
+    {
+        OpenMwMeleeAttacker stats;
+        std::array<float, static_cast<std::size_t>(MeleeWeaponSkill::Count)> weaponSkills{};
+        std::uint64_t maximumEncumbranceWeightUnits = 1;
+
+        friend constexpr bool operator==(const CanonicalPlayerCombatTemplate&,
+            const CanonicalPlayerCombatTemplate&) noexcept = default;
+    };
+
     struct CanonicalPlayerCombatState
     {
         PlayerId playerId;
         CombatRevision revision = CombatRevision::initial();
         OpenMwMeleeAttacker stats;
-        std::optional<OpenMwMeleeWeapon> equippedWeapon;
+        std::array<float, static_cast<std::size_t>(MeleeWeaponSkill::Count)> weaponSkills{};
+        std::uint64_t maximumEncumbranceWeightUnits = 1;
         std::optional<ServerTick> lastAttackTick;
 
         friend constexpr bool operator==(const CanonicalPlayerCombatState&,
@@ -65,6 +125,9 @@ namespace TES3MP
         const CanonicalPlayerCombatState* findPlayer(PlayerId id) const noexcept;
         const CanonicalActorCombatState* findActor(ActorId id) const noexcept;
         RandomStateV1 randomState() const noexcept { return mRandomState; }
+        bool ensurePlayer(PlayerId id, const CanonicalPlayerCombatTemplate& source,
+            std::uint64_t inventoryWeightUnits) noexcept;
+        bool advancePlayerInventoryBinding(PlayerId id, std::uint64_t inventoryWeightUnits) noexcept;
 
         friend bool operator==(const CanonicalCombatWorld&, const CanonicalCombatWorld&) noexcept = default;
 
@@ -98,6 +161,7 @@ namespace TES3MP
         ServerTick sourceTick;
         MeleeAttackType attackType;
         std::optional<OpenMwMeleeWeapon> weapon;
+        std::optional<float> weaponReach;
     };
 
     class ServerMeleeContactQuery
@@ -160,13 +224,15 @@ namespace TES3MP
     {
         AuthoritativeMeleeDisposition disposition = AuthoritativeMeleeDisposition::InvalidAttempt;
         std::optional<CanonicalCombatWorld> candidate;
+        std::optional<CanonicalInventoryWorld> candidateInventory;
         std::optional<AuthoritativeMeleeEvent> event;
     };
 
     PreparedMeleeAttack prepareAuthoritativeMeleeAttack(const CanonicalCombatWorld& combat,
-        const CanonicalServerState& players, const CanonicalActorWorld& actors, const OpenMwMeleeSettings& settings,
-        MeleeAuthorityPolicy policy, ServerMeleeContactQuery& contact, ServerTick serverTick,
-        const AuthoritativeMeleeAttack& attack) noexcept;
+        const CanonicalInventoryWorld& inventory, const ItemPrototypeCatalog& items,
+        const MeleeWeaponCatalog& weapons, const CanonicalServerState& players,
+        const CanonicalActorWorld& actors, const OpenMwMeleeSettings& settings, MeleeAuthorityPolicy policy,
+        ServerMeleeContactQuery& contact, ServerTick serverTick, const AuthoritativeMeleeAttack& attack) noexcept;
 }
 
 #endif

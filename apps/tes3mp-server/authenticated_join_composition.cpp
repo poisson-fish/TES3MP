@@ -51,12 +51,15 @@ namespace TES3MP::ServerApp
                 && std::ranges::binary_search(
                     joiningSession->negotiatedHello()->negotiatedCapabilities(), inventoryReplicationCapability());
             std::vector<std::pair<TransportConnectionId, InventoryInterestDelivery>> inventoryBaselines;
-            if (inventoryCapable)
+            if (mInventory)
             {
-                if (!mInventory)
-                    return false;
                 mPendingInventory = *mInventory;
                 if (!mPendingInventory->ensurePlayer(join.player))
+                    return false;
+            }
+            if (inventoryCapable)
+            {
+                if (!mPendingInventory)
                     return false;
                 auto inventoryBaseline
                     = projectInventoryInterestBaseline(after, *mPendingInventory, join.session, tick, revision);
@@ -67,10 +70,22 @@ namespace TES3MP::ServerApp
             const auto combatCapable = joiningSession && joiningSession->negotiatedHello()
                 && std::ranges::binary_search(joiningSession->negotiatedHello()->negotiatedCapabilities(),
                     combatReplicationCapability());
-            auto combatSnapshot = combatCapable && mCombat && mActors
-                ? projectCombatSnapshot(after, *mActors, *mCombat, join.session, tick, revision)
+            if (mCombat)
+            {
+                if (!mPendingInventory || !mPlayerCombatTemplate || !mItemCatalog)
+                    return false;
+                const auto* playerInventory = mPendingInventory->findPlayer(join.player);
+                if (!playerInventory)
+                    return false;
+                mPendingCombat = *mCombat;
+                if (!mPendingCombat->ensurePlayer(
+                        join.player, *mPlayerCombatTemplate, playerInventory->totalWeight(*mItemCatalog)))
+                    return false;
+            }
+            auto combatSnapshot = combatCapable && mPendingCombat && mActors
+                ? projectCombatSnapshot(after, *mActors, *mPendingCombat, join.session, tick, revision)
                 : std::optional<LatestWinsCombatSnapshot>{};
-            if (combatCapable && (!mCombat || !mActors || !combatSnapshot))
+            if (combatCapable && (!mPendingCombat || !mActors || !combatSnapshot))
                 return false;
             if (mInventory || mPendingInventory)
             {
@@ -179,12 +194,16 @@ namespace TES3MP::ServerApp
 
     bool TransportJoinResponseQueue::commitJoinState() noexcept
     {
-        if (!mPendingInventory)
-            return true;
-        if (!mInventory)
+        if (mPendingInventory && !mInventory)
             return false;
-        *mInventory = std::move(*mPendingInventory);
+        if (mPendingCombat && !mCombat)
+            return false;
+        if (mPendingInventory)
+            *mInventory = std::move(*mPendingInventory);
+        if (mPendingCombat)
+            *mCombat = std::move(*mPendingCombat);
         mPendingInventory.reset();
+        mPendingCombat.reset();
         return true;
     }
 

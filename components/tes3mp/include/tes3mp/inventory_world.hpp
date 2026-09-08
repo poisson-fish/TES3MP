@@ -133,6 +133,7 @@ namespace TES3MP
         StaleContainerRevision,
         StaleWorldItemRevision,
         SlotNotCompatible,
+        ItemBroken,
         EquipmentQuantityExceeded,
         ItemEquipped,
         PlayerInventoryFull,
@@ -144,6 +145,16 @@ namespace TES3MP
         RevisionExhausted,
         StackIdExhausted,
         InternalError,
+    };
+
+    enum class EquippedConditionResult : std::uint8_t
+    {
+        Applied,
+        PlayerNotFound,
+        ItemNotEquipped,
+        InvalidCondition,
+        TickRegression,
+        RevisionExhausted,
     };
 
     struct InventoryTransactionOutcome
@@ -185,6 +196,8 @@ namespace TES3MP
         bool ensurePlayer(PlayerId player) noexcept;
         bool ensureContainer(
             ContainerId container, CellId cell, Position3 position, std::uint32_t capacityWeight = 0) noexcept;
+        EquippedConditionResult setEquippedItemCondition(PlayerId player, EquipmentSlot slot,
+            ItemStackId stack, std::uint32_t condition, bool unequip, ServerTick tick) noexcept;
 
         friend bool operator==(const CanonicalInventoryWorld&, const CanonicalInventoryWorld&) noexcept = default;
 

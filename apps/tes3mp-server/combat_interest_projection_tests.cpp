@@ -33,7 +33,7 @@ namespace
         OpenMwMeleeAttacker attacker;
         attacker.fatigue = 75.f;
         const std::array combatPlayers{ CanonicalPlayerCombatState{ id<PlayerId>(1),
-            id<CombatRevision>(5), attacker, std::nullopt, std::nullopt } };
+            id<CombatRevision>(5), attacker, {}, 100, std::nullopt } };
         OpenMwMeleeVictim first;
         first.health = 40.f;
         OpenMwMeleeVictim second;

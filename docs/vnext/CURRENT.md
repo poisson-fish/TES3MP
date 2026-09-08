@@ -1,7 +1,7 @@
 # TES3MP vNext current implementation
 
 - Updated: 2026-09-08
-- Code snapshot inspected: `vnext` working tree based on `50ae4ef442`
+- Code snapshot inspected: `vnext` working tree based on `8a954860e0`
 - OpenMW baseline: `f4bec41444214a7903bebd178389ca22ca13f646`
 
 This is the only status and backlog document. “Implemented” means production
@@ -176,9 +176,21 @@ and [`desktop_providers.cpp`](../../apps/openmw/tes3mp/desktop_providers.cpp).
   damage, resources, targets, and wall-clock time are not accepted as outcomes.
 - A shared engine-independent resolver is also used by OpenMW's hit chance,
   weapon damage, hand-to-hand damage, and fatigue helpers. The server owns the
-  PRNG, attacker fatigue/equipment condition, actor health/fatigue/dead state,
+  PRNG, attacker fatigue, actor health/fatigue/dead state,
   cooldown, and separate combat revisions. Damage and death commit atomically
   with command finalization.
+- Optional bounded `TES3MP_COMBAT_V1` content supplies manifest-scoped resolver
+  settings, a validated default player combat profile, exhaustive actor combat
+  seeds, weapon records, and a deterministic random seed. Startup rejects a
+  missing, malformed, mismatched, or internally inconsistent configured file
+  before exposing any of its state.
+- Fresh joins atomically initialize inventory and canonical combat state from
+  that server profile and current carried weight; reattach/resume preserves the
+  existing combatant. The carried-right inventory stack selects server weapon
+  data and skill. Its canonical condition receives wear and breakage, including
+  automatic unequip, in the same prepared commit as fatigue, damage, death, and
+  command finalization. Relevant inventory/equipment changes advance the combat
+  revision and recompute normalized encumbrance.
 - Server validation rejects unknown or cross-cell targets, stale revisions,
   future/expired source ticks, missing contact history, failed authoritative
   contact/reach, and rate abuse before mutation. Existing session generation,
@@ -191,6 +203,7 @@ and [`desktop_providers.cpp`](../../apps/openmw/tes3mp/desktop_providers.cpp).
 
 Primary sources: [`melee_combat.cpp`](../../components/tes3mp/protocol/melee_combat.cpp),
 [`combat_world.cpp`](../../components/tes3mp/server_core/combat_world.cpp),
+[`combat_content.cpp`](../../apps/tes3mp-server/combat_content.cpp),
 [`combat_replication.cpp`](../../components/tes3mp/protocol/combat_replication.cpp),
 [`combat_interest_projection.cpp`](../../apps/tes3mp-server/combat_interest_projection.cpp),
 and [`character.cpp`](../../apps/openmw/mwmechanics/character.cpp).
@@ -211,12 +224,14 @@ and [`character.cpp`](../../apps/openmw/mwmechanics/character.cpp).
 - Interactive traps publish bounded outcomes but full spell-effect resolution
   does not exist. Lockpicking and probe disarming do not exist.
 - Inventory does not include barter/trade, merchant stock/restocking, disk
-  persistence, or binding its item condition to combat's equipped-weapon wear.
-- Combat capability wiring is executable through the server-application seam,
-  but the dedicated-server entry point deliberately does not advertise it yet.
-  Production still needs manifest-derived player/actor combat stats, equipment
-  binding, settings, and a concrete bounded historical contact/reach provider;
-  enabling the capability without those inputs would invent gameplay state.
+  persistence, or repair commands.
+- The dedicated server can load and compose the combat bootstrap but
+  deliberately does not advertise capability 5. The profile and manifest ID
+  are currently operator-authored rather than derived and hashed from the
+  actual OpenMW content loadout; one default profile initializes every new
+  player, character combat state is not persisted, and production contact/reach
+  validation remains fail-closed. Enabling combat under those conditions would
+  not prove client/server record equivalence or historical contact.
 - The current resolver covers direct player-versus-server-actor weapon and
   hand-to-hand hit, fatigue, resistance, critical/knockdown multipliers, weapon
   wear, damage, and death. Actor attacks, PvP/P2P, blocking decisions, difficulty
@@ -234,15 +249,15 @@ and [`character.cpp`](../../apps/openmw/mwmechanics/character.cpp).
 
 ## Work still required
 
-### Next milestone: production combat parity
+### Next milestone: production combat admission
 
-Feed manifest-derived OpenMW combat settings and actor/player stat/equipment
-state into the canonical combat world, implement bounded historical native
-contact/reach validation, and enable combat capability 5 in the dedicated
-server. Then extend the same authoritative outcome pipeline in single-player
-ordering through blocking, difficulty scaling, skill/AI consequences, on-strike
-magic and retaliation, actor attacks, death handling, resurrection, and respawn.
-PvP/P2P remains outside this slice.
+Derive and hash combat records, settings, and character state from the actual
+server/client OpenMW content loadout; replace the temporary shared player
+profile with character-specific creation and persistence; and implement bounded
+historical native contact/reach validation. Only then advertise combat
+capability 5. Subsequent parity work includes blocking, difficulty scaling,
+skill/AI consequences, on-strike magic and retaliation, actor attacks, death
+handling, resurrection, and respawn. PvP/P2P remains outside this slice.
 
 ### Required before the desktop/PC-VR release
 
@@ -284,14 +299,13 @@ last-known product results, not a guarantee about later commits:
 - provenance accounted for 478 intentional differences and 95 dependency
   declarations.
 
-The combat-foundation working tree subsequently passed the standalone MSVC
-C++20 aggregate, dedicated-server app and combat-interest executables, the
-full-tree RelWithDebInfo `openmw` build, the OpenMW adapter executable, the
-FlatBuffers selection proof, patch-registry verification, and baseline
-provenance verification. All 177 repository Python tests passed after updating
-the production-schema lock assertion. No live two-process gameplay capture,
-sanitizer profile, non-Windows build, or hardware run was performed for this
-slice.
+The production-combat-bootstrap working tree subsequently passed the standalone
+MSVC C++20 aggregate, dedicated-server app and combat-interest executables, and
+the GNS-enabled RelWithDebInfo production server build. All 179 repository
+Python tests, patch-registry verification, and indexed baseline provenance for
+419 intentional differences and 95 dependency declarations passed. No full
+OpenMW rebuild, live two-process gameplay capture, sanitizer profile,
+non-Windows build, or hardware run was performed for this slice.
 
 Use [DEVELOPMENT.md](DEVELOPMENT.md) for commands and record only the newest
 relevant verification here after behavior changes.

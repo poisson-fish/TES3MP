@@ -24,6 +24,7 @@ namespace TES3MP
         const ItemPrototypeCatalog* itemCatalog = nullptr;
         CanonicalCombatWorld* combat = nullptr;
         const CanonicalActorWorld* actors = nullptr;
+        const MeleeWeaponCatalog* meleeWeapons = nullptr;
         const OpenMwMeleeSettings* meleeSettings = nullptr;
         const MeleeAuthorityPolicy* meleePolicy = nullptr;
         ServerMeleeContactQuery* meleeContact = nullptr;
@@ -260,6 +261,7 @@ namespace TES3MP
             const CanonicalInteractiveObjectWorld* objects, const InteractiveObjectCatalog* objectCatalog,
             const CanonicalInventoryWorld* inventory, const ItemPrototypeCatalog* itemCatalog,
             const CanonicalCombatWorld* combat = nullptr, const CanonicalActorWorld* actors = nullptr,
+            const MeleeWeaponCatalog* meleeWeapons = nullptr,
             const OpenMwMeleeSettings* meleeSettings = nullptr, const MeleeAuthorityPolicy* meleePolicy = nullptr,
             ServerMeleeContactQuery* meleeContact = nullptr);
         PreparedBatch prepareTickState(PreparedBatch prepared, const ServerTickCommandBatch& batch);

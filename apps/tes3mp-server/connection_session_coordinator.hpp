@@ -38,7 +38,9 @@ namespace TES3MP::ServerApp
             CapabilityOffer offer, ServerAuthenticationService& authentication, OutboundQueueSet& queues,
             std::size_t capacity, const CanonicalActorWorld* actors = nullptr,
             const CanonicalInteractiveObjectWorld* objects = nullptr,
-            CanonicalInventoryWorld* inventory = nullptr, const CanonicalCombatWorld* combat = nullptr) noexcept;
+            CanonicalInventoryWorld* inventory = nullptr, CanonicalCombatWorld* combat = nullptr,
+            const CanonicalPlayerCombatTemplate* playerCombatTemplate = nullptr,
+            const ItemPrototypeCatalog* itemCatalog = nullptr) noexcept;
 
         ConnectionSessionResult accept(TransportConnectionId connection, AdmissionScopeId scope) noexcept;
         ConnectionSessionResult close(TransportConnectionId connection) noexcept;
@@ -76,7 +78,9 @@ namespace TES3MP::ServerApp
         const CanonicalActorWorld* mActors;
         const CanonicalInteractiveObjectWorld* mObjects;
         CanonicalInventoryWorld* mInventory;
-        const CanonicalCombatWorld* mCombat;
+        CanonicalCombatWorld* mCombat;
+        const CanonicalPlayerCombatTemplate* mPlayerCombatTemplate;
+        const ItemPrototypeCatalog* mItemCatalog;
         std::map<TransportConnectionId, Connection> mConnections;
     };
 }

@@ -1,4 +1,5 @@
 #include "actor_content.hpp"
+#include "combat_content.hpp"
 #include "connection_session_coordinator.hpp"
 #include "content_collision.hpp"
 #include "interactive_object_content.hpp"
@@ -39,6 +40,16 @@ namespace
             const auto elapsed = std::chrono::steady_clock::now().time_since_epoch();
             const auto nanoseconds = std::chrono::duration_cast<std::chrono::nanoseconds>(elapsed).count();
             return TES3MP::MonotonicInstant::fromNanoseconds(static_cast<std::uint64_t>(nanoseconds));
+        }
+    };
+
+    class UnavailableMeleeContactQuery final : public TES3MP::ServerMeleeContactQuery
+    {
+    public:
+        TES3MP::MeleeContactValidation validate(const TES3MP::ServerMeleeContactRequest&,
+            const TES3MP::CanonicalPlayerEntityState&, const TES3MP::CanonicalActorEntityState&) noexcept override
+        {
+            return TES3MP::MeleeContactValidation::HistoryUnavailable;
         }
     };
 }
@@ -157,6 +168,27 @@ int main(int argc, char** argv)
         itemCatalog.emplace(std::move(content->catalog));
         inventoryWorld.emplace(std::move(content->world));
     }
+    std::optional<TES3MP::ServerApp::CombatContent> combatContent;
+    if (!config.combatContentFile.empty())
+    {
+        if (!itemCatalog || !inventoryWorld)
+        {
+            std::cerr << "combat content requires inventory content\n";
+            return 2;
+        }
+        auto loaded = TES3MP::ServerApp::loadCombatContent(
+            config.combatContentFile, config.contentManifest, actorCatalog, *itemCatalog);
+        auto* content = std::get_if<TES3MP::ServerApp::CombatContent>(&loaded);
+        if (!content)
+        {
+            std::cerr << "combat content initialization failed: "
+                      << TES3MP::ServerApp::describeCombatContentError(
+                             std::get<TES3MP::ServerApp::CombatContentError>(loaded))
+                      << '\n';
+            return 2;
+        }
+        combatContent.emplace(std::move(*content));
+    }
     auto password = TES3MP::ServerApp::loadJoinPassword(config.joinPasswordFile);
     if (const auto* error = std::get_if<TES3MP::ServerApp::ConfigError>(&password))
     {
@@ -245,15 +277,23 @@ int main(int argc, char** argv)
     }
     TES3MP::SharedServerAuthenticationService authentication(
         *limiter, *joinProvider, *resumeStore, clock, playerIdentities.get());
+    const TES3MP::MeleeAuthorityPolicy meleePolicy{};
+    UnavailableMeleeContactQuery meleeContact;
     TES3MP::ServerApp::ConnectionSessionCoordinator sessions(clock, observability, *timeouts,
         std::get<TES3MP::CapabilityOffer>(std::move(offer)), authentication, *queues,
         TES3MP::ServerApp::Phase7ConnectionCapacity, &actorWorld,
-        interactiveObjectWorld ? &*interactiveObjectWorld : nullptr, inventoryWorld ? &*inventoryWorld : nullptr);
+        interactiveObjectWorld ? &*interactiveObjectWorld : nullptr, inventoryWorld ? &*inventoryWorld : nullptr,
+        combatContent ? &combatContent->world : nullptr,
+        combatContent ? &combatContent->playerTemplate : nullptr, itemCatalog ? &*itemCatalog : nullptr);
     TES3MP::ServerApp::ServerApplication application(*factory.runtime, config,
         { sessions, *joins, *crypto, *queues, clock, intake, reducer, *lifecycle, &actorCatalog, &actorWorld,
             collision.get(), interactiveObjectCatalog ? &*interactiveObjectCatalog : nullptr,
             interactiveObjectWorld ? &*interactiveObjectWorld : nullptr, itemCatalog ? &*itemCatalog : nullptr,
-            inventoryWorld ? &*inventoryWorld : nullptr });
+            inventoryWorld ? &*inventoryWorld : nullptr, combatContent ? &combatContent->world : nullptr,
+            combatContent ? &combatContent->weapons : nullptr,
+            combatContent ? &combatContent->playerTemplate : nullptr,
+            combatContent ? &combatContent->settings : nullptr,
+            combatContent ? &meleePolicy : nullptr, combatContent ? &meleeContact : nullptr });
     if (!application.start())
     {
         std::cerr << application.failure() << '\n';

@@ -762,9 +762,12 @@ namespace TES3MP::ServerApp
             mFailure = "inventory composition incomplete";
             return false;
         }
-        const bool anyCombat = mWiring->combat || mWiring->meleeSettings || mWiring->meleePolicy
-            || mWiring->meleeContact;
+        const bool anyCombat = mWiring->combat || mWiring->meleeWeapons || mWiring->playerCombatTemplate
+            || mWiring->meleeSettings
+            || mWiring->meleePolicy || mWiring->meleeContact;
         if (anyCombat && (!mWiring->combat || !mWiring->actors || !mWiring->meleeSettings
+                || !mWiring->inventory || !mWiring->itemCatalog || !mWiring->meleeWeapons
+                || !mWiring->playerCombatTemplate
                 || !mWiring->meleePolicy || !mWiring->meleeContact))
         {
             mFailure = "combat composition incomplete";
@@ -782,7 +785,7 @@ namespace TES3MP::ServerApp
             const auto revisionBefore = mWiring->reducer.canonicalRevision();
             CanonicalCommandWorlds commandWorlds{ mWiring->interactiveObjects, mWiring->interactiveObjectCatalog,
                 mWiring->inventory, mWiring->itemCatalog, mWiring->combat, mWiring->actors,
-                mWiring->meleeSettings, mWiring->meleePolicy, mWiring->meleeContact };
+                mWiring->meleeWeapons, mWiring->meleeSettings, mWiring->meleePolicy, mWiring->meleeContact };
             auto prepared = mWiring->reducer.prepareTick(batch, commandWorlds);
             if (!prepared.result())
             {
@@ -795,7 +798,7 @@ namespace TES3MP::ServerApp
             std::vector<std::pair<TransportConnectionId, InteractiveObjectInterestBaselineDelivery>> objectBaselines;
             std::vector<std::pair<TransportConnectionId, InventoryInterestDelivery>> inventoryBaselines;
             std::vector<CellId> changedObjectCells;
-            bool hasInventoryCommand = false;
+            bool refreshInventoryBaselines = false;
             const auto dispositions = prepared.result().dispositions();
             const auto commands = batch.commands();
             for (std::size_t index = 0; index < dispositions.size(); ++index)
@@ -806,7 +809,10 @@ namespace TES3MP::ServerApp
                     && std::ranges::find(changedObjectCells, interaction->cell()) == changedObjectCells.end())
                     changedObjectCells.push_back(interaction->cell());
                 if (std::holds_alternative<InventoryCommandProposal>(commands[index].proposal().payload()))
-                    hasInventoryCommand = true;
+                    refreshInventoryBaselines = true;
+                if (std::holds_alternative<MeleeAttackCommandProposal>(commands[index].proposal().payload())
+                    && dispositions[index].disposition() == CommandDisposition::Applied)
+                    refreshInventoryBaselines = true;
             }
             if (prepared.candidateRevision() != revisionBefore)
             {
@@ -903,7 +909,7 @@ namespace TES3MP::ServerApp
                         const auto* newPlayer = prepared.candidateState().findPlayer(target.playerId());
                         const bool changedCell
                             = oldPlayer && newPlayer && oldPlayer->transform().cell() != newPlayer->transform().cell();
-                        if (!connection || !newPlayer || (!changedCell && !hasInventoryCommand)
+                        if (!connection || !newPlayer || (!changedCell && !refreshInventoryBaselines)
                             || !supportsInventory(*connection))
                             continue;
                         const auto& projectedInventory

@@ -160,6 +160,16 @@
       "purpose": "Declares the bounded process-local inventory transfer interceptor seam."
     },
     {
+      "path": "apps/openmw/mwmechanics/character.cpp",
+      "status": "M",
+      "purpose": "Routes native player melee contact through the authoritative capture boundary while preserving local single-player behavior."
+    },
+    {
+      "path": "apps/openmw/mwmechanics/combat.cpp",
+      "status": "M",
+      "purpose": "Shares OpenMW melee hit chance, fatigue, weapon damage, hand-to-hand damage, wear, and death ordering with the engine-independent resolver."
+    },
+    {
       "path": "apps/openmw/mwrender/animation.cpp",
       "status": "M",
       "purpose": "Adds the explicit replicated-actor animation context and prevents replica animation completion from reaching Lua."
@@ -363,6 +373,31 @@
       "path": "apps/tes3mp-server/authenticated_join_composition.hpp",
       "status": "A",
       "purpose": "Defines the app-owned authenticated-join composition and atomic response-queue boundary."
+    },
+    {
+      "path": "apps/tes3mp-server/combat_content.cpp",
+      "status": "A",
+      "purpose": "Loads and atomically validates bounded manifest-scoped combat settings, player defaults, actor seeds, weapons, and deterministic random state."
+    },
+    {
+      "path": "apps/tes3mp-server/combat_content.hpp",
+      "status": "A",
+      "purpose": "Declares the dedicated-server combat bootstrap artifact, hard size bound, typed diagnostics, and loaded production bundle."
+    },
+    {
+      "path": "apps/tes3mp-server/combat_interest_projection.cpp",
+      "status": "A",
+      "purpose": "Projects private player and exact-cell actor combat snapshots plus reliable authoritative hit and death events."
+    },
+    {
+      "path": "apps/tes3mp-server/combat_interest_projection.hpp",
+      "status": "A",
+      "purpose": "Declares capability-gated combat snapshot and reliable event projection boundaries."
+    },
+    {
+      "path": "apps/tes3mp-server/combat_interest_projection_tests.cpp",
+      "status": "A",
+      "purpose": "Focused combat interest, privacy, ordering, snapshot, and reliable event projection contracts."
     },
     {
       "path": "apps/tes3mp-server/connection_session_coordinator.cpp",
@@ -620,6 +655,16 @@
       "purpose": "Engine-independent complete client orchestration boundary and bounded typed outcomes."
     },
     {
+      "path": "components/tes3mp/include/tes3mp/combat_replication.hpp",
+      "status": "A",
+      "purpose": "Declares bounded authoritative melee commands, private combat snapshots, reliable outcomes, and verifier-first codecs."
+    },
+    {
+      "path": "components/tes3mp/include/tes3mp/combat_world.hpp",
+      "status": "A",
+      "purpose": "Declares canonical combatants, manifest-bound weapons, server contact validation, and atomic combat preparation."
+    },
+    {
       "path": "components/tes3mp/include/tes3mp/command_primitives.hpp",
       "status": "A",
       "purpose": "Owner-approved value-only client-command, entity-precondition, writer-admission, and authoritative spatial-snapshot records."
@@ -673,6 +718,11 @@
       "path": "components/tes3mp/include/tes3mp/item_catalog.hpp",
       "status": "A",
       "purpose": "Declares the bounded manifest-scoped item prototype catalog, item categories, equipment slots, and stack metadata."
+    },
+    {
+      "path": "components/tes3mp/include/tes3mp/melee_combat.hpp",
+      "status": "A",
+      "purpose": "Declares OpenMW-aligned engine-independent melee inputs, settings, and authoritative resolution outcomes."
     },
     {
       "path": "components/tes3mp/include/tes3mp/monotonic_clock.hpp",
@@ -845,6 +895,11 @@
       "purpose": "Move-only bounded password/token storage plus verifier-first T3AQ/T3AA/T3AR credential encoding, decoding, lifetime validation, and best-effort clearing."
     },
     {
+      "path": "components/tes3mp/protocol/combat_replication.cpp",
+      "status": "A",
+      "purpose": "Implements bounded verifier-first melee command, latest-wins combat snapshot, and reliable combat event codecs."
+    },
+    {
       "path": "components/tes3mp/protocol/content_identity.cpp",
       "status": "A",
       "purpose": "Implements exact nonzero manifest parsing and bounded manifest-scoped initial content identity validation."
@@ -880,6 +935,11 @@
       "purpose": "Pinned FlatBuffers 25.12.19 generated C++ for authenticated inventory transaction commands."
     },
     {
+      "path": "components/tes3mp/protocol/generated/client_melee_attack_command_generated.h",
+      "status": "A",
+      "purpose": "Pinned FlatBuffers 25.12.19 generated C++ for bounded authoritative melee intent."
+    },
+    {
       "path": "components/tes3mp/protocol/generated/client_vr_pose_sample_generated.h",
       "status": "A",
       "purpose": "Pinned FlatBuffers 25.12.19 generated C++ for the size-prefixed T3VP client pose schema."
@@ -888,6 +948,11 @@
       "path": "components/tes3mp/protocol/generated/latest_wins_actor_snapshot_generated.h",
       "status": "A",
       "purpose": "Pinned FlatBuffers 25.12.19 generated C++ for bounded latest-wins actor views."
+    },
+    {
+      "path": "components/tes3mp/protocol/generated/latest_wins_combat_snapshot_generated.h",
+      "status": "A",
+      "purpose": "Pinned FlatBuffers 25.12.19 generated C++ for bounded private and exact-cell combat views."
     },
     {
       "path": "components/tes3mp/protocol/generated/latest_wins_equipment_snapshot_generated.h",
@@ -903,6 +968,11 @@
       "path": "components/tes3mp/protocol/generated/reliable_actor_interest_baseline_generated.h",
       "status": "A",
       "purpose": "Pinned FlatBuffers 25.12.19 generated C++ for bounded complete actor membership."
+    },
+    {
+      "path": "components/tes3mp/protocol/generated/reliable_combat_event_batch_generated.h",
+      "status": "A",
+      "purpose": "Pinned FlatBuffers 25.12.19 generated C++ for bounded reliable authoritative combat outcomes."
     },
     {
       "path": "components/tes3mp/protocol/generated/reliable_container_inventory_baseline_generated.h",
@@ -980,6 +1050,11 @@
       "purpose": "Implements bounded item prototype catalog validation, canonical ordering, and lookup."
     },
     {
+      "path": "components/tes3mp/protocol/melee_combat.cpp",
+      "status": "A",
+      "purpose": "Implements deterministic OpenMW-aligned hit chance, fatigue cost, damage, resistance, wear, and death resolution."
+    },
+    {
       "path": "components/tes3mp/protocol/protocol_exchange.cpp",
       "status": "A",
       "purpose": "Verifier-first bounded T3RO/T3LS encoding and decoding including versioned locomotion fields, closed-body dispatch, and allocation-after-bounds enforcement."
@@ -1030,6 +1105,11 @@
       "purpose": "Explicit-ID T3IT schema for authenticated inventory transaction commands."
     },
     {
+      "path": "components/tes3mp/protocol/schema/client_melee_attack_command.fbs",
+      "status": "A",
+      "purpose": "Explicit-ID T3MC schema for bounded player melee intent without client-authored outcomes or weapon data."
+    },
+    {
       "path": "components/tes3mp/protocol/schema/client_vr_pose_sample.fbs",
       "status": "A",
       "purpose": "Explicit-ID T3VP presentation-only client head and optional-hand pose schema."
@@ -1038,6 +1118,11 @@
       "path": "components/tes3mp/protocol/schema/latest_wins_actor_snapshot.fbs",
       "status": "A",
       "purpose": "Explicit-ID schema for bounded capability-gated latest-wins actor views."
+    },
+    {
+      "path": "components/tes3mp/protocol/schema/latest_wins_combat_snapshot.fbs",
+      "status": "A",
+      "purpose": "Explicit-ID T3CS schema for private player and exact-cell actor combat revisions and resources."
     },
     {
       "path": "components/tes3mp/protocol/schema/latest_wins_equipment_snapshot.fbs",
@@ -1053,6 +1138,11 @@
       "path": "components/tes3mp/protocol/schema/reliable_actor_interest_baseline.fbs",
       "status": "A",
       "purpose": "Explicit-ID schema for bounded complete actor membership and completion metadata."
+    },
+    {
+      "path": "components/tes3mp/protocol/schema/reliable_combat_event_batch.fbs",
+      "status": "A",
+      "purpose": "Explicit-ID T3CE schema for bounded reliable authoritative hit, damage, and death facts."
     },
     {
       "path": "components/tes3mp/protocol/schema/reliable_container_inventory_baseline.fbs",
@@ -1143,6 +1233,11 @@
       "path": "components/tes3mp/server_core/canonical_state.cpp",
       "status": "A",
       "purpose": "Full-input canonical-state and finalized-history validation, deterministic owned construction and lookup, and pure atomic spatial revision advancement implementation."
+    },
+    {
+      "path": "components/tes3mp/server_core/combat_world.cpp",
+      "status": "A",
+      "purpose": "Implements canonical combat bootstrap, inventory-bound weapon resolution and wear, authoritative contact/timing checks, and atomic combat candidates."
     },
     {
       "path": "components/tes3mp/server_core/credential_crypto.cpp",
@@ -1288,6 +1383,21 @@
       "path": "components/tes3mp/tests/client_locomotion_tests.cpp",
       "status": "A",
       "purpose": "Focused bounded input-history, acknowledgement replay, no-feedback, and hard-discontinuity clearing contracts."
+    },
+    {
+      "path": "components/tes3mp/tests/combat_command_reducer_tests.cpp",
+      "status": "A",
+      "purpose": "Focused atomic combat, inventory wear, equipment revision, command finalization, and canonical commit contracts."
+    },
+    {
+      "path": "components/tes3mp/tests/combat_replication_tests.cpp",
+      "status": "A",
+      "purpose": "Focused bounded melee command, private snapshot, reliable outcome, malformed payload, and round-trip contracts."
+    },
+    {
+      "path": "components/tes3mp/tests/combat_world_tests.cpp",
+      "status": "A",
+      "purpose": "Focused combat bootstrap, canonical weapon sourcing, contact, timing, revision, wear, damage, death, and atomic failure contracts."
     },
     {
       "path": "components/tes3mp/tests/credential_crypto_tests.cpp",
@@ -1503,6 +1613,11 @@
       "path": "components/tes3mp/tests/inventory_world_tests.cpp",
       "status": "A",
       "purpose": "Focused unit contracts for canonical inventory validation, transaction atomicity, authority, concurrency, equipment, and item conservation."
+    },
+    {
+      "path": "components/tes3mp/tests/melee_combat_tests.cpp",
+      "status": "A",
+      "purpose": "Focused deterministic OpenMW melee formula, ordering, weapon wear, resistance, fatigue, and invalid-input contracts."
     },
     {
       "path": "components/tes3mp/tests/movement_evidence_tests.cpp",
@@ -1855,6 +1970,11 @@
       "purpose": "Unit and workflow-policy tests for the Windows baseline evidence gate."
     },
     {
+      "path": "scripts/tests/test_combat_bootstrap_contract.py",
+      "status": "A",
+      "purpose": "Production-wiring contract for manifest-scoped combat bootstrap, canonical inventory weapon sources, and deliberately disabled capability advertisement."
+    },
+    {
       "path": "scripts/tests/test_interactive_object_contract.py",
       "status": "A",
       "purpose": "Unit test contract verifying interactive object components have no forbidden engine or OpenMW dependencies."
@@ -2106,7 +2226,7 @@
         },
         {
           "path": "components/tes3mp/CMakeLists.txt",
-          "sha256": "b76776b21336a9473719ba4b36f8d19b5dc4318396a01dd5bf3f56af80859ae9"
+          "sha256": "c5d654f87500327104d44effd770a347ed4ef197e1df235a54e017954c42ae18"
         },
         {
           "path": "components/tes3mp/protocol/generated/authentication_accepted_generated.h",
@@ -2334,11 +2454,11 @@
         },
         {
           "path": "scripts/tests/test_run_vnext_flatbuffers_proof.py",
-          "sha256": "bff68452e118417f8c4cc451210feee53b69e9d438aeb38b24dec76451ec788c"
+          "sha256": "875f76d902640980a1f790565f22d613561af684025be6cb222fbf2458a65132"
         },
         {
           "path": "scripts/vnext_flatbuffers_proof.json",
-          "sha256": "900ae06ca6f5729bc113e33306171468aba3c7bb805becb3b5281fef491a9792"
+          "sha256": "0329cefd9cc457e73c2b2b62c8f8d872c615be0d9aba3557c727955269c68f29"
         }
       ],
       "repositories": [

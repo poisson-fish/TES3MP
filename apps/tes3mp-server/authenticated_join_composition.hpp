@@ -72,7 +72,9 @@ namespace TES3MP::ServerApp
         TransportJoinResponseQueue(OutboundQueueSet& queues, TransportConnectionId connection,
             ConnectionSessionCoordinator* sessions = nullptr, const CanonicalActorWorld* actors = nullptr,
             const CanonicalInteractiveObjectWorld* objects = nullptr,
-            CanonicalInventoryWorld* inventory = nullptr, const CanonicalCombatWorld* combat = nullptr) noexcept
+            CanonicalInventoryWorld* inventory = nullptr, CanonicalCombatWorld* combat = nullptr,
+            const CanonicalPlayerCombatTemplate* playerCombatTemplate = nullptr,
+            const ItemPrototypeCatalog* itemCatalog = nullptr) noexcept
             : mQueues(queues)
             , mConnection(connection)
             , mSessions(sessions)
@@ -80,6 +82,8 @@ namespace TES3MP::ServerApp
             , mObjects(objects)
             , mInventory(inventory)
             , mCombat(combat)
+            , mPlayerCombatTemplate(playerCombatTemplate)
+            , mItemCatalog(itemCatalog)
         {
         }
 
@@ -95,8 +99,11 @@ namespace TES3MP::ServerApp
         const CanonicalActorWorld* mActors;
         const CanonicalInteractiveObjectWorld* mObjects;
         CanonicalInventoryWorld* mInventory;
-        const CanonicalCombatWorld* mCombat;
+        CanonicalCombatWorld* mCombat;
+        const CanonicalPlayerCombatTemplate* mPlayerCombatTemplate;
+        const ItemPrototypeCatalog* mItemCatalog;
         std::optional<CanonicalInventoryWorld> mPendingInventory;
+        std::optional<CanonicalCombatWorld> mPendingCombat;
     };
 }
 

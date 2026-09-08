@@ -500,6 +500,7 @@ namespace TES3MP
         const CanonicalInteractiveObjectWorld* objects, const InteractiveObjectCatalog* objectCatalog,
         const CanonicalInventoryWorld* inventory, const ItemPrototypeCatalog* itemCatalog,
         const CanonicalCombatWorld* combat, const CanonicalActorWorld* actors,
+        const MeleeWeaponCatalog* meleeWeapons,
         const OpenMwMeleeSettings* meleeSettings, const MeleeAuthorityPolicy* meleePolicy,
         ServerMeleeContactQuery* meleeContact)
     {
@@ -558,7 +559,10 @@ namespace TES3MP
         const bool hasInventoryTransaction = std::ranges::any_of(commands, [](const StampedServerCommand& command) {
             return std::holds_alternative<InventoryCommandProposal>(command.proposal().payload());
         });
-        if ((hasInventoryTransaction || hasObjectInteraction) && inventory != nullptr)
+        const bool hasMeleeAttack = std::ranges::any_of(commands, [](const StampedServerCommand& command) {
+            return std::holds_alternative<MeleeAttackCommandProposal>(command.proposal().payload());
+        });
+        if ((hasInventoryTransaction || hasObjectInteraction || hasMeleeAttack) && inventory != nullptr)
         {
             try
             {
@@ -571,10 +575,7 @@ namespace TES3MP
                 return prepared;
             }
         }
-        const bool hasMeleeAttack = std::ranges::any_of(commands, [](const StampedServerCommand& command) {
-            return std::holds_alternative<MeleeAttackCommandProposal>(command.proposal().payload());
-        });
-        if (hasMeleeAttack && combat != nullptr)
+        if ((hasMeleeAttack || hasInventoryTransaction) && combat != nullptr)
         {
             try
             {
@@ -785,11 +786,43 @@ namespace TES3MP
                                         {
                                             auto transaction = proposalCommand;
                                             transaction.player = session->playerId();
-                                            const auto outcome = applyInventoryTransaction(*prepared.mInventory,
-                                                *prepared.mState, transaction, InventoryValidationContext{}, tick);
-                                            disposition = outcome.code == InventoryTransactionResultCode::Success
-                                                ? CommandDisposition::Applied
-                                                : CommandDisposition::InventoryTransactionRejected;
+                                            const auto* beforeInventory
+                                                = prepared.mInventory->findPlayer(session->playerId());
+                                            const auto* combatPlayer
+                                                = prepared.mCombat ? prepared.mCombat->findPlayer(session->playerId()) : nullptr;
+                                            const auto oldWeight = beforeInventory
+                                                ? beforeInventory->totalWeight(*itemCatalog) : 0;
+                                            const auto oldWeapon = beforeInventory
+                                                ? beforeInventory->equipment[static_cast<std::size_t>(
+                                                      EquipmentSlot::CarriedRight)]
+                                                : std::optional<ItemStackId>{};
+                                            if (prepared.mCombat && (!combatPlayer || !combatPlayer->revision.next()))
+                                                disposition = CommandDisposition::InventoryTransactionRejected;
+                                            else
+                                            {
+                                                const auto outcome = applyInventoryTransaction(*prepared.mInventory,
+                                                    *prepared.mState, transaction, InventoryValidationContext{}, tick);
+                                                disposition = outcome.code == InventoryTransactionResultCode::Success
+                                                    ? CommandDisposition::Applied
+                                                    : CommandDisposition::InventoryTransactionRejected;
+                                                const auto* afterInventory = disposition == CommandDisposition::Applied
+                                                    ? prepared.mInventory->findPlayer(session->playerId()) : nullptr;
+                                                const auto newWeight = afterInventory
+                                                    ? afterInventory->totalWeight(*itemCatalog) : oldWeight;
+                                                const auto newWeapon = afterInventory
+                                                    ? afterInventory->equipment[static_cast<std::size_t>(
+                                                          EquipmentSlot::CarriedRight)]
+                                                    : oldWeapon;
+                                                if (disposition == CommandDisposition::Applied && prepared.mCombat
+                                                    && (oldWeight != newWeight || oldWeapon != newWeapon)
+                                                    && !prepared.mCombat->advancePlayerInventoryBinding(
+                                                        session->playerId(), newWeight))
+                                                {
+                                                    result.mError = CommandBatchReductionError::CandidateStateInvalid;
+                                                    prepared.mPublication = std::move(publication);
+                                                    return prepared;
+                                                }
+                                            }
                                         }
                                     }
                                     else
@@ -797,7 +830,8 @@ namespace TES3MP
                                         requiresSpatialAdvance = false;
                                         const auto& melee
                                             = std::get<MeleeAttackCommandProposal>(proposal.payload()).command();
-                                        if (!prepared.mCombat || !actors || !meleeSettings || !meleePolicy
+                                        if (!prepared.mCombat || !prepared.mInventory || !itemCatalog
+                                            || !actors || !meleeWeapons || !meleeSettings || !meleePolicy
                                             || !meleeContact)
                                             disposition = CommandDisposition::CombatRejected;
                                         else
@@ -807,12 +841,16 @@ namespace TES3MP
                                                 melee.expectedTargetRevision, melee.sourceServerTick,
                                                 melee.attackType, melee.attackStrength };
                                             auto combatResult = prepareAuthoritativeMeleeAttack(*prepared.mCombat,
+                                                *prepared.mInventory, *itemCatalog, *meleeWeapons,
                                                 *prepared.mState, *actors, *meleeSettings, *meleePolicy,
                                                 *meleeContact, tick, attack);
                                             if (combatResult.disposition == AuthoritativeMeleeDisposition::Applied
                                                 && combatResult.candidate)
                                             {
                                                 prepared.mCombat = std::move(*combatResult.candidate);
+                                                if (combatResult.candidateInventory)
+                                                    prepared.mInventory
+                                                        = std::move(*combatResult.candidateInventory);
                                                 if (combatResult.event)
                                                     prepared.mCombatEvents.push_back(*combatResult.event);
                                                 disposition = CommandDisposition::Applied;
@@ -1028,8 +1066,8 @@ namespace TES3MP
         const ServerTickCommandBatch& batch, CanonicalCommandWorlds worlds)
     {
         return prepareTickState(prepareCommands(batch, worlds.interactiveObjects, worlds.interactiveObjectCatalog,
-            worlds.inventory, worlds.itemCatalog, worlds.combat, worlds.actors, worlds.meleeSettings,
-            worlds.meleePolicy, worlds.meleeContact), batch);
+            worlds.inventory, worlds.itemCatalog, worlds.combat, worlds.actors, worlds.meleeWeapons,
+            worlds.meleeSettings, worlds.meleePolicy, worlds.meleeContact), batch);
     }
 
     bool CanonicalCommandReducer::commitPrepared(

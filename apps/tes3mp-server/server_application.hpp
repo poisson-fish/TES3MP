@@ -37,6 +37,8 @@ namespace TES3MP::ServerApp
         const ItemPrototypeCatalog* itemCatalog = nullptr;
         CanonicalInventoryWorld* inventory = nullptr;
         CanonicalCombatWorld* combat = nullptr;
+        const MeleeWeaponCatalog* meleeWeapons = nullptr;
+        const CanonicalPlayerCombatTemplate* playerCombatTemplate = nullptr;
         const OpenMwMeleeSettings* meleeSettings = nullptr;
         const MeleeAuthorityPolicy* meleePolicy = nullptr;
         ServerMeleeContactQuery* meleeContact = nullptr;

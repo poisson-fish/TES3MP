@@ -1,6 +1,7 @@
 #include "actor_content.hpp"
 #include "actor_interest_projection.hpp"
 #include "authenticated_join_composition.hpp"
+#include "combat_content.hpp"
 #include "connection_session_coordinator.hpp"
 #include "content_collision.hpp"
 #include "interactive_object_content.hpp"
@@ -65,6 +66,7 @@ namespace
           "actor_content_file = actors.txt\n"
           "interactive_object_content_file = objects.txt\n"
           "inventory_content_file = inventory.txt\n"
+          "combat_content_file = combat.txt\n"
           "player_identity_file = players.txt\n";
 
     class FakeRuntime final : public TES3MP::TransportRuntime
@@ -479,6 +481,7 @@ int main()
         assert(config.actorContentFile == std::filesystem::path("actors.txt"));
         assert(config.interactiveObjectContentFile == std::filesystem::path("objects.txt"));
         assert(config.inventoryContentFile == std::filesystem::path("inventory.txt"));
+        assert(config.combatContentFile == std::filesystem::path("combat.txt"));
         const std::vector<Position3> expectedSpawns{ Position3(-10, 20, 30), Position3(40, 50, 60) };
         assert(config.spawnPositions == expectedSpawns);
         assert(config.contentManifest.movementProfile().speed(LocomotionMode::Sneak) == 1024
@@ -589,6 +592,52 @@ int main()
     assert(std::get<ActorContentError>(loadActorContent(actorPath, parsedConfig().contentManifest))
         == ActorContentError::Malformed);
     std::filesystem::remove(actorPath);
+
+    const auto combatPath = std::filesystem::temp_directory_path() / "tes3mp-server-combat-content-test";
+    const auto writeCombat = [&](std::string_view content) {
+        std::ofstream stream(combatPath, std::ios::binary | std::ios::trunc);
+        stream << content;
+        assert(static_cast<bool>(stream));
+    };
+    constexpr std::string_view combatHeader
+        = "TES3MP_COMBAT_V1\n"
+          "manifest 0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20\n"
+          "seed 42\n";
+    constexpr std::string_view combatBody
+        = "settings 0.2 5 1 0.1 1 1 0.1 0.1 1 1 1.5 1\n"
+          "player 50 40 40 1 0 0 10 20 30 40 50 25 100 500 0\n"
+          "actor 1 20 50 0 0 0 25 0 0 0 0 0\n"
+          "weapon 4 1 1 10 1 10 1 10 5 1 1\n";
+    const std::array combatItemDeclarations{ ItemPrototypeDeclaration{ id<ItemPrototypeId>(4), ItemCategory::Weapon,
+        5, 1, 100, 0, slotToMask(EquipmentSlot::CarriedRight), false, std::nullopt } };
+    auto combatItems = *ItemPrototypeCatalog::create(parsedConfig().contentManifest, combatItemDeclarations);
+    writeCombat(std::string(combatHeader) + std::string(combatBody));
+    auto loadedCombat = loadCombatContent(combatPath, parsedConfig().contentManifest, actorCatalog, combatItems);
+    assert(std::holds_alternative<CombatContent>(loadedCombat));
+    const auto& combat = std::get<CombatContent>(loadedCombat);
+    assert(combat.world.actors().size() == 1 && combat.world.players().empty()
+        && combat.weapons.find(id<ItemPrototypeId>(4))
+        && combat.playerTemplate.weaponSkills[static_cast<std::size_t>(MeleeWeaponSkill::LongBlade)] == 20.f);
+    writeCombat(std::string(combatHeader)
+        + "settings nan 5 1 0.1 1 1 0.1 0.1 1 1 1.5 1\n"
+          "player 50 40 40 1 0 0 10 20 30 40 50 25 100 500 0\n"
+          "actor 1 20 50 0 0 0 25 0 0 0 0 0\n");
+    const auto malformedCombat
+        = std::get<CombatContentError>(loadCombatContent(combatPath, parsedConfig().contentManifest,
+            actorCatalog, combatItems));
+    assert(malformedCombat.code == CombatContentErrorCode::InvalidSettings && malformedCombat.line == 4
+        && describeCombatContentError(malformedCombat) == "invalid settings at line 4");
+    writeCombat(std::string(combatHeader)
+        + "settings 0.2 5 1 0.1 1 1 0.1 0.1 1 1 1.5 1\n"
+          "player 50 40 40 1 0 0 10 20 30 40 50 25 100 500 0\n");
+    assert(std::get<CombatContentError>(loadCombatContent(combatPath, parsedConfig().contentManifest,
+               actorCatalog, combatItems)).code == CombatContentErrorCode::InvalidActorSet);
+    writeCombat("TES3MP_COMBAT_V1\n"
+                "manifest 0202030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20\n"
+                "seed 42\n" + std::string(combatBody));
+    assert(std::get<CombatContentError>(loadCombatContent(combatPath, parsedConfig().contentManifest,
+               actorCatalog, combatItems)).code == CombatContentErrorCode::ManifestMismatch);
+    std::filesystem::remove(combatPath);
 
     const auto objectPath = std::filesystem::temp_directory_path() / "tes3mp-server-object-content-test";
     const auto writeObjects = [&](std::string_view content) {
@@ -772,6 +821,70 @@ int main()
         assert(rejectedJoins.liveBindings() == 0 && rejectedJoins.state().players().empty());
     }
     {
+        const auto combatConfig = parsedConfig();
+        const std::array<ItemPrototypeDeclaration, 0> noItems{};
+        auto itemCatalog = *ItemPrototypeCatalog::create(combatConfig.contentManifest, noItems);
+        auto inventory = *CanonicalInventoryWorld::create(combatConfig.contentManifest, itemCatalog, {}, {});
+        const auto randomKey = *RandomStreamKey::fromValues(5, 0);
+        auto combat = std::get<CanonicalCombatWorld>(createCanonicalCombatWorld({}, {},
+            Xoshiro256StarStar::fromWorldSeed(42, randomKey).snapshot()));
+        CanonicalPlayerCombatTemplate playerTemplate;
+        playerTemplate.stats.strength = 45.f;
+        playerTemplate.stats.fatigue = 80.f;
+        playerTemplate.maximumEncumbranceWeightUnits = 200;
+
+        FixedClock clock;
+        NullMetricSink metrics;
+        NullStructuredEventSink events;
+        Observability observability(metrics, events);
+        FakeAuthentication authentication;
+        RecordingCrypto crypto;
+        auto queues = OutboundQueueSet::create(OutboundQueuePolicy{}, 1);
+        auto timeouts = *SessionTimeoutPolicy::create(1'000'000, 1'000'000, 1'000'000);
+        ConnectionSessionCoordinator sessions(clock, observability, timeouts, emptyOffer(), authentication, *queues,
+            1, nullptr, nullptr, &inventory, &combat, &playerTemplate, &itemCatalog);
+        JoinFixture fixture;
+        const auto connection = TransportConnectionId::initial();
+        assert(sessions.accept(connection, scope(std::byte{ 6 })) == ConnectionSessionResult::Accepted);
+        const auto hello = std::get<std::vector<std::byte>>(encodeProtocolFrame(MessageClass::SessionControl,
+            MessageKind::ClientHello, encodeClientHello(ClientHello::fromOffer(emptyOffer()))));
+        assert(sessions.dispatch(connection, { TransportChannel::ReliableOrdered, hello }, fixture.joins, crypto,
+                   ServerTick::initial()) == ConnectionSessionResult::Accepted);
+        auto material = AuthenticationMaterial::create({});
+        const auto authenticationRequest = std::get<std::vector<std::byte>>(encodeProtocolFrame(
+            MessageClass::SessionControl, MessageKind::AuthenticationRequest,
+            encodeAuthenticationRequest(AuthenticationRequest::join(std::move(*material)))));
+        assert(sessions.dispatch(connection, { TransportChannel::ReliableOrdered, authenticationRequest },
+                   fixture.joins, crypto, ServerTick::initial()) == ConnectionSessionResult::Joined);
+        const auto* joinedInventory = inventory.findPlayer(id<PlayerId>(1));
+        const auto* joinedCombat = combat.findPlayer(id<PlayerId>(1));
+        assert(joinedInventory && joinedCombat && joinedCombat->stats.strength == 45.f
+            && joinedCombat->stats.fatigue == 80.f && joinedCombat->stats.normalizedEncumbrance == 0.f);
+
+        auto rejectedInventory
+            = *CanonicalInventoryWorld::create(combatConfig.contentManifest, itemCatalog, {}, {});
+        auto rejectedCombat = std::get<CanonicalCombatWorld>(createCanonicalCombatWorld({}, {},
+            Xoshiro256StarStar::fromWorldSeed(43, randomKey).snapshot()));
+        auto narrowQueues = OutboundQueueSet::create(
+            *OutboundQueuePolicy::create(1, 64 * 1024, 4, 2, 4, 1, 1, 1, 3, 100), 1);
+        ConnectionSessionCoordinator rejectedSessions(clock, observability, timeouts, emptyOffer(), authentication,
+            *narrowQueues, 1, nullptr, nullptr, &rejectedInventory, &rejectedCombat, &playerTemplate, &itemCatalog);
+        JoinFixture rejectedFixture;
+        assert(rejectedSessions.accept(connection, scope(std::byte{ 7 })) == ConnectionSessionResult::Accepted);
+        assert(rejectedSessions.dispatch(connection, { TransportChannel::ReliableOrdered, hello }, rejectedFixture.joins,
+                   crypto, ServerTick::initial()) == ConnectionSessionResult::Accepted);
+        FakeRuntime drain;
+        assert(narrowQueues->pump(drain, connection, 0) == OutboundPumpResult::Progress);
+        auto rejectedMaterial = AuthenticationMaterial::create({});
+        const auto rejectedRequest = std::get<std::vector<std::byte>>(encodeProtocolFrame(
+            MessageClass::SessionControl, MessageKind::AuthenticationRequest,
+            encodeAuthenticationRequest(AuthenticationRequest::join(std::move(*rejectedMaterial)))));
+        assert(rejectedSessions.dispatch(connection, { TransportChannel::ReliableOrdered, rejectedRequest },
+                   rejectedFixture.joins, crypto, ServerTick::initial()) == ConnectionSessionResult::ProtocolRejected);
+        assert(rejectedFixture.joins.state().players().empty() && rejectedInventory.players().empty()
+            && rejectedCombat.players().empty());
+    }
+    {
         FixedClock clock;
         NullMetricSink metrics;
         NullStructuredEventSink events;
@@ -890,6 +1003,17 @@ int main()
         auto lifecycle
             = ServerLifecycleCoordinator::create(config.disconnectGraceMilliseconds * 1'000'000, joinFixture.reducer);
         assert(lifecycle);
+        FakeRuntime incompleteRuntime;
+        ServerApplicationWiring incompleteWiring{
+            sessions, joins, crypto, *queues, clock, intake, joinFixture.reducer, *lifecycle };
+        incompleteWiring.actorCatalog = &actorCatalog;
+        incompleteWiring.actors = &actors;
+        incompleteWiring.actorCollision = collision.get();
+        incompleteWiring.meleeWeapons = &combat.weapons;
+        ServerApplication incomplete(incompleteRuntime, config, incompleteWiring);
+        assert(incomplete.start());
+        assert(!incomplete.pump(ServerTick::initial()) && incomplete.failure() == "combat composition incomplete");
+
         FakeRuntime wiredRuntime;
         const auto connection = TransportConnectionId::initial();
         wiredRuntime.events.push_back(

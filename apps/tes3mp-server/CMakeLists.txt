@@ -10,6 +10,8 @@ add_library(tes3mp_server_app STATIC
     actor_interest_projection.cpp
     combat_interest_projection.hpp
     combat_interest_projection.cpp
+    combat_content.hpp
+    combat_content.cpp
     authenticated_join_composition.hpp
     authenticated_join_composition.cpp
     connection_session_coordinator.hpp

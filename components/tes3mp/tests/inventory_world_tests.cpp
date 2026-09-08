@@ -503,6 +503,31 @@ namespace
         assert(!unequippedPlayer->equipment[static_cast<std::size_t>(EquipmentSlot::Cuirass)].has_value());
     }
 
+    void testBrokenWeaponCannotBeEquipped()
+    {
+        const auto manifest = testContentManifest();
+        const std::array declarations{ ItemPrototypeDeclaration{ id<ItemPrototypeId>(20), ItemCategory::Weapon,
+            10, 10, 100, 0, slotToMask(EquipmentSlot::CarriedRight), false, std::nullopt } };
+        const auto catalog = *ItemPrototypeCatalog::create(manifest, declarations);
+        CanonicalPlayerInventoryState player{ .player = id<PlayerId>(1),
+            .stacks = { { id<ItemStackId>(20), id<ItemPrototypeId>(20), 1, 0, 0, std::nullopt } } };
+        auto world = *CanonicalInventoryWorld::create(manifest, catalog, std::array{ player }, {});
+        const InventoryTransactionCommand command{ .player = id<PlayerId>(1),
+            .kind = InventoryTransactionKind::EquipItem,
+            .prototypeId = id<ItemPrototypeId>(20),
+            .stackId = id<ItemStackId>(20),
+            .slot = EquipmentSlot::CarriedRight,
+            .expectedInventoryRevision = InventoryRevision::initial(),
+            .interactionOrigin = Position3(0, 0, 0) };
+        const auto outcome = applyInventoryTransaction(
+            world, players(), command, InventoryValidationContext{}, id<ServerTick>(1));
+        assert(outcome.code == InventoryTransactionResultCode::ItemBroken
+            && !world.findPlayer(id<PlayerId>(1))
+                    ->equipment[static_cast<std::size_t>(EquipmentSlot::CarriedRight)]);
+        player.equipment[static_cast<std::size_t>(EquipmentSlot::CarriedRight)] = id<ItemStackId>(20);
+        assert(!CanonicalInventoryWorld::create(manifest, catalog, std::array{ player }, {}));
+    }
+
     void testWorldCreationRejectsBrokenCanonicalState()
     {
         const auto manifest = testContentManifest();
@@ -863,6 +888,7 @@ int main()
     testConcurrentAccessPreventsDuplication();
     testReachAndCellValidation();
     testEquipmentSlotAssignment();
+    testBrokenWeaponCannotBeEquipped();
     testWorldCreationRejectsBrokenCanonicalState();
     testWorldCreationCanonicalizesStackOrder();
     testTransferOverflowRollsBackCompletely();

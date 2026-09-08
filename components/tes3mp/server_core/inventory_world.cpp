@@ -191,6 +191,9 @@ namespace TES3MP
                 const auto equipmentSlot = static_cast<EquipmentSlot>(slot);
                 const auto* declaration = stack ? catalog.find(stack->prototypeId) : nullptr;
                 if (!stack || !declaration || (declaration->slotMask & slotToMask(equipmentSlot)) == 0
+                    || (equipmentSlot == EquipmentSlot::CarriedRight
+                        && declaration->category == ItemCategory::Weapon && declaration->maxCondition != 0
+                        && stack->condition == 0)
                     || equipmentUseCount(player, stack->stackId) > stack->count)
                     return std::nullopt;
             }
@@ -300,6 +303,34 @@ namespace TES3MP
     catch (...)
     {
         return false;
+    }
+
+    EquippedConditionResult CanonicalInventoryWorld::setEquippedItemCondition(PlayerId playerId,
+        EquipmentSlot equipmentSlot, ItemStackId stackId, std::uint32_t condition, bool unequip,
+        ServerTick tick) noexcept
+    {
+        auto* player = findMutablePlayer(playerId);
+        if (!player)
+            return EquippedConditionResult::PlayerNotFound;
+        const auto slot = static_cast<std::size_t>(equipmentSlot);
+        if (slot >= player->equipment.size() || player->equipment[slot] != stackId)
+            return EquippedConditionResult::ItemNotEquipped;
+        auto* stack = player->findStack(stackId);
+        const auto* declaration = stack ? mCatalog.find(stack->prototypeId) : nullptr;
+        if (!stack || !declaration || condition > declaration->maxCondition
+            || (declaration->maxCondition == 0 && condition != 0))
+            return EquippedConditionResult::InvalidCondition;
+        if (tick < player->lastChangeTick)
+            return EquippedConditionResult::TickRegression;
+        const auto nextRevision = player->revision.next();
+        if (!nextRevision)
+            return EquippedConditionResult::RevisionExhausted;
+        stack->condition = condition;
+        if (unequip)
+            player->equipment[slot].reset();
+        player->revision = *nextRevision;
+        player->lastChangeTick = tick;
+        return EquippedConditionResult::Applied;
     }
 
     bool CanonicalInventoryWorld::ensureContainer(
@@ -548,6 +579,9 @@ namespace TES3MP
                 const auto sourceIndex = stackIndex(player->stacks, command);
                 if (!sourceIndex)
                     return makeOutcome(InventoryTransactionResultCode::ItemNotFound);
+                if (*command.slot == EquipmentSlot::CarriedRight && declaration->category == ItemCategory::Weapon
+                    && declaration->maxCondition != 0 && player->stacks[*sourceIndex].condition == 0)
+                    return makeOutcome(InventoryTransactionResultCode::ItemBroken);
                 const auto stackId = player->stacks[*sourceIndex].stackId;
                 if (player->equipment[slot] == stackId)
                     return makeOutcome(InventoryTransactionResultCode::Success, stackId);
