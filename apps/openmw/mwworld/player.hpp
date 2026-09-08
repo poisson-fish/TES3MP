@@ -5,6 +5,7 @@
 #include <functional>
 #include <map>
 #include <utility>
+#include <vector>
 
 #include "../mwworld/livecellref.hpp"
 
@@ -36,6 +37,9 @@ namespace MWWorld
     {
     public:
         using ActivationInterceptor = std::function<bool(const MWWorld::Ptr& toActivate, const MWWorld::Ptr& player)>;
+        using MeleeHitInterceptor
+            = std::function<bool(float attackStrength, int attackType, const MWWorld::Ptr& victim)>;
+        using MeleeTargetProvider = std::function<void(std::vector<MWWorld::Ptr>& targets)>;
 
     private:
         LiveCellRef<ESM::NPC> mPlayer;
@@ -62,6 +66,8 @@ namespace MWWorld
 
         bool mJumping;
         ActivationInterceptor mActivationInterceptor;
+        MeleeHitInterceptor mMeleeHitInterceptor;
+        MeleeTargetProvider mMeleeTargetProvider;
 
     public:
         Player(const ESM::NPC* player);
@@ -103,6 +109,22 @@ namespace MWWorld
         void clearActivationInterceptor()
         {
             mActivationInterceptor = nullptr;
+        }
+        void setMeleeHitInterceptor(MeleeHitInterceptor interceptor) { mMeleeHitInterceptor = std::move(interceptor); }
+        void setMeleeTargetProvider(MeleeTargetProvider provider) { mMeleeTargetProvider = std::move(provider); }
+        void clearMeleeCombatInterceptors()
+        {
+            mMeleeHitInterceptor = nullptr;
+            mMeleeTargetProvider = nullptr;
+        }
+        bool interceptMeleeHit(float attackStrength, int attackType, const MWWorld::Ptr& victim) const
+        {
+            return mMeleeHitInterceptor && mMeleeHitInterceptor(attackStrength, attackType, victim);
+        }
+        void appendMeleeTargets(std::vector<MWWorld::Ptr>& targets) const
+        {
+            if (mMeleeTargetProvider)
+                mMeleeTargetProvider(targets);
         }
 
         void yaw(float yaw);

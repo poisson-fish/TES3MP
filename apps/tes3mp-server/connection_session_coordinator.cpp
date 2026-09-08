@@ -3,6 +3,7 @@
 #include "resume_token_context.hpp"
 
 #include "tes3mp/authentication.hpp"
+#include "tes3mp/combat_replication.hpp"
 #include "tes3mp/interactive_object_replication.hpp"
 #include "tes3mp/inventory_replication.hpp"
 #include "tes3mp/protocol_frame.hpp"
@@ -32,7 +33,8 @@ namespace TES3MP::ServerApp
     ConnectionSessionCoordinator::ConnectionSessionCoordinator(MonotonicClock& clock, Observability& observability,
         SessionTimeoutPolicy timeouts, CapabilityOffer offer, ServerAuthenticationService& authentication,
         OutboundQueueSet& queues, std::size_t capacity, const CanonicalActorWorld* actors,
-        const CanonicalInteractiveObjectWorld* objects, CanonicalInventoryWorld* inventory) noexcept
+        const CanonicalInteractiveObjectWorld* objects, CanonicalInventoryWorld* inventory,
+        const CanonicalCombatWorld* combat) noexcept
         : mClock(clock)
         , mObservability(observability)
         , mTimeouts(timeouts)
@@ -43,6 +45,7 @@ namespace TES3MP::ServerApp
         , mActors(actors)
         , mObjects(objects)
         , mInventory(inventory)
+        , mCombat(combat)
     {
     }
 
@@ -300,6 +303,33 @@ namespace TES3MP::ServerApp
                 : ConnectionSessionResult::QueueRejected;
         }
 
+        if (frame->messageKind() == MessageKind::ClientMeleeAttackCommand)
+        {
+            if (frame->messageClass() != MessageClass::ReliableOperation
+                || state->state() != ServerSessionState::Established || !state->sessionId())
+                return ConnectionSessionResult::ProtocolRejected;
+            auto decodedCommand = decodeClientMeleeAttackCommand(frame->payload());
+            auto* command = std::get_if<ClientMeleeAttackCommand>(&decodedCommand);
+            if (!command || command->sessionId != *state->sessionId()
+                || command->sessionGeneration != state->generation())
+                return ConnectionSessionResult::ProtocolRejected;
+            const auto& hello = state->negotiatedHello();
+            if (!hello || !std::ranges::binary_search(
+                    hello->negotiatedCapabilities(), combatReplicationCapability()))
+                return ConnectionSessionResult::ProtocolRejected;
+            const auto* progress = joins.state().findActiveSession(*state->sessionId());
+            const auto* player = progress ? joins.state().findPlayer(progress->playerId()) : nullptr;
+            if (!progress || !player)
+                return ConnectionSessionResult::ProtocolRejected;
+            ServerCommandProposal proposal(command->sessionId, command->sessionGeneration,
+                command->commandSequence, command->commandId, command->observedCanonicalRevision,
+                EntityPrecondition(progress->entityId(), player->entityRevision(), player->authorityEpoch()),
+                MeleeAttackCommandProposal(*command));
+            return intake.submit(std::move(proposal)) == CommandSubmissionResult::Accepted
+                ? ConnectionSessionResult::CommandSubmitted
+                : ConnectionSessionResult::QueueRejected;
+        }
+
         if (frame->messageKind() == MessageKind::ClientHello)
         {
             auto hello = decodeClientHello(frame->payload());
@@ -349,7 +379,7 @@ namespace TES3MP::ServerApp
         auto context = makeResumeTokenContext(*state->negotiatedHello(), crypto);
         if (!context)
             return ConnectionSessionResult::ProtocolRejected;
-        TransportJoinResponseQueue responses(mQueues, connection, this, mActors, mObjects, mInventory);
+        TransportJoinResponseQueue responses(mQueues, connection, this, mActors, mObjects, mInventory, mCombat);
         AuthenticatedJoinComposition composition(joins, mAuthentication, responses);
         auto outcome = composition.join(*state->principal(), state->generation(), tick, *context, state->playerClaim());
         if (outcome.result != JoinCompositionResult::Committed || !outcome.committed)

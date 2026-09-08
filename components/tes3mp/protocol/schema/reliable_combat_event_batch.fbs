@@ -1,0 +1,34 @@
+namespace TES3MP.Protocol.Schema.CombatEvent;
+
+enum MeleeDamageStat : ubyte {
+  Health = 0,
+  Fatigue = 1,
+}
+
+table CombatEventHeader {
+  target_session_id:ulong (id: 0);
+  target_session_generation:ulong (id: 1);
+  server_tick:ulong (id: 2);
+  canonical_revision:ulong (id: 3);
+}
+
+struct MeleeCombatEvent {
+  attacker_player_id:ulong;
+  target_actor_id:ulong;
+  attacker_combat_revision:ulong;
+  target_combat_revision:ulong;
+  damage:float;
+  damage_stat:MeleeDamageStat;
+  hit:bool;
+  blocked:bool;
+  target_died:bool;
+}
+
+table ReliableCombatEventBatch {
+  header:CombatEventHeader (id: 0);
+  events:[MeleeCombatEvent] (id: 1);
+}
+
+root_type ReliableCombatEventBatch;
+file_identifier "T3CE";
+file_extension "t3ce";

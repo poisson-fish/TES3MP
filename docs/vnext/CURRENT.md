@@ -1,7 +1,7 @@
 # TES3MP vNext current implementation
 
 - Updated: 2026-09-08
-- Code snapshot inspected: `50ae4ef442`
+- Code snapshot inspected: `vnext` working tree based on `50ae4ef442`
 - OpenMW baseline: `f4bec41444214a7903bebd178389ca22ca13f646`
 
 This is the only status and backlog document. “Implemented” means production
@@ -16,14 +16,14 @@ Code and tests are authoritative when this document becomes stale.
 
 | Surface | Current implementation |
 |---|---|
-| `tes3mp_protocol` | Strong value types, bounded frames, FlatBuffers codecs, negotiation, authentication messages, reliable operations, canonical snapshots, actors, objects, inventory, and VR pose |
+| `tes3mp_protocol` | Strong value types, bounded frames, FlatBuffers codecs, negotiation, authentication messages, reliable operations, canonical snapshots, actors, objects, inventory, melee combat, and VR pose |
 | `tes3mp_transport` | Project-owned connection, channel, queue, lifecycle, reason, and telemetry interfaces |
 | `tes3mp_transport_gns` | Private GameNetworkingSockets adapter with c-ares/OpenSSL dependency composition |
 | `tes3mp_server_core` | Deterministic authentication, canonical worlds, fixed ticks, command intake/reduction, publication, checksums, lifecycle, resync, and sink boundaries |
 | `tes3mp_client_session` | Caller-pumped negotiation, authentication, resume/resync, command output, snapshot ingestion, replication state, and locomotion reconciliation |
 | `tes3mp_server` | Configuration/content loading and real-transport dedicated-server composition |
 | `tes3mp_headless_client` | Scripted real-transport client for bounded integration scenarios |
-| `openmw_tes3mp_adapter` | Shared OpenMW connection, input capture, state application, reconnect, remote presentation, object activation, and inventory integration |
+| `openmw_tes3mp_adapter` | Shared OpenMW connection, input capture, state application, reconnect, remote presentation, object activation, inventory integration, and authoritative melee capture/presentation |
 
 The target graph and include-boundary enforcement live in
 [`components/tes3mp/CMakeLists.txt`](../../components/tes3mp/CMakeLists.txt) and
@@ -40,8 +40,8 @@ GameNetworkingSockets types.
   allocation. Each payload is verifier-checked and semantically validated.
 - The production server negotiates protocol major 1, minors 2–3. Defined
   optional capabilities are VR pose (1), actor replication (2), interactive
-  objects (3), and inventory (4). Content-manifest mismatch rejects before
-  authentication.
+  objects (3), inventory (4), and combat (5). Content-manifest mismatch rejects
+  before authentication. The production server does not yet offer combat (5).
 - Reliable ordered operations, latest-wins canonical snapshots, and ephemeral
   pose samples use distinct delivery/queue semantics.
 - The owned transport boundary supports lifecycle events, bounded outbound
@@ -167,6 +167,34 @@ Primary sources: [`item_catalog.hpp`](../../components/tes3mp/include/tes3mp/ite
 [`inventory_interest_projection.cpp`](../../apps/tes3mp-server/inventory_interest_projection.cpp),
 and [`desktop_providers.cpp`](../../apps/openmw/tes3mp/desktop_providers.cpp).
 
+### Authoritative melee combat foundation
+
+- OpenMW's normal player attack animation and contact selection remain the
+  capture path. At the native hit key, a negotiated combat session suppresses
+  local mutation and sends only attack type/strength, optional actor identity,
+  last observed server tick, and expected combat revisions. Client hit rolls,
+  damage, resources, targets, and wall-clock time are not accepted as outcomes.
+- A shared engine-independent resolver is also used by OpenMW's hit chance,
+  weapon damage, hand-to-hand damage, and fatigue helpers. The server owns the
+  PRNG, attacker fatigue/equipment condition, actor health/fatigue/dead state,
+  cooldown, and separate combat revisions. Damage and death commit atomically
+  with command finalization.
+- Server validation rejects unknown or cross-cell targets, stale revisions,
+  future/expired source ticks, missing contact history, failed authoritative
+  contact/reach, and rate abuse before mutation. Existing session generation,
+  command sequence/ID, entity binding, authority epoch, and canonical revision
+  checks reject stale authority and replay.
+- Private self fatigue/revision and same-cell actor stats replicate through a
+  latest-wins snapshot. Same-cell hit/death facts use a reliable event batch.
+  OpenMW applies confirmed fatigue, actor health/fatigue, native dead state, and
+  deterministic death/resurrection presentation to renderer-only actors.
+
+Primary sources: [`melee_combat.cpp`](../../components/tes3mp/protocol/melee_combat.cpp),
+[`combat_world.cpp`](../../components/tes3mp/server_core/combat_world.cpp),
+[`combat_replication.cpp`](../../components/tes3mp/protocol/combat_replication.cpp),
+[`combat_interest_projection.cpp`](../../apps/tes3mp-server/combat_interest_projection.cpp),
+and [`character.cpp`](../../apps/openmw/mwmechanics/character.cpp).
+
 ## Partial foundations and known limitations
 
 - The OpenMW desktop, scripted headless, and shared PC-VR provider architecture
@@ -182,8 +210,20 @@ and [`desktop_providers.cpp`](../../apps/openmw/tes3mp/desktop_providers.cpp).
   parity, schedules, needs, dynamic spawning/removal, or authority delegation.
 - Interactive traps publish bounded outcomes but full spell-effect resolution
   does not exist. Lockpicking and probe disarming do not exist.
-- Inventory does not include barter/trade, merchant stock/restocking, durability
-  damage from combat, or disk persistence.
+- Inventory does not include barter/trade, merchant stock/restocking, disk
+  persistence, or binding its item condition to combat's equipped-weapon wear.
+- Combat capability wiring is executable through the server-application seam,
+  but the dedicated-server entry point deliberately does not advertise it yet.
+  Production still needs manifest-derived player/actor combat stats, equipment
+  binding, settings, and a concrete bounded historical contact/reach provider;
+  enabling the capability without those inputs would invent gameplay state.
+- The current resolver covers direct player-versus-server-actor weapon and
+  hand-to-hand hit, fatigue, resistance, critical/knockdown multipliers, weapon
+  wear, damage, and death. Actor attacks, PvP/P2P, blocking decisions, difficulty
+  scaling, skill advancement, AI aggression, hit reactions/sounds, on-strike
+  enchantments, elemental shields, disease, Lua hit callbacks, general magic,
+  canonical resurrection/respawn policy, and client weapon-wear presentation
+  remain unimplemented.
 - The identity file survives restart; canonical world, object, actor, and
   inventory state do not.
 - Content is supplied through bounded hand-authored server artifacts. General
@@ -194,25 +234,15 @@ and [`desktop_providers.cpp`](../../apps/openmw/tes3mp/desktop_providers.cpp).
 
 ## Work still required
 
-### Next milestone: combat foundation
+### Next milestone: production combat parity
 
-The next implementation milestone is discovery and selection of a bounded
-combat package covering stats, attacks, damage, magic, death, resurrection, and
-respawn. Before production code lands it must identify the relevant OpenMW
-seams and specify:
-
-- semantic client intents versus canonical outcomes and presentation events;
-- canonical actor/player stat ownership and revision boundaries;
-- server-known target, cell, reach, timing, resource, cooldown, and authority
-  validation;
-- lag policy without trusting client timestamps;
-- deterministic damage/effect ordering and atomic death transitions;
-- rate abuse, forged targets, impossible reach, stale authority, resource
-  bypass, and replayed-command tests; and
-- the smallest real OpenMW round trip that proves authoritative behavior.
-
-This milestone should update this section directly. It should not create a
-separate discovery report or multi-phase diary.
+Feed manifest-derived OpenMW combat settings and actor/player stat/equipment
+state into the canonical combat world, implement bounded historical native
+contact/reach validation, and enable combat capability 5 in the dedicated
+server. Then extend the same authoritative outcome pipeline in single-player
+ordering through blocking, difficulty scaling, skill/AI consequences, on-strike
+magic and retaliation, actor attacks, death handling, resurrection, and respawn.
+PvP/P2P remains outside this slice.
 
 ### Required before the desktop/PC-VR release
 
@@ -254,10 +284,14 @@ last-known product results, not a guarantee about later commits:
 - provenance accounted for 478 intentional differences and 95 dependency
   declarations.
 
-The documentation consolidation subsequently passed all 177 repository Python
-tests and indexed baseline verification with 395 intentional differences and
-the same 95 dependency declarations. Product C++ binaries were not rebuilt for
-the prose-only consolidation.
+The combat-foundation working tree subsequently passed the standalone MSVC
+C++20 aggregate, dedicated-server app and combat-interest executables, the
+full-tree RelWithDebInfo `openmw` build, the OpenMW adapter executable, the
+FlatBuffers selection proof, patch-registry verification, and baseline
+provenance verification. All 177 repository Python tests passed after updating
+the production-schema lock assertion. No live two-process gameplay capture,
+sanitizer profile, non-Windows build, or hardware run was performed for this
+slice.
 
 Use [DEVELOPMENT.md](DEVELOPMENT.md) for commands and record only the newest
 relevant verification here after behavior changes.

@@ -123,14 +123,23 @@ namespace TES3MP::ServerApp
         const std::vector<std::pair<TransportConnectionId, ActorInterestBaselineDelivery>>& actorBaselines,
         const std::vector<std::pair<TransportConnectionId, LatestWinsActorSnapshot>>& actorViews,
         const std::vector<std::pair<TransportConnectionId, InteractiveObjectInterestBaselineDelivery>>& objectBaselines,
-        const std::vector<std::pair<TransportConnectionId, InventoryInterestDelivery>>& inventoryBaselines)
+        const std::vector<std::pair<TransportConnectionId, InventoryInterestDelivery>>& inventoryBaselines,
+        const std::vector<std::pair<TransportConnectionId, LatestWinsCombatSnapshot>>& combatViews,
+        const std::vector<std::pair<TransportConnectionId, ReliableCombatEventBatch>>& combatEvents)
     try
     {
         std::vector<std::vector<std::byte>> frames;
         std::vector<OutboundQueueSet::AtomicMessage> messages;
-        frames.reserve(playerObservations.size() + playerViews.size() + actorBaselines.size() * 2 + actorViews.size()
-            + objectBaselines.size());
-        messages.reserve(frames.capacity());
+        std::size_t frameCount = playerObservations.size() + playerViews.size() + actorBaselines.size() * 2
+            + actorViews.size() + objectBaselines.size() + combatViews.size() + combatEvents.size();
+        for (const auto& [connection, delivery] : inventoryBaselines)
+        {
+            (void)connection;
+            frameCount += delivery.playerInventory.size() + delivery.containers.size()
+                + delivery.groundItems.size() + 1;
+        }
+        frames.reserve(frameCount);
+        messages.reserve(frameCount);
         const auto add = [&](TransportConnectionId connection, TransportChannel channel, MessageClass messageClass,
                              MessageKind kind, std::vector<std::byte> payload) {
             auto frame = encodeProtocolFrame(messageClass, kind, payload);
@@ -167,6 +176,15 @@ namespace TES3MP::ServerApp
                 return false;
         for (const auto& [connection, delivery] : inventoryBaselines)
             if (!appendInventoryInterestMessages(frames, messages, connection, delivery))
+                return false;
+        for (const auto& [connection, view] : combatViews)
+            if (!add(connection, TransportChannel::LatestWins, MessageClass::LatestWinsSnapshot,
+                    MessageKind::LatestWinsCombatSnapshot, encodeLatestWinsCombatSnapshot(view)))
+                return false;
+        for (const auto& [connection, events] : combatEvents)
+            if (!events.events().empty()
+                && !add(connection, TransportChannel::ReliableOrdered, MessageClass::ReliableOperation,
+                    MessageKind::ReliableCombatEventBatch, encodeReliableCombatEventBatch(events)))
                 return false;
         return messages.empty() || queues.enqueueMessagesAtomically(messages) == TransportResult::Accepted;
     }

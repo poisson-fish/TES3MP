@@ -11,6 +11,7 @@
 #include "../mwgui/itemmodel.hpp"
 #include "../mwgui/worlditemmodel.hpp"
 #include "../mwinput/actions.hpp"
+#include "../mwmechanics/creaturestats.hpp"
 #include "../mwrender/replicatedactor.hpp"
 #include "../mwworld/cell.hpp"
 #include "../mwworld/cellstore.hpp"
@@ -29,6 +30,7 @@
 #include <components/esm3/loadcell.hpp>
 #include <components/esm3/loadcont.hpp>
 #include <components/esm3/loaddoor.hpp>
+#include <components/esm3/loadweap.hpp>
 
 #include <algorithm>
 #include <array>
@@ -338,6 +340,7 @@ namespace TES3MP::OpenMWAdapter
         const PresentationProvider* presentation = nullptr;
         std::optional<ObjectInteractionCapture> pendingInteraction;
         std::optional<InventoryTransactionCapture> pendingInventoryTransaction;
+        std::optional<MeleeAttackCapture> pendingMeleeAttack;
         bool interceptorInstalled = false;
 
         void ensureInterceptor(DesktopSemanticInput* self)
@@ -352,6 +355,20 @@ namespace TES3MP::OpenMWAdapter
                 MWWorld::Player& player = world->getPlayer();
                 player.setActivationInterceptor([self](const MWWorld::Ptr& toActivate, const MWWorld::Ptr& actor) {
                     return self->handleActivation(toActivate, actor);
+                });
+                player.setMeleeTargetProvider([self](std::vector<MWWorld::Ptr>& targets) {
+                    auto* presentation = dynamic_cast<const DesktopPresentation*>(self->mImpl->presentation);
+                    if (presentation)
+                        presentation->appendMeleeTargets(targets);
+                });
+                player.setMeleeHitInterceptor([self](float strength, int type, const MWWorld::Ptr& victim) {
+                    auto* presentation = dynamic_cast<const DesktopPresentation*>(self->mImpl->presentation);
+                    if (!presentation)
+                        return false;
+                    auto capture = presentation->captureMeleeAttack(victim, strength, type);
+                    if (capture && !self->mImpl->pendingMeleeAttack)
+                        self->mImpl->pendingMeleeAttack = std::move(*capture);
+                    return capture.has_value();
                 });
                 MWGui::ItemModel::setTransferInterceptor([self](MWGui::ItemModel& source, const MWGui::ItemStack& item,
                                                              std::size_t count, MWGui::ItemModel& target) {
@@ -387,7 +404,10 @@ namespace TES3MP::OpenMWAdapter
             {
                 auto world = MWBase::Environment::get().getWorld();
                 if (world)
+                {
                     world->getPlayer().clearActivationInterceptor();
+                    world->getPlayer().clearMeleeCombatInterceptors();
+                }
                 MWGui::ItemModel::clearTransferInterceptor();
                 MWGui::InventoryWindow::clearUseItemInterceptor();
             }
@@ -416,6 +436,7 @@ namespace TES3MP::OpenMWAdapter
         mImpl->clearInterceptor();
         mImpl->pendingInteraction.reset();
         mImpl->pendingInventoryTransaction.reset();
+        mImpl->pendingMeleeAttack.reset();
     }
 
     bool DesktopSemanticInput::handleActivation(const MWWorld::Ptr& toActivate, const MWWorld::Ptr& player) noexcept
@@ -533,6 +554,16 @@ namespace TES3MP::OpenMWAdapter
         return captured;
     }
 
+    std::optional<MeleeAttackCapture> DesktopSemanticInput::captureMeleeAttack() noexcept
+    {
+        mImpl->ensureInterceptor(this);
+        if (!mImpl->pendingMeleeAttack)
+            return std::nullopt;
+        auto captured = std::move(mImpl->pendingMeleeAttack);
+        mImpl->pendingMeleeAttack.reset();
+        return captured;
+    }
+
     CellTransitionCapture DesktopSemanticInput::captureCellTransition() noexcept
     {
         try
@@ -543,6 +574,7 @@ namespace TES3MP::OpenMWAdapter
                 return {};
             mImpl->pendingInteraction.reset();
             mImpl->pendingInventoryTransaction.reset();
+            mImpl->pendingMeleeAttack.reset();
             if (!current)
                 return {};
             if (!mImpl->mapping)
@@ -650,6 +682,7 @@ namespace TES3MP::OpenMWAdapter
         std::map<ItemStackId, MWWorld::Ptr> presentedGroundItems;
         std::optional<InventoryRevision> observedPlayerInventoryRevision;
         std::optional<CanonicalRevision> observedInventoryCanonicalRevision;
+        std::optional<LatestWinsCombatSnapshot> combatSnapshot;
 
         void clear() noexcept
         {
@@ -685,6 +718,7 @@ namespace TES3MP::OpenMWAdapter
             observedContainerRevisions.clear();
             observedPlayerInventoryRevision.reset();
             observedInventoryCanonicalRevision.reset();
+            combatSnapshot.reset();
         }
 
         void erase(std::map<EntityId, ActorRemote>::iterator iter) noexcept
@@ -918,6 +952,14 @@ namespace TES3MP::OpenMWAdapter
                 if (!found->second.motion.observe(*entry, receivedAt))
                     return ProviderResult::PresentationFailed;
                 found->second.lastObserved = *entry;
+                if (combatSnapshot)
+                {
+                    const auto combat = std::ranges::lower_bound(
+                        combatSnapshot->actors(), observed.actorId, {}, &ActorCombatSnapshot::actorId);
+                    if (combat != combatSnapshot->actors().end() && combat->actorId == observed.actorId
+                        && !replicatedActorResultAccepted(found->second.actor->setDead(combat->dead)))
+                        return ProviderResult::PresentationFailed;
+                }
             }
             if (snapshot.view().entries().size() != observedActors.size())
                 return ProviderResult::PresentationFailed;
@@ -931,6 +973,91 @@ namespace TES3MP::OpenMWAdapter
                 }
                 else
                     ++iter;
+            return ProviderResult::Accepted;
+        }
+
+        void appendMeleeTargets(std::vector<MWWorld::Ptr>& targets) const
+        {
+            for (const auto& [entity, remote] : actorRemotes)
+            {
+                (void)entity;
+                if (remote.actor)
+                    targets.push_back(remote.actor->ptr());
+            }
+        }
+
+        std::optional<MeleeAttackCapture> captureMeleeAttack(
+            const MWWorld::Ptr& victim, float attackStrength, int attackType) const
+        {
+            if (!combatSnapshot || !std::isfinite(attackStrength) || attackStrength < 0.f || attackStrength > 1.f)
+                return std::nullopt;
+            MeleeAttackType type;
+            if (attackType == ESM::Weapon::AT_Chop)
+                type = MeleeAttackType::Chop;
+            else if (attackType == ESM::Weapon::AT_Slash)
+                type = MeleeAttackType::Slash;
+            else if (attackType == ESM::Weapon::AT_Thrust)
+                type = MeleeAttackType::Thrust;
+            else
+                return std::nullopt;
+
+            std::optional<ActorId> target;
+            CombatRevision targetRevision = CombatRevision::initial();
+            if (!victim.isEmpty())
+            {
+                const auto remote = std::ranges::find_if(actorRemotes,
+                    [&](const auto& entry) { return entry.second.actor && entry.second.actor->ptr() == victim; });
+                if (remote == actorRemotes.end() || !remote->second.lastObserved)
+                    return std::nullopt;
+                target = remote->second.lastObserved->actorId();
+                const auto combat = std::ranges::lower_bound(
+                    combatSnapshot->actors(), *target, {}, &ActorCombatSnapshot::actorId);
+                if (combat == combatSnapshot->actors().end() || combat->actorId != *target || combat->dead)
+                    return std::nullopt;
+                targetRevision = combat->combatRevision;
+            }
+            return MeleeAttackCapture{ target, combatSnapshot->serverTick(),
+                combatSnapshot->selfCombatRevision(), targetRevision, type, attackStrength };
+        }
+
+        ProviderResult applyCombat(const LatestWinsCombatSnapshot& snapshot)
+        {
+            if (combatSnapshot && snapshot.serverTick() < combatSnapshot->serverTick())
+                return ProviderResult::Accepted;
+            if (combatSnapshot && snapshot.serverTick() == combatSnapshot->serverTick()
+                && snapshot != *combatSnapshot)
+                return ProviderResult::PresentationFailed;
+            auto world = MWBase::Environment::get().getWorld();
+            if (!world)
+                return ProviderResult::PresentationFailed;
+            auto player = world->getPlayerPtr();
+            auto& playerStats = player.getClass().getCreatureStats(player);
+            auto fatigue = playerStats.getFatigue();
+            fatigue.setCurrent(snapshot.selfFatigue());
+            playerStats.setFatigue(fatigue);
+
+            for (auto& [entity, remote] : actorRemotes)
+            {
+                (void)entity;
+                if (!remote.actor || !remote.lastObserved)
+                    continue;
+                const auto combat = std::ranges::lower_bound(
+                    snapshot.actors(), remote.lastObserved->actorId(), {}, &ActorCombatSnapshot::actorId);
+                if (combat == snapshot.actors().end() || combat->actorId != remote.lastObserved->actorId())
+                    continue;
+                auto& stats = remote.actor->ptr().getClass().getCreatureStats(remote.actor->ptr());
+                if (!combat->dead && stats.isDead())
+                    stats.resurrect();
+                auto health = stats.getHealth();
+                health.setCurrent(combat->health);
+                stats.setHealth(health);
+                auto actorFatigue = stats.getFatigue();
+                actorFatigue.setCurrent(combat->fatigue);
+                stats.setFatigue(actorFatigue);
+                if (!replicatedActorResultAccepted(remote.actor->setDead(combat->dead)))
+                    return ProviderResult::PresentationFailed;
+            }
+            combatSnapshot = snapshot;
             return ProviderResult::Accepted;
         }
 
@@ -1569,6 +1696,43 @@ namespace TES3MP::OpenMWAdapter
         {
             mImpl->clear();
             return ProviderResult::PresentationFailed;
+        }
+    }
+
+    ProviderResult DesktopPresentation::applyCombat(const LatestWinsCombatSnapshot& snapshot,
+        std::span<const ReliableCombatEventBatch> events, MonotonicInstant receivedAt) noexcept
+    {
+        (void)events;
+        (void)receivedAt;
+        try
+        {
+            const auto result = mImpl->applyCombat(snapshot);
+            if (result != ProviderResult::Accepted)
+                mImpl->clear();
+            return result;
+        }
+        catch (...)
+        {
+            mImpl->clear();
+            return ProviderResult::PresentationFailed;
+        }
+    }
+
+    void DesktopPresentation::appendMeleeTargets(std::vector<MWWorld::Ptr>& targets) const
+    {
+        mImpl->appendMeleeTargets(targets);
+    }
+
+    std::optional<MeleeAttackCapture> DesktopPresentation::captureMeleeAttack(
+        const MWWorld::Ptr& victim, float attackStrength, int attackType) const noexcept
+    {
+        try
+        {
+            return mImpl->captureMeleeAttack(victim, attackStrength, attackType);
+        }
+        catch (...)
+        {
+            return std::nullopt;
         }
     }
 

@@ -1,0 +1,29 @@
+namespace TES3MP.Protocol.Schema.CombatCommand;
+
+enum MeleeAttackType : ubyte {
+  Chop = 0,
+  Slash = 1,
+  Thrust = 2,
+}
+
+table ClientCommandHeader {
+  session_id:ulong (id: 0);
+  session_generation:ulong (id: 1);
+  command_sequence:ulong (id: 2);
+  command_id:ulong (id: 3);
+  observed_canonical_revision:ulong (id: 4);
+}
+
+table ClientMeleeAttackCommand {
+  header:ClientCommandHeader (id: 0);
+  target_actor_id:ulong (id: 1);
+  source_server_tick:ulong (id: 2);
+  expected_attacker_revision:ulong (id: 3);
+  expected_target_revision:ulong (id: 4);
+  attack_type:MeleeAttackType (id: 5);
+  attack_strength:float (id: 6);
+}
+
+root_type ClientMeleeAttackCommand;
+file_identifier "T3MC";
+file_extension "t3mc";

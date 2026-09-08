@@ -35,6 +35,7 @@ namespace TES3MP
         MotionOutOfRange,
         ObjectInteractionRejected,
         InventoryTransactionRejected,
+        CombatRejected,
     };
 
     class FinalizedCommandRecord

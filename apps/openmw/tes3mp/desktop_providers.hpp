@@ -87,6 +87,7 @@ namespace TES3MP::OpenMWAdapter
         std::optional<LocomotionIntent> sampleCurrentIntent() noexcept override;
         std::optional<ObjectInteractionCapture> captureObjectInteraction() noexcept override;
         std::optional<InventoryTransactionCapture> captureInventoryTransaction() noexcept override;
+        std::optional<MeleeAttackCapture> captureMeleeAttack() noexcept override;
 
         bool handleActivation(const MWWorld::Ptr& toActivate, const MWWorld::Ptr& player) noexcept;
         bool queueObjectActivation(const MWWorld::Ptr& doorPtr) noexcept;
@@ -116,6 +117,11 @@ namespace TES3MP::OpenMWAdapter
             std::span<const ReliableContainerInventoryBaseline> containers,
             const ReliableGroundItemBaseline& groundItems, const LatestWinsEquipmentSnapshot& equipment,
             MonotonicInstant receivedAt) noexcept override;
+        ProviderResult applyCombat(const LatestWinsCombatSnapshot& snapshot,
+            std::span<const ReliableCombatEventBatch> events, MonotonicInstant receivedAt) noexcept override;
+        void appendMeleeTargets(std::vector<MWWorld::Ptr>& targets) const;
+        std::optional<MeleeAttackCapture> captureMeleeAttack(
+            const MWWorld::Ptr& victim, float attackStrength, int attackType) const noexcept;
         std::optional<InventoryTransactionCapture> inventoryTransfer(MWGui::ItemModel& source, const MWWorld::Ptr& item,
             std::size_t count, MWGui::ItemModel& target) const noexcept;
         std::optional<InventoryTransactionCapture> inventoryUse(const MWWorld::Ptr& item) const noexcept;

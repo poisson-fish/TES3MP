@@ -189,6 +189,7 @@ target_link_libraries(openmw-lib
     osg-ffmpeg-videoplayer
     oics
     components
+    TES3MP::Protocol
 )
 
 if (MSVC AND PRECOMPILE_HEADERS_WITH_MSVC)
@@ -281,7 +282,9 @@ if(BUILD_TESTING)
     target_compile_definitions(openmw-lib PRIVATE TES3MP_OPENMW_DESKTOP_AUTOMATION)
 endif()
 
-target_link_libraries(openmw TES3MP::OpenMWAdapter TES3MP::OpenMWDesktopProviders)
+if(TARGET openmw)
+    target_link_libraries(openmw TES3MP::OpenMWAdapter TES3MP::OpenMWDesktopProviders)
+endif()
 
 if(BUILD_OPENMW_VR AND TARGET openmw_vr)
     target_link_libraries(openmw_vr TES3MP::OpenMWAdapter)

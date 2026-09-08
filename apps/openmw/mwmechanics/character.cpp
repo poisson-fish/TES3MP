@@ -20,6 +20,7 @@
 #include "character.hpp"
 
 #include <array>
+#include <optional>
 #include <unordered_set>
 
 #include <components/esm/records.hpp>
@@ -1107,7 +1108,11 @@ namespace MWMechanics
             // and processing multiple hit keys for a single attack
             if (mReadyToHit)
             {
-                charClass.hit(mPtr, mAttackStrength, attackType, mAttackVictim, mAttackHitPos, mAttackSuccess);
+                const bool intercepted = mPtr == MWMechanics::getPlayer()
+                    && MWBase::Environment::get().getWorld()->getPlayer().interceptMeleeHit(
+                        mAttackStrength, attackType, mAttackVictim);
+                if (!intercepted)
+                    charClass.hit(mPtr, mAttackStrength, attackType, mAttackVictim, mAttackHitPos, mAttackSuccess);
                 mReadyToHit = false;
             }
         }
@@ -1138,15 +1143,22 @@ namespace MWMechanics
                 // so we have to do this early.
                 prepareHit();
 
+                std::optional<int> attackType;
                 if (groupname == "attack1" || groupname == "swimattack1")
-                    charClass.hit(
-                        mPtr, mAttackStrength, ESM::Weapon::AT_Chop, mAttackVictim, mAttackHitPos, mAttackSuccess);
+                    attackType = ESM::Weapon::AT_Chop;
                 else if (groupname == "attack2" || groupname == "swimattack2")
-                    charClass.hit(
-                        mPtr, mAttackStrength, ESM::Weapon::AT_Slash, mAttackVictim, mAttackHitPos, mAttackSuccess);
+                    attackType = ESM::Weapon::AT_Slash;
                 else if (groupname == "attack3" || groupname == "swimattack3")
-                    charClass.hit(
-                        mPtr, mAttackStrength, ESM::Weapon::AT_Thrust, mAttackVictim, mAttackHitPos, mAttackSuccess);
+                    attackType = ESM::Weapon::AT_Thrust;
+                if (attackType)
+                {
+                    const bool intercepted = mPtr == MWMechanics::getPlayer()
+                        && MWBase::Environment::get().getWorld()->getPlayer().interceptMeleeHit(
+                            mAttackStrength, *attackType, mAttackVictim);
+                    if (!intercepted)
+                        charClass.hit(
+                            mPtr, mAttackStrength, *attackType, mAttackVictim, mAttackHitPos, mAttackSuccess);
+                }
             }
         }
         else if (action == "shoot attach")

@@ -1,4 +1,5 @@
 #include <tes3mp/actor_simulation.hpp>
+#include <tes3mp/combat_world.hpp>
 
 #include <algorithm>
 #include <limits>
@@ -161,9 +162,11 @@ namespace TES3MP
         });
     }
 
-    ActorSimulationResult advanceActorSimulation(const CanonicalActorWorld& current, const ActorCatalog& catalog,
-        const CanonicalServerState& players, ServerTick tick, MovementProfile movementProfile,
-        ServerCollisionQuery& collision)
+    namespace
+    {
+        ActorSimulationResult advanceActors(const CanonicalActorWorld& current, const ActorCatalog& catalog,
+            const CanonicalServerState& players, const CanonicalCombatWorld* combat, ServerTick tick,
+            MovementProfile movementProfile, ServerCollisionQuery& collision)
     try
     {
         if (current.actors().size() != catalog.entries().size()
@@ -179,6 +182,27 @@ namespace TES3MP
                 return ActorSimulationError{ ActorSimulationErrorCode::CatalogMismatch, index };
             if (tick < actor.lastChangeTick())
                 return ActorSimulationError{ ActorSimulationErrorCode::TickRegression, index };
+            if (combat)
+            {
+                const auto* combatActor = combat->findActor(actor.actorId());
+                if (!combatActor)
+                    return ActorSimulationError{ ActorSimulationErrorCode::CatalogMismatch, index };
+                if (combatActor->stats.dead)
+                {
+                    if (actor.activity() == ActorActivity::Idle
+                        && actor.velocity() == LinearVelocity3(0, 0, 0))
+                    {
+                        replacements.push_back(actor);
+                        continue;
+                    }
+                    auto replacement = replaceActor(actor, tick, actor.root(), LinearVelocity3(0, 0, 0),
+                        ActorActivity::Idle, actor.waypointIndex(), index);
+                    if (const auto* error = std::get_if<ActorSimulationError>(&replacement))
+                        return *error;
+                    replacements.push_back(std::get<CanonicalActorEntityState>(std::move(replacement)));
+                    continue;
+                }
+            }
             if (!activeCell(players, actor.root().cell()))
             {
                 replacements.push_back(actor);
@@ -234,5 +258,20 @@ namespace TES3MP
     catch (...)
     {
         return ActorSimulationError{ ActorSimulationErrorCode::InvalidResult };
+    }
+    }
+
+    ActorSimulationResult advanceActorSimulation(const CanonicalActorWorld& current, const ActorCatalog& catalog,
+        const CanonicalServerState& players, ServerTick tick, MovementProfile movementProfile,
+        ServerCollisionQuery& collision)
+    {
+        return advanceActors(current, catalog, players, nullptr, tick, movementProfile, collision);
+    }
+
+    ActorSimulationResult advanceActorSimulation(const CanonicalActorWorld& current, const ActorCatalog& catalog,
+        const CanonicalServerState& players, const CanonicalCombatWorld& combat, ServerTick tick,
+        MovementProfile movementProfile, ServerCollisionQuery& collision)
+    {
+        return advanceActors(current, catalog, players, &combat, tick, movementProfile, collision);
     }
 }

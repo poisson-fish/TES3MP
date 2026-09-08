@@ -149,6 +149,11 @@ namespace TES3MP::Detail
     {
         static constexpr std::string_view name = "ContainerId";
     };
+
+    struct CombatRevisionTag
+    {
+        static constexpr std::string_view name = "CombatRevision";
+    };
 }
 
 namespace TES3MP
@@ -191,6 +196,7 @@ namespace TES3MP
     using WorldItemRevision
         = Detail::StrongValue<Detail::WorldItemRevisionTag, Detail::StrongValuePolicy::CounterFromOne>;
     using ContainerId = Detail::StrongValue<Detail::ContainerIdTag, Detail::StrongValuePolicy::Identity>;
+    using CombatRevision = Detail::StrongValue<Detail::CombatRevisionTag, Detail::StrongValuePolicy::CounterFromOne>;
 }
 
 #endif

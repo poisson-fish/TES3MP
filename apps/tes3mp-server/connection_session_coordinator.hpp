@@ -3,6 +3,7 @@
 
 #include "tes3mp/actor_simulation.hpp"
 #include "tes3mp/authenticated_join.hpp"
+#include "tes3mp/combat_world.hpp"
 #include "tes3mp/interactive_object_world.hpp"
 #include "tes3mp/inventory_world.hpp"
 #include "tes3mp/server_session.hpp"
@@ -37,7 +38,7 @@ namespace TES3MP::ServerApp
             CapabilityOffer offer, ServerAuthenticationService& authentication, OutboundQueueSet& queues,
             std::size_t capacity, const CanonicalActorWorld* actors = nullptr,
             const CanonicalInteractiveObjectWorld* objects = nullptr,
-            CanonicalInventoryWorld* inventory = nullptr) noexcept;
+            CanonicalInventoryWorld* inventory = nullptr, const CanonicalCombatWorld* combat = nullptr) noexcept;
 
         ConnectionSessionResult accept(TransportConnectionId connection, AdmissionScopeId scope) noexcept;
         ConnectionSessionResult close(TransportConnectionId connection) noexcept;
@@ -75,6 +76,7 @@ namespace TES3MP::ServerApp
         const CanonicalActorWorld* mActors;
         const CanonicalInteractiveObjectWorld* mObjects;
         CanonicalInventoryWorld* mInventory;
+        const CanonicalCombatWorld* mCombat;
         std::map<TransportConnectionId, Connection> mConnections;
     };
 }

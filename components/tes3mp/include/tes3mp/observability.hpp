@@ -302,6 +302,7 @@ namespace TES3MP
         MotionOutOfRange,
         ObjectInteractionRejected,
         InventoryTransactionRejected,
+        CombatRejected,
     };
 
     struct CommandReductionEvent

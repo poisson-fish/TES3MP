@@ -47,7 +47,8 @@ namespace
     }
 
     TES3MP::ServerHello serverHello(
-        bool pose = false, bool actors = false, bool interactiveObjects = false, bool inventory = false)
+        bool pose = false, bool actors = false, bool interactiveObjects = false, bool inventory = false,
+        bool combat = false)
     {
         auto versions = std::get<TES3MP::ProtocolVersionRange>(TES3MP::ProtocolVersionRange::create(1, 2, 2));
         std::vector<TES3MP::CapabilityId> capabilities;
@@ -59,6 +60,8 @@ namespace
             capabilities.push_back(TES3MP::interactiveObjectReplicationCapability());
         if (inventory)
             capabilities.push_back(TES3MP::inventoryReplicationCapability());
+        if (combat)
+            capabilities.push_back(TES3MP::combatReplicationCapability());
         auto client = std::get<TES3MP::CapabilityOffer>(TES3MP::CapabilityOffer::create(versions, capabilities, {}));
         auto server
             = std::get<TES3MP::CapabilityOffer>(TES3MP::CapabilityOffer::create(std::move(versions), capabilities, {}));
@@ -127,6 +130,17 @@ namespace
         auto created = TES3MP::LatestWinsEquipmentSnapshot::create(value<TES3MP::SessionId>(1), generation,
             value<TES3MP::ServerTick>(tick), value<TES3MP::CanonicalRevision>(revision), members);
         return std::get<TES3MP::LatestWinsEquipmentSnapshot>(std::move(created));
+    }
+
+    TES3MP::LatestWinsCombatSnapshot combatSnapshot(
+        TES3MP::SessionGeneration generation, std::uint64_t tick, std::uint64_t revision)
+    {
+        const std::array actors{ TES3MP::ActorCombatSnapshot{ value<TES3MP::ActorId>(1),
+            TES3MP::CombatRevision::initial(), 25.f, 30.f, false } };
+        auto created = TES3MP::LatestWinsCombatSnapshot::create(value<TES3MP::SessionId>(1), generation,
+            value<TES3MP::ServerTick>(tick), value<TES3MP::CanonicalRevision>(revision),
+            value<TES3MP::PlayerId>(1), TES3MP::CombatRevision::initial(), 80.f, actors);
+        return std::get<TES3MP::LatestWinsCombatSnapshot>(std::move(created));
     }
 
     std::vector<std::byte> frame(
@@ -402,19 +416,29 @@ namespace
             nextInventory.reset();
             return value;
         }
+        std::optional<TES3MP::OpenMWAdapter::MeleeAttackCapture> captureMeleeAttack() noexcept override
+        {
+            ++meleeCalls;
+            auto value = std::move(nextMelee);
+            nextMelee.reset();
+            return value;
+        }
         void clearSessionState() noexcept override
         {
             ++clearCalls;
             nextInteraction.reset();
             nextInventory.reset();
+            nextMelee.reset();
         }
         unsigned calls = 0;
         unsigned interactionCalls = 0;
         unsigned inventoryCalls = 0;
+        unsigned meleeCalls = 0;
         unsigned clearCalls = 0;
         std::optional<TES3MP::OpenMWAdapter::CellTransitionCapture> nextTransition;
         std::optional<TES3MP::OpenMWAdapter::ObjectInteractionCapture> nextInteraction;
         std::optional<TES3MP::OpenMWAdapter::InventoryTransactionCapture> nextInventory;
+        std::optional<TES3MP::OpenMWAdapter::MeleeAttackCapture> nextMelee;
     };
 
     class Presentation final : public TES3MP::OpenMWAdapter::PresentationProvider
@@ -465,6 +489,14 @@ namespace
             lastEquipmentCount = equipment.members.size();
             return TES3MP::OpenMWAdapter::ProviderResult::Accepted;
         }
+        TES3MP::OpenMWAdapter::ProviderResult applyCombat(const TES3MP::LatestWinsCombatSnapshot& snapshot,
+            std::span<const TES3MP::ReliableCombatEventBatch> events, TES3MP::MonotonicInstant) noexcept override
+        {
+            ++combats;
+            lastCombatFatigue = snapshot.selfFatigue();
+            lastCombatEvents = events.size();
+            return TES3MP::OpenMWAdapter::ProviderResult::Accepted;
+        }
         std::optional<TES3MP::ObjectRevision> observedObjectRevision(
             TES3MP::InteractiveObjectId id) const noexcept override
         {
@@ -492,6 +524,7 @@ namespace
         unsigned actors = 0;
         unsigned interactiveObjects = 0;
         unsigned inventories = 0;
+        unsigned combats = 0;
         unsigned poseFallbacks = 0;
         double lastPoseWeight = 0.0;
         std::map<TES3MP::InteractiveObjectId, TES3MP::ObjectRevision> objectRevisions;
@@ -499,6 +532,8 @@ namespace
         std::size_t lastContainerCount = 0;
         std::size_t lastGroundCount = 0;
         std::size_t lastEquipmentCount = 0;
+        float lastCombatFatigue = 0.f;
+        std::size_t lastCombatEvents = 0;
     };
 
     class PoseInput final : public TES3MP::OpenMWAdapter::VrPoseInputProvider
@@ -1164,6 +1199,60 @@ int main()
         TransportChannel::ReliableOrdered);
     inventoryCoordinator->frame(0.01f);
     require(inventoryControl.resyncCompletions == 1 && inventoryPresentation.inventories == 2);
+
+    Input combatInput;
+    Presentation combatPresentation;
+    Status combatStatus;
+    auto combatTransport = std::make_unique<IdleTransport>();
+    auto* combatTransportObserver = combatTransport.get();
+    combatTransportObserver->acceptConnections = true;
+    auto combatClock = std::make_unique<Clock>();
+    auto combatCreated = ClientSessionRuntime::create(
+        *combatTransport, *combatClock, timeouts, SessionGeneration::initial(), outbound);
+    auto combatRuntime = std::get<std::unique_ptr<ClientSessionRuntime>>(std::move(combatCreated));
+    auto combatVersions = std::get<ProtocolVersionRange>(ProtocolVersionRange::create(1, 2, 2));
+    const std::array combatCapabilities{ combatReplicationCapability() };
+    auto combatOffer
+        = std::get<CapabilityOffer>(CapabilityOffer::create(std::move(combatVersions), combatCapabilities, {}));
+    auto combatPassword = AuthenticationMaterial::create(passwordBytes);
+    require(combatPassword && combatRuntime->start(endpoint, ClientHello::fromOffer(std::move(combatOffer)),
+                                  AuthenticationRequest::join(std::move(*combatPassword)))
+            == HeadlessClientResult::Accepted);
+    auto combatCoordinator = makeCoordinator(std::move(combatTransport), std::move(combatClock),
+        std::move(combatRuntime), reconnect, combatInput, combatPresentation, combatStatus);
+    combatCoordinator->frame(0.01f);
+    combatTransportObserver->enqueue(MessageClass::SessionControl, MessageKind::ServerHello,
+        encodeServerHello(serverHello(false, false, false, false, true)), TransportChannel::ReliableOrdered);
+    combatCoordinator->frame(0.01f);
+    combatTransportObserver->enqueue(MessageClass::SessionControl, MessageKind::AuthenticationAccepted,
+        encodeAuthenticationAccepted(accepted(std::byte{ 8 })), TransportChannel::ReliableOrdered);
+    combatTransportObserver->enqueue(MessageClass::ReliableOperation, MessageKind::ReliableInterestBaseline,
+        encodeReliableInterestBaseline(selfBaseline(SessionGeneration::initial())), TransportChannel::ReliableOrdered);
+    combatTransportObserver->enqueue(MessageClass::LatestWinsSnapshot, MessageKind::LatestWinsSnapshot,
+        encodeLatestWinsSnapshot(selfSnapshot(SessionGeneration::initial())), TransportChannel::LatestWins);
+    combatTransportObserver->enqueue(MessageClass::LatestWinsSnapshot, MessageKind::LatestWinsCombatSnapshot,
+        encodeLatestWinsCombatSnapshot(combatSnapshot(SessionGeneration::initial(), 1, 1)),
+        TransportChannel::LatestWins);
+    combatCoordinator->frame(0.01f);
+    require(combatPresentation.combats == 1 && combatPresentation.lastCombatFatigue == 80.f);
+    combatInput.nextMelee = MeleeAttackCapture{ value<ActorId>(1), value<ServerTick>(1),
+        CombatRevision::initial(), CombatRevision::initial(), MeleeAttackType::Chop, 0.75f };
+    const auto sentBeforeCombat = combatTransportObserver->sentFrames.size();
+    combatCoordinator->frame(0.01f);
+    bool foundCombatCommand = false;
+    for (std::size_t index = sentBeforeCombat; index < combatTransportObserver->sentFrames.size(); ++index)
+    {
+        auto decoded = decodeProtocolFrame(combatTransportObserver->sentFrames[index]);
+        auto* commandFrame = std::get_if<DecodedFrame>(&decoded);
+        if (!commandFrame || commandFrame->messageKind() != MessageKind::ClientMeleeAttackCommand)
+            continue;
+        auto decodedCommand = decodeClientMeleeAttackCommand(commandFrame->payload());
+        auto* command = std::get_if<ClientMeleeAttackCommand>(&decodedCommand);
+        foundCombatCommand = command && command->targetActorId == value<ActorId>(1)
+            && command->expectedAttackerRevision == CombatRevision::initial()
+            && command->attackType == MeleeAttackType::Chop && command->attackStrength == 0.75f;
+    }
+    require(foundCombatCommand);
 
     require(
         std::get<TES3MP::OpenMWAdapter::ClientCompositionFailure>(TES3MP::OpenMWAdapter::makeClientCoordinator("", 0, 0,

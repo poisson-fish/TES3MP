@@ -46,6 +46,8 @@ namespace
                 return CommandReductionObservationOutcome::ObjectInteractionRejected;
             case CommandDisposition::InventoryTransactionRejected:
                 return CommandReductionObservationOutcome::InventoryTransactionRejected;
+            case CommandDisposition::CombatRejected:
+                return CommandReductionObservationOutcome::CombatRejected;
         }
         return CommandReductionObservationOutcome::CandidateStateInvalid;
     }
@@ -496,7 +498,10 @@ namespace TES3MP
 
     CanonicalCommandReducer::PreparedBatch CanonicalCommandReducer::prepareCommands(const ServerTickCommandBatch& batch,
         const CanonicalInteractiveObjectWorld* objects, const InteractiveObjectCatalog* objectCatalog,
-        const CanonicalInventoryWorld* inventory, const ItemPrototypeCatalog* itemCatalog)
+        const CanonicalInventoryWorld* inventory, const ItemPrototypeCatalog* itemCatalog,
+        const CanonicalCombatWorld* combat, const CanonicalActorWorld* actors,
+        const OpenMwMeleeSettings* meleeSettings, const MeleeAuthorityPolicy* meleePolicy,
+        ServerMeleeContactQuery* meleeContact)
     {
         PreparedBatch prepared;
         prepared.mBaseVersion = mStateVersion;
@@ -559,6 +564,22 @@ namespace TES3MP
             {
                 prepared.mBaseInventory = *inventory;
                 prepared.mInventory = *inventory;
+            }
+            catch (...)
+            {
+                result.mError = CommandBatchReductionError::CandidateStateInvalid;
+                return prepared;
+            }
+        }
+        const bool hasMeleeAttack = std::ranges::any_of(commands, [](const StampedServerCommand& command) {
+            return std::holds_alternative<MeleeAttackCommandProposal>(command.proposal().payload());
+        });
+        if (hasMeleeAttack && combat != nullptr)
+        {
+            try
+            {
+                prepared.mBaseCombat = *combat;
+                prepared.mCombat = *combat;
             }
             catch (...)
             {
@@ -753,11 +774,11 @@ namespace TES3MP
                                             }
                                         }
                                     }
-                                    else
+                                    else if (const auto* inventoryProposal
+                                        = std::get_if<InventoryCommandProposal>(&proposal.payload()))
                                     {
                                         requiresSpatialAdvance = false;
-                                        const auto& proposalCommand
-                                            = std::get<InventoryCommandProposal>(proposal.payload()).command();
+                                        const auto& proposalCommand = inventoryProposal->command();
                                         if (!prepared.mInventory || itemCatalog == nullptr)
                                             disposition = CommandDisposition::InventoryTransactionRejected;
                                         else
@@ -769,6 +790,35 @@ namespace TES3MP
                                             disposition = outcome.code == InventoryTransactionResultCode::Success
                                                 ? CommandDisposition::Applied
                                                 : CommandDisposition::InventoryTransactionRejected;
+                                        }
+                                    }
+                                    else
+                                    {
+                                        requiresSpatialAdvance = false;
+                                        const auto& melee
+                                            = std::get<MeleeAttackCommandProposal>(proposal.payload()).command();
+                                        if (!prepared.mCombat || !actors || !meleeSettings || !meleePolicy
+                                            || !meleeContact)
+                                            disposition = CommandDisposition::CombatRejected;
+                                        else
+                                        {
+                                            const AuthoritativeMeleeAttack attack{ session->playerId(),
+                                                melee.targetActorId, melee.expectedAttackerRevision,
+                                                melee.expectedTargetRevision, melee.sourceServerTick,
+                                                melee.attackType, melee.attackStrength };
+                                            auto combatResult = prepareAuthoritativeMeleeAttack(*prepared.mCombat,
+                                                *prepared.mState, *actors, *meleeSettings, *meleePolicy,
+                                                *meleeContact, tick, attack);
+                                            if (combatResult.disposition == AuthoritativeMeleeDisposition::Applied
+                                                && combatResult.candidate)
+                                            {
+                                                prepared.mCombat = std::move(*combatResult.candidate);
+                                                if (combatResult.event)
+                                                    prepared.mCombatEvents.push_back(*combatResult.event);
+                                                disposition = CommandDisposition::Applied;
+                                            }
+                                            else
+                                                disposition = CommandDisposition::CombatRejected;
                                         }
                                     }
                                     const auto advanced = requiresSpatialAdvance
@@ -974,20 +1024,33 @@ namespace TES3MP
         return prepareTickState(prepare(batch, objects, objectCatalog, inventory, itemCatalog), batch);
     }
 
+    CanonicalCommandReducer::PreparedBatch CanonicalCommandReducer::prepareTick(
+        const ServerTickCommandBatch& batch, CanonicalCommandWorlds worlds)
+    {
+        return prepareTickState(prepareCommands(batch, worlds.interactiveObjects, worlds.interactiveObjectCatalog,
+            worlds.inventory, worlds.itemCatalog, worlds.combat, worlds.actors, worlds.meleeSettings,
+            worlds.meleePolicy, worlds.meleeContact), batch);
+    }
+
     bool CanonicalCommandReducer::commitPrepared(
-        PreparedBatch&& prepared, CanonicalInteractiveObjectWorld* objects, CanonicalInventoryWorld* inventory)
+        PreparedBatch&& prepared, CanonicalInteractiveObjectWorld* objects, CanonicalInventoryWorld* inventory,
+        CanonicalCombatWorld* combat)
     {
         if (prepared.mBaseVersion != mStateVersion || prepared.mBaseCanonicalRevision != mCanonicalRevision
             || !prepared.mState || !prepared.mPublication || (prepared.mInteractiveObjects && objects == nullptr)
             || (prepared.mBaseInteractiveObjects && (!objects || *objects != *prepared.mBaseInteractiveObjects))
             || (prepared.mInventory && inventory == nullptr)
-            || (prepared.mBaseInventory && (!inventory || *inventory != *prepared.mBaseInventory)))
+            || (prepared.mBaseInventory && (!inventory || *inventory != *prepared.mBaseInventory))
+            || (prepared.mCombat && combat == nullptr)
+            || (prepared.mBaseCombat && (!combat || *combat != *prepared.mBaseCombat)))
             return false;
         mState = std::move(prepared.mState);
         if (prepared.mInteractiveObjects)
             *objects = std::move(*prepared.mInteractiveObjects);
         if (prepared.mInventory)
             *inventory = std::move(*prepared.mInventory);
+        if (prepared.mCombat)
+            *combat = std::move(*prepared.mCombat);
         mStateVersion = prepared.mStateVersion;
         mCanonicalRevision = prepared.mCanonicalRevision;
         mCheckpointTick = prepared.mCheckpointTick;
@@ -1001,23 +1064,28 @@ namespace TES3MP
 
     bool CanonicalCommandReducer::commit(PreparedBatch&& prepared)
     {
-        return commitPrepared(std::move(prepared), nullptr, nullptr);
+        return commitPrepared(std::move(prepared), nullptr, nullptr, nullptr);
     }
 
     bool CanonicalCommandReducer::commit(PreparedBatch&& prepared, CanonicalInteractiveObjectWorld& objects)
     {
-        return commitPrepared(std::move(prepared), &objects, nullptr);
+        return commitPrepared(std::move(prepared), &objects, nullptr, nullptr);
     }
 
     bool CanonicalCommandReducer::commit(PreparedBatch&& prepared, CanonicalInventoryWorld& inventory)
     {
-        return commitPrepared(std::move(prepared), nullptr, &inventory);
+        return commitPrepared(std::move(prepared), nullptr, &inventory, nullptr);
     }
 
     bool CanonicalCommandReducer::commit(
         PreparedBatch&& prepared, CanonicalInteractiveObjectWorld& objects, CanonicalInventoryWorld& inventory)
     {
-        return commitPrepared(std::move(prepared), &objects, &inventory);
+        return commitPrepared(std::move(prepared), &objects, &inventory, nullptr);
+    }
+
+    bool CanonicalCommandReducer::commit(PreparedBatch&& prepared, CanonicalCommandWorlds worlds)
+    {
+        return commitPrepared(std::move(prepared), worlds.interactiveObjects, worlds.inventory, worlds.combat);
     }
 
     CommandBatchReductionResult CanonicalCommandReducer::apply(const ServerTickCommandBatch& batch)

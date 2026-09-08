@@ -3,6 +3,7 @@
 
 #include <tes3mp/actor_replication.hpp>
 #include <tes3mp/client_locomotion.hpp>
+#include <tes3mp/combat_replication.hpp>
 #include <tes3mp/client_session.hpp>
 #include <tes3mp/interactive_object_replication.hpp>
 #include <tes3mp/inventory_replication.hpp>
@@ -88,6 +89,16 @@ namespace TES3MP::OpenMWAdapter
         std::optional<WorldItemRevision> expectedWorldItemRevision;
     };
 
+    struct MeleeAttackCapture
+    {
+        std::optional<ActorId> target;
+        ServerTick sourceTick;
+        CombatRevision expectedAttackerRevision = CombatRevision::initial();
+        CombatRevision expectedTargetRevision = CombatRevision::initial();
+        MeleeAttackType attackType = MeleeAttackType::Chop;
+        float attackStrength = 0.f;
+    };
+
     class SemanticInputProvider
     {
     public:
@@ -99,6 +110,7 @@ namespace TES3MP::OpenMWAdapter
         {
             return std::nullopt;
         }
+        virtual std::optional<MeleeAttackCapture> captureMeleeAttack() noexcept { return std::nullopt; }
         virtual void clearSessionState() noexcept {}
     };
 
@@ -130,6 +142,11 @@ namespace TES3MP::OpenMWAdapter
         virtual ProviderResult applyInventory(const ReliablePlayerInventoryBaseline&,
             std::span<const ReliableContainerInventoryBaseline>, const ReliableGroundItemBaseline&,
             const LatestWinsEquipmentSnapshot&, MonotonicInstant) noexcept
+        {
+            return ProviderResult::Accepted;
+        }
+        virtual ProviderResult applyCombat(const LatestWinsCombatSnapshot&,
+            std::span<const ReliableCombatEventBatch>, MonotonicInstant) noexcept
         {
             return ProviderResult::Accepted;
         }

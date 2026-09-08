@@ -2,6 +2,7 @@
 
 #include "actor_interest_projection.hpp"
 #include "connection_session_coordinator.hpp"
+#include "combat_interest_projection.hpp"
 #include "interactive_object_interest_projection.hpp"
 #include "interest_projection.hpp"
 #include "inventory_interest_projection.hpp"
@@ -63,6 +64,14 @@ namespace TES3MP::ServerApp
                     return false;
                 inventoryBaselines.emplace_back(mConnection, std::move(*inventoryBaseline));
             }
+            const auto combatCapable = joiningSession && joiningSession->negotiatedHello()
+                && std::ranges::binary_search(joiningSession->negotiatedHello()->negotiatedCapabilities(),
+                    combatReplicationCapability());
+            auto combatSnapshot = combatCapable && mCombat && mActors
+                ? projectCombatSnapshot(after, *mActors, *mCombat, join.session, tick, revision)
+                : std::optional<LatestWinsCombatSnapshot>{};
+            if (combatCapable && (!mCombat || !mActors || !combatSnapshot))
+                return false;
             if (mInventory || mPendingInventory)
             {
                 const auto& projectedInventory = mPendingInventory ? *mPendingInventory : *mInventory;
@@ -87,7 +96,7 @@ namespace TES3MP::ServerApp
 
             std::vector<std::vector<std::byte>> owned;
             std::vector<OutboundQueueSet::AtomicMessage> messages;
-            owned.reserve(6 + projected->size() * 2);
+            owned.reserve(8 + projected->size() * 2);
             owned.emplace_back(authentication.begin(), authentication.end());
             auto baselineFrame = encodeProtocolFrame(MessageClass::ReliableOperation,
                 MessageKind::ReliableInterestBaseline, encodeReliableInterestBaseline(baseline->baseline));
@@ -127,6 +136,16 @@ namespace TES3MP::ServerApp
                     return false;
                 owned.push_back(std::get<std::vector<std::byte>>(std::move(objectBaselineFrame)));
                 messages.push_back({ mConnection, TransportChannel::ReliableOrdered, owned.back() });
+            }
+
+            if (combatSnapshot)
+            {
+                auto combatFrame = encodeProtocolFrame(MessageClass::LatestWinsSnapshot,
+                    MessageKind::LatestWinsCombatSnapshot, encodeLatestWinsCombatSnapshot(*combatSnapshot));
+                if (!std::holds_alternative<std::vector<std::byte>>(combatFrame))
+                    return false;
+                owned.push_back(std::get<std::vector<std::byte>>(std::move(combatFrame)));
+                messages.push_back({ mConnection, TransportChannel::LatestWins, owned.back() });
             }
 
             for (const auto& [connection, inventoryBaseline] : inventoryBaselines)

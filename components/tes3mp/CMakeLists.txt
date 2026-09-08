@@ -75,11 +75,13 @@ target_sources(tes3mp_protocol PRIVATE
     include/tes3mp/admission_scope.hpp
     include/tes3mp/authentication.hpp
     include/tes3mp/command_primitives.hpp
+    include/tes3mp/combat_replication.hpp
     include/tes3mp/content_identity.hpp
     include/tes3mp/interactive_object_catalog.hpp
     include/tes3mp/interactive_object_replication.hpp
     include/tes3mp/inventory_replication.hpp
     include/tes3mp/item_catalog.hpp
+    include/tes3mp/melee_combat.hpp
     include/tes3mp/protocol_envelope.hpp
     include/tes3mp/protocol_exchange.hpp
     include/tes3mp/protocol_handshake.hpp
@@ -95,10 +97,12 @@ target_sources(tes3mp_protocol PRIVATE
     protocol/generated/client_hello_generated.h
     protocol/generated/client_interact_object_command_generated.h
     protocol/generated/client_inventory_transaction_command_generated.h
+    protocol/generated/client_melee_attack_command_generated.h
     protocol/generated/client_vr_pose_sample_generated.h
     protocol/generated/latest_wins_snapshot_generated.h
     protocol/generated/latest_wins_actor_snapshot_generated.h
     protocol/generated/latest_wins_equipment_snapshot_generated.h
+    protocol/generated/latest_wins_combat_snapshot_generated.h
     protocol/generated/reliable_actor_interest_baseline_generated.h
     protocol/generated/reliable_interactive_object_interest_baseline_generated.h
     protocol/generated/reliable_container_inventory_baseline_generated.h
@@ -106,6 +110,7 @@ target_sources(tes3mp_protocol PRIVATE
     protocol/generated/reliable_player_inventory_baseline_generated.h
     protocol/generated/reliable_interest_baseline_generated.h
     protocol/generated/reliable_observation_batch_generated.h
+    protocol/generated/reliable_combat_event_batch_generated.h
     protocol/generated/reliable_operation_generated.h
     protocol/generated/server_hello_generated.h
     protocol/generated/server_vr_pose_snapshot_generated.h
@@ -115,10 +120,12 @@ target_sources(tes3mp_protocol PRIVATE
     protocol/actor_catalog.cpp
     protocol/actor_replication.cpp
     protocol/content_identity.cpp
+    protocol/combat_replication.cpp
     protocol/interactive_object_catalog.cpp
     protocol/interactive_object_replication.cpp
     protocol/inventory_replication.cpp
     protocol/item_catalog.cpp
+    protocol/melee_combat.cpp
     protocol/protocol_exchange.cpp
     protocol/protocol_handshake.cpp
     protocol/protocol_frame.cpp
@@ -304,6 +311,7 @@ target_sources(tes3mp_server_core PRIVATE
     include/tes3mp/canonical_resync.hpp
     include/tes3mp/canonical_sinks.hpp
     include/tes3mp/canonical_state.hpp
+    include/tes3mp/combat_world.hpp
     include/tes3mp/deterministic_random.hpp
     include/tes3mp/fixed_tick_scheduler.hpp
     include/tes3mp/interactive_object_world.hpp
@@ -324,6 +332,7 @@ target_sources(tes3mp_server_core PRIVATE
     server_core/canonical_publication.cpp
     server_core/canonical_resync.cpp
     server_core/canonical_state.cpp
+    server_core/combat_world.cpp
     server_core/credential_crypto.cpp
     server_core/deterministic_random.cpp
     server_core/fixed_tick_scheduler.cpp
@@ -373,6 +382,33 @@ set_target_properties(tes3mp_actor_simulation_tests PROPERTIES FOLDER "TES3MP/Te
 tes3mp_enable_runtime_safety(tes3mp_actor_simulation_tests)
 tes3mp_verify_target_dependencies(tes3mp_actor_simulation_tests ALLOWED tes3mp_server_core tes3mp_protocol)
 tes3mp_verify_target_includes(tes3mp_actor_simulation_tests
+    FORBIDDEN ${TES3MP_ENGINE_INDEPENDENT_FORBIDDEN_INCLUDES})
+
+add_executable(tes3mp_melee_combat_tests tests/melee_combat_tests.cpp)
+target_compile_features(tes3mp_melee_combat_tests PRIVATE cxx_std_20)
+target_link_libraries(tes3mp_melee_combat_tests PRIVATE tes3mp_protocol)
+set_target_properties(tes3mp_melee_combat_tests PROPERTIES FOLDER "TES3MP/Tests")
+tes3mp_enable_runtime_safety(tes3mp_melee_combat_tests)
+tes3mp_verify_target_dependencies(tes3mp_melee_combat_tests ALLOWED tes3mp_protocol)
+tes3mp_verify_target_includes(tes3mp_melee_combat_tests
+    FORBIDDEN ${TES3MP_ENGINE_INDEPENDENT_FORBIDDEN_INCLUDES})
+
+add_executable(tes3mp_combat_world_tests tests/combat_world_tests.cpp)
+target_compile_features(tes3mp_combat_world_tests PRIVATE cxx_std_20)
+target_link_libraries(tes3mp_combat_world_tests PRIVATE tes3mp_server_core)
+set_target_properties(tes3mp_combat_world_tests PROPERTIES FOLDER "TES3MP/Tests")
+tes3mp_enable_runtime_safety(tes3mp_combat_world_tests)
+tes3mp_verify_target_dependencies(tes3mp_combat_world_tests ALLOWED tes3mp_server_core tes3mp_protocol)
+tes3mp_verify_target_includes(tes3mp_combat_world_tests
+    FORBIDDEN ${TES3MP_ENGINE_INDEPENDENT_FORBIDDEN_INCLUDES})
+
+add_executable(tes3mp_combat_replication_tests tests/combat_replication_tests.cpp)
+target_compile_features(tes3mp_combat_replication_tests PRIVATE cxx_std_20)
+target_link_libraries(tes3mp_combat_replication_tests PRIVATE tes3mp_protocol)
+set_target_properties(tes3mp_combat_replication_tests PROPERTIES FOLDER "TES3MP/Tests")
+tes3mp_enable_runtime_safety(tes3mp_combat_replication_tests)
+tes3mp_verify_target_dependencies(tes3mp_combat_replication_tests ALLOWED tes3mp_protocol)
+tes3mp_verify_target_includes(tes3mp_combat_replication_tests
     FORBIDDEN ${TES3MP_ENGINE_INDEPENDENT_FORBIDDEN_INCLUDES})
 
 add_executable(tes3mp_interactive_object_catalog_tests tests/interactive_object_catalog_tests.cpp)
@@ -494,6 +530,16 @@ target_sources(tes3mp_test_support PRIVATE
     test_support/spatial_round_trip.cpp
     test_support/scripted_fake_client.cpp
 )
+
+add_executable(tes3mp_combat_command_reducer_tests tests/combat_command_reducer_tests.cpp)
+target_compile_features(tes3mp_combat_command_reducer_tests PRIVATE cxx_std_20)
+target_link_libraries(tes3mp_combat_command_reducer_tests PRIVATE tes3mp_test_support)
+set_target_properties(tes3mp_combat_command_reducer_tests PROPERTIES FOLDER "TES3MP/Tests")
+tes3mp_enable_runtime_safety(tes3mp_combat_command_reducer_tests)
+tes3mp_verify_target_dependencies(tes3mp_combat_command_reducer_tests
+    ALLOWED tes3mp_test_support tes3mp_server_core tes3mp_client_session tes3mp_transport tes3mp_protocol)
+tes3mp_verify_target_includes(tes3mp_combat_command_reducer_tests
+    FORBIDDEN ${TES3MP_ENGINE_INDEPENDENT_FORBIDDEN_INCLUDES})
 
 tes3mp_verify_target_dependencies(tes3mp_protocol)
 tes3mp_verify_target_dependencies(tes3mp_transport ALLOWED tes3mp_protocol)
@@ -919,6 +965,10 @@ add_custom_target(tes3mp_protocol_tests_run
     COMMAND $<TARGET_FILE:tes3mp_actor_catalog_tests>
     COMMAND $<TARGET_FILE:tes3mp_actor_replication_tests>
     COMMAND $<TARGET_FILE:tes3mp_actor_simulation_tests>
+    COMMAND $<TARGET_FILE:tes3mp_melee_combat_tests>
+    COMMAND $<TARGET_FILE:tes3mp_combat_world_tests>
+    COMMAND $<TARGET_FILE:tes3mp_combat_replication_tests>
+    COMMAND $<TARGET_FILE:tes3mp_combat_command_reducer_tests>
     COMMAND $<TARGET_FILE:tes3mp_interactive_object_catalog_tests>
     COMMAND $<TARGET_FILE:tes3mp_interactive_object_world_tests>
     COMMAND $<TARGET_FILE:tes3mp_interactive_object_replication_tests>
@@ -952,6 +1002,10 @@ add_custom_target(tes3mp_protocol_tests_run
         tes3mp_actor_catalog_tests
         tes3mp_actor_replication_tests
         tes3mp_actor_simulation_tests
+        tes3mp_melee_combat_tests
+        tes3mp_combat_world_tests
+        tes3mp_combat_replication_tests
+        tes3mp_combat_command_reducer_tests
         tes3mp_interactive_object_catalog_tests
         tes3mp_interactive_object_world_tests
         tes3mp_interactive_object_replication_tests

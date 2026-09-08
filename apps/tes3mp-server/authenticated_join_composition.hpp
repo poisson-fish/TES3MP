@@ -3,6 +3,7 @@
 
 #include "tes3mp/actor_simulation.hpp"
 #include "tes3mp/authenticated_join.hpp"
+#include "tes3mp/combat_world.hpp"
 #include "tes3mp/inventory_world.hpp"
 #include "tes3mp/server_authentication.hpp"
 #include "tes3mp/transport.hpp"
@@ -71,13 +72,14 @@ namespace TES3MP::ServerApp
         TransportJoinResponseQueue(OutboundQueueSet& queues, TransportConnectionId connection,
             ConnectionSessionCoordinator* sessions = nullptr, const CanonicalActorWorld* actors = nullptr,
             const CanonicalInteractiveObjectWorld* objects = nullptr,
-            CanonicalInventoryWorld* inventory = nullptr) noexcept
+            CanonicalInventoryWorld* inventory = nullptr, const CanonicalCombatWorld* combat = nullptr) noexcept
             : mQueues(queues)
             , mConnection(connection)
             , mSessions(sessions)
             , mActors(actors)
             , mObjects(objects)
             , mInventory(inventory)
+            , mCombat(combat)
         {
         }
 
@@ -93,6 +95,7 @@ namespace TES3MP::ServerApp
         const CanonicalActorWorld* mActors;
         const CanonicalInteractiveObjectWorld* mObjects;
         CanonicalInventoryWorld* mInventory;
+        const CanonicalCombatWorld* mCombat;
         std::optional<CanonicalInventoryWorld> mPendingInventory;
     };
 }

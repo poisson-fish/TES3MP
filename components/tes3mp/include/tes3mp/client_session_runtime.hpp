@@ -4,6 +4,7 @@
 #include "actor_replication.hpp"
 #include "authentication.hpp"
 #include "client_locomotion.hpp"
+#include "combat_replication.hpp"
 #include "headless_client_session.hpp"
 #include "interactive_object_replication.hpp"
 #include "inventory_replication.hpp"
@@ -21,7 +22,8 @@ namespace TES3MP
         AuthenticationRejectedMessage, LatestWinsSnapshot, ReliableObservationBatch, ReliableInterestBaseline,
         LatestWinsActorSnapshot, ReliableActorInterestBaseline, ReliableInteractiveObjectInterestBaseline,
         ReliablePlayerInventoryBaseline, ReliableContainerInventoryBaseline, ReliableGroundItemBaseline,
-        LatestWinsEquipmentSnapshot, ServerVrPoseSnapshot>;
+        LatestWinsEquipmentSnapshot, LatestWinsCombatSnapshot, ReliableCombatEventBatch, ServerVrPoseSnapshot>;
+// Combat is capability-gated and intentionally kept outside the spatial readiness lanes.
 
     enum class ClientRuntimeResult : std::uint8_t
     {
@@ -60,9 +62,11 @@ namespace TES3MP
         bool groundItemsApplied = false;
         bool equipmentSnapshotApplied = false;
         bool inventoryReplicationCompleted = false;
+        bool combatSnapshotApplied = false;
         bool resyncRequested = false;
         bool authenticationAccepted = false;
         std::vector<ServerVrPoseSnapshot> poseSnapshots;
+        std::vector<ReliableCombatEventBatch> combatEvents;
     };
 
     struct ClientRuntimeQueueResult
@@ -98,6 +102,9 @@ namespace TES3MP
             std::optional<EquipmentSlot> slot = std::nullopt,
             std::optional<ContainerRevision> expectedContainerRevision = std::nullopt,
             std::optional<WorldItemRevision> expectedWorldItemRevision = std::nullopt);
+        ClientRuntimeQueueResult queueMeleeAttack(std::optional<ActorId> target, ServerTick sourceTick,
+            CombatRevision expectedAttackerRevision, CombatRevision expectedTargetRevision,
+            MeleeAttackType attackType, float attackStrength);
         std::optional<LocalLocomotionReconciliation> reconcileLocalPresentation(
             bool hardDiscontinuity = false) noexcept;
         ClientRuntimeResult requestResync(ResyncReason reason);
@@ -113,6 +120,8 @@ namespace TES3MP
         std::optional<ResumeToken> takeUnsubmittedResumeToken() noexcept;
         std::optional<PlayerCredential> takePlayerCredential() noexcept;
         std::uint64_t resumeLifetimeMilliseconds() const noexcept { return mResumeLifetimeMilliseconds; }
+        const std::optional<LatestWinsCombatSnapshot>& confirmedCombatSnapshot() const noexcept
+        { return mCombatSnapshot; }
 
     private:
         ClientSessionRuntime(TransportRuntime& transport, MonotonicClock& clock,
@@ -139,10 +148,12 @@ namespace TES3MP
         bool mResyncPlayerInventoryObserved = false;
         bool mResyncGroundItemsObserved = false;
         bool mResyncEquipmentObserved = false;
+        bool mResyncCombatObserved = false;
         std::optional<CommandSequence> mLastQueuedSequence;
         ClientLocomotionHistory mLocomotionHistory;
         std::optional<LocomotionInputTick> mLastLocomotionInputTick;
         std::optional<LocomotionInputSequence> mLastLocomotionInputSequence;
+        std::optional<LatestWinsCombatSnapshot> mCombatSnapshot;
     };
 }
 

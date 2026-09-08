@@ -2,6 +2,7 @@
 #define TES3MP_SERVER_COMMAND_INTAKE_HPP
 
 #include "command_primitives.hpp"
+#include "combat_replication.hpp"
 #include "fixed_tick_scheduler.hpp"
 #include "interactive_object_world.hpp"
 #include "inventory_world.hpp"
@@ -127,8 +128,23 @@ namespace TES3MP
         InventoryTransactionCommand mCommand;
     };
 
+    class MeleeAttackCommandProposal
+    {
+    public:
+        explicit MeleeAttackCommandProposal(ClientMeleeAttackCommand command) noexcept
+            : mCommand(std::move(command))
+        {
+        }
+        constexpr const ClientMeleeAttackCommand& command() const noexcept { return mCommand; }
+        friend constexpr bool operator==(const MeleeAttackCommandProposal&,
+            const MeleeAttackCommandProposal&) noexcept = default;
+    private:
+        ClientMeleeAttackCommand mCommand;
+    };
+
     using ServerCommandPayload = std::variant<PlayerMotionCommandProposal, CellTransitionCommandProposal,
-        PlayerLocomotionCommandProposal, InteractiveObjectCommandProposal, InventoryCommandProposal>;
+        PlayerLocomotionCommandProposal, InteractiveObjectCommandProposal, InventoryCommandProposal,
+        MeleeAttackCommandProposal>;
 
     class ServerCommandProposal
     {
@@ -169,6 +185,15 @@ namespace TES3MP
             , mObservedCanonicalRevision(observedCanonicalRevision)
             , mEntityPrecondition(entityPrecondition)
             , mPayload(std::move(inventory))
+        {
+        }
+
+        ServerCommandProposal(SessionId sessionId, SessionGeneration sessionGeneration, CommandSequence commandSequence,
+            CommandId commandId, CanonicalRevision observedCanonicalRevision, EntityPrecondition entityPrecondition,
+            MeleeAttackCommandProposal melee) noexcept
+            : mSessionId(sessionId), mSessionGeneration(sessionGeneration), mCommandSequence(commandSequence),
+              mCommandId(commandId), mObservedCanonicalRevision(observedCanonicalRevision),
+              mEntityPrecondition(entityPrecondition), mPayload(std::move(melee))
         {
         }
 

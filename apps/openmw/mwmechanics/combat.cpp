@@ -5,6 +5,7 @@
 
 #include <components/misc/rng.hpp>
 #include <components/settings/values.hpp>
+#include <tes3mp/melee_combat.hpp>
 
 #include <components/sceneutil/positionattitudetransform.hpp>
 
@@ -24,6 +25,7 @@
 #include "../mwworld/esmstore.hpp"
 #include "../mwworld/globals.hpp"
 #include "../mwworld/inventorystore.hpp"
+#include "../mwworld/player.hpp"
 
 #include "actorutil.hpp"
 #include "difficultyscaling.hpp"
@@ -315,32 +317,29 @@ namespace MWMechanics
         MWBase::World* world = MWBase::Environment::get().getWorld();
         const MWWorld::Store<ESM::GameSetting>& gmst = world->getStore().get<ESM::GameSetting>();
 
-        float defenseTerm = 0;
         MWMechanics::CreatureStats& victimStats = victim.getClass().getCreatureStats(victim);
-        if (victimStats.getFatigue().getCurrent() >= 0)
-        {
-            // Maybe we should keep an aware state for actors updated every so often instead of testing every time
-            bool unaware = (!victimStats.getAiSequence().isInCombat()) && (attacker == getPlayer())
-                && (!MWBase::Environment::get().getMechanicsManager()->awarenessCheck(attacker, victim));
-            if (!(victimStats.getKnockedDown() || victimStats.isParalyzed() || unaware))
-            {
-                defenseTerm = victimStats.getEvasion();
-            }
-            static const float fCombatInvisoMult = gmst.find("fCombatInvisoMult")->mValue.getFloat();
-            defenseTerm += std::min(100.f,
-                fCombatInvisoMult
-                    * victimStats.getMagicEffects().getOrDefault(ESM::MagicEffect::Chameleon).getMagnitude());
-            defenseTerm += std::min(100.f,
-                fCombatInvisoMult
-                    * victimStats.getMagicEffects().getOrDefault(ESM::MagicEffect::Invisibility).getMagnitude());
-        }
-        float attackTerm = skillValue + (stats.getAttribute(ESM::Attribute::Agility).getModified() / 5.0f)
-            + (stats.getAttribute(ESM::Attribute::Luck).getModified() / 10.0f);
-        attackTerm *= stats.getFatigueTerm();
-        attackTerm += mageffects.getOrDefault(ESM::MagicEffect::FortifyAttack).getMagnitude()
-            - mageffects.getOrDefault(ESM::MagicEffect::Blind).getMagnitude();
-
-        return round(attackTerm - defenseTerm);
+        const bool unaware = (!victimStats.getAiSequence().isInCombat()) && (attacker == getPlayer())
+            && (!MWBase::Environment::get().getMechanicsManager()->awarenessCheck(attacker, victim));
+        TES3MP::OpenMwMeleeSettings settings;
+        settings.combatInvisibilityMultiplier = gmst.find("fCombatInvisoMult")->mValue.getFloat();
+        TES3MP::OpenMwMeleeAttacker attackerState;
+        attackerState.weaponSkill = static_cast<float>(skillValue);
+        attackerState.agility = stats.getAttribute(ESM::Attribute::Agility).getModified();
+        attackerState.luck = stats.getAttribute(ESM::Attribute::Luck).getModified();
+        attackerState.fatigueTerm = stats.getFatigueTerm();
+        attackerState.fortifyAttack = mageffects.getOrDefault(ESM::MagicEffect::FortifyAttack).getMagnitude();
+        attackerState.blind = mageffects.getOrDefault(ESM::MagicEffect::Blind).getMagnitude();
+        TES3MP::OpenMwMeleeVictim victimState;
+        victimState.evasion = victimStats.getEvasion();
+        victimState.chameleon
+            = victimStats.getMagicEffects().getOrDefault(ESM::MagicEffect::Chameleon).getMagnitude();
+        victimState.invisibility
+            = victimStats.getMagicEffects().getOrDefault(ESM::MagicEffect::Invisibility).getMagnitude();
+        victimState.fatigueNonNegative = victimStats.getFatigue().getCurrent() >= 0;
+        victimState.knockedDown = victimStats.getKnockedDown();
+        victimState.paralyzed = victimStats.isParalyzed();
+        victimState.unaware = unaware;
+        return TES3MP::openMwMeleeHitChance(settings, attackerState, victimState);
     }
 
     void applyElementalShields(const MWWorld::Ptr& attacker, const MWWorld::Ptr& victim)
@@ -449,11 +448,6 @@ namespace MWMechanics
             return;
 
         const bool weaphashealth = weapon.getClass().hasItemHealth(weapon);
-        if (weaphashealth)
-        {
-            damage *= weapon.getClass().getItemNormalizedHealth(weapon);
-        }
-
         static const float fDamageStrengthBase = MWBase::Environment::get()
                                                      .getESMStore()
                                                      ->get<ESM::GameSetting>()
@@ -464,9 +458,12 @@ namespace MWMechanics
                                                      ->get<ESM::GameSetting>()
                                                      .find("fDamageStrengthMult")
                                                      ->mValue.getFloat();
-        damage *= fDamageStrengthBase
-            + (attacker.getClass().getCreatureStats(attacker).getAttribute(ESM::Attribute::Strength).getModified()
-                * fDamageStrengthMult * 0.1f);
+        TES3MP::OpenMwMeleeSettings settings;
+        settings.damageStrengthBase = fDamageStrengthBase;
+        settings.damageStrengthMultiplier = fDamageStrengthMult;
+        damage = TES3MP::openMwAdjustedWeaponDamage(settings,
+            attacker.getClass().getCreatureStats(attacker).getAttribute(ESM::Attribute::Strength).getModified(),
+            weaphashealth ? weapon.getClass().getItemNormalizedHealth(weapon) : 1.f, weaphashealth, damage);
     }
 
     void getHandToHandDamage(
@@ -475,9 +472,6 @@ namespace MWMechanics
         const MWWorld::ESMStore& store = *MWBase::Environment::get().getESMStore();
         static const float minstrike = store.get<ESM::GameSetting>().find("fMinHandToHandMult")->mValue.getFloat();
         static const float maxstrike = store.get<ESM::GameSetting>().find("fMaxHandToHandMult")->mValue.getFloat();
-        damage = static_cast<float>(attacker.getClass().getSkill(attacker, ESM::Skill::HandToHand));
-        damage *= minstrike + ((maxstrike - minstrike) * attackStrength);
-
         MWMechanics::CreatureStats& otherstats = victim.getClass().getCreatureStats(victim);
         healthdmg = otherstats.isParalyzed() || otherstats.getKnockedDown();
         bool isWerewolf = (attacker.getClass().isNpc() && attacker.getClass().getNpcStats(attacker).isWerewolf());
@@ -487,25 +481,21 @@ namespace MWMechanics
         // 1 = Factor into werewolf hand-to-hand combat.
         // 2 = Ignore werewolves.
         const int factorStrength = Settings::game().mStrengthInfluencesHandToHand;
-        if (factorStrength == 1 || (factorStrength == 2 && !isWerewolf))
-        {
-            damage
-                *= attacker.getClass().getCreatureStats(attacker).getAttribute(ESM::Attribute::Strength).getModified()
-                / 40.0f;
-        }
-
         if (isWerewolf)
-        {
             healthdmg = true;
-            // GLOB instead of GMST because it gets updated during a quest
-            damage *= MWBase::Environment::get().getWorld()->getGlobalFloat(MWWorld::Globals::sWerewolfClawMult);
-        }
-        if (healthdmg)
-        {
-            static const float fHandtoHandHealthPer
-                = store.get<ESM::GameSetting>().find("fHandtoHandHealthPer")->mValue.getFloat();
-            damage *= fHandtoHandHealthPer;
-        }
+        static const float fHandtoHandHealthPer
+            = store.get<ESM::GameSetting>().find("fHandtoHandHealthPer")->mValue.getFloat();
+        TES3MP::OpenMwMeleeSettings settings;
+        settings.minimumHandToHandMultiplier = minstrike;
+        settings.maximumHandToHandMultiplier = maxstrike;
+        settings.handToHandHealthPercent = fHandtoHandHealthPer;
+        damage = TES3MP::openMwHandToHandDamage(settings,
+            static_cast<float>(attacker.getClass().getSkill(attacker, ESM::Skill::HandToHand)),
+            attacker.getClass().getCreatureStats(attacker).getAttribute(ESM::Attribute::Strength).getModified(),
+            attackStrength, factorStrength == 1 || (factorStrength == 2 && !isWerewolf), isWerewolf,
+            isWerewolf ? MWBase::Environment::get().getWorld()->getGlobalFloat(MWWorld::Globals::sWerewolfClawMult)
+                       : 1.f,
+            healthdmg);
 
         MWBase::SoundManager* sndMgr = MWBase::Environment::get().getSoundManager();
         auto& prng = MWBase::Environment::get().getWorld()->getPrng();
@@ -539,9 +529,21 @@ namespace MWMechanics
 
         if (!godmode)
         {
-            float fatigueLoss = fFatigueAttackBase + normalizedEncumbrance * fFatigueAttackMult;
+            TES3MP::OpenMwMeleeSettings settings;
+            settings.fatigueAttackBase = fFatigueAttackBase;
+            settings.fatigueAttackMultiplier = fFatigueAttackMult;
+            settings.weaponFatigueMultiplier = fWeaponFatigueMult;
+            TES3MP::OpenMwMeleeAttacker attackerState;
+            attackerState.normalizedEncumbrance = normalizedEncumbrance;
+            TES3MP::OpenMwMeleeAttempt attempt;
+            attempt.attackStrength = attackStrength;
             if (!weapon.isEmpty())
-                fatigueLoss += weapon.getClass().getWeight(weapon) * attackStrength * fWeaponFatigueMult;
+            {
+                TES3MP::OpenMwMeleeWeapon weaponState;
+                weaponState.weight = weapon.getClass().getWeight(weapon);
+                attempt.weapon = weaponState;
+            }
+            const float fatigueLoss = TES3MP::openMwMeleeFatigueCost(settings, attackerState, attempt);
             fatigue.setCurrent(fatigue.getCurrent() - fatigueLoss);
             stats.setFatigue(fatigue);
         }
@@ -636,6 +638,8 @@ namespace MWMechanics
         else
             MWBase::Environment::get().getMechanicsManager()->getActorsInRange(
                 actorPos, static_cast<float>(Settings::game().mActorsProcessingRange), targets);
+        if (actor == getPlayer())
+            world->getPlayer().appendMeleeTargets(targets);
 
         for (MWWorld::Ptr& target : targets)
         {

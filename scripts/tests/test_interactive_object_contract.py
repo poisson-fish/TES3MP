@@ -146,7 +146,8 @@ class InteractiveObjectContractTests(unittest.TestCase):
         self.assertIn("applyInteractiveObjects", adapter_src)
         production_capabilities = (
             "const std::array optional{ vrPoseCapability(), actorReplicationCapability(), "
-            "interactiveObjectReplicationCapability(), inventoryReplicationCapability() };"
+            "interactiveObjectReplicationCapability(), inventoryReplicationCapability(), "
+            "combatReplicationCapability() };"
         )
         old_capabilities = "const std::array optional{ vrPoseCapability(), actorReplicationCapability() };"
         for src in (adapter_src, connection_src):

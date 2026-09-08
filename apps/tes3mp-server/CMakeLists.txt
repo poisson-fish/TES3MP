@@ -8,6 +8,8 @@ add_library(tes3mp_server_app STATIC
     interactive_object_content.cpp
     actor_interest_projection.hpp
     actor_interest_projection.cpp
+    combat_interest_projection.hpp
+    combat_interest_projection.cpp
     authenticated_join_composition.hpp
     authenticated_join_composition.cpp
     connection_session_coordinator.hpp
@@ -47,8 +49,21 @@ set_target_properties(tes3mp_server_app_tests PROPERTIES FOLDER "TES3MP/Tests")
 tes3mp_enable_runtime_safety(tes3mp_server_app_tests)
 add_custom_target(tes3mp_server_app_tests_run
     COMMAND $<TARGET_FILE:tes3mp_server_app_tests>
-    DEPENDS tes3mp_server_app_tests
+    COMMAND $<TARGET_FILE:tes3mp_combat_interest_projection_tests>
+    DEPENDS tes3mp_server_app_tests tes3mp_combat_interest_projection_tests
     COMMENT "Running TES3MP dedicated-server app contracts")
+
+add_executable(tes3mp_combat_interest_projection_tests combat_interest_projection_tests.cpp)
+target_compile_features(tes3mp_combat_interest_projection_tests PRIVATE cxx_std_20)
+target_link_libraries(tes3mp_combat_interest_projection_tests PRIVATE tes3mp_server_app)
+set_target_properties(tes3mp_combat_interest_projection_tests PROPERTIES FOLDER "TES3MP/Tests")
+tes3mp_enable_runtime_safety(tes3mp_combat_interest_projection_tests)
+tes3mp_verify_target_dependencies(tes3mp_combat_interest_projection_tests ALLOWED tes3mp_server_app)
+
+add_custom_target(tes3mp_combat_interest_projection_tests_run
+    COMMAND $<TARGET_FILE:tes3mp_combat_interest_projection_tests>
+    DEPENDS tes3mp_combat_interest_projection_tests
+    COMMENT "Running TES3MP combat interest projection contracts")
 
 if(TES3MP_ENABLE_GNS_TRANSPORT)
     add_executable(tes3mp_server main.cpp)

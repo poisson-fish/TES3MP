@@ -17,7 +17,8 @@ namespace TES3MP::OpenMWAdapter
         {
             auto versions = std::get<ProtocolVersionRange>(ProtocolVersionRange::create(1, 2, 3));
             const std::array optional{ vrPoseCapability(), actorReplicationCapability(),
-                interactiveObjectReplicationCapability(), inventoryReplicationCapability() };
+                interactiveObjectReplicationCapability(), inventoryReplicationCapability(),
+                combatReplicationCapability() };
             auto offer = std::get<CapabilityOffer>(
                 CapabilityOffer::create(std::move(versions), optional, {}, contentManifest));
             return ClientHello::fromOffer(std::move(offer));
@@ -53,6 +54,13 @@ namespace TES3MP::OpenMWAdapter
             return hello
                 && std::binary_search(hello->negotiatedCapabilities().begin(), hello->negotiatedCapabilities().end(),
                     inventoryReplicationCapability());
+        }
+
+        bool combatNegotiated(const ClientSessionRuntime& runtime) noexcept
+        {
+            const auto& hello = runtime.session().stateMachine().negotiatedHello();
+            return hello && std::binary_search(hello->negotiatedCapabilities().begin(),
+                hello->negotiatedCapabilities().end(), combatReplicationCapability());
         }
 
         struct ResumeContinuity
@@ -170,6 +178,7 @@ namespace TES3MP::OpenMWAdapter
                     mResyncActorBaseline = mResyncActorBaseline || advanced.actorBaselineCompleted;
                     mResyncObjectBaseline = mResyncObjectBaseline || advanced.interactiveObjectBaselineCompleted;
                     mResyncInventory = mResyncInventory || advanced.inventoryReplicationCompleted;
+                    mResyncCombat = mResyncCombat || advanced.combatSnapshotApplied;
                 }
                 if (advanced.authenticationAccepted)
                 {
@@ -319,6 +328,15 @@ namespace TES3MP::OpenMWAdapter
                         return;
                     }
                 }
+                const auto& combat = mRuntime->confirmedCombatSnapshot();
+                if ((advanced.combatSnapshotApplied || !advanced.combatEvents.empty()) && combat)
+                {
+                    if (mPresentation.applyCombat(*combat, advanced.combatEvents, now) != ProviderResult::Accepted)
+                    {
+                        closeForProviderFailure(ProviderResult::PresentationFailed);
+                        return;
+                    }
+                }
                 if (snapshot)
                 {
                     mPoseEvidence.retain(snapshot->view().entries());
@@ -362,7 +380,8 @@ namespace TES3MP::OpenMWAdapter
                 }
                 if (mAwaitingResync && mResyncPlayerBaseline && (!actorsNegotiated(*mRuntime) || mResyncActorBaseline)
                     && (!interactiveObjectsNegotiated(*mRuntime) || mResyncObjectBaseline)
-                    && (!inventoryNegotiated(*mRuntime) || mResyncInventory))
+                    && (!inventoryNegotiated(*mRuntime) || mResyncInventory)
+                    && (!combatNegotiated(*mRuntime) || mResyncCombat))
                 {
                     mAwaitingResync = false;
                     mControl->resyncCompleted();
@@ -403,6 +422,7 @@ namespace TES3MP::OpenMWAdapter
                         mResyncActorBaseline = false;
                         mResyncObjectBaseline = false;
                         mResyncInventory = false;
+                        mResyncCombat = false;
                     }
                 }
                 if (mReady && !mPendingCellTransition && !mDeferredCellTransition && !captured.transition
@@ -430,6 +450,21 @@ namespace TES3MP::OpenMWAdapter
                                 transaction->stackId, transaction->count, transaction->expectedInventoryRevision,
                                 transaction->interactionOrigin, transaction->containerId, transaction->slot,
                                 transaction->expectedContainerRevision, transaction->expectedWorldItemRevision);
+                        if (queued.result != ClientRuntimeResult::Accepted || !queued.sequence)
+                        {
+                            closeTerminal(ConnectionStatus::TransportFailed);
+                            return;
+                        }
+                    }
+                }
+                if (mReady && !mAwaitingResync && !mPendingCellTransition && !mDeferredCellTransition
+                    && !captured.transition && combatNegotiated(*mRuntime))
+                {
+                    if (auto attack = mInput.captureMeleeAttack())
+                    {
+                        const auto queued = mRuntime->queueMeleeAttack(attack->target, attack->sourceTick,
+                            attack->expectedAttackerRevision, attack->expectedTargetRevision,
+                            attack->attackType, attack->attackStrength);
                         if (queued.result != ClientRuntimeResult::Accepted || !queued.sequence)
                         {
                             closeTerminal(ConnectionStatus::TransportFailed);
@@ -549,6 +584,7 @@ namespace TES3MP::OpenMWAdapter
                 mResyncActorBaseline = false;
                 mResyncObjectBaseline = false;
                 mResyncInventory = false;
+                mResyncCombat = false;
                 mMinimumActorBaselineRevision.reset();
                 mMinimumObjectBaselineRevision.reset();
                 mMinimumInventoryRevision.reset();
@@ -664,6 +700,7 @@ namespace TES3MP::OpenMWAdapter
             bool mResyncActorBaseline = false;
             bool mResyncObjectBaseline = false;
             bool mResyncInventory = false;
+            bool mResyncCombat = false;
             std::optional<CanonicalRevision> mMinimumActorBaselineRevision;
             std::optional<CanonicalRevision> mMinimumObjectBaselineRevision;
             std::optional<CanonicalRevision> mMinimumInventoryRevision;

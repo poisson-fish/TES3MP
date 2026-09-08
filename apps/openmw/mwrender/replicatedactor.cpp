@@ -264,7 +264,7 @@ namespace MWRender
 
             void setLocomotion(ReplicatedActorLocomotion locomotion)
             {
-                if (mAnimationFallback || (mLocomotion && *mLocomotion == locomotion))
+                if (mAnimationFallback || mDead || (mLocomotion && *mLocomotion == locomotion))
                     return;
                 std::array<std::string_view, 3> candidates{ replicatedActorAnimationGroup(locomotion), "idle", {} };
                 switch (locomotion)
@@ -319,6 +319,24 @@ namespace MWRender
                     std::numeric_limits<std::uint32_t>::max(), true);
                 mCurrentGroup = *selected;
                 mLocomotion = locomotion;
+            }
+
+            void setDead(bool dead)
+            {
+                if (mAnimationFallback || mDead == dead)
+                    return;
+                if (!mCurrentGroup.empty())
+                    disable(mCurrentGroup);
+                mCurrentGroup = {};
+                mLocomotion.reset();
+                mDead = dead;
+                if (dead && hasAnimation("death1"))
+                {
+                    play("death1", 1, BlendMask_All, false, 1.f, "start", "stop", 0.f, 0, false);
+                    mCurrentGroup = "death1";
+                }
+                else if (!dead)
+                    setLocomotion(ReplicatedActorLocomotion::Idle);
             }
 
         private:
@@ -534,6 +552,7 @@ namespace MWRender
 
             std::shared_ptr<NullAnimationTime> mStaticControllerTime;
             bool mAnimationFallback = false;
+            bool mDead = false;
             std::optional<ReplicatedActorLocomotion> mLocomotion;
             std::string_view mCurrentGroup;
         };
@@ -604,6 +623,22 @@ namespace MWRender
         return ReplicatedActorResult::Accepted;
     }
 
+    ReplicatedActorResult Objects::setReplicatedActorDead(const MWWorld::Ptr& ptr, bool dead) noexcept
+    {
+        const auto found = mReplicatedActors.find(ptr.mRef);
+        if (found == mReplicatedActors.end() || ptr.getRefData().getBaseNode() == nullptr)
+            return ReplicatedActorResult::LifecycleViolation;
+        try
+        {
+            static_cast<ReplicatedActorAnimation*>(found->second.get())->setDead(dead);
+            return ReplicatedActorResult::Accepted;
+        }
+        catch (...)
+        {
+            return ReplicatedActorResult::ResourceLoadFailed;
+        }
+    }
+
     bool Objects::removeReplicatedActor(const MWWorld::Ptr& ptr) noexcept
     {
         const auto found = mReplicatedActors.find(ptr.mRef);
@@ -649,7 +684,13 @@ namespace MWRender
             return mRendering.getObjects().advanceReplicatedActor(mPtr, position, locomotion, animationSeconds);
         }
 
+        ReplicatedActorResult setDead(bool dead) noexcept
+        {
+            return mRendering.getObjects().setReplicatedActorDead(mPtr, dead);
+        }
+
         ReplicatedActorResult createResult() const noexcept { return mCreateResult; }
+        const MWWorld::Ptr& ptr() const noexcept { return mPtr; }
 
     private:
         RenderingManager& mRendering;
@@ -671,6 +712,18 @@ namespace MWRender
         if (!mImpl)
             return ReplicatedActorResult::LifecycleViolation;
         return mImpl->update(position, locomotion, animationSeconds);
+    }
+
+    ReplicatedActorResult ReplicatedActor::setDead(bool dead) noexcept
+    {
+        if (!mImpl)
+            return ReplicatedActorResult::LifecycleViolation;
+        return mImpl->setDead(dead);
+    }
+
+    const MWWorld::Ptr& ReplicatedActor::ptr() const noexcept
+    {
+        return mImpl->ptr();
     }
 
     ReplicatedActor::CreateResult ReplicatedActor::create(RenderingManager& rendering, const MWWorld::ESMStore& store,

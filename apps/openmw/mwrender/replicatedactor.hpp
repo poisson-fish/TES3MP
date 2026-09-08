@@ -19,6 +19,7 @@ namespace MWWorld
 {
     class CellStore;
     class ESMStore;
+    class Ptr;
 }
 
 namespace MWRender
@@ -84,6 +85,8 @@ namespace MWRender
 
         ReplicatedActorResult update(
             const ESM::Position& position, ReplicatedActorLocomotion locomotion, float animationSeconds) noexcept;
+        ReplicatedActorResult setDead(bool dead) noexcept;
+        const MWWorld::Ptr& ptr() const noexcept;
 
         static CreateResult create(RenderingManager& rendering, const MWWorld::ESMStore& store,
             const ESM::RefId& npcRecord, MWWorld::CellStore& cell, const ESM::Position& position,

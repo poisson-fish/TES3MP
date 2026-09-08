@@ -22,6 +22,7 @@ namespace TES3MP
     inline constexpr std::uint32_t ActorReplicationCapabilityValue = 2;
     inline constexpr std::uint32_t InteractiveObjectReplicationCapabilityValue = 3;
     inline constexpr std::uint32_t InventoryReplicationCapabilityValue = 4;
+    inline constexpr std::uint32_t CombatReplicationCapabilityValue = 5;
 
     class CapabilityId
     {
@@ -65,6 +66,11 @@ namespace TES3MP
     inline constexpr CapabilityId inventoryReplicationCapability() noexcept
     {
         return *CapabilityId::fromValue(InventoryReplicationCapabilityValue);
+    }
+
+    inline constexpr CapabilityId combatReplicationCapability() noexcept
+    {
+        return *CapabilityId::fromValue(CombatReplicationCapabilityValue);
     }
 
     struct ProtocolVersion

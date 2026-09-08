@@ -350,6 +350,32 @@ namespace TES3MP
                     || ((!wasComplete || (mResyncPending && mResyncInventoryObserved))
                         && mSession->stateMachine().inventoryReplicationComplete());
             }
+            else if (auto* combat = std::get_if<LatestWinsCombatSnapshot>(&message))
+            {
+                const auto sessionId = mSession->stateMachine().sessionId();
+                if (!sessionId || !negotiated(mSession->stateMachine(), combatReplicationCapability())
+                    || combat->targetSessionId() != *sessionId
+                    || combat->targetSessionGeneration() != mSession->stateMachine().generation())
+                    return reject();
+                if (mCombatSnapshot && combat->serverTick() < mCombatSnapshot->serverTick())
+                    continue;
+                if (mCombatSnapshot && combat->serverTick() == mCombatSnapshot->serverTick()
+                    && *combat != *mCombatSnapshot)
+                    return reject();
+                result.combatSnapshotApplied = !mCombatSnapshot || *combat != *mCombatSnapshot;
+                mCombatSnapshot = std::move(*combat);
+                if (mResyncPending)
+                    mResyncCombatObserved = true;
+            }
+            else if (auto* events = std::get_if<ReliableCombatEventBatch>(&message))
+            {
+                const auto sessionId = mSession->stateMachine().sessionId();
+                if (!sessionId || !negotiated(mSession->stateMachine(), combatReplicationCapability())
+                    || events->targetSessionId() != *sessionId
+                    || events->targetSessionGeneration() != mSession->stateMachine().generation())
+                    return reject();
+                result.combatEvents.emplace_back(std::move(*events));
+            }
             else if (auto* pose = std::get_if<ServerVrPoseSnapshot>(&message))
             {
                 const auto sessionId = mSession->stateMachine().sessionId();
@@ -368,7 +394,8 @@ namespace TES3MP
                 || (mResyncObjectBaselineObserved
                     && mSession->stateMachine().interactiveObjectInterestBaselineComplete()))
             && (!negotiated(mSession->stateMachine(), inventoryReplicationCapability())
-                || (mResyncInventoryObserved && mSession->stateMachine().inventoryReplicationComplete())))
+                || (mResyncInventoryObserved && mSession->stateMachine().inventoryReplicationComplete()))
+            && (!negotiated(mSession->stateMachine(), combatReplicationCapability()) || mResyncCombatObserved))
         {
             mResyncPending = false;
             mResyncPlayerBaselineObserved = false;
@@ -378,6 +405,7 @@ namespace TES3MP
             mResyncPlayerInventoryObserved = false;
             mResyncGroundItemsObserved = false;
             mResyncEquipmentObserved = false;
+            mResyncCombatObserved = false;
         }
         return result;
     }
@@ -496,6 +524,34 @@ namespace TES3MP
         return { queued, queued == ClientRuntimeResult::Accepted ? sequence : std::nullopt };
     }
 
+    ClientRuntimeQueueResult ClientSessionRuntime::queueMeleeAttack(std::optional<ActorId> target, ServerTick sourceTick,
+        CombatRevision expectedAttackerRevision, CombatRevision expectedTargetRevision,
+        MeleeAttackType attackType, float attackStrength)
+    {
+        const auto& spatial = mSession->stateMachine().confirmedSnapshot();
+        const auto sessionId = mSession->stateMachine().sessionId();
+        if (!spatial || !mCombatSnapshot || !sessionId
+            || !negotiated(mSession->stateMachine(), combatReplicationCapability()))
+            return { ClientRuntimeResult::NotConnected, std::nullopt };
+        auto sequence = mLastQueuedSequence ? mLastQueuedSequence->next()
+            : spatial->header().acknowledgedCommandSequence()
+            ? spatial->header().acknowledgedCommandSequence()->next()
+            : std::optional<CommandSequence>(CommandSequence::initial());
+        if (!sequence)
+            return { ClientRuntimeResult::EncodeRejected, std::nullopt };
+        const auto commandId = CommandId::fromValue(sequence->value());
+        if (!commandId)
+            return { ClientRuntimeResult::EncodeRejected, std::nullopt };
+        const ClientMeleeAttackCommand command{ *sessionId, spatial->header().targetSessionGeneration(), *sequence,
+            *commandId, spatial->header().canonicalRevision(), target, sourceTick, expectedAttackerRevision,
+            expectedTargetRevision, attackType, attackStrength };
+        const auto encoded = encodeClientMeleeAttackCommand(command);
+        const auto queued = queue(MessageClass::ReliableOperation, MessageKind::ClientMeleeAttackCommand, encoded);
+        if (queued == ClientRuntimeResult::Accepted)
+            mLastQueuedSequence = *sequence;
+        return { queued, queued == ClientRuntimeResult::Accepted ? sequence : std::nullopt };
+    }
+
     std::optional<LocalLocomotionReconciliation> ClientSessionRuntime::reconcileLocalPresentation(
         bool hardDiscontinuity) noexcept
     {
@@ -549,6 +605,7 @@ namespace TES3MP
             mResyncPlayerInventoryObserved = false;
             mResyncGroundItemsObserved = false;
             mResyncEquipmentObserved = false;
+            mResyncCombatObserved = false;
         }
         return result;
     }
@@ -761,6 +818,24 @@ namespace TES3MP
                 {
                     auto value = decodeLatestWinsEquipmentSnapshot(frame->payload());
                     if (auto* typed = std::get_if<LatestWinsEquipmentSnapshot>(&value))
+                        result.messages.emplace_back(std::move(*typed));
+                    else
+                        return fail(ClientRuntimeResult::ProtocolRejected);
+                    break;
+                }
+                case MessageKind::LatestWinsCombatSnapshot:
+                {
+                    auto value = decodeLatestWinsCombatSnapshot(frame->payload());
+                    if (auto* typed = std::get_if<LatestWinsCombatSnapshot>(&value))
+                        result.messages.emplace_back(std::move(*typed));
+                    else
+                        return fail(ClientRuntimeResult::ProtocolRejected);
+                    break;
+                }
+                case MessageKind::ReliableCombatEventBatch:
+                {
+                    auto value = decodeReliableCombatEventBatch(frame->payload());
+                    if (auto* typed = std::get_if<ReliableCombatEventBatch>(&value))
                         result.messages.emplace_back(std::move(*typed));
                     else
                         return fail(ClientRuntimeResult::ProtocolRejected);

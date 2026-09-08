@@ -3,6 +3,7 @@
 
 #include "canonical_publication.hpp"
 #include "canonical_sinks.hpp"
+#include "combat_world.hpp"
 #include "inventory_world.hpp"
 #include "movement_kernel.hpp"
 #include "observability.hpp"
@@ -15,6 +16,19 @@
 
 namespace TES3MP
 {
+    struct CanonicalCommandWorlds
+    {
+        CanonicalInteractiveObjectWorld* interactiveObjects = nullptr;
+        const InteractiveObjectCatalog* interactiveObjectCatalog = nullptr;
+        CanonicalInventoryWorld* inventory = nullptr;
+        const ItemPrototypeCatalog* itemCatalog = nullptr;
+        CanonicalCombatWorld* combat = nullptr;
+        const CanonicalActorWorld* actors = nullptr;
+        const OpenMwMeleeSettings* meleeSettings = nullptr;
+        const MeleeAuthorityPolicy* meleePolicy = nullptr;
+        ServerMeleeContactQuery* meleeContact = nullptr;
+    };
+
     enum class CommandBatchReductionError : std::uint8_t
     {
         None,
@@ -104,6 +118,8 @@ namespace TES3MP
                 return mInteractiveObjects;
             }
             const std::optional<CanonicalInventoryWorld>& candidateInventory() const noexcept { return mInventory; }
+            const std::optional<CanonicalCombatWorld>& candidateCombat() const noexcept { return mCombat; }
+            std::span<const AuthoritativeMeleeEvent> combatEvents() const noexcept { return mCombatEvents; }
 
         private:
             friend class CanonicalCommandReducer;
@@ -120,6 +136,9 @@ namespace TES3MP
             std::optional<CanonicalInteractiveObjectWorld> mInteractiveObjects;
             std::optional<CanonicalInventoryWorld> mBaseInventory;
             std::optional<CanonicalInventoryWorld> mInventory;
+            std::optional<CanonicalCombatWorld> mBaseCombat;
+            std::optional<CanonicalCombatWorld> mCombat;
+            std::vector<AuthoritativeMeleeEvent> mCombatEvents;
         };
 
         class PreparedJoin
@@ -209,11 +228,13 @@ namespace TES3MP
         PreparedBatch prepareTick(const ServerTickCommandBatch& batch, const CanonicalInteractiveObjectWorld& objects,
             const InteractiveObjectCatalog& objectCatalog, const CanonicalInventoryWorld& inventory,
             const ItemPrototypeCatalog& itemCatalog);
+        PreparedBatch prepareTick(const ServerTickCommandBatch& batch, CanonicalCommandWorlds worlds);
         bool commit(PreparedBatch&& prepared);
         bool commit(PreparedBatch&& prepared, CanonicalInteractiveObjectWorld& objects);
         bool commit(PreparedBatch&& prepared, CanonicalInventoryWorld& inventory);
         bool commit(
             PreparedBatch&& prepared, CanonicalInteractiveObjectWorld& objects, CanonicalInventoryWorld& inventory);
+        bool commit(PreparedBatch&& prepared, CanonicalCommandWorlds worlds);
         std::optional<PreparedJoin> prepareJoin(
             CanonicalPlayerEntityState player, CanonicalSessionProgress session, ServerTick tick);
         bool commit(PreparedJoin&& prepared);
@@ -237,10 +258,14 @@ namespace TES3MP
         void observe(CanonicalSinkRole role, CanonicalSinkDeliveryResult result, ServerTick tick) noexcept;
         PreparedBatch prepareCommands(const ServerTickCommandBatch& batch,
             const CanonicalInteractiveObjectWorld* objects, const InteractiveObjectCatalog* objectCatalog,
-            const CanonicalInventoryWorld* inventory, const ItemPrototypeCatalog* itemCatalog);
+            const CanonicalInventoryWorld* inventory, const ItemPrototypeCatalog* itemCatalog,
+            const CanonicalCombatWorld* combat = nullptr, const CanonicalActorWorld* actors = nullptr,
+            const OpenMwMeleeSettings* meleeSettings = nullptr, const MeleeAuthorityPolicy* meleePolicy = nullptr,
+            ServerMeleeContactQuery* meleeContact = nullptr);
         PreparedBatch prepareTickState(PreparedBatch prepared, const ServerTickCommandBatch& batch);
         bool commitPrepared(
-            PreparedBatch&& prepared, CanonicalInteractiveObjectWorld* objects, CanonicalInventoryWorld* inventory);
+            PreparedBatch&& prepared, CanonicalInteractiveObjectWorld* objects, CanonicalInventoryWorld* inventory,
+            CanonicalCombatWorld* combat = nullptr);
 
         std::shared_ptr<const CanonicalServerState> mState;
         CanonicalStateVersion mStateVersion = CanonicalStateVersion::initial();

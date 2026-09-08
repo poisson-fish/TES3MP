@@ -4,6 +4,7 @@
 #include "connection_session_coordinator.hpp"
 #include "server_config.hpp"
 #include "tes3mp/actor_simulation.hpp"
+#include "tes3mp/combat_world.hpp"
 #include "tes3mp/interactive_object_catalog.hpp"
 #include "tes3mp/interactive_object_world.hpp"
 #include "tes3mp/inventory_world.hpp"
@@ -35,6 +36,10 @@ namespace TES3MP::ServerApp
         CanonicalInteractiveObjectWorld* interactiveObjects = nullptr;
         const ItemPrototypeCatalog* itemCatalog = nullptr;
         CanonicalInventoryWorld* inventory = nullptr;
+        CanonicalCombatWorld* combat = nullptr;
+        const OpenMwMeleeSettings* meleeSettings = nullptr;
+        const MeleeAuthorityPolicy* meleePolicy = nullptr;
+        ServerMeleeContactQuery* meleeContact = nullptr;
     };
 
     class ServerApplication
@@ -77,6 +82,7 @@ namespace TES3MP::ServerApp
         bool supportsActors(TransportConnectionId connection) const noexcept;
         bool supportsInteractiveObjects(TransportConnectionId connection) const noexcept;
         bool supportsInventory(TransportConnectionId connection) const noexcept;
+        bool supportsCombat(TransportConnectionId connection) const noexcept;
     };
 }
 

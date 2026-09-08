@@ -15,6 +15,7 @@
 
 namespace TES3MP
 {
+    class CanonicalCombatWorld;
     class CanonicalActorEntityState
     {
     public:
@@ -118,6 +119,9 @@ namespace TES3MP
     ActorSimulationResult advanceActorSimulation(const CanonicalActorWorld& current, const ActorCatalog& catalog,
         const CanonicalServerState& players, ServerTick tick, MovementProfile movementProfile,
         ServerCollisionQuery& collision);
+    ActorSimulationResult advanceActorSimulation(const CanonicalActorWorld& current, const ActorCatalog& catalog,
+        const CanonicalServerState& players, const CanonicalCombatWorld& combat, ServerTick tick,
+        MovementProfile movementProfile, ServerCollisionQuery& collision);
 }
 
 #endif

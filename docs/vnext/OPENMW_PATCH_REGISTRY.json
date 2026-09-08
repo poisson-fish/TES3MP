@@ -94,6 +94,24 @@
       ],
       "disposition": "local; possible general-purpose upstream candidate; no upstream contact authorized",
       "removal_condition": "OpenMW supplies equivalent reviewed pre-mutation inventory transfer and item-use hooks"
+    },
+    {
+      "id": "P16-001",
+      "slice": "16.1",
+      "owner": "OpenMW adapter",
+      "purpose": "Route player melee animation hit keys through the multiplayer semantic-command seam before stock single-player mutation, while allowing replicated content actors to participate in OpenMW's native melee contact search.",
+      "paths": [
+        "apps/openmw/mwmechanics/character.cpp",
+        "apps/openmw/mwmechanics/combat.cpp"
+      ],
+      "tests": [
+        "scripts/tests/test_openmw_patch_registry.py",
+        "openmw_tes3mp_adapter_tests",
+        "tes3mp_melee_combat_tests",
+        "tes3mp_combat_command_reducer_tests"
+      ],
+      "disposition": "local; possible general-purpose upstream candidate; no upstream contact authorized",
+      "removal_condition": "OpenMW supplies an equivalent reviewed pre-mutation melee hit hook and replicated-actor targeting role"
     }
   ]
 }
