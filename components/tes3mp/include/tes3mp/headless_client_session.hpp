@@ -45,12 +45,18 @@ namespace TES3MP
         ActorReplicationReceiveResult receiveLatestWinsActorSnapshot(LatestWinsActorSnapshot snapshot);
         ActorReplicationReceiveResult receiveReliableActorInterestBaseline(
             ReliableActorInterestBaseline baseline);
+        InteractiveObjectReplicationReceiveResult receiveReliableInteractiveObjectInterestBaseline(
+            ReliableInteractiveObjectInterestBaseline baseline);
         HeadlessClientResult close() noexcept;
 
         const ClientSessionStateMachine& stateMachine() const noexcept { return *mState; }
         std::optional<ConnectAttemptId> attempt() const noexcept { return mAttempt; }
         std::optional<TransportConnectionId> connection() const noexcept { return mConnection; }
         std::span<const ObservedPlayer> observedPlayers() const noexcept { return mState->observedPlayers(); }
+        std::span<const InteractiveObjectInterestMember> observedInteractiveObjects() const noexcept
+        {
+            return mState->observedInteractiveObjects();
+        }
 
     private:
         HeadlessClientSession(TransportRuntime& transport, std::unique_ptr<ClientSessionStateMachine> state) noexcept;

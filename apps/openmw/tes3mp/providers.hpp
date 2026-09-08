@@ -4,6 +4,7 @@
 #include <tes3mp/actor_replication.hpp>
 #include <tes3mp/client_locomotion.hpp>
 #include <tes3mp/client_session.hpp>
+#include <tes3mp/interactive_object_replication.hpp>
 #include <tes3mp/protocol_exchange.hpp>
 #include <tes3mp/protocol_pose.hpp>
 
@@ -87,6 +88,11 @@ namespace TES3MP::OpenMWAdapter
         virtual ProviderResult advance(MonotonicInstant now) noexcept = 0;
         virtual ProviderResult applyActors(
             const LatestWinsActorSnapshot&, std::span<const ActorInterestMember>, MonotonicInstant) noexcept
+        {
+            return ProviderResult::Accepted;
+        }
+        virtual ProviderResult applyInteractiveObjects(
+            const ReliableInteractiveObjectInterestBaseline&, MonotonicInstant) noexcept
         {
             return ProviderResult::Accepted;
         }

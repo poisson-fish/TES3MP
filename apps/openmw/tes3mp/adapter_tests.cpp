@@ -45,7 +45,7 @@ namespace
             TES3MP::LinearVelocity3(velocity, 0, 0), mode);
     }
 
-    TES3MP::ServerHello serverHello(bool pose = false, bool actors = false)
+    TES3MP::ServerHello serverHello(bool pose = false, bool actors = false, bool interactiveObjects = false)
     {
         auto versions = std::get<TES3MP::ProtocolVersionRange>(TES3MP::ProtocolVersionRange::create(1, 2, 2));
         std::vector<TES3MP::CapabilityId> capabilities;
@@ -53,11 +53,32 @@ namespace
             capabilities.push_back(TES3MP::vrPoseCapability());
         if (actors)
             capabilities.push_back(TES3MP::actorReplicationCapability());
+        if (interactiveObjects)
+            capabilities.push_back(TES3MP::interactiveObjectReplicationCapability());
         auto client = std::get<TES3MP::CapabilityOffer>(TES3MP::CapabilityOffer::create(versions, capabilities, {}));
         auto server
             = std::get<TES3MP::CapabilityOffer>(TES3MP::CapabilityOffer::create(std::move(versions), capabilities, {}));
         auto negotiated = TES3MP::negotiateClientHello(TES3MP::ClientHello::fromOffer(std::move(client)), server);
         return std::get<TES3MP::ServerHello>(std::move(negotiated));
+    }
+
+    TES3MP::ReliableInteractiveObjectInterestBaseline interactiveObjectBaseline(
+        TES3MP::SessionGeneration generation, std::uint64_t tick, std::uint64_t revision,
+        std::optional<std::uint64_t> objectRevision = std::nullopt)
+    {
+        const std::array members{
+            TES3MP::InteractiveObjectInterestMember{
+                *TES3MP::InteractiveObjectId::fromValue(101),
+                *TES3MP::ObjectRevision::fromValue(objectRevision.value_or(revision)),
+                TES3MP::DoorState::Open,
+                TES3MP::LockState::Unlocked,
+                TES3MP::TrapState::Disarmed,
+            }
+        };
+        auto created = TES3MP::ReliableInteractiveObjectInterestBaseline::create(
+            value<TES3MP::SessionId>(1), generation, value<TES3MP::ServerTick>(tick),
+            value<TES3MP::CanonicalRevision>(revision), members);
+        return std::get<TES3MP::ReliableInteractiveObjectInterestBaseline>(std::move(created));
     }
 
     std::vector<std::byte> frame(
@@ -333,6 +354,12 @@ namespace
             ++actors;
             return TES3MP::OpenMWAdapter::ProviderResult::Accepted;
         }
+        TES3MP::OpenMWAdapter::ProviderResult applyInteractiveObjects(
+            const TES3MP::ReliableInteractiveObjectInterestBaseline&, TES3MP::MonotonicInstant) noexcept override
+        {
+            ++interactiveObjects;
+            return TES3MP::OpenMWAdapter::ProviderResult::Accepted;
+        }
         TES3MP::OpenMWAdapter::ProviderResult applyVrPoseWeight(
             TES3MP::EntityId, TES3MP::AuthorityEpoch, double weight) noexcept override
         {
@@ -346,6 +373,7 @@ namespace
         unsigned clears = 0;
         unsigned poses = 0;
         unsigned actors = 0;
+        unsigned interactiveObjects = 0;
         unsigned poseFallbacks = 0;
         double lastPoseWeight = 0.0;
     };
@@ -775,6 +803,90 @@ int main()
         TransportChannel::LatestWins);
     reconnectCoordinator->frame(0.01f);
     require(disconnect.resyncCompletions == 1 && reconnectPresentation.calls == 3 && reconnectPresentation.actors == 4);
+
+    Input objInput;
+    Presentation objPresentation;
+    Status objStatus;
+    DisconnectOnce objDisconnect;
+    objDisconnect.pending = false;
+    auto objTransport = std::make_unique<IdleTransport>();
+    auto* objTransportObserver = objTransport.get();
+    objTransportObserver->acceptConnections = true;
+    auto objClock = std::make_unique<Clock>();
+    auto objCreated = ClientSessionRuntime::create(
+        *objTransport, *objClock, timeouts, SessionGeneration::initial(), outbound);
+    auto objRuntime = std::get<std::unique_ptr<ClientSessionRuntime>>(std::move(objCreated));
+    auto objVersions = std::get<ProtocolVersionRange>(ProtocolVersionRange::create(1, 2, 2));
+    const std::array objCapabilities{ interactiveObjectReplicationCapability() };
+    auto objOffer = std::get<CapabilityOffer>(CapabilityOffer::create(std::move(objVersions), objCapabilities, {}));
+    auto objPassword = AuthenticationMaterial::create(passwordBytes);
+    require(objPassword
+        && objRuntime->start(
+               endpoint, ClientHello::fromOffer(std::move(objOffer)), AuthenticationRequest::join(std::move(*objPassword)))
+            == HeadlessClientResult::Accepted);
+    auto objCoordinator = makeCoordinator(
+        std::move(objTransport), std::move(objClock), std::move(objRuntime), reconnect,
+        objInput, objPresentation, objStatus, &objDisconnect);
+    require(static_cast<bool>(objCoordinator));
+    auto objHello = encodeServerHello(serverHello(false, false, true));
+    objTransportObserver->enqueue(
+        MessageClass::SessionControl, MessageKind::ServerHello, objHello, TransportChannel::ReliableOrdered);
+    objCoordinator->frame(0.01f);
+    auto objAccepted = accepted(std::byte{ 5 });
+    objTransportObserver->enqueue(MessageClass::SessionControl, MessageKind::AuthenticationAccepted,
+        encodeAuthenticationAccepted(objAccepted), TransportChannel::ReliableOrdered);
+    objTransportObserver->enqueue(MessageClass::ReliableOperation, MessageKind::ReliableInterestBaseline,
+        encodeReliableInterestBaseline(selfBaseline(SessionGeneration::initial(), true, 1, 1)),
+        TransportChannel::ReliableOrdered);
+    objTransportObserver->enqueue(MessageClass::LatestWinsSnapshot, MessageKind::LatestWinsSnapshot,
+        encodeLatestWinsSnapshot(selfSnapshot(SessionGeneration::initial(), true, 1, 1)),
+        TransportChannel::LatestWins);
+    objTransportObserver->enqueue(MessageClass::ReliableOperation,
+        MessageKind::ReliableInteractiveObjectInterestBaseline,
+        encodeReliableInteractiveObjectInterestBaseline(
+            interactiveObjectBaseline(SessionGeneration::initial(), 1, 1)),
+        TransportChannel::ReliableOrdered);
+    objCoordinator->frame(0.01f);
+    require(objPresentation.calls == 1 && objPresentation.interactiveObjects == 1);
+
+    objDisconnect.resyncPending = true;
+    objCoordinator->frame(0.01f);
+    require(objDisconnect.resyncCompletions == 0);
+    objTransportObserver->enqueue(MessageClass::ReliableOperation, MessageKind::ReliableInterestBaseline,
+        encodeReliableInterestBaseline(selfBaseline(SessionGeneration::initial(), true, 2, 2)),
+        TransportChannel::ReliableOrdered);
+    objTransportObserver->enqueue(MessageClass::LatestWinsSnapshot, MessageKind::LatestWinsSnapshot,
+        encodeLatestWinsSnapshot(selfSnapshot(SessionGeneration::initial(), true, 2, 2)),
+        TransportChannel::LatestWins);
+    objCoordinator->frame(0.01f);
+    require(objDisconnect.resyncCompletions == 0);
+    require(objPresentation.calls == 2);
+    require(objPresentation.interactiveObjects == 1);
+    objTransportObserver->enqueue(MessageClass::ReliableOperation,
+        MessageKind::ReliableInteractiveObjectInterestBaseline,
+        encodeReliableInteractiveObjectInterestBaseline(
+            interactiveObjectBaseline(SessionGeneration::initial(), 2, 2)),
+        TransportChannel::ReliableOrdered);
+    objCoordinator->frame(0.01f);
+    require(objDisconnect.resyncCompletions == 1 && objPresentation.interactiveObjects == 2);
+
+    // Verify revision gating: object baseline with revision > snapshot revision is not applied to presentation
+    objTransportObserver->enqueue(MessageClass::ReliableOperation,
+        MessageKind::ReliableInteractiveObjectInterestBaseline,
+        encodeReliableInteractiveObjectInterestBaseline(
+            interactiveObjectBaseline(SessionGeneration::initial(), 3, 5)),
+        TransportChannel::ReliableOrdered);
+    objCoordinator->frame(0.01f);
+    require(objPresentation.interactiveObjects == 2);
+
+    // A newer baseline may not regress an individual object's revision.
+    objTransportObserver->enqueue(MessageClass::ReliableOperation,
+        MessageKind::ReliableInteractiveObjectInterestBaseline,
+        encodeReliableInteractiveObjectInterestBaseline(
+            interactiveObjectBaseline(SessionGeneration::initial(), 4, 6, 4)),
+        TransportChannel::ReliableOrdered);
+    objCoordinator->frame(0.01f);
+    require(objStatus.last == ConnectionStatus::Reconnecting && objPresentation.interactiveObjects == 2);
 
     require(
         std::get<TES3MP::OpenMWAdapter::ClientCompositionFailure>(TES3MP::OpenMWAdapter::makeClientCoordinator("", 0, 0,

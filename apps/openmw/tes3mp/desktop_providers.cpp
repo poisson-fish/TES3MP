@@ -3,11 +3,13 @@
 
 #include "../mwbase/environment.hpp"
 #include "../mwbase/inputmanager.hpp"
+#include "../mwbase/soundmanager.hpp"
 #include "../mwbase/world.hpp"
 #include "../mwinput/actions.hpp"
 #include "../mwrender/replicatedactor.hpp"
 #include "../mwworld/cell.hpp"
 #include "../mwworld/cellstore.hpp"
+#include "../mwworld/class.hpp"
 #include "../mwworld/scene.hpp"
 #include "../mwworld/worldmodel.hpp"
 
@@ -15,10 +17,12 @@
 #include <components/esm/position.hpp>
 #include <components/esm/refid.hpp>
 #include <components/esm3/loadcell.hpp>
+#include <components/esm3/loaddoor.hpp>
 
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <limits>
 #include <map>
 #include <numbers>
 #include <optional>
@@ -216,7 +220,8 @@ namespace TES3MP::OpenMWAdapter
 
     std::optional<DesktopContentMapping> DesktopContentMapping::create(ContentManifest manifest,
         std::span<const DesktopCellSpaceMapping> cellSpaces, AppearanceId appearanceId, std::string avatarNpc,
-        std::span<const DesktopActorPrototypeMapping> actorPrototypes)
+        std::span<const DesktopActorPrototypeMapping> actorPrototypes,
+        std::span<const DesktopInteractiveObjectMapping> interactiveObjects)
     try
     {
         if (appearanceId != manifest.defaultAppearance() || avatarNpc.empty()
@@ -249,8 +254,14 @@ namespace TES3MP::OpenMWAdapter
             for (std::size_t prior = 0; prior < index; ++prior)
                 if (local == refId(prototypes[prior].record)) return std::nullopt;
         }
+        std::vector<DesktopInteractiveObjectMapping> objects(interactiveObjects.begin(), interactiveObjects.end());
+        std::ranges::sort(objects, {}, &DesktopInteractiveObjectMapping::id);
+        for (std::size_t index = 0; index < objects.size(); ++index)
+        {
+            if (index != 0 && objects[index - 1].id == objects[index].id) return std::nullopt;
+        }
         return DesktopContentMapping{ std::move(manifest), std::move(mappings), appearanceId,
-            std::move(avatarNpc), std::move(prototypes) };
+            std::move(avatarNpc), std::move(prototypes), std::move(objects) };
     }
     catch (...) { return std::nullopt; }
 
@@ -346,6 +357,14 @@ namespace TES3MP::OpenMWAdapter
                 : cell(targetCell), actor(std::move(targetActor)), motion(metrics) {}
         };
 
+        struct ObservedDoorPresentation
+        {
+            TES3MP::DoorState lastDoorState = TES3MP::DoorState::Closed;
+            TES3MP::LockState lastLockState = TES3MP::LockState::Unlocked;
+            TES3MP::TrapState lastTrapState = TES3MP::TrapState::Disarmed;
+            ObjectRevision lastRevision = ObjectRevision::initial();
+        };
+
         explicit Impl(RemoteMotionMetricSink& targetMetrics)
             : metrics(targetMetrics)
         {
@@ -355,6 +374,7 @@ namespace TES3MP::OpenMWAdapter
         RemoteMotionMetricSink& metrics;
         std::map<EntityId, Remote> remotes;
         std::map<EntityId, ActorRemote> actorRemotes;
+        std::map<InteractiveObjectId, ObservedDoorPresentation> observedDoors;
 
         void clear() noexcept
         {
@@ -370,6 +390,7 @@ namespace TES3MP::OpenMWAdapter
                 remote.motion.clear();
             }
             actorRemotes.clear();
+            observedDoors.clear();
         }
 
         void erase(std::map<EntityId, ActorRemote>::iterator iter) noexcept
@@ -609,6 +630,144 @@ namespace TES3MP::OpenMWAdapter
             }
             return ProviderResult::Accepted;
         }
+
+        static MWWorld::Ptr findDoorInCell(
+            MWWorld::CellStore& cell, std::uint32_t refNumIndex, std::int32_t contentFile)
+        {
+            MWWorld::Ptr found;
+            cell.forEachType<ESM::Door>([&](const MWWorld::Ptr& ptr) {
+                const auto refNum = ptr.getCellRef().getRefNum();
+                if (refNum.mIndex == refNumIndex && (contentFile < 0 || refNum.mContentFile == contentFile))
+                {
+                    found = ptr;
+                    return false;
+                }
+                return true;
+            });
+            return found;
+        }
+
+        static MWWorld::Ptr findActiveDoor(std::uint32_t refNumIndex, std::int32_t contentFile)
+        {
+            auto scene = MWBase::Environment::get().getWorldScene();
+            auto* current = scene->getCurrentCell();
+            if (current)
+            {
+                auto ptr = findDoorInCell(*current, refNumIndex, contentFile);
+                if (!ptr.isEmpty())
+                    return ptr;
+            }
+            for (auto* cell : scene->getActiveCells())
+            {
+                if (cell && cell != current)
+                {
+                    auto ptr = findDoorInCell(*cell, refNumIndex, contentFile);
+                    if (!ptr.isEmpty())
+                        return ptr;
+                }
+            }
+            return {};
+        }
+
+        ProviderResult applyInteractiveObjects(
+            const ReliableInteractiveObjectInterestBaseline& baseline, MonotonicInstant receivedAt)
+        {
+            (void)receivedAt;
+            if (!mapping)
+                return ProviderResult::ContentMappingFailed;
+            const auto& content = *mapping;
+            auto world = MWBase::Environment::get().getWorld();
+            auto soundManager = MWBase::Environment::get().getSoundManager();
+
+            for (const auto& member : baseline.members())
+            {
+                std::uint32_t refNumIndex = 0;
+                std::int32_t refNumContentFile = -1;
+                const auto it = std::ranges::lower_bound(
+                    content.interactiveObjects, member.objectId, {}, &DesktopInteractiveObjectMapping::id);
+                if (it != content.interactiveObjects.end() && it->id == member.objectId)
+                {
+                    refNumIndex = it->refNumIndex;
+                    refNumContentFile = it->refNumContentFile;
+                }
+                else
+                {
+                    if (member.objectId.value() > std::numeric_limits<std::uint32_t>::max())
+                        return ProviderResult::ContentMappingFailed;
+                    refNumIndex = static_cast<std::uint32_t>(member.objectId.value());
+                }
+
+                auto doorPtr = findActiveDoor(refNumIndex, refNumContentFile);
+                if (doorPtr.isEmpty())
+                    continue;
+                const bool teleportDoor = doorPtr.getCellRef().getTeleport();
+                if (teleportDoor && member.doorState != TES3MP::DoorState::Closed)
+                    return ProviderResult::ContentMappingFailed;
+
+                auto found = observedDoors.find(member.objectId);
+                if (found != observedDoors.end())
+                {
+                    if (member.revision < found->second.lastRevision)
+                        return ProviderResult::PresentationFailed;
+                    if (member.revision == found->second.lastRevision
+                        && (member.doorState != found->second.lastDoorState
+                            || member.lockState != found->second.lastLockState
+                            || member.trapState != found->second.lastTrapState))
+                        return ProviderResult::PresentationFailed;
+                }
+
+                if (member.lockState == TES3MP::LockState::Locked)
+                    doorPtr.getCellRef().lock(100);
+                else
+                    doorPtr.getCellRef().unlock();
+
+                if (member.trapState == TES3MP::TrapState::Disarmed)
+                    doorPtr.getCellRef().setTrap(ESM::RefId());
+
+                const float minRot = doorPtr.getCellRef().getPosition().rot[2];
+                const float maxRot = minRot + static_cast<float>(std::numbers::pi / 2.0);
+
+                if (found == observedDoors.end())
+                {
+                    if (!teleportDoor)
+                    {
+                        auto newRot = doorPtr.getRefData().getPosition().asRotationVec3();
+                        newRot.z() = (member.doorState == TES3MP::DoorState::Open) ? maxRot : minRot;
+                        world->activateDoor(doorPtr, MWWorld::DoorState::Idle);
+                        world->rotateObject(doorPtr, newRot, MWBase::RotationFlag_none);
+                        doorPtr.getClass().setDoorState(doorPtr, MWWorld::DoorState::Idle);
+                    }
+
+                    observedDoors.emplace(member.objectId,
+                        ObservedDoorPresentation{
+                            member.doorState, member.lockState, member.trapState, member.revision });
+                }
+                else
+                {
+                    if (!teleportDoor && member.doorState != found->second.lastDoorState)
+                    {
+                        const auto* ref = doorPtr.get<ESM::Door>()->mBase;
+                        if (member.doorState == TES3MP::DoorState::Open)
+                        {
+                            world->activateDoor(doorPtr, MWWorld::DoorState::Opening);
+                            if (ref && !ref->mOpenSound.empty() && soundManager)
+                                soundManager->playSound3D(doorPtr, ref->mOpenSound, 1.0f, 1.0f);
+                        }
+                        else
+                        {
+                            world->activateDoor(doorPtr, MWWorld::DoorState::Closing);
+                            if (ref && !ref->mCloseSound.empty() && soundManager)
+                                soundManager->playSound3D(doorPtr, ref->mCloseSound, 1.0f, 1.0f);
+                        }
+                    }
+                    found->second.lastDoorState = member.doorState;
+                    found->second.lastLockState = member.lockState;
+                    found->second.lastTrapState = member.trapState;
+                    found->second.lastRevision = member.revision;
+                }
+            }
+            return ProviderResult::Accepted;
+        }
     };
 
     DesktopPresentation::DesktopPresentation(RemoteMotionMetricSink& metrics)
@@ -665,6 +824,22 @@ namespace TES3MP::OpenMWAdapter
         try
         {
             const auto result = mImpl->applyActors(snapshot, observedActors, receivedAt);
+            if (result != ProviderResult::Accepted) mImpl->clear();
+            return result;
+        }
+        catch (...)
+        {
+            mImpl->clear();
+            return ProviderResult::PresentationFailed;
+        }
+    }
+
+    ProviderResult DesktopPresentation::applyInteractiveObjects(
+        const ReliableInteractiveObjectInterestBaseline& baseline, MonotonicInstant receivedAt) noexcept
+    {
+        try
+        {
+            const auto result = mImpl->applyInteractiveObjects(baseline, receivedAt);
             if (result != ProviderResult::Accepted) mImpl->clear();
             return result;
         }

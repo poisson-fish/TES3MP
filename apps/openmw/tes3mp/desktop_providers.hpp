@@ -24,17 +24,26 @@ namespace TES3MP::OpenMWAdapter
         std::string record;
     };
 
+    struct DesktopInteractiveObjectMapping
+    {
+        InteractiveObjectId id;
+        std::uint32_t refNumIndex = 0;
+        std::int32_t refNumContentFile = -1;
+    };
+
     struct DesktopContentMapping
     {
         static std::optional<DesktopContentMapping> create(ContentManifest manifest,
             std::span<const DesktopCellSpaceMapping> cellSpaces, AppearanceId appearanceId,
-            std::string avatarNpc, std::span<const DesktopActorPrototypeMapping> actorPrototypes = {});
+            std::string avatarNpc, std::span<const DesktopActorPrototypeMapping> actorPrototypes = {},
+            std::span<const DesktopInteractiveObjectMapping> interactiveObjects = {});
 
         ContentManifest manifest;
         std::vector<DesktopCellSpaceMapping> cellSpaces;
         AppearanceId appearanceId;
         std::string avatarNpc;
         std::vector<DesktopActorPrototypeMapping> actorPrototypes;
+        std::vector<DesktopInteractiveObjectMapping> interactiveObjects;
     };
 
     class DesktopSemanticInput final : public SemanticInputProvider
@@ -64,6 +73,8 @@ namespace TES3MP::OpenMWAdapter
         ProviderResult advance(MonotonicInstant now) noexcept override;
         ProviderResult applyActors(const LatestWinsActorSnapshot& snapshot,
             std::span<const ActorInterestMember> observedActors, MonotonicInstant receivedAt) noexcept override;
+        ProviderResult applyInteractiveObjects(
+            const ReliableInteractiveObjectInterestBaseline& baseline, MonotonicInstant receivedAt) noexcept override;
         void clear() noexcept override;
 
     private:

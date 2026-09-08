@@ -92,6 +92,10 @@ namespace TES3MP
         ReliableActorInterestBaseline baseline)
     { return mState->receiveReliableActorInterestBaseline(std::move(baseline)); }
 
+    InteractiveObjectReplicationReceiveResult HeadlessClientSession::receiveReliableInteractiveObjectInterestBaseline(
+        ReliableInteractiveObjectInterestBaseline baseline)
+    { return mState->receiveReliableInteractiveObjectInterestBaseline(std::move(baseline)); }
+
     HeadlessClientResult HeadlessClientSession::close() noexcept
     {
         if (mAttempt) { mTransport.cancelConnect(*mAttempt); mAttempt.reset(); }

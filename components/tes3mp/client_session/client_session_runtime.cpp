@@ -241,6 +241,26 @@ namespace TES3MP
                 result.actorBaselineCompleted = result.actorBaselineCompleted
                     || ((!wasComplete || mResyncPending) && mSession->stateMachine().actorInterestBaselineComplete());
             }
+            else if (auto* objectBaseline = std::get_if<ReliableInteractiveObjectInterestBaseline>(&message))
+            {
+                const auto wasComplete = mSession->stateMachine().interactiveObjectInterestBaselineComplete();
+                if (!mSession->stateMachine().sessionId())
+                {
+                    if (mSession->bindEstablishedSession(objectBaseline->targetSessionId())
+                        != ClientSessionBindingResult::Bound)
+                        return reject();
+                }
+                const auto applied = mSession->receiveReliableInteractiveObjectInterestBaseline(std::move(*objectBaseline));
+                if (applied != InteractiveObjectReplicationReceiveResult::Applied
+                    && applied != InteractiveObjectReplicationReceiveResult::IdenticalDuplicate)
+                    return reject();
+                result.interactiveObjectBaselineApplied
+                    = result.interactiveObjectBaselineApplied || applied == InteractiveObjectReplicationReceiveResult::Applied;
+                if (mResyncPending)
+                    mResyncObjectBaselineObserved = true;
+                result.interactiveObjectBaselineCompleted = result.interactiveObjectBaselineCompleted
+                    || ((!wasComplete || mResyncPending) && mSession->stateMachine().interactiveObjectInterestBaselineComplete());
+            }
             else if (auto* pose = std::get_if<ServerVrPoseSnapshot>(&message))
             {
                 const auto sessionId = mSession->stateMachine().sessionId();
@@ -254,11 +274,14 @@ namespace TES3MP
         }
         if (mResyncPending && mResyncPlayerBaselineObserved && mSession->stateMachine().interestBaselineComplete()
             && (!negotiated(mSession->stateMachine(), actorReplicationCapability())
-                || (mResyncActorBaselineObserved && mSession->stateMachine().actorInterestBaselineComplete())))
+                || (mResyncActorBaselineObserved && mSession->stateMachine().actorInterestBaselineComplete()))
+            && (!negotiated(mSession->stateMachine(), interactiveObjectReplicationCapability())
+                || (mResyncObjectBaselineObserved && mSession->stateMachine().interactiveObjectInterestBaselineComplete())))
         {
             mResyncPending = false;
             mResyncPlayerBaselineObserved = false;
             mResyncActorBaselineObserved = false;
+            mResyncObjectBaselineObserved = false;
         }
         return result;
     }
@@ -314,6 +337,45 @@ namespace TES3MP
         return queued;
     }
 
+    ClientRuntimeQueueResult ClientSessionRuntime::queueInteractObject(InteractiveObjectId objectId,
+        CellId targetCell, Position3 interactionOrigin, ObjectRevision expectedRevision,
+        ObjectInteractionKind kind, std::optional<KeyPrototypeId> requestedKey)
+    {
+        const auto& snapshot = mSession->stateMachine().confirmedSnapshot();
+        const auto sessionId = mSession->stateMachine().sessionId();
+        if (!snapshot || !sessionId || !mSession->stateMachine().interestBaselineComplete()
+            || !negotiated(mSession->stateMachine(), interactiveObjectReplicationCapability()))
+            return { ClientRuntimeResult::NotConnected, std::nullopt };
+        auto sequence = mLastQueuedSequence ? mLastQueuedSequence->next()
+            : snapshot->header().acknowledgedCommandSequence()
+            ? snapshot->header().acknowledgedCommandSequence()->next()
+            : std::optional<CommandSequence>(CommandSequence::initial());
+        if (!sequence)
+            return { ClientRuntimeResult::EncodeRejected, std::nullopt };
+        auto commandId = CommandId::fromValue(sequence->value());
+        if (!commandId)
+            return { ClientRuntimeResult::EncodeRejected, std::nullopt };
+        ClientInteractObjectCommand command{
+            *sessionId,
+            snapshot->header().targetSessionGeneration(),
+            *sequence,
+            *commandId,
+            snapshot->header().canonicalRevision(),
+            objectId,
+            targetCell,
+            interactionOrigin,
+            expectedRevision,
+            kind,
+            requestedKey
+        };
+        const auto encoded = encodeClientInteractObjectCommand(command);
+        const auto queued = queue(MessageClass::ReliableOperation,
+            MessageKind::ClientInteractObjectCommand, encoded);
+        if (queued == ClientRuntimeResult::Accepted)
+            mLastQueuedSequence = *sequence;
+        return { queued, queued == ClientRuntimeResult::Accepted ? sequence : std::nullopt };
+    }
+
     std::optional<LocalLocomotionReconciliation> ClientSessionRuntime::reconcileLocalPresentation(
         bool hardDiscontinuity) noexcept
     {
@@ -362,6 +424,7 @@ namespace TES3MP
             mResyncPending = true;
             mResyncPlayerBaselineObserved = false;
             mResyncActorBaselineObserved = false;
+            mResyncObjectBaselineObserved = false;
         }
         return result;
     }
@@ -529,6 +592,15 @@ namespace TES3MP
                 {
                     auto value = decodeReliableActorInterestBaseline(frame->payload());
                     if (auto* typed = std::get_if<ReliableActorInterestBaseline>(&value))
+                        result.messages.emplace_back(std::move(*typed));
+                    else
+                        return fail(ClientRuntimeResult::ProtocolRejected);
+                    break;
+                }
+                case MessageKind::ReliableInteractiveObjectInterestBaseline:
+                {
+                    auto value = decodeReliableInteractiveObjectInterestBaseline(frame->payload());
+                    if (auto* typed = std::get_if<ReliableInteractiveObjectInterestBaseline>(&value))
                         result.messages.emplace_back(std::move(*typed));
                     else
                         return fail(ClientRuntimeResult::ProtocolRejected);

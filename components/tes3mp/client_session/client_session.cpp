@@ -387,4 +387,53 @@ namespace TES3MP
             && mConfirmedActorSnapshot->canonicalRevision()
                 >= mConfirmedActorInterestBaseline->canonicalRevision();
     }
+
+    InteractiveObjectReplicationReceiveResult ClientSessionStateMachine::receiveReliableInteractiveObjectInterestBaseline(
+        ReliableInteractiveObjectInterestBaseline baseline)
+    {
+        if (mState != ClientSessionState::Established)
+            return InteractiveObjectReplicationReceiveResult::NotEstablished;
+        if (!mNegotiatedHello || !std::ranges::binary_search(
+                mNegotiatedHello->negotiatedCapabilities(), interactiveObjectReplicationCapability()))
+            return InteractiveObjectReplicationReceiveResult::CapabilityNotNegotiated;
+        if (!mSessionId) return InteractiveObjectReplicationReceiveResult::SessionNotBound;
+        if (baseline.targetSessionId() != *mSessionId) return InteractiveObjectReplicationReceiveResult::SessionMismatch;
+        if (baseline.targetSessionGeneration() != mGeneration)
+            return InteractiveObjectReplicationReceiveResult::GenerationMismatch;
+        if (mConfirmedInteractiveObjectInterestBaseline)
+        {
+            if (baseline.canonicalRevision() < mConfirmedInteractiveObjectInterestBaseline->canonicalRevision())
+                return InteractiveObjectReplicationReceiveResult::StaleTick;
+            if (baseline.canonicalRevision() == mConfirmedInteractiveObjectInterestBaseline->canonicalRevision())
+                return baseline.members().size() == mConfirmedInteractiveObjectInterestBaseline->members().size()
+                        && std::ranges::equal(baseline.members(), mConfirmedInteractiveObjectInterestBaseline->members())
+                    ? InteractiveObjectReplicationReceiveResult::IdenticalDuplicate
+                    : InteractiveObjectReplicationReceiveResult::ContradictorySameTick;
+            if (baseline.serverTick() < mConfirmedInteractiveObjectInterestBaseline->serverTick())
+                return InteractiveObjectReplicationReceiveResult::StaleTick;
+            for (const auto& member : baseline.members())
+            {
+                const auto previous = std::ranges::lower_bound(
+                    mConfirmedInteractiveObjectInterestBaseline->members(), member.objectId, {},
+                    &InteractiveObjectInterestMember::objectId);
+                if (previous == mConfirmedInteractiveObjectInterestBaseline->members().end()
+                    || previous->objectId != member.objectId)
+                    continue;
+                if (member.revision < previous->revision)
+                    return InteractiveObjectReplicationReceiveResult::StaleTick;
+                if (member.revision == previous->revision && member != *previous)
+                    return InteractiveObjectReplicationReceiveResult::ContradictorySameTick;
+            }
+        }
+        mObservedInteractiveObjects.assign(baseline.members().begin(), baseline.members().end());
+        mConfirmedInteractiveObjectInterestBaseline = std::move(baseline);
+        return InteractiveObjectReplicationReceiveResult::Applied;
+    }
+
+    bool ClientSessionStateMachine::interactiveObjectInterestBaselineComplete() const noexcept
+    {
+        return mConfirmedInteractiveObjectInterestBaseline && mConfirmedSnapshot
+            && mConfirmedSnapshot->header().canonicalRevision()
+                >= mConfirmedInteractiveObjectInterestBaseline->canonicalRevision();
+    }
 }

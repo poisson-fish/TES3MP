@@ -49,6 +49,9 @@ namespace OpenMW
         addOption("tes3mp-content-actor-prototype-map",
             bpo::value<StringsVector>()->default_value(StringsVector(), "")->multitoken()->composing(),
             "OpenMW actor prototype mappings: <id>=<NPC-or-creature-record>");
+        addOption("tes3mp-content-interactive-object-map",
+            bpo::value<StringsVector>()->default_value(StringsVector(), "")->multitoken()->composing(),
+            "OpenMW interactive object mappings: <id>=<ref-num-index>[:<content-file>]");
 #ifdef TES3MP_OPENMW_DESKTOP_AUTOMATION
         addOption("tes3mp-automation-role", bpo::value<std::string>()->default_value(""),
             "test-only fixed TES3MP desktop automation role");

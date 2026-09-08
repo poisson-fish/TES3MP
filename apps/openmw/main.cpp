@@ -325,9 +325,49 @@ bool parseOptions(int argc, char** argv, OMW::Engine& engine, Files::Configurati
             }
             actorMappings.push_back({ *id, entry.substr(equal + 1) });
         }
+        std::vector<TES3MP::OpenMWAdapter::DesktopInteractiveObjectMapping> interactiveObjectMappings;
+        for (const auto& entry : variables["tes3mp-content-interactive-object-map"].as<StringsVector>())
+        {
+            const auto equal = entry.find('=');
+            std::uint64_t rawId = 0;
+            const auto parsed = equal == std::string::npos ? std::from_chars_result{}
+                : std::from_chars(entry.data(), entry.data() + equal, rawId);
+            const auto id = equal != std::string::npos && parsed.ec == std::errc{}
+                && parsed.ptr == entry.data() + equal ? TES3MP::InteractiveObjectId::fromValue(rawId) : std::nullopt;
+            if (!id || equal + 1 == entry.size())
+            {
+                Log(Debug::Error) << "TES3MP startup failed: invalid interactive object mapping";
+                return false;
+            }
+            std::string_view refPart(entry.data() + equal + 1, entry.size() - equal - 1);
+            const auto colon = refPart.find(':');
+            std::uint32_t refNumIndex = 0;
+            std::int32_t refNumFile = -1;
+            auto parsedRef = std::from_chars(refPart.data(),
+                colon == std::string_view::npos ? refPart.data() + refPart.size() : refPart.data() + colon,
+                refNumIndex);
+            const auto refNumEnd
+                = colon == std::string_view::npos ? refPart.data() + refPart.size() : refPart.data() + colon;
+            if (parsedRef.ec != std::errc{} || parsedRef.ptr != refNumEnd)
+            {
+                Log(Debug::Error) << "TES3MP startup failed: invalid interactive object refNum";
+                return false;
+            }
+            if (colon != std::string_view::npos)
+            {
+                auto parsedFile = std::from_chars(
+                    refPart.data() + colon + 1, refPart.data() + refPart.size(), refNumFile);
+                if (parsedFile.ec != std::errc{} || parsedFile.ptr != refPart.data() + refPart.size())
+                {
+                    Log(Debug::Error) << "TES3MP startup failed: invalid interactive object content file";
+                    return false;
+                }
+            }
+            interactiveObjectMappings.push_back({ *id, refNumIndex, refNumFile });
+        }
         auto contentMapping = TES3MP::OpenMWAdapter::DesktopContentMapping::create(*contentManifest, localMappings,
             contentManifest->defaultAppearance(), variables["tes3mp-content-appearance-record"].as<std::string>(),
-            actorMappings);
+            actorMappings, interactiveObjectMappings);
         if (!contentMapping)
         {
             Log(Debug::Error) << "TES3MP startup failed: content record mappings are required";

@@ -1,6 +1,6 @@
 # TES3MP vNext rolling implementation plan
 
-Updated: 2026-09-07
+Updated: 2026-09-08
 
 This is the authoritative implementation tracker. It deliberately plans one
 useful pass at a time instead of pre-authoring every future slice. Detailed
@@ -36,32 +36,24 @@ Verification scales with risk:
 
 ## Now
 
-### Phase 14 — interactive-object command ordering and authoritative outcomes
+### Phase 14 — interactive-object client reception and OpenMW presentation
 
 Status: **Complete — ready for commit**
 
-Baseline replication and most server composition are implemented and verified:
-- Pinned FlatBuffers schemas (`reliable_interactive_object_interest_baseline.fbs`, `client_interact_object_command.fbs`) and size-prefixed verified wire codecs.
-- Negotiated `interactiveObjectReplicationCapability()`.
-- Exact-cell baseline projection (`projectInteractiveObjectInterestBaseline`, `projectCellInteractiveObjectBaseline`).
-- Capability-gated client interaction decoding and submission to the bounded canonical command intake in `ConnectionSessionCoordinator`.
-- Server application wiring `CanonicalInteractiveObjectWorld` and `InteractiveObjectCatalog` into `ServerApplicationWiring`.
-- Optional bounded production object content loading, with capability advertisement only when the catalog and initial world load successfully.
-- Server tick execution applying object mutations in place within one prepared batch snapshot, in shared command order, and atomically delivering updated cell baselines.
-- Cell transitions projecting and atomically admitting object baselines alongside player observations and actor baselines.
-- Scenario 11 (unloaded cell preservation without ticking) and Scenario 12 (late join and resync complete baseline) verified in `server_app_tests.cpp`.
-
-Closure:
-- Interaction commands use the canonical command-ordering/idempotency boundary, including finalized session sequence and command-ID history.
-- Teleport-door player replacement and trap outcomes are composed into the same prepared command transaction; typed outcomes are included in canonical sink publications.
-- Canonical player/object state commits only after affected outbound publications are admitted. Focused reducer and server-app tests cover mixed ordering, outcomes, and rollback.
-- Network key-unlock intent is rejected until Phase 15 can prove key ownership from canonical inventory state; the reducer retains an explicit verified-key integration seam.
+Client session reception and OpenMW-local presentation of interactive objects are implemented and verified:
+- Ingestion and decoding of `MessageKind::ReliableInteractiveObjectInterestBaseline` across `ClientSession`, `HeadlessClientSession`, and `ClientSessionRuntime`.
+- Reception and presentation remain capability-gated, while production client offers intentionally defer `interactiveObjectReplicationCapability()` until OpenMW activation is intercepted and routed through `queueInteractObject`.
+- Desktop content mapping extended with `--tes3mp-content-interactive-object-map` CLI parsing (`<id>=<refNumIndex>[:<contentFile>]`) and fallback mapping (`refNumIndex == objectId.value()`).
+- `PresentationProvider::applyInteractiveObjects` implemented in `DesktopPresentation`: resolves doors in current and active cells via `MWWorld::Scene`, synchronizes lock/trap state on cell refs, snaps door rotation on cell entry (`world->rotateObject` + `activateDoor(Idle)`), smoothly interpolates door swings (`world->activateDoor(Opening/Closing)`), and triggers 3D sound effects (`MWBase::SoundManager`).
+- OpenMW `Coordinator` enforces baseline revision monotonicity, gates resync completion on interactive-object baseline arrival when negotiated, and clears door state tracking on cell transitions and session reset.
+- Client command generation seam added (`queueInteractObject`) in `ClientSessionRuntime`.
+- Strict authority and security boundaries preserved: production clients cannot negotiate the feature while stock OpenMW activation could still mutate door presentation locally; no intermediate network door angles and zero legacy multiplayer networking packets.
 
 ## Next
 
 These are candidates, not locked slices:
 
-1. Wire client session reception of `ReliableInteractiveObjectInterestBaseline`, client-local visual door swing animation, and OpenMW renderer scene node rotation.
+1. Wire OpenMW object activation / door activation raycast to queue `queueInteractObject` commands to the server session runtime, test round-trip client-server door activation, and then enable production capability advertisement.
 2. Revisit Phase 12 PC-VR hardware capture before Phase 22 stabilization if
    hardware remains unavailable during Phase 14 presentation work.
 3. Phase 15 — inventory, containers, and equipment baseline replication, including authoritative key ownership for object unlock commands.

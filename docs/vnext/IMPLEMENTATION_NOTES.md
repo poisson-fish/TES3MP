@@ -2,7 +2,7 @@
 
 Document type: chronological implementation history and working notes
 
-Updated: 2026-09-02
+Updated: 2026-09-08
 
 Status source: [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md)
 
@@ -6595,6 +6595,34 @@ only the relevant phase section here.
   - A clean standalone MSVC RelWithDebInfo production build in
     `build/precommit-server-link` compiled and linked `tes3mp_server` without
     interrupting the existing Phase 13 demo process.
+
+### 2026-09-08 — interactive-object client reception and OpenMW presentation — Complete
+
+- Client Session Reception:
+  - `ClientSession`, `HeadlessClientSession`, and `ClientSessionRuntime` updated with `receiveReliableInteractiveObjectInterestBaseline`, `observedInteractiveObjects()`, `confirmedInteractiveObjectInterestBaseline()`, and `interactiveObjectInterestBaselineComplete()`.
+  - Ingestion and decoding of `MessageKind::ReliableInteractiveObjectInterestBaseline`.
+  - Added `queueInteractObject(...)` in `ClientSessionRuntime` for interactive object command generation.
+  - Added resync gating: `resyncCompleted()` requires `mResyncObjectBaselineObserved` when `interactiveObjects` capability is negotiated.
+- Presentation Provider & OpenMW Desktop Adapter:
+  - Extended `PresentationProvider` with `applyInteractiveObjects(const ReliableInteractiveObjectInterestBaseline&, MonotonicInstant)`.
+  - Added `DesktopInteractiveObjectMapping` and updated `DesktopContentMapping::create` with `--tes3mp-content-interactive-object-map` CLI option parsing `<id>=<refNumIndex>[:<contentFile>]`, with fallback to `refNumIndex == objectId.value()`.
+  - Implemented `DesktopPresentation::applyInteractiveObjects`: resolves door references (`findActiveDoor` inspecting current cell and active cells in `MWWorld::Scene`), applies lock/trap state on cell ref, snaps door rotation on initial observation in cell (`world->rotateObject` + `world->activateDoor(door, MWWorld::DoorState::Idle)` + `door.getClass().setDoorState(door, MWWorld::DoorState::Idle)`), smoothly triggers visual door swing interpolation and 3D audio on subsequent state transitions (`world->activateDoor(door, MWWorld::DoorState::Opening/Closing)` + `soundManager->playSound3D`), and clears door tracking on cell transitions and session reset.
+  - In `apps/openmw/tes3mp/adapter.cpp` (`Coordinator`): gated `applyInteractiveObjects` on snapshot and player baseline canonical revision bounds and minimum revision, gated `resyncCompleted()` on `mResyncObjectBaseline` when capability is negotiated, and reset baseline tracking on session reset / reconnect.
+  - Kept `interactiveObjectReplicationCapability()` out of production client offers until OpenMW activation is intercepted and routed through `queueInteractObject(...)`; focused adapter tests negotiate the capability explicitly to exercise the dormant reception/presentation path without permitting local-authority divergence in production.
+  - Hardened presentation for teleport doors, rejected unmapped object IDs that cannot fit the OpenMW 32-bit refNum fallback, and enforced per-object revision/state consistency before mutating local references.
+  - Tightened `--tes3mp-content-interactive-object-map` parsing so every numeric field must be consumed in full.
+- Verification Evidence:
+  - Full OpenMW MSVC RelWithDebInfo build succeeds cleanly (`openmw` and `openmw_tes3mp_adapter_tests` targets in `build/slice82-openmw-full`).
+  - `openmw_tes3mp_adapter_tests.exe`: adapter tests pass cleanly (exit code 0), verifying negotiation, initial baseline dispatch, revision gating (> snapshot revision rejected/not applied), and resync completion gating (resync does not complete until object baseline arrives).
+  - `tes3mp_interactive_object_replication_tests.exe` and `tes3mp_interactive_object_world_tests.exe`: unit tests pass (exit code 0).
+  - `tes3mp_server_app_tests.exe`: integration tests pass (exit code 0).
+  - Python tests: all 163 tests pass (`python -m unittest discover -s scripts/tests`), including expanded `test_interactive_object_contract.py` verifying client reception and OpenMW presentation symbols, options, and zero legacy networking.
+  - Legacy exclusion: `verify_vnext_legacy_exclusion.py` passes (4,118 tracked paths, 62 CMake files, 1,254 compile commands, and 1,971 Ninja build edges checked).
+  - Baseline provenance: `verify_vnext_baseline.py` passes with 81 verified dependency declarations.
+- Invariants verified:
+  - Zero legacy multiplayer networking: no RakNet, no legacy door/lock/trap packets.
+  - Canonical authority remains strictly on the server; client does not author object state.
+  - No intermediate door angles streamed across the network; network streams discrete state in `ReliableInteractiveObjectInterestBaseline`.
 
 ## Phase 15 — Inventory, equipment, and container transactions
 

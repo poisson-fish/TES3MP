@@ -3,6 +3,7 @@
 
 #include "monotonic_clock.hpp"
 #include "actor_replication.hpp"
+#include "interactive_object_replication.hpp"
 #include "protocol_exchange.hpp"
 #include "protocol_handshake.hpp"
 #include "session_types.hpp"
@@ -167,6 +168,19 @@ namespace TES3MP
         ContradictorySameTick,
     };
 
+    enum class InteractiveObjectReplicationReceiveResult : std::uint8_t
+    {
+        Applied,
+        IdenticalDuplicate,
+        NotEstablished,
+        CapabilityNotNegotiated,
+        SessionNotBound,
+        SessionMismatch,
+        GenerationMismatch,
+        StaleTick,
+        ContradictorySameTick,
+    };
+
     using ClientSessionCreateResult
         = std::variant<std::unique_ptr<class ClientSessionStateMachine>, SessionTransitionError>;
 
@@ -189,6 +203,8 @@ namespace TES3MP
         ActorReplicationReceiveResult receiveLatestWinsActorSnapshot(LatestWinsActorSnapshot snapshot);
         ActorReplicationReceiveResult receiveReliableActorInterestBaseline(
             ReliableActorInterestBaseline baseline);
+        InteractiveObjectReplicationReceiveResult receiveReliableInteractiveObjectInterestBaseline(
+            ReliableInteractiveObjectInterestBaseline baseline);
 
         ClientSessionState state() const noexcept { return mState; }
         SessionGeneration generation() const noexcept { return mGeneration; }
@@ -215,6 +231,11 @@ namespace TES3MP
         const std::optional<ReliableActorInterestBaseline>& confirmedActorInterestBaseline() const noexcept
         { return mConfirmedActorInterestBaseline; }
         bool actorInterestBaselineComplete() const noexcept;
+        std::span<const InteractiveObjectInterestMember> observedInteractiveObjects() const noexcept
+        { return mObservedInteractiveObjects; }
+        const std::optional<ReliableInteractiveObjectInterestBaseline>& confirmedInteractiveObjectInterestBaseline() const noexcept
+        { return mConfirmedInteractiveObjectInterestBaseline; }
+        bool interactiveObjectInterestBaselineComplete() const noexcept;
 
     private:
         ClientSessionStateMachine(MonotonicClock& clock, SessionTimeoutPolicy timeoutPolicy,
@@ -242,6 +263,8 @@ namespace TES3MP
         std::optional<LatestWinsActorSnapshot> mConfirmedActorSnapshot;
         std::optional<ReliableActorInterestBaseline> mConfirmedActorInterestBaseline;
         std::vector<ActorInterestMember> mObservedActors;
+        std::optional<ReliableInteractiveObjectInterestBaseline> mConfirmedInteractiveObjectInterestBaseline;
+        std::vector<InteractiveObjectInterestMember> mObservedInteractiveObjects;
     };
 }
 

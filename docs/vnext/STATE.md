@@ -1,6 +1,6 @@
 # TES3MP vNext state
 
-Updated: 2026-09-07
+Updated: 2026-09-08
 
 ## Current status
 
@@ -16,8 +16,9 @@ Updated: 2026-09-07
 - Phase 14 discovery: **Complete**
 - Phase 14 canonical core: **Complete**
 - Phase 14 interactive-object replication and server composition: **Complete**
-- Active work: **None — Phase 14 server composition is ready for commit**
-- Last pass: **Pre-commit quality review closed production wiring, reducer scaling, and key authority gaps**
+- Phase 14 client reception and OpenMW presentation: **Complete**
+- Active work: **None — Phase 14 client reception and OpenMW presentation pass is ready for commit**
+- Last pass: **Client reception and OpenMW desktop presentation of interactive objects (doors, locks, traps)**
 - Authoritative tracker: [rolling implementation plan](IMPLEMENTATION_PLAN.md)
 - Historical evidence: [implementation notes](IMPLEMENTATION_NOTES.md)
 
@@ -392,30 +393,30 @@ work.
 
 ## Last verified
 
+- Full OpenMW MSVC RelWithDebInfo build completed cleanly (`openmw` and
+  `openmw_tes3mp_adapter_tests` targets in `build/slice82-openmw-full`).
+- `openmw_tes3mp_adapter_tests.exe` passes cleanly (returncode 0).
 - Full standalone TES3MP MSVC RelWithDebInfo build completed cleanly in
   `build/slice51-msvc`.
-- `tes3mp_interactive_object_replication_tests` passes cleanly (returncode 0).
-- `tes3mp_server_app_tests` passes cleanly (returncode 0), including Scenarios 11 & 12.
-- `tes3mp_interactive_object_catalog_tests` and `tes3mp_interactive_object_world_tests`
+- `tes3mp_interactive_object_replication_tests` and `tes3mp_interactive_object_world_tests`
   executables pass cleanly (returncode 0).
-- All 162 repository Python tests pass (`python -m unittest discover -s scripts/tests`),
+- `tes3mp_server_app_tests` passes cleanly (returncode 0), including Scenarios 11 & 12.
+- `tes3mp_interactive_object_catalog_tests` passes cleanly (returncode 0).
+- All 163 repository Python tests pass (`python -m unittest discover -s scripts/tests`),
   including updated `test_interactive_object_contract.py`.
-- A clean standalone MSVC RelWithDebInfo build in `build/precommit-server-link`
-  compiles and links the production `tes3mp_server` target.
-- `verify_vnext_legacy_exclusion.py` passes (4,115 tracked paths, 62 CMake files,
+- `verify_vnext_legacy_exclusion.py` passes (4,118 tracked paths, 62 CMake files,
   1,254 compile commands, and 1,971 Ninja build edges checked).
 - `verify_vnext_baseline.py` passes with 81 verified input dependency declarations.
 - Target boundary verification and forbidden include checks enforced in CMake.
 
 ## Next pass
 
-Wire client reception and OpenMW-local presentation of interactive-object
-baselines, including visual door swing interpolation, without moving canonical
-authority or simulation into the client.
+Wire OpenMW object activation / door activation raycast to queue `queueInteractObject`
+commands to the server session runtime, test round-trip client-server door activation,
+and then enable production interactive-object capability advertisement.
 
 ## Working-tree expectation
 
-`vnext` contains the reviewed Phase 14 canonical-core, replication, and server-
-composition pass ready for commit. Client-local interactive-object presentation
-remains the next pass. The separate `vnext-vr` worktree remains clean at Phase 13
+`vnext` contains the reviewed Phase 14 client reception and OpenMW desktop presentation
+pass ready for commit. The separate `vnext-vr` worktree remains clean at Phase 13
 integration merge `2762445c8b`.

@@ -110,6 +110,64 @@ class InteractiveObjectContractTests(unittest.TestCase):
         self.assertIn("cmd->kind == ObjectInteractionKind::UnlockWithKey", coordinator)
         self.assertIn("return ConnectionSessionResult::ProtocolRejected", coordinator)
 
+    def test_client_reception_and_openmw_presentation_contract(self):
+        client_session_hdr = (ROOT / "components/tes3mp/include/tes3mp/client_session.hpp").read_text(encoding="utf-8")
+        client_session_src = (ROOT / "components/tes3mp/client_session/client_session.cpp").read_text(encoding="utf-8")
+        client_runtime_hdr = (ROOT / "components/tes3mp/include/tes3mp/client_session_runtime.hpp").read_text(encoding="utf-8")
+        client_runtime_src = (ROOT / "components/tes3mp/client_session/client_session_runtime.cpp").read_text(encoding="utf-8")
+        adapter_src = (ROOT / "apps/openmw/tes3mp/adapter.cpp").read_text(encoding="utf-8")
+        connection_src = (ROOT / "apps/openmw/tes3mp/client_connection.cpp").read_text(encoding="utf-8")
+        openmw_main = (ROOT / "apps/openmw/main.cpp").read_text(encoding="utf-8")
+        providers_hdr = (ROOT / "apps/openmw/tes3mp/providers.hpp").read_text(encoding="utf-8")
+        desktop_hdr = (ROOT / "apps/openmw/tes3mp/desktop_providers.hpp").read_text(encoding="utf-8")
+        desktop_src = (ROOT / "apps/openmw/tes3mp/desktop_providers.cpp").read_text(encoding="utf-8")
+
+        # Client session state machine
+        self.assertIn("receiveReliableInteractiveObjectInterestBaseline", client_session_hdr)
+        self.assertIn("observedInteractiveObjects", client_session_hdr)
+        self.assertIn("confirmedInteractiveObjectInterestBaseline", client_session_hdr)
+        self.assertIn("interactiveObjectInterestBaselineComplete", client_session_hdr)
+        self.assertIn("receiveReliableInteractiveObjectInterestBaseline", client_session_src)
+
+        # Client session runtime frame ingestion and resync tracking
+        self.assertIn("interactiveObjectBaselineApplied", client_runtime_hdr)
+        self.assertIn("interactiveObjectBaselineCompleted", client_runtime_hdr)
+        self.assertIn("mResyncObjectBaselineObserved", client_runtime_hdr)
+        self.assertIn("MessageKind::ReliableInteractiveObjectInterestBaseline", client_runtime_src)
+
+        # Adapter coordinator capability negotiation, revision gating, and resync gating
+        self.assertIn("interactiveObjectReplicationCapability", adapter_src)
+        self.assertIn("interactiveObjectsNegotiated", adapter_src)
+        self.assertIn("mMinimumObjectBaselineRevision", adapter_src)
+        self.assertIn("mResyncObjectBaseline", adapter_src)
+        self.assertIn("applyInteractiveObjects", adapter_src)
+        production_capabilities = "const std::array optional{ vrPoseCapability(), actorReplicationCapability() };"
+        self.assertIn(production_capabilities, adapter_src)
+        self.assertIn(production_capabilities, connection_src)
+
+        # OpenMW Presentation provider and desktop implementation
+        self.assertIn("applyInteractiveObjects", providers_hdr)
+        self.assertIn("DesktopInteractiveObjectMapping", desktop_hdr)
+        self.assertIn("applyInteractiveObjects", desktop_hdr)
+        self.assertIn("applyInteractiveObjects", desktop_src)
+        self.assertIn("activateDoor", desktop_src)
+        self.assertIn("rotateObject", desktop_src)
+        self.assertIn("observedDoors", desktop_src)
+        self.assertIn("member.objectId.value() > std::numeric_limits<std::uint32_t>::max()", desktop_src)
+        self.assertIn("member.revision < found->second.lastRevision", desktop_src)
+        self.assertIn("member.revision == found->second.lastRevision", desktop_src)
+        self.assertIn("doorPtr.getCellRef().getTeleport()", desktop_src)
+        self.assertIn("!teleportDoor", desktop_src)
+
+        # Mapping fields must be parsed in full, without numeric-prefix acceptance.
+        self.assertIn("parsedRef.ptr != refNumEnd", openmw_main)
+        self.assertIn("parsedFile.ptr != refPart.data() + refPart.size()", openmw_main)
+
+        # Verify no forbidden legacy networking references
+        for text in (client_session_src, client_runtime_src, adapter_src, desktop_src):
+            for forbidden in ("PacketDoorState", "PacketObjectLock", "PacketObjectTrap", "RakNet"):
+                self.assertNotIn(forbidden, text)
+
 
 if __name__ == "__main__":
     unittest.main()

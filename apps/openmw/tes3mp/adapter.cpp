@@ -38,6 +38,14 @@ namespace TES3MP::OpenMWAdapter
                     actorReplicationCapability());
         }
 
+        bool interactiveObjectsNegotiated(const ClientSessionRuntime& runtime) noexcept
+        {
+            const auto& hello = runtime.session().stateMachine().negotiatedHello();
+            return hello
+                && std::binary_search(hello->negotiatedCapabilities().begin(), hello->negotiatedCapabilities().end(),
+                    interactiveObjectReplicationCapability());
+        }
+
         struct ResumeContinuity
         {
             SessionId session;
@@ -150,6 +158,7 @@ namespace TES3MP::OpenMWAdapter
                 {
                     mResyncPlayerBaseline = mResyncPlayerBaseline || advanced.baselineCompleted;
                     mResyncActorBaseline = mResyncActorBaseline || advanced.actorBaselineCompleted;
+                    mResyncObjectBaseline = mResyncObjectBaseline || advanced.interactiveObjectBaselineCompleted;
                 }
                 if (advanced.authenticationAccepted)
                 {
@@ -193,6 +202,7 @@ namespace TES3MP::OpenMWAdapter
                     mPendingCellTransition.reset();
                     finalizedCellTransition = true;
                     mMinimumActorBaselineRevision = snapshot->header().canonicalRevision();
+                    mMinimumObjectBaselineRevision = snapshot->header().canonicalRevision();
                 }
                 if (mResuming && advanced.baselineCompleted)
                 {
@@ -253,6 +263,25 @@ namespace TES3MP::OpenMWAdapter
                         return;
                     }
                 }
+                const auto& objectBaseline
+                    = mRuntime->session().stateMachine().confirmedInteractiveObjectInterestBaseline();
+                if ((advanced.interactiveObjectBaselineCompleted || advanced.interactiveObjectBaselineApplied
+                        || advanced.baselineCompleted || advanced.snapshotApplied)
+                    && !mPendingCellTransition && !mDeferredCellTransition && !captured.transition
+                    && objectBaseline && playerBaseline
+                    && objectBaseline->canonicalRevision() >= playerBaseline->canonicalRevision() && snapshot
+                    && objectBaseline->canonicalRevision() <= snapshot->header().canonicalRevision()
+                    && (!mMinimumObjectBaselineRevision
+                        || objectBaseline->canonicalRevision() >= *mMinimumObjectBaselineRevision)
+                    && mRuntime->session().stateMachine().interactiveObjectInterestBaselineComplete())
+                {
+                    const auto applied = mPresentation.applyInteractiveObjects(*objectBaseline, now);
+                    if (applied != ProviderResult::Accepted)
+                    {
+                        closeForProviderFailure(applied);
+                        return;
+                    }
+                }
                 if (snapshot)
                 {
                     mPoseEvidence.retain(snapshot->view().entries());
@@ -294,7 +323,8 @@ namespace TES3MP::OpenMWAdapter
                     closeForProviderFailure(ProviderResult::PresentationFailed);
                     return;
                 }
-                if (mAwaitingResync && mResyncPlayerBaseline && (!actorsNegotiated(*mRuntime) || mResyncActorBaseline))
+                if (mAwaitingResync && mResyncPlayerBaseline && (!actorsNegotiated(*mRuntime) || mResyncActorBaseline)
+                    && (!interactiveObjectsNegotiated(*mRuntime) || mResyncObjectBaseline))
                 {
                     mAwaitingResync = false;
                     mControl->resyncCompleted();
@@ -333,6 +363,7 @@ namespace TES3MP::OpenMWAdapter
                         mAwaitingResync = true;
                         mResyncPlayerBaseline = false;
                         mResyncActorBaseline = false;
+                        mResyncObjectBaseline = false;
                     }
                 }
                 if (snapshot)
@@ -444,7 +475,9 @@ namespace TES3MP::OpenMWAdapter
                 mAwaitingResync = false;
                 mResyncPlayerBaseline = false;
                 mResyncActorBaseline = false;
+                mResyncObjectBaseline = false;
                 mMinimumActorBaselineRevision.reset();
+                mMinimumObjectBaselineRevision.reset();
                 mReady = false;
                 mResuming = true;
                 mAttemptGeneration = *nextGeneration;
@@ -553,7 +586,9 @@ namespace TES3MP::OpenMWAdapter
             bool mAwaitingResync = false;
             bool mResyncPlayerBaseline = false;
             bool mResyncActorBaseline = false;
+            bool mResyncObjectBaseline = false;
             std::optional<CanonicalRevision> mMinimumActorBaselineRevision;
+            std::optional<CanonicalRevision> mMinimumObjectBaselineRevision;
             bool mReady = false;
             bool mResuming = false;
             std::optional<CommandSequence> mPendingCellTransition;
