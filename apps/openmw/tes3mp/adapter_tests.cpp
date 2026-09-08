@@ -11,6 +11,7 @@
 #include <fstream>
 #include <iostream>
 #include <limits>
+#include <map>
 #include <numbers>
 #include <optional>
 #include <vector>
@@ -317,14 +318,43 @@ namespace
     class Input final : public TES3MP::OpenMWAdapter::SemanticInputProvider
     {
     public:
-        TES3MP::OpenMWAdapter::CellTransitionCapture captureCellTransition() noexcept override { return {}; }
+        TES3MP::OpenMWAdapter::CellTransitionCapture captureCellTransition() noexcept override
+        {
+            if (nextTransition)
+            {
+                auto val = *nextTransition;
+                nextTransition.reset();
+                return val;
+            }
+            return {};
+        }
         std::optional<TES3MP::LocomotionIntent> sampleCurrentIntent() noexcept override
         {
             ++calls;
             return TES3MP::LocomotionIntent(
                 TES3MP::LocomotionMode::Walk, TES3MP::Turn32::fromValue(0), TES3MP::LinearVelocity3(1, 2, 3));
         }
+        std::optional<TES3MP::OpenMWAdapter::ObjectInteractionCapture> captureObjectInteraction() noexcept override
+        {
+            ++interactionCalls;
+            if (nextInteraction)
+            {
+                auto val = std::move(nextInteraction);
+                nextInteraction.reset();
+                return val;
+            }
+            return std::nullopt;
+        }
+        void clearSessionState() noexcept override
+        {
+            ++clearCalls;
+            nextInteraction.reset();
+        }
         unsigned calls = 0;
+        unsigned interactionCalls = 0;
+        unsigned clearCalls = 0;
+        std::optional<TES3MP::OpenMWAdapter::CellTransitionCapture> nextTransition;
+        std::optional<TES3MP::OpenMWAdapter::ObjectInteractionCapture> nextInteraction;
     };
 
     class Presentation final : public TES3MP::OpenMWAdapter::PresentationProvider
@@ -355,10 +385,20 @@ namespace
             return TES3MP::OpenMWAdapter::ProviderResult::Accepted;
         }
         TES3MP::OpenMWAdapter::ProviderResult applyInteractiveObjects(
-            const TES3MP::ReliableInteractiveObjectInterestBaseline&, TES3MP::MonotonicInstant) noexcept override
+            const TES3MP::ReliableInteractiveObjectInterestBaseline& baseline, TES3MP::MonotonicInstant) noexcept override
         {
             ++interactiveObjects;
+            for (const auto& member : baseline.members())
+                objectRevisions.insert_or_assign(member.objectId, member.revision);
             return TES3MP::OpenMWAdapter::ProviderResult::Accepted;
+        }
+        std::optional<TES3MP::ObjectRevision> observedObjectRevision(
+            TES3MP::InteractiveObjectId id) const noexcept override
+        {
+            auto it = objectRevisions.find(id);
+            if (it != objectRevisions.end())
+                return it->second;
+            return std::nullopt;
         }
         TES3MP::OpenMWAdapter::ProviderResult applyVrPoseWeight(
             TES3MP::EntityId, TES3MP::AuthorityEpoch, double weight) noexcept override
@@ -367,7 +407,11 @@ namespace
             lastPoseWeight = weight;
             return TES3MP::OpenMWAdapter::ProviderResult::Accepted;
         }
-        void clear() noexcept override { ++clears; }
+        void clear() noexcept override
+        {
+            ++clears;
+            objectRevisions.clear();
+        }
         unsigned calls = 0;
         unsigned advances = 0;
         unsigned clears = 0;
@@ -376,6 +420,7 @@ namespace
         unsigned interactiveObjects = 0;
         unsigned poseFallbacks = 0;
         double lastPoseWeight = 0.0;
+        std::map<TES3MP::InteractiveObjectId, TES3MP::ObjectRevision> objectRevisions;
     };
 
     class PoseInput final : public TES3MP::OpenMWAdapter::VrPoseInputProvider
@@ -804,6 +849,26 @@ int main()
     reconnectCoordinator->frame(0.01f);
     require(disconnect.resyncCompletions == 1 && reconnectPresentation.calls == 3 && reconnectPresentation.actors == 4);
 
+    // Verify unnegotiated interactive object capability does not queue commands or capture interactions
+    const auto sentBeforeUnneg = reconnectTransportObserver->sentFrames.size();
+    const auto unnegInteractionsBefore = reconnectInput.interactionCalls;
+    reconnectInput.nextInteraction = ObjectInteractionCapture{
+        *InteractiveObjectId::fromValue(101),
+        CellId::interior(value<CellSpaceId>(7)),
+        Position3(100, 200, 300),
+        *ObjectRevision::fromValue(1)
+    };
+    reconnectCoordinator->frame(0.01f);
+    require(reconnectInput.interactionCalls == unnegInteractionsBefore);
+    for (std::size_t index = sentBeforeUnneg; index < reconnectTransportObserver->sentFrames.size(); ++index)
+    {
+        const auto decoded = decodeProtocolFrame(reconnectTransportObserver->sentFrames[index]);
+        if (std::holds_alternative<DecodedFrame>(decoded))
+        {
+            require(std::get<DecodedFrame>(decoded).messageKind() != MessageKind::ClientInteractObjectCommand);
+        }
+    }
+
     Input objInput;
     Presentation objPresentation;
     Status objStatus;
@@ -848,6 +913,43 @@ int main()
         TransportChannel::ReliableOrdered);
     objCoordinator->frame(0.01f);
     require(objPresentation.calls == 1 && objPresentation.interactiveObjects == 1);
+    require(objPresentation.observedObjectRevision(*InteractiveObjectId::fromValue(101))
+        == *ObjectRevision::fromValue(1));
+
+    // Test queueing object activation when capability is negotiated
+    objInput.nextInteraction = ObjectInteractionCapture{
+        *InteractiveObjectId::fromValue(101),
+        CellId::interior(value<CellSpaceId>(7)),
+        Position3(100, 200, 300),
+        *ObjectRevision::fromValue(1)
+    };
+    const auto sentBeforeInteract = objTransportObserver->sentFrames.size();
+    objCoordinator->frame(0.01f);
+    require(objInput.interactionCalls >= 1);
+    require(objTransportObserver->sentFrames.size() > sentBeforeInteract);
+
+    bool foundInteractCommand = false;
+    for (std::size_t index = sentBeforeInteract; index < objTransportObserver->sentFrames.size(); ++index)
+    {
+        const auto decoded = decodeProtocolFrame(objTransportObserver->sentFrames[index]);
+        if (std::holds_alternative<DecodedFrame>(decoded))
+        {
+            const auto& frame = std::get<DecodedFrame>(decoded);
+            if (frame.messageKind() == MessageKind::ClientInteractObjectCommand)
+            {
+                auto decodedCmd = decodeClientInteractObjectCommand(frame.payload());
+                require(std::holds_alternative<ClientInteractObjectCommand>(decodedCmd));
+                const auto& cmd = std::get<ClientInteractObjectCommand>(decodedCmd);
+                require(cmd.objectId == *InteractiveObjectId::fromValue(101));
+                require(cmd.targetCell == CellId::interior(value<CellSpaceId>(7)));
+                require(cmd.interactionOrigin == Position3(100, 200, 300));
+                require(cmd.expectedRevision == *ObjectRevision::fromValue(1));
+                require(cmd.kind == ObjectInteractionKind::Activate);
+                foundInteractCommand = true;
+            }
+        }
+    }
+    require(foundInteractCommand);
 
     objDisconnect.resyncPending = true;
     objCoordinator->frame(0.01f);
@@ -869,6 +971,8 @@ int main()
         TransportChannel::ReliableOrdered);
     objCoordinator->frame(0.01f);
     require(objDisconnect.resyncCompletions == 1 && objPresentation.interactiveObjects == 2);
+    require(objPresentation.observedObjectRevision(*InteractiveObjectId::fromValue(101))
+        == *ObjectRevision::fromValue(2));
 
     // Verify revision gating: object baseline with revision > snapshot revision is not applied to presentation
     objTransportObserver->enqueue(MessageClass::ReliableOperation,
@@ -887,6 +991,7 @@ int main()
         TransportChannel::ReliableOrdered);
     objCoordinator->frame(0.01f);
     require(objStatus.last == ConnectionStatus::Reconnecting && objPresentation.interactiveObjects == 2);
+    require(objInput.clearCalls == 1);
 
     require(
         std::get<TES3MP::OpenMWAdapter::ClientCompositionFailure>(TES3MP::OpenMWAdapter::makeClientCoordinator("", 0, 0,

@@ -16,7 +16,9 @@ namespace TES3MP::OpenMWAdapter
         ClientHello makeClientHello(ContentManifestId contentManifest)
         {
             auto versions = std::get<ProtocolVersionRange>(ProtocolVersionRange::create(1, 2, 3));
-            const std::array optional{ vrPoseCapability(), actorReplicationCapability() };
+            const std::array optional{
+                vrPoseCapability(), actorReplicationCapability(), interactiveObjectReplicationCapability()
+            };
             auto offer = std::get<CapabilityOffer>(
                 CapabilityOffer::create(std::move(versions), optional, {}, contentManifest));
             return ClientHello::fromOffer(std::move(offer));
@@ -110,6 +112,7 @@ namespace TES3MP::OpenMWAdapter
 
             ~Coordinator() override
             {
+                mInput.clearSessionState();
                 mPresentation.clear();
                 if (mRuntime)
                     mRuntime->close();
@@ -366,6 +369,21 @@ namespace TES3MP::OpenMWAdapter
                         mResyncObjectBaseline = false;
                     }
                 }
+                if (mReady && !mPendingCellTransition && !mDeferredCellTransition && !captured.transition
+                    && interactiveObjectsNegotiated(*mRuntime))
+                {
+                    if (auto interaction = mInput.captureObjectInteraction())
+                    {
+                        const auto queued = mRuntime->queueInteractObject(interaction->objectId,
+                            interaction->targetCell, interaction->interactionOrigin,
+                            interaction->expectedRevision, interaction->kind, interaction->requestedKey);
+                        if (queued.result != ClientRuntimeResult::Accepted || !queued.sequence)
+                        {
+                            closeTerminal(ConnectionStatus::TransportFailed);
+                            return;
+                        }
+                    }
+                }
                 if (snapshot)
                 {
                     if (auto intent = mInput.sampleCurrentIntent())
@@ -465,6 +483,7 @@ namespace TES3MP::OpenMWAdapter
                     closeTerminal(ConnectionStatus::ResumeFailed);
                     return;
                 }
+                mInput.clearSessionState();
                 mPresentation.clear();
                 mMotion = MotionIntentTracker(mMovementMetrics);
                 mPoseEvidence.clear();
@@ -521,6 +540,7 @@ namespace TES3MP::OpenMWAdapter
 
             void reportFailure(ClientRuntimeResult result, ClientSessionAction action) noexcept
             {
+                mInput.clearSessionState();
                 mPresentation.clear();
                 if (mRuntime)
                     mRuntime->close();
@@ -559,6 +579,7 @@ namespace TES3MP::OpenMWAdapter
 
             void closeTerminal(ConnectionStatus status) noexcept
             {
+                mInput.clearSessionState();
                 mPresentation.clear();
                 if (mRuntime)
                     mRuntime->close();

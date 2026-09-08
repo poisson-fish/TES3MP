@@ -63,12 +63,27 @@ namespace TES3MP::OpenMWAdapter
         virtual void resyncCompleted() noexcept {}
     };
 
+    struct ObjectInteractionCapture
+    {
+        InteractiveObjectId objectId;
+        CellId targetCell;
+        Position3 interactionOrigin;
+        ObjectRevision expectedRevision;
+        ObjectInteractionKind kind = ObjectInteractionKind::Activate;
+        std::optional<KeyPrototypeId> requestedKey = std::nullopt;
+    };
+
     class SemanticInputProvider
     {
     public:
         virtual ~SemanticInputProvider() = default;
         virtual CellTransitionCapture captureCellTransition() noexcept = 0;
         virtual std::optional<LocomotionIntent> sampleCurrentIntent() noexcept = 0;
+        virtual std::optional<ObjectInteractionCapture> captureObjectInteraction() noexcept
+        {
+            return std::nullopt;
+        }
+        virtual void clearSessionState() noexcept {}
     };
 
     class VrPoseInputProvider
@@ -95,6 +110,10 @@ namespace TES3MP::OpenMWAdapter
             const ReliableInteractiveObjectInterestBaseline&, MonotonicInstant) noexcept
         {
             return ProviderResult::Accepted;
+        }
+        virtual std::optional<ObjectRevision> observedObjectRevision(InteractiveObjectId) const noexcept
+        {
+            return std::nullopt;
         }
         virtual ProviderResult applyVrPose(const ServerVrPoseSnapshot&, MonotonicInstant) noexcept
         {

@@ -10,6 +10,8 @@
 #include "../mwworld/cell.hpp"
 #include "../mwworld/cellstore.hpp"
 #include "../mwworld/class.hpp"
+#include "../mwworld/player.hpp"
+#include "../mwworld/ptr.hpp"
 #include "../mwworld/scene.hpp"
 #include "../mwworld/worldmodel.hpp"
 
@@ -27,6 +29,7 @@
 #include <numbers>
 #include <optional>
 #include <ranges>
+#include <utility>
 
 namespace TES3MP::OpenMWAdapter
 {
@@ -256,9 +259,22 @@ namespace TES3MP::OpenMWAdapter
         }
         std::vector<DesktopInteractiveObjectMapping> objects(interactiveObjects.begin(), interactiveObjects.end());
         std::ranges::sort(objects, {}, &DesktopInteractiveObjectMapping::id);
+        std::vector<std::pair<std::uint32_t, std::int32_t>> objectRefs;
+        objectRefs.reserve(objects.size());
         for (std::size_t index = 0; index < objects.size(); ++index)
         {
-            if (index != 0 && objects[index - 1].id == objects[index].id) return std::nullopt;
+            if (objects[index].refNumContentFile < -1
+                || (index != 0 && objects[index - 1].id == objects[index].id))
+                return std::nullopt;
+            objectRefs.emplace_back(objects[index].refNumIndex, objects[index].refNumContentFile);
+        }
+        std::ranges::sort(objectRefs);
+        for (std::size_t index = 1; index < objectRefs.size(); ++index)
+        {
+            if (objectRefs[index - 1].first == objectRefs[index].first
+                && (objectRefs[index - 1].second == -1 || objectRefs[index].second == -1
+                    || objectRefs[index - 1].second == objectRefs[index].second))
+                return std::nullopt;
         }
         return DesktopContentMapping{ std::move(manifest), std::move(mappings), appearanceId,
             std::move(avatarNpc), std::move(prototypes), std::move(objects) };
@@ -269,6 +285,45 @@ namespace TES3MP::OpenMWAdapter
     {
     public:
         std::optional<DesktopContentMapping> mapping;
+        const PresentationProvider* presentation = nullptr;
+        std::optional<ObjectInteractionCapture> pendingInteraction;
+        bool interceptorInstalled = false;
+
+        void ensureInterceptor(DesktopSemanticInput* self)
+        {
+            if (interceptorInstalled)
+                return;
+            try
+            {
+                auto world = MWBase::Environment::get().getWorld();
+                if (!world)
+                    return;
+                MWWorld::Player& player = world->getPlayer();
+                player.setActivationInterceptor([self](const MWWorld::Ptr& toActivate, const MWWorld::Ptr& actor) {
+                    return self->handleActivation(toActivate, actor);
+                });
+                interceptorInstalled = true;
+            }
+            catch (...)
+            {
+            }
+        }
+
+        void clearInterceptor()
+        {
+            if (!interceptorInstalled)
+                return;
+            try
+            {
+                auto world = MWBase::Environment::get().getWorld();
+                if (world)
+                    world->getPlayer().clearActivationInterceptor();
+            }
+            catch (...)
+            {
+            }
+            interceptorInstalled = false;
+        }
     };
 
     DesktopSemanticInput::DesktopSemanticInput()
@@ -278,9 +333,120 @@ namespace TES3MP::OpenMWAdapter
 
     DesktopSemanticInput::~DesktopSemanticInput() = default;
 
-    void DesktopSemanticInput::configure(DesktopContentMapping mapping)
+    void DesktopSemanticInput::configure(DesktopContentMapping mapping, const PresentationProvider* presentation)
     {
         mImpl->mapping = std::move(mapping);
+        mImpl->presentation = presentation;
+    }
+
+    void DesktopSemanticInput::clearSessionState() noexcept
+    {
+        mImpl->clearInterceptor();
+        mImpl->pendingInteraction.reset();
+    }
+
+    bool DesktopSemanticInput::handleActivation(const MWWorld::Ptr& toActivate, const MWWorld::Ptr& player) noexcept
+    {
+        try
+        {
+            (void)player;
+            if (toActivate.isEmpty() || !mImpl->mapping)
+                return false;
+
+            // In Phase 14, interactive objects are doors (with locks and traps).
+            if (toActivate.getType() != ESM::Door::sRecordId)
+                return false;
+
+            return queueObjectActivation(toActivate);
+        }
+        catch (...)
+        {
+            return false;
+        }
+    }
+
+    bool DesktopSemanticInput::queueObjectActivation(const MWWorld::Ptr& doorPtr) noexcept
+    {
+        try
+        {
+            if (doorPtr.isEmpty() || !mImpl->mapping)
+                return false;
+            if (doorPtr.getType() != ESM::Door::sRecordId)
+                return false;
+
+            const auto refNum = doorPtr.getCellRef().getRefNum();
+            std::optional<InteractiveObjectId> objectId;
+            bool explicitlyMapped = false;
+            for (const auto& objMap : mImpl->mapping->interactiveObjects)
+            {
+                if (objMap.refNumIndex == refNum.mIndex
+                    && (objMap.refNumContentFile == -1 || objMap.refNumContentFile == refNum.mContentFile))
+                {
+                    objectId = objMap.id;
+                    explicitlyMapped = true;
+                    break;
+                }
+            }
+            if (!objectId)
+            {
+                objectId = InteractiveObjectId::fromValue(refNum.mIndex);
+            }
+            if (!objectId)
+                return false;
+
+            auto* cellStore = doorPtr.getCell();
+            if (!cellStore)
+            {
+                auto scene = MWBase::Environment::get().getWorldScene();
+                if (scene)
+                    cellStore = scene->getCurrentCell();
+            }
+            if (!cellStore)
+                return false;
+            auto canonicalCell = toCanonical(*cellStore->getCell(), *mImpl->mapping);
+            if (!canonicalCell)
+                return false;
+
+            auto world = MWBase::Environment::get().getWorld();
+            if (!world)
+                return false;
+            const auto playerPtr = world->getPlayerPtr();
+            const auto& pos = playerPtr.getRefData().getPosition();
+            const auto origin = Position3(
+                static_cast<std::int64_t>(std::round(pos.pos[0] * PositionScale)),
+                static_cast<std::int64_t>(std::round(pos.pos[1] * PositionScale)),
+                static_cast<std::int64_t>(std::round(pos.pos[2] * PositionScale)));
+
+            if (!mImpl->presentation)
+                return false;
+            const auto expectedRev = mImpl->presentation->observedObjectRevision(*objectId);
+            if (!expectedRev)
+                return explicitlyMapped;
+
+            mImpl->pendingInteraction = ObjectInteractionCapture{
+                .objectId = *objectId,
+                .targetCell = *canonicalCell,
+                .interactionOrigin = origin,
+                .expectedRevision = *expectedRev,
+                .kind = ObjectInteractionKind::Activate,
+                .requestedKey = std::nullopt
+            };
+            return true;
+        }
+        catch (...)
+        {
+            return false;
+        }
+    }
+
+    std::optional<ObjectInteractionCapture> DesktopSemanticInput::captureObjectInteraction() noexcept
+    {
+        mImpl->ensureInterceptor(this);
+        if (!mImpl->pendingInteraction)
+            return std::nullopt;
+        auto captured = std::move(mImpl->pendingInteraction);
+        mImpl->pendingInteraction.reset();
+        return captured;
     }
 
     CellTransitionCapture DesktopSemanticInput::captureCellTransition() noexcept
@@ -289,7 +455,10 @@ namespace TES3MP::OpenMWAdapter
         {
             auto scene = MWBase::Environment::get().getWorldScene();
             auto* current = scene->getCurrentCell();
-            if (!scene->hasCellChanged() || !current)
+            if (!scene->hasCellChanged())
+                return {};
+            mImpl->pendingInteraction.reset();
+            if (!current)
                 return {};
             if (!mImpl->mapping)
                 return { ProviderResult::ContentMappingFailed, std::nullopt };
@@ -768,6 +937,12 @@ namespace TES3MP::OpenMWAdapter
             }
             return ProviderResult::Accepted;
         }
+
+        std::optional<ObjectRevision> observedObjectRevision(InteractiveObjectId id) const noexcept
+        {
+            const auto found = observedDoors.find(id);
+            return found != observedDoors.end() ? std::optional(found->second.lastRevision) : std::nullopt;
+        }
     };
 
     DesktopPresentation::DesktopPresentation(RemoteMotionMetricSink& metrics)
@@ -848,6 +1023,12 @@ namespace TES3MP::OpenMWAdapter
             mImpl->clear();
             return ProviderResult::PresentationFailed;
         }
+    }
+
+    std::optional<ObjectRevision> DesktopPresentation::observedObjectRevision(
+        InteractiveObjectId id) const noexcept
+    {
+        return mImpl->observedObjectRevision(id);
     }
 
     void DesktopPresentation::clear() noexcept

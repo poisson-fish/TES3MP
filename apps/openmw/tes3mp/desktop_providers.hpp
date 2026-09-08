@@ -46,14 +46,28 @@ namespace TES3MP::OpenMWAdapter
         std::vector<DesktopInteractiveObjectMapping> interactiveObjects;
     };
 
+}
+
+namespace MWWorld
+{
+    class Ptr;
+}
+
+namespace TES3MP::OpenMWAdapter
+{
     class DesktopSemanticInput final : public SemanticInputProvider
     {
     public:
         DesktopSemanticInput();
         ~DesktopSemanticInput() override;
-        void configure(DesktopContentMapping mapping);
+        void configure(DesktopContentMapping mapping, const PresentationProvider* presentation = nullptr);
         CellTransitionCapture captureCellTransition() noexcept override;
         std::optional<LocomotionIntent> sampleCurrentIntent() noexcept override;
+        std::optional<ObjectInteractionCapture> captureObjectInteraction() noexcept override;
+
+        bool handleActivation(const MWWorld::Ptr& toActivate, const MWWorld::Ptr& player) noexcept;
+        bool queueObjectActivation(const MWWorld::Ptr& doorPtr) noexcept;
+        void clearSessionState() noexcept override;
 
     private:
         class Impl;
@@ -75,6 +89,7 @@ namespace TES3MP::OpenMWAdapter
             std::span<const ActorInterestMember> observedActors, MonotonicInstant receivedAt) noexcept override;
         ProviderResult applyInteractiveObjects(
             const ReliableInteractiveObjectInterestBaseline& baseline, MonotonicInstant receivedAt) noexcept override;
+        std::optional<ObjectRevision> observedObjectRevision(InteractiveObjectId id) const noexcept override;
         void clear() noexcept override;
 
     private:

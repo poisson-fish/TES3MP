@@ -44,6 +44,9 @@ namespace TES3MP::OpenMWAdapter
             const std::optional<LocalLocomotionReconciliation>& localReconciliation = std::nullopt) noexcept override;
         ProviderResult applyActors(const LatestWinsActorSnapshot& snapshot,
             std::span<const ActorInterestMember> observedActors, MonotonicInstant receivedAt) noexcept override;
+        ProviderResult applyInteractiveObjects(
+            const ReliableInteractiveObjectInterestBaseline& baseline, MonotonicInstant receivedAt) noexcept override;
+        std::optional<ObjectRevision> observedObjectRevision(InteractiveObjectId id) const noexcept override;
         ProviderResult advance(MonotonicInstant now) noexcept override;
         void clear() noexcept override;
         void report(ConnectionStatus status) noexcept override;

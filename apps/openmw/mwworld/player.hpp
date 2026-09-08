@@ -2,7 +2,9 @@
 #define GAME_MWWORLD_PLAYER_H
 
 #include <array>
+#include <functional>
 #include <map>
+#include <utility>
 
 #include "../mwworld/livecellref.hpp"
 
@@ -32,6 +34,10 @@ namespace MWWorld
     /// \brief NPC object representing the player and additional player data
     class Player
     {
+    public:
+        using ActivationInterceptor = std::function<bool(const MWWorld::Ptr& toActivate, const MWWorld::Ptr& player)>;
+
+    private:
         LiveCellRef<ESM::NPC> mPlayer;
         MWWorld::CellStore* mCellStore;
         ESM::RefId mSign;
@@ -55,6 +61,7 @@ namespace MWWorld
         std::array<float, ESM::Attribute::Length> mSaveAttributes;
 
         bool mJumping;
+        ActivationInterceptor mActivationInterceptor;
 
     public:
         Player(const ESM::NPC* player);
@@ -88,6 +95,15 @@ namespace MWWorld
 
         /// Activate the object under the crosshair, if any
         void activate();
+
+        void setActivationInterceptor(ActivationInterceptor interceptor)
+        {
+            mActivationInterceptor = std::move(interceptor);
+        }
+        void clearActivationInterceptor()
+        {
+            mActivationInterceptor = nullptr;
+        }
 
         void yaw(float yaw);
         void pitch(float pitch);

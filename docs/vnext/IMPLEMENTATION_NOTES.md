@@ -6624,6 +6624,38 @@ only the relevant phase section here.
   - Canonical authority remains strictly on the server; client does not author object state.
   - No intermediate door angles streamed across the network; network streams discrete state in `ReliableInteractiveObjectInterestBaseline`.
 
+### 2026-09-08 — interactive-object client activation and round-trip verification — Complete
+
+- OpenMW Raycast Activation Interception:
+  - Added `using ActivationInterceptor = std::function<bool(const MWWorld::Ptr&, const MWWorld::Ptr&)>` and `setActivationInterceptor` / `clearActivationInterceptor` on `MWWorld::Player`.
+  - In `MWWorld::Player::activate()`, invoke `mActivationInterceptor(toActivate, player)` before running stock activation or Lua `objectActivated` callbacks; if consumed, stock single-player door opening and teleportation are intercepted.
+  - Registered `P14-001` in `docs/vnext/OPENMW_PATCH_REGISTRY.json` for `apps/openmw/mwworld/player.cpp` and `player.hpp`.
+- Desktop Semantic Input & Presentation Query:
+  - Extended `SemanticInputProvider` with `captureObjectInteraction()` returning `std::optional<ObjectInteractionCapture>`.
+  - Extended `PresentationProvider` with `observedObjectRevision(InteractiveObjectId)` to provide the current authoritative baseline revision for optimistic concurrency control.
+  - Implemented `DesktopSemanticInput::handleActivation` and `queueObjectActivation`: checks door validity, maps the cell ref via `DesktopContentMapping`, retrieves observed revision from `DesktopPresentation`, and stages the proposal.
+  - Added `SemanticInputProvider::clearSessionState()` and coordinator lifecycle calls so pending interactions and the `MWWorld::Player` interceptor are cleared during reconnect, terminal failure, and coordinator teardown while the OpenMW world is still alive.
+  - Unmapped fallback IDs are intercepted only after an authoritative object baseline has identified them; explicitly mapped objects remain consumed while awaiting their first revision instead of mutating stock local state.
+  - Desktop content mapping now rejects ambiguous reverse object mappings and invalid negative content-file identifiers.
+  - Desktop automation forwards interactive-object baselines and revision observations to its wrapped presentation provider.
+  - In `apps/openmw/main.cpp`, configured `multiplayerInput` with the presentation provider reference.
+- Adapter Coordinator Dispatch & Production Capability Advertisement:
+  - In `Coordinator::frame()`, when runtime is ready, no cell transition is pending, and interactive objects capability is negotiated, samples `mInput.captureObjectInteraction()` and queues `mRuntime->queueInteractObject(...)`.
+  - Reliable queue admission failure is terminal instead of silently dropping an already-consumed activation.
+  - Enabled `interactiveObjectReplicationCapability()` in client hello capability arrays in `apps/openmw/tes3mp/adapter.cpp` and `apps/openmw/tes3mp/client_connection.cpp`.
+- Verification Evidence:
+  - Full MSVC RelWithDebInfo build of `openmw` and `openmw_tes3mp_adapter_tests` targets in `build/slice82-openmw-full` succeeded with exit code 0.
+  - `openmw_tes3mp_adapter_tests.exe` passes cleanly (exit code 0), verifying:
+    - Queueing `ClientInteractObjectCommand` with target object ID, cell ID, origin, and expected revision upon input activation.
+    - Wire encoding/decoding and FlatBuffers schema validation of `ClientInteractObjectCommand`.
+    - Server baseline response application, object revision progression, and door state observation.
+    - Capability gating: unnegotiated client sessions neither sample interactions nor transmit `ClientInteractObjectCommand`.
+  - `tes3mp_interactive_object_world_tests.exe`, `tes3mp_interactive_object_replication_tests.exe`, and `tes3mp_interactive_object_catalog_tests.exe` pass cleanly (exit code 0).
+  - Python tests: all 163 tests pass (`python -m unittest discover -s scripts/tests`), including updated `test_interactive_object_contract.py` and `test_openmw_patch_registry.py`.
+  - `verify_openmw_patch_registry.py` passes.
+  - Baseline provenance: `verify_vnext_baseline.py` passes with 81 verified dependency declarations.
+  - Legacy exclusion: `verify_vnext_legacy_exclusion.py` passes (4,118 tracked paths, 62 CMake files, 1,254 compile commands, and 1,971 Ninja build edges checked).
+
 ## Phase 15 — Inventory, equipment, and container transactions
 
 [Back to the phase tracker](IMPLEMENTATION_PLAN.md#phase-15--inventory-equipment-and-container-transactions)

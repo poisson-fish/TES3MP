@@ -302,6 +302,17 @@ namespace TES3MP::OpenMWAdapter
         return ProviderResult::Accepted;
     }
 
+    ProviderResult DesktopAutomation::applyInteractiveObjects(
+        const ReliableInteractiveObjectInterestBaseline& baseline, MonotonicInstant receivedAt) noexcept
+    {
+        return mPresentation.applyInteractiveObjects(baseline, receivedAt);
+    }
+
+    std::optional<ObjectRevision> DesktopAutomation::observedObjectRevision(InteractiveObjectId id) const noexcept
+    {
+        return mPresentation.observedObjectRevision(id);
+    }
+
     void DesktopAutomation::clear() noexcept
     {
         mPresentation.clear();

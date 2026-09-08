@@ -53,6 +53,23 @@
       "tests": ["scripts/tests/test_openmw_patch_registry.py", "scripts/tests/test_replicated_actor_contract.py", "openmw-tests ReplicatedActor.*", "openmw_tes3mp_adapter_tests", "content-backed two-client desktop flow/reconnect/soak", "openmw RelWithDebInfo link"],
       "disposition": "local; possible general-purpose upstream candidate; no upstream contact authorized",
       "removal_condition": "OpenMW supplies an equivalent reviewed ephemeral replicated-actor render role with explicit non-gameplay registration and visibility contracts"
+    },
+    {
+      "id": "P14-001",
+      "slice": "14.4",
+      "owner": "OpenMW adapter",
+      "purpose": "Provide a clean activation interceptor seam on MWWorld::Player to route interactive object activation raycasts to the multiplayer input provider before stock single-player activation occurs.",
+      "paths": [
+        "apps/openmw/mwworld/player.cpp",
+        "apps/openmw/mwworld/player.hpp"
+      ],
+      "tests": [
+        "scripts/tests/test_openmw_patch_registry.py",
+        "scripts/tests/test_interactive_object_contract.py",
+        "openmw_tes3mp_adapter_tests"
+      ],
+      "disposition": "local; possible general-purpose upstream candidate; no upstream contact authorized",
+      "removal_condition": "OpenMW supplies an equivalent reviewed activation interceptor hook on MWWorld::Player"
     }
   ]
 }

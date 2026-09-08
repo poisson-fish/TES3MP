@@ -204,6 +204,9 @@ namespace MWWorld
         if (!toActivate.getClass().hasToolTip(toActivate))
             return;
 
+        if (mActivationInterceptor && mActivationInterceptor(toActivate, player))
+            return;
+
         MWBase::Environment::get().getLuaManager()->objectActivated(toActivate, player);
     }
 

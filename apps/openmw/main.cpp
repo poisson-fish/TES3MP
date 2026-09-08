@@ -373,7 +373,7 @@ bool parseOptions(int argc, char** argv, OMW::Engine& engine, Files::Configurati
             Log(Debug::Error) << "TES3MP startup failed: content record mappings are required";
             return false;
         }
-        multiplayerInput.configure(*contentMapping);
+        multiplayerInput.configure(*contentMapping, &multiplayerPresentation);
         multiplayerPresentation.configure(*contentMapping);
 
         TES3MP::OpenMWAdapter::SemanticInputProvider* input = &multiplayerInput;

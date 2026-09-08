@@ -36,28 +36,36 @@ Verification scales with risk:
 
 ## Now
 
-### Phase 14 — interactive-object client reception and OpenMW presentation
+### Phase 14 — interactive-object OpenMW client integration
 
 Status: **Complete — ready for commit**
 
 Client session reception and OpenMW-local presentation of interactive objects are implemented and verified:
 - Ingestion and decoding of `MessageKind::ReliableInteractiveObjectInterestBaseline` across `ClientSession`, `HeadlessClientSession`, and `ClientSessionRuntime`.
-- Reception and presentation remain capability-gated, while production client offers intentionally defer `interactiveObjectReplicationCapability()` until OpenMW activation is intercepted and routed through `queueInteractObject`.
+- Reception, presentation, and interaction dispatch remain capability-gated, and production clients advertise `interactiveObjectReplicationCapability()`.
 - Desktop content mapping extended with `--tes3mp-content-interactive-object-map` CLI parsing (`<id>=<refNumIndex>[:<contentFile>]`) and fallback mapping (`refNumIndex == objectId.value()`).
 - `PresentationProvider::applyInteractiveObjects` implemented in `DesktopPresentation`: resolves doors in current and active cells via `MWWorld::Scene`, synchronizes lock/trap state on cell refs, snaps door rotation on cell entry (`world->rotateObject` + `activateDoor(Idle)`), smoothly interpolates door swings (`world->activateDoor(Opening/Closing)`), and triggers 3D sound effects (`MWBase::SoundManager`).
 - OpenMW `Coordinator` enforces baseline revision monotonicity, gates resync completion on interactive-object baseline arrival when negotiated, and clears door state tracking on cell transitions and session reset.
 - Client command generation seam added (`queueInteractObject`) in `ClientSessionRuntime`.
-- Strict authority and security boundaries preserved: production clients cannot negotiate the feature while stock OpenMW activation could still mutate door presentation locally; no intermediate network door angles and zero legacy multiplayer networking packets.
+- Strict authority and security boundaries preserved: mapped or authoritatively observed doors are intercepted before stock OpenMW activation can mutate presentation; no intermediate network door angles and zero legacy multiplayer networking packets.
+OpenMW activation raycast interception, client interaction dispatch, unnegotiated rejection, round-trip door activation verification, and production capability advertisement are implemented and verified:
+- Added non-intrusive `ActivationInterceptor` seam on `MWWorld::Player` to intercept door activation before stock single-player activation or Lua `objectActivated` callbacks run, cleanly intercepting local door rotation and teleportation.
+- Registered patch `P14-001` in `docs/vnext/OPENMW_PATCH_REGISTRY.json` for `apps/openmw/mwworld/player.cpp` and `player.hpp`.
+- Implemented `DesktopSemanticInput::handleActivation` and `queueObjectActivation` translating door activation raycasts into `ObjectInteractionCapture` with observed revision from `DesktopPresentation`.
+- Added session-lifecycle cleanup so disconnect and resume clear pending interactions and remove the OpenMW activation interceptor while the engine is alive.
+- Reject ambiguous reverse object mappings and leave unmapped, unobserved doors on the stock OpenMW activation path.
+- In `Coordinator::frame`, sampled object interaction and queued via `mRuntime->queueInteractObject(...)` when negotiated and no cell transition is pending.
+- Enabled `interactiveObjectReplicationCapability()` across production client hello arrays in `apps/openmw/tes3mp/adapter.cpp` and `apps/openmw/tes3mp/client_connection.cpp`.
+- Extended `openmw_tes3mp_adapter_tests` to verify command queueing, wire encoding/decoding, server baseline response application, door state progression, unnegotiated capability rejection, and input cleanup on reconnect.
 
 ## Next
 
 These are candidates, not locked slices:
 
-1. Wire OpenMW object activation / door activation raycast to queue `queueInteractObject` commands to the server session runtime, test round-trip client-server door activation, and then enable production capability advertisement.
+1. Phase 15 discovery and foundational scope: inventory, containers, and equipment baseline replication, including authoritative key ownership for object unlock commands.
 2. Revisit Phase 12 PC-VR hardware capture before Phase 22 stabilization if
    hardware remains unavailable during Phase 14 presentation work.
-3. Phase 15 — inventory, containers, and equipment baseline replication, including authoritative key ownership for object unlock commands.
-4. Phase 16 — combat, stats, magic, death, and resurrection.
+3. Phase 16 — combat, stats, magic, death, and resurrection.
 
 The list is rewritten after each completed pass. New evidence may reorder,
 combine, or remove items.
@@ -104,6 +112,8 @@ but they no longer force a predetermined sequence of micro-slices.
 | Phase 14 discovery | **Complete** | OpenMW door/lock/trap/activation trace, legacy requirements evidence, clean lane separation, named proofs, and owner decision options |
 | Phase 14 canonical core | **Complete** | Manifest-bound catalog, immutable canonical object world, reach/cell/revision/key validation, and discrete state outcomes |
 | Phase 14 replication/server composition | **Complete** | Capability-gated wire protocol, exact-cell baselines, shared canonical command ordering/idempotency, atomic player/object commit, teleport replacement, and trap outcome publication |
+| Phase 14 client reception/presentation | **Complete** | Client session baseline ingestion, desktop content mapping, OpenMW scene door rotation/sound sync, and resync/revision gating |
+| Phase 14 activation and round-trip | **Complete** | Activation raycast interception via `MWWorld::Player`, client `queueInteractObject` dispatch, unnegotiated and round-trip verification, and production capability advertisement |
 
 ### Phase 9 completion record
 

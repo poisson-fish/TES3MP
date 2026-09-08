@@ -17,8 +17,9 @@ Updated: 2026-09-08
 - Phase 14 canonical core: **Complete**
 - Phase 14 interactive-object replication and server composition: **Complete**
 - Phase 14 client reception and OpenMW presentation: **Complete**
-- Active work: **None — Phase 14 client reception and OpenMW presentation pass is ready for commit**
-- Last pass: **Client reception and OpenMW desktop presentation of interactive objects (doors, locks, traps)**
+- Phase 14 client activation and round-trip verification: **Complete**
+- Active work: **None — Phase 14 client activation and round-trip verification pass is ready for commit**
+- Last pass: **Client door activation raycast interception, client-server round-trip verification, and production capability advertisement**
 - Authoritative tracker: [rolling implementation plan](IMPLEMENTATION_PLAN.md)
 - Historical evidence: [implementation notes](IMPLEMENTATION_NOTES.md)
 
@@ -331,6 +332,19 @@ ADRs and GDRs are required only for consequential, hard-to-reverse decisions.
 - Verified in `apps/tes3mp-server/server_app_tests.cpp`: baseline delivery on join, client interaction dispatch with reach enforcement, door open transition with revision increment, Scenario 11 (unloaded cell preserves canonical object state without ticking), and Scenario 12 (late join and resync receive complete modified cell baseline).
 - Pre-commit regression coverage proves mixed cell-transition/interaction ordering, finalized command history, rejected-interaction outcomes, trap outcome delivery to canonical sinks, teleport player replacement, and rollback when reliable output admission fails.
 
+## Phase 14 client reception, activation, and round-trip result
+
+- Extended `ClientSession`, `HeadlessClientSession`, and `ClientSessionRuntime` to ingest `ReliableInteractiveObjectInterestBaseline`, enforce baseline revision monotonicity, and gate session resync on object baseline completion when capability is negotiated.
+- Implemented `DesktopPresentation::applyInteractiveObjects` to map and synchronize door state, apply lock/trap data, snap door rotation on cell entry, smoothly interpolate visual door swings, and play 3D audio.
+- Added non-intrusive activation interception hook on `MWWorld::Player` (`mActivationInterceptor`) to catch door raycast activation before stock single-player activation or Lua callbacks run, cleanly intercepting local door rotation and teleportation.
+- Registered patch `P14-001` in `docs/vnext/OPENMW_PATCH_REGISTRY.json` for `apps/openmw/mwworld/player.cpp` and `player.hpp`.
+- Implemented `DesktopSemanticInput::handleActivation` and `queueObjectActivation` translating door activation into `ObjectInteractionCapture` with the current observed revision from `DesktopPresentation`.
+- Added explicit input session cleanup so reconnect, terminal failure, and coordinator teardown remove the activation interceptor and discard pending interactions before OpenMW world teardown.
+- Limited fallback activation interception to objects already observed in an authoritative baseline, and rejected ambiguous reverse object mappings.
+- In `Coordinator::frame`, sampled object interaction when negotiated and dispatched via `queueInteractObject`.
+- Enabled `interactiveObjectReplicationCapability()` across production client hello arrays in `adapter.cpp` and `client_connection.cpp`.
+- Verified the client round-trip boundary in `openmw_tes3mp_adapter_tests`: activation proposal -> `ClientInteractObjectCommand` wire transmission and FlatBuffers decoding -> simulated server baseline response with object revision advance -> presentation observation. Verified unnegotiated rejection and input cleanup on reconnect.
+
 ## Phase 10 result
 
 - Fresh password joins issue a random 32-byte player credential after ordinary
@@ -402,8 +416,9 @@ work.
   executables pass cleanly (returncode 0).
 - `tes3mp_server_app_tests` passes cleanly (returncode 0), including Scenarios 11 & 12.
 - `tes3mp_interactive_object_catalog_tests` passes cleanly (returncode 0).
+- `verify_openmw_patch_registry.py` passes cleanly with `P14-001` covering `player.cpp` and `player.hpp`.
 - All 163 repository Python tests pass (`python -m unittest discover -s scripts/tests`),
-  including updated `test_interactive_object_contract.py`.
+  including updated `test_interactive_object_contract.py` and `test_openmw_patch_registry.py`.
 - `verify_vnext_legacy_exclusion.py` passes (4,118 tracked paths, 62 CMake files,
   1,254 compile commands, and 1,971 Ninja build edges checked).
 - `verify_vnext_baseline.py` passes with 81 verified input dependency declarations.
@@ -411,12 +426,8 @@ work.
 
 ## Next pass
 
-Wire OpenMW object activation / door activation raycast to queue `queueInteractObject`
-commands to the server session runtime, test round-trip client-server door activation,
-and then enable production interactive-object capability advertisement.
+Phase 15 discovery and foundational scope: inventory, containers, and equipment baseline replication, including authoritative key ownership for object unlock commands.
 
 ## Working-tree expectation
 
-`vnext` contains the reviewed Phase 14 client reception and OpenMW desktop presentation
-pass ready for commit. The separate `vnext-vr` worktree remains clean at Phase 13
-integration merge `2762445c8b`.
+`vnext` contains the completed and verified Phase 14 client activation raycast interception, client-server round-trip verification, and production capability advertisement pass ready for commit. The separate `vnext-vr` worktree remains clean at Phase 13 integration merge `2762445c8b`.

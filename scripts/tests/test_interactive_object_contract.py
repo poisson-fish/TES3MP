@@ -141,9 +141,33 @@ class InteractiveObjectContractTests(unittest.TestCase):
         self.assertIn("mMinimumObjectBaselineRevision", adapter_src)
         self.assertIn("mResyncObjectBaseline", adapter_src)
         self.assertIn("applyInteractiveObjects", adapter_src)
-        production_capabilities = "const std::array optional{ vrPoseCapability(), actorReplicationCapability() };"
-        self.assertIn(production_capabilities, adapter_src)
-        self.assertIn(production_capabilities, connection_src)
+        production_capabilities = (
+            "const std::array optional{ vrPoseCapability(), actorReplicationCapability(), "
+            "interactiveObjectReplicationCapability() };"
+        )
+        old_capabilities = "const std::array optional{ vrPoseCapability(), actorReplicationCapability() };"
+        for src in (adapter_src, connection_src):
+            compact = " ".join(src.split())
+            self.assertIn(production_capabilities, compact)
+            self.assertNotIn(old_capabilities, compact)
+            self.assertEqual(compact.count("const std::array optional{"), 1)
+
+        # OpenMW Activation raycast interception, input capture, and desktop provider wiring
+        player_hdr = (ROOT / "apps/openmw/mwworld/player.hpp").read_text(encoding="utf-8")
+        player_src = (ROOT / "apps/openmw/mwworld/player.cpp").read_text(encoding="utf-8")
+        self.assertIn("captureObjectInteraction", providers_hdr)
+        self.assertIn("clearSessionState", providers_hdr)
+        self.assertIn("observedObjectRevision", providers_hdr)
+        self.assertIn("mActivationInterceptor", player_hdr)
+        self.assertIn("setActivationInterceptor", player_hdr)
+        self.assertIn("mActivationInterceptor(toActivate, player)", player_src)
+        self.assertIn("queueObjectActivation", desktop_hdr)
+        self.assertIn("captureObjectInteraction", desktop_hdr)
+        self.assertIn("observedObjectRevision", desktop_hdr)
+        self.assertIn("captureObjectInteraction", desktop_src)
+        self.assertIn("clearSessionState", desktop_src)
+        self.assertIn("observedObjectRevision", desktop_src)
+        self.assertIn("queueInteractObject", adapter_src)
 
         # OpenMW Presentation provider and desktop implementation
         self.assertIn("applyInteractiveObjects", providers_hdr)
