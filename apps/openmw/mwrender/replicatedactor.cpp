@@ -11,8 +11,10 @@
 #include <components/esm3/loadbody.hpp>
 #include <components/esm3/loadclot.hpp>
 #include <components/esm3/loadcrea.hpp>
+#include <components/esm3/loadligh.hpp>
 #include <components/esm3/loadnpc.hpp>
 #include <components/esm3/loadrace.hpp>
+#include <components/esm3/loadweap.hpp>
 #include <components/misc/convert.hpp>
 #include <components/misc/resourcehelpers.hpp>
 #include <components/resource/resourcesystem.hpp>
@@ -172,7 +174,8 @@ namespace MWRender
         {
         public:
             ReplicatedActorAnimation(const MWWorld::Ptr& ptr, osg::ref_ptr<osg::Group> parentNode,
-                Resource::ResourceSystem* resourceSystem, const MWWorld::ESMStore& store)
+                Resource::ResourceSystem* resourceSystem, const MWWorld::ESMStore& store,
+                std::optional<std::span<const ESM::RefId>> equipment)
                 : Animation(ptr, std::move(parentNode), resourceSystem, Context::ReplicatedActor)
                 , mStaticControllerTime(std::make_shared<NullAnimationTime>())
             {
@@ -226,7 +229,10 @@ namespace MWRender
                 }
                 assignNamed(parts, ESM::PRT_Head, 1, npc->mHead, store);
                 assignNamed(parts, ESM::PRT_Hair, 1, npc->mHair, store);
-                applyEquipment(parts, *npc, female, store);
+                if (equipment)
+                    applyEquipment(parts, *equipment, female, store);
+                else
+                    applyEquipment(parts, *npc, female, store);
 
                 for (const AppearancePart& part : parts)
                     if (part.mesh)
@@ -236,6 +242,8 @@ namespace MWRender
                 for (std::size_t index = 0; index < parts.size(); ++index)
                     if (parts[index].mesh)
                         attachPart(static_cast<ESM::PartReferenceType>(index), *parts[index].mesh);
+                if (equipment)
+                    applyCarriedEquipment(*equipment, store);
 
                 const std::string_view base = Settings::models().mXbaseanim.get().value();
                 if (!base.empty())
@@ -333,13 +341,12 @@ namespace MWRender
                 {
                     if (bodyPart->mModel.empty())
                         throw BuildFailure(ReplicatedActorResult::MissingAppearanceDependency);
-                    parts[type].mesh
-                        = Misc::ResourceHelpers::correctMeshPath(VFS::Path::Normalized(bodyPart->mModel));
+                    parts[type].mesh = Misc::ResourceHelpers::correctMeshPath(VFS::Path::Normalized(bodyPart->mModel));
                 }
             }
 
-            static void assignNamed(std::array<AppearancePart, ESM::PRT_Count>& parts,
-                ESM::PartReferenceType type, int priority, const ESM::RefId& id, const MWWorld::ESMStore& store)
+            static void assignNamed(std::array<AppearancePart, ESM::PRT_Count>& parts, ESM::PartReferenceType type,
+                int priority, const ESM::RefId& id, const MWWorld::ESMStore& store)
             {
                 if (id.empty())
                     return;
@@ -349,8 +356,8 @@ namespace MWRender
                 assign(parts, type, priority, bodyPart);
             }
 
-            static void reserve(std::array<AppearancePart, ESM::PRT_Count>& parts, ESM::PartReferenceType type,
-                int priority)
+            static void reserve(
+                std::array<AppearancePart, ESM::PRT_Count>& parts, ESM::PartReferenceType type, int priority)
             {
                 assign(parts, type, priority, nullptr);
             }
@@ -399,9 +406,8 @@ namespace MWRender
                         if (clothing->mData.mType == ESM::Clothing::Robe)
                         {
                             constexpr ESM::PartReferenceType covered[] = { ESM::PRT_Groin, ESM::PRT_Skirt,
-                                ESM::PRT_RLeg, ESM::PRT_LLeg, ESM::PRT_RUpperarm, ESM::PRT_LUpperarm,
-                                ESM::PRT_RKnee, ESM::PRT_LKnee, ESM::PRT_RForearm, ESM::PRT_LForearm,
-                                ESM::PRT_Cuirass };
+                                ESM::PRT_RLeg, ESM::PRT_LLeg, ESM::PRT_RUpperarm, ESM::PRT_LUpperarm, ESM::PRT_RKnee,
+                                ESM::PRT_LKnee, ESM::PRT_RForearm, ESM::PRT_LForearm, ESM::PRT_Cuirass };
                             for (const auto part : covered)
                                 reserve(parts, part, priority);
                         }
@@ -422,6 +428,80 @@ namespace MWRender
                         applyPartReferences(parts, armor->mParts.mParts, female, 3, store);
                         if (armor->mData.mType == ESM::Armor::Helmet)
                             reserve(parts, ESM::PRT_Hair, 3);
+                    }
+                }
+            }
+
+            static void applyEquipment(std::array<AppearancePart, ESM::PRT_Count>& parts,
+                std::span<const ESM::RefId> equipment, bool female, const MWWorld::ESMStore& store)
+            {
+                for (const ESM::RefId& id : equipment)
+                {
+                    if (id.empty())
+                        continue;
+                    const int type = store.find(id);
+                    if (type == ESM::Clothing::sRecordId)
+                    {
+                        const ESM::Clothing* clothing = store.get<ESM::Clothing>().search(id);
+                        if (!clothing)
+                            throw BuildFailure(ReplicatedActorResult::InvalidAppearanceRecord);
+                        const int priority = clothingPriority(*clothing);
+                        applyPartReferences(parts, clothing->mParts.mParts, female, priority, store);
+                        if (clothing->mData.mType == ESM::Clothing::Robe)
+                        {
+                            constexpr ESM::PartReferenceType covered[] = { ESM::PRT_Groin, ESM::PRT_Skirt,
+                                ESM::PRT_RLeg, ESM::PRT_LLeg, ESM::PRT_RUpperarm, ESM::PRT_LUpperarm, ESM::PRT_RKnee,
+                                ESM::PRT_LKnee, ESM::PRT_RForearm, ESM::PRT_LForearm, ESM::PRT_Cuirass };
+                            for (const auto part : covered)
+                                reserve(parts, part, priority);
+                        }
+                        else if (clothing->mData.mType == ESM::Clothing::Skirt)
+                        {
+                            reserve(parts, ESM::PRT_Groin, priority);
+                            reserve(parts, ESM::PRT_RLeg, priority);
+                            reserve(parts, ESM::PRT_LLeg, priority);
+                        }
+                    }
+                    else if (type == ESM::Armor::sRecordId)
+                    {
+                        const ESM::Armor* armor = store.get<ESM::Armor>().search(id);
+                        if (!armor)
+                            throw BuildFailure(ReplicatedActorResult::InvalidAppearanceRecord);
+                        applyPartReferences(parts, armor->mParts.mParts, female, 3, store);
+                        if (armor->mData.mType == ESM::Armor::Helmet)
+                            reserve(parts, ESM::PRT_Hair, 3);
+                    }
+                    else if (type != ESM::Weapon::sRecordId && type != ESM::Light::sRecordId)
+                        throw BuildFailure(ReplicatedActorResult::InvalidAppearanceRecord);
+                }
+            }
+
+            void applyCarriedEquipment(std::span<const ESM::RefId> equipment, const MWWorld::ESMStore& store)
+            {
+                for (const ESM::RefId& id : equipment)
+                {
+                    const int type = id.empty() ? 0 : store.find(id);
+                    if (type == ESM::Weapon::sRecordId)
+                    {
+                        const ESM::Weapon* weapon = store.get<ESM::Weapon>().search(id);
+                        if (!weapon || weapon->mModel.empty())
+                            throw BuildFailure(ReplicatedActorResult::MissingAppearanceDependency);
+                        attachPart(ESM::PRT_Weapon,
+                            Misc::ResourceHelpers::correctMeshPath(VFS::Path::Normalized(weapon->mModel)));
+                    }
+                    else if (type == ESM::Armor::sRecordId)
+                    {
+                        const ESM::Armor* armor = store.get<ESM::Armor>().search(id);
+                        if (armor && armor->mData.mType == ESM::Armor::Shield && !armor->mModel.empty())
+                            attachPart(ESM::PRT_Shield,
+                                Misc::ResourceHelpers::correctMeshPath(VFS::Path::Normalized(armor->mModel)));
+                    }
+                    else if (type == ESM::Light::sRecordId)
+                    {
+                        const ESM::Light* light = store.get<ESM::Light>().search(id);
+                        if (light && !light->mModel.empty())
+                            attachPart(ESM::PRT_Shield,
+                                Misc::ResourceHelpers::correctMeshPath(VFS::Path::Normalized(light->mModel)));
                     }
                 }
             }
@@ -465,7 +545,8 @@ namespace MWRender
             && std::ranges::all_of(position.rot, [](float value) { return std::isfinite(value); });
     }
 
-    ReplicatedActorResult Objects::insertReplicatedActor(const MWWorld::Ptr& ptr, const MWWorld::ESMStore& store)
+    ReplicatedActorResult Objects::insertReplicatedActor(
+        const MWWorld::Ptr& ptr, const MWWorld::ESMStore& store, std::optional<std::span<const ESM::RefId>> equipment)
     {
         const ReplicatedActorResult capacity = replicatedActorCapacityResult(mReplicatedActors.size());
         if (capacity != ReplicatedActorResult::Accepted)
@@ -477,8 +558,8 @@ namespace MWRender
         ptr.getRefData().getBaseNode()->setNodeMask(Mask_ReplicatedActor);
         try
         {
-            osg::ref_ptr<ReplicatedActorAnimation> animation(new ReplicatedActorAnimation(ptr,
-                osg::ref_ptr<osg::Group>(ptr.getRefData().getBaseNode()), mResourceSystem, store));
+            osg::ref_ptr<ReplicatedActorAnimation> animation(new ReplicatedActorAnimation(
+                ptr, osg::ref_ptr<osg::Group>(ptr.getRefData().getBaseNode()), mResourceSystem, store, equipment));
             const bool fallback = animation->animationFallback();
             mReplicatedActors.emplace(ptr.mRef, std::move(animation));
             return fallback ? ReplicatedActorResult::AnimationFallback : ReplicatedActorResult::Accepted;
@@ -544,7 +625,8 @@ namespace MWRender
     {
     public:
         Impl(RenderingManager& rendering, const MWWorld::ESMStore& store, const ESM::RefId& npcRecord,
-            MWWorld::CellStore& cell, const ESM::Position& position)
+            MWWorld::CellStore& cell, const ESM::Position& position,
+            std::optional<std::span<const ESM::RefId>> equipment)
             : mRendering(rendering)
             , mReference(store, npcRecord)
             , mPtr(mReference.getPtr().mRef, &cell)
@@ -554,7 +636,7 @@ namespace MWRender
             if (!isValidReplicatedActorPose(position))
                 throw BuildFailure(ReplicatedActorResult::InvalidPose);
             mPtr.getRefData().setPosition(position);
-            mCreateResult = mRendering.getObjects().insertReplicatedActor(mPtr, store);
+            mCreateResult = mRendering.getObjects().insertReplicatedActor(mPtr, store, equipment);
             if (!replicatedActorResultAccepted(mCreateResult))
                 throw BuildFailure(mCreateResult);
         }
@@ -591,9 +673,9 @@ namespace MWRender
         return mImpl->update(position, locomotion, animationSeconds);
     }
 
-    ReplicatedActor::CreateResult ReplicatedActor::create(RenderingManager& rendering,
-        const MWWorld::ESMStore& store, const ESM::RefId& npcRecord, MWWorld::CellStore& cell,
-        const ESM::Position& position) noexcept
+    ReplicatedActor::CreateResult ReplicatedActor::create(RenderingManager& rendering, const MWWorld::ESMStore& store,
+        const ESM::RefId& npcRecord, MWWorld::CellStore& cell, const ESM::Position& position,
+        std::optional<std::span<const ESM::RefId>> equipment) noexcept
     {
         try
         {
@@ -602,7 +684,7 @@ namespace MWRender
             const int recType = store.find(npcRecord);
             if (recType != ESM::NPC::sRecordId && recType != ESM::Creature::sRecordId)
                 return { ReplicatedActorResult::InvalidAppearanceRecord, nullptr };
-            auto impl = std::make_unique<Impl>(rendering, store, npcRecord, cell, position);
+            auto impl = std::make_unique<Impl>(rendering, store, npcRecord, cell, position, equipment);
             const ReplicatedActorResult result = impl->createResult();
             return { result, std::unique_ptr<ReplicatedActor>(new ReplicatedActor(std::move(impl))) };
         }

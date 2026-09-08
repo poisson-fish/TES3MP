@@ -8,6 +8,11 @@
 
 namespace MWGui
 {
+    namespace
+    {
+        ItemModel::TransferInterceptor sTransferInterceptor;
+        bool sTransferIntercepted = false;
+    }
 
     ItemStack::ItemStack(const MWWorld::Ptr& base, ItemModel* creator, size_t count)
         : mType(Type_Normal)
@@ -57,11 +62,38 @@ namespace MWGui
 
     MWWorld::Ptr ItemModel::moveItem(const ItemStack& item, size_t count, ItemModel* otherModel, bool allowAutoEquip)
     {
+        if (otherModel && interceptTransfer(item, count, *otherModel))
+            return {};
         removeItem(item, count);
         // If we removed the entire stack we can transfer it instead of creating a copy with a different RefNum
         if (item.mBase.getCellRef().getCount() == 0)
             return otherModel->addItem(item, count, allowAutoEquip);
         return otherModel->copyItem(item, count, allowAutoEquip);
+    }
+
+    bool ItemModel::interceptTransfer(const ItemStack& item, size_t count, ItemModel& otherModel)
+    {
+        sTransferIntercepted = false;
+        if (!sTransferInterceptor || !sTransferInterceptor(*this, item, count, otherModel))
+            return false;
+        sTransferIntercepted = true;
+        return true;
+    }
+
+    void ItemModel::setTransferInterceptor(TransferInterceptor interceptor)
+    {
+        sTransferInterceptor = std::move(interceptor);
+    }
+
+    void ItemModel::clearTransferInterceptor() noexcept
+    {
+        sTransferInterceptor = {};
+        sTransferIntercepted = false;
+    }
+
+    bool ItemModel::takeTransferIntercepted() noexcept
+    {
+        return std::exchange(sTransferIntercepted, false);
     }
 
     bool ItemModel::allowedToUseItems() const

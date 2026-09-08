@@ -1,14 +1,16 @@
 #ifndef TES3MP_CLIENT_SESSION_HPP
 #define TES3MP_CLIENT_SESSION_HPP
 
-#include "monotonic_clock.hpp"
 #include "actor_replication.hpp"
 #include "interactive_object_replication.hpp"
+#include "inventory_replication.hpp"
+#include "monotonic_clock.hpp"
 #include "protocol_exchange.hpp"
 #include "protocol_handshake.hpp"
 #include "session_types.hpp"
 
 #include <cstdint>
+#include <map>
 #include <memory>
 #include <optional>
 #include <variant>
@@ -181,6 +183,21 @@ namespace TES3MP
         ContradictorySameTick,
     };
 
+    enum class InventoryReplicationReceiveResult : std::uint8_t
+    {
+        Applied,
+        ChunkAccepted,
+        IdenticalDuplicate,
+        NotEstablished,
+        CapabilityNotNegotiated,
+        SessionNotBound,
+        SessionMismatch,
+        GenerationMismatch,
+        StaleTick,
+        ContradictorySameTick,
+        InvalidChunkSequence,
+    };
+
     using ClientSessionCreateResult
         = std::variant<std::unique_ptr<class ClientSessionStateMachine>, SessionTransitionError>;
 
@@ -201,10 +218,15 @@ namespace TES3MP
         ReliableObservationReceiveResult receiveReliableObservationBatch(ReliableObservationBatch batch);
         ReliableInterestBaselineReceiveResult receiveReliableInterestBaseline(ReliableInterestBaseline baseline);
         ActorReplicationReceiveResult receiveLatestWinsActorSnapshot(LatestWinsActorSnapshot snapshot);
-        ActorReplicationReceiveResult receiveReliableActorInterestBaseline(
-            ReliableActorInterestBaseline baseline);
+        ActorReplicationReceiveResult receiveReliableActorInterestBaseline(ReliableActorInterestBaseline baseline);
         InteractiveObjectReplicationReceiveResult receiveReliableInteractiveObjectInterestBaseline(
             ReliableInteractiveObjectInterestBaseline baseline);
+        InventoryReplicationReceiveResult receiveReliablePlayerInventoryBaseline(
+            ReliablePlayerInventoryBaseline baseline);
+        InventoryReplicationReceiveResult receiveReliableContainerInventoryBaseline(
+            ReliableContainerInventoryBaseline baseline);
+        InventoryReplicationReceiveResult receiveReliableGroundItemBaseline(ReliableGroundItemBaseline baseline);
+        InventoryReplicationReceiveResult receiveLatestWinsEquipmentSnapshot(LatestWinsEquipmentSnapshot snapshot);
 
         ClientSessionState state() const noexcept { return mState; }
         SessionGeneration generation() const noexcept { return mGeneration; }
@@ -220,22 +242,52 @@ namespace TES3MP
         std::optional<EntityId> targetEntityId() const noexcept { return mTargetEntityId; }
         const std::optional<LatestWinsSnapshot>& confirmedSnapshot() const noexcept { return mConfirmedSnapshot; }
         const std::optional<ReliableObservationBatch>& confirmedObservationBatch() const noexcept
-        { return mConfirmedObservationBatch; }
+        {
+            return mConfirmedObservationBatch;
+        }
         std::span<const ObservedPlayer> observedPlayers() const noexcept { return mObservedPlayers; }
         const std::optional<ReliableInterestBaseline>& confirmedInterestBaseline() const noexcept
-        { return mConfirmedInterestBaseline; }
+        {
+            return mConfirmedInterestBaseline;
+        }
         bool interestBaselineComplete() const noexcept;
         std::span<const ActorInterestMember> observedActors() const noexcept { return mObservedActors; }
         const std::optional<LatestWinsActorSnapshot>& confirmedActorSnapshot() const noexcept
-        { return mConfirmedActorSnapshot; }
+        {
+            return mConfirmedActorSnapshot;
+        }
         const std::optional<ReliableActorInterestBaseline>& confirmedActorInterestBaseline() const noexcept
-        { return mConfirmedActorInterestBaseline; }
+        {
+            return mConfirmedActorInterestBaseline;
+        }
         bool actorInterestBaselineComplete() const noexcept;
         std::span<const InteractiveObjectInterestMember> observedInteractiveObjects() const noexcept
-        { return mObservedInteractiveObjects; }
-        const std::optional<ReliableInteractiveObjectInterestBaseline>& confirmedInteractiveObjectInterestBaseline() const noexcept
-        { return mConfirmedInteractiveObjectInterestBaseline; }
+        {
+            return mObservedInteractiveObjects;
+        }
+        const std::optional<ReliableInteractiveObjectInterestBaseline>&
+        confirmedInteractiveObjectInterestBaseline() const noexcept
+        {
+            return mConfirmedInteractiveObjectInterestBaseline;
+        }
         bool interactiveObjectInterestBaselineComplete() const noexcept;
+        const std::optional<ReliablePlayerInventoryBaseline>& confirmedPlayerInventoryBaseline() const noexcept
+        {
+            return mConfirmedPlayerInventoryBaseline;
+        }
+        std::span<const ReliableContainerInventoryBaseline> confirmedContainerInventoryBaselines() const noexcept
+        {
+            return mConfirmedContainerInventoryBaselines;
+        }
+        const std::optional<ReliableGroundItemBaseline>& confirmedGroundItemBaseline() const noexcept
+        {
+            return mConfirmedGroundItemBaseline;
+        }
+        const std::optional<LatestWinsEquipmentSnapshot>& confirmedEquipmentSnapshot() const noexcept
+        {
+            return mConfirmedEquipmentSnapshot;
+        }
+        bool inventoryReplicationComplete() const noexcept;
 
     private:
         ClientSessionStateMachine(MonotonicClock& clock, SessionTimeoutPolicy timeoutPolicy,
@@ -265,6 +317,36 @@ namespace TES3MP
         std::vector<ActorInterestMember> mObservedActors;
         std::optional<ReliableInteractiveObjectInterestBaseline> mConfirmedInteractiveObjectInterestBaseline;
         std::vector<InteractiveObjectInterestMember> mObservedInteractiveObjects;
+        struct PlayerInventoryChunks
+        {
+            InventoryBaselineHeader header;
+            PlayerId player;
+            InventoryRevision revision;
+            std::vector<std::optional<ReliablePlayerInventoryBaseline>> chunks;
+        };
+        struct ContainerInventoryChunks
+        {
+            InventoryBaselineHeader header;
+            ContainerId container;
+            CellId cell;
+            Position3 position;
+            ContainerRevision revision;
+            std::uint32_t capacityWeight = 0;
+            std::vector<std::optional<ReliableContainerInventoryBaseline>> chunks;
+        };
+        struct GroundItemChunks
+        {
+            InventoryBaselineHeader header;
+            CellId cell;
+            std::vector<std::optional<ReliableGroundItemBaseline>> chunks;
+        };
+        std::optional<PlayerInventoryChunks> mPendingPlayerInventory;
+        std::map<ContainerId, ContainerInventoryChunks> mPendingContainerInventories;
+        std::optional<GroundItemChunks> mPendingGroundItems;
+        std::optional<ReliablePlayerInventoryBaseline> mConfirmedPlayerInventoryBaseline;
+        std::vector<ReliableContainerInventoryBaseline> mConfirmedContainerInventoryBaselines;
+        std::optional<ReliableGroundItemBaseline> mConfirmedGroundItemBaseline;
+        std::optional<LatestWinsEquipmentSnapshot> mConfirmedEquipmentSnapshot;
     };
 }
 

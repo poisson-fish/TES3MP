@@ -39,8 +39,7 @@ namespace TES3MP::OpenMWAdapter
             return OutboundQueuePolicy::create(64, 512 * 1024, 8, 4, 8, 1, 4, 1, 8, 250);
         }
 
-        bool replaceCredentialFile(
-            const std::filesystem::path& temporary, const std::filesystem::path& target) noexcept
+        bool replaceCredentialFile(const std::filesystem::path& temporary, const std::filesystem::path& target) noexcept
         {
 #ifdef _WIN32
             return MoveFileExW(temporary.c_str(), target.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)
@@ -87,7 +86,10 @@ namespace TES3MP::OpenMWAdapter
         class FilePlayerCredentialPersistence final : public PlayerCredentialPersistence
         {
         public:
-            explicit FilePlayerCredentialPersistence(std::filesystem::path path) : mPath(std::move(path)) {}
+            explicit FilePlayerCredentialPersistence(std::filesystem::path path)
+                : mPath(std::move(path))
+            {
+            }
 
             bool store(PlayerCredential credential) noexcept override
             try
@@ -128,14 +130,13 @@ namespace TES3MP::OpenMWAdapter
         {
             if (path.empty() || !std::filesystem::exists(path))
                 return std::nullopt;
-            if (!std::filesystem::is_regular_file(path)
-                || std::filesystem::file_size(path) != PlayerCredentialBytes)
+            if (!std::filesystem::is_regular_file(path) || std::filesystem::file_size(path) != PlayerCredentialBytes)
                 return std::nullopt;
             std::array<std::byte, PlayerCredentialBytes> bytes{};
             std::ifstream stream(path, std::ios::binary);
             stream.read(reinterpret_cast<char*>(bytes.data()), bytes.size());
-            auto credential = stream && stream.peek() == std::char_traits<char>::eof()
-                ? PlayerCredential::create(bytes) : std::nullopt;
+            auto credential = stream && stream.peek() == std::char_traits<char>::eof() ? PlayerCredential::create(bytes)
+                                                                                       : std::nullopt;
             std::fill(bytes.begin(), bytes.end(), std::byte{});
             return credential;
         }
@@ -145,8 +146,7 @@ namespace TES3MP::OpenMWAdapter
         }
     }
 
-    std::unique_ptr<PlayerCredentialPersistence> makeFilePlayerCredentialPersistence(
-        std::filesystem::path path)
+    std::unique_ptr<PlayerCredentialPersistence> makeFilePlayerCredentialPersistence(std::filesystem::path path)
     {
         return std::make_unique<FilePlayerCredentialPersistence>(std::move(path));
     }
@@ -211,20 +211,17 @@ namespace TES3MP::OpenMWAdapter
         if (!runtime || !*runtime)
             return ClientCompositionFailure::RuntimeUnavailable;
         auto versions = std::get<ProtocolVersionRange>(ProtocolVersionRange::create(1, 2, 3));
-        const std::array optional{
-            vrPoseCapability(), actorReplicationCapability(), interactiveObjectReplicationCapability()
-        };
-        auto offer = std::get<CapabilityOffer>(
-            CapabilityOffer::create(std::move(versions), optional, {}, contentManifest));
-        if ((*runtime)->start(
-                *endpoint, ClientHello::fromOffer(std::move(offer)),
+        const std::array optional{ vrPoseCapability(), actorReplicationCapability(),
+            interactiveObjectReplicationCapability(), inventoryReplicationCapability() };
+        auto offer
+            = std::get<CapabilityOffer>(CapabilityOffer::create(std::move(versions), optional, {}, contentManifest));
+        if ((*runtime)->start(*endpoint, ClientHello::fromOffer(std::move(offer)),
                 AuthenticationRequest::join(std::move(*password), std::move(playerCredential)))
             != HeadlessClientResult::Accepted)
             return ClientCompositionFailure::ConnectionRejected;
         return makeCoordinator(std::move(transport.runtime), std::move(clock), std::move(*runtime),
-            ReconnectConfiguration{ *endpoint, *timeouts, *queue, contentManifest },
-            *providers.input, *providers.presentation,
-            *providers.status, providers.control, providers.poseInput,
+            ReconnectConfiguration{ *endpoint, *timeouts, *queue, contentManifest }, *providers.input,
+            *providers.presentation, *providers.status, providers.control, providers.poseInput,
             makeFilePlayerCredentialPersistence(playerCredentialFile), providers.movementMetrics);
 #else
         return ClientCompositionFailure::TransportUnavailable;

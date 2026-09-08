@@ -16,9 +16,8 @@ namespace TES3MP::OpenMWAdapter
         ClientHello makeClientHello(ContentManifestId contentManifest)
         {
             auto versions = std::get<ProtocolVersionRange>(ProtocolVersionRange::create(1, 2, 3));
-            const std::array optional{
-                vrPoseCapability(), actorReplicationCapability(), interactiveObjectReplicationCapability()
-            };
+            const std::array optional{ vrPoseCapability(), actorReplicationCapability(),
+                interactiveObjectReplicationCapability(), inventoryReplicationCapability() };
             auto offer = std::get<CapabilityOffer>(
                 CapabilityOffer::create(std::move(versions), optional, {}, contentManifest));
             return ClientHello::fromOffer(std::move(offer));
@@ -46,6 +45,14 @@ namespace TES3MP::OpenMWAdapter
             return hello
                 && std::binary_search(hello->negotiatedCapabilities().begin(), hello->negotiatedCapabilities().end(),
                     interactiveObjectReplicationCapability());
+        }
+
+        bool inventoryNegotiated(const ClientSessionRuntime& runtime) noexcept
+        {
+            const auto& hello = runtime.session().stateMachine().negotiatedHello();
+            return hello
+                && std::binary_search(hello->negotiatedCapabilities().begin(), hello->negotiatedCapabilities().end(),
+                    inventoryReplicationCapability());
         }
 
         struct ResumeContinuity
@@ -162,6 +169,7 @@ namespace TES3MP::OpenMWAdapter
                     mResyncPlayerBaseline = mResyncPlayerBaseline || advanced.baselineCompleted;
                     mResyncActorBaseline = mResyncActorBaseline || advanced.actorBaselineCompleted;
                     mResyncObjectBaseline = mResyncObjectBaseline || advanced.interactiveObjectBaselineCompleted;
+                    mResyncInventory = mResyncInventory || advanced.inventoryReplicationCompleted;
                 }
                 if (advanced.authenticationAccepted)
                 {
@@ -206,6 +214,7 @@ namespace TES3MP::OpenMWAdapter
                     finalizedCellTransition = true;
                     mMinimumActorBaselineRevision = snapshot->header().canonicalRevision();
                     mMinimumObjectBaselineRevision = snapshot->header().canonicalRevision();
+                    mMinimumInventoryRevision = snapshot->header().canonicalRevision();
                 }
                 if (mResuming && advanced.baselineCompleted)
                 {
@@ -250,8 +259,8 @@ namespace TES3MP::OpenMWAdapter
                 const auto& actorBaseline = mRuntime->session().stateMachine().confirmedActorInterestBaseline();
                 if ((advanced.actorBaselineCompleted || advanced.actorBaselineApplied || advanced.actorSnapshotApplied
                         || advanced.baselineCompleted || advanced.snapshotApplied)
-                    && !mPendingCellTransition && !mDeferredCellTransition && !captured.transition
-                    && actorSnapshot && playerBaseline && actorBaseline
+                    && !mPendingCellTransition && !mDeferredCellTransition && !captured.transition && actorSnapshot
+                    && playerBaseline && actorBaseline
                     && actorBaseline->canonicalRevision() >= playerBaseline->canonicalRevision() && snapshot
                     && actorBaseline->canonicalRevision() <= snapshot->header().canonicalRevision()
                     && (!mMinimumActorBaselineRevision
@@ -270,15 +279,40 @@ namespace TES3MP::OpenMWAdapter
                     = mRuntime->session().stateMachine().confirmedInteractiveObjectInterestBaseline();
                 if ((advanced.interactiveObjectBaselineCompleted || advanced.interactiveObjectBaselineApplied
                         || advanced.baselineCompleted || advanced.snapshotApplied)
-                    && !mPendingCellTransition && !mDeferredCellTransition && !captured.transition
-                    && objectBaseline && playerBaseline
-                    && objectBaseline->canonicalRevision() >= playerBaseline->canonicalRevision() && snapshot
-                    && objectBaseline->canonicalRevision() <= snapshot->header().canonicalRevision()
+                    && !mPendingCellTransition && !mDeferredCellTransition && !captured.transition && objectBaseline
+                    && playerBaseline && objectBaseline->canonicalRevision() >= playerBaseline->canonicalRevision()
+                    && snapshot && objectBaseline->canonicalRevision() <= snapshot->header().canonicalRevision()
                     && (!mMinimumObjectBaselineRevision
                         || objectBaseline->canonicalRevision() >= *mMinimumObjectBaselineRevision)
                     && mRuntime->session().stateMachine().interactiveObjectInterestBaselineComplete())
                 {
                     const auto applied = mPresentation.applyInteractiveObjects(*objectBaseline, now);
+                    if (applied != ProviderResult::Accepted)
+                    {
+                        closeForProviderFailure(applied);
+                        return;
+                    }
+                }
+                const auto& playerInventory = mRuntime->session().stateMachine().confirmedPlayerInventoryBaseline();
+                const auto& groundItems = mRuntime->session().stateMachine().confirmedGroundItemBaseline();
+                const auto& equipment = mRuntime->session().stateMachine().confirmedEquipmentSnapshot();
+                if ((advanced.inventoryReplicationCompleted || advanced.playerInventoryApplied
+                        || advanced.containerInventoryApplied || advanced.groundItemsApplied
+                        || advanced.equipmentSnapshotApplied || advanced.baselineCompleted || advanced.snapshotApplied)
+                    && !mPendingCellTransition && !mDeferredCellTransition && !captured.transition && playerInventory
+                    && groundItems && equipment && playerBaseline && snapshot
+                    && playerInventory->header.canonicalRevision >= playerBaseline->canonicalRevision()
+                    && playerInventory->header.canonicalRevision <= snapshot->header().canonicalRevision()
+                    && groundItems->header.canonicalRevision == playerInventory->header.canonicalRevision
+                    && equipment->canonicalRevision >= playerInventory->header.canonicalRevision
+                    && (!mMinimumInventoryRevision
+                        || playerInventory->header.canonicalRevision >= *mMinimumInventoryRevision)
+                    && (!mAwaitingResync || mResyncInventory)
+                    && mRuntime->session().stateMachine().inventoryReplicationComplete())
+                {
+                    const auto applied = mPresentation.applyInventory(*playerInventory,
+                        mRuntime->session().stateMachine().confirmedContainerInventoryBaselines(), *groundItems,
+                        *equipment, now);
                     if (applied != ProviderResult::Accepted)
                     {
                         closeForProviderFailure(applied);
@@ -327,7 +361,8 @@ namespace TES3MP::OpenMWAdapter
                     return;
                 }
                 if (mAwaitingResync && mResyncPlayerBaseline && (!actorsNegotiated(*mRuntime) || mResyncActorBaseline)
-                    && (!interactiveObjectsNegotiated(*mRuntime) || mResyncObjectBaseline))
+                    && (!interactiveObjectsNegotiated(*mRuntime) || mResyncObjectBaseline)
+                    && (!inventoryNegotiated(*mRuntime) || mResyncInventory))
                 {
                     mAwaitingResync = false;
                     mControl->resyncCompleted();
@@ -367,6 +402,7 @@ namespace TES3MP::OpenMWAdapter
                         mResyncPlayerBaseline = false;
                         mResyncActorBaseline = false;
                         mResyncObjectBaseline = false;
+                        mResyncInventory = false;
                     }
                 }
                 if (mReady && !mPendingCellTransition && !mDeferredCellTransition && !captured.transition
@@ -375,8 +411,25 @@ namespace TES3MP::OpenMWAdapter
                     if (auto interaction = mInput.captureObjectInteraction())
                     {
                         const auto queued = mRuntime->queueInteractObject(interaction->objectId,
-                            interaction->targetCell, interaction->interactionOrigin,
-                            interaction->expectedRevision, interaction->kind, interaction->requestedKey);
+                            interaction->targetCell, interaction->interactionOrigin, interaction->expectedRevision,
+                            interaction->kind, interaction->requestedKey);
+                        if (queued.result != ClientRuntimeResult::Accepted || !queued.sequence)
+                        {
+                            closeTerminal(ConnectionStatus::TransportFailed);
+                            return;
+                        }
+                    }
+                }
+                if (mReady && !mAwaitingResync && !mPendingCellTransition && !mDeferredCellTransition
+                    && !captured.transition && inventoryNegotiated(*mRuntime))
+                {
+                    if (auto transaction = mInput.captureInventoryTransaction())
+                    {
+                        const auto queued
+                            = mRuntime->queueInventoryTransaction(transaction->kind, transaction->prototypeId,
+                                transaction->stackId, transaction->count, transaction->expectedInventoryRevision,
+                                transaction->interactionOrigin, transaction->containerId, transaction->slot,
+                                transaction->expectedContainerRevision, transaction->expectedWorldItemRevision);
                         if (queued.result != ClientRuntimeResult::Accepted || !queued.sequence)
                         {
                             closeTerminal(ConnectionStatus::TransportFailed);
@@ -495,8 +548,10 @@ namespace TES3MP::OpenMWAdapter
                 mResyncPlayerBaseline = false;
                 mResyncActorBaseline = false;
                 mResyncObjectBaseline = false;
+                mResyncInventory = false;
                 mMinimumActorBaselineRevision.reset();
                 mMinimumObjectBaselineRevision.reset();
+                mMinimumInventoryRevision.reset();
                 mReady = false;
                 mResuming = true;
                 mAttemptGeneration = *nextGeneration;
@@ -608,8 +663,10 @@ namespace TES3MP::OpenMWAdapter
             bool mResyncPlayerBaseline = false;
             bool mResyncActorBaseline = false;
             bool mResyncObjectBaseline = false;
+            bool mResyncInventory = false;
             std::optional<CanonicalRevision> mMinimumActorBaselineRevision;
             std::optional<CanonicalRevision> mMinimumObjectBaselineRevision;
+            std::optional<CanonicalRevision> mMinimumInventoryRevision;
             bool mReady = false;
             bool mResuming = false;
             std::optional<CommandSequence> mPendingCellTransition;

@@ -70,6 +70,30 @@
       ],
       "disposition": "local; possible general-purpose upstream candidate; no upstream contact authorized",
       "removal_condition": "OpenMW supplies an equivalent reviewed activation interceptor hook on MWWorld::Player"
+    },
+    {
+      "id": "P15-001",
+      "slice": "15.4",
+      "owner": "OpenMW adapter",
+      "purpose": "Provide bounded inventory transfer and item-use interception seams so multiplayer UI actions become server-authoritative transaction proposals before stock single-player mutation.",
+      "paths": [
+        "apps/openmw/mwgui/container.cpp",
+        "apps/openmw/mwgui/containeritemmodel.cpp",
+        "apps/openmw/mwgui/containeritemmodel.hpp",
+        "apps/openmw/mwgui/draganddrop.cpp",
+        "apps/openmw/mwgui/inventoryitemmodel.hpp",
+        "apps/openmw/mwgui/inventorywindow.cpp",
+        "apps/openmw/mwgui/inventorywindow.hpp",
+        "apps/openmw/mwgui/itemmodel.cpp",
+        "apps/openmw/mwgui/itemmodel.hpp"
+      ],
+      "tests": [
+        "scripts/tests/test_openmw_patch_registry.py",
+        "scripts/tests/test_inventory_contract.py",
+        "openmw_tes3mp_adapter_tests"
+      ],
+      "disposition": "local; possible general-purpose upstream candidate; no upstream contact authorized",
+      "removal_condition": "OpenMW supplies equivalent reviewed pre-mutation inventory transfer and item-use hooks"
     }
   ]
 }

@@ -21,8 +21,9 @@ Updated: 2026-09-08
 - Phase 15 discovery: **Complete**
 - Phase 15 canonical core: **Complete**
 - Phase 15 replication and server composition: **Complete**
-- Active work: **None — Phase 15 replication and server composition complete**
-- Last pass: **Capability-gated inventory wire protocol, private/public exact-cell projection, ordered transaction intake, atomic server commit, lifecycle delivery, and bounded production content composition**
+- Phase 15 OpenMW client integration: **Complete**
+- Active work: **None — Phase 15 complete**
+- Last pass: **Bounded client inventory ingestion, confirmed OpenMW reconciliation, authoritative transaction capture, and local/remote equipment presentation**
 - Authoritative tracker: [rolling implementation plan](IMPLEMENTATION_PLAN.md)
 - Historical evidence: [implementation notes](IMPLEMENTATION_NOTES.md)
 
@@ -389,7 +390,23 @@ ADRs and GDRs are required only for consequential, hard-to-reverse decisions.
   cells whose complete reliable view cannot fit the bounded queue. The server
   advertises inventory replication only when this content loads successfully.
 - OpenMW ingestion, GUI reconciliation, transaction capture, and equipment mesh
-  presentation remain the next pass.
+  presentation were deferred to and completed in the following pass.
+
+## Phase 15 OpenMW client integration result
+
+- The shared client now assembles bounded private inventory, exact-cell
+  container/ground, and public-equipment messages. Complete-view, session,
+  generation, revision, and resync gates prevent partial or stale presentation.
+- Inventory transactions use the existing authenticated, ordered,
+  idempotent command sequence. The adapter captures only confirmed stack IDs and
+  expected revisions and never treats OpenMW UI state as canonical authority.
+- Complete local content maps bind item prototypes and container references.
+  Confirmed player/container stores and ground items reconcile on the main
+  thread; ambiguous OpenMW stack merges fail closed.
+- Transfer, pickup, drop, equip, and unequip hooks intercept before stock local
+  mutation. Take All safely emits one proposal at a time. Remote replicated
+  actors rebuild from confirmed public equipment while retaining canonical
+  transform and motion presentation.
 
 ## Phase 10 result
 
@@ -455,28 +472,24 @@ work.
 
 - Standalone TES3MP MSVC C++20 build completed cleanly in `build/slice51-msvc`.
 - `tes3mp_protocol_tests_run` and `tes3mp_server_app_tests_run` build and pass,
-  including inventory wire bounds, projection privacy, lifecycle delivery,
-  atomic rollback, and the inventory-to-door-key integration path.
-- `tes3mp_transport_queue_tests.exe` and `tes3mp_inventory_replication_tests.exe`
-  pass cleanly; the production `tes3mp_server` executable links successfully.
-- The pinned FlatBuffers selection proof regenerates and compares all 22
-  production schemas and generated headers successfully.
-- Python inventory contracts pass (11 tests), and all 174 repository Python
-  tests pass (`python -m unittest discover -s scripts/tests`).
-- `verify_openmw_patch_registry.py` passes cleanly with `P14-001` covering `player.cpp` and `player.hpp`.
-- `verify_vnext_legacy_exclusion.py` passes (4,128 tracked paths, 62 CMake files, 1,254 compile commands, and 1,971 Ninja build edges checked).
-- Indexed candidate-tree `verify_vnext_baseline.py --index` passes with 469
-  intentional differences and 95 verified dependency declarations.
+  including the inventory client session changes.
+- Full RelWithDebInfo `openmw` and `openmw_tes3mp_adapter_tests` targets build
+  and link; the adapter integration executable passes.
+- Inventory/OpenMW patch contracts pass (16 focused tests), and all 176
+  repository Python tests pass (`python -m unittest discover -s scripts/tests`).
+- Patch-registry and legacy-exclusion proofs pass; the latter checked 4,146
+  tracked paths, 62 CMake files, 1,254 compile commands, and 1,971 Ninja edges.
+- Indexed candidate-tree baseline provenance passes with 478 intentional
+  differences and 95 verified dependency declarations.
 - Target boundary verification and forbidden include checks enforced in CMake.
 
 ## Next pass
 
-Phase 15 OpenMW client integration: ingest complete inventory/container/ground
-views, reconcile GUI state, dispatch transactions, and present confirmed local
-and remote equipment without expanding client authority.
+Phase 16 discovery: trace combat, stats, magic, death, and resurrection authority,
+OpenMW seams, compatibility constraints, and proof cases before package selection.
 
 ## Working-tree expectation
 
-`vnext` contains the completed Phase 15 inventory replication and
-server-composition pass and is expected to be clean after closeout. The separate
+`vnext` contains the completed Phase 15 inventory pass and is expected to be
+clean after closeout. The separate
 `vnext-vr` worktree remains at the Phase 13 integration merge `2762445c8b`.

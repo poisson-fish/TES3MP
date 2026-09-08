@@ -29,3 +29,9 @@ also lie in declared collision cells before production composition succeeds.
 
 The artifact seeds server-owned canonical state only. It does not grant clients
 authority to create item prototypes, select stack identities, or mutate counts.
+
+OpenMW clients bind those opaque IDs locally with repeatable
+`--tes3mp-content-item-prototype-map <id>=<item-record>` and
+`--tes3mp-content-container-map <id>=<ref-num-index>[:<content-file>]`
+options. Mappings must be injective and complete for every presented record;
+missing or ambiguous mappings fail the multiplayer session closed.

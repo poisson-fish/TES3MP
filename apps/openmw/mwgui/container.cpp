@@ -269,9 +269,15 @@ namespace MWGui
             const ItemStack item = mModel->getItem(static_cast<ItemModel::ModelIndex>(i));
 
             if (!mModel->onTakeItem(item.mBase, static_cast<int>(item.mCount)))
+            {
+                if (ItemModel::takeTransferIntercepted())
+                    return;
                 break;
+            }
 
             mModel->moveItem(item, item.mCount, playerModel);
+            if (ItemModel::takeTransferIntercepted())
+                return;
         }
 
         MWBase::Environment::get().getWindowManager()->removeGuiMode(GM_Container);

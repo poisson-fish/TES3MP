@@ -31,12 +31,27 @@ namespace TES3MP::OpenMWAdapter
         std::int32_t refNumContentFile = -1;
     };
 
+    struct DesktopItemPrototypeMapping
+    {
+        ItemPrototypeId id;
+        std::string record;
+    };
+
+    struct DesktopContainerMapping
+    {
+        ContainerId id;
+        std::uint32_t refNumIndex = 0;
+        std::int32_t refNumContentFile = -1;
+    };
+
     struct DesktopContentMapping
     {
         static std::optional<DesktopContentMapping> create(ContentManifest manifest,
-            std::span<const DesktopCellSpaceMapping> cellSpaces, AppearanceId appearanceId,
-            std::string avatarNpc, std::span<const DesktopActorPrototypeMapping> actorPrototypes = {},
-            std::span<const DesktopInteractiveObjectMapping> interactiveObjects = {});
+            std::span<const DesktopCellSpaceMapping> cellSpaces, AppearanceId appearanceId, std::string avatarNpc,
+            std::span<const DesktopActorPrototypeMapping> actorPrototypes = {},
+            std::span<const DesktopInteractiveObjectMapping> interactiveObjects = {},
+            std::span<const DesktopItemPrototypeMapping> itemPrototypes = {},
+            std::span<const DesktopContainerMapping> containers = {});
 
         ContentManifest manifest;
         std::vector<DesktopCellSpaceMapping> cellSpaces;
@@ -44,6 +59,8 @@ namespace TES3MP::OpenMWAdapter
         std::string avatarNpc;
         std::vector<DesktopActorPrototypeMapping> actorPrototypes;
         std::vector<DesktopInteractiveObjectMapping> interactiveObjects;
+        std::vector<DesktopItemPrototypeMapping> itemPrototypes;
+        std::vector<DesktopContainerMapping> containers;
     };
 
 }
@@ -51,6 +68,11 @@ namespace TES3MP::OpenMWAdapter
 namespace MWWorld
 {
     class Ptr;
+}
+
+namespace MWGui
+{
+    class ItemModel;
 }
 
 namespace TES3MP::OpenMWAdapter
@@ -64,6 +86,7 @@ namespace TES3MP::OpenMWAdapter
         CellTransitionCapture captureCellTransition() noexcept override;
         std::optional<LocomotionIntent> sampleCurrentIntent() noexcept override;
         std::optional<ObjectInteractionCapture> captureObjectInteraction() noexcept override;
+        std::optional<InventoryTransactionCapture> captureInventoryTransaction() noexcept override;
 
         bool handleActivation(const MWWorld::Ptr& toActivate, const MWWorld::Ptr& player) noexcept;
         bool queueObjectActivation(const MWWorld::Ptr& doorPtr) noexcept;
@@ -81,8 +104,7 @@ namespace TES3MP::OpenMWAdapter
         ~DesktopPresentation() override;
         void configure(DesktopContentMapping mapping);
         ProviderResult applyAuthoritative(const LatestWinsSnapshot& snapshot,
-            std::span<const ObservedPlayer> observedPlayers, bool allowLocalCellCorrection,
-            MonotonicInstant receivedAt,
+            std::span<const ObservedPlayer> observedPlayers, bool allowLocalCellCorrection, MonotonicInstant receivedAt,
             const std::optional<LocalLocomotionReconciliation>& localReconciliation = std::nullopt) noexcept override;
         ProviderResult advance(MonotonicInstant now) noexcept override;
         ProviderResult applyActors(const LatestWinsActorSnapshot& snapshot,
@@ -90,6 +112,15 @@ namespace TES3MP::OpenMWAdapter
         ProviderResult applyInteractiveObjects(
             const ReliableInteractiveObjectInterestBaseline& baseline, MonotonicInstant receivedAt) noexcept override;
         std::optional<ObjectRevision> observedObjectRevision(InteractiveObjectId id) const noexcept override;
+        ProviderResult applyInventory(const ReliablePlayerInventoryBaseline& player,
+            std::span<const ReliableContainerInventoryBaseline> containers,
+            const ReliableGroundItemBaseline& groundItems, const LatestWinsEquipmentSnapshot& equipment,
+            MonotonicInstant receivedAt) noexcept override;
+        std::optional<InventoryTransactionCapture> inventoryTransfer(MWGui::ItemModel& source, const MWWorld::Ptr& item,
+            std::size_t count, MWGui::ItemModel& target) const noexcept;
+        std::optional<InventoryTransactionCapture> inventoryUse(const MWWorld::Ptr& item) const noexcept;
+        std::optional<InventoryTransactionCapture> inventoryPickup(const MWWorld::Ptr& item) const noexcept;
+        bool observesInventoryItem(const MWWorld::Ptr& item) const noexcept;
         void clear() noexcept override;
 
     private:

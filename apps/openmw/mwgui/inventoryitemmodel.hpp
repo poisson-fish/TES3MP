@@ -10,6 +10,7 @@ namespace MWGui
     {
     public:
         InventoryItemModel(const MWWorld::Ptr& actor);
+        const MWWorld::Ptr& actor() const noexcept { return mActor; }
 
         ItemStack getItem(ModelIndex index) override;
         ModelIndex getIndex(const ItemStack& item) override;

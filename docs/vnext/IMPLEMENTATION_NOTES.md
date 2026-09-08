@@ -6726,6 +6726,29 @@ only the relevant phase section here.
   provenance passes with 469 intentional differences and 95 dependency inputs;
   patch-registry, legacy-exclusion, and diff-hygiene checks pass.
 
+### 2026-09-08 — Phase 15 OpenMW client integration — Complete
+
+- Added bounded chunk assembly and complete-view validation for private player
+  inventory, exact-cell containers/ground items, and public equipment. Resume,
+  resync, cell transitions, and canonical revision fences cannot expose a
+  partial set.
+- Added authenticated inventory command queueing on the shared ordered sequence
+  and idempotency lane. Adapter capture uses only confirmed stack identities,
+  source revisions, and interaction origins.
+- Added injective local item/container maps and main-thread reconciliation of
+  player inventory, active containers, and ground items. OpenMW stack merges
+  that would erase canonical identity fail closed.
+- Added pre-mutation transfer and item-use hooks. Pickup, drop, take, put, equip,
+  and unequip become server proposals; Take All stops after one proposal and
+  waits for confirmation. Remote replicated actors consume public equipment
+  without gaining gameplay registration or authority.
+- Verification: RelWithDebInfo `openmw` and adapter-test targets build/link;
+  `openmw_tes3mp_adapter_tests`, `tes3mp_protocol_tests_run`, and
+  `tes3mp_server_app_tests_run` pass. Inventory/patch contracts pass 16 focused
+  tests and full Python discovery passes all 176 tests. Patch-registry and
+  legacy-exclusion proofs pass; indexed provenance passes with 478 intentional
+  differences and 95 verified dependency inputs.
+
 ## Phase 16 — Combat, stats, magic, death, and resurrection
 
 [Back to the phase tracker](IMPLEMENTATION_PLAN.md#phase-16--combat-stats-magic-death-and-resurrection)

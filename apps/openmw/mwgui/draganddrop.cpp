@@ -43,6 +43,14 @@ namespace MWGui
         {
             MWWorld::Ptr item = mSourceModel->moveItem(mItem, mDraggedCount, playerModel);
 
+            if (item.isEmpty())
+            {
+                mSourceModel->update();
+                mSourceView->update();
+                playerModel->update();
+                return;
+            }
+
             playerModel->update();
 
             ItemModel::ModelIndex newIndex = -1;

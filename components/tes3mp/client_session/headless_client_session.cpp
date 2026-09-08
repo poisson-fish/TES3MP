@@ -8,18 +8,23 @@ namespace TES3MP
         SessionTimeoutPolicy timeoutPolicy, SessionGeneration generation)
     {
         auto state = ClientSessionStateMachine::create(clock, timeoutPolicy, generation);
-        if (auto* failure = std::get_if<SessionTransitionError>(&state)) return *failure;
+        if (auto* failure = std::get_if<SessionTransitionError>(&state))
+            return *failure;
         return std::unique_ptr<HeadlessClientSession>(new HeadlessClientSession(
             transport, std::get<std::unique_ptr<ClientSessionStateMachine>>(std::move(state))));
     }
 
     HeadlessClientSession::HeadlessClientSession(
         TransportRuntime& transport, std::unique_ptr<ClientSessionStateMachine> state) noexcept
-        : mTransport(transport), mState(std::move(state)) {}
+        : mTransport(transport)
+        , mState(std::move(state))
+    {
+    }
 
     HeadlessClientResult HeadlessClientSession::connect(const ConnectionEndpoint& endpoint) noexcept
     {
-        if (mAttempt || mConnection) return HeadlessClientResult::AlreadyStarted;
+        if (mAttempt || mConnection)
+            return HeadlessClientResult::AlreadyStarted;
         const auto admitted = mTransport.connect(endpoint);
         if (admitted.result != TransportResult::Accepted || !admitted.id)
             return HeadlessClientResult::TransportRejected;
@@ -57,7 +62,8 @@ namespace TES3MP
             }
             else if ((event.kind == TransportEventKind::ConnectionClosed
                          || event.kind == TransportEventKind::RuntimeFailed)
-                && (event.kind == TransportEventKind::RuntimeFailed || (mConnection && event.connection == mConnection)))
+                && (event.kind == TransportEventKind::RuntimeFailed
+                    || (mConnection && event.connection == mConnection)))
             {
                 mConnection.reset();
                 mState->handle(ClientClose{});
@@ -68,38 +74,86 @@ namespace TES3MP
     }
 
     ClientSessionTransition HeadlessClientSession::handle(ClientSessionEvent event) noexcept
-    { return mState->handle(std::move(event)); }
+    {
+        return mState->handle(std::move(event));
+    }
 
     ClientSessionBindingResult HeadlessClientSession::bindEstablishedSession(SessionId session) noexcept
-    { return mState->bindEstablishedSession(session); }
+    {
+        return mState->bindEstablishedSession(session);
+    }
 
     LatestWinsSnapshotReceiveResult HeadlessClientSession::receiveLatestWinsSnapshot(LatestWinsSnapshot snapshot)
-    { return mState->receiveLatestWinsSnapshot(std::move(snapshot)); }
+    {
+        return mState->receiveLatestWinsSnapshot(std::move(snapshot));
+    }
 
     ReliableObservationReceiveResult HeadlessClientSession::receiveReliableObservationBatch(
         ReliableObservationBatch batch)
-    { return mState->receiveReliableObservationBatch(std::move(batch)); }
+    {
+        return mState->receiveReliableObservationBatch(std::move(batch));
+    }
 
     ReliableInterestBaselineReceiveResult HeadlessClientSession::receiveReliableInterestBaseline(
         ReliableInterestBaseline baseline)
-    { return mState->receiveReliableInterestBaseline(std::move(baseline)); }
+    {
+        return mState->receiveReliableInterestBaseline(std::move(baseline));
+    }
 
     ActorReplicationReceiveResult HeadlessClientSession::receiveLatestWinsActorSnapshot(
         LatestWinsActorSnapshot snapshot)
-    { return mState->receiveLatestWinsActorSnapshot(std::move(snapshot)); }
+    {
+        return mState->receiveLatestWinsActorSnapshot(std::move(snapshot));
+    }
 
     ActorReplicationReceiveResult HeadlessClientSession::receiveReliableActorInterestBaseline(
         ReliableActorInterestBaseline baseline)
-    { return mState->receiveReliableActorInterestBaseline(std::move(baseline)); }
+    {
+        return mState->receiveReliableActorInterestBaseline(std::move(baseline));
+    }
 
     InteractiveObjectReplicationReceiveResult HeadlessClientSession::receiveReliableInteractiveObjectInterestBaseline(
         ReliableInteractiveObjectInterestBaseline baseline)
-    { return mState->receiveReliableInteractiveObjectInterestBaseline(std::move(baseline)); }
+    {
+        return mState->receiveReliableInteractiveObjectInterestBaseline(std::move(baseline));
+    }
+
+    InventoryReplicationReceiveResult HeadlessClientSession::receiveReliablePlayerInventoryBaseline(
+        ReliablePlayerInventoryBaseline baseline)
+    {
+        return mState->receiveReliablePlayerInventoryBaseline(std::move(baseline));
+    }
+
+    InventoryReplicationReceiveResult HeadlessClientSession::receiveReliableContainerInventoryBaseline(
+        ReliableContainerInventoryBaseline baseline)
+    {
+        return mState->receiveReliableContainerInventoryBaseline(std::move(baseline));
+    }
+
+    InventoryReplicationReceiveResult HeadlessClientSession::receiveReliableGroundItemBaseline(
+        ReliableGroundItemBaseline baseline)
+    {
+        return mState->receiveReliableGroundItemBaseline(std::move(baseline));
+    }
+
+    InventoryReplicationReceiveResult HeadlessClientSession::receiveLatestWinsEquipmentSnapshot(
+        LatestWinsEquipmentSnapshot snapshot)
+    {
+        return mState->receiveLatestWinsEquipmentSnapshot(std::move(snapshot));
+    }
 
     HeadlessClientResult HeadlessClientSession::close() noexcept
     {
-        if (mAttempt) { mTransport.cancelConnect(*mAttempt); mAttempt.reset(); }
-        if (mConnection) { mTransport.close(*mConnection, TransportCloseMode::Graceful); mConnection.reset(); }
+        if (mAttempt)
+        {
+            mTransport.cancelConnect(*mAttempt);
+            mAttempt.reset();
+        }
+        if (mConnection)
+        {
+            mTransport.close(*mConnection, TransportCloseMode::Graceful);
+            mConnection.reset();
+        }
         mState->handle(ClientClose{});
         return HeadlessClientResult::Accepted;
     }

@@ -308,6 +308,13 @@ namespace TES3MP::OpenMWAdapter
         return mPresentation.applyInteractiveObjects(baseline, receivedAt);
     }
 
+    ProviderResult DesktopAutomation::applyInventory(const ReliablePlayerInventoryBaseline& player,
+        std::span<const ReliableContainerInventoryBaseline> containers, const ReliableGroundItemBaseline& groundItems,
+        const LatestWinsEquipmentSnapshot& equipment, MonotonicInstant receivedAt) noexcept
+    {
+        return mPresentation.applyInventory(player, containers, groundItems, equipment, receivedAt);
+    }
+
     std::optional<ObjectRevision> DesktopAutomation::observedObjectRevision(InteractiveObjectId id) const noexcept
     {
         return mPresentation.observedObjectRevision(id);

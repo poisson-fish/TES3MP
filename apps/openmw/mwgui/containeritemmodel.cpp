@@ -1,5 +1,7 @@
 #include "containeritemmodel.hpp"
 
+#include "inventorywindow.hpp"
+
 #include <algorithm>
 
 #include "../mwmechanics/actorutil.hpp"
@@ -255,6 +257,13 @@ namespace MWGui
     bool ContainerItemModel::onTakeItem(const MWWorld::Ptr& item, int count)
     {
         if (mItemSources.empty())
+            return false;
+
+        auto* inventory = MWBase::Environment::get().getWindowManager()->getInventoryWindow();
+        auto* playerModel = inventory ? inventory->getModel() : nullptr;
+        if (count > 0 && playerModel
+            && interceptTransfer(
+                ItemStack(item, this, static_cast<std::size_t>(count)), static_cast<std::size_t>(count), *playerModel))
             return false;
 
         MWWorld::Ptr target = mItemSources[0].first;

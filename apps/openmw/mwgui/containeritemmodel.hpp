@@ -22,6 +22,10 @@ namespace MWGui
         ///  while the last element will be used to add new items to.
 
         ContainerItemModel(const MWWorld::Ptr& source);
+        MWWorld::Ptr primarySource() const noexcept
+        {
+            return mItemSources.empty() ? MWWorld::Ptr{} : mItemSources.front().first;
+        }
 
         bool allowedToUseItems() const override;
 

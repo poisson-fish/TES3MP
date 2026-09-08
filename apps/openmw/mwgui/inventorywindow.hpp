@@ -8,6 +8,7 @@
 #include "../mwworld/ptr.hpp"
 
 #include <components/misc/notnullptr.hpp>
+#include <functional>
 
 namespace osg
 {
@@ -36,6 +37,7 @@ namespace MWGui
     class InventoryWindow : public WindowPinnableBase
     {
     public:
+        using UseItemInterceptor = std::function<bool(const MWWorld::Ptr&)>;
         explicit InventoryWindow(DragAndDrop& dragAndDrop, ItemTransfer& itemTransfer, osg::Group* parent,
             Resource::ResourceSystem* resourceSystem);
 
@@ -65,6 +67,8 @@ namespace MWGui
         void clear() override;
 
         void useItem(const MWWorld::Ptr& ptr, bool force = false);
+        static void setUseItemInterceptor(UseItemInterceptor interceptor);
+        static void clearUseItemInterceptor() noexcept;
 
         void setGuiMode(GuiMode mode);
 

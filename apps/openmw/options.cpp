@@ -52,6 +52,12 @@ namespace OpenMW
         addOption("tes3mp-content-interactive-object-map",
             bpo::value<StringsVector>()->default_value(StringsVector(), "")->multitoken()->composing(),
             "OpenMW interactive object mappings: <id>=<ref-num-index>[:<content-file>]");
+        addOption("tes3mp-content-item-prototype-map",
+            bpo::value<StringsVector>()->default_value(StringsVector(), "")->multitoken()->composing(),
+            "OpenMW item prototype mappings: <id>=<item-record>");
+        addOption("tes3mp-content-container-map",
+            bpo::value<StringsVector>()->default_value(StringsVector(), "")->multitoken()->composing(),
+            "OpenMW container mappings: <id>=<ref-num-index>[:<content-file>]");
 #ifdef TES3MP_OPENMW_DESKTOP_AUTOMATION
         addOption("tes3mp-automation-role", bpo::value<std::string>()->default_value(""),
             "test-only fixed TES3MP desktop automation role");

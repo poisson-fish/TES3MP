@@ -36,37 +36,35 @@ Verification scales with risk:
 
 ## Now
 
-### Phase 15 — inventory replication and server composition
+### Phase 15 — OpenMW inventory client integration
 
 Status: **Complete**
 
-- Added capability-gated, size-prefixed FlatBuffers messages for private player
-  inventory, exact-cell containers and ground items, public equipment, and
-  authenticated inventory transaction commands. Bounded chunk sizes fit their
-  transport classes and are reproduced by the pinned generator proof.
-- Composed inventory commands into the shared ordered/idempotent reducer and
-  atomic output-admission boundary. Canonical player, object, and inventory
-  changes commit together; authoritative inventory keys now enable Phase 14
-  door unlocking without client claims.
-- Join, resume, resync, cell changes, and transaction outcomes deliver complete
-  target-specific views. Backpack contents remain private; public equipment has
-  a separate latest-wins slot so it cannot replace spatial or actor snapshots.
-- Added optional bounded [inventory content V1](INVENTORY_CONTENT_V1.md) loading.
-  Production advertises the capability only after manifest, catalog, world,
-  collision-cell, and outbound-composition validation succeeds.
-- Verification: `tes3mp_protocol_tests_run`, `tes3mp_server_app_tests_run`,
-  focused transport/inventory executables, the production `tes3mp_server` link,
-  the pinned FlatBuffers proof, and 174 repository Python tests pass.
+- The shared client assembles bounded inventory chunks, rejects stale or
+  contradictory views, and exposes only complete player/container/ground and
+  equipment state. Resume and resync wait for fresh inventory lanes.
+- The adapter revision-fences confirmed views, applies them on the OpenMW main
+  thread, and sends authenticated inventory proposals on the existing ordered
+  command/idempotency lane.
+- OpenMW maps canonical item/container IDs locally, rebuilds confirmed player
+  and container stores, presents confirmed ground items, and projects public
+  equipment onto remote replicated actors.
+- Pre-mutation GUI hooks cover transfer, pickup, drop, equip, and unequip.
+  Unconfirmed local mutation is consumed; Take All queues one bounded proposal
+  and leaves the container open for the next confirmed action.
+- Verification: full RelWithDebInfo `openmw` and adapter-test targets build and
+  link; `openmw_tes3mp_adapter_tests`, standalone protocol/server-app runners,
+  all 176 repository Python tests, patch registry, legacy exclusion, and indexed
+  baseline provenance pass.
 
 ## Next
 
 These are candidates, not locked slices:
 
-1. Phase 15 OpenMW client integration: inventory/container session ingestion,
-   GUI reconciliation, transaction dispatch, and local/remote equipment presentation.
-2. Revisit Phase 12 PC-VR hardware capture before Phase 22 stabilization if
-   hardware remains unavailable during Phase 15 presentation work.
-3. Phase 16 — combat, stats, magic, death, and resurrection.
+1. Phase 16 discovery — combat, stats, magic, death, and resurrection; trace the
+   authority and OpenMW seams before selecting a package.
+2. Revisit Phase 12 PC-VR hardware capture when a headset is available, no later
+   than Phase 22 stabilization.
 
 The list is rewritten after each completed pass. New evidence may reorder,
 combine, or remove items.

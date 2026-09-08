@@ -5,6 +5,7 @@
 #include <tes3mp/client_locomotion.hpp>
 #include <tes3mp/client_session.hpp>
 #include <tes3mp/interactive_object_replication.hpp>
+#include <tes3mp/inventory_replication.hpp>
 #include <tes3mp/protocol_exchange.hpp>
 #include <tes3mp/protocol_pose.hpp>
 
@@ -73,13 +74,28 @@ namespace TES3MP::OpenMWAdapter
         std::optional<KeyPrototypeId> requestedKey = std::nullopt;
     };
 
+    struct InventoryTransactionCapture
+    {
+        InventoryTransactionKind kind = InventoryTransactionKind::TakeFromContainer;
+        ItemPrototypeId prototypeId;
+        std::optional<ItemStackId> stackId;
+        std::uint32_t count = 1;
+        InventoryRevision expectedInventoryRevision = InventoryRevision::initial();
+        Position3 interactionOrigin;
+        std::optional<ContainerId> containerId;
+        std::optional<EquipmentSlot> slot;
+        std::optional<ContainerRevision> expectedContainerRevision;
+        std::optional<WorldItemRevision> expectedWorldItemRevision;
+    };
+
     class SemanticInputProvider
     {
     public:
         virtual ~SemanticInputProvider() = default;
         virtual CellTransitionCapture captureCellTransition() noexcept = 0;
         virtual std::optional<LocomotionIntent> sampleCurrentIntent() noexcept = 0;
-        virtual std::optional<ObjectInteractionCapture> captureObjectInteraction() noexcept
+        virtual std::optional<ObjectInteractionCapture> captureObjectInteraction() noexcept { return std::nullopt; }
+        virtual std::optional<InventoryTransactionCapture> captureInventoryTransaction() noexcept
         {
             return std::nullopt;
         }
@@ -108,6 +124,12 @@ namespace TES3MP::OpenMWAdapter
         }
         virtual ProviderResult applyInteractiveObjects(
             const ReliableInteractiveObjectInterestBaseline&, MonotonicInstant) noexcept
+        {
+            return ProviderResult::Accepted;
+        }
+        virtual ProviderResult applyInventory(const ReliablePlayerInventoryBaseline&,
+            std::span<const ReliableContainerInventoryBaseline>, const ReliableGroundItemBaseline&,
+            const LatestWinsEquipmentSnapshot&, MonotonicInstant) noexcept
         {
             return ProviderResult::Accepted;
         }

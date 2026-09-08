@@ -6,6 +6,7 @@
 #include "client_locomotion.hpp"
 #include "headless_client_session.hpp"
 #include "interactive_object_replication.hpp"
+#include "inventory_replication.hpp"
 #include "protocol_handshake.hpp"
 #include "protocol_pose.hpp"
 
@@ -19,7 +20,8 @@ namespace TES3MP
     using ClientRuntimeMessage = std::variant<ServerHello, SessionRejected, AuthenticationAcceptedMessage,
         AuthenticationRejectedMessage, LatestWinsSnapshot, ReliableObservationBatch, ReliableInterestBaseline,
         LatestWinsActorSnapshot, ReliableActorInterestBaseline, ReliableInteractiveObjectInterestBaseline,
-        ServerVrPoseSnapshot>;
+        ReliablePlayerInventoryBaseline, ReliableContainerInventoryBaseline, ReliableGroundItemBaseline,
+        LatestWinsEquipmentSnapshot, ServerVrPoseSnapshot>;
 
     enum class ClientRuntimeResult : std::uint8_t
     {
@@ -53,6 +55,11 @@ namespace TES3MP
         bool actorBaselineCompleted = false;
         bool interactiveObjectBaselineApplied = false;
         bool interactiveObjectBaselineCompleted = false;
+        bool playerInventoryApplied = false;
+        bool containerInventoryApplied = false;
+        bool groundItemsApplied = false;
+        bool equipmentSnapshotApplied = false;
+        bool inventoryReplicationCompleted = false;
         bool resyncRequested = false;
         bool authenticationAccepted = false;
         std::vector<ServerVrPoseSnapshot> poseSnapshots;
@@ -85,6 +92,12 @@ namespace TES3MP
             Position3 interactionOrigin, ObjectRevision expectedRevision,
             ObjectInteractionKind kind = ObjectInteractionKind::Activate,
             std::optional<KeyPrototypeId> requestedKey = std::nullopt);
+        ClientRuntimeQueueResult queueInventoryTransaction(InventoryTransactionKind kind, ItemPrototypeId prototypeId,
+            std::optional<ItemStackId> stackId, std::uint32_t count, InventoryRevision expectedInventoryRevision,
+            Position3 interactionOrigin, std::optional<ContainerId> containerId = std::nullopt,
+            std::optional<EquipmentSlot> slot = std::nullopt,
+            std::optional<ContainerRevision> expectedContainerRevision = std::nullopt,
+            std::optional<WorldItemRevision> expectedWorldItemRevision = std::nullopt);
         std::optional<LocalLocomotionReconciliation> reconcileLocalPresentation(
             bool hardDiscontinuity = false) noexcept;
         ClientRuntimeResult requestResync(ResyncReason reason);
@@ -122,6 +135,10 @@ namespace TES3MP
         bool mResyncPlayerBaselineObserved = false;
         bool mResyncActorBaselineObserved = false;
         bool mResyncObjectBaselineObserved = false;
+        bool mResyncInventoryObserved = false;
+        bool mResyncPlayerInventoryObserved = false;
+        bool mResyncGroundItemsObserved = false;
+        bool mResyncEquipmentObserved = false;
         std::optional<CommandSequence> mLastQueuedSequence;
         ClientLocomotionHistory mLocomotionHistory;
         std::optional<LocomotionInputTick> mLastLocomotionInputTick;

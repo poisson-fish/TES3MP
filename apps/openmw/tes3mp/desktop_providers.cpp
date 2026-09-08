@@ -5,11 +5,19 @@
 #include "../mwbase/inputmanager.hpp"
 #include "../mwbase/soundmanager.hpp"
 #include "../mwbase/world.hpp"
+#include "../mwgui/containeritemmodel.hpp"
+#include "../mwgui/inventoryitemmodel.hpp"
+#include "../mwgui/inventorywindow.hpp"
+#include "../mwgui/itemmodel.hpp"
+#include "../mwgui/worlditemmodel.hpp"
 #include "../mwinput/actions.hpp"
 #include "../mwrender/replicatedactor.hpp"
 #include "../mwworld/cell.hpp"
 #include "../mwworld/cellstore.hpp"
 #include "../mwworld/class.hpp"
+#include "../mwworld/containerstore.hpp"
+#include "../mwworld/inventorystore.hpp"
+#include "../mwworld/manualref.hpp"
 #include "../mwworld/player.hpp"
 #include "../mwworld/ptr.hpp"
 #include "../mwworld/scene.hpp"
@@ -19,6 +27,7 @@
 #include <components/esm/position.hpp>
 #include <components/esm/refid.hpp>
 #include <components/esm3/loadcell.hpp>
+#include <components/esm3/loadcont.hpp>
 #include <components/esm3/loaddoor.hpp>
 
 #include <algorithm>
@@ -46,8 +55,8 @@ namespace TES3MP::OpenMWAdapter
         const DesktopCellSpaceMapping* mappingFor(
             const DesktopContentMapping& mapping, CellSpaceId id, CellSpaceKind kind)
         {
-            const auto found = std::ranges::find_if(mapping.cellSpaces,
-                [&](const auto& value) { return value.id == id && value.kind == kind; });
+            const auto found = std::ranges::find_if(
+                mapping.cellSpaces, [&](const auto& value) { return value.id == id && value.kind == kind; });
             return found == mapping.cellSpaces.end() ? nullptr : &*found;
         }
 
@@ -58,14 +67,16 @@ namespace TES3MP::OpenMWAdapter
                 const auto found = std::ranges::find_if(mapping.cellSpaces, [&](const auto& value) {
                     return value.kind == CellSpaceKind::Interior && cell.getId() == refId(value.record);
                 });
-                if (found == mapping.cellSpaces.end()) return std::nullopt;
+                if (found == mapping.cellSpaces.end())
+                    return std::nullopt;
                 const auto result = CellId::interior(found->id);
                 return mapping.manifest.contains(result) ? std::optional(result) : std::nullopt;
             }
             const auto found = std::ranges::find_if(mapping.cellSpaces, [&](const auto& value) {
                 return value.kind == CellSpaceKind::Exterior && cell.getWorldSpace() == refId(value.record);
             });
-            if (found == mapping.cellSpaces.end()) return std::nullopt;
+            if (found == mapping.cellSpaces.end())
+                return std::nullopt;
             const auto result = CellId::exterior(found->id, cell.getGridX(), cell.getGridY());
             return mapping.manifest.contains(result) ? std::optional(result) : std::nullopt;
         }
@@ -104,7 +115,8 @@ namespace TES3MP::OpenMWAdapter
 
         MWWorld::CellStore* resolveCell(const CellId& cell, const DesktopContentMapping& mapping)
         {
-            if (!mapping.manifest.contains(cell)) return nullptr;
+            if (!mapping.manifest.contains(cell))
+                return nullptr;
             auto worldModel = MWBase::Environment::get().getWorldModel();
             if (const auto* interior = cell.asInterior())
             {
@@ -112,9 +124,10 @@ namespace TES3MP::OpenMWAdapter
                 return local ? worldModel->findCell(refId(local->record)) : nullptr;
             }
             const auto* exterior = cell.asExterior();
-            const auto* local = exterior
-                ? mappingFor(mapping, exterior->worldspace(), CellSpaceKind::Exterior) : nullptr;
-            if (!local) return nullptr;
+            const auto* local
+                = exterior ? mappingFor(mapping, exterior->worldspace(), CellSpaceKind::Exterior) : nullptr;
+            if (!local)
+                return nullptr;
             return &worldModel->getExterior(
                 ESM::ExteriorCellLocation(exterior->gridX(), exterior->gridY(), refId(local->record)));
         }
@@ -224,38 +237,46 @@ namespace TES3MP::OpenMWAdapter
     std::optional<DesktopContentMapping> DesktopContentMapping::create(ContentManifest manifest,
         std::span<const DesktopCellSpaceMapping> cellSpaces, AppearanceId appearanceId, std::string avatarNpc,
         std::span<const DesktopActorPrototypeMapping> actorPrototypes,
-        std::span<const DesktopInteractiveObjectMapping> interactiveObjects)
+        std::span<const DesktopInteractiveObjectMapping> interactiveObjects,
+        std::span<const DesktopItemPrototypeMapping> itemPrototypes,
+        std::span<const DesktopContainerMapping> containers)
     try
     {
         if (appearanceId != manifest.defaultAppearance() || avatarNpc.empty()
-            || cellSpaces.size() != manifest.cellSpaces().size()) return std::nullopt;
+            || cellSpaces.size() != manifest.cellSpaces().size())
+            return std::nullopt;
         std::vector<DesktopCellSpaceMapping> mappings(cellSpaces.begin(), cellSpaces.end());
         std::ranges::sort(mappings, {}, &DesktopCellSpaceMapping::id);
         for (std::size_t index = 0; index < mappings.size(); ++index)
         {
             const auto& mapping = mappings[index];
-            const auto declaration = std::ranges::lower_bound(
-                manifest.cellSpaces(), mapping.id, {}, &CellSpaceDeclaration::id);
-            if (mapping.record.empty() || declaration == manifest.cellSpaces().end()
-                || declaration->id != mapping.id || declaration->kind != mapping.kind
-                || (index != 0 && mappings[index - 1].id == mapping.id)) return std::nullopt;
+            const auto declaration
+                = std::ranges::lower_bound(manifest.cellSpaces(), mapping.id, {}, &CellSpaceDeclaration::id);
+            if (mapping.record.empty() || declaration == manifest.cellSpaces().end() || declaration->id != mapping.id
+                || declaration->kind != mapping.kind || (index != 0 && mappings[index - 1].id == mapping.id))
+                return std::nullopt;
             const auto local = refId(mapping.record);
-            if (local == refId(avatarNpc)) return std::nullopt;
+            if (local == refId(avatarNpc))
+                return std::nullopt;
             for (std::size_t prior = 0; prior < index; ++prior)
-                if (local == refId(mappings[prior].record)) return std::nullopt;
+                if (local == refId(mappings[prior].record))
+                    return std::nullopt;
         }
         std::vector<DesktopActorPrototypeMapping> prototypes(actorPrototypes.begin(), actorPrototypes.end());
         std::ranges::sort(prototypes, {}, &DesktopActorPrototypeMapping::id);
         for (std::size_t index = 0; index < prototypes.size(); ++index)
         {
-            if (prototypes[index].record.empty()
-                || (index != 0 && prototypes[index - 1].id == prototypes[index].id)) return std::nullopt;
+            if (prototypes[index].record.empty() || (index != 0 && prototypes[index - 1].id == prototypes[index].id))
+                return std::nullopt;
             const auto local = refId(prototypes[index].record);
-            if (local == refId(avatarNpc)) return std::nullopt;
+            if (local == refId(avatarNpc))
+                return std::nullopt;
             for (const auto& mapping : mappings)
-                if (local == refId(mapping.record)) return std::nullopt;
+                if (local == refId(mapping.record))
+                    return std::nullopt;
             for (std::size_t prior = 0; prior < index; ++prior)
-                if (local == refId(prototypes[prior].record)) return std::nullopt;
+                if (local == refId(prototypes[prior].record))
+                    return std::nullopt;
         }
         std::vector<DesktopInteractiveObjectMapping> objects(interactiveObjects.begin(), interactiveObjects.end());
         std::ranges::sort(objects, {}, &DesktopInteractiveObjectMapping::id);
@@ -263,8 +284,7 @@ namespace TES3MP::OpenMWAdapter
         objectRefs.reserve(objects.size());
         for (std::size_t index = 0; index < objects.size(); ++index)
         {
-            if (objects[index].refNumContentFile < -1
-                || (index != 0 && objects[index - 1].id == objects[index].id))
+            if (objects[index].refNumContentFile < -1 || (index != 0 && objects[index - 1].id == objects[index].id))
                 return std::nullopt;
             objectRefs.emplace_back(objects[index].refNumIndex, objects[index].refNumContentFile);
         }
@@ -276,10 +296,40 @@ namespace TES3MP::OpenMWAdapter
                     || objectRefs[index - 1].second == objectRefs[index].second))
                 return std::nullopt;
         }
-        return DesktopContentMapping{ std::move(manifest), std::move(mappings), appearanceId,
-            std::move(avatarNpc), std::move(prototypes), std::move(objects) };
+        std::vector<DesktopItemPrototypeMapping> items(itemPrototypes.begin(), itemPrototypes.end());
+        std::ranges::sort(items, {}, &DesktopItemPrototypeMapping::id);
+        for (std::size_t index = 0; index < items.size(); ++index)
+        {
+            if (items[index].record.empty() || (index != 0 && items[index - 1].id == items[index].id))
+                return std::nullopt;
+            for (std::size_t prior = 0; prior < index; ++prior)
+                if (refId(items[prior].record) == refId(items[index].record))
+                    return std::nullopt;
+        }
+        std::vector<DesktopContainerMapping> containerMappings(containers.begin(), containers.end());
+        std::ranges::sort(containerMappings, {}, &DesktopContainerMapping::id);
+        std::vector<std::pair<std::uint32_t, std::int32_t>> containerRefs;
+        for (std::size_t index = 0; index < containerMappings.size(); ++index)
+        {
+            if (containerMappings[index].refNumContentFile < -1
+                || (index != 0 && containerMappings[index - 1].id == containerMappings[index].id))
+                return std::nullopt;
+            containerRefs.emplace_back(
+                containerMappings[index].refNumIndex, containerMappings[index].refNumContentFile);
+        }
+        std::ranges::sort(containerRefs);
+        for (std::size_t index = 1; index < containerRefs.size(); ++index)
+            if (containerRefs[index - 1].first == containerRefs[index].first
+                && (containerRefs[index - 1].second == -1 || containerRefs[index].second == -1
+                    || containerRefs[index - 1].second == containerRefs[index].second))
+                return std::nullopt;
+        return DesktopContentMapping{ std::move(manifest), std::move(mappings), appearanceId, std::move(avatarNpc),
+            std::move(prototypes), std::move(objects), std::move(items), std::move(containerMappings) };
     }
-    catch (...) { return std::nullopt; }
+    catch (...)
+    {
+        return std::nullopt;
+    }
 
     class DesktopSemanticInput::Impl
     {
@@ -287,6 +337,7 @@ namespace TES3MP::OpenMWAdapter
         std::optional<DesktopContentMapping> mapping;
         const PresentationProvider* presentation = nullptr;
         std::optional<ObjectInteractionCapture> pendingInteraction;
+        std::optional<InventoryTransactionCapture> pendingInventoryTransaction;
         bool interceptorInstalled = false;
 
         void ensureInterceptor(DesktopSemanticInput* self)
@@ -301,6 +352,25 @@ namespace TES3MP::OpenMWAdapter
                 MWWorld::Player& player = world->getPlayer();
                 player.setActivationInterceptor([self](const MWWorld::Ptr& toActivate, const MWWorld::Ptr& actor) {
                     return self->handleActivation(toActivate, actor);
+                });
+                MWGui::ItemModel::setTransferInterceptor([self](MWGui::ItemModel& source, const MWGui::ItemStack& item,
+                                                             std::size_t count, MWGui::ItemModel& target) {
+                    auto* presentation = dynamic_cast<const DesktopPresentation*>(self->mImpl->presentation);
+                    if (!presentation)
+                        return false;
+                    auto capture = presentation->inventoryTransfer(source, item.mBase, count, target);
+                    if (capture && !self->mImpl->pendingInventoryTransaction)
+                        self->mImpl->pendingInventoryTransaction = std::move(*capture);
+                    return capture.has_value() || presentation->observesInventoryItem(item.mBase);
+                });
+                MWGui::InventoryWindow::setUseItemInterceptor([self](const MWWorld::Ptr& item) {
+                    auto* presentation = dynamic_cast<const DesktopPresentation*>(self->mImpl->presentation);
+                    if (!presentation)
+                        return false;
+                    auto capture = presentation->inventoryUse(item);
+                    if (capture && !self->mImpl->pendingInventoryTransaction)
+                        self->mImpl->pendingInventoryTransaction = std::move(*capture);
+                    return capture.has_value() || presentation->observesInventoryItem(item);
                 });
                 interceptorInstalled = true;
             }
@@ -318,6 +388,8 @@ namespace TES3MP::OpenMWAdapter
                 auto world = MWBase::Environment::get().getWorld();
                 if (world)
                     world->getPlayer().clearActivationInterceptor();
+                MWGui::ItemModel::clearTransferInterceptor();
+                MWGui::InventoryWindow::clearUseItemInterceptor();
             }
             catch (...)
             {
@@ -343,6 +415,7 @@ namespace TES3MP::OpenMWAdapter
     {
         mImpl->clearInterceptor();
         mImpl->pendingInteraction.reset();
+        mImpl->pendingInventoryTransaction.reset();
     }
 
     bool DesktopSemanticInput::handleActivation(const MWWorld::Ptr& toActivate, const MWWorld::Ptr& player) noexcept
@@ -353,11 +426,15 @@ namespace TES3MP::OpenMWAdapter
             if (toActivate.isEmpty() || !mImpl->mapping)
                 return false;
 
-            // In Phase 14, interactive objects are doors (with locks and traps).
-            if (toActivate.getType() != ESM::Door::sRecordId)
+            if (toActivate.getType() == ESM::Door::sRecordId)
+                return queueObjectActivation(toActivate);
+            auto* presentation = dynamic_cast<const DesktopPresentation*>(mImpl->presentation);
+            auto capture = presentation ? presentation->inventoryPickup(toActivate) : std::nullopt;
+            if (!capture)
                 return false;
-
-            return queueObjectActivation(toActivate);
+            if (!mImpl->pendingInventoryTransaction)
+                mImpl->pendingInventoryTransaction = std::move(*capture);
+            return true;
         }
         catch (...)
         {
@@ -412,8 +489,7 @@ namespace TES3MP::OpenMWAdapter
                 return false;
             const auto playerPtr = world->getPlayerPtr();
             const auto& pos = playerPtr.getRefData().getPosition();
-            const auto origin = Position3(
-                static_cast<std::int64_t>(std::round(pos.pos[0] * PositionScale)),
+            const auto origin = Position3(static_cast<std::int64_t>(std::round(pos.pos[0] * PositionScale)),
                 static_cast<std::int64_t>(std::round(pos.pos[1] * PositionScale)),
                 static_cast<std::int64_t>(std::round(pos.pos[2] * PositionScale)));
 
@@ -423,14 +499,12 @@ namespace TES3MP::OpenMWAdapter
             if (!expectedRev)
                 return explicitlyMapped;
 
-            mImpl->pendingInteraction = ObjectInteractionCapture{
-                .objectId = *objectId,
+            mImpl->pendingInteraction = ObjectInteractionCapture{ .objectId = *objectId,
                 .targetCell = *canonicalCell,
                 .interactionOrigin = origin,
                 .expectedRevision = *expectedRev,
                 .kind = ObjectInteractionKind::Activate,
-                .requestedKey = std::nullopt
-            };
+                .requestedKey = std::nullopt };
             return true;
         }
         catch (...)
@@ -449,6 +523,16 @@ namespace TES3MP::OpenMWAdapter
         return captured;
     }
 
+    std::optional<InventoryTransactionCapture> DesktopSemanticInput::captureInventoryTransaction() noexcept
+    {
+        mImpl->ensureInterceptor(this);
+        if (!mImpl->pendingInventoryTransaction)
+            return std::nullopt;
+        auto captured = std::move(mImpl->pendingInventoryTransaction);
+        mImpl->pendingInventoryTransaction.reset();
+        return captured;
+    }
+
     CellTransitionCapture DesktopSemanticInput::captureCellTransition() noexcept
     {
         try
@@ -458,6 +542,7 @@ namespace TES3MP::OpenMWAdapter
             if (!scene->hasCellChanged())
                 return {};
             mImpl->pendingInteraction.reset();
+            mImpl->pendingInventoryTransaction.reset();
             if (!current)
                 return {};
             if (!mImpl->mapping)
@@ -503,6 +588,8 @@ namespace TES3MP::OpenMWAdapter
             RemoteMotionBuffer motion;
             std::optional<SpatialEntitySnapshot> lastObserved;
             std::optional<MonotonicInstant> lastAdvance;
+            std::array<std::optional<ItemPrototypeId>, static_cast<std::size_t>(EquipmentSlot::Count)> equipment{};
+            bool authoritativeEquipment = false;
 
             Remote(MWWorld::CellStore* targetCell, std::unique_ptr<MWRender::ReplicatedActor> targetActor,
                 RemoteMotionMetricSink& metrics)
@@ -523,7 +610,11 @@ namespace TES3MP::OpenMWAdapter
 
             ActorRemote(MWWorld::CellStore* targetCell, std::unique_ptr<MWRender::ReplicatedActor> targetActor,
                 RemoteMotionMetricSink& metrics)
-                : cell(targetCell), actor(std::move(targetActor)), motion(metrics) {}
+                : cell(targetCell)
+                , actor(std::move(targetActor))
+                , motion(metrics)
+            {
+            }
         };
 
         struct ObservedDoorPresentation
@@ -532,6 +623,16 @@ namespace TES3MP::OpenMWAdapter
             TES3MP::LockState lastLockState = TES3MP::LockState::Unlocked;
             TES3MP::TrapState lastTrapState = TES3MP::TrapState::Disarmed;
             ObjectRevision lastRevision = ObjectRevision::initial();
+        };
+
+        struct ObservedInventoryStack
+        {
+            CanonicalItemStack stack;
+            MWWorld::Ptr ptr;
+            std::optional<ContainerId> container;
+            bool ground = false;
+            std::optional<ContainerRevision> containerRevision;
+            std::optional<WorldItemRevision> worldItemRevision;
         };
 
         explicit Impl(RemoteMotionMetricSink& targetMetrics)
@@ -544,6 +645,11 @@ namespace TES3MP::OpenMWAdapter
         std::map<EntityId, Remote> remotes;
         std::map<EntityId, ActorRemote> actorRemotes;
         std::map<InteractiveObjectId, ObservedDoorPresentation> observedDoors;
+        std::map<ItemStackId, ObservedInventoryStack> observedInventoryStacks;
+        std::map<ContainerId, ContainerRevision> observedContainerRevisions;
+        std::map<ItemStackId, MWWorld::Ptr> presentedGroundItems;
+        std::optional<InventoryRevision> observedPlayerInventoryRevision;
+        std::optional<CanonicalRevision> observedInventoryCanonicalRevision;
 
         void clear() noexcept
         {
@@ -560,6 +666,25 @@ namespace TES3MP::OpenMWAdapter
             }
             actorRemotes.clear();
             observedDoors.clear();
+            try
+            {
+                auto world = MWBase::Environment::get().getWorld();
+                if (world)
+                    for (const auto& [stack, ptr] : presentedGroundItems)
+                    {
+                        (void)stack;
+                        if (!ptr.isEmpty())
+                            world->deleteObject(ptr);
+                    }
+            }
+            catch (...)
+            {
+            }
+            presentedGroundItems.clear();
+            observedInventoryStacks.clear();
+            observedContainerRevisions.clear();
+            observedPlayerInventoryRevision.reset();
+            observedInventoryCanonicalRevision.reset();
         }
 
         void erase(std::map<EntityId, ActorRemote>::iterator iter) noexcept
@@ -572,6 +697,57 @@ namespace TES3MP::OpenMWAdapter
         {
             iter->second.motion.clear();
             remotes.erase(iter);
+        }
+
+        bool equipmentRecords(const LatestWinsEquipmentSnapshot& snapshot, PlayerId player,
+            std::vector<ESM::RefId>& records,
+            std::array<std::optional<ItemPrototypeId>, static_cast<std::size_t>(EquipmentSlot::Count)>& slots) const
+        {
+            slots = {};
+            const auto member = std::ranges::lower_bound(snapshot.members, player, {}, &PublicEquipmentMember::player);
+            if (member == snapshot.members.end() || member->player != player)
+                return true;
+            slots = member->slots;
+            for (std::size_t index = 0; index < slots.size(); ++index)
+            {
+                const auto& prototype = slots[index];
+                if (!prototype)
+                    continue;
+                if (index == static_cast<std::size_t>(EquipmentSlot::Ammunition))
+                    continue;
+                const auto* local = itemMapping(*prototype);
+                if (!local)
+                    return false;
+                records.push_back(refId(local->record));
+            }
+            return true;
+        }
+
+        ProviderResult applyPublicEquipment(const LatestWinsEquipmentSnapshot& snapshot)
+        {
+            for (auto& [entity, remote] : remotes)
+            {
+                (void)entity;
+                if (!remote.lastObserved)
+                    continue;
+                std::vector<ESM::RefId> records;
+                std::array<std::optional<ItemPrototypeId>, static_cast<std::size_t>(EquipmentSlot::Count)> slots;
+                if (!equipmentRecords(snapshot, remote.lastObserved->playerId(), records, slots))
+                    return ProviderResult::ContentMappingFailed;
+                if (remote.authoritativeEquipment && remote.equipment == slots)
+                    continue;
+                auto [actorResult, actor]
+                    = MWRender::ReplicatedActor::create(*MWBase::Environment::get().getWorld()->getRenderingManager(),
+                        *MWBase::Environment::get().getESMStore(), refId(mapping->avatarNpc), *remote.cell,
+                        toOpenMW(remote.lastObserved->transform()), std::span<const ESM::RefId>(records));
+                const auto mapped = mapReplicatedActorResult(actorResult);
+                if (mapped != ProviderResult::Accepted || !actor)
+                    return mapped;
+                remote.actor = std::move(actor);
+                remote.equipment = slots;
+                remote.authoritativeEquipment = true;
+            }
+            return ProviderResult::Accepted;
         }
 
         ProviderResult apply(const LatestWinsSnapshot& snapshot, std::span<const ObservedPlayer> observedPlayers,
@@ -647,9 +823,9 @@ namespace TES3MP::OpenMWAdapter
                     const ProviderResult mappedResult = mapReplicatedActorResult(actorResult);
                     if (mappedResult != ProviderResult::Accepted || !actor)
                     {
-                        Log(Debug::Error) << "TES3MP replicated actor create failed: entity="
-                                          << observed.entityId.value() << " result="
-                                          << replicatedActorResultName(actorResult);
+                        Log(Debug::Error)
+                            << "TES3MP replicated actor create failed: entity=" << observed.entityId.value()
+                            << " result=" << replicatedActorResultName(actorResult);
                         return mappedResult;
                     }
                     found = remotes.try_emplace(observed.entityId, targetCell, std::move(actor), metrics).first;
@@ -659,9 +835,9 @@ namespace TES3MP::OpenMWAdapter
                 {
                     if (!sameReplicatedState(*entry, *found->second.lastObserved))
                     {
-                        Log(Debug::Error) << "TES3MP replicated actor contradictory same-revision observation: entity="
-                                          << observed.entityId.value() << " revision="
-                                          << entry->entityRevision().value();
+                        Log(Debug::Error)
+                            << "TES3MP replicated actor contradictory same-revision observation: entity="
+                            << observed.entityId.value() << " revision=" << entry->entityRevision().value();
                         return ProviderResult::PresentationFailed;
                     }
                     continue;
@@ -691,7 +867,8 @@ namespace TES3MP::OpenMWAdapter
         ProviderResult applyActors(const LatestWinsActorSnapshot& snapshot,
             std::span<const ActorInterestMember> observedActors, MonotonicInstant receivedAt)
         {
-            if (!mapping) return ProviderResult::ContentMappingFailed;
+            if (!mapping)
+                return ProviderResult::ContentMappingFailed;
             const auto& content = *mapping;
             std::array<std::optional<EntityId>, MaximumActorInterestMembers> desired;
             std::size_t desiredCount = 0;
@@ -701,13 +878,15 @@ namespace TES3MP::OpenMWAdapter
                     return candidate.actorId() == observed.actorId && candidate.entityId() == observed.entityId
                         && candidate.prototypeId() == observed.prototypeId;
                 });
-                if (entry == snapshot.view().entries().end()) return ProviderResult::PresentationFailed;
+                if (entry == snapshot.view().entries().end())
+                    return ProviderResult::PresentationFailed;
                 const auto prototype = std::ranges::lower_bound(
                     content.actorPrototypes, observed.prototypeId, {}, &DesktopActorPrototypeMapping::id);
                 if (prototype == content.actorPrototypes.end() || prototype->id != observed.prototypeId)
                     return ProviderResult::ContentMappingFailed;
                 auto* targetCell = resolveCell(entry->transform().cell(), content);
-                if (!targetCell) return ProviderResult::ContentMappingFailed;
+                if (!targetCell)
+                    return ProviderResult::ContentMappingFailed;
                 if (desiredCount == desired.size())
                     return ProviderResult::PresentationFailed;
                 desired[desiredCount++].emplace(observed.entityId);
@@ -715,16 +894,17 @@ namespace TES3MP::OpenMWAdapter
                 const auto position = toOpenMW(entry->transform());
                 if (found == actorRemotes.end() || found->second.cell != targetCell)
                 {
-                    if (found != actorRemotes.end()) erase(found);
+                    if (found != actorRemotes.end())
+                        erase(found);
                     if (remotes.size() + actorRemotes.size() >= MWRender::MaximumReplicatedActors)
                         continue;
-                    auto [actorResult, actor] = MWRender::ReplicatedActor::create(*MWBase::Environment::get()
-                        .getWorld()->getRenderingManager(), *MWBase::Environment::get().getESMStore(),
-                        refId(prototype->record), *targetCell, position);
+                    auto [actorResult, actor] = MWRender::ReplicatedActor::create(
+                        *MWBase::Environment::get().getWorld()->getRenderingManager(),
+                        *MWBase::Environment::get().getESMStore(), refId(prototype->record), *targetCell, position);
                     const auto mapped = mapReplicatedActorResult(actorResult);
-                    if (mapped != ProviderResult::Accepted || !actor) return mapped;
-                    found = actorRemotes.try_emplace(
-                        observed.entityId, targetCell, std::move(actor), metrics).first;
+                    if (mapped != ProviderResult::Accepted || !actor)
+                        return mapped;
+                    found = actorRemotes.try_emplace(observed.entityId, targetCell, std::move(actor), metrics).first;
                 }
                 if (found == actorRemotes.end())
                     continue;
@@ -749,7 +929,8 @@ namespace TES3MP::OpenMWAdapter
                     iter->second.motion.clear();
                     iter = actorRemotes.erase(iter);
                 }
-                else ++iter;
+                else
+                    ++iter;
             return ProviderResult::Accepted;
         }
 
@@ -781,19 +962,19 @@ namespace TES3MP::OpenMWAdapter
             for (auto& [entity, remote] : actorRemotes)
             {
                 auto pose = remote.motion.advance(now);
-                if (!pose) return ProviderResult::PresentationFailed;
+                if (!pose)
+                    return ProviderResult::PresentationFailed;
                 float animationSeconds = 0.f;
                 if (remote.lastAdvance && now >= *remote.lastAdvance)
-                    animationSeconds = static_cast<float>(now.nanoseconds()
-                        - remote.lastAdvance->nanoseconds()) / 1e9f;
+                    animationSeconds = static_cast<float>(now.nanoseconds() - remote.lastAdvance->nanoseconds()) / 1e9f;
                 remote.lastAdvance = now;
                 const auto actorResult = remote.actor->update(
                     toOpenMW(*pose), toOpenMW(remoteLocomotionAnimation(*pose)), animationSeconds);
                 const auto result = mapReplicatedActorResult(actorResult);
                 if (result != ProviderResult::Accepted)
                 {
-                    Log(Debug::Error) << "TES3MP replicated content actor update failed: entity="
-                                      << entity.value() << " result=" << replicatedActorResultName(actorResult);
+                    Log(Debug::Error) << "TES3MP replicated content actor update failed: entity=" << entity.value()
+                                      << " result=" << replicatedActorResultName(actorResult);
                     return result;
                 }
             }
@@ -836,6 +1017,347 @@ namespace TES3MP::OpenMWAdapter
                 }
             }
             return {};
+        }
+
+        static MWWorld::Ptr findContainerInCell(
+            MWWorld::CellStore& cell, std::uint32_t refNumIndex, std::int32_t contentFile)
+        {
+            MWWorld::Ptr found;
+            cell.forEachType<ESM::Container>([&](const MWWorld::Ptr& ptr) {
+                const auto refNum = ptr.getCellRef().getRefNum();
+                if (refNum.mIndex == refNumIndex && (contentFile < 0 || refNum.mContentFile == contentFile))
+                {
+                    found = ptr;
+                    return false;
+                }
+                return true;
+            });
+            return found;
+        }
+
+        static MWWorld::Ptr findActiveContainer(std::uint32_t refNumIndex, std::int32_t contentFile)
+        {
+            auto scene = MWBase::Environment::get().getWorldScene();
+            if (!scene)
+                return {};
+            auto* current = scene->getCurrentCell();
+            if (current)
+            {
+                auto ptr = findContainerInCell(*current, refNumIndex, contentFile);
+                if (!ptr.isEmpty())
+                    return ptr;
+            }
+            for (auto* cell : scene->getActiveCells())
+                if (cell && cell != current)
+                {
+                    auto ptr = findContainerInCell(*cell, refNumIndex, contentFile);
+                    if (!ptr.isEmpty())
+                        return ptr;
+                }
+            return {};
+        }
+
+        const DesktopItemPrototypeMapping* itemMapping(ItemPrototypeId id) const noexcept
+        {
+            if (!mapping)
+                return nullptr;
+            const auto found
+                = std::ranges::lower_bound(mapping->itemPrototypes, id, {}, &DesktopItemPrototypeMapping::id);
+            return found != mapping->itemPrototypes.end() && found->id == id ? &*found : nullptr;
+        }
+
+        std::optional<ItemPrototypeId> itemPrototype(const MWWorld::Ptr& ptr) const noexcept
+        {
+            if (!mapping || ptr.isEmpty())
+                return std::nullopt;
+            const auto found = std::ranges::find_if(mapping->itemPrototypes,
+                [&](const auto& item) { return refId(item.record) == ptr.getCellRef().getRefId(); });
+            return found == mapping->itemPrototypes.end() ? std::nullopt : std::optional(found->id);
+        }
+
+        std::optional<ContainerId> containerId(const MWWorld::Ptr& ptr) const noexcept
+        {
+            if (!mapping || ptr.isEmpty())
+                return std::nullopt;
+            const auto refNum = ptr.getCellRef().getRefNum();
+            const auto found = std::ranges::find_if(mapping->containers, [&](const auto& container) {
+                return container.refNumIndex == refNum.mIndex
+                    && (container.refNumContentFile < 0 || container.refNumContentFile == refNum.mContentFile);
+            });
+            return found == mapping->containers.end() ? std::nullopt : std::optional(found->id);
+        }
+
+        const ObservedInventoryStack* observedStack(const MWWorld::Ptr& ptr) const noexcept
+        {
+            const auto found = std::ranges::find_if(
+                observedInventoryStacks, [&](const auto& value) { return value.second.ptr == ptr; });
+            return found == observedInventoryStacks.end() ? nullptr : &found->second;
+        }
+
+        static Position3 playerOrigin()
+        {
+            const auto& pos = MWBase::Environment::get().getWorld()->getPlayerPtr().getRefData().getPosition();
+            return Position3(static_cast<std::int64_t>(std::round(pos.pos[0] * PositionScale)),
+                static_cast<std::int64_t>(std::round(pos.pos[1] * PositionScale)),
+                static_cast<std::int64_t>(std::round(pos.pos[2] * PositionScale)));
+        }
+
+        template <class Sink>
+        std::optional<MWWorld::Ptr> materializeItem(const CanonicalItemStack& stack, Sink&& sink) const
+        {
+            const auto* local = itemMapping(stack.prototypeId);
+            if (!local || stack.count > static_cast<std::uint32_t>(std::numeric_limits<int>::max())
+                || stack.condition > static_cast<std::uint32_t>(std::numeric_limits<int>::max()))
+                return std::nullopt;
+            MWWorld::ManualRef reference(
+                *MWBase::Environment::get().getESMStore(), refId(local->record), static_cast<int>(stack.count));
+            auto ptr = reference.getPtr();
+            ptr.getCellRef().setCount(static_cast<int>(stack.count));
+            if (ptr.getClass().hasItemHealth(ptr))
+                ptr.getCellRef().setCharge(static_cast<int>(stack.condition));
+            if (!ptr.getClass().getEnchantment(ptr).empty())
+                ptr.getCellRef().setEnchantmentCharge(static_cast<float>(stack.enchantmentCharge));
+            if (stack.soulPrototype)
+            {
+                if (!mapping)
+                    return std::nullopt;
+                const auto soul = std::ranges::lower_bound(
+                    mapping->actorPrototypes, *stack.soulPrototype, {}, &DesktopActorPrototypeMapping::id);
+                if (soul == mapping->actorPrototypes.end() || soul->id != *stack.soulPrototype)
+                    return std::nullopt;
+                ptr.getCellRef().setSoul(refId(soul->record));
+            }
+            return std::forward<Sink>(sink)(ptr);
+        }
+
+        ProviderResult applyInventory(const ReliablePlayerInventoryBaseline& player,
+            std::span<const ReliableContainerInventoryBaseline> containers,
+            const ReliableGroundItemBaseline& groundItems, const LatestWinsEquipmentSnapshot& equipment)
+        {
+            if (!mapping)
+                return ProviderResult::ContentMappingFailed;
+            auto world = MWBase::Environment::get().getWorld();
+            if (!world)
+                return ProviderResult::PresentationFailed;
+
+            if (!observedPlayerInventoryRevision || *observedPlayerInventoryRevision != player.revision)
+            {
+                auto playerPtr = world->getPlayerPtr();
+                auto& inventory = playerPtr.getClass().getInventoryStore(playerPtr);
+                inventory.unequipAll();
+                inventory.clear();
+                std::erase_if(observedInventoryStacks,
+                    [](const auto& value) { return !value.second.container && !value.second.ground; });
+                for (const auto& stack : player.stacks)
+                {
+                    auto local = materializeItem(stack, [&](const MWWorld::Ptr& ptr) {
+                        return *inventory.add(ptr, static_cast<int>(stack.count), false);
+                    });
+                    if (!local)
+                        return ProviderResult::ContentMappingFailed;
+                    const auto [stored, inserted] = observedInventoryStacks.emplace(stack.stackId,
+                        ObservedInventoryStack{ stack, *local, std::nullopt, false, std::nullopt, std::nullopt });
+                    if (!inserted || std::ranges::any_of(observedInventoryStacks, [&](const auto& value) {
+                            return value.first != stored->first && value.second.ptr == stored->second.ptr;
+                        }))
+                        return ProviderResult::ContentMappingFailed;
+                }
+                for (const auto& binding : player.equipment)
+                {
+                    const auto stored = observedInventoryStacks.find(binding.stackId);
+                    if (stored == observedInventoryStacks.end())
+                        return ProviderResult::PresentationFailed;
+                    auto iter = inventory.begin();
+                    for (; iter != inventory.end() && *iter != stored->second.ptr; ++iter)
+                    {
+                    }
+                    if (iter == inventory.end())
+                        return ProviderResult::PresentationFailed;
+                    inventory.equip(static_cast<int>(binding.slot), iter);
+                }
+                observedPlayerInventoryRevision = player.revision;
+            }
+
+            std::map<ContainerId, ContainerRevision> desiredContainers;
+            for (const auto& baseline : containers)
+            {
+                desiredContainers.emplace(baseline.container, baseline.revision);
+                const auto prior = observedContainerRevisions.find(baseline.container);
+                if (prior != observedContainerRevisions.end() && prior->second == baseline.revision)
+                    continue;
+                const auto localMapping = std::ranges::lower_bound(
+                    mapping->containers, baseline.container, {}, &DesktopContainerMapping::id);
+                if (localMapping == mapping->containers.end() || localMapping->id != baseline.container)
+                    return ProviderResult::ContentMappingFailed;
+                auto ptr = findActiveContainer(localMapping->refNumIndex, localMapping->refNumContentFile);
+                if (ptr.isEmpty())
+                    continue;
+                auto& store = ptr.getClass().getContainerStore(ptr);
+                store.clear();
+                std::erase_if(observedInventoryStacks,
+                    [&](const auto& value) { return value.second.container == baseline.container; });
+                for (const auto& stack : baseline.stacks)
+                {
+                    auto local = materializeItem(stack,
+                        [&](const MWWorld::Ptr& ptr) { return *store.add(ptr, static_cast<int>(stack.count), false); });
+                    if (!local)
+                        return ProviderResult::ContentMappingFailed;
+                    const auto [stored, inserted] = observedInventoryStacks.emplace(stack.stackId,
+                        ObservedInventoryStack{
+                            stack, *local, baseline.container, false, baseline.revision, std::nullopt });
+                    if (!inserted || std::ranges::any_of(observedInventoryStacks, [&](const auto& value) {
+                            return value.first != stored->first && value.second.ptr == stored->second.ptr;
+                        }))
+                        return ProviderResult::ContentMappingFailed;
+                }
+                observedContainerRevisions.insert_or_assign(baseline.container, baseline.revision);
+            }
+            std::erase_if(observedContainerRevisions,
+                [&](const auto& value) { return !desiredContainers.contains(value.first); });
+
+            if (!observedInventoryCanonicalRevision
+                || *observedInventoryCanonicalRevision != groundItems.header.canonicalRevision)
+            {
+                for (const auto& [stack, ptr] : presentedGroundItems)
+                {
+                    (void)stack;
+                    if (!ptr.isEmpty())
+                        world->deleteObject(ptr);
+                }
+                presentedGroundItems.clear();
+                std::erase_if(observedInventoryStacks, [](const auto& value) { return value.second.ground; });
+                auto* cell = resolveCell(groundItems.cell, *mapping);
+                if (!cell)
+                    return ProviderResult::ContentMappingFailed;
+                for (const auto& member : groundItems.items)
+                {
+                    ESM::Position position{};
+                    position.pos[0] = static_cast<float>(member.position.x()) / static_cast<float>(PositionScale);
+                    position.pos[1] = static_cast<float>(member.position.y()) / static_cast<float>(PositionScale);
+                    position.pos[2] = static_cast<float>(member.position.z()) / static_cast<float>(PositionScale);
+                    auto local = materializeItem(
+                        member.stack, [&](const MWWorld::Ptr& ptr) { return world->placeObject(ptr, cell, position); });
+                    if (!local)
+                        return ProviderResult::ContentMappingFailed;
+                    auto ptr = *local;
+                    presentedGroundItems.emplace(member.stack.stackId, ptr);
+                    if (!observedInventoryStacks
+                            .emplace(member.stack.stackId,
+                                ObservedInventoryStack{
+                                    member.stack, ptr, std::nullopt, true, std::nullopt, member.revision })
+                            .second)
+                        return ProviderResult::PresentationFailed;
+                }
+                observedInventoryCanonicalRevision = groundItems.header.canonicalRevision;
+            }
+            return applyPublicEquipment(equipment);
+        }
+
+        std::optional<InventoryTransactionCapture> inventoryTransfer(
+            MWGui::ItemModel& source, const MWWorld::Ptr& item, std::size_t count, MWGui::ItemModel& target) const
+        {
+            if (!observedPlayerInventoryRevision || count == 0 || count > MaximumTransferCount)
+                return std::nullopt;
+            const auto* stack = observedStack(item);
+            if (!stack || count > stack->stack.count)
+                return std::nullopt;
+            InventoryTransactionCapture result{ .prototypeId = stack->stack.prototypeId,
+                .stackId = stack->stack.stackId,
+                .count = static_cast<std::uint32_t>(count),
+                .expectedInventoryRevision = *observedPlayerInventoryRevision,
+                .interactionOrigin = playerOrigin() };
+            const auto player = MWBase::Environment::get().getWorld()->getPlayerPtr();
+            const auto sourceInventory = dynamic_cast<MWGui::InventoryItemModel*>(&source);
+            const auto targetInventory = dynamic_cast<MWGui::InventoryItemModel*>(&target);
+            const bool sourcePlayer
+                = sourceInventory && sourceInventory->actor() == player && !stack->container && !stack->ground;
+            const bool targetPlayer = targetInventory && targetInventory->actor() == player;
+            if (stack->container && targetPlayer)
+            {
+                result.kind = InventoryTransactionKind::TakeFromContainer;
+                result.containerId = stack->container;
+                result.expectedContainerRevision = stack->containerRevision;
+                return result;
+            }
+            if (sourcePlayer)
+            {
+                if (auto* containerModel = dynamic_cast<MWGui::ContainerItemModel*>(&target))
+                {
+                    const auto id = containerId(containerModel->primarySource());
+                    const auto revision = id ? observedContainerRevisions.find(*id) : observedContainerRevisions.end();
+                    if (!id || revision == observedContainerRevisions.end())
+                        return std::nullopt;
+                    result.kind = InventoryTransactionKind::PutIntoContainer;
+                    result.containerId = *id;
+                    result.expectedContainerRevision = revision->second;
+                    return result;
+                }
+                if (dynamic_cast<MWGui::WorldItemModel*>(&target))
+                {
+                    result.kind = InventoryTransactionKind::DropItem;
+                    return result;
+                }
+            }
+            return std::nullopt;
+        }
+
+        std::optional<InventoryTransactionCapture> inventoryUse(const MWWorld::Ptr& item) const
+        {
+            if (!observedPlayerInventoryRevision)
+                return std::nullopt;
+            const auto* stack = observedStack(item);
+            if (!stack || stack->container || stack->ground)
+                return std::nullopt;
+            InventoryTransactionCapture result{ .prototypeId = stack->stack.prototypeId,
+                .stackId = stack->stack.stackId,
+                .count = 1,
+                .expectedInventoryRevision = *observedPlayerInventoryRevision,
+                .interactionOrigin = playerOrigin() };
+            const auto playerPtr = MWBase::Environment::get().getWorld()->getPlayerPtr();
+            auto& inventory = playerPtr.getClass().getInventoryStore(playerPtr);
+            for (int slot = 0; slot < MWWorld::InventoryStore::Slots; ++slot)
+            {
+                const auto equipped = inventory.getSlot(slot);
+                if (equipped != inventory.end() && *equipped == item)
+                {
+                    result.kind = InventoryTransactionKind::UnequipItem;
+                    result.slot = static_cast<EquipmentSlot>(slot);
+                    return result;
+                }
+            }
+            const auto slots = item.getClass().getEquipmentSlots(item).first;
+            if (slots.empty() || slots.front() < 0 || slots.front() >= MWWorld::InventoryStore::Slots)
+                return std::nullopt;
+            int selectedSlot = slots.front();
+            for (const int slot : slots)
+            {
+                if (slot < 0 || slot >= MWWorld::InventoryStore::Slots)
+                    return std::nullopt;
+                if (inventory.getSlot(slot) == inventory.end())
+                {
+                    selectedSlot = slot;
+                    break;
+                }
+            }
+            result.kind = InventoryTransactionKind::EquipItem;
+            result.slot = static_cast<EquipmentSlot>(selectedSlot);
+            return result;
+        }
+
+        std::optional<InventoryTransactionCapture> inventoryPickup(const MWWorld::Ptr& item) const
+        {
+            if (!observedPlayerInventoryRevision)
+                return std::nullopt;
+            const auto* stack = observedStack(item);
+            if (!stack || !stack->ground || !stack->worldItemRevision)
+                return std::nullopt;
+            return InventoryTransactionCapture{ .kind = InventoryTransactionKind::PickupItem,
+                .prototypeId = stack->stack.prototypeId,
+                .stackId = stack->stack.stackId,
+                .count = stack->stack.count,
+                .expectedInventoryRevision = *observedPlayerInventoryRevision,
+                .interactionOrigin = playerOrigin(),
+                .expectedWorldItemRevision = stack->worldItemRevision };
         }
 
         ProviderResult applyInteractiveObjects(
@@ -958,14 +1480,13 @@ namespace TES3MP::OpenMWAdapter
     }
 
     ProviderResult DesktopPresentation::applyAuthoritative(const LatestWinsSnapshot& snapshot,
-        std::span<const ObservedPlayer> observedPlayers, bool allowLocalCellCorrection,
-        MonotonicInstant receivedAt,
+        std::span<const ObservedPlayer> observedPlayers, bool allowLocalCellCorrection, MonotonicInstant receivedAt,
         const std::optional<LocalLocomotionReconciliation>& localReconciliation) noexcept
     {
         try
         {
-            const auto result = mImpl->apply(
-                snapshot, observedPlayers, allowLocalCellCorrection, receivedAt, localReconciliation);
+            const auto result
+                = mImpl->apply(snapshot, observedPlayers, allowLocalCellCorrection, receivedAt, localReconciliation);
             if (result != ProviderResult::Accepted)
                 mImpl->clear();
             return result;
@@ -999,7 +1520,8 @@ namespace TES3MP::OpenMWAdapter
         try
         {
             const auto result = mImpl->applyActors(snapshot, observedActors, receivedAt);
-            if (result != ProviderResult::Accepted) mImpl->clear();
+            if (result != ProviderResult::Accepted)
+                mImpl->clear();
             return result;
         }
         catch (...)
@@ -1015,7 +1537,8 @@ namespace TES3MP::OpenMWAdapter
         try
         {
             const auto result = mImpl->applyInteractiveObjects(baseline, receivedAt);
-            if (result != ProviderResult::Accepted) mImpl->clear();
+            if (result != ProviderResult::Accepted)
+                mImpl->clear();
             return result;
         }
         catch (...)
@@ -1025,10 +1548,79 @@ namespace TES3MP::OpenMWAdapter
         }
     }
 
-    std::optional<ObjectRevision> DesktopPresentation::observedObjectRevision(
-        InteractiveObjectId id) const noexcept
+    std::optional<ObjectRevision> DesktopPresentation::observedObjectRevision(InteractiveObjectId id) const noexcept
     {
         return mImpl->observedObjectRevision(id);
+    }
+
+    ProviderResult DesktopPresentation::applyInventory(const ReliablePlayerInventoryBaseline& player,
+        std::span<const ReliableContainerInventoryBaseline> containers, const ReliableGroundItemBaseline& groundItems,
+        const LatestWinsEquipmentSnapshot& equipment, MonotonicInstant receivedAt) noexcept
+    {
+        (void)receivedAt;
+        try
+        {
+            const auto result = mImpl->applyInventory(player, containers, groundItems, equipment);
+            if (result != ProviderResult::Accepted)
+                mImpl->clear();
+            return result;
+        }
+        catch (...)
+        {
+            mImpl->clear();
+            return ProviderResult::PresentationFailed;
+        }
+    }
+
+    std::optional<InventoryTransactionCapture> DesktopPresentation::inventoryTransfer(
+        MWGui::ItemModel& source, const MWWorld::Ptr& item, std::size_t count, MWGui::ItemModel& target) const noexcept
+    {
+        try
+        {
+            return mImpl->inventoryTransfer(source, item, count, target);
+        }
+        catch (...)
+        {
+            return std::nullopt;
+        }
+    }
+
+    std::optional<InventoryTransactionCapture> DesktopPresentation::inventoryUse(
+        const MWWorld::Ptr& item) const noexcept
+    {
+        try
+        {
+            return mImpl->inventoryUse(item);
+        }
+        catch (...)
+        {
+            return std::nullopt;
+        }
+    }
+
+    std::optional<InventoryTransactionCapture> DesktopPresentation::inventoryPickup(
+        const MWWorld::Ptr& item) const noexcept
+    {
+        try
+        {
+            return mImpl->inventoryPickup(item);
+        }
+        catch (...)
+        {
+            return std::nullopt;
+        }
+    }
+
+    bool DesktopPresentation::observesInventoryItem(const MWWorld::Ptr& item) const noexcept
+    {
+        try
+        {
+            return mImpl->observedStack(item) != nullptr;
+        }
+        catch (...)
+        {
+            return false;
+        }
     }
 
     void DesktopPresentation::clear() noexcept

@@ -4,6 +4,8 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <optional>
+#include <span>
 #include <string_view>
 #include <utility>
 
@@ -84,7 +86,8 @@ namespace MWRender
             const ESM::Position& position, ReplicatedActorLocomotion locomotion, float animationSeconds) noexcept;
 
         static CreateResult create(RenderingManager& rendering, const MWWorld::ESMStore& store,
-            const ESM::RefId& npcRecord, MWWorld::CellStore& cell, const ESM::Position& position) noexcept;
+            const ESM::RefId& npcRecord, MWWorld::CellStore& cell, const ESM::Position& position,
+            std::optional<std::span<const ESM::RefId>> equipment = std::nullopt) noexcept;
 
     private:
         class Impl;

@@ -64,6 +64,10 @@ namespace MWGui
 {
     namespace
     {
+        InventoryWindow::UseItemInterceptor sUseItemInterceptor;
+    }
+    namespace
+    {
         WindowSettingValues getModeSettings(GuiMode mode)
         {
             switch (mode)
@@ -609,6 +613,8 @@ namespace MWGui
 
     void InventoryWindow::useItem(const MWWorld::Ptr& ptr, bool force)
     {
+        if (sUseItemInterceptor && sUseItemInterceptor(ptr))
+            return;
         const ESM::RefId& script = ptr.getClass().getScript(ptr);
         if (!script.empty())
         {
@@ -689,6 +695,16 @@ namespace MWGui
             notifyContentChanged();
         }
         // else: will be updated in open()
+    }
+
+    void InventoryWindow::setUseItemInterceptor(UseItemInterceptor interceptor)
+    {
+        sUseItemInterceptor = std::move(interceptor);
+    }
+
+    void InventoryWindow::clearUseItemInterceptor() noexcept
+    {
+        sUseItemInterceptor = {};
     }
 
     void InventoryWindow::onAvatarClicked(MyGUI::Widget* /*sender*/)

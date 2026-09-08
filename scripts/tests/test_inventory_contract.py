@@ -149,6 +149,51 @@ class InventoryContractTests(unittest.TestCase):
         invalid = [character for character in discovery if ord(character) < 32 and character != "\n"]
         self.assertEqual([], invalid)
 
+    def test_openmw_client_inventory_path_is_authoritative_and_complete(self):
+        session = (ROOT / "components/tes3mp/include/tes3mp/client_session.hpp").read_text(encoding="utf-8")
+        session_source = (ROOT / "components/tes3mp/client_session/client_session.cpp").read_text(encoding="utf-8")
+        runtime = (ROOT / "components/tes3mp/client_session/client_session_runtime.cpp").read_text(encoding="utf-8")
+        providers = (ROOT / "apps/openmw/tes3mp/desktop_providers.cpp").read_text(encoding="utf-8")
+        adapter = (ROOT / "apps/openmw/tes3mp/adapter.cpp").read_text(encoding="utf-8")
+
+        for symbol in (
+            "receiveReliablePlayerInventoryBaseline",
+            "receiveReliableContainerInventoryBaseline",
+            "receiveReliableGroundItemBaseline",
+            "receiveLatestWinsEquipmentSnapshot",
+            "inventoryReplicationComplete",
+        ):
+            self.assertIn(symbol, session)
+        self.assertIn("decodeReliablePlayerInventoryBaseline", runtime)
+        self.assertIn("queueInventoryTransaction", runtime)
+        self.assertIn("PlayerInventoryChunkLimit", session_source)
+        self.assertIn("ContainerInventoryChunkLimit", session_source)
+        self.assertIn("GroundItemChunkLimit", session_source)
+        self.assertIn("captureInventoryTransaction", adapter)
+        self.assertIn("applyInventory", adapter)
+        self.assertIn("!mAwaitingResync || mResyncInventory", adapter)
+        self.assertIn("inventory.unequipAll()", providers)
+        self.assertIn("inventory.clear()", providers)
+        self.assertIn("applyPublicEquipment", providers)
+        self.assertIn("world->placeObject", providers)
+
+    def test_openmw_inventory_ui_intercepts_before_local_mutation(self):
+        item_model = (ROOT / "apps/openmw/mwgui/itemmodel.cpp").read_text(encoding="utf-8")
+        inventory_window = (ROOT / "apps/openmw/mwgui/inventorywindow.cpp").read_text(encoding="utf-8")
+        container_model = (ROOT / "apps/openmw/mwgui/containeritemmodel.cpp").read_text(encoding="utf-8")
+        move = item_model.index("MWWorld::Ptr ItemModel::moveItem")
+        intercepted = item_model.index("interceptTransfer(item, count", move)
+        remove = item_model.index("removeItem(item, count);", move)
+        self.assertLess(intercepted, remove)
+        use = inventory_window.index("void InventoryWindow::useItem")
+        intercepted_use = inventory_window.index("sUseItemInterceptor", use)
+        stock_use = inventory_window.index("ptr.getClass().use", use)
+        self.assertLess(intercepted_use, stock_use)
+        take = container_model.index("bool ContainerItemModel::onTakeItem")
+        intercepted_take = container_model.index("interceptTransfer", take)
+        stock_take = container_model.index("itemTaken", take)
+        self.assertLess(intercepted_take, stock_take)
+
 
 if __name__ == "__main__":
     unittest.main()

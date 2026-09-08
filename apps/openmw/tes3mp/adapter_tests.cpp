@@ -46,7 +46,8 @@ namespace
             TES3MP::LinearVelocity3(velocity, 0, 0), mode);
     }
 
-    TES3MP::ServerHello serverHello(bool pose = false, bool actors = false, bool interactiveObjects = false)
+    TES3MP::ServerHello serverHello(
+        bool pose = false, bool actors = false, bool interactiveObjects = false, bool inventory = false)
     {
         auto versions = std::get<TES3MP::ProtocolVersionRange>(TES3MP::ProtocolVersionRange::create(1, 2, 2));
         std::vector<TES3MP::CapabilityId> capabilities;
@@ -56,6 +57,8 @@ namespace
             capabilities.push_back(TES3MP::actorReplicationCapability());
         if (interactiveObjects)
             capabilities.push_back(TES3MP::interactiveObjectReplicationCapability());
+        if (inventory)
+            capabilities.push_back(TES3MP::inventoryReplicationCapability());
         auto client = std::get<TES3MP::CapabilityOffer>(TES3MP::CapabilityOffer::create(versions, capabilities, {}));
         auto server
             = std::get<TES3MP::CapabilityOffer>(TES3MP::CapabilityOffer::create(std::move(versions), capabilities, {}));
@@ -63,23 +66,67 @@ namespace
         return std::get<TES3MP::ServerHello>(std::move(negotiated));
     }
 
-    TES3MP::ReliableInteractiveObjectInterestBaseline interactiveObjectBaseline(
-        TES3MP::SessionGeneration generation, std::uint64_t tick, std::uint64_t revision,
-        std::optional<std::uint64_t> objectRevision = std::nullopt)
+    TES3MP::ReliableInteractiveObjectInterestBaseline interactiveObjectBaseline(TES3MP::SessionGeneration generation,
+        std::uint64_t tick, std::uint64_t revision, std::optional<std::uint64_t> objectRevision = std::nullopt)
     {
-        const std::array members{
-            TES3MP::InteractiveObjectInterestMember{
-                *TES3MP::InteractiveObjectId::fromValue(101),
-                *TES3MP::ObjectRevision::fromValue(objectRevision.value_or(revision)),
-                TES3MP::DoorState::Open,
-                TES3MP::LockState::Unlocked,
-                TES3MP::TrapState::Disarmed,
-            }
-        };
-        auto created = TES3MP::ReliableInteractiveObjectInterestBaseline::create(
-            value<TES3MP::SessionId>(1), generation, value<TES3MP::ServerTick>(tick),
-            value<TES3MP::CanonicalRevision>(revision), members);
+        const std::array members{ TES3MP::InteractiveObjectInterestMember{
+            *TES3MP::InteractiveObjectId::fromValue(101),
+            *TES3MP::ObjectRevision::fromValue(objectRevision.value_or(revision)),
+            TES3MP::DoorState::Open,
+            TES3MP::LockState::Unlocked,
+            TES3MP::TrapState::Disarmed,
+        } };
+        auto created = TES3MP::ReliableInteractiveObjectInterestBaseline::create(value<TES3MP::SessionId>(1),
+            generation, value<TES3MP::ServerTick>(tick), value<TES3MP::CanonicalRevision>(revision), members);
         return std::get<TES3MP::ReliableInteractiveObjectInterestBaseline>(std::move(created));
+    }
+
+    TES3MP::InventoryBaselineHeader inventoryHeader(
+        TES3MP::SessionGeneration generation, std::uint64_t tick, std::uint64_t revision)
+    {
+        return { value<TES3MP::SessionId>(1), generation, value<TES3MP::ServerTick>(tick),
+            value<TES3MP::CanonicalRevision>(revision), 0, 1 };
+    }
+
+    TES3MP::ReliablePlayerInventoryBaseline playerInventoryBaseline(TES3MP::SessionGeneration generation,
+        std::uint64_t tick, std::uint64_t revision, std::uint32_t chunkIndex = 0, std::uint32_t chunkCount = 1)
+    {
+        const std::array stacks{ TES3MP::CanonicalItemStack{
+            value<TES3MP::ItemStackId>(10 + chunkIndex), value<TES3MP::ItemPrototypeId>(20), 2, 0, 0, std::nullopt } };
+        auto header = inventoryHeader(generation, tick, revision);
+        header.chunkIndex = chunkIndex;
+        header.chunkCount = chunkCount;
+        auto created = TES3MP::ReliablePlayerInventoryBaseline::create(
+            header, value<TES3MP::PlayerId>(1), value<TES3MP::InventoryRevision>(revision), stacks, {});
+        return std::get<TES3MP::ReliablePlayerInventoryBaseline>(std::move(created));
+    }
+
+    TES3MP::ReliableContainerInventoryBaseline containerInventoryBaseline(
+        TES3MP::SessionGeneration generation, std::uint64_t tick, std::uint64_t revision)
+    {
+        const std::array stacks{ TES3MP::CanonicalItemStack{
+            value<TES3MP::ItemStackId>(12), value<TES3MP::ItemPrototypeId>(20), 1, 0, 0, std::nullopt } };
+        auto created = TES3MP::ReliableContainerInventoryBaseline::create(inventoryHeader(generation, tick, revision),
+            value<TES3MP::ContainerId>(30), TES3MP::CellId::interior(value<TES3MP::CellSpaceId>(7)),
+            TES3MP::Position3(10, 0, 0), value<TES3MP::ContainerRevision>(revision), 100, stacks);
+        return std::get<TES3MP::ReliableContainerInventoryBaseline>(std::move(created));
+    }
+
+    TES3MP::ReliableGroundItemBaseline groundItemBaseline(
+        TES3MP::SessionGeneration generation, std::uint64_t tick, std::uint64_t revision)
+    {
+        auto created = TES3MP::ReliableGroundItemBaseline::create(
+            inventoryHeader(generation, tick, revision), TES3MP::CellId::interior(value<TES3MP::CellSpaceId>(7)), {});
+        return std::get<TES3MP::ReliableGroundItemBaseline>(std::move(created));
+    }
+
+    TES3MP::LatestWinsEquipmentSnapshot equipmentSnapshot(
+        TES3MP::SessionGeneration generation, std::uint64_t tick, std::uint64_t revision)
+    {
+        const std::array members{ TES3MP::PublicEquipmentMember{ value<TES3MP::PlayerId>(1) } };
+        auto created = TES3MP::LatestWinsEquipmentSnapshot::create(value<TES3MP::SessionId>(1), generation,
+            value<TES3MP::ServerTick>(tick), value<TES3MP::CanonicalRevision>(revision), members);
+        return std::get<TES3MP::LatestWinsEquipmentSnapshot>(std::move(created));
     }
 
     std::vector<std::byte> frame(
@@ -345,16 +392,29 @@ namespace
             }
             return std::nullopt;
         }
+        std::optional<TES3MP::OpenMWAdapter::InventoryTransactionCapture>
+        captureInventoryTransaction() noexcept override
+        {
+            ++inventoryCalls;
+            if (!nextInventory)
+                return std::nullopt;
+            auto value = std::move(nextInventory);
+            nextInventory.reset();
+            return value;
+        }
         void clearSessionState() noexcept override
         {
             ++clearCalls;
             nextInteraction.reset();
+            nextInventory.reset();
         }
         unsigned calls = 0;
         unsigned interactionCalls = 0;
+        unsigned inventoryCalls = 0;
         unsigned clearCalls = 0;
         std::optional<TES3MP::OpenMWAdapter::CellTransitionCapture> nextTransition;
         std::optional<TES3MP::OpenMWAdapter::ObjectInteractionCapture> nextInteraction;
+        std::optional<TES3MP::OpenMWAdapter::InventoryTransactionCapture> nextInventory;
     };
 
     class Presentation final : public TES3MP::OpenMWAdapter::PresentationProvider
@@ -385,11 +445,24 @@ namespace
             return TES3MP::OpenMWAdapter::ProviderResult::Accepted;
         }
         TES3MP::OpenMWAdapter::ProviderResult applyInteractiveObjects(
-            const TES3MP::ReliableInteractiveObjectInterestBaseline& baseline, TES3MP::MonotonicInstant) noexcept override
+            const TES3MP::ReliableInteractiveObjectInterestBaseline& baseline,
+            TES3MP::MonotonicInstant) noexcept override
         {
             ++interactiveObjects;
             for (const auto& member : baseline.members())
                 objectRevisions.insert_or_assign(member.objectId, member.revision);
+            return TES3MP::OpenMWAdapter::ProviderResult::Accepted;
+        }
+        TES3MP::OpenMWAdapter::ProviderResult applyInventory(const TES3MP::ReliablePlayerInventoryBaseline& player,
+            std::span<const TES3MP::ReliableContainerInventoryBaseline> containers,
+            const TES3MP::ReliableGroundItemBaseline& ground, const TES3MP::LatestWinsEquipmentSnapshot& equipment,
+            TES3MP::MonotonicInstant) noexcept override
+        {
+            ++inventories;
+            lastInventoryRevision = player.revision;
+            lastContainerCount = containers.size();
+            lastGroundCount = ground.items.size();
+            lastEquipmentCount = equipment.members.size();
             return TES3MP::OpenMWAdapter::ProviderResult::Accepted;
         }
         std::optional<TES3MP::ObjectRevision> observedObjectRevision(
@@ -418,9 +491,14 @@ namespace
         unsigned poses = 0;
         unsigned actors = 0;
         unsigned interactiveObjects = 0;
+        unsigned inventories = 0;
         unsigned poseFallbacks = 0;
         double lastPoseWeight = 0.0;
         std::map<TES3MP::InteractiveObjectId, TES3MP::ObjectRevision> objectRevisions;
+        std::optional<TES3MP::InventoryRevision> lastInventoryRevision;
+        std::size_t lastContainerCount = 0;
+        std::size_t lastGroundCount = 0;
+        std::size_t lastEquipmentCount = 0;
     };
 
     class PoseInput final : public TES3MP::OpenMWAdapter::VrPoseInputProvider
@@ -852,12 +930,8 @@ int main()
     // Verify unnegotiated interactive object capability does not queue commands or capture interactions
     const auto sentBeforeUnneg = reconnectTransportObserver->sentFrames.size();
     const auto unnegInteractionsBefore = reconnectInput.interactionCalls;
-    reconnectInput.nextInteraction = ObjectInteractionCapture{
-        *InteractiveObjectId::fromValue(101),
-        CellId::interior(value<CellSpaceId>(7)),
-        Position3(100, 200, 300),
-        *ObjectRevision::fromValue(1)
-    };
+    reconnectInput.nextInteraction = ObjectInteractionCapture{ *InteractiveObjectId::fromValue(101),
+        CellId::interior(value<CellSpaceId>(7)), Position3(100, 200, 300), *ObjectRevision::fromValue(1) };
     reconnectCoordinator->frame(0.01f);
     require(reconnectInput.interactionCalls == unnegInteractionsBefore);
     for (std::size_t index = sentBeforeUnneg; index < reconnectTransportObserver->sentFrames.size(); ++index)
@@ -878,20 +952,19 @@ int main()
     auto* objTransportObserver = objTransport.get();
     objTransportObserver->acceptConnections = true;
     auto objClock = std::make_unique<Clock>();
-    auto objCreated = ClientSessionRuntime::create(
-        *objTransport, *objClock, timeouts, SessionGeneration::initial(), outbound);
+    auto objCreated
+        = ClientSessionRuntime::create(*objTransport, *objClock, timeouts, SessionGeneration::initial(), outbound);
     auto objRuntime = std::get<std::unique_ptr<ClientSessionRuntime>>(std::move(objCreated));
     auto objVersions = std::get<ProtocolVersionRange>(ProtocolVersionRange::create(1, 2, 2));
     const std::array objCapabilities{ interactiveObjectReplicationCapability() };
     auto objOffer = std::get<CapabilityOffer>(CapabilityOffer::create(std::move(objVersions), objCapabilities, {}));
     auto objPassword = AuthenticationMaterial::create(passwordBytes);
     require(objPassword
-        && objRuntime->start(
-               endpoint, ClientHello::fromOffer(std::move(objOffer)), AuthenticationRequest::join(std::move(*objPassword)))
+        && objRuntime->start(endpoint, ClientHello::fromOffer(std::move(objOffer)),
+               AuthenticationRequest::join(std::move(*objPassword)))
             == HeadlessClientResult::Accepted);
-    auto objCoordinator = makeCoordinator(
-        std::move(objTransport), std::move(objClock), std::move(objRuntime), reconnect,
-        objInput, objPresentation, objStatus, &objDisconnect);
+    auto objCoordinator = makeCoordinator(std::move(objTransport), std::move(objClock), std::move(objRuntime),
+        reconnect, objInput, objPresentation, objStatus, &objDisconnect);
     require(static_cast<bool>(objCoordinator));
     auto objHello = encodeServerHello(serverHello(false, false, true));
     objTransportObserver->enqueue(
@@ -904,25 +977,19 @@ int main()
         encodeReliableInterestBaseline(selfBaseline(SessionGeneration::initial(), true, 1, 1)),
         TransportChannel::ReliableOrdered);
     objTransportObserver->enqueue(MessageClass::LatestWinsSnapshot, MessageKind::LatestWinsSnapshot,
-        encodeLatestWinsSnapshot(selfSnapshot(SessionGeneration::initial(), true, 1, 1)),
-        TransportChannel::LatestWins);
+        encodeLatestWinsSnapshot(selfSnapshot(SessionGeneration::initial(), true, 1, 1)), TransportChannel::LatestWins);
     objTransportObserver->enqueue(MessageClass::ReliableOperation,
         MessageKind::ReliableInteractiveObjectInterestBaseline,
-        encodeReliableInteractiveObjectInterestBaseline(
-            interactiveObjectBaseline(SessionGeneration::initial(), 1, 1)),
+        encodeReliableInteractiveObjectInterestBaseline(interactiveObjectBaseline(SessionGeneration::initial(), 1, 1)),
         TransportChannel::ReliableOrdered);
     objCoordinator->frame(0.01f);
     require(objPresentation.calls == 1 && objPresentation.interactiveObjects == 1);
-    require(objPresentation.observedObjectRevision(*InteractiveObjectId::fromValue(101))
-        == *ObjectRevision::fromValue(1));
+    require(
+        objPresentation.observedObjectRevision(*InteractiveObjectId::fromValue(101)) == *ObjectRevision::fromValue(1));
 
     // Test queueing object activation when capability is negotiated
-    objInput.nextInteraction = ObjectInteractionCapture{
-        *InteractiveObjectId::fromValue(101),
-        CellId::interior(value<CellSpaceId>(7)),
-        Position3(100, 200, 300),
-        *ObjectRevision::fromValue(1)
-    };
+    objInput.nextInteraction = ObjectInteractionCapture{ *InteractiveObjectId::fromValue(101),
+        CellId::interior(value<CellSpaceId>(7)), Position3(100, 200, 300), *ObjectRevision::fromValue(1) };
     const auto sentBeforeInteract = objTransportObserver->sentFrames.size();
     objCoordinator->frame(0.01f);
     require(objInput.interactionCalls >= 1);
@@ -958,27 +1025,24 @@ int main()
         encodeReliableInterestBaseline(selfBaseline(SessionGeneration::initial(), true, 2, 2)),
         TransportChannel::ReliableOrdered);
     objTransportObserver->enqueue(MessageClass::LatestWinsSnapshot, MessageKind::LatestWinsSnapshot,
-        encodeLatestWinsSnapshot(selfSnapshot(SessionGeneration::initial(), true, 2, 2)),
-        TransportChannel::LatestWins);
+        encodeLatestWinsSnapshot(selfSnapshot(SessionGeneration::initial(), true, 2, 2)), TransportChannel::LatestWins);
     objCoordinator->frame(0.01f);
     require(objDisconnect.resyncCompletions == 0);
     require(objPresentation.calls == 2);
     require(objPresentation.interactiveObjects == 1);
     objTransportObserver->enqueue(MessageClass::ReliableOperation,
         MessageKind::ReliableInteractiveObjectInterestBaseline,
-        encodeReliableInteractiveObjectInterestBaseline(
-            interactiveObjectBaseline(SessionGeneration::initial(), 2, 2)),
+        encodeReliableInteractiveObjectInterestBaseline(interactiveObjectBaseline(SessionGeneration::initial(), 2, 2)),
         TransportChannel::ReliableOrdered);
     objCoordinator->frame(0.01f);
     require(objDisconnect.resyncCompletions == 1 && objPresentation.interactiveObjects == 2);
-    require(objPresentation.observedObjectRevision(*InteractiveObjectId::fromValue(101))
-        == *ObjectRevision::fromValue(2));
+    require(
+        objPresentation.observedObjectRevision(*InteractiveObjectId::fromValue(101)) == *ObjectRevision::fromValue(2));
 
     // Verify revision gating: object baseline with revision > snapshot revision is not applied to presentation
     objTransportObserver->enqueue(MessageClass::ReliableOperation,
         MessageKind::ReliableInteractiveObjectInterestBaseline,
-        encodeReliableInteractiveObjectInterestBaseline(
-            interactiveObjectBaseline(SessionGeneration::initial(), 3, 5)),
+        encodeReliableInteractiveObjectInterestBaseline(interactiveObjectBaseline(SessionGeneration::initial(), 3, 5)),
         TransportChannel::ReliableOrdered);
     objCoordinator->frame(0.01f);
     require(objPresentation.interactiveObjects == 2);
@@ -992,6 +1056,114 @@ int main()
     objCoordinator->frame(0.01f);
     require(objStatus.last == ConnectionStatus::Reconnecting && objPresentation.interactiveObjects == 2);
     require(objInput.clearCalls == 1);
+
+    // Inventory views apply only after the complete private/container/ground/equipment set, then UI proposals
+    // leave as one authenticated transaction command.
+    Input inventoryInput;
+    Presentation inventoryPresentation;
+    Status inventoryStatus;
+    DisconnectOnce inventoryControl;
+    inventoryControl.pending = false;
+    auto inventoryTransport = std::make_unique<IdleTransport>();
+    auto* inventoryTransportObserver = inventoryTransport.get();
+    inventoryTransportObserver->acceptConnections = true;
+    auto inventoryClock = std::make_unique<Clock>();
+    auto inventoryCreated = ClientSessionRuntime::create(
+        *inventoryTransport, *inventoryClock, timeouts, SessionGeneration::initial(), outbound);
+    auto inventoryRuntime = std::get<std::unique_ptr<ClientSessionRuntime>>(std::move(inventoryCreated));
+    auto inventoryVersions = std::get<ProtocolVersionRange>(ProtocolVersionRange::create(1, 2, 2));
+    const std::array inventoryCapabilities{ inventoryReplicationCapability() };
+    auto inventoryOffer
+        = std::get<CapabilityOffer>(CapabilityOffer::create(std::move(inventoryVersions), inventoryCapabilities, {}));
+    auto inventoryPassword = AuthenticationMaterial::create(passwordBytes);
+    require(inventoryPassword
+        && inventoryRuntime->start(endpoint, ClientHello::fromOffer(std::move(inventoryOffer)),
+               AuthenticationRequest::join(std::move(*inventoryPassword)))
+            == HeadlessClientResult::Accepted);
+    auto inventoryCoordinator
+        = makeCoordinator(std::move(inventoryTransport), std::move(inventoryClock), std::move(inventoryRuntime),
+            reconnect, inventoryInput, inventoryPresentation, inventoryStatus, &inventoryControl);
+    inventoryCoordinator->frame(0.01f);
+    inventoryTransportObserver->enqueue(MessageClass::SessionControl, MessageKind::ServerHello,
+        encodeServerHello(serverHello(false, false, false, true)), TransportChannel::ReliableOrdered);
+    inventoryCoordinator->frame(0.01f);
+    auto inventoryAccepted = accepted(std::byte{ 7 });
+    inventoryTransportObserver->enqueue(MessageClass::SessionControl, MessageKind::AuthenticationAccepted,
+        encodeAuthenticationAccepted(inventoryAccepted), TransportChannel::ReliableOrdered);
+    inventoryTransportObserver->enqueue(MessageClass::ReliableOperation, MessageKind::ReliableInterestBaseline,
+        encodeReliableInterestBaseline(selfBaseline(SessionGeneration::initial(), true)),
+        TransportChannel::ReliableOrdered);
+    inventoryTransportObserver->enqueue(MessageClass::LatestWinsSnapshot, MessageKind::LatestWinsSnapshot,
+        encodeLatestWinsSnapshot(selfSnapshot(SessionGeneration::initial(), true)), TransportChannel::LatestWins);
+    inventoryTransportObserver->enqueue(MessageClass::ReliableOperation, MessageKind::ReliablePlayerInventoryBaseline,
+        encodeReliablePlayerInventoryBaseline(playerInventoryBaseline(SessionGeneration::initial(), 1, 1, 0, 2)),
+        TransportChannel::ReliableOrdered);
+    inventoryTransportObserver->enqueue(MessageClass::ReliableOperation,
+        MessageKind::ReliableContainerInventoryBaseline,
+        encodeReliableContainerInventoryBaseline(containerInventoryBaseline(SessionGeneration::initial(), 1, 1)),
+        TransportChannel::ReliableOrdered);
+    inventoryCoordinator->frame(0.01f);
+    require(inventoryPresentation.inventories == 0);
+    inventoryTransportObserver->enqueue(MessageClass::ReliableOperation, MessageKind::ReliablePlayerInventoryBaseline,
+        encodeReliablePlayerInventoryBaseline(playerInventoryBaseline(SessionGeneration::initial(), 1, 1, 1, 2)),
+        TransportChannel::ReliableOrdered);
+    inventoryTransportObserver->enqueue(MessageClass::ReliableOperation, MessageKind::ReliableGroundItemBaseline,
+        encodeReliableGroundItemBaseline(groundItemBaseline(SessionGeneration::initial(), 1, 1)),
+        TransportChannel::ReliableOrdered);
+    inventoryTransportObserver->enqueue(MessageClass::LatestWinsSnapshot, MessageKind::LatestWinsEquipmentSnapshot,
+        encodeLatestWinsEquipmentSnapshot(equipmentSnapshot(SessionGeneration::initial(), 1, 1)),
+        TransportChannel::LatestWins);
+    inventoryCoordinator->frame(0.01f);
+    require(inventoryPresentation.inventories == 1 && inventoryPresentation.lastContainerCount == 1
+        && inventoryPresentation.lastGroundCount == 0 && inventoryPresentation.lastEquipmentCount == 1);
+
+    inventoryInput.nextInventory = InventoryTransactionCapture{ .kind = InventoryTransactionKind::TakeFromContainer,
+        .prototypeId = value<ItemPrototypeId>(20),
+        .stackId = value<ItemStackId>(12),
+        .count = 1,
+        .expectedInventoryRevision = value<InventoryRevision>(1),
+        .interactionOrigin = Position3(0, 0, 0),
+        .containerId = value<ContainerId>(30),
+        .expectedContainerRevision = value<ContainerRevision>(1) };
+    const auto sentBeforeInventory = inventoryTransportObserver->sentFrames.size();
+    inventoryCoordinator->frame(0.01f);
+    bool foundInventoryCommand = false;
+    for (std::size_t index = sentBeforeInventory; index < inventoryTransportObserver->sentFrames.size(); ++index)
+    {
+        auto decoded = decodeProtocolFrame(inventoryTransportObserver->sentFrames[index]);
+        auto* commandFrame = std::get_if<DecodedFrame>(&decoded);
+        if (!commandFrame || commandFrame->messageKind() != MessageKind::ClientInventoryTransactionCommand)
+            continue;
+        auto decodedCommand = decodeClientInventoryTransactionCommand(commandFrame->payload());
+        auto* command = std::get_if<ClientInventoryTransactionCommand>(&decodedCommand);
+        foundInventoryCommand = command && command->kind == InventoryTransactionKind::TakeFromContainer
+            && command->containerId == value<ContainerId>(30) && command->stackId == value<ItemStackId>(12)
+            && command->expectedInventoryRevision == value<InventoryRevision>(1)
+            && command->expectedContainerRevision == value<ContainerRevision>(1);
+    }
+    require(foundInventoryCommand);
+
+    inventoryControl.resyncPending = true;
+    inventoryCoordinator->frame(0.01f);
+    inventoryTransportObserver->enqueue(MessageClass::ReliableOperation, MessageKind::ReliableInterestBaseline,
+        encodeReliableInterestBaseline(selfBaseline(SessionGeneration::initial(), true)),
+        TransportChannel::ReliableOrdered);
+    inventoryTransportObserver->enqueue(MessageClass::ReliableOperation, MessageKind::ReliablePlayerInventoryBaseline,
+        encodeReliablePlayerInventoryBaseline(playerInventoryBaseline(SessionGeneration::initial(), 1, 1, 0, 2)),
+        TransportChannel::ReliableOrdered);
+    inventoryTransportObserver->enqueue(MessageClass::ReliableOperation, MessageKind::ReliableGroundItemBaseline,
+        encodeReliableGroundItemBaseline(groundItemBaseline(SessionGeneration::initial(), 1, 1)),
+        TransportChannel::ReliableOrdered);
+    inventoryTransportObserver->enqueue(MessageClass::LatestWinsSnapshot, MessageKind::LatestWinsEquipmentSnapshot,
+        encodeLatestWinsEquipmentSnapshot(equipmentSnapshot(SessionGeneration::initial(), 1, 1)),
+        TransportChannel::LatestWins);
+    inventoryCoordinator->frame(0.01f);
+    require(inventoryControl.resyncCompletions == 0 && inventoryPresentation.inventories == 1);
+    inventoryTransportObserver->enqueue(MessageClass::ReliableOperation, MessageKind::ReliablePlayerInventoryBaseline,
+        encodeReliablePlayerInventoryBaseline(playerInventoryBaseline(SessionGeneration::initial(), 1, 1, 1, 2)),
+        TransportChannel::ReliableOrdered);
+    inventoryCoordinator->frame(0.01f);
+    require(inventoryControl.resyncCompletions == 1 && inventoryPresentation.inventories == 2);
 
     require(
         std::get<TES3MP::OpenMWAdapter::ClientCompositionFailure>(TES3MP::OpenMWAdapter::makeClientCoordinator("", 0, 0,

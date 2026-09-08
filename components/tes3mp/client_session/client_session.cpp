@@ -1,11 +1,21 @@
 #include <tes3mp/client_session.hpp>
 
+#include <algorithm>
 #include <type_traits>
 #include <utility>
-#include <algorithm>
 
 namespace
 {
+    constexpr std::uint32_t PlayerInventoryChunkLimit
+        = (TES3MP::MaximumPlayerInventoryStacks + TES3MP::MaximumInventoryBaselineChunkStacks - 1)
+        / TES3MP::MaximumInventoryBaselineChunkStacks;
+    constexpr std::uint32_t ContainerInventoryChunkLimit
+        = (TES3MP::MaximumContainerStacks + TES3MP::MaximumInventoryBaselineChunkStacks - 1)
+        / TES3MP::MaximumInventoryBaselineChunkStacks;
+    constexpr std::uint32_t GroundItemChunkLimit
+        = (TES3MP::MaximumWorldItemStacks + TES3MP::MaximumGroundItemBaselineChunkItems - 1)
+        / TES3MP::MaximumGroundItemBaselineChunkItems;
+
     TES3MP::ClientSessionEventKind eventKind(const TES3MP::ClientSessionEvent& event) noexcept
     {
         return std::visit(
@@ -222,6 +232,9 @@ namespace TES3MP
         if ((mTargetPlayerId && *mTargetPlayerId != snapshot.header().targetPlayerId())
             || (mTargetEntityId && *mTargetEntityId != snapshot.header().targetEntityId()))
             return LatestWinsSnapshotReceiveResult::TargetBindingMismatch;
+        if (mConfirmedPlayerInventoryBaseline
+            && mConfirmedPlayerInventoryBaseline->player != snapshot.header().targetPlayerId())
+            return LatestWinsSnapshotReceiveResult::TargetBindingMismatch;
 
         if (mConfirmedSnapshot)
         {
@@ -269,9 +282,8 @@ namespace TES3MP
             if (batch.canonicalRevision() < mConfirmedObservationBatch->canonicalRevision())
                 return ReliableObservationReceiveResult::StaleTick;
             if (batch.canonicalRevision() == mConfirmedObservationBatch->canonicalRevision())
-                return batch == *mConfirmedObservationBatch
-                    ? ReliableObservationReceiveResult::IdenticalDuplicate
-                    : ReliableObservationReceiveResult::ContradictorySameTick;
+                return batch == *mConfirmedObservationBatch ? ReliableObservationReceiveResult::IdenticalDuplicate
+                                                            : ReliableObservationReceiveResult::ContradictorySameTick;
         }
 
         auto next = mObservedPlayers;
@@ -333,11 +345,13 @@ namespace TES3MP
     {
         if (mState != ClientSessionState::Established)
             return ActorReplicationReceiveResult::NotEstablished;
-        if (!mNegotiatedHello || !std::ranges::binary_search(
-                mNegotiatedHello->negotiatedCapabilities(), actorReplicationCapability()))
+        if (!mNegotiatedHello
+            || !std::ranges::binary_search(mNegotiatedHello->negotiatedCapabilities(), actorReplicationCapability()))
             return ActorReplicationReceiveResult::CapabilityNotNegotiated;
-        if (!mSessionId) return ActorReplicationReceiveResult::SessionNotBound;
-        if (snapshot.targetSessionId() != *mSessionId) return ActorReplicationReceiveResult::SessionMismatch;
+        if (!mSessionId)
+            return ActorReplicationReceiveResult::SessionNotBound;
+        if (snapshot.targetSessionId() != *mSessionId)
+            return ActorReplicationReceiveResult::SessionMismatch;
         if (snapshot.targetSessionGeneration() != mGeneration)
             return ActorReplicationReceiveResult::GenerationMismatch;
         if (mConfirmedActorSnapshot)
@@ -346,7 +360,7 @@ namespace TES3MP
                 return ActorReplicationReceiveResult::StaleTick;
             if (snapshot.serverTick() == mConfirmedActorSnapshot->serverTick())
                 return snapshot == *mConfirmedActorSnapshot ? ActorReplicationReceiveResult::IdenticalDuplicate
-                    : ActorReplicationReceiveResult::ContradictorySameTick;
+                                                            : ActorReplicationReceiveResult::ContradictorySameTick;
         }
         mConfirmedActorSnapshot = std::move(snapshot);
         return ActorReplicationReceiveResult::Applied;
@@ -357,11 +371,13 @@ namespace TES3MP
     {
         if (mState != ClientSessionState::Established)
             return ActorReplicationReceiveResult::NotEstablished;
-        if (!mNegotiatedHello || !std::ranges::binary_search(
-                mNegotiatedHello->negotiatedCapabilities(), actorReplicationCapability()))
+        if (!mNegotiatedHello
+            || !std::ranges::binary_search(mNegotiatedHello->negotiatedCapabilities(), actorReplicationCapability()))
             return ActorReplicationReceiveResult::CapabilityNotNegotiated;
-        if (!mSessionId) return ActorReplicationReceiveResult::SessionNotBound;
-        if (baseline.targetSessionId() != *mSessionId) return ActorReplicationReceiveResult::SessionMismatch;
+        if (!mSessionId)
+            return ActorReplicationReceiveResult::SessionNotBound;
+        if (baseline.targetSessionId() != *mSessionId)
+            return ActorReplicationReceiveResult::SessionMismatch;
         if (baseline.targetSessionGeneration() != mGeneration)
             return ActorReplicationReceiveResult::GenerationMismatch;
         if (mConfirmedActorInterestBaseline)
@@ -384,20 +400,23 @@ namespace TES3MP
     bool ClientSessionStateMachine::actorInterestBaselineComplete() const noexcept
     {
         return mConfirmedActorInterestBaseline && mConfirmedActorSnapshot
-            && mConfirmedActorSnapshot->canonicalRevision()
-                >= mConfirmedActorInterestBaseline->canonicalRevision();
+            && mConfirmedActorSnapshot->canonicalRevision() >= mConfirmedActorInterestBaseline->canonicalRevision();
     }
 
-    InteractiveObjectReplicationReceiveResult ClientSessionStateMachine::receiveReliableInteractiveObjectInterestBaseline(
+    InteractiveObjectReplicationReceiveResult
+    ClientSessionStateMachine::receiveReliableInteractiveObjectInterestBaseline(
         ReliableInteractiveObjectInterestBaseline baseline)
     {
         if (mState != ClientSessionState::Established)
             return InteractiveObjectReplicationReceiveResult::NotEstablished;
-        if (!mNegotiatedHello || !std::ranges::binary_search(
+        if (!mNegotiatedHello
+            || !std::ranges::binary_search(
                 mNegotiatedHello->negotiatedCapabilities(), interactiveObjectReplicationCapability()))
             return InteractiveObjectReplicationReceiveResult::CapabilityNotNegotiated;
-        if (!mSessionId) return InteractiveObjectReplicationReceiveResult::SessionNotBound;
-        if (baseline.targetSessionId() != *mSessionId) return InteractiveObjectReplicationReceiveResult::SessionMismatch;
+        if (!mSessionId)
+            return InteractiveObjectReplicationReceiveResult::SessionNotBound;
+        if (baseline.targetSessionId() != *mSessionId)
+            return InteractiveObjectReplicationReceiveResult::SessionMismatch;
         if (baseline.targetSessionGeneration() != mGeneration)
             return InteractiveObjectReplicationReceiveResult::GenerationMismatch;
         if (mConfirmedInteractiveObjectInterestBaseline)
@@ -406,16 +425,16 @@ namespace TES3MP
                 return InteractiveObjectReplicationReceiveResult::StaleTick;
             if (baseline.canonicalRevision() == mConfirmedInteractiveObjectInterestBaseline->canonicalRevision())
                 return baseline.members().size() == mConfirmedInteractiveObjectInterestBaseline->members().size()
-                        && std::ranges::equal(baseline.members(), mConfirmedInteractiveObjectInterestBaseline->members())
+                        && std::ranges::equal(
+                            baseline.members(), mConfirmedInteractiveObjectInterestBaseline->members())
                     ? InteractiveObjectReplicationReceiveResult::IdenticalDuplicate
                     : InteractiveObjectReplicationReceiveResult::ContradictorySameTick;
             if (baseline.serverTick() < mConfirmedInteractiveObjectInterestBaseline->serverTick())
                 return InteractiveObjectReplicationReceiveResult::StaleTick;
             for (const auto& member : baseline.members())
             {
-                const auto previous = std::ranges::lower_bound(
-                    mConfirmedInteractiveObjectInterestBaseline->members(), member.objectId, {},
-                    &InteractiveObjectInterestMember::objectId);
+                const auto previous = std::ranges::lower_bound(mConfirmedInteractiveObjectInterestBaseline->members(),
+                    member.objectId, {}, &InteractiveObjectInterestMember::objectId);
                 if (previous == mConfirmedInteractiveObjectInterestBaseline->members().end()
                     || previous->objectId != member.objectId)
                     continue;
@@ -434,6 +453,283 @@ namespace TES3MP
     {
         return mConfirmedInteractiveObjectInterestBaseline && mConfirmedSnapshot
             && mConfirmedSnapshot->header().canonicalRevision()
-                >= mConfirmedInteractiveObjectInterestBaseline->canonicalRevision();
+            >= mConfirmedInteractiveObjectInterestBaseline->canonicalRevision();
+    }
+
+    InventoryReplicationReceiveResult ClientSessionStateMachine::receiveReliablePlayerInventoryBaseline(
+        ReliablePlayerInventoryBaseline baseline)
+    {
+        if (mState != ClientSessionState::Established)
+            return InventoryReplicationReceiveResult::NotEstablished;
+        if (!mNegotiatedHello
+            || !std::ranges::binary_search(
+                mNegotiatedHello->negotiatedCapabilities(), inventoryReplicationCapability()))
+            return InventoryReplicationReceiveResult::CapabilityNotNegotiated;
+        if (!mSessionId)
+            return InventoryReplicationReceiveResult::SessionNotBound;
+        if (baseline.header.targetSessionId != *mSessionId)
+            return InventoryReplicationReceiveResult::SessionMismatch;
+        if (baseline.header.targetSessionGeneration != mGeneration)
+            return InventoryReplicationReceiveResult::GenerationMismatch;
+        if (baseline.header.chunkCount == 0 || baseline.header.chunkCount > PlayerInventoryChunkLimit
+            || baseline.header.chunkIndex >= baseline.header.chunkCount)
+            return InventoryReplicationReceiveResult::InvalidChunkSequence;
+        if (mTargetPlayerId && baseline.player != *mTargetPlayerId)
+            return InventoryReplicationReceiveResult::SessionMismatch;
+        if (mConfirmedPlayerInventoryBaseline
+            && baseline.header.canonicalRevision < mConfirmedPlayerInventoryBaseline->header.canonicalRevision)
+            return InventoryReplicationReceiveResult::StaleTick;
+
+        const auto sameSeries = [&](const PlayerInventoryChunks& chunks) {
+            return chunks.header.targetSessionId == baseline.header.targetSessionId
+                && chunks.header.targetSessionGeneration == baseline.header.targetSessionGeneration
+                && chunks.header.serverTick == baseline.header.serverTick
+                && chunks.header.canonicalRevision == baseline.header.canonicalRevision
+                && chunks.header.chunkCount == baseline.header.chunkCount && chunks.player == baseline.player
+                && chunks.revision == baseline.revision;
+        };
+        if (!mPendingPlayerInventory || !sameSeries(*mPendingPlayerInventory))
+        {
+            if (mPendingPlayerInventory
+                && baseline.header.canonicalRevision <= mPendingPlayerInventory->header.canonicalRevision)
+                return InventoryReplicationReceiveResult::ContradictorySameTick;
+            mPendingPlayerInventory = PlayerInventoryChunks{ baseline.header, baseline.player, baseline.revision,
+                std::vector<std::optional<ReliablePlayerInventoryBaseline>>(baseline.header.chunkCount) };
+        }
+        auto& slot = mPendingPlayerInventory->chunks[baseline.header.chunkIndex];
+        if (slot)
+            return *slot == baseline ? InventoryReplicationReceiveResult::IdenticalDuplicate
+                                     : InventoryReplicationReceiveResult::ContradictorySameTick;
+        slot = std::move(baseline);
+        if (!std::ranges::all_of(mPendingPlayerInventory->chunks, [](const auto& value) { return value.has_value(); }))
+            return InventoryReplicationReceiveResult::ChunkAccepted;
+
+        std::vector<CanonicalItemStack> stacks;
+        std::vector<EquipmentBinding> equipment;
+        for (const auto& chunk : mPendingPlayerInventory->chunks)
+        {
+            stacks.insert(stacks.end(), chunk->stacks.begin(), chunk->stacks.end());
+            equipment.insert(equipment.end(), chunk->equipment.begin(), chunk->equipment.end());
+        }
+        auto header = mPendingPlayerInventory->header;
+        header.chunkIndex = 0;
+        header.chunkCount = 1;
+        auto created = ReliablePlayerInventoryBaseline::create(
+            header, mPendingPlayerInventory->player, mPendingPlayerInventory->revision, stacks, equipment);
+        auto* complete = std::get_if<ReliablePlayerInventoryBaseline>(&created);
+        if (!complete)
+            return InventoryReplicationReceiveResult::InvalidChunkSequence;
+        if (mConfirmedPlayerInventoryBaseline
+            && complete->header.canonicalRevision == mConfirmedPlayerInventoryBaseline->header.canonicalRevision)
+        {
+            const bool identical = *complete == *mConfirmedPlayerInventoryBaseline;
+            mPendingPlayerInventory.reset();
+            return identical ? InventoryReplicationReceiveResult::IdenticalDuplicate
+                             : InventoryReplicationReceiveResult::ContradictorySameTick;
+        }
+        mConfirmedPlayerInventoryBaseline = std::move(*complete);
+        mPendingPlayerInventory.reset();
+        return InventoryReplicationReceiveResult::Applied;
+    }
+
+    InventoryReplicationReceiveResult ClientSessionStateMachine::receiveReliableContainerInventoryBaseline(
+        ReliableContainerInventoryBaseline baseline)
+    {
+        if (mState != ClientSessionState::Established)
+            return InventoryReplicationReceiveResult::NotEstablished;
+        if (!mNegotiatedHello
+            || !std::ranges::binary_search(
+                mNegotiatedHello->negotiatedCapabilities(), inventoryReplicationCapability()))
+            return InventoryReplicationReceiveResult::CapabilityNotNegotiated;
+        if (!mSessionId)
+            return InventoryReplicationReceiveResult::SessionNotBound;
+        if (baseline.header.targetSessionId != *mSessionId)
+            return InventoryReplicationReceiveResult::SessionMismatch;
+        if (baseline.header.targetSessionGeneration != mGeneration)
+            return InventoryReplicationReceiveResult::GenerationMismatch;
+        if (baseline.header.chunkCount == 0 || baseline.header.chunkCount > ContainerInventoryChunkLimit
+            || baseline.header.chunkIndex >= baseline.header.chunkCount)
+            return InventoryReplicationReceiveResult::InvalidChunkSequence;
+        const auto confirmed = std::ranges::lower_bound(mConfirmedContainerInventoryBaselines, baseline.container, {},
+            &ReliableContainerInventoryBaseline::container);
+        if (confirmed != mConfirmedContainerInventoryBaselines.end() && confirmed->container == baseline.container
+            && baseline.header.canonicalRevision < confirmed->header.canonicalRevision)
+            return InventoryReplicationReceiveResult::StaleTick;
+
+        auto pending = mPendingContainerInventories.find(baseline.container);
+        const auto sameSeries = [&](const ContainerInventoryChunks& chunks) {
+            return chunks.header.targetSessionId == baseline.header.targetSessionId
+                && chunks.header.targetSessionGeneration == baseline.header.targetSessionGeneration
+                && chunks.header.serverTick == baseline.header.serverTick
+                && chunks.header.canonicalRevision == baseline.header.canonicalRevision
+                && chunks.header.chunkCount == baseline.header.chunkCount && chunks.container == baseline.container
+                && chunks.cell == baseline.cell && chunks.position == baseline.position
+                && chunks.revision == baseline.revision && chunks.capacityWeight == baseline.capacityWeight;
+        };
+        if (pending == mPendingContainerInventories.end() || !sameSeries(pending->second))
+        {
+            if (pending != mPendingContainerInventories.end()
+                && baseline.header.canonicalRevision <= pending->second.header.canonicalRevision)
+                return InventoryReplicationReceiveResult::ContradictorySameTick;
+            if (pending == mPendingContainerInventories.end()
+                && mPendingContainerInventories.size() >= MaximumInventoryContainers)
+                return InventoryReplicationReceiveResult::InvalidChunkSequence;
+            auto [inserted, unused] = mPendingContainerInventories.insert_or_assign(baseline.container,
+                ContainerInventoryChunks{ baseline.header, baseline.container, baseline.cell, baseline.position,
+                    baseline.revision, baseline.capacityWeight,
+                    std::vector<std::optional<ReliableContainerInventoryBaseline>>(baseline.header.chunkCount) });
+            (void)unused;
+            pending = inserted;
+        }
+        auto& slot = pending->second.chunks[baseline.header.chunkIndex];
+        if (slot)
+            return *slot == baseline ? InventoryReplicationReceiveResult::IdenticalDuplicate
+                                     : InventoryReplicationReceiveResult::ContradictorySameTick;
+        slot = std::move(baseline);
+        if (!std::ranges::all_of(pending->second.chunks, [](const auto& value) { return value.has_value(); }))
+            return InventoryReplicationReceiveResult::ChunkAccepted;
+        std::vector<CanonicalItemStack> stacks;
+        for (const auto& chunk : pending->second.chunks)
+            stacks.insert(stacks.end(), chunk->stacks.begin(), chunk->stacks.end());
+        auto header = pending->second.header;
+        header.chunkIndex = 0;
+        header.chunkCount = 1;
+        auto created
+            = ReliableContainerInventoryBaseline::create(header, pending->second.container, pending->second.cell,
+                pending->second.position, pending->second.revision, pending->second.capacityWeight, stacks);
+        auto* complete = std::get_if<ReliableContainerInventoryBaseline>(&created);
+        if (!complete)
+            return InventoryReplicationReceiveResult::InvalidChunkSequence;
+        const auto current = std::ranges::lower_bound(mConfirmedContainerInventoryBaselines, complete->container, {},
+            &ReliableContainerInventoryBaseline::container);
+        if (current != mConfirmedContainerInventoryBaselines.end() && current->container == complete->container)
+        {
+            if (current->header.canonicalRevision == complete->header.canonicalRevision)
+            {
+                const bool identical = *current == *complete;
+                mPendingContainerInventories.erase(pending);
+                return identical ? InventoryReplicationReceiveResult::IdenticalDuplicate
+                                 : InventoryReplicationReceiveResult::ContradictorySameTick;
+            }
+            *current = std::move(*complete);
+        }
+        else
+            mConfirmedContainerInventoryBaselines.insert(current, std::move(*complete));
+        mPendingContainerInventories.erase(pending);
+        return InventoryReplicationReceiveResult::Applied;
+    }
+
+    InventoryReplicationReceiveResult ClientSessionStateMachine::receiveReliableGroundItemBaseline(
+        ReliableGroundItemBaseline baseline)
+    {
+        if (mState != ClientSessionState::Established)
+            return InventoryReplicationReceiveResult::NotEstablished;
+        if (!mNegotiatedHello
+            || !std::ranges::binary_search(
+                mNegotiatedHello->negotiatedCapabilities(), inventoryReplicationCapability()))
+            return InventoryReplicationReceiveResult::CapabilityNotNegotiated;
+        if (!mSessionId)
+            return InventoryReplicationReceiveResult::SessionNotBound;
+        if (baseline.header.targetSessionId != *mSessionId)
+            return InventoryReplicationReceiveResult::SessionMismatch;
+        if (baseline.header.targetSessionGeneration != mGeneration)
+            return InventoryReplicationReceiveResult::GenerationMismatch;
+        if (baseline.header.chunkCount == 0 || baseline.header.chunkCount > GroundItemChunkLimit
+            || baseline.header.chunkIndex >= baseline.header.chunkCount)
+            return InventoryReplicationReceiveResult::InvalidChunkSequence;
+        if (mConfirmedGroundItemBaseline
+            && baseline.header.canonicalRevision < mConfirmedGroundItemBaseline->header.canonicalRevision)
+            return InventoryReplicationReceiveResult::StaleTick;
+        const auto sameSeries = [&](const GroundItemChunks& chunks) {
+            return chunks.header.targetSessionId == baseline.header.targetSessionId
+                && chunks.header.targetSessionGeneration == baseline.header.targetSessionGeneration
+                && chunks.header.serverTick == baseline.header.serverTick
+                && chunks.header.canonicalRevision == baseline.header.canonicalRevision
+                && chunks.header.chunkCount == baseline.header.chunkCount && chunks.cell == baseline.cell;
+        };
+        if (!mPendingGroundItems || !sameSeries(*mPendingGroundItems))
+        {
+            if (mPendingGroundItems
+                && baseline.header.canonicalRevision <= mPendingGroundItems->header.canonicalRevision)
+                return InventoryReplicationReceiveResult::ContradictorySameTick;
+            mPendingGroundItems = GroundItemChunks{ baseline.header, baseline.cell,
+                std::vector<std::optional<ReliableGroundItemBaseline>>(baseline.header.chunkCount) };
+        }
+        auto& slot = mPendingGroundItems->chunks[baseline.header.chunkIndex];
+        if (slot)
+            return *slot == baseline ? InventoryReplicationReceiveResult::IdenticalDuplicate
+                                     : InventoryReplicationReceiveResult::ContradictorySameTick;
+        slot = std::move(baseline);
+        if (!std::ranges::all_of(mPendingGroundItems->chunks, [](const auto& value) { return value.has_value(); }))
+            return InventoryReplicationReceiveResult::ChunkAccepted;
+        std::vector<GroundItemInterestMember> items;
+        for (const auto& chunk : mPendingGroundItems->chunks)
+            items.insert(items.end(), chunk->items.begin(), chunk->items.end());
+        auto header = mPendingGroundItems->header;
+        header.chunkIndex = 0;
+        header.chunkCount = 1;
+        auto created = ReliableGroundItemBaseline::create(header, mPendingGroundItems->cell, items);
+        auto* complete = std::get_if<ReliableGroundItemBaseline>(&created);
+        if (!complete)
+            return InventoryReplicationReceiveResult::InvalidChunkSequence;
+        if (mConfirmedGroundItemBaseline
+            && complete->header.canonicalRevision == mConfirmedGroundItemBaseline->header.canonicalRevision)
+        {
+            const bool identical = *complete == *mConfirmedGroundItemBaseline;
+            mPendingGroundItems.reset();
+            return identical ? InventoryReplicationReceiveResult::IdenticalDuplicate
+                             : InventoryReplicationReceiveResult::ContradictorySameTick;
+        }
+        const CellId completedCell = complete->cell;
+        const CanonicalRevision completedRevision = complete->header.canonicalRevision;
+        std::erase_if(mConfirmedContainerInventoryBaselines, [&](const auto& container) {
+            return container.cell != completedCell || container.header.canonicalRevision != completedRevision;
+        });
+        std::erase_if(mPendingContainerInventories, [&](const auto& container) {
+            return container.second.cell != completedCell
+                || container.second.header.canonicalRevision != completedRevision;
+        });
+        mConfirmedGroundItemBaseline = std::move(*complete);
+        mPendingGroundItems.reset();
+        return InventoryReplicationReceiveResult::Applied;
+    }
+
+    InventoryReplicationReceiveResult ClientSessionStateMachine::receiveLatestWinsEquipmentSnapshot(
+        LatestWinsEquipmentSnapshot snapshot)
+    {
+        if (mState != ClientSessionState::Established)
+            return InventoryReplicationReceiveResult::NotEstablished;
+        if (!mNegotiatedHello
+            || !std::ranges::binary_search(
+                mNegotiatedHello->negotiatedCapabilities(), inventoryReplicationCapability()))
+            return InventoryReplicationReceiveResult::CapabilityNotNegotiated;
+        if (!mSessionId)
+            return InventoryReplicationReceiveResult::SessionNotBound;
+        if (snapshot.targetSessionId != *mSessionId)
+            return InventoryReplicationReceiveResult::SessionMismatch;
+        if (snapshot.targetSessionGeneration != mGeneration)
+            return InventoryReplicationReceiveResult::GenerationMismatch;
+        if (mConfirmedEquipmentSnapshot)
+        {
+            if (snapshot.serverTick < mConfirmedEquipmentSnapshot->serverTick)
+                return InventoryReplicationReceiveResult::StaleTick;
+            if (snapshot.serverTick == mConfirmedEquipmentSnapshot->serverTick)
+                return snapshot == *mConfirmedEquipmentSnapshot
+                    ? InventoryReplicationReceiveResult::IdenticalDuplicate
+                    : InventoryReplicationReceiveResult::ContradictorySameTick;
+        }
+        mConfirmedEquipmentSnapshot = std::move(snapshot);
+        return InventoryReplicationReceiveResult::Applied;
+    }
+
+    bool ClientSessionStateMachine::inventoryReplicationComplete() const noexcept
+    {
+        if (!mConfirmedSnapshot || !mConfirmedPlayerInventoryBaseline || !mConfirmedGroundItemBaseline
+            || !mConfirmedEquipmentSnapshot)
+            return false;
+        const auto revision = mConfirmedPlayerInventoryBaseline->header.canonicalRevision;
+        return mConfirmedGroundItemBaseline->header.canonicalRevision == revision
+            && mConfirmedEquipmentSnapshot->canonicalRevision >= revision
+            && mConfirmedSnapshot->header().canonicalRevision() >= revision;
     }
 }

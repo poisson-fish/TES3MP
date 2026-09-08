@@ -33,8 +33,8 @@
 extern "C" __declspec(dllexport) DWORD AmdPowerXpressRequestHighPerformance = 0x00000001;
 #endif
 
-#include <filesystem>
 #include <charconv>
+#include <filesystem>
 #include <optional>
 #include <ranges>
 #include <span>
@@ -270,19 +270,18 @@ bool parseOptions(int argc, char** argv, OMW::Engine& engine, Files::Configurati
 
     if (variables["tes3mp-enable"].as<bool>())
     {
-        const auto manifestId = TES3MP::ContentManifestId::fromHex(
-            variables["tes3mp-content-manifest-id"].as<std::string>());
-        const auto cellSpaces = TES3MP::parseCellSpaceDeclarations(
-            variables["tes3mp-content-cell-spaces"].as<std::string>());
-        const auto allowedCells = TES3MP::parseContentCells(
-            variables["tes3mp-content-allowed-cells"].as<std::string>());
-        const auto appearanceId = TES3MP::AppearanceId::fromValue(
-            variables["tes3mp-content-appearance-id"].as<unsigned long long>());
-        const auto movementProfile = TES3MP::parseMovementProfile(
-            variables["tes3mp-content-movement-profile"].as<std::string>());
+        const auto manifestId
+            = TES3MP::ContentManifestId::fromHex(variables["tes3mp-content-manifest-id"].as<std::string>());
+        const auto cellSpaces
+            = TES3MP::parseCellSpaceDeclarations(variables["tes3mp-content-cell-spaces"].as<std::string>());
+        const auto allowedCells
+            = TES3MP::parseContentCells(variables["tes3mp-content-allowed-cells"].as<std::string>());
+        const auto appearanceId
+            = TES3MP::AppearanceId::fromValue(variables["tes3mp-content-appearance-id"].as<unsigned long long>());
+        const auto movementProfile
+            = TES3MP::parseMovementProfile(variables["tes3mp-content-movement-profile"].as<std::string>());
         const auto contentManifest = manifestId && cellSpaces && allowedCells && appearanceId && movementProfile
-            ? TES3MP::ContentManifest::create(
-                *manifestId, *cellSpaces, *allowedCells, *appearanceId, *movementProfile)
+            ? TES3MP::ContentManifest::create(*manifestId, *cellSpaces, *allowedCells, *appearanceId, *movementProfile)
             : std::nullopt;
         if (!contentManifest)
         {
@@ -296,11 +295,12 @@ bool parseOptions(int argc, char** argv, OMW::Engine& engine, Files::Configurati
             const auto equal = entry.find('=');
             std::uint64_t rawId = 0;
             const auto parsed = equal == std::string::npos ? std::from_chars_result{}
-                : std::from_chars(entry.data(), entry.data() + equal, rawId);
-            const auto id = equal != std::string::npos && parsed.ec == std::errc{}
-                && parsed.ptr == entry.data() + equal ? TES3MP::CellSpaceId::fromValue(rawId) : std::nullopt;
-            const auto declaration = id ? std::ranges::lower_bound(
-                contentManifest->cellSpaces(), *id, {}, &TES3MP::CellSpaceDeclaration::id)
+                                                           : std::from_chars(entry.data(), entry.data() + equal, rawId);
+            const auto id = equal != std::string::npos && parsed.ec == std::errc{} && parsed.ptr == entry.data() + equal
+                ? TES3MP::CellSpaceId::fromValue(rawId)
+                : std::nullopt;
+            const auto declaration = id
+                ? std::ranges::lower_bound(contentManifest->cellSpaces(), *id, {}, &TES3MP::CellSpaceDeclaration::id)
                 : contentManifest->cellSpaces().end();
             if (!id || declaration == contentManifest->cellSpaces().end() || declaration->id != *id)
             {
@@ -315,9 +315,10 @@ bool parseOptions(int argc, char** argv, OMW::Engine& engine, Files::Configurati
             const auto equal = entry.find('=');
             std::uint64_t rawId = 0;
             const auto parsed = equal == std::string::npos ? std::from_chars_result{}
-                : std::from_chars(entry.data(), entry.data() + equal, rawId);
-            const auto id = equal != std::string::npos && parsed.ec == std::errc{}
-                && parsed.ptr == entry.data() + equal ? TES3MP::ActorPrototypeId::fromValue(rawId) : std::nullopt;
+                                                           : std::from_chars(entry.data(), entry.data() + equal, rawId);
+            const auto id = equal != std::string::npos && parsed.ec == std::errc{} && parsed.ptr == entry.data() + equal
+                ? TES3MP::ActorPrototypeId::fromValue(rawId)
+                : std::nullopt;
             if (!id || equal + 1 == entry.size())
             {
                 Log(Debug::Error) << "TES3MP startup failed: invalid actor prototype mapping";
@@ -331,9 +332,10 @@ bool parseOptions(int argc, char** argv, OMW::Engine& engine, Files::Configurati
             const auto equal = entry.find('=');
             std::uint64_t rawId = 0;
             const auto parsed = equal == std::string::npos ? std::from_chars_result{}
-                : std::from_chars(entry.data(), entry.data() + equal, rawId);
-            const auto id = equal != std::string::npos && parsed.ec == std::errc{}
-                && parsed.ptr == entry.data() + equal ? TES3MP::InteractiveObjectId::fromValue(rawId) : std::nullopt;
+                                                           : std::from_chars(entry.data(), entry.data() + equal, rawId);
+            const auto id = equal != std::string::npos && parsed.ec == std::errc{} && parsed.ptr == entry.data() + equal
+                ? TES3MP::InteractiveObjectId::fromValue(rawId)
+                : std::nullopt;
             if (!id || equal + 1 == entry.size())
             {
                 Log(Debug::Error) << "TES3MP startup failed: invalid interactive object mapping";
@@ -355,8 +357,8 @@ bool parseOptions(int argc, char** argv, OMW::Engine& engine, Files::Configurati
             }
             if (colon != std::string_view::npos)
             {
-                auto parsedFile = std::from_chars(
-                    refPart.data() + colon + 1, refPart.data() + refPart.size(), refNumFile);
+                auto parsedFile
+                    = std::from_chars(refPart.data() + colon + 1, refPart.data() + refPart.size(), refNumFile);
                 if (parsedFile.ec != std::errc{} || parsedFile.ptr != refPart.data() + refPart.size())
                 {
                     Log(Debug::Error) << "TES3MP startup failed: invalid interactive object content file";
@@ -365,9 +367,65 @@ bool parseOptions(int argc, char** argv, OMW::Engine& engine, Files::Configurati
             }
             interactiveObjectMappings.push_back({ *id, refNumIndex, refNumFile });
         }
+        std::vector<TES3MP::OpenMWAdapter::DesktopItemPrototypeMapping> itemMappings;
+        for (const auto& entry : variables["tes3mp-content-item-prototype-map"].as<StringsVector>())
+        {
+            const auto equal = entry.find('=');
+            std::uint64_t rawId = 0;
+            const auto parsed = equal == std::string::npos ? std::from_chars_result{}
+                                                           : std::from_chars(entry.data(), entry.data() + equal, rawId);
+            const auto id = equal != std::string::npos && parsed.ec == std::errc{} && parsed.ptr == entry.data() + equal
+                ? TES3MP::ItemPrototypeId::fromValue(rawId)
+                : std::nullopt;
+            if (!id || equal + 1 == entry.size())
+            {
+                Log(Debug::Error) << "TES3MP startup failed: invalid item prototype mapping";
+                return false;
+            }
+            itemMappings.push_back({ *id, entry.substr(equal + 1) });
+        }
+        std::vector<TES3MP::OpenMWAdapter::DesktopContainerMapping> containerMappings;
+        for (const auto& entry : variables["tes3mp-content-container-map"].as<StringsVector>())
+        {
+            const auto equal = entry.find('=');
+            std::uint64_t rawId = 0;
+            const auto parsed = equal == std::string::npos ? std::from_chars_result{}
+                                                           : std::from_chars(entry.data(), entry.data() + equal, rawId);
+            const auto id = equal != std::string::npos && parsed.ec == std::errc{} && parsed.ptr == entry.data() + equal
+                ? TES3MP::ContainerId::fromValue(rawId)
+                : std::nullopt;
+            if (!id || equal + 1 == entry.size())
+            {
+                Log(Debug::Error) << "TES3MP startup failed: invalid container mapping";
+                return false;
+            }
+            std::string_view refPart(entry.data() + equal + 1, entry.size() - equal - 1);
+            const auto colon = refPart.find(':');
+            std::uint32_t refNumIndex = 0;
+            std::int32_t refNumFile = -1;
+            const auto refEnd
+                = colon == std::string_view::npos ? refPart.data() + refPart.size() : refPart.data() + colon;
+            auto parsedRef = std::from_chars(refPart.data(), refEnd, refNumIndex);
+            if (parsedRef.ec != std::errc{} || parsedRef.ptr != refEnd)
+            {
+                Log(Debug::Error) << "TES3MP startup failed: invalid container refNum";
+                return false;
+            }
+            if (colon != std::string_view::npos)
+            {
+                auto parsedFile
+                    = std::from_chars(refPart.data() + colon + 1, refPart.data() + refPart.size(), refNumFile);
+                if (parsedFile.ec != std::errc{} || parsedFile.ptr != refPart.data() + refPart.size())
+                {
+                    Log(Debug::Error) << "TES3MP startup failed: invalid container content file";
+                    return false;
+                }
+            }
+            containerMappings.push_back({ *id, refNumIndex, refNumFile });
+        }
         auto contentMapping = TES3MP::OpenMWAdapter::DesktopContentMapping::create(*contentManifest, localMappings,
             contentManifest->defaultAppearance(), variables["tes3mp-content-appearance-record"].as<std::string>(),
-            actorMappings, interactiveObjectMappings);
+            actorMappings, interactiveObjectMappings, itemMappings, containerMappings);
         if (!contentMapping)
         {
             Log(Debug::Error) << "TES3MP startup failed: content record mappings are required";
@@ -404,16 +462,16 @@ bool parseOptions(int argc, char** argv, OMW::Engine& engine, Files::Configurati
             control = multiplayerAutomation.get();
         }
 #endif
-        const TES3MP::OpenMWAdapter::ClientProviders providers{
-            input, presentation, status, control, nullptr, &multiplayerMovementMetrics };
+        const TES3MP::OpenMWAdapter::ClientProviders providers{ input, presentation, status, control, nullptr,
+            &multiplayerMovementMetrics };
 #else
         const TES3MP::OpenMWAdapter::ClientProviders providers{};
 #endif
         auto coordinator = TES3MP::OpenMWAdapter::makeClientCoordinator(variables["tes3mp-host"].as<std::string>(),
             variables["tes3mp-port"].as<unsigned>(), variables["tes3mp-timeout-ms"].as<unsigned>(),
             variables["tes3mp-password-file"].as<Files::MaybeQuotedPath>().u8string(),
-            variables["tes3mp-player-credential-file"].as<Files::MaybeQuotedPath>().u8string(),
-            contentManifest->id(), providers);
+            variables["tes3mp-player-credential-file"].as<Files::MaybeQuotedPath>().u8string(), contentManifest->id(),
+            providers);
         auto* value = std::get_if<std::unique_ptr<TES3MP::OpenMWAdapter::EngineCoordinator>>(&coordinator);
         if (!value || !*value || !engine.attachMultiplayerCoordinator(std::move(*value)))
         {
@@ -500,7 +558,8 @@ int runApplication(int argc, char* argv[])
 
     if (parseOptions(argc, argv, *engine, cfgMgr
 #ifndef OPENMW_VR
-            , multiplayerInput, multiplayerPresentation, multiplayerStatus, multiplayerMotionMetrics
+            ,
+            multiplayerInput, multiplayerPresentation, multiplayerStatus, multiplayerMotionMetrics
 #ifdef TES3MP_OPENMW_DESKTOP_AUTOMATION
             ,
             multiplayerAutomation
@@ -513,16 +572,16 @@ int runApplication(int argc, char* argv[])
 
         engine->go();
 #ifndef OPENMW_VR
-        for (std::size_t index = 0;
-             index < static_cast<std::size_t>(TES3MP::OpenMWAdapter::MovementMetricKey::Count); ++index)
+        for (std::size_t index = 0; index < static_cast<std::size_t>(TES3MP::OpenMWAdapter::MovementMetricKey::Count);
+            ++index)
         {
             const auto key = static_cast<TES3MP::OpenMWAdapter::MovementMetricKey>(index);
             const auto& summary = multiplayerMotionMetrics.summary(key);
             if (summary.samples != 0)
                 Log(Debug::Info) << "TES3MP movement evidence: metric="
-                                 << TES3MP::OpenMWAdapter::movementMetricName(key)
-                                 << " samples=" << summary.samples << " min=" << summary.minimum
-                                 << " max=" << summary.maximum << " total=" << summary.total;
+                                 << TES3MP::OpenMWAdapter::movementMetricName(key) << " samples=" << summary.samples
+                                 << " min=" << summary.minimum << " max=" << summary.maximum
+                                 << " total=" << summary.total;
         }
         if (multiplayerMotionMetrics.droppedCount() != 0)
             Log(Debug::Warning) << "TES3MP movement evidence dropped observations: "

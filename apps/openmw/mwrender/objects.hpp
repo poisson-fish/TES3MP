@@ -81,7 +81,8 @@ namespace MWRender
         void insertNPC(const MWWorld::Ptr& ptr);
         void insertCreature(const MWWorld::Ptr& ptr, const std::string& model, bool weaponsShields);
 
-        ReplicatedActorResult insertReplicatedActor(const MWWorld::Ptr& ptr, const MWWorld::ESMStore& store);
+        ReplicatedActorResult insertReplicatedActor(const MWWorld::Ptr& ptr, const MWWorld::ESMStore& store,
+            std::optional<std::span<const ESM::RefId>> equipment = std::nullopt);
         ReplicatedActorResult advanceReplicatedActor(const MWWorld::Ptr& ptr, const ESM::Position& position,
             ReplicatedActorLocomotion locomotion, float animationSeconds) noexcept;
         bool removeReplicatedActor(const MWWorld::Ptr& ptr) noexcept;

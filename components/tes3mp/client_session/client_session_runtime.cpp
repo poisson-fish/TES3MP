@@ -250,16 +250,105 @@ namespace TES3MP
                         != ClientSessionBindingResult::Bound)
                         return reject();
                 }
-                const auto applied = mSession->receiveReliableInteractiveObjectInterestBaseline(std::move(*objectBaseline));
+                const auto applied
+                    = mSession->receiveReliableInteractiveObjectInterestBaseline(std::move(*objectBaseline));
                 if (applied != InteractiveObjectReplicationReceiveResult::Applied
                     && applied != InteractiveObjectReplicationReceiveResult::IdenticalDuplicate)
                     return reject();
-                result.interactiveObjectBaselineApplied
-                    = result.interactiveObjectBaselineApplied || applied == InteractiveObjectReplicationReceiveResult::Applied;
+                result.interactiveObjectBaselineApplied = result.interactiveObjectBaselineApplied
+                    || applied == InteractiveObjectReplicationReceiveResult::Applied;
                 if (mResyncPending)
                     mResyncObjectBaselineObserved = true;
                 result.interactiveObjectBaselineCompleted = result.interactiveObjectBaselineCompleted
-                    || ((!wasComplete || mResyncPending) && mSession->stateMachine().interactiveObjectInterestBaselineComplete());
+                    || ((!wasComplete || mResyncPending)
+                        && mSession->stateMachine().interactiveObjectInterestBaselineComplete());
+            }
+            else if (auto* playerInventory = std::get_if<ReliablePlayerInventoryBaseline>(&message))
+            {
+                const bool wasComplete = mSession->stateMachine().inventoryReplicationComplete();
+                if (!mSession->stateMachine().sessionId()
+                    && mSession->bindEstablishedSession(playerInventory->header.targetSessionId)
+                        != ClientSessionBindingResult::Bound)
+                    return reject();
+                const auto applied = mSession->receiveReliablePlayerInventoryBaseline(std::move(*playerInventory));
+                if (applied != InventoryReplicationReceiveResult::Applied
+                    && applied != InventoryReplicationReceiveResult::ChunkAccepted
+                    && applied != InventoryReplicationReceiveResult::IdenticalDuplicate)
+                    return reject();
+                result.playerInventoryApplied
+                    = result.playerInventoryApplied || applied == InventoryReplicationReceiveResult::Applied;
+                if (mResyncPending && applied != InventoryReplicationReceiveResult::ChunkAccepted)
+                {
+                    mResyncPlayerInventoryObserved = true;
+                    mResyncInventoryObserved = mResyncGroundItemsObserved && mResyncEquipmentObserved;
+                }
+                result.inventoryReplicationCompleted = result.inventoryReplicationCompleted
+                    || ((!wasComplete || (mResyncPending && mResyncInventoryObserved))
+                        && mSession->stateMachine().inventoryReplicationComplete());
+            }
+            else if (auto* containerInventory = std::get_if<ReliableContainerInventoryBaseline>(&message))
+            {
+                const bool wasComplete = mSession->stateMachine().inventoryReplicationComplete();
+                if (!mSession->stateMachine().sessionId()
+                    && mSession->bindEstablishedSession(containerInventory->header.targetSessionId)
+                        != ClientSessionBindingResult::Bound)
+                    return reject();
+                const auto applied
+                    = mSession->receiveReliableContainerInventoryBaseline(std::move(*containerInventory));
+                if (applied != InventoryReplicationReceiveResult::Applied
+                    && applied != InventoryReplicationReceiveResult::ChunkAccepted
+                    && applied != InventoryReplicationReceiveResult::IdenticalDuplicate)
+                    return reject();
+                result.containerInventoryApplied
+                    = result.containerInventoryApplied || applied == InventoryReplicationReceiveResult::Applied;
+                result.inventoryReplicationCompleted = result.inventoryReplicationCompleted
+                    || (!wasComplete && mSession->stateMachine().inventoryReplicationComplete());
+            }
+            else if (auto* groundItems = std::get_if<ReliableGroundItemBaseline>(&message))
+            {
+                const bool wasComplete = mSession->stateMachine().inventoryReplicationComplete();
+                if (!mSession->stateMachine().sessionId()
+                    && mSession->bindEstablishedSession(groundItems->header.targetSessionId)
+                        != ClientSessionBindingResult::Bound)
+                    return reject();
+                const auto applied = mSession->receiveReliableGroundItemBaseline(std::move(*groundItems));
+                if (applied != InventoryReplicationReceiveResult::Applied
+                    && applied != InventoryReplicationReceiveResult::ChunkAccepted
+                    && applied != InventoryReplicationReceiveResult::IdenticalDuplicate)
+                    return reject();
+                result.groundItemsApplied
+                    = result.groundItemsApplied || applied == InventoryReplicationReceiveResult::Applied;
+                if (mResyncPending && applied != InventoryReplicationReceiveResult::ChunkAccepted)
+                {
+                    mResyncGroundItemsObserved = true;
+                    mResyncInventoryObserved = mResyncPlayerInventoryObserved && mResyncEquipmentObserved;
+                }
+                result.inventoryReplicationCompleted = result.inventoryReplicationCompleted
+                    || ((!wasComplete || (mResyncPending && mResyncInventoryObserved))
+                        && mSession->stateMachine().inventoryReplicationComplete());
+            }
+            else if (auto* equipment = std::get_if<LatestWinsEquipmentSnapshot>(&message))
+            {
+                const bool wasComplete = mSession->stateMachine().inventoryReplicationComplete();
+                if (!mSession->stateMachine().sessionId()
+                    && mSession->bindEstablishedSession(equipment->targetSessionId)
+                        != ClientSessionBindingResult::Bound)
+                    return reject();
+                const auto applied = mSession->receiveLatestWinsEquipmentSnapshot(std::move(*equipment));
+                if (applied != InventoryReplicationReceiveResult::Applied
+                    && applied != InventoryReplicationReceiveResult::IdenticalDuplicate
+                    && applied != InventoryReplicationReceiveResult::StaleTick)
+                    return reject();
+                result.equipmentSnapshotApplied
+                    = result.equipmentSnapshotApplied || applied == InventoryReplicationReceiveResult::Applied;
+                if (mResyncPending && applied != InventoryReplicationReceiveResult::StaleTick)
+                {
+                    mResyncEquipmentObserved = true;
+                    mResyncInventoryObserved = mResyncPlayerInventoryObserved && mResyncGroundItemsObserved;
+                }
+                result.inventoryReplicationCompleted = result.inventoryReplicationCompleted
+                    || ((!wasComplete || (mResyncPending && mResyncInventoryObserved))
+                        && mSession->stateMachine().inventoryReplicationComplete());
             }
             else if (auto* pose = std::get_if<ServerVrPoseSnapshot>(&message))
             {
@@ -276,12 +365,19 @@ namespace TES3MP
             && (!negotiated(mSession->stateMachine(), actorReplicationCapability())
                 || (mResyncActorBaselineObserved && mSession->stateMachine().actorInterestBaselineComplete()))
             && (!negotiated(mSession->stateMachine(), interactiveObjectReplicationCapability())
-                || (mResyncObjectBaselineObserved && mSession->stateMachine().interactiveObjectInterestBaselineComplete())))
+                || (mResyncObjectBaselineObserved
+                    && mSession->stateMachine().interactiveObjectInterestBaselineComplete()))
+            && (!negotiated(mSession->stateMachine(), inventoryReplicationCapability())
+                || (mResyncInventoryObserved && mSession->stateMachine().inventoryReplicationComplete())))
         {
             mResyncPending = false;
             mResyncPlayerBaselineObserved = false;
             mResyncActorBaselineObserved = false;
             mResyncObjectBaselineObserved = false;
+            mResyncInventoryObserved = false;
+            mResyncPlayerInventoryObserved = false;
+            mResyncGroundItemsObserved = false;
+            mResyncEquipmentObserved = false;
         }
         return result;
     }
@@ -337,9 +433,9 @@ namespace TES3MP
         return queued;
     }
 
-    ClientRuntimeQueueResult ClientSessionRuntime::queueInteractObject(InteractiveObjectId objectId,
-        CellId targetCell, Position3 interactionOrigin, ObjectRevision expectedRevision,
-        ObjectInteractionKind kind, std::optional<KeyPrototypeId> requestedKey)
+    ClientRuntimeQueueResult ClientSessionRuntime::queueInteractObject(InteractiveObjectId objectId, CellId targetCell,
+        Position3 interactionOrigin, ObjectRevision expectedRevision, ObjectInteractionKind kind,
+        std::optional<KeyPrototypeId> requestedKey)
     {
         const auto& snapshot = mSession->stateMachine().confirmedSnapshot();
         const auto sessionId = mSession->stateMachine().sessionId();
@@ -355,22 +451,46 @@ namespace TES3MP
         auto commandId = CommandId::fromValue(sequence->value());
         if (!commandId)
             return { ClientRuntimeResult::EncodeRejected, std::nullopt };
-        ClientInteractObjectCommand command{
-            *sessionId,
-            snapshot->header().targetSessionGeneration(),
-            *sequence,
-            *commandId,
-            snapshot->header().canonicalRevision(),
-            objectId,
-            targetCell,
-            interactionOrigin,
-            expectedRevision,
-            kind,
-            requestedKey
-        };
+        ClientInteractObjectCommand command{ *sessionId, snapshot->header().targetSessionGeneration(), *sequence,
+            *commandId, snapshot->header().canonicalRevision(), objectId, targetCell, interactionOrigin,
+            expectedRevision, kind, requestedKey };
         const auto encoded = encodeClientInteractObjectCommand(command);
-        const auto queued = queue(MessageClass::ReliableOperation,
-            MessageKind::ClientInteractObjectCommand, encoded);
+        const auto queued = queue(MessageClass::ReliableOperation, MessageKind::ClientInteractObjectCommand, encoded);
+        if (queued == ClientRuntimeResult::Accepted)
+            mLastQueuedSequence = *sequence;
+        return { queued, queued == ClientRuntimeResult::Accepted ? sequence : std::nullopt };
+    }
+
+    ClientRuntimeQueueResult ClientSessionRuntime::queueInventoryTransaction(InventoryTransactionKind kind,
+        ItemPrototypeId prototypeId, std::optional<ItemStackId> stackId, std::uint32_t count,
+        InventoryRevision expectedInventoryRevision, Position3 interactionOrigin,
+        std::optional<ContainerId> containerId, std::optional<EquipmentSlot> slot,
+        std::optional<ContainerRevision> expectedContainerRevision,
+        std::optional<WorldItemRevision> expectedWorldItemRevision)
+    {
+        const auto& snapshot = mSession->stateMachine().confirmedSnapshot();
+        const auto sessionId = mSession->stateMachine().sessionId();
+        if (!snapshot || !sessionId || !mSession->stateMachine().inventoryReplicationComplete()
+            || !negotiated(mSession->stateMachine(), inventoryReplicationCapability()))
+            return { ClientRuntimeResult::NotConnected, std::nullopt };
+        auto sequence = mLastQueuedSequence ? mLastQueuedSequence->next()
+            : snapshot->header().acknowledgedCommandSequence()
+            ? snapshot->header().acknowledgedCommandSequence()->next()
+            : std::optional<CommandSequence>(CommandSequence::initial());
+        if (!sequence)
+            return { ClientRuntimeResult::EncodeRejected, std::nullopt };
+        const auto commandId = CommandId::fromValue(sequence->value());
+        if (!commandId)
+            return { ClientRuntimeResult::EncodeRejected, std::nullopt };
+        const ClientInventoryTransactionCommand command{ *sessionId, snapshot->header().targetSessionGeneration(),
+            *sequence, *commandId, snapshot->header().canonicalRevision(), kind, containerId, prototypeId, stackId,
+            count, slot, expectedInventoryRevision, expectedContainerRevision, expectedWorldItemRevision,
+            interactionOrigin };
+        const auto encoded = encodeClientInventoryTransactionCommand(command);
+        if (encoded.empty())
+            return { ClientRuntimeResult::EncodeRejected, std::nullopt };
+        const auto queued
+            = queue(MessageClass::ReliableOperation, MessageKind::ClientInventoryTransactionCommand, encoded);
         if (queued == ClientRuntimeResult::Accepted)
             mLastQueuedSequence = *sequence;
         return { queued, queued == ClientRuntimeResult::Accepted ? sequence : std::nullopt };
@@ -425,6 +545,10 @@ namespace TES3MP
             mResyncPlayerBaselineObserved = false;
             mResyncActorBaselineObserved = false;
             mResyncObjectBaselineObserved = false;
+            mResyncInventoryObserved = false;
+            mResyncPlayerInventoryObserved = false;
+            mResyncGroundItemsObserved = false;
+            mResyncEquipmentObserved = false;
         }
         return result;
     }
@@ -601,6 +725,42 @@ namespace TES3MP
                 {
                     auto value = decodeReliableInteractiveObjectInterestBaseline(frame->payload());
                     if (auto* typed = std::get_if<ReliableInteractiveObjectInterestBaseline>(&value))
+                        result.messages.emplace_back(std::move(*typed));
+                    else
+                        return fail(ClientRuntimeResult::ProtocolRejected);
+                    break;
+                }
+                case MessageKind::ReliablePlayerInventoryBaseline:
+                {
+                    auto value = decodeReliablePlayerInventoryBaseline(frame->payload());
+                    if (auto* typed = std::get_if<ReliablePlayerInventoryBaseline>(&value))
+                        result.messages.emplace_back(std::move(*typed));
+                    else
+                        return fail(ClientRuntimeResult::ProtocolRejected);
+                    break;
+                }
+                case MessageKind::ReliableContainerInventoryBaseline:
+                {
+                    auto value = decodeReliableContainerInventoryBaseline(frame->payload());
+                    if (auto* typed = std::get_if<ReliableContainerInventoryBaseline>(&value))
+                        result.messages.emplace_back(std::move(*typed));
+                    else
+                        return fail(ClientRuntimeResult::ProtocolRejected);
+                    break;
+                }
+                case MessageKind::ReliableGroundItemBaseline:
+                {
+                    auto value = decodeReliableGroundItemBaseline(frame->payload());
+                    if (auto* typed = std::get_if<ReliableGroundItemBaseline>(&value))
+                        result.messages.emplace_back(std::move(*typed));
+                    else
+                        return fail(ClientRuntimeResult::ProtocolRejected);
+                    break;
+                }
+                case MessageKind::LatestWinsEquipmentSnapshot:
+                {
+                    auto value = decodeLatestWinsEquipmentSnapshot(frame->payload());
+                    if (auto* typed = std::get_if<LatestWinsEquipmentSnapshot>(&value))
                         result.messages.emplace_back(std::move(*typed));
                     else
                         return fail(ClientRuntimeResult::ProtocolRejected);

@@ -1,6 +1,7 @@
 #ifndef MWGUI_ITEM_MODEL_H
 #define MWGUI_ITEM_MODEL_H
 
+#include <functional>
 #include <memory>
 
 #include "../mwworld/ptr.hpp"
@@ -43,6 +44,7 @@ namespace MWGui
     class ItemModel
     {
     public:
+        using TransferInterceptor = std::function<bool(ItemModel&, const ItemStack&, std::size_t, ItemModel&)>;
         ItemModel();
         virtual ~ItemModel() = default;
 
@@ -65,6 +67,10 @@ namespace MWGui
         /// @note Derived implementations may return an empty Ptr if the move was unsuccessful.
         virtual MWWorld::Ptr moveItem(
             const ItemStack& item, size_t count, ItemModel* otherModel, bool allowAutoEquip = true);
+        bool interceptTransfer(const ItemStack& item, size_t count, ItemModel& otherModel);
+        static void setTransferInterceptor(TransferInterceptor interceptor);
+        static void clearTransferInterceptor() noexcept;
+        static bool takeTransferIntercepted() noexcept;
 
         /// Is the player allowed to use items from this item model? (default true)
         virtual bool allowedToUseItems() const;

@@ -107,7 +107,52 @@
     {
       "path": "apps/openmw/main.cpp",
       "status": "M",
-      "purpose": "Composes the explicitly enabled desktop multiplayer coordinator with sanitized startup and runtime status reporting."
+      "purpose": "Composes the explicitly enabled desktop multiplayer coordinator with sanitized startup, local canonical content mappings, and runtime status reporting."
+    },
+    {
+      "path": "apps/openmw/mwgui/container.cpp",
+      "status": "M",
+      "purpose": "Stops Take All after one intercepted authoritative inventory proposal and leaves the container open for confirmation."
+    },
+    {
+      "path": "apps/openmw/mwgui/containeritemmodel.cpp",
+      "status": "M",
+      "purpose": "Intercepts confirmed container takes before stock ownership and crime side effects."
+    },
+    {
+      "path": "apps/openmw/mwgui/containeritemmodel.hpp",
+      "status": "M",
+      "purpose": "Exposes the read-only primary container reference required for canonical container mapping."
+    },
+    {
+      "path": "apps/openmw/mwgui/draganddrop.cpp",
+      "status": "M",
+      "purpose": "Handles an intercepted authoritative transfer without dereferencing an absent locally moved item."
+    },
+    {
+      "path": "apps/openmw/mwgui/inventoryitemmodel.hpp",
+      "status": "M",
+      "purpose": "Exposes the read-only inventory actor required to distinguish the player from other actor inventories."
+    },
+    {
+      "path": "apps/openmw/mwgui/inventorywindow.cpp",
+      "status": "M",
+      "purpose": "Invokes the multiplayer item-use interceptor before stock equip or consumable effects."
+    },
+    {
+      "path": "apps/openmw/mwgui/inventorywindow.hpp",
+      "status": "M",
+      "purpose": "Declares the bounded process-local item-use interceptor seam."
+    },
+    {
+      "path": "apps/openmw/mwgui/itemmodel.cpp",
+      "status": "M",
+      "purpose": "Invokes the multiplayer transfer interceptor before stock inventory mutation."
+    },
+    {
+      "path": "apps/openmw/mwgui/itemmodel.hpp",
+      "status": "M",
+      "purpose": "Declares the bounded process-local inventory transfer interceptor seam."
     },
     {
       "path": "apps/openmw/mwrender/animation.cpp",
@@ -177,7 +222,7 @@
     {
       "path": "apps/openmw/options.cpp",
       "status": "M",
-      "purpose": "Declares the approved explicit desktop multiplayer enablement, endpoint, timeout, and password-file options."
+      "purpose": "Declares the approved explicit desktop multiplayer enablement, endpoint, credentials, and local content-mapping options."
     },
     {
       "path": "apps/openmw/tes3mp/CMakeLists.txt",

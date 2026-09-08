@@ -46,6 +46,10 @@ namespace TES3MP::OpenMWAdapter
             std::span<const ActorInterestMember> observedActors, MonotonicInstant receivedAt) noexcept override;
         ProviderResult applyInteractiveObjects(
             const ReliableInteractiveObjectInterestBaseline& baseline, MonotonicInstant receivedAt) noexcept override;
+        ProviderResult applyInventory(const ReliablePlayerInventoryBaseline& player,
+            std::span<const ReliableContainerInventoryBaseline> containers,
+            const ReliableGroundItemBaseline& groundItems, const LatestWinsEquipmentSnapshot& equipment,
+            MonotonicInstant receivedAt) noexcept override;
         std::optional<ObjectRevision> observedObjectRevision(InteractiveObjectId id) const noexcept override;
         ProviderResult advance(MonotonicInstant now) noexcept override;
         void clear() noexcept override;

@@ -43,10 +43,15 @@ namespace TES3MP
         ReliableObservationReceiveResult receiveReliableObservationBatch(ReliableObservationBatch batch);
         ReliableInterestBaselineReceiveResult receiveReliableInterestBaseline(ReliableInterestBaseline baseline);
         ActorReplicationReceiveResult receiveLatestWinsActorSnapshot(LatestWinsActorSnapshot snapshot);
-        ActorReplicationReceiveResult receiveReliableActorInterestBaseline(
-            ReliableActorInterestBaseline baseline);
+        ActorReplicationReceiveResult receiveReliableActorInterestBaseline(ReliableActorInterestBaseline baseline);
         InteractiveObjectReplicationReceiveResult receiveReliableInteractiveObjectInterestBaseline(
             ReliableInteractiveObjectInterestBaseline baseline);
+        InventoryReplicationReceiveResult receiveReliablePlayerInventoryBaseline(
+            ReliablePlayerInventoryBaseline baseline);
+        InventoryReplicationReceiveResult receiveReliableContainerInventoryBaseline(
+            ReliableContainerInventoryBaseline baseline);
+        InventoryReplicationReceiveResult receiveReliableGroundItemBaseline(ReliableGroundItemBaseline baseline);
+        InventoryReplicationReceiveResult receiveLatestWinsEquipmentSnapshot(LatestWinsEquipmentSnapshot snapshot);
         HeadlessClientResult close() noexcept;
 
         const ClientSessionStateMachine& stateMachine() const noexcept { return *mState; }
