@@ -333,6 +333,25 @@ namespace
         return exhausted.outcome.code == ObjectInteractionResultCode::RevisionExhausted
             && !exhausted.updatedWorld.has_value();
     }
+
+    bool prepared_candidate_updates_in_place_and_can_restore_one_command()
+    {
+        const auto catalog = sampleCatalog();
+        auto candidate
+            = std::get<CanonicalInteractiveObjectWorld>(createInitialCanonicalInteractiveObjectWorld(catalog));
+        const auto p = players(7, 100);
+        const auto* storage = candidate.objects().data();
+        const InteractObjectCommand command{ id<PlayerId>(1), id<InteractiveObjectId>(1),
+            CellId::interior(id<CellSpaceId>(7)), Position3(100, 0, 0), ObjectRevision::initial(),
+            ObjectInteractionKind::Activate };
+        const auto staged = applyObjectInteractionToCandidate(candidate, catalog, p, command, id<ServerTick>(1));
+        if (!staged.worldChanged || !staged.previousState || candidate.objects().data() != storage
+            || candidate.find(command.objectId)->doorState() != DoorState::Open)
+            return false;
+        return restoreInteractiveObjectCandidate(candidate, *staged.previousState)
+            && candidate.objects().data() == storage
+            && candidate.find(command.objectId)->doorState() == DoorState::Closed;
+    }
 }
 
 int main()
@@ -344,6 +363,7 @@ int main()
             && reported_origin_must_reach_object_and_remain_in_root_envelope()
             && extreme_positions_and_maximum_reach_are_checked_without_overflow() && catalog_mismatch_is_rejected()
             && tick_regression_and_revision_exhaustion_are_explicit()
+            && prepared_candidate_updates_in_place_and_can_restore_one_command()
         ? 0
         : 1;
 }

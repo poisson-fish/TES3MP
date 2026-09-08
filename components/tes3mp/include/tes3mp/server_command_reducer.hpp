@@ -98,6 +98,11 @@ namespace TES3MP
             CanonicalStateVersion candidateStateVersion() const noexcept { return mStateVersion; }
             CanonicalRevision candidateRevision() const noexcept { return mCanonicalRevision; }
             const CommandBatchReductionResult& result() const noexcept { return mResult; }
+            const std::optional<CanonicalInteractiveObjectWorld>& candidateInteractiveObjects() const noexcept
+            {
+                return mInteractiveObjects;
+            }
+
         private:
             friend class CanonicalCommandReducer;
             PreparedBatch() = default;
@@ -109,6 +114,8 @@ namespace TES3MP
             std::shared_ptr<const CanonicalServerState> mState;
             std::shared_ptr<CanonicalStatePublication> mPublication;
             CommandBatchReductionResult mResult;
+            std::optional<CanonicalInteractiveObjectWorld> mBaseInteractiveObjects;
+            std::optional<CanonicalInteractiveObjectWorld> mInteractiveObjects;
         };
 
         class PreparedJoin
@@ -121,6 +128,7 @@ namespace TES3MP
             const CanonicalServerState& candidateState() const noexcept { return *mState; }
             CanonicalStateVersion candidateStateVersion() const noexcept { return mStateVersion; }
             CanonicalRevision candidateRevision() const noexcept { return mCanonicalRevision; }
+
         private:
             friend class CanonicalCommandReducer;
             PreparedJoin() = default;
@@ -143,6 +151,7 @@ namespace TES3MP
             const CanonicalServerState& candidateState() const noexcept { return *mState; }
             CanonicalStateVersion candidateStateVersion() const noexcept { return mStateVersion; }
             CanonicalRevision candidateRevision() const noexcept { return mCanonicalRevision; }
+
         private:
             friend class CanonicalCommandReducer;
             PreparedLifecycle() = default;
@@ -158,8 +167,8 @@ namespace TES3MP
         // Eligible for later reviewed composition; this type owns no connection,
         // protocol request, target projection, delivery, or runtime loop.
         CanonicalCommandReducer(CanonicalServerState initialState, Observability& observability);
-        CanonicalCommandReducer(CanonicalServerState initialState, Observability& observability,
-            ContentManifest contentManifest);
+        CanonicalCommandReducer(
+            CanonicalServerState initialState, Observability& observability, ContentManifest contentManifest);
         CanonicalCommandReducer(CanonicalServerState initialState, Observability& observability,
             ContentManifest contentManifest, ServerCollisionQuery& collision);
         CanonicalCommandReducer(
@@ -181,32 +190,38 @@ namespace TES3MP
         CanonicalRevision canonicalRevision() const noexcept { return mCanonicalRevision; }
         std::shared_ptr<const CanonicalStatePublication> latestPublication() const noexcept;
         PreparedBatch prepare(const ServerTickCommandBatch& batch);
+        PreparedBatch prepare(const ServerTickCommandBatch& batch, const CanonicalInteractiveObjectWorld& objects,
+            const InteractiveObjectCatalog& catalog);
         PreparedBatch prepareTick(const ServerTickCommandBatch& batch);
+        PreparedBatch prepareTick(const ServerTickCommandBatch& batch, const CanonicalInteractiveObjectWorld& objects,
+            const InteractiveObjectCatalog& catalog);
         bool commit(PreparedBatch&& prepared);
-        std::optional<PreparedJoin> prepareJoin(CanonicalPlayerEntityState player,
-            CanonicalSessionProgress session, ServerTick tick);
+        bool commit(PreparedBatch&& prepared, CanonicalInteractiveObjectWorld& objects);
+        std::optional<PreparedJoin> prepareJoin(
+            CanonicalPlayerEntityState player, CanonicalSessionProgress session, ServerTick tick);
         bool commit(PreparedJoin&& prepared);
         std::optional<PreparedLifecycle> prepareDisconnect(SessionId session, ServerTick tick);
-        std::optional<PreparedLifecycle> prepareDisconnectBatch(
-            std::span<const SessionId> sessions, ServerTick tick);
-        std::optional<PreparedLifecycle> prepareResume(
-            CanonicalSessionProgress session, ServerTick tick);
-        std::optional<PreparedLifecycle> prepareExpiration(PlayerId player, SessionId session,
-            SessionGeneration generation, ServerTick tick);
+        std::optional<PreparedLifecycle> prepareDisconnectBatch(std::span<const SessionId> sessions, ServerTick tick);
+        std::optional<PreparedLifecycle> prepareResume(CanonicalSessionProgress session, ServerTick tick);
+        std::optional<PreparedLifecycle> prepareExpiration(
+            PlayerId player, SessionId session, SessionGeneration generation, ServerTick tick);
         bool commit(PreparedLifecycle&& prepared);
         CommandBatchReductionResult apply(const ServerTickCommandBatch& batch);
 
     private:
-        std::optional<PreparedLifecycle> prepareLifecycleState(
-            std::vector<CanonicalPlayerEntityState> players,
-            std::vector<CanonicalSessionProgress> sessions, CanonicalSessionLifecycleKind kind,
-            SessionId session, PlayerId player, SessionGeneration generation, ServerTick tick);
+        std::optional<PreparedLifecycle> prepareLifecycleState(std::vector<CanonicalPlayerEntityState> players,
+            std::vector<CanonicalSessionProgress> sessions, CanonicalSessionLifecycleKind kind, SessionId session,
+            PlayerId player, SessionGeneration generation, ServerTick tick);
         CanonicalSinkDeliveryReport publish(std::shared_ptr<CanonicalStatePublication> publication) noexcept;
         CanonicalSinkDeliveryReport deliver(
             const std::shared_ptr<const CanonicalStatePublication>& publication) noexcept;
         void observe(CommandDisposition disposition, ServerTick tick) noexcept;
         void observe(CommandBatchReductionError error, ServerTick tick, std::uint64_t processedCommands) noexcept;
         void observe(CanonicalSinkRole role, CanonicalSinkDeliveryResult result, ServerTick tick) noexcept;
+        PreparedBatch prepareCommands(const ServerTickCommandBatch& batch,
+            const CanonicalInteractiveObjectWorld* objects, const InteractiveObjectCatalog* catalog);
+        PreparedBatch prepareTickState(PreparedBatch prepared, const ServerTickCommandBatch& batch);
+        bool commitPrepared(PreparedBatch&& prepared, CanonicalInteractiveObjectWorld* objects);
 
         std::shared_ptr<const CanonicalServerState> mState;
         CanonicalStateVersion mStateVersion = CanonicalStateVersion::initial();

@@ -142,7 +142,8 @@ namespace TES3MP
                 }
                 const auto applied = mSession->receiveLatestWinsSnapshot(std::move(*snapshot));
                 if (applied != LatestWinsSnapshotReceiveResult::Applied
-                    && applied != LatestWinsSnapshotReceiveResult::IdenticalDuplicate)
+                    && applied != LatestWinsSnapshotReceiveResult::IdenticalDuplicate
+                    && applied != LatestWinsSnapshotReceiveResult::StaleTick)
                     return reject();
                 result.snapshotApplied = result.snapshotApplied || applied == LatestWinsSnapshotReceiveResult::Applied;
                 for (auto& pending : mPendingObservations)
@@ -209,7 +210,8 @@ namespace TES3MP
                 }
                 const auto applied = mSession->receiveLatestWinsActorSnapshot(std::move(*actorSnapshot));
                 if (applied != ActorReplicationReceiveResult::Applied
-                    && applied != ActorReplicationReceiveResult::IdenticalDuplicate)
+                    && applied != ActorReplicationReceiveResult::IdenticalDuplicate
+                    && applied != ActorReplicationReceiveResult::StaleTick)
                     return reject();
                 result.actorSnapshotApplied
                     = result.actorSnapshotApplied || applied == ActorReplicationReceiveResult::Applied;

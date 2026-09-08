@@ -20,6 +20,7 @@ namespace TES3MP
         = MaximumOptionalCapabilityCount + MaximumRequiredCapabilityCount;
     inline constexpr std::uint32_t VrPoseCapabilityValue = 1;
     inline constexpr std::uint32_t ActorReplicationCapabilityValue = 2;
+    inline constexpr std::uint32_t InteractiveObjectReplicationCapabilityValue = 3;
 
     class CapabilityId
     {
@@ -53,6 +54,11 @@ namespace TES3MP
     inline constexpr CapabilityId actorReplicationCapability() noexcept
     {
         return *CapabilityId::fromValue(ActorReplicationCapabilityValue);
+    }
+
+    inline constexpr CapabilityId interactiveObjectReplicationCapability() noexcept
+    {
+        return *CapabilityId::fromValue(InteractiveObjectReplicationCapabilityValue);
     }
 
     struct ProtocolVersion

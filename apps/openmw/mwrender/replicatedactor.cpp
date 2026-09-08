@@ -10,6 +10,7 @@
 #include <components/esm3/loadarmo.hpp>
 #include <components/esm3/loadbody.hpp>
 #include <components/esm3/loadclot.hpp>
+#include <components/esm3/loadcrea.hpp>
 #include <components/esm3/loadnpc.hpp>
 #include <components/esm3/loadrace.hpp>
 #include <components/misc/convert.hpp>
@@ -175,6 +176,27 @@ namespace MWRender
                 : Animation(ptr, std::move(parentNode), resourceSystem, Context::ReplicatedActor)
                 , mStaticControllerTime(std::make_shared<NullAnimationTime>())
             {
+                if (mPtr.getType() == ESM::REC_CREA)
+                {
+                    const ESM::Creature* creature = mPtr.get<ESM::Creature>()->mBase;
+                    if (creature == nullptr || creature->mModel.empty())
+                        throw BuildFailure(ReplicatedActorResult::InvalidAppearanceRecord);
+                    const VFS::Path::Normalized model
+                        = Misc::ResourceHelpers::correctMeshPath(VFS::Path::Normalized(creature->mModel));
+                    const std::string skeleton
+                        = Misc::ResourceHelpers::correctActorModelPath(model, mResourceSystem->getVFS());
+                    requireResource(VFS::Path::Normalized(skeleton));
+                    setObjectRoot(skeleton, false, false, true);
+                    if ((creature->mFlags & ESM::Creature::Bipedal) != 0)
+                        addAnimSource(Settings::models().mXbaseanim.get(), skeleton);
+                    addAnimSource(skeleton, skeleton);
+                    setAccumulation(osg::Vec3f(1.f, 1.f, 0.f));
+                    mAnimationFallback = !hasAnimation("idle");
+                    if (!mAnimationFallback)
+                        setLocomotion(ReplicatedActorLocomotion::Idle);
+                    return;
+                }
+
                 const ESM::NPC* npc = mPtr.get<ESM::NPC>()->mBase;
                 const ESM::Race* race = store.get<ESM::Race>().search(npc->mRace);
                 if (race == nullptr)
@@ -368,8 +390,10 @@ namespace MWRender
                     if (type == ESM::Clothing::sRecordId)
                     {
                         const ESM::Clothing* clothing = store.get<ESM::Clothing>().search(item.mItem);
-                        if (clothing == nullptr || !occupiedSlots.insert(equipmentSlot(*clothing)).second)
+                        if (clothing == nullptr)
                             throw BuildFailure(ReplicatedActorResult::InvalidAppearanceRecord);
+                        if (!occupiedSlots.insert(equipmentSlot(*clothing)).second)
+                            continue;
                         const int priority = clothingPriority(*clothing);
                         applyPartReferences(parts, clothing->mParts.mParts, female, priority, store);
                         if (clothing->mData.mType == ESM::Clothing::Robe)
@@ -391,8 +415,10 @@ namespace MWRender
                     else if (type == ESM::Armor::sRecordId)
                     {
                         const ESM::Armor* armor = store.get<ESM::Armor>().search(item.mItem);
-                        if (armor == nullptr || !occupiedSlots.insert(equipmentSlot(*armor)).second)
+                        if (armor == nullptr)
                             throw BuildFailure(ReplicatedActorResult::InvalidAppearanceRecord);
+                        if (!occupiedSlots.insert(equipmentSlot(*armor)).second)
+                            continue;
                         applyPartReferences(parts, armor->mParts.mParts, female, 3, store);
                         if (armor->mData.mType == ESM::Armor::Helmet)
                             reserve(parts, ESM::PRT_Hair, 3);
@@ -523,7 +549,7 @@ namespace MWRender
             , mReference(store, npcRecord)
             , mPtr(mReference.getPtr().mRef, &cell)
         {
-            if (mPtr.getType() != ESM::REC_NPC_)
+            if (mPtr.getType() != ESM::REC_NPC_ && mPtr.getType() != ESM::REC_CREA)
                 throw BuildFailure(ReplicatedActorResult::InvalidAppearanceRecord);
             if (!isValidReplicatedActorPose(position))
                 throw BuildFailure(ReplicatedActorResult::InvalidPose);
@@ -571,7 +597,10 @@ namespace MWRender
     {
         try
         {
-            if (npcRecord.empty() || store.find(npcRecord) != ESM::NPC::sRecordId)
+            if (npcRecord.empty())
+                return { ReplicatedActorResult::InvalidAppearanceRecord, nullptr };
+            const int recType = store.find(npcRecord);
+            if (recType != ESM::NPC::sRecordId && recType != ESM::Creature::sRecordId)
                 return { ReplicatedActorResult::InvalidAppearanceRecord, nullptr };
             auto impl = std::make_unique<Impl>(rendering, store, npcRecord, cell, position);
             const ReplicatedActorResult result = impl->createResult();

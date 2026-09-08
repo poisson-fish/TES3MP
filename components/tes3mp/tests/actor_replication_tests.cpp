@@ -97,6 +97,9 @@ namespace
         auto snapshot = LatestWinsActorSnapshot(session, SessionGeneration::initial(), id<ServerTick>(5),
             id<CanonicalRevision>(3),
             std::get<ActorWorldView>(ActorWorldView::create(entries)));
+        auto staleSnapshot = LatestWinsActorSnapshot(session, SessionGeneration::initial(), id<ServerTick>(4),
+            id<CanonicalRevision>(3),
+            std::get<ActorWorldView>(ActorWorldView::create(entries)));
         auto resync = std::get<ReliableActorInterestBaseline>(ReliableActorInterestBaseline::create(
             session, SessionGeneration::initial(), id<ServerTick>(6), id<CanonicalRevision>(3), members));
         return !client->actorInterestBaselineComplete()
@@ -105,6 +108,9 @@ namespace
             && !client->actorInterestBaselineComplete()
             && client->receiveLatestWinsActorSnapshot(std::move(snapshot)) == ActorReplicationReceiveResult::Applied
             && client->actorInterestBaselineComplete() && client->observedActors().size() == 1
+            && client->receiveLatestWinsActorSnapshot(std::move(staleSnapshot))
+                == ActorReplicationReceiveResult::StaleTick
+            && client->actorInterestBaselineComplete()
             && client->receiveReliableActorInterestBaseline(std::move(resync))
                 == ActorReplicationReceiveResult::IdenticalDuplicate;
     }

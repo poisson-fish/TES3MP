@@ -107,7 +107,7 @@ namespace TES3MP
             0 };
     }
 
-    ObjectInteractionResult applyObjectInteraction(const CanonicalInteractiveObjectWorld& current,
+    StagedObjectInteractionResult applyObjectInteractionToCandidate(CanonicalInteractiveObjectWorld& current,
         const InteractiveObjectCatalog& catalog, const CanonicalServerState& players,
         const InteractObjectCommand& command, ServerTick currentTick,
         ObjectInteractionValidationContext validation) noexcept
@@ -120,13 +120,13 @@ namespace TES3MP
         if (!playerState)
         {
             outcome.code = ObjectInteractionResultCode::PlayerNotFound;
-            return { outcome, std::nullopt };
+            return { outcome, false };
         }
 
         if (playerState->transform().cell() != command.cell)
         {
             outcome.code = ObjectInteractionResultCode::CellMismatch;
-            return { outcome, std::nullopt };
+            return { outcome, false };
         }
 
         const auto* object = current.find(command.objectId);
@@ -134,19 +134,19 @@ namespace TES3MP
         if (!object || !catalogEntry)
         {
             outcome.code = ObjectInteractionResultCode::ObjectNotFound;
-            return { outcome, std::nullopt };
+            return { outcome, false };
         }
 
         if (!stateMatchesCatalog(*object, *catalogEntry))
         {
             outcome.code = ObjectInteractionResultCode::CatalogMismatch;
-            return { outcome, std::nullopt };
+            return { outcome, false };
         }
 
         if (object->cell() != command.cell)
         {
             outcome.code = ObjectInteractionResultCode::CellMismatch;
-            return { outcome, std::nullopt };
+            return { outcome, false };
         }
 
         const auto playerPosition = playerState->transform().position();
@@ -156,19 +156,19 @@ namespace TES3MP
             || !withinReach(command.interactionOrigin, objectPosition, validation.maxReach))
         {
             outcome.code = ObjectInteractionResultCode::PlayerOutOfReach;
-            return { outcome, std::nullopt };
+            return { outcome, false };
         }
 
         if (command.expectedRevision != object->revision())
         {
             outcome.code = ObjectInteractionResultCode::StaleRevision;
-            return { outcome, std::nullopt };
+            return { outcome, false };
         }
 
         if (currentTick < object->lastChangeTick())
         {
             outcome.code = ObjectInteractionResultCode::TickRegression;
-            return { outcome, std::nullopt };
+            return { outcome, false };
         }
 
         if (command.kind == ObjectInteractionKind::UnlockWithKey)
@@ -184,7 +184,7 @@ namespace TES3MP
                     if (!nextRevOpt)
                     {
                         outcome.code = ObjectInteractionResultCode::RevisionExhausted;
-                        return { outcome, std::nullopt };
+                        return { outcome, false };
                     }
                     const auto nextRev = *nextRevOpt;
                     outcome.code = ObjectInteractionResultCode::Success;
@@ -193,28 +193,18 @@ namespace TES3MP
                     outcome.newLockState = LockState::Unlocked;
                     outcome.newTrapState = TrapState::Disarmed;
 
-                    std::vector<CanonicalInteractiveObjectState> updated(
-                        current.objects().begin(), current.objects().end());
-                    for (auto& obj : updated)
-                    {
-                        if (obj.objectId() == command.objectId)
-                        {
-                            obj = CanonicalInteractiveObjectState(obj.objectId(), obj.cell(), obj.doorState(),
-                                LockState::Unlocked, obj.lockLevel(), obj.keyId(), TrapState::Disarmed, obj.trapId(),
-                                nextRev, currentTick);
-                            break;
-                        }
-                    }
-                    auto rebuilt = createCanonicalInteractiveObjectWorld(updated);
-                    if (auto* updatedWorld = std::get_if<CanonicalInteractiveObjectWorld>(&rebuilt))
-                        return { outcome, std::move(*updatedWorld) };
-                    outcome.code = ObjectInteractionResultCode::InternalError;
-                    return { outcome, std::nullopt };
+                    auto found = std::ranges::lower_bound(
+                        current.mObjects, command.objectId, {}, &CanonicalInteractiveObjectState::objectId);
+                    const auto previous = *found;
+                    *found = CanonicalInteractiveObjectState(found->objectId(), found->cell(), found->doorState(),
+                        LockState::Unlocked, found->lockLevel(), found->keyId(), TrapState::Disarmed, found->trapId(),
+                        nextRev, currentTick);
+                    return { outcome, true, previous };
                 }
                 else
                 {
                     outcome.code = ObjectInteractionResultCode::Locked;
-                    return { outcome, std::nullopt };
+                    return { outcome, false };
                 }
             }
             else
@@ -224,14 +214,14 @@ namespace TES3MP
                 outcome.newDoorState = object->doorState();
                 outcome.newLockState = object->lockState();
                 outcome.newTrapState = object->trapState();
-                return { outcome, std::nullopt };
+                return { outcome, false };
             }
         }
 
         if (object->lockState() == LockState::Locked)
         {
             outcome.code = ObjectInteractionResultCode::Locked;
-            return { outcome, std::nullopt };
+            return { outcome, false };
         }
 
         if (object->trapState() == TrapState::Armed)
@@ -240,7 +230,7 @@ namespace TES3MP
             if (!nextRevOpt)
             {
                 outcome.code = ObjectInteractionResultCode::RevisionExhausted;
-                return { outcome, std::nullopt };
+                return { outcome, false };
             }
             const auto nextRev = *nextRevOpt;
             outcome.code = ObjectInteractionResultCode::TrapSprung;
@@ -250,21 +240,13 @@ namespace TES3MP
             outcome.newTrapState = TrapState::Disarmed;
             outcome.sprungTrap = object->trapId();
 
-            std::vector<CanonicalInteractiveObjectState> updated(current.objects().begin(), current.objects().end());
-            for (auto& obj : updated)
-            {
-                if (obj.objectId() == command.objectId)
-                {
-                    obj = CanonicalInteractiveObjectState(obj.objectId(), obj.cell(), obj.doorState(), obj.lockState(),
-                        obj.lockLevel(), obj.keyId(), TrapState::Disarmed, obj.trapId(), nextRev, currentTick);
-                    break;
-                }
-            }
-            auto rebuilt = createCanonicalInteractiveObjectWorld(updated);
-            if (auto* updatedWorld = std::get_if<CanonicalInteractiveObjectWorld>(&rebuilt))
-                return { outcome, std::move(*updatedWorld) };
-            outcome.code = ObjectInteractionResultCode::InternalError;
-            return { outcome, std::nullopt };
+            auto found = std::ranges::lower_bound(
+                current.mObjects, command.objectId, {}, &CanonicalInteractiveObjectState::objectId);
+            const auto previous = *found;
+            *found = CanonicalInteractiveObjectState(found->objectId(), found->cell(), found->doorState(),
+                found->lockState(), found->lockLevel(), found->keyId(), TrapState::Disarmed, found->trapId(), nextRev,
+                currentTick);
+            return { outcome, true, previous };
         }
 
         if (catalogEntry->kind == InteractiveObjectKind::TeleportDoor)
@@ -273,7 +255,7 @@ namespace TES3MP
             if (!nextRevOpt)
             {
                 outcome.code = ObjectInteractionResultCode::RevisionExhausted;
-                return { outcome, std::nullopt };
+                return { outcome, false };
             }
             const auto nextRev = *nextRevOpt;
             outcome.code = ObjectInteractionResultCode::Success;
@@ -283,28 +265,20 @@ namespace TES3MP
             outcome.newTrapState = object->trapState();
             outcome.playerTeleport = catalogEntry->destination;
 
-            std::vector<CanonicalInteractiveObjectState> updated(current.objects().begin(), current.objects().end());
-            for (auto& obj : updated)
-            {
-                if (obj.objectId() == command.objectId)
-                {
-                    obj = CanonicalInteractiveObjectState(obj.objectId(), obj.cell(), obj.doorState(), obj.lockState(),
-                        obj.lockLevel(), obj.keyId(), obj.trapState(), obj.trapId(), nextRev, currentTick);
-                    break;
-                }
-            }
-            auto rebuilt = createCanonicalInteractiveObjectWorld(updated);
-            if (auto* updatedWorld = std::get_if<CanonicalInteractiveObjectWorld>(&rebuilt))
-                return { outcome, std::move(*updatedWorld) };
-            outcome.code = ObjectInteractionResultCode::InternalError;
-            return { outcome, std::nullopt };
+            auto found = std::ranges::lower_bound(
+                current.mObjects, command.objectId, {}, &CanonicalInteractiveObjectState::objectId);
+            const auto previous = *found;
+            *found = CanonicalInteractiveObjectState(found->objectId(), found->cell(), found->doorState(),
+                found->lockState(), found->lockLevel(), found->keyId(), found->trapState(), found->trapId(), nextRev,
+                currentTick);
+            return { outcome, true, previous };
         }
 
         const auto nextRevOpt = object->revision().next();
         if (!nextRevOpt)
         {
             outcome.code = ObjectInteractionResultCode::RevisionExhausted;
-            return { outcome, std::nullopt };
+            return { outcome, false };
         }
         const auto nextRev = *nextRevOpt;
         const auto nextDoorState = (object->doorState() == DoorState::Closed) ? DoorState::Open : DoorState::Closed;
@@ -314,21 +288,42 @@ namespace TES3MP
         outcome.newLockState = object->lockState();
         outcome.newTrapState = object->trapState();
 
-        std::vector<CanonicalInteractiveObjectState> updated(current.objects().begin(), current.objects().end());
-        for (auto& obj : updated)
-        {
-            if (obj.objectId() == command.objectId)
-            {
-                obj = CanonicalInteractiveObjectState(obj.objectId(), obj.cell(), nextDoorState, obj.lockState(),
-                    obj.lockLevel(), obj.keyId(), obj.trapState(), obj.trapId(), nextRev, currentTick);
-                break;
-            }
-        }
-        auto rebuilt = createCanonicalInteractiveObjectWorld(updated);
-        if (auto* updatedWorld = std::get_if<CanonicalInteractiveObjectWorld>(&rebuilt))
-            return { outcome, std::move(*updatedWorld) };
+        auto found = std::ranges::lower_bound(
+            current.mObjects, command.objectId, {}, &CanonicalInteractiveObjectState::objectId);
+        const auto previous = *found;
+        *found = CanonicalInteractiveObjectState(found->objectId(), found->cell(), nextDoorState, found->lockState(),
+            found->lockLevel(), found->keyId(), found->trapState(), found->trapId(), nextRev, currentTick);
+        return { outcome, true, previous };
+    }
+    catch (...)
+    {
+        ObjectInteractionOutcome outcome;
         outcome.code = ObjectInteractionResultCode::InternalError;
-        return { outcome, std::nullopt };
+        outcome.objectId = command.objectId;
+        return { outcome, false };
+    }
+
+    bool restoreInteractiveObjectCandidate(
+        CanonicalInteractiveObjectWorld& candidate, CanonicalInteractiveObjectState previous) noexcept
+    {
+        const auto found = std::ranges::lower_bound(
+            candidate.mObjects, previous.objectId(), {}, &CanonicalInteractiveObjectState::objectId);
+        if (found == candidate.mObjects.end() || found->objectId() != previous.objectId())
+            return false;
+        *found = std::move(previous);
+        return true;
+    }
+
+    ObjectInteractionResult applyObjectInteraction(const CanonicalInteractiveObjectWorld& current,
+        const InteractiveObjectCatalog& catalog, const CanonicalServerState& players,
+        const InteractObjectCommand& command, ServerTick currentTick,
+        ObjectInteractionValidationContext validation) noexcept
+    try
+    {
+        CanonicalInteractiveObjectWorld candidate = current;
+        auto staged = applyObjectInteractionToCandidate(candidate, catalog, players, command, currentTick, validation);
+        return { std::move(staged.outcome),
+            staged.worldChanged ? std::optional<CanonicalInteractiveObjectWorld>(std::move(candidate)) : std::nullopt };
     }
     catch (...)
     {

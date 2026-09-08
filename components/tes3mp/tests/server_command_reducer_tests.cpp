@@ -1,5 +1,5 @@
-#include <tes3mp/server_command_reducer.hpp>
 #include <tes3mp/movement_policy.hpp>
+#include <tes3mp/server_command_reducer.hpp>
 #include <tes3mp/test_support/manual_clock.hpp>
 #include <tes3mp/test_support/recording_observability.hpp>
 
@@ -53,9 +53,8 @@ namespace
         std::uint64_t tick = 0, std::uint64_t epoch = 1, LinearVelocity3 velocity = LinearVelocity3(0, 0, 0))
     {
         return CanonicalPlayerEntityState(playerId(player), entityId(entity), AppearanceId::fromValue(1).value(),
-            transform(player, player * 100), velocity,
-            EntityRevision::fromValue(revision).value(), AuthorityEpoch::fromValue(epoch).value(),
-            ServerTick::fromValue(tick).value());
+            transform(player, player * 100), velocity, EntityRevision::fromValue(revision).value(),
+            AuthorityEpoch::fromValue(epoch).value(), ServerTick::fromValue(tick).value());
     }
 
     CanonicalSessionProgress session(std::uint64_t session, std::uint64_t player, std::uint64_t entity,
@@ -81,8 +80,50 @@ namespace
         const std::array spaces{ CellSpaceDeclaration{ interior, CellSpaceKind::Interior },
             CellSpaceDeclaration{ exterior, CellSpaceKind::Exterior } };
         const std::array cells{ CellId::interior(interior), CellId::exterior(exterior, 0, 0) };
-        return *ContentManifest::create(
-            testContentManifestId(), spaces, cells, *AppearanceId::fromValue(1), movement);
+        return *ContentManifest::create(testContentManifestId(), spaces, cells, *AppearanceId::fromValue(1), movement);
+    }
+
+    struct InteractiveFixture
+    {
+        ContentManifest manifest;
+        InteractiveObjectCatalog catalog;
+        CanonicalInteractiveObjectWorld objects;
+        CanonicalServerState players;
+        Transform destination;
+    };
+
+    InteractiveFixture interactiveFixture()
+    {
+        auto manifest = contentManifest(testContentManifest().movementProfile());
+        const auto zero = Turn32::fromValue(0);
+        const auto cell7 = CellId::interior(*CellSpaceId::fromValue(7));
+        const auto cell8 = CellId::exterior(*CellSpaceId::fromValue(8), 0, 0);
+        const auto trapRoot = Transform(cell7, Position3(10, 0, 0), Orientation3(zero, zero, zero));
+        const auto teleportRoot = Transform(cell7, Position3(20, 0, 0), Orientation3(zero, zero, zero));
+        const auto destination = Transform(cell8, Position3(500, 600, 700), Orientation3(zero, zero, zero));
+        const std::array entries{
+            InteractiveObjectCatalogEntry{ *InteractiveObjectId::fromValue(1), InteractiveObjectKind::StandardDoor,
+                cell7, trapRoot, std::nullopt, {}, ObjectTrapDeclaration{ true, *TrapPrototypeId::fromValue(11) } },
+            InteractiveObjectCatalogEntry{ *InteractiveObjectId::fromValue(2), InteractiveObjectKind::TeleportDoor,
+                cell7, teleportRoot, TeleportDestination{ cell8, destination }, {}, {} },
+        };
+        auto catalog = *InteractiveObjectCatalog::create(manifest, entries);
+        auto objects = std::get<CanonicalInteractiveObjectWorld>(createInitialCanonicalInteractiveObjectWorld(catalog));
+        const std::array players{ CanonicalPlayerEntityState(playerId(1), entityId(101), *AppearanceId::fromValue(1),
+            Transform(cell7, Position3(0, 0, 0), Orientation3(zero, zero, zero)), LinearVelocity3(9, 0, 0),
+            *EntityRevision::fromValue(1), AuthorityEpoch::initial(), ServerTick::initial()) };
+        const std::array sessions{ session(10, 1, 101) };
+        return { std::move(manifest), std::move(catalog), std::move(objects), state(players, sessions), destination };
+    }
+
+    ServerCommandProposal interactionProposal(std::uint64_t sequence, std::uint64_t command, std::uint64_t object,
+        CellId cell, Position3 origin, ObjectRevision revision)
+    {
+        return ServerCommandProposal(sessionId(10), SessionGeneration::initial(), *CommandSequence::fromValue(sequence),
+            *CommandId::fromValue(command), CanonicalRevision::initial(),
+            EntityPrecondition(entityId(101), *EntityRevision::fromValue(sequence), AuthorityEpoch::initial()),
+            InteractiveObjectCommandProposal(*InteractiveObjectId::fromValue(object), cell, origin, revision,
+                ObjectInteractionKind::Activate, std::nullopt));
     }
 
     ServerCommandProposal proposal(std::uint64_t session, std::uint64_t sequence, std::uint64_t command,
@@ -103,19 +144,20 @@ namespace
     {
         return ServerCommandProposal(sessionId(session), SessionGeneration::fromValue(generation).value(),
             CommandSequence::fromValue(sequence).value(), CommandId::fromValue(command).value(),
-            CanonicalRevision::initial(), EntityPrecondition(entityId(entity), EntityRevision::fromValue(revision).value(),
-                                       AuthorityEpoch::fromValue(epoch).value()),
+            CanonicalRevision::initial(),
+            EntityPrecondition(entityId(entity), EntityRevision::fromValue(revision).value(),
+                AuthorityEpoch::fromValue(epoch).value()),
             CellTransitionCommandProposal(cell));
     }
 
-    ServerCommandProposal locomotionProposal(std::uint64_t session, std::uint64_t sequence,
-        std::uint64_t command, std::uint64_t entity, std::uint64_t revision, LocomotionMode mode,
-        Turn32 facing, LinearVelocity3 velocity)
+    ServerCommandProposal locomotionProposal(std::uint64_t session, std::uint64_t sequence, std::uint64_t command,
+        std::uint64_t entity, std::uint64_t revision, LocomotionMode mode, Turn32 facing, LinearVelocity3 velocity)
     {
         return ServerCommandProposal(sessionId(session), SessionGeneration::initial(),
             CommandSequence::fromValue(sequence).value(), CommandId::fromValue(command).value(),
-            CanonicalRevision::initial(), EntityPrecondition(entityId(entity),
-                EntityRevision::fromValue(revision).value(), AuthorityEpoch::initial()),
+            CanonicalRevision::initial(),
+            EntityPrecondition(
+                entityId(entity), EntityRevision::fromValue(revision).value(), AuthorityEpoch::initial()),
             PlayerLocomotionCommandProposal(*LocomotionInputTick::fromValue(sequence),
                 *LocomotionInputSequence::fromValue(sequence), LocomotionIntent(mode, facing, velocity)));
     }
@@ -181,6 +223,19 @@ namespace
         }
     };
 
+    class ObjectOutcomeScriptSink final : public CanonicalScriptSink
+    {
+    public:
+        CanonicalSinkDeliveryResult tryConsume(
+            const std::shared_ptr<const CanonicalStatePublication>& value) noexcept override
+        {
+            publication = value;
+            return CanonicalSinkDeliveryResult::Accepted;
+        }
+
+        std::shared_ptr<const CanonicalStatePublication> publication;
+    };
+
     CommandBatchReductionResult reduceCommands(
         CanonicalCommandReducer& reducer, std::span<const ServerCommandProposal> values)
     {
@@ -191,6 +246,129 @@ namespace
         if (!pumped || pumped.batches().size() != 1)
             return {};
         return reducer.apply(pumped.batches().front());
+    }
+
+    bool object_interactions_share_global_command_order_with_cell_transitions()
+    {
+        auto fixture = interactiveFixture();
+        NullMetricSink metrics;
+        NullStructuredEventSink events;
+        Observability observability(metrics, events);
+        CanonicalCommandReducer reducer(fixture.players, observability, fixture.manifest);
+        const auto cell7 = CellId::interior(*CellSpaceId::fromValue(7));
+        const auto cell8 = CellId::exterior(*CellSpaceId::fromValue(8), 0, 0);
+        const std::array commands{
+            transitionProposal(10, 1, 1001, 101, 1, cell8),
+            interactionProposal(2, 1002, 1, cell7, Position3(10, 0, 0), ObjectRevision::initial()),
+        };
+        IntakeFixture intake;
+        if (!intake.submit(commands))
+            return false;
+        const auto pumped = intake.pumpFirst();
+        if (!pumped || pumped.batches().size() != 1)
+            return false;
+        auto prepared = reducer.prepare(pumped.batches().front(), fixture.objects, fixture.catalog);
+        const auto outcomes = prepared.result().dispositions();
+        const auto candidateObjects = prepared.candidateInteractiveObjects();
+        if (!prepared.result() || outcomes.size() != 2 || outcomes[0].disposition() != CommandDisposition::Applied
+            || outcomes[1].disposition() != CommandDisposition::ObjectInteractionRejected || !candidateObjects
+            || *candidateObjects != fixture.objects)
+            return false;
+        if (!reducer.commit(std::move(prepared), fixture.objects))
+            return false;
+        const auto publication = reducer.latestPublication();
+        const auto& changes = publication->changes();
+        return reducer.state().players().front().transform().cell() == cell8
+            && reducer.state().activeSessions().front().highestContiguousFinalizedCommand()
+            == *CommandSequence::fromValue(2)
+            && changes.size() == 2 && !changes[0].objectInteractionOutcome() && changes[1].objectInteractionOutcome()
+            && changes[1].objectInteractionOutcome()->code == ObjectInteractionResultCode::CellMismatch
+            && fixture.objects.find(*InteractiveObjectId::fromValue(1))->trapState() == TrapState::Armed;
+    }
+
+    bool trap_and_teleport_outcomes_commit_with_object_and_player_state()
+    {
+        auto fixture = interactiveFixture();
+        NullMetricSink metrics;
+        NullStructuredEventSink events;
+        Observability observability(metrics, events);
+        ObjectOutcomeScriptSink script;
+        CanonicalCommandReducer reducer(
+            fixture.players, observability, CanonicalSinkBundle(nullptr, nullptr, &script, nullptr), fixture.manifest);
+        const auto cell7 = CellId::interior(*CellSpaceId::fromValue(7));
+        const std::array commands{
+            interactionProposal(1, 2001, 1, cell7, Position3(10, 0, 0), ObjectRevision::initial()),
+            interactionProposal(2, 2002, 2, cell7, Position3(20, 0, 0), ObjectRevision::initial()),
+        };
+        IntakeFixture intake;
+        if (!intake.submit(commands))
+            return false;
+        const auto pumped = intake.pumpFirst();
+        if (!pumped || pumped.batches().size() != 1)
+            return false;
+        auto prepared = reducer.prepare(pumped.batches().front(), fixture.objects, fixture.catalog);
+        if (!prepared.result() || prepared.result().dispositions().size() != 2
+            || prepared.result().dispositions()[0].disposition() != CommandDisposition::Applied
+            || prepared.result().dispositions()[1].disposition() != CommandDisposition::Applied
+            || !prepared.candidateInteractiveObjects())
+            return false;
+        if (!reducer.commit(std::move(prepared), fixture.objects))
+            return false;
+
+        const auto publication = reducer.latestPublication();
+        const auto changes = publication->changes();
+        const auto* trap = fixture.objects.find(*InteractiveObjectId::fromValue(1));
+        const auto* teleporter = fixture.objects.find(*InteractiveObjectId::fromValue(2));
+        const auto& teleportedPlayer = reducer.state().players().front();
+        return script.publication == publication && changes.size() == 2 && changes[0].objectInteractionOutcome()
+            && changes[0].objectInteractionOutcome()->code == ObjectInteractionResultCode::TrapSprung
+            && changes[0].objectInteractionOutcome()->sprungTrap == *TrapPrototypeId::fromValue(11)
+            && changes[1].objectInteractionOutcome() && changes[1].objectInteractionOutcome()->playerTeleport
+            && changes[1].playerReplacement() && teleportedPlayer.transform() == fixture.destination
+            && teleportedPlayer.linearVelocity() == LinearVelocity3(0, 0, 0)
+            && teleportedPlayer.entityRevision() == *EntityRevision::fromValue(2) && trap
+            && trap->trapState() == TrapState::Disarmed && trap->revision() == *ObjectRevision::fromValue(2)
+            && teleporter && teleporter->revision() == *ObjectRevision::fromValue(2);
+    }
+
+    bool stale_object_base_rejects_the_whole_prepared_commit()
+    {
+        auto fixture = interactiveFixture();
+        NullMetricSink metrics;
+        NullStructuredEventSink events;
+        Observability observability(metrics, events);
+        CanonicalCommandReducer reducer(fixture.players, observability, fixture.manifest);
+        const auto cell7 = CellId::interior(*CellSpaceId::fromValue(7));
+        const std::array commands{
+            interactionProposal(1, 3001, 2, cell7, Position3(20, 0, 0), ObjectRevision::initial()),
+        };
+        IntakeFixture intake;
+        if (!intake.submit(commands))
+            return false;
+        const auto pumped = intake.pumpFirst();
+        if (!pumped || pumped.batches().size() != 1)
+            return false;
+        auto prepared = reducer.prepare(pumped.batches().front(), fixture.objects, fixture.catalog);
+        if (!prepared.result() || !prepared.candidateInteractiveObjects())
+            return false;
+
+        const InteractObjectCommand competing{
+            .player = playerId(1),
+            .objectId = *InteractiveObjectId::fromValue(1),
+            .cell = cell7,
+            .interactionOrigin = Position3(10, 0, 0),
+            .expectedRevision = ObjectRevision::initial(),
+            .kind = ObjectInteractionKind::Activate,
+        };
+        auto external = applyObjectInteraction(
+            fixture.objects, fixture.catalog, reducer.state(), competing, *ServerTick::fromValue(1));
+        if (!external.updatedWorld)
+            return false;
+        fixture.objects = std::move(*external.updatedWorld);
+        const auto stateBeforeCommit = reducer.state();
+        const auto objectsBeforeCommit = fixture.objects;
+        return !reducer.commit(std::move(prepared), fixture.objects) && reducer.state() == stateBeforeCommit
+            && fixture.objects == objectsBeforeCommit;
     }
 
     bool valid_bound_next_command_atomically_replaces_player_and_ack()
@@ -223,8 +401,8 @@ namespace
         NullStructuredEventSink events;
         Observability observability(metrics, events);
         CanonicalCommandReducer reducer(state(players, sessions), observability);
-        const std::array commands{ transitionProposal(10, 1, 1001, 101, 999,
-            CellId::interior(CellSpaceId::fromValue(7).value())) };
+        const std::array commands{ transitionProposal(
+            10, 1, 1001, 101, 999, CellId::interior(CellSpaceId::fromValue(7).value())) };
         const auto result = reduceCommands(reducer, commands);
         const auto& current = reducer.state();
         return result && result.dispositions().front().disposition() == CommandDisposition::Applied
@@ -237,7 +415,8 @@ namespace
 
     bool unknown_and_same_fixture_transitions_finalize_without_spatial_mutation()
     {
-        const std::array players{ CanonicalPlayerEntityState(playerId(1), entityId(101), AppearanceId::fromValue(1).value(),
+        const std::array players{ CanonicalPlayerEntityState(playerId(1), entityId(101),
+            AppearanceId::fromValue(1).value(),
             Transform(CellId::interior(CellSpaceId::fromValue(7).value()), Position3(1, 2, 3),
                 Orientation3(Turn32::fromValue(0), Turn32::fromValue(0), Turn32::fromValue(0))),
             LinearVelocity3(4, 5, 6), EntityRevision::fromValue(1).value(), AuthorityEpoch::fromValue(1).value(),
@@ -247,11 +426,11 @@ namespace
         NullStructuredEventSink events;
         Observability observability(metrics, events);
         CanonicalCommandReducer reducer(state(players, sessions), observability);
-        const std::array unknown{ transitionProposal(10, 1, 1001, 101, 1,
-            CellId::interior(CellSpaceId::fromValue(9).value())) };
+        const std::array unknown{ transitionProposal(
+            10, 1, 1001, 101, 1, CellId::interior(CellSpaceId::fromValue(9).value())) };
         const auto rejected = reduceCommands(reducer, unknown);
-        const std::array same{ transitionProposal(10, 2, 1002, 101, 1,
-            CellId::interior(CellSpaceId::fromValue(7).value())) };
+        const std::array same{ transitionProposal(
+            10, 2, 1002, 101, 1, CellId::interior(CellSpaceId::fromValue(7).value())) };
         const auto idempotent = reduceCommands(reducer, same);
         return rejected && idempotent
             && rejected.dispositions().front().disposition() == CommandDisposition::UnknownCell
@@ -560,8 +739,7 @@ namespace
         NullStructuredEventSink events;
         Observability observability(metrics, events);
         AuthoritativeCollision collision;
-        CanonicalCommandReducer reducer(
-            state(players, sessions), observability, testContentManifest(), collision);
+        CanonicalCommandReducer reducer(state(players, sessions), observability, testContentManifest(), collision);
         const std::array commands{ proposal(10, 1, 1001, 101, 1, LinearVelocity3(100, 0, 0)) };
         IntakeFixture fixture;
         if (!fixture.submit(commands))
@@ -575,8 +753,7 @@ namespace
             && root.transform().position().x() == players.front().transform().position().x() + 2
             && root.transform().cell() == players.front().transform().cell()
             && root.transform().orientation() == players.front().transform().orientation()
-            && root.linearVelocity() == LinearVelocity3(0, 0, 0)
-            && reducer.commit(std::move(prepared));
+            && root.linearVelocity() == LinearVelocity3(0, 0, 0) && reducer.commit(std::move(prepared));
     }
 
     bool manifest_walk_profile_and_collision_failure_are_fail_closed()
@@ -616,8 +793,8 @@ namespace
         NullStructuredEventSink events;
         Observability observability(metrics, events);
         CanonicalCommandReducer reducer(state(players, sessions), observability, contentManifest(profile));
-        const std::array accepted{ locomotionProposal(10, 1, 1001, 101, 1, LocomotionMode::Run,
-            Turn32::fromValue(123), LinearVelocity3(30, 0, 0)) };
+        const std::array accepted{ locomotionProposal(
+            10, 1, 1001, 101, 1, LocomotionMode::Run, Turn32::fromValue(123), LinearVelocity3(30, 0, 0)) };
         const auto result = reduceCommands(reducer, accepted);
         const auto current = reducer.state().players().front();
         if (!result || result.dispositions().front().disposition() != CommandDisposition::Applied
@@ -626,8 +803,8 @@ namespace
             || current.linearVelocity() != LinearVelocity3(30, 0, 0))
             return false;
 
-        const std::array rejected{ locomotionProposal(10, 2, 1002, 101, 2, LocomotionMode::Sneak,
-            Turn32::fromValue(456), LinearVelocity3(11, 0, 0)) };
+        const std::array rejected{ locomotionProposal(
+            10, 2, 1002, 101, 2, LocomotionMode::Sneak, Turn32::fromValue(456), LinearVelocity3(11, 0, 0)) };
         const auto rejection = reduceCommands(reducer, rejected);
         return rejection && rejection.dispositions().front().disposition() == CommandDisposition::MotionOutOfRange
             && reducer.state().players().front() == current;
@@ -975,6 +1152,12 @@ namespace
 int main()
 {
     const std::array tests{
+        std::pair{ "object_interactions_share_global_command_order_with_cell_transitions",
+            &object_interactions_share_global_command_order_with_cell_transitions },
+        std::pair{ "trap_and_teleport_outcomes_commit_with_object_and_player_state",
+            &trap_and_teleport_outcomes_commit_with_object_and_player_state },
+        std::pair{ "stale_object_base_rejects_the_whole_prepared_commit",
+            &stale_object_base_rejects_the_whole_prepared_commit },
         std::pair{ "valid_bound_next_command_atomically_replaces_player_and_ack",
             &valid_bound_next_command_atomically_replaces_player_and_ack },
         std::pair{ "stale_observed_revision_fixture_transition_still_changes_cell_and_ack",
@@ -1005,8 +1188,8 @@ int main()
             &motion_magnitude_is_bounded_before_canonical_mutation },
         std::pair{
             "extreme_motion_input_cannot_fail_the_server_tick", &extreme_motion_input_cannot_fail_the_server_tick },
-        std::pair{ "server_collision_is_the_only_canonical_root_result",
-            &server_collision_is_the_only_canonical_root_result },
+        std::pair{
+            "server_collision_is_the_only_canonical_root_result", &server_collision_is_the_only_canonical_root_result },
         std::pair{ "manifest_walk_profile_and_collision_failure_are_fail_closed",
             &manifest_walk_profile_and_collision_failure_are_fail_closed },
         std::pair{ "versioned_locomotion_applies_mode_facing_and_manifest_speed",

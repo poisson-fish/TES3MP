@@ -3,6 +3,8 @@
 #include "authenticated_join_composition.hpp"
 #include "connection_session_coordinator.hpp"
 #include "content_collision.hpp"
+#include "interactive_object_content.hpp"
+#include "interactive_object_interest_projection.hpp"
 #include "interest_projection.hpp"
 #include "phase7_proof_profile.hpp"
 #include "phase7_queue_telemetry.hpp"
@@ -10,6 +12,9 @@
 #include "resume_token_context.hpp"
 #include "server_application.hpp"
 #include "server_config.hpp"
+#include "tes3mp/interactive_object_catalog.hpp"
+#include "tes3mp/interactive_object_replication.hpp"
+#include "tes3mp/interactive_object_world.hpp"
 
 #include <array>
 #include <cassert>
@@ -55,6 +60,7 @@ namespace
           "movement_profile = sneak:1024;walk:4097;run:8192;jump:4096\n"
           "collision_content_file = collision.txt\n"
           "actor_content_file = actors.txt\n"
+          "interactive_object_content_file = objects.txt\n"
           "player_identity_file = players.txt\n";
 
     class FakeRuntime final : public TES3MP::TransportRuntime
@@ -235,6 +241,32 @@ namespace
     {
         auto versions = std::get<ProtocolVersionRange>(ProtocolVersionRange::create(1, 3, 3));
         return std::get<CapabilityOffer>(CapabilityOffer::create(versions, {}, {}));
+    }
+
+    CapabilityOffer objectOffer()
+    {
+        auto versions = std::get<ProtocolVersionRange>(ProtocolVersionRange::create(1, 2, 3));
+        const std::array capabilities{ interactiveObjectReplicationCapability() };
+        return std::get<CapabilityOffer>(CapabilityOffer::create(versions, capabilities, {}));
+    }
+
+    InteractiveObjectCatalog sampleObjectCatalog(const ContentManifest& manifest)
+    {
+        const auto zero = Turn32::fromValue(0);
+        const auto tr7
+            = Transform(CellId::interior(id<CellSpaceId>(7)), Position3(100, 20, 30), Orientation3(zero, zero, zero));
+        const auto tr8 = Transform(
+            CellId::exterior(id<CellSpaceId>(8), 0, 0), Position3(500, 20, 30), Orientation3(zero, zero, zero));
+        const std::array entries{ InteractiveObjectCatalogEntry{ id<InteractiveObjectId>(1),
+                                      InteractiveObjectKind::StandardDoor, CellId::interior(id<CellSpaceId>(7)), tr7,
+                                      std::nullopt, ObjectLockDeclaration{ false, 0, std::nullopt },
+                                      ObjectTrapDeclaration{ false, std::nullopt } },
+            InteractiveObjectCatalogEntry{ id<InteractiveObjectId>(2), InteractiveObjectKind::StandardDoor,
+                CellId::exterior(id<CellSpaceId>(8), 0, 0), tr8, std::nullopt,
+                ObjectLockDeclaration{ false, 0, std::nullopt }, ObjectTrapDeclaration{ false, std::nullopt } } };
+        auto created = InteractiveObjectCatalog::create(manifest, entries);
+        assert(created.has_value());
+        return std::move(*created);
     }
 
     AdmissionScopeId scope(std::byte value)
@@ -434,6 +466,7 @@ int main()
         assert(config.tickIntervalMilliseconds == 16 && config.disconnectGraceMilliseconds == 30000);
         assert(config.collisionContentFile == std::filesystem::path("collision.txt"));
         assert(config.actorContentFile == std::filesystem::path("actors.txt"));
+        assert(config.interactiveObjectContentFile == std::filesystem::path("objects.txt"));
         const std::vector<Position3> expectedSpawns{ Position3(-10, 20, 30), Position3(40, 50, 60) };
         assert(config.spawnPositions == expectedSpawns);
         assert(config.contentManifest.movementProfile().speed(LocomotionMode::Sneak) == 1024
@@ -457,8 +490,8 @@ int main()
         std::string("sneak:1024;walk:4097;run:8192;jump:4096").size(), "sneak:4097;walk:1024;run:8192;jump:4096");
     assert(std::holds_alternative<ConfigError>(parseServerConfig(invalidMovementProfile)));
     auto invalidSpawnPositions = std::string(validConfig);
-    invalidSpawnPositions.replace(invalidSpawnPositions.find("-10:20:30;40:50:60"),
-        std::string("-10:20:30;40:50:60").size(), "1:2");
+    invalidSpawnPositions.replace(
+        invalidSpawnPositions.find("-10:20:30;40:50:60"), std::string("-10:20:30;40:50:60").size(), "1:2");
     assert(std::holds_alternative<ConfigError>(parseServerConfig(invalidSpawnPositions)));
 
     const auto collisionPath = std::filesystem::temp_directory_path() / "tes3mp-server-collision-content-test";
@@ -544,6 +577,32 @@ int main()
     assert(std::get<ActorContentError>(loadActorContent(actorPath, parsedConfig().contentManifest))
         == ActorContentError::Malformed);
     std::filesystem::remove(actorPath);
+
+    const auto objectPath = std::filesystem::temp_directory_path() / "tes3mp-server-object-content-test";
+    const auto writeObjects = [&](std::string_view content) {
+        std::ofstream stream(objectPath, std::ios::binary | std::ios::trunc);
+        stream << content;
+        assert(static_cast<bool>(stream));
+    };
+    constexpr std::string_view objectHeader
+        = "TES3MP_INTERACTIVE_OBJECTS_V1\n"
+          "manifest 0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20\n";
+    writeObjects(std::string(objectHeader)
+        + "object 1 standard interior 7 100 20 30 0 0 0 0 none none\n"
+          "object 2 teleport interior 7 20 20 30 0 0 0 0 none none exterior 8 0 0 500 20 30 0 0 0\n");
+    auto objectContent = loadInteractiveObjectContent(objectPath, parsedConfig().contentManifest);
+    assert(std::holds_alternative<InteractiveObjectCatalog>(objectContent));
+    const auto& loadedObjects = std::get<InteractiveObjectCatalog>(objectContent);
+    assert(loadedObjects.entries().size() == 2 && loadedObjects.entries()[0].objectId == id<InteractiveObjectId>(1)
+        && loadedObjects.entries()[1].destination
+        && loadedObjects.entries()[1].destination->cell == CellId::exterior(id<CellSpaceId>(8), 0, 0));
+    auto loadedWorld = createInitialCanonicalInteractiveObjectWorld(loadedObjects);
+    assert(std::holds_alternative<CanonicalInteractiveObjectWorld>(loadedWorld));
+    writeObjects(std::string(objectHeader) + "object 1 standard interior 7 0 0 0 0 0 0 0 99 none\n");
+    assert(std::get<InteractiveObjectContentError>(
+               loadInteractiveObjectContent(objectPath, parsedConfig().contentManifest))
+        == InteractiveObjectContentError::Malformed);
+    std::filesystem::remove(objectPath);
 
     const auto temporary = std::filesystem::temp_directory_path() / "tes3mp-server-password-test";
     {
@@ -1050,5 +1109,297 @@ int main()
         auto prepared = reducer.prepareTick(batches.batches()[0]);
         assert(!prepared.result() && prepared.result().error() == CommandBatchReductionError::SpatialIntegrationOverflow
             && reducer.state() == before);
+    }
+    {
+        FixedClock clock;
+        NullMetricSink metrics;
+        NullStructuredEventSink events;
+        Observability observability(metrics, events);
+        FakeAuthentication authentication;
+        RecordingCrypto crypto;
+        auto queues = OutboundQueueSet::create(OutboundQueuePolicy{}, 2);
+        auto timeouts = *SessionTimeoutPolicy::create(1'000'000, 1'000'000, 1'000'000);
+
+        const auto objectCatalog = sampleObjectCatalog(config.contentManifest);
+        auto initialObjects = createInitialCanonicalInteractiveObjectWorld(objectCatalog);
+        assert(std::holds_alternative<CanonicalInteractiveObjectWorld>(initialObjects));
+        auto objects = std::get<CanonicalInteractiveObjectWorld>(std::move(initialObjects));
+
+        ConnectionSessionCoordinator sessions(
+            clock, observability, timeouts, objectOffer(), authentication, *queues, 2, nullptr, &objects);
+        JoinFixture joinFixture;
+        auto& joins = joinFixture.joins;
+        ServerCommandIntakeCoordinator intake(
+            clock, observability, clock.now(), ServerTick::initial(), IngressOrdinal::initial());
+        auto lifecycle
+            = ServerLifecycleCoordinator::create(config.disconnectGraceMilliseconds * 1'000'000, joinFixture.reducer);
+        assert(lifecycle);
+        FakeRuntime wiredRuntime;
+        const auto connection = TransportConnectionId::initial();
+        wiredRuntime.events.push_back(
+            { TransportEventKind::ConnectionAccepted, TransportFailure::None, std::nullopt, std::nullopt, connection,
+                std::nullopt, TransportSecurity::EncryptedUnauthenticated, scope(std::byte{ 8 }) });
+        const auto helloPayload = encodeClientHello(ClientHello::fromOffer(objectOffer()));
+        wiredRuntime.incoming.push_back({ TransportChannel::ReliableOrdered,
+            std::get<std::vector<std::byte>>(
+                encodeProtocolFrame(MessageClass::SessionControl, MessageKind::ClientHello, helloPayload)) });
+
+        ServerApplication wired(wiredRuntime, config,
+            ServerApplicationWiring{ sessions, joins, crypto, *queues, clock, intake, joinFixture.reducer, *lifecycle,
+                nullptr, nullptr, nullptr, &objectCatalog, &objects });
+        assert(wired.start() && wired.pump(ServerTick::initial()));
+        assert(sessions.size() == 1 && wiredRuntime.sent.size() == 1);
+        assert(std::get<DecodedFrame>(decodeProtocolFrame(wiredRuntime.sent[0])).messageKind()
+            == MessageKind::ServerHello);
+
+        auto material = AuthenticationMaterial::create({});
+        const auto authenticationPayload
+            = encodeAuthenticationRequest(AuthenticationRequest::join(std::move(*material)));
+        wiredRuntime.incoming.push_back({ TransportChannel::ReliableOrdered,
+            std::get<std::vector<std::byte>>(encodeProtocolFrame(
+                MessageClass::SessionControl, MessageKind::AuthenticationRequest, authenticationPayload)) });
+        assert(wired.pump(ServerTick::initial()));
+        assert(lifecycle->liveCount() == 1 && joinFixture.reducer.state().activeSessions().size() == 1);
+
+        // Verify initial join received ReliableInteractiveObjectInterestBaseline for spawn cell (interior:7)
+        bool sawObjectBaseline = false;
+        ObjectRevision initialDoorRevision = ObjectRevision::initial();
+        for (const auto& bytes : wiredRuntime.sent)
+        {
+            const auto frame = decodeProtocolFrame(bytes);
+            if (!std::holds_alternative<DecodedFrame>(frame))
+                continue;
+            if (std::get<DecodedFrame>(frame).messageKind() == MessageKind::ReliableInteractiveObjectInterestBaseline)
+            {
+                auto decoded = decodeReliableInteractiveObjectInterestBaseline(std::get<DecodedFrame>(frame).payload());
+                assert(std::holds_alternative<ReliableInteractiveObjectInterestBaseline>(decoded));
+                const auto& baseline = std::get<ReliableInteractiveObjectInterestBaseline>(decoded);
+                assert(baseline.members().size() == 1);
+                assert(baseline.members()[0].objectId == id<InteractiveObjectId>(1));
+                assert(baseline.members()[0].doorState == DoorState::Closed);
+                initialDoorRevision = baseline.members()[0].revision;
+                sawObjectBaseline = true;
+            }
+        }
+        assert(sawObjectBaseline);
+
+        // Key possession has no authoritative inventory source until Phase 15.
+        // Reject key-unlock commands at intake instead of treating an empty key set as verification.
+        const ClientInteractObjectCommand deferredUnlock{ .sessionId = id<SessionId>(1),
+            .sessionGeneration = SessionGeneration::initial(),
+            .commandSequence = id<CommandSequence>(1),
+            .commandId = id<CommandId>(99),
+            .observedCanonicalRevision = joinFixture.reducer.canonicalRevision(),
+            .objectId = id<InteractiveObjectId>(1),
+            .targetCell = CellId::interior(id<CellSpaceId>(7)),
+            .interactionOrigin = Position3(-10, 20, 30),
+            .expectedRevision = initialDoorRevision,
+            .kind = ObjectInteractionKind::UnlockWithKey,
+            .requestedKey = id<KeyPrototypeId>(1) };
+        const auto deferredUnlockFrame
+            = std::get<std::vector<std::byte>>(encodeProtocolFrame(MessageClass::ReliableOperation,
+                MessageKind::ClientInteractObjectCommand, encodeClientInteractObjectCommand(deferredUnlock)));
+        assert(sessions.dispatch(connection, TransportMessage{ TransportChannel::ReliableOrdered, deferredUnlockFrame },
+                   joins, crypto, intake, ServerTick::initial())
+            == ConnectionSessionResult::ProtocolRejected);
+
+        // Interaction command: player in cell 7 activates door 1
+        wiredRuntime.sent.clear();
+        ClientInteractObjectCommand interactCmd{ .sessionId = id<SessionId>(1),
+            .sessionGeneration = SessionGeneration::initial(),
+            .commandSequence = id<CommandSequence>(1),
+            .commandId = id<CommandId>(1),
+            .observedCanonicalRevision = joinFixture.reducer.canonicalRevision(),
+            .objectId = id<InteractiveObjectId>(1),
+            .targetCell = CellId::interior(id<CellSpaceId>(7)),
+            .interactionOrigin = Position3(-10, 20, 30),
+            .expectedRevision = initialDoorRevision,
+            .kind = ObjectInteractionKind::Activate,
+            .requestedKey = std::nullopt };
+        const auto interactFrame = std::get<std::vector<std::byte>>(encodeProtocolFrame(MessageClass::ReliableOperation,
+            MessageKind::ClientInteractObjectCommand, encodeClientInteractObjectCommand(interactCmd)));
+        wiredRuntime.incoming.push_back({ TransportChannel::ReliableOrdered, interactFrame });
+
+        clock.nanoseconds = 34'000'000;
+        assert(wired.pump(id<ServerTick>(1)));
+
+        // Verify that door 1 in objects is now Open with advanced revision
+        const auto* doorObj = objects.find(id<InteractiveObjectId>(1));
+        assert(doorObj && doorObj->doorState() == DoorState::Open);
+        assert(doorObj->revision() > initialDoorRevision);
+        const auto* finalizedInteraction = joinFixture.reducer.state().findActiveSession(interactCmd.sessionId);
+        const auto interactionPublication = joinFixture.reducer.latestPublication();
+        assert(finalizedInteraction
+            && finalizedInteraction->highestContiguousFinalizedCommand() == interactCmd.commandSequence
+            && interactionPublication && interactionPublication->changes().size() == 1
+            && interactionPublication->changes()[0].commandId() == interactCmd.commandId
+            && interactionPublication->changes()[0].objectInteractionOutcome()
+            && interactionPublication->changes()[0].objectInteractionOutcome()->code
+                == ObjectInteractionResultCode::Success);
+
+        // Drain queue so messages reach wiredRuntime.sent
+        for (std::uint64_t now = 35; now < 50; ++now)
+        {
+            const auto drained = queues->pump(wiredRuntime, connection, now);
+            assert(drained && *drained != OutboundPumpResult::TransportFailed);
+            if (*drained == OutboundPumpResult::Idle)
+                break;
+        }
+
+        // Verify client received updated baseline with doorState == DoorState::Open
+        bool sawUpdatedDoor = false;
+        for (const auto& bytes : wiredRuntime.sent)
+        {
+            const auto frame = decodeProtocolFrame(bytes);
+            if (!std::holds_alternative<DecodedFrame>(frame))
+                continue;
+            if (std::get<DecodedFrame>(frame).messageKind() == MessageKind::ReliableInteractiveObjectInterestBaseline)
+            {
+                auto decoded = decodeReliableInteractiveObjectInterestBaseline(std::get<DecodedFrame>(frame).payload());
+                if (std::holds_alternative<ReliableInteractiveObjectInterestBaseline>(decoded))
+                {
+                    const auto& baseline = std::get<ReliableInteractiveObjectInterestBaseline>(decoded);
+                    if (!baseline.members().empty() && baseline.members()[0].objectId == id<InteractiveObjectId>(1)
+                        && baseline.members()[0].doorState == DoorState::Open)
+                    {
+                        sawUpdatedDoor = true;
+                    }
+                }
+            }
+        }
+        assert(sawUpdatedDoor);
+
+        // Scenario 11: Unloaded cell preserves canonical object modifications without ticking
+        // Player disconnects, cell 7 is now empty
+        const auto closedRevision = doorObj->revision();
+        wiredRuntime.events.push_back({ TransportEventKind::ConnectionClosed, TransportFailure::None, std::nullopt,
+            std::nullopt, connection, std::nullopt, TransportSecurity::EncryptedUnauthenticated, std::nullopt });
+        assert(wired.pump(id<ServerTick>(2)));
+        assert(sessions.size() == 0);
+        // Advance several ticks with cell 7 completely empty
+        clock.nanoseconds = 100'000'000;
+        assert(wired.pump(id<ServerTick>(3)));
+        clock.nanoseconds = 200'000'000;
+        assert(wired.pump(id<ServerTick>(4)));
+        // Verify object 1 in cell 7 still preserves DoorState::Open without ticking
+        const auto* preserved = objects.find(id<InteractiveObjectId>(1));
+        assert(preserved && preserved->doorState() == DoorState::Open && preserved->revision() == closedRevision);
+
+        // Scenario 12: Late join and resync receive complete cell interactive object baseline
+        // Second player joins into cell 7
+        const auto conn2 = id<TransportConnectionId>(2);
+        wiredRuntime.events.push_back({ TransportEventKind::ConnectionAccepted, TransportFailure::None, std::nullopt,
+            std::nullopt, conn2, std::nullopt, TransportSecurity::EncryptedUnauthenticated, scope(std::byte{ 9 }) });
+        wiredRuntime.incomingByConnection[conn2].push_back({ TransportChannel::ReliableOrdered,
+            std::get<std::vector<std::byte>>(
+                encodeProtocolFrame(MessageClass::SessionControl, MessageKind::ClientHello, helloPayload)) });
+        wiredRuntime.sent.clear();
+        assert(wired.pump(id<ServerTick>(5)));
+
+        auto mat2 = AuthenticationMaterial::create({});
+        const auto auth2Payload = encodeAuthenticationRequest(AuthenticationRequest::join(std::move(*mat2)));
+        wiredRuntime.incomingByConnection[conn2].push_back({ TransportChannel::ReliableOrdered,
+            std::get<std::vector<std::byte>>(
+                encodeProtocolFrame(MessageClass::SessionControl, MessageKind::AuthenticationRequest, auth2Payload)) });
+        assert(wired.pump(id<ServerTick>(5)));
+
+        // Late joiner conn2 receives baseline reflecting modified DoorState::Open!
+        bool lateJoinSawModified = false;
+        for (const auto& bytes : wiredRuntime.sent)
+        {
+            const auto frame = decodeProtocolFrame(bytes);
+            if (!std::holds_alternative<DecodedFrame>(frame))
+                continue;
+            if (std::get<DecodedFrame>(frame).messageKind() == MessageKind::ReliableInteractiveObjectInterestBaseline)
+            {
+                auto decoded = decodeReliableInteractiveObjectInterestBaseline(std::get<DecodedFrame>(frame).payload());
+                if (std::holds_alternative<ReliableInteractiveObjectInterestBaseline>(decoded))
+                {
+                    const auto& baseline = std::get<ReliableInteractiveObjectInterestBaseline>(decoded);
+                    if (!baseline.members().empty() && baseline.members()[0].objectId == id<InteractiveObjectId>(1)
+                        && baseline.members()[0].doorState == DoorState::Open)
+                    {
+                        lateJoinSawModified = true;
+                    }
+                }
+            }
+        }
+        assert(lateJoinSawModified);
+
+        // Resync test: conn2 requests resync
+        const auto pubBeforeResync = joinFixture.reducer.latestPublication();
+        assert(pubBeforeResync);
+        const auto sess2Id = sessions.session(conn2)->sessionId();
+        assert(sess2Id);
+        const SessionResyncRequest resyncReq(
+            *sess2Id, SessionGeneration::initial(), ResyncReason::LocalFeedGap, pubBeforeResync->stateVersion());
+        wiredRuntime.incomingByConnection[conn2].push_back({ TransportChannel::ReliableOrdered,
+            std::get<std::vector<std::byte>>(encodeProtocolFrame(MessageClass::SessionControl,
+                MessageKind::SessionResyncRequest, encodeSessionResyncRequest(resyncReq))) });
+        wiredRuntime.sent.clear();
+        assert(wired.pump(id<ServerTick>(6)));
+
+        for (std::uint64_t now = 201; now < 215; ++now)
+        {
+            const auto drained = queues->pump(wiredRuntime, conn2, now);
+            assert(drained && *drained != OutboundPumpResult::TransportFailed);
+            if (*drained == OutboundPumpResult::Idle)
+                break;
+        }
+
+        bool resyncSawModified = false;
+        for (const auto& bytes : wiredRuntime.sent)
+        {
+            const auto frame = decodeProtocolFrame(bytes);
+            if (!std::holds_alternative<DecodedFrame>(frame))
+                continue;
+            if (std::get<DecodedFrame>(frame).messageKind() == MessageKind::ReliableInteractiveObjectInterestBaseline)
+            {
+                auto decoded = decodeReliableInteractiveObjectInterestBaseline(std::get<DecodedFrame>(frame).payload());
+                if (std::holds_alternative<ReliableInteractiveObjectInterestBaseline>(decoded))
+                {
+                    const auto& baseline = std::get<ReliableInteractiveObjectInterestBaseline>(decoded);
+                    if (!baseline.members().empty() && baseline.members()[0].objectId == id<InteractiveObjectId>(1)
+                        && baseline.members()[0].doorState == DoorState::Open)
+                    {
+                        resyncSawModified = true;
+                    }
+                }
+            }
+        }
+        assert(resyncSawModified);
+
+        // Object state and its reliable publication commit together. Saturating
+        // the target queue must leave the canonical door unchanged.
+        const auto* secondSession = joinFixture.reducer.state().findActiveSession(*sess2Id);
+        const auto* secondPlayer
+            = secondSession ? joinFixture.reducer.state().findPlayer(secondSession->playerId()) : nullptr;
+        assert(secondPlayer);
+        const auto beforeRejectedPublish = *objects.find(id<InteractiveObjectId>(1));
+        ClientInteractObjectCommand rejectedPublish{ .sessionId = *sess2Id,
+            .sessionGeneration = SessionGeneration::initial(),
+            .commandSequence = id<CommandSequence>(1),
+            .commandId = id<CommandId>(2),
+            .observedCanonicalRevision = joinFixture.reducer.canonicalRevision(),
+            .objectId = id<InteractiveObjectId>(1),
+            .targetCell = beforeRejectedPublish.cell(),
+            .interactionOrigin = secondPlayer->transform().position(),
+            .expectedRevision = beforeRejectedPublish.revision(),
+            .kind = ObjectInteractionKind::Activate,
+            .requestedKey = std::nullopt };
+        const auto rejectedPublishFrame
+            = std::get<std::vector<std::byte>>(encodeProtocolFrame(MessageClass::ReliableOperation,
+                MessageKind::ClientInteractObjectCommand, encodeClientInteractObjectCommand(rejectedPublish)));
+        const std::array<std::byte, 1> filler{};
+        for (std::size_t index = 0; index < OutboundQueuePolicy::MaxReliableMessages; ++index)
+            assert(queues->enqueue(conn2, TransportChannel::ReliableOrdered, filler) == TransportResult::Accepted);
+        wiredRuntime.incomingByConnection[conn2].push_back({ TransportChannel::ReliableOrdered, rejectedPublishFrame });
+        clock.nanoseconds = 234'000'000;
+        assert(!wired.pump(id<ServerTick>(7)));
+        const auto* afterRejectedPublish = objects.find(id<InteractiveObjectId>(1));
+        const auto* uncommittedInteraction = joinFixture.reducer.state().findActiveSession(*sess2Id);
+        assert(afterRejectedPublish && *afterRejectedPublish == beforeRejectedPublish && uncommittedInteraction
+            && !uncommittedInteraction->highestContiguousFinalizedCommand()
+            && wired.failure() == "interactive object output admission failed");
     }
 }

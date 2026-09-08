@@ -10,6 +10,7 @@
 #include <memory>
 #include <optional>
 #include <span>
+#include <utility>
 #include <vector>
 
 namespace TES3MP
@@ -20,7 +21,8 @@ namespace TES3MP
         ServerTick commitTick;
         CanonicalSessionProgress session;
         CanonicalPlayerEntityState player;
-        friend bool operator==(const CanonicalSessionJoinedRecord&, const CanonicalSessionJoinedRecord&) noexcept = default;
+        friend bool operator==(const CanonicalSessionJoinedRecord&, const CanonicalSessionJoinedRecord&) noexcept
+            = default;
     };
 
     struct CanonicalSpatialTickRecord
@@ -46,8 +48,8 @@ namespace TES3MP
         SessionId session;
         PlayerId player;
         SessionGeneration generation;
-        friend bool operator==(const CanonicalSessionLifecycleRecord&,
-            const CanonicalSessionLifecycleRecord&) noexcept = default;
+        friend bool operator==(const CanonicalSessionLifecycleRecord&, const CanonicalSessionLifecycleRecord&) noexcept
+            = default;
     };
 
     class CanonicalStateChangeRecord
@@ -71,6 +73,10 @@ namespace TES3MP
         {
             return mPlayerReplacement;
         }
+        constexpr const std::optional<ObjectInteractionOutcome>& objectInteractionOutcome() const noexcept
+        {
+            return mObjectInteractionOutcome;
+        }
 
         friend bool operator==(const CanonicalStateChangeRecord&, const CanonicalStateChangeRecord&) noexcept = default;
 
@@ -80,7 +86,8 @@ namespace TES3MP
         CanonicalStateChangeRecord(CanonicalStateVersion stateVersion, WriterAdmissionStamp stamp, SessionId sessionId,
             SessionGeneration sessionGeneration, CommandSequence commandSequence, CommandId commandId,
             CommandDisposition disposition, CanonicalSessionProgress sessionReplacement,
-            std::optional<CanonicalPlayerEntityState> playerReplacement) noexcept
+            std::optional<CanonicalPlayerEntityState> playerReplacement,
+            std::optional<ObjectInteractionOutcome> objectInteractionOutcome = std::nullopt) noexcept
             : mStateVersion(stateVersion)
             , mStamp(stamp)
             , mSessionId(sessionId)
@@ -90,6 +97,7 @@ namespace TES3MP
             , mDisposition(disposition)
             , mSessionReplacement(sessionReplacement)
             , mPlayerReplacement(playerReplacement)
+            , mObjectInteractionOutcome(std::move(objectInteractionOutcome))
         {
         }
         CanonicalStateVersion mStateVersion;
@@ -101,6 +109,7 @@ namespace TES3MP
         CommandDisposition mDisposition;
         CanonicalSessionProgress mSessionReplacement;
         std::optional<CanonicalPlayerEntityState> mPlayerReplacement;
+        std::optional<ObjectInteractionOutcome> mObjectInteractionOutcome;
     };
 
     class CanonicalStatePublication
@@ -113,10 +122,7 @@ namespace TES3MP
         std::span<const CanonicalStateChangeRecord> changes() const noexcept { return mChanges; }
         std::span<const CanonicalSessionJoinedRecord> joinedSessions() const noexcept { return mJoinedSessions; }
         std::span<const CanonicalSpatialTickRecord> spatialTicks() const noexcept { return mSpatialTicks; }
-        std::span<const CanonicalSessionLifecycleRecord> sessionLifecycle() const noexcept
-        {
-            return mSessionLifecycle;
-        }
+        std::span<const CanonicalSessionLifecycleRecord> sessionLifecycle() const noexcept { return mSessionLifecycle; }
 
         friend bool operator==(const CanonicalStatePublication&, const CanonicalStatePublication&) noexcept;
 

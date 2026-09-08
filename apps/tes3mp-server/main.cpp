@@ -3,6 +3,7 @@
 #include "actor_content.hpp"
 #include "content_collision.hpp"
 #include "connection_session_coordinator.hpp"
+#include "interactive_object_content.hpp"
 #include "phase7_proof_profile.hpp"
 #include "phase7_queue_telemetry.hpp"
 #include "player_identity_file.hpp"
@@ -11,12 +12,11 @@
 #include <tes3mp/server_authentication.hpp>
 #include <tes3mp/transport_gns.hpp>
 
-#include <algorithm>
-#include <array>
 #include <csignal>
 #include <fstream>
 #include <iostream>
 #include <iterator>
+#include <optional>
 #include <string>
 #include <thread>
 #include <variant>
@@ -105,6 +105,28 @@ int main(int argc, char** argv)
         return 3;
     }
     auto actorWorld = std::move(*actorWorldValue);
+    std::optional<TES3MP::InteractiveObjectCatalog> interactiveObjectCatalog;
+    std::optional<TES3MP::CanonicalInteractiveObjectWorld> interactiveObjectWorld;
+    if (!config.interactiveObjectContentFile.empty())
+    {
+        auto objectContent = TES3MP::ServerApp::loadInteractiveObjectContent(
+            config.interactiveObjectContentFile, config.contentManifest);
+        auto* catalog = std::get_if<TES3MP::InteractiveObjectCatalog>(&objectContent);
+        if (!catalog)
+        {
+            std::cerr << "interactive object content initialization failed\n";
+            return 2;
+        }
+        interactiveObjectCatalog.emplace(std::move(*catalog));
+        auto initialObjects = TES3MP::createInitialCanonicalInteractiveObjectWorld(*interactiveObjectCatalog);
+        auto* world = std::get_if<TES3MP::CanonicalInteractiveObjectWorld>(&initialObjects);
+        if (!world)
+        {
+            std::cerr << "interactive object world initialization failed\n";
+            return 3;
+        }
+        interactiveObjectWorld.emplace(std::move(*world));
+    }
     auto password = TES3MP::ServerApp::loadJoinPassword(config.joinPasswordFile);
     if (const auto* error = std::get_if<TES3MP::ServerApp::ConfigError>(&password))
     {
@@ -166,7 +188,11 @@ int main(int argc, char** argv)
     auto versions = std::get<TES3MP::ProtocolVersionRange>(TES3MP::ProtocolVersionRange::create(
         TES3MP::ServerApp::Phase7ProtocolMajor, TES3MP::ServerApp::Phase7ProtocolMinimumMinor,
         TES3MP::ServerApp::Phase7ProtocolMaximumMinor));
-    const std::array optionalCapabilities{ TES3MP::vrPoseCapability(), TES3MP::actorReplicationCapability() };
+    std::vector<TES3MP::CapabilityId> optionalCapabilities{
+        TES3MP::vrPoseCapability(), TES3MP::actorReplicationCapability()
+    };
+    if (interactiveObjectWorld)
+        optionalCapabilities.push_back(TES3MP::interactiveObjectReplicationCapability());
     auto offer = TES3MP::CapabilityOffer::create(
         std::move(versions), optionalCapabilities, {}, config.contentManifest.id());
     const auto zero = TES3MP::Turn32::fromValue(0);
@@ -197,10 +223,13 @@ int main(int argc, char** argv)
         *limiter, *joinProvider, *resumeStore, clock, playerIdentities.get());
     TES3MP::ServerApp::ConnectionSessionCoordinator sessions(clock, observability, *timeouts,
         std::get<TES3MP::CapabilityOffer>(std::move(offer)), authentication, *queues,
-        TES3MP::ServerApp::Phase7ConnectionCapacity, &actorWorld);
+        TES3MP::ServerApp::Phase7ConnectionCapacity, &actorWorld,
+        interactiveObjectWorld ? &*interactiveObjectWorld : nullptr);
     TES3MP::ServerApp::ServerApplication application(*factory.runtime, config,
         { sessions, *joins, *crypto, *queues, clock, intake, reducer, *lifecycle,
-            &actorCatalog, &actorWorld, collision.get() });
+            &actorCatalog, &actorWorld, collision.get(),
+            interactiveObjectCatalog ? &*interactiveObjectCatalog : nullptr,
+            interactiveObjectWorld ? &*interactiveObjectWorld : nullptr });
     if (!application.start())
     {
         std::cerr << application.failure() << '\n';

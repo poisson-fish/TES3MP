@@ -527,7 +527,7 @@ namespace TES3MP::OpenMWAdapter
                 {
                     if (found != actorRemotes.end()) erase(found);
                     if (remotes.size() + actorRemotes.size() >= MWRender::MaximumReplicatedActors)
-                        return ProviderResult::PresentationFailed;
+                        continue;
                     auto [actorResult, actor] = MWRender::ReplicatedActor::create(*MWBase::Environment::get()
                         .getWorld()->getRenderingManager(), *MWBase::Environment::get().getESMStore(),
                         refId(prototype->record), *targetCell, position);
@@ -536,6 +536,8 @@ namespace TES3MP::OpenMWAdapter
                     found = actorRemotes.try_emplace(
                         observed.entityId, targetCell, std::move(actor), metrics).first;
                 }
+                if (found == actorRemotes.end())
+                    continue;
                 if (found->second.lastObserved
                     && entry->entityRevision() == found->second.lastObserved->entityRevision())
                 {

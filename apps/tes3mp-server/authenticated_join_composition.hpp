@@ -9,6 +9,11 @@
 #include <span>
 #include <optional>
 
+namespace TES3MP
+{
+    class CanonicalInteractiveObjectWorld;
+}
+
 namespace TES3MP::ServerApp
 {
     class ConnectionSessionCoordinator;
@@ -61,8 +66,9 @@ namespace TES3MP::ServerApp
     {
     public:
         TransportJoinResponseQueue(OutboundQueueSet& queues, TransportConnectionId connection,
-            ConnectionSessionCoordinator* sessions = nullptr, const CanonicalActorWorld* actors = nullptr) noexcept
-            : mQueues(queues), mConnection(connection), mSessions(sessions), mActors(actors) {}
+            ConnectionSessionCoordinator* sessions = nullptr, const CanonicalActorWorld* actors = nullptr,
+            const CanonicalInteractiveObjectWorld* objects = nullptr) noexcept
+            : mQueues(queues), mConnection(connection), mSessions(sessions), mActors(actors), mObjects(objects) {}
 
         bool enqueueJoinResponses(std::span<const std::byte> authentication,
             std::span<const std::byte> snapshot, const CanonicalServerState& before,
@@ -74,6 +80,7 @@ namespace TES3MP::ServerApp
         TransportConnectionId mConnection;
         ConnectionSessionCoordinator* mSessions;
         const CanonicalActorWorld* mActors;
+        const CanonicalInteractiveObjectWorld* mObjects;
     };
 }
 

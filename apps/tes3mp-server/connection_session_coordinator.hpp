@@ -1,10 +1,11 @@
 #ifndef TES3MP_SERVER_CONNECTION_SESSION_COORDINATOR_HPP
 #define TES3MP_SERVER_CONNECTION_SESSION_COORDINATOR_HPP
 
+#include "tes3mp/actor_simulation.hpp"
+#include "tes3mp/authenticated_join.hpp"
+#include "tes3mp/interactive_object_world.hpp"
 #include "tes3mp/server_session.hpp"
 #include "tes3mp/transport.hpp"
-#include "tes3mp/authenticated_join.hpp"
-#include "tes3mp/actor_simulation.hpp"
 
 #include <map>
 #include <vector>
@@ -31,10 +32,10 @@ namespace TES3MP::ServerApp
     class ConnectionSessionCoordinator
     {
     public:
-        ConnectionSessionCoordinator(MonotonicClock& clock, Observability& observability,
-            SessionTimeoutPolicy timeouts, CapabilityOffer offer, ServerAuthenticationService& authentication,
-            OutboundQueueSet& queues, std::size_t capacity,
-            const CanonicalActorWorld* actors = nullptr) noexcept;
+        ConnectionSessionCoordinator(MonotonicClock& clock, Observability& observability, SessionTimeoutPolicy timeouts,
+            CapabilityOffer offer, ServerAuthenticationService& authentication, OutboundQueueSet& queues,
+            std::size_t capacity, const CanonicalActorWorld* actors = nullptr,
+            const CanonicalInteractiveObjectWorld* objects = nullptr) noexcept;
 
         ConnectionSessionResult accept(TransportConnectionId connection, AdmissionScopeId scope) noexcept;
         ConnectionSessionResult close(TransportConnectionId connection) noexcept;
@@ -70,8 +71,8 @@ namespace TES3MP::ServerApp
         OutboundQueueSet& mQueues;
         std::size_t mCapacity;
         const CanonicalActorWorld* mActors;
+        const CanonicalInteractiveObjectWorld* mObjects;
         std::map<TransportConnectionId, Connection> mConnections;
-
     };
 }
 

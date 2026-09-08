@@ -300,6 +300,7 @@ namespace TES3MP
         StateVersionCapacityExceeded,
         UnknownCell,
         MotionOutOfRange,
+        ObjectInteractionRejected,
     };
 
     struct CommandReductionEvent

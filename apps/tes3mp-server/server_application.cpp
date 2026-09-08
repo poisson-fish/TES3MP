@@ -1,5 +1,6 @@
 #include "server_application.hpp"
 #include "actor_interest_projection.hpp"
+#include "interactive_object_interest_projection.hpp"
 #include "interest_projection.hpp"
 #include "tes3mp/canonical_resync.hpp"
 
@@ -48,6 +49,18 @@ namespace TES3MP::ServerApp
             return false;
         const auto& hello = session->negotiatedHello();
         return hello && std::ranges::binary_search(hello->negotiatedCapabilities(), actorReplicationCapability());
+    }
+
+    bool ServerApplication::supportsInteractiveObjects(TransportConnectionId connection) const noexcept
+    {
+        if (!mWiring)
+            return false;
+        const auto* session = mWiring->sessions.session(connection);
+        if (!session || session->state() != ServerSessionState::Established || !session->sessionId())
+            return false;
+        const auto& hello = session->negotiatedHello();
+        return hello
+            && std::ranges::binary_search(hello->negotiatedCapabilities(), interactiveObjectReplicationCapability());
     }
 
     bool ServerApplication::start() noexcept
@@ -268,7 +281,12 @@ namespace TES3MP::ServerApp
         auto actorBaseline = candidate && mWiring->actors && supportsActors(connection)
             ? projectActorInterestBaseline(*candidate, *mWiring->actors, *session->sessionId(), tick, *revision)
             : std::optional<ActorInterestBaselineDelivery>{};
-        if (!candidate || !baseline || !observations || !accepted || (supportsActors(connection) && !actorBaseline))
+        auto objectBaseline = candidate && mWiring->interactiveObjects && supportsInteractiveObjects(connection)
+            ? projectInteractiveObjectInterestBaseline(
+                  *candidate, *mWiring->interactiveObjects, *session->sessionId(), tick, *revision)
+            : std::optional<InteractiveObjectInterestBaselineDelivery>{};
+        if (!candidate || !baseline || !observations || !accepted || (supportsActors(connection) && !actorBaseline)
+            || (supportsInteractiveObjects(connection) && !objectBaseline))
         {
             cancel();
             return false;
@@ -277,7 +295,7 @@ namespace TES3MP::ServerApp
         try
         {
             std::vector<std::vector<std::byte>> frames;
-            frames.reserve(5 + observations->size() * 2);
+            frames.reserve(6 + observations->size() * 2);
             auto addFrame = [&](MessageClass messageClass, MessageKind kind, std::vector<std::byte> payload) {
                 auto encoded = encodeProtocolFrame(messageClass, kind, payload);
                 if (!std::holds_alternative<std::vector<std::byte>>(encoded))
@@ -304,16 +322,28 @@ namespace TES3MP::ServerApp
                 cancel();
                 return false;
             }
+            if (objectBaseline
+                && !addFrame(MessageClass::ReliableOperation, MessageKind::ReliableInteractiveObjectInterestBaseline,
+                    encodeReliableInteractiveObjectInterestBaseline(objectBaseline->baseline)))
+            {
+                cancel();
+                return false;
+            }
 
             std::vector<OutboundQueueSet::AtomicMessage> messages;
-            messages.reserve(5 + observations->size() * 2);
-            messages.push_back({ connection, TransportChannel::ReliableOrdered, frames[0] });
-            messages.push_back({ connection, TransportChannel::ReliableOrdered, frames[1] });
-            messages.push_back({ connection, TransportChannel::LatestWins, frames[2] });
+            messages.reserve(6 + observations->size() * 2);
+            std::size_t nextFrameIdx = 0;
+            messages.push_back({ connection, TransportChannel::ReliableOrdered, frames[nextFrameIdx++] });
+            messages.push_back({ connection, TransportChannel::ReliableOrdered, frames[nextFrameIdx++] });
+            messages.push_back({ connection, TransportChannel::LatestWins, frames[nextFrameIdx++] });
             if (actorBaseline)
             {
-                messages.push_back({ connection, TransportChannel::ReliableOrdered, frames[3] });
-                messages.push_back({ connection, TransportChannel::LatestWins, frames[4] });
+                messages.push_back({ connection, TransportChannel::ReliableOrdered, frames[nextFrameIdx++] });
+                messages.push_back({ connection, TransportChannel::LatestWins, frames[nextFrameIdx++] });
+            }
+            if (objectBaseline)
+            {
+                messages.push_back({ connection, TransportChannel::ReliableOrdered, frames[nextFrameIdx++] });
             }
             for (const auto& delivery : *observations)
             {
@@ -368,18 +398,30 @@ namespace TES3MP::ServerApp
             resolved.publication()->stateVersion());
         if (!delivery)
             return false;
-        if (!supportsActors(connection))
+        const bool wantActors = supportsActors(connection);
+        const bool wantObjects = supportsInteractiveObjects(connection);
+        if (!wantActors && !wantObjects)
             return admitInterestBaseline(mWiring->queues, connection, *delivery);
-        if (!mWiring->actors)
+        if (wantActors && !mWiring->actors)
             return false;
-        auto actorDelivery = projectActorInterestBaseline(resolved.publication()->state(), *mWiring->actors,
-            request->sessionId(), tick, mWiring->reducer.canonicalRevision());
-        if (!actorDelivery)
+        if (wantObjects && !mWiring->interactiveObjects)
+            return false;
+        auto actorDelivery = wantActors
+            ? projectActorInterestBaseline(resolved.publication()->state(), *mWiring->actors, request->sessionId(),
+                  tick, mWiring->reducer.canonicalRevision())
+            : std::nullopt;
+        if (wantActors && !actorDelivery)
+            return false;
+        auto objectDelivery = wantObjects
+            ? projectInteractiveObjectInterestBaseline(resolved.publication()->state(), *mWiring->interactiveObjects,
+                  request->sessionId(), tick, mWiring->reducer.canonicalRevision())
+            : std::nullopt;
+        if (wantObjects && !objectDelivery)
             return false;
         try
         {
             std::vector<std::vector<std::byte>> frames;
-            frames.reserve(4);
+            frames.reserve(5);
             const auto add = [&](MessageClass messageClass, MessageKind kind, std::vector<std::byte> payload) {
                 auto frame = encodeProtocolFrame(messageClass, kind, payload);
                 if (!std::holds_alternative<std::vector<std::byte>>(frame))
@@ -390,18 +432,32 @@ namespace TES3MP::ServerApp
             if (!add(MessageClass::ReliableOperation, MessageKind::ReliableInterestBaseline,
                     encodeReliableInterestBaseline(delivery->baseline))
                 || !add(MessageClass::LatestWinsSnapshot, MessageKind::LatestWinsSnapshot,
-                    encodeLatestWinsSnapshot(delivery->view))
-                || !add(MessageClass::ReliableOperation, MessageKind::ReliableActorInterestBaseline,
-                    encodeReliableActorInterestBaseline(actorDelivery->baseline))
-                || !add(MessageClass::LatestWinsSnapshot, MessageKind::LatestWinsActorSnapshot,
-                    encodeLatestWinsActorSnapshot(actorDelivery->view)))
+                    encodeLatestWinsSnapshot(delivery->view)))
                 return false;
-            const std::array<OutboundQueueSet::AtomicMessage, 4> messages{ {
-                { connection, TransportChannel::ReliableOrdered, frames[0] },
-                { connection, TransportChannel::LatestWins, frames[1] },
-                { connection, TransportChannel::ReliableOrdered, frames[2] },
-                { connection, TransportChannel::LatestWins, frames[3] },
-            } };
+            if (wantActors
+                && (!add(MessageClass::ReliableOperation, MessageKind::ReliableActorInterestBaseline,
+                        encodeReliableActorInterestBaseline(actorDelivery->baseline))
+                    || !add(MessageClass::LatestWinsSnapshot, MessageKind::LatestWinsActorSnapshot,
+                        encodeLatestWinsActorSnapshot(actorDelivery->view))))
+                return false;
+            if (wantObjects
+                && !add(MessageClass::ReliableOperation, MessageKind::ReliableInteractiveObjectInterestBaseline,
+                    encodeReliableInteractiveObjectInterestBaseline(objectDelivery->baseline)))
+                return false;
+            std::vector<OutboundQueueSet::AtomicMessage> messages;
+            messages.reserve(frames.size());
+            std::size_t nextIdx = 0;
+            messages.push_back({ connection, TransportChannel::ReliableOrdered, frames[nextIdx++] });
+            messages.push_back({ connection, TransportChannel::LatestWins, frames[nextIdx++] });
+            if (wantActors)
+            {
+                messages.push_back({ connection, TransportChannel::ReliableOrdered, frames[nextIdx++] });
+                messages.push_back({ connection, TransportChannel::LatestWins, frames[nextIdx++] });
+            }
+            if (wantObjects)
+            {
+                messages.push_back({ connection, TransportChannel::ReliableOrdered, frames[nextIdx++] });
+            }
             return mWiring->queues.enqueueMessagesAtomically(messages) == TransportResult::Accepted;
         }
         catch (...)
@@ -621,6 +677,12 @@ namespace TES3MP::ServerApp
             mFailure = "actor composition incomplete";
             return false;
         }
+        if ((mWiring->interactiveObjectCatalog || mWiring->interactiveObjects)
+            && (!mWiring->interactiveObjectCatalog || !mWiring->interactiveObjects))
+        {
+            mFailure = "interactive object composition incomplete";
+            return false;
+        }
         const auto pumpedCommands = mWiring->intake.pump();
         if (!pumpedCommands)
         {
@@ -631,7 +693,9 @@ namespace TES3MP::ServerApp
         {
             const auto before = mWiring->reducer.state();
             const auto revisionBefore = mWiring->reducer.canonicalRevision();
-            auto prepared = mWiring->reducer.prepareTick(batch);
+            auto prepared = mWiring->interactiveObjects
+                ? mWiring->reducer.prepareTick(batch, *mWiring->interactiveObjects, *mWiring->interactiveObjectCatalog)
+                : mWiring->reducer.prepareTick(batch);
             if (!prepared.result())
             {
                 mFailure = "command reduction failed";
@@ -640,6 +704,18 @@ namespace TES3MP::ServerApp
             std::vector<std::pair<TransportConnectionId, InterestDelivery>> routed;
             std::vector<std::pair<TransportConnectionId, LatestWinsSnapshot>> routedViews;
             std::vector<std::pair<TransportConnectionId, ActorInterestBaselineDelivery>> actorBaselines;
+            std::vector<std::pair<TransportConnectionId, InteractiveObjectInterestBaselineDelivery>> objectBaselines;
+            std::vector<CellId> changedObjectCells;
+            const auto dispositions = prepared.result().dispositions();
+            const auto commands = batch.commands();
+            for (std::size_t index = 0; index < dispositions.size(); ++index)
+            {
+                const auto* interaction
+                    = std::get_if<InteractiveObjectCommandProposal>(&commands[index].proposal().payload());
+                if (interaction && dispositions[index].disposition() == CommandDisposition::Applied
+                    && std::ranges::find(changedObjectCells, interaction->cell()) == changedObjectCells.end())
+                    changedObjectCells.push_back(interaction->cell());
+            }
             if (prepared.candidateRevision() != revisionBefore)
             {
                 auto projected = projectInterestChanges(
@@ -698,6 +774,34 @@ namespace TES3MP::ServerApp
                         }
                         actorBaselines.emplace_back(*connection, std::move(*baseline));
                     }
+                if (mWiring->interactiveObjects)
+                    for (const auto& target : prepared.candidateState().activeSessions())
+                    {
+                        const auto connection = mWiring->sessions.connectionForSession(target.sessionId());
+                        const auto* oldSession = before.findActiveSession(target.sessionId());
+                        const auto* oldPlayer = oldSession ? before.findPlayer(oldSession->playerId()) : nullptr;
+                        const auto* newPlayer = prepared.candidateState().findPlayer(target.playerId());
+                        const bool changedCell
+                            = oldPlayer && newPlayer && oldPlayer->transform().cell() != newPlayer->transform().cell();
+                        const bool objectChangedInCell = newPlayer
+                            && std::ranges::find(changedObjectCells, newPlayer->transform().cell())
+                                != changedObjectCells.end();
+                        if (!connection || !newPlayer || (!changedCell && !objectChangedInCell)
+                            || !supportsInteractiveObjects(*connection))
+                            continue;
+                        const auto& projectedObjects = prepared.candidateInteractiveObjects()
+                            ? *prepared.candidateInteractiveObjects()
+                            : *mWiring->interactiveObjects;
+                        auto baseline
+                            = projectInteractiveObjectInterestBaseline(prepared.candidateState(), projectedObjects,
+                                target.sessionId(), batch.scheduledTick().value(), prepared.candidateRevision());
+                        if (!baseline)
+                        {
+                            mFailure = "interactive object baseline projection failed";
+                            return false;
+                        }
+                        objectBaselines.emplace_back(*connection, std::move(*baseline));
+                    }
             }
             std::optional<CanonicalActorWorld> actorCandidate;
             std::vector<std::pair<TransportConnectionId, LatestWinsActorSnapshot>> actorViews;
@@ -713,29 +817,32 @@ namespace TES3MP::ServerApp
                     return false;
                 }
                 actorCandidate.emplace(std::move(*candidate));
-                for (const auto connection : mWiring->sessions.connections())
+                for (const auto& target : prepared.candidateState().activeSessions())
                 {
-                    if (!supportsActors(connection))
+                    const auto connection = mWiring->sessions.connectionForSession(target.sessionId());
+                    if (!connection || !supportsActors(*connection))
                         continue;
-                    const auto* session = mWiring->sessions.session(connection);
-                    auto view = session && session->sessionId()
-                        ? projectActorInterestView(prepared.candidateState(), *actorCandidate, *session->sessionId(),
-                              batch.scheduledTick().value(), prepared.candidateRevision())
-                        : std::nullopt;
+                    auto view = projectActorInterestView(prepared.candidateState(), *actorCandidate, target.sessionId(),
+                        batch.scheduledTick().value(), prepared.candidateRevision());
                     if (!view)
                     {
                         mFailure = "actor view projection failed";
                         return false;
                     }
-                    actorViews.emplace_back(connection, std::move(*view));
+                    actorViews.emplace_back(*connection, std::move(*view));
                 }
             }
-            if (!admitCombinedInterestTickAtomically(mWiring->queues, routed, routedViews, actorBaselines, actorViews))
+            if (!admitCombinedInterestTickAtomically(
+                    mWiring->queues, routed, routedViews, actorBaselines, actorViews, objectBaselines))
             {
-                mFailure = "tick output admission failed";
+                mFailure = changedObjectCells.empty() ? "tick output admission failed"
+                                                      : "interactive object output admission failed";
                 return false;
             }
-            if (!mWiring->reducer.commit(std::move(prepared)))
+            const bool committed = mWiring->interactiveObjects
+                ? mWiring->reducer.commit(std::move(prepared), *mWiring->interactiveObjects)
+                : mWiring->reducer.commit(std::move(prepared));
+            if (!committed)
             {
                 mFailure = "canonical commit failed";
                 return false;

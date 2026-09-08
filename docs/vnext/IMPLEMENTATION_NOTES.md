@@ -6545,6 +6545,57 @@ only the relevant phase section here.
 - Exclusions verified: zero OpenMW, rendering, container, inventory, combat, or persistence
   dependencies in engine-independent `tes3mp` components.
 
+### 2026-09-07 — interactive-object replication and server composition — Complete
+
+- Protocol & Codecs:
+  - Added FlatBuffers schemas `components/tes3mp/protocol/schema/reliable_interactive_object_interest_baseline.fbs` (file ID `T3IO`) and `components/tes3mp/protocol/schema/client_interact_object_command.fbs` (file ID `T3IC`) with LF line endings.
+  - Generated C++ headers `reliable_interactive_object_interest_baseline_generated.h` and `client_interact_object_command_generated.h`.
+  - Implemented size-prefixed verified FlatBuffers encoding and decoding in `interactive_object_replication.hpp` and `interactive_object_replication.cpp` with strict buffer bounds and identifier checking.
+  - Added `InteractiveObjectReplicationCapabilityValue = 3`, `interactiveObjectReplicationCapability()`, and framed message types `ReliableInteractiveObjectInterestBaseline` (`0x0105`) and `ClientInteractObjectCommand` (`0x0106`) on `TransportChannel::ReliableOrdered`.
+- Server Composition & Routing:
+  - Added the optional bounded production artifact described in
+    [Interactive object content V1](INTERACTIVE_OBJECT_CONTENT_V1.md). The process
+    root loads the catalog and canonical world before listen, advertises the
+    capability only when that content is configured successfully, and passes both
+    objects into session and server-application composition.
+  - Implemented `apps/tes3mp-server/interactive_object_interest_projection.hpp` and `.cpp` providing `projectInteractiveObjectInterestBaseline`, `projectCellInteractiveObjectBaseline`, and `admitInteractiveObjectInterestBaseline`.
+  - Updated `actor_interest_projection.hpp` and `.cpp` to atomically admit object baselines alongside player observations and actor baselines via `admitCombinedInterestTickAtomically`.
+  - Updated `authenticated_join_composition.hpp` and `.cpp` (`TransportJoinResponseQueue`) to forward `mObjects`, verify capability, and enqueue initial cell interactive-object baselines upon successful join.
+  - Updated `connection_session_coordinator.hpp` and `.cpp` to forward `mObjects`, receive `ClientInteractObjectCommand`, validate session and generation, resolve the canonical entity binding, and submit interaction proposals to `ServerCommandIntakeCoordinator` without a parallel queue.
+  - Capability-gated interactive-object commands and reused the canonical intake's 128-command per-session-generation bound.
+  - Network `UnlockWithKey` commands fail closed at session intake until Phase 15
+    supplies authoritative inventory ownership. The engine-independent reducer's
+    explicit verified-key input remains the integration seam; an empty key set is
+    not represented as successful verification.
+  - Updated `server_application.hpp` and `.cpp`:
+    - Added `interactiveObjectCatalog` and `interactiveObjects` to `ServerApplicationWiring` and checked wiring completeness before running.
+    - Implemented `supportsInteractiveObjects(connection)`.
+    - Delivered initial cell object baselines in `resumeConnection` and `resyncConnection`.
+    - In `pump(ServerTick tick)`: reduced interactions in shared ingress order with movement and cell transitions, broadcast updated baselines to clients in affected cells, projected cell transitions, and atomically admitted baselines.
+    - Interactive-object state now commits only after the affected reliable baselines are admitted atomically; queue rejection leaves the canonical object world unchanged.
+- Verification Evidence:
+  - Full MSVC build succeeds cleanly in `build/slice51-msvc`.
+  - `tes3mp_interactive_object_replication_tests.exe`: unit tests pass (exit code 0).
+  - `tes3mp_server_app_tests.exe`: integration tests pass (exit code 0), validating:
+    - Object baseline delivery on authenticated join.
+    - Client interaction routing, Euclidean reach validation, door state toggle, and revision increment.
+    - Scenario 11: unloaded cell preserves canonical object state without ticking.
+    - Scenario 12: late join and resync deliver complete modified cell baselines.
+  - Python tests: all 162 tests pass (`python -m unittest discover -s scripts/tests`), including expanded `test_interactive_object_contract.py` verifying engine-independent boundaries, production content wiring, the deferred key-authority boundary, and the canonical ordering/outcome composition path.
+  - Legacy exclusion: `verify_vnext_legacy_exclusion.py` passes (4,115 tracked paths, 62 CMake files, 1,254 compile commands, 1,971 Ninja build edges checked).
+  - Baseline provenance: `verify_vnext_baseline.py` passes with 81 verified dependency declarations.
+- Pre-commit review closure:
+  - `ClientInteractObjectCommand` now preserves its complete session-global command header through `ServerCommandIntakeCoordinator` and the canonical reducer. Mixed interaction/movement/cell-transition commands share ingress stamps, sequence validation, command-ID idempotency, and finalized history.
+  - The reducer stages `CanonicalInteractiveObjectWorld` beside canonical player state. Teleport outcomes replace the player's canonical transform and stop velocity; trap outcomes disarm the object and are carried by `CanonicalStateChangeRecord` to canonical sinks.
+  - A prepared batch takes a bounded base/candidate snapshot, then updates
+    individual object records in place. Per-command full-world copy/rebuild work
+    was removed; failed teleport composition restores only that command's prior
+    object record.
+  - `server_command_reducer_tests.cpp` covers mixed cell-transition/interaction ordering, trap sink delivery, and teleport state replacement. `server_app_tests.cpp` proves network-dispatched interactions finalize history and that output-admission failure commits neither player history nor object state.
+  - A clean standalone MSVC RelWithDebInfo production build in
+    `build/precommit-server-link` compiled and linked `tes3mp_server` without
+    interrupting the existing Phase 13 demo process.
+
 ## Phase 15 — Inventory, equipment, and container transactions
 
 [Back to the phase tracker](IMPLEMENTATION_PLAN.md#phase-15--inventory-equipment-and-container-transactions)

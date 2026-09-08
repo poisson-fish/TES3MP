@@ -7,6 +7,17 @@ namespace TES3MP
 {
     namespace
     {
+        Turn32 facingToward(std::int64_t vx, std::int64_t vy) noexcept
+        {
+            // The current movement kernel advances on one horizontal axis at a time.
+            // Keep facing updates integer-only so canonical replay is bit-for-bit
+            // deterministic across standard-library math implementations.
+            if (vx > 0)
+                return Turn32::fromValue(0x40000000u);
+            if (vx < 0)
+                return Turn32::fromValue(0xc0000000u);
+            return Turn32::fromValue(vy < 0 ? 0x80000000u : 0u);
+        }
         ActorActivity initialActivity(ActorAiPackageKind kind) noexcept
         {
             switch (kind)
@@ -200,6 +211,12 @@ namespace TES3MP
                 const auto& step = std::get<MovementKernelStep>(movement);
                 root = step.root;
                 velocity = step.velocity;
+                if (velocity.x() != 0 || velocity.y() != 0)
+                {
+                    root = Transform(root.cell(), root.position(),
+                        Orientation3(root.orientation().x(), root.orientation().y(),
+                            facingToward(velocity.x(), velocity.y())));
+                }
             }
             auto replacement = replaceActor(actor, tick, root, velocity, activity, waypointIndex, index);
             if (const auto* error = std::get_if<ActorSimulationError>(&replacement))

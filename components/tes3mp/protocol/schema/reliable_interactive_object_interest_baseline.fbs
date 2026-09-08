@@ -1,0 +1,41 @@
+namespace TES3MP.Protocol.Schema.InteractiveObjectBaseline;
+
+table InteractiveObjectBaselineHeader {
+  target_session_id:ulong (id: 0);
+  target_session_generation:ulong (id: 1);
+  server_tick:ulong (id: 2);
+  canonical_revision:ulong (id: 3);
+}
+
+enum DoorState : ubyte {
+  Closed = 0,
+  Open = 1
+}
+
+enum LockState : ubyte {
+  Unlocked = 0,
+  Locked = 1
+}
+
+enum TrapState : ubyte {
+  Disarmed = 0,
+  Armed = 1
+}
+
+struct InteractiveObjectMember {
+  object_id:ulong;
+  revision:ulong;
+  door_state:DoorState;
+  lock_state:LockState;
+  trap_state:TrapState;
+  padding:ubyte;
+}
+
+table ReliableInteractiveObjectInterestBaseline {
+  header:InteractiveObjectBaselineHeader (id: 0);
+  members:[InteractiveObjectMember] (id: 1);
+}
+
+root_type ReliableInteractiveObjectInterestBaseline;
+file_identifier "T3IO";
+file_extension "t3io";

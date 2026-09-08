@@ -4,6 +4,8 @@ include(${CMAKE_CURRENT_LIST_DIR}/../../cmake/TES3MPRuntimeSafety.cmake)
 add_library(tes3mp_server_app STATIC
     actor_content.hpp
     actor_content.cpp
+    interactive_object_content.hpp
+    interactive_object_content.cpp
     actor_interest_projection.hpp
     actor_interest_projection.cpp
     authenticated_join_composition.hpp
@@ -14,6 +16,8 @@ add_library(tes3mp_server_app STATIC
     content_collision.cpp
     interest_projection.hpp
     interest_projection.cpp
+    interactive_object_interest_projection.hpp
+    interactive_object_interest_projection.cpp
     phase7_proof_profile.hpp
     phase7_queue_telemetry.hpp
     phase7_queue_telemetry.cpp

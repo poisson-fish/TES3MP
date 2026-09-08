@@ -16,6 +16,12 @@
 
 namespace TES3MP
 {
+    class CanonicalInteractiveObjectWorld;
+    class InteractiveObjectCatalog;
+    struct InteractObjectCommand;
+    struct ObjectInteractionValidationContext;
+    struct StagedObjectInteractionResult;
+
     enum class DoorState : std::uint8_t
     {
         Closed = 0,
@@ -112,6 +118,11 @@ namespace TES3MP
     private:
         friend std::variant<CanonicalInteractiveObjectWorld, CanonicalInteractiveObjectWorldError>
             createCanonicalInteractiveObjectWorld(std::span<const CanonicalInteractiveObjectState>);
+        friend StagedObjectInteractionResult applyObjectInteractionToCandidate(CanonicalInteractiveObjectWorld&,
+            const InteractiveObjectCatalog&, const CanonicalServerState&, const InteractObjectCommand&, ServerTick,
+            ObjectInteractionValidationContext) noexcept;
+        friend bool restoreInteractiveObjectCandidate(
+            CanonicalInteractiveObjectWorld&, CanonicalInteractiveObjectState) noexcept;
 
         explicit CanonicalInteractiveObjectWorld(std::vector<CanonicalInteractiveObjectState> objects) noexcept
             : mObjects(std::move(objects))
@@ -193,6 +204,25 @@ namespace TES3MP
 
         friend bool operator==(const ObjectInteractionResult&, const ObjectInteractionResult&) noexcept = default;
     };
+
+    struct StagedObjectInteractionResult
+    {
+        ObjectInteractionOutcome outcome;
+        bool worldChanged = false;
+        std::optional<CanonicalInteractiveObjectState> previousState;
+
+        friend bool operator==(const StagedObjectInteractionResult&, const StagedObjectInteractionResult&) noexcept
+            = default;
+    };
+
+    // Mutates only a caller-owned prepared candidate. This avoids rebuilding the
+    // complete bounded world for every command in a server tick.
+    StagedObjectInteractionResult applyObjectInteractionToCandidate(CanonicalInteractiveObjectWorld& candidate,
+        const InteractiveObjectCatalog& catalog, const CanonicalServerState& players,
+        const InteractObjectCommand& command, ServerTick currentTick,
+        ObjectInteractionValidationContext validation = {}) noexcept;
+    bool restoreInteractiveObjectCandidate(
+        CanonicalInteractiveObjectWorld& candidate, CanonicalInteractiveObjectState previous) noexcept;
 
     ObjectInteractionResult applyObjectInteraction(const CanonicalInteractiveObjectWorld& current,
         const InteractiveObjectCatalog& catalog, const CanonicalServerState& players,

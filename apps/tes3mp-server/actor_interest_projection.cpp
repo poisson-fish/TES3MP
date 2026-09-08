@@ -107,13 +107,14 @@ namespace TES3MP::ServerApp
         const std::vector<std::pair<TransportConnectionId, InterestDelivery>>& playerObservations,
         const std::vector<std::pair<TransportConnectionId, LatestWinsSnapshot>>& playerViews,
         const std::vector<std::pair<TransportConnectionId, ActorInterestBaselineDelivery>>& actorBaselines,
-        const std::vector<std::pair<TransportConnectionId, LatestWinsActorSnapshot>>& actorViews)
+        const std::vector<std::pair<TransportConnectionId, LatestWinsActorSnapshot>>& actorViews,
+        const std::vector<std::pair<TransportConnectionId, InteractiveObjectInterestBaselineDelivery>>& objectBaselines)
     try
     {
         std::vector<std::vector<std::byte>> frames;
         std::vector<OutboundQueueSet::AtomicMessage> messages;
         frames.reserve(playerObservations.size() + playerViews.size() + actorBaselines.size() * 2
-            + actorViews.size());
+            + actorViews.size() + objectBaselines.size());
         messages.reserve(frames.capacity());
         const auto add = [&](TransportConnectionId connection, TransportChannel channel,
                              MessageClass messageClass, MessageKind kind, std::vector<std::byte> payload) {
@@ -142,6 +143,11 @@ namespace TES3MP::ServerApp
         for (const auto& [connection, view] : actorViews)
             if (!add(connection, TransportChannel::LatestWins, MessageClass::LatestWinsSnapshot,
                     MessageKind::LatestWinsActorSnapshot, encodeLatestWinsActorSnapshot(view))) return false;
+        for (const auto& [connection, delivery] : objectBaselines)
+            if (!add(connection, TransportChannel::ReliableOrdered, MessageClass::ReliableOperation,
+                    MessageKind::ReliableInteractiveObjectInterestBaseline,
+                    encodeReliableInteractiveObjectInterestBaseline(delivery.baseline)))
+                return false;
         return messages.empty() || queues.enqueueMessagesAtomically(messages) == TransportResult::Accepted;
     }
     catch (...) { return false; }

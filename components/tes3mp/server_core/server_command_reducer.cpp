@@ -1,5 +1,5 @@
-#include <tes3mp/server_command_reducer.hpp>
 #include <tes3mp/movement_policy.hpp>
+#include <tes3mp/server_command_reducer.hpp>
 
 #include <algorithm>
 #include <array>
@@ -42,6 +42,8 @@ namespace
                 return CommandReductionObservationOutcome::UnknownCell;
             case CommandDisposition::MotionOutOfRange:
                 return CommandReductionObservationOutcome::MotionOutOfRange;
+            case CommandDisposition::ObjectInteractionRejected:
+                return CommandReductionObservationOutcome::ObjectInteractionRejected;
         }
         return CommandReductionObservationOutcome::CandidateStateInvalid;
     }
@@ -177,8 +179,8 @@ namespace TES3MP
     {
     }
 
-    CanonicalCommandReducer::CanonicalCommandReducer(CanonicalServerState initialState, Observability& observability,
-        ContentManifest contentManifest)
+    CanonicalCommandReducer::CanonicalCommandReducer(
+        CanonicalServerState initialState, Observability& observability, ContentManifest contentManifest)
         : CanonicalCommandReducer(
               std::move(initialState), observability, CanonicalSinkBundle{}, contentManifest, compatibilityCollision())
     {
@@ -224,12 +226,13 @@ namespace TES3MP
     std::optional<CanonicalCommandReducer::PreparedJoin> CanonicalCommandReducer::prepareJoin(
         CanonicalPlayerEntityState player, CanonicalSessionProgress session, ServerTick tick)
     {
-        if (!mStateVersion.next() || !mCanonicalRevision.next()) return std::nullopt;
+        if (!mStateVersion.next() || !mCanonicalRevision.next())
+            return std::nullopt;
         std::vector<CanonicalPlayerEntityState> players(mState->players().begin(), mState->players().end());
-        std::vector<CanonicalSessionProgress> sessions(mState->activeSessions().begin(), mState->activeSessions().end());
-        const auto existing = std::find_if(players.begin(), players.end(), [&](const auto& value) {
-            return value.playerId() == player.playerId();
-        });
+        std::vector<CanonicalSessionProgress> sessions(
+            mState->activeSessions().begin(), mState->activeSessions().end());
+        const auto existing = std::find_if(
+            players.begin(), players.end(), [&](const auto& value) { return value.playerId() == player.playerId(); });
         if (existing == players.end())
             players.push_back(player);
         else if (*existing != player)
@@ -237,7 +240,8 @@ namespace TES3MP
         sessions.push_back(session);
         auto candidate = createCanonicalServerState(players, sessions);
         auto* state = std::get_if<CanonicalServerState>(&candidate);
-        if (!state) return std::nullopt;
+        if (!state)
+            return std::nullopt;
         PreparedJoin prepared;
         prepared.mBaseVersion = mStateVersion;
         prepared.mStateVersion = *mStateVersion.next();
@@ -247,15 +251,15 @@ namespace TES3MP
         prepared.mState = std::make_shared<CanonicalServerState>(std::move(*state));
         prepared.mPublication = std::shared_ptr<CanonicalStatePublication>(
             new CanonicalStatePublication(mStateVersion, tick, mState, {}));
-        prepared.mPublication->mJoinedSessions.push_back(
-            { prepared.mStateVersion, tick, session, player });
+        prepared.mPublication->mJoinedSessions.push_back({ prepared.mStateVersion, tick, session, player });
         return prepared;
     }
 
     bool CanonicalCommandReducer::commit(PreparedJoin&& prepared)
     {
         if (prepared.mBaseVersion != mStateVersion || prepared.mBaseCanonicalRevision != mCanonicalRevision
-            || !prepared.mState || !prepared.mPublication) return false;
+            || !prepared.mState || !prepared.mPublication)
+            return false;
         mState = std::move(prepared.mState);
         mStateVersion = prepared.mStateVersion;
         mCanonicalRevision = prepared.mCanonicalRevision;
@@ -272,12 +276,13 @@ namespace TES3MP
 
     std::optional<CanonicalCommandReducer::PreparedLifecycle> CanonicalCommandReducer::prepareLifecycleState(
         std::vector<CanonicalPlayerEntityState> players, std::vector<CanonicalSessionProgress> sessions,
-        CanonicalSessionLifecycleKind kind, SessionId session, PlayerId player,
-        SessionGeneration generation, ServerTick tick)
+        CanonicalSessionLifecycleKind kind, SessionId session, PlayerId player, SessionGeneration generation,
+        ServerTick tick)
     {
         auto candidate = createCanonicalServerState(players, sessions);
         auto* state = std::get_if<CanonicalServerState>(&candidate);
-        if (!state || !mStateVersion.next() || !mCanonicalRevision.next()) return std::nullopt;
+        if (!state || !mStateVersion.next() || !mCanonicalRevision.next())
+            return std::nullopt;
         PreparedLifecycle prepared;
         prepared.mBaseVersion = mStateVersion;
         prepared.mStateVersion = *mStateVersion.next();
@@ -296,10 +301,12 @@ namespace TES3MP
         SessionId sessionId, ServerTick tick)
     {
         std::vector<CanonicalPlayerEntityState> players(mState->players().begin(), mState->players().end());
-        std::vector<CanonicalSessionProgress> sessions(mState->activeSessions().begin(), mState->activeSessions().end());
+        std::vector<CanonicalSessionProgress> sessions(
+            mState->activeSessions().begin(), mState->activeSessions().end());
         const auto found = std::find_if(sessions.begin(), sessions.end(),
             [sessionId](const auto& value) { return value.sessionId() == sessionId; });
-        if (found == sessions.end()) return std::nullopt;
+        if (found == sessions.end())
+            return std::nullopt;
         const auto player = found->playerId();
         const auto generation = found->sessionGeneration();
         sessions.erase(found);
@@ -310,22 +317,26 @@ namespace TES3MP
     std::optional<CanonicalCommandReducer::PreparedLifecycle> CanonicalCommandReducer::prepareDisconnectBatch(
         std::span<const SessionId> sessionIds, ServerTick tick)
     {
-        if (sessionIds.empty() || !mStateVersion.next() || !mCanonicalRevision.next()) return std::nullopt;
+        if (sessionIds.empty() || !mStateVersion.next() || !mCanonicalRevision.next())
+            return std::nullopt;
         std::vector<CanonicalPlayerEntityState> players(mState->players().begin(), mState->players().end());
-        std::vector<CanonicalSessionProgress> sessions(mState->activeSessions().begin(), mState->activeSessions().end());
+        std::vector<CanonicalSessionProgress> sessions(
+            mState->activeSessions().begin(), mState->activeSessions().end());
         std::vector<CanonicalSessionProgress> removed;
         removed.reserve(sessionIds.size());
         for (const auto sessionId : sessionIds)
         {
             const auto found = std::find_if(sessions.begin(), sessions.end(),
                 [sessionId](const auto& value) { return value.sessionId() == sessionId; });
-            if (found == sessions.end()) return std::nullopt;
+            if (found == sessions.end())
+                return std::nullopt;
             removed.push_back(*found);
             sessions.erase(found);
         }
         auto candidate = createCanonicalServerState(players, sessions);
         auto* state = std::get_if<CanonicalServerState>(&candidate);
-        if (!state) return std::nullopt;
+        if (!state)
+            return std::nullopt;
         PreparedLifecycle prepared;
         prepared.mBaseVersion = mStateVersion;
         prepared.mStateVersion = *mStateVersion.next();
@@ -336,9 +347,9 @@ namespace TES3MP
         prepared.mPublication = std::shared_ptr<CanonicalStatePublication>(
             new CanonicalStatePublication(mStateVersion, tick, mState, {}));
         for (const auto& session : removed)
-            prepared.mPublication->mSessionLifecycle.push_back({ prepared.mStateVersion, tick,
-                CanonicalSessionLifecycleKind::Disconnected, session.sessionId(), session.playerId(),
-                session.sessionGeneration() });
+            prepared.mPublication->mSessionLifecycle.push_back(
+                { prepared.mStateVersion, tick, CanonicalSessionLifecycleKind::Disconnected, session.sessionId(),
+                    session.playerId(), session.sessionGeneration() });
         return prepared;
     }
 
@@ -346,34 +357,40 @@ namespace TES3MP
         CanonicalSessionProgress session, ServerTick tick)
     {
         std::vector<CanonicalPlayerEntityState> players(mState->players().begin(), mState->players().end());
-        if (!mState->findPlayer(session.playerId()) || mState->findActiveSession(session.sessionId())) return std::nullopt;
-        std::vector<CanonicalSessionProgress> sessions(mState->activeSessions().begin(), mState->activeSessions().end());
+        if (!mState->findPlayer(session.playerId()) || mState->findActiveSession(session.sessionId()))
+            return std::nullopt;
+        std::vector<CanonicalSessionProgress> sessions(
+            mState->activeSessions().begin(), mState->activeSessions().end());
         sessions.push_back(session);
-        std::sort(sessions.begin(), sessions.end(), [](const auto& a, const auto& b) { return a.sessionId() < b.sessionId(); });
-        return prepareLifecycleState(std::move(players), std::move(sessions),
-            CanonicalSessionLifecycleKind::Resumed, session.sessionId(), session.playerId(),
-            session.sessionGeneration(), tick);
+        std::sort(sessions.begin(), sessions.end(),
+            [](const auto& a, const auto& b) { return a.sessionId() < b.sessionId(); });
+        return prepareLifecycleState(std::move(players), std::move(sessions), CanonicalSessionLifecycleKind::Resumed,
+            session.sessionId(), session.playerId(), session.sessionGeneration(), tick);
     }
 
     std::optional<CanonicalCommandReducer::PreparedLifecycle> CanonicalCommandReducer::prepareExpiration(
         PlayerId playerId, SessionId sessionId, SessionGeneration generation, ServerTick tick)
     {
         std::vector<CanonicalPlayerEntityState> players(mState->players().begin(), mState->players().end());
-        const auto found = std::find_if(players.begin(), players.end(),
-            [playerId](const auto& value) { return value.playerId() == playerId; });
-        if (found == players.end()) return std::nullopt;
-        players.erase(found);
-        std::vector<CanonicalSessionProgress> sessions(mState->activeSessions().begin(), mState->activeSessions().end());
-        if (std::any_of(sessions.begin(), sessions.end(), [playerId](const auto& value) { return value.playerId() == playerId; }))
+        const auto found = std::find_if(
+            players.begin(), players.end(), [playerId](const auto& value) { return value.playerId() == playerId; });
+        if (found == players.end())
             return std::nullopt;
-        return prepareLifecycleState(std::move(players), std::move(sessions),
-            CanonicalSessionLifecycleKind::Expired, sessionId, playerId, generation, tick);
+        players.erase(found);
+        std::vector<CanonicalSessionProgress> sessions(
+            mState->activeSessions().begin(), mState->activeSessions().end());
+        if (std::any_of(sessions.begin(), sessions.end(),
+                [playerId](const auto& value) { return value.playerId() == playerId; }))
+            return std::nullopt;
+        return prepareLifecycleState(std::move(players), std::move(sessions), CanonicalSessionLifecycleKind::Expired,
+            sessionId, playerId, generation, tick);
     }
 
     bool CanonicalCommandReducer::commit(PreparedLifecycle&& prepared)
     {
         if (prepared.mBaseVersion != mStateVersion || prepared.mBaseCanonicalRevision != mCanonicalRevision
-            || !prepared.mState || !prepared.mPublication) return false;
+            || !prepared.mState || !prepared.mPublication)
+            return false;
         mState = std::move(prepared.mState);
         mStateVersion = prepared.mStateVersion;
         mCanonicalRevision = prepared.mCanonicalRevision;
@@ -475,7 +492,8 @@ namespace TES3MP
             (void)mObservability.events().tryRecord(*event);
     }
 
-    CanonicalCommandReducer::PreparedBatch CanonicalCommandReducer::prepare(const ServerTickCommandBatch& batch)
+    CanonicalCommandReducer::PreparedBatch CanonicalCommandReducer::prepareCommands(const ServerTickCommandBatch& batch,
+        const CanonicalInteractiveObjectWorld* objects, const InteractiveObjectCatalog* catalog)
     {
         PreparedBatch prepared;
         prepared.mBaseVersion = mStateVersion;
@@ -513,6 +531,22 @@ namespace TES3MP
             result.mError = CommandBatchReductionError::StateVersionCapacityExceeded;
             return prepared;
         }
+        const bool hasObjectInteraction = std::ranges::any_of(commands, [](const StampedServerCommand& command) {
+            return std::holds_alternative<InteractiveObjectCommandProposal>(command.proposal().payload());
+        });
+        if (hasObjectInteraction && objects != nullptr)
+        {
+            try
+            {
+                prepared.mBaseInteractiveObjects = *objects;
+                prepared.mInteractiveObjects = *objects;
+            }
+            catch (...)
+            {
+                result.mError = CommandBatchReductionError::CandidateStateInvalid;
+                return prepared;
+            }
+        }
 
         result.mDispositions.reserve(commands.size());
         publication->mChanges.reserve(commands.size());
@@ -539,6 +573,7 @@ namespace TES3MP
                             = static_cast<std::size_t>(session - prepared.mState->activeSessions().data());
                         std::optional<std::size_t> playerIndex;
                         std::optional<CanonicalPlayerEntityState> playerReplacement;
+                        std::optional<ObjectInteractionOutcome> objectInteractionOutcome;
 
                         if (session->containsFinalizedCommandId(proposal.commandId()))
                             disposition = CommandDisposition::DuplicateCommandId;
@@ -549,7 +584,8 @@ namespace TES3MP
                                 disposition = CommandDisposition::EntityBindingMismatch;
                             else
                             {
-                                const CanonicalPlayerEntityState* player = prepared.mState->findPlayer(session->playerId());
+                                const CanonicalPlayerEntityState* player
+                                    = prepared.mState->findPlayer(session->playerId());
                                 playerIndex = static_cast<std::size_t>(player - prepared.mState->players().data());
                                 if (precondition.expectedAuthorityEpoch() != player->authorityEpoch())
                                     disposition = CommandDisposition::AuthorityEpochMismatch;
@@ -588,17 +624,18 @@ namespace TES3MP
                                         else
                                         {
                                             const auto currentOrientation = player->transform().orientation();
-                                            replacementTransform = Transform(player->transform().cell(),
-                                                player->transform().position(), Orientation3(currentOrientation.x(),
-                                                    currentOrientation.y(), intent.rootFacing()));
+                                            replacementTransform
+                                                = Transform(player->transform().cell(), player->transform().position(),
+                                                    Orientation3(currentOrientation.x(), currentOrientation.y(),
+                                                        intent.rootFacing()));
                                             replacementVelocity = intent.desiredVelocity();
                                             replacementLocomotionMode = intent.mode();
                                         }
                                     }
-                                    else
+                                    else if (const auto* transition
+                                        = std::get_if<CellTransitionCommandProposal>(&proposal.payload()))
                                     {
-                                        const auto& requested = std::get<CellTransitionCommandProposal>(
-                                            proposal.payload()).requestedCell();
+                                        const auto& requested = transition->requestedCell();
                                         if (!mContentManifest.contains(requested))
                                         {
                                             disposition = CommandDisposition::UnknownCell;
@@ -615,10 +652,89 @@ namespace TES3MP
                                                 player->transform().orientation());
                                         }
                                     }
+                                    else
+                                    {
+                                        requiresSpatialAdvance = false;
+                                        const auto& interaction
+                                            = std::get<InteractiveObjectCommandProposal>(proposal.payload());
+                                        if (!prepared.mInteractiveObjects || catalog == nullptr)
+                                        {
+                                            ObjectInteractionOutcome outcome;
+                                            outcome.code = ObjectInteractionResultCode::InternalError;
+                                            outcome.objectId = interaction.objectId();
+                                            objectInteractionOutcome = outcome;
+                                            disposition = CommandDisposition::ObjectInteractionRejected;
+                                        }
+                                        else
+                                        {
+                                            const InteractObjectCommand objectCommand{
+                                                .player = session->playerId(),
+                                                .objectId = interaction.objectId(),
+                                                .cell = interaction.cell(),
+                                                .interactionOrigin = interaction.interactionOrigin(),
+                                                .expectedRevision = interaction.expectedRevision(),
+                                                .kind = interaction.kind(),
+                                                .requestedKey = interaction.requestedKey(),
+                                            };
+                                            auto interactionResult
+                                                = applyObjectInteractionToCandidate(*prepared.mInteractiveObjects,
+                                                    *catalog, *prepared.mState, objectCommand, tick);
+                                            objectInteractionOutcome = interactionResult.outcome;
+                                            disposition
+                                                = interactionResult.outcome.code == ObjectInteractionResultCode::Success
+                                                    || interactionResult.outcome.code
+                                                        == ObjectInteractionResultCode::TrapSprung
+                                                ? CommandDisposition::Applied
+                                                : CommandDisposition::ObjectInteractionRejected;
+
+                                            bool acceptObjectMutation = interactionResult.worldChanged;
+                                            if (interactionResult.outcome.playerTeleport)
+                                            {
+                                                const auto& destination = *interactionResult.outcome.playerTeleport;
+                                                auto teleported
+                                                    = advanceCanonicalSpatialState(*player, tick, destination.transform,
+                                                        LinearVelocity3(0, 0, 0), replacementLocomotionMode);
+                                                if (const auto* value
+                                                    = std::get_if<CanonicalPlayerEntityState>(&teleported))
+                                                {
+                                                    playerReplacement = *value;
+                                                    playerStateChanged = true;
+                                                }
+                                                else
+                                                {
+                                                    acceptObjectMutation = false;
+                                                    playerReplacement.reset();
+                                                    playerStateChanged = false;
+                                                    if (std::get<SpatialAdvanceError>(teleported).code
+                                                        == SpatialAdvanceErrorCode::TickRegression)
+                                                    {
+                                                        disposition = CommandDisposition::SpatialTickRegression;
+                                                        objectInteractionOutcome->code
+                                                            = ObjectInteractionResultCode::TickRegression;
+                                                    }
+                                                    else
+                                                    {
+                                                        disposition = CommandDisposition::EntityRevisionExhausted;
+                                                        objectInteractionOutcome->code
+                                                            = ObjectInteractionResultCode::RevisionExhausted;
+                                                    }
+                                                    objectInteractionOutcome->playerTeleport.reset();
+                                                }
+                                            }
+                                            if (!acceptObjectMutation && interactionResult.previousState
+                                                && !restoreInteractiveObjectCandidate(
+                                                    *prepared.mInteractiveObjects, *interactionResult.previousState))
+                                            {
+                                                result.mError = CommandBatchReductionError::CandidateStateInvalid;
+                                                prepared.mPublication = std::move(publication);
+                                                return prepared;
+                                            }
+                                        }
+                                    }
                                     const auto advanced = requiresSpatialAdvance
-                                        ? std::optional<SpatialAdvanceResult>(advanceCanonicalSpatialState(
-                                              *player, tick, replacementTransform, replacementVelocity,
-                                              replacementLocomotionMode))
+                                        ? std::optional<SpatialAdvanceResult>(
+                                              advanceCanonicalSpatialState(*player, tick, replacementTransform,
+                                                  replacementVelocity, replacementLocomotionMode))
                                         : std::nullopt;
                                     if (!advanced)
                                     {
@@ -654,7 +770,8 @@ namespace TES3MP
 
                             CanonicalStateChangeRecord change(nextVersion, command.stamp(), proposal.sessionId(),
                                 proposal.sessionGeneration(), proposal.commandSequence(), proposal.commandId(),
-                                disposition, sessionReplacement, committedPlayerReplacement);
+                                disposition, sessionReplacement, committedPlayerReplacement,
+                                std::move(objectInteractionOutcome));
                             auto nextState = std::make_shared<CanonicalServerState>(std::move(candidateState));
                             publication->mChanges.push_back(std::move(change));
                             prepared.mState = std::move(nextState);
@@ -695,15 +812,28 @@ namespace TES3MP
         return prepared;
     }
 
-    CanonicalCommandReducer::PreparedBatch CanonicalCommandReducer::prepareTick(const ServerTickCommandBatch& batch)
+    CanonicalCommandReducer::PreparedBatch CanonicalCommandReducer::prepare(const ServerTickCommandBatch& batch)
     {
-        auto prepared = prepare(batch);
-        if (!prepared.result()) return prepared;
+        return prepareCommands(batch, nullptr, nullptr);
+    }
+
+    CanonicalCommandReducer::PreparedBatch CanonicalCommandReducer::prepare(const ServerTickCommandBatch& batch,
+        const CanonicalInteractiveObjectWorld& objects, const InteractiveObjectCatalog& catalog)
+    {
+        return prepareCommands(batch, &objects, &catalog);
+    }
+
+    CanonicalCommandReducer::PreparedBatch CanonicalCommandReducer::prepareTickState(
+        PreparedBatch prepared, const ServerTickCommandBatch& batch)
+    {
+        if (!prepared.result())
+            return prepared;
         const ServerTick tick = batch.scheduledTick().value();
         const auto players = prepared.mState->players();
         std::size_t moving = 0;
         for (const auto& player : players)
-            if (player.linearVelocity() != LinearVelocity3(0, 0, 0)) ++moving;
+            if (player.linearVelocity() != LinearVelocity3(0, 0, 0))
+                ++moving;
         if (!canReserveCanonicalStateVersions(prepared.mStateVersion, moving))
         {
             prepared.mResult.mError = CommandBatchReductionError::StateVersionCapacityExceeded;
@@ -716,14 +846,15 @@ namespace TES3MP
             {
                 const auto current = replacements[index];
                 const auto velocity = current.linearVelocity();
-                if (velocity == LinearVelocity3(0, 0, 0)) continue;
+                if (velocity == LinearVelocity3(0, 0, 0))
+                    continue;
                 auto kernel = advanceMovementKernel(mContentManifest.id(), mContentManifest.movementProfile(),
                     current.locomotionMode(), current.entityId(), tick, current.transform(), velocity, *mCollision);
                 const auto* step = std::get_if<MovementKernelStep>(&kernel);
                 if (!step)
                 {
-                    prepared.mResult.mError = std::get<MovementKernelError>(kernel)
-                            == MovementKernelError::IntegrationOverflow
+                    prepared.mResult.mError
+                        = std::get<MovementKernelError>(kernel) == MovementKernelError::IntegrationOverflow
                         ? CommandBatchReductionError::SpatialIntegrationOverflow
                         : CommandBatchReductionError::CandidateStateInvalid;
                     return prepared;
@@ -766,12 +897,26 @@ namespace TES3MP
         return prepared;
     }
 
-    bool CanonicalCommandReducer::commit(PreparedBatch&& prepared)
+    CanonicalCommandReducer::PreparedBatch CanonicalCommandReducer::prepareTick(const ServerTickCommandBatch& batch)
+    {
+        return prepareTickState(prepare(batch), batch);
+    }
+
+    CanonicalCommandReducer::PreparedBatch CanonicalCommandReducer::prepareTick(const ServerTickCommandBatch& batch,
+        const CanonicalInteractiveObjectWorld& objects, const InteractiveObjectCatalog& catalog)
+    {
+        return prepareTickState(prepare(batch, objects, catalog), batch);
+    }
+
+    bool CanonicalCommandReducer::commitPrepared(PreparedBatch&& prepared, CanonicalInteractiveObjectWorld* objects)
     {
         if (prepared.mBaseVersion != mStateVersion || prepared.mBaseCanonicalRevision != mCanonicalRevision
-            || !prepared.mState || !prepared.mPublication)
+            || !prepared.mState || !prepared.mPublication || (prepared.mInteractiveObjects && objects == nullptr)
+            || (prepared.mBaseInteractiveObjects && (!objects || *objects != *prepared.mBaseInteractiveObjects)))
             return false;
         mState = std::move(prepared.mState);
+        if (prepared.mInteractiveObjects)
+            *objects = std::move(*prepared.mInteractiveObjects);
         mStateVersion = prepared.mStateVersion;
         mCanonicalRevision = prepared.mCanonicalRevision;
         mCheckpointTick = prepared.mCheckpointTick;
@@ -781,6 +926,16 @@ namespace TES3MP
             observe(prepared.mResult.mError, mCheckpointTick, prepared.mResult.mDispositions.size());
         prepared.mResult.mSinkDeliveryReport = publish(std::move(prepared.mPublication));
         return true;
+    }
+
+    bool CanonicalCommandReducer::commit(PreparedBatch&& prepared)
+    {
+        return commitPrepared(std::move(prepared), nullptr);
+    }
+
+    bool CanonicalCommandReducer::commit(PreparedBatch&& prepared, CanonicalInteractiveObjectWorld& objects)
+    {
+        return commitPrepared(std::move(prepared), &objects);
     }
 
     CommandBatchReductionResult CanonicalCommandReducer::apply(const ServerTickCommandBatch& batch)

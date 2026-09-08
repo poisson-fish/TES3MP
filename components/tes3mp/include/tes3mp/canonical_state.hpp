@@ -1,8 +1,8 @@
 #ifndef TES3MP_CANONICAL_STATE_HPP
 #define TES3MP_CANONICAL_STATE_HPP
 
-#include "spatial_types.hpp"
 #include "movement_policy.hpp"
+#include "spatial_types.hpp"
 
 #include <cstddef>
 #include <cstdint>
@@ -33,6 +33,7 @@ namespace TES3MP
         EntityRevisionExhausted,
         UnknownCell,
         MotionOutOfRange,
+        ObjectInteractionRejected,
     };
 
     class FinalizedCommandRecord

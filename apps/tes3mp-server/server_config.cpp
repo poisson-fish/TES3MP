@@ -113,7 +113,7 @@ namespace TES3MP::ServerApp
         if (text.size() > MaximumConfigBytes) return error(ConfigErrorCode::TooLarge);
         if (!validUtf8(text)) return error(ConfigErrorCode::InvalidUtf8);
 
-        std::array<bool, 15> seen{};
+        std::array<bool, 16> seen{};
         std::string bindAddress;
         std::uint16_t port = 0;
         std::uint64_t tick = 0;
@@ -128,6 +128,7 @@ namespace TES3MP::ServerApp
         std::optional<MovementProfile> movementProfile;
         std::filesystem::path collisionContentPath;
         std::filesystem::path actorContentPath;
+        std::filesystem::path interactiveObjectContentPath;
         std::filesystem::path playerIdentityPath;
         std::size_t lineNumber = 0;
         std::size_t begin = 0;
@@ -161,6 +162,7 @@ namespace TES3MP::ServerApp
                 else if (key == "actor_content_file") slot = 12;
                 else if (key == "player_identity_file") slot = 13;
                 else if (key == "spawn_positions") slot = 14;
+                else if (key == "interactive_object_content_file") slot = 15;
                 else return error(ConfigErrorCode::UnknownKey, lineNumber, key);
                 if (seen[slot]) return error(ConfigErrorCode::DuplicateKey, lineNumber, key);
                 if (value.empty() || value.find('#') != std::string_view::npos
@@ -243,11 +245,17 @@ namespace TES3MP::ServerApp
                         return error(ConfigErrorCode::InvalidValue, lineNumber, key);
                     playerIdentityPath = std::filesystem::u8path(value);
                 }
-                else
+                else if (slot == 14)
                 {
                     auto parsed = spawnPositions(value);
                     if (!parsed) return error(ConfigErrorCode::InvalidValue, lineNumber, key);
                     configuredSpawnPositions = std::move(*parsed);
+                }
+                else
+                {
+                    if (value.size() > MaximumInteractiveObjectContentPathBytes)
+                        return error(ConfigErrorCode::InvalidValue, lineNumber, key);
+                    interactiveObjectContentPath = std::filesystem::u8path(value);
                 }
             }
             if (end == std::string_view::npos) break;
@@ -268,7 +276,7 @@ namespace TES3MP::ServerApp
             return error(ConfigErrorCode::InvalidValue, 0, "content_manifest_id");
         return ServerConfig{ std::move(*endpoint), tick, grace, std::move(passwordPath), *manifest,
             *spawnCell, std::move(configuredSpawnPositions), std::move(collisionContentPath),
-            std::move(actorContentPath), std::move(playerIdentityPath) };
+            std::move(actorContentPath), std::move(interactiveObjectContentPath), std::move(playerIdentityPath) };
     }
 
     PasswordLoadResult loadJoinPassword(const std::filesystem::path& path)

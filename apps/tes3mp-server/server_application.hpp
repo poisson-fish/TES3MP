@@ -6,6 +6,8 @@
 #include "tes3mp/server_lifecycle.hpp"
 #include "tes3mp/protocol_pose.hpp"
 #include "tes3mp/actor_simulation.hpp"
+#include "tes3mp/interactive_object_catalog.hpp"
+#include "tes3mp/interactive_object_world.hpp"
 
 #include <map>
 #include <optional>
@@ -28,6 +30,8 @@ namespace TES3MP::ServerApp
         const ActorCatalog* actorCatalog = nullptr;
         CanonicalActorWorld* actors = nullptr;
         ServerCollisionQuery* actorCollision = nullptr;
+        const InteractiveObjectCatalog* interactiveObjectCatalog = nullptr;
+        CanonicalInteractiveObjectWorld* interactiveObjects = nullptr;
     };
 
     class ServerApplication
@@ -68,6 +72,7 @@ namespace TES3MP::ServerApp
         bool expireSessions(ServerTick tick) noexcept;
         bool relayPose(TransportConnectionId connection, const TransportMessage& message) noexcept;
         bool supportsActors(TransportConnectionId connection) const noexcept;
+        bool supportsInteractiveObjects(TransportConnectionId connection) const noexcept;
     };
 }
 

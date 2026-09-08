@@ -3,6 +3,7 @@
 #include "tes3mp/protocol_frame.hpp"
 #include "connection_session_coordinator.hpp"
 #include "actor_interest_projection.hpp"
+#include "interactive_object_interest_projection.hpp"
 #include "interest_projection.hpp"
 
 #include <algorithm>
@@ -32,9 +33,18 @@ namespace TES3MP::ServerApp
                 ? projectActorInterestBaseline(after, *mActors, join.session, tick, revision)
                 : std::optional<ActorInterestBaselineDelivery>{};
             if (actorCapable && (!mActors || !actorBaseline)) return false;
+
+            const auto objectCapable = joiningSession && joiningSession->negotiatedHello()
+                && std::ranges::binary_search(joiningSession->negotiatedHello()->negotiatedCapabilities(),
+                    interactiveObjectReplicationCapability());
+            auto objectBaseline = objectCapable && mObjects
+                ? projectInteractiveObjectInterestBaseline(after, *mObjects, join.session, tick, revision)
+                : std::optional<InteractiveObjectInterestBaselineDelivery>{};
+            if (objectCapable && (!mObjects || !objectBaseline)) return false;
+
             std::vector<std::vector<std::byte>> owned;
             std::vector<OutboundQueueSet::AtomicMessage> messages;
-            owned.reserve(5 + projected->size() * 2);
+            owned.reserve(6 + projected->size() * 2);
             owned.emplace_back(authentication.begin(), authentication.end());
             auto baselineFrame = encodeProtocolFrame(MessageClass::ReliableOperation,
                 MessageKind::ReliableInterestBaseline, encodeReliableInterestBaseline(baseline->baseline));
@@ -62,6 +72,16 @@ namespace TES3MP::ServerApp
                 messages.push_back({ mConnection, TransportChannel::ReliableOrdered, owned.back() });
                 owned.push_back(std::get<std::vector<std::byte>>(std::move(actorViewFrame)));
                 messages.push_back({ mConnection, TransportChannel::LatestWins, owned.back() });
+            }
+
+            if (objectBaseline)
+            {
+                auto objectBaselineFrame = encodeProtocolFrame(MessageClass::ReliableOperation,
+                    MessageKind::ReliableInteractiveObjectInterestBaseline,
+                    encodeReliableInteractiveObjectInterestBaseline(objectBaseline->baseline));
+                if (!std::holds_alternative<std::vector<std::byte>>(objectBaselineFrame)) return false;
+                owned.push_back(std::get<std::vector<std::byte>>(std::move(objectBaselineFrame)));
+                messages.push_back({ mConnection, TransportChannel::ReliableOrdered, owned.back() });
             }
 
             for (const auto& delivery : *projected)

@@ -36,29 +36,36 @@ Verification scales with risk:
 
 ## Now
 
-### Phase 14 — interactive-object replication and server composition
+### Phase 14 — interactive-object command ordering and authoritative outcomes
 
-Status: **Ready to implement**
+Status: **Complete — ready for commit**
 
-Package A (Canonical Core + Catalog) is complete and verified:
+Baseline replication and most server composition are implemented and verified:
+- Pinned FlatBuffers schemas (`reliable_interactive_object_interest_baseline.fbs`, `client_interact_object_command.fbs`) and size-prefixed verified wire codecs.
+- Negotiated `interactiveObjectReplicationCapability()`.
+- Exact-cell baseline projection (`projectInteractiveObjectInterestBaseline`, `projectCellInteractiveObjectBaseline`).
+- Capability-gated client interaction decoding and submission to the bounded canonical command intake in `ConnectionSessionCoordinator`.
+- Server application wiring `CanonicalInteractiveObjectWorld` and `InteractiveObjectCatalog` into `ServerApplicationWiring`.
+- Optional bounded production object content loading, with capability advertisement only when the catalog and initial world load successfully.
+- Server tick execution applying object mutations in place within one prepared batch snapshot, in shared command order, and atomically delivering updated cell baselines.
+- Cell transitions projecting and atomically admitting object baselines alongside player observations and actor baselines.
+- Scenario 11 (unloaded cell preservation without ticking) and Scenario 12 (late join and resync complete baseline) verified in `server_app_tests.cpp`.
 
-- Added `InteractiveObjectId`, `KeyPrototypeId`, `TrapPrototypeId`, and `ObjectRevision` strong value types.
-- Implemented `InteractiveObjectCatalog` with manifest binding, spatial transforms, lock declarations, and trap declarations.
-- Implemented `CanonicalInteractiveObjectWorld` with discrete door, lock, and trap states initialized from catalog defaults.
-- Implemented `applyObjectInteraction` reducer enforcing player presence, catalog/state and same-cell matching,
-  overflow-safe reach checks (<= 384 units by default), root-bounded interaction origins, monotonic ticks,
-  optimistic revision concurrency, server-verified key possession, and trap firing.
-- Acceptance decisions recorded in [ADR-0061](adr/ADR-0061-phase14-server-authoritative-interactive-objects.md) and [GDR-0021](gdr/GDR-0021-phase14-interactive-objects-locks-traps-doors.md).
-- Ready to wire into server application state, cell entry baseline replication, and client session intake.
+Closure:
+- Interaction commands use the canonical command-ordering/idempotency boundary, including finalized session sequence and command-ID history.
+- Teleport-door player replacement and trap outcomes are composed into the same prepared command transaction; typed outcomes are included in canonical sink publications.
+- Canonical player/object state commits only after affected outbound publications are admitted. Focused reducer and server-app tests cover mixed ordering, outcomes, and rollback.
+- Network key-unlock intent is rejected until Phase 15 can prove key ownership from canonical inventory state; the reducer retains an explicit verified-key integration seam.
 
 ## Next
 
 These are candidates, not locked slices:
 
-1. Compose interactive-object state into server tick and exact-cell baseline replication.
-2. Wire desktop/PC-VR presentation smoothing and 90-degree visual door swing interpolation.
-3. Revisit Phase 12 PC-VR hardware capture before Phase 22 stabilization if
+1. Wire client session reception of `ReliableInteractiveObjectInterestBaseline`, client-local visual door swing animation, and OpenMW renderer scene node rotation.
+2. Revisit Phase 12 PC-VR hardware capture before Phase 22 stabilization if
    hardware remains unavailable during Phase 14 presentation work.
+3. Phase 15 — inventory, containers, and equipment baseline replication, including authoritative key ownership for object unlock commands.
+4. Phase 16 — combat, stats, magic, death, and resurrection.
 
 The list is rewritten after each completed pass. New evidence may reorder,
 combine, or remove items.
@@ -104,6 +111,7 @@ but they no longer force a predetermined sequence of micro-slices.
 | Phase 13 live presentation follow-up | **Complete** | Canonical-only actor translation, deterministic bounded multi-player spawn points, and representative interior demo placement |
 | Phase 14 discovery | **Complete** | OpenMW door/lock/trap/activation trace, legacy requirements evidence, clean lane separation, named proofs, and owner decision options |
 | Phase 14 canonical core | **Complete** | Manifest-bound catalog, immutable canonical object world, reach/cell/revision/key validation, and discrete state outcomes |
+| Phase 14 replication/server composition | **Complete** | Capability-gated wire protocol, exact-cell baselines, shared canonical command ordering/idempotency, atomic player/object commit, teleport replacement, and trap outcome publication |
 
 ### Phase 9 completion record
 

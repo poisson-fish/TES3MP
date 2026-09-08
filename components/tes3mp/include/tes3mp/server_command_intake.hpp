@@ -3,6 +3,7 @@
 
 #include "command_primitives.hpp"
 #include "fixed_tick_scheduler.hpp"
+#include "interactive_object_world.hpp"
 #include "movement_policy.hpp"
 #include "observability.hpp"
 
@@ -46,8 +47,9 @@ namespace TES3MP
 
         constexpr const CellId& requestedCell() const noexcept { return mRequestedCell; }
 
-        friend constexpr bool operator==(const CellTransitionCommandProposal&,
-            const CellTransitionCommandProposal&) noexcept = default;
+        friend constexpr bool operator==(
+            const CellTransitionCommandProposal&, const CellTransitionCommandProposal&) noexcept
+            = default;
 
     private:
         CellId mRequestedCell;
@@ -56,15 +58,19 @@ namespace TES3MP
     class PlayerLocomotionCommandProposal
     {
     public:
-        constexpr PlayerLocomotionCommandProposal(LocomotionInputTick inputTick,
-            LocomotionInputSequence inputSequence, LocomotionIntent intent) noexcept
-            : mInputTick(inputTick), mInputSequence(inputSequence), mIntent(intent) {}
+        constexpr PlayerLocomotionCommandProposal(
+            LocomotionInputTick inputTick, LocomotionInputSequence inputSequence, LocomotionIntent intent) noexcept
+            : mInputTick(inputTick)
+            , mInputSequence(inputSequence)
+            , mIntent(intent)
+        {
+        }
 
         constexpr LocomotionInputTick inputTick() const noexcept { return mInputTick; }
         constexpr LocomotionInputSequence inputSequence() const noexcept { return mInputSequence; }
         constexpr const LocomotionIntent& intent() const noexcept { return mIntent; }
-        friend constexpr bool operator==(PlayerLocomotionCommandProposal,
-            PlayerLocomotionCommandProposal) noexcept = default;
+        friend constexpr bool operator==(PlayerLocomotionCommandProposal, PlayerLocomotionCommandProposal) noexcept
+            = default;
 
     private:
         LocomotionInputTick mInputTick;
@@ -72,8 +78,43 @@ namespace TES3MP
         LocomotionIntent mIntent;
     };
 
+    class InteractiveObjectCommandProposal
+    {
+    public:
+        InteractiveObjectCommandProposal(InteractiveObjectId objectId, CellId cell, Position3 interactionOrigin,
+            ObjectRevision expectedRevision, ObjectInteractionKind kind,
+            std::optional<KeyPrototypeId> requestedKey) noexcept
+            : mObjectId(objectId)
+            , mCell(cell)
+            , mInteractionOrigin(interactionOrigin)
+            , mExpectedRevision(expectedRevision)
+            , mKind(kind)
+            , mRequestedKey(requestedKey)
+        {
+        }
+
+        constexpr InteractiveObjectId objectId() const noexcept { return mObjectId; }
+        constexpr const CellId& cell() const noexcept { return mCell; }
+        constexpr Position3 interactionOrigin() const noexcept { return mInteractionOrigin; }
+        constexpr ObjectRevision expectedRevision() const noexcept { return mExpectedRevision; }
+        constexpr ObjectInteractionKind kind() const noexcept { return mKind; }
+        constexpr std::optional<KeyPrototypeId> requestedKey() const noexcept { return mRequestedKey; }
+
+        friend bool operator==(
+            const InteractiveObjectCommandProposal&, const InteractiveObjectCommandProposal&) noexcept
+            = default;
+
+    private:
+        InteractiveObjectId mObjectId;
+        CellId mCell;
+        Position3 mInteractionOrigin;
+        ObjectRevision mExpectedRevision;
+        ObjectInteractionKind mKind;
+        std::optional<KeyPrototypeId> mRequestedKey;
+    };
+
     using ServerCommandPayload = std::variant<PlayerMotionCommandProposal, CellTransitionCommandProposal,
-        PlayerLocomotionCommandProposal>;
+        PlayerLocomotionCommandProposal, InteractiveObjectCommandProposal>;
 
     class ServerCommandProposal
     {
@@ -88,6 +129,19 @@ namespace TES3MP
             , mObservedCanonicalRevision(observedCanonicalRevision)
             , mEntityPrecondition(entityPrecondition)
             , mPayload(motion)
+        {
+        }
+
+        ServerCommandProposal(SessionId sessionId, SessionGeneration sessionGeneration, CommandSequence commandSequence,
+            CommandId commandId, CanonicalRevision observedCanonicalRevision, EntityPrecondition entityPrecondition,
+            InteractiveObjectCommandProposal interaction) noexcept
+            : mSessionId(sessionId)
+            , mSessionGeneration(sessionGeneration)
+            , mCommandSequence(commandSequence)
+            , mCommandId(commandId)
+            , mObservedCanonicalRevision(observedCanonicalRevision)
+            , mEntityPrecondition(entityPrecondition)
+            , mPayload(std::move(interaction))
         {
         }
 

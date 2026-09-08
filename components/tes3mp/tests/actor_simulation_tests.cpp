@@ -203,6 +203,48 @@ namespace
             && std::get<ActorSimulationError>(wrongCellResult).code == ActorSimulationErrorCode::CatalogMismatch
             && stale.actors()[0] == staleValues[0] && maximum.actors()[0] == maximumValues[0];
     }
+
+    bool actor_simulation_updates_orientation_towards_movement_direction()
+    {
+        const std::array eastRoute{ Position3(1000, 0, 0) };
+        const auto eastCatalog = catalog(ActorAiPackageKind::Travel, eastRoute);
+        const auto initialEast = std::get<CanonicalActorWorld>(createInitialCanonicalActorWorld(eastCatalog));
+        RecordingCollision collision;
+        const auto advancedEast = advanceActorSimulation(initialEast, eastCatalog, players(true), id<ServerTick>(1),
+            testMovementProfile(), collision);
+        const auto* eastWorld = std::get_if<CanonicalActorWorld>(&advancedEast);
+        if (!eastWorld || eastWorld->actors()[0].root().orientation().z() != Turn32::fromValue(0x40000000))
+            return false;
+
+        const std::array southRoute{ Position3(0, -1000, 0) };
+        const auto southCatalog = catalog(ActorAiPackageKind::Travel, southRoute);
+        const auto initialSouth = std::get<CanonicalActorWorld>(createInitialCanonicalActorWorld(southCatalog));
+        const auto advancedSouth = advanceActorSimulation(initialSouth, southCatalog, players(true), id<ServerTick>(1),
+            testMovementProfile(), collision);
+        const auto* southWorld = std::get_if<CanonicalActorWorld>(&advancedSouth);
+        if (!southWorld || southWorld->actors()[0].root().orientation().z() != Turn32::fromValue(0x80000000))
+            return false;
+
+        const std::array westRoute{ Position3(-1000, 0, 0) };
+        const auto westCatalog = catalog(ActorAiPackageKind::Travel, westRoute);
+        const auto initialWest = std::get<CanonicalActorWorld>(createInitialCanonicalActorWorld(westCatalog));
+        const auto advancedWest = advanceActorSimulation(initialWest, westCatalog, players(true), id<ServerTick>(1),
+            testMovementProfile(), collision);
+        const auto* westWorld = std::get_if<CanonicalActorWorld>(&advancedWest);
+        if (!westWorld || westWorld->actors()[0].root().orientation().z() != Turn32::fromValue(0xc0000000))
+            return false;
+
+        const std::array northRoute{ Position3(0, 1000, 0) };
+        const auto northCatalog = catalog(ActorAiPackageKind::Travel, northRoute);
+        const auto initialNorth = std::get<CanonicalActorWorld>(createInitialCanonicalActorWorld(northCatalog));
+        const auto advancedNorth = advanceActorSimulation(initialNorth, northCatalog, players(true), id<ServerTick>(1),
+            testMovementProfile(), collision);
+        const auto* northWorld = std::get_if<CanonicalActorWorld>(&advancedNorth);
+        if (!northWorld || northWorld->actors()[0].root().orientation().z() != Turn32::fromValue(0))
+            return false;
+
+        return true;
+    }
 }
 
 int main()
@@ -215,6 +257,7 @@ int main()
             && travel_stops_and_wander_cycles_at_waypoints()
             && extreme_opposite_sign_waypoint_uses_bounded_step()
             && stale_tick_revision_exhaustion_and_catalog_mismatch_fail_atomically()
+            && actor_simulation_updates_orientation_towards_movement_direction()
         ? 0
         : 1;
 }

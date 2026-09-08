@@ -325,6 +325,26 @@
       "purpose": "Declares the app-layer content collision provider, hard bounds, and closed startup failure categories."
     },
     {
+      "path": "apps/tes3mp-server/interactive_object_content.cpp",
+      "status": "A",
+      "purpose": "Loads and validates the optional bounded manifest-scoped interactive-object artifact before server listen."
+    },
+    {
+      "path": "apps/tes3mp-server/interactive_object_content.hpp",
+      "status": "A",
+      "purpose": "Declares the dedicated-server interactive-object content loader and closed startup failure boundary."
+    },
+    {
+      "path": "apps/tes3mp-server/interactive_object_interest_projection.cpp",
+      "status": "A",
+      "purpose": "Implements exact-cell interactive object baseline projection and atomic output admission."
+    },
+    {
+      "path": "apps/tes3mp-server/interactive_object_interest_projection.hpp",
+      "status": "A",
+      "purpose": "Declares exact-cell interactive object baseline projection and capability-gated admission."
+    },
+    {
       "path": "apps/tes3mp-server/interest_projection.cpp",
       "status": "A",
       "purpose": "Derives deterministic server-owned exact-cell interest deltas, complete baselines and scoped views, and admits paired output atomically."
@@ -447,7 +467,7 @@
     {
       "path": "components/tes3mp/client_session/headless_client_session.cpp",
       "status": "A",
-      "purpose": "Caller-pumped single-attempt/single-connection headless client façade over owned transport and client-session state."
+      "purpose": "Caller-pumped single-attempt/single-connection headless client fa\u00e7ade over owned transport and client-session state."
     },
     {
       "path": "components/tes3mp/include/tes3mp/actor_catalog.hpp",
@@ -543,6 +563,21 @@
       "path": "components/tes3mp/include/tes3mp/headless_client_session.hpp",
       "status": "A",
       "purpose": "Bounded typed production headless client command, pump, state, and snapshot interface."
+    },
+    {
+      "path": "components/tes3mp/include/tes3mp/interactive_object_catalog.hpp",
+      "status": "A",
+      "purpose": "Declares bounded manifest-scoped interactive object catalog, transforms, door, lock, and trap configurations."
+    },
+    {
+      "path": "components/tes3mp/include/tes3mp/interactive_object_replication.hpp",
+      "status": "A",
+      "purpose": "Declares interactive object wire types, size-prefixed verified FlatBuffers codecs, and replication capability."
+    },
+    {
+      "path": "components/tes3mp/include/tes3mp/interactive_object_world.hpp",
+      "status": "A",
+      "purpose": "Declares server-authoritative canonical interactive object world, discrete states, and interaction reducer."
     },
     {
       "path": "components/tes3mp/include/tes3mp/monotonic_clock.hpp",
@@ -740,6 +775,11 @@
       "purpose": "Pinned FlatBuffers 25.12.19 generated C++ for the size-prefixed T3CH client-offer schema."
     },
     {
+      "path": "components/tes3mp/protocol/generated/client_interact_object_command_generated.h",
+      "status": "A",
+      "purpose": "Generated FlatBuffers C++ header for client interaction command."
+    },
+    {
       "path": "components/tes3mp/protocol/generated/client_vr_pose_sample_generated.h",
       "status": "A",
       "purpose": "Pinned FlatBuffers 25.12.19 generated C++ for the size-prefixed T3VP client pose schema."
@@ -758,6 +798,11 @@
       "path": "components/tes3mp/protocol/generated/reliable_actor_interest_baseline_generated.h",
       "status": "A",
       "purpose": "Pinned FlatBuffers 25.12.19 generated C++ for bounded complete actor membership."
+    },
+    {
+      "path": "components/tes3mp/protocol/generated/reliable_interactive_object_interest_baseline_generated.h",
+      "status": "A",
+      "purpose": "Generated FlatBuffers C++ header for reliable interactive object interest baseline."
     },
     {
       "path": "components/tes3mp/protocol/generated/reliable_interest_baseline_generated.h",
@@ -793,6 +838,16 @@
       "path": "components/tes3mp/protocol/generated/session_resync_request_generated.h",
       "status": "A",
       "purpose": "Pinned FlatBuffers 25.12.19 generated C++ for the metadata-only T3RS session resync request schema."
+    },
+    {
+      "path": "components/tes3mp/protocol/interactive_object_catalog.cpp",
+      "status": "A",
+      "purpose": "Implements manifest-scoped interactive object catalog validation, transform consistency, and bounds checks."
+    },
+    {
+      "path": "components/tes3mp/protocol/interactive_object_replication.cpp",
+      "status": "A",
+      "purpose": "Implements size-prefixed verified FlatBuffers encoding and decoding for interactive object replication."
     },
     {
       "path": "components/tes3mp/protocol/protocol_exchange.cpp",
@@ -835,6 +890,11 @@
       "purpose": "Explicit-ID T3CH client protocol-range and bounded optional/required capability offer schema."
     },
     {
+      "path": "components/tes3mp/protocol/schema/client_interact_object_command.fbs",
+      "status": "A",
+      "purpose": "FlatBuffers schema for client interact object command with file identifier T3IC."
+    },
+    {
       "path": "components/tes3mp/protocol/schema/client_vr_pose_sample.fbs",
       "status": "A",
       "purpose": "Explicit-ID T3VP presentation-only client head and optional-hand pose schema."
@@ -853,6 +913,11 @@
       "path": "components/tes3mp/protocol/schema/reliable_actor_interest_baseline.fbs",
       "status": "A",
       "purpose": "Explicit-ID schema for bounded complete actor membership and completion metadata."
+    },
+    {
+      "path": "components/tes3mp/protocol/schema/reliable_interactive_object_interest_baseline.fbs",
+      "status": "A",
+      "purpose": "FlatBuffers schema for reliable interactive object interest baseline with file identifier T3IO."
     },
     {
       "path": "components/tes3mp/protocol/schema/reliable_interest_baseline.fbs",
@@ -938,6 +1003,11 @@
       "path": "components/tes3mp/server_core/fixed_tick_scheduler.cpp",
       "status": "A",
       "purpose": "Checked rational-deadline 30 Hz scheduler implementation with bounded sequential batches and no sleep, callback, reducer, or thread."
+    },
+    {
+      "path": "components/tes3mp/server_core/interactive_object_world.cpp",
+      "status": "A",
+      "purpose": "Implements canonical interactive object world state, spatial reach validation, key verification, trap triggers, and reducer transitions."
     },
     {
       "path": "components/tes3mp/server_core/movement_kernel.cpp",
@@ -1245,6 +1315,21 @@
       "purpose": "Focused single-attempt, transport establishment/failure, fixed script capacity, and bounded timeline contracts."
     },
     {
+      "path": "components/tes3mp/tests/interactive_object_catalog_tests.cpp",
+      "status": "A",
+      "purpose": "Focused unit contracts for interactive object catalog parsing, duplicate detection, and transform validation."
+    },
+    {
+      "path": "components/tes3mp/tests/interactive_object_replication_tests.cpp",
+      "status": "A",
+      "purpose": "Unit contracts for interactive object replication encoding, decoding, corrupted buffer rejection, and boundary limits."
+    },
+    {
+      "path": "components/tes3mp/tests/interactive_object_world_tests.cpp",
+      "status": "A",
+      "purpose": "Focused unit contracts for canonical interactive object world state, door opening, locking, trapping, and reach checks."
+    },
+    {
       "path": "components/tes3mp/tests/movement_evidence_tests.cpp",
       "status": "A",
       "purpose": "Deterministic desktop/PC-VR walk-turn-stop capture under direct, jitter, loss, and stall schedules with bounded movement and pose observations."
@@ -1405,6 +1490,11 @@
       "purpose": "Concise living vNext phase, gate, status, and current completion-evidence tracker."
     },
     {
+      "path": "docs/vnext/INTERACTIVE_OBJECT_CONTENT_V1.md",
+      "status": "A",
+      "purpose": "Documents the optional bounded manifest-scoped interactive-object artifact and authoritative key-unlock boundary."
+    },
+    {
       "path": "docs/vnext/LEGACY_GAMEPLAY_FEATURE_INVENTORY.md",
       "status": "A",
       "purpose": "Reference-only inventory of archived TES3MP gameplay behavior."
@@ -1443,6 +1533,11 @@
       "path": "docs/vnext/PHASE13_ACTOR_LIFECYCLE_CAPTURE.md",
       "status": "A",
       "purpose": "Records the bounded representative-content two-client actor cell, resume, authenticated resync, durable rejoin, and canonical continuity proof."
+    },
+    {
+      "path": "docs/vnext/PHASE14_OBJECT_DISCOVERY.md",
+      "status": "A",
+      "purpose": "Repository-backed interactive object discovery, discrete state model, reach validation, and owner package choices."
     },
     {
       "path": "docs/vnext/PRE_CUTOVER_PROVENANCE.md",
@@ -1647,7 +1742,7 @@
     {
       "path": "docs/vnext/adr/ADR-0041-phase7-headless-client-and-script-driver.md",
       "status": "A",
-      "purpose": "Owner-approved caller-pumped headless client façade and deterministic fixed-capacity scripted fake-client evidence boundary."
+      "purpose": "Owner-approved caller-pumped headless client fa\u00e7ade and deterministic fixed-capacity scripted fake-client evidence boundary."
     },
     {
       "path": "docs/vnext/adr/ADR-0042-phase7-authenticated-join-and-identity-allocation.md",
@@ -1745,6 +1840,11 @@
       "purpose": "Records the approved separate actor state, server-only simulation authority, additive compatibility, and no-client-lease architecture."
     },
     {
+      "path": "docs/vnext/adr/ADR-0061-phase14-server-authoritative-interactive-objects.md",
+      "status": "A",
+      "purpose": "Architectural decision record for server-authoritative interactive objects, discrete states, and bounded interaction."
+    },
+    {
       "path": "docs/vnext/gdr/GDR-0001-phase7-headless-vertical-slice-behavior.md",
       "status": "A",
       "purpose": "Owner-approved Phase 7 fixture spawn, readiness, cell visibility, provisional tick integration, headless correction, and bounded resume behavior."
@@ -1798,6 +1898,11 @@
       "path": "docs/vnext/gdr/GDR-0020-phase13-actor-lifecycle-and-ai.md",
       "status": "A",
       "purpose": "Records owner approval of manifest-created actors, bounded idle/travel/wander, inactive-cell freeze, and no client simulation."
+    },
+    {
+      "path": "docs/vnext/gdr/GDR-0021-phase14-interactive-objects-locks-traps-doors.md",
+      "status": "A",
+      "purpose": "Gameplay decision record for interactive objects, doors, locks, and traps authority model."
     },
     {
       "path": "docs/vnext/proofs/cares/CMakeLists.txt",
@@ -1978,6 +2083,11 @@
       "path": "scripts/tests/test_capture_vnext_windows_ci.py",
       "status": "A",
       "purpose": "Unit and workflow-policy tests for the Windows baseline evidence gate."
+    },
+    {
+      "path": "scripts/tests/test_interactive_object_contract.py",
+      "status": "A",
+      "purpose": "Unit test contract verifying interactive object components have no forbidden engine or OpenMW dependencies."
     },
     {
       "path": "scripts/tests/test_openmw_patch_registry.py",
@@ -2216,7 +2326,7 @@
         },
         {
           "path": "components/tes3mp/CMakeLists.txt",
-          "sha256": "e5e2948f66125d5ee4be995494fc1ad674cd800bdf2e144c52c359049cfadaba"
+          "sha256": "36b5c3f39009bc513d53d20388311cc60da573f66b8db67314b36042ebd18311"
         },
         {
           "path": "components/tes3mp/protocol/generated/authentication_accepted_generated.h",

@@ -6,6 +6,7 @@
 #include <tes3mp/canonical_state.hpp>
 #include <tes3mp/transport.hpp>
 #include "interest_projection.hpp"
+#include "interactive_object_interest_projection.hpp"
 
 #include <optional>
 #include <vector>
@@ -33,7 +34,8 @@ namespace TES3MP::ServerApp
         const std::vector<std::pair<TransportConnectionId, InterestDelivery>>& playerObservations,
         const std::vector<std::pair<TransportConnectionId, LatestWinsSnapshot>>& playerViews,
         const std::vector<std::pair<TransportConnectionId, ActorInterestBaselineDelivery>>& actorBaselines,
-        const std::vector<std::pair<TransportConnectionId, LatestWinsActorSnapshot>>& actorViews);
+        const std::vector<std::pair<TransportConnectionId, LatestWinsActorSnapshot>>& actorViews,
+        const std::vector<std::pair<TransportConnectionId, InteractiveObjectInterestBaselineDelivery>>& objectBaselines = {});
 }
 
 #endif

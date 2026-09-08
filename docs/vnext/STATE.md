@@ -15,8 +15,9 @@ Updated: 2026-09-07
 - Phase 13 lifecycle proof: **Complete**
 - Phase 14 discovery: **Complete**
 - Phase 14 canonical core: **Complete**
-- Active work: **Phase 14 interactive-object replication and server composition**
-- Last pass: **Phase 14 canonical core complete (Package A implemented)**
+- Phase 14 interactive-object replication and server composition: **Complete**
+- Active work: **None — Phase 14 server composition is ready for commit**
+- Last pass: **Pre-commit quality review closed production wiring, reducer scaling, and key authority gaps**
 - Authoritative tracker: [rolling implementation plan](IMPLEMENTATION_PLAN.md)
 - Historical evidence: [implementation notes](IMPLEMENTATION_NOTES.md)
 
@@ -302,6 +303,33 @@ ADRs and GDRs are required only for consequential, hard-to-reverse decisions.
 - Inventory, containers, combat, scripting, persistence, physics, and client authority
   remain strictly excluded.
 
+## Phase 14 interactive-object replication and server composition result
+
+- Pinned FlatBuffers schemas:
+  `components/tes3mp/protocol/schema/reliable_interactive_object_interest_baseline.fbs` (identifier `T3IO`)
+  and `components/tes3mp/protocol/schema/client_interact_object_command.fbs` (identifier `T3IC`) with strict LF line endings.
+- Implemented size-prefixed verified FlatBuffers wire codecs in `interactive_object_replication.hpp` and `.cpp`.
+- Extended handshake capabilities with `InteractiveObjectReplicationCapabilityValue = 3` and capability negotiation via `interactiveObjectReplicationCapability()`.
+- Implemented exact-cell object interest baseline projection in `interactive_object_interest_projection.hpp` and `.cpp` (`projectInteractiveObjectInterestBaseline`, `projectCellInteractiveObjectBaseline`, `admitInteractiveObjectInterestBaseline`).
+- Wired `TransportJoinResponseQueue` to deliver initial cell interactive-object baselines on join when capability is negotiated.
+- Wired `ConnectionSessionCoordinator` to receive `ClientInteractObjectCommand` (kind `0x0106`), validate session and generation, resolve the canonical entity binding, and submit the complete command header and interaction payload to `ServerCommandIntakeCoordinator`.
+- Composed `InteractiveObjectCatalog` and `CanonicalInteractiveObjectWorld` into `ServerApplicationWiring`.
+- Added optional bounded [Interactive object content V1](INTERACTIVE_OBJECT_CONTENT_V1.md)
+  loading in the production process root. The replication capability is advertised
+  only after the configured catalog and initial world load successfully.
+- The canonical command reducer executes interactions in the same ingress order and session-global sequence/idempotency history as movement and cell-transition commands. It stages player state, object state, and typed `ObjectInteractionOutcome` records together.
+- Prepared reduction takes bounded base/candidate snapshots once per affected
+  batch and mutates individual records in place; rollback restores only the failed
+  command's prior record instead of rebuilding the entire world for every command.
+- Teleport doors atomically replace the activating player's canonical transform and stop velocity; armed traps disarm canonically and publish their typed trap outcome to persistence/replay/script/metrics sinks.
+- Interactive-object commands are capability-gated and use the existing 128-command per-session-generation intake bound; player/object mutations commit only after affected reliable baselines are admitted atomically.
+- Network `UnlockWithKey` commands are rejected until Phase 15 integrates
+  canonical inventory ownership. The core reducer accepts only an explicit
+  independently verified key set and does not treat an empty set as verification.
+- Delivery on resume, resync, join, and cell transition delivers complete exact-cell baselines without requiring continuous ticking for unloaded or empty cells.
+- Verified in `apps/tes3mp-server/server_app_tests.cpp`: baseline delivery on join, client interaction dispatch with reach enforcement, door open transition with revision increment, Scenario 11 (unloaded cell preserves canonical object state without ticking), and Scenario 12 (late join and resync receive complete modified cell baseline).
+- Pre-commit regression coverage proves mixed cell-transition/interaction ordering, finalized command history, rejected-interaction outcomes, trap outcome delivery to canonical sinks, teleport player replacement, and rollback when reliable output admission fails.
+
 ## Phase 10 result
 
 - Fresh password joins issue a random 32-byte player credential after ordinary
@@ -366,23 +394,28 @@ work.
 
 - Full standalone TES3MP MSVC RelWithDebInfo build completed cleanly in
   `build/slice51-msvc`.
+- `tes3mp_interactive_object_replication_tests` passes cleanly (returncode 0).
+- `tes3mp_server_app_tests` passes cleanly (returncode 0), including Scenarios 11 & 12.
 - `tes3mp_interactive_object_catalog_tests` and `tes3mp_interactive_object_world_tests`
   executables pass cleanly (returncode 0).
-- All 158 repository Python tests pass (`python -m unittest discover -s scripts/tests`).
-- `verify_vnext_legacy_exclusion.py` passes (4,096 tracked paths, 62 CMake files,
+- All 162 repository Python tests pass (`python -m unittest discover -s scripts/tests`),
+  including updated `test_interactive_object_contract.py`.
+- A clean standalone MSVC RelWithDebInfo build in `build/precommit-server-link`
+  compiles and links the production `tes3mp_server` target.
+- `verify_vnext_legacy_exclusion.py` passes (4,115 tracked paths, 62 CMake files,
   1,254 compile commands, and 1,971 Ninja build edges checked).
 - `verify_vnext_baseline.py` passes with 81 verified input dependency declarations.
 - Target boundary verification and forbidden include checks enforced in CMake.
 
 ## Next pass
 
-Compose interactive-object state into server tick and exact-cell baseline replication:
-integrate `CanonicalInteractiveObjectWorld` into server application state, wire cell
-entry snapshots to include interactive objects, and forward interaction commands
-from client session intake.
+Wire client reception and OpenMW-local presentation of interactive-object
+baselines, including visual door swing interpolation, without moving canonical
+authority or simulation into the client.
 
 ## Working-tree expectation
 
-`vnext` contains the committed Phase 14 Package A canonical core and should be
-clean. The separate `vnext-vr` worktree remains clean at Phase 13 integration
-merge `2762445c8b`.
+`vnext` contains the reviewed Phase 14 canonical-core, replication, and server-
+composition pass ready for commit. Client-local interactive-object presentation
+remains the next pass. The separate `vnext-vr` worktree remains clean at Phase 13
+integration merge `2762445c8b`.

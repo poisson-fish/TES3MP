@@ -237,6 +237,7 @@ namespace TES3MP::OpenMWAdapter
                 const auto& actorBaseline = mRuntime->session().stateMachine().confirmedActorInterestBaseline();
                 if ((advanced.actorBaselineCompleted || advanced.actorBaselineApplied || advanced.actorSnapshotApplied
                         || advanced.baselineCompleted || advanced.snapshotApplied)
+                    && !mPendingCellTransition && !mDeferredCellTransition && !captured.transition
                     && actorSnapshot && playerBaseline && actorBaseline
                     && actorBaseline->canonicalRevision() >= playerBaseline->canonicalRevision() && snapshot
                     && actorBaseline->canonicalRevision() <= snapshot->header().canonicalRevision()
