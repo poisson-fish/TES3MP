@@ -1,0 +1,47 @@
+namespace TES3MP.Protocol.Schema.InventoryCommand;
+
+struct Position3 {
+  x:long;
+  y:long;
+  z:long;
+}
+
+enum InventoryTransactionKind : ubyte {
+  TakeFromContainer = 0,
+  PutIntoContainer = 1,
+  EquipItem = 2,
+  UnequipItem = 3,
+  DropItem = 4,
+  PickupItem = 5
+}
+
+table ClientCommandHeader {
+  session_id:ulong (id: 0);
+  session_generation:ulong (id: 1);
+  command_sequence:ulong (id: 2);
+  command_id:ulong (id: 3);
+  observed_canonical_revision:ulong (id: 4);
+}
+
+table ClientInventoryTransactionCommand {
+  header:ClientCommandHeader (id: 0);
+  kind:InventoryTransactionKind (id: 1);
+  prototype_id:ulong (id: 2);
+  count:uint (id: 3);
+  expected_inventory_revision:ulong (id: 4);
+  interaction_origin:Position3 (id: 5);
+  has_container:bool (id: 6);
+  container_id:ulong (id: 7);
+  has_stack:bool (id: 8);
+  stack_id:ulong (id: 9);
+  has_slot:bool (id: 10);
+  slot:ubyte (id: 11);
+  has_container_revision:bool (id: 12);
+  expected_container_revision:ulong (id: 13);
+  has_world_item_revision:bool (id: 14);
+  expected_world_item_revision:ulong (id: 15);
+}
+
+root_type ClientInventoryTransactionCommand;
+file_identifier "T3IT";
+file_extension "t3it";

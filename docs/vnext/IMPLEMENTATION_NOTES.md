@@ -6699,6 +6699,33 @@ only the relevant phase section here.
   - `verify_vnext_legacy_exclusion.py` passes (4,118 tracked paths, 62 CMake files, 1,254 compile commands, 1,971 Ninja build edges checked).
   - `verify_vnext_baseline.py` passes with 81 verified input dependency declarations.
 
+### 2026-09-08 — Phase 15 replication and server composition — Complete
+
+- Implemented capability-gated FlatBuffers schemas/codecs for reliable private
+  player inventory, exact-cell container and ground-item baselines, latest-wins
+  public equipment, and reliable authenticated inventory transactions. Payloads
+  use bounded chunks, strict ordering and semantic validation, and pinned
+  generator output; the production schema lock now covers the Phase 13–15 wire
+  files it previously omitted.
+- Integrated inventory proposals with the shared ordered/idempotent reducer.
+  Player, interactive-object, and inventory candidate state commits together
+  only after complete affected output admission. Canonical key possession feeds
+  Phase 14 unlock validation.
+- Added target-specific join, resume, resync, cell-change, and transaction-result
+  projections. Private backpack stacks are owner-only, exact-cell containers and
+  ground items are reliable, and public equipment uses an independent
+  latest-wins transport slot.
+- Added optional bounded [inventory content V1](INVENTORY_CONTENT_V1.md) loading
+  and production composition. Manifest/catalog/world, collision-cell, and queue
+  capacity failures prevent capability advertisement and listener startup.
+- Verification: MSVC `tes3mp_protocol_tests_run` and
+  `tes3mp_server_app_tests_run` pass; focused inventory-replication and transport
+  queue executables pass; production `tes3mp_server` links; and the pinned
+  FlatBuffers proof passes. The inventory Python contract has 11 passing checks,
+  and the full repository suite passes all 174 tests. Indexed candidate-tree
+  provenance passes with 469 intentional differences and 95 dependency inputs;
+  patch-registry, legacy-exclusion, and diff-hygiene checks pass.
+
 ## Phase 16 — Combat, stats, magic, death, and resurrection
 
 [Back to the phase tracker](IMPLEMENTATION_PLAN.md#phase-16--combat-stats-magic-death-and-resurrection)

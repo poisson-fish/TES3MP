@@ -1,12 +1,13 @@
-#include "server_application.hpp"
-#include "server_config.hpp"
 #include "actor_content.hpp"
-#include "content_collision.hpp"
 #include "connection_session_coordinator.hpp"
+#include "content_collision.hpp"
 #include "interactive_object_content.hpp"
+#include "inventory_content.hpp"
 #include "phase7_proof_profile.hpp"
 #include "phase7_queue_telemetry.hpp"
 #include "player_identity_file.hpp"
+#include "server_application.hpp"
+#include "server_config.hpp"
 
 #include <tes3mp/observability.hpp>
 #include <tes3mp/server_authentication.hpp>
@@ -25,7 +26,10 @@
 namespace
 {
     volatile std::sig_atomic_t stopRequested = 0;
-    void requestStop(int) { stopRequested = 1; }
+    void requestStop(int)
+    {
+        stopRequested = 1;
+    }
 
     class SteadyMonotonicClock final : public TES3MP::MonotonicClock
     {
@@ -64,12 +68,12 @@ int main(int argc, char** argv)
         return 2;
     }
     auto config = std::get<TES3MP::ServerApp::ServerConfig>(std::move(parsed));
-    auto collisionResult = TES3MP::ServerApp::ContentCollisionProvider::load(
-        config.collisionContentFile, config.contentManifest);
-    auto* collisionValue = std::get_if<std::unique_ptr<TES3MP::ServerApp::ContentCollisionProvider>>(
-        &collisionResult);
+    auto collisionResult
+        = TES3MP::ServerApp::ContentCollisionProvider::load(config.collisionContentFile, config.contentManifest);
+    auto* collisionValue = std::get_if<std::unique_ptr<TES3MP::ServerApp::ContentCollisionProvider>>(&collisionResult);
     auto collision = collisionValue ? std::move(*collisionValue) : nullptr;
-    if (!collision || std::any_of(config.spawnPositions.begin(), config.spawnPositions.end(),
+    if (!collision
+        || std::any_of(config.spawnPositions.begin(), config.spawnPositions.end(),
             [&](const auto& position) { return !collision->canOccupy(config.spawnCell, position); }))
     {
         std::cerr << "collision content initialization failed\n";
@@ -127,6 +131,32 @@ int main(int argc, char** argv)
         }
         interactiveObjectWorld.emplace(std::move(*world));
     }
+    std::optional<TES3MP::ItemPrototypeCatalog> itemCatalog;
+    std::optional<TES3MP::CanonicalInventoryWorld> inventoryWorld;
+    if (!config.inventoryContentFile.empty())
+    {
+        auto loaded = TES3MP::ServerApp::loadInventoryContent(config.inventoryContentFile, config.contentManifest);
+        auto* content = std::get_if<TES3MP::ServerApp::InventoryContent>(&loaded);
+        if (!content)
+        {
+            std::cerr << "inventory content initialization failed\n";
+            return 2;
+        }
+        for (const auto& container : content->world.containers())
+            if (!collision->canOccupy(container.cell, container.position))
+            {
+                std::cerr << "inventory container collision validation failed\n";
+                return 2;
+            }
+        for (const auto& item : content->world.worldItems())
+            if (!collision->canOccupy(item.cell, item.position))
+            {
+                std::cerr << "ground item collision validation failed\n";
+                return 2;
+            }
+        itemCatalog.emplace(std::move(content->catalog));
+        inventoryWorld.emplace(std::move(content->world));
+    }
     auto password = TES3MP::ServerApp::loadJoinPassword(config.joinPasswordFile);
     if (const auto* error = std::get_if<TES3MP::ServerApp::ConfigError>(&password))
     {
@@ -154,47 +184,42 @@ int main(int argc, char** argv)
 
     SteadyMonotonicClock clock;
     auto crypto = TES3MP::makeProductionCredentialCrypto();
-    auto ratePolicy = TES3MP::AuthenticationRateLimitPolicy::create(
-        TES3MP::ServerApp::Phase7SourceAuthenticationBurst,
-        TES3MP::ServerApp::Phase7GlobalAuthenticationBurst,
-        TES3MP::ServerApp::Phase7AuthenticationRefillMilliseconds,
+    auto ratePolicy = TES3MP::AuthenticationRateLimitPolicy::create(TES3MP::ServerApp::Phase7SourceAuthenticationBurst,
+        TES3MP::ServerApp::Phase7GlobalAuthenticationBurst, TES3MP::ServerApp::Phase7AuthenticationRefillMilliseconds,
         TES3MP::ServerApp::Phase7AuthenticationRefillMilliseconds);
     auto limiter = ratePolicy ? TES3MP::AuthenticationRateLimiter::create(*ratePolicy, clock.now()) : nullptr;
     auto joinProvider = crypto ? TES3MP::JoinPasswordAuthenticationProvider::create(
-                                    *crypto, std::get<TES3MP::AuthenticationMaterial>(std::move(password)))
+                                     *crypto, std::get<TES3MP::AuthenticationMaterial>(std::move(password)))
                                : nullptr;
-    auto resumeStore = crypto ? TES3MP::ResumeTokenStore::create(*crypto, config.disconnectGraceMilliseconds)
-                              : nullptr;
+    auto resumeStore = crypto ? TES3MP::ResumeTokenStore::create(*crypto, config.disconnectGraceMilliseconds) : nullptr;
     auto identityFileResult = TES3MP::ServerApp::PlayerIdentityFile::open(config.playerIdentityFile);
-    auto* identityFileValue
-        = std::get_if<std::unique_ptr<TES3MP::ServerApp::PlayerIdentityFile>>(&identityFileResult);
+    auto* identityFileValue = std::get_if<std::unique_ptr<TES3MP::ServerApp::PlayerIdentityFile>>(&identityFileResult);
     auto identityFile = identityFileValue ? std::move(*identityFileValue) : nullptr;
     std::vector<TES3MP::EntityId> actorEntityIds;
     actorEntityIds.reserve(actorCatalog.entries().size());
-    for (const auto& actor : actorCatalog.entries()) actorEntityIds.push_back(actor.entityId);
+    for (const auto& actor : actorCatalog.entries())
+        actorEntityIds.push_back(actor.entityId);
     auto playerIdentityResult = crypto && identityFile
-        ? TES3MP::PlayerIdentityRegistry::create(
-            *crypto, *identityFile, identityFile->records(), actorEntityIds)
+        ? TES3MP::PlayerIdentityRegistry::create(*crypto, *identityFile, identityFile->records(), actorEntityIds)
         : std::variant<std::unique_ptr<TES3MP::PlayerIdentityRegistry>, TES3MP::PlayerIdentityError>(
               TES3MP::PlayerIdentityError::InvalidInitialState);
-    auto* playerIdentityValue
-        = std::get_if<std::unique_ptr<TES3MP::PlayerIdentityRegistry>>(&playerIdentityResult);
+    auto* playerIdentityValue = std::get_if<std::unique_ptr<TES3MP::PlayerIdentityRegistry>>(&playerIdentityResult);
     auto playerIdentities = playerIdentityValue ? std::move(*playerIdentityValue) : nullptr;
     auto queues = TES3MP::OutboundQueueSet::create(
         TES3MP::OutboundQueuePolicy{}, TES3MP::ServerApp::Phase7ConnectionCapacity, queueTelemetry);
     const auto timeoutNanoseconds = config.disconnectGraceMilliseconds * 1'000'000;
-    auto timeouts = TES3MP::SessionTimeoutPolicy::create(
-        timeoutNanoseconds, timeoutNanoseconds, timeoutNanoseconds);
-    auto versions = std::get<TES3MP::ProtocolVersionRange>(TES3MP::ProtocolVersionRange::create(
-        TES3MP::ServerApp::Phase7ProtocolMajor, TES3MP::ServerApp::Phase7ProtocolMinimumMinor,
-        TES3MP::ServerApp::Phase7ProtocolMaximumMinor));
-    std::vector<TES3MP::CapabilityId> optionalCapabilities{
-        TES3MP::vrPoseCapability(), TES3MP::actorReplicationCapability()
-    };
+    auto timeouts = TES3MP::SessionTimeoutPolicy::create(timeoutNanoseconds, timeoutNanoseconds, timeoutNanoseconds);
+    auto versions = std::get<TES3MP::ProtocolVersionRange>(
+        TES3MP::ProtocolVersionRange::create(TES3MP::ServerApp::Phase7ProtocolMajor,
+            TES3MP::ServerApp::Phase7ProtocolMinimumMinor, TES3MP::ServerApp::Phase7ProtocolMaximumMinor));
+    std::vector<TES3MP::CapabilityId> optionalCapabilities{ TES3MP::vrPoseCapability(),
+        TES3MP::actorReplicationCapability() };
     if (interactiveObjectWorld)
         optionalCapabilities.push_back(TES3MP::interactiveObjectReplicationCapability());
-    auto offer = TES3MP::CapabilityOffer::create(
-        std::move(versions), optionalCapabilities, {}, config.contentManifest.id());
+    if (inventoryWorld)
+        optionalCapabilities.push_back(TES3MP::inventoryReplicationCapability());
+    auto offer
+        = TES3MP::CapabilityOffer::create(std::move(versions), optionalCapabilities, {}, config.contentManifest.id());
     const auto zero = TES3MP::Turn32::fromValue(0);
     std::vector<TES3MP::Transform> spawns;
     spawns.reserve(config.spawnPositions.size());
@@ -204,17 +229,16 @@ int main(int argc, char** argv)
     TES3MP::NullStructuredEventSink events;
     TES3MP::Observability observability(metrics, events);
     auto emptyState = std::get<TES3MP::CanonicalServerState>(TES3MP::createCanonicalServerState({}, {}));
-    TES3MP::CanonicalCommandReducer reducer(
-        std::move(emptyState), observability, config.contentManifest, *collision);
+    TES3MP::CanonicalCommandReducer reducer(std::move(emptyState), observability, config.contentManifest, *collision);
     TES3MP::ServerCommandIntakeCoordinator intake(
         clock, observability, clock.now(), TES3MP::ServerTick::initial(), TES3MP::IngressOrdinal::initial());
-    auto joins = playerIdentities ? TES3MP::AuthenticatedJoinCoordinator::create(spawns,
-        config.contentManifest, *TES3MP::SessionId::fromValue(1), *playerIdentities, reducer) : std::nullopt;
-    auto lifecycle = TES3MP::ServerLifecycleCoordinator::create(
-        config.disconnectGraceMilliseconds * 1'000'000, reducer);
-    if (!crypto || !limiter || !joinProvider || !resumeStore || !identityFile || !playerIdentities
-        || !queues || !timeouts || !joins || !lifecycle
-        || !std::holds_alternative<TES3MP::CapabilityOffer>(offer))
+    auto joins = playerIdentities ? TES3MP::AuthenticatedJoinCoordinator::create(spawns, config.contentManifest,
+                                        *TES3MP::SessionId::fromValue(1), *playerIdentities, reducer)
+                                  : std::nullopt;
+    auto lifecycle
+        = TES3MP::ServerLifecycleCoordinator::create(config.disconnectGraceMilliseconds * 1'000'000, reducer);
+    if (!crypto || !limiter || !joinProvider || !resumeStore || !identityFile || !playerIdentities || !queues
+        || !timeouts || !joins || !lifecycle || !std::holds_alternative<TES3MP::CapabilityOffer>(offer))
     {
         std::cerr << "server composition failed\n";
         return 3;
@@ -224,12 +248,12 @@ int main(int argc, char** argv)
     TES3MP::ServerApp::ConnectionSessionCoordinator sessions(clock, observability, *timeouts,
         std::get<TES3MP::CapabilityOffer>(std::move(offer)), authentication, *queues,
         TES3MP::ServerApp::Phase7ConnectionCapacity, &actorWorld,
-        interactiveObjectWorld ? &*interactiveObjectWorld : nullptr);
+        interactiveObjectWorld ? &*interactiveObjectWorld : nullptr, inventoryWorld ? &*inventoryWorld : nullptr);
     TES3MP::ServerApp::ServerApplication application(*factory.runtime, config,
-        { sessions, *joins, *crypto, *queues, clock, intake, reducer, *lifecycle,
-            &actorCatalog, &actorWorld, collision.get(),
-            interactiveObjectCatalog ? &*interactiveObjectCatalog : nullptr,
-            interactiveObjectWorld ? &*interactiveObjectWorld : nullptr });
+        { sessions, *joins, *crypto, *queues, clock, intake, reducer, *lifecycle, &actorCatalog, &actorWorld,
+            collision.get(), interactiveObjectCatalog ? &*interactiveObjectCatalog : nullptr,
+            interactiveObjectWorld ? &*interactiveObjectWorld : nullptr, itemCatalog ? &*itemCatalog : nullptr,
+            inventoryWorld ? &*inventoryWorld : nullptr });
     if (!application.start())
     {
         std::cerr << application.failure() << '\n';
@@ -247,12 +271,13 @@ int main(int argc, char** argv)
         }
         if (const auto evidence = queueTelemetry.takeDrainEvidence())
             std::cout << "{\"event\":\"phase7_queue_drain\",\"reliable_high_water_messages\":"
-                      << evidence->reliableHighWaterMessages << ",\"reliable_high_water_bytes\":"
-                      << evidence->reliableHighWaterBytes << ",\"latest_high_water_messages\":"
-                      << evidence->latestHighWaterMessages << ",\"latest_high_water_bytes\":"
-                      << evidence->latestHighWaterBytes
+                      << evidence->reliableHighWaterMessages
+                      << ",\"reliable_high_water_bytes\":" << evidence->reliableHighWaterBytes
+                      << ",\"latest_high_water_messages\":" << evidence->latestHighWaterMessages
+                      << ",\"latest_high_water_bytes\":" << evidence->latestHighWaterBytes
                       << ",\"final_reliable_messages\":0,\"final_reliable_bytes\":0,"
-                         "\"final_latest_messages\":0,\"final_latest_bytes\":0}" << std::endl;
+                         "\"final_latest_messages\":0,\"final_latest_bytes\":0}"
+                      << std::endl;
         std::this_thread::sleep_for(std::chrono::milliseconds(config.tickIntervalMilliseconds));
     }
     if (!application.stop())

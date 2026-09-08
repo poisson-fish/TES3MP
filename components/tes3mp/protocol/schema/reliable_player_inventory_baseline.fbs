@@ -1,0 +1,42 @@
+namespace TES3MP.Protocol.Schema.PlayerInventoryBaseline;
+
+struct ItemStack {
+  stack_id:ulong;
+  prototype_id:ulong;
+  count:uint;
+  condition:uint;
+  enchantment_charge:uint;
+  soul_prototype_id:ulong;
+  has_soul:ubyte;
+  padding0:ubyte;
+  padding1:ushort;
+}
+
+struct EquipmentBinding {
+  stack_id:ulong;
+  slot:ubyte;
+  padding0:ubyte;
+  padding1:ushort;
+  padding2:uint;
+}
+
+table PlayerInventoryBaselineHeader {
+  target_session_id:ulong (id: 0);
+  target_session_generation:ulong (id: 1);
+  server_tick:ulong (id: 2);
+  canonical_revision:ulong (id: 3);
+  player_id:ulong (id: 4);
+  inventory_revision:ulong (id: 5);
+  chunk_index:uint (id: 6);
+  chunk_count:uint (id: 7);
+}
+
+table ReliablePlayerInventoryBaseline {
+  header:PlayerInventoryBaselineHeader (id: 0);
+  stacks:[ItemStack] (id: 1);
+  equipment:[EquipmentBinding] (id: 2);
+}
+
+root_type ReliablePlayerInventoryBaseline;
+file_identifier "T3PI";
+file_extension "t3pi";

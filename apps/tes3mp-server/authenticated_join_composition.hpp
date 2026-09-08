@@ -1,13 +1,14 @@
 #ifndef TES3MP_SERVER_AUTHENTICATED_JOIN_COMPOSITION_HPP
 #define TES3MP_SERVER_AUTHENTICATED_JOIN_COMPOSITION_HPP
 
-#include "tes3mp/authenticated_join.hpp"
 #include "tes3mp/actor_simulation.hpp"
+#include "tes3mp/authenticated_join.hpp"
+#include "tes3mp/inventory_world.hpp"
 #include "tes3mp/server_authentication.hpp"
 #include "tes3mp/transport.hpp"
 
-#include <span>
 #include <optional>
+#include <span>
 
 namespace TES3MP
 {
@@ -38,22 +39,24 @@ namespace TES3MP::ServerApp
     public:
         virtual ~JoinResponseQueue() = default;
         virtual bool enqueueJoinResponses(std::span<const std::byte> authentication,
-            std::span<const std::byte> snapshot, const CanonicalServerState& before,
-            const CanonicalServerState& after, const AuthenticatedJoinResult& join, ServerTick tick,
-            CanonicalStateVersion stateVersion) noexcept = 0;
+            std::span<const std::byte> snapshot, const CanonicalServerState& before, const CanonicalServerState& after,
+            const AuthenticatedJoinResult& join, ServerTick tick, CanonicalStateVersion stateVersion) noexcept = 0;
+        virtual bool commitJoinState() noexcept { return true; }
     };
 
     class AuthenticatedJoinComposition
     {
     public:
-        AuthenticatedJoinComposition(AuthenticatedJoinCoordinator& joins,
-            ServerAuthenticationService& authentication, JoinResponseQueue& responses) noexcept
-            : mJoins(joins), mAuthentication(authentication), mResponses(responses)
+        AuthenticatedJoinComposition(AuthenticatedJoinCoordinator& joins, ServerAuthenticationService& authentication,
+            JoinResponseQueue& responses) noexcept
+            : mJoins(joins)
+            , mAuthentication(authentication)
+            , mResponses(responses)
         {
         }
 
-        JoinCompositionOutcome join(PrincipalId principal, SessionGeneration generation,
-            ServerTick tick, ResumeTokenContext context,
+        JoinCompositionOutcome join(PrincipalId principal, SessionGeneration generation, ServerTick tick,
+            ResumeTokenContext context,
             std::optional<AuthenticatedAdmission::PlayerClaim> playerClaim = std::nullopt) noexcept;
 
     private:
@@ -67,13 +70,21 @@ namespace TES3MP::ServerApp
     public:
         TransportJoinResponseQueue(OutboundQueueSet& queues, TransportConnectionId connection,
             ConnectionSessionCoordinator* sessions = nullptr, const CanonicalActorWorld* actors = nullptr,
-            const CanonicalInteractiveObjectWorld* objects = nullptr) noexcept
-            : mQueues(queues), mConnection(connection), mSessions(sessions), mActors(actors), mObjects(objects) {}
+            const CanonicalInteractiveObjectWorld* objects = nullptr,
+            CanonicalInventoryWorld* inventory = nullptr) noexcept
+            : mQueues(queues)
+            , mConnection(connection)
+            , mSessions(sessions)
+            , mActors(actors)
+            , mObjects(objects)
+            , mInventory(inventory)
+        {
+        }
 
-        bool enqueueJoinResponses(std::span<const std::byte> authentication,
-            std::span<const std::byte> snapshot, const CanonicalServerState& before,
-            const CanonicalServerState& after, const AuthenticatedJoinResult& join, ServerTick tick,
-            CanonicalStateVersion stateVersion) noexcept override;
+        bool enqueueJoinResponses(std::span<const std::byte> authentication, std::span<const std::byte> snapshot,
+            const CanonicalServerState& before, const CanonicalServerState& after, const AuthenticatedJoinResult& join,
+            ServerTick tick, CanonicalStateVersion stateVersion) noexcept override;
+        bool commitJoinState() noexcept override;
 
     private:
         OutboundQueueSet& mQueues;
@@ -81,6 +92,8 @@ namespace TES3MP::ServerApp
         ConnectionSessionCoordinator* mSessions;
         const CanonicalActorWorld* mActors;
         const CanonicalInteractiveObjectWorld* mObjects;
+        CanonicalInventoryWorld* mInventory;
+        std::optional<CanonicalInventoryWorld> mPendingInventory;
     };
 }
 

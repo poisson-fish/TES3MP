@@ -20,8 +20,9 @@ Updated: 2026-09-08
 - Phase 14 client activation and round-trip verification: **Complete**
 - Phase 15 discovery: **Complete**
 - Phase 15 canonical core: **Complete**
-- Active work: **None — Phase 15 canonical core complete**
-- Last pass: **Phase 15 canonical core: manifest-bound item prototype catalog, canonical player, container, and ground-item storage, key verification bridge, and atomic transfer reducer**
+- Phase 15 replication and server composition: **Complete**
+- Active work: **None — Phase 15 replication and server composition complete**
+- Last pass: **Capability-gated inventory wire protocol, private/public exact-cell projection, ordered transaction intake, atomic server commit, lifecycle delivery, and bounded production content composition**
 - Authoritative tracker: [rolling implementation plan](IMPLEMENTATION_PLAN.md)
 - Historical evidence: [implementation notes](IMPLEMENTATION_NOTES.md)
 
@@ -367,6 +368,29 @@ ADRs and GDRs are required only for consequential, hard-to-reverse decisions.
   gameplay, authority, or rendering behavior changed.
 - Scripting, durable disk persistence, and client authority remain strictly excluded.
 
+## Phase 15 replication and server composition result
+
+- Five explicit-ID FlatBuffers schemas and owned codecs cover private player
+  inventory, exact-cell container and ground-item baselines, public equipment,
+  and authenticated transaction commands. Chunk and collection limits are
+  checked before allocation and against the transport payload caps.
+- Inventory transactions share the established session-global ordering,
+  duplicate handling, acknowledgement, and canonical revision path. Player,
+  interactive-object, and inventory candidates commit only after all affected
+  output is admitted; failure leaves every canonical domain unchanged.
+- Join, resume, resync, cell changes, and transaction outcomes project complete
+  target-specific inventory state. Only the owner receives backpack stacks;
+  same-cell peers receive visible prototype IDs for the 19 equipment slots.
+- The canonical key bridge now supplies verified possession to Phase 14 door
+  commands. The end-to-end app contract takes a key from a container and then
+  unlocks a matching door without trusting a client key claim.
+- Optional [inventory content V1](INVENTORY_CONTENT_V1.md) startup composition is
+  manifest-bound, size/count constrained, collision-cell checked, and rejects
+  cells whose complete reliable view cannot fit the bounded queue. The server
+  advertises inventory replication only when this content loads successfully.
+- OpenMW ingestion, GUI reconciliation, transaction capture, and equipment mesh
+  presentation remain the next pass.
+
 ## Phase 10 result
 
 - Fresh password joins issue a random 32-byte player credential after ordinary
@@ -430,19 +454,29 @@ work.
 ## Last verified
 
 - Standalone TES3MP MSVC C++20 build completed cleanly in `build/slice51-msvc`.
-- `tes3mp_item_catalog_tests.exe` and `tes3mp_inventory_world_tests.exe` pass cleanly (returncode 0).
-- `tes3mp_protocol_tests_run` custom target builds and runs all component tests cleanly, including all protocol, deterministic facility, fault, server lifecycle, interactive object, and inventory tests.
-- Python unit contract `test_inventory_contract.py` passes cleanly (9 tests).
-- All 172 repository Python tests pass (`python -m unittest discover -s scripts/tests`).
+- `tes3mp_protocol_tests_run` and `tes3mp_server_app_tests_run` build and pass,
+  including inventory wire bounds, projection privacy, lifecycle delivery,
+  atomic rollback, and the inventory-to-door-key integration path.
+- `tes3mp_transport_queue_tests.exe` and `tes3mp_inventory_replication_tests.exe`
+  pass cleanly; the production `tes3mp_server` executable links successfully.
+- The pinned FlatBuffers selection proof regenerates and compares all 22
+  production schemas and generated headers successfully.
+- Python inventory contracts pass (11 tests), and all 174 repository Python
+  tests pass (`python -m unittest discover -s scripts/tests`).
 - `verify_openmw_patch_registry.py` passes cleanly with `P14-001` covering `player.cpp` and `player.hpp`.
-- `verify_vnext_legacy_exclusion.py` passes (4,118 tracked paths, 62 CMake files, 1,254 compile commands, and 1,971 Ninja build edges checked).
-- `verify_vnext_baseline.py` passes with 81 verified input dependency declarations.
+- `verify_vnext_legacy_exclusion.py` passes (4,128 tracked paths, 62 CMake files, 1,254 compile commands, and 1,971 Ninja build edges checked).
+- Indexed candidate-tree `verify_vnext_baseline.py --index` passes with 469
+  intentional differences and 95 verified dependency declarations.
 - Target boundary verification and forbidden include checks enforced in CMake.
 
 ## Next pass
 
-Phase 15 replication and server composition: reliable player inventory and container baselines, public equipment and cell ground-item views, wire schemas, and server command intake.
+Phase 15 OpenMW client integration: ingest complete inventory/container/ground
+views, reconcile GUI state, dispatch transactions, and present confirmed local
+and remote equipment without expanding client authority.
 
 ## Working-tree expectation
 
-`vnext` contains the completed and verified Phase 15 inventory canonical core pass ready for commit, including canonical spatial authority, exact-stack transactions, and encapsulated mutation. The separate `vnext-vr` worktree remains clean at Phase 13 integration merge `2762445c8b`.
+`vnext` contains the completed Phase 15 inventory replication and
+server-composition pass and is expected to be clean after closeout. The separate
+`vnext-vr` worktree remains at the Phase 13 integration merge `2762445c8b`.

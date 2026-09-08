@@ -7,8 +7,18 @@ table ActorSnapshotHeader {
   canonical_revision:ulong (id: 3);
 }
 
-enum CellKind : ubyte { Unknown = 0, Interior = 1, Exterior = 2 }
-enum ActorActivity : ubyte { Unknown = 0, Idle = 1, Travel = 2, Wander = 3 }
+enum CellKind : ubyte {
+  Unknown = 0,
+  Interior = 1,
+  Exterior = 2
+}
+
+enum ActorActivity : ubyte {
+  Unknown = 0,
+  Idle = 1,
+  Travel = 2,
+  Wander = 3
+}
 
 struct Cell { cell_space_id:ulong; grid_x:int; grid_y:int; kind:CellKind; }
 struct Position3 { x:long; y:long; z:long; }

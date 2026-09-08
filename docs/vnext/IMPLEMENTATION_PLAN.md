@@ -36,27 +36,37 @@ Verification scales with risk:
 
 ## Now
 
-### Phase 15 — inventory canonical core
+### Phase 15 — inventory replication and server composition
 
 Status: **Complete**
 
-Manifest-bound item prototype catalog, canonical player inventory, container and ground-item storage, key verification bridge, and atomic transfer reducer implemented with full engine independence and proven against race conditions, desyncs, and duplicate transactions:
-- **Strong Value Types**: Added `ItemPrototypeId`, `ItemStackId`, `InventoryRevision`, `ContainerRevision`, `WorldItemRevision`, and `ContainerId` in `value_types.hpp`.
-- **Item Prototype Catalog**: Defined `ItemPrototypeDeclaration`, `ItemCategory`, `EquipmentSlot` (19 canonical slots), and `ItemPrototypeCatalog` bound immutably to `ContentManifest` in `tes3mp_protocol`.
-- **Canonical Inventory World**: Implemented `CanonicalItemStack`, `CanonicalPlayerInventoryState`, `CanonicalContainerInventoryState`, `CanonicalWorldItemState`, and `CanonicalInventoryWorld` with manifest/catalog validation, globally unique stack IDs, and bounded capacities in `tes3mp_server_core`.
-- **Key Verification Bridge**: Built `collectVerifiedKeys(PlayerId)` over the world's owned catalog snapshot, producing authoritative key lists directly consumable by Phase 14 `ObjectInteractionValidationContext::verifiedPlayerKeys` for door unlocking without client trust.
-- **Atomic Transaction Reducer**: Implemented `applyInventoryTransaction` executing atomic `TakeFromContainer`, `PutIntoContainer`, `EquipItem`, `UnequipItem`, `DropItem`, and `PickupItem` transactions with server-derived player location, strict reach (384 units), exact-cell matching, exact source stack identity, mandatory source revision fencing, equipment quantity checks, overflow-safe preflight, stable whole-stack identity, and canonical ground-item conservation.
-- **Verification**: Unit tests `tes3mp_item_catalog_tests` and `tes3mp_inventory_world_tests` remain active in release builds and cover adversarial rollback, authority, identity exhaustion, equipment, and extreme-coordinate cases; Python contract `test_inventory_contract.py` includes 9 checks; all 172 repository Python tests pass.
+- Added capability-gated, size-prefixed FlatBuffers messages for private player
+  inventory, exact-cell containers and ground items, public equipment, and
+  authenticated inventory transaction commands. Bounded chunk sizes fit their
+  transport classes and are reproduced by the pinned generator proof.
+- Composed inventory commands into the shared ordered/idempotent reducer and
+  atomic output-admission boundary. Canonical player, object, and inventory
+  changes commit together; authoritative inventory keys now enable Phase 14
+  door unlocking without client claims.
+- Join, resume, resync, cell changes, and transaction outcomes deliver complete
+  target-specific views. Backpack contents remain private; public equipment has
+  a separate latest-wins slot so it cannot replace spatial or actor snapshots.
+- Added optional bounded [inventory content V1](INVENTORY_CONTENT_V1.md) loading.
+  Production advertises the capability only after manifest, catalog, world,
+  collision-cell, and outbound-composition validation succeeds.
+- Verification: `tes3mp_protocol_tests_run`, `tes3mp_server_app_tests_run`,
+  focused transport/inventory executables, the production `tes3mp_server` link,
+  the pinned FlatBuffers proof, and 174 repository Python tests pass.
 
 ## Next
 
 These are candidates, not locked slices:
 
-1. Phase 15 replication and server composition: reliable player inventory and container baselines, public equipment and cell ground-item views, wire schemas, and server command intake.
-2. Phase 15 OpenMW client integration: inventory/container session ingestion, GUI reconciliation, and equipment presentation.
-3. Revisit Phase 12 PC-VR hardware capture before Phase 22 stabilization if
+1. Phase 15 OpenMW client integration: inventory/container session ingestion,
+   GUI reconciliation, transaction dispatch, and local/remote equipment presentation.
+2. Revisit Phase 12 PC-VR hardware capture before Phase 22 stabilization if
    hardware remains unavailable during Phase 15 presentation work.
-4. Phase 16 — combat, stats, magic, death, and resurrection.
+3. Phase 16 — combat, stats, magic, death, and resurrection.
 
 The list is rewritten after each completed pass. New evidence may reorder,
 combine, or remove items.
@@ -107,6 +117,7 @@ but they no longer force a predetermined sequence of micro-slices.
 | Phase 14 activation and round-trip | **Complete** | Activation raycast interception via `MWWorld::Player`, client `queueInteractObject` dispatch, unnegotiated and round-trip verification, and production capability advertisement |
 | Phase 15 discovery | **Complete** | Inventory/container/equipment trace, legacy vulnerability audit, lane separation, owner package choices, and named proofs |
 | Phase 15 canonical core | **Complete** | Manifest-bound catalog, validated player/container/ground-item state, globally unique stack identity, authoritative key query, and atomic inventory transactions |
+| Phase 15 replication/server composition | **Complete** | Capability-gated private/public inventory views, bounded schemas/codecs, ordered command intake, atomic cross-domain commit, lifecycle baselines, and production content loading |
 
 ### Phase 9 completion record
 

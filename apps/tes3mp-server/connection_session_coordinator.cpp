@@ -4,6 +4,7 @@
 
 #include "tes3mp/authentication.hpp"
 #include "tes3mp/interactive_object_replication.hpp"
+#include "tes3mp/inventory_replication.hpp"
 #include "tes3mp/protocol_frame.hpp"
 #include "tes3mp/protocol_handshake.hpp"
 
@@ -31,7 +32,7 @@ namespace TES3MP::ServerApp
     ConnectionSessionCoordinator::ConnectionSessionCoordinator(MonotonicClock& clock, Observability& observability,
         SessionTimeoutPolicy timeouts, CapabilityOffer offer, ServerAuthenticationService& authentication,
         OutboundQueueSet& queues, std::size_t capacity, const CanonicalActorWorld* actors,
-        const CanonicalInteractiveObjectWorld* objects) noexcept
+        const CanonicalInteractiveObjectWorld* objects, CanonicalInventoryWorld* inventory) noexcept
         : mClock(clock)
         , mObservability(observability)
         , mTimeouts(timeouts)
@@ -41,6 +42,7 @@ namespace TES3MP::ServerApp
         , mCapacity(capacity)
         , mActors(actors)
         , mObjects(objects)
+        , mInventory(inventory)
     {
     }
 
@@ -244,10 +246,7 @@ namespace TES3MP::ServerApp
                 || !std::ranges::binary_search(
                     hello->negotiatedCapabilities(), interactiveObjectReplicationCapability()))
                 return ConnectionSessionResult::ProtocolRejected;
-            // Key possession is not canonical until Phase 15 inventory state exists.
-            // Reject the operation at intake rather than treating an empty key set
-            // as authoritative verification.
-            if (cmd->kind == ObjectInteractionKind::UnlockWithKey)
+            if (cmd->kind == ObjectInteractionKind::UnlockWithKey && !mInventory)
                 return ConnectionSessionResult::ProtocolRejected;
             const auto* progress = joins.state().findActiveSession(*state->sessionId());
             const auto* player = progress ? joins.state().findPlayer(progress->playerId()) : nullptr;
@@ -258,6 +257,44 @@ namespace TES3MP::ServerApp
                 EntityPrecondition(progress->entityId(), player->entityRevision(), player->authorityEpoch()),
                 InteractiveObjectCommandProposal(cmd->objectId, cmd->targetCell, cmd->interactionOrigin,
                     cmd->expectedRevision, cmd->kind, cmd->requestedKey));
+            return intake.submit(std::move(proposal)) == CommandSubmissionResult::Accepted
+                ? ConnectionSessionResult::CommandSubmitted
+                : ConnectionSessionResult::QueueRejected;
+        }
+
+        if (frame->messageKind() == MessageKind::ClientInventoryTransactionCommand)
+        {
+            if (frame->messageClass() != MessageClass::ReliableOperation || !mInventory
+                || state->state() != ServerSessionState::Established || !state->sessionId())
+                return ConnectionSessionResult::ProtocolRejected;
+            auto decoded = decodeClientInventoryTransactionCommand(frame->payload());
+            auto* command = std::get_if<ClientInventoryTransactionCommand>(&decoded);
+            if (!command || command->sessionId != *state->sessionId()
+                || command->sessionGeneration != state->generation())
+                return ConnectionSessionResult::ProtocolRejected;
+            const auto& hello = state->negotiatedHello();
+            if (!hello
+                || !std::ranges::binary_search(hello->negotiatedCapabilities(), inventoryReplicationCapability()))
+                return ConnectionSessionResult::ProtocolRejected;
+            const auto* progress = joins.state().findActiveSession(*state->sessionId());
+            const auto* player = progress ? joins.state().findPlayer(progress->playerId()) : nullptr;
+            if (!progress || !player)
+                return ConnectionSessionResult::ProtocolRejected;
+            InventoryTransactionCommand transaction{ .player = progress->playerId(),
+                .kind = command->kind,
+                .containerId = command->containerId,
+                .prototypeId = command->prototypeId,
+                .stackId = command->stackId,
+                .count = command->count,
+                .slot = command->slot,
+                .expectedInventoryRevision = command->expectedInventoryRevision,
+                .expectedContainerRevision = command->expectedContainerRevision,
+                .expectedWorldItemRevision = command->expectedWorldItemRevision,
+                .interactionOrigin = command->interactionOrigin };
+            ServerCommandProposal proposal(command->sessionId, command->sessionGeneration, command->commandSequence,
+                command->commandId, command->observedCanonicalRevision,
+                EntityPrecondition(progress->entityId(), player->entityRevision(), player->authorityEpoch()),
+                InventoryCommandProposal(std::move(transaction)));
             return intake.submit(std::move(proposal)) == CommandSubmissionResult::Accepted
                 ? ConnectionSessionResult::CommandSubmitted
                 : ConnectionSessionResult::QueueRejected;
@@ -312,7 +349,7 @@ namespace TES3MP::ServerApp
         auto context = makeResumeTokenContext(*state->negotiatedHello(), crypto);
         if (!context)
             return ConnectionSessionResult::ProtocolRejected;
-        TransportJoinResponseQueue responses(mQueues, connection, this, mActors, mObjects);
+        TransportJoinResponseQueue responses(mQueues, connection, this, mActors, mObjects, mInventory);
         AuthenticatedJoinComposition composition(joins, mAuthentication, responses);
         auto outcome = composition.join(*state->principal(), state->generation(), tick, *context, state->playerClaim());
         if (outcome.result != JoinCompositionResult::Committed || !outcome.committed)

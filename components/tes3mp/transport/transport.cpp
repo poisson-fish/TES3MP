@@ -164,6 +164,17 @@ namespace TES3MP
                 && message[6] == static_cast<std::byte>(kind & 0xff)
                 && message[7] == static_cast<std::byte>((kind >> 8) & 0xff);
         }
+
+        bool isEquipmentLatestFrame(std::span<const std::byte> message) noexcept
+        {
+            constexpr auto kind = static_cast<std::uint16_t>(MessageKind::LatestWinsEquipmentSnapshot);
+            return message.size() >= ProtocolFrameHeaderBytes
+                && std::equal(ProtocolFrameMagic.begin(), ProtocolFrameMagic.end(), message.begin())
+                && message[4] == static_cast<std::byte>(ProtocolFrameFormatVersion)
+                && message[5] == static_cast<std::byte>(MessageClass::LatestWinsSnapshot)
+                && message[6] == static_cast<std::byte>(kind & 0xff)
+                && message[7] == static_cast<std::byte>((kind >> 8) & 0xff);
+        }
     }
 
     namespace
@@ -346,8 +357,10 @@ namespace TES3MP
         }
         if (channel == TransportChannel::LatestWins || channel == TransportChannel::PresentationLatest)
         {
-            auto& slot = channel == TransportChannel::PresentationLatest ? mPresentationLatest
-                : (isActorLatestFrame(message) ? mActorLatest : mLatest);
+            auto& slot = channel == TransportChannel::PresentationLatest
+                ? mPresentationLatest
+                : (isActorLatestFrame(message) ? mActorLatest
+                                               : (isEquipmentLatestFrame(message) ? mEquipmentLatest : mLatest));
             if (slot)
                 count(TransportTelemetryKind::Coalesced, channel);
             slot.emplace(message.begin(), message.end());
@@ -367,8 +380,8 @@ namespace TES3MP
         return TransportResult::Accepted;
     }
 
-    TransportResult OutboundTransportQueue::enqueuePair(TransportChannel firstChannel,
-        std::span<const std::byte> first, TransportChannel secondChannel, std::span<const std::byte> second)
+    TransportResult OutboundTransportQueue::enqueuePair(TransportChannel firstChannel, std::span<const std::byte> first,
+        TransportChannel secondChannel, std::span<const std::byte> second)
     {
         const auto firstMaximum = maximumTransportMessageBytes(firstChannel);
         const auto secondMaximum = maximumTransportMessageBytes(secondChannel);
@@ -380,12 +393,14 @@ namespace TES3MP
         auto reliable = mReliable;
         auto latest = mLatest;
         auto actorLatest = mActorLatest;
+        auto equipmentLatest = mEquipmentLatest;
         auto presentationLatest = mPresentationLatest;
         std::size_t reliableBytes = mReliableBytes;
         const auto stage = [&](TransportChannel channel, std::span<const std::byte> message) {
             if (channel == TransportChannel::LatestWins)
             {
-                auto& slot = isActorLatestFrame(message) ? actorLatest : latest;
+                auto& slot = isActorLatestFrame(message) ? actorLatest
+                                                         : (isEquipmentLatestFrame(message) ? equipmentLatest : latest);
                 slot.emplace(message.begin(), message.end());
                 return TransportResult::Accepted;
             }
@@ -394,8 +409,7 @@ namespace TES3MP
                 presentationLatest.emplace(message.begin(), message.end());
                 return TransportResult::Accepted;
             }
-            if (reliable.size() >= mPolicy.reliableMessages
-                || message.size() > mPolicy.reliableBytes - reliableBytes)
+            if (reliable.size() >= mPolicy.reliableMessages || message.size() > mPolicy.reliableBytes - reliableBytes)
                 return TransportResult::WouldBlock;
             reliable.emplace_back(message.begin(), message.end());
             reliableBytes += message.size();
@@ -409,12 +423,17 @@ namespace TES3MP
         count(TransportTelemetryKind::Submitted, firstChannel);
         count(TransportTelemetryKind::Submitted, secondChannel);
         if (firstChannel == TransportChannel::LatestWins
-            && (isActorLatestFrame(first) ? mActorLatest.has_value() : mLatest.has_value()))
+            && (isActorLatestFrame(first)
+                    ? mActorLatest.has_value()
+                    : (isEquipmentLatestFrame(first) ? mEquipmentLatest.has_value() : mLatest.has_value())))
             count(TransportTelemetryKind::Coalesced, firstChannel);
         if (secondChannel == TransportChannel::LatestWins
-            && ((isActorLatestFrame(second) ? mActorLatest.has_value() : mLatest.has_value())
+            && ((isActorLatestFrame(second)
+                        ? mActorLatest.has_value()
+                        : (isEquipmentLatestFrame(second) ? mEquipmentLatest.has_value() : mLatest.has_value()))
                 || (firstChannel == TransportChannel::LatestWins
-                    && isActorLatestFrame(first) == isActorLatestFrame(second))))
+                    && isActorLatestFrame(first) == isActorLatestFrame(second)
+                    && isEquipmentLatestFrame(first) == isEquipmentLatestFrame(second))))
             count(TransportTelemetryKind::Coalesced, secondChannel);
         if (firstChannel == TransportChannel::PresentationLatest && mPresentationLatest)
             count(TransportTelemetryKind::Coalesced, firstChannel);
@@ -424,6 +443,7 @@ namespace TES3MP
         mReliable.swap(reliable);
         mLatest.swap(latest);
         mActorLatest.swap(actorLatest);
+        mEquipmentLatest.swap(equipmentLatest);
         mPresentationLatest.swap(presentationLatest);
         mReliableBytes = reliableBytes;
         count(TransportTelemetryKind::Admitted, firstChannel);
@@ -495,8 +515,7 @@ namespace TES3MP
             return OutboundPumpResult::TransportFailed;
         }
 
-        const auto sendLatest = [&](std::optional<std::vector<std::byte>>& slot)
-        {
+        const auto sendLatest = [&](std::optional<std::vector<std::byte>>& slot) {
             if (!slot || attempts >= mPolicy.sendAttemptsPerPump || mLatestRate.tokens == 0)
                 return OutboundPumpResult::Idle;
             const TransportResult result = runtime.send(connection, TransportChannel::LatestWins, *slot);
@@ -517,12 +536,18 @@ namespace TES3MP
         if (latestResult == OutboundPumpResult::TransportFailed)
             return latestResult;
         if (latestResult == OutboundPumpResult::Idle)
-            latestResult = mPreferActorLatest ? sendLatest(mLatest) : sendLatest(mActorLatest);
+            latestResult = mPreferActorLatest ? sendLatest(mEquipmentLatest) : sendLatest(mActorLatest);
         else if (attempts < mPolicy.sendAttemptsPerPump && mLatestRate.tokens != 0)
         {
-            const auto other = mPreferActorLatest ? sendLatest(mLatest) : sendLatest(mActorLatest);
+            const auto other = mPreferActorLatest ? sendLatest(mEquipmentLatest) : sendLatest(mActorLatest);
             if (other == OutboundPumpResult::TransportFailed)
                 return other;
+        }
+        if (attempts < mPolicy.sendAttemptsPerPump && mLatestRate.tokens != 0)
+        {
+            const auto third = mPreferActorLatest ? sendLatest(mLatest) : sendLatest(mEquipmentLatest);
+            if (third == OutboundPumpResult::TransportFailed)
+                return third;
         }
         if (latestResult != OutboundPumpResult::Idle)
             mPreferActorLatest = !mPreferActorLatest;
@@ -569,8 +594,9 @@ namespace TES3MP
             queueGauges();
             return OutboundPumpResult::Progress;
         }
-        return mReliable.empty() && !mLatest && !mActorLatest && !mPresentationLatest ? OutboundPumpResult::Idle
-                                                                     : OutboundPumpResult::Blocked;
+        return mReliable.empty() && !mLatest && !mActorLatest && !mEquipmentLatest && !mPresentationLatest
+            ? OutboundPumpResult::Idle
+            : OutboundPumpResult::Blocked;
     }
 
     void OutboundTransportQueue::clear() noexcept
@@ -578,6 +604,7 @@ namespace TES3MP
         mReliable.clear();
         mLatest.reset();
         mActorLatest.reset();
+        mEquipmentLatest.reset();
         mPresentationLatest.reset();
         mReliableBytes = 0;
         mFirstReliableBlock.reset();
@@ -608,11 +635,12 @@ namespace TES3MP
         gauge(TransportTelemetryKind::QueuedMessages, TransportChannel::ReliableOrdered, mReliable.size());
         gauge(TransportTelemetryKind::QueuedBytes, TransportChannel::ReliableOrdered, mReliableBytes);
         gauge(TransportTelemetryKind::QueuedMessages, TransportChannel::LatestWins,
-            (mLatest ? 1 : 0) + (mActorLatest ? 1 : 0));
+            (mLatest ? 1 : 0) + (mActorLatest ? 1 : 0) + (mEquipmentLatest ? 1 : 0));
         gauge(TransportTelemetryKind::QueuedBytes, TransportChannel::LatestWins,
-            (mLatest ? mLatest->size() : 0) + (mActorLatest ? mActorLatest->size() : 0));
-        gauge(TransportTelemetryKind::QueuedMessages, TransportChannel::PresentationLatest,
-            mPresentationLatest ? 1 : 0);
+            (mLatest ? mLatest->size() : 0) + (mActorLatest ? mActorLatest->size() : 0)
+                + (mEquipmentLatest ? mEquipmentLatest->size() : 0));
+        gauge(
+            TransportTelemetryKind::QueuedMessages, TransportChannel::PresentationLatest, mPresentationLatest ? 1 : 0);
         gauge(TransportTelemetryKind::QueuedBytes, TransportChannel::PresentationLatest,
             mPresentationLatest ? mPresentationLatest->size() : 0);
     }
@@ -654,26 +682,28 @@ namespace TES3MP
         return found == mQueues.end() ? TransportResult::UnknownId : found->second.enqueue(channel, message);
     }
 
-    TransportResult OutboundQueueSet::enqueuePair(TransportConnectionId connection,
-        TransportChannel firstChannel, std::span<const std::byte> first, TransportChannel secondChannel,
-        std::span<const std::byte> second)
+    TransportResult OutboundQueueSet::enqueuePair(TransportConnectionId connection, TransportChannel firstChannel,
+        std::span<const std::byte> first, TransportChannel secondChannel, std::span<const std::byte> second)
     {
         const auto found = mQueues.find(connection);
         return found == mQueues.end() ? TransportResult::UnknownId
-                                     : found->second.enqueuePair(firstChannel, first, secondChannel, second);
+                                      : found->second.enqueuePair(firstChannel, first, secondChannel, second);
     }
 
     TransportResult OutboundQueueSet::enqueuePairsAtomically(std::span<const AtomicPair> pairs)
     {
-        if (pairs.empty() || pairs.size() > mConnectionLimit) return TransportResult::InvalidInput;
+        if (pairs.empty() || pairs.size() > mConnectionLimit)
+            return TransportResult::InvalidInput;
         auto staged = mQueues;
         for (const auto& pair : pairs)
         {
             const auto found = staged.find(pair.connection);
-            if (found == staged.end()) return TransportResult::UnknownId;
-            const auto result = found->second.enqueuePair(
-                pair.firstChannel, pair.first, pair.secondChannel, pair.second);
-            if (result != TransportResult::Accepted) return result;
+            if (found == staged.end())
+                return TransportResult::UnknownId;
+            const auto result
+                = found->second.enqueuePair(pair.firstChannel, pair.first, pair.secondChannel, pair.second);
+            if (result != TransportResult::Accepted)
+                return result;
         }
         mQueues.swap(staged);
         return TransportResult::Accepted;
@@ -681,14 +711,18 @@ namespace TES3MP
 
     TransportResult OutboundQueueSet::enqueueMessagesAtomically(std::span<const AtomicMessage> messages)
     {
-        if (messages.empty() || messages.size() > mConnectionLimit * 5) return TransportResult::InvalidInput;
+        constexpr std::size_t MaximumAtomicMessagesPerConnection = OutboundQueuePolicy::MaxReliableMessages + 3;
+        if (messages.empty() || messages.size() > mConnectionLimit * MaximumAtomicMessagesPerConnection)
+            return TransportResult::InvalidInput;
         auto staged = mQueues;
         for (const auto& message : messages)
         {
             const auto found = staged.find(message.connection);
-            if (found == staged.end()) return TransportResult::UnknownId;
+            if (found == staged.end())
+                return TransportResult::UnknownId;
             const auto result = found->second.enqueue(message.channel, message.bytes);
-            if (result != TransportResult::Accepted) return result;
+            if (result != TransportResult::Accepted)
+                return result;
         }
         mQueues.swap(staged);
         return TransportResult::Accepted;

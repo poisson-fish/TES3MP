@@ -1,13 +1,14 @@
 #ifndef TES3MP_SERVER_APPLICATION_HPP
 #define TES3MP_SERVER_APPLICATION_HPP
 
-#include "server_config.hpp"
 #include "connection_session_coordinator.hpp"
-#include "tes3mp/server_lifecycle.hpp"
-#include "tes3mp/protocol_pose.hpp"
+#include "server_config.hpp"
 #include "tes3mp/actor_simulation.hpp"
 #include "tes3mp/interactive_object_catalog.hpp"
 #include "tes3mp/interactive_object_world.hpp"
+#include "tes3mp/inventory_world.hpp"
+#include "tes3mp/protocol_pose.hpp"
+#include "tes3mp/server_lifecycle.hpp"
 
 #include <map>
 #include <optional>
@@ -32,14 +33,16 @@ namespace TES3MP::ServerApp
         ServerCollisionQuery* actorCollision = nullptr;
         const InteractiveObjectCatalog* interactiveObjectCatalog = nullptr;
         CanonicalInteractiveObjectWorld* interactiveObjects = nullptr;
+        const ItemPrototypeCatalog* itemCatalog = nullptr;
+        CanonicalInventoryWorld* inventory = nullptr;
     };
 
     class ServerApplication
     {
     public:
         ServerApplication(TransportRuntime& transport, const ServerConfig& config) noexcept;
-        ServerApplication(TransportRuntime& transport, const ServerConfig& config,
-            ServerApplicationWiring wiring) noexcept;
+        ServerApplication(
+            TransportRuntime& transport, const ServerConfig& config, ServerApplicationWiring wiring) noexcept;
         ~ServerApplication();
 
         bool start() noexcept;
@@ -73,6 +76,7 @@ namespace TES3MP::ServerApp
         bool relayPose(TransportConnectionId connection, const TransportMessage& message) noexcept;
         bool supportsActors(TransportConnectionId connection) const noexcept;
         bool supportsInteractiveObjects(TransportConnectionId connection) const noexcept;
+        bool supportsInventory(TransportConnectionId connection) const noexcept;
     };
 }
 

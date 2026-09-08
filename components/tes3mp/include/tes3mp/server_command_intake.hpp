@@ -4,6 +4,7 @@
 #include "command_primitives.hpp"
 #include "fixed_tick_scheduler.hpp"
 #include "interactive_object_world.hpp"
+#include "inventory_world.hpp"
 #include "movement_policy.hpp"
 #include "observability.hpp"
 
@@ -48,8 +49,7 @@ namespace TES3MP
         constexpr const CellId& requestedCell() const noexcept { return mRequestedCell; }
 
         friend constexpr bool operator==(
-            const CellTransitionCommandProposal&, const CellTransitionCommandProposal&) noexcept
-            = default;
+            const CellTransitionCommandProposal&, const CellTransitionCommandProposal&) noexcept = default;
 
     private:
         CellId mRequestedCell;
@@ -101,8 +101,7 @@ namespace TES3MP
         constexpr std::optional<KeyPrototypeId> requestedKey() const noexcept { return mRequestedKey; }
 
         friend bool operator==(
-            const InteractiveObjectCommandProposal&, const InteractiveObjectCommandProposal&) noexcept
-            = default;
+            const InteractiveObjectCommandProposal&, const InteractiveObjectCommandProposal&) noexcept = default;
 
     private:
         InteractiveObjectId mObjectId;
@@ -113,8 +112,23 @@ namespace TES3MP
         std::optional<KeyPrototypeId> mRequestedKey;
     };
 
+    class InventoryCommandProposal
+    {
+    public:
+        explicit InventoryCommandProposal(InventoryTransactionCommand command) noexcept
+            : mCommand(std::move(command))
+        {
+        }
+
+        constexpr const InventoryTransactionCommand& command() const noexcept { return mCommand; }
+        friend bool operator==(const InventoryCommandProposal&, const InventoryCommandProposal&) noexcept = default;
+
+    private:
+        InventoryTransactionCommand mCommand;
+    };
+
     using ServerCommandPayload = std::variant<PlayerMotionCommandProposal, CellTransitionCommandProposal,
-        PlayerLocomotionCommandProposal, InteractiveObjectCommandProposal>;
+        PlayerLocomotionCommandProposal, InteractiveObjectCommandProposal, InventoryCommandProposal>;
 
     class ServerCommandProposal
     {
@@ -142,6 +156,19 @@ namespace TES3MP
             , mObservedCanonicalRevision(observedCanonicalRevision)
             , mEntityPrecondition(entityPrecondition)
             , mPayload(std::move(interaction))
+        {
+        }
+
+        ServerCommandProposal(SessionId sessionId, SessionGeneration sessionGeneration, CommandSequence commandSequence,
+            CommandId commandId, CanonicalRevision observedCanonicalRevision, EntityPrecondition entityPrecondition,
+            InventoryCommandProposal inventory) noexcept
+            : mSessionId(sessionId)
+            , mSessionGeneration(sessionGeneration)
+            , mCommandSequence(commandSequence)
+            , mCommandId(commandId)
+            , mObservedCanonicalRevision(observedCanonicalRevision)
+            , mEntityPrecondition(entityPrecondition)
+            , mPayload(std::move(inventory))
         {
         }
 

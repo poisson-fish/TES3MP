@@ -78,6 +78,7 @@ target_sources(tes3mp_protocol PRIVATE
     include/tes3mp/content_identity.hpp
     include/tes3mp/interactive_object_catalog.hpp
     include/tes3mp/interactive_object_replication.hpp
+    include/tes3mp/inventory_replication.hpp
     include/tes3mp/item_catalog.hpp
     include/tes3mp/protocol_envelope.hpp
     include/tes3mp/protocol_exchange.hpp
@@ -93,11 +94,16 @@ target_sources(tes3mp_protocol PRIVATE
     protocol/generated/authentication_request_generated.h
     protocol/generated/client_hello_generated.h
     protocol/generated/client_interact_object_command_generated.h
+    protocol/generated/client_inventory_transaction_command_generated.h
     protocol/generated/client_vr_pose_sample_generated.h
     protocol/generated/latest_wins_snapshot_generated.h
     protocol/generated/latest_wins_actor_snapshot_generated.h
+    protocol/generated/latest_wins_equipment_snapshot_generated.h
     protocol/generated/reliable_actor_interest_baseline_generated.h
     protocol/generated/reliable_interactive_object_interest_baseline_generated.h
+    protocol/generated/reliable_container_inventory_baseline_generated.h
+    protocol/generated/reliable_ground_item_baseline_generated.h
+    protocol/generated/reliable_player_inventory_baseline_generated.h
     protocol/generated/reliable_interest_baseline_generated.h
     protocol/generated/reliable_observation_batch_generated.h
     protocol/generated/reliable_operation_generated.h
@@ -111,6 +117,7 @@ target_sources(tes3mp_protocol PRIVATE
     protocol/content_identity.cpp
     protocol/interactive_object_catalog.cpp
     protocol/interactive_object_replication.cpp
+    protocol/inventory_replication.cpp
     protocol/item_catalog.cpp
     protocol/protocol_exchange.cpp
     protocol/protocol_handshake.cpp
@@ -411,6 +418,15 @@ set_target_properties(tes3mp_interactive_object_replication_tests PROPERTIES FOL
 tes3mp_enable_runtime_safety(tes3mp_interactive_object_replication_tests)
 tes3mp_verify_target_dependencies(tes3mp_interactive_object_replication_tests ALLOWED tes3mp_protocol)
 tes3mp_verify_target_includes(tes3mp_interactive_object_replication_tests
+    FORBIDDEN ${TES3MP_ENGINE_INDEPENDENT_FORBIDDEN_INCLUDES})
+
+add_executable(tes3mp_inventory_replication_tests tests/inventory_replication_tests.cpp)
+target_compile_features(tes3mp_inventory_replication_tests PRIVATE cxx_std_20)
+target_link_libraries(tes3mp_inventory_replication_tests PRIVATE tes3mp_protocol)
+set_target_properties(tes3mp_inventory_replication_tests PROPERTIES FOLDER "TES3MP/Tests")
+tes3mp_enable_runtime_safety(tes3mp_inventory_replication_tests)
+tes3mp_verify_target_dependencies(tes3mp_inventory_replication_tests ALLOWED tes3mp_protocol)
+tes3mp_verify_target_includes(tes3mp_inventory_replication_tests
     FORBIDDEN ${TES3MP_ENGINE_INDEPENDENT_FORBIDDEN_INCLUDES})
 
 add_executable(tes3mp_authenticated_join_tests tests/authenticated_join_tests.cpp)
@@ -906,6 +922,7 @@ add_custom_target(tes3mp_protocol_tests_run
     COMMAND $<TARGET_FILE:tes3mp_interactive_object_catalog_tests>
     COMMAND $<TARGET_FILE:tes3mp_interactive_object_world_tests>
     COMMAND $<TARGET_FILE:tes3mp_interactive_object_replication_tests>
+    COMMAND $<TARGET_FILE:tes3mp_inventory_replication_tests>
     COMMAND $<TARGET_FILE:tes3mp_item_catalog_tests>
     COMMAND $<TARGET_FILE:tes3mp_inventory_world_tests>
     COMMAND $<TARGET_FILE:tes3mp_canonical_sink_tests>
@@ -938,6 +955,7 @@ add_custom_target(tes3mp_protocol_tests_run
         tes3mp_interactive_object_catalog_tests
         tes3mp_interactive_object_world_tests
         tes3mp_interactive_object_replication_tests
+        tes3mp_inventory_replication_tests
         tes3mp_item_catalog_tests
         tes3mp_inventory_world_tests
         tes3mp_canonical_sink_tests

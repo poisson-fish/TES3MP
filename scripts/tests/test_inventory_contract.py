@@ -105,6 +105,38 @@ class InventoryContractTests(unittest.TestCase):
         self.assertIn("tes3mp_verify_target_dependencies(tes3mp_inventory_world_tests", cmake)
         self.assertIn("COMMAND $<TARGET_FILE:tes3mp_item_catalog_tests>", cmake)
         self.assertIn("COMMAND $<TARGET_FILE:tes3mp_inventory_world_tests>", cmake)
+        self.assertIn("add_executable(tes3mp_inventory_replication_tests", cmake)
+        self.assertIn("COMMAND $<TARGET_FILE:tes3mp_inventory_replication_tests>", cmake)
+
+    def test_inventory_replication_and_server_composition_are_bounded_and_private(self):
+        replication = (ROOT / "components/tes3mp/include/tes3mp/inventory_replication.hpp").read_text(
+            encoding="utf-8")
+        projection = (ROOT / "apps/tes3mp-server/inventory_interest_projection.cpp").read_text(encoding="utf-8")
+        coordinator = (ROOT / "apps/tes3mp-server/connection_session_coordinator.cpp").read_text(encoding="utf-8")
+        application = (ROOT / "apps/tes3mp-server/server_application.cpp").read_text(encoding="utf-8")
+
+        self.assertIn("MaximumInventoryBaselineChunkStacks", replication)
+        self.assertIn("MaximumGroundItemBaselineChunkItems", replication)
+        self.assertIn("MaximumEquipmentSnapshotPlayers", replication)
+        self.assertIn("playerInventory->stacks", projection)
+        self.assertNotIn("otherInventory.stacks", projection)
+        self.assertIn("decodeClientInventoryTransactionCommand", coordinator)
+        self.assertIn("InventoryCommandProposal", coordinator)
+        self.assertIn("admitCombinedInterestTickAtomically", application)
+
+    def test_inventory_wire_schemas_are_registered_with_unique_identifiers(self):
+        schema_dir = ROOT / "components/tes3mp/protocol/schema"
+        expected = {
+            "client_inventory_transaction_command.fbs": "T3IT",
+            "latest_wins_equipment_snapshot.fbs": "T3EQ",
+            "reliable_container_inventory_baseline.fbs": "T3CI",
+            "reliable_ground_item_baseline.fbs": "T3GI",
+            "reliable_player_inventory_baseline.fbs": "T3PI",
+        }
+        for filename, identifier in expected.items():
+            text = (schema_dir / filename).read_text(encoding="utf-8")
+            self.assertIn(f'file_identifier "{identifier}"', text)
+            self.assertRegex(text, r"\(id: \d+\)")
 
     def test_cpp_inventory_assertions_remain_active_in_release_builds(self):
         for source_name in ("inventory_catalog_tests.cpp", "inventory_world_tests.cpp"):

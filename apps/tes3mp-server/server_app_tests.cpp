@@ -6,6 +6,8 @@
 #include "interactive_object_content.hpp"
 #include "interactive_object_interest_projection.hpp"
 #include "interest_projection.hpp"
+#include "inventory_content.hpp"
+#include "inventory_interest_projection.hpp"
 #include "phase7_proof_profile.hpp"
 #include "phase7_queue_telemetry.hpp"
 #include "player_identity_file.hpp"
@@ -15,6 +17,7 @@
 #include "tes3mp/interactive_object_catalog.hpp"
 #include "tes3mp/interactive_object_replication.hpp"
 #include "tes3mp/interactive_object_world.hpp"
+#include "tes3mp/inventory_replication.hpp"
 
 #include <array>
 #include <cassert>
@@ -61,6 +64,7 @@ namespace
           "collision_content_file = collision.txt\n"
           "actor_content_file = actors.txt\n"
           "interactive_object_content_file = objects.txt\n"
+          "inventory_content_file = inventory.txt\n"
           "player_identity_file = players.txt\n";
 
     class FakeRuntime final : public TES3MP::TransportRuntime
@@ -247,6 +251,13 @@ namespace
     {
         auto versions = std::get<ProtocolVersionRange>(ProtocolVersionRange::create(1, 2, 3));
         const std::array capabilities{ interactiveObjectReplicationCapability() };
+        return std::get<CapabilityOffer>(CapabilityOffer::create(versions, capabilities, {}));
+    }
+
+    CapabilityOffer inventoryObjectOffer()
+    {
+        auto versions = std::get<ProtocolVersionRange>(ProtocolVersionRange::create(1, 2, 3));
+        const std::array capabilities{ interactiveObjectReplicationCapability(), inventoryReplicationCapability() };
         return std::get<CapabilityOffer>(CapabilityOffer::create(versions, capabilities, {}));
     }
 
@@ -467,6 +478,7 @@ int main()
         assert(config.collisionContentFile == std::filesystem::path("collision.txt"));
         assert(config.actorContentFile == std::filesystem::path("actors.txt"));
         assert(config.interactiveObjectContentFile == std::filesystem::path("objects.txt"));
+        assert(config.inventoryContentFile == std::filesystem::path("inventory.txt"));
         const std::vector<Position3> expectedSpawns{ Position3(-10, 20, 30), Position3(40, 50, 60) };
         assert(config.spawnPositions == expectedSpawns);
         assert(config.contentManifest.movementProfile().speed(LocomotionMode::Sneak) == 1024
@@ -603,6 +615,37 @@ int main()
                loadInteractiveObjectContent(objectPath, parsedConfig().contentManifest))
         == InteractiveObjectContentError::Malformed);
     std::filesystem::remove(objectPath);
+
+    const auto inventoryPath = std::filesystem::temp_directory_path() / "tes3mp-server-inventory-content-test";
+    const auto writeInventory = [&](std::string_view content) {
+        std::ofstream stream(inventoryPath, std::ios::binary | std::ios::trunc);
+        stream << content;
+        assert(static_cast<bool>(stream));
+    };
+    constexpr std::string_view inventoryHeader
+        = "TES3MP_INVENTORY_V1\n"
+          "manifest 0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20\n";
+    writeInventory(std::string(inventoryHeader)
+        + "prototype 1 8 1 5 0 0 0 1 1\n"
+          "container 1 interior 7 20 20 30 100\n"
+          "container_item 1 10 1 1 0 0 none\n"
+          "ground_item 11 1 1 0 0 none interior 7 25 20 30\n");
+    auto inventoryContent = loadInventoryContent(inventoryPath, parsedConfig().contentManifest);
+    assert(std::holds_alternative<InventoryContent>(inventoryContent));
+    auto loadedInventory = std::get<InventoryContent>(std::move(inventoryContent));
+    assert(loadedInventory.catalog.declarations().size() == 1 && loadedInventory.world.containers().size() == 1
+        && loadedInventory.world.worldItems().size() == 1);
+    assert(loadedInventory.world.ensurePlayer(id<PlayerId>(1)) && loadedInventory.world.ensurePlayer(id<PlayerId>(2)));
+    auto inventoryProjection = projectInventoryInterestBaseline(
+        fixtureState(false), loadedInventory.world, id<SessionId>(1), id<ServerTick>(4), id<CanonicalRevision>(2));
+    assert(inventoryProjection && inventoryProjection->playerInventory.size() == 1
+        && inventoryProjection->playerInventory[0].player == id<PlayerId>(1)
+        && inventoryProjection->containers.size() == 1 && inventoryProjection->groundItems.size() == 1
+        && inventoryProjection->equipment && inventoryProjection->equipment->members.size() == 2);
+    writeInventory(std::string(inventoryHeader) + "prototype 0 8 1 5 0 0 0 1 none\n");
+    assert(std::get<InventoryContentError>(loadInventoryContent(inventoryPath, parsedConfig().contentManifest))
+        == InventoryContentError::Malformed);
+    std::filesystem::remove(inventoryPath);
 
     const auto temporary = std::filesystem::temp_directory_path() / "tes3mp-server-password-test";
     {
@@ -1401,5 +1444,122 @@ int main()
         assert(afterRejectedPublish && *afterRejectedPublish == beforeRejectedPublish && uncommittedInteraction
             && !uncommittedInteraction->highestContiguousFinalizedCommand()
             && wired.failure() == "interactive object output admission failed");
+    }
+    {
+        FixedClock clock;
+        NullMetricSink metrics;
+        NullStructuredEventSink events;
+        Observability observability(metrics, events);
+        FakeAuthentication authentication;
+        RecordingCrypto crypto;
+        auto queues = OutboundQueueSet::create(OutboundQueuePolicy{}, 1);
+        auto timeouts = *SessionTimeoutPolicy::create(1'000'000, 1'000'000, 1'000'000);
+
+        const auto keyId = id<KeyPrototypeId>(1);
+        const std::array prototypes{ ItemPrototypeDeclaration{
+            id<ItemPrototypeId>(1), ItemCategory::Miscellaneous, 1, 1, 0, 0, 0, true, keyId } };
+        auto catalogValue = ItemPrototypeCatalog::create(config.contentManifest, prototypes);
+        assert(catalogValue);
+        auto itemCatalog = std::move(*catalogValue);
+        const auto spawnCell = CellId::interior(id<CellSpaceId>(7));
+        const CanonicalItemStack keyStack{ id<ItemStackId>(10), id<ItemPrototypeId>(1), 1, 0, 0, std::nullopt };
+        const std::array containers{ CanonicalContainerInventoryState{ id<ContainerId>(1), spawnCell,
+            Position3(20, 20, 30), ContainerRevision::initial(), ServerTick::initial(), 0, { keyStack } } };
+        auto inventoryValue = CanonicalInventoryWorld::create(config.contentManifest, itemCatalog, {}, containers);
+        assert(inventoryValue);
+        auto inventory = std::move(*inventoryValue);
+
+        const auto zero = Turn32::fromValue(0);
+        const std::array objectEntries{ InteractiveObjectCatalogEntry{ id<InteractiveObjectId>(1),
+            InteractiveObjectKind::StandardDoor, spawnCell,
+            Transform(spawnCell, Position3(30, 20, 30), Orientation3(zero, zero, zero)), std::nullopt,
+            ObjectLockDeclaration{ true, 10, keyId }, ObjectTrapDeclaration{ false, std::nullopt } } };
+        auto objectCatalogValue = InteractiveObjectCatalog::create(config.contentManifest, objectEntries);
+        assert(objectCatalogValue);
+        auto objectCatalog = std::move(*objectCatalogValue);
+        auto objectsValue = createInitialCanonicalInteractiveObjectWorld(objectCatalog);
+        assert(std::holds_alternative<CanonicalInteractiveObjectWorld>(objectsValue));
+        auto objects = std::get<CanonicalInteractiveObjectWorld>(std::move(objectsValue));
+
+        ConnectionSessionCoordinator sessions(clock, observability, timeouts, inventoryObjectOffer(), authentication,
+            *queues, 1, nullptr, &objects, &inventory);
+        JoinFixture fixture;
+        ServerCommandIntakeCoordinator intake(
+            clock, observability, clock.now(), ServerTick::initial(), IngressOrdinal::initial());
+        auto lifecycle
+            = ServerLifecycleCoordinator::create(config.disconnectGraceMilliseconds * 1'000'000, fixture.reducer);
+        assert(lifecycle);
+        FakeRuntime runtime;
+        const auto connection = TransportConnectionId::initial();
+        runtime.events.push_back(
+            { TransportEventKind::ConnectionAccepted, TransportFailure::None, std::nullopt, std::nullopt, connection,
+                std::nullopt, TransportSecurity::EncryptedUnauthenticated, scope(std::byte{ 12 }) });
+        const auto hello = encodeClientHello(ClientHello::fromOffer(inventoryObjectOffer()));
+        runtime.incoming.push_back({ TransportChannel::ReliableOrdered,
+            std::get<std::vector<std::byte>>(
+                encodeProtocolFrame(MessageClass::SessionControl, MessageKind::ClientHello, hello)) });
+        ServerApplication application(runtime, config,
+            { sessions, fixture.joins, crypto, *queues, clock, intake, fixture.reducer, *lifecycle, nullptr, nullptr,
+                nullptr, &objectCatalog, &objects, &itemCatalog, &inventory });
+        assert(application.start() && application.pump(ServerTick::initial()));
+        auto material = AuthenticationMaterial::create({});
+        runtime.incoming.push_back({ TransportChannel::ReliableOrdered,
+            std::get<std::vector<std::byte>>(
+                encodeProtocolFrame(MessageClass::SessionControl, MessageKind::AuthenticationRequest,
+                    encodeAuthenticationRequest(AuthenticationRequest::join(std::move(*material))))) });
+        assert(application.pump(ServerTick::initial()));
+        assert(inventory.findPlayer(id<PlayerId>(1)));
+        bool sawPrivateBaseline = false;
+        for (const auto& bytes : runtime.sent)
+        {
+            const auto frame = decodeProtocolFrame(bytes);
+            if (const auto* decoded = std::get_if<DecodedFrame>(&frame);
+                decoded && decoded->messageKind() == MessageKind::ReliablePlayerInventoryBaseline)
+            {
+                auto baseline = decodeReliablePlayerInventoryBaseline(decoded->payload());
+                sawPrivateBaseline = std::holds_alternative<ReliablePlayerInventoryBaseline>(baseline)
+                    && std::get<ReliablePlayerInventoryBaseline>(baseline).player == id<PlayerId>(1);
+            }
+        }
+        assert(sawPrivateBaseline);
+
+        const ClientInventoryTransactionCommand take{ .sessionId = id<SessionId>(1),
+            .sessionGeneration = SessionGeneration::initial(),
+            .commandSequence = id<CommandSequence>(1),
+            .commandId = id<CommandId>(1),
+            .observedCanonicalRevision = fixture.reducer.canonicalRevision(),
+            .kind = InventoryTransactionKind::TakeFromContainer,
+            .containerId = id<ContainerId>(1),
+            .prototypeId = id<ItemPrototypeId>(1),
+            .stackId = id<ItemStackId>(10),
+            .count = 1,
+            .expectedInventoryRevision = InventoryRevision::initial(),
+            .expectedContainerRevision = ContainerRevision::initial(),
+            .interactionOrigin = Position3(20, 20, 30) };
+        runtime.incoming.push_back({ TransportChannel::ReliableOrdered,
+            std::get<std::vector<std::byte>>(encodeProtocolFrame(MessageClass::ReliableOperation,
+                MessageKind::ClientInventoryTransactionCommand, encodeClientInventoryTransactionCommand(take))) });
+        clock.nanoseconds = 34'000'000;
+        assert(application.pump(id<ServerTick>(1)));
+        assert(inventory.findPlayer(id<PlayerId>(1))->stacks.size() == 1
+            && inventory.findContainer(id<ContainerId>(1))->stacks.empty());
+
+        const ClientInteractObjectCommand unlock{ .sessionId = id<SessionId>(1),
+            .sessionGeneration = SessionGeneration::initial(),
+            .commandSequence = id<CommandSequence>(2),
+            .commandId = id<CommandId>(2),
+            .observedCanonicalRevision = fixture.reducer.canonicalRevision(),
+            .objectId = id<InteractiveObjectId>(1),
+            .targetCell = spawnCell,
+            .interactionOrigin = Position3(30, 20, 30),
+            .expectedRevision = ObjectRevision::initial(),
+            .kind = ObjectInteractionKind::UnlockWithKey,
+            .requestedKey = keyId };
+        runtime.incoming.push_back({ TransportChannel::ReliableOrdered,
+            std::get<std::vector<std::byte>>(encodeProtocolFrame(MessageClass::ReliableOperation,
+                MessageKind::ClientInteractObjectCommand, encodeClientInteractObjectCommand(unlock))) });
+        clock.nanoseconds = 68'000'000;
+        assert(application.pump(id<ServerTick>(2)));
+        assert(objects.find(id<InteractiveObjectId>(1))->lockState() == LockState::Unlocked);
     }
 }

@@ -2,6 +2,7 @@
 #include "actor_interest_projection.hpp"
 #include "interactive_object_interest_projection.hpp"
 #include "interest_projection.hpp"
+#include "inventory_interest_projection.hpp"
 #include "tes3mp/canonical_resync.hpp"
 
 #include <algorithm>
@@ -61,6 +62,17 @@ namespace TES3MP::ServerApp
         const auto& hello = session->negotiatedHello();
         return hello
             && std::ranges::binary_search(hello->negotiatedCapabilities(), interactiveObjectReplicationCapability());
+    }
+
+    bool ServerApplication::supportsInventory(TransportConnectionId connection) const noexcept
+    {
+        if (!mWiring)
+            return false;
+        const auto* session = mWiring->sessions.session(connection);
+        if (!session || session->state() != ServerSessionState::Established || !session->sessionId())
+            return false;
+        const auto& hello = session->negotiatedHello();
+        return hello && std::ranges::binary_search(hello->negotiatedCapabilities(), inventoryReplicationCapability());
     }
 
     bool ServerApplication::start() noexcept
@@ -285,8 +297,12 @@ namespace TES3MP::ServerApp
             ? projectInteractiveObjectInterestBaseline(
                   *candidate, *mWiring->interactiveObjects, *session->sessionId(), tick, *revision)
             : std::optional<InteractiveObjectInterestBaselineDelivery>{};
+        auto inventoryBaseline = candidate && mWiring->inventory && supportsInventory(connection)
+            ? projectInventoryInterestBaseline(*candidate, *mWiring->inventory, *session->sessionId(), tick, *revision)
+            : std::optional<InventoryInterestDelivery>{};
         if (!candidate || !baseline || !observations || !accepted || (supportsActors(connection) && !actorBaseline)
-            || (supportsInteractiveObjects(connection) && !objectBaseline))
+            || (supportsInteractiveObjects(connection) && !objectBaseline)
+            || (supportsInventory(connection) && !inventoryBaseline))
         {
             cancel();
             return false;
@@ -360,6 +376,11 @@ namespace TES3MP::ServerApp
                 messages.push_back({ *target, TransportChannel::ReliableOrdered, frames[frames.size() - 2] });
                 messages.push_back({ *target, TransportChannel::LatestWins, frames.back() });
             }
+            if (inventoryBaseline && !appendInventoryInterestMessages(frames, messages, connection, *inventoryBaseline))
+            {
+                cancel();
+                return false;
+            }
             if (mWiring->queues.enqueueMessagesAtomically(messages) != TransportResult::Accepted)
             {
                 cancel();
@@ -400,11 +421,14 @@ namespace TES3MP::ServerApp
             return false;
         const bool wantActors = supportsActors(connection);
         const bool wantObjects = supportsInteractiveObjects(connection);
-        if (!wantActors && !wantObjects)
+        const bool wantInventory = supportsInventory(connection);
+        if (!wantActors && !wantObjects && !wantInventory)
             return admitInterestBaseline(mWiring->queues, connection, *delivery);
         if (wantActors && !mWiring->actors)
             return false;
         if (wantObjects && !mWiring->interactiveObjects)
+            return false;
+        if (wantInventory && !mWiring->inventory)
             return false;
         auto actorDelivery = wantActors
             ? projectActorInterestBaseline(resolved.publication()->state(), *mWiring->actors, request->sessionId(),
@@ -417,6 +441,12 @@ namespace TES3MP::ServerApp
                   request->sessionId(), tick, mWiring->reducer.canonicalRevision())
             : std::nullopt;
         if (wantObjects && !objectDelivery)
+            return false;
+        auto inventoryDelivery = wantInventory
+            ? projectInventoryInterestBaseline(resolved.publication()->state(), *mWiring->inventory,
+                  request->sessionId(), tick, mWiring->reducer.canonicalRevision())
+            : std::nullopt;
+        if (wantInventory && !inventoryDelivery)
             return false;
         try
         {
@@ -458,6 +488,8 @@ namespace TES3MP::ServerApp
             {
                 messages.push_back({ connection, TransportChannel::ReliableOrdered, frames[nextIdx++] });
             }
+            if (wantInventory && !appendInventoryInterestMessages(frames, messages, connection, *inventoryDelivery))
+                return false;
             return mWiring->queues.enqueueMessagesAtomically(messages) == TransportResult::Accepted;
         }
         catch (...)
@@ -683,6 +715,11 @@ namespace TES3MP::ServerApp
             mFailure = "interactive object composition incomplete";
             return false;
         }
+        if ((mWiring->itemCatalog || mWiring->inventory) && (!mWiring->itemCatalog || !mWiring->inventory))
+        {
+            mFailure = "inventory composition incomplete";
+            return false;
+        }
         const auto pumpedCommands = mWiring->intake.pump();
         if (!pumpedCommands)
         {
@@ -693,9 +730,13 @@ namespace TES3MP::ServerApp
         {
             const auto before = mWiring->reducer.state();
             const auto revisionBefore = mWiring->reducer.canonicalRevision();
-            auto prepared = mWiring->interactiveObjects
+            auto prepared = mWiring->interactiveObjects && mWiring->inventory
+                ? mWiring->reducer.prepareTick(batch, *mWiring->interactiveObjects, *mWiring->interactiveObjectCatalog,
+                      *mWiring->inventory, *mWiring->itemCatalog)
+                : mWiring->interactiveObjects
                 ? mWiring->reducer.prepareTick(batch, *mWiring->interactiveObjects, *mWiring->interactiveObjectCatalog)
-                : mWiring->reducer.prepareTick(batch);
+                : mWiring->inventory ? mWiring->reducer.prepareTick(batch, *mWiring->inventory, *mWiring->itemCatalog)
+                                     : mWiring->reducer.prepareTick(batch);
             if (!prepared.result())
             {
                 mFailure = "command reduction failed";
@@ -705,7 +746,9 @@ namespace TES3MP::ServerApp
             std::vector<std::pair<TransportConnectionId, LatestWinsSnapshot>> routedViews;
             std::vector<std::pair<TransportConnectionId, ActorInterestBaselineDelivery>> actorBaselines;
             std::vector<std::pair<TransportConnectionId, InteractiveObjectInterestBaselineDelivery>> objectBaselines;
+            std::vector<std::pair<TransportConnectionId, InventoryInterestDelivery>> inventoryBaselines;
             std::vector<CellId> changedObjectCells;
+            bool hasInventoryCommand = false;
             const auto dispositions = prepared.result().dispositions();
             const auto commands = batch.commands();
             for (std::size_t index = 0; index < dispositions.size(); ++index)
@@ -715,6 +758,8 @@ namespace TES3MP::ServerApp
                 if (interaction && dispositions[index].disposition() == CommandDisposition::Applied
                     && std::ranges::find(changedObjectCells, interaction->cell()) == changedObjectCells.end())
                     changedObjectCells.push_back(interaction->cell());
+                if (std::holds_alternative<InventoryCommandProposal>(commands[index].proposal().payload()))
+                    hasInventoryCommand = true;
             }
             if (prepared.candidateRevision() != revisionBefore)
             {
@@ -802,6 +847,29 @@ namespace TES3MP::ServerApp
                         }
                         objectBaselines.emplace_back(*connection, std::move(*baseline));
                     }
+                if (mWiring->inventory)
+                    for (const auto& target : prepared.candidateState().activeSessions())
+                    {
+                        const auto connection = mWiring->sessions.connectionForSession(target.sessionId());
+                        const auto* oldSession = before.findActiveSession(target.sessionId());
+                        const auto* oldPlayer = oldSession ? before.findPlayer(oldSession->playerId()) : nullptr;
+                        const auto* newPlayer = prepared.candidateState().findPlayer(target.playerId());
+                        const bool changedCell
+                            = oldPlayer && newPlayer && oldPlayer->transform().cell() != newPlayer->transform().cell();
+                        if (!connection || !newPlayer || (!changedCell && !hasInventoryCommand)
+                            || !supportsInventory(*connection))
+                            continue;
+                        const auto& projectedInventory
+                            = prepared.candidateInventory() ? *prepared.candidateInventory() : *mWiring->inventory;
+                        auto baseline = projectInventoryInterestBaseline(prepared.candidateState(), projectedInventory,
+                            target.sessionId(), batch.scheduledTick().value(), prepared.candidateRevision());
+                        if (!baseline)
+                        {
+                            mFailure = "inventory baseline projection failed";
+                            return false;
+                        }
+                        inventoryBaselines.emplace_back(*connection, std::move(*baseline));
+                    }
             }
             std::optional<CanonicalActorWorld> actorCandidate;
             std::vector<std::pair<TransportConnectionId, LatestWinsActorSnapshot>> actorViews;
@@ -832,16 +900,19 @@ namespace TES3MP::ServerApp
                     actorViews.emplace_back(*connection, std::move(*view));
                 }
             }
-            if (!admitCombinedInterestTickAtomically(
-                    mWiring->queues, routed, routedViews, actorBaselines, actorViews, objectBaselines))
+            if (!admitCombinedInterestTickAtomically(mWiring->queues, routed, routedViews, actorBaselines, actorViews,
+                    objectBaselines, inventoryBaselines))
             {
                 mFailure = changedObjectCells.empty() ? "tick output admission failed"
                                                       : "interactive object output admission failed";
                 return false;
             }
-            const bool committed = mWiring->interactiveObjects
+            const bool committed = mWiring->interactiveObjects && mWiring->inventory
+                ? mWiring->reducer.commit(std::move(prepared), *mWiring->interactiveObjects, *mWiring->inventory)
+                : mWiring->interactiveObjects
                 ? mWiring->reducer.commit(std::move(prepared), *mWiring->interactiveObjects)
-                : mWiring->reducer.commit(std::move(prepared));
+                : mWiring->inventory ? mWiring->reducer.commit(std::move(prepared), *mWiring->inventory)
+                                     : mWiring->reducer.commit(std::move(prepared));
             if (!committed)
             {
                 mFailure = "canonical commit failed";

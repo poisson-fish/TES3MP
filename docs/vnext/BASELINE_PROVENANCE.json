@@ -365,6 +365,26 @@
       "purpose": "Declares bounded exact-cell interest projection, baseline, and atomic delivery boundaries."
     },
     {
+      "path": "apps/tes3mp-server/inventory_content.cpp",
+      "status": "A",
+      "purpose": "Loads and validates the optional bounded manifest-scoped inventory artifact before server listen."
+    },
+    {
+      "path": "apps/tes3mp-server/inventory_content.hpp",
+      "status": "A",
+      "purpose": "Declares the dedicated-server inventory content loader, composition bounds, and closed startup failures."
+    },
+    {
+      "path": "apps/tes3mp-server/inventory_interest_projection.cpp",
+      "status": "A",
+      "purpose": "Implements owner-private and exact-cell inventory projection plus public equipment views and atomic message composition."
+    },
+    {
+      "path": "apps/tes3mp-server/inventory_interest_projection.hpp",
+      "status": "A",
+      "purpose": "Declares bounded target-specific inventory, container, ground-item, and public-equipment delivery."
+    },
+    {
       "path": "apps/tes3mp-server/main.cpp",
       "status": "A",
       "purpose": "Thin single-threaded dedicated-server process root with fail-closed content collision, transactional configuration, secret, transport, listener, and signal-driven shutdown composition."
@@ -590,6 +610,11 @@
       "purpose": "Declares server-authoritative canonical interactive object world, discrete states, and interaction reducer."
     },
     {
+      "path": "components/tes3mp/include/tes3mp/inventory_replication.hpp",
+      "status": "A",
+      "purpose": "Declares bounded private/public inventory wire values, owned codecs, and the negotiated replication capability."
+    },
+    {
       "path": "components/tes3mp/include/tes3mp/inventory_world.hpp",
       "status": "A",
       "purpose": "Declares bounded canonical player, container, equipment, and ground-item state plus the server-authoritative atomic transaction reducer."
@@ -800,6 +825,11 @@
       "purpose": "Generated FlatBuffers C++ header for client interaction command."
     },
     {
+      "path": "components/tes3mp/protocol/generated/client_inventory_transaction_command_generated.h",
+      "status": "A",
+      "purpose": "Pinned FlatBuffers 25.12.19 generated C++ for authenticated inventory transaction commands."
+    },
+    {
       "path": "components/tes3mp/protocol/generated/client_vr_pose_sample_generated.h",
       "status": "A",
       "purpose": "Pinned FlatBuffers 25.12.19 generated C++ for the size-prefixed T3VP client pose schema."
@@ -810,6 +840,11 @@
       "purpose": "Pinned FlatBuffers 25.12.19 generated C++ for bounded latest-wins actor views."
     },
     {
+      "path": "components/tes3mp/protocol/generated/latest_wins_equipment_snapshot_generated.h",
+      "status": "A",
+      "purpose": "Pinned FlatBuffers 25.12.19 generated C++ for bounded public equipment views."
+    },
+    {
       "path": "components/tes3mp/protocol/generated/latest_wins_snapshot_generated.h",
       "status": "A",
       "purpose": "Pinned FlatBuffers 25.12.19 generated C++ for the size-prefixed closed-union T3LS spatial-view schema."
@@ -818,6 +853,16 @@
       "path": "components/tes3mp/protocol/generated/reliable_actor_interest_baseline_generated.h",
       "status": "A",
       "purpose": "Pinned FlatBuffers 25.12.19 generated C++ for bounded complete actor membership."
+    },
+    {
+      "path": "components/tes3mp/protocol/generated/reliable_container_inventory_baseline_generated.h",
+      "status": "A",
+      "purpose": "Pinned FlatBuffers 25.12.19 generated C++ for chunked exact-cell container inventory."
+    },
+    {
+      "path": "components/tes3mp/protocol/generated/reliable_ground_item_baseline_generated.h",
+      "status": "A",
+      "purpose": "Pinned FlatBuffers 25.12.19 generated C++ for chunked exact-cell ground items."
     },
     {
       "path": "components/tes3mp/protocol/generated/reliable_interactive_object_interest_baseline_generated.h",
@@ -838,6 +883,11 @@
       "path": "components/tes3mp/protocol/generated/reliable_operation_generated.h",
       "status": "A",
       "purpose": "Pinned FlatBuffers 25.12.19 generated C++ for the size-prefixed closed-union T3RO legacy and versioned locomotion-input schema."
+    },
+    {
+      "path": "components/tes3mp/protocol/generated/reliable_player_inventory_baseline_generated.h",
+      "status": "A",
+      "purpose": "Pinned FlatBuffers 25.12.19 generated C++ for chunked owner-private player inventory."
     },
     {
       "path": "components/tes3mp/protocol/generated/server_hello_generated.h",
@@ -868,6 +918,11 @@
       "path": "components/tes3mp/protocol/interactive_object_replication.cpp",
       "status": "A",
       "purpose": "Implements size-prefixed verified FlatBuffers encoding and decoding for interactive object replication."
+    },
+    {
+      "path": "components/tes3mp/protocol/inventory_replication.cpp",
+      "status": "A",
+      "purpose": "Implements verifier-first bounded inventory, container, ground-item, equipment, and transaction codecs."
     },
     {
       "path": "components/tes3mp/protocol/item_catalog.cpp",
@@ -920,6 +975,11 @@
       "purpose": "FlatBuffers schema for client interact object command with file identifier T3IC."
     },
     {
+      "path": "components/tes3mp/protocol/schema/client_inventory_transaction_command.fbs",
+      "status": "A",
+      "purpose": "Explicit-ID T3IT schema for authenticated inventory transaction commands."
+    },
+    {
       "path": "components/tes3mp/protocol/schema/client_vr_pose_sample.fbs",
       "status": "A",
       "purpose": "Explicit-ID T3VP presentation-only client head and optional-hand pose schema."
@@ -930,6 +990,11 @@
       "purpose": "Explicit-ID schema for bounded capability-gated latest-wins actor views."
     },
     {
+      "path": "components/tes3mp/protocol/schema/latest_wins_equipment_snapshot.fbs",
+      "status": "A",
+      "purpose": "Explicit-ID T3EQ schema for bounded public equipment views."
+    },
+    {
       "path": "components/tes3mp/protocol/schema/latest_wins_snapshot.fbs",
       "status": "A",
       "purpose": "Explicit-ID T3LS schema for bounded latest-wins spatial views with additive canonical locomotion metadata and no one-shot events."
@@ -938,6 +1003,16 @@
       "path": "components/tes3mp/protocol/schema/reliable_actor_interest_baseline.fbs",
       "status": "A",
       "purpose": "Explicit-ID schema for bounded complete actor membership and completion metadata."
+    },
+    {
+      "path": "components/tes3mp/protocol/schema/reliable_container_inventory_baseline.fbs",
+      "status": "A",
+      "purpose": "Explicit-ID T3CI schema for chunked exact-cell container inventory."
+    },
+    {
+      "path": "components/tes3mp/protocol/schema/reliable_ground_item_baseline.fbs",
+      "status": "A",
+      "purpose": "Explicit-ID T3GI schema for chunked exact-cell ground items."
     },
     {
       "path": "components/tes3mp/protocol/schema/reliable_interactive_object_interest_baseline.fbs",
@@ -958,6 +1033,11 @@
       "path": "components/tes3mp/protocol/schema/reliable_operation.fbs",
       "status": "A",
       "purpose": "Explicit-ID T3RO closed-union schema for preconditioned legacy motion and versioned locomotion input."
+    },
+    {
+      "path": "components/tes3mp/protocol/schema/reliable_player_inventory_baseline.fbs",
+      "status": "A",
+      "purpose": "Explicit-ID T3PI schema for chunked owner-private player inventory and equipment bindings."
     },
     {
       "path": "components/tes3mp/protocol/schema/server_hello.fbs",
@@ -1365,6 +1445,11 @@
       "purpose": "Focused unit contracts for item prototype catalog validation, lookup, category, and equipment-slot bounds."
     },
     {
+      "path": "components/tes3mp/tests/inventory_replication_tests.cpp",
+      "status": "A",
+      "purpose": "Focused wire round-trip, corruption, payload-bound, frame-class, and capability contracts for inventory replication."
+    },
+    {
       "path": "components/tes3mp/tests/inventory_world_tests.cpp",
       "status": "A",
       "purpose": "Focused unit contracts for canonical inventory validation, transaction atomicity, authority, concurrency, equipment, and item conservation."
@@ -1533,6 +1618,11 @@
       "path": "docs/vnext/INTERACTIVE_OBJECT_CONTENT_V1.md",
       "status": "A",
       "purpose": "Documents the optional bounded manifest-scoped interactive-object artifact and authoritative key-unlock boundary."
+    },
+    {
+      "path": "docs/vnext/INVENTORY_CONTENT_V1.md",
+      "status": "A",
+      "purpose": "Documents the optional bounded manifest-scoped inventory artifact and fail-closed production composition."
     },
     {
       "path": "docs/vnext/LEGACY_GAMEPLAY_FEATURE_INVENTORY.md",
@@ -2386,7 +2476,7 @@
         },
         {
           "path": "components/tes3mp/CMakeLists.txt",
-          "sha256": "2f1381d4a9839ca5dee2b7e8bb9813bfb0025a626183d94a859874755db0cccf"
+          "sha256": "b76776b21336a9473719ba4b36f8d19b5dc4318396a01dd5bf3f56af80859ae9"
         },
         {
           "path": "components/tes3mp/protocol/generated/authentication_accepted_generated.h",
@@ -2405,6 +2495,14 @@
           "sha256": "951236d2cda2f5c8c5f4253021b8a7a6e2e53dd654c2688acd3c90d64d2f7e69"
         },
         {
+          "path": "components/tes3mp/protocol/generated/client_interact_object_command_generated.h",
+          "sha256": "80d1302e4a3f4bd9da40048c2c34c27bf75e04eadc2a4c8b5fc45111eded263c"
+        },
+        {
+          "path": "components/tes3mp/protocol/generated/client_inventory_transaction_command_generated.h",
+          "sha256": "18b542d10986acc0ccd1f6683ae986a8ad0539ab08373a55543dde72a6ec6547"
+        },
+        {
           "path": "components/tes3mp/protocol/generated/client_vr_pose_sample_generated.h",
           "sha256": "b1ac92e791922b4cbf42a7f4ae27b3d0ee318f6e893ee3cf6d520cd5d7ce3927"
         },
@@ -2413,12 +2511,28 @@
           "sha256": "e6d272936e5ff1681d3f36167c74c50159544554bf4bd5a1ed4e8d55eff59b49"
         },
         {
+          "path": "components/tes3mp/protocol/generated/latest_wins_equipment_snapshot_generated.h",
+          "sha256": "d153a442022e98b16e6397c3172c29a99659792611773f1a226cfa9b48798019"
+        },
+        {
           "path": "components/tes3mp/protocol/generated/latest_wins_snapshot_generated.h",
           "sha256": "9b1135ccb51a371dad5afc1df794c9c78872f3fcc9a7e2b0c6c4840023ae5c5a"
         },
         {
           "path": "components/tes3mp/protocol/generated/reliable_actor_interest_baseline_generated.h",
           "sha256": "dc03796473e9e3de898c507b871cbb2b218815347ea036ff843391290d696c3e"
+        },
+        {
+          "path": "components/tes3mp/protocol/generated/reliable_container_inventory_baseline_generated.h",
+          "sha256": "0ecd664bd98dea35db4e794e0a657af34f0c1a68cdc66f4c4dcb6e2c13fd110f"
+        },
+        {
+          "path": "components/tes3mp/protocol/generated/reliable_ground_item_baseline_generated.h",
+          "sha256": "922cb41f28a199353ea17613efabb0b46074f75cc2429b9b16512e6ca80e94a4"
+        },
+        {
+          "path": "components/tes3mp/protocol/generated/reliable_interactive_object_interest_baseline_generated.h",
+          "sha256": "8bbab357d83fdd9fbc7c407b15c3130e31cedf7cce636ca2f77aec8b7d26ed37"
         },
         {
           "path": "components/tes3mp/protocol/generated/reliable_interest_baseline_generated.h",
@@ -2431,6 +2545,10 @@
         {
           "path": "components/tes3mp/protocol/generated/reliable_operation_generated.h",
           "sha256": "0db954c6d22a4815562ceece3e5a6f1c24558dc53721b8c91721d178ac5d6704"
+        },
+        {
+          "path": "components/tes3mp/protocol/generated/reliable_player_inventory_baseline_generated.h",
+          "sha256": "8be14c7cf2fc877edbc9c43c58083210040f49480fbdc34e96e4f7d8fa0b4f3c"
         },
         {
           "path": "components/tes3mp/protocol/generated/server_hello_generated.h",
@@ -2465,12 +2583,24 @@
           "sha256": "4d8a39efd176aa720a628d6bec7f008c7d0d1e5f908ddcc5c4f29f76f30b2ba9"
         },
         {
+          "path": "components/tes3mp/protocol/schema/client_interact_object_command.fbs",
+          "sha256": "1b44aaafcd0438bb86b6c95067633f1481d9cd8993e708c3f7e685e07aacc742"
+        },
+        {
+          "path": "components/tes3mp/protocol/schema/client_inventory_transaction_command.fbs",
+          "sha256": "c56054574c0de3add29e7d5baaa99a748ea2e011b6d62163d3821a4fbcfa24f0"
+        },
+        {
           "path": "components/tes3mp/protocol/schema/client_vr_pose_sample.fbs",
           "sha256": "8a41fd9287361e87a03e602244754ff070f7f28b9a473ca92ef8e9ec6358c942"
         },
         {
           "path": "components/tes3mp/protocol/schema/latest_wins_actor_snapshot.fbs",
-          "sha256": "3cc114af9f9cd585a82e8bd4f457e5561f057e41df7e1cf38dcedd92bc4d5a7f"
+          "sha256": "29d34a5aebbd745362d2aa19ebc5825c3b0e6113f6efd918fd565e050f54e37b"
+        },
+        {
+          "path": "components/tes3mp/protocol/schema/latest_wins_equipment_snapshot.fbs",
+          "sha256": "60060fab5576313ee60a17d546e3e81402629c7ab3444abb0893d8287fae4c2e"
         },
         {
           "path": "components/tes3mp/protocol/schema/latest_wins_snapshot.fbs",
@@ -2479,6 +2609,18 @@
         {
           "path": "components/tes3mp/protocol/schema/reliable_actor_interest_baseline.fbs",
           "sha256": "ac77f035e9c2c200b183f060dbb6641d5fcd92d4eabeff1bc5c4ebf5425239ce"
+        },
+        {
+          "path": "components/tes3mp/protocol/schema/reliable_container_inventory_baseline.fbs",
+          "sha256": "fb983176035136b58f98892f39bc1a6c7b7246e09e6de6ef7ab9dade457dae97"
+        },
+        {
+          "path": "components/tes3mp/protocol/schema/reliable_ground_item_baseline.fbs",
+          "sha256": "96e6f368f789d1e3ac1edc9b2fd7ef55134b20df2fb74a9209a1bbd40f7c745f"
+        },
+        {
+          "path": "components/tes3mp/protocol/schema/reliable_interactive_object_interest_baseline.fbs",
+          "sha256": "1b00638ac68b9f26f7eb6ada61ea15e0783a5a062ad32aa1e64960b9b4063072"
         },
         {
           "path": "components/tes3mp/protocol/schema/reliable_interest_baseline.fbs",
@@ -2491,6 +2633,10 @@
         {
           "path": "components/tes3mp/protocol/schema/reliable_operation.fbs",
           "sha256": "a73083a63cd7dc0b3939f605ec10654658d28c3f73cf9f7927a4ec300106fa56"
+        },
+        {
+          "path": "components/tes3mp/protocol/schema/reliable_player_inventory_baseline.fbs",
+          "sha256": "bdd755ec24e78d6c561b855c86db6fb2c6ee5392a43647ef961441e0ff3b5f1e"
         },
         {
           "path": "components/tes3mp/protocol/schema/server_hello.fbs",
@@ -2558,11 +2704,11 @@
         },
         {
           "path": "scripts/tests/test_run_vnext_flatbuffers_proof.py",
-          "sha256": "b513a79771a529ea785aba180d421fd0cfc4f8a1f47a0e278f4cff5aa7d54711"
+          "sha256": "bff68452e118417f8c4cc451210feee53b69e9d438aeb38b24dec76451ec788c"
         },
         {
           "path": "scripts/vnext_flatbuffers_proof.json",
-          "sha256": "e39b4b2065fe2f26fcc6c6e8545a304b13c8aab765f439aea38019764967a4fa"
+          "sha256": "900ae06ca6f5729bc113e33306171468aba3c7bb805becb3b5281fef491a9792"
         }
       ],
       "repositories": [

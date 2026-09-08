@@ -34,6 +34,7 @@ namespace TES3MP
         UnknownCell,
         MotionOutOfRange,
         ObjectInteractionRejected,
+        InventoryTransactionRejected,
     };
 
     class FinalizedCommandRecord

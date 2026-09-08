@@ -44,6 +44,8 @@ namespace
                 return CommandReductionObservationOutcome::MotionOutOfRange;
             case CommandDisposition::ObjectInteractionRejected:
                 return CommandReductionObservationOutcome::ObjectInteractionRejected;
+            case CommandDisposition::InventoryTransactionRejected:
+                return CommandReductionObservationOutcome::InventoryTransactionRejected;
         }
         return CommandReductionObservationOutcome::CandidateStateInvalid;
     }
@@ -493,7 +495,8 @@ namespace TES3MP
     }
 
     CanonicalCommandReducer::PreparedBatch CanonicalCommandReducer::prepareCommands(const ServerTickCommandBatch& batch,
-        const CanonicalInteractiveObjectWorld* objects, const InteractiveObjectCatalog* catalog)
+        const CanonicalInteractiveObjectWorld* objects, const InteractiveObjectCatalog* objectCatalog,
+        const CanonicalInventoryWorld* inventory, const ItemPrototypeCatalog* itemCatalog)
     {
         PreparedBatch prepared;
         prepared.mBaseVersion = mStateVersion;
@@ -540,6 +543,22 @@ namespace TES3MP
             {
                 prepared.mBaseInteractiveObjects = *objects;
                 prepared.mInteractiveObjects = *objects;
+            }
+            catch (...)
+            {
+                result.mError = CommandBatchReductionError::CandidateStateInvalid;
+                return prepared;
+            }
+        }
+        const bool hasInventoryTransaction = std::ranges::any_of(commands, [](const StampedServerCommand& command) {
+            return std::holds_alternative<InventoryCommandProposal>(command.proposal().payload());
+        });
+        if ((hasInventoryTransaction || hasObjectInteraction) && inventory != nullptr)
+        {
+            try
+            {
+                prepared.mBaseInventory = *inventory;
+                prepared.mInventory = *inventory;
             }
             catch (...)
             {
@@ -652,16 +671,15 @@ namespace TES3MP
                                                 player->transform().orientation());
                                         }
                                     }
-                                    else
+                                    else if (const auto* interaction
+                                        = std::get_if<InteractiveObjectCommandProposal>(&proposal.payload()))
                                     {
                                         requiresSpatialAdvance = false;
-                                        const auto& interaction
-                                            = std::get<InteractiveObjectCommandProposal>(proposal.payload());
-                                        if (!prepared.mInteractiveObjects || catalog == nullptr)
+                                        if (!prepared.mInteractiveObjects || objectCatalog == nullptr)
                                         {
                                             ObjectInteractionOutcome outcome;
                                             outcome.code = ObjectInteractionResultCode::InternalError;
-                                            outcome.objectId = interaction.objectId();
+                                            outcome.objectId = interaction->objectId();
                                             objectInteractionOutcome = outcome;
                                             disposition = CommandDisposition::ObjectInteractionRejected;
                                         }
@@ -669,16 +687,20 @@ namespace TES3MP
                                         {
                                             const InteractObjectCommand objectCommand{
                                                 .player = session->playerId(),
-                                                .objectId = interaction.objectId(),
-                                                .cell = interaction.cell(),
-                                                .interactionOrigin = interaction.interactionOrigin(),
-                                                .expectedRevision = interaction.expectedRevision(),
-                                                .kind = interaction.kind(),
-                                                .requestedKey = interaction.requestedKey(),
+                                                .objectId = interaction->objectId(),
+                                                .cell = interaction->cell(),
+                                                .interactionOrigin = interaction->interactionOrigin(),
+                                                .expectedRevision = interaction->expectedRevision(),
+                                                .kind = interaction->kind(),
+                                                .requestedKey = interaction->requestedKey(),
                                             };
+                                            ObjectInteractionValidationContext validation;
+                                            if (prepared.mInventory)
+                                                validation.verifiedPlayerKeys
+                                                    = prepared.mInventory->collectVerifiedKeys(session->playerId());
                                             auto interactionResult
                                                 = applyObjectInteractionToCandidate(*prepared.mInteractiveObjects,
-                                                    *catalog, *prepared.mState, objectCommand, tick);
+                                                    *objectCatalog, *prepared.mState, objectCommand, tick, validation);
                                             objectInteractionOutcome = interactionResult.outcome;
                                             disposition
                                                 = interactionResult.outcome.code == ObjectInteractionResultCode::Success
@@ -729,6 +751,24 @@ namespace TES3MP
                                                 prepared.mPublication = std::move(publication);
                                                 return prepared;
                                             }
+                                        }
+                                    }
+                                    else
+                                    {
+                                        requiresSpatialAdvance = false;
+                                        const auto& proposalCommand
+                                            = std::get<InventoryCommandProposal>(proposal.payload()).command();
+                                        if (!prepared.mInventory || itemCatalog == nullptr)
+                                            disposition = CommandDisposition::InventoryTransactionRejected;
+                                        else
+                                        {
+                                            auto transaction = proposalCommand;
+                                            transaction.player = session->playerId();
+                                            const auto outcome = applyInventoryTransaction(*prepared.mInventory,
+                                                *prepared.mState, transaction, InventoryValidationContext{}, tick);
+                                            disposition = outcome.code == InventoryTransactionResultCode::Success
+                                                ? CommandDisposition::Applied
+                                                : CommandDisposition::InventoryTransactionRejected;
                                         }
                                     }
                                     const auto advanced = requiresSpatialAdvance
@@ -814,13 +854,26 @@ namespace TES3MP
 
     CanonicalCommandReducer::PreparedBatch CanonicalCommandReducer::prepare(const ServerTickCommandBatch& batch)
     {
-        return prepareCommands(batch, nullptr, nullptr);
+        return prepareCommands(batch, nullptr, nullptr, nullptr, nullptr);
     }
 
     CanonicalCommandReducer::PreparedBatch CanonicalCommandReducer::prepare(const ServerTickCommandBatch& batch,
         const CanonicalInteractiveObjectWorld& objects, const InteractiveObjectCatalog& catalog)
     {
-        return prepareCommands(batch, &objects, &catalog);
+        return prepareCommands(batch, &objects, &catalog, nullptr, nullptr);
+    }
+
+    CanonicalCommandReducer::PreparedBatch CanonicalCommandReducer::prepare(const ServerTickCommandBatch& batch,
+        const CanonicalInventoryWorld& inventory, const ItemPrototypeCatalog& catalog)
+    {
+        return prepareCommands(batch, nullptr, nullptr, &inventory, &catalog);
+    }
+
+    CanonicalCommandReducer::PreparedBatch CanonicalCommandReducer::prepare(const ServerTickCommandBatch& batch,
+        const CanonicalInteractiveObjectWorld& objects, const InteractiveObjectCatalog& objectCatalog,
+        const CanonicalInventoryWorld& inventory, const ItemPrototypeCatalog& itemCatalog)
+    {
+        return prepareCommands(batch, &objects, &objectCatalog, &inventory, &itemCatalog);
     }
 
     CanonicalCommandReducer::PreparedBatch CanonicalCommandReducer::prepareTickState(
@@ -908,15 +961,33 @@ namespace TES3MP
         return prepareTickState(prepare(batch, objects, catalog), batch);
     }
 
-    bool CanonicalCommandReducer::commitPrepared(PreparedBatch&& prepared, CanonicalInteractiveObjectWorld* objects)
+    CanonicalCommandReducer::PreparedBatch CanonicalCommandReducer::prepareTick(const ServerTickCommandBatch& batch,
+        const CanonicalInventoryWorld& inventory, const ItemPrototypeCatalog& catalog)
+    {
+        return prepareTickState(prepare(batch, inventory, catalog), batch);
+    }
+
+    CanonicalCommandReducer::PreparedBatch CanonicalCommandReducer::prepareTick(const ServerTickCommandBatch& batch,
+        const CanonicalInteractiveObjectWorld& objects, const InteractiveObjectCatalog& objectCatalog,
+        const CanonicalInventoryWorld& inventory, const ItemPrototypeCatalog& itemCatalog)
+    {
+        return prepareTickState(prepare(batch, objects, objectCatalog, inventory, itemCatalog), batch);
+    }
+
+    bool CanonicalCommandReducer::commitPrepared(
+        PreparedBatch&& prepared, CanonicalInteractiveObjectWorld* objects, CanonicalInventoryWorld* inventory)
     {
         if (prepared.mBaseVersion != mStateVersion || prepared.mBaseCanonicalRevision != mCanonicalRevision
             || !prepared.mState || !prepared.mPublication || (prepared.mInteractiveObjects && objects == nullptr)
-            || (prepared.mBaseInteractiveObjects && (!objects || *objects != *prepared.mBaseInteractiveObjects)))
+            || (prepared.mBaseInteractiveObjects && (!objects || *objects != *prepared.mBaseInteractiveObjects))
+            || (prepared.mInventory && inventory == nullptr)
+            || (prepared.mBaseInventory && (!inventory || *inventory != *prepared.mBaseInventory)))
             return false;
         mState = std::move(prepared.mState);
         if (prepared.mInteractiveObjects)
             *objects = std::move(*prepared.mInteractiveObjects);
+        if (prepared.mInventory)
+            *inventory = std::move(*prepared.mInventory);
         mStateVersion = prepared.mStateVersion;
         mCanonicalRevision = prepared.mCanonicalRevision;
         mCheckpointTick = prepared.mCheckpointTick;
@@ -930,12 +1001,23 @@ namespace TES3MP
 
     bool CanonicalCommandReducer::commit(PreparedBatch&& prepared)
     {
-        return commitPrepared(std::move(prepared), nullptr);
+        return commitPrepared(std::move(prepared), nullptr, nullptr);
     }
 
     bool CanonicalCommandReducer::commit(PreparedBatch&& prepared, CanonicalInteractiveObjectWorld& objects)
     {
-        return commitPrepared(std::move(prepared), &objects);
+        return commitPrepared(std::move(prepared), &objects, nullptr);
+    }
+
+    bool CanonicalCommandReducer::commit(PreparedBatch&& prepared, CanonicalInventoryWorld& inventory)
+    {
+        return commitPrepared(std::move(prepared), nullptr, &inventory);
+    }
+
+    bool CanonicalCommandReducer::commit(
+        PreparedBatch&& prepared, CanonicalInteractiveObjectWorld& objects, CanonicalInventoryWorld& inventory)
+    {
+        return commitPrepared(std::move(prepared), &objects, &inventory);
     }
 
     CommandBatchReductionResult CanonicalCommandReducer::apply(const ServerTickCommandBatch& batch)

@@ -45,8 +45,13 @@ namespace TES3MP
         ReliableActorInterestBaseline = 0x0104,
         ReliableInteractiveObjectInterestBaseline = 0x0105,
         ClientInteractObjectCommand = 0x0106,
+        ReliablePlayerInventoryBaseline = 0x0107,
+        ReliableContainerInventoryBaseline = 0x0108,
+        ReliableGroundItemBaseline = 0x0109,
+        ClientInventoryTransactionCommand = 0x010a,
         LatestWinsSnapshot = 0x0200,
         LatestWinsActorSnapshot = 0x0201,
+        LatestWinsEquipmentSnapshot = 0x0202,
         ClientVrPoseSample = 0x0300,
         ServerVrPoseSnapshot = 0x0301,
     };
@@ -78,9 +83,14 @@ namespace TES3MP
             case MessageKind::ReliableActorInterestBaseline:
             case MessageKind::ReliableInteractiveObjectInterestBaseline:
             case MessageKind::ClientInteractObjectCommand:
+            case MessageKind::ReliablePlayerInventoryBaseline:
+            case MessageKind::ReliableContainerInventoryBaseline:
+            case MessageKind::ReliableGroundItemBaseline:
+            case MessageKind::ClientInventoryTransactionCommand:
                 return MessageDescriptor{ kind, MessageClass::ReliableOperation, ReliableOperationMaximumPayloadBytes };
             case MessageKind::LatestWinsSnapshot:
             case MessageKind::LatestWinsActorSnapshot:
+            case MessageKind::LatestWinsEquipmentSnapshot:
                 return MessageDescriptor{ kind, MessageClass::LatestWinsSnapshot,
                     LatestWinsSnapshotMaximumPayloadBytes };
             case MessageKind::ClientVrPoseSample:

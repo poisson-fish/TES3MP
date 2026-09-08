@@ -18,6 +18,10 @@ add_library(tes3mp_server_app STATIC
     interest_projection.cpp
     interactive_object_interest_projection.hpp
     interactive_object_interest_projection.cpp
+    inventory_interest_projection.hpp
+    inventory_interest_projection.cpp
+    inventory_content.hpp
+    inventory_content.cpp
     phase7_proof_profile.hpp
     phase7_queue_telemetry.hpp
     phase7_queue_telemetry.cpp

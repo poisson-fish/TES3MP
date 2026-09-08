@@ -1,0 +1,58 @@
+namespace TES3MP.Protocol.Schema.ContainerInventoryBaseline;
+
+struct Position3 {
+  x:long;
+  y:long;
+  z:long;
+}
+
+enum CellKind : ubyte {
+  Unknown = 0,
+  Interior = 1,
+  Exterior = 2
+}
+
+struct Cell {
+  cell_space_id:ulong;
+  grid_x:int;
+  grid_y:int;
+  kind:CellKind;
+  padding0:ubyte;
+  padding1:ushort;
+  padding2:uint;
+}
+
+struct ItemStack {
+  stack_id:ulong;
+  prototype_id:ulong;
+  count:uint;
+  condition:uint;
+  enchantment_charge:uint;
+  soul_prototype_id:ulong;
+  has_soul:ubyte;
+  padding0:ubyte;
+  padding1:ushort;
+}
+
+table ContainerInventoryBaselineHeader {
+  target_session_id:ulong (id: 0);
+  target_session_generation:ulong (id: 1);
+  server_tick:ulong (id: 2);
+  canonical_revision:ulong (id: 3);
+  container_id:ulong (id: 4);
+  container_revision:ulong (id: 5);
+  capacity_weight:uint (id: 6);
+  chunk_index:uint (id: 7);
+  chunk_count:uint (id: 8);
+}
+
+table ReliableContainerInventoryBaseline {
+  header:ContainerInventoryBaselineHeader (id: 0);
+  cell:Cell (id: 1);
+  position:Position3 (id: 2);
+  stacks:[ItemStack] (id: 3);
+}
+
+root_type ReliableContainerInventoryBaseline;
+file_identifier "T3CI";
+file_extension "t3ci";

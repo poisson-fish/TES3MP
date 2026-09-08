@@ -301,6 +301,7 @@ namespace TES3MP
         UnknownCell,
         MotionOutOfRange,
         ObjectInteractionRejected,
+        InventoryTransactionRejected,
     };
 
     struct CommandReductionEvent

@@ -326,8 +326,7 @@ namespace TES3MP
         virtual TransportAdmission<ConnectAttemptId> connect(const ConnectionEndpoint& endpoint) = 0;
         virtual TransportResult cancelConnect(ConnectAttemptId attempt) = 0;
         virtual TransportResult send(
-            TransportConnectionId connection, TransportChannel channel, std::span<const std::byte> message)
-            = 0;
+            TransportConnectionId connection, TransportChannel channel, std::span<const std::byte> message) = 0;
         virtual TransportReceiveResult receive(TransportConnectionId connection, std::span<TransportMessage> output)
             = 0;
         virtual TransportResult close(TransportConnectionId connection, TransportCloseMode mode) = 0;
@@ -386,9 +385,16 @@ namespace TES3MP
         std::size_t reliableMessages() const noexcept { return mReliable.size(); }
         std::size_t reliableBytes() const noexcept { return mReliableBytes; }
         bool hasLatest() const noexcept
-        { return mLatest.has_value() || mActorLatest.has_value() || mPresentationLatest.has_value(); }
-        bool hasWorldLatest() const noexcept { return mLatest.has_value() || mActorLatest.has_value(); }
+        {
+            return mLatest.has_value() || mActorLatest.has_value() || mEquipmentLatest.has_value()
+                || mPresentationLatest.has_value();
+        }
+        bool hasWorldLatest() const noexcept
+        {
+            return mLatest.has_value() || mActorLatest.has_value() || mEquipmentLatest.has_value();
+        }
         bool hasActorLatest() const noexcept { return mActorLatest.has_value(); }
+        bool hasEquipmentLatest() const noexcept { return mEquipmentLatest.has_value(); }
         bool hasPresentationLatest() const noexcept { return mPresentationLatest.has_value(); }
 
     private:
@@ -410,6 +416,7 @@ namespace TES3MP
         std::deque<std::vector<std::byte>> mReliable;
         std::optional<std::vector<std::byte>> mLatest;
         std::optional<std::vector<std::byte>> mActorLatest;
+        std::optional<std::vector<std::byte>> mEquipmentLatest;
         std::optional<std::vector<std::byte>> mPresentationLatest;
         std::size_t mReliableBytes = 0;
         RateBucket mReliableRate;
