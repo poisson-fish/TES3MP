@@ -14,6 +14,7 @@ import shutil
 import subprocess
 import sys
 import tarfile
+import time
 import urllib.request
 from pathlib import Path, PurePosixPath
 from typing import Any, Iterable
@@ -250,6 +251,18 @@ def sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
+def remove_tree(path: Path, attempts: int = 6) -> None:
+    """Remove generated input despite short-lived Windows scanner/indexer locks."""
+    for attempt in range(attempts):
+        try:
+            shutil.rmtree(path)
+            return
+        except OSError:
+            if attempt + 1 == attempts:
+                raise
+            time.sleep(0.2 * (attempt + 1))
+
+
 def find_tool(name: str, environment_name: str, windows_candidates: Iterable[Path] = ()) -> str:
     override = os.environ.get(environment_name)
     if override:
@@ -390,7 +403,10 @@ def configure_build_environment() -> tuple[str, str, str, dict[str, str]]:
         / "Microsoft Visual Studio/2022/BuildTools/Common7/IDE/CommonExtensions/Microsoft/CMake/CMake/bin/cmake.exe"
     ]
     ninja_candidates = [candidate.parents[2] / "Ninja/ninja.exe" for candidate in cmake_candidates]
-    perl_candidates = [Path("C:/Strawberry/perl/bin/perl.exe")]
+    perl_candidates = [
+        Path("C:/Strawberry/perl/bin/perl.exe"),
+        Path(os.environ.get("ProgramFiles", "C:/Program Files")) / "Strawberry/perl/bin/perl.exe",
+    ]
     cmake = find_tool("cmake", "VNEXT_CMAKE", cmake_candidates)
     ninja = find_tool("ninja", "VNEXT_NINJA", ninja_candidates)
     perl = find_tool("perl", "VNEXT_PERL", perl_candidates)
@@ -643,7 +659,7 @@ def execute(sanitize: bool) -> None:
         download_verified(dependency["source_archive"]["url"], dependency["source_archive"]["sha256"], archive)
         archives[name] = archive
     if SOURCE_DIR.exists():
-        shutil.rmtree(SOURCE_DIR)
+        remove_tree(SOURCE_DIR)
     SOURCE_DIR.mkdir(parents=True)
     for name, dependency in lock["dependencies"].items():
         temporary = BUILD_DIR / f"extract-{name}"

@@ -38,10 +38,16 @@ if (-not $ServerBin -or -not (Test-Path $ServerBin)) {
 }
 
 # Ensure dependency DLLs are accessible
+$binDir = Split-Path -Parent $ServerBin
 $vcpkgBin = "$repoRoot\deps\installed\x64-windows\bin"
-if ((Test-Path $vcpkgBin) -and ($env:PATH -notlike "*$vcpkgBin*")) {
-    $env:PATH = "$vcpkgBin;$env:PATH"
+$vcpkgRelease = "$vcpkgBin\Release"
+$runtimeDirs = @($binDir, $vcpkgBin, $vcpkgRelease)
+foreach ($dir in $runtimeDirs) {
+    if ((Test-Path $dir) -and ($env:PATH -notlike "*$dir*")) {
+        $env:PATH = "$dir;$env:PATH"
+    }
 }
+
 
 # 2. Locate server configuration file
 if (-not $ConfigPath -and $env:TES3MP_SERVER_CONFIG) {
@@ -75,3 +81,7 @@ Write-Host "Config: $ConfigPath" -ForegroundColor Gray
 Write-Host "==========================================" -ForegroundColor Cyan
 
 & "$ServerBin" "$ConfigPath"
+if ($null -ne $LASTEXITCODE -and $LASTEXITCODE -ne 0) {
+    exit $LASTEXITCODE
+}
+

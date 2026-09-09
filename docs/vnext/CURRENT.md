@@ -365,7 +365,7 @@ following on 2026-09-09:
 - a fresh bounded Windows MSVC/Ninja product build of `openmw` and the linked
   `tes3mp_server`, followed by the focused OpenMW adapter and server-application
   contract executables;
-- all 182 repository Python tests and patch-registry verification; and
+- all 179 repository Python tests and patch-registry verification; and
 - focused server-application coverage of both packaged chargen safe points,
   strict rejection of legacy character/persistence files, and atomic file
   replacement; and

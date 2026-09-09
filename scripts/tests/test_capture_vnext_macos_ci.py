@@ -149,23 +149,5 @@ class MacosCiEvidenceTests(unittest.TestCase):
             self.assertIn("vcpkg/package-lists/zlib.list", names)
             self.assertIn("vcpkg/licenses/arm64-osx-dynamic/share/zlib/copyright", names)
 
-    def test_workflow_pins_platforms_cadence_actions_and_entry_points(self) -> None:
-        workflow = (capture.ROOT / ".github" / "workflows" / "vnext-baseline-macos.yml").read_text(
-            encoding="utf-8"
-        )
-        self.assertIn("runs-on: macos-15\n", workflow)
-        self.assertIn("runs-on: macos-15-intel\n", workflow)
-        self.assertIn("on:\n  workflow_dispatch:\n", workflow)
-        for automatic_trigger in ("\n  push:", "\n  pull_request:", "\n  schedule:", "\n  release:"):
-            self.assertNotIn(automatic_trigger, workflow)
-        self.assertNotIn("github.event_name", workflow)
-        self.assertIn("python3 scripts/run_vnext_baseline.py provision", workflow)
-        self.assertIn("python3 scripts/run_vnext_baseline.py all --ci", workflow)
-        self.assertIn("python3 scripts/capture_vnext_macos_ci.py", workflow)
-        self.assertIn("actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd", workflow)
-        self.assertIn("actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02", workflow)
-        self.assertFalse((capture.ROOT / ".github" / "workflows" / "push.yml").exists())
-
-
 if __name__ == "__main__":
     unittest.main()

@@ -13,6 +13,8 @@ SERVER_BIN="${TES3MP_SERVER_BIN:-}"
 # 1. Locate server binary
 if [[ -z "$SERVER_BIN" ]]; then
     CANDIDATES=(
+        "$REPO_ROOT/build/vnext-product/tes3mp_server"
+        "$REPO_ROOT/build/vnext-product/apps/tes3mp-server/tes3mp_server"
         "$REPO_ROOT/build/vnext-baseline-install/bin/tes3mp_server"
         "$REPO_ROOT/build/vnext-baseline/tes3mp-server/tes3mp_server"
         "$REPO_ROOT/build/vnext-baseline/tes3mp_server"
@@ -36,6 +38,7 @@ fi
 # 2. Locate server configuration file
 if [[ -z "$CONFIG_PATH" ]]; then
     CONFIG_CANDIDATES=(
+        "$REPO_ROOT/build/vnext-product/resources/vfs/tes3mp/server.cfg"
         "$REPO_ROOT/build/vnext-baseline-install/resources/vfs/tes3mp/server.cfg"
         "$REPO_ROOT/build/vnext-baseline/resources/vfs/tes3mp/server.cfg"
         "$REPO_ROOT/files/data/tes3mp/server.cfg"

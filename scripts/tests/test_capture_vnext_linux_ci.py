@@ -76,25 +76,5 @@ class LinuxCiEvidenceTests(unittest.TestCase):
             self.assertEqual(capture.create_license_archive(destination, root), 1)
             self.assertTrue(destination.is_file())
 
-    def test_workflow_pins_runner_compilers_actions_and_repository_entry_points(self) -> None:
-        workflow = (capture.ROOT / ".github" / "workflows" / "vnext-baseline-linux.yml").read_text(encoding="utf-8")
-        for required in (
-            "runs-on: ubuntu-24.04",
-            "compiler: gcc-13",
-            "compiler: clang-18",
-            "actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd",
-            "actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02",
-            "fetch-depth: 0",
-            "python3 scripts/run_vnext_baseline.py all --ci",
-            "python3 scripts/capture_vnext_linux_ci.py",
-        ):
-            self.assertIn(required, workflow)
-        self.assertIn("on:\n  workflow_dispatch:\n", workflow)
-        for automatic_trigger in ("\n  push:", "\n  pull_request:", "\n  schedule:", "\n  release:"):
-            self.assertNotIn(automatic_trigger, workflow)
-        self.assertNotIn("ubuntu-latest", workflow)
-        self.assertFalse((capture.ROOT / ".github" / "workflows" / "push.yml").exists())
-
-
 if __name__ == "__main__":
     unittest.main()

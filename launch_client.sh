@@ -64,6 +64,8 @@ done
 # 1. Locate OpenMW client binary
 if [[ -z "$OPENMW_BIN" ]]; then
     BIN_CANDIDATES=(
+        "$REPO_ROOT/build/vnext-product/openmw"
+        "$REPO_ROOT/build/vnext-product/OpenMW.app/Contents/MacOS/openmw"
         "$REPO_ROOT/build/vnext-baseline-install/bin/openmw"
         "$REPO_ROOT/build/vnext-baseline/openmw"
         "$REPO_ROOT/build/vnext-baseline/OpenMW.app/Contents/MacOS/openmw"
@@ -112,6 +114,7 @@ if [[ -z "$RESOURCES_DIR" ]]; then
     RES_CANDIDATES=(
         "$BIN_DIR/resources"
         "$BIN_DIR/../Resources"
+        "$REPO_ROOT/build/vnext-product/resources"
         "$REPO_ROOT/build/vnext-baseline-install/resources"
         "$REPO_ROOT/build/vnext-baseline/resources"
     )

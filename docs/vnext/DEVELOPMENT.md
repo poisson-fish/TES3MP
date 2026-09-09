@@ -65,16 +65,38 @@ Run commands from the repository root unless noted.
 
 The product preset builds only the two shipping runtime targets: the OpenMW
 client and the TES3MP dedicated server. It disables the launcher, editor,
-conversion tools, benchmarks, and upstream test suites. Provision the verified
-transport dependencies once before the first product build:
+conversion tools, benchmarks, and upstream test suites.
+
+On Windows, the wrapper initializes the compiler environment, downloads and
+builds missing pinned transport dependencies, configures the bounded preset,
+and builds the product. From a clean checkout or after deleting `build`, run:
+
+```bat
+build_windows.bat
+```
+
+The first build takes longer because it compiles the verified OpenSSL,
+Protobuf, GameNetworkingSockets, and c-ares inputs. Later builds reuse them.
+Use `-Clean` to refresh CMake configuration without deleting or rebuilding
+those dependency inputs.
+
+A clean Windows machine also needs native Strawberry Perl to build OpenSSL.
+Git's bundled MSYS Perl is not compatible. Install it from an elevated terminal
+before the first build:
+
+```bat
+winget install --id StrawberryPerl.StrawberryPerl --exact
+```
+
+To provision the transport inputs separately, or to force their proofs to run
+again, use:
 
 ```sh
 python scripts/provision_vnext_transport.py
+python scripts/provision_vnext_transport.py --refresh
 ```
 
-On Windows, the wrapper configures the compiler environment and uses the
-bounded preset. `product` is the default; narrower and broader scopes remain
-explicit:
+`product` is the Windows default; narrower and broader scopes remain explicit:
 
 ```bat
 build_windows.bat
@@ -85,7 +107,7 @@ build_windows.bat -Target checks
 build_windows.bat -Target contracts
 ```
 
-On other supported desktop platforms, use the matching root preset:
+CI and other supported desktop platforms use the matching root preset:
 
 ```sh
 cmake --preset vnext-product-linux --fresh
@@ -94,8 +116,10 @@ cmake --build --preset vnext-product-linux --parallel 4
 
 Use `vnext-product-macos` on macOS. The headless client and focused test
 executables are development tools and are deliberately absent from the product
-preset. The full OpenMW baseline below remains a release/CI regression gate,
-not the normal edit-build loop.
+preset. GitHub CI runs these bounded Linux, macOS, and Windows product builds,
+plus the Linux ASan/UBSan and fuzz smoke profile. The full OpenMW baseline below
+is an explicit release or regression investigation gate, not the normal CI or
+edit-build loop.
 
 ### Fast repository checks
 

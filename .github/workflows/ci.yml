@@ -1,0 +1,120 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  linux:
+    name: Linux
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    env:
+      CC: gcc-13
+      CXX: g++-13
+    steps:
+      - name: Check out source
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+
+      - name: Install build dependencies
+        run: sudo CI/install_debian_deps.sh gcc openmw-deps openmw-deps-dynamic
+
+      - name: Run repository checks
+        run: |
+          python3 -m unittest discover -s scripts/tests -v
+          python3 scripts/verify_openmw_patch_registry.py
+          python3 scripts/verify_vnext_baseline.py
+
+      - name: Provision transport dependencies
+        run: python3 scripts/provision_vnext_transport.py
+
+      - name: Configure
+        run: cmake --preset vnext-product-linux --fresh
+
+      - name: Build client and server
+        run: cmake --build --preset vnext-product-linux --parallel 4
+
+  macos:
+    name: macOS
+    runs-on: macos-15
+    timeout-minutes: 120
+    env:
+      MACOSX_DEPLOYMENT_TARGET: "14.8"
+      VNEXT_QT_ROOT: /opt/homebrew/opt/qt
+      VNEXT_VCPKG_ROOT: /tmp/openmw-deps
+      VNEXT_VCPKG_TRIPLET: arm64-osx-dynamic
+    steps:
+      - name: Check out source
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Provision OpenMW dependencies
+        run: python3 scripts/run_vnext_baseline.py provision
+
+      - name: Provision transport dependencies
+        run: python3 scripts/provision_vnext_transport.py
+
+      - name: Configure
+        run: cmake --preset vnext-product-macos --fresh
+
+      - name: Build client and server
+        run: cmake --build --preset vnext-product-macos --parallel 4
+
+  windows:
+    name: Windows
+    runs-on: windows-2022
+    timeout-minutes: 120
+    steps:
+      - name: Check out source
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Enter the Visual Studio x64 environment
+        uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1
+        with:
+          arch: x64
+          vsversion: "2022"
+
+      - name: Install native Perl for OpenSSL
+        run: choco install strawberryperl --yes --no-progress
+
+      - name: Provision OpenMW dependencies
+        run: python scripts/run_vnext_baseline.py provision
+
+      - name: Build client and server
+        run: .\build_windows.ps1 -Target product -Clean
+
+  asan-ubsan:
+    name: ASan + UBSan
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Check out source
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Install sanitizer toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes clang-18 cmake ninja-build
+
+      - name: Run sanitizers and bounded fuzz smoke
+        run: python3 scripts/run_tes3mp_runtime_safety.py --profile asan-ubsan --fuzz-seconds 30
+
+      - name: Retain failure evidence
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: tes3mp-asan-ubsan-${{ github.sha }}
+          path: |
+            build/tes3mp-safety-asan-ubsan/evidence/*
+            build/tes3mp-safety-asan-ubsan/fuzzer-artifacts/*
+          if-no-files-found: ignore
+          retention-days: 14

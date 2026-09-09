@@ -40,16 +40,35 @@ if (-not $OpenMWBin -or -not (Test-Path $OpenMWBin)) {
 }
 
 # Ensure OSG plugins and runtime dependencies are in PATH and OSG_LIBRARY_PATH
+$binDir = Split-Path -Parent $OpenMWBin
 $vcpkgBin = "$repoRoot\deps\installed\x64-windows\bin"
-if (Test-Path "$vcpkgBin\osgPlugins-3.6.5") {
-    $env:OSG_LIBRARY_PATH = "$vcpkgBin\osgPlugins-3.6.5"
-    if ($env:PATH -notlike "*$vcpkgBin*") {
-        $env:PATH = "$vcpkgBin;$env:PATH"
+$vcpkgRelease = "$vcpkgBin\Release"
+$qtBin = "$repoRoot\deps\Qt\6.6.3\msvc2019_64\bin"
+
+# Locate OSG plugins directory dynamically
+$osgPluginDir = "$vcpkgBin\osgPlugins-3.6.5"
+if (-not (Test-Path $osgPluginDir)) {
+    $foundOsg = Get-ChildItem -Path $vcpkgBin -Filter "osgPlugins*" -Directory -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($foundOsg) { $osgPluginDir = $foundOsg.FullName }
+}
+if (Test-Path $osgPluginDir) {
+    $env:OSG_LIBRARY_PATH = $osgPluginDir
+}
+
+# Prepend all runtime DLL paths to PATH
+$runtimeDirs = @($binDir, $vcpkgBin, $vcpkgRelease, $qtBin)
+foreach ($dir in $runtimeDirs) {
+    if ((Test-Path $dir) -and ($env:PATH -notlike "*$dir*")) {
+        $env:PATH = "$dir;$env:PATH"
     }
 }
-$qtBin = "$repoRoot\deps\Qt\6.6.3\msvc2019_64\bin"
-if ((Test-Path $qtBin) -and ($env:PATH -notlike "*$qtBin*")) {
-    $env:PATH = "$qtBin;$env:PATH"
+
+# Auto-deploy MyGUIEngine.dll to the binary directory if missing
+if (-not (Test-Path "$binDir\MyGUIEngine.dll")) {
+    $myguiSrc = if (Test-Path "$vcpkgBin\MyGUIEngine.dll") { "$vcpkgBin\MyGUIEngine.dll" } elseif (Test-Path "$vcpkgRelease\MyGUIEngine.dll") { "$vcpkgRelease\MyGUIEngine.dll" } else { $null }
+    if ($myguiSrc) {
+        Copy-Item $myguiSrc "$binDir\MyGUIEngine.dll" -Force -ErrorAction SilentlyContinue
+    }
 }
 
 # 2. Locate Morrowind Data Files
@@ -161,10 +180,17 @@ if ($ResourcesDir) { Write-Host "Resources : $ResourcesDir" -ForegroundColor Gra
 if ($Connect) { Write-Host "Connect   : $Connect" -ForegroundColor Yellow }
 Write-Host "==========================================" -ForegroundColor Cyan
 
+$clientExit = 0
 try {
     & "$OpenMWBin" @clientArgs $args
+    $clientExit = $LASTEXITCODE
 } finally {
     if ($tempPasswordFile -and (Test-Path $tempPasswordFile)) {
         Remove-Item -Path $tempPasswordFile -Force -ErrorAction SilentlyContinue
     }
 }
+
+if ($null -ne $clientExit -and $clientExit -ne 0) {
+    exit $clientExit
+}
+

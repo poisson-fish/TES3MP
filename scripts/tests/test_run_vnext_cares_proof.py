@@ -95,18 +95,6 @@ class CaresProofTests(unittest.TestCase):
             path.write_bytes(b"resolver proof")
             self.assertEqual(proof.sha256_file(path), hashlib.sha256(b"resolver proof").hexdigest())
 
-    def test_workflow_uses_supported_matrix_and_pinned_actions(self) -> None:
-        workflow = (proof.ROOT / ".github" / "workflows" / "vnext-cares-proof.yml").read_text(encoding="utf-8")
-        for value in ("ubuntu-24.04", "windows-2022", "macos-15", "macos-15-intel"):
-            self.assertIn(value, workflow)
-        for compiler in ("gcc-13", "clang-18", "MSVC 2022 v143", "Xcode 16"):
-            self.assertIn(compiler, workflow)
-        self.assertIn("on:\n  workflow_dispatch:\n", workflow)
-        for automatic_trigger in ("\n  push:", "\n  pull_request:", "\n  schedule:", "\n  release:"):
-            self.assertNotIn(automatic_trigger, workflow)
-        self.assertIn("--sanitize", workflow)
-        self.assertNotRegex(workflow, r"uses:\s+[^\s@]+@v\d")
-
     def test_hashed_inputs_have_platform_independent_line_endings(self) -> None:
         attributes = (proof.ROOT / ".gitattributes").read_text(encoding="utf-8").splitlines()
         expected = {

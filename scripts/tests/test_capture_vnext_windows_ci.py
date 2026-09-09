@@ -199,28 +199,5 @@ class WindowsCiEvidenceTests(unittest.TestCase):
             self.assertTrue((output / "windows-ci-evidence.json").is_file())
             self.assertTrue((output / "windows-dependency-evidence.tar.gz").is_file())
 
-    def test_workflow_pins_runner_actions_and_repository_entry_points(self) -> None:
-        workflow = (capture.ROOT / ".github" / "workflows" / "vnext-baseline-windows.yml").read_text(
-            encoding="utf-8"
-        )
-        for required in (
-            "runs-on: windows-2022",
-            "actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd",
-            "ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756",
-            "actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02",
-            "fetch-depth: 0",
-            'vsversion: "2022"',
-            "python scripts/run_vnext_baseline.py provision",
-            "python scripts/run_vnext_baseline.py all --ci",
-            "python scripts/capture_vnext_windows_ci.py",
-        ):
-            self.assertIn(required, workflow)
-        self.assertIn("on:\n  workflow_dispatch:\n", workflow)
-        for automatic_trigger in ("\n  push:", "\n  pull_request:", "\n  schedule:", "\n  release:"):
-            self.assertNotIn(automatic_trigger, workflow)
-        self.assertNotIn("windows-latest", workflow)
-        self.assertFalse((capture.ROOT / ".github" / "workflows" / "push.yml").exists())
-
-
 if __name__ == "__main__":
     unittest.main()

@@ -188,21 +188,6 @@ class FlatBuffersProofRunnerTests(unittest.TestCase):
                 with self.assertRaisesRegex(proof.ProofError, "generated seed corpus"):
                     proof.verify_seed_corpus(lock)
 
-    def test_workflow_uses_approved_matrix_and_pinned_actions(self) -> None:
-        workflow = (proof.ROOT / ".github" / "workflows" / "vnext-flatbuffers-proof.yml").read_text(
-            encoding="utf-8"
-        )
-        for value in ("ubuntu-24.04", "windows-2022", "macos-15", "macos-15-intel"):
-            self.assertIn(value, workflow)
-        for compiler in ("gcc-13", "clang-18", "MSVC 2022 v143", "Xcode 16"):
-            self.assertIn(compiler, workflow)
-        self.assertIn("on:\n  workflow_dispatch:\n", workflow)
-        for automatic_trigger in ("\n  push:", "\n  pull_request:", "\n  schedule:", "\n  release:"):
-            self.assertNotIn(automatic_trigger, workflow)
-        self.assertNotIn("github.event_name", workflow)
-        self.assertNotRegex(workflow, r"uses:\s+[^\s@]+@v\d")
-        self.assertIn("scripts/run_vnext_flatbuffers_proof.py", workflow)
-
     def test_hashed_proof_inputs_have_platform_independent_line_endings(self) -> None:
         attributes = (proof.ROOT / ".gitattributes").read_text(encoding="utf-8").splitlines()
         expected_rules = {

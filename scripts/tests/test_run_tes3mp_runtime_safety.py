@@ -8,7 +8,7 @@ from unittest import mock
 
 REPOSITORY_ROOT = pathlib.Path(__file__).resolve().parents[2]
 SCRIPT_PATH = REPOSITORY_ROOT / "scripts" / "run_tes3mp_runtime_safety.py"
-WORKFLOW_PATH = REPOSITORY_ROOT / ".github" / "workflows" / "vnext-runtime-safety.yml"
+WORKFLOW_PATH = REPOSITORY_ROOT / ".github" / "workflows" / "ci.yml"
 PRESETS_PATH = REPOSITORY_ROOT / "components" / "tes3mp" / "CMakePresets.json"
 CMAKE_MODULE_PATH = REPOSITORY_ROOT / "cmake" / "TES3MPRuntimeSafety.cmake"
 COMPONENT_CMAKE_PATH = REPOSITORY_ROOT / "components" / "tes3mp" / "CMakeLists.txt"
@@ -277,13 +277,10 @@ class RuntimeSafetyRunnerTests(unittest.TestCase):
     def test_workflow_is_pinned_bounded_phase_exit_only_and_retains_failures(self):
         workflow = WORKFLOW_PATH.read_text(encoding="utf-8")
         self.assertIn("runs-on: ubuntu-24.04", workflow)
-        self.assertEqual(workflow.count("timeout-minutes: 20"), 2)
-        self.assertIn("on:\n  workflow_dispatch:\n", workflow)
-        for automatic_trigger in ("\n  push:", "\n  pull_request:", "\n  schedule:", "\n  release:"):
-            self.assertNotIn(automatic_trigger, workflow)
+        self.assertEqual(workflow.count("timeout-minutes: 20"), 1)
         self.assertIn("--profile asan-ubsan --fuzz-seconds 30", workflow)
-        self.assertIn("--profile tsan", workflow)
-        self.assertEqual(workflow.count("if: always()"), 2)
+        self.assertNotIn("--profile tsan", workflow)
+        self.assertEqual(workflow.count("if: failure()"), 1)
         self.assertNotIn("@main", workflow)
         self.assertIn("actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd", workflow)
         self.assertIn("actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02", workflow)

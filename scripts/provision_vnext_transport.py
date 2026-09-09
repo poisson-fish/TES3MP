@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Provision the exact verified Phase 6 transport dependency inputs."""
+"""Provision the exact verified transport dependency inputs."""
 
 from __future__ import annotations
 
@@ -10,8 +10,12 @@ import subprocess
 import sys
 from typing import Any
 
-import run_vnext_cares_proof as cares
-import run_vnext_gamenetworkingsockets_proof as gns
+try:
+    from . import run_vnext_cares_proof as cares
+    from . import run_vnext_gamenetworkingsockets_proof as gns
+except ImportError:  # Direct script execution adds scripts/ rather than the repository root.
+    import run_vnext_cares_proof as cares
+    import run_vnext_gamenetworkingsockets_proof as gns
 
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -37,6 +41,14 @@ def _require_directory(path: pathlib.Path, description: str) -> pathlib.Path:
 def _run_proofs() -> None:
     subprocess.run([sys.executable, str(ROOT / "scripts/run_vnext_gamenetworkingsockets_proof.py")], check=True)
     subprocess.run([sys.executable, str(ROOT / "scripts/run_vnext_cares_proof.py")], check=True)
+
+
+def _inputs_are_present() -> bool:
+    try:
+        build_manifest()
+    except (ProvisionError, gns.ProofError, cares.ProofError, OSError):
+        return False
+    return True
 
 
 def _verify_license(source: pathlib.Path, value: dict[str, Any], description: str) -> None:
@@ -111,13 +123,17 @@ def build_manifest() -> dict[str, Any]:
     }
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--refresh", action="store_true", help="rerun both exact dependency proofs first")
+    parser.add_argument(
+        "--refresh", action="store_true", help="rerun both exact dependency proofs even when verified inputs exist"
+    )
     parser.add_argument("--output", type=pathlib.Path, default=OUTPUT)
-    arguments = parser.parse_args()
+    arguments = parser.parse_args(argv)
     try:
-        if arguments.refresh:
+        if arguments.refresh or not _inputs_are_present():
+            reason = "refresh requested" if arguments.refresh else "verified inputs are missing"
+            print(f"Rebuilding transport dependencies because {reason}.", flush=True)
             _run_proofs()
         manifest = build_manifest()
         output = arguments.output.resolve()

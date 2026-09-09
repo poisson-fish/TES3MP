@@ -49,9 +49,10 @@ if ($Target -in @("contracts", "standalone")) {
 }
 
 $manifest = "$repoRoot\build\vnext-transport-dependencies\manifest.json"
-if (-not (Test-Path -LiteralPath $manifest)) {
-    throw "Verified transport dependencies are missing. Run: python scripts/provision_vnext_transport.py"
-}
+Write-Host "`nChecking verified transport dependencies..." -ForegroundColor Cyan
+python "$repoRoot\scripts\provision_vnext_transport.py"
+if ($LASTEXITCODE -ne 0) { throw "TES3MP transport dependency provisioning failed." }
+if (-not (Test-Path -LiteralPath $manifest)) { throw "TES3MP transport dependency manifest was not created." }
 
 $presetByTarget = @{
     product  = "vnext-product-windows"
@@ -73,3 +74,15 @@ if ($LASTEXITCODE -ne 0) { throw "TES3MP product configuration failed." }
 Write-Host "`nBuilding preset: $buildPreset" -ForegroundColor Cyan
 cmake --build --preset $buildPreset --parallel
 if ($LASTEXITCODE -ne 0) { throw "TES3MP product build failed." }
+
+# Ensure runtime dependencies that lack automatic CMake deployment are present
+$productBinDir = "$repoRoot\build\vnext-product"
+$myguiCandidate = "$repoRoot\deps\installed\x64-windows\bin\Release\MyGUIEngine.dll"
+$vcpkgBin = "$repoRoot\deps\installed\x64-windows\bin"
+
+if (-not (Test-Path "$vcpkgBin\MyGUIEngine.dll") -and (Test-Path $myguiCandidate)) {
+    Copy-Item $myguiCandidate "$vcpkgBin\MyGUIEngine.dll" -Force
+}
+if ((Test-Path $myguiCandidate) -and (Test-Path $productBinDir)) {
+    Copy-Item $myguiCandidate "$productBinDir\MyGUIEngine.dll" -Force
+}

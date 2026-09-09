@@ -13,6 +13,16 @@ from scripts import run_vnext_gamenetworkingsockets_proof as proof
 
 
 class GameNetworkingSocketsProofRunnerTests(unittest.TestCase):
+    def test_generated_tree_removal_retries_transient_windows_failure(self) -> None:
+        path = proof.Path("generated")
+        with (
+            mock.patch.object(proof.shutil, "rmtree", side_effect=[OSError("busy"), None]) as remove,
+            mock.patch.object(proof.time, "sleep") as sleep,
+        ):
+            proof.remove_tree(path)
+        self.assertEqual(remove.call_count, 2)
+        sleep.assert_called_once_with(0.2)
+
     def test_dependency_lock_is_exact_and_restricted(self) -> None:
         lock = proof.load_lock()
         self.assertEqual(
@@ -120,22 +130,6 @@ class GameNetworkingSocketsProofRunnerTests(unittest.TestCase):
             path = pathlib.Path(directory) / "data"
             path.write_bytes(b"transport proof")
             self.assertEqual(proof.sha256_file(path), hashlib.sha256(b"transport proof").hexdigest())
-
-    def test_workflow_uses_approved_matrix_and_pinned_actions(self) -> None:
-        workflow = (
-            proof.ROOT / ".github" / "workflows" / "vnext-gamenetworkingsockets-proof.yml"
-        ).read_text(encoding="utf-8")
-        for value in ("ubuntu-24.04", "windows-2022", "macos-15", "macos-15-intel"):
-            self.assertIn(value, workflow)
-        for compiler in ("gcc-13", "clang-18", "MSVC 2022 v143", "Xcode 16"):
-            self.assertIn(compiler, workflow)
-        self.assertIn("on:\n  workflow_dispatch:\n", workflow)
-        for automatic_trigger in ("\n  push:", "\n  pull_request:", "\n  schedule:", "\n  release:"):
-            self.assertNotIn(automatic_trigger, workflow)
-        self.assertNotIn("github.event_name", workflow)
-        self.assertIn("--sanitize", workflow)
-        self.assertIn("strawberryperl", workflow)
-        self.assertNotRegex(workflow, r"uses:\s+[^\s@]+@v\d")
 
     def test_sanitizer_profile_is_coherent_and_narrowly_scoped(self) -> None:
         cmake = (proof.PROOF_DIR / "CMakeLists.txt").read_text(encoding="utf-8")
