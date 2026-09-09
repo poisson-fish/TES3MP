@@ -2,6 +2,8 @@
 #define TES3MP_PLAYER_IDENTITY_HPP
 
 #include "authentication.hpp"
+#include "character_profile.hpp"
+#include "canonical_state.hpp"
 #include "server_authentication.hpp"
 
 #include <cstdint>
@@ -18,8 +20,10 @@ namespace TES3MP
     {
         AuthenticatedAdmission::PlayerClaim claim;
         CredentialDigest credentialDigest;
+        std::optional<CanonicalPlayerEntityState> savedPlayer;
+        CharacterProfile characterProfile = CharacterProfile::fresh();
 
-        friend constexpr bool operator==(PersistedPlayerIdentity, PersistedPlayerIdentity) noexcept = default;
+        friend bool operator==(PersistedPlayerIdentity, PersistedPlayerIdentity) noexcept = default;
     };
 
     class PlayerIdentityPersistence
@@ -67,6 +71,14 @@ namespace TES3MP
         bool cancel(std::uint64_t preparationId) noexcept;
         std::optional<AuthenticatedAdmission::PlayerClaim> authenticate(
             const PlayerCredential& credential, ContentManifestId contentManifest) noexcept;
+        const CanonicalPlayerEntityState* savedPlayer(PlayerId player) const noexcept;
+        bool savePlayer(const CanonicalPlayerEntityState& player) noexcept;
+        bool savePlayers(std::span<const CanonicalPlayerEntityState> players) noexcept;
+        const CharacterProfile* characterProfile(PlayerId player) const noexcept;
+        bool restartIncompleteCharacter(PlayerId player) noexcept;
+        CharacterProfileApplyResult applyCharacterCreation(PlayerId player,
+            const CharacterContentCatalog& catalog, const CharacterCreationCommand& command,
+            const CanonicalPlayerEntityState* completionCheckpoint = nullptr) noexcept;
         std::span<const PersistedPlayerIdentity> records() const noexcept { return mRecords; }
 
     private:

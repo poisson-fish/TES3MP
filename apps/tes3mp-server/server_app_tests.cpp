@@ -2,6 +2,7 @@
 #include "actor_interest_projection.hpp"
 #include "authenticated_join_composition.hpp"
 #include "combat_content.hpp"
+#include "character_content.hpp"
 #include "connection_session_coordinator.hpp"
 #include "content_collision.hpp"
 #include "interactive_object_content.hpp"
@@ -364,6 +365,53 @@ namespace
 
 int main()
 {
+    using namespace TES3MP::ServerApp;
+    {
+        const auto manifestId = ContentManifestId::fromHex(
+            "5c3c8c2cbd20e25901b59b3ece33d36b7ef0e3d60ad8d11828bcc61a5ead1647");
+        const auto spaces = parseCellSpaceDeclarations("interior:1;interior:2;interior:3;exterior:4");
+        const auto cells = parseContentCells("interior:1;interior:2;interior:3;exterior:4:-2:-9");
+        const auto movement = parseMovementProfile("sneak:4;walk:8;run:16;jump:12");
+        const auto appearance = AppearanceId::fromValue(100);
+        auto manifest = manifestId && spaces && cells && movement && appearance
+            ? ContentManifest::create(*manifestId, *spaces, *cells, *appearance, *movement)
+            : std::nullopt;
+        assert(manifest);
+        const auto path = std::filesystem::path(TES3MP_SOURCE_ROOT)
+            / "files/data/tes3mp/vanilla-characters.txt";
+        auto loaded = loadCharacterContent(path, *manifest);
+        const auto* catalog = std::get_if<CharacterContentCatalog>(&loaded);
+        const CharacterAppearance stockMale{
+            *RaceRecordId::fromValue(*characterRecordId("Dark Elf")),
+            *HeadRecordId::fromValue(*characterRecordId("b_n_dark elf_m_head_01")),
+            *HairRecordId::fromValue(*characterRecordId("b_n_dark elf_m_hair_01")), CharacterSex::Male };
+        const CharacterAppearance stockFemale{
+            *RaceRecordId::fromValue(*characterRecordId("Dark Elf")),
+            *HeadRecordId::fromValue(*characterRecordId("b_n_dark elf_f_head_01")),
+            *HairRecordId::fromValue(*characterRecordId("b_n_dark elf_f_hair_01")), CharacterSex::Female };
+        const auto* darkElf = catalog ? catalog->find(stockMale.race) : nullptr;
+        constexpr std::array vanillaRaces{ "Argonian", "Breton", "Dark Elf", "High Elf", "Imperial",
+            "Khajiit", "Nord", "Orc", "Redguard", "Wood Elf" };
+        std::size_t packagedAppearanceCount = 0;
+        for (const std::string_view raceName : vanillaRaces)
+        {
+            const auto raceId = characterRecordId(raceName);
+            const auto* race = raceId ? catalog->find(*RaceRecordId::fromValue(*raceId)) : nullptr;
+            assert(race);
+            packagedAppearanceCount += race->appearances.size();
+        }
+        assert(catalog && catalog->creationSpawn().cell() == CellId::interior(id<CellSpaceId>(1))
+            && catalog->creationSpawn().position() == Position3(62464, -138240, 24576)
+            && catalog->creationSpawn().orientation().z() == Turn32::fromValue(4056358002u)
+            && catalog->completionSpawn().cell() == CellId::exterior(id<CellSpaceId>(4), -2, -9)
+            && catalog->completionSpawn().position() == Position3(-10443674, -73251021, 237568)
+            && catalog->completionSpawn().orientation().z() == Turn32::fromValue(536870912u)
+            && packagedAppearanceCount == 1181
+            && darkElf && std::ranges::find(darkElf->appearances, stockMale) != darkElf->appearances.end()
+            && std::ranges::find(darkElf->appearances, stockFemale) != darkElf->appearances.end()
+            && catalog->find(*ClassRecordId::fromValue(*characterRecordId("Warrior")))
+            && catalog->find(*BirthsignRecordId::fromValue(*characterRecordId("Fay"))));
+    }
     {
         TES3MP::ServerApp::Phase7QueueTelemetry telemetry;
         const auto record = [&](TransportTelemetryKind kind, TransportChannel channel, std::uint64_t value) {
@@ -384,7 +432,6 @@ int main()
             && evidence->latestHighWaterMessages == 1 && evidence->latestHighWaterBytes == 10
             && !telemetry.takeDrainEvidence());
     }
-    using namespace TES3MP::ServerApp;
     static_assert(Phase7ProtocolMajor == 1 && Phase7ProtocolMinimumMinor == 2 && Phase7ProtocolMaximumMinor == 3);
     static_assert(Phase7SourceAuthenticationBurst == 4 && Phase7GlobalAuthenticationBurst == 32
         && Phase7AuthenticationRefillMilliseconds == 1'000 && Phase7ConnectionCapacity == 8);
@@ -714,8 +761,25 @@ int main()
     auto identityFile = std::move(std::get<std::unique_ptr<PlayerIdentityFile>>(identityFileResult));
     CredentialDigest identityDigest;
     identityDigest.bytes.fill(std::byte{ 0x4a });
+    const auto zeroTurn = Turn32::fromValue(0);
+    const CanonicalPlayerEntityState savedIdentityPlayer(id<PlayerId>(3), id<EntityId>(5), id<AppearanceId>(7),
+        Transform(CellId::interior(id<CellSpaceId>(7)), Position3(100, 200, 300),
+            Orientation3(zeroTurn, zeroTurn, zeroTurn)),
+        LinearVelocity3(1, 2, 3), id<EntityRevision>(4), id<AuthorityEpoch>(2), id<ServerTick>(8),
+        LocomotionMode::Run);
+    CharacterDerivedState savedDerived;
+    savedDerived.attributes.fill(40);
+    savedDerived.skills.fill(5);
+    savedDerived.startingSpells = { id<SpellRecordId>(41) };
+    auto savedCharacter = CharacterProfile::restore(CharacterLifecycle::EstablishedCharacter,
+        CharacterCreationPhase::Complete, "Nerevar",
+        CharacterAppearance{ id<RaceRecordId>(11), id<HeadRecordId>(12), id<HairRecordId>(13), CharacterSex::Male },
+        CharacterClass{ id<ClassRecordId>(21) }, id<BirthsignRecordId>(31), std::move(savedDerived),
+        std::vector<StartingItem>{ { id<ItemPrototypeId>(51), 1, 3 } }, id<CharacterProfileRevision>(6));
+    assert(savedCharacter);
     const std::array identityRecords{ PersistedPlayerIdentity{
-        { id<PlayerId>(3), id<EntityId>(5), id<AppearanceId>(7), testContentManifestId() }, identityDigest } };
+        { id<PlayerId>(3), id<EntityId>(5), id<AppearanceId>(7), testContentManifestId() }, identityDigest,
+        savedIdentityPlayer, *savedCharacter } };
     assert(identityFile->replace(identityRecords));
     auto identityTemporaryPath = identityPath;
     identityTemporaryPath += ".tmp";
@@ -724,9 +788,34 @@ int main()
     assert(std::holds_alternative<std::unique_ptr<PlayerIdentityFile>>(reopenedResult));
     auto reopened = std::move(std::get<std::unique_ptr<PlayerIdentityFile>>(reopenedResult));
     assert(reopened->records().size() == 1 && reopened->records()[0] == identityRecords[0]);
+    auto unsafeIdentity = identityRecords[0];
+    unsafeIdentity.characterProfile = CharacterProfile::fresh();
+    assert(!identityFile->replace(std::span<const PersistedPlayerIdentity>(&unsafeIdentity, 1)));
+    auto unchangedResult = PlayerIdentityFile::open(identityPath);
+    assert(std::holds_alternative<std::unique_ptr<PlayerIdentityFile>>(unchangedResult));
+    assert(std::get<std::unique_ptr<PlayerIdentityFile>>(unchangedResult)->records()[0] == identityRecords[0]);
     {
         std::ofstream stream(identityPath, std::ios::binary | std::ios::trunc);
-        stream << "TES3MP_PLAYER_IDENTITIES_V2\n";
+        stream << "TES3MP_PLAYER_IDENTITIES_V1\n3 5 7 "
+               << "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20 "
+               << std::string(CredentialDigestBytes * 2, 'a') << '\n';
+    }
+    assert(std::holds_alternative<PlayerIdentityFileError>(PlayerIdentityFile::open(identityPath)));
+    {
+        std::ofstream stream(identityPath, std::ios::binary | std::ios::trunc);
+        stream << "TES3MP_PLAYER_IDENTITIES_V3\n3 5 7 "
+               << "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20 "
+               << std::string(CredentialDigestBytes * 2, 'a') << " 0 9 1 1 - 0 0 0 0 0 0\n";
+    }
+    assert(std::holds_alternative<PlayerIdentityFileError>(PlayerIdentityFile::open(identityPath)));
+    {
+        std::ofstream stream(identityPath, std::ios::binary | std::ios::trunc);
+        stream << "TES3MP_PLAYER_IDENTITIES_V4\n";
+    }
+    assert(std::holds_alternative<std::unique_ptr<PlayerIdentityFile>>(PlayerIdentityFile::open(identityPath)));
+    {
+        std::ofstream stream(identityPath, std::ios::binary | std::ios::trunc);
+        stream << "TES3MP_PLAYER_IDENTITIES_V5\n";
     }
     assert(std::holds_alternative<PlayerIdentityFileError>(PlayerIdentityFile::open(identityPath)));
     std::filesystem::remove(identityPath);

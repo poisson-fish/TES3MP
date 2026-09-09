@@ -1,0 +1,47 @@
+namespace TES3MP.Protocol.Schema.CharacterCreation;
+
+enum CommandKind : ubyte {
+  Unknown = 0,
+  SetName = 1,
+  SetAppearance = 2,
+  SetClass = 3,
+  SetCustomClass = 4,
+  SetBirthsign = 5,
+  Complete = 6
+}
+enum CharacterSex : ubyte {
+  Female = 0,
+  Male = 1
+}
+enum ClassSpecialization : ubyte {
+  Combat = 0,
+  Magic = 1,
+  Stealth = 2
+}
+
+table ClientCharacterCreationCommand {
+  session_id:ulong (id: 0);
+  session_generation:ulong (id: 1);
+  command_sequence:ulong (id: 2);
+  command_id:ulong (id: 3);
+  observed_canonical_revision:ulong (id: 4);
+  expected_profile_revision:ulong (id: 5);
+  kind:CommandKind = Unknown (id: 6);
+  name:string (id: 7);
+  race_id:ulong (id: 8);
+  head_id:ulong (id: 9);
+  hair_id:ulong (id: 10);
+  sex:CharacterSex = Female (id: 11);
+  class_id:ulong (id: 12);
+  custom_class_name:string (id: 13);
+  custom_class_description:string (id: 14);
+  specialization:ClassSpecialization = Combat (id: 15);
+  favored_attributes:[ubyte] (id: 16);
+  minor_skills:[ubyte] (id: 17);
+  major_skills:[ubyte] (id: 18);
+  birthsign_id:ulong (id: 19);
+}
+
+root_type ClientCharacterCreationCommand;
+file_identifier "T3CC";
+file_extension "t3cc";

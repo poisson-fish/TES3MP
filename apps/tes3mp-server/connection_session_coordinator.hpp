@@ -4,6 +4,7 @@
 #include "tes3mp/actor_simulation.hpp"
 #include "tes3mp/authenticated_join.hpp"
 #include "tes3mp/combat_world.hpp"
+#include "tes3mp/character_creation_protocol.hpp"
 #include "tes3mp/interactive_object_world.hpp"
 #include "tes3mp/inventory_world.hpp"
 #include "tes3mp/server_session.hpp"
@@ -40,7 +41,8 @@ namespace TES3MP::ServerApp
             const CanonicalInteractiveObjectWorld* objects = nullptr,
             CanonicalInventoryWorld* inventory = nullptr, CanonicalCombatWorld* combat = nullptr,
             const CanonicalPlayerCombatTemplate* playerCombatTemplate = nullptr,
-            const ItemPrototypeCatalog* itemCatalog = nullptr) noexcept;
+            const ItemPrototypeCatalog* itemCatalog = nullptr,
+            const CharacterContentCatalog* characterContent = nullptr) noexcept;
 
         ConnectionSessionResult accept(TransportConnectionId connection, AdmissionScopeId scope) noexcept;
         ConnectionSessionResult close(TransportConnectionId connection) noexcept;
@@ -66,6 +68,7 @@ namespace TES3MP::ServerApp
             std::optional<SessionResyncRequest> pendingResync;
             std::optional<LocomotionInputTick> lastLocomotionInputTick;
             std::optional<LocomotionInputSequence> lastLocomotionInputSequence;
+            std::optional<CommandSequence> lastCharacterCommandSequence;
         };
 
         MonotonicClock& mClock;
@@ -81,6 +84,7 @@ namespace TES3MP::ServerApp
         CanonicalCombatWorld* mCombat;
         const CanonicalPlayerCombatTemplate* mPlayerCombatTemplate;
         const ItemPrototypeCatalog* mItemCatalog;
+        const CharacterContentCatalog* mCharacterContent;
         std::map<TransportConnectionId, Connection> mConnections;
     };
 }

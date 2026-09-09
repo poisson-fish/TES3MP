@@ -51,6 +51,8 @@ namespace TES3MP
         ClientInventoryTransactionCommand = 0x010a,
         ClientMeleeAttackCommand = 0x010b,
         ReliableCombatEventBatch = 0x010c,
+        ClientCharacterCreationCommand = 0x010d,
+        ReliableCharacterProfile = 0x010e,
         LatestWinsSnapshot = 0x0200,
         LatestWinsActorSnapshot = 0x0201,
         LatestWinsEquipmentSnapshot = 0x0202,
@@ -92,6 +94,8 @@ namespace TES3MP
             case MessageKind::ClientInventoryTransactionCommand:
             case MessageKind::ClientMeleeAttackCommand:
             case MessageKind::ReliableCombatEventBatch:
+            case MessageKind::ClientCharacterCreationCommand:
+            case MessageKind::ReliableCharacterProfile:
                 return MessageDescriptor{ kind, MessageClass::ReliableOperation, ReliableOperationMaximumPayloadBytes };
             case MessageKind::LatestWinsSnapshot:
             case MessageKind::LatestWinsActorSnapshot:

@@ -8,7 +8,10 @@
 
 #include <algorithm>
 #include <array>
+#include <cstdint>
+#include <cstring>
 #include <optional>
+#include <type_traits>
 
 namespace
 {
@@ -19,6 +22,15 @@ namespace
 
     constexpr std::size_t SizePrefixBytes = sizeof(flatbuffers::uoffset_t);
     constexpr std::size_t MinimumBytes = SizePrefixBytes + sizeof(flatbuffers::uoffset_t) + 4;
+
+    template <class Struct>
+    Struct copyStruct(const flatbuffers::Vector<const Struct*>* values, std::size_t index) noexcept
+    {
+        static_assert(std::is_trivially_copyable_v<Struct>);
+        Struct result{};
+        std::memcpy(&result, values->Data() + index * sizeof(Struct), sizeof(Struct));
+        return result;
+    }
 
     constexpr Error error(Code code, std::size_t observed = 0, std::size_t limit = 0,
         std::size_t index = 0) noexcept
@@ -171,23 +183,23 @@ namespace TES3MP
         members.reserve(count);
         for (std::size_t index = 0; index < count; ++index)
         {
-            const auto* current = encoded->Get(static_cast<flatbuffers::uoffset_t>(index));
-            auto objectId = strong<InteractiveObjectId>(current->object_id(), index);
-            auto revision = strong<ObjectRevision>(current->revision(), index);
+            const auto current = copyStruct(encoded, index);
+            auto objectId = strong<InteractiveObjectId>(current.object_id(), index);
+            auto revision = strong<ObjectRevision>(current.revision(), index);
             if (const auto* failure = std::get_if<Error>(&objectId)) return *failure;
             if (const auto* failure = std::get_if<Error>(&revision)) return *failure;
-            if (static_cast<std::uint8_t>(current->door_state()) > static_cast<std::uint8_t>(DoorState::Open))
-                return error(Code::InvalidDoorState, static_cast<std::size_t>(current->door_state()), 0, index);
-            if (static_cast<std::uint8_t>(current->lock_state()) > static_cast<std::uint8_t>(LockState::Locked))
-                return error(Code::InvalidLockState, static_cast<std::size_t>(current->lock_state()), 0, index);
-            if (static_cast<std::uint8_t>(current->trap_state()) > static_cast<std::uint8_t>(TrapState::Armed))
-                return error(Code::InvalidTrapState, static_cast<std::size_t>(current->trap_state()), 0, index);
+            if (static_cast<std::uint8_t>(current.door_state()) > static_cast<std::uint8_t>(DoorState::Open))
+                return error(Code::InvalidDoorState, static_cast<std::size_t>(current.door_state()), 0, index);
+            if (static_cast<std::uint8_t>(current.lock_state()) > static_cast<std::uint8_t>(LockState::Locked))
+                return error(Code::InvalidLockState, static_cast<std::size_t>(current.lock_state()), 0, index);
+            if (static_cast<std::uint8_t>(current.trap_state()) > static_cast<std::uint8_t>(TrapState::Armed))
+                return error(Code::InvalidTrapState, static_cast<std::size_t>(current.trap_state()), 0, index);
             members.push_back({
                 *value(objectId),
                 *value(revision),
-                static_cast<DoorState>(current->door_state()),
-                static_cast<LockState>(current->lock_state()),
-                static_cast<TrapState>(current->trap_state())
+                static_cast<DoorState>(current.door_state()),
+                static_cast<LockState>(current.lock_state()),
+                static_cast<TrapState>(current.trap_state())
             });
         }
         return ReliableInteractiveObjectInterestBaseline::create(

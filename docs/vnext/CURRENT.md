@@ -1,6 +1,6 @@
 # TES3MP vNext current implementation
 
-- Updated: 2026-09-08
+- Updated: 2026-09-09
 - Code snapshot inspected: `vnext` working tree based on `8a954860e0`
 - OpenMW baseline: `f4bec41444214a7903bebd178389ca22ca13f646`
 
@@ -16,14 +16,14 @@ Code and tests are authoritative when this document becomes stale.
 
 | Surface | Current implementation |
 |---|---|
-| `tes3mp_protocol` | Strong value types, bounded frames, FlatBuffers codecs, negotiation, authentication messages, reliable operations, canonical snapshots, actors, objects, inventory, melee combat, and VR pose |
+| `tes3mp_protocol` | Strong value types, bounded frames, FlatBuffers codecs, negotiation, authentication and character-profile messages, reliable operations, canonical snapshots, actors, objects, inventory, melee combat, and VR pose |
 | `tes3mp_transport` | Project-owned connection, channel, queue, lifecycle, reason, and telemetry interfaces |
 | `tes3mp_transport_gns` | Private GameNetworkingSockets adapter with c-ares/OpenSSL dependency composition |
 | `tes3mp_server_core` | Deterministic authentication, canonical worlds, fixed ticks, command intake/reduction, publication, checksums, lifecycle, resync, and sink boundaries |
 | `tes3mp_client_session` | Caller-pumped negotiation, authentication, resume/resync, command output, snapshot ingestion, replication state, and locomotion reconciliation |
 | `tes3mp_server` | Configuration/content loading and real-transport dedicated-server composition |
 | `tes3mp_headless_client` | Scripted real-transport client for bounded integration scenarios |
-| `openmw_tes3mp_adapter` | Shared OpenMW connection, input capture, state application, reconnect, remote presentation, object activation, inventory integration, and authoritative melee capture/presentation |
+| `openmw_tes3mp_adapter` | Shared OpenMW connection, stock-chargen confirmation bridge, state application, reconnect, remote presentation, object activation, inventory integration, and authoritative melee capture/presentation |
 
 The target graph and include-boundary enforcement live in
 [`components/tes3mp/CMakeLists.txt`](../../components/tes3mp/CMakeLists.txt) and
@@ -31,6 +31,11 @@ The target graph and include-boundary enforcement live in
 `components/tes3mp` public headers expose project-owned values and do not expose
 OpenMW, renderer, OpenXR, operating-system, FlatBuffers-generated, or
 GameNetworkingSockets types.
+
+Root product presets build only the shipping OpenMW client and TES3MP dedicated
+server. The headless client, focused TES3MP checks, standalone contracts, and
+full upstream OpenMW baseline are separate opt-in build scopes; the Windows
+wrapper selects the bounded product scope by default.
 
 ## Implemented behavior
 
@@ -40,7 +45,7 @@ GameNetworkingSockets types.
   allocation. Each payload is verifier-checked and semantically validated.
 - The production server negotiates protocol major 1, minors 2–3. Defined
   optional capabilities are VR pose (1), actor replication (2), interactive
-  objects (3), inventory (4), and combat (5). Content-manifest mismatch rejects
+  objects (3), inventory (4), combat (5), and character creation (6). Content-manifest mismatch rejects
   before authentication. The production server does not yet offer combat (5).
 - Reliable ordered operations, latest-wins canonical snapshots, and ephemeral
   pose samples use distinct delivery/queue semantics.
@@ -64,14 +69,72 @@ Primary sources: [`protocol_frame.hpp`](../../components/tes3mp/include/tes3mp/p
   the secret; the server atomically stores its SHA-256 digest with stable
   player/entity/appearance and manifest identity. Credential reattachment
   recreates the visible avatar with the same durable identity.
-- The identity registry is bounded to 256 records. It is identity persistence,
-  not character or world persistence.
+- The identity registry is bounded to 256 records. Its V4 atomic file stores
+  only a fresh pre-chargen identity or a complete established profile paired
+  with its canonical root. Intermediate chargen state and movement are never
+  written. Credential reattachment restores established state with a new
+  authority epoch; an incomplete character instead restarts from the fresh
+  pre-chargen checkpoint even when replacing a hidden grace-period session.
+  V1–V3 identity files are rejected. Broader world persistence is not yet
+  present.
 
 Primary sources: [`authentication.hpp`](../../components/tes3mp/include/tes3mp/authentication.hpp),
 [`server_authentication.cpp`](../../components/tes3mp/server_core/server_authentication.cpp),
 [`server_lifecycle.cpp`](../../components/tes3mp/server_core/server_lifecycle.cpp),
 [`player_identity_file.cpp`](../../apps/tes3mp-server/player_identity_file.cpp), and
 [`connection_session_coordinator.cpp`](../../apps/tes3mp-server/connection_session_coordinator.cpp).
+
+### Main-menu entry and player continuation
+
+- An explicitly configured multiplayer build exposes a stock-main-menu
+  Multiplayer dialog accepting a DNS name, IPv4 address, bracketed IPv6
+  address, `host:port`, or `tes3mp://` URI. Credentials are stored per endpoint.
+- The dialog includes bounded password entry. Host starts the packaged
+  dedicated-server configuration/content, waits for an explicit readiness
+  signal, reports captured startup errors, then connects through the same
+  client path. The child is stopped with the client.
+- Network/session admission is pumped while the main menu remains active, but
+  no world provider is called before a game exists. Once the complete initial
+  baseline is ready, OpenMW runs its normal new-game startup and the adapter
+  applies an authoritative root only for established characters. Fresh and
+  incomplete characters retain stock new-game intro placement. Existing
+  command-line automation remains available.
+
+Primary sources: [`mainmenu.cpp`](../../apps/openmw/mwgui/mainmenu.cpp),
+[`multiplayerdialog.cpp`](../../apps/openmw/mwgui/multiplayerdialog.cpp),
+[`client_connection.cpp`](../../apps/openmw/tes3mp/client_connection.cpp), and
+[`player_identity_file.cpp`](../../apps/tes3mp-server/player_identity_file.cpp).
+
+### Authoritative character creation
+
+- Authentication and join results explicitly classify each identity as
+  `NewCharacter`, `CreatingCharacter`, or `EstablishedCharacter` and carry the
+  canonical profile revision. Entity presence is not a freshness signal.
+- The packaged vanilla profile contains distinct stock pre-chargen Imperial
+  Prison Ship and post-boat Seyda Neen safe-point transforms, plus bounded
+  playable race/appearance, class, birthsign, spell, and starting-item declarations.
+  Its appearance allowlist is the exact stock race-dialog-selectable set, and
+  sex uses the same female-0/male-1 encoding as the protocol and OpenMW bridge.
+  Startup validates its manifest, cell, and collision occupancy.
+- Typed reliable name, race/appearance, predefined/custom class, birthsign, and
+  completion commands carry expected profile and canonical revisions. The
+  server validates record IDs and phase and computes attributes, skills,
+  spells, and starting inventory/equipment. Intermediate confirmations remain
+  live-only. When stock `CharGenState` reaches `-1`, the completion command
+  atomically persists the complete profile with the configured post-boat root
+  and publishes the matching canonical spatial revision.
+- The focused OpenMW bridge intercepts each stock chargen choice, waits for
+  confirmation, projects it through existing player mechanics, and advances
+  the normal UI. Gameplay input and authoritative presentation are suppressed
+  during chargen. After completion, the bridge waits for a newer safe-point
+  snapshot before applying the root, so a stale boat snapshot cannot teleport
+  the player backward. A process restart or credential reattachment restarts
+  incomplete chargen; established players skip it and restore their saved root.
+
+Primary sources: [`character_profile.hpp`](../../components/tes3mp/include/tes3mp/character_profile.hpp),
+[`character_creation_protocol.cpp`](../../components/tes3mp/protocol/character_creation_protocol.cpp),
+[`character_content.cpp`](../../apps/tes3mp-server/character_content.cpp), and
+[`charactercreation.cpp`](../../apps/openmw/mwgui/charactercreation.cpp).
 
 ### Cells, interest, and resynchronization
 
@@ -239,8 +302,16 @@ and [`character.cpp`](../../apps/openmw/mwmechanics/character.cpp).
   enchantments, elemental shields, disease, Lua hit callbacks, general magic,
   canonical resurrection/respawn policy, and client weapon-wear presentation
   remain unimplemented.
-- The identity file survives restart; canonical world, object, actor, and
-  inventory state do not.
+- Established root checkpoints and complete character profiles survive restart;
+  canonical dynamic world/object/actor state does not. Chargen is the only
+  scripted sequence with explicit server safe points today. Other cutscenes,
+  quest/script progress, and their intermediate state are not yet canonical or
+  durable and must be added through the future server-scripting/persistence
+  boundary. Starting inventory/equipment is modeled in the profile, while
+  broader inventory persistence remains unfinished.
+- The packaged default is the verified installed vanilla manifest. Other
+  loadouts still require bounded content generation and local record mappings;
+  server discovery/history remain unfinished.
 - Content is supplied through bounded hand-authored server artifacts. General
   extraction/baking tooling and broad production-world content are unfinished.
 - Test and fixture paths demonstrate subsystem behavior, but release-quality
@@ -249,15 +320,13 @@ and [`character.cpp`](../../apps/openmw/mwmechanics/character.cpp).
 
 ## Work still required
 
-### Next milestone: production combat admission
+### Next milestone: content-specific character state integration
 
-Derive and hash combat records, settings, and character state from the actual
-server/client OpenMW content loadout; replace the temporary shared player
-profile with character-specific creation and persistence; and implement bounded
-historical native contact/reach validation. Only then advertise combat
-capability 5. Subsequent parity work includes blocking, difficulty scaling,
-skill/AI consequences, on-strike magic and retaliation, actor attacks, death
-handling, resurrection, and respawn. PvP/P2P remains outside this slice.
+Bind the confirmed character-specific derived stats, spells, and starting
+inventory into the broader canonical inventory/combat bootstrap and add a
+repeatable content baker for non-vanilla loadouts. Production combat admission
+follows that character-specific foundation; general deterministic server
+scripting remains later work.
 
 ### Required before the desktop/PC-VR release
 
@@ -287,25 +356,28 @@ and do not enter protocol or canonical state.
 
 ## Verification snapshot
 
-The Phase 15 closeout recorded the following on 2026-09-08; these are historical
-last-known product results, not a guarantee about later commits:
+The chargen save-boundary and build-consolidation working tree passed the
+following on 2026-09-09:
 
-- standalone MSVC C++20 protocol and server-app runners passed;
-- full RelWithDebInfo `openmw` and `openmw_tes3mp_adapter_tests` built and the
-  adapter executable passed;
-- all 176 repository Python tests passed;
-- patch-registry, legacy-exclusion, target-boundary, forbidden-include, and
-  indexed baseline-provenance checks passed; and
-- provenance accounted for 478 intentional differences and 95 dependency
-  declarations.
+- the standalone MSVC C++20 aggregate, including character-profile, protocol
+  golden-vector/malformed-input, lifecycle, authentication, client-session,
+  persistence, and server-application contracts;
+- a fresh bounded Windows MSVC/Ninja product build of `openmw` and the linked
+  `tes3mp_server`, followed by the focused OpenMW adapter and server-application
+  contract executables;
+- all 182 repository Python tests and patch-registry verification; and
+- focused server-application coverage of both packaged chargen safe points,
+  strict rejection of legacy character/persistence files, and atomic file
+  replacement; and
+- focused authoritative-join coverage of disconnect, process restart,
+  credential reattach, and successful chargen completion.
 
-The production-combat-bootstrap working tree subsequently passed the standalone
-MSVC C++20 aggregate, dedicated-server app and combat-interest executables, and
-the GNS-enabled RelWithDebInfo production server build. All 179 repository
-Python tests, patch-registry verification, and indexed baseline provenance for
-419 intentional differences and 95 dependency declarations passed. No full
-OpenMW rebuild, live two-process gameplay capture, sanitizer profile,
-non-Windows build, or hardware run was performed for this slice.
+The Linux-only sanitizer/fuzzer execution profile, non-Windows product builds,
+PC-VR hardware checks, a full upstream OpenMW baseline, and a human-driven
+visible OpenMW chargen walkthrough were not performed. The bounded Windows
+product link uses the newest installed MSVC so its STL matches the provisioned
+protobuf/Abseil libraries. The repository baseline verifier also cannot attest
+the current dirty tree because pre-existing vNext additions remain untracked.
 
 Use [DEVELOPMENT.md](DEVELOPMENT.md) for commands and record only the newest
 relevant verification here after behavior changes.

@@ -11,6 +11,9 @@
 
 #include <algorithm>
 #include <array>
+#include <cstdint>
+#include <cstring>
+#include <type_traits>
 
 namespace
 {
@@ -23,6 +26,15 @@ namespace
     using Code = TES3MP::InventoryReplicationDecodeErrorCode;
 
     constexpr std::size_t MinimumBytes = sizeof(flatbuffers::uoffset_t) * 2 + 4;
+
+    template <class Struct>
+    Struct copyStruct(const flatbuffers::Vector<const Struct*>* values, std::size_t index) noexcept
+    {
+        static_assert(std::is_trivially_copyable_v<Struct>);
+        Struct result{};
+        std::memcpy(&result, values->Data() + index * sizeof(Struct), sizeof(Struct));
+        return result;
+    }
 
     constexpr Error error(Code code, std::size_t observed = 0, std::size_t limit = 0, std::size_t index = 0) noexcept
     {
@@ -413,26 +425,28 @@ namespace TES3MP
             return error(Code::TooManyEntries, count, MaximumInventoryBaselineChunkStacks);
         for (std::size_t index = 0; index < count; ++index)
         {
-            const auto* current = encodedStacks->Get(static_cast<flatbuffers::uoffset_t>(index));
+            const auto current = copyStruct(encodedStacks, index);
             auto stack
-                = decodeStack(current->stack_id(), current->prototype_id(), current->count(), current->condition(),
-                    current->enchantment_charge(), current->has_soul() != 0, current->soul_prototype_id(), index);
+                = decodeStack(current.stack_id(), current.prototype_id(), current.count(), current.condition(),
+                    current.enchantment_charge(), current.has_soul() != 0, current.soul_prototype_id(), index);
             if (const auto* failure = std::get_if<Error>(&stack))
                 return *failure;
             stacks.push_back(std::get<CanonicalItemStack>(std::move(stack)));
         }
         std::vector<EquipmentBinding> equipment;
         if (const auto* encoded = root->equipment())
+        {
             for (std::size_t index = 0; index < encoded->size(); ++index)
             {
-                const auto* current = encoded->Get(static_cast<flatbuffers::uoffset_t>(index));
-                if (current->slot() >= static_cast<std::uint8_t>(EquipmentSlot::Count))
-                    return error(Code::InvalidEquipmentSlot, current->slot(), 0, index);
-                auto stack = strong<ItemStackId>(current->stack_id(), index);
+                const auto current = copyStruct(encoded, index);
+                if (current.slot() >= static_cast<std::uint8_t>(EquipmentSlot::Count))
+                    return error(Code::InvalidEquipmentSlot, current.slot(), 0, index);
+                auto stack = strong<ItemStackId>(current.stack_id(), index);
                 if (const auto* failure = std::get_if<Error>(&stack))
                     return *failure;
-                equipment.push_back({ static_cast<EquipmentSlot>(current->slot()), *value(stack) });
+                equipment.push_back({ static_cast<EquipmentSlot>(current.slot()), *value(stack) });
             }
+        }
         return ReliablePlayerInventoryBaseline::create(
             std::get<InventoryBaselineHeader>(header), *value(player), *value(revision), stacks, equipment);
     }
@@ -468,10 +482,10 @@ namespace TES3MP
                 return error(Code::TooManyEntries, encoded->size(), MaximumInventoryBaselineChunkStacks);
             for (std::size_t index = 0; index < encoded->size(); ++index)
             {
-                const auto* current = encoded->Get(static_cast<flatbuffers::uoffset_t>(index));
+                const auto current = copyStruct(encoded, index);
                 auto stack
-                    = decodeStack(current->stack_id(), current->prototype_id(), current->count(), current->condition(),
-                        current->enchantment_charge(), current->has_soul() != 0, current->soul_prototype_id(), index);
+                    = decodeStack(current.stack_id(), current.prototype_id(), current.count(), current.condition(),
+                        current.enchantment_charge(), current.has_soul() != 0, current.soul_prototype_id(), index);
                 if (const auto* failure = std::get_if<Error>(&stack))
                     return *failure;
                 stacks.push_back(std::get<CanonicalItemStack>(std::move(stack)));
@@ -511,17 +525,17 @@ namespace TES3MP
                 return error(Code::TooManyEntries, encoded->size(), MaximumGroundItemBaselineChunkItems);
             for (std::size_t index = 0; index < encoded->size(); ++index)
             {
-                const auto* current = encoded->Get(static_cast<flatbuffers::uoffset_t>(index));
+                const auto current = copyStruct(encoded, index);
                 auto stack
-                    = decodeStack(current->stack_id(), current->prototype_id(), current->count(), current->condition(),
-                        current->enchantment_charge(), current->has_soul() != 0, current->soul_prototype_id(), index);
-                auto revision = strong<WorldItemRevision>(current->revision(), index);
+                    = decodeStack(current.stack_id(), current.prototype_id(), current.count(), current.condition(),
+                        current.enchantment_charge(), current.has_soul() != 0, current.soul_prototype_id(), index);
+                auto revision = strong<WorldItemRevision>(current.revision(), index);
                 if (const auto* failure = std::get_if<Error>(&stack))
                     return *failure;
                 if (const auto* failure = std::get_if<Error>(&revision))
                     return *failure;
                 items.push_back({ std::get<CanonicalItemStack>(std::move(stack)),
-                    Position3(current->x(), current->y(), current->z()), *value(revision) });
+                    Position3(current.x(), current.y(), current.z()), *value(revision) });
             }
         }
         return ReliableGroundItemBaseline::create(
@@ -558,16 +572,16 @@ namespace TES3MP
                 return error(Code::TooManyEntries, encoded->size(), MaximumEquipmentSnapshotPlayers);
             for (std::size_t index = 0; index < encoded->size(); ++index)
             {
-                const auto* current = encoded->Get(static_cast<flatbuffers::uoffset_t>(index));
-                auto player = strong<PlayerId>(current->player_id(), index);
+                const auto current = copyStruct(encoded, index);
+                auto player = strong<PlayerId>(current.player_id(), index);
                 if (const auto* failure = std::get_if<Error>(&player))
                     return *failure;
                 PublicEquipmentMember member{ .player = *value(player) };
-                const std::array raw{ current->helmet(), current->cuirass(), current->greaves(),
-                    current->left_pauldron(), current->right_pauldron(), current->left_gauntlet(),
-                    current->right_gauntlet(), current->boots(), current->shirt(), current->pants(), current->skirt(),
-                    current->robe(), current->left_ring(), current->right_ring(), current->amulet(), current->belt(),
-                    current->carried_right(), current->carried_left(), current->ammunition() };
+                const std::array raw{ current.helmet(), current.cuirass(), current.greaves(),
+                    current.left_pauldron(), current.right_pauldron(), current.left_gauntlet(),
+                    current.right_gauntlet(), current.boots(), current.shirt(), current.pants(), current.skirt(),
+                    current.robe(), current.left_ring(), current.right_ring(), current.amulet(), current.belt(),
+                    current.carried_right(), current.carried_left(), current.ammunition() };
                 for (std::size_t slot = 0; slot < raw.size(); ++slot)
                     if (raw[slot])
                     {

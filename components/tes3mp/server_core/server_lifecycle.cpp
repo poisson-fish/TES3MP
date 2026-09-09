@@ -21,14 +21,29 @@ namespace TES3MP
 
     bool ServerLifecycleCoordinator::registerJoined(PrincipalId principal, SessionId sessionId) noexcept
     {
-        if (mPending || mBindings.size() >= MaximumCanonicalActiveSessions) return false;
+        if (mPending) return false;
         const auto* session = mReducer.state().findActiveSession(sessionId);
         if (!session) return false;
-        if (std::any_of(mBindings.begin(), mBindings.end(), [principal, session](const Binding& value) {
-                return value.principal == principal || value.session.sessionId() == session->sessionId()
-                    || value.session.playerId() == session->playerId()
-                    || value.session.entityId() == session->entityId();
-            })) return false;
+        auto replacement = mBindings.end();
+        for (auto binding = mBindings.begin(); binding != mBindings.end(); ++binding)
+        {
+            if (binding->principal == principal || binding->session.sessionId() == session->sessionId())
+                return false;
+            if (binding->session.playerId() == session->playerId()
+                || binding->session.entityId() == session->entityId())
+            {
+                if (binding->live || binding->session.playerId() != session->playerId()
+                    || binding->session.entityId() != session->entityId() || replacement != mBindings.end())
+                    return false;
+                replacement = binding;
+            }
+        }
+        if (replacement != mBindings.end())
+        {
+            *replacement = { principal, *session, true, MonotonicInstant::fromNanoseconds(0) };
+            return true;
+        }
+        if (mBindings.size() >= MaximumCanonicalActiveSessions) return false;
         mBindings.push_back({ principal, *session, true, MonotonicInstant::fromNanoseconds(0) });
         return true;
     }

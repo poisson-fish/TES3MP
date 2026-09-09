@@ -36,7 +36,7 @@ add_openmw_dir (mwgui
     windowbase statswindow messagebox journalwindow charactercreation
     mapwindow windowpinnablebase tooltips scrollwindow bookwindow resourceskin
     formatting inventorywindow container hud countdialog tradewindow settingswindow
-    confirmationdialog alchemywindow referenceinterface spellwindow mainmenu quickkeysmenu
+    confirmationdialog alchemywindow referenceinterface spellwindow mainmenu multiplayerdialog quickkeysmenu
     itemselection spellbuyingwindow loadingscreen levelupdialog waitdialog spellcreationdialog
     enchantingdialog trainingwindow travelwindow exposedwindow cursor spellicons
     merchantrepair repair soulgemdialog companionwindow bookpage journalviewmodel journalbooks

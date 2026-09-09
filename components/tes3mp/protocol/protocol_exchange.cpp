@@ -12,8 +12,11 @@
 
 #include <algorithm>
 #include <array>
+#include <cstdint>
+#include <cstring>
 #include <iterator>
 #include <optional>
+#include <type_traits>
 
 namespace
 {
@@ -30,6 +33,15 @@ namespace
     constexpr std::size_t MinimumIdentifiedFlatBufferBytes = SizePrefixBytes + sizeof(flatbuffers::uoffset_t) + 4;
     constexpr std::size_t MaximumVerifierDepth = 8;
     constexpr std::size_t MaximumVerifierTables = 8;
+
+    template <class Struct>
+    Struct copyStruct(const flatbuffers::Vector<const Struct*>* values, std::size_t index) noexcept
+    {
+        static_assert(std::is_trivially_copyable_v<Struct>);
+        Struct result{};
+        std::memcpy(&result, values->Data() + index * sizeof(Struct), sizeof(Struct));
+        return result;
+    }
 
     constexpr ExchangeDecodeError error(ExchangeDecodeErrorStage stage, ExchangeDecodeErrorCode code,
         std::size_t observed = 0, std::size_t limit = 0, std::size_t index = 0) noexcept
@@ -638,7 +650,8 @@ namespace TES3MP
                 }
                 mode = *decodedMode;
             }
-            auto decoded = decodeEntry(*encodedEntries->Get(static_cast<flatbuffers::uoffset_t>(index)), mode, index);
+            const auto current = copyStruct(encodedEntries, index);
+            auto decoded = decodeEntry(current, mode, index);
             if (const auto* failure = std::get_if<ExchangeDecodeError>(&decoded))
                 return *failure;
             entries.push_back(std::get<SpatialEntitySnapshot>(std::move(decoded)));
@@ -681,13 +694,13 @@ namespace TES3MP
         changes.reserve(count);
         for (std::size_t index = 0; index < count; ++index)
         {
-            const auto* current = encoded->Get(static_cast<flatbuffers::uoffset_t>(index));
-            auto player = strongValue<PlayerId>(current->player_id(), index);
-            auto entity = strongValue<EntityId>(current->entity_id(), index);
+            const auto current = copyStruct(encoded, index);
+            auto player = strongValue<PlayerId>(current.player_id(), index);
+            auto entity = strongValue<EntityId>(current.entity_id(), index);
             if (const auto* failure = std::get_if<ExchangeDecodeError>(&player)) return *failure;
             if (const auto* failure = std::get_if<ExchangeDecodeError>(&entity)) return *failure;
             changes.push_back({ *decodedValue(player), *decodedValue(entity),
-                static_cast<ObservationChangeKind>(current->kind()) });
+                static_cast<ObservationChangeKind>(current.kind()) });
         }
         return ReliableObservationBatch::create(*decodedValue(session), *decodedValue(generation),
             *decodedValue(revision), changes);
@@ -727,9 +740,9 @@ namespace TES3MP
         members.reserve(count);
         for (std::size_t index = 0; index < count; ++index)
         {
-            const auto* current = encoded->Get(static_cast<flatbuffers::uoffset_t>(index));
-            auto player = strongValue<PlayerId>(current->player_id(), index);
-            auto entity = strongValue<EntityId>(current->entity_id(), index);
+            const auto current = copyStruct(encoded, index);
+            auto player = strongValue<PlayerId>(current.player_id(), index);
+            auto entity = strongValue<EntityId>(current.entity_id(), index);
             if (const auto* failure = std::get_if<ExchangeDecodeError>(&player)) return *failure;
             if (const auto* failure = std::get_if<ExchangeDecodeError>(&entity)) return *failure;
             members.push_back({ *decodedValue(player), *decodedValue(entity) });

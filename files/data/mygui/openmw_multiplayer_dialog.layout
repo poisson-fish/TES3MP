@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<MyGUI type="Layout">
+    <Widget type="Window" skin="MW_Dialog" layer="Modal" position="0 0 460 205" align="Center" name="_Main">
+        <Property key="Caption" value="Multiplayer"/>
+        <Widget type="TextBox" skin="ProgressText" position="12 10 430 24" name="AddressLabel">
+            <Property key="Caption" value="Server address (host, host:port, or tes3mp:// URI)"/>
+        </Widget>
+        <Widget type="EditBox" skin="MW_TextEdit" position="12 38 430 30" name="Address"/>
+        <Widget type="TextBox" skin="ProgressText" position="12 76 430 24" name="PasswordLabel">
+            <Property key="Caption" value="Server password (leave empty if none)"/>
+        </Widget>
+        <Widget type="EditBox" skin="MW_TextEdit" position="12 104 430 30" name="Password"/>
+        <Widget type="AutoSizedButton" skin="MW_Button" position="210 147 70 24" name="Connect">
+            <Property key="Caption" value="Connect"/>
+        </Widget>
+        <Widget type="AutoSizedButton" skin="MW_Button" position="290 147 60 24" name="Host">
+            <Property key="Caption" value="Host"/>
+        </Widget>
+        <Widget type="AutoSizedButton" skin="MW_Button" position="360 147 70 24" name="Cancel">
+            <Property key="Caption" value="#{Interface:Cancel}"/>
+        </Widget>
+    </Widget>
+</MyGUI>

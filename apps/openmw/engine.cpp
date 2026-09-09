@@ -205,7 +205,19 @@ bool OMW::Engine::frame(unsigned frameNumber, float frametime)
         }
 
         if (mMultiplayerCoordinator)
+        {
+            const bool gameRunning = mStateManager->getState() != MWBase::StateManager::State_NoGame;
+            mMultiplayerCoordinator->setGameRunning(gameRunning);
             mMultiplayerCoordinator->frame(frametime);
+            if (!gameRunning && mMultiplayerCoordinator->gameStartRequested())
+            {
+                mWindowManager->removeGuiMode(MWGui::GM_MainMenu);
+                mStateManager->newGame(mMultiplayerCoordinator->characterLifecycle()
+                    == TES3MP::CharacterLifecycle::EstablishedCharacter);
+                mMultiplayerCoordinator->confirmGameStart(
+                    mStateManager->getState() == MWBase::StateManager::State_Running);
+            }
+        }
 
         // When the window is minimized, pause the game. Currently this *has* to be here to work around a MyGUI bug.
         // If we are not currently rendering, then RenderItems will not be reused resulting in a memory leak upon
@@ -402,6 +414,7 @@ OMW::Engine::Engine(Files::ConfigurationManager& configurationManager)
 
 OMW::Engine::~Engine()
 {
+    mEnvironment.setMultiplayerCoordinator(nullptr);
     mMultiplayerCoordinator.reset();
 
     if (mScreenCaptureOperation != nullptr)
@@ -453,6 +466,7 @@ bool OMW::Engine::attachMultiplayerCoordinator(
     if (!coordinator || mMultiplayerCoordinator)
         return false;
     mMultiplayerCoordinator = std::move(coordinator);
+    mEnvironment.setMultiplayerCoordinator(mMultiplayerCoordinator.get());
     return true;
 }
 

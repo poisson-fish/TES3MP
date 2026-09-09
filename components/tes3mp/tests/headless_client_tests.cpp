@@ -18,6 +18,12 @@ namespace
     {
         return *Value::fromValue(raw);
     }
+    TES3MP::ResumeToken resumeToken(std::byte byte)
+    {
+        std::array<std::byte, TES3MP::ResumeTokenBytes> bytes{};
+        bytes.fill(byte);
+        return std::move(*TES3MP::ResumeToken::create(bytes));
+    }
     class FakeRuntime final : public TES3MP::TransportRuntime
     {
     public:
@@ -233,6 +239,63 @@ int main()
     require(clientRuntime->queue(MessageClass::SessionControl, MessageKind::ClientHello, helloPayload)
         == ClientRuntimeResult::Accepted);
     require(clientRuntime->flushOutbound() == ClientRuntimeResult::NotConnected);
+
+    FakeRuntime orderedRuntime;
+    auto orderedCreated = ClientSessionRuntime::create(
+        orderedRuntime, clock, policy, SessionGeneration::initial(), *runtimeQueuePolicy);
+    auto ordered = std::get<std::unique_ptr<ClientSessionRuntime>>(std::move(orderedCreated));
+    auto orderedVersions = std::get<ProtocolVersionRange>(ProtocolVersionRange::create(1, 2, 3));
+    const std::array characterCapabilities{ characterCreationCapability() };
+    auto orderedClientOffer = std::get<CapabilityOffer>(
+        CapabilityOffer::create(orderedVersions, characterCapabilities, {}));
+    auto orderedServerOffer = std::get<CapabilityOffer>(
+        CapabilityOffer::create(std::move(orderedVersions), characterCapabilities, {}));
+    auto orderedMaterial = AuthenticationMaterial::create({});
+    require(ordered->start(endpoint, ClientHello::fromOffer(std::move(orderedClientOffer)),
+                AuthenticationRequest::join(std::move(*orderedMaterial)))
+        == HeadlessClientResult::Accepted);
+    require(ordered->advance().action == ClientSessionAction::SendClientHello);
+    require(ordered->flushOutbound() == ClientRuntimeResult::Accepted);
+    auto orderedNegotiated = negotiateClientHello(
+        std::get<ClientHello>(decodeClientHello(std::get<DecodedFrame>(decodeProtocolFrame(orderedRuntime.sent)).payload())),
+        orderedServerOffer);
+    auto orderedHelloFrame = encodeProtocolFrame(MessageClass::SessionControl, MessageKind::ServerHello,
+        encodeServerHello(std::get<ServerHello>(std::move(orderedNegotiated))));
+    orderedRuntime.inbound.push_back({ TransportChannel::ReliableOrdered,
+        std::get<std::vector<std::byte>>(std::move(orderedHelloFrame)) });
+    require(ordered->advance().result == ClientRuntimeResult::Accepted);
+    require(ordered->flushOutbound() == ClientRuntimeResult::Accepted);
+
+    auto accepted = AuthenticationAcceptedMessage::create(resumeToken(std::byte{ 1 }),
+        MinimumResumeTokenLifetimeMilliseconds, std::nullopt, CharacterLifecycle::NewCharacter,
+        CharacterProfileRevision::initial());
+    auto acceptedFrame = encodeProtocolFrame(MessageClass::SessionControl, MessageKind::AuthenticationAccepted,
+        encodeAuthenticationAccepted(*accepted));
+    ReliableCharacterProfile profile{ value<SessionId>(1), SessionGeneration::initial(), value<PlayerId>(1),
+        CharacterConfirmationResult::Confirmed, CharacterProfile::fresh() };
+    auto profileFrame = encodeProtocolFrame(MessageClass::ReliableOperation, MessageKind::ReliableCharacterProfile,
+        encodeReliableCharacterProfile(profile));
+    const auto zeroTurn = Turn32::fromValue(0);
+    const std::array entries{ SpatialEntitySnapshot(ServerTick::initial(), value<PlayerId>(1), value<EntityId>(1),
+        value<AppearanceId>(1), EntityRevision::initial(), AuthorityEpoch::initial(),
+        Transform(CellId::interior(value<CellSpaceId>(1)), Position3(61, -135, 24),
+            Orientation3(zeroTurn, zeroTurn, zeroTurn)), LinearVelocity3(0, 0, 0)) };
+    auto world = std::get<SpatialWorldView>(SpatialWorldView::create(entries));
+    LatestWinsSnapshot snapshot(LatestWinsSnapshotHeader(value<SessionId>(1), SessionGeneration::initial(),
+                                    value<PlayerId>(1), value<EntityId>(1), CanonicalRevision::initial(), std::nullopt),
+        std::move(world));
+    auto snapshotFrame = encodeProtocolFrame(MessageClass::LatestWinsSnapshot, MessageKind::LatestWinsSnapshot,
+        encodeLatestWinsSnapshot(snapshot));
+    orderedRuntime.inbound.push_back({ TransportChannel::ReliableOrdered,
+        std::get<std::vector<std::byte>>(std::move(acceptedFrame)) });
+    orderedRuntime.inbound.push_back({ TransportChannel::ReliableOrdered,
+        std::get<std::vector<std::byte>>(std::move(profileFrame)) });
+    orderedRuntime.inbound.push_back({ TransportChannel::LatestWins,
+        std::get<std::vector<std::byte>>(std::move(snapshotFrame)) });
+    const auto orderedAdvance = ordered->advance();
+    require(orderedAdvance.result == ClientRuntimeResult::Accepted && orderedAdvance.characterProfileApplied
+        && ordered->confirmedCharacterProfile()
+        && ordered->confirmedCharacterProfile()->playerId == value<PlayerId>(1));
 
     FakeRuntime retryRuntime;
     retryRuntime.acceptConnect = false;

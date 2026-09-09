@@ -39,6 +39,9 @@ namespace TES3MP
         PlayerId player;
         EntityId entity;
         LatestWinsSnapshot initialSnapshot;
+        CharacterLifecycle characterLifecycle = CharacterLifecycle::NewCharacter;
+        CharacterProfileRevision profileRevision = CharacterProfileRevision::initial();
+        CharacterProfile characterProfile = CharacterProfile::fresh();
     };
 
     struct AuthenticatedJoinPreparation
@@ -76,6 +79,12 @@ namespace TES3MP
         std::optional<PlayerCredential> copyPendingPlayerCredential(std::uint64_t preparationId) const noexcept;
         bool pendingCreatesPersistentIdentity(std::uint64_t preparationId) const noexcept;
         bool releasePrincipal(PrincipalId principal) noexcept;
+        bool persistPlayer(PlayerId player) noexcept;
+        bool persistPlayers(std::span<const PlayerId> players) noexcept;
+        const CharacterProfile* characterProfile(PlayerId player) const noexcept;
+        CharacterProfileApplyResult applyCharacterCreation(PlayerId player,
+            const CharacterContentCatalog& catalog, const CharacterCreationCommand& command,
+            ServerTick tick) noexcept;
 
         const CanonicalServerState& state() const noexcept { return mReducer.state(); }
         std::size_t liveBindings() const noexcept { return mPrincipals.size(); }
@@ -87,7 +96,8 @@ namespace TES3MP
             PlayerIdentityRegistry* playerIdentities) noexcept;
         AuthenticatedJoinPrepareOutcome prepareIdentity(PrincipalId principal,
             AuthenticatedAdmission::PlayerClaim claim, bool createsIdentity,
-            std::optional<std::uint64_t> identityPreparation, SessionGeneration generation, ServerTick serverTick);
+            std::optional<std::uint64_t> identityPreparation, SessionGeneration generation, ServerTick serverTick,
+            std::optional<PrincipalId> replacedPrincipal = std::nullopt);
 
         std::vector<Transform> mSpawns;
         AppearanceId mAppearance;
@@ -108,6 +118,7 @@ namespace TES3MP
             CanonicalCommandReducer::PreparedJoin state;
             AuthenticatedJoinResult result;
             std::optional<std::uint64_t> identityPreparation;
+            std::optional<PrincipalId> replacedPrincipal;
         };
         std::optional<PendingJoin> mPending;
         std::uint64_t mNextPreparationId = 1;

@@ -35,6 +35,7 @@ extern "C" __declspec(dllexport) DWORD AmdPowerXpressRequestHighPerformance = 0x
 
 #include <charconv>
 #include <filesystem>
+#include <limits>
 #include <optional>
 #include <ranges>
 #include <span>
@@ -467,17 +468,66 @@ bool parseOptions(int argc, char** argv, OMW::Engine& engine, Files::Configurati
 #else
         const TES3MP::OpenMWAdapter::ClientProviders providers{};
 #endif
-        auto coordinator = TES3MP::OpenMWAdapter::makeClientCoordinator(variables["tes3mp-host"].as<std::string>(),
-            variables["tes3mp-port"].as<unsigned>(), variables["tes3mp-timeout-ms"].as<unsigned>(),
-            variables["tes3mp-password-file"].as<Files::MaybeQuotedPath>().u8string(),
-            variables["tes3mp-player-credential-file"].as<Files::MaybeQuotedPath>().u8string(), contentManifest->id(),
-            providers);
-        auto* value = std::get_if<std::unique_ptr<TES3MP::OpenMWAdapter::EngineCoordinator>>(&coordinator);
-        if (!value || !*value || !engine.attachMultiplayerCoordinator(std::move(*value)))
+        const bool automaticConnection = variables["skip-menu"].as<bool>()
+#ifdef TES3MP_OPENMW_DESKTOP_AUTOMATION
+            || multiplayerAutomation != nullptr
+#endif
+            ;
+        std::unique_ptr<TES3MP::OpenMWAdapter::EngineCoordinator> coordinator;
+        std::optional<TES3MP::OpenMWAdapter::ClientCompositionFailure> compositionFailure;
+        const auto configuredPort = variables["tes3mp-port"].as<unsigned>();
+        if (configuredPort == 0 || configuredPort > (std::numeric_limits<std::uint16_t>::max)())
         {
-            const auto failure = std::get_if<TES3MP::OpenMWAdapter::ClientCompositionFailure>(&coordinator);
+            Log(Debug::Error) << "TES3MP startup failed: tes3mp-port is invalid";
+            return false;
+        }
+        if (automaticConnection)
+        {
+            auto created = TES3MP::OpenMWAdapter::makeClientCoordinator(variables["tes3mp-host"].as<std::string>(),
+                variables["tes3mp-port"].as<unsigned>(), variables["tes3mp-timeout-ms"].as<unsigned>(),
+                variables["tes3mp-password-file"].as<Files::MaybeQuotedPath>().u8string(),
+                variables["tes3mp-player-credential-file"].as<Files::MaybeQuotedPath>().u8string(),
+                contentManifest->id(), providers);
+            if (auto* value
+                = std::get_if<std::unique_ptr<TES3MP::OpenMWAdapter::EngineCoordinator>>(&created))
+                coordinator = std::move(*value);
+            else if (auto* failure = std::get_if<TES3MP::OpenMWAdapter::ClientCompositionFailure>(&created))
+                compositionFailure = *failure;
+        }
+        else
+        {
+            std::filesystem::path credentialDirectory
+                = variables["tes3mp-player-credential-directory"].as<Files::MaybeQuotedPath>();
+            if (credentialDirectory.empty())
+                credentialDirectory = cfgMgr.getUserDataPath() / "tes3mp" / "credentials";
+            std::filesystem::path serverExecutable
+                = variables["tes3mp-server-executable"].as<Files::MaybeQuotedPath>();
+            if (serverExecutable.empty())
+            {
+                serverExecutable = std::filesystem::absolute(std::filesystem::u8path(argv[0])).parent_path()
+#ifdef _WIN32
+                    / "tes3mp_server.exe";
+#else
+                    / "tes3mp_server";
+#endif
+            }
+            std::filesystem::path serverConfig
+                = variables["tes3mp-server-config"].as<Files::MaybeQuotedPath>();
+            if (serverConfig.empty())
+                serverConfig = cfgMgr.getUserDataPath() / "tes3mp" / "server.cfg";
+            coordinator = TES3MP::OpenMWAdapter::makeClientLauncher(
+                { static_cast<std::uint16_t>(configuredPort),
+                    variables["tes3mp-timeout-ms"].as<unsigned>(),
+                    variables["tes3mp-password-file"].as<Files::MaybeQuotedPath>().u8string(),
+                    std::move(credentialDirectory), std::move(serverExecutable),
+                    std::move(serverConfig),
+                    contentManifest->id(), providers });
+        }
+        if (!coordinator || !engine.attachMultiplayerCoordinator(std::move(coordinator)))
+        {
             Log(Debug::Error) << "TES3MP startup failed: "
-                              << (failure ? describe(*failure) : "coordinator attachment failed");
+                              << (compositionFailure ? describe(*compositionFailure)
+                                                     : "coordinator attachment failed");
             return false;
         }
     }

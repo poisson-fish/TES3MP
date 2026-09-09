@@ -1,6 +1,7 @@
 #include "mainmenu.hpp"
 
 #include <MyGUI_Gui.h>
+#include <MyGUI_Button.h>
 #include <MyGUI_InputManager.h>
 #include <MyGUI_RenderManager.h>
 #include <MyGUI_TextBox.h>
@@ -17,10 +18,12 @@
 #include "../mwbase/world.hpp"
 
 #include "../mwworld/globals.hpp"
+#include "../tes3mp/engine_coordinator.hpp"
 
 #include "backgroundimage.hpp"
 #include "confirmationdialog.hpp"
 #include "savegamedialog.hpp"
+#include "multiplayerdialog.hpp"
 #include "settingswindow.hpp"
 #include "videowidget.hpp"
 
@@ -111,6 +114,8 @@ namespace MWGui
         updateMenu();
     }
 
+    MainMenu::~MainMenu() = default;
+
     void MainMenu::onResChange(int w, int h)
     {
         mWidth = w;
@@ -193,6 +198,12 @@ namespace MWGui
                 dialog->eventOkClicked += MyGUI::newDelegate(this, &MainMenu::onNewGameConfirmed);
                 dialog->eventCancelClicked.clear();
             }
+        }
+        else if (name == "multiplayer")
+        {
+            if (!mMultiplayerDialog)
+                mMultiplayerDialog = std::make_unique<MultiplayerDialog>("127.0.0.1");
+            mMultiplayerDialog->setVisible(true);
         }
         else if (name == "loadgame" || name == "savegame")
         {
@@ -296,6 +307,21 @@ namespace MWGui
 
         MWBase::StateManager::State state = MWBase::Environment::get().getStateManager()->getState();
 
+        auto* multiplayer = MWBase::Environment::get().getMultiplayerCoordinator();
+        const bool showMultiplayer = state == MWBase::StateManager::State_NoGame && multiplayer
+            && multiplayer->multiplayerState() != TES3MP::OpenMWAdapter::MultiplayerState::Connecting
+            && multiplayer->multiplayerState() != TES3MP::OpenMWAdapter::MultiplayerState::Ready;
+
+        if (!mMultiplayerButton)
+        {
+            mMultiplayerButton = mButtonBox->createWidget<MyGUI::Button>(
+                "MW_Button", MyGUI::IntCoord(0, 0, 180, 28), MyGUI::Align::Default);
+            mMultiplayerButton->setCaption("Multiplayer");
+            mMultiplayerButton->setUserData(std::string("multiplayer"));
+            mMultiplayerButton->eventMouseButtonClick += MyGUI::newDelegate(this, &MainMenu::onButtonClicked);
+        }
+        mMultiplayerButton->setVisible(showMultiplayer);
+
         mVersionText->setVisible(state == MWBase::StateManager::State_NoGame);
 
         std::vector<std::string> buttons;
@@ -368,6 +394,12 @@ namespace MWGui
             button->setCoord(static_cast<int>((maxwidth - requested.width / scale) / 2), curH,
                 static_cast<int>(requested.width / scale), static_cast<int>(height / scale - 16));
             curH += static_cast<int>(height / scale - 16);
+        }
+
+        if (showMultiplayer)
+        {
+            mMultiplayerButton->setCoord((maxwidth - 180) / 2, curH + 4, 180, 28);
+            curH += 36;
         }
 
         if (state == MWBase::StateManager::State_NoGame)

@@ -61,7 +61,8 @@
         "tes3mp_protocol_handshake_fuzz",
         "tes3mp_protocol_authentication_fuzz",
         "tes3mp_protocol_exchange_fuzz",
-        "tes3mp_protocol_pose_fuzz"
+        "tes3mp_protocol_pose_fuzz",
+        "tes3mp_character_creation_protocol_fuzz"
       ]
     },
     {

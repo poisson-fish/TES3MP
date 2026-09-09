@@ -9,7 +9,10 @@
 
 #include <algorithm>
 #include <array>
+#include <cstdint>
+#include <cstring>
 #include <optional>
+#include <type_traits>
 
 namespace
 {
@@ -20,6 +23,15 @@ namespace
 
     constexpr std::size_t SizePrefixBytes = sizeof(flatbuffers::uoffset_t);
     constexpr std::size_t MinimumBytes = SizePrefixBytes + sizeof(flatbuffers::uoffset_t) + 4;
+
+    template <class Struct>
+    Struct copyStruct(const flatbuffers::Vector<const Struct*>* values, std::size_t index) noexcept
+    {
+        static_assert(std::is_trivially_copyable_v<Struct>);
+        Struct result{};
+        std::memcpy(&result, values->Data() + index * sizeof(Struct), sizeof(Struct));
+        return result;
+    }
 
     constexpr Error error(Code code, std::size_t observed = 0, std::size_t limit = 0,
         std::size_t index = 0) noexcept
@@ -220,10 +232,10 @@ namespace TES3MP
         members.reserve(count);
         for (std::size_t index = 0; index < count; ++index)
         {
-            const auto* current = encoded->Get(static_cast<flatbuffers::uoffset_t>(index));
-            auto actor = strong<ActorId>(current->actor_id(), index);
-            auto entity = strong<EntityId>(current->entity_id(), index);
-            auto prototype = strong<ActorPrototypeId>(current->prototype_id(), index);
+            const auto current = copyStruct(encoded, index);
+            auto actor = strong<ActorId>(current.actor_id(), index);
+            auto entity = strong<EntityId>(current.entity_id(), index);
+            auto prototype = strong<ActorPrototypeId>(current.prototype_id(), index);
             if (const auto* failure = std::get_if<Error>(&actor)) return *failure;
             if (const auto* failure = std::get_if<Error>(&entity)) return *failure;
             if (const auto* failure = std::get_if<Error>(&prototype)) return *failure;
@@ -260,23 +272,23 @@ namespace TES3MP
         entries.reserve(count);
         for (std::size_t index = 0; index < count; ++index)
         {
-            const auto* current = encoded->Get(static_cast<flatbuffers::uoffset_t>(index));
-            auto actor = strong<ActorId>(current->actor_id(), index);
-            auto entity = strong<EntityId>(current->entity_id(), index);
-            auto prototype = strong<ActorPrototypeId>(current->prototype_id(), index);
-            auto revision = strong<EntityRevision>(current->entity_revision(), index);
-            auto epoch = strong<AuthorityEpoch>(current->authority_epoch(), index);
-            auto entryTick = strong<ServerTick>(current->server_tick(), index);
-            auto cell = decodeCell(current->cell());
-            const auto activity = decodeActivity(current->activity());
+            const auto current = copyStruct(encoded, index);
+            auto actor = strong<ActorId>(current.actor_id(), index);
+            auto entity = strong<EntityId>(current.entity_id(), index);
+            auto prototype = strong<ActorPrototypeId>(current.prototype_id(), index);
+            auto revision = strong<EntityRevision>(current.entity_revision(), index);
+            auto epoch = strong<AuthorityEpoch>(current.authority_epoch(), index);
+            auto entryTick = strong<ServerTick>(current.server_tick(), index);
+            auto cell = decodeCell(current.cell());
+            const auto activity = decodeActivity(current.activity());
             const std::array failures{ std::get_if<Error>(&actor), std::get_if<Error>(&entity),
                 std::get_if<Error>(&prototype), std::get_if<Error>(&revision), std::get_if<Error>(&epoch),
                 std::get_if<Error>(&entryTick), std::get_if<Error>(&cell) };
             for (const auto* failure : failures) if (failure) return *failure;
-            if (!activity) return error(Code::InvalidActivity, static_cast<std::size_t>(current->activity()), 0, index);
-            const auto& position = current->position();
-            const auto& orientation = current->orientation();
-            const auto& velocity = current->linear_velocity();
+            if (!activity) return error(Code::InvalidActivity, static_cast<std::size_t>(current.activity()), 0, index);
+            const auto& position = current.position();
+            const auto& orientation = current.orientation();
+            const auto& velocity = current.linear_velocity();
             entries.emplace_back(*value(entryTick), *value(actor), *value(entity), *value(prototype),
                 *value(revision), *value(epoch), Transform(std::get<CellId>(cell),
                     Position3(position.x(), position.y(), position.z()), Orientation3(

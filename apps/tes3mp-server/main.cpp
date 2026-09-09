@@ -1,5 +1,6 @@
 #include "actor_content.hpp"
 #include "combat_content.hpp"
+#include "character_content.hpp"
 #include "connection_session_coordinator.hpp"
 #include "content_collision.hpp"
 #include "interactive_object_content.hpp"
@@ -79,6 +80,18 @@ int main(int argc, char** argv)
         return 2;
     }
     auto config = std::get<TES3MP::ServerApp::ServerConfig>(std::move(parsed));
+    const auto configDirectory = std::filesystem::absolute(std::filesystem::path(argv[1])).parent_path();
+    const auto resolve = [&](std::filesystem::path& path) {
+        if (!path.empty() && path.is_relative()) path = configDirectory / path;
+    };
+    resolve(config.joinPasswordFile);
+    resolve(config.collisionContentFile);
+    resolve(config.actorContentFile);
+    resolve(config.interactiveObjectContentFile);
+    resolve(config.inventoryContentFile);
+    resolve(config.combatContentFile);
+    resolve(config.playerIdentityFile);
+    resolve(config.characterContentFile);
     auto collisionResult
         = TES3MP::ServerApp::ContentCollisionProvider::load(config.collisionContentFile, config.contentManifest);
     auto* collisionValue = std::get_if<std::unique_ptr<TES3MP::ServerApp::ContentCollisionProvider>>(&collisionResult);
@@ -89,6 +102,27 @@ int main(int argc, char** argv)
     {
         std::cerr << "collision content initialization failed\n";
         return 2;
+    }
+    std::optional<TES3MP::CharacterContentCatalog> characterContent;
+    if (!config.characterContentFile.empty())
+    {
+        auto loaded = TES3MP::ServerApp::loadCharacterContent(config.characterContentFile, config.contentManifest);
+        auto* catalog = std::get_if<TES3MP::CharacterContentCatalog>(&loaded);
+        if (!catalog)
+        {
+            std::cerr << "character content initialization failed: "
+                      << TES3MP::ServerApp::describeCharacterContentError(
+                             std::get<TES3MP::ServerApp::CharacterContentError>(loaded))
+                      << '\n';
+            return 2;
+        }
+        if (!collision->canOccupy(catalog->creationSpawn().cell(), catalog->creationSpawn().position())
+            || !collision->canOccupy(catalog->completionSpawn().cell(), catalog->completionSpawn().position()))
+        {
+            std::cerr << "character safe-point spawn collision validation failed\n";
+            return 2;
+        }
+        characterContent.emplace(std::move(*catalog));
     }
     auto actorContent = TES3MP::ServerApp::loadActorContent(config.actorContentFile, config.contentManifest);
     auto* actorCatalogValue = std::get_if<TES3MP::ActorCatalog>(&actorContent);
@@ -227,6 +261,16 @@ int main(int argc, char** argv)
     auto identityFileResult = TES3MP::ServerApp::PlayerIdentityFile::open(config.playerIdentityFile);
     auto* identityFileValue = std::get_if<std::unique_ptr<TES3MP::ServerApp::PlayerIdentityFile>>(&identityFileResult);
     auto identityFile = identityFileValue ? std::move(*identityFileValue) : nullptr;
+    if (identityFile)
+        for (const auto& record : identityFile->records())
+            if (record.savedPlayer
+                && (!config.contentManifest.contains(record.savedPlayer->transform().cell())
+                    || !collision->canOccupy(
+                        record.savedPlayer->transform().cell(), record.savedPlayer->transform().position())))
+            {
+                std::cerr << "persisted player state validation failed\n";
+                return 2;
+            }
     std::vector<TES3MP::EntityId> actorEntityIds;
     actorEntityIds.reserve(actorCatalog.entries().size());
     for (const auto& actor : actorCatalog.entries())
@@ -246,17 +290,24 @@ int main(int argc, char** argv)
             TES3MP::ServerApp::Phase7ProtocolMinimumMinor, TES3MP::ServerApp::Phase7ProtocolMaximumMinor));
     std::vector<TES3MP::CapabilityId> optionalCapabilities{ TES3MP::vrPoseCapability(),
         TES3MP::actorReplicationCapability() };
+    if (characterContent)
+        optionalCapabilities.push_back(TES3MP::characterCreationCapability());
     if (interactiveObjectWorld)
         optionalCapabilities.push_back(TES3MP::interactiveObjectReplicationCapability());
     if (inventoryWorld)
         optionalCapabilities.push_back(TES3MP::inventoryReplicationCapability());
     auto offer
         = TES3MP::CapabilityOffer::create(std::move(versions), optionalCapabilities, {}, config.contentManifest.id());
-    const auto zero = TES3MP::Turn32::fromValue(0);
     std::vector<TES3MP::Transform> spawns;
-    spawns.reserve(config.spawnPositions.size());
-    for (const auto& position : config.spawnPositions)
-        spawns.emplace_back(config.spawnCell, position, TES3MP::Orientation3(zero, zero, zero));
+    if (characterContent)
+        spawns.push_back(characterContent->creationSpawn());
+    else
+    {
+        const auto zero = TES3MP::Turn32::fromValue(0);
+        spawns.reserve(config.spawnPositions.size());
+        for (const auto& position : config.spawnPositions)
+            spawns.emplace_back(config.spawnCell, position, TES3MP::Orientation3(zero, zero, zero));
+    }
     TES3MP::NullMetricSink metrics;
     TES3MP::NullStructuredEventSink events;
     TES3MP::Observability observability(metrics, events);
@@ -284,7 +335,8 @@ int main(int argc, char** argv)
         TES3MP::ServerApp::Phase7ConnectionCapacity, &actorWorld,
         interactiveObjectWorld ? &*interactiveObjectWorld : nullptr, inventoryWorld ? &*inventoryWorld : nullptr,
         combatContent ? &combatContent->world : nullptr,
-        combatContent ? &combatContent->playerTemplate : nullptr, itemCatalog ? &*itemCatalog : nullptr);
+        combatContent ? &combatContent->playerTemplate : nullptr, itemCatalog ? &*itemCatalog : nullptr,
+        characterContent ? &*characterContent : nullptr);
     TES3MP::ServerApp::ServerApplication application(*factory.runtime, config,
         { sessions, *joins, *crypto, *queues, clock, intake, reducer, *lifecycle, &actorCatalog, &actorWorld,
             collision.get(), interactiveObjectCatalog ? &*interactiveObjectCatalog : nullptr,

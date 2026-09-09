@@ -17,6 +17,20 @@ the affected code/tests in the same milestone.
 - **Pinned base.** The active engine base is OpenMW 0.51.0 commit
   `f4bec41444214a7903bebd178389ca22ca13f646`. Differences and patch ownership are
   maintained by machine registries rather than narrative provenance.
+- **Multiplayer game entry.** A menu connection does not load a client-authored
+  OpenMW save. After authentication and the complete initial baseline, OpenMW
+  runs its stock new-game initialization and the adapter then applies the
+  server-owned root. Durable player credentials are scoped to the normalized
+  server endpoint so one server's identity is never intentionally offered to
+  another.
+- **Server-owned chargen with stock presentation.** Freshness is explicit
+  state (`NewCharacter`, `CreatingCharacter`, or `EstablishedCharacter`), never
+  inferred from the current entity set. OpenMW retains the prison-ship dialogue,
+  UI, and animation sequence. Confirmed intermediate choices remain live-only;
+  the complete profile and post-boat canonical root become durable together
+  only after stock chargen exits. A process restart or credential reattachment
+  of an incomplete character deliberately restarts from the fresh pre-chargen
+  checkpoint. Only established profiles restore a saved canonical root.
 
 ## Authority and state
 
@@ -38,6 +52,17 @@ the affected code/tests in the same milestone.
 - **No actor delegation yet.** Canonical actor simulation stays server-owned.
   Any future delegation requires a measured decision, finite epoch-bound lease,
   complete atomic handoff, revocation, and deterministic server fallback.
+- **Disconnect checkpoint.** Resume-token recovery keeps the same live canonical
+  session. Credential reattachment of an established character supersedes the
+  hidden principal/session binding and preserves its current canonical root;
+  reattachment after expiration or restart uses its last atomic server-side
+  checkpoint. Reattachment advances entity revision and authority epoch,
+  rebases the spatial tick, and clears velocity. Incomplete chargen is the
+  deliberate exception: it restarts at the pre-chargen safe point.
+- **Character save clean break.** Identity file V4 stores either a fresh
+  pre-chargen identity with no root or an established complete profile with its
+  canonical root. It cannot represent a half-created durable character. V1–V3
+  identity files are rejected without migration.
 
 ## Protocol, transport, and security
 

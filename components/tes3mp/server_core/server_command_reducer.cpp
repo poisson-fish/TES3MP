@@ -240,7 +240,18 @@ namespace TES3MP
         if (existing == players.end())
             players.push_back(player);
         else if (*existing != player)
-            return std::nullopt;
+        {
+            const auto nextRevision = existing->entityRevision().next();
+            const auto nextAuthority = existing->authorityEpoch().next();
+            if (!nextRevision || !nextAuthority || player.entityId() != existing->entityId()
+                || player.appearanceId() != existing->appearanceId()
+                || player.entityRevision() != *nextRevision || player.authorityEpoch() != *nextAuthority
+                || std::ranges::any_of(sessions, [&](const auto& value) {
+                       return value.playerId() == player.playerId();
+                   }))
+                return std::nullopt;
+            *existing = player;
+        }
         sessions.push_back(session);
         auto candidate = createCanonicalServerState(players, sessions);
         auto* state = std::get_if<CanonicalServerState>(&candidate);
@@ -370,6 +381,43 @@ namespace TES3MP
             [](const auto& a, const auto& b) { return a.sessionId() < b.sessionId(); });
         return prepareLifecycleState(std::move(players), std::move(sessions), CanonicalSessionLifecycleKind::Resumed,
             session.sessionId(), session.playerId(), session.sessionGeneration(), tick);
+    }
+
+    std::optional<CanonicalCommandReducer::PreparedLifecycle> CanonicalCommandReducer::preparePlayerSafePoint(
+        PlayerId playerId, Transform transform, ServerTick tick)
+    {
+        if (!mContentManifest.contains(transform.cell()) || !mStateVersion.next() || !mCanonicalRevision.next())
+            return std::nullopt;
+        std::vector<CanonicalPlayerEntityState> players(mState->players().begin(), mState->players().end());
+        const auto found = std::find_if(
+            players.begin(), players.end(), [playerId](const auto& value) { return value.playerId() == playerId; });
+        if (found == players.end()
+            || !std::ranges::any_of(mState->activeSessions(),
+                [playerId](const auto& session) { return session.playerId() == playerId; }))
+            return std::nullopt;
+        auto advanced = advanceCanonicalSpatialState(
+            *found, tick, transform, LinearVelocity3(0, 0, 0), LocomotionMode::Walk);
+        auto* replacement = std::get_if<CanonicalPlayerEntityState>(&advanced);
+        if (!replacement)
+            return std::nullopt;
+        *found = *replacement;
+        std::vector<CanonicalSessionProgress> sessions(
+            mState->activeSessions().begin(), mState->activeSessions().end());
+        auto candidate = createCanonicalServerState(players, sessions);
+        auto* state = std::get_if<CanonicalServerState>(&candidate);
+        if (!state)
+            return std::nullopt;
+        PreparedLifecycle prepared;
+        prepared.mBaseVersion = mStateVersion;
+        prepared.mStateVersion = *mStateVersion.next();
+        prepared.mBaseCanonicalRevision = mCanonicalRevision;
+        prepared.mCanonicalRevision = *mCanonicalRevision.next();
+        prepared.mCheckpointTick = tick;
+        prepared.mState = std::make_shared<CanonicalServerState>(std::move(*state));
+        prepared.mPublication = std::shared_ptr<CanonicalStatePublication>(
+            new CanonicalStatePublication(mStateVersion, tick, mState, {}));
+        prepared.mPublication->mSpatialTicks.push_back({ prepared.mStateVersion, tick, *replacement });
+        return prepared;
     }
 
     std::optional<CanonicalCommandReducer::PreparedLifecycle> CanonicalCommandReducer::prepareExpiration(

@@ -18,7 +18,7 @@ namespace TES3MP::OpenMWAdapter
             auto versions = std::get<ProtocolVersionRange>(ProtocolVersionRange::create(1, 2, 3));
             const std::array optional{ vrPoseCapability(), actorReplicationCapability(),
                 interactiveObjectReplicationCapability(), inventoryReplicationCapability(),
-                combatReplicationCapability() };
+                combatReplicationCapability(), characterCreationCapability() };
             auto offer = std::get<CapabilityOffer>(
                 CapabilityOffer::create(std::move(versions), optional, {}, contentManifest));
             return ClientHello::fromOffer(std::move(offer));
@@ -155,9 +155,15 @@ namespace TES3MP::OpenMWAdapter
                     return;
                 }
 
+                const auto& snapshotBeforeAdvance = mRuntime->session().stateMachine().confirmedSnapshot();
+                const auto previousSnapshotRevision = snapshotBeforeAdvance
+                    ? std::optional<CanonicalRevision>(snapshotBeforeAdvance->header().canonicalRevision())
+                    : std::nullopt;
                 const bool hadSnapshot = mRuntime->session().stateMachine().interestBaselineComplete();
                 CellTransitionCapture captured;
-                if (hadSnapshot && !mResuming)
+                if (mGameRunning && hadSnapshot && !mResuming
+                    && mRuntime->characterLifecycle() == CharacterLifecycle::EstablishedCharacter
+                    && !mMinimumEstablishedSnapshotRevision)
                 {
                     captured = mInput.captureCellTransition();
                     if (captured.result != ProviderResult::Accepted)
@@ -213,6 +219,19 @@ namespace TES3MP::OpenMWAdapter
                 }
 
                 const auto& snapshot = mRuntime->session().stateMachine().confirmedSnapshot();
+                if (advanced.characterProfileApplied
+                    && mRuntime->characterLifecycle() == CharacterLifecycle::EstablishedCharacter
+                    && previousSnapshotRevision)
+                    mMinimumEstablishedSnapshotRevision = *previousSnapshotRevision;
+                if (mMinimumEstablishedSnapshotRevision && snapshot
+                    && snapshot->header().canonicalRevision() > *mMinimumEstablishedSnapshotRevision)
+                {
+                    const auto safePointRevision = snapshot->header().canonicalRevision();
+                    mMinimumActorBaselineRevision = safePointRevision;
+                    mMinimumObjectBaselineRevision = safePointRevision;
+                    mMinimumInventoryRevision = safePointRevision;
+                    mMinimumEstablishedSnapshotRevision.reset();
+                }
                 if (snapshot)
                     mMotion.observeAcknowledgement(snapshot->header().acknowledgedCommandSequence(), now);
                 bool finalizedCellTransition = false;
@@ -236,11 +255,43 @@ namespace TES3MP::OpenMWAdapter
                     mReady = true;
                     mStatus.report(ConnectionStatus::Resumed);
                 }
-                if ((advanced.baselineCompleted || advanced.snapshotApplied || advanced.observationApplied) && snapshot
+                const bool firstBaseline = !mResuming && advanced.baselineCompleted && !mReady;
+                if (firstBaseline)
+                {
+                    auto current = snapshot ? continuity(*snapshot) : std::nullopt;
+                    if (!current || !snapshot)
+                    {
+                        closeTerminal(ConnectionStatus::TransportFailed);
+                        return;
+                    }
+                    mContinuity = std::move(current);
+                    mAttemptGeneration = snapshot->header().targetSessionGeneration();
+                    mReady = true;
+                    mPresentationBootstrapPending = true;
+                }
+                if (mRuntime->characterLifecycle() != CharacterLifecycle::EstablishedCharacter
+                    || mMinimumEstablishedSnapshotRevision)
+                {
+                    if (mRuntime->flushOutbound() != ClientRuntimeResult::Accepted)
+                        handleRuntimeFailure(
+                            ClientRuntimeResult::TransportFailed, ClientSessionAction::SessionClosed, now);
+                    return;
+                }
+                const bool spatialStateChanged = mPresentationBootstrapPending || advanced.baselineCompleted
+                    || advanced.snapshotApplied || advanced.observationApplied;
+                std::optional<LocalLocomotionReconciliation> localReconciliation;
+                if (spatialStateChanged && snapshot
                     && mRuntime->session().stateMachine().interestBaselineComplete())
                 {
-                    const auto localReconciliation
-                        = mRuntime->reconcileLocalPresentation(advanced.baselineCompleted && !mReady);
+                    localReconciliation
+                        = mRuntime->reconcileLocalPresentation(firstBaseline || mPresentationBootstrapPending);
+                }
+                if (mGameRunning
+                    && mRuntime->characterLifecycle() == CharacterLifecycle::EstablishedCharacter
+                    && spatialStateChanged
+                    && snapshot
+                    && mRuntime->session().stateMachine().interestBaselineComplete())
+                {
                     const auto applied
                         = mPresentation.applyAuthoritative(*snapshot, mRuntime->session().observedPlayers(),
                             !mPendingCellTransition && !mDeferredCellTransition && !captured.transition, now,
@@ -250,23 +301,13 @@ namespace TES3MP::OpenMWAdapter
                         closeForProviderFailure(applied);
                         return;
                     }
-                    if (advanced.baselineCompleted)
-                    {
-                        auto current = continuity(*snapshot);
-                        if (!current)
-                        {
-                            closeTerminal(ConnectionStatus::TransportFailed);
-                            return;
-                        }
-                        mContinuity = std::move(current);
-                        mAttemptGeneration = snapshot->header().targetSessionGeneration();
-                        mReady = true;
-                    }
                 }
                 const auto& actorSnapshot = mRuntime->session().stateMachine().confirmedActorSnapshot();
                 const auto& playerBaseline = mRuntime->session().stateMachine().confirmedInterestBaseline();
                 const auto& actorBaseline = mRuntime->session().stateMachine().confirmedActorInterestBaseline();
-                if ((advanced.actorBaselineCompleted || advanced.actorBaselineApplied || advanced.actorSnapshotApplied
+                if (mGameRunning
+                    && (mPresentationBootstrapPending || advanced.actorBaselineCompleted || advanced.actorBaselineApplied
+                        || advanced.actorSnapshotApplied
                         || advanced.baselineCompleted || advanced.snapshotApplied)
                     && !mPendingCellTransition && !mDeferredCellTransition && !captured.transition && actorSnapshot
                     && playerBaseline && actorBaseline
@@ -286,7 +327,9 @@ namespace TES3MP::OpenMWAdapter
                 }
                 const auto& objectBaseline
                     = mRuntime->session().stateMachine().confirmedInteractiveObjectInterestBaseline();
-                if ((advanced.interactiveObjectBaselineCompleted || advanced.interactiveObjectBaselineApplied
+                if (mGameRunning
+                    && (mPresentationBootstrapPending || advanced.interactiveObjectBaselineCompleted
+                        || advanced.interactiveObjectBaselineApplied
                         || advanced.baselineCompleted || advanced.snapshotApplied)
                     && !mPendingCellTransition && !mDeferredCellTransition && !captured.transition && objectBaseline
                     && playerBaseline && objectBaseline->canonicalRevision() >= playerBaseline->canonicalRevision()
@@ -305,7 +348,9 @@ namespace TES3MP::OpenMWAdapter
                 const auto& playerInventory = mRuntime->session().stateMachine().confirmedPlayerInventoryBaseline();
                 const auto& groundItems = mRuntime->session().stateMachine().confirmedGroundItemBaseline();
                 const auto& equipment = mRuntime->session().stateMachine().confirmedEquipmentSnapshot();
-                if ((advanced.inventoryReplicationCompleted || advanced.playerInventoryApplied
+                if (mGameRunning
+                    && (mPresentationBootstrapPending || advanced.inventoryReplicationCompleted
+                        || advanced.playerInventoryApplied
                         || advanced.containerInventoryApplied || advanced.groundItemsApplied
                         || advanced.equipmentSnapshotApplied || advanced.baselineCompleted || advanced.snapshotApplied)
                     && !mPendingCellTransition && !mDeferredCellTransition && !captured.transition && playerInventory
@@ -329,7 +374,10 @@ namespace TES3MP::OpenMWAdapter
                     }
                 }
                 const auto& combat = mRuntime->confirmedCombatSnapshot();
-                if ((advanced.combatSnapshotApplied || !advanced.combatEvents.empty()) && combat)
+                if (mGameRunning
+                    && (mPresentationBootstrapPending || advanced.combatSnapshotApplied
+                        || !advanced.combatEvents.empty())
+                    && combat)
                 {
                     if (mPresentation.applyCombat(*combat, advanced.combatEvents, now) != ProviderResult::Accepted)
                     {
@@ -337,7 +385,7 @@ namespace TES3MP::OpenMWAdapter
                         return;
                     }
                 }
-                if (snapshot)
+                if (mGameRunning && snapshot)
                 {
                     mPoseEvidence.retain(snapshot->view().entries());
                     for (const auto& pose : advanced.poseSnapshots)
@@ -357,7 +405,7 @@ namespace TES3MP::OpenMWAdapter
                     }
                 }
                 mPoseEvidence.advance(now);
-                if (snapshot)
+                if (mGameRunning && snapshot)
                 {
                     for (const auto& entry : snapshot->view().entries())
                     {
@@ -373,11 +421,13 @@ namespace TES3MP::OpenMWAdapter
                         }
                     }
                 }
-                if (mPresentation.advance(now) != ProviderResult::Accepted)
+                if (mGameRunning && mPresentation.advance(now) != ProviderResult::Accepted)
                 {
                     closeForProviderFailure(ProviderResult::PresentationFailed);
                     return;
                 }
+                if (mGameRunning)
+                    mPresentationBootstrapPending = false;
                 if (mAwaitingResync && mResyncPlayerBaseline && (!actorsNegotiated(*mRuntime) || mResyncActorBaseline)
                     && (!interactiveObjectsNegotiated(*mRuntime) || mResyncObjectBaseline)
                     && (!inventoryNegotiated(*mRuntime) || mResyncInventory)
@@ -387,6 +437,13 @@ namespace TES3MP::OpenMWAdapter
                     mControl->resyncCompleted();
                 }
                 if (mResuming || !mReady)
+                {
+                    if (mRuntime->flushOutbound() != ClientRuntimeResult::Accepted)
+                        handleRuntimeFailure(
+                            ClientRuntimeResult::TransportFailed, ClientSessionAction::SessionClosed, now);
+                    return;
+                }
+                if (!mGameRunning)
                 {
                     if (mRuntime->flushOutbound() != ClientRuntimeResult::Accepted)
                         handleRuntimeFailure(
@@ -425,6 +482,7 @@ namespace TES3MP::OpenMWAdapter
                         mResyncCombat = false;
                     }
                 }
+
                 if (mReady && !mPendingCellTransition && !mDeferredCellTransition && !captured.transition
                     && interactiveObjectsNegotiated(*mRuntime))
                 {
@@ -528,6 +586,49 @@ namespace TES3MP::OpenMWAdapter
                     handleRuntimeFailure(ClientRuntimeResult::TransportFailed, ClientSessionAction::SessionClosed, now);
             }
 
+            MultiplayerState multiplayerState() const noexcept override
+            {
+                if (mClosed)
+                    return MultiplayerState::Failed;
+                return mReady ? MultiplayerState::Ready : MultiplayerState::Connecting;
+            }
+
+            bool gameStartRequested() const noexcept override { return mReady && !mGameRunning; }
+
+            CharacterLifecycle characterLifecycle() const noexcept override
+            { return mRuntime ? mRuntime->characterLifecycle() : CharacterLifecycle::NewCharacter; }
+
+            CharacterProfileRevision characterProfileRevision() const noexcept override
+            { return mRuntime ? mRuntime->characterProfileRevision() : CharacterProfileRevision::initial(); }
+
+            const ReliableCharacterProfile* confirmedCharacterProfile() const noexcept override
+            {
+                if (!mRuntime)
+                    return nullptr;
+                const auto& value = mRuntime->confirmedCharacterProfile();
+                return value ? &*value : nullptr;
+            }
+
+            bool submitCharacterCreation(CharacterCreationChoice choice) noexcept override
+            try
+            {
+                return mRuntime && mRuntime->queueCharacterCreation(
+                    std::move(choice), mRuntime->characterProfileRevision()).result == ClientRuntimeResult::Accepted;
+            }
+            catch (...)
+            {
+                return false;
+            }
+
+            void setGameRunning(bool value) noexcept override { mGameRunning = value; }
+
+            void confirmGameStart(bool running) noexcept override
+            {
+                mGameRunning = running;
+                if (!running)
+                    closeTerminal(ConnectionStatus::PresentationFailed);
+            }
+
         private:
             void handleRuntimeFailure(ClientRuntimeResult result, ClientSessionAction action, MonotonicInstant now)
             {
@@ -588,6 +689,7 @@ namespace TES3MP::OpenMWAdapter
                 mMinimumActorBaselineRevision.reset();
                 mMinimumObjectBaselineRevision.reset();
                 mMinimumInventoryRevision.reset();
+                mMinimumEstablishedSnapshotRevision.reset();
                 mReady = false;
                 mResuming = true;
                 mAttemptGeneration = *nextGeneration;
@@ -704,7 +806,10 @@ namespace TES3MP::OpenMWAdapter
             std::optional<CanonicalRevision> mMinimumActorBaselineRevision;
             std::optional<CanonicalRevision> mMinimumObjectBaselineRevision;
             std::optional<CanonicalRevision> mMinimumInventoryRevision;
+            std::optional<CanonicalRevision> mMinimumEstablishedSnapshotRevision;
             bool mReady = false;
+            bool mGameRunning = true;
+            bool mPresentationBootstrapPending = false;
             bool mResuming = false;
             std::optional<CommandSequence> mPendingCellTransition;
             std::optional<CellTransition> mDeferredCellTransition;

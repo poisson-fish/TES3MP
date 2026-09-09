@@ -112,6 +112,44 @@
       ],
       "disposition": "local; possible general-purpose upstream candidate; no upstream contact authorized",
       "removal_condition": "OpenMW supplies an equivalent reviewed pre-mutation melee hit hook and replicated-actor targeting role"
+    },
+    {
+      "id": "P18-001",
+      "slice": "authoritative character creation",
+      "owner": "OpenMW adapter",
+      "purpose": "Bridge stock prison-ship character-generation choices through bounded server confirmation before durable player mutation while retaining OpenMW dialogue, menus, animations, and presentation.",
+      "paths": [
+        "apps/openmw/mwgui/charactercreation.cpp",
+        "apps/openmw/mwgui/charactercreation.hpp"
+      ],
+      "tests": [
+        "scripts/tests/test_openmw_patch_registry.py",
+        "openmw_tes3mp_adapter_tests",
+        "tes3mp_character_profile_tests",
+        "tes3mp_character_creation_protocol_tests"
+      ],
+      "disposition": "local product adapter",
+      "removal_condition": "OpenMW supplies an equivalent supported pre-mutation and confirmed-projection character-generation seam"
+    },
+    {
+      "id": "P17-001",
+      "slice": "client release flow",
+      "owner": "OpenMW adapter",
+      "purpose": "Expose the optional multiplayer coordinator to the stock main menu, present a bounded host/connect dialog, and start stock new-game initialization only after the authoritative initial baseline is ready.",
+      "paths": [
+        "apps/openmw/mwbase/environment.hpp",
+        "apps/openmw/mwgui/mainmenu.cpp",
+        "apps/openmw/mwgui/mainmenu.hpp",
+        "apps/openmw/mwgui/multiplayerdialog.cpp",
+        "apps/openmw/mwgui/multiplayerdialog.hpp"
+      ],
+      "tests": [
+        "scripts/tests/test_openmw_patch_registry.py",
+        "openmw_tes3mp_adapter_tests",
+        "openmw RelWithDebInfo link"
+      ],
+      "disposition": "local product composition",
+      "removal_condition": "OpenMW supplies an equivalent supported multiplayer menu and deferred game-start lifecycle"
     }
   ]
 }

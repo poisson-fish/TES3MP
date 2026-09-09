@@ -3,6 +3,8 @@
 
 #include <components/esm3/loadclas.hpp>
 
+#include "../tes3mp/engine_coordinator.hpp"
+
 #include <map>
 #include <memory>
 #include <vector>
@@ -129,6 +131,26 @@ namespace MWGui
         };
 
         CSE mCreationStage; // Which state the character creating is in, controls back/next/ok buttons
+
+        enum class PendingCharacterChoice
+        {
+            None,
+            Name,
+            Race,
+            Class,
+            Birthsign,
+            Complete,
+        };
+        PendingCharacterChoice mPendingCharacterChoice = PendingCharacterChoice::None;
+        TES3MP::CharacterProfileRevision mPendingProfileRevision = TES3MP::CharacterProfileRevision::initial();
+        ESM::RefId mPendingHeadId;
+        ESM::RefId mPendingHairId;
+        bool mPendingMale = false;
+
+        bool multiplayerChargen() const noexcept;
+        bool submitCharacterChoice(TES3MP::CharacterCreationChoice choice, PendingCharacterChoice pending) noexcept;
+        void applyConfirmedCharacterChoice();
+        void applyResumedCharacterProfile();
 
         void handleDialogDone(CSE currentStage, int nextMode);
     };

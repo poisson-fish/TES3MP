@@ -24,6 +24,7 @@ PROTOCOL_FRAME_CORPUS_DIR = SOURCE_DIR / "tests" / "fuzz" / "corpus" / "protocol
 PROTOCOL_HANDSHAKE_CORPUS_DIR = SOURCE_DIR / "tests" / "fuzz" / "corpus" / "protocol_handshake"
 PROTOCOL_EXCHANGE_CORPUS_DIR = SOURCE_DIR / "tests" / "fuzz" / "corpus" / "protocol_exchange"
 PROTOCOL_POSE_CORPUS_DIR = SOURCE_DIR / "tests" / "fuzz" / "corpus" / "protocol_pose"
+CHARACTER_CREATION_CORPUS_DIR = SOURCE_DIR / "tests" / "fuzz" / "corpus" / "character_creation_protocol"
 PROFILES = {
     "asan-ubsan": {
         "preset": "tes3mp-safety-asan-ubsan",
@@ -41,6 +42,8 @@ CONTRACT_EXECUTABLES = (
     "tes3mp_protocol_envelope_tests",
     "tes3mp_protocol_frame_tests",
     "tes3mp_protocol_handshake_tests",
+    "tes3mp_character_profile_tests",
+    "tes3mp_character_creation_protocol_tests",
     "tes3mp_protocol_exchange_tests",
     "tes3mp_protocol_pose_tests",
     "tes3mp_session_state_tests",
@@ -168,6 +171,24 @@ DECODER_REGISTRY = {
             "sha256": "a055a67fd7ece4aed70788529f53e42c667764edc5bf82cdc334c7ea1322d0e3",
         },
     },
+    "decodeClientCharacterCreationCommand": {
+        "target": "tes3mp_character_creation_protocol_fuzz",
+        "source": "tests/fuzz/character_creation_protocol_fuzz.cpp",
+        "corpus": "character_creation_protocol",
+        "valid_seed": {
+            "name": "valid-character-command",
+            "sha256": "8bc8a56e96fbd20cfa24edbec538b2c36b72cbf2823c997f91aadd3983aa8c2d",
+        },
+    },
+    "decodeReliableCharacterProfile": {
+        "target": "tes3mp_character_creation_protocol_fuzz",
+        "source": "tests/fuzz/character_creation_protocol_fuzz.cpp",
+        "corpus": "character_creation_protocol",
+        "valid_seed": {
+            "name": "valid-character-profile",
+            "sha256": "8a996547dfa4af2961cbd870b8f98979dd839760b23556faa676134fca75ba66",
+        },
+    },
 }
 CORPUS_DIRECTORIES = {
     "spatial_round_trip": CORPUS_DIR,
@@ -175,16 +196,19 @@ CORPUS_DIRECTORIES = {
     "protocol_handshake": PROTOCOL_HANDSHAKE_CORPUS_DIR,
     "protocol_exchange": PROTOCOL_EXCHANGE_CORPUS_DIR,
     "protocol_pose": PROTOCOL_POSE_CORPUS_DIR,
+    "character_creation_protocol": CHARACTER_CREATION_CORPUS_DIR,
 }
 EXPECTED_COMPILED_SOURCES = {
     "client_session/anchor.cpp",
     "client_session/client_session.cpp",
     "protocol/anchor.cpp",
     "protocol/authentication.cpp",
+    "protocol/character_creation_protocol.cpp",
     "protocol/protocol_frame.cpp",
     "protocol/protocol_handshake.cpp",
     "protocol/protocol_exchange.cpp",
     "protocol/protocol_pose.cpp",
+    "server_core/character_profile.cpp",
     "server_core/anchor.cpp",
     "server_core/canonical_checksum.cpp",
     "server_core/canonical_publication.cpp",
@@ -216,6 +240,8 @@ EXPECTED_COMPILED_SOURCES = {
     "tests/protocol_envelope_tests.cpp",
     "tests/protocol_authentication_tests.cpp",
     "tests/protocol_handshake_tests.cpp",
+    "tests/character_profile_tests.cpp",
+    "tests/character_creation_protocol_tests.cpp",
     "tests/protocol_exchange_tests.cpp",
     "tests/protocol_pose_tests.cpp",
     "tests/session_state_machine_tests.cpp",
@@ -404,6 +430,27 @@ def verify_protocol_pose_corpus() -> list[dict[str, Any]]:
     return records
 
 
+def verify_character_creation_corpus() -> list[dict[str, Any]]:
+    files = sorted(path for path in CHARACTER_CREATION_CORPUS_DIR.iterdir() if path.is_file())
+    if not files or len(files) > MAX_CORPUS_FILES:
+        raise RuntimeSafetyError(
+            f"Character-creation fuzz corpus must contain 1-{MAX_CORPUS_FILES} files, found {len(files)}"
+        )
+    records = []
+    for path in files:
+        size = path.stat().st_size
+        if size > TES3MP_LATEST_WINS_SNAPSHOT_MAX_BYTES:
+            raise RuntimeSafetyError(f"Character-creation fuzz seed exceeds protocol bounds: {path}")
+        records.append(
+            {
+                "path": str(path.relative_to(ROOT)).replace(os.sep, "/"),
+                "bytes": size,
+                "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+            }
+        )
+    return records
+
+
 def verify_decoder_registry() -> list[dict[str, Any]]:
     records = []
     targets = set()
@@ -446,6 +493,7 @@ def verify_decoder_registry() -> list[dict[str, Any]]:
         "tes3mp_protocol_handshake_fuzz",
         "tes3mp_protocol_exchange_fuzz",
         "tes3mp_protocol_pose_fuzz",
+        "tes3mp_character_creation_protocol_fuzz",
     }
     if targets != expected_targets:
         raise RuntimeSafetyError(f"Decoder registry target mismatch: {sorted(targets)}")
@@ -533,6 +581,7 @@ def verify_instrumented_compile_commands(profile: str, build_dir: pathlib.Path) 
         expected.add("tests/fuzz/protocol_authentication_fuzz.cpp")
         expected.add("tests/fuzz/protocol_exchange_fuzz.cpp")
         expected.add("tests/fuzz/protocol_pose_fuzz.cpp")
+        expected.add("tests/fuzz/character_creation_protocol_fuzz.cpp")
         required_flag = "-fsanitize=address,undefined"
     else:
         required_flag = "-fsanitize=thread"
@@ -586,6 +635,7 @@ def execute(profile: str, fuzz_seconds: int) -> pathlib.Path:
     protocol_handshake_corpus = verify_protocol_handshake_corpus()
     protocol_exchange_corpus = verify_protocol_exchange_corpus()
     protocol_pose_corpus = verify_protocol_pose_corpus()
+    character_creation_corpus = verify_character_creation_corpus()
     decoder_registry = verify_decoder_registry()
     try:
         run_command(configure_command(cmake, profile), environment=environment, cwd=SOURCE_DIR, log_path=log_path)
@@ -653,6 +703,19 @@ def execute(profile: str, fuzz_seconds: int) -> pathlib.Path:
                 cwd=SOURCE_DIR,
                 log_path=log_path,
             )
+            run_command(
+                fuzz_command(
+                    profile,
+                    fuzz_seconds,
+                    artifact_dir,
+                    target="tes3mp_character_creation_protocol_fuzz",
+                    corpus_dir=CHARACTER_CREATION_CORPUS_DIR,
+                    maximum_input_bytes=TES3MP_LATEST_WINS_SNAPSHOT_MAX_BYTES + 1,
+                ),
+                environment=environment,
+                cwd=SOURCE_DIR,
+                log_path=log_path,
+            )
     except RuntimeSafetyError as error:
         write_json(
             evidence_dir / "runtime-safety-failure.json",
@@ -708,6 +771,7 @@ def execute(profile: str, fuzz_seconds: int) -> pathlib.Path:
                         "tes3mp_protocol_handshake_fuzz",
                         "tes3mp_protocol_exchange_fuzz",
                         "tes3mp_protocol_pose_fuzz",
+                        "tes3mp_character_creation_protocol_fuzz",
                     ]
                     if profile == "asan-ubsan"
                     else []
@@ -719,6 +783,7 @@ def execute(profile: str, fuzz_seconds: int) -> pathlib.Path:
                     "protocol_handshake": protocol_handshake_corpus,
                     "protocol_exchange": protocol_exchange_corpus,
                     "protocol_pose": protocol_pose_corpus,
+                    "character_creation_protocol": character_creation_corpus,
                 },
                 "maximum_input_bytes": {
                     "spatial_round_trip": MAX_CORPUS_FILE_BYTES,
@@ -726,6 +791,7 @@ def execute(profile: str, fuzz_seconds: int) -> pathlib.Path:
                     "protocol_handshake": TES3MP_SESSION_CONTROL_MAX_BYTES + 1,
                     "protocol_exchange": TES3MP_LATEST_WINS_SNAPSHOT_MAX_BYTES + 1,
                     "protocol_pose": TES3MP_PRESENTATION_SAMPLE_MAX_BYTES + 1,
+                    "character_creation_protocol": TES3MP_LATEST_WINS_SNAPSHOT_MAX_BYTES + 1,
                 },
                 "parser_max_bytes": {
                     "spatial_round_trip": MAX_SPATIAL_SNAPSHOT_BYTES,
@@ -733,6 +799,7 @@ def execute(profile: str, fuzz_seconds: int) -> pathlib.Path:
                     "protocol_handshake": TES3MP_SESSION_CONTROL_MAX_BYTES,
                     "protocol_exchange": TES3MP_LATEST_WINS_SNAPSHOT_MAX_BYTES,
                     "protocol_pose": TES3MP_PRESENTATION_SAMPLE_MAX_BYTES,
+                    "character_creation_protocol": TES3MP_LATEST_WINS_SNAPSHOT_MAX_BYTES,
                 },
                 "decoder_registry": decoder_registry,
             },

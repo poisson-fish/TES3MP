@@ -7,6 +7,7 @@
 #include "interest_projection.hpp"
 #include "inventory_interest_projection.hpp"
 #include "tes3mp/protocol_frame.hpp"
+#include "tes3mp/character_creation_protocol.hpp"
 
 #include <algorithm>
 #include <variant>
@@ -70,6 +71,9 @@ namespace TES3MP::ServerApp
             const auto combatCapable = joiningSession && joiningSession->negotiatedHello()
                 && std::ranges::binary_search(joiningSession->negotiatedHello()->negotiatedCapabilities(),
                     combatReplicationCapability());
+            const auto characterCapable = joiningSession && joiningSession->negotiatedHello()
+                && std::ranges::binary_search(joiningSession->negotiatedHello()->negotiatedCapabilities(),
+                    characterCreationCapability());
             if (mCombat)
             {
                 if (!mPendingInventory || !mPlayerCombatTemplate || !mItemCatalog)
@@ -125,6 +129,18 @@ namespace TES3MP::ServerApp
             messages.push_back({ mConnection, TransportChannel::ReliableOrdered, owned[0] });
             messages.push_back({ mConnection, TransportChannel::ReliableOrdered, owned[1] });
             messages.push_back({ mConnection, TransportChannel::LatestWins, owned[2] });
+            if (characterCapable)
+            {
+                auto profileFrame = encodeProtocolFrame(MessageClass::ReliableOperation,
+                    MessageKind::ReliableCharacterProfile,
+                    encodeReliableCharacterProfile({ join.session,
+                        join.initialSnapshot.header().targetSessionGeneration(), join.player,
+                        CharacterConfirmationResult::Confirmed, join.characterProfile }));
+                if (!std::holds_alternative<std::vector<std::byte>>(profileFrame))
+                    return false;
+                owned.push_back(std::get<std::vector<std::byte>>(std::move(profileFrame)));
+                messages.push_back({ mConnection, TransportChannel::ReliableOrdered, owned.back() });
+            }
 
             if (actorBaseline)
             {
@@ -238,13 +254,26 @@ namespace TES3MP::ServerApp
             if (playerCredential)
             {
                 auto withPlayerCredential = AuthenticationAcceptedMessage::create(
-                    accepted.takeToken(), accepted.lifetimeMilliseconds(), std::move(*playerCredential));
+                    accepted.takeToken(), accepted.lifetimeMilliseconds(), std::move(*playerCredential),
+                    preparation.join.characterLifecycle, preparation.join.profileRevision);
                 if (!withPlayerCredential)
                 {
                     cancel();
                     return { JoinCompositionResult::EncodingRejected, std::nullopt };
                 }
                 accepted = std::move(*withPlayerCredential);
+            }
+            else
+            {
+                auto withCharacterState = AuthenticationAcceptedMessage::create(accepted.takeToken(),
+                    accepted.lifetimeMilliseconds(), std::nullopt, preparation.join.characterLifecycle,
+                    preparation.join.profileRevision);
+                if (!withCharacterState)
+                {
+                    cancel();
+                    return { JoinCompositionResult::EncodingRejected, std::nullopt };
+                }
+                accepted = std::move(*withCharacterState);
             }
             const auto authenticationPayload = encodeAuthenticationAccepted(accepted);
             const auto snapshotPayload = encodeLatestWinsSnapshot(preparation.join.initialSnapshot);

@@ -1,0 +1,6 @@
+TES3MP_COLLISION_V1
+manifest 5c3c8c2cbd20e25901b59b3ece33d36b7ef0e3d60ad8d11828bcc61a5ead1647
+cell interior 1
+cell interior 2
+cell interior 3
+cell exterior 4 -2 -9

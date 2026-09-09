@@ -100,11 +100,14 @@ namespace
             return false;
 
         auto accepted = AuthenticationAcceptedMessage::create(
-            token(41), MinimumResumeTokenLifetimeMilliseconds, playerCredential(43));
+            token(41), MinimumResumeTokenLifetimeMilliseconds, playerCredential(43),
+            CharacterLifecycle::EstablishedCharacter, *CharacterProfileRevision::fromValue(9));
         const auto acceptedBytes = encodeAuthenticationAccepted(*accepted);
         auto decodedAccepted = decodeAuthenticationAccepted(acceptedBytes);
         auto* acceptedValue = std::get_if<AuthenticationAcceptedMessage>(&decodedAccepted);
-        if (!acceptedValue || !acceptedValue->hasPlayerCredential())
+        if (!acceptedValue || !acceptedValue->hasPlayerCredential()
+            || acceptedValue->characterLifecycle() != CharacterLifecycle::EstablishedCharacter
+            || acceptedValue->profileRevision() != *CharacterProfileRevision::fromValue(9))
             return false;
         auto returned = acceptedValue->takePlayerCredential();
         copied.fill(std::byte{});

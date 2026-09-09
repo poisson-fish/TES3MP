@@ -102,7 +102,7 @@
     {
       "path": "apps/openmw/engine.cpp",
       "status": "M",
-      "purpose": "Adds the approved post-input coordinator call and ordered teardown before OpenMW dependencies."
+      "purpose": "Adds the approved post-input coordinator call, defers stock new-game bootstrap until the authoritative multiplayer baseline is ready, and orders teardown before OpenMW dependencies."
     },
     {
       "path": "apps/openmw/engine.hpp",
@@ -112,7 +112,22 @@
     {
       "path": "apps/openmw/main.cpp",
       "status": "M",
-      "purpose": "Composes the explicitly enabled desktop multiplayer coordinator with sanitized startup, local canonical content mappings, and runtime status reporting."
+      "purpose": "Composes either automatic or dormant menu-driven desktop multiplayer startup with sanitized endpoints, endpoint-scoped credentials, local canonical content mappings, hosted-server paths, and runtime status reporting."
+    },
+    {
+      "path": "apps/openmw/mwbase/environment.hpp",
+      "status": "M",
+      "purpose": "Exposes the nullable app-owned multiplayer coordinator to the main-menu UI without transferring ownership."
+    },
+    {
+      "path": "apps/openmw/mwgui/charactercreation.cpp",
+      "status": "M",
+      "purpose": "Routes stock character-generation selections through server confirmation and projects confirmed profile choices back through OpenMW mechanics."
+    },
+    {
+      "path": "apps/openmw/mwgui/charactercreation.hpp",
+      "status": "M",
+      "purpose": "Tracks the bounded pending and confirmed state used by the focused authoritative chargen bridge."
     },
     {
       "path": "apps/openmw/mwgui/container.cpp",
@@ -158,6 +173,26 @@
       "path": "apps/openmw/mwgui/itemmodel.hpp",
       "status": "M",
       "purpose": "Declares the bounded process-local inventory transfer interceptor seam."
+    },
+    {
+      "path": "apps/openmw/mwgui/mainmenu.cpp",
+      "status": "M",
+      "purpose": "Adds the no-game Multiplayer action and opens the bounded connect-or-host dialog when multiplayer composition is available."
+    },
+    {
+      "path": "apps/openmw/mwgui/mainmenu.hpp",
+      "status": "M",
+      "purpose": "Owns the lazily created multiplayer dialog and its main-menu button."
+    },
+    {
+      "path": "apps/openmw/mwgui/multiplayerdialog.cpp",
+      "status": "A",
+      "purpose": "Implements bounded user-driven server address entry plus Connect, Host, and Cancel actions through the app-owned coordinator."
+    },
+    {
+      "path": "apps/openmw/mwgui/multiplayerdialog.hpp",
+      "status": "A",
+      "purpose": "Declares the modal multiplayer connection dialog without adding TES3MP ownership to generic GUI infrastructure."
     },
     {
       "path": "apps/openmw/mwmechanics/character.cpp",
@@ -237,7 +272,7 @@
     {
       "path": "apps/openmw/options.cpp",
       "status": "M",
-      "purpose": "Declares the approved explicit desktop multiplayer enablement, endpoint, credentials, and local content-mapping options."
+      "purpose": "Declares the approved explicit desktop multiplayer enablement, endpoint, endpoint-scoped credential directory, hosted-server paths, and local content-mapping options."
     },
     {
       "path": "apps/openmw/tes3mp/CMakeLists.txt",
@@ -373,6 +408,16 @@
       "path": "apps/tes3mp-server/authenticated_join_composition.hpp",
       "status": "A",
       "purpose": "Defines the app-owned authenticated-join composition and atomic response-queue boundary."
+    },
+    {
+      "path": "apps/tes3mp-server/character_content.cpp",
+      "status": "A",
+      "purpose": "Loads and atomically validates the manifest-scoped authoritative character catalog and official creation spawn."
+    },
+    {
+      "path": "apps/tes3mp-server/character_content.hpp",
+      "status": "A",
+      "purpose": "Declares owned bounded character-content loading results without exposing parser internals."
     },
     {
       "path": "apps/tes3mp-server/combat_content.cpp",
@@ -535,6 +580,16 @@
       "purpose": "Owned minimal server configuration values, limits, errors, and secret-loading interface."
     },
     {
+      "path": "build_windows.bat",
+      "status": "A",
+      "purpose": "Thin Windows command-shell entry point for the bounded PowerShell product build wrapper."
+    },
+    {
+      "path": "build_windows.ps1",
+      "status": "A",
+      "purpose": "Selects bounded product, focused check, headless, standalone contract, or full baseline build scopes with explicit MSVC setup."
+    },
+    {
       "path": "cmake/TES3MPRuntimeSafety.cmake",
       "status": "A",
       "purpose": "Owner-approved fail-closed target-scoped ASan/UBSan, ThreadSanitizer, and libFuzzer CMake policy."
@@ -638,6 +693,16 @@
       "path": "components/tes3mp/include/tes3mp/canonical_state.hpp",
       "status": "A",
       "purpose": "Owner-approved immutable canonical player/session state including locomotion mode, bounded finalized-command history values, closed invariants, const access, and checked spatial advancement."
+    },
+    {
+      "path": "components/tes3mp/include/tes3mp/character_creation_protocol.hpp",
+      "status": "A",
+      "purpose": "Declares bounded typed character commands and reliable complete-profile confirmations."
+    },
+    {
+      "path": "components/tes3mp/include/tes3mp/character_profile.hpp",
+      "status": "A",
+      "purpose": "Defines explicit character lifecycle, creation phases, canonical profiles, manifest record identities, and pure validation."
     },
     {
       "path": "components/tes3mp/include/tes3mp/client_locomotion.hpp",
@@ -895,6 +960,11 @@
       "purpose": "Move-only bounded password/token storage plus verifier-first T3AQ/T3AA/T3AR credential encoding, decoding, lifetime validation, and best-effort clearing."
     },
     {
+      "path": "components/tes3mp/protocol/character_creation_protocol.cpp",
+      "status": "A",
+      "purpose": "Implements verifier-checked semantic codecs for character commands and complete server confirmations."
+    },
+    {
       "path": "components/tes3mp/protocol/combat_replication.cpp",
       "status": "A",
       "purpose": "Implements bounded verifier-first melee command, latest-wins combat snapshot, and reliable combat event codecs."
@@ -918,6 +988,11 @@
       "path": "components/tes3mp/protocol/generated/authentication_request_generated.h",
       "status": "A",
       "purpose": "Pinned FlatBuffers 25.12.19 generated C++ for the size-prefixed T3AQ tagged credential schema."
+    },
+    {
+      "path": "components/tes3mp/protocol/generated/client_character_creation_command_generated.h",
+      "status": "A",
+      "purpose": "Pinned flatc output for the client character-creation command schema."
     },
     {
       "path": "components/tes3mp/protocol/generated/client_hello_generated.h",
@@ -968,6 +1043,11 @@
       "path": "components/tes3mp/protocol/generated/reliable_actor_interest_baseline_generated.h",
       "status": "A",
       "purpose": "Pinned FlatBuffers 25.12.19 generated C++ for bounded complete actor membership."
+    },
+    {
+      "path": "components/tes3mp/protocol/generated/reliable_character_profile_generated.h",
+      "status": "A",
+      "purpose": "Pinned flatc output for reliable authoritative character-profile confirmations."
     },
     {
       "path": "components/tes3mp/protocol/generated/reliable_combat_event_batch_generated.h",
@@ -1090,6 +1170,11 @@
       "purpose": "Explicit-ID T3AQ tagged join-password or resume-token request schema."
     },
     {
+      "path": "components/tes3mp/protocol/schema/client_character_creation_command.fbs",
+      "status": "A",
+      "purpose": "Defines the directional typed character-selection command wire schema with explicit field IDs."
+    },
+    {
       "path": "components/tes3mp/protocol/schema/client_hello.fbs",
       "status": "A",
       "purpose": "Explicit-ID T3CH client protocol-range and bounded optional/required capability offer schema."
@@ -1138,6 +1223,11 @@
       "path": "components/tes3mp/protocol/schema/reliable_actor_interest_baseline.fbs",
       "status": "A",
       "purpose": "Explicit-ID schema for bounded complete actor membership and completion metadata."
+    },
+    {
+      "path": "components/tes3mp/protocol/schema/reliable_character_profile.fbs",
+      "status": "A",
+      "purpose": "Defines complete reliable authoritative profile confirmations with bounded parallel inventory fields."
     },
     {
       "path": "components/tes3mp/protocol/schema/reliable_combat_event_batch.fbs",
@@ -1233,6 +1323,11 @@
       "path": "components/tes3mp/server_core/canonical_state.cpp",
       "status": "A",
       "purpose": "Full-input canonical-state and finalized-history validation, deterministic owned construction and lookup, and pure atomic spatial revision advancement implementation."
+    },
+    {
+      "path": "components/tes3mp/server_core/character_profile.cpp",
+      "status": "A",
+      "purpose": "Validates phased character selections atomically and derives canonical attributes, skills, spells, and initial inventory."
     },
     {
       "path": "components/tes3mp/server_core/combat_world.cpp",
@@ -1380,6 +1475,16 @@
       "purpose": "Canonical scope, binding, ordering, hard-bound, atomic-revision, failure-preservation, acknowledgement, immutability, and boundary contracts."
     },
     {
+      "path": "components/tes3mp/tests/character_creation_protocol_tests.cpp",
+      "status": "A",
+      "purpose": "Covers every typed character command, full profile round trips, golden vectors, and malformed payloads."
+    },
+    {
+      "path": "components/tes3mp/tests/character_profile_tests.cpp",
+      "status": "A",
+      "purpose": "Covers lifecycle phases, revision and selection rejection, custom derivation, and atomic completion."
+    },
+    {
       "path": "components/tes3mp/tests/client_locomotion_tests.cpp",
       "status": "A",
       "purpose": "Focused bounded input-history, acknowledgement replay, no-feedback, and hard-discontinuity clearing contracts."
@@ -1420,6 +1525,81 @@
       "purpose": "Independent profile/path validation, latency, loss, duplication, jitter, reorder, stall, disconnect, bounds, backpressure, isolation, and exact seeded-trace contracts."
     },
     {
+      "path": "components/tes3mp/tests/fuzz/character_creation_protocol_fuzz.cpp",
+      "status": "A",
+      "purpose": "Fuzzes both character command and profile decoders with normalized re-encoding of accepted payloads."
+    },
+    {
+      "path": "components/tes3mp/tests/fuzz/corpus/character_creation_protocol/04528fcd6e75d536c1f0d9015e024781de209ea4",
+      "status": "A",
+      "purpose": "Minimized retained character-protocol fuzz seed for malformed and boundary coverage."
+    },
+    {
+      "path": "components/tes3mp/tests/fuzz/corpus/character_creation_protocol/25b5d9bff94bf222471fc4caf47312b802ce2126",
+      "status": "A",
+      "purpose": "Minimized retained character-protocol fuzz seed for malformed and boundary coverage."
+    },
+    {
+      "path": "components/tes3mp/tests/fuzz/corpus/character_creation_protocol/2bd5a71e6f6560e7b09efdfee2d88aeaecd8663a",
+      "status": "A",
+      "purpose": "Minimized retained character-protocol fuzz seed for malformed and boundary coverage."
+    },
+    {
+      "path": "components/tes3mp/tests/fuzz/corpus/character_creation_protocol/2c0f63787f13e151ebcab11a1d77b5b04f5256b6",
+      "status": "A",
+      "purpose": "Minimized retained character-protocol fuzz seed for malformed and boundary coverage."
+    },
+    {
+      "path": "components/tes3mp/tests/fuzz/corpus/character_creation_protocol/32133029b2407f324cfb328868017ea97a8bdca6",
+      "status": "A",
+      "purpose": "Minimized retained character-protocol fuzz seed for malformed and boundary coverage."
+    },
+    {
+      "path": "components/tes3mp/tests/fuzz/corpus/character_creation_protocol/377bfd167da5d23d3319b0930a56085daac6f313",
+      "status": "A",
+      "purpose": "Minimized retained character-protocol fuzz seed for malformed and boundary coverage."
+    },
+    {
+      "path": "components/tes3mp/tests/fuzz/corpus/character_creation_protocol/55ec068634be8d30c8e4ec9fbfa435c6b03fcb96",
+      "status": "A",
+      "purpose": "Minimized retained character-protocol fuzz seed for malformed and boundary coverage."
+    },
+    {
+      "path": "components/tes3mp/tests/fuzz/corpus/character_creation_protocol/5ba93c9db0cff93f52b521d7420e43f6eda2784f",
+      "status": "A",
+      "purpose": "Minimized retained character-protocol fuzz seed for malformed and boundary coverage."
+    },
+    {
+      "path": "components/tes3mp/tests/fuzz/corpus/character_creation_protocol/9e0314ce9bbcf0491b1d8599c43a0de179bcf091",
+      "status": "A",
+      "purpose": "Minimized retained character-protocol fuzz seed for malformed and boundary coverage."
+    },
+    {
+      "path": "components/tes3mp/tests/fuzz/corpus/character_creation_protocol/e2415cb7f63df0c9de23362326ad3c37a9adfc96",
+      "status": "A",
+      "purpose": "Minimized retained character-protocol fuzz seed for malformed and boundary coverage."
+    },
+    {
+      "path": "components/tes3mp/tests/fuzz/corpus/character_creation_protocol/ecd271cd02604eff85fb46582306458153735f66",
+      "status": "A",
+      "purpose": "Minimized retained character-protocol fuzz seed for malformed and boundary coverage."
+    },
+    {
+      "path": "components/tes3mp/tests/fuzz/corpus/character_creation_protocol/f94c73d222cfc36ad6d1baecf2593ae3e9abf251",
+      "status": "A",
+      "purpose": "Minimized retained character-protocol fuzz seed for malformed and boundary coverage."
+    },
+    {
+      "path": "components/tes3mp/tests/fuzz/corpus/character_creation_protocol/valid-character-command",
+      "status": "A",
+      "purpose": "Golden valid seed for bounded character-command decoder fuzzing."
+    },
+    {
+      "path": "components/tes3mp/tests/fuzz/corpus/character_creation_protocol/valid-character-profile",
+      "status": "A",
+      "purpose": "Golden valid seed for bounded authoritative profile decoder fuzzing."
+    },
+    {
       "path": "components/tes3mp/tests/fuzz/corpus/protocol_authentication/valid-authentication-accepted",
       "status": "A",
       "purpose": "Valid T3AA fresh-token payload for credential decoder success-path fuzzing and schema drift detection."
@@ -1438,6 +1618,76 @@
       "path": "components/tes3mp/tests/fuzz/corpus/protocol_authentication/valid-resume-token",
       "status": "A",
       "purpose": "Valid exact-32-byte resume T3AQ payload for credential decoder success-path fuzzing and schema drift detection."
+    },
+    {
+      "path": "components/tes3mp/tests/fuzz/corpus/protocol_exchange/16d4de1e30d9b5c10a64deb7ec1b06bedd152fed",
+      "status": "A",
+      "purpose": "Minimized retained exchange-protocol fuzz seed for malformed and boundary coverage."
+    },
+    {
+      "path": "components/tes3mp/tests/fuzz/corpus/protocol_exchange/42099b4af021e53fd8fd4e056c2568d7c2e3ffa8",
+      "status": "A",
+      "purpose": "Minimized retained exchange-protocol fuzz seed for malformed and boundary coverage."
+    },
+    {
+      "path": "components/tes3mp/tests/fuzz/corpus/protocol_exchange/446b4865eadd43990f31351da4df47de1b37e103",
+      "status": "A",
+      "purpose": "Minimized retained exchange-protocol fuzz seed for malformed and boundary coverage."
+    },
+    {
+      "path": "components/tes3mp/tests/fuzz/corpus/protocol_exchange/4ae73c51583da13c7f295e9406d6afb155fc168a",
+      "status": "A",
+      "purpose": "Minimized retained exchange-protocol fuzz seed for malformed and boundary coverage."
+    },
+    {
+      "path": "components/tes3mp/tests/fuzz/corpus/protocol_exchange/5ba93c9db0cff93f52b521d7420e43f6eda2784f",
+      "status": "A",
+      "purpose": "Minimized retained exchange-protocol fuzz seed for malformed and boundary coverage."
+    },
+    {
+      "path": "components/tes3mp/tests/fuzz/corpus/protocol_exchange/7063b58119884674945c349759e6c14a6b29d7db",
+      "status": "A",
+      "purpose": "Minimized retained exchange-protocol fuzz seed for malformed and boundary coverage."
+    },
+    {
+      "path": "components/tes3mp/tests/fuzz/corpus/protocol_exchange/82f0293714c2e78c3ad38c3757499f530f2ee2e6",
+      "status": "A",
+      "purpose": "Minimized retained exchange-protocol fuzz seed for malformed and boundary coverage."
+    },
+    {
+      "path": "components/tes3mp/tests/fuzz/corpus/protocol_exchange/890b27c22b8252dd0de1bfbeaa7b64916ebe27e8",
+      "status": "A",
+      "purpose": "Minimized retained exchange-protocol fuzz seed for malformed and boundary coverage."
+    },
+    {
+      "path": "components/tes3mp/tests/fuzz/corpus/protocol_exchange/8b8ea344d262229d147e41272ad7a9a3178a72ca",
+      "status": "A",
+      "purpose": "Minimized retained exchange-protocol fuzz seed for malformed and boundary coverage."
+    },
+    {
+      "path": "components/tes3mp/tests/fuzz/corpus/protocol_exchange/8d883f1577ca8c334b7c6d75ccb71209d71ced13",
+      "status": "A",
+      "purpose": "Minimized retained exchange-protocol fuzz seed for malformed and boundary coverage."
+    },
+    {
+      "path": "components/tes3mp/tests/fuzz/corpus/protocol_exchange/c4ef8dfa1503b5907353e3a49930cbccd8751551",
+      "status": "A",
+      "purpose": "Minimized retained exchange-protocol fuzz seed for malformed and boundary coverage."
+    },
+    {
+      "path": "components/tes3mp/tests/fuzz/corpus/protocol_exchange/d3b5b9af17d2fb5f0a5c97fceafdaf51301c23a4",
+      "status": "A",
+      "purpose": "Minimized retained exchange-protocol fuzz seed for malformed and boundary coverage."
+    },
+    {
+      "path": "components/tes3mp/tests/fuzz/corpus/protocol_exchange/e77040d0606984217d758d3e47f29405c7b21cf6",
+      "status": "A",
+      "purpose": "Minimized retained exchange-protocol fuzz seed for malformed and boundary coverage."
+    },
+    {
+      "path": "components/tes3mp/tests/fuzz/corpus/protocol_exchange/f694914f06925104ba4a14cbf5a60f77f228c387",
+      "status": "A",
+      "purpose": "Minimized retained exchange-protocol fuzz seed for malformed and boundary coverage."
     },
     {
       "path": "components/tes3mp/tests/fuzz/corpus/protocol_exchange/reliable-identifier",
@@ -1480,6 +1730,21 @@
       "purpose": "SHA-locked valid T3RS payload seed for metadata-only resync decoder success-path fuzzing."
     },
     {
+      "path": "components/tes3mp/tests/fuzz/corpus/protocol_frame/2d14ab97cc3dc294c51c0d6814f4ea45f4b4e312",
+      "status": "A",
+      "purpose": "Minimized retained frame-protocol fuzz seed for malformed and boundary coverage."
+    },
+    {
+      "path": "components/tes3mp/tests/fuzz/corpus/protocol_frame/5ba93c9db0cff93f52b521d7420e43f6eda2784f",
+      "status": "A",
+      "purpose": "Minimized retained frame-protocol fuzz seed for malformed and boundary coverage."
+    },
+    {
+      "path": "components/tes3mp/tests/fuzz/corpus/protocol_frame/d7165beda2385acb347cb65bd04a127770e81c3e",
+      "status": "A",
+      "purpose": "Minimized retained frame-protocol fuzz seed for malformed and boundary coverage."
+    },
+    {
       "path": "components/tes3mp/tests/fuzz/corpus/protocol_frame/truncated-header",
       "status": "A",
       "purpose": "Truncated magic/header seed for the bounded production protocol-frame decoder fuzz target."
@@ -1493,6 +1758,31 @@
       "path": "components/tes3mp/tests/fuzz/corpus/protocol_frame/valid-client-hello-frame",
       "status": "A",
       "purpose": "SHA-locked valid format-one frame seed for production frame-decoder success-path fuzzing and golden drift detection."
+    },
+    {
+      "path": "components/tes3mp/tests/fuzz/corpus/protocol_handshake/448ce24653f8539706618b29f13ca3e213a78fc9",
+      "status": "A",
+      "purpose": "Minimized retained handshake-protocol fuzz seed for malformed and boundary coverage."
+    },
+    {
+      "path": "components/tes3mp/tests/fuzz/corpus/protocol_handshake/5405252b728dc2fe74d5519322a8840cfb4a889d",
+      "status": "A",
+      "purpose": "Minimized retained handshake-protocol fuzz seed for malformed and boundary coverage."
+    },
+    {
+      "path": "components/tes3mp/tests/fuzz/corpus/protocol_handshake/adc83b19e793491b1c6ea0fd8b46cd9f32e592fc",
+      "status": "A",
+      "purpose": "Minimized retained handshake-protocol fuzz seed for malformed and boundary coverage."
+    },
+    {
+      "path": "components/tes3mp/tests/fuzz/corpus/protocol_handshake/c4ea21bb365bbeeaf5f2c654883e56d11e43c44e",
+      "status": "A",
+      "purpose": "Minimized retained handshake-protocol fuzz seed for malformed and boundary coverage."
+    },
+    {
+      "path": "components/tes3mp/tests/fuzz/corpus/protocol_handshake/c85c15d6fbc7a17b43a97cbee087f9bc6630ab72",
+      "status": "A",
+      "purpose": "Minimized retained handshake-protocol fuzz seed for malformed and boundary coverage."
     },
     {
       "path": "components/tes3mp/tests/fuzz/corpus/protocol_handshake/identifiers",
@@ -1520,6 +1810,16 @@
       "purpose": "SHA-locked valid T3RJ golden payload seed for rejection decoder success-path fuzzing and schema drift detection."
     },
     {
+      "path": "components/tes3mp/tests/fuzz/corpus/protocol_pose/0c2389bbc6c52912d2e5ebbe0fa3e6dbfe68a775",
+      "status": "A",
+      "purpose": "Minimized retained pose-protocol fuzz seed for malformed and boundary coverage."
+    },
+    {
+      "path": "components/tes3mp/tests/fuzz/corpus/protocol_pose/a42c6cf1de3abfdea9b95f34687cbbe92b9a7383",
+      "status": "A",
+      "purpose": "Minimized retained pose-protocol fuzz seed for malformed and boundary coverage."
+    },
+    {
       "path": "components/tes3mp/tests/fuzz/corpus/protocol_pose/truncated",
       "status": "A",
       "purpose": "Truncated size-prefix seed for both bounded presentation-pose decoders."
@@ -1533,6 +1833,16 @@
       "path": "components/tes3mp/tests/fuzz/corpus/protocol_pose/valid-server-vr-pose",
       "status": "A",
       "purpose": "SHA-locked valid T3VR golden payload seed for server-pose decoder success-path fuzzing and schema drift detection."
+    },
+    {
+      "path": "components/tes3mp/tests/fuzz/corpus/spatial_round_trip/33d24272fa325af74ce7d0f64c432ab45e70444d",
+      "status": "A",
+      "purpose": "Minimized retained spatial round-trip fuzz seed for malformed and boundary coverage."
+    },
+    {
+      "path": "components/tes3mp/tests/fuzz/corpus/spatial_round_trip/58668e7669fd564d99db5d581fcdb6a5618440b5",
+      "status": "A",
+      "purpose": "Minimized retained spatial round-trip fuzz seed for malformed and boundary coverage."
     },
     {
       "path": "components/tes3mp/tests/fuzz/corpus/spatial_round_trip/interior-sized",
@@ -1885,6 +2195,71 @@
       "purpose": "Encrypted connection, capture-canary, authentication, resume, lifecycle, bounded-queue, delivery-lane, fault, and telemetry selection scenarios."
     },
     {
+      "path": "files/data/CMakeLists.txt",
+      "status": "M",
+      "purpose": "Registers the multiplayer dialog layout for build-tree resource copying and installation."
+    },
+    {
+      "path": "files/data/mygui/openmw_multiplayer_dialog.layout",
+      "status": "A",
+      "purpose": "Defines the compact native MyGUI server address, Connect, Host, and Cancel dialog layout."
+    },
+    {
+      "path": "files/data/tes3mp/join-password.txt",
+      "status": "A",
+      "purpose": "Supplies the local-only packaged host profile's replaceable default join password."
+    },
+    {
+      "path": "files/data/tes3mp/server.cfg",
+      "status": "A",
+      "purpose": "Supplies a runnable localhost dedicated-server configuration for the packaged vanilla host path."
+    },
+    {
+      "path": "files/data/tes3mp/vanilla-actors.txt",
+      "status": "A",
+      "purpose": "Supplies the manifest-matched empty actor catalog required by the focused vanilla first-join profile."
+    },
+    {
+      "path": "files/data/tes3mp/vanilla-characters.txt",
+      "status": "A",
+      "purpose": "Packages the installed vanilla manifest's playable character records and official Imperial Prison Ship startup transform."
+    },
+    {
+      "path": "files/data/tes3mp/vanilla-collision.txt",
+      "status": "A",
+      "purpose": "Declares the packaged vanilla first-join cells as occupiable for authoritative startup validation."
+    },
+    {
+      "path": "launch_client.bat",
+      "status": "A",
+      "purpose": "Thin Windows command-shell entry point for the packaged TES3MP OpenMW client launcher."
+    },
+    {
+      "path": "launch_client.ps1",
+      "status": "A",
+      "purpose": "Locates the bounded product client, resources, and Morrowind content and launches menu or direct-connect multiplayer safely."
+    },
+    {
+      "path": "launch_client.sh",
+      "status": "A",
+      "purpose": "Portable shell entry point for launching the packaged TES3MP OpenMW client."
+    },
+    {
+      "path": "launch_server.bat",
+      "status": "A",
+      "purpose": "Thin Windows command-shell entry point for the packaged TES3MP dedicated-server launcher."
+    },
+    {
+      "path": "launch_server.ps1",
+      "status": "A",
+      "purpose": "Locates the bounded product server and packaged configuration and starts the dedicated server."
+    },
+    {
+      "path": "launch_server.sh",
+      "status": "A",
+      "purpose": "Portable shell entry point for launching the packaged TES3MP dedicated server."
+    },
+    {
       "path": "scripts/capture_vnext_linux_ci.py",
       "status": "A",
       "purpose": "Fail-closed Ubuntu runner, compiler, package, repository, and package-license evidence capture."
@@ -1955,6 +2330,11 @@
       "purpose": "Fail-closed dependency-lock validation, verified acquisition, safe extraction, restricted source build, scenario execution, and evidence runner."
     },
     {
+      "path": "scripts/setup_msvc_env.ps1",
+      "status": "A",
+      "purpose": "Initializes an x64 MSVC, CMake, Ninja, vcpkg, and Qt environment while allowing product builds to match newer provisioned STL inputs."
+    },
+    {
       "path": "scripts/tests/test_capture_vnext_linux_ci.py",
       "status": "A",
       "purpose": "Unit and workflow-policy tests for the Linux baseline evidence gate."
@@ -2013,6 +2393,11 @@
       "path": "scripts/tests/test_phase9_pose_protocol.py",
       "status": "A",
       "purpose": "Contracts for presentation-only directional pose schemas, protocol dependency isolation, and disabled production routing."
+    },
+    {
+      "path": "scripts/tests/test_product_build_presets.py",
+      "status": "A",
+      "purpose": "Contracts that product presets build only shipping binaries and keep checks and headless tooling explicit."
     },
     {
       "path": "scripts/tests/test_replicated_actor_contract.py",
@@ -2126,7 +2511,7 @@
         },
         {
           "path": "CMakePresets.json",
-          "sha256": "7b30ffc412fbbf6b01bb60ec36d9a3c9c6b9206c94fcb50d2609c07dfab4a782"
+          "sha256": "076cd31ed9d7e3271f627653c5e91e88798eada199e488e299b5041189cfb8c0"
         },
         {
           "path": "extern/CMakeLists.txt",
@@ -2226,11 +2611,11 @@
         },
         {
           "path": "components/tes3mp/CMakeLists.txt",
-          "sha256": "c5d654f87500327104d44effd770a347ed4ef197e1df235a54e017954c42ae18"
+          "sha256": "6dfd4e93fc7864efbd0627abbb66e4937315f4784ff9162df27ba4f908a2f8d3"
         },
         {
           "path": "components/tes3mp/protocol/generated/authentication_accepted_generated.h",
-          "sha256": "678461d1648782d3d273d8e79f328ef51e4964a42298d62abbe54baaa5d1ea52"
+          "sha256": "d2a6199573f8f4a4335a02ebbdac9907847d7d19e9b473b8d147eefc153a0fca"
         },
         {
           "path": "components/tes3mp/protocol/generated/authentication_rejected_generated.h",
@@ -2318,7 +2703,7 @@
         },
         {
           "path": "components/tes3mp/protocol/schema/authentication_accepted.fbs",
-          "sha256": "f4726874c43b7be450039344670c4ca93800035ae67f33c6b6fa40847708ebc1"
+          "sha256": "6aaf8dbaad0f0475e0af58ebd33af2b53273666878afd70f1b7128e3d2e79104"
         },
         {
           "path": "components/tes3mp/protocol/schema/authentication_rejected.fbs",
@@ -2454,11 +2839,11 @@
         },
         {
           "path": "scripts/tests/test_run_vnext_flatbuffers_proof.py",
-          "sha256": "875f76d902640980a1f790565f22d613561af684025be6cb222fbf2458a65132"
+          "sha256": "9fababad30bb7750be9f4ced490cd33e63215fe8e50c77a0fc953a92f576da50"
         },
         {
           "path": "scripts/vnext_flatbuffers_proof.json",
-          "sha256": "0329cefd9cc457e73c2b2b62c8f8d872c615be0d9aba3557c727955269c68f29"
+          "sha256": "14aa4bddd4faf533ccd97e6d8e1a7345996c1e9051b10d05ad6bd87d286927d1"
         }
       ],
       "repositories": [

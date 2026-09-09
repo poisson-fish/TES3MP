@@ -476,7 +476,11 @@ namespace
                             const auto normalized = decodeReliableOperation(encodeReliableOperation(*current));
                             const auto* value = std::get_if<ReliableOperation>(&normalized);
                             if (value == nullptr || *value != *current)
+                            {
+                                std::cerr << "reliable bit mutation failed to normalize at byte " << index
+                                          << " bit " << bit << '\n';
                                 return false;
+                            }
                         }
                     }
                     else
@@ -487,13 +491,36 @@ namespace
                             const auto normalized = decodeLatestWinsSnapshot(encodeLatestWinsSnapshot(*current));
                             const auto* value = std::get_if<LatestWinsSnapshot>(&normalized);
                             if (value == nullptr || *value != *current)
+                            {
+                                std::cerr << "snapshot bit mutation failed to normalize at byte " << index
+                                          << " bit " << bit << '\n';
+                                if (const auto* failure = std::get_if<ExchangeDecodeError>(&normalized))
+                                    std::cerr << "normalized decode error stage "
+                                              << static_cast<unsigned>(failure->stage) << " code "
+                                              << static_cast<unsigned>(failure->code) << '\n';
                                 return false;
+                            }
                         }
                     }
                 }
             }
         }
         return true;
+    }
+
+    bool unaligned_struct_vector_is_copied_before_typed_access()
+    {
+        constexpr std::array<std::uint8_t, 96> payload{ 0x5c, 0x00, 0x00, 0x00, 0x10, 0x00, 0x00, 0x00,
+            0x54, 0x33, 0x49, 0x42, 0x08, 0x00, 0x0c, 0x00, 0x04, 0x00, 0x08, 0x00, 0x08, 0x00, 0x00, 0x00,
+            0x1c, 0x00, 0x00, 0x00, 0x04, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x0e, 0x00,
+            0x2c, 0x00, 0x04, 0x00, 0x0c, 0x00, 0x14, 0x00, 0x1c, 0x00, 0x24, 0x00, 0x0e, 0x00, 0x00, 0x00,
+            0x15, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x09, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x09, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x09, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 };
+        const auto decoded = decodeReliableInterestBaseline(std::as_bytes(std::span(payload)));
+        const auto* value = std::get_if<ReliableInterestBaseline>(&decoded);
+        return value != nullptr
+            && decodeReliableInterestBaseline(encodeReliableInterestBaseline(*value)) == decoded;
     }
 
     bool client_snapshot_guard_is_atomic_and_monotonic()
@@ -742,6 +769,7 @@ int main(int argc, char** argv)
     passed &= check(every_truncation_identifier_and_trailing_byte_fail_without_partial_value(), "malformed inputs");
     passed &= check(closed_body_and_strong_value_mutations_fail_semantically(), "semantic mutations");
     passed &= check(every_single_bit_mutation_is_rejected_or_normalizes_to_an_owned_value(), "bit mutations");
+    passed &= check(unaligned_struct_vector_is_copied_before_typed_access(), "unaligned struct vector");
     passed &= check(client_snapshot_guard_is_atomic_and_monotonic(), "client snapshot guard");
     passed &= check(fake_peer_negotiates_authenticates_and_exchanges_framed_state_in_memory(), "fake peer exchange");
     passed &= check(old_generation_operation_is_not_delivered(), "old generation operation");

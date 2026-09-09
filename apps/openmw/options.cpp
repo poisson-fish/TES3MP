@@ -8,6 +8,13 @@ namespace
 {
     namespace bpo = boost::program_options;
     typedef std::vector<std::string> StringsVector;
+
+    Files::MaybeQuotedPath defaultPath(const char* value)
+    {
+        Files::MaybeQuotedPath result;
+        static_cast<std::filesystem::path&>(result) = value;
+        return result;
+    }
 }
 
 namespace OpenMW
@@ -24,27 +31,43 @@ namespace OpenMW
         addOption("tes3mp-enable", bpo::value<bool>()->implicit_value(true)->default_value(false),
             "enable TES3MP multiplayer");
         addOption("tes3mp-host", bpo::value<std::string>()->default_value(""), "TES3MP server host");
-        addOption("tes3mp-port", bpo::value<unsigned>()->default_value(0), "TES3MP server port");
-        addOption("tes3mp-timeout-ms", bpo::value<unsigned>()->default_value(0),
-            "TES3MP connection timeout in milliseconds (1-60000; required when enabled)");
+        addOption("tes3mp-port", bpo::value<unsigned>()->default_value(25565), "TES3MP server port");
+        addOption("tes3mp-timeout-ms", bpo::value<unsigned>()->default_value(10000),
+            "TES3MP connection timeout in milliseconds (1-60000)");
         addOption("tes3mp-password-file", bpo::value<Files::MaybeQuotedPath>()->default_value({}, ""),
             "file containing optional TES3MP join password");
         addOption("tes3mp-player-credential-file", bpo::value<Files::MaybeQuotedPath>()->default_value({}, ""),
             "private TES3MP durable player credential file");
-        addOption("tes3mp-content-manifest-id", bpo::value<std::string>()->default_value(""),
+        addOption("tes3mp-player-credential-directory", bpo::value<Files::MaybeQuotedPath>()->default_value({}, ""),
+            "private directory for endpoint-scoped TES3MP player credentials");
+        addOption("tes3mp-server-executable",
+            bpo::value<Files::MaybeQuotedPath>()->default_value(defaultPath("tes3mp_server.exe"),
+                "tes3mp_server.exe"),
+            "dedicated server executable used by the multiplayer Host button");
+        addOption("tes3mp-server-config",
+            bpo::value<Files::MaybeQuotedPath>()->default_value(
+                defaultPath("resources/vfs/tes3mp/server.cfg"), "resources/vfs/tes3mp/server.cfg"),
+            "dedicated server configuration used by the multiplayer Host button");
+        addOption("tes3mp-content-manifest-id", bpo::value<std::string>()->default_value(
+            "5c3c8c2cbd20e25901b59b3ece33d36b7ef0e3d60ad8d11828bcc61a5ead1647"),
             "exact TES3MP content manifest SHA-256 in hexadecimal");
-        addOption("tes3mp-content-cell-spaces", bpo::value<std::string>()->default_value(""),
+        addOption("tes3mp-content-cell-spaces",
+            bpo::value<std::string>()->default_value("interior:1;interior:2;interior:3;exterior:4"),
             "TES3MP cell-space catalog: interior:<id>;exterior:<id>");
-        addOption("tes3mp-content-allowed-cells", bpo::value<std::string>()->default_value(""),
+        addOption("tes3mp-content-allowed-cells", bpo::value<std::string>()->default_value(
+            "interior:1;interior:2;interior:3;exterior:4:-2:-9"),
             "TES3MP exact cell catalog: interior:<id>;exterior:<id>:<x>:<y>");
-        addOption("tes3mp-content-appearance-id", bpo::value<unsigned long long>()->default_value(0),
+        addOption("tes3mp-content-appearance-id", bpo::value<unsigned long long>()->default_value(100),
             "manifest-scoped TES3MP default appearance ID");
-        addOption("tes3mp-content-movement-profile", bpo::value<std::string>()->default_value(""),
+        addOption("tes3mp-content-movement-profile",
+            bpo::value<std::string>()->default_value("sneak:1024;walk:4097;run:8192;jump:4096"),
             "TES3MP movement profile: sneak:<speed>;walk:<speed>;run:<speed>;jump:<speed>");
         addOption("tes3mp-content-cell-space-map",
-            bpo::value<StringsVector>()->default_value(StringsVector(), "")->multitoken()->composing(),
+            bpo::value<StringsVector>()->default_value(StringsVector{ "1=Imperial Prison Ship",
+                "2=Seyda Neen, Census and Excise Office", "3=Seyda Neen, Census and Excise Warehouse",
+                "4=sys::default" }, "vanilla chargen cells")->multitoken()->composing(),
             "OpenMW cell-space mapping entries: <id>=<record>");
-        addOption("tes3mp-content-appearance-record", bpo::value<std::string>()->default_value(""),
+        addOption("tes3mp-content-appearance-record", bpo::value<std::string>()->default_value("player"),
             "OpenMW NPC record mapped by the TES3MP content manifest");
         addOption("tes3mp-content-actor-prototype-map",
             bpo::value<StringsVector>()->default_value(StringsVector(), "")->multitoken()->composing(),

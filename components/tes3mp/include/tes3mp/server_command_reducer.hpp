@@ -242,6 +242,8 @@ namespace TES3MP
         std::optional<PreparedLifecycle> prepareDisconnect(SessionId session, ServerTick tick);
         std::optional<PreparedLifecycle> prepareDisconnectBatch(std::span<const SessionId> sessions, ServerTick tick);
         std::optional<PreparedLifecycle> prepareResume(CanonicalSessionProgress session, ServerTick tick);
+        std::optional<PreparedLifecycle> preparePlayerSafePoint(
+            PlayerId player, Transform transform, ServerTick tick);
         std::optional<PreparedLifecycle> prepareExpiration(
             PlayerId player, SessionId session, SessionGeneration generation, ServerTick tick);
         bool commit(PreparedLifecycle&& prepared);

@@ -34,6 +34,27 @@ namespace
             Orientation3(zero, zero, zero));
     }
 
+    Transform completionSpawn()
+    {
+        const auto zero = Turn32::fromValue(0);
+        return Transform(CellId::interior(id<CellSpaceId>(7)), Position3(100, 200, 300),
+            Orientation3(zero, zero, zero));
+    }
+
+    CharacterContentCatalog characterCatalog()
+    {
+        CharacterAppearance appearance{ id<RaceRecordId>(1), id<HeadRecordId>(2), id<HairRecordId>(3),
+            CharacterSex::Female };
+        CharacterRaceDefinition race{ id<RaceRecordId>(1), { appearance } };
+        race.femaleAttributes.fill(40);
+        race.maleAttributes.fill(40);
+        CharacterClassDefinition characterClass{ id<ClassRecordId>(1), ClassSpecialization::Combat,
+            { 0, 1 }, { 2, 3, 4, 5, 6 }, { 7, 8, 9, 10, 11 } };
+        CharacterBirthsignDefinition birthsign{ id<BirthsignRecordId>(1), {} };
+        return *CharacterContentCatalog::create(testContentManifestId(), spawn(), completionSpawn(), std::span(&race, 1),
+            std::span(&characterClass, 1), std::span(&birthsign, 1), {});
+    }
+
     struct JoinFixture
     {
         NullMetricSink metrics;
@@ -237,23 +258,71 @@ namespace
         assert(credential && joins.pendingCreatesPersistentIdentity(prepared.id));
         const auto joined = std::get<AuthenticatedJoinResult>(joins.commit(prepared.id));
         assert(joined.player == id<PlayerId>(1) && joined.entity == id<EntityId>(1)
+            && joined.characterLifecycle == CharacterLifecycle::NewCharacter
+            && joined.profileRevision == CharacterProfileRevision::initial()
             && persistence.records.size() == 1);
+
+        const auto catalog = characterCatalog();
+        auto applyChoice = [&](CharacterCreationChoice choice) {
+            const auto* current = registry->characterProfile(joined.player);
+            assert(current);
+            auto result = joins.applyCharacterCreation(joined.player, catalog,
+                { current->revision(), std::move(choice) }, id<ServerTick>(10));
+            assert(std::holds_alternative<CharacterProfile>(result));
+        };
+        applyChoice(SetCharacterName{ "Nerevar" });
+        applyChoice(SetCharacterAppearance{ catalog.find(id<RaceRecordId>(1))->appearances.front() });
+        applyChoice(SetCharacterClass{ id<ClassRecordId>(1) });
+        applyChoice(SetCharacterBirthsign{ id<BirthsignRecordId>(1) });
+        applyChoice(CompleteCharacterCreation{});
+        assert(registry->characterProfile(joined.player)->lifecycle()
+            == CharacterLifecycle::EstablishedCharacter);
+        assert(registry->savedPlayer(joined.player)
+            && registry->savedPlayer(joined.player)->transform() == completionSpawn());
+        assert(reducer.state().findPlayer(joined.player)->transform() == completionSpawn());
 
         auto claim = registry->authenticate(*credential, testContentManifestId());
         assert(claim && claim->player == joined.player && claim->entity == joined.entity);
+        const auto zero = Turn32::fromValue(0);
+        const CanonicalPlayerEntityState saved(joined.player, joined.entity, id<AppearanceId>(1),
+            Transform(spawn().cell(), Position3(901, 902, 903), Orientation3(zero, zero, zero)),
+            LinearVelocity3(0, 0, 0), id<EntityRevision>(4), id<AuthorityEpoch>(2), id<ServerTick>(5),
+            LocomotionMode::Walk);
+        assert(registry->savePlayer(saved));
+        persistence.reject = true;
+        const CanonicalPlayerEntityState rejectedSave(joined.player, joined.entity, id<AppearanceId>(1),
+            Transform(spawn().cell(), Position3(999, 999, 999), Orientation3(zero, zero, zero)),
+            LinearVelocity3(0, 0, 0), id<EntityRevision>(5), id<AuthorityEpoch>(2), id<ServerTick>(6),
+            LocomotionMode::Walk);
+        assert(!registry->savePlayer(rejectedSave) && registry->savedPlayer(joined.player)
+            && registry->savedPlayer(joined.player)->transform() == saved.transform());
+        persistence.reject = false;
         auto disconnected = reducer.prepareDisconnect(joined.session, id<ServerTick>(1));
         assert(disconnected && reducer.commit(std::move(*disconnected)));
-        auto expired = reducer.prepareExpiration(joined.player, joined.session,
-            SessionGeneration::initial(), id<ServerTick>(2));
+        const auto gracePreparation = std::get<AuthenticatedJoinPreparation>(joins.prepareReattach(
+            id<PrincipalId>(2), *claim, SessionGeneration::initial(), id<ServerTick>(2)));
+        const auto graceJoin = std::get<AuthenticatedJoinResult>(joins.commit(gracePreparation.id));
+        assert(graceJoin.player == joined.player && graceJoin.entity == joined.entity
+            && graceJoin.session == id<SessionId>(2) && joins.liveBindings() == 1
+            && graceJoin.characterLifecycle == CharacterLifecycle::EstablishedCharacter);
+        assert(joins.state().findPlayer(joined.player)->transform() == completionSpawn());
+        disconnected = reducer.prepareDisconnect(graceJoin.session, id<ServerTick>(3));
+        assert(disconnected && reducer.commit(std::move(*disconnected)));
+        auto expired = reducer.prepareExpiration(joined.player, graceJoin.session,
+            SessionGeneration::initial(), id<ServerTick>(4));
         assert(expired && reducer.commit(std::move(*expired)) && reducer.state().players().empty());
-        assert(joins.releasePrincipal(joined.principal));
+        assert(joins.releasePrincipal(graceJoin.principal));
         auto reattached = joins.prepareReattach(
-            id<PrincipalId>(2), *claim, SessionGeneration::initial(), id<ServerTick>(3));
+            id<PrincipalId>(3), *claim, SessionGeneration::initial(), id<ServerTick>(5));
         const auto reattachPreparation = std::get<AuthenticatedJoinPreparation>(std::move(reattached));
         assert(!joins.pendingCreatesPersistentIdentity(reattachPreparation.id));
         const auto reattachResult = std::get<AuthenticatedJoinResult>(joins.commit(reattachPreparation.id));
         assert(reattachResult.player == joined.player && reattachResult.entity == joined.entity
-            && reattachResult.session == id<SessionId>(2) && persistence.records.size() == 1);
+            && reattachResult.session == id<SessionId>(3) && persistence.records.size() == 1);
+        assert(joins.state().findPlayer(joined.player)->transform() == saved.transform());
+        assert(joins.state().findPlayer(joined.player)->entityRevision() == id<EntityRevision>(5)
+            && joins.state().findPlayer(joined.player)->authorityEpoch() == id<AuthorityEpoch>(3)
+            && joins.state().findPlayer(joined.player)->lastSpatialChangeTick() == id<ServerTick>(5));
 
         auto restartedRegistry = std::move(std::get<std::unique_ptr<PlayerIdentityRegistry>>(
             PlayerIdentityRegistry::create(crypto, persistence, persistence.records)));
@@ -269,7 +338,9 @@ namespace
         const auto restartedJoin = std::get<AuthenticatedJoinResult>(
             restartedJoins.commit(restartedPreparation.id));
         assert(restartedJoin.player == joined.player && restartedJoin.entity == joined.entity
-            && restartedJoin.session == id<SessionId>(1));
+            && restartedJoin.session == id<SessionId>(1)
+            && restartedJoin.characterLifecycle == CharacterLifecycle::EstablishedCharacter);
+        assert(restartedJoins.state().findPlayer(joined.player)->transform() == saved.transform());
 
         MemoryPersistence failing;
         failing.reject = true;
@@ -288,6 +359,57 @@ namespace
         const auto retry = std::get<AuthenticatedJoinPreparation>(
             failingJoins.prepare(id<PrincipalId>(3), SessionGeneration::initial(), ServerTick::initial()));
         assert(retry.join.player == id<PlayerId>(1) && retry.join.entity == id<EntityId>(1));
+    }
+
+    void incomplete_character_profile_restarts_from_the_pre_chargen_safe_point()
+    {
+        FakeCrypto crypto;
+        MemoryPersistence persistence;
+        auto registry = std::move(std::get<std::unique_ptr<PlayerIdentityRegistry>>(
+            PlayerIdentityRegistry::create(crypto, persistence, {})));
+        const auto prepared = std::get<PreparedPlayerIdentity>(registry->prepareCreate(testContentManifest()));
+        const auto credential = registry->copyPreparedCredential(prepared.id);
+        assert(credential);
+        const auto player = prepared.claim.player;
+        assert(registry->commit(prepared.id) && registry->finalize(prepared.id));
+        auto changed = registry->applyCharacterCreation(player, characterCatalog(),
+            { CharacterProfileRevision::initial(), SetCharacterName{ "Jiub" } });
+        assert(std::holds_alternative<CharacterProfile>(changed)
+            && std::get<CharacterProfile>(changed).lifecycle() == CharacterLifecycle::CreatingCharacter
+            && std::get<CharacterProfile>(changed).phase() == CharacterCreationPhase::AwaitingRace);
+        assert(persistence.records.size() == 1
+            && persistence.records.front().characterProfile == CharacterProfile::fresh()
+            && !persistence.records.front().savedPlayer);
+
+        const auto* live = registry->characterProfile(player);
+        assert(live && live->phase() == CharacterCreationPhase::AwaitingRace);
+        const auto* claim = &registry->records().front().claim;
+        const auto zero = Turn32::fromValue(0);
+        const CanonicalPlayerEntityState unsafe(player, claim->entity, claim->appearance,
+            Transform(spawn().cell(), Position3(999, 999, 999), Orientation3(zero, zero, zero)),
+            LinearVelocity3(0, 0, 0), EntityRevision::initial(), AuthorityEpoch::initial(),
+            ServerTick::initial());
+        assert(registry->savePlayer(unsafe) && !registry->savedPlayer(player));
+
+        const auto authenticated = registry->authenticate(*credential, testContentManifestId());
+        assert(authenticated);
+        NullMetricSink metrics;
+        NullStructuredEventSink events;
+        Observability observability{ metrics, events };
+        CanonicalCommandReducer reconnectReducer(
+            std::get<CanonicalServerState>(createCanonicalServerState({}, {})), observability, testContentManifest());
+        auto reconnectJoins = *AuthenticatedJoinCoordinator::create(
+            spawn(), testContentManifest(), id<SessionId>(1), *registry, reconnectReducer);
+        const auto reconnectPrepared = std::get<AuthenticatedJoinPreparation>(reconnectJoins.prepareReattach(
+            id<PrincipalId>(1), *authenticated, SessionGeneration::initial(), ServerTick::initial()));
+        const auto rejoined = std::get<AuthenticatedJoinResult>(reconnectJoins.commit(reconnectPrepared.id));
+        assert(rejoined.characterProfile == CharacterProfile::fresh()
+            && reconnectReducer.state().findPlayer(player)->transform() == spawn());
+
+        auto restarted = std::move(std::get<std::unique_ptr<PlayerIdentityRegistry>>(
+            PlayerIdentityRegistry::create(crypto, persistence, persistence.records)));
+        const auto* profile = restarted->characterProfile(player);
+        assert(profile && *profile == CharacterProfile::fresh() && !restarted->savedPlayer(player));
     }
 
     void persistent_identity_skips_reserved_actor_entities()
@@ -326,6 +448,7 @@ int main()
     preparationIsInvisibleUntilCommit();
     cancelledPreparationLeavesNoStateAndReusesIdentity();
     persistent_identity_reattaches_and_failed_commit_is_atomic();
+    incomplete_character_profile_restarts_from_the_pre_chargen_safe_point();
     persistent_identity_skips_reserved_actor_entities();
     std::cout << "authenticated join contracts passed\n";
 }

@@ -202,13 +202,17 @@ namespace TES3MP
 
     std::optional<AuthenticationAcceptedMessage> AuthenticationAcceptedMessage::create(
         ResumeToken token, std::uint64_t lifetimeMilliseconds,
-        std::optional<PlayerCredential> playerCredential) noexcept
+        std::optional<PlayerCredential> playerCredential, CharacterLifecycle characterLifecycle,
+        CharacterProfileRevision profileRevision) noexcept
     {
         if (lifetimeMilliseconds < MinimumResumeTokenLifetimeMilliseconds
             || lifetimeMilliseconds > MaximumResumeTokenLifetimeMilliseconds)
             return std::nullopt;
-        return AuthenticationAcceptedMessage(
-            std::move(token), lifetimeMilliseconds, std::move(playerCredential));
+        if (static_cast<unsigned>(characterLifecycle) < static_cast<unsigned>(CharacterLifecycle::NewCharacter)
+            || static_cast<unsigned>(characterLifecycle) > static_cast<unsigned>(CharacterLifecycle::EstablishedCharacter))
+            return std::nullopt;
+        return AuthenticationAcceptedMessage(std::move(token), lifetimeMilliseconds,
+            std::move(playerCredential), characterLifecycle, profileRevision);
     }
 
     std::vector<std::byte> encodeAuthenticationRequest(const AuthenticationRequest& value)
@@ -245,7 +249,9 @@ namespace TES3MP
                 reinterpret_cast<const std::uint8_t*>(credential.data()), credential.size());
         }
         const auto root = Protocol::Schema::CreateAuthenticationAccepted(
-            builder, encodedToken, value.lifetimeMilliseconds(), encodedPlayerCredential);
+            builder, encodedToken, value.lifetimeMilliseconds(), encodedPlayerCredential,
+            static_cast<Protocol::Schema::CharacterLifecycle>(value.characterLifecycle()),
+            value.profileRevision().value());
         Protocol::Schema::FinishSizePrefixedAuthenticationAcceptedBuffer(builder, root);
         return takeBuffer(builder);
     }
@@ -347,8 +353,29 @@ namespace TES3MP
         auto playerCredential = playerCredentialBytes.empty()
             ? std::optional<PlayerCredential>{}
             : PlayerCredential::create(playerCredentialBytes);
-        auto accepted = AuthenticationAcceptedMessage::create(
-            std::move(*token), value->lifetime_milliseconds(), std::move(playerCredential));
+        CharacterLifecycle lifecycle;
+        switch (value->character_lifecycle())
+        {
+            case Protocol::Schema::CharacterLifecycle::NewCharacter:
+                lifecycle = CharacterLifecycle::NewCharacter;
+                break;
+            case Protocol::Schema::CharacterLifecycle::CreatingCharacter:
+                lifecycle = CharacterLifecycle::CreatingCharacter;
+                break;
+            case Protocol::Schema::CharacterLifecycle::EstablishedCharacter:
+                lifecycle = CharacterLifecycle::EstablishedCharacter;
+                break;
+            default:
+                return error(AuthenticationCodecErrorStage::SemanticValidation,
+                    AuthenticationCodecErrorCode::UnknownCharacterLifecycle,
+                    static_cast<std::size_t>(value->character_lifecycle()));
+        }
+        auto profileRevision = CharacterProfileRevision::fromValue(value->profile_revision());
+        if (!profileRevision)
+            return error(AuthenticationCodecErrorStage::SemanticValidation,
+                AuthenticationCodecErrorCode::InvalidProfileRevision, value->profile_revision(), 1);
+        auto accepted = AuthenticationAcceptedMessage::create(std::move(*token), value->lifetime_milliseconds(),
+            std::move(playerCredential), lifecycle, *profileRevision);
         if (!accepted)
         {
             return error(AuthenticationCodecErrorStage::SemanticValidation,

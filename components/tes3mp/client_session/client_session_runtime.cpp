@@ -44,6 +44,11 @@ namespace TES3MP
     HeadlessClientResult ClientSessionRuntime::start(
         const ConnectionEndpoint& endpoint, ClientHello hello, AuthenticationRequest authentication) noexcept
     {
+        mCharacterLifecycle = CharacterLifecycle::NewCharacter;
+        mCharacterProfileRevision = CharacterProfileRevision::initial();
+        mCharacterProfile.reset();
+        mPendingCharacterProfile.reset();
+        mLastCharacterCommandSequence.reset();
         mMayAcceptPlayerCredential = authentication.kind() == AuthenticationCredentialKind::JoinPassword
             && !authentication.hasPlayerCredential();
         mClientHello.emplace(std::move(hello));
@@ -121,6 +126,8 @@ namespace TES3MP
                 if (!transition.accepted() || transition.action != ClientSessionAction::SessionEstablished)
                     return reject();
                 mResumeLifetimeMilliseconds = accepted->lifetimeMilliseconds();
+                mCharacterLifecycle = accepted->characterLifecycle();
+                mCharacterProfileRevision = accepted->profileRevision();
                 mResumeToken.emplace(accepted->takeToken());
                 if (auto playerCredential = accepted->takePlayerCredential())
                 {
@@ -130,6 +137,28 @@ namespace TES3MP
                 }
                 mMayAcceptPlayerCredential = false;
                 result.authenticationAccepted = true;
+            }
+            else if (auto* profile = std::get_if<ReliableCharacterProfile>(&message))
+            {
+                const auto sessionId = mSession->stateMachine().sessionId();
+                const auto& snapshot = mSession->stateMachine().confirmedSnapshot();
+                if (profile->targetSessionGeneration != mSession->stateMachine().generation()
+                    || (sessionId && profile->targetSessionId != *sessionId)
+                    || profile->profile.revision() < mCharacterProfileRevision)
+                    return reject();
+                if (!sessionId || !snapshot)
+                {
+                    if (mPendingCharacterProfile)
+                        return reject();
+                    mPendingCharacterProfile = std::move(*profile);
+                    continue;
+                }
+                if (profile->playerId != snapshot->header().targetPlayerId())
+                    return reject();
+                mCharacterLifecycle = profile->profile.lifecycle();
+                mCharacterProfileRevision = profile->profile.revision();
+                mCharacterProfile = std::move(*profile);
+                result.characterProfileApplied = true;
             }
             else if (auto* snapshot = std::get_if<LatestWinsSnapshot>(&message))
             {
@@ -146,6 +175,22 @@ namespace TES3MP
                     && applied != LatestWinsSnapshotReceiveResult::StaleTick)
                     return reject();
                 result.snapshotApplied = result.snapshotApplied || applied == LatestWinsSnapshotReceiveResult::Applied;
+                if (mPendingCharacterProfile)
+                {
+                    const auto sessionId = mSession->stateMachine().sessionId();
+                    const auto& confirmed = mSession->stateMachine().confirmedSnapshot();
+                    if (!sessionId || !confirmed || mPendingCharacterProfile->targetSessionId != *sessionId
+                        || mPendingCharacterProfile->targetSessionGeneration
+                            != mSession->stateMachine().generation()
+                        || mPendingCharacterProfile->playerId != confirmed->header().targetPlayerId()
+                        || mPendingCharacterProfile->profile.revision() < mCharacterProfileRevision)
+                        return reject();
+                    mCharacterLifecycle = mPendingCharacterProfile->profile.lifecycle();
+                    mCharacterProfileRevision = mPendingCharacterProfile->profile.revision();
+                    mCharacterProfile = std::move(mPendingCharacterProfile);
+                    mPendingCharacterProfile.reset();
+                    result.characterProfileApplied = true;
+                }
                 for (auto& pending : mPendingObservations)
                 {
                     const auto observed = mSession->receiveReliableObservationBatch(std::move(pending));
@@ -552,6 +597,28 @@ namespace TES3MP
         return { queued, queued == ClientRuntimeResult::Accepted ? sequence : std::nullopt };
     }
 
+    ClientRuntimeQueueResult ClientSessionRuntime::queueCharacterCreation(CharacterCreationChoice choice,
+        CharacterProfileRevision expectedRevision)
+    {
+        const auto& snapshot = mSession->stateMachine().confirmedSnapshot();
+        const auto sessionId = mSession->stateMachine().sessionId();
+        if (!snapshot || !sessionId || mCharacterLifecycle == CharacterLifecycle::EstablishedCharacter)
+            return { ClientRuntimeResult::NotConnected, std::nullopt };
+        auto sequence = mLastCharacterCommandSequence ? mLastCharacterCommandSequence->next()
+            : std::optional<CommandSequence>(CommandSequence::initial());
+        if (!sequence) return { ClientRuntimeResult::EncodeRejected, std::nullopt };
+        auto commandId = CommandId::fromValue(sequence->value());
+        if (!commandId) return { ClientRuntimeResult::EncodeRejected, std::nullopt };
+        ClientCharacterCreationCommand command{ *sessionId, snapshot->header().targetSessionGeneration(), *sequence,
+            *commandId, snapshot->header().canonicalRevision(), { expectedRevision, std::move(choice) } };
+        const auto encoded = encodeClientCharacterCreationCommand(command);
+        if (encoded.empty()) return { ClientRuntimeResult::EncodeRejected, std::nullopt };
+        const auto queued = queue(MessageClass::ReliableOperation,
+            MessageKind::ClientCharacterCreationCommand, encoded);
+        if (queued == ClientRuntimeResult::Accepted) mLastCharacterCommandSequence = *sequence;
+        return { queued, queued == ClientRuntimeResult::Accepted ? sequence : std::nullopt };
+    }
+
     std::optional<LocalLocomotionReconciliation> ClientSessionRuntime::reconcileLocalPresentation(
         bool hardDiscontinuity) noexcept
     {
@@ -841,6 +908,15 @@ namespace TES3MP
                         return fail(ClientRuntimeResult::ProtocolRejected);
                     break;
                 }
+                case MessageKind::ReliableCharacterProfile:
+                {
+                    auto value = decodeReliableCharacterProfile(frame->payload());
+                    if (auto* typed = std::get_if<ReliableCharacterProfile>(&value))
+                        result.messages.emplace_back(std::move(*typed));
+                    else
+                        return fail(ClientRuntimeResult::ProtocolRejected);
+                    break;
+                }
                 case MessageKind::ServerVrPoseSnapshot:
                 {
                     auto value = decodeServerVrPoseSnapshot(frame->payload());
@@ -890,6 +966,7 @@ namespace TES3MP
         mMayAcceptPlayerCredential = false;
         mOutbound.clear();
         mLocomotionHistory.clear();
+        mPendingCharacterProfile.reset();
         return mSession->close();
     }
 

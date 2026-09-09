@@ -1,0 +1,79 @@
+namespace TES3MP.Protocol.Schema.CharacterProfile;
+
+enum ResultCode : ubyte {
+  Confirmed = 0,
+  StaleRevision = 1,
+  AlreadyEstablished = 2,
+  WrongPhase = 3,
+  InvalidName = 4,
+  UnknownRace = 5,
+  InvalidAppearance = 6,
+  UnknownClass = 7,
+  InvalidCustomClass = 8,
+  UnknownBirthsign = 9,
+  Incomplete = 10,
+  InternalError = 11
+}
+enum CharacterLifecycle : ubyte {
+  Unknown = 0,
+  NewCharacter = 1,
+  CreatingCharacter = 2,
+  EstablishedCharacter = 3
+}
+enum CharacterCreationPhase : ubyte {
+  Unknown = 0,
+  AwaitingName = 1,
+  AwaitingRace = 2,
+  AwaitingClass = 3,
+  AwaitingBirthsign = 4,
+  AwaitingReview = 5,
+  Complete = 6
+}
+enum CharacterSex : ubyte {
+  Female = 0,
+  Male = 1
+}
+enum CharacterClassKind : ubyte {
+  None = 0,
+  Predefined = 1,
+  Custom = 2
+}
+enum ClassSpecialization : ubyte {
+  Combat = 0,
+  Magic = 1,
+  Stealth = 2
+}
+
+table ReliableCharacterProfile {
+  target_session_id:ulong (id: 0);
+  target_session_generation:ulong (id: 1);
+  player_id:ulong (id: 2);
+  result:ResultCode = Confirmed (id: 3);
+  lifecycle:CharacterLifecycle = Unknown (id: 4);
+  phase:CharacterCreationPhase = Unknown (id: 5);
+  revision:ulong (id: 6);
+  name:string (id: 7);
+  race_id:ulong (id: 8);
+  head_id:ulong (id: 9);
+  hair_id:ulong (id: 10);
+  sex:CharacterSex = Female (id: 11);
+  class_kind:CharacterClassKind = None (id: 12);
+  class_id:ulong (id: 13);
+  custom_class_name:string (id: 14);
+  custom_class_description:string (id: 15);
+  specialization:ClassSpecialization = Combat (id: 16);
+  favored_attributes:[ubyte] (id: 17);
+  minor_skills:[ubyte] (id: 18);
+  major_skills:[ubyte] (id: 19);
+  birthsign_id:ulong (id: 20);
+  attributes:[ushort] (id: 21);
+  skills:[ushort] (id: 22);
+  starting_spells:[ulong] (id: 23);
+  item_prototypes:[ulong] (id: 24);
+  item_counts:[uint] (id: 25);
+  equipment_slots:[ubyte] (id: 26);
+}
+
+root_type ReliableCharacterProfile;
+file_identifier "T3CP";
+file_extension "t3cp";

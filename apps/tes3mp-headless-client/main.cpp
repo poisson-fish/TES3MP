@@ -18,6 +18,8 @@ namespace
 {
     constexpr std::size_t Phase7ReconnectCycles = 32;
     constexpr auto Phase7SoakDuration = std::chrono::seconds(60);
+    constexpr std::string_view VanillaManifest
+        = "5c3c8c2cbd20e25901b59b3ece33d36b7ef0e3d60ad8d11828bcc61a5ead1647";
 
     class SteadyClock final : public TES3MP::MonotonicClock
     {
@@ -137,7 +139,7 @@ int main(int argc, char** argv)
     if (argc != 5 && argc != 6)
     {
         std::cerr << "usage: tes3mp_headless_client <host> <port> <password-file> <timeout-ms> "
-                     "[mover|observer|motion-one|motion-two|lifecycle|reconnect|soak-one|soak-two]\n";
+                     "[mover|observer|motion-one|motion-two|lifecycle|reconnect|soak-one|soak-two|vanilla-character]\n";
         return 2;
     }
     const auto port = number(argv[2]);
@@ -180,7 +182,8 @@ int main(int argc, char** argv)
     bool authenticationAccepted = false;
     const std::string_view mode = argc == 6 ? argv[5] : "join";
     if (mode != "join" && mode != "mover" && mode != "observer" && mode != "motion-one" && mode != "motion-two"
-        && mode != "lifecycle" && mode != "reconnect" && mode != "soak-one" && mode != "soak-two")
+        && mode != "lifecycle" && mode != "reconnect" && mode != "soak-one" && mode != "soak-two"
+        && mode != "vanilla-character")
         return 2;
     const bool soak = mode == "soak-one" || mode == "soak-two";
     if (mode == "lifecycle" || mode == "reconnect")
@@ -263,9 +266,20 @@ int main(int argc, char** argv)
         factory.runtime->shutdown();
         return 0;
     }
-    auto versions = std::get<TES3MP::ProtocolVersionRange>(TES3MP::ProtocolVersionRange::create(1, 2, 2));
-    auto offer = std::get<TES3MP::CapabilityOffer>(TES3MP::CapabilityOffer::create(std::move(versions), {}, {}));
-    if (clientRuntime.start(*endpoint, TES3MP::ClientHello::fromOffer(std::move(offer)),
+    auto versions = std::get<TES3MP::ProtocolVersionRange>(TES3MP::ProtocolVersionRange::create(1, 2, 3));
+    const bool vanillaCharacter = mode == "vanilla-character";
+    const std::array characterCapabilities{ TES3MP::characterCreationCapability() };
+    const auto contentManifestId = vanillaCharacter ? TES3MP::ContentManifestId::fromHex(VanillaManifest)
+                                           : std::optional(TES3MP::testContentManifestId());
+    auto offer = contentManifestId ? TES3MP::CapabilityOffer::create(std::move(versions),
+                              vanillaCharacter ? std::span<const TES3MP::CapabilityId>(characterCapabilities)
+                                               : std::span<const TES3MP::CapabilityId>{},
+                              {}, *contentManifestId)
+                          : TES3MP::CapabilityOffer::create(std::move(versions), {}, {});
+    if (!std::holds_alternative<TES3MP::CapabilityOffer>(offer))
+        return 3;
+    if (clientRuntime.start(*endpoint, TES3MP::ClientHello::fromOffer(
+            std::get<TES3MP::CapabilityOffer>(std::move(offer))),
             TES3MP::AuthenticationRequest::join(std::move(*password)))
         != TES3MP::HeadlessClientResult::Accepted)
         return 3;
@@ -280,6 +294,7 @@ int main(int argc, char** argv)
     std::optional<TES3MP::LatestWinsSnapshot> staleSnapshot;
     std::optional<std::chrono::steady_clock::time_point> motionNotBefore;
     std::optional<std::chrono::steady_clock::time_point> soakStarted;
+    std::optional<TES3MP::CharacterProfileRevision> submittedCharacterRevision;
     const auto deadline = std::chrono::steady_clock::now()
         + (soak ? Phase7SoakDuration + std::chrono::seconds(10) : std::chrono::milliseconds(*timeout));
 
@@ -313,6 +328,17 @@ int main(int argc, char** argv)
             if (foundSelf == confirmed.view().entries().end())
                 return 3;
             const auto& entry = *foundSelf;
+            if (vanillaCharacter)
+            {
+                const auto expectedCell = TES3MP::CellId::interior(*TES3MP::CellSpaceId::fromValue(1));
+                if (entry.transform().cell() != expectedCell
+                    || entry.transform().position() != TES3MP::Position3(61, -135, 24)
+                    || entry.transform().orientation().z() != TES3MP::Turn32::fromValue(4056358002u))
+                {
+                    std::cerr << "vanilla prison-ship spawn mismatch\n";
+                    return 3;
+                }
+            }
             std::cout << "{\"event\":\"joined\",\"session_id\":" << sessionId.value()
                       << ",\"player_id\":" << entry.playerId().value() << ",\"entity_id\":" << entry.entityId().value()
                       << "}" << std::endl;
@@ -331,6 +357,56 @@ int main(int argc, char** argv)
         {
             if (!staleSnapshot)
                 staleSnapshot = previousSnapshot;
+        }
+        if (vanillaCharacter && bound)
+        {
+            const auto& confirmed = clientRuntime.confirmedCharacterProfile();
+            if (confirmed && confirmed->result != TES3MP::CharacterConfirmationResult::Confirmed)
+            {
+                std::cerr << "character command rejected: "
+                          << TES3MP::characterConfirmationResultName(confirmed->result) << " (result "
+                          << static_cast<unsigned>(confirmed->result) << ")\n";
+                return 3;
+            }
+            if (confirmed && confirmed->profile.lifecycle() == TES3MP::CharacterLifecycle::EstablishedCharacter)
+            {
+                std::cout << "{\"event\":\"vanilla_character_complete\",\"player_id\":"
+                          << confirmed->playerId.value() << ",\"profile_revision\":"
+                          << confirmed->profile.revision().value() << ",\"spawn_verified\":true}\n";
+                session.close();
+                factory.runtime->shutdown();
+                return 0;
+            }
+            if (confirmed && submittedCharacterRevision != confirmed->profile.revision())
+            {
+                TES3MP::CharacterCreationChoice choice = TES3MP::CompleteCharacterCreation{};
+                switch (confirmed->profile.phase())
+                {
+                    case TES3MP::CharacterCreationPhase::AwaitingName:
+                        choice = TES3MP::SetCharacterName{ "Live Vanilla" };
+                        break;
+                    case TES3MP::CharacterCreationPhase::AwaitingRace:
+                        choice = TES3MP::SetCharacterAppearance{ { *TES3MP::RaceRecordId::fromValue(7341676071149937664ull),
+                            *TES3MP::HeadRecordId::fromValue(11299439226986375735ull),
+                            *TES3MP::HairRecordId::fromValue(3843492829321912261ull), TES3MP::CharacterSex::Male } };
+                        break;
+                    case TES3MP::CharacterCreationPhase::AwaitingClass:
+                        choice = TES3MP::SetCharacterClass{ *TES3MP::ClassRecordId::fromValue(13547919975846885001ull) };
+                        break;
+                    case TES3MP::CharacterCreationPhase::AwaitingBirthsign:
+                        choice = TES3MP::SetCharacterBirthsign{ *TES3MP::BirthsignRecordId::fromValue(15904883304367654179ull) };
+                        break;
+                    case TES3MP::CharacterCreationPhase::AwaitingReview:
+                        break;
+                    case TES3MP::CharacterCreationPhase::Complete:
+                        return 3;
+                }
+                const auto revision = confirmed->profile.revision();
+                if (clientRuntime.queueCharacterCreation(std::move(choice), revision).result
+                    != TES3MP::ClientRuntimeResult::Accepted)
+                    return 3;
+                submittedCharacterRevision = revision;
+            }
         }
         if (bound && mode == "mover" && session.connection())
         {

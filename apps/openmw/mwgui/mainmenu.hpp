@@ -13,6 +13,11 @@ namespace Gui
     class ImageButton;
 }
 
+namespace MyGUI
+{
+    class Button;
+}
+
 namespace VFS
 {
     class Manager;
@@ -22,6 +27,7 @@ namespace MWGui
 {
 
     class BackgroundImage;
+    class MultiplayerDialog;
     class VideoWidget;
     class MenuVideo
     {
@@ -47,6 +53,7 @@ namespace MWGui
 
     public:
         MainMenu(int w, int h, const VFS::Manager* vfs, const std::string& versionDescription);
+        ~MainMenu() override;
 
         void onResChange(int w, int h) override;
         bool onControllerButtonEvent(const SDL_ControllerButtonEvent& arg) override;
@@ -60,6 +67,7 @@ namespace MWGui
 
         MyGUI::Widget* mButtonBox;
         MyGUI::TextBox* mVersionText;
+        MyGUI::Button* mMultiplayerButton = nullptr;
 
         BackgroundImage* mBackground;
 
@@ -76,6 +84,7 @@ namespace MWGui
         void updateMenu();
 
         std::unique_ptr<SaveGameDialog> mSaveGameDialog;
+        std::unique_ptr<MultiplayerDialog> mMultiplayerDialog;
     };
 
 }

@@ -5,6 +5,7 @@
 #include "authentication.hpp"
 #include "client_locomotion.hpp"
 #include "combat_replication.hpp"
+#include "character_creation_protocol.hpp"
 #include "headless_client_session.hpp"
 #include "interactive_object_replication.hpp"
 #include "inventory_replication.hpp"
@@ -22,7 +23,8 @@ namespace TES3MP
         AuthenticationRejectedMessage, LatestWinsSnapshot, ReliableObservationBatch, ReliableInterestBaseline,
         LatestWinsActorSnapshot, ReliableActorInterestBaseline, ReliableInteractiveObjectInterestBaseline,
         ReliablePlayerInventoryBaseline, ReliableContainerInventoryBaseline, ReliableGroundItemBaseline,
-        LatestWinsEquipmentSnapshot, LatestWinsCombatSnapshot, ReliableCombatEventBatch, ServerVrPoseSnapshot>;
+        LatestWinsEquipmentSnapshot, LatestWinsCombatSnapshot, ReliableCombatEventBatch, ReliableCharacterProfile,
+        ServerVrPoseSnapshot>;
 // Combat is capability-gated and intentionally kept outside the spatial readiness lanes.
 
     enum class ClientRuntimeResult : std::uint8_t
@@ -65,6 +67,7 @@ namespace TES3MP
         bool combatSnapshotApplied = false;
         bool resyncRequested = false;
         bool authenticationAccepted = false;
+        bool characterProfileApplied = false;
         std::vector<ServerVrPoseSnapshot> poseSnapshots;
         std::vector<ReliableCombatEventBatch> combatEvents;
     };
@@ -105,6 +108,8 @@ namespace TES3MP
         ClientRuntimeQueueResult queueMeleeAttack(std::optional<ActorId> target, ServerTick sourceTick,
             CombatRevision expectedAttackerRevision, CombatRevision expectedTargetRevision,
             MeleeAttackType attackType, float attackStrength);
+        ClientRuntimeQueueResult queueCharacterCreation(CharacterCreationChoice choice,
+            CharacterProfileRevision expectedRevision);
         std::optional<LocalLocomotionReconciliation> reconcileLocalPresentation(
             bool hardDiscontinuity = false) noexcept;
         ClientRuntimeResult requestResync(ResyncReason reason);
@@ -120,6 +125,10 @@ namespace TES3MP
         std::optional<ResumeToken> takeUnsubmittedResumeToken() noexcept;
         std::optional<PlayerCredential> takePlayerCredential() noexcept;
         std::uint64_t resumeLifetimeMilliseconds() const noexcept { return mResumeLifetimeMilliseconds; }
+        CharacterLifecycle characterLifecycle() const noexcept { return mCharacterLifecycle; }
+        CharacterProfileRevision characterProfileRevision() const noexcept { return mCharacterProfileRevision; }
+        const std::optional<ReliableCharacterProfile>& confirmedCharacterProfile() const noexcept
+        { return mCharacterProfile; }
         const std::optional<LatestWinsCombatSnapshot>& confirmedCombatSnapshot() const noexcept
         { return mCombatSnapshot; }
 
@@ -139,6 +148,10 @@ namespace TES3MP
         std::optional<PlayerCredential> mPlayerCredential;
         bool mMayAcceptPlayerCredential = false;
         std::uint64_t mResumeLifetimeMilliseconds = 0;
+        CharacterLifecycle mCharacterLifecycle = CharacterLifecycle::NewCharacter;
+        CharacterProfileRevision mCharacterProfileRevision = CharacterProfileRevision::initial();
+        std::optional<ReliableCharacterProfile> mCharacterProfile;
+        std::optional<ReliableCharacterProfile> mPendingCharacterProfile;
         std::vector<ReliableObservationBatch> mPendingObservations;
         bool mResyncPending = false;
         bool mResyncPlayerBaselineObserved = false;
@@ -150,6 +163,7 @@ namespace TES3MP
         bool mResyncEquipmentObserved = false;
         bool mResyncCombatObserved = false;
         std::optional<CommandSequence> mLastQueuedSequence;
+        std::optional<CommandSequence> mLastCharacterCommandSequence;
         ClientLocomotionHistory mLocomotionHistory;
         std::optional<LocomotionInputTick> mLastLocomotionInputTick;
         std::optional<LocomotionInputSequence> mLastLocomotionInputSequence;

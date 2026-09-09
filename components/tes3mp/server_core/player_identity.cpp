@@ -12,6 +12,20 @@ namespace
             return std::nullopt;
         return Value::fromValue(value.value() + 1);
     }
+
+    std::vector<TES3MP::PersistedPlayerIdentity> durableRecords(
+        const std::vector<TES3MP::PersistedPlayerIdentity>& live)
+    {
+        auto durable = live;
+        for (auto& record : durable)
+        {
+            if (record.characterProfile.lifecycle() == TES3MP::CharacterLifecycle::EstablishedCharacter)
+                continue;
+            record.characterProfile = TES3MP::CharacterProfile::fresh();
+            record.savedPlayer.reset();
+        }
+        return durable;
+    }
 }
 
 namespace TES3MP
@@ -45,6 +59,15 @@ namespace TES3MP
         for (std::size_t index = 0; index < records.size(); ++index)
         {
             const auto& record = records[index];
+            const bool established
+                = record.characterProfile.lifecycle() == CharacterLifecycle::EstablishedCharacter;
+            if ((!established && record.characterProfile != CharacterProfile::fresh())
+                || established != record.savedPlayer.has_value()
+                || (record.savedPlayer
+                && (record.savedPlayer->playerId() != record.claim.player
+                    || record.savedPlayer->entityId() != record.claim.entity
+                    || record.savedPlayer->appearanceId() != record.claim.appearance)))
+                return PlayerIdentityError::InvalidInitialState;
             if ((index != 0 && records[index - 1].claim.player == record.claim.player)
                 || std::any_of(records.begin(), records.begin() + static_cast<std::ptrdiff_t>(index),
                     [&](const auto& previous) { return previous.claim.entity == record.claim.entity
@@ -149,7 +172,7 @@ namespace TES3MP
         });
         Committed committed{
             preparationId, mRecords, mNextPlayer, mNextEntity, mIdentityExhausted };
-        if (!mPersistence.replace(candidate))
+        if (!mPersistence.replace(durableRecords(candidate)))
             return false;
         mCommitted.emplace(std::move(committed));
         mRecords = std::move(candidate);
@@ -172,7 +195,8 @@ namespace TES3MP
 
     bool PlayerIdentityRegistry::rollback(std::uint64_t preparationId) noexcept
     {
-        if (!mCommitted || mCommitted->id != preparationId || !mPersistence.replace(mCommitted->prior))
+        if (!mCommitted || mCommitted->id != preparationId
+            || !mPersistence.replace(durableRecords(mCommitted->prior)))
             return false;
         mRecords = std::move(mCommitted->prior);
         mNextPlayer = mCommitted->priorNextPlayer;
@@ -201,5 +225,109 @@ namespace TES3MP
                 && mCrypto.constantTimeEqual(record.credentialDigest.bytes, digestValue.bytes))
                 return record.claim;
         return std::nullopt;
+    }
+
+    const CanonicalPlayerEntityState* PlayerIdentityRegistry::savedPlayer(PlayerId player) const noexcept
+    {
+        const auto found = std::find_if(mRecords.begin(), mRecords.end(),
+            [player](const auto& record) { return record.claim.player == player; });
+        return found == mRecords.end() || !found->savedPlayer ? nullptr : &*found->savedPlayer;
+    }
+
+    bool PlayerIdentityRegistry::savePlayer(const CanonicalPlayerEntityState& player) noexcept
+    {
+        return savePlayers(std::span<const CanonicalPlayerEntityState>(&player, 1));
+    }
+
+    bool PlayerIdentityRegistry::savePlayers(std::span<const CanonicalPlayerEntityState> players) noexcept
+    try
+    {
+        if (mPending || mCommitted || players.empty())
+            return false;
+        auto candidate = mRecords;
+        std::vector<PlayerId> seen;
+        seen.reserve(players.size());
+        bool changed = false;
+        for (const auto& player : players)
+        {
+            if (std::ranges::find(seen, player.playerId()) != seen.end())
+                return false;
+            seen.push_back(player.playerId());
+            const auto found = std::find_if(candidate.begin(), candidate.end(), [&](const auto& record) {
+                return record.claim.player == player.playerId() && record.claim.entity == player.entityId()
+                    && record.claim.appearance == player.appearanceId();
+            });
+            if (found == candidate.end())
+                return false;
+            if (found->characterProfile.lifecycle() != CharacterLifecycle::EstablishedCharacter)
+                continue;
+            found->savedPlayer = player;
+            changed = true;
+        }
+        if (!changed)
+            return true;
+        if (!mPersistence.replace(durableRecords(candidate)))
+            return false;
+        mRecords = std::move(candidate);
+        return true;
+    }
+    catch (...)
+    {
+        return false;
+    }
+
+    const CharacterProfile* PlayerIdentityRegistry::characterProfile(PlayerId player) const noexcept
+    {
+        const auto found = std::find_if(mRecords.begin(), mRecords.end(),
+            [player](const auto& record) { return record.claim.player == player; });
+        return found == mRecords.end() ? nullptr : &found->characterProfile;
+    }
+
+    bool PlayerIdentityRegistry::restartIncompleteCharacter(PlayerId player) noexcept
+    {
+        const auto found = std::find_if(mRecords.begin(), mRecords.end(),
+            [player](const auto& record) { return record.claim.player == player; });
+        if (found == mRecords.end())
+            return false;
+        if (found->characterProfile.lifecycle() == CharacterLifecycle::EstablishedCharacter)
+            return true;
+        found->characterProfile = CharacterProfile::fresh();
+        found->savedPlayer.reset();
+        return true;
+    }
+
+    CharacterProfileApplyResult PlayerIdentityRegistry::applyCharacterCreation(PlayerId player,
+        const CharacterContentCatalog& catalog, const CharacterCreationCommand& command,
+        const CanonicalPlayerEntityState* completionCheckpoint) noexcept
+    try
+    {
+        if (mPending || mCommitted)
+            return CharacterProfileError::PersistenceFailed;
+        auto candidate = mRecords;
+        const auto found = std::find_if(candidate.begin(), candidate.end(),
+            [player](const auto& record) { return record.claim.player == player; });
+        if (found == candidate.end() || found->claim.contentManifest != catalog.manifest())
+            return CharacterProfileError::InvalidInitialState;
+        auto applied = TES3MP::applyCharacterCreation(found->characterProfile, catalog, command);
+        auto* profile = std::get_if<CharacterProfile>(&applied);
+        if (!profile)
+            return std::get<CharacterProfileError>(applied);
+        found->characterProfile = *profile;
+        if (profile->lifecycle() == CharacterLifecycle::EstablishedCharacter)
+        {
+            if (!completionCheckpoint || completionCheckpoint->playerId() != found->claim.player
+                || completionCheckpoint->entityId() != found->claim.entity
+                || completionCheckpoint->appearanceId() != found->claim.appearance)
+                return CharacterProfileError::InvalidInitialState;
+            found->savedPlayer = *completionCheckpoint;
+            if (!mPersistence.replace(durableRecords(candidate)))
+                return CharacterProfileError::PersistenceFailed;
+        }
+        mRecords = std::move(candidate);
+        return *profile;
+    }
+    catch (...)
+    {
+        return CharacterProfileError::AllocationFailure;
     }
 }

@@ -8,6 +8,50 @@ header and exactly one manifest record. Missing, oversized, malformed,
 duplicate, unknown-cell, collision-invalid, or manifest-mismatched input fails
 server startup; partial catalogs are never accepted.
 
+## Characters V2
+
+Configured by `character_content_file`. Omission disables authoritative
+character creation. Maximum size is 2 MiB. The catalog contains at most 256
+races, classes, and birthsigns, 1,024 appearances per race, 64 starting spells
+per race/sign, and 64 starting items.
+
+```text
+TES3MP_CHARACTERS_V2
+manifest <64-lowercase-hex-digits>
+spawn <cell> <x> <y> <z> <rot-x> <rot-y> <rot-z>
+completion_spawn <cell> <x> <y> <z> <rot-x> <rot-y> <rot-z>
+race <id> <8-female-attributes> <8-male-attributes> <27-skill-bonuses> <spell-count> [<spell-id> ...]
+appearance <race-id> <head-id> <hair-id> <female-0-or-male-1>
+class <id> <combat-0-or-magic-1-or-stealth-2> <2-favored-attributes> <5-minor-skills> <5-major-skills>
+birthsign <id> <spell-count> [<spell-id> ...]
+starting_item <prototype-id> <count> <equipment-slot-or--1>
+```
+
+`<cell>` uses the same `interior <space-id>` or `exterior <worldspace-id>
+<grid-x> <grid-y>` form as the other catalogs. Both safe-point transforms must
+be in the exact manifest and occupiable in the collision catalog. `spawn` is
+the pre-chargen checkpoint; `completion_spawn` is committed only after stock
+chargen has actually exited. Coordinates are signed fixed-point values with
+1,024 canonical quanta per OpenMW world unit.
+Attributes and skills use the fixed OpenMW order (8 attributes, 27 skills);
+skill indexes and favored attribute indexes are range-checked and distinct
+where the class rules require it. Equipment slots use the canonical 0–18
+range; `-1` means carried only.
+
+Record IDs are manifest-scoped unsigned 64-bit identities derived from the
+case-folded ASCII OpenMW record ID with FNV-1a. They are opaque on the wire;
+the server never accepts an unchecked record string from a client. The shipped
+vanilla profile was extracted from the installed `Morrowind.esm` identified by
+its manifest hash. Its authoritative intro transform comes from the stock
+`CharGen` startup script: Imperial Prison Ship at `(61, -135, 24)`, Z rotation
+340 degrees, encoded as `(62464, -138240, 24576)` canonical position quanta and
+`4056358002` in `Turn32`. The completion transform comes from the stock
+`CharGenDoorExitCaptain` exit destination outside Seyda Neen. V1 character
+catalogs are intentionally rejected rather than assigned an inferred safe
+point. See
+[`character_content.cpp`](../../apps/tes3mp-server/character_content.cpp) and
+[`character_profile.cpp`](../../components/tes3mp/server_core/character_profile.cpp).
+
 ## Collision V1
 
 Configured by `collision_content_file`; required by the production server.

@@ -48,9 +48,9 @@ namespace
 
     TES3MP::ServerHello serverHello(
         bool pose = false, bool actors = false, bool interactiveObjects = false, bool inventory = false,
-        bool combat = false)
+        bool combat = false, std::uint16_t minor = 2)
     {
-        auto versions = std::get<TES3MP::ProtocolVersionRange>(TES3MP::ProtocolVersionRange::create(1, 2, 2));
+        auto versions = std::get<TES3MP::ProtocolVersionRange>(TES3MP::ProtocolVersionRange::create(1, minor, minor));
         std::vector<TES3MP::CapabilityId> capabilities;
         if (pose)
             capabilities.push_back(TES3MP::vrPoseCapability());
@@ -150,7 +150,8 @@ namespace
     }
 
     TES3MP::AuthenticationAcceptedMessage accepted(std::byte marker,
-        std::uint64_t lifetime = TES3MP::MinimumResumeTokenLifetimeMilliseconds, bool includePlayerCredential = false)
+        std::uint64_t lifetime = TES3MP::MinimumResumeTokenLifetimeMilliseconds, bool includePlayerCredential = false,
+        TES3MP::CharacterLifecycle lifecycle = TES3MP::CharacterLifecycle::EstablishedCharacter)
     {
         std::array<std::byte, TES3MP::ResumeTokenBytes> bytes{};
         bytes.fill(marker);
@@ -159,7 +160,22 @@ namespace
         if (includePlayerCredential)
             playerCredential = TES3MP::PlayerCredential::create(bytes);
         return std::move(
-            *TES3MP::AuthenticationAcceptedMessage::create(std::move(*token), lifetime, std::move(playerCredential)));
+            *TES3MP::AuthenticationAcceptedMessage::create(std::move(*token), lifetime, std::move(playerCredential),
+                lifecycle));
+    }
+
+    TES3MP::CharacterProfile establishedCharacterProfile()
+    {
+        TES3MP::CharacterDerivedState derived;
+        derived.attributes.fill(40);
+        derived.skills.fill(5);
+        auto profile = TES3MP::CharacterProfile::restore(TES3MP::CharacterLifecycle::EstablishedCharacter,
+            TES3MP::CharacterCreationPhase::Complete, "Nerevar",
+            TES3MP::CharacterAppearance{ value<TES3MP::RaceRecordId>(1), value<TES3MP::HeadRecordId>(2),
+                value<TES3MP::HairRecordId>(3), TES3MP::CharacterSex::Male },
+            TES3MP::CharacterClass{ value<TES3MP::ClassRecordId>(4) }, value<TES3MP::BirthsignRecordId>(5),
+            std::move(derived), {}, value<TES3MP::CharacterProfileRevision>(6));
+        return std::move(*profile);
     }
 
     class RecordingPlayerCredentialPersistence final : public TES3MP::OpenMWAdapter::PlayerCredentialPersistence
@@ -175,7 +191,8 @@ namespace
     };
 
     TES3MP::LatestWinsSnapshot selfSnapshot(TES3MP::SessionGeneration generation, bool includeRemote = false,
-        std::uint64_t canonicalRevision = 1, std::uint64_t serverTick = 1)
+        std::uint64_t canonicalRevision = 1, std::uint64_t serverTick = 1,
+        std::optional<std::uint64_t> acknowledgedCommand = std::nullopt)
     {
         const auto session = value<TES3MP::SessionId>(1);
         const auto player = value<TES3MP::PlayerId>(1);
@@ -194,8 +211,11 @@ namespace
                     TES3MP::Orientation3(zero, zero, zero)),
                 TES3MP::LinearVelocity3(0, 0, 0)));
         auto view = std::get<TES3MP::SpatialWorldView>(TES3MP::SpatialWorldView::create(entries));
+        const auto acknowledgement = acknowledgedCommand
+            ? std::optional(value<TES3MP::CommandSequence>(*acknowledgedCommand))
+            : std::nullopt;
         return TES3MP::LatestWinsSnapshot(TES3MP::LatestWinsSnapshotHeader(session, generation, player, entity,
-                                              value<TES3MP::CanonicalRevision>(canonicalRevision), std::nullopt),
+                                               value<TES3MP::CanonicalRevision>(canonicalRevision), acknowledgement),
             std::move(view));
     }
 
@@ -819,10 +839,11 @@ int main()
         std::move(transport), std::move(clock), std::move(runtime), reconnect, input, presentation, status);
     require(static_cast<bool>(liveCoordinator));
     liveCoordinator->frame(0.01f);
-    require(presentation.advances == 1);
+    require(presentation.advances == 0);
     transportObserver->failPoll = true;
     liveCoordinator->frame(0.01f);
     require(presentation.clears == 1 && status.last == ConnectionStatus::Disconnected);
+    require(liveCoordinator->confirmedCharacterProfile() == nullptr);
     liveCoordinator.reset();
     require(presentation.clears == 2);
 
@@ -1254,6 +1275,109 @@ int main()
     }
     require(foundCombatCommand);
 
+    Input deferredInput;
+    Presentation deferredPresentation;
+    Status deferredStatus;
+    auto deferredTransport = std::make_unique<IdleTransport>();
+    auto* deferredTransportObserver = deferredTransport.get();
+    deferredTransportObserver->acceptConnections = true;
+    auto deferredClock = std::make_unique<Clock>();
+    auto deferredCreated = ClientSessionRuntime::create(
+        *deferredTransport, *deferredClock, timeouts, SessionGeneration::initial(), outbound);
+    auto deferredRuntime = std::get<std::unique_ptr<ClientSessionRuntime>>(std::move(deferredCreated));
+    auto deferredVersions = std::get<ProtocolVersionRange>(ProtocolVersionRange::create(1, 2, 2));
+    auto deferredOffer
+        = std::get<CapabilityOffer>(CapabilityOffer::create(std::move(deferredVersions), {}, {}));
+    auto deferredPassword = AuthenticationMaterial::create(passwordBytes);
+    require(deferredPassword
+        && deferredRuntime->start(endpoint, ClientHello::fromOffer(std::move(deferredOffer)),
+               AuthenticationRequest::join(std::move(*deferredPassword)))
+            == HeadlessClientResult::Accepted);
+    auto deferredCoordinator = makeCoordinator(std::move(deferredTransport), std::move(deferredClock),
+        std::move(deferredRuntime), reconnect, deferredInput, deferredPresentation, deferredStatus);
+    deferredCoordinator->setGameRunning(false);
+    deferredCoordinator->frame(0.01f);
+    deferredTransportObserver->enqueue(MessageClass::SessionControl, MessageKind::ServerHello,
+        encodeServerHello(serverHello()), TransportChannel::ReliableOrdered);
+    deferredCoordinator->frame(0.01f);
+    deferredTransportObserver->enqueue(MessageClass::SessionControl, MessageKind::AuthenticationAccepted,
+        encodeAuthenticationAccepted(accepted(std::byte{ 9 })), TransportChannel::ReliableOrdered);
+    deferredTransportObserver->enqueue(MessageClass::ReliableOperation, MessageKind::ReliableInterestBaseline,
+        encodeReliableInterestBaseline(selfBaseline(SessionGeneration::initial())),
+        TransportChannel::ReliableOrdered);
+    deferredTransportObserver->enqueue(MessageClass::LatestWinsSnapshot, MessageKind::LatestWinsSnapshot,
+        encodeLatestWinsSnapshot(selfSnapshot(SessionGeneration::initial())), TransportChannel::LatestWins);
+    deferredCoordinator->frame(0.01f);
+    require(deferredCoordinator->multiplayerState() == MultiplayerState::Ready
+        && deferredCoordinator->gameStartRequested() && deferredPresentation.calls == 0
+        && deferredPresentation.advances == 0 && deferredInput.calls == 0);
+    deferredCoordinator->setGameRunning(true);
+    deferredCoordinator->frame(0.01f);
+    require(!deferredCoordinator->gameStartRequested() && deferredPresentation.calls == 1
+        && deferredPresentation.advances == 1 && deferredInput.calls == 1);
+
+    Input chargenInput;
+    Presentation chargenPresentation;
+    Status chargenStatus;
+    auto chargenTransport = std::make_unique<IdleTransport>();
+    auto* chargenTransportObserver = chargenTransport.get();
+    chargenTransportObserver->acceptConnections = true;
+    auto chargenClock = std::make_unique<Clock>();
+    auto* chargenClockObserver = chargenClock.get();
+    auto chargenCreated = ClientSessionRuntime::create(
+        *chargenTransport, *chargenClock, timeouts, SessionGeneration::initial(), outbound);
+    auto chargenRuntime = std::get<std::unique_ptr<ClientSessionRuntime>>(std::move(chargenCreated));
+    auto chargenVersions = std::get<ProtocolVersionRange>(ProtocolVersionRange::create(1, 3, 3));
+    auto chargenOffer = std::get<CapabilityOffer>(CapabilityOffer::create(std::move(chargenVersions), {}, {}));
+    auto chargenPassword = AuthenticationMaterial::create(passwordBytes);
+    require(chargenPassword
+        && chargenRuntime->start(endpoint, ClientHello::fromOffer(std::move(chargenOffer)),
+               AuthenticationRequest::join(std::move(*chargenPassword)))
+            == HeadlessClientResult::Accepted);
+    auto chargenCoordinator = makeCoordinator(std::move(chargenTransport), std::move(chargenClock),
+        std::move(chargenRuntime), reconnect, chargenInput, chargenPresentation, chargenStatus);
+    chargenCoordinator->frame(0.01f);
+    chargenTransportObserver->enqueue(MessageClass::SessionControl, MessageKind::ServerHello,
+        encodeServerHello(serverHello(false, false, false, false, false, 3)), TransportChannel::ReliableOrdered);
+    chargenCoordinator->frame(0.01f);
+    chargenTransportObserver->enqueue(MessageClass::SessionControl, MessageKind::AuthenticationAccepted,
+        encodeAuthenticationAccepted(accepted(std::byte{ 10 }, MinimumResumeTokenLifetimeMilliseconds, false,
+            CharacterLifecycle::NewCharacter)),
+        TransportChannel::ReliableOrdered);
+    chargenTransportObserver->enqueue(MessageClass::ReliableOperation, MessageKind::ReliableInterestBaseline,
+        encodeReliableInterestBaseline(selfBaseline(SessionGeneration::initial())),
+        TransportChannel::ReliableOrdered);
+    chargenTransportObserver->enqueue(MessageClass::LatestWinsSnapshot, MessageKind::LatestWinsSnapshot,
+        encodeLatestWinsSnapshot(selfSnapshot(SessionGeneration::initial())), TransportChannel::LatestWins);
+    chargenCoordinator->frame(0.01f);
+    for (std::uint64_t sequence = 1; sequence <= MaximumRetainedLocomotionInputs + 1; ++sequence)
+    {
+        chargenClockObserver->nanoseconds = sequence * 250'000'000;
+        chargenTransportObserver->enqueue(MessageClass::LatestWinsSnapshot, MessageKind::LatestWinsSnapshot,
+            encodeLatestWinsSnapshot(selfSnapshot(
+                SessionGeneration::initial(), false, sequence + 1, sequence + 1, sequence)),
+            TransportChannel::LatestWins);
+        chargenCoordinator->frame(0.01f);
+    }
+    require(chargenCoordinator->multiplayerState() == MultiplayerState::Ready);
+    require(chargenCoordinator->characterLifecycle() == CharacterLifecycle::NewCharacter);
+    require(chargenPresentation.calls == 0);
+    require(chargenInput.calls == 0);
+    chargenTransportObserver->enqueue(MessageClass::ReliableOperation, MessageKind::ReliableCharacterProfile,
+        encodeReliableCharacterProfile({ value<SessionId>(1), SessionGeneration::initial(), value<PlayerId>(1),
+            CharacterConfirmationResult::Confirmed, establishedCharacterProfile() }),
+        TransportChannel::ReliableOrdered);
+    chargenCoordinator->frame(0.01f);
+    require(chargenCoordinator->characterLifecycle() == CharacterLifecycle::EstablishedCharacter
+        && chargenPresentation.calls == 0 && chargenInput.calls == 0);
+    const auto safePointRevision = MaximumRetainedLocomotionInputs + 3;
+    chargenTransportObserver->enqueue(MessageClass::LatestWinsSnapshot, MessageKind::LatestWinsSnapshot,
+        encodeLatestWinsSnapshot(selfSnapshot(
+            SessionGeneration::initial(), false, safePointRevision, safePointRevision, safePointRevision - 1)),
+        TransportChannel::LatestWins);
+    chargenCoordinator->frame(0.01f);
+    require(chargenPresentation.calls == 1 && chargenInput.calls == 1);
+
     require(
         std::get<TES3MP::OpenMWAdapter::ClientCompositionFailure>(TES3MP::OpenMWAdapter::makeClientCoordinator("", 0, 0,
             "unreachable/credential", {}, TES3MP::testContentManifestId(), TES3MP::OpenMWAdapter::ClientProviders{}))
@@ -1265,4 +1389,16 @@ int main()
     require(std::get<TES3MP::OpenMWAdapter::ClientCompositionFailure>(TES3MP::OpenMWAdapter::makeClientCoordinator(
                 "127.0.0.1", 25560, 0, {}, {}, TES3MP::testContentManifestId(), providers))
         == TES3MP::OpenMWAdapter::ClientCompositionFailure::InvalidTimeout);
+
+    const auto hostOnly = TES3MP::OpenMWAdapter::parseServerAddress("example.org", 25565);
+    require(hostOnly && hostOnly->host() == "example.org" && hostOnly->port() == 25565);
+    const auto uri = TES3MP::OpenMWAdapter::parseServerAddress("tes3mp://127.0.0.1:25570", 25565);
+    require(uri && uri->host() == "127.0.0.1" && uri->port() == 25570);
+    require(TES3MP::OpenMWAdapter::parseServerAddress("TES3MP://example.org", 25565));
+    const auto ipv6 = TES3MP::OpenMWAdapter::parseServerAddress("tes3mp://[::1]:25571", 25565);
+    require(ipv6 && ipv6->host() == "::1" && ipv6->port() == 25571);
+    require(!TES3MP::OpenMWAdapter::parseServerAddress("http://example.org", 25565));
+    require(!TES3MP::OpenMWAdapter::parseServerAddress("tes3mp://example.org/path", 25565));
+    require(!TES3MP::OpenMWAdapter::parseServerAddress("::1", 25565));
+    require(!TES3MP::OpenMWAdapter::parseServerAddress("example.org:0", 25565));
 }

@@ -3,6 +3,11 @@ if (NOT DEFINED OPENMW_RESOURCES_ROOT)
 endif()
 
 set(BUILTIN_DATA_FILES
+    tes3mp/server.cfg
+    tes3mp/join-password.txt
+    tes3mp/vanilla-collision.txt
+    tes3mp/vanilla-actors.txt
+    tes3mp/vanilla-characters.txt
     textures/omw_map_color_palette.dds
     textures/omw_menu_scroll_down.dds
     textures/omw_menu_scroll_up.dds
@@ -213,6 +218,7 @@ set(BUILTIN_DATA_FILES
     mygui/openmw_map_window.layout
     mygui/openmw_map_window.skin.xml
     mygui/openmw_messagebox.layout
+    mygui/openmw_multiplayer_dialog.layout
     mygui/openmw_pointer.xml
     mygui/openmw_progress.skin.xml
     mygui/openmw_resources.xml

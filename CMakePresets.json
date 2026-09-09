@@ -33,6 +33,85 @@
       }
     },
     {
+      "name": "vnext-product-common",
+      "hidden": true,
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/vnext-product",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+        "CMAKE_EXPORT_COMPILE_COMMANDS": true,
+        "BUILD_TESTING": false,
+        "BUILD_OPENMW": true,
+        "BUILD_LAUNCHER": false,
+        "BUILD_WIZARD": false,
+        "BUILD_MWINIIMPORTER": false,
+        "BUILD_OPENCS": false,
+        "BUILD_ESSIMPORTER": false,
+        "BUILD_BSATOOL": false,
+        "BUILD_ESMTOOL": false,
+        "BUILD_NIFTEST": false,
+        "BUILD_NAVMESHTOOL": false,
+        "BUILD_BULLETOBJECTTOOL": false,
+        "BUILD_COMPONENTS_TESTS": false,
+        "BUILD_OPENMW_TESTS": false,
+        "BUILD_OPENCS_TESTS": false,
+        "BUILD_BENCHMARKS": false,
+        "TES3MP_ENABLE_GNS_TRANSPORT": true,
+        "TES3MP_TRANSPORT_DEPENDENCY_MANIFEST": "${sourceDir}/build/vnext-transport-dependencies/manifest.json"
+      }
+    },
+    {
+      "name": "vnext-product-windows",
+      "displayName": "TES3MP client and dedicated server (Windows x86-64)",
+      "inherits": "vnext-product-common",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Windows"
+      },
+      "cacheVariables": {
+        "CMAKE_TOOLCHAIN_FILE": "$env{VNEXT_VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake",
+        "CMAKE_PREFIX_PATH": "$env{VNEXT_QT_ROOT}",
+        "LuaJit_INCLUDE_DIR": "$env{VNEXT_VCPKG_ROOT}/installed/x64-windows/include/luajit",
+        "LuaJit_LIBRARY": "$env{VNEXT_VCPKG_ROOT}/installed/x64-windows/lib/lua51.lib",
+        "OPENMW_USE_SYSTEM_SQLITE3": false,
+        "OPENMW_USE_SYSTEM_YAML_CPP": false,
+        "VCPKG_TARGET_TRIPLET": "x64-windows"
+      }
+    },
+    {
+      "name": "vnext-product-linux",
+      "displayName": "TES3MP client and dedicated server (Linux x86-64)",
+      "inherits": "vnext-product-common",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Linux"
+      },
+      "cacheVariables": {
+        "OPENMW_USE_SYSTEM_RECASTNAVIGATION": true,
+        "USE_SYSTEM_TINYXML": true
+      }
+    },
+    {
+      "name": "vnext-product-macos",
+      "displayName": "TES3MP client and dedicated server (macOS)",
+      "inherits": "vnext-product-common",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Darwin"
+      },
+      "cacheVariables": {
+        "CMAKE_TOOLCHAIN_FILE": "$env{VNEXT_VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake",
+        "CMAKE_PREFIX_PATH": "$env{VNEXT_VCPKG_ROOT}/installed/$env{VNEXT_VCPKG_TRIPLET};$env{VNEXT_QT_ROOT}",
+        "OPENMW_OSX_DEPLOYMENT": true,
+        "OPENMW_USE_SYSTEM_YAML_CPP": false,
+        "VCPKG_HOST_TRIPLET": "$env{VNEXT_VCPKG_TRIPLET}",
+        "VCPKG_TARGET_TRIPLET": "$env{VNEXT_VCPKG_TRIPLET}"
+      }
+    },
+    {
       "name": "vnext-baseline-windows",
       "displayName": "vNext OpenMW 0.51 baseline tests (Windows x86-64)",
       "inherits": "vnext-baseline-common",
@@ -143,6 +222,55 @@
     }
   ],
   "buildPresets": [
+    {
+      "name": "vnext-product-windows",
+      "configurePreset": "vnext-product-windows",
+      "targets": [
+        "openmw",
+        "tes3mp_server"
+      ]
+    },
+    {
+      "name": "vnext-product-client-windows",
+      "configurePreset": "vnext-product-windows",
+      "targets": ["openmw"]
+    },
+    {
+      "name": "vnext-product-server-windows",
+      "configurePreset": "vnext-product-windows",
+      "targets": ["tes3mp_server"]
+    },
+    {
+      "name": "vnext-product-headless-windows",
+      "configurePreset": "vnext-product-windows",
+      "targets": ["tes3mp_headless_client"]
+    },
+    {
+      "name": "vnext-product-checks-windows",
+      "configurePreset": "vnext-product-windows",
+      "targets": [
+        "openmw",
+        "tes3mp_server",
+        "openmw_tes3mp_adapter_tests_run",
+        "tes3mp_server_app_tests_run"
+      ]
+    },
+    {
+      "name": "vnext-product-linux",
+      "configurePreset": "vnext-product-linux",
+      "targets": [
+        "openmw",
+        "tes3mp_server"
+      ]
+    },
+    {
+      "name": "vnext-product-macos",
+      "configurePreset": "vnext-product-macos",
+      "targets": [
+        "openmw",
+        "tes3mp_server"
+      ]
+    },
     {
       "name": "vnext-baseline-windows",
       "configurePreset": "vnext-baseline-windows",

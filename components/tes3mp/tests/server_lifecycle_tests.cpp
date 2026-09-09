@@ -113,6 +113,25 @@ namespace
             == ServerLifecycleError::UnknownPrincipal);
     }
 
+    void credentialReattachSupersedesHiddenBinding()
+    {
+        Fixture value;
+        const auto disconnected = std::get<ServerLifecyclePreparation>(value.lifecycle.prepareDisconnect(
+            value.joined.session, MonotonicInstant::fromNanoseconds(10), id<ServerTick>(1)));
+        assert(value.lifecycle.commit(disconnected.id));
+
+        const auto player = value.reducer.state().players().front();
+        const CanonicalSessionProgress replacement(id<SessionId>(2), SessionGeneration::initial(),
+            player.playerId(), player.entityId(), std::nullopt);
+        auto prepared = value.reducer.prepareJoin(player, replacement, id<ServerTick>(2));
+        assert(prepared && value.reducer.commit(std::move(*prepared)));
+        assert(value.lifecycle.registerJoined(id<PrincipalId>(32), replacement.sessionId()));
+        assert(value.lifecycle.liveCount() == 1 && value.lifecycle.hiddenCount() == 0);
+        assert(std::get<ServerLifecycleError>(value.lifecycle.prepareResume(value.joined.principal,
+                   value.joined.session, MonotonicInstant::fromNanoseconds(20), id<ServerTick>(3)))
+            == ServerLifecycleError::UnknownPrincipal);
+    }
+
     void simultaneousDisconnectsCommitAsOneBatch()
     {
         Fixture value;
@@ -146,6 +165,7 @@ int main()
     disconnectIsPreparedAndFailureAtomic();
     resumePreservesIdentityAndRejectsDeadline();
     expirationWinsAtDeadlineAndRemovesPlayer();
+    credentialReattachSupersedesHiddenBinding();
     simultaneousDisconnectsCommitAsOneBatch();
     std::cout << "server lifecycle contracts passed\n";
 }

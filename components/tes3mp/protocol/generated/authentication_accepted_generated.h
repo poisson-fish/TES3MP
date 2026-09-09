@@ -20,12 +20,50 @@ namespace Schema {
 struct AuthenticationAccepted;
 struct AuthenticationAcceptedBuilder;
 
+enum class CharacterLifecycle : uint8_t {
+  Unknown = 0,
+  NewCharacter = 1,
+  CreatingCharacter = 2,
+  EstablishedCharacter = 3,
+  MIN = Unknown,
+  MAX = EstablishedCharacter
+};
+
+inline const CharacterLifecycle (&EnumValuesCharacterLifecycle())[4] {
+  static const CharacterLifecycle values[] = {
+    CharacterLifecycle::Unknown,
+    CharacterLifecycle::NewCharacter,
+    CharacterLifecycle::CreatingCharacter,
+    CharacterLifecycle::EstablishedCharacter
+  };
+  return values;
+}
+
+inline const char * const *EnumNamesCharacterLifecycle() {
+  static const char * const names[5] = {
+    "Unknown",
+    "NewCharacter",
+    "CreatingCharacter",
+    "EstablishedCharacter",
+    nullptr
+  };
+  return names;
+}
+
+inline const char *EnumNameCharacterLifecycle(CharacterLifecycle e) {
+  if (::flatbuffers::IsOutRange(e, CharacterLifecycle::Unknown, CharacterLifecycle::EstablishedCharacter)) return "";
+  const size_t index = static_cast<size_t>(e);
+  return EnumNamesCharacterLifecycle()[index];
+}
+
 struct AuthenticationAccepted FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
   typedef AuthenticationAcceptedBuilder Builder;
   enum FlatBuffersVTableOffset FLATBUFFERS_VTABLE_UNDERLYING_TYPE {
     VT_RESUME_TOKEN = 4,
     VT_LIFETIME_MILLISECONDS = 6,
-    VT_PLAYER_CREDENTIAL = 8
+    VT_PLAYER_CREDENTIAL = 8,
+    VT_CHARACTER_LIFECYCLE = 10,
+    VT_PROFILE_REVISION = 12
   };
   const ::flatbuffers::Vector<uint8_t> *resume_token() const {
     return GetPointer<const ::flatbuffers::Vector<uint8_t> *>(VT_RESUME_TOKEN);
@@ -36,6 +74,12 @@ struct AuthenticationAccepted FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::T
   const ::flatbuffers::Vector<uint8_t> *player_credential() const {
     return GetPointer<const ::flatbuffers::Vector<uint8_t> *>(VT_PLAYER_CREDENTIAL);
   }
+  TES3MP::Protocol::Schema::CharacterLifecycle character_lifecycle() const {
+    return static_cast<TES3MP::Protocol::Schema::CharacterLifecycle>(GetField<uint8_t>(VT_CHARACTER_LIFECYCLE, 0));
+  }
+  uint64_t profile_revision() const {
+    return GetField<uint64_t>(VT_PROFILE_REVISION, 0);
+  }
   template <bool B = false>
   bool Verify(::flatbuffers::VerifierTemplate<B> &verifier) const {
     return VerifyTableStart(verifier) &&
@@ -44,6 +88,8 @@ struct AuthenticationAccepted FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::T
            VerifyField<uint64_t>(verifier, VT_LIFETIME_MILLISECONDS, 8) &&
            VerifyOffset(verifier, VT_PLAYER_CREDENTIAL) &&
            verifier.VerifyVector(player_credential()) &&
+           VerifyField<uint8_t>(verifier, VT_CHARACTER_LIFECYCLE, 1) &&
+           VerifyField<uint64_t>(verifier, VT_PROFILE_REVISION, 8) &&
            verifier.EndTable();
   }
 };
@@ -61,6 +107,12 @@ struct AuthenticationAcceptedBuilder {
   void add_player_credential(::flatbuffers::Offset<::flatbuffers::Vector<uint8_t>> player_credential) {
     fbb_.AddOffset(AuthenticationAccepted::VT_PLAYER_CREDENTIAL, player_credential);
   }
+  void add_character_lifecycle(TES3MP::Protocol::Schema::CharacterLifecycle character_lifecycle) {
+    fbb_.AddElement<uint8_t>(AuthenticationAccepted::VT_CHARACTER_LIFECYCLE, static_cast<uint8_t>(character_lifecycle), 0);
+  }
+  void add_profile_revision(uint64_t profile_revision) {
+    fbb_.AddElement<uint64_t>(AuthenticationAccepted::VT_PROFILE_REVISION, profile_revision, 0);
+  }
   explicit AuthenticationAcceptedBuilder(::flatbuffers::FlatBufferBuilder &_fbb)
         : fbb_(_fbb) {
     start_ = fbb_.StartTable();
@@ -76,11 +128,15 @@ inline ::flatbuffers::Offset<AuthenticationAccepted> CreateAuthenticationAccepte
     ::flatbuffers::FlatBufferBuilder &_fbb,
     ::flatbuffers::Offset<::flatbuffers::Vector<uint8_t>> resume_token = 0,
     uint64_t lifetime_milliseconds = 0,
-    ::flatbuffers::Offset<::flatbuffers::Vector<uint8_t>> player_credential = 0) {
+    ::flatbuffers::Offset<::flatbuffers::Vector<uint8_t>> player_credential = 0,
+    TES3MP::Protocol::Schema::CharacterLifecycle character_lifecycle = TES3MP::Protocol::Schema::CharacterLifecycle::Unknown,
+    uint64_t profile_revision = 0) {
   AuthenticationAcceptedBuilder builder_(_fbb);
+  builder_.add_profile_revision(profile_revision);
   builder_.add_lifetime_milliseconds(lifetime_milliseconds);
   builder_.add_player_credential(player_credential);
   builder_.add_resume_token(resume_token);
+  builder_.add_character_lifecycle(character_lifecycle);
   return builder_.Finish();
 }
 
@@ -88,14 +144,18 @@ inline ::flatbuffers::Offset<AuthenticationAccepted> CreateAuthenticationAccepte
     ::flatbuffers::FlatBufferBuilder &_fbb,
     const std::vector<uint8_t> *resume_token = nullptr,
     uint64_t lifetime_milliseconds = 0,
-    const std::vector<uint8_t> *player_credential = nullptr) {
+    const std::vector<uint8_t> *player_credential = nullptr,
+    TES3MP::Protocol::Schema::CharacterLifecycle character_lifecycle = TES3MP::Protocol::Schema::CharacterLifecycle::Unknown,
+    uint64_t profile_revision = 0) {
   auto resume_token__ = resume_token ? _fbb.CreateVector<uint8_t>(*resume_token) : 0;
   auto player_credential__ = player_credential ? _fbb.CreateVector<uint8_t>(*player_credential) : 0;
   return TES3MP::Protocol::Schema::CreateAuthenticationAccepted(
       _fbb,
       resume_token__,
       lifetime_milliseconds,
-      player_credential__);
+      player_credential__,
+      character_lifecycle,
+      profile_revision);
 }
 
 inline const TES3MP::Protocol::Schema::AuthenticationAccepted *GetAuthenticationAccepted(const void *buf) {

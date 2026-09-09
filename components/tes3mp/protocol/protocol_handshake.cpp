@@ -263,9 +263,10 @@ namespace TES3MP
         flatbuffers::FlatBufferBuilder builder;
         const auto capabilities = rawCapabilities(value.negotiatedCapabilities());
         const auto manifest = rawManifest(value.contentManifest());
+        const auto encodedManifest = builder.CreateVector(manifest);
+        const auto encodedCapabilities = builder.CreateVector(capabilities);
         const auto root = Protocol::Schema::CreateServerHello(
-            builder, value.selectedVersion().major, value.selectedVersion().minor, builder.CreateVector(capabilities),
-            builder.CreateVector(manifest));
+            builder, value.selectedVersion().major, value.selectedVersion().minor, encodedCapabilities, encodedManifest);
         Protocol::Schema::FinishSizePrefixedServerHelloBuffer(builder, root);
         return takeBuffer(builder);
     }

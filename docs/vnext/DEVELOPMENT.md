@@ -61,6 +61,42 @@ include families.
 
 Run commands from the repository root unless noted.
 
+### Everyday product builds
+
+The product preset builds only the two shipping runtime targets: the OpenMW
+client and the TES3MP dedicated server. It disables the launcher, editor,
+conversion tools, benchmarks, and upstream test suites. Provision the verified
+transport dependencies once before the first product build:
+
+```sh
+python scripts/provision_vnext_transport.py
+```
+
+On Windows, the wrapper configures the compiler environment and uses the
+bounded preset. `product` is the default; narrower and broader scopes remain
+explicit:
+
+```bat
+build_windows.bat
+build_windows.bat -Target client
+build_windows.bat -Target server
+build_windows.bat -Target headless
+build_windows.bat -Target checks
+build_windows.bat -Target contracts
+```
+
+On other supported desktop platforms, use the matching root preset:
+
+```sh
+cmake --preset vnext-product-linux --fresh
+cmake --build --preset vnext-product-linux --parallel 4
+```
+
+Use `vnext-product-macos` on macOS. The headless client and focused test
+executables are development tools and are deliberately absent from the product
+preset. The full OpenMW baseline below remains a release/CI regression gate,
+not the normal edit-build loop.
+
 ### Fast repository checks
 
 ```sh

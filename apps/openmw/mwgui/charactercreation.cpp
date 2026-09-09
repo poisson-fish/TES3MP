@@ -4,6 +4,9 @@
 
 #include <components/debug/debuglog.hpp>
 #include <components/fallback/fallback.hpp>
+#include <components/esm3/loadbody.hpp>
+#include <components/esm3/loadbsgn.hpp>
+#include <components/esm3/loadrace.hpp>
 #include <components/misc/resourcehelpers.hpp>
 #include <components/misc/rng.hpp>
 
@@ -12,12 +15,14 @@
 #include "../mwbase/soundmanager.hpp"
 #include "../mwbase/windowmanager.hpp"
 #include "../mwbase/world.hpp"
+#include "../tes3mp/engine_coordinator.hpp"
 
 #include "../mwmechanics/actorutil.hpp"
 #include "../mwmechanics/creaturestats.hpp"
 
 #include "../mwworld/class.hpp"
 #include "../mwworld/esmstore.hpp"
+#include "../mwworld/globals.hpp"
 #include "../mwworld/player.hpp"
 
 #include "birth.hpp"
@@ -29,6 +34,56 @@
 
 namespace
 {
+    template <class Id>
+    std::optional<Id> multiplayerRecordId(const ESM::RefId& value)
+    {
+        const auto raw = TES3MP::characterRecordId(value.serializeText());
+        return raw ? Id::fromValue(*raw) : std::nullopt;
+    }
+
+    TES3MP::CustomClassDefinition multiplayerCustomClass(const ESM::Class& value)
+    {
+        TES3MP::CustomClassDefinition result;
+        result.name = value.mName;
+        result.description = value.mDescription;
+        result.specialization = static_cast<TES3MP::ClassSpecialization>(value.mData.mSpecialization);
+        for (std::size_t index = 0; index < result.favoredAttributes.size(); ++index)
+            result.favoredAttributes[index] = static_cast<std::uint8_t>(value.mData.mAttribute[index]);
+        for (std::size_t index = 0; index < result.minorSkills.size(); ++index)
+        {
+            result.minorSkills[index] = static_cast<std::uint8_t>(value.mData.mSkills[index][0]);
+            result.majorSkills[index] = static_cast<std::uint8_t>(value.mData.mSkills[index][1]);
+        }
+        return result;
+    }
+
+    template <class Record, class Id>
+    ESM::RefId findMultiplayerRecord(const MWWorld::ESMStore& store, Id id)
+    {
+        for (const auto& record : store.get<Record>())
+            if (const auto candidate = multiplayerRecordId<Id>(record.mId); candidate && *candidate == id)
+                return record.mId;
+        return {};
+    }
+
+    ESM::Class openmwCustomClass(const TES3MP::CustomClassDefinition& value)
+    {
+        ESM::Class result;
+        result.blank();
+        result.mName = value.name;
+        result.mDescription = value.description;
+        result.mData.mSpecialization = static_cast<std::int32_t>(value.specialization);
+        result.mData.mIsPlayable = 1;
+        for (std::size_t index = 0; index < value.favoredAttributes.size(); ++index)
+            result.mData.mAttribute[index] = value.favoredAttributes[index];
+        for (std::size_t index = 0; index < value.minorSkills.size(); ++index)
+        {
+            result.mData.mSkills[index][0] = value.minorSkills[index];
+            result.mData.mSkills[index][1] = value.majorSkills[index];
+        }
+        return result;
+    }
+
     struct Response
     {
         const std::string mText;
@@ -147,8 +202,175 @@ namespace MWGui
 
     void CharacterCreation::onFrame(float duration)
     {
+        applyConfirmedCharacterChoice();
+        applyResumedCharacterProfile();
+        if (mPendingCharacterChoice == PendingCharacterChoice::None && multiplayerChargen())
+        {
+            auto* coordinator = MWBase::Environment::get().getMultiplayerCoordinator();
+            const auto* confirmation = coordinator ? coordinator->confirmedCharacterProfile() : nullptr;
+            if (confirmation && confirmation->result == TES3MP::CharacterConfirmationResult::Confirmed
+                && confirmation->profile.phase() == TES3MP::CharacterCreationPhase::AwaitingReview
+                && MWBase::Environment::get().getWorld()->getGlobalInt(MWWorld::Globals::sCharGenState) == -1)
+                (void)submitCharacterChoice(
+                    TES3MP::CompleteCharacterCreation{}, PendingCharacterChoice::Complete);
+        }
         if (mReviewDialog)
             mReviewDialog->onFrame(duration);
+    }
+
+    void CharacterCreation::applyResumedCharacterProfile()
+    {
+        if (mPendingCharacterChoice != PendingCharacterChoice::None)
+            return;
+        auto* coordinator = MWBase::Environment::get().getMultiplayerCoordinator();
+        const auto* confirmation = coordinator ? coordinator->confirmedCharacterProfile() : nullptr;
+        if (!confirmation || confirmation->result != TES3MP::CharacterConfirmationResult::Confirmed
+            || confirmation->profile.lifecycle() != TES3MP::CharacterLifecycle::CreatingCharacter)
+            return;
+        const auto phase = confirmation->profile.phase();
+        auto mechanics = MWBase::Environment::get().getMechanicsManager();
+        auto windows = MWBase::Environment::get().getWindowManager();
+        const auto& store = MWBase::Environment::get().getWorld()->getStore();
+        if (mNameDialog && phase != TES3MP::CharacterCreationPhase::AwaitingName)
+        {
+            mPlayerName = confirmation->profile.name();
+            mechanics->setPlayerName(mPlayerName);
+            windows->removeDialog(std::move(mNameDialog));
+            handleDialogDone(CSE_NameChosen, GM_Race);
+        }
+        else if (mRaceDialog && phase >= TES3MP::CharacterCreationPhase::AwaitingClass
+            && confirmation->profile.appearance())
+        {
+            const auto& appearance = *confirmation->profile.appearance();
+            mPlayerRaceId = findMultiplayerRecord<ESM::Race>(store, appearance.race);
+            mPendingHeadId = findMultiplayerRecord<ESM::BodyPart>(store, appearance.head);
+            mPendingHairId = findMultiplayerRecord<ESM::BodyPart>(store, appearance.hair);
+            mPendingMale = appearance.sex == TES3MP::CharacterSex::Male;
+            if (mPlayerRaceId.empty() || mPendingHeadId.empty() || mPendingHairId.empty())
+                return;
+            mechanics->setPlayerRace(mPlayerRaceId, mPendingMale, mPendingHeadId, mPendingHairId);
+            windows->getInventoryWindow()->rebuildAvatar();
+            windows->removeDialog(std::move(mRaceDialog));
+            handleDialogDone(CSE_RaceChosen, GM_Class);
+        }
+        else if ((mPickClassDialog || mGenerateClassResultDialog || mCreateClassDialog)
+            && phase >= TES3MP::CharacterCreationPhase::AwaitingBirthsign
+            && confirmation->profile.characterClass())
+        {
+            const auto& selected = *confirmation->profile.characterClass();
+            if (const auto* predefined = std::get_if<TES3MP::ClassRecordId>(&selected))
+            {
+                const auto id = findMultiplayerRecord<ESM::Class>(store, *predefined);
+                const auto* record = store.get<ESM::Class>().find(id);
+                if (id.empty() || !record) return;
+                mPlayerClass = *record;
+                mechanics->setPlayerClass(id);
+            }
+            else
+            {
+                mPlayerClass = openmwCustomClass(std::get<TES3MP::CustomClassDefinition>(selected));
+                mechanics->setPlayerClass(mPlayerClass);
+            }
+            windows->removeDialog(std::move(mPickClassDialog));
+            windows->removeDialog(std::move(mGenerateClassResultDialog));
+            if (mCreateClassDialog) mCreateClassDialog->setVisible(false);
+            handleDialogDone(CSE_ClassChosen, GM_Birth);
+        }
+        else if (mBirthSignDialog && phase >= TES3MP::CharacterCreationPhase::AwaitingReview
+            && confirmation->profile.birthsign())
+        {
+            mPlayerBirthSignId = findMultiplayerRecord<ESM::BirthSign>(store, *confirmation->profile.birthsign());
+            if (mPlayerBirthSignId.empty()) return;
+            mechanics->setPlayerBirthsign(mPlayerBirthSignId);
+            windows->removeDialog(std::move(mBirthSignDialog));
+            handleDialogDone(CSE_BirthSignChosen, GM_Review);
+        }
+    }
+
+    bool CharacterCreation::multiplayerChargen() const noexcept
+    {
+        const auto* coordinator = MWBase::Environment::get().getMultiplayerCoordinator();
+        return coordinator && coordinator->multiplayerState() == TES3MP::OpenMWAdapter::MultiplayerState::Ready
+            && coordinator->characterLifecycle() != TES3MP::CharacterLifecycle::EstablishedCharacter;
+    }
+
+    bool CharacterCreation::submitCharacterChoice(
+        TES3MP::CharacterCreationChoice choice, PendingCharacterChoice pending) noexcept
+    {
+        auto* coordinator = MWBase::Environment::get().getMultiplayerCoordinator();
+        if (!coordinator || mPendingCharacterChoice != PendingCharacterChoice::None)
+            return false;
+        mPendingProfileRevision = coordinator->characterProfileRevision();
+        if (!coordinator->submitCharacterCreation(std::move(choice)))
+            return false;
+        mPendingCharacterChoice = pending;
+        return true;
+    }
+
+    void CharacterCreation::applyConfirmedCharacterChoice()
+    {
+        if (mPendingCharacterChoice == PendingCharacterChoice::None)
+            return;
+        auto* coordinator = MWBase::Environment::get().getMultiplayerCoordinator();
+        const auto* confirmation = coordinator ? coordinator->confirmedCharacterProfile() : nullptr;
+        if (!confirmation)
+            return;
+        if (confirmation->result != TES3MP::CharacterConfirmationResult::Confirmed)
+        {
+            Log(Debug::Error) << "TES3MP rejected the character-creation selection: "
+                              << TES3MP::characterConfirmationResultName(confirmation->result) << " (result "
+                              << static_cast<unsigned>(confirmation->result) << ")";
+            const auto rejected = mPendingCharacterChoice;
+            mPendingCharacterChoice = PendingCharacterChoice::None;
+            if (rejected == PendingCharacterChoice::Name && mNameDialog) mNameDialog->setVisible(true);
+            if (rejected == PendingCharacterChoice::Race && mRaceDialog) mRaceDialog->setVisible(true);
+            if (rejected == PendingCharacterChoice::Class && mPickClassDialog) mPickClassDialog->setVisible(true);
+            if (rejected == PendingCharacterChoice::Class && mGenerateClassResultDialog)
+                mGenerateClassResultDialog->setVisible(true);
+            if (rejected == PendingCharacterChoice::Class && mCreateClassDialog) mCreateClassDialog->setVisible(true);
+            if (rejected == PendingCharacterChoice::Birthsign && mBirthSignDialog)
+                mBirthSignDialog->setVisible(true);
+            return;
+        }
+        if (confirmation->profile.revision() <= mPendingProfileRevision)
+            return;
+
+        auto mechanics = MWBase::Environment::get().getMechanicsManager();
+        auto windows = MWBase::Environment::get().getWindowManager();
+        const auto pending = mPendingCharacterChoice;
+        mPendingCharacterChoice = PendingCharacterChoice::None;
+        switch (pending)
+        {
+            case PendingCharacterChoice::Name:
+                mechanics->setPlayerName(confirmation->profile.name());
+                mPlayerName = confirmation->profile.name();
+                windows->removeDialog(std::move(mNameDialog));
+                handleDialogDone(CSE_NameChosen, GM_Race);
+                break;
+            case PendingCharacterChoice::Race:
+                mechanics->setPlayerRace(mPlayerRaceId, mPendingMale, mPendingHeadId, mPendingHairId);
+                windows->getInventoryWindow()->rebuildAvatar();
+                windows->removeDialog(std::move(mRaceDialog));
+                handleDialogDone(CSE_RaceChosen, GM_Class);
+                break;
+            case PendingCharacterChoice::Class:
+                if (mPlayerClass.mId.empty()) mechanics->setPlayerClass(mPlayerClass);
+                else mechanics->setPlayerClass(mPlayerClass.mId);
+                windows->removeDialog(std::move(mPickClassDialog));
+                windows->removeDialog(std::move(mGenerateClassResultDialog));
+                if (mCreateClassDialog) mCreateClassDialog->setVisible(false);
+                handleDialogDone(CSE_ClassChosen, GM_Birth);
+                break;
+            case PendingCharacterChoice::Birthsign:
+                mechanics->setPlayerBirthsign(mPlayerBirthSignId);
+                windows->removeDialog(std::move(mBirthSignDialog));
+                handleDialogDone(CSE_BirthSignChosen, GM_Review);
+                break;
+            case PendingCharacterChoice::Complete:
+                break;
+            case PendingCharacterChoice::None:
+                break;
+        }
     }
 
     void CharacterCreation::spawnDialog(const GuiMode id)
@@ -304,6 +526,12 @@ namespace MWGui
 
     void CharacterCreation::onReviewDialogDone(WindowBase* parWindow)
     {
+        if (multiplayerChargen())
+        {
+            MWBase::Environment::get().getWindowManager()->removeDialog(std::move(mReviewDialog));
+            MWBase::Environment::get().getWindowManager()->popGuiMode();
+            return;
+        }
         MWBase::Environment::get().getWindowManager()->removeDialog(std::move(mReviewDialog));
         MWBase::Environment::get().getWindowManager()->popGuiMode();
     }
@@ -359,6 +587,19 @@ namespace MWGui
 
     void CharacterCreation::onPickClassDialogDone(WindowBase* parWindow)
     {
+        if (multiplayerChargen() && mPickClassDialog)
+        {
+            const auto classId = mPickClassDialog->getClassId();
+            const auto canonical = multiplayerRecordId<TES3MP::ClassRecordId>(classId);
+            const auto* selected = MWBase::Environment::get().getESMStore()->get<ESM::Class>().find(classId);
+            if (canonical && selected
+                && submitCharacterChoice(TES3MP::SetCharacterClass{ *canonical }, PendingCharacterChoice::Class))
+            {
+                mPlayerClass = *selected;
+                mPickClassDialog->setVisible(false);
+            }
+            return;
+        }
         selectPickedClass();
 
         handleDialogDone(CSE_ClassChosen, GM_Birth);
@@ -366,7 +607,10 @@ namespace MWGui
 
     void CharacterCreation::onPickClassDialogBack()
     {
-        selectPickedClass();
+        if (multiplayerChargen())
+            MWBase::Environment::get().getWindowManager()->removeDialog(std::move(mPickClassDialog));
+        else
+            selectPickedClass();
 
         MWBase::Environment::get().getWindowManager()->popGuiMode();
         MWBase::Environment::get().getWindowManager()->pushGuiMode(GM_Class);
@@ -397,6 +641,13 @@ namespace MWGui
 
     void CharacterCreation::onNameDialogDone(WindowBase* parWindow)
     {
+        if (multiplayerChargen() && mNameDialog)
+        {
+            const auto name = mNameDialog->getTextInput();
+            if (submitCharacterChoice(TES3MP::SetCharacterName{ name }, PendingCharacterChoice::Name))
+                mNameDialog->setVisible(false);
+            return;
+        }
         if (mNameDialog)
         {
             mPlayerName = mNameDialog->getTextInput();
@@ -426,7 +677,10 @@ namespace MWGui
 
     void CharacterCreation::onRaceDialogBack()
     {
-        selectRace();
+        if (multiplayerChargen())
+            MWBase::Environment::get().getWindowManager()->removeDialog(std::move(mRaceDialog));
+        else
+            selectRace();
 
         MWBase::Environment::get().getWindowManager()->popGuiMode();
         MWBase::Environment::get().getWindowManager()->pushGuiMode(GM_Name);
@@ -434,6 +688,25 @@ namespace MWGui
 
     void CharacterCreation::onRaceDialogDone(WindowBase* parWindow)
     {
+        if (multiplayerChargen() && mRaceDialog)
+        {
+            const auto& data = mRaceDialog->getResult();
+            const auto race = multiplayerRecordId<TES3MP::RaceRecordId>(data.mRace);
+            const auto head = multiplayerRecordId<TES3MP::HeadRecordId>(data.mHead);
+            const auto hair = multiplayerRecordId<TES3MP::HairRecordId>(data.mHair);
+            if (race && head && hair
+                && submitCharacterChoice(TES3MP::SetCharacterAppearance{ { *race, *head, *hair,
+                        data.isMale() ? TES3MP::CharacterSex::Male : TES3MP::CharacterSex::Female } },
+                    PendingCharacterChoice::Race))
+            {
+                mPlayerRaceId = data.mRace;
+                mPendingHeadId = data.mHead;
+                mPendingHairId = data.mHair;
+                mPendingMale = data.isMale();
+                mRaceDialog->setVisible(false);
+            }
+            return;
+        }
         selectRace();
 
         handleDialogDone(CSE_RaceChosen, GM_Class);
@@ -452,6 +725,18 @@ namespace MWGui
 
     void CharacterCreation::onBirthSignDialogDone(WindowBase* parWindow)
     {
+        if (multiplayerChargen() && mBirthSignDialog)
+        {
+            const auto id = mBirthSignDialog->getBirthId();
+            const auto canonical = multiplayerRecordId<TES3MP::BirthsignRecordId>(id);
+            if (canonical && submitCharacterChoice(
+                    TES3MP::SetCharacterBirthsign{ *canonical }, PendingCharacterChoice::Birthsign))
+            {
+                mPlayerBirthSignId = id;
+                mBirthSignDialog->setVisible(false);
+            }
+            return;
+        }
         selectBirthSign();
 
         handleDialogDone(CSE_BirthSignChosen, GM_Review);
@@ -459,7 +744,10 @@ namespace MWGui
 
     void CharacterCreation::onBirthSignDialogBack()
     {
-        selectBirthSign();
+        if (multiplayerChargen())
+            MWBase::Environment::get().getWindowManager()->removeDialog(std::move(mBirthSignDialog));
+        else
+            selectBirthSign();
 
         MWBase::Environment::get().getWindowManager()->popGuiMode();
         MWBase::Environment::get().getWindowManager()->pushGuiMode(GM_Class);
@@ -491,7 +779,8 @@ namespace MWGui
                 createdClass.mData.mSkills[i][0] = ESM::Skill::refIdToIndex(minorSkills[i]);
             }
 
-            MWBase::Environment::get().getMechanicsManager()->setPlayerClass(createdClass);
+            if (!multiplayerChargen())
+                MWBase::Environment::get().getMechanicsManager()->setPlayerClass(createdClass);
             mPlayerClass = std::move(createdClass);
 
             // Do not delete dialog, so that choices are remembered in case we want to go back and adjust them later
@@ -501,6 +790,15 @@ namespace MWGui
 
     void CharacterCreation::onCreateClassDialogDone(WindowBase* parWindow)
     {
+        if (multiplayerChargen())
+        {
+            selectCreatedClass();
+            const auto definition = multiplayerCustomClass(mPlayerClass);
+            if (submitCharacterChoice(
+                    TES3MP::SetCharacterClass{ definition }, PendingCharacterChoice::Class))
+                return;
+            return;
+        }
         selectCreatedClass();
 
         handleDialogDone(CSE_ClassChosen, GM_Birth);
@@ -509,7 +807,10 @@ namespace MWGui
     void CharacterCreation::onCreateClassDialogBack()
     {
         // not done in MW, but we do it for consistency with the other dialogs
-        selectCreatedClass();
+        if (multiplayerChargen())
+            mCreateClassDialog->setVisible(false);
+        else
+            selectCreatedClass();
 
         MWBase::Environment::get().getWindowManager()->popGuiMode();
         MWBase::Environment::get().getWindowManager()->pushGuiMode(GM_Class);
@@ -689,7 +990,10 @@ namespace MWGui
 
     void CharacterCreation::onGenerateClassBack()
     {
-        selectGeneratedClass();
+        if (multiplayerChargen())
+            MWBase::Environment::get().getWindowManager()->removeDialog(std::move(mGenerateClassResultDialog));
+        else
+            selectGeneratedClass();
 
         MWBase::Environment::get().getWindowManager()->popGuiMode();
         MWBase::Environment::get().getWindowManager()->pushGuiMode(GM_Class);
@@ -697,6 +1001,19 @@ namespace MWGui
 
     void CharacterCreation::onGenerateClassDone(WindowBase* parWindow)
     {
+        if (multiplayerChargen())
+        {
+            const auto canonical = multiplayerRecordId<TES3MP::ClassRecordId>(mGenerateClass);
+            const auto* selected
+                = MWBase::Environment::get().getESMStore()->get<ESM::Class>().find(mGenerateClass);
+            if (canonical && selected
+                && submitCharacterChoice(TES3MP::SetCharacterClass{ *canonical }, PendingCharacterChoice::Class))
+            {
+                mPlayerClass = *selected;
+                mGenerateClassResultDialog->setVisible(false);
+            }
+            return;
+        }
         selectGeneratedClass();
 
         handleDialogDone(CSE_ClassChosen, GM_Birth);

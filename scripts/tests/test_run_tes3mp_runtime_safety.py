@@ -149,6 +149,11 @@ class RuntimeSafetyRunnerTests(unittest.TestCase):
         self.assertTrue(
             all(record["bytes"] <= safety.MAX_CORPUS_FILE_BYTES for record in pose_records)
         )
+        character_records = safety.verify_character_creation_corpus()
+        self.assertGreaterEqual(len(character_records), 2)
+        self.assertTrue(
+            all(record["bytes"] <= safety.TES3MP_LATEST_WINS_SNAPSHOT_MAX_BYTES for record in character_records)
+        )
 
     def test_every_bounded_decoder_has_a_fuzzer_corpus_and_production_golden_seed(self):
         registry = safety.verify_decoder_registry()
@@ -167,6 +172,8 @@ class RuntimeSafetyRunnerTests(unittest.TestCase):
                 "decodeSessionResyncRequest",
                 "decodeClientVrPoseSample",
                 "decodeServerVrPoseSnapshot",
+                "decodeClientCharacterCreationCommand",
+                "decodeReliableCharacterProfile",
             },
         )
         for record in registry:
@@ -205,6 +212,8 @@ class RuntimeSafetyRunnerTests(unittest.TestCase):
             "tes3mp_protocol_frame_tests",
             "tes3mp_protocol_handshake_tests",
             "tes3mp_protocol_authentication_tests",
+            "tes3mp_character_profile_tests",
+            "tes3mp_character_creation_protocol_tests",
             "tes3mp_protocol_exchange_tests",
             "tes3mp_protocol_pose_tests",
             "tes3mp_session_state_tests",
@@ -222,8 +231,9 @@ class RuntimeSafetyRunnerTests(unittest.TestCase):
         self.assertIn("tes3mp_enable_libfuzzer(tes3mp_protocol_authentication_fuzz)", component)
         self.assertIn("tes3mp_enable_libfuzzer(tes3mp_protocol_exchange_fuzz)", component)
         self.assertIn("tes3mp_enable_libfuzzer(tes3mp_protocol_pose_fuzz)", component)
+        self.assertIn("tes3mp_enable_libfuzzer(tes3mp_character_creation_protocol_fuzz)", component)
         self.assertIn("TES3MP_TEST_TSAN_ALLOCATOR_INTERPOSITION=1", component)
-        self.assertEqual(component.count("--verify-corpus"), 5)
+        self.assertEqual(component.count("--verify-corpus"), 6)
         asan_preset = next(
             preset
             for preset in data["buildPresets"]
@@ -233,6 +243,7 @@ class RuntimeSafetyRunnerTests(unittest.TestCase):
         self.assertIn("tes3mp_protocol_authentication_fuzz", asan_preset["targets"])
         self.assertIn("tes3mp_protocol_exchange_fuzz", asan_preset["targets"])
         self.assertIn("tes3mp_protocol_pose_fuzz", asan_preset["targets"])
+        self.assertIn("tes3mp_character_creation_protocol_fuzz", asan_preset["targets"])
         adapter = (REPOSITORY_ROOT / "apps" / "openmw" / "tes3mp" / "CMakeLists.txt").read_text(
             encoding="utf-8"
         )

@@ -2,6 +2,7 @@
 #define TES3MP_AUTHENTICATION_HPP
 
 #include "session_types.hpp"
+#include "character_profile.hpp"
 #include "content_identity.hpp"
 #include "value_types.hpp"
 
@@ -181,7 +182,9 @@ namespace TES3MP
     public:
         static std::optional<AuthenticationAcceptedMessage> create(
             ResumeToken token, std::uint64_t lifetimeMilliseconds,
-            std::optional<PlayerCredential> playerCredential = std::nullopt) noexcept;
+            std::optional<PlayerCredential> playerCredential = std::nullopt,
+            CharacterLifecycle characterLifecycle = CharacterLifecycle::NewCharacter,
+            CharacterProfileRevision profileRevision = CharacterProfileRevision::initial()) noexcept;
 
         AuthenticationAcceptedMessage(const AuthenticationAcceptedMessage&) = delete;
         AuthenticationAcceptedMessage& operator=(const AuthenticationAcceptedMessage&) = delete;
@@ -191,6 +194,8 @@ namespace TES3MP
         std::uint64_t lifetimeMilliseconds() const noexcept { return mLifetimeMilliseconds; }
         ResumeToken takeToken() noexcept { return std::move(mToken); }
         bool hasPlayerCredential() const noexcept { return mPlayerCredential.has_value(); }
+        CharacterLifecycle characterLifecycle() const noexcept { return mCharacterLifecycle; }
+        CharacterProfileRevision profileRevision() const noexcept { return mProfileRevision; }
         std::optional<PlayerCredential> takePlayerCredential() noexcept
         {
             auto result = std::move(mPlayerCredential);
@@ -204,16 +209,21 @@ namespace TES3MP
         decodeAuthenticationAccepted(std::span<const std::byte> payload);
 
         AuthenticationAcceptedMessage(ResumeToken token, std::uint64_t lifetimeMilliseconds,
-            std::optional<PlayerCredential> playerCredential) noexcept
+            std::optional<PlayerCredential> playerCredential, CharacterLifecycle characterLifecycle,
+            CharacterProfileRevision profileRevision) noexcept
             : mToken(std::move(token))
             , mLifetimeMilliseconds(lifetimeMilliseconds)
             , mPlayerCredential(std::move(playerCredential))
+            , mCharacterLifecycle(characterLifecycle)
+            , mProfileRevision(profileRevision)
         {
         }
 
         ResumeToken mToken;
         std::uint64_t mLifetimeMilliseconds;
         std::optional<PlayerCredential> mPlayerCredential;
+        CharacterLifecycle mCharacterLifecycle;
+        CharacterProfileRevision mProfileRevision;
     };
 
     enum class AuthenticationPublicRejection : std::uint8_t
@@ -251,6 +261,8 @@ namespace TES3MP
         InvalidPlayerCredentialSize,
         UnexpectedPlayerCredential,
         InvalidLifetime,
+        UnknownCharacterLifecycle,
+        InvalidProfileRevision,
         UnknownRejectionReason,
     };
 

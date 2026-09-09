@@ -4,6 +4,7 @@
 
 #include "tes3mp/authentication.hpp"
 #include "tes3mp/combat_replication.hpp"
+#include "tes3mp/character_creation_protocol.hpp"
 #include "tes3mp/interactive_object_replication.hpp"
 #include "tes3mp/inventory_replication.hpp"
 #include "tes3mp/protocol_frame.hpp"
@@ -35,7 +36,7 @@ namespace TES3MP::ServerApp
         OutboundQueueSet& queues, std::size_t capacity, const CanonicalActorWorld* actors,
         const CanonicalInteractiveObjectWorld* objects, CanonicalInventoryWorld* inventory,
         CanonicalCombatWorld* combat, const CanonicalPlayerCombatTemplate* playerCombatTemplate,
-        const ItemPrototypeCatalog* itemCatalog) noexcept
+        const ItemPrototypeCatalog* itemCatalog, const CharacterContentCatalog* characterContent) noexcept
         : mClock(clock)
         , mObservability(observability)
         , mTimeouts(timeouts)
@@ -49,6 +50,7 @@ namespace TES3MP::ServerApp
         , mCombat(combat)
         , mPlayerCombatTemplate(playerCombatTemplate)
         , mItemCatalog(itemCatalog)
+        , mCharacterContent(characterContent)
     {
     }
 
@@ -161,6 +163,19 @@ namespace TES3MP::ServerApp
                 && frame->messageClass() != MessageClass::ReliableOperation))
             return ConnectionSessionResult::ProtocolRejected;
 
+        const bool gameplayCommand = frame->messageKind() == MessageKind::ReliableOperation
+            || frame->messageKind() == MessageKind::ClientInteractObjectCommand
+            || frame->messageKind() == MessageKind::ClientInventoryTransactionCommand
+            || frame->messageKind() == MessageKind::ClientMeleeAttackCommand;
+        if (gameplayCommand && mCharacterContent)
+        {
+            const auto* progress = state->sessionId()
+                ? joins.state().findActiveSession(*state->sessionId()) : nullptr;
+            const auto* profile = progress ? joins.characterProfile(progress->playerId()) : nullptr;
+            if (!profile || profile->lifecycle() != CharacterLifecycle::EstablishedCharacter)
+                return ConnectionSessionResult::ProtocolRejected;
+        }
+
         if (frame->messageKind() == MessageKind::SessionResyncRequest)
         {
             if (frame->messageClass() != MessageClass::SessionControl
@@ -266,6 +281,46 @@ namespace TES3MP::ServerApp
             return intake.submit(std::move(proposal)) == CommandSubmissionResult::Accepted
                 ? ConnectionSessionResult::CommandSubmitted
                 : ConnectionSessionResult::QueueRejected;
+        }
+
+        if (frame->messageKind() == MessageKind::ClientCharacterCreationCommand)
+        {
+            if (frame->messageClass() != MessageClass::ReliableOperation || !mCharacterContent
+                || state->state() != ServerSessionState::Established || !state->sessionId())
+                return ConnectionSessionResult::ProtocolRejected;
+            const auto& characterHello = state->negotiatedHello();
+            if (!characterHello || !std::ranges::binary_search(
+                    characterHello->negotiatedCapabilities(), characterCreationCapability()))
+                return ConnectionSessionResult::ProtocolRejected;
+            auto decodedCharacter = decodeClientCharacterCreationCommand(frame->payload());
+            auto* command = std::get_if<ClientCharacterCreationCommand>(&decodedCharacter);
+            if (!command || command->sessionId != *state->sessionId()
+                || command->sessionGeneration != state->generation())
+                return ConnectionSessionResult::ProtocolRejected;
+            auto& connectionState = mConnections.find(connection)->second;
+            const auto expectedSequence = connectionState.lastCharacterCommandSequence
+                ? connectionState.lastCharacterCommandSequence->next()
+                : std::optional<CommandSequence>(CommandSequence::initial());
+            if (!expectedSequence || command->commandSequence != *expectedSequence)
+                return ConnectionSessionResult::ProtocolRejected;
+            const auto* progress = joins.state().findActiveSession(*state->sessionId());
+            if (!progress) return ConnectionSessionResult::ProtocolRejected;
+            auto applied = joins.applyCharacterCreation(
+                progress->playerId(), *mCharacterContent, command->command, tick);
+            CharacterConfirmationResult result = CharacterConfirmationResult::Confirmed;
+            if (const auto* rejected = std::get_if<CharacterProfileError>(&applied))
+                result = characterConfirmationResult(*rejected);
+            const auto* profile = joins.characterProfile(progress->playerId());
+            if (!profile) return ConnectionSessionResult::ProtocolRejected;
+            auto encoded = encodeProtocolFrame(MessageClass::ReliableOperation, MessageKind::ReliableCharacterProfile,
+                encodeReliableCharacterProfile({ *state->sessionId(), state->generation(), progress->playerId(),
+                    result, *profile }));
+            auto* bytes = std::get_if<std::vector<std::byte>>(&encoded);
+            if (!bytes || mQueues.enqueue(connection, TransportChannel::ReliableOrdered, *bytes)
+                    != TransportResult::Accepted)
+                return ConnectionSessionResult::QueueRejected;
+            connectionState.lastCharacterCommandSequence = command->commandSequence;
+            return ConnectionSessionResult::CommandSubmitted;
         }
 
         if (frame->messageKind() == MessageKind::ClientInventoryTransactionCommand)

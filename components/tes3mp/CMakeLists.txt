@@ -74,6 +74,8 @@ target_sources(tes3mp_protocol PRIVATE
     include/tes3mp/actor_replication.hpp
     include/tes3mp/admission_scope.hpp
     include/tes3mp/authentication.hpp
+    include/tes3mp/character_profile.hpp
+    include/tes3mp/character_creation_protocol.hpp
     include/tes3mp/command_primitives.hpp
     include/tes3mp/combat_replication.hpp
     include/tes3mp/content_identity.hpp
@@ -95,6 +97,7 @@ target_sources(tes3mp_protocol PRIVATE
     protocol/generated/authentication_rejected_generated.h
     protocol/generated/authentication_request_generated.h
     protocol/generated/client_hello_generated.h
+    protocol/generated/client_character_creation_command_generated.h
     protocol/generated/client_interact_object_command_generated.h
     protocol/generated/client_inventory_transaction_command_generated.h
     protocol/generated/client_melee_attack_command_generated.h
@@ -111,12 +114,15 @@ target_sources(tes3mp_protocol PRIVATE
     protocol/generated/reliable_interest_baseline_generated.h
     protocol/generated/reliable_observation_batch_generated.h
     protocol/generated/reliable_combat_event_batch_generated.h
+    protocol/generated/reliable_character_profile_generated.h
     protocol/generated/reliable_operation_generated.h
     protocol/generated/server_hello_generated.h
     protocol/generated/server_vr_pose_snapshot_generated.h
     protocol/generated/session_rejected_generated.h
     protocol/generated/session_resync_request_generated.h
     protocol/authentication.cpp
+    protocol/character_creation_protocol.cpp
+    server_core/character_profile.cpp
     protocol/actor_catalog.cpp
     protocol/actor_replication.cpp
     protocol/content_identity.cpp
@@ -355,6 +361,15 @@ set_target_properties(tes3mp_server_lifecycle_tests PROPERTIES FOLDER "TES3MP/Te
 tes3mp_enable_runtime_safety(tes3mp_server_lifecycle_tests)
 tes3mp_verify_target_dependencies(tes3mp_server_lifecycle_tests ALLOWED tes3mp_server_core tes3mp_protocol)
 tes3mp_verify_target_includes(tes3mp_server_lifecycle_tests
+    FORBIDDEN ${TES3MP_ENGINE_INDEPENDENT_FORBIDDEN_INCLUDES})
+
+add_executable(tes3mp_character_profile_tests tests/character_profile_tests.cpp)
+target_compile_features(tes3mp_character_profile_tests PRIVATE cxx_std_20)
+target_link_libraries(tes3mp_character_profile_tests PRIVATE tes3mp_protocol)
+set_target_properties(tes3mp_character_profile_tests PROPERTIES FOLDER "TES3MP/Tests")
+tes3mp_enable_runtime_safety(tes3mp_character_profile_tests)
+tes3mp_verify_target_dependencies(tes3mp_character_profile_tests ALLOWED tes3mp_protocol)
+tes3mp_verify_target_includes(tes3mp_character_profile_tests
     FORBIDDEN ${TES3MP_ENGINE_INDEPENDENT_FORBIDDEN_INCLUDES})
 
 add_executable(tes3mp_actor_catalog_tests tests/actor_catalog_tests.cpp)
@@ -693,6 +708,15 @@ tes3mp_verify_target_dependencies(tes3mp_protocol_authentication_tests ALLOWED t
 tes3mp_verify_target_includes(tes3mp_protocol_authentication_tests
     FORBIDDEN ${TES3MP_ENGINE_INDEPENDENT_FORBIDDEN_INCLUDES})
 
+add_executable(tes3mp_character_creation_protocol_tests tests/character_creation_protocol_tests.cpp)
+target_compile_features(tes3mp_character_creation_protocol_tests PRIVATE cxx_std_20)
+target_link_libraries(tes3mp_character_creation_protocol_tests PRIVATE tes3mp_protocol)
+set_target_properties(tes3mp_character_creation_protocol_tests PROPERTIES FOLDER "TES3MP/Tests")
+tes3mp_enable_runtime_safety(tes3mp_character_creation_protocol_tests)
+tes3mp_verify_target_dependencies(tes3mp_character_creation_protocol_tests ALLOWED tes3mp_protocol)
+tes3mp_verify_target_includes(tes3mp_character_creation_protocol_tests
+    FORBIDDEN ${TES3MP_ENGINE_INDEPENDENT_FORBIDDEN_INCLUDES})
+
 add_executable(tes3mp_protocol_exchange_tests tests/protocol_exchange_tests.cpp)
 target_compile_features(tes3mp_protocol_exchange_tests PRIVATE cxx_std_20)
 target_link_libraries(tes3mp_protocol_exchange_tests PRIVATE tes3mp_test_support)
@@ -910,6 +934,16 @@ if(TES3MP_BUILD_FUZZERS)
     tes3mp_verify_target_includes(tes3mp_protocol_authentication_fuzz
         FORBIDDEN ${TES3MP_ENGINE_INDEPENDENT_FORBIDDEN_INCLUDES})
 
+    add_executable(tes3mp_character_creation_protocol_fuzz tests/fuzz/character_creation_protocol_fuzz.cpp)
+    target_compile_features(tes3mp_character_creation_protocol_fuzz PRIVATE cxx_std_20)
+    target_link_libraries(tes3mp_character_creation_protocol_fuzz PRIVATE tes3mp_protocol)
+    set_target_properties(tes3mp_character_creation_protocol_fuzz PROPERTIES FOLDER "TES3MP/Fuzzers")
+    tes3mp_enable_runtime_safety(tes3mp_character_creation_protocol_fuzz)
+    tes3mp_enable_libfuzzer(tes3mp_character_creation_protocol_fuzz)
+    tes3mp_verify_target_dependencies(tes3mp_character_creation_protocol_fuzz ALLOWED tes3mp_protocol)
+    tes3mp_verify_target_includes(tes3mp_character_creation_protocol_fuzz
+        FORBIDDEN ${TES3MP_ENGINE_INDEPENDENT_FORBIDDEN_INCLUDES})
+
     add_executable(tes3mp_protocol_exchange_fuzz tests/fuzz/protocol_exchange_fuzz.cpp)
     target_compile_features(tes3mp_protocol_exchange_fuzz PRIVATE cxx_std_20)
     target_link_libraries(tes3mp_protocol_exchange_fuzz PRIVATE tes3mp_protocol)
@@ -943,6 +977,10 @@ add_custom_target(tes3mp_protocol_tests_run
     COMMAND $<TARGET_FILE:tes3mp_protocol_authentication_tests>
     COMMAND $<TARGET_FILE:tes3mp_protocol_authentication_tests> --verify-corpus
         ${CMAKE_CURRENT_SOURCE_DIR}/tests/fuzz/corpus/protocol_authentication
+    COMMAND $<TARGET_FILE:tes3mp_character_profile_tests>
+    COMMAND $<TARGET_FILE:tes3mp_character_creation_protocol_tests>
+    COMMAND $<TARGET_FILE:tes3mp_character_creation_protocol_tests> --verify-corpus
+        ${CMAKE_CURRENT_SOURCE_DIR}/tests/fuzz/corpus/character_creation_protocol
     COMMAND $<TARGET_FILE:tes3mp_protocol_exchange_tests>
     COMMAND $<TARGET_FILE:tes3mp_protocol_exchange_tests> --verify-corpus
         ${CMAKE_CURRENT_SOURCE_DIR}/tests/fuzz/corpus/protocol_exchange
@@ -984,6 +1022,8 @@ add_custom_target(tes3mp_protocol_tests_run
         tes3mp_protocol_frame_tests
         tes3mp_protocol_handshake_tests
         tes3mp_protocol_authentication_tests
+        tes3mp_character_profile_tests
+        tes3mp_character_creation_protocol_tests
         tes3mp_protocol_exchange_tests
         tes3mp_protocol_pose_tests
         tes3mp_session_state_tests

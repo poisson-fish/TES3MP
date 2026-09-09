@@ -88,6 +88,18 @@ namespace TES3MP::ServerApp
             hello->negotiatedCapabilities(), combatReplicationCapability());
     }
 
+    bool ServerApplication::supportsCharacterCreation(TransportConnectionId connection) const noexcept
+    {
+        if (!mWiring)
+            return false;
+        const auto* state = mWiring->sessions.session(connection);
+        if (!state)
+            return false;
+        const auto& hello = state->negotiatedHello();
+        return hello && std::ranges::binary_search(
+            hello->negotiatedCapabilities(), characterCreationCapability());
+    }
+
     bool ServerApplication::start() noexcept
     {
         if (mRunning || mListener)
@@ -182,6 +194,15 @@ namespace TES3MP::ServerApp
                 return false;
             }
             routed.emplace_back(*target, std::move(delivery));
+        }
+        std::vector<PlayerId> players;
+        players.reserve(lifecycle->entries.size());
+        for (const auto& entry : lifecycle->entries)
+            players.push_back(entry.player);
+        if (!mWiring->joins.persistPlayers(players))
+        {
+            cancel();
+            return false;
         }
         if (!admitInterestChangesAtomically(mWiring->queues, routed))
         {
@@ -303,6 +324,21 @@ namespace TES3MP::ServerApp
         auto observations
             = candidate && revision ? projectInterestChanges(before, *candidate, tick, *revision) : std::nullopt;
         auto accepted = session->takeAuthenticationAccepted();
+        const auto* resumedSession = candidate ? candidate->findActiveSession(*session->sessionId()) : nullptr;
+        const auto* resumedProfile
+            = resumedSession ? mWiring->joins.characterProfile(resumedSession->playerId()) : nullptr;
+        if (accepted && resumedProfile)
+        {
+            auto withCharacterState = AuthenticationAcceptedMessage::create(accepted->takeToken(),
+                accepted->lifetimeMilliseconds(), std::nullopt, resumedProfile->lifecycle(),
+                resumedProfile->revision());
+            if (!withCharacterState)
+            {
+                cancel();
+                return false;
+            }
+            accepted = std::move(*withCharacterState);
+        }
         auto actorBaseline = candidate && mWiring->actors && supportsActors(connection)
             ? projectActorInterestBaseline(*candidate, *mWiring->actors, *session->sessionId(), tick, *revision)
             : std::optional<ActorInterestBaselineDelivery>{};
@@ -347,6 +383,15 @@ namespace TES3MP::ServerApp
                 cancel();
                 return false;
             }
+            const bool characterCapable = supportsCharacterCreation(connection);
+            if (characterCapable
+                && !addFrame(MessageClass::ReliableOperation, MessageKind::ReliableCharacterProfile,
+                    encodeReliableCharacterProfile({ *session->sessionId(), session->generation(),
+                        resumedSession->playerId(), CharacterConfirmationResult::Confirmed, *resumedProfile })))
+            {
+                cancel();
+                return false;
+            }
             if (actorBaseline
                 && (!addFrame(MessageClass::ReliableOperation, MessageKind::ReliableActorInterestBaseline,
                         encodeReliableActorInterestBaseline(actorBaseline->baseline))
@@ -377,6 +422,8 @@ namespace TES3MP::ServerApp
             messages.push_back({ connection, TransportChannel::ReliableOrdered, frames[nextFrameIdx++] });
             messages.push_back({ connection, TransportChannel::ReliableOrdered, frames[nextFrameIdx++] });
             messages.push_back({ connection, TransportChannel::LatestWins, frames[nextFrameIdx++] });
+            if (characterCapable)
+                messages.push_back({ connection, TransportChannel::ReliableOrdered, frames[nextFrameIdx++] });
             if (actorBaseline)
             {
                 messages.push_back({ connection, TransportChannel::ReliableOrdered, frames[nextFrameIdx++] });
@@ -651,6 +698,8 @@ namespace TES3MP::ServerApp
             return false;
         }
 
+        std::optional<CanonicalServerState> directMutationBase;
+        std::optional<CanonicalRevision> directMutationBaseRevision;
         std::array<TransportMessage, TransportRuntime::MaxMessagesPerReceive> messages{};
         for (const auto connection : mWiring->sessions.connections())
         {
@@ -674,8 +723,16 @@ namespace TES3MP::ServerApp
                     }
                     continue;
                 }
+                const auto beforeDispatch = mWiring->reducer.state();
+                const auto revisionBeforeDispatch = mWiring->reducer.canonicalRevision();
                 const auto dispatched = mWiring->sessions.dispatch(
                     connection, messages[index], mWiring->joins, mWiring->crypto, mWiring->intake, tick);
+                if (dispatched == ConnectionSessionResult::CommandSubmitted && !directMutationBase
+                    && mWiring->reducer.canonicalRevision() != revisionBeforeDispatch)
+                {
+                    directMutationBase = beforeDispatch;
+                    directMutationBaseRevision = revisionBeforeDispatch;
+                }
                 if (dispatched == ConnectionSessionResult::ProtocolRejected
                     || dispatched == ConnectionSessionResult::QueueRejected
                     || dispatched == ConnectionSessionResult::SessionRejected
@@ -781,8 +838,11 @@ namespace TES3MP::ServerApp
         }
         for (const auto& batch : pumpedCommands.batches())
         {
-            const auto before = mWiring->reducer.state();
-            const auto revisionBefore = mWiring->reducer.canonicalRevision();
+            const auto before = directMutationBase ? *directMutationBase : mWiring->reducer.state();
+            const auto revisionBefore
+                = directMutationBaseRevision.value_or(mWiring->reducer.canonicalRevision());
+            directMutationBase.reset();
+            directMutationBaseRevision.reset();
             CanonicalCommandWorlds commandWorlds{ mWiring->interactiveObjects, mWiring->interactiveObjectCatalog,
                 mWiring->inventory, mWiring->itemCatalog, mWiring->combat, mWiring->actors,
                 mWiring->meleeWeapons, mWiring->meleeSettings, mWiring->meleePolicy, mWiring->meleeContact };
@@ -1018,6 +1078,14 @@ namespace TES3MP::ServerApp
             return true;
         mRunning = false;
         bool success = true;
+        if (mWiring && !mWiring->reducer.state().players().empty())
+        {
+            std::vector<PlayerId> players;
+            players.reserve(mWiring->reducer.state().players().size());
+            for (const auto& player : mWiring->reducer.state().players())
+                players.push_back(player.playerId());
+            success = mWiring->joins.persistPlayers(players);
+        }
         if (mListener)
         {
             const auto stopped = mTransport.stopListener(*mListener);

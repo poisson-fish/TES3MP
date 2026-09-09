@@ -85,6 +85,7 @@ namespace TES3MP::ServerApp
         bool supportsInteractiveObjects(TransportConnectionId connection) const noexcept;
         bool supportsInventory(TransportConnectionId connection) const noexcept;
         bool supportsCombat(TransportConnectionId connection) const noexcept;
+        bool supportsCharacterCreation(TransportConnectionId connection) const noexcept;
     };
 }
 

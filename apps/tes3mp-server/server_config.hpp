@@ -25,6 +25,7 @@ namespace TES3MP::ServerApp
     inline constexpr std::size_t MaximumInteractiveObjectContentPathBytes = 1024;
     inline constexpr std::size_t MaximumInventoryContentPathBytes = 1024;
     inline constexpr std::size_t MaximumCombatContentPathBytes = 1024;
+    inline constexpr std::size_t MaximumCharacterContentPathBytes = 1024;
 
     enum class ConfigErrorCode : std::uint8_t
     {
@@ -64,6 +65,7 @@ namespace TES3MP::ServerApp
         std::filesystem::path inventoryContentFile;
         std::filesystem::path combatContentFile;
         std::filesystem::path playerIdentityFile;
+        std::filesystem::path characterContentFile;
     };
 
     using ConfigParseResult = std::variant<ServerConfig, ConfigError>;

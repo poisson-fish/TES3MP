@@ -22,6 +22,11 @@ namespace MWWorld
     class Scene;
 }
 
+namespace TES3MP::OpenMWAdapter
+{
+    class EngineCoordinator;
+}
+
 namespace MWBase
 {
     class World;
@@ -58,6 +63,7 @@ namespace MWBase
         LuaManager* mLuaManager = nullptr;
         Resource::ResourceSystem* mResourceSystem = nullptr;
         L10n::Manager* mL10nManager = nullptr;
+        TES3MP::OpenMWAdapter::EngineCoordinator* mMultiplayerCoordinator = nullptr;
         float mFrameRateLimit = 0;
         float mFrameDuration = 0;
 
@@ -97,6 +103,11 @@ namespace MWBase
 
         void setL10nManager(L10n::Manager& value) { mL10nManager = &value; }
 
+        void setMultiplayerCoordinator(TES3MP::OpenMWAdapter::EngineCoordinator* value)
+        {
+            mMultiplayerCoordinator = value;
+        }
+
         Misc::NotNullPtr<World> getWorld() const { return mWorld; }
         Misc::NotNullPtr<MWWorld::WorldModel> getWorldModel() const { return mWorldModel; }
         Misc::NotNullPtr<MWWorld::Scene> getWorldScene() const { return mWorldScene; }
@@ -123,6 +134,11 @@ namespace MWBase
         Misc::NotNullPtr<Resource::ResourceSystem> getResourceSystem() const { return mResourceSystem; }
 
         Misc::NotNullPtr<L10n::Manager> getL10nManager() const { return mL10nManager; }
+
+        TES3MP::OpenMWAdapter::EngineCoordinator* getMultiplayerCoordinator() const
+        {
+            return mMultiplayerCoordinator;
+        }
 
         float getFrameRateLimit() const { return mFrameRateLimit; }
 

@@ -4,6 +4,8 @@ include(${CMAKE_CURRENT_LIST_DIR}/../../cmake/TES3MPRuntimeSafety.cmake)
 add_library(tes3mp_server_app STATIC
     actor_content.hpp
     actor_content.cpp
+    character_content.hpp
+    character_content.cpp
     interactive_object_content.hpp
     interactive_object_content.cpp
     actor_interest_projection.hpp
@@ -47,6 +49,7 @@ tes3mp_enable_runtime_safety(tes3mp_server_app)
 add_executable(tes3mp_server_app_tests server_app_tests.cpp)
 target_compile_features(tes3mp_server_app_tests PRIVATE cxx_std_20)
 target_link_libraries(tes3mp_server_app_tests PRIVATE tes3mp_server_app)
+target_compile_definitions(tes3mp_server_app_tests PRIVATE TES3MP_SOURCE_ROOT="${CMAKE_CURRENT_SOURCE_DIR}/../..")
 set_target_properties(tes3mp_server_app_tests PROPERTIES FOLDER "TES3MP/Tests")
 tes3mp_enable_runtime_safety(tes3mp_server_app_tests)
 add_custom_target(tes3mp_server_app_tests_run

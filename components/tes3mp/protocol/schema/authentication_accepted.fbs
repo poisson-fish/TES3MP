@@ -1,9 +1,18 @@
 namespace TES3MP.Protocol.Schema;
 
+enum CharacterLifecycle : ubyte {
+  Unknown = 0,
+  NewCharacter = 1,
+  CreatingCharacter = 2,
+  EstablishedCharacter = 3
+}
+
 table AuthenticationAccepted {
   resume_token:[ubyte] (id: 0);
   lifetime_milliseconds:ulong = 0 (id: 1);
   player_credential:[ubyte] (id: 2);
+  character_lifecycle:CharacterLifecycle = Unknown (id: 3);
+  profile_revision:ulong = 0 (id: 4);
 }
 
 root_type AuthenticationAccepted;

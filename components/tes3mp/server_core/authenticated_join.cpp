@@ -106,18 +106,33 @@ namespace TES3MP
             return AuthenticatedJoinError::CanonicalStateRejected;
         if (mPending)
             return AuthenticatedJoinError::PreparationPending;
-        if (std::any_of(mPrincipals.begin(), mPrincipals.end(), [&](const auto& binding) {
-                return binding.principal == principal || binding.player == claim.player;
-            }))
+        if (std::any_of(mPrincipals.begin(), mPrincipals.end(),
+                [principal](const auto& binding) { return binding.principal == principal; }))
             return AuthenticatedJoinError::DuplicatePrincipal;
+        const auto previous = std::find_if(mPrincipals.begin(), mPrincipals.end(),
+            [&](const auto& binding) { return binding.player == claim.player; });
+        std::optional<PrincipalId> replacedPrincipal;
+        if (previous != mPrincipals.end())
+        {
+            const bool stillActive = std::any_of(mReducer.state().activeSessions().begin(),
+                mReducer.state().activeSessions().end(), [&](const auto& session) {
+                    return session.playerId() == claim.player;
+                });
+            if (stillActive)
+                return AuthenticatedJoinError::DuplicatePrincipal;
+            replacedPrincipal = previous->principal;
+        }
+        if (!mPlayerIdentities->restartIncompleteCharacter(claim.player))
+            return AuthenticatedJoinError::CanonicalStateRejected;
         if (mReducer.state().activeSessions().size() >= MaximumCanonicalActiveSessions)
             return AuthenticatedJoinError::CapacityExhausted;
-        return prepareIdentity(principal, claim, false, std::nullopt, generation, serverTick);
+        return prepareIdentity(principal, claim, false, std::nullopt, generation, serverTick, replacedPrincipal);
     }
 
     AuthenticatedJoinPrepareOutcome AuthenticatedJoinCoordinator::prepareIdentity(PrincipalId principal,
         AuthenticatedAdmission::PlayerClaim claim, bool createsIdentity,
-        std::optional<std::uint64_t> identityPreparation, SessionGeneration generation, ServerTick serverTick)
+        std::optional<std::uint64_t> identityPreparation, SessionGeneration generation, ServerTick serverTick,
+        std::optional<PrincipalId> replacedPrincipal)
     {
         if (mNextPreparationId == 0)
             return AuthenticatedJoinError::IdentityExhausted;
@@ -125,11 +140,30 @@ namespace TES3MP
         const auto& spawn = mSpawns[(claim.player.value() - 1) % mSpawns.size()];
         CanonicalPlayerEntityState canonicalPlayer(claim.player, claim.entity, claim.appearance, spawn,
             LinearVelocity3(0, 0, 0), EntityRevision::initial(), AuthorityEpoch::initial(), serverTick);
+        const auto* profile = mPlayerIdentities ? mPlayerIdentities->characterProfile(claim.player) : nullptr;
+        const bool established = profile && profile->lifecycle() == CharacterLifecycle::EstablishedCharacter;
+        if (!createsIdentity && mPlayerIdentities && established)
+            if (const auto* saved = mPlayerIdentities->savedPlayer(claim.player))
+            {
+                const auto revision = saved->entityRevision().next();
+                const auto authority = saved->authorityEpoch().next();
+                if (!revision || !authority)
+                    return AuthenticatedJoinError::CanonicalStateRejected;
+                canonicalPlayer = CanonicalPlayerEntityState(claim.player, claim.entity, claim.appearance,
+                    saved->transform(), LinearVelocity3(0, 0, 0), *revision, *authority, serverTick,
+                    LocomotionMode::Walk);
+            }
         if (const auto* existing = mReducer.state().findPlayer(claim.player))
         {
             if (createsIdentity || existing->entityId() != claim.entity || existing->appearanceId() != claim.appearance)
                 return AuthenticatedJoinError::CanonicalStateRejected;
-            canonicalPlayer = *existing;
+            const auto revision = existing->entityRevision().next();
+            const auto authority = existing->authorityEpoch().next();
+            if (!revision || !authority)
+                return AuthenticatedJoinError::CanonicalStateRejected;
+            canonicalPlayer = CanonicalPlayerEntityState(claim.player, claim.entity, claim.appearance,
+                established ? existing->transform() : spawn, LinearVelocity3(0, 0, 0),
+                *revision, *authority, serverTick, LocomotionMode::Walk);
         }
         CanonicalSessionProgress canonicalSession(mSeed.nextSession, generation, claim.player, claim.entity, std::nullopt);
         auto candidate = mReducer.prepareJoin(canonicalPlayer, canonicalSession, serverTick);
@@ -154,9 +188,13 @@ namespace TES3MP
             LatestWinsSnapshotHeader(session, generation, player, entity, candidate->candidateRevision(), std::nullopt),
             std::move(*acceptedView));
 
-        AuthenticatedJoinResult result{ principal, session, player, entity, std::move(snapshot) };
+        AuthenticatedJoinResult result{ principal, session, player, entity, std::move(snapshot),
+            profile ? profile->lifecycle() : CharacterLifecycle::NewCharacter,
+            profile ? profile->revision() : CharacterProfileRevision::initial(),
+            profile ? *profile : CharacterProfile::fresh() };
         const auto preparationId = mNextPreparationId++;
-        mPending.emplace(PendingJoin{ preparationId, std::move(*candidate), result, identityPreparation });
+        mPending.emplace(PendingJoin{
+            preparationId, std::move(*candidate), result, identityPreparation, replacedPrincipal });
         return AuthenticatedJoinPreparation{ preparationId, std::move(result) };
     }
 
@@ -181,10 +219,21 @@ namespace TES3MP
             mPending.reset();
             return AuthenticatedJoinError::StalePreparation;
         }
+        const auto replacedPrincipal = mPending->replacedPrincipal;
         mPending.reset();
         if (identityPreparation && mPlayerIdentities)
             (void)mPlayerIdentities->finalize(*identityPreparation);
-        mPrincipals.push_back({ result.principal, result.player });
+        if (replacedPrincipal)
+        {
+            const auto previous = std::find_if(mPrincipals.begin(), mPrincipals.end(),
+                [&](const auto& binding) { return binding.principal == *replacedPrincipal; });
+            if (previous != mPrincipals.end())
+                *previous = { result.principal, result.player };
+            else
+                mPrincipals.push_back({ result.principal, result.player });
+        }
+        else
+            mPrincipals.push_back({ result.principal, result.player });
         const auto nextSession = advance(mSeed.nextSession);
         const auto nextPlayer = mPlayerIdentities ? std::optional<PlayerId>(mSeed.nextPlayer) : advance(mSeed.nextPlayer);
         const auto nextEntity = mPlayerIdentities ? std::optional<EntityId>(mSeed.nextEntity) : advance(mSeed.nextEntity);
@@ -246,5 +295,61 @@ namespace TES3MP
             return false;
         mPrincipals.erase(found);
         return true;
+    }
+
+    bool AuthenticatedJoinCoordinator::persistPlayer(PlayerId player) noexcept
+    {
+        return persistPlayers(std::span<const PlayerId>(&player, 1));
+    }
+
+    bool AuthenticatedJoinCoordinator::persistPlayers(std::span<const PlayerId> players) noexcept
+    {
+        if (!mPlayerIdentities)
+            return true;
+        std::vector<CanonicalPlayerEntityState> canonical;
+        canonical.reserve(players.size());
+        for (const auto player : players)
+        {
+            const auto* found = mReducer.state().findPlayer(player);
+            if (!found)
+                return false;
+            canonical.push_back(*found);
+        }
+        return mPlayerIdentities->savePlayers(canonical);
+    }
+
+    const CharacterProfile* AuthenticatedJoinCoordinator::characterProfile(PlayerId player) const noexcept
+    {
+        return mPlayerIdentities ? mPlayerIdentities->characterProfile(player) : nullptr;
+    }
+
+    CharacterProfileApplyResult AuthenticatedJoinCoordinator::applyCharacterCreation(PlayerId player,
+        const CharacterContentCatalog& catalog, const CharacterCreationCommand& command,
+        ServerTick tick) noexcept
+    {
+        if (!mPlayerIdentities)
+            return CharacterProfileError::PersistenceFailed;
+        const auto* current = mPlayerIdentities->characterProfile(player);
+        if (!current)
+            return CharacterProfileError::InvalidInitialState;
+        auto preview = TES3MP::applyCharacterCreation(*current, catalog, command);
+        auto* profile = std::get_if<CharacterProfile>(&preview);
+        if (!profile)
+            return std::get<CharacterProfileError>(preview);
+        if (profile->lifecycle() != CharacterLifecycle::EstablishedCharacter)
+            return mPlayerIdentities->applyCharacterCreation(player, catalog, command);
+
+        auto safePoint = mReducer.preparePlayerSafePoint(player, catalog.completionSpawn(), tick);
+        if (!safePoint)
+            return CharacterProfileError::InvalidInitialState;
+        const auto* checkpoint = safePoint->candidateState().findPlayer(player);
+        if (!checkpoint)
+            return CharacterProfileError::InvalidInitialState;
+        auto persisted = mPlayerIdentities->applyCharacterCreation(player, catalog, command, checkpoint);
+        if (!std::holds_alternative<CharacterProfile>(persisted))
+            return persisted;
+        if (!mReducer.commit(std::move(*safePoint)))
+            return CharacterProfileError::PersistenceFailed;
+        return persisted;
     }
 }
