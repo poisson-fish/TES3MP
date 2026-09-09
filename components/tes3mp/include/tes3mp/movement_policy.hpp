@@ -72,18 +72,30 @@ namespace TES3MP
     class LocomotionIntent
     {
     public:
-        constexpr LocomotionIntent(LocomotionMode mode, Turn32 rootFacing, LinearVelocity3 desiredVelocity) noexcept
-            : mMode(mode), mRootFacing(rootFacing), mDesiredVelocity(desiredVelocity) {}
+        constexpr LocomotionIntent(LocomotionMode mode, Turn32 rootFacing, LinearVelocity3 desiredVelocity,
+            std::optional<Position3> position = std::nullopt,
+            std::optional<Orientation3> orientation = std::nullopt) noexcept
+            : mMode(mode)
+            , mRootFacing(rootFacing)
+            , mDesiredVelocity(desiredVelocity)
+            , mPosition(position)
+            , mOrientation(orientation)
+        {
+        }
 
         constexpr LocomotionMode mode() const noexcept { return mMode; }
         constexpr Turn32 rootFacing() const noexcept { return mRootFacing; }
         constexpr LinearVelocity3 desiredVelocity() const noexcept { return mDesiredVelocity; }
-        friend constexpr bool operator==(LocomotionIntent, LocomotionIntent) noexcept = default;
+        constexpr const std::optional<Position3>& position() const noexcept { return mPosition; }
+        constexpr const std::optional<Orientation3>& orientation() const noexcept { return mOrientation; }
+        friend constexpr bool operator==(const LocomotionIntent&, const LocomotionIntent&) noexcept = default;
 
     private:
         LocomotionMode mMode;
         Turn32 mRootFacing;
         LinearVelocity3 mDesiredVelocity;
+        std::optional<Position3> mPosition;
+        std::optional<Orientation3> mOrientation;
     };
 
     class MovementProfile

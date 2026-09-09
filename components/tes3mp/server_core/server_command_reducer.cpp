@@ -447,6 +447,14 @@ namespace TES3MP
         mStateVersion = prepared.mStateVersion;
         mCanonicalRevision = prepared.mCanonicalRevision;
         mCheckpointTick = prepared.mCheckpointTick;
+        for (const auto& item : prepared.mPublication->mSessionLifecycle)
+        {
+            if (item.kind == CanonicalSessionLifecycleKind::Disconnected
+                || item.kind == CanonicalSessionLifecycleKind::Expired)
+            {
+                std::erase(mClientAuthoritativePlayers, item.player);
+            }
+        }
         prepared.mPublication->mStateVersion = mStateVersion;
         prepared.mPublication->mCheckpointTick = mCheckpointTick;
         prepared.mPublication->mState = mState;
@@ -559,6 +567,7 @@ namespace TES3MP
         prepared.mCanonicalRevision = mCanonicalRevision;
         prepared.mCheckpointTick = mCheckpointTick;
         prepared.mState = mState;
+        prepared.mClientAuthoritativePlayers = mClientAuthoritativePlayers;
         auto& result = prepared.mResult;
         const auto commands = batch.commands();
         const ServerTick tick = batch.scheduledTick().value();
@@ -704,21 +713,42 @@ namespace TES3MP
                                         = std::get_if<PlayerLocomotionCommandProposal>(&proposal.payload()))
                                     {
                                         const auto& intent = locomotion->intent();
-                                        if (!mContentManifest.movementProfile().allows(
-                                                intent.mode(), intent.desiredVelocity()))
+                                        if (intent.position().has_value())
                                         {
-                                            disposition = CommandDisposition::MotionOutOfRange;
-                                            requiresSpatialAdvance = false;
+                                            const auto currentOrientation = player->transform().orientation();
+                                            const auto orientation = intent.orientation().value_or(
+                                                Orientation3(currentOrientation.x(), currentOrientation.y(),
+                                                    intent.rootFacing()));
+                                            replacementTransform
+                                                = Transform(player->transform().cell(), *intent.position(), orientation);
+                                            replacementVelocity = intent.desiredVelocity();
+                                            replacementLocomotionMode = intent.mode();
+                                            if (std::find(prepared.mClientAuthoritativePlayers.begin(),
+                                                    prepared.mClientAuthoritativePlayers.end(),
+                                                    session->playerId())
+                                                == prepared.mClientAuthoritativePlayers.end())
+                                            {
+                                                prepared.mClientAuthoritativePlayers.push_back(session->playerId());
+                                            }
                                         }
                                         else
                                         {
-                                            const auto currentOrientation = player->transform().orientation();
-                                            replacementTransform
-                                                = Transform(player->transform().cell(), player->transform().position(),
-                                                    Orientation3(currentOrientation.x(), currentOrientation.y(),
-                                                        intent.rootFacing()));
-                                            replacementVelocity = intent.desiredVelocity();
-                                            replacementLocomotionMode = intent.mode();
+                                            if (!mContentManifest.movementProfile().allows(
+                                                    intent.mode(), intent.desiredVelocity()))
+                                            {
+                                                disposition = CommandDisposition::MotionOutOfRange;
+                                                requiresSpatialAdvance = false;
+                                            }
+                                            else
+                                            {
+                                                const auto currentOrientation = player->transform().orientation();
+                                                replacementTransform
+                                                    = Transform(player->transform().cell(), player->transform().position(),
+                                                        Orientation3(currentOrientation.x(), currentOrientation.y(),
+                                                            intent.rootFacing()));
+                                                replacementVelocity = intent.desiredVelocity();
+                                                replacementLocomotionMode = intent.mode();
+                                            }
                                         }
                                     }
                                     else if (const auto* transition
@@ -1037,6 +1067,11 @@ namespace TES3MP
                 const auto velocity = current.linearVelocity();
                 if (velocity == LinearVelocity3(0, 0, 0))
                     continue;
+                if (std::find(prepared.mClientAuthoritativePlayers.begin(),
+                        prepared.mClientAuthoritativePlayers.end(),
+                        current.playerId())
+                    != prepared.mClientAuthoritativePlayers.end())
+                    continue;
                 auto kernel = advanceMovementKernel(mContentManifest.id(), mContentManifest.movementProfile(),
                     current.locomotionMode(), current.entityId(), tick, current.transform(), velocity, *mCollision);
                 const auto* step = std::get_if<MovementKernelStep>(&kernel);
@@ -1140,6 +1175,7 @@ namespace TES3MP
         mStateVersion = prepared.mStateVersion;
         mCanonicalRevision = prepared.mCanonicalRevision;
         mCheckpointTick = prepared.mCheckpointTick;
+        mClientAuthoritativePlayers = std::move(prepared.mClientAuthoritativePlayers);
         for (const auto& record : prepared.mResult.mDispositions)
             observe(record.disposition(), mCheckpointTick);
         if (prepared.mResult.mError != CommandBatchReductionError::None)

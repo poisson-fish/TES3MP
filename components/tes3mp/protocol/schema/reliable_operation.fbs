@@ -14,6 +14,18 @@ table EntityPrecondition {
   expected_authority_epoch:ulong (id: 2);
 }
 
+struct Position3 {
+  x:long;
+  y:long;
+  z:long;
+}
+
+struct Orientation3 {
+  x:uint;
+  y:uint;
+  z:uint;
+}
+
 struct LinearVelocity3 {
   x:long;
   y:long;
@@ -38,6 +50,8 @@ table PlayerLocomotionInput {
   locomotion_mode:LocomotionMode (id: 2);
   root_facing:uint (id: 3);
   desired_velocity:LinearVelocity3 (id: 4);
+  position:Position3 (id: 5);
+  orientation:Orientation3 (id: 6);
 }
 
 enum CellKind : ubyte {

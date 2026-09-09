@@ -98,9 +98,13 @@ the affected code/tests in the same milestone.
 
 - **Semantic controls.** Desktop and VR produce the same semantic gameplay
   commands. Fork-specific OpenXR tracking stays in the provider leaf.
-- **Authoritative root.** The server movement kernel and server content collision
-  are the only sources of canonical player/actor root movement. Client physics
-  and pose cannot author collision or canonical transforms.
+- **Client-authoritative player movement.** Server-side Bullet physics and
+  collision simulation for player movement are deferred. The client is authoritative
+  over its own character's 3D position, orientation, velocity, and locomotion mode.
+  The server ingests client transform proposals, records them into canonical state,
+  and relays them to peers; server movement simulation kernels are skipped for
+  client-authoritative players. Intra-cell client presentation does not override
+  local physics with server snapshots.
 - **Prediction is presentation.** Local input replay and correction cannot create
   new input. Remote interpolation, door animation, actor animation, sounds, and
   pose degradation do not change canonical outcomes.

@@ -24,6 +24,10 @@ struct ClientCommandHeaderBuilder;
 struct EntityPrecondition;
 struct EntityPreconditionBuilder;
 
+struct Position3;
+
+struct Orientation3;
+
 struct LinearVelocity3;
 
 struct PlayerMotionIntent;
@@ -168,6 +172,64 @@ template <bool B = false>
 bool VerifyReliableOperationBody(::flatbuffers::VerifierTemplate<B> &verifier, const void *obj, ReliableOperationBody type);
 template <bool B = false>
 bool VerifyReliableOperationBodyVector(::flatbuffers::VerifierTemplate<B> &verifier, const ::flatbuffers::Vector<::flatbuffers::Offset<void>> *values, const ::flatbuffers::Vector<ReliableOperationBody> *types);
+
+FLATBUFFERS_MANUALLY_ALIGNED_STRUCT(8) Position3 FLATBUFFERS_FINAL_CLASS {
+ private:
+  int64_t x_;
+  int64_t y_;
+  int64_t z_;
+
+ public:
+  Position3()
+      : x_(0),
+        y_(0),
+        z_(0) {
+  }
+  Position3(int64_t _x, int64_t _y, int64_t _z)
+      : x_(::flatbuffers::EndianScalar(_x)),
+        y_(::flatbuffers::EndianScalar(_y)),
+        z_(::flatbuffers::EndianScalar(_z)) {
+  }
+  int64_t x() const {
+    return ::flatbuffers::EndianScalar(x_);
+  }
+  int64_t y() const {
+    return ::flatbuffers::EndianScalar(y_);
+  }
+  int64_t z() const {
+    return ::flatbuffers::EndianScalar(z_);
+  }
+};
+FLATBUFFERS_STRUCT_END(Position3, 24);
+
+FLATBUFFERS_MANUALLY_ALIGNED_STRUCT(4) Orientation3 FLATBUFFERS_FINAL_CLASS {
+ private:
+  uint32_t x_;
+  uint32_t y_;
+  uint32_t z_;
+
+ public:
+  Orientation3()
+      : x_(0),
+        y_(0),
+        z_(0) {
+  }
+  Orientation3(uint32_t _x, uint32_t _y, uint32_t _z)
+      : x_(::flatbuffers::EndianScalar(_x)),
+        y_(::flatbuffers::EndianScalar(_y)),
+        z_(::flatbuffers::EndianScalar(_z)) {
+  }
+  uint32_t x() const {
+    return ::flatbuffers::EndianScalar(x_);
+  }
+  uint32_t y() const {
+    return ::flatbuffers::EndianScalar(y_);
+  }
+  uint32_t z() const {
+    return ::flatbuffers::EndianScalar(z_);
+  }
+};
+FLATBUFFERS_STRUCT_END(Orientation3, 12);
 
 FLATBUFFERS_MANUALLY_ALIGNED_STRUCT(8) LinearVelocity3 FLATBUFFERS_FINAL_CLASS {
  private:
@@ -439,7 +501,9 @@ struct PlayerLocomotionInput FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Ta
     VT_INPUT_SEQUENCE = 6,
     VT_LOCOMOTION_MODE = 8,
     VT_ROOT_FACING = 10,
-    VT_DESIRED_VELOCITY = 12
+    VT_DESIRED_VELOCITY = 12,
+    VT_POSITION = 14,
+    VT_ORIENTATION = 16
   };
   uint64_t input_tick() const {
     return GetField<uint64_t>(VT_INPUT_TICK, 0);
@@ -456,6 +520,12 @@ struct PlayerLocomotionInput FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Ta
   const TES3MP::Protocol::Schema::Reliable::LinearVelocity3 *desired_velocity() const {
     return GetStruct<const TES3MP::Protocol::Schema::Reliable::LinearVelocity3 *>(VT_DESIRED_VELOCITY);
   }
+  const TES3MP::Protocol::Schema::Reliable::Position3 *position() const {
+    return GetStruct<const TES3MP::Protocol::Schema::Reliable::Position3 *>(VT_POSITION);
+  }
+  const TES3MP::Protocol::Schema::Reliable::Orientation3 *orientation() const {
+    return GetStruct<const TES3MP::Protocol::Schema::Reliable::Orientation3 *>(VT_ORIENTATION);
+  }
   template <bool B = false>
   bool Verify(::flatbuffers::VerifierTemplate<B> &verifier) const {
     return VerifyTableStart(verifier) &&
@@ -464,6 +534,8 @@ struct PlayerLocomotionInput FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Ta
            VerifyField<uint8_t>(verifier, VT_LOCOMOTION_MODE, 1) &&
            VerifyField<uint32_t>(verifier, VT_ROOT_FACING, 4) &&
            VerifyField<TES3MP::Protocol::Schema::Reliable::LinearVelocity3>(verifier, VT_DESIRED_VELOCITY, 8) &&
+           VerifyField<TES3MP::Protocol::Schema::Reliable::Position3>(verifier, VT_POSITION, 8) &&
+           VerifyField<TES3MP::Protocol::Schema::Reliable::Orientation3>(verifier, VT_ORIENTATION, 4) &&
            verifier.EndTable();
   }
 };
@@ -487,6 +559,12 @@ struct PlayerLocomotionInputBuilder {
   void add_desired_velocity(const TES3MP::Protocol::Schema::Reliable::LinearVelocity3 *desired_velocity) {
     fbb_.AddStruct(PlayerLocomotionInput::VT_DESIRED_VELOCITY, desired_velocity);
   }
+  void add_position(const TES3MP::Protocol::Schema::Reliable::Position3 *position) {
+    fbb_.AddStruct(PlayerLocomotionInput::VT_POSITION, position);
+  }
+  void add_orientation(const TES3MP::Protocol::Schema::Reliable::Orientation3 *orientation) {
+    fbb_.AddStruct(PlayerLocomotionInput::VT_ORIENTATION, orientation);
+  }
   explicit PlayerLocomotionInputBuilder(::flatbuffers::FlatBufferBuilder &_fbb)
         : fbb_(_fbb) {
     start_ = fbb_.StartTable();
@@ -504,10 +582,14 @@ inline ::flatbuffers::Offset<PlayerLocomotionInput> CreatePlayerLocomotionInput(
     uint64_t input_sequence = 0,
     TES3MP::Protocol::Schema::Reliable::LocomotionMode locomotion_mode = TES3MP::Protocol::Schema::Reliable::LocomotionMode::Unknown,
     uint32_t root_facing = 0,
-    const TES3MP::Protocol::Schema::Reliable::LinearVelocity3 *desired_velocity = nullptr) {
+    const TES3MP::Protocol::Schema::Reliable::LinearVelocity3 *desired_velocity = nullptr,
+    const TES3MP::Protocol::Schema::Reliable::Position3 *position = nullptr,
+    const TES3MP::Protocol::Schema::Reliable::Orientation3 *orientation = nullptr) {
   PlayerLocomotionInputBuilder builder_(_fbb);
   builder_.add_input_sequence(input_sequence);
   builder_.add_input_tick(input_tick);
+  builder_.add_orientation(orientation);
+  builder_.add_position(position);
   builder_.add_desired_velocity(desired_velocity);
   builder_.add_root_facing(root_facing);
   builder_.add_locomotion_mode(locomotion_mode);

@@ -165,14 +165,16 @@ Primary sources: [`content_identity.hpp`](../../components/tes3mp/include/tes3mp
 
 ### Player movement and presentation
 
-- Clients send bounded semantic locomotion input. A deterministic server-owned
-  fixed-tick kernel is the only producer of canonical player-root movement.
-- Manifest-scoped movement profiles define walk/run/sneak/jump parameters.
-  Server content collision checks attempted root segments against fixed blocked
-  volumes; clients cannot submit collision results.
-- Local presentation keeps bounded input history and reconciles by replay.
-  Remote presentation uses bounded adaptive playback and canonical locomotion
-  state. Reliable one-shot events remain separate.
+- Clients have authority over their own character's 3D movement and physics.
+  Clients sample OpenMW local position, orientation, velocity, and locomotion mode
+  (walk/run/sneak/jump) and submit them via locomotion proposals.
+- Server-side Bullet physics and static blocked-volume collision simulation for
+  players are deferred. The server ingests client-authoritative player transforms
+  and updates canonical state without applying server movement kernels.
+- Local desktop presentation retains native OpenMW player physics and does not
+  override intra-cell player coordinates with server snapshots. Initial placement
+  is applied on bootstrap and cell transition. Remote presentation uses bounded
+  adaptive playback and canonical locomotion state.
 - Optional root-relative head/hand pose travels on its own latest-wins lane.
   Pose cannot move the canonical root, prove reach, or author gameplay.
 
@@ -289,9 +291,11 @@ and [`character.cpp`](../../apps/openmw/mwmechanics/character.cpp).
 - Remote actor/root presentation exists. Articulated remote skeleton head/hands,
   improved pose-loss blending, pose compression hardening, and any pose-assisted
   gameplay reach are not implemented.
-- Static blocked-volume collision is a bounded authoritative seam, not OpenMW
-  physics parity. It does not model gravity, slopes, dynamic bodies, capsules,
-  general pathfinding, or arbitrary cell traversal.
+- Server-authoritative physics and collisions for player characters are deferred;
+  clients are authoritative over their own character's movement. Static blocked-volume
+  collision and wander kernels remain in place for server-simulated actors. Full
+  server-side Bullet physics and terrain/mesh collision integration remain a future
+  milestone.
 - Actor AI is deliberately limited to idle/travel/wander. There is no navmesh
   parity, schedules, needs, dynamic spawning/removal, or authority delegation.
 - Interactive traps publish bounded outcomes but full spell-effect resolution

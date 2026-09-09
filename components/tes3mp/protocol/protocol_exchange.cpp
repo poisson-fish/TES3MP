@@ -376,8 +376,22 @@ namespace TES3MP
             const ReliableSchema::LinearVelocity3 encodedVelocity(velocity.x(), velocity.y(), velocity.z());
             const auto mode = static_cast<ReliableSchema::LocomotionMode>(
                 static_cast<std::uint8_t>(input->intent().mode()) + 1);
+            std::optional<ReliableSchema::Position3> encodedPosition;
+            if (input->intent().position())
+            {
+                const auto& pos = *input->intent().position();
+                encodedPosition.emplace(pos.x(), pos.y(), pos.z());
+            }
+            std::optional<ReliableSchema::Orientation3> encodedOrientation;
+            if (input->intent().orientation())
+            {
+                const auto& ori = *input->intent().orientation();
+                encodedOrientation.emplace(ori.x().value(), ori.y().value(), ori.z().value());
+            }
             body = ReliableSchema::CreatePlayerLocomotionInput(builder, input->inputTick().value(),
-                input->inputSequence().value(), mode, input->intent().rootFacing().value(), &encodedVelocity).Union();
+                input->inputSequence().value(), mode, input->intent().rootFacing().value(), &encodedVelocity,
+                encodedPosition ? &*encodedPosition : nullptr,
+                encodedOrientation ? &*encodedOrientation : nullptr).Union();
             bodyType = ReliableSchema::ReliableOperationBody::PlayerLocomotionInput;
         }
         else
@@ -551,9 +565,18 @@ namespace TES3MP
             const auto mode = static_cast<LocomotionMode>(
                 static_cast<std::uint8_t>(input->locomotion_mode()) - 1);
             const auto* velocity = input->desired_velocity();
+            std::optional<Position3> position;
+            if (input->position() != nullptr)
+                position.emplace(input->position()->x(), input->position()->y(), input->position()->z());
+            std::optional<Orientation3> orientation;
+            if (input->orientation() != nullptr)
+                orientation.emplace(Turn32::fromValue(input->orientation()->x()),
+                    Turn32::fromValue(input->orientation()->y()), Turn32::fromValue(input->orientation()->z()));
+
             return ReliableOperation::create(header, PlayerLocomotionInput(*inputTick, *inputSequence,
                 LocomotionIntent(mode, Turn32::fromValue(input->root_facing()),
-                    LinearVelocity3(velocity->x(), velocity->y(), velocity->z()))));
+                    LinearVelocity3(velocity->x(), velocity->y(), velocity->z()),
+                    position, orientation)));
         }
         const auto* transition = root->body_as_CellTransition();
         if (transition == nullptr || transition->requested_cell() == nullptr)

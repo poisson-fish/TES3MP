@@ -33,6 +33,7 @@ namespace TES3MP::OpenMWAdapter
         std::optional<LocomotionIntent> next(LinearVelocity3 authoritativeVelocity) const noexcept;
         bool markQueued(CommandSequence sequence, LocomotionIntent intent, MonotonicInstant queuedAt) noexcept;
         bool pending() const noexcept { return mPending.has_value(); }
+        void clear() noexcept;
 
     private:
         struct PendingIntent
@@ -51,6 +52,7 @@ namespace TES3MP::OpenMWAdapter
         MovementMetricSink* mMetrics = nullptr;
         std::optional<DesiredIntent> mDesired;
         std::optional<PendingIntent> mPending;
+        std::optional<LocomotionIntent> mLastQueued;
     };
 
     inline constexpr std::size_t MaximumPoseEvidenceSources = 256;

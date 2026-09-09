@@ -59,7 +59,15 @@ namespace TES3MP
         std::size_t replayedCount = 0;
         for (const auto& retained : mInputs)
         {
-            const auto desired = retained.input.intent().desiredVelocity();
+            const auto& intent = retained.input.intent();
+            if (intent.position() && intent.orientation())
+            {
+                replayed = Transform(replayed.cell(), *intent.position(), *intent.orientation());
+                velocity = intent.desiredVelocity();
+                ++replayedCount;
+                continue;
+            }
+            const auto desired = intent.desiredVelocity();
             const auto position = replayed.position();
             const auto x = checkedAdd(position.x(), desired.x());
             const auto y = checkedAdd(position.y(), desired.y());
@@ -71,7 +79,7 @@ namespace TES3MP
             }
             const auto orientation = replayed.orientation();
             replayed = Transform(replayed.cell(), Position3(*x, *y, *z),
-                Orientation3(orientation.x(), orientation.y(), retained.input.intent().rootFacing()));
+                Orientation3(orientation.x(), orientation.y(), intent.rootFacing()));
             velocity = desired;
             ++replayedCount;
         }

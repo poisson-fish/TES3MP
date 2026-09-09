@@ -3,6 +3,7 @@
 
 #include "../mwbase/environment.hpp"
 #include "../mwbase/inputmanager.hpp"
+#include "../mwbase/mechanicsmanager.hpp"
 #include "../mwbase/soundmanager.hpp"
 #include "../mwbase/world.hpp"
 #include "../mwgui/containeritemmodel.hpp"
@@ -34,6 +35,7 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cmath>
 #include <limits>
 #include <map>
@@ -48,6 +50,28 @@ namespace TES3MP::OpenMWAdapter
     {
         constexpr double PositionScale = 1024.0;
         constexpr double TurnScale = 4294967296.0;
+
+        std::int64_t roundTiesToEven(double value) noexcept
+        {
+            const double lower = std::floor(value);
+            const double fraction = value - lower;
+            if (fraction < 0.5)
+                return static_cast<std::int64_t>(lower);
+            if (fraction > 0.5)
+                return static_cast<std::int64_t>(lower + 1.0);
+            const auto lowerInteger = static_cast<std::int64_t>(lower);
+            return lowerInteger % 2 == 0 ? lowerInteger : lowerInteger + 1;
+        }
+
+        Turn32 turnFromOpenMW(float rad) noexcept
+        {
+            constexpr double Tau = 2.0 * std::numbers::pi;
+            double turns = std::fmod(-static_cast<double>(rad) / Tau, 1.0);
+            if (turns < 0.0)
+                turns += 1.0;
+            return Turn32::fromUnnormalized(static_cast<std::uint64_t>(
+                std::floor(turns * TurnScale + 0.5)));
+        }
 
         ESM::RefId refId(std::string_view value)
         {
@@ -342,6 +366,9 @@ namespace TES3MP::OpenMWAdapter
         std::optional<InventoryTransactionCapture> pendingInventoryTransaction;
         std::optional<MeleeAttackCapture> pendingMeleeAttack;
         bool interceptorInstalled = false;
+        std::optional<osg::Vec3f> lastPosition;
+        std::optional<std::chrono::steady_clock::time_point> lastSampleTime;
+        LinearVelocity3 lastVelocity{ 0, 0, 0 };
 
         void ensureInterceptor(DesktopSemanticInput* self)
         {
@@ -437,6 +464,9 @@ namespace TES3MP::OpenMWAdapter
         mImpl->pendingInteraction.reset();
         mImpl->pendingInventoryTransaction.reset();
         mImpl->pendingMeleeAttack.reset();
+        mImpl->lastPosition.reset();
+        mImpl->lastSampleTime.reset();
+        mImpl->lastVelocity = LinearVelocity3(0, 0, 0);
     }
 
     bool DesktopSemanticInput::handleActivation(const MWWorld::Ptr& toActivate, const MWWorld::Ptr& player) noexcept
@@ -597,12 +627,68 @@ namespace TES3MP::OpenMWAdapter
             auto input = MWBase::Environment::get().getInputManager();
             if (input->controlsDisabled() || !input->getControlSwitch("playercontrols"))
                 return LocomotionIntent(LocomotionMode::Walk, Turn32::fromValue(0), LinearVelocity3(0, 0, 0));
-            const double right = static_cast<double>(input->getActionValue(MWInput::A_MoveRight))
-                - static_cast<double>(input->getActionValue(MWInput::A_MoveLeft));
-            const double forward = static_cast<double>(input->getActionValue(MWInput::A_MoveForward))
-                - static_cast<double>(input->getActionValue(MWInput::A_MoveBackward));
-            const auto player = MWBase::Environment::get().getWorld()->getPlayerPtr();
-            return mapPlanarMovement(right, forward, player.getRefData().getPosition().rot[2]);
+            auto world = MWBase::Environment::get().getWorld();
+            const auto player = world->getPlayerPtr();
+            const auto& pos = player.getRefData().getPosition();
+            if (!std::isfinite(pos.pos[0]) || !std::isfinite(pos.pos[1]) || !std::isfinite(pos.pos[2])
+                || !std::isfinite(pos.rot[0]) || !std::isfinite(pos.rot[1]) || !std::isfinite(pos.rot[2]))
+                return LocomotionIntent(LocomotionMode::Walk, Turn32::fromValue(0), LinearVelocity3(0, 0, 0));
+
+            const auto position = Position3(
+                static_cast<std::int64_t>(std::round(pos.pos[0] * PositionScale)),
+                static_cast<std::int64_t>(std::round(pos.pos[1] * PositionScale)),
+                static_cast<std::int64_t>(std::round(pos.pos[2] * PositionScale)));
+
+            const auto orientation = Orientation3(
+                turnFromOpenMW(pos.rot[0]),
+                turnFromOpenMW(pos.rot[1]),
+                turnFromOpenMW(pos.rot[2]));
+            const auto rootFacing = orientation.z();
+
+            auto mechanics = MWBase::Environment::get().getMechanicsManager();
+            LocomotionMode mode = LocomotionMode::Walk;
+            if (!world->isOnGround(player))
+                mode = LocomotionMode::Jump;
+            else if (mechanics->isSneaking(player))
+                mode = LocomotionMode::Sneak;
+            else if (mechanics->isRunning(player))
+                mode = LocomotionMode::Run;
+
+            const auto now = std::chrono::steady_clock::now();
+            if (mImpl->lastPosition && mImpl->lastSampleTime)
+            {
+                const double dt = std::chrono::duration<double>(now - *mImpl->lastSampleTime).count();
+                if (dt > 0.5)
+                {
+                    mImpl->lastVelocity = LinearVelocity3(0, 0, 0);
+                    mImpl->lastPosition = osg::Vec3f(pos.pos[0], pos.pos[1], pos.pos[2]);
+                    mImpl->lastSampleTime = now;
+                }
+                else if (dt >= 0.01)
+                {
+                    const double dx = static_cast<double>(pos.pos[0]) - mImpl->lastPosition->x();
+                    const double dy = static_cast<double>(pos.pos[1]) - mImpl->lastPosition->y();
+                    const double dz = static_cast<double>(pos.pos[2]) - mImpl->lastPosition->z();
+                    constexpr double ServerTickRate = 30.0;
+                    const double vx = (dx / dt) / ServerTickRate * PositionScale;
+                    const double vy = (dy / dt) / ServerTickRate * PositionScale;
+                    const double vz = (dz / dt) / ServerTickRate * PositionScale;
+                    mImpl->lastVelocity = LinearVelocity3(
+                        roundTiesToEven(vx),
+                        roundTiesToEven(vy),
+                        roundTiesToEven(vz));
+                    mImpl->lastPosition = osg::Vec3f(pos.pos[0], pos.pos[1], pos.pos[2]);
+                    mImpl->lastSampleTime = now;
+                }
+            }
+            else
+            {
+                mImpl->lastPosition = osg::Vec3f(pos.pos[0], pos.pos[1], pos.pos[2]);
+                mImpl->lastSampleTime = now;
+                mImpl->lastVelocity = LinearVelocity3(0, 0, 0);
+            }
+
+            return LocomotionIntent(mode, rootFacing, mImpl->lastVelocity, position, orientation);
         }
         catch (...)
         {
@@ -683,9 +769,11 @@ namespace TES3MP::OpenMWAdapter
         std::optional<InventoryRevision> observedPlayerInventoryRevision;
         std::optional<CanonicalRevision> observedInventoryCanonicalRevision;
         std::optional<LatestWinsCombatSnapshot> combatSnapshot;
+        bool sessionBootstrapPending = true;
 
         void clear() noexcept
         {
+            sessionBootstrapPending = true;
             for (auto& [entity, remote] : remotes)
             {
                 (void)entity;
@@ -817,16 +905,21 @@ namespace TES3MP::OpenMWAdapter
                 world->changeToCell(targetCell->getCell()->getId(), selfPosition, false, false);
                 player = world->getPlayerPtr();
                 targetCell = player.getCell();
+                sessionBootstrapPending = false;
             }
             else if (player.getCell() == targetCell)
             {
+                if (sessionBootstrapPending)
+                {
+                    world->moveObject(player, selfPosition.asVec3());
+                    sessionBootstrapPending = false;
+                }
                 const auto& local = player.getRefData().getPosition();
                 (void)metrics.tryRecord({ MovementMetricKey::LocalCorrectionDistanceQuanta,
                     movementCorrectionDistanceQuanta(localRoot.position(),
                         static_cast<double>(local.pos[0]) * PositionScale,
                         static_cast<double>(local.pos[1]) * PositionScale,
                         static_cast<double>(local.pos[2]) * PositionScale) });
-                world->moveObject(player, selfPosition.asVec3());
             }
 
             std::array<std::optional<EntityId>, MWRender::MaximumReplicatedActors> desired;

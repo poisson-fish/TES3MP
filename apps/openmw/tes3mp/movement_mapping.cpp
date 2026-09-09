@@ -90,7 +90,17 @@ namespace TES3MP::OpenMWAdapter
 
     std::optional<LocomotionIntent> MotionIntentTracker::next(LinearVelocity3 authoritativeVelocity) const noexcept
     {
-        if (mPending || !mDesired || mDesired->intent.desiredVelocity() == authoritativeVelocity)
+        if (mPending || !mDesired)
+            return std::nullopt;
+
+        if (mDesired->intent.position().has_value())
+        {
+            if (mLastQueued && *mLastQueued == mDesired->intent)
+                return std::nullopt;
+            return mDesired->intent;
+        }
+
+        if (mDesired->intent.desiredVelocity() == authoritativeVelocity)
             return std::nullopt;
         return mDesired->intent;
     }
@@ -105,7 +115,15 @@ namespace TES3MP::OpenMWAdapter
             && mDesired->intent.desiredVelocity() == intent.desiredVelocity())
             stopObservedAt = mDesired->sampledAt;
         mPending.emplace(PendingIntent{ sequence, queuedAt, stopObservedAt });
+        mLastQueued = intent;
         return true;
+    }
+
+    void MotionIntentTracker::clear() noexcept
+    {
+        mDesired.reset();
+        mPending.reset();
+        mLastQueued.reset();
     }
 
     void PoseEvidenceTracker::observe(EntityId source, AuthorityEpoch epoch, PoseSampleSequence sequence,

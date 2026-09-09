@@ -140,6 +140,7 @@ namespace TES3MP
             std::optional<CanonicalCombatWorld> mBaseCombat;
             std::optional<CanonicalCombatWorld> mCombat;
             std::vector<AuthoritativeMeleeEvent> mCombatEvents;
+            std::vector<PlayerId> mClientAuthoritativePlayers;
         };
 
         class PreparedJoin
@@ -280,6 +281,7 @@ namespace TES3MP
         CanonicalSinkBundle mSinks;
         ContentManifest mContentManifest;
         ServerCollisionQuery* mCollision;
+        std::vector<PlayerId> mClientAuthoritativePlayers;
     };
 }
 
