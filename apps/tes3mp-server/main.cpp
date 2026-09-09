@@ -296,6 +296,9 @@ int main(int argc, char** argv)
         optionalCapabilities.push_back(TES3MP::interactiveObjectReplicationCapability());
     if (inventoryWorld)
         optionalCapabilities.push_back(TES3MP::inventoryReplicationCapability());
+    std::sort(optionalCapabilities.begin(), optionalCapabilities.end());
+    optionalCapabilities.erase(
+        std::unique(optionalCapabilities.begin(), optionalCapabilities.end()), optionalCapabilities.end());
     auto offer
         = TES3MP::CapabilityOffer::create(std::move(versions), optionalCapabilities, {}, config.contentManifest.id());
     std::vector<TES3MP::Transform> spawns;

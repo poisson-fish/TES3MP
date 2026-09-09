@@ -1,8 +1,8 @@
 #include "actor_content.hpp"
 #include "actor_interest_projection.hpp"
 #include "authenticated_join_composition.hpp"
-#include "combat_content.hpp"
 #include "character_content.hpp"
+#include "combat_content.hpp"
 #include "connection_session_coordinator.hpp"
 #include "content_collision.hpp"
 #include "interactive_object_content.hpp"
@@ -192,6 +192,41 @@ namespace
         std::uint64_t nextPrincipal = 9;
     };
 
+    class RejectedOperation final : public AuthenticationOperation
+    {
+    public:
+        explicit RejectedOperation(AuthenticationAttempt attempt)
+            : mAttempt(attempt)
+        {
+        }
+
+        AuthenticationPollResult poll() noexcept override
+        {
+            return AuthenticationCompletion{ mAttempt,
+                AuthenticationRejected{ AuthenticationRejectionReason::Denied } };
+        }
+        void cancel() noexcept override {}
+
+    private:
+        AuthenticationAttempt mAttempt;
+    };
+
+    class RejectingAuthentication final : public ServerAuthenticationService
+    {
+    public:
+        std::unique_ptr<AuthenticationOperation> begin(
+            AuthenticationAttempt attempt, ServerAuthenticationSubmission) noexcept override
+        {
+            return std::make_unique<RejectedOperation>(attempt);
+        }
+
+        ResumeTokenIssueResult issueInitial(
+            PrincipalId, SessionId, SessionGeneration, ResumeTokenContext) noexcept override
+        {
+            return ResumeTokenStoreError::Denied;
+        }
+    };
+
     class FixedClock final : public MonotonicClock
     {
     public:
@@ -367,8 +402,8 @@ int main()
 {
     using namespace TES3MP::ServerApp;
     {
-        const auto manifestId = ContentManifestId::fromHex(
-            "5c3c8c2cbd20e25901b59b3ece33d36b7ef0e3d60ad8d11828bcc61a5ead1647");
+        const auto manifestId
+            = ContentManifestId::fromHex("5c3c8c2cbd20e25901b59b3ece33d36b7ef0e3d60ad8d11828bcc61a5ead1647");
         const auto spaces = parseCellSpaceDeclarations("interior:1;interior:2;interior:3;exterior:4");
         const auto cells = parseContentCells("interior:1;interior:2;interior:3;exterior:4:-2:-9");
         const auto movement = parseMovementProfile("sneak:4;walk:8;run:16;jump:12");
@@ -377,21 +412,18 @@ int main()
             ? ContentManifest::create(*manifestId, *spaces, *cells, *appearance, *movement)
             : std::nullopt;
         assert(manifest);
-        const auto path = std::filesystem::path(TES3MP_SOURCE_ROOT)
-            / "files/data/tes3mp/vanilla-characters.txt";
+        const auto path = std::filesystem::path(TES3MP_SOURCE_ROOT) / "files/data/tes3mp/vanilla-characters.txt";
         auto loaded = loadCharacterContent(path, *manifest);
         const auto* catalog = std::get_if<CharacterContentCatalog>(&loaded);
-        const CharacterAppearance stockMale{
-            *RaceRecordId::fromValue(*characterRecordId("Dark Elf")),
+        const CharacterAppearance stockMale{ *RaceRecordId::fromValue(*characterRecordId("Dark Elf")),
             *HeadRecordId::fromValue(*characterRecordId("b_n_dark elf_m_head_01")),
             *HairRecordId::fromValue(*characterRecordId("b_n_dark elf_m_hair_01")), CharacterSex::Male };
-        const CharacterAppearance stockFemale{
-            *RaceRecordId::fromValue(*characterRecordId("Dark Elf")),
+        const CharacterAppearance stockFemale{ *RaceRecordId::fromValue(*characterRecordId("Dark Elf")),
             *HeadRecordId::fromValue(*characterRecordId("b_n_dark elf_f_head_01")),
             *HairRecordId::fromValue(*characterRecordId("b_n_dark elf_f_hair_01")), CharacterSex::Female };
         const auto* darkElf = catalog ? catalog->find(stockMale.race) : nullptr;
-        constexpr std::array vanillaRaces{ "Argonian", "Breton", "Dark Elf", "High Elf", "Imperial",
-            "Khajiit", "Nord", "Orc", "Redguard", "Wood Elf" };
+        constexpr std::array vanillaRaces{ "Argonian", "Breton", "Dark Elf", "High Elf", "Imperial", "Khajiit", "Nord",
+            "Orc", "Redguard", "Wood Elf" };
         std::size_t packagedAppearanceCount = 0;
         for (const std::string_view raceName : vanillaRaces)
         {
@@ -406,8 +438,8 @@ int main()
             && catalog->completionSpawn().cell() == CellId::exterior(id<CellSpaceId>(4), -2, -9)
             && catalog->completionSpawn().position() == Position3(-10443674, -73251021, 237568)
             && catalog->completionSpawn().orientation().z() == Turn32::fromValue(536870912u)
-            && packagedAppearanceCount == 1181
-            && darkElf && std::ranges::find(darkElf->appearances, stockMale) != darkElf->appearances.end()
+            && packagedAppearanceCount == 1181 && darkElf
+            && std::ranges::find(darkElf->appearances, stockMale) != darkElf->appearances.end()
             && std::ranges::find(darkElf->appearances, stockFemale) != darkElf->appearances.end()
             && catalog->find(*ClassRecordId::fromValue(*characterRecordId("Warrior")))
             && catalog->find(*BirthsignRecordId::fromValue(*characterRecordId("Fay"))));
@@ -655,8 +687,8 @@ int main()
           "player 50 40 40 1 0 0 10 20 30 40 50 25 100 500 0\n"
           "actor 1 20 50 0 0 0 25 0 0 0 0 0\n"
           "weapon 4 1 1 10 1 10 1 10 5 1 1\n";
-    const std::array combatItemDeclarations{ ItemPrototypeDeclaration{ id<ItemPrototypeId>(4), ItemCategory::Weapon,
-        5, 1, 100, 0, slotToMask(EquipmentSlot::CarriedRight), false, std::nullopt } };
+    const std::array combatItemDeclarations{ ItemPrototypeDeclaration{ id<ItemPrototypeId>(4), ItemCategory::Weapon, 5,
+        1, 100, 0, slotToMask(EquipmentSlot::CarriedRight), false, std::nullopt } };
     auto combatItems = *ItemPrototypeCatalog::create(parsedConfig().contentManifest, combatItemDeclarations);
     writeCombat(std::string(combatHeader) + std::string(combatBody));
     auto loadedCombat = loadCombatContent(combatPath, parsedConfig().contentManifest, actorCatalog, combatItems);
@@ -669,21 +701,26 @@ int main()
         + "settings nan 5 1 0.1 1 1 0.1 0.1 1 1 1.5 1\n"
           "player 50 40 40 1 0 0 10 20 30 40 50 25 100 500 0\n"
           "actor 1 20 50 0 0 0 25 0 0 0 0 0\n");
-    const auto malformedCombat
-        = std::get<CombatContentError>(loadCombatContent(combatPath, parsedConfig().contentManifest,
-            actorCatalog, combatItems));
+    const auto malformedCombat = std::get<CombatContentError>(
+        loadCombatContent(combatPath, parsedConfig().contentManifest, actorCatalog, combatItems));
     assert(malformedCombat.code == CombatContentErrorCode::InvalidSettings && malformedCombat.line == 4
         && describeCombatContentError(malformedCombat) == "invalid settings at line 4");
     writeCombat(std::string(combatHeader)
         + "settings 0.2 5 1 0.1 1 1 0.1 0.1 1 1 1.5 1\n"
           "player 50 40 40 1 0 0 10 20 30 40 50 25 100 500 0\n");
-    assert(std::get<CombatContentError>(loadCombatContent(combatPath, parsedConfig().contentManifest,
-               actorCatalog, combatItems)).code == CombatContentErrorCode::InvalidActorSet);
-    writeCombat("TES3MP_COMBAT_V1\n"
-                "manifest 0202030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20\n"
-                "seed 42\n" + std::string(combatBody));
-    assert(std::get<CombatContentError>(loadCombatContent(combatPath, parsedConfig().contentManifest,
-               actorCatalog, combatItems)).code == CombatContentErrorCode::ManifestMismatch);
+    assert(std::get<CombatContentError>(
+               loadCombatContent(combatPath, parsedConfig().contentManifest, actorCatalog, combatItems))
+               .code
+        == CombatContentErrorCode::InvalidActorSet);
+    writeCombat(
+        "TES3MP_COMBAT_V1\n"
+        "manifest 0202030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20\n"
+        "seed 42\n"
+        + std::string(combatBody));
+    assert(std::get<CombatContentError>(
+               loadCombatContent(combatPath, parsedConfig().contentManifest, actorCatalog, combatItems))
+               .code
+        == CombatContentErrorCode::ManifestMismatch);
     std::filesystem::remove(combatPath);
 
     const auto objectPath = std::filesystem::temp_directory_path() / "tes3mp-server-object-content-test";
@@ -751,6 +788,12 @@ int main()
     auto password = loadJoinPassword(temporary);
     assert(std::holds_alternative<TES3MP::AuthenticationMaterial>(password));
     assert(std::get<TES3MP::AuthenticationMaterial>(password).size() == 6);
+    {
+        std::ofstream stream(temporary, std::ios::binary);
+    }
+    auto emptyPassword = loadJoinPassword(temporary);
+    assert(std::holds_alternative<TES3MP::AuthenticationMaterial>(emptyPassword));
+    assert(std::get<TES3MP::AuthenticationMaterial>(emptyPassword).empty());
     std::filesystem::remove(temporary);
     assert(std::holds_alternative<ConfigError>(loadJoinPassword(temporary)));
 
@@ -763,10 +806,9 @@ int main()
     identityDigest.bytes.fill(std::byte{ 0x4a });
     const auto zeroTurn = Turn32::fromValue(0);
     const CanonicalPlayerEntityState savedIdentityPlayer(id<PlayerId>(3), id<EntityId>(5), id<AppearanceId>(7),
-        Transform(CellId::interior(id<CellSpaceId>(7)), Position3(100, 200, 300),
-            Orientation3(zeroTurn, zeroTurn, zeroTurn)),
-        LinearVelocity3(1, 2, 3), id<EntityRevision>(4), id<AuthorityEpoch>(2), id<ServerTick>(8),
-        LocomotionMode::Run);
+        Transform(
+            CellId::interior(id<CellSpaceId>(7)), Position3(100, 200, 300), Orientation3(zeroTurn, zeroTurn, zeroTurn)),
+        LinearVelocity3(1, 2, 3), id<EntityRevision>(4), id<AuthorityEpoch>(2), id<ServerTick>(8), LocomotionMode::Run);
     CharacterDerivedState savedDerived;
     savedDerived.attributes.fill(40);
     savedDerived.skills.fill(5);
@@ -915,8 +957,8 @@ int main()
         auto itemCatalog = *ItemPrototypeCatalog::create(combatConfig.contentManifest, noItems);
         auto inventory = *CanonicalInventoryWorld::create(combatConfig.contentManifest, itemCatalog, {}, {});
         const auto randomKey = *RandomStreamKey::fromValues(5, 0);
-        auto combat = std::get<CanonicalCombatWorld>(createCanonicalCombatWorld({}, {},
-            Xoshiro256StarStar::fromWorldSeed(42, randomKey).snapshot()));
+        auto combat = std::get<CanonicalCombatWorld>(
+            createCanonicalCombatWorld({}, {}, Xoshiro256StarStar::fromWorldSeed(42, randomKey).snapshot()));
         CanonicalPlayerCombatTemplate playerTemplate;
         playerTemplate.stats.strength = 45.f;
         playerTemplate.stats.fatigue = 80.f;
@@ -930,46 +972,49 @@ int main()
         RecordingCrypto crypto;
         auto queues = OutboundQueueSet::create(OutboundQueuePolicy{}, 1);
         auto timeouts = *SessionTimeoutPolicy::create(1'000'000, 1'000'000, 1'000'000);
-        ConnectionSessionCoordinator sessions(clock, observability, timeouts, emptyOffer(), authentication, *queues,
-            1, nullptr, nullptr, &inventory, &combat, &playerTemplate, &itemCatalog);
+        ConnectionSessionCoordinator sessions(clock, observability, timeouts, emptyOffer(), authentication, *queues, 1,
+            nullptr, nullptr, &inventory, &combat, &playerTemplate, &itemCatalog);
         JoinFixture fixture;
         const auto connection = TransportConnectionId::initial();
         assert(sessions.accept(connection, scope(std::byte{ 6 })) == ConnectionSessionResult::Accepted);
         const auto hello = std::get<std::vector<std::byte>>(encodeProtocolFrame(MessageClass::SessionControl,
             MessageKind::ClientHello, encodeClientHello(ClientHello::fromOffer(emptyOffer()))));
         assert(sessions.dispatch(connection, { TransportChannel::ReliableOrdered, hello }, fixture.joins, crypto,
-                   ServerTick::initial()) == ConnectionSessionResult::Accepted);
+                   ServerTick::initial())
+            == ConnectionSessionResult::Accepted);
         auto material = AuthenticationMaterial::create({});
-        const auto authenticationRequest = std::get<std::vector<std::byte>>(encodeProtocolFrame(
-            MessageClass::SessionControl, MessageKind::AuthenticationRequest,
-            encodeAuthenticationRequest(AuthenticationRequest::join(std::move(*material)))));
+        const auto authenticationRequest = std::get<std::vector<std::byte>>(
+            encodeProtocolFrame(MessageClass::SessionControl, MessageKind::AuthenticationRequest,
+                encodeAuthenticationRequest(AuthenticationRequest::join(std::move(*material)))));
         assert(sessions.dispatch(connection, { TransportChannel::ReliableOrdered, authenticationRequest },
-                   fixture.joins, crypto, ServerTick::initial()) == ConnectionSessionResult::Joined);
+                   fixture.joins, crypto, ServerTick::initial())
+            == ConnectionSessionResult::Joined);
         const auto* joinedInventory = inventory.findPlayer(id<PlayerId>(1));
         const auto* joinedCombat = combat.findPlayer(id<PlayerId>(1));
         assert(joinedInventory && joinedCombat && joinedCombat->stats.strength == 45.f
             && joinedCombat->stats.fatigue == 80.f && joinedCombat->stats.normalizedEncumbrance == 0.f);
 
-        auto rejectedInventory
-            = *CanonicalInventoryWorld::create(combatConfig.contentManifest, itemCatalog, {}, {});
-        auto rejectedCombat = std::get<CanonicalCombatWorld>(createCanonicalCombatWorld({}, {},
-            Xoshiro256StarStar::fromWorldSeed(43, randomKey).snapshot()));
-        auto narrowQueues = OutboundQueueSet::create(
-            *OutboundQueuePolicy::create(1, 64 * 1024, 4, 2, 4, 1, 1, 1, 3, 100), 1);
+        auto rejectedInventory = *CanonicalInventoryWorld::create(combatConfig.contentManifest, itemCatalog, {}, {});
+        auto rejectedCombat = std::get<CanonicalCombatWorld>(
+            createCanonicalCombatWorld({}, {}, Xoshiro256StarStar::fromWorldSeed(43, randomKey).snapshot()));
+        auto narrowQueues
+            = OutboundQueueSet::create(*OutboundQueuePolicy::create(1, 64 * 1024, 4, 2, 4, 1, 1, 1, 3, 100), 1);
         ConnectionSessionCoordinator rejectedSessions(clock, observability, timeouts, emptyOffer(), authentication,
             *narrowQueues, 1, nullptr, nullptr, &rejectedInventory, &rejectedCombat, &playerTemplate, &itemCatalog);
         JoinFixture rejectedFixture;
         assert(rejectedSessions.accept(connection, scope(std::byte{ 7 })) == ConnectionSessionResult::Accepted);
-        assert(rejectedSessions.dispatch(connection, { TransportChannel::ReliableOrdered, hello }, rejectedFixture.joins,
-                   crypto, ServerTick::initial()) == ConnectionSessionResult::Accepted);
+        assert(rejectedSessions.dispatch(connection, { TransportChannel::ReliableOrdered, hello },
+                   rejectedFixture.joins, crypto, ServerTick::initial())
+            == ConnectionSessionResult::Accepted);
         FakeRuntime drain;
         assert(narrowQueues->pump(drain, connection, 0) == OutboundPumpResult::Progress);
         auto rejectedMaterial = AuthenticationMaterial::create({});
-        const auto rejectedRequest = std::get<std::vector<std::byte>>(encodeProtocolFrame(
-            MessageClass::SessionControl, MessageKind::AuthenticationRequest,
-            encodeAuthenticationRequest(AuthenticationRequest::join(std::move(*rejectedMaterial)))));
+        const auto rejectedRequest = std::get<std::vector<std::byte>>(
+            encodeProtocolFrame(MessageClass::SessionControl, MessageKind::AuthenticationRequest,
+                encodeAuthenticationRequest(AuthenticationRequest::join(std::move(*rejectedMaterial)))));
         assert(rejectedSessions.dispatch(connection, { TransportChannel::ReliableOrdered, rejectedRequest },
-                   rejectedFixture.joins, crypto, ServerTick::initial()) == ConnectionSessionResult::ProtocolRejected);
+                   rejectedFixture.joins, crypto, ServerTick::initial())
+            == ConnectionSessionResult::ProtocolRejected);
         assert(rejectedFixture.joins.state().players().empty() && rejectedInventory.players().empty()
             && rejectedCombat.players().empty());
     }
@@ -994,6 +1039,91 @@ int main()
         assert(sessions.size() == 0 && queues->connections() == 0);
         assert(sessions.close(first) == ConnectionSessionResult::UnknownConnection);
         assert(sessions.accept(second, scope(std::byte{ 2 })) == ConnectionSessionResult::Accepted);
+    }
+    {
+        FixedClock clock;
+        NullMetricSink metrics;
+        NullStructuredEventSink events;
+        Observability observability(metrics, events);
+        FakeAuthentication authentication;
+        RecordingCrypto crypto;
+        auto queues = OutboundQueueSet::create(OutboundQueuePolicy{}, 1);
+        auto timeouts = *SessionTimeoutPolicy::create(1'000'000, 1'000'000, 1'000'000);
+        ConnectionSessionCoordinator sessions(clock, observability, timeouts, emptyOffer(), authentication, *queues, 1);
+        const auto connection = TransportConnectionId::initial();
+        assert(sessions.accept(connection, scope(std::byte{ 3 })) == ConnectionSessionResult::Accepted);
+
+        auto incompatibleVersions = std::get<ProtocolVersionRange>(ProtocolVersionRange::create(2, 0, 0));
+        auto incompatibleOffer
+            = std::get<CapabilityOffer>(CapabilityOffer::create(std::move(incompatibleVersions), {}, {}));
+        auto incompatibleHello = std::get<std::vector<std::byte>>(encodeProtocolFrame(MessageClass::SessionControl,
+            MessageKind::ClientHello, encodeClientHello(ClientHello::fromOffer(std::move(incompatibleOffer)))));
+        JoinFixture fixture;
+        assert(sessions.dispatch(connection, { TransportChannel::ReliableOrdered, incompatibleHello }, fixture.joins,
+                   crypto, ServerTick::initial())
+            == ConnectionSessionResult::SessionRejected);
+        FakeRuntime drain;
+        assert(queues->pump(drain, connection, 0) == OutboundPumpResult::Progress && drain.sent.size() == 1);
+        const auto rejectionFrame = decodeProtocolFrame(drain.sent.front());
+        assert(std::holds_alternative<DecodedFrame>(rejectionFrame));
+        const auto& decodedRejectionFrame = std::get<DecodedFrame>(rejectionFrame);
+        assert(decodedRejectionFrame.messageKind() == MessageKind::SessionRejected);
+        const auto rejection = decodeSessionRejected(decodedRejectionFrame.payload());
+        assert(std::holds_alternative<SessionRejected>(rejection)
+            && std::get<SessionRejected>(rejection).reason() == SessionRejectionReason::ProtocolMajorMismatch);
+    }
+    {
+        FixedClock clock;
+        NullMetricSink metrics;
+        NullStructuredEventSink events;
+        Observability observability(metrics, events);
+        RejectingAuthentication authentication;
+        RecordingCrypto crypto;
+        auto queues = OutboundQueueSet::create(OutboundQueuePolicy{}, 1);
+        auto timeouts = *SessionTimeoutPolicy::create(1'000'000, 1'000'000, 1'000'000);
+        ConnectionSessionCoordinator sessions(clock, observability, timeouts, emptyOffer(), authentication, *queues, 1);
+        const auto connection = TransportConnectionId::initial();
+        JoinFixture fixture;
+        assert(sessions.accept(connection, scope(std::byte{ 4 })) == ConnectionSessionResult::Accepted);
+        const auto hello = std::get<std::vector<std::byte>>(encodeProtocolFrame(MessageClass::SessionControl,
+            MessageKind::ClientHello, encodeClientHello(ClientHello::fromOffer(emptyOffer()))));
+        assert(sessions.dispatch(connection, { TransportChannel::ReliableOrdered, hello }, fixture.joins, crypto,
+                   ServerTick::initial())
+            == ConnectionSessionResult::Accepted);
+        FakeRuntime drain;
+        assert(queues->pump(drain, connection, 0) == OutboundPumpResult::Progress);
+        drain.sent.clear();
+        auto material = AuthenticationMaterial::create({});
+        const auto request = std::get<std::vector<std::byte>>(
+            encodeProtocolFrame(MessageClass::SessionControl, MessageKind::AuthenticationRequest,
+                encodeAuthenticationRequest(AuthenticationRequest::join(std::move(*material)))));
+        assert(sessions.dispatch(connection, { TransportChannel::ReliableOrdered, request }, fixture.joins, crypto,
+                   ServerTick::initial())
+            == ConnectionSessionResult::SessionRejected);
+        assert(queues->pump(drain, connection, 1) == OutboundPumpResult::Progress && drain.sent.size() == 1);
+        const auto rejectionFrame = decodeProtocolFrame(drain.sent.front());
+        assert(std::holds_alternative<DecodedFrame>(rejectionFrame));
+        const auto& decodedRejectionFrame = std::get<DecodedFrame>(rejectionFrame);
+        assert(decodedRejectionFrame.messageKind() == MessageKind::AuthenticationRejected);
+        const auto rejection = decodeAuthenticationRejected(decodedRejectionFrame.payload());
+        assert(std::holds_alternative<AuthenticationRejectedMessage>(rejection)
+            && std::get<AuthenticationRejectedMessage>(rejection).reason == AuthenticationPublicRejection::Denied);
+    }
+    {
+        FixedClock clock;
+        NullMetricSink metrics;
+        NullStructuredEventSink events;
+        Observability observability(metrics, events);
+        FakeAuthentication authentication;
+        auto queues = OutboundQueueSet::create(OutboundQueuePolicy{}, 1);
+        auto timeouts = *SessionTimeoutPolicy::create(1'000'000, 1'000'000, 1'000'000);
+        ConnectionSessionCoordinator sessions(clock, observability, timeouts, emptyOffer(), authentication, *queues, 1);
+        const auto connection = TransportConnectionId::initial();
+        assert(sessions.accept(connection, scope(std::byte{ 5 })) == ConnectionSessionResult::Accepted);
+        assert(sessions.checkTimeout(connection) == ConnectionSessionResult::Accepted);
+        clock.nanoseconds = 1'000'000;
+        assert(sessions.checkTimeout(connection) == ConnectionSessionResult::TimedOut);
+        assert(sessions.session(connection)->state() == ServerSessionState::TimedOut);
     }
     {
         FixedClock clock;
@@ -1093,8 +1223,8 @@ int main()
             = ServerLifecycleCoordinator::create(config.disconnectGraceMilliseconds * 1'000'000, joinFixture.reducer);
         assert(lifecycle);
         FakeRuntime incompleteRuntime;
-        ServerApplicationWiring incompleteWiring{
-            sessions, joins, crypto, *queues, clock, intake, joinFixture.reducer, *lifecycle };
+        ServerApplicationWiring incompleteWiring{ sessions, joins, crypto, *queues, clock, intake, joinFixture.reducer,
+            *lifecycle };
         incompleteWiring.actorCatalog = &actorCatalog;
         incompleteWiring.actors = &actors;
         incompleteWiring.actorCollision = collision.get();

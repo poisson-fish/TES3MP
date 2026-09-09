@@ -150,8 +150,7 @@ namespace
                    "blocked world snapshot prevented presentation progress")
             && check(queue.hasWorldLatest() && !queue.hasPresentationLatest(),
                 "independent latest-wins slots did not retain only the blocked world snapshot")
-            && check(runtime.sent.size() == 1
-                    && runtime.sent[0].channel == TES3MP::TransportChannel::PresentationLatest
+            && check(runtime.sent.size() == 1 && runtime.sent[0].channel == TES3MP::TransportChannel::PresentationLatest
                     && runtime.sent[0].bytes[0] == std::byte{ 7 },
                 "presentation latest-wins coalescing failed");
     }
@@ -169,15 +168,15 @@ namespace
         queue.enqueue(TES3MP::TransportChannel::LatestWins, actor);
         const auto first = queue.pump(runtime, connection, 0);
         const auto second = queue.pump(runtime, connection, 10);
-        if (runtime.sent.size() != 2) return false;
+        if (runtime.sent.size() != 2)
+            return false;
         const auto firstFrame = TES3MP::decodeProtocolFrame(runtime.sent[0].bytes);
         const auto secondFrame = TES3MP::decodeProtocolFrame(runtime.sent[1].bytes);
-        return check(first == TES3MP::OutboundPumpResult::Progress
-                && second == TES3MP::OutboundPumpResult::Progress, "separate latest records did not drain")
-            && check(std::get<TES3MP::DecodedFrame>(firstFrame).messageKind()
-                    == TES3MP::MessageKind::LatestWinsSnapshot
-                && std::get<TES3MP::DecodedFrame>(secondFrame).messageKind()
-                    == TES3MP::MessageKind::LatestWinsActorSnapshot,
+        return check(first == TES3MP::OutboundPumpResult::Progress && second == TES3MP::OutboundPumpResult::Progress,
+                   "separate latest records did not drain")
+            && check(std::get<TES3MP::DecodedFrame>(firstFrame).messageKind() == TES3MP::MessageKind::LatestWinsSnapshot
+                    && std::get<TES3MP::DecodedFrame>(secondFrame).messageKind()
+                        == TES3MP::MessageKind::LatestWinsActorSnapshot,
                 "latest record drain was not fair")
             && check(!queue.hasWorldLatest(), "latest records retained after fair drain");
     }
@@ -187,16 +186,16 @@ namespace
         auto queues = TES3MP::OutboundQueueSet::create(policy(), 1);
         const auto connection = TES3MP::TransportConnectionId::initial();
         FakeRuntime runtime;
-        if (!check(queues && queues->attach(connection) == TES3MP::TransportResult::Accepted,
-                "pair queue setup failed"))
+        if (!check(
+                queues && queues->attach(connection) == TES3MP::TransportResult::Accepted, "pair queue setup failed"))
             return false;
         for (unsigned value = 0; value < 4; ++value)
             queues->enqueue(connection, TES3MP::TransportChannel::ReliableOrdered, bytes(value));
         const auto blocked = queues->enqueuePair(connection, TES3MP::TransportChannel::LatestWins, bytes(9),
             TES3MP::TransportChannel::ReliableOrdered, bytes(5));
         queues->pump(runtime, connection, 0);
-        const bool noPartialLatest = std::ranges::none_of(runtime.sent,
-            [](const auto& message) { return message.channel == TES3MP::TransportChannel::LatestWins; });
+        const bool noPartialLatest = std::ranges::none_of(
+            runtime.sent, [](const auto& message) { return message.channel == TES3MP::TransportChannel::LatestWins; });
         const auto sentBeforeAcceptedPair = runtime.sent.size();
 
         auto admitted = TES3MP::OutboundQueueSet::create(policy(), 1);
@@ -208,7 +207,8 @@ namespace
             && check(noPartialLatest, "rejected pair admitted one lane")
             && check(accepted == TES3MP::TransportResult::Accepted, "valid pair was rejected")
             && check(admitted->enqueuePair(*connection.next(), TES3MP::TransportChannel::ReliableOrdered, bytes(1),
-                         TES3MP::TransportChannel::LatestWins, bytes(2)) == TES3MP::TransportResult::UnknownId,
+                         TES3MP::TransportChannel::LatestWins, bytes(2))
+                    == TES3MP::TransportResult::UnknownId,
                 "unknown connection pair was admitted")
             && check(runtime.sent.size() == sentBeforeAcceptedPair + 2
                     && runtime.sent[sentBeforeAcceptedPair].bytes[0] == std::byte{ 7 }
@@ -249,23 +249,27 @@ namespace
         queues->attach(second);
         const auto a = bytes(1);
         const auto b = bytes(2);
-        std::array<TES3MP::OutboundQueueSet::AtomicMessage, 2> invalid{{
+        std::array<TES3MP::OutboundQueueSet::AtomicMessage, 2> invalid{ {
             { first, TES3MP::TransportChannel::ReliableOrdered, a },
             { *second.next(), TES3MP::TransportChannel::LatestWins, b },
-        }};
+        } };
         const auto rejected = queues->enqueueMessagesAtomically(invalid);
         FakeRuntime runtime;
         const bool empty = queues->pump(runtime, first, 0) == TES3MP::OutboundPumpResult::Idle
             && queues->pump(runtime, second, 0) == TES3MP::OutboundPumpResult::Idle;
-        std::array<TES3MP::OutboundQueueSet::AtomicMessage, 2> valid{{
+        std::array<TES3MP::OutboundQueueSet::AtomicMessage, 2> valid{ {
             { first, TES3MP::TransportChannel::ReliableOrdered, a },
             { second, TES3MP::TransportChannel::LatestWins, b },
-        }};
+        } };
         const auto accepted = queues->enqueueMessagesAtomically(valid);
+        const bool pending = queues->hasPending(first) == true && queues->hasPending(second) == true
+            && !queues->hasPending(*second.next());
         queues->pump(runtime, first, 1);
         queues->pump(runtime, second, 1);
+        const bool drained = queues->hasPending(first) == false && queues->hasPending(second) == false;
         return check(rejected == TES3MP::TransportResult::UnknownId && empty,
                    "multi-target failure admitted a partial frame")
+            && check(pending && drained, "pending queue state was not reported exactly")
             && check(accepted == TES3MP::TransportResult::Accepted && runtime.sent.size() == 2,
                 "multi-target transaction did not admit every frame");
     }
@@ -328,9 +332,8 @@ namespace
 int main()
 {
     return policyAndBounds() && connectionSetBounds() && orderingCoalescingAndFairness()
-            && actorAndPlayerLatestAreCoalescedSeparatelyAndDrainFairly()
-            && presentationIsCoalescedAndIndependent() && pairAdmissionIsAtomic()
-            && limitsRateAndTime() && multiConnectionAdmissionIsAtomic()
+            && actorAndPlayerLatestAreCoalescedSeparatelyAndDrainFairly() && presentationIsCoalescedAndIndependent()
+            && pairAdmissionIsAtomic() && limitsRateAndTime() && multiConnectionAdmissionIsAtomic()
             && isolatedSlowPeerEviction() && telemetryIsExactBoundedAndIsolated()
         ? 0
         : 1;

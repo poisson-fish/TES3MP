@@ -412,10 +412,14 @@ namespace TES3MP::OpenMWAdapter
                     return;
                 mSession->setGameRunning(mGameRunning);
                 mSession->frame(duration);
-                if (mSession->multiplayerState() == MultiplayerState::Ready)
+                const auto sessionState = mSession->multiplayerState();
+                if (sessionState == MultiplayerState::Ready)
                     mState = MultiplayerState::Ready;
-                else if (mSession->multiplayerState() == MultiplayerState::Failed)
+                else if (sessionState == MultiplayerState::Failed)
+                {
                     mState = MultiplayerState::Failed;
+                    mSession.reset();
+                }
             }
 
             MultiplayerState multiplayerState() const noexcept override { return mState; }
@@ -425,9 +429,9 @@ namespace TES3MP::OpenMWAdapter
             {
                 if (mState == MultiplayerState::Connecting || mState == MultiplayerState::Ready)
                     return false;
+                mSession.reset();
                 if (mHosted)
                 {
-                    mSession.reset();
                     std::this_thread::sleep_for(std::chrono::milliseconds(100));
                     mServer.stop();
                     mHosted = false;
@@ -441,9 +445,11 @@ namespace TES3MP::OpenMWAdapter
                     return fail("The player credential directory could not be created.");
                 auto providers = mConfiguration.providers;
                 providers.status = this;
+                const auto credentialFile = mConfiguration.playerCredentialDirectory / credentialFileName(*endpoint);
+                mActiveCredentialFile = credentialFile;
                 auto created = makeClientCoordinator(endpoint->host(), endpoint->port(),
                     mConfiguration.timeoutMilliseconds, mConfiguration.passwordFile,
-                    mConfiguration.playerCredentialDirectory / credentialFileName(*endpoint),
+                    credentialFile,
                     mConfiguration.contentManifest, providers, mJoinPassword);
                 auto* session = std::get_if<std::unique_ptr<EngineCoordinator>>(&created);
                 if (!session || !*session)
@@ -466,9 +472,9 @@ namespace TES3MP::OpenMWAdapter
             {
                 if (mState == MultiplayerState::Connecting || mState == MultiplayerState::Ready)
                     return false;
+                mSession.reset();
                 if (mHosted)
                 {
-                    mSession.reset();
                     std::this_thread::sleep_for(std::chrono::milliseconds(100));
                     mServer.stop();
                     mHosted = false;
@@ -524,7 +530,10 @@ namespace TES3MP::OpenMWAdapter
                 if (mSession)
                     mSession->confirmGameStart(running);
                 if (!running)
+                {
                     mState = MultiplayerState::Failed;
+                    mSession.reset();
+                }
             }
 
         private:
@@ -543,6 +552,12 @@ namespace TES3MP::OpenMWAdapter
                     mState = MultiplayerState::Connecting;
                 else
                     mState = MultiplayerState::Failed;
+                if (status == ConnectionStatus::AuthenticationRejected && !mActiveCredentialFile.empty())
+                {
+                    std::error_code ignored;
+                    std::filesystem::remove(mActiveCredentialFile, ignored);
+                    mActiveCredentialFile.clear();
+                }
                 if (mReportedStatus)
                     mReportedStatus->report(status);
             }
@@ -554,6 +569,7 @@ namespace TES3MP::OpenMWAdapter
             MultiplayerState mState = MultiplayerState::Idle;
             std::string mFailure;
             std::string mJoinPassword;
+            std::filesystem::path mActiveCredentialFile;
             bool mGameRunning = false;
             bool mHosted = false;
         };

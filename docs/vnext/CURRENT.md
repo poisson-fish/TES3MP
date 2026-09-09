@@ -45,8 +45,13 @@ wrapper selects the bounded product scope by default.
   allocation. Each payload is verifier-checked and semantically validated.
 - The production server negotiates protocol major 1, minors 2–3. Defined
   optional capabilities are VR pose (1), actor replication (2), interactive
-  objects (3), inventory (4), combat (5), and character creation (6). Content-manifest mismatch rejects
-  before authentication. The production server does not yet offer combat (5).
+  objects (3), inventory (4), combat (5), and character creation (6).
+  Content-manifest mismatch rejects before authentication. The production
+  server does not yet offer combat (5).
+- Negotiation and authentication rejection payloads are sent before a bounded
+  graceful close, so clients receive the exact public reason instead of an
+  undifferentiated peer disconnect. Client and server pumps enforce their
+  staged session deadlines and close stalled handshakes.
 - Reliable ordered operations, latest-wins canonical snapshots, and ephemeral
   pose samples use distinct delivery/queue semantics.
 - The owned transport boundary supports lifecycle events, bounded outbound
@@ -88,11 +93,16 @@ Primary sources: [`authentication.hpp`](../../components/tes3mp/include/tes3mp/a
 
 - An explicitly configured multiplayer build exposes a stock-main-menu
   Multiplayer dialog accepting a DNS name, IPv4 address, bracketed IPv6
-  address, `host:port`, or `tes3mp://` URI. Credentials are stored per endpoint.
+  address, `host:port`, or `tes3mp://` URI. Credentials are stored per endpoint;
+  denied credentials are automatically pruned to prevent stale authentication loops.
 - The dialog includes bounded password entry. Host starts the packaged
   dedicated-server configuration/content, waits for an explicit readiness
   signal, reports captured startup errors, then connects through the same
   client path. The child is stopped with the client.
+- A terminal connection or game-start failure releases its client session and
+  process-wide transport ownership. A later Join or Host request in the same
+  OpenMW process starts with a fresh transport instead of reporting that the
+  multiplayer transport is unavailable.
 - Network/session admission is pumped while the main menu remains active, but
   no world provider is called before a game exists. Once the complete initial
   baseline is ready, OpenMW runs its normal new-game startup and the adapter
@@ -356,21 +366,21 @@ and do not enter protocol or canonical state.
 
 ## Verification snapshot
 
-The chargen save-boundary and build-consolidation working tree passed the
-following on 2026-09-09:
+The connection-hardening working tree passed the following on 2026-09-09:
 
 - the standalone MSVC C++20 aggregate, including character-profile, protocol
   golden-vector/malformed-input, lifecycle, authentication, client-session,
   persistence, and server-application contracts;
-- a fresh bounded Windows MSVC/Ninja product build of `openmw` and the linked
-  `tes3mp_server`, followed by the focused OpenMW adapter and server-application
-  contract executables;
-- all 179 repository Python tests and patch-registry verification; and
-- focused server-application coverage of both packaged chargen safe points,
-  strict rejection of legacy character/persistence files, and atomic file
-  replacement; and
-- focused authoritative-join coverage of disconnect, process restart,
-  credential reattach, and successful chargen completion.
+- a bounded Windows MSVC/Ninja product build of `openmw` and `tes3mp_server`,
+  plus the focused OpenMW adapter and server-application contract executables;
+- a production-linked adapter regression proving that a terminal session
+  releases GameNetworkingSockets ownership and permits an immediate in-process
+  retry;
+- focused rejection-delivery, session-timeout, outbound-drain, and exact
+  OpenMW status-mapping regressions; and
+- real GameNetworkingSockets runs covering a successful first-time vanilla
+  character flow, denied authentication, and content-manifest rejection; and
+- all 180 repository Python tests and patch-registry verification.
 
 The Linux-only sanitizer/fuzzer execution profile, non-Windows product builds,
 PC-VR hardware checks, a full upstream OpenMW baseline, and a human-driven

@@ -46,9 +46,8 @@ namespace
             TES3MP::LinearVelocity3(velocity, 0, 0), mode);
     }
 
-    TES3MP::ServerHello serverHello(
-        bool pose = false, bool actors = false, bool interactiveObjects = false, bool inventory = false,
-        bool combat = false, std::uint16_t minor = 2)
+    TES3MP::ServerHello serverHello(bool pose = false, bool actors = false, bool interactiveObjects = false,
+        bool inventory = false, bool combat = false, std::uint16_t minor = 2)
     {
         auto versions = std::get<TES3MP::ProtocolVersionRange>(TES3MP::ProtocolVersionRange::create(1, minor, minor));
         std::vector<TES3MP::CapabilityId> capabilities;
@@ -135,11 +134,11 @@ namespace
     TES3MP::LatestWinsCombatSnapshot combatSnapshot(
         TES3MP::SessionGeneration generation, std::uint64_t tick, std::uint64_t revision)
     {
-        const std::array actors{ TES3MP::ActorCombatSnapshot{ value<TES3MP::ActorId>(1),
-            TES3MP::CombatRevision::initial(), 25.f, 30.f, false } };
+        const std::array actors{ TES3MP::ActorCombatSnapshot{
+            value<TES3MP::ActorId>(1), TES3MP::CombatRevision::initial(), 25.f, 30.f, false } };
         auto created = TES3MP::LatestWinsCombatSnapshot::create(value<TES3MP::SessionId>(1), generation,
-            value<TES3MP::ServerTick>(tick), value<TES3MP::CanonicalRevision>(revision),
-            value<TES3MP::PlayerId>(1), TES3MP::CombatRevision::initial(), 80.f, actors);
+            value<TES3MP::ServerTick>(tick), value<TES3MP::CanonicalRevision>(revision), value<TES3MP::PlayerId>(1),
+            TES3MP::CombatRevision::initial(), 80.f, actors);
         return std::get<TES3MP::LatestWinsCombatSnapshot>(std::move(created));
     }
 
@@ -159,9 +158,8 @@ namespace
         std::optional<TES3MP::PlayerCredential> playerCredential;
         if (includePlayerCredential)
             playerCredential = TES3MP::PlayerCredential::create(bytes);
-        return std::move(
-            *TES3MP::AuthenticationAcceptedMessage::create(std::move(*token), lifetime, std::move(playerCredential),
-                lifecycle));
+        return std::move(*TES3MP::AuthenticationAcceptedMessage::create(
+            std::move(*token), lifetime, std::move(playerCredential), lifecycle));
     }
 
     TES3MP::CharacterProfile establishedCharacterProfile()
@@ -211,11 +209,10 @@ namespace
                     TES3MP::Orientation3(zero, zero, zero)),
                 TES3MP::LinearVelocity3(0, 0, 0)));
         auto view = std::get<TES3MP::SpatialWorldView>(TES3MP::SpatialWorldView::create(entries));
-        const auto acknowledgement = acknowledgedCommand
-            ? std::optional(value<TES3MP::CommandSequence>(*acknowledgedCommand))
-            : std::nullopt;
+        const auto acknowledgement
+            = acknowledgedCommand ? std::optional(value<TES3MP::CommandSequence>(*acknowledgedCommand)) : std::nullopt;
         return TES3MP::LatestWinsSnapshot(TES3MP::LatestWinsSnapshotHeader(session, generation, player, entity,
-                                               value<TES3MP::CanonicalRevision>(canonicalRevision), acknowledgement),
+                                              value<TES3MP::CanonicalRevision>(canonicalRevision), acknowledgement),
             std::move(view));
     }
 
@@ -847,6 +844,111 @@ int main()
     liveCoordinator.reset();
     require(presentation.clears == 2);
 
+    Input rejectedInput;
+    Presentation rejectedPresentation;
+    Status rejectedStatus;
+    auto rejectedTransport = std::make_unique<IdleTransport>();
+    auto* rejectedTransportObserver = rejectedTransport.get();
+    rejectedTransportObserver->acceptConnections = true;
+    auto rejectedClock = std::make_unique<Clock>();
+    auto rejectedCreated = ClientSessionRuntime::create(
+        *rejectedTransport, *rejectedClock, timeouts, SessionGeneration::initial(), outbound);
+    auto rejectedRuntime = std::get<std::unique_ptr<ClientSessionRuntime>>(std::move(rejectedCreated));
+    auto rejectedVersions = std::get<ProtocolVersionRange>(ProtocolVersionRange::create(1, 2, 3));
+    auto rejectedClientOffer
+        = std::get<CapabilityOffer>(CapabilityOffer::create(rejectedVersions, {}, {}, testContentManifestId()));
+    auto rejectedMaterial = AuthenticationMaterial::create({});
+    require(rejectedRuntime->start(endpoint, ClientHello::fromOffer(std::move(rejectedClientOffer)),
+                AuthenticationRequest::join(std::move(*rejectedMaterial)))
+        == HeadlessClientResult::Accepted);
+    auto rejectedCoordinator = makeCoordinator(std::move(rejectedTransport), std::move(rejectedClock),
+        std::move(rejectedRuntime), reconnect, rejectedInput, rejectedPresentation, rejectedStatus);
+    rejectedCoordinator->frame(0.01f);
+    std::array<std::byte, ContentManifestIdBytes> mismatchedManifestBytes{};
+    mismatchedManifestBytes.fill(std::byte{ 1 });
+    const auto mismatchedManifest = *ContentManifestId::fromBytes(mismatchedManifestBytes);
+    auto serverVersions = std::get<ProtocolVersionRange>(ProtocolVersionRange::create(1, 2, 3));
+    auto serverOffer
+        = std::get<CapabilityOffer>(CapabilityOffer::create(std::move(serverVersions), {}, {}, mismatchedManifest));
+    auto clientVersions = std::get<ProtocolVersionRange>(ProtocolVersionRange::create(1, 2, 3));
+    auto clientOffer = std::get<CapabilityOffer>(
+        CapabilityOffer::create(std::move(clientVersions), {}, {}, testContentManifestId()));
+    const auto negotiation = negotiateClientHello(ClientHello::fromOffer(std::move(clientOffer)), serverOffer);
+    require(std::holds_alternative<SessionRejected>(negotiation));
+    auto rejectionFrame = encodeProtocolFrame(MessageClass::SessionControl, MessageKind::SessionRejected,
+        encodeSessionRejected(std::get<SessionRejected>(negotiation)));
+    rejectedTransportObserver->inbound.push_back(
+        { TransportChannel::ReliableOrdered, std::get<std::vector<std::byte>>(std::move(rejectionFrame)) });
+    rejectedCoordinator->frame(0.01f);
+    require(rejectedStatus.last == ConnectionStatus::ContentManifestMismatch
+        && rejectedCoordinator->multiplayerState() == MultiplayerState::Failed);
+
+    Input authRejectedInput;
+    Presentation authRejectedPresentation;
+    Status authRejectedStatus;
+    auto authRejectedTransport = std::make_unique<IdleTransport>();
+    auto* authRejectedTransportObserver = authRejectedTransport.get();
+    authRejectedTransportObserver->acceptConnections = true;
+    auto authRejectedClock = std::make_unique<Clock>();
+    auto authRejectedCreated = ClientSessionRuntime::create(
+        *authRejectedTransport, *authRejectedClock, timeouts, SessionGeneration::initial(), outbound);
+    auto authRejectedRuntime = std::get<std::unique_ptr<ClientSessionRuntime>>(std::move(authRejectedCreated));
+    auto authRejectedVersions = std::get<ProtocolVersionRange>(ProtocolVersionRange::create(1, 2, 3));
+    auto authRejectedClientOffer
+        = std::get<CapabilityOffer>(CapabilityOffer::create(authRejectedVersions, {}, {}, testContentManifestId()));
+    const std::array dummyPasswordBytes{ std::byte{ 1 } };
+    auto authRejectedMaterial = AuthenticationMaterial::create(dummyPasswordBytes);
+    require(authRejectedMaterial
+        && authRejectedRuntime->start(endpoint, ClientHello::fromOffer(std::move(authRejectedClientOffer)),
+               AuthenticationRequest::join(std::move(*authRejectedMaterial)))
+            == HeadlessClientResult::Accepted);
+    auto authRejectedCoordinator = makeCoordinator(std::move(authRejectedTransport), std::move(authRejectedClock),
+        std::move(authRejectedRuntime), reconnect, authRejectedInput, authRejectedPresentation, authRejectedStatus);
+    authRejectedCoordinator->frame(0.01f);
+    authRejectedTransportObserver->enqueue(MessageClass::SessionControl, MessageKind::ServerHello,
+        encodeServerHello(serverHello()), TransportChannel::ReliableOrdered);
+    authRejectedCoordinator->frame(0.01f);
+    authRejectedTransportObserver->enqueue(MessageClass::SessionControl, MessageKind::AuthenticationRejected,
+        encodeAuthenticationRejected({ AuthenticationPublicRejection::Denied }), TransportChannel::ReliableOrdered);
+    authRejectedTransportObserver->failPoll = true;
+    authRejectedCoordinator->frame(0.01f);
+    require(authRejectedStatus.last == ConnectionStatus::AuthenticationRejected
+        && authRejectedCoordinator->multiplayerState() == MultiplayerState::Failed);
+
+    Input concurrentProtocolRejectedInput;
+    Presentation concurrentProtocolRejectedPresentation;
+    Status concurrentProtocolRejectedStatus;
+    auto concurrentProtocolRejectedTransport = std::make_unique<IdleTransport>();
+    auto* concurrentProtocolRejectedTransportObserver = concurrentProtocolRejectedTransport.get();
+    concurrentProtocolRejectedTransportObserver->acceptConnections = true;
+    auto concurrentProtocolRejectedClock = std::make_unique<Clock>();
+    auto concurrentProtocolRejectedCreated = ClientSessionRuntime::create(
+        *concurrentProtocolRejectedTransport, *concurrentProtocolRejectedClock, timeouts,
+        SessionGeneration::initial(), outbound);
+    auto concurrentProtocolRejectedRuntime
+        = std::get<std::unique_ptr<ClientSessionRuntime>>(std::move(concurrentProtocolRejectedCreated));
+    auto concurrentProtocolRejectedVersions = std::get<ProtocolVersionRange>(ProtocolVersionRange::create(1, 2, 3));
+    auto concurrentProtocolRejectedOffer = std::get<CapabilityOffer>(
+        CapabilityOffer::create(std::move(concurrentProtocolRejectedVersions), {}, {}, testContentManifestId()));
+    auto concurrentProtocolRejectedPassword = AuthenticationMaterial::create(dummyPasswordBytes);
+    require(concurrentProtocolRejectedPassword
+        && concurrentProtocolRejectedRuntime->start(endpoint,
+               ClientHello::fromOffer(std::move(concurrentProtocolRejectedOffer)),
+               AuthenticationRequest::join(std::move(*concurrentProtocolRejectedPassword)))
+            == HeadlessClientResult::Accepted);
+    auto concurrentProtocolRejectedCoordinator = makeCoordinator(std::move(concurrentProtocolRejectedTransport),
+        std::move(concurrentProtocolRejectedClock), std::move(concurrentProtocolRejectedRuntime), reconnect,
+        concurrentProtocolRejectedInput, concurrentProtocolRejectedPresentation, concurrentProtocolRejectedStatus);
+    concurrentProtocolRejectedCoordinator->frame(0.01f);
+    auto concurrentRejectionFrame = encodeProtocolFrame(MessageClass::SessionControl, MessageKind::SessionRejected,
+        encodeSessionRejected(std::get<SessionRejected>(negotiation)));
+    concurrentProtocolRejectedTransportObserver->inbound.push_back(
+        { TransportChannel::ReliableOrdered, std::get<std::vector<std::byte>>(std::move(concurrentRejectionFrame)) });
+    concurrentProtocolRejectedTransportObserver->failPoll = true;
+    concurrentProtocolRejectedCoordinator->frame(0.01f);
+    require(concurrentProtocolRejectedStatus.last == ConnectionStatus::ContentManifestMismatch
+        && concurrentProtocolRejectedCoordinator->multiplayerState() == MultiplayerState::Failed);
+
     Input reconnectInput;
     Presentation reconnectPresentation;
     Status reconnectStatus;
@@ -1236,8 +1338,9 @@ int main()
     auto combatOffer
         = std::get<CapabilityOffer>(CapabilityOffer::create(std::move(combatVersions), combatCapabilities, {}));
     auto combatPassword = AuthenticationMaterial::create(passwordBytes);
-    require(combatPassword && combatRuntime->start(endpoint, ClientHello::fromOffer(std::move(combatOffer)),
-                                  AuthenticationRequest::join(std::move(*combatPassword)))
+    require(combatPassword
+        && combatRuntime->start(endpoint, ClientHello::fromOffer(std::move(combatOffer)),
+               AuthenticationRequest::join(std::move(*combatPassword)))
             == HeadlessClientResult::Accepted);
     auto combatCoordinator = makeCoordinator(std::move(combatTransport), std::move(combatClock),
         std::move(combatRuntime), reconnect, combatInput, combatPresentation, combatStatus);
@@ -1256,8 +1359,8 @@ int main()
         TransportChannel::LatestWins);
     combatCoordinator->frame(0.01f);
     require(combatPresentation.combats == 1 && combatPresentation.lastCombatFatigue == 80.f);
-    combatInput.nextMelee = MeleeAttackCapture{ value<ActorId>(1), value<ServerTick>(1),
-        CombatRevision::initial(), CombatRevision::initial(), MeleeAttackType::Chop, 0.75f };
+    combatInput.nextMelee = MeleeAttackCapture{ value<ActorId>(1), value<ServerTick>(1), CombatRevision::initial(),
+        CombatRevision::initial(), MeleeAttackType::Chop, 0.75f };
     const auto sentBeforeCombat = combatTransportObserver->sentFrames.size();
     combatCoordinator->frame(0.01f);
     bool foundCombatCommand = false;
@@ -1286,8 +1389,7 @@ int main()
         *deferredTransport, *deferredClock, timeouts, SessionGeneration::initial(), outbound);
     auto deferredRuntime = std::get<std::unique_ptr<ClientSessionRuntime>>(std::move(deferredCreated));
     auto deferredVersions = std::get<ProtocolVersionRange>(ProtocolVersionRange::create(1, 2, 2));
-    auto deferredOffer
-        = std::get<CapabilityOffer>(CapabilityOffer::create(std::move(deferredVersions), {}, {}));
+    auto deferredOffer = std::get<CapabilityOffer>(CapabilityOffer::create(std::move(deferredVersions), {}, {}));
     auto deferredPassword = AuthenticationMaterial::create(passwordBytes);
     require(deferredPassword
         && deferredRuntime->start(endpoint, ClientHello::fromOffer(std::move(deferredOffer)),
@@ -1303,8 +1405,7 @@ int main()
     deferredTransportObserver->enqueue(MessageClass::SessionControl, MessageKind::AuthenticationAccepted,
         encodeAuthenticationAccepted(accepted(std::byte{ 9 })), TransportChannel::ReliableOrdered);
     deferredTransportObserver->enqueue(MessageClass::ReliableOperation, MessageKind::ReliableInterestBaseline,
-        encodeReliableInterestBaseline(selfBaseline(SessionGeneration::initial())),
-        TransportChannel::ReliableOrdered);
+        encodeReliableInterestBaseline(selfBaseline(SessionGeneration::initial())), TransportChannel::ReliableOrdered);
     deferredTransportObserver->enqueue(MessageClass::LatestWinsSnapshot, MessageKind::LatestWinsSnapshot,
         encodeLatestWinsSnapshot(selfSnapshot(SessionGeneration::initial())), TransportChannel::LatestWins);
     deferredCoordinator->frame(0.01f);
@@ -1341,12 +1442,11 @@ int main()
         encodeServerHello(serverHello(false, false, false, false, false, 3)), TransportChannel::ReliableOrdered);
     chargenCoordinator->frame(0.01f);
     chargenTransportObserver->enqueue(MessageClass::SessionControl, MessageKind::AuthenticationAccepted,
-        encodeAuthenticationAccepted(accepted(std::byte{ 10 }, MinimumResumeTokenLifetimeMilliseconds, false,
-            CharacterLifecycle::NewCharacter)),
+        encodeAuthenticationAccepted(
+            accepted(std::byte{ 10 }, MinimumResumeTokenLifetimeMilliseconds, false, CharacterLifecycle::NewCharacter)),
         TransportChannel::ReliableOrdered);
     chargenTransportObserver->enqueue(MessageClass::ReliableOperation, MessageKind::ReliableInterestBaseline,
-        encodeReliableInterestBaseline(selfBaseline(SessionGeneration::initial())),
-        TransportChannel::ReliableOrdered);
+        encodeReliableInterestBaseline(selfBaseline(SessionGeneration::initial())), TransportChannel::ReliableOrdered);
     chargenTransportObserver->enqueue(MessageClass::LatestWinsSnapshot, MessageKind::LatestWinsSnapshot,
         encodeLatestWinsSnapshot(selfSnapshot(SessionGeneration::initial())), TransportChannel::LatestWins);
     chargenCoordinator->frame(0.01f);
@@ -1354,8 +1454,8 @@ int main()
     {
         chargenClockObserver->nanoseconds = sequence * 250'000'000;
         chargenTransportObserver->enqueue(MessageClass::LatestWinsSnapshot, MessageKind::LatestWinsSnapshot,
-            encodeLatestWinsSnapshot(selfSnapshot(
-                SessionGeneration::initial(), false, sequence + 1, sequence + 1, sequence)),
+            encodeLatestWinsSnapshot(
+                selfSnapshot(SessionGeneration::initial(), false, sequence + 1, sequence + 1, sequence)),
             TransportChannel::LatestWins);
         chargenCoordinator->frame(0.01f);
     }
@@ -1401,4 +1501,17 @@ int main()
     require(!TES3MP::OpenMWAdapter::parseServerAddress("tes3mp://example.org/path", 25565));
     require(!TES3MP::OpenMWAdapter::parseServerAddress("::1", 25565));
     require(!TES3MP::OpenMWAdapter::parseServerAddress("example.org:0", 25565));
+
+#ifdef TES3MP_ADAPTER_TEST_HAS_GNS
+    auto launcher = TES3MP::OpenMWAdapter::makeClientLauncher({ 25565, 1'000, {},
+        std::filesystem::temp_directory_path(), {}, {}, TES3MP::testContentManifestId(), providers });
+    require(static_cast<bool>(launcher));
+    launcher->setJoinPassword("retry-test");
+    require(launcher->connect("127.0.0.1:9"));
+    launcher->confirmGameStart(false);
+    require(launcher->multiplayerState() == TES3MP::OpenMWAdapter::MultiplayerState::Failed);
+    require(launcher->connect("127.0.0.1:9"));
+    require(launcher->failure().empty());
+    launcher->confirmGameStart(false);
+#endif
 }

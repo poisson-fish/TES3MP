@@ -131,6 +131,8 @@ namespace TES3MP
         { return mCharacterProfile; }
         const std::optional<LatestWinsCombatSnapshot>& confirmedCombatSnapshot() const noexcept
         { return mCombatSnapshot; }
+        std::optional<AuthenticationRejectionReason> authenticationRejection() const noexcept;
+        const std::optional<SessionRejected>& protocolRejection() const noexcept;
 
     private:
         ClientSessionRuntime(TransportRuntime& transport, MonotonicClock& clock,
@@ -168,6 +170,8 @@ namespace TES3MP
         std::optional<LocomotionInputTick> mLastLocomotionInputTick;
         std::optional<LocomotionInputSequence> mLastLocomotionInputSequence;
         std::optional<LatestWinsCombatSnapshot> mCombatSnapshot;
+        std::optional<AuthenticationRejectionReason> mAuthenticationRejection;
+        std::optional<SessionRejected> mProtocolRejection;
     };
 }
 

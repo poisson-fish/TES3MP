@@ -116,11 +116,10 @@ int main()
         sessionId, SessionGeneration::initial(), CanonicalRevision::initial(), enterChanges));
     require(session->receiveReliableObservationBatch(entered) == ReliableObservationReceiveResult::BaselineMissing);
     const std::array<InterestMember, 0> emptyMembers{};
-    auto baseline = std::get<ReliableInterestBaseline>(ReliableInterestBaseline::create(sessionId,
-        SessionGeneration::initial(), CanonicalRevision::initial(), CanonicalStateVersion::initial(),
-        ServerTick::initial(), emptyMembers));
-    require(session->receiveReliableInterestBaseline(baseline)
-        == ReliableInterestBaselineReceiveResult::Applied);
+    auto baseline
+        = std::get<ReliableInterestBaseline>(ReliableInterestBaseline::create(sessionId, SessionGeneration::initial(),
+            CanonicalRevision::initial(), CanonicalStateVersion::initial(), ServerTick::initial(), emptyMembers));
+    require(session->receiveReliableInterestBaseline(baseline) == ReliableInterestBaselineReceiveResult::Applied);
     require(session->receiveReliableInterestBaseline(baseline)
         == ReliableInterestBaselineReceiveResult::IdenticalDuplicate);
     require(session->receiveReliableObservationBatch(entered) == ReliableObservationReceiveResult::Applied);
@@ -187,6 +186,38 @@ int main()
     require(failed->pump().result == HeadlessClientResult::TransportFailed);
     require(failed->stateMachine().state() == ClientSessionState::Closed);
 
+    FakeRuntime timeoutRuntime;
+    timeoutRuntime.emit = false;
+    TestSupport::ManualClock timeoutClock(MonotonicInstant::fromNanoseconds(0));
+    auto timeoutCreated
+        = HeadlessClientSession::create(timeoutRuntime, timeoutClock, policy, SessionGeneration::initial());
+    auto timeoutSession = std::get<std::unique_ptr<HeadlessClientSession>>(std::move(timeoutCreated));
+    require(timeoutSession->connect(endpoint) == HeadlessClientResult::Accepted);
+    require(timeoutClock.advance(1'000'000));
+    const auto timedOut = timeoutSession->pump();
+    require(timedOut.result == HeadlessClientResult::TransportFailed
+        && timedOut.action == ClientSessionAction::SessionTimedOut && !timeoutSession->attempt()
+        && !timeoutSession->connection() && timeoutSession->stateMachine().state() == ClientSessionState::TimedOut);
+
+    FakeRuntime runtimeTimeoutTransport;
+    runtimeTimeoutTransport.emit = false;
+    TestSupport::ManualClock runtimeTimeoutClock(MonotonicInstant::fromNanoseconds(0));
+    const auto timeoutQueuePolicy = OutboundQueuePolicy::create(64, 512 * 1024, 8, 4, 8, 1, 4, 1, 8, 250);
+    require(timeoutQueuePolicy.has_value());
+    auto runtimeTimeoutCreated = ClientSessionRuntime::create(
+        runtimeTimeoutTransport, runtimeTimeoutClock, policy, SessionGeneration::initial(), *timeoutQueuePolicy);
+    auto runtimeTimeout = std::get<std::unique_ptr<ClientSessionRuntime>>(std::move(runtimeTimeoutCreated));
+    auto timeoutVersions = std::get<ProtocolVersionRange>(ProtocolVersionRange::create(1, 0, 0));
+    auto timeoutOffer = std::get<CapabilityOffer>(CapabilityOffer::create(std::move(timeoutVersions), {}, {}));
+    auto timeoutMaterial = AuthenticationMaterial::create({});
+    require(runtimeTimeout->start(endpoint, ClientHello::fromOffer(std::move(timeoutOffer)),
+                AuthenticationRequest::join(std::move(*timeoutMaterial)))
+        == HeadlessClientResult::Accepted);
+    require(runtimeTimeoutClock.advance(1'000'000));
+    const auto runtimeTimedOut = runtimeTimeout->advance();
+    require(runtimeTimedOut.result == ClientRuntimeResult::TransportFailed
+        && runtimeTimedOut.action == ClientSessionAction::SessionTimedOut);
+
     FakeRuntime runtimeTransport;
     const auto runtimeQueuePolicy = OutboundQueuePolicy::create(64, 512 * 1024, 8, 4, 8, 1, 4, 1, 8, 250);
     require(runtimeQueuePolicy.has_value());
@@ -246,10 +277,10 @@ int main()
     auto ordered = std::get<std::unique_ptr<ClientSessionRuntime>>(std::move(orderedCreated));
     auto orderedVersions = std::get<ProtocolVersionRange>(ProtocolVersionRange::create(1, 2, 3));
     const std::array characterCapabilities{ characterCreationCapability() };
-    auto orderedClientOffer = std::get<CapabilityOffer>(
-        CapabilityOffer::create(orderedVersions, characterCapabilities, {}));
-    auto orderedServerOffer = std::get<CapabilityOffer>(
-        CapabilityOffer::create(std::move(orderedVersions), characterCapabilities, {}));
+    auto orderedClientOffer
+        = std::get<CapabilityOffer>(CapabilityOffer::create(orderedVersions, characterCapabilities, {}));
+    auto orderedServerOffer
+        = std::get<CapabilityOffer>(CapabilityOffer::create(std::move(orderedVersions), characterCapabilities, {}));
     auto orderedMaterial = AuthenticationMaterial::create({});
     require(ordered->start(endpoint, ClientHello::fromOffer(std::move(orderedClientOffer)),
                 AuthenticationRequest::join(std::move(*orderedMaterial)))
@@ -257,20 +288,21 @@ int main()
     require(ordered->advance().action == ClientSessionAction::SendClientHello);
     require(ordered->flushOutbound() == ClientRuntimeResult::Accepted);
     auto orderedNegotiated = negotiateClientHello(
-        std::get<ClientHello>(decodeClientHello(std::get<DecodedFrame>(decodeProtocolFrame(orderedRuntime.sent)).payload())),
+        std::get<ClientHello>(
+            decodeClientHello(std::get<DecodedFrame>(decodeProtocolFrame(orderedRuntime.sent)).payload())),
         orderedServerOffer);
     auto orderedHelloFrame = encodeProtocolFrame(MessageClass::SessionControl, MessageKind::ServerHello,
         encodeServerHello(std::get<ServerHello>(std::move(orderedNegotiated))));
-    orderedRuntime.inbound.push_back({ TransportChannel::ReliableOrdered,
-        std::get<std::vector<std::byte>>(std::move(orderedHelloFrame)) });
+    orderedRuntime.inbound.push_back(
+        { TransportChannel::ReliableOrdered, std::get<std::vector<std::byte>>(std::move(orderedHelloFrame)) });
     require(ordered->advance().result == ClientRuntimeResult::Accepted);
     require(ordered->flushOutbound() == ClientRuntimeResult::Accepted);
 
-    auto accepted = AuthenticationAcceptedMessage::create(resumeToken(std::byte{ 1 }),
-        MinimumResumeTokenLifetimeMilliseconds, std::nullopt, CharacterLifecycle::NewCharacter,
-        CharacterProfileRevision::initial());
-    auto acceptedFrame = encodeProtocolFrame(MessageClass::SessionControl, MessageKind::AuthenticationAccepted,
-        encodeAuthenticationAccepted(*accepted));
+    auto accepted
+        = AuthenticationAcceptedMessage::create(resumeToken(std::byte{ 1 }), MinimumResumeTokenLifetimeMilliseconds,
+            std::nullopt, CharacterLifecycle::NewCharacter, CharacterProfileRevision::initial());
+    auto acceptedFrame = encodeProtocolFrame(
+        MessageClass::SessionControl, MessageKind::AuthenticationAccepted, encodeAuthenticationAccepted(*accepted));
     ReliableCharacterProfile profile{ value<SessionId>(1), SessionGeneration::initial(), value<PlayerId>(1),
         CharacterConfirmationResult::Confirmed, CharacterProfile::fresh() };
     auto profileFrame = encodeProtocolFrame(MessageClass::ReliableOperation, MessageKind::ReliableCharacterProfile,
@@ -279,19 +311,20 @@ int main()
     const std::array entries{ SpatialEntitySnapshot(ServerTick::initial(), value<PlayerId>(1), value<EntityId>(1),
         value<AppearanceId>(1), EntityRevision::initial(), AuthorityEpoch::initial(),
         Transform(CellId::interior(value<CellSpaceId>(1)), Position3(61, -135, 24),
-            Orientation3(zeroTurn, zeroTurn, zeroTurn)), LinearVelocity3(0, 0, 0)) };
+            Orientation3(zeroTurn, zeroTurn, zeroTurn)),
+        LinearVelocity3(0, 0, 0)) };
     auto world = std::get<SpatialWorldView>(SpatialWorldView::create(entries));
     LatestWinsSnapshot snapshot(LatestWinsSnapshotHeader(value<SessionId>(1), SessionGeneration::initial(),
                                     value<PlayerId>(1), value<EntityId>(1), CanonicalRevision::initial(), std::nullopt),
         std::move(world));
-    auto snapshotFrame = encodeProtocolFrame(MessageClass::LatestWinsSnapshot, MessageKind::LatestWinsSnapshot,
-        encodeLatestWinsSnapshot(snapshot));
-    orderedRuntime.inbound.push_back({ TransportChannel::ReliableOrdered,
-        std::get<std::vector<std::byte>>(std::move(acceptedFrame)) });
-    orderedRuntime.inbound.push_back({ TransportChannel::ReliableOrdered,
-        std::get<std::vector<std::byte>>(std::move(profileFrame)) });
-    orderedRuntime.inbound.push_back({ TransportChannel::LatestWins,
-        std::get<std::vector<std::byte>>(std::move(snapshotFrame)) });
+    auto snapshotFrame = encodeProtocolFrame(
+        MessageClass::LatestWinsSnapshot, MessageKind::LatestWinsSnapshot, encodeLatestWinsSnapshot(snapshot));
+    orderedRuntime.inbound.push_back(
+        { TransportChannel::ReliableOrdered, std::get<std::vector<std::byte>>(std::move(acceptedFrame)) });
+    orderedRuntime.inbound.push_back(
+        { TransportChannel::ReliableOrdered, std::get<std::vector<std::byte>>(std::move(profileFrame)) });
+    orderedRuntime.inbound.push_back(
+        { TransportChannel::LatestWins, std::get<std::vector<std::byte>>(std::move(snapshotFrame)) });
     const auto orderedAdvance = ordered->advance();
     require(orderedAdvance.result == ClientRuntimeResult::Accepted && orderedAdvance.characterProfileApplied
         && ordered->confirmedCharacterProfile()

@@ -3,8 +3,8 @@
 
 #include "tes3mp/actor_simulation.hpp"
 #include "tes3mp/authenticated_join.hpp"
-#include "tes3mp/combat_world.hpp"
 #include "tes3mp/character_creation_protocol.hpp"
+#include "tes3mp/combat_world.hpp"
 #include "tes3mp/interactive_object_world.hpp"
 #include "tes3mp/inventory_world.hpp"
 #include "tes3mp/server_session.hpp"
@@ -30,6 +30,7 @@ namespace TES3MP::ServerApp
         CommandSubmitted,
         ResyncRequested,
         ResyncCoalesced,
+        TimedOut,
     };
 
     class ConnectionSessionCoordinator
@@ -38,9 +39,8 @@ namespace TES3MP::ServerApp
         ConnectionSessionCoordinator(MonotonicClock& clock, Observability& observability, SessionTimeoutPolicy timeouts,
             CapabilityOffer offer, ServerAuthenticationService& authentication, OutboundQueueSet& queues,
             std::size_t capacity, const CanonicalActorWorld* actors = nullptr,
-            const CanonicalInteractiveObjectWorld* objects = nullptr,
-            CanonicalInventoryWorld* inventory = nullptr, CanonicalCombatWorld* combat = nullptr,
-            const CanonicalPlayerCombatTemplate* playerCombatTemplate = nullptr,
+            const CanonicalInteractiveObjectWorld* objects = nullptr, CanonicalInventoryWorld* inventory = nullptr,
+            CanonicalCombatWorld* combat = nullptr, const CanonicalPlayerCombatTemplate* playerCombatTemplate = nullptr,
             const ItemPrototypeCatalog* itemCatalog = nullptr,
             const CharacterContentCatalog* characterContent = nullptr) noexcept;
 
@@ -55,6 +55,7 @@ namespace TES3MP::ServerApp
             AuthenticatedJoinCoordinator& joins, CredentialCrypto& crypto, ServerTick tick) noexcept;
         ConnectionSessionResult pollAuthentication(TransportConnectionId connection,
             AuthenticatedJoinCoordinator& joins, CredentialCrypto& crypto, ServerTick tick) noexcept;
+        ConnectionSessionResult checkTimeout(TransportConnectionId connection) noexcept;
         std::size_t size() const noexcept { return mConnections.size(); }
         std::vector<TransportConnectionId> connections() const;
         std::optional<TransportConnectionId> connectionForSession(SessionId session) const noexcept;
@@ -86,6 +87,11 @@ namespace TES3MP::ServerApp
         const ItemPrototypeCatalog* mItemCatalog;
         const CharacterContentCatalog* mCharacterContent;
         std::map<TransportConnectionId, Connection> mConnections;
+
+        ConnectionSessionResult enqueueProtocolRejection(
+            TransportConnectionId connection, const SessionRejected& rejection) noexcept;
+        ConnectionSessionResult enqueueAuthenticationRejection(
+            TransportConnectionId connection, AuthenticationRejectionReason reason) noexcept;
     };
 }
 

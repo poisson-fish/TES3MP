@@ -49,6 +49,8 @@ namespace TES3MP
         mCharacterProfile.reset();
         mPendingCharacterProfile.reset();
         mLastCharacterCommandSequence.reset();
+        mAuthenticationRejection.reset();
+        mProtocolRejection.reset();
         mMayAcceptPlayerCredential = authentication.kind() == AuthenticationCredentialKind::JoinPassword
             && !authentication.hasPlayerCredential();
         mClientHello.emplace(std::move(hello));
@@ -103,6 +105,7 @@ namespace TES3MP
             }
             else if (auto* rejected = std::get_if<SessionRejected>(&message))
             {
+                mProtocolRejection.emplace(*rejected);
                 mSession->handle(ClientSessionRejectedReceived{ std::move(*rejected) });
                 mMayAcceptPlayerCredential = false;
                 mOutbound.clear();
@@ -114,6 +117,7 @@ namespace TES3MP
                 const auto reason = authenticationRejected->reason == AuthenticationPublicRejection::Denied
                     ? AuthenticationRejectionReason::Denied
                     : AuthenticationRejectionReason::ProviderUnavailable;
+                mAuthenticationRejection = reason;
                 mSession->handle(ClientAuthenticationRejected{ reason });
                 mMayAcceptPlayerCredential = false;
                 mOutbound.clear();
@@ -180,8 +184,7 @@ namespace TES3MP
                     const auto sessionId = mSession->stateMachine().sessionId();
                     const auto& confirmed = mSession->stateMachine().confirmedSnapshot();
                     if (!sessionId || !confirmed || mPendingCharacterProfile->targetSessionId != *sessionId
-                        || mPendingCharacterProfile->targetSessionGeneration
-                            != mSession->stateMachine().generation()
+                        || mPendingCharacterProfile->targetSessionGeneration != mSession->stateMachine().generation()
                         || mPendingCharacterProfile->playerId != confirmed->header().targetPlayerId()
                         || mPendingCharacterProfile->profile.revision() < mCharacterProfileRevision)
                         return reject();
@@ -452,6 +455,18 @@ namespace TES3MP
             mResyncEquipmentObserved = false;
             mResyncCombatObserved = false;
         }
+        if (drained.action == ClientSessionAction::SessionClosed
+            || mSession->stateMachine().state() == ClientSessionState::Closed)
+        {
+            fail(ClientRuntimeResult::TransportFailed);
+            return { ClientRuntimeResult::TransportFailed, ClientSessionAction::SessionClosed, result.transportEvents };
+        }
+        if (drained.action == ClientSessionAction::SessionTimedOut
+            || mSession->stateMachine().state() == ClientSessionState::TimedOut)
+        {
+            fail(ClientRuntimeResult::TransportFailed);
+            return { ClientRuntimeResult::TransportFailed, ClientSessionAction::SessionTimedOut, result.transportEvents };
+        }
         return result;
     }
 
@@ -569,8 +584,8 @@ namespace TES3MP
         return { queued, queued == ClientRuntimeResult::Accepted ? sequence : std::nullopt };
     }
 
-    ClientRuntimeQueueResult ClientSessionRuntime::queueMeleeAttack(std::optional<ActorId> target, ServerTick sourceTick,
-        CombatRevision expectedAttackerRevision, CombatRevision expectedTargetRevision,
+    ClientRuntimeQueueResult ClientSessionRuntime::queueMeleeAttack(std::optional<ActorId> target,
+        ServerTick sourceTick, CombatRevision expectedAttackerRevision, CombatRevision expectedTargetRevision,
         MeleeAttackType attackType, float attackStrength)
     {
         const auto& spatial = mSession->stateMachine().confirmedSnapshot();
@@ -597,25 +612,29 @@ namespace TES3MP
         return { queued, queued == ClientRuntimeResult::Accepted ? sequence : std::nullopt };
     }
 
-    ClientRuntimeQueueResult ClientSessionRuntime::queueCharacterCreation(CharacterCreationChoice choice,
-        CharacterProfileRevision expectedRevision)
+    ClientRuntimeQueueResult ClientSessionRuntime::queueCharacterCreation(
+        CharacterCreationChoice choice, CharacterProfileRevision expectedRevision)
     {
         const auto& snapshot = mSession->stateMachine().confirmedSnapshot();
         const auto sessionId = mSession->stateMachine().sessionId();
         if (!snapshot || !sessionId || mCharacterLifecycle == CharacterLifecycle::EstablishedCharacter)
             return { ClientRuntimeResult::NotConnected, std::nullopt };
         auto sequence = mLastCharacterCommandSequence ? mLastCharacterCommandSequence->next()
-            : std::optional<CommandSequence>(CommandSequence::initial());
-        if (!sequence) return { ClientRuntimeResult::EncodeRejected, std::nullopt };
+                                                      : std::optional<CommandSequence>(CommandSequence::initial());
+        if (!sequence)
+            return { ClientRuntimeResult::EncodeRejected, std::nullopt };
         auto commandId = CommandId::fromValue(sequence->value());
-        if (!commandId) return { ClientRuntimeResult::EncodeRejected, std::nullopt };
+        if (!commandId)
+            return { ClientRuntimeResult::EncodeRejected, std::nullopt };
         ClientCharacterCreationCommand command{ *sessionId, snapshot->header().targetSessionGeneration(), *sequence,
             *commandId, snapshot->header().canonicalRevision(), { expectedRevision, std::move(choice) } };
         const auto encoded = encodeClientCharacterCreationCommand(command);
-        if (encoded.empty()) return { ClientRuntimeResult::EncodeRejected, std::nullopt };
-        const auto queued = queue(MessageClass::ReliableOperation,
-            MessageKind::ClientCharacterCreationCommand, encoded);
-        if (queued == ClientRuntimeResult::Accepted) mLastCharacterCommandSequence = *sequence;
+        if (encoded.empty())
+            return { ClientRuntimeResult::EncodeRejected, std::nullopt };
+        const auto queued
+            = queue(MessageClass::ReliableOperation, MessageKind::ClientCharacterCreationCommand, encoded);
+        if (queued == ClientRuntimeResult::Accepted)
+            mLastCharacterCommandSequence = *sequence;
         return { queued, queued == ClientRuntimeResult::Accepted ? sequence : std::nullopt };
     }
 
@@ -742,20 +761,45 @@ namespace TES3MP
 
     ClientRuntimeDrainResult ClientSessionRuntime::drainInbound()
     {
-        const auto lifecycle = mSession->pump();
-        if (lifecycle.result != HeadlessClientResult::Accepted)
-            return fail(ClientRuntimeResult::TransportFailed);
-        ClientRuntimeDrainResult result{ ClientRuntimeResult::Accepted, lifecycle.action, lifecycle.transportEvents };
-        const auto connection = mSession->connection();
-        if (!connection)
-            return result;
-
+        const auto priorConnection = mSession->connection();
         std::array<TransportMessage, MaximumInboundMessagesPerDrain> messages{};
-        const auto received = mTransport.receive(*connection, messages);
-        if (received.result != TransportResult::Accepted || received.messages > messages.size())
+        std::size_t receivedMessageCount = 0;
+        bool priorReceiveFailed = false;
+
+        if (priorConnection)
+        {
+            const auto received = mTransport.receive(*priorConnection, messages);
+            if (received.result == TransportResult::Accepted && received.messages <= messages.size())
+                receivedMessageCount = received.messages;
+            else if (received.result != TransportResult::AlreadyFinalized)
+                priorReceiveFailed = true;
+        }
+
+        const auto lifecycle = mSession->pump();
+
+        if (priorReceiveFailed)
             return fail(ClientRuntimeResult::TransportFailed);
-        result.messages.reserve(received.messages);
-        for (std::size_t index = 0; index < received.messages; ++index)
+
+        const auto currentConnection = mSession->connection();
+        if (receivedMessageCount == 0 && currentConnection && currentConnection != priorConnection)
+        {
+            const auto received = mTransport.receive(*currentConnection, messages);
+            if (received.result != TransportResult::Accepted || received.messages > messages.size())
+                return fail(ClientRuntimeResult::TransportFailed);
+            receivedMessageCount = received.messages;
+        }
+
+        if (lifecycle.result != HeadlessClientResult::Accepted && receivedMessageCount == 0)
+        {
+            auto failed = fail(ClientRuntimeResult::TransportFailed);
+            if (lifecycle.action == ClientSessionAction::SessionTimedOut)
+                failed.action = ClientSessionAction::SessionTimedOut;
+            return failed;
+        }
+
+        ClientRuntimeDrainResult result{ ClientRuntimeResult::Accepted, lifecycle.action, lifecycle.transportEvents };
+        result.messages.reserve(receivedMessageCount);
+        for (std::size_t index = 0; index < receivedMessageCount; ++index)
         {
             auto decoded = decodeProtocolFrame(messages[index].bytes);
             auto* frame = std::get_if<DecodedFrame>(&decoded);
@@ -975,5 +1019,20 @@ namespace TES3MP
         auto result = std::move(mPlayerCredential);
         mPlayerCredential.reset();
         return result;
+    }
+
+    std::optional<AuthenticationRejectionReason> ClientSessionRuntime::authenticationRejection() const noexcept
+    {
+        if (mAuthenticationRejection)
+            return mAuthenticationRejection;
+        return mSession ? mSession->stateMachine().authenticationRejection() : std::nullopt;
+    }
+
+    const std::optional<SessionRejected>& ClientSessionRuntime::protocolRejection() const noexcept
+    {
+        if (mProtocolRejection)
+            return mProtocolRejection;
+        static const std::optional<SessionRejected> none;
+        return mSession ? mSession->stateMachine().protocolRejection() : none;
     }
 }

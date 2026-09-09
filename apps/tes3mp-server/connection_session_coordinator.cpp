@@ -3,8 +3,8 @@
 #include "resume_token_context.hpp"
 
 #include "tes3mp/authentication.hpp"
-#include "tes3mp/combat_replication.hpp"
 #include "tes3mp/character_creation_protocol.hpp"
+#include "tes3mp/combat_replication.hpp"
 #include "tes3mp/interactive_object_replication.hpp"
 #include "tes3mp/inventory_replication.hpp"
 #include "tes3mp/protocol_frame.hpp"
@@ -145,6 +145,53 @@ namespace TES3MP::ServerApp
         return result;
     }
 
+    ConnectionSessionResult ConnectionSessionCoordinator::enqueueProtocolRejection(
+        TransportConnectionId connection, const SessionRejected& rejection) noexcept
+    try
+    {
+        auto encoded = encodeProtocolFrame(
+            MessageClass::SessionControl, MessageKind::SessionRejected, encodeSessionRejected(rejection));
+        auto* bytes = std::get_if<std::vector<std::byte>>(&encoded);
+        return bytes
+                && mQueues.enqueue(connection, TransportChannel::ReliableOrdered, *bytes) == TransportResult::Accepted
+            ? ConnectionSessionResult::SessionRejected
+            : ConnectionSessionResult::QueueRejected;
+    }
+    catch (...)
+    {
+        return ConnectionSessionResult::QueueRejected;
+    }
+
+    ConnectionSessionResult ConnectionSessionCoordinator::enqueueAuthenticationRejection(
+        TransportConnectionId connection, AuthenticationRejectionReason reason) noexcept
+    try
+    {
+        const auto publicReason = reason == AuthenticationRejectionReason::Denied
+            ? AuthenticationPublicRejection::Denied
+            : AuthenticationPublicRejection::TemporarilyUnavailable;
+        auto encoded = encodeProtocolFrame(MessageClass::SessionControl, MessageKind::AuthenticationRejected,
+            encodeAuthenticationRejected({ publicReason }));
+        auto* bytes = std::get_if<std::vector<std::byte>>(&encoded);
+        return bytes
+                && mQueues.enqueue(connection, TransportChannel::ReliableOrdered, *bytes) == TransportResult::Accepted
+            ? ConnectionSessionResult::SessionRejected
+            : ConnectionSessionResult::QueueRejected;
+    }
+    catch (...)
+    {
+        return ConnectionSessionResult::QueueRejected;
+    }
+
+    ConnectionSessionResult ConnectionSessionCoordinator::checkTimeout(TransportConnectionId connection) noexcept
+    {
+        auto* state = session(connection);
+        if (!state)
+            return ConnectionSessionResult::UnknownConnection;
+        const auto transition = state->handle(ServerCheckTimeout{});
+        return transition.action == ServerSessionAction::SessionTimedOut ? ConnectionSessionResult::TimedOut
+                                                                         : ConnectionSessionResult::Accepted;
+    }
+
     ConnectionSessionResult ConnectionSessionCoordinator::dispatch(TransportConnectionId connection,
         const TransportMessage& message, AuthenticatedJoinCoordinator& joins, CredentialCrypto& crypto,
         ServerCommandIntakeCoordinator& intake, ServerTick tick) noexcept
@@ -169,8 +216,7 @@ namespace TES3MP::ServerApp
             || frame->messageKind() == MessageKind::ClientMeleeAttackCommand;
         if (gameplayCommand && mCharacterContent)
         {
-            const auto* progress = state->sessionId()
-                ? joins.state().findActiveSession(*state->sessionId()) : nullptr;
+            const auto* progress = state->sessionId() ? joins.state().findActiveSession(*state->sessionId()) : nullptr;
             const auto* profile = progress ? joins.characterProfile(progress->playerId()) : nullptr;
             if (!profile || profile->lifecycle() != CharacterLifecycle::EstablishedCharacter)
                 return ConnectionSessionResult::ProtocolRejected;
@@ -289,8 +335,8 @@ namespace TES3MP::ServerApp
                 || state->state() != ServerSessionState::Established || !state->sessionId())
                 return ConnectionSessionResult::ProtocolRejected;
             const auto& characterHello = state->negotiatedHello();
-            if (!characterHello || !std::ranges::binary_search(
-                    characterHello->negotiatedCapabilities(), characterCreationCapability()))
+            if (!characterHello
+                || !std::ranges::binary_search(characterHello->negotiatedCapabilities(), characterCreationCapability()))
                 return ConnectionSessionResult::ProtocolRejected;
             auto decodedCharacter = decodeClientCharacterCreationCommand(frame->payload());
             auto* command = std::get_if<ClientCharacterCreationCommand>(&decodedCharacter);
@@ -304,20 +350,22 @@ namespace TES3MP::ServerApp
             if (!expectedSequence || command->commandSequence != *expectedSequence)
                 return ConnectionSessionResult::ProtocolRejected;
             const auto* progress = joins.state().findActiveSession(*state->sessionId());
-            if (!progress) return ConnectionSessionResult::ProtocolRejected;
-            auto applied = joins.applyCharacterCreation(
-                progress->playerId(), *mCharacterContent, command->command, tick);
+            if (!progress)
+                return ConnectionSessionResult::ProtocolRejected;
+            auto applied
+                = joins.applyCharacterCreation(progress->playerId(), *mCharacterContent, command->command, tick);
             CharacterConfirmationResult result = CharacterConfirmationResult::Confirmed;
             if (const auto* rejected = std::get_if<CharacterProfileError>(&applied))
                 result = characterConfirmationResult(*rejected);
             const auto* profile = joins.characterProfile(progress->playerId());
-            if (!profile) return ConnectionSessionResult::ProtocolRejected;
+            if (!profile)
+                return ConnectionSessionResult::ProtocolRejected;
             auto encoded = encodeProtocolFrame(MessageClass::ReliableOperation, MessageKind::ReliableCharacterProfile,
-                encodeReliableCharacterProfile({ *state->sessionId(), state->generation(), progress->playerId(),
-                    result, *profile }));
+                encodeReliableCharacterProfile(
+                    { *state->sessionId(), state->generation(), progress->playerId(), result, *profile }));
             auto* bytes = std::get_if<std::vector<std::byte>>(&encoded);
-            if (!bytes || mQueues.enqueue(connection, TransportChannel::ReliableOrdered, *bytes)
-                    != TransportResult::Accepted)
+            if (!bytes
+                || mQueues.enqueue(connection, TransportChannel::ReliableOrdered, *bytes) != TransportResult::Accepted)
                 return ConnectionSessionResult::QueueRejected;
             connectionState.lastCharacterCommandSequence = command->commandSequence;
             return ConnectionSessionResult::CommandSubmitted;
@@ -328,8 +376,8 @@ namespace TES3MP::ServerApp
             if (frame->messageClass() != MessageClass::ReliableOperation || !mInventory
                 || state->state() != ServerSessionState::Established || !state->sessionId())
                 return ConnectionSessionResult::ProtocolRejected;
-            auto decoded = decodeClientInventoryTransactionCommand(frame->payload());
-            auto* command = std::get_if<ClientInventoryTransactionCommand>(&decoded);
+            auto decodedTransaction = decodeClientInventoryTransactionCommand(frame->payload());
+            auto* command = std::get_if<ClientInventoryTransactionCommand>(&decodedTransaction);
             if (!command || command->sessionId != *state->sessionId()
                 || command->sessionGeneration != state->generation())
                 return ConnectionSessionResult::ProtocolRejected;
@@ -372,15 +420,14 @@ namespace TES3MP::ServerApp
                 || command->sessionGeneration != state->generation())
                 return ConnectionSessionResult::ProtocolRejected;
             const auto& hello = state->negotiatedHello();
-            if (!hello || !std::ranges::binary_search(
-                    hello->negotiatedCapabilities(), combatReplicationCapability()))
+            if (!hello || !std::ranges::binary_search(hello->negotiatedCapabilities(), combatReplicationCapability()))
                 return ConnectionSessionResult::ProtocolRejected;
             const auto* progress = joins.state().findActiveSession(*state->sessionId());
             const auto* player = progress ? joins.state().findPlayer(progress->playerId()) : nullptr;
             if (!progress || !player)
                 return ConnectionSessionResult::ProtocolRejected;
-            ServerCommandProposal proposal(command->sessionId, command->sessionGeneration,
-                command->commandSequence, command->commandId, command->observedCanonicalRevision,
+            ServerCommandProposal proposal(command->sessionId, command->sessionGeneration, command->commandSequence,
+                command->commandId, command->observedCanonicalRevision,
                 EntityPrecondition(progress->entityId(), player->entityRevision(), player->authorityEpoch()),
                 MeleeAttackCommandProposal(*command));
             return intake.submit(std::move(proposal)) == CommandSubmissionResult::Accepted
@@ -392,10 +439,12 @@ namespace TES3MP::ServerApp
         {
             auto hello = decodeClientHello(frame->payload());
             auto* value = std::get_if<ClientHello>(&hello);
-            if (value == nullptr
-                || state->handle(ServerClientHelloReceived{ std::move(*value) }).action
-                    != ServerSessionAction::SendServerHello
-                || !state->negotiatedHello())
+            if (!value)
+                return ConnectionSessionResult::ProtocolRejected;
+            const auto transition = state->handle(ServerClientHelloReceived{ std::move(*value) });
+            if (transition.action == ServerSessionAction::SendSessionRejected && state->protocolRejection())
+                return enqueueProtocolRejection(connection, *state->protocolRejection());
+            if (transition.action != ServerSessionAction::SendServerHello || !state->negotiatedHello())
                 return ConnectionSessionResult::ProtocolRejected;
             auto payload = encodeServerHello(*state->negotiatedHello());
             auto encoded = encodeProtocolFrame(MessageClass::SessionControl, MessageKind::ServerHello, payload);
@@ -411,11 +460,13 @@ namespace TES3MP::ServerApp
         auto request = decodeAuthenticationRequest(frame->payload());
         auto* value = std::get_if<AuthenticationRequest>(&request);
         auto context = makeResumeTokenContext(*state->negotiatedHello(), crypto);
-        if (value == nullptr || !context
-            || state->handle(ServerAuthenticationSubmitted{ ServerAuthenticationSubmission(
-                                 std::move(*value), *scope, *context, state->negotiatedHello()->contentManifest()) })
-                    .action
-                != ServerSessionAction::AuthenticationStarted)
+        if (!value || !context)
+            return ConnectionSessionResult::ProtocolRejected;
+        const auto transition = state->handle(ServerAuthenticationSubmitted{ ServerAuthenticationSubmission(
+            std::move(*value), *scope, *context, state->negotiatedHello()->contentManifest()) });
+        if (transition.action == ServerSessionAction::AuthenticationRejected && state->authenticationRejection())
+            return enqueueAuthenticationRejection(connection, state->authenticationRejection()->reason);
+        if (transition.action != ServerSessionAction::AuthenticationStarted)
             return ConnectionSessionResult::ProtocolRejected;
         return pollAuthentication(connection, joins, crypto, tick);
     }
@@ -429,6 +480,8 @@ namespace TES3MP::ServerApp
         const auto transition = state->handle(ServerPollAuthentication{});
         if (transition.action == ServerSessionAction::AuthenticationPending)
             return ConnectionSessionResult::AuthenticationPending;
+        if (transition.action == ServerSessionAction::AuthenticationRejected && state->authenticationRejection())
+            return enqueueAuthenticationRejection(connection, state->authenticationRejection()->reason);
         if (transition.action != ServerSessionAction::SessionEstablished || !state->principal()
             || !state->negotiatedHello())
             return ConnectionSessionResult::ProtocolRejected;
@@ -437,8 +490,8 @@ namespace TES3MP::ServerApp
         auto context = makeResumeTokenContext(*state->negotiatedHello(), crypto);
         if (!context)
             return ConnectionSessionResult::ProtocolRejected;
-        TransportJoinResponseQueue responses(mQueues, connection, this, mActors, mObjects, mInventory, mCombat,
-            mPlayerCombatTemplate, mItemCatalog);
+        TransportJoinResponseQueue responses(
+            mQueues, connection, this, mActors, mObjects, mInventory, mCombat, mPlayerCombatTemplate, mItemCatalog);
         AuthenticatedJoinComposition composition(joins, mAuthentication, responses);
         auto outcome = composition.join(*state->principal(), state->generation(), tick, *context, state->playerClaim());
         if (outcome.result != JoinCompositionResult::Committed || !outcome.committed)

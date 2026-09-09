@@ -73,6 +73,7 @@ namespace TES3MP::ServerApp
         std::string_view mFailure;
         std::optional<ServerApplicationWiring> mWiring;
         std::map<SessionId, RetainedPose> mLatestPoses;
+        std::map<TransportConnectionId, MonotonicInstant> mRejectedCloseDeadlines;
 
         bool failConnection(TransportConnectionId connection, std::string_view failure) noexcept;
         bool disconnectConnection(TransportConnectionId connection, ServerTick tick) noexcept;

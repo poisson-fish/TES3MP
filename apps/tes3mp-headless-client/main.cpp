@@ -18,8 +18,24 @@ namespace
 {
     constexpr std::size_t Phase7ReconnectCycles = 32;
     constexpr auto Phase7SoakDuration = std::chrono::seconds(60);
-    constexpr std::string_view VanillaManifest
-        = "5c3c8c2cbd20e25901b59b3ece33d36b7ef0e3d60ad8d11828bcc61a5ead1647";
+    constexpr std::string_view VanillaManifest = "5c3c8c2cbd20e25901b59b3ece33d36b7ef0e3d60ad8d11828bcc61a5ead1647";
+
+    const char* sessionRejectionName(TES3MP::SessionRejectionReason reason) noexcept
+    {
+        using Reason = TES3MP::SessionRejectionReason;
+        switch (reason)
+        {
+            case Reason::ProtocolMajorMismatch:
+                return "protocol major mismatch";
+            case Reason::NoCompatibleMinor:
+                return "no compatible protocol minor";
+            case Reason::UnsupportedRequiredCapability:
+                return "required capability unavailable";
+            case Reason::ContentManifestMismatch:
+                return "content manifest mismatch";
+        }
+        return "unknown negotiation rejection";
+    }
 
     class SteadyClock final : public TES3MP::MonotonicClock
     {
@@ -94,9 +110,10 @@ namespace
             {
                 const auto sessionId = *client.stateMachine().sessionId();
                 const auto& confirmed = *client.stateMachine().confirmedSnapshot();
-                const auto self = std::ranges::find_if(confirmed.view().entries(),
-                    [&](const auto& entry) { return entry.playerId() == confirmed.header().targetPlayerId()
-                        && entry.entityId() == confirmed.header().targetEntityId(); });
+                const auto self = std::ranges::find_if(confirmed.view().entries(), [&](const auto& entry) {
+                    return entry.playerId() == confirmed.header().targetPlayerId()
+                        && entry.entityId() == confirmed.header().targetEntityId();
+                });
                 if (self == confirmed.view().entries().end())
                     break;
                 const auto acknowledged = confirmed.header().acknowledgedCommandSequence();
@@ -105,8 +122,10 @@ namespace
                     const auto next = acknowledged ? 2u : 1u;
                     if (motionCommandsSent < next)
                     {
-                        if (clientRuntime.queueMotionIntent(
-                                TES3MP::PlayerMotionIntent(TES3MP::LinearVelocity3(next == 1 ? 3 : 0, 0, 0))).result
+                        if (clientRuntime
+                                .queueMotionIntent(
+                                    TES3MP::PlayerMotionIntent(TES3MP::LinearVelocity3(next == 1 ? 3 : 0, 0, 0)))
+                                .result
                             != TES3MP::ClientRuntimeResult::Accepted)
                             break;
                         motionCommandsSent = next;
@@ -270,16 +289,16 @@ int main(int argc, char** argv)
     const bool vanillaCharacter = mode == "vanilla-character";
     const std::array characterCapabilities{ TES3MP::characterCreationCapability() };
     const auto contentManifestId = vanillaCharacter ? TES3MP::ContentManifestId::fromHex(VanillaManifest)
-                                           : std::optional(TES3MP::testContentManifestId());
+                                                    : std::optional(TES3MP::testContentManifestId());
     auto offer = contentManifestId ? TES3MP::CapabilityOffer::create(std::move(versions),
-                              vanillaCharacter ? std::span<const TES3MP::CapabilityId>(characterCapabilities)
-                                               : std::span<const TES3MP::CapabilityId>{},
-                              {}, *contentManifestId)
-                          : TES3MP::CapabilityOffer::create(std::move(versions), {}, {});
+                                         vanillaCharacter ? std::span<const TES3MP::CapabilityId>(characterCapabilities)
+                                                          : std::span<const TES3MP::CapabilityId>{},
+                                         {}, *contentManifestId)
+                                   : TES3MP::CapabilityOffer::create(std::move(versions), {}, {});
     if (!std::holds_alternative<TES3MP::CapabilityOffer>(offer))
         return 3;
-    if (clientRuntime.start(*endpoint, TES3MP::ClientHello::fromOffer(
-            std::get<TES3MP::CapabilityOffer>(std::move(offer))),
+    if (clientRuntime.start(*endpoint,
+            TES3MP::ClientHello::fromOffer(std::get<TES3MP::CapabilityOffer>(std::move(offer))),
             TES3MP::AuthenticationRequest::join(std::move(*password)))
         != TES3MP::HeadlessClientResult::Accepted)
         return 3;
@@ -304,7 +323,22 @@ int main(int argc, char** argv)
         auto pumped = clientRuntime.advance();
         if (pumped.result != TES3MP::ClientRuntimeResult::Accepted)
         {
-            std::cerr << "inbound drain failed " << static_cast<int>(pumped.result) << '\n';
+            if (pumped.action == TES3MP::ClientSessionAction::SessionRejected)
+            {
+                const auto& state = session.stateMachine();
+                if (const auto authentication = state.authenticationRejection())
+                    std::cerr << (*authentication == TES3MP::AuthenticationRejectionReason::Denied
+                            ? "authentication denied\n"
+                            : "authentication temporarily unavailable\n");
+                else if (state.protocolRejection())
+                    std::cerr << sessionRejectionName(state.protocolRejection()->reason()) << '\n';
+                else
+                    std::cerr << "session rejected\n";
+            }
+            else if (pumped.action == TES3MP::ClientSessionAction::SessionTimedOut)
+                std::cerr << "connection timed out\n";
+            else
+                std::cerr << "inbound drain failed " << static_cast<int>(pumped.result) << '\n';
             break;
         }
         authenticationAccepted = authenticationAccepted || pumped.authenticationAccepted;
@@ -323,8 +357,10 @@ int main(int argc, char** argv)
         {
             const auto sessionId = *session.stateMachine().sessionId();
             const auto& confirmed = *session.stateMachine().confirmedSnapshot();
-            const auto foundSelf = std::ranges::find_if(confirmed.view().entries(),
-                [&](const auto& entry) { return entry.playerId().value() == sessionId.value(); });
+            const auto foundSelf = std::ranges::find_if(confirmed.view().entries(), [&](const auto& entry) {
+                return entry.playerId() == confirmed.header().targetPlayerId()
+                    && entry.entityId() == confirmed.header().targetEntityId();
+            });
             if (foundSelf == confirmed.view().entries().end())
                 return 3;
             const auto& entry = *foundSelf;
@@ -332,7 +368,7 @@ int main(int argc, char** argv)
             {
                 const auto expectedCell = TES3MP::CellId::interior(*TES3MP::CellSpaceId::fromValue(1));
                 if (entry.transform().cell() != expectedCell
-                    || entry.transform().position() != TES3MP::Position3(61, -135, 24)
+                    || entry.transform().position() != TES3MP::Position3(62464, -138240, 24576)
                     || entry.transform().orientation().z() != TES3MP::Turn32::fromValue(4056358002u))
                 {
                     std::cerr << "vanilla prison-ship spawn mismatch\n";
@@ -370,9 +406,9 @@ int main(int argc, char** argv)
             }
             if (confirmed && confirmed->profile.lifecycle() == TES3MP::CharacterLifecycle::EstablishedCharacter)
             {
-                std::cout << "{\"event\":\"vanilla_character_complete\",\"player_id\":"
-                          << confirmed->playerId.value() << ",\"profile_revision\":"
-                          << confirmed->profile.revision().value() << ",\"spawn_verified\":true}\n";
+                std::cout << "{\"event\":\"vanilla_character_complete\",\"player_id\":" << confirmed->playerId.value()
+                          << ",\"profile_revision\":" << confirmed->profile.revision().value()
+                          << ",\"spawn_verified\":true}\n";
                 session.close();
                 factory.runtime->shutdown();
                 return 0;
@@ -386,15 +422,18 @@ int main(int argc, char** argv)
                         choice = TES3MP::SetCharacterName{ "Live Vanilla" };
                         break;
                     case TES3MP::CharacterCreationPhase::AwaitingRace:
-                        choice = TES3MP::SetCharacterAppearance{ { *TES3MP::RaceRecordId::fromValue(7341676071149937664ull),
+                        choice = TES3MP::SetCharacterAppearance{ { *TES3MP::RaceRecordId::fromValue(
+                                                                       7341676071149937664ull),
                             *TES3MP::HeadRecordId::fromValue(11299439226986375735ull),
                             *TES3MP::HairRecordId::fromValue(3843492829321912261ull), TES3MP::CharacterSex::Male } };
                         break;
                     case TES3MP::CharacterCreationPhase::AwaitingClass:
-                        choice = TES3MP::SetCharacterClass{ *TES3MP::ClassRecordId::fromValue(13547919975846885001ull) };
+                        choice
+                            = TES3MP::SetCharacterClass{ *TES3MP::ClassRecordId::fromValue(13547919975846885001ull) };
                         break;
                     case TES3MP::CharacterCreationPhase::AwaitingBirthsign:
-                        choice = TES3MP::SetCharacterBirthsign{ *TES3MP::BirthsignRecordId::fromValue(15904883304367654179ull) };
+                        choice = TES3MP::SetCharacterBirthsign{ *TES3MP::BirthsignRecordId::fromValue(
+                            15904883304367654179ull) };
                         break;
                     case TES3MP::CharacterCreationPhase::AwaitingReview:
                         break;
@@ -457,8 +496,10 @@ int main(int argc, char** argv)
             });
             if (self == confirmed.view().entries().end())
                 return 3;
-            if (clientRuntime.queueMotionIntent(TES3MP::PlayerMotionIntent(
-                    TES3MP::LinearVelocity3(mode == "motion-two" || mode == "soak-two" ? 2 : 1, 0, 0))).result
+            if (clientRuntime
+                    .queueMotionIntent(TES3MP::PlayerMotionIntent(
+                        TES3MP::LinearVelocity3(mode == "motion-two" || mode == "soak-two" ? 2 : 1, 0, 0)))
+                    .result
                 != TES3MP::ClientRuntimeResult::Accepted)
                 return 3;
             sentMotion = true;

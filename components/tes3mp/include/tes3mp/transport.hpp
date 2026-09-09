@@ -460,6 +460,7 @@ namespace TES3MP
         TransportResult enqueueMessagesAtomically(std::span<const AtomicMessage> messages);
         std::optional<OutboundPumpResult> pump(
             TransportRuntime& runtime, TransportConnectionId connection, std::uint64_t nowMilliseconds);
+        std::optional<bool> hasPending(TransportConnectionId connection) const noexcept;
         std::size_t connections() const noexcept { return mQueues.size(); }
 
     private:

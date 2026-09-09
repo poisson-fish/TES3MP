@@ -38,8 +38,16 @@ namespace TES3MP::OpenMWAdapter
             {
                 case ConnectionStatus::ProtocolRejected:
                     return "protocol_rejected";
+                case ConnectionStatus::ProtocolVersionMismatch:
+                    return "protocol_version_mismatch";
+                case ConnectionStatus::RequiredCapabilityMissing:
+                    return "required_capability_missing";
+                case ConnectionStatus::ContentManifestMismatch:
+                    return "content_manifest_mismatch";
                 case ConnectionStatus::AuthenticationRejected:
                     return "authentication_rejected";
+                case ConnectionStatus::AuthenticationUnavailable:
+                    return "authentication_unavailable";
                 case ConnectionStatus::TimedOut:
                     return "timed_out";
                 case ConnectionStatus::TransportFailed:

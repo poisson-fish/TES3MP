@@ -3,8 +3,8 @@
 
 #include <tes3mp/actor_replication.hpp>
 #include <tes3mp/client_locomotion.hpp>
-#include <tes3mp/combat_replication.hpp>
 #include <tes3mp/client_session.hpp>
+#include <tes3mp/combat_replication.hpp>
 #include <tes3mp/interactive_object_replication.hpp>
 #include <tes3mp/inventory_replication.hpp>
 #include <tes3mp/protocol_exchange.hpp>
@@ -18,7 +18,11 @@ namespace TES3MP::OpenMWAdapter
     enum class ConnectionStatus
     {
         ProtocolRejected,
+        ProtocolVersionMismatch,
+        RequiredCapabilityMissing,
+        ContentManifestMismatch,
         AuthenticationRejected,
+        AuthenticationUnavailable,
         TimedOut,
         TransportFailed,
         Disconnected,
@@ -145,8 +149,8 @@ namespace TES3MP::OpenMWAdapter
         {
             return ProviderResult::Accepted;
         }
-        virtual ProviderResult applyCombat(const LatestWinsCombatSnapshot&,
-            std::span<const ReliableCombatEventBatch>, MonotonicInstant) noexcept
+        virtual ProviderResult applyCombat(
+            const LatestWinsCombatSnapshot&, std::span<const ReliableCombatEventBatch>, MonotonicInstant) noexcept
         {
             return ProviderResult::Accepted;
         }

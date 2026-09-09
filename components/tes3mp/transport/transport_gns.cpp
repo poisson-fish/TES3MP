@@ -547,7 +547,7 @@ namespace
             const auto found = mConnections.find(connection);
             if (found == mConnections.end())
                 return finalized(connection, mNextConnection);
-            if (found->second.incomingPending)
+            if (found->second.incomingPending || found->second.closed)
                 return TES3MP::TransportResult::NotReady;
 
             SteamNetworkingMessage_t* outgoing = SteamAPI_ISteamNetworkingUtils_AllocateMessage(
@@ -586,6 +586,27 @@ namespace
                 return { TES3MP::TransportResult::NotReady, 0 };
             if (output.empty())
                 return { TES3MP::TransportResult::Accepted, 0 };
+
+            if (!found->second.bufferedMessages.empty())
+            {
+                const std::size_t deliveredCount = std::min(output.size(), found->second.bufferedMessages.size());
+                for (std::size_t index = 0; index < deliveredCount; ++index)
+                {
+                    count(TES3MP::TransportTelemetryKind::Received, TES3MP::TransportTelemetryDirection::Inbound,
+                        found->second.bufferedMessages.front().channel);
+                    output[index] = std::move(found->second.bufferedMessages.front());
+                    found->second.bufferedMessages.pop_front();
+                }
+                if (found->second.closed && found->second.bufferedMessages.empty())
+                    mConnections.erase(found);
+                return { TES3MP::TransportResult::Accepted, deliveredCount };
+            }
+
+            if (found->second.closed)
+            {
+                mConnections.erase(found);
+                return { finalized(connection, mNextConnection), 0 };
+            }
 
             std::array<SteamNetworkingMessage_t*, TES3MP::TransportRuntime::MaxMessagesPerReceive> incoming{};
             const int received = SteamAPI_ISteamNetworkingSockets_ReceiveMessagesOnConnection(
@@ -648,6 +669,11 @@ namespace
             auto found = mConnections.find(connection);
             if (found == mConnections.end())
                 return finalized(connection, mNextConnection);
+            if (found->second.closed)
+            {
+                mConnections.erase(found);
+                return TES3MP::TransportResult::Accepted;
+            }
             const HSteamNetConnection handle = found->second.handle;
             SteamAPI_ISteamNetworkingSockets_CloseConnection(sockets(), handle, 0,
                 mode == TES3MP::TransportCloseMode::Graceful ? "graceful" : nullptr,
@@ -784,7 +810,57 @@ namespace
             bool incomingPending = false;
             std::uint64_t generation = 0;
             std::optional<TES3MP::AdmissionScopeId> admissionScope;
+            bool closed = false;
+            std::deque<TES3MP::TransportMessage> bufferedMessages;
         };
+
+        bool drainHandleMessages(HSteamNetConnection handle, std::deque<TES3MP::TransportMessage>& target,
+            TES3MP::TransportConnectionId connection)
+        {
+            if (handle == k_HSteamNetConnection_Invalid)
+                return true;
+            std::array<SteamNetworkingMessage_t*, TES3MP::TransportRuntime::MaxMessagesPerReceive> incoming{};
+            while (true)
+            {
+                const int received = SteamAPI_ISteamNetworkingSockets_ReceiveMessagesOnConnection(
+                    sockets(), handle, incoming.data(), static_cast<int>(incoming.size()));
+                if (received <= 0)
+                    break;
+                bool invalid = false;
+                for (int index = 0; index < received; ++index)
+                {
+                    SteamNetworkingMessage_t* value = incoming[static_cast<std::size_t>(index)];
+                    const auto channel = value == nullptr ? std::nullopt : channelFor(value->m_idxLane);
+                    const auto maximumBytes
+                        = channel ? TES3MP::maximumTransportMessageBytes(*channel) : std::optional<std::size_t>{};
+                    const bool isReliable = value != nullptr && (value->m_nFlags & k_nSteamNetworkingSend_Reliable) != 0;
+                    const bool expectedReliability
+                        = channel && ((*channel == TES3MP::TransportChannel::ReliableOrdered) == isReliable);
+                    if (value == nullptr || value->m_cbSize <= 0 || value->m_pData == nullptr || !maximumBytes
+                        || static_cast<std::size_t>(value->m_cbSize) > *maximumBytes || !expectedReliability)
+                    {
+                        invalid = true;
+                    }
+                    else if (!invalid)
+                    {
+                        const auto* begin = static_cast<const std::byte*>(value->m_pData);
+                        target.push_back(
+                            { *channel, std::vector<std::byte>(begin, begin + static_cast<std::size_t>(value->m_cbSize)) });
+                    }
+                }
+                for (int index = 0; index < received; ++index)
+                {
+                    if (incoming[static_cast<std::size_t>(index)] != nullptr)
+                        incoming[static_cast<std::size_t>(index)]->Release();
+                }
+                if (invalid)
+                {
+                    closeInvalidMessage(connection);
+                    return false;
+                }
+            }
+            return true;
+        }
 
         static ISteamNetworkingSockets* sockets() { return SteamNetworkingSockets(); }
 
@@ -1189,8 +1265,12 @@ namespace
                     --mIncomingPending;
                 mConnectionHandles.erase(info.m_hConn);
                 mIncomingListeners.erase(id);
-                mConnections.erase(found);
+                drainHandleMessages(info.m_hConn, found->second.bufferedMessages, id);
                 SteamAPI_ISteamNetworkingSockets_CloseConnection(sockets(), info.m_hConn, 0, nullptr, false);
+                found->second.handle = k_HSteamNetConnection_Invalid;
+                found->second.closed = true;
+                if (found->second.bufferedMessages.empty())
+                    mConnections.erase(found);
                 queue({ TES3MP::TransportEventKind::ConnectionClosed,
                     info.m_info.m_eState == k_ESteamNetworkingConnectionState_ClosedByPeer
                         ? TES3MP::TransportFailure::PeerClosed

@@ -739,4 +739,12 @@ namespace TES3MP
             mQueues.erase(found);
         return result;
     }
+
+    std::optional<bool> OutboundQueueSet::hasPending(TransportConnectionId connection) const noexcept
+    {
+        const auto found = mQueues.find(connection);
+        if (found == mQueues.end())
+            return std::nullopt;
+        return found->second.reliableMessages() != 0 || found->second.hasLatest();
+    }
 }

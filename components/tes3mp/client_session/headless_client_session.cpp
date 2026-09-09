@@ -70,6 +70,21 @@ namespace TES3MP
                 return { HeadlessClientResult::TransportFailed, ClientSessionAction::SessionClosed, polled.events };
             }
         }
+        const auto timeout = mState->handle(ClientCheckTimeout{});
+        if (timeout.action == ClientSessionAction::SessionTimedOut)
+        {
+            if (mAttempt)
+            {
+                (void)mTransport.cancelConnect(*mAttempt);
+                mAttempt.reset();
+            }
+            if (mConnection)
+            {
+                (void)mTransport.close(*mConnection, TransportCloseMode::Abort);
+                mConnection.reset();
+            }
+            return { HeadlessClientResult::TransportFailed, ClientSessionAction::SessionTimedOut, polled.events };
+        }
         return { HeadlessClientResult::Accepted, action, polled.events };
     }
 

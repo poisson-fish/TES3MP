@@ -63,9 +63,17 @@ namespace
         switch (status)
         {
             case Status::ProtocolRejected:
-                return "server protocol or capabilities are incompatible";
+                return "server sent an invalid or unexpected protocol message";
+            case Status::ProtocolVersionMismatch:
+                return "client and server protocol versions are incompatible";
+            case Status::RequiredCapabilityMissing:
+                return "server does not support a capability required by this client";
+            case Status::ContentManifestMismatch:
+                return "client and server content manifests do not match";
             case Status::AuthenticationRejected:
                 return "server denied authentication";
+            case Status::AuthenticationUnavailable:
+                return "server authentication is temporarily unavailable";
             case Status::TimedOut:
                 return "connection timed out";
             case Status::TransportFailed:
@@ -488,8 +496,7 @@ bool parseOptions(int argc, char** argv, OMW::Engine& engine, Files::Configurati
                 variables["tes3mp-password-file"].as<Files::MaybeQuotedPath>().u8string(),
                 variables["tes3mp-player-credential-file"].as<Files::MaybeQuotedPath>().u8string(),
                 contentManifest->id(), providers);
-            if (auto* value
-                = std::get_if<std::unique_ptr<TES3MP::OpenMWAdapter::EngineCoordinator>>(&created))
+            if (auto* value = std::get_if<std::unique_ptr<TES3MP::OpenMWAdapter::EngineCoordinator>>(&created))
                 coordinator = std::move(*value);
             else if (auto* failure = std::get_if<TES3MP::OpenMWAdapter::ClientCompositionFailure>(&created))
                 compositionFailure = *failure;
@@ -500,8 +507,7 @@ bool parseOptions(int argc, char** argv, OMW::Engine& engine, Files::Configurati
                 = variables["tes3mp-player-credential-directory"].as<Files::MaybeQuotedPath>();
             if (credentialDirectory.empty())
                 credentialDirectory = cfgMgr.getUserDataPath() / "tes3mp" / "credentials";
-            std::filesystem::path serverExecutable
-                = variables["tes3mp-server-executable"].as<Files::MaybeQuotedPath>();
+            std::filesystem::path serverExecutable = variables["tes3mp-server-executable"].as<Files::MaybeQuotedPath>();
             if (serverExecutable.empty())
             {
                 serverExecutable = std::filesystem::absolute(std::filesystem::u8path(argv[0])).parent_path()
@@ -511,23 +517,19 @@ bool parseOptions(int argc, char** argv, OMW::Engine& engine, Files::Configurati
                     / "tes3mp_server";
 #endif
             }
-            std::filesystem::path serverConfig
-                = variables["tes3mp-server-config"].as<Files::MaybeQuotedPath>();
+            std::filesystem::path serverConfig = variables["tes3mp-server-config"].as<Files::MaybeQuotedPath>();
             if (serverConfig.empty())
                 serverConfig = cfgMgr.getUserDataPath() / "tes3mp" / "server.cfg";
             coordinator = TES3MP::OpenMWAdapter::makeClientLauncher(
-                { static_cast<std::uint16_t>(configuredPort),
-                    variables["tes3mp-timeout-ms"].as<unsigned>(),
+                { static_cast<std::uint16_t>(configuredPort), variables["tes3mp-timeout-ms"].as<unsigned>(),
                     variables["tes3mp-password-file"].as<Files::MaybeQuotedPath>().u8string(),
-                    std::move(credentialDirectory), std::move(serverExecutable),
-                    std::move(serverConfig),
+                    std::move(credentialDirectory), std::move(serverExecutable), std::move(serverConfig),
                     contentManifest->id(), providers });
         }
         if (!coordinator || !engine.attachMultiplayerCoordinator(std::move(coordinator)))
         {
             Log(Debug::Error) << "TES3MP startup failed: "
-                              << (compositionFailure ? describe(*compositionFailure)
-                                                     : "coordinator attachment failed");
+                              << (compositionFailure ? describe(*compositionFailure) : "coordinator attachment failed");
             return false;
         }
     }

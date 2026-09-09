@@ -14,6 +14,8 @@ namespace TES3MP::ServerApp
 {
     namespace
     {
+        constexpr std::uint64_t RejectionDrainNanoseconds = 250'000'000;
+
         bool supportsPose(const ServerSessionStateMachine& session) noexcept
         {
             const auto& hello = session.negotiatedHello();
@@ -84,8 +86,7 @@ namespace TES3MP::ServerApp
         if (!session || session->state() != ServerSessionState::Established || !session->sessionId())
             return false;
         const auto& hello = session->negotiatedHello();
-        return hello && std::ranges::binary_search(
-            hello->negotiatedCapabilities(), combatReplicationCapability());
+        return hello && std::ranges::binary_search(hello->negotiatedCapabilities(), combatReplicationCapability());
     }
 
     bool ServerApplication::supportsCharacterCreation(TransportConnectionId connection) const noexcept
@@ -96,8 +97,7 @@ namespace TES3MP::ServerApp
         if (!state)
             return false;
         const auto& hello = state->negotiatedHello();
-        return hello && std::ranges::binary_search(
-            hello->negotiatedCapabilities(), characterCreationCapability());
+        return hello && std::ranges::binary_search(hello->negotiatedCapabilities(), characterCreationCapability());
     }
 
     bool ServerApplication::start() noexcept
@@ -127,6 +127,7 @@ namespace TES3MP::ServerApp
 
     bool ServerApplication::failConnection(TransportConnectionId connection, std::string_view failure) noexcept
     {
+        mRejectedCloseDeadlines.erase(connection);
         if (mWiring)
         {
             if (auto* session = mWiring->sessions.session(connection); session && session->sessionId())
@@ -329,9 +330,9 @@ namespace TES3MP::ServerApp
             = resumedSession ? mWiring->joins.characterProfile(resumedSession->playerId()) : nullptr;
         if (accepted && resumedProfile)
         {
-            auto withCharacterState = AuthenticationAcceptedMessage::create(accepted->takeToken(),
-                accepted->lifetimeMilliseconds(), std::nullopt, resumedProfile->lifecycle(),
-                resumedProfile->revision());
+            auto withCharacterState
+                = AuthenticationAcceptedMessage::create(accepted->takeToken(), accepted->lifetimeMilliseconds(),
+                    std::nullopt, resumedProfile->lifecycle(), resumedProfile->revision());
             if (!withCharacterState)
             {
                 cancel();
@@ -350,13 +351,12 @@ namespace TES3MP::ServerApp
             ? projectInventoryInterestBaseline(*candidate, *mWiring->inventory, *session->sessionId(), tick, *revision)
             : std::optional<InventoryInterestDelivery>{};
         auto combatSnapshot = candidate && revision && mWiring->combat && mWiring->actors && supportsCombat(connection)
-            ? projectCombatSnapshot(*candidate, *mWiring->actors, *mWiring->combat,
-                  *session->sessionId(), tick, *revision)
+            ? projectCombatSnapshot(
+                  *candidate, *mWiring->actors, *mWiring->combat, *session->sessionId(), tick, *revision)
             : std::optional<LatestWinsCombatSnapshot>{};
         if (!candidate || !baseline || !observations || !accepted || (supportsActors(connection) && !actorBaseline)
             || (supportsInteractiveObjects(connection) && !objectBaseline)
-            || (supportsInventory(connection) && !inventoryBaseline)
-            || (supportsCombat(connection) && !combatSnapshot))
+            || (supportsInventory(connection) && !inventoryBaseline) || (supportsCombat(connection) && !combatSnapshot))
         {
             cancel();
             return false;
@@ -678,7 +678,10 @@ namespace TES3MP::ServerApp
                 }
             }
             else if (event.kind == TransportEventKind::ConnectionClosed && event.connection)
+            {
+                mRejectedCloseDeadlines.erase(*event.connection);
                 closedConnections.push_back(*event.connection);
+            }
             else if (event.kind == TransportEventKind::RuntimeFailed)
             {
                 mFailure = "transport runtime failed";
@@ -692,6 +695,21 @@ namespace TES3MP::ServerApp
             return false;
         }
 
+        for (const auto connection : mWiring->sessions.connections())
+        {
+            const auto* session = mWiring->sessions.session(connection);
+            if (session && session->state() == ServerSessionState::Rejected)
+                continue;
+            const auto timeout = mWiring->sessions.checkTimeout(connection);
+            if (timeout == ConnectionSessionResult::TimedOut)
+                (void)failConnection(connection, "connection timed out");
+            else if (timeout != ConnectionSessionResult::Accepted)
+            {
+                mFailure = "session timeout check failed";
+                return false;
+            }
+        }
+
         if (!expireSessions(tick))
         {
             mFailure = "expiration lifecycle failed";
@@ -703,6 +721,9 @@ namespace TES3MP::ServerApp
         std::array<TransportMessage, TransportRuntime::MaxMessagesPerReceive> messages{};
         for (const auto connection : mWiring->sessions.connections())
         {
+            const auto* currentSession = mWiring->sessions.session(connection);
+            if (currentSession && currentSession->state() == ServerSessionState::Rejected)
+                continue;
             const auto received = mTransport.receive(connection, messages);
             if (received.result != TransportResult::Accepted)
             {
@@ -735,7 +756,6 @@ namespace TES3MP::ServerApp
                 }
                 if (dispatched == ConnectionSessionResult::ProtocolRejected
                     || dispatched == ConnectionSessionResult::QueueRejected
-                    || dispatched == ConnectionSessionResult::SessionRejected
                     || dispatched == ConnectionSessionResult::UnknownConnection)
                 {
                     (void)failConnection(connection, "connection dispatch rejected");
@@ -780,7 +800,8 @@ namespace TES3MP::ServerApp
                     = mWiring->sessions.pollAuthentication(connection, mWiring->joins, mWiring->crypto, tick);
                 if (advanced != ConnectionSessionResult::AuthenticationPending
                     && advanced != ConnectionSessionResult::Joined
-                    && advanced != ConnectionSessionResult::ResumePrepared)
+                    && advanced != ConnectionSessionResult::ResumePrepared
+                    && advanced != ConnectionSessionResult::SessionRejected)
                 {
                     (void)failConnection(connection, "authentication rejected");
                     continue;
@@ -820,11 +841,10 @@ namespace TES3MP::ServerApp
             return false;
         }
         const bool anyCombat = mWiring->combat || mWiring->meleeWeapons || mWiring->playerCombatTemplate
-            || mWiring->meleeSettings
-            || mWiring->meleePolicy || mWiring->meleeContact;
-        if (anyCombat && (!mWiring->combat || !mWiring->actors || !mWiring->meleeSettings
-                || !mWiring->inventory || !mWiring->itemCatalog || !mWiring->meleeWeapons
-                || !mWiring->playerCombatTemplate
+            || mWiring->meleeSettings || mWiring->meleePolicy || mWiring->meleeContact;
+        if (anyCombat
+            && (!mWiring->combat || !mWiring->actors || !mWiring->meleeSettings || !mWiring->inventory
+                || !mWiring->itemCatalog || !mWiring->meleeWeapons || !mWiring->playerCombatTemplate
                 || !mWiring->meleePolicy || !mWiring->meleeContact))
         {
             mFailure = "combat composition incomplete";
@@ -839,13 +859,12 @@ namespace TES3MP::ServerApp
         for (const auto& batch : pumpedCommands.batches())
         {
             const auto before = directMutationBase ? *directMutationBase : mWiring->reducer.state();
-            const auto revisionBefore
-                = directMutationBaseRevision.value_or(mWiring->reducer.canonicalRevision());
+            const auto revisionBefore = directMutationBaseRevision.value_or(mWiring->reducer.canonicalRevision());
             directMutationBase.reset();
             directMutationBaseRevision.reset();
             CanonicalCommandWorlds commandWorlds{ mWiring->interactiveObjects, mWiring->interactiveObjectCatalog,
-                mWiring->inventory, mWiring->itemCatalog, mWiring->combat, mWiring->actors,
-                mWiring->meleeWeapons, mWiring->meleeSettings, mWiring->meleePolicy, mWiring->meleeContact };
+                mWiring->inventory, mWiring->itemCatalog, mWiring->combat, mWiring->actors, mWiring->meleeWeapons,
+                mWiring->meleeSettings, mWiring->meleePolicy, mWiring->meleeContact };
             auto prepared = mWiring->reducer.prepareTick(batch, commandWorlds);
             if (!prepared.result())
             {
@@ -989,12 +1008,12 @@ namespace TES3MP::ServerApp
             if (mWiring->actors)
             {
                 auto advanced = prepared.candidateCombat()
-                    ? advanceActorSimulation(*mWiring->actors, *mWiring->actorCatalog,
-                          prepared.candidateState(), *prepared.candidateCombat(), batch.scheduledTick().value(),
+                    ? advanceActorSimulation(*mWiring->actors, *mWiring->actorCatalog, prepared.candidateState(),
+                          *prepared.candidateCombat(), batch.scheduledTick().value(),
                           mConfig.contentManifest.movementProfile(), *mWiring->actorCollision)
-                    : advanceActorSimulation(*mWiring->actors, *mWiring->actorCatalog,
-                          prepared.candidateState(), batch.scheduledTick().value(),
-                          mConfig.contentManifest.movementProfile(), *mWiring->actorCollision);
+                    : advanceActorSimulation(*mWiring->actors, *mWiring->actorCatalog, prepared.candidateState(),
+                          batch.scheduledTick().value(), mConfig.contentManifest.movementProfile(),
+                          *mWiring->actorCollision);
                 auto* candidate = std::get_if<CanonicalActorWorld>(&advanced);
                 if (!candidate)
                 {
@@ -1031,8 +1050,9 @@ namespace TES3MP::ServerApp
                         continue;
                     auto view = projectCombatSnapshot(prepared.candidateState(), projectedActors, projectedCombat,
                         target.sessionId(), batch.scheduledTick().value(), prepared.candidateRevision());
-                    auto eventBatch = projectCombatEvents(prepared.candidateState(), projectedActors, target.sessionId(),
-                        batch.scheduledTick().value(), prepared.candidateRevision(), prepared.combatEvents());
+                    auto eventBatch
+                        = projectCombatEvents(prepared.candidateState(), projectedActors, target.sessionId(),
+                            batch.scheduledTick().value(), prepared.candidateRevision(), prepared.combatEvents());
                     if (!view || !eventBatch)
                     {
                         mFailure = "combat projection failed";
@@ -1068,6 +1088,37 @@ namespace TES3MP::ServerApp
                 (void)failConnection(connection, "connection send failed");
                 continue;
             }
+            auto* session = mWiring->sessions.session(connection);
+            if (!session || session->state() != ServerSessionState::Rejected)
+                continue;
+            const auto pending = mWiring->queues.hasPending(connection);
+            if (!pending)
+            {
+                (void)failConnection(connection, "rejection queue state missing");
+                continue;
+            }
+            if (*pending)
+            {
+                mRejectedCloseDeadlines.erase(connection);
+                continue;
+            }
+            auto deadline = mRejectedCloseDeadlines.find(connection);
+            if (deadline == mRejectedCloseDeadlines.end())
+            {
+                const auto value = sessionDeadline(mWiring->clock.now(), RejectionDrainNanoseconds);
+                if (!value)
+                {
+                    (void)failConnection(connection, "rejection drain deadline overflow");
+                    continue;
+                }
+                mRejectedCloseDeadlines.emplace(connection, *value);
+                continue;
+            }
+            if (mWiring->clock.now() < deadline->second)
+                continue;
+            mRejectedCloseDeadlines.erase(deadline);
+            (void)mWiring->sessions.close(connection);
+            (void)mTransport.close(connection, TransportCloseMode::Graceful);
         }
         return true;
     }
@@ -1094,6 +1145,7 @@ namespace TES3MP::ServerApp
         }
         const auto shutDown = mTransport.shutdown();
         mLatestPoses.clear();
+        mRejectedCloseDeadlines.clear();
         success = success && (shutDown == TransportResult::Accepted || shutDown == TransportResult::AlreadyFinalized);
         if (!success)
             mFailure = "transport shutdown failed";

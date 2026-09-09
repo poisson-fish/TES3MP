@@ -59,8 +59,9 @@ namespace TES3MP::OpenMWAdapter
         bool combatNegotiated(const ClientSessionRuntime& runtime) noexcept
         {
             const auto& hello = runtime.session().stateMachine().negotiatedHello();
-            return hello && std::binary_search(hello->negotiatedCapabilities().begin(),
-                hello->negotiatedCapabilities().end(), combatReplicationCapability());
+            return hello
+                && std::binary_search(hello->negotiatedCapabilities().begin(), hello->negotiatedCapabilities().end(),
+                    combatReplicationCapability());
         }
 
         struct ResumeContinuity
@@ -280,17 +281,13 @@ namespace TES3MP::OpenMWAdapter
                 const bool spatialStateChanged = mPresentationBootstrapPending || advanced.baselineCompleted
                     || advanced.snapshotApplied || advanced.observationApplied;
                 std::optional<LocalLocomotionReconciliation> localReconciliation;
-                if (spatialStateChanged && snapshot
-                    && mRuntime->session().stateMachine().interestBaselineComplete())
+                if (spatialStateChanged && snapshot && mRuntime->session().stateMachine().interestBaselineComplete())
                 {
                     localReconciliation
                         = mRuntime->reconcileLocalPresentation(firstBaseline || mPresentationBootstrapPending);
                 }
-                if (mGameRunning
-                    && mRuntime->characterLifecycle() == CharacterLifecycle::EstablishedCharacter
-                    && spatialStateChanged
-                    && snapshot
-                    && mRuntime->session().stateMachine().interestBaselineComplete())
+                if (mGameRunning && mRuntime->characterLifecycle() == CharacterLifecycle::EstablishedCharacter
+                    && spatialStateChanged && snapshot && mRuntime->session().stateMachine().interestBaselineComplete())
                 {
                     const auto applied
                         = mPresentation.applyAuthoritative(*snapshot, mRuntime->session().observedPlayers(),
@@ -306,9 +303,9 @@ namespace TES3MP::OpenMWAdapter
                 const auto& playerBaseline = mRuntime->session().stateMachine().confirmedInterestBaseline();
                 const auto& actorBaseline = mRuntime->session().stateMachine().confirmedActorInterestBaseline();
                 if (mGameRunning
-                    && (mPresentationBootstrapPending || advanced.actorBaselineCompleted || advanced.actorBaselineApplied
-                        || advanced.actorSnapshotApplied
-                        || advanced.baselineCompleted || advanced.snapshotApplied)
+                    && (mPresentationBootstrapPending || advanced.actorBaselineCompleted
+                        || advanced.actorBaselineApplied || advanced.actorSnapshotApplied || advanced.baselineCompleted
+                        || advanced.snapshotApplied)
                     && !mPendingCellTransition && !mDeferredCellTransition && !captured.transition && actorSnapshot
                     && playerBaseline && actorBaseline
                     && actorBaseline->canonicalRevision() >= playerBaseline->canonicalRevision() && snapshot
@@ -329,8 +326,8 @@ namespace TES3MP::OpenMWAdapter
                     = mRuntime->session().stateMachine().confirmedInteractiveObjectInterestBaseline();
                 if (mGameRunning
                     && (mPresentationBootstrapPending || advanced.interactiveObjectBaselineCompleted
-                        || advanced.interactiveObjectBaselineApplied
-                        || advanced.baselineCompleted || advanced.snapshotApplied)
+                        || advanced.interactiveObjectBaselineApplied || advanced.baselineCompleted
+                        || advanced.snapshotApplied)
                     && !mPendingCellTransition && !mDeferredCellTransition && !captured.transition && objectBaseline
                     && playerBaseline && objectBaseline->canonicalRevision() >= playerBaseline->canonicalRevision()
                     && snapshot && objectBaseline->canonicalRevision() <= snapshot->header().canonicalRevision()
@@ -350,9 +347,9 @@ namespace TES3MP::OpenMWAdapter
                 const auto& equipment = mRuntime->session().stateMachine().confirmedEquipmentSnapshot();
                 if (mGameRunning
                     && (mPresentationBootstrapPending || advanced.inventoryReplicationCompleted
-                        || advanced.playerInventoryApplied
-                        || advanced.containerInventoryApplied || advanced.groundItemsApplied
-                        || advanced.equipmentSnapshotApplied || advanced.baselineCompleted || advanced.snapshotApplied)
+                        || advanced.playerInventoryApplied || advanced.containerInventoryApplied
+                        || advanced.groundItemsApplied || advanced.equipmentSnapshotApplied
+                        || advanced.baselineCompleted || advanced.snapshotApplied)
                     && !mPendingCellTransition && !mDeferredCellTransition && !captured.transition && playerInventory
                     && groundItems && equipment && playerBaseline && snapshot
                     && playerInventory->header.canonicalRevision >= playerBaseline->canonicalRevision()
@@ -521,8 +518,8 @@ namespace TES3MP::OpenMWAdapter
                     if (auto attack = mInput.captureMeleeAttack())
                     {
                         const auto queued = mRuntime->queueMeleeAttack(attack->target, attack->sourceTick,
-                            attack->expectedAttackerRevision, attack->expectedTargetRevision,
-                            attack->attackType, attack->attackStrength);
+                            attack->expectedAttackerRevision, attack->expectedTargetRevision, attack->attackType,
+                            attack->attackStrength);
                         if (queued.result != ClientRuntimeResult::Accepted || !queued.sequence)
                         {
                             closeTerminal(ConnectionStatus::TransportFailed);
@@ -596,10 +593,14 @@ namespace TES3MP::OpenMWAdapter
             bool gameStartRequested() const noexcept override { return mReady && !mGameRunning; }
 
             CharacterLifecycle characterLifecycle() const noexcept override
-            { return mRuntime ? mRuntime->characterLifecycle() : CharacterLifecycle::NewCharacter; }
+            {
+                return mRuntime ? mRuntime->characterLifecycle() : CharacterLifecycle::NewCharacter;
+            }
 
             CharacterProfileRevision characterProfileRevision() const noexcept override
-            { return mRuntime ? mRuntime->characterProfileRevision() : CharacterProfileRevision::initial(); }
+            {
+                return mRuntime ? mRuntime->characterProfileRevision() : CharacterProfileRevision::initial();
+            }
 
             const ReliableCharacterProfile* confirmedCharacterProfile() const noexcept override
             {
@@ -612,8 +613,9 @@ namespace TES3MP::OpenMWAdapter
             bool submitCharacterCreation(CharacterCreationChoice choice) noexcept override
             try
             {
-                return mRuntime && mRuntime->queueCharacterCreation(
-                    std::move(choice), mRuntime->characterProfileRevision()).result == ClientRuntimeResult::Accepted;
+                return mRuntime
+                    && mRuntime->queueCharacterCreation(std::move(choice), mRuntime->characterProfileRevision()).result
+                    == ClientRuntimeResult::Accepted;
             }
             catch (...)
             {
@@ -733,22 +735,44 @@ namespace TES3MP::OpenMWAdapter
 
             void reportFailure(ClientRuntimeResult result, ClientSessionAction action) noexcept
             {
+                const auto authentication = mRuntime ? mRuntime->authenticationRejection() : std::nullopt;
+                const auto& protocol = mRuntime ? mRuntime->protocolRejection() : std::nullopt;
+
                 mInput.clearSessionState();
                 mPresentation.clear();
                 if (mRuntime)
                     mRuntime->close();
-                if (action == ClientSessionAction::SessionRejected)
+                if (action == ClientSessionAction::SessionRejected || authentication || protocol)
                 {
-                    const auto& state = mRuntime->session().stateMachine();
-                    mStatus.report(state.authenticationRejection() ? ConnectionStatus::AuthenticationRejected
-                                                                   : ConnectionStatus::ProtocolRejected);
+                    if (authentication)
+                        mStatus.report(*authentication == AuthenticationRejectionReason::Denied
+                                ? ConnectionStatus::AuthenticationRejected
+                                : ConnectionStatus::AuthenticationUnavailable);
+                    else if (protocol)
+                    {
+                        switch (protocol->reason())
+                        {
+                            case SessionRejectionReason::ProtocolMajorMismatch:
+                            case SessionRejectionReason::NoCompatibleMinor:
+                                mStatus.report(ConnectionStatus::ProtocolVersionMismatch);
+                                break;
+                            case SessionRejectionReason::UnsupportedRequiredCapability:
+                                mStatus.report(ConnectionStatus::RequiredCapabilityMissing);
+                                break;
+                            case SessionRejectionReason::ContentManifestMismatch:
+                                mStatus.report(ConnectionStatus::ContentManifestMismatch);
+                                break;
+                        }
+                    }
+                    else
+                        mStatus.report(ConnectionStatus::ProtocolRejected);
                 }
                 else if (action == ClientSessionAction::SessionTimedOut)
                     mStatus.report(ConnectionStatus::TimedOut);
-                else if (action == ClientSessionAction::SessionClosed)
-                    mStatus.report(ConnectionStatus::Disconnected);
                 else if (result == ClientRuntimeResult::ProtocolRejected)
                     mStatus.report(ConnectionStatus::ProtocolRejected);
+                else if (action == ClientSessionAction::SessionClosed)
+                    mStatus.report(ConnectionStatus::Disconnected);
                 else
                     mStatus.report(ConnectionStatus::TransportFailed);
             }
