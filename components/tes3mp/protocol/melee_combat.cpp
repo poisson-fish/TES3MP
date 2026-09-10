@@ -34,7 +34,13 @@ namespace
             && value.blockMinimumChance <= value.blockMaximumChance && value.blockMaximumChance <= 100.f
             && finite(value.fatigueBlockBase) && value.fatigueBlockBase >= 0.f
             && finite(value.fatigueBlockMultiplier) && value.fatigueBlockMultiplier >= 0.f
-            && finite(value.weaponFatigueBlockMultiplier) && value.weaponFatigueBlockMultiplier >= 0.f;
+            && finite(value.weaponFatigueBlockMultiplier) && value.weaponFatigueBlockMultiplier >= 0.f
+            && finite(value.baseArmorSkill) && value.baseArmorSkill > 0.f
+            && finite(value.unarmoredBase1) && value.unarmoredBase1 >= 0.f
+            && finite(value.unarmoredBase2) && value.unarmoredBase2 >= 0.f
+            && finite(value.combatArmorMinimumMultiplier)
+            && value.combatArmorMinimumMultiplier >= 0.f
+            && value.combatArmorMinimumMultiplier <= 1.f;
     }
 
     bool validAttacker(const TES3MP::OpenMwMeleeAttacker& value) noexcept
@@ -201,6 +207,36 @@ namespace TES3MP
         if (attackerWeapon)
             result += attackerWeapon->weight * attackStrength * settings.weaponFatigueBlockMultiplier;
         return result;
+    }
+
+    float openMwSkillAdjustedArmorRating(const OpenMwMeleeSettings& settings,
+        float baseArmor, float armorSkill, float normalizedCondition) noexcept
+    {
+        if (!validSettings(settings) || !finite(baseArmor) || baseArmor < 0.f
+            || !finite(armorSkill) || armorSkill < 0.f || !finite(normalizedCondition)
+            || normalizedCondition < 0.f || normalizedCondition > 1.f)
+            return 0.f;
+        return baseArmor * armorSkill / settings.baseArmorSkill * normalizedCondition;
+    }
+
+    float openMwUnarmoredRating(const OpenMwMeleeSettings& settings, float unarmoredSkill) noexcept
+    {
+        if (!validSettings(settings) || !finite(unarmoredSkill) || unarmoredSkill < 0.f)
+            return 0.f;
+        return std::max(0.f,
+            settings.unarmoredBase1 * unarmoredSkill * settings.unarmoredBase2 * unarmoredSkill);
+    }
+
+    float openMwArmorAdjustedDamage(const OpenMwMeleeSettings& settings,
+        float damage, float armorRating) noexcept
+    {
+        if (!validSettings(settings) || !finite(damage) || damage < 0.f
+            || !finite(armorRating) || armorRating < 0.f)
+            return 0.f;
+        if (damage == 0.f)
+            return 0.f;
+        const float multiplier = damage / (damage + armorRating);
+        return damage * std::max(multiplier, settings.combatArmorMinimumMultiplier);
     }
 
     OpenMwMeleeResolution resolveOpenMwMelee(const OpenMwMeleeSettings& settings,

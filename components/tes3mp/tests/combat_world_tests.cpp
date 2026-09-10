@@ -140,10 +140,10 @@ namespace
         const std::array profiles{ TES3MP::MeleeWeaponProfile{ id<TES3MP::ItemPrototypeId>(4),
             TES3MP::MeleeWeaponSkill::LongBlade, 10.f, 10.f, 10.f, 10.f, 10.f, 10.f,
             5.f, 1.f, true } };
-        const std::array shields{ TES3MP::MeleeShieldProfile{ id<TES3MP::ItemPrototypeId>(6),
-            TES3MP::ShieldArmorSkill::LightArmor } };
+        const std::array armor{ TES3MP::MeleeArmorProfile{ id<TES3MP::ItemPrototypeId>(6),
+            TES3MP::ArmorSkill::LightArmor, 30.f } };
         auto weapons = *TES3MP::MeleeWeaponCatalog::create(items, profiles,
-            withShield ? std::span<const TES3MP::MeleeShieldProfile>(shields) : std::span<const TES3MP::MeleeShieldProfile>{});
+            withShield ? std::span<const TES3MP::MeleeArmorProfile>(armor) : std::span<const TES3MP::MeleeArmorProfile>{});
         return { std::move(items), std::move(inventory), std::move(weapons) };
     }
 
@@ -277,6 +277,10 @@ namespace
         derived.skills[6] = 16;
         derived.skills[7] = 27;
         derived.skills[20] = 30;
+        derived.skills[21] = 31;
+        derived.skills[2] = 32;
+        derived.skills[3] = 33;
+        derived.skills[17] = 34;
         derived.skills[26] = 35;
         const auto profile = TES3MP::CharacterProfile::restore(TES3MP::CharacterLifecycle::EstablishedCharacter,
             TES3MP::CharacterCreationPhase::Complete, "Nerevar",
@@ -309,6 +313,7 @@ namespace
             || character->stats.handToHandSkill != 35.f || character->stats.fortifyAttack != 3.f
             || character->weaponSkills[static_cast<std::size_t>(TES3MP::MeleeWeaponSkill::ShortBlade)] != 30.f
             || character->weaponSkills[static_cast<std::size_t>(TES3MP::MeleeWeaponSkill::LongBlade)] != 25.f
+            || character->armorSkills != std::array<float, 4>{ 31.f, 32.f, 33.f, 34.f }
             || std::abs(character->skillProgression[static_cast<std::size_t>(
                 TES3MP::CombatProgressionSkill::Block)].requirementFactor - 1.f) > 0.0001f
             || std::abs(character->skillProgression[static_cast<std::size_t>(
@@ -512,7 +517,7 @@ namespace
             .revision = TES3MP::CombatRevision::initial(), .stats = actorVictim,
             .respawnStats = actorVictim, .attacker = actorAttacker, .naturalWeapon = natural,
             .attackReachQuanta = 128 * 1024, .aggressionTarget = id<TES3MP::PlayerId>(1),
-            .maximumHealth = 20.f, .maximumFatigue = 20.f } };
+            .maximumHealth = 20.f, .maximumFatigue = 20.f, .creature = true } };
         const auto key = *TES3MP::RandomStreamKey::fromValues(3, 4);
         return std::get<TES3MP::CanonicalCombatWorld>(TES3MP::createCanonicalCombatWorld(players, actors,
             TES3MP::Xoshiro256StarStar::fromWorldSeed(5, key).snapshot()));
@@ -588,6 +593,91 @@ namespace
             && outgoing.candidate->findActor(id<TES3MP::ActorId>(2))->stats.health == 12.f
             && incoming && incoming->events.size() == 1 && incoming->events[0].resolution.damage == 60.f
             && incoming->combat.findPlayer(id<TES3MP::PlayerId>(1))->victim.health == 40.f;
+    }
+
+    bool armor_mitigation_wear_and_progression_commit_atomically()
+    {
+        auto before = retaliatingCombatWorld(100.f);
+        std::vector<TES3MP::CanonicalPlayerCombatState> players(before.players().begin(), before.players().end());
+        players[0].armorSkills[0] = 30.f;
+        const auto lightArmor = static_cast<std::size_t>(TES3MP::CombatProgressionSkill::LightArmor);
+        players[0].skillRules[lightArmor].useGain = 1000.f;
+        players[0].skillProgression[lightArmor].requirementFactor = 1.f;
+        before = std::get<TES3MP::CanonicalCombatWorld>(TES3MP::createCanonicalCombatWorld(
+            players, before.actors(), before.randomState()));
+
+        constexpr std::array armorSlots{ TES3MP::EquipmentSlot::Helmet, TES3MP::EquipmentSlot::Cuirass,
+            TES3MP::EquipmentSlot::Greaves, TES3MP::EquipmentSlot::LeftPauldron,
+            TES3MP::EquipmentSlot::RightPauldron, TES3MP::EquipmentSlot::LeftGauntlet,
+            TES3MP::EquipmentSlot::RightGauntlet, TES3MP::EquipmentSlot::Boots,
+            TES3MP::EquipmentSlot::CarriedLeft };
+        std::uint32_t slotMask = 0;
+        for (const auto slot : armorSlots)
+            slotMask |= TES3MP::slotToMask(slot);
+        const auto manifest = TES3MP::testContentManifest();
+        const std::array declarations{ TES3MP::ItemPrototypeDeclaration{ id<TES3MP::ItemPrototypeId>(6),
+            TES3MP::ItemCategory::Armor, 10, 1, 100, 0, slotMask, false, std::nullopt } };
+        const auto items = *TES3MP::ItemPrototypeCatalog::create(manifest, declarations);
+        TES3MP::CanonicalPlayerInventoryState inventoryPlayer{ .player = id<TES3MP::PlayerId>(1) };
+        for (std::size_t index = 0; index < armorSlots.size(); ++index)
+        {
+            const auto stackId = id<TES3MP::ItemStackId>(10 + index);
+            inventoryPlayer.stacks.push_back({ stackId, id<TES3MP::ItemPrototypeId>(6), 1, 100, 0, std::nullopt });
+            inventoryPlayer.equipment[static_cast<std::size_t>(armorSlots[index])] = stackId;
+        }
+        const auto inventory = *TES3MP::CanonicalInventoryWorld::create(
+            manifest, items, std::array{ inventoryPlayer }, {});
+        const std::array armor{ TES3MP::MeleeArmorProfile{
+            id<TES3MP::ItemPrototypeId>(6), TES3MP::ArmorSkill::LightArmor, 30.f } };
+        const auto weapons = *TES3MP::MeleeWeaponCatalog::create(items, {}, armor);
+        auto armorSettings = settings();
+        armorSettings.blockMinimumChance = 0.f;
+        armorSettings.blockMaximumChance = 0.f;
+        armorSettings.unarmedCreatureAttacksDamageArmor = true;
+        const auto advanced = TES3MP::advanceAuthoritativeCombat(before, inventory, items, weapons,
+            activeSpatialPlayers(), spatialActors(), armorSettings, { 2, 5 }, id<TES3MP::ServerTick>(5));
+        const auto* step = std::get_if<TES3MP::CombatSimulationStep>(&advanced);
+        const auto* player = step ? step->combat.findPlayer(id<TES3MP::PlayerId>(1)) : nullptr;
+        const auto* changed = step && step->inventory
+            ? step->inventory->findPlayer(id<TES3MP::PlayerId>(1)) : nullptr;
+        std::size_t worn = 0;
+        if (changed)
+            for (const auto& stack : changed->stacks)
+                worn += stack.condition == 92 ? 1 : 0;
+        const bool committed = step && step->events.size() == 1 && step->events[0].resolution.hit
+            && !step->events[0].resolution.blocked
+            && std::abs(step->events[0].resolution.damage - 2.5f) < 0.0001f
+            && player && std::abs(player->victim.health - 97.5f) < 0.0001f
+            && player->armorSkills[0] == 31.f && player->skillProgression[lightArmor].progress == 0.f
+            && changed && changed->revision.value() == 2 && worn == 1
+            && inventory.findPlayer(id<TES3MP::PlayerId>(1))->revision == TES3MP::InventoryRevision::initial();
+
+        std::vector<TES3MP::CanonicalActorCombatState> lowDamageActors(
+            before.actors().begin(), before.actors().end());
+        lowDamageActors[0].naturalWeapon = TES3MP::OpenMwMeleeWeapon{
+            1.f, 1.f, 1.f, 1.f, 1.f, 1.f, 0.f, 1.f, 0, false, false };
+        const auto lowDamageBefore = std::get<TES3MP::CanonicalCombatWorld>(
+            TES3MP::createCanonicalCombatWorld(before.players(), lowDamageActors, before.randomState()));
+        const auto lowDamageResult = TES3MP::advanceAuthoritativeCombat(lowDamageBefore, inventory, items, weapons,
+            activeSpatialPlayers(), spatialActors(), armorSettings, { 2, 5 }, id<TES3MP::ServerTick>(5));
+        const auto* lowDamage = std::get_if<TES3MP::CombatSimulationStep>(&lowDamageResult);
+        std::size_t lowDamageWorn = 0;
+        if (lowDamage && lowDamage->inventory)
+            if (const auto* lowInventory = lowDamage->inventory->findPlayer(id<TES3MP::PlayerId>(1)))
+                for (const auto& stack : lowInventory->stacks)
+                    lowDamageWorn += stack.condition == 99 ? 1 : 0;
+
+        inventoryPlayer.revision = id<TES3MP::InventoryRevision>(std::numeric_limits<std::uint64_t>::max());
+        const auto exhaustedInventory = *TES3MP::CanonicalInventoryWorld::create(
+            manifest, items, std::array{ inventoryPlayer }, {});
+        const auto rejected = TES3MP::advanceAuthoritativeCombat(before, exhaustedInventory, items, weapons,
+            activeSpatialPlayers(), spatialActors(), armorSettings, { 2, 5 }, id<TES3MP::ServerTick>(5));
+        const auto* error = std::get_if<TES3MP::CombatSimulationError>(&rejected);
+        return committed && lowDamage && lowDamage->events.size() == 1
+            && lowDamage->events[0].resolution.damage == 1.f && lowDamageWorn == 1
+            && error && error->code == TES3MP::CombatSimulationErrorCode::RevisionExhausted
+            && before.findPlayer(id<TES3MP::PlayerId>(1))->victim.health == 100.f
+            && exhaustedInventory.findPlayer(id<TES3MP::PlayerId>(1))->stacks[0].condition == 100;
     }
 
     bool actor_respawn_restores_baseline_and_clears_combat_intent()
@@ -740,6 +830,7 @@ int main()
             && actor_retaliation_damage_cooldown_and_player_respawn_are_authoritative()
             && player_blocking_uses_server_roll_facing_and_canonical_shield_wear()
             && difficulty_scaling_is_server_selected_for_both_damage_directions()
+            && armor_mitigation_wear_and_progression_commit_atomically()
             && actor_respawn_restores_baseline_and_clears_combat_intent()
             && fatigue_recovery_is_tick_deterministic_bounded_and_active_only()
             && health_and_magicka_recovery_are_tick_bounded_active_and_out_of_combat()

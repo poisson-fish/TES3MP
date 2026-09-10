@@ -43,6 +43,10 @@ namespace TES3MP::ServerApp
             self->weaponSkills[static_cast<std::size_t>(MeleeWeaponSkill::Axe)],
             self->weaponSkills[static_cast<std::size_t>(MeleeWeaponSkill::Spear)],
             self->stats.handToHandSkill,
+            self->armorSkills[0],
+            self->armorSkills[1],
+            self->armorSkills[2],
+            self->armorSkills[3],
         };
         std::array<CombatSkillSnapshot, ReplicatedCombatSkillCount> skills{};
         for (std::size_t index = 0; index < skills.size(); ++index)

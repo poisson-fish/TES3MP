@@ -51,6 +51,12 @@ namespace TES3MP
         float fatigueBlockBase = 0.f;
         float fatigueBlockMultiplier = 0.f;
         float weaponFatigueBlockMultiplier = 0.f;
+        float baseArmorSkill = 30.f;
+        float unarmoredBase1 = 0.01f;
+        float unarmoredBase2 = 0.01f;
+        float combatArmorMinimumMultiplier = 0.25f;
+        bool unarmedCreatureAttacksDamageArmor = false;
+        bool redistributeShieldHitsWhenNotWearingShield = false;
 
         friend constexpr bool operator==(OpenMwMeleeSettings, OpenMwMeleeSettings) noexcept = default;
     };
@@ -172,6 +178,11 @@ namespace TES3MP
     float openMwMeleeBlockFatigueCost(const OpenMwMeleeSettings& settings,
         float normalizedEncumbrance, const std::optional<OpenMwMeleeWeapon>& attackerWeapon,
         float attackStrength) noexcept;
+    float openMwSkillAdjustedArmorRating(const OpenMwMeleeSettings& settings,
+        float baseArmor, float armorSkill, float normalizedCondition) noexcept;
+    float openMwUnarmoredRating(const OpenMwMeleeSettings& settings, float unarmoredSkill) noexcept;
+    float openMwArmorAdjustedDamage(const OpenMwMeleeSettings& settings,
+        float damage, float armorRating) noexcept;
     OpenMwMeleeResolution resolveOpenMwMelee(const OpenMwMeleeSettings& settings,
         const OpenMwMeleeAttacker& attacker, const OpenMwMeleeVictim& victim,
         const OpenMwMeleeAttempt& attempt) noexcept;

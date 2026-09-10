@@ -72,13 +72,13 @@ class ContentBakerTests(unittest.TestCase):
             encoding="utf-8",
         )
         (self.source / "combat.txt").write_text(
-            "TES3MP_COMBAT_V4\n"
+            "TES3MP_COMBAT_V5\n"
             f"manifest {ZERO_MANIFEST}\n"
             "seed 1234\n"
-            "settings 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 -90 90 1 1 1 0 100 1 1 1\n"
-            "progression 1 1 1 1 0 1 0 1 0 1 0 1 0 1 0 1 0 1\n"
-            "player 50 50 50 1 0 0 20 20 20 20 20 25 100 50 20 50 100 0.1 0.2 500 0\n"
-            "actor 1 20 20 10 0 0 0 0 0 0 0 0\n"
+            "settings 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 -90 90 1 1 1 0 100 1 1 1 30 .01 .01 .25 0 0\n"
+            "progression 1 1 1 1 0 1 0 1 0 1 0 1 0 1 0 1 0 1 0 1 0 1 0 1 0 1\n"
+            "player 50 50 50 1 0 0 20 20 20 20 20 25 100 50 20 50 100 0.1 0.2 20 20 20 20 500 0\n"
+            "actor 1 20 20 10 0 0 0 0 0 0 0 0 1\n"
             f"weapon {self.item_prototype} 0 1 5 1 5 1 5 10 1 1\n",
             encoding="utf-8",
         )
@@ -169,6 +169,8 @@ class ContentBakerTests(unittest.TestCase):
             "fSwingBlockMult": 1., "fSwingBlockBase": 1., "fBlockStillBonus": 1.25,
             "iBlockMinChance": 10., "iBlockMaxChance": 50., "fFatigueBlockBase": 2.,
             "fFatigueBlockMult": 3., "fWeaponFatigueBlockMult": .25,
+            "iBaseArmorSkill": 30., "fUnarmoredBase1": .01, "fUnarmoredBase2": .01,
+            "fCombatArmorMinMult": .25,
             "iShieldWeight": 15., "fLightMaxMod": .6, "fMedMaxMod": .9,
             "fMiscSkillBonus": 1., "fMinorSkillBonus": .75, "fMajorSkillBonus": .5,
             "fSpecialSkillBonus": .8, "fRestMagicMult": .15,
@@ -341,11 +343,11 @@ class ContentBakerTests(unittest.TestCase):
         characters = path.joinpath("characters.txt").read_text()
         self.assertIn(f"manifest {manifest}", inventory)
         self.assertIn(f"prototype {self.item_prototype} 11 30 10 400 0 65536 0 none", inventory)
-        self.assertIn("settings 0.200000003 2 0 0.25 0.100000001 0.5 0.100000001 0.100000001 0.5 0.100000001 4 1.5 1.25 0.5 0.0199999996 0.0399999991 0.100000001 5 -60 60 1 1 1.25 10 50 2 3 0.25", combat)
-        self.assertIn("progression 1 0.75 0.5 0.800000012 0 1 0 21 0 6 0 5 0 7 0 8 0 27", combat)
-        self.assertIn("player 40 40 40 1.25 0 0 21 22 23 24 25 26 160 40 5 30 0 0.0333333333 0.0375000015 2000 0", combat)
+        self.assertIn("settings 0.200000003 2 0 0.25 0.100000001 0.5 0.100000001 0.100000001 0.5 0.100000001 4 1.5 1.25 0.5 0.0199999996 0.0399999991 0.100000001 5 -60 60 1 1 1.25 10 50 2 3 0.25 30 0.00999999978 0.00999999978 0.25 0 0", combat)
+        self.assertIn("progression 1 0.75 0.5 0.800000012 0 1 0 21 0 6 0 5 0 7 0 8 0 27 0 22 0 3 0 4 0 18", combat)
+        self.assertIn("player 40 40 40 1.25 0 0 21 22 23 24 25 26 160 40 5 30 0 0.0333333333 0.0375000015 5 5 5 5 2000 0", combat)
         self.assertIn(f"weapon {self.item_prototype} 0 4 5 4 5 5 5 3 1 1", combat)
-        self.assertIn("actor 1 23 60 6.25 0 0 0 0 0 0 0 0", combat)
+        self.assertIn("actor 1 23 60 6.25 0 0 0 0 0 0 0 0 1", combat)
         self.assertIn("actor_attack 1 20 10 10 1.25 30 60 1 2 1 2 1 2 1 10", combat)
         self.assertIn(f"actor 1 2 {self.actor_prototype} interior 1 0 0 0 0 0 0 idle", actors)
         self.assertIn("solid interior 1 100 100 100 200 200 200", collision)
@@ -373,7 +375,7 @@ class ContentBakerTests(unittest.TestCase):
         inventory = path.joinpath("vanilla-inventory.txt").read_text()
         for name, weight, skill in shields:
             prototype = baker.stable_record_id(name)
-            self.assertIn(f"shield {prototype} {skill}", combat)
+            self.assertIn(f"armor {prototype} {skill} 10", combat)
             self.assertIn(f"prototype {prototype} 2 {round(weight * 10)} 20 100 0 131072 0 none", inventory)
 
     def test_derived_pack_missing_record_preserves_current_pointer(self):

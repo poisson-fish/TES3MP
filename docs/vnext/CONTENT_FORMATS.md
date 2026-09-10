@@ -228,26 +228,26 @@ OpenMW clients bind opaque IDs locally with repeatable
 Mappings must be injective and complete for presented records. See
 [`inventory_content.cpp`](../../apps/tes3mp-server/inventory_content.cpp).
 
-## Combat V4
+## Combat V5
 
 Configured optionally by `combat_content_file`; combat also requires actor,
 inventory, collision, and historical-contact composition. The catalog contains
 one deterministic seed; exactly one settings record, progression profile, and
 player template; one combat state per actor; an optional complete actor-attack
-set; and zero or more melee weapon or shield profiles keyed by inventory
+set; and zero or more melee weapon or armor profiles keyed by inventory
 prototype ID.
 
 ```text
-TES3MP_COMBAT_V4
+TES3MP_COMBAT_V5
 manifest <64-lowercase-hex-digits>
 seed <unsigned-64-bit>
-settings <12-finite-OpenMW-melee-values> <fatigue-base> <fatigue-multiplier> <fatigue-return-base> <fatigue-return-multiplier> <endurance-fatigue-multiplier> <difficulty-multiplier> <block-left-angle> <block-right-angle> <swing-block-multiplier> <swing-block-base> <block-still-bonus> <block-minimum-chance> <block-maximum-chance> <fatigue-block-base> <fatigue-block-multiplier> <weapon-fatigue-block-multiplier>
-progression <misc-factor> <minor-factor> <major-factor> <specialization-factor> <block-specialization> <block-use-gain> <short-blade-specialization> <short-blade-use-gain> <long-blade-specialization> <long-blade-use-gain> <blunt-specialization> <blunt-use-gain> <axe-specialization> <axe-use-gain> <spear-specialization> <spear-use-gain> <hand-to-hand-specialization> <hand-to-hand-use-gain>
-player <agility> <luck> <strength> <fatigue-term> <fortify-attack> <blind> <short-blade> <long-blade> <blunt> <axe> <spear> <hand-to-hand> <fatigue> <endurance> <block> <intelligence> <magicka> <health-recovery-per-second> <magicka-recovery-per-second> <maximum-weight> <werewolf-0-or-1>
-actor <actor-id> <health> <fatigue> <evasion> <chameleon> <invisibility> <normal-resistance> <normal-weakness> <knocked-down-0-or-1> <paralyzed-0-or-1> <unaware-0-or-1> <dead-0-or-1>
+settings <12-finite-OpenMW-melee-values> <fatigue-base> <fatigue-multiplier> <fatigue-return-base> <fatigue-return-multiplier> <endurance-fatigue-multiplier> <difficulty-multiplier> <block-left-angle> <block-right-angle> <swing-block-multiplier> <swing-block-base> <block-still-bonus> <block-minimum-chance> <block-maximum-chance> <fatigue-block-base> <fatigue-block-multiplier> <weapon-fatigue-block-multiplier> <base-armor-skill> <unarmored-base-1> <unarmored-base-2> <armor-minimum-damage-multiplier> <unarmed-creature-wears-armor-0-or-1> <redistribute-missing-shield-hit-0-or-1>
+progression <misc-factor> <minor-factor> <major-factor> <specialization-factor> <block-specialization> <block-use-gain> <short-blade-specialization> <short-blade-use-gain> <long-blade-specialization> <long-blade-use-gain> <blunt-specialization> <blunt-use-gain> <axe-specialization> <axe-use-gain> <spear-specialization> <spear-use-gain> <hand-to-hand-specialization> <hand-to-hand-use-gain> <light-armor-specialization> <light-armor-use-gain> <medium-armor-specialization> <medium-armor-use-gain> <heavy-armor-specialization> <heavy-armor-use-gain> <unarmored-specialization> <unarmored-use-gain>
+player <agility> <luck> <strength> <fatigue-term> <fortify-attack> <blind> <short-blade> <long-blade> <blunt> <axe> <spear> <hand-to-hand> <fatigue> <endurance> <block> <intelligence> <magicka> <health-recovery-per-second> <magicka-recovery-per-second> <light-armor> <medium-armor> <heavy-armor> <unarmored> <maximum-weight> <werewolf-0-or-1>
+actor <actor-id> <health> <fatigue> <evasion> <chameleon> <invisibility> <normal-resistance> <normal-weakness> <knocked-down-0-or-1> <paralyzed-0-or-1> <unaware-0-or-1> <dead-0-or-1> <creature-0-or-1>
 actor_attack <actor-id> <agility> <luck> <strength> <fatigue-term> <combat-skill> <fatigue> <chop-min> <chop-max> <slash-min> <slash-max> <thrust-min> <thrust-max> <reach> <endurance>
 weapon <prototype-id> <skill> <chop-min> <chop-max> <slash-min> <slash-max> <thrust-min> <thrust-max> <weight> <reach> <normal-weapon-0-or-1>
-shield <prototype-id> <light-0-medium-1-heavy-2>
+armor <prototype-id> <light-0-medium-1-heavy-2> <base-armor>
 ```
 
 The actor set must exactly match Actors V1. Every weapon must be a conditioned,
@@ -260,9 +260,12 @@ active restoration formulas;
 restoration is integrated by elapsed authoritative server ticks and clamps at
 the canonical maximum. The remaining values reproduce difficulty and blocking.
 `combat_difficulty` selects one bounded server-wide value from -100 through 100;
-clients never contribute it to an outcome. Shields must reference conditioned,
-left-hand-compatible armor, and their armor-skill category controls confirmed
-block feedback. Progression specializations use combat 0, magic 1, and stealth
+clients never contribute it to an outcome. Every conditioned inventory armor
+prototype requires one armor profile. Equipped armor supplies the stock
+skill-, condition-, and slot-weighted rating; a server PRNG selects the struck
+slot for wear and defensive-skill advancement after an unsuccessful block.
+The two armor flags reproduce the stock creature-wear and shield-hit
+redistribution settings. Progression specializations use combat 0, magic 1, and stealth
 2. Use gains and the four class factors are baked from the selected loadout;
 the server combines them with the confirmed character class and current skill.
 Health and magicka recovery rates are derived from the stock rest formulas at

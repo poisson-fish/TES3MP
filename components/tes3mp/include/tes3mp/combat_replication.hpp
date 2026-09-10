@@ -16,7 +16,7 @@ namespace TES3MP
 {
     inline constexpr std::size_t MaximumCombatSnapshotActors = 248;
     inline constexpr std::size_t MaximumCombatEventsPerBatch = 256;
-    inline constexpr std::size_t ReplicatedCombatSkillCount = 7;
+    inline constexpr std::size_t ReplicatedCombatSkillCount = 11;
 
     enum class ReplicatedCombatSkill : std::uint8_t
     {
@@ -27,6 +27,10 @@ namespace TES3MP
         Axe = 4,
         Spear = 5,
         HandToHand = 6,
+        LightArmor = 7,
+        MediumArmor = 8,
+        HeavyArmor = 9,
+        Unarmored = 10,
     };
 
     enum class CombatReplicationDecodeErrorCode : std::uint8_t

@@ -43,7 +43,7 @@ wrapper selects the bounded product scope by default.
 
 - A 12-byte bounded frame separates message class and kind before payload
   allocation. Each payload is verifier-checked and semantically validated.
-- The production server negotiates protocol major 1, minor 4. Defined
+- The production server negotiates protocol major 1, minor 5. Defined
   optional capabilities are VR pose (1), actor replication (2), interactive
   objects (3), inventory (4), combat (5), and character creation (6).
   Content-manifest mismatch rejects before authentication. Combat (5) is
@@ -290,9 +290,9 @@ and [`desktop_providers.cpp`](../../apps/openmw/tes3mp/desktop_providers.cpp).
   PRNG, canonical maximum/current health, magicka, and fatigue, actor dead state,
   cooldown, and separate combat revisions. Damage and death commit atomically
   with command finalization.
-- Optional bounded `TES3MP_COMBAT_V4` content supplies manifest-scoped resolver
+- Optional bounded `TES3MP_COMBAT_V5` content supplies manifest-scoped resolver
   settings, a validated default player combat profile, exhaustive actor combat
-  seeds and attack profiles, weapon and shield records, OpenMW fatigue/block
+  seeds and attack profiles, weapon and armor records, OpenMW fatigue/block/armor
   constants, progression gains/class factors, recovery rates, endurance,
   intelligence, and a deterministic random seed.
   Startup rejects a missing, malformed, mismatched, or internally inconsistent
@@ -313,7 +313,7 @@ and [`desktop_providers.cpp`](../../apps/openmw/tes3mp/desktop_providers.cpp).
   contact/reach, and rate abuse before mutation. Existing session generation,
   command sequence/ID, entity binding, authority epoch, and canonical revision
   checks reject stale authority and replay.
-- Private self maximum/current health, magicka, fatigue, seven combat skill
+- Private self maximum/current health, magicka, fatigue, eleven combat skill
   values/progress counters, death state, and revision, plus same-cell actor
   stats, replicate through a latest-wins snapshot.
   Same-cell player and actor attack outcomes use a reliable event batch. OpenMW
@@ -326,7 +326,9 @@ and [`desktop_providers.cpp`](../../apps/openmw/tes3mp/desktop_providers.cpp).
   in both directions. Incoming hits use canonical facing, motion, stats, and the
   equipped left-hand shield plus a server PRNG roll to decide passive blocking;
   a block atomically spends fatigue, wears or breaks the shield, suppresses
-  health damage, and publishes the outcome.
+  health damage, and publishes the outcome. Unblocked hits then apply the stock
+  slot-weighted armor or unarmored rating, advance the selected defensive skill,
+  and wear the server-selected struck armor piece in that same atomic step.
   Active living players and actors recover fatigue deterministically from
   elapsed server ticks, endurance, and canonical encumbrance, clamped to their
   server-owned maximum. Latest-wins server ticks order passive recovery without
@@ -373,7 +375,7 @@ and [`character.cpp`](../../apps/openmw/mwmechanics/character.cpp).
   pack and are neither copied nor hashed.
 - The derived-vanilla recipe replaces authored collision, actor, inventory,
   combat, client actor/item mapping, and starting-equipment records. Numeric
-  item, weapon, shield, actor, player-template, and combat-setting values come
+  item, weapon, armor, actor, player-template, and combat-setting values come
   from the resolved TES3 load-order winners. Missing, deleted, ambiguous,
   malformed, or unsupported selected records reject before publication.
 
@@ -413,14 +415,16 @@ and [`test_bake_tes3mp_content.py`](../../scripts/tests/test_bake_tes3mp_content
   hand-to-hand hit, fatigue, resistance, critical/knockdown multipliers, weapon
   wear, damage, death, reactive actor attacks, hit animations, timed in-place
   respawn, maximum/current health, magicka, and fatigue, active fatigue recovery,
-  out-of-combat health/magicka recovery, authoritative advancement for Block
-  and the six direct melee skills, server-wide difficulty, passive canonical
-  shield blocking, shield wear, and
+  out-of-combat health/magicka recovery, authoritative advancement for Block,
+  the six direct melee skills, and four armor skills, server-wide difficulty,
+  passive canonical shield blocking, armor mitigation, equipment wear, and
   stock hit/block feedback. Blocking currently applies only to actor melee
   against players and uses canonical root facing rather than rewound animation
   pose. The packaged derived pack has no on-strike enchantment or actor spell
   effect to resolve: its baker rejects selected enchanted items and actors with
-  initial spell effects. PvP/P2P, proactive AI aggression, armor mitigation,
+  initial spell effects. Player armor mitigation covers reactive actor melee;
+  actor armor and player-versus-player armor resolution are not yet modeled.
+  PvP/P2P, proactive AI aggression,
   broader on-strike enchantments, elemental shields, disease, Lua hit callbacks,
   and general magic remain unimplemented.
 - Established root checkpoints and complete character profiles survive restart;
@@ -444,10 +448,10 @@ and [`test_bake_tes3mp_content.py`](../../scripts/tests/test_bake_tes3mp_content
 
 ## Work still required
 
-### Next milestone: armor and direct magic effects
+### Next milestone: direct magic effects
 
-Add authoritative armor mitigation/armor-skill advancement and a bounded typed
-kernel for direct enchantment, elemental-shield, and disease effects. General
+Add a bounded typed kernel for direct enchantment, elemental-shield, and disease
+effects, composed atomically with the existing melee outcome. General
 spellcasting and deterministic server scripting remain later work.
 
 ### Required before the desktop/PC-VR release
@@ -479,7 +483,7 @@ and do not enter protocol or canonical state.
 
 ## Verification snapshot
 
-The combat-progression and recovery working tree passed the following
+The authoritative-armor working tree passed the following
 on 2026-09-10:
 
 - the bounded Windows product `checks` graph, including relinking the shipping
@@ -493,7 +497,7 @@ on 2026-09-10:
   `Morrowind.esm` with SHA-256
   `5c3c8c2cbd20e25901b59b3ece33d36b7ef0e3d60ad8d11828bcc61a5ead1647`,
   producing and verifying pack
-  `d5b68da26223dc8c1b61ade51a89a5b90c4b4d6514aede752eff4322e19cb4e7`.
+  `f69a886749559d3d54e673bd8c05f59c2ddf31feac728c5685eddc8ea341d7b7`.
 
 The standalone aggregate also passed. The Linux-only sanitizer/fuzzer execution
 profile, non-Windows product builds, PC-VR hardware checks, a full upstream

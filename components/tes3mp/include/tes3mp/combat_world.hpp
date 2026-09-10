@@ -31,7 +31,11 @@ namespace TES3MP
         Axe = 4,
         Spear = 5,
         HandToHand = 6,
-        Count = 7,
+        LightArmor = 7,
+        MediumArmor = 8,
+        HeavyArmor = 9,
+        Unarmored = 10,
+        Count = 11,
     };
 
     struct CombatSkillProgressionRule
@@ -90,19 +94,20 @@ namespace TES3MP
         friend constexpr bool operator==(MeleeWeaponProfile, MeleeWeaponProfile) noexcept = default;
     };
 
-    enum class ShieldArmorSkill : std::uint8_t
+    enum class ArmorSkill : std::uint8_t
     {
         LightArmor = 0,
         MediumArmor = 1,
         HeavyArmor = 2,
     };
 
-    struct MeleeShieldProfile
+    struct MeleeArmorProfile
     {
         ItemPrototypeId prototypeId;
-        ShieldArmorSkill skill = ShieldArmorSkill::LightArmor;
+        ArmorSkill skill = ArmorSkill::LightArmor;
+        float baseArmor = 0.f;
 
-        friend constexpr bool operator==(MeleeShieldProfile, MeleeShieldProfile) noexcept = default;
+        friend constexpr bool operator==(MeleeArmorProfile, MeleeArmorProfile) noexcept = default;
     };
 
     class MeleeWeaponCatalog
@@ -110,23 +115,23 @@ namespace TES3MP
     public:
         static std::optional<MeleeWeaponCatalog> create(
             const ItemPrototypeCatalog& items, std::span<const MeleeWeaponProfile> profiles,
-            std::span<const MeleeShieldProfile> shields = {}) noexcept;
+            std::span<const MeleeArmorProfile> armor = {}) noexcept;
 
         ContentManifestId contentManifestId() const noexcept { return mContentManifestId; }
         std::span<const MeleeWeaponProfile> profiles() const noexcept { return mProfiles; }
         const MeleeWeaponProfile* find(ItemPrototypeId id) const noexcept;
-        const MeleeShieldProfile* findShield(ItemPrototypeId id) const noexcept;
+        const MeleeArmorProfile* findArmor(ItemPrototypeId id) const noexcept;
 
         friend bool operator==(const MeleeWeaponCatalog&, const MeleeWeaponCatalog&) noexcept = default;
 
     private:
         MeleeWeaponCatalog(ContentManifestId contentManifestId, std::vector<MeleeWeaponProfile> profiles,
-            std::vector<MeleeShieldProfile> shields) noexcept
-            : mContentManifestId(contentManifestId), mProfiles(std::move(profiles)), mShields(std::move(shields)) {}
+            std::vector<MeleeArmorProfile> armor) noexcept
+            : mContentManifestId(contentManifestId), mProfiles(std::move(profiles)), mArmor(std::move(armor)) {}
 
         ContentManifestId mContentManifestId;
         std::vector<MeleeWeaponProfile> mProfiles;
-        std::vector<MeleeShieldProfile> mShields;
+        std::vector<MeleeArmorProfile> mArmor;
     };
 
     struct CanonicalPlayerCombatTemplate
@@ -148,6 +153,7 @@ namespace TES3MP
         std::array<CombatSkillProgressionState,
             static_cast<std::size_t>(CombatProgressionSkill::Count)> skillProgression{};
         float intelligence = 1.f;
+        std::array<float, 4> armorSkills{};
 
         friend constexpr bool operator==(const CanonicalPlayerCombatTemplate&,
             const CanonicalPlayerCombatTemplate&) noexcept = default;
@@ -176,6 +182,7 @@ namespace TES3MP
             static_cast<std::size_t>(CombatProgressionSkill::Count)> skillRules{};
         std::array<CombatSkillProgressionState,
             static_cast<std::size_t>(CombatProgressionSkill::Count)> skillProgression{};
+        std::array<float, 4> armorSkills{};
 
         friend constexpr bool operator==(const CanonicalPlayerCombatState&,
             const CanonicalPlayerCombatState&) noexcept = default;
@@ -195,6 +202,7 @@ namespace TES3MP
         std::optional<ServerTick> deathTick;
         float maximumHealth = 0.f;
         float maximumFatigue = 0.f;
+        bool creature = false;
 
         friend constexpr bool operator==(const CanonicalActorCombatState&,
             const CanonicalActorCombatState&) noexcept = default;

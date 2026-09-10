@@ -46,7 +46,7 @@ CATALOGS = {
     "actor_content_file": ("TES3MP_ACTORS_V1", True),
     "interactive_object_content_file": ("TES3MP_INTERACTIVE_OBJECTS_V1", False),
     "inventory_content_file": ("TES3MP_INVENTORY_V1", False),
-    "combat_content_file": ("TES3MP_COMBAT_V4", False),
+    "combat_content_file": ("TES3MP_COMBAT_V5", False),
     "character_content_file": ("TES3MP_CHARACTERS_V2", False),
 }
 
@@ -737,13 +737,20 @@ COMBAT_GMSTS = (
     "fDifficultyMult", "fCombatBlockLeftAngle", "fCombatBlockRightAngle", "fSwingBlockMult",
     "fSwingBlockBase", "fBlockStillBonus", "iBlockMinChance", "iBlockMaxChance",
     "fFatigueBlockBase", "fFatigueBlockMult", "fWeaponFatigueBlockMult",
+    "iBaseArmorSkill", "fUnarmoredBase1", "fUnarmoredBase2", "fCombatArmorMinMult",
 )
 
 PROGRESSION_GMSTS = (
     "fMiscSkillBonus", "fMinorSkillBonus", "fMajorSkillBonus", "fSpecialSkillBonus",
 )
 
-PROGRESSION_SKILL_INDEXES = (0, 20, 5, 4, 6, 7, 26)
+PROGRESSION_SKILL_INDEXES = (0, 20, 5, 4, 6, 7, 26, 21, 2, 3, 17)
+
+ARMOR_WEIGHT_GMSTS = {
+    0: "iHelmWeight", 1: "iCuirassWeight", 2: "iPauldronWeight", 3: "iPauldronWeight",
+    4: "iGreavesWeight", 5: "iBootsWeight", 6: "iGauntletWeight", 7: "iGauntletWeight",
+    8: "iShieldWeight", 9: "iGauntletWeight", 10: "iGauntletWeight",
+}
 
 
 def _skill_progression_rule(records: dict[tuple[str, str], Tes3Record], index: int) -> tuple[int, float]:
@@ -883,7 +890,8 @@ def derive_catalogs(recipe: DerivedRecipe, server_entries: Sequence[Assignment],
             str(key_id) if key_id is not None else "none")))
 
     combat_lines = [CATALOGS["combat_content_file"][0], f"manifest {MANIFEST_PLACEHOLDER}",
-                    f"seed {recipe.seed}", "settings " + " ".join(_float_text(value) for value in gmsts)]
+                    f"seed {recipe.seed}",
+                    "settings " + " ".join((*(_float_text(value) for value in gmsts), "0", "0"))]
     progression_fields = (*progression_factors,
                           *(value for rule in progression_rules for value in rule))
     combat_lines.append("progression " + " ".join(_float_text(float(value)) for value in progression_fields))
@@ -896,28 +904,34 @@ def derive_catalogs(recipe: DerivedRecipe, server_entries: Sequence[Assignment],
     player_fields = (float(agility), float(luck), float(strength), fatigue_base, 0.0, 0.0,
                      *(float(value) for value in weapon_skill_values), float(player_skills[26]), float(player_fatigue),
                      float(player_attributes[5]), float(player_skills[0]), float(player_attributes[1]),
-                     float(player_magicka), health_recovery, magicka_recovery)
+                     float(player_magicka), health_recovery, magicka_recovery,
+                     float(player_skills[21]), float(player_skills[2]), float(player_skills[3]),
+                     float(player_skills[17]))
     combat_lines.append("player " + " ".join((*(_float_text(value) for value in player_fields),
         str(maximum_weight), "0")))
     for actor, _record, health, fatigue, evasion, attack in sorted(actor_values, key=lambda value: value[0].actor_id):
         combat_lines.append("actor " + " ".join((str(actor.actor_id), _float_text(health),
-            _float_text(fatigue), _float_text(evasion), "0", "0", "0", "0", "0", "0", "0", "0")))
+            _float_text(fatigue), _float_text(evasion), "0", "0", "0", "0", "0", "0", "0", "0",
+            "1" if _record.kind == "CREA" else "0")))
         combat_lines.append("actor_attack " + " ".join((str(actor.actor_id),
             *(_float_text(value) for value in attack))))
     for identifier, skill, values, normal in sorted(weapon_profiles):
         combat_lines.append("weapon " + " ".join((str(identifier), str(skill),
             *(_float_text(value) for value in values), "1" if normal else "0")))
-    shield_weight = math.floor(_gmst_value(records, "iShieldWeight"))
-    light_max = shield_weight * _gmst_value(records, "fLightMaxMod") + 0.0005
-    medium_max = shield_weight * _gmst_value(records, "fMedMaxMod") + 0.0005
+    light_multiplier = _gmst_value(records, "fLightMaxMod")
+    medium_multiplier = _gmst_value(records, "fMedMaxMod")
     for identifier, _values, record_value in sorted(item_declarations):
         if record_value.kind != "ARMO":
             continue
-        armor_type, weight, _value, _health, _enchant, _armor = _unpack(record_value, "AODT", "<ifiiii")
-        if int(armor_type) != 8:
-            continue
+        armor_type, weight, _value, _health, _enchant, base_armor = _unpack(record_value, "AODT", "<ifiiii")
+        weight_gmst = ARMOR_WEIGHT_GMSTS.get(int(armor_type))
+        if weight_gmst is None:
+            raise BakeError(f"unsupported armor type: {record_value.name}")
+        type_weight = math.floor(_gmst_value(records, weight_gmst))
+        light_max = type_weight * light_multiplier + 0.0005
+        medium_max = type_weight * medium_multiplier + 0.0005
         armor_skill = 0 if float(weight) <= light_max else 1 if float(weight) <= medium_max else 2
-        combat_lines.append(f"shield {identifier} {armor_skill}")
+        combat_lines.append(f"armor {identifier} {armor_skill} {int(base_armor)}")
 
     generated = [
         _catalog("collision_content_file", recipe.path, "vanilla-collision.txt", collision_lines),

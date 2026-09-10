@@ -42,7 +42,9 @@ namespace
         combatPlayer.magicka = 40.f;
         combatPlayer.maximumMagicka = 50.f;
         combatPlayer.blockSkill = 15.f;
+        combatPlayer.armorSkills = { 21.f, 22.f, 23.f, 24.f };
         combatPlayer.skillProgression[static_cast<std::size_t>(CombatProgressionSkill::Block)].progress = 0.25f;
+        combatPlayer.skillProgression[static_cast<std::size_t>(CombatProgressionSkill::Unarmored)].progress = 0.75f;
         const std::array combatPlayers{ combatPlayer };
         OpenMwMeleeVictim first;
         first.health = 40.f;
@@ -71,8 +73,11 @@ namespace
         return snapshot && snapshot->selfPlayerId() == id<PlayerId>(1) && snapshot->selfHealth() == 60.f
             && snapshot->selfMaximumHealth() == 80.f && snapshot->selfFatigue() == 75.f
             && snapshot->selfMaximumFatigue() == 100.f && snapshot->selfMagicka() == 40.f
-            && snapshot->selfMaximumMagicka() == 50.f && snapshot->selfSkills().size() == 7
+            && snapshot->selfMaximumMagicka() == 50.f
+            && snapshot->selfSkills().size() == ReplicatedCombatSkillCount
             && snapshot->selfSkills()[0] == CombatSkillSnapshot{ ReplicatedCombatSkill::Block, 15.f, 0.25f }
+            && snapshot->selfSkills()[10]
+                == CombatSkillSnapshot{ ReplicatedCombatSkill::Unarmored, 24.f, 0.75f }
             && !snapshot->selfDead()
             && snapshot->actors().size() == 1 && snapshot->actors()[0].actorId == id<ActorId>(3)
             && snapshot->actors()[0].maximumHealth == 50.f

@@ -12,7 +12,7 @@ namespace
 
     constexpr std::array<std::size_t,
         static_cast<std::size_t>(TES3MP::CombatProgressionSkill::Count)> CharacterSkillIndexes{
-        0, 20, 5, 4, 6, 7, 26
+        0, 20, 5, 4, 6, 7, 26, 21, 2, 3, 17
     };
 
     float combatSkillValue(const TES3MP::CanonicalPlayerCombatState& player,
@@ -33,6 +33,10 @@ namespace
             case Skill::Spear:
                 return player.weaponSkills[static_cast<std::size_t>(TES3MP::MeleeWeaponSkill::Spear)];
             case Skill::HandToHand: return player.stats.handToHandSkill;
+            case Skill::LightArmor: return player.armorSkills[0];
+            case Skill::MediumArmor: return player.armorSkills[1];
+            case Skill::HeavyArmor: return player.armorSkills[2];
+            case Skill::Unarmored: return player.armorSkills[3];
             case Skill::Count: break;
         }
         return 0.f;
@@ -56,6 +60,10 @@ namespace
             case Skill::Spear:
                 player.weaponSkills[static_cast<std::size_t>(TES3MP::MeleeWeaponSkill::Spear)] = value; break;
             case Skill::HandToHand: player.stats.handToHandSkill = value; break;
+            case Skill::LightArmor: player.armorSkills[0] = value; break;
+            case Skill::MediumArmor: player.armorSkills[1] = value; break;
+            case Skill::HeavyArmor: player.armorSkills[2] = value; break;
+            case Skill::Unarmored: player.armorSkills[3] = value; break;
             case Skill::Count: break;
         }
     }
@@ -119,10 +127,11 @@ namespace
             && finite(value.reach) && value.reach > 0.f;
     }
 
-    bool validProfile(const TES3MP::MeleeShieldProfile& value) noexcept
+    bool validProfile(const TES3MP::MeleeArmorProfile& value) noexcept
     {
         return static_cast<std::uint8_t>(value.skill)
-            <= static_cast<std::uint8_t>(TES3MP::ShieldArmorSkill::HeavyArmor);
+                <= static_cast<std::uint8_t>(TES3MP::ArmorSkill::HeavyArmor)
+            && finite(value.baseArmor) && value.baseArmor >= 0.f;
     }
 
     bool valid(const TES3MP::CanonicalPlayerCombatState& value) noexcept
@@ -140,6 +149,7 @@ namespace
             || value.maximumEncumbranceWeightUnits == 0
             || !finite(value.blockSkill)
             || !std::ranges::all_of(value.weaponSkills, [](float skill) { return finite(skill); })
+            || !std::ranges::all_of(value.armorSkills, [](float skill) { return finite(skill); })
             || !validVictim(value.victim) || !validVictim(value.respawnVictim)
             || !finite(value.maximumHealth) || value.maximumHealth <= 0.f
             || !finite(value.maximumFatigue) || value.maximumFatigue < 0.f
@@ -240,6 +250,95 @@ namespace
             + static_cast<double>(velocity.y()) * std::cos(yaw);
         return forwardSpeed <= 0.0;
     }
+
+    constexpr std::uint32_t ArmorSlotMask = TES3MP::slotToMask(TES3MP::EquipmentSlot::Helmet)
+        | TES3MP::slotToMask(TES3MP::EquipmentSlot::Cuirass)
+        | TES3MP::slotToMask(TES3MP::EquipmentSlot::Greaves)
+        | TES3MP::slotToMask(TES3MP::EquipmentSlot::LeftPauldron)
+        | TES3MP::slotToMask(TES3MP::EquipmentSlot::RightPauldron)
+        | TES3MP::slotToMask(TES3MP::EquipmentSlot::LeftGauntlet)
+        | TES3MP::slotToMask(TES3MP::EquipmentSlot::RightGauntlet)
+        | TES3MP::slotToMask(TES3MP::EquipmentSlot::Boots)
+        | TES3MP::slotToMask(TES3MP::EquipmentSlot::CarriedLeft);
+
+    TES3MP::CombatProgressionSkill progressionSkill(TES3MP::ArmorSkill skill) noexcept
+    {
+        switch (skill)
+        {
+            case TES3MP::ArmorSkill::LightArmor: return TES3MP::CombatProgressionSkill::LightArmor;
+            case TES3MP::ArmorSkill::MediumArmor: return TES3MP::CombatProgressionSkill::MediumArmor;
+            case TES3MP::ArmorSkill::HeavyArmor: return TES3MP::CombatProgressionSkill::HeavyArmor;
+        }
+        return TES3MP::CombatProgressionSkill::Unarmored;
+    }
+
+    const TES3MP::CanonicalItemStack* equippedArmor(const TES3MP::CanonicalPlayerInventoryState* inventory,
+        TES3MP::EquipmentSlot slot, const TES3MP::ItemPrototypeCatalog& items,
+        const TES3MP::MeleeWeaponCatalog& weapons) noexcept
+    {
+        if (!inventory)
+            return nullptr;
+        const auto stackId = inventory->equipment[static_cast<std::size_t>(slot)];
+        const auto* stack = stackId ? inventory->findStack(*stackId) : nullptr;
+        const auto* item = stack ? items.find(stack->prototypeId) : nullptr;
+        return stack && item && item->category == TES3MP::ItemCategory::Armor && stack->condition > 0
+                && weapons.findArmor(stack->prototypeId)
+            ? stack : nullptr;
+    }
+
+    float armorRating(const TES3MP::CanonicalPlayerCombatState& player,
+        const TES3MP::CanonicalPlayerInventoryState* inventory,
+        const TES3MP::ItemPrototypeCatalog& items, const TES3MP::MeleeWeaponCatalog& weapons,
+        const TES3MP::OpenMwMeleeSettings& settings) noexcept
+    {
+        constexpr std::array slots{
+            std::pair{ TES3MP::EquipmentSlot::Cuirass, 0.30f },
+            std::pair{ TES3MP::EquipmentSlot::CarriedLeft, 0.10f },
+            std::pair{ TES3MP::EquipmentSlot::Helmet, 0.10f },
+            std::pair{ TES3MP::EquipmentSlot::Greaves, 0.10f },
+            std::pair{ TES3MP::EquipmentSlot::Boots, 0.10f },
+            std::pair{ TES3MP::EquipmentSlot::LeftPauldron, 0.10f },
+            std::pair{ TES3MP::EquipmentSlot::RightPauldron, 0.10f },
+            std::pair{ TES3MP::EquipmentSlot::LeftGauntlet, 0.05f },
+            std::pair{ TES3MP::EquipmentSlot::RightGauntlet, 0.05f },
+        };
+        const float unarmored = TES3MP::openMwUnarmoredRating(settings, player.armorSkills[3]);
+        float total = 0.f;
+        for (const auto& [slot, weight] : slots)
+        {
+            float rating = unarmored;
+            if (const auto* stack = equippedArmor(inventory, slot, items, weapons))
+            {
+                const auto* item = items.find(stack->prototypeId);
+                const auto* armor = weapons.findArmor(stack->prototypeId);
+                const float condition = item->maxCondition == 0 ? 1.f
+                    : static_cast<float>(stack->condition) / static_cast<float>(item->maxCondition);
+                rating = item->weightUnits == 0 ? armor->baseArmor * condition
+                    : TES3MP::openMwSkillAdjustedArmorRating(settings, armor->baseArmor,
+                        player.armorSkills[static_cast<std::size_t>(armor->skill)], condition);
+            }
+            total += rating * weight;
+        }
+        return total;
+    }
+
+    TES3MP::EquipmentSlot armorHitSlot(std::uint8_t roll, bool redistributeShield) noexcept
+    {
+        if (roll >= 90)
+        {
+            if (redistributeShield)
+                return roll >= 95 ? TES3MP::EquipmentSlot::Cuirass : TES3MP::EquipmentSlot::LeftPauldron;
+            return TES3MP::EquipmentSlot::CarriedLeft;
+        }
+        if (roll >= 85) return TES3MP::EquipmentSlot::RightGauntlet;
+        if (roll >= 80) return TES3MP::EquipmentSlot::LeftGauntlet;
+        if (roll >= 70) return TES3MP::EquipmentSlot::RightPauldron;
+        if (roll >= 60) return TES3MP::EquipmentSlot::LeftPauldron;
+        if (roll >= 50) return TES3MP::EquipmentSlot::Boots;
+        if (roll >= 40) return TES3MP::EquipmentSlot::Greaves;
+        if (roll >= 30) return TES3MP::EquipmentSlot::Helmet;
+        return TES3MP::EquipmentSlot::Cuirass;
+    }
 }
 
 namespace TES3MP
@@ -306,6 +405,8 @@ namespace TES3MP
             = static_cast<float>(skills[4]);
         result.weaponSkills[static_cast<std::size_t>(MeleeWeaponSkill::Axe)] = static_cast<float>(skills[6]);
         result.weaponSkills[static_cast<std::size_t>(MeleeWeaponSkill::Spear)] = static_cast<float>(skills[7]);
+        result.armorSkills = { static_cast<float>(skills[21]), static_cast<float>(skills[2]),
+            static_cast<float>(skills[3]), static_cast<float>(skills[17]) };
         for (std::size_t index = 0; index < result.skillProgression.size(); ++index)
         {
             const auto characterSkill = static_cast<std::uint8_t>(CharacterSkillIndexes[index]);
@@ -331,7 +432,7 @@ namespace TES3MP
 
     std::optional<MeleeWeaponCatalog> MeleeWeaponCatalog::create(
         const ItemPrototypeCatalog& items, std::span<const MeleeWeaponProfile> profiles,
-        std::span<const MeleeShieldProfile> shields) noexcept
+        std::span<const MeleeArmorProfile> armor) noexcept
     try
     {
         if (profiles.size() > MaximumItemPrototypes)
@@ -348,21 +449,29 @@ namespace TES3MP
                 || (index != 0 && values[index - 1].prototypeId == values[index].prototypeId))
                 return std::nullopt;
         }
-        if (shields.size() > MaximumItemPrototypes)
+        if (armor.size() > MaximumItemPrototypes)
             return std::nullopt;
-        std::vector<MeleeShieldProfile> shieldValues(shields.begin(), shields.end());
-        std::ranges::sort(shieldValues, {}, &MeleeShieldProfile::prototypeId);
-        for (std::size_t index = 0; index < shieldValues.size(); ++index)
+        std::vector<MeleeArmorProfile> armorValues(armor.begin(), armor.end());
+        std::ranges::sort(armorValues, {}, &MeleeArmorProfile::prototypeId);
+        for (std::size_t index = 0; index < armorValues.size(); ++index)
         {
-            const auto* item = items.find(shieldValues[index].prototypeId);
-            if (!validProfile(shieldValues[index]) || !item || item->category != ItemCategory::Armor
+            const auto* item = items.find(armorValues[index].prototypeId);
+            if (!validProfile(armorValues[index]) || !item || item->category != ItemCategory::Armor
                 || item->stackable || item->maxCondition == 0
                 || item->maxCondition > static_cast<std::uint32_t>(std::numeric_limits<std::int32_t>::max())
-                || (item->slotMask & slotToMask(EquipmentSlot::CarriedLeft)) == 0
-                || (index != 0 && shieldValues[index - 1].prototypeId == shieldValues[index].prototypeId))
+                || (item->slotMask & ArmorSlotMask) == 0
+                || (index != 0 && armorValues[index - 1].prototypeId == armorValues[index].prototypeId))
                 return std::nullopt;
         }
-        return MeleeWeaponCatalog(items.contentManifestId(), std::move(values), std::move(shieldValues));
+        for (const auto& item : items.declarations())
+        {
+            if (item.category != ItemCategory::Armor)
+                continue;
+            const auto found = std::ranges::lower_bound(armorValues, item.id, {}, &MeleeArmorProfile::prototypeId);
+            if (found == armorValues.end() || found->prototypeId != item.id)
+                return std::nullopt;
+        }
+        return MeleeWeaponCatalog(items.contentManifestId(), std::move(values), std::move(armorValues));
     }
     catch (...)
     {
@@ -375,10 +484,10 @@ namespace TES3MP
         return found != mProfiles.end() && found->prototypeId == id ? &*found : nullptr;
     }
 
-    const MeleeShieldProfile* MeleeWeaponCatalog::findShield(ItemPrototypeId id) const noexcept
+    const MeleeArmorProfile* MeleeWeaponCatalog::findArmor(ItemPrototypeId id) const noexcept
     {
-        const auto found = std::ranges::lower_bound(mShields, id, {}, &MeleeShieldProfile::prototypeId);
-        return found != mShields.end() && found->prototypeId == id ? &*found : nullptr;
+        const auto found = std::ranges::lower_bound(mArmor, id, {}, &MeleeArmorProfile::prototypeId);
+        return found != mArmor.end() && found->prototypeId == id ? &*found : nullptr;
     }
 
     const CanonicalPlayerCombatState* CanonicalCombatWorld::findPlayer(PlayerId id) const noexcept
@@ -414,6 +523,7 @@ namespace TES3MP
         value.magickaRecoveryPerSecond = source.magickaRecoveryPerSecond;
         value.skillRules = source.skillRules;
         value.skillProgression = source.skillProgression;
+        value.armorSkills = source.armorSkills;
         value.stats.weaponSkill = 0.f;
         value.stats.normalizedEncumbrance
             = normalizedEncumbrance(inventoryWeightUnits, source.maximumEncumbranceWeightUnits);
@@ -456,6 +566,7 @@ namespace TES3MP
         value.magickaRecoveryPerSecond = source.magickaRecoveryPerSecond;
         value.skillRules = source.skillRules;
         value.skillProgression = source.skillProgression;
+        value.armorSkills = source.armorSkills;
         value.stats.weaponSkill = 0.f;
         value.stats.normalizedEncumbrance
             = normalizedEncumbrance(inventoryWeightUnits, source.maximumEncumbranceWeightUnits);
@@ -839,23 +950,12 @@ namespace TES3MP
                 continue;
             if (resolution.hit)
             {
-                resolution.damage = openMwDifficultyScaledDamage(
-                    settings, resolution.damage, policy.difficulty, true);
-                if (resolution.damagedStat == MeleeDamageStat::Health)
-                {
-                    const float remaining = target->victim.health - resolution.damage;
-                    resolution.victimDied = remaining < 1.f;
-                    resolution.victimHealth = resolution.victimDied ? 0.f : remaining;
-                }
-                else
-                    resolution.victimFatigue = target->victim.fatigue - resolution.damage;
-
                 const auto* playerInventory = inventoryCandidate.findPlayer(target->playerId);
                 const auto left = static_cast<std::size_t>(EquipmentSlot::CarriedLeft);
                 const auto shieldId = playerInventory ? playerInventory->equipment[left] : std::nullopt;
                 const auto* shieldStack = shieldId && playerInventory ? playerInventory->findStack(*shieldId) : nullptr;
                 const auto* shieldItem = shieldStack ? items.find(shieldStack->prototypeId) : nullptr;
-                const auto* shield = shieldStack ? weapons.findShield(shieldStack->prototypeId) : nullptr;
+                const auto* shield = shieldStack ? weapons.findArmor(shieldStack->prototypeId) : nullptr;
                 const bool canBlock = shieldId && shieldStack && shieldItem && shield
                     && shieldItem->category == ItemCategory::Armor && shieldStack->condition > 0
                     && !target->victim.knockedDown && !target->victim.paralyzed
@@ -893,6 +993,47 @@ namespace TES3MP
                         (void)advanceCombatSkill(*target, CombatProgressionSkill::Block);
                     }
                 }
+                if (!resolution.blocked && resolution.damagedStat == MeleeDamageStat::Health)
+                {
+                    const float originalDamage = resolution.damage;
+                    const float armorAdjustedDamage = openMwArmorAdjustedDamage(settings, originalDamage,
+                        armorRating(*target, playerInventory, items, weapons, settings));
+                    resolution.damage = std::max(armorAdjustedDamage, 1.f);
+                    const auto armorRoll = random.uniformBelow(100);
+                    if (!armorRoll)
+                        return CombatSimulationError{ CombatSimulationErrorCode::InvalidWorld, index };
+                    const bool hasShield = equippedArmor(playerInventory,
+                        EquipmentSlot::CarriedLeft, items, weapons) != nullptr;
+                    const auto slot = armorHitSlot(static_cast<std::uint8_t>(*armorRoll),
+                        settings.redistributeShieldHitsWhenNotWearingShield && !hasShield);
+                    const auto* hitStack = equippedArmor(playerInventory, slot, items, weapons);
+                    const auto* armor = hitStack ? weapons.findArmor(hitStack->prototypeId) : nullptr;
+                    (void)advanceCombatSkill(*target, armor
+                        ? progressionSkill(armor->skill) : CombatProgressionSkill::Unarmored);
+                    if (hitStack && (!actor.creature || settings.unarmedCreatureAttacksDamageArmor))
+                    {
+                        const auto lossValue = std::ceil(std::max(0.f, originalDamage - armorAdjustedDamage));
+                        const auto loss = static_cast<std::uint32_t>(std::min<float>(lossValue,
+                            static_cast<float>(hitStack->condition)));
+                        const auto condition = hitStack->condition - loss;
+                        if (loss != 0
+                            && inventoryCandidate.setEquippedItemCondition(target->playerId, slot,
+                                hitStack->stackId, condition, condition == 0, tick)
+                                != EquippedConditionResult::Applied)
+                            return CombatSimulationError{ CombatSimulationErrorCode::RevisionExhausted, index };
+                    }
+                }
+                if (!resolution.blocked)
+                    resolution.damage = openMwDifficultyScaledDamage(
+                        settings, resolution.damage, policy.difficulty, true);
+                if (resolution.damagedStat == MeleeDamageStat::Health)
+                {
+                    const float remaining = target->victim.health - resolution.damage;
+                    resolution.victimDied = remaining < 1.f;
+                    resolution.victimHealth = resolution.victimDied ? 0.f : remaining;
+                }
+                else
+                    resolution.victimFatigue = target->victim.fatigue - resolution.damage;
             }
             const auto actorRevision = actor.revision.next();
             const auto targetRevision = target->revision.next();

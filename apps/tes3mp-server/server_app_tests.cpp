@@ -424,7 +424,7 @@ int main()
     using namespace TES3MP::ServerApp;
     {
         const auto manifestId
-            = ContentManifestId::fromHex("d5b68da26223dc8c1b61ade51a89a5b90c4b4d6514aede752eff4322e19cb4e7");
+            = ContentManifestId::fromHex("f69a886749559d3d54e673bd8c05f59c2ddf31feac728c5685eddc8ea341d7b7");
         const auto spaces = parseCellSpaceDeclarations("interior:1;interior:2;interior:3;exterior:4");
         const auto cells = parseContentCells("interior:1;interior:2;interior:3;exterior:4:-2:-9");
         const auto movement = parseMovementProfile("sneak:4;walk:8;run:16;jump:12");
@@ -493,8 +493,11 @@ int main()
         const auto* packagedCombat = std::get_if<CombatContent>(&packagedCombatResult);
         assert(packagedCombat && packagedCombat->world.actors().size() == 1
             && packagedCombat->weapons.find(id<ItemPrototypeId>(579706974062055657ull))
-            && packagedCombat->weapons.findShield(id<ItemPrototypeId>(9071396267722241944ull))
+            && packagedCombat->weapons.findArmor(id<ItemPrototypeId>(9071396267722241944ull))
+            && packagedCombat->weapons.findArmor(id<ItemPrototypeId>(9071396267722241944ull))->baseArmor == 10.f
+            && packagedCombat->world.actors()[0].creature
             && packagedCombat->playerTemplate.maximumMagicka == 50.f
+            && packagedCombat->playerTemplate.armorSkills[static_cast<std::size_t>(ArmorSkill::LightArmor)] == 5.f
             && std::abs(packagedCombat->playerTemplate.healthRecoveryPerSecond - 0.025f) < 0.000001f
             && std::abs(packagedCombat->playerTemplate.magickaRecoveryPerSecond - 0.0375f) < 0.000001f
             && std::abs(packagedCombat->playerTemplate.skillRules[static_cast<std::size_t>(
@@ -520,7 +523,7 @@ int main()
             && evidence->latestHighWaterMessages == 1 && evidence->latestHighWaterBytes == 10
             && !telemetry.takeDrainEvidence());
     }
-    static_assert(Phase7ProtocolMajor == 1 && Phase7ProtocolMinimumMinor == 4 && Phase7ProtocolMaximumMinor == 4);
+    static_assert(Phase7ProtocolMajor == 1 && Phase7ProtocolMinimumMinor == 5 && Phase7ProtocolMaximumMinor == 5);
     static_assert(Phase7SourceAuthenticationBurst == 4 && Phase7GlobalAuthenticationBurst == 32
         && Phase7AuthenticationRefillMilliseconds == 1'000 && Phase7ConnectionCapacity == 8);
     static_assert(!phase7ProofDisconnectGraceAccepted(MinimumResumeTokenLifetimeMilliseconds - 1));
@@ -740,18 +743,23 @@ int main()
         assert(static_cast<bool>(stream));
     };
     constexpr std::string_view combatHeader
-        = "TES3MP_COMBAT_V4\n"
+        = "TES3MP_COMBAT_V5\n"
           "manifest 0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20\n"
           "seed 42\n";
     constexpr std::string_view combatBody
-        = "settings 0.2 5 1 0.1 1 1 0.1 0.1 1 1 1.5 1 1.25 0.5 0.02 0.04 0.1 5 -90 90 1 1 1 0 100 1 1 1\n"
-          "progression 1 0.75 0.5 0.8 0 1 0 2 0 3 0 4 0 5 0 6 0 7\n"
-          "player 50 40 40 1 0 0 10 20 30 40 50 25 100 30 35 40 80 0.1 0.2 500 0\n"
-          "actor 1 20 50 0 0 0 25 0 0 0 0 0\n"
+        = "settings 0.2 5 1 0.1 1 1 0.1 0.1 1 1 1.5 1 1.25 0.5 0.02 0.04 0.1 5 -90 90 1 1 1 0 100 1 1 1 30 .01 .01 .25 0 0\n"
+          "progression 1 0.75 0.5 0.8 0 1 0 2 0 3 0 4 0 5 0 6 0 7 0 8 0 9 0 10 0 11\n"
+          "player 50 40 40 1 0 0 10 20 30 40 50 25 100 30 35 40 80 0.1 0.2 15 16 17 18 500 0\n"
+          "actor 1 20 50 0 0 0 25 0 0 0 0 0 1\n"
           "actor_attack 1 50 40 40 1 25 50 1 4 1 4 1 4 1 30\n"
-          "weapon 4 1 1 10 1 10 1 10 5 1 1\n";
-    const std::array combatItemDeclarations{ ItemPrototypeDeclaration{ id<ItemPrototypeId>(4), ItemCategory::Weapon, 5,
-        1, 100, 0, slotToMask(EquipmentSlot::CarriedRight), false, std::nullopt } };
+          "weapon 4 1 1 10 1 10 1 10 5 1 1\n"
+          "armor 5 2 30\n";
+    const std::array combatItemDeclarations{
+        ItemPrototypeDeclaration{ id<ItemPrototypeId>(4), ItemCategory::Weapon, 5,
+            1, 100, 0, slotToMask(EquipmentSlot::CarriedRight), false, std::nullopt },
+        ItemPrototypeDeclaration{ id<ItemPrototypeId>(5), ItemCategory::Armor, 5,
+            1, 100, 0, slotToMask(EquipmentSlot::CarriedLeft), false, std::nullopt },
+    };
     auto combatItems = *ItemPrototypeCatalog::create(parsedConfig().contentManifest, combatItemDeclarations);
     writeCombat(std::string(combatHeader) + std::string(combatBody));
     auto loadedCombat = loadCombatContent(combatPath, parsedConfig().contentManifest, actorCatalog, combatItems);
@@ -759,6 +767,10 @@ int main()
     const auto& combat = std::get<CombatContent>(loadedCombat);
     assert(combat.world.actors().size() == 1 && combat.world.players().empty()
         && combat.weapons.find(id<ItemPrototypeId>(4))
+        && combat.weapons.findArmor(id<ItemPrototypeId>(5))
+        && combat.weapons.findArmor(id<ItemPrototypeId>(5))->skill == ArmorSkill::HeavyArmor
+        && combat.weapons.findArmor(id<ItemPrototypeId>(5))->baseArmor == 30.f
+        && combat.world.actors()[0].creature
         && combat.world.actors()[0].attackReachQuanta == 128 * 1024
         && combat.world.actors()[0].maximumHealth == 20.f
         && combat.world.actors()[0].maximumFatigue == 50.f
@@ -770,40 +782,43 @@ int main()
         && combat.playerTemplate.maximumMagicka == 80.f
         && combat.playerTemplate.healthRecoveryPerSecond == 0.1f
         && combat.playerTemplate.magickaRecoveryPerSecond == 0.2f
+        && combat.playerTemplate.armorSkills[static_cast<std::size_t>(ArmorSkill::HeavyArmor)] == 17.f
         && combat.playerTemplate.skillSettings.majorFactor == 0.5f
         && combat.playerTemplate.skillRules[static_cast<std::size_t>(
             CombatProgressionSkill::LongBlade)].useGain == 3.f
         && combat.settings.difficultyMultiplier == 5.f
+        && combat.settings.baseArmorSkill == 30.f
+        && combat.settings.combatArmorMinimumMultiplier == 0.25f
         && combat.settings.fatigueReturnMultiplier == 0.04f
         && combat.playerTemplate.weaponSkills[static_cast<std::size_t>(MeleeWeaponSkill::LongBlade)] == 20.f);
     writeCombat(std::string(combatHeader)
-        + "settings nan 5 1 0.1 1 1 0.1 0.1 1 1 1.5 1 1.25 0.5 0.02 0.04 0.1 5 -90 90 1 1 1 0 100 1 1 1\n"
-          "progression 1 0.75 0.5 0.8 0 1 0 2 0 3 0 4 0 5 0 6 0 7\n"
-          "player 50 40 40 1 0 0 10 20 30 40 50 25 100 30 35 40 80 0.1 0.2 500 0\n"
-          "actor 1 20 50 0 0 0 25 0 0 0 0 0\n");
+        + "settings nan 5 1 0.1 1 1 0.1 0.1 1 1 1.5 1 1.25 0.5 0.02 0.04 0.1 5 -90 90 1 1 1 0 100 1 1 1 30 .01 .01 .25 0 0\n"
+          "progression 1 0.75 0.5 0.8 0 1 0 2 0 3 0 4 0 5 0 6 0 7 0 8 0 9 0 10 0 11\n"
+          "player 50 40 40 1 0 0 10 20 30 40 50 25 100 30 35 40 80 0.1 0.2 15 16 17 18 500 0\n"
+          "actor 1 20 50 0 0 0 25 0 0 0 0 0 1\n");
     const auto malformedCombat = std::get<CombatContentError>(
         loadCombatContent(combatPath, parsedConfig().contentManifest, actorCatalog, combatItems));
     assert(malformedCombat.code == CombatContentErrorCode::InvalidSettings && malformedCombat.line == 4
         && describeCombatContentError(malformedCombat) == "invalid settings at line 4");
     writeCombat(std::string(combatHeader)
-        + "settings 0.2 5 1 0.1 1 1 0.1 0.1 1 1 1.5 1 1.25 0.5 0.02 0.04 0.1 5 -181 90 1 1 1 0 100 1 1 1\n"
-          "progression 1 0.75 0.5 0.8 0 1 0 2 0 3 0 4 0 5 0 6 0 7\n"
-          "player 50 40 40 1 0 0 10 20 30 40 50 25 100 30 35 40 80 0.1 0.2 500 0\n"
-          "actor 1 20 50 0 0 0 25 0 0 0 0 0\n");
+        + "settings 0.2 5 1 0.1 1 1 0.1 0.1 1 1 1.5 1 1.25 0.5 0.02 0.04 0.1 5 -181 90 1 1 1 0 100 1 1 1 30 .01 .01 .25 0 0\n"
+          "progression 1 0.75 0.5 0.8 0 1 0 2 0 3 0 4 0 5 0 6 0 7 0 8 0 9 0 10 0 11\n"
+          "player 50 40 40 1 0 0 10 20 30 40 50 25 100 30 35 40 80 0.1 0.2 15 16 17 18 500 0\n"
+          "actor 1 20 50 0 0 0 25 0 0 0 0 0 1\n");
     assert(std::get<CombatContentError>(
                loadCombatContent(combatPath, parsedConfig().contentManifest, actorCatalog, combatItems))
                .code
         == CombatContentErrorCode::InvalidSettings);
     writeCombat(std::string(combatHeader)
-        + "settings 0.2 5 1 0.1 1 1 0.1 0.1 1 1 1.5 1 1.25 0.5 0.02 0.04 0.1 5 -90 90 1 1 1 0 100 1 1 1\n"
-          "progression 1 0.75 0.5 0.8 0 1 0 2 0 3 0 4 0 5 0 6 0 7\n"
-          "player 50 40 40 1 0 0 10 20 30 40 50 25 100 30 35 40 80 0.1 0.2 500 0\n");
+        + "settings 0.2 5 1 0.1 1 1 0.1 0.1 1 1 1.5 1 1.25 0.5 0.02 0.04 0.1 5 -90 90 1 1 1 0 100 1 1 1 30 .01 .01 .25 0 0\n"
+          "progression 1 0.75 0.5 0.8 0 1 0 2 0 3 0 4 0 5 0 6 0 7 0 8 0 9 0 10 0 11\n"
+          "player 50 40 40 1 0 0 10 20 30 40 50 25 100 30 35 40 80 0.1 0.2 15 16 17 18 500 0\n");
     assert(std::get<CombatContentError>(
                loadCombatContent(combatPath, parsedConfig().contentManifest, actorCatalog, combatItems))
                .code
         == CombatContentErrorCode::InvalidActorSet);
     writeCombat(
-        "TES3MP_COMBAT_V4\n"
+        "TES3MP_COMBAT_V5\n"
         "manifest 0202030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20\n"
         "seed 42\n"
         + std::string(combatBody));

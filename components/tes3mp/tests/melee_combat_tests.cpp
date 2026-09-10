@@ -164,6 +164,24 @@ namespace
             && near(TES3MP::openMwMeleeBlockFatigueCost(invalidBlock, 0.5f, weapon(), 0.5f), 0.f)
             && near(TES3MP::openMwDifficultyScaledDamage(input, 10.f, 101, true), 0.f);
     }
+
+    bool armor_helpers_match_openmw_formulas_and_bounds()
+    {
+        auto input = settings();
+        input.baseArmorSkill = 30.f;
+        input.unarmoredBase1 = 0.01f;
+        input.unarmoredBase2 = 0.01f;
+        input.combatArmorMinimumMultiplier = 0.25f;
+        auto invalid = input;
+        invalid.baseArmorSkill = 0.f;
+        return near(TES3MP::openMwSkillAdjustedArmorRating(input, 20.f, 45.f, 0.5f), 15.f)
+            && near(TES3MP::openMwUnarmoredRating(input, 50.f), 0.25f)
+            && near(TES3MP::openMwArmorAdjustedDamage(input, 10.f, 30.f), 2.5f)
+            && near(TES3MP::openMwArmorAdjustedDamage(input, 2.f, 100.f), 0.5f)
+            && near(TES3MP::openMwSkillAdjustedArmorRating(invalid, 20.f, 45.f, 1.f), 0.f)
+            && near(TES3MP::openMwArmorAdjustedDamage(input,
+                std::numeric_limits<float>::quiet_NaN(), 10.f), 0.f);
+    }
 }
 
 int main()
@@ -172,6 +190,7 @@ int main()
             && unarmed_fatigue_and_health_paths_match_openmw() && invalid_external_values_fail_without_results()
             && fatigue_term_and_recovery_match_openmw_formulas()
             && difficulty_and_block_helpers_match_openmw_formulas()
+            && armor_helpers_match_openmw_formulas_and_bounds()
         ? 0
         : 1;
 }

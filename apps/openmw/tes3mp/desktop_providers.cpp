@@ -1147,7 +1147,8 @@ namespace TES3MP::OpenMWAdapter
             playerStats.setMagicka(magicka);
             const std::array skillIds{ ESM::Skill::Block, ESM::Skill::ShortBlade,
                 ESM::Skill::LongBlade, ESM::Skill::BluntWeapon, ESM::Skill::Axe,
-                ESM::Skill::Spear, ESM::Skill::HandToHand };
+                ESM::Skill::Spear, ESM::Skill::HandToHand, ESM::Skill::LightArmor,
+                ESM::Skill::MediumArmor, ESM::Skill::HeavyArmor, ESM::Skill::Unarmored };
             auto& npcStats = player.getClass().getNpcStats(player);
             for (const auto& confirmed : snapshot.selfSkills())
             {

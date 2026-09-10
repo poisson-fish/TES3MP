@@ -15,8 +15,8 @@ namespace TES3MP::ServerApp
 {
     namespace
     {
-        constexpr std::string_view Header = "TES3MP_COMBAT_V4";
-        constexpr std::size_t MaximumFields = 32;
+        constexpr std::string_view Header = "TES3MP_COMBAT_V5";
+        constexpr std::size_t MaximumFields = 40;
 
         struct ActorAttackDeclaration
         {
@@ -105,7 +105,7 @@ namespace TES3MP::ServerApp
         std::vector<CanonicalActorCombatState> actorStates;
         std::vector<ActorAttackDeclaration> actorAttacks;
         std::vector<MeleeWeaponProfile> weaponProfiles;
-        std::vector<MeleeShieldProfile> shieldProfiles;
+        std::vector<MeleeArmorProfile> armorProfiles;
         std::size_t lineNumber = 0;
         for (std::size_t begin = 0; begin <= text.size();)
         {
@@ -140,20 +140,25 @@ namespace TES3MP::ServerApp
                 }
                 else if (values[0] == "settings")
                 {
-                    if (values.size() != 29 || settings)
+                    if (values.size() != 35 || settings)
                         return error(CombatContentErrorCode::Malformed, lineNumber);
-                    std::array<float, 28> parsed{};
+                    std::array<float, 32> parsed{};
                     for (std::size_t index = 0; index < parsed.size(); ++index)
                     {
                         const auto value = finiteFloat(values[index + 1]);
                         if (!value) return error(CombatContentErrorCode::InvalidSettings, lineNumber);
                         parsed[index] = *value;
                     }
+                    const auto unarmedCreatureWear = boolean(values[33]);
+                    const auto redistributeShieldHits = boolean(values[34]);
+                    if (!unarmedCreatureWear || !redistributeShieldHits)
+                        return error(CombatContentErrorCode::InvalidSettings, lineNumber);
                     settings = OpenMwMeleeSettings{ parsed[0], parsed[1], parsed[2], parsed[3], parsed[4],
                         parsed[5], parsed[6], parsed[7], parsed[8], parsed[9], parsed[10], parsed[11],
                         parsed[12], parsed[13], parsed[14], parsed[15], parsed[16], parsed[17], parsed[18],
                         parsed[19], parsed[20], parsed[21], parsed[22], parsed[23], parsed[24], parsed[25],
-                        parsed[26], parsed[27] };
+                        parsed[26], parsed[27], parsed[28], parsed[29], parsed[30], parsed[31],
+                        *unarmedCreatureWear, *redistributeShieldHits };
                     if (settings->minimumHandToHandMultiplier > settings->maximumHandToHandMultiplier
                         || settings->fatigueBase < 0.f || settings->fatigueMultiplier < 0.f
                         || settings->fatigueReturnBase < 0.f || settings->fatigueReturnMultiplier < 0.f
@@ -165,22 +170,25 @@ namespace TES3MP::ServerApp
                         || settings->blockMinimumChance < 0.f
                         || settings->blockMinimumChance > settings->blockMaximumChance
                         || settings->blockMaximumChance > 100.f || settings->fatigueBlockBase < 0.f
-                        || settings->fatigueBlockMultiplier < 0.f || settings->weaponFatigueBlockMultiplier < 0.f)
+                        || settings->fatigueBlockMultiplier < 0.f || settings->weaponFatigueBlockMultiplier < 0.f
+                        || settings->baseArmorSkill <= 0.f || settings->unarmoredBase1 < 0.f
+                        || settings->unarmoredBase2 < 0.f || settings->combatArmorMinimumMultiplier < 0.f
+                        || settings->combatArmorMinimumMultiplier > 1.f)
                         return error(CombatContentErrorCode::InvalidSettings, lineNumber);
                 }
                 else if (values[0] == "player")
                 {
-                    if (values.size() != 22 || playerTemplate)
+                    if (values.size() != 26 || playerTemplate)
                         return error(CombatContentErrorCode::Malformed, lineNumber);
-                    std::array<float, 19> parsed{};
+                    std::array<float, 23> parsed{};
                     for (std::size_t index = 0; index < parsed.size(); ++index)
                     {
                         const auto value = finiteFloat(values[index + 1]);
                         if (!value) return error(CombatContentErrorCode::InvalidPlayerTemplate, lineNumber);
                         parsed[index] = *value;
                     }
-                    const auto maximumWeight = number<std::uint64_t>(values[20]);
-                    const auto werewolf = boolean(values[21]);
+                    const auto maximumWeight = number<std::uint64_t>(values[24]);
+                    const auto werewolf = boolean(values[25]);
                     if (!maximumWeight || *maximumWeight == 0 || !werewolf || parsed[13] < 0.f
                         || parsed[14] < 0.f || parsed[15] <= 0.f || parsed[16] < 0.f
                         || parsed[17] < 0.f || parsed[18] < 0.f)
@@ -203,6 +211,7 @@ namespace TES3MP::ServerApp
                     playerTemplate->maximumMagicka = parsed[16];
                     playerTemplate->healthRecoveryPerSecond = parsed[17];
                     playerTemplate->magickaRecoveryPerSecond = parsed[18];
+                    playerTemplate->armorSkills = { parsed[19], parsed[20], parsed[21], parsed[22] };
                 }
                 else if (values[0] == "progression")
                 {
@@ -234,7 +243,7 @@ namespace TES3MP::ServerApp
                 }
                 else if (values[0] == "actor")
                 {
-                    if (values.size() != 13)
+                    if (values.size() != 14)
                         return error(CombatContentErrorCode::Malformed, lineNumber);
                     const auto rawActor = number<std::uint64_t>(values[1]);
                     const auto actor = rawActor ? ActorId::fromValue(*rawActor) : std::nullopt;
@@ -249,7 +258,8 @@ namespace TES3MP::ServerApp
                     const auto paralyzed = boolean(values[10]);
                     const auto unaware = boolean(values[11]);
                     const auto dead = boolean(values[12]);
-                    if (!actor || !knockedDown || !paralyzed || !unaware || !dead)
+                    const auto creature = boolean(values[13]);
+                    if (!actor || !knockedDown || !paralyzed || !unaware || !dead || !creature)
                         return error(CombatContentErrorCode::InvalidActorSet, lineNumber);
                     if (parsed[0] < 0.f || (*dead && parsed[0] != 0.f) || (!*dead && parsed[0] < 1.f))
                         return error(CombatContentErrorCode::InvalidActorSet, lineNumber);
@@ -261,7 +271,7 @@ namespace TES3MP::ServerApp
                     victim.paralyzed = *paralyzed; victim.unaware = *unaware; victim.dead = *dead;
                     actorStates.push_back({ *actor, CombatRevision::initial(), victim, victim,
                         {}, std::nullopt, 0, std::nullopt, std::nullopt, std::nullopt,
-                        victim.health, victim.fatigue });
+                        victim.health, victim.fatigue, *creature });
                     if (actorStates.size() > MaximumActorCombatants)
                         return error(CombatContentErrorCode::TooLarge, lineNumber);
                 }
@@ -325,17 +335,19 @@ namespace TES3MP::ServerApp
                     if (weaponProfiles.size() > MaximumItemPrototypes)
                         return error(CombatContentErrorCode::TooLarge, lineNumber);
                 }
-                else if (values[0] == "shield")
+                else if (values[0] == "armor")
                 {
-                    if (values.size() != 3)
+                    if (values.size() != 4)
                         return error(CombatContentErrorCode::Malformed, lineNumber);
                     const auto rawPrototype = number<std::uint64_t>(values[1]);
                     const auto prototype = rawPrototype ? ItemPrototypeId::fromValue(*rawPrototype) : std::nullopt;
                     const auto rawSkill = number<std::uint8_t>(values[2]);
-                    if (!prototype || !rawSkill || *rawSkill > static_cast<std::uint8_t>(ShieldArmorSkill::HeavyArmor))
+                    const auto baseArmor = finiteFloat(values[3]);
+                    if (!prototype || !rawSkill || *rawSkill > static_cast<std::uint8_t>(ArmorSkill::HeavyArmor)
+                        || !baseArmor || *baseArmor < 0.f)
                         return error(CombatContentErrorCode::InvalidWeaponCatalog, lineNumber);
-                    shieldProfiles.push_back({ *prototype, static_cast<ShieldArmorSkill>(*rawSkill) });
-                    if (shieldProfiles.size() > MaximumItemPrototypes)
+                    armorProfiles.push_back({ *prototype, static_cast<ArmorSkill>(*rawSkill), *baseArmor });
+                    if (armorProfiles.size() > MaximumItemPrototypes)
                         return error(CombatContentErrorCode::TooLarge, lineNumber);
                 }
                 else
@@ -372,7 +384,7 @@ namespace TES3MP::ServerApp
             actorStates[index].naturalWeapon = actorAttacks[index].weapon;
             actorStates[index].attackReachQuanta = actorAttacks[index].reachQuanta;
         }
-        auto weapons = MeleeWeaponCatalog::create(items, weaponProfiles, shieldProfiles);
+        auto weapons = MeleeWeaponCatalog::create(items, weaponProfiles, armorProfiles);
         if (!weapons)
             return error(CombatContentErrorCode::InvalidWeaponCatalog);
         const auto streamKey = RandomStreamKey::fromValues(5, 0);
