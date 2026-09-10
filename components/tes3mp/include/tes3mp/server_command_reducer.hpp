@@ -7,6 +7,7 @@
 #include "inventory_world.hpp"
 #include "movement_kernel.hpp"
 #include "observability.hpp"
+#include "server_scripting.hpp"
 
 #include <atomic>
 #include <cstdint>
@@ -41,6 +42,9 @@ namespace TES3MP
         CandidateStateInvalid,
         SpatialIntegrationOverflow,
         SpatialRevisionExhausted,
+        ScriptCommandLimitExceeded,
+        ScriptEligibleTickMismatch,
+        ScriptOrderNotStrictlyIncreasing,
     };
 
     class CommandDispositionRecord
@@ -87,6 +91,10 @@ namespace TES3MP
     public:
         constexpr CommandBatchReductionError error() const noexcept { return mError; }
         std::span<const CommandDispositionRecord> dispositions() const noexcept { return mDispositions; }
+        std::span<const ServerScriptCommandDispositionRecord> scriptDispositions() const noexcept
+        {
+            return mScriptDispositions;
+        }
         constexpr CanonicalSinkDeliveryReport sinkDeliveryReport() const noexcept { return mSinkDeliveryReport; }
         constexpr explicit operator bool() const noexcept { return mError == CommandBatchReductionError::None; }
 
@@ -98,6 +106,7 @@ namespace TES3MP
 
         CommandBatchReductionError mError = CommandBatchReductionError::None;
         std::vector<CommandDispositionRecord> mDispositions;
+        std::vector<ServerScriptCommandDispositionRecord> mScriptDispositions;
         CanonicalSinkDeliveryReport mSinkDeliveryReport;
     };
 
@@ -232,6 +241,8 @@ namespace TES3MP
             const InteractiveObjectCatalog& objectCatalog, const CanonicalInventoryWorld& inventory,
             const ItemPrototypeCatalog& itemCatalog);
         PreparedBatch prepareTick(const ServerTickCommandBatch& batch, CanonicalCommandWorlds worlds);
+        PreparedBatch prepareTick(const ServerTickCommandBatch& batch, CanonicalCommandWorlds worlds,
+            std::span<const QueuedServerScriptCommand> scriptCommands);
         bool commit(PreparedBatch&& prepared);
         bool commit(PreparedBatch&& prepared, CanonicalInteractiveObjectWorld& objects);
         bool commit(PreparedBatch&& prepared, CanonicalInventoryWorld& inventory);
@@ -269,6 +280,8 @@ namespace TES3MP
             const OpenMwMeleeSettings* meleeSettings = nullptr, const MeleeAuthorityPolicy* meleePolicy = nullptr,
             ServerMeleeContactQuery* meleeContact = nullptr, const DirectMagicCatalog* directMagic = nullptr);
         PreparedBatch prepareTickState(PreparedBatch prepared, const ServerTickCommandBatch& batch);
+        PreparedBatch prepareScriptCommands(PreparedBatch prepared, const ServerTickCommandBatch& batch,
+            std::span<const QueuedServerScriptCommand> commands);
         bool commitPrepared(
             PreparedBatch&& prepared, CanonicalInteractiveObjectWorld* objects, CanonicalInventoryWorld* inventory,
             CanonicalCombatWorld* combat = nullptr);

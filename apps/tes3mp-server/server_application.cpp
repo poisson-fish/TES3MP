@@ -655,6 +655,11 @@ namespace TES3MP::ServerApp
     {
         if (!mRunning)
             return false;
+        if (mWiring && mWiring->scripts && !mWiring->scripts->healthy())
+        {
+            mFailure = "server script delivery failed";
+            return false;
+        }
         std::array<TransportEvent, 128> events{};
         const auto result = mTransport.poll(events);
         if (result.result != TransportResult::Accepted)
@@ -870,6 +875,11 @@ namespace TES3MP::ServerApp
             mFailure = "melee contact history composition incomplete";
             return false;
         }
+        if (mWiring->scripts && !mWiring->scripts->healthy())
+        {
+            mFailure = "server script delivery failed";
+            return false;
+        }
         const auto pumpedCommands = mWiring->intake.pump();
         if (!pumpedCommands)
         {
@@ -878,6 +888,16 @@ namespace TES3MP::ServerApp
         }
         for (const auto& batch : pumpedCommands.batches())
         {
+            ServerScriptPumpResult pumpedScripts;
+            if (mWiring->scripts)
+            {
+                pumpedScripts = mWiring->scripts->pump(batch.scheduledTick().value());
+                if (!pumpedScripts)
+                {
+                    mFailure = "server script command pump failed";
+                    return false;
+                }
+            }
             const auto before = directMutationBase ? *directMutationBase : mWiring->reducer.state();
             const auto revisionBefore = directMutationBaseRevision.value_or(mWiring->reducer.canonicalRevision());
             directMutationBase.reset();
@@ -885,7 +905,7 @@ namespace TES3MP::ServerApp
             CanonicalCommandWorlds commandWorlds{ mWiring->interactiveObjects, mWiring->interactiveObjectCatalog,
                 mWiring->inventory, mWiring->itemCatalog, mWiring->combat, mWiring->actors, mWiring->meleeWeapons,
                 mWiring->meleeSettings, mWiring->meleePolicy, mWiring->meleeContact, mWiring->directMagic };
-            auto prepared = mWiring->reducer.prepareTick(batch, commandWorlds);
+            auto prepared = mWiring->reducer.prepareTick(batch, commandWorlds, pumpedScripts.commands());
             if (!prepared.result())
             {
                 mFailure = "command reduction failed";
@@ -1142,6 +1162,11 @@ namespace TES3MP::ServerApp
             if (!committed)
             {
                 mFailure = "canonical commit failed";
+                return false;
+            }
+            if (mWiring->scripts && !mWiring->scripts->healthy())
+            {
+                mFailure = "server script delivery failed";
                 return false;
             }
             if (actorCandidate)

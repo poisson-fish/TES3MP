@@ -390,6 +390,39 @@ namespace
         AuthenticatedJoinCoordinator joins{ joinCoordinator(reducer) };
     };
 
+    class OverflowingJoinScript final : public ServerScriptCallback
+    {
+    public:
+        ServerScriptCallbackResult onEvent(
+            const ServerScriptCallbackInput& input, ServerScriptCommandEmitter& output) noexcept override
+        {
+            const auto& player = input.event().playerState();
+            if (!player)
+                return ServerScriptCallbackResult::Failed;
+            const EntityPrecondition precondition(
+                player->entityId(), player->entityRevision(), player->authorityEpoch());
+            for (std::size_t index = 0; index <= MaximumServerScriptCommandsPerCallback; ++index)
+            {
+                if (output.enqueue(ServerScriptPlayerSafePointCommand(
+                        player->playerId(), precondition, player->transform()))
+                    != ServerScriptEmitResult::Accepted)
+                    break;
+            }
+            return ServerScriptCallbackResult::Accepted;
+        }
+    };
+
+    struct ScriptJoinFixture
+    {
+        NullMetricSink metrics;
+        NullStructuredEventSink events;
+        Observability observability{ metrics, events };
+        DeterministicServerScriptRuntime scripts;
+        CanonicalCommandReducer reducer{ std::get<CanonicalServerState>(createCanonicalServerState({}, {})),
+            observability, CanonicalSinkBundle(nullptr, nullptr, &scripts, nullptr), testContentManifest() };
+        AuthenticatedJoinCoordinator joins{ joinCoordinator(reducer) };
+    };
+
     TES3MP::ServerApp::ServerConfig parsedConfig()
     {
         auto result = TES3MP::ServerApp::parseServerConfig(validConfig);
@@ -997,6 +1030,51 @@ int main()
     failed.pollResult = TES3MP::TransportResult::RuntimeFailed;
     assert(!failedApplication.pump());
     assert(failed.calls == "LPSX");
+
+    {
+        FixedClock clock;
+        NullMetricSink metrics;
+        NullStructuredEventSink events;
+        Observability observability(metrics, events);
+        FakeAuthentication authentication;
+        RecordingCrypto crypto;
+        auto queues = OutboundQueueSet::create(OutboundQueuePolicy{}, 1);
+        auto timeouts = *SessionTimeoutPolicy::create(1'000'000, 1'000'000, 1'000'000);
+        ConnectionSessionCoordinator sessions(
+            clock, observability, timeouts, poseOffer(), authentication, *queues, 1);
+        ScriptJoinFixture fixture;
+        OverflowingJoinScript callback;
+        const auto package = ServerScriptPackage::create(1, 1, 1);
+        assert(package
+            && fixture.scripts.registerCallback(
+                   *package, 1, ServerScriptEventKind::SessionJoined, callback)
+                == ServerScriptRegistrationResult::Accepted);
+        ServerCommandIntakeCoordinator intake(
+            clock, observability, clock.now(), ServerTick::initial(), IngressOrdinal::initial());
+        auto lifecycle
+            = ServerLifecycleCoordinator::create(config.disconnectGraceMilliseconds * 1'000'000, fixture.reducer);
+        assert(lifecycle);
+        FakeRuntime scriptRuntime;
+        const auto connection = TransportConnectionId::initial();
+        scriptRuntime.events.push_back(
+            { TransportEventKind::ConnectionAccepted, TransportFailure::None, std::nullopt, std::nullopt, connection,
+                std::nullopt, TransportSecurity::EncryptedUnauthenticated, scope(std::byte{ 9 }) });
+        scriptRuntime.incoming.push_back({ TransportChannel::ReliableOrdered,
+            std::get<std::vector<std::byte>>(encodeProtocolFrame(MessageClass::SessionControl,
+                MessageKind::ClientHello, encodeClientHello(ClientHello::fromOffer(poseOffer())))) });
+        ServerApplicationWiring wiring{
+            sessions, fixture.joins, crypto, *queues, clock, intake, fixture.reducer, *lifecycle };
+        wiring.scripts = &fixture.scripts;
+        ServerApplication scriptApplication(scriptRuntime, config, wiring);
+        assert(scriptApplication.start() && scriptApplication.pump(ServerTick::initial()));
+        auto material = AuthenticationMaterial::create({});
+        scriptRuntime.incoming.push_back({ TransportChannel::ReliableOrdered,
+            std::get<std::vector<std::byte>>(encodeProtocolFrame(MessageClass::SessionControl,
+                MessageKind::AuthenticationRequest,
+                encodeAuthenticationRequest(AuthenticationRequest::join(std::move(*material))))) });
+        assert(!scriptApplication.pump(ServerTick::initial())
+            && scriptApplication.failure() == "server script delivery failed" && !fixture.scripts.healthy());
+    }
 
     {
         JoinFixture joinFixture;

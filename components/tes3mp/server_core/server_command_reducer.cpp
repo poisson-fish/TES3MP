@@ -64,6 +64,9 @@ namespace
                 return CommandReductionObservationOutcome::IngressOrdinalNotStrictlyIncreasing;
             case CommandBatchReductionError::StateVersionCapacityExceeded:
                 return CommandReductionObservationOutcome::StateVersionCapacityExceeded;
+            case CommandBatchReductionError::ScriptCommandLimitExceeded:
+            case CommandBatchReductionError::ScriptEligibleTickMismatch:
+            case CommandBatchReductionError::ScriptOrderNotStrictlyIncreasing:
             case CommandBatchReductionError::CandidateStateInvalid:
                 return CommandReductionObservationOutcome::CandidateStateInvalid;
             case CommandBatchReductionError::None:
@@ -1121,6 +1124,113 @@ namespace TES3MP
         return prepared;
     }
 
+    CanonicalCommandReducer::PreparedBatch CanonicalCommandReducer::prepareScriptCommands(PreparedBatch prepared,
+        const ServerTickCommandBatch& batch, std::span<const QueuedServerScriptCommand> commands)
+    {
+        if (!prepared.result())
+            return prepared;
+        const ServerTick tick = batch.scheduledTick().value();
+        if (commands.size() > MaximumServerScriptCommandsPerTick)
+        {
+            prepared.mResult.mError = CommandBatchReductionError::ScriptCommandLimitExceeded;
+            return prepared;
+        }
+        for (std::size_t index = 0; index < commands.size(); ++index)
+        {
+            if (commands[index].order().eligibleTick() != tick)
+            {
+                prepared.mResult.mError = CommandBatchReductionError::ScriptEligibleTickMismatch;
+                return prepared;
+            }
+            if (index != 0 && commands[index - 1].order() >= commands[index].order())
+            {
+                prepared.mResult.mError = CommandBatchReductionError::ScriptOrderNotStrictlyIncreasing;
+                return prepared;
+            }
+        }
+        if (!canReserveCanonicalStateVersions(prepared.mStateVersion, commands.size()))
+        {
+            prepared.mResult.mError = CommandBatchReductionError::StateVersionCapacityExceeded;
+            return prepared;
+        }
+
+        try
+        {
+            std::vector<CanonicalPlayerEntityState> players(
+                prepared.mState->players().begin(), prepared.mState->players().end());
+            prepared.mResult.mScriptDispositions.reserve(commands.size());
+            bool stateChanged = false;
+            for (const auto& queued : commands)
+            {
+                const auto& command = std::get<ServerScriptPlayerSafePointCommand>(queued.payload());
+                ServerScriptCommandDisposition disposition = ServerScriptCommandDisposition::UnknownPlayer;
+                const auto found = std::ranges::find(players, command.player(), &CanonicalPlayerEntityState::playerId);
+                if (found != players.end())
+                {
+                    if (!std::ranges::any_of(prepared.mState->activeSessions(), [&](const auto& session) {
+                            return session.playerId() == command.player();
+                        }))
+                        disposition = ServerScriptCommandDisposition::InactivePlayer;
+                    else if (command.precondition().entityId() != found->entityId())
+                        disposition = ServerScriptCommandDisposition::EntityBindingMismatch;
+                    else if (command.precondition().expectedRevision() != found->entityRevision())
+                        disposition = ServerScriptCommandDisposition::EntityRevisionMismatch;
+                    else if (command.precondition().expectedAuthorityEpoch() != found->authorityEpoch())
+                        disposition = ServerScriptCommandDisposition::AuthorityEpochMismatch;
+                    else if (!mContentManifest.contains(command.destination().cell()))
+                        disposition = ServerScriptCommandDisposition::UnknownCell;
+                    else
+                    {
+                        auto advanced = advanceCanonicalSpatialState(*found, tick, command.destination(),
+                            LinearVelocity3(0, 0, 0), LocomotionMode::Walk);
+                        if (const auto* replacement = std::get_if<CanonicalPlayerEntityState>(&advanced))
+                        {
+                            *found = *replacement;
+                            prepared.mStateVersion = *prepared.mStateVersion.next();
+                            if (prepared.mCanonicalRevision == prepared.mBaseCanonicalRevision)
+                            {
+                                const auto nextRevision = prepared.mCanonicalRevision.next();
+                                if (!nextRevision)
+                                {
+                                    prepared.mResult.mError = CommandBatchReductionError::StateVersionCapacityExceeded;
+                                    return prepared;
+                                }
+                                prepared.mCanonicalRevision = *nextRevision;
+                            }
+                            prepared.mPublication->mSpatialTicks.push_back(
+                                { prepared.mStateVersion, tick, *replacement });
+                            disposition = ServerScriptCommandDisposition::Applied;
+                            stateChanged = true;
+                        }
+                        else if (std::get<SpatialAdvanceError>(advanced).code
+                            == SpatialAdvanceErrorCode::TickRegression)
+                            disposition = ServerScriptCommandDisposition::SpatialTickRegression;
+                        else
+                            disposition = ServerScriptCommandDisposition::EntityRevisionExhausted;
+                    }
+                }
+                prepared.mResult.mScriptDispositions.emplace_back(queued.order(), disposition);
+            }
+            if (stateChanged)
+            {
+                auto candidate = createCanonicalServerState(players, prepared.mState->activeSessions());
+                auto* state = std::get_if<CanonicalServerState>(&candidate);
+                if (!state)
+                {
+                    prepared.mResult.mError = CommandBatchReductionError::CandidateStateInvalid;
+                    return prepared;
+                }
+                prepared.mState = std::make_shared<CanonicalServerState>(std::move(*state));
+                prepared.mCheckpointTick = tick;
+            }
+        }
+        catch (...)
+        {
+            prepared.mResult.mError = CommandBatchReductionError::CandidateStateInvalid;
+        }
+        return prepared;
+    }
+
     CanonicalCommandReducer::PreparedBatch CanonicalCommandReducer::prepareTick(const ServerTickCommandBatch& batch)
     {
         return prepareTickState(prepare(batch), batch);
@@ -1151,6 +1261,15 @@ namespace TES3MP
         return prepareTickState(prepareCommands(batch, worlds.interactiveObjects, worlds.interactiveObjectCatalog,
             worlds.inventory, worlds.itemCatalog, worlds.combat, worlds.actors, worlds.meleeWeapons,
             worlds.meleeSettings, worlds.meleePolicy, worlds.meleeContact, worlds.directMagic), batch);
+    }
+
+    CanonicalCommandReducer::PreparedBatch CanonicalCommandReducer::prepareTick(const ServerTickCommandBatch& batch,
+        CanonicalCommandWorlds worlds, std::span<const QueuedServerScriptCommand> scriptCommands)
+    {
+        auto prepared = prepareCommands(batch, worlds.interactiveObjects, worlds.interactiveObjectCatalog,
+            worlds.inventory, worlds.itemCatalog, worlds.combat, worlds.actors, worlds.meleeWeapons,
+            worlds.meleeSettings, worlds.meleePolicy, worlds.meleeContact, worlds.directMagic);
+        return prepareTickState(prepareScriptCommands(std::move(prepared), batch, scriptCommands), batch);
     }
 
     bool CanonicalCommandReducer::commitPrepared(

@@ -329,8 +329,10 @@ int main(int argc, char** argv)
     TES3MP::NullMetricSink metrics;
     TES3MP::NullStructuredEventSink events;
     TES3MP::Observability observability(metrics, events);
+    TES3MP::DeterministicServerScriptRuntime scripts;
     auto emptyState = std::get<TES3MP::CanonicalServerState>(TES3MP::createCanonicalServerState({}, {}));
-    TES3MP::CanonicalCommandReducer reducer(std::move(emptyState), observability, config.contentManifest, *collision);
+    TES3MP::CanonicalCommandReducer reducer(std::move(emptyState), observability,
+        TES3MP::CanonicalSinkBundle(nullptr, nullptr, &scripts, nullptr), config.contentManifest, *collision);
     TES3MP::ServerCommandIntakeCoordinator intake(
         clock, observability, clock.now(), TES3MP::ServerTick::initial(), TES3MP::IngressOrdinal::initial());
     auto joins = playerIdentities ? TES3MP::AuthenticatedJoinCoordinator::create(spawns, config.contentManifest,
@@ -364,7 +366,8 @@ int main(int argc, char** argv)
             combatContent ? &meleePolicy : nullptr,
             meleeContactHistory ? &*meleeContactHistory : nullptr,
             meleeContactHistory ? &*meleeContactHistory : nullptr,
-            combatContent ? &combatContent->magic : nullptr });
+            combatContent ? &combatContent->magic : nullptr,
+            &scripts });
     if (!application.start())
     {
         std::cerr << application.failure() << '\n';

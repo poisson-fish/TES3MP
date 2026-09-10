@@ -10,6 +10,7 @@
 #include "tes3mp/inventory_world.hpp"
 #include "tes3mp/protocol_pose.hpp"
 #include "tes3mp/server_lifecycle.hpp"
+#include "tes3mp/server_scripting.hpp"
 
 #include <map>
 #include <optional>
@@ -44,6 +45,7 @@ namespace TES3MP::ServerApp
         ServerMeleeContactQuery* meleeContact = nullptr;
         ServerMeleeContactHistory* meleeContactHistory = nullptr;
         const DirectMagicCatalog* directMagic = nullptr;
+        DeterministicServerScriptRuntime* scripts = nullptr;
     };
 
     class ServerApplication

@@ -19,7 +19,7 @@ Code and tests are authoritative when this document becomes stale.
 | `tes3mp_protocol` | Strong value types, bounded frames, FlatBuffers codecs, negotiation, authentication and character-profile messages, reliable operations, canonical snapshots, actors, objects, inventory, melee combat, and VR pose |
 | `tes3mp_transport` | Project-owned connection, channel, queue, lifecycle, reason, and telemetry interfaces |
 | `tes3mp_transport_gns` | Private GameNetworkingSockets adapter with c-ares/OpenSSL dependency composition |
-| `tes3mp_server_core` | Deterministic authentication, canonical worlds, fixed ticks, command intake/reduction, publication, checksums, lifecycle, resync, and sink boundaries |
+| `tes3mp_server_core` | Deterministic authentication, canonical worlds, fixed ticks, client and script command reduction, publication, checksums, lifecycle, resync, and a versioned server-scripting boundary |
 | `tes3mp_client_session` | Caller-pumped negotiation, authentication, resume/resync, command output, snapshot ingestion, replication state, and locomotion reconciliation |
 | `tes3mp_server` | Configuration/content loading and real-transport dedicated-server composition |
 | `tes3mp_headless_client` | Scripted real-transport client for bounded integration scenarios |
@@ -368,6 +368,31 @@ Primary sources: [`melee_combat.cpp`](../../components/tes3mp/protocol/melee_com
 [`combat_interest_projection.cpp`](../../apps/tes3mp-server/combat_interest_projection.cpp),
 and [`character.cpp`](../../apps/openmw/mwmechanics/character.cpp).
 
+### Deterministic server-scripting foundation
+
+- Version 1 of the engine-independent scripting boundary projects committed
+  canonical publications into immutable bounded command-finalized,
+  session-joined, spatial-state, and session-lifecycle events. Callbacks receive
+  copied project-owned values, never packet buffers or mutable canonical state.
+- Callback execution is event-major and then ordered by package load order,
+  package identity, and callback order. Generated commands carry the source
+  publication/event ordinals plus package, API, callback, and command-order
+  identity, so the same input trace reproduces the same command trace.
+- Callback output is staged atomically behind per-callback, per-publication,
+  pending, and per-tick bounds. A callback or queue failure discards the whole
+  publication output and terminates production composition rather than
+  continuing with a partial script result.
+- Script commands have their own origin and do not impersonate client sessions.
+  The first typed command installs an active player's manifest-scoped canonical
+  safe point after validating player, entity revision, authority epoch, and
+  destination cell. It can execute only at the tick following its source
+  publication and shares the reducer's prepared commit and interest projection.
+
+Primary sources: [`server_scripting.hpp`](../../components/tes3mp/include/tes3mp/server_scripting.hpp),
+[`server_scripting.cpp`](../../components/tes3mp/server_core/server_scripting.cpp),
+[`server_command_reducer.cpp`](../../components/tes3mp/server_core/server_command_reducer.cpp),
+and [`server_application.cpp`](../../apps/tes3mp-server/server_application.cpp).
+
 ### Repeatable content packs
 
 - The offline V2 baker resolves ordered TES3 content through OpenMW `data`,
@@ -442,11 +467,13 @@ and [`test_bake_tes3mp_content.py`](../../scripts/tests/test_bake_tes3mp_content
   remain unimplemented.
 - Established root checkpoints and complete character profiles survive restart;
   canonical dynamic world/object/actor state does not. Chargen is the only
-  scripted sequence with explicit server safe points today. Other cutscenes,
-  quest/script progress, and their intermediate state are not yet canonical or
-  durable and must be added through the future server-scripting/persistence
-  boundary. Starting inventory/equipment is modeled in the profile, while
-  broader inventory persistence remains unfinished.
+  packaged scripted sequence with explicit server safe points today. The
+  runtime-neutral versioned server-scripting boundary and its first safe-point
+  command exist, but no script content loader or interpreter is packaged and the
+  default server registers no callbacks. Other cutscenes, quest/script progress,
+  and their intermediate state are not yet canonical or durable. Starting
+  inventory/equipment is modeled in the profile, while broader inventory
+  persistence remains unfinished.
 - The packaged default is the verified installed vanilla manifest. Other
   loadouts still require bounded content generation and local record mappings;
   server discovery/history remain unfinished. The V2 baker binds TES3 content
@@ -461,12 +488,13 @@ and [`test_bake_tes3mp_content.py`](../../scripts/tests/test_bake_tes3mp_content
 
 ## Work still required
 
-### Next milestone: deterministic server scripting boundary
+### Next milestone: transactional persistence and replay envelope
 
-Add the versioned server-scripting foundation: immutable bounded callback
-inputs, replay-stable callback ordering, and queued typed commands applied only
-at explicit tick safe points. Do not expose packet buffers or mutable canonical
-state and do not recreate the legacy CoreScripts API.
+Define the atomic durability acknowledgement point and persist replayable
+canonical domain transactions with configuration, content manifest, script/API
+versions, deterministic seeds, and complete client/script command ordering.
+Restart must either restore one verified committed prefix or reject it without
+partially installing state. TES3MP 0.8.x saves remain unsupported.
 
 ### Required before the desktop/PC-VR release
 
@@ -474,8 +502,9 @@ state and do not recreate the legacy CoreScripts API.
 2. Dialogue, journals, quests, factions, reputation, and their durable
    consequences.
 3. Canonical time, weather, globals, and durable world-state transitions.
-4. A versioned deterministic server-scripting boundary with immutable inputs
-   and queued typed commands; the legacy CoreScripts API is not reused.
+4. Script content loading/runtime composition and expansion of the versioned
+   immutable event/typed-command surface for release gameplay domains; the
+   legacy CoreScripts API is not reused.
 5. Transactional persistence and deterministic replay for domain state,
    configuration, content identity, script/API versions, seeds, and command
    ordering. TES3MP 0.8.x saves are not migrated.
@@ -497,29 +526,26 @@ and do not enter protocol or canonical state.
 
 ## Verification snapshot
 
-The direct-magic working tree passed the following
+The deterministic server-scripting working tree passed the following
 on 2026-09-10:
 
 - the bounded Windows product `checks` graph, including relinking the shipping
   client and dedicated server and running the adapter, server-application, and
   historical-melee-contact contracts;
-- the pinned FlatBuffers selection proof, including exact regeneration checks
-  for every production protocol header;
-- the opt-in Windows headless-client build;
-- all 196 repository Python tests and patch-registry verification;
-- deterministic bake and verification against the installed 79,837,557-byte
-  `Morrowind.esm` with SHA-256
-  `5c3c8c2cbd20e25901b59b3ece33d36b7ef0e3d60ad8d11828bcc61a5ead1647`,
-  producing and verifying pack
-  `c5df902cab7f9920d4b3bbe77c9e17983e287d0cad533517abdc87babd645576`.
+- the standalone aggregate, including the new script ordering, next-tick safe
+  point, atomic failure, replay checksum, and reducer-validation contracts;
+- the dedicated-server application aggregate, including production fail-closed
+  handling for script callback/queue failure; and
+- all 196 repository Python tests and patch-registry verification.
 
-The standalone aggregate also passed. The Linux-only sanitizer/fuzzer execution
-profile, non-Windows product builds, PC-VR hardware checks, a full upstream
-OpenMW baseline, and a human-driven visible OpenMW
-walkthrough were not performed. The product build uses the newest installed
-MSVC so its STL matches the provisioned protobuf/Abseil libraries. The
-repository baseline verifier still cannot attest the current dirty tree because
-pre-existing vNext additions and registry changes remain unmatched.
+Protocol generation, content baking, and the headless client were unaffected
+and were not rerun for this milestone. The Linux-only sanitizer/fuzzer
+execution profile, non-Windows product builds, PC-VR hardware checks, a full
+upstream OpenMW baseline, and a human-driven visible OpenMW walkthrough were not
+performed. The product build uses the newest installed MSVC so its STL matches
+the provisioned protobuf/Abseil libraries. The repository baseline verifier
+still cannot attest the current dirty tree because pre-existing vNext additions
+and registry changes remain unmatched.
 
 Use [DEVELOPMENT.md](DEVELOPMENT.md) for commands and record only the newest
 relevant verification here after behavior changes.

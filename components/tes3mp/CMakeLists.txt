@@ -332,6 +332,7 @@ target_sources(tes3mp_server_core PRIVATE
     include/tes3mp/server_command_reducer.hpp
     include/tes3mp/server_authentication.hpp
     include/tes3mp/server_session.hpp
+    include/tes3mp/server_scripting.hpp
     include/tes3mp/server_lifecycle.hpp
     server_core/authenticated_join.cpp
     server_core/actor_simulation.cpp
@@ -353,6 +354,7 @@ target_sources(tes3mp_server_core PRIVATE
     server_core/server_command_reducer.cpp
     server_core/server_authentication.cpp
     server_core/server_session.cpp
+    server_core/server_scripting.cpp
     server_core/server_lifecycle.cpp
 )
 
@@ -852,6 +854,15 @@ tes3mp_verify_target_dependencies(tes3mp_server_command_reducer_tests ALLOWED te
 tes3mp_verify_target_includes(tes3mp_server_command_reducer_tests
     FORBIDDEN ${TES3MP_ENGINE_INDEPENDENT_FORBIDDEN_INCLUDES})
 
+add_executable(tes3mp_server_scripting_tests tests/server_scripting_tests.cpp)
+target_compile_features(tes3mp_server_scripting_tests PRIVATE cxx_std_20)
+target_link_libraries(tes3mp_server_scripting_tests PRIVATE tes3mp_test_support)
+set_target_properties(tes3mp_server_scripting_tests PROPERTIES FOLDER "TES3MP/Tests")
+tes3mp_enable_runtime_safety(tes3mp_server_scripting_tests)
+tes3mp_verify_target_dependencies(tes3mp_server_scripting_tests ALLOWED tes3mp_test_support)
+tes3mp_verify_target_includes(tes3mp_server_scripting_tests
+    FORBIDDEN ${TES3MP_ENGINE_INDEPENDENT_FORBIDDEN_INCLUDES})
+
 add_executable(tes3mp_server_core_safety_tests tests/server_core_safety_tests.cpp)
 target_compile_features(tes3mp_server_core_safety_tests PRIVATE cxx_std_20)
 target_link_libraries(tes3mp_server_core_safety_tests PRIVATE tes3mp_test_support)
@@ -1019,6 +1030,7 @@ add_custom_target(tes3mp_protocol_tests_run
     COMMAND $<TARGET_FILE:tes3mp_server_command_intake_tests>
     COMMAND $<TARGET_FILE:tes3mp_canonical_state_tests>
     COMMAND $<TARGET_FILE:tes3mp_server_command_reducer_tests>
+    COMMAND $<TARGET_FILE:tes3mp_server_scripting_tests>
     COMMAND $<TARGET_FILE:tes3mp_server_core_safety_tests>
     COMMAND $<TARGET_FILE:tes3mp_server_authentication_tests>
     COMMAND $<TARGET_FILE:tes3mp_server_lifecycle_tests>
@@ -1060,6 +1072,7 @@ add_custom_target(tes3mp_protocol_tests_run
         tes3mp_server_command_intake_tests
         tes3mp_canonical_state_tests
         tes3mp_server_command_reducer_tests
+        tes3mp_server_scripting_tests
         tes3mp_server_core_safety_tests
         tes3mp_server_authentication_tests
         tes3mp_server_lifecycle_tests
