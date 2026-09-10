@@ -5,6 +5,7 @@
 #include "content_collision.hpp"
 #include "interactive_object_content.hpp"
 #include "inventory_content.hpp"
+#include "melee_contact_history.hpp"
 #include "phase7_proof_profile.hpp"
 #include "phase7_queue_telemetry.hpp"
 #include "player_identity_file.hpp"
@@ -44,15 +45,6 @@ namespace
         }
     };
 
-    class UnavailableMeleeContactQuery final : public TES3MP::ServerMeleeContactQuery
-    {
-    public:
-        TES3MP::MeleeContactValidation validate(const TES3MP::ServerMeleeContactRequest&,
-            const TES3MP::CanonicalPlayerEntityState&, const TES3MP::CanonicalActorEntityState&) noexcept override
-        {
-            return TES3MP::MeleeContactValidation::HistoryUnavailable;
-        }
-    };
 }
 
 int main(int argc, char** argv)
@@ -223,6 +215,18 @@ int main(int argc, char** argv)
         }
         combatContent.emplace(std::move(*content));
     }
+    const TES3MP::MeleeAuthorityPolicy meleePolicy{};
+    std::optional<TES3MP::ServerApp::MeleeContactHistory> meleeContactHistory;
+    if (combatContent)
+    {
+        auto created = TES3MP::ServerApp::MeleeContactHistory::create(meleePolicy, *collision);
+        if (!created)
+        {
+            std::cerr << "melee contact history initialization failed\n";
+            return 3;
+        }
+        meleeContactHistory.emplace(std::move(*created));
+    }
     auto password = TES3MP::ServerApp::loadJoinPassword(config.joinPasswordFile);
     if (const auto* error = std::get_if<TES3MP::ServerApp::ConfigError>(&password))
     {
@@ -304,6 +308,8 @@ int main(int argc, char** argv)
         optionalCapabilities.push_back(TES3MP::interactiveObjectReplicationCapability());
     if (inventoryWorld)
         optionalCapabilities.push_back(TES3MP::inventoryReplicationCapability());
+    if (combatContent && meleeContactHistory)
+        optionalCapabilities.push_back(TES3MP::combatReplicationCapability());
     std::sort(optionalCapabilities.begin(), optionalCapabilities.end());
     optionalCapabilities.erase(
         std::unique(optionalCapabilities.begin(), optionalCapabilities.end()), optionalCapabilities.end());
@@ -339,8 +345,6 @@ int main(int argc, char** argv)
     }
     TES3MP::SharedServerAuthenticationService authentication(
         *limiter, *joinProvider, *resumeStore, clock, playerIdentities.get());
-    const TES3MP::MeleeAuthorityPolicy meleePolicy{};
-    UnavailableMeleeContactQuery meleeContact;
     TES3MP::ServerApp::ConnectionSessionCoordinator sessions(clock, observability, *timeouts,
         std::get<TES3MP::CapabilityOffer>(std::move(offer)), authentication, *queues,
         TES3MP::ServerApp::Phase7ConnectionCapacity, &actorWorld,
@@ -356,7 +360,9 @@ int main(int argc, char** argv)
             combatContent ? &combatContent->weapons : nullptr,
             combatContent ? &combatContent->playerTemplate : nullptr,
             combatContent ? &combatContent->settings : nullptr,
-            combatContent ? &meleePolicy : nullptr, combatContent ? &meleeContact : nullptr });
+            combatContent ? &meleePolicy : nullptr,
+            meleeContactHistory ? &*meleeContactHistory : nullptr,
+            meleeContactHistory ? &*meleeContactHistory : nullptr });
     if (!application.start())
     {
         std::cerr << application.failure() << '\n';

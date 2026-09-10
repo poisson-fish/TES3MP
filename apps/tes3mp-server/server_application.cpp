@@ -850,6 +850,12 @@ namespace TES3MP::ServerApp
             mFailure = "combat composition incomplete";
             return false;
         }
+        if (mWiring->meleeContactHistory
+            && (mWiring->meleeContact != mWiring->meleeContactHistory || !mWiring->actors))
+        {
+            mFailure = "melee contact history composition incomplete";
+            return false;
+        }
         const auto pumpedCommands = mWiring->intake.pump();
         if (!pumpedCommands)
         {
@@ -1077,6 +1083,12 @@ namespace TES3MP::ServerApp
             }
             if (actorCandidate)
                 *mWiring->actors = std::move(*actorCandidate);
+        }
+        if (mWiring->meleeContactHistory
+            && !mWiring->meleeContactHistory->capture(tick, mWiring->reducer.state(), *mWiring->actors))
+        {
+            mFailure = "melee contact history capture failed";
+            return false;
         }
         for (const auto connection : mWiring->sessions.connections())
         {

@@ -182,6 +182,16 @@ namespace TES3MP
     {
         std::uint64_t minimumAttackIntervalTicks = 1;
         std::uint64_t maximumRewindTicks = 8;
+        // OpenMW world coordinates use 1,024 canonical quanta per unit. This
+        // is the stock 128-unit melee distance before weapon reach scaling.
+        std::uint32_t baseReachQuanta = 128 * 1024;
+    };
+
+    class ServerMeleeContactHistory : public ServerMeleeContactQuery
+    {
+    public:
+        virtual bool capture(ServerTick tick, const CanonicalServerState& players,
+            const CanonicalActorWorld& actors) noexcept = 0;
     };
 
     struct AuthoritativeMeleeAttack

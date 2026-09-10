@@ -33,6 +33,7 @@ namespace TES3MP::ServerApp
             const std::filesystem::path& path, const ContentManifest& manifest) noexcept;
 
         bool canOccupy(const CellId& cell, Position3 position) const noexcept;
+        bool segmentClear(const CellId& cell, Position3 start, Position3 end) const noexcept;
         std::optional<ServerCollisionResult> resolve(const ServerCollisionRequest& request) noexcept override;
 
     private:

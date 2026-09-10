@@ -300,4 +300,15 @@ namespace TES3MP::ServerApp
             return inside(position, box.minimum, box.maximum);
         });
     }
+
+    bool ContentCollisionProvider::segmentClear(const CellId& cell, Position3 start, Position3 end) const noexcept
+    {
+        if (!bounded(start) || !bounded(end) || !std::ranges::binary_search(mCells, cell))
+            return false;
+        const auto first = std::ranges::lower_bound(mBoxes, cell, {}, &CollisionBox::cell);
+        const auto last = std::ranges::upper_bound(mBoxes, cell, {}, &CollisionBox::cell);
+        return std::ranges::none_of(first, last, [&](const CollisionBox& box) {
+            return segmentIntersectsAxisAlignedBox(start, end, box.minimum, box.maximum);
+        });
+    }
 }

@@ -17,6 +17,14 @@ the affected code/tests in the same milestone.
 - **Pinned base.** The active engine base is OpenMW 0.51.0 commit
   `f4bec41444214a7903bebd178389ca22ca13f646`. Differences and patch ownership are
   maintained by machine registries rather than narrative provenance.
+- **Modpack is the compatibility unit.** A server selects one immutable,
+  manifest-addressed modpack. The ordered exact bytes of every gameplay plugin
+  and any resource that can affect canonical outcomes belong to that identity;
+  additional client content is allowed only when explicitly classified as
+  presentation-only. Canonical state is derived from load-order winners, not
+  from a preferred source plugin. Unsupported records or scripts fail baking or
+  remain explicitly non-canonical; running them locally never grants authority.
+  Packs reference third-party content and do not imply permission to redistribute it.
 - **Multiplayer game entry.** A menu connection does not load a client-authored
   OpenMW save. After authentication and the complete initial baseline, OpenMW
   runs its stock new-game initialization and the adapter then applies the
@@ -87,6 +95,11 @@ the affected code/tests in the same milestone.
 - **Capability negotiation.** Additive optional domains are negotiated explicitly.
   Required-capability, protocol-range, and exact content-manifest mismatches
   reject before gameplay admission.
+- **Baked content identity.** A production content manifest identifies the
+  ordered exact bytes of the resolved OpenMW loadout together with normalized
+  canonical server catalogs and complete client record mappings. Baked packs
+  are immutable and manifest-addressed; publication advances a small atomic
+  pointer rather than rewriting a live pack in place.
 - **Authentication separation.** Routing principals, process-local resume tokens,
   durable player credentials, sessions, and canonical player identity have
   separate lifetimes. Servers store player-credential digests, not reusable
@@ -117,6 +130,10 @@ the affected code/tests in the same milestone.
 - **Prediction is presentation.** Local input replay and correction cannot create
   new input. Remote interpolation, door animation, actor animation, sounds, and
   pose degradation do not change canonical outcomes.
+- **Historical melee contact.** A melee claim is checked against bounded
+  server-captured player and actor roots at the client's observed server tick.
+  Stock base distance, canonical weapon reach, exact-cell membership, and
+  server collision occlusion decide contact; missing history fails closed.
 - **Freeze inactive cells.** Current actors, objects, and inventories retain
   canonical in-memory state while their exact cell has no active player; they do
   not simulate client-owned background results.

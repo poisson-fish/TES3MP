@@ -46,8 +46,10 @@ wrapper selects the bounded product scope by default.
 - The production server negotiates protocol major 1, minors 2–3. Defined
   optional capabilities are VR pose (1), actor replication (2), interactive
   objects (3), inventory (4), combat (5), and character creation (6).
-  Content-manifest mismatch rejects before authentication. The production
-  server does not yet offer combat (5).
+  Content-manifest mismatch rejects before authentication. Combat (5) is
+  offered only when combat content and authoritative contact history are both
+  successfully composed; the packaged derived-vanilla default now composes both
+  and offers it.
 - Negotiation and authentication rejection payloads are sent before a bounded
   graceful close, so clients receive the exact public reason instead of an
   undifferentiated peer disconnect. Client and server pumps enforce their
@@ -310,13 +312,47 @@ and [`desktop_providers.cpp`](../../apps/openmw/tes3mp/desktop_providers.cpp).
   latest-wins snapshot. Same-cell hit/death facts use a reliable event batch.
   OpenMW applies confirmed fatigue, actor health/fatigue, native dead state, and
   deterministic death/resurrection presentation to renderer-only actors.
+- Production composition retains nine bounded server-tick frames of player and
+  actor roots. Contact uses the client-observed historical tick, stock 128-unit
+  base distance scaled by canonical weapon reach, exact-cell identity, and the
+  collision catalog's obstructing solids. Missing frames, missing historical
+  entities, excessive distance, and occlusion fail closed. Capability 5 is
+  advertised only after this validator and the complete combat content graph
+  exist.
 
 Primary sources: [`melee_combat.cpp`](../../components/tes3mp/protocol/melee_combat.cpp),
 [`combat_world.cpp`](../../components/tes3mp/server_core/combat_world.cpp),
 [`combat_content.cpp`](../../apps/tes3mp-server/combat_content.cpp),
+[`melee_contact_history.cpp`](../../apps/tes3mp-server/melee_contact_history.cpp),
 [`combat_replication.cpp`](../../components/tes3mp/protocol/combat_replication.cpp),
 [`combat_interest_projection.cpp`](../../apps/tes3mp-server/combat_interest_projection.cpp),
 and [`character.cpp`](../../apps/openmw/mwmechanics/character.cpp).
+
+### Repeatable content packs
+
+- The offline V2 baker resolves ordered TES3 content through OpenMW `data`,
+  `data-local`, and `content` configuration, hashes exact loadout bytes together
+  with normalized server catalogs and complete client mappings, and emits a
+  manifest-addressed server/client pack.
+- It inspects load-order winners, including deletion, and rejects absent or
+  wrongly hashed character, actor, item, cell, or appearance records. It also
+  rejects incomplete public mapping sets and cross-catalog combat/inventory or
+  actor mismatches before writing a pack.
+- It validates bounded TES3 `MAST` declarations against the resolved order and
+  records the checked direct-master graph in verified pack metadata. Missing or
+  misordered dependencies fail before publication.
+- Packs are immutable and carry per-artifact SHA-256 metadata. Successful
+  publication atomically advances `CURRENT`; failure preserves the previously
+  selected pack. Join-password and player-identity state remain outside the
+  pack and are neither copied nor hashed.
+- The derived-vanilla recipe replaces authored collision, actor, inventory,
+  combat, client actor/item mapping, and starting-equipment records. Numeric
+  item, weapon, actor, player-template, and combat-setting values come from the
+  resolved TES3 load-order winners. Missing, deleted, ambiguous, malformed, or
+  unsupported selected records reject before publication.
+
+Primary sources: [`bake_tes3mp_content.py`](../../scripts/bake_tes3mp_content.py)
+and [`test_bake_tes3mp_content.py`](../../scripts/tests/test_bake_tes3mp_content.py).
 
 ## Partial foundations and known limitations
 
@@ -337,13 +373,13 @@ and [`character.cpp`](../../apps/openmw/mwmechanics/character.cpp).
   does not exist. Lockpicking and probe disarming do not exist.
 - Inventory does not include barter/trade, merchant stock/restocking, disk
   persistence, or repair commands.
-- The dedicated server can load and compose the combat bootstrap but
-  deliberately does not advertise capability 5. The profile and manifest ID
-  are currently operator-authored rather than derived and hashed from the
-  actual OpenMW content loadout. Character-derived combat state is now bound at
-  chargen, but combat state is not persisted and production contact/reach
-  validation remains fail-closed. Enabling combat under those conditions would
-  not prove client/server record equivalence or historical contact.
+- The packaged default is intentionally narrow: one vanilla dagger, one rat,
+  one starting loadout, and pre-inflated collision boxes for the four initial
+  cells. The baker derives selected gameplay values from ESM records, but does
+  not extract arbitrary NIF/terrain geometry or broad world catalogs.
+  Historical contact uses canonical root distance and static collision
+  occlusion, not rewound animation volumes or per-bone weapon traces. Combat
+  state is not persisted.
 - The current resolver covers direct player-versus-server-actor weapon and
   hand-to-hand hit, fatigue, resistance, critical/knockdown multipliers, weapon
   wear, damage, and death. Actor attacks, PvP/P2P, blocking decisions, difficulty
@@ -360,22 +396,23 @@ and [`character.cpp`](../../apps/openmw/mwmechanics/character.cpp).
   broader inventory persistence remains unfinished.
 - The packaged default is the verified installed vanilla manifest. Other
   loadouts still require bounded content generation and local record mappings;
-  server discovery/history remain unfinished.
-- Content is supplied through bounded hand-authored server artifacts. General
-  extraction/baking tooling and broad production-world content are unfinished.
+  server discovery/history remain unfinished. The V2 baker binds TES3 content
+  plugins but does not yet bind archives or loose resources, so it cannot claim
+  complete modpack parity when external assets affect canonical behavior.
+- Content packs are deterministic and loadout-bound. Broad record selection and
+  placed-reference selection, full geometry extraction, and deterministic
+  handling of mod scripts remain unfinished.
 - Test and fixture paths demonstrate subsystem behavior, but release-quality
   real-game coverage, packaging, performance budgets, and soak evidence remain
   unfinished.
 
 ## Work still required
 
-### Next milestone: repeatable content baking and production combat admission
+### Next milestone: combat presentation and actor response
 
-Build a deterministic baker from the OpenMW loadout that emits mutually
-consistent manifest, character, inventory, combat, and client-record mappings.
-Then provide authoritative production contact history/reach validation and
-advertise combat capability 5. General deterministic server scripting remains
-later work.
+Close weapon-wear presentation, hit reactions, actor aggression/attacks, and
+resurrection/respawn policy against the packaged derived pack. General
+deterministic server scripting remains later work.
 
 ### Required before the desktop/PC-VR release
 
@@ -390,7 +427,8 @@ later work.
    ordering. TES3MP 0.8.x saves are not migrated.
 6. Administration, moderation, discovery, health, metrics, and privileged
    operational interfaces without exposing runtime internals.
-7. Broader content/world coverage, content tooling, failure recovery, security
+7. Broader content/world coverage, load-order-winner/reference extraction,
+   modpack resource identity, content tooling, failure recovery, security
    hardening, packaging, upgrades, cross-platform validation, performance
    budgets, regression assets, and long-running soak evidence.
 8. Deferred PC-VR hardware measurement and final desktop/VR interoperability
@@ -405,30 +443,29 @@ and do not enter protocol or canonical state.
 
 ## Verification snapshot
 
-The character-bootstrap working tree passed the following on 2026-09-09:
+The derived-combat-pack working tree passed the following on
+2026-09-09:
 
-- the standalone MSVC C++20 aggregate, including character-profile, protocol
-  golden-vector/malformed-input, lifecycle, authentication, client-session,
-  persistence, authenticated-join, inventory, and combat contracts;
-- the dedicated-server application contract executable after compiling and
-  linking the changed server application and core libraries;
-- focused protocol/server authentication, V5 persistence, first named-profile
-  registration, endpoint credential derivation, plaintext-profile migration,
-  reconnect, cross-channel chargen safe-point ordering, authoritative rejection
-  of out-of-catalog transitions, atomic character bootstrap/rollback,
-  idempotent starting inventory, derived combat state, and adapter regressions;
+- the bounded Windows product `checks` graph, including relinking the shipping
+  client and dedicated server and running the adapter, server-application, and
+  historical-melee-contact contracts;
+- all 194 repository Python tests and patch-registry verification;
+- deterministic bake and verification against the installed 79,837,557-byte
+  `Morrowind.esm` with SHA-256
+  `5c3c8c2cbd20e25901b59b3ece33d36b7ef0e3d60ad8d11828bcc61a5ead1647`,
+  producing and verifying pack
+  `b5aae9a2d013a40175e1c31b877a150b9f9862778490bb6cfbbfcbc6617fe360`;
   and
-- all 180 repository Python tests and patch-registry verification.
+- a dedicated-server start/readiness/interrupt-stop smoke using the packaged
+  default configuration.
 
-The Linux-only sanitizer/fuzzer execution profile, non-Windows product builds,
-PC-VR hardware checks, a full upstream OpenMW baseline, and a human-driven
-visible OpenMW profile/chargen walkthrough were not performed after this fix.
-The bounded Windows product graph compiled the affected libraries and tests,
-but the final `tes3mp_server.exe` relink could not replace the currently running
-process. The product build uses the newest installed MSVC so its STL matches the
-provisioned protobuf/Abseil libraries. The repository baseline verifier also
-cannot attest the current dirty tree because pre-existing vNext additions and
-registry changes remain unmatched.
+The standalone aggregate also passed. The Linux-only sanitizer/fuzzer execution
+profile, non-Windows product builds, PC-VR hardware checks, a full upstream
+OpenMW baseline, and a human-driven visible OpenMW
+walkthrough were not performed. The product build uses the newest installed
+MSVC so its STL matches the provisioned protobuf/Abseil libraries. The
+repository baseline verifier still cannot attest the current dirty tree because
+pre-existing vNext additions and registry changes remain unmatched.
 
 Use [DEVELOPMENT.md](DEVELOPMENT.md) for commands and record only the newest
 relevant verification here after behavior changes.

@@ -1,0 +1,45 @@
+{
+  "actors": [
+    {
+      "actor_id": 1,
+      "cell": "interior:1",
+      "entity_id": 2,
+      "orientation": [0, 0, 0],
+      "position": [128000, -138240, 24576],
+      "record": "rat"
+    }
+  ],
+  "collision_solids": [
+    {
+      "cell": "interior:1",
+      "maximum": [210000, -60000, 120000],
+      "minimum": [200000, -220000, -20000]
+    },
+    {
+      "cell": "interior:2",
+      "maximum": [10000, 10000, 10000],
+      "minimum": [-10000, -10000, -10000]
+    },
+    {
+      "cell": "interior:3",
+      "maximum": [10000, 10000, 10000],
+      "minimum": [-10000, -10000, -10000]
+    },
+    {
+      "cell": "exterior:4:-2:-9",
+      "maximum": [-11000000, -72000000, 100000],
+      "minimum": [-11200000, -74000000, -100000]
+    }
+  ],
+  "format": "TES3MP_DERIVED_VANILLA_V1",
+  "items": ["chargen dagger"],
+  "player_record": "player",
+  "seed": 14474947440507032443,
+  "starting_items": [
+    {
+      "count": 1,
+      "record": "chargen dagger",
+      "slot": 16
+    }
+  ]
+}

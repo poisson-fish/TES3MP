@@ -1,6 +1,10 @@
 TES3MP_COLLISION_V1
-manifest 5c3c8c2cbd20e25901b59b3ece33d36b7ef0e3d60ad8d11828bcc61a5ead1647
+manifest e4dd08a20c7506de8e59f0df6474dd476047f7a2504cefcaceee7dcba9b0c676
 cell interior 1
 cell interior 2
 cell interior 3
 cell exterior 4 -2 -9
+solid exterior 4 -2 -9 -11200000 -74000000 -100000 -11000000 -72000000 100000
+solid interior 1 200000 -220000 -20000 210000 -60000 120000
+solid interior 2 -10000 -10000 -10000 10000 10000 10000
+solid interior 3 -10000 -10000 -10000 10000 10000 10000

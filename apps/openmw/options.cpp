@@ -49,7 +49,7 @@ namespace OpenMW
                 defaultPath("resources/vfs/tes3mp/server.cfg"), "resources/vfs/tes3mp/server.cfg"),
             "dedicated server configuration used by the multiplayer Host button");
         addOption("tes3mp-content-manifest-id", bpo::value<std::string>()->default_value(
-            "5c3c8c2cbd20e25901b59b3ece33d36b7ef0e3d60ad8d11828bcc61a5ead1647"),
+            "e4dd08a20c7506de8e59f0df6474dd476047f7a2504cefcaceee7dcba9b0c676"),
             "exact TES3MP content manifest SHA-256 in hexadecimal");
         addOption("tes3mp-content-cell-spaces",
             bpo::value<std::string>()->default_value("interior:1;interior:2;interior:3;exterior:4"),
@@ -70,13 +70,16 @@ namespace OpenMW
         addOption("tes3mp-content-appearance-record", bpo::value<std::string>()->default_value("player"),
             "OpenMW NPC record mapped by the TES3MP content manifest");
         addOption("tes3mp-content-actor-prototype-map",
-            bpo::value<StringsVector>()->default_value(StringsVector(), "")->multitoken()->composing(),
+            bpo::value<StringsVector>()->default_value(
+                StringsVector{ "9941342243677752440=rat" }, "vanilla actor prototypes")->multitoken()->composing(),
             "OpenMW actor prototype mappings: <id>=<NPC-or-creature-record>");
         addOption("tes3mp-content-interactive-object-map",
             bpo::value<StringsVector>()->default_value(StringsVector(), "")->multitoken()->composing(),
             "OpenMW interactive object mappings: <id>=<ref-num-index>[:<content-file>]");
         addOption("tes3mp-content-item-prototype-map",
-            bpo::value<StringsVector>()->default_value(StringsVector(), "")->multitoken()->composing(),
+            bpo::value<StringsVector>()->default_value(
+                StringsVector{ "579706974062055657=chargen dagger" }, "vanilla item prototypes")
+                ->multitoken()->composing(),
             "OpenMW item prototype mappings: <id>=<item-record>");
         addOption("tes3mp-content-container-map",
             bpo::value<StringsVector>()->default_value(StringsVector(), "")->multitoken()->composing(),

@@ -10,6 +10,7 @@
 #include "interest_projection.hpp"
 #include "inventory_content.hpp"
 #include "inventory_interest_projection.hpp"
+#include "melee_contact_history.hpp"
 #include "phase7_proof_profile.hpp"
 #include "phase7_queue_telemetry.hpp"
 #include "player_identity_file.hpp"
@@ -19,6 +20,7 @@
 #include "tes3mp/interactive_object_catalog.hpp"
 #include "tes3mp/interactive_object_replication.hpp"
 #include "tes3mp/interactive_object_world.hpp"
+#include "tes3mp/combat_replication.hpp"
 #include "tes3mp/inventory_replication.hpp"
 
 #include <array>
@@ -299,6 +301,14 @@ namespace
         return std::get<CapabilityOffer>(CapabilityOffer::create(versions, capabilities, {}));
     }
 
+    CapabilityOffer combatOffer()
+    {
+        auto versions = std::get<ProtocolVersionRange>(ProtocolVersionRange::create(1, 3, 3));
+        const std::array capabilities{
+            actorReplicationCapability(), inventoryReplicationCapability(), combatReplicationCapability() };
+        return std::get<CapabilityOffer>(CapabilityOffer::create(versions, capabilities, {}));
+    }
+
     InteractiveObjectCatalog sampleObjectCatalog(const ContentManifest& manifest)
     {
         const auto zero = Turn32::fromValue(0);
@@ -413,7 +423,7 @@ int main()
     using namespace TES3MP::ServerApp;
     {
         const auto manifestId
-            = ContentManifestId::fromHex("5c3c8c2cbd20e25901b59b3ece33d36b7ef0e3d60ad8d11828bcc61a5ead1647");
+            = ContentManifestId::fromHex("e4dd08a20c7506de8e59f0df6474dd476047f7a2504cefcaceee7dcba9b0c676");
         const auto spaces = parseCellSpaceDeclarations("interior:1;interior:2;interior:3;exterior:4");
         const auto cells = parseContentCells("interior:1;interior:2;interior:3;exterior:4:-2:-9");
         const auto movement = parseMovementProfile("sneak:4;walk:8;run:16;jump:12");
@@ -452,7 +462,33 @@ int main()
             && std::ranges::find(darkElf->appearances, stockMale) != darkElf->appearances.end()
             && std::ranges::find(darkElf->appearances, stockFemale) != darkElf->appearances.end()
             && catalog->find(*ClassRecordId::fromValue(*characterRecordId("Warrior")))
-            && catalog->find(*BirthsignRecordId::fromValue(*characterRecordId("Fay"))));
+            && catalog->find(*BirthsignRecordId::fromValue(*characterRecordId("Fay")))
+            && catalog->startingInventory().size() == 1
+            && catalog->startingInventory()[0].prototype == id<ItemPrototypeId>(579706974062055657ull)
+            && catalog->startingInventory()[0].equipmentSlot
+                == static_cast<std::uint8_t>(EquipmentSlot::CarriedRight));
+
+        const auto contentRoot = std::filesystem::path(TES3MP_SOURCE_ROOT) / "files/data/tes3mp";
+        auto packagedCollisionResult = ContentCollisionProvider::load(contentRoot / "vanilla-collision.txt", *manifest);
+        auto* packagedCollisionValue
+            = std::get_if<std::unique_ptr<ContentCollisionProvider>>(&packagedCollisionResult);
+        assert(packagedCollisionValue && *packagedCollisionValue);
+        auto packagedActorsResult = loadActorContent(contentRoot / "vanilla-actors.txt", *manifest);
+        auto* packagedActors = std::get_if<ActorCatalog>(&packagedActorsResult);
+        auto packagedInventoryResult = loadInventoryContent(contentRoot / "vanilla-inventory.txt", *manifest);
+        auto* packagedInventory = std::get_if<InventoryContent>(&packagedInventoryResult);
+        assert(packagedActors && packagedInventory && packagedActors->entries().size() == 1
+            && packagedActors->entries()[0].prototypeId == id<ActorPrototypeId>(9941342243677752440ull)
+            && (*packagedCollisionValue)->canOccupy(
+                packagedActors->entries()[0].initialRoot.cell(), packagedActors->entries()[0].initialRoot.position())
+            && packagedInventory->catalog.find(id<ItemPrototypeId>(579706974062055657ull)));
+        auto packagedCombatResult = packagedActors && packagedInventory
+            ? loadCombatContent(contentRoot / "vanilla-combat.txt", *manifest, *packagedActors,
+                  packagedInventory->catalog)
+            : CombatContentLoadResult{ CombatContentError{} };
+        const auto* packagedCombat = std::get_if<CombatContent>(&packagedCombatResult);
+        assert(packagedCombat && packagedCombat->world.actors().size() == 1
+            && packagedCombat->weapons.find(id<ItemPrototypeId>(579706974062055657ull)));
     }
     {
         TES3MP::ServerApp::Phase7QueueTelemetry telemetry;
@@ -1954,5 +1990,186 @@ int main()
         clock.nanoseconds = 68'000'000;
         assert(application.pump(id<ServerTick>(2)));
         assert(objects.find(id<InteractiveObjectId>(1))->lockState() == LockState::Unlocked);
+    }
+    {
+        // A protocol client negotiates combat against the packaged derived
+        // vanilla worlds, swings their equipped chargen dagger at the rat, and
+        // observes every committed consequence through public replication.
+        FixedClock clock;
+        NullMetricSink metrics;
+        NullStructuredEventSink events;
+        Observability observability(metrics, events);
+        FakeAuthentication authentication;
+        RecordingCrypto crypto;
+        const auto contentRoot = std::filesystem::path(TES3MP_SOURCE_ROOT) / "files/data/tes3mp";
+        std::ifstream packagedConfigStream(contentRoot / "server.cfg", std::ios::binary);
+        const std::string packagedConfigText{
+            std::istreambuf_iterator<char>(packagedConfigStream), std::istreambuf_iterator<char>() };
+        auto packagedConfigResult = parseServerConfig(packagedConfigText);
+        assert(std::holds_alternative<ServerConfig>(packagedConfigResult));
+        auto packagedConfig = std::get<ServerConfig>(std::move(packagedConfigResult));
+        auto packagedCollisionResult
+            = ContentCollisionProvider::load(contentRoot / "vanilla-collision.txt", packagedConfig.contentManifest);
+        auto* packagedCollisionValue
+            = std::get_if<std::unique_ptr<ContentCollisionProvider>>(&packagedCollisionResult);
+        assert(packagedCollisionValue && *packagedCollisionValue);
+        auto packagedCollision = std::move(*packagedCollisionValue);
+        auto packagedActorResult = loadActorContent(contentRoot / "vanilla-actors.txt", packagedConfig.contentManifest);
+        auto* packagedActorCatalog = std::get_if<ActorCatalog>(&packagedActorResult);
+        auto packagedInventoryResult
+            = loadInventoryContent(contentRoot / "vanilla-inventory.txt", packagedConfig.contentManifest);
+        auto* packagedInventory = std::get_if<InventoryContent>(&packagedInventoryResult);
+        assert(packagedActorCatalog && packagedInventory);
+        auto packagedCombatResult = loadCombatContent(contentRoot / "vanilla-combat.txt",
+            packagedConfig.contentManifest, *packagedActorCatalog, packagedInventory->catalog);
+        auto* packagedCombat = std::get_if<CombatContent>(&packagedCombatResult);
+        assert(packagedCombat);
+
+        auto queues = OutboundQueueSet::create(OutboundQueuePolicy{}, 1);
+        auto timeouts = *SessionTimeoutPolicy::create(1'000'000, 1'000'000, 1'000'000);
+        auto inventory = packagedInventory->world;
+        auto combatWorld = packagedCombat->world;
+        auto actorWorldResult = createInitialCanonicalActorWorld(*packagedActorCatalog);
+        assert(std::holds_alternative<CanonicalActorWorld>(actorWorldResult));
+        auto combatActors = std::get<CanonicalActorWorld>(std::move(actorWorldResult));
+        auto playerTemplate = packagedCombat->playerTemplate;
+        playerTemplate.weaponSkills[static_cast<std::size_t>(MeleeWeaponSkill::ShortBlade)] = 100.f;
+        const MeleeAuthorityPolicy meleePolicy{ 1, 8, 128 * 1024 };
+        auto contactHistory = MeleeContactHistory::create(meleePolicy, *packagedCollision);
+        assert(queues && contactHistory);
+
+        ConnectionSessionCoordinator sessions(clock, observability, timeouts, combatOffer(), authentication,
+            *queues, 1, &combatActors, nullptr, &inventory, &combatWorld, &playerTemplate, &packagedInventory->catalog);
+        auto emptyState = std::get<CanonicalServerState>(createCanonicalServerState({}, {}));
+        CanonicalCommandReducer reducer(std::move(emptyState), observability);
+        const auto zero = Turn32::fromValue(0);
+        const auto spawn = Transform(packagedConfig.spawnCell, packagedConfig.spawnPositions[0],
+            Orientation3(zero, zero, zero));
+        auto joins = *AuthenticatedJoinCoordinator::create(spawn, id<AppearanceId>(100),
+            AuthenticatedJoinIdentitySeed{ id<SessionId>(1), id<PlayerId>(1), id<EntityId>(1) }, reducer);
+        ServerCommandIntakeCoordinator intake(
+            clock, observability, clock.now(), ServerTick::initial(), IngressOrdinal::initial());
+        auto lifecycle = ServerLifecycleCoordinator::create(
+            packagedConfig.disconnectGraceMilliseconds * 1'000'000, reducer);
+        assert(lifecycle);
+        FakeRuntime runtime;
+        const auto connection = TransportConnectionId::initial();
+        runtime.events.push_back(
+            { TransportEventKind::ConnectionAccepted, TransportFailure::None, std::nullopt, std::nullopt, connection,
+                std::nullopt, TransportSecurity::EncryptedUnauthenticated, scope(std::byte{ 13 }) });
+        const auto hello = encodeClientHello(ClientHello::fromOffer(combatOffer()));
+        runtime.incoming.push_back({ TransportChannel::ReliableOrdered,
+            std::get<std::vector<std::byte>>(
+                encodeProtocolFrame(MessageClass::SessionControl, MessageKind::ClientHello, hello)) });
+        ServerApplication application(runtime, packagedConfig,
+            { sessions, joins, crypto, *queues, clock, intake, reducer, *lifecycle,
+                packagedActorCatalog, &combatActors, packagedCollision.get(), nullptr, nullptr,
+                &packagedInventory->catalog, &inventory, &combatWorld, &packagedCombat->weapons, &playerTemplate,
+                &packagedCombat->settings, &meleePolicy, &*contactHistory, &*contactHistory });
+        assert(application.start() && application.pump(ServerTick::initial()));
+
+        bool negotiatedCombat = false;
+        for (const auto& bytes : runtime.sent)
+        {
+            const auto frame = decodeProtocolFrame(bytes);
+            if (const auto* decoded = std::get_if<DecodedFrame>(&frame);
+                decoded && decoded->messageKind() == MessageKind::ServerHello)
+            {
+                const auto serverHello = decodeServerHello(decoded->payload());
+                const auto* accepted = std::get_if<ServerHello>(&serverHello);
+                negotiatedCombat = accepted
+                    && std::ranges::binary_search(
+                        accepted->negotiatedCapabilities(), combatReplicationCapability());
+            }
+        }
+        assert(negotiatedCombat);
+
+        auto material = AuthenticationMaterial::create({});
+        runtime.incoming.push_back({ TransportChannel::ReliableOrdered,
+            std::get<std::vector<std::byte>>(
+                encodeProtocolFrame(MessageClass::SessionControl, MessageKind::AuthenticationRequest,
+                    encodeAuthenticationRequest(AuthenticationRequest::join(std::move(*material))))) });
+        assert(application.pump(ServerTick::initial()));
+
+        const std::array startingItems{ StartingItem{ id<ItemPrototypeId>(579706974062055657ull), 1,
+            static_cast<std::uint8_t>(EquipmentSlot::CarriedRight) } };
+        assert(inventory.initializePlayerFromCharacter(
+            id<PlayerId>(1), CharacterProfileRevision::initial(), startingItems, ServerTick::initial()));
+        const auto* initializedInventory = inventory.findPlayer(id<PlayerId>(1));
+        assert(initializedInventory && initializedInventory->stacks.size() == 1
+            && initializedInventory->equipment[static_cast<std::size_t>(EquipmentSlot::CarriedRight)]);
+        assert(combatWorld.initializePlayerFromCharacter(id<PlayerId>(1), playerTemplate,
+            initializedInventory->totalWeight(packagedInventory->catalog), CharacterProfileRevision::initial()));
+        const auto initialFatigue = combatWorld.findPlayer(id<PlayerId>(1))->stats.fatigue;
+        const auto initialHealth = combatWorld.findActor(id<ActorId>(1))->stats.health;
+        const auto initialCondition = initializedInventory->stacks[0].condition;
+
+        const ClientMeleeAttackCommand attack{ .sessionId = id<SessionId>(1),
+            .sessionGeneration = SessionGeneration::initial(),
+            .commandSequence = id<CommandSequence>(1),
+            .commandId = id<CommandId>(1),
+            .observedCanonicalRevision = reducer.canonicalRevision(),
+            .targetActorId = id<ActorId>(1),
+            .sourceServerTick = ServerTick::initial(),
+            .expectedAttackerRevision = combatWorld.findPlayer(id<PlayerId>(1))->revision,
+            .expectedTargetRevision = combatWorld.findActor(id<ActorId>(1))->revision,
+            .attackType = MeleeAttackType::Slash,
+            .attackStrength = 1.f };
+        runtime.sent.clear();
+        runtime.incoming.push_back({ TransportChannel::ReliableOrdered,
+            std::get<std::vector<std::byte>>(encodeProtocolFrame(MessageClass::ReliableOperation,
+                MessageKind::ClientMeleeAttackCommand, encodeClientMeleeAttackCommand(attack))) });
+        clock.nanoseconds = 34'000'000;
+        assert(application.pump(id<ServerTick>(1)));
+        for (std::uint64_t now = 35; now < 48; ++now)
+        {
+            const auto drained = queues->pump(runtime, connection, now);
+            assert(drained && *drained != OutboundPumpResult::TransportFailed);
+            if (*drained == OutboundPumpResult::Idle)
+                break;
+        }
+
+        const auto* finalCombat = combatWorld.findPlayer(id<PlayerId>(1));
+        const auto* finalActor = combatWorld.findActor(id<ActorId>(1));
+        const auto* finalInventory = inventory.findPlayer(id<PlayerId>(1));
+        assert(finalCombat && finalCombat->stats.fatigue < initialFatigue);
+        assert(finalActor && finalActor->stats.health < initialHealth);
+        assert(finalInventory && finalInventory->stacks.size() == 1);
+        assert(finalInventory->stacks[0].condition < initialCondition);
+
+        bool sawCombatSnapshot = false;
+        bool sawDamageEvent = false;
+        bool sawWeaponWear = false;
+        for (const auto& bytes : runtime.sent)
+        {
+            const auto frame = decodeProtocolFrame(bytes);
+            const auto* decoded = std::get_if<DecodedFrame>(&frame);
+            if (!decoded)
+                continue;
+            if (decoded->messageKind() == MessageKind::LatestWinsCombatSnapshot)
+            {
+                const auto snapshot = decodeLatestWinsCombatSnapshot(decoded->payload());
+                if (const auto* value = std::get_if<LatestWinsCombatSnapshot>(&snapshot))
+                    sawCombatSnapshot = value->selfFatigue() == finalCombat->stats.fatigue
+                        && value->actors().size() == 1 && value->actors()[0].health == finalActor->stats.health;
+            }
+            else if (decoded->messageKind() == MessageKind::ReliableCombatEventBatch)
+            {
+                const auto events = decodeReliableCombatEventBatch(decoded->payload());
+                if (const auto* value = std::get_if<ReliableCombatEventBatch>(&events))
+                    sawDamageEvent = value->events().size() == 1 && value->events()[0].hit
+                        && value->events()[0].damage > 0.f;
+            }
+            else if (decoded->messageKind() == MessageKind::ReliablePlayerInventoryBaseline)
+            {
+                const auto baseline = decodeReliablePlayerInventoryBaseline(decoded->payload());
+                if (const auto* value = std::get_if<ReliablePlayerInventoryBaseline>(&baseline))
+                    sawWeaponWear = value->stacks.size() == 1
+                        && value->stacks[0].condition == finalInventory->stacks[0].condition;
+            }
+        }
+        assert(sawCombatSnapshot);
+        assert(sawDamageEvent);
+        assert(sawWeaponWear);
     }
 }

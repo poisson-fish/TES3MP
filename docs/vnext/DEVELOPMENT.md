@@ -129,6 +129,35 @@ python scripts/verify_openmw_patch_registry.py
 python scripts/verify_vnext_baseline.py
 ```
 
+### Deterministic content baking
+
+Prepare a mapping layer containing only `tes3mp-content-appearance-record` and
+the repeatable `tes3mp-content-*-map` assignments, then bake an immutable pack:
+
+```sh
+python scripts/bake_tes3mp_content.py bake \
+  --openmw-config /path/to/openmw.cfg \
+  --server-config files/data/tes3mp/server.cfg \
+  --client-mappings files/data/tes3mp/vanilla-client-mappings.cfg \
+  --derived-pack-recipe files/data/tes3mp/vanilla-derived-pack.json \
+  --output build/tes3mp-content
+python scripts/bake_tes3mp_content.py verify \
+  build/tes3mp-content/packs/<manifest-id>
+```
+
+Repeat `--openmw-config` in increasing priority order when the effective
+loadout is composed from several configuration layers. List every TES3 master
+once and before its dependents; the baker validates the bounded `MAST` graph but
+does not discover or insert missing plugins. The graph is recorded in
+`pack.json` for diagnostics. Use the generated pack's `openmw.cfg` as an OpenMW
+configuration layer and its `server.cfg` for the dedicated server. Provision
+`join-password.txt` in the output root; the server creates and updates
+`players.txt` there. Do not edit a manifest-addressed pack. Omit
+`--derived-pack-recipe` only when validating a fully authored custom pack; the
+packaged vanilla configuration uses the recipe so inventory, combat, actor, and
+collision catalogs are regenerated from its resolved loadout. V2 does not yet
+bind archives or loose resources and is not a complete general-modpack packager.
+
 Use `--index` with provenance/exclusion tools only for staged pre-commit checks.
 
 ### Engine-independent C++ contracts

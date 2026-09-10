@@ -8,6 +8,84 @@ header and exactly one manifest record. Missing, oversized, malformed,
 duplicate, unknown-cell, collision-invalid, or manifest-mismatched input fails
 server startup; partial catalogs are never accepted.
 
+## Baked content packs V2
+
+[`bake_tes3mp_content.py`](../../scripts/bake_tes3mp_content.py) resolves one or
+more OpenMW configuration layers in increasing priority order. It searches the
+configured `data` and `data-local` directories using OpenMW's later-directory
+priority, then hashes the ordered exact bytes of every `content` file. V2
+accepts TES3 ESM/ESP content only.
+
+Every configured plugin must appear exactly once. The baker reads each TES3
+header's bounded `MAST` declarations and requires every direct master to appear
+earlier in the resolved content order. Missing, duplicate, path-valued, or
+misordered masters reject before pack publication. `pack.json` records the
+validated direct-master list beside each content file's name, size, and SHA-256;
+pack verification checks that recorded graph.
+V1 packs, which did not carry this dependency metadata, are rejected without
+migration; rebaking creates a V2 identity under a distinct hash domain.
+
+The baker also consumes a server configuration and a small client-mapping
+configuration. It normalizes and hashes every configured catalog below,
+validates winning TES3 record presence and FNV-1a identities for character,
+actor, item, cell, and appearance mappings, and requires client mapping sets to
+exactly cover the server's presented actor, object, item, container, and
+cell-space identities. Deleted winning records and mismatched combat,
+inventory, actor, or character references reject before publication.
+
+Output is written under `packs/<manifest-id>/` with `server.cfg`, `openmw.cfg`,
+the rebound catalogs, and a digest-bearing `pack.json`. Existing packs are
+immutable. A successful bake atomically updates `CURRENT`; failure leaves the
+previous pointer unchanged. The generated server config expects mutable
+`join-password.txt` and `players.txt` in the output root, outside the immutable
+pack. The tool never copies or hashes those files.
+
+With `--derived-pack-recipe`, the baker does not read authored collision, actor,
+inventory, or combat catalogs. The bounded `TES3MP_DERIVED_VANILLA_V1` JSON
+recipe selects item, player, and actor record IDs; assigns canonical actor
+identities/transforms; supplies pre-inflated collision solids for the exact
+allowed cells; selects starting equipment; and fixes the deterministic combat
+seed. The baker resolves all selected records after load-order overrides, then
+derives item category, weight, value, condition, equipment slots, weapon skill,
+damage, reach, actor stats, player combat stats, and the required combat GMSTs
+from their binary TES3 subrecords. Actor/item client mappings and character
+starting-item records are replaced from the recipe rather than accepted from
+the source catalogs.
+
+Recipe input is limited to 256 KiB, 65,536 items, 4,096 actors, 32,768 solids,
+and 64 starting items. Unknown keys, invalid ranges/cells/slots, identity
+collisions, an actor inside a solid, malformed layouts, enchanted or otherwise
+unsupported selected records, and missing, deleted, or ambiguous load-order
+winners reject the whole bake before pack creation or `CURRENT` publication.
+The recipe's collision boxes are bounded root-occlusion input, not extraction
+of arbitrary NIF/terrain geometry; broader world geometry remains future work.
+
+### Modpack compatibility boundary
+
+The entire resolved loadout is one compatibility unit. A server does not admit
+a client with an added, removed, reordered, or byte-different gameplay plugin,
+even if the changed record appears unrelated to the current cell. Server
+catalogs and client mappings always describe winning records after all
+overrides and deletions; they do not attach authority to the plugin that first
+declared a record.
+
+V2 hashes only configured TES3 `content` files and generated TES3MP artifacts.
+It does not yet enumerate or hash `fallback-archive` entries, loose resources,
+or other resource paths. Therefore it cannot yet claim complete production
+compatibility for a modpack whose models, collision, or other external assets
+can affect canonical behavior. Future resource identity must bind those inputs;
+an override may remain unbound only after it is explicitly classified as
+presentation-only.
+
+The authored-catalog path can describe a non-vanilla loadout today, but broad
+mod support still requires a bounded extractor that emits cells, placed actors,
+objects, inventories, collision, combat data, and mappings from load-order
+winners as one atomic bake. The current derived recipe deliberately selects a
+small vanilla subset and is not that general extractor. Client-side mod scripts
+may present confirmed state or submit typed intent, but cannot commit canonical
+state; unsupported scripted behavior must be rejected or explicitly inert until
+the deterministic server-scripting boundary exists.
+
 ## Characters V2
 
 Configured by `character_content_file`. Omission disables authoritative
@@ -149,3 +227,26 @@ OpenMW clients bind opaque IDs locally with repeatable
 `--tes3mp-content-container-map <id>=<ref-num-index>[:<content-file>]` options.
 Mappings must be injective and complete for presented records. See
 [`inventory_content.cpp`](../../apps/tes3mp-server/inventory_content.cpp).
+
+## Combat V1
+
+Configured optionally by `combat_content_file`; combat also requires actor,
+inventory, collision, and historical-contact composition. The catalog contains
+one deterministic seed, exactly one settings and player template, one combat
+state per actor, and zero or more melee weapon profiles keyed by inventory
+prototype ID.
+
+```text
+TES3MP_COMBAT_V1
+manifest <64-lowercase-hex-digits>
+seed <unsigned-64-bit>
+settings <12-finite-OpenMW-melee-values>
+player <agility> <luck> <strength> <fatigue-term> <blind> <fortify-attack> <short-blade> <long-blade> <blunt> <axe> <spear> <hand-to-hand> <fatigue> <maximum-weight> <werewolf-0-or-1>
+actor <actor-id> <health> <fatigue> <evasion> <sanctuary> <normal-resistance> <critical-fatigue-0-or-1> <knocked-down-0-or-1> <paralyzed-0-or-1> <werewolf-0-or-1> <god-mode-0-or-1> <dead-0-or-1>
+weapon <prototype-id> <skill> <chop-min> <chop-max> <slash-min> <slash-max> <thrust-min> <thrust-max> <weight> <reach> <normal-weapon-0-or-1>
+```
+
+The actor set must exactly match Actors V1. Every weapon must be a conditioned,
+right-hand-compatible inventory weapon. Values are finite and range checked;
+cross-catalog failure is atomic. See
+[`combat_content.cpp`](../../apps/tes3mp-server/combat_content.cpp).

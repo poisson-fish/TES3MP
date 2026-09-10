@@ -8,6 +8,9 @@ set(BUILTIN_DATA_FILES
     tes3mp/vanilla-collision.txt
     tes3mp/vanilla-actors.txt
     tes3mp/vanilla-characters.txt
+    tes3mp/vanilla-inventory.txt
+    tes3mp/vanilla-combat.txt
+    tes3mp/vanilla-derived-pack.json
     textures/omw_map_color_palette.dds
     textures/omw_menu_scroll_down.dds
     textures/omw_menu_scroll_up.dds

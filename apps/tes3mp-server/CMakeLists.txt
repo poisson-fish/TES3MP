@@ -28,6 +28,8 @@ add_library(tes3mp_server_app STATIC
     inventory_interest_projection.cpp
     inventory_content.hpp
     inventory_content.cpp
+    melee_contact_history.hpp
+    melee_contact_history.cpp
     phase7_proof_profile.hpp
     phase7_queue_telemetry.hpp
     phase7_queue_telemetry.cpp
@@ -55,7 +57,8 @@ tes3mp_enable_runtime_safety(tes3mp_server_app_tests)
 add_custom_target(tes3mp_server_app_tests_run
     COMMAND $<TARGET_FILE:tes3mp_server_app_tests>
     COMMAND $<TARGET_FILE:tes3mp_combat_interest_projection_tests>
-    DEPENDS tes3mp_server_app_tests tes3mp_combat_interest_projection_tests
+    COMMAND $<TARGET_FILE:tes3mp_melee_contact_history_tests>
+    DEPENDS tes3mp_server_app_tests tes3mp_combat_interest_projection_tests tes3mp_melee_contact_history_tests
     COMMENT "Running TES3MP dedicated-server app contracts")
 
 add_executable(tes3mp_combat_interest_projection_tests combat_interest_projection_tests.cpp)
@@ -69,6 +72,18 @@ add_custom_target(tes3mp_combat_interest_projection_tests_run
     COMMAND $<TARGET_FILE:tes3mp_combat_interest_projection_tests>
     DEPENDS tes3mp_combat_interest_projection_tests
     COMMENT "Running TES3MP combat interest projection contracts")
+
+add_executable(tes3mp_melee_contact_history_tests melee_contact_history_tests.cpp)
+target_compile_features(tes3mp_melee_contact_history_tests PRIVATE cxx_std_20)
+target_link_libraries(tes3mp_melee_contact_history_tests PRIVATE tes3mp_server_app)
+set_target_properties(tes3mp_melee_contact_history_tests PROPERTIES FOLDER "TES3MP/Tests")
+tes3mp_enable_runtime_safety(tes3mp_melee_contact_history_tests)
+tes3mp_verify_target_dependencies(tes3mp_melee_contact_history_tests ALLOWED tes3mp_server_app)
+
+add_custom_target(tes3mp_melee_contact_history_tests_run
+    COMMAND $<TARGET_FILE:tes3mp_melee_contact_history_tests>
+    DEPENDS tes3mp_melee_contact_history_tests
+    COMMENT "Running TES3MP authoritative melee contact-history contracts")
 
 if(TES3MP_ENABLE_GNS_TRANSPORT)
     add_executable(tes3mp_server main.cpp)

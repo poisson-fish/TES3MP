@@ -42,6 +42,7 @@ namespace TES3MP::ServerApp
         const OpenMwMeleeSettings* meleeSettings = nullptr;
         const MeleeAuthorityPolicy* meleePolicy = nullptr;
         ServerMeleeContactQuery* meleeContact = nullptr;
+        ServerMeleeContactHistory* meleeContactHistory = nullptr;
     };
 
     class ServerApplication
