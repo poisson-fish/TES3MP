@@ -135,13 +135,16 @@
       "id": "P17-001",
       "slice": "client release flow",
       "owner": "OpenMW adapter",
-      "purpose": "Expose the optional multiplayer coordinator to the stock main menu, present a bounded host/connect dialog, and start stock new-game initialization only after the authoritative initial baseline is ready.",
+      "purpose": "Expose the optional multiplayer coordinator and credential-root profile manager to the stock main menu, present bounded profile and host/connect dialogs, and start stock new-game initialization only after the authoritative initial baseline is ready.",
       "paths": [
         "apps/openmw/mwbase/environment.hpp",
         "apps/openmw/mwgui/mainmenu.cpp",
         "apps/openmw/mwgui/mainmenu.hpp",
         "apps/openmw/mwgui/multiplayerdialog.cpp",
-        "apps/openmw/mwgui/multiplayerdialog.hpp"
+        "apps/openmw/mwgui/multiplayerdialog.hpp",
+        "apps/openmw/mwgui/profiledialog.cpp",
+        "apps/openmw/mwgui/profiledialog.hpp",
+        "apps/openmw/mwgui/windowmanagerimp.cpp"
       ],
       "tests": [
         "scripts/tests/test_openmw_patch_registry.py",

@@ -20,9 +20,10 @@ the affected code/tests in the same milestone.
 - **Multiplayer game entry.** A menu connection does not load a client-authored
   OpenMW save. After authentication and the complete initial baseline, OpenMW
   runs its stock new-game initialization and the adapter then applies the
-  server-owned root. Durable player credentials are scoped to the normalized
-  server endpoint so one server's identity is never intentionally offered to
-  another.
+  server-owned root. The local profile stores a username-bound credential root;
+  the offered durable player credential is derived from that root and the
+  normalized server endpoint so one server's identity is never intentionally
+  offered to another. Plaintext profile passwords are not retained.
 - **Server-owned chargen with stock presentation.** Freshness is explicit
   state (`NewCharacter`, `CreatingCharacter`, or `EstablishedCharacter`), never
   inferred from the current entity set. OpenMW retains the prison-ship dialogue,
@@ -59,10 +60,18 @@ the affected code/tests in the same milestone.
   checkpoint. Reattachment advances entity revision and authority epoch,
   rebases the spatial tick, and clears velocity. Incomplete chargen is the
   deliberate exception: it restarts at the pre-chargen safe point.
-- **Character save clean break.** Identity file V4 stores either a fresh
+- **Character save clean break.** Identity file V5 stores either a fresh
   pre-chargen identity with no root or an established complete profile with its
-  canonical root. It cannot represent a half-created durable character. V1–V3
+  canonical root. It cannot represent a half-created durable character. V1–V4
   identity files are rejected without migration.
+- **Character bootstrap transaction.** Chargen completion binds the established
+  profile, post-boat root, starting inventory/equipment, and derived combat
+  state in one prepared operation. Inventory and combat record the profile
+  revision that initialized them, making resume/reattach idempotent and
+  preventing a different profile from silently replacing live state. The
+  operator combat template retains resolver modifiers and the weight-unit
+  scale; confirmed character attributes and skills override player-specific
+  fields.
 
 ## Protocol, transport, and security
 

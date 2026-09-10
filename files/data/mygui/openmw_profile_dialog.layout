@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<MyGUI type="Layout">
+    <Widget type="Window" skin="MW_Dialog" layer="Modal" position="0 0 460 300" align="Center" name="_Main">
+        <Property key="Caption" value="Player Profiles"/>
+        <Widget type="TextBox" skin="ProgressText" position="12 10 430 22" name="SelectLabel">
+            <Property key="Caption" value="Select Profile"/>
+        </Widget>
+        <Widget type="ComboBox" skin="MW_ComboBox" position="12 34 430 28" name="ProfileSelect">
+            <Property key="ModeDrop" value="true"/>
+        </Widget>
+        <Widget type="TextBox" skin="ProgressText" position="12 68 430 22" name="UsernameLabel">
+            <Property key="Caption" value="Username (3-32 characters: a-z, 0-9, _)"/>
+        </Widget>
+        <Widget type="EditBox" skin="MW_TextEdit" position="12 92 430 28" name="Username">
+            <Property key="MaxTextLength" value="32"/>
+        </Widget>
+        <Widget type="TextBox" skin="ProgressText" position="12 126 430 22" name="PasswordLabel">
+            <Property key="Caption" value="Profile Password"/>
+        </Widget>
+        <Widget type="EditBox" skin="MW_TextEdit" position="12 150 430 28" name="Password">
+            <Property key="MaxTextLength" value="256"/>
+        </Widget>
+        <Widget type="TextBox" skin="ProgressText" position="12 186 430 22" name="StatusMessage">
+            <Property key="Caption" value=""/>
+        </Widget>
+        <Widget type="AutoSizedButton" skin="MW_Button" position="20 220 90 28" name="Add">
+            <Property key="Caption" value="Add New"/>
+        </Widget>
+        <Widget type="AutoSizedButton" skin="MW_Button" position="170 220 80 28" name="Delete">
+            <Property key="Caption" value="Delete"/>
+        </Widget>
+        <Widget type="AutoSizedButton" skin="MW_Button" position="350 220 80 28" name="Close">
+            <Property key="Caption" value="Done"/>
+        </Widget>
+    </Widget>
+</MyGUI>

@@ -88,6 +88,9 @@ namespace TES3MP::OpenMWAdapter
 
         std::optional<CellId> toCanonical(const MWWorld::Cell& cell, const DesktopContentMapping& mapping)
         {
+            // Local input may briefly enter a known cell space outside the server's exact-cell catalog while
+            // OpenMW finishes new-game startup. Preserve that request for authoritative server rejection and
+            // correction; only genuinely unmapped local records are content-mapping failures.
             if (!cell.isExterior())
             {
                 const auto found = std::ranges::find_if(mapping.cellSpaces, [&](const auto& value) {
@@ -95,16 +98,14 @@ namespace TES3MP::OpenMWAdapter
                 });
                 if (found == mapping.cellSpaces.end())
                     return std::nullopt;
-                const auto result = CellId::interior(found->id);
-                return mapping.manifest.contains(result) ? std::optional(result) : std::nullopt;
+                return CellId::interior(found->id);
             }
             const auto found = std::ranges::find_if(mapping.cellSpaces, [&](const auto& value) {
                 return value.kind == CellSpaceKind::Exterior && cell.getWorldSpace() == refId(value.record);
             });
             if (found == mapping.cellSpaces.end())
                 return std::nullopt;
-            const auto result = CellId::exterior(found->id, cell.getGridX(), cell.getGridY());
-            return mapping.manifest.contains(result) ? std::optional(result) : std::nullopt;
+            return CellId::exterior(found->id, cell.getGridX(), cell.getGridY());
         }
 
         ESM::Position toOpenMW(const Transform& transform)

@@ -1,6 +1,7 @@
 #ifndef OPENMW_GAME_MWGUI_MAINMENU_H
 #define OPENMW_GAME_MWGUI_MAINMENU_H
 
+#include <filesystem>
 #include <memory>
 #include <optional>
 #include <thread>
@@ -23,11 +24,17 @@ namespace VFS
     class Manager;
 }
 
+namespace TES3MP::OpenMWAdapter
+{
+    class PlayerProfileManager;
+}
+
 namespace MWGui
 {
 
     class BackgroundImage;
     class MultiplayerDialog;
+    class ProfileDialog;
     class VideoWidget;
     class MenuVideo
     {
@@ -52,7 +59,8 @@ namespace MWGui
         bool mHasAnimatedMenu;
 
     public:
-        MainMenu(int w, int h, const VFS::Manager* vfs, const std::string& versionDescription);
+        MainMenu(int w, int h, const VFS::Manager* vfs, const std::string& versionDescription,
+            const std::filesystem::path& userDataPath = {});
         ~MainMenu() override;
 
         void onResChange(int w, int h) override;
@@ -68,6 +76,7 @@ namespace MWGui
         MyGUI::Widget* mButtonBox;
         MyGUI::TextBox* mVersionText;
         MyGUI::Button* mMultiplayerButton = nullptr;
+        MyGUI::Button* mProfileButton = nullptr;
 
         BackgroundImage* mBackground;
 
@@ -78,6 +87,7 @@ namespace MWGui
         void onButtonClicked(MyGUI::Widget* sender);
         void onNewGameConfirmed();
         void onExitConfirmed();
+        void onProfileChanged();
 
         void showBackground(bool show);
 
@@ -85,6 +95,9 @@ namespace MWGui
 
         std::unique_ptr<SaveGameDialog> mSaveGameDialog;
         std::unique_ptr<MultiplayerDialog> mMultiplayerDialog;
+        std::unique_ptr<ProfileDialog> mProfileDialog;
+        std::unique_ptr<TES3MP::OpenMWAdapter::PlayerProfileManager> mProfileManager;
+        std::string mProfilePath;
     };
 
 }

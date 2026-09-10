@@ -1,4 +1,5 @@
 #include "client_connection.hpp"
+#include "player_profile_manager.hpp"
 
 #ifdef TES3MP_OPENMW_HAS_GNS
 #include <tes3mp/transport_gns.hpp>
@@ -446,11 +447,12 @@ namespace TES3MP::OpenMWAdapter
                 auto providers = mConfiguration.providers;
                 providers.status = this;
                 const auto credentialFile = mConfiguration.playerCredentialDirectory / credentialFileName(*endpoint);
-                mActiveCredentialFile = credentialFile;
+                mActiveCredentialFile = mProfileUsername.empty() ? credentialFile : std::filesystem::path{};
                 auto created = makeClientCoordinator(endpoint->host(), endpoint->port(),
                     mConfiguration.timeoutMilliseconds, mConfiguration.passwordFile,
                     credentialFile,
-                    mConfiguration.contentManifest, providers, mJoinPassword);
+                    mConfiguration.contentManifest, providers, mJoinPassword,
+                    mProfileUsername, mProfileCredential);
                 auto* session = std::get_if<std::unique_ptr<EngineCoordinator>>(&created);
                 if (!session || !*session)
                 {
@@ -501,6 +503,23 @@ namespace TES3MP::OpenMWAdapter
                     mJoinPassword.assign(value);
                 else
                     mJoinPassword.clear();
+            }
+            void setPlayerProfile(std::string_view username, std::span<const std::byte> credential) noexcept override
+            {
+                if (isValidPlayerUsername(username) && credential.size() == PlayerCredentialBytes)
+                {
+                    mProfileUsername.assign(username);
+                    std::ranges::copy(credential, mProfileCredential.begin());
+                }
+                else
+                {
+                    mProfileUsername.clear();
+                    std::ranges::fill(mProfileCredential, std::byte{});
+                }
+            }
+            std::string_view activePlayerUsername() const noexcept override
+            {
+                return mProfileUsername;
             }
             bool gameStartRequested() const noexcept override
             {
@@ -569,6 +588,8 @@ namespace TES3MP::OpenMWAdapter
             MultiplayerState mState = MultiplayerState::Idle;
             std::string mFailure;
             std::string mJoinPassword;
+            std::string mProfileUsername;
+            std::array<std::byte, PlayerCredentialBytes> mProfileCredential{};
             std::filesystem::path mActiveCredentialFile;
             bool mGameRunning = false;
             bool mHosted = false;
@@ -652,7 +673,8 @@ namespace TES3MP::OpenMWAdapter
     ClientCoordinatorResult makeClientCoordinator(std::string_view host, std::uint64_t port,
         std::uint64_t timeoutMilliseconds, const std::filesystem::path& passwordFile,
         const std::filesystem::path& playerCredentialFile, ContentManifestId contentManifest,
-        ClientProviders providers, std::string_view passwordOverride) noexcept
+        ClientProviders providers, std::string_view passwordOverride,
+        std::string_view profileUsername, std::span<const std::byte> profileCredential) noexcept
     try
     {
         if (!providers.input || !providers.presentation || !providers.status)
@@ -694,12 +716,28 @@ namespace TES3MP::OpenMWAdapter
         std::fill(bytes.begin(), bytes.end(), std::byte{});
         if (!password)
             return ClientCompositionFailure::CredentialRejected;
-        if (playerCredentialFile.empty())
-            return ClientCompositionFailure::CredentialRejected;
-        const bool playerCredentialExists = std::filesystem::exists(playerCredentialFile);
-        auto playerCredential = loadPlayerCredential(playerCredentialFile);
-        if (playerCredentialExists && !playerCredential)
-            return ClientCompositionFailure::CredentialReadFailed;
+
+        std::optional<PlayerCredential> playerCredential;
+        if (!profileUsername.empty())
+        {
+            if (!isValidPlayerUsername(profileUsername) || profileCredential.size() != PlayerCredentialBytes)
+                return ClientCompositionFailure::CredentialRejected;
+            auto endpointCredential
+                = deriveEndpointCredential(profileCredential, endpoint->host(), endpoint->port());
+            playerCredential = PlayerCredential::create(endpointCredential);
+            std::ranges::fill(endpointCredential, std::byte{});
+            if (!playerCredential)
+                return ClientCompositionFailure::CredentialRejected;
+        }
+        else
+        {
+            if (playerCredentialFile.empty())
+                return ClientCompositionFailure::CredentialRejected;
+            const bool playerCredentialExists = std::filesystem::exists(playerCredentialFile);
+            playerCredential = loadPlayerCredential(playerCredentialFile);
+            if (playerCredentialExists && !playerCredential)
+                return ClientCompositionFailure::CredentialReadFailed;
+        }
 
 #ifdef TES3MP_OPENMW_HAS_GNS
         auto limits = TransportLimits::create(1, 1, 1, 32);
@@ -723,7 +761,8 @@ namespace TES3MP::OpenMWAdapter
         auto offer
             = std::get<CapabilityOffer>(CapabilityOffer::create(std::move(versions), optional, {}, contentManifest));
         if ((*runtime)->start(*endpoint, ClientHello::fromOffer(std::move(offer)),
-                AuthenticationRequest::join(std::move(*password), std::move(playerCredential)))
+                AuthenticationRequest::join(std::move(*password), std::move(playerCredential),
+                    std::string(profileUsername)))
             != HeadlessClientResult::Accepted)
             return ClientCompositionFailure::ConnectionRejected;
         return makeCoordinator(std::move(transport.runtime), std::move(clock), std::move(*runtime),

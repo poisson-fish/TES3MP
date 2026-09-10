@@ -58,7 +58,9 @@ namespace TES3MP::ServerApp
 
         JoinCompositionOutcome join(PrincipalId principal, SessionGeneration generation, ServerTick tick,
             ResumeTokenContext context,
-            std::optional<AuthenticatedAdmission::PlayerClaim> playerClaim = std::nullopt) noexcept;
+            std::optional<AuthenticatedAdmission::PlayerClaim> playerClaim = std::nullopt,
+            std::optional<PlayerCredential> providedCredential = std::nullopt,
+            std::string username = {}) noexcept;
 
     private:
         AuthenticatedJoinCoordinator& mJoins;

@@ -57,6 +57,10 @@ namespace TES3MP::ServerApp
                 mPendingInventory = *mInventory;
                 if (!mPendingInventory->ensurePlayer(join.player))
                     return false;
+                if (join.characterProfile.lifecycle() == CharacterLifecycle::EstablishedCharacter
+                    && (!mItemCatalog || !mPendingInventory->initializePlayerFromCharacter(join.player,
+                        join.characterProfile.revision(), join.characterProfile.startingInventory(), tick)))
+                    return false;
             }
             if (inventoryCapable)
             {
@@ -82,8 +86,16 @@ namespace TES3MP::ServerApp
                 if (!playerInventory)
                     return false;
                 mPendingCombat = *mCombat;
-                if (!mPendingCombat->ensurePlayer(
-                        join.player, *mPlayerCombatTemplate, playerInventory->totalWeight(*mItemCatalog)))
+                const auto weight = playerInventory->totalWeight(*mItemCatalog);
+                if (join.characterProfile.lifecycle() == CharacterLifecycle::EstablishedCharacter)
+                {
+                    auto characterTemplate
+                        = deriveCharacterCombatTemplate(join.characterProfile, *mPlayerCombatTemplate);
+                    if (!characterTemplate || !mPendingCombat->initializePlayerFromCharacter(join.player,
+                        *characterTemplate, weight, join.characterProfile.revision()))
+                        return false;
+                }
+                else if (!mPendingCombat->ensurePlayer(join.player, *mPlayerCombatTemplate, weight))
                     return false;
             }
             auto combatSnapshot = combatCapable && mPendingCombat && mActors
@@ -225,10 +237,13 @@ namespace TES3MP::ServerApp
 
     JoinCompositionOutcome AuthenticatedJoinComposition::join(PrincipalId principal, SessionGeneration generation,
         ServerTick tick, ResumeTokenContext context,
-        std::optional<AuthenticatedAdmission::PlayerClaim> playerClaim) noexcept
+        std::optional<AuthenticatedAdmission::PlayerClaim> playerClaim,
+        std::optional<PlayerCredential> providedCredential,
+        std::string username) noexcept
     {
+        const bool clientProvidedCredential = providedCredential.has_value();
         auto prepared = playerClaim ? mJoins.prepareReattach(principal, *playerClaim, generation, tick)
-                                    : mJoins.prepare(principal, generation, tick);
+                                    : mJoins.prepare(principal, generation, tick, std::move(providedCredential), std::move(username));
         if (!std::holds_alternative<AuthenticatedJoinPreparation>(prepared))
             return { JoinCompositionResult::JoinRejected, std::nullopt };
 
@@ -245,8 +260,11 @@ namespace TES3MP::ServerApp
         try
         {
             auto accepted = std::get<AuthenticationAcceptedMessage>(std::move(issued));
-            auto playerCredential = mJoins.copyPendingPlayerCredential(preparation.id);
-            if (mJoins.pendingCreatesPersistentIdentity(preparation.id) && !playerCredential)
+            auto playerCredential = clientProvidedCredential
+                ? std::optional<PlayerCredential>{}
+                : mJoins.copyPendingPlayerCredential(preparation.id);
+            if (mJoins.pendingCreatesPersistentIdentity(preparation.id)
+                && !clientProvidedCredential && !playerCredential)
             {
                 cancel();
                 return { JoinCompositionResult::EncodingRejected, std::nullopt };

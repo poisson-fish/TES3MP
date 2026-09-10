@@ -49,6 +49,40 @@ namespace
 
 namespace TES3MP
 {
+    std::optional<CanonicalPlayerCombatTemplate> deriveCharacterCombatTemplate(
+        const CharacterProfile& profile, const CanonicalPlayerCombatTemplate& base) noexcept
+    {
+        if (profile.lifecycle() != CharacterLifecycle::EstablishedCharacter
+            || !finite(base.stats.strength) || base.stats.strength <= 0.f
+            || base.maximumEncumbranceWeightUnits == 0)
+            return std::nullopt;
+        const auto& attributes = profile.derived().attributes;
+        const auto& skills = profile.derived().skills;
+        CanonicalPlayerCombatTemplate result = base;
+        result.stats.strength = static_cast<float>(attributes[0]);
+        result.stats.agility = static_cast<float>(attributes[3]);
+        result.stats.luck = static_cast<float>(attributes[7]);
+        result.stats.fatigueTerm = 1.f;
+        result.stats.handToHandSkill = static_cast<float>(skills[26]);
+        result.stats.fatigue = static_cast<float>(attributes[0]) + static_cast<float>(attributes[2])
+            + static_cast<float>(attributes[3]) + static_cast<float>(attributes[5]);
+        result.weaponSkills[static_cast<std::size_t>(MeleeWeaponSkill::ShortBlade)]
+            = static_cast<float>(skills[20]);
+        result.weaponSkills[static_cast<std::size_t>(MeleeWeaponSkill::LongBlade)]
+            = static_cast<float>(skills[5]);
+        result.weaponSkills[static_cast<std::size_t>(MeleeWeaponSkill::BluntWeapon)]
+            = static_cast<float>(skills[4]);
+        result.weaponSkills[static_cast<std::size_t>(MeleeWeaponSkill::Axe)] = static_cast<float>(skills[6]);
+        result.weaponSkills[static_cast<std::size_t>(MeleeWeaponSkill::Spear)] = static_cast<float>(skills[7]);
+        const auto scaledEncumbrance = static_cast<long double>(base.maximumEncumbranceWeightUnits)
+            * static_cast<long double>(attributes[0]) / static_cast<long double>(base.stats.strength);
+        if (scaledEncumbrance < 1.L
+            || scaledEncumbrance > static_cast<long double>(std::numeric_limits<std::uint64_t>::max()))
+            return std::nullopt;
+        result.maximumEncumbranceWeightUnits = static_cast<std::uint64_t>(scaledEncumbrance);
+        return result;
+    }
+
     std::optional<MeleeWeaponCatalog> MeleeWeaponCatalog::create(
         const ItemPrototypeCatalog& items, std::span<const MeleeWeaponProfile> profiles) noexcept
     try
@@ -109,6 +143,40 @@ namespace TES3MP
             return false;
         const auto position = std::ranges::lower_bound(mPlayers, id, {}, &CanonicalPlayerCombatState::playerId);
         mPlayers.insert(position, std::move(value));
+        return true;
+    }
+    catch (...)
+    {
+        return false;
+    }
+
+    bool CanonicalCombatWorld::initializePlayerFromCharacter(PlayerId id,
+        const CanonicalPlayerCombatTemplate& source, std::uint64_t inventoryWeightUnits,
+        CharacterProfileRevision profileRevision) noexcept
+    try
+    {
+        auto found = std::ranges::lower_bound(mPlayers, id, {}, &CanonicalPlayerCombatState::playerId);
+        if (found == mPlayers.end() || found->playerId != id)
+        {
+            if (!ensurePlayer(id, source, inventoryWeightUnits))
+                return false;
+            found = std::ranges::lower_bound(mPlayers, id, {}, &CanonicalPlayerCombatState::playerId);
+            found->initializedCharacterProfile = profileRevision;
+            return true;
+        }
+        if (found->initializedCharacterProfile)
+            return *found->initializedCharacterProfile == profileRevision;
+        const auto revision = found->revision.next();
+        if (!revision || source.maximumEncumbranceWeightUnits == 0)
+            return false;
+        CanonicalPlayerCombatState value{ id, *revision, source.stats, source.weaponSkills,
+            source.maximumEncumbranceWeightUnits, std::nullopt, profileRevision };
+        value.stats.weaponSkill = 0.f;
+        value.stats.normalizedEncumbrance
+            = normalizedEncumbrance(inventoryWeightUnits, source.maximumEncumbranceWeightUnits);
+        if (!valid(value))
+            return false;
+        *found = std::move(value);
         return true;
     }
     catch (...)

@@ -69,7 +69,8 @@ namespace TES3MP
     }
 
     AuthenticatedJoinPrepareOutcome AuthenticatedJoinCoordinator::prepare(
-        PrincipalId principal, SessionGeneration generation, ServerTick serverTick)
+        PrincipalId principal, SessionGeneration generation, ServerTick serverTick,
+        std::optional<PlayerCredential> credential, std::string username)
     {
         if (mPending)
             return AuthenticatedJoinError::PreparationPending;
@@ -84,7 +85,7 @@ namespace TES3MP
             return AuthenticatedJoinError::IdentityExhausted;
         if (mPlayerIdentities)
         {
-            auto identity = mPlayerIdentities->prepareCreate(mContentManifest);
+            auto identity = mPlayerIdentities->prepareCreate(mContentManifest, std::move(credential), std::move(username));
             auto* prepared = std::get_if<PreparedPlayerIdentity>(&identity);
             if (!prepared)
                 return std::get<PlayerIdentityError>(identity) == PlayerIdentityError::Full
@@ -323,9 +324,12 @@ namespace TES3MP
         return mPlayerIdentities ? mPlayerIdentities->characterProfile(player) : nullptr;
     }
 
-    CharacterProfileApplyResult AuthenticatedJoinCoordinator::applyCharacterCreation(PlayerId player,
-        const CharacterContentCatalog& catalog, const CharacterCreationCommand& command,
-        ServerTick tick) noexcept
+    CharacterCreationPrepareOutcome AuthenticatedJoinCoordinator::prepareCharacterCreation(PlayerId player,
+        const CharacterContentCatalog& catalog, const CharacterCreationCommand& command, ServerTick tick,
+        CanonicalInventoryWorld* inventory, CanonicalCombatWorld* combat,
+        const CanonicalPlayerCombatTemplate* playerCombatTemplate,
+        const ItemPrototypeCatalog* itemCatalog) noexcept
+    try
     {
         if (!mPlayerIdentities)
             return CharacterProfileError::PersistenceFailed;
@@ -336,20 +340,102 @@ namespace TES3MP
         auto* profile = std::get_if<CharacterProfile>(&preview);
         if (!profile)
             return std::get<CharacterProfileError>(preview);
-        if (profile->lifecycle() != CharacterLifecycle::EstablishedCharacter)
-            return mPlayerIdentities->applyCharacterCreation(player, catalog, command);
 
-        auto safePoint = mReducer.preparePlayerSafePoint(player, catalog.completionSpawn(), tick);
-        if (!safePoint)
+        PreparedCharacterCreation prepared;
+        prepared.mProfile = *profile;
+        prepared.mBaseState = &mReducer.state();
+        prepared.mBaseRevision = mReducer.canonicalRevision();
+        const CanonicalPlayerEntityState* checkpoint = nullptr;
+        if (profile->lifecycle() == CharacterLifecycle::EstablishedCharacter)
+        {
+            prepared.mSafePoint = mReducer.preparePlayerSafePoint(player, catalog.completionSpawn(), tick);
+            if (!prepared.mSafePoint)
+                return CharacterProfileError::InvalidInitialState;
+            checkpoint = prepared.mSafePoint->candidateState().findPlayer(player);
+            if (!checkpoint)
+                return CharacterProfileError::InvalidInitialState;
+
+            if (inventory)
+            {
+                if (!itemCatalog || inventory->contentManifestId() != catalog.manifest()
+                    || itemCatalog->contentManifestId() != catalog.manifest())
+                    return CharacterProfileError::InvalidInitialState;
+                prepared.mInventory = *inventory;
+                if (!prepared.mInventory->initializePlayerFromCharacter(
+                        player, profile->revision(), profile->startingInventory(), tick))
+                    return CharacterProfileError::InvalidInitialState;
+                prepared.mInventoryTarget = inventory;
+            }
+            if (combat)
+            {
+                if (!prepared.mInventory || !itemCatalog || !playerCombatTemplate)
+                    return CharacterProfileError::InvalidInitialState;
+                auto characterTemplate = deriveCharacterCombatTemplate(*profile, *playerCombatTemplate);
+                const auto* playerInventory = prepared.mInventory->findPlayer(player);
+                if (!characterTemplate || !playerInventory)
+                    return CharacterProfileError::InvalidInitialState;
+                prepared.mCombat = *combat;
+                if (!prepared.mCombat->initializePlayerFromCharacter(player, *characterTemplate,
+                        playerInventory->totalWeight(*itemCatalog), profile->revision()))
+                    return CharacterProfileError::InvalidInitialState;
+                prepared.mCombatTarget = combat;
+            }
+        }
+        auto identity = mPlayerIdentities->prepareCharacterCreation(player, catalog, command, checkpoint);
+        auto* identityPreparation = std::get_if<PreparedCharacterProfile>(&identity);
+        if (!identityPreparation)
+            return std::get<CharacterProfileError>(identity);
+        if (identityPreparation->profile != prepared.mProfile)
+        {
+            (void)mPlayerIdentities->cancelCharacterCreation(identityPreparation->id);
             return CharacterProfileError::InvalidInitialState;
-        const auto* checkpoint = safePoint->candidateState().findPlayer(player);
-        if (!checkpoint)
-            return CharacterProfileError::InvalidInitialState;
-        auto persisted = mPlayerIdentities->applyCharacterCreation(player, catalog, command, checkpoint);
-        if (!std::holds_alternative<CharacterProfile>(persisted))
-            return persisted;
-        if (!mReducer.commit(std::move(*safePoint)))
+        }
+        prepared.mIdentityPreparation = identityPreparation->id;
+        return prepared;
+    }
+    catch (...)
+    {
+        return CharacterProfileError::AllocationFailure;
+    }
+
+    bool AuthenticatedJoinCoordinator::commitCharacterCreation(PreparedCharacterCreation&& prepared) noexcept
+    {
+        if (!mPlayerIdentities || prepared.mIdentityPreparation == 0)
+            return false;
+        if (!mPlayerIdentities->commitCharacterCreation(prepared.mIdentityPreparation))
+        {
+            (void)mPlayerIdentities->cancelCharacterCreation(prepared.mIdentityPreparation);
+            return false;
+        }
+        if (prepared.mSafePoint && !mReducer.commit(std::move(*prepared.mSafePoint)))
+        {
+            (void)mPlayerIdentities->rollbackCharacterCreation(prepared.mIdentityPreparation);
+            return false;
+        }
+        if (prepared.mInventory && prepared.mInventoryTarget)
+            *prepared.mInventoryTarget = std::move(*prepared.mInventory);
+        if (prepared.mCombat && prepared.mCombatTarget)
+            *prepared.mCombatTarget = std::move(*prepared.mCombat);
+        return mPlayerIdentities->finalizeCharacterCreation(prepared.mIdentityPreparation);
+    }
+
+    bool AuthenticatedJoinCoordinator::cancelCharacterCreation(PreparedCharacterCreation&& prepared) noexcept
+    {
+        return mPlayerIdentities && prepared.mIdentityPreparation != 0
+            && mPlayerIdentities->cancelCharacterCreation(prepared.mIdentityPreparation);
+    }
+
+    CharacterProfileApplyResult AuthenticatedJoinCoordinator::applyCharacterCreation(PlayerId player,
+        const CharacterContentCatalog& catalog, const CharacterCreationCommand& command,
+        ServerTick tick) noexcept
+    {
+        auto result = prepareCharacterCreation(player, catalog, command, tick);
+        auto* prepared = std::get_if<PreparedCharacterCreation>(&result);
+        if (!prepared)
+            return std::get<CharacterProfileError>(result);
+        CharacterProfile profile = prepared->profile();
+        if (!commitCharacterCreation(std::move(*prepared)))
             return CharacterProfileError::PersistenceFailed;
-        return persisted;
+        return profile;
     }
 }

@@ -58,7 +58,8 @@ struct AuthenticationRequest FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Ta
   enum FlatBuffersVTableOffset FLATBUFFERS_VTABLE_UNDERLYING_TYPE {
     VT_KIND = 4,
     VT_MATERIAL = 6,
-    VT_PLAYER_CREDENTIAL = 8
+    VT_PLAYER_CREDENTIAL = 8,
+    VT_USERNAME = 10
   };
   TES3MP::Protocol::Schema::AuthenticationCredentialKind kind() const {
     return static_cast<TES3MP::Protocol::Schema::AuthenticationCredentialKind>(GetField<uint8_t>(VT_KIND, 0));
@@ -69,6 +70,9 @@ struct AuthenticationRequest FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Ta
   const ::flatbuffers::Vector<uint8_t> *player_credential() const {
     return GetPointer<const ::flatbuffers::Vector<uint8_t> *>(VT_PLAYER_CREDENTIAL);
   }
+  const ::flatbuffers::String *username() const {
+    return GetPointer<const ::flatbuffers::String *>(VT_USERNAME);
+  }
   template <bool B = false>
   bool Verify(::flatbuffers::VerifierTemplate<B> &verifier) const {
     return VerifyTableStart(verifier) &&
@@ -77,6 +81,8 @@ struct AuthenticationRequest FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Ta
            verifier.VerifyVector(material()) &&
            VerifyOffset(verifier, VT_PLAYER_CREDENTIAL) &&
            verifier.VerifyVector(player_credential()) &&
+           VerifyOffset(verifier, VT_USERNAME) &&
+           verifier.VerifyString(username()) &&
            verifier.EndTable();
   }
 };
@@ -94,6 +100,9 @@ struct AuthenticationRequestBuilder {
   void add_player_credential(::flatbuffers::Offset<::flatbuffers::Vector<uint8_t>> player_credential) {
     fbb_.AddOffset(AuthenticationRequest::VT_PLAYER_CREDENTIAL, player_credential);
   }
+  void add_username(::flatbuffers::Offset<::flatbuffers::String> username) {
+    fbb_.AddOffset(AuthenticationRequest::VT_USERNAME, username);
+  }
   explicit AuthenticationRequestBuilder(::flatbuffers::FlatBufferBuilder &_fbb)
         : fbb_(_fbb) {
     start_ = fbb_.StartTable();
@@ -109,8 +118,10 @@ inline ::flatbuffers::Offset<AuthenticationRequest> CreateAuthenticationRequest(
     ::flatbuffers::FlatBufferBuilder &_fbb,
     TES3MP::Protocol::Schema::AuthenticationCredentialKind kind = TES3MP::Protocol::Schema::AuthenticationCredentialKind::Unknown,
     ::flatbuffers::Offset<::flatbuffers::Vector<uint8_t>> material = 0,
-    ::flatbuffers::Offset<::flatbuffers::Vector<uint8_t>> player_credential = 0) {
+    ::flatbuffers::Offset<::flatbuffers::Vector<uint8_t>> player_credential = 0,
+    ::flatbuffers::Offset<::flatbuffers::String> username = 0) {
   AuthenticationRequestBuilder builder_(_fbb);
+  builder_.add_username(username);
   builder_.add_player_credential(player_credential);
   builder_.add_material(material);
   builder_.add_kind(kind);
@@ -121,14 +132,17 @@ inline ::flatbuffers::Offset<AuthenticationRequest> CreateAuthenticationRequestD
     ::flatbuffers::FlatBufferBuilder &_fbb,
     TES3MP::Protocol::Schema::AuthenticationCredentialKind kind = TES3MP::Protocol::Schema::AuthenticationCredentialKind::Unknown,
     const std::vector<uint8_t> *material = nullptr,
-    const std::vector<uint8_t> *player_credential = nullptr) {
+    const std::vector<uint8_t> *player_credential = nullptr,
+    const char *username = nullptr) {
   auto material__ = material ? _fbb.CreateVector<uint8_t>(*material) : 0;
   auto player_credential__ = player_credential ? _fbb.CreateVector<uint8_t>(*player_credential) : 0;
+  auto username__ = username ? _fbb.CreateString(username) : 0;
   return TES3MP::Protocol::Schema::CreateAuthenticationRequest(
       _fbb,
       kind,
       material__,
-      player_credential__);
+      player_credential__,
+      username__);
 }
 
 inline const TES3MP::Protocol::Schema::AuthenticationRequest *GetAuthenticationRequest(const void *buf) {

@@ -10,6 +10,7 @@ table AuthenticationRequest {
   kind:AuthenticationCredentialKind = Unknown (id: 0);
   material:[ubyte] (id: 1);
   player_credential:[ubyte] (id: 2);
+  username:string (id: 3);
 }
 
 root_type AuthenticationRequest;

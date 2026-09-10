@@ -167,6 +167,50 @@ namespace
             && *world.findPlayer(id<TES3MP::PlayerId>(1)) == initialized;
     }
 
+    bool character_profile_derives_and_initializes_combat_once()
+    {
+        TES3MP::CharacterDerivedState derived;
+        derived.attributes = { 50, 30, 30, 40, 40, 45, 30, 35 };
+        derived.skills[4] = 14;
+        derived.skills[5] = 25;
+        derived.skills[6] = 16;
+        derived.skills[7] = 27;
+        derived.skills[20] = 30;
+        derived.skills[26] = 35;
+        const auto profile = TES3MP::CharacterProfile::restore(TES3MP::CharacterLifecycle::EstablishedCharacter,
+            TES3MP::CharacterCreationPhase::Complete, "Nerevar",
+            TES3MP::CharacterAppearance{ id<TES3MP::RaceRecordId>(1), id<TES3MP::HeadRecordId>(2),
+                id<TES3MP::HairRecordId>(3), TES3MP::CharacterSex::Female },
+            TES3MP::CharacterClass{ id<TES3MP::ClassRecordId>(4) }, id<TES3MP::BirthsignRecordId>(5),
+            derived, {}, id<TES3MP::CharacterProfileRevision>(6));
+        TES3MP::CanonicalPlayerCombatTemplate base;
+        base.stats.strength = 40.f;
+        base.stats.fortifyAttack = 3.f;
+        base.maximumEncumbranceWeightUnits = 400;
+        const auto character = profile ? TES3MP::deriveCharacterCombatTemplate(*profile, base) : std::nullopt;
+        if (!character || character->stats.strength != 50.f || character->stats.agility != 40.f
+            || character->stats.luck != 35.f || character->stats.fatigue != 165.f
+            || character->stats.handToHandSkill != 35.f || character->stats.fortifyAttack != 3.f
+            || character->weaponSkills[static_cast<std::size_t>(TES3MP::MeleeWeaponSkill::ShortBlade)] != 30.f
+            || character->weaponSkills[static_cast<std::size_t>(TES3MP::MeleeWeaponSkill::LongBlade)] != 25.f
+            || character->maximumEncumbranceWeightUnits != 500)
+            return false;
+        const auto key = *TES3MP::RandomStreamKey::fromValues(7, 9);
+        auto world = std::get<TES3MP::CanonicalCombatWorld>(TES3MP::createCanonicalCombatWorld({}, {},
+            TES3MP::Xoshiro256StarStar::fromWorldSeed(10, key).snapshot()));
+        if (!world.initializePlayerFromCharacter(id<TES3MP::PlayerId>(1), *character, 125,
+                profile->revision()))
+            return false;
+        const auto initialized = *world.findPlayer(id<TES3MP::PlayerId>(1));
+        return initialized.stats.normalizedEncumbrance == 0.25f
+            && initialized.initializedCharacterProfile == profile->revision()
+            && world.initializePlayerFromCharacter(id<TES3MP::PlayerId>(1), *character, 250,
+                profile->revision())
+            && *world.findPlayer(id<TES3MP::PlayerId>(1)) == initialized
+            && !world.initializePlayerFromCharacter(id<TES3MP::PlayerId>(1), *character, 250,
+                id<TES3MP::CharacterProfileRevision>(7));
+    }
+
     bool equipped_weapon_stats_condition_and_wear_come_from_canonical_sources()
     {
         const auto before = combatWorld();
@@ -324,6 +368,7 @@ int main()
 {
     return authoritative_hit_is_atomic_and_server_randomized() && lethal_hit_marks_death_in_same_candidate()
             && player_template_initializes_once_and_resume_preserves_state()
+            && character_profile_derives_and_initializes_combat_once()
             && equipped_weapon_stats_condition_and_wear_come_from_canonical_sources()
             && missing_weapon_profile_rejects_without_contact_or_mutation()
             && weapon_catalog_rejects_unbounded_or_stackable_records()

@@ -19,11 +19,13 @@
 
 #include "../mwworld/globals.hpp"
 #include "../tes3mp/engine_coordinator.hpp"
+#include "../tes3mp/player_profile_manager.hpp"
 
 #include "backgroundimage.hpp"
 #include "confirmationdialog.hpp"
 #include "savegamedialog.hpp"
 #include "multiplayerdialog.hpp"
+#include "profiledialog.hpp"
 #include "settingswindow.hpp"
 #include "videowidget.hpp"
 
@@ -95,7 +97,8 @@ namespace MWGui
         }
     }
 
-    MainMenu::MainMenu(int w, int h, const VFS::Manager* vfs, const std::string& versionDescription)
+    MainMenu::MainMenu(int w, int h, const VFS::Manager* vfs, const std::string& versionDescription,
+        const std::filesystem::path& userDataPath)
         : WindowBase("openmw_mainmenu.layout")
         , mWidth(w)
         , mHeight(h)
@@ -105,6 +108,15 @@ namespace MWGui
     {
         getWidget(mVersionText, "VersionText");
         mVersionText->setCaption(versionDescription);
+
+        if (!userDataPath.empty())
+            mProfilePath = (userDataPath / "tes3mp" / "profiles.json").string();
+        else
+            mProfilePath = "profiles.json";
+
+        mProfileManager = std::make_unique<TES3MP::OpenMWAdapter::PlayerProfileManager>();
+        if (mProfileManager->load(mProfilePath))
+            (void)mProfileManager->save(mProfilePath);
 
         constexpr VFS::Path::NormalizedView menuBackgroundVideo("video/menu_background.bik");
 
@@ -163,6 +175,11 @@ namespace MWGui
         MWBase::Environment::get().getStateManager()->requestQuit();
     }
 
+    void MainMenu::onProfileChanged()
+    {
+        updateMenu();
+    }
+
     void MainMenu::onButtonClicked(MyGUI::Widget* sender)
     {
         MWBase::WindowManager* winMgr = MWBase::Environment::get().getWindowManager();
@@ -202,8 +219,19 @@ namespace MWGui
         else if (name == "multiplayer")
         {
             if (!mMultiplayerDialog)
-                mMultiplayerDialog = std::make_unique<MultiplayerDialog>("127.0.0.1");
+                mMultiplayerDialog = std::make_unique<MultiplayerDialog>("127.0.0.1", mProfileManager.get());
+            mMultiplayerDialog->updateProfileDisplay();
             mMultiplayerDialog->setVisible(true);
+        }
+        else if (name == "profile")
+        {
+            if (!mProfileDialog && mProfileManager)
+            {
+                mProfileDialog = std::make_unique<ProfileDialog>(*mProfileManager, mProfilePath);
+                mProfileDialog->eventProfileChanged += MyGUI::newDelegate(this, &MainMenu::onProfileChanged);
+            }
+            if (mProfileDialog)
+                mProfileDialog->setVisible(true);
         }
         else if (name == "loadgame" || name == "savegame")
         {
@@ -312,6 +340,9 @@ namespace MWGui
             && multiplayer->multiplayerState() != TES3MP::OpenMWAdapter::MultiplayerState::Connecting
             && multiplayer->multiplayerState() != TES3MP::OpenMWAdapter::MultiplayerState::Ready;
 
+        const bool hasProfiles = mProfileManager && !mProfileManager->profiles().empty()
+            && mProfileManager->activeProfile().has_value();
+
         if (!mMultiplayerButton)
         {
             mMultiplayerButton = mButtonBox->createWidget<MyGUI::Button>(
@@ -321,6 +352,17 @@ namespace MWGui
             mMultiplayerButton->eventMouseButtonClick += MyGUI::newDelegate(this, &MainMenu::onButtonClicked);
         }
         mMultiplayerButton->setVisible(showMultiplayer);
+        mMultiplayerButton->setEnabled(hasProfiles);
+
+        if (!mProfileButton)
+        {
+            mProfileButton = mButtonBox->createWidget<MyGUI::Button>(
+                "MW_Button", MyGUI::IntCoord(0, 0, 180, 28), MyGUI::Align::Default);
+            mProfileButton->setCaption("Profiles");
+            mProfileButton->setUserData(std::string("profile"));
+            mProfileButton->eventMouseButtonClick += MyGUI::newDelegate(this, &MainMenu::onButtonClicked);
+        }
+        mProfileButton->setVisible(showMultiplayer);
 
         mVersionText->setVisible(state == MWBase::StateManager::State_NoGame);
 
@@ -399,6 +441,8 @@ namespace MWGui
         if (showMultiplayer)
         {
             mMultiplayerButton->setCoord((maxwidth - 180) / 2, curH + 4, 180, 28);
+            curH += 32;
+            mProfileButton->setCoord((maxwidth - 180) / 2, curH, 180, 28);
             curH += 36;
         }
 

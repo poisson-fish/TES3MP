@@ -499,8 +499,15 @@ namespace TES3MP
         {
         public:
             PlayerClaimAuthenticationOperation(std::unique_ptr<AuthenticationOperation> underlying,
-                std::optional<AuthenticatedAdmission::PlayerClaim> claim) noexcept
-                : mUnderlying(std::move(underlying)), mClaim(claim) {}
+                std::optional<AuthenticatedAdmission::PlayerClaim> claim,
+                std::optional<PlayerCredential> playerCredential = std::nullopt,
+                std::string username = {}) noexcept
+                : mUnderlying(std::move(underlying))
+                , mClaim(claim)
+                , mPlayerCredential(std::move(playerCredential))
+                , mUsername(std::move(username))
+            {
+            }
 
             AuthenticationPollResult poll() noexcept override
             {
@@ -518,7 +525,8 @@ namespace TES3MP
                         completion->result = AuthenticationRejected{ AuthenticationRejectionReason::Denied };
                     return result;
                 }
-                completion->result = AuthenticatedAdmission::reattach(admission->principal(), *mClaim);
+                completion->result = AuthenticatedAdmission::reattach(
+                    admission->principal(), *mClaim, std::move(mPlayerCredential), std::move(mUsername));
                 return result;
             }
 
@@ -532,6 +540,49 @@ namespace TES3MP
         private:
             std::unique_ptr<AuthenticationOperation> mUnderlying;
             std::optional<AuthenticatedAdmission::PlayerClaim> mClaim;
+            std::optional<PlayerCredential> mPlayerCredential;
+            std::string mUsername;
+        };
+
+        class PlayerNewProfileAuthenticationOperation final : public AuthenticationOperation
+        {
+        public:
+            PlayerNewProfileAuthenticationOperation(std::unique_ptr<AuthenticationOperation> underlying,
+                std::optional<PlayerCredential> playerCredential,
+                std::string username) noexcept
+                : mUnderlying(std::move(underlying))
+                , mPlayerCredential(std::move(playerCredential))
+                , mUsername(std::move(username))
+            {
+            }
+
+            AuthenticationPollResult poll() noexcept override
+            {
+                if (!mUnderlying)
+                    return AuthenticationPending{};
+                auto result = mUnderlying->poll();
+                auto* completion = std::get_if<AuthenticationCompletion>(&result);
+                if (!completion)
+                    return result;
+                mUnderlying.reset();
+                auto* admission = std::get_if<AuthenticatedAdmission>(&completion->result);
+                if (!admission)
+                    return result;
+                completion->result = AuthenticatedAdmission::initial(
+                    admission->principal(), std::move(mPlayerCredential), std::move(mUsername));
+                return result;
+            }
+
+            void cancel() noexcept override
+            {
+                if (mUnderlying) mUnderlying->cancel();
+                mUnderlying.reset();
+            }
+
+        private:
+            std::unique_ptr<AuthenticationOperation> mUnderlying;
+            std::optional<PlayerCredential> mPlayerCredential;
+            std::string mUsername;
         };
 
         std::unique_ptr<AuthenticationOperation> immediate(
@@ -551,13 +602,38 @@ namespace TES3MP
         if (submission.mRequest.kind() == AuthenticationCredentialKind::JoinPassword)
         {
             auto playerCredential = submission.mRequest.takePlayerCredential();
+            std::string username(submission.mRequest.username());
             auto operation = mJoinProvider.begin(attempt, submission.mRequest.takeMaterial());
+            if (!mPlayerIdentities)
+                return operation;
+
+            if (!username.empty() && !isValidPlayerUsername(username))
+                return immediate(attempt, AuthenticationRejected{ AuthenticationRejectionReason::Denied });
+
+            if (!username.empty())
+            {
+                if (mPlayerIdentities->hasUsername(username))
+                {
+                    if (!playerCredential)
+                        return immediate(attempt, AuthenticationRejected{ AuthenticationRejectionReason::Denied });
+                    const auto claim = mPlayerIdentities->authenticate(*playerCredential, submission.mContentManifest, username);
+                    if (!claim)
+                        return immediate(attempt, AuthenticationRejected{ AuthenticationRejectionReason::Denied });
+                    return std::unique_ptr<AuthenticationOperation>(
+                        new (std::nothrow) PlayerClaimAuthenticationOperation(
+                            std::move(operation), claim, std::move(playerCredential), std::move(username)));
+                }
+                return std::unique_ptr<AuthenticationOperation>(
+                    new (std::nothrow) PlayerNewProfileAuthenticationOperation(
+                        std::move(operation), std::move(playerCredential), std::move(username)));
+            }
+
             if (!playerCredential)
                 return operation;
-            const auto claim = mPlayerIdentities
-                ? mPlayerIdentities->authenticate(*playerCredential, submission.mContentManifest) : std::nullopt;
+            const auto claim = mPlayerIdentities->authenticate(*playerCredential, submission.mContentManifest);
             return std::unique_ptr<AuthenticationOperation>(
-                new (std::nothrow) PlayerClaimAuthenticationOperation(std::move(operation), claim));
+                new (std::nothrow) PlayerClaimAuthenticationOperation(
+                    std::move(operation), claim, std::move(playerCredential)));
         }
 
         auto token = submission.mRequest.takeResumeToken();

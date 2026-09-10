@@ -305,6 +305,89 @@ namespace TES3MP
         return false;
     }
 
+    bool CanonicalInventoryWorld::initializePlayerFromCharacter(PlayerId playerId,
+        CharacterProfileRevision profileRevision, std::span<const StartingItem> startingItems,
+        ServerTick tick) noexcept
+    try
+    {
+        auto* player = findMutablePlayer(playerId);
+        if (player && player->initializedCharacterProfile)
+            return *player->initializedCharacterProfile == profileRevision;
+        if (player && (!player->stacks.empty()
+                || std::ranges::any_of(player->equipment, [](const auto& value) { return value.has_value(); })))
+            return false;
+        if (!player && mPlayers.size() >= MaximumInventoryPlayers)
+            return false;
+
+        std::size_t requiredStacks = 0;
+        std::array<bool, static_cast<std::size_t>(EquipmentSlot::Count)> occupied{};
+        for (const auto& item : startingItems)
+        {
+            const auto* declaration = mCatalog.find(item.prototype);
+            if (!declaration || item.count == 0)
+                return false;
+            const auto count = declaration->stackable ? std::size_t{ 1 } : static_cast<std::size_t>(item.count);
+            if (count > MaximumPlayerInventoryStacks - requiredStacks)
+                return false;
+            requiredStacks += count;
+            if (item.equipmentSlot)
+            {
+                const auto slot = static_cast<EquipmentSlot>(*item.equipmentSlot);
+                const auto slotIndex = static_cast<std::size_t>(slot);
+                if (slotIndex >= occupied.size() || std::exchange(occupied[slotIndex], true)
+                    || (declaration->slotMask & slotToMask(slot)) == 0)
+                    return false;
+            }
+        }
+
+        auto nextStackId = mNextItemStackId;
+        if (requiredStacks != 0
+            && (!nextStackId
+                || requiredStacks - 1 > std::numeric_limits<std::uint64_t>::max() - nextStackId->value()))
+            return false;
+        std::vector<CanonicalItemStack> stacks;
+        stacks.reserve(requiredStacks);
+        std::array<std::optional<ItemStackId>, static_cast<std::size_t>(EquipmentSlot::Count)> equipment{};
+        for (const auto& item : startingItems)
+        {
+            const auto& declaration = *mCatalog.find(item.prototype);
+            const auto stackCount = declaration.stackable ? std::size_t{ 1 } : static_cast<std::size_t>(item.count);
+            for (std::size_t index = 0; index < stackCount; ++index)
+            {
+                const auto stackId = *nextStackId;
+                const auto following = stackId.value() == std::numeric_limits<std::uint64_t>::max()
+                    ? std::optional<ItemStackId>{}
+                    : ItemStackId::fromValue(stackId.value() + 1);
+                stacks.push_back(CanonicalItemStack{ stackId, item.prototype,
+                    declaration.stackable ? item.count : 1, declaration.maxCondition,
+                    declaration.maxEnchantmentCharge, std::nullopt });
+                if (index == 0 && item.equipmentSlot)
+                    equipment[*item.equipmentSlot] = stackId;
+                nextStackId = following;
+            }
+        }
+        const auto revision = player ? player->revision.next() : InventoryRevision::initial().next();
+        if (!revision)
+            return false;
+        if (!player)
+        {
+            const auto position
+                = std::ranges::lower_bound(mPlayers, playerId, {}, &CanonicalPlayerInventoryState::player);
+            player = &*mPlayers.insert(position, CanonicalPlayerInventoryState{ .player = playerId });
+        }
+        player->revision = *revision;
+        player->lastChangeTick = tick;
+        player->stacks = std::move(stacks);
+        player->equipment = equipment;
+        player->initializedCharacterProfile = profileRevision;
+        mNextItemStackId = nextStackId;
+        return true;
+    }
+    catch (...)
+    {
+        return false;
+    }
+
     EquippedConditionResult CanonicalInventoryWorld::setEquippedItemCondition(PlayerId playerId,
         EquipmentSlot equipmentSlot, ItemStackId stackId, std::uint32_t condition, bool unequip,
         ServerTick tick) noexcept

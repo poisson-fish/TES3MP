@@ -2,6 +2,8 @@
 #define TES3MP_AUTHENTICATED_JOIN_HPP
 
 #include "canonical_state.hpp"
+#include "combat_world.hpp"
+#include "inventory_world.hpp"
 #include "player_identity.hpp"
 #include "protocol_exchange.hpp"
 #include "server_command_reducer.hpp"
@@ -31,6 +33,38 @@ namespace TES3MP
         PlayerId nextPlayer;
         EntityId nextEntity;
     };
+
+    class PreparedCharacterCreation
+    {
+    public:
+        PreparedCharacterCreation(PreparedCharacterCreation&&) noexcept = default;
+        PreparedCharacterCreation& operator=(PreparedCharacterCreation&&) noexcept = default;
+        PreparedCharacterCreation(const PreparedCharacterCreation&) = delete;
+        PreparedCharacterCreation& operator=(const PreparedCharacterCreation&) = delete;
+
+        const CharacterProfile& profile() const noexcept { return mProfile; }
+        const CanonicalServerState& candidateState() const noexcept
+        { return mSafePoint ? mSafePoint->candidateState() : *mBaseState; }
+        CanonicalRevision candidateRevision() const noexcept
+        { return mSafePoint ? mSafePoint->candidateRevision() : mBaseRevision; }
+        const std::optional<CanonicalInventoryWorld>& candidateInventory() const noexcept { return mInventory; }
+        const std::optional<CanonicalCombatWorld>& candidateCombat() const noexcept { return mCombat; }
+
+    private:
+        friend class AuthenticatedJoinCoordinator;
+        PreparedCharacterCreation() = default;
+        std::uint64_t mIdentityPreparation = 0;
+        CharacterProfile mProfile = CharacterProfile::fresh();
+        const CanonicalServerState* mBaseState = nullptr;
+        CanonicalRevision mBaseRevision = CanonicalRevision::initial();
+        std::optional<CanonicalCommandReducer::PreparedLifecycle> mSafePoint;
+        CanonicalInventoryWorld* mInventoryTarget = nullptr;
+        CanonicalCombatWorld* mCombatTarget = nullptr;
+        std::optional<CanonicalInventoryWorld> mInventory;
+        std::optional<CanonicalCombatWorld> mCombat;
+    };
+
+    using CharacterCreationPrepareOutcome = std::variant<PreparedCharacterCreation, CharacterProfileError>;
 
     struct AuthenticatedJoinResult
     {
@@ -68,7 +102,9 @@ namespace TES3MP
         AuthenticatedJoinOutcome join(
             PrincipalId principal, SessionGeneration generation, ServerTick serverTick);
         AuthenticatedJoinPrepareOutcome prepare(
-            PrincipalId principal, SessionGeneration generation, ServerTick serverTick);
+            PrincipalId principal, SessionGeneration generation, ServerTick serverTick,
+            std::optional<PlayerCredential> credential = std::nullopt,
+            std::string username = {});
         AuthenticatedJoinPrepareOutcome prepareReattach(PrincipalId principal,
             AuthenticatedAdmission::PlayerClaim claim, SessionGeneration generation, ServerTick serverTick);
         AuthenticatedJoinOutcome commit(std::uint64_t preparationId);
@@ -82,6 +118,13 @@ namespace TES3MP
         bool persistPlayer(PlayerId player) noexcept;
         bool persistPlayers(std::span<const PlayerId> players) noexcept;
         const CharacterProfile* characterProfile(PlayerId player) const noexcept;
+        CharacterCreationPrepareOutcome prepareCharacterCreation(PlayerId player,
+            const CharacterContentCatalog& catalog, const CharacterCreationCommand& command, ServerTick tick,
+            CanonicalInventoryWorld* inventory = nullptr, CanonicalCombatWorld* combat = nullptr,
+            const CanonicalPlayerCombatTemplate* playerCombatTemplate = nullptr,
+            const ItemPrototypeCatalog* itemCatalog = nullptr) noexcept;
+        bool commitCharacterCreation(PreparedCharacterCreation&& prepared) noexcept;
+        bool cancelCharacterCreation(PreparedCharacterCreation&& prepared) noexcept;
         CharacterProfileApplyResult applyCharacterCreation(PlayerId player,
             const CharacterContentCatalog& catalog, const CharacterCreationCommand& command,
             ServerTick tick) noexcept;

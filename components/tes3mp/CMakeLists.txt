@@ -622,6 +622,7 @@ add_custom_target(tes3mp_headless_client_tests_run
 add_executable(openmw_tes3mp_adapter_tests
     ${CMAKE_CURRENT_LIST_DIR}/../../apps/openmw/tes3mp/adapter.cpp
     ${CMAKE_CURRENT_LIST_DIR}/../../apps/openmw/tes3mp/client_connection.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/../../apps/openmw/tes3mp/player_profile_manager.cpp
     ${CMAKE_CURRENT_LIST_DIR}/../../apps/openmw/tes3mp/movement_mapping.cpp
     ${CMAKE_CURRENT_LIST_DIR}/../../apps/openmw/tes3mp/remote_motion.cpp
     ${CMAKE_CURRENT_LIST_DIR}/../../apps/openmw/tes3mp/adapter_tests.cpp)
@@ -1010,6 +1011,7 @@ add_custom_target(tes3mp_protocol_tests_run
     COMMAND $<TARGET_FILE:tes3mp_server_core_safety_tests>
     COMMAND $<TARGET_FILE:tes3mp_server_authentication_tests>
     COMMAND $<TARGET_FILE:tes3mp_server_lifecycle_tests>
+    COMMAND $<TARGET_FILE:tes3mp_authenticated_join_tests>
     COMMAND $<TARGET_FILE:tes3mp_actor_catalog_tests>
     COMMAND $<TARGET_FILE:tes3mp_actor_replication_tests>
     COMMAND $<TARGET_FILE:tes3mp_actor_simulation_tests>
@@ -1049,6 +1051,7 @@ add_custom_target(tes3mp_protocol_tests_run
         tes3mp_server_core_safety_tests
         tes3mp_server_authentication_tests
         tes3mp_server_lifecycle_tests
+        tes3mp_authenticated_join_tests
         tes3mp_actor_catalog_tests
         tes3mp_actor_replication_tests
         tes3mp_actor_simulation_tests

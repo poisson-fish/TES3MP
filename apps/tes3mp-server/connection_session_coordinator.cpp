@@ -1,5 +1,7 @@
 #include "connection_session_coordinator.hpp"
 #include "authenticated_join_composition.hpp"
+#include "combat_interest_projection.hpp"
+#include "inventory_interest_projection.hpp"
 #include "resume_token_context.hpp"
 
 #include "tes3mp/authentication.hpp"
@@ -352,21 +354,97 @@ namespace TES3MP::ServerApp
             const auto* progress = joins.state().findActiveSession(*state->sessionId());
             if (!progress)
                 return ConnectionSessionResult::ProtocolRejected;
-            auto applied
-                = joins.applyCharacterCreation(progress->playerId(), *mCharacterContent, command->command, tick);
+            auto prepared = joins.prepareCharacterCreation(progress->playerId(), *mCharacterContent,
+                command->command, tick, mInventory, mCombat, mPlayerCombatTemplate, mItemCatalog);
             CharacterConfirmationResult result = CharacterConfirmationResult::Confirmed;
-            if (const auto* rejected = std::get_if<CharacterProfileError>(&applied))
+            if (const auto* rejected = std::get_if<CharacterProfileError>(&prepared))
                 result = characterConfirmationResult(*rejected);
-            const auto* profile = joins.characterProfile(progress->playerId());
+            auto* pending = std::get_if<PreparedCharacterCreation>(&prepared);
+            const auto* profile = pending ? &pending->profile() : joins.characterProfile(progress->playerId());
             if (!profile)
                 return ConnectionSessionResult::ProtocolRejected;
             auto encoded = encodeProtocolFrame(MessageClass::ReliableOperation, MessageKind::ReliableCharacterProfile,
                 encodeReliableCharacterProfile(
                     { *state->sessionId(), state->generation(), progress->playerId(), result, *profile }));
             auto* bytes = std::get_if<std::vector<std::byte>>(&encoded);
-            if (!bytes
-                || mQueues.enqueue(connection, TransportChannel::ReliableOrdered, *bytes) != TransportResult::Accepted)
+            if (!bytes)
+            {
+                if (pending)
+                    (void)joins.cancelCharacterCreation(std::move(*pending));
                 return ConnectionSessionResult::QueueRejected;
+            }
+            std::vector<std::vector<std::byte>> owned;
+            std::vector<OutboundQueueSet::AtomicMessage> messages;
+            owned.reserve(8);
+            messages.reserve(8);
+            owned.push_back(std::move(*bytes));
+            messages.push_back({ connection, TransportChannel::ReliableOrdered, owned.back() });
+            if (pending && pending->profile().lifecycle() == CharacterLifecycle::EstablishedCharacter)
+            {
+                const auto& candidateState = pending->candidateState();
+                const auto revision = pending->candidateRevision();
+                if (mInventory && pending->candidateInventory())
+                {
+                    for (const auto& target : candidateState.activeSessions())
+                    {
+                        const auto targetConnection = connectionForSession(target.sessionId());
+                        const auto* targetSession = targetConnection ? session(*targetConnection) : nullptr;
+                        const bool capable = targetSession && targetSession->negotiatedHello()
+                            && std::ranges::binary_search(targetSession->negotiatedHello()->negotiatedCapabilities(),
+                                inventoryReplicationCapability());
+                        if (!targetConnection || !capable)
+                            continue;
+                        auto delivery = projectInventoryInterestBaseline(candidateState,
+                            *pending->candidateInventory(), target.sessionId(), tick, revision);
+                        if (!delivery
+                            || !appendInventoryInterestMessages(owned, messages, *targetConnection, *delivery))
+                        {
+                            (void)joins.cancelCharacterCreation(std::move(*pending));
+                            return ConnectionSessionResult::ProtocolRejected;
+                        }
+                    }
+                }
+                if (mCombat && mActors && pending->candidateCombat())
+                {
+                    for (const auto& target : candidateState.activeSessions())
+                    {
+                        const auto targetConnection = connectionForSession(target.sessionId());
+                        const auto* targetSession = targetConnection ? session(*targetConnection) : nullptr;
+                        const bool capable = targetSession && targetSession->negotiatedHello()
+                            && std::ranges::binary_search(targetSession->negotiatedHello()->negotiatedCapabilities(),
+                                combatReplicationCapability());
+                        if (!targetConnection || !capable)
+                            continue;
+                        auto snapshot = projectCombatSnapshot(candidateState, *mActors,
+                            *pending->candidateCombat(), target.sessionId(), tick, revision);
+                        if (!snapshot)
+                        {
+                            (void)joins.cancelCharacterCreation(std::move(*pending));
+                            return ConnectionSessionResult::ProtocolRejected;
+                        }
+                        auto combatFrame = encodeProtocolFrame(MessageClass::LatestWinsSnapshot,
+                            MessageKind::LatestWinsCombatSnapshot, encodeLatestWinsCombatSnapshot(*snapshot));
+                        auto* frameBytes = std::get_if<std::vector<std::byte>>(&combatFrame);
+                        if (!frameBytes)
+                        {
+                            (void)joins.cancelCharacterCreation(std::move(*pending));
+                            return ConnectionSessionResult::ProtocolRejected;
+                        }
+                        owned.push_back(std::move(*frameBytes));
+                        messages.push_back({ *targetConnection, TransportChannel::LatestWins, owned.back() });
+                    }
+                }
+            }
+            auto stagedQueues = mQueues;
+            if (stagedQueues.enqueueMessagesAtomically(messages) != TransportResult::Accepted)
+            {
+                if (pending)
+                    (void)joins.cancelCharacterCreation(std::move(*pending));
+                return ConnectionSessionResult::QueueRejected;
+            }
+            if (pending && !joins.commitCharacterCreation(std::move(*pending)))
+                return ConnectionSessionResult::ProtocolRejected;
+            mQueues = std::move(stagedQueues);
             connectionState.lastCharacterCommandSequence = command->commandSequence;
             return ConnectionSessionResult::CommandSubmitted;
         }
@@ -493,7 +571,8 @@ namespace TES3MP::ServerApp
         TransportJoinResponseQueue responses(
             mQueues, connection, this, mActors, mObjects, mInventory, mCombat, mPlayerCombatTemplate, mItemCatalog);
         AuthenticatedJoinComposition composition(joins, mAuthentication, responses);
-        auto outcome = composition.join(*state->principal(), state->generation(), tick, *context, state->playerClaim());
+        auto outcome = composition.join(*state->principal(), state->generation(), tick, *context, state->playerClaim(),
+            state->takePlayerCredential(), state->username());
         if (outcome.result != JoinCompositionResult::Committed || !outcome.committed)
             return ConnectionSessionResult::ProtocolRejected;
         if (state->bindPreissuedInitialSession(outcome.committed->session)

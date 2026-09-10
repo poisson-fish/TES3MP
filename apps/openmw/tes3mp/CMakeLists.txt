@@ -11,6 +11,8 @@ add_library(openmw_tes3mp_adapter STATIC
     engine_coordinator.hpp
     movement_mapping.cpp
     movement_mapping.hpp
+    player_profile_manager.cpp
+    player_profile_manager.hpp
     providers.hpp
     remote_motion.cpp
     remote_motion.hpp

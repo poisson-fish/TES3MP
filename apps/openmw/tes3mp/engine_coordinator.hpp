@@ -1,6 +1,8 @@
 #ifndef OPENMW_TES3MP_ENGINE_COORDINATOR_HPP
 #define OPENMW_TES3MP_ENGINE_COORDINATOR_HPP
 
+#include <cstddef>
+#include <span>
 #include <string_view>
 
 #include <tes3mp/character_profile.hpp>
@@ -26,6 +28,8 @@ namespace TES3MP::OpenMWAdapter
         virtual bool connect(std::string_view) noexcept { return false; }
         virtual bool host(std::string_view) noexcept { return false; }
         virtual void setJoinPassword(std::string_view) noexcept {}
+        virtual void setPlayerProfile(std::string_view, std::span<const std::byte>) noexcept {}
+        virtual std::string_view activePlayerUsername() const noexcept { return {}; }
         virtual std::string_view failure() const noexcept { return {}; }
         virtual bool gameStartRequested() const noexcept { return false; }
         virtual CharacterLifecycle characterLifecycle() const noexcept

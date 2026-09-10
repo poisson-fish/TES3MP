@@ -15,6 +15,7 @@ namespace TES3MP::ServerApp
     {
         Unavailable,
         TooLarge,
+        UnsupportedVersion,
         Malformed,
     };
 

@@ -156,10 +156,6 @@ namespace TES3MP::OpenMWAdapter
                     return;
                 }
 
-                const auto& snapshotBeforeAdvance = mRuntime->session().stateMachine().confirmedSnapshot();
-                const auto previousSnapshotRevision = snapshotBeforeAdvance
-                    ? std::optional<CanonicalRevision>(snapshotBeforeAdvance->header().canonicalRevision())
-                    : std::nullopt;
                 const bool hadSnapshot = mRuntime->session().stateMachine().interestBaselineComplete();
                 CellTransitionCapture captured;
                 if (mGameRunning && hadSnapshot && !mResuming
@@ -222,8 +218,11 @@ namespace TES3MP::OpenMWAdapter
                 const auto& snapshot = mRuntime->session().stateMachine().confirmedSnapshot();
                 if (advanced.characterProfileApplied
                     && mRuntime->characterLifecycle() == CharacterLifecycle::EstablishedCharacter
-                    && previousSnapshotRevision)
-                    mMinimumEstablishedSnapshotRevision = *previousSnapshotRevision;
+                    && mPendingCharacterCompletionRevision)
+                {
+                    mMinimumEstablishedSnapshotRevision = *mPendingCharacterCompletionRevision;
+                    mPendingCharacterCompletionRevision.reset();
+                }
                 if (mMinimumEstablishedSnapshotRevision && snapshot
                     && snapshot->header().canonicalRevision() > *mMinimumEstablishedSnapshotRevision)
                 {
@@ -613,9 +612,20 @@ namespace TES3MP::OpenMWAdapter
             bool submitCharacterCreation(CharacterCreationChoice choice) noexcept override
             try
             {
-                return mRuntime
-                    && mRuntime->queueCharacterCreation(std::move(choice), mRuntime->characterProfileRevision()).result
-                    == ClientRuntimeResult::Accepted;
+                if (!mRuntime)
+                    return false;
+                const bool completesCharacter = std::holds_alternative<CompleteCharacterCreation>(choice);
+                const auto& snapshot = mRuntime->session().stateMachine().confirmedSnapshot();
+                const auto completionBaseRevision = completesCharacter && snapshot
+                    ? std::optional<CanonicalRevision>(snapshot->header().canonicalRevision())
+                    : std::nullopt;
+                const auto queued
+                    = mRuntime->queueCharacterCreation(std::move(choice), mRuntime->characterProfileRevision());
+                if (queued.result != ClientRuntimeResult::Accepted)
+                    return false;
+                if (completionBaseRevision)
+                    mPendingCharacterCompletionRevision = *completionBaseRevision;
+                return true;
             }
             catch (...)
             {
@@ -692,6 +702,7 @@ namespace TES3MP::OpenMWAdapter
                 mMinimumObjectBaselineRevision.reset();
                 mMinimumInventoryRevision.reset();
                 mMinimumEstablishedSnapshotRevision.reset();
+                mPendingCharacterCompletionRevision.reset();
                 mReady = false;
                 mResuming = true;
                 mAttemptGeneration = *nextGeneration;
@@ -831,6 +842,7 @@ namespace TES3MP::OpenMWAdapter
             std::optional<CanonicalRevision> mMinimumObjectBaselineRevision;
             std::optional<CanonicalRevision> mMinimumInventoryRevision;
             std::optional<CanonicalRevision> mMinimumEstablishedSnapshotRevision;
+            std::optional<CanonicalRevision> mPendingCharacterCompletionRevision;
             bool mReady = false;
             bool mGameRunning = true;
             bool mPresentationBootstrapPending = false;

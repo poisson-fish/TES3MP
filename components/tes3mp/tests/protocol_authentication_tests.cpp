@@ -8,6 +8,7 @@
 #include <fstream>
 #include <optional>
 #include <span>
+#include <string>
 #include <string_view>
 #include <type_traits>
 #include <vector>
@@ -88,10 +89,10 @@ namespace
     {
         const auto password = bytes(7, 11);
         const auto requestBytes = encodeAuthenticationRequest(
-            AuthenticationRequest::join(material(password), playerCredential(29)));
+            AuthenticationRequest::join(material(password), playerCredential(29), "Jiub"));
         auto decodedRequest = decodeAuthenticationRequest(requestBytes);
         auto* request = std::get_if<AuthenticationRequest>(&decodedRequest);
-        if (!request || !request->hasPlayerCredential())
+        if (!request || !request->hasPlayerCredential() || request->username() != "Jiub")
             return false;
         auto credential = request->takePlayerCredential();
         std::array<std::byte, PlayerCredentialBytes> copied{};
@@ -111,8 +112,21 @@ namespace
             return false;
         auto returned = acceptedValue->takePlayerCredential();
         copied.fill(std::byte{});
-        return returned && returned->copyTo(copied) && std::ranges::equal(copied, bytes(PlayerCredentialBytes, 43))
-            && !AuthenticationRequest::resume(token(3)).hasPlayerCredential();
+        if (!returned || !returned->copyTo(copied)
+            || !std::ranges::equal(copied, bytes(PlayerCredentialBytes, 43))
+            || AuthenticationRequest::resume(token(3)).hasPlayerCredential())
+            return false;
+
+        for (const std::string_view invalid : { "ab", "user with spaces", "invalid!char",
+                 "username_that_is_more_than_32_chars" })
+        {
+            auto decoded = decodeAuthenticationRequest(encodeAuthenticationRequest(
+                AuthenticationRequest::join(material(password), playerCredential(31), std::string(invalid))));
+            auto* failure = std::get_if<AuthenticationCodecError>(&decoded);
+            if (!failure || failure->code != AuthenticationCodecErrorCode::InvalidUsernameSize)
+                return false;
+        }
+        return true;
     }
 
     bool exact_bounds_are_enforced()

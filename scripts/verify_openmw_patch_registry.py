@@ -31,6 +31,11 @@ def verify(root: Path) -> None:
         check=True, capture_output=True, text=True, encoding="utf-8")
     changed = {line for line in result.stdout.splitlines()
                if line and not line.startswith("apps/openmw/tes3mp/")}
+    untracked = subprocess.run(
+        ["git", "-C", str(root), "ls-files", "--others", "--exclude-standard", "--", "apps/openmw"],
+        check=True, capture_output=True, text=True, encoding="utf-8")
+    changed.update(line for line in untracked.stdout.splitlines()
+                   if line and not line.startswith("apps/openmw/tes3mp/"))
     if changed != covered:
         raise ValueError(f"registry coverage mismatch: missing={sorted(changed-covered)}, stale={sorted(covered-changed)}")
 

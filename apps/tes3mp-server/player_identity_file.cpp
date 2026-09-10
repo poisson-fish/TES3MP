@@ -15,7 +15,7 @@
 
 namespace
 {
-    constexpr std::string_view HeaderV4 = "TES3MP_PLAYER_IDENTITIES_V4";
+    constexpr std::string_view HeaderV5 = "TES3MP_PLAYER_IDENTITIES_V5";
     constexpr std::size_t MaximumFileBytes = 256 * 1024;
 
     class TemporaryFileCleanup
@@ -138,8 +138,11 @@ namespace TES3MP::ServerApp
             return PlayerIdentityFileError::TooLarge;
         std::ifstream stream(path, std::ios::binary);
         std::string line;
-        if (!stream || !std::getline(stream, line) || line != HeaderV4)
+        if (!stream || !std::getline(stream, line))
             return PlayerIdentityFileError::Malformed;
+        if (line != HeaderV5)
+            return line.starts_with("TES3MP_PLAYER_IDENTITIES_V")
+                ? PlayerIdentityFileError::UnsupportedVersion : PlayerIdentityFileError::Malformed;
         std::vector<PersistedPlayerIdentity> records;
         while (std::getline(stream, line))
         {
@@ -320,10 +323,18 @@ namespace TES3MP::ServerApp
                     && (savedPlayer->playerId() != claim.player || savedPlayer->entityId() != claim.entity
                         || savedPlayer->appearanceId() != claim.appearance)))
                 return PlayerIdentityFileError::Malformed;
+            std::string username;
+            std::string usernameHex;
+            if (!(fields >> usernameHex))
+                return PlayerIdentityFileError::Malformed;
+            auto parsedUsername = textFromHex(usernameHex, MaximumPlayerUsernameBytes);
+            if (!parsedUsername || (!parsedUsername->empty() && !isValidPlayerUsername(*parsedUsername)))
+                return PlayerIdentityFileError::Malformed;
+            username = std::move(*parsedUsername);
             std::string extra;
             if (fields >> extra)
                 return PlayerIdentityFileError::Malformed;
-            records.push_back({ claim, *digest, std::move(savedPlayer), std::move(characterProfile) });
+            records.push_back({ claim, *digest, std::move(savedPlayer), std::move(characterProfile), std::move(username) });
             if (records.size() > MaximumPlayerIdentityRecords)
                 return PlayerIdentityFileError::TooLarge;
         }
@@ -342,16 +353,22 @@ namespace TES3MP::ServerApp
         if (records.size() > MaximumPlayerIdentityRecords)
             return false;
         std::vector<PersistedPlayerIdentity> candidate(records.begin(), records.end());
-        for (const auto& record : candidate)
+        for (std::size_t index = 0; index < candidate.size(); ++index)
         {
+            const auto& record = candidate[index];
             const bool established
                 = record.characterProfile.lifecycle() == CharacterLifecycle::EstablishedCharacter;
-            if ((!established && record.characterProfile != CharacterProfile::fresh())
+            if ((!record.username.empty() && !isValidPlayerUsername(record.username))
+                || (!established && record.characterProfile != CharacterProfile::fresh())
                 || established != record.savedPlayer.has_value()
                 || (record.savedPlayer
                     && (record.savedPlayer->playerId() != record.claim.player
                         || record.savedPlayer->entityId() != record.claim.entity
                         || record.savedPlayer->appearanceId() != record.claim.appearance)))
+                return false;
+            if (!record.username.empty()
+                && std::any_of(candidate.begin(), candidate.begin() + static_cast<std::ptrdiff_t>(index),
+                    [&](const auto& previous) { return previous.hasUsername(record.username); }))
                 return false;
         }
         auto temporary = mPath;
@@ -362,7 +379,7 @@ namespace TES3MP::ServerApp
             if (!stream)
                 return false;
             cleanup.activate();
-            stream << HeaderV4 << '\n';
+            stream << HeaderV5 << '\n';
             for (const auto& record : candidate)
             {
                 stream << record.claim.player.value() << ' ' << record.claim.entity.value() << ' '
@@ -420,7 +437,7 @@ namespace TES3MP::ServerApp
                 for (const auto& item : profile.startingInventory())
                     stream << ' ' << item.prototype.value() << ' ' << item.count << ' '
                            << (item.equipmentSlot ? static_cast<int>(*item.equipmentSlot) : -1);
-                stream << '\n';
+                stream << ' ' << textHex(record.username) << '\n';
             }
             stream.flush();
             if (!stream)

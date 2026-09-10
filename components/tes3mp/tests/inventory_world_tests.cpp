@@ -879,6 +879,43 @@ namespace
         assert(keys[0] == id<KeyPrototypeId>(42));
     }
 
+    void testCharacterBootstrapIsAtomicAndIdempotent()
+    {
+        const auto manifest = testContentManifest();
+        const auto catalog = createTestCatalog(manifest);
+        auto world = *CanonicalInventoryWorld::create(manifest, catalog, {}, {});
+        const std::array items{
+            StartingItem{ id<ItemPrototypeId>(1), 3, std::nullopt },
+            StartingItem{ id<ItemPrototypeId>(2), 1,
+                static_cast<std::uint8_t>(EquipmentSlot::Cuirass) },
+        };
+        const auto profileRevision = id<CharacterProfileRevision>(6);
+        assert(world.initializePlayerFromCharacter(
+            id<PlayerId>(1), profileRevision, items, id<ServerTick>(7)));
+        const auto* player = world.findPlayer(id<PlayerId>(1));
+        assert(player && player->stacks.size() == 2 && player->revision == id<InventoryRevision>(2)
+            && player->lastChangeTick == id<ServerTick>(7)
+            && player->initializedCharacterProfile == profileRevision
+            && player->stacks[0].count == 3 && player->stacks[1].condition == 100
+            && player->equipment[static_cast<std::size_t>(EquipmentSlot::Cuirass)]
+                == player->stacks[1].stackId
+            && player->totalWeight(catalog) == 103);
+        const auto initialized = world;
+        assert(world.initializePlayerFromCharacter(
+                   id<PlayerId>(1), profileRevision, items, id<ServerTick>(8))
+            && world == initialized);
+        assert(!world.initializePlayerFromCharacter(id<PlayerId>(1), id<CharacterProfileRevision>(7),
+                   items, id<ServerTick>(8))
+            && world == initialized);
+
+        auto rejected = *CanonicalInventoryWorld::create(manifest, catalog, {}, {});
+        const std::array invalid{ StartingItem{ id<ItemPrototypeId>(99), 1, std::nullopt } };
+        const auto before = rejected;
+        assert(!rejected.initializePlayerFromCharacter(
+                   id<PlayerId>(2), profileRevision, invalid, id<ServerTick>(7))
+            && rejected == before);
+    }
+
 }
 
 int main()
@@ -898,6 +935,7 @@ int main()
     testWholeStackGroundRoundTripPreservesIdentity();
     testExtremeReachAndStackIdExhaustionFailClosed();
     testWorldOwnsItsValidatedCatalogSnapshot();
+    testCharacterBootstrapIsAtomicAndIdempotent();
 
     std::cout << "All inventory world tests passed." << std::endl;
     return 0;

@@ -381,6 +381,24 @@ namespace MWGui
             {
                 case GM_Name:
                 {
+                    if (multiplayerChargen())
+                    {
+                        auto* coordinator = MWBase::Environment::get().getMultiplayerCoordinator();
+                        const std::string name = coordinator && !coordinator->activePlayerUsername().empty()
+                            ? std::string(coordinator->activePlayerUsername())
+                            : mPlayerName;
+                        if (!name.empty())
+                        {
+                            mPlayerName = name;
+                            MWBase::Environment::get().getMechanicsManager()->setPlayerName(mPlayerName);
+                            if (submitCharacterChoice(TES3MP::SetCharacterName{ name }, PendingCharacterChoice::Name))
+                            {
+                                if (mCreationStage < CSE_NameChosen)
+                                    mCreationStage = CSE_NameChosen;
+                                break;
+                            }
+                        }
+                    }
                     MWBase::Environment::get().getWindowManager()->removeDialog(std::move(mNameDialog));
                     mNameDialog = std::make_unique<TextInputDialog>();
                     mNameDialog->setTextLabel(

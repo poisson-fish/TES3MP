@@ -313,6 +313,8 @@ namespace TES3MP
             {
                 mPrincipal = admission->principal();
                 mPlayerClaim = admission->playerClaim();
+                mPlayerCredential = admission->takePlayerCredential();
+                mUsername = admission->username();
                 if (auto grant = admission->takeResumeGrant())
                 {
                     mPreparedResumeId = grant->preparationId();

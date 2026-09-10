@@ -259,6 +259,14 @@ int main(int argc, char** argv)
                                : nullptr;
     auto resumeStore = crypto ? TES3MP::ResumeTokenStore::create(*crypto, config.disconnectGraceMilliseconds) : nullptr;
     auto identityFileResult = TES3MP::ServerApp::PlayerIdentityFile::open(config.playerIdentityFile);
+    if (const auto* identityError = std::get_if<TES3MP::ServerApp::PlayerIdentityFileError>(&identityFileResult))
+    {
+        if (*identityError == TES3MP::ServerApp::PlayerIdentityFileError::UnsupportedVersion)
+            std::cerr << "player identity file version is unsupported; V5 is required\n";
+        else
+            std::cerr << "player identity file could not be loaded\n";
+        return 2;
+    }
     auto* identityFileValue = std::get_if<std::unique_ptr<TES3MP::ServerApp::PlayerIdentityFile>>(&identityFileResult);
     auto identityFile = identityFileValue ? std::move(*identityFileValue) : nullptr;
     if (identityFile)

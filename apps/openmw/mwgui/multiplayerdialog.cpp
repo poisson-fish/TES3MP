@@ -2,18 +2,23 @@
 
 #include <MyGUI_Button.h>
 #include <MyGUI_EditBox.h>
+#include <MyGUI_TextBox.h>
 
 #include "../mwbase/environment.hpp"
 #include "../mwbase/windowmanager.hpp"
 #include "../tes3mp/engine_coordinator.hpp"
+#include "../tes3mp/player_profile_manager.hpp"
 
 namespace MWGui
 {
-    MultiplayerDialog::MultiplayerDialog(std::string defaultAddress)
+    MultiplayerDialog::MultiplayerDialog(std::string defaultAddress,
+        TES3MP::OpenMWAdapter::PlayerProfileManager* profileManager)
         : WindowModal("openmw_multiplayer_dialog.layout")
+        , mProfileManager(profileManager)
     {
         getWidget(mAddress, "Address");
         getWidget(mPassword, "Password");
+        getWidget(mProfileLabel, "ProfileLabel");
         getWidget(mConnect, "Connect");
         getWidget(mHost, "Host");
         getWidget(mCancel, "Cancel");
@@ -26,6 +31,7 @@ namespace MWGui
         mCancel->eventMouseButtonClick += MyGUI::newDelegate(this, &MultiplayerDialog::onCancel);
         mControllerButtons.mA = "#{Interface:OK}";
         mControllerButtons.mB = "#{Interface:Cancel}";
+        updateProfileDisplay();
         center();
     }
 
@@ -60,11 +66,45 @@ namespace MWGui
         (void)exit();
     }
 
+    void MultiplayerDialog::updateProfileDisplay()
+    {
+        if (!mProfileLabel)
+            return;
+
+        if (mProfileManager && mProfileManager->hasProfiles())
+        {
+            if (const auto profile = mProfileManager->activeProfile())
+            {
+                mProfileLabel->setCaption("Active Profile: " + profile->username);
+                mConnect->setEnabled(true);
+                mHost->setEnabled(true);
+                return;
+            }
+        }
+
+        mProfileLabel->setCaption("No profile selected. Please create one in Profiles.");
+        mConnect->setEnabled(false);
+        mHost->setEnabled(false);
+    }
+
     bool MultiplayerDialog::start(bool shouldHost)
     {
         auto* multiplayer = MWBase::Environment::get().getMultiplayerCoordinator();
         if (!multiplayer)
             return false;
+
+        if (mProfileManager)
+        {
+            const auto profile = mProfileManager->activeProfile();
+            if (!profile)
+            {
+                MWBase::Environment::get().getWindowManager()->messageBox(
+                    "Please create a player profile before connecting.");
+                return false;
+            }
+            multiplayer->setPlayerProfile(profile->username, profile->credential);
+        }
+
         const std::string address = mAddress->getCaption();
         multiplayer->setJoinPassword(mPassword->getCaption());
         const bool accepted = shouldHost ? multiplayer->host(address) : multiplayer->connect(address);

@@ -188,10 +188,11 @@ namespace TES3MP
     void PlayerCredential::clear() noexcept { clearBytes(mBytes); }
 
     AuthenticationRequest AuthenticationRequest::join(
-        AuthenticationMaterial material, std::optional<PlayerCredential> playerCredential) noexcept
+        AuthenticationMaterial material, std::optional<PlayerCredential> playerCredential,
+        std::string username) noexcept
     {
         return AuthenticationRequest(AuthenticationCredentialKind::JoinPassword,
-            std::move(material), std::move(playerCredential));
+            std::move(material), std::move(playerCredential), std::move(username));
     }
 
     AuthenticationRequest AuthenticationRequest::resume(ResumeToken token) noexcept
@@ -228,9 +229,12 @@ namespace TES3MP
             encodedPlayerCredential = builder.CreateVector(
                 reinterpret_cast<const std::uint8_t*>(credential.data()), credential.size());
         }
+        flatbuffers::Offset<flatbuffers::String> encodedUsername;
+        if (!value.username().empty())
+            encodedUsername = builder.CreateString(value.username());
         const auto root = Protocol::Schema::CreateAuthenticationRequest(
             builder, static_cast<Protocol::Schema::AuthenticationCredentialKind>(value.kind()), encodedMaterial,
-            encodedPlayerCredential);
+            encodedPlayerCredential, encodedUsername);
         Protocol::Schema::FinishSizePrefixedAuthenticationRequestBuffer(builder, root);
         return takeBuffer(builder);
     }
@@ -315,11 +319,23 @@ namespace TES3MP
                     AuthenticationCodecErrorCode::UnknownCredentialKind, static_cast<std::size_t>(value->kind()));
         }
 
+        std::string username;
+        if (value->username())
+        {
+            if (!isValidPlayerUsername(value->username()->string_view()))
+            {
+                return error(AuthenticationCodecErrorStage::SemanticValidation,
+                    AuthenticationCodecErrorCode::InvalidUsernameSize, value->username()->size(),
+                    MaximumPlayerUsernameBytes);
+            }
+            username = value->username()->str();
+        }
+
         auto material = AuthenticationMaterial::create(materialBytes);
         auto playerCredential = playerCredentialBytes.empty()
             ? std::optional<PlayerCredential>{}
             : PlayerCredential::create(playerCredentialBytes);
-        return AuthenticationRequest(kind, std::move(*material), std::move(playerCredential));
+        return AuthenticationRequest(kind, std::move(*material), std::move(playerCredential), std::move(username));
     }
 
     AuthenticationAcceptedDecodeResult decodeAuthenticationAccepted(std::span<const std::byte> payload)

@@ -3,6 +3,7 @@
 
 #include "actor_simulation.hpp"
 #include "canonical_state.hpp"
+#include "character_profile.hpp"
 #include "deterministic_random.hpp"
 #include "inventory_world.hpp"
 #include "melee_combat.hpp"
@@ -85,6 +86,7 @@ namespace TES3MP
         std::array<float, static_cast<std::size_t>(MeleeWeaponSkill::Count)> weaponSkills{};
         std::uint64_t maximumEncumbranceWeightUnits = 1;
         std::optional<ServerTick> lastAttackTick;
+        std::optional<CharacterProfileRevision> initializedCharacterProfile = std::nullopt;
 
         friend constexpr bool operator==(const CanonicalPlayerCombatState&,
             const CanonicalPlayerCombatState&) noexcept = default;
@@ -127,6 +129,8 @@ namespace TES3MP
         RandomStateV1 randomState() const noexcept { return mRandomState; }
         bool ensurePlayer(PlayerId id, const CanonicalPlayerCombatTemplate& source,
             std::uint64_t inventoryWeightUnits) noexcept;
+        bool initializePlayerFromCharacter(PlayerId id, const CanonicalPlayerCombatTemplate& source,
+            std::uint64_t inventoryWeightUnits, CharacterProfileRevision profileRevision) noexcept;
         bool advancePlayerInventoryBinding(PlayerId id, std::uint64_t inventoryWeightUnits) noexcept;
 
         friend bool operator==(const CanonicalCombatWorld&, const CanonicalCombatWorld&) noexcept = default;
@@ -146,6 +150,8 @@ namespace TES3MP
     std::variant<CanonicalCombatWorld, CanonicalCombatWorldError> createCanonicalCombatWorld(
         std::span<const CanonicalPlayerCombatState> players, std::span<const CanonicalActorCombatState> actors,
         RandomStateV1 randomState);
+    std::optional<CanonicalPlayerCombatTemplate> deriveCharacterCombatTemplate(
+        const CharacterProfile& profile, const CanonicalPlayerCombatTemplate& base) noexcept;
 
     enum class MeleeContactValidation : std::uint8_t
     {

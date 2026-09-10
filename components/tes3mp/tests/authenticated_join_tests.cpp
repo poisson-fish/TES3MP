@@ -55,6 +55,23 @@ namespace
             std::span(&characterClass, 1), std::span(&birthsign, 1), {});
     }
 
+    CharacterContentCatalog characterCatalogWithStartingWeapon()
+    {
+        CharacterAppearance appearance{ id<RaceRecordId>(1), id<HeadRecordId>(2), id<HairRecordId>(3),
+            CharacterSex::Female };
+        CharacterRaceDefinition race{ id<RaceRecordId>(1), { appearance } };
+        race.femaleAttributes.fill(40);
+        race.maleAttributes.fill(40);
+        CharacterClassDefinition characterClass{ id<ClassRecordId>(1), ClassSpecialization::Combat,
+            { 0, 1 }, { 2, 3, 4, 5, 6 }, { 7, 8, 9, 10, 11 } };
+        CharacterBirthsignDefinition birthsign{ id<BirthsignRecordId>(1), {} };
+        const StartingItem weapon{ id<ItemPrototypeId>(4), 1,
+            static_cast<std::uint8_t>(EquipmentSlot::CarriedRight) };
+        return *CharacterContentCatalog::create(testContentManifestId(), spawn(), completionSpawn(),
+            std::span(&race, 1), std::span(&characterClass, 1), std::span(&birthsign, 1),
+            std::span(&weapon, 1));
+    }
+
     struct JoinFixture
     {
         NullMetricSink metrics;
@@ -412,6 +429,86 @@ namespace
         assert(profile && *profile == CharacterProfile::fresh() && !restarted->savedPlayer(player));
     }
 
+    void character_completion_atomically_bootstraps_inventory_and_combat()
+    {
+        FakeCrypto crypto;
+        MemoryPersistence persistence;
+        auto registry = std::move(std::get<std::unique_ptr<PlayerIdentityRegistry>>(
+            PlayerIdentityRegistry::create(crypto, persistence, {})));
+        NullMetricSink metrics;
+        NullStructuredEventSink events;
+        Observability observability{ metrics, events };
+        CanonicalCommandReducer reducer(
+            std::get<CanonicalServerState>(createCanonicalServerState({}, {})), observability, testContentManifest());
+        auto joins = *AuthenticatedJoinCoordinator::create(
+            spawn(), testContentManifest(), id<SessionId>(1), *registry, reducer);
+        const auto joined = std::get<AuthenticatedJoinResult>(
+            joins.join(id<PrincipalId>(1), SessionGeneration::initial(), ServerTick::initial()));
+        const auto catalog = characterCatalogWithStartingWeapon();
+        auto applyChoice = [&](CharacterCreationChoice choice) {
+            const auto* current = registry->characterProfile(joined.player);
+            assert(current);
+            auto applied = joins.applyCharacterCreation(joined.player, catalog,
+                { current->revision(), std::move(choice) }, id<ServerTick>(2));
+            assert(std::holds_alternative<CharacterProfile>(applied));
+        };
+        applyChoice(SetCharacterName{ "Nerevar" });
+        applyChoice(SetCharacterAppearance{ catalog.find(id<RaceRecordId>(1))->appearances.front() });
+        applyChoice(SetCharacterClass{ id<ClassRecordId>(1) });
+        applyChoice(SetCharacterBirthsign{ id<BirthsignRecordId>(1) });
+
+        const std::array itemDeclarations{ ItemPrototypeDeclaration{ id<ItemPrototypeId>(4),
+            ItemCategory::Weapon, 25, 10, 100, 0, slotToMask(EquipmentSlot::CarriedRight), false,
+            std::nullopt } };
+        const auto itemCatalog = *ItemPrototypeCatalog::create(testContentManifest(), itemDeclarations);
+        auto inventory = *CanonicalInventoryWorld::create(testContentManifest(), itemCatalog, {}, {});
+        const auto randomKey = *RandomStreamKey::fromValues(5, 1);
+        auto combat = std::get<CanonicalCombatWorld>(createCanonicalCombatWorld({}, {},
+            Xoshiro256StarStar::fromWorldSeed(9, randomKey).snapshot()));
+        CanonicalPlayerCombatTemplate base;
+        base.stats.strength = 40.f;
+        base.maximumEncumbranceWeightUnits = 400;
+        const auto* review = registry->characterProfile(joined.player);
+        assert(review && review->lifecycle() == CharacterLifecycle::CreatingCharacter);
+        const CharacterCreationCommand completion{ review->revision(), CompleteCharacterCreation{} };
+        const auto beforeInventory = inventory;
+        const auto beforeCombat = combat;
+        const auto beforeRoot = reducer.state().findPlayer(joined.player)->transform();
+
+        persistence.reject = true;
+        auto rejected = joins.prepareCharacterCreation(joined.player, catalog, completion, id<ServerTick>(3),
+            &inventory, &combat, &base, &itemCatalog);
+        auto* rejectedPreparation = std::get_if<PreparedCharacterCreation>(&rejected);
+        assert(rejectedPreparation && !joins.commitCharacterCreation(std::move(*rejectedPreparation)));
+        assert(*registry->characterProfile(joined.player) == *review && inventory == beforeInventory
+            && combat == beforeCombat && reducer.state().findPlayer(joined.player)->transform() == beforeRoot);
+
+        persistence.reject = false;
+        auto prepared = joins.prepareCharacterCreation(joined.player, catalog, completion, id<ServerTick>(3),
+            &inventory, &combat, &base, &itemCatalog);
+        auto* accepted = std::get_if<PreparedCharacterCreation>(&prepared);
+        assert(accepted && joins.commitCharacterCreation(std::move(*accepted)));
+        const auto* initializedInventory = inventory.findPlayer(joined.player);
+        const auto* initializedCombat = combat.findPlayer(joined.player);
+        assert(registry->characterProfile(joined.player)->lifecycle() == CharacterLifecycle::EstablishedCharacter
+            && reducer.state().findPlayer(joined.player)->transform() == completionSpawn()
+            && initializedInventory && initializedInventory->stacks.size() == 1
+            && initializedInventory->stacks.front().condition == 100
+            && initializedInventory->equipment[static_cast<std::size_t>(EquipmentSlot::CarriedRight)]
+                == initializedInventory->stacks.front().stackId
+            && initializedCombat && initializedCombat->stats.strength == 50.f
+            && initializedCombat->stats.handToHandSkill == 5.f
+            && initializedCombat->weaponSkills[static_cast<std::size_t>(MeleeWeaponSkill::LongBlade)] == 20.f
+            && initializedCombat->stats.fatigue == 170.f
+            && initializedCombat->stats.normalizedEncumbrance == 0.05f);
+        const auto completedInventory = inventory;
+        const auto completedCombat = combat;
+        auto duplicate = joins.prepareCharacterCreation(joined.player, catalog, completion, id<ServerTick>(4),
+            &inventory, &combat, &base, &itemCatalog);
+        assert(std::get<CharacterProfileError>(duplicate) == CharacterProfileError::AlreadyEstablished
+            && inventory == completedInventory && combat == completedCombat);
+    }
+
     void persistent_identity_skips_reserved_actor_entities()
     {
         FakeCrypto crypto;
@@ -449,6 +546,7 @@ int main()
     cancelledPreparationLeavesNoStateAndReusesIdentity();
     persistent_identity_reattaches_and_failed_commit_is_atomic();
     incomplete_character_profile_restarts_from_the_pre_chargen_safe_point();
+    character_completion_atomically_bootstraps_inventory_and_combat();
     persistent_identity_skips_reserved_actor_entities();
     std::cout << "authenticated join contracts passed\n";
 }

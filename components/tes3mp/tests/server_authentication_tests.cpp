@@ -612,6 +612,81 @@ namespace
         auto* rejection = completion ? std::get_if<AuthenticationRejected>(&completion->result) : nullptr;
         return rejection && rejection->reason == AuthenticationRejectionReason::Denied;
     }
+
+    bool shared_service_authenticates_named_profiles_and_rejects_wrong_passwords()
+    {
+        FakeCrypto crypto;
+        MemoryIdentityPersistence persistence;
+        auto identities = std::move(std::get<std::unique_ptr<PlayerIdentityRegistry>>(
+            PlayerIdentityRegistry::create(crypto, persistence, {})));
+        std::array<std::byte, PlayerCredentialBytes> jiubBytes{};
+        jiubBytes[0] = std::byte{ 42 };
+        auto jiubCred = PlayerCredential::create(jiubBytes);
+        auto prepared = std::get<PreparedPlayerIdentity>(identities->prepareCreate(
+            testContentManifest(), std::move(jiubCred), "Jiub"));
+        if (!identities->commit(prepared.id) || !identities->finalize(prepared.id))
+            return false;
+
+        FixedClock clock;
+        auto limiter = AuthenticationRateLimiter::create(ratePolicy(10, 10), clock.now());
+        const std::array password{ std::byte{ 1 }, std::byte{ 2 } };
+        auto join = JoinPasswordAuthenticationProvider::create(crypto, material(password));
+        auto tokens = store(crypto);
+        SharedServerAuthenticationService service(*limiter, *join, *tokens, clock, identities.get());
+
+        // 1. Correct password and username (case-insensitive "jiub") -> reattaches claim
+        auto valid = service.begin(attempt(1), ServerAuthenticationSubmission(
+            AuthenticationRequest::join(material(password), PlayerCredential::create(jiubBytes), "jiub"),
+            scope(1), context(), testContentManifestId()));
+        auto admission = accepted(valid->poll());
+        if (!admission || !admission->playerClaim() || *admission->playerClaim() != prepared.claim)
+            return false;
+
+        // 2. Wrong password for existing user "Jiub" -> Denied
+        auto wrongBytes = jiubBytes;
+        wrongBytes[1] ^= std::byte{ 0xff };
+        auto invalid = service.begin(attempt(2), ServerAuthenticationSubmission(
+            AuthenticationRequest::join(material(password), PlayerCredential::create(wrongBytes), "Jiub"),
+            scope(2), context(), testContentManifestId()));
+        auto invalidPoll = invalid->poll();
+        auto* completion = std::get_if<AuthenticationCompletion>(&invalidPoll);
+        auto* rejection = completion ? std::get_if<AuthenticationRejected>(&completion->result) : nullptr;
+        if (!rejection || rejection->reason != AuthenticationRejectionReason::Denied)
+            return false;
+
+        // 3. Missing password for existing user "Jiub" -> Denied
+        auto missingCred = service.begin(attempt(3), ServerAuthenticationSubmission(
+            AuthenticationRequest::join(material(password), std::nullopt, "Jiub"),
+            scope(3), context(), testContentManifestId()));
+        auto missingPoll = missingCred->poll();
+        auto* missingCompletion = std::get_if<AuthenticationCompletion>(&missingPoll);
+        auto* missingRejection = missingCompletion ? std::get_if<AuthenticationRejected>(&missingCompletion->result) : nullptr;
+        if (!missingRejection || missingRejection->reason != AuthenticationRejectionReason::Denied)
+            return false;
+
+        // 4. New username "Caius" with password -> admits with initial, username and credential
+        std::array<std::byte, PlayerCredentialBytes> caiusBytes{};
+        caiusBytes[0] = std::byte{ 99 };
+        auto newPlayer = service.begin(attempt(4), ServerAuthenticationSubmission(
+            AuthenticationRequest::join(material(password), PlayerCredential::create(caiusBytes), "Caius"),
+            scope(4), context(), testContentManifestId()));
+        auto newAdmission = accepted(newPlayer->poll());
+        if (!newAdmission || newAdmission->playerClaim().has_value() || newAdmission->username() != "Caius")
+            return false;
+
+        // 5. Direct callers cannot bypass the wire decoder's username policy.
+        auto invalidUsername = service.begin(attempt(5), ServerAuthenticationSubmission(
+            AuthenticationRequest::join(material(password), PlayerCredential::create(caiusBytes), "x"),
+            scope(5), context(), testContentManifestId()));
+        auto invalidUsernamePoll = invalidUsername->poll();
+        auto* invalidUsernameCompletion = std::get_if<AuthenticationCompletion>(&invalidUsernamePoll);
+        auto* invalidUsernameRejection = invalidUsernameCompletion
+            ? std::get_if<AuthenticationRejected>(&invalidUsernameCompletion->result) : nullptr;
+        if (!invalidUsernameRejection || invalidUsernameRejection->reason != AuthenticationRejectionReason::Denied)
+            return false;
+
+        return true;
+    }
 }
 
 int main()
@@ -646,6 +721,8 @@ int main()
             shared_service_gates_routes_and_defers_resume_consumption },
         Test{ "shared_service_resolves_durable_player_after_password_authentication",
             shared_service_resolves_durable_player_after_password_authentication },
+        Test{ "shared_service_authenticates_named_profiles_and_rejects_wrong_passwords",
+            shared_service_authenticates_named_profiles_and_rejects_wrong_passwords },
     };
     for (const auto& test : tests)
     {

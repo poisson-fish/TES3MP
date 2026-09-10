@@ -2,6 +2,7 @@
 #define TES3MP_INVENTORY_WORLD_HPP
 
 #include "canonical_state.hpp"
+#include "character_profile.hpp"
 #include "item_catalog.hpp"
 #include "spatial_types.hpp"
 #include "value_types.hpp"
@@ -44,6 +45,7 @@ namespace TES3MP
         ServerTick lastChangeTick = ServerTick::initial();
         std::vector<CanonicalItemStack> stacks;
         std::array<std::optional<ItemStackId>, static_cast<std::size_t>(EquipmentSlot::Count)> equipment{};
+        std::optional<CharacterProfileRevision> initializedCharacterProfile = std::nullopt;
 
         const CanonicalItemStack* findStack(ItemStackId id) const noexcept;
         CanonicalItemStack* findStack(ItemStackId id) noexcept;
@@ -194,6 +196,8 @@ namespace TES3MP
         std::vector<KeyPrototypeId> collectVerifiedKeys(PlayerId player) const noexcept;
 
         bool ensurePlayer(PlayerId player) noexcept;
+        bool initializePlayerFromCharacter(PlayerId player, CharacterProfileRevision profileRevision,
+            std::span<const StartingItem> startingItems, ServerTick tick) noexcept;
         bool ensureContainer(
             ContainerId container, CellId cell, Position3 position, std::uint32_t capacityWeight = 0) noexcept;
         EquippedConditionResult setEquippedItemCondition(PlayerId player, EquipmentSlot slot,

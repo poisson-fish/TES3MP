@@ -30,6 +30,31 @@ namespace
 
 namespace TES3MP
 {
+    bool PersistedPlayerIdentity::hasUsername(std::string_view name) const noexcept
+    {
+        if (username.empty() || username.size() != name.size())
+            return false;
+        for (std::size_t i = 0; i < username.size(); ++i)
+        {
+            if (std::tolower(static_cast<unsigned char>(username[i]))
+                != std::tolower(static_cast<unsigned char>(name[i])))
+                return false;
+        }
+        return true;
+    }
+
+    bool PlayerIdentityRegistry::hasUsername(std::string_view username) const noexcept
+    {
+        if (username.empty())
+            return false;
+        for (const auto& record : mRecords)
+        {
+            if (record.hasUsername(username))
+                return true;
+        }
+        return false;
+    }
+
     PlayerIdentityRegistry::PlayerIdentityRegistry(CredentialCrypto& crypto,
         PlayerIdentityPersistence& persistence, std::vector<PersistedPlayerIdentity> records,
         std::vector<EntityId> reservedEntityIds, PlayerId nextPlayer, EntityId nextEntity) noexcept
@@ -61,7 +86,8 @@ namespace TES3MP
             const auto& record = records[index];
             const bool established
                 = record.characterProfile.lifecycle() == CharacterLifecycle::EstablishedCharacter;
-            if ((!established && record.characterProfile != CharacterProfile::fresh())
+            if ((!record.username.empty() && !isValidPlayerUsername(record.username))
+                || (!established && record.characterProfile != CharacterProfile::fresh())
                 || established != record.savedPlayer.has_value()
                 || (record.savedPlayer
                 && (record.savedPlayer->playerId() != record.claim.player
@@ -72,6 +98,10 @@ namespace TES3MP
                 || std::any_of(records.begin(), records.begin() + static_cast<std::ptrdiff_t>(index),
                     [&](const auto& previous) { return previous.claim.entity == record.claim.entity
                         || previous.credentialDigest == record.credentialDigest; }))
+                return PlayerIdentityError::InvalidInitialState;
+            if (!record.username.empty()
+                && std::any_of(records.begin(), records.begin() + static_cast<std::ptrdiff_t>(index),
+                    [&](const auto& previous) { return previous.hasUsername(record.username); }))
                 return PlayerIdentityError::InvalidInitialState;
             if (std::ranges::binary_search(reserved, record.claim.entity))
                 return PlayerIdentityError::InvalidInitialState;
@@ -120,22 +150,36 @@ namespace TES3MP
         return true;
     }
 
-    PlayerIdentityPrepareResult PlayerIdentityRegistry::prepareCreate(ContentManifest contentManifest) noexcept
+    PlayerIdentityPrepareResult PlayerIdentityRegistry::prepareCreate(ContentManifest contentManifest,
+        std::optional<PlayerCredential> providedCredential, std::string username) noexcept
     try
     {
-        if (mPending || mCommitted)
+        if (mPending || mCommitted || mPendingCharacterProfile || mCommittedCharacterProfile)
             return PlayerIdentityError::PreparationPending;
         if (mRecords.size() >= MaximumPlayerIdentityRecords)
             return PlayerIdentityError::Full;
         if (mIdentityExhausted || mNextPreparationId == 0)
             return PlayerIdentityError::IdentityExhausted;
-        std::array<std::byte, PlayerCredentialBytes> bytes{};
-        if (!mCrypto.randomBytes(bytes))
-            return PlayerIdentityError::RandomUnavailable;
-        auto credential = PlayerCredential::create(bytes);
-        std::fill(bytes.begin(), bytes.end(), std::byte{});
+        if (!username.empty() && (!isValidPlayerUsername(username) || hasUsername(username)))
+            return PlayerIdentityError::InvalidInitialState;
+        PlayerCredential credential;
+        if (providedCredential)
+        {
+            credential = std::move(*providedCredential);
+        }
+        else
+        {
+            std::array<std::byte, PlayerCredentialBytes> bytes{};
+            if (!mCrypto.randomBytes(bytes))
+                return PlayerIdentityError::RandomUnavailable;
+            auto generated = PlayerCredential::create(bytes);
+            std::fill(bytes.begin(), bytes.end(), std::byte{});
+            if (!generated)
+                return PlayerIdentityError::RandomUnavailable;
+            credential = std::move(*generated);
+        }
         CredentialDigest digestValue;
-        if (!credential || !digest(*credential, digestValue))
+        if (!digest(credential, digestValue))
             return PlayerIdentityError::DigestUnavailable;
         if (std::any_of(mRecords.begin(), mRecords.end(), [&](const auto& record) {
                 return record.credentialDigest == digestValue;
@@ -144,7 +188,8 @@ namespace TES3MP
         const AuthenticatedAdmission::PlayerClaim claim{ mNextPlayer, mNextEntity,
             contentManifest.defaultAppearance(), contentManifest.id() };
         const auto id = mNextPreparationId++;
-        mPending.emplace(Pending{ id, { claim, digestValue }, std::move(*credential) });
+        PersistedPlayerIdentity record{ claim, digestValue, std::nullopt, CharacterProfile::fresh(), std::move(username) };
+        mPending.emplace(Pending{ id, std::move(record), std::move(credential) });
         return PreparedPlayerIdentity{ id, claim };
     }
     catch (...)
@@ -215,15 +260,21 @@ namespace TES3MP
     }
 
     std::optional<AuthenticatedAdmission::PlayerClaim> PlayerIdentityRegistry::authenticate(
-        const PlayerCredential& credential, ContentManifestId contentManifest) noexcept
+        const PlayerCredential& credential, ContentManifestId contentManifest,
+        std::string_view username) noexcept
     {
         CredentialDigest digestValue;
         if (!digest(credential, digestValue))
             return std::nullopt;
         for (const auto& record : mRecords)
-            if (record.claim.contentManifest == contentManifest
-                && mCrypto.constantTimeEqual(record.credentialDigest.bytes, digestValue.bytes))
+        {
+            if (record.claim.contentManifest != contentManifest)
+                continue;
+            if (!username.empty() && !record.hasUsername(username))
+                continue;
+            if (mCrypto.constantTimeEqual(record.credentialDigest.bytes, digestValue.bytes))
                 return record.claim;
+        }
         return std::nullopt;
     }
 
@@ -242,7 +293,7 @@ namespace TES3MP
     bool PlayerIdentityRegistry::savePlayers(std::span<const CanonicalPlayerEntityState> players) noexcept
     try
     {
-        if (mPending || mCommitted || players.empty())
+        if (mPending || mCommitted || mPendingCharacterProfile || mCommittedCharacterProfile || players.empty())
             return false;
         auto candidate = mRecords;
         std::vector<PlayerId> seen;
@@ -285,6 +336,8 @@ namespace TES3MP
 
     bool PlayerIdentityRegistry::restartIncompleteCharacter(PlayerId player) noexcept
     {
+        if (mPending || mCommitted || mPendingCharacterProfile || mCommittedCharacterProfile)
+            return false;
         const auto found = std::find_if(mRecords.begin(), mRecords.end(),
             [player](const auto& record) { return record.claim.player == player; });
         if (found == mRecords.end())
@@ -296,14 +349,16 @@ namespace TES3MP
         return true;
     }
 
-    CharacterProfileApplyResult PlayerIdentityRegistry::applyCharacterCreation(PlayerId player,
+    CharacterProfilePrepareResult PlayerIdentityRegistry::prepareCharacterCreation(PlayerId player,
         const CharacterContentCatalog& catalog, const CharacterCreationCommand& command,
         const CanonicalPlayerEntityState* completionCheckpoint) noexcept
     try
     {
-        if (mPending || mCommitted)
+        if (mPending || mCommitted || mPendingCharacterProfile || mCommittedCharacterProfile
+            || mNextPreparationId == 0)
             return CharacterProfileError::PersistenceFailed;
-        auto candidate = mRecords;
+        auto prior = mRecords;
+        auto candidate = prior;
         const auto found = std::find_if(candidate.begin(), candidate.end(),
             [player](const auto& record) { return record.claim.player == player; });
         if (found == candidate.end() || found->claim.contentManifest != catalog.manifest())
@@ -313,21 +368,90 @@ namespace TES3MP
         if (!profile)
             return std::get<CharacterProfileError>(applied);
         found->characterProfile = *profile;
-        if (profile->lifecycle() == CharacterLifecycle::EstablishedCharacter)
+        const bool durable = profile->lifecycle() == CharacterLifecycle::EstablishedCharacter;
+        if (durable)
         {
             if (!completionCheckpoint || completionCheckpoint->playerId() != found->claim.player
                 || completionCheckpoint->entityId() != found->claim.entity
                 || completionCheckpoint->appearanceId() != found->claim.appearance)
                 return CharacterProfileError::InvalidInitialState;
             found->savedPlayer = *completionCheckpoint;
-            if (!mPersistence.replace(durableRecords(candidate)))
-                return CharacterProfileError::PersistenceFailed;
         }
-        mRecords = std::move(candidate);
-        return *profile;
+        const auto id = mNextPreparationId++;
+        CharacterProfile preparedProfile = *profile;
+        mPendingCharacterProfile.emplace(
+            PendingCharacterProfile{ id, std::move(prior), std::move(candidate), preparedProfile, durable });
+        return PreparedCharacterProfile{ id, std::move(preparedProfile) };
     }
     catch (...)
     {
         return CharacterProfileError::AllocationFailure;
+    }
+
+    bool PlayerIdentityRegistry::commitCharacterCreation(std::uint64_t preparationId) noexcept
+    try
+    {
+        if (!mPendingCharacterProfile || mPendingCharacterProfile->id != preparationId
+            || mCommittedCharacterProfile)
+            return false;
+        if (mPendingCharacterProfile->durable
+            && !mPersistence.replace(durableRecords(mPendingCharacterProfile->candidate)))
+            return false;
+        mCommittedCharacterProfile.emplace(CommittedCharacterProfile{
+            preparationId, std::move(mPendingCharacterProfile->prior), mPendingCharacterProfile->durable });
+        mRecords = std::move(mPendingCharacterProfile->candidate);
+        mPendingCharacterProfile.reset();
+        return true;
+    }
+    catch (...)
+    {
+        return false;
+    }
+
+    bool PlayerIdentityRegistry::finalizeCharacterCreation(std::uint64_t preparationId) noexcept
+    {
+        if (!mCommittedCharacterProfile || mCommittedCharacterProfile->id != preparationId)
+            return false;
+        mCommittedCharacterProfile.reset();
+        return true;
+    }
+
+    bool PlayerIdentityRegistry::rollbackCharacterCreation(std::uint64_t preparationId) noexcept
+    {
+        if (!mCommittedCharacterProfile || mCommittedCharacterProfile->id != preparationId
+            || (mCommittedCharacterProfile->durable
+                && !mPersistence.replace(durableRecords(mCommittedCharacterProfile->prior))))
+            return false;
+        mRecords = std::move(mCommittedCharacterProfile->prior);
+        mCommittedCharacterProfile.reset();
+        return true;
+    }
+
+    bool PlayerIdentityRegistry::cancelCharacterCreation(std::uint64_t preparationId) noexcept
+    {
+        if (!mPendingCharacterProfile || mPendingCharacterProfile->id != preparationId)
+            return false;
+        mPendingCharacterProfile.reset();
+        return true;
+    }
+
+    CharacterProfileApplyResult PlayerIdentityRegistry::applyCharacterCreation(PlayerId player,
+        const CharacterContentCatalog& catalog, const CharacterCreationCommand& command,
+        const CanonicalPlayerEntityState* completionCheckpoint) noexcept
+    {
+        auto prepared = prepareCharacterCreation(player, catalog, command, completionCheckpoint);
+        auto* value = std::get_if<PreparedCharacterProfile>(&prepared);
+        if (!value)
+            return std::get<CharacterProfileError>(prepared);
+        const auto id = value->id;
+        CharacterProfile profile = value->profile;
+        if (!commitCharacterCreation(id))
+        {
+            (void)cancelCharacterCreation(id);
+            return CharacterProfileError::PersistenceFailed;
+        }
+        if (!finalizeCharacterCreation(id))
+            return CharacterProfileError::PersistenceFailed;
+        return profile;
     }
 }

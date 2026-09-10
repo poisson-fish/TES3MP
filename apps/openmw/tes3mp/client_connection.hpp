@@ -7,6 +7,7 @@
 #include <filesystem>
 #include <memory>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <variant>
@@ -60,7 +61,8 @@ namespace TES3MP::OpenMWAdapter
     ClientCoordinatorResult makeClientCoordinator(std::string_view host, std::uint64_t port,
         std::uint64_t timeoutMilliseconds, const std::filesystem::path& passwordFile,
         const std::filesystem::path& playerCredentialFile, ContentManifestId contentManifest,
-        ClientProviders providers, std::string_view passwordOverride = {}) noexcept;
+        ClientProviders providers, std::string_view passwordOverride = {},
+        std::string_view profileUsername = {}, std::span<const std::byte> profileCredential = {}) noexcept;
 }
 
 #endif

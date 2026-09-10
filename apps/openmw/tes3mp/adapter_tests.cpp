@@ -1,6 +1,7 @@
 #include "adapter.hpp"
 #include "client_connection.hpp"
 #include "movement_mapping.hpp"
+#include "player_profile_manager.hpp"
 #include "providers.hpp"
 #include "remote_motion.hpp"
 
@@ -462,10 +463,13 @@ namespace
     {
     public:
         TES3MP::OpenMWAdapter::ProviderResult applyAuthoritative(const TES3MP::LatestWinsSnapshot&,
-            std::span<const TES3MP::ObservedPlayer>, bool, TES3MP::MonotonicInstant,
+            std::span<const TES3MP::ObservedPlayer> observed, bool allowLocalCellCorrection,
+            TES3MP::MonotonicInstant,
             const std::optional<TES3MP::LocalLocomotionReconciliation>&) noexcept override
         {
             ++calls;
+            lastObservedPlayers = observed.size();
+            lastAllowLocalCellCorrection = allowLocalCellCorrection;
             return TES3MP::OpenMWAdapter::ProviderResult::Accepted;
         }
         TES3MP::OpenMWAdapter::ProviderResult advance(TES3MP::MonotonicInstant) noexcept override
@@ -535,6 +539,8 @@ namespace
             objectRevisions.clear();
         }
         unsigned calls = 0;
+        std::size_t lastObservedPlayers = 0;
+        bool lastAllowLocalCellCorrection = false;
         unsigned advances = 0;
         unsigned clears = 0;
         unsigned poses = 0;
@@ -1446,16 +1452,17 @@ int main()
             accepted(std::byte{ 10 }, MinimumResumeTokenLifetimeMilliseconds, false, CharacterLifecycle::NewCharacter)),
         TransportChannel::ReliableOrdered);
     chargenTransportObserver->enqueue(MessageClass::ReliableOperation, MessageKind::ReliableInterestBaseline,
-        encodeReliableInterestBaseline(selfBaseline(SessionGeneration::initial())), TransportChannel::ReliableOrdered);
+        encodeReliableInterestBaseline(selfBaseline(SessionGeneration::initial(), true)),
+        TransportChannel::ReliableOrdered);
     chargenTransportObserver->enqueue(MessageClass::LatestWinsSnapshot, MessageKind::LatestWinsSnapshot,
-        encodeLatestWinsSnapshot(selfSnapshot(SessionGeneration::initial())), TransportChannel::LatestWins);
+        encodeLatestWinsSnapshot(selfSnapshot(SessionGeneration::initial(), true)), TransportChannel::LatestWins);
     chargenCoordinator->frame(0.01f);
     for (std::uint64_t sequence = 1; sequence <= MaximumRetainedLocomotionInputs + 1; ++sequence)
     {
         chargenClockObserver->nanoseconds = sequence * 250'000'000;
         chargenTransportObserver->enqueue(MessageClass::LatestWinsSnapshot, MessageKind::LatestWinsSnapshot,
             encodeLatestWinsSnapshot(
-                selfSnapshot(SessionGeneration::initial(), false, sequence + 1, sequence + 1, sequence)),
+                selfSnapshot(SessionGeneration::initial(), true, sequence + 1, sequence + 1, sequence)),
             TransportChannel::LatestWins);
         chargenCoordinator->frame(0.01f);
     }
@@ -1463,20 +1470,55 @@ int main()
     require(chargenCoordinator->characterLifecycle() == CharacterLifecycle::NewCharacter);
     require(chargenPresentation.calls == 0);
     require(chargenInput.calls == 0);
+    require(chargenCoordinator->submitCharacterCreation(CompleteCharacterCreation{}));
+    const auto safePointRevision = MaximumRetainedLocomotionInputs + 3;
+    chargenTransportObserver->enqueue(MessageClass::LatestWinsSnapshot, MessageKind::LatestWinsSnapshot,
+        encodeLatestWinsSnapshot(selfSnapshot(
+            SessionGeneration::initial(), true, safePointRevision, safePointRevision, safePointRevision - 1)),
+        TransportChannel::LatestWins);
+    chargenCoordinator->frame(0.01f);
+    require(chargenCoordinator->characterLifecycle() == CharacterLifecycle::NewCharacter
+        && chargenPresentation.calls == 0 && chargenInput.calls == 0);
     chargenTransportObserver->enqueue(MessageClass::ReliableOperation, MessageKind::ReliableCharacterProfile,
         encodeReliableCharacterProfile({ value<SessionId>(1), SessionGeneration::initial(), value<PlayerId>(1),
             CharacterConfirmationResult::Confirmed, establishedCharacterProfile() }),
         TransportChannel::ReliableOrdered);
     chargenCoordinator->frame(0.01f);
     require(chargenCoordinator->characterLifecycle() == CharacterLifecycle::EstablishedCharacter
-        && chargenPresentation.calls == 0 && chargenInput.calls == 0);
-    const auto safePointRevision = MaximumRetainedLocomotionInputs + 3;
+        && chargenPresentation.calls == 1 && chargenPresentation.lastObservedPlayers == 2
+        && chargenInput.calls == 1);
+
+    const auto transientStartupCell = CellId::exterior(value<CellSpaceId>(4), 0, 0);
+    chargenInput.nextTransition = CellTransitionCapture{
+        ProviderResult::Accepted, CellTransition(transientStartupCell)
+    };
+    chargenPresentation.lastAllowLocalCellCorrection = false;
+    const auto sentBeforeTransientTransition = chargenTransportObserver->sentFrames.size();
+    chargenCoordinator->frame(0.01f);
+    std::optional<CommandSequence> transientTransitionSequence;
+    for (std::size_t index = sentBeforeTransientTransition;
+         index < chargenTransportObserver->sentFrames.size(); ++index)
+    {
+        auto decoded = decodeProtocolFrame(chargenTransportObserver->sentFrames[index]);
+        const auto* commandFrame = std::get_if<DecodedFrame>(&decoded);
+        if (!commandFrame || commandFrame->messageKind() != MessageKind::ReliableOperation)
+            continue;
+        auto operation = decodeReliableOperation(commandFrame->payload());
+        const auto* reliable = std::get_if<ReliableOperation>(&operation);
+        const auto* transition = reliable ? std::get_if<CellTransition>(&reliable->body()) : nullptr;
+        if (transition && transition->requestedCell() == transientStartupCell)
+            transientTransitionSequence = reliable->header().commandHeader().commandSequence();
+    }
+    require(transientTransitionSequence && chargenCoordinator->multiplayerState() == MultiplayerState::Ready
+        && !chargenPresentation.lastAllowLocalCellCorrection);
+
     chargenTransportObserver->enqueue(MessageClass::LatestWinsSnapshot, MessageKind::LatestWinsSnapshot,
-        encodeLatestWinsSnapshot(selfSnapshot(
-            SessionGeneration::initial(), false, safePointRevision, safePointRevision, safePointRevision - 1)),
+        encodeLatestWinsSnapshot(selfSnapshot(SessionGeneration::initial(), true, safePointRevision + 1,
+            safePointRevision + 1, transientTransitionSequence->value())),
         TransportChannel::LatestWins);
     chargenCoordinator->frame(0.01f);
-    require(chargenPresentation.calls == 1 && chargenInput.calls == 1);
+    require(chargenCoordinator->multiplayerState() == MultiplayerState::Ready
+        && chargenPresentation.lastAllowLocalCellCorrection);
 
     require(
         std::get<TES3MP::OpenMWAdapter::ClientCompositionFailure>(TES3MP::OpenMWAdapter::makeClientCoordinator("", 0, 0,
@@ -1502,10 +1544,88 @@ int main()
     require(!TES3MP::OpenMWAdapter::parseServerAddress("::1", 25565));
     require(!TES3MP::OpenMWAdapter::parseServerAddress("example.org:0", 25565));
 
+    // PlayerProfileManager and credential hashing tests
+    {
+        using namespace TES3MP::OpenMWAdapter;
+        require(PlayerProfileManager::isValidUsername("Jiub"));
+        require(PlayerProfileManager::isValidUsername("Player_1"));
+        require(!PlayerProfileManager::isValidUsername("ab"));
+        require(!PlayerProfileManager::isValidUsername("user with spaces"));
+        require(!PlayerProfileManager::isValidUsername("invalid!char"));
+
+        const auto hash1 = computeCredentialHash("Jiub", "mypassword");
+        const auto hash2 = computeCredentialHash("jiub", "mypassword");
+        require(hash1 == hash2);
+        const auto hash3 = computeCredentialHash("Jiub", "wrongpassword");
+        require(hash1 != hash3);
+        const auto endpointHash1 = deriveEndpointCredential(hash1, "example.org", 25565);
+        const auto endpointHash2 = deriveEndpointCredential(hash1, "EXAMPLE.ORG", 25565);
+        require(endpointHash1 == endpointHash2);
+        require(endpointHash1 != deriveEndpointCredential(hash1, "example.org", 25566));
+        require(endpointHash1 != deriveEndpointCredential(hash1, "other.example", 25565));
+
+        const auto tempProfileFile = std::filesystem::temp_directory_path() / "tes3mp_test_profiles.json";
+        std::filesystem::remove(tempProfileFile);
+
+        PlayerProfileManager manager;
+        require(!manager.load(tempProfileFile));
+        require(!manager.hasProfiles());
+
+        require(manager.addProfile("Jiub", "pass1"));
+        require(manager.hasProfiles());
+        require(manager.activeUsername() == "Jiub");
+        require(manager.addProfile("Fargoth", "pass2"));
+        require(manager.profiles().size() == 2);
+        require(manager.setActive("Fargoth"));
+        require(manager.activeUsername() == "Fargoth");
+        require(manager.save(tempProfileFile));
+        {
+            std::ifstream saved(tempProfileFile);
+            const std::string text((std::istreambuf_iterator<char>(saved)), std::istreambuf_iterator<char>());
+            require(text.find("\"password\"") == std::string::npos);
+            require(text.find("\"credential\"") != std::string::npos);
+            require(text.find("pass1") == std::string::npos && text.find("pass2") == std::string::npos);
+        }
+
+        PlayerProfileManager loaded;
+        require(loaded.load(tempProfileFile));
+        require(loaded.profiles().size() == 2);
+        require(loaded.activeUsername() == "Fargoth");
+        const auto* loadedJiub = loaded.getProfile("Jiub");
+        require(loadedJiub && loadedJiub->credential == computeCredentialHash("Jiub", "pass1"));
+        const auto* loadedFargoth = loaded.getProfile("Fargoth");
+        require(loadedFargoth && loadedFargoth->credential == computeCredentialHash("Fargoth", "pass2"));
+
+        require(loaded.deleteProfile("Jiub"));
+        require(loaded.profiles().size() == 1);
+        require(loaded.getProfile("Jiub") == nullptr);
+
+        std::filesystem::remove(tempProfileFile);
+        {
+            std::ofstream legacy(tempProfileFile);
+            legacy << "{\n  \"active\": \"Jiub\",\n  \"profiles\": [\n"
+                      "    { \"username\": \"Jiub\", \"password\": \"oldpass\" }\n  ]\n}\n";
+        }
+        PlayerProfileManager migrated;
+        require(migrated.load(tempProfileFile));
+        require(migrated.getProfile("Jiub")
+            && migrated.getProfile("Jiub")->credential == computeCredentialHash("Jiub", "oldpass"));
+        require(migrated.save(tempProfileFile));
+        {
+            std::ifstream saved(tempProfileFile);
+            const std::string text((std::istreambuf_iterator<char>(saved)), std::istreambuf_iterator<char>());
+            require(text.find("oldpass") == std::string::npos && text.find("\"password\"") == std::string::npos);
+        }
+        std::filesystem::remove(tempProfileFile);
+    }
+
 #ifdef TES3MP_ADAPTER_TEST_HAS_GNS
     auto launcher = TES3MP::OpenMWAdapter::makeClientLauncher({ 25565, 1'000, {},
         std::filesystem::temp_directory_path(), {}, {}, TES3MP::testContentManifestId(), providers });
     require(static_cast<bool>(launcher));
+    const auto profileCredential = TES3MP::OpenMWAdapter::computeCredentialHash("Jiub", "testpass");
+    launcher->setPlayerProfile("Jiub", profileCredential);
+    require(launcher->activePlayerUsername() == "Jiub");
     launcher->setJoinPassword("retry-test");
     require(launcher->connect("127.0.0.1:9"));
     launcher->confirmGameStart(false);

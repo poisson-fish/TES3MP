@@ -341,12 +341,22 @@ namespace
                 && std::get<DecodedFrame>(authenticationFrame).messageKind() == MessageKind::AuthenticationAccepted
                 && std::holds_alternative<DecodedFrame>(snapshotFrame)
                 && std::get<DecodedFrame>(snapshotFrame).messageKind() == MessageKind::LatestWinsSnapshot;
+            if (valid)
+            {
+                auto accepted = decodeAuthenticationAccepted(
+                    std::get<DecodedFrame>(authenticationFrame).payload());
+                if (const auto* value = std::get_if<AuthenticationAcceptedMessage>(&accepted))
+                    authenticationIncludedPlayerCredential = value->hasPlayerCredential();
+                else
+                    valid = false;
+            }
             revisions.push_back(join.initialSnapshot.header().canonicalRevision());
             return valid;
         }
 
         bool reject = false;
         bool valid = false;
+        bool authenticationIncludedPlayerCredential = false;
         std::size_t attempts = 0;
         std::vector<CanonicalRevision> revisions;
     };
@@ -821,7 +831,7 @@ int main()
     assert(savedCharacter);
     const std::array identityRecords{ PersistedPlayerIdentity{
         { id<PlayerId>(3), id<EntityId>(5), id<AppearanceId>(7), testContentManifestId() }, identityDigest,
-        savedIdentityPlayer, *savedCharacter } };
+        savedIdentityPlayer, *savedCharacter, "Nerevar" } };
     assert(identityFile->replace(identityRecords));
     auto identityTemporaryPath = identityPath;
     identityTemporaryPath += ".tmp";
@@ -842,7 +852,8 @@ int main()
                << "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20 "
                << std::string(CredentialDigestBytes * 2, 'a') << '\n';
     }
-    assert(std::holds_alternative<PlayerIdentityFileError>(PlayerIdentityFile::open(identityPath)));
+    assert(std::get<PlayerIdentityFileError>(PlayerIdentityFile::open(identityPath))
+        == PlayerIdentityFileError::UnsupportedVersion);
     {
         std::ofstream stream(identityPath, std::ios::binary | std::ios::trunc);
         stream << "TES3MP_PLAYER_IDENTITIES_V3\n3 5 7 "
@@ -854,12 +865,18 @@ int main()
         std::ofstream stream(identityPath, std::ios::binary | std::ios::trunc);
         stream << "TES3MP_PLAYER_IDENTITIES_V4\n";
     }
-    assert(std::holds_alternative<std::unique_ptr<PlayerIdentityFile>>(PlayerIdentityFile::open(identityPath)));
+    assert(std::holds_alternative<PlayerIdentityFileError>(PlayerIdentityFile::open(identityPath)));
     {
         std::ofstream stream(identityPath, std::ios::binary | std::ios::trunc);
         stream << "TES3MP_PLAYER_IDENTITIES_V5\n";
     }
-    assert(std::holds_alternative<PlayerIdentityFileError>(PlayerIdentityFile::open(identityPath)));
+    assert(std::holds_alternative<std::unique_ptr<PlayerIdentityFile>>(PlayerIdentityFile::open(identityPath)));
+    {
+        std::ofstream stream(identityPath, std::ios::binary | std::ios::trunc);
+        stream << "TES3MP_PLAYER_IDENTITIES_V6\n";
+    }
+    assert(std::get<PlayerIdentityFileError>(PlayerIdentityFile::open(identityPath))
+        == PlayerIdentityFileError::UnsupportedVersion);
     std::filesystem::remove(identityPath);
 
     auto config = parsedConfig();
@@ -899,6 +916,39 @@ int main()
         assert(authentication.issues == 2 && responses.attempts == 2 && responses.valid
             && responses.revisions.size() == 2 && responses.revisions[0] < responses.revisions[1]);
         assert(joins.liveBindings() == 2 && joins.state().players().size() == 2);
+    }
+    {
+        const auto identityPath
+            = std::filesystem::temp_directory_path() / "tes3mp-server-profile-registration-test";
+        std::filesystem::remove(identityPath);
+        auto identityFileResult = PlayerIdentityFile::open(identityPath);
+        assert(std::holds_alternative<std::unique_ptr<PlayerIdentityFile>>(identityFileResult));
+        auto identityFile = std::move(std::get<std::unique_ptr<PlayerIdentityFile>>(identityFileResult));
+        RecordingCrypto crypto;
+        auto registryResult = PlayerIdentityRegistry::create(crypto, *identityFile, {});
+        assert(std::holds_alternative<std::unique_ptr<PlayerIdentityRegistry>>(registryResult));
+        auto registry = std::move(std::get<std::unique_ptr<PlayerIdentityRegistry>>(registryResult));
+        NullMetricSink metrics;
+        NullStructuredEventSink events;
+        Observability observability(metrics, events);
+        CanonicalCommandReducer reducer(
+            std::get<CanonicalServerState>(createCanonicalServerState({}, {})), observability, testContentManifest());
+        const auto zero = Turn32::fromValue(0);
+        const Transform spawn(CellId::interior(id<CellSpaceId>(7)), Position3(10, 20, 30),
+            Orientation3(zero, zero, zero));
+        auto joins = *AuthenticatedJoinCoordinator::create(
+            spawn, testContentManifest(), id<SessionId>(1), *registry, reducer);
+        FakeAuthentication authentication;
+        FakeJoinQueue responses;
+        AuthenticatedJoinComposition composition(joins, authentication, responses);
+        std::array<std::byte, PlayerCredentialBytes> credentialBytes{};
+        credentialBytes[0] = std::byte{ 42 };
+        auto credential = PlayerCredential::create(credentialBytes);
+        auto joined = composition.join(id<PrincipalId>(9), SessionGeneration::initial(), ServerTick::initial(),
+            ResumeTokenContext{}, std::nullopt, std::move(credential), "Jiub");
+        assert(joined.result == JoinCompositionResult::Committed && joined.committed && responses.valid
+            && !responses.authenticationIncludedPlayerCredential && registry->hasUsername("Jiub"));
+        std::filesystem::remove(identityPath);
     }
     {
         JoinFixture joinFixture;

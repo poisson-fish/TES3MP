@@ -22,6 +22,9 @@ namespace TES3MP
         CredentialDigest credentialDigest;
         std::optional<CanonicalPlayerEntityState> savedPlayer;
         CharacterProfile characterProfile = CharacterProfile::fresh();
+        std::string username;
+
+        bool hasUsername(std::string_view name) const noexcept;
 
         friend bool operator==(PersistedPlayerIdentity, PersistedPlayerIdentity) noexcept = default;
     };
@@ -55,6 +58,14 @@ namespace TES3MP
 
     using PlayerIdentityPrepareResult = std::variant<PreparedPlayerIdentity, PlayerIdentityError>;
 
+    struct PreparedCharacterProfile
+    {
+        std::uint64_t id;
+        CharacterProfile profile;
+    };
+
+    using CharacterProfilePrepareResult = std::variant<PreparedCharacterProfile, CharacterProfileError>;
+
     class PlayerIdentityRegistry
     {
     public:
@@ -63,19 +74,30 @@ namespace TES3MP
             std::span<const PersistedPlayerIdentity> initialRecords,
             std::span<const EntityId> reservedEntityIds = {}) noexcept;
 
-        PlayerIdentityPrepareResult prepareCreate(ContentManifest contentManifest) noexcept;
+        PlayerIdentityPrepareResult prepareCreate(ContentManifest contentManifest,
+            std::optional<PlayerCredential> credential = std::nullopt,
+            std::string username = {}) noexcept;
         std::optional<PlayerCredential> copyPreparedCredential(std::uint64_t preparationId) const noexcept;
         bool commit(std::uint64_t preparationId) noexcept;
         bool finalize(std::uint64_t preparationId) noexcept;
         bool rollback(std::uint64_t preparationId) noexcept;
         bool cancel(std::uint64_t preparationId) noexcept;
+        bool hasUsername(std::string_view username) const noexcept;
         std::optional<AuthenticatedAdmission::PlayerClaim> authenticate(
-            const PlayerCredential& credential, ContentManifestId contentManifest) noexcept;
+            const PlayerCredential& credential, ContentManifestId contentManifest,
+            std::string_view username = {}) noexcept;
         const CanonicalPlayerEntityState* savedPlayer(PlayerId player) const noexcept;
         bool savePlayer(const CanonicalPlayerEntityState& player) noexcept;
         bool savePlayers(std::span<const CanonicalPlayerEntityState> players) noexcept;
         const CharacterProfile* characterProfile(PlayerId player) const noexcept;
         bool restartIncompleteCharacter(PlayerId player) noexcept;
+        CharacterProfilePrepareResult prepareCharacterCreation(PlayerId player,
+            const CharacterContentCatalog& catalog, const CharacterCreationCommand& command,
+            const CanonicalPlayerEntityState* completionCheckpoint = nullptr) noexcept;
+        bool commitCharacterCreation(std::uint64_t preparationId) noexcept;
+        bool finalizeCharacterCreation(std::uint64_t preparationId) noexcept;
+        bool rollbackCharacterCreation(std::uint64_t preparationId) noexcept;
+        bool cancelCharacterCreation(std::uint64_t preparationId) noexcept;
         CharacterProfileApplyResult applyCharacterCreation(PlayerId player,
             const CharacterContentCatalog& catalog, const CharacterCreationCommand& command,
             const CanonicalPlayerEntityState* completionCheckpoint = nullptr) noexcept;
@@ -96,6 +118,20 @@ namespace TES3MP
             EntityId priorNextEntity;
             bool priorIdentityExhausted;
         };
+        struct PendingCharacterProfile
+        {
+            std::uint64_t id;
+            std::vector<PersistedPlayerIdentity> prior;
+            std::vector<PersistedPlayerIdentity> candidate;
+            CharacterProfile profile;
+            bool durable = false;
+        };
+        struct CommittedCharacterProfile
+        {
+            std::uint64_t id;
+            std::vector<PersistedPlayerIdentity> prior;
+            bool durable = false;
+        };
 
         PlayerIdentityRegistry(CredentialCrypto& crypto, PlayerIdentityPersistence& persistence,
             std::vector<PersistedPlayerIdentity> records, std::vector<EntityId> reservedEntityIds,
@@ -111,6 +147,8 @@ namespace TES3MP
         EntityId mNextEntity;
         std::optional<Pending> mPending;
         std::optional<Committed> mCommitted;
+        std::optional<PendingCharacterProfile> mPendingCharacterProfile;
+        std::optional<CommittedCharacterProfile> mCommittedCharacterProfile;
         std::uint64_t mNextPreparationId = 1;
         bool mIdentityExhausted = false;
     };

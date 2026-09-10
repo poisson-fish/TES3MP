@@ -12,6 +12,8 @@
 #include <memory>
 #include <optional>
 #include <span>
+#include <string>
+#include <string_view>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -21,8 +23,21 @@ namespace TES3MP
     inline constexpr std::size_t MaximumAuthenticationMaterialBytes = 256;
     inline constexpr std::size_t ResumeTokenBytes = 32;
     inline constexpr std::size_t PlayerCredentialBytes = 32;
+    inline constexpr std::size_t MinimumPlayerUsernameBytes = 3;
+    inline constexpr std::size_t MaximumPlayerUsernameBytes = 32;
     inline constexpr std::uint64_t MinimumResumeTokenLifetimeMilliseconds = 1'000;
     inline constexpr std::uint64_t MaximumResumeTokenLifetimeMilliseconds = 120'000;
+
+    inline constexpr bool isValidPlayerUsername(std::string_view username) noexcept
+    {
+        if (username.size() < MinimumPlayerUsernameBytes || username.size() > MaximumPlayerUsernameBytes)
+            return false;
+        for (const char value : username)
+            if (!((value >= 'a' && value <= 'z') || (value >= 'A' && value <= 'Z')
+                    || (value >= '0' && value <= '9') || value == '_'))
+                return false;
+        return true;
+    }
 
     class AuthenticationRequest;
     class AuthenticationAcceptedMessage;
@@ -130,7 +145,8 @@ namespace TES3MP
     {
     public:
         static AuthenticationRequest join(AuthenticationMaterial material,
-            std::optional<PlayerCredential> playerCredential = std::nullopt) noexcept;
+            std::optional<PlayerCredential> playerCredential = std::nullopt,
+            std::string username = {}) noexcept;
         static AuthenticationRequest resume(ResumeToken token) noexcept;
 
         AuthenticationRequest(const AuthenticationRequest&) = delete;
@@ -156,6 +172,7 @@ namespace TES3MP
             mPlayerCredential.reset();
             return result;
         }
+        const std::string& username() const noexcept { return mUsername; }
 
     private:
         friend std::vector<std::byte> encodeAuthenticationRequest(const AuthenticationRequest& value);
@@ -165,16 +182,19 @@ namespace TES3MP
         std::span<const std::byte> materialBytes() const noexcept { return mMaterial.secretBytes(); }
 
         AuthenticationRequest(AuthenticationCredentialKind kind, AuthenticationMaterial material,
-            std::optional<PlayerCredential> playerCredential = std::nullopt) noexcept
+            std::optional<PlayerCredential> playerCredential = std::nullopt,
+            std::string username = {}) noexcept
             : mKind(kind)
             , mMaterial(std::move(material))
             , mPlayerCredential(std::move(playerCredential))
+            , mUsername(std::move(username))
         {
         }
 
         AuthenticationCredentialKind mKind;
         AuthenticationMaterial mMaterial;
         std::optional<PlayerCredential> mPlayerCredential;
+        std::string mUsername;
     };
 
     class AuthenticationAcceptedMessage
@@ -260,6 +280,7 @@ namespace TES3MP
         InvalidResumeTokenSize,
         InvalidPlayerCredentialSize,
         UnexpectedPlayerCredential,
+        InvalidUsernameSize,
         InvalidLifetime,
         UnknownCharacterLifecycle,
         InvalidProfileRevision,
@@ -338,9 +359,11 @@ namespace TES3MP
     class AuthenticatedAdmission
     {
     public:
-        static AuthenticatedAdmission initial(PrincipalId principal) noexcept
+        static AuthenticatedAdmission initial(PrincipalId principal,
+            std::optional<PlayerCredential> playerCredential = std::nullopt,
+            std::string username = {}) noexcept
         {
-            return AuthenticatedAdmission(principal, std::nullopt);
+            return AuthenticatedAdmission(principal, std::nullopt, std::nullopt, std::move(playerCredential), std::move(username));
         }
 
         struct PlayerClaim
@@ -353,9 +376,11 @@ namespace TES3MP
             friend constexpr bool operator==(PlayerClaim, PlayerClaim) noexcept = default;
         };
 
-        static AuthenticatedAdmission reattach(PrincipalId principal, PlayerClaim claim) noexcept
+        static AuthenticatedAdmission reattach(PrincipalId principal, PlayerClaim claim,
+            std::optional<PlayerCredential> playerCredential = std::nullopt,
+            std::string username = {}) noexcept
         {
-            return AuthenticatedAdmission(principal, std::nullopt, claim);
+            return AuthenticatedAdmission(principal, std::nullopt, claim, std::move(playerCredential), std::move(username));
         }
 
         AuthenticatedAdmission(const AuthenticatedAdmission&) = delete;
@@ -366,6 +391,15 @@ namespace TES3MP
         PrincipalId principal() const noexcept { return mPrincipal; }
         bool isResume() const noexcept { return mResume.has_value(); }
         const std::optional<PlayerClaim>& playerClaim() const noexcept { return mPlayerClaim; }
+        const std::string& username() const noexcept { return mUsername; }
+        bool hasPlayerCredential() const noexcept { return mPlayerCredential.has_value(); }
+        const std::optional<PlayerCredential>& playerCredential() const noexcept { return mPlayerCredential; }
+        std::optional<PlayerCredential> takePlayerCredential() noexcept
+        {
+            auto result = std::move(mPlayerCredential);
+            mPlayerCredential.reset();
+            return result;
+        }
         std::optional<ResumeAdmissionGrant> takeResumeGrant() noexcept
         {
             auto result = std::move(mResume);
@@ -377,16 +411,22 @@ namespace TES3MP
         friend class ResumeTokenStore;
 
         AuthenticatedAdmission(PrincipalId principal, std::optional<ResumeAdmissionGrant> resume,
-            std::optional<PlayerClaim> playerClaim = std::nullopt) noexcept
+            std::optional<PlayerClaim> playerClaim = std::nullopt,
+            std::optional<PlayerCredential> playerCredential = std::nullopt,
+            std::string username = {}) noexcept
             : mPrincipal(principal)
             , mResume(std::move(resume))
             , mPlayerClaim(playerClaim)
+            , mPlayerCredential(std::move(playerCredential))
+            , mUsername(std::move(username))
         {
         }
 
         PrincipalId mPrincipal;
         std::optional<ResumeAdmissionGrant> mResume;
         std::optional<PlayerClaim> mPlayerClaim;
+        std::optional<PlayerCredential> mPlayerCredential;
+        std::string mUsername;
     };
 
     struct AuthenticationRejected
