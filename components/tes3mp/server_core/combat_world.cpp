@@ -3,11 +3,103 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
+#include <numbers>
 #include <ranges>
 
 namespace
 {
     bool finite(float value) noexcept { return std::isfinite(value); }
+
+    constexpr std::array<std::size_t,
+        static_cast<std::size_t>(TES3MP::CombatProgressionSkill::Count)> CharacterSkillIndexes{
+        0, 20, 5, 4, 6, 7, 26
+    };
+
+    float combatSkillValue(const TES3MP::CanonicalPlayerCombatState& player,
+        TES3MP::CombatProgressionSkill skill) noexcept
+    {
+        using Skill = TES3MP::CombatProgressionSkill;
+        switch (skill)
+        {
+            case Skill::Block: return player.blockSkill;
+            case Skill::ShortBlade:
+                return player.weaponSkills[static_cast<std::size_t>(TES3MP::MeleeWeaponSkill::ShortBlade)];
+            case Skill::LongBlade:
+                return player.weaponSkills[static_cast<std::size_t>(TES3MP::MeleeWeaponSkill::LongBlade)];
+            case Skill::BluntWeapon:
+                return player.weaponSkills[static_cast<std::size_t>(TES3MP::MeleeWeaponSkill::BluntWeapon)];
+            case Skill::Axe:
+                return player.weaponSkills[static_cast<std::size_t>(TES3MP::MeleeWeaponSkill::Axe)];
+            case Skill::Spear:
+                return player.weaponSkills[static_cast<std::size_t>(TES3MP::MeleeWeaponSkill::Spear)];
+            case Skill::HandToHand: return player.stats.handToHandSkill;
+            case Skill::Count: break;
+        }
+        return 0.f;
+    }
+
+    void setCombatSkillValue(TES3MP::CanonicalPlayerCombatState& player,
+        TES3MP::CombatProgressionSkill skill, float value) noexcept
+    {
+        using Skill = TES3MP::CombatProgressionSkill;
+        switch (skill)
+        {
+            case Skill::Block: player.blockSkill = value; break;
+            case Skill::ShortBlade:
+                player.weaponSkills[static_cast<std::size_t>(TES3MP::MeleeWeaponSkill::ShortBlade)] = value; break;
+            case Skill::LongBlade:
+                player.weaponSkills[static_cast<std::size_t>(TES3MP::MeleeWeaponSkill::LongBlade)] = value; break;
+            case Skill::BluntWeapon:
+                player.weaponSkills[static_cast<std::size_t>(TES3MP::MeleeWeaponSkill::BluntWeapon)] = value; break;
+            case Skill::Axe:
+                player.weaponSkills[static_cast<std::size_t>(TES3MP::MeleeWeaponSkill::Axe)] = value; break;
+            case Skill::Spear:
+                player.weaponSkills[static_cast<std::size_t>(TES3MP::MeleeWeaponSkill::Spear)] = value; break;
+            case Skill::HandToHand: player.stats.handToHandSkill = value; break;
+            case Skill::Count: break;
+        }
+    }
+
+    TES3MP::CombatProgressionSkill progressionSkill(TES3MP::MeleeWeaponSkill skill) noexcept
+    {
+        using Progression = TES3MP::CombatProgressionSkill;
+        switch (skill)
+        {
+            case TES3MP::MeleeWeaponSkill::ShortBlade: return Progression::ShortBlade;
+            case TES3MP::MeleeWeaponSkill::LongBlade: return Progression::LongBlade;
+            case TES3MP::MeleeWeaponSkill::BluntWeapon: return Progression::BluntWeapon;
+            case TES3MP::MeleeWeaponSkill::Axe: return Progression::Axe;
+            case TES3MP::MeleeWeaponSkill::Spear: return Progression::Spear;
+            case TES3MP::MeleeWeaponSkill::Count: break;
+        }
+        return Progression::HandToHand;
+    }
+
+    bool advanceCombatSkill(TES3MP::CanonicalPlayerCombatState& player,
+        TES3MP::CombatProgressionSkill skill) noexcept
+    {
+        const auto index = static_cast<std::size_t>(skill);
+        if (index >= player.skillRules.size())
+            return false;
+        const auto& rule = player.skillRules[index];
+        auto& state = player.skillProgression[index];
+        const float value = combatSkillValue(player, skill);
+        if (!finite(value) || value >= 100.f || !finite(rule.useGain) || rule.useGain <= 0.f
+            || !finite(state.progress) || state.progress < 0.f
+            || !finite(state.requirementFactor) || state.requirementFactor <= 0.f)
+            return false;
+        const float requirement = (value + 1.f) * state.requirementFactor;
+        const float gained = rule.useGain / requirement;
+        if (!finite(gained) || gained <= 0.f)
+            return false;
+        state.progress += gained;
+        if (state.progress >= 1.f)
+        {
+            setCombatSkillValue(player, skill, std::min(100.f, value + 1.f));
+            state.progress = 0.f;
+        }
+        return true;
+    }
 
     float normalizedEncumbrance(std::uint64_t weight, std::uint64_t maximum) noexcept
     {
@@ -27,6 +119,12 @@ namespace
             && finite(value.reach) && value.reach > 0.f;
     }
 
+    bool validProfile(const TES3MP::MeleeShieldProfile& value) noexcept
+    {
+        return static_cast<std::uint8_t>(value.skill)
+            <= static_cast<std::uint8_t>(TES3MP::ShieldArmorSkill::HeavyArmor);
+    }
+
     bool valid(const TES3MP::CanonicalPlayerCombatState& value) noexcept
     {
         const auto& s = value.stats;
@@ -40,11 +138,27 @@ namespace
                 && finite(s.weaponSkill) && finite(s.handToHandSkill) && finite(s.fatigue)
                 && finite(s.endurance))
             || value.maximumEncumbranceWeightUnits == 0
+            || !finite(value.blockSkill)
             || !std::ranges::all_of(value.weaponSkills, [](float skill) { return finite(skill); })
             || !validVictim(value.victim) || !validVictim(value.respawnVictim)
             || !finite(value.maximumHealth) || value.maximumHealth <= 0.f
-            || !finite(value.maximumFatigue) || value.maximumFatigue < 0.f)
+            || !finite(value.maximumFatigue) || value.maximumFatigue < 0.f
+            || !finite(value.magicka) || !finite(value.maximumMagicka) || value.maximumMagicka < 0.f
+            || value.magicka < 0.f || value.magicka > value.maximumMagicka
+            || !finite(value.healthRecoveryPerSecond) || value.healthRecoveryPerSecond < 0.f
+            || !finite(value.magickaRecoveryPerSecond) || value.magickaRecoveryPerSecond < 0.f)
             return false;
+        for (std::size_t index = 0; index < value.skillRules.size(); ++index)
+        {
+            const auto specialization = static_cast<std::uint8_t>(value.skillRules[index].specialization);
+            if (specialization > static_cast<std::uint8_t>(TES3MP::ClassSpecialization::Stealth)
+                || !finite(value.skillRules[index].useGain) || value.skillRules[index].useGain < 0.f
+                || !finite(value.skillProgression[index].progress) || value.skillProgression[index].progress < 0.f
+                || value.skillProgression[index].progress >= 1.f
+                || !finite(value.skillProgression[index].requirementFactor)
+                || value.skillProgression[index].requirementFactor <= 0.f)
+                return false;
+        }
         return true;
     }
 
@@ -99,16 +213,64 @@ namespace
             return std::numeric_limits<std::uint64_t>::max();
         return *x * *x + *y * *y + *z * *z;
     }
+
+    bool insideBlockArc(const TES3MP::Transform& blocker, const TES3MP::Position3& attacker,
+        const TES3MP::OpenMwMeleeSettings& settings) noexcept
+    {
+        const auto origin = blocker.position();
+        const double x = static_cast<double>(attacker.x()) - static_cast<double>(origin.x());
+        const double y = static_cast<double>(attacker.y()) - static_cast<double>(origin.y());
+        if (x == 0.0 && y == 0.0)
+            return true;
+        constexpr double TurnScale = 2.0 * std::numbers::pi / 4294967296.0;
+        const double yaw = static_cast<double>(blocker.orientation().z().value()) * TurnScale;
+        const double forwardX = std::sin(yaw);
+        const double forwardY = std::cos(yaw);
+        const double angle = std::atan2(x * forwardY - y * forwardX, forwardX * x + forwardY * y)
+            * 180.0 / std::numbers::pi;
+        return angle >= settings.combatBlockLeftAngle && angle <= settings.combatBlockRightAngle;
+    }
+
+    bool receivesBlockStillBonus(
+        const TES3MP::Transform& blocker, const TES3MP::LinearVelocity3& velocity) noexcept
+    {
+        constexpr double TurnScale = 2.0 * std::numbers::pi / 4294967296.0;
+        const double yaw = static_cast<double>(blocker.orientation().z().value()) * TurnScale;
+        const double forwardSpeed = static_cast<double>(velocity.x()) * std::sin(yaw)
+            + static_cast<double>(velocity.y()) * std::cos(yaw);
+        return forwardSpeed <= 0.0;
+    }
 }
 
 namespace TES3MP
 {
     std::optional<CanonicalPlayerCombatTemplate> deriveCharacterCombatTemplate(
-        const CharacterProfile& profile, const CanonicalPlayerCombatTemplate& base) noexcept
+        const CharacterProfile& profile, const CanonicalPlayerCombatTemplate& base,
+        const CharacterContentCatalog* characterContent) noexcept
     {
         if (profile.lifecycle() != CharacterLifecycle::EstablishedCharacter
             || !finite(base.stats.strength) || base.stats.strength <= 0.f
-            || base.maximumEncumbranceWeightUnits == 0)
+            || !finite(base.stats.endurance)
+            || (base.healthRecoveryPerSecond > 0.f && base.stats.endurance <= 0.f)
+            || !finite(base.intelligence)
+            || ((base.maximumMagicka > 0.f || base.magickaRecoveryPerSecond > 0.f) && base.intelligence <= 0.f)
+            || base.maximumEncumbranceWeightUnits == 0 || !profile.characterClass())
+            return std::nullopt;
+        std::optional<CharacterClassDefinition> ownedClass;
+        const CharacterClassDefinition* selectedClass = nullptr;
+        if (const auto* predefined = std::get_if<ClassRecordId>(&*profile.characterClass()))
+        {
+            if (!characterContent)
+                return std::nullopt;
+            selectedClass = characterContent->find(*predefined);
+        }
+        else if (const auto* custom = std::get_if<CustomClassDefinition>(&*profile.characterClass()))
+        {
+            ownedClass = CharacterClassDefinition{ *ClassRecordId::fromValue(1), custom->specialization,
+                custom->favoredAttributes, custom->minorSkills, custom->majorSkills };
+            selectedClass = &*ownedClass;
+        }
+        if (!selectedClass)
             return std::nullopt;
         const auto& attributes = profile.derived().attributes;
         const auto& skills = profile.derived().skills;
@@ -119,6 +281,7 @@ namespace TES3MP
         result.stats.endurance = static_cast<float>(attributes[5]);
         result.stats.fatigueTerm = 1.f;
         result.stats.handToHandSkill = static_cast<float>(skills[26]);
+        result.blockSkill = static_cast<float>(skills[0]);
         result.stats.fatigue = static_cast<float>(attributes[0]) + static_cast<float>(attributes[2])
             + static_cast<float>(attributes[3]) + static_cast<float>(attributes[5]);
         result.victim.health = (static_cast<float>(attributes[0]) + static_cast<float>(attributes[5])) * 0.5f;
@@ -127,6 +290,14 @@ namespace TES3MP
         result.victim.dead = false;
         result.maximumHealth = result.victim.health;
         result.maximumFatigue = result.victim.fatigue;
+        result.maximumMagicka = base.maximumMagicka > 0.f
+            ? base.maximumMagicka * static_cast<float>(attributes[1]) / base.intelligence : 0.f;
+        result.magicka = result.maximumMagicka;
+        result.healthRecoveryPerSecond = base.healthRecoveryPerSecond > 0.f
+            ? base.healthRecoveryPerSecond * result.stats.endurance / base.stats.endurance : 0.f;
+        result.magickaRecoveryPerSecond = base.magickaRecoveryPerSecond > 0.f
+            ? base.magickaRecoveryPerSecond * static_cast<float>(attributes[1]) / base.intelligence : 0.f;
+        result.intelligence = static_cast<float>(attributes[1]);
         result.weaponSkills[static_cast<std::size_t>(MeleeWeaponSkill::ShortBlade)]
             = static_cast<float>(skills[20]);
         result.weaponSkills[static_cast<std::size_t>(MeleeWeaponSkill::LongBlade)]
@@ -135,6 +306,20 @@ namespace TES3MP
             = static_cast<float>(skills[4]);
         result.weaponSkills[static_cast<std::size_t>(MeleeWeaponSkill::Axe)] = static_cast<float>(skills[6]);
         result.weaponSkills[static_cast<std::size_t>(MeleeWeaponSkill::Spear)] = static_cast<float>(skills[7]);
+        for (std::size_t index = 0; index < result.skillProgression.size(); ++index)
+        {
+            const auto characterSkill = static_cast<std::uint8_t>(CharacterSkillIndexes[index]);
+            float factor = result.skillSettings.miscellaneousFactor;
+            if (std::ranges::find(selectedClass->minorSkills, characterSkill) != selectedClass->minorSkills.end())
+                factor = result.skillSettings.minorFactor;
+            else if (std::ranges::find(selectedClass->majorSkills, characterSkill) != selectedClass->majorSkills.end())
+                factor = result.skillSettings.majorFactor;
+            if (result.skillRules[index].specialization == selectedClass->specialization)
+                factor *= result.skillSettings.specializationFactor;
+            if (!finite(factor) || factor <= 0.f)
+                return std::nullopt;
+            result.skillProgression[index] = { 0.f, factor };
+        }
         const auto scaledEncumbrance = static_cast<long double>(base.maximumEncumbranceWeightUnits)
             * static_cast<long double>(attributes[0]) / static_cast<long double>(base.stats.strength);
         if (scaledEncumbrance < 1.L
@@ -145,7 +330,8 @@ namespace TES3MP
     }
 
     std::optional<MeleeWeaponCatalog> MeleeWeaponCatalog::create(
-        const ItemPrototypeCatalog& items, std::span<const MeleeWeaponProfile> profiles) noexcept
+        const ItemPrototypeCatalog& items, std::span<const MeleeWeaponProfile> profiles,
+        std::span<const MeleeShieldProfile> shields) noexcept
     try
     {
         if (profiles.size() > MaximumItemPrototypes)
@@ -162,7 +348,21 @@ namespace TES3MP
                 || (index != 0 && values[index - 1].prototypeId == values[index].prototypeId))
                 return std::nullopt;
         }
-        return MeleeWeaponCatalog(items.contentManifestId(), std::move(values));
+        if (shields.size() > MaximumItemPrototypes)
+            return std::nullopt;
+        std::vector<MeleeShieldProfile> shieldValues(shields.begin(), shields.end());
+        std::ranges::sort(shieldValues, {}, &MeleeShieldProfile::prototypeId);
+        for (std::size_t index = 0; index < shieldValues.size(); ++index)
+        {
+            const auto* item = items.find(shieldValues[index].prototypeId);
+            if (!validProfile(shieldValues[index]) || !item || item->category != ItemCategory::Armor
+                || item->stackable || item->maxCondition == 0
+                || item->maxCondition > static_cast<std::uint32_t>(std::numeric_limits<std::int32_t>::max())
+                || (item->slotMask & slotToMask(EquipmentSlot::CarriedLeft)) == 0
+                || (index != 0 && shieldValues[index - 1].prototypeId == shieldValues[index].prototypeId))
+                return std::nullopt;
+        }
+        return MeleeWeaponCatalog(items.contentManifestId(), std::move(values), std::move(shieldValues));
     }
     catch (...)
     {
@@ -173,6 +373,12 @@ namespace TES3MP
     {
         const auto found = std::ranges::lower_bound(mProfiles, id, {}, &MeleeWeaponProfile::prototypeId);
         return found != mProfiles.end() && found->prototypeId == id ? &*found : nullptr;
+    }
+
+    const MeleeShieldProfile* MeleeWeaponCatalog::findShield(ItemPrototypeId id) const noexcept
+    {
+        const auto found = std::ranges::lower_bound(mShields, id, {}, &MeleeShieldProfile::prototypeId);
+        return found != mShields.end() && found->prototypeId == id ? &*found : nullptr;
     }
 
     const CanonicalPlayerCombatState* CanonicalCombatWorld::findPlayer(PlayerId id) const noexcept
@@ -195,11 +401,19 @@ namespace TES3MP
             return true;
         if (mPlayers.size() >= MaximumPlayerCombatants || source.maximumEncumbranceWeightUnits == 0
             || !finite(source.maximumHealth) || source.maximumHealth <= 0.f
-            || !finite(source.maximumFatigue) || source.maximumFatigue < 0.f)
+            || !finite(source.maximumFatigue) || source.maximumFatigue < 0.f
+            || !finite(source.magicka) || !finite(source.maximumMagicka) || source.maximumMagicka < 0.f
+            || source.magicka < 0.f || source.magicka > source.maximumMagicka)
             return false;
         CanonicalPlayerCombatState value{ id, CombatRevision::initial(), source.stats, source.weaponSkills,
-            source.maximumEncumbranceWeightUnits, std::nullopt, std::nullopt, source.victim, source.victim,
+            source.blockSkill, source.maximumEncumbranceWeightUnits, std::nullopt, std::nullopt, source.victim, source.victim,
             std::nullopt, source.maximumHealth, source.maximumFatigue };
+        value.magicka = source.magicka;
+        value.maximumMagicka = source.maximumMagicka;
+        value.healthRecoveryPerSecond = source.healthRecoveryPerSecond;
+        value.magickaRecoveryPerSecond = source.magickaRecoveryPerSecond;
+        value.skillRules = source.skillRules;
+        value.skillProgression = source.skillProgression;
         value.stats.weaponSkill = 0.f;
         value.stats.normalizedEncumbrance
             = normalizedEncumbrance(inventoryWeightUnits, source.maximumEncumbranceWeightUnits);
@@ -234,8 +448,14 @@ namespace TES3MP
         if (!revision || source.maximumEncumbranceWeightUnits == 0)
             return false;
         CanonicalPlayerCombatState value{ id, *revision, source.stats, source.weaponSkills,
-            source.maximumEncumbranceWeightUnits, std::nullopt, profileRevision, source.victim, source.victim,
+            source.blockSkill, source.maximumEncumbranceWeightUnits, std::nullopt, profileRevision, source.victim, source.victim,
             std::nullopt, source.maximumHealth, source.maximumFatigue };
+        value.magicka = source.magicka;
+        value.maximumMagicka = source.maximumMagicka;
+        value.healthRecoveryPerSecond = source.healthRecoveryPerSecond;
+        value.magickaRecoveryPerSecond = source.magickaRecoveryPerSecond;
+        value.skillRules = source.skillRules;
+        value.skillProgression = source.skillProgression;
         value.stats.weaponSkill = 0.f;
         value.stats.normalizedEncumbrance
             = normalizedEncumbrance(inventoryWeightUnits, source.maximumEncumbranceWeightUnits);
@@ -363,6 +583,7 @@ namespace TES3MP
         std::optional<ItemStackId> equippedStackId;
         std::optional<OpenMwMeleeWeapon> equippedWeapon;
         std::optional<float> equippedWeaponReach;
+        CombatProgressionSkill usedSkill = CombatProgressionSkill::HandToHand;
         OpenMwMeleeAttacker resolvedAttacker = attackerCombat->stats;
         resolvedAttacker.fatigueTerm = openMwFatigueTerm(
             settings, attackerCombat->stats.fatigue, attackerCombat->maximumFatigue);
@@ -390,6 +611,7 @@ namespace TES3MP
             equippedWeaponReach = profile->reach;
             resolvedAttacker.weaponSkill
                 = attackerCombat->weaponSkills[static_cast<std::size_t>(profile->skill)];
+            usedSkill = progressionSkill(profile->skill);
         }
         else
             resolvedAttacker.weaponSkill = 0.f;
@@ -443,22 +665,36 @@ namespace TES3MP
             .attackStrength = attack.attackStrength,
             .hitRoll0To99 = roll,
             .contact = mutableTarget != nullptr,
-            .blocked = attack.blocked,
+            .blocked = false,
             .strengthInfluencesHandToHand = attack.strengthInfluencesHandToHand,
             .werewolfClawMultiplier = attack.werewolfClawMultiplier,
             .weapon = equippedWeapon };
         const OpenMwMeleeVictim emptyVictim{};
-        const auto resolution = resolveOpenMwMelee(
+        auto resolution = resolveOpenMwMelee(
             settings, resolvedAttacker, mutableTarget ? mutableTarget->stats : emptyVictim, attempt);
         if (resolution.code == OpenMwMeleeResolutionCode::InvalidInput)
         {
             out.disposition = AuthoritativeMeleeDisposition::InvalidAttempt;
             return out;
         }
+        if (mutableTarget && resolution.hit && !resolution.blocked)
+        {
+            resolution.damage = openMwDifficultyScaledDamage(settings, resolution.damage, policy.difficulty, false);
+            if (resolution.damagedStat == MeleeDamageStat::Health)
+            {
+                const float remaining = mutableTarget->stats.health - resolution.damage;
+                resolution.victimDied = remaining < 1.f;
+                resolution.victimHealth = resolution.victimDied ? 0.f : remaining;
+            }
+            else
+                resolution.victimFatigue = mutableTarget->stats.fatigue - resolution.damage;
+        }
         mutableAttacker.stats.fatigue = resolution.attackerFatigue;
         mutableAttacker.victim.fatigue = resolution.attackerFatigue;
         mutableAttacker.victim.fatigueNonNegative = resolution.attackerFatigue >= 0.f;
         mutableAttacker.lastAttackTick = serverTick;
+        if (mutableTarget && resolution.hit)
+            (void)advanceCombatSkill(mutableAttacker, usedSkill);
         mutableAttacker.revision = *attackerRevision;
         if (equippedStackId && equippedWeapon && resolution.weaponCondition != equippedWeapon->condition)
         {
@@ -506,13 +742,17 @@ namespace TES3MP
     }
 
     std::variant<CombatSimulationStep, CombatSimulationError> advanceAuthoritativeCombat(
-        const CanonicalCombatWorld& combat, const CanonicalServerState& players,
-        const CanonicalActorWorld& actors, const OpenMwMeleeSettings& settings,
-        CombatSimulationPolicy policy, ServerTick tick) noexcept
+        const CanonicalCombatWorld& combat, const CanonicalInventoryWorld& inventory,
+        const ItemPrototypeCatalog& items, const MeleeWeaponCatalog& weapons,
+        const CanonicalServerState& players, const CanonicalActorWorld& actors,
+        const OpenMwMeleeSettings& settings, CombatSimulationPolicy policy, ServerTick tick) noexcept
     try
     {
         if (policy.minimumActorAttackIntervalTicks == 0 || policy.respawnDelayTicks == 0
-            || !finite(policy.secondsPerTick) || policy.secondsPerTick <= 0.f)
+            || !finite(policy.secondsPerTick) || policy.secondsPerTick <= 0.f
+            || policy.difficulty < -100 || policy.difficulty > 100
+            || inventory.contentManifestId() != items.contentManifestId()
+            || inventory.contentManifestId() != weapons.contentManifestId())
             return CombatSimulationError{ CombatSimulationErrorCode::InvalidWorld };
         if (combat.lastSimulationTick() && tick < *combat.lastSimulationTick())
             return CombatSimulationError{ CombatSimulationErrorCode::TickRegression };
@@ -521,6 +761,7 @@ namespace TES3MP
         std::vector<CanonicalPlayerCombatState> playerStates(combat.players().begin(), combat.players().end());
         std::vector<CanonicalActorCombatState> actorStates(combat.actors().begin(), combat.actors().end());
         std::vector<AuthoritativeActorMeleeEvent> events;
+        CanonicalInventoryWorld inventoryCandidate = inventory;
         auto random = Xoshiro256StarStar::restore(combat.randomState());
 
         const auto activePlayer = [&](PlayerId id) {
@@ -588,7 +829,7 @@ namespace TES3MP
             auto resolvedActor = actor.attacker;
             resolvedActor.fatigueTerm = openMwFatigueTerm(
                 settings, actor.attacker.fatigue, actor.maximumFatigue);
-            const auto resolution = resolveOpenMwMelee(settings, resolvedActor, target->victim,
+            auto resolution = resolveOpenMwMelee(settings, resolvedActor, target->victim,
                 OpenMwMeleeAttempt{ .type = MeleeAttackType::Chop, .attackStrength = 1.f,
                     .hitRoll0To99 = static_cast<std::uint8_t>(*roll), .contact = true,
                     .weapon = actor.naturalWeapon });
@@ -596,6 +837,63 @@ namespace TES3MP
                 return CombatSimulationError{ CombatSimulationErrorCode::InvalidWorld, index };
             if (resolution.code == OpenMwMeleeResolutionCode::DeadVictim)
                 continue;
+            if (resolution.hit)
+            {
+                resolution.damage = openMwDifficultyScaledDamage(
+                    settings, resolution.damage, policy.difficulty, true);
+                if (resolution.damagedStat == MeleeDamageStat::Health)
+                {
+                    const float remaining = target->victim.health - resolution.damage;
+                    resolution.victimDied = remaining < 1.f;
+                    resolution.victimHealth = resolution.victimDied ? 0.f : remaining;
+                }
+                else
+                    resolution.victimFatigue = target->victim.fatigue - resolution.damage;
+
+                const auto* playerInventory = inventoryCandidate.findPlayer(target->playerId);
+                const auto left = static_cast<std::size_t>(EquipmentSlot::CarriedLeft);
+                const auto shieldId = playerInventory ? playerInventory->equipment[left] : std::nullopt;
+                const auto* shieldStack = shieldId && playerInventory ? playerInventory->findStack(*shieldId) : nullptr;
+                const auto* shieldItem = shieldStack ? items.find(shieldStack->prototypeId) : nullptr;
+                const auto* shield = shieldStack ? weapons.findShield(shieldStack->prototypeId) : nullptr;
+                const bool canBlock = shieldId && shieldStack && shieldItem && shield
+                    && shieldItem->category == ItemCategory::Armor && shieldStack->condition > 0
+                    && !target->victim.knockedDown && !target->victim.paralyzed
+                    && insideBlockArc(spatialPlayer->transform(), spatialActor->root().position(), settings);
+                if (canBlock)
+                {
+                    const auto blockRoll = random.uniformBelow(100);
+                    if (!blockRoll)
+                        return CombatSimulationError{ CombatSimulationErrorCode::InvalidWorld, index };
+                    auto blocker = target->stats;
+                    blocker.fatigueTerm = openMwFatigueTerm(
+                        settings, target->stats.fatigue, target->maximumFatigue);
+                    const bool receivesStillBonus = receivesBlockStillBonus(
+                        spatialPlayer->transform(), spatialPlayer->linearVelocity());
+                    const float chance = openMwMeleeBlockChance(
+                        settings, target->blockSkill, blocker, resolvedActor, 1.f, receivesStillBonus);
+                    if (static_cast<float>(*blockRoll) < chance)
+                    {
+                        const auto conditionLoss = std::min<std::uint32_t>(shieldStack->condition,
+                            static_cast<std::uint32_t>(std::min<float>(resolution.damage,
+                                static_cast<float>(std::numeric_limits<std::uint32_t>::max()))));
+                        const auto condition = shieldStack->condition - conditionLoss;
+                        if (conditionLoss != 0
+                            && inventoryCandidate.setEquippedItemCondition(target->playerId,
+                                EquipmentSlot::CarriedLeft, *shieldId, condition, condition == 0, tick)
+                                != EquippedConditionResult::Applied)
+                            return CombatSimulationError{ CombatSimulationErrorCode::RevisionExhausted, index };
+                        const float fatigueCost = openMwMeleeBlockFatigueCost(
+                            settings, target->stats.normalizedEncumbrance, actor.naturalWeapon, 1.f);
+                        resolution.blocked = true;
+                        resolution.damage = 0.f;
+                        resolution.victimHealth = target->victim.health;
+                        resolution.victimFatigue = target->victim.fatigue - fatigueCost;
+                        resolution.victimDied = false;
+                        (void)advanceCombatSkill(*target, CombatProgressionSkill::Block);
+                    }
+                }
+            }
             const auto actorRevision = actor.revision.next();
             const auto targetRevision = target->revision.next();
             if (!actorRevision || !targetRevision)
@@ -635,6 +933,7 @@ namespace TES3MP
                 return CombatSimulationError{ CombatSimulationErrorCode::RevisionExhausted, index };
             player.victim = player.respawnVictim;
             player.stats.fatigue = player.respawnVictim.fatigue;
+            player.magicka = player.maximumMagicka;
             player.lastAttackTick.reset();
             player.deathTick.reset();
             player.revision = *revision;
@@ -661,11 +960,32 @@ namespace TES3MP
             if (player.victim.dead || !activePlayer(player.playerId))
                 continue;
             const float recovered = recoverFatigue(player.stats.fatigue, player.maximumFatigue, player.stats);
-            if (recovered == player.stats.fatigue)
+            if (recovered != player.stats.fatigue)
+            {
+                player.stats.fatigue = recovered;
+                player.victim.fatigue = recovered;
+                player.victim.fatigueNonNegative = recovered >= 0.f;
+            }
+            const auto* spatialPlayer = players.findPlayer(player.playerId);
+            const bool engaged = spatialPlayer && std::ranges::any_of(actorStates,
+                [&](const CanonicalActorCombatState& actor) {
+                    if (actor.stats.dead || actor.aggressionTarget != player.playerId)
+                        return false;
+                    const auto* spatialActor = actors.find(actor.actorId);
+                    return spatialActor && spatialActor->root().cell() == spatialPlayer->transform().cell();
+                });
+            if (engaged)
                 continue;
-            player.stats.fatigue = recovered;
-            player.victim.fatigue = recovered;
-            player.victim.fatigueNonNegative = recovered >= 0.f;
+            if (player.victim.health < player.maximumHealth && player.healthRecoveryPerSecond > 0.f)
+            {
+                player.victim.health = std::min(player.maximumHealth,
+                    player.victim.health + player.healthRecoveryPerSecond * elapsedSeconds);
+            }
+            if (player.magicka < player.maximumMagicka && player.magickaRecoveryPerSecond > 0.f)
+            {
+                player.magicka = std::min(player.maximumMagicka,
+                    player.magicka + player.magickaRecoveryPerSecond * elapsedSeconds);
+            }
         }
         for (std::size_t index = 0; index < actorStates.size(); ++index)
         {
@@ -690,7 +1010,10 @@ namespace TES3MP
         auto* candidate = std::get_if<CanonicalCombatWorld>(&created);
         if (!candidate)
             return CombatSimulationError{ CombatSimulationErrorCode::InvalidWorld };
-        return CombatSimulationStep{ std::move(*candidate), std::move(events) };
+        std::optional<CanonicalInventoryWorld> changedInventory;
+        if (inventoryCandidate != inventory)
+            changedInventory.emplace(std::move(inventoryCandidate));
+        return CombatSimulationStep{ std::move(*candidate), std::move(changedInventory), std::move(events) };
     }
     catch (...)
     {

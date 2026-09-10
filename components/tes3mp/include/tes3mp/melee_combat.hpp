@@ -40,6 +40,17 @@ namespace TES3MP
         float fatigueReturnBase = 0.f;
         float fatigueReturnMultiplier = 0.f;
         float enduranceFatigueMultiplier = 0.f;
+        float difficultyMultiplier = 1.f;
+        float combatBlockLeftAngle = -90.f;
+        float combatBlockRightAngle = 90.f;
+        float swingBlockMultiplier = 0.f;
+        float swingBlockBase = 1.f;
+        float blockStillBonus = 1.f;
+        float blockMinimumChance = 0.f;
+        float blockMaximumChance = 100.f;
+        float fatigueBlockBase = 0.f;
+        float fatigueBlockMultiplier = 0.f;
+        float weaponFatigueBlockMultiplier = 0.f;
 
         friend constexpr bool operator==(OpenMwMeleeSettings, OpenMwMeleeSettings) noexcept = default;
     };
@@ -153,6 +164,14 @@ namespace TES3MP
         const OpenMwMeleeSettings& settings, float currentFatigue, float maximumFatigue) noexcept;
     float openMwFatigueRecoveryPerSecond(const OpenMwMeleeSettings& settings, float endurance,
         float normalizedEncumbrance) noexcept;
+    float openMwDifficultyScaledDamage(const OpenMwMeleeSettings& settings, float damage,
+        std::int16_t difficulty, bool playerIsVictim) noexcept;
+    float openMwMeleeBlockChance(const OpenMwMeleeSettings& settings, float blockSkill,
+        const OpenMwMeleeAttacker& blocker, const OpenMwMeleeAttacker& attacker,
+        float attackStrength, bool receivesStillBonus) noexcept;
+    float openMwMeleeBlockFatigueCost(const OpenMwMeleeSettings& settings,
+        float normalizedEncumbrance, const std::optional<OpenMwMeleeWeapon>& attackerWeapon,
+        float attackStrength) noexcept;
     OpenMwMeleeResolution resolveOpenMwMelee(const OpenMwMeleeSettings& settings,
         const OpenMwMeleeAttacker& attacker, const OpenMwMeleeVictim& victim,
         const OpenMwMeleeAttempt& attempt) noexcept;

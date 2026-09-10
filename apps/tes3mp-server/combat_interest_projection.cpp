@@ -1,5 +1,6 @@
 #include "combat_interest_projection.hpp"
 
+#include <array>
 #include <vector>
 
 namespace TES3MP::ServerApp
@@ -34,9 +35,25 @@ namespace TES3MP::ServerApp
             visible.push_back({ state->actorId, state->revision, state->stats.health,
                 state->maximumHealth, state->stats.fatigue, state->maximumFatigue, state->stats.dead });
         }
+        const std::array skillValues{
+            self->blockSkill,
+            self->weaponSkills[static_cast<std::size_t>(MeleeWeaponSkill::ShortBlade)],
+            self->weaponSkills[static_cast<std::size_t>(MeleeWeaponSkill::LongBlade)],
+            self->weaponSkills[static_cast<std::size_t>(MeleeWeaponSkill::BluntWeapon)],
+            self->weaponSkills[static_cast<std::size_t>(MeleeWeaponSkill::Axe)],
+            self->weaponSkills[static_cast<std::size_t>(MeleeWeaponSkill::Spear)],
+            self->stats.handToHandSkill,
+        };
+        std::array<CombatSkillSnapshot, ReplicatedCombatSkillCount> skills{};
+        for (std::size_t index = 0; index < skills.size(); ++index)
+        {
+            skills[index] = { static_cast<ReplicatedCombatSkill>(index), skillValues[index],
+                self->skillProgression[index].progress };
+        }
         auto created = LatestWinsCombatSnapshot::create(target, session->sessionGeneration(), tick,
             canonicalRevision, session->playerId(), self->revision, self->victim.health,
-            self->maximumHealth, self->stats.fatigue, self->maximumFatigue, self->victim.dead, visible);
+            self->maximumHealth, self->stats.fatigue, self->maximumFatigue, self->magicka,
+            self->maximumMagicka, self->victim.dead, visible, skills);
         auto* snapshot = std::get_if<LatestWinsCombatSnapshot>(&created);
         return snapshot ? std::optional<LatestWinsCombatSnapshot>(std::move(*snapshot)) : std::nullopt;
     }

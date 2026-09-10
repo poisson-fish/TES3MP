@@ -128,7 +128,7 @@ namespace TES3MP::ServerApp
         if (!validUtf8(text))
             return error(ConfigErrorCode::InvalidUtf8);
 
-        std::array<bool, 19> seen{};
+        std::array<bool, 20> seen{};
         std::string bindAddress;
         std::uint16_t port = 0;
         std::uint64_t tick = 0;
@@ -148,6 +148,7 @@ namespace TES3MP::ServerApp
         std::filesystem::path combatContentPath;
         std::filesystem::path characterContentPath;
         std::filesystem::path playerIdentityPath;
+        std::int16_t combatDifficulty = 0;
         std::size_t lineNumber = 0;
         std::size_t begin = 0;
         while (begin <= text.size())
@@ -204,6 +205,8 @@ namespace TES3MP::ServerApp
                     slot = 17;
                 else if (key == "character_content_file")
                     slot = 18;
+                else if (key == "combat_difficulty")
+                    slot = 19;
                 else
                     return error(ConfigErrorCode::UnknownKey, lineNumber, key);
                 if (seen[slot])
@@ -322,11 +325,18 @@ namespace TES3MP::ServerApp
                         return error(ConfigErrorCode::InvalidValue, lineNumber, key);
                     combatContentPath = std::filesystem::u8path(value);
                 }
-                else
+                else if (slot == 18)
                 {
                     if (value.size() > MaximumCharacterContentPathBytes)
                         return error(ConfigErrorCode::InvalidValue, lineNumber, key);
                     characterContentPath = std::filesystem::u8path(value);
+                }
+                else
+                {
+                    const auto parsed = signedValue(value);
+                    if (!parsed || *parsed < -100 || *parsed > 100)
+                        return error(ConfigErrorCode::InvalidValue, lineNumber, key);
+                    combatDifficulty = static_cast<std::int16_t>(*parsed);
                 }
             }
             if (end == std::string_view::npos)
@@ -350,7 +360,8 @@ namespace TES3MP::ServerApp
         return ServerConfig{ std::move(*endpoint), tick, grace, std::move(passwordPath), *manifest, *spawnCell,
             std::move(configuredSpawnPositions), std::move(collisionContentPath), std::move(actorContentPath),
             std::move(interactiveObjectContentPath), std::move(inventoryContentPath),
-            std::move(combatContentPath), std::move(playerIdentityPath), std::move(characterContentPath) };
+            std::move(combatContentPath), std::move(playerIdentityPath), std::move(characterContentPath),
+            combatDifficulty };
     }
 
     PasswordLoadResult loadJoinPassword(const std::filesystem::path& path)

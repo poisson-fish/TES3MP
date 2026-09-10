@@ -87,6 +87,20 @@ the affected code/tests in the same milestone.
   starts a server-tick timer, and after 30 seconds the combatant respawns at its
   current canonical root with its configured baseline stats and cleared combat
   intent. Clients only animate replicated outcomes.
+- **Server-selected melee difficulty and blocking.** One bounded server setting
+  scales player damage in both directions; a client difficulty preference is
+  presentation-only. Player blocking is passive and requires a canonical
+  equipped shield, server-owned stats, motion and facing, baked OpenMW rules,
+  and a server PRNG roll. The block result, fatigue cost, shield wear/breakage,
+  damage suppression, and publication form one atomic operation.
+- **Live authoritative combat progression and recovery.** Successful server-confirmed
+  weapon, hand-to-hand, and block uses advance only the corresponding canonical
+  skill using baked OpenMW use gains plus the confirmed character's class and
+  specialization factors; clients receive values and progress but submit none.
+  Health and magicka use baked stock rest rates at the default 30x time scale
+  while an active living player has no live same-cell aggressor. These live
+  values deliberately remain outside the V5 character checkpoint until broader
+  canonical persistence and time/rest semantics are defined.
 
 ## Protocol, transport, and security
 

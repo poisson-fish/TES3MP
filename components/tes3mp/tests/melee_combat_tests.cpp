@@ -137,6 +137,33 @@ namespace
             && near(TES3MP::openMwFatigueRecoveryPerSecond(input,
                 std::numeric_limits<float>::quiet_NaN(), 0.f), 0.f);
     }
+
+    bool difficulty_and_block_helpers_match_openmw_formulas()
+    {
+        auto input = settings();
+        input.difficultyMultiplier = 5.f;
+        input.swingBlockMultiplier = 1.f;
+        input.swingBlockBase = 1.f;
+        input.blockStillBonus = 1.25f;
+        input.blockMinimumChance = 10.f;
+        input.blockMaximumChance = 50.f;
+        input.fatigueBlockBase = 4.f;
+        input.fatigueBlockMultiplier = 2.f;
+        input.weaponFatigueBlockMultiplier = 1.f;
+        auto enemy = attacker();
+        enemy.weaponSkill = 20.f;
+        auto invalidBlock = input;
+        invalidBlock.fatigueBlockBase = -1.f;
+        return near(TES3MP::openMwDifficultyScaledDamage(input, 10.f, 100, true), 60.f)
+            && near(TES3MP::openMwDifficultyScaledDamage(input, 10.f, 100, false), 8.f)
+            && near(TES3MP::openMwDifficultyScaledDamage(input, 10.f, -100, true), 8.f)
+            && near(TES3MP::openMwDifficultyScaledDamage(input, 10.f, -100, false), 60.f)
+            && near(TES3MP::openMwMeleeBlockChance(input, 20.f, attacker(), enemy, 1.f, false), 34.f)
+            && near(TES3MP::openMwMeleeBlockChance(input, 20.f, attacker(), enemy, 1.f, true), 50.f)
+            && near(TES3MP::openMwMeleeBlockFatigueCost(input, 0.5f, weapon(), 0.5f), 11.f)
+            && near(TES3MP::openMwMeleeBlockFatigueCost(invalidBlock, 0.5f, weapon(), 0.5f), 0.f)
+            && near(TES3MP::openMwDifficultyScaledDamage(input, 10.f, 101, true), 0.f);
+    }
 }
 
 int main()
@@ -144,6 +171,7 @@ int main()
     return weapon_attack_matches_openmw_ordering() && miss_wears_weapon_and_empty_swing_only_spends_fatigue()
             && unarmed_fatigue_and_health_paths_match_openmw() && invalid_external_values_fail_without_results()
             && fatigue_term_and_recovery_match_openmw_formulas()
+            && difficulty_and_block_helpers_match_openmw_formulas()
         ? 0
         : 1;
 }

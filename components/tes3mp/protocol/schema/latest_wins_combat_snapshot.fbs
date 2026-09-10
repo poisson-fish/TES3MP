@@ -12,6 +12,8 @@ table CombatSnapshotHeader {
   self_dead:bool = false (id: 8);
   self_maximum_health:float = 0 (id: 9);
   self_maximum_fatigue:float = 0 (id: 10);
+  self_magicka:float = 0 (id: 11);
+  self_maximum_magicka:float = 0 (id: 12);
 }
 
 struct ActorCombatSnapshot {
@@ -24,9 +26,16 @@ struct ActorCombatSnapshot {
   dead:bool;
 }
 
+struct CombatSkillSnapshot {
+  skill:ubyte;
+  value:float;
+  progress:float;
+}
+
 table LatestWinsCombatSnapshot {
   header:CombatSnapshotHeader (id: 0);
   actors:[ActorCombatSnapshot] (id: 1);
+  self_skills:[CombatSkillSnapshot] (id: 2);
 }
 
 root_type LatestWinsCombatSnapshot;

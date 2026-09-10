@@ -46,7 +46,7 @@ CATALOGS = {
     "actor_content_file": ("TES3MP_ACTORS_V1", True),
     "interactive_object_content_file": ("TES3MP_INTERACTIVE_OBJECTS_V1", False),
     "inventory_content_file": ("TES3MP_INVENTORY_V1", False),
-    "combat_content_file": ("TES3MP_COMBAT_V2", False),
+    "combat_content_file": ("TES3MP_COMBAT_V4", False),
     "character_content_file": ("TES3MP_CHARACTERS_V2", False),
 }
 
@@ -449,6 +449,10 @@ def _tes3_record_data(path: pathlib.Path) -> Iterable[Tes3Record]:
                         name = raw_name.decode("cp1252").casefold()
                     elif subtype == "DELE":
                         deleted = True
+                if name is None and record_type == "SKIL":
+                    indexes = [value for subtype, value in subrecords if subtype == "INDX"]
+                    if len(indexes) == 1 and len(indexes[0]) == 4:
+                        name = str(struct.unpack("<i", indexes[0])[0])
                 if name:
                     yield Tes3Record(record_type, name, deleted, tuple(subrecords))
     except (OSError, UnicodeDecodeError, struct.error) as exc:
@@ -714,15 +718,15 @@ def _weapon_values(record_value: Tes3Record) -> tuple[int, tuple[float, ...], bo
     return skills[weapon_type], (*damages, weight, reach), (flags & 3) == 0
 
 
-def _npc_values(record_value: Tes3Record, description: str) -> tuple[int, tuple[int, ...], tuple[int, ...], int, int]:
+def _npc_values(record_value: Tes3Record, description: str) -> tuple[int, tuple[int, ...], tuple[int, ...], int, int, int]:
     values = _unpack(record_value, "NPDT", "<h8B27Bx3H3Bxi")
     level = int(values[0])
     attributes = tuple(int(value) for value in values[1:9])
     skills = tuple(int(value) for value in values[9:36])
-    health, fatigue = int(values[36]), int(values[38])
-    if level < 1 or health < 1 or fatigue < 0:
+    health, magicka, fatigue = int(values[36]), int(values[37]), int(values[38])
+    if level < 1 or health < 1 or magicka < 0 or fatigue < 0:
         raise BakeError(f"{description} has unsupported NPC stats: {record_value.name}")
-    return level, attributes, skills, health, fatigue
+    return level, attributes, skills, health, magicka, fatigue
 
 
 COMBAT_GMSTS = (
@@ -730,7 +734,27 @@ COMBAT_GMSTS = (
     "fWeaponDamageMult", "fDamageStrengthBase", "fDamageStrengthMult", "fMinHandToHandMult",
     "fMaxHandToHandMult", "fHandtoHandHealthPer", "fCombatCriticalStrikeMult", "fCombatKODamageMult",
     "fFatigueBase", "fFatigueMult", "fFatigueReturnBase", "fFatigueReturnMult", "fEndFatigueMult",
+    "fDifficultyMult", "fCombatBlockLeftAngle", "fCombatBlockRightAngle", "fSwingBlockMult",
+    "fSwingBlockBase", "fBlockStillBonus", "iBlockMinChance", "iBlockMaxChance",
+    "fFatigueBlockBase", "fFatigueBlockMult", "fWeaponFatigueBlockMult",
 )
+
+PROGRESSION_GMSTS = (
+    "fMiscSkillBonus", "fMinorSkillBonus", "fMajorSkillBonus", "fSpecialSkillBonus",
+)
+
+PROGRESSION_SKILL_INDEXES = (0, 20, 5, 4, 6, 7, 26)
+
+
+def _skill_progression_rule(records: dict[tuple[str, str], Tes3Record], index: int) -> tuple[int, float]:
+    record_value = _winning_record(records, str(index), {"SKIL"}, "skill")
+    attribute, specialization, *use_values = _unpack(record_value, "SKDT", "<ii4f")
+    if int(attribute) < 0 or int(attribute) >= 8 or int(specialization) < 0 or int(specialization) > 2:
+        raise BakeError(f"skill {index} has unsupported progression metadata")
+    gain = float(use_values[0])
+    if not math.isfinite(gain) or gain < 0:
+        raise BakeError(f"skill {index} has invalid use gain")
+    return int(specialization), gain
 
 
 def _gmst_value(records: dict[tuple[str, str], Tes3Record], name: str) -> float:
@@ -784,8 +808,13 @@ def derive_catalogs(recipe: DerivedRecipe, server_entries: Sequence[Assignment],
         raise BakeError("derived actor starts inside a collision solid")
 
     player_record = _winning_record(records, recipe.player_record, {"NPC_"}, "player-stat")
-    _level, player_attributes, player_skills, _health, player_fatigue = _npc_values(player_record, "player template")
+    _level, player_attributes, player_skills, _health, player_magicka, player_fatigue = _npc_values(
+        player_record, "player template")
     gmsts = tuple(_gmst_value(records, name) for name in COMBAT_GMSTS)
+    progression_factors = tuple(_gmst_value(records, name) for name in PROGRESSION_GMSTS)
+    if any(value <= 0 for value in progression_factors):
+        raise BakeError("derived skill progression factor is invalid")
+    progression_rules = tuple(_skill_progression_rule(records, index) for index in PROGRESSION_SKILL_INDEXES)
     fatigue_base = gmsts[12]
     strength, agility, luck = player_attributes[0], player_attributes[3], player_attributes[7]
     weapon_skill_values = (player_skills[22], player_skills[5], player_skills[4], player_skills[6], player_skills[7])
@@ -813,7 +842,7 @@ def derive_catalogs(recipe: DerivedRecipe, server_entries: Sequence[Assignment],
         if any(kind == "NPCS" for kind, _value in record_value.subrecords):
             raise BakeError(f"unsupported actor with initial spell effects: {actor.record}")
         if record_value.kind == "NPC_":
-            _level, attributes, actor_skills, health, fatigue = _npc_values(record_value, "actor")
+            _level, attributes, actor_skills, health, _magicka, fatigue = _npc_values(record_value, "actor")
             combat_skill = float(actor_skills[26])
             attacks = (0.0,) * 6
         else:
@@ -855,9 +884,19 @@ def derive_catalogs(recipe: DerivedRecipe, server_entries: Sequence[Assignment],
 
     combat_lines = [CATALOGS["combat_content_file"][0], f"manifest {MANIFEST_PLACEHOLDER}",
                     f"seed {recipe.seed}", "settings " + " ".join(_float_text(value) for value in gmsts)]
+    progression_fields = (*progression_factors,
+                          *(value for rule in progression_rules for value in rule))
+    combat_lines.append("progression " + " ".join(_float_text(float(value)) for value in progression_fields))
+    # OpenMW restores these resources per in-game hour while resting. Until the
+    # canonical time/rest domain lands, vNext uses the same formulas at the
+    # stock 30x time scale only while the player has no live same-cell aggressor.
+    health_recovery = float(player_attributes[5]) * 0.1 / 120.0
+    rest_magic_multiplier = _gmst_value(records, "fRestMagicMult")
+    magicka_recovery = float(player_attributes[1]) * rest_magic_multiplier / 120.0
     player_fields = (float(agility), float(luck), float(strength), fatigue_base, 0.0, 0.0,
                      *(float(value) for value in weapon_skill_values), float(player_skills[26]), float(player_fatigue),
-                     float(player_attributes[5]))
+                     float(player_attributes[5]), float(player_skills[0]), float(player_attributes[1]),
+                     float(player_magicka), health_recovery, magicka_recovery)
     combat_lines.append("player " + " ".join((*(_float_text(value) for value in player_fields),
         str(maximum_weight), "0")))
     for actor, _record, health, fatigue, evasion, attack in sorted(actor_values, key=lambda value: value[0].actor_id):
@@ -868,6 +907,17 @@ def derive_catalogs(recipe: DerivedRecipe, server_entries: Sequence[Assignment],
     for identifier, skill, values, normal in sorted(weapon_profiles):
         combat_lines.append("weapon " + " ".join((str(identifier), str(skill),
             *(_float_text(value) for value in values), "1" if normal else "0")))
+    shield_weight = math.floor(_gmst_value(records, "iShieldWeight"))
+    light_max = shield_weight * _gmst_value(records, "fLightMaxMod") + 0.0005
+    medium_max = shield_weight * _gmst_value(records, "fMedMaxMod") + 0.0005
+    for identifier, _values, record_value in sorted(item_declarations):
+        if record_value.kind != "ARMO":
+            continue
+        armor_type, weight, _value, _health, _enchant, _armor = _unpack(record_value, "AODT", "<ifiiii")
+        if int(armor_type) != 8:
+            continue
+        armor_skill = 0 if float(weight) <= light_max else 1 if float(weight) <= medium_max else 2
+        combat_lines.append(f"shield {identifier} {armor_skill}")
 
     generated = [
         _catalog("collision_content_file", recipe.path, "vanilla-collision.txt", collision_lines),

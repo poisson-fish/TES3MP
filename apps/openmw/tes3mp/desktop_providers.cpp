@@ -14,6 +14,7 @@
 #include "../mwgui/worlditemmodel.hpp"
 #include "../mwinput/actions.hpp"
 #include "../mwmechanics/creaturestats.hpp"
+#include "../mwmechanics/npcstats.hpp"
 #include "../mwrender/replicatedactor.hpp"
 #include "../mwworld/cell.hpp"
 #include "../mwworld/cellstore.hpp"
@@ -33,6 +34,7 @@
 #include <components/esm3/loadcont.hpp>
 #include <components/esm3/loaddoor.hpp>
 #include <components/esm3/loadweap.hpp>
+#include <components/esm3/loadskil.hpp>
 
 #include <algorithm>
 #include <array>
@@ -1128,6 +1130,7 @@ namespace TES3MP::OpenMWAdapter
                 return ProviderResult::PresentationFailed;
             auto player = world->getPlayerPtr();
             auto& playerStats = player.getClass().getCreatureStats(player);
+            auto sound = MWBase::Environment::get().getSoundManager();
             if (!snapshot.selfDead() && playerStats.isDead())
                 MWBase::Environment::get().getMechanicsManager()->resurrect(player);
             auto playerHealth = playerStats.getHealth();
@@ -1138,6 +1141,24 @@ namespace TES3MP::OpenMWAdapter
             fatigue.setBase(snapshot.selfMaximumFatigue());
             fatigue.setCurrent(snapshot.selfFatigue(), true, true);
             playerStats.setFatigue(fatigue);
+            auto magicka = playerStats.getMagicka();
+            magicka.setBase(snapshot.selfMaximumMagicka());
+            magicka.setCurrent(snapshot.selfMagicka(), true, true);
+            playerStats.setMagicka(magicka);
+            const std::array skillIds{ ESM::Skill::Block, ESM::Skill::ShortBlade,
+                ESM::Skill::LongBlade, ESM::Skill::BluntWeapon, ESM::Skill::Axe,
+                ESM::Skill::Spear, ESM::Skill::HandToHand };
+            auto& npcStats = player.getClass().getNpcStats(player);
+            for (const auto& confirmed : snapshot.selfSkills())
+            {
+                const auto index = static_cast<std::size_t>(confirmed.skill);
+                if (index >= skillIds.size())
+                    return ProviderResult::PresentationFailed;
+                auto skill = npcStats.getSkill(skillIds[index]);
+                skill.setBase(confirmed.value);
+                skill.setProgress(confirmed.progress);
+                npcStats.setSkill(skillIds[index], skill);
+            }
 
             for (auto& [entity, remote] : actorRemotes)
             {
@@ -1176,6 +1197,13 @@ namespace TES3MP::OpenMWAdapter
                         && !replicatedActorResultAccepted(
                             remote->second.actor->playAction(MWRender::ReplicatedActorAction::Hit)))
                         return ProviderResult::PresentationFailed;
+                    if (remote != actorRemotes.end() && event.damage > 0.f)
+                    {
+                        const auto soundId = event.damagedStat == MeleeDamageStat::Fatigue
+                            ? ESM::RefId::stringRefId("Hand To Hand Hit")
+                            : ESM::RefId::stringRefId("Health Damage");
+                        sound->playSound3D(remote->second.actor->ptr(), soundId, 1.f, 1.f);
+                    }
                 }
                 for (const auto& event : batch.actorEvents())
                 {
@@ -1189,8 +1217,35 @@ namespace TES3MP::OpenMWAdapter
                         return ProviderResult::PresentationFailed;
                     if (event.targetPlayerId == snapshot.selfPlayerId() && event.hit)
                     {
-                        playerStats.setHitRecovery(true);
-                        MWBase::Environment::get().getWindowManager()->activateHitOverlay();
+                        if (event.blocked)
+                        {
+                            playerStats.setBlock(true);
+                            auto& inventory = player.getClass().getInventoryStore(player);
+                            const auto shield = inventory.getSlot(MWWorld::InventoryStore::Slot_CarriedLeft);
+                            if (shield != inventory.end())
+                            {
+                                const auto skill = shield->getClass().getEquipmentSkill(*shield);
+                                const auto soundId = skill == ESM::Skill::LightArmor
+                                    ? ESM::RefId::stringRefId("Light Armor Hit")
+                                    : skill == ESM::Skill::MediumArmor
+                                    ? ESM::RefId::stringRefId("Medium Armor Hit")
+                                    : ESM::RefId::stringRefId("Heavy Armor Hit");
+                                sound->playSound3D(player, soundId, 1.f, 1.f);
+                            }
+                            else
+                                sound->playSound3D(player,
+                                    ESM::RefId::stringRefId("Light Armor Hit"), 1.f, 1.f);
+                        }
+                        else if (event.damage > 0.f)
+                        {
+                            playerStats.setHitRecovery(true);
+                            const auto soundId = event.damagedStat == MeleeDamageStat::Fatigue
+                                ? ESM::RefId::stringRefId("Hand To Hand Hit")
+                                : ESM::RefId::stringRefId("Health Damage");
+                            sound->playSound3D(player, soundId, 1.f, 1.f);
+                            if (event.damagedStat == MeleeDamageStat::Health)
+                                MWBase::Environment::get().getWindowManager()->activateHitOverlay();
+                        }
                     }
                 }
             }

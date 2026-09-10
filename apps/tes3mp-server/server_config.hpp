@@ -66,6 +66,7 @@ namespace TES3MP::ServerApp
         std::filesystem::path combatContentFile;
         std::filesystem::path playerIdentityFile;
         std::filesystem::path characterContentFile;
+        std::int16_t combatDifficulty = 0;
     };
 
     using ConfigParseResult = std::variant<ServerConfig, ConfigError>;

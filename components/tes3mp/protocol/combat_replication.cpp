@@ -86,12 +86,14 @@ namespace TES3MP
     std::variant<LatestWinsCombatSnapshot, CombatReplicationDecodeError> LatestWinsCombatSnapshot::create(
         SessionId session, SessionGeneration generation, ServerTick tick, CanonicalRevision canonicalRevision,
         PlayerId self, CombatRevision selfRevision, float selfHealth, float selfMaximumHealth, float selfFatigue,
-        float selfMaximumFatigue, bool selfDead,
-        std::span<const ActorCombatSnapshot> actors)
+        float selfMaximumFatigue, float selfMagicka, float selfMaximumMagicka, bool selfDead,
+        std::span<const ActorCombatSnapshot> actors, std::span<const CombatSkillSnapshot> skills)
     {
         if (!std::isfinite(selfHealth) || !std::isfinite(selfMaximumHealth)
             || !std::isfinite(selfFatigue) || !std::isfinite(selfMaximumFatigue)
-            || selfMaximumHealth <= 0.f || selfMaximumFatigue < 0.f)
+            || !std::isfinite(selfMagicka) || !std::isfinite(selfMaximumMagicka)
+            || selfMaximumHealth <= 0.f || selfMaximumFatigue < 0.f || selfMaximumMagicka < 0.f
+            || selfMagicka < 0.f || selfMagicka > selfMaximumMagicka)
             return error(Code::InvalidFloat);
         if (actors.size() > MaximumCombatSnapshotActors)
             return error(Code::TooManyEntries, actors.size(), MaximumCombatSnapshotActors);
@@ -105,9 +107,20 @@ namespace TES3MP
                 return error(Code::EntriesNotStrictlySorted, actors[i].actorId.value(),
                     actors[i - 1].actorId.value(), i);
         }
+        if (skills.size() != ReplicatedCombatSkillCount)
+            return error(Code::TooManyEntries, skills.size(), ReplicatedCombatSkillCount);
+        for (std::size_t i = 0; i < skills.size(); ++i)
+        {
+            if (static_cast<std::size_t>(skills[i].skill) != i)
+                return error(Code::InvalidSkill, static_cast<std::size_t>(skills[i].skill), i, i);
+            if (!std::isfinite(skills[i].value) || !std::isfinite(skills[i].progress)
+                || skills[i].value < 0.f || skills[i].value > 100.f
+                || skills[i].progress < 0.f || skills[i].progress >= 1.f)
+                return error(Code::InvalidFloat, 0, 0, i);
+        }
         return LatestWinsCombatSnapshot(session, generation, tick, canonicalRevision, self, selfRevision,
-            selfHealth, selfMaximumHealth, selfFatigue, selfMaximumFatigue, selfDead,
-            std::vector(actors.begin(), actors.end()));
+            selfHealth, selfMaximumHealth, selfFatigue, selfMaximumFatigue, selfMagicka, selfMaximumMagicka,
+            selfDead, std::vector(actors.begin(), actors.end()), std::vector(skills.begin(), skills.end()));
     }
 
     std::variant<ReliableCombatEventBatch, CombatReplicationDecodeError> ReliableCombatEventBatch::create(
@@ -154,14 +167,19 @@ namespace TES3MP
         const auto header = Snapshot::CreateCombatSnapshotHeader(builder, input.targetSessionId().value(),
             input.targetSessionGeneration().value(), input.serverTick().value(), input.canonicalRevision().value(),
             input.selfPlayerId().value(), input.selfCombatRevision().value(), input.selfFatigue(), input.selfHealth(),
-            input.selfDead(), input.selfMaximumHealth(), input.selfMaximumFatigue());
+            input.selfDead(), input.selfMaximumHealth(), input.selfMaximumFatigue(), input.selfMagicka(),
+            input.selfMaximumMagicka());
         std::vector<Snapshot::ActorCombatSnapshot> actors;
         actors.reserve(input.actors().size());
         for (const auto& actor : input.actors())
             actors.emplace_back(actor.actorId.value(), actor.combatRevision.value(), actor.health,
                 actor.maximumHealth, actor.fatigue, actor.maximumFatigue, actor.dead);
+        std::vector<Snapshot::CombatSkillSnapshot> skills;
+        skills.reserve(input.selfSkills().size());
+        for (const auto& skill : input.selfSkills())
+            skills.emplace_back(static_cast<std::uint8_t>(skill.skill), skill.value, skill.progress);
         const auto root = Snapshot::CreateLatestWinsCombatSnapshot(
-            builder, header, builder.CreateVectorOfStructs(actors));
+            builder, header, builder.CreateVectorOfStructs(actors), builder.CreateVectorOfStructs(skills));
         Snapshot::FinishSizePrefixedLatestWinsCombatSnapshotBuffer(builder, root);
         return take(builder);
     }
@@ -255,7 +273,9 @@ namespace TES3MP
         if (!std::isfinite(root->header()->self_health())
             || !std::isfinite(root->header()->self_maximum_health())
             || !std::isfinite(root->header()->self_fatigue())
-            || !std::isfinite(root->header()->self_maximum_fatigue()))
+            || !std::isfinite(root->header()->self_maximum_fatigue())
+            || !std::isfinite(root->header()->self_magicka())
+            || !std::isfinite(root->header()->self_maximum_magicka()))
             return error(Code::InvalidFloat);
         const auto* encoded = root->actors();
         const std::size_t count = encoded ? encoded->size() : 0;
@@ -271,10 +291,25 @@ namespace TES3MP
             actors.push_back({ *value(actor), *value(revision), current.health(), current.maximum_health(),
                 current.fatigue(), current.maximum_fatigue(), current.dead() });
         }
+        const auto* encodedSkills = root->self_skills();
+        const std::size_t skillCount = encodedSkills ? encodedSkills->size() : 0;
+        if (skillCount != ReplicatedCombatSkillCount)
+            return error(Code::TooManyEntries, skillCount, ReplicatedCombatSkillCount);
+        std::vector<CombatSkillSnapshot> skills;
+        skills.reserve(skillCount);
+        for (std::size_t i = 0; i < skillCount; ++i)
+        {
+            const auto current = copyStruct(encodedSkills, i);
+            if (current.skill() != i || current.skill() >= ReplicatedCombatSkillCount)
+                return error(Code::InvalidSkill, current.skill(), i, i);
+            skills.push_back({ static_cast<ReplicatedCombatSkill>(current.skill()),
+                current.value(), current.progress() });
+        }
         return LatestWinsCombatSnapshot::create(*value(session), *value(generation), *value(tick), *value(canonical),
             *value(self), *value(selfRevision), root->header()->self_health(),
             root->header()->self_maximum_health(), root->header()->self_fatigue(),
-            root->header()->self_maximum_fatigue(), root->header()->self_dead(), actors);
+            root->header()->self_maximum_fatigue(), root->header()->self_magicka(),
+            root->header()->self_maximum_magicka(), root->header()->self_dead(), actors, skills);
     }
 
     std::variant<ReliableCombatEventBatch, CombatReplicationDecodeError> decodeReliableCombatEventBatch(

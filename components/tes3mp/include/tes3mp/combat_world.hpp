@@ -22,6 +22,47 @@ namespace TES3MP
     inline constexpr std::size_t MaximumActorCombatants = MaximumActorCatalogEntries;
     inline constexpr std::size_t MaximumAuthoritativeActorMeleeEventsPerTick = MaximumActorCombatants;
 
+    enum class CombatProgressionSkill : std::uint8_t
+    {
+        Block = 0,
+        ShortBlade = 1,
+        LongBlade = 2,
+        BluntWeapon = 3,
+        Axe = 4,
+        Spear = 5,
+        HandToHand = 6,
+        Count = 7,
+    };
+
+    struct CombatSkillProgressionRule
+    {
+        ClassSpecialization specialization = ClassSpecialization::Combat;
+        float useGain = 0.f;
+
+        friend constexpr bool operator==(CombatSkillProgressionRule,
+            CombatSkillProgressionRule) noexcept = default;
+    };
+
+    struct CombatSkillProgressionState
+    {
+        float progress = 0.f;
+        float requirementFactor = 1.f;
+
+        friend constexpr bool operator==(CombatSkillProgressionState,
+            CombatSkillProgressionState) noexcept = default;
+    };
+
+    struct CombatSkillProgressionSettings
+    {
+        float miscellaneousFactor = 1.f;
+        float minorFactor = 1.f;
+        float majorFactor = 1.f;
+        float specializationFactor = 1.f;
+
+        friend constexpr bool operator==(CombatSkillProgressionSettings,
+            CombatSkillProgressionSettings) noexcept = default;
+    };
+
     enum class MeleeWeaponSkill : std::uint8_t
     {
         ShortBlade = 0,
@@ -49,34 +90,64 @@ namespace TES3MP
         friend constexpr bool operator==(MeleeWeaponProfile, MeleeWeaponProfile) noexcept = default;
     };
 
+    enum class ShieldArmorSkill : std::uint8_t
+    {
+        LightArmor = 0,
+        MediumArmor = 1,
+        HeavyArmor = 2,
+    };
+
+    struct MeleeShieldProfile
+    {
+        ItemPrototypeId prototypeId;
+        ShieldArmorSkill skill = ShieldArmorSkill::LightArmor;
+
+        friend constexpr bool operator==(MeleeShieldProfile, MeleeShieldProfile) noexcept = default;
+    };
+
     class MeleeWeaponCatalog
     {
     public:
         static std::optional<MeleeWeaponCatalog> create(
-            const ItemPrototypeCatalog& items, std::span<const MeleeWeaponProfile> profiles) noexcept;
+            const ItemPrototypeCatalog& items, std::span<const MeleeWeaponProfile> profiles,
+            std::span<const MeleeShieldProfile> shields = {}) noexcept;
 
         ContentManifestId contentManifestId() const noexcept { return mContentManifestId; }
         std::span<const MeleeWeaponProfile> profiles() const noexcept { return mProfiles; }
         const MeleeWeaponProfile* find(ItemPrototypeId id) const noexcept;
+        const MeleeShieldProfile* findShield(ItemPrototypeId id) const noexcept;
 
         friend bool operator==(const MeleeWeaponCatalog&, const MeleeWeaponCatalog&) noexcept = default;
 
     private:
-        MeleeWeaponCatalog(ContentManifestId contentManifestId, std::vector<MeleeWeaponProfile> profiles) noexcept
-            : mContentManifestId(contentManifestId), mProfiles(std::move(profiles)) {}
+        MeleeWeaponCatalog(ContentManifestId contentManifestId, std::vector<MeleeWeaponProfile> profiles,
+            std::vector<MeleeShieldProfile> shields) noexcept
+            : mContentManifestId(contentManifestId), mProfiles(std::move(profiles)), mShields(std::move(shields)) {}
 
         ContentManifestId mContentManifestId;
         std::vector<MeleeWeaponProfile> mProfiles;
+        std::vector<MeleeShieldProfile> mShields;
     };
 
     struct CanonicalPlayerCombatTemplate
     {
         OpenMwMeleeAttacker stats;
         std::array<float, static_cast<std::size_t>(MeleeWeaponSkill::Count)> weaponSkills{};
+        float blockSkill = 0.f;
         std::uint64_t maximumEncumbranceWeightUnits = 1;
         OpenMwMeleeVictim victim;
         float maximumHealth = 0.f;
         float maximumFatigue = 0.f;
+        float magicka = 0.f;
+        float maximumMagicka = 0.f;
+        float healthRecoveryPerSecond = 0.f;
+        float magickaRecoveryPerSecond = 0.f;
+        std::array<CombatSkillProgressionRule,
+            static_cast<std::size_t>(CombatProgressionSkill::Count)> skillRules{};
+        CombatSkillProgressionSettings skillSettings;
+        std::array<CombatSkillProgressionState,
+            static_cast<std::size_t>(CombatProgressionSkill::Count)> skillProgression{};
+        float intelligence = 1.f;
 
         friend constexpr bool operator==(const CanonicalPlayerCombatTemplate&,
             const CanonicalPlayerCombatTemplate&) noexcept = default;
@@ -88,6 +159,7 @@ namespace TES3MP
         CombatRevision revision = CombatRevision::initial();
         OpenMwMeleeAttacker stats;
         std::array<float, static_cast<std::size_t>(MeleeWeaponSkill::Count)> weaponSkills{};
+        float blockSkill = 0.f;
         std::uint64_t maximumEncumbranceWeightUnits = 1;
         std::optional<ServerTick> lastAttackTick;
         std::optional<CharacterProfileRevision> initializedCharacterProfile = std::nullopt;
@@ -96,6 +168,14 @@ namespace TES3MP
         std::optional<ServerTick> deathTick;
         float maximumHealth = 0.f;
         float maximumFatigue = 0.f;
+        float magicka = 0.f;
+        float maximumMagicka = 0.f;
+        float healthRecoveryPerSecond = 0.f;
+        float magickaRecoveryPerSecond = 0.f;
+        std::array<CombatSkillProgressionRule,
+            static_cast<std::size_t>(CombatProgressionSkill::Count)> skillRules{};
+        std::array<CombatSkillProgressionState,
+            static_cast<std::size_t>(CombatProgressionSkill::Count)> skillProgression{};
 
         friend constexpr bool operator==(const CanonicalPlayerCombatState&,
             const CanonicalPlayerCombatState&) noexcept = default;
@@ -174,7 +254,8 @@ namespace TES3MP
         std::span<const CanonicalPlayerCombatState> players, std::span<const CanonicalActorCombatState> actors,
         RandomStateV1 randomState, std::optional<ServerTick> lastSimulationTick = std::nullopt);
     std::optional<CanonicalPlayerCombatTemplate> deriveCharacterCombatTemplate(
-        const CharacterProfile& profile, const CanonicalPlayerCombatTemplate& base) noexcept;
+        const CharacterProfile& profile, const CanonicalPlayerCombatTemplate& base,
+        const CharacterContentCatalog* characterContent = nullptr) noexcept;
 
     enum class MeleeContactValidation : std::uint8_t
     {
@@ -208,6 +289,7 @@ namespace TES3MP
         // OpenMW world coordinates use 1,024 canonical quanta per unit. This
         // is the stock 128-unit melee distance before weapon reach scaling.
         std::uint32_t baseReachQuanta = 128 * 1024;
+        std::int16_t difficulty = 0;
     };
 
     class ServerMeleeContactHistory : public ServerMeleeContactQuery
@@ -226,7 +308,6 @@ namespace TES3MP
         ServerTick sourceTick = ServerTick::initial();
         MeleeAttackType attackType = MeleeAttackType::Chop;
         float attackStrength = 0.f;
-        bool blocked = false;
         bool strengthInfluencesHandToHand = false;
         float werewolfClawMultiplier = 1.f;
     };
@@ -274,6 +355,7 @@ namespace TES3MP
         std::uint64_t minimumActorAttackIntervalTicks = 63;
         std::uint64_t respawnDelayTicks = 1875;
         float secondsPerTick = 0.016f;
+        std::int16_t difficulty = 0;
     };
 
     enum class CombatSimulationErrorCode : std::uint8_t
@@ -293,6 +375,7 @@ namespace TES3MP
     struct CombatSimulationStep
     {
         CanonicalCombatWorld combat;
+        std::optional<CanonicalInventoryWorld> inventory;
         std::vector<AuthoritativeActorMeleeEvent> events;
     };
 
@@ -310,9 +393,10 @@ namespace TES3MP
         const CanonicalActorWorld& actors, const OpenMwMeleeSettings& settings, MeleeAuthorityPolicy policy,
         ServerMeleeContactQuery& contact, ServerTick serverTick, const AuthoritativeMeleeAttack& attack) noexcept;
     std::variant<CombatSimulationStep, CombatSimulationError> advanceAuthoritativeCombat(
-        const CanonicalCombatWorld& combat, const CanonicalServerState& players,
-        const CanonicalActorWorld& actors, const OpenMwMeleeSettings& settings,
-        CombatSimulationPolicy policy, ServerTick tick) noexcept;
+        const CanonicalCombatWorld& combat, const CanonicalInventoryWorld& inventory,
+        const ItemPrototypeCatalog& items, const MeleeWeaponCatalog& weapons,
+        const CanonicalServerState& players, const CanonicalActorWorld& actors,
+        const OpenMwMeleeSettings& settings, CombatSimulationPolicy policy, ServerTick tick) noexcept;
 }
 
 #endif

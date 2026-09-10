@@ -569,7 +569,8 @@ namespace TES3MP::ServerApp
         if (!context)
             return ConnectionSessionResult::ProtocolRejected;
         TransportJoinResponseQueue responses(
-            mQueues, connection, this, mActors, mObjects, mInventory, mCombat, mPlayerCombatTemplate, mItemCatalog);
+            mQueues, connection, this, mActors, mObjects, mInventory, mCombat, mPlayerCombatTemplate, mItemCatalog,
+            mCharacterContent);
         AuthenticatedJoinComposition composition(joins, mAuthentication, responses);
         auto outcome = composition.join(*state->principal(), state->generation(), tick, *context, state->playerClaim(),
             state->takePlayerCredential(), state->username());

@@ -21,7 +21,20 @@ namespace
             && finite(value.combatCriticalStrikeMultiplier) && finite(value.combatKnockdownDamageMultiplier)
             && finite(value.fatigueBase) && finite(value.fatigueMultiplier)
             && finite(value.fatigueReturnBase) && finite(value.fatigueReturnMultiplier)
-            && finite(value.enduranceFatigueMultiplier);
+            && finite(value.enduranceFatigueMultiplier) && finite(value.difficultyMultiplier)
+            && value.difficultyMultiplier > 0.f && finite(value.combatBlockLeftAngle)
+            && finite(value.combatBlockRightAngle)
+            && value.combatBlockLeftAngle >= -180.f && value.combatBlockLeftAngle <= 0.f
+            && value.combatBlockRightAngle >= 0.f && value.combatBlockRightAngle <= 180.f
+            && finite(value.swingBlockMultiplier) && value.swingBlockMultiplier >= 0.f
+            && finite(value.swingBlockBase) && value.swingBlockBase >= 0.f
+            && finite(value.blockStillBonus) && value.blockStillBonus >= 0.f
+            && finite(value.blockMinimumChance)
+            && finite(value.blockMaximumChance) && value.blockMinimumChance >= 0.f
+            && value.blockMinimumChance <= value.blockMaximumChance && value.blockMaximumChance <= 100.f
+            && finite(value.fatigueBlockBase) && value.fatigueBlockBase >= 0.f
+            && finite(value.fatigueBlockMultiplier) && value.fatigueBlockMultiplier >= 0.f
+            && finite(value.weaponFatigueBlockMultiplier) && value.weaponFatigueBlockMultiplier >= 0.f;
     }
 
     bool validAttacker(const TES3MP::OpenMwMeleeAttacker& value) noexcept
@@ -141,6 +154,53 @@ namespace TES3MP
         const float encumbrance = std::clamp(normalizedEncumbrance, 0.f, 1.f);
         return (settings.fatigueReturnBase + settings.fatigueReturnMultiplier * (1.f - encumbrance))
             * (settings.enduranceFatigueMultiplier * endurance);
+    }
+
+    float openMwDifficultyScaledDamage(const OpenMwMeleeSettings& settings, float damage,
+        std::int16_t difficulty, bool playerIsVictim) noexcept
+    {
+        if (!validSettings(settings) || !finite(damage) || damage < 0.f || difficulty < -100 || difficulty > 100)
+            return 0.f;
+        const float term = static_cast<float>(difficulty) * 0.01f;
+        float adjustment = 0.f;
+        if (playerIsVictim)
+            adjustment = term > 0.f ? settings.difficultyMultiplier * term : term / settings.difficultyMultiplier;
+        else
+            adjustment = term > 0.f ? -term / settings.difficultyMultiplier
+                                    : settings.difficultyMultiplier * -term;
+        return std::max(0.f, damage * (1.f + adjustment));
+    }
+
+    float openMwMeleeBlockChance(const OpenMwMeleeSettings& settings, float blockSkill,
+        const OpenMwMeleeAttacker& blocker, const OpenMwMeleeAttacker& attacker,
+        float attackStrength, bool receivesStillBonus) noexcept
+    {
+        if (!validSettings(settings) || !validAttacker(blocker) || !validAttacker(attacker)
+            || !finite(blockSkill) || !finite(attackStrength) || attackStrength < 0.f || attackStrength > 1.f)
+            return 0.f;
+        float blockerTerm = (blockSkill + 0.2f * blocker.agility + 0.1f * blocker.luck)
+            * (attackStrength * settings.swingBlockMultiplier + settings.swingBlockBase);
+        if (receivesStillBonus)
+            blockerTerm *= settings.blockStillBonus;
+        blockerTerm *= blocker.fatigueTerm;
+        const float attackerTerm = (attacker.weaponSkill + 0.2f * attacker.agility + 0.1f * attacker.luck)
+            * attacker.fatigueTerm;
+        return std::clamp(std::trunc(blockerTerm - attackerTerm),
+            settings.blockMinimumChance, settings.blockMaximumChance);
+    }
+
+    float openMwMeleeBlockFatigueCost(const OpenMwMeleeSettings& settings,
+        float normalizedEncumbrance, const std::optional<OpenMwMeleeWeapon>& attackerWeapon,
+        float attackStrength) noexcept
+    {
+        if (!validSettings(settings) || !finite(normalizedEncumbrance) || !finite(attackStrength)
+            || attackStrength < 0.f || attackStrength > 1.f || (attackerWeapon && !validWeapon(*attackerWeapon)))
+            return 0.f;
+        float result = settings.fatigueBlockBase
+            + std::clamp(normalizedEncumbrance, 0.f, 1.f) * settings.fatigueBlockMultiplier;
+        if (attackerWeapon)
+            result += attackerWeapon->weight * attackStrength * settings.weaponFatigueBlockMultiplier;
+        return result;
     }
 
     OpenMwMeleeResolution resolveOpenMwMelee(const OpenMwMeleeSettings& settings,

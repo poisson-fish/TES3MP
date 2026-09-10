@@ -15,7 +15,7 @@ namespace TES3MP::OpenMWAdapter
 
         ClientHello makeClientHello(ContentManifestId contentManifest)
         {
-            auto versions = std::get<ProtocolVersionRange>(ProtocolVersionRange::create(1, 2, 3));
+            auto versions = std::get<ProtocolVersionRange>(ProtocolVersionRange::create(1, 4, 4));
             const std::array optional{ vrPoseCapability(), actorReplicationCapability(),
                 interactiveObjectReplicationCapability(), inventoryReplicationCapability(),
                 combatReplicationCapability(), characterCreationCapability() };

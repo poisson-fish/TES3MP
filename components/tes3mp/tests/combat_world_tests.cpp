@@ -38,10 +38,38 @@ namespace
         return std::get<TES3MP::CanonicalServerState>(TES3MP::createCanonicalServerState(players, sessions));
     }
 
+    TES3MP::CanonicalServerState activeSpatialPlayersFacingAway()
+    {
+        const auto zero = TES3MP::Turn32::fromValue(0);
+        const auto away = TES3MP::Turn32::fromValue(0x80000000u);
+        const auto transform = TES3MP::Transform(TES3MP::CellId::interior(id<TES3MP::CellSpaceId>(7)),
+            TES3MP::Position3(0, 0, 0), TES3MP::Orientation3(zero, zero, away));
+        const std::array players{ TES3MP::CanonicalPlayerEntityState(id<TES3MP::PlayerId>(1),
+            id<TES3MP::EntityId>(100), id<TES3MP::AppearanceId>(1), transform,
+            TES3MP::LinearVelocity3(0, 0, 0), TES3MP::EntityRevision::initial(),
+            TES3MP::AuthorityEpoch::initial(), TES3MP::ServerTick::initial()) };
+        const std::array sessions{ TES3MP::CanonicalSessionProgress(id<TES3MP::SessionId>(1),
+            TES3MP::SessionGeneration::initial(), id<TES3MP::PlayerId>(1), id<TES3MP::EntityId>(100),
+            std::nullopt) };
+        return std::get<TES3MP::CanonicalServerState>(TES3MP::createCanonicalServerState(players, sessions));
+    }
+
     TES3MP::CanonicalActorWorld spatialActors(std::uint64_t cell = 7)
     {
         const std::array actors{ TES3MP::CanonicalActorEntityState(id<TES3MP::ActorId>(2),
             id<TES3MP::EntityId>(200), id<TES3MP::ActorPrototypeId>(3), root(10, cell),
+            TES3MP::LinearVelocity3(0, 0, 0), TES3MP::EntityRevision::initial(),
+            TES3MP::AuthorityEpoch::initial(), TES3MP::ServerTick::initial(), TES3MP::ActorActivity::Idle, 0) };
+        return std::get<TES3MP::CanonicalActorWorld>(TES3MP::createCanonicalActorWorld(actors));
+    }
+
+    TES3MP::CanonicalActorWorld spatialActorsInFront()
+    {
+        const auto zero = TES3MP::Turn32::fromValue(0);
+        const auto transform = TES3MP::Transform(TES3MP::CellId::interior(id<TES3MP::CellSpaceId>(7)),
+            TES3MP::Position3(0, 10, 0), TES3MP::Orientation3(zero, zero, zero));
+        const std::array actors{ TES3MP::CanonicalActorEntityState(id<TES3MP::ActorId>(2),
+            id<TES3MP::EntityId>(200), id<TES3MP::ActorPrototypeId>(3), transform,
             TES3MP::LinearVelocity3(0, 0, 0), TES3MP::EntityRevision::initial(),
             TES3MP::AuthorityEpoch::initial(), TES3MP::ServerTick::initial(), TES3MP::ActorActivity::Idle, 0) };
         return std::get<TES3MP::CanonicalActorWorld>(TES3MP::createCanonicalActorWorld(actors));
@@ -85,23 +113,37 @@ namespace
         TES3MP::MeleeWeaponCatalog weapons;
     };
 
-    CombatSources combatSources(std::uint32_t condition = 100)
+    CombatSources combatSources(std::uint32_t condition = 100, bool withShield = false,
+        std::uint32_t shieldCondition = 100)
     {
         const auto manifest = TES3MP::testContentManifest();
-        const std::array declarations{ TES3MP::ItemPrototypeDeclaration{ id<TES3MP::ItemPrototypeId>(4),
+        std::vector declarations{ TES3MP::ItemPrototypeDeclaration{ id<TES3MP::ItemPrototypeId>(4),
             TES3MP::ItemCategory::Weapon, 5, 1, 100, 0,
             TES3MP::slotToMask(TES3MP::EquipmentSlot::CarriedRight), false, std::nullopt } };
+        if (withShield)
+            declarations.push_back({ id<TES3MP::ItemPrototypeId>(6), TES3MP::ItemCategory::Armor, 4, 1, 100, 0,
+                TES3MP::slotToMask(TES3MP::EquipmentSlot::CarriedLeft), false, std::nullopt });
         auto items = *TES3MP::ItemPrototypeCatalog::create(manifest, declarations);
         TES3MP::CanonicalPlayerInventoryState player{ .player = id<TES3MP::PlayerId>(1),
             .stacks = { { id<TES3MP::ItemStackId>(5), id<TES3MP::ItemPrototypeId>(4), 1, condition, 0,
                 std::nullopt } } };
         player.equipment[static_cast<std::size_t>(TES3MP::EquipmentSlot::CarriedRight)]
             = id<TES3MP::ItemStackId>(5);
+        if (withShield)
+        {
+            player.stacks.push_back({ id<TES3MP::ItemStackId>(6), id<TES3MP::ItemPrototypeId>(6), 1,
+                shieldCondition, 0, std::nullopt });
+            player.equipment[static_cast<std::size_t>(TES3MP::EquipmentSlot::CarriedLeft)]
+                = id<TES3MP::ItemStackId>(6);
+        }
         auto inventory = *TES3MP::CanonicalInventoryWorld::create(manifest, items, std::array{ player }, {});
         const std::array profiles{ TES3MP::MeleeWeaponProfile{ id<TES3MP::ItemPrototypeId>(4),
             TES3MP::MeleeWeaponSkill::LongBlade, 10.f, 10.f, 10.f, 10.f, 10.f, 10.f,
             5.f, 1.f, true } };
-        auto weapons = *TES3MP::MeleeWeaponCatalog::create(items, profiles);
+        const std::array shields{ TES3MP::MeleeShieldProfile{ id<TES3MP::ItemPrototypeId>(6),
+            TES3MP::ShieldArmorSkill::LightArmor } };
+        auto weapons = *TES3MP::MeleeWeaponCatalog::create(items, profiles,
+            withShield ? std::span<const TES3MP::MeleeShieldProfile>(shields) : std::span<const TES3MP::MeleeShieldProfile>{});
         return { std::move(items), std::move(inventory), std::move(weapons) };
     }
 
@@ -114,6 +156,17 @@ namespace
         auto sources = combatSources();
         return TES3MP::prepareAuthoritativeMeleeAttack(combat, sources.inventory, sources.items,
             sources.weapons, players, actors, meleeSettings, policy, contact, tick, meleeAttack);
+    }
+
+    std::variant<TES3MP::CombatSimulationStep, TES3MP::CombatSimulationError> advance(
+        const TES3MP::CanonicalCombatWorld& combat, const TES3MP::CanonicalServerState& players,
+        const TES3MP::CanonicalActorWorld& actors, const TES3MP::OpenMwMeleeSettings& meleeSettings,
+        TES3MP::CombatSimulationPolicy policy, TES3MP::ServerTick tick,
+        bool withShield = false, std::uint32_t shieldCondition = 100)
+    {
+        auto sources = combatSources(100, withShield, shieldCondition);
+        return TES3MP::advanceAuthoritativeCombat(combat, sources.inventory, sources.items, sources.weapons,
+            players, actors, meleeSettings, policy, tick);
     }
 
     TES3MP::OpenMwMeleeSettings settings()
@@ -165,6 +218,31 @@ namespace
             && prepared.event->resolution.hit && !prepared.event->resolution.victimDied;
     }
 
+    bool successful_melee_advances_only_the_server_selected_skill()
+    {
+        const auto baseline = combatWorld();
+        std::vector<TES3MP::CanonicalPlayerCombatState> players(
+            baseline.players().begin(), baseline.players().end());
+        players[0].weaponSkills[static_cast<std::size_t>(TES3MP::MeleeWeaponSkill::LongBlade)] = 99.f;
+        const auto longBlade = static_cast<std::size_t>(TES3MP::CombatProgressionSkill::LongBlade);
+        players[0].skillRules[longBlade].useGain = 100.f;
+        players[0].skillProgression[longBlade].requirementFactor = 1.f;
+        const auto created = TES3MP::createCanonicalCombatWorld(
+            players, baseline.actors(), baseline.randomState());
+        const auto* world = std::get_if<TES3MP::CanonicalCombatWorld>(&created);
+        if (!world)
+            return false;
+        Contact contact;
+        const auto prepared = resolve(*world, spatialPlayers(), spatialActors(),
+            settings(), { 2, 8 }, contact, id<TES3MP::ServerTick>(5), attack());
+        const auto* player = prepared.candidate
+            ? prepared.candidate->findPlayer(id<TES3MP::PlayerId>(1)) : nullptr;
+        return prepared.event && prepared.event->resolution.hit && player
+            && player->weaponSkills[static_cast<std::size_t>(TES3MP::MeleeWeaponSkill::LongBlade)] == 100.f
+            && player->skillProgression[longBlade].progress == 0.f
+            && player->blockSkill == 0.f;
+    }
+
     bool player_template_initializes_once_and_resume_preserves_state()
     {
         const auto key = *TES3MP::RandomStreamKey::fromValues(7, 8);
@@ -193,6 +271,7 @@ namespace
     {
         TES3MP::CharacterDerivedState derived;
         derived.attributes = { 50, 30, 30, 40, 40, 45, 30, 35 };
+        derived.skills[0] = 12;
         derived.skills[4] = 14;
         derived.skills[5] = 25;
         derived.skills[6] = 16;
@@ -203,20 +282,39 @@ namespace
             TES3MP::CharacterCreationPhase::Complete, "Nerevar",
             TES3MP::CharacterAppearance{ id<TES3MP::RaceRecordId>(1), id<TES3MP::HeadRecordId>(2),
                 id<TES3MP::HairRecordId>(3), TES3MP::CharacterSex::Female },
-            TES3MP::CharacterClass{ id<TES3MP::ClassRecordId>(4) }, id<TES3MP::BirthsignRecordId>(5),
+            TES3MP::CharacterClass{ TES3MP::CustomClassDefinition{ "Blade", "Combat test",
+                TES3MP::ClassSpecialization::Combat, { 0, 1 }, { 20, 4, 6, 7, 26 }, { 5, 2, 3, 8, 9 } } },
+            id<TES3MP::BirthsignRecordId>(5),
             derived, {}, id<TES3MP::CharacterProfileRevision>(6));
         TES3MP::CanonicalPlayerCombatTemplate base;
         base.stats.strength = 40.f;
+        base.stats.endurance = 30.f;
         base.stats.fortifyAttack = 3.f;
+        base.intelligence = 20.f;
+        base.maximumMagicka = 40.f;
+        base.magicka = 40.f;
+        base.healthRecoveryPerSecond = 0.2f;
+        base.magickaRecoveryPerSecond = 0.1f;
+        base.skillSettings = { 1.25f, 1.f, 0.75f, 0.8f };
         base.maximumEncumbranceWeightUnits = 400;
         const auto character = profile ? TES3MP::deriveCharacterCombatTemplate(*profile, base) : std::nullopt;
         if (!character || character->stats.strength != 50.f || character->stats.agility != 40.f
             || character->stats.luck != 35.f || character->stats.fatigue != 165.f
             || character->stats.endurance != 45.f || character->maximumHealth != 47.5f
             || character->maximumFatigue != 165.f
+            || character->magicka != 60.f || character->maximumMagicka != 60.f
+            || std::abs(character->healthRecoveryPerSecond - 0.3f) > 0.0001f
+            || std::abs(character->magickaRecoveryPerSecond - 0.15f) > 0.0001f
+            || character->blockSkill != 12.f
             || character->stats.handToHandSkill != 35.f || character->stats.fortifyAttack != 3.f
             || character->weaponSkills[static_cast<std::size_t>(TES3MP::MeleeWeaponSkill::ShortBlade)] != 30.f
             || character->weaponSkills[static_cast<std::size_t>(TES3MP::MeleeWeaponSkill::LongBlade)] != 25.f
+            || std::abs(character->skillProgression[static_cast<std::size_t>(
+                TES3MP::CombatProgressionSkill::Block)].requirementFactor - 1.f) > 0.0001f
+            || std::abs(character->skillProgression[static_cast<std::size_t>(
+                TES3MP::CombatProgressionSkill::ShortBlade)].requirementFactor - 0.8f) > 0.0001f
+            || std::abs(character->skillProgression[static_cast<std::size_t>(
+                TES3MP::CombatProgressionSkill::LongBlade)].requirementFactor - 0.6f) > 0.0001f
             || character->maximumEncumbranceWeightUnits != 500)
             return false;
         const auto key = *TES3MP::RandomStreamKey::fromValues(7, 9);
@@ -423,7 +521,7 @@ namespace
     bool actor_retaliation_damage_cooldown_and_player_respawn_are_authoritative()
     {
         const auto before = retaliatingCombatWorld(5.f);
-        const auto advanced = TES3MP::advanceAuthoritativeCombat(before, activeSpatialPlayers(), spatialActors(),
+        const auto advanced = advance(before, activeSpatialPlayers(), spatialActors(),
             settings(), { 2, 5 }, id<TES3MP::ServerTick>(5));
         const auto* first = std::get_if<TES3MP::CombatSimulationStep>(&advanced);
         if (!first || first->events.size() != 1 || !first->events[0].resolution.hit
@@ -434,17 +532,62 @@ namespace
         if (!player || !actor || !player->victim.dead || player->victim.health != 0.f
             || player->deathTick != id<TES3MP::ServerTick>(5) || actor->lastAttackTick != id<TES3MP::ServerTick>(5))
             return false;
-        const auto cooldown = TES3MP::advanceAuthoritativeCombat(first->combat, activeSpatialPlayers(),
+        const auto cooldown = advance(first->combat, activeSpatialPlayers(),
             spatialActors(), settings(), { 2, 5 }, id<TES3MP::ServerTick>(6));
         const auto* second = std::get_if<TES3MP::CombatSimulationStep>(&cooldown);
         if (!second || !second->events.empty() || !second->combat.findPlayer(id<TES3MP::PlayerId>(1))->victim.dead)
             return false;
-        const auto respawn = TES3MP::advanceAuthoritativeCombat(second->combat, activeSpatialPlayers(),
+        const auto respawn = advance(second->combat, activeSpatialPlayers(),
             spatialActors(), settings(), { 2, 5 }, id<TES3MP::ServerTick>(10));
         const auto* third = std::get_if<TES3MP::CombatSimulationStep>(&respawn);
         const auto* respawned = third ? third->combat.findPlayer(id<TES3MP::PlayerId>(1)) : nullptr;
         return respawned && !respawned->victim.dead && respawned->victim.health == 5.f
             && !respawned->deathTick && respawned->revision.value() == 3;
+    }
+
+    bool player_blocking_uses_server_roll_facing_and_canonical_shield_wear()
+    {
+        auto blockSettings = settings();
+        blockSettings.blockMinimumChance = 100.f;
+        blockSettings.blockMaximumChance = 100.f;
+        blockSettings.combatBlockLeftAngle = -90.f;
+        blockSettings.combatBlockRightAngle = 30.f;
+        blockSettings.fatigueBlockBase = 2.f;
+        const auto result = advance(retaliatingCombatWorld(20.f), activeSpatialPlayers(), spatialActorsInFront(),
+            blockSettings, { 2, 5 }, id<TES3MP::ServerTick>(5), true, 5);
+        const auto* step = std::get_if<TES3MP::CombatSimulationStep>(&result);
+        const auto* player = step ? step->combat.findPlayer(id<TES3MP::PlayerId>(1)) : nullptr;
+        const auto* inventory = step && step->inventory
+            ? step->inventory->findPlayer(id<TES3MP::PlayerId>(1)) : nullptr;
+        const auto* shield = inventory ? inventory->findStack(id<TES3MP::ItemStackId>(6)) : nullptr;
+        const auto facingAwayResult = advance(retaliatingCombatWorld(20.f), activeSpatialPlayersFacingAway(),
+            spatialActorsInFront(), blockSettings, { 2, 5 }, id<TES3MP::ServerTick>(5), true, 5);
+        const auto* facingAway = std::get_if<TES3MP::CombatSimulationStep>(&facingAwayResult);
+        return step && step->events.size() == 1 && step->events[0].resolution.hit
+            && step->events[0].resolution.blocked && step->events[0].resolution.damage == 0.f
+            && player && player->victim.health == 20.f && player->stats.fatigue == 18.f
+            && shield && shield->condition == 0
+            && !inventory->equipment[static_cast<std::size_t>(TES3MP::EquipmentSlot::CarriedLeft)]
+            && facingAway && facingAway->events.size() == 1
+            && !facingAway->events[0].resolution.blocked && facingAway->events[0].resolution.damage == 10.f
+            && !facingAway->inventory
+            && facingAway->combat.findPlayer(id<TES3MP::PlayerId>(1))->victim.health == 10.f;
+    }
+
+    bool difficulty_scaling_is_server_selected_for_both_damage_directions()
+    {
+        auto difficultySettings = settings();
+        difficultySettings.difficultyMultiplier = 5.f;
+        Contact contact;
+        const auto outgoing = resolve(combatWorld(), spatialPlayers(), spatialActors(), difficultySettings,
+            { 1, 8, 128 * 1024, 100 }, contact, id<TES3MP::ServerTick>(5), attack());
+        const auto incomingResult = advance(retaliatingCombatWorld(100.f), activeSpatialPlayers(), spatialActors(),
+            difficultySettings, { 2, 5, 0.016f, 100 }, id<TES3MP::ServerTick>(5));
+        const auto* incoming = std::get_if<TES3MP::CombatSimulationStep>(&incomingResult);
+        return outgoing.event && outgoing.event->resolution.damage == 8.f
+            && outgoing.candidate->findActor(id<TES3MP::ActorId>(2))->stats.health == 12.f
+            && incoming && incoming->events.size() == 1 && incoming->events[0].resolution.damage == 60.f
+            && incoming->combat.findPlayer(id<TES3MP::PlayerId>(1))->victim.health == 40.f;
     }
 
     bool actor_respawn_restores_baseline_and_clears_combat_intent()
@@ -456,7 +599,7 @@ namespace
         actors[0].deathTick = id<TES3MP::ServerTick>(5);
         actors[0].lastAttackTick = id<TES3MP::ServerTick>(4);
         const auto dead = TES3MP::createCanonicalCombatWorld(before.players(), actors, before.randomState());
-        const auto advanced = TES3MP::advanceAuthoritativeCombat(
+        const auto advanced = advance(
             std::get<TES3MP::CanonicalCombatWorld>(dead), activeSpatialPlayers(), spatialActors(),
             settings(), { 2, 5 }, id<TES3MP::ServerTick>(10));
         const auto* step = std::get_if<TES3MP::CombatSimulationStep>(&advanced);
@@ -496,24 +639,24 @@ namespace
         recoverySettings.fatigueReturnBase = 0.02f;
         recoverySettings.fatigueReturnMultiplier = 0.04f;
         recoverySettings.enduranceFatigueMultiplier = 0.1f;
-        const auto firstResult = TES3MP::advanceAuthoritativeCombat(world, activeSpatialPlayers(), spatialActors(),
+        const auto firstResult = advance(world, activeSpatialPlayers(), spatialActors(),
             recoverySettings, { 2, 5, 0.5f }, id<TES3MP::ServerTick>(5));
         const auto* first = std::get_if<TES3MP::CombatSimulationStep>(&firstResult);
         if (!first)
             return false;
-        const auto sameTickResult = TES3MP::advanceAuthoritativeCombat(first->combat, activeSpatialPlayers(),
+        const auto sameTickResult = advance(first->combat, activeSpatialPlayers(),
             spatialActors(), recoverySettings, { 2, 5, 0.5f }, id<TES3MP::ServerTick>(5));
         const auto* sameTick = std::get_if<TES3MP::CombatSimulationStep>(&sameTickResult);
         if (!sameTick || sameTick->combat != first->combat)
             return false;
-        const auto laterResult = TES3MP::advanceAuthoritativeCombat(sameTick->combat, activeSpatialPlayers(),
+        const auto laterResult = advance(sameTick->combat, activeSpatialPlayers(),
             spatialActors(), recoverySettings, { 2, 5, 0.5f }, id<TES3MP::ServerTick>(7));
         const auto* later = std::get_if<TES3MP::CombatSimulationStep>(&laterResult);
         const auto* firstPlayer = first->combat.findPlayer(id<TES3MP::PlayerId>(1));
         const auto* firstActor = first->combat.findActor(id<TES3MP::ActorId>(2));
         const auto* laterPlayer = later ? later->combat.findPlayer(id<TES3MP::PlayerId>(1)) : nullptr;
         const auto* laterActor = later ? later->combat.findActor(id<TES3MP::ActorId>(2)) : nullptr;
-        const auto inactiveResult = TES3MP::advanceAuthoritativeCombat(world, spatialPlayers(), spatialActors(),
+        const auto inactiveResult = advance(world, spatialPlayers(), spatialActors(),
             recoverySettings, { 2, 5, 0.5f }, id<TES3MP::ServerTick>(5));
         const auto* inactive = std::get_if<TES3MP::CombatSimulationStep>(&inactiveResult);
         return firstPlayer && firstActor && laterPlayer && laterActor && inactive
@@ -526,11 +669,65 @@ namespace
             && inactive->combat.findPlayer(id<TES3MP::PlayerId>(1))->stats.fatigue == 50.f
             && inactive->combat.findActor(id<TES3MP::ActorId>(2))->stats.fatigue == 10.f;
     }
+
+    bool health_and_magicka_recovery_are_tick_bounded_active_and_out_of_combat()
+    {
+        const auto baseline = combatWorld();
+        std::vector<TES3MP::CanonicalPlayerCombatState> players(
+            baseline.players().begin(), baseline.players().end());
+        players[0].victim.health = 10.f;
+        players[0].magicka = 5.f;
+        players[0].maximumMagicka = 20.f;
+        players[0].healthRecoveryPerSecond = 2.f;
+        players[0].magickaRecoveryPerSecond = 3.f;
+        const auto created = TES3MP::createCanonicalCombatWorld(
+            players, baseline.actors(), baseline.randomState());
+        const auto* world = std::get_if<TES3MP::CanonicalCombatWorld>(&created);
+        if (!world)
+            return false;
+        const auto recoveredResult = advance(*world, activeSpatialPlayers(), spatialActors(),
+            settings(), { 2, 5, 0.5f }, id<TES3MP::ServerTick>(5));
+        const auto* recovered = std::get_if<TES3MP::CombatSimulationStep>(&recoveredResult);
+        const auto* player = recovered
+            ? recovered->combat.findPlayer(id<TES3MP::PlayerId>(1)) : nullptr;
+        const auto inactiveResult = advance(*world, spatialPlayers(), spatialActors(),
+            settings(), { 2, 5, 0.5f }, id<TES3MP::ServerTick>(5));
+        const auto* inactive = std::get_if<TES3MP::CombatSimulationStep>(&inactiveResult);
+
+        auto engaged = retaliatingCombatWorld(20.f);
+        std::vector<TES3MP::CanonicalPlayerCombatState> engagedPlayers(
+            engaged.players().begin(), engaged.players().end());
+        engagedPlayers[0].victim.health = 10.f;
+        engagedPlayers[0].maximumHealth = 20.f;
+        engagedPlayers[0].magicka = 5.f;
+        engagedPlayers[0].maximumMagicka = 20.f;
+        engagedPlayers[0].healthRecoveryPerSecond = 2.f;
+        engagedPlayers[0].magickaRecoveryPerSecond = 3.f;
+        std::vector<TES3MP::CanonicalActorCombatState> engagedActors(
+            engaged.actors().begin(), engaged.actors().end());
+        engagedActors[0].lastAttackTick = id<TES3MP::ServerTick>(5);
+        const auto engagedWorld = TES3MP::createCanonicalCombatWorld(
+            engagedPlayers, engagedActors, engaged.randomState());
+        const auto engagedResult = advance(std::get<TES3MP::CanonicalCombatWorld>(engagedWorld),
+            activeSpatialPlayers(), spatialActors(), settings(), { 100, 5, 0.5f },
+            id<TES3MP::ServerTick>(5));
+        const auto* engagedStep = std::get_if<TES3MP::CombatSimulationStep>(&engagedResult);
+        const auto* engagedPlayer = engagedStep
+            ? engagedStep->combat.findPlayer(id<TES3MP::PlayerId>(1)) : nullptr;
+        return player && std::abs(player->victim.health - 11.f) < 0.0001f
+            && std::abs(player->magicka - 6.5f) < 0.0001f
+            && player->revision == TES3MP::CombatRevision::initial()
+            && inactive && inactive->combat.findPlayer(id<TES3MP::PlayerId>(1))->victim.health == 10.f
+            && inactive->combat.findPlayer(id<TES3MP::PlayerId>(1))->magicka == 5.f
+            && engagedPlayer && engagedPlayer->victim.health == 10.f && engagedPlayer->magicka == 5.f;
+    }
 }
 
 int main()
 {
-    return authoritative_hit_is_atomic_and_server_randomized() && lethal_hit_marks_death_in_same_candidate()
+    return authoritative_hit_is_atomic_and_server_randomized()
+            && successful_melee_advances_only_the_server_selected_skill()
+            && lethal_hit_marks_death_in_same_candidate()
             && player_template_initializes_once_and_resume_preserves_state()
             && character_profile_derives_and_initializes_combat_once()
             && equipped_weapon_stats_condition_and_wear_come_from_canonical_sources()
@@ -541,8 +738,11 @@ int main()
             && forged_targets_impossible_contact_and_stale_intent_fail_atomically()
             && empty_swing_spends_fatigue_without_contact_or_randomness()
             && actor_retaliation_damage_cooldown_and_player_respawn_are_authoritative()
+            && player_blocking_uses_server_roll_facing_and_canonical_shield_wear()
+            && difficulty_scaling_is_server_selected_for_both_damage_directions()
             && actor_respawn_restores_baseline_and_clears_combat_intent()
             && fatigue_recovery_is_tick_deterministic_bounded_and_active_only()
+            && health_and_magicka_recovery_are_tick_bounded_active_and_out_of_combat()
         ? 0
         : 1;
 }

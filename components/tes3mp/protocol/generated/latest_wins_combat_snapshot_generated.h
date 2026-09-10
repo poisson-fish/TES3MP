@@ -23,6 +23,8 @@ struct CombatSnapshotHeaderBuilder;
 
 struct ActorCombatSnapshot;
 
+struct CombatSkillSnapshot;
+
 struct LatestWinsCombatSnapshot;
 struct LatestWinsCombatSnapshotBuilder;
 
@@ -92,6 +94,44 @@ FLATBUFFERS_MANUALLY_ALIGNED_STRUCT(8) ActorCombatSnapshot FLATBUFFERS_FINAL_CLA
 };
 FLATBUFFERS_STRUCT_END(ActorCombatSnapshot, 40);
 
+FLATBUFFERS_MANUALLY_ALIGNED_STRUCT(4) CombatSkillSnapshot FLATBUFFERS_FINAL_CLASS {
+ private:
+  uint8_t skill_;
+  int8_t padding0__;  int16_t padding1__;
+  float value_;
+  float progress_;
+
+ public:
+  CombatSkillSnapshot()
+      : skill_(0),
+        padding0__(0),
+        padding1__(0),
+        value_(0),
+        progress_(0) {
+    (void)padding0__;
+    (void)padding1__;
+  }
+  CombatSkillSnapshot(uint8_t _skill, float _value, float _progress)
+      : skill_(::flatbuffers::EndianScalar(_skill)),
+        padding0__(0),
+        padding1__(0),
+        value_(::flatbuffers::EndianScalar(_value)),
+        progress_(::flatbuffers::EndianScalar(_progress)) {
+    (void)padding0__;
+    (void)padding1__;
+  }
+  uint8_t skill() const {
+    return ::flatbuffers::EndianScalar(skill_);
+  }
+  float value() const {
+    return ::flatbuffers::EndianScalar(value_);
+  }
+  float progress() const {
+    return ::flatbuffers::EndianScalar(progress_);
+  }
+};
+FLATBUFFERS_STRUCT_END(CombatSkillSnapshot, 12);
+
 struct CombatSnapshotHeader FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
   typedef CombatSnapshotHeaderBuilder Builder;
   enum FlatBuffersVTableOffset FLATBUFFERS_VTABLE_UNDERLYING_TYPE {
@@ -105,7 +145,9 @@ struct CombatSnapshotHeader FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Tab
     VT_SELF_HEALTH = 18,
     VT_SELF_DEAD = 20,
     VT_SELF_MAXIMUM_HEALTH = 22,
-    VT_SELF_MAXIMUM_FATIGUE = 24
+    VT_SELF_MAXIMUM_FATIGUE = 24,
+    VT_SELF_MAGICKA = 26,
+    VT_SELF_MAXIMUM_MAGICKA = 28
   };
   uint64_t target_session_id() const {
     return GetField<uint64_t>(VT_TARGET_SESSION_ID, 0);
@@ -140,6 +182,12 @@ struct CombatSnapshotHeader FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Tab
   float self_maximum_fatigue() const {
     return GetField<float>(VT_SELF_MAXIMUM_FATIGUE, 0.0f);
   }
+  float self_magicka() const {
+    return GetField<float>(VT_SELF_MAGICKA, 0.0f);
+  }
+  float self_maximum_magicka() const {
+    return GetField<float>(VT_SELF_MAXIMUM_MAGICKA, 0.0f);
+  }
   template <bool B = false>
   bool Verify(::flatbuffers::VerifierTemplate<B> &verifier) const {
     return VerifyTableStart(verifier) &&
@@ -154,6 +202,8 @@ struct CombatSnapshotHeader FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Tab
            VerifyField<uint8_t>(verifier, VT_SELF_DEAD, 1) &&
            VerifyField<float>(verifier, VT_SELF_MAXIMUM_HEALTH, 4) &&
            VerifyField<float>(verifier, VT_SELF_MAXIMUM_FATIGUE, 4) &&
+           VerifyField<float>(verifier, VT_SELF_MAGICKA, 4) &&
+           VerifyField<float>(verifier, VT_SELF_MAXIMUM_MAGICKA, 4) &&
            verifier.EndTable();
   }
 };
@@ -195,6 +245,12 @@ struct CombatSnapshotHeaderBuilder {
   void add_self_maximum_fatigue(float self_maximum_fatigue) {
     fbb_.AddElement<float>(CombatSnapshotHeader::VT_SELF_MAXIMUM_FATIGUE, self_maximum_fatigue, 0.0f);
   }
+  void add_self_magicka(float self_magicka) {
+    fbb_.AddElement<float>(CombatSnapshotHeader::VT_SELF_MAGICKA, self_magicka, 0.0f);
+  }
+  void add_self_maximum_magicka(float self_maximum_magicka) {
+    fbb_.AddElement<float>(CombatSnapshotHeader::VT_SELF_MAXIMUM_MAGICKA, self_maximum_magicka, 0.0f);
+  }
   explicit CombatSnapshotHeaderBuilder(::flatbuffers::FlatBufferBuilder &_fbb)
         : fbb_(_fbb) {
     start_ = fbb_.StartTable();
@@ -218,7 +274,9 @@ inline ::flatbuffers::Offset<CombatSnapshotHeader> CreateCombatSnapshotHeader(
     float self_health = 0.0f,
     bool self_dead = false,
     float self_maximum_health = 0.0f,
-    float self_maximum_fatigue = 0.0f) {
+    float self_maximum_fatigue = 0.0f,
+    float self_magicka = 0.0f,
+    float self_maximum_magicka = 0.0f) {
   CombatSnapshotHeaderBuilder builder_(_fbb);
   builder_.add_self_combat_revision(self_combat_revision);
   builder_.add_self_player_id(self_player_id);
@@ -226,6 +284,8 @@ inline ::flatbuffers::Offset<CombatSnapshotHeader> CreateCombatSnapshotHeader(
   builder_.add_server_tick(server_tick);
   builder_.add_target_session_generation(target_session_generation);
   builder_.add_target_session_id(target_session_id);
+  builder_.add_self_maximum_magicka(self_maximum_magicka);
+  builder_.add_self_magicka(self_magicka);
   builder_.add_self_maximum_fatigue(self_maximum_fatigue);
   builder_.add_self_maximum_health(self_maximum_health);
   builder_.add_self_health(self_health);
@@ -238,13 +298,17 @@ struct LatestWinsCombatSnapshot FLATBUFFERS_FINAL_CLASS : private ::flatbuffers:
   typedef LatestWinsCombatSnapshotBuilder Builder;
   enum FlatBuffersVTableOffset FLATBUFFERS_VTABLE_UNDERLYING_TYPE {
     VT_HEADER = 4,
-    VT_ACTORS = 6
+    VT_ACTORS = 6,
+    VT_SELF_SKILLS = 8
   };
   const TES3MP::Protocol::Schema::CombatSnapshot::CombatSnapshotHeader *header() const {
     return GetPointer<const TES3MP::Protocol::Schema::CombatSnapshot::CombatSnapshotHeader *>(VT_HEADER);
   }
   const ::flatbuffers::Vector<const TES3MP::Protocol::Schema::CombatSnapshot::ActorCombatSnapshot *> *actors() const {
     return GetPointer<const ::flatbuffers::Vector<const TES3MP::Protocol::Schema::CombatSnapshot::ActorCombatSnapshot *> *>(VT_ACTORS);
+  }
+  const ::flatbuffers::Vector<const TES3MP::Protocol::Schema::CombatSnapshot::CombatSkillSnapshot *> *self_skills() const {
+    return GetPointer<const ::flatbuffers::Vector<const TES3MP::Protocol::Schema::CombatSnapshot::CombatSkillSnapshot *> *>(VT_SELF_SKILLS);
   }
   template <bool B = false>
   bool Verify(::flatbuffers::VerifierTemplate<B> &verifier) const {
@@ -253,6 +317,8 @@ struct LatestWinsCombatSnapshot FLATBUFFERS_FINAL_CLASS : private ::flatbuffers:
            verifier.VerifyTable(header()) &&
            VerifyOffset(verifier, VT_ACTORS) &&
            verifier.VerifyVector(actors()) &&
+           VerifyOffset(verifier, VT_SELF_SKILLS) &&
+           verifier.VerifyVector(self_skills()) &&
            verifier.EndTable();
   }
 };
@@ -266,6 +332,9 @@ struct LatestWinsCombatSnapshotBuilder {
   }
   void add_actors(::flatbuffers::Offset<::flatbuffers::Vector<const TES3MP::Protocol::Schema::CombatSnapshot::ActorCombatSnapshot *>> actors) {
     fbb_.AddOffset(LatestWinsCombatSnapshot::VT_ACTORS, actors);
+  }
+  void add_self_skills(::flatbuffers::Offset<::flatbuffers::Vector<const TES3MP::Protocol::Schema::CombatSnapshot::CombatSkillSnapshot *>> self_skills) {
+    fbb_.AddOffset(LatestWinsCombatSnapshot::VT_SELF_SKILLS, self_skills);
   }
   explicit LatestWinsCombatSnapshotBuilder(::flatbuffers::FlatBufferBuilder &_fbb)
         : fbb_(_fbb) {
@@ -281,8 +350,10 @@ struct LatestWinsCombatSnapshotBuilder {
 inline ::flatbuffers::Offset<LatestWinsCombatSnapshot> CreateLatestWinsCombatSnapshot(
     ::flatbuffers::FlatBufferBuilder &_fbb,
     ::flatbuffers::Offset<TES3MP::Protocol::Schema::CombatSnapshot::CombatSnapshotHeader> header = 0,
-    ::flatbuffers::Offset<::flatbuffers::Vector<const TES3MP::Protocol::Schema::CombatSnapshot::ActorCombatSnapshot *>> actors = 0) {
+    ::flatbuffers::Offset<::flatbuffers::Vector<const TES3MP::Protocol::Schema::CombatSnapshot::ActorCombatSnapshot *>> actors = 0,
+    ::flatbuffers::Offset<::flatbuffers::Vector<const TES3MP::Protocol::Schema::CombatSnapshot::CombatSkillSnapshot *>> self_skills = 0) {
   LatestWinsCombatSnapshotBuilder builder_(_fbb);
+  builder_.add_self_skills(self_skills);
   builder_.add_actors(actors);
   builder_.add_header(header);
   return builder_.Finish();
@@ -291,12 +362,15 @@ inline ::flatbuffers::Offset<LatestWinsCombatSnapshot> CreateLatestWinsCombatSna
 inline ::flatbuffers::Offset<LatestWinsCombatSnapshot> CreateLatestWinsCombatSnapshotDirect(
     ::flatbuffers::FlatBufferBuilder &_fbb,
     ::flatbuffers::Offset<TES3MP::Protocol::Schema::CombatSnapshot::CombatSnapshotHeader> header = 0,
-    const std::vector<TES3MP::Protocol::Schema::CombatSnapshot::ActorCombatSnapshot> *actors = nullptr) {
+    const std::vector<TES3MP::Protocol::Schema::CombatSnapshot::ActorCombatSnapshot> *actors = nullptr,
+    const std::vector<TES3MP::Protocol::Schema::CombatSnapshot::CombatSkillSnapshot> *self_skills = nullptr) {
   auto actors__ = actors ? _fbb.CreateVectorOfStructs<TES3MP::Protocol::Schema::CombatSnapshot::ActorCombatSnapshot>(*actors) : 0;
+  auto self_skills__ = self_skills ? _fbb.CreateVectorOfStructs<TES3MP::Protocol::Schema::CombatSnapshot::CombatSkillSnapshot>(*self_skills) : 0;
   return TES3MP::Protocol::Schema::CombatSnapshot::CreateLatestWinsCombatSnapshot(
       _fbb,
       header,
-      actors__);
+      actors__,
+      self_skills__);
 }
 
 inline const TES3MP::Protocol::Schema::CombatSnapshot::LatestWinsCombatSnapshot *GetLatestWinsCombatSnapshot(const void *buf) {

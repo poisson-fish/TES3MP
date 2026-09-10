@@ -15,7 +15,7 @@ namespace TES3MP::ServerApp
 {
     namespace
     {
-        constexpr std::string_view Header = "TES3MP_COMBAT_V2";
+        constexpr std::string_view Header = "TES3MP_COMBAT_V4";
         constexpr std::size_t MaximumFields = 32;
 
         struct ActorAttackDeclaration
@@ -98,10 +98,14 @@ namespace TES3MP::ServerApp
         std::optional<ContentManifestId> declaredManifest;
         std::optional<OpenMwMeleeSettings> settings;
         std::optional<CanonicalPlayerCombatTemplate> playerTemplate;
+        std::optional<CombatSkillProgressionSettings> skillSettings;
+        std::optional<std::array<CombatSkillProgressionRule,
+            static_cast<std::size_t>(CombatProgressionSkill::Count)>> skillRules;
         std::optional<std::uint64_t> randomSeed;
         std::vector<CanonicalActorCombatState> actorStates;
         std::vector<ActorAttackDeclaration> actorAttacks;
         std::vector<MeleeWeaponProfile> weaponProfiles;
+        std::vector<MeleeShieldProfile> shieldProfiles;
         std::size_t lineNumber = 0;
         for (std::size_t begin = 0; begin <= text.size();)
         {
@@ -136,9 +140,9 @@ namespace TES3MP::ServerApp
                 }
                 else if (values[0] == "settings")
                 {
-                    if (values.size() != 18 || settings)
+                    if (values.size() != 29 || settings)
                         return error(CombatContentErrorCode::Malformed, lineNumber);
-                    std::array<float, 17> parsed{};
+                    std::array<float, 28> parsed{};
                     for (std::size_t index = 0; index < parsed.size(); ++index)
                     {
                         const auto value = finiteFloat(values[index + 1]);
@@ -147,27 +151,39 @@ namespace TES3MP::ServerApp
                     }
                     settings = OpenMwMeleeSettings{ parsed[0], parsed[1], parsed[2], parsed[3], parsed[4],
                         parsed[5], parsed[6], parsed[7], parsed[8], parsed[9], parsed[10], parsed[11],
-                        parsed[12], parsed[13], parsed[14], parsed[15], parsed[16] };
+                        parsed[12], parsed[13], parsed[14], parsed[15], parsed[16], parsed[17], parsed[18],
+                        parsed[19], parsed[20], parsed[21], parsed[22], parsed[23], parsed[24], parsed[25],
+                        parsed[26], parsed[27] };
                     if (settings->minimumHandToHandMultiplier > settings->maximumHandToHandMultiplier
                         || settings->fatigueBase < 0.f || settings->fatigueMultiplier < 0.f
                         || settings->fatigueReturnBase < 0.f || settings->fatigueReturnMultiplier < 0.f
-                        || settings->enduranceFatigueMultiplier < 0.f)
+                        || settings->enduranceFatigueMultiplier < 0.f || settings->difficultyMultiplier <= 0.f
+                        || settings->combatBlockLeftAngle < -180.f || settings->combatBlockLeftAngle > 0.f
+                        || settings->combatBlockRightAngle < 0.f || settings->combatBlockRightAngle > 180.f
+                        || settings->swingBlockMultiplier < 0.f || settings->swingBlockBase < 0.f
+                        || settings->blockStillBonus < 0.f
+                        || settings->blockMinimumChance < 0.f
+                        || settings->blockMinimumChance > settings->blockMaximumChance
+                        || settings->blockMaximumChance > 100.f || settings->fatigueBlockBase < 0.f
+                        || settings->fatigueBlockMultiplier < 0.f || settings->weaponFatigueBlockMultiplier < 0.f)
                         return error(CombatContentErrorCode::InvalidSettings, lineNumber);
                 }
                 else if (values[0] == "player")
                 {
-                    if (values.size() != 17 || playerTemplate)
+                    if (values.size() != 22 || playerTemplate)
                         return error(CombatContentErrorCode::Malformed, lineNumber);
-                    std::array<float, 14> parsed{};
+                    std::array<float, 19> parsed{};
                     for (std::size_t index = 0; index < parsed.size(); ++index)
                     {
                         const auto value = finiteFloat(values[index + 1]);
                         if (!value) return error(CombatContentErrorCode::InvalidPlayerTemplate, lineNumber);
                         parsed[index] = *value;
                     }
-                    const auto maximumWeight = number<std::uint64_t>(values[15]);
-                    const auto werewolf = boolean(values[16]);
-                    if (!maximumWeight || *maximumWeight == 0 || !werewolf || parsed[13] < 0.f)
+                    const auto maximumWeight = number<std::uint64_t>(values[20]);
+                    const auto werewolf = boolean(values[21]);
+                    if (!maximumWeight || *maximumWeight == 0 || !werewolf || parsed[13] < 0.f
+                        || parsed[14] < 0.f || parsed[15] <= 0.f || parsed[16] < 0.f
+                        || parsed[17] < 0.f || parsed[18] < 0.f)
                         return error(CombatContentErrorCode::InvalidPlayerTemplate, lineNumber);
                     OpenMwMeleeAttacker attacker;
                     attacker.agility = parsed[0]; attacker.luck = parsed[1]; attacker.strength = parsed[2];
@@ -180,8 +196,41 @@ namespace TES3MP::ServerApp
                     victim.fatigue = attacker.fatigue;
                     victim.evasion = (attacker.agility / 5.f + attacker.luck / 10.f) * attacker.fatigueTerm;
                     playerTemplate = CanonicalPlayerCombatTemplate{ attacker,
-                        { parsed[6], parsed[7], parsed[8], parsed[9], parsed[10] }, *maximumWeight, victim,
+                        { parsed[6], parsed[7], parsed[8], parsed[9], parsed[10] }, parsed[14], *maximumWeight, victim,
                         victim.health, victim.fatigue };
+                    playerTemplate->intelligence = parsed[15];
+                    playerTemplate->magicka = parsed[16];
+                    playerTemplate->maximumMagicka = parsed[16];
+                    playerTemplate->healthRecoveryPerSecond = parsed[17];
+                    playerTemplate->magickaRecoveryPerSecond = parsed[18];
+                }
+                else if (values[0] == "progression")
+                {
+                    constexpr std::size_t SkillCount = static_cast<std::size_t>(CombatProgressionSkill::Count);
+                    if (values.size() != 5 + SkillCount * 2 || skillSettings || skillRules)
+                        return error(CombatContentErrorCode::Malformed, lineNumber);
+                    std::array<float, 4> factors{};
+                    for (std::size_t index = 0; index < factors.size(); ++index)
+                    {
+                        const auto parsed = finiteFloat(values[index + 1]);
+                        if (!parsed || *parsed <= 0.f)
+                            return error(CombatContentErrorCode::InvalidPlayerTemplate, lineNumber);
+                        factors[index] = *parsed;
+                    }
+                    std::array<CombatSkillProgressionRule, SkillCount> rules{};
+                    for (std::size_t index = 0; index < SkillCount; ++index)
+                    {
+                        const auto specialization = number<std::uint8_t>(values[5 + index * 2]);
+                        const auto gain = finiteFloat(values[6 + index * 2]);
+                        if (!specialization
+                            || *specialization > static_cast<std::uint8_t>(ClassSpecialization::Stealth)
+                            || !gain || *gain < 0.f)
+                            return error(CombatContentErrorCode::InvalidPlayerTemplate, lineNumber);
+                        rules[index] = { static_cast<ClassSpecialization>(*specialization), *gain };
+                    }
+                    skillSettings = CombatSkillProgressionSettings{
+                        factors[0], factors[1], factors[2], factors[3] };
+                    skillRules = rules;
                 }
                 else if (values[0] == "actor")
                 {
@@ -276,6 +325,19 @@ namespace TES3MP::ServerApp
                     if (weaponProfiles.size() > MaximumItemPrototypes)
                         return error(CombatContentErrorCode::TooLarge, lineNumber);
                 }
+                else if (values[0] == "shield")
+                {
+                    if (values.size() != 3)
+                        return error(CombatContentErrorCode::Malformed, lineNumber);
+                    const auto rawPrototype = number<std::uint64_t>(values[1]);
+                    const auto prototype = rawPrototype ? ItemPrototypeId::fromValue(*rawPrototype) : std::nullopt;
+                    const auto rawSkill = number<std::uint8_t>(values[2]);
+                    if (!prototype || !rawSkill || *rawSkill > static_cast<std::uint8_t>(ShieldArmorSkill::HeavyArmor))
+                        return error(CombatContentErrorCode::InvalidWeaponCatalog, lineNumber);
+                    shieldProfiles.push_back({ *prototype, static_cast<ShieldArmorSkill>(*rawSkill) });
+                    if (shieldProfiles.size() > MaximumItemPrototypes)
+                        return error(CombatContentErrorCode::TooLarge, lineNumber);
+                }
                 else
                     return error(CombatContentErrorCode::Malformed, lineNumber);
             }
@@ -283,8 +345,12 @@ namespace TES3MP::ServerApp
             begin = end + 1;
         }
 
-        if (!declaredManifest || !settings || !playerTemplate || !randomSeed)
+        if (!declaredManifest || !settings || !playerTemplate || !skillSettings || !skillRules || !randomSeed)
             return error(CombatContentErrorCode::Malformed);
+        playerTemplate->skillSettings = *skillSettings;
+        playerTemplate->skillRules = *skillRules;
+        for (auto& state : playerTemplate->skillProgression)
+            state.requirementFactor = skillSettings->miscellaneousFactor;
         if (*declaredManifest != manifest.id() || items.contentManifestId() != manifest.id()
             || actors.contentManifestId() != manifest.id())
             return error(CombatContentErrorCode::ManifestMismatch);
@@ -306,7 +372,7 @@ namespace TES3MP::ServerApp
             actorStates[index].naturalWeapon = actorAttacks[index].weapon;
             actorStates[index].attackReachQuanta = actorAttacks[index].reachQuanta;
         }
-        auto weapons = MeleeWeaponCatalog::create(items, weaponProfiles);
+        auto weapons = MeleeWeaponCatalog::create(items, weaponProfiles, shieldProfiles);
         if (!weapons)
             return error(CombatContentErrorCode::InvalidWeaponCatalog);
         const auto streamKey = RandomStreamKey::fromValues(5, 0);

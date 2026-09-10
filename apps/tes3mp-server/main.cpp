@@ -215,7 +215,8 @@ int main(int argc, char** argv)
         }
         combatContent.emplace(std::move(*content));
     }
-    const TES3MP::MeleeAuthorityPolicy meleePolicy{};
+    TES3MP::MeleeAuthorityPolicy meleePolicy{};
+    meleePolicy.difficulty = config.combatDifficulty;
     std::optional<TES3MP::ServerApp::MeleeContactHistory> meleeContactHistory;
     if (combatContent)
     {

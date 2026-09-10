@@ -370,7 +370,7 @@ namespace TES3MP
             {
                 if (!prepared.mInventory || !itemCatalog || !playerCombatTemplate)
                     return CharacterProfileError::InvalidInitialState;
-                auto characterTemplate = deriveCharacterCombatTemplate(*profile, *playerCombatTemplate);
+                auto characterTemplate = deriveCharacterCombatTemplate(*profile, *playerCombatTemplate, &catalog);
                 const auto* playerInventory = prepared.mInventory->findPlayer(player);
                 if (!characterTemplate || !playerInventory)
                     return CharacterProfileError::InvalidInitialState;

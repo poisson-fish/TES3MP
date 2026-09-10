@@ -24,12 +24,13 @@ namespace TES3MP::ServerApp
                     hello->negotiatedCapabilities().begin(), hello->negotiatedCapabilities().end(), vrPoseCapability());
         }
 
-        CombatSimulationPolicy combatSimulationPolicy(std::uint64_t tickMilliseconds) noexcept
+        CombatSimulationPolicy combatSimulationPolicy(
+            std::uint64_t tickMilliseconds, std::int16_t difficulty) noexcept
         {
             const auto ticksFor = [tickMilliseconds](std::uint64_t milliseconds) {
                 return std::max<std::uint64_t>(1, (milliseconds + tickMilliseconds - 1) / tickMilliseconds);
             };
-            return { ticksFor(1000), ticksFor(30000), static_cast<float>(tickMilliseconds) / 1000.f };
+            return { ticksFor(1000), ticksFor(30000), static_cast<float>(tickMilliseconds) / 1000.f, difficulty };
         }
     }
 
@@ -858,6 +859,11 @@ namespace TES3MP::ServerApp
             mFailure = "combat composition incomplete";
             return false;
         }
+        if (mWiring->meleePolicy && mWiring->meleePolicy->difficulty != mConfig.combatDifficulty)
+        {
+            mFailure = "combat difficulty composition mismatch";
+            return false;
+        }
         if (mWiring->meleeContactHistory
             && (mWiring->meleeContact != mWiring->meleeContactHistory || !mWiring->actors))
         {
@@ -1018,14 +1024,19 @@ namespace TES3MP::ServerApp
                     }
             }
             std::optional<CanonicalCombatWorld> combatCandidate;
+            std::optional<CanonicalInventoryWorld> combatInventoryCandidate;
             std::vector<AuthoritativeActorMeleeEvent> authoritativeActorEvents;
             if (mWiring->combat)
             {
                 const auto& baseCombat
                     = prepared.candidateCombat() ? *prepared.candidateCombat() : *mWiring->combat;
-                auto advancedCombat = advanceAuthoritativeCombat(baseCombat, prepared.candidateState(),
+                const auto& baseInventory
+                    = prepared.candidateInventory() ? *prepared.candidateInventory() : *mWiring->inventory;
+                auto advancedCombat = advanceAuthoritativeCombat(baseCombat, baseInventory,
+                    *mWiring->itemCatalog, *mWiring->meleeWeapons, prepared.candidateState(),
                     *mWiring->actors, *mWiring->meleeSettings,
-                    combatSimulationPolicy(mConfig.tickIntervalMilliseconds), batch.scheduledTick().value());
+                    combatSimulationPolicy(mConfig.tickIntervalMilliseconds, mWiring->meleePolicy->difficulty),
+                    batch.scheduledTick().value());
                 auto* step = std::get_if<CombatSimulationStep>(&advancedCombat);
                 if (!step)
                 {
@@ -1033,6 +1044,8 @@ namespace TES3MP::ServerApp
                     return false;
                 }
                 combatCandidate.emplace(std::move(step->combat));
+                if (step->inventory)
+                    combatInventoryCandidate.emplace(std::move(*step->inventory));
                 authoritativeActorEvents = std::move(step->events);
             }
             std::optional<CanonicalActorWorld> actorCandidate;
@@ -1095,6 +1108,29 @@ namespace TES3MP::ServerApp
                     combatEvents.emplace_back(*connection, std::move(*eventBatch));
                 }
             }
+            if (combatInventoryCandidate)
+            {
+                for (const auto& target : prepared.candidateState().activeSessions())
+                {
+                    const auto connection = mWiring->sessions.connectionForSession(target.sessionId());
+                    if (!connection || !supportsInventory(*connection))
+                        continue;
+                    auto baseline = projectInventoryInterestBaseline(prepared.candidateState(),
+                        *combatInventoryCandidate, target.sessionId(), batch.scheduledTick().value(),
+                        prepared.candidateRevision());
+                    if (!baseline)
+                    {
+                        mFailure = "combat inventory projection failed";
+                        return false;
+                    }
+                    const auto existing = std::ranges::find(inventoryBaselines, *connection,
+                        &std::pair<TransportConnectionId, InventoryInterestDelivery>::first);
+                    if (existing == inventoryBaselines.end())
+                        inventoryBaselines.emplace_back(*connection, std::move(*baseline));
+                    else
+                        existing->second = std::move(*baseline);
+                }
+            }
             if (!admitCombinedInterestTickAtomically(mWiring->queues, routed, routedViews, actorBaselines, actorViews,
                     objectBaselines, inventoryBaselines, combatViews, combatEvents))
             {
@@ -1110,6 +1146,8 @@ namespace TES3MP::ServerApp
             }
             if (actorCandidate)
                 *mWiring->actors = std::move(*actorCandidate);
+            if (combatInventoryCandidate)
+                *mWiring->inventory = std::move(*combatInventoryCandidate);
             if (combatCandidate)
                 *mWiring->combat = std::move(*combatCandidate);
         }

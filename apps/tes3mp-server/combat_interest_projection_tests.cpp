@@ -35,10 +35,15 @@ namespace
         OpenMwMeleeVictim playerVictim;
         playerVictim.health = 60.f;
         playerVictim.fatigue = 75.f;
-        const std::array combatPlayers{ CanonicalPlayerCombatState{ .playerId = id<PlayerId>(1),
+        CanonicalPlayerCombatState combatPlayer{ .playerId = id<PlayerId>(1),
             .revision = id<CombatRevision>(5), .stats = attacker, .maximumEncumbranceWeightUnits = 100,
             .victim = playerVictim, .respawnVictim = playerVictim,
-            .maximumHealth = 80.f, .maximumFatigue = 100.f } };
+            .maximumHealth = 80.f, .maximumFatigue = 100.f };
+        combatPlayer.magicka = 40.f;
+        combatPlayer.maximumMagicka = 50.f;
+        combatPlayer.blockSkill = 15.f;
+        combatPlayer.skillProgression[static_cast<std::size_t>(CombatProgressionSkill::Block)].progress = 0.25f;
+        const std::array combatPlayers{ combatPlayer };
         OpenMwMeleeVictim first;
         first.health = 40.f;
         OpenMwMeleeVictim second;
@@ -65,7 +70,10 @@ namespace
             id<ServerTick>(9), id<CanonicalRevision>(4), events, actorEvents);
         return snapshot && snapshot->selfPlayerId() == id<PlayerId>(1) && snapshot->selfHealth() == 60.f
             && snapshot->selfMaximumHealth() == 80.f && snapshot->selfFatigue() == 75.f
-            && snapshot->selfMaximumFatigue() == 100.f && !snapshot->selfDead()
+            && snapshot->selfMaximumFatigue() == 100.f && snapshot->selfMagicka() == 40.f
+            && snapshot->selfMaximumMagicka() == 50.f && snapshot->selfSkills().size() == 7
+            && snapshot->selfSkills()[0] == CombatSkillSnapshot{ ReplicatedCombatSkill::Block, 15.f, 0.25f }
+            && !snapshot->selfDead()
             && snapshot->actors().size() == 1 && snapshot->actors()[0].actorId == id<ActorId>(3)
             && snapshot->actors()[0].maximumHealth == 50.f
             && batch && batch->events().size() == 1 && batch->events()[0].targetActorId == id<ActorId>(3)

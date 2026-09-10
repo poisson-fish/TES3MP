@@ -72,11 +72,12 @@ class ContentBakerTests(unittest.TestCase):
             encoding="utf-8",
         )
         (self.source / "combat.txt").write_text(
-            "TES3MP_COMBAT_V2\n"
+            "TES3MP_COMBAT_V4\n"
             f"manifest {ZERO_MANIFEST}\n"
             "seed 1234\n"
-            "settings 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1\n"
-            "player 50 50 50 1 0 0 20 20 20 20 20 25 100 50 500 0\n"
+            "settings 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 -90 90 1 1 1 0 100 1 1 1\n"
+            "progression 1 1 1 1 0 1 0 1 0 1 0 1 0 1 0 1 0 1\n"
+            "player 50 50 50 1 0 0 20 20 20 20 20 25 100 50 20 50 100 0.1 0.2 500 0\n"
             "actor 1 20 20 10 0 0 0 0 0 0 0 0\n"
             f"weapon {self.item_prototype} 0 1 5 1 5 1 5 10 1 1\n",
             encoding="utf-8",
@@ -164,10 +165,22 @@ class ContentBakerTests(unittest.TestCase):
             "fHandtoHandHealthPer": .1, "fCombatCriticalStrikeMult": 4.,
             "fCombatKODamageMult": 1.5, "fFatigueBase": 1.25, "fFatigueMult": .5,
             "fFatigueReturnBase": .02, "fFatigueReturnMult": .04, "fEndFatigueMult": .1,
+            "fDifficultyMult": 5., "fCombatBlockLeftAngle": -60., "fCombatBlockRightAngle": 60.,
+            "fSwingBlockMult": 1., "fSwingBlockBase": 1., "fBlockStillBonus": 1.25,
+            "iBlockMinChance": 10., "iBlockMaxChance": 50., "fFatigueBlockBase": 2.,
+            "fFatigueBlockMult": 3., "fWeaponFatigueBlockMult": .25,
+            "iShieldWeight": 15., "fLightMaxMod": .6, "fMedMaxMod": .9,
+            "fMiscSkillBonus": 1., "fMinorSkillBonus": .75, "fMajorSkillBonus": .5,
+            "fSpecialSkillBonus": .8, "fRestMagicMult": .15,
         }
         gmsts = b"".join(record("GMST", subrecord("NAME", name.encode() + b"\0"),
                                   subrecord("FLTV", struct.pack("<f", value)))
                           for name, value in settings.items())
+        skill_records = b"".join(
+            record("SKIL", subrecord("INDX", struct.pack("<i", index)),
+                   subrecord("SKDT", struct.pack("<ii4f", 0, 0, 1.0 + index, 0, 0, 0)))
+            for index in baker.PROGRESSION_SKILL_INDEXES
+        )
         self.esm.write_bytes(record("TES3", subrecord("HEDR", bytes(300)))
                              + named_record("CELL", "Room")
                              + record("CREA", subrecord("NAME", b"rat\0"),
@@ -176,7 +189,7 @@ class ContentBakerTests(unittest.TestCase):
                                       subrecord("NPDT", npc_data), subrecord("FLAG", struct.pack("<i", 8)))
                              + record("WEAP", subrecord("NAME", b"iron dagger\0"),
                                       subrecord("WPDT", weapon_data))
-                             + gmsts + extra)
+                             + gmsts + skill_records + extra)
 
     def _write_recipe(self, **changes) -> pathlib.Path:
         recipe = {
@@ -328,8 +341,9 @@ class ContentBakerTests(unittest.TestCase):
         characters = path.joinpath("characters.txt").read_text()
         self.assertIn(f"manifest {manifest}", inventory)
         self.assertIn(f"prototype {self.item_prototype} 11 30 10 400 0 65536 0 none", inventory)
-        self.assertIn("settings 0.200000003 2 0 0.25 0.100000001 0.5 0.100000001 0.100000001 0.5 0.100000001 4 1.5 1.25 0.5 0.0199999996 0.0399999991 0.100000001", combat)
-        self.assertIn("player 40 40 40 1.25 0 0 21 22 23 24 25 26 160 40 2000 0", combat)
+        self.assertIn("settings 0.200000003 2 0 0.25 0.100000001 0.5 0.100000001 0.100000001 0.5 0.100000001 4 1.5 1.25 0.5 0.0199999996 0.0399999991 0.100000001 5 -60 60 1 1 1.25 10 50 2 3 0.25", combat)
+        self.assertIn("progression 1 0.75 0.5 0.800000012 0 1 0 21 0 6 0 5 0 7 0 8 0 27", combat)
+        self.assertIn("player 40 40 40 1.25 0 0 21 22 23 24 25 26 160 40 5 30 0 0.0333333333 0.0375000015 2000 0", combat)
         self.assertIn(f"weapon {self.item_prototype} 0 4 5 4 5 5 5 3 1 1", combat)
         self.assertIn("actor 1 23 60 6.25 0 0 0 0 0 0 0 0", combat)
         self.assertIn("actor_attack 1 20 10 10 1.25 30 60 1 2 1 2 1 2 1 10", combat)
@@ -341,6 +355,26 @@ class ContentBakerTests(unittest.TestCase):
         self.assertIn("inventory_content_file = vanilla-inventory.txt", server)
         self.assertIn("combat_content_file = vanilla-combat.txt", server)
         self.assertEqual(baker.verify_pack(path), manifest)
+
+    def test_derived_pack_classifies_shield_feedback_from_openmw_weight_rules(self):
+        shields = (("light shield", 8.0, 0), ("medium shield", 11.0, 1),
+                   ("heavy shield", 14.0, 2))
+        armor_records = b"".join(
+            record("ARMO", subrecord("NAME", name.encode() + b"\0"),
+                   subrecord("AODT", struct.pack("<ifiiii", 8, weight, 20, 100, 0, 10)))
+            for name, weight, _skill in shields)
+        self._write_derived_esm(armor_records)
+        recipe = self._write_recipe(items=["iron dagger", *(name for name, _weight, _skill in shields)])
+
+        _manifest, path = baker.bake(
+            [self.openmw_config], self.server_config, self.client_mappings, self.output, recipe)
+
+        combat = path.joinpath("vanilla-combat.txt").read_text()
+        inventory = path.joinpath("vanilla-inventory.txt").read_text()
+        for name, weight, skill in shields:
+            prototype = baker.stable_record_id(name)
+            self.assertIn(f"shield {prototype} {skill}", combat)
+            self.assertIn(f"prototype {prototype} 2 {round(weight * 10)} 20 100 0 131072 0 none", inventory)
 
     def test_derived_pack_missing_record_preserves_current_pointer(self):
         self._write_derived_esm()

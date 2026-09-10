@@ -76,7 +76,8 @@ namespace TES3MP::ServerApp
             const CanonicalInteractiveObjectWorld* objects = nullptr,
             CanonicalInventoryWorld* inventory = nullptr, CanonicalCombatWorld* combat = nullptr,
             const CanonicalPlayerCombatTemplate* playerCombatTemplate = nullptr,
-            const ItemPrototypeCatalog* itemCatalog = nullptr) noexcept
+            const ItemPrototypeCatalog* itemCatalog = nullptr,
+            const CharacterContentCatalog* characterContent = nullptr) noexcept
             : mQueues(queues)
             , mConnection(connection)
             , mSessions(sessions)
@@ -86,6 +87,7 @@ namespace TES3MP::ServerApp
             , mCombat(combat)
             , mPlayerCombatTemplate(playerCombatTemplate)
             , mItemCatalog(itemCatalog)
+            , mCharacterContent(characterContent)
         {
         }
 
@@ -104,6 +106,7 @@ namespace TES3MP::ServerApp
         CanonicalCombatWorld* mCombat;
         const CanonicalPlayerCombatTemplate* mPlayerCombatTemplate;
         const ItemPrototypeCatalog* mItemCatalog;
+        const CharacterContentCatalog* mCharacterContent;
         std::optional<CanonicalInventoryWorld> mPendingInventory;
         std::optional<CanonicalCombatWorld> mPendingCombat;
     };

@@ -137,9 +137,12 @@ namespace
     {
         const std::array actors{ TES3MP::ActorCombatSnapshot{
             value<TES3MP::ActorId>(1), TES3MP::CombatRevision::initial(), 25.f, 40.f, 30.f, 50.f, false } };
+        std::array<TES3MP::CombatSkillSnapshot, TES3MP::ReplicatedCombatSkillCount> skills{};
+        for (std::size_t index = 0; index < skills.size(); ++index)
+            skills[index] = { static_cast<TES3MP::ReplicatedCombatSkill>(index), 20.f + index, 0.25f };
         auto created = TES3MP::LatestWinsCombatSnapshot::create(value<TES3MP::SessionId>(1), generation,
             value<TES3MP::ServerTick>(tick), value<TES3MP::CanonicalRevision>(revision), value<TES3MP::PlayerId>(1),
-            TES3MP::CombatRevision::initial(), 100.f, 120.f, 80.f, 100.f, false, actors);
+            TES3MP::CombatRevision::initial(), 100.f, 120.f, 80.f, 100.f, 60.f, 75.f, false, actors, skills);
         return std::get<TES3MP::LatestWinsCombatSnapshot>(std::move(created));
     }
 

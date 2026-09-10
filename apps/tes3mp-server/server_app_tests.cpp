@@ -25,6 +25,7 @@
 
 #include <array>
 #include <cassert>
+#include <cmath>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
@@ -69,7 +70,7 @@ namespace
           "actor_content_file = actors.txt\n"
           "interactive_object_content_file = objects.txt\n"
           "inventory_content_file = inventory.txt\n"
-          "combat_content_file = combat.txt\n"
+          "combat_content_file = combat.txt\ncombat_difficulty = 25\n"
           "player_identity_file = players.txt\n";
 
     class FakeRuntime final : public TES3MP::TransportRuntime
@@ -423,7 +424,7 @@ int main()
     using namespace TES3MP::ServerApp;
     {
         const auto manifestId
-            = ContentManifestId::fromHex("de09e7e9fe8d9bacec7a0c454fb602f976f81e782c92b75d9e9e682c322f54a7");
+            = ContentManifestId::fromHex("d5b68da26223dc8c1b61ade51a89a5b90c4b4d6514aede752eff4322e19cb4e7");
         const auto spaces = parseCellSpaceDeclarations("interior:1;interior:2;interior:3;exterior:4");
         const auto cells = parseContentCells("interior:1;interior:2;interior:3;exterior:4:-2:-9");
         const auto movement = parseMovementProfile("sneak:4;walk:8;run:16;jump:12");
@@ -463,10 +464,13 @@ int main()
             && std::ranges::find(darkElf->appearances, stockFemale) != darkElf->appearances.end()
             && catalog->find(*ClassRecordId::fromValue(*characterRecordId("Warrior")))
             && catalog->find(*BirthsignRecordId::fromValue(*characterRecordId("Fay")))
-            && catalog->startingInventory().size() == 1
+            && catalog->startingInventory().size() == 2
             && catalog->startingInventory()[0].prototype == id<ItemPrototypeId>(579706974062055657ull)
             && catalog->startingInventory()[0].equipmentSlot
-                == static_cast<std::uint8_t>(EquipmentSlot::CarriedRight));
+                == static_cast<std::uint8_t>(EquipmentSlot::CarriedRight)
+            && catalog->startingInventory()[1].prototype == id<ItemPrototypeId>(9071396267722241944ull)
+            && catalog->startingInventory()[1].equipmentSlot
+                == static_cast<std::uint8_t>(EquipmentSlot::CarriedLeft));
 
         const auto contentRoot = std::filesystem::path(TES3MP_SOURCE_ROOT) / "files/data/tes3mp";
         auto packagedCollisionResult = ContentCollisionProvider::load(contentRoot / "vanilla-collision.txt", *manifest);
@@ -488,7 +492,13 @@ int main()
             : CombatContentLoadResult{ CombatContentError{} };
         const auto* packagedCombat = std::get_if<CombatContent>(&packagedCombatResult);
         assert(packagedCombat && packagedCombat->world.actors().size() == 1
-            && packagedCombat->weapons.find(id<ItemPrototypeId>(579706974062055657ull)));
+            && packagedCombat->weapons.find(id<ItemPrototypeId>(579706974062055657ull))
+            && packagedCombat->weapons.findShield(id<ItemPrototypeId>(9071396267722241944ull))
+            && packagedCombat->playerTemplate.maximumMagicka == 50.f
+            && std::abs(packagedCombat->playerTemplate.healthRecoveryPerSecond - 0.025f) < 0.000001f
+            && std::abs(packagedCombat->playerTemplate.magickaRecoveryPerSecond - 0.0375f) < 0.000001f
+            && std::abs(packagedCombat->playerTemplate.skillRules[static_cast<std::size_t>(
+                CombatProgressionSkill::ShortBlade)].useGain - 0.15f) < 0.000001f);
     }
     {
         TES3MP::ServerApp::Phase7QueueTelemetry telemetry;
@@ -510,7 +520,7 @@ int main()
             && evidence->latestHighWaterMessages == 1 && evidence->latestHighWaterBytes == 10
             && !telemetry.takeDrainEvidence());
     }
-    static_assert(Phase7ProtocolMajor == 1 && Phase7ProtocolMinimumMinor == 2 && Phase7ProtocolMaximumMinor == 3);
+    static_assert(Phase7ProtocolMajor == 1 && Phase7ProtocolMinimumMinor == 4 && Phase7ProtocolMaximumMinor == 4);
     static_assert(Phase7SourceAuthenticationBurst == 4 && Phase7GlobalAuthenticationBurst == 32
         && Phase7AuthenticationRefillMilliseconds == 1'000 && Phase7ConnectionCapacity == 8);
     static_assert(!phase7ProofDisconnectGraceAccepted(MinimumResumeTokenLifetimeMilliseconds - 1));
@@ -601,7 +611,8 @@ int main()
         assert(std::holds_alternative<ServerConfig>(result));
         const auto& config = std::get<ServerConfig>(result);
         assert(config.endpoint.address() == "127.0.0.1" && config.endpoint.port() == 25565);
-        assert(config.tickIntervalMilliseconds == 16 && config.disconnectGraceMilliseconds == 30000);
+        assert(config.tickIntervalMilliseconds == 16 && config.disconnectGraceMilliseconds == 30000
+            && config.combatDifficulty == 25);
         assert(config.collisionContentFile == std::filesystem::path("collision.txt"));
         assert(config.actorContentFile == std::filesystem::path("actors.txt"));
         assert(config.interactiveObjectContentFile == std::filesystem::path("objects.txt"));
@@ -633,6 +644,10 @@ int main()
     invalidSpawnPositions.replace(
         invalidSpawnPositions.find("-10:20:30;40:50:60"), std::string("-10:20:30;40:50:60").size(), "1:2");
     assert(std::holds_alternative<ConfigError>(parseServerConfig(invalidSpawnPositions)));
+    auto invalidDifficulty = std::string(validConfig);
+    invalidDifficulty.replace(invalidDifficulty.find("combat_difficulty = 25"),
+        std::string("combat_difficulty = 25").size(), "combat_difficulty = 101");
+    assert(std::holds_alternative<ConfigError>(parseServerConfig(invalidDifficulty)));
 
     const auto collisionPath = std::filesystem::temp_directory_path() / "tes3mp-server-collision-content-test";
     const auto writeCollision = [&](std::string_view content) {
@@ -725,12 +740,13 @@ int main()
         assert(static_cast<bool>(stream));
     };
     constexpr std::string_view combatHeader
-        = "TES3MP_COMBAT_V2\n"
+        = "TES3MP_COMBAT_V4\n"
           "manifest 0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20\n"
           "seed 42\n";
     constexpr std::string_view combatBody
-        = "settings 0.2 5 1 0.1 1 1 0.1 0.1 1 1 1.5 1 1.25 0.5 0.02 0.04 0.1\n"
-          "player 50 40 40 1 0 0 10 20 30 40 50 25 100 30 500 0\n"
+        = "settings 0.2 5 1 0.1 1 1 0.1 0.1 1 1 1.5 1 1.25 0.5 0.02 0.04 0.1 5 -90 90 1 1 1 0 100 1 1 1\n"
+          "progression 1 0.75 0.5 0.8 0 1 0 2 0 3 0 4 0 5 0 6 0 7\n"
+          "player 50 40 40 1 0 0 10 20 30 40 50 25 100 30 35 40 80 0.1 0.2 500 0\n"
           "actor 1 20 50 0 0 0 25 0 0 0 0 0\n"
           "actor_attack 1 50 40 40 1 25 50 1 4 1 4 1 4 1 30\n"
           "weapon 4 1 1 10 1 10 1 10 5 1 1\n";
@@ -750,25 +766,44 @@ int main()
         && combat.playerTemplate.maximumHealth == 40.f
         && combat.playerTemplate.maximumFatigue == 100.f
         && combat.playerTemplate.stats.endurance == 30.f
+        && combat.playerTemplate.blockSkill == 35.f
+        && combat.playerTemplate.maximumMagicka == 80.f
+        && combat.playerTemplate.healthRecoveryPerSecond == 0.1f
+        && combat.playerTemplate.magickaRecoveryPerSecond == 0.2f
+        && combat.playerTemplate.skillSettings.majorFactor == 0.5f
+        && combat.playerTemplate.skillRules[static_cast<std::size_t>(
+            CombatProgressionSkill::LongBlade)].useGain == 3.f
+        && combat.settings.difficultyMultiplier == 5.f
         && combat.settings.fatigueReturnMultiplier == 0.04f
         && combat.playerTemplate.weaponSkills[static_cast<std::size_t>(MeleeWeaponSkill::LongBlade)] == 20.f);
     writeCombat(std::string(combatHeader)
-        + "settings nan 5 1 0.1 1 1 0.1 0.1 1 1 1.5 1 1.25 0.5 0.02 0.04 0.1\n"
-          "player 50 40 40 1 0 0 10 20 30 40 50 25 100 30 500 0\n"
+        + "settings nan 5 1 0.1 1 1 0.1 0.1 1 1 1.5 1 1.25 0.5 0.02 0.04 0.1 5 -90 90 1 1 1 0 100 1 1 1\n"
+          "progression 1 0.75 0.5 0.8 0 1 0 2 0 3 0 4 0 5 0 6 0 7\n"
+          "player 50 40 40 1 0 0 10 20 30 40 50 25 100 30 35 40 80 0.1 0.2 500 0\n"
           "actor 1 20 50 0 0 0 25 0 0 0 0 0\n");
     const auto malformedCombat = std::get<CombatContentError>(
         loadCombatContent(combatPath, parsedConfig().contentManifest, actorCatalog, combatItems));
     assert(malformedCombat.code == CombatContentErrorCode::InvalidSettings && malformedCombat.line == 4
         && describeCombatContentError(malformedCombat) == "invalid settings at line 4");
     writeCombat(std::string(combatHeader)
-        + "settings 0.2 5 1 0.1 1 1 0.1 0.1 1 1 1.5 1 1.25 0.5 0.02 0.04 0.1\n"
-          "player 50 40 40 1 0 0 10 20 30 40 50 25 100 30 500 0\n");
+        + "settings 0.2 5 1 0.1 1 1 0.1 0.1 1 1 1.5 1 1.25 0.5 0.02 0.04 0.1 5 -181 90 1 1 1 0 100 1 1 1\n"
+          "progression 1 0.75 0.5 0.8 0 1 0 2 0 3 0 4 0 5 0 6 0 7\n"
+          "player 50 40 40 1 0 0 10 20 30 40 50 25 100 30 35 40 80 0.1 0.2 500 0\n"
+          "actor 1 20 50 0 0 0 25 0 0 0 0 0\n");
+    assert(std::get<CombatContentError>(
+               loadCombatContent(combatPath, parsedConfig().contentManifest, actorCatalog, combatItems))
+               .code
+        == CombatContentErrorCode::InvalidSettings);
+    writeCombat(std::string(combatHeader)
+        + "settings 0.2 5 1 0.1 1 1 0.1 0.1 1 1 1.5 1 1.25 0.5 0.02 0.04 0.1 5 -90 90 1 1 1 0 100 1 1 1\n"
+          "progression 1 0.75 0.5 0.8 0 1 0 2 0 3 0 4 0 5 0 6 0 7\n"
+          "player 50 40 40 1 0 0 10 20 30 40 50 25 100 30 35 40 80 0.1 0.2 500 0\n");
     assert(std::get<CombatContentError>(
                loadCombatContent(combatPath, parsedConfig().contentManifest, actorCatalog, combatItems))
                .code
         == CombatContentErrorCode::InvalidActorSet);
     writeCombat(
-        "TES3MP_COMBAT_V2\n"
+        "TES3MP_COMBAT_V4\n"
         "manifest 0202030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20\n"
         "seed 42\n"
         + std::string(combatBody));
@@ -2170,6 +2205,11 @@ int main()
                         && value->selfMaximumHealth() == finalCombat->maximumHealth
                         && value->selfFatigue() == finalCombat->stats.fatigue
                         && value->selfMaximumFatigue() == finalCombat->maximumFatigue
+                        && value->selfMagicka() == finalCombat->magicka
+                        && value->selfMaximumMagicka() == finalCombat->maximumMagicka
+                        && value->selfSkills().size() == ReplicatedCombatSkillCount
+                        && value->selfSkills()[static_cast<std::size_t>(ReplicatedCombatSkill::LongBlade)].value
+                            == finalCombat->weaponSkills[static_cast<std::size_t>(MeleeWeaponSkill::LongBlade)]
                         && value->actors().size() == 1 && value->actors()[0].health == finalActor->stats.health
                         && value->actors()[0].maximumHealth == finalActor->maximumHealth
                         && value->actors()[0].maximumFatigue == finalActor->maximumFatigue;

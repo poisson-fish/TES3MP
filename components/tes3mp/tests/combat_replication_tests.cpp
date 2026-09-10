@@ -9,6 +9,14 @@ namespace
 {
     template <class T> T value(std::uint64_t raw) { return *T::fromValue(raw); }
 
+    std::array<TES3MP::CombatSkillSnapshot, TES3MP::ReplicatedCombatSkillCount> skills()
+    {
+        std::array<TES3MP::CombatSkillSnapshot, TES3MP::ReplicatedCombatSkillCount> result{};
+        for (std::size_t index = 0; index < result.size(); ++index)
+            result[index] = { static_cast<TES3MP::ReplicatedCombatSkill>(index), 10.f + index, 0.1f };
+        return result;
+    }
+
     bool command_round_trips_and_is_bounded()
     {
         const TES3MP::ClientMeleeAttackCommand input{ value<TES3MP::SessionId>(1),
@@ -32,12 +40,13 @@ namespace
 
     bool snapshots_and_events_round_trip()
     {
+        const auto selfSkills = skills();
         const std::array actors{ TES3MP::ActorCombatSnapshot{ value<TES3MP::ActorId>(2),
             value<TES3MP::CombatRevision>(3), 40.f, 50.f, 20.f, 30.f, false } };
         auto created = TES3MP::LatestWinsCombatSnapshot::create(value<TES3MP::SessionId>(1),
             TES3MP::SessionGeneration::initial(), value<TES3MP::ServerTick>(5),
             value<TES3MP::CanonicalRevision>(6), value<TES3MP::PlayerId>(7),
-            value<TES3MP::CombatRevision>(8), 75.f, 100.f, 90.f, 120.f, false, actors);
+            value<TES3MP::CombatRevision>(8), 75.f, 100.f, 90.f, 120.f, 40.f, 60.f, false, actors, selfSkills);
         const auto snapshot = std::get<TES3MP::LatestWinsCombatSnapshot>(created);
         const auto decodedSnapshot = TES3MP::decodeLatestWinsCombatSnapshot(
             TES3MP::encodeLatestWinsCombatSnapshot(snapshot));
@@ -58,6 +67,9 @@ namespace
 
     bool semantic_validation_rejects_nonfinite_and_unsorted()
     {
+        const auto selfSkills = skills();
+        auto invalidSkills = selfSkills;
+        invalidSkills[0].progress = 1.f;
         const std::array unsorted{ TES3MP::ActorCombatSnapshot{ value<TES3MP::ActorId>(2),
             TES3MP::CombatRevision::initial(), 1.f, 1.f, 1.f, 1.f, false },
             TES3MP::ActorCombatSnapshot{ value<TES3MP::ActorId>(1), TES3MP::CombatRevision::initial(),
@@ -66,13 +78,23 @@ namespace
             TES3MP::SessionGeneration::initial(), TES3MP::ServerTick::initial(),
             TES3MP::CanonicalRevision::initial(), value<TES3MP::PlayerId>(1),
             TES3MP::CombatRevision::initial(), 1.f, 1.f,
-            std::numeric_limits<float>::quiet_NaN(), 1.f, false, {});
+            std::numeric_limits<float>::quiet_NaN(), 1.f, 1.f, 1.f, false, {}, selfSkills);
         const auto order = TES3MP::LatestWinsCombatSnapshot::create(value<TES3MP::SessionId>(1),
             TES3MP::SessionGeneration::initial(), TES3MP::ServerTick::initial(),
             TES3MP::CanonicalRevision::initial(), value<TES3MP::PlayerId>(1),
-            TES3MP::CombatRevision::initial(), 1.f, 1.f, 1.f, 1.f, false, unsorted);
+            TES3MP::CombatRevision::initial(), 1.f, 1.f, 1.f, 1.f, 1.f, 1.f, false, unsorted, selfSkills);
+        const auto magicka = TES3MP::LatestWinsCombatSnapshot::create(value<TES3MP::SessionId>(1),
+            TES3MP::SessionGeneration::initial(), TES3MP::ServerTick::initial(),
+            TES3MP::CanonicalRevision::initial(), value<TES3MP::PlayerId>(1),
+            TES3MP::CombatRevision::initial(), 1.f, 1.f, 1.f, 1.f, 2.f, 1.f, false, {}, selfSkills);
+        const auto progression = TES3MP::LatestWinsCombatSnapshot::create(value<TES3MP::SessionId>(1),
+            TES3MP::SessionGeneration::initial(), TES3MP::ServerTick::initial(),
+            TES3MP::CanonicalRevision::initial(), value<TES3MP::PlayerId>(1),
+            TES3MP::CombatRevision::initial(), 1.f, 1.f, 1.f, 1.f, 1.f, 1.f, false, {}, invalidSkills);
         return std::holds_alternative<TES3MP::CombatReplicationDecodeError>(invalid)
-            && std::holds_alternative<TES3MP::CombatReplicationDecodeError>(order);
+            && std::holds_alternative<TES3MP::CombatReplicationDecodeError>(order)
+            && std::holds_alternative<TES3MP::CombatReplicationDecodeError>(magicka)
+            && std::holds_alternative<TES3MP::CombatReplicationDecodeError>(progression);
     }
 
     bool frame_classes_are_pinned()

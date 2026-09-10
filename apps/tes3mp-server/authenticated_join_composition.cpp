@@ -89,8 +89,8 @@ namespace TES3MP::ServerApp
                 const auto weight = playerInventory->totalWeight(*mItemCatalog);
                 if (join.characterProfile.lifecycle() == CharacterLifecycle::EstablishedCharacter)
                 {
-                    auto characterTemplate
-                        = deriveCharacterCombatTemplate(join.characterProfile, *mPlayerCombatTemplate);
+                    auto characterTemplate = deriveCharacterCombatTemplate(
+                        join.characterProfile, *mPlayerCombatTemplate, mCharacterContent);
                     if (!characterTemplate || !mPendingCombat->initializePlayerFromCharacter(join.player,
                         *characterTemplate, weight, join.characterProfile.revision()))
                         return false;
