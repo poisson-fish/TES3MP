@@ -32,10 +32,14 @@ namespace TES3MP::ServerApp
         std::optional<CanonicalStateVersion> restoredStateVersion() const noexcept;
         std::optional<CanonicalRevision> restoredCanonicalRevision() const noexcept;
         std::optional<ServerTick> restoredCheckpointTick() const noexcept;
+        const CanonicalDurableInventoryState* restoredInventory() const noexcept;
+        const CanonicalDurableCombatState* restoredCombat() const noexcept;
         bool bindPlayerIdentities(const PlayerIdentityRegistry& identities) noexcept;
 
         CanonicalDurabilityResult commit(const std::shared_ptr<const CanonicalStatePublication>& candidate,
-            CanonicalRevision canonicalRevision, std::span<const DurableCommandOrder> commands) noexcept override;
+            CanonicalRevision canonicalRevision, std::span<const DurableCommandOrder> commands,
+            const CanonicalInventoryWorld* inventory = nullptr,
+            const CanonicalCombatWorld* combat = nullptr) noexcept override;
 
     private:
         CanonicalPersistenceFile(std::filesystem::path path, CanonicalDurablePrefix prefix) noexcept

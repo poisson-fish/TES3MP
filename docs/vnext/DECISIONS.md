@@ -186,9 +186,11 @@ the affected code/tests in the same milestone.
   installs or publishes the candidate. Failure leaves the prior state visible.
   Every prefix is exactly bound to configuration, content, script/API package
   versions, deterministic seeds, and complete client/script command ordering.
-  V1 restores established, session-independent player identities and roots but
-  never live sessions or incomplete-chargen roots; later domains extend the
-  envelope rather than creating parallel save authorities.
+  V2 restores established, session-independent roots, inventory, combat, and
+  combat RNG but never live sessions or incomplete-chargen state. It keeps one
+  checkpoint plus a bounded journal tail. Development V1 files are left intact
+  rather than migrated; later domains extend V2 instead of creating parallel
+  save authorities.
 - **Administration.** Public health and privileged operational detail remain
   separate. Administrative APIs do not expose scripting/runtime internals.
 - **Quest isolation.** A future Quest implementation reuses the platform-neutral

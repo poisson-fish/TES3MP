@@ -393,32 +393,33 @@ Primary sources: [`server_scripting.hpp`](../../components/tes3mp/include/tes3mp
 [`server_command_reducer.cpp`](../../components/tes3mp/server_core/server_command_reducer.cpp),
 and [`server_application.cpp`](../../apps/tes3mp-server/server_application.cpp).
 
-### Transactional player-root persistence and replay envelope
+### Transactional gameplay persistence and replay envelope
 
-- Version 1 of the engine-independent persistence contract binds every durable
+- Version 2 of the engine-independent persistence contract binds every durable
   prefix to the content manifest, a SHA-256 server-configuration identity,
-  script API/package versions, and named deterministic seed states. Each
-  chained transaction carries canonical state version, canonical revision,
-  checkpoint tick, the complete normalized client/script command order and
-  disposition, and a checksum of the session-independent player roots.
+  script API/package versions, and named deterministic seed states. Each record
+  carries canonical state version, canonical revision, checkpoint tick, complete
+  normalized client/script command order and disposition, session-independent
+  player roots, inventory/equipment/container/ground state, complete player and
+  actor combat state, combat simulation tick and PRNG words, and one checksum
+  across the full durable snapshot.
 - The reducer offers a fully prepared immutable candidate to the durability
   port before installing it or publishing it to replay, scripts, metrics, or
   clients. Only `Committed` acknowledges durability. Rejection or I/O failure
   leaves the previous canonical state and publication installed.
-- The production V1 adapter stores the verified prefix beside `players.txt` as
-  `players.txt.world-v1`. It bounds files, records, players, scripts, seeds, and
-  commands; checks the whole file and each chained transaction; flushes a
-  temporary file; and atomically replaces the committed file. A stale temporary
-  file is ignored. Restart validates the complete prefix and all identities
-  before restoring player roots and version/revision/tick counters; live
-  sessions are intentionally not restored.
-- The replay contract consumes the recorded command ordering one transaction at
-  a time and requires the resulting session-independent canonical state to
-  match every recorded checksum. Truncation, corruption, unsupported versions,
-  or content/configuration/script/seed mismatches reject the whole candidate
-  without exposing a partial restore. Only established-character roots enter
-  the durable root set; incomplete chargen still follows the deliberate fresh
-  pre-chargen restart policy.
+- The production V2 adapter stores a checkpoint plus at most 32 chained journal
+  records beside `players.txt` as `players.txt.world-v2`. On overflow it rebases
+  the previous complete tick as the new checkpoint, bounding persistence cost,
+  file size, and recovery verification. It flushes a temporary file and
+  atomically replaces the committed file; every crash cut therefore selects the
+  previous or new complete multi-domain tick, never a mixture. V1 development
+  files remain untouched and are not migrated.
+- Restart validates the complete bounded prefix and exact identity before
+  restoring roots, inventory, combat, PRNG, and version/revision/tick counters;
+  live sessions are intentionally not restored. Replay begins from the verified
+  checkpoint, consumes tail ordering one tick at a time, and requires the full
+  reconstructed durable checksum at every record. Only established-character
+  player state is retained; incomplete chargen still restarts fresh.
 
 Primary sources: [`canonical_persistence.hpp`](../../components/tes3mp/include/tes3mp/canonical_persistence.hpp),
 [`canonical_persistence.cpp`](../../components/tes3mp/server_core/canonical_persistence.cpp),
@@ -470,16 +471,15 @@ and [`test_bake_tes3mp_content.py`](../../scripts/tests/test_bake_tes3mp_content
   delegation.
 - Interactive traps publish bounded outcomes but full spell-effect resolution
   does not exist. Lockpicking and probe disarming do not exist.
-- Inventory does not include barter/trade, merchant stock/restocking, disk
-  persistence, or repair commands.
+- Inventory does not include barter/trade, merchant stock/restocking, or repair
+  commands.
 - The packaged default is intentionally narrow: one vanilla dagger, one chitin
   shield, one rat, one starting loadout, and pre-inflated collision boxes for
   the four initial cells. The baker derives selected gameplay values from ESM
   records, but does not extract arbitrary NIF/terrain geometry or broad world
   catalogs.
   Historical contact uses canonical root distance and static collision
-  occlusion, not rewound animation volumes or per-bone weapon traces. Combat
-  state is not persisted.
+  occlusion, not rewound animation volumes or per-bone weapon traces.
 - The current resolver covers direct player-versus-server-actor weapon and
   hand-to-hand hit, fatigue, resistance, critical/knockdown multipliers, weapon
   wear, damage, death, reactive actor attacks, hit animations, timed in-place
@@ -498,16 +498,17 @@ and [`test_bake_tes3mp_content.py`](../../scripts/tests/test_bake_tes3mp_content
   duration/area magic, active spellcasting, Lua hit callbacks, and general magic
   remain unimplemented.
 - Established root checkpoints, current canonical player roots, complete
-  character profiles, canonical version/revision/tick counters, deterministic
-  identity, and command ordering survive restart. Canonical inventory, combat,
-  dynamic world/object/actor state, and live script memory do not. Chargen is the only
+  character profiles, inventory, equipment, containers, ground items, combat,
+  combat RNG, canonical version/revision/tick counters, deterministic identity,
+  and bounded command ordering survive restart. Dynamic object state, actor
+  simulation state outside combat, quests, globals, and live script memory do not. Chargen is the only
   packaged scripted sequence with explicit server safe points today. The
   runtime-neutral versioned server-scripting boundary and its first safe-point
   command exist, but no script content loader or interpreter is packaged and the
   default server registers no callbacks. Other cutscenes, quest/script progress,
   and their intermediate state are not yet canonical or durable. Starting
   inventory/equipment is modeled in the profile, while broader inventory
-  persistence remains unfinished.
+  persistence beyond the implemented gameplay domains remains unfinished.
 - The packaged default is the verified installed vanilla manifest. Other
   loadouts still require bounded content generation and local record mappings;
   server discovery/history remain unfinished. The V2 baker binds TES3 content
@@ -522,13 +523,12 @@ and [`test_bake_tes3mp_content.py`](../../scripts/tests/test_bake_tes3mp_content
 
 ## Work still required
 
-### Next milestone: durable gameplay domains
+### Next milestone: broader durable world domains
 
 Extend the versioned transaction payload and canonical checksum across
-inventory, combat, actors, objects, quests, globals, and eventually live script
-state. Add bounded checkpoint compaction and upgrade policy without weakening
-the existing acknowledgement point or exact identity checks. TES3MP 0.8.x
-saves remain unsupported.
+actors, objects, quests, globals, and eventually live script state without
+weakening the existing acknowledgement point, bounded recovery, or exact
+identity checks. TES3MP 0.8.x saves remain unsupported.
 
 ### Required before the desktop/PC-VR release
 
@@ -560,21 +560,23 @@ and do not enter protocol or canonical state.
 
 ## Verification snapshot
 
-The transactional player-root persistence working tree passed the following
+The bounded multi-domain persistence working tree passed the following
 on 2026-09-10:
 
-- the standalone aggregate, including the new format, identity, ordering,
-  checksum replay, pre-publication acknowledgement, corruption, truncation,
-  atomic replacement, and stale-temporary-file recovery contracts;
-- the dedicated-server application aggregate; and
-- the bounded Windows dedicated-server product build;
+- the standalone aggregate, including V2 domain round trips, inventory/combat
+  replay with RNG and full durable checksum comparison, identity and ordering,
+  and pre-publication acknowledgement;
+- the dedicated-server application aggregate, including bounded compaction,
+  corruption/truncation rejection, exhaustive candidate-file crash cuts, atomic
+  replacement, and stale-temporary-file recovery;
+- the bounded Windows checks graph and dedicated-server product build;
 - all 196 repository Python tests; and
 - patch-registry verification.
 
 Protocol generation, content baking, the shipping client, and the headless
 client were unaffected and were not rerun for this milestone. The repository
-baseline verifier was run but remains blocked by pre-existing provenance drift
-outside this milestone. The Linux-only sanitizer/fuzzer
+baseline verifier was not rerun and remains known to be blocked by pre-existing
+provenance drift outside this milestone. The Linux-only sanitizer/fuzzer
 execution profile, non-Windows builds, PC-VR hardware checks, a full upstream
 OpenMW baseline, and a human-driven visible OpenMW walkthrough were not
 performed. The product build uses the newest installed MSVC so its STL matches

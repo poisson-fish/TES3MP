@@ -1,13 +1,13 @@
 #include "authenticated_join_composition.hpp"
 
 #include "actor_interest_projection.hpp"
-#include "connection_session_coordinator.hpp"
 #include "combat_interest_projection.hpp"
+#include "connection_session_coordinator.hpp"
 #include "interactive_object_interest_projection.hpp"
 #include "interest_projection.hpp"
 #include "inventory_interest_projection.hpp"
-#include "tes3mp/protocol_frame.hpp"
 #include "tes3mp/character_creation_protocol.hpp"
+#include "tes3mp/protocol_frame.hpp"
 
 #include <algorithm>
 #include <variant>
@@ -58,8 +58,9 @@ namespace TES3MP::ServerApp
                 if (!mPendingInventory->ensurePlayer(join.player))
                     return false;
                 if (join.characterProfile.lifecycle() == CharacterLifecycle::EstablishedCharacter
-                    && (!mItemCatalog || !mPendingInventory->initializePlayerFromCharacter(join.player,
-                        join.characterProfile.revision(), join.characterProfile.startingInventory(), tick)))
+                    && (!mItemCatalog
+                        || !mPendingInventory->initializePlayerFromCharacter(join.player,
+                            join.characterProfile.revision(), join.characterProfile.startingInventory(), tick)))
                     return false;
             }
             if (inventoryCapable)
@@ -73,11 +74,11 @@ namespace TES3MP::ServerApp
                 inventoryBaselines.emplace_back(mConnection, std::move(*inventoryBaseline));
             }
             const auto combatCapable = joiningSession && joiningSession->negotiatedHello()
-                && std::ranges::binary_search(joiningSession->negotiatedHello()->negotiatedCapabilities(),
-                    combatReplicationCapability());
+                && std::ranges::binary_search(
+                    joiningSession->negotiatedHello()->negotiatedCapabilities(), combatReplicationCapability());
             const auto characterCapable = joiningSession && joiningSession->negotiatedHello()
-                && std::ranges::binary_search(joiningSession->negotiatedHello()->negotiatedCapabilities(),
-                    characterCreationCapability());
+                && std::ranges::binary_search(
+                    joiningSession->negotiatedHello()->negotiatedCapabilities(), characterCreationCapability());
             if (mCombat)
             {
                 if (!mPendingInventory || !mPlayerCombatTemplate || !mItemCatalog)
@@ -91,8 +92,9 @@ namespace TES3MP::ServerApp
                 {
                     auto characterTemplate = deriveCharacterCombatTemplate(
                         join.characterProfile, *mPlayerCombatTemplate, mCharacterContent);
-                    if (!characterTemplate || !mPendingCombat->initializePlayerFromCharacter(join.player,
-                        *characterTemplate, weight, join.characterProfile.revision()))
+                    if (!characterTemplate
+                        || !mPendingCombat->initializePlayerFromCharacter(
+                            join.player, *characterTemplate, weight, join.characterProfile.revision()))
                         return false;
                 }
                 else if (!mPendingCombat->ensurePlayer(join.player, *mPlayerCombatTemplate, weight))
@@ -143,11 +145,11 @@ namespace TES3MP::ServerApp
             messages.push_back({ mConnection, TransportChannel::LatestWins, owned[2] });
             if (characterCapable)
             {
-                auto profileFrame = encodeProtocolFrame(MessageClass::ReliableOperation,
-                    MessageKind::ReliableCharacterProfile,
-                    encodeReliableCharacterProfile({ join.session,
-                        join.initialSnapshot.header().targetSessionGeneration(), join.player,
-                        CharacterConfirmationResult::Confirmed, join.characterProfile }));
+                auto profileFrame
+                    = encodeProtocolFrame(MessageClass::ReliableOperation, MessageKind::ReliableCharacterProfile,
+                        encodeReliableCharacterProfile(
+                            { join.session, join.initialSnapshot.header().targetSessionGeneration(), join.player,
+                                CharacterConfirmationResult::Confirmed, join.characterProfile }));
                 if (!std::holds_alternative<std::vector<std::byte>>(profileFrame))
                     return false;
                 owned.push_back(std::get<std::vector<std::byte>>(std::move(profileFrame)));
@@ -236,14 +238,13 @@ namespace TES3MP::ServerApp
     }
 
     JoinCompositionOutcome AuthenticatedJoinComposition::join(PrincipalId principal, SessionGeneration generation,
-        ServerTick tick, ResumeTokenContext context,
-        std::optional<AuthenticatedAdmission::PlayerClaim> playerClaim,
-        std::optional<PlayerCredential> providedCredential,
-        std::string username) noexcept
+        ServerTick tick, ResumeTokenContext context, std::optional<AuthenticatedAdmission::PlayerClaim> playerClaim,
+        std::optional<PlayerCredential> providedCredential, std::string username) noexcept
     {
         const bool clientProvidedCredential = providedCredential.has_value();
-        auto prepared = playerClaim ? mJoins.prepareReattach(principal, *playerClaim, generation, tick)
-                                    : mJoins.prepare(principal, generation, tick, std::move(providedCredential), std::move(username));
+        auto prepared = playerClaim
+            ? mJoins.prepareReattach(principal, *playerClaim, generation, tick)
+            : mJoins.prepare(principal, generation, tick, std::move(providedCredential), std::move(username));
         if (!std::holds_alternative<AuthenticatedJoinPreparation>(prepared))
             return { JoinCompositionResult::JoinRejected, std::nullopt };
 
@@ -260,20 +261,19 @@ namespace TES3MP::ServerApp
         try
         {
             auto accepted = std::get<AuthenticationAcceptedMessage>(std::move(issued));
-            auto playerCredential = clientProvidedCredential
-                ? std::optional<PlayerCredential>{}
-                : mJoins.copyPendingPlayerCredential(preparation.id);
-            if (mJoins.pendingCreatesPersistentIdentity(preparation.id)
-                && !clientProvidedCredential && !playerCredential)
+            auto playerCredential = clientProvidedCredential ? std::optional<PlayerCredential>{}
+                                                             : mJoins.copyPendingPlayerCredential(preparation.id);
+            if (mJoins.pendingCreatesPersistentIdentity(preparation.id) && !clientProvidedCredential
+                && !playerCredential)
             {
                 cancel();
                 return { JoinCompositionResult::EncodingRejected, std::nullopt };
             }
             if (playerCredential)
             {
-                auto withPlayerCredential = AuthenticationAcceptedMessage::create(
-                    accepted.takeToken(), accepted.lifetimeMilliseconds(), std::move(*playerCredential),
-                    preparation.join.characterLifecycle, preparation.join.profileRevision);
+                auto withPlayerCredential = AuthenticationAcceptedMessage::create(accepted.takeToken(),
+                    accepted.lifetimeMilliseconds(), std::move(*playerCredential), preparation.join.characterLifecycle,
+                    preparation.join.profileRevision);
                 if (!withPlayerCredential)
                 {
                     cancel();
@@ -283,9 +283,9 @@ namespace TES3MP::ServerApp
             }
             else
             {
-                auto withCharacterState = AuthenticationAcceptedMessage::create(accepted.takeToken(),
-                    accepted.lifetimeMilliseconds(), std::nullopt, preparation.join.characterLifecycle,
-                    preparation.join.profileRevision);
+                auto withCharacterState
+                    = AuthenticationAcceptedMessage::create(accepted.takeToken(), accepted.lifetimeMilliseconds(),
+                        std::nullopt, preparation.join.characterLifecycle, preparation.join.profileRevision);
                 if (!withCharacterState)
                 {
                     cancel();
@@ -323,7 +323,7 @@ namespace TES3MP::ServerApp
             return { JoinCompositionResult::EncodingRejected, std::nullopt };
         }
 
-        auto committed = mJoins.commit(preparation.id);
+        auto committed = mJoins.commit(preparation.id, mResponses.pendingInventory(), mResponses.pendingCombat());
         if (auto* joined = std::get_if<AuthenticatedJoinResult>(&committed))
         {
             if (!mResponses.commitJoinState())

@@ -232,7 +232,8 @@ namespace TES3MP
         CanonicalStateVersion stateVersion() const noexcept { return mStateVersion; }
         CanonicalRevision canonicalRevision() const noexcept { return mCanonicalRevision; }
         ServerTick checkpointTick() const noexcept { return mCheckpointTick; }
-        bool configureDurability(CanonicalDurabilityPort& durability) noexcept;
+        bool configureDurability(CanonicalDurabilityPort& durability, CanonicalInventoryWorld* inventory = nullptr,
+            CanonicalCombatWorld* combat = nullptr) noexcept;
         std::shared_ptr<const CanonicalStatePublication> latestPublication() const noexcept;
         PreparedBatch prepare(const ServerTickCommandBatch& batch);
         PreparedBatch prepare(const ServerTickCommandBatch& batch, const CanonicalInteractiveObjectWorld& objects,
@@ -261,14 +262,16 @@ namespace TES3MP
         bool commit(PreparedBatch&& prepared, CanonicalCommandWorlds worlds);
         std::optional<PreparedJoin> prepareJoin(
             CanonicalPlayerEntityState player, CanonicalSessionProgress session, ServerTick tick);
-        bool commit(PreparedJoin&& prepared);
+        bool commit(PreparedJoin&& prepared, const CanonicalInventoryWorld* inventory = nullptr,
+            const CanonicalCombatWorld* combat = nullptr);
         std::optional<PreparedLifecycle> prepareDisconnect(SessionId session, ServerTick tick);
         std::optional<PreparedLifecycle> prepareDisconnectBatch(std::span<const SessionId> sessions, ServerTick tick);
         std::optional<PreparedLifecycle> prepareResume(CanonicalSessionProgress session, ServerTick tick);
         std::optional<PreparedLifecycle> preparePlayerSafePoint(PlayerId player, Transform transform, ServerTick tick);
         std::optional<PreparedLifecycle> prepareExpiration(
             PlayerId player, SessionId session, SessionGeneration generation, ServerTick tick);
-        bool commit(PreparedLifecycle&& prepared);
+        bool commit(PreparedLifecycle&& prepared, const CanonicalInventoryWorld* inventory = nullptr,
+            const CanonicalCombatWorld* combat = nullptr);
         CommandBatchReductionResult apply(const ServerTickCommandBatch& batch);
 
     private:
@@ -302,6 +305,8 @@ namespace TES3MP
         Observability& mObservability;
         CanonicalSinkBundle mSinks;
         CanonicalDurabilityPort* mDurability = nullptr;
+        CanonicalInventoryWorld* mDurableInventory = nullptr;
+        CanonicalCombatWorld* mDurableCombat = nullptr;
         ContentManifest mContentManifest;
         ServerCollisionQuery* mCollision;
         std::vector<PlayerId> mClientAuthoritativePlayers;

@@ -16,9 +16,9 @@ namespace
 
 namespace TES3MP
 {
-    AuthenticatedJoinCoordinator::AuthenticatedJoinCoordinator(std::vector<Transform> spawns,
-        AppearanceId appearance, AuthenticatedJoinIdentitySeed seed, CanonicalCommandReducer& reducer,
-        ContentManifest contentManifest, PlayerIdentityRegistry* playerIdentities) noexcept
+    AuthenticatedJoinCoordinator::AuthenticatedJoinCoordinator(std::vector<Transform> spawns, AppearanceId appearance,
+        AuthenticatedJoinIdentitySeed seed, CanonicalCommandReducer& reducer, ContentManifest contentManifest,
+        PlayerIdentityRegistry* playerIdentities) noexcept
         : mSpawns(std::move(spawns))
         , mAppearance(appearance)
         , mSeed(seed)
@@ -30,11 +30,9 @@ namespace TES3MP
     }
 
     std::optional<AuthenticatedJoinCoordinator> AuthenticatedJoinCoordinator::create(
-        Transform spawn, AppearanceId appearance, AuthenticatedJoinIdentitySeed seed,
-        CanonicalCommandReducer& reducer)
+        Transform spawn, AppearanceId appearance, AuthenticatedJoinIdentitySeed seed, CanonicalCommandReducer& reducer)
     {
-        return AuthenticatedJoinCoordinator(
-            { spawn }, appearance, seed, reducer, testContentManifest(), nullptr);
+        return AuthenticatedJoinCoordinator({ spawn }, appearance, seed, reducer, testContentManifest(), nullptr);
     }
 
     std::optional<AuthenticatedJoinCoordinator> AuthenticatedJoinCoordinator::create(Transform spawn,
@@ -54,8 +52,8 @@ namespace TES3MP
             return std::nullopt;
         return AuthenticatedJoinCoordinator(std::vector<Transform>(spawns.begin(), spawns.end()),
             contentManifest.defaultAppearance(),
-            { nextSession, PlayerId::fromValue(1).value(), EntityId::fromValue(1).value() },
-            reducer, contentManifest, &playerIdentities);
+            { nextSession, PlayerId::fromValue(1).value(), EntityId::fromValue(1).value() }, reducer, contentManifest,
+            &playerIdentities);
     }
 
     AuthenticatedJoinOutcome AuthenticatedJoinCoordinator::join(
@@ -68,9 +66,9 @@ namespace TES3MP
         return commit(value->id);
     }
 
-    AuthenticatedJoinPrepareOutcome AuthenticatedJoinCoordinator::prepare(
-        PrincipalId principal, SessionGeneration generation, ServerTick serverTick,
-        std::optional<PlayerCredential> credential, std::string username)
+    AuthenticatedJoinPrepareOutcome AuthenticatedJoinCoordinator::prepare(PrincipalId principal,
+        SessionGeneration generation, ServerTick serverTick, std::optional<PlayerCredential> credential,
+        std::string username)
     {
         if (mPending)
             return AuthenticatedJoinError::PreparationPending;
@@ -85,18 +83,20 @@ namespace TES3MP
             return AuthenticatedJoinError::IdentityExhausted;
         if (mPlayerIdentities)
         {
-            auto identity = mPlayerIdentities->prepareCreate(mContentManifest, std::move(credential), std::move(username));
+            auto identity
+                = mPlayerIdentities->prepareCreate(mContentManifest, std::move(credential), std::move(username));
             auto* prepared = std::get_if<PreparedPlayerIdentity>(&identity);
             if (!prepared)
                 return std::get<PlayerIdentityError>(identity) == PlayerIdentityError::Full
-                    ? AuthenticatedJoinError::CapacityExhausted : AuthenticatedJoinError::IdentityExhausted;
+                    ? AuthenticatedJoinError::CapacityExhausted
+                    : AuthenticatedJoinError::IdentityExhausted;
             auto result = prepareIdentity(principal, prepared->claim, true, prepared->id, generation, serverTick);
             if (!std::holds_alternative<AuthenticatedJoinPreparation>(result))
                 (void)mPlayerIdentities->cancel(prepared->id);
             return result;
         }
-        const AuthenticatedAdmission::PlayerClaim claim{ mSeed.nextPlayer, mSeed.nextEntity,
-            mAppearance, mContentManifest.id() };
+        const AuthenticatedAdmission::PlayerClaim claim{ mSeed.nextPlayer, mSeed.nextEntity, mAppearance,
+            mContentManifest.id() };
         return prepareIdentity(principal, claim, true, std::nullopt, generation, serverTick);
     }
 
@@ -115,10 +115,9 @@ namespace TES3MP
         std::optional<PrincipalId> replacedPrincipal;
         if (previous != mPrincipals.end())
         {
-            const bool stillActive = std::any_of(mReducer.state().activeSessions().begin(),
-                mReducer.state().activeSessions().end(), [&](const auto& session) {
-                    return session.playerId() == claim.player;
-                });
+            const bool stillActive
+                = std::any_of(mReducer.state().activeSessions().begin(), mReducer.state().activeSessions().end(),
+                    [&](const auto& session) { return session.playerId() == claim.player; });
             if (stillActive)
                 return AuthenticatedJoinError::DuplicatePrincipal;
             replacedPrincipal = previous->principal;
@@ -150,9 +149,9 @@ namespace TES3MP
                 const auto authority = saved->authorityEpoch().next();
                 if (!revision || !authority)
                     return AuthenticatedJoinError::CanonicalStateRejected;
-                canonicalPlayer = CanonicalPlayerEntityState(claim.player, claim.entity, claim.appearance,
-                    saved->transform(), LinearVelocity3(0, 0, 0), *revision, *authority, serverTick,
-                    LocomotionMode::Walk);
+                canonicalPlayer
+                    = CanonicalPlayerEntityState(claim.player, claim.entity, claim.appearance, saved->transform(),
+                        LinearVelocity3(0, 0, 0), *revision, *authority, serverTick, LocomotionMode::Walk);
             }
         if (const auto* existing = mReducer.state().findPlayer(claim.player))
         {
@@ -163,10 +162,11 @@ namespace TES3MP
             if (!revision || !authority)
                 return AuthenticatedJoinError::CanonicalStateRejected;
             canonicalPlayer = CanonicalPlayerEntityState(claim.player, claim.entity, claim.appearance,
-                established ? existing->transform() : spawn, LinearVelocity3(0, 0, 0),
-                *revision, *authority, serverTick, LocomotionMode::Walk);
+                established ? existing->transform() : spawn, LinearVelocity3(0, 0, 0), *revision, *authority,
+                serverTick, LocomotionMode::Walk);
         }
-        CanonicalSessionProgress canonicalSession(mSeed.nextSession, generation, claim.player, claim.entity, std::nullopt);
+        CanonicalSessionProgress canonicalSession(
+            mSeed.nextSession, generation, claim.player, claim.entity, std::nullopt);
         auto candidate = mReducer.prepareJoin(canonicalPlayer, canonicalSession, serverTick);
         if (!candidate)
             return AuthenticatedJoinError::CanonicalStateRejected;
@@ -194,12 +194,13 @@ namespace TES3MP
             profile ? profile->revision() : CharacterProfileRevision::initial(),
             profile ? *profile : CharacterProfile::fresh() };
         const auto preparationId = mNextPreparationId++;
-        mPending.emplace(PendingJoin{
-            preparationId, std::move(*candidate), result, identityPreparation, replacedPrincipal });
+        mPending.emplace(
+            PendingJoin{ preparationId, std::move(*candidate), result, identityPreparation, replacedPrincipal });
         return AuthenticatedJoinPreparation{ preparationId, std::move(result) };
     }
 
-    AuthenticatedJoinOutcome AuthenticatedJoinCoordinator::commit(std::uint64_t preparationId)
+    AuthenticatedJoinOutcome AuthenticatedJoinCoordinator::commit(
+        std::uint64_t preparationId, const CanonicalInventoryWorld* inventory, const CanonicalCombatWorld* combat)
     {
         if (!mPending || mPending->id != preparationId)
             return AuthenticatedJoinError::StalePreparation;
@@ -213,7 +214,7 @@ namespace TES3MP
             mPending.reset();
             return AuthenticatedJoinError::CanonicalStateRejected;
         }
-        if (!mReducer.commit(std::move(mPending->state)))
+        if (!mReducer.commit(std::move(mPending->state), inventory, combat))
         {
             if (identityPreparation && mPlayerIdentities)
                 (void)mPlayerIdentities->rollback(*identityPreparation);
@@ -236,8 +237,10 @@ namespace TES3MP
         else
             mPrincipals.push_back({ result.principal, result.player });
         const auto nextSession = advance(mSeed.nextSession);
-        const auto nextPlayer = mPlayerIdentities ? std::optional<PlayerId>(mSeed.nextPlayer) : advance(mSeed.nextPlayer);
-        const auto nextEntity = mPlayerIdentities ? std::optional<EntityId>(mSeed.nextEntity) : advance(mSeed.nextEntity);
+        const auto nextPlayer
+            = mPlayerIdentities ? std::optional<PlayerId>(mSeed.nextPlayer) : advance(mSeed.nextPlayer);
+        const auto nextEntity
+            = mPlayerIdentities ? std::optional<EntityId>(mSeed.nextEntity) : advance(mSeed.nextEntity);
         if (nextSession && nextPlayer && nextEntity)
             mSeed = { *nextSession, *nextPlayer, *nextEntity };
         else
@@ -264,7 +267,8 @@ namespace TES3MP
         std::uint64_t preparationId) const noexcept
     {
         return mPending && mPending->id == preparationId
-            ? std::optional<CanonicalRevision>(mPending->state.candidateRevision()) : std::nullopt;
+            ? std::optional<CanonicalRevision>(mPending->state.candidateRevision())
+            : std::nullopt;
     }
 
     std::optional<CanonicalStateVersion> AuthenticatedJoinCoordinator::candidateStateVersion(
@@ -327,8 +331,7 @@ namespace TES3MP
     CharacterCreationPrepareOutcome AuthenticatedJoinCoordinator::prepareCharacterCreation(PlayerId player,
         const CharacterContentCatalog& catalog, const CharacterCreationCommand& command, ServerTick tick,
         CanonicalInventoryWorld* inventory, CanonicalCombatWorld* combat,
-        const CanonicalPlayerCombatTemplate* playerCombatTemplate,
-        const ItemPrototypeCatalog* itemCatalog) noexcept
+        const CanonicalPlayerCombatTemplate* playerCombatTemplate, const ItemPrototypeCatalog* itemCatalog) noexcept
     try
     {
         if (!mPlayerIdentities)
@@ -375,8 +378,8 @@ namespace TES3MP
                 if (!characterTemplate || !playerInventory)
                     return CharacterProfileError::InvalidInitialState;
                 prepared.mCombat = *combat;
-                if (!prepared.mCombat->initializePlayerFromCharacter(player, *characterTemplate,
-                        playerInventory->totalWeight(*itemCatalog), profile->revision()))
+                if (!prepared.mCombat->initializePlayerFromCharacter(
+                        player, *characterTemplate, playerInventory->totalWeight(*itemCatalog), profile->revision()))
                     return CharacterProfileError::InvalidInitialState;
                 prepared.mCombatTarget = combat;
             }
@@ -407,7 +410,9 @@ namespace TES3MP
             (void)mPlayerIdentities->cancelCharacterCreation(prepared.mIdentityPreparation);
             return false;
         }
-        if (prepared.mSafePoint && !mReducer.commit(std::move(*prepared.mSafePoint)))
+        if (prepared.mSafePoint
+            && !mReducer.commit(std::move(*prepared.mSafePoint), prepared.mInventory ? &*prepared.mInventory : nullptr,
+                prepared.mCombat ? &*prepared.mCombat : nullptr))
         {
             (void)mPlayerIdentities->rollbackCharacterCreation(prepared.mIdentityPreparation);
             return false;
@@ -426,8 +431,7 @@ namespace TES3MP
     }
 
     CharacterProfileApplyResult AuthenticatedJoinCoordinator::applyCharacterCreation(PlayerId player,
-        const CharacterContentCatalog& catalog, const CharacterCreationCommand& command,
-        ServerTick tick) noexcept
+        const CharacterContentCatalog& catalog, const CharacterCreationCommand& command, ServerTick tick) noexcept
     {
         auto result = prepareCharacterCreation(player, catalog, command, tick);
         auto* prepared = std::get_if<PreparedCharacterCreation>(&result);

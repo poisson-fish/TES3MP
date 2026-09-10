@@ -71,8 +71,7 @@ namespace TES3MP
         std::uint64_t totalWeight(const ItemPrototypeCatalog& catalog) const noexcept;
 
         friend bool operator==(
-            const CanonicalContainerInventoryState&, const CanonicalContainerInventoryState&) noexcept
-            = default;
+            const CanonicalContainerInventoryState&, const CanonicalContainerInventoryState&) noexcept = default;
     };
 
     struct CanonicalWorldItemState
@@ -187,6 +186,7 @@ namespace TES3MP
         std::span<const CanonicalPlayerInventoryState> players() const noexcept { return mPlayers; }
         std::span<const CanonicalContainerInventoryState> containers() const noexcept { return mContainers; }
         std::span<const CanonicalWorldItemState> worldItems() const noexcept { return mWorldItems; }
+        std::optional<ItemStackId> nextItemStackId() const noexcept { return mNextItemStackId; }
 
         const CanonicalPlayerInventoryState* findPlayer(PlayerId player) const noexcept;
 
@@ -201,10 +201,10 @@ namespace TES3MP
             std::span<const StartingItem> startingItems, ServerTick tick) noexcept;
         bool ensureContainer(
             ContainerId container, CellId cell, Position3 position, std::uint32_t capacityWeight = 0) noexcept;
-        EquippedConditionResult setEquippedItemCondition(PlayerId player, EquipmentSlot slot,
-            ItemStackId stack, std::uint32_t condition, bool unequip, ServerTick tick) noexcept;
-        EquippedConditionResult setEquippedItemEnchantmentCharge(PlayerId player, EquipmentSlot slot,
-            ItemStackId stack, std::uint32_t charge, ServerTick tick) noexcept;
+        EquippedConditionResult setEquippedItemCondition(PlayerId player, EquipmentSlot slot, ItemStackId stack,
+            std::uint32_t condition, bool unequip, ServerTick tick) noexcept;
+        EquippedConditionResult setEquippedItemEnchantmentCharge(
+            PlayerId player, EquipmentSlot slot, ItemStackId stack, std::uint32_t charge, ServerTick tick) noexcept;
 
         friend bool operator==(const CanonicalInventoryWorld&, const CanonicalInventoryWorld&) noexcept = default;
 

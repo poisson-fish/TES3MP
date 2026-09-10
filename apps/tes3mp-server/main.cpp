@@ -305,7 +305,7 @@ int main(int argc, char** argv)
     auto persistenceIdentity = TES3MP::CanonicalPersistenceIdentity::create(
         config.contentManifest.id(), *configurationId, {}, persistenceSeeds);
     auto persistencePath = config.playerIdentityFile;
-    persistencePath += ".world-v1";
+    persistencePath += ".world-v2";
     auto persistenceFileResult = persistenceIdentity
         ? TES3MP::ServerApp::CanonicalPersistenceFile::open(persistencePath, *persistenceIdentity)
         : std::variant<std::unique_ptr<TES3MP::ServerApp::CanonicalPersistenceFile>,
@@ -334,6 +334,42 @@ int main(int argc, char** argv)
                 return 2;
             }
         }
+    }
+    if (const auto* restoredInventory = persistenceFile->restoredInventory())
+    {
+        if (!inventoryWorld || !itemCatalog)
+        {
+            std::cerr << "persisted inventory has no configured domain\n";
+            return 2;
+        }
+        auto world
+            = TES3MP::CanonicalInventoryWorld::create(config.contentManifest, *itemCatalog, restoredInventory->players,
+                restoredInventory->containers, restoredInventory->worldItems, restoredInventory->nextItemStackId);
+        if (!world)
+        {
+            std::cerr << "persisted inventory validation failed\n";
+            return 2;
+        }
+        inventoryWorld = std::move(*world);
+    }
+    if (const auto* restoredCombat = persistenceFile->restoredCombat())
+    {
+        const auto random = TES3MP::RandomStateV1::fromWords(restoredCombat->randomWords[0],
+            restoredCombat->randomWords[1], restoredCombat->randomWords[2], restoredCombat->randomWords[3]);
+        auto world = random
+            ? TES3MP::createCanonicalCombatWorld(
+                  restoredCombat->players, restoredCombat->actors, *random, restoredCombat->lastSimulationTick)
+            : std::variant<TES3MP::CanonicalCombatWorld, TES3MP::CanonicalCombatWorldError>(
+                  TES3MP::CanonicalCombatWorldError{ TES3MP::CanonicalCombatWorldErrorCode::InvalidStat });
+        auto* restored = std::get_if<TES3MP::CanonicalCombatWorld>(&world);
+        if (!combatContent || !restored || restored->actors().size() != combatContent->world.actors().size()
+            || !std::equal(restored->actors().begin(), restored->actors().end(), combatContent->world.actors().begin(),
+                [](const auto& left, const auto& right) { return left.actorId == right.actorId; }))
+        {
+            std::cerr << "persisted combat validation failed\n";
+            return 2;
+        }
+        combatContent->world = std::move(*restored);
     }
     std::vector<TES3MP::PersistedPlayerIdentity> identityRecords(
         identityFile->records().begin(), identityFile->records().end());
@@ -414,7 +450,8 @@ int main(int argc, char** argv)
     TES3MP::CanonicalCommandReducer reducer(std::move(initialState), restoredVersion, restoredRevision, restoredTick,
         observability, TES3MP::CanonicalSinkBundle(nullptr, nullptr, &scripts, nullptr), config.contentManifest,
         *collision);
-    if (!reducer.configureDurability(*persistenceFile))
+    if (!reducer.configureDurability(*persistenceFile, inventoryWorld ? &*inventoryWorld : nullptr,
+            combatContent ? &combatContent->world : nullptr))
     {
         std::cerr << "canonical persistence composition failed\n";
         return 3;

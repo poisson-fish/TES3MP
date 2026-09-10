@@ -1,6 +1,8 @@
 #include <tes3mp/canonical_persistence.hpp>
 
 #include <algorithm>
+#include <bit>
+#include <cmath>
 #include <limits>
 #include <tuple>
 #include <type_traits>
@@ -148,6 +150,571 @@ namespace
             LinearVelocity3(*vx, *vy, *vz), *revision, *epoch, *tick, static_cast<LocomotionMode>(*locomotion));
     }
 
+    template <class T>
+    void writeStrong(Writer& writer, T value)
+    {
+        writer.fixed(value.value());
+    }
+
+    template <class T>
+    std::optional<T> readStrong(Reader& reader) noexcept
+    {
+        const auto value = reader.fixed<std::uint64_t>();
+        return value ? T::fromValue(*value) : std::nullopt;
+    }
+
+    template <class T>
+    void writeOptionalStrong(Writer& writer, const std::optional<T>& value)
+    {
+        writer.fixed(static_cast<std::uint8_t>(value.has_value()));
+        if (value)
+            writeStrong(writer, *value);
+    }
+
+    template <class T>
+    bool readOptionalStrong(Reader& reader, std::optional<T>& result) noexcept
+    {
+        const auto present = reader.fixed<std::uint8_t>();
+        if (!present || *present > 1)
+            return false;
+        if (!*present)
+        {
+            result.reset();
+            return true;
+        }
+        auto value = readStrong<T>(reader);
+        if (!value)
+            return false;
+        result = *value;
+        return true;
+    }
+
+    void writeFloat(Writer& writer, float value)
+    {
+        writer.fixed(std::bit_cast<std::uint32_t>(value));
+    }
+
+    bool readFloat(Reader& reader, float& result) noexcept
+    {
+        const auto bits = reader.fixed<std::uint32_t>();
+        if (!bits)
+            return false;
+        result = std::bit_cast<float>(*bits);
+        return std::isfinite(result);
+    }
+
+    void writePosition(Writer& writer, Position3 value)
+    {
+        writer.fixed(value.x());
+        writer.fixed(value.y());
+        writer.fixed(value.z());
+    }
+
+    std::optional<Position3> readPosition(Reader& reader) noexcept
+    {
+        const auto x = reader.fixed<std::int64_t>();
+        const auto y = reader.fixed<std::int64_t>();
+        const auto z = reader.fixed<std::int64_t>();
+        return x && y && z ? std::optional(Position3(*x, *y, *z)) : std::nullopt;
+    }
+
+    void writeItemStack(Writer& writer, const CanonicalItemStack& stack)
+    {
+        writeStrong(writer, stack.stackId);
+        writeStrong(writer, stack.prototypeId);
+        writer.fixed(stack.count);
+        writer.fixed(stack.condition);
+        writer.fixed(stack.enchantmentCharge);
+        writeOptionalStrong(writer, stack.soulPrototype);
+    }
+
+    std::optional<CanonicalItemStack> readItemStack(Reader& reader) noexcept
+    {
+        auto stackId = readStrong<ItemStackId>(reader);
+        auto prototypeId = readStrong<ItemPrototypeId>(reader);
+        const auto count = reader.fixed<std::uint32_t>();
+        const auto condition = reader.fixed<std::uint32_t>();
+        const auto charge = reader.fixed<std::uint32_t>();
+        std::optional<ActorPrototypeId> soul;
+        if (!stackId || !prototypeId || !count || *count == 0 || *count > MaximumTransferCount || !condition || !charge
+            || !readOptionalStrong(reader, soul))
+            return std::nullopt;
+        return CanonicalItemStack{ *stackId, *prototypeId, *count, *condition, *charge, soul };
+    }
+
+    void writeInventory(Writer& writer, const CanonicalDurableInventoryState& inventory)
+    {
+        writer.fixed(static_cast<std::uint32_t>(inventory.players.size()));
+        for (const auto& player : inventory.players)
+        {
+            writeStrong(writer, player.player);
+            writeStrong(writer, player.revision);
+            writeStrong(writer, player.lastChangeTick);
+            writer.fixed(static_cast<std::uint32_t>(player.stacks.size()));
+            for (const auto& stack : player.stacks)
+                writeItemStack(writer, stack);
+            for (const auto& equipped : player.equipment)
+                writeOptionalStrong(writer, equipped);
+            writeOptionalStrong(writer, player.initializedCharacterProfile);
+        }
+        writer.fixed(static_cast<std::uint32_t>(inventory.containers.size()));
+        for (const auto& container : inventory.containers)
+        {
+            writeStrong(writer, container.containerId);
+            writeCell(writer, container.cell);
+            writePosition(writer, container.position);
+            writeStrong(writer, container.revision);
+            writeStrong(writer, container.lastChangeTick);
+            writer.fixed(container.capacityWeight);
+            writer.fixed(static_cast<std::uint32_t>(container.stacks.size()));
+            for (const auto& stack : container.stacks)
+                writeItemStack(writer, stack);
+        }
+        writer.fixed(static_cast<std::uint32_t>(inventory.worldItems.size()));
+        for (const auto& item : inventory.worldItems)
+        {
+            writeItemStack(writer, item.stack);
+            writeCell(writer, item.cell);
+            writePosition(writer, item.position);
+            writeStrong(writer, item.revision);
+            writeStrong(writer, item.lastChangeTick);
+        }
+        writeOptionalStrong(writer, inventory.nextItemStackId);
+    }
+
+    std::optional<CellId> readCell(Reader& reader) noexcept
+    {
+        const auto kind = reader.fixed<std::uint8_t>();
+        const auto spaceRaw = reader.fixed<std::uint64_t>();
+        const auto gridX = reader.fixed<std::int32_t>();
+        const auto gridY = reader.fixed<std::int32_t>();
+        const auto space = spaceRaw ? CellSpaceId::fromValue(*spaceRaw) : std::nullopt;
+        if (!kind || *kind > 1 || !gridX || !gridY || !space)
+            return std::nullopt;
+        return *kind == 0 ? std::optional(CellId::interior(*space))
+                          : std::optional(CellId::exterior(*space, *gridX, *gridY));
+    }
+
+    std::optional<CanonicalDurableInventoryState> readInventory(Reader& reader) noexcept
+    {
+        CanonicalDurableInventoryState result;
+        const auto playerCount = reader.fixed<std::uint32_t>();
+        if (!playerCount || *playerCount > MaximumInventoryPlayers)
+            return std::nullopt;
+        result.players.reserve(*playerCount);
+        for (std::uint32_t index = 0; index < *playerCount; ++index)
+        {
+            auto playerId = readStrong<PlayerId>(reader);
+            auto revision = readStrong<InventoryRevision>(reader);
+            auto tick = readStrong<ServerTick>(reader);
+            const auto stackCount = reader.fixed<std::uint32_t>();
+            if (!playerId || !revision || !tick || !stackCount || *stackCount > MaximumPlayerInventoryStacks)
+                return std::nullopt;
+            std::vector<CanonicalItemStack> stacks;
+            stacks.reserve(*stackCount);
+            for (std::uint32_t stackIndex = 0; stackIndex < *stackCount; ++stackIndex)
+            {
+                auto stack = readItemStack(reader);
+                if (!stack)
+                    return std::nullopt;
+                stacks.push_back(*stack);
+            }
+            std::array<std::optional<ItemStackId>, static_cast<std::size_t>(EquipmentSlot::Count)> equipment{};
+            for (auto& equipped : equipment)
+                if (!readOptionalStrong(reader, equipped))
+                    return std::nullopt;
+            std::optional<CharacterProfileRevision> profile;
+            if (!readOptionalStrong(reader, profile))
+                return std::nullopt;
+            result.players.push_back({ *playerId, *revision, *tick, std::move(stacks), equipment, profile });
+        }
+        const auto containerCount = reader.fixed<std::uint32_t>();
+        if (!containerCount || *containerCount > MaximumInventoryContainers)
+            return std::nullopt;
+        result.containers.reserve(*containerCount);
+        for (std::uint32_t index = 0; index < *containerCount; ++index)
+        {
+            auto id = readStrong<ContainerId>(reader);
+            auto cell = readCell(reader);
+            auto position = readPosition(reader);
+            auto revision = readStrong<ContainerRevision>(reader);
+            auto tick = readStrong<ServerTick>(reader);
+            const auto capacity = reader.fixed<std::uint32_t>();
+            const auto stackCount = reader.fixed<std::uint32_t>();
+            if (!id || !cell || !position || !revision || !tick || !capacity || !stackCount
+                || *stackCount > MaximumContainerStacks)
+                return std::nullopt;
+            std::vector<CanonicalItemStack> stacks;
+            stacks.reserve(*stackCount);
+            for (std::uint32_t stackIndex = 0; stackIndex < *stackCount; ++stackIndex)
+            {
+                auto stack = readItemStack(reader);
+                if (!stack)
+                    return std::nullopt;
+                stacks.push_back(*stack);
+            }
+            result.containers.push_back({ *id, *cell, *position, *revision, *tick, *capacity, std::move(stacks) });
+        }
+        const auto worldCount = reader.fixed<std::uint32_t>();
+        if (!worldCount || *worldCount > MaximumWorldItemStacks)
+            return std::nullopt;
+        result.worldItems.reserve(*worldCount);
+        for (std::uint32_t index = 0; index < *worldCount; ++index)
+        {
+            auto stack = readItemStack(reader);
+            auto cell = readCell(reader);
+            auto position = readPosition(reader);
+            auto revision = readStrong<WorldItemRevision>(reader);
+            auto tick = readStrong<ServerTick>(reader);
+            if (!stack || !cell || !position || !revision || !tick)
+                return std::nullopt;
+            result.worldItems.push_back({ *stack, *cell, *position, *revision, *tick });
+        }
+        if (!readOptionalStrong(reader, result.nextItemStackId))
+            return std::nullopt;
+        return result;
+    }
+
+    void writeBool(Writer& writer, bool value)
+    {
+        writer.fixed(static_cast<std::uint8_t>(value));
+    }
+
+    bool readBool(Reader& reader, bool& value) noexcept
+    {
+        const auto raw = reader.fixed<std::uint8_t>();
+        if (!raw || *raw > 1)
+            return false;
+        value = *raw != 0;
+        return true;
+    }
+
+    void writeAttacker(Writer& writer, const OpenMwMeleeAttacker& value)
+    {
+        writeFloat(writer, value.agility);
+        writeFloat(writer, value.luck);
+        writeFloat(writer, value.strength);
+        writeFloat(writer, value.fatigueTerm);
+        writeFloat(writer, value.normalizedEncumbrance);
+        writeFloat(writer, value.fortifyAttack);
+        writeFloat(writer, value.blind);
+        writeFloat(writer, value.weaponSkill);
+        writeFloat(writer, value.handToHandSkill);
+        writeFloat(writer, value.fatigue);
+        writeFloat(writer, value.endurance);
+        writeBool(writer, value.werewolf);
+        writeBool(writer, value.godMode);
+    }
+
+    bool readAttacker(Reader& reader, OpenMwMeleeAttacker& value) noexcept
+    {
+        return readFloat(reader, value.agility) && readFloat(reader, value.luck) && readFloat(reader, value.strength)
+            && readFloat(reader, value.fatigueTerm) && readFloat(reader, value.normalizedEncumbrance)
+            && readFloat(reader, value.fortifyAttack) && readFloat(reader, value.blind)
+            && readFloat(reader, value.weaponSkill) && readFloat(reader, value.handToHandSkill)
+            && readFloat(reader, value.fatigue) && readFloat(reader, value.endurance)
+            && readBool(reader, value.werewolf) && readBool(reader, value.godMode);
+    }
+
+    void writeVictim(Writer& writer, const OpenMwMeleeVictim& value)
+    {
+        writeFloat(writer, value.health);
+        writeFloat(writer, value.fatigue);
+        writeFloat(writer, value.evasion);
+        writeFloat(writer, value.chameleon);
+        writeFloat(writer, value.invisibility);
+        writeFloat(writer, value.normalWeaponResistance);
+        writeFloat(writer, value.normalWeaponWeakness);
+        writeBool(writer, value.fatigueNonNegative);
+        writeBool(writer, value.knockedDown);
+        writeBool(writer, value.paralyzed);
+        writeBool(writer, value.unaware);
+        writeBool(writer, value.dead);
+    }
+
+    bool readVictim(Reader& reader, OpenMwMeleeVictim& value) noexcept
+    {
+        return readFloat(reader, value.health) && readFloat(reader, value.fatigue) && readFloat(reader, value.evasion)
+            && readFloat(reader, value.chameleon) && readFloat(reader, value.invisibility)
+            && readFloat(reader, value.normalWeaponResistance) && readFloat(reader, value.normalWeaponWeakness)
+            && readBool(reader, value.fatigueNonNegative) && readBool(reader, value.knockedDown)
+            && readBool(reader, value.paralyzed) && readBool(reader, value.unaware) && readBool(reader, value.dead);
+    }
+
+    void writeWeapon(Writer& writer, const OpenMwMeleeWeapon& value)
+    {
+        writeFloat(writer, value.chopMinimum);
+        writeFloat(writer, value.chopMaximum);
+        writeFloat(writer, value.slashMinimum);
+        writeFloat(writer, value.slashMaximum);
+        writeFloat(writer, value.thrustMinimum);
+        writeFloat(writer, value.thrustMaximum);
+        writeFloat(writer, value.weight);
+        writeFloat(writer, value.normalizedCondition);
+        writer.fixed(value.condition);
+        writeBool(writer, value.hasCondition);
+        writeBool(writer, value.normalWeapon);
+    }
+
+    bool readWeapon(Reader& reader, OpenMwMeleeWeapon& value) noexcept
+    {
+        return readFloat(reader, value.chopMinimum) && readFloat(reader, value.chopMaximum)
+            && readFloat(reader, value.slashMinimum) && readFloat(reader, value.slashMaximum)
+            && readFloat(reader, value.thrustMinimum) && readFloat(reader, value.thrustMaximum)
+            && readFloat(reader, value.weight) && readFloat(reader, value.normalizedCondition) && ([&] {
+                   const auto condition = reader.fixed<std::int32_t>();
+                   if (!condition)
+                       return false;
+                   value.condition = *condition;
+                   return true;
+               })()
+            && readBool(reader, value.hasCondition) && readBool(reader, value.normalWeapon);
+    }
+
+    void writeDefense(Writer& writer, const DirectMagicDefense& value)
+    {
+        writeFloat(writer, value.willpower);
+        writeFloat(writer, value.destructionSkill);
+        writeFloat(writer, value.fireResistance);
+        writeFloat(writer, value.shockResistance);
+        writeFloat(writer, value.frostResistance);
+        writeFloat(writer, value.poisonResistance);
+        writeFloat(writer, value.commonDiseaseResistance);
+        writeFloat(writer, value.blightDiseaseResistance);
+        writeFloat(writer, value.fireShield);
+        writeFloat(writer, value.shockShield);
+        writeFloat(writer, value.frostShield);
+    }
+
+    bool readDefense(Reader& reader, DirectMagicDefense& value) noexcept
+    {
+        return readFloat(reader, value.willpower) && readFloat(reader, value.destructionSkill)
+            && readFloat(reader, value.fireResistance) && readFloat(reader, value.shockResistance)
+            && readFloat(reader, value.frostResistance) && readFloat(reader, value.poisonResistance)
+            && readFloat(reader, value.commonDiseaseResistance) && readFloat(reader, value.blightDiseaseResistance)
+            && readFloat(reader, value.fireShield) && readFloat(reader, value.shockShield)
+            && readFloat(reader, value.frostShield);
+    }
+
+    void writeCombat(Writer& writer, const CanonicalDurableCombatState& combat)
+    {
+        writer.fixed(static_cast<std::uint32_t>(combat.players.size()));
+        for (const auto& player : combat.players)
+        {
+            writeStrong(writer, player.playerId);
+            writeStrong(writer, player.revision);
+            writeAttacker(writer, player.stats);
+            for (float value : player.weaponSkills)
+                writeFloat(writer, value);
+            writeFloat(writer, player.blockSkill);
+            writer.fixed(player.maximumEncumbranceWeightUnits);
+            writeOptionalStrong(writer, player.lastAttackTick);
+            writeOptionalStrong(writer, player.initializedCharacterProfile);
+            writeVictim(writer, player.victim);
+            writeVictim(writer, player.respawnVictim);
+            writeOptionalStrong(writer, player.deathTick);
+            writeFloat(writer, player.maximumHealth);
+            writeFloat(writer, player.maximumFatigue);
+            writeFloat(writer, player.magicka);
+            writeFloat(writer, player.maximumMagicka);
+            writeFloat(writer, player.healthRecoveryPerSecond);
+            writeFloat(writer, player.magickaRecoveryPerSecond);
+            for (const auto& rule : player.skillRules)
+            {
+                writer.fixed(static_cast<std::uint8_t>(rule.specialization));
+                writeFloat(writer, rule.useGain);
+            }
+            for (const auto& progress : player.skillProgression)
+            {
+                writeFloat(writer, progress.progress);
+                writeFloat(writer, progress.requirementFactor);
+            }
+            for (float value : player.armorSkills)
+                writeFloat(writer, value);
+            writeDefense(writer, player.magicDefense);
+            writer.fixed(static_cast<std::uint32_t>(player.contractedDiseases.size()));
+            for (const auto disease : player.contractedDiseases)
+                writeStrong(writer, disease);
+        }
+        writer.fixed(static_cast<std::uint32_t>(combat.actors.size()));
+        for (const auto& actor : combat.actors)
+        {
+            writeStrong(writer, actor.actorId);
+            writeStrong(writer, actor.revision);
+            writeVictim(writer, actor.stats);
+            writeVictim(writer, actor.respawnStats);
+            writeAttacker(writer, actor.attacker);
+            writeBool(writer, actor.naturalWeapon.has_value());
+            if (actor.naturalWeapon)
+                writeWeapon(writer, *actor.naturalWeapon);
+            writer.fixed(actor.attackReachQuanta);
+            writeOptionalStrong(writer, actor.aggressionTarget);
+            writeOptionalStrong(writer, actor.lastAttackTick);
+            writeOptionalStrong(writer, actor.deathTick);
+            writeFloat(writer, actor.maximumHealth);
+            writeFloat(writer, actor.maximumFatigue);
+            writeBool(writer, actor.creature);
+            writeDefense(writer, actor.magicDefense);
+        }
+        for (const auto word : combat.randomWords)
+            writer.fixed(word);
+        writeOptionalStrong(writer, combat.lastSimulationTick);
+    }
+
+    std::optional<CanonicalDurableCombatState> readCombat(Reader& reader) noexcept
+    {
+        CanonicalDurableCombatState result;
+        const auto playerCount = reader.fixed<std::uint32_t>();
+        if (!playerCount || *playerCount > MaximumPlayerCombatants)
+            return std::nullopt;
+        result.players.reserve(*playerCount);
+        for (std::uint32_t index = 0; index < *playerCount; ++index)
+        {
+            auto id = readStrong<PlayerId>(reader);
+            auto revision = readStrong<CombatRevision>(reader);
+            if (!id || !revision)
+                return std::nullopt;
+            CanonicalPlayerCombatState player{ *id };
+            player.revision = *revision;
+            if (!readAttacker(reader, player.stats))
+                return std::nullopt;
+            for (auto& value : player.weaponSkills)
+                if (!readFloat(reader, value))
+                    return std::nullopt;
+            if (!readFloat(reader, player.blockSkill))
+                return std::nullopt;
+            const auto capacity = reader.fixed<std::uint64_t>();
+            if (!capacity)
+                return std::nullopt;
+            player.maximumEncumbranceWeightUnits = *capacity;
+            if (!readOptionalStrong(reader, player.lastAttackTick)
+                || !readOptionalStrong(reader, player.initializedCharacterProfile) || !readVictim(reader, player.victim)
+                || !readVictim(reader, player.respawnVictim) || !readOptionalStrong(reader, player.deathTick)
+                || !readFloat(reader, player.maximumHealth) || !readFloat(reader, player.maximumFatigue)
+                || !readFloat(reader, player.magicka) || !readFloat(reader, player.maximumMagicka)
+                || !readFloat(reader, player.healthRecoveryPerSecond)
+                || !readFloat(reader, player.magickaRecoveryPerSecond))
+                return std::nullopt;
+            for (auto& rule : player.skillRules)
+            {
+                const auto specialization = reader.fixed<std::uint8_t>();
+                if (!specialization || *specialization > static_cast<std::uint8_t>(ClassSpecialization::Stealth)
+                    || !readFloat(reader, rule.useGain))
+                    return std::nullopt;
+                rule.specialization = static_cast<ClassSpecialization>(*specialization);
+            }
+            for (auto& progress : player.skillProgression)
+                if (!readFloat(reader, progress.progress) || !readFloat(reader, progress.requirementFactor))
+                    return std::nullopt;
+            for (auto& value : player.armorSkills)
+                if (!readFloat(reader, value))
+                    return std::nullopt;
+            if (!readDefense(reader, player.magicDefense))
+                return std::nullopt;
+            const auto diseaseCount = reader.fixed<std::uint32_t>();
+            if (!diseaseCount || *diseaseCount > MaximumContractedDiseasesPerPlayer)
+                return std::nullopt;
+            player.contractedDiseases.reserve(*diseaseCount);
+            for (std::uint32_t diseaseIndex = 0; diseaseIndex < *diseaseCount; ++diseaseIndex)
+            {
+                auto disease = readStrong<SpellRecordId>(reader);
+                if (!disease)
+                    return std::nullopt;
+                player.contractedDiseases.push_back(*disease);
+            }
+            result.players.push_back(std::move(player));
+        }
+        const auto actorCount = reader.fixed<std::uint32_t>();
+        if (!actorCount || *actorCount > MaximumActorCombatants)
+            return std::nullopt;
+        result.actors.reserve(*actorCount);
+        for (std::uint32_t index = 0; index < *actorCount; ++index)
+        {
+            auto id = readStrong<ActorId>(reader);
+            auto revision = readStrong<CombatRevision>(reader);
+            if (!id || !revision)
+                return std::nullopt;
+            CanonicalActorCombatState actor{ *id };
+            actor.revision = *revision;
+            if (!readVictim(reader, actor.stats) || !readVictim(reader, actor.respawnStats)
+                || !readAttacker(reader, actor.attacker))
+                return std::nullopt;
+            bool hasWeapon = false;
+            if (!readBool(reader, hasWeapon))
+                return std::nullopt;
+            if (hasWeapon)
+            {
+                OpenMwMeleeWeapon weapon;
+                if (!readWeapon(reader, weapon))
+                    return std::nullopt;
+                actor.naturalWeapon = weapon;
+            }
+            const auto reach = reader.fixed<std::uint32_t>();
+            if (!reach)
+                return std::nullopt;
+            actor.attackReachQuanta = *reach;
+            if (!readOptionalStrong(reader, actor.aggressionTarget) || !readOptionalStrong(reader, actor.lastAttackTick)
+                || !readOptionalStrong(reader, actor.deathTick) || !readFloat(reader, actor.maximumHealth)
+                || !readFloat(reader, actor.maximumFatigue) || !readBool(reader, actor.creature)
+                || !readDefense(reader, actor.magicDefense))
+                return std::nullopt;
+            result.actors.push_back(std::move(actor));
+        }
+        for (auto& word : result.randomWords)
+        {
+            const auto value = reader.fixed<std::uint64_t>();
+            if (!value)
+                return std::nullopt;
+            word = *value;
+        }
+        if (std::ranges::all_of(result.randomWords, [](auto value) { return value == 0; })
+            || !readOptionalStrong(reader, result.lastSimulationTick))
+            return std::nullopt;
+        const auto random = RandomStateV1::fromWords(
+            result.randomWords[0], result.randomWords[1], result.randomWords[2], result.randomWords[3]);
+        if (!random
+            || !std::holds_alternative<CanonicalCombatWorld>(
+                createCanonicalCombatWorld(result.players, result.actors, *random, result.lastSimulationTick)))
+            return std::nullopt;
+        return result;
+    }
+
+    void writeDomains(Writer& writer, const std::optional<CanonicalDurableInventoryState>& inventory,
+        const std::optional<CanonicalDurableCombatState>& combat)
+    {
+        writeBool(writer, inventory.has_value());
+        if (inventory)
+            writeInventory(writer, *inventory);
+        writeBool(writer, combat.has_value());
+        if (combat)
+            writeCombat(writer, *combat);
+    }
+
+    bool readDomains(Reader& reader, std::optional<CanonicalDurableInventoryState>& inventory,
+        std::optional<CanonicalDurableCombatState>& combat) noexcept
+    {
+        bool present = false;
+        if (!readBool(reader, present))
+            return false;
+        if (present)
+        {
+            auto value = readInventory(reader);
+            if (!value)
+                return false;
+            inventory = std::move(*value);
+        }
+        if (!readBool(reader, present))
+            return false;
+        if (present)
+        {
+            auto value = readCombat(reader);
+            if (!value)
+                return false;
+            combat = std::move(*value);
+        }
+        return true;
+    }
+
     void writeOrder(Writer& writer, DurableCommandOrder order)
     {
         writer.fixed(static_cast<std::uint8_t>(order.source));
@@ -179,7 +746,9 @@ namespace
 
     std::vector<std::byte> transactionMaterial(CanonicalStateVersion stateVersion, CanonicalRevision revision,
         ServerTick tick, CanonicalChecksum previous, CanonicalChecksum canonical,
-        std::span<const CanonicalPlayerEntityState> players, std::span<const DurableCommandOrder> commands)
+        std::span<const CanonicalPlayerEntityState> players, std::span<const DurableCommandOrder> commands,
+        const std::optional<CanonicalDurableInventoryState>& inventory,
+        const std::optional<CanonicalDurableCombatState>& combat)
     {
         Writer writer;
         writer.fixed(stateVersion.value());
@@ -190,6 +759,7 @@ namespace
         writer.fixed(static_cast<std::uint32_t>(players.size()));
         for (const auto& player : players)
             writePlayer(writer, player);
+        writeDomains(writer, inventory, combat);
         writer.fixed(static_cast<std::uint32_t>(commands.size()));
         for (const auto order : commands)
             writeOrder(writer, order);
@@ -229,12 +799,39 @@ namespace
         return true;
     }
 
-    CanonicalChecksum rootChecksum(
-        CanonicalStateVersion version, ServerTick tick, std::span<const CanonicalPlayerEntityState> players) noexcept
+    bool durablePlayer(std::span<const CanonicalPlayerEntityState> players, PlayerId id) noexcept
     {
-        auto state = createCanonicalServerState(players, {});
-        const auto* value = std::get_if<CanonicalServerState>(&state);
-        return value ? canonicalStateChecksumV2(version, tick, *value) : CanonicalChecksum(0);
+        return std::ranges::any_of(players, [id](const auto& player) { return player.playerId() == id; });
+    }
+
+    std::optional<CanonicalDurableInventoryState> snapshotInventory(
+        const CanonicalInventoryWorld* world, std::span<const CanonicalPlayerEntityState> durablePlayers)
+    {
+        if (!world)
+            return std::nullopt;
+        CanonicalDurableInventoryState result;
+        for (const auto& player : world->players())
+            if (durablePlayer(durablePlayers, player.player))
+                result.players.push_back(player);
+        result.containers.assign(world->containers().begin(), world->containers().end());
+        result.worldItems.assign(world->worldItems().begin(), world->worldItems().end());
+        result.nextItemStackId = world->nextItemStackId();
+        return result;
+    }
+
+    std::optional<CanonicalDurableCombatState> snapshotCombat(
+        const CanonicalCombatWorld* world, std::span<const CanonicalPlayerEntityState> durablePlayers)
+    {
+        if (!world)
+            return std::nullopt;
+        CanonicalDurableCombatState result;
+        for (const auto& player : world->players())
+            if (durablePlayer(durablePlayers, player.playerId))
+                result.players.push_back(player);
+        result.actors.assign(world->actors().begin(), world->actors().end());
+        result.randomWords = world->randomState().words();
+        result.lastSimulationTick = world->lastSimulationTick();
+        return result;
     }
 }
 
@@ -277,10 +874,42 @@ namespace TES3MP
         return std::nullopt;
     }
 
+    CanonicalChecksum canonicalDurableStateChecksumV1(CanonicalStateVersion stateVersion, ServerTick checkpointTick,
+        std::span<const CanonicalPlayerEntityState> players,
+        const std::optional<CanonicalDurableInventoryState>& inventory,
+        const std::optional<CanonicalDurableCombatState>& combat) noexcept
+    try
+    {
+        Writer writer;
+        writer.fixed(stateVersion.value());
+        writer.fixed(checkpointTick.value());
+        writer.fixed(static_cast<std::uint32_t>(players.size()));
+        for (const auto& player : players)
+            writePlayer(writer, player);
+        writeDomains(writer, inventory, combat);
+        const auto& bytes = writer.view();
+        return crc64Ecma182({ reinterpret_cast<const std::uint8_t*>(bytes.data()), bytes.size() });
+    }
+    catch (...)
+    {
+        return CanonicalChecksum(0);
+    }
+
     std::optional<CanonicalDurableTick> CanonicalDurableTick::create(CanonicalStateVersion stateVersion,
         CanonicalRevision canonicalRevision, ServerTick checkpointTick,
         std::span<const CanonicalPlayerEntityState> players, std::span<const DurableCommandOrder> commands,
-        CanonicalChecksum previousTransactionChecksum) noexcept
+        CanonicalChecksum previousTransactionChecksum, const CanonicalInventoryWorld* inventory,
+        const CanonicalCombatWorld* combat) noexcept
+    {
+        return create(stateVersion, canonicalRevision, checkpointTick, players, commands, previousTransactionChecksum,
+            snapshotInventory(inventory, players), snapshotCombat(combat, players));
+    }
+
+    std::optional<CanonicalDurableTick> CanonicalDurableTick::create(CanonicalStateVersion stateVersion,
+        CanonicalRevision canonicalRevision, ServerTick checkpointTick,
+        std::span<const CanonicalPlayerEntityState> players, std::span<const DurableCommandOrder> commands,
+        CanonicalChecksum previousTransactionChecksum, std::optional<CanonicalDurableInventoryState> inventory,
+        std::optional<CanonicalDurableCombatState> combat) noexcept
     try
     {
         if (players.size() > MaximumCanonicalPlayerEntities || commands.size() > MaximumPersistenceCommandsPerTick
@@ -293,14 +922,38 @@ namespace TES3MP
         auto candidate = createCanonicalServerState(players, {});
         if (!std::holds_alternative<CanonicalServerState>(candidate))
             return std::nullopt;
-        const auto canonical = rootChecksum(stateVersion, checkpointTick, players);
-        auto material = transactionMaterial(
-            stateVersion, canonicalRevision, checkpointTick, previousTransactionChecksum, canonical, players, commands);
+        if (inventory)
+        {
+            if (inventory->players.size() > MaximumInventoryPlayers
+                || inventory->containers.size() > MaximumInventoryContainers
+                || inventory->worldItems.size() > MaximumWorldItemStacks
+                || std::ranges::any_of(
+                    inventory->players, [&](const auto& player) { return !durablePlayer(players, player.player); }))
+                return std::nullopt;
+        }
+        if (combat)
+        {
+            const auto random = RandomStateV1::fromWords(
+                combat->randomWords[0], combat->randomWords[1], combat->randomWords[2], combat->randomWords[3]);
+            if (!random
+                || std::ranges::any_of(
+                    combat->players, [&](const auto& player) { return !durablePlayer(players, player.playerId); })
+                || !std::holds_alternative<CanonicalCombatWorld>(
+                    createCanonicalCombatWorld(combat->players, combat->actors, *random, combat->lastSimulationTick)))
+                return std::nullopt;
+        }
+        const auto canonical
+            = canonicalDurableStateChecksumV1(stateVersion, checkpointTick, players, inventory, combat);
+        auto material = transactionMaterial(stateVersion, canonicalRevision, checkpointTick,
+            previousTransactionChecksum, canonical, players, commands, inventory, combat);
+        if (material.size() + sizeof(std::uint64_t) > MaximumPersistenceRecordBytes)
+            return std::nullopt;
         const auto transaction
             = crc64Ecma182({ reinterpret_cast<const std::uint8_t*>(material.data()), material.size() });
         return CanonicalDurableTick(stateVersion, canonicalRevision, checkpointTick, previousTransactionChecksum,
             canonical, transaction, std::vector<CanonicalPlayerEntityState>(players.begin(), players.end()),
-            std::vector<DurableCommandOrder>(commands.begin(), commands.end()));
+            std::vector<DurableCommandOrder>(commands.begin(), commands.end()), std::move(inventory),
+            std::move(combat));
     }
     catch (...)
     {
@@ -324,7 +977,8 @@ namespace TES3MP
                 || transaction.canonicalRevision() < priorRevision)
                 return std::nullopt;
             auto rebuilt = CanonicalDurableTick::create(transaction.stateVersion(), transaction.canonicalRevision(),
-                transaction.checkpointTick(), transaction.players(), transaction.commands(), prior);
+                transaction.checkpointTick(), transaction.players(), transaction.commands(), prior,
+                transaction.inventory(), transaction.combat());
             if (!rebuilt || rebuilt->transactionChecksum() != transaction.transactionChecksum()
                 || rebuilt->canonicalChecksum() != transaction.canonicalChecksum())
                 return std::nullopt;
@@ -340,7 +994,7 @@ namespace TES3MP
         return std::nullopt;
     }
 
-    std::vector<std::byte> encodeCanonicalDurablePrefixV1(const CanonicalDurablePrefix& prefix)
+    std::vector<std::byte> encodeCanonicalDurablePrefixV2(const CanonicalDurablePrefix& prefix)
     {
         Writer writer;
         constexpr std::array magic{ std::byte{ 'T' }, std::byte{ '3' }, std::byte{ 'P' }, std::byte{ 'E' },
@@ -370,7 +1024,8 @@ namespace TES3MP
         {
             auto material = transactionMaterial(transaction.stateVersion(), transaction.canonicalRevision(),
                 transaction.checkpointTick(), transaction.previousTransactionChecksum(),
-                transaction.canonicalChecksum(), transaction.players(), transaction.commands());
+                transaction.canonicalChecksum(), transaction.players(), transaction.commands(), transaction.inventory(),
+                transaction.combat());
             writer.fixed(static_cast<std::uint32_t>(material.size() + sizeof(std::uint64_t)));
             writer.fixed(transaction.transactionChecksum().value());
             writer.bytes(material);
@@ -381,7 +1036,7 @@ namespace TES3MP
         return writer.take();
     }
 
-    CanonicalPersistenceDecodeResult decodeCanonicalDurablePrefixV1(
+    CanonicalPersistenceDecodeResult decodeCanonicalDurablePrefix(
         std::span<const std::byte> bytes, const CanonicalPersistenceIdentity& expected) noexcept
     try
     {
@@ -491,6 +1146,10 @@ namespace TES3MP
                     return CanonicalPersistenceDecodeError::Malformed;
                 players.push_back(*player);
             }
+            std::optional<CanonicalDurableInventoryState> inventory;
+            std::optional<CanonicalDurableCombatState> combat;
+            if (!readDomains(recordReader, inventory, combat))
+                return CanonicalPersistenceDecodeError::Malformed;
             const auto commandCount = recordReader.fixed<std::uint32_t>();
             if (!commandCount || *commandCount > MaximumPersistenceCommandsPerTick)
                 return CanonicalPersistenceDecodeError::Malformed;
@@ -508,8 +1167,8 @@ namespace TES3MP
             const auto tick = ServerTick::fromValue(*tickRaw);
             if (!stateVersion || !revision || !tick || recordReader.remaining() != 0)
                 return CanonicalPersistenceDecodeError::Malformed;
-            auto transaction = CanonicalDurableTick::create(
-                *stateVersion, *revision, *tick, players, commands, CanonicalChecksum(*previousRaw));
+            auto transaction = CanonicalDurableTick::create(*stateVersion, *revision, *tick, players, commands,
+                CanonicalChecksum(*previousRaw), std::move(inventory), std::move(combat));
             if (!transaction || transaction->canonicalChecksum().value() != *canonicalRaw
                 || transaction->transactionChecksum().value() != *storedChecksum)
                 return CanonicalPersistenceDecodeError::Corrupted;
@@ -531,17 +1190,24 @@ namespace TES3MP
     {
         if (!step)
             return false;
-        auto currentResult = createCanonicalServerState({}, {});
-        auto* current = std::get_if<CanonicalServerState>(&currentResult);
-        if (!current)
+        const auto* checkpoint = prefix.checkpoint();
+        if (!checkpoint)
+            return true;
+        auto currentResult = createCanonicalServerState(checkpoint->players(), {});
+        auto* checkpointPlayers = std::get_if<CanonicalServerState>(&currentResult);
+        if (!checkpointPlayers
+            || canonicalDurableStateChecksumV1(checkpoint->stateVersion(), checkpoint->checkpointTick(),
+                   checkpoint->players(), checkpoint->inventory(), checkpoint->combat())
+                != checkpoint->canonicalChecksum())
             return false;
-        CanonicalServerState state = std::move(*current);
-        for (const auto& transaction : prefix.transactions())
+        CanonicalReplayState state{ std::move(*checkpointPlayers), checkpoint->inventory(), checkpoint->combat() };
+        for (const auto& transaction : prefix.journal())
         {
             auto replayed = step(state, transaction.commands(), transaction.checkpointTick());
-            auto* next = std::get_if<CanonicalServerState>(&replayed);
-            if (!next || !next->activeSessions().empty()
-                || canonicalStateChecksumV2(transaction.stateVersion(), transaction.checkpointTick(), *next)
+            auto* next = std::get_if<CanonicalReplayState>(&replayed);
+            if (!next || !next->players.activeSessions().empty()
+                || canonicalDurableStateChecksumV1(transaction.stateVersion(), transaction.checkpointTick(),
+                       next->players.players(), next->inventory, next->combat)
                     != transaction.canonicalChecksum())
                 return false;
             state = std::move(*next);

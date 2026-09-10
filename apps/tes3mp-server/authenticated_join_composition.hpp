@@ -43,6 +43,8 @@ namespace TES3MP::ServerApp
             std::span<const std::byte> snapshot, const CanonicalServerState& before, const CanonicalServerState& after,
             const AuthenticatedJoinResult& join, ServerTick tick, CanonicalStateVersion stateVersion) noexcept = 0;
         virtual bool commitJoinState() noexcept { return true; }
+        virtual const CanonicalInventoryWorld* pendingInventory() const noexcept { return nullptr; }
+        virtual const CanonicalCombatWorld* pendingCombat() const noexcept { return nullptr; }
     };
 
     class AuthenticatedJoinComposition
@@ -57,10 +59,8 @@ namespace TES3MP::ServerApp
         }
 
         JoinCompositionOutcome join(PrincipalId principal, SessionGeneration generation, ServerTick tick,
-            ResumeTokenContext context,
-            std::optional<AuthenticatedAdmission::PlayerClaim> playerClaim = std::nullopt,
-            std::optional<PlayerCredential> providedCredential = std::nullopt,
-            std::string username = {}) noexcept;
+            ResumeTokenContext context, std::optional<AuthenticatedAdmission::PlayerClaim> playerClaim = std::nullopt,
+            std::optional<PlayerCredential> providedCredential = std::nullopt, std::string username = {}) noexcept;
 
     private:
         AuthenticatedJoinCoordinator& mJoins;
@@ -73,9 +73,8 @@ namespace TES3MP::ServerApp
     public:
         TransportJoinResponseQueue(OutboundQueueSet& queues, TransportConnectionId connection,
             ConnectionSessionCoordinator* sessions = nullptr, const CanonicalActorWorld* actors = nullptr,
-            const CanonicalInteractiveObjectWorld* objects = nullptr,
-            CanonicalInventoryWorld* inventory = nullptr, CanonicalCombatWorld* combat = nullptr,
-            const CanonicalPlayerCombatTemplate* playerCombatTemplate = nullptr,
+            const CanonicalInteractiveObjectWorld* objects = nullptr, CanonicalInventoryWorld* inventory = nullptr,
+            CanonicalCombatWorld* combat = nullptr, const CanonicalPlayerCombatTemplate* playerCombatTemplate = nullptr,
             const ItemPrototypeCatalog* itemCatalog = nullptr,
             const CharacterContentCatalog* characterContent = nullptr) noexcept
             : mQueues(queues)
@@ -95,6 +94,14 @@ namespace TES3MP::ServerApp
             const CanonicalServerState& before, const CanonicalServerState& after, const AuthenticatedJoinResult& join,
             ServerTick tick, CanonicalStateVersion stateVersion) noexcept override;
         bool commitJoinState() noexcept override;
+        const CanonicalInventoryWorld* pendingInventory() const noexcept override
+        {
+            return mPendingInventory ? &*mPendingInventory : mInventory;
+        }
+        const CanonicalCombatWorld* pendingCombat() const noexcept override
+        {
+            return mPendingCombat ? &*mPendingCombat : mCombat;
+        }
 
     private:
         OutboundQueueSet& mQueues;

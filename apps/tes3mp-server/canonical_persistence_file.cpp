@@ -1,5 +1,6 @@
 #include "canonical_persistence_file.hpp"
 
+#include <algorithm>
 #include <array>
 #include <cstdio>
 #include <fstream>
@@ -134,7 +135,7 @@ namespace TES3MP::ServerApp
             stream.read(reinterpret_cast<char*>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
         if (!stream || stream.peek() != std::ifstream::traits_type::eof())
             return CanonicalPersistenceFileError::Unavailable;
-        auto decoded = decodeCanonicalDurablePrefixV1(bytes, identity);
+        auto decoded = decodeCanonicalDurablePrefix(bytes, identity);
         if (const auto* error = std::get_if<CanonicalPersistenceDecodeError>(&decoded))
             return mapError(*error);
         return std::unique_ptr<CanonicalPersistenceFile>(
@@ -178,6 +179,18 @@ namespace TES3MP::ServerApp
         return latest ? std::optional(latest->checkpointTick()) : std::nullopt;
     }
 
+    const CanonicalDurableInventoryState* CanonicalPersistenceFile::restoredInventory() const noexcept
+    {
+        const auto* latest = mPrefix.latest();
+        return latest && latest->inventory() ? &*latest->inventory() : nullptr;
+    }
+
+    const CanonicalDurableCombatState* CanonicalPersistenceFile::restoredCombat() const noexcept
+    {
+        const auto* latest = mPrefix.latest();
+        return latest && latest->combat() ? &*latest->combat() : nullptr;
+    }
+
     bool CanonicalPersistenceFile::bindPlayerIdentities(const PlayerIdentityRegistry& identities) noexcept
     {
         if (mPlayerIdentities)
@@ -188,7 +201,8 @@ namespace TES3MP::ServerApp
 
     CanonicalDurabilityResult CanonicalPersistenceFile::commit(
         const std::shared_ptr<const CanonicalStatePublication>& candidate, CanonicalRevision canonicalRevision,
-        std::span<const DurableCommandOrder> commands) noexcept
+        std::span<const DurableCommandOrder> commands, const CanonicalInventoryWorld* inventory,
+        const CanonicalCombatWorld* combat) noexcept
     try
     {
         if (!candidate)
@@ -202,16 +216,41 @@ namespace TES3MP::ServerApp
             if (!mPlayerIdentities || (profile && profile->lifecycle() == CharacterLifecycle::EstablishedCharacter))
                 durablePlayers.push_back(player);
         }
-        auto transaction = CanonicalDurableTick::create(
-            candidate->stateVersion(), canonicalRevision, candidate->checkpointTick(), durablePlayers, commands, prior);
+        if (mPlayerIdentities && mPrefix.latest())
+            for (const auto& player : mPrefix.latest()->players())
+            {
+                const auto* profile = mPlayerIdentities->characterProfile(player.playerId());
+                if (profile && profile->lifecycle() == CharacterLifecycle::EstablishedCharacter
+                    && std::ranges::none_of(
+                        durablePlayers, [&](const auto& value) { return value.playerId() == player.playerId(); }))
+                    durablePlayers.push_back(player);
+            }
+        std::ranges::sort(durablePlayers, {}, &CanonicalPlayerEntityState::playerId);
+        auto transaction = CanonicalDurableTick::create(candidate->stateVersion(), canonicalRevision,
+            candidate->checkpointTick(), durablePlayers, commands, prior, inventory, combat);
         if (!transaction)
             return CanonicalDurabilityResult::Rejected;
         std::vector<CanonicalDurableTick> transactions(mPrefix.transactions().begin(), mPrefix.transactions().end());
         transactions.push_back(std::move(*transaction));
+        if (transactions.size() > MaximumPersistenceTransactions)
+        {
+            const auto& previous = transactions[transactions.size() - 2];
+            auto checkpoint = CanonicalDurableTick::create(previous.stateVersion(), previous.canonicalRevision(),
+                previous.checkpointTick(), previous.players(), {}, CanonicalChecksum(0), previous.inventory(),
+                previous.combat());
+            auto newest = CanonicalDurableTick::create(candidate->stateVersion(), canonicalRevision,
+                candidate->checkpointTick(), durablePlayers, commands,
+                checkpoint ? checkpoint->transactionChecksum() : CanonicalChecksum(0), inventory, combat);
+            if (!checkpoint || !newest)
+                return CanonicalDurabilityResult::Rejected;
+            transactions.clear();
+            transactions.push_back(std::move(*checkpoint));
+            transactions.push_back(std::move(*newest));
+        }
         auto next = CanonicalDurablePrefix::create(mPrefix.identity(), std::move(transactions));
         if (!next)
             return CanonicalDurabilityResult::Rejected;
-        auto bytes = encodeCanonicalDurablePrefixV1(*next);
+        auto bytes = encodeCanonicalDurablePrefixV2(*next);
         if (bytes.size() > MaximumPersistenceFileBytes || !replaceDurably(mPath, bytes))
             return CanonicalDurabilityResult::Failed;
         mPrefix = std::move(*next);

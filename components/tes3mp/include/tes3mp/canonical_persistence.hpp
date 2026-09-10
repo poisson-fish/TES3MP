@@ -2,6 +2,8 @@
 #define TES3MP_CANONICAL_PERSISTENCE_HPP
 
 #include "canonical_publication.hpp"
+#include "combat_world.hpp"
+#include "inventory_world.hpp"
 #include "server_scripting.hpp"
 
 #include <array>
@@ -15,12 +17,13 @@
 
 namespace TES3MP
 {
-    inline constexpr std::uint16_t CanonicalPersistenceFormatVersion = 1;
+    inline constexpr std::uint16_t CanonicalPersistenceFormatVersion = 2;
     inline constexpr std::size_t MaximumPersistenceScriptPackages = 64;
     inline constexpr std::size_t MaximumPersistenceSeeds = 64;
     inline constexpr std::size_t MaximumPersistenceCommandsPerTick
         = MaximumServerCommandsPerTick + MaximumServerScriptCommandsPerTick;
-    inline constexpr std::size_t MaximumPersistenceTransactions = 1'000'000;
+    inline constexpr std::size_t MaximumPersistenceJournalTransactions = 32;
+    inline constexpr std::size_t MaximumPersistenceTransactions = MaximumPersistenceJournalTransactions + 1;
     inline constexpr std::size_t MaximumPersistenceRecordBytes = 2 * 1024 * 1024;
     inline constexpr std::size_t MaximumPersistenceFileBytes = 256 * 1024 * 1024;
 
@@ -94,13 +97,41 @@ namespace TES3MP
         friend constexpr bool operator==(DurableCommandOrder, DurableCommandOrder) noexcept = default;
     };
 
+    struct CanonicalDurableInventoryState
+    {
+        std::vector<CanonicalPlayerInventoryState> players;
+        std::vector<CanonicalContainerInventoryState> containers;
+        std::vector<CanonicalWorldItemState> worldItems;
+        std::optional<ItemStackId> nextItemStackId;
+
+        friend bool operator==(const CanonicalDurableInventoryState&, const CanonicalDurableInventoryState&) noexcept
+            = default;
+    };
+
+    struct CanonicalDurableCombatState
+    {
+        std::vector<CanonicalPlayerCombatState> players;
+        std::vector<CanonicalActorCombatState> actors;
+        std::array<std::uint64_t, 4> randomWords{};
+        std::optional<ServerTick> lastSimulationTick;
+
+        friend bool operator==(const CanonicalDurableCombatState&, const CanonicalDurableCombatState&) noexcept
+            = default;
+    };
+
     class CanonicalDurableTick
     {
     public:
         static std::optional<CanonicalDurableTick> create(CanonicalStateVersion stateVersion,
             CanonicalRevision canonicalRevision, ServerTick checkpointTick,
             std::span<const CanonicalPlayerEntityState> players, std::span<const DurableCommandOrder> commands,
-            CanonicalChecksum previousTransactionChecksum = CanonicalChecksum(0)) noexcept;
+            CanonicalChecksum previousTransactionChecksum = CanonicalChecksum(0),
+            const CanonicalInventoryWorld* inventory = nullptr, const CanonicalCombatWorld* combat = nullptr) noexcept;
+        static std::optional<CanonicalDurableTick> create(CanonicalStateVersion stateVersion,
+            CanonicalRevision canonicalRevision, ServerTick checkpointTick,
+            std::span<const CanonicalPlayerEntityState> players, std::span<const DurableCommandOrder> commands,
+            CanonicalChecksum previousTransactionChecksum, std::optional<CanonicalDurableInventoryState> inventory,
+            std::optional<CanonicalDurableCombatState> combat) noexcept;
 
         constexpr CanonicalStateVersion stateVersion() const noexcept { return mStateVersion; }
         constexpr CanonicalRevision canonicalRevision() const noexcept { return mCanonicalRevision; }
@@ -113,13 +144,17 @@ namespace TES3MP
         constexpr CanonicalChecksum transactionChecksum() const noexcept { return mTransactionChecksum; }
         std::span<const CanonicalPlayerEntityState> players() const noexcept { return mPlayers; }
         std::span<const DurableCommandOrder> commands() const noexcept { return mCommands; }
+        const std::optional<CanonicalDurableInventoryState>& inventory() const noexcept { return mInventory; }
+        const std::optional<CanonicalDurableCombatState>& combat() const noexcept { return mCombat; }
         friend bool operator==(const CanonicalDurableTick&, const CanonicalDurableTick&) noexcept = default;
 
     private:
         CanonicalDurableTick(CanonicalStateVersion stateVersion, CanonicalRevision canonicalRevision,
             ServerTick checkpointTick, CanonicalChecksum previousTransactionChecksum,
             CanonicalChecksum canonicalChecksum, CanonicalChecksum transactionChecksum,
-            std::vector<CanonicalPlayerEntityState> players, std::vector<DurableCommandOrder> commands) noexcept
+            std::vector<CanonicalPlayerEntityState> players, std::vector<DurableCommandOrder> commands,
+            std::optional<CanonicalDurableInventoryState> inventory,
+            std::optional<CanonicalDurableCombatState> combat) noexcept
             : mStateVersion(stateVersion)
             , mCanonicalRevision(canonicalRevision)
             , mCheckpointTick(checkpointTick)
@@ -128,6 +163,8 @@ namespace TES3MP
             , mTransactionChecksum(transactionChecksum)
             , mPlayers(std::move(players))
             , mCommands(std::move(commands))
+            , mInventory(std::move(inventory))
+            , mCombat(std::move(combat))
         {
         }
 
@@ -139,6 +176,8 @@ namespace TES3MP
         CanonicalChecksum mTransactionChecksum;
         std::vector<CanonicalPlayerEntityState> mPlayers;
         std::vector<DurableCommandOrder> mCommands;
+        std::optional<CanonicalDurableInventoryState> mInventory;
+        std::optional<CanonicalDurableCombatState> mCombat;
     };
 
     class CanonicalDurablePrefix
@@ -152,6 +191,15 @@ namespace TES3MP
         const CanonicalDurableTick* latest() const noexcept
         {
             return mTransactions.empty() ? nullptr : &mTransactions.back();
+        }
+        const CanonicalDurableTick* checkpoint() const noexcept
+        {
+            return mTransactions.empty() ? nullptr : &mTransactions.front();
+        }
+        std::span<const CanonicalDurableTick> journal() const noexcept
+        {
+            return mTransactions.empty() ? std::span<const CanonicalDurableTick>{}
+                                         : std::span<const CanonicalDurableTick>(mTransactions).subspan(1);
         }
         friend bool operator==(const CanonicalDurablePrefix&, const CanonicalDurablePrefix&) noexcept = default;
 
@@ -178,9 +226,14 @@ namespace TES3MP
 
     using CanonicalPersistenceDecodeResult = std::variant<CanonicalDurablePrefix, CanonicalPersistenceDecodeError>;
 
-    std::vector<std::byte> encodeCanonicalDurablePrefixV1(const CanonicalDurablePrefix& prefix);
-    CanonicalPersistenceDecodeResult decodeCanonicalDurablePrefixV1(
+    std::vector<std::byte> encodeCanonicalDurablePrefixV2(const CanonicalDurablePrefix& prefix);
+    CanonicalPersistenceDecodeResult decodeCanonicalDurablePrefix(
         std::span<const std::byte> bytes, const CanonicalPersistenceIdentity& expected) noexcept;
+
+    CanonicalChecksum canonicalDurableStateChecksumV1(CanonicalStateVersion stateVersion, ServerTick checkpointTick,
+        std::span<const CanonicalPlayerEntityState> players,
+        const std::optional<CanonicalDurableInventoryState>& inventory,
+        const std::optional<CanonicalDurableCombatState>& combat) noexcept;
 
     enum class CanonicalDurabilityResult : std::uint8_t
     {
@@ -197,11 +250,22 @@ namespace TES3MP
         // Committed is the durability acknowledgement point. The reducer has
         // not installed or published the candidate when this call begins.
         virtual CanonicalDurabilityResult commit(const std::shared_ptr<const CanonicalStatePublication>& candidate,
-            CanonicalRevision canonicalRevision, std::span<const DurableCommandOrder> commands) noexcept = 0;
+            CanonicalRevision canonicalRevision, std::span<const DurableCommandOrder> commands,
+            const CanonicalInventoryWorld* inventory = nullptr, const CanonicalCombatWorld* combat = nullptr) noexcept
+            = 0;
     };
 
-    using CanonicalReplayStep = std::variant<CanonicalServerState, CanonicalChecksum> (*)(
-        const CanonicalServerState&, std::span<const DurableCommandOrder>, ServerTick);
+    struct CanonicalReplayState
+    {
+        CanonicalServerState players;
+        std::optional<CanonicalDurableInventoryState> inventory;
+        std::optional<CanonicalDurableCombatState> combat;
+
+        friend bool operator==(const CanonicalReplayState&, const CanonicalReplayState&) noexcept = default;
+    };
+
+    using CanonicalReplayStep = std::variant<CanonicalReplayState, CanonicalChecksum> (*)(
+        const CanonicalReplayState&, std::span<const DurableCommandOrder>, ServerTick);
     bool replayCanonicalDurablePrefix(const CanonicalDurablePrefix& prefix, CanonicalReplayStep step) noexcept;
 }
 

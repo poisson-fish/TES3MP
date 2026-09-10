@@ -241,11 +241,14 @@ namespace TES3MP
     {
     }
 
-    bool CanonicalCommandReducer::configureDurability(CanonicalDurabilityPort& durability) noexcept
+    bool CanonicalCommandReducer::configureDurability(
+        CanonicalDurabilityPort& durability, CanonicalInventoryWorld* inventory, CanonicalCombatWorld* combat) noexcept
     {
         if (mDurability != nullptr)
             return false;
         mDurability = &durability;
+        mDurableInventory = inventory;
+        mDurableCombat = combat;
         return true;
     }
 
@@ -296,7 +299,8 @@ namespace TES3MP
         return prepared;
     }
 
-    bool CanonicalCommandReducer::commit(PreparedJoin&& prepared)
+    bool CanonicalCommandReducer::commit(
+        PreparedJoin&& prepared, const CanonicalInventoryWorld* inventory, const CanonicalCombatWorld* combat)
     {
         if (prepared.mBaseVersion != mStateVersion || prepared.mBaseCanonicalRevision != mCanonicalRevision
             || !prepared.mState || !prepared.mPublication)
@@ -307,7 +311,8 @@ namespace TES3MP
         prepared.mPublication->mChecksum
             = canonicalStateChecksumV2(prepared.mStateVersion, prepared.mCheckpointTick, *prepared.mState);
         if (mDurability
-            && mDurability->commit(prepared.mPublication, prepared.mCanonicalRevision, {})
+            && mDurability->commit(prepared.mPublication, prepared.mCanonicalRevision, {},
+                   inventory ? inventory : mDurableInventory, combat ? combat : mDurableCombat)
                 != CanonicalDurabilityResult::Committed)
             return false;
         mState = std::move(prepared.mState);
@@ -469,7 +474,8 @@ namespace TES3MP
             sessionId, playerId, generation, tick);
     }
 
-    bool CanonicalCommandReducer::commit(PreparedLifecycle&& prepared)
+    bool CanonicalCommandReducer::commit(
+        PreparedLifecycle&& prepared, const CanonicalInventoryWorld* inventory, const CanonicalCombatWorld* combat)
     {
         if (prepared.mBaseVersion != mStateVersion || prepared.mBaseCanonicalRevision != mCanonicalRevision
             || !prepared.mState || !prepared.mPublication)
@@ -480,7 +486,8 @@ namespace TES3MP
         prepared.mPublication->mChecksum
             = canonicalStateChecksumV2(prepared.mStateVersion, prepared.mCheckpointTick, *prepared.mState);
         if (mDurability
-            && mDurability->commit(prepared.mPublication, prepared.mCanonicalRevision, {})
+            && mDurability->commit(prepared.mPublication, prepared.mCanonicalRevision, {},
+                   inventory ? inventory : mDurableInventory, combat ? combat : mDurableCombat)
                 != CanonicalDurabilityResult::Committed)
             return false;
         mState = std::move(prepared.mState);
@@ -1343,8 +1350,9 @@ namespace TES3MP
             = canonicalStateChecksumV2(prepared.mStateVersion, prepared.mCheckpointTick, *prepared.mState);
         if (mDurability)
         {
-            prepared.mResult.mDurabilityResult
-                = mDurability->commit(prepared.mPublication, prepared.mCanonicalRevision, prepared.mDurableCommands);
+            prepared.mResult.mDurabilityResult = mDurability->commit(prepared.mPublication, prepared.mCanonicalRevision,
+                prepared.mDurableCommands, prepared.mInventory ? &*prepared.mInventory : mDurableInventory,
+                prepared.mCombat ? &*prepared.mCombat : mDurableCombat);
             if (prepared.mResult.mDurabilityResult != CanonicalDurabilityResult::Committed)
                 return false;
         }
