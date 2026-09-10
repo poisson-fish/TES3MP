@@ -46,8 +46,8 @@ namespace
     CanonicalPlayerEntityState player()
     {
         return CanonicalPlayerEntityState(playerId(1), entityId(101), AppearanceId::fromValue(1).value(),
-            transform(1, 100), LinearVelocity3(0, 0, 0),
-            EntityRevision::fromValue(1).value(), AuthorityEpoch::fromValue(1).value(), ServerTick::initial());
+            transform(1, 100), LinearVelocity3(0, 0, 0), EntityRevision::fromValue(1).value(),
+            AuthorityEpoch::fromValue(1).value(), ServerTick::initial());
     }
 
     CanonicalSessionProgress session()
@@ -144,17 +144,17 @@ namespace
         }
     };
 
-    class PersistenceProbe final : public CanonicalPersistenceSink
+    class ArchiveProbe final : public CanonicalArchiveSink
     {
     public:
-        explicit PersistenceProbe(SinkProbe& probe)
+        explicit ArchiveProbe(SinkProbe& probe)
             : mProbe(probe)
         {
         }
         CanonicalSinkDeliveryResult tryConsume(
             const std::shared_ptr<const CanonicalStatePublication>& publication) noexcept override
         {
-            return mProbe.record(CanonicalSinkRole::Persistence, publication);
+            return mProbe.record(CanonicalSinkRole::Archive, publication);
         }
 
     private:
@@ -235,7 +235,7 @@ namespace
         SinkProbe replay;
         SinkProbe script;
         SinkProbe metrics;
-        PersistenceProbe persistencePort;
+        ArchiveProbe persistencePort;
         ReplayProbe replayPort;
         ScriptProbe scriptPort;
         MetricsProbe metricsPort;
@@ -244,14 +244,14 @@ namespace
     bool server_core_sink_ports_are_nominal_bounded_and_backend_free()
     {
         static_assert(MaximumCanonicalSinkAttempts == 4);
-        static_assert(std::is_abstract_v<CanonicalPersistenceSink>);
+        static_assert(std::is_abstract_v<CanonicalArchiveSink>);
         static_assert(std::is_abstract_v<CanonicalReplaySink>);
         static_assert(std::is_abstract_v<CanonicalScriptSink>);
         static_assert(std::is_abstract_v<CanonicalMetricsSink>);
-        static_assert(!std::is_base_of_v<CanonicalPersistenceSink, CanonicalReplaySink>);
+        static_assert(!std::is_base_of_v<CanonicalArchiveSink, CanonicalReplaySink>);
         static_assert(sizeof(CanonicalSinkBundle) == sizeof(void*) * MaximumCanonicalSinkAttempts);
-        static_assert(std::is_same_v<decltype(std::declval<const CanonicalSinkBundle&>().persistence()),
-            CanonicalPersistenceSink*>);
+        static_assert(
+            std::is_same_v<decltype(std::declval<const CanonicalSinkBundle&>().archive()), CanonicalArchiveSink*>);
         return true;
     }
 
@@ -291,7 +291,7 @@ namespace
         const auto latest = reducer.latestPublication();
         const auto report = result.sinkDeliveryReport();
         return result && report.publicationOffered()
-            && report.result(CanonicalSinkRole::Persistence) == CanonicalSinkDeliveryResult::Accepted
+            && report.result(CanonicalSinkRole::Archive) == CanonicalSinkDeliveryResult::Accepted
             && report.result(CanonicalSinkRole::Replay) == CanonicalSinkDeliveryResult::Accepted
             && report.result(CanonicalSinkRole::Script) == CanonicalSinkDeliveryResult::Accepted
             && report.result(CanonicalSinkRole::Metrics) == CanonicalSinkDeliveryResult::Accepted
@@ -357,7 +357,7 @@ namespace
         CanonicalCommandReducer reducer(initialState(), observability, probes.bundle());
         IntakeFixture intake;
         const std::array command{ proposal(1, 1001, 1) };
-        return intake.reduce(reducer, command) && order.size == 4 && order.roles[0] == CanonicalSinkRole::Persistence
+        return intake.reduce(reducer, command) && order.size == 4 && order.roles[0] == CanonicalSinkRole::Archive
             && order.roles[1] == CanonicalSinkRole::Replay && order.roles[2] == CanonicalSinkRole::Script
             && order.roles[3] == CanonicalSinkRole::Metrics;
     }
@@ -379,7 +379,7 @@ namespace
         const auto result = intake.reduce(reducer, command);
         const auto report = result.sinkDeliveryReport();
         return result && order.size == 3
-            && report.result(CanonicalSinkRole::Persistence) == CanonicalSinkDeliveryResult::Accepted
+            && report.result(CanonicalSinkRole::Archive) == CanonicalSinkDeliveryResult::Accepted
             && report.result(CanonicalSinkRole::Replay) == CanonicalSinkDeliveryResult::Backpressured
             && report.result(CanonicalSinkRole::Script) == CanonicalSinkDeliveryResult::Failed
             && report.result(CanonicalSinkRole::Metrics) == CanonicalSinkDeliveryResult::NotConfigured
@@ -399,7 +399,7 @@ namespace
         const std::array command{ proposal(1, 1001, 1) };
         const auto result = intake.reduce(reducer, command);
         return result && order.size == 4
-            && result.sinkDeliveryReport().result(CanonicalSinkRole::Persistence) == CanonicalSinkDeliveryResult::Failed
+            && result.sinkDeliveryReport().result(CanonicalSinkRole::Archive) == CanonicalSinkDeliveryResult::Failed
             && probes.metrics.count == 1;
     }
 
@@ -451,7 +451,7 @@ namespace
         const auto& persistence = std::get<CanonicalSinkDeliveryEvent>(events->events()[1].payload());
         const auto& replay = std::get<CanonicalSinkDeliveryEvent>(events->events()[2].payload());
         const auto& script = std::get<CanonicalSinkDeliveryEvent>(events->events()[3].payload());
-        return persistence.role == CanonicalSinkObservationRole::Persistence
+        return persistence.role == CanonicalSinkObservationRole::Archive
             && persistence.outcome == CanonicalSinkObservationOutcome::Accepted
             && replay.role == CanonicalSinkObservationRole::Replay
             && replay.outcome == CanonicalSinkObservationOutcome::Backpressured
@@ -510,9 +510,9 @@ namespace
     bool public_sink_surface_exposes_only_immutable_domain_values()
     {
         static_assert(std::is_same_v<decltype(std::declval<const CanonicalSinkDeliveryReport&>().result(
-                                         CanonicalSinkRole::Persistence)),
+                                         CanonicalSinkRole::Archive)),
             CanonicalSinkDeliveryResult>);
-        static_assert(std::is_same_v<decltype(std::declval<CanonicalPersistenceSink&>().tryConsume(
+        static_assert(std::is_same_v<decltype(std::declval<CanonicalArchiveSink&>().tryConsume(
                                          std::declval<const std::shared_ptr<const CanonicalStatePublication>&>())),
             CanonicalSinkDeliveryResult>);
         static_assert(std::is_same_v<decltype(std::declval<const CanonicalStatePublication&>().state()),

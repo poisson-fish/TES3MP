@@ -313,6 +313,7 @@ target_sources(tes3mp_server_core PRIVATE
     include/tes3mp/actor_simulation.hpp
     include/tes3mp/authenticated_join.hpp
     include/tes3mp/canonical_checksum.hpp
+    include/tes3mp/canonical_persistence.hpp
     include/tes3mp/canonical_publication.hpp
     include/tes3mp/canonical_resync.hpp
     include/tes3mp/canonical_sinks.hpp
@@ -337,6 +338,7 @@ target_sources(tes3mp_server_core PRIVATE
     server_core/authenticated_join.cpp
     server_core/actor_simulation.cpp
     server_core/canonical_checksum.cpp
+    server_core/canonical_persistence.cpp
     server_core/canonical_publication.cpp
     server_core/canonical_resync.cpp
     server_core/canonical_state.cpp
@@ -906,6 +908,15 @@ tes3mp_verify_target_dependencies(tes3mp_canonical_sink_tests ALLOWED tes3mp_tes
 tes3mp_verify_target_includes(tes3mp_canonical_sink_tests
     FORBIDDEN ${TES3MP_ENGINE_INDEPENDENT_FORBIDDEN_INCLUDES})
 
+add_executable(tes3mp_canonical_persistence_tests tests/canonical_persistence_tests.cpp)
+target_compile_features(tes3mp_canonical_persistence_tests PRIVATE cxx_std_20)
+target_link_libraries(tes3mp_canonical_persistence_tests PRIVATE tes3mp_server_core)
+set_target_properties(tes3mp_canonical_persistence_tests PROPERTIES FOLDER "TES3MP/Tests")
+tes3mp_enable_runtime_safety(tes3mp_canonical_persistence_tests)
+tes3mp_verify_target_dependencies(tes3mp_canonical_persistence_tests ALLOWED tes3mp_server_core tes3mp_protocol)
+tes3mp_verify_target_includes(tes3mp_canonical_persistence_tests
+    FORBIDDEN ${TES3MP_ENGINE_INDEPENDENT_FORBIDDEN_INCLUDES})
+
 add_executable(tes3mp_server_core_property_tests tests/server_core_property_tests.cpp)
 target_compile_features(tes3mp_server_core_property_tests PRIVATE cxx_std_20)
 target_link_libraries(tes3mp_server_core_property_tests PRIVATE tes3mp_test_support)
@@ -1050,6 +1061,7 @@ add_custom_target(tes3mp_protocol_tests_run
     COMMAND $<TARGET_FILE:tes3mp_item_catalog_tests>
     COMMAND $<TARGET_FILE:tes3mp_inventory_world_tests>
     COMMAND $<TARGET_FILE:tes3mp_canonical_sink_tests>
+    COMMAND $<TARGET_FILE:tes3mp_canonical_persistence_tests>
     COMMAND $<TARGET_FILE:tes3mp_server_core_property_tests>
     COMMAND $<TARGET_FILE:tes3mp_transport_lifecycle_tests>
     DEPENDS
@@ -1092,6 +1104,7 @@ add_custom_target(tes3mp_protocol_tests_run
         tes3mp_item_catalog_tests
         tes3mp_inventory_world_tests
         tes3mp_canonical_sink_tests
+        tes3mp_canonical_persistence_tests
         tes3mp_server_core_property_tests
         tes3mp_transport_lifecycle_tests
     COMMENT "Running TES3MP protocol, deterministic facility, fault, and observability contracts"

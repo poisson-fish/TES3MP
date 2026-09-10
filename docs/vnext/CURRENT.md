@@ -393,6 +393,38 @@ Primary sources: [`server_scripting.hpp`](../../components/tes3mp/include/tes3mp
 [`server_command_reducer.cpp`](../../components/tes3mp/server_core/server_command_reducer.cpp),
 and [`server_application.cpp`](../../apps/tes3mp-server/server_application.cpp).
 
+### Transactional player-root persistence and replay envelope
+
+- Version 1 of the engine-independent persistence contract binds every durable
+  prefix to the content manifest, a SHA-256 server-configuration identity,
+  script API/package versions, and named deterministic seed states. Each
+  chained transaction carries canonical state version, canonical revision,
+  checkpoint tick, the complete normalized client/script command order and
+  disposition, and a checksum of the session-independent player roots.
+- The reducer offers a fully prepared immutable candidate to the durability
+  port before installing it or publishing it to replay, scripts, metrics, or
+  clients. Only `Committed` acknowledges durability. Rejection or I/O failure
+  leaves the previous canonical state and publication installed.
+- The production V1 adapter stores the verified prefix beside `players.txt` as
+  `players.txt.world-v1`. It bounds files, records, players, scripts, seeds, and
+  commands; checks the whole file and each chained transaction; flushes a
+  temporary file; and atomically replaces the committed file. A stale temporary
+  file is ignored. Restart validates the complete prefix and all identities
+  before restoring player roots and version/revision/tick counters; live
+  sessions are intentionally not restored.
+- The replay contract consumes the recorded command ordering one transaction at
+  a time and requires the resulting session-independent canonical state to
+  match every recorded checksum. Truncation, corruption, unsupported versions,
+  or content/configuration/script/seed mismatches reject the whole candidate
+  without exposing a partial restore. Only established-character roots enter
+  the durable root set; incomplete chargen still follows the deliberate fresh
+  pre-chargen restart policy.
+
+Primary sources: [`canonical_persistence.hpp`](../../components/tes3mp/include/tes3mp/canonical_persistence.hpp),
+[`canonical_persistence.cpp`](../../components/tes3mp/server_core/canonical_persistence.cpp),
+[`canonical_persistence_file.cpp`](../../apps/tes3mp-server/canonical_persistence_file.cpp),
+and [`server_command_reducer.cpp`](../../components/tes3mp/server_core/server_command_reducer.cpp).
+
 ### Repeatable content packs
 
 - The offline V2 baker resolves ordered TES3 content through OpenMW `data`,
@@ -465,8 +497,10 @@ and [`test_bake_tes3mp_content.py`](../../scripts/tests/test_bake_tes3mp_content
   PvP/P2P, proactive AI aggression,
   duration/area magic, active spellcasting, Lua hit callbacks, and general magic
   remain unimplemented.
-- Established root checkpoints and complete character profiles survive restart;
-  canonical dynamic world/object/actor state does not. Chargen is the only
+- Established root checkpoints, current canonical player roots, complete
+  character profiles, canonical version/revision/tick counters, deterministic
+  identity, and command ordering survive restart. Canonical inventory, combat,
+  dynamic world/object/actor state, and live script memory do not. Chargen is the only
   packaged scripted sequence with explicit server safe points today. The
   runtime-neutral versioned server-scripting boundary and its first safe-point
   command exist, but no script content loader or interpreter is packaged and the
@@ -488,13 +522,13 @@ and [`test_bake_tes3mp_content.py`](../../scripts/tests/test_bake_tes3mp_content
 
 ## Work still required
 
-### Next milestone: transactional persistence and replay envelope
+### Next milestone: durable gameplay domains
 
-Define the atomic durability acknowledgement point and persist replayable
-canonical domain transactions with configuration, content manifest, script/API
-versions, deterministic seeds, and complete client/script command ordering.
-Restart must either restore one verified committed prefix or reject it without
-partially installing state. TES3MP 0.8.x saves remain unsupported.
+Extend the versioned transaction payload and canonical checksum across
+inventory, combat, actors, objects, quests, globals, and eventually live script
+state. Add bounded checkpoint compaction and upgrade policy without weakening
+the existing acknowledgement point or exact identity checks. TES3MP 0.8.x
+saves remain unsupported.
 
 ### Required before the desktop/PC-VR release
 
@@ -526,22 +560,23 @@ and do not enter protocol or canonical state.
 
 ## Verification snapshot
 
-The deterministic server-scripting working tree passed the following
+The transactional player-root persistence working tree passed the following
 on 2026-09-10:
 
-- the bounded Windows product `checks` graph, including relinking the shipping
-  client and dedicated server and running the adapter, server-application, and
-  historical-melee-contact contracts;
-- the standalone aggregate, including the new script ordering, next-tick safe
-  point, atomic failure, replay checksum, and reducer-validation contracts;
-- the dedicated-server application aggregate, including production fail-closed
-  handling for script callback/queue failure; and
-- all 196 repository Python tests and patch-registry verification.
+- the standalone aggregate, including the new format, identity, ordering,
+  checksum replay, pre-publication acknowledgement, corruption, truncation,
+  atomic replacement, and stale-temporary-file recovery contracts;
+- the dedicated-server application aggregate; and
+- the bounded Windows dedicated-server product build;
+- all 196 repository Python tests; and
+- patch-registry verification.
 
-Protocol generation, content baking, and the headless client were unaffected
-and were not rerun for this milestone. The Linux-only sanitizer/fuzzer
-execution profile, non-Windows product builds, PC-VR hardware checks, a full
-upstream OpenMW baseline, and a human-driven visible OpenMW walkthrough were not
+Protocol generation, content baking, the shipping client, and the headless
+client were unaffected and were not rerun for this milestone. The repository
+baseline verifier was run but remains blocked by pre-existing provenance drift
+outside this milestone. The Linux-only sanitizer/fuzzer
+execution profile, non-Windows builds, PC-VR hardware checks, a full upstream
+OpenMW baseline, and a human-driven visible OpenMW walkthrough were not
 performed. The product build uses the newest installed MSVC so its STL matches
 the provisioned protobuf/Abseil libraries. The repository baseline verifier
 still cannot attest the current dirty tree because pre-existing vNext additions

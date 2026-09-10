@@ -135,7 +135,7 @@ namespace TES3MP
         CommandReductionStateVersionCapacityExceeded = 55,
         CommandReductionUnknownCell = 56,
         CommandReductionMotionOutOfRange = 57,
-        CanonicalSinkPersistence = 60,
+        CanonicalSinkArchive = 60,
         CanonicalSinkReplay = 61,
         CanonicalSinkScript = 62,
         CanonicalSinkMetrics = 63,
@@ -315,7 +315,7 @@ namespace TES3MP
 
     enum class CanonicalSinkObservationRole : std::uint8_t
     {
-        Persistence,
+        Archive,
         Replay,
         Script,
         Metrics,

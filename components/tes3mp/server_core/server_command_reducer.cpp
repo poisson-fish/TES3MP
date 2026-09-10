@@ -86,8 +86,8 @@ namespace
     {
         switch (role)
         {
-            case CanonicalSinkRole::Persistence:
-                return CanonicalSinkObservationRole::Persistence;
+            case CanonicalSinkRole::Archive:
+                return CanonicalSinkObservationRole::Archive;
             case CanonicalSinkRole::Replay:
                 return CanonicalSinkObservationRole::Replay;
             case CanonicalSinkRole::Script:
@@ -95,7 +95,7 @@ namespace
             case CanonicalSinkRole::Metrics:
                 return CanonicalSinkObservationRole::Metrics;
         }
-        return CanonicalSinkObservationRole::Persistence;
+        return CanonicalSinkObservationRole::Archive;
     }
 
     CanonicalSinkObservationOutcome observationOutcome(CanonicalSinkDeliveryResult result) noexcept
@@ -116,8 +116,7 @@ namespace
     MetricDimensionValue metricValue(CanonicalSinkRole role) noexcept
     {
         return static_cast<MetricDimensionValue>(
-            static_cast<std::uint8_t>(MetricDimensionValue::CanonicalSinkPersistence)
-            + static_cast<std::uint8_t>(role));
+            static_cast<std::uint8_t>(MetricDimensionValue::CanonicalSinkArchive) + static_cast<std::uint8_t>(role));
     }
 
     MetricDimensionValue metricValue(CanonicalSinkDeliveryResult result) noexcept
@@ -225,6 +224,31 @@ namespace TES3MP
     {
     }
 
+    CanonicalCommandReducer::CanonicalCommandReducer(CanonicalServerState restoredState,
+        CanonicalStateVersion restoredStateVersion, CanonicalRevision restoredCanonicalRevision,
+        ServerTick restoredCheckpointTick, Observability& observability, CanonicalSinkBundle sinks,
+        ContentManifest contentManifest, ServerCollisionQuery& collision)
+        : mState(std::make_shared<CanonicalServerState>(std::move(restoredState)))
+        , mStateVersion(restoredStateVersion)
+        , mCanonicalRevision(restoredCanonicalRevision)
+        , mCheckpointTick(restoredCheckpointTick)
+        , mLatestPublication(std::shared_ptr<const CanonicalStatePublication>(
+              new CanonicalStatePublication(restoredStateVersion, restoredCheckpointTick, mState, {})))
+        , mObservability(observability)
+        , mSinks(sinks)
+        , mContentManifest(std::move(contentManifest))
+        , mCollision(&collision)
+    {
+    }
+
+    bool CanonicalCommandReducer::configureDurability(CanonicalDurabilityPort& durability) noexcept
+    {
+        if (mDurability != nullptr)
+            return false;
+        mDurability = &durability;
+        return true;
+    }
+
     std::shared_ptr<const CanonicalStatePublication> CanonicalCommandReducer::latestPublication() const noexcept
     {
         return std::atomic_load_explicit(&mLatestPublication, std::memory_order_acquire);
@@ -247,9 +271,8 @@ namespace TES3MP
             const auto nextRevision = existing->entityRevision().next();
             const auto nextAuthority = existing->authorityEpoch().next();
             if (!nextRevision || !nextAuthority || player.entityId() != existing->entityId()
-                || player.appearanceId() != existing->appearanceId()
-                || player.entityRevision() != *nextRevision || player.authorityEpoch() != *nextAuthority
-                || std::ranges::any_of(sessions, [&](const auto& value) {
+                || player.appearanceId() != existing->appearanceId() || player.entityRevision() != *nextRevision
+                || player.authorityEpoch() != *nextAuthority || std::ranges::any_of(sessions, [&](const auto& value) {
                        return value.playerId() == player.playerId();
                    }))
                 return std::nullopt;
@@ -278,14 +301,19 @@ namespace TES3MP
         if (prepared.mBaseVersion != mStateVersion || prepared.mBaseCanonicalRevision != mCanonicalRevision
             || !prepared.mState || !prepared.mPublication)
             return false;
+        prepared.mPublication->mStateVersion = prepared.mStateVersion;
+        prepared.mPublication->mCheckpointTick = prepared.mCheckpointTick;
+        prepared.mPublication->mState = prepared.mState;
+        prepared.mPublication->mChecksum
+            = canonicalStateChecksumV2(prepared.mStateVersion, prepared.mCheckpointTick, *prepared.mState);
+        if (mDurability
+            && mDurability->commit(prepared.mPublication, prepared.mCanonicalRevision, {})
+                != CanonicalDurabilityResult::Committed)
+            return false;
         mState = std::move(prepared.mState);
         mStateVersion = prepared.mStateVersion;
         mCanonicalRevision = prepared.mCanonicalRevision;
         mCheckpointTick = prepared.mCheckpointTick;
-        prepared.mPublication->mStateVersion = mStateVersion;
-        prepared.mPublication->mCheckpointTick = mCheckpointTick;
-        prepared.mPublication->mState = mState;
-        prepared.mPublication->mChecksum = canonicalStateChecksumV2(mStateVersion, mCheckpointTick, *mState);
         std::shared_ptr<const CanonicalStatePublication> committed = std::move(prepared.mPublication);
         std::atomic_store_explicit(&mLatestPublication, committed, std::memory_order_release);
         (void)deliver(committed);
@@ -394,12 +422,12 @@ namespace TES3MP
         std::vector<CanonicalPlayerEntityState> players(mState->players().begin(), mState->players().end());
         const auto found = std::find_if(
             players.begin(), players.end(), [playerId](const auto& value) { return value.playerId() == playerId; });
-        if (found == players.end()
-            || !std::ranges::any_of(mState->activeSessions(),
-                [playerId](const auto& session) { return session.playerId() == playerId; }))
+        if (found == players.end() || !std::ranges::any_of(mState->activeSessions(), [playerId](const auto& session) {
+                return session.playerId() == playerId;
+            }))
             return std::nullopt;
-        auto advanced = advanceCanonicalSpatialState(
-            *found, tick, transform, LinearVelocity3(0, 0, 0), LocomotionMode::Walk);
+        auto advanced
+            = advanceCanonicalSpatialState(*found, tick, transform, LinearVelocity3(0, 0, 0), LocomotionMode::Walk);
         auto* replacement = std::get_if<CanonicalPlayerEntityState>(&advanced);
         if (!replacement)
             return std::nullopt;
@@ -446,6 +474,15 @@ namespace TES3MP
         if (prepared.mBaseVersion != mStateVersion || prepared.mBaseCanonicalRevision != mCanonicalRevision
             || !prepared.mState || !prepared.mPublication)
             return false;
+        prepared.mPublication->mStateVersion = prepared.mStateVersion;
+        prepared.mPublication->mCheckpointTick = prepared.mCheckpointTick;
+        prepared.mPublication->mState = prepared.mState;
+        prepared.mPublication->mChecksum
+            = canonicalStateChecksumV2(prepared.mStateVersion, prepared.mCheckpointTick, *prepared.mState);
+        if (mDurability
+            && mDurability->commit(prepared.mPublication, prepared.mCanonicalRevision, {})
+                != CanonicalDurabilityResult::Committed)
+            return false;
         mState = std::move(prepared.mState);
         mStateVersion = prepared.mStateVersion;
         mCanonicalRevision = prepared.mCanonicalRevision;
@@ -458,10 +495,6 @@ namespace TES3MP
                 std::erase(mClientAuthoritativePlayers, item.player);
             }
         }
-        prepared.mPublication->mStateVersion = mStateVersion;
-        prepared.mPublication->mCheckpointTick = mCheckpointTick;
-        prepared.mPublication->mState = mState;
-        prepared.mPublication->mChecksum = canonicalStateChecksumV2(mStateVersion, mCheckpointTick, *mState);
         std::shared_ptr<const CanonicalStatePublication> committed = std::move(prepared.mPublication);
         std::atomic_store_explicit(&mLatestPublication, committed, std::memory_order_release);
         (void)deliver(committed);
@@ -496,7 +529,7 @@ namespace TES3MP
             report.setResult(role, result);
             observe(role, result, publication->checkpointTick());
         };
-        attempt(CanonicalSinkRole::Persistence, mSinks.persistence());
+        attempt(CanonicalSinkRole::Archive, mSinks.archive());
         attempt(CanonicalSinkRole::Replay, mSinks.replay());
         attempt(CanonicalSinkRole::Script, mSinks.script());
         attempt(CanonicalSinkRole::Metrics, mSinks.metrics());
@@ -558,8 +591,7 @@ namespace TES3MP
     CanonicalCommandReducer::PreparedBatch CanonicalCommandReducer::prepareCommands(const ServerTickCommandBatch& batch,
         const CanonicalInteractiveObjectWorld* objects, const InteractiveObjectCatalog* objectCatalog,
         const CanonicalInventoryWorld* inventory, const ItemPrototypeCatalog* itemCatalog,
-        const CanonicalCombatWorld* combat, const CanonicalActorWorld* actors,
-        const MeleeWeaponCatalog* meleeWeapons,
+        const CanonicalCombatWorld* combat, const CanonicalActorWorld* actors, const MeleeWeaponCatalog* meleeWeapons,
         const OpenMwMeleeSettings* meleeSettings, const MeleeAuthorityPolicy* meleePolicy,
         ServerMeleeContactQuery* meleeContact, const DirectMagicCatalog* directMagic)
     {
@@ -719,16 +751,14 @@ namespace TES3MP
                                         if (intent.position().has_value())
                                         {
                                             const auto currentOrientation = player->transform().orientation();
-                                            const auto orientation = intent.orientation().value_or(
-                                                Orientation3(currentOrientation.x(), currentOrientation.y(),
-                                                    intent.rootFacing()));
-                                            replacementTransform
-                                                = Transform(player->transform().cell(), *intent.position(), orientation);
+                                            const auto orientation = intent.orientation().value_or(Orientation3(
+                                                currentOrientation.x(), currentOrientation.y(), intent.rootFacing()));
+                                            replacementTransform = Transform(
+                                                player->transform().cell(), *intent.position(), orientation);
                                             replacementVelocity = intent.desiredVelocity();
                                             replacementLocomotionMode = intent.mode();
                                             if (std::find(prepared.mClientAuthoritativePlayers.begin(),
-                                                    prepared.mClientAuthoritativePlayers.end(),
-                                                    session->playerId())
+                                                    prepared.mClientAuthoritativePlayers.end(), session->playerId())
                                                 == prepared.mClientAuthoritativePlayers.end())
                                             {
                                                 prepared.mClientAuthoritativePlayers.push_back(session->playerId());
@@ -745,10 +775,10 @@ namespace TES3MP
                                             else
                                             {
                                                 const auto currentOrientation = player->transform().orientation();
-                                                replacementTransform
-                                                    = Transform(player->transform().cell(), player->transform().position(),
-                                                        Orientation3(currentOrientation.x(), currentOrientation.y(),
-                                                            intent.rootFacing()));
+                                                replacementTransform = Transform(player->transform().cell(),
+                                                    player->transform().position(),
+                                                    Orientation3(currentOrientation.x(), currentOrientation.y(),
+                                                        intent.rootFacing()));
                                                 replacementVelocity = intent.desiredVelocity();
                                                 replacementLocomotionMode = intent.mode();
                                             }
@@ -869,13 +899,14 @@ namespace TES3MP
                                             transaction.player = session->playerId();
                                             const auto* beforeInventory
                                                 = prepared.mInventory->findPlayer(session->playerId());
-                                            const auto* combatPlayer
-                                                = prepared.mCombat ? prepared.mCombat->findPlayer(session->playerId()) : nullptr;
-                                            const auto oldWeight = beforeInventory
-                                                ? beforeInventory->totalWeight(*itemCatalog) : 0;
+                                            const auto* combatPlayer = prepared.mCombat
+                                                ? prepared.mCombat->findPlayer(session->playerId())
+                                                : nullptr;
+                                            const auto oldWeight
+                                                = beforeInventory ? beforeInventory->totalWeight(*itemCatalog) : 0;
                                             const auto oldWeapon = beforeInventory
-                                                ? beforeInventory->equipment[static_cast<std::size_t>(
-                                                      EquipmentSlot::CarriedRight)]
+                                                ? beforeInventory
+                                                      ->equipment[static_cast<std::size_t>(EquipmentSlot::CarriedRight)]
                                                 : std::optional<ItemStackId>{};
                                             if (prepared.mCombat && (!combatPlayer || !combatPlayer->revision.next()))
                                                 disposition = CommandDisposition::InventoryTransactionRejected;
@@ -887,9 +918,11 @@ namespace TES3MP
                                                     ? CommandDisposition::Applied
                                                     : CommandDisposition::InventoryTransactionRejected;
                                                 const auto* afterInventory = disposition == CommandDisposition::Applied
-                                                    ? prepared.mInventory->findPlayer(session->playerId()) : nullptr;
+                                                    ? prepared.mInventory->findPlayer(session->playerId())
+                                                    : nullptr;
                                                 const auto newWeight = afterInventory
-                                                    ? afterInventory->totalWeight(*itemCatalog) : oldWeight;
+                                                    ? afterInventory->totalWeight(*itemCatalog)
+                                                    : oldWeight;
                                                 const auto newWeapon = afterInventory
                                                     ? afterInventory->equipment[static_cast<std::size_t>(
                                                           EquipmentSlot::CarriedRight)]
@@ -911,27 +944,25 @@ namespace TES3MP
                                         requiresSpatialAdvance = false;
                                         const auto& melee
                                             = std::get<MeleeAttackCommandProposal>(proposal.payload()).command();
-                                        if (!prepared.mCombat || !prepared.mInventory || !itemCatalog
-                                            || !actors || !meleeWeapons || !meleeSettings || !meleePolicy
-                                            || !meleeContact)
+                                        if (!prepared.mCombat || !prepared.mInventory || !itemCatalog || !actors
+                                            || !meleeWeapons || !meleeSettings || !meleePolicy || !meleeContact)
                                             disposition = CommandDisposition::CombatRejected;
                                         else
                                         {
                                             const AuthoritativeMeleeAttack attack{ session->playerId(),
                                                 melee.targetActorId, melee.expectedAttackerRevision,
-                                                melee.expectedTargetRevision, melee.sourceServerTick,
-                                                melee.attackType, melee.attackStrength };
+                                                melee.expectedTargetRevision, melee.sourceServerTick, melee.attackType,
+                                                melee.attackStrength };
                                             auto combatResult = prepareAuthoritativeMeleeAttack(*prepared.mCombat,
-                                                *prepared.mInventory, *itemCatalog, *meleeWeapons,
-                                                *prepared.mState, *actors, *meleeSettings, *meleePolicy,
-                                                *meleeContact, tick, attack, directMagic);
+                                                *prepared.mInventory, *itemCatalog, *meleeWeapons, *prepared.mState,
+                                                *actors, *meleeSettings, *meleePolicy, *meleeContact, tick, attack,
+                                                directMagic);
                                             if (combatResult.disposition == AuthoritativeMeleeDisposition::Applied
                                                 && combatResult.candidate)
                                             {
                                                 prepared.mCombat = std::move(*combatResult.candidate);
                                                 if (combatResult.candidateInventory)
-                                                    prepared.mInventory
-                                                        = std::move(*combatResult.candidateInventory);
+                                                    prepared.mInventory = std::move(*combatResult.candidateInventory);
                                                 if (combatResult.event)
                                                     prepared.mCombatEvents.push_back(*combatResult.event);
                                                 disposition = CommandDisposition::Applied;
@@ -1017,6 +1048,17 @@ namespace TES3MP
         {
             throw;
         }
+        prepared.mDurableCommands.reserve(result.mDispositions.size());
+        for (const auto& record : result.mDispositions)
+        {
+            DurableCommandOrder order;
+            order.source = DurableCommandSource::Client;
+            order.fields = { record.stamp().eligibleServerTick().value(), record.stamp().ingressOrdinal().value(),
+                record.sessionId().value(), record.sessionGeneration().value(), record.commandSequence().value(),
+                record.commandId().value(), 0, 0, 0 };
+            order.disposition = static_cast<std::uint8_t>(record.disposition());
+            prepared.mDurableCommands.push_back(order);
+        }
         prepared.mPublication = std::move(publication);
         return prepared;
     }
@@ -1070,8 +1112,7 @@ namespace TES3MP
                 const auto velocity = current.linearVelocity();
                 if (velocity == LinearVelocity3(0, 0, 0))
                     continue;
-                if (std::find(prepared.mClientAuthoritativePlayers.begin(),
-                        prepared.mClientAuthoritativePlayers.end(),
+                if (std::find(prepared.mClientAuthoritativePlayers.begin(), prepared.mClientAuthoritativePlayers.end(),
                         current.playerId())
                     != prepared.mClientAuthoritativePlayers.end())
                     continue;
@@ -1167,9 +1208,8 @@ namespace TES3MP
                 const auto found = std::ranges::find(players, command.player(), &CanonicalPlayerEntityState::playerId);
                 if (found != players.end())
                 {
-                    if (!std::ranges::any_of(prepared.mState->activeSessions(), [&](const auto& session) {
-                            return session.playerId() == command.player();
-                        }))
+                    if (!std::ranges::any_of(prepared.mState->activeSessions(),
+                            [&](const auto& session) { return session.playerId() == command.player(); }))
                         disposition = ServerScriptCommandDisposition::InactivePlayer;
                     else if (command.precondition().entityId() != found->entityId())
                         disposition = ServerScriptCommandDisposition::EntityBindingMismatch;
@@ -1181,8 +1221,8 @@ namespace TES3MP
                         disposition = ServerScriptCommandDisposition::UnknownCell;
                     else
                     {
-                        auto advanced = advanceCanonicalSpatialState(*found, tick, command.destination(),
-                            LinearVelocity3(0, 0, 0), LocomotionMode::Walk);
+                        auto advanced = advanceCanonicalSpatialState(
+                            *found, tick, command.destination(), LinearVelocity3(0, 0, 0), LocomotionMode::Walk);
                         if (const auto* replacement = std::get_if<CanonicalPlayerEntityState>(&advanced))
                         {
                             *found = *replacement;
@@ -1223,6 +1263,17 @@ namespace TES3MP
                 prepared.mState = std::make_shared<CanonicalServerState>(std::move(*state));
                 prepared.mCheckpointTick = tick;
             }
+            for (const auto& record : prepared.mResult.mScriptDispositions)
+            {
+                const auto value = record.order();
+                DurableCommandOrder order;
+                order.source = DurableCommandSource::Script;
+                order.fields = { value.eligibleTick().value(), value.publicationOrdinal(), value.eventOrdinal(),
+                    value.packageLoadOrder(), value.packageId(), value.packageVersion(), value.apiVersion(),
+                    value.callbackOrder(), value.commandOrdinal() };
+                order.disposition = static_cast<std::uint8_t>(record.disposition());
+                prepared.mDurableCommands.push_back(order);
+            }
         }
         catch (...)
         {
@@ -1258,9 +1309,11 @@ namespace TES3MP
     CanonicalCommandReducer::PreparedBatch CanonicalCommandReducer::prepareTick(
         const ServerTickCommandBatch& batch, CanonicalCommandWorlds worlds)
     {
-        return prepareTickState(prepareCommands(batch, worlds.interactiveObjects, worlds.interactiveObjectCatalog,
-            worlds.inventory, worlds.itemCatalog, worlds.combat, worlds.actors, worlds.meleeWeapons,
-            worlds.meleeSettings, worlds.meleePolicy, worlds.meleeContact, worlds.directMagic), batch);
+        return prepareTickState(
+            prepareCommands(batch, worlds.interactiveObjects, worlds.interactiveObjectCatalog, worlds.inventory,
+                worlds.itemCatalog, worlds.combat, worlds.actors, worlds.meleeWeapons, worlds.meleeSettings,
+                worlds.meleePolicy, worlds.meleeContact, worlds.directMagic),
+            batch);
     }
 
     CanonicalCommandReducer::PreparedBatch CanonicalCommandReducer::prepareTick(const ServerTickCommandBatch& batch,
@@ -1272,9 +1325,8 @@ namespace TES3MP
         return prepareTickState(prepareScriptCommands(std::move(prepared), batch, scriptCommands), batch);
     }
 
-    bool CanonicalCommandReducer::commitPrepared(
-        PreparedBatch&& prepared, CanonicalInteractiveObjectWorld* objects, CanonicalInventoryWorld* inventory,
-        CanonicalCombatWorld* combat)
+    bool CanonicalCommandReducer::commitPrepared(PreparedBatch&& prepared, CanonicalInteractiveObjectWorld* objects,
+        CanonicalInventoryWorld* inventory, CanonicalCombatWorld* combat)
     {
         if (prepared.mBaseVersion != mStateVersion || prepared.mBaseCanonicalRevision != mCanonicalRevision
             || !prepared.mState || !prepared.mPublication || (prepared.mInteractiveObjects && objects == nullptr)
@@ -1284,6 +1336,18 @@ namespace TES3MP
             || (prepared.mCombat && combat == nullptr)
             || (prepared.mBaseCombat && (!combat || *combat != *prepared.mBaseCombat)))
             return false;
+        prepared.mPublication->mStateVersion = prepared.mStateVersion;
+        prepared.mPublication->mCheckpointTick = prepared.mCheckpointTick;
+        prepared.mPublication->mState = prepared.mState;
+        prepared.mPublication->mChecksum
+            = canonicalStateChecksumV2(prepared.mStateVersion, prepared.mCheckpointTick, *prepared.mState);
+        if (mDurability)
+        {
+            prepared.mResult.mDurabilityResult
+                = mDurability->commit(prepared.mPublication, prepared.mCanonicalRevision, prepared.mDurableCommands);
+            if (prepared.mResult.mDurabilityResult != CanonicalDurabilityResult::Committed)
+                return false;
+        }
         mState = std::move(prepared.mState);
         if (prepared.mInteractiveObjects)
             *objects = std::move(*prepared.mInteractiveObjects);

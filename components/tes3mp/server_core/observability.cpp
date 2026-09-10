@@ -35,7 +35,7 @@ namespace
                 return dimension.value >= MetricDimensionValue::CommandReductionApplied
                     && dimension.value <= MetricDimensionValue::CommandReductionStateVersionCapacityExceeded;
             case MetricDimensionKey::CanonicalSinkRole:
-                return dimension.value >= MetricDimensionValue::CanonicalSinkPersistence
+                return dimension.value >= MetricDimensionValue::CanonicalSinkArchive
                     && dimension.value <= MetricDimensionValue::CanonicalSinkMetrics;
             case MetricDimensionKey::CanonicalSinkDeliveryOutcome:
                 return dimension.value >= MetricDimensionValue::CanonicalSinkAccepted
@@ -142,7 +142,7 @@ namespace
     {
         using TES3MP::CanonicalSinkObservationOutcome;
         using TES3MP::CanonicalSinkObservationRole;
-        const bool validRole = event.role >= CanonicalSinkObservationRole::Persistence
+        const bool validRole = event.role >= CanonicalSinkObservationRole::Archive
             && event.role <= CanonicalSinkObservationRole::Metrics;
         const bool validOutcome = event.outcome >= CanonicalSinkObservationOutcome::Accepted
             && event.outcome <= CanonicalSinkObservationOutcome::Failed;

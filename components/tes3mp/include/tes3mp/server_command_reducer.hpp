@@ -1,6 +1,7 @@
 #ifndef TES3MP_SERVER_COMMAND_REDUCER_HPP
 #define TES3MP_SERVER_COMMAND_REDUCER_HPP
 
+#include "canonical_persistence.hpp"
 #include "canonical_publication.hpp"
 #include "canonical_sinks.hpp"
 #include "combat_world.hpp"
@@ -96,6 +97,7 @@ namespace TES3MP
             return mScriptDispositions;
         }
         constexpr CanonicalSinkDeliveryReport sinkDeliveryReport() const noexcept { return mSinkDeliveryReport; }
+        constexpr CanonicalDurabilityResult durabilityResult() const noexcept { return mDurabilityResult; }
         constexpr explicit operator bool() const noexcept { return mError == CommandBatchReductionError::None; }
 
         friend bool operator==(const CommandBatchReductionResult&, const CommandBatchReductionResult&) noexcept
@@ -108,6 +110,7 @@ namespace TES3MP
         std::vector<CommandDispositionRecord> mDispositions;
         std::vector<ServerScriptCommandDispositionRecord> mScriptDispositions;
         CanonicalSinkDeliveryReport mSinkDeliveryReport;
+        CanonicalDurabilityResult mDurabilityResult = CanonicalDurabilityResult::NotConfigured;
     };
 
     class CanonicalCommandReducer
@@ -151,6 +154,7 @@ namespace TES3MP
             std::optional<CanonicalCombatWorld> mCombat;
             std::vector<AuthoritativeMeleeEvent> mCombatEvents;
             std::vector<PlayerId> mClientAuthoritativePlayers;
+            std::vector<DurableCommandOrder> mDurableCommands;
         };
 
         class PreparedJoin
@@ -212,6 +216,10 @@ namespace TES3MP
             CanonicalSinkBundle sinks, ContentManifest contentManifest);
         CanonicalCommandReducer(CanonicalServerState initialState, Observability& observability,
             CanonicalSinkBundle sinks, ContentManifest contentManifest, ServerCollisionQuery& collision);
+        CanonicalCommandReducer(CanonicalServerState restoredState, CanonicalStateVersion restoredStateVersion,
+            CanonicalRevision restoredCanonicalRevision, ServerTick restoredCheckpointTick,
+            Observability& observability, CanonicalSinkBundle sinks, ContentManifest contentManifest,
+            ServerCollisionQuery& collision);
 
         CanonicalCommandReducer(const CanonicalCommandReducer&) = delete;
         CanonicalCommandReducer& operator=(const CanonicalCommandReducer&) = delete;
@@ -223,6 +231,8 @@ namespace TES3MP
         const CanonicalServerState& state() const noexcept { return *mState; }
         CanonicalStateVersion stateVersion() const noexcept { return mStateVersion; }
         CanonicalRevision canonicalRevision() const noexcept { return mCanonicalRevision; }
+        ServerTick checkpointTick() const noexcept { return mCheckpointTick; }
+        bool configureDurability(CanonicalDurabilityPort& durability) noexcept;
         std::shared_ptr<const CanonicalStatePublication> latestPublication() const noexcept;
         PreparedBatch prepare(const ServerTickCommandBatch& batch);
         PreparedBatch prepare(const ServerTickCommandBatch& batch, const CanonicalInteractiveObjectWorld& objects,
@@ -255,8 +265,7 @@ namespace TES3MP
         std::optional<PreparedLifecycle> prepareDisconnect(SessionId session, ServerTick tick);
         std::optional<PreparedLifecycle> prepareDisconnectBatch(std::span<const SessionId> sessions, ServerTick tick);
         std::optional<PreparedLifecycle> prepareResume(CanonicalSessionProgress session, ServerTick tick);
-        std::optional<PreparedLifecycle> preparePlayerSafePoint(
-            PlayerId player, Transform transform, ServerTick tick);
+        std::optional<PreparedLifecycle> preparePlayerSafePoint(PlayerId player, Transform transform, ServerTick tick);
         std::optional<PreparedLifecycle> prepareExpiration(
             PlayerId player, SessionId session, SessionGeneration generation, ServerTick tick);
         bool commit(PreparedLifecycle&& prepared);
@@ -276,15 +285,14 @@ namespace TES3MP
             const CanonicalInteractiveObjectWorld* objects, const InteractiveObjectCatalog* objectCatalog,
             const CanonicalInventoryWorld* inventory, const ItemPrototypeCatalog* itemCatalog,
             const CanonicalCombatWorld* combat = nullptr, const CanonicalActorWorld* actors = nullptr,
-            const MeleeWeaponCatalog* meleeWeapons = nullptr,
-            const OpenMwMeleeSettings* meleeSettings = nullptr, const MeleeAuthorityPolicy* meleePolicy = nullptr,
-            ServerMeleeContactQuery* meleeContact = nullptr, const DirectMagicCatalog* directMagic = nullptr);
+            const MeleeWeaponCatalog* meleeWeapons = nullptr, const OpenMwMeleeSettings* meleeSettings = nullptr,
+            const MeleeAuthorityPolicy* meleePolicy = nullptr, ServerMeleeContactQuery* meleeContact = nullptr,
+            const DirectMagicCatalog* directMagic = nullptr);
         PreparedBatch prepareTickState(PreparedBatch prepared, const ServerTickCommandBatch& batch);
         PreparedBatch prepareScriptCommands(PreparedBatch prepared, const ServerTickCommandBatch& batch,
             std::span<const QueuedServerScriptCommand> commands);
-        bool commitPrepared(
-            PreparedBatch&& prepared, CanonicalInteractiveObjectWorld* objects, CanonicalInventoryWorld* inventory,
-            CanonicalCombatWorld* combat = nullptr);
+        bool commitPrepared(PreparedBatch&& prepared, CanonicalInteractiveObjectWorld* objects,
+            CanonicalInventoryWorld* inventory, CanonicalCombatWorld* combat = nullptr);
 
         std::shared_ptr<const CanonicalServerState> mState;
         CanonicalStateVersion mStateVersion = CanonicalStateVersion::initial();
@@ -293,6 +301,7 @@ namespace TES3MP
         std::shared_ptr<const CanonicalStatePublication> mLatestPublication;
         Observability& mObservability;
         CanonicalSinkBundle mSinks;
+        CanonicalDurabilityPort* mDurability = nullptr;
         ContentManifest mContentManifest;
         ServerCollisionQuery* mCollision;
         std::vector<PlayerId> mClientAuthoritativePlayers;

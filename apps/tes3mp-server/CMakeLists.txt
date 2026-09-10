@@ -2,6 +2,8 @@ include(${CMAKE_CURRENT_LIST_DIR}/../../cmake/TES3MPVerifyTargetBoundaries.cmake
 include(${CMAKE_CURRENT_LIST_DIR}/../../cmake/TES3MPRuntimeSafety.cmake)
 
 add_library(tes3mp_server_app STATIC
+    canonical_persistence_file.hpp
+    canonical_persistence_file.cpp
     actor_content.hpp
     actor_content.cpp
     character_content.hpp
@@ -54,11 +56,18 @@ target_link_libraries(tes3mp_server_app_tests PRIVATE tes3mp_server_app)
 target_compile_definitions(tes3mp_server_app_tests PRIVATE TES3MP_SOURCE_ROOT="${CMAKE_CURRENT_SOURCE_DIR}/../..")
 set_target_properties(tes3mp_server_app_tests PROPERTIES FOLDER "TES3MP/Tests")
 tes3mp_enable_runtime_safety(tes3mp_server_app_tests)
+add_executable(tes3mp_canonical_persistence_file_tests canonical_persistence_file_tests.cpp)
+target_compile_features(tes3mp_canonical_persistence_file_tests PRIVATE cxx_std_20)
+target_link_libraries(tes3mp_canonical_persistence_file_tests PRIVATE tes3mp_server_app)
+set_target_properties(tes3mp_canonical_persistence_file_tests PROPERTIES FOLDER "TES3MP/Tests")
+tes3mp_enable_runtime_safety(tes3mp_canonical_persistence_file_tests)
 add_custom_target(tes3mp_server_app_tests_run
     COMMAND $<TARGET_FILE:tes3mp_server_app_tests>
+    COMMAND $<TARGET_FILE:tes3mp_canonical_persistence_file_tests>
     COMMAND $<TARGET_FILE:tes3mp_combat_interest_projection_tests>
     COMMAND $<TARGET_FILE:tes3mp_melee_contact_history_tests>
-    DEPENDS tes3mp_server_app_tests tes3mp_combat_interest_projection_tests tes3mp_melee_contact_history_tests
+    DEPENDS tes3mp_server_app_tests tes3mp_canonical_persistence_file_tests
+        tes3mp_combat_interest_projection_tests tes3mp_melee_contact_history_tests
     COMMENT "Running TES3MP dedicated-server app contracts")
 
 add_executable(tes3mp_combat_interest_projection_tests combat_interest_projection_tests.cpp)
@@ -98,4 +107,5 @@ endif()
 tes3mp_verify_target_dependencies(tes3mp_server_app
     ALLOWED tes3mp_protocol tes3mp_transport tes3mp_server_core)
 tes3mp_verify_target_dependencies(tes3mp_server_app_tests ALLOWED tes3mp_server_app)
+tes3mp_verify_target_dependencies(tes3mp_canonical_persistence_file_tests ALLOWED tes3mp_server_app)
 tes3mp_verify_target_includes(tes3mp_server_app FORBIDDEN "apps/openmw" "tes3mp/test_support")

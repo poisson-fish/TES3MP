@@ -1,6 +1,7 @@
 #include "actor_content.hpp"
-#include "combat_content.hpp"
+#include "canonical_persistence_file.hpp"
 #include "character_content.hpp"
+#include "combat_content.hpp"
 #include "connection_session_coordinator.hpp"
 #include "content_collision.hpp"
 #include "interactive_object_content.hpp"
@@ -12,6 +13,7 @@
 #include "server_application.hpp"
 #include "server_config.hpp"
 
+#include <tes3mp/canonical_persistence.hpp>
 #include <tes3mp/observability.hpp>
 #include <tes3mp/server_authentication.hpp>
 #include <tes3mp/transport_gns.hpp>
@@ -21,6 +23,7 @@
 #include <iostream>
 #include <iterator>
 #include <optional>
+#include <span>
 #include <string>
 #include <thread>
 #include <variant>
@@ -74,7 +77,8 @@ int main(int argc, char** argv)
     auto config = std::get<TES3MP::ServerApp::ServerConfig>(std::move(parsed));
     const auto configDirectory = std::filesystem::absolute(std::filesystem::path(argv[1])).parent_path();
     const auto resolve = [&](std::filesystem::path& path) {
-        if (!path.empty() && path.is_relative()) path = configDirectory / path;
+        if (!path.empty() && path.is_relative())
+            path = configDirectory / path;
     };
     resolve(config.joinPasswordFile);
     resolve(config.collisionContentFile);
@@ -255,6 +259,17 @@ int main(int argc, char** argv)
 
     SteadyMonotonicClock clock;
     auto crypto = TES3MP::makeProductionCredentialCrypto();
+    TES3MP::CredentialDigest configurationDigest;
+    const auto configurationBytes
+        = std::span<const std::byte>(reinterpret_cast<const std::byte*>(text.data()), text.size());
+    const auto configurationId = crypto && crypto->sha256(configurationBytes, configurationDigest)
+        ? TES3MP::ServerConfigurationId::fromBytes(configurationDigest.bytes)
+        : std::nullopt;
+    if (!configurationId)
+    {
+        std::cerr << "configuration identity is unavailable\n";
+        return 2;
+    }
     auto ratePolicy = TES3MP::AuthenticationRateLimitPolicy::create(TES3MP::ServerApp::Phase7SourceAuthenticationBurst,
         TES3MP::ServerApp::Phase7GlobalAuthenticationBurst, TES3MP::ServerApp::Phase7AuthenticationRefillMilliseconds,
         TES3MP::ServerApp::Phase7AuthenticationRefillMilliseconds);
@@ -284,16 +299,74 @@ int main(int argc, char** argv)
                 std::cerr << "persisted player state validation failed\n";
                 return 2;
             }
+    std::vector<TES3MP::PersistenceSeed> persistenceSeeds;
+    if (combatContent)
+        persistenceSeeds.push_back({ 1, combatContent->world.randomState().words() });
+    auto persistenceIdentity = TES3MP::CanonicalPersistenceIdentity::create(
+        config.contentManifest.id(), *configurationId, {}, persistenceSeeds);
+    auto persistencePath = config.playerIdentityFile;
+    persistencePath += ".world-v1";
+    auto persistenceFileResult = persistenceIdentity
+        ? TES3MP::ServerApp::CanonicalPersistenceFile::open(persistencePath, *persistenceIdentity)
+        : std::variant<std::unique_ptr<TES3MP::ServerApp::CanonicalPersistenceFile>,
+              TES3MP::ServerApp::CanonicalPersistenceFileError>(
+              TES3MP::ServerApp::CanonicalPersistenceFileError::Malformed);
+    if (const auto* persistenceError
+        = std::get_if<TES3MP::ServerApp::CanonicalPersistenceFileError>(&persistenceFileResult))
+    {
+        if (*persistenceError == TES3MP::ServerApp::CanonicalPersistenceFileError::IdentityMismatch)
+            std::cerr << "canonical persistence content, configuration, script, or seed identity mismatch\n";
+        else
+            std::cerr << "canonical persistence file could not be verified\n";
+        return 2;
+    }
+    auto persistenceFile
+        = std::move(std::get<std::unique_ptr<TES3MP::ServerApp::CanonicalPersistenceFile>>(persistenceFileResult));
+    auto restoredState = persistenceFile->restoredState();
+    if (restoredState)
+    {
+        for (const auto& player : restoredState->players())
+        {
+            if (!config.contentManifest.contains(player.transform().cell())
+                || !collision->canOccupy(player.transform().cell(), player.transform().position()))
+            {
+                std::cerr << "persisted canonical player validation failed\n";
+                return 2;
+            }
+        }
+    }
+    std::vector<TES3MP::PersistedPlayerIdentity> identityRecords(
+        identityFile->records().begin(), identityFile->records().end());
+    if (restoredState)
+        for (const auto& player : restoredState->players())
+        {
+            auto record = std::find_if(identityRecords.begin(), identityRecords.end(), [&](const auto& value) {
+                return value.claim.player == player.playerId() && value.claim.entity == player.entityId()
+                    && value.claim.appearance == player.appearanceId()
+                    && value.characterProfile.lifecycle() == TES3MP::CharacterLifecycle::EstablishedCharacter;
+            });
+            if (record == identityRecords.end())
+            {
+                std::cerr << "persisted canonical player identity mismatch\n";
+                return 2;
+            }
+            record->savedPlayer = player;
+        }
     std::vector<TES3MP::EntityId> actorEntityIds;
     actorEntityIds.reserve(actorCatalog.entries().size());
     for (const auto& actor : actorCatalog.entries())
         actorEntityIds.push_back(actor.entityId);
     auto playerIdentityResult = crypto && identityFile
-        ? TES3MP::PlayerIdentityRegistry::create(*crypto, *identityFile, identityFile->records(), actorEntityIds)
+        ? TES3MP::PlayerIdentityRegistry::create(*crypto, *identityFile, identityRecords, actorEntityIds)
         : std::variant<std::unique_ptr<TES3MP::PlayerIdentityRegistry>, TES3MP::PlayerIdentityError>(
               TES3MP::PlayerIdentityError::InvalidInitialState);
     auto* playerIdentityValue = std::get_if<std::unique_ptr<TES3MP::PlayerIdentityRegistry>>(&playerIdentityResult);
     auto playerIdentities = playerIdentityValue ? std::move(*playerIdentityValue) : nullptr;
+    if (!playerIdentities || !persistenceFile->bindPlayerIdentities(*playerIdentities))
+    {
+        std::cerr << "canonical persistence identity composition failed\n";
+        return 3;
+    }
     auto queues = TES3MP::OutboundQueueSet::create(
         TES3MP::OutboundQueuePolicy{}, TES3MP::ServerApp::Phase7ConnectionCapacity, queueTelemetry);
     const auto timeoutNanoseconds = config.disconnectGraceMilliseconds * 1'000'000;
@@ -330,11 +403,32 @@ int main(int argc, char** argv)
     TES3MP::NullStructuredEventSink events;
     TES3MP::Observability observability(metrics, events);
     TES3MP::DeterministicServerScriptRuntime scripts;
-    auto emptyState = std::get<TES3MP::CanonicalServerState>(TES3MP::createCanonicalServerState({}, {}));
-    TES3MP::CanonicalCommandReducer reducer(std::move(emptyState), observability,
-        TES3MP::CanonicalSinkBundle(nullptr, nullptr, &scripts, nullptr), config.contentManifest, *collision);
+    auto initialState = restoredState
+        ? std::move(*restoredState)
+        : std::get<TES3MP::CanonicalServerState>(TES3MP::createCanonicalServerState({}, {}));
+    const auto restoredVersion
+        = persistenceFile->restoredStateVersion().value_or(TES3MP::CanonicalStateVersion::initial());
+    const auto restoredRevision
+        = persistenceFile->restoredCanonicalRevision().value_or(TES3MP::CanonicalRevision::initial());
+    const auto restoredTick = persistenceFile->restoredCheckpointTick().value_or(TES3MP::ServerTick::initial());
+    TES3MP::CanonicalCommandReducer reducer(std::move(initialState), restoredVersion, restoredRevision, restoredTick,
+        observability, TES3MP::CanonicalSinkBundle(nullptr, nullptr, &scripts, nullptr), config.contentManifest,
+        *collision);
+    if (!reducer.configureDurability(*persistenceFile))
+    {
+        std::cerr << "canonical persistence composition failed\n";
+        return 3;
+    }
+    const auto nextTick = persistenceFile->restoredCheckpointTick()
+        ? restoredTick.next()
+        : std::optional<TES3MP::ServerTick>(TES3MP::ServerTick::initial());
+    if (!nextTick)
+    {
+        std::cerr << "persisted checkpoint tick is exhausted\n";
+        return 2;
+    }
     TES3MP::ServerCommandIntakeCoordinator intake(
-        clock, observability, clock.now(), TES3MP::ServerTick::initial(), TES3MP::IngressOrdinal::initial());
+        clock, observability, clock.now(), *nextTick, TES3MP::IngressOrdinal::initial());
     auto joins = playerIdentities ? TES3MP::AuthenticatedJoinCoordinator::create(spawns, config.contentManifest,
                                         *TES3MP::SessionId::fromValue(1), *playerIdentities, reducer)
                                   : std::nullopt;
@@ -352,21 +446,17 @@ int main(int argc, char** argv)
         std::get<TES3MP::CapabilityOffer>(std::move(offer)), authentication, *queues,
         TES3MP::ServerApp::Phase7ConnectionCapacity, &actorWorld,
         interactiveObjectWorld ? &*interactiveObjectWorld : nullptr, inventoryWorld ? &*inventoryWorld : nullptr,
-        combatContent ? &combatContent->world : nullptr,
-        combatContent ? &combatContent->playerTemplate : nullptr, itemCatalog ? &*itemCatalog : nullptr,
-        characterContent ? &*characterContent : nullptr);
+        combatContent ? &combatContent->world : nullptr, combatContent ? &combatContent->playerTemplate : nullptr,
+        itemCatalog ? &*itemCatalog : nullptr, characterContent ? &*characterContent : nullptr);
     TES3MP::ServerApp::ServerApplication application(*factory.runtime, config,
         { sessions, *joins, *crypto, *queues, clock, intake, reducer, *lifecycle, &actorCatalog, &actorWorld,
             collision.get(), interactiveObjectCatalog ? &*interactiveObjectCatalog : nullptr,
             interactiveObjectWorld ? &*interactiveObjectWorld : nullptr, itemCatalog ? &*itemCatalog : nullptr,
             inventoryWorld ? &*inventoryWorld : nullptr, combatContent ? &combatContent->world : nullptr,
-            combatContent ? &combatContent->weapons : nullptr,
-            combatContent ? &combatContent->playerTemplate : nullptr,
-            combatContent ? &combatContent->settings : nullptr,
-            combatContent ? &meleePolicy : nullptr,
+            combatContent ? &combatContent->weapons : nullptr, combatContent ? &combatContent->playerTemplate : nullptr,
+            combatContent ? &combatContent->settings : nullptr, combatContent ? &meleePolicy : nullptr,
             meleeContactHistory ? &*meleeContactHistory : nullptr,
-            meleeContactHistory ? &*meleeContactHistory : nullptr,
-            combatContent ? &combatContent->magic : nullptr,
+            meleeContactHistory ? &*meleeContactHistory : nullptr, combatContent ? &combatContent->magic : nullptr,
             &scripts });
     if (!application.start())
     {

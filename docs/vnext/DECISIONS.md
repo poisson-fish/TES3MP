@@ -178,10 +178,17 @@ the affected code/tests in the same milestone.
   typed commands for deterministic ticks. They never receive packet buffers or
   direct mutable canonical references. Callback and generated-command ordering
   must be replay-stable. Reusing Lua does not imply legacy API compatibility.
-- **Persistence.** Persist canonical domain records, not protocol payloads,
-  OpenMW pointers, renderer objects, or transport types. Define the durability
-  acknowledgement point and atomically bind replay to configuration, content,
-  script/API versions, deterministic seeds, and command ordering.
+- **Persistence acknowledgement and identity.** Persist canonical domain
+  records, not protocol payloads, OpenMW pointers, renderer objects, or
+  transport types. `Committed` from the durability port is the sole
+  acknowledgement point: it occurs after the file-backed adapter has flushed
+  and atomically replaced a completely verified prefix, but before the reducer
+  installs or publishes the candidate. Failure leaves the prior state visible.
+  Every prefix is exactly bound to configuration, content, script/API package
+  versions, deterministic seeds, and complete client/script command ordering.
+  V1 restores established, session-independent player identities and roots but
+  never live sessions or incomplete-chargen roots; later domains extend the
+  envelope rather than creating parallel save authorities.
 - **Administration.** Public health and privileged operational detail remain
   separate. Administrative APIs do not expose scripting/runtime internals.
 - **Quest isolation.** A future Quest implementation reuses the platform-neutral

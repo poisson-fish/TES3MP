@@ -14,7 +14,7 @@ namespace TES3MP
 
     enum class CanonicalSinkRole : std::uint8_t
     {
-        Persistence,
+        Archive,
         Replay,
         Script,
         Metrics,
@@ -28,13 +28,14 @@ namespace TES3MP
         Failed,
     };
 
-    class CanonicalPersistenceSink
+    // Post-publication archival/diagnostic observation only. Durable commits
+    // use CanonicalDurabilityPort and cannot be acknowledged here.
+    class CanonicalArchiveSink
     {
     public:
-        virtual ~CanonicalPersistenceSink() = default;
+        virtual ~CanonicalArchiveSink() = default;
         virtual CanonicalSinkDeliveryResult tryConsume(
-            const std::shared_ptr<const CanonicalStatePublication>& publication) noexcept
-            = 0;
+            const std::shared_ptr<const CanonicalStatePublication>& publication) noexcept = 0;
     };
 
     class CanonicalReplaySink
@@ -42,8 +43,7 @@ namespace TES3MP
     public:
         virtual ~CanonicalReplaySink() = default;
         virtual CanonicalSinkDeliveryResult tryConsume(
-            const std::shared_ptr<const CanonicalStatePublication>& publication) noexcept
-            = 0;
+            const std::shared_ptr<const CanonicalStatePublication>& publication) noexcept = 0;
     };
 
     class CanonicalScriptSink
@@ -51,8 +51,7 @@ namespace TES3MP
     public:
         virtual ~CanonicalScriptSink() = default;
         virtual CanonicalSinkDeliveryResult tryConsume(
-            const std::shared_ptr<const CanonicalStatePublication>& publication) noexcept
-            = 0;
+            const std::shared_ptr<const CanonicalStatePublication>& publication) noexcept = 0;
     };
 
     class CanonicalMetricsSink
@@ -60,30 +59,29 @@ namespace TES3MP
     public:
         virtual ~CanonicalMetricsSink() = default;
         virtual CanonicalSinkDeliveryResult tryConsume(
-            const std::shared_ptr<const CanonicalStatePublication>& publication) noexcept
-            = 0;
+            const std::shared_ptr<const CanonicalStatePublication>& publication) noexcept = 0;
     };
 
     class CanonicalSinkBundle
     {
     public:
         constexpr CanonicalSinkBundle() noexcept = default;
-        constexpr CanonicalSinkBundle(CanonicalPersistenceSink* persistence, CanonicalReplaySink* replay,
+        constexpr CanonicalSinkBundle(CanonicalArchiveSink* archive, CanonicalReplaySink* replay,
             CanonicalScriptSink* script, CanonicalMetricsSink* metrics) noexcept
-            : mPersistence(persistence)
+            : mArchive(archive)
             , mReplay(replay)
             , mScript(script)
             , mMetrics(metrics)
         {
         }
 
-        constexpr CanonicalPersistenceSink* persistence() const noexcept { return mPersistence; }
+        constexpr CanonicalArchiveSink* archive() const noexcept { return mArchive; }
         constexpr CanonicalReplaySink* replay() const noexcept { return mReplay; }
         constexpr CanonicalScriptSink* script() const noexcept { return mScript; }
         constexpr CanonicalMetricsSink* metrics() const noexcept { return mMetrics; }
 
     private:
-        CanonicalPersistenceSink* mPersistence = nullptr;
+        CanonicalArchiveSink* mArchive = nullptr;
         CanonicalReplaySink* mReplay = nullptr;
         CanonicalScriptSink* mScript = nullptr;
         CanonicalMetricsSink* mMetrics = nullptr;
