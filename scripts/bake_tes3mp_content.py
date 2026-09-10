@@ -46,7 +46,7 @@ CATALOGS = {
     "actor_content_file": ("TES3MP_ACTORS_V1", True),
     "interactive_object_content_file": ("TES3MP_INTERACTIVE_OBJECTS_V1", False),
     "inventory_content_file": ("TES3MP_INVENTORY_V1", False),
-    "combat_content_file": ("TES3MP_COMBAT_V1", False),
+    "combat_content_file": ("TES3MP_COMBAT_V2", False),
     "character_content_file": ("TES3MP_CHARACTERS_V2", False),
 }
 
@@ -729,6 +729,7 @@ COMBAT_GMSTS = (
     "fCombatInvisoMult", "fFatigueAttackBase", "fFatigueAttackMult", "fWeaponFatigueMult",
     "fWeaponDamageMult", "fDamageStrengthBase", "fDamageStrengthMult", "fMinHandToHandMult",
     "fMaxHandToHandMult", "fHandtoHandHealthPer", "fCombatCriticalStrikeMult", "fCombatKODamageMult",
+    "fFatigueBase", "fFatigueMult", "fFatigueReturnBase", "fFatigueReturnMult", "fEndFatigueMult",
 )
 
 
@@ -784,8 +785,8 @@ def derive_catalogs(recipe: DerivedRecipe, server_entries: Sequence[Assignment],
 
     player_record = _winning_record(records, recipe.player_record, {"NPC_"}, "player-stat")
     _level, player_attributes, player_skills, _health, player_fatigue = _npc_values(player_record, "player template")
-    fatigue_base = _gmst_value(records, "fFatigueBase")
     gmsts = tuple(_gmst_value(records, name) for name in COMBAT_GMSTS)
+    fatigue_base = gmsts[12]
     strength, agility, luck = player_attributes[0], player_attributes[3], player_attributes[7]
     weapon_skill_values = (player_skills[22], player_skills[5], player_skills[4], player_skills[6], player_skills[7])
     maximum_weight = strength * 50
@@ -825,7 +826,7 @@ def derive_catalogs(recipe: DerivedRecipe, server_entries: Sequence[Assignment],
             attacks = tuple(float(value) for value in values[17:23])
         evasion = (attributes[3] / 5.0 + attributes[7] / 10.0) * fatigue_base
         attack = (float(attributes[3]), float(attributes[7]), float(attributes[0]), fatigue_base,
-                  combat_skill, float(fatigue), *attacks, 1.0)
+                  combat_skill, float(fatigue), *attacks, 1.0, float(attributes[5]))
         actor_values.append((actor, record_value, float(health), float(fatigue), evasion, attack))
     if len({stable_record_id(actor.record) for actor in recipe.actors}) != len(
             {actor.record.casefold() for actor in recipe.actors}):
@@ -855,7 +856,8 @@ def derive_catalogs(recipe: DerivedRecipe, server_entries: Sequence[Assignment],
     combat_lines = [CATALOGS["combat_content_file"][0], f"manifest {MANIFEST_PLACEHOLDER}",
                     f"seed {recipe.seed}", "settings " + " ".join(_float_text(value) for value in gmsts)]
     player_fields = (float(agility), float(luck), float(strength), fatigue_base, 0.0, 0.0,
-                     *(float(value) for value in weapon_skill_values), float(player_skills[26]), float(player_fatigue))
+                     *(float(value) for value in weapon_skill_values), float(player_skills[26]), float(player_fatigue),
+                     float(player_attributes[5]))
     combat_lines.append("player " + " ".join((*(_float_text(value) for value in player_fields),
         str(maximum_weight), "0")))
     for actor, _record, health, fatigue, evasion, attack in sorted(actor_values, key=lambda value: value[0].actor_id):

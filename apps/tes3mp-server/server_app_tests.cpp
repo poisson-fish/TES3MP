@@ -423,7 +423,7 @@ int main()
     using namespace TES3MP::ServerApp;
     {
         const auto manifestId
-            = ContentManifestId::fromHex("bfbfad7ef8c111d2995a61cbdf01a47b3cbebac3bf95f010215ef798d793bfca");
+            = ContentManifestId::fromHex("de09e7e9fe8d9bacec7a0c454fb602f976f81e782c92b75d9e9e682c322f54a7");
         const auto spaces = parseCellSpaceDeclarations("interior:1;interior:2;interior:3;exterior:4");
         const auto cells = parseContentCells("interior:1;interior:2;interior:3;exterior:4:-2:-9");
         const auto movement = parseMovementProfile("sneak:4;walk:8;run:16;jump:12");
@@ -725,14 +725,14 @@ int main()
         assert(static_cast<bool>(stream));
     };
     constexpr std::string_view combatHeader
-        = "TES3MP_COMBAT_V1\n"
+        = "TES3MP_COMBAT_V2\n"
           "manifest 0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20\n"
           "seed 42\n";
     constexpr std::string_view combatBody
-        = "settings 0.2 5 1 0.1 1 1 0.1 0.1 1 1 1.5 1\n"
-          "player 50 40 40 1 0 0 10 20 30 40 50 25 100 500 0\n"
+        = "settings 0.2 5 1 0.1 1 1 0.1 0.1 1 1 1.5 1 1.25 0.5 0.02 0.04 0.1\n"
+          "player 50 40 40 1 0 0 10 20 30 40 50 25 100 30 500 0\n"
           "actor 1 20 50 0 0 0 25 0 0 0 0 0\n"
-          "actor_attack 1 50 40 40 1 25 50 1 4 1 4 1 4 1\n"
+          "actor_attack 1 50 40 40 1 25 50 1 4 1 4 1 4 1 30\n"
           "weapon 4 1 1 10 1 10 1 10 5 1 1\n";
     const std::array combatItemDeclarations{ ItemPrototypeDeclaration{ id<ItemPrototypeId>(4), ItemCategory::Weapon, 5,
         1, 100, 0, slotToMask(EquipmentSlot::CarriedRight), false, std::nullopt } };
@@ -744,24 +744,31 @@ int main()
     assert(combat.world.actors().size() == 1 && combat.world.players().empty()
         && combat.weapons.find(id<ItemPrototypeId>(4))
         && combat.world.actors()[0].attackReachQuanta == 128 * 1024
+        && combat.world.actors()[0].maximumHealth == 20.f
+        && combat.world.actors()[0].maximumFatigue == 50.f
+        && combat.world.actors()[0].attacker.endurance == 30.f
+        && combat.playerTemplate.maximumHealth == 40.f
+        && combat.playerTemplate.maximumFatigue == 100.f
+        && combat.playerTemplate.stats.endurance == 30.f
+        && combat.settings.fatigueReturnMultiplier == 0.04f
         && combat.playerTemplate.weaponSkills[static_cast<std::size_t>(MeleeWeaponSkill::LongBlade)] == 20.f);
     writeCombat(std::string(combatHeader)
-        + "settings nan 5 1 0.1 1 1 0.1 0.1 1 1 1.5 1\n"
-          "player 50 40 40 1 0 0 10 20 30 40 50 25 100 500 0\n"
+        + "settings nan 5 1 0.1 1 1 0.1 0.1 1 1 1.5 1 1.25 0.5 0.02 0.04 0.1\n"
+          "player 50 40 40 1 0 0 10 20 30 40 50 25 100 30 500 0\n"
           "actor 1 20 50 0 0 0 25 0 0 0 0 0\n");
     const auto malformedCombat = std::get<CombatContentError>(
         loadCombatContent(combatPath, parsedConfig().contentManifest, actorCatalog, combatItems));
     assert(malformedCombat.code == CombatContentErrorCode::InvalidSettings && malformedCombat.line == 4
         && describeCombatContentError(malformedCombat) == "invalid settings at line 4");
     writeCombat(std::string(combatHeader)
-        + "settings 0.2 5 1 0.1 1 1 0.1 0.1 1 1 1.5 1\n"
-          "player 50 40 40 1 0 0 10 20 30 40 50 25 100 500 0\n");
+        + "settings 0.2 5 1 0.1 1 1 0.1 0.1 1 1 1.5 1 1.25 0.5 0.02 0.04 0.1\n"
+          "player 50 40 40 1 0 0 10 20 30 40 50 25 100 30 500 0\n");
     assert(std::get<CombatContentError>(
                loadCombatContent(combatPath, parsedConfig().contentManifest, actorCatalog, combatItems))
                .code
         == CombatContentErrorCode::InvalidActorSet);
     writeCombat(
-        "TES3MP_COMBAT_V1\n"
+        "TES3MP_COMBAT_V2\n"
         "manifest 0202030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20\n"
         "seed 42\n"
         + std::string(combatBody));
@@ -1051,6 +1058,10 @@ int main()
         playerTemplate.stats.strength = 45.f;
         playerTemplate.stats.fatigue = 80.f;
         playerTemplate.maximumEncumbranceWeightUnits = 200;
+        playerTemplate.victim.health = 45.f;
+        playerTemplate.victim.fatigue = 80.f;
+        playerTemplate.maximumHealth = 45.f;
+        playerTemplate.maximumFatigue = 80.f;
 
         FixedClock clock;
         NullMetricSink metrics;
@@ -2156,8 +2167,12 @@ int main()
                 if (const auto* value = std::get_if<LatestWinsCombatSnapshot>(&snapshot))
                     sawCombatSnapshot = value->selfHealth() == finalCombat->victim.health
                         && value->selfHealth() <= initialPlayerHealth && value->selfDead() == finalCombat->victim.dead
+                        && value->selfMaximumHealth() == finalCombat->maximumHealth
                         && value->selfFatigue() == finalCombat->stats.fatigue
-                        && value->actors().size() == 1 && value->actors()[0].health == finalActor->stats.health;
+                        && value->selfMaximumFatigue() == finalCombat->maximumFatigue
+                        && value->actors().size() == 1 && value->actors()[0].health == finalActor->stats.health
+                        && value->actors()[0].maximumHealth == finalActor->maximumHealth
+                        && value->actors()[0].maximumFatigue == finalActor->maximumFatigue;
             }
             else if (decoded->messageKind() == MessageKind::ReliableCombatEventBatch)
             {

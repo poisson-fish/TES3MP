@@ -32,11 +32,11 @@ namespace TES3MP::ServerApp
             if (!state)
                 return std::nullopt;
             visible.push_back({ state->actorId, state->revision, state->stats.health,
-                state->stats.fatigue, state->stats.dead });
+                state->maximumHealth, state->stats.fatigue, state->maximumFatigue, state->stats.dead });
         }
         auto created = LatestWinsCombatSnapshot::create(target, session->sessionGeneration(), tick,
             canonicalRevision, session->playerId(), self->revision, self->victim.health,
-            self->stats.fatigue, self->victim.dead, visible);
+            self->maximumHealth, self->stats.fatigue, self->maximumFatigue, self->victim.dead, visible);
         auto* snapshot = std::get_if<LatestWinsCombatSnapshot>(&created);
         return snapshot ? std::optional<LatestWinsCombatSnapshot>(std::move(*snapshot)) : std::nullopt;
     }

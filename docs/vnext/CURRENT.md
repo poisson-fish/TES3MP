@@ -1,6 +1,6 @@
 # TES3MP vNext current implementation
 
-- Updated: 2026-09-09
+- Updated: 2026-09-10
 - Code snapshot inspected: `vnext` working tree based on `0641a1792d`
 - OpenMW baseline: `f4bec41444214a7903bebd178389ca22ca13f646`
 
@@ -287,12 +287,13 @@ and [`desktop_providers.cpp`](../../apps/openmw/tes3mp/desktop_providers.cpp).
   damage, resources, targets, and wall-clock time are not accepted as outcomes.
 - A shared engine-independent resolver is also used by OpenMW's hit chance,
   weapon damage, hand-to-hand damage, and fatigue helpers. The server owns the
-  PRNG, attacker fatigue, actor health/fatigue/dead state,
+  PRNG, canonical maximum/current health and fatigue, actor dead state,
   cooldown, and separate combat revisions. Damage and death commit atomically
   with command finalization.
-- Optional bounded `TES3MP_COMBAT_V1` content supplies manifest-scoped resolver
+- Optional bounded `TES3MP_COMBAT_V2` content supplies manifest-scoped resolver
   settings, a validated default player combat profile, exhaustive actor combat
-  seeds and attack profiles, weapon records, and a deterministic random seed.
+  seeds and attack profiles, weapon records, OpenMW fatigue constants and
+  endurance, and a deterministic random seed.
   Startup rejects a missing, malformed, mismatched, or internally inconsistent
   configured file before exposing any of its state.
 - Fresh joins establish the validated server baseline. Character completion and
@@ -310,14 +311,19 @@ and [`desktop_providers.cpp`](../../apps/openmw/tes3mp/desktop_providers.cpp).
   contact/reach, and rate abuse before mutation. Existing session generation,
   command sequence/ID, entity binding, authority epoch, and canonical revision
   checks reject stale authority and replay.
-- Private self health/dead/fatigue/revision and same-cell actor stats replicate
-  through a latest-wins snapshot. Same-cell player and actor attack outcomes use
-  a reliable event batch. OpenMW applies confirmed player resources and hit
-  recovery, actor health/fatigue/dead state, native death/resurrection, actor
-  attack/hit animations, and canonical inventory condition/breakage.
+- Private self maximum/current health and fatigue, death state, and revision,
+  plus same-cell actor stats, replicate through a latest-wins snapshot.
+  Same-cell player and actor attack outcomes use a reliable event batch. OpenMW
+  applies confirmed stat bases and current resources, hit recovery, actor
+  health/fatigue/dead state, native death/resurrection, actor attack/hit
+  animations, and canonical inventory condition/breakage.
 - Confirmed player contact assigns actor aggression. In-reach actors resolve one
   server-owned attack per configured tick interval using their baked stats and
   natural weapon, update canonical player health/death, and publish the result.
+  Active living players and actors recover fatigue deterministically from
+  elapsed server ticks, endurance, and canonical encumbrance, clamped to their
+  server-owned maximum. Latest-wins server ticks order passive recovery without
+  invalidating combat intent revisions on every simulation tick.
   Dead players and actors automatically respawn after 30 seconds at their
   current canonical root with baseline resources and cleared attack state.
 - Production composition retains nine bounded server-tick frames of player and
@@ -392,9 +398,10 @@ and [`test_bake_tes3mp_content.py`](../../scripts/tests/test_bake_tes3mp_content
   state is not persisted.
 - The current resolver covers direct player-versus-server-actor weapon and
   hand-to-hand hit, fatigue, resistance, critical/knockdown multipliers, weapon
-  wear, damage, death, reactive actor attacks, hit animations, and timed in-place
-  respawn. PvP/P2P, proactive AI aggression, blocking decisions, difficulty
-  scaling, resource recovery, skill advancement, hit sounds, on-strike
+  wear, damage, death, reactive actor attacks, hit animations, timed in-place
+  respawn, maximum/current health and fatigue, and active fatigue recovery.
+  PvP/P2P, proactive AI aggression, blocking decisions, difficulty scaling,
+  health/magicka recovery, skill advancement, hit sounds, on-strike
   enchantments, elemental shields, disease, Lua hit callbacks, and general
   magic remain unimplemented.
 - Established root checkpoints and complete character profiles survive restart;
@@ -418,12 +425,11 @@ and [`test_bake_tes3mp_content.py`](../../scripts/tests/test_bake_tes3mp_content
 
 ## Work still required
 
-### Next milestone: combat stats, blocking, and recovery
+### Next milestone: blocking, difficulty, and combat feedback
 
-Add authoritative maximum/current stat derivation and recovery, player blocking,
-difficulty scaling, and the remaining direct-combat presentation feedback
-against the packaged derived pack. General magic and deterministic server
-scripting remain later work.
+Add authoritative player blocking, difficulty scaling, and the remaining
+direct-combat presentation feedback against the packaged derived pack. General
+magic and deterministic server scripting remain later work.
 
 ### Required before the desktop/PC-VR release
 
@@ -454,8 +460,7 @@ and do not enter protocol or canonical state.
 
 ## Verification snapshot
 
-The derived-combat-pack working tree passed the following on
-2026-09-09:
+The fatigue-recovery working tree passed the following on 2026-09-10:
 
 - the bounded Windows product `checks` graph, including relinking the shipping
   client and dedicated server and running the adapter, server-application, and
@@ -468,10 +473,7 @@ The derived-combat-pack working tree passed the following on
   `Morrowind.esm` with SHA-256
   `5c3c8c2cbd20e25901b59b3ece33d36b7ef0e3d60ad8d11828bcc61a5ead1647`,
   producing and verifying pack
-  `bfbfad7ef8c111d2995a61cbdf01a47b3cbebac3bf95f010215ef798d793bfca`;
-  and
-- a dedicated-server start/readiness/interrupt-stop smoke using the packaged
-  default configuration.
+  `de09e7e9fe8d9bacec7a0c454fb602f976f81e782c92b75d9e9e682c322f54a7`.
 
 The standalone aggregate also passed. The Linux-only sanitizer/fuzzer execution
 profile, non-Windows product builds, PC-VR hardware checks, a full upstream

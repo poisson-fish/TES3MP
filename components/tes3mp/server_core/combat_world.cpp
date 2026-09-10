@@ -37,10 +37,13 @@ namespace
         };
         if (!(finite(s.agility) && finite(s.luck) && finite(s.strength) && finite(s.fatigueTerm)
                 && finite(s.normalizedEncumbrance) && finite(s.fortifyAttack) && finite(s.blind)
-                && finite(s.weaponSkill) && finite(s.handToHandSkill) && finite(s.fatigue))
+                && finite(s.weaponSkill) && finite(s.handToHandSkill) && finite(s.fatigue)
+                && finite(s.endurance))
             || value.maximumEncumbranceWeightUnits == 0
             || !std::ranges::all_of(value.weaponSkills, [](float skill) { return finite(skill); })
-            || !validVictim(value.victim) || !validVictim(value.respawnVictim))
+            || !validVictim(value.victim) || !validVictim(value.respawnVictim)
+            || !finite(value.maximumHealth) || value.maximumHealth <= 0.f
+            || !finite(value.maximumFatigue) || value.maximumFatigue < 0.f)
             return false;
         return true;
     }
@@ -58,8 +61,11 @@ namespace
         const bool attackerValid = finite(attacker.agility) && finite(attacker.luck) && finite(attacker.strength)
             && finite(attacker.fatigueTerm) && finite(attacker.normalizedEncumbrance)
             && finite(attacker.fortifyAttack) && finite(attacker.blind) && finite(attacker.weaponSkill)
-            && finite(attacker.handToHandSkill) && finite(attacker.fatigue);
+            && finite(attacker.handToHandSkill) && finite(attacker.fatigue) && finite(attacker.endurance);
         return victimValid && spawnValid && attackerValid
+            && finite(value.maximumHealth) && value.maximumHealth >= 0.f
+            && finite(value.maximumFatigue) && value.maximumFatigue >= 0.f
+            && (value.stats.dead || value.maximumHealth > 0.f)
             && (!value.naturalWeapon || validProfile(TES3MP::MeleeWeaponProfile{
                 *TES3MP::ItemPrototypeId::fromValue(1), TES3MP::MeleeWeaponSkill::ShortBlade,
                 value.naturalWeapon->chopMinimum, value.naturalWeapon->chopMaximum,
@@ -110,14 +116,17 @@ namespace TES3MP
         result.stats.strength = static_cast<float>(attributes[0]);
         result.stats.agility = static_cast<float>(attributes[3]);
         result.stats.luck = static_cast<float>(attributes[7]);
+        result.stats.endurance = static_cast<float>(attributes[5]);
         result.stats.fatigueTerm = 1.f;
         result.stats.handToHandSkill = static_cast<float>(skills[26]);
         result.stats.fatigue = static_cast<float>(attributes[0]) + static_cast<float>(attributes[2])
             + static_cast<float>(attributes[3]) + static_cast<float>(attributes[5]);
-        result.victim.health = (static_cast<float>(attributes[0]) + static_cast<float>(attributes[2])) * 0.5f;
+        result.victim.health = (static_cast<float>(attributes[0]) + static_cast<float>(attributes[5])) * 0.5f;
         result.victim.fatigue = result.stats.fatigue;
         result.victim.evasion = (result.stats.agility / 5.f + result.stats.luck / 10.f) * result.stats.fatigueTerm;
         result.victim.dead = false;
+        result.maximumHealth = result.victim.health;
+        result.maximumFatigue = result.victim.fatigue;
         result.weaponSkills[static_cast<std::size_t>(MeleeWeaponSkill::ShortBlade)]
             = static_cast<float>(skills[20]);
         result.weaponSkills[static_cast<std::size_t>(MeleeWeaponSkill::LongBlade)]
@@ -184,10 +193,13 @@ namespace TES3MP
     {
         if (findPlayer(id))
             return true;
-        if (mPlayers.size() >= MaximumPlayerCombatants || source.maximumEncumbranceWeightUnits == 0)
+        if (mPlayers.size() >= MaximumPlayerCombatants || source.maximumEncumbranceWeightUnits == 0
+            || !finite(source.maximumHealth) || source.maximumHealth <= 0.f
+            || !finite(source.maximumFatigue) || source.maximumFatigue < 0.f)
             return false;
         CanonicalPlayerCombatState value{ id, CombatRevision::initial(), source.stats, source.weaponSkills,
-            source.maximumEncumbranceWeightUnits, std::nullopt, std::nullopt, source.victim, source.victim };
+            source.maximumEncumbranceWeightUnits, std::nullopt, std::nullopt, source.victim, source.victim,
+            std::nullopt, source.maximumHealth, source.maximumFatigue };
         value.stats.weaponSkill = 0.f;
         value.stats.normalizedEncumbrance
             = normalizedEncumbrance(inventoryWeightUnits, source.maximumEncumbranceWeightUnits);
@@ -222,7 +234,8 @@ namespace TES3MP
         if (!revision || source.maximumEncumbranceWeightUnits == 0)
             return false;
         CanonicalPlayerCombatState value{ id, *revision, source.stats, source.weaponSkills,
-            source.maximumEncumbranceWeightUnits, std::nullopt, profileRevision, source.victim, source.victim };
+            source.maximumEncumbranceWeightUnits, std::nullopt, profileRevision, source.victim, source.victim,
+            std::nullopt, source.maximumHealth, source.maximumFatigue };
         value.stats.weaponSkill = 0.f;
         value.stats.normalizedEncumbrance
             = normalizedEncumbrance(inventoryWeightUnits, source.maximumEncumbranceWeightUnits);
@@ -253,7 +266,7 @@ namespace TES3MP
 
     std::variant<CanonicalCombatWorld, CanonicalCombatWorldError> createCanonicalCombatWorld(
         std::span<const CanonicalPlayerCombatState> players, std::span<const CanonicalActorCombatState> actors,
-        RandomStateV1 randomState)
+        RandomStateV1 randomState, std::optional<ServerTick> lastSimulationTick)
     {
         if (players.size() > MaximumPlayerCombatants)
             return CanonicalCombatWorldError{ CanonicalCombatWorldErrorCode::PlayerLimitExceeded };
@@ -274,7 +287,7 @@ namespace TES3MP
                 return CanonicalCombatWorldError{ CanonicalCombatWorldErrorCode::ActorsNotStrictlySorted, i };
         }
         return CanonicalCombatWorld(std::vector(players.begin(), players.end()),
-            std::vector(actors.begin(), actors.end()), randomState);
+            std::vector(actors.begin(), actors.end()), randomState, lastSimulationTick);
     }
 
     PreparedMeleeAttack prepareAuthoritativeMeleeAttack(const CanonicalCombatWorld& combat,
@@ -351,6 +364,8 @@ namespace TES3MP
         std::optional<OpenMwMeleeWeapon> equippedWeapon;
         std::optional<float> equippedWeaponReach;
         OpenMwMeleeAttacker resolvedAttacker = attackerCombat->stats;
+        resolvedAttacker.fatigueTerm = openMwFatigueTerm(
+            settings, attackerCombat->stats.fatigue, attackerCombat->maximumFatigue);
         const auto carriedRight = static_cast<std::size_t>(EquipmentSlot::CarriedRight);
         if (attackerInventory->equipment[carriedRight])
         {
@@ -442,6 +457,7 @@ namespace TES3MP
         }
         mutableAttacker.stats.fatigue = resolution.attackerFatigue;
         mutableAttacker.victim.fatigue = resolution.attackerFatigue;
+        mutableAttacker.victim.fatigueNonNegative = resolution.attackerFatigue >= 0.f;
         mutableAttacker.lastAttackTick = serverTick;
         mutableAttacker.revision = *attackerRevision;
         if (equippedStackId && equippedWeapon && resolution.weaponCondition != equippedWeapon->condition)
@@ -459,6 +475,7 @@ namespace TES3MP
         {
             mutableTarget->stats.health = resolution.victimHealth;
             mutableTarget->stats.fatigue = resolution.victimFatigue;
+            mutableTarget->stats.fatigueNonNegative = resolution.victimFatigue >= 0.f;
             mutableTarget->attacker.fatigue = resolution.victimFatigue;
             mutableTarget->stats.dead = resolution.victimDied || mutableTarget->stats.dead;
             mutableTarget->aggressionTarget = attack.attacker;
@@ -466,7 +483,8 @@ namespace TES3MP
                 mutableTarget->deathTick = serverTick;
             mutableTarget->revision = *targetRevision;
         }
-        auto created = createCanonicalCombatWorld(playerStates, actorStates, random.snapshot());
+        auto created = createCanonicalCombatWorld(
+            playerStates, actorStates, random.snapshot(), combat.lastSimulationTick());
         auto* candidate = std::get_if<CanonicalCombatWorld>(&created);
         if (!candidate)
         {
@@ -493,8 +511,13 @@ namespace TES3MP
         CombatSimulationPolicy policy, ServerTick tick) noexcept
     try
     {
-        if (policy.minimumActorAttackIntervalTicks == 0 || policy.respawnDelayTicks == 0)
+        if (policy.minimumActorAttackIntervalTicks == 0 || policy.respawnDelayTicks == 0
+            || !finite(policy.secondsPerTick) || policy.secondsPerTick <= 0.f)
             return CombatSimulationError{ CombatSimulationErrorCode::InvalidWorld };
+        if (combat.lastSimulationTick() && tick < *combat.lastSimulationTick())
+            return CombatSimulationError{ CombatSimulationErrorCode::TickRegression };
+        const std::uint64_t elapsedTicks = combat.lastSimulationTick()
+            ? tick.value() - combat.lastSimulationTick()->value() : 1;
         std::vector<CanonicalPlayerCombatState> playerStates(combat.players().begin(), combat.players().end());
         std::vector<CanonicalActorCombatState> actorStates(combat.actors().begin(), combat.actors().end());
         std::vector<AuthoritativeActorMeleeEvent> events;
@@ -562,7 +585,10 @@ namespace TES3MP
             const auto roll = random.uniformBelow(100);
             if (!roll)
                 return CombatSimulationError{ CombatSimulationErrorCode::InvalidWorld, index };
-            const auto resolution = resolveOpenMwMelee(settings, actor.attacker, target->victim,
+            auto resolvedActor = actor.attacker;
+            resolvedActor.fatigueTerm = openMwFatigueTerm(
+                settings, actor.attacker.fatigue, actor.maximumFatigue);
+            const auto resolution = resolveOpenMwMelee(settings, resolvedActor, target->victim,
                 OpenMwMeleeAttempt{ .type = MeleeAttackType::Chop, .attackStrength = 1.f,
                     .hitRoll0To99 = static_cast<std::uint8_t>(*roll), .contact = true,
                     .weapon = actor.naturalWeapon });
@@ -576,10 +602,12 @@ namespace TES3MP
                 return CombatSimulationError{ CombatSimulationErrorCode::RevisionExhausted, index };
             actor.attacker.fatigue = resolution.attackerFatigue;
             actor.stats.fatigue = resolution.attackerFatigue;
+            actor.stats.fatigueNonNegative = resolution.attackerFatigue >= 0.f;
             actor.lastAttackTick = tick;
             actor.revision = *actorRevision;
             target->victim.health = resolution.victimHealth;
             target->victim.fatigue = resolution.victimFatigue;
+            target->victim.fatigueNonNegative = resolution.victimFatigue >= 0.f;
             target->victim.dead = resolution.victimDied || target->victim.dead;
             target->stats.fatigue = resolution.victimFatigue;
             if (target->victim.dead && !target->deathTick)
@@ -612,7 +640,53 @@ namespace TES3MP
             player.revision = *revision;
         }
 
-        auto created = createCanonicalCombatWorld(playerStates, actorStates, random.snapshot());
+        const float elapsedSeconds = static_cast<float>(elapsedTicks) * policy.secondsPerTick;
+        if (!finite(elapsedSeconds))
+            return CombatSimulationError{ CombatSimulationErrorCode::InvalidWorld };
+        const auto recoverFatigue = [&](float current, float maximum, const OpenMwMeleeAttacker& attacker) {
+            if (current >= maximum)
+                return current;
+            const float rate = openMwFatigueRecoveryPerSecond(
+                settings, attacker.endurance, attacker.normalizedEncumbrance);
+            if (!finite(rate) || rate <= 0.f)
+                return current;
+            return std::min(maximum, current + rate * elapsedSeconds);
+        };
+        // Latest-wins snapshots order passive recovery by server tick. Keeping the
+        // action revision stable prevents normal network delay from making every
+        // attack stale while fatigue is recovering.
+        for (std::size_t index = 0; index < playerStates.size(); ++index)
+        {
+            auto& player = playerStates[index];
+            if (player.victim.dead || !activePlayer(player.playerId))
+                continue;
+            const float recovered = recoverFatigue(player.stats.fatigue, player.maximumFatigue, player.stats);
+            if (recovered == player.stats.fatigue)
+                continue;
+            player.stats.fatigue = recovered;
+            player.victim.fatigue = recovered;
+            player.victim.fatigueNonNegative = recovered >= 0.f;
+        }
+        for (std::size_t index = 0; index < actorStates.size(); ++index)
+        {
+            auto& actor = actorStates[index];
+            const auto* spatialActor = actors.find(actor.actorId);
+            const bool activeCell = spatialActor && std::ranges::any_of(players.activeSessions(),
+                [&](const CanonicalSessionProgress& session) {
+                    const auto* player = players.findPlayer(session.playerId());
+                    return player && player->transform().cell() == spatialActor->root().cell();
+                });
+            if (actor.stats.dead || !activeCell)
+                continue;
+            const float recovered = recoverFatigue(actor.attacker.fatigue, actor.maximumFatigue, actor.attacker);
+            if (recovered == actor.attacker.fatigue)
+                continue;
+            actor.attacker.fatigue = recovered;
+            actor.stats.fatigue = recovered;
+            actor.stats.fatigueNonNegative = recovered >= 0.f;
+        }
+
+        auto created = createCanonicalCombatWorld(playerStates, actorStates, random.snapshot(), tick);
         auto* candidate = std::get_if<CanonicalCombatWorld>(&created);
         if (!candidate)
             return CombatSimulationError{ CombatSimulationErrorCode::InvalidWorld };

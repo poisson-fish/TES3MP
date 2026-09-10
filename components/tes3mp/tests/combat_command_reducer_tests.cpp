@@ -46,12 +46,18 @@ namespace
         attacker.fatigue = 100.f;
         std::array<float, static_cast<std::size_t>(MeleeWeaponSkill::Count)> weaponSkills{};
         weaponSkills.fill(100.f);
-        const std::array combatPlayers{ CanonicalPlayerCombatState{
-            playerId, CombatRevision::initial(), attacker, weaponSkills, 100, std::nullopt } };
+        OpenMwMeleeVictim playerVictim;
+        playerVictim.health = 100.f;
+        playerVictim.fatigue = 100.f;
+        const std::array combatPlayers{ CanonicalPlayerCombatState{ .playerId = playerId,
+            .revision = CombatRevision::initial(), .stats = attacker, .weaponSkills = weaponSkills,
+            .maximumEncumbranceWeightUnits = 100, .victim = playerVictim, .respawnVictim = playerVictim,
+            .maximumHealth = 100.f, .maximumFatigue = 100.f } };
         OpenMwMeleeVictim victim;
         victim.health = 20.f;
-        const std::array combatActors{ CanonicalActorCombatState{
-            id<ActorId>(2), CombatRevision::initial(), victim } };
+        const std::array combatActors{ CanonicalActorCombatState{ .actorId = id<ActorId>(2),
+            .revision = CombatRevision::initial(), .stats = victim, .respawnStats = victim,
+            .maximumHealth = 20.f, .maximumFatigue = 0.f } };
         const auto key = *RandomStreamKey::fromValues(1, 2);
         auto combat = std::get<CanonicalCombatWorld>(createCanonicalCombatWorld(combatPlayers, combatActors,
             Xoshiro256StarStar::fromWorldSeed(3, key).snapshot()));

@@ -10,13 +10,17 @@ table CombatSnapshotHeader {
   self_fatigue:float (id: 6);
   self_health:float = 0 (id: 7);
   self_dead:bool = false (id: 8);
+  self_maximum_health:float = 0 (id: 9);
+  self_maximum_fatigue:float = 0 (id: 10);
 }
 
 struct ActorCombatSnapshot {
   actor_id:ulong;
   combat_revision:ulong;
   health:float;
+  maximum_health:float;
   fatigue:float;
+  maximum_fatigue:float;
   dead:bool;
 }
 

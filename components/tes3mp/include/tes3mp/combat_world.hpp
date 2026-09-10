@@ -75,6 +75,8 @@ namespace TES3MP
         std::array<float, static_cast<std::size_t>(MeleeWeaponSkill::Count)> weaponSkills{};
         std::uint64_t maximumEncumbranceWeightUnits = 1;
         OpenMwMeleeVictim victim;
+        float maximumHealth = 0.f;
+        float maximumFatigue = 0.f;
 
         friend constexpr bool operator==(const CanonicalPlayerCombatTemplate&,
             const CanonicalPlayerCombatTemplate&) noexcept = default;
@@ -92,6 +94,8 @@ namespace TES3MP
         OpenMwMeleeVictim victim;
         OpenMwMeleeVictim respawnVictim;
         std::optional<ServerTick> deathTick;
+        float maximumHealth = 0.f;
+        float maximumFatigue = 0.f;
 
         friend constexpr bool operator==(const CanonicalPlayerCombatState&,
             const CanonicalPlayerCombatState&) noexcept = default;
@@ -109,6 +113,8 @@ namespace TES3MP
         std::optional<PlayerId> aggressionTarget;
         std::optional<ServerTick> lastAttackTick;
         std::optional<ServerTick> deathTick;
+        float maximumHealth = 0.f;
+        float maximumFatigue = 0.f;
 
         friend constexpr bool operator==(const CanonicalActorCombatState&,
             const CanonicalActorCombatState&) noexcept = default;
@@ -139,6 +145,7 @@ namespace TES3MP
         const CanonicalPlayerCombatState* findPlayer(PlayerId id) const noexcept;
         const CanonicalActorCombatState* findActor(ActorId id) const noexcept;
         RandomStateV1 randomState() const noexcept { return mRandomState; }
+        std::optional<ServerTick> lastSimulationTick() const noexcept { return mLastSimulationTick; }
         bool ensurePlayer(PlayerId id, const CanonicalPlayerCombatTemplate& source,
             std::uint64_t inventoryWeightUnits) noexcept;
         bool initializePlayerFromCharacter(PlayerId id, const CanonicalPlayerCombatTemplate& source,
@@ -149,19 +156,23 @@ namespace TES3MP
 
     private:
         friend std::variant<CanonicalCombatWorld, CanonicalCombatWorldError> createCanonicalCombatWorld(
-            std::span<const CanonicalPlayerCombatState>, std::span<const CanonicalActorCombatState>, RandomStateV1);
+            std::span<const CanonicalPlayerCombatState>, std::span<const CanonicalActorCombatState>, RandomStateV1,
+            std::optional<ServerTick>);
         CanonicalCombatWorld(std::vector<CanonicalPlayerCombatState> players,
-            std::vector<CanonicalActorCombatState> actors, RandomStateV1 randomState) noexcept
-            : mPlayers(std::move(players)), mActors(std::move(actors)), mRandomState(randomState) {}
+            std::vector<CanonicalActorCombatState> actors, RandomStateV1 randomState,
+            std::optional<ServerTick> lastSimulationTick) noexcept
+            : mPlayers(std::move(players)), mActors(std::move(actors)), mRandomState(randomState),
+              mLastSimulationTick(lastSimulationTick) {}
 
         std::vector<CanonicalPlayerCombatState> mPlayers;
         std::vector<CanonicalActorCombatState> mActors;
         RandomStateV1 mRandomState;
+        std::optional<ServerTick> mLastSimulationTick;
     };
 
     std::variant<CanonicalCombatWorld, CanonicalCombatWorldError> createCanonicalCombatWorld(
         std::span<const CanonicalPlayerCombatState> players, std::span<const CanonicalActorCombatState> actors,
-        RandomStateV1 randomState);
+        RandomStateV1 randomState, std::optional<ServerTick> lastSimulationTick = std::nullopt);
     std::optional<CanonicalPlayerCombatTemplate> deriveCharacterCombatTemplate(
         const CharacterProfile& profile, const CanonicalPlayerCombatTemplate& base) noexcept;
 
@@ -262,6 +273,7 @@ namespace TES3MP
     {
         std::uint64_t minimumActorAttackIntervalTicks = 63;
         std::uint64_t respawnDelayTicks = 1875;
+        float secondsPerTick = 0.016f;
     };
 
     enum class CombatSimulationErrorCode : std::uint8_t

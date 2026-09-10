@@ -65,7 +65,9 @@ namespace TES3MP
         ActorId actorId;
         CombatRevision combatRevision = CombatRevision::initial();
         float health = 0.f;
+        float maximumHealth = 0.f;
         float fatigue = 0.f;
+        float maximumFatigue = 0.f;
         bool dead = false;
         friend constexpr bool operator==(ActorCombatSnapshot, ActorCombatSnapshot) noexcept = default;
         friend constexpr auto operator<=>(const ActorCombatSnapshot& lhs, const ActorCombatSnapshot& rhs) noexcept
@@ -77,7 +79,8 @@ namespace TES3MP
     public:
         static std::variant<LatestWinsCombatSnapshot, CombatReplicationDecodeError> create(SessionId session,
             SessionGeneration generation, ServerTick tick, CanonicalRevision canonicalRevision, PlayerId self,
-            CombatRevision selfRevision, float selfHealth, float selfFatigue, bool selfDead,
+            CombatRevision selfRevision, float selfHealth, float selfMaximumHealth, float selfFatigue,
+            float selfMaximumFatigue, bool selfDead,
             std::span<const ActorCombatSnapshot> actors);
         SessionId targetSessionId() const noexcept { return mSession; }
         SessionGeneration targetSessionGeneration() const noexcept { return mGeneration; }
@@ -86,18 +89,23 @@ namespace TES3MP
         PlayerId selfPlayerId() const noexcept { return mSelf; }
         CombatRevision selfCombatRevision() const noexcept { return mSelfRevision; }
         float selfHealth() const noexcept { return mSelfHealth; }
+        float selfMaximumHealth() const noexcept { return mSelfMaximumHealth; }
         float selfFatigue() const noexcept { return mSelfFatigue; }
+        float selfMaximumFatigue() const noexcept { return mSelfMaximumFatigue; }
         bool selfDead() const noexcept { return mSelfDead; }
         std::span<const ActorCombatSnapshot> actors() const noexcept { return mActors; }
         friend bool operator==(const LatestWinsCombatSnapshot&, const LatestWinsCombatSnapshot&) noexcept = default;
     private:
         LatestWinsCombatSnapshot(SessionId session, SessionGeneration generation, ServerTick tick,
             CanonicalRevision canonicalRevision, PlayerId self, CombatRevision selfRevision, float selfHealth,
-            float selfFatigue, bool selfDead, std::vector<ActorCombatSnapshot> actors) : mSession(session), mGeneration(generation), mTick(tick),
+            float selfMaximumHealth, float selfFatigue, float selfMaximumFatigue, bool selfDead,
+            std::vector<ActorCombatSnapshot> actors) : mSession(session), mGeneration(generation), mTick(tick),
             mCanonicalRevision(canonicalRevision), mSelf(self), mSelfRevision(selfRevision), mSelfFatigue(selfFatigue),
-            mSelfHealth(selfHealth), mSelfDead(selfDead), mActors(std::move(actors)) {}
+            mSelfMaximumFatigue(selfMaximumFatigue), mSelfHealth(selfHealth),
+            mSelfMaximumHealth(selfMaximumHealth), mSelfDead(selfDead), mActors(std::move(actors)) {}
         SessionId mSession; SessionGeneration mGeneration; ServerTick mTick; CanonicalRevision mCanonicalRevision;
-        PlayerId mSelf; CombatRevision mSelfRevision; float mSelfFatigue; float mSelfHealth; bool mSelfDead;
+        PlayerId mSelf; CombatRevision mSelfRevision; float mSelfFatigue; float mSelfMaximumFatigue;
+        float mSelfHealth; float mSelfMaximumHealth; bool mSelfDead;
         std::vector<ActorCombatSnapshot> mActors;
     };
 

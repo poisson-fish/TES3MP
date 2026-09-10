@@ -29,7 +29,7 @@ namespace TES3MP::ServerApp
             const auto ticksFor = [tickMilliseconds](std::uint64_t milliseconds) {
                 return std::max<std::uint64_t>(1, (milliseconds + tickMilliseconds - 1) / tickMilliseconds);
             };
-            return { ticksFor(1000), ticksFor(30000) };
+            return { ticksFor(1000), ticksFor(30000), static_cast<float>(tickMilliseconds) / 1000.f };
         }
     }
 

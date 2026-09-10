@@ -31,7 +31,9 @@ FLATBUFFERS_MANUALLY_ALIGNED_STRUCT(8) ActorCombatSnapshot FLATBUFFERS_FINAL_CLA
   uint64_t actor_id_;
   uint64_t combat_revision_;
   float health_;
+  float maximum_health_;
   float fatigue_;
+  float maximum_fatigue_;
   uint8_t dead_;
   int8_t padding0__;  int16_t padding1__;  int32_t padding2__;
 
@@ -40,7 +42,9 @@ FLATBUFFERS_MANUALLY_ALIGNED_STRUCT(8) ActorCombatSnapshot FLATBUFFERS_FINAL_CLA
       : actor_id_(0),
         combat_revision_(0),
         health_(0),
+        maximum_health_(0),
         fatigue_(0),
+        maximum_fatigue_(0),
         dead_(0),
         padding0__(0),
         padding1__(0),
@@ -49,11 +53,13 @@ FLATBUFFERS_MANUALLY_ALIGNED_STRUCT(8) ActorCombatSnapshot FLATBUFFERS_FINAL_CLA
     (void)padding1__;
     (void)padding2__;
   }
-  ActorCombatSnapshot(uint64_t _actor_id, uint64_t _combat_revision, float _health, float _fatigue, bool _dead)
+  ActorCombatSnapshot(uint64_t _actor_id, uint64_t _combat_revision, float _health, float _maximum_health, float _fatigue, float _maximum_fatigue, bool _dead)
       : actor_id_(::flatbuffers::EndianScalar(_actor_id)),
         combat_revision_(::flatbuffers::EndianScalar(_combat_revision)),
         health_(::flatbuffers::EndianScalar(_health)),
+        maximum_health_(::flatbuffers::EndianScalar(_maximum_health)),
         fatigue_(::flatbuffers::EndianScalar(_fatigue)),
+        maximum_fatigue_(::flatbuffers::EndianScalar(_maximum_fatigue)),
         dead_(::flatbuffers::EndianScalar(static_cast<uint8_t>(_dead))),
         padding0__(0),
         padding1__(0),
@@ -71,14 +77,20 @@ FLATBUFFERS_MANUALLY_ALIGNED_STRUCT(8) ActorCombatSnapshot FLATBUFFERS_FINAL_CLA
   float health() const {
     return ::flatbuffers::EndianScalar(health_);
   }
+  float maximum_health() const {
+    return ::flatbuffers::EndianScalar(maximum_health_);
+  }
   float fatigue() const {
     return ::flatbuffers::EndianScalar(fatigue_);
+  }
+  float maximum_fatigue() const {
+    return ::flatbuffers::EndianScalar(maximum_fatigue_);
   }
   bool dead() const {
     return ::flatbuffers::EndianScalar(dead_) != 0;
   }
 };
-FLATBUFFERS_STRUCT_END(ActorCombatSnapshot, 32);
+FLATBUFFERS_STRUCT_END(ActorCombatSnapshot, 40);
 
 struct CombatSnapshotHeader FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
   typedef CombatSnapshotHeaderBuilder Builder;
@@ -91,7 +103,9 @@ struct CombatSnapshotHeader FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Tab
     VT_SELF_COMBAT_REVISION = 14,
     VT_SELF_FATIGUE = 16,
     VT_SELF_HEALTH = 18,
-    VT_SELF_DEAD = 20
+    VT_SELF_DEAD = 20,
+    VT_SELF_MAXIMUM_HEALTH = 22,
+    VT_SELF_MAXIMUM_FATIGUE = 24
   };
   uint64_t target_session_id() const {
     return GetField<uint64_t>(VT_TARGET_SESSION_ID, 0);
@@ -120,6 +134,12 @@ struct CombatSnapshotHeader FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Tab
   bool self_dead() const {
     return GetField<uint8_t>(VT_SELF_DEAD, 0) != 0;
   }
+  float self_maximum_health() const {
+    return GetField<float>(VT_SELF_MAXIMUM_HEALTH, 0.0f);
+  }
+  float self_maximum_fatigue() const {
+    return GetField<float>(VT_SELF_MAXIMUM_FATIGUE, 0.0f);
+  }
   template <bool B = false>
   bool Verify(::flatbuffers::VerifierTemplate<B> &verifier) const {
     return VerifyTableStart(verifier) &&
@@ -132,6 +152,8 @@ struct CombatSnapshotHeader FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Tab
            VerifyField<float>(verifier, VT_SELF_FATIGUE, 4) &&
            VerifyField<float>(verifier, VT_SELF_HEALTH, 4) &&
            VerifyField<uint8_t>(verifier, VT_SELF_DEAD, 1) &&
+           VerifyField<float>(verifier, VT_SELF_MAXIMUM_HEALTH, 4) &&
+           VerifyField<float>(verifier, VT_SELF_MAXIMUM_FATIGUE, 4) &&
            verifier.EndTable();
   }
 };
@@ -167,6 +189,12 @@ struct CombatSnapshotHeaderBuilder {
   void add_self_dead(bool self_dead) {
     fbb_.AddElement<uint8_t>(CombatSnapshotHeader::VT_SELF_DEAD, static_cast<uint8_t>(self_dead), 0);
   }
+  void add_self_maximum_health(float self_maximum_health) {
+    fbb_.AddElement<float>(CombatSnapshotHeader::VT_SELF_MAXIMUM_HEALTH, self_maximum_health, 0.0f);
+  }
+  void add_self_maximum_fatigue(float self_maximum_fatigue) {
+    fbb_.AddElement<float>(CombatSnapshotHeader::VT_SELF_MAXIMUM_FATIGUE, self_maximum_fatigue, 0.0f);
+  }
   explicit CombatSnapshotHeaderBuilder(::flatbuffers::FlatBufferBuilder &_fbb)
         : fbb_(_fbb) {
     start_ = fbb_.StartTable();
@@ -188,7 +216,9 @@ inline ::flatbuffers::Offset<CombatSnapshotHeader> CreateCombatSnapshotHeader(
     uint64_t self_combat_revision = 0,
     float self_fatigue = 0.0f,
     float self_health = 0.0f,
-    bool self_dead = false) {
+    bool self_dead = false,
+    float self_maximum_health = 0.0f,
+    float self_maximum_fatigue = 0.0f) {
   CombatSnapshotHeaderBuilder builder_(_fbb);
   builder_.add_self_combat_revision(self_combat_revision);
   builder_.add_self_player_id(self_player_id);
@@ -196,6 +226,8 @@ inline ::flatbuffers::Offset<CombatSnapshotHeader> CreateCombatSnapshotHeader(
   builder_.add_server_tick(server_tick);
   builder_.add_target_session_generation(target_session_generation);
   builder_.add_target_session_id(target_session_id);
+  builder_.add_self_maximum_fatigue(self_maximum_fatigue);
+  builder_.add_self_maximum_health(self_maximum_health);
   builder_.add_self_health(self_health);
   builder_.add_self_fatigue(self_fatigue);
   builder_.add_self_dead(self_dead);

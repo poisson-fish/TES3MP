@@ -35,6 +35,11 @@ namespace TES3MP
         float handToHandHealthPercent = 1.f;
         float combatCriticalStrikeMultiplier = 1.f;
         float combatKnockdownDamageMultiplier = 1.f;
+        float fatigueBase = 1.f;
+        float fatigueMultiplier = 0.f;
+        float fatigueReturnBase = 0.f;
+        float fatigueReturnMultiplier = 0.f;
+        float enduranceFatigueMultiplier = 0.f;
 
         friend constexpr bool operator==(OpenMwMeleeSettings, OpenMwMeleeSettings) noexcept = default;
     };
@@ -51,6 +56,7 @@ namespace TES3MP
         float weaponSkill = 0.f;
         float handToHandSkill = 0.f;
         float fatigue = 0.f;
+        float endurance = 0.f;
         bool werewolf = false;
         bool godMode = false;
 
@@ -143,6 +149,10 @@ namespace TES3MP
     float openMwHandToHandDamage(const OpenMwMeleeSettings& settings, float handToHandSkill, float strength,
         float attackStrength, bool factorStrength, bool werewolf, float werewolfClawMultiplier,
         bool healthDamage) noexcept;
+    float openMwFatigueTerm(
+        const OpenMwMeleeSettings& settings, float currentFatigue, float maximumFatigue) noexcept;
+    float openMwFatigueRecoveryPerSecond(const OpenMwMeleeSettings& settings, float endurance,
+        float normalizedEncumbrance) noexcept;
     OpenMwMeleeResolution resolveOpenMwMelee(const OpenMwMeleeSettings& settings,
         const OpenMwMeleeAttacker& attacker, const OpenMwMeleeVictim& victim,
         const OpenMwMeleeAttempt& attempt) noexcept;

@@ -60,14 +60,19 @@ namespace
         attacker.fatigue = 100.f;
         std::array<float, static_cast<std::size_t>(TES3MP::MeleeWeaponSkill::Count)> skills{};
         skills.fill(100.f);
-        const std::array players{ TES3MP::CanonicalPlayerCombatState{
-            id<TES3MP::PlayerId>(1), TES3MP::CombatRevision::initial(), attacker, skills, 100,
-            std::nullopt } };
+        TES3MP::OpenMwMeleeVictim playerVictim;
+        playerVictim.health = 100.f;
+        playerVictim.fatigue = 100.f;
+        const std::array players{ TES3MP::CanonicalPlayerCombatState{ .playerId = id<TES3MP::PlayerId>(1),
+            .revision = TES3MP::CombatRevision::initial(), .stats = attacker, .weaponSkills = skills,
+            .maximumEncumbranceWeightUnits = 100, .victim = playerVictim, .respawnVictim = playerVictim,
+            .maximumHealth = 100.f, .maximumFatigue = 100.f } };
         TES3MP::OpenMwMeleeVictim victim;
         victim.health = health;
         victim.fatigue = 50.f;
-        const std::array actors{ TES3MP::CanonicalActorCombatState{
-            id<TES3MP::ActorId>(2), TES3MP::CombatRevision::initial(), victim } };
+        const std::array actors{ TES3MP::CanonicalActorCombatState{ .actorId = id<TES3MP::ActorId>(2),
+            .revision = TES3MP::CombatRevision::initial(), .stats = victim, .respawnStats = victim,
+            .maximumHealth = 20.f, .maximumFatigue = 50.f } };
         const auto key = *TES3MP::RandomStreamKey::fromValues(1, 2);
         const auto random = TES3MP::Xoshiro256StarStar::fromWorldSeed(3, key).snapshot();
         return std::get<TES3MP::CanonicalCombatWorld>(TES3MP::createCanonicalCombatWorld(players, actors, random));
@@ -170,6 +175,10 @@ namespace
         source.stats.fatigue = 80.f;
         source.weaponSkills[static_cast<std::size_t>(TES3MP::MeleeWeaponSkill::Spear)] = 30.f;
         source.maximumEncumbranceWeightUnits = 200;
+        source.victim.health = 45.f;
+        source.victim.fatigue = 80.f;
+        source.maximumHealth = 45.f;
+        source.maximumFatigue = 80.f;
         if (!world.ensurePlayer(id<TES3MP::PlayerId>(1), source, 50))
             return false;
         const auto initialized = *world.findPlayer(id<TES3MP::PlayerId>(1));
@@ -203,6 +212,8 @@ namespace
         const auto character = profile ? TES3MP::deriveCharacterCombatTemplate(*profile, base) : std::nullopt;
         if (!character || character->stats.strength != 50.f || character->stats.agility != 40.f
             || character->stats.luck != 35.f || character->stats.fatigue != 165.f
+            || character->stats.endurance != 45.f || character->maximumHealth != 47.5f
+            || character->maximumFatigue != 165.f
             || character->stats.handToHandSkill != 35.f || character->stats.fortifyAttack != 3.f
             || character->weaponSkills[static_cast<std::size_t>(TES3MP::MeleeWeaponSkill::ShortBlade)] != 30.f
             || character->weaponSkills[static_cast<std::size_t>(TES3MP::MeleeWeaponSkill::LongBlade)] != 25.f
@@ -383,9 +394,10 @@ namespace
         TES3MP::OpenMwMeleeVictim playerVictim;
         playerVictim.health = playerHealth;
         playerVictim.fatigue = 20.f;
-        const std::array players{ TES3MP::CanonicalPlayerCombatState{ id<TES3MP::PlayerId>(1),
-            TES3MP::CombatRevision::initial(), playerAttacker, {}, 100, std::nullopt, std::nullopt,
-            playerVictim, playerVictim } };
+        const std::array players{ TES3MP::CanonicalPlayerCombatState{ .playerId = id<TES3MP::PlayerId>(1),
+            .revision = TES3MP::CombatRevision::initial(), .stats = playerAttacker,
+            .maximumEncumbranceWeightUnits = 100, .victim = playerVictim, .respawnVictim = playerVictim,
+            .maximumHealth = playerHealth, .maximumFatigue = 20.f } };
         TES3MP::OpenMwMeleeVictim actorVictim;
         actorVictim.health = 20.f;
         actorVictim.fatigue = 20.f;
@@ -398,9 +410,11 @@ namespace
         actorAttacker.fatigue = 20.f;
         const TES3MP::OpenMwMeleeWeapon natural{ 10.f, 10.f, 10.f, 10.f, 10.f, 10.f,
             0.f, 1.f, 0, false, false };
-        const std::array actors{ TES3MP::CanonicalActorCombatState{ id<TES3MP::ActorId>(2),
-            TES3MP::CombatRevision::initial(), actorVictim, actorVictim, actorAttacker, natural,
-            128 * 1024, id<TES3MP::PlayerId>(1) } };
+        const std::array actors{ TES3MP::CanonicalActorCombatState{ .actorId = id<TES3MP::ActorId>(2),
+            .revision = TES3MP::CombatRevision::initial(), .stats = actorVictim,
+            .respawnStats = actorVictim, .attacker = actorAttacker, .naturalWeapon = natural,
+            .attackReachQuanta = 128 * 1024, .aggressionTarget = id<TES3MP::PlayerId>(1),
+            .maximumHealth = 20.f, .maximumFatigue = 20.f } };
         const auto key = *TES3MP::RandomStreamKey::fromValues(3, 4);
         return std::get<TES3MP::CanonicalCombatWorld>(TES3MP::createCanonicalCombatWorld(players, actors,
             TES3MP::Xoshiro256StarStar::fromWorldSeed(5, key).snapshot()));
@@ -452,6 +466,66 @@ namespace
             && !actor->aggressionTarget && !actor->lastAttackTick && !actor->deathTick
             && actor->revision.value() == 2;
     }
+
+    bool fatigue_recovery_is_tick_deterministic_bounded_and_active_only()
+    {
+        TES3MP::OpenMwMeleeAttacker playerAttacker;
+        playerAttacker.fatigue = 50.f;
+        playerAttacker.endurance = 40.f;
+        playerAttacker.normalizedEncumbrance = 0.5f;
+        TES3MP::OpenMwMeleeVictim playerVictim;
+        playerVictim.health = 20.f;
+        playerVictim.fatigue = 50.f;
+        const std::array players{ TES3MP::CanonicalPlayerCombatState{
+            .playerId = id<TES3MP::PlayerId>(1), .stats = playerAttacker,
+            .maximumEncumbranceWeightUnits = 100, .victim = playerVictim,
+            .respawnVictim = playerVictim, .maximumHealth = 20.f, .maximumFatigue = 100.f } };
+        TES3MP::OpenMwMeleeAttacker actorAttacker;
+        actorAttacker.fatigue = 10.f;
+        actorAttacker.endurance = 20.f;
+        TES3MP::OpenMwMeleeVictim actorVictim;
+        actorVictim.health = 20.f;
+        actorVictim.fatigue = 10.f;
+        const std::array actors{ TES3MP::CanonicalActorCombatState{
+            .actorId = id<TES3MP::ActorId>(2), .stats = actorVictim, .respawnStats = actorVictim,
+            .attacker = actorAttacker, .maximumHealth = 20.f, .maximumFatigue = 20.f } };
+        const auto key = *TES3MP::RandomStreamKey::fromValues(11, 12);
+        const auto world = std::get<TES3MP::CanonicalCombatWorld>(TES3MP::createCanonicalCombatWorld(
+            players, actors, TES3MP::Xoshiro256StarStar::fromWorldSeed(13, key).snapshot()));
+        auto recoverySettings = settings();
+        recoverySettings.fatigueReturnBase = 0.02f;
+        recoverySettings.fatigueReturnMultiplier = 0.04f;
+        recoverySettings.enduranceFatigueMultiplier = 0.1f;
+        const auto firstResult = TES3MP::advanceAuthoritativeCombat(world, activeSpatialPlayers(), spatialActors(),
+            recoverySettings, { 2, 5, 0.5f }, id<TES3MP::ServerTick>(5));
+        const auto* first = std::get_if<TES3MP::CombatSimulationStep>(&firstResult);
+        if (!first)
+            return false;
+        const auto sameTickResult = TES3MP::advanceAuthoritativeCombat(first->combat, activeSpatialPlayers(),
+            spatialActors(), recoverySettings, { 2, 5, 0.5f }, id<TES3MP::ServerTick>(5));
+        const auto* sameTick = std::get_if<TES3MP::CombatSimulationStep>(&sameTickResult);
+        if (!sameTick || sameTick->combat != first->combat)
+            return false;
+        const auto laterResult = TES3MP::advanceAuthoritativeCombat(sameTick->combat, activeSpatialPlayers(),
+            spatialActors(), recoverySettings, { 2, 5, 0.5f }, id<TES3MP::ServerTick>(7));
+        const auto* later = std::get_if<TES3MP::CombatSimulationStep>(&laterResult);
+        const auto* firstPlayer = first->combat.findPlayer(id<TES3MP::PlayerId>(1));
+        const auto* firstActor = first->combat.findActor(id<TES3MP::ActorId>(2));
+        const auto* laterPlayer = later ? later->combat.findPlayer(id<TES3MP::PlayerId>(1)) : nullptr;
+        const auto* laterActor = later ? later->combat.findActor(id<TES3MP::ActorId>(2)) : nullptr;
+        const auto inactiveResult = TES3MP::advanceAuthoritativeCombat(world, spatialPlayers(), spatialActors(),
+            recoverySettings, { 2, 5, 0.5f }, id<TES3MP::ServerTick>(5));
+        const auto* inactive = std::get_if<TES3MP::CombatSimulationStep>(&inactiveResult);
+        return firstPlayer && firstActor && laterPlayer && laterActor && inactive
+            && std::abs(firstPlayer->stats.fatigue - 50.08f) < 0.0001f
+            && std::abs(firstActor->stats.fatigue - 10.06f) < 0.0001f
+            && std::abs(laterPlayer->stats.fatigue - 50.24f) < 0.0001f
+            && std::abs(laterActor->stats.fatigue - 10.18f) < 0.0001f
+            && laterPlayer->revision == TES3MP::CombatRevision::initial()
+            && laterActor->revision == TES3MP::CombatRevision::initial()
+            && inactive->combat.findPlayer(id<TES3MP::PlayerId>(1))->stats.fatigue == 50.f
+            && inactive->combat.findActor(id<TES3MP::ActorId>(2))->stats.fatigue == 10.f;
+    }
 }
 
 int main()
@@ -468,6 +542,7 @@ int main()
             && empty_swing_spends_fatigue_without_contact_or_randomness()
             && actor_retaliation_damage_cooldown_and_player_respawn_are_authoritative()
             && actor_respawn_restores_baseline_and_clears_combat_intent()
+            && fatigue_recovery_is_tick_deterministic_bounded_and_active_only()
         ? 0
         : 1;
 }

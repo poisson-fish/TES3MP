@@ -260,12 +260,16 @@ namespace
         spatial = std::get<CanonicalServerState>(createCanonicalServerState(movedPlayers, sessions));
         OpenMwMeleeVictim playerVictim;
         playerVictim.health = 20.f;
-        const std::array combatPlayers{ CanonicalPlayerCombatState{ id<PlayerId>(1), CombatRevision::initial(),
-            {}, {}, 1, std::nullopt, std::nullopt, playerVictim, playerVictim } };
+        const std::array combatPlayers{ CanonicalPlayerCombatState{ .playerId = id<PlayerId>(1),
+            .revision = CombatRevision::initial(), .maximumEncumbranceWeightUnits = 1,
+            .victim = playerVictim, .respawnVictim = playerVictim,
+            .maximumHealth = 20.f, .maximumFatigue = 0.f } };
         OpenMwMeleeVictim actorVictim;
         actorVictim.health = 20.f;
-        const std::array combatActors{ CanonicalActorCombatState{ id<ActorId>(1), CombatRevision::initial(),
-            actorVictim, actorVictim, {}, std::nullopt, 100, id<PlayerId>(1) } };
+        const std::array combatActors{ CanonicalActorCombatState{ .actorId = id<ActorId>(1),
+            .revision = CombatRevision::initial(), .stats = actorVictim, .respawnStats = actorVictim,
+            .attackReachQuanta = 100, .aggressionTarget = id<PlayerId>(1),
+            .maximumHealth = 20.f, .maximumFatigue = 0.f } };
         const auto key = *RandomStreamKey::fromValues(1, 1);
         const auto combat = std::get<CanonicalCombatWorld>(createCanonicalCombatWorld(combatPlayers, combatActors,
             Xoshiro256StarStar::fromWorldSeed(1, key).snapshot()));

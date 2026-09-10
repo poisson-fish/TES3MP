@@ -228,7 +228,7 @@ OpenMW clients bind opaque IDs locally with repeatable
 Mappings must be injective and complete for presented records. See
 [`inventory_content.cpp`](../../apps/tes3mp-server/inventory_content.cpp).
 
-## Combat V1
+## Combat V2
 
 Configured optionally by `combat_content_file`; combat also requires actor,
 inventory, collision, and historical-contact composition. The catalog contains
@@ -237,13 +237,13 @@ state per actor, an optional complete actor-attack set, and zero or more melee
 weapon profiles keyed by inventory prototype ID.
 
 ```text
-TES3MP_COMBAT_V1
+TES3MP_COMBAT_V2
 manifest <64-lowercase-hex-digits>
 seed <unsigned-64-bit>
-settings <12-finite-OpenMW-melee-values>
-player <agility> <luck> <strength> <fatigue-term> <blind> <fortify-attack> <short-blade> <long-blade> <blunt> <axe> <spear> <hand-to-hand> <fatigue> <maximum-weight> <werewolf-0-or-1>
-actor <actor-id> <health> <fatigue> <evasion> <sanctuary> <normal-resistance> <critical-fatigue-0-or-1> <knocked-down-0-or-1> <paralyzed-0-or-1> <werewolf-0-or-1> <god-mode-0-or-1> <dead-0-or-1>
-actor_attack <actor-id> <agility> <luck> <strength> <fatigue-term> <combat-skill> <fatigue> <chop-min> <chop-max> <slash-min> <slash-max> <thrust-min> <thrust-max> <reach>
+settings <12-finite-OpenMW-melee-values> <fatigue-base> <fatigue-multiplier> <fatigue-return-base> <fatigue-return-multiplier> <endurance-fatigue-multiplier>
+player <agility> <luck> <strength> <fatigue-term> <blind> <fortify-attack> <short-blade> <long-blade> <blunt> <axe> <spear> <hand-to-hand> <fatigue> <endurance> <maximum-weight> <werewolf-0-or-1>
+actor <actor-id> <health> <fatigue> <evasion> <chameleon> <invisibility> <normal-resistance> <normal-weakness> <knocked-down-0-or-1> <paralyzed-0-or-1> <unaware-0-or-1> <dead-0-or-1>
+actor_attack <actor-id> <agility> <luck> <strength> <fatigue-term> <combat-skill> <fatigue> <chop-min> <chop-max> <slash-min> <slash-max> <thrust-min> <thrust-max> <reach> <endurance>
 weapon <prototype-id> <skill> <chop-min> <chop-max> <slash-min> <slash-max> <thrust-min> <thrust-max> <weight> <reach> <normal-weapon-0-or-1>
 ```
 
@@ -251,5 +251,9 @@ The actor set must exactly match Actors V1. Every weapon must be a conditioned,
 right-hand-compatible inventory weapon. If any `actor_attack` declaration is
 present, exactly one is required for every actor; all-zero damage declares an
 unarmed attack. Attack reach is expressed in stock OpenMW distance units.
-Values are finite and range checked; cross-catalog failure is atomic. See
+Initial health and fatigue are also their canonical maxima. The final five
+settings reproduce OpenMW's fatigue term and active restoration formulas;
+restoration is integrated by elapsed authoritative server ticks and clamps at
+the canonical maximum. Values are finite and range checked; cross-catalog
+failure is atomic. See
 [`combat_content.cpp`](../../apps/tes3mp-server/combat_content.cpp).

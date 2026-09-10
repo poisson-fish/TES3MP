@@ -23,7 +23,12 @@ namespace
             .maximumHandToHandMultiplier = 0.5f,
             .handToHandHealthPercent = 0.1f,
             .combatCriticalStrikeMultiplier = 4.f,
-            .combatKnockdownDamageMultiplier = 1.5f };
+            .combatKnockdownDamageMultiplier = 1.5f,
+            .fatigueBase = 1.25f,
+            .fatigueMultiplier = 0.5f,
+            .fatigueReturnBase = 0.02f,
+            .fatigueReturnMultiplier = 0.04f,
+            .enduranceFatigueMultiplier = 0.1f };
     }
 
     TES3MP::OpenMwMeleeAttacker attacker()
@@ -120,12 +125,25 @@ namespace
             && deadResult.code == TES3MP::OpenMwMeleeResolutionCode::DeadVictim
             && near(deadResult.attackerFatigue, 96.5f);
     }
+
+    bool fatigue_term_and_recovery_match_openmw_formulas()
+    {
+        const auto input = settings();
+        const float term = TES3MP::openMwFatigueTerm(input, 50.f, 100.f);
+        const float recovery = TES3MP::openMwFatigueRecoveryPerSecond(input, 40.f, 0.5f);
+        return near(term, 1.f) && near(recovery, 0.16f)
+            && near(TES3MP::openMwFatigueTerm(input, 100.f, 0.f), 1.25f)
+            && near(TES3MP::openMwFatigueRecoveryPerSecond(input, 40.f, 2.f), 0.08f)
+            && near(TES3MP::openMwFatigueRecoveryPerSecond(input,
+                std::numeric_limits<float>::quiet_NaN(), 0.f), 0.f);
+    }
 }
 
 int main()
 {
     return weapon_attack_matches_openmw_ordering() && miss_wears_weapon_and_empty_swing_only_spends_fatigue()
             && unarmed_fatigue_and_health_paths_match_openmw() && invalid_external_values_fail_without_results()
+            && fatigue_term_and_recovery_match_openmw_formulas()
         ? 0
         : 1;
 }

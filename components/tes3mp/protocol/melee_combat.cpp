@@ -18,14 +18,18 @@ namespace
             && finite(value.weaponDamageMultiplier) && finite(value.damageStrengthBase)
             && finite(value.damageStrengthMultiplier) && finite(value.minimumHandToHandMultiplier)
             && finite(value.maximumHandToHandMultiplier) && finite(value.handToHandHealthPercent)
-            && finite(value.combatCriticalStrikeMultiplier) && finite(value.combatKnockdownDamageMultiplier);
+            && finite(value.combatCriticalStrikeMultiplier) && finite(value.combatKnockdownDamageMultiplier)
+            && finite(value.fatigueBase) && finite(value.fatigueMultiplier)
+            && finite(value.fatigueReturnBase) && finite(value.fatigueReturnMultiplier)
+            && finite(value.enduranceFatigueMultiplier);
     }
 
     bool validAttacker(const TES3MP::OpenMwMeleeAttacker& value) noexcept
     {
         return finite(value.agility) && finite(value.luck) && finite(value.strength) && finite(value.fatigueTerm)
             && finite(value.normalizedEncumbrance) && finite(value.fortifyAttack) && finite(value.blind)
-            && finite(value.weaponSkill) && finite(value.handToHandSkill) && finite(value.fatigue);
+            && finite(value.weaponSkill) && finite(value.handToHandSkill) && finite(value.fatigue)
+            && finite(value.endurance);
     }
 
     bool validVictim(const TES3MP::OpenMwMeleeVictim& value) noexcept
@@ -117,6 +121,26 @@ namespace TES3MP
         if (healthDamage)
             damage *= settings.handToHandHealthPercent;
         return damage;
+    }
+
+    float openMwFatigueTerm(
+        const OpenMwMeleeSettings& settings, float currentFatigue, float maximumFatigue) noexcept
+    {
+        if (!validSettings(settings) || !finite(currentFatigue) || !finite(maximumFatigue))
+            return 0.f;
+        const float normalized = std::floor(maximumFatigue) == 0.f
+            ? 1.f : std::max(0.f, currentFatigue / maximumFatigue);
+        return settings.fatigueBase - settings.fatigueMultiplier * (1.f - normalized);
+    }
+
+    float openMwFatigueRecoveryPerSecond(const OpenMwMeleeSettings& settings, float endurance,
+        float normalizedEncumbrance) noexcept
+    {
+        if (!validSettings(settings) || !finite(endurance) || !finite(normalizedEncumbrance))
+            return 0.f;
+        const float encumbrance = std::clamp(normalizedEncumbrance, 0.f, 1.f);
+        return (settings.fatigueReturnBase + settings.fatigueReturnMultiplier * (1.f - encumbrance))
+            * (settings.enduranceFatigueMultiplier * endurance);
     }
 
     OpenMwMeleeResolution resolveOpenMwMelee(const OpenMwMeleeSettings& settings,

@@ -72,11 +72,11 @@ class ContentBakerTests(unittest.TestCase):
             encoding="utf-8",
         )
         (self.source / "combat.txt").write_text(
-            "TES3MP_COMBAT_V1\n"
+            "TES3MP_COMBAT_V2\n"
             f"manifest {ZERO_MANIFEST}\n"
             "seed 1234\n"
-            "settings 1 1 1 1 1 1 1 1 1 1 1 1\n"
-            "player 50 50 50 1 0 0 20 20 20 20 20 25 100 500 0\n"
+            "settings 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1\n"
+            "player 50 50 50 1 0 0 20 20 20 20 20 25 100 50 500 0\n"
             "actor 1 20 20 10 0 0 0 0 0 0 0 0\n"
             f"weapon {self.item_prototype} 0 1 5 1 5 1 5 10 1 1\n",
             encoding="utf-8",
@@ -162,7 +162,8 @@ class ContentBakerTests(unittest.TestCase):
             "fWeaponFatigueMult": .25, "fWeaponDamageMult": .1, "fDamageStrengthBase": .5,
             "fDamageStrengthMult": .1, "fMinHandToHandMult": .1, "fMaxHandToHandMult": .5,
             "fHandtoHandHealthPer": .1, "fCombatCriticalStrikeMult": 4.,
-            "fCombatKODamageMult": 1.5, "fFatigueBase": 1.25,
+            "fCombatKODamageMult": 1.5, "fFatigueBase": 1.25, "fFatigueMult": .5,
+            "fFatigueReturnBase": .02, "fFatigueReturnMult": .04, "fEndFatigueMult": .1,
         }
         gmsts = b"".join(record("GMST", subrecord("NAME", name.encode() + b"\0"),
                                   subrecord("FLTV", struct.pack("<f", value)))
@@ -327,11 +328,11 @@ class ContentBakerTests(unittest.TestCase):
         characters = path.joinpath("characters.txt").read_text()
         self.assertIn(f"manifest {manifest}", inventory)
         self.assertIn(f"prototype {self.item_prototype} 11 30 10 400 0 65536 0 none", inventory)
-        self.assertIn("settings 0.200000003 2 0 0.25 0.100000001 0.5 0.100000001 0.100000001 0.5 0.100000001 4 1.5", combat)
-        self.assertIn("player 40 40 40 1.25 0 0 21 22 23 24 25 26 160 2000 0", combat)
+        self.assertIn("settings 0.200000003 2 0 0.25 0.100000001 0.5 0.100000001 0.100000001 0.5 0.100000001 4 1.5 1.25 0.5 0.0199999996 0.0399999991 0.100000001", combat)
+        self.assertIn("player 40 40 40 1.25 0 0 21 22 23 24 25 26 160 40 2000 0", combat)
         self.assertIn(f"weapon {self.item_prototype} 0 4 5 4 5 5 5 3 1 1", combat)
         self.assertIn("actor 1 23 60 6.25 0 0 0 0 0 0 0 0", combat)
-        self.assertIn("actor_attack 1 20 10 10 1.25 30 60 1 2 1 2 1 2 1", combat)
+        self.assertIn("actor_attack 1 20 10 10 1.25 30 60 1 2 1 2 1 2 1 10", combat)
         self.assertIn(f"actor 1 2 {self.actor_prototype} interior 1 0 0 0 0 0 0 idle", actors)
         self.assertIn("solid interior 1 100 100 100 200 200 200", collision)
         self.assertIn(f"tes3mp-content-item-prototype-map={self.item_prototype}=iron dagger", client)

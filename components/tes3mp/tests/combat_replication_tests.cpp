@@ -33,11 +33,11 @@ namespace
     bool snapshots_and_events_round_trip()
     {
         const std::array actors{ TES3MP::ActorCombatSnapshot{ value<TES3MP::ActorId>(2),
-            value<TES3MP::CombatRevision>(3), 40.f, 20.f, false } };
+            value<TES3MP::CombatRevision>(3), 40.f, 50.f, 20.f, 30.f, false } };
         auto created = TES3MP::LatestWinsCombatSnapshot::create(value<TES3MP::SessionId>(1),
             TES3MP::SessionGeneration::initial(), value<TES3MP::ServerTick>(5),
             value<TES3MP::CanonicalRevision>(6), value<TES3MP::PlayerId>(7),
-            value<TES3MP::CombatRevision>(8), 75.f, 90.f, false, actors);
+            value<TES3MP::CombatRevision>(8), 75.f, 100.f, 90.f, 120.f, false, actors);
         const auto snapshot = std::get<TES3MP::LatestWinsCombatSnapshot>(created);
         const auto decodedSnapshot = TES3MP::decodeLatestWinsCombatSnapshot(
             TES3MP::encodeLatestWinsCombatSnapshot(snapshot));
@@ -59,17 +59,18 @@ namespace
     bool semantic_validation_rejects_nonfinite_and_unsorted()
     {
         const std::array unsorted{ TES3MP::ActorCombatSnapshot{ value<TES3MP::ActorId>(2),
-            TES3MP::CombatRevision::initial(), 1.f, 1.f, false },
+            TES3MP::CombatRevision::initial(), 1.f, 1.f, 1.f, 1.f, false },
             TES3MP::ActorCombatSnapshot{ value<TES3MP::ActorId>(1), TES3MP::CombatRevision::initial(),
-                1.f, 1.f, false } };
+                1.f, 1.f, 1.f, 1.f, false } };
         const auto invalid = TES3MP::LatestWinsCombatSnapshot::create(value<TES3MP::SessionId>(1),
             TES3MP::SessionGeneration::initial(), TES3MP::ServerTick::initial(),
             TES3MP::CanonicalRevision::initial(), value<TES3MP::PlayerId>(1),
-            TES3MP::CombatRevision::initial(), 1.f, std::numeric_limits<float>::quiet_NaN(), false, {});
+            TES3MP::CombatRevision::initial(), 1.f, 1.f,
+            std::numeric_limits<float>::quiet_NaN(), 1.f, false, {});
         const auto order = TES3MP::LatestWinsCombatSnapshot::create(value<TES3MP::SessionId>(1),
             TES3MP::SessionGeneration::initial(), TES3MP::ServerTick::initial(),
             TES3MP::CanonicalRevision::initial(), value<TES3MP::PlayerId>(1),
-            TES3MP::CombatRevision::initial(), 1.f, 1.f, false, unsorted);
+            TES3MP::CombatRevision::initial(), 1.f, 1.f, 1.f, 1.f, false, unsorted);
         return std::holds_alternative<TES3MP::CombatReplicationDecodeError>(invalid)
             && std::holds_alternative<TES3MP::CombatReplicationDecodeError>(order);
     }

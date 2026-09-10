@@ -15,7 +15,7 @@ namespace TES3MP::ServerApp
 {
     namespace
     {
-        constexpr std::string_view Header = "TES3MP_COMBAT_V1";
+        constexpr std::string_view Header = "TES3MP_COMBAT_V2";
         constexpr std::size_t MaximumFields = 32;
 
         struct ActorAttackDeclaration
@@ -136,9 +136,9 @@ namespace TES3MP::ServerApp
                 }
                 else if (values[0] == "settings")
                 {
-                    if (values.size() != 13 || settings)
+                    if (values.size() != 18 || settings)
                         return error(CombatContentErrorCode::Malformed, lineNumber);
-                    std::array<float, 12> parsed{};
+                    std::array<float, 17> parsed{};
                     for (std::size_t index = 0; index < parsed.size(); ++index)
                     {
                         const auto value = finiteFloat(values[index + 1]);
@@ -146,36 +146,42 @@ namespace TES3MP::ServerApp
                         parsed[index] = *value;
                     }
                     settings = OpenMwMeleeSettings{ parsed[0], parsed[1], parsed[2], parsed[3], parsed[4],
-                        parsed[5], parsed[6], parsed[7], parsed[8], parsed[9], parsed[10], parsed[11] };
-                    if (settings->minimumHandToHandMultiplier > settings->maximumHandToHandMultiplier)
+                        parsed[5], parsed[6], parsed[7], parsed[8], parsed[9], parsed[10], parsed[11],
+                        parsed[12], parsed[13], parsed[14], parsed[15], parsed[16] };
+                    if (settings->minimumHandToHandMultiplier > settings->maximumHandToHandMultiplier
+                        || settings->fatigueBase < 0.f || settings->fatigueMultiplier < 0.f
+                        || settings->fatigueReturnBase < 0.f || settings->fatigueReturnMultiplier < 0.f
+                        || settings->enduranceFatigueMultiplier < 0.f)
                         return error(CombatContentErrorCode::InvalidSettings, lineNumber);
                 }
                 else if (values[0] == "player")
                 {
-                    if (values.size() != 16 || playerTemplate)
+                    if (values.size() != 17 || playerTemplate)
                         return error(CombatContentErrorCode::Malformed, lineNumber);
-                    std::array<float, 13> parsed{};
+                    std::array<float, 14> parsed{};
                     for (std::size_t index = 0; index < parsed.size(); ++index)
                     {
                         const auto value = finiteFloat(values[index + 1]);
                         if (!value) return error(CombatContentErrorCode::InvalidPlayerTemplate, lineNumber);
                         parsed[index] = *value;
                     }
-                    const auto maximumWeight = number<std::uint64_t>(values[14]);
-                    const auto werewolf = boolean(values[15]);
-                    if (!maximumWeight || *maximumWeight == 0 || !werewolf)
+                    const auto maximumWeight = number<std::uint64_t>(values[15]);
+                    const auto werewolf = boolean(values[16]);
+                    if (!maximumWeight || *maximumWeight == 0 || !werewolf || parsed[13] < 0.f)
                         return error(CombatContentErrorCode::InvalidPlayerTemplate, lineNumber);
                     OpenMwMeleeAttacker attacker;
                     attacker.agility = parsed[0]; attacker.luck = parsed[1]; attacker.strength = parsed[2];
                     attacker.fatigueTerm = parsed[3]; attacker.fortifyAttack = parsed[4]; attacker.blind = parsed[5];
                     attacker.handToHandSkill = parsed[11]; attacker.fatigue = parsed[12];
+                    attacker.endurance = parsed[13];
                     attacker.werewolf = *werewolf; attacker.godMode = false;
                     OpenMwMeleeVictim victim;
                     victim.health = attacker.strength;
                     victim.fatigue = attacker.fatigue;
                     victim.evasion = (attacker.agility / 5.f + attacker.luck / 10.f) * attacker.fatigueTerm;
                     playerTemplate = CanonicalPlayerCombatTemplate{ attacker,
-                        { parsed[6], parsed[7], parsed[8], parsed[9], parsed[10] }, *maximumWeight, victim };
+                        { parsed[6], parsed[7], parsed[8], parsed[9], parsed[10] }, *maximumWeight, victim,
+                        victim.health, victim.fatigue };
                 }
                 else if (values[0] == "actor")
                 {
@@ -204,17 +210,19 @@ namespace TES3MP::ServerApp
                     victim.normalWeaponResistance = parsed[5]; victim.normalWeaponWeakness = parsed[6];
                     victim.fatigueNonNegative = victim.fatigue >= 0.f; victim.knockedDown = *knockedDown;
                     victim.paralyzed = *paralyzed; victim.unaware = *unaware; victim.dead = *dead;
-                    actorStates.push_back({ *actor, CombatRevision::initial(), victim, victim });
+                    actorStates.push_back({ *actor, CombatRevision::initial(), victim, victim,
+                        {}, std::nullopt, 0, std::nullopt, std::nullopt, std::nullopt,
+                        victim.health, victim.fatigue });
                     if (actorStates.size() > MaximumActorCombatants)
                         return error(CombatContentErrorCode::TooLarge, lineNumber);
                 }
                 else if (values[0] == "actor_attack")
                 {
-                    if (values.size() != 15)
+                    if (values.size() != 16)
                         return error(CombatContentErrorCode::Malformed, lineNumber);
                     const auto rawActor = number<std::uint64_t>(values[1]);
                     const auto actor = rawActor ? ActorId::fromValue(*rawActor) : std::nullopt;
-                    std::array<float, 13> parsed{};
+                    std::array<float, 14> parsed{};
                     for (std::size_t index = 0; index < parsed.size(); ++index)
                     {
                         const auto value = finiteFloat(values[index + 2]);
@@ -223,12 +231,14 @@ namespace TES3MP::ServerApp
                     }
                     if (!actor || parsed[3] <= 0.f || parsed[6] < 0.f || parsed[6] > parsed[7]
                         || parsed[8] < 0.f || parsed[8] > parsed[9] || parsed[10] < 0.f
-                        || parsed[10] > parsed[11] || parsed[12] <= 0.f || parsed[12] > 8192.f)
+                        || parsed[10] > parsed[11] || parsed[12] <= 0.f || parsed[12] > 8192.f
+                        || parsed[13] < 0.f)
                         return error(CombatContentErrorCode::InvalidActorSet, lineNumber);
                     OpenMwMeleeAttacker attacker;
                     attacker.agility = parsed[0]; attacker.luck = parsed[1]; attacker.strength = parsed[2];
                     attacker.fatigueTerm = parsed[3]; attacker.weaponSkill = parsed[4];
                     attacker.handToHandSkill = parsed[4]; attacker.fatigue = parsed[5];
+                    attacker.endurance = parsed[13];
                     std::optional<OpenMwMeleeWeapon> weapon;
                     if (parsed[6] != 0.f || parsed[7] != 0.f || parsed[8] != 0.f || parsed[9] != 0.f
                         || parsed[10] != 0.f || parsed[11] != 0.f)

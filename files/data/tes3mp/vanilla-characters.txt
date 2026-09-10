@@ -3,7 +3,7 @@ TES3MP_CHARACTERS_V2
 # CharGen starts with: Player->PositionCell 61,-135,24,340,"Imperial Prison Ship".
 # Appearances are the exact race-dialog-selectable cross-products from the pinned ESM.
 # Appearance sex uses the protocol encoding: female 0, male 1.
-manifest bfbfad7ef8c111d2995a61cbdf01a47b3cbebac3bf95f010215ef798d793bfca
+manifest de09e7e9fe8d9bacec7a0c454fb602f976f81e782c92b75d9e9e682c322f54a7
 spawn interior 1 62464 -138240 24576 0 0 4056358002
 # CharGenDoorExitCaptain releases the player through this exterior destination.
 completion_spawn exterior 4 -2 -9 -10443674 -73251021 237568 0 0 536870912

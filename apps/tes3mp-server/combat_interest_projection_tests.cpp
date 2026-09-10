@@ -35,15 +35,19 @@ namespace
         OpenMwMeleeVictim playerVictim;
         playerVictim.health = 60.f;
         playerVictim.fatigue = 75.f;
-        const std::array combatPlayers{ CanonicalPlayerCombatState{ id<PlayerId>(1),
-            id<CombatRevision>(5), attacker, {}, 100, std::nullopt, std::nullopt,
-            playerVictim, playerVictim } };
+        const std::array combatPlayers{ CanonicalPlayerCombatState{ .playerId = id<PlayerId>(1),
+            .revision = id<CombatRevision>(5), .stats = attacker, .maximumEncumbranceWeightUnits = 100,
+            .victim = playerVictim, .respawnVictim = playerVictim,
+            .maximumHealth = 80.f, .maximumFatigue = 100.f } };
         OpenMwMeleeVictim first;
         first.health = 40.f;
         OpenMwMeleeVictim second;
         second.health = 90.f;
-        const std::array combatActors{ CanonicalActorCombatState{ id<ActorId>(3), id<CombatRevision>(6), first },
-            CanonicalActorCombatState{ id<ActorId>(4), id<CombatRevision>(7), second } };
+        const std::array combatActors{
+            CanonicalActorCombatState{ .actorId = id<ActorId>(3), .revision = id<CombatRevision>(6),
+                .stats = first, .respawnStats = first, .maximumHealth = 50.f, .maximumFatigue = 0.f },
+            CanonicalActorCombatState{ .actorId = id<ActorId>(4), .revision = id<CombatRevision>(7),
+                .stats = second, .respawnStats = second, .maximumHealth = 100.f, .maximumFatigue = 0.f } };
         const auto random = Xoshiro256StarStar::fromWorldSeed(1, *RandomStreamKey::fromValues(1, 1)).snapshot();
         const auto combat = std::get<CanonicalCombatWorld>(
             createCanonicalCombatWorld(combatPlayers, combatActors, random));
@@ -60,8 +64,10 @@ namespace
         auto batch = TES3MP::ServerApp::projectCombatEvents(canonical, spatial, id<SessionId>(2),
             id<ServerTick>(9), id<CanonicalRevision>(4), events, actorEvents);
         return snapshot && snapshot->selfPlayerId() == id<PlayerId>(1) && snapshot->selfHealth() == 60.f
-            && snapshot->selfFatigue() == 75.f && !snapshot->selfDead()
+            && snapshot->selfMaximumHealth() == 80.f && snapshot->selfFatigue() == 75.f
+            && snapshot->selfMaximumFatigue() == 100.f && !snapshot->selfDead()
             && snapshot->actors().size() == 1 && snapshot->actors()[0].actorId == id<ActorId>(3)
+            && snapshot->actors()[0].maximumHealth == 50.f
             && batch && batch->events().size() == 1 && batch->events()[0].targetActorId == id<ActorId>(3)
             && batch->actorEvents().size() == 1
             && batch->actorEvents()[0].attackerActorId == id<ActorId>(3);

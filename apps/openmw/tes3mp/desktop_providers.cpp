@@ -1131,10 +1131,12 @@ namespace TES3MP::OpenMWAdapter
             if (!snapshot.selfDead() && playerStats.isDead())
                 MWBase::Environment::get().getMechanicsManager()->resurrect(player);
             auto playerHealth = playerStats.getHealth();
+            playerHealth.setBase(snapshot.selfMaximumHealth());
             playerHealth.setCurrent(snapshot.selfHealth());
             playerStats.setHealth(playerHealth);
             auto fatigue = playerStats.getFatigue();
-            fatigue.setCurrent(snapshot.selfFatigue());
+            fatigue.setBase(snapshot.selfMaximumFatigue());
+            fatigue.setCurrent(snapshot.selfFatigue(), true, true);
             playerStats.setFatigue(fatigue);
 
             for (auto& [entity, remote] : actorRemotes)
@@ -1150,10 +1152,12 @@ namespace TES3MP::OpenMWAdapter
                 if (!combat->dead && stats.isDead())
                     stats.resurrect();
                 auto health = stats.getHealth();
+                health.setBase(combat->maximumHealth);
                 health.setCurrent(combat->health);
                 stats.setHealth(health);
                 auto actorFatigue = stats.getFatigue();
-                actorFatigue.setCurrent(combat->fatigue);
+                actorFatigue.setBase(combat->maximumFatigue);
+                actorFatigue.setCurrent(combat->fatigue, true, true);
                 stats.setFatigue(actorFatigue);
                 if (!replicatedActorResultAccepted(remote.actor->setDead(combat->dead)))
                     return ProviderResult::PresentationFailed;
