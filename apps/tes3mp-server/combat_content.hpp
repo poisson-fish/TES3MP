@@ -23,6 +23,7 @@ namespace TES3MP::ServerApp
         InvalidPlayerTemplate,
         InvalidActorSet,
         InvalidWeaponCatalog,
+        InvalidMagicCatalog,
         InvalidWorld,
     };
 
@@ -37,6 +38,7 @@ namespace TES3MP::ServerApp
         OpenMwMeleeSettings settings;
         CanonicalPlayerCombatTemplate playerTemplate;
         MeleeWeaponCatalog weapons;
+        DirectMagicCatalog magic;
         CanonicalCombatWorld world;
     };
 

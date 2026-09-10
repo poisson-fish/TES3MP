@@ -850,11 +850,11 @@ namespace TES3MP::ServerApp
             return false;
         }
         const bool anyCombat = mWiring->combat || mWiring->meleeWeapons || mWiring->playerCombatTemplate
-            || mWiring->meleeSettings || mWiring->meleePolicy || mWiring->meleeContact;
+            || mWiring->meleeSettings || mWiring->meleePolicy || mWiring->meleeContact || mWiring->directMagic;
         if (anyCombat
             && (!mWiring->combat || !mWiring->actors || !mWiring->meleeSettings || !mWiring->inventory
                 || !mWiring->itemCatalog || !mWiring->meleeWeapons || !mWiring->playerCombatTemplate
-                || !mWiring->meleePolicy || !mWiring->meleeContact))
+                || !mWiring->meleePolicy || !mWiring->meleeContact || !mWiring->directMagic))
         {
             mFailure = "combat composition incomplete";
             return false;
@@ -884,7 +884,7 @@ namespace TES3MP::ServerApp
             directMutationBaseRevision.reset();
             CanonicalCommandWorlds commandWorlds{ mWiring->interactiveObjects, mWiring->interactiveObjectCatalog,
                 mWiring->inventory, mWiring->itemCatalog, mWiring->combat, mWiring->actors, mWiring->meleeWeapons,
-                mWiring->meleeSettings, mWiring->meleePolicy, mWiring->meleeContact };
+                mWiring->meleeSettings, mWiring->meleePolicy, mWiring->meleeContact, mWiring->directMagic };
             auto prepared = mWiring->reducer.prepareTick(batch, commandWorlds);
             if (!prepared.result())
             {
@@ -1036,7 +1036,7 @@ namespace TES3MP::ServerApp
                     *mWiring->itemCatalog, *mWiring->meleeWeapons, prepared.candidateState(),
                     *mWiring->actors, *mWiring->meleeSettings,
                     combatSimulationPolicy(mConfig.tickIntervalMilliseconds, mWiring->meleePolicy->difficulty),
-                    batch.scheduledTick().value());
+                    batch.scheduledTick().value(), mWiring->directMagic);
                 auto* step = std::get_if<CombatSimulationStep>(&advancedCombat);
                 if (!step)
                 {

@@ -228,26 +228,34 @@ OpenMW clients bind opaque IDs locally with repeatable
 Mappings must be injective and complete for presented records. See
 [`inventory_content.cpp`](../../apps/tes3mp-server/inventory_content.cpp).
 
-## Combat V5
+## Combat V6
 
 Configured optionally by `combat_content_file`; combat also requires actor,
 inventory, collision, and historical-contact composition. The catalog contains
 one deterministic seed; exactly one settings record, progression profile, and
 player template; one combat state per actor; an optional complete actor-attack
 set; and zero or more melee weapon or armor profiles keyed by inventory
-prototype ID.
+prototype ID. V6 also carries the bounded direct-magic subset used during
+melee contact: on-strike enchantments, equipped constant defenses and elemental
+shields, and actor-carried common or blight diseases.
 
 ```text
-TES3MP_COMBAT_V5
+TES3MP_COMBAT_V6
 manifest <64-lowercase-hex-digits>
 seed <unsigned-64-bit>
 settings <12-finite-OpenMW-melee-values> <fatigue-base> <fatigue-multiplier> <fatigue-return-base> <fatigue-return-multiplier> <endurance-fatigue-multiplier> <difficulty-multiplier> <block-left-angle> <block-right-angle> <swing-block-multiplier> <swing-block-base> <block-still-bonus> <block-minimum-chance> <block-maximum-chance> <fatigue-block-base> <fatigue-block-multiplier> <weapon-fatigue-block-multiplier> <base-armor-skill> <unarmored-base-1> <unarmored-base-2> <armor-minimum-damage-multiplier> <unarmed-creature-wears-armor-0-or-1> <redistribute-missing-shield-hit-0-or-1>
+magic_settings <elemental-shield-multiplier> <disease-transfer-percent>
+player_magic <willpower> <destruction> <fire-resist> <shock-resist> <frost-resist> <poison-resist> <common-disease-resist> <blight-disease-resist> <fire-shield> <shock-shield> <frost-shield>
 progression <misc-factor> <minor-factor> <major-factor> <specialization-factor> <block-specialization> <block-use-gain> <short-blade-specialization> <short-blade-use-gain> <long-blade-specialization> <long-blade-use-gain> <blunt-specialization> <blunt-use-gain> <axe-specialization> <axe-use-gain> <spear-specialization> <spear-use-gain> <hand-to-hand-specialization> <hand-to-hand-use-gain> <light-armor-specialization> <light-armor-use-gain> <medium-armor-specialization> <medium-armor-use-gain> <heavy-armor-specialization> <heavy-armor-use-gain> <unarmored-specialization> <unarmored-use-gain>
 player <agility> <luck> <strength> <fatigue-term> <fortify-attack> <blind> <short-blade> <long-blade> <blunt> <axe> <spear> <hand-to-hand> <fatigue> <endurance> <block> <intelligence> <magicka> <health-recovery-per-second> <magicka-recovery-per-second> <light-armor> <medium-armor> <heavy-armor> <unarmored> <maximum-weight> <werewolf-0-or-1>
 actor <actor-id> <health> <fatigue> <evasion> <chameleon> <invisibility> <normal-resistance> <normal-weakness> <knocked-down-0-or-1> <paralyzed-0-or-1> <unaware-0-or-1> <dead-0-or-1> <creature-0-or-1>
 actor_attack <actor-id> <agility> <luck> <strength> <fatigue-term> <combat-skill> <fatigue> <chop-min> <chop-max> <slash-min> <slash-max> <thrust-min> <thrust-max> <reach> <endurance>
+actor_magic <actor-id> <willpower> <destruction> <fire-resist> <shock-resist> <frost-resist> <poison-resist> <common-disease-resist> <blight-disease-resist> <fire-shield> <shock-shield> <frost-shield>
 weapon <prototype-id> <skill> <chop-min> <chop-max> <slash-min> <slash-max> <thrust-min> <thrust-max> <weight> <reach> <normal-weapon-0-or-1>
 armor <prototype-id> <light-0-medium-1-heavy-2> <base-armor>
+enchantment <weapon-prototype-id> <charge-cost> <effect-count> [<self-or-other> <fire-or-shock-or-frost-or-poison-or-health-or-fatigue> <minimum> <maximum>]...
+equipment_magic <prototype-id> <zero> <zero> <fire-resist> <shock-resist> <frost-resist> <poison-resist> <common-disease-resist> <blight-disease-resist> <fire-shield> <shock-shield> <frost-shield>
+disease <actor-id> <spell-record-id> <common-or-blight> <effect-count> [<other> <fire-or-shock-or-frost-or-poison-or-health-or-fatigue> <minimum> <maximum>]...
 ```
 
 The actor set must exactly match Actors V1. Every weapon must be a conditioned,
@@ -273,3 +281,13 @@ the default 30x time scale and apply only to active, living players without a
 live same-cell aggressor until canonical time/rest exists. Values are finite and
 range checked; cross-catalog failure is atomic. See
 [`combat_content.cpp`](../../apps/tes3mp-server/combat_content.cpp).
+
+Direct-magic sources contain one through eight instantaneous effects. An
+on-strike source requires a conditioned carried-right weapon and sufficient
+canonical charge; charge, wear, melee damage, magic damage, retaliation, death,
+and revisions commit together. Equipped magic may supply only resistances and
+the three elemental shields. Disease entries are unique per actor, transfer by
+the server PRNG and configured resistance-aware chance, and apply at most once
+per player. General casting, durations, area effects, summons, attribute/skill
+effects, dispelling, and scripted effects are outside V6 and fail content
+validation instead of being approximated.

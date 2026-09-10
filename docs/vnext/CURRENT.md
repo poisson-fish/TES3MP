@@ -290,11 +290,12 @@ and [`desktop_providers.cpp`](../../apps/openmw/tes3mp/desktop_providers.cpp).
   PRNG, canonical maximum/current health, magicka, and fatigue, actor dead state,
   cooldown, and separate combat revisions. Damage and death commit atomically
   with command finalization.
-- Optional bounded `TES3MP_COMBAT_V5` content supplies manifest-scoped resolver
+- Optional bounded `TES3MP_COMBAT_V6` content supplies manifest-scoped resolver
   settings, a validated default player combat profile, exhaustive actor combat
   seeds and attack profiles, weapon and armor records, OpenMW fatigue/block/armor
   constants, progression gains/class factors, recovery rates, endurance,
-  intelligence, and a deterministic random seed.
+  intelligence, a deterministic random seed, and direct-magic settings and
+  profiles.
   Startup rejects a missing, malformed, mismatched, or internally inconsistent
   configured file before exposing any of its state.
 - Fresh joins establish the validated server baseline. Character completion and
@@ -340,6 +341,16 @@ and [`desktop_providers.cpp`](../../apps/openmw/tes3mp/desktop_providers.cpp).
   character's class and specialization factors.
   Dead players and actors automatically respawn after 30 seconds at their
   current canonical root with baseline resources and cleared attack state.
+- Successful melee contact also resolves a bounded server-owned direct-magic
+  subset. Carried-right on-strike enchantments spend canonical item charge and
+  apply self/target elemental, poison, health, or fatigue damage. Equipped
+  constant effects contribute elemental/poison/disease resistance and fire,
+  shock, or frost shields; shields retaliate against a contacting attacker.
+  Common and blight diseases transfer from configured actors using the server
+  PRNG, canonical resistance, and a once-per-player disease identity. These
+  consequences, melee, equipment wear/charge, death, revisions, and publication
+  share the existing atomic prepared commit. Existing combat and inventory
+  snapshots carry the resulting stats and charge without a protocol revision.
 - Production composition retains nine bounded server-tick frames of player and
   actor roots. Contact uses the client-observed historical tick, stock 128-unit
   base distance scaled by canonical weapon reach, exact-cell identity, and the
@@ -350,6 +361,7 @@ and [`desktop_providers.cpp`](../../apps/openmw/tes3mp/desktop_providers.cpp).
 
 Primary sources: [`melee_combat.cpp`](../../components/tes3mp/protocol/melee_combat.cpp),
 [`combat_world.cpp`](../../components/tes3mp/server_core/combat_world.cpp),
+[`direct_magic.cpp`](../../components/tes3mp/server_core/direct_magic.cpp),
 [`combat_content.cpp`](../../apps/tes3mp-server/combat_content.cpp),
 [`melee_contact_history.cpp`](../../apps/tes3mp-server/melee_contact_history.cpp),
 [`combat_replication.cpp`](../../components/tes3mp/protocol/combat_replication.cpp),
@@ -420,13 +432,14 @@ and [`test_bake_tes3mp_content.py`](../../scripts/tests/test_bake_tes3mp_content
   passive canonical shield blocking, armor mitigation, equipment wear, and
   stock hit/block feedback. Blocking currently applies only to actor melee
   against players and uses canonical root facing rather than rewound animation
-  pose. The packaged derived pack has no on-strike enchantment or actor spell
-  effect to resolve: its baker rejects selected enchanted items and actors with
-  initial spell effects. Player armor mitigation covers reactive actor melee;
+  pose. The packaged default currently selects no on-strike enchantment or actor
+  disease, but the baker extracts supported winning on-strike, constant
+  defensive, elemental-shield, and disease records and fails closed on magic
+  outside that bounded subset. Player armor mitigation covers reactive actor melee;
   actor armor and player-versus-player armor resolution are not yet modeled.
   PvP/P2P, proactive AI aggression,
-  broader on-strike enchantments, elemental shields, disease, Lua hit callbacks,
-  and general magic remain unimplemented.
+  duration/area magic, active spellcasting, Lua hit callbacks, and general magic
+  remain unimplemented.
 - Established root checkpoints and complete character profiles survive restart;
   canonical dynamic world/object/actor state does not. Chargen is the only
   scripted sequence with explicit server safe points today. Other cutscenes,
@@ -448,11 +461,12 @@ and [`test_bake_tes3mp_content.py`](../../scripts/tests/test_bake_tes3mp_content
 
 ## Work still required
 
-### Next milestone: direct magic effects
+### Next milestone: deterministic server scripting boundary
 
-Add a bounded typed kernel for direct enchantment, elemental-shield, and disease
-effects, composed atomically with the existing melee outcome. General
-spellcasting and deterministic server scripting remain later work.
+Add the versioned server-scripting foundation: immutable bounded callback
+inputs, replay-stable callback ordering, and queued typed commands applied only
+at explicit tick safe points. Do not expose packet buffers or mutable canonical
+state and do not recreate the legacy CoreScripts API.
 
 ### Required before the desktop/PC-VR release
 
@@ -483,7 +497,7 @@ and do not enter protocol or canonical state.
 
 ## Verification snapshot
 
-The authoritative-armor working tree passed the following
+The direct-magic working tree passed the following
 on 2026-09-10:
 
 - the bounded Windows product `checks` graph, including relinking the shipping
@@ -492,12 +506,12 @@ on 2026-09-10:
 - the pinned FlatBuffers selection proof, including exact regeneration checks
   for every production protocol header;
 - the opt-in Windows headless-client build;
-- all 195 repository Python tests and patch-registry verification;
+- all 196 repository Python tests and patch-registry verification;
 - deterministic bake and verification against the installed 79,837,557-byte
   `Morrowind.esm` with SHA-256
   `5c3c8c2cbd20e25901b59b3ece33d36b7ef0e3d60ad8d11828bcc61a5ead1647`,
   producing and verifying pack
-  `f69a886749559d3d54e673bd8c05f59c2ddf31feac728c5685eddc8ea341d7b7`.
+  `c5df902cab7f9920d4b3bbe77c9e17983e287d0cad533517abdc87babd645576`.
 
 The standalone aggregate also passed. The Linux-only sanitizer/fuzzer execution
 profile, non-Windows product builds, PC-VR hardware checks, a full upstream

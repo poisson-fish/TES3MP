@@ -558,7 +558,7 @@ namespace TES3MP
         const CanonicalCombatWorld* combat, const CanonicalActorWorld* actors,
         const MeleeWeaponCatalog* meleeWeapons,
         const OpenMwMeleeSettings* meleeSettings, const MeleeAuthorityPolicy* meleePolicy,
-        ServerMeleeContactQuery* meleeContact)
+        ServerMeleeContactQuery* meleeContact, const DirectMagicCatalog* directMagic)
     {
         PreparedBatch prepared;
         prepared.mBaseVersion = mStateVersion;
@@ -921,7 +921,7 @@ namespace TES3MP
                                             auto combatResult = prepareAuthoritativeMeleeAttack(*prepared.mCombat,
                                                 *prepared.mInventory, *itemCatalog, *meleeWeapons,
                                                 *prepared.mState, *actors, *meleeSettings, *meleePolicy,
-                                                *meleeContact, tick, attack);
+                                                *meleeContact, tick, attack, directMagic);
                                             if (combatResult.disposition == AuthoritativeMeleeDisposition::Applied
                                                 && combatResult.candidate)
                                             {
@@ -1150,7 +1150,7 @@ namespace TES3MP
     {
         return prepareTickState(prepareCommands(batch, worlds.interactiveObjects, worlds.interactiveObjectCatalog,
             worlds.inventory, worlds.itemCatalog, worlds.combat, worlds.actors, worlds.meleeWeapons,
-            worlds.meleeSettings, worlds.meleePolicy, worlds.meleeContact), batch);
+            worlds.meleeSettings, worlds.meleePolicy, worlds.meleeContact, worlds.directMagic), batch);
     }
 
     bool CanonicalCommandReducer::commitPrepared(

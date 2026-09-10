@@ -5,6 +5,7 @@
 #include "canonical_state.hpp"
 #include "character_profile.hpp"
 #include "deterministic_random.hpp"
+#include "direct_magic.hpp"
 #include "inventory_world.hpp"
 #include "melee_combat.hpp"
 
@@ -154,6 +155,7 @@ namespace TES3MP
             static_cast<std::size_t>(CombatProgressionSkill::Count)> skillProgression{};
         float intelligence = 1.f;
         std::array<float, 4> armorSkills{};
+        DirectMagicDefense magicDefense;
 
         friend constexpr bool operator==(const CanonicalPlayerCombatTemplate&,
             const CanonicalPlayerCombatTemplate&) noexcept = default;
@@ -183,6 +185,8 @@ namespace TES3MP
         std::array<CombatSkillProgressionState,
             static_cast<std::size_t>(CombatProgressionSkill::Count)> skillProgression{};
         std::array<float, 4> armorSkills{};
+        DirectMagicDefense magicDefense;
+        std::vector<SpellRecordId> contractedDiseases;
 
         friend constexpr bool operator==(const CanonicalPlayerCombatState&,
             const CanonicalPlayerCombatState&) noexcept = default;
@@ -203,6 +207,7 @@ namespace TES3MP
         float maximumHealth = 0.f;
         float maximumFatigue = 0.f;
         bool creature = false;
+        DirectMagicDefense magicDefense;
 
         friend constexpr bool operator==(const CanonicalActorCombatState&,
             const CanonicalActorCombatState&) noexcept = default;
@@ -399,12 +404,14 @@ namespace TES3MP
         const CanonicalInventoryWorld& inventory, const ItemPrototypeCatalog& items,
         const MeleeWeaponCatalog& weapons, const CanonicalServerState& players,
         const CanonicalActorWorld& actors, const OpenMwMeleeSettings& settings, MeleeAuthorityPolicy policy,
-        ServerMeleeContactQuery& contact, ServerTick serverTick, const AuthoritativeMeleeAttack& attack) noexcept;
+        ServerMeleeContactQuery& contact, ServerTick serverTick, const AuthoritativeMeleeAttack& attack,
+        const DirectMagicCatalog* magic = nullptr) noexcept;
     std::variant<CombatSimulationStep, CombatSimulationError> advanceAuthoritativeCombat(
         const CanonicalCombatWorld& combat, const CanonicalInventoryWorld& inventory,
         const ItemPrototypeCatalog& items, const MeleeWeaponCatalog& weapons,
         const CanonicalServerState& players, const CanonicalActorWorld& actors,
-        const OpenMwMeleeSettings& settings, CombatSimulationPolicy policy, ServerTick tick) noexcept;
+        const OpenMwMeleeSettings& settings, CombatSimulationPolicy policy, ServerTick tick,
+        const DirectMagicCatalog* magic = nullptr) noexcept;
 }
 
 #endif

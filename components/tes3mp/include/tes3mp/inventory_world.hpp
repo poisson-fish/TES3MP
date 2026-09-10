@@ -155,6 +155,7 @@ namespace TES3MP
         PlayerNotFound,
         ItemNotEquipped,
         InvalidCondition,
+        InvalidEnchantmentCharge,
         TickRegression,
         RevisionExhausted,
     };
@@ -202,6 +203,8 @@ namespace TES3MP
             ContainerId container, CellId cell, Position3 position, std::uint32_t capacityWeight = 0) noexcept;
         EquippedConditionResult setEquippedItemCondition(PlayerId player, EquipmentSlot slot,
             ItemStackId stack, std::uint32_t condition, bool unequip, ServerTick tick) noexcept;
+        EquippedConditionResult setEquippedItemEnchantmentCharge(PlayerId player, EquipmentSlot slot,
+            ItemStackId stack, std::uint32_t charge, ServerTick tick) noexcept;
 
         friend bool operator==(const CanonicalInventoryWorld&, const CanonicalInventoryWorld&) noexcept = default;
 

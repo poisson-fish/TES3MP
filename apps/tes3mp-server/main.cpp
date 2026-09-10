@@ -363,7 +363,8 @@ int main(int argc, char** argv)
             combatContent ? &combatContent->settings : nullptr,
             combatContent ? &meleePolicy : nullptr,
             meleeContactHistory ? &*meleeContactHistory : nullptr,
-            meleeContactHistory ? &*meleeContactHistory : nullptr });
+            meleeContactHistory ? &*meleeContactHistory : nullptr,
+            combatContent ? &combatContent->magic : nullptr });
     if (!application.start())
     {
         std::cerr << application.failure() << '\n';

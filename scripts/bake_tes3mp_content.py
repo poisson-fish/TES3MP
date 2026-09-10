@@ -46,7 +46,7 @@ CATALOGS = {
     "actor_content_file": ("TES3MP_ACTORS_V1", True),
     "interactive_object_content_file": ("TES3MP_INTERACTIVE_OBJECTS_V1", False),
     "inventory_content_file": ("TES3MP_INVENTORY_V1", False),
-    "combat_content_file": ("TES3MP_COMBAT_V5", False),
+    "combat_content_file": ("TES3MP_COMBAT_V6", False),
     "character_content_file": ("TES3MP_CHARACTERS_V2", False),
 }
 
@@ -641,8 +641,6 @@ def _item_values(record_value: Tes3Record) -> tuple[int, int, int, int, int, boo
     slot_mask = 0
     stackable = True
     key_id: int | None = None
-    if _subrecord(record_value, "ENAM", False) is not None:
-        raise BakeError(f"unsupported enchanted item record: {record_value.name}")
     if kind == "WEAP":
         values = _unpack(record_value, "WPDT", "<fihHffH2B2B2Bi")
         weight, value, weapon_type, health = float(values[0]), int(values[1]), int(values[2]), int(values[3])
@@ -752,6 +750,115 @@ ARMOR_WEIGHT_GMSTS = {
     8: "iShieldWeight", 9: "iGauntletWeight", 10: "iGauntletWeight",
 }
 
+DIRECT_EFFECT_KINDS = {
+    14: "fire", 15: "shock", 16: "frost", 23: "health", 25: "fatigue", 27: "poison",
+}
+
+PASSIVE_EFFECT_FIELDS = {
+    4: 8, 5: 9, 6: 10, 90: 2, 91: 4, 92: 3, 94: 6, 95: 7, 97: 5,
+}
+
+
+def _record_reference(payload: bytes, description: str) -> str:
+    raw = payload.split(b"\0", 1)[0]
+    if not raw or len(raw) > 255:
+        raise BakeError(f"invalid {description} reference")
+    try:
+        return raw.decode("cp1252")
+    except UnicodeDecodeError as exc:
+        raise BakeError(f"invalid {description} reference") from exc
+
+
+def _effect_values(record_value: Tes3Record) -> tuple[tuple[int, int, int, int, int, int], ...]:
+    result = []
+    for kind, payload in record_value.subrecords:
+        if kind != "ENAM":
+            continue
+        if len(result) >= 8:
+            raise BakeError(f"invalid direct magic effect count: {record_value.name}")
+        if len(payload) != struct.calcsize("<hbbiiiii"):
+            raise BakeError(f"unsupported magic effect layout: {record_value.name}")
+        effect, _skill, _attribute, effect_range, area, duration, minimum, maximum = \
+            struct.unpack("<hbbiiiii", payload)
+        if effect_range < 0 or effect_range > 2 or area != 0 or duration not in {0, 1} \
+                or minimum < 0 or maximum < minimum:
+            raise BakeError(f"unsupported direct magic effect: {record_value.name}")
+        result.append((effect, effect_range, duration, minimum, maximum, area))
+    if not result or len(result) > 8:
+        raise BakeError(f"invalid direct magic effect count: {record_value.name}")
+    return tuple(result)
+
+
+def _direct_effect_tokens(record_value: Tes3Record, force_other: bool = False) -> tuple[str, ...]:
+    result = []
+    for effect, effect_range, _duration, minimum, maximum, _area in _effect_values(record_value):
+        effect_kind = DIRECT_EFFECT_KINDS.get(effect)
+        if effect_kind is None:
+            raise BakeError(f"unsupported direct magic effect: {record_value.name}")
+        target = "other" if force_other or effect_range != 0 else "self"
+        result.extend((target, effect_kind, str(minimum), str(maximum)))
+    return tuple(result)
+
+
+def _passive_magic_defense(record_value: Tes3Record) -> tuple[float, ...]:
+    result = [0.0] * 11
+    for effect, effect_range, _duration, minimum, maximum, _area in _effect_values(record_value):
+        field = PASSIVE_EFFECT_FIELDS.get(effect)
+        if field is None or effect_range != 0 or minimum != maximum:
+            raise BakeError(f"unsupported passive magic effect: {record_value.name}")
+        result[field] += float(minimum)
+    return tuple(result)
+
+
+def _item_magic(record_value: Tes3Record, records: dict[tuple[str, str], Tes3Record]) \
+        -> tuple[int, tuple[str, ...] | None, tuple[float, ...] | None]:
+    if record_value.kind not in {"ARMO", "BOOK", "CLOT", "WEAP"}:
+        if any(kind == "ENAM" for kind, _payload in record_value.subrecords):
+            raise BakeError(f"unsupported direct-use item magic: {record_value.name}")
+        return 0, None, None
+    reference = _subrecord(record_value, "ENAM", False)
+    if reference is None:
+        return 0, None, None
+    enchantment = _winning_record(records, _record_reference(reference, "enchantment"), {"ENCH"}, "enchantment")
+    enchant_type, cost, charge, _flags = (int(value) for value in _unpack(enchantment, "ENDT", "<4i"))
+    if enchant_type == 1:
+        if record_value.kind != "WEAP":
+            raise BakeError(f"unsupported on-strike item type: {record_value.name}")
+        if cost <= 0 or charge <= 0 or cost > charge:
+            raise BakeError(f"invalid on-strike enchantment charge: {enchantment.name}")
+        return charge, (str(cost), *_direct_effect_tokens(enchantment)), None
+    if enchant_type == 3:
+        return 0, None, _passive_magic_defense(enchantment)
+    raise BakeError(f"unsupported item enchantment type: {enchantment.name}")
+
+
+def _actor_magic(record_value: Tes3Record, records: dict[tuple[str, str], Tes3Record],
+        willpower: float, destruction: float) -> tuple[tuple[float, ...], tuple[tuple[int, str, tuple[str, ...]], ...]]:
+    defense = [willpower, destruction, *([0.0] * 9)]
+    diseases = []
+    for kind, payload in record_value.subrecords:
+        if kind != "NPCS":
+            continue
+        spell = _winning_record(records, _record_reference(payload, "actor spell"), {"SPEL"}, "actor spell")
+        spell_type, _cost, _flags = (int(value) for value in _unpack(spell, "SPDT", "<3i"))
+        if spell_type in {0, 5}:
+            continue
+        if spell_type == 1:
+            for index, value in enumerate(_passive_magic_defense(spell)):
+                defense[index] += value
+        elif spell_type in {2, 3}:
+            if len(diseases) >= 16:
+                raise BakeError(f"invalid actor disease set: {record_value.name}")
+            diseases.append((stable_record_id(spell.name), "blight" if spell_type == 2 else "common",
+                             _direct_effect_tokens(spell, True)))
+        else:
+            raise BakeError(f"unsupported initial actor spell type: {spell.name}")
+    if len(diseases) > 16 or len({value[0] for value in diseases}) != len(diseases):
+        raise BakeError(f"invalid actor disease set: {record_value.name}")
+    if any(not math.isfinite(value) or value < -1000 or value > 1000 for value in defense):
+        raise BakeError(f"actor magic defense is out of range: {record_value.name}")
+    return tuple(defense), tuple(sorted(diseases))
+
 
 def _skill_progression_rule(records: dict[tuple[str, str], Tes3Record], index: int) -> tuple[int, float]:
     record_value = _winning_record(records, str(index), {"SKIL"}, "skill")
@@ -830,27 +937,34 @@ def derive_catalogs(recipe: DerivedRecipe, server_entries: Sequence[Assignment],
         raise BakeError("derived player maximum encumbrance is invalid")
 
     item_records: dict[str, Tes3Record] = {}
-    item_declarations: list[tuple[int, tuple[int, int, int, int, int, bool, int | None], Tes3Record]] = []
+    item_declarations: list[tuple[int, tuple[int, int, int, int, int, bool, int | None], Tes3Record, int]] = []
     weapon_profiles: list[tuple[int, int, tuple[float, ...], bool]] = []
+    enchantment_profiles: list[tuple[int, tuple[str, ...]]] = []
+    equipment_magic_profiles: list[tuple[int, tuple[float, ...]]] = []
     for item_name in recipe.items:
         record_value = _winning_record(records, item_name, ITEM_RECORD_TYPES, "item")
         identifier = stable_record_id(item_name)
         item_records[item_name.casefold()] = record_value
-        item_declarations.append((identifier, _item_values(record_value), record_value))
+        maximum_charge, enchantment, equipment_magic = _item_magic(record_value, records)
+        item_declarations.append((identifier, _item_values(record_value), record_value, maximum_charge))
+        if enchantment is not None:
+            enchantment_profiles.append((identifier, enchantment))
+        if equipment_magic is not None:
+            equipment_magic_profiles.append((identifier, equipment_magic))
         if record_value.kind == "WEAP":
             skill, weapon_values, normal = _weapon_values(record_value)
             weapon_profiles.append((identifier, skill, weapon_values, normal))
-    if len({identifier for identifier, _values, _record in item_declarations}) != len(item_declarations):
+    if len({identifier for identifier, _values, _record, _charge in item_declarations}) != len(item_declarations):
         raise BakeError("derived item identities collide")
 
-    actor_values: list[tuple[DerivedActor, Tes3Record, float, float, float, tuple[float, ...]]] = []
+    actor_values: list[tuple[DerivedActor, Tes3Record, float, float, float, tuple[float, ...],
+                            tuple[float, ...], tuple[tuple[int, str, tuple[str, ...]], ...]]] = []
     for actor in recipe.actors:
         record_value = _winning_record(records, actor.record, {"NPC_", "CREA"}, "actor")
-        if any(kind == "NPCS" for kind, _value in record_value.subrecords):
-            raise BakeError(f"unsupported actor with initial spell effects: {actor.record}")
         if record_value.kind == "NPC_":
             _level, attributes, actor_skills, health, _magicka, fatigue = _npc_values(record_value, "actor")
             combat_skill = float(actor_skills[26])
+            destruction_skill = float(actor_skills[10])
             attacks = (0.0,) * 6
         else:
             values = _unpack(record_value, "NPDT", "<24i")
@@ -859,11 +973,15 @@ def derive_catalogs(recipe: DerivedRecipe, server_entries: Sequence[Assignment],
             if health < 1 or fatigue < 0:
                 raise BakeError(f"actor has unsupported creature stats: {actor.record}")
             combat_skill = float(values[14])
+            destruction_skill = 0.0
             attacks = tuple(float(value) for value in values[17:23])
         evasion = (attributes[3] / 5.0 + attributes[7] / 10.0) * fatigue_base
         attack = (float(attributes[3]), float(attributes[7]), float(attributes[0]), fatigue_base,
                   combat_skill, float(fatigue), *attacks, 1.0, float(attributes[5]))
-        actor_values.append((actor, record_value, float(health), float(fatigue), evasion, attack))
+        magic_defense, diseases = _actor_magic(
+            record_value, records, float(attributes[2]), destruction_skill)
+        actor_values.append((actor, record_value, float(health), float(fatigue), evasion, attack,
+                             magic_defense, diseases))
     if len({stable_record_id(actor.record) for actor in recipe.actors}) != len(
             {actor.record.casefold() for actor in recipe.actors}):
         raise BakeError("derived actor prototype identities collide")
@@ -876,22 +994,26 @@ def derive_catalogs(recipe: DerivedRecipe, server_entries: Sequence[Assignment],
             *(str(value) for value in solid.minimum), *(str(value) for value in solid.maximum))))
 
     actor_lines = [CATALOGS["actor_content_file"][0], f"manifest {MANIFEST_PLACEHOLDER}"]
-    for actor, _record, _health, _fatigue, _evasion, _attack in sorted(
+    for actor, _record, _health, _fatigue, _evasion, _attack, _magic, _diseases in sorted(
             actor_values, key=lambda value: value[0].actor_id):
         actor_lines.append(" ".join(("actor", str(actor.actor_id), str(actor.entity_id),
             str(stable_record_id(actor.record)), *_cell_tokens(actor.cell),
             *(str(value) for value in actor.position), *(str(value) for value in actor.orientation), "idle")))
 
     inventory_lines = [CATALOGS["inventory_content_file"][0], f"manifest {MANIFEST_PLACEHOLDER}"]
-    for identifier, values, _record in sorted(item_declarations):
+    for identifier, values, _record, maximum_charge in sorted(item_declarations):
         category, weight, item_value, condition, slots, stackable, key_id = values
         inventory_lines.append(" ".join(("prototype", str(identifier), str(category), str(weight),
-            str(item_value), str(condition), "0", str(slots), "1" if stackable else "0",
+            str(item_value), str(condition), str(maximum_charge), str(slots), "1" if stackable else "0",
             str(key_id) if key_id is not None else "none")))
 
     combat_lines = [CATALOGS["combat_content_file"][0], f"manifest {MANIFEST_PLACEHOLDER}",
                     f"seed {recipe.seed}",
                     "settings " + " ".join((*(_float_text(value) for value in gmsts), "0", "0"))]
+    combat_lines.append("magic_settings " + " ".join(_float_text(_gmst_value(records, name))
+        for name in ("fElementalShieldMult", "fDiseaseXferChance")))
+    player_magic = (float(player_attributes[2]), float(player_skills[10]), *([0.0] * 9))
+    combat_lines.append("player_magic " + " ".join(_float_text(value) for value in player_magic))
     progression_fields = (*progression_factors,
                           *(value for rule in progression_rules for value in rule))
     combat_lines.append("progression " + " ".join(_float_text(float(value)) for value in progression_fields))
@@ -909,18 +1031,30 @@ def derive_catalogs(recipe: DerivedRecipe, server_entries: Sequence[Assignment],
                      float(player_skills[17]))
     combat_lines.append("player " + " ".join((*(_float_text(value) for value in player_fields),
         str(maximum_weight), "0")))
-    for actor, _record, health, fatigue, evasion, attack in sorted(actor_values, key=lambda value: value[0].actor_id):
+    for actor, _record, health, fatigue, evasion, attack, magic_defense, diseases in sorted(
+            actor_values, key=lambda value: value[0].actor_id):
         combat_lines.append("actor " + " ".join((str(actor.actor_id), _float_text(health),
             _float_text(fatigue), _float_text(evasion), "0", "0", "0", "0", "0", "0", "0", "0",
             "1" if _record.kind == "CREA" else "0")))
         combat_lines.append("actor_attack " + " ".join((str(actor.actor_id),
             *(_float_text(value) for value in attack))))
+        combat_lines.append("actor_magic " + " ".join((str(actor.actor_id),
+            *(_float_text(value) for value in magic_defense))))
+        for spell_id, disease_kind, effects in diseases:
+            combat_lines.append("disease " + " ".join((str(actor.actor_id), str(spell_id), disease_kind,
+                str(len(effects) // 4), *effects)))
     for identifier, skill, values, normal in sorted(weapon_profiles):
         combat_lines.append("weapon " + " ".join((str(identifier), str(skill),
             *(_float_text(value) for value in values), "1" if normal else "0")))
+    for identifier, values in sorted(enchantment_profiles):
+        combat_lines.append("enchantment " + " ".join((str(identifier), values[0],
+            str((len(values) - 1) // 4), *values[1:])))
+    for identifier, defense in sorted(equipment_magic_profiles):
+        combat_lines.append("equipment_magic " + " ".join((str(identifier),
+            *(_float_text(value) for value in defense))))
     light_multiplier = _gmst_value(records, "fLightMaxMod")
     medium_multiplier = _gmst_value(records, "fMedMaxMod")
-    for identifier, _values, record_value in sorted(item_declarations):
+    for identifier, _values, record_value, _charge in sorted(item_declarations):
         if record_value.kind != "ARMO":
             continue
         armor_type, weight, _value, _health, _enchant, base_armor = _unpack(record_value, "AODT", "<ifiiii")
@@ -978,7 +1112,7 @@ def derive_catalogs(recipe: DerivedRecipe, server_entries: Sequence[Assignment],
         existing_actor_names[stable_record_id(actor.record)] = actor.record
     for identifier, record_name in sorted(existing_actor_names.items()):
         augmented.append(Assignment("tes3mp-content-actor-prototype-map", f"{identifier}={record_name}", line)); line += 1
-    for identifier, _values, record_value in sorted(item_declarations):
+    for identifier, _values, record_value, _charge in sorted(item_declarations):
         original_name = next(name for name in recipe.items if name.casefold() == record_value.name)
         augmented.append(Assignment("tes3mp-content-item-prototype-map", f"{identifier}={original_name}", line)); line += 1
     return catalogs, augmented

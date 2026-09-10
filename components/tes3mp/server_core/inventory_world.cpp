@@ -416,6 +416,30 @@ namespace TES3MP
         return EquippedConditionResult::Applied;
     }
 
+    EquippedConditionResult CanonicalInventoryWorld::setEquippedItemEnchantmentCharge(PlayerId playerId,
+        EquipmentSlot equipmentSlot, ItemStackId stackId, std::uint32_t charge, ServerTick tick) noexcept
+    {
+        auto* player = findMutablePlayer(playerId);
+        if (!player)
+            return EquippedConditionResult::PlayerNotFound;
+        const auto slot = static_cast<std::size_t>(equipmentSlot);
+        if (slot >= player->equipment.size() || player->equipment[slot] != stackId)
+            return EquippedConditionResult::ItemNotEquipped;
+        auto* stack = player->findStack(stackId);
+        const auto* declaration = stack ? mCatalog.find(stack->prototypeId) : nullptr;
+        if (!stack || !declaration || charge > declaration->maxEnchantmentCharge)
+            return EquippedConditionResult::InvalidEnchantmentCharge;
+        if (tick < player->lastChangeTick)
+            return EquippedConditionResult::TickRegression;
+        const auto nextRevision = player->revision.next();
+        if (!nextRevision)
+            return EquippedConditionResult::RevisionExhausted;
+        stack->enchantmentCharge = charge;
+        player->revision = *nextRevision;
+        player->lastChangeTick = tick;
+        return EquippedConditionResult::Applied;
+    }
+
     bool CanonicalInventoryWorld::ensureContainer(
         ContainerId container, CellId cell, Position3 position, std::uint32_t capacityWeight) noexcept
     try

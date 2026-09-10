@@ -43,6 +43,7 @@ namespace TES3MP::ServerApp
         const MeleeAuthorityPolicy* meleePolicy = nullptr;
         ServerMeleeContactQuery* meleeContact = nullptr;
         ServerMeleeContactHistory* meleeContactHistory = nullptr;
+        const DirectMagicCatalog* directMagic = nullptr;
     };
 
     class ServerApplication

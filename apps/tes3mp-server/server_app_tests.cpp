@@ -17,10 +17,10 @@
 #include "resume_token_context.hpp"
 #include "server_application.hpp"
 #include "server_config.hpp"
+#include "tes3mp/combat_replication.hpp"
 #include "tes3mp/interactive_object_catalog.hpp"
 #include "tes3mp/interactive_object_replication.hpp"
 #include "tes3mp/interactive_object_world.hpp"
-#include "tes3mp/combat_replication.hpp"
 #include "tes3mp/inventory_replication.hpp"
 
 #include <array>
@@ -305,8 +305,8 @@ namespace
     CapabilityOffer combatOffer()
     {
         auto versions = std::get<ProtocolVersionRange>(ProtocolVersionRange::create(1, 3, 3));
-        const std::array capabilities{
-            actorReplicationCapability(), inventoryReplicationCapability(), combatReplicationCapability() };
+        const std::array capabilities{ actorReplicationCapability(), inventoryReplicationCapability(),
+            combatReplicationCapability() };
         return std::get<CapabilityOffer>(CapabilityOffer::create(versions, capabilities, {}));
     }
 
@@ -354,8 +354,7 @@ namespace
                 && std::get<DecodedFrame>(snapshotFrame).messageKind() == MessageKind::LatestWinsSnapshot;
             if (valid)
             {
-                auto accepted = decodeAuthenticationAccepted(
-                    std::get<DecodedFrame>(authenticationFrame).payload());
+                auto accepted = decodeAuthenticationAccepted(std::get<DecodedFrame>(authenticationFrame).payload());
                 if (const auto* value = std::get_if<AuthenticationAcceptedMessage>(&accepted))
                     authenticationIncludedPlayerCredential = value->hasPlayerCredential();
                 else
@@ -418,13 +417,12 @@ namespace
         return std::get<CanonicalServerState>(createCanonicalServerState(players, sessions));
     }
 }
-
 int main()
 {
     using namespace TES3MP::ServerApp;
     {
         const auto manifestId
-            = ContentManifestId::fromHex("f69a886749559d3d54e673bd8c05f59c2ddf31feac728c5685eddc8ea341d7b7");
+            = ContentManifestId::fromHex("c5df902cab7f9920d4b3bbe77c9e17983e287d0cad533517abdc87babd645576");
         const auto spaces = parseCellSpaceDeclarations("interior:1;interior:2;interior:3;exterior:4");
         const auto cells = parseContentCells("interior:1;interior:2;interior:3;exterior:4:-2:-9");
         const auto movement = parseMovementProfile("sneak:4;walk:8;run:16;jump:12");
@@ -466,16 +464,13 @@ int main()
             && catalog->find(*BirthsignRecordId::fromValue(*characterRecordId("Fay")))
             && catalog->startingInventory().size() == 2
             && catalog->startingInventory()[0].prototype == id<ItemPrototypeId>(579706974062055657ull)
-            && catalog->startingInventory()[0].equipmentSlot
-                == static_cast<std::uint8_t>(EquipmentSlot::CarriedRight)
+            && catalog->startingInventory()[0].equipmentSlot == static_cast<std::uint8_t>(EquipmentSlot::CarriedRight)
             && catalog->startingInventory()[1].prototype == id<ItemPrototypeId>(9071396267722241944ull)
-            && catalog->startingInventory()[1].equipmentSlot
-                == static_cast<std::uint8_t>(EquipmentSlot::CarriedLeft));
+            && catalog->startingInventory()[1].equipmentSlot == static_cast<std::uint8_t>(EquipmentSlot::CarriedLeft));
 
         const auto contentRoot = std::filesystem::path(TES3MP_SOURCE_ROOT) / "files/data/tes3mp";
         auto packagedCollisionResult = ContentCollisionProvider::load(contentRoot / "vanilla-collision.txt", *manifest);
-        auto* packagedCollisionValue
-            = std::get_if<std::unique_ptr<ContentCollisionProvider>>(&packagedCollisionResult);
+        auto* packagedCollisionValue = std::get_if<std::unique_ptr<ContentCollisionProvider>>(&packagedCollisionResult);
         assert(packagedCollisionValue && *packagedCollisionValue);
         auto packagedActorsResult = loadActorContent(contentRoot / "vanilla-actors.txt", *manifest);
         auto* packagedActors = std::get_if<ActorCatalog>(&packagedActorsResult);
@@ -483,25 +478,28 @@ int main()
         auto* packagedInventory = std::get_if<InventoryContent>(&packagedInventoryResult);
         assert(packagedActors && packagedInventory && packagedActors->entries().size() == 1
             && packagedActors->entries()[0].prototypeId == id<ActorPrototypeId>(9941342243677752440ull)
-            && (*packagedCollisionValue)->canOccupy(
-                packagedActors->entries()[0].initialRoot.cell(), packagedActors->entries()[0].initialRoot.position())
+            && (*packagedCollisionValue)
+                ->canOccupy(packagedActors->entries()[0].initialRoot.cell(),
+                    packagedActors->entries()[0].initialRoot.position())
             && packagedInventory->catalog.find(id<ItemPrototypeId>(579706974062055657ull)));
         auto packagedCombatResult = packagedActors && packagedInventory
-            ? loadCombatContent(contentRoot / "vanilla-combat.txt", *manifest, *packagedActors,
-                  packagedInventory->catalog)
+            ? loadCombatContent(
+                  contentRoot / "vanilla-combat.txt", *manifest, *packagedActors, packagedInventory->catalog)
             : CombatContentLoadResult{ CombatContentError{} };
         const auto* packagedCombat = std::get_if<CombatContent>(&packagedCombatResult);
         assert(packagedCombat && packagedCombat->world.actors().size() == 1
             && packagedCombat->weapons.find(id<ItemPrototypeId>(579706974062055657ull))
             && packagedCombat->weapons.findArmor(id<ItemPrototypeId>(9071396267722241944ull))
             && packagedCombat->weapons.findArmor(id<ItemPrototypeId>(9071396267722241944ull))->baseArmor == 10.f
-            && packagedCombat->world.actors()[0].creature
-            && packagedCombat->playerTemplate.maximumMagicka == 50.f
+            && packagedCombat->world.actors()[0].creature && packagedCombat->playerTemplate.maximumMagicka == 50.f
             && packagedCombat->playerTemplate.armorSkills[static_cast<std::size_t>(ArmorSkill::LightArmor)] == 5.f
             && std::abs(packagedCombat->playerTemplate.healthRecoveryPerSecond - 0.025f) < 0.000001f
             && std::abs(packagedCombat->playerTemplate.magickaRecoveryPerSecond - 0.0375f) < 0.000001f
-            && std::abs(packagedCombat->playerTemplate.skillRules[static_cast<std::size_t>(
-                CombatProgressionSkill::ShortBlade)].useGain - 0.15f) < 0.000001f);
+            && std::abs(packagedCombat->playerTemplate
+                            .skillRules[static_cast<std::size_t>(CombatProgressionSkill::ShortBlade)]
+                            .useGain
+                   - 0.15f)
+                < 0.000001f);
     }
     {
         TES3MP::ServerApp::Phase7QueueTelemetry telemetry;
@@ -743,22 +741,29 @@ int main()
         assert(static_cast<bool>(stream));
     };
     constexpr std::string_view combatHeader
-        = "TES3MP_COMBAT_V5\n"
+        = "TES3MP_COMBAT_V6\n"
           "manifest 0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20\n"
           "seed 42\n";
     constexpr std::string_view combatBody
-        = "settings 0.2 5 1 0.1 1 1 0.1 0.1 1 1 1.5 1 1.25 0.5 0.02 0.04 0.1 5 -90 90 1 1 1 0 100 1 1 1 30 .01 .01 .25 0 0\n"
+        = "settings 0.2 5 1 0.1 1 1 0.1 0.1 1 1 1.5 1 1.25 0.5 0.02 0.04 0.1 5 -90 90 1 1 1 0 100 1 1 1 30 .01 .01 .25 "
+          "0 0\n"
+          "magic_settings .1 .1\n"
+          "player_magic 40 10 0 0 0 0 0 0 0 0 0\n"
           "progression 1 0.75 0.5 0.8 0 1 0 2 0 3 0 4 0 5 0 6 0 7 0 8 0 9 0 10 0 11\n"
           "player 50 40 40 1 0 0 10 20 30 40 50 25 100 30 35 40 80 0.1 0.2 15 16 17 18 500 0\n"
           "actor 1 20 50 0 0 0 25 0 0 0 0 0 1\n"
           "actor_attack 1 50 40 40 1 25 50 1 4 1 4 1 4 1 30\n"
+          "actor_magic 1 30 5 1 2 3 4 5 6 7 8 9\n"
           "weapon 4 1 1 10 1 10 1 10 5 1 1\n"
-          "armor 5 2 30\n";
+          "armor 5 2 30\n"
+          "enchantment 4 5 2 other fire 3 3 self fatigue 1 1\n"
+          "equipment_magic 5 0 0 10 0 0 0 0 0 5 0 0\n"
+          "disease 1 9 common 1 other health 2 2\n";
     const std::array combatItemDeclarations{
-        ItemPrototypeDeclaration{ id<ItemPrototypeId>(4), ItemCategory::Weapon, 5,
-            1, 100, 0, slotToMask(EquipmentSlot::CarriedRight), false, std::nullopt },
-        ItemPrototypeDeclaration{ id<ItemPrototypeId>(5), ItemCategory::Armor, 5,
-            1, 100, 0, slotToMask(EquipmentSlot::CarriedLeft), false, std::nullopt },
+        ItemPrototypeDeclaration{ id<ItemPrototypeId>(4), ItemCategory::Weapon, 5, 1, 100, 40,
+            slotToMask(EquipmentSlot::CarriedRight), false, std::nullopt },
+        ItemPrototypeDeclaration{ id<ItemPrototypeId>(5), ItemCategory::Armor, 5, 1, 100, 0,
+            slotToMask(EquipmentSlot::CarriedLeft), false, std::nullopt },
     };
     auto combatItems = *ItemPrototypeCatalog::create(parsedConfig().contentManifest, combatItemDeclarations);
     writeCombat(std::string(combatHeader) + std::string(combatBody));
@@ -766,29 +771,26 @@ int main()
     assert(std::holds_alternative<CombatContent>(loadedCombat));
     const auto& combat = std::get<CombatContent>(loadedCombat);
     assert(combat.world.actors().size() == 1 && combat.world.players().empty()
-        && combat.weapons.find(id<ItemPrototypeId>(4))
-        && combat.weapons.findArmor(id<ItemPrototypeId>(5))
+        && combat.weapons.find(id<ItemPrototypeId>(4)) && combat.weapons.findArmor(id<ItemPrototypeId>(5))
         && combat.weapons.findArmor(id<ItemPrototypeId>(5))->skill == ArmorSkill::HeavyArmor
-        && combat.weapons.findArmor(id<ItemPrototypeId>(5))->baseArmor == 30.f
-        && combat.world.actors()[0].creature
-        && combat.world.actors()[0].attackReachQuanta == 128 * 1024
-        && combat.world.actors()[0].maximumHealth == 20.f
-        && combat.world.actors()[0].maximumFatigue == 50.f
-        && combat.world.actors()[0].attacker.endurance == 30.f
-        && combat.playerTemplate.maximumHealth == 40.f
-        && combat.playerTemplate.maximumFatigue == 100.f
-        && combat.playerTemplate.stats.endurance == 30.f
-        && combat.playerTemplate.blockSkill == 35.f
-        && combat.playerTemplate.maximumMagicka == 80.f
-        && combat.playerTemplate.healthRecoveryPerSecond == 0.1f
+        && combat.weapons.findArmor(id<ItemPrototypeId>(5))->baseArmor == 30.f && combat.world.actors()[0].creature
+        && combat.world.actors()[0].attackReachQuanta == 128 * 1024 && combat.world.actors()[0].maximumHealth == 20.f
+        && combat.world.actors()[0].maximumFatigue == 50.f && combat.world.actors()[0].attacker.endurance == 30.f
+        && combat.playerTemplate.maximumHealth == 40.f && combat.playerTemplate.maximumFatigue == 100.f
+        && combat.playerTemplate.stats.endurance == 30.f && combat.playerTemplate.blockSkill == 35.f
+        && combat.playerTemplate.maximumMagicka == 80.f && combat.playerTemplate.healthRecoveryPerSecond == 0.1f
         && combat.playerTemplate.magickaRecoveryPerSecond == 0.2f
         && combat.playerTemplate.armorSkills[static_cast<std::size_t>(ArmorSkill::HeavyArmor)] == 17.f
         && combat.playerTemplate.skillSettings.majorFactor == 0.5f
-        && combat.playerTemplate.skillRules[static_cast<std::size_t>(
-            CombatProgressionSkill::LongBlade)].useGain == 3.f
-        && combat.settings.difficultyMultiplier == 5.f
-        && combat.settings.baseArmorSkill == 30.f
-        && combat.settings.combatArmorMinimumMultiplier == 0.25f
+        && combat.playerTemplate.skillRules[static_cast<std::size_t>(CombatProgressionSkill::LongBlade)].useGain == 3.f
+        && combat.magic.settings().elementalShieldMultiplier == 0.1f
+        && combat.magic.findEnchantment(id<ItemPrototypeId>(4))->chargeCost == 5
+        && combat.magic.findEnchantment(id<ItemPrototypeId>(4))->effects.size() == 2
+        && combat.magic.findEquipment(id<ItemPrototypeId>(5))->defense.fireResistance == 10.f
+        && combat.magic.findActor(id<ActorId>(1))->diseases[0].spellId == id<SpellRecordId>(9)
+        && combat.world.actors()[0].magicDefense.frostShield == 9.f
+        && combat.playerTemplate.magicDefense.willpower == 40.f && combat.settings.difficultyMultiplier == 5.f
+        && combat.settings.baseArmorSkill == 30.f && combat.settings.combatArmorMinimumMultiplier == 0.25f
         && combat.settings.fatigueReturnMultiplier == 0.04f
         && combat.playerTemplate.weaponSkills[static_cast<std::size_t>(MeleeWeaponSkill::LongBlade)] == 20.f);
     writeCombat(std::string(combatHeader)
@@ -811,6 +813,8 @@ int main()
         == CombatContentErrorCode::InvalidSettings);
     writeCombat(std::string(combatHeader)
         + "settings 0.2 5 1 0.1 1 1 0.1 0.1 1 1 1.5 1 1.25 0.5 0.02 0.04 0.1 5 -90 90 1 1 1 0 100 1 1 1 30 .01 .01 .25 0 0\n"
+          "magic_settings .1 .1\n"
+          "player_magic 40 10 0 0 0 0 0 0 0 0 0\n"
           "progression 1 0.75 0.5 0.8 0 1 0 2 0 3 0 4 0 5 0 6 0 7 0 8 0 9 0 10 0 11\n"
           "player 50 40 40 1 0 0 10 20 30 40 50 25 100 30 35 40 80 0.1 0.2 15 16 17 18 500 0\n");
     assert(std::get<CombatContentError>(
@@ -818,7 +822,7 @@ int main()
                .code
         == CombatContentErrorCode::InvalidActorSet);
     writeCombat(
-        "TES3MP_COMBAT_V5\n"
+        "TES3MP_COMBAT_V6\n"
         "manifest 0202030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20\n"
         "seed 42\n"
         + std::string(combatBody));
@@ -1013,8 +1017,7 @@ int main()
         assert(joins.liveBindings() == 2 && joins.state().players().size() == 2);
     }
     {
-        const auto identityPath
-            = std::filesystem::temp_directory_path() / "tes3mp-server-profile-registration-test";
+        const auto identityPath = std::filesystem::temp_directory_path() / "tes3mp-server-profile-registration-test";
         std::filesystem::remove(identityPath);
         auto identityFileResult = PlayerIdentityFile::open(identityPath);
         assert(std::holds_alternative<std::unique_ptr<PlayerIdentityFile>>(identityFileResult));
@@ -1029,10 +1032,10 @@ int main()
         CanonicalCommandReducer reducer(
             std::get<CanonicalServerState>(createCanonicalServerState({}, {})), observability, testContentManifest());
         const auto zero = Turn32::fromValue(0);
-        const Transform spawn(CellId::interior(id<CellSpaceId>(7)), Position3(10, 20, 30),
-            Orientation3(zero, zero, zero));
-        auto joins = *AuthenticatedJoinCoordinator::create(
-            spawn, testContentManifest(), id<SessionId>(1), *registry, reducer);
+        const Transform spawn(
+            CellId::interior(id<CellSpaceId>(7)), Position3(10, 20, 30), Orientation3(zero, zero, zero));
+        auto joins
+            = *AuthenticatedJoinCoordinator::create(spawn, testContentManifest(), id<SessionId>(1), *registry, reducer);
         FakeAuthentication authentication;
         FakeJoinQueue responses;
         AuthenticatedJoinComposition composition(joins, authentication, responses);
@@ -2066,15 +2069,14 @@ int main()
         RecordingCrypto crypto;
         const auto contentRoot = std::filesystem::path(TES3MP_SOURCE_ROOT) / "files/data/tes3mp";
         std::ifstream packagedConfigStream(contentRoot / "server.cfg", std::ios::binary);
-        const std::string packagedConfigText{
-            std::istreambuf_iterator<char>(packagedConfigStream), std::istreambuf_iterator<char>() };
+        const std::string packagedConfigText{ std::istreambuf_iterator<char>(packagedConfigStream),
+            std::istreambuf_iterator<char>() };
         auto packagedConfigResult = parseServerConfig(packagedConfigText);
         assert(std::holds_alternative<ServerConfig>(packagedConfigResult));
         auto packagedConfig = std::get<ServerConfig>(std::move(packagedConfigResult));
         auto packagedCollisionResult
             = ContentCollisionProvider::load(contentRoot / "vanilla-collision.txt", packagedConfig.contentManifest);
-        auto* packagedCollisionValue
-            = std::get_if<std::unique_ptr<ContentCollisionProvider>>(&packagedCollisionResult);
+        auto* packagedCollisionValue = std::get_if<std::unique_ptr<ContentCollisionProvider>>(&packagedCollisionResult);
         assert(packagedCollisionValue && *packagedCollisionValue);
         auto packagedCollision = std::move(*packagedCollisionValue);
         auto packagedActorResult = loadActorContent(contentRoot / "vanilla-actors.txt", packagedConfig.contentManifest);
@@ -2101,19 +2103,19 @@ int main()
         auto contactHistory = MeleeContactHistory::create(meleePolicy, *packagedCollision);
         assert(queues && contactHistory);
 
-        ConnectionSessionCoordinator sessions(clock, observability, timeouts, combatOffer(), authentication,
-            *queues, 1, &combatActors, nullptr, &inventory, &combatWorld, &playerTemplate, &packagedInventory->catalog);
+        ConnectionSessionCoordinator sessions(clock, observability, timeouts, combatOffer(), authentication, *queues, 1,
+            &combatActors, nullptr, &inventory, &combatWorld, &playerTemplate, &packagedInventory->catalog);
         auto emptyState = std::get<CanonicalServerState>(createCanonicalServerState({}, {}));
         CanonicalCommandReducer reducer(std::move(emptyState), observability);
         const auto zero = Turn32::fromValue(0);
-        const auto spawn = Transform(packagedConfig.spawnCell, packagedConfig.spawnPositions[0],
-            Orientation3(zero, zero, zero));
+        const auto spawn
+            = Transform(packagedConfig.spawnCell, packagedConfig.spawnPositions[0], Orientation3(zero, zero, zero));
         auto joins = *AuthenticatedJoinCoordinator::create(spawn, id<AppearanceId>(100),
             AuthenticatedJoinIdentitySeed{ id<SessionId>(1), id<PlayerId>(1), id<EntityId>(1) }, reducer);
         ServerCommandIntakeCoordinator intake(
             clock, observability, clock.now(), ServerTick::initial(), IngressOrdinal::initial());
-        auto lifecycle = ServerLifecycleCoordinator::create(
-            packagedConfig.disconnectGraceMilliseconds * 1'000'000, reducer);
+        auto lifecycle
+            = ServerLifecycleCoordinator::create(packagedConfig.disconnectGraceMilliseconds * 1'000'000, reducer);
         assert(lifecycle);
         FakeRuntime runtime;
         const auto connection = TransportConnectionId::initial();
@@ -2125,10 +2127,10 @@ int main()
             std::get<std::vector<std::byte>>(
                 encodeProtocolFrame(MessageClass::SessionControl, MessageKind::ClientHello, hello)) });
         ServerApplication application(runtime, packagedConfig,
-            { sessions, joins, crypto, *queues, clock, intake, reducer, *lifecycle,
-                packagedActorCatalog, &combatActors, packagedCollision.get(), nullptr, nullptr,
-                &packagedInventory->catalog, &inventory, &combatWorld, &packagedCombat->weapons, &playerTemplate,
-                &packagedCombat->settings, &meleePolicy, &*contactHistory, &*contactHistory });
+            { sessions, joins, crypto, *queues, clock, intake, reducer, *lifecycle, packagedActorCatalog, &combatActors,
+                packagedCollision.get(), nullptr, nullptr, &packagedInventory->catalog, &inventory, &combatWorld,
+                &packagedCombat->weapons, &playerTemplate, &packagedCombat->settings, &meleePolicy, &*contactHistory,
+                &*contactHistory, &packagedCombat->magic });
         assert(application.start() && application.pump(ServerTick::initial()));
 
         bool negotiatedCombat = false;
@@ -2141,8 +2143,7 @@ int main()
                 const auto serverHello = decodeServerHello(decoded->payload());
                 const auto* accepted = std::get_if<ServerHello>(&serverHello);
                 negotiatedCombat = accepted
-                    && std::ranges::binary_search(
-                        accepted->negotiatedCapabilities(), combatReplicationCapability());
+                    && std::ranges::binary_search(accepted->negotiatedCapabilities(), combatReplicationCapability());
             }
         }
         assert(negotiatedCombat);
@@ -2154,8 +2155,8 @@ int main()
                     encodeAuthenticationRequest(AuthenticationRequest::join(std::move(*material))))) });
         assert(application.pump(ServerTick::initial()));
 
-        const std::array startingItems{ StartingItem{ id<ItemPrototypeId>(579706974062055657ull), 1,
-            static_cast<std::uint8_t>(EquipmentSlot::CarriedRight) } };
+        const std::array startingItems{ StartingItem{
+            id<ItemPrototypeId>(579706974062055657ull), 1, static_cast<std::uint8_t>(EquipmentSlot::CarriedRight) } };
         assert(inventory.initializePlayerFromCharacter(
             id<PlayerId>(1), CharacterProfileRevision::initial(), startingItems, ServerTick::initial()));
         const auto* initializedInventory = inventory.findPlayer(id<PlayerId>(1));
@@ -2234,8 +2235,8 @@ int main()
                 const auto decodedBatch = decodeReliableCombatEventBatch(decoded->payload());
                 if (const auto* value = std::get_if<ReliableCombatEventBatch>(&decodedBatch))
                 {
-                    sawDamageEvent = value->events().size() == 1 && value->events()[0].hit
-                        && value->events()[0].damage > 0.f;
+                    sawDamageEvent
+                        = value->events().size() == 1 && value->events()[0].hit && value->events()[0].damage > 0.f;
                     sawActorRetaliation = value->actorEvents().size() == 1
                         && value->actorEvents()[0].attackerActorId == id<ActorId>(1)
                         && value->actorEvents()[0].targetPlayerId == id<PlayerId>(1);

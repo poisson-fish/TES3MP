@@ -28,6 +28,7 @@ namespace TES3MP
         const OpenMwMeleeSettings* meleeSettings = nullptr;
         const MeleeAuthorityPolicy* meleePolicy = nullptr;
         ServerMeleeContactQuery* meleeContact = nullptr;
+        const DirectMagicCatalog* directMagic = nullptr;
     };
 
     enum class CommandBatchReductionError : std::uint8_t
@@ -266,7 +267,7 @@ namespace TES3MP
             const CanonicalCombatWorld* combat = nullptr, const CanonicalActorWorld* actors = nullptr,
             const MeleeWeaponCatalog* meleeWeapons = nullptr,
             const OpenMwMeleeSettings* meleeSettings = nullptr, const MeleeAuthorityPolicy* meleePolicy = nullptr,
-            ServerMeleeContactQuery* meleeContact = nullptr);
+            ServerMeleeContactQuery* meleeContact = nullptr, const DirectMagicCatalog* directMagic = nullptr);
         PreparedBatch prepareTickState(PreparedBatch prepared, const ServerTickCommandBatch& batch);
         bool commitPrepared(
             PreparedBatch&& prepared, CanonicalInteractiveObjectWorld* objects, CanonicalInventoryWorld* inventory,

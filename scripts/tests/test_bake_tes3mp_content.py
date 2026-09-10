@@ -72,10 +72,12 @@ class ContentBakerTests(unittest.TestCase):
             encoding="utf-8",
         )
         (self.source / "combat.txt").write_text(
-            "TES3MP_COMBAT_V5\n"
+            "TES3MP_COMBAT_V6\n"
             f"manifest {ZERO_MANIFEST}\n"
             "seed 1234\n"
             "settings 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 -90 90 1 1 1 0 100 1 1 1 30 .01 .01 .25 0 0\n"
+            "magic_settings .1 .1\n"
+            "player_magic 50 10 0 0 0 0 0 0 0 0 0\n"
             "progression 1 1 1 1 0 1 0 1 0 1 0 1 0 1 0 1 0 1 0 1 0 1 0 1 0 1\n"
             "player 50 50 50 1 0 0 20 20 20 20 20 25 100 50 20 50 100 0.1 0.2 20 20 20 20 500 0\n"
             "actor 1 20 20 10 0 0 0 0 0 0 0 0 1\n"
@@ -149,7 +151,8 @@ class ContentBakerTests(unittest.TestCase):
             encoding="utf-8",
         )
 
-    def _write_derived_esm(self, extra: bytes = b"") -> None:
+    def _write_derived_esm(self, extra: bytes = b"", item_enchantment: str | None = None,
+                           actor_spells: tuple[str, ...] = ()) -> None:
         attributes = [40, 30, 30, 40, 40, 40, 30, 40]
         skills = [5] * 27
         skills[22], skills[5], skills[4], skills[6], skills[7], skills[26] = 21, 22, 23, 24, 25, 26
@@ -174,6 +177,7 @@ class ContentBakerTests(unittest.TestCase):
             "iShieldWeight": 15., "fLightMaxMod": .6, "fMedMaxMod": .9,
             "fMiscSkillBonus": 1., "fMinorSkillBonus": .75, "fMajorSkillBonus": .5,
             "fSpecialSkillBonus": .8, "fRestMagicMult": .15,
+            "fElementalShieldMult": .1, "fDiseaseXferChance": 10.,
         }
         gmsts = b"".join(record("GMST", subrecord("NAME", name.encode() + b"\0"),
                                   subrecord("FLTV", struct.pack("<f", value)))
@@ -186,11 +190,15 @@ class ContentBakerTests(unittest.TestCase):
         self.esm.write_bytes(record("TES3", subrecord("HEDR", bytes(300)))
                              + named_record("CELL", "Room")
                              + record("CREA", subrecord("NAME", b"rat\0"),
-                                      subrecord("NPDT", creature_data), subrecord("FLAG", struct.pack("<i", 0x48)))
+                                      subrecord("NPDT", creature_data),
+                                      *(subrecord("NPCS", value.encode() + b"\0") for value in actor_spells),
+                                      subrecord("FLAG", struct.pack("<i", 0x48)))
                              + record("NPC_", subrecord("NAME", b"player\0"),
                                       subrecord("NPDT", npc_data), subrecord("FLAG", struct.pack("<i", 8)))
                              + record("WEAP", subrecord("NAME", b"iron dagger\0"),
-                                      subrecord("WPDT", weapon_data))
+                                      subrecord("WPDT", weapon_data),
+                                      *(tuple([subrecord("ENAM", item_enchantment.encode() + b"\0")])
+                                        if item_enchantment else ()))
                              + gmsts + skill_records + extra)
 
     def _write_recipe(self, **changes) -> pathlib.Path:
@@ -346,9 +354,12 @@ class ContentBakerTests(unittest.TestCase):
         self.assertIn("settings 0.200000003 2 0 0.25 0.100000001 0.5 0.100000001 0.100000001 0.5 0.100000001 4 1.5 1.25 0.5 0.0199999996 0.0399999991 0.100000001 5 -60 60 1 1 1.25 10 50 2 3 0.25 30 0.00999999978 0.00999999978 0.25 0 0", combat)
         self.assertIn("progression 1 0.75 0.5 0.800000012 0 1 0 21 0 6 0 5 0 7 0 8 0 27 0 22 0 3 0 4 0 18", combat)
         self.assertIn("player 40 40 40 1.25 0 0 21 22 23 24 25 26 160 40 5 30 0 0.0333333333 0.0375000015 5 5 5 5 2000 0", combat)
+        self.assertIn("magic_settings 0.100000001 10", combat)
+        self.assertIn("player_magic 30 5 0 0 0 0 0 0 0 0 0", combat)
         self.assertIn(f"weapon {self.item_prototype} 0 4 5 4 5 5 5 3 1 1", combat)
         self.assertIn("actor 1 23 60 6.25 0 0 0 0 0 0 0 0 1", combat)
         self.assertIn("actor_attack 1 20 10 10 1.25 30 60 1 2 1 2 1 2 1 10", combat)
+        self.assertIn("actor_magic 1 5 0 0 0 0 0 0 0 0 0 0", combat)
         self.assertIn(f"actor 1 2 {self.actor_prototype} interior 1 0 0 0 0 0 0 idle", actors)
         self.assertIn("solid interior 1 100 100 100 200 200 200", collision)
         self.assertIn(f"tes3mp-content-item-prototype-map={self.item_prototype}=iron dagger", client)
@@ -377,6 +388,28 @@ class ContentBakerTests(unittest.TestCase):
             prototype = baker.stable_record_id(name)
             self.assertIn(f"armor {prototype} {skill} 10", combat)
             self.assertIn(f"prototype {prototype} 2 {round(weight * 10)} 20 100 0 131072 0 none", inventory)
+
+    def test_derived_pack_bakes_on_strike_enchantment_and_actor_disease(self):
+        enchantment = "fire bite"
+        disease = "rat fever"
+        effect = lambda effect_id, effect_range, magnitude: subrecord(
+            "ENAM", struct.pack("<hbbiiiii", effect_id, -1, -1, effect_range, 0, 1, magnitude, magnitude))
+        enchantment_record = record("ENCH", subrecord("NAME", enchantment.encode() + b"\0"),
+                                    subrecord("ENDT", struct.pack("<4i", 1, 5, 40, 0)),
+                                    effect(14, 1, 7))
+        disease_record = record("SPEL", subrecord("NAME", disease.encode() + b"\0"),
+                                subrecord("SPDT", struct.pack("<3i", 3, 0, 0)),
+                                effect(23, 0, 3))
+        self._write_derived_esm(enchantment_record + disease_record, enchantment, (disease,))
+
+        _manifest, path = baker.bake([self.openmw_config], self.server_config, self.client_mappings,
+                                     self.output, self._write_recipe())
+
+        inventory = path.joinpath("vanilla-inventory.txt").read_text()
+        combat = path.joinpath("vanilla-combat.txt").read_text()
+        self.assertIn(f"prototype {self.item_prototype} 11 30 10 400 40 65536 0 none", inventory)
+        self.assertIn(f"enchantment {self.item_prototype} 5 1 other fire 7 7", combat)
+        self.assertIn(f"disease 1 {baker.stable_record_id(disease)} common 1 other health 3 3", combat)
 
     def test_derived_pack_missing_record_preserves_current_pointer(self):
         self._write_derived_esm()
