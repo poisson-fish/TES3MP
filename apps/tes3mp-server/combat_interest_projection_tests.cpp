@@ -32,8 +32,12 @@ namespace
         const auto spatial = std::get<CanonicalActorWorld>(createCanonicalActorWorld(actorStates));
         OpenMwMeleeAttacker attacker;
         attacker.fatigue = 75.f;
+        OpenMwMeleeVictim playerVictim;
+        playerVictim.health = 60.f;
+        playerVictim.fatigue = 75.f;
         const std::array combatPlayers{ CanonicalPlayerCombatState{ id<PlayerId>(1),
-            id<CombatRevision>(5), attacker, {}, 100, std::nullopt } };
+            id<CombatRevision>(5), attacker, {}, 100, std::nullopt, std::nullopt,
+            playerVictim, playerVictim } };
         OpenMwMeleeVictim first;
         first.health = 40.f;
         OpenMwMeleeVictim second;
@@ -48,13 +52,19 @@ namespace
         const AuthoritativeMeleeEvent hiddenEvent{ id<ServerTick>(9), id<PlayerId>(1), id<ActorId>(4),
             id<CombatRevision>(5), id<CombatRevision>(7), OpenMwMeleeResolution{ .damage = 5.f, .hit = true } };
         const std::array events{ visibleEvent, hiddenEvent };
+        const std::array actorEvents{ AuthoritativeActorMeleeEvent{ id<ServerTick>(9), id<ActorId>(3),
+            id<PlayerId>(1), id<CombatRevision>(8), id<CombatRevision>(9),
+            OpenMwMeleeResolution{ .damage = 4.f, .hit = true } } };
         auto snapshot = TES3MP::ServerApp::projectCombatSnapshot(canonical, spatial, combat, id<SessionId>(2),
             id<ServerTick>(9), id<CanonicalRevision>(4));
         auto batch = TES3MP::ServerApp::projectCombatEvents(canonical, spatial, id<SessionId>(2),
-            id<ServerTick>(9), id<CanonicalRevision>(4), events);
-        return snapshot && snapshot->selfPlayerId() == id<PlayerId>(1) && snapshot->selfFatigue() == 75.f
+            id<ServerTick>(9), id<CanonicalRevision>(4), events, actorEvents);
+        return snapshot && snapshot->selfPlayerId() == id<PlayerId>(1) && snapshot->selfHealth() == 60.f
+            && snapshot->selfFatigue() == 75.f && !snapshot->selfDead()
             && snapshot->actors().size() == 1 && snapshot->actors()[0].actorId == id<ActorId>(3)
-            && batch && batch->events().size() == 1 && batch->events()[0].targetActorId == id<ActorId>(3);
+            && batch && batch->events().size() == 1 && batch->events()[0].targetActorId == id<ActorId>(3)
+            && batch->actorEvents().size() == 1
+            && batch->actorEvents()[0].attackerActorId == id<ActorId>(3);
     }
 }
 

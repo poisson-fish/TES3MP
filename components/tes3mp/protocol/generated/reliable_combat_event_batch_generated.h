@@ -23,6 +23,8 @@ struct CombatEventHeaderBuilder;
 
 struct MeleeCombatEvent;
 
+struct ActorMeleeCombatEvent;
+
 struct ReliableCombatEventBatch;
 struct ReliableCombatEventBatchBuilder;
 
@@ -121,6 +123,71 @@ FLATBUFFERS_MANUALLY_ALIGNED_STRUCT(8) MeleeCombatEvent FLATBUFFERS_FINAL_CLASS 
 };
 FLATBUFFERS_STRUCT_END(MeleeCombatEvent, 40);
 
+FLATBUFFERS_MANUALLY_ALIGNED_STRUCT(8) ActorMeleeCombatEvent FLATBUFFERS_FINAL_CLASS {
+ private:
+  uint64_t attacker_actor_id_;
+  uint64_t target_player_id_;
+  uint64_t attacker_combat_revision_;
+  uint64_t target_combat_revision_;
+  float damage_;
+  uint8_t damage_stat_;
+  uint8_t hit_;
+  uint8_t blocked_;
+  uint8_t target_died_;
+
+ public:
+  ActorMeleeCombatEvent()
+      : attacker_actor_id_(0),
+        target_player_id_(0),
+        attacker_combat_revision_(0),
+        target_combat_revision_(0),
+        damage_(0),
+        damage_stat_(0),
+        hit_(0),
+        blocked_(0),
+        target_died_(0) {
+  }
+  ActorMeleeCombatEvent(uint64_t _attacker_actor_id, uint64_t _target_player_id, uint64_t _attacker_combat_revision, uint64_t _target_combat_revision, float _damage, TES3MP::Protocol::Schema::CombatEvent::MeleeDamageStat _damage_stat, bool _hit, bool _blocked, bool _target_died)
+      : attacker_actor_id_(::flatbuffers::EndianScalar(_attacker_actor_id)),
+        target_player_id_(::flatbuffers::EndianScalar(_target_player_id)),
+        attacker_combat_revision_(::flatbuffers::EndianScalar(_attacker_combat_revision)),
+        target_combat_revision_(::flatbuffers::EndianScalar(_target_combat_revision)),
+        damage_(::flatbuffers::EndianScalar(_damage)),
+        damage_stat_(::flatbuffers::EndianScalar(static_cast<uint8_t>(_damage_stat))),
+        hit_(::flatbuffers::EndianScalar(static_cast<uint8_t>(_hit))),
+        blocked_(::flatbuffers::EndianScalar(static_cast<uint8_t>(_blocked))),
+        target_died_(::flatbuffers::EndianScalar(static_cast<uint8_t>(_target_died))) {
+  }
+  uint64_t attacker_actor_id() const {
+    return ::flatbuffers::EndianScalar(attacker_actor_id_);
+  }
+  uint64_t target_player_id() const {
+    return ::flatbuffers::EndianScalar(target_player_id_);
+  }
+  uint64_t attacker_combat_revision() const {
+    return ::flatbuffers::EndianScalar(attacker_combat_revision_);
+  }
+  uint64_t target_combat_revision() const {
+    return ::flatbuffers::EndianScalar(target_combat_revision_);
+  }
+  float damage() const {
+    return ::flatbuffers::EndianScalar(damage_);
+  }
+  TES3MP::Protocol::Schema::CombatEvent::MeleeDamageStat damage_stat() const {
+    return static_cast<TES3MP::Protocol::Schema::CombatEvent::MeleeDamageStat>(::flatbuffers::EndianScalar(damage_stat_));
+  }
+  bool hit() const {
+    return ::flatbuffers::EndianScalar(hit_) != 0;
+  }
+  bool blocked() const {
+    return ::flatbuffers::EndianScalar(blocked_) != 0;
+  }
+  bool target_died() const {
+    return ::flatbuffers::EndianScalar(target_died_) != 0;
+  }
+};
+FLATBUFFERS_STRUCT_END(ActorMeleeCombatEvent, 40);
+
 struct CombatEventHeader FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
   typedef CombatEventHeaderBuilder Builder;
   enum FlatBuffersVTableOffset FLATBUFFERS_VTABLE_UNDERLYING_TYPE {
@@ -197,13 +264,17 @@ struct ReliableCombatEventBatch FLATBUFFERS_FINAL_CLASS : private ::flatbuffers:
   typedef ReliableCombatEventBatchBuilder Builder;
   enum FlatBuffersVTableOffset FLATBUFFERS_VTABLE_UNDERLYING_TYPE {
     VT_HEADER = 4,
-    VT_EVENTS = 6
+    VT_EVENTS = 6,
+    VT_ACTOR_EVENTS = 8
   };
   const TES3MP::Protocol::Schema::CombatEvent::CombatEventHeader *header() const {
     return GetPointer<const TES3MP::Protocol::Schema::CombatEvent::CombatEventHeader *>(VT_HEADER);
   }
   const ::flatbuffers::Vector<const TES3MP::Protocol::Schema::CombatEvent::MeleeCombatEvent *> *events() const {
     return GetPointer<const ::flatbuffers::Vector<const TES3MP::Protocol::Schema::CombatEvent::MeleeCombatEvent *> *>(VT_EVENTS);
+  }
+  const ::flatbuffers::Vector<const TES3MP::Protocol::Schema::CombatEvent::ActorMeleeCombatEvent *> *actor_events() const {
+    return GetPointer<const ::flatbuffers::Vector<const TES3MP::Protocol::Schema::CombatEvent::ActorMeleeCombatEvent *> *>(VT_ACTOR_EVENTS);
   }
   template <bool B = false>
   bool Verify(::flatbuffers::VerifierTemplate<B> &verifier) const {
@@ -212,6 +283,8 @@ struct ReliableCombatEventBatch FLATBUFFERS_FINAL_CLASS : private ::flatbuffers:
            verifier.VerifyTable(header()) &&
            VerifyOffset(verifier, VT_EVENTS) &&
            verifier.VerifyVector(events()) &&
+           VerifyOffset(verifier, VT_ACTOR_EVENTS) &&
+           verifier.VerifyVector(actor_events()) &&
            verifier.EndTable();
   }
 };
@@ -225,6 +298,9 @@ struct ReliableCombatEventBatchBuilder {
   }
   void add_events(::flatbuffers::Offset<::flatbuffers::Vector<const TES3MP::Protocol::Schema::CombatEvent::MeleeCombatEvent *>> events) {
     fbb_.AddOffset(ReliableCombatEventBatch::VT_EVENTS, events);
+  }
+  void add_actor_events(::flatbuffers::Offset<::flatbuffers::Vector<const TES3MP::Protocol::Schema::CombatEvent::ActorMeleeCombatEvent *>> actor_events) {
+    fbb_.AddOffset(ReliableCombatEventBatch::VT_ACTOR_EVENTS, actor_events);
   }
   explicit ReliableCombatEventBatchBuilder(::flatbuffers::FlatBufferBuilder &_fbb)
         : fbb_(_fbb) {
@@ -240,8 +316,10 @@ struct ReliableCombatEventBatchBuilder {
 inline ::flatbuffers::Offset<ReliableCombatEventBatch> CreateReliableCombatEventBatch(
     ::flatbuffers::FlatBufferBuilder &_fbb,
     ::flatbuffers::Offset<TES3MP::Protocol::Schema::CombatEvent::CombatEventHeader> header = 0,
-    ::flatbuffers::Offset<::flatbuffers::Vector<const TES3MP::Protocol::Schema::CombatEvent::MeleeCombatEvent *>> events = 0) {
+    ::flatbuffers::Offset<::flatbuffers::Vector<const TES3MP::Protocol::Schema::CombatEvent::MeleeCombatEvent *>> events = 0,
+    ::flatbuffers::Offset<::flatbuffers::Vector<const TES3MP::Protocol::Schema::CombatEvent::ActorMeleeCombatEvent *>> actor_events = 0) {
   ReliableCombatEventBatchBuilder builder_(_fbb);
+  builder_.add_actor_events(actor_events);
   builder_.add_events(events);
   builder_.add_header(header);
   return builder_.Finish();
@@ -250,12 +328,15 @@ inline ::flatbuffers::Offset<ReliableCombatEventBatch> CreateReliableCombatEvent
 inline ::flatbuffers::Offset<ReliableCombatEventBatch> CreateReliableCombatEventBatchDirect(
     ::flatbuffers::FlatBufferBuilder &_fbb,
     ::flatbuffers::Offset<TES3MP::Protocol::Schema::CombatEvent::CombatEventHeader> header = 0,
-    const std::vector<TES3MP::Protocol::Schema::CombatEvent::MeleeCombatEvent> *events = nullptr) {
+    const std::vector<TES3MP::Protocol::Schema::CombatEvent::MeleeCombatEvent> *events = nullptr,
+    const std::vector<TES3MP::Protocol::Schema::CombatEvent::ActorMeleeCombatEvent> *actor_events = nullptr) {
   auto events__ = events ? _fbb.CreateVectorOfStructs<TES3MP::Protocol::Schema::CombatEvent::MeleeCombatEvent>(*events) : 0;
+  auto actor_events__ = actor_events ? _fbb.CreateVectorOfStructs<TES3MP::Protocol::Schema::CombatEvent::ActorMeleeCombatEvent>(*actor_events) : 0;
   return TES3MP::Protocol::Schema::CombatEvent::CreateReliableCombatEventBatch(
       _fbb,
       header,
-      events__);
+      events__,
+      actor_events__);
 }
 
 inline const TES3MP::Protocol::Schema::CombatEvent::ReliableCombatEventBatch *GetReliableCombatEventBatch(const void *buf) {

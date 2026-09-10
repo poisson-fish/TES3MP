@@ -89,7 +89,9 @@ struct CombatSnapshotHeader FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Tab
     VT_CANONICAL_REVISION = 10,
     VT_SELF_PLAYER_ID = 12,
     VT_SELF_COMBAT_REVISION = 14,
-    VT_SELF_FATIGUE = 16
+    VT_SELF_FATIGUE = 16,
+    VT_SELF_HEALTH = 18,
+    VT_SELF_DEAD = 20
   };
   uint64_t target_session_id() const {
     return GetField<uint64_t>(VT_TARGET_SESSION_ID, 0);
@@ -112,6 +114,12 @@ struct CombatSnapshotHeader FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Tab
   float self_fatigue() const {
     return GetField<float>(VT_SELF_FATIGUE, 0.0f);
   }
+  float self_health() const {
+    return GetField<float>(VT_SELF_HEALTH, 0.0f);
+  }
+  bool self_dead() const {
+    return GetField<uint8_t>(VT_SELF_DEAD, 0) != 0;
+  }
   template <bool B = false>
   bool Verify(::flatbuffers::VerifierTemplate<B> &verifier) const {
     return VerifyTableStart(verifier) &&
@@ -122,6 +130,8 @@ struct CombatSnapshotHeader FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Tab
            VerifyField<uint64_t>(verifier, VT_SELF_PLAYER_ID, 8) &&
            VerifyField<uint64_t>(verifier, VT_SELF_COMBAT_REVISION, 8) &&
            VerifyField<float>(verifier, VT_SELF_FATIGUE, 4) &&
+           VerifyField<float>(verifier, VT_SELF_HEALTH, 4) &&
+           VerifyField<uint8_t>(verifier, VT_SELF_DEAD, 1) &&
            verifier.EndTable();
   }
 };
@@ -151,6 +161,12 @@ struct CombatSnapshotHeaderBuilder {
   void add_self_fatigue(float self_fatigue) {
     fbb_.AddElement<float>(CombatSnapshotHeader::VT_SELF_FATIGUE, self_fatigue, 0.0f);
   }
+  void add_self_health(float self_health) {
+    fbb_.AddElement<float>(CombatSnapshotHeader::VT_SELF_HEALTH, self_health, 0.0f);
+  }
+  void add_self_dead(bool self_dead) {
+    fbb_.AddElement<uint8_t>(CombatSnapshotHeader::VT_SELF_DEAD, static_cast<uint8_t>(self_dead), 0);
+  }
   explicit CombatSnapshotHeaderBuilder(::flatbuffers::FlatBufferBuilder &_fbb)
         : fbb_(_fbb) {
     start_ = fbb_.StartTable();
@@ -170,7 +186,9 @@ inline ::flatbuffers::Offset<CombatSnapshotHeader> CreateCombatSnapshotHeader(
     uint64_t canonical_revision = 0,
     uint64_t self_player_id = 0,
     uint64_t self_combat_revision = 0,
-    float self_fatigue = 0.0f) {
+    float self_fatigue = 0.0f,
+    float self_health = 0.0f,
+    bool self_dead = false) {
   CombatSnapshotHeaderBuilder builder_(_fbb);
   builder_.add_self_combat_revision(self_combat_revision);
   builder_.add_self_player_id(self_player_id);
@@ -178,7 +196,9 @@ inline ::flatbuffers::Offset<CombatSnapshotHeader> CreateCombatSnapshotHeader(
   builder_.add_server_tick(server_tick);
   builder_.add_target_session_generation(target_session_generation);
   builder_.add_target_session_id(target_session_id);
+  builder_.add_self_health(self_health);
   builder_.add_self_fatigue(self_fatigue);
+  builder_.add_self_dead(self_dead);
   return builder_.Finish();
 }
 

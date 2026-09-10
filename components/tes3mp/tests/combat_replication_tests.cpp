@@ -37,16 +37,19 @@ namespace
         auto created = TES3MP::LatestWinsCombatSnapshot::create(value<TES3MP::SessionId>(1),
             TES3MP::SessionGeneration::initial(), value<TES3MP::ServerTick>(5),
             value<TES3MP::CanonicalRevision>(6), value<TES3MP::PlayerId>(7),
-            value<TES3MP::CombatRevision>(8), 90.f, actors);
+            value<TES3MP::CombatRevision>(8), 75.f, 90.f, false, actors);
         const auto snapshot = std::get<TES3MP::LatestWinsCombatSnapshot>(created);
         const auto decodedSnapshot = TES3MP::decodeLatestWinsCombatSnapshot(
             TES3MP::encodeLatestWinsCombatSnapshot(snapshot));
         const std::array events{ TES3MP::MeleeCombatEvent{ value<TES3MP::PlayerId>(7),
             value<TES3MP::ActorId>(2), value<TES3MP::CombatRevision>(8), value<TES3MP::CombatRevision>(3),
             10.f, TES3MP::MeleeDamageStat::Health, true, false, false } };
+        const std::array actorEvents{ TES3MP::ActorMeleeCombatEvent{ value<TES3MP::ActorId>(2),
+            value<TES3MP::PlayerId>(7), value<TES3MP::CombatRevision>(4), value<TES3MP::CombatRevision>(9),
+            4.f, TES3MP::MeleeDamageStat::Health, true, false, false } };
         auto batch = std::get<TES3MP::ReliableCombatEventBatch>(TES3MP::ReliableCombatEventBatch::create(
             value<TES3MP::SessionId>(1), TES3MP::SessionGeneration::initial(), value<TES3MP::ServerTick>(5),
-            value<TES3MP::CanonicalRevision>(6), events));
+            value<TES3MP::CanonicalRevision>(6), events, actorEvents));
         const auto decodedBatch = TES3MP::decodeReliableCombatEventBatch(
             TES3MP::encodeReliableCombatEventBatch(batch));
         return std::get<TES3MP::LatestWinsCombatSnapshot>(decodedSnapshot) == snapshot
@@ -62,11 +65,11 @@ namespace
         const auto invalid = TES3MP::LatestWinsCombatSnapshot::create(value<TES3MP::SessionId>(1),
             TES3MP::SessionGeneration::initial(), TES3MP::ServerTick::initial(),
             TES3MP::CanonicalRevision::initial(), value<TES3MP::PlayerId>(1),
-            TES3MP::CombatRevision::initial(), std::numeric_limits<float>::quiet_NaN(), {});
+            TES3MP::CombatRevision::initial(), 1.f, std::numeric_limits<float>::quiet_NaN(), false, {});
         const auto order = TES3MP::LatestWinsCombatSnapshot::create(value<TES3MP::SessionId>(1),
             TES3MP::SessionGeneration::initial(), TES3MP::ServerTick::initial(),
             TES3MP::CanonicalRevision::initial(), value<TES3MP::PlayerId>(1),
-            TES3MP::CombatRevision::initial(), 1.f, unsorted);
+            TES3MP::CombatRevision::initial(), 1.f, 1.f, false, unsorted);
         return std::holds_alternative<TES3MP::CombatReplicationDecodeError>(invalid)
             && std::holds_alternative<TES3MP::CombatReplicationDecodeError>(order);
     }

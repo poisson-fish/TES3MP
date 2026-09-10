@@ -339,6 +339,21 @@ namespace MWRender
                     setLocomotion(ReplicatedActorLocomotion::Idle);
             }
 
+            bool playAction(ReplicatedActorAction action)
+            {
+                if (mAnimationFallback || mDead)
+                    return false;
+                const std::array<std::string_view, 3> candidates = action == ReplicatedActorAction::Attack
+                    ? std::array<std::string_view, 3>{ "attack1", "weapononehand", "handtohand" }
+                    : std::array<std::string_view, 3>{ "hit1", "hit2", "hit3" };
+                const auto selected = std::ranges::find_if(
+                    candidates, [&](std::string_view group) { return hasAnimation(group); });
+                if (selected == candidates.end())
+                    return false;
+                play(*selected, 2, BlendMask_All, false, 1.f, "start", "stop", 0.f, 0, false);
+                return true;
+            }
+
         private:
             void requireResource(VFS::Path::NormalizedView mesh) const
             {
@@ -639,6 +654,23 @@ namespace MWRender
         }
     }
 
+    ReplicatedActorResult Objects::playReplicatedActorAction(
+        const MWWorld::Ptr& ptr, ReplicatedActorAction action) noexcept
+    {
+        const auto found = mReplicatedActors.find(ptr.mRef);
+        if (found == mReplicatedActors.end() || ptr.getRefData().getBaseNode() == nullptr)
+            return ReplicatedActorResult::LifecycleViolation;
+        try
+        {
+            return static_cast<ReplicatedActorAnimation*>(found->second.get())->playAction(action)
+                ? ReplicatedActorResult::Accepted : ReplicatedActorResult::AnimationFallback;
+        }
+        catch (...)
+        {
+            return ReplicatedActorResult::ResourceLoadFailed;
+        }
+    }
+
     bool Objects::removeReplicatedActor(const MWWorld::Ptr& ptr) noexcept
     {
         const auto found = mReplicatedActors.find(ptr.mRef);
@@ -689,6 +721,11 @@ namespace MWRender
             return mRendering.getObjects().setReplicatedActorDead(mPtr, dead);
         }
 
+        ReplicatedActorResult playAction(ReplicatedActorAction action) noexcept
+        {
+            return mRendering.getObjects().playReplicatedActorAction(mPtr, action);
+        }
+
         ReplicatedActorResult createResult() const noexcept { return mCreateResult; }
         const MWWorld::Ptr& ptr() const noexcept { return mPtr; }
 
@@ -719,6 +756,13 @@ namespace MWRender
         if (!mImpl)
             return ReplicatedActorResult::LifecycleViolation;
         return mImpl->setDead(dead);
+    }
+
+    ReplicatedActorResult ReplicatedActor::playAction(ReplicatedActorAction action) noexcept
+    {
+        if (!mImpl)
+            return ReplicatedActorResult::LifecycleViolation;
+        return mImpl->playAction(action);
     }
 
     const MWWorld::Ptr& ReplicatedActor::ptr() const noexcept

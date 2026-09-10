@@ -77,24 +77,28 @@ namespace TES3MP
     public:
         static std::variant<LatestWinsCombatSnapshot, CombatReplicationDecodeError> create(SessionId session,
             SessionGeneration generation, ServerTick tick, CanonicalRevision canonicalRevision, PlayerId self,
-            CombatRevision selfRevision, float selfFatigue, std::span<const ActorCombatSnapshot> actors);
+            CombatRevision selfRevision, float selfHealth, float selfFatigue, bool selfDead,
+            std::span<const ActorCombatSnapshot> actors);
         SessionId targetSessionId() const noexcept { return mSession; }
         SessionGeneration targetSessionGeneration() const noexcept { return mGeneration; }
         ServerTick serverTick() const noexcept { return mTick; }
         CanonicalRevision canonicalRevision() const noexcept { return mCanonicalRevision; }
         PlayerId selfPlayerId() const noexcept { return mSelf; }
         CombatRevision selfCombatRevision() const noexcept { return mSelfRevision; }
+        float selfHealth() const noexcept { return mSelfHealth; }
         float selfFatigue() const noexcept { return mSelfFatigue; }
+        bool selfDead() const noexcept { return mSelfDead; }
         std::span<const ActorCombatSnapshot> actors() const noexcept { return mActors; }
         friend bool operator==(const LatestWinsCombatSnapshot&, const LatestWinsCombatSnapshot&) noexcept = default;
     private:
         LatestWinsCombatSnapshot(SessionId session, SessionGeneration generation, ServerTick tick,
-            CanonicalRevision canonicalRevision, PlayerId self, CombatRevision selfRevision, float selfFatigue,
-            std::vector<ActorCombatSnapshot> actors) : mSession(session), mGeneration(generation), mTick(tick),
+            CanonicalRevision canonicalRevision, PlayerId self, CombatRevision selfRevision, float selfHealth,
+            float selfFatigue, bool selfDead, std::vector<ActorCombatSnapshot> actors) : mSession(session), mGeneration(generation), mTick(tick),
             mCanonicalRevision(canonicalRevision), mSelf(self), mSelfRevision(selfRevision), mSelfFatigue(selfFatigue),
-            mActors(std::move(actors)) {}
+            mSelfHealth(selfHealth), mSelfDead(selfDead), mActors(std::move(actors)) {}
         SessionId mSession; SessionGeneration mGeneration; ServerTick mTick; CanonicalRevision mCanonicalRevision;
-        PlayerId mSelf; CombatRevision mSelfRevision; float mSelfFatigue; std::vector<ActorCombatSnapshot> mActors;
+        PlayerId mSelf; CombatRevision mSelfRevision; float mSelfFatigue; float mSelfHealth; bool mSelfDead;
+        std::vector<ActorCombatSnapshot> mActors;
     };
 
     struct MeleeCombatEvent
@@ -111,24 +115,43 @@ namespace TES3MP
         friend constexpr bool operator==(MeleeCombatEvent, MeleeCombatEvent) noexcept = default;
     };
 
+    struct ActorMeleeCombatEvent
+    {
+        ActorId attackerActorId;
+        PlayerId targetPlayerId;
+        CombatRevision attackerCombatRevision = CombatRevision::initial();
+        CombatRevision targetCombatRevision = CombatRevision::initial();
+        float damage = 0.f;
+        MeleeDamageStat damagedStat = MeleeDamageStat::Health;
+        bool hit = false;
+        bool blocked = false;
+        bool targetDied = false;
+        friend constexpr bool operator==(ActorMeleeCombatEvent, ActorMeleeCombatEvent) noexcept = default;
+    };
+
     class ReliableCombatEventBatch
     {
     public:
         static std::variant<ReliableCombatEventBatch, CombatReplicationDecodeError> create(SessionId session,
             SessionGeneration generation, ServerTick tick, CanonicalRevision canonicalRevision,
-            std::span<const MeleeCombatEvent> events);
+            std::span<const MeleeCombatEvent> events,
+            std::span<const ActorMeleeCombatEvent> actorEvents = {});
         SessionId targetSessionId() const noexcept { return mSession; }
         SessionGeneration targetSessionGeneration() const noexcept { return mGeneration; }
         ServerTick serverTick() const noexcept { return mTick; }
         CanonicalRevision canonicalRevision() const noexcept { return mCanonicalRevision; }
         std::span<const MeleeCombatEvent> events() const noexcept { return mEvents; }
+        std::span<const ActorMeleeCombatEvent> actorEvents() const noexcept { return mActorEvents; }
         friend bool operator==(const ReliableCombatEventBatch&, const ReliableCombatEventBatch&) noexcept = default;
     private:
         ReliableCombatEventBatch(SessionId session, SessionGeneration generation, ServerTick tick,
-            CanonicalRevision revision, std::vector<MeleeCombatEvent> events) : mSession(session),
-            mGeneration(generation), mTick(tick), mCanonicalRevision(revision), mEvents(std::move(events)) {}
+            CanonicalRevision revision, std::vector<MeleeCombatEvent> events,
+            std::vector<ActorMeleeCombatEvent> actorEvents) : mSession(session),
+            mGeneration(generation), mTick(tick), mCanonicalRevision(revision), mEvents(std::move(events)),
+            mActorEvents(std::move(actorEvents)) {}
         SessionId mSession; SessionGeneration mGeneration; ServerTick mTick; CanonicalRevision mCanonicalRevision;
         std::vector<MeleeCombatEvent> mEvents;
+        std::vector<ActorMeleeCombatEvent> mActorEvents;
     };
 
     std::vector<std::byte> encodeClientMeleeAttackCommand(const ClientMeleeAttackCommand& value);

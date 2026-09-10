@@ -423,7 +423,7 @@ int main()
     using namespace TES3MP::ServerApp;
     {
         const auto manifestId
-            = ContentManifestId::fromHex("e4dd08a20c7506de8e59f0df6474dd476047f7a2504cefcaceee7dcba9b0c676");
+            = ContentManifestId::fromHex("bfbfad7ef8c111d2995a61cbdf01a47b3cbebac3bf95f010215ef798d793bfca");
         const auto spaces = parseCellSpaceDeclarations("interior:1;interior:2;interior:3;exterior:4");
         const auto cells = parseContentCells("interior:1;interior:2;interior:3;exterior:4:-2:-9");
         const auto movement = parseMovementProfile("sneak:4;walk:8;run:16;jump:12");
@@ -732,6 +732,7 @@ int main()
         = "settings 0.2 5 1 0.1 1 1 0.1 0.1 1 1 1.5 1\n"
           "player 50 40 40 1 0 0 10 20 30 40 50 25 100 500 0\n"
           "actor 1 20 50 0 0 0 25 0 0 0 0 0\n"
+          "actor_attack 1 50 40 40 1 25 50 1 4 1 4 1 4 1\n"
           "weapon 4 1 1 10 1 10 1 10 5 1 1\n";
     const std::array combatItemDeclarations{ ItemPrototypeDeclaration{ id<ItemPrototypeId>(4), ItemCategory::Weapon, 5,
         1, 100, 0, slotToMask(EquipmentSlot::CarriedRight), false, std::nullopt } };
@@ -742,6 +743,7 @@ int main()
     const auto& combat = std::get<CombatContent>(loadedCombat);
     assert(combat.world.actors().size() == 1 && combat.world.players().empty()
         && combat.weapons.find(id<ItemPrototypeId>(4))
+        && combat.world.actors()[0].attackReachQuanta == 128 * 1024
         && combat.playerTemplate.weaponSkills[static_cast<std::size_t>(MeleeWeaponSkill::LongBlade)] == 20.f);
     writeCombat(std::string(combatHeader)
         + "settings nan 5 1 0.1 1 1 0.1 0.1 1 1 1.5 1\n"
@@ -2101,6 +2103,7 @@ int main()
         assert(combatWorld.initializePlayerFromCharacter(id<PlayerId>(1), playerTemplate,
             initializedInventory->totalWeight(packagedInventory->catalog), CharacterProfileRevision::initial()));
         const auto initialFatigue = combatWorld.findPlayer(id<PlayerId>(1))->stats.fatigue;
+        const auto initialPlayerHealth = combatWorld.findPlayer(id<PlayerId>(1))->victim.health;
         const auto initialHealth = combatWorld.findActor(id<ActorId>(1))->stats.health;
         const auto initialCondition = initializedInventory->stacks[0].condition;
 
@@ -2139,6 +2142,7 @@ int main()
 
         bool sawCombatSnapshot = false;
         bool sawDamageEvent = false;
+        bool sawActorRetaliation = false;
         bool sawWeaponWear = false;
         for (const auto& bytes : runtime.sent)
         {
@@ -2150,15 +2154,22 @@ int main()
             {
                 const auto snapshot = decodeLatestWinsCombatSnapshot(decoded->payload());
                 if (const auto* value = std::get_if<LatestWinsCombatSnapshot>(&snapshot))
-                    sawCombatSnapshot = value->selfFatigue() == finalCombat->stats.fatigue
+                    sawCombatSnapshot = value->selfHealth() == finalCombat->victim.health
+                        && value->selfHealth() <= initialPlayerHealth && value->selfDead() == finalCombat->victim.dead
+                        && value->selfFatigue() == finalCombat->stats.fatigue
                         && value->actors().size() == 1 && value->actors()[0].health == finalActor->stats.health;
             }
             else if (decoded->messageKind() == MessageKind::ReliableCombatEventBatch)
             {
-                const auto events = decodeReliableCombatEventBatch(decoded->payload());
-                if (const auto* value = std::get_if<ReliableCombatEventBatch>(&events))
+                const auto decodedBatch = decodeReliableCombatEventBatch(decoded->payload());
+                if (const auto* value = std::get_if<ReliableCombatEventBatch>(&decodedBatch))
+                {
                     sawDamageEvent = value->events().size() == 1 && value->events()[0].hit
                         && value->events()[0].damage > 0.f;
+                    sawActorRetaliation = value->actorEvents().size() == 1
+                        && value->actorEvents()[0].attackerActorId == id<ActorId>(1)
+                        && value->actorEvents()[0].targetPlayerId == id<PlayerId>(1);
+                }
             }
             else if (decoded->messageKind() == MessageKind::ReliablePlayerInventoryBaseline)
             {
@@ -2170,6 +2181,7 @@ int main()
         }
         assert(sawCombatSnapshot);
         assert(sawDamageEvent);
+        assert(sawActorRetaliation);
         assert(sawWeaponWear);
     }
 }

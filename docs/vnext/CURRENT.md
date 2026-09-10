@@ -1,7 +1,7 @@
 # TES3MP vNext current implementation
 
 - Updated: 2026-09-09
-- Code snapshot inspected: `vnext` working tree based on `8a954860e0`
+- Code snapshot inspected: `vnext` working tree based on `0641a1792d`
 - OpenMW baseline: `f4bec41444214a7903bebd178389ca22ca13f646`
 
 This is the only status and backlog document. “Implemented” means production
@@ -219,8 +219,10 @@ Primary sources: [`movement_kernel.hpp`](../../components/tes3mp/include/tes3mp/
 - Manifest content creates stable actors with separate actor/prototype/entity
   identities. Actors never receive fake player or session identities.
 - The server simulates idle, ordered waypoint travel, and deterministic looping
-  wander through the existing movement/collision boundary. Exact cells without
-  an active player freeze and retain actor state.
+  wander through the existing movement/collision boundary. An actor struck by a
+  player acquires that player as its canonical aggression target, pursues using
+  the run movement kernel, and stops within its configured melee reach. Exact
+  cells without an active player otherwise freeze and retain actor state.
 - Capability-gated reliable interest baselines and latest-wins actor snapshots
   drive renderer-only desktop/PC-VR presentation. Clients have no actor
   simulation lease or canonical authority.
@@ -290,9 +292,9 @@ and [`desktop_providers.cpp`](../../apps/openmw/tes3mp/desktop_providers.cpp).
   with command finalization.
 - Optional bounded `TES3MP_COMBAT_V1` content supplies manifest-scoped resolver
   settings, a validated default player combat profile, exhaustive actor combat
-  seeds, weapon records, and a deterministic random seed. Startup rejects a
-  missing, malformed, mismatched, or internally inconsistent configured file
-  before exposing any of its state.
+  seeds and attack profiles, weapon records, and a deterministic random seed.
+  Startup rejects a missing, malformed, mismatched, or internally inconsistent
+  configured file before exposing any of its state.
 - Fresh joins establish the validated server baseline. Character completion and
   established reattachment derive strength, agility, luck, fatigue,
   hand-to-hand, weapon skills, and maximum encumbrance from the confirmed
@@ -308,10 +310,16 @@ and [`desktop_providers.cpp`](../../apps/openmw/tes3mp/desktop_providers.cpp).
   contact/reach, and rate abuse before mutation. Existing session generation,
   command sequence/ID, entity binding, authority epoch, and canonical revision
   checks reject stale authority and replay.
-- Private self fatigue/revision and same-cell actor stats replicate through a
-  latest-wins snapshot. Same-cell hit/death facts use a reliable event batch.
-  OpenMW applies confirmed fatigue, actor health/fatigue, native dead state, and
-  deterministic death/resurrection presentation to renderer-only actors.
+- Private self health/dead/fatigue/revision and same-cell actor stats replicate
+  through a latest-wins snapshot. Same-cell player and actor attack outcomes use
+  a reliable event batch. OpenMW applies confirmed player resources and hit
+  recovery, actor health/fatigue/dead state, native death/resurrection, actor
+  attack/hit animations, and canonical inventory condition/breakage.
+- Confirmed player contact assigns actor aggression. In-reach actors resolve one
+  server-owned attack per configured tick interval using their baked stats and
+  natural weapon, update canonical player health/death, and publish the result.
+  Dead players and actors automatically respawn after 30 seconds at their
+  current canonical root with baseline resources and cleared attack state.
 - Production composition retains nine bounded server-tick frames of player and
   actor roots. Contact uses the client-observed historical tick, stock 128-unit
   base distance scaled by canonical weapon reach, exact-cell identity, and the
@@ -367,8 +375,10 @@ and [`test_bake_tes3mp_content.py`](../../scripts/tests/test_bake_tes3mp_content
   collision and wander kernels remain in place for server-simulated actors. Full
   server-side Bullet physics and terrain/mesh collision integration remain a future
   milestone.
-- Actor AI is deliberately limited to idle/travel/wander. There is no navmesh
-  parity, schedules, needs, dynamic spawning/removal, or authority delegation.
+- Actor AI is deliberately limited to idle/travel/wander and reactive pursuit of
+  the player who struck it. There is no proactive detection, target selection,
+  navmesh parity, schedules, needs, dynamic spawning/removal, or authority
+  delegation.
 - Interactive traps publish bounded outcomes but full spell-effect resolution
   does not exist. Lockpicking and probe disarming do not exist.
 - Inventory does not include barter/trade, merchant stock/restocking, disk
@@ -382,11 +392,11 @@ and [`test_bake_tes3mp_content.py`](../../scripts/tests/test_bake_tes3mp_content
   state is not persisted.
 - The current resolver covers direct player-versus-server-actor weapon and
   hand-to-hand hit, fatigue, resistance, critical/knockdown multipliers, weapon
-  wear, damage, and death. Actor attacks, PvP/P2P, blocking decisions, difficulty
-  scaling, skill advancement, AI aggression, hit reactions/sounds, on-strike
-  enchantments, elemental shields, disease, Lua hit callbacks, general magic,
-  canonical resurrection/respawn policy, and client weapon-wear presentation
-  remain unimplemented.
+  wear, damage, death, reactive actor attacks, hit animations, and timed in-place
+  respawn. PvP/P2P, proactive AI aggression, blocking decisions, difficulty
+  scaling, resource recovery, skill advancement, hit sounds, on-strike
+  enchantments, elemental shields, disease, Lua hit callbacks, and general
+  magic remain unimplemented.
 - Established root checkpoints and complete character profiles survive restart;
   canonical dynamic world/object/actor state does not. Chargen is the only
   scripted sequence with explicit server safe points today. Other cutscenes,
@@ -408,11 +418,12 @@ and [`test_bake_tes3mp_content.py`](../../scripts/tests/test_bake_tes3mp_content
 
 ## Work still required
 
-### Next milestone: combat presentation and actor response
+### Next milestone: combat stats, blocking, and recovery
 
-Close weapon-wear presentation, hit reactions, actor aggression/attacks, and
-resurrection/respawn policy against the packaged derived pack. General
-deterministic server scripting remains later work.
+Add authoritative maximum/current stat derivation and recovery, player blocking,
+difficulty scaling, and the remaining direct-combat presentation feedback
+against the packaged derived pack. General magic and deterministic server
+scripting remain later work.
 
 ### Required before the desktop/PC-VR release
 
@@ -449,12 +460,15 @@ The derived-combat-pack working tree passed the following on
 - the bounded Windows product `checks` graph, including relinking the shipping
   client and dedicated server and running the adapter, server-application, and
   historical-melee-contact contracts;
+- the pinned FlatBuffers selection proof, including exact regeneration checks
+  for every production protocol header;
+- the opt-in Windows headless-client build;
 - all 194 repository Python tests and patch-registry verification;
 - deterministic bake and verification against the installed 79,837,557-byte
   `Morrowind.esm` with SHA-256
   `5c3c8c2cbd20e25901b59b3ece33d36b7ef0e3d60ad8d11828bcc61a5ead1647`,
   producing and verifying pack
-  `b5aae9a2d013a40175e1c31b877a150b9f9862778490bb6cfbbfcbc6617fe360`;
+  `bfbfad7ef8c111d2995a61cbdf01a47b3cbebac3bf95f010215ef798d793bfca`;
   and
 - a dedicated-server start/readiness/interrupt-stop smoke using the packaged
   default configuration.

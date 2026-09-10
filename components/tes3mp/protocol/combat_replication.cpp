@@ -7,6 +7,7 @@
 
 #include <flatbuffers/flatbuffers.h>
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstdint>
@@ -84,9 +85,10 @@ namespace TES3MP
 {
     std::variant<LatestWinsCombatSnapshot, CombatReplicationDecodeError> LatestWinsCombatSnapshot::create(
         SessionId session, SessionGeneration generation, ServerTick tick, CanonicalRevision canonicalRevision,
-        PlayerId self, CombatRevision selfRevision, float selfFatigue, std::span<const ActorCombatSnapshot> actors)
+        PlayerId self, CombatRevision selfRevision, float selfHealth, float selfFatigue, bool selfDead,
+        std::span<const ActorCombatSnapshot> actors)
     {
-        if (!std::isfinite(selfFatigue)) return error(Code::InvalidFloat);
+        if (!std::isfinite(selfHealth) || !std::isfinite(selfFatigue)) return error(Code::InvalidFloat);
         if (actors.size() > MaximumCombatSnapshotActors)
             return error(Code::TooManyEntries, actors.size(), MaximumCombatSnapshotActors);
         for (std::size_t i = 0; i < actors.size(); ++i)
@@ -98,23 +100,30 @@ namespace TES3MP
                     actors[i - 1].actorId.value(), i);
         }
         return LatestWinsCombatSnapshot(session, generation, tick, canonicalRevision, self, selfRevision,
-            selfFatigue, std::vector(actors.begin(), actors.end()));
+            selfHealth, selfFatigue, selfDead, std::vector(actors.begin(), actors.end()));
     }
 
     std::variant<ReliableCombatEventBatch, CombatReplicationDecodeError> ReliableCombatEventBatch::create(
         SessionId session, SessionGeneration generation, ServerTick tick, CanonicalRevision revision,
-        std::span<const MeleeCombatEvent> events)
+        std::span<const MeleeCombatEvent> events, std::span<const ActorMeleeCombatEvent> actorEvents)
     {
-        if (events.size() > MaximumCombatEventsPerBatch)
-            return error(Code::TooManyEntries, events.size(), MaximumCombatEventsPerBatch);
+        if (events.size() > MaximumCombatEventsPerBatch || actorEvents.size() > MaximumCombatEventsPerBatch)
+            return error(Code::TooManyEntries, std::max(events.size(), actorEvents.size()), MaximumCombatEventsPerBatch);
         for (std::size_t i = 0; i < events.size(); ++i)
         {
             if (!std::isfinite(events[i].damage)) return error(Code::InvalidFloat, 0, 0, i);
             if (static_cast<std::uint8_t>(events[i].damagedStat) > static_cast<std::uint8_t>(MeleeDamageStat::Fatigue))
                 return error(Code::InvalidDamageStat, static_cast<std::size_t>(events[i].damagedStat), 0, i);
         }
+        for (std::size_t i = 0; i < actorEvents.size(); ++i)
+        {
+            if (!std::isfinite(actorEvents[i].damage)) return error(Code::InvalidFloat, 0, 0, i);
+            if (static_cast<std::uint8_t>(actorEvents[i].damagedStat)
+                > static_cast<std::uint8_t>(MeleeDamageStat::Fatigue))
+                return error(Code::InvalidDamageStat, static_cast<std::size_t>(actorEvents[i].damagedStat), 0, i);
+        }
         return ReliableCombatEventBatch(session, generation, tick, revision,
-            std::vector(events.begin(), events.end()));
+            std::vector(events.begin(), events.end()), std::vector(actorEvents.begin(), actorEvents.end()));
     }
 
     std::vector<std::byte> encodeClientMeleeAttackCommand(const ClientMeleeAttackCommand& input)
@@ -137,7 +146,8 @@ namespace TES3MP
         flatbuffers::FlatBufferBuilder builder;
         const auto header = Snapshot::CreateCombatSnapshotHeader(builder, input.targetSessionId().value(),
             input.targetSessionGeneration().value(), input.serverTick().value(), input.canonicalRevision().value(),
-            input.selfPlayerId().value(), input.selfCombatRevision().value(), input.selfFatigue());
+            input.selfPlayerId().value(), input.selfCombatRevision().value(), input.selfFatigue(), input.selfHealth(),
+            input.selfDead());
         std::vector<Snapshot::ActorCombatSnapshot> actors;
         actors.reserve(input.actors().size());
         for (const auto& actor : input.actors())
@@ -160,8 +170,14 @@ namespace TES3MP
             events.emplace_back(event.attackerPlayerId.value(), event.targetActorId.value(),
                 event.attackerCombatRevision.value(), event.targetCombatRevision.value(), event.damage,
                 static_cast<Event::MeleeDamageStat>(event.damagedStat), event.hit, event.blocked, event.targetDied);
+        std::vector<Event::ActorMeleeCombatEvent> actorEvents;
+        actorEvents.reserve(input.actorEvents().size());
+        for (const auto& event : input.actorEvents())
+            actorEvents.emplace_back(event.attackerActorId.value(), event.targetPlayerId.value(),
+                event.attackerCombatRevision.value(), event.targetCombatRevision.value(), event.damage,
+                static_cast<Event::MeleeDamageStat>(event.damagedStat), event.hit, event.blocked, event.targetDied);
         const auto root = Event::CreateReliableCombatEventBatch(
-            builder, header, builder.CreateVectorOfStructs(events));
+            builder, header, builder.CreateVectorOfStructs(events), builder.CreateVectorOfStructs(actorEvents));
         Event::FinishSizePrefixedReliableCombatEventBatchBuffer(builder, root);
         return take(builder);
     }
@@ -229,7 +245,8 @@ namespace TES3MP
             std::get_if<Error>(&tick), std::get_if<Error>(&canonical), std::get_if<Error>(&self),
             std::get_if<Error>(&selfRevision) };
         for (const auto* failure : failures) if (failure) return *failure;
-        if (!std::isfinite(root->header()->self_fatigue())) return error(Code::InvalidFloat);
+        if (!std::isfinite(root->header()->self_health()) || !std::isfinite(root->header()->self_fatigue()))
+            return error(Code::InvalidFloat);
         const auto* encoded = root->actors();
         const std::size_t count = encoded ? encoded->size() : 0;
         if (count > MaximumCombatSnapshotActors) return error(Code::TooManyEntries, count, MaximumCombatSnapshotActors);
@@ -244,7 +261,8 @@ namespace TES3MP
             actors.push_back({ *value(actor), *value(revision), current.health(), current.fatigue(), current.dead() });
         }
         return LatestWinsCombatSnapshot::create(*value(session), *value(generation), *value(tick), *value(canonical),
-            *value(self), *value(selfRevision), root->header()->self_fatigue(), actors);
+            *value(self), *value(selfRevision), root->header()->self_health(), root->header()->self_fatigue(),
+            root->header()->self_dead(), actors);
     }
 
     std::variant<ReliableCombatEventBatch, CombatReplicationDecodeError> decodeReliableCombatEventBatch(
@@ -286,7 +304,30 @@ namespace TES3MP
                 current.damage(), static_cast<MeleeDamageStat>(current.damage_stat()), current.hit(),
                 current.blocked(), current.target_died() });
         }
+        const auto* encodedActorEvents = root->actor_events();
+        const std::size_t actorCount = encodedActorEvents ? encodedActorEvents->size() : 0;
+        if (actorCount > MaximumCombatEventsPerBatch)
+            return error(Code::TooManyEntries, actorCount, MaximumCombatEventsPerBatch);
+        std::vector<ActorMeleeCombatEvent> actorEvents; actorEvents.reserve(actorCount);
+        for (std::size_t i = 0; i < actorCount; ++i)
+        {
+            const auto current = copyStruct(encodedActorEvents, i);
+            auto attacker = strong<ActorId>(current.attacker_actor_id(), i);
+            auto target = strong<PlayerId>(current.target_player_id(), i);
+            auto attackerRevision = strong<CombatRevision>(current.attacker_combat_revision(), i);
+            auto targetRevision = strong<CombatRevision>(current.target_combat_revision(), i);
+            if (auto* failure = std::get_if<Error>(&attacker)) return *failure;
+            if (auto* failure = std::get_if<Error>(&target)) return *failure;
+            if (auto* failure = std::get_if<Error>(&attackerRevision)) return *failure;
+            if (auto* failure = std::get_if<Error>(&targetRevision)) return *failure;
+            if (current.damage_stat() != Event::MeleeDamageStat::Health
+                && current.damage_stat() != Event::MeleeDamageStat::Fatigue)
+                return error(Code::InvalidDamageStat, static_cast<std::size_t>(current.damage_stat()), 0, i);
+            actorEvents.push_back({ *value(attacker), *value(target), *value(attackerRevision), *value(targetRevision),
+                current.damage(), static_cast<MeleeDamageStat>(current.damage_stat()), current.hit(),
+                current.blocked(), current.target_died() });
+        }
         return ReliableCombatEventBatch::create(
-            *value(session), *value(generation), *value(tick), *value(canonical), events);
+            *value(session), *value(generation), *value(tick), *value(canonical), events, actorEvents);
     }
 }

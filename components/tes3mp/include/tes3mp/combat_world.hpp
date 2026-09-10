@@ -20,6 +20,7 @@ namespace TES3MP
 {
     inline constexpr std::size_t MaximumPlayerCombatants = 256;
     inline constexpr std::size_t MaximumActorCombatants = MaximumActorCatalogEntries;
+    inline constexpr std::size_t MaximumAuthoritativeActorMeleeEventsPerTick = MaximumActorCombatants;
 
     enum class MeleeWeaponSkill : std::uint8_t
     {
@@ -73,6 +74,7 @@ namespace TES3MP
         OpenMwMeleeAttacker stats;
         std::array<float, static_cast<std::size_t>(MeleeWeaponSkill::Count)> weaponSkills{};
         std::uint64_t maximumEncumbranceWeightUnits = 1;
+        OpenMwMeleeVictim victim;
 
         friend constexpr bool operator==(const CanonicalPlayerCombatTemplate&,
             const CanonicalPlayerCombatTemplate&) noexcept = default;
@@ -87,6 +89,9 @@ namespace TES3MP
         std::uint64_t maximumEncumbranceWeightUnits = 1;
         std::optional<ServerTick> lastAttackTick;
         std::optional<CharacterProfileRevision> initializedCharacterProfile = std::nullopt;
+        OpenMwMeleeVictim victim;
+        OpenMwMeleeVictim respawnVictim;
+        std::optional<ServerTick> deathTick;
 
         friend constexpr bool operator==(const CanonicalPlayerCombatState&,
             const CanonicalPlayerCombatState&) noexcept = default;
@@ -97,6 +102,13 @@ namespace TES3MP
         ActorId actorId;
         CombatRevision revision = CombatRevision::initial();
         OpenMwMeleeVictim stats;
+        OpenMwMeleeVictim respawnStats;
+        OpenMwMeleeAttacker attacker;
+        std::optional<OpenMwMeleeWeapon> naturalWeapon;
+        std::uint32_t attackReachQuanta = 0;
+        std::optional<PlayerId> aggressionTarget;
+        std::optional<ServerTick> lastAttackTick;
+        std::optional<ServerTick> deathTick;
 
         friend constexpr bool operator==(const CanonicalActorCombatState&,
             const CanonicalActorCombatState&) noexcept = default;
@@ -236,6 +248,42 @@ namespace TES3MP
         OpenMwMeleeResolution resolution;
     };
 
+    struct AuthoritativeActorMeleeEvent
+    {
+        ServerTick serverTick = ServerTick::initial();
+        ActorId attacker;
+        PlayerId target;
+        CombatRevision attackerRevision = CombatRevision::initial();
+        CombatRevision targetRevision = CombatRevision::initial();
+        OpenMwMeleeResolution resolution;
+    };
+
+    struct CombatSimulationPolicy
+    {
+        std::uint64_t minimumActorAttackIntervalTicks = 63;
+        std::uint64_t respawnDelayTicks = 1875;
+    };
+
+    enum class CombatSimulationErrorCode : std::uint8_t
+    {
+        TickRegression,
+        RevisionExhausted,
+        InvalidWorld,
+        EventLimitExceeded,
+    };
+
+    struct CombatSimulationError
+    {
+        CombatSimulationErrorCode code = CombatSimulationErrorCode::InvalidWorld;
+        std::size_t index = 0;
+    };
+
+    struct CombatSimulationStep
+    {
+        CanonicalCombatWorld combat;
+        std::vector<AuthoritativeActorMeleeEvent> events;
+    };
+
     struct PreparedMeleeAttack
     {
         AuthoritativeMeleeDisposition disposition = AuthoritativeMeleeDisposition::InvalidAttempt;
@@ -249,6 +297,10 @@ namespace TES3MP
         const MeleeWeaponCatalog& weapons, const CanonicalServerState& players,
         const CanonicalActorWorld& actors, const OpenMwMeleeSettings& settings, MeleeAuthorityPolicy policy,
         ServerMeleeContactQuery& contact, ServerTick serverTick, const AuthoritativeMeleeAttack& attack) noexcept;
+    std::variant<CombatSimulationStep, CombatSimulationError> advanceAuthoritativeCombat(
+        const CanonicalCombatWorld& combat, const CanonicalServerState& players,
+        const CanonicalActorWorld& actors, const OpenMwMeleeSettings& settings,
+        CombatSimulationPolicy policy, ServerTick tick) noexcept;
 }
 
 #endif

@@ -6,6 +6,7 @@
 #include "../mwbase/mechanicsmanager.hpp"
 #include "../mwbase/soundmanager.hpp"
 #include "../mwbase/world.hpp"
+#include "../mwbase/windowmanager.hpp"
 #include "../mwgui/containeritemmodel.hpp"
 #include "../mwgui/inventoryitemmodel.hpp"
 #include "../mwgui/inventorywindow.hpp"
@@ -1114,7 +1115,8 @@ namespace TES3MP::OpenMWAdapter
                 combatSnapshot->selfCombatRevision(), targetRevision, type, attackStrength };
         }
 
-        ProviderResult applyCombat(const LatestWinsCombatSnapshot& snapshot)
+        ProviderResult applyCombat(const LatestWinsCombatSnapshot& snapshot,
+            std::span<const ReliableCombatEventBatch> events)
         {
             if (combatSnapshot && snapshot.serverTick() < combatSnapshot->serverTick())
                 return ProviderResult::Accepted;
@@ -1126,6 +1128,11 @@ namespace TES3MP::OpenMWAdapter
                 return ProviderResult::PresentationFailed;
             auto player = world->getPlayerPtr();
             auto& playerStats = player.getClass().getCreatureStats(player);
+            if (!snapshot.selfDead() && playerStats.isDead())
+                MWBase::Environment::get().getMechanicsManager()->resurrect(player);
+            auto playerHealth = playerStats.getHealth();
+            playerHealth.setCurrent(snapshot.selfHealth());
+            playerStats.setHealth(playerHealth);
             auto fatigue = playerStats.getFatigue();
             fatigue.setCurrent(snapshot.selfFatigue());
             playerStats.setFatigue(fatigue);
@@ -1150,6 +1157,38 @@ namespace TES3MP::OpenMWAdapter
                 stats.setFatigue(actorFatigue);
                 if (!replicatedActorResultAccepted(remote.actor->setDead(combat->dead)))
                     return ProviderResult::PresentationFailed;
+            }
+            for (const auto& batch : events)
+            {
+                for (const auto& event : batch.events())
+                {
+                    if (!event.hit)
+                        continue;
+                    const auto remote = std::ranges::find_if(actorRemotes, [&](const auto& entry) {
+                        return entry.second.actor && entry.second.lastObserved
+                            && entry.second.lastObserved->actorId() == event.targetActorId;
+                    });
+                    if (remote != actorRemotes.end()
+                        && !replicatedActorResultAccepted(
+                            remote->second.actor->playAction(MWRender::ReplicatedActorAction::Hit)))
+                        return ProviderResult::PresentationFailed;
+                }
+                for (const auto& event : batch.actorEvents())
+                {
+                    const auto remote = std::ranges::find_if(actorRemotes, [&](const auto& entry) {
+                        return entry.second.actor && entry.second.lastObserved
+                            && entry.second.lastObserved->actorId() == event.attackerActorId;
+                    });
+                    if (remote != actorRemotes.end()
+                        && !replicatedActorResultAccepted(
+                            remote->second.actor->playAction(MWRender::ReplicatedActorAction::Attack)))
+                        return ProviderResult::PresentationFailed;
+                    if (event.targetPlayerId == snapshot.selfPlayerId() && event.hit)
+                    {
+                        playerStats.setHitRecovery(true);
+                        MWBase::Environment::get().getWindowManager()->activateHitOverlay();
+                    }
+                }
             }
             combatSnapshot = snapshot;
             return ProviderResult::Accepted;
@@ -1796,11 +1835,10 @@ namespace TES3MP::OpenMWAdapter
     ProviderResult DesktopPresentation::applyCombat(const LatestWinsCombatSnapshot& snapshot,
         std::span<const ReliableCombatEventBatch> events, MonotonicInstant receivedAt) noexcept
     {
-        (void)events;
         (void)receivedAt;
         try
         {
-            const auto result = mImpl->applyCombat(snapshot);
+            const auto result = mImpl->applyCombat(snapshot, events);
             if (result != ProviderResult::Accepted)
                 mImpl->clear();
             return result;

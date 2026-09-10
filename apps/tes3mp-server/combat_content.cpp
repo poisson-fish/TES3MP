@@ -18,6 +18,14 @@ namespace TES3MP::ServerApp
         constexpr std::string_view Header = "TES3MP_COMBAT_V1";
         constexpr std::size_t MaximumFields = 32;
 
+        struct ActorAttackDeclaration
+        {
+            ActorId actorId;
+            OpenMwMeleeAttacker attacker;
+            std::optional<OpenMwMeleeWeapon> weapon;
+            std::uint32_t reachQuanta = 0;
+        };
+
         CombatContentError error(CombatContentErrorCode code, std::size_t line = 0) noexcept
         {
             return { code, line };
@@ -92,6 +100,7 @@ namespace TES3MP::ServerApp
         std::optional<CanonicalPlayerCombatTemplate> playerTemplate;
         std::optional<std::uint64_t> randomSeed;
         std::vector<CanonicalActorCombatState> actorStates;
+        std::vector<ActorAttackDeclaration> actorAttacks;
         std::vector<MeleeWeaponProfile> weaponProfiles;
         std::size_t lineNumber = 0;
         for (std::size_t begin = 0; begin <= text.size();)
@@ -161,8 +170,12 @@ namespace TES3MP::ServerApp
                     attacker.fatigueTerm = parsed[3]; attacker.fortifyAttack = parsed[4]; attacker.blind = parsed[5];
                     attacker.handToHandSkill = parsed[11]; attacker.fatigue = parsed[12];
                     attacker.werewolf = *werewolf; attacker.godMode = false;
+                    OpenMwMeleeVictim victim;
+                    victim.health = attacker.strength;
+                    victim.fatigue = attacker.fatigue;
+                    victim.evasion = (attacker.agility / 5.f + attacker.luck / 10.f) * attacker.fatigueTerm;
                     playerTemplate = CanonicalPlayerCombatTemplate{ attacker,
-                        { parsed[6], parsed[7], parsed[8], parsed[9], parsed[10] }, *maximumWeight };
+                        { parsed[6], parsed[7], parsed[8], parsed[9], parsed[10] }, *maximumWeight, victim };
                 }
                 else if (values[0] == "actor")
                 {
@@ -191,9 +204,40 @@ namespace TES3MP::ServerApp
                     victim.normalWeaponResistance = parsed[5]; victim.normalWeaponWeakness = parsed[6];
                     victim.fatigueNonNegative = victim.fatigue >= 0.f; victim.knockedDown = *knockedDown;
                     victim.paralyzed = *paralyzed; victim.unaware = *unaware; victim.dead = *dead;
-                    actorStates.push_back({ *actor, CombatRevision::initial(), victim });
+                    actorStates.push_back({ *actor, CombatRevision::initial(), victim, victim });
                     if (actorStates.size() > MaximumActorCombatants)
                         return error(CombatContentErrorCode::TooLarge, lineNumber);
+                }
+                else if (values[0] == "actor_attack")
+                {
+                    if (values.size() != 15)
+                        return error(CombatContentErrorCode::Malformed, lineNumber);
+                    const auto rawActor = number<std::uint64_t>(values[1]);
+                    const auto actor = rawActor ? ActorId::fromValue(*rawActor) : std::nullopt;
+                    std::array<float, 13> parsed{};
+                    for (std::size_t index = 0; index < parsed.size(); ++index)
+                    {
+                        const auto value = finiteFloat(values[index + 2]);
+                        if (!value) return error(CombatContentErrorCode::InvalidActorSet, lineNumber);
+                        parsed[index] = *value;
+                    }
+                    if (!actor || parsed[3] <= 0.f || parsed[6] < 0.f || parsed[6] > parsed[7]
+                        || parsed[8] < 0.f || parsed[8] > parsed[9] || parsed[10] < 0.f
+                        || parsed[10] > parsed[11] || parsed[12] <= 0.f || parsed[12] > 8192.f)
+                        return error(CombatContentErrorCode::InvalidActorSet, lineNumber);
+                    OpenMwMeleeAttacker attacker;
+                    attacker.agility = parsed[0]; attacker.luck = parsed[1]; attacker.strength = parsed[2];
+                    attacker.fatigueTerm = parsed[3]; attacker.weaponSkill = parsed[4];
+                    attacker.handToHandSkill = parsed[4]; attacker.fatigue = parsed[5];
+                    std::optional<OpenMwMeleeWeapon> weapon;
+                    if (parsed[6] != 0.f || parsed[7] != 0.f || parsed[8] != 0.f || parsed[9] != 0.f
+                        || parsed[10] != 0.f || parsed[11] != 0.f)
+                        weapon = OpenMwMeleeWeapon{ parsed[6], parsed[7], parsed[8], parsed[9], parsed[10],
+                            parsed[11], 0.f, 1.f, 0, false, false };
+                    const auto reach = static_cast<double>(parsed[12]) * 128.0 * 1024.0;
+                    if (reach < 1.0 || reach > static_cast<double>(1u << 30))
+                        return error(CombatContentErrorCode::InvalidActorSet, lineNumber);
+                    actorAttacks.push_back({ *actor, attacker, weapon, static_cast<std::uint32_t>(std::round(reach)) });
                 }
                 else if (values[0] == "weapon")
                 {
@@ -235,11 +279,23 @@ namespace TES3MP::ServerApp
             || actors.contentManifestId() != manifest.id())
             return error(CombatContentErrorCode::ManifestMismatch);
         std::ranges::sort(actorStates, {}, &CanonicalActorCombatState::actorId);
+        std::ranges::sort(actorAttacks, {}, &ActorAttackDeclaration::actorId);
         if (actorStates.size() != actors.entries().size())
             return error(CombatContentErrorCode::InvalidActorSet);
         for (std::size_t index = 0; index < actorStates.size(); ++index)
             if (actorStates[index].actorId != actors.entries()[index].actorId)
                 return error(CombatContentErrorCode::InvalidActorSet);
+        if (!actorAttacks.empty() && actorAttacks.size() != actorStates.size())
+            return error(CombatContentErrorCode::InvalidActorSet);
+        for (std::size_t index = 0; index < actorAttacks.size(); ++index)
+        {
+            if (actorAttacks[index].actorId != actorStates[index].actorId
+                || (index != 0 && actorAttacks[index - 1].actorId == actorAttacks[index].actorId))
+                return error(CombatContentErrorCode::InvalidActorSet);
+            actorStates[index].attacker = actorAttacks[index].attacker;
+            actorStates[index].naturalWeapon = actorAttacks[index].weapon;
+            actorStates[index].attackReachQuanta = actorAttacks[index].reachQuanta;
+        }
         auto weapons = MeleeWeaponCatalog::create(items, weaponProfiles);
         if (!weapons)
             return error(CombatContentErrorCode::InvalidWeaponCatalog);

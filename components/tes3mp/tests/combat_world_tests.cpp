@@ -26,6 +26,18 @@ namespace
         return std::get<TES3MP::CanonicalServerState>(TES3MP::createCanonicalServerState(players, {}));
     }
 
+    TES3MP::CanonicalServerState activeSpatialPlayers(std::uint64_t cell = 7)
+    {
+        const std::array players{ TES3MP::CanonicalPlayerEntityState(id<TES3MP::PlayerId>(1),
+            id<TES3MP::EntityId>(100), id<TES3MP::AppearanceId>(1), root(0, cell),
+            TES3MP::LinearVelocity3(0, 0, 0), TES3MP::EntityRevision::initial(),
+            TES3MP::AuthorityEpoch::initial(), TES3MP::ServerTick::initial()) };
+        const std::array sessions{ TES3MP::CanonicalSessionProgress(id<TES3MP::SessionId>(1),
+            TES3MP::SessionGeneration::initial(), id<TES3MP::PlayerId>(1), id<TES3MP::EntityId>(100),
+            std::nullopt) };
+        return std::get<TES3MP::CanonicalServerState>(TES3MP::createCanonicalServerState(players, sessions));
+    }
+
     TES3MP::CanonicalActorWorld spatialActors(std::uint64_t cell = 7)
     {
         const std::array actors{ TES3MP::CanonicalActorEntityState(id<TES3MP::ActorId>(2),
@@ -144,6 +156,7 @@ namespace
         return before.findPlayer(id<TES3MP::PlayerId>(1))->stats.fatigue == 100.f
             && player && actor && player->revision.value() == 2 && actor->revision.value() == 2
             && player->stats.fatigue == 95.f && actor->stats.health == 10.f
+            && actor->aggressionTarget == id<TES3MP::PlayerId>(1)
             && prepared.event->resolution.hit && !prepared.event->resolution.victimDied;
     }
 
@@ -362,6 +375,83 @@ namespace
             && actor->revision == TES3MP::CombatRevision::initial()
             && prepared.candidate->randomState() == before.randomState();
     }
+
+    TES3MP::CanonicalCombatWorld retaliatingCombatWorld(float playerHealth)
+    {
+        TES3MP::OpenMwMeleeAttacker playerAttacker;
+        playerAttacker.fatigue = 20.f;
+        TES3MP::OpenMwMeleeVictim playerVictim;
+        playerVictim.health = playerHealth;
+        playerVictim.fatigue = 20.f;
+        const std::array players{ TES3MP::CanonicalPlayerCombatState{ id<TES3MP::PlayerId>(1),
+            TES3MP::CombatRevision::initial(), playerAttacker, {}, 100, std::nullopt, std::nullopt,
+            playerVictim, playerVictim } };
+        TES3MP::OpenMwMeleeVictim actorVictim;
+        actorVictim.health = 20.f;
+        actorVictim.fatigue = 20.f;
+        TES3MP::OpenMwMeleeAttacker actorAttacker;
+        actorAttacker.agility = 100.f;
+        actorAttacker.luck = 100.f;
+        actorAttacker.strength = 50.f;
+        actorAttacker.fatigueTerm = 1.f;
+        actorAttacker.weaponSkill = 100.f;
+        actorAttacker.fatigue = 20.f;
+        const TES3MP::OpenMwMeleeWeapon natural{ 10.f, 10.f, 10.f, 10.f, 10.f, 10.f,
+            0.f, 1.f, 0, false, false };
+        const std::array actors{ TES3MP::CanonicalActorCombatState{ id<TES3MP::ActorId>(2),
+            TES3MP::CombatRevision::initial(), actorVictim, actorVictim, actorAttacker, natural,
+            128 * 1024, id<TES3MP::PlayerId>(1) } };
+        const auto key = *TES3MP::RandomStreamKey::fromValues(3, 4);
+        return std::get<TES3MP::CanonicalCombatWorld>(TES3MP::createCanonicalCombatWorld(players, actors,
+            TES3MP::Xoshiro256StarStar::fromWorldSeed(5, key).snapshot()));
+    }
+
+    bool actor_retaliation_damage_cooldown_and_player_respawn_are_authoritative()
+    {
+        const auto before = retaliatingCombatWorld(5.f);
+        const auto advanced = TES3MP::advanceAuthoritativeCombat(before, activeSpatialPlayers(), spatialActors(),
+            settings(), { 2, 5 }, id<TES3MP::ServerTick>(5));
+        const auto* first = std::get_if<TES3MP::CombatSimulationStep>(&advanced);
+        if (!first || first->events.size() != 1 || !first->events[0].resolution.hit
+            || !first->events[0].resolution.victimDied)
+            return false;
+        const auto* player = first->combat.findPlayer(id<TES3MP::PlayerId>(1));
+        const auto* actor = first->combat.findActor(id<TES3MP::ActorId>(2));
+        if (!player || !actor || !player->victim.dead || player->victim.health != 0.f
+            || player->deathTick != id<TES3MP::ServerTick>(5) || actor->lastAttackTick != id<TES3MP::ServerTick>(5))
+            return false;
+        const auto cooldown = TES3MP::advanceAuthoritativeCombat(first->combat, activeSpatialPlayers(),
+            spatialActors(), settings(), { 2, 5 }, id<TES3MP::ServerTick>(6));
+        const auto* second = std::get_if<TES3MP::CombatSimulationStep>(&cooldown);
+        if (!second || !second->events.empty() || !second->combat.findPlayer(id<TES3MP::PlayerId>(1))->victim.dead)
+            return false;
+        const auto respawn = TES3MP::advanceAuthoritativeCombat(second->combat, activeSpatialPlayers(),
+            spatialActors(), settings(), { 2, 5 }, id<TES3MP::ServerTick>(10));
+        const auto* third = std::get_if<TES3MP::CombatSimulationStep>(&respawn);
+        const auto* respawned = third ? third->combat.findPlayer(id<TES3MP::PlayerId>(1)) : nullptr;
+        return respawned && !respawned->victim.dead && respawned->victim.health == 5.f
+            && !respawned->deathTick && respawned->revision.value() == 3;
+    }
+
+    bool actor_respawn_restores_baseline_and_clears_combat_intent()
+    {
+        const auto before = retaliatingCombatWorld(20.f);
+        std::vector<TES3MP::CanonicalActorCombatState> actors(before.actors().begin(), before.actors().end());
+        actors[0].stats.health = 0.f;
+        actors[0].stats.dead = true;
+        actors[0].deathTick = id<TES3MP::ServerTick>(5);
+        actors[0].lastAttackTick = id<TES3MP::ServerTick>(4);
+        const auto dead = TES3MP::createCanonicalCombatWorld(before.players(), actors, before.randomState());
+        const auto advanced = TES3MP::advanceAuthoritativeCombat(
+            std::get<TES3MP::CanonicalCombatWorld>(dead), activeSpatialPlayers(), spatialActors(),
+            settings(), { 2, 5 }, id<TES3MP::ServerTick>(10));
+        const auto* step = std::get_if<TES3MP::CombatSimulationStep>(&advanced);
+        const auto* actor = step ? step->combat.findActor(id<TES3MP::ActorId>(2)) : nullptr;
+        return actor && !actor->stats.dead && actor->stats.health == 20.f
+            && actor->stats.fatigue == 20.f && actor->attacker.fatigue == 20.f
+            && !actor->aggressionTarget && !actor->lastAttackTick && !actor->deathTick
+            && actor->revision.value() == 2;
+    }
 }
 
 int main()
@@ -376,6 +466,8 @@ int main()
             && contact_history_and_cooldown_are_authoritative()
             && forged_targets_impossible_contact_and_stale_intent_fail_atomically()
             && empty_swing_spends_fatigue_without_contact_or_randomness()
+            && actor_retaliation_damage_cooldown_and_player_respawn_are_authoritative()
+            && actor_respawn_restores_baseline_and_clears_combat_intent()
         ? 0
         : 1;
 }

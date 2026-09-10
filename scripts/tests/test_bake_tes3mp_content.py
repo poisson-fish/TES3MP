@@ -331,6 +331,7 @@ class ContentBakerTests(unittest.TestCase):
         self.assertIn("player 40 40 40 1.25 0 0 21 22 23 24 25 26 160 2000 0", combat)
         self.assertIn(f"weapon {self.item_prototype} 0 4 5 4 5 5 5 3 1 1", combat)
         self.assertIn("actor 1 23 60 6.25 0 0 0 0 0 0 0 0", combat)
+        self.assertIn("actor_attack 1 20 10 10 1.25 30 60 1 2 1 2 1 2 1", combat)
         self.assertIn(f"actor 1 2 {self.actor_prototype} interior 1 0 0 0 0 0 0 idle", actors)
         self.assertIn("solid interior 1 100 100 100 200 200 200", collision)
         self.assertIn(f"tes3mp-content-item-prototype-map={self.item_prototype}=iron dagger", client)

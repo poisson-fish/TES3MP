@@ -806,21 +806,27 @@ def derive_catalogs(recipe: DerivedRecipe, server_entries: Sequence[Assignment],
     if len({identifier for identifier, _values, _record in item_declarations}) != len(item_declarations):
         raise BakeError("derived item identities collide")
 
-    actor_values: list[tuple[DerivedActor, Tes3Record, float, float, float]] = []
+    actor_values: list[tuple[DerivedActor, Tes3Record, float, float, float, tuple[float, ...]]] = []
     for actor in recipe.actors:
         record_value = _winning_record(records, actor.record, {"NPC_", "CREA"}, "actor")
         if any(kind == "NPCS" for kind, _value in record_value.subrecords):
             raise BakeError(f"unsupported actor with initial spell effects: {actor.record}")
         if record_value.kind == "NPC_":
-            _level, attributes, _skills, health, fatigue = _npc_values(record_value, "actor")
+            _level, attributes, actor_skills, health, fatigue = _npc_values(record_value, "actor")
+            combat_skill = float(actor_skills[26])
+            attacks = (0.0,) * 6
         else:
             values = _unpack(record_value, "NPDT", "<24i")
             attributes = tuple(int(value) for value in values[2:10])
             health, fatigue = int(values[10]), int(values[12])
             if health < 1 or fatigue < 0:
                 raise BakeError(f"actor has unsupported creature stats: {actor.record}")
+            combat_skill = float(values[14])
+            attacks = tuple(float(value) for value in values[17:23])
         evasion = (attributes[3] / 5.0 + attributes[7] / 10.0) * fatigue_base
-        actor_values.append((actor, record_value, float(health), float(fatigue), evasion))
+        attack = (float(attributes[3]), float(attributes[7]), float(attributes[0]), fatigue_base,
+                  combat_skill, float(fatigue), *attacks, 1.0)
+        actor_values.append((actor, record_value, float(health), float(fatigue), evasion, attack))
     if len({stable_record_id(actor.record) for actor in recipe.actors}) != len(
             {actor.record.casefold() for actor in recipe.actors}):
         raise BakeError("derived actor prototype identities collide")
@@ -833,7 +839,8 @@ def derive_catalogs(recipe: DerivedRecipe, server_entries: Sequence[Assignment],
             *(str(value) for value in solid.minimum), *(str(value) for value in solid.maximum))))
 
     actor_lines = [CATALOGS["actor_content_file"][0], f"manifest {MANIFEST_PLACEHOLDER}"]
-    for actor, _record, _health, _fatigue, _evasion in sorted(actor_values, key=lambda value: value[0].actor_id):
+    for actor, _record, _health, _fatigue, _evasion, _attack in sorted(
+            actor_values, key=lambda value: value[0].actor_id):
         actor_lines.append(" ".join(("actor", str(actor.actor_id), str(actor.entity_id),
             str(stable_record_id(actor.record)), *_cell_tokens(actor.cell),
             *(str(value) for value in actor.position), *(str(value) for value in actor.orientation), "idle")))
@@ -851,9 +858,11 @@ def derive_catalogs(recipe: DerivedRecipe, server_entries: Sequence[Assignment],
                      *(float(value) for value in weapon_skill_values), float(player_skills[26]), float(player_fatigue))
     combat_lines.append("player " + " ".join((*(_float_text(value) for value in player_fields),
         str(maximum_weight), "0")))
-    for actor, _record, health, fatigue, evasion in sorted(actor_values, key=lambda value: value[0].actor_id):
+    for actor, _record, health, fatigue, evasion, attack in sorted(actor_values, key=lambda value: value[0].actor_id):
         combat_lines.append("actor " + " ".join((str(actor.actor_id), _float_text(health),
             _float_text(fatigue), _float_text(evasion), "0", "0", "0", "0", "0", "0", "0", "0")))
+        combat_lines.append("actor_attack " + " ".join((str(actor.actor_id),
+            *(_float_text(value) for value in attack))))
     for identifier, skill, values, normal in sorted(weapon_profiles):
         combat_lines.append("weapon " + " ".join((str(identifier), str(skill),
             *(_float_text(value) for value in values), "1" if normal else "0")))

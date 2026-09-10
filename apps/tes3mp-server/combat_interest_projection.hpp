@@ -14,7 +14,8 @@ namespace TES3MP::ServerApp
         ServerTick tick, CanonicalRevision canonicalRevision);
     std::optional<ReliableCombatEventBatch> projectCombatEvents(const CanonicalServerState& players,
         const CanonicalActorWorld& spatialActors, SessionId target, ServerTick tick,
-        CanonicalRevision canonicalRevision, std::span<const AuthoritativeMeleeEvent> events);
+        CanonicalRevision canonicalRevision, std::span<const AuthoritativeMeleeEvent> events,
+        std::span<const AuthoritativeActorMeleeEvent> actorEvents = {});
 }
 
 #endif

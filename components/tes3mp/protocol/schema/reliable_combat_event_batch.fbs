@@ -24,9 +24,22 @@ struct MeleeCombatEvent {
   target_died:bool;
 }
 
+struct ActorMeleeCombatEvent {
+  attacker_actor_id:ulong;
+  target_player_id:ulong;
+  attacker_combat_revision:ulong;
+  target_combat_revision:ulong;
+  damage:float;
+  damage_stat:MeleeDamageStat;
+  hit:bool;
+  blocked:bool;
+  target_died:bool;
+}
+
 table ReliableCombatEventBatch {
   header:CombatEventHeader (id: 0);
   events:[MeleeCombatEvent] (id: 1);
+  actor_events:[ActorMeleeCombatEvent] (id: 2);
 }
 
 root_type ReliableCombatEventBatch;

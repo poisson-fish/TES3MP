@@ -1,4 +1,5 @@
 #include <tes3mp/actor_simulation.hpp>
+#include <tes3mp/combat_world.hpp>
 
 #include <array>
 #include <concepts>
@@ -245,6 +246,36 @@ namespace
 
         return true;
     }
+
+    bool aggressive_actor_chases_the_canonical_player()
+    {
+        const auto actorCatalog = catalog(ActorAiPackageKind::Idle, {});
+        const auto before = std::get<CanonicalActorWorld>(createInitialCanonicalActorWorld(actorCatalog));
+        auto spatial = players(true);
+        const auto& originalPlayer = spatial.players()[0];
+        const std::array movedPlayers{ CanonicalPlayerEntityState(originalPlayer.playerId(),
+            originalPlayer.entityId(), originalPlayer.appearanceId(), root(10000), originalPlayer.linearVelocity(),
+            originalPlayer.entityRevision(), originalPlayer.authorityEpoch(), originalPlayer.lastSpatialChangeTick()) };
+        const std::array sessions{ spatial.activeSessions()[0] };
+        spatial = std::get<CanonicalServerState>(createCanonicalServerState(movedPlayers, sessions));
+        OpenMwMeleeVictim playerVictim;
+        playerVictim.health = 20.f;
+        const std::array combatPlayers{ CanonicalPlayerCombatState{ id<PlayerId>(1), CombatRevision::initial(),
+            {}, {}, 1, std::nullopt, std::nullopt, playerVictim, playerVictim } };
+        OpenMwMeleeVictim actorVictim;
+        actorVictim.health = 20.f;
+        const std::array combatActors{ CanonicalActorCombatState{ id<ActorId>(1), CombatRevision::initial(),
+            actorVictim, actorVictim, {}, std::nullopt, 100, id<PlayerId>(1) } };
+        const auto key = *RandomStreamKey::fromValues(1, 1);
+        const auto combat = std::get<CanonicalCombatWorld>(createCanonicalCombatWorld(combatPlayers, combatActors,
+            Xoshiro256StarStar::fromWorldSeed(1, key).snapshot()));
+        RecordingCollision collision;
+        const auto result = advanceActorSimulation(before, actorCatalog, spatial, combat, id<ServerTick>(1),
+            testMovementProfile(), collision);
+        const auto* after = std::get_if<CanonicalActorWorld>(&result);
+        return after && collision.calls == 1 && after->actors()[0].root().position().x() == 4097
+            && after->actors()[0].velocity().x() == 4097;
+    }
 }
 
 int main()
@@ -258,6 +289,7 @@ int main()
             && extreme_opposite_sign_waypoint_uses_bounded_step()
             && stale_tick_revision_exhaustion_and_catalog_mismatch_fail_atomically()
             && actor_simulation_updates_orientation_towards_movement_direction()
+            && aggressive_actor_chases_the_canonical_player()
         ? 0
         : 1;
 }

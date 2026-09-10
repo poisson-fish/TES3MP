@@ -35,6 +35,29 @@ namespace TES3MP
             return value < 0 ? static_cast<std::uint64_t>(-(value + 1)) + 1 : static_cast<std::uint64_t>(value);
         }
 
+        std::optional<std::uint64_t> delta(std::int64_t first, std::int64_t second) noexcept
+        {
+            if ((first < 0) == (second < 0))
+                return first < second ? static_cast<std::uint64_t>(second - first)
+                                      : static_cast<std::uint64_t>(first - second);
+            const auto a = magnitude(first);
+            const auto b = magnitude(second);
+            if (a > std::numeric_limits<std::uint64_t>::max() - b)
+                return std::nullopt;
+            return a + b;
+        }
+
+        bool withinReach(Position3 first, Position3 second, std::uint32_t reach) noexcept
+        {
+            const auto x = delta(first.x(), second.x());
+            const auto y = delta(first.y(), second.y());
+            const auto z = delta(first.z(), second.z());
+            if (!x || !y || !z || *x > reach || *y > reach || *z > reach)
+                return false;
+            const auto squared = static_cast<std::uint64_t>(reach) * reach;
+            return *x * *x + *y * *y + *z * *z <= squared;
+        }
+
         std::int64_t stepToward(std::int64_t from, std::int64_t to, std::uint64_t limit) noexcept
         {
             if (from == to)
@@ -201,6 +224,39 @@ namespace TES3MP
                         return *error;
                     replacements.push_back(std::get<CanonicalActorEntityState>(std::move(replacement)));
                     continue;
+                }
+                if (combatActor->aggressionTarget)
+                {
+                    const auto* target = players.findPlayer(*combatActor->aggressionTarget);
+                    const auto* targetCombat = combat->findPlayer(*combatActor->aggressionTarget);
+                    if (target && targetCombat && !targetCombat->victim.dead
+                        && target->transform().cell() == actor.root().cell())
+                    {
+                        Transform root = actor.root();
+                        LinearVelocity3 velocity(0, 0, 0);
+                        if (!withinReach(root.position(), target->transform().position(),
+                                combatActor->attackReachQuanta))
+                        {
+                            velocity = velocityToward(root.position(), target->transform().position(),
+                                movementProfile.speed(LocomotionMode::Run));
+                            const auto movement = advanceMovementKernel(catalog.contentManifestId(), movementProfile,
+                                LocomotionMode::Run, actor.entityId(), tick, root, velocity, collision);
+                            if (const auto* error = std::get_if<MovementKernelError>(&movement))
+                                return ActorSimulationError{ ActorSimulationErrorCode::MovementRejected, index, *error };
+                            const auto& step = std::get<MovementKernelStep>(movement);
+                            root = step.root;
+                            velocity = step.velocity;
+                            if (velocity.x() != 0 || velocity.y() != 0)
+                                root = Transform(root.cell(), root.position(), Orientation3(root.orientation().x(),
+                                    root.orientation().y(), facingToward(velocity.x(), velocity.y())));
+                        }
+                        auto replacement = replaceActor(actor, tick, root, velocity, ActorActivity::Idle,
+                            actor.waypointIndex(), index);
+                        if (const auto* error = std::get_if<ActorSimulationError>(&replacement))
+                            return *error;
+                        replacements.push_back(std::get<CanonicalActorEntityState>(std::move(replacement)));
+                        continue;
+                    }
                 }
             }
             if (!activeCell(players, actor.root().cell()))

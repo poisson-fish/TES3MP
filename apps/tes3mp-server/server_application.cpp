@@ -23,6 +23,14 @@ namespace TES3MP::ServerApp
                 && std::binary_search(
                     hello->negotiatedCapabilities().begin(), hello->negotiatedCapabilities().end(), vrPoseCapability());
         }
+
+        CombatSimulationPolicy combatSimulationPolicy(std::uint64_t tickMilliseconds) noexcept
+        {
+            const auto ticksFor = [tickMilliseconds](std::uint64_t milliseconds) {
+                return std::max<std::uint64_t>(1, (milliseconds + tickMilliseconds - 1) / tickMilliseconds);
+            };
+            return { ticksFor(1000), ticksFor(30000) };
+        }
     }
 
     ServerApplication::ServerApplication(TransportRuntime& transport, const ServerConfig& config) noexcept
@@ -1009,13 +1017,31 @@ namespace TES3MP::ServerApp
                         inventoryBaselines.emplace_back(*connection, std::move(*baseline));
                     }
             }
+            std::optional<CanonicalCombatWorld> combatCandidate;
+            std::vector<AuthoritativeActorMeleeEvent> authoritativeActorEvents;
+            if (mWiring->combat)
+            {
+                const auto& baseCombat
+                    = prepared.candidateCombat() ? *prepared.candidateCombat() : *mWiring->combat;
+                auto advancedCombat = advanceAuthoritativeCombat(baseCombat, prepared.candidateState(),
+                    *mWiring->actors, *mWiring->meleeSettings,
+                    combatSimulationPolicy(mConfig.tickIntervalMilliseconds), batch.scheduledTick().value());
+                auto* step = std::get_if<CombatSimulationStep>(&advancedCombat);
+                if (!step)
+                {
+                    mFailure = "combat simulation failed";
+                    return false;
+                }
+                combatCandidate.emplace(std::move(step->combat));
+                authoritativeActorEvents = std::move(step->events);
+            }
             std::optional<CanonicalActorWorld> actorCandidate;
             std::vector<std::pair<TransportConnectionId, LatestWinsActorSnapshot>> actorViews;
             if (mWiring->actors)
             {
-                auto advanced = prepared.candidateCombat()
+                auto advanced = combatCandidate
                     ? advanceActorSimulation(*mWiring->actors, *mWiring->actorCatalog, prepared.candidateState(),
-                          *prepared.candidateCombat(), batch.scheduledTick().value(),
+                          *combatCandidate, batch.scheduledTick().value(),
                           mConfig.contentManifest.movementProfile(), *mWiring->actorCollision)
                     : advanceActorSimulation(*mWiring->actors, *mWiring->actorCatalog, prepared.candidateState(),
                           batch.scheduledTick().value(), mConfig.contentManifest.movementProfile(),
@@ -1047,7 +1073,7 @@ namespace TES3MP::ServerApp
             if (mWiring->combat)
             {
                 const auto& projectedCombat
-                    = prepared.candidateCombat() ? *prepared.candidateCombat() : *mWiring->combat;
+                    = combatCandidate ? *combatCandidate : *mWiring->combat;
                 const auto& projectedActors = actorCandidate ? *actorCandidate : *mWiring->actors;
                 for (const auto& target : prepared.candidateState().activeSessions())
                 {
@@ -1058,7 +1084,8 @@ namespace TES3MP::ServerApp
                         target.sessionId(), batch.scheduledTick().value(), prepared.candidateRevision());
                     auto eventBatch
                         = projectCombatEvents(prepared.candidateState(), projectedActors, target.sessionId(),
-                            batch.scheduledTick().value(), prepared.candidateRevision(), prepared.combatEvents());
+                            batch.scheduledTick().value(), prepared.candidateRevision(), prepared.combatEvents(),
+                            authoritativeActorEvents);
                     if (!view || !eventBatch)
                     {
                         mFailure = "combat projection failed";
@@ -1083,6 +1110,8 @@ namespace TES3MP::ServerApp
             }
             if (actorCandidate)
                 *mWiring->actors = std::move(*actorCandidate);
+            if (combatCandidate)
+                *mWiring->combat = std::move(*combatCandidate);
         }
         if (mWiring->meleeContactHistory
             && !mWiring->meleeContactHistory->capture(tick, mWiring->reducer.state(), *mWiring->actors))

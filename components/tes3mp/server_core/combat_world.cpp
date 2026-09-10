@@ -30,11 +30,17 @@ namespace
     bool valid(const TES3MP::CanonicalPlayerCombatState& value) noexcept
     {
         const auto& s = value.stats;
+        const auto validVictim = [](const TES3MP::OpenMwMeleeVictim& victim) {
+            return finite(victim.health) && finite(victim.fatigue) && finite(victim.evasion)
+                && finite(victim.chameleon) && finite(victim.invisibility)
+                && finite(victim.normalWeaponResistance) && finite(victim.normalWeaponWeakness);
+        };
         if (!(finite(s.agility) && finite(s.luck) && finite(s.strength) && finite(s.fatigueTerm)
                 && finite(s.normalizedEncumbrance) && finite(s.fortifyAttack) && finite(s.blind)
                 && finite(s.weaponSkill) && finite(s.handToHandSkill) && finite(s.fatigue))
             || value.maximumEncumbranceWeightUnits == 0
-            || !std::ranges::all_of(value.weaponSkills, [](float skill) { return finite(skill); }))
+            || !std::ranges::all_of(value.weaponSkills, [](float skill) { return finite(skill); })
+            || !validVictim(value.victim) || !validVictim(value.respawnVictim))
             return false;
         return true;
     }
@@ -42,8 +48,50 @@ namespace
     bool valid(const TES3MP::CanonicalActorCombatState& value) noexcept
     {
         const auto& s = value.stats;
-        return finite(s.health) && finite(s.fatigue) && finite(s.evasion) && finite(s.chameleon)
+        const auto& spawn = value.respawnStats;
+        const auto& attacker = value.attacker;
+        const bool victimValid = finite(s.health) && finite(s.fatigue) && finite(s.evasion) && finite(s.chameleon)
             && finite(s.invisibility) && finite(s.normalWeaponResistance) && finite(s.normalWeaponWeakness);
+        const bool spawnValid = finite(spawn.health) && finite(spawn.fatigue) && finite(spawn.evasion)
+            && finite(spawn.chameleon) && finite(spawn.invisibility) && finite(spawn.normalWeaponResistance)
+            && finite(spawn.normalWeaponWeakness);
+        const bool attackerValid = finite(attacker.agility) && finite(attacker.luck) && finite(attacker.strength)
+            && finite(attacker.fatigueTerm) && finite(attacker.normalizedEncumbrance)
+            && finite(attacker.fortifyAttack) && finite(attacker.blind) && finite(attacker.weaponSkill)
+            && finite(attacker.handToHandSkill) && finite(attacker.fatigue);
+        return victimValid && spawnValid && attackerValid
+            && (!value.naturalWeapon || validProfile(TES3MP::MeleeWeaponProfile{
+                *TES3MP::ItemPrototypeId::fromValue(1), TES3MP::MeleeWeaponSkill::ShortBlade,
+                value.naturalWeapon->chopMinimum, value.naturalWeapon->chopMaximum,
+                value.naturalWeapon->slashMinimum, value.naturalWeapon->slashMaximum,
+                value.naturalWeapon->thrustMinimum, value.naturalWeapon->thrustMaximum,
+                value.naturalWeapon->weight, 1.f, value.naturalWeapon->normalWeapon }))
+            && value.attackReachQuanta <= (1u << 30);
+    }
+
+    std::uint64_t distanceSquared(const TES3MP::Position3& lhs, const TES3MP::Position3& rhs,
+        std::uint32_t maximum) noexcept
+    {
+        const auto delta = [](std::int64_t first, std::int64_t second) -> std::optional<std::uint64_t> {
+            if ((first < 0) == (second < 0))
+                return first < second ? static_cast<std::uint64_t>(second - first)
+                                      : static_cast<std::uint64_t>(first - second);
+            const auto magnitude = [](std::int64_t value) {
+                return value < 0 ? static_cast<std::uint64_t>(-(value + 1)) + 1
+                                 : static_cast<std::uint64_t>(value);
+            };
+            const auto a = magnitude(first);
+            const auto b = magnitude(second);
+            if (a > std::numeric_limits<std::uint64_t>::max() - b)
+                return std::nullopt;
+            return a + b;
+        };
+        const auto x = delta(lhs.x(), rhs.x());
+        const auto y = delta(lhs.y(), rhs.y());
+        const auto z = delta(lhs.z(), rhs.z());
+        if (!x || !y || !z || *x > maximum || *y > maximum || *z > maximum)
+            return std::numeric_limits<std::uint64_t>::max();
+        return *x * *x + *y * *y + *z * *z;
     }
 }
 
@@ -66,6 +114,10 @@ namespace TES3MP
         result.stats.handToHandSkill = static_cast<float>(skills[26]);
         result.stats.fatigue = static_cast<float>(attributes[0]) + static_cast<float>(attributes[2])
             + static_cast<float>(attributes[3]) + static_cast<float>(attributes[5]);
+        result.victim.health = (static_cast<float>(attributes[0]) + static_cast<float>(attributes[2])) * 0.5f;
+        result.victim.fatigue = result.stats.fatigue;
+        result.victim.evasion = (result.stats.agility / 5.f + result.stats.luck / 10.f) * result.stats.fatigueTerm;
+        result.victim.dead = false;
         result.weaponSkills[static_cast<std::size_t>(MeleeWeaponSkill::ShortBlade)]
             = static_cast<float>(skills[20]);
         result.weaponSkills[static_cast<std::size_t>(MeleeWeaponSkill::LongBlade)]
@@ -135,7 +187,7 @@ namespace TES3MP
         if (mPlayers.size() >= MaximumPlayerCombatants || source.maximumEncumbranceWeightUnits == 0)
             return false;
         CanonicalPlayerCombatState value{ id, CombatRevision::initial(), source.stats, source.weaponSkills,
-            source.maximumEncumbranceWeightUnits, std::nullopt };
+            source.maximumEncumbranceWeightUnits, std::nullopt, std::nullopt, source.victim, source.victim };
         value.stats.weaponSkill = 0.f;
         value.stats.normalizedEncumbrance
             = normalizedEncumbrance(inventoryWeightUnits, source.maximumEncumbranceWeightUnits);
@@ -170,7 +222,7 @@ namespace TES3MP
         if (!revision || source.maximumEncumbranceWeightUnits == 0)
             return false;
         CanonicalPlayerCombatState value{ id, *revision, source.stats, source.weaponSkills,
-            source.maximumEncumbranceWeightUnits, std::nullopt, profileRevision };
+            source.maximumEncumbranceWeightUnits, std::nullopt, profileRevision, source.victim, source.victim };
         value.stats.weaponSkill = 0.f;
         value.stats.normalizedEncumbrance
             = normalizedEncumbrance(inventoryWeightUnits, source.maximumEncumbranceWeightUnits);
@@ -242,6 +294,11 @@ namespace TES3MP
         if (attackerCombat->revision != attack.expectedAttackerRevision)
         {
             out.disposition = AuthoritativeMeleeDisposition::StaleAttackerRevision;
+            return out;
+        }
+        if (attackerCombat->victim.dead)
+        {
+            out.disposition = AuthoritativeMeleeDisposition::InvalidAttempt;
             return out;
         }
         const auto* targetCombat = attack.target ? combat.findActor(*attack.target) : nullptr;
@@ -384,6 +441,7 @@ namespace TES3MP
             return out;
         }
         mutableAttacker.stats.fatigue = resolution.attackerFatigue;
+        mutableAttacker.victim.fatigue = resolution.attackerFatigue;
         mutableAttacker.lastAttackTick = serverTick;
         mutableAttacker.revision = *attackerRevision;
         if (equippedStackId && equippedWeapon && resolution.weaponCondition != equippedWeapon->condition)
@@ -401,7 +459,11 @@ namespace TES3MP
         {
             mutableTarget->stats.health = resolution.victimHealth;
             mutableTarget->stats.fatigue = resolution.victimFatigue;
+            mutableTarget->attacker.fatigue = resolution.victimFatigue;
             mutableTarget->stats.dead = resolution.victimDied || mutableTarget->stats.dead;
+            mutableTarget->aggressionTarget = attack.attacker;
+            if (mutableTarget->stats.dead && !mutableTarget->deathTick)
+                mutableTarget->deathTick = serverTick;
             mutableTarget->revision = *targetRevision;
         }
         auto created = createCanonicalCombatWorld(playerStates, actorStates, random.snapshot());
@@ -423,5 +485,141 @@ namespace TES3MP
     catch (...)
     {
         return PreparedMeleeAttack{};
+    }
+
+    std::variant<CombatSimulationStep, CombatSimulationError> advanceAuthoritativeCombat(
+        const CanonicalCombatWorld& combat, const CanonicalServerState& players,
+        const CanonicalActorWorld& actors, const OpenMwMeleeSettings& settings,
+        CombatSimulationPolicy policy, ServerTick tick) noexcept
+    try
+    {
+        if (policy.minimumActorAttackIntervalTicks == 0 || policy.respawnDelayTicks == 0)
+            return CombatSimulationError{ CombatSimulationErrorCode::InvalidWorld };
+        std::vector<CanonicalPlayerCombatState> playerStates(combat.players().begin(), combat.players().end());
+        std::vector<CanonicalActorCombatState> actorStates(combat.actors().begin(), combat.actors().end());
+        std::vector<AuthoritativeActorMeleeEvent> events;
+        auto random = Xoshiro256StarStar::restore(combat.randomState());
+
+        const auto activePlayer = [&](PlayerId id) {
+            return std::ranges::any_of(players.activeSessions(), [&](const CanonicalSessionProgress& session) {
+                return session.playerId() == id;
+            });
+        };
+        for (std::size_t index = 0; index < actorStates.size(); ++index)
+        {
+            auto& actor = actorStates[index];
+            const auto* spatialActor = actors.find(actor.actorId);
+            if (!spatialActor)
+                return CombatSimulationError{ CombatSimulationErrorCode::InvalidWorld, index };
+            if (actor.stats.dead)
+            {
+                if (!actor.deathTick)
+                    continue;
+                if (tick < *actor.deathTick)
+                    return CombatSimulationError{ CombatSimulationErrorCode::TickRegression, index };
+                if (actor.respawnStats.health > 0.f
+                    && tick.value() - actor.deathTick->value() >= policy.respawnDelayTicks)
+                {
+                    const auto revision = actor.revision.next();
+                    if (!revision)
+                        return CombatSimulationError{ CombatSimulationErrorCode::RevisionExhausted, index };
+                    actor.stats = actor.respawnStats;
+                    actor.attacker.fatigue = actor.respawnStats.fatigue;
+                    actor.aggressionTarget.reset();
+                    actor.lastAttackTick.reset();
+                    actor.deathTick.reset();
+                    actor.revision = *revision;
+                }
+                continue;
+            }
+            if (!actor.aggressionTarget)
+                continue;
+            auto target = std::ranges::lower_bound(
+                playerStates, *actor.aggressionTarget, {}, &CanonicalPlayerCombatState::playerId);
+            const auto* spatialPlayer = players.findPlayer(*actor.aggressionTarget);
+            const bool validTarget = target != playerStates.end() && target->playerId == *actor.aggressionTarget
+                && spatialPlayer && activePlayer(target->playerId) && !target->victim.dead
+                && spatialPlayer->transform().cell() == spatialActor->root().cell();
+            if (!validTarget)
+            {
+                const auto revision = actor.revision.next();
+                if (!revision)
+                    return CombatSimulationError{ CombatSimulationErrorCode::RevisionExhausted, index };
+                actor.aggressionTarget.reset();
+                actor.revision = *revision;
+                continue;
+            }
+            if (actor.attackReachQuanta == 0
+                || (actor.lastAttackTick && tick >= *actor.lastAttackTick
+                    && tick.value() - actor.lastAttackTick->value() < policy.minimumActorAttackIntervalTicks))
+                continue;
+            if (actor.lastAttackTick && tick < *actor.lastAttackTick)
+                return CombatSimulationError{ CombatSimulationErrorCode::TickRegression, index };
+            const auto rangeSquared = static_cast<std::uint64_t>(actor.attackReachQuanta) * actor.attackReachQuanta;
+            if (distanceSquared(spatialActor->root().position(), spatialPlayer->transform().position(),
+                    actor.attackReachQuanta) > rangeSquared)
+                continue;
+            const auto roll = random.uniformBelow(100);
+            if (!roll)
+                return CombatSimulationError{ CombatSimulationErrorCode::InvalidWorld, index };
+            const auto resolution = resolveOpenMwMelee(settings, actor.attacker, target->victim,
+                OpenMwMeleeAttempt{ .type = MeleeAttackType::Chop, .attackStrength = 1.f,
+                    .hitRoll0To99 = static_cast<std::uint8_t>(*roll), .contact = true,
+                    .weapon = actor.naturalWeapon });
+            if (resolution.code == OpenMwMeleeResolutionCode::InvalidInput)
+                return CombatSimulationError{ CombatSimulationErrorCode::InvalidWorld, index };
+            if (resolution.code == OpenMwMeleeResolutionCode::DeadVictim)
+                continue;
+            const auto actorRevision = actor.revision.next();
+            const auto targetRevision = target->revision.next();
+            if (!actorRevision || !targetRevision)
+                return CombatSimulationError{ CombatSimulationErrorCode::RevisionExhausted, index };
+            actor.attacker.fatigue = resolution.attackerFatigue;
+            actor.stats.fatigue = resolution.attackerFatigue;
+            actor.lastAttackTick = tick;
+            actor.revision = *actorRevision;
+            target->victim.health = resolution.victimHealth;
+            target->victim.fatigue = resolution.victimFatigue;
+            target->victim.dead = resolution.victimDied || target->victim.dead;
+            target->stats.fatigue = resolution.victimFatigue;
+            if (target->victim.dead && !target->deathTick)
+                target->deathTick = tick;
+            target->revision = *targetRevision;
+            events.push_back({ tick, actor.actorId, target->playerId, *actorRevision, *targetRevision, resolution });
+            if (events.size() > MaximumAuthoritativeActorMeleeEventsPerTick)
+                return CombatSimulationError{ CombatSimulationErrorCode::EventLimitExceeded, index };
+        }
+
+        for (std::size_t index = 0; index < playerStates.size(); ++index)
+        {
+            auto& player = playerStates[index];
+            if (!player.victim.dead)
+                continue;
+            if (!player.deathTick)
+                continue;
+            if (tick < *player.deathTick)
+                return CombatSimulationError{ CombatSimulationErrorCode::TickRegression, index };
+            if (player.respawnVictim.health <= 0.f
+                || tick.value() - player.deathTick->value() < policy.respawnDelayTicks)
+                continue;
+            const auto revision = player.revision.next();
+            if (!revision)
+                return CombatSimulationError{ CombatSimulationErrorCode::RevisionExhausted, index };
+            player.victim = player.respawnVictim;
+            player.stats.fatigue = player.respawnVictim.fatigue;
+            player.lastAttackTick.reset();
+            player.deathTick.reset();
+            player.revision = *revision;
+        }
+
+        auto created = createCanonicalCombatWorld(playerStates, actorStates, random.snapshot());
+        auto* candidate = std::get_if<CanonicalCombatWorld>(&created);
+        if (!candidate)
+            return CombatSimulationError{ CombatSimulationErrorCode::InvalidWorld };
+        return CombatSimulationStep{ std::move(*candidate), std::move(events) };
+    }
+    catch (...)
+    {
+        return CombatSimulationError{ CombatSimulationErrorCode::InvalidWorld };
     }
 }

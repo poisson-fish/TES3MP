@@ -47,6 +47,12 @@ namespace MWRender
         Jump,
     };
 
+    enum class ReplicatedActorAction : std::uint8_t
+    {
+        Attack,
+        Hit,
+    };
+
     std::string_view replicatedActorAnimationGroup(ReplicatedActorLocomotion locomotion) noexcept;
 
     enum class ReplicatedActorResult : std::uint8_t
@@ -86,6 +92,7 @@ namespace MWRender
         ReplicatedActorResult update(
             const ESM::Position& position, ReplicatedActorLocomotion locomotion, float animationSeconds) noexcept;
         ReplicatedActorResult setDead(bool dead) noexcept;
+        ReplicatedActorResult playAction(ReplicatedActorAction action) noexcept;
         const MWWorld::Ptr& ptr() const noexcept;
 
         static CreateResult create(RenderingManager& rendering, const MWWorld::ESMStore& store,

@@ -80,6 +80,13 @@ the affected code/tests in the same milestone.
   operator combat template retains resolver modifiers and the weight-unit
   scale; confirmed character attributes and skills override player-specific
   fields.
+- **Reactive actor combat and timed respawn.** A confirmed player strike assigns
+  that player as the actor's server-owned aggression target. The actor pursues
+  and attacks on deterministic tick cadence while both remain active, alive,
+  and in the same cell. Player and actor health/death are canonical; death
+  starts a server-tick timer, and after 30 seconds the combatant respawns at its
+  current canonical root with its configured baseline stats and cleared combat
+  intent. Clients only animate replicated outcomes.
 
 ## Protocol, transport, and security
 

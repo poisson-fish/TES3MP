@@ -35,7 +35,8 @@ namespace TES3MP::ServerApp
                 state->stats.fatigue, state->stats.dead });
         }
         auto created = LatestWinsCombatSnapshot::create(target, session->sessionGeneration(), tick,
-            canonicalRevision, session->playerId(), self->revision, self->stats.fatigue, visible);
+            canonicalRevision, session->playerId(), self->revision, self->victim.health,
+            self->stats.fatigue, self->victim.dead, visible);
         auto* snapshot = std::get_if<LatestWinsCombatSnapshot>(&created);
         return snapshot ? std::optional<LatestWinsCombatSnapshot>(std::move(*snapshot)) : std::nullopt;
     }
@@ -46,7 +47,8 @@ namespace TES3MP::ServerApp
 
     std::optional<ReliableCombatEventBatch> projectCombatEvents(const CanonicalServerState& players,
         const CanonicalActorWorld& spatialActors, SessionId target, ServerTick tick,
-        CanonicalRevision canonicalRevision, std::span<const AuthoritativeMeleeEvent> events)
+        CanonicalRevision canonicalRevision, std::span<const AuthoritativeMeleeEvent> events,
+        std::span<const AuthoritativeActorMeleeEvent> actorEvents)
     try
     {
         const auto* session = players.findActiveSession(target);
@@ -54,6 +56,7 @@ namespace TES3MP::ServerApp
         if (!session || !player)
             return std::nullopt;
         std::vector<MeleeCombatEvent> visible;
+        std::vector<ActorMeleeCombatEvent> visibleActorEvents;
         for (const auto& event : events)
         {
             const auto* actor = spatialActors.find(event.target);
@@ -63,8 +66,17 @@ namespace TES3MP::ServerApp
                 event.resolution.damage, event.resolution.damagedStat, event.resolution.hit,
                 event.resolution.blocked, event.resolution.victimDied });
         }
+        for (const auto& event : actorEvents)
+        {
+            const auto* actor = spatialActors.find(event.attacker);
+            if (!actor || actor->root().cell() != player->transform().cell())
+                continue;
+            visibleActorEvents.push_back({ event.attacker, event.target, event.attackerRevision,
+                event.targetRevision, event.resolution.damage, event.resolution.damagedStat,
+                event.resolution.hit, event.resolution.blocked, event.resolution.victimDied });
+        }
         auto created = ReliableCombatEventBatch::create(target, session->sessionGeneration(), tick,
-            canonicalRevision, visible);
+            canonicalRevision, visible, visibleActorEvents);
         auto* batch = std::get_if<ReliableCombatEventBatch>(&created);
         return batch ? std::optional<ReliableCombatEventBatch>(std::move(*batch)) : std::nullopt;
     }
