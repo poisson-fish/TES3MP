@@ -91,16 +91,17 @@ class ContentBakerTests(unittest.TestCase):
             encoding="utf-8",
         )
         (self.source / "world.txt").write_text(
-            "TES3MP_WORLD_V3\n"
+            "TES3MP_WORLD_V4\n"
             f"manifest {ZERO_MANIFEST}\n"
             "time 16 6 427 32400000 30000\n"
-            "global 1 short 0\n",
+            "global 1 short 0\n"
+            "weather_seed 1234\nweather 1\nweather_region 1 1 9000 300 1\n",
             encoding="utf-8",
         )
         (self.source / "vanilla-script-module.t3sm").write_bytes((
             "TES3MP_SCRIPT_MODULE_V1\n"
             "abi 1\n"
-            "api 5\n"
+            "api 6\n"
             "entry joined\n"
             "callback 0 session_joined\n"
             "increment_integer 1 1\n"
@@ -108,8 +109,8 @@ class ContentBakerTests(unittest.TestCase):
         (self.source / "scripts.txt").write_text(
             "TES3MP_SCRIPT_PACKAGES_V2\n"
             f"manifest {ZERO_MANIFEST}\n"
-            "package 1 1 0 5 1 vanilla-script-module.t3sm "
-            "8f8e49a1b09145a3ca84c70bc21838b85761db293e3afe476db513bad37627ca joined 32\n"
+            "package 1 1 0 6 1 vanilla-script-module.t3sm "
+            "ff389bbabd319cd7e79b6b3ea4136f43fb70afbc04a30755bee9aeb8ebf1f24b joined 32\n"
             "variable 1 1 integer 0\n",
             encoding="utf-8",
         )
@@ -289,7 +290,7 @@ class ContentBakerTests(unittest.TestCase):
     def test_script_package_upgrade_changes_manifest(self):
         first_manifest, _first_path = self._bake()
         scripts = self.source / "scripts.txt"
-        scripts.write_text(scripts.read_text().replace("package 1 1 0 5", "package 1 2 0 5"), encoding="utf-8")
+        scripts.write_text(scripts.read_text().replace("package 1 1 0 6", "package 1 2 0 6"), encoding="utf-8")
 
         second_manifest, second_path = self._bake()
 

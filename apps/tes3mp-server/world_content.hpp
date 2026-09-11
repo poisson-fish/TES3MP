@@ -26,6 +26,8 @@ namespace TES3MP::ServerApp
         GlobalVariableCatalog globals;
         QuestJournalCatalog questJournal;
         FactionDialogueCatalog factionDialogue;
+        WeatherCatalog weather;
+        RandomStateV1 weatherRandomState;
         CanonicalWorldState world;
     };
 

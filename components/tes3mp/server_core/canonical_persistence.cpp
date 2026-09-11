@@ -918,6 +918,41 @@ namespace
                 writeStrong(writer, faction.lastReputationChangeTick);
             }
         }
+        writeBool(writer, world.weatherCatalog().has_value() && world.weather().has_value());
+        if (!world.weatherCatalog() || !world.weather())
+            return;
+        const auto& weatherCatalog = *world.weatherCatalog();
+        const auto& weather = *world.weather();
+        writer.bytes(weatherCatalog.manifest().bytes());
+        writer.fixed(static_cast<std::uint32_t>(weatherCatalog.weather().size()));
+        for (const auto id : weatherCatalog.weather())
+            writeStrong(writer, id);
+        writer.fixed(static_cast<std::uint32_t>(weatherCatalog.regions().size()));
+        for (const auto& region : weatherCatalog.regions())
+        {
+            writeStrong(writer, region.id);
+            writeStrong(writer, region.initialWeather);
+            writer.fixed(region.selectionIntervalTicks);
+            writer.fixed(region.transitionDurationTicks);
+            writer.fixed(static_cast<std::uint32_t>(region.eligibleWeather.size()));
+            for (const auto id : region.eligibleWeather)
+                writeStrong(writer, id);
+        }
+        for (const auto word : weather.randomState.words())
+            writer.fixed(word);
+        writeStrong(writer, weather.lastAdvanceTick);
+        writer.fixed(static_cast<std::uint32_t>(weather.regions.size()));
+        for (const auto region : weather.regions)
+        {
+            writeStrong(writer, region.region);
+            writeStrong(writer, region.currentWeather);
+            writeStrong(writer, region.targetWeather);
+            writeStrong(writer, region.transitionStartTick);
+            writeStrong(writer, region.transitionEndTick);
+            writeStrong(writer, region.nextSelectionTick);
+            writeStrong(writer, region.revision);
+            writeStrong(writer, region.lastChangeTick);
+        }
     }
 
     std::optional<CanonicalWorldState> readWorld(Reader& reader) noexcept
@@ -1173,8 +1208,93 @@ namespace
             }
             playerFactions.push_back(std::move(state));
         }
-        return CanonicalWorldState::create(time, globals, std::move(*catalog), std::move(*factionCatalog), players,
-            playerFactions);
+        bool hasWeather = false;
+        if (!readBool(reader, hasWeather))
+            return std::nullopt;
+        if (!hasWeather)
+            return CanonicalWorldState::create(time, globals, std::move(*catalog), std::move(*factionCatalog),
+                players, playerFactions);
+        const auto weatherManifestBytes = reader.bytes(ContentManifestIdBytes);
+        const auto weatherCount = reader.fixed<std::uint32_t>();
+        if (!weatherManifestBytes || !weatherCount || *weatherCount == 0
+            || *weatherCount > MaximumWeatherIdentities)
+            return std::nullopt;
+        const auto weatherManifest = ContentManifestId::fromBytes(*weatherManifestBytes);
+        if (!weatherManifest)
+            return std::nullopt;
+        std::vector<WeatherId> weatherIds;
+        weatherIds.reserve(*weatherCount);
+        for (std::uint32_t index = 0; index < *weatherCount; ++index)
+        {
+            const auto id = readStrong<WeatherId>(reader);
+            if (!id)
+                return std::nullopt;
+            weatherIds.push_back(*id);
+        }
+        const auto weatherRegionCount = reader.fixed<std::uint32_t>();
+        if (!weatherRegionCount || *weatherRegionCount == 0 || *weatherRegionCount > MaximumWeatherRegions)
+            return std::nullopt;
+        std::vector<WeatherRegionCatalogEntry> weatherRegions;
+        weatherRegions.reserve(*weatherRegionCount);
+        std::size_t totalEligibility = 0;
+        for (std::uint32_t index = 0; index < *weatherRegionCount; ++index)
+        {
+            const auto id = readStrong<WeatherRegionId>(reader);
+            const auto initial = readStrong<WeatherId>(reader);
+            const auto interval = reader.fixed<std::uint64_t>();
+            const auto transition = reader.fixed<std::uint64_t>();
+            const auto eligibleCount = reader.fixed<std::uint32_t>();
+            if (!id || !initial || !interval || !transition || !eligibleCount || *eligibleCount == 0
+                || *eligibleCount > MaximumWeatherEligibilityEntries - totalEligibility)
+                return std::nullopt;
+            totalEligibility += *eligibleCount;
+            WeatherRegionCatalogEntry region{ *id, *initial, *interval, *transition, {} };
+            region.eligibleWeather.reserve(*eligibleCount);
+            for (std::uint32_t weatherIndex = 0; weatherIndex < *eligibleCount; ++weatherIndex)
+            {
+                const auto weather = readStrong<WeatherId>(reader);
+                if (!weather)
+                    return std::nullopt;
+                region.eligibleWeather.push_back(*weather);
+            }
+            weatherRegions.push_back(std::move(region));
+        }
+        auto weatherCatalog = WeatherCatalog::create(*weatherManifest, weatherIds, weatherRegions);
+        std::array<std::uint64_t, 4> randomWords{};
+        for (auto& word : randomWords)
+        {
+            const auto value = reader.fixed<std::uint64_t>();
+            if (!value)
+                return std::nullopt;
+            word = *value;
+        }
+        const auto random = RandomStateV1::fromWords(
+            randomWords[0], randomWords[1], randomWords[2], randomWords[3]);
+        const auto weatherLastAdvance = readStrong<ServerTick>(reader);
+        const auto stateCount = reader.fixed<std::uint32_t>();
+        if (!weatherCatalog || !random || !weatherLastAdvance || !stateCount
+            || *stateCount != *weatherRegionCount)
+            return std::nullopt;
+        CanonicalWeatherState weatherState{ {}, *random, *weatherLastAdvance };
+        weatherState.regions.reserve(*stateCount);
+        for (std::uint32_t index = 0; index < *stateCount; ++index)
+        {
+            const auto region = readStrong<WeatherRegionId>(reader);
+            const auto current = readStrong<WeatherId>(reader);
+            const auto target = readStrong<WeatherId>(reader);
+            const auto transitionStart = readStrong<ServerTick>(reader);
+            const auto transitionEnd = readStrong<ServerTick>(reader);
+            const auto nextSelection = readStrong<ServerTick>(reader);
+            const auto weatherRevision = readStrong<WeatherRevision>(reader);
+            const auto weatherLastChange = readStrong<ServerTick>(reader);
+            if (!region || !current || !target || !transitionStart || !transitionEnd || !nextSelection
+                || !weatherRevision || !weatherLastChange)
+                return std::nullopt;
+            weatherState.regions.push_back({ *region, *current, *target, *transitionStart, *transitionEnd,
+                *nextSelection, *weatherRevision, *weatherLastChange });
+        }
+        return CanonicalWorldState::create(time, globals, std::move(*catalog), std::move(*factionCatalog),
+            std::move(*weatherCatalog), players, playerFactions, std::move(weatherState));
     }
 
     void writeScriptValue(Writer& writer, const ScriptVariableValue& value)
@@ -1530,6 +1650,10 @@ namespace
         for (const auto& player : world->factionStates())
             if (durablePlayer(durablePlayers, player.player))
                 factionPlayers.push_back(player);
+        if (world->weatherCatalog() && world->weather())
+            return CanonicalWorldState::create(world->time(), world->globals(), *world->questJournalCatalog(),
+                *world->factionDialogueCatalog(), *world->weatherCatalog(), players, factionPlayers,
+                *world->weather());
         return CanonicalWorldState::create(world->time(), world->globals(), *world->questJournalCatalog(),
             *world->factionDialogueCatalog(), players, factionPlayers);
     }
@@ -1708,6 +1832,9 @@ namespace TES3MP
             return std::nullopt;
         if (world
             && (world->time().lastAdvanceTick > checkpointTick || world->time().lastChangeTick > checkpointTick
+                || (world->weather()
+                    && (world->weather()->lastAdvanceTick != world->time().lastAdvanceTick
+                        || world->weather()->lastAdvanceTick > checkpointTick))
                 || std::ranges::any_of(world->globals(),
                     [checkpointTick](const auto& global) { return global.lastChangeTick > checkpointTick; })
                 || std::ranges::any_of(world->questJournal(), [&](const auto& player) {

@@ -129,7 +129,7 @@ int main(int argc, char** argv)
     {
         auto loadedModules = TES3MP::ServerApp::loadExecutableScriptModules(
             config.scriptPackageContentFile, *scriptContent, worldContent.globals, worldContent.questJournal,
-            worldContent.factionDialogue, scripts);
+            worldContent.factionDialogue, worldContent.weather, scripts);
         auto* modules = std::get_if<TES3MP::ServerApp::ExecutableScriptModules>(&loadedModules);
         if (!modules)
         {
@@ -352,6 +352,7 @@ int main(int argc, char** argv)
     std::vector<TES3MP::PersistenceSeed> persistenceSeeds;
     if (combatContent)
         persistenceSeeds.push_back({ 1, combatContent->world.randomState().words() });
+    persistenceSeeds.push_back({ 2, worldContent.weatherRandomState.words() });
     auto scriptState = scriptStateCatalog ? TES3MP::CanonicalScriptState::initial(*scriptStateCatalog) : std::nullopt;
     auto persistenceIdentity = scriptStateCatalog
         ? TES3MP::CanonicalPersistenceIdentity::create(
@@ -484,16 +485,19 @@ int main(int argc, char** argv)
     if (const auto* restoredWorld = persistenceFile->restoredWorld())
     {
         if (!restoredWorld->questJournalCatalog() || !restoredWorld->factionDialogueCatalog()
+            || !restoredWorld->weatherCatalog() || !restoredWorld->weather()
             || *restoredWorld->questJournalCatalog() != worldContent.questJournal
-            || *restoredWorld->factionDialogueCatalog() != worldContent.factionDialogue)
+            || *restoredWorld->factionDialogueCatalog() != worldContent.factionDialogue
+            || *restoredWorld->weatherCatalog() != worldContent.weather)
         {
             std::cerr << "persisted quest/journal catalog validation failed\n";
             return 2;
         }
         auto restored = TES3MP::restoreCanonicalWorldState(worldContent.globals, worldContent.questJournal,
-            worldContent.factionDialogue, restoredWorld->time(), restoredWorld->globals(),
+            worldContent.factionDialogue, worldContent.weather, restoredWorld->time(), restoredWorld->globals(),
             *restoredWorld->questJournalCatalog(), *restoredWorld->factionDialogueCatalog(),
-            restoredWorld->questJournal(), restoredWorld->factionStates());
+            *restoredWorld->weatherCatalog(), restoredWorld->questJournal(), restoredWorld->factionStates(),
+            *restoredWorld->weather());
         auto* world = std::get_if<TES3MP::CanonicalWorldState>(&restored);
         if (!world)
         {
@@ -504,7 +508,7 @@ int main(int argc, char** argv)
     }
     else if (persistenceFile->prefix().latest())
     {
-        std::cerr << "persisted time/global/quest/journal/faction domain is missing\n";
+        std::cerr << "persisted time/global/quest/journal/faction/weather domain is missing\n";
         return 2;
     }
     std::vector<TES3MP::PersistedPlayerIdentity> identityRecords(

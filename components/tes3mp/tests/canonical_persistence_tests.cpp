@@ -184,6 +184,18 @@ namespace
             id<DialogueChoiceId>(1), id<FactionId>(1), id<FactionRank>(1), 5 } };
         const auto factionCatalog
             = FactionDialogueCatalog::create(testContentManifestId(), factions, choices).value();
+        const std::array weatherIds{ id<WeatherId>(1), id<WeatherId>(2) };
+        const std::array weatherRegions{ WeatherRegionCatalogEntry{ id<WeatherRegionId>(1), id<WeatherId>(1), 3, 3,
+            { id<WeatherId>(1), id<WeatherId>(2) } } };
+        const auto weatherCatalog
+            = WeatherCatalog::create(testContentManifestId(), weatherIds, weatherRegions).value();
+        const auto random = Xoshiro256StarStar::fromWorldSeed(
+            44, *RandomStreamKey::fromValues(0x5745415448455231ULL, 0));
+        CanonicalWeatherState weather{ {}, random.snapshot(), id<ServerTick>(tick) };
+        weather.regions.push_back({ id<WeatherRegionId>(1), id<WeatherId>(1),
+            tick > 1 ? id<WeatherId>(2) : id<WeatherId>(1), id<ServerTick>(tick),
+            id<ServerTick>(tick > 1 ? tick + 3 : tick), id<ServerTick>(tick > 1 ? tick + 6 : tick + 3),
+            id<WeatherRevision>(tick), id<ServerTick>(tick) });
         std::vector<CanonicalPlayerQuestJournalState> players;
         std::vector<CanonicalPlayerFactionState> playerFactions;
         if (tick > 1)
@@ -196,7 +208,9 @@ namespace
                 { { id<FactionId>(1), id<FactionRank>(1), id<FactionMembershipRevision>(2), id<ServerTick>(2), 5,
                     id<FactionReputationRevision>(2), id<ServerTick>(2) } } });
         }
-        return CanonicalWorldState::create(time, globals, catalog, factionCatalog, players, playerFactions).value();
+        return CanonicalWorldState::create(
+            time, globals, catalog, factionCatalog, weatherCatalog, players, playerFactions, weather)
+            .value();
     }
 
     CanonicalDurablePrefix domainPrefix()
@@ -353,6 +367,17 @@ namespace
             || !restored->latest()->objects() || !restored->latest()->actors() || !restored->latest()->world())
             return false;
         const auto& latest = *restored->latest();
+        auto restartedAtCompletion = advanceCanonicalWeather(*latest.world(), id<ServerTick>(5));
+        auto uninterruptedAtCompletion = advanceCanonicalWeather(world(2, 2), id<ServerTick>(5));
+        auto* restartedWorld = std::get_if<CanonicalWorldState>(&restartedAtCompletion);
+        auto* uninterruptedWorld = std::get_if<CanonicalWorldState>(&uninterruptedAtCompletion);
+        if (!restartedWorld || !uninterruptedWorld || *restartedWorld != *uninterruptedWorld)
+            return false;
+        auto restartedAtSelection = advanceCanonicalWeather(*restartedWorld, id<ServerTick>(8));
+        auto uninterruptedAtSelection = advanceCanonicalWeather(*uninterruptedWorld, id<ServerTick>(8));
+        if (!std::get_if<CanonicalWorldState>(&restartedAtSelection)
+            || restartedAtSelection != uninterruptedAtSelection)
+            return false;
         return latest.inventory()->players.front().stacks.front().count == 2
             && latest.combat()->players.front().victim.health == 75.f
             && latest.combat()->randomWords == combat(75.f, 20, 2).randomWords
@@ -369,6 +394,11 @@ namespace
             && latest.world()->factionDialogueCatalog()->dialogueChoices().size() == 1
             && latest.world()->factionStates().size() == 1
             && latest.world()->factionStates().front().factions.front().reputation == 5
+            && latest.world()->weatherCatalog() && latest.world()->weather()
+            && latest.world()->weatherCatalog()->regions().size() == 1
+            && latest.world()->weather()->regions.front().currentWeather == id<WeatherId>(1)
+            && latest.world()->weather()->regions.front().targetWeather == id<WeatherId>(2)
+            && latest.world()->weather()->regions.front().transitionEndTick == id<ServerTick>(5)
             && latest.combat()->actors.front().aggressionTarget == id<PlayerId>(1)
             && latest.canonicalChecksum()
             == canonicalDurableStateChecksumV1(latest.stateVersion(), latest.checkpointTick(), latest.players(),

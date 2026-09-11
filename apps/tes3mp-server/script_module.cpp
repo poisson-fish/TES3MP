@@ -89,9 +89,22 @@ namespace TES3MP::ServerApp
             std::int32_t reputation;
         };
 
+        struct WeatherIs
+        {
+            WeatherRegionId region;
+            WeatherId weather;
+            bool target = false;
+        };
+
+        struct SetWeather
+        {
+            WeatherRegionId region;
+            WeatherId weather;
+        };
+
         using Instruction = std::variant<IncrementInteger, ConsumeBudget, QuestStageEquals, JournalEntryAbsent,
             GlobalEquals, DialogueChoiceIs, FactionRankAtLeast, ReputationAtLeast, SetQuestStage, AddJournalEntry,
-            SetFactionRank, SetReputation>;
+            SetFactionRank, SetReputation, WeatherIs, SetWeather>;
 
         struct ParsedCallback
         {
@@ -124,7 +137,8 @@ namespace TES3MP::ServerApp
                         && !std::holds_alternative<GlobalEquals>(instruction)
                         && !std::holds_alternative<DialogueChoiceIs>(instruction)
                         && !std::holds_alternative<FactionRankAtLeast>(instruction)
-                        && !std::holds_alternative<ReputationAtLeast>(instruction))
+                        && !std::holds_alternative<ReputationAtLeast>(instruction)
+                        && !std::holds_alternative<WeatherIs>(instruction))
                         continue;
                     if (consumed == mBudget || !read)
                         return ServerScriptCallbackResult::Failed;
@@ -176,6 +190,15 @@ namespace TES3MP::ServerApp
                         if (!current || current->reputation < reputationPredicate->reputation)
                             return ServerScriptCallbackResult::Accepted;
                     }
+                    else if (const auto* weatherPredicate = std::get_if<WeatherIs>(&instruction))
+                    {
+                        const auto* current = read->findWeather(weatherPredicate->region);
+                        if (!current)
+                            return ServerScriptCallbackResult::Failed;
+                        const auto value = weatherPredicate->target ? current->targetWeather : current->currentWeather;
+                        if (value != weatherPredicate->weather)
+                            return ServerScriptCallbackResult::Accepted;
+                    }
                 }
                 for (const auto& instruction : mInstructions)
                 {
@@ -184,7 +207,8 @@ namespace TES3MP::ServerApp
                         || std::holds_alternative<GlobalEquals>(instruction)
                         || std::holds_alternative<DialogueChoiceIs>(instruction)
                         || std::holds_alternative<FactionRankAtLeast>(instruction)
-                        || std::holds_alternative<ReputationAtLeast>(instruction))
+                        || std::holds_alternative<ReputationAtLeast>(instruction)
+                        || std::holds_alternative<WeatherIs>(instruction))
                         continue;
                     const auto cost = std::holds_alternative<ConsumeBudget>(instruction)
                         ? std::get<ConsumeBudget>(instruction).units
@@ -253,6 +277,15 @@ namespace TES3MP::ServerApp
                                 != ServerScriptEmitResult::Accepted)
                             return ServerScriptCallbackResult::Failed;
                     }
+                    else if (const auto* setWeather = std::get_if<SetWeather>(&instruction))
+                    {
+                        const auto* current = read ? read->findWeather(setWeather->region) : nullptr;
+                        if (!current
+                            || output.enqueue(ServerScriptSetWeatherCommand(
+                                   setWeather->region, current->revision, setWeather->weather))
+                                != ServerScriptEmitResult::Accepted)
+                            return ServerScriptCallbackResult::Failed;
+                    }
                 }
                 return ServerScriptCallbackResult::Accepted;
             }
@@ -289,6 +322,8 @@ namespace TES3MP::ServerApp
                 return ServerScriptEventKind::SessionLifecycle;
             if (text == "dialogue_choice_committed")
                 return ServerScriptEventKind::DialogueChoiceCommitted;
+            if (text == "weather_changed")
+                return ServerScriptEventKind::WeatherChanged;
             return std::nullopt;
         }
 
@@ -452,7 +487,7 @@ namespace TES3MP::ServerApp
         std::variant<ParsedModule, ExecutableScriptModuleError> parseModule(std::string_view text,
             const ScriptModuleBinding& binding, const ServerScriptStateCatalog& stateCatalog,
             const GlobalVariableCatalog& globalCatalog, const QuestJournalCatalog& questJournalCatalog,
-            const FactionDialogueCatalog& factionDialogueCatalog) noexcept
+            const FactionDialogueCatalog& factionDialogueCatalog, const WeatherCatalog* weatherCatalog) noexcept
         try
         {
             ParsedModule module;
@@ -692,6 +727,34 @@ namespace TES3MP::ServerApp
                             callback->sawAction = true;
                         }
                     }
+                    else if ((*tokens)[0] == "weather_is" || (*tokens)[0] == "weather_target_is"
+                        || (*tokens)[0] == "set_weather")
+                    {
+                        const auto rawRegion
+                            = tokens->size() == 3 ? number<std::uint64_t>((*tokens)[1]) : std::nullopt;
+                        const auto rawWeather
+                            = tokens->size() == 3 ? number<std::uint64_t>((*tokens)[2]) : std::nullopt;
+                        const auto region = rawRegion ? WeatherRegionId::fromValue(*rawRegion) : std::nullopt;
+                        const auto weather = rawWeather ? WeatherId::fromValue(*rawWeather) : std::nullopt;
+                        const auto* declaration = weatherCatalog && region ? weatherCatalog->findRegion(*region) : nullptr;
+                        const bool isAction = (*tokens)[0] == "set_weather";
+                        if (!callback || !region || !weather || (!isAction && callback->sawAction))
+                            return ExecutableScriptModuleError::Malformed;
+                        if (!declaration
+                            || std::ranges::find(declaration->eligibleWeather, *weather)
+                                == declaration->eligibleWeather.end())
+                            return ExecutableScriptModuleError::InvalidWorldCatalog;
+                        if (callback->instructions.size() == MaximumScriptModuleInstructionsPerCallback)
+                            return ExecutableScriptModuleError::InvalidResourceBounds;
+                        if (isAction)
+                        {
+                            callback->instructions.emplace_back(SetWeather{ *region, *weather });
+                            callback->sawAction = true;
+                        }
+                        else
+                            callback->instructions.emplace_back(
+                                WeatherIs{ *region, *weather, (*tokens)[0] == "weather_target_is" });
+                    }
                     else if ((*tokens)[0] == "end")
                     {
                         if (tokens->size() != 1 || !callback || callback->instructions.empty())
@@ -729,6 +792,7 @@ namespace TES3MP::ServerApp
     ExecutableScriptModuleLoadResult loadExecutableScriptModules(const std::filesystem::path& packageContentPath,
         const ScriptPackageContent& content, const GlobalVariableCatalog& globalCatalog,
         const QuestJournalCatalog& questJournalCatalog, const FactionDialogueCatalog& factionDialogueCatalog,
+        const WeatherCatalog& weatherCatalog,
         DeterministicServerScriptRuntime& runtime) noexcept
     try
     {
@@ -773,7 +837,8 @@ namespace TES3MP::ServerApp
                 return ExecutableScriptModuleError::HashMismatch;
             const std::string_view text(reinterpret_cast<const char*>(bytes.data()), bytes.size());
             auto parsed = parseModule(
-                text, binding, content.stateCatalog, globalCatalog, questJournalCatalog, factionDialogueCatalog);
+                text, binding, content.stateCatalog, globalCatalog, questJournalCatalog, factionDialogueCatalog,
+                &weatherCatalog);
             const auto* module = std::get_if<ParsedModule>(&parsed);
             if (!module)
                 return std::get<ExecutableScriptModuleError>(parsed);
@@ -803,6 +868,23 @@ namespace TES3MP::ServerApp
     catch (...)
     {
         return ExecutableScriptModuleError::Unavailable;
+    }
+
+    ExecutableScriptModuleLoadResult loadExecutableScriptModules(const std::filesystem::path& packageContentPath,
+        const ScriptPackageContent& content, const GlobalVariableCatalog& globalCatalog,
+        const QuestJournalCatalog& questJournalCatalog, const FactionDialogueCatalog& factionDialogueCatalog,
+        DeterministicServerScriptRuntime& runtime) noexcept
+    {
+        const auto weatherId = WeatherId::fromValue(1);
+        const auto regionId = WeatherRegionId::fromValue(1);
+        if (!weatherId || !regionId)
+            return ExecutableScriptModuleError::InvalidWorldCatalog;
+        const std::array weather{ *weatherId };
+        const std::array regions{ WeatherRegionCatalogEntry{ *regionId, *weatherId, 1, 1, { *weatherId } } };
+        const auto catalog = WeatherCatalog::create(questJournalCatalog.manifest(), weather, regions);
+        return catalog ? loadExecutableScriptModules(packageContentPath, content, globalCatalog, questJournalCatalog,
+                             factionDialogueCatalog, *catalog, runtime)
+                       : ExecutableScriptModuleLoadResult(ExecutableScriptModuleError::InvalidWorldCatalog);
     }
 
     ExecutableScriptModuleLoadResult loadExecutableScriptModules(const std::filesystem::path& packageContentPath,

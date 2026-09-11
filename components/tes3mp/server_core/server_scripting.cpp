@@ -150,6 +150,11 @@ namespace TES3MP
         return enqueuePayload(ServerScriptCommandPayload(std::move(command)));
     }
 
+    ServerScriptEmitResult ServerScriptCommandEmitter::enqueue(ServerScriptSetWeatherCommand command) noexcept
+    {
+        return enqueuePayload(ServerScriptCommandPayload(std::move(command)));
+    }
+
     ServerScriptEmitResult ServerScriptCommandEmitter::enqueuePayload(ServerScriptCommandPayload command) noexcept
     try
     {
@@ -246,7 +251,8 @@ namespace TES3MP
         };
         if (!addEvents(publication->changes().size()) || !addEvents(publication->joinedSessions().size())
             || !addEvents(publication->spatialTicks().size()) || !addEvents(publication->sessionLifecycle().size())
-            || !addEvents(publication->dialogueChoices().size()))
+            || !addEvents(publication->dialogueChoices().size())
+            || !addEvents(publication->weatherChanges().size()))
             return terminate(CanonicalSinkDeliveryResult::Backpressured);
         const std::uint64_t publicationOrdinal = mNextPublicationOrdinal++;
         if (eventCount == 0 || mCallbacks.empty())
@@ -316,6 +322,15 @@ namespace TES3MP
             event.mCommitTick = dialogue.commitTick;
             event.mPlayerId = dialogue.player;
             event.mDialogueChoiceId = dialogue.choice;
+            events.push_back(std::move(event));
+        }
+        for (const auto& weather : publication->weatherChanges())
+        {
+            ServerScriptEvent event;
+            event.mKind = ServerScriptEventKind::WeatherChanged;
+            event.mStateVersion = weather.stateVersion;
+            event.mCommitTick = weather.commitTick;
+            event.mWeather = weather.weather;
             events.push_back(std::move(event));
         }
 

@@ -21,7 +21,7 @@ namespace
     constexpr std::uint64_t FirstTickDeadline = 33'333'334;
     constexpr std::uint64_t NextTickIncrement = 33'333'333;
 
-    static_assert(ServerScriptApiVersion == 5);
+    static_assert(ServerScriptApiVersion == 6);
     static_assert(MaximumServerScriptCallbacks == 64);
     static_assert(MaximumServerScriptCommandsPerCallback == 16);
     static_assert(MaximumServerScriptCommandsPerTick == 256);
@@ -202,6 +202,41 @@ namespace
         }
 
         bool sawEligibleSnapshot = false;
+    };
+
+    class WeatherConsequenceCallback final : public ServerScriptCallback
+    {
+    public:
+        explicit WeatherConsequenceCallback(bool includeGlobal) noexcept
+            : mIncludeGlobal(includeGlobal)
+        {
+        }
+
+        ServerScriptCallbackResult onEvent(
+            const ServerScriptCallbackInput& input, ServerScriptCommandEmitter& output) noexcept override
+        {
+            const auto* read = input.readModel();
+            const auto* weather = read ? read->findWeather(id<WeatherRegionId>(50)) : nullptr;
+            sawImmutableWeather = input.event().kind() == ServerScriptEventKind::WeatherChanged
+                && input.event().weather() && input.event().weather()->targetWeather == id<WeatherId>(2) && weather
+                && weather->targetWeather == id<WeatherId>(2) && weather->revision.value() == 2;
+            if (!sawImmutableWeather
+                || output.enqueue(ServerScriptSetWeatherCommand(
+                       id<WeatherRegionId>(50), weather->revision, id<WeatherId>(1)))
+                    != ServerScriptEmitResult::Accepted)
+                return ServerScriptCallbackResult::Failed;
+            if (mIncludeGlobal
+                && output.enqueue(ServerScriptSetGlobalCommand(
+                       id<GlobalVariableId>(1), GlobalVariableRevision::initial(), std::int32_t{ 7 }))
+                    != ServerScriptEmitResult::Accepted)
+                return ServerScriptCallbackResult::Failed;
+            return ServerScriptCallbackResult::Accepted;
+        }
+
+        bool sawImmutableWeather = false;
+
+    private:
+        bool mIncludeGlobal;
     };
 
     class ReadModelCallback final : public ServerScriptCallback
@@ -917,6 +952,88 @@ namespace
         return !reducer.commit(std::move(prepared), worlds) && world == unchanged
             && !durability.installedBeforeAcknowledgement;
     }
+
+    bool weather_event_reads_ordering_stale_revisions_and_atomic_consequences_are_bounded()
+    {
+        Fixture fixture;
+        const std::array globals{ GlobalVariableCatalogEntry{ id<GlobalVariableId>(1), std::int32_t{ 0 } } };
+        const auto globalCatalog = GlobalVariableCatalog::create(globals).value();
+        const auto questCatalog = QuestJournalCatalog::create(testContentManifestId(), {}, {}).value();
+        const auto factionCatalog = FactionDialogueCatalog::create(testContentManifestId(), {}, {}).value();
+        const std::array weatherIds{ id<WeatherId>(1), id<WeatherId>(2) };
+        const std::array regions{ WeatherRegionCatalogEntry{ id<WeatherRegionId>(50), id<WeatherId>(1), 10, 4,
+            { id<WeatherId>(1), id<WeatherId>(2) } } };
+        const auto weatherCatalog = WeatherCatalog::create(testContentManifestId(), weatherIds, regions).value();
+        const auto random = Xoshiro256StarStar::fromWorldSeed(
+            55, *RandomStreamKey::fromValues(0x5745415448455231ULL, 0));
+        auto world = CanonicalWorldState::initial(CanonicalWorldTimeState{}, globalCatalog, questCatalog,
+            factionCatalog, weatherCatalog, random.snapshot())
+                         .value();
+
+        DeterministicServerScriptRuntime scripts;
+        WeatherConsequenceCallback first(true);
+        WeatherConsequenceCallback second(false);
+        const auto package = ServerScriptPackage::create(1, 1, 1).value();
+        if (!scripts.bindWorldState(world)
+            || scripts.registerCallback(package, 1, ServerScriptEventKind::WeatherChanged, first)
+                != ServerScriptRegistrationResult::Accepted
+            || scripts.registerCallback(package, 2, ServerScriptEventKind::WeatherChanged, second)
+                != ServerScriptRegistrationResult::Accepted)
+            return false;
+        CanonicalCommandReducer reducer(fixture.initialState(), fixture.observability,
+            CanonicalSinkBundle(nullptr, nullptr, &scripts, nullptr), testContentManifest());
+        CanonicalCommandWorlds worlds;
+        worlds.world = &world;
+        worlds.globalCatalog = &globalCatalog;
+        ScriptDurabilityProbe durability;
+        durability.currentWorld = &world;
+        if (!reducer.configureDurability(durability, nullptr, nullptr, nullptr, nullptr, &world, nullptr))
+            return false;
+
+        const auto firstTick = fixture.pumpFirst();
+        if (!firstTick || !scripts.pump(id<ServerTick>(1)))
+            return false;
+        auto changed = setCanonicalWeather(world, id<WeatherRegionId>(50), WeatherRevision::initial(),
+            id<WeatherId>(2), id<ServerTick>(1));
+        auto* changedWorld = std::get_if<CanonicalWorldState>(&changed);
+        if (!changedWorld)
+            return false;
+        auto prepared = reducer.prepareTick(firstTick.batches()[0], worlds, {});
+        const bool staged = reducer.stageSimulationCandidates(prepared, nullptr, std::nullopt, nullptr, std::nullopt,
+            nullptr, std::nullopt, &world, *changedWorld);
+        const bool committed = staged && reducer.commit(std::move(prepared), worlds);
+        if (!staged || !committed || !first.sawImmutableWeather
+            || !second.sawImmutableWeather || reducer.latestPublication()->weatherChanges().size() != 1)
+            return false;
+
+        const auto secondTick = fixture.pumpNext();
+        const auto generated = scripts.pump(id<ServerTick>(2));
+        if (!secondTick || !generated || generated.commands().size() != 3
+            || generated.commands()[0].order().callbackOrder() != 1
+            || generated.commands()[0].order().commandOrdinal() != 1
+            || generated.commands()[1].order().commandOrdinal() != 2
+            || generated.commands()[2].order().callbackOrder() != 2)
+            return false;
+        auto consequences = reducer.prepareTick(secondTick.batches()[0], worlds, generated.commands());
+        if (!consequences.result() || consequences.result().scriptDispositions().size() != 3
+            || consequences.result().scriptDispositions()[0].disposition() != ServerScriptCommandDisposition::Applied
+            || consequences.result().scriptDispositions()[1].disposition() != ServerScriptCommandDisposition::Applied
+            || consequences.result().scriptDispositions()[2].disposition()
+                != ServerScriptCommandDisposition::WeatherRevisionMismatch
+            || !consequences.candidateWorld())
+            return false;
+        const auto* stagedWeather = consequences.candidateWorld()->findWeather(id<WeatherRegionId>(50));
+        const auto* stagedGlobal = consequences.candidateWorld()->find(id<GlobalVariableId>(1));
+        if (!stagedWeather || stagedWeather->targetWeather != id<WeatherId>(1) || !stagedGlobal
+            || stagedGlobal->value != GlobalVariableValue(std::int32_t{ 7 }))
+            return false;
+        const auto unchanged = world;
+        durability.result = CanonicalDurabilityResult::Rejected;
+        durability.expectedWorld = &*consequences.candidateWorld();
+        const bool rejected = !reducer.commit(std::move(consequences), worlds);
+        const bool unchangedWorld = world == unchanged;
+        return rejected && unchangedWorld && durability.sawExpected && !durability.installedBeforeAcknowledgement;
+    }
 }
 
 int main()
@@ -951,6 +1068,8 @@ int main()
             "persistent_variable_bounds_and_types_fail_closed", &persistent_variable_bounds_and_types_fail_closed },
         std::pair{ "committed_dialogue_choice_triggers_ordered_atomic_cross_domain_consequences",
             &committed_dialogue_choice_triggers_ordered_atomic_cross_domain_consequences },
+        std::pair{ "weather_event_reads_ordering_stale_revisions_and_atomic_consequences_are_bounded",
+            &weather_event_reads_ordering_stale_revisions_and_atomic_consequences_are_bounded },
     };
     bool passed = true;
     for (const auto& [name, test] : tests)

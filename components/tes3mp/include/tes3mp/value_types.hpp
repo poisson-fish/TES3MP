@@ -212,6 +212,18 @@ namespace TES3MP::Detail
     {
         static constexpr std::string_view name = "DialogueChoiceId";
     };
+    struct WeatherIdTag
+    {
+        static constexpr std::string_view name = "WeatherId";
+    };
+    struct WeatherRegionIdTag
+    {
+        static constexpr std::string_view name = "WeatherRegionId";
+    };
+    struct WeatherRevisionTag
+    {
+        static constexpr std::string_view name = "WeatherRevision";
+    };
     struct ScriptVariableIdTag
     {
         static constexpr std::string_view name = "ScriptVariableId";
@@ -307,6 +319,10 @@ namespace TES3MP
     using FactionReputationRevision
         = Detail::StrongValue<Detail::FactionReputationRevisionTag, Detail::StrongValuePolicy::CounterFromOne>;
     using DialogueChoiceId = Detail::StrongValue<Detail::DialogueChoiceIdTag, Detail::StrongValuePolicy::Identity>;
+    using WeatherId = Detail::StrongValue<Detail::WeatherIdTag, Detail::StrongValuePolicy::Identity>;
+    using WeatherRegionId = Detail::StrongValue<Detail::WeatherRegionIdTag, Detail::StrongValuePolicy::Identity>;
+    using WeatherRevision
+        = Detail::StrongValue<Detail::WeatherRevisionTag, Detail::StrongValuePolicy::CounterFromOne>;
     using ScriptVariableId = Detail::StrongValue<Detail::ScriptVariableIdTag, Detail::StrongValuePolicy::Identity>;
     using ScriptStateRevision
         = Detail::StrongValue<Detail::ScriptStateRevisionTag, Detail::StrongValuePolicy::CounterFromOne>;

@@ -1,6 +1,6 @@
 TES3MP_SCRIPT_MODULE_V1
 abi 1
-api 5
+api 6
 entry joined
 callback 0 session_joined
 increment_integer 1 1

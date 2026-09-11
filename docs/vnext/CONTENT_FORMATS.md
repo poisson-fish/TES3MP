@@ -74,7 +74,7 @@ variable <package-id> <variable-id> string_hex <lowercase-hex-bytes|->
 ```
 
 Startup sorts declarations canonically. IDs are nonzero, package IDs are
-unique, variables reference a package, API is 5, and ABI is 1. Module leaf
+unique, variables reference a package, API is 6, and ABI is 1. Module leaf
 names, SHA-256 values, entrypoints, and budgets (1–4,096) are bounded. Ordered
 package versions/API and the typed initial-value catalog bind V2 persistence,
 so incompatible state rejects. `-` is an empty string. V1 catalogs reject. The
@@ -88,9 +88,9 @@ narrow:
 ```text
 TES3MP_SCRIPT_MODULE_V1
 abi 1
-api 5
+api 6
 entry <entrypoint>
-callback <callback-order> <command_finalized|session_joined|spatial_state_changed|session_lifecycle|dialogue_choice_committed>
+callback <callback-order> <command_finalized|session_joined|spatial_state_changed|session_lifecycle|dialogue_choice_committed|weather_changed>
 increment_integer <declared-integer-variable-id> <nonzero-signed-delta>
 global_equals <global-id> <short|long|float> <value>
 quest_stage_equals <quest-id> <stage>
@@ -98,10 +98,13 @@ journal_entry_absent <journal-entry-id>
 dialogue_choice_is <dialogue-choice-id>
 faction_rank_at_least <faction-id> <rank>
 reputation_at_least <faction-id> <signed-32-bit-value>
+weather_is <weather-region-id> <weather-id>
+weather_target_is <weather-region-id> <weather-id>
 set_quest_stage <quest-id> <stage>
 add_journal_entry <quest-id> <journal-entry-id>
 set_faction_rank <faction-id> <rank>
 set_reputation <faction-id> <signed-32-bit-value>
+set_weather <weather-region-id> <weather-id>
 consume <positive-budget-units>
 end
 ```
@@ -109,18 +112,15 @@ end
 Predicates read a copied immutable world snapshot; a false predicate emits
 nothing. Actions derive expected revisions from that snapshot and queue typed next-tick commands.
 Predicates must precede actions in a callback.
-Startup validates every variable, global type, quest stage, journal entry, and
-quest-entry relationship against the manifest catalogs. Each predicate and
-action costs one budget unit; `consume` costs its declared units. Invalid input,
-overflow, or exhaustion terminates execution and publishes no callback output.
-Modules use canonical package/load order, after durable state is restored.
+Startup validates every variable, global type, quest stage, journal entry,
+quest-entry relationship, weather region, and weather eligibility against the
+manifest catalogs. Each predicate and action costs one budget unit; `consume`
+costs its declared units. Invalid input, overflow, or exhaustion terminates
+execution and publishes no callback output. Modules use canonical package/load
+order, after durable state is restored.
 
-Broad mod support still requires a bounded extractor for cells, actors,
-objects, inventories, collision, combat, and mappings from load-order winners.
-The derived recipe covers only a small vanilla subset. Client-side mod scripts
-may present confirmed state or submit typed intent, but cannot commit canonical
-state; unsupported scripted behavior must be rejected or explicitly inert until
-the deterministic server-scripting boundary exists.
+The derived recipe covers a small vanilla subset. Client scripts may present
+confirmed state or submit typed intent, but cannot commit canonical state.
 
 ## Characters V2
 
@@ -264,13 +264,14 @@ OpenMW clients bind opaque IDs locally with repeatable
 Mappings must be injective and complete for presented records. See
 [`inventory_content.cpp`](../../apps/tes3mp-server/inventory_content.cpp).
 
-## World V3
+## World V4
 
 The required `world_content_file` is at most 4 MiB. It declares one clock, up to
-65,536 typed globals, and manifest-scoped quest, journal, faction, rank, and dialogue-choice catalogs.
+65,536 typed globals, and manifest-scoped quest, journal, faction, rank,
+dialogue-choice, weather-identity, and weather-region catalogs.
 
 ```text
-TES3MP_WORLD_V3
+TES3MP_WORLD_V4
 manifest <64-lowercase-hex-digits>
 time <day> <month> <year> <milliseconds-since-midnight> <time-scale-thousandths>
 global <nonzero-id> <short-or-long-or-float> <value>
@@ -279,6 +280,9 @@ journal <nonzero-entry-id> <quest-id> <declared-stage>
 faction <nonzero-faction-id> <strictly-increasing-rank>...
 dialogue_choice <nonzero-choice-id> unrestricted
 dialogue_choice <nonzero-choice-id> <required-faction-id> <minimum-rank> <minimum-reputation>
+weather_seed <unsigned-64-bit-seed>
+weather <nonzero-weather-id>
+weather_region <nonzero-region-id> <initial-weather-id> <selection-interval-ticks> <transition-duration-ticks> <eligible-weather-id>...
 ```
 
 Days are 1–30, months 0–11, milliseconds 0–86,399,999, and time scale is in
@@ -292,7 +296,10 @@ initial stage; the catalog is bounded to 4,096 quests, 32,768 total stages, and
 exact catalog. Factions have 1–256 ranks; choices are either unrestricted or
 require membership at a minimum declared rank and reputation. Canonical
 membership and reputation have independent per-player revisions. Clients map
-quest IDs with `tes3mp-content-quest-map=<id>=<journal-record>`. See
+quest IDs with `tes3mp-content-quest-map=<id>=<journal-record>`. Weather is
+required and bounded to 256 identities, 4,096 regions, 65,536 total eligibility
+entries, and 1–1,000,000,000 ticks per timing value. Initial weather must be
+eligible. Region transitions and RNG are durable. V1–V3 reject. See
 [`world_content.cpp`](../../apps/tes3mp-server/world_content.cpp).
 
 ## Combat V6

@@ -139,11 +139,50 @@ namespace
         return true;
     }
 
+    bool eligible(const WeatherRegionCatalogEntry& region, WeatherId weather) noexcept
+    {
+        return std::ranges::find(region.eligibleWeather, weather) != region.eligibleWeather.end();
+    }
+
+    std::optional<ServerTick> addTicks(ServerTick tick, std::uint64_t amount) noexcept
+    {
+        if (amount > std::numeric_limits<std::uint64_t>::max() - tick.value())
+            return std::nullopt;
+        return ServerTick::fromValue(tick.value() + amount);
+    }
+
+    bool validWeatherState(const WeatherCatalog& catalog, const CanonicalWeatherState& weather) noexcept
+    {
+        if (weather.regions.size() != catalog.regions().size())
+            return false;
+        for (std::size_t index = 0; index < weather.regions.size(); ++index)
+        {
+            const auto& state = weather.regions[index];
+            const auto& declaration = catalog.regions()[index];
+            if (state.region != declaration.id || !eligible(declaration, state.currentWeather)
+                || !eligible(declaration, state.targetWeather) || state.lastChangeTick > weather.lastAdvanceTick
+                || state.transitionStartTick > state.transitionEndTick
+                || state.nextSelectionTick < state.transitionEndTick)
+                return false;
+            if (state.currentWeather == state.targetWeather
+                && state.transitionStartTick != state.transitionEndTick)
+                return false;
+            if (state.currentWeather != state.targetWeather
+                && (state.transitionStartTick == state.transitionEndTick
+                    || state.lastChangeTick != state.transitionStartTick))
+                return false;
+        }
+        return true;
+    }
+
     std::optional<CanonicalWorldState> recreateWorld(const CanonicalWorldState& state, CanonicalWorldTimeState time,
         std::span<const CanonicalGlobalVariableState> globals,
         std::span<const CanonicalPlayerQuestJournalState> questJournal,
         std::span<const CanonicalPlayerFactionState> factions) noexcept
     {
+        if (state.questJournalCatalog() && state.factionDialogueCatalog() && state.weatherCatalog() && state.weather())
+            return CanonicalWorldState::create(time, globals, *state.questJournalCatalog(),
+                *state.factionDialogueCatalog(), *state.weatherCatalog(), questJournal, factions, *state.weather());
         if (state.questJournalCatalog() && state.factionDialogueCatalog())
             return CanonicalWorldState::create(time, globals, *state.questJournalCatalog(),
                 *state.factionDialogueCatalog(), questJournal, factions);
@@ -295,6 +334,60 @@ namespace TES3MP
         return found == mDialogueChoices.end() ? nullptr : &*found;
     }
 
+    std::optional<WeatherCatalog> WeatherCatalog::create(ContentManifestId manifest,
+        std::span<const WeatherId> weather, std::span<const WeatherRegionCatalogEntry> regions) noexcept
+    try
+    {
+        if (weather.empty() || weather.size() > MaximumWeatherIdentities || regions.empty()
+            || regions.size() > MaximumWeatherRegions)
+            return std::nullopt;
+        std::vector<WeatherId> weatherCopy(weather.begin(), weather.end());
+        for (std::size_t index = 0; index < weatherCopy.size(); ++index)
+            if (std::ranges::find(std::span(weatherCopy).first(index), weatherCopy[index])
+                != std::span(weatherCopy).first(index).end())
+                return std::nullopt;
+        std::vector<WeatherRegionCatalogEntry> regionCopy(regions.begin(), regions.end());
+        std::size_t totalEligibility = 0;
+        for (std::size_t index = 0; index < regionCopy.size(); ++index)
+        {
+            const auto& region = regionCopy[index];
+            if (region.selectionIntervalTicks == 0 || region.transitionDurationTicks == 0
+                || region.selectionIntervalTicks > MaximumWeatherTimingTicks
+                || region.transitionDurationTicks > MaximumWeatherTimingTicks || region.eligibleWeather.empty()
+                || region.eligibleWeather.size() > MaximumWeatherEligibilityEntries - totalEligibility
+                || std::ranges::any_of(std::span(regionCopy).first(index),
+                    [&](const auto& prior) { return prior.id == region.id; }))
+                return std::nullopt;
+            totalEligibility += region.eligibleWeather.size();
+            for (std::size_t weatherIndex = 0; weatherIndex < region.eligibleWeather.size(); ++weatherIndex)
+            {
+                const auto id = region.eligibleWeather[weatherIndex];
+                if (std::ranges::find(weatherCopy, id) == weatherCopy.end()
+                    || std::ranges::find(std::span(region.eligibleWeather).first(weatherIndex), id)
+                        != std::span(region.eligibleWeather).first(weatherIndex).end())
+                    return std::nullopt;
+            }
+            if (!eligible(region, region.initialWeather))
+                return std::nullopt;
+        }
+        return WeatherCatalog(manifest, std::move(weatherCopy), std::move(regionCopy));
+    }
+    catch (...)
+    {
+        return std::nullopt;
+    }
+
+    bool WeatherCatalog::contains(WeatherId id) const noexcept
+    {
+        return std::ranges::find(mWeather, id) != mWeather.end();
+    }
+
+    const WeatherRegionCatalogEntry* WeatherCatalog::findRegion(WeatherRegionId id) const noexcept
+    {
+        const auto found = std::ranges::find(mRegions, id, &WeatherRegionCatalogEntry::id);
+        return found == mRegions.end() ? nullptr : &*found;
+    }
+
     std::optional<CanonicalWorldState> CanonicalWorldState::create(
         CanonicalWorldTimeState time, std::span<const CanonicalGlobalVariableState> globals) noexcept
     try
@@ -325,6 +418,29 @@ namespace TES3MP
         return CanonicalWorldState(time, std::vector<CanonicalGlobalVariableState>(globals.begin(), globals.end()),
             std::move(questJournalCatalog),
             std::vector<CanonicalPlayerQuestJournalState>(questJournal.begin(), questJournal.end()));
+    }
+    catch (...)
+    {
+        return std::nullopt;
+    }
+
+    std::optional<CanonicalWorldState> CanonicalWorldState::create(CanonicalWorldTimeState time,
+        std::span<const CanonicalGlobalVariableState> globals, QuestJournalCatalog questJournalCatalog,
+        FactionDialogueCatalog factionDialogueCatalog, WeatherCatalog weatherCatalog,
+        std::span<const CanonicalPlayerQuestJournalState> questJournal,
+        std::span<const CanonicalPlayerFactionState> factions, CanonicalWeatherState weather) noexcept
+    try
+    {
+        auto base = create(time, globals, questJournalCatalog, factionDialogueCatalog, questJournal, factions);
+        if (!base || questJournalCatalog.manifest() != weatherCatalog.manifest()
+            || !validWeatherState(weatherCatalog, weather))
+            return std::nullopt;
+        return CanonicalWorldState(time, std::vector<CanonicalGlobalVariableState>(globals.begin(), globals.end()),
+            std::move(questJournalCatalog),
+            std::vector<CanonicalPlayerQuestJournalState>(questJournal.begin(), questJournal.end()),
+            std::move(factionDialogueCatalog),
+            std::vector<CanonicalPlayerFactionState>(factions.begin(), factions.end()),
+            std::move(weatherCatalog), std::move(weather));
     }
     catch (...)
     {
@@ -384,6 +500,34 @@ namespace TES3MP
 
     std::optional<CanonicalWorldState> CanonicalWorldState::initial(CanonicalWorldTimeState time,
         const GlobalVariableCatalog& globals, QuestJournalCatalog questJournalCatalog,
+        FactionDialogueCatalog factionDialogueCatalog, WeatherCatalog weatherCatalog,
+        RandomStateV1 weatherRandomState) noexcept
+    try
+    {
+        auto base = initial(time, globals, questJournalCatalog, factionDialogueCatalog);
+        if (!base)
+            return std::nullopt;
+        CanonicalWeatherState weather{ {}, weatherRandomState, time.lastAdvanceTick };
+        weather.regions.reserve(weatherCatalog.regions().size());
+        for (const auto& region : weatherCatalog.regions())
+        {
+            const auto nextSelection = addTicks(time.lastAdvanceTick, region.selectionIntervalTicks);
+            if (!nextSelection)
+                return std::nullopt;
+            weather.regions.push_back({ region.id, region.initialWeather, region.initialWeather,
+                time.lastAdvanceTick, time.lastAdvanceTick, *nextSelection, WeatherRevision::initial(),
+                time.lastAdvanceTick });
+        }
+        return create(base->time(), base->globals(), std::move(questJournalCatalog),
+            std::move(factionDialogueCatalog), std::move(weatherCatalog), {}, {}, std::move(weather));
+    }
+    catch (...)
+    {
+        return std::nullopt;
+    }
+
+    std::optional<CanonicalWorldState> CanonicalWorldState::initial(CanonicalWorldTimeState time,
+        const GlobalVariableCatalog& globals, QuestJournalCatalog questJournalCatalog,
         FactionDialogueCatalog factionDialogueCatalog) noexcept
     try
     {
@@ -414,6 +558,14 @@ namespace TES3MP
     {
         const auto found = std::ranges::lower_bound(mFactionStates, player, {}, &CanonicalPlayerFactionState::player);
         return found == mFactionStates.end() || found->player != player ? nullptr : &*found;
+    }
+
+    const CanonicalWeatherRegionState* CanonicalWorldState::findWeather(WeatherRegionId region) const noexcept
+    {
+        if (!mWeather)
+            return nullptr;
+        const auto found = std::ranges::find(mWeather->regions, region, &CanonicalWeatherRegionState::region);
+        return found == mWeather->regions.end() ? nullptr : &*found;
     }
 
     CanonicalWorldMutationResult advanceCanonicalWorldTime(
@@ -772,6 +924,121 @@ namespace TES3MP
         return CanonicalWorldMutationError::InvalidState;
     }
 
+    CanonicalWorldMutationResult setCanonicalWeather(const CanonicalWorldState& state, WeatherRegionId region,
+        WeatherRevision expectedRevision, WeatherId target, ServerTick tick) noexcept
+    try
+    {
+        if (!state.weatherCatalog() || !state.weather())
+            return CanonicalWorldMutationError::UnknownWeatherRegion;
+        const auto* declaration = state.weatherCatalog()->findRegion(region);
+        const auto* current = state.findWeather(region);
+        if (!declaration || !current)
+            return CanonicalWorldMutationError::UnknownWeatherRegion;
+        if (!state.weatherCatalog()->contains(target))
+            return CanonicalWorldMutationError::UnknownWeather;
+        if (!eligible(*declaration, target))
+            return CanonicalWorldMutationError::WeatherIneligible;
+        if (current->revision != expectedRevision)
+            return CanonicalWorldMutationError::WeatherRevisionMismatch;
+        if (tick < state.weather()->lastAdvanceTick || tick < current->lastChangeTick)
+            return CanonicalWorldMutationError::TickRegression;
+        if (current->targetWeather == target)
+            return state;
+        const auto revision = current->revision.next();
+        const auto transitionEnd = addTicks(tick, declaration->transitionDurationTicks);
+        const auto nextSelection
+            = transitionEnd ? addTicks(*transitionEnd, declaration->selectionIntervalTicks) : std::nullopt;
+        if (!revision)
+            return CanonicalWorldMutationError::RevisionExhausted;
+        if (!transitionEnd || !nextSelection)
+            return CanonicalWorldMutationError::ArithmeticOverflow;
+        CanonicalWeatherState weather = *state.weather();
+        auto found = std::ranges::find(weather.regions, region, &CanonicalWeatherRegionState::region);
+        found->targetWeather = target;
+        found->transitionStartTick = tick;
+        found->transitionEndTick = target == found->currentWeather ? tick : *transitionEnd;
+        found->nextSelectionTick
+            = target == found->currentWeather ? *addTicks(tick, declaration->selectionIntervalTicks) : *nextSelection;
+        found->revision = *revision;
+        found->lastChangeTick = tick;
+        weather.lastAdvanceTick = tick;
+        auto result = CanonicalWorldState::create(state.time(), state.globals(), *state.questJournalCatalog(),
+            *state.factionDialogueCatalog(), *state.weatherCatalog(), state.questJournal(), state.factionStates(),
+            std::move(weather));
+        return result ? CanonicalWorldMutationResult(std::move(*result))
+                      : CanonicalWorldMutationResult(CanonicalWorldMutationError::InvalidState);
+    }
+    catch (...)
+    {
+        return CanonicalWorldMutationError::InvalidState;
+    }
+
+    CanonicalWorldMutationResult advanceCanonicalWeather(const CanonicalWorldState& state, ServerTick tick) noexcept
+    try
+    {
+        if (!state.weatherCatalog() || !state.weather())
+            return state;
+        if (tick < state.weather()->lastAdvanceTick)
+            return CanonicalWorldMutationError::TickRegression;
+        if (tick == state.weather()->lastAdvanceTick)
+            return state;
+        CanonicalWeatherState weather = *state.weather();
+        auto random = Xoshiro256StarStar::restore(weather.randomState);
+        for (std::size_t index = 0; index < weather.regions.size(); ++index)
+        {
+            auto& region = weather.regions[index];
+            const auto& declaration = state.weatherCatalog()->regions()[index];
+            if (region.currentWeather != region.targetWeather && tick >= region.transitionEndTick)
+            {
+                const auto revision = region.revision.next();
+                if (!revision)
+                    return CanonicalWorldMutationError::RevisionExhausted;
+                region.currentWeather = region.targetWeather;
+                region.transitionStartTick = tick;
+                region.transitionEndTick = tick;
+                region.revision = *revision;
+                region.lastChangeTick = tick;
+            }
+            if (region.currentWeather == region.targetWeather && tick >= region.nextSelectionTick)
+            {
+                const auto selection = random.uniformBelow(declaration.eligibleWeather.size());
+                const auto nextSelection = addTicks(tick, declaration.selectionIntervalTicks);
+                if (!selection || !nextSelection)
+                    return CanonicalWorldMutationError::ArithmeticOverflow;
+                const WeatherId target = declaration.eligibleWeather[static_cast<std::size_t>(*selection)];
+                region.nextSelectionTick = *nextSelection;
+                if (target != region.currentWeather)
+                {
+                    const auto revision = region.revision.next();
+                    const auto transitionEnd = addTicks(tick, declaration.transitionDurationTicks);
+                    const auto afterTransition
+                        = transitionEnd ? addTicks(*transitionEnd, declaration.selectionIntervalTicks) : std::nullopt;
+                    if (!revision)
+                        return CanonicalWorldMutationError::RevisionExhausted;
+                    if (!transitionEnd || !afterTransition)
+                        return CanonicalWorldMutationError::ArithmeticOverflow;
+                    region.targetWeather = target;
+                    region.transitionStartTick = tick;
+                    region.transitionEndTick = *transitionEnd;
+                    region.nextSelectionTick = *afterTransition;
+                    region.revision = *revision;
+                    region.lastChangeTick = tick;
+                }
+            }
+        }
+        weather.randomState = random.snapshot();
+        weather.lastAdvanceTick = tick;
+        auto result = CanonicalWorldState::create(state.time(), state.globals(), *state.questJournalCatalog(),
+            *state.factionDialogueCatalog(), *state.weatherCatalog(), state.questJournal(), state.factionStates(),
+            std::move(weather));
+        return result ? CanonicalWorldMutationResult(std::move(*result))
+                      : CanonicalWorldMutationResult(CanonicalWorldMutationError::InvalidState);
+    }
+    catch (...)
+    {
+        return CanonicalWorldMutationError::InvalidState;
+    }
+
     CanonicalWorldMutationResult restoreCanonicalWorldState(const GlobalVariableCatalog& catalog,
         CanonicalWorldTimeState time, std::span<const CanonicalGlobalVariableState> globals) noexcept
     try
@@ -833,6 +1100,35 @@ namespace TES3MP
             return std::get<CanonicalWorldMutationError>(restoredGlobals);
         auto result = CanonicalWorldState::create(base->time(), base->globals(), expectedQuestJournalCatalog,
             expectedFactionDialogueCatalog, questJournal, factions);
+        return result ? CanonicalWorldMutationResult(std::move(*result))
+                      : CanonicalWorldMutationResult(CanonicalWorldMutationError::CatalogMismatch);
+    }
+    catch (...)
+    {
+        return CanonicalWorldMutationError::InvalidState;
+    }
+
+    CanonicalWorldMutationResult restoreCanonicalWorldState(const GlobalVariableCatalog& globals,
+        const QuestJournalCatalog& expectedQuestJournalCatalog,
+        const FactionDialogueCatalog& expectedFactionDialogueCatalog, const WeatherCatalog& expectedWeatherCatalog,
+        CanonicalWorldTimeState time, std::span<const CanonicalGlobalVariableState> globalStates,
+        const QuestJournalCatalog& restoredQuestJournalCatalog,
+        const FactionDialogueCatalog& restoredFactionDialogueCatalog, const WeatherCatalog& restoredWeatherCatalog,
+        std::span<const CanonicalPlayerQuestJournalState> questJournal,
+        std::span<const CanonicalPlayerFactionState> factions, CanonicalWeatherState weather) noexcept
+    try
+    {
+        if (expectedWeatherCatalog != restoredWeatherCatalog)
+            return CanonicalWorldMutationError::CatalogMismatch;
+        const auto restored = restoreCanonicalWorldState(globals, expectedQuestJournalCatalog,
+            expectedFactionDialogueCatalog, time, globalStates, restoredQuestJournalCatalog,
+            restoredFactionDialogueCatalog, questJournal, factions);
+        const auto* base = std::get_if<CanonicalWorldState>(&restored);
+        if (!base)
+            return std::get<CanonicalWorldMutationError>(restored);
+        auto result = CanonicalWorldState::create(base->time(), base->globals(), expectedQuestJournalCatalog,
+            expectedFactionDialogueCatalog, expectedWeatherCatalog, base->questJournal(), base->factionStates(),
+            std::move(weather));
         return result ? CanonicalWorldMutationResult(std::move(*result))
                       : CanonicalWorldMutationResult(CanonicalWorldMutationError::CatalogMismatch);
     }

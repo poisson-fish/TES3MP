@@ -21,7 +21,7 @@ namespace TES3MP
             && left.mChecksum == right.mChecksum && *left.mState == *right.mState && left.mChanges == right.mChanges
             && left.mJoinedSessions == right.mJoinedSessions && left.mSpatialTicks == right.mSpatialTicks
             && left.mSessionLifecycle == right.mSessionLifecycle
-            && left.mDialogueChoices == right.mDialogueChoices;
+            && left.mDialogueChoices == right.mDialogueChoices && left.mWeatherChanges == right.mWeatherChanges;
     }
 
     CanonicalPublicationReadAction classifyCanonicalPublication(

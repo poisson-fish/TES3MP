@@ -542,7 +542,9 @@ namespace TES3MP
     CanonicalSinkDeliveryReport CanonicalCommandReducer::publish(
         std::shared_ptr<CanonicalStatePublication> publication) noexcept
     {
-        if (publication->mChanges.empty() && publication->mSpatialTicks.empty())
+        if (publication->mChanges.empty() && publication->mJoinedSessions.empty()
+            && publication->mSpatialTicks.empty() && publication->mSessionLifecycle.empty()
+            && publication->mDialogueChoices.empty() && publication->mWeatherChanges.empty())
             return {};
         publication->mStateVersion = mStateVersion;
         publication->mCheckpointTick = mCheckpointTick;
@@ -1558,6 +1560,62 @@ namespace TES3MP
                             disposition = ServerScriptCommandDisposition::FactionReputationRevisionMismatch;
                     }
                 }
+                else if (const auto* weatherCommand
+                    = std::get_if<ServerScriptSetWeatherCommand>(&queued.payload()))
+                {
+                    if (!world)
+                        disposition = ServerScriptCommandDisposition::UnknownWeatherRegion;
+                    else
+                    {
+                        const auto& base = prepared.mWorld ? *prepared.mWorld : *world;
+                        auto changed = setCanonicalWeather(base, weatherCommand->region(),
+                            weatherCommand->expectedRevision(), weatherCommand->target(), tick);
+                        if (auto* next = std::get_if<CanonicalWorldState>(&changed))
+                        {
+                            disposition = ServerScriptCommandDisposition::Applied;
+                            if (*next != base)
+                            {
+                                if (!recordChange())
+                                {
+                                    prepared.mResult.mError = CommandBatchReductionError::StateVersionCapacityExceeded;
+                                    return prepared;
+                                }
+                                if (!prepared.mBaseWorld)
+                                    prepared.mBaseWorld = *world;
+                                const auto* weather = next->findWeather(weatherCommand->region());
+                                if (!weather)
+                                {
+                                    prepared.mResult.mError = CommandBatchReductionError::CandidateStateInvalid;
+                                    return prepared;
+                                }
+                                prepared.mPublication->mWeatherChanges.push_back(
+                                    { prepared.mStateVersion, tick, *weather });
+                                prepared.mWorld = std::move(*next);
+                            }
+                        }
+                        else
+                        {
+                            switch (std::get<CanonicalWorldMutationError>(changed))
+                            {
+                                case CanonicalWorldMutationError::UnknownWeatherRegion:
+                                    disposition = ServerScriptCommandDisposition::UnknownWeatherRegion;
+                                    break;
+                                case CanonicalWorldMutationError::UnknownWeather:
+                                    disposition = ServerScriptCommandDisposition::UnknownWeather;
+                                    break;
+                                case CanonicalWorldMutationError::WeatherIneligible:
+                                    disposition = ServerScriptCommandDisposition::WeatherIneligible;
+                                    break;
+                                case CanonicalWorldMutationError::WeatherRevisionMismatch:
+                                    disposition = ServerScriptCommandDisposition::WeatherRevisionMismatch;
+                                    break;
+                                default:
+                                    disposition = ServerScriptCommandDisposition::InvalidWorldMutation;
+                                    break;
+                            }
+                        }
+                    }
+                }
                 else if (const auto* persistent
                     = std::get_if<ServerScriptCompareAndSetPersistentCommand>(&queued.payload()))
                 {
@@ -1724,10 +1782,46 @@ namespace TES3MP
         {
             if (!baseWorld)
                 return false;
+            const CanonicalWorldState* priorWorld = prepared.mWorld ? &*prepared.mWorld : baseWorld;
+            std::size_t weatherChanges = 0;
+            if (priorWorld->weather() && world->weather())
+            {
+                if (priorWorld->weather()->regions.size() != world->weather()->regions.size())
+                    return false;
+                for (std::size_t index = 0; index < world->weather()->regions.size(); ++index)
+                    if (priorWorld->weather()->regions[index].revision != world->weather()->regions[index].revision)
+                        ++weatherChanges;
+            }
+            else if (priorWorld->weather().has_value() != world->weather().has_value())
+                return false;
+            if (!canReserveCanonicalStateVersions(prepared.mStateVersion, weatherChanges))
+                return false;
             if (!prepared.mBaseWorld)
                 prepared.mBaseWorld = *baseWorld;
             else if (*prepared.mBaseWorld != *baseWorld)
                 return false;
+            if (world->weather())
+            {
+                for (std::size_t index = 0; index < world->weather()->regions.size(); ++index)
+                {
+                    if (priorWorld->weather()->regions[index].revision == world->weather()->regions[index].revision)
+                        continue;
+                    const auto nextVersion = prepared.mStateVersion.next();
+                    if (!nextVersion)
+                        return false;
+                    prepared.mStateVersion = *nextVersion;
+                    if (prepared.mCanonicalRevision == prepared.mBaseCanonicalRevision)
+                    {
+                        const auto nextRevision = prepared.mCanonicalRevision.next();
+                        if (!nextRevision)
+                            return false;
+                        prepared.mCanonicalRevision = *nextRevision;
+                    }
+                    prepared.mPublication->mWeatherChanges.push_back(
+                        { prepared.mStateVersion, world->weather()->regions[index].lastChangeTick,
+                            world->weather()->regions[index] });
+                }
+            }
             prepared.mWorld = std::move(*world);
         }
         return true;

@@ -1,6 +1,6 @@
 # TES3MP vNext current implementation
 
-- Updated: 2026-09-10
+- Updated: 2026-09-11
 - Code snapshot inspected: `vnext` working tree based on `0641a1792d`
 - OpenMW baseline: `f4bec41444214a7903bebd178389ca22ca13f646`
 
@@ -382,17 +382,18 @@ and [`character.cpp`](../../apps/openmw/mwmechanics/character.cpp).
   Production config contains one executable package and one declared integer variable.
   Declarations are canonically sorted; malformed, oversized, unknown-package,
   wrong-API, or manifest-mismatched input fails startup.
-- Script API V5 projects committed publications into immutable bounded events
+- Script API V6 projects committed publications into immutable bounded events
   plus copied typed-global, quest/journal, and per-player faction rank and
-  reputation reads. It includes committed dialogue-choice identity; execution
+  reputation reads. It includes committed dialogue-choice identity and
+  per-region current/target weather, transition timing, and revision; execution
   and generated commands retain replay-stable order.
 - Output is staged behind callback, publication, pending, and tick bounds. Any
   callback or queue failure discards the publication output and terminates the
   runtime instead of exposing a partial result.
 - Typed next-tick commands cover safe points, time, globals, quests, journals,
-  faction rank, reputation, and atomic compare-and-set of package-scoped
-  variables. Catalogs, types, ranks, and independent revisions validate before
-  the prepared durability commit.
+  faction rank, reputation, weather targets, and atomic compare-and-set of
+  package-scoped variables. Catalogs, eligibility, types, ranks, and independent
+  revisions validate before the prepared durability commit.
 - Production registers the exact package catalog before opening V2 persistence,
   then restores and binds catalog-compatible state before callbacks can run.
   Undeclared or version-conflicting callback registration fails. A callback
@@ -400,8 +401,10 @@ and [`character.cpp`](../../apps/openmw/mwmechanics/character.cpp).
 - The bounded V1 module loader rejects missing, oversized, hash-mismatched,
   malformed, wrong-API/ABI, missing-entrypoint, resource-invalid, or
   catalog-invalid artifacts before startup. Predicates cover typed globals,
-  quest/journal state, dialogue identity, faction rank, and reputation;
-  revision-checked actions cover quest/journal and faction consequences.
+  quest/journal state, dialogue identity, faction rank, reputation, and current
+  or target weather; revision-checked actions cover quest/journal, faction, and
+  weather consequences. A committed weather change also creates an immutable
+  `weather_changed` callback event.
   Referenced IDs, stages, ranks, choices, ownership, and types validate against
   manifest catalogs before registration. The packaged module demonstrates both
   quest and dialogue-driven cross-domain consequences.
@@ -412,6 +415,15 @@ Primary sources: [`script_state.hpp`](../../components/tes3mp/include/tes3mp/scr
 [`script_module.cpp`](../../apps/tes3mp-server/script_module.cpp), and
 [`server_command_reducer.cpp`](../../components/tes3mp/server_core/server_command_reducer.cpp).
 
+### Canonical weather
+
+`TES3MP_WORLD_V4` binds weather identities, regional eligibility/timing, and an
+RNG seed. The server persists current/target weather, transition and selection
+ticks, revisions, and RNG state; catalog-order fixed ticks replay identically.
+Manual and automatic changes share the atomic durability path and emit ordered
+immutable records. Client transport is future work; rendering, sound, particles,
+and visual interpolation remain local.
+
 ### Transactional gameplay persistence and replay envelope
 
 - V2 binds every durable prefix to content/configuration identity, script
@@ -419,7 +431,8 @@ Primary sources: [`script_state.hpp`](../../components/tes3mp/include/tes3mp/scr
   Its one checksum covers established players, inventory, objects, actor
   simulation/combat/respawn and RNG, clock, typed globals, and manifest-scoped
   per-player quest stages/journal entries, faction membership/reputation, and
-  explicit script variables with revisions and change ticks. Dialogue-choice
+  explicit script variables with revisions and change ticks, plus the exact
+  weather catalog, per-region transition state, and weather RNG. Dialogue-choice
   identity is retained in durable command order.
 - Identity includes the exact script API, ordered packages, and typed variable
   catalog. Missing, extra, reordered, or retyped state rejects before install.
@@ -502,9 +515,9 @@ and [`test_bake_tes3mp_content.py`](../../scripts/tests/test_bake_tes3mp_content
   casting, Lua hit callbacks, and general magic remain unimplemented.
 - Declared package variables survive restart; undeclared script/VM memory does
   not. Executable modules now query globals, quest/journal progress, dialogue
-  choice, faction rank, and reputation and emit cross-domain consequences.
-  General branching/arithmetic and weather, inventory, combat, or magic script
-  surfaces remain absent. Dialogue text and presentation stay client-local;
+  choice, faction rank, reputation, and weather and emit cross-domain
+  consequences. General branching/arithmetic and inventory, combat, or magic
+  script surfaces remain absent. Dialogue text and presentation stay client-local;
   desktop dialogue UI and its transport admission path are not implemented.
 - The packaged default is the verified installed vanilla manifest. Other
   loadouts still require bounded content generation and local record mappings;
@@ -520,47 +533,32 @@ and [`test_bake_tes3mp_content.py`](../../scripts/tests/test_bake_tes3mp_content
 
 ## Work still required
 
-### Next milestone: canonical weather consequences
+### Next milestone: desktop dialogue-choice transport and UI
 
-Continue the versioned immutable event/query and typed-command surface with
-canonical weather consequences. TES3MP 0.8.x scripts and saves remain unsupported.
+Wire the already committed dialogue-choice authority through bounded desktop
+transport and local OpenMW presentation as a separate milestone. TES3MP 0.8.x
+scripts and saves remain unsupported.
 
 ### Required before the desktop/PC-VR release
 
-1. Combat, stats, magic, death, resurrection, and respawn.
-2. Weather and broader durable world-state transitions; canonical time and
-   globals are implemented.
-3. Broader dialogue/faction/reputation and quest/journal gameplay consequences;
-   their bounded durable authority and script slice are implemented.
-4. Script content loading/runtime composition and expansion of the versioned
-   immutable event/typed-command surface for release gameplay domains; the
-   legacy CoreScripts API is not reused.
-5. Transactional persistence and deterministic replay for domain state,
-   configuration, content identity, script/API versions, seeds, and command
-   ordering. TES3MP 0.8.x saves are not migrated.
-6. Administration, moderation, discovery, health, metrics, and privileged
-   operational interfaces without exposing runtime internals.
-7. Broader content/world coverage, load-order-winner/reference extraction,
-   modpack resource identity, content tooling, failure recovery, security
-   hardening, packaging, upgrades, cross-platform validation, performance
-   budgets, regression assets, and long-running soak evidence.
-8. Deferred PC-VR hardware measurement and final desktop/VR interoperability
-   closure.
+1. Complete gameplay beyond the current melee, direct-magic, dialogue, quest,
+   faction, and weather slices.
+2. Extend durable world transitions beyond implemented time, globals, and weather.
+3. Expand the immutable event/typed-command script API without legacy API reuse.
+4. Add administration, moderation, discovery, health, and privileged operations.
+5. Broaden content extraction/resource identity and finish recovery, security,
+   packaging, platform, performance, regression, soak, and PC-VR evidence.
 
 ### Optional after the release boundary
 
-Evaluate standalone Quest feasibility against measured performance, dependency,
-maintenance, and packaging constraints. A Quest port proceeds only after an
-explicit go decision. Device-specific types remain in a provider/platform leaf
-and do not enter protocol or canonical state.
+Evaluate standalone Quest only after measured release evidence and an explicit
+go decision. Device types remain provider-local.
 
 ## Verification snapshot
 
-The API-V5 dialogue/faction working tree passed focused core, persistence,
-runtime, module, and application tests; Windows dedicated-server and standalone
-contracts; a fresh packaged bake/verify; all 198 repository Python tests; and
-patch-registry verification on 2026-09-10. The separate baseline-provenance
-verifier still reports pre-existing registry drift.
+API-V6 weather passed focused integration, Windows server/product contracts,
+standalone contracts, a fresh bake/verify, all 198 Python tests, and
+patch-registry verification on 2026-09-11.
 
 Sanitizer/fuzzer profiles, non-Windows builds, PC-VR hardware, the upstream
 OpenMW baseline, and a visible OpenMW walkthrough were not run.

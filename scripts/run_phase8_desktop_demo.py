@@ -165,7 +165,8 @@ def main() -> int:
         actors.write_text(
             f"TES3MP_ACTORS_V1\nmanifest {TEST_CONTENT_MANIFEST}\n", encoding="utf-8")
         world.write_text(
-            f"TES3MP_WORLD_V3\nmanifest {TEST_CONTENT_MANIFEST}\ntime 16 6 427 32400000 30000\n",
+            f"TES3MP_WORLD_V4\nmanifest {TEST_CONTENT_MANIFEST}\ntime 16 6 427 32400000 30000\n"
+            "weather_seed 1\nweather 1\nweather_region 1 1 9000 300 1\n",
             encoding="utf-8")
         config.write_text(
             f"bind_address=127.0.0.1\nport={port}\ntick_interval_ms=16\n"

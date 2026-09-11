@@ -62,6 +62,9 @@ the affected code/tests in the same milestone.
   catalog order; restore rejects any missing, extra, reordered, or retyped entry
   before installation. Clock and global changes use the same persistence
   acknowledgement as every other durable domain.
+- **Canonical weather, local atmosphere.** The server owns weather identity,
+  eligibility, timing, RNG, revisions, and gameplay consequences. Rendering,
+  sound, particles, and visual interpolation stay client-local.
 - **Player-scoped quests and journals.** Per-player canonical progress uses
   opaque IDs bound to an exact manifest catalog; OpenMW names remain
   adapter-local. Mutations carry expected revisions and V2 acknowledgement.

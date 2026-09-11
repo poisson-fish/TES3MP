@@ -60,7 +60,8 @@ def write_server_config(root: Path, port: int, password: Path) -> Path:
         encoding="utf-8")
     world = root / "world-content"
     world.write_text(
-        f"TES3MP_WORLD_V3\nmanifest {TEST_CONTENT_MANIFEST}\ntime 16 6 427 32400000 30000\n",
+        f"TES3MP_WORLD_V4\nmanifest {TEST_CONTENT_MANIFEST}\ntime 16 6 427 32400000 30000\n"
+        "weather_seed 1\nweather 1\nweather_region 1 1 9000 300 1\n",
         encoding="utf-8")
     config = root / "server.cfg"
     config.write_text(

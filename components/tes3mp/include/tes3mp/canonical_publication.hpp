@@ -4,6 +4,7 @@
 #include "canonical_checksum.hpp"
 #include "canonical_state.hpp"
 #include "server_command_intake.hpp"
+#include "world_state.hpp"
 
 #include <cstddef>
 #include <cstdint>
@@ -40,6 +41,15 @@ namespace TES3MP
         PlayerId player;
         DialogueChoiceId choice;
         friend constexpr bool operator==(CanonicalDialogueChoiceRecord, CanonicalDialogueChoiceRecord) noexcept
+            = default;
+    };
+
+    struct CanonicalWeatherChangeRecord
+    {
+        CanonicalStateVersion stateVersion;
+        ServerTick commitTick;
+        CanonicalWeatherRegionState weather;
+        friend constexpr bool operator==(CanonicalWeatherChangeRecord, CanonicalWeatherChangeRecord) noexcept
             = default;
     };
 
@@ -134,6 +144,7 @@ namespace TES3MP
         std::span<const CanonicalSpatialTickRecord> spatialTicks() const noexcept { return mSpatialTicks; }
         std::span<const CanonicalSessionLifecycleRecord> sessionLifecycle() const noexcept { return mSessionLifecycle; }
         std::span<const CanonicalDialogueChoiceRecord> dialogueChoices() const noexcept { return mDialogueChoices; }
+        std::span<const CanonicalWeatherChangeRecord> weatherChanges() const noexcept { return mWeatherChanges; }
 
         friend bool operator==(const CanonicalStatePublication&, const CanonicalStatePublication&) noexcept;
 
@@ -152,6 +163,7 @@ namespace TES3MP
         std::vector<CanonicalSpatialTickRecord> mSpatialTicks;
         std::vector<CanonicalSessionLifecycleRecord> mSessionLifecycle;
         std::vector<CanonicalDialogueChoiceRecord> mDialogueChoices;
+        std::vector<CanonicalWeatherChangeRecord> mWeatherChanges;
     };
 
     enum class CanonicalPublicationReadAction : std::uint8_t

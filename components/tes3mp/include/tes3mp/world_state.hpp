@@ -2,6 +2,7 @@
 #define TES3MP_WORLD_STATE_HPP
 
 #include "content_identity.hpp"
+#include "deterministic_random.hpp"
 
 #include <cstddef>
 #include <cstdint>
@@ -26,6 +27,10 @@ namespace TES3MP
     inline constexpr std::size_t MaximumDialogueChoiceCatalogEntries = 16'384;
     inline constexpr std::size_t MaximumPlayerFactionStates = 256;
     inline constexpr std::size_t MaximumCanonicalFactionStates = 16'384;
+    inline constexpr std::size_t MaximumWeatherIdentities = 256;
+    inline constexpr std::size_t MaximumWeatherRegions = 4'096;
+    inline constexpr std::size_t MaximumWeatherEligibilityEntries = 65'536;
+    inline constexpr std::uint64_t MaximumWeatherTimingTicks = 1'000'000'000;
     inline constexpr std::uint32_t WorldMillisecondsPerHour = 3'600'000;
     inline constexpr std::uint32_t WorldMillisecondsPerDay = 24 * WorldMillisecondsPerHour;
     inline constexpr std::uint32_t WorldTimeScaleUnitsPerOne = 1'000;
@@ -153,6 +158,41 @@ namespace TES3MP
         std::vector<DialogueChoiceCatalogEntry> mDialogueChoices;
     };
 
+    struct WeatherRegionCatalogEntry
+    {
+        WeatherRegionId id;
+        WeatherId initialWeather;
+        std::uint64_t selectionIntervalTicks = 0;
+        std::uint64_t transitionDurationTicks = 0;
+        std::vector<WeatherId> eligibleWeather;
+        friend bool operator==(const WeatherRegionCatalogEntry&, const WeatherRegionCatalogEntry&) noexcept = default;
+    };
+
+    class WeatherCatalog
+    {
+    public:
+        static std::optional<WeatherCatalog> create(ContentManifestId manifest,
+            std::span<const WeatherId> weather, std::span<const WeatherRegionCatalogEntry> regions) noexcept;
+        constexpr ContentManifestId manifest() const noexcept { return mManifest; }
+        std::span<const WeatherId> weather() const noexcept { return mWeather; }
+        std::span<const WeatherRegionCatalogEntry> regions() const noexcept { return mRegions; }
+        bool contains(WeatherId id) const noexcept;
+        const WeatherRegionCatalogEntry* findRegion(WeatherRegionId id) const noexcept;
+        friend bool operator==(const WeatherCatalog&, const WeatherCatalog&) noexcept = default;
+
+    private:
+        WeatherCatalog(ContentManifestId manifest, std::vector<WeatherId> weather,
+            std::vector<WeatherRegionCatalogEntry> regions) noexcept
+            : mManifest(manifest)
+            , mWeather(std::move(weather))
+            , mRegions(std::move(regions))
+        {
+        }
+        ContentManifestId mManifest;
+        std::vector<WeatherId> mWeather;
+        std::vector<WeatherRegionCatalogEntry> mRegions;
+    };
+
     struct CanonicalQuestState
     {
         QuestId id;
@@ -234,6 +274,27 @@ namespace TES3MP
             const CanonicalGlobalVariableState&, const CanonicalGlobalVariableState&) noexcept = default;
     };
 
+    struct CanonicalWeatherRegionState
+    {
+        WeatherRegionId region;
+        WeatherId currentWeather;
+        WeatherId targetWeather;
+        ServerTick transitionStartTick = ServerTick::initial();
+        ServerTick transitionEndTick = ServerTick::initial();
+        ServerTick nextSelectionTick = ServerTick::initial();
+        WeatherRevision revision = WeatherRevision::initial();
+        ServerTick lastChangeTick = ServerTick::initial();
+        friend constexpr bool operator==(CanonicalWeatherRegionState, CanonicalWeatherRegionState) noexcept = default;
+    };
+
+    struct CanonicalWeatherState
+    {
+        std::vector<CanonicalWeatherRegionState> regions;
+        RandomStateV1 randomState;
+        ServerTick lastAdvanceTick = ServerTick::initial();
+        friend bool operator==(const CanonicalWeatherState&, const CanonicalWeatherState&) noexcept = default;
+    };
+
     class CanonicalWorldState
     {
     public:
@@ -247,6 +308,11 @@ namespace TES3MP
             FactionDialogueCatalog factionDialogueCatalog,
             std::span<const CanonicalPlayerQuestJournalState> questJournal,
             std::span<const CanonicalPlayerFactionState> factions) noexcept;
+        static std::optional<CanonicalWorldState> create(CanonicalWorldTimeState time,
+            std::span<const CanonicalGlobalVariableState> globals, QuestJournalCatalog questJournalCatalog,
+            FactionDialogueCatalog factionDialogueCatalog, WeatherCatalog weatherCatalog,
+            std::span<const CanonicalPlayerQuestJournalState> questJournal,
+            std::span<const CanonicalPlayerFactionState> factions, CanonicalWeatherState weather) noexcept;
         static std::optional<CanonicalWorldState> initial(
             CanonicalWorldTimeState time, const GlobalVariableCatalog& catalog) noexcept;
         static std::optional<CanonicalWorldState> initial(CanonicalWorldTimeState time,
@@ -254,6 +320,10 @@ namespace TES3MP
         static std::optional<CanonicalWorldState> initial(CanonicalWorldTimeState time,
             const GlobalVariableCatalog& globals, QuestJournalCatalog questJournalCatalog,
             FactionDialogueCatalog factionDialogueCatalog) noexcept;
+        static std::optional<CanonicalWorldState> initial(CanonicalWorldTimeState time,
+            const GlobalVariableCatalog& globals, QuestJournalCatalog questJournalCatalog,
+            FactionDialogueCatalog factionDialogueCatalog, WeatherCatalog weatherCatalog,
+            RandomStateV1 weatherRandomState) noexcept;
 
         constexpr const CanonicalWorldTimeState& time() const noexcept { return mTime; }
         std::span<const CanonicalGlobalVariableState> globals() const noexcept { return mGlobals; }
@@ -267,6 +337,9 @@ namespace TES3MP
         }
         std::span<const CanonicalPlayerFactionState> factionStates() const noexcept { return mFactionStates; }
         const CanonicalPlayerFactionState* findFactionState(PlayerId player) const noexcept;
+        const std::optional<WeatherCatalog>& weatherCatalog() const noexcept { return mWeatherCatalog; }
+        const std::optional<CanonicalWeatherState>& weather() const noexcept { return mWeather; }
+        const CanonicalWeatherRegionState* findWeather(WeatherRegionId region) const noexcept;
         friend bool operator==(const CanonicalWorldState&, const CanonicalWorldState&) noexcept = default;
 
     private:
@@ -274,13 +347,17 @@ namespace TES3MP
             std::optional<QuestJournalCatalog> questJournalCatalog = std::nullopt,
             std::vector<CanonicalPlayerQuestJournalState> questJournal = {},
             std::optional<FactionDialogueCatalog> factionDialogueCatalog = std::nullopt,
-            std::vector<CanonicalPlayerFactionState> factionStates = {}) noexcept
+            std::vector<CanonicalPlayerFactionState> factionStates = {},
+            std::optional<WeatherCatalog> weatherCatalog = std::nullopt,
+            std::optional<CanonicalWeatherState> weather = std::nullopt) noexcept
             : mTime(time)
             , mGlobals(std::move(globals))
             , mQuestJournalCatalog(std::move(questJournalCatalog))
             , mQuestJournal(std::move(questJournal))
             , mFactionDialogueCatalog(std::move(factionDialogueCatalog))
             , mFactionStates(std::move(factionStates))
+            , mWeatherCatalog(std::move(weatherCatalog))
+            , mWeather(std::move(weather))
         {
         }
         CanonicalWorldTimeState mTime;
@@ -289,6 +366,8 @@ namespace TES3MP
         std::vector<CanonicalPlayerQuestJournalState> mQuestJournal;
         std::optional<FactionDialogueCatalog> mFactionDialogueCatalog;
         std::vector<CanonicalPlayerFactionState> mFactionStates;
+        std::optional<WeatherCatalog> mWeatherCatalog;
+        std::optional<CanonicalWeatherState> mWeather;
     };
 
     enum class CanonicalWorldMutationError : std::uint8_t
@@ -315,6 +394,10 @@ namespace TES3MP
         FactionReputationRevisionMismatch,
         UnknownDialogueChoice,
         DialogueChoiceIneligible,
+        UnknownWeatherRegion,
+        UnknownWeather,
+        WeatherIneligible,
+        WeatherRevisionMismatch,
     };
 
     using CanonicalWorldMutationResult = std::variant<CanonicalWorldState, CanonicalWorldMutationError>;
@@ -337,6 +420,9 @@ namespace TES3MP
         ServerTick tick) noexcept;
     std::optional<CanonicalWorldMutationError> validateCanonicalDialogueChoice(
         const CanonicalWorldState& state, PlayerId player, DialogueChoiceId choice) noexcept;
+    CanonicalWorldMutationResult setCanonicalWeather(const CanonicalWorldState& state, WeatherRegionId region,
+        WeatherRevision expectedRevision, WeatherId target, ServerTick tick) noexcept;
+    CanonicalWorldMutationResult advanceCanonicalWeather(const CanonicalWorldState& state, ServerTick tick) noexcept;
     CanonicalWorldMutationResult restoreCanonicalWorldState(const GlobalVariableCatalog& catalog,
         CanonicalWorldTimeState time, std::span<const CanonicalGlobalVariableState> globals) noexcept;
     CanonicalWorldMutationResult restoreCanonicalWorldState(const GlobalVariableCatalog& globals,
@@ -352,6 +438,14 @@ namespace TES3MP
         const FactionDialogueCatalog& restoredFactionDialogueCatalog,
         std::span<const CanonicalPlayerQuestJournalState> questJournal,
         std::span<const CanonicalPlayerFactionState> factions) noexcept;
+    CanonicalWorldMutationResult restoreCanonicalWorldState(const GlobalVariableCatalog& globals,
+        const QuestJournalCatalog& expectedQuestJournalCatalog,
+        const FactionDialogueCatalog& expectedFactionDialogueCatalog, const WeatherCatalog& expectedWeatherCatalog,
+        CanonicalWorldTimeState time, std::span<const CanonicalGlobalVariableState> globalStates,
+        const QuestJournalCatalog& restoredQuestJournalCatalog,
+        const FactionDialogueCatalog& restoredFactionDialogueCatalog, const WeatherCatalog& restoredWeatherCatalog,
+        std::span<const CanonicalPlayerQuestJournalState> questJournal,
+        std::span<const CanonicalPlayerFactionState> factions, CanonicalWeatherState weather) noexcept;
 }
 
 #endif

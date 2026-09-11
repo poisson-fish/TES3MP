@@ -1,4 +1,4 @@
 TES3MP_SCRIPT_PACKAGES_V2
 manifest afd2d1a2a6c8ba6a6ca826fe964122a8e8fc3830d8a366fa639cb6b925dd8da6
-package 1 1 0 5 1 vanilla-script-module.t3sm bf2f307ede12791a00281014bee20bab5208067ddab5e3c1fade2b8fd43d6993 joined 32
+package 1 1 0 6 1 vanilla-script-module.t3sm 4d6f2177368645b228b3737c8ddb6b96f18ed9c0ea4de9a2e5d3a086000ecd63 joined 32
 variable 1 1 integer 0

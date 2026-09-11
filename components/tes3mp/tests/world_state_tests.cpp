@@ -70,6 +70,32 @@ namespace
             .value();
     }
 
+    WeatherCatalog weatherCatalog()
+    {
+        const std::array weather{ id<WeatherId>(1), id<WeatherId>(2), id<WeatherId>(3) };
+        const std::array regions{
+            WeatherRegionCatalogEntry{ id<WeatherRegionId>(10), id<WeatherId>(1), 3, 2,
+                { id<WeatherId>(1), id<WeatherId>(2) } },
+            WeatherRegionCatalogEntry{ id<WeatherRegionId>(20), id<WeatherId>(2), 5, 3,
+                { id<WeatherId>(2), id<WeatherId>(3) } },
+        };
+        return WeatherCatalog::create(testContentManifest().id(), weather, regions).value();
+    }
+
+    RandomStateV1 weatherRandom()
+    {
+        return Xoshiro256StarStar::fromWorldSeed(
+            1234, *RandomStreamKey::fromValues(0x5745415448455231ULL, 0))
+            .snapshot();
+    }
+
+    CanonicalWorldState weatherWorld()
+    {
+        return CanonicalWorldState::initial(CanonicalWorldTimeState{}, catalog(), questCatalog(), factionCatalog(),
+            weatherCatalog(), weatherRandom())
+            .value();
+    }
+
     bool time_advances_exactly_across_calendar_boundaries()
     {
         const auto advanced = advanceCanonicalWorldTime(world(), id<ServerTick>(125), 16);
@@ -224,6 +250,62 @@ namespace
         return !FactionDialogueCatalog::create(testContentManifest().id(), duplicateRanks, {})
             && !FactionDialogueCatalog::create(testContentManifest().id(), validFaction, badChoice);
     }
+
+    bool weather_catalog_and_typed_mutation_reject_invalid_combinations_atomically()
+    {
+        const std::array weather{ id<WeatherId>(1), id<WeatherId>(2) };
+        const std::array badRegions{ WeatherRegionCatalogEntry{ id<WeatherRegionId>(1), id<WeatherId>(1), 3, 2,
+            { id<WeatherId>(2), id<WeatherId>(3) } } };
+        if (WeatherCatalog::create(testContentManifest().id(), weather, badRegions))
+            return false;
+        const auto initial = weatherWorld();
+        const auto changed = setCanonicalWeather(initial, id<WeatherRegionId>(10), WeatherRevision::initial(),
+            id<WeatherId>(2), id<ServerTick>(1));
+        const auto* result = std::get_if<CanonicalWorldState>(&changed);
+        const auto* region = result ? result->findWeather(id<WeatherRegionId>(10)) : nullptr;
+        if (!region || region->currentWeather != id<WeatherId>(1) || region->targetWeather != id<WeatherId>(2)
+            || region->transitionStartTick != id<ServerTick>(1) || region->transitionEndTick != id<ServerTick>(3)
+            || region->revision.value() != 2)
+            return false;
+        return std::get<CanonicalWorldMutationError>(setCanonicalWeather(*result, id<WeatherRegionId>(10),
+                   WeatherRevision::initial(), id<WeatherId>(1), id<ServerTick>(2)))
+                == CanonicalWorldMutationError::WeatherRevisionMismatch
+            && std::get<CanonicalWorldMutationError>(setCanonicalWeather(*result, id<WeatherRegionId>(10),
+                   id<WeatherRevision>(2), id<WeatherId>(3), id<ServerTick>(2)))
+                == CanonicalWorldMutationError::WeatherIneligible
+            && std::get<CanonicalWorldMutationError>(setCanonicalWeather(*result, id<WeatherRegionId>(99),
+                   id<WeatherRevision>(2), id<WeatherId>(1), id<ServerTick>(2)))
+                == CanonicalWorldMutationError::UnknownWeatherRegion;
+    }
+
+    bool weather_restart_mid_transition_and_rng_replay_are_deterministic()
+    {
+        auto changed = setCanonicalWeather(weatherWorld(), id<WeatherRegionId>(10), WeatherRevision::initial(),
+            id<WeatherId>(2), id<ServerTick>(1));
+        auto* transition = std::get_if<CanonicalWorldState>(&changed);
+        if (!transition)
+            return false;
+        auto midpoint = advanceCanonicalWeather(*transition, id<ServerTick>(2));
+        const auto* persisted = std::get_if<CanonicalWorldState>(&midpoint);
+        if (!persisted || persisted->findWeather(id<WeatherRegionId>(10))->currentWeather != id<WeatherId>(1))
+            return false;
+        CanonicalWorldState uninterrupted = *persisted;
+        CanonicalWorldState restarted = *persisted;
+        for (std::uint64_t tick = 3; tick <= 30; ++tick)
+        {
+            auto left = advanceCanonicalWeather(uninterrupted, id<ServerTick>(tick));
+            auto right = advanceCanonicalWeather(restarted, id<ServerTick>(tick));
+            const auto* leftState = std::get_if<CanonicalWorldState>(&left);
+            const auto* rightState = std::get_if<CanonicalWorldState>(&right);
+            if (!leftState || !rightState || *leftState != *rightState)
+                return false;
+            uninterrupted = *leftState;
+            restarted = *rightState;
+        }
+        const auto* completed = uninterrupted.findWeather(id<WeatherRegionId>(10));
+        return completed && completed->revision.value() > 2
+            && uninterrupted.weather()->randomState != weatherRandom();
+    }
 }
 
 int main()
@@ -246,6 +328,10 @@ int main()
             &faction_membership_reputation_and_dialogue_eligibility_are_revisioned },
         std::pair{ "malformed_faction_and_choice_catalogs_reject_atomically",
             &malformed_faction_and_choice_catalogs_reject_atomically },
+        std::pair{ "weather_catalog_and_typed_mutation_reject_invalid_combinations_atomically",
+            &weather_catalog_and_typed_mutation_reject_invalid_combinations_atomically },
+        std::pair{ "weather_restart_mid_transition_and_rng_replay_are_deterministic",
+            &weather_restart_mid_transition_and_rng_replay_are_deterministic },
     };
     for (const auto& [name, test] : tests)
         if (!test())

@@ -13,7 +13,7 @@ namespace TES3MP::ServerApp
 {
     namespace
     {
-        constexpr std::string_view Header = "TES3MP_WORLD_V3";
+        constexpr std::string_view Header = "TES3MP_WORLD_V4";
         constexpr std::size_t MaximumFields = MaximumQuestStagesPerQuest + 3;
 
         template <class Value>
@@ -77,6 +77,9 @@ namespace TES3MP::ServerApp
         std::vector<JournalCatalogEntry> journal;
         std::vector<FactionCatalogEntry> factions;
         std::vector<DialogueChoiceCatalogEntry> dialogueChoices;
+        std::optional<std::uint64_t> weatherSeed;
+        std::vector<WeatherId> weatherIdentities;
+        std::vector<WeatherRegionCatalogEntry> weatherRegions;
         std::size_t lineNumber = 0;
         for (std::size_t begin = 0; begin <= text.size();)
         {
@@ -248,6 +251,53 @@ namespace TES3MP::ServerApp
                         dialogueChoices.push_back({ *id, *faction, *rank, *reputation });
                     }
                 }
+                else if (values[0] == "weather_seed")
+                {
+                    if (values.size() != 2 || weatherSeed)
+                        return WorldContentError::Malformed;
+                    weatherSeed = number<std::uint64_t>(values[1]);
+                    if (!weatherSeed)
+                        return WorldContentError::Malformed;
+                }
+                else if (values[0] == "weather")
+                {
+                    if (values.size() != 2 || weatherIdentities.size() == MaximumWeatherIdentities)
+                        return weatherIdentities.size() == MaximumWeatherIdentities ? WorldContentError::TooLarge
+                                                                                   : WorldContentError::Malformed;
+                    const auto rawId = number<std::uint64_t>(values[1]);
+                    const auto id = rawId ? WeatherId::fromValue(*rawId) : std::nullopt;
+                    if (!id)
+                        return WorldContentError::Malformed;
+                    weatherIdentities.push_back(*id);
+                }
+                else if (values[0] == "weather_region")
+                {
+                    if (values.size() < 6 || weatherRegions.size() == MaximumWeatherRegions
+                        || values.size() - 5 > MaximumWeatherIdentities)
+                        return weatherRegions.size() == MaximumWeatherRegions
+                                || values.size() - 5 > MaximumWeatherIdentities
+                            ? WorldContentError::TooLarge
+                            : WorldContentError::Malformed;
+                    const auto rawRegion = number<std::uint64_t>(values[1]);
+                    const auto rawInitial = number<std::uint64_t>(values[2]);
+                    const auto region = rawRegion ? WeatherRegionId::fromValue(*rawRegion) : std::nullopt;
+                    const auto initial = rawInitial ? WeatherId::fromValue(*rawInitial) : std::nullopt;
+                    const auto interval = number<std::uint64_t>(values[3]);
+                    const auto transition = number<std::uint64_t>(values[4]);
+                    if (!region || !initial || !interval || !transition)
+                        return WorldContentError::Malformed;
+                    WeatherRegionCatalogEntry entry{ *region, *initial, *interval, *transition, {} };
+                    entry.eligibleWeather.reserve(values.size() - 5);
+                    for (const auto field : values.subspan(5))
+                    {
+                        const auto rawWeather = number<std::uint64_t>(field);
+                        const auto weather = rawWeather ? WeatherId::fromValue(*rawWeather) : std::nullopt;
+                        if (!weather)
+                            return WorldContentError::Malformed;
+                        entry.eligibleWeather.push_back(*weather);
+                    }
+                    weatherRegions.push_back(std::move(entry));
+                }
                 else
                     return WorldContentError::Malformed;
             }
@@ -255,20 +305,26 @@ namespace TES3MP::ServerApp
                 break;
             begin = lineEnd + 1;
         }
-        if (!declaredManifest || !time)
+        if (!declaredManifest || !time || !weatherSeed)
             return WorldContentError::Malformed;
         if (*declaredManifest != manifest.id())
             return WorldContentError::ManifestMismatch;
         auto catalog = GlobalVariableCatalog::create(globals);
         auto questJournal = QuestJournalCatalog::create(*declaredManifest, quests, journal);
         auto factionDialogue = FactionDialogueCatalog::create(*declaredManifest, factions, dialogueChoices);
-        auto world = catalog && questJournal && factionDialogue
-            ? CanonicalWorldState::initial(*time, *catalog, *questJournal, *factionDialogue)
+        auto weather = WeatherCatalog::create(*declaredManifest, weatherIdentities, weatherRegions);
+        const auto weatherKey = RandomStreamKey::fromValues(0x5745415448455231ULL, 0);
+        const auto weatherRandom = weatherKey ? std::optional<RandomStateV1>(
+            Xoshiro256StarStar::fromWorldSeed(*weatherSeed, *weatherKey).snapshot()) : std::nullopt;
+        auto world = catalog && questJournal && factionDialogue && weather && weatherRandom
+            ? CanonicalWorldState::initial(
+                  *time, *catalog, *questJournal, *factionDialogue, *weather, *weatherRandom)
             : std::nullopt;
-        if (!catalog || !questJournal || !factionDialogue || !world)
+        if (!catalog || !questJournal || !factionDialogue || !weather || !weatherRandom || !world)
             return WorldContentError::InvalidCatalog;
         return WorldContent{
-            std::move(*catalog), std::move(*questJournal), std::move(*factionDialogue), std::move(*world) };
+            std::move(*catalog), std::move(*questJournal), std::move(*factionDialogue), std::move(*weather),
+            *weatherRandom, std::move(*world) };
     }
     catch (...)
     {

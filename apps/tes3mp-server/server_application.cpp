@@ -1124,7 +1124,15 @@ namespace TES3MP::ServerApp
                     mFailure = "world time simulation failed";
                     return false;
                 }
-                worldCandidate.emplace(std::move(*worldValue));
+                auto advancedWeather
+                    = advanceCanonicalWeather(*worldValue, batch.scheduledTick().value());
+                auto* weatherValue = std::get_if<CanonicalWorldState>(&advancedWeather);
+                if (!weatherValue)
+                {
+                    mFailure = "weather simulation failed";
+                    return false;
+                }
+                worldCandidate.emplace(std::move(*weatherValue));
             }
             std::vector<std::pair<TransportConnectionId, LatestWinsCombatSnapshot>> combatViews;
             std::vector<std::pair<TransportConnectionId, ReliableCombatEventBatch>> combatEvents;

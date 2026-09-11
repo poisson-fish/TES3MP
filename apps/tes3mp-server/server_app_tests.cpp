@@ -696,12 +696,13 @@ int main()
         assert(static_cast<bool>(stream));
     };
     constexpr std::string_view worldHeader
-        = "TES3MP_WORLD_V3\n"
+        = "TES3MP_WORLD_V4\n"
           "manifest 0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20\n";
     writeWorld(std::string(worldHeader)
         + "time 16 6 427 32400000 30000\nglobal 1 short 2\nglobal 2 long -3\nglobal 3 float 4.5\n"
           "quest 10 0 0 10 20\njournal 100 10 10\njournal 101 10 20\n"
-          "faction 30 0 1 2\ndialogue_choice 40 unrestricted\ndialogue_choice 41 30 1 10\n");
+          "faction 30 0 1 2\ndialogue_choice 40 unrestricted\ndialogue_choice 41 30 1 10\n"
+          "weather_seed 1234\nweather 50\nweather 51\nweather_region 60 50 100 10 50 51\n");
     auto loadedWorldContent = loadWorldContent(worldPath, parsedConfig().contentManifest);
     auto* worldContent = std::get_if<WorldContent>(&loadedWorldContent);
     assert(worldContent && worldContent->globals.entries().size() == 3 && worldContent->world.time().day == 16
@@ -711,31 +712,49 @@ int main()
         && worldContent->questJournal.quests().size() == 1 && worldContent->questJournal.journal().size() == 2
         && worldContent->factionDialogue.factions().size() == 1
         && worldContent->factionDialogue.dialogueChoices().size() == 2
+        && worldContent->weather.weather().size() == 2 && worldContent->weather.regions().size() == 1
         && worldContent->world.questJournalCatalog()
         && worldContent->world.factionDialogueCatalog()
         && *worldContent->world.questJournalCatalog() == worldContent->questJournal
-        && *worldContent->world.factionDialogueCatalog() == worldContent->factionDialogue);
-    writeWorld(std::string(worldHeader) + "time 16 6 427 32400000 30000\nglobal 1 short 2\nglobal 1 long 3\n");
+        && *worldContent->world.factionDialogueCatalog() == worldContent->factionDialogue
+        && worldContent->world.weatherCatalog() && *worldContent->world.weatherCatalog() == worldContent->weather);
+    constexpr std::string_view weather = "weather_seed 1234\nweather 50\nweather_region 60 50 100 10 50\n";
+    writeWorld(std::string(worldHeader) + "time 16 6 427 32400000 30000\nglobal 1 short 2\nglobal 1 long 3\n" + std::string(weather));
     assert(std::get<WorldContentError>(loadWorldContent(worldPath, parsedConfig().contentManifest))
         == WorldContentError::InvalidCatalog);
     writeWorld(std::string(worldHeader)
-        + "time 16 6 427 32400000 30000\nfaction 30 0 0\ndialogue_choice 40 30 0 0\n");
+        + "time 16 6 427 32400000 30000\nfaction 30 0 0\ndialogue_choice 40 30 0 0\n" + std::string(weather));
     assert(std::get<WorldContentError>(loadWorldContent(worldPath, parsedConfig().contentManifest))
         == WorldContentError::InvalidCatalog);
     writeWorld(std::string(worldHeader)
-        + "time 16 6 427 32400000 30000\nfaction 30 0 1\ndialogue_choice 40 31 0 0\n");
+        + "time 16 6 427 32400000 30000\nfaction 30 0 1\ndialogue_choice 40 31 0 0\n" + std::string(weather));
     assert(std::get<WorldContentError>(loadWorldContent(worldPath, parsedConfig().contentManifest))
         == WorldContentError::InvalidCatalog);
-    writeWorld(std::string(worldHeader) + "time 16 6 427 32400000 30000\nglobal 1 float inf\n");
+    writeWorld(std::string(worldHeader) + "time 16 6 427 32400000 30000\nglobal 1 float inf\n" + std::string(weather));
     assert(std::get<WorldContentError>(loadWorldContent(worldPath, parsedConfig().contentManifest))
         == WorldContentError::Malformed);
     writeWorld(std::string(worldHeader) + "time 16 6 427 32400000 30000\nquest 10 0 0 10\n"
-        "journal 100 11 10\n");
+        "journal 100 11 10\n" + std::string(weather));
+    assert(std::get<WorldContentError>(loadWorldContent(worldPath, parsedConfig().contentManifest))
+        == WorldContentError::InvalidCatalog);
+    writeWorld(std::string(worldHeader)
+        + "time 16 6 427 32400000 30000\nweather_seed 1234\nweather 50\n"
+          "weather_region 60 51 100 10 50\n");
+    assert(std::get<WorldContentError>(loadWorldContent(worldPath, parsedConfig().contentManifest))
+        == WorldContentError::InvalidCatalog);
+    writeWorld(std::string(worldHeader)
+        + "time 16 6 427 32400000 30000\nweather_seed 1234\nweather 50\n"
+          "weather_region 60 50 100 10 51\n");
+    assert(std::get<WorldContentError>(loadWorldContent(worldPath, parsedConfig().contentManifest))
+        == WorldContentError::InvalidCatalog);
+    writeWorld(std::string(worldHeader)
+        + "time 16 6 427 32400000 30000\nweather_seed 1234\nweather 50\nweather 50\n"
+          "weather_region 60 50 100 10 50\n");
     assert(std::get<WorldContentError>(loadWorldContent(worldPath, parsedConfig().contentManifest))
         == WorldContentError::InvalidCatalog);
     writeWorld(
-        "TES3MP_WORLD_V3\nmanifest 0202030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20\n"
-        "time 16 6 427 32400000 30000\n");
+        "TES3MP_WORLD_V4\nmanifest 0202030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20\n"
+        "time 16 6 427 32400000 30000\nweather_seed 1\nweather 1\nweather_region 1 1 1 1 1\n");
     assert(std::get<WorldContentError>(loadWorldContent(worldPath, parsedConfig().contentManifest))
         == WorldContentError::ManifestMismatch);
     std::filesystem::remove(worldPath);
@@ -2235,7 +2254,7 @@ int main()
         assert(packagedScriptRuntime.configurePackages(packagedScripts->packages, packagedScripts->stateCatalog));
         auto packagedModules = loadExecutableScriptModules(contentRoot / "vanilla-scripts.txt", *packagedScripts,
             packagedWorld->globals, packagedWorld->questJournal, packagedWorld->factionDialogue,
-            packagedScriptRuntime);
+            packagedWorld->weather, packagedScriptRuntime);
         assert(std::holds_alternative<ExecutableScriptModules>(packagedModules));
         assert(std::get<ExecutableScriptModules>(packagedModules).callbackCount() == 3);
 

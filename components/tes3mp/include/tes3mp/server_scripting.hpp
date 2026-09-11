@@ -17,7 +17,7 @@
 
 namespace TES3MP
 {
-    inline constexpr std::uint32_t ServerScriptApiVersion = 5;
+    inline constexpr std::uint32_t ServerScriptApiVersion = 6;
     inline constexpr std::size_t MaximumServerScriptPackages = 64;
     inline constexpr std::size_t MaximumServerScriptCallbacks = 64;
     inline constexpr std::size_t MaximumServerScriptEventsPerPublication = 4096;
@@ -33,6 +33,7 @@ namespace TES3MP
         SpatialStateChanged,
         SessionLifecycle,
         DialogueChoiceCommitted,
+        WeatherChanged,
     };
 
     class ServerScriptEvent
@@ -55,6 +56,7 @@ namespace TES3MP
         constexpr const std::optional<CanonicalPlayerEntityState>& playerState() const noexcept { return mPlayerState; }
         constexpr std::optional<CanonicalSessionLifecycleKind> lifecycleKind() const noexcept { return mLifecycleKind; }
         constexpr std::optional<DialogueChoiceId> dialogueChoiceId() const noexcept { return mDialogueChoiceId; }
+        constexpr const std::optional<CanonicalWeatherRegionState>& weather() const noexcept { return mWeather; }
 
         friend bool operator==(const ServerScriptEvent&, const ServerScriptEvent&) noexcept = default;
 
@@ -75,6 +77,7 @@ namespace TES3MP
         std::optional<CanonicalPlayerEntityState> mPlayerState;
         std::optional<CanonicalSessionLifecycleKind> mLifecycleKind;
         std::optional<DialogueChoiceId> mDialogueChoiceId;
+        std::optional<CanonicalWeatherRegionState> mWeather;
     };
 
     class ServerScriptPackage
@@ -134,6 +137,10 @@ namespace TES3MP
         std::span<const CanonicalJournalEntryState> journal(PlayerId player) const noexcept;
         const CanonicalJournalEntryState* findJournalEntry(PlayerId player, JournalEntryId entry) const noexcept;
         std::optional<ServerScriptFactionRead> findFaction(PlayerId player, FactionId faction) const noexcept;
+        const CanonicalWeatherRegionState* findWeather(WeatherRegionId region) const noexcept
+        {
+            return mWorld.findWeather(region);
+        }
 
     private:
         friend class DeterministicServerScriptRuntime;
@@ -365,10 +372,32 @@ namespace TES3MP
         ScriptVariableValue mValue;
     };
 
+    class ServerScriptSetWeatherCommand
+    {
+    public:
+        constexpr ServerScriptSetWeatherCommand(
+            WeatherRegionId region, WeatherRevision expectedRevision, WeatherId target) noexcept
+            : mRegion(region)
+            , mExpectedRevision(expectedRevision)
+            , mTarget(target)
+        {
+        }
+        constexpr WeatherRegionId region() const noexcept { return mRegion; }
+        constexpr WeatherRevision expectedRevision() const noexcept { return mExpectedRevision; }
+        constexpr WeatherId target() const noexcept { return mTarget; }
+        friend constexpr bool operator==(ServerScriptSetWeatherCommand, ServerScriptSetWeatherCommand) noexcept
+            = default;
+
+    private:
+        WeatherRegionId mRegion;
+        WeatherRevision mExpectedRevision;
+        WeatherId mTarget;
+    };
+
     using ServerScriptCommandPayload = std::variant<ServerScriptPlayerSafePointCommand, ServerScriptSetGlobalCommand,
         ServerScriptSetWorldTimeCommand, ServerScriptSetQuestStageCommand, ServerScriptAddJournalEntryCommand,
         ServerScriptSetFactionRankCommand, ServerScriptSetReputationCommand,
-        ServerScriptCompareAndSetPersistentCommand>;
+        ServerScriptCompareAndSetPersistentCommand, ServerScriptSetWeatherCommand>;
 
     class ServerScriptCommandOrder
     {
@@ -454,6 +483,7 @@ namespace TES3MP
         ServerScriptEmitResult enqueue(ServerScriptSetFactionRankCommand command) noexcept;
         ServerScriptEmitResult enqueue(ServerScriptSetReputationCommand command) noexcept;
         ServerScriptEmitResult enqueue(ServerScriptCompareAndSetPersistentCommand command) noexcept;
+        ServerScriptEmitResult enqueue(ServerScriptSetWeatherCommand command) noexcept;
 
     private:
         friend class DeterministicServerScriptRuntime;
@@ -595,6 +625,10 @@ namespace TES3MP
         UnknownFactionRank,
         FactionMembershipRevisionMismatch,
         FactionReputationRevisionMismatch,
+        UnknownWeatherRegion,
+        UnknownWeather,
+        WeatherIneligible,
+        WeatherRevisionMismatch,
         UnknownPersistentVariable,
         PersistentVariableTypeMismatch,
         PersistentVariableRevisionMismatch,

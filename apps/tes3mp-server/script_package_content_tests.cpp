@@ -79,16 +79,31 @@ namespace
         return FactionDialogueCatalog::create(manifest().id(), factionEntries, choices).value();
     }
 
+    WeatherCatalog weather()
+    {
+        const std::array weatherIds{ id<WeatherId>(1), id<WeatherId>(2) };
+        const std::array regions{ WeatherRegionCatalogEntry{ id<WeatherRegionId>(50), id<WeatherId>(1), 10, 4,
+            { id<WeatherId>(1), id<WeatherId>(2) } } };
+        return WeatherCatalog::create(manifest().id(), weatherIds, regions).value();
+    }
+
+    RandomStateV1 weatherRandom()
+    {
+        return Xoshiro256StarStar::fromWorldSeed(
+            1234, RandomStreamKey::fromValues(0x5745415448455231ULL, 0).value())
+            .snapshot();
+    }
+
     std::string packageText(std::uint32_t firstVersion = 1, std::string_view firstInitial = "7")
     {
         return "TES3MP_SCRIPT_PACKAGES_V2\n"
                "manifest 0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20\n"
-               "package 22 1 20 5 1 module22.t3sm "
-               "534424a152d2aff8779fe28d1c8f4ec9ad6b35208f86fa49fef34c1690127d17 joined 32\n"
+               "package 22 1 20 6 1 module22.t3sm "
+               "962f9cb324dd2d98c5b43991dbaf737f2b740904eafe426a5183616ec547f322 joined 32\n"
                "package 11 "
             + std::to_string(firstVersion)
-            + " 10 5 1 module11.t3sm "
-              "8f8e49a1b09145a3ca84c70bc21838b85761db293e3afe476db513bad37627ca joined 32\n"
+            + " 10 6 1 module11.t3sm "
+              "ff389bbabd319cd7e79b6b3ea4136f43fb70afbc04a30755bee9aeb8ebf1f24b joined 32\n"
               "variable 22 4 string_hex 68656c6c6f\n"
               "variable 22 5 integer 0\n"
               "variable 11 2 boolean true\n"
@@ -105,7 +120,7 @@ namespace
 
     std::string questModuleText()
     {
-        return "TES3MP_SCRIPT_MODULE_V1\nabi 1\napi 5\nentry quest_start\n"
+        return "TES3MP_SCRIPT_MODULE_V1\nabi 1\napi 6\nentry quest_start\n"
                "callback 0 session_joined\n"
                "global_equals 1 long 7\n"
                "quest_stage_equals 1 0\n"
@@ -117,7 +132,7 @@ namespace
 
     std::string dialogueModuleText()
     {
-        return "TES3MP_SCRIPT_MODULE_V1\nabi 1\napi 5\nentry quest_start\n"
+        return "TES3MP_SCRIPT_MODULE_V1\nabi 1\napi 6\nentry quest_start\n"
                "callback 0 dialogue_choice_committed\n"
                "dialogue_choice_is 1\n"
                "faction_rank_at_least 1 0\n"
@@ -128,11 +143,21 @@ namespace
                "end\n";
     }
 
+    std::string weatherModuleText()
+    {
+        return "TES3MP_SCRIPT_MODULE_V1\nabi 1\napi 6\nentry quest_start\n"
+               "callback 0 session_joined\n"
+               "weather_is 50 1\n"
+               "weather_target_is 50 1\n"
+               "set_weather 50 2\n"
+               "end\n";
+    }
+
     std::string singlePackageText(std::string_view hash, std::uint32_t budget = 5)
     {
         return "TES3MP_SCRIPT_PACKAGES_V2\n"
                "manifest 0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20\n"
-               "package 1 1 0 5 1 module.t3sm "
+               "package 1 1 0 6 1 module.t3sm "
             + std::string(hash) + " quest_start " + std::to_string(budget) + "\n";
     }
 
@@ -280,7 +305,7 @@ namespace
         write(path,
             "TES3MP_SCRIPT_PACKAGES_V2\nmanifest "
             "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff\n"
-            "package 1 1 0 5 1 module.t3sm "
+            "package 1 1 0 6 1 module.t3sm "
             "a51a8b25ada18922a00da8db3e1c8724fa27a063dfc0528e80ffaf1a1aa7300e joined 32\n");
         auto mismatched = loadScriptPackageContent(path, manifest());
         if (!std::get_if<ScriptPackageContentError>(&mismatched)
@@ -289,7 +314,7 @@ namespace
         write(path,
             "TES3MP_SCRIPT_PACKAGES_V2\nmanifest "
             "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20\n"
-            "package 1 1 0 6 1 module.t3sm "
+            "package 1 1 0 5 1 module.t3sm "
             "a51a8b25ada18922a00da8db3e1c8724fa27a063dfc0528e80ffaf1a1aa7300e joined 32\n");
         auto wrongApi = loadScriptPackageContent(path, manifest());
         if (std::get<ScriptPackageContentError>(wrongApi) != ScriptPackageContentError::Malformed)
@@ -297,7 +322,7 @@ namespace
         write(path,
             "TES3MP_SCRIPT_PACKAGES_V2\nmanifest "
             "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20\n"
-            "package 1 1 0 5 1 module.t3sm "
+            "package 1 1 0 6 1 module.t3sm "
             "a51a8b25ada18922a00da8db3e1c8724fa27a063dfc0528e80ffaf1a1aa7300e joined 32\n"
             "variable 2 1 integer 0\n");
         auto unknownPackage = loadScriptPackageContent(path, manifest());
@@ -308,7 +333,7 @@ namespace
               "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20\n";
         for (std::uint64_t value = 1; value <= MaximumServerScriptPackages + 1; ++value)
             tooMany += "package " + std::to_string(value) + " 1 " + std::to_string(value)
-                + " 5 1 module.t3sm "
+                + " 6 1 module.t3sm "
                   "a51a8b25ada18922a00da8db3e1c8724fa27a063dfc0528e80ffaf1a1aa7300e joined 32\n";
         write(path, tooMany);
         auto oversized = loadScriptPackageContent(path, manifest());
@@ -346,10 +371,10 @@ namespace
         if (std::get<ExecutableScriptModuleError>(oversized) != ExecutableScriptModuleError::TooLarge)
             return false;
 
-        write(directory.path() / "module11.t3sm", moduleText(1, 6));
+        write(directory.path() / "module11.t3sm", moduleText(1, 5));
         auto apiText = packageText();
-        apiText.replace(apiText.find("8f8e49a1b09145a3ca84c70bc21838b85761db293e3afe476db513bad37627ca"), 64,
-            "ff389bbabd319cd7e79b6b3ea4136f43fb70afbc04a30755bee9aeb8ebf1f24b");
+        apiText.replace(apiText.find("ff389bbabd319cd7e79b6b3ea4136f43fb70afbc04a30755bee9aeb8ebf1f24b"), 64,
+            "8f8e49a1b09145a3ca84c70bc21838b85761db293e3afe476db513bad37627ca");
         write(path, apiText);
         auto apiLoaded = loadScriptPackageContent(path, manifest());
         auto* apiContent = std::get_if<ScriptPackageContent>(&apiLoaded);
@@ -388,11 +413,11 @@ namespace
             return false;
 
         const auto budgetModule
-            = "TES3MP_SCRIPT_MODULE_V1\nabi 1\napi 5\nentry joined\ncallback 0 session_joined\nconsume 2\nend\n";
+            = "TES3MP_SCRIPT_MODULE_V1\nabi 1\napi 6\nentry joined\ncallback 0 session_joined\nconsume 2\nend\n";
         write(directory.path() / "module11.t3sm", budgetModule);
         auto budgetText = packageText();
-        budgetText.replace(budgetText.find("8f8e49a1b09145a3ca84c70bc21838b85761db293e3afe476db513bad37627ca"), 64,
-            "48d4bd557eff79ca6e266cee93d61923d15aa7a4d449bea5271e3e4dc145880c");
+        budgetText.replace(budgetText.find("ff389bbabd319cd7e79b6b3ea4136f43fb70afbc04a30755bee9aeb8ebf1f24b"), 64,
+            "4a68b02aed3a80baef2d038f1622532a383e8592058a4765cf1f2b01daf14c91");
         const auto budgetPosition = budgetText.find(" joined 32", budgetText.find("module11.t3sm"));
         budgetText.replace(budgetPosition, 10, " joined 1");
         write(path, budgetText);
@@ -415,7 +440,7 @@ namespace
         TemporaryDirectory directory;
         const auto path = directory.path() / "scripts.txt";
         write(directory.path() / "module.t3sm", questModuleText());
-        write(path, singlePackageText("42f18916e1fbdf346d734532cea6bb744dd00e7893183bd720a770798c0cfcd9"));
+        write(path, singlePackageText("5ff928087ead46d78e4e32499cf5f8837ee47e5d5818520e53da6f523a7cfea5"));
         auto loaded = loadScriptPackageContent(path, manifest());
         auto* content = std::get_if<ScriptPackageContent>(&loaded);
         const auto globalCatalog = globals();
@@ -481,22 +506,22 @@ namespace
                 && std::get<ExecutableScriptModuleError>(result) == ExecutableScriptModuleError::InvalidWorldCatalog
                 && runtime.callbackCount() == 0;
         };
-        if (!rejects("TES3MP_SCRIPT_MODULE_V1\nabi 1\napi 5\nentry quest_start\n"
+        if (!rejects("TES3MP_SCRIPT_MODULE_V1\nabi 1\napi 6\nentry quest_start\n"
                      "callback 0 session_joined\nquest_stage_equals 999 0\nend\n",
-                "94e489db582950ca4a59b847b7f625ba040a46117d6ffdc0ef3b41ae91537ffe")
-            || !rejects("TES3MP_SCRIPT_MODULE_V1\nabi 1\napi 5\nentry quest_start\n"
+                "651ba9c97c469999b9afa2779b05e107cabe0d6b684d50a4f4bce2ac92020bb8")
+            || !rejects("TES3MP_SCRIPT_MODULE_V1\nabi 1\napi 6\nentry quest_start\n"
                         "callback 0 session_joined\nglobal_equals 999 long 7\nend\n",
-                "08724a29f5ae1d9a000ff5dd37a8dc362831e4753e3015c6e2c6f6933e9d5795")
-            || !rejects("TES3MP_SCRIPT_MODULE_V1\nabi 1\napi 5\nentry quest_start\n"
+                "37115a8d2b32b4350c11326d6b0a7352ce1d64b207cae13a483e8584eb873b9d")
+            || !rejects("TES3MP_SCRIPT_MODULE_V1\nabi 1\napi 6\nentry quest_start\n"
                         "callback 0 session_joined\nglobal_equals 1 short 7\nend\n",
-                "298b4edb380042cdb43eca237cd3d68c9ad8624508b76ca31aef2f96fe2588c2")
-            || !rejects("TES3MP_SCRIPT_MODULE_V1\nabi 1\napi 5\nentry quest_start\n"
+                "0c39087b600213e5d20b9b32735df3127aac2913d0d3fe214b1ac82550610269")
+            || !rejects("TES3MP_SCRIPT_MODULE_V1\nabi 1\napi 6\nentry quest_start\n"
                         "callback 0 session_joined\nadd_journal_entry 2 1\nend\n",
-                "cf786cf06ad145f236495be7ad72e19932d28bcb06b199adf37e16a8b75e71f6"))
+                "9567a165b6f00e9542d7b928c49b54092e2318be22ba12ed46da10fb6d95034b"))
             return false;
 
         write(directory.path() / "module.t3sm", questModuleText());
-        write(path, singlePackageText("42f18916e1fbdf346d734532cea6bb744dd00e7893183bd720a770798c0cfcd9", 4));
+        write(path, singlePackageText("5ff928087ead46d78e4e32499cf5f8837ee47e5d5818520e53da6f523a7cfea5", 4));
         auto loaded = loadScriptPackageContent(path, manifest());
         auto* content = std::get_if<ScriptPackageContent>(&loaded);
         auto state = content ? CanonicalScriptState::initial(content->stateCatalog) : std::nullopt;
@@ -520,7 +545,7 @@ namespace
         write(directory.path() / "module.t3sm", dialogueModuleText());
         const auto run = [&](std::uint32_t budget, bool expectCommands) {
             write(path, singlePackageText(
-                "947ab422abed1301cba7f953912dfb57ff52d66d2a0deef725ffc238f56310cf", budget));
+                "06de8b8767740b0d702a9c100034c315edf479b64ac71839f99eb92b23036b00", budget));
             auto loaded = loadScriptPackageContent(path, manifest());
             auto* content = std::get_if<ScriptPackageContent>(&loaded);
             auto state = content ? CanonicalScriptState::initial(content->stateCatalog) : std::nullopt;
@@ -574,6 +599,42 @@ namespace
         };
         return run(6, true) && run(5, false);
     }
+
+    bool weather_predicates_emit_revision_checked_commands_and_budget_failure_is_atomic()
+    {
+        TemporaryDirectory directory;
+        const auto path = directory.path() / "scripts.txt";
+        write(directory.path() / "module.t3sm", weatherModuleText());
+        const auto weatherCatalog = weather();
+        const auto run = [&](std::uint32_t budget, bool expectCommand) {
+            write(path, singlePackageText(
+                "bfad0ec3a74e02351ca3548b2bb4d01ece4a3cb493a0cc6c0d3eb4f80312c08b", budget));
+            auto loaded = loadScriptPackageContent(path, manifest());
+            auto* content = std::get_if<ScriptPackageContent>(&loaded);
+            auto state = content ? CanonicalScriptState::initial(content->stateCatalog) : std::nullopt;
+            auto world = CanonicalWorldState::initial(
+                CanonicalWorldTimeState{}, globals(), quests(), factions(), weatherCatalog, weatherRandom());
+            DeterministicServerScriptRuntime runtime;
+            if (!content || !state || !world || !runtime.configurePackages(content->packages, content->stateCatalog)
+                || !runtime.bindPersistentState(*state) || !runtime.bindWorldState(*world))
+                return false;
+            auto modules = loadExecutableScriptModules(
+                path, *content, globals(), quests(), factions(), weatherCatalog, runtime);
+            if (!std::get_if<ExecutableScriptModules>(&modules))
+                return false;
+            const auto pumped = joinAndPump(runtime);
+            if (!expectCommand)
+                return pumped && !*pumped && pumped->commands().empty() && runtime.pendingCommandCount() == 0
+                    && !runtime.healthy();
+            if (!pumped || !*pumped || pumped->commands().size() != 1 || !runtime.healthy())
+                return false;
+            const auto* command = std::get_if<ServerScriptSetWeatherCommand>(&pumped->commands()[0].payload());
+            return command && command->region() == id<WeatherRegionId>(50)
+                && command->target() == id<WeatherId>(2)
+                && command->expectedRevision() == WeatherRevision::initial();
+        };
+        return run(3, true) && run(2, false);
+    }
 }
 
 int main()
@@ -594,6 +655,8 @@ int main()
             &malformed_world_references_and_quest_budget_exhaustion_fail_closed },
         std::pair{ "dialogue_faction_predicates_commands_and_budget_are_bounded",
             &dialogue_faction_predicates_commands_and_budget_are_bounded },
+        std::pair{ "weather_predicates_emit_revision_checked_commands_and_budget_failure_is_atomic",
+            &weather_predicates_emit_revision_checked_commands_and_budget_failure_is_atomic },
     };
     bool passed = true;
     for (const auto& [name, test] : tests)
