@@ -45,6 +45,23 @@ namespace TES3MP
         return found == entries.end() ? nullptr : &*found;
     }
 
+    std::optional<ServerScriptFactionRead> ServerScriptReadModel::findFaction(
+        PlayerId player, FactionId faction) const noexcept
+    {
+        if (!mWorld.factionDialogueCatalog() || !mWorld.factionDialogueCatalog()->findFaction(faction))
+            return std::nullopt;
+        const auto* playerState = mWorld.findFactionState(player);
+        if (playerState)
+        {
+            const auto found = std::ranges::find(playerState->factions, faction, &CanonicalFactionState::id);
+            if (found != playerState->factions.end())
+                return ServerScriptFactionRead{ found->rank, found->membershipRevision, found->reputation,
+                    found->reputationRevision };
+        }
+        return ServerScriptFactionRead{ std::nullopt, FactionMembershipRevision::initial(), 0,
+            FactionReputationRevision::initial() };
+    }
+
     CanonicalSinkDeliveryResult DeterministicServerScriptRuntime::terminate(CanonicalSinkDeliveryResult result) noexcept
     {
         mPending.clear();
@@ -113,6 +130,16 @@ namespace TES3MP
     }
 
     ServerScriptEmitResult ServerScriptCommandEmitter::enqueue(ServerScriptAddJournalEntryCommand command) noexcept
+    {
+        return enqueuePayload(ServerScriptCommandPayload(std::move(command)));
+    }
+
+    ServerScriptEmitResult ServerScriptCommandEmitter::enqueue(ServerScriptSetFactionRankCommand command) noexcept
+    {
+        return enqueuePayload(ServerScriptCommandPayload(std::move(command)));
+    }
+
+    ServerScriptEmitResult ServerScriptCommandEmitter::enqueue(ServerScriptSetReputationCommand command) noexcept
     {
         return enqueuePayload(ServerScriptCommandPayload(std::move(command)));
     }
@@ -218,7 +245,8 @@ namespace TES3MP
             return true;
         };
         if (!addEvents(publication->changes().size()) || !addEvents(publication->joinedSessions().size())
-            || !addEvents(publication->spatialTicks().size()) || !addEvents(publication->sessionLifecycle().size()))
+            || !addEvents(publication->spatialTicks().size()) || !addEvents(publication->sessionLifecycle().size())
+            || !addEvents(publication->dialogueChoices().size()))
             return terminate(CanonicalSinkDeliveryResult::Backpressured);
         const std::uint64_t publicationOrdinal = mNextPublicationOrdinal++;
         if (eventCount == 0 || mCallbacks.empty())
@@ -278,6 +306,16 @@ namespace TES3MP
             event.mSessionGeneration = lifecycle.generation;
             event.mPlayerId = lifecycle.player;
             event.mLifecycleKind = lifecycle.kind;
+            events.push_back(std::move(event));
+        }
+        for (const auto& dialogue : publication->dialogueChoices())
+        {
+            ServerScriptEvent event;
+            event.mKind = ServerScriptEventKind::DialogueChoiceCommitted;
+            event.mStateVersion = dialogue.stateVersion;
+            event.mCommitTick = dialogue.commitTick;
+            event.mPlayerId = dialogue.player;
+            event.mDialogueChoiceId = dialogue.choice;
             events.push_back(std::move(event));
         }
 

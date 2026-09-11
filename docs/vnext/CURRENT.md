@@ -382,29 +382,29 @@ and [`character.cpp`](../../apps/openmw/mwmechanics/character.cpp).
   Production config contains one executable package and one declared integer variable.
   Declarations are canonically sorted; malformed, oversized, unknown-package,
   wrong-API, or manifest-mismatched input fails startup.
-- Script API V4 projects committed publications into immutable bounded events
-  plus a copied read model for typed globals, per-player quest stages and
-  journals, and their revisions. Execution and generated commands retain
-  replay-stable event/package/callback/instruction order.
+- Script API V5 projects committed publications into immutable bounded events
+  plus copied typed-global, quest/journal, and per-player faction rank and
+  reputation reads. It includes committed dialogue-choice identity; execution
+  and generated commands retain replay-stable order.
 - Output is staged behind callback, publication, pending, and tick bounds. Any
   callback or queue failure discards the publication output and terminates the
   runtime instead of exposing a partial result.
 - Typed next-tick commands cover safe points, time, globals, quests, journals,
-  and atomic compare-and-set of package-scoped boolean, integer, finite-float,
-  and string variables. External input, catalogs, types, and revisions validate
-  before the prepared durability commit.
+  faction rank, reputation, and atomic compare-and-set of package-scoped
+  variables. Catalogs, types, ranks, and independent revisions validate before
+  the prepared durability commit.
 - Production registers the exact package catalog before opening V2 persistence,
   then restores and binds catalog-compatible state before callbacks can run.
   Undeclared or version-conflicting callback registration fails. A callback
   sees only its package's immutable state.
 - The bounded V1 module loader rejects missing, oversized, hash-mismatched,
   malformed, wrong-API/ABI, missing-entrypoint, resource-invalid, or
-  catalog-invalid artifacts before startup. Its bounded predicates cover typed
-  global equality, quest-stage equality, and journal-entry absence; quest and
-  journal instructions emit revision-checked next-tick commands. Referenced
-  IDs, stages, entry ownership, and global types validate against the manifest
-  catalogs before registration. The packaged session-joined module retains its
-  persistent increment and adds an idempotent two-command quest consequence.
+  catalog-invalid artifacts before startup. Predicates cover typed globals,
+  quest/journal state, dialogue identity, faction rank, and reputation;
+  revision-checked actions cover quest/journal and faction consequences.
+  Referenced IDs, stages, ranks, choices, ownership, and types validate against
+  manifest catalogs before registration. The packaged module demonstrates both
+  quest and dialogue-driven cross-domain consequences.
 
 Primary sources: [`script_state.hpp`](../../components/tes3mp/include/tes3mp/script_state.hpp),
 [`server_scripting.hpp`](../../components/tes3mp/include/tes3mp/server_scripting.hpp),
@@ -418,8 +418,9 @@ Primary sources: [`script_state.hpp`](../../components/tes3mp/include/tes3mp/scr
   versions, seeds, state version/revision/tick, and normalized command results.
   Its one checksum covers established players, inventory, objects, actor
   simulation/combat/respawn and RNG, clock, typed globals, and manifest-scoped
-  per-player quest stages/journal entries and explicit script variables with
-  revisions and change ticks.
+  per-player quest stages/journal entries, faction membership/reputation, and
+  explicit script variables with revisions and change ticks. Dialogue-choice
+  identity is retained in durable command order.
 - Identity includes the exact script API, ordered packages, and typed variable
   catalog. Missing, extra, reordered, or retyped state rejects before install.
 - The reducer offers a fully prepared immutable candidate to the durability
@@ -491,27 +492,20 @@ and [`test_bake_tes3mp_content.py`](../../scripts/tests/test_bake_tes3mp_content
   catalogs.
   Historical contact uses canonical root distance and static collision
   occlusion, not rewound animation volumes or per-bone weapon traces.
-- The current resolver covers direct player-versus-server-actor weapon and
-  hand-to-hand hit, fatigue, resistance, critical/knockdown multipliers, weapon
-  wear, damage, death, reactive actor attacks, hit animations, timed in-place
-  respawn, maximum/current health, magicka, and fatigue, active fatigue recovery,
-  out-of-combat health/magicka recovery, authoritative advancement for Block,
-  the six direct melee skills, and four armor skills, server-wide difficulty,
-  passive canonical shield blocking, armor mitigation, equipment wear, and
-  stock hit/block feedback. Blocking currently applies only to actor melee
-  against players and uses canonical root facing rather than rewound animation
-  pose. The packaged default currently selects no on-strike enchantment or actor
-  disease, but the baker extracts supported winning on-strike, constant
-  defensive, elemental-shield, and disease records and fails closed on magic
-  outside that bounded subset. Player armor mitigation covers reactive actor melee;
-  actor armor and player-versus-player armor resolution are not yet modeled.
-  PvP/P2P, proactive AI aggression,
-  duration/area magic, active spellcasting, Lua hit callbacks, and general magic
-  remain unimplemented.
+- The current resolver covers direct player-versus-server-actor melee, reactive
+  attacks, resources, death/respawn, recovery, relevant skill advancement,
+  difficulty, shield blocking, armor mitigation/wear, and stock feedback.
+  Blocking and armor mitigation cover reactive actor melee against players and
+  use canonical root facing. The baker extracts the supported on-strike,
+  constant-defense, elemental-shield, and disease subset and rejects other
+  magic. Actor armor, PvP/P2P, proactive aggression, duration/area magic, active
+  casting, Lua hit callbacks, and general magic remain unimplemented.
 - Declared package variables survive restart; undeclared script/VM memory does
-  not. Executable modules now query globals and quest/journal progress and emit
-  quest consequences, but general branching/arithmetic and weather, dialogue,
-  faction, reputation, inventory, combat, or magic script surfaces are absent.
+  not. Executable modules now query globals, quest/journal progress, dialogue
+  choice, faction rank, and reputation and emit cross-domain consequences.
+  General branching/arithmetic and weather, inventory, combat, or magic script
+  surfaces remain absent. Dialogue text and presentation stay client-local;
+  desktop dialogue UI and its transport admission path are not implemented.
 - The packaged default is the verified installed vanilla manifest. Other
   loadouts still require bounded content generation and local record mappings;
   server discovery/history remain unfinished. The V2 baker binds TES3 content
@@ -526,19 +520,18 @@ and [`test_bake_tes3mp_content.py`](../../scripts/tests/test_bake_tes3mp_content
 
 ## Work still required
 
-### Next milestone: broader executable gameplay scripts
+### Next milestone: canonical weather consequences
 
-Continue the versioned immutable event/query and typed-command surface with a
-bounded dialogue/faction/reputation slice or canonical weather consequences.
-TES3MP 0.8.x scripts and saves remain unsupported.
+Continue the versioned immutable event/query and typed-command surface with
+canonical weather consequences. TES3MP 0.8.x scripts and saves remain unsupported.
 
 ### Required before the desktop/PC-VR release
 
 1. Combat, stats, magic, death, resurrection, and respawn.
 2. Weather and broader durable world-state transitions; canonical time and
    globals are implemented.
-3. Dialogue, factions, reputation, and broader quest/journal gameplay
-   consequences; durable quest stages and journal entries are implemented.
+3. Broader dialogue/faction/reputation and quest/journal gameplay consequences;
+   their bounded durable authority and script slice are implemented.
 4. Script content loading/runtime composition and expansion of the versioned
    immutable event/typed-command surface for release gameplay domains; the
    legacy CoreScripts API is not reused.
@@ -563,11 +556,11 @@ and do not enter protocol or canonical state.
 
 ## Verification snapshot
 
-The API-V4 quest-script working tree passed focused runtime/module tests, the
-dedicated-server and standalone aggregates, Windows OpenMW/server/headless
-builds, a fresh packaged bake/verify, all 198 repository Python tests, and
+The API-V5 dialogue/faction working tree passed focused core, persistence,
+runtime, module, and application tests; Windows dedicated-server and standalone
+contracts; a fresh packaged bake/verify; all 198 repository Python tests; and
 patch-registry verification on 2026-09-10. The separate baseline-provenance
-verifier still reports the branch's pre-existing registry drift.
+verifier still reports pre-existing registry drift.
 
 Sanitizer/fuzzer profiles, non-Windows builds, PC-VR hardware, the upstream
 OpenMW baseline, and a visible OpenMW walkthrough were not run.

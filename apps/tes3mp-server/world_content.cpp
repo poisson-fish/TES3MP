@@ -13,7 +13,7 @@ namespace TES3MP::ServerApp
 {
     namespace
     {
-        constexpr std::string_view Header = "TES3MP_WORLD_V2";
+        constexpr std::string_view Header = "TES3MP_WORLD_V3";
         constexpr std::size_t MaximumFields = MaximumQuestStagesPerQuest + 3;
 
         template <class Value>
@@ -75,6 +75,8 @@ namespace TES3MP::ServerApp
         std::vector<GlobalVariableCatalogEntry> globals;
         std::vector<QuestCatalogEntry> quests;
         std::vector<JournalCatalogEntry> journal;
+        std::vector<FactionCatalogEntry> factions;
+        std::vector<DialogueChoiceCatalogEntry> dialogueChoices;
         std::size_t lineNumber = 0;
         for (std::size_t begin = 0; begin <= text.size();)
         {
@@ -193,6 +195,59 @@ namespace TES3MP::ServerApp
                         return WorldContentError::Malformed;
                     journal.push_back({ *entry, *quest, *stage });
                 }
+                else if (values[0] == "faction")
+                {
+                    if (values.size() < 3 || factions.size() == MaximumFactionCatalogEntries
+                        || values.size() - 2 > MaximumFactionRanksPerFaction)
+                        return factions.size() == MaximumFactionCatalogEntries
+                                || values.size() - 2 > MaximumFactionRanksPerFaction
+                            ? WorldContentError::TooLarge
+                            : WorldContentError::Malformed;
+                    const auto rawId = number<std::uint64_t>(values[1]);
+                    const auto id = rawId ? FactionId::fromValue(*rawId) : std::nullopt;
+                    if (!id)
+                        return WorldContentError::Malformed;
+                    FactionCatalogEntry faction{ *id, {} };
+                    faction.ranks.reserve(values.size() - 2);
+                    for (const auto field : values.subspan(2))
+                    {
+                        const auto rawRank = number<std::uint64_t>(field);
+                        const auto rank = rawRank ? FactionRank::fromValue(*rawRank) : std::nullopt;
+                        if (!rank)
+                            return WorldContentError::Malformed;
+                        faction.ranks.push_back(*rank);
+                    }
+                    factions.push_back(std::move(faction));
+                }
+                else if (values[0] == "dialogue_choice")
+                {
+                    if ((values.size() != 3 && values.size() != 5)
+                        || dialogueChoices.size() == MaximumDialogueChoiceCatalogEntries)
+                        return dialogueChoices.size() == MaximumDialogueChoiceCatalogEntries
+                            ? WorldContentError::TooLarge
+                            : WorldContentError::Malformed;
+                    const auto rawId = number<std::uint64_t>(values[1]);
+                    const auto id = rawId ? DialogueChoiceId::fromValue(*rawId) : std::nullopt;
+                    if (!id)
+                        return WorldContentError::Malformed;
+                    if (values.size() == 3)
+                    {
+                        if (values[2] != "unrestricted")
+                            return WorldContentError::Malformed;
+                        dialogueChoices.push_back({ *id });
+                    }
+                    else
+                    {
+                        const auto rawFaction = number<std::uint64_t>(values[2]);
+                        const auto rawRank = number<std::uint64_t>(values[3]);
+                        const auto faction = rawFaction ? FactionId::fromValue(*rawFaction) : std::nullopt;
+                        const auto rank = rawRank ? FactionRank::fromValue(*rawRank) : std::nullopt;
+                        const auto reputation = number<std::int32_t>(values[4]);
+                        if (!faction || !rank || !reputation)
+                            return WorldContentError::Malformed;
+                        dialogueChoices.push_back({ *id, *faction, *rank, *reputation });
+                    }
+                }
                 else
                     return WorldContentError::Malformed;
             }
@@ -206,11 +261,14 @@ namespace TES3MP::ServerApp
             return WorldContentError::ManifestMismatch;
         auto catalog = GlobalVariableCatalog::create(globals);
         auto questJournal = QuestJournalCatalog::create(*declaredManifest, quests, journal);
-        auto world
-            = catalog && questJournal ? CanonicalWorldState::initial(*time, *catalog, *questJournal) : std::nullopt;
-        if (!catalog || !questJournal || !world)
+        auto factionDialogue = FactionDialogueCatalog::create(*declaredManifest, factions, dialogueChoices);
+        auto world = catalog && questJournal && factionDialogue
+            ? CanonicalWorldState::initial(*time, *catalog, *questJournal, *factionDialogue)
+            : std::nullopt;
+        if (!catalog || !questJournal || !factionDialogue || !world)
             return WorldContentError::InvalidCatalog;
-        return WorldContent{ std::move(*catalog), std::move(*questJournal), std::move(*world) };
+        return WorldContent{
+            std::move(*catalog), std::move(*questJournal), std::move(*factionDialogue), std::move(*world) };
     }
     catch (...)
     {

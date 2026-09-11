@@ -192,6 +192,26 @@ namespace TES3MP::Detail
     {
         static constexpr std::string_view name = "JournalRevision";
     };
+    struct FactionIdTag
+    {
+        static constexpr std::string_view name = "FactionId";
+    };
+    struct FactionRankTag
+    {
+        static constexpr std::string_view name = "FactionRank";
+    };
+    struct FactionMembershipRevisionTag
+    {
+        static constexpr std::string_view name = "FactionMembershipRevision";
+    };
+    struct FactionReputationRevisionTag
+    {
+        static constexpr std::string_view name = "FactionReputationRevision";
+    };
+    struct DialogueChoiceIdTag
+    {
+        static constexpr std::string_view name = "DialogueChoiceId";
+    };
     struct ScriptVariableIdTag
     {
         static constexpr std::string_view name = "ScriptVariableId";
@@ -280,6 +300,13 @@ namespace TES3MP
     using QuestRevision = Detail::StrongValue<Detail::QuestRevisionTag, Detail::StrongValuePolicy::CounterFromOne>;
     using JournalEntryId = Detail::StrongValue<Detail::JournalEntryIdTag, Detail::StrongValuePolicy::Identity>;
     using JournalRevision = Detail::StrongValue<Detail::JournalRevisionTag, Detail::StrongValuePolicy::CounterFromOne>;
+    using FactionId = Detail::StrongValue<Detail::FactionIdTag, Detail::StrongValuePolicy::Identity>;
+    using FactionRank = Detail::StrongValue<Detail::FactionRankTag, Detail::StrongValuePolicy::CounterFromZero>;
+    using FactionMembershipRevision
+        = Detail::StrongValue<Detail::FactionMembershipRevisionTag, Detail::StrongValuePolicy::CounterFromOne>;
+    using FactionReputationRevision
+        = Detail::StrongValue<Detail::FactionReputationRevisionTag, Detail::StrongValuePolicy::CounterFromOne>;
+    using DialogueChoiceId = Detail::StrongValue<Detail::DialogueChoiceIdTag, Detail::StrongValuePolicy::Identity>;
     using ScriptVariableId = Detail::StrongValue<Detail::ScriptVariableIdTag, Detail::StrongValuePolicy::Identity>;
     using ScriptStateRevision
         = Detail::StrongValue<Detail::ScriptStateRevisionTag, Detail::StrongValuePolicy::CounterFromOne>;

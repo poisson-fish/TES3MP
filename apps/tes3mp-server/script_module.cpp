@@ -48,6 +48,23 @@ namespace TES3MP::ServerApp
             GlobalVariableValue value;
         };
 
+        struct DialogueChoiceIs
+        {
+            DialogueChoiceId choice;
+        };
+
+        struct FactionRankAtLeast
+        {
+            FactionId faction;
+            FactionRank rank;
+        };
+
+        struct ReputationAtLeast
+        {
+            FactionId faction;
+            std::int32_t reputation;
+        };
+
         struct SetQuestStage
         {
             QuestId quest;
@@ -60,8 +77,21 @@ namespace TES3MP::ServerApp
             JournalEntryId entry;
         };
 
+        struct SetFactionRank
+        {
+            FactionId faction;
+            FactionRank rank;
+        };
+
+        struct SetReputation
+        {
+            FactionId faction;
+            std::int32_t reputation;
+        };
+
         using Instruction = std::variant<IncrementInteger, ConsumeBudget, QuestStageEquals, JournalEntryAbsent,
-            GlobalEquals, SetQuestStage, AddJournalEntry>;
+            GlobalEquals, DialogueChoiceIs, FactionRankAtLeast, ReputationAtLeast, SetQuestStage, AddJournalEntry,
+            SetFactionRank, SetReputation>;
 
         struct ParsedCallback
         {
@@ -91,7 +121,10 @@ namespace TES3MP::ServerApp
                 {
                     if (!std::holds_alternative<QuestStageEquals>(instruction)
                         && !std::holds_alternative<JournalEntryAbsent>(instruction)
-                        && !std::holds_alternative<GlobalEquals>(instruction))
+                        && !std::holds_alternative<GlobalEquals>(instruction)
+                        && !std::holds_alternative<DialogueChoiceIs>(instruction)
+                        && !std::holds_alternative<FactionRankAtLeast>(instruction)
+                        && !std::holds_alternative<ReputationAtLeast>(instruction))
                         continue;
                     if (consumed == mBudget || !read)
                         return ServerScriptCallbackResult::Failed;
@@ -122,12 +155,36 @@ namespace TES3MP::ServerApp
                         if (current->value != globalPredicate->value)
                             return ServerScriptCallbackResult::Accepted;
                     }
+                    else if (const auto* dialoguePredicate = std::get_if<DialogueChoiceIs>(&instruction))
+                    {
+                        if (input.event().dialogueChoiceId() != dialoguePredicate->choice)
+                            return ServerScriptCallbackResult::Accepted;
+                    }
+                    else if (const auto* factionPredicate = std::get_if<FactionRankAtLeast>(&instruction))
+                    {
+                        const auto player = input.event().playerId();
+                        const auto current = player ? read->findFaction(*player, factionPredicate->faction)
+                                                    : std::nullopt;
+                        if (!current || !current->rank || *current->rank < factionPredicate->rank)
+                            return ServerScriptCallbackResult::Accepted;
+                    }
+                    else if (const auto* reputationPredicate = std::get_if<ReputationAtLeast>(&instruction))
+                    {
+                        const auto player = input.event().playerId();
+                        const auto current = player ? read->findFaction(*player, reputationPredicate->faction)
+                                                    : std::nullopt;
+                        if (!current || current->reputation < reputationPredicate->reputation)
+                            return ServerScriptCallbackResult::Accepted;
+                    }
                 }
                 for (const auto& instruction : mInstructions)
                 {
                     if (std::holds_alternative<QuestStageEquals>(instruction)
                         || std::holds_alternative<JournalEntryAbsent>(instruction)
-                        || std::holds_alternative<GlobalEquals>(instruction))
+                        || std::holds_alternative<GlobalEquals>(instruction)
+                        || std::holds_alternative<DialogueChoiceIs>(instruction)
+                        || std::holds_alternative<FactionRankAtLeast>(instruction)
+                        || std::holds_alternative<ReputationAtLeast>(instruction))
                         continue;
                     const auto cost = std::holds_alternative<ConsumeBudget>(instruction)
                         ? std::get<ConsumeBudget>(instruction).units
@@ -174,6 +231,28 @@ namespace TES3MP::ServerApp
                                 != ServerScriptEmitResult::Accepted)
                             return ServerScriptCallbackResult::Failed;
                     }
+                    else if (const auto* setFaction = std::get_if<SetFactionRank>(&instruction))
+                    {
+                        const auto player = input.event().playerId();
+                        const auto current
+                            = player && read ? read->findFaction(*player, setFaction->faction) : std::nullopt;
+                        if (!player || !current
+                            || output.enqueue(ServerScriptSetFactionRankCommand(
+                                   *player, setFaction->faction, current->membershipRevision, setFaction->rank))
+                                != ServerScriptEmitResult::Accepted)
+                            return ServerScriptCallbackResult::Failed;
+                    }
+                    else if (const auto* setReputation = std::get_if<SetReputation>(&instruction))
+                    {
+                        const auto player = input.event().playerId();
+                        const auto current
+                            = player && read ? read->findFaction(*player, setReputation->faction) : std::nullopt;
+                        if (!player || !current
+                            || output.enqueue(ServerScriptSetReputationCommand(*player, setReputation->faction,
+                                   current->reputationRevision, setReputation->reputation))
+                                != ServerScriptEmitResult::Accepted)
+                            return ServerScriptCallbackResult::Failed;
+                    }
                 }
                 return ServerScriptCallbackResult::Accepted;
             }
@@ -208,6 +287,8 @@ namespace TES3MP::ServerApp
                 return ServerScriptEventKind::SpatialStateChanged;
             if (text == "session_lifecycle")
                 return ServerScriptEventKind::SessionLifecycle;
+            if (text == "dialogue_choice_committed")
+                return ServerScriptEventKind::DialogueChoiceCommitted;
             return std::nullopt;
         }
 
@@ -370,7 +451,8 @@ namespace TES3MP::ServerApp
 
         std::variant<ParsedModule, ExecutableScriptModuleError> parseModule(std::string_view text,
             const ScriptModuleBinding& binding, const ServerScriptStateCatalog& stateCatalog,
-            const GlobalVariableCatalog& globalCatalog, const QuestJournalCatalog& questJournalCatalog) noexcept
+            const GlobalVariableCatalog& globalCatalog, const QuestJournalCatalog& questJournalCatalog,
+            const FactionDialogueCatalog& factionDialogueCatalog) noexcept
         try
         {
             ParsedModule module;
@@ -550,6 +632,66 @@ namespace TES3MP::ServerApp
                             return ExecutableScriptModuleError::InvalidResourceBounds;
                         callback->instructions.emplace_back(GlobalEquals{ *id, value });
                     }
+                    else if ((*tokens)[0] == "dialogue_choice_is")
+                    {
+                        const auto rawChoice
+                            = tokens->size() == 2 ? number<std::uint64_t>((*tokens)[1]) : std::nullopt;
+                        const auto choice = rawChoice ? DialogueChoiceId::fromValue(*rawChoice) : std::nullopt;
+                        if (!callback || !choice || callback->sawAction)
+                            return ExecutableScriptModuleError::Malformed;
+                        if (!factionDialogueCatalog.findDialogueChoice(*choice))
+                            return ExecutableScriptModuleError::InvalidWorldCatalog;
+                        if (callback->instructions.size() == MaximumScriptModuleInstructionsPerCallback)
+                            return ExecutableScriptModuleError::InvalidResourceBounds;
+                        callback->instructions.emplace_back(DialogueChoiceIs{ *choice });
+                    }
+                    else if ((*tokens)[0] == "faction_rank_at_least"
+                        || (*tokens)[0] == "set_faction_rank")
+                    {
+                        const auto rawFaction
+                            = tokens->size() == 3 ? number<std::uint64_t>((*tokens)[1]) : std::nullopt;
+                        const auto rawRank
+                            = tokens->size() == 3 ? number<std::uint64_t>((*tokens)[2]) : std::nullopt;
+                        const auto faction = rawFaction ? FactionId::fromValue(*rawFaction) : std::nullopt;
+                        const auto rank = rawRank ? FactionRank::fromValue(*rawRank) : std::nullopt;
+                        const auto* declaration = faction ? factionDialogueCatalog.findFaction(*faction) : nullptr;
+                        if (!callback || !faction || !rank
+                            || ((*tokens)[0] == "faction_rank_at_least" && callback->sawAction))
+                            return ExecutableScriptModuleError::Malformed;
+                        if (!declaration || std::ranges::find(declaration->ranks, *rank) == declaration->ranks.end())
+                            return ExecutableScriptModuleError::InvalidWorldCatalog;
+                        if (callback->instructions.size() == MaximumScriptModuleInstructionsPerCallback)
+                            return ExecutableScriptModuleError::InvalidResourceBounds;
+                        if ((*tokens)[0] == "faction_rank_at_least")
+                            callback->instructions.emplace_back(FactionRankAtLeast{ *faction, *rank });
+                        else
+                        {
+                            callback->instructions.emplace_back(SetFactionRank{ *faction, *rank });
+                            callback->sawAction = true;
+                        }
+                    }
+                    else if ((*tokens)[0] == "reputation_at_least" || (*tokens)[0] == "set_reputation")
+                    {
+                        const auto rawFaction
+                            = tokens->size() == 3 ? number<std::uint64_t>((*tokens)[1]) : std::nullopt;
+                        const auto faction = rawFaction ? FactionId::fromValue(*rawFaction) : std::nullopt;
+                        const auto reputation
+                            = tokens->size() == 3 ? number<std::int32_t>((*tokens)[2]) : std::nullopt;
+                        if (!callback || !faction || !reputation
+                            || ((*tokens)[0] == "reputation_at_least" && callback->sawAction))
+                            return ExecutableScriptModuleError::Malformed;
+                        if (!factionDialogueCatalog.findFaction(*faction))
+                            return ExecutableScriptModuleError::InvalidWorldCatalog;
+                        if (callback->instructions.size() == MaximumScriptModuleInstructionsPerCallback)
+                            return ExecutableScriptModuleError::InvalidResourceBounds;
+                        if ((*tokens)[0] == "reputation_at_least")
+                            callback->instructions.emplace_back(ReputationAtLeast{ *faction, *reputation });
+                        else
+                        {
+                            callback->instructions.emplace_back(SetReputation{ *faction, *reputation });
+                            callback->sawAction = true;
+                        }
+                    }
                     else if ((*tokens)[0] == "end")
                     {
                         if (tokens->size() != 1 || !callback || callback->instructions.empty())
@@ -586,7 +728,8 @@ namespace TES3MP::ServerApp
 
     ExecutableScriptModuleLoadResult loadExecutableScriptModules(const std::filesystem::path& packageContentPath,
         const ScriptPackageContent& content, const GlobalVariableCatalog& globalCatalog,
-        const QuestJournalCatalog& questJournalCatalog, DeterministicServerScriptRuntime& runtime) noexcept
+        const QuestJournalCatalog& questJournalCatalog, const FactionDialogueCatalog& factionDialogueCatalog,
+        DeterministicServerScriptRuntime& runtime) noexcept
     try
     {
         if (content.modules.size() != content.packages.size())
@@ -629,7 +772,8 @@ namespace TES3MP::ServerApp
             if (sha256(bytes) != binding.sha256)
                 return ExecutableScriptModuleError::HashMismatch;
             const std::string_view text(reinterpret_cast<const char*>(bytes.data()), bytes.size());
-            auto parsed = parseModule(text, binding, content.stateCatalog, globalCatalog, questJournalCatalog);
+            auto parsed = parseModule(
+                text, binding, content.stateCatalog, globalCatalog, questJournalCatalog, factionDialogueCatalog);
             const auto* module = std::get_if<ParsedModule>(&parsed);
             if (!module)
                 return std::get<ExecutableScriptModuleError>(parsed);
@@ -659,5 +803,15 @@ namespace TES3MP::ServerApp
     catch (...)
     {
         return ExecutableScriptModuleError::Unavailable;
+    }
+
+    ExecutableScriptModuleLoadResult loadExecutableScriptModules(const std::filesystem::path& packageContentPath,
+        const ScriptPackageContent& content, const GlobalVariableCatalog& globalCatalog,
+        const QuestJournalCatalog& questJournalCatalog, DeterministicServerScriptRuntime& runtime) noexcept
+    {
+        const auto empty = FactionDialogueCatalog::create(questJournalCatalog.manifest(), {}, {});
+        return empty ? loadExecutableScriptModules(
+                           packageContentPath, content, globalCatalog, questJournalCatalog, *empty, runtime)
+                     : ExecutableScriptModuleLoadResult(ExecutableScriptModuleError::InvalidWorldCatalog);
     }
 }

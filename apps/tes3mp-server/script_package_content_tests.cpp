@@ -70,16 +70,25 @@ namespace
         return QuestJournalCatalog::create(manifest().id(), questEntries, journalEntries).value();
     }
 
+    FactionDialogueCatalog factions()
+    {
+        const std::array factionEntries{
+            FactionCatalogEntry{ id<FactionId>(1), { id<FactionRank>(0), id<FactionRank>(1) } } };
+        const std::array choices{ DialogueChoiceCatalogEntry{
+            id<DialogueChoiceId>(1), id<FactionId>(1), id<FactionRank>(0), 5 } };
+        return FactionDialogueCatalog::create(manifest().id(), factionEntries, choices).value();
+    }
+
     std::string packageText(std::uint32_t firstVersion = 1, std::string_view firstInitial = "7")
     {
         return "TES3MP_SCRIPT_PACKAGES_V2\n"
                "manifest 0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20\n"
-               "package 22 1 20 4 1 module22.t3sm "
-               "fd3968691fc811bf759daf39e30c00cbd1320c95dccc90861039a714229966ff joined 32\n"
+               "package 22 1 20 5 1 module22.t3sm "
+               "534424a152d2aff8779fe28d1c8f4ec9ad6b35208f86fa49fef34c1690127d17 joined 32\n"
                "package 11 "
             + std::to_string(firstVersion)
-            + " 10 4 1 module11.t3sm "
-              "4057f6a499aefe85a887e8a1b217658cae86183415cd7e6141c9b37f401bb538 joined 32\n"
+            + " 10 5 1 module11.t3sm "
+              "8f8e49a1b09145a3ca84c70bc21838b85761db293e3afe476db513bad37627ca joined 32\n"
               "variable 22 4 string_hex 68656c6c6f\n"
               "variable 22 5 integer 0\n"
               "variable 11 2 boolean true\n"
@@ -96,7 +105,7 @@ namespace
 
     std::string questModuleText()
     {
-        return "TES3MP_SCRIPT_MODULE_V1\nabi 1\napi 4\nentry quest_start\n"
+        return "TES3MP_SCRIPT_MODULE_V1\nabi 1\napi 5\nentry quest_start\n"
                "callback 0 session_joined\n"
                "global_equals 1 long 7\n"
                "quest_stage_equals 1 0\n"
@@ -106,11 +115,24 @@ namespace
                "end\n";
     }
 
+    std::string dialogueModuleText()
+    {
+        return "TES3MP_SCRIPT_MODULE_V1\nabi 1\napi 5\nentry quest_start\n"
+               "callback 0 dialogue_choice_committed\n"
+               "dialogue_choice_is 1\n"
+               "faction_rank_at_least 1 0\n"
+               "reputation_at_least 1 5\n"
+               "set_quest_stage 1 10\n"
+               "set_faction_rank 1 1\n"
+               "set_reputation 1 9\n"
+               "end\n";
+    }
+
     std::string singlePackageText(std::string_view hash, std::uint32_t budget = 5)
     {
         return "TES3MP_SCRIPT_PACKAGES_V2\n"
                "manifest 0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20\n"
-               "package 1 1 0 4 1 module.t3sm "
+               "package 1 1 0 5 1 module.t3sm "
             + std::string(hash) + " quest_start " + std::to_string(budget) + "\n";
     }
 
@@ -258,7 +280,7 @@ namespace
         write(path,
             "TES3MP_SCRIPT_PACKAGES_V2\nmanifest "
             "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff\n"
-            "package 1 1 0 4 1 module.t3sm "
+            "package 1 1 0 5 1 module.t3sm "
             "a51a8b25ada18922a00da8db3e1c8724fa27a063dfc0528e80ffaf1a1aa7300e joined 32\n");
         auto mismatched = loadScriptPackageContent(path, manifest());
         if (!std::get_if<ScriptPackageContentError>(&mismatched)
@@ -267,7 +289,7 @@ namespace
         write(path,
             "TES3MP_SCRIPT_PACKAGES_V2\nmanifest "
             "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20\n"
-            "package 1 1 0 5 1 module.t3sm "
+            "package 1 1 0 6 1 module.t3sm "
             "a51a8b25ada18922a00da8db3e1c8724fa27a063dfc0528e80ffaf1a1aa7300e joined 32\n");
         auto wrongApi = loadScriptPackageContent(path, manifest());
         if (std::get<ScriptPackageContentError>(wrongApi) != ScriptPackageContentError::Malformed)
@@ -275,7 +297,7 @@ namespace
         write(path,
             "TES3MP_SCRIPT_PACKAGES_V2\nmanifest "
             "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20\n"
-            "package 1 1 0 4 1 module.t3sm "
+            "package 1 1 0 5 1 module.t3sm "
             "a51a8b25ada18922a00da8db3e1c8724fa27a063dfc0528e80ffaf1a1aa7300e joined 32\n"
             "variable 2 1 integer 0\n");
         auto unknownPackage = loadScriptPackageContent(path, manifest());
@@ -286,7 +308,7 @@ namespace
               "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20\n";
         for (std::uint64_t value = 1; value <= MaximumServerScriptPackages + 1; ++value)
             tooMany += "package " + std::to_string(value) + " 1 " + std::to_string(value)
-                + " 4 1 module.t3sm "
+                + " 5 1 module.t3sm "
                   "a51a8b25ada18922a00da8db3e1c8724fa27a063dfc0528e80ffaf1a1aa7300e joined 32\n";
         write(path, tooMany);
         auto oversized = loadScriptPackageContent(path, manifest());
@@ -324,10 +346,10 @@ namespace
         if (std::get<ExecutableScriptModuleError>(oversized) != ExecutableScriptModuleError::TooLarge)
             return false;
 
-        write(directory.path() / "module11.t3sm", moduleText(1, 5));
+        write(directory.path() / "module11.t3sm", moduleText(1, 6));
         auto apiText = packageText();
-        apiText.replace(apiText.find("4057f6a499aefe85a887e8a1b217658cae86183415cd7e6141c9b37f401bb538"), 64,
-            "8f8e49a1b09145a3ca84c70bc21838b85761db293e3afe476db513bad37627ca");
+        apiText.replace(apiText.find("8f8e49a1b09145a3ca84c70bc21838b85761db293e3afe476db513bad37627ca"), 64,
+            "ff389bbabd319cd7e79b6b3ea4136f43fb70afbc04a30755bee9aeb8ebf1f24b");
         write(path, apiText);
         auto apiLoaded = loadScriptPackageContent(path, manifest());
         auto* apiContent = std::get_if<ScriptPackageContent>(&apiLoaded);
@@ -366,11 +388,11 @@ namespace
             return false;
 
         const auto budgetModule
-            = "TES3MP_SCRIPT_MODULE_V1\nabi 1\napi 4\nentry joined\ncallback 0 session_joined\nconsume 2\nend\n";
+            = "TES3MP_SCRIPT_MODULE_V1\nabi 1\napi 5\nentry joined\ncallback 0 session_joined\nconsume 2\nend\n";
         write(directory.path() / "module11.t3sm", budgetModule);
         auto budgetText = packageText();
-        budgetText.replace(budgetText.find("4057f6a499aefe85a887e8a1b217658cae86183415cd7e6141c9b37f401bb538"), 64,
-            "98b320e00518eafd4956912b30159cd7509dac43572edf643169e96e69def359");
+        budgetText.replace(budgetText.find("8f8e49a1b09145a3ca84c70bc21838b85761db293e3afe476db513bad37627ca"), 64,
+            "48d4bd557eff79ca6e266cee93d61923d15aa7a4d449bea5271e3e4dc145880c");
         const auto budgetPosition = budgetText.find(" joined 32", budgetText.find("module11.t3sm"));
         budgetText.replace(budgetPosition, 10, " joined 1");
         write(path, budgetText);
@@ -393,7 +415,7 @@ namespace
         TemporaryDirectory directory;
         const auto path = directory.path() / "scripts.txt";
         write(directory.path() / "module.t3sm", questModuleText());
-        write(path, singlePackageText("f31b2b3f333628ed9ac841bcfc45fbe215b9e45d27cb85f46f69df082af413b9"));
+        write(path, singlePackageText("42f18916e1fbdf346d734532cea6bb744dd00e7893183bd720a770798c0cfcd9"));
         auto loaded = loadScriptPackageContent(path, manifest());
         auto* content = std::get_if<ScriptPackageContent>(&loaded);
         const auto globalCatalog = globals();
@@ -459,22 +481,22 @@ namespace
                 && std::get<ExecutableScriptModuleError>(result) == ExecutableScriptModuleError::InvalidWorldCatalog
                 && runtime.callbackCount() == 0;
         };
-        if (!rejects("TES3MP_SCRIPT_MODULE_V1\nabi 1\napi 4\nentry quest_start\n"
+        if (!rejects("TES3MP_SCRIPT_MODULE_V1\nabi 1\napi 5\nentry quest_start\n"
                      "callback 0 session_joined\nquest_stage_equals 999 0\nend\n",
-                "3ff72495769913e31ace8fbcccd6ec04eed0549b1b6438c578f80057f19c283d")
-            || !rejects("TES3MP_SCRIPT_MODULE_V1\nabi 1\napi 4\nentry quest_start\n"
+                "94e489db582950ca4a59b847b7f625ba040a46117d6ffdc0ef3b41ae91537ffe")
+            || !rejects("TES3MP_SCRIPT_MODULE_V1\nabi 1\napi 5\nentry quest_start\n"
                         "callback 0 session_joined\nglobal_equals 999 long 7\nend\n",
-                "18afa7d177a43eb8ef6afeba99870a98387d33cfff29652c8b6cff08f3834ad4")
-            || !rejects("TES3MP_SCRIPT_MODULE_V1\nabi 1\napi 4\nentry quest_start\n"
+                "08724a29f5ae1d9a000ff5dd37a8dc362831e4753e3015c6e2c6f6933e9d5795")
+            || !rejects("TES3MP_SCRIPT_MODULE_V1\nabi 1\napi 5\nentry quest_start\n"
                         "callback 0 session_joined\nglobal_equals 1 short 7\nend\n",
-                "6689072155090dd7da1066b428506a452e25d9135f6d52182e14a5d9343eeccd")
-            || !rejects("TES3MP_SCRIPT_MODULE_V1\nabi 1\napi 4\nentry quest_start\n"
+                "298b4edb380042cdb43eca237cd3d68c9ad8624508b76ca31aef2f96fe2588c2")
+            || !rejects("TES3MP_SCRIPT_MODULE_V1\nabi 1\napi 5\nentry quest_start\n"
                         "callback 0 session_joined\nadd_journal_entry 2 1\nend\n",
-                "885eb6ae690bf88b10a7268baeed4da9c9b86cd64a3fc633220682112ccd71c4"))
+                "cf786cf06ad145f236495be7ad72e19932d28bcb06b199adf37e16a8b75e71f6"))
             return false;
 
         write(directory.path() / "module.t3sm", questModuleText());
-        write(path, singlePackageText("f31b2b3f333628ed9ac841bcfc45fbe215b9e45d27cb85f46f69df082af413b9", 4));
+        write(path, singlePackageText("42f18916e1fbdf346d734532cea6bb744dd00e7893183bd720a770798c0cfcd9", 4));
         auto loaded = loadScriptPackageContent(path, manifest());
         auto* content = std::get_if<ScriptPackageContent>(&loaded);
         auto state = content ? CanonicalScriptState::initial(content->stateCatalog) : std::nullopt;
@@ -489,6 +511,68 @@ namespace
         const auto exhausted = joinAndPump(runtime);
         return exhausted && !*exhausted && exhausted->commands().empty() && runtime.pendingCommandCount() == 0
             && !runtime.healthy();
+    }
+
+    bool dialogue_faction_predicates_commands_and_budget_are_bounded()
+    {
+        TemporaryDirectory directory;
+        const auto path = directory.path() / "scripts.txt";
+        write(directory.path() / "module.t3sm", dialogueModuleText());
+        const auto run = [&](std::uint32_t budget, bool expectCommands) {
+            write(path, singlePackageText(
+                "947ab422abed1301cba7f953912dfb57ff52d66d2a0deef725ffc238f56310cf", budget));
+            auto loaded = loadScriptPackageContent(path, manifest());
+            auto* content = std::get_if<ScriptPackageContent>(&loaded);
+            auto state = content ? CanonicalScriptState::initial(content->stateCatalog) : std::nullopt;
+            auto world = CanonicalWorldState::initial(
+                CanonicalWorldTimeState{}, globals(), quests(), factions())
+                             .value();
+            world = std::get<CanonicalWorldState>(setCanonicalFactionRank(world, id<PlayerId>(1), id<FactionId>(1),
+                FactionMembershipRevision::initial(), id<FactionRank>(0), id<ServerTick>(1)));
+            world = std::get<CanonicalWorldState>(setCanonicalFactionReputation(world, id<PlayerId>(1),
+                id<FactionId>(1), FactionReputationRevision::initial(), 5, id<ServerTick>(1)));
+            DeterministicServerScriptRuntime runtime;
+            if (!content || !state || !runtime.configurePackages(content->packages, content->stateCatalog)
+                || !runtime.bindPersistentState(*state) || !runtime.bindWorldState(world))
+                return false;
+            auto modules
+                = loadExecutableScriptModules(path, *content, globals(), quests(), factions(), runtime);
+            if (!std::get_if<ExecutableScriptModules>(&modules) || !runtime.pump(ServerTick::initial()))
+                return false;
+            const auto zero = Turn32::fromValue(0);
+            const std::array players{ CanonicalPlayerEntityState(id<PlayerId>(1), id<EntityId>(2),
+                id<AppearanceId>(2),
+                Transform(CellId::interior(id<CellSpaceId>(1)), Position3(0, 0, 0),
+                    Orientation3(zero, zero, zero)),
+                LinearVelocity3(0, 0, 0), EntityRevision::initial(), AuthorityEpoch::initial(),
+                ServerTick::initial()) };
+            const std::array sessions{ CanonicalSessionProgress(id<SessionId>(3), SessionGeneration::initial(),
+                id<PlayerId>(1), id<EntityId>(2), std::nullopt) };
+            auto initial = std::get<CanonicalServerState>(createCanonicalServerState(players, sessions));
+            NullMetricSink metrics;
+            NullStructuredEventSink events;
+            Observability observability(metrics, events);
+            CanonicalCommandReducer reducer(std::move(initial), observability,
+                CanonicalSinkBundle(nullptr, nullptr, &runtime, nullptr), manifest());
+            auto dialogue
+                = reducer.prepareDialogueChoice(id<PlayerId>(1), id<DialogueChoiceId>(1), world, id<ServerTick>(1));
+            if (!dialogue || !reducer.commit(std::move(*dialogue)))
+                return false;
+            const auto pumped = runtime.pump(id<ServerTick>(2));
+            if (!expectCommands)
+                return !pumped && pumped.commands().empty() && !runtime.healthy();
+            if (!pumped || pumped.commands().size() != 3)
+                return false;
+            const auto* quest = std::get_if<ServerScriptSetQuestStageCommand>(&pumped.commands()[0].payload());
+            const auto* rank = std::get_if<ServerScriptSetFactionRankCommand>(&pumped.commands()[1].payload());
+            const auto* reputation = std::get_if<ServerScriptSetReputationCommand>(&pumped.commands()[2].payload());
+            return quest && rank && reputation && quest->stage() == id<QuestStage>(10)
+                && rank->rank() == id<FactionRank>(1) && rank->expectedRevision().value() == 2
+                && reputation->reputation() == 9 && reputation->expectedRevision().value() == 2
+                && pumped.commands()[0].order() < pumped.commands()[1].order()
+                && pumped.commands()[1].order() < pumped.commands()[2].order();
+        };
+        return run(6, true) && run(5, false);
     }
 }
 
@@ -508,6 +592,8 @@ int main()
             &quest_predicates_emit_ordered_revision_checked_commands_and_restart_is_idempotent },
         std::pair{ "malformed_world_references_and_quest_budget_exhaustion_fail_closed",
             &malformed_world_references_and_quest_budget_exhaustion_fail_closed },
+        std::pair{ "dialogue_faction_predicates_commands_and_budget_are_bounded",
+            &dialogue_faction_predicates_commands_and_budget_are_bounded },
     };
     bool passed = true;
     for (const auto& [name, test] : tests)

@@ -17,7 +17,7 @@
 
 namespace TES3MP
 {
-    inline constexpr std::uint32_t ServerScriptApiVersion = 4;
+    inline constexpr std::uint32_t ServerScriptApiVersion = 5;
     inline constexpr std::size_t MaximumServerScriptPackages = 64;
     inline constexpr std::size_t MaximumServerScriptCallbacks = 64;
     inline constexpr std::size_t MaximumServerScriptEventsPerPublication = 4096;
@@ -32,6 +32,7 @@ namespace TES3MP
         SessionJoined,
         SpatialStateChanged,
         SessionLifecycle,
+        DialogueChoiceCommitted,
     };
 
     class ServerScriptEvent
@@ -53,6 +54,7 @@ namespace TES3MP
         }
         constexpr const std::optional<CanonicalPlayerEntityState>& playerState() const noexcept { return mPlayerState; }
         constexpr std::optional<CanonicalSessionLifecycleKind> lifecycleKind() const noexcept { return mLifecycleKind; }
+        constexpr std::optional<DialogueChoiceId> dialogueChoiceId() const noexcept { return mDialogueChoiceId; }
 
         friend bool operator==(const ServerScriptEvent&, const ServerScriptEvent&) noexcept = default;
 
@@ -72,6 +74,7 @@ namespace TES3MP
         std::optional<ObjectInteractionOutcome> mObjectInteractionOutcome;
         std::optional<CanonicalPlayerEntityState> mPlayerState;
         std::optional<CanonicalSessionLifecycleKind> mLifecycleKind;
+        std::optional<DialogueChoiceId> mDialogueChoiceId;
     };
 
     class ServerScriptPackage
@@ -112,6 +115,15 @@ namespace TES3MP
         friend constexpr bool operator==(ServerScriptQuestStageRead, ServerScriptQuestStageRead) noexcept = default;
     };
 
+    struct ServerScriptFactionRead
+    {
+        std::optional<FactionRank> rank;
+        FactionMembershipRevision membershipRevision;
+        std::int32_t reputation;
+        FactionReputationRevision reputationRevision;
+        friend constexpr bool operator==(ServerScriptFactionRead, ServerScriptFactionRead) noexcept = default;
+    };
+
     class ServerScriptReadModel
     {
     public:
@@ -121,6 +133,7 @@ namespace TES3MP
         JournalRevision journalRevision(PlayerId player) const noexcept;
         std::span<const CanonicalJournalEntryState> journal(PlayerId player) const noexcept;
         const CanonicalJournalEntryState* findJournalEntry(PlayerId player, JournalEntryId entry) const noexcept;
+        std::optional<ServerScriptFactionRead> findFaction(PlayerId player, FactionId faction) const noexcept;
 
     private:
         friend class DeterministicServerScriptRuntime;
@@ -280,6 +293,56 @@ namespace TES3MP
         JournalEntryId mEntry;
     };
 
+    class ServerScriptSetFactionRankCommand
+    {
+    public:
+        constexpr ServerScriptSetFactionRankCommand(PlayerId player, FactionId faction,
+            FactionMembershipRevision expectedRevision, FactionRank rank) noexcept
+            : mPlayer(player)
+            , mFaction(faction)
+            , mExpectedRevision(expectedRevision)
+            , mRank(rank)
+        {
+        }
+        constexpr PlayerId player() const noexcept { return mPlayer; }
+        constexpr FactionId faction() const noexcept { return mFaction; }
+        constexpr FactionMembershipRevision expectedRevision() const noexcept { return mExpectedRevision; }
+        constexpr FactionRank rank() const noexcept { return mRank; }
+        friend constexpr bool operator==(ServerScriptSetFactionRankCommand, ServerScriptSetFactionRankCommand) noexcept
+            = default;
+
+    private:
+        PlayerId mPlayer;
+        FactionId mFaction;
+        FactionMembershipRevision mExpectedRevision;
+        FactionRank mRank;
+    };
+
+    class ServerScriptSetReputationCommand
+    {
+    public:
+        constexpr ServerScriptSetReputationCommand(PlayerId player, FactionId faction,
+            FactionReputationRevision expectedRevision, std::int32_t reputation) noexcept
+            : mPlayer(player)
+            , mFaction(faction)
+            , mExpectedRevision(expectedRevision)
+            , mReputation(reputation)
+        {
+        }
+        constexpr PlayerId player() const noexcept { return mPlayer; }
+        constexpr FactionId faction() const noexcept { return mFaction; }
+        constexpr FactionReputationRevision expectedRevision() const noexcept { return mExpectedRevision; }
+        constexpr std::int32_t reputation() const noexcept { return mReputation; }
+        friend constexpr bool operator==(ServerScriptSetReputationCommand, ServerScriptSetReputationCommand) noexcept
+            = default;
+
+    private:
+        PlayerId mPlayer;
+        FactionId mFaction;
+        FactionReputationRevision mExpectedRevision;
+        std::int32_t mReputation;
+    };
+
     class ServerScriptCompareAndSetPersistentCommand
     {
     public:
@@ -304,6 +367,7 @@ namespace TES3MP
 
     using ServerScriptCommandPayload = std::variant<ServerScriptPlayerSafePointCommand, ServerScriptSetGlobalCommand,
         ServerScriptSetWorldTimeCommand, ServerScriptSetQuestStageCommand, ServerScriptAddJournalEntryCommand,
+        ServerScriptSetFactionRankCommand, ServerScriptSetReputationCommand,
         ServerScriptCompareAndSetPersistentCommand>;
 
     class ServerScriptCommandOrder
@@ -387,6 +451,8 @@ namespace TES3MP
         ServerScriptEmitResult enqueue(ServerScriptSetWorldTimeCommand command) noexcept;
         ServerScriptEmitResult enqueue(ServerScriptSetQuestStageCommand command) noexcept;
         ServerScriptEmitResult enqueue(ServerScriptAddJournalEntryCommand command) noexcept;
+        ServerScriptEmitResult enqueue(ServerScriptSetFactionRankCommand command) noexcept;
+        ServerScriptEmitResult enqueue(ServerScriptSetReputationCommand command) noexcept;
         ServerScriptEmitResult enqueue(ServerScriptCompareAndSetPersistentCommand command) noexcept;
 
     private:
@@ -525,6 +591,10 @@ namespace TES3MP
         JournalEntryQuestMismatch,
         JournalRevisionMismatch,
         JournalEntryAlreadyPresent,
+        UnknownFaction,
+        UnknownFactionRank,
+        FactionMembershipRevisionMismatch,
+        FactionReputationRevisionMismatch,
         UnknownPersistentVariable,
         PersistentVariableTypeMismatch,
         PersistentVariableRevisionMismatch,

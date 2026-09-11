@@ -20,7 +20,8 @@ namespace TES3MP
         return left.mStateVersion == right.mStateVersion && left.mCheckpointTick == right.mCheckpointTick
             && left.mChecksum == right.mChecksum && *left.mState == *right.mState && left.mChanges == right.mChanges
             && left.mJoinedSessions == right.mJoinedSessions && left.mSpatialTicks == right.mSpatialTicks
-            && left.mSessionLifecycle == right.mSessionLifecycle;
+            && left.mSessionLifecycle == right.mSessionLifecycle
+            && left.mDialogueChoices == right.mDialogueChoices;
     }
 
     CanonicalPublicationReadAction classifyCanonicalPublication(

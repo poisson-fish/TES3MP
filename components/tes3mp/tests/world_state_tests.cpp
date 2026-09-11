@@ -54,6 +54,22 @@ namespace
         return CanonicalWorldState::initial(time, catalog(), questCatalog()).value();
     }
 
+    FactionDialogueCatalog factionCatalog()
+    {
+        const std::array factions{ FactionCatalogEntry{
+            id<FactionId>(30), { id<FactionRank>(0), id<FactionRank>(1), id<FactionRank>(2) } } };
+        const std::array choices{ DialogueChoiceCatalogEntry{ id<DialogueChoiceId>(40) },
+            DialogueChoiceCatalogEntry{ id<DialogueChoiceId>(41), id<FactionId>(30), id<FactionRank>(1), 10 } };
+        return FactionDialogueCatalog::create(testContentManifest().id(), factions, choices).value();
+    }
+
+    CanonicalWorldState factionWorld()
+    {
+        return CanonicalWorldState::initial(
+            CanonicalWorldTimeState{}, catalog(), questCatalog(), factionCatalog())
+            .value();
+    }
+
     bool time_advances_exactly_across_calendar_boundaries()
     {
         const auto advanced = advanceCanonicalWorldTime(world(), id<ServerTick>(125), 16);
@@ -168,6 +184,46 @@ namespace
         return !QuestJournalCatalog::create(testContentManifest().id(), duplicateStages, none)
             && !QuestJournalCatalog::create(testContentManifest().id(), validQuest, unknownQuestJournal);
     }
+
+    bool faction_membership_reputation_and_dialogue_eligibility_are_revisioned()
+    {
+        auto rankChanged = setCanonicalFactionRank(factionWorld(), id<PlayerId>(1), id<FactionId>(30),
+            FactionMembershipRevision::initial(), id<FactionRank>(1), id<ServerTick>(3));
+        auto* ranked = std::get_if<CanonicalWorldState>(&rankChanged);
+        if (!ranked)
+            return false;
+        auto reputationChanged = setCanonicalFactionReputation(*ranked, id<PlayerId>(1), id<FactionId>(30),
+            FactionReputationRevision::initial(), 10, id<ServerTick>(3));
+        const auto* result = std::get_if<CanonicalWorldState>(&reputationChanged);
+        const auto* player = result ? result->findFactionState(id<PlayerId>(1)) : nullptr;
+        if (!player || player->factions.size() != 1 || player->factions[0].rank != id<FactionRank>(1)
+            || player->factions[0].membershipRevision.value() != 2 || player->factions[0].reputation != 10
+            || player->factions[0].reputationRevision.value() != 2
+            || validateCanonicalDialogueChoice(*result, id<PlayerId>(1), id<DialogueChoiceId>(41)))
+            return false;
+        return std::get<CanonicalWorldMutationError>(setCanonicalFactionRank(*result, id<PlayerId>(1),
+                   id<FactionId>(30), FactionMembershipRevision::initial(), id<FactionRank>(2), id<ServerTick>(4)))
+                == CanonicalWorldMutationError::FactionMembershipRevisionMismatch
+            && std::get<CanonicalWorldMutationError>(setCanonicalFactionRank(*result, id<PlayerId>(1),
+                   id<FactionId>(30), id<FactionMembershipRevision>(2), id<FactionRank>(9), id<ServerTick>(4)))
+                == CanonicalWorldMutationError::UnknownFactionRank
+            && validateCanonicalDialogueChoice(factionWorld(), id<PlayerId>(1), id<DialogueChoiceId>(41))
+                == CanonicalWorldMutationError::DialogueChoiceIneligible
+            && validateCanonicalDialogueChoice(*result, id<PlayerId>(1), id<DialogueChoiceId>(99))
+                == CanonicalWorldMutationError::UnknownDialogueChoice;
+    }
+
+    bool malformed_faction_and_choice_catalogs_reject_atomically()
+    {
+        const std::array duplicateRanks{ FactionCatalogEntry{
+            id<FactionId>(1), { id<FactionRank>(0), id<FactionRank>(0) } } };
+        const std::array validFaction{
+            FactionCatalogEntry{ id<FactionId>(1), { id<FactionRank>(0), id<FactionRank>(1) } } };
+        const std::array badChoice{
+            DialogueChoiceCatalogEntry{ id<DialogueChoiceId>(1), id<FactionId>(2), id<FactionRank>(0), 0 } };
+        return !FactionDialogueCatalog::create(testContentManifest().id(), duplicateRanks, {})
+            && !FactionDialogueCatalog::create(testContentManifest().id(), validFaction, badChoice);
+    }
 }
 
 int main()
@@ -186,6 +242,10 @@ int main()
         std::pair{ "quest_journal_restore_requires_the_exact_manifest_catalog",
             &quest_journal_restore_requires_the_exact_manifest_catalog },
         std::pair{ "malformed_quest_catalogs_reject_atomically", &malformed_quest_catalogs_reject_atomically },
+        std::pair{ "faction_membership_reputation_and_dialogue_eligibility_are_revisioned",
+            &faction_membership_reputation_and_dialogue_eligibility_are_revisioned },
+        std::pair{ "malformed_faction_and_choice_catalogs_reject_atomically",
+            &malformed_faction_and_choice_catalogs_reject_atomically },
     };
     for (const auto& [name, test] : tests)
         if (!test())

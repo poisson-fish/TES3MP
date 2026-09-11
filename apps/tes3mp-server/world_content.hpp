@@ -25,6 +25,7 @@ namespace TES3MP::ServerApp
     {
         GlobalVariableCatalog globals;
         QuestJournalCatalog questJournal;
+        FactionDialogueCatalog factionDialogue;
         CanonicalWorldState world;
     };
 

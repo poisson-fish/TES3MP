@@ -20,6 +20,12 @@ namespace TES3MP
     inline constexpr std::size_t MaximumPlayerQuestJournalStates = 256;
     inline constexpr std::size_t MaximumCanonicalQuestStates = 16'384;
     inline constexpr std::size_t MaximumCanonicalJournalEntries = 16'384;
+    inline constexpr std::size_t MaximumFactionCatalogEntries = 4'096;
+    inline constexpr std::size_t MaximumFactionRanksPerFaction = 256;
+    inline constexpr std::size_t MaximumFactionCatalogRanks = 16'384;
+    inline constexpr std::size_t MaximumDialogueChoiceCatalogEntries = 16'384;
+    inline constexpr std::size_t MaximumPlayerFactionStates = 256;
+    inline constexpr std::size_t MaximumCanonicalFactionStates = 16'384;
     inline constexpr std::uint32_t WorldMillisecondsPerHour = 3'600'000;
     inline constexpr std::uint32_t WorldMillisecondsPerDay = 24 * WorldMillisecondsPerHour;
     inline constexpr std::uint32_t WorldTimeScaleUnitsPerOne = 1'000;
@@ -105,6 +111,48 @@ namespace TES3MP
         std::vector<JournalCatalogEntry> mJournal;
     };
 
+    struct FactionCatalogEntry
+    {
+        FactionId id;
+        std::vector<FactionRank> ranks;
+        friend bool operator==(const FactionCatalogEntry&, const FactionCatalogEntry&) noexcept = default;
+    };
+
+    struct DialogueChoiceCatalogEntry
+    {
+        DialogueChoiceId id;
+        std::optional<FactionId> requiredFaction;
+        FactionRank minimumRank = FactionRank::initial();
+        std::int32_t minimumReputation = 0;
+        friend constexpr bool operator==(DialogueChoiceCatalogEntry, DialogueChoiceCatalogEntry) noexcept = default;
+    };
+
+    class FactionDialogueCatalog
+    {
+    public:
+        static std::optional<FactionDialogueCatalog> create(ContentManifestId manifest,
+            std::span<const FactionCatalogEntry> factions,
+            std::span<const DialogueChoiceCatalogEntry> dialogueChoices) noexcept;
+        constexpr ContentManifestId manifest() const noexcept { return mManifest; }
+        std::span<const FactionCatalogEntry> factions() const noexcept { return mFactions; }
+        std::span<const DialogueChoiceCatalogEntry> dialogueChoices() const noexcept { return mDialogueChoices; }
+        const FactionCatalogEntry* findFaction(FactionId id) const noexcept;
+        const DialogueChoiceCatalogEntry* findDialogueChoice(DialogueChoiceId id) const noexcept;
+        friend bool operator==(const FactionDialogueCatalog&, const FactionDialogueCatalog&) noexcept = default;
+
+    private:
+        FactionDialogueCatalog(ContentManifestId manifest, std::vector<FactionCatalogEntry> factions,
+            std::vector<DialogueChoiceCatalogEntry> dialogueChoices) noexcept
+            : mManifest(manifest)
+            , mFactions(std::move(factions))
+            , mDialogueChoices(std::move(dialogueChoices))
+        {
+        }
+        ContentManifestId mManifest;
+        std::vector<FactionCatalogEntry> mFactions;
+        std::vector<DialogueChoiceCatalogEntry> mDialogueChoices;
+    };
+
     struct CanonicalQuestState
     {
         QuestId id;
@@ -131,6 +179,26 @@ namespace TES3MP
         ServerTick lastJournalChangeTick = ServerTick::initial();
         friend bool operator==(
             const CanonicalPlayerQuestJournalState&, const CanonicalPlayerQuestJournalState&) noexcept = default;
+    };
+
+    struct CanonicalFactionState
+    {
+        FactionId id;
+        std::optional<FactionRank> rank;
+        FactionMembershipRevision membershipRevision = FactionMembershipRevision::initial();
+        ServerTick lastMembershipChangeTick = ServerTick::initial();
+        std::int32_t reputation = 0;
+        FactionReputationRevision reputationRevision = FactionReputationRevision::initial();
+        ServerTick lastReputationChangeTick = ServerTick::initial();
+        friend constexpr bool operator==(CanonicalFactionState, CanonicalFactionState) noexcept = default;
+    };
+
+    struct CanonicalPlayerFactionState
+    {
+        PlayerId player;
+        std::vector<CanonicalFactionState> factions;
+        friend bool operator==(const CanonicalPlayerFactionState&, const CanonicalPlayerFactionState&) noexcept
+            = default;
     };
 
     struct CanonicalWorldTimeState
@@ -174,10 +242,18 @@ namespace TES3MP
         static std::optional<CanonicalWorldState> create(CanonicalWorldTimeState time,
             std::span<const CanonicalGlobalVariableState> globals, QuestJournalCatalog questJournalCatalog,
             std::span<const CanonicalPlayerQuestJournalState> questJournal) noexcept;
+        static std::optional<CanonicalWorldState> create(CanonicalWorldTimeState time,
+            std::span<const CanonicalGlobalVariableState> globals, QuestJournalCatalog questJournalCatalog,
+            FactionDialogueCatalog factionDialogueCatalog,
+            std::span<const CanonicalPlayerQuestJournalState> questJournal,
+            std::span<const CanonicalPlayerFactionState> factions) noexcept;
         static std::optional<CanonicalWorldState> initial(
             CanonicalWorldTimeState time, const GlobalVariableCatalog& catalog) noexcept;
         static std::optional<CanonicalWorldState> initial(CanonicalWorldTimeState time,
             const GlobalVariableCatalog& globals, QuestJournalCatalog questJournalCatalog) noexcept;
+        static std::optional<CanonicalWorldState> initial(CanonicalWorldTimeState time,
+            const GlobalVariableCatalog& globals, QuestJournalCatalog questJournalCatalog,
+            FactionDialogueCatalog factionDialogueCatalog) noexcept;
 
         constexpr const CanonicalWorldTimeState& time() const noexcept { return mTime; }
         std::span<const CanonicalGlobalVariableState> globals() const noexcept { return mGlobals; }
@@ -185,22 +261,34 @@ namespace TES3MP
         const std::optional<QuestJournalCatalog>& questJournalCatalog() const noexcept { return mQuestJournalCatalog; }
         std::span<const CanonicalPlayerQuestJournalState> questJournal() const noexcept { return mQuestJournal; }
         const CanonicalPlayerQuestJournalState* findQuestJournal(PlayerId player) const noexcept;
+        const std::optional<FactionDialogueCatalog>& factionDialogueCatalog() const noexcept
+        {
+            return mFactionDialogueCatalog;
+        }
+        std::span<const CanonicalPlayerFactionState> factionStates() const noexcept { return mFactionStates; }
+        const CanonicalPlayerFactionState* findFactionState(PlayerId player) const noexcept;
         friend bool operator==(const CanonicalWorldState&, const CanonicalWorldState&) noexcept = default;
 
     private:
         CanonicalWorldState(CanonicalWorldTimeState time, std::vector<CanonicalGlobalVariableState> globals,
             std::optional<QuestJournalCatalog> questJournalCatalog = std::nullopt,
-            std::vector<CanonicalPlayerQuestJournalState> questJournal = {}) noexcept
+            std::vector<CanonicalPlayerQuestJournalState> questJournal = {},
+            std::optional<FactionDialogueCatalog> factionDialogueCatalog = std::nullopt,
+            std::vector<CanonicalPlayerFactionState> factionStates = {}) noexcept
             : mTime(time)
             , mGlobals(std::move(globals))
             , mQuestJournalCatalog(std::move(questJournalCatalog))
             , mQuestJournal(std::move(questJournal))
+            , mFactionDialogueCatalog(std::move(factionDialogueCatalog))
+            , mFactionStates(std::move(factionStates))
         {
         }
         CanonicalWorldTimeState mTime;
         std::vector<CanonicalGlobalVariableState> mGlobals;
         std::optional<QuestJournalCatalog> mQuestJournalCatalog;
         std::vector<CanonicalPlayerQuestJournalState> mQuestJournal;
+        std::optional<FactionDialogueCatalog> mFactionDialogueCatalog;
+        std::vector<CanonicalPlayerFactionState> mFactionStates;
     };
 
     enum class CanonicalWorldMutationError : std::uint8_t
@@ -221,6 +309,12 @@ namespace TES3MP
         JournalEntryQuestMismatch,
         JournalRevisionMismatch,
         DuplicateJournalEntry,
+        UnknownFaction,
+        UnknownFactionRank,
+        FactionMembershipRevisionMismatch,
+        FactionReputationRevisionMismatch,
+        UnknownDialogueChoice,
+        DialogueChoiceIneligible,
     };
 
     using CanonicalWorldMutationResult = std::variant<CanonicalWorldState, CanonicalWorldMutationError>;
@@ -236,6 +330,13 @@ namespace TES3MP
         QuestId quest, QuestRevision expectedRevision, QuestStage stage, ServerTick tick) noexcept;
     CanonicalWorldMutationResult addCanonicalJournalEntry(const CanonicalWorldState& state, PlayerId player,
         QuestId quest, JournalRevision expectedRevision, JournalEntryId entry, ServerTick tick) noexcept;
+    CanonicalWorldMutationResult setCanonicalFactionRank(const CanonicalWorldState& state, PlayerId player,
+        FactionId faction, FactionMembershipRevision expectedRevision, FactionRank rank, ServerTick tick) noexcept;
+    CanonicalWorldMutationResult setCanonicalFactionReputation(const CanonicalWorldState& state, PlayerId player,
+        FactionId faction, FactionReputationRevision expectedRevision, std::int32_t reputation,
+        ServerTick tick) noexcept;
+    std::optional<CanonicalWorldMutationError> validateCanonicalDialogueChoice(
+        const CanonicalWorldState& state, PlayerId player, DialogueChoiceId choice) noexcept;
     CanonicalWorldMutationResult restoreCanonicalWorldState(const GlobalVariableCatalog& catalog,
         CanonicalWorldTimeState time, std::span<const CanonicalGlobalVariableState> globals) noexcept;
     CanonicalWorldMutationResult restoreCanonicalWorldState(const GlobalVariableCatalog& globals,
@@ -243,6 +344,14 @@ namespace TES3MP
         std::span<const CanonicalGlobalVariableState> globalStates,
         const QuestJournalCatalog& restoredQuestJournalCatalog,
         std::span<const CanonicalPlayerQuestJournalState> questJournal) noexcept;
+    CanonicalWorldMutationResult restoreCanonicalWorldState(const GlobalVariableCatalog& globals,
+        const QuestJournalCatalog& expectedQuestJournalCatalog,
+        const FactionDialogueCatalog& expectedFactionDialogueCatalog, CanonicalWorldTimeState time,
+        std::span<const CanonicalGlobalVariableState> globalStates,
+        const QuestJournalCatalog& restoredQuestJournalCatalog,
+        const FactionDialogueCatalog& restoredFactionDialogueCatalog,
+        std::span<const CanonicalPlayerQuestJournalState> questJournal,
+        std::span<const CanonicalPlayerFactionState> factions) noexcept;
 }
 
 #endif

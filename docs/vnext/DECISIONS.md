@@ -185,6 +185,9 @@ the affected code/tests in the same milestone.
 - **Private inventory.** A player's backpack is delivered only to its owner.
   Other clients receive scoped container/ground views and public equipment, not
   another player's private contents.
+- **Dialogue authority.** Dialogue text and presentation are client-local. The
+  server owns bounded choice identity, eligibility, and canonical consequences,
+  so presentation cannot invent an outcome.
 
 ## Future systems
 
@@ -204,7 +207,7 @@ the affected code/tests in the same milestone.
   Every prefix is exactly bound to configuration, content, script/API package
   versions, deterministic seeds, and complete client/script command ordering.
   V2 restores durable gameplay state, including combat RNG, time, globals,
-  quests, and journals, but not live sessions or incomplete chargen. It keeps
+  quests, journals, factions, and reputation, but not live sessions or incomplete chargen. It keeps
   one checkpoint plus a bounded journal tail. Development V1 files are not
   migrated; later domains extend V2 instead of creating another authority.
 - **Administration.** Public health and privileged operational detail remain

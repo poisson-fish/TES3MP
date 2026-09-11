@@ -214,6 +214,7 @@ namespace TES3MP
             ServerTick mCheckpointTick = ServerTick::initial();
             std::shared_ptr<const CanonicalServerState> mState;
             std::shared_ptr<CanonicalStatePublication> mPublication;
+            std::vector<DurableCommandOrder> mDurableCommands;
         };
 
         // Eligible for later reviewed composition; this type owns no connection,
@@ -288,6 +289,8 @@ namespace TES3MP
         std::optional<PreparedLifecycle> prepareDisconnectBatch(std::span<const SessionId> sessions, ServerTick tick);
         std::optional<PreparedLifecycle> prepareResume(CanonicalSessionProgress session, ServerTick tick);
         std::optional<PreparedLifecycle> preparePlayerSafePoint(PlayerId player, Transform transform, ServerTick tick);
+        std::optional<PreparedLifecycle> prepareDialogueChoice(
+            PlayerId player, DialogueChoiceId choice, const CanonicalWorldState& world, ServerTick tick);
         std::optional<PreparedLifecycle> prepareExpiration(
             PlayerId player, SessionId session, SessionGeneration generation, ServerTick tick);
         bool commit(PreparedLifecycle&& prepared, const CanonicalInventoryWorld* inventory = nullptr,

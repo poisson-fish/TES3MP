@@ -47,12 +47,16 @@ namespace TES3MP::ServerApp
     private:
         friend std::variant<ExecutableScriptModules, ExecutableScriptModuleError> loadExecutableScriptModules(
             const std::filesystem::path&, const ScriptPackageContent&, const GlobalVariableCatalog&,
-            const QuestJournalCatalog&, DeterministicServerScriptRuntime&) noexcept;
+            const QuestJournalCatalog&, const FactionDialogueCatalog&, DeterministicServerScriptRuntime&) noexcept;
         std::vector<std::unique_ptr<ServerScriptCallback>> mCallbacks;
     };
 
     using ExecutableScriptModuleLoadResult = std::variant<ExecutableScriptModules, ExecutableScriptModuleError>;
 
+    ExecutableScriptModuleLoadResult loadExecutableScriptModules(const std::filesystem::path& packageContentPath,
+        const ScriptPackageContent& content, const GlobalVariableCatalog& globalCatalog,
+        const QuestJournalCatalog& questJournalCatalog, const FactionDialogueCatalog& factionDialogueCatalog,
+        DeterministicServerScriptRuntime& runtime) noexcept;
     ExecutableScriptModuleLoadResult loadExecutableScriptModules(const std::filesystem::path& packageContentPath,
         const ScriptPackageContent& content, const GlobalVariableCatalog& globalCatalog,
         const QuestJournalCatalog& questJournalCatalog, DeterministicServerScriptRuntime& runtime) noexcept;

@@ -49,7 +49,7 @@ CATALOGS = {
     "inventory_content_file": ("TES3MP_INVENTORY_V1", False),
     "combat_content_file": ("TES3MP_COMBAT_V6", False),
     "character_content_file": ("TES3MP_CHARACTERS_V2", False),
-    "world_content_file": ("TES3MP_WORLD_V2", True),
+    "world_content_file": ("TES3MP_WORLD_V3", True),
     "script_package_file": ("TES3MP_SCRIPT_PACKAGES_V2", False),
 }
 
@@ -1203,7 +1203,7 @@ def _validate_script_packages(catalog: Catalog | None) -> None:
                 package_id, version, load_order, api, abi = map(int, record[1:6])
                 artifact, digest, entrypoint, budget_text = record[6:10]
                 if package_id <= 0 or package_id > 0xFFFFFFFFFFFFFFFF or version <= 0 \
-                        or version > 0xFFFFFFFF or load_order < 0 or load_order > 0xFFFFFFFF or api != 4 \
+                        or version > 0xFFFFFFFF or load_order < 0 or load_order > 0xFFFFFFFF or api != 5 \
                         or abi != 1 or package_id in packages \
                         or not artifact or len(artifact.encode("ascii", errors="ignore")) != len(artifact) \
                         or len(artifact) > 128 or pathlib.PurePath(artifact).name != artifact \
@@ -1285,7 +1285,7 @@ def load_script_modules(catalog: Catalog | None) -> list[ScriptModuleArtifact]:
         text = _decode_text(data, str(path))
         lines = [line.strip() for line in text.splitlines() if line.strip() and not line.lstrip().startswith("#")]
         if not lines or lines[0] != "TES3MP_SCRIPT_MODULE_V1" or f"abi 1" not in lines \
-                or f"api 4" not in lines or f"entry {entrypoint}" not in lines:
+                or f"api 5" not in lines or f"entry {entrypoint}" not in lines:
             raise BakeError(f"invalid script module artifact: {name}")
         result.append(ScriptModuleArtifact(name, path, data, digest))
     return result

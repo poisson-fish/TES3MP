@@ -73,6 +73,7 @@ namespace
         CanonicalActorWorld actors;
         GlobalVariableCatalog globalCatalog;
         QuestJournalCatalog questJournalCatalog;
+        FactionDialogueCatalog factionDialogueCatalog;
         CanonicalWorldState world;
         ServerScriptStateCatalog scriptStateCatalog;
         CanonicalScriptState scriptState;
@@ -206,7 +207,20 @@ namespace
         std::vector<CanonicalPlayerQuestJournalState> questJournalStates;
         if (count > 1)
             questJournalStates.push_back(std::move(playerQuestJournal));
-        auto world = *CanonicalWorldState::create(time, globals, questJournalCatalog, questJournalStates);
+        const std::array factionDeclarations{
+            FactionCatalogEntry{ id<FactionId>(20), { id<FactionRank>(0), id<FactionRank>(1) } } };
+        const std::array dialogueChoices{ DialogueChoiceCatalogEntry{
+            id<DialogueChoiceId>(30), id<FactionId>(20), id<FactionRank>(1), 5 } };
+        auto factionDialogueCatalog
+            = *FactionDialogueCatalog::create(manifest.id(), factionDeclarations, dialogueChoices);
+        std::vector<CanonicalPlayerFactionState> factionStates;
+        if (count > 1)
+            factionStates.push_back({ id<PlayerId>(1),
+                { { id<FactionId>(20), id<FactionRank>(1), id<FactionMembershipRevision>(count),
+                    id<ServerTick>(count), static_cast<std::int32_t>(count * 5),
+                    id<FactionReputationRevision>(count), id<ServerTick>(count) } } });
+        auto world = *CanonicalWorldState::create(
+            time, globals, questJournalCatalog, factionDialogueCatalog, questJournalStates, factionStates);
         const std::array scriptDeclarations{ ServerScriptVariableCatalogEntry{
             11, id<ScriptVariableId>(1), std::int64_t{ 0 } } };
         auto scriptStateCatalog = ServerScriptStateCatalog::create(scriptDeclarations).value();
@@ -216,7 +230,8 @@ namespace
         auto scriptState = std::get<CanonicalScriptState>(std::move(changedScriptState));
         return { std::move(catalog), std::move(inventory), std::move(combat), std::move(objectCatalog),
             std::move(objects), std::move(actorCatalog), std::move(actors), std::move(globalCatalog),
-            std::move(questJournalCatalog), std::move(world), std::move(scriptStateCatalog), std::move(scriptState) };
+            std::move(questJournalCatalog), std::move(factionDialogueCatalog), std::move(world),
+            std::move(scriptStateCatalog), std::move(scriptState) };
     }
 
     bool commitJoin(CanonicalPersistenceFile& file, CanonicalInventoryWorld* inventory = nullptr,
@@ -447,6 +462,12 @@ namespace
             && (count == 1
                 || (world->questJournal()[0].quests.size() == 1 && world->questJournal()[0].journal.size() == count - 1
                     && world->questJournal()[0].journalRevision.value() == count))
+            && world->factionDialogueCatalog() && world->factionDialogueCatalog()->factions().size() == 1
+            && world->factionDialogueCatalog()->dialogueChoices().size() == 1
+            && world->factionStates().size() == (count > 1 ? 1u : 0u)
+            && (count == 1
+                || (world->factionStates()[0].factions[0].rank == id<FactionRank>(1)
+                    && world->factionStates()[0].factions[0].reputation == static_cast<std::int32_t>(count * 5)))
             && latest->canonicalChecksum() == checksum
             && canonicalDurableStateChecksumV1(latest->stateVersion(), latest->checkpointTick(), latest->players(),
                    latest->inventory(), latest->combat(), latest->objects(), latest->actors(), latest->world(),

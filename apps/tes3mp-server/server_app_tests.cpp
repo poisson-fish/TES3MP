@@ -696,11 +696,12 @@ int main()
         assert(static_cast<bool>(stream));
     };
     constexpr std::string_view worldHeader
-        = "TES3MP_WORLD_V2\n"
+        = "TES3MP_WORLD_V3\n"
           "manifest 0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20\n";
     writeWorld(std::string(worldHeader)
         + "time 16 6 427 32400000 30000\nglobal 1 short 2\nglobal 2 long -3\nglobal 3 float 4.5\n"
-          "quest 10 0 0 10 20\njournal 100 10 10\njournal 101 10 20\n");
+          "quest 10 0 0 10 20\njournal 100 10 10\njournal 101 10 20\n"
+          "faction 30 0 1 2\ndialogue_choice 40 unrestricted\ndialogue_choice 41 30 1 10\n");
     auto loadedWorldContent = loadWorldContent(worldPath, parsedConfig().contentManifest);
     auto* worldContent = std::get_if<WorldContent>(&loadedWorldContent);
     assert(worldContent && worldContent->globals.entries().size() == 3 && worldContent->world.time().day == 16
@@ -708,9 +709,21 @@ int main()
         && worldContent->world.time().hour() == 9.0 && worldContent->world.time().timeScale() == 30.0
         && std::get<std::int32_t>(worldContent->world.globals()[1].value) == -3
         && worldContent->questJournal.quests().size() == 1 && worldContent->questJournal.journal().size() == 2
+        && worldContent->factionDialogue.factions().size() == 1
+        && worldContent->factionDialogue.dialogueChoices().size() == 2
         && worldContent->world.questJournalCatalog()
-        && *worldContent->world.questJournalCatalog() == worldContent->questJournal);
+        && worldContent->world.factionDialogueCatalog()
+        && *worldContent->world.questJournalCatalog() == worldContent->questJournal
+        && *worldContent->world.factionDialogueCatalog() == worldContent->factionDialogue);
     writeWorld(std::string(worldHeader) + "time 16 6 427 32400000 30000\nglobal 1 short 2\nglobal 1 long 3\n");
+    assert(std::get<WorldContentError>(loadWorldContent(worldPath, parsedConfig().contentManifest))
+        == WorldContentError::InvalidCatalog);
+    writeWorld(std::string(worldHeader)
+        + "time 16 6 427 32400000 30000\nfaction 30 0 0\ndialogue_choice 40 30 0 0\n");
+    assert(std::get<WorldContentError>(loadWorldContent(worldPath, parsedConfig().contentManifest))
+        == WorldContentError::InvalidCatalog);
+    writeWorld(std::string(worldHeader)
+        + "time 16 6 427 32400000 30000\nfaction 30 0 1\ndialogue_choice 40 31 0 0\n");
     assert(std::get<WorldContentError>(loadWorldContent(worldPath, parsedConfig().contentManifest))
         == WorldContentError::InvalidCatalog);
     writeWorld(std::string(worldHeader) + "time 16 6 427 32400000 30000\nglobal 1 float inf\n");
@@ -721,7 +734,7 @@ int main()
     assert(std::get<WorldContentError>(loadWorldContent(worldPath, parsedConfig().contentManifest))
         == WorldContentError::InvalidCatalog);
     writeWorld(
-        "TES3MP_WORLD_V2\nmanifest 0202030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20\n"
+        "TES3MP_WORLD_V3\nmanifest 0202030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20\n"
         "time 16 6 427 32400000 30000\n");
     assert(std::get<WorldContentError>(loadWorldContent(worldPath, parsedConfig().contentManifest))
         == WorldContentError::ManifestMismatch);
@@ -2215,13 +2228,16 @@ int main()
         auto* packagedScripts = std::get_if<ScriptPackageContent>(&packagedScriptsResult);
         assert(packagedCombat && packagedWorld && packagedScripts && packagedScripts->packages.size() == 1
             && packagedScripts->modules.size() == 1 && packagedScripts->stateCatalog.entries().size() == 1
-            && packagedWorld->questJournal.quests().size() == 1 && packagedWorld->questJournal.journal().size() == 1);
+            && packagedWorld->questJournal.quests().size() == 1 && packagedWorld->questJournal.journal().size() == 1
+            && packagedWorld->factionDialogue.factions().size() == 1
+            && packagedWorld->factionDialogue.dialogueChoices().size() == 2);
         DeterministicServerScriptRuntime packagedScriptRuntime;
         assert(packagedScriptRuntime.configurePackages(packagedScripts->packages, packagedScripts->stateCatalog));
         auto packagedModules = loadExecutableScriptModules(contentRoot / "vanilla-scripts.txt", *packagedScripts,
-            packagedWorld->globals, packagedWorld->questJournal, packagedScriptRuntime);
+            packagedWorld->globals, packagedWorld->questJournal, packagedWorld->factionDialogue,
+            packagedScriptRuntime);
         assert(std::holds_alternative<ExecutableScriptModules>(packagedModules));
-        assert(std::get<ExecutableScriptModules>(packagedModules).callbackCount() == 2);
+        assert(std::get<ExecutableScriptModules>(packagedModules).callbackCount() == 3);
 
         auto queues = OutboundQueueSet::create(OutboundQueuePolicy{}, 1);
         auto timeouts = *SessionTimeoutPolicy::create(1'000'000, 1'000'000, 1'000'000);

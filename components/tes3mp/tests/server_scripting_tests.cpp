@@ -21,7 +21,7 @@ namespace
     constexpr std::uint64_t FirstTickDeadline = 33'333'334;
     constexpr std::uint64_t NextTickIncrement = 33'333'333;
 
-    static_assert(ServerScriptApiVersion == 4);
+    static_assert(ServerScriptApiVersion == 5);
     static_assert(MaximumServerScriptCallbacks == 64);
     static_assert(MaximumServerScriptCommandsPerCallback == 16);
     static_assert(MaximumServerScriptCommandsPerTick == 256);
@@ -174,6 +174,36 @@ namespace
         }
     };
 
+    class DialogueConsequenceCallback final : public ServerScriptCallback
+    {
+    public:
+        ServerScriptCallbackResult onEvent(
+            const ServerScriptCallbackInput& input, ServerScriptCommandEmitter& output) noexcept override
+        {
+            const auto player = input.event().playerId();
+            const auto* read = input.readModel();
+            const auto faction = player && read ? read->findFaction(*player, id<FactionId>(30)) : std::nullopt;
+            sawEligibleSnapshot = input.event().kind() == ServerScriptEventKind::DialogueChoiceCommitted
+                && input.event().dialogueChoiceId() == id<DialogueChoiceId>(40) && faction && faction->rank
+                && *faction->rank == id<FactionRank>(1) && faction->reputation == 10;
+            if (!sawEligibleSnapshot || !player)
+                return ServerScriptCallbackResult::Failed;
+            return output.enqueue(ServerScriptSetQuestStageCommand(
+                       *player, id<QuestId>(10), QuestRevision::initial(), id<QuestStage>(20)))
+                        == ServerScriptEmitResult::Accepted
+                    && output.enqueue(ServerScriptSetFactionRankCommand(
+                           *player, id<FactionId>(30), faction->membershipRevision, id<FactionRank>(2)))
+                        == ServerScriptEmitResult::Accepted
+                    && output.enqueue(ServerScriptSetReputationCommand(
+                           *player, id<FactionId>(30), faction->reputationRevision, 20))
+                        == ServerScriptEmitResult::Accepted
+                ? ServerScriptCallbackResult::Accepted
+                : ServerScriptCallbackResult::Failed;
+        }
+
+        bool sawEligibleSnapshot = false;
+    };
+
     class ReadModelCallback final : public ServerScriptCallback
     {
     public:
@@ -226,8 +256,8 @@ namespace
     class ScriptDurabilityProbe final : public CanonicalDurabilityPort
     {
     public:
-        CanonicalDurabilityResult commit(const std::shared_ptr<const CanonicalStatePublication>&, CanonicalRevision,
-            std::span<const DurableCommandOrder>, const CanonicalInventoryWorld*, const CanonicalCombatWorld*,
+        CanonicalDurabilityResult commit(const std::shared_ptr<const CanonicalStatePublication>& publication,
+            CanonicalRevision, std::span<const DurableCommandOrder> commands, const CanonicalInventoryWorld*, const CanonicalCombatWorld*,
             const CanonicalInteractiveObjectWorld*, const CanonicalActorWorld*, const CanonicalWorldState* world,
             const CanonicalScriptState* scriptState) noexcept override
         {
@@ -235,6 +265,12 @@ namespace
                 && (!expectedWorld || (world && *world == *expectedWorld));
             installedBeforeAcknowledgement = (expected && current && *current == *expected)
                 || (expectedWorld && currentWorld && *currentWorld == *expectedWorld);
+            if (publication && !publication->dialogueChoices().empty())
+                sawDialogueOrder = commands.size() == 1
+                    && commands.front().source == DurableCommandSource::DialogueChoice
+                    && commands.front().fields[0] == publication->checkpointTick().value()
+                    && commands.front().fields[1] == publication->dialogueChoices().front().player.value()
+                    && commands.front().fields[2] == publication->dialogueChoices().front().choice.value();
             return result;
         }
 
@@ -245,6 +281,7 @@ namespace
         const CanonicalWorldState* expectedWorld = nullptr;
         bool sawExpected = false;
         bool installedBeforeAcknowledgement = false;
+        bool sawDialogueOrder = false;
     };
 
     struct ScenarioResult
@@ -809,6 +846,77 @@ namespace
             == CanonicalScriptStateMutationError::InvalidValue
             && *state == CanonicalScriptState::initial(*catalog).value();
     }
+
+    bool committed_dialogue_choice_triggers_ordered_atomic_cross_domain_consequences()
+    {
+        Fixture fixture;
+        const std::array globals{ GlobalVariableCatalogEntry{ id<GlobalVariableId>(1), std::int32_t{ 0 } } };
+        const auto globalCatalog = GlobalVariableCatalog::create(globals).value();
+        const std::array quests{ QuestCatalogEntry{
+            id<QuestId>(10), id<QuestStage>(0), { id<QuestStage>(0), id<QuestStage>(20) } } };
+        const std::array<JournalCatalogEntry, 0> journal{};
+        const auto questCatalog = QuestJournalCatalog::create(testContentManifestId(), quests, journal).value();
+        const std::array factions{ FactionCatalogEntry{
+            id<FactionId>(30), { id<FactionRank>(0), id<FactionRank>(1), id<FactionRank>(2) } } };
+        const std::array choices{ DialogueChoiceCatalogEntry{
+            id<DialogueChoiceId>(40), id<FactionId>(30), id<FactionRank>(1), 10 } };
+        const auto factionCatalog
+            = FactionDialogueCatalog::create(testContentManifestId(), factions, choices).value();
+        auto world = CanonicalWorldState::initial(
+            CanonicalWorldTimeState{}, globalCatalog, questCatalog, factionCatalog)
+                         .value();
+        world = std::get<CanonicalWorldState>(setCanonicalFactionRank(world, id<PlayerId>(1), id<FactionId>(30),
+            FactionMembershipRevision::initial(), id<FactionRank>(1), id<ServerTick>(1)));
+        world = std::get<CanonicalWorldState>(setCanonicalFactionReputation(world, id<PlayerId>(1), id<FactionId>(30),
+            FactionReputationRevision::initial(), 10, id<ServerTick>(1)));
+
+        DeterministicServerScriptRuntime scripts;
+        DialogueConsequenceCallback callback;
+        const auto package = ServerScriptPackage::create(1, 1, 1).value();
+        if (!scripts.bindWorldState(world)
+            || scripts.registerCallback(package, 1, ServerScriptEventKind::DialogueChoiceCommitted, callback)
+                != ServerScriptRegistrationResult::Accepted)
+            return false;
+        CanonicalCommandReducer reducer(fixture.initialState(), fixture.observability,
+            CanonicalSinkBundle(nullptr, nullptr, &scripts, nullptr), testContentManifest());
+        CanonicalCommandWorlds worlds;
+        worlds.world = &world;
+        worlds.globalCatalog = &globalCatalog;
+        ScriptDurabilityProbe durability;
+        durability.currentWorld = &world;
+        const auto initialTick = fixture.pumpFirst();
+        if (!reducer.configureDurability(durability, nullptr, nullptr, nullptr, nullptr, &world, nullptr)
+            || !initialTick || initialTick.batches().size() != 1 || !scripts.pump(id<ServerTick>(1))
+            || reducer.prepareDialogueChoice(id<PlayerId>(1), id<DialogueChoiceId>(99), world, id<ServerTick>(1)))
+            return false;
+        const auto ineligibleWorld
+            = CanonicalWorldState::initial(CanonicalWorldTimeState{}, globalCatalog, questCatalog, factionCatalog)
+                  .value();
+        if (reducer.prepareDialogueChoice(
+                id<PlayerId>(1), id<DialogueChoiceId>(40), ineligibleWorld, id<ServerTick>(1)))
+            return false;
+        auto dialogue
+            = reducer.prepareDialogueChoice(id<PlayerId>(1), id<DialogueChoiceId>(40), world, id<ServerTick>(1));
+        if (!dialogue || !reducer.commit(std::move(*dialogue)) || !callback.sawEligibleSnapshot
+            || !durability.sawDialogueOrder
+            || reducer.latestPublication()->dialogueChoices().size() != 1)
+            return false;
+        const auto tick = fixture.pumpNext();
+        const auto generated = scripts.pump(id<ServerTick>(2));
+        if (!tick || tick.batches().size() != 1 || !generated || generated.commands().size() != 3
+            || generated.commands()[0].order().commandOrdinal() != 1
+            || generated.commands()[1].order().commandOrdinal() != 2
+            || generated.commands()[2].order().commandOrdinal() != 3)
+            return false;
+        auto prepared = reducer.prepareTick(tick.batches()[0], worlds, generated.commands());
+        if (!prepared.result() || !prepared.candidateWorld())
+            return false;
+        const auto unchanged = world;
+        durability.result = CanonicalDurabilityResult::Rejected;
+        durability.expectedWorld = &*prepared.candidateWorld();
+        return !reducer.commit(std::move(prepared), worlds) && world == unchanged
+            && !durability.installedBeforeAcknowledgement;
+    }
 }
 
 int main()
@@ -841,6 +949,8 @@ int main()
             &stale_persistent_state_revision_fails_without_mutation },
         std::pair{
             "persistent_variable_bounds_and_types_fail_closed", &persistent_variable_bounds_and_types_fail_closed },
+        std::pair{ "committed_dialogue_choice_triggers_ordered_atomic_cross_domain_consequences",
+            &committed_dialogue_choice_triggers_ordered_atomic_cross_domain_consequences },
     };
     bool passed = true;
     for (const auto& [name, test] : tests)

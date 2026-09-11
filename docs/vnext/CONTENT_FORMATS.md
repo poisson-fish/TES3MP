@@ -74,7 +74,7 @@ variable <package-id> <variable-id> string_hex <lowercase-hex-bytes|->
 ```
 
 Startup sorts declarations canonically. IDs are nonzero, package IDs are
-unique, variables reference a package, API is 4, and ABI is 1. Module leaf
+unique, variables reference a package, API is 5, and ABI is 1. Module leaf
 names, SHA-256 values, entrypoints, and budgets (1–4,096) are bounded. Ordered
 package versions/API and the typed initial-value catalog bind V2 persistence,
 so incompatible state rejects. `-` is an empty string. V1 catalogs reject. The
@@ -88,22 +88,26 @@ narrow:
 ```text
 TES3MP_SCRIPT_MODULE_V1
 abi 1
-api 4
+api 5
 entry <entrypoint>
-callback <callback-order> <command_finalized|session_joined|spatial_state_changed|session_lifecycle>
+callback <callback-order> <command_finalized|session_joined|spatial_state_changed|session_lifecycle|dialogue_choice_committed>
 increment_integer <declared-integer-variable-id> <nonzero-signed-delta>
 global_equals <global-id> <short|long|float> <value>
 quest_stage_equals <quest-id> <stage>
 journal_entry_absent <journal-entry-id>
+dialogue_choice_is <dialogue-choice-id>
+faction_rank_at_least <faction-id> <rank>
+reputation_at_least <faction-id> <signed-32-bit-value>
 set_quest_stage <quest-id> <stage>
 add_journal_entry <quest-id> <journal-entry-id>
+set_faction_rank <faction-id> <rank>
+set_reputation <faction-id> <signed-32-bit-value>
 consume <positive-budget-units>
 end
 ```
 
-Predicates read a copied immutable snapshot of typed globals and per-player
-quest/journal state; a false predicate emits nothing. Quest and journal actions
-derive expected revisions from that snapshot and queue typed next-tick commands.
+Predicates read a copied immutable world snapshot; a false predicate emits
+nothing. Actions derive expected revisions from that snapshot and queue typed next-tick commands.
 Predicates must precede actions in a callback.
 Startup validates every variable, global type, quest stage, journal entry, and
 quest-entry relationship against the manifest catalogs. Each predicate and
@@ -260,18 +264,21 @@ OpenMW clients bind opaque IDs locally with repeatable
 Mappings must be injective and complete for presented records. See
 [`inventory_content.cpp`](../../apps/tes3mp-server/inventory_content.cpp).
 
-## World V2
+## World V3
 
 The required `world_content_file` is at most 4 MiB. It declares one clock, up to
-65,536 typed globals, and manifest-scoped quest/journal catalogs.
+65,536 typed globals, and manifest-scoped quest, journal, faction, rank, and dialogue-choice catalogs.
 
 ```text
-TES3MP_WORLD_V2
+TES3MP_WORLD_V3
 manifest <64-lowercase-hex-digits>
 time <day> <month> <year> <milliseconds-since-midnight> <time-scale-thousandths>
 global <nonzero-id> <short-or-long-or-float> <value>
 quest <nonzero-quest-id> <initial-stage> <strictly-increasing-stage>...
 journal <nonzero-entry-id> <quest-id> <declared-stage>
+faction <nonzero-faction-id> <strictly-increasing-rank>...
+dialogue_choice <nonzero-choice-id> unrestricted
+dialogue_choice <nonzero-choice-id> <required-faction-id> <minimum-rank> <minimum-reputation>
 ```
 
 Days are 1–30, months 0–11, milliseconds 0–86,399,999, and time scale is in
@@ -282,7 +289,9 @@ declaration order is canonical: restart requires exactly the same IDs, order,
 and types before installation. A quest declares 1–1,024 stages including its
 initial stage; the catalog is bounded to 4,096 quests, 32,768 total stages, and
 16,384 journal entries; each names a declared quest stage. Restart requires the
-exact catalog, including manifest, declarations, and stage order. Clients map
+exact catalog. Factions have 1–256 ranks; choices are either unrestricted or
+require membership at a minimum declared rank and reputation. Canonical
+membership and reputation have independent per-player revisions. Clients map
 quest IDs with `tes3mp-content-quest-map=<id>=<journal-record>`. See
 [`world_content.cpp`](../../apps/tes3mp-server/world_content.cpp).
 

@@ -462,6 +462,30 @@ namespace TES3MP
         return prepared;
     }
 
+    std::optional<CanonicalCommandReducer::PreparedLifecycle> CanonicalCommandReducer::prepareDialogueChoice(
+        PlayerId player, DialogueChoiceId choice, const CanonicalWorldState& world, ServerTick tick)
+    {
+        if (tick < mCheckpointTick || !mStateVersion.next() || !mCanonicalRevision.next()
+            || !mState->findPlayer(player)
+            || std::ranges::none_of(mState->activeSessions(),
+                [&](const auto& session) { return session.playerId() == player; })
+            || validateCanonicalDialogueChoice(world, player, choice))
+            return std::nullopt;
+        PreparedLifecycle prepared;
+        prepared.mBaseVersion = mStateVersion;
+        prepared.mStateVersion = *mStateVersion.next();
+        prepared.mBaseCanonicalRevision = mCanonicalRevision;
+        prepared.mCanonicalRevision = *mCanonicalRevision.next();
+        prepared.mCheckpointTick = tick;
+        prepared.mState = mState;
+        prepared.mPublication = std::shared_ptr<CanonicalStatePublication>(
+            new CanonicalStatePublication(mStateVersion, tick, mState, {}));
+        prepared.mPublication->mDialogueChoices.push_back({ prepared.mStateVersion, tick, player, choice });
+        prepared.mDurableCommands.push_back({ DurableCommandSource::DialogueChoice,
+            { tick.value(), player.value(), choice.value(), 0, 0, 0, 0, 0, 0 }, 0 });
+        return prepared;
+    }
+
     std::optional<CanonicalCommandReducer::PreparedLifecycle> CanonicalCommandReducer::prepareExpiration(
         PlayerId playerId, SessionId sessionId, SessionGeneration generation, ServerTick tick)
     {
@@ -492,7 +516,7 @@ namespace TES3MP
         prepared.mPublication->mChecksum
             = canonicalStateChecksumV2(prepared.mStateVersion, prepared.mCheckpointTick, *prepared.mState);
         if (mDurability
-            && mDurability->commit(prepared.mPublication, prepared.mCanonicalRevision, {},
+            && mDurability->commit(prepared.mPublication, prepared.mCanonicalRevision, prepared.mDurableCommands,
                    inventory ? inventory : mDurableInventory, combat ? combat : mDurableCombat, mDurableObjects,
                    mDurableActors, mDurableWorld, mDurableScriptState)
                 != CanonicalDurabilityResult::Committed)
@@ -1447,6 +1471,91 @@ namespace TES3MP
                                     break;
                             }
                         }
+                    }
+                }
+                else if (const auto* factionCommand
+                    = std::get_if<ServerScriptSetFactionRankCommand>(&queued.payload()))
+                {
+                    if (std::ranges::none_of(
+                            players, [&](const auto& value) { return value.playerId() == factionCommand->player(); }))
+                        disposition = ServerScriptCommandDisposition::UnknownPlayer;
+                    else if (!world)
+                        disposition = ServerScriptCommandDisposition::UnknownFaction;
+                    else
+                    {
+                        const auto& base = prepared.mWorld ? *prepared.mWorld : *world;
+                        auto changed = setCanonicalFactionRank(base, factionCommand->player(),
+                            factionCommand->faction(), factionCommand->expectedRevision(), factionCommand->rank(), tick);
+                        if (auto* next = std::get_if<CanonicalWorldState>(&changed))
+                        {
+                            disposition = ServerScriptCommandDisposition::Applied;
+                            if (*next != base)
+                            {
+                                if (!recordChange())
+                                {
+                                    prepared.mResult.mError = CommandBatchReductionError::StateVersionCapacityExceeded;
+                                    return prepared;
+                                }
+                                if (!prepared.mBaseWorld)
+                                    prepared.mBaseWorld = *world;
+                                prepared.mWorld = std::move(*next);
+                            }
+                        }
+                        else
+                        {
+                            switch (std::get<CanonicalWorldMutationError>(changed))
+                            {
+                                case CanonicalWorldMutationError::UnknownFaction:
+                                    disposition = ServerScriptCommandDisposition::UnknownFaction;
+                                    break;
+                                case CanonicalWorldMutationError::UnknownFactionRank:
+                                    disposition = ServerScriptCommandDisposition::UnknownFactionRank;
+                                    break;
+                                case CanonicalWorldMutationError::FactionMembershipRevisionMismatch:
+                                    disposition = ServerScriptCommandDisposition::FactionMembershipRevisionMismatch;
+                                    break;
+                                default:
+                                    disposition = ServerScriptCommandDisposition::InvalidWorldMutation;
+                                    break;
+                            }
+                        }
+                    }
+                }
+                else if (const auto* reputationCommand
+                    = std::get_if<ServerScriptSetReputationCommand>(&queued.payload()))
+                {
+                    if (std::ranges::none_of(players,
+                            [&](const auto& value) { return value.playerId() == reputationCommand->player(); }))
+                        disposition = ServerScriptCommandDisposition::UnknownPlayer;
+                    else if (!world)
+                        disposition = ServerScriptCommandDisposition::UnknownFaction;
+                    else
+                    {
+                        const auto& base = prepared.mWorld ? *prepared.mWorld : *world;
+                        auto changed = setCanonicalFactionReputation(base, reputationCommand->player(),
+                            reputationCommand->faction(), reputationCommand->expectedRevision(),
+                            reputationCommand->reputation(), tick);
+                        if (auto* next = std::get_if<CanonicalWorldState>(&changed))
+                        {
+                            disposition = ServerScriptCommandDisposition::Applied;
+                            if (*next != base)
+                            {
+                                if (!recordChange())
+                                {
+                                    prepared.mResult.mError = CommandBatchReductionError::StateVersionCapacityExceeded;
+                                    return prepared;
+                                }
+                                if (!prepared.mBaseWorld)
+                                    prepared.mBaseWorld = *world;
+                                prepared.mWorld = std::move(*next);
+                            }
+                        }
+                        else if (std::get<CanonicalWorldMutationError>(changed)
+                            == CanonicalWorldMutationError::UnknownFaction)
+                            disposition = ServerScriptCommandDisposition::UnknownFaction;
+                        else if (std::get<CanonicalWorldMutationError>(changed)
+                            == CanonicalWorldMutationError::FactionReputationRevisionMismatch)
+                            disposition = ServerScriptCommandDisposition::FactionReputationRevisionMismatch;
                     }
                 }
                 else if (const auto* persistent

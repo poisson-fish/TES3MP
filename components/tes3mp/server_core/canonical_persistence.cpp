@@ -877,6 +877,47 @@ namespace
             writeStrong(writer, player.journalRevision);
             writeStrong(writer, player.lastJournalChangeTick);
         }
+        writeBool(writer, world.factionDialogueCatalog().has_value());
+        if (!world.factionDialogueCatalog())
+            return;
+        const auto& factionCatalog = *world.factionDialogueCatalog();
+        writer.bytes(factionCatalog.manifest().bytes());
+        writer.fixed(static_cast<std::uint32_t>(factionCatalog.factions().size()));
+        for (const auto& faction : factionCatalog.factions())
+        {
+            writeStrong(writer, faction.id);
+            writer.fixed(static_cast<std::uint32_t>(faction.ranks.size()));
+            for (const auto rank : faction.ranks)
+                writeStrong(writer, rank);
+        }
+        writer.fixed(static_cast<std::uint32_t>(factionCatalog.dialogueChoices().size()));
+        for (const auto choice : factionCatalog.dialogueChoices())
+        {
+            writeStrong(writer, choice.id);
+            writeBool(writer, choice.requiredFaction.has_value());
+            if (choice.requiredFaction)
+                writeStrong(writer, *choice.requiredFaction);
+            writeStrong(writer, choice.minimumRank);
+            writer.fixed(choice.minimumReputation);
+        }
+        writer.fixed(static_cast<std::uint32_t>(world.factionStates().size()));
+        for (const auto& player : world.factionStates())
+        {
+            writeStrong(writer, player.player);
+            writer.fixed(static_cast<std::uint32_t>(player.factions.size()));
+            for (const auto faction : player.factions)
+            {
+                writeStrong(writer, faction.id);
+                writeBool(writer, faction.rank.has_value());
+                if (faction.rank)
+                    writeStrong(writer, *faction.rank);
+                writeStrong(writer, faction.membershipRevision);
+                writeStrong(writer, faction.lastMembershipChangeTick);
+                writer.fixed(faction.reputation);
+                writeStrong(writer, faction.reputationRevision);
+                writeStrong(writer, faction.lastReputationChangeTick);
+            }
+        }
     }
 
     std::optional<CanonicalWorldState> readWorld(Reader& reader) noexcept
@@ -1032,7 +1073,108 @@ namespace
             state.lastJournalChangeTick = *tick;
             players.push_back(std::move(state));
         }
-        return CanonicalWorldState::create(time, globals, std::move(*catalog), players);
+        bool hasFactionDialogue = false;
+        if (!readBool(reader, hasFactionDialogue))
+            return std::nullopt;
+        if (!hasFactionDialogue)
+            return CanonicalWorldState::create(time, globals, std::move(*catalog), players);
+        const auto factionManifestBytes = reader.bytes(ContentManifestIdBytes);
+        const auto factionCount = reader.fixed<std::uint32_t>();
+        if (!factionManifestBytes || !factionCount || *factionCount > MaximumFactionCatalogEntries)
+            return std::nullopt;
+        const auto factionManifest = ContentManifestId::fromBytes(*factionManifestBytes);
+        if (!factionManifest)
+            return std::nullopt;
+        std::vector<FactionCatalogEntry> factions;
+        factions.reserve(*factionCount);
+        std::size_t totalRanks = 0;
+        for (std::uint32_t index = 0; index < *factionCount; ++index)
+        {
+            const auto id = readStrong<FactionId>(reader);
+            const auto rankCount = reader.fixed<std::uint32_t>();
+            if (!id || !rankCount || *rankCount == 0 || *rankCount > MaximumFactionRanksPerFaction
+                || *rankCount > MaximumFactionCatalogRanks - totalRanks)
+                return std::nullopt;
+            totalRanks += *rankCount;
+            std::vector<FactionRank> ranks;
+            ranks.reserve(*rankCount);
+            for (std::uint32_t rankIndex = 0; rankIndex < *rankCount; ++rankIndex)
+            {
+                const auto rank = readStrong<FactionRank>(reader);
+                if (!rank)
+                    return std::nullopt;
+                ranks.push_back(*rank);
+            }
+            factions.push_back({ *id, std::move(ranks) });
+        }
+        const auto choiceCount = reader.fixed<std::uint32_t>();
+        if (!choiceCount || *choiceCount > MaximumDialogueChoiceCatalogEntries)
+            return std::nullopt;
+        std::vector<DialogueChoiceCatalogEntry> choices;
+        choices.reserve(*choiceCount);
+        for (std::uint32_t index = 0; index < *choiceCount; ++index)
+        {
+            const auto id = readStrong<DialogueChoiceId>(reader);
+            bool hasRequiredFaction = false;
+            if (!id || !readBool(reader, hasRequiredFaction))
+                return std::nullopt;
+            std::optional<FactionId> requiredFaction;
+            if (hasRequiredFaction)
+            {
+                requiredFaction = readStrong<FactionId>(reader);
+                if (!requiredFaction)
+                    return std::nullopt;
+            }
+            const auto minimumRank = readStrong<FactionRank>(reader);
+            const auto minimumReputation = reader.fixed<std::int32_t>();
+            if (!minimumRank || !minimumReputation)
+                return std::nullopt;
+            choices.push_back({ *id, requiredFaction, *minimumRank, *minimumReputation });
+        }
+        auto factionCatalog = FactionDialogueCatalog::create(*factionManifest, factions, choices);
+        const auto factionPlayerCount = reader.fixed<std::uint32_t>();
+        if (!factionCatalog || !factionPlayerCount || *factionPlayerCount > MaximumPlayerFactionStates)
+            return std::nullopt;
+        std::vector<CanonicalPlayerFactionState> playerFactions;
+        playerFactions.reserve(*factionPlayerCount);
+        std::size_t totalFactionStates = 0;
+        for (std::uint32_t playerIndex = 0; playerIndex < *factionPlayerCount; ++playerIndex)
+        {
+            const auto player = readStrong<PlayerId>(reader);
+            const auto stateCount = reader.fixed<std::uint32_t>();
+            if (!player || !stateCount || *stateCount > factions.size()
+                || *stateCount > MaximumCanonicalFactionStates - totalFactionStates)
+                return std::nullopt;
+            totalFactionStates += *stateCount;
+            CanonicalPlayerFactionState state{ *player };
+            state.factions.reserve(*stateCount);
+            for (std::uint32_t stateIndex = 0; stateIndex < *stateCount; ++stateIndex)
+            {
+                const auto id = readStrong<FactionId>(reader);
+                bool hasRank = false;
+                if (!id || !readBool(reader, hasRank))
+                    return std::nullopt;
+                std::optional<FactionRank> rank;
+                if (hasRank)
+                {
+                    rank = readStrong<FactionRank>(reader);
+                    if (!rank)
+                        return std::nullopt;
+                }
+                const auto membershipRevision = readStrong<FactionMembershipRevision>(reader);
+                const auto membershipTick = readStrong<ServerTick>(reader);
+                const auto reputation = reader.fixed<std::int32_t>();
+                const auto reputationRevision = readStrong<FactionReputationRevision>(reader);
+                const auto reputationTick = readStrong<ServerTick>(reader);
+                if (!membershipRevision || !membershipTick || !reputation || !reputationRevision || !reputationTick)
+                    return std::nullopt;
+                state.factions.push_back({ *id, rank, *membershipRevision, *membershipTick, *reputation,
+                    *reputationRevision, *reputationTick });
+            }
+            playerFactions.push_back(std::move(state));
+        }
+        return CanonicalWorldState::create(time, globals, std::move(*catalog), std::move(*factionCatalog), players,
+            playerFactions);
     }
 
     void writeScriptValue(Writer& writer, const ScriptVariableValue& value)
@@ -1234,7 +1376,7 @@ namespace
     {
         DurableCommandOrder result;
         const auto source = reader.fixed<std::uint8_t>();
-        if (!source || *source > static_cast<std::uint8_t>(DurableCommandSource::Script))
+        if (!source || *source > static_cast<std::uint8_t>(DurableCommandSource::DialogueChoice))
             return std::nullopt;
         result.source = static_cast<DurableCommandSource>(*source);
         for (auto& field : result.fields)
@@ -1302,6 +1444,14 @@ namespace
                     || command.fields[6] != ServerScriptApiVersion || (priorScript && command.fields <= *priorScript))
                     return false;
                 priorScript = command.fields;
+            }
+            else if (command.source == DurableCommandSource::DialogueChoice)
+            {
+                if (commands.size() != 1 || command.disposition != 0 || command.fields[1] == 0
+                    || command.fields[2] == 0
+                    || std::ranges::any_of(
+                        std::span(command.fields).subspan(3), [](auto field) { return field != 0; }))
+                    return false;
             }
             else
                 return false;
@@ -1374,7 +1524,14 @@ namespace
         for (const auto& player : world->questJournal())
             if (durablePlayer(durablePlayers, player.player))
                 players.push_back(player);
-        return CanonicalWorldState::create(world->time(), world->globals(), *world->questJournalCatalog(), players);
+        if (!world->factionDialogueCatalog())
+            return CanonicalWorldState::create(world->time(), world->globals(), *world->questJournalCatalog(), players);
+        std::vector<CanonicalPlayerFactionState> factionPlayers;
+        for (const auto& player : world->factionStates())
+            if (durablePlayer(durablePlayers, player.player))
+                factionPlayers.push_back(player);
+        return CanonicalWorldState::create(world->time(), world->globals(), *world->questJournalCatalog(),
+            *world->factionDialogueCatalog(), players, factionPlayers);
     }
 }
 
@@ -1559,6 +1716,13 @@ namespace TES3MP
                                [checkpointTick](const auto& quest) { return quest.lastChangeTick > checkpointTick; })
                            || std::ranges::any_of(player.journal,
                                [checkpointTick](const auto& entry) { return entry.changeTick > checkpointTick; });
+                   })
+                || std::ranges::any_of(world->factionStates(), [&](const auto& player) {
+                       return !durablePlayer(players, player.player)
+                           || std::ranges::any_of(player.factions, [checkpointTick](const auto& faction) {
+                                  return faction.lastMembershipChangeTick > checkpointTick
+                                      || faction.lastReputationChangeTick > checkpointTick;
+                              });
                    })))
             return std::nullopt;
         if (scriptState && std::ranges::any_of(scriptState->variables(), [checkpointTick](const auto& variable) {

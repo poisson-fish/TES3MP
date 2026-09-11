@@ -94,6 +94,63 @@ namespace
         }
         return true;
     }
+
+    bool containsRank(const FactionCatalogEntry& faction, FactionRank rank) noexcept
+    {
+        return std::ranges::find(faction.ranks, rank) != faction.ranks.end();
+    }
+
+    bool validFactionState(
+        const FactionDialogueCatalog& catalog, std::span<const CanonicalPlayerFactionState> players) noexcept
+    {
+        if (players.size() > MaximumPlayerFactionStates)
+            return false;
+        std::size_t totalFactions = 0;
+        for (std::size_t playerIndex = 0; playerIndex < players.size(); ++playerIndex)
+        {
+            const auto& player = players[playerIndex];
+            if ((playerIndex != 0 && players[playerIndex - 1].player >= player.player) || player.factions.empty()
+                || player.factions.size() > catalog.factions().size()
+                || player.factions.size() > MaximumCanonicalFactionStates - totalFactions)
+                return false;
+            totalFactions += player.factions.size();
+            std::size_t priorFactionIndex = 0;
+            bool hasPriorFaction = false;
+            for (const auto& faction : player.factions)
+            {
+                const auto declaration = std::ranges::find(catalog.factions(), faction.id, &FactionCatalogEntry::id);
+                if (declaration == catalog.factions().end() || (faction.rank && !containsRank(*declaration, *faction.rank)))
+                    return false;
+                const auto catalogIndex = static_cast<std::size_t>(declaration - catalog.factions().begin());
+                if ((hasPriorFaction && catalogIndex <= priorFactionIndex)
+                    || faction.rank.has_value()
+                        != (faction.membershipRevision != FactionMembershipRevision::initial())
+                    || faction.rank.has_value() != (faction.lastMembershipChangeTick != ServerTick::initial())
+                    || (faction.reputationRevision == FactionReputationRevision::initial()
+                        && (faction.reputation != 0 || faction.lastReputationChangeTick != ServerTick::initial()))
+                    || (faction.reputationRevision != FactionReputationRevision::initial()
+                        && faction.lastReputationChangeTick == ServerTick::initial())
+                    || (!faction.rank && faction.reputationRevision == FactionReputationRevision::initial()))
+                    return false;
+                priorFactionIndex = catalogIndex;
+                hasPriorFaction = true;
+            }
+        }
+        return true;
+    }
+
+    std::optional<CanonicalWorldState> recreateWorld(const CanonicalWorldState& state, CanonicalWorldTimeState time,
+        std::span<const CanonicalGlobalVariableState> globals,
+        std::span<const CanonicalPlayerQuestJournalState> questJournal,
+        std::span<const CanonicalPlayerFactionState> factions) noexcept
+    {
+        if (state.questJournalCatalog() && state.factionDialogueCatalog())
+            return CanonicalWorldState::create(time, globals, *state.questJournalCatalog(),
+                *state.factionDialogueCatalog(), questJournal, factions);
+        if (state.questJournalCatalog())
+            return CanonicalWorldState::create(time, globals, *state.questJournalCatalog(), questJournal);
+        return CanonicalWorldState::create(time, globals);
+    }
 }
 
 namespace TES3MP
@@ -177,6 +234,67 @@ namespace TES3MP
         return found == mJournal.end() ? nullptr : &*found;
     }
 
+    std::optional<FactionDialogueCatalog> FactionDialogueCatalog::create(ContentManifestId manifest,
+        std::span<const FactionCatalogEntry> factions,
+        std::span<const DialogueChoiceCatalogEntry> dialogueChoices) noexcept
+    try
+    {
+        if (factions.size() > MaximumFactionCatalogEntries
+            || dialogueChoices.size() > MaximumDialogueChoiceCatalogEntries)
+            return std::nullopt;
+        std::vector<FactionCatalogEntry> factionCopy(factions.begin(), factions.end());
+        std::size_t totalRanks = 0;
+        for (std::size_t index = 0; index < factionCopy.size(); ++index)
+        {
+            const auto& faction = factionCopy[index];
+            if (faction.ranks.empty() || faction.ranks.size() > MaximumFactionRanksPerFaction
+                || faction.ranks.size() > MaximumFactionCatalogRanks - totalRanks
+                || std::ranges::any_of(std::span(factionCopy).first(index),
+                    [&](const auto& prior) { return prior.id == faction.id; }))
+                return std::nullopt;
+            totalRanks += faction.ranks.size();
+            for (std::size_t rankIndex = 1; rankIndex < faction.ranks.size(); ++rankIndex)
+                if (faction.ranks[rankIndex - 1] >= faction.ranks[rankIndex])
+                    return std::nullopt;
+        }
+        std::vector<DialogueChoiceCatalogEntry> choiceCopy(dialogueChoices.begin(), dialogueChoices.end());
+        for (std::size_t index = 0; index < choiceCopy.size(); ++index)
+        {
+            const auto& choice = choiceCopy[index];
+            const FactionCatalogEntry* faction = nullptr;
+            if (choice.requiredFaction)
+            {
+                const auto found
+                    = std::ranges::find(factionCopy, *choice.requiredFaction, &FactionCatalogEntry::id);
+                faction = found == factionCopy.end() ? nullptr : &*found;
+            }
+            if ((!choice.requiredFaction && (choice.minimumRank != FactionRank::initial()
+                                                || choice.minimumReputation != 0))
+                || (choice.requiredFaction
+                    && (!faction || !containsRank(*faction, choice.minimumRank)))
+                || std::ranges::any_of(std::span(choiceCopy).first(index),
+                    [&](const auto& prior) { return prior.id == choice.id; }))
+                return std::nullopt;
+        }
+        return FactionDialogueCatalog(manifest, std::move(factionCopy), std::move(choiceCopy));
+    }
+    catch (...)
+    {
+        return std::nullopt;
+    }
+
+    const FactionCatalogEntry* FactionDialogueCatalog::findFaction(FactionId id) const noexcept
+    {
+        const auto found = std::ranges::find(mFactions, id, &FactionCatalogEntry::id);
+        return found == mFactions.end() ? nullptr : &*found;
+    }
+
+    const DialogueChoiceCatalogEntry* FactionDialogueCatalog::findDialogueChoice(DialogueChoiceId id) const noexcept
+    {
+        const auto found = std::ranges::find(mDialogueChoices, id, &DialogueChoiceCatalogEntry::id);
+        return found == mDialogueChoices.end() ? nullptr : &*found;
+    }
+
     std::optional<CanonicalWorldState> CanonicalWorldState::create(
         CanonicalWorldTimeState time, std::span<const CanonicalGlobalVariableState> globals) noexcept
     try
@@ -213,6 +331,29 @@ namespace TES3MP
         return std::nullopt;
     }
 
+    std::optional<CanonicalWorldState> CanonicalWorldState::create(CanonicalWorldTimeState time,
+        std::span<const CanonicalGlobalVariableState> globals, QuestJournalCatalog questJournalCatalog,
+        FactionDialogueCatalog factionDialogueCatalog,
+        std::span<const CanonicalPlayerQuestJournalState> questJournal,
+        std::span<const CanonicalPlayerFactionState> factions) noexcept
+    try
+    {
+        auto base = create(time, globals);
+        if (!base || questJournalCatalog.manifest() != factionDialogueCatalog.manifest()
+            || !validQuestJournalState(questJournalCatalog, questJournal)
+            || !validFactionState(factionDialogueCatalog, factions))
+            return std::nullopt;
+        return CanonicalWorldState(time, std::vector<CanonicalGlobalVariableState>(globals.begin(), globals.end()),
+            std::move(questJournalCatalog),
+            std::vector<CanonicalPlayerQuestJournalState>(questJournal.begin(), questJournal.end()),
+            std::move(factionDialogueCatalog),
+            std::vector<CanonicalPlayerFactionState>(factions.begin(), factions.end()));
+    }
+    catch (...)
+    {
+        return std::nullopt;
+    }
+
     std::optional<CanonicalWorldState> CanonicalWorldState::initial(
         CanonicalWorldTimeState time, const GlobalVariableCatalog& catalog) noexcept
     try
@@ -241,6 +382,21 @@ namespace TES3MP
         return std::nullopt;
     }
 
+    std::optional<CanonicalWorldState> CanonicalWorldState::initial(CanonicalWorldTimeState time,
+        const GlobalVariableCatalog& globals, QuestJournalCatalog questJournalCatalog,
+        FactionDialogueCatalog factionDialogueCatalog) noexcept
+    try
+    {
+        auto base = initial(time, globals);
+        return base ? create(base->time(), base->globals(), std::move(questJournalCatalog),
+                          std::move(factionDialogueCatalog), {}, {})
+                    : std::nullopt;
+    }
+    catch (...)
+    {
+        return std::nullopt;
+    }
+
     const CanonicalGlobalVariableState* CanonicalWorldState::find(GlobalVariableId id) const noexcept
     {
         const auto found = std::ranges::find(mGlobals, id, &CanonicalGlobalVariableState::id);
@@ -252,6 +408,12 @@ namespace TES3MP
         const auto found
             = std::ranges::lower_bound(mQuestJournal, player, {}, &CanonicalPlayerQuestJournalState::player);
         return found == mQuestJournal.end() || found->player != player ? nullptr : &*found;
+    }
+
+    const CanonicalPlayerFactionState* CanonicalWorldState::findFactionState(PlayerId player) const noexcept
+    {
+        const auto found = std::ranges::lower_bound(mFactionStates, player, {}, &CanonicalPlayerFactionState::player);
+        return found == mFactionStates.end() || found->player != player ? nullptr : &*found;
     }
 
     CanonicalWorldMutationResult advanceCanonicalWorldTime(
@@ -299,9 +461,7 @@ namespace TES3MP
             next.revision = *current.revision.next();
             next.lastChangeTick = tick;
         }
-        auto result = state.questJournalCatalog()
-            ? CanonicalWorldState::create(next, state.globals(), *state.questJournalCatalog(), state.questJournal())
-            : CanonicalWorldState::create(next, state.globals());
+        auto result = recreateWorld(state, next, state.globals(), state.questJournal(), state.factionStates());
         return result ? CanonicalWorldMutationResult(std::move(*result))
                       : CanonicalWorldMutationResult(CanonicalWorldMutationError::InvalidState);
     }
@@ -326,9 +486,8 @@ namespace TES3MP
         replacement.lastChangeTick = tick;
         replacement.lastAdvanceTick = tick;
         replacement.subMillisecondRemainder = 0;
-        auto result = state.questJournalCatalog() ? CanonicalWorldState::create(replacement, state.globals(),
-                                                        *state.questJournalCatalog(), state.questJournal())
-                                                  : CanonicalWorldState::create(replacement, state.globals());
+        auto result
+            = recreateWorld(state, replacement, state.globals(), state.questJournal(), state.factionStates());
         return result ? CanonicalWorldMutationResult(std::move(*result))
                       : CanonicalWorldMutationResult(CanonicalWorldMutationError::InvalidState);
     }
@@ -363,9 +522,7 @@ namespace TES3MP
         found->value = std::move(value);
         found->revision = *revision;
         found->lastChangeTick = tick;
-        auto result = state.questJournalCatalog()
-            ? CanonicalWorldState::create(state.time(), globals, *state.questJournalCatalog(), state.questJournal())
-            : CanonicalWorldState::create(state.time(), globals);
+        auto result = recreateWorld(state, state.time(), globals, state.questJournal(), state.factionStates());
         return result ? CanonicalWorldMutationResult(std::move(*result))
                       : CanonicalWorldMutationResult(CanonicalWorldMutationError::InvalidState);
     }
@@ -422,7 +579,7 @@ namespace TES3MP
             current->revision = *revision;
             current->lastChangeTick = tick;
         }
-        auto result = CanonicalWorldState::create(state.time(), state.globals(), catalog, players);
+        auto result = recreateWorld(state, state.time(), state.globals(), players, state.factionStates());
         return result ? CanonicalWorldMutationResult(std::move(*result))
                       : CanonicalWorldMutationResult(CanonicalWorldMutationError::InvalidState);
     }
@@ -462,9 +619,153 @@ namespace TES3MP
         playerState->journal.push_back({ entry, *revision, tick });
         playerState->journalRevision = *revision;
         playerState->lastJournalChangeTick = tick;
-        auto result = CanonicalWorldState::create(state.time(), state.globals(), catalog, players);
+        auto result = recreateWorld(state, state.time(), state.globals(), players, state.factionStates());
         return result ? CanonicalWorldMutationResult(std::move(*result))
                       : CanonicalWorldMutationResult(CanonicalWorldMutationError::InvalidState);
+    }
+    catch (...)
+    {
+        return CanonicalWorldMutationError::InvalidState;
+    }
+
+    CanonicalWorldMutationResult setCanonicalFactionRank(const CanonicalWorldState& state, PlayerId player,
+        FactionId faction, FactionMembershipRevision expectedRevision, FactionRank rank, ServerTick tick) noexcept
+    try
+    {
+        if (!state.factionDialogueCatalog())
+            return CanonicalWorldMutationError::UnknownFaction;
+        const auto& catalog = *state.factionDialogueCatalog();
+        const auto* declaration = catalog.findFaction(faction);
+        if (!declaration)
+            return CanonicalWorldMutationError::UnknownFaction;
+        if (!containsRank(*declaration, rank))
+            return CanonicalWorldMutationError::UnknownFactionRank;
+
+        std::vector<CanonicalPlayerFactionState> players(state.factionStates().begin(), state.factionStates().end());
+        auto playerState = std::ranges::lower_bound(players, player, {}, &CanonicalPlayerFactionState::player);
+        if (playerState == players.end() || playerState->player != player)
+            playerState = players.insert(playerState, CanonicalPlayerFactionState{ player });
+        auto current = std::ranges::find(playerState->factions, faction, &CanonicalFactionState::id);
+        const auto currentRevision = current == playerState->factions.end()
+            ? FactionMembershipRevision::initial()
+            : current->membershipRevision;
+        const auto currentTick = current == playerState->factions.end()
+            ? ServerTick::initial()
+            : current->lastMembershipChangeTick;
+        if (expectedRevision != currentRevision)
+            return CanonicalWorldMutationError::FactionMembershipRevisionMismatch;
+        if (tick < currentTick)
+            return CanonicalWorldMutationError::TickRegression;
+        if (current != playerState->factions.end() && current->rank == rank)
+            return state;
+        const auto revision = currentRevision.next();
+        if (!revision)
+            return CanonicalWorldMutationError::RevisionExhausted;
+        if (current == playerState->factions.end())
+        {
+            const auto targetIndex = static_cast<std::size_t>(
+                std::ranges::find(catalog.factions(), faction, &FactionCatalogEntry::id) - catalog.factions().begin());
+            current = std::ranges::find_if(playerState->factions, [&](const auto& existing) {
+                const auto index = std::ranges::find(catalog.factions(), existing.id, &FactionCatalogEntry::id)
+                    - catalog.factions().begin();
+                return static_cast<std::size_t>(index) > targetIndex;
+            });
+            playerState->factions.insert(current,
+                CanonicalFactionState{ faction, rank, *revision, tick, 0,
+                    FactionReputationRevision::initial(), ServerTick::initial() });
+        }
+        else
+        {
+            current->rank = rank;
+            current->membershipRevision = *revision;
+            current->lastMembershipChangeTick = tick;
+        }
+        auto result = recreateWorld(state, state.time(), state.globals(), state.questJournal(), players);
+        return result ? CanonicalWorldMutationResult(std::move(*result))
+                      : CanonicalWorldMutationResult(CanonicalWorldMutationError::InvalidState);
+    }
+    catch (...)
+    {
+        return CanonicalWorldMutationError::InvalidState;
+    }
+
+    CanonicalWorldMutationResult setCanonicalFactionReputation(const CanonicalWorldState& state, PlayerId player,
+        FactionId faction, FactionReputationRevision expectedRevision, std::int32_t reputation,
+        ServerTick tick) noexcept
+    try
+    {
+        if (!state.factionDialogueCatalog() || !state.factionDialogueCatalog()->findFaction(faction))
+            return CanonicalWorldMutationError::UnknownFaction;
+        const auto& catalog = *state.factionDialogueCatalog();
+        std::vector<CanonicalPlayerFactionState> players(state.factionStates().begin(), state.factionStates().end());
+        auto playerState = std::ranges::lower_bound(players, player, {}, &CanonicalPlayerFactionState::player);
+        if (playerState == players.end() || playerState->player != player)
+            playerState = players.insert(playerState, CanonicalPlayerFactionState{ player });
+        auto current = std::ranges::find(playerState->factions, faction, &CanonicalFactionState::id);
+        const auto currentRevision = current == playerState->factions.end()
+            ? FactionReputationRevision::initial()
+            : current->reputationRevision;
+        const auto currentTick = current == playerState->factions.end()
+            ? ServerTick::initial()
+            : current->lastReputationChangeTick;
+        const auto currentReputation = current == playerState->factions.end() ? 0 : current->reputation;
+        if (expectedRevision != currentRevision)
+            return CanonicalWorldMutationError::FactionReputationRevisionMismatch;
+        if (tick < currentTick)
+            return CanonicalWorldMutationError::TickRegression;
+        if (reputation == currentReputation)
+            return state;
+        const auto revision = currentRevision.next();
+        if (!revision)
+            return CanonicalWorldMutationError::RevisionExhausted;
+        if (current == playerState->factions.end())
+        {
+            const auto targetIndex = static_cast<std::size_t>(
+                std::ranges::find(catalog.factions(), faction, &FactionCatalogEntry::id) - catalog.factions().begin());
+            current = std::ranges::find_if(playerState->factions, [&](const auto& existing) {
+                const auto index = std::ranges::find(catalog.factions(), existing.id, &FactionCatalogEntry::id)
+                    - catalog.factions().begin();
+                return static_cast<std::size_t>(index) > targetIndex;
+            });
+            playerState->factions.insert(current,
+                CanonicalFactionState{ faction, std::nullopt, FactionMembershipRevision::initial(),
+                    ServerTick::initial(), reputation, *revision, tick });
+        }
+        else
+        {
+            current->reputation = reputation;
+            current->reputationRevision = *revision;
+            current->lastReputationChangeTick = tick;
+        }
+        auto result = recreateWorld(state, state.time(), state.globals(), state.questJournal(), players);
+        return result ? CanonicalWorldMutationResult(std::move(*result))
+                      : CanonicalWorldMutationResult(CanonicalWorldMutationError::InvalidState);
+    }
+    catch (...)
+    {
+        return CanonicalWorldMutationError::InvalidState;
+    }
+
+    std::optional<CanonicalWorldMutationError> validateCanonicalDialogueChoice(
+        const CanonicalWorldState& state, PlayerId player, DialogueChoiceId choice) noexcept
+    try
+    {
+        if (!state.factionDialogueCatalog())
+            return CanonicalWorldMutationError::UnknownDialogueChoice;
+        const auto* declaration = state.factionDialogueCatalog()->findDialogueChoice(choice);
+        if (!declaration)
+            return CanonicalWorldMutationError::UnknownDialogueChoice;
+        if (!declaration->requiredFaction)
+            return std::nullopt;
+        const auto* playerState = state.findFactionState(player);
+        if (!playerState)
+            return CanonicalWorldMutationError::DialogueChoiceIneligible;
+        const auto found
+            = std::ranges::find(playerState->factions, *declaration->requiredFaction, &CanonicalFactionState::id);
+        if (found == playerState->factions.end() || !found->rank || *found->rank < declaration->minimumRank
+            || found->reputation < declaration->minimumReputation)
+            return CanonicalWorldMutationError::DialogueChoiceIneligible;
+        return std::nullopt;
     }
     catch (...)
     {
@@ -505,6 +806,33 @@ namespace TES3MP
             return std::get<CanonicalWorldMutationError>(restoredGlobals);
         auto result
             = CanonicalWorldState::create(base->time(), base->globals(), expectedQuestJournalCatalog, questJournal);
+        return result ? CanonicalWorldMutationResult(std::move(*result))
+                      : CanonicalWorldMutationResult(CanonicalWorldMutationError::CatalogMismatch);
+    }
+    catch (...)
+    {
+        return CanonicalWorldMutationError::InvalidState;
+    }
+
+    CanonicalWorldMutationResult restoreCanonicalWorldState(const GlobalVariableCatalog& globals,
+        const QuestJournalCatalog& expectedQuestJournalCatalog,
+        const FactionDialogueCatalog& expectedFactionDialogueCatalog, CanonicalWorldTimeState time,
+        std::span<const CanonicalGlobalVariableState> globalStates,
+        const QuestJournalCatalog& restoredQuestJournalCatalog,
+        const FactionDialogueCatalog& restoredFactionDialogueCatalog,
+        std::span<const CanonicalPlayerQuestJournalState> questJournal,
+        std::span<const CanonicalPlayerFactionState> factions) noexcept
+    try
+    {
+        if (expectedQuestJournalCatalog != restoredQuestJournalCatalog
+            || expectedFactionDialogueCatalog != restoredFactionDialogueCatalog)
+            return CanonicalWorldMutationError::CatalogMismatch;
+        const auto restoredGlobals = restoreCanonicalWorldState(globals, time, globalStates);
+        const auto* base = std::get_if<CanonicalWorldState>(&restoredGlobals);
+        if (!base)
+            return std::get<CanonicalWorldMutationError>(restoredGlobals);
+        auto result = CanonicalWorldState::create(base->time(), base->globals(), expectedQuestJournalCatalog,
+            expectedFactionDialogueCatalog, questJournal, factions);
         return result ? CanonicalWorldMutationResult(std::move(*result))
                       : CanonicalWorldMutationResult(CanonicalWorldMutationError::CatalogMismatch);
     }

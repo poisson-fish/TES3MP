@@ -94,11 +94,13 @@ namespace TES3MP
     {
         Client,
         Script,
+        DialogueChoice,
     };
 
     // The nine fields are a lossless normalized ordering key. Client commands use
     // tick, ingress ordinal, session, generation, sequence, and command id.
-    // Script commands use the complete ServerScriptCommandOrder tuple.
+    // Script commands use the complete ServerScriptCommandOrder tuple. Dialogue
+    // choices use tick, player identity, and choice identity.
     struct DurableCommandOrder
     {
         DurableCommandSource source = DurableCommandSource::Client;

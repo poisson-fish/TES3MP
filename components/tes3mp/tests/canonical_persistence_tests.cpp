@@ -81,6 +81,11 @@ namespace
         return { DurableCommandSource::Script, { tick, 1, 0, 0, 11, 1, ServerScriptApiVersion, 0, ordinal }, 0 };
     }
 
+    DurableCommandOrder dialogue(std::uint64_t tick)
+    {
+        return { DurableCommandSource::DialogueChoice, { tick, 1, 40, 0, 0, 0, 0, 0, 0 }, 0 };
+    }
+
     CanonicalDurablePrefix prefix()
     {
         const std::array firstPlayers{ player(10) };
@@ -173,13 +178,25 @@ namespace
             id<QuestId>(1), id<QuestStage>(0), { id<QuestStage>(0), id<QuestStage>(10) } } };
         const std::array journal{ JournalCatalogEntry{ id<JournalEntryId>(1), id<QuestId>(1), id<QuestStage>(10) } };
         const auto catalog = QuestJournalCatalog::create(testContentManifestId(), quests, journal).value();
+        const std::array factions{
+            FactionCatalogEntry{ id<FactionId>(1), { id<FactionRank>(0), id<FactionRank>(1) } } };
+        const std::array choices{ DialogueChoiceCatalogEntry{
+            id<DialogueChoiceId>(1), id<FactionId>(1), id<FactionRank>(1), 5 } };
+        const auto factionCatalog
+            = FactionDialogueCatalog::create(testContentManifestId(), factions, choices).value();
         std::vector<CanonicalPlayerQuestJournalState> players;
+        std::vector<CanonicalPlayerFactionState> playerFactions;
         if (tick > 1)
+        {
             players.push_back(
                 { id<PlayerId>(1), { { id<QuestId>(1), id<QuestStage>(10), id<QuestRevision>(2), id<ServerTick>(2) } },
                     { { id<JournalEntryId>(1), id<JournalRevision>(2), id<ServerTick>(2) } }, id<JournalRevision>(2),
                     id<ServerTick>(2) });
-        return CanonicalWorldState::create(time, globals, catalog, players).value();
+            playerFactions.push_back({ id<PlayerId>(1),
+                { { id<FactionId>(1), id<FactionRank>(1), id<FactionMembershipRevision>(2), id<ServerTick>(2), 5,
+                    id<FactionReputationRevision>(2), id<ServerTick>(2) } } });
+        }
+        return CanonicalWorldState::create(time, globals, catalog, factionCatalog, players, playerFactions).value();
     }
 
     CanonicalDurablePrefix domainPrefix()
@@ -230,6 +247,25 @@ namespace
             == CanonicalPersistenceDecodeError::IdentityMismatch
             && std::get<CanonicalPersistenceDecodeError>(decodeCanonicalDurablePrefix(bytes, identity(1, 2)))
             == CanonicalPersistenceDecodeError::IdentityMismatch;
+    }
+
+    bool dialogue_choice_identity_has_a_bounded_durable_order()
+    {
+        const std::array players{ player(10) };
+        const std::array commands{ dialogue(1) };
+        const auto tick = CanonicalDurableTick::create(id<CanonicalStateVersion>(1), id<CanonicalRevision>(1),
+            id<ServerTick>(1), players, commands);
+        const auto prefix = tick ? CanonicalDurablePrefix::create(identity(), { *tick }) : std::nullopt;
+        const auto decoded = prefix
+            ? decodeCanonicalDurablePrefix(encodeCanonicalDurablePrefixV2(*prefix), identity())
+            : CanonicalPersistenceDecodeResult(CanonicalPersistenceDecodeError::Malformed);
+        const auto* restored = std::get_if<CanonicalDurablePrefix>(&decoded);
+        auto invalid = dialogue(1);
+        invalid.fields[3] = 1;
+        return restored && restored->latest()->commands().size() == 1
+            && restored->latest()->commands().front() == commands.front()
+            && !CanonicalDurableTick::create(id<CanonicalStateVersion>(1), id<CanonicalRevision>(1),
+                id<ServerTick>(1), players, std::array{ invalid });
     }
 
     std::variant<CanonicalReplayState, CanonicalChecksum> replayScriptState(
@@ -329,6 +365,10 @@ namespace
             && latest.world()->questJournal().size() == 1
             && latest.world()->questJournal().front().quests.front().stage == id<QuestStage>(10)
             && latest.world()->questJournal().front().journal.front().id == id<JournalEntryId>(1)
+            && latest.world()->factionDialogueCatalog()
+            && latest.world()->factionDialogueCatalog()->dialogueChoices().size() == 1
+            && latest.world()->factionStates().size() == 1
+            && latest.world()->factionStates().front().factions.front().reputation == 5
             && latest.combat()->actors.front().aggressionTarget == id<PlayerId>(1)
             && latest.canonicalChecksum()
             == canonicalDurableStateChecksumV1(latest.stateVersion(), latest.checkpointTick(), latest.players(),
@@ -551,6 +591,8 @@ int main()
             &round_trip_preserves_identity_roots_versions_seeds_and_order },
         std::pair{ "malformed_inputs_and_identity_mismatches_reject_atomically",
             &malformed_inputs_and_identity_mismatches_reject_atomically },
+        std::pair{ "dialogue_choice_identity_has_a_bounded_durable_order",
+            &dialogue_choice_identity_has_a_bounded_durable_order },
         std::pair{ "script_state_round_trip_replay_checksum_and_catalog_identity_are_exact",
             &script_state_round_trip_replay_checksum_and_catalog_identity_are_exact },
         std::pair{ "replayed_command_stream_reaches_each_recorded_checksum",

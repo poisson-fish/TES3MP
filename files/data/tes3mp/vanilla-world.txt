@@ -1,5 +1,8 @@
-TES3MP_WORLD_V2
+TES3MP_WORLD_V3
 manifest afd2d1a2a6c8ba6a6ca826fe964122a8e8fc3830d8a366fa639cb6b925dd8da6
 time 16 6 427 32400000 30000
 quest 1 0 0 10
 journal 1 1 10
+faction 1 0 1
+dialogue_choice 1 unrestricted
+dialogue_choice 2 1 0 5
