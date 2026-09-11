@@ -376,9 +376,10 @@ and [`character.cpp`](../../apps/openmw/mwmechanics/character.cpp).
 
 ### Deterministic server-scripting foundation
 
-- Optional bounded `TES3MP_SCRIPT_PACKAGES_V1` content loads manifest-bound
-  package/version/load/API declarations and typed persistent-variable catalogs.
-  Production config contains one package and one declared integer variable.
+- Optional bounded `TES3MP_SCRIPT_PACKAGES_V2` content loads manifest-bound
+  package/version/load/API/ABI declarations, exact module SHA-256 and entrypoint
+  bindings, execution budgets, and typed persistent-variable catalogs.
+  Production config contains one executable package and one declared integer variable.
   Declarations are canonically sorted; malformed, oversized, unknown-package,
   wrong-API, or manifest-mismatched input fails startup.
 - Script API V3 projects committed publications into immutable bounded events.
@@ -395,10 +396,17 @@ and [`character.cpp`](../../apps/openmw/mwmechanics/character.cpp).
   then restores and binds catalog-compatible state before callbacks can run.
   Undeclared or version-conflicting callback registration fails. A callback
   sees only its package's immutable state.
+- The bounded V1 module loader rejects missing, oversized, hash-mismatched,
+  malformed, wrong-API/ABI, missing-entrypoint, resource-invalid, or
+  catalog-invalid artifacts before server startup. It instantiates callbacks in
+  canonical package/load order and terminates on execution-budget exhaustion.
+  The packaged module uses an immutable session-joined event to emit a typed
+  next-tick compare-and-set increment of its declared persistent integer.
 
 Primary sources: [`script_state.hpp`](../../components/tes3mp/include/tes3mp/script_state.hpp),
 [`server_scripting.hpp`](../../components/tes3mp/include/tes3mp/server_scripting.hpp),
-[`script_package_content.cpp`](../../apps/tes3mp-server/script_package_content.cpp), and
+[`script_package_content.cpp`](../../apps/tes3mp-server/script_package_content.cpp),
+[`script_module.cpp`](../../apps/tes3mp-server/script_module.cpp), and
 [`server_command_reducer.cpp`](../../components/tes3mp/server_core/server_command_reducer.cpp).
 
 ### Transactional gameplay persistence and replay envelope
@@ -498,8 +506,10 @@ and [`test_bake_tes3mp_content.py`](../../scripts/tests/test_bake_tes3mp_content
   duration/area magic, active spellcasting, Lua hit callbacks, and general magic
   remain unimplemented.
 - Declared package variables survive restart; undeclared script/VM memory does
-  not. Package metadata/catalog loading is implemented, but no interpreter or
-  default callback behavior is packaged.
+  not. The initial executable module format supports bounded event callbacks,
+  explicit budget consumption, and integer-state increments only; broader
+  gameplay queries, branching, arithmetic, events, and typed commands remain
+  unimplemented.
 - The packaged default is the verified installed vanilla manifest. Other
   loadouts still require bounded content generation and local record mappings;
   server discovery/history remain unfinished. The V2 baker binds TES3 content
@@ -514,11 +524,12 @@ and [`test_bake_tes3mp_content.py`](../../scripts/tests/test_bake_tes3mp_content
 
 ## Work still required
 
-### Next milestone: executable script modules
+### Next milestone: broader executable gameplay scripts
 
-Load executable callbacks for the manifest-bound packages through the versioned
-runtime and expand the immutable event/typed-command surface. TES3MP 0.8.x
-scripts and saves remain unsupported.
+Expand the versioned immutable event/query and typed-command surface beyond the
+initial session-joined persistent-state callback, prioritizing weather,
+dialogue, factions, reputation, and quest consequences. TES3MP 0.8.x scripts
+and saves remain unsupported.
 
 ### Required before the desktop/PC-VR release
 
@@ -551,24 +562,13 @@ and do not enter protocol or canonical state.
 
 ## Verification snapshot
 
-The script-package composition working tree passed the following on 2026-09-10:
+The executable-module working tree passed focused script/runtime and baker
+tests, the dedicated-server application aggregate, the Windows server product
+build, all 198 repository Python tests, and patch-registry verification on
+2026-09-10. The full standalone aggregate also passed.
 
-- the standalone aggregate, including package registration, restored callback
-  visibility, CAS, exact identity, replay/checksum, and acknowledgement;
-- the dedicated-server application aggregate, including bounded compaction,
-  script package/catalog loading, restart restoration, upgrades, mismatches,
-  crash cuts, exact catalog restoration, and atomic replacement; and
-- the server product and Windows checks graph, including shipping client and
-  OpenMW adapter contracts, plus the headless client; and
-- all 198 repository Python tests plus patch-registry verification.
-
-The baseline verifier was rerun and remains blocked by pre-existing provenance
-drift outside this milestone. Protocol generation, content baking, and the
-headless client were not rerun. The Linux-only sanitizer/fuzzer execution
-profile, non-Windows builds, PC-VR hardware checks, a full upstream OpenMW
-baseline, and a human-driven visible OpenMW walkthrough were not performed. The
-product build uses the newest installed MSVC so its STL matches the provisioned
-protobuf/Abseil libraries.
+Sanitizer/fuzzer profiles, non-Windows builds, PC-VR hardware, the upstream
+OpenMW baseline, and a visible OpenMW walkthrough were not run.
 
 Use [DEVELOPMENT.md](DEVELOPMENT.md) for commands and record only the newest
 relevant verification here after behavior changes.

@@ -97,10 +97,19 @@ class ContentBakerTests(unittest.TestCase):
             "global 1 short 0\n",
             encoding="utf-8",
         )
+        (self.source / "vanilla-script-module.t3sm").write_bytes((
+            "TES3MP_SCRIPT_MODULE_V1\n"
+            "abi 1\n"
+            "api 3\n"
+            "entry joined\n"
+            "callback 0 session_joined\n"
+            "increment_integer 1 1\n"
+            "end\n").encode("utf-8"))
         (self.source / "scripts.txt").write_text(
-            "TES3MP_SCRIPT_PACKAGES_V1\n"
+            "TES3MP_SCRIPT_PACKAGES_V2\n"
             f"manifest {ZERO_MANIFEST}\n"
-            "package 1 1 0 3\n"
+            "package 1 1 0 3 1 vanilla-script-module.t3sm "
+            "a51a8b25ada18922a00da8db3e1c8724fa27a063dfc0528e80ffaf1a1aa7300e joined 32\n"
             "variable 1 1 integer 0\n",
             encoding="utf-8",
         )
@@ -258,16 +267,17 @@ class ContentBakerTests(unittest.TestCase):
         self.assertEqual(metadata["content_files"][0]["sha256"], hashlib.sha256(self.esm.read_bytes()).hexdigest())
         self.assertEqual(metadata["content_files"][0]["masters"], [])
         for name in ("server.cfg", "openmw.cfg", "collision.txt", "actors.txt", "inventory.txt", "combat.txt",
-                     "characters.txt", "scripts.txt"):
+                     "characters.txt", "scripts.txt", "vanilla-script-module.t3sm"):
             self.assertIn(name, metadata["artifacts"])
         self.assertIn(f"content_manifest_id = {manifest}", path.joinpath("server.cfg").read_text())
         self.assertIn(f"tes3mp-content-manifest-id={manifest}", path.joinpath("openmw.cfg").read_text())
 
     def test_malformed_script_package_rejects_before_publication(self):
         (self.source / "scripts.txt").write_text(
-            "TES3MP_SCRIPT_PACKAGES_V1\n"
+            "TES3MP_SCRIPT_PACKAGES_V2\n"
             f"manifest {ZERO_MANIFEST}\n"
-            "package 1 1 0 4\n",
+            "package 1 1 0 4 1 vanilla-script-module.t3sm "
+            "a51a8b25ada18922a00da8db3e1c8724fa27a063dfc0528e80ffaf1a1aa7300e joined 32\n",
             encoding="utf-8",
         )
 

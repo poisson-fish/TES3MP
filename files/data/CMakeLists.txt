@@ -12,6 +12,7 @@ set(BUILTIN_DATA_FILES
     tes3mp/vanilla-combat.txt
     tes3mp/vanilla-world.txt
     tes3mp/vanilla-scripts.txt
+    tes3mp/vanilla-script-module.t3sm
     tes3mp/vanilla-derived-pack.json
     textures/omw_map_color_palette.dds
     textures/omw_menu_scroll_down.dds

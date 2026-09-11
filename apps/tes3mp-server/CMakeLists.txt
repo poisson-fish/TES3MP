@@ -41,6 +41,8 @@ add_library(tes3mp_server_app STATIC
     resume_token_context.cpp
     script_package_content.hpp
     script_package_content.cpp
+    script_module.hpp
+    script_module.cpp
     server_config.hpp
     server_config.cpp
     world_content.hpp

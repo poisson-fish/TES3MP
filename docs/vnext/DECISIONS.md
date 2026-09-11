@@ -191,7 +191,10 @@ the affected code/tests in the same milestone.
 - **Scripting.** Server scripts receive immutable bounded values/events and queue
   typed commands for deterministic ticks. They never receive packet buffers or
   direct mutable canonical references. Callback and generated-command ordering
-  must be replay-stable. Reusing Lua does not imply legacy API compatibility.
+  must be replay-stable. Executable packages bind exact module bytes and an
+  entrypoint through a versioned, resource-metered module ABI; modules do not
+  load OS dynamic libraries or persist VM state. Reusing a broader language in
+  the future does not imply legacy API compatibility.
 - **Persistence acknowledgement and identity.** Persist canonical domain
   records, not protocol payloads, OpenMW pointers, renderer objects, or
   transport types. `Committed` from the durability port is the sole

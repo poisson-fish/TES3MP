@@ -15,8 +15,8 @@ namespace TES3MP::ServerApp
 {
     namespace
     {
-        constexpr std::string_view Header = "TES3MP_SCRIPT_PACKAGES_V1";
-        constexpr std::size_t MaximumFields = 5;
+        constexpr std::string_view Header = "TES3MP_SCRIPT_PACKAGES_V2";
+        constexpr std::size_t MaximumFields = 10;
 
         template <class Value>
         std::optional<Value> number(std::string_view text) noexcept
@@ -79,6 +79,49 @@ namespace TES3MP::ServerApp
         {
             return std::nullopt;
         }
+
+        std::optional<std::array<std::byte, ScriptModuleHashBytes>> moduleHash(std::string_view text) noexcept
+        {
+            if (text.size() != ScriptModuleHashBytes * 2)
+                return std::nullopt;
+            const auto nibble = [](char value) -> std::optional<unsigned char> {
+                if (value >= '0' && value <= '9')
+                    return static_cast<unsigned char>(value - '0');
+                if (value >= 'a' && value <= 'f')
+                    return static_cast<unsigned char>(value - 'a' + 10);
+                return std::nullopt;
+            };
+            std::array<std::byte, ScriptModuleHashBytes> result{};
+            for (std::size_t index = 0; index < result.size(); ++index)
+            {
+                const auto high = nibble(text[index * 2]);
+                const auto low = nibble(text[index * 2 + 1]);
+                if (!high || !low)
+                    return std::nullopt;
+                result[index] = static_cast<std::byte>((*high << 4) | *low);
+            }
+            return result;
+        }
+
+        bool identifier(std::string_view value, std::size_t maximum) noexcept
+        {
+            if (value.empty() || value.size() > maximum)
+                return false;
+            return std::ranges::all_of(value, [](char byte) {
+                return (byte >= 'a' && byte <= 'z') || (byte >= 'A' && byte <= 'Z') || (byte >= '0' && byte <= '9')
+                    || byte == '_' || byte == '-';
+            });
+        }
+
+        bool artifactName(std::string_view value) noexcept
+        {
+            if (value.empty() || value.size() > MaximumScriptModuleNameBytes || value.front() == '.')
+                return false;
+            return std::ranges::all_of(value, [](char byte) {
+                return (byte >= 'a' && byte <= 'z') || (byte >= 'A' && byte <= 'Z') || (byte >= '0' && byte <= '9')
+                    || byte == '_' || byte == '-' || byte == '.';
+            });
+        }
     }
 
     ScriptPackageContentLoadResult loadScriptPackageContent(
@@ -108,6 +151,7 @@ namespace TES3MP::ServerApp
 
         std::optional<ContentManifestId> declaredManifest;
         std::vector<ServerScriptPackage> packages;
+        std::vector<ScriptModuleBinding> modules;
         std::vector<ServerScriptVariableCatalogEntry> variables;
         std::size_t lineNumber = 0;
         for (std::size_t begin = 0; begin <= text.size();)
@@ -140,21 +184,28 @@ namespace TES3MP::ServerApp
                 }
                 else if (values[0] == "package")
                 {
-                    if (values.size() != 5 || packages.size() == MaximumServerScriptPackages)
+                    if (values.size() != 10 || packages.size() == MaximumServerScriptPackages)
                         return packages.size() == MaximumServerScriptPackages ? ScriptPackageContentError::TooLarge
                                                                               : ScriptPackageContentError::Malformed;
                     const auto packageId = number<std::uint64_t>(values[1]);
                     const auto version = number<std::uint32_t>(values[2]);
                     const auto loadOrder = number<std::uint32_t>(values[3]);
                     const auto api = number<std::uint32_t>(values[4]);
+                    const auto abi = number<std::uint32_t>(values[5]);
+                    const auto hash = moduleHash(values[7]);
+                    const auto budget = number<std::uint32_t>(values[9]);
                     const auto package = packageId && version && loadOrder && api
                         ? ServerScriptPackage::create(*packageId, *version, *loadOrder, *api)
                         : std::nullopt;
-                    if (!package || std::ranges::any_of(packages, [&](const auto value) {
-                            return value.packageId() == *packageId;
-                        }))
+                    const std::filesystem::path artifact = std::filesystem::u8path(values[6]);
+                    if (!package || !abi || *abi != ServerScriptModuleAbiVersion || !hash || !budget || *budget == 0
+                        || *budget > MaximumScriptModuleExecutionBudget || !artifactName(values[6])
+                        || artifact.filename() != artifact || !identifier(values[8], MaximumScriptEntrypointBytes)
+                        || std::ranges::any_of(
+                            packages, [&](const auto value) { return value.packageId() == *packageId; }))
                         return ScriptPackageContentError::Malformed;
                     packages.push_back(*package);
+                    modules.push_back({ *package, artifact, *hash, std::string(values[8]), *budget });
                 }
                 else if (values[0] == "variable")
                 {
@@ -216,6 +267,12 @@ namespace TES3MP::ServerApp
             return std::tuple(left.loadOrder(), left.packageId(), left.packageVersion(), left.apiVersion())
                 < std::tuple(right.loadOrder(), right.packageId(), right.packageVersion(), right.apiVersion());
         });
+        std::ranges::sort(modules, [](const auto& left, const auto& right) {
+            return std::tuple(left.package.loadOrder(), left.package.packageId(), left.package.packageVersion(),
+                       left.package.apiVersion())
+                < std::tuple(right.package.loadOrder(), right.package.packageId(), right.package.packageVersion(),
+                    right.package.apiVersion());
+        });
         std::ranges::sort(variables, {}, [](const auto& value) { return std::pair(value.packageId, value.id); });
         if (std::ranges::any_of(variables, [&](const auto& variable) {
                 return std::ranges::none_of(
@@ -225,7 +282,7 @@ namespace TES3MP::ServerApp
         auto catalog = ServerScriptStateCatalog::create(variables);
         if (!catalog)
             return ScriptPackageContentError::InvalidCatalog;
-        return ScriptPackageContent{ std::move(packages), std::move(*catalog) };
+        return ScriptPackageContent{ std::move(packages), std::move(modules), std::move(*catalog) };
     }
     catch (...)
     {

@@ -15,6 +15,7 @@
 #include "phase7_queue_telemetry.hpp"
 #include "player_identity_file.hpp"
 #include "resume_token_context.hpp"
+#include "script_module.hpp"
 #include "script_package_content.hpp"
 #include "server_application.hpp"
 #include "server_config.hpp"
@@ -2213,7 +2214,13 @@ int main()
             = loadScriptPackageContent(contentRoot / "vanilla-scripts.txt", packagedConfig.contentManifest);
         auto* packagedScripts = std::get_if<ScriptPackageContent>(&packagedScriptsResult);
         assert(packagedCombat && packagedWorld && packagedScripts && packagedScripts->packages.size() == 1
-            && packagedScripts->stateCatalog.entries().size() == 1);
+            && packagedScripts->modules.size() == 1 && packagedScripts->stateCatalog.entries().size() == 1);
+        DeterministicServerScriptRuntime packagedScriptRuntime;
+        assert(packagedScriptRuntime.configurePackages(packagedScripts->packages, packagedScripts->stateCatalog));
+        auto packagedModules
+            = loadExecutableScriptModules(contentRoot / "vanilla-scripts.txt", *packagedScripts, packagedScriptRuntime);
+        assert(std::holds_alternative<ExecutableScriptModules>(packagedModules));
+        assert(std::get<ExecutableScriptModules>(packagedModules).callbackCount() == 1);
 
         auto queues = OutboundQueueSet::create(OutboundQueuePolicy{}, 1);
         auto timeouts = *SessionTimeoutPolicy::create(1'000'000, 1'000'000, 1'000'000);

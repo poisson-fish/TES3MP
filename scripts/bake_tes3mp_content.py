@@ -33,6 +33,7 @@ MAX_DATA_DIRECTORIES = 256
 MAX_RECORD_BYTES = 256 * 1024 * 1024
 MAX_MASTER_NAME_BYTES = 1024
 MAX_DERIVED_RECIPE_BYTES = 256 * 1024
+MAX_SCRIPT_MODULE_BYTES = 64 * 1024
 DERIVED_RECIPE_FORMAT = "TES3MP_DERIVED_VANILLA_V1"
 DERIVED_CATALOG_KEYS = {
     "collision_content_file",
@@ -49,7 +50,7 @@ CATALOGS = {
     "combat_content_file": ("TES3MP_COMBAT_V6", False),
     "character_content_file": ("TES3MP_CHARACTERS_V2", False),
     "world_content_file": ("TES3MP_WORLD_V2", True),
-    "script_package_file": ("TES3MP_SCRIPT_PACKAGES_V1", False),
+    "script_package_file": ("TES3MP_SCRIPT_PACKAGES_V2", False),
 }
 
 SERVER_CONTENT_KEYS = (
@@ -105,6 +106,14 @@ class Catalog:
     output_name: str
     normalized: bytes
     records: tuple[tuple[str, ...], ...]
+
+
+@dataclass(frozen=True)
+class ScriptModuleArtifact:
+    name: str
+    path: pathlib.Path
+    data: bytes
+    sha256: str
 
 
 @dataclass(frozen=True)
@@ -1189,13 +1198,26 @@ def _validate_script_packages(catalog: Catalog | None) -> None:
     for record in catalog.records:
         try:
             if record[0] == "package":
-                if len(record) != 5 or len(packages) == 64:
+                if len(record) != 10 or len(packages) == 64:
                     raise BakeError(f"malformed or oversized package record in {catalog.path}")
-                package_id, version, load_order, api = map(int, record[1:])
+                package_id, version, load_order, api, abi = map(int, record[1:6])
+                artifact, digest, entrypoint, budget_text = record[6:10]
                 if package_id <= 0 or package_id > 0xFFFFFFFFFFFFFFFF or version <= 0 \
                         or version > 0xFFFFFFFF or load_order < 0 or load_order > 0xFFFFFFFF or api != 3 \
-                        or package_id in packages:
+                        or abi != 1 or package_id in packages \
+                        or not artifact or len(artifact.encode("ascii", errors="ignore")) != len(artifact) \
+                        or len(artifact) > 128 or pathlib.PurePath(artifact).name != artifact \
+                        or artifact.startswith(".") \
+                        or any(character not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_.-"
+                               for character in artifact) \
+                        or len(digest) != 64 or any(character not in "0123456789abcdef" for character in digest) \
+                        or not entrypoint or len(entrypoint) > 64 \
+                        or any(character not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-"
+                               for character in entrypoint):
                     raise BakeError(f"invalid or duplicate script package in {catalog.path}")
+                budget = int(budget_text)
+                if budget <= 0 or budget > 4096:
+                    raise BakeError(f"invalid script execution budget in {catalog.path}")
                 packages[package_id] = (version, load_order, api)
             elif record[0] == "variable":
                 if len(record) != 5 or len(variables) == 16384:
@@ -1240,6 +1262,33 @@ def _validate_script_packages(catalog: Catalog | None) -> None:
             raise BakeError(f"malformed script package record in {catalog.path}") from exc
     if any(package_id not in packages for package_id, _variable_id in variables):
         raise BakeError(f"script variable references an unknown package in {catalog.path}")
+
+
+def load_script_modules(catalog: Catalog | None) -> list[ScriptModuleArtifact]:
+    if catalog is None:
+        return []
+    result: list[ScriptModuleArtifact] = []
+    names: set[str] = set()
+    for record in catalog.records:
+        if record[0] != "package":
+            continue
+        name, expected, entrypoint = record[6], record[7], record[8]
+        normalized = name.casefold()
+        if normalized in names:
+            raise BakeError(f"duplicate script module artifact in {catalog.path}: {name}")
+        names.add(normalized)
+        path = _resolve_path(name, catalog.path.parent, "script module artifact")
+        data = _read_bounded(path, MAX_SCRIPT_MODULE_BYTES, "script module artifact")
+        digest = hashlib.sha256(data).hexdigest()
+        if digest != expected:
+            raise BakeError(f"script module artifact digest mismatch: {name}")
+        text = _decode_text(data, str(path))
+        lines = [line.strip() for line in text.splitlines() if line.strip() and not line.lstrip().startswith("#")]
+        if not lines or lines[0] != "TES3MP_SCRIPT_MODULE_V1" or f"abi 1" not in lines \
+                or f"api 3" not in lines or f"entry {entrypoint}" not in lines:
+            raise BakeError(f"invalid script module artifact: {name}")
+        result.append(ScriptModuleArtifact(name, path, data, digest))
+    return result
 
 
 def validate_consistency(server_entries: Sequence[Assignment], client_entries: Sequence[Assignment],
@@ -1370,7 +1419,8 @@ def _canonical_client_semantics(entries: Sequence[Assignment]) -> bytes:
 
 
 def compute_manifest(loadout: Sequence[LoadoutFile], server_entries: Sequence[Assignment],
-    client_entries: Sequence[Assignment], catalogs: Sequence[Catalog]) -> str:
+    client_entries: Sequence[Assignment], catalogs: Sequence[Catalog],
+    script_modules: Sequence[ScriptModuleArtifact] = ()) -> str:
     digest = hashlib.sha256(HASH_DOMAIN)
 
     def add(label: str, payload: bytes) -> None:
@@ -1386,6 +1436,8 @@ def compute_manifest(loadout: Sequence[LoadoutFile], server_entries: Sequence[As
     add("client", _canonical_client_semantics(client_entries))
     for catalog in sorted(catalogs, key=lambda value: value.key):
         add(f"catalog/{catalog.key}", catalog.normalized)
+    for module in sorted(script_modules, key=lambda value: value.name.casefold()):
+        add(f"script_module/{module.name.casefold()}", module.data)
     return digest.hexdigest()
 
 
@@ -1486,7 +1538,8 @@ def bake(config_paths: Sequence[pathlib.Path], server_config: pathlib.Path, clie
                 next_line += 1
     verify_loadout_unchanged(loadout)
     validate_consistency(server_entries, client_entries, catalogs, records)
-    manifest = compute_manifest(loadout, server_entries, client_entries, catalogs)
+    script_modules = load_script_modules(_catalog_by_key(catalogs, "script_package_file"))
+    manifest = compute_manifest(loadout, server_entries, client_entries, catalogs, script_modules)
 
     output_root = output_root.resolve(strict=False)
     packs = output_root / "packs"
@@ -1503,6 +1556,10 @@ def bake(config_paths: Sequence[pathlib.Path], server_config: pathlib.Path, clie
         }
         for catalog in catalogs:
             rendered[catalog.output_name] = _replace_manifest(catalog.normalized, manifest)
+        for module in script_modules:
+            if module.name in rendered:
+                raise BakeError(f"script module output filename is duplicated: {module.name}")
+            rendered[module.name] = module.data
         for name, data in sorted(rendered.items()):
             _write(temporary / name, data)
             artifacts[name] = hashlib.sha256(data).hexdigest()
@@ -1610,7 +1667,10 @@ def verify_pack(path: pathlib.Path) -> str:
             raise BakeError("server config manifest does not match pack")
         if name == "openmw.cfg" and f"tes3mp-content-manifest-id={manifest}".encode() not in data:
             raise BakeError("OpenMW config manifest does not match pack")
-        if name not in {"server.cfg", "openmw.cfg"} and f"manifest {manifest}".encode() not in data:
+        if name.endswith(".t3sm"):
+            if not data.startswith(b"TES3MP_SCRIPT_MODULE_V1\n"):
+                raise BakeError(f"invalid script module artifact: {name}")
+        elif name not in {"server.cfg", "openmw.cfg"} and f"manifest {manifest}".encode() not in data:
             raise BakeError(f"catalog manifest does not match pack: {name}")
     return manifest
 

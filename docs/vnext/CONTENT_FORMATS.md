@@ -25,13 +25,9 @@ pack verification checks that recorded graph.
 V1 packs, which did not carry this dependency metadata, are rejected without
 migration; rebaking creates a V2 identity under a distinct hash domain.
 
-The baker also consumes a server configuration and a small client-mapping
-configuration. It normalizes and hashes every configured catalog below,
-validates winning TES3 record presence and FNV-1a identities for character,
-actor, item, cell, and appearance mappings, and requires client mapping sets to
-exactly cover the server's presented actor, object, item, container, and
-cell-space identities. Deleted winning records and mismatched combat,
-inventory, actor, or character references reject before publication.
+The baker normalizes and hashes the server catalogs and client mappings,
+validates winning TES3 records and stable identities, and requires mappings to
+cover every presented identity. Cross-catalog mismatches reject publication.
 
 Output is written under `packs/<manifest-id>/` with `server.cfg`, `openmw.cfg`,
 the rebound catalogs, and a digest-bearing `pack.json`. Existing packs are
@@ -40,34 +36,18 @@ previous pointer unchanged. The generated server config expects mutable
 `join-password.txt` and `players.txt` in the output root, outside the immutable
 pack. The tool never copies or hashes those files.
 
-With `--derived-pack-recipe`, the baker does not read authored collision, actor,
-inventory, or combat catalogs. The bounded `TES3MP_DERIVED_VANILLA_V1` JSON
-recipe selects item, player, and actor record IDs; assigns canonical actor
-identities/transforms; supplies pre-inflated collision solids for the exact
-allowed cells; selects starting equipment; and fixes the deterministic combat
-seed. The baker resolves all selected records after load-order overrides, then
-derives item category, weight, value, condition, equipment slots, weapon skill,
-damage, reach, actor stats, player combat stats, and the required combat GMSTs
-from their binary TES3 subrecords. Actor/item client mappings and character
-starting-item records are replaced from the recipe rather than accepted from
-the source catalogs.
-
-Recipe input is limited to 256 KiB, 65,536 items, 4,096 actors, 32,768 solids,
-and 64 starting items. Unknown keys, invalid ranges/cells/slots, identity
-collisions, an actor inside a solid, malformed layouts, enchanted or otherwise
-unsupported selected records, and missing, deleted, or ambiguous load-order
-winners reject the whole bake before pack creation or `CURRENT` publication.
-The recipe's collision boxes are bounded root-occlusion input, not extraction
-of arbitrary NIF/terrain geometry; broader world geometry remains future work.
+`--derived-pack-recipe` replaces authored collision, actor, inventory, and
+combat catalogs from a bounded `TES3MP_DERIVED_VANILLA_V1` selection of winning
+records, identities, transforms, starting equipment, collision solids, and a
+combat seed. Missing, deleted, ambiguous, malformed, unsupported, inconsistent,
+or out-of-bound input rejects before publication. Recipe collision boxes are
+bounded root-occlusion input, not arbitrary geometry extraction.
 
 ### Modpack compatibility boundary
 
-The entire resolved loadout is one compatibility unit. A server does not admit
-a client with an added, removed, reordered, or byte-different gameplay plugin,
-even if the changed record appears unrelated to the current cell. Server
-catalogs and client mappings always describe winning records after all
-overrides and deletions; they do not attach authority to the plugin that first
-declared a record.
+The resolved loadout is one compatibility unit. Added, removed, reordered, or
+byte-different gameplay plugins reject admission. Catalogs and mappings always
+describe winning records after overrides and deletions.
 
 V2 hashes only configured TES3 `content` files and generated TES3MP artifacts.
 It does not yet enumerate or hash `fallback-archive` entries, loose resources,
@@ -77,16 +57,16 @@ can affect canonical behavior. Future resource identity must bind those inputs;
 an override may remain unbound only after it is explicitly classified as
 presentation-only.
 
-## Script packages V1
+## Script packages V2 and executable modules V1
 
 Configured by optional `script_package_file`. The ASCII file is limited to
 2 MiB, 64 packages, 16,384 variables, 256 variables per package, 4 KiB per
 string, and 1 MiB of strings total.
 
 ```text
-TES3MP_SCRIPT_PACKAGES_V1
+TES3MP_SCRIPT_PACKAGES_V2
 manifest <64-hex-digits>
-package <package-id> <package-version> <load-order> <api-version>
+package <package-id> <package-version> <load-order> <api-version> <abi-version> <module-filename> <module-sha256> <entrypoint> <execution-budget>
 variable <package-id> <variable-id> boolean <true|false>
 variable <package-id> <variable-id> integer <signed-64-bit-value>
 variable <package-id> <variable-id> float <finite-double>
@@ -96,18 +76,47 @@ variable <package-id> <variable-id> string_hex <lowercase-hex-bytes|->
 Package and variable declarations may be authored in any order; startup sorts
 them by load order/package identity and package/variable identity respectively.
 IDs are nonzero, package IDs are unique, variables reference a declared
-package, and API version must equal the compiled server API. The exact ordered
-package versions/API and complete typed initial-value catalog bind V2
+package, API version is 3, and module ABI version is 1. A module filename is a
+bounded leaf name beside the package catalog; its exact bytes must match the
+declared lowercase SHA-256. Entrypoints are bounded identifiers and execution
+budgets are in the range 1–4,096. The exact ordered package versions/API and
+complete typed initial-value catalog bind V2
 persistence. A package upgrade or catalog change therefore rejects an existing
 prefix instead of silently restoring incompatible state. `-` encodes an empty
-string. The baker validates, hashes, copies, and rebinds this catalog like other
-manifest-scoped server content.
+string. V1 package catalogs have no executable binding and are rejected. The
+baker validates, hashes, copies, and rebinds the catalog and every referenced
+module into the immutable content pack; module bytes participate in the pack's
+manifest identity.
 
-The authored-catalog path can describe a non-vanilla loadout today, but broad
-mod support still requires a bounded extractor that emits cells, placed actors,
-objects, inventories, collision, combat data, and mappings from load-order
-winners as one atomic bake. The current derived recipe deliberately selects a
-small vanilla subset and is not that general extractor. Client-side mod scripts
+Module artifacts are ASCII files limited to 64 KiB, 16 callbacks per module,
+64 instructions per callback, and the package's declared execution budget per
+callback invocation. The initial deterministic instruction set is deliberately
+narrow:
+
+```text
+TES3MP_SCRIPT_MODULE_V1
+abi 1
+api 3
+entry <entrypoint>
+callback <callback-order> <command_finalized|session_joined|spatial_state_changed|session_lifecycle>
+increment_integer <declared-integer-variable-id> <nonzero-signed-delta>
+consume <positive-budget-units>
+end
+```
+
+`increment_integer` reads only the package's immutable persistent-state view
+and emits a typed revision-checked compare-and-set command for the next tick.
+`consume` performs no mutation and exists to make execution metering explicit
+and testable. An unknown instruction, variable/type mismatch, missing export,
+hash/API/ABI mismatch, resource overflow, arithmetic overflow, or exhausted
+execution budget fails closed and terminates the script runtime without
+publishing partial callback output. Modules are instantiated in canonical
+package/load order. Persistent state is restored and bound before the first
+committed publication can invoke one.
+
+Broad mod support still requires a bounded extractor for cells, actors,
+objects, inventories, collision, combat, and mappings from load-order winners.
+The derived recipe covers only a small vanilla subset. Client-side mod scripts
 may present confirmed state or submit typed intent, but cannot commit canonical
 state; unsupported scripted behavior must be rejected or explicitly inert until
 the deterministic server-scripting boundary exists.

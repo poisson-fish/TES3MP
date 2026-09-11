@@ -10,6 +10,7 @@
 #include "phase7_proof_profile.hpp"
 #include "phase7_queue_telemetry.hpp"
 #include "player_identity_file.hpp"
+#include "script_module.hpp"
 #include "script_package_content.hpp"
 #include "server_application.hpp"
 #include "server_config.hpp"
@@ -102,6 +103,7 @@ int main(int argc, char** argv)
     auto worldContent = std::move(*worldValue);
     std::vector<TES3MP::ServerScriptPackage> scriptPackages;
     auto scriptStateCatalog = TES3MP::ServerScriptStateCatalog::create({});
+    std::optional<TES3MP::ServerApp::ScriptPackageContent> scriptContent;
     if (!config.scriptPackageContentFile.empty())
     {
         auto loaded
@@ -112,14 +114,28 @@ int main(int argc, char** argv)
             std::cerr << "script package content initialization failed\n";
             return 2;
         }
-        scriptPackages = std::move(content->packages);
-        scriptStateCatalog = std::move(content->stateCatalog);
+        scriptContent = std::move(*content);
+        scriptPackages = scriptContent->packages;
+        scriptStateCatalog = scriptContent->stateCatalog;
     }
     TES3MP::DeterministicServerScriptRuntime scripts;
     if (!scriptStateCatalog || !scripts.configurePackages(scriptPackages, *scriptStateCatalog))
     {
         std::cerr << "script package runtime configuration failed\n";
         return 3;
+    }
+    TES3MP::ServerApp::ExecutableScriptModules executableScriptModules;
+    if (scriptContent)
+    {
+        auto loadedModules
+            = TES3MP::ServerApp::loadExecutableScriptModules(config.scriptPackageContentFile, *scriptContent, scripts);
+        auto* modules = std::get_if<TES3MP::ServerApp::ExecutableScriptModules>(&loadedModules);
+        if (!modules)
+        {
+            std::cerr << "executable script module initialization failed\n";
+            return 2;
+        }
+        executableScriptModules = std::move(*modules);
     }
     auto collisionResult
         = TES3MP::ServerApp::ContentCollisionProvider::load(config.collisionContentFile, config.contentManifest);
