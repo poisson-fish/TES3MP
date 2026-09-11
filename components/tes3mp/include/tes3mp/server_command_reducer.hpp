@@ -33,6 +33,8 @@ namespace TES3MP
         const DirectMagicCatalog* directMagic = nullptr;
         CanonicalWorldState* world = nullptr;
         const GlobalVariableCatalog* globalCatalog = nullptr;
+        CanonicalScriptState* scriptState = nullptr;
+        const ServerScriptStateCatalog* scriptStateCatalog = nullptr;
     };
 
     enum class CommandBatchReductionError : std::uint8_t
@@ -137,6 +139,7 @@ namespace TES3MP
             const std::optional<CanonicalCombatWorld>& candidateCombat() const noexcept { return mCombat; }
             const std::optional<CanonicalActorWorld>& candidateActors() const noexcept { return mActors; }
             const std::optional<CanonicalWorldState>& candidateWorld() const noexcept { return mWorld; }
+            const std::optional<CanonicalScriptState>& candidateScriptState() const noexcept { return mScriptState; }
             std::span<const AuthoritativeMeleeEvent> combatEvents() const noexcept { return mCombatEvents; }
 
         private:
@@ -160,6 +163,8 @@ namespace TES3MP
             std::optional<CanonicalActorWorld> mActors;
             std::optional<CanonicalWorldState> mBaseWorld;
             std::optional<CanonicalWorldState> mWorld;
+            std::optional<CanonicalScriptState> mBaseScriptState;
+            std::optional<CanonicalScriptState> mScriptState;
             std::vector<AuthoritativeMeleeEvent> mCombatEvents;
             std::vector<PlayerId> mClientAuthoritativePlayers;
             std::vector<DurableCommandOrder> mDurableCommands;
@@ -242,7 +247,8 @@ namespace TES3MP
         ServerTick checkpointTick() const noexcept { return mCheckpointTick; }
         bool configureDurability(CanonicalDurabilityPort& durability, CanonicalInventoryWorld* inventory = nullptr,
             CanonicalCombatWorld* combat = nullptr, CanonicalInteractiveObjectWorld* objects = nullptr,
-            CanonicalActorWorld* actors = nullptr, CanonicalWorldState* world = nullptr) noexcept;
+            CanonicalActorWorld* actors = nullptr, CanonicalWorldState* world = nullptr,
+            CanonicalScriptState* scriptState = nullptr) noexcept;
         std::shared_ptr<const CanonicalStatePublication> latestPublication() const noexcept;
         PreparedBatch prepare(const ServerTickCommandBatch& batch);
         PreparedBatch prepare(const ServerTickCommandBatch& batch, const CanonicalInteractiveObjectWorld& objects,
@@ -308,10 +314,12 @@ namespace TES3MP
         PreparedBatch prepareTickState(PreparedBatch prepared, const ServerTickCommandBatch& batch);
         PreparedBatch prepareScriptCommands(PreparedBatch prepared, const ServerTickCommandBatch& batch,
             std::span<const QueuedServerScriptCommand> commands, const CanonicalWorldState* world,
-            const GlobalVariableCatalog* globalCatalog);
+            const GlobalVariableCatalog* globalCatalog, const CanonicalScriptState* scriptState,
+            const ServerScriptStateCatalog* scriptStateCatalog);
         bool commitPrepared(PreparedBatch&& prepared, CanonicalInteractiveObjectWorld* objects,
             CanonicalInventoryWorld* inventory, CanonicalCombatWorld* combat = nullptr,
-            CanonicalActorWorld* actors = nullptr, CanonicalWorldState* world = nullptr);
+            CanonicalActorWorld* actors = nullptr, CanonicalWorldState* world = nullptr,
+            CanonicalScriptState* scriptState = nullptr);
 
         std::shared_ptr<const CanonicalServerState> mState;
         CanonicalStateVersion mStateVersion = CanonicalStateVersion::initial();
@@ -326,6 +334,7 @@ namespace TES3MP
         CanonicalInteractiveObjectWorld* mDurableObjects = nullptr;
         CanonicalActorWorld* mDurableActors = nullptr;
         CanonicalWorldState* mDurableWorld = nullptr;
+        CanonicalScriptState* mDurableScriptState = nullptr;
         ContentManifest mContentManifest;
         ServerCollisionQuery* mCollision;
         std::vector<PlayerId> mClientAuthoritativePlayers;

@@ -65,6 +65,10 @@ the affected code/tests in the same milestone.
 - **Player-scoped quests and journals.** Per-player canonical progress uses
   opaque IDs bound to an exact manifest catalog; OpenMW names remain
   adapter-local. Mutations carry expected revisions and V2 acknowledgement.
+- **Explicit script state, never VM snapshots.** Only bounded, catalog-declared,
+  package-scoped typed variables are durable. Revision-checked atomic commands
+  update values and change ticks. Interpreter stacks, closures, coroutines,
+  pointers, allocator state, and other VM internals are never canonical.
 - **Interest is server-owned.** Current visibility is exact canonical-cell
   membership. A client cannot select its own interest set or use presentation
   pose to expand gameplay reach.

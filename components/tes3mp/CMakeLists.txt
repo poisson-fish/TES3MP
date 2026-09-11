@@ -334,6 +334,7 @@ target_sources(tes3mp_server_core PRIVATE
     include/tes3mp/server_authentication.hpp
     include/tes3mp/server_session.hpp
     include/tes3mp/server_scripting.hpp
+    include/tes3mp/script_state.hpp
     include/tes3mp/server_lifecycle.hpp
     include/tes3mp/world_state.hpp
     server_core/authenticated_join.cpp
@@ -358,6 +359,7 @@ target_sources(tes3mp_server_core PRIVATE
     server_core/server_authentication.cpp
     server_core/server_session.cpp
     server_core/server_scripting.cpp
+    server_core/script_state.cpp
     server_core/server_lifecycle.cpp
     server_core/world_state.cpp
 )

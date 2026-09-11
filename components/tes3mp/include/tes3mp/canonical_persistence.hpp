@@ -59,20 +59,26 @@ namespace TES3MP
         static std::optional<CanonicalPersistenceIdentity> create(ContentManifestId content,
             ServerConfigurationId configuration, std::span<const ServerScriptPackage> scripts,
             std::span<const PersistenceSeed> seeds) noexcept;
+        static std::optional<CanonicalPersistenceIdentity> create(ContentManifestId content,
+            ServerConfigurationId configuration, std::span<const ServerScriptPackage> scripts,
+            const ServerScriptStateCatalog& scriptStateCatalog, std::span<const PersistenceSeed> seeds) noexcept;
 
         constexpr ContentManifestId contentManifest() const noexcept { return mContent; }
         constexpr ServerConfigurationId serverConfiguration() const noexcept { return mConfiguration; }
         std::span<const ServerScriptPackage> scripts() const noexcept { return mScripts; }
         std::span<const PersistenceSeed> seeds() const noexcept { return mSeeds; }
+        const ServerScriptStateCatalog& scriptStateCatalog() const noexcept { return mScriptStateCatalog; }
         friend bool operator==(const CanonicalPersistenceIdentity&, const CanonicalPersistenceIdentity&) noexcept
             = default;
 
     private:
         CanonicalPersistenceIdentity(ContentManifestId content, ServerConfigurationId configuration,
-            std::vector<ServerScriptPackage> scripts, std::vector<PersistenceSeed> seeds) noexcept
+            std::vector<ServerScriptPackage> scripts, ServerScriptStateCatalog scriptStateCatalog,
+            std::vector<PersistenceSeed> seeds) noexcept
             : mContent(content)
             , mConfiguration(configuration)
             , mScripts(std::move(scripts))
+            , mScriptStateCatalog(std::move(scriptStateCatalog))
             , mSeeds(std::move(seeds))
         {
         }
@@ -80,6 +86,7 @@ namespace TES3MP
         ContentManifestId mContent;
         ServerConfigurationId mConfiguration;
         std::vector<ServerScriptPackage> mScripts;
+        ServerScriptStateCatalog mScriptStateCatalog;
         std::vector<PersistenceSeed> mSeeds;
     };
 
@@ -145,8 +152,8 @@ namespace TES3MP
             std::span<const CanonicalPlayerEntityState> players, std::span<const DurableCommandOrder> commands,
             CanonicalChecksum previousTransactionChecksum = CanonicalChecksum(0),
             const CanonicalInventoryWorld* inventory = nullptr, const CanonicalCombatWorld* combat = nullptr,
-            const CanonicalInteractiveObjectWorld* objects = nullptr,
-            const CanonicalActorWorld* actors = nullptr, const CanonicalWorldState* world = nullptr) noexcept;
+            const CanonicalInteractiveObjectWorld* objects = nullptr, const CanonicalActorWorld* actors = nullptr,
+            const CanonicalWorldState* world = nullptr, const CanonicalScriptState* scriptState = nullptr) noexcept;
         static std::optional<CanonicalDurableTick> create(CanonicalStateVersion stateVersion,
             CanonicalRevision canonicalRevision, ServerTick checkpointTick,
             std::span<const CanonicalPlayerEntityState> players, std::span<const DurableCommandOrder> commands,
@@ -154,7 +161,8 @@ namespace TES3MP
             std::optional<CanonicalDurableCombatState> combat,
             std::optional<CanonicalDurableInteractiveObjectState> objects = std::nullopt,
             std::optional<CanonicalDurableActorState> actors = std::nullopt,
-            std::optional<CanonicalWorldState> world = std::nullopt) noexcept;
+            std::optional<CanonicalWorldState> world = std::nullopt,
+            std::optional<CanonicalScriptState> scriptState = std::nullopt) noexcept;
 
         constexpr CanonicalStateVersion stateVersion() const noexcept { return mStateVersion; }
         constexpr CanonicalRevision canonicalRevision() const noexcept { return mCanonicalRevision; }
@@ -172,6 +180,7 @@ namespace TES3MP
         const std::optional<CanonicalDurableInteractiveObjectState>& objects() const noexcept { return mObjects; }
         const std::optional<CanonicalDurableActorState>& actors() const noexcept { return mActors; }
         const std::optional<CanonicalWorldState>& world() const noexcept { return mWorld; }
+        const std::optional<CanonicalScriptState>& scriptState() const noexcept { return mScriptState; }
         friend bool operator==(const CanonicalDurableTick&, const CanonicalDurableTick&) noexcept = default;
 
     private:
@@ -181,7 +190,8 @@ namespace TES3MP
             std::vector<CanonicalPlayerEntityState> players, std::vector<DurableCommandOrder> commands,
             std::optional<CanonicalDurableInventoryState> inventory, std::optional<CanonicalDurableCombatState> combat,
             std::optional<CanonicalDurableInteractiveObjectState> objects,
-            std::optional<CanonicalDurableActorState> actors, std::optional<CanonicalWorldState> world) noexcept
+            std::optional<CanonicalDurableActorState> actors, std::optional<CanonicalWorldState> world,
+            std::optional<CanonicalScriptState> scriptState) noexcept
             : mStateVersion(stateVersion)
             , mCanonicalRevision(canonicalRevision)
             , mCheckpointTick(checkpointTick)
@@ -195,6 +205,7 @@ namespace TES3MP
             , mObjects(std::move(objects))
             , mActors(std::move(actors))
             , mWorld(std::move(world))
+            , mScriptState(std::move(scriptState))
         {
         }
 
@@ -211,6 +222,7 @@ namespace TES3MP
         std::optional<CanonicalDurableInteractiveObjectState> mObjects;
         std::optional<CanonicalDurableActorState> mActors;
         std::optional<CanonicalWorldState> mWorld;
+        std::optional<CanonicalScriptState> mScriptState;
     };
 
     class CanonicalDurablePrefix
@@ -269,7 +281,8 @@ namespace TES3MP
         const std::optional<CanonicalDurableCombatState>& combat,
         const std::optional<CanonicalDurableInteractiveObjectState>& objects = std::nullopt,
         const std::optional<CanonicalDurableActorState>& actors = std::nullopt,
-        const std::optional<CanonicalWorldState>& world = std::nullopt) noexcept;
+        const std::optional<CanonicalWorldState>& world = std::nullopt,
+        const std::optional<CanonicalScriptState>& scriptState = std::nullopt) noexcept;
 
     enum class CanonicalDurabilityResult : std::uint8_t
     {
@@ -288,8 +301,8 @@ namespace TES3MP
         virtual CanonicalDurabilityResult commit(const std::shared_ptr<const CanonicalStatePublication>& candidate,
             CanonicalRevision canonicalRevision, std::span<const DurableCommandOrder> commands,
             const CanonicalInventoryWorld* inventory = nullptr, const CanonicalCombatWorld* combat = nullptr,
-            const CanonicalInteractiveObjectWorld* objects = nullptr,
-            const CanonicalActorWorld* actors = nullptr, const CanonicalWorldState* world = nullptr) noexcept = 0;
+            const CanonicalInteractiveObjectWorld* objects = nullptr, const CanonicalActorWorld* actors = nullptr,
+            const CanonicalWorldState* world = nullptr, const CanonicalScriptState* scriptState = nullptr) noexcept = 0;
     };
 
     struct CanonicalReplayState
@@ -300,6 +313,7 @@ namespace TES3MP
         std::optional<CanonicalDurableInteractiveObjectState> objects;
         std::optional<CanonicalDurableActorState> actors;
         std::optional<CanonicalWorldState> world;
+        std::optional<CanonicalScriptState> scriptState;
 
         friend bool operator==(const CanonicalReplayState&, const CanonicalReplayState&) noexcept = default;
     };

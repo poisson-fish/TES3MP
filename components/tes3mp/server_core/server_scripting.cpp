@@ -46,6 +46,12 @@ namespace TES3MP
         return enqueuePayload(ServerScriptCommandPayload(std::move(command)));
     }
 
+    ServerScriptEmitResult ServerScriptCommandEmitter::enqueue(
+        ServerScriptCompareAndSetPersistentCommand command) noexcept
+    {
+        return enqueuePayload(ServerScriptCommandPayload(std::move(command)));
+    }
+
     ServerScriptEmitResult ServerScriptCommandEmitter::enqueuePayload(ServerScriptCommandPayload command) noexcept
     try
     {
@@ -92,6 +98,14 @@ namespace TES3MP
     catch (...)
     {
         return ServerScriptRegistrationResult::CallbackLimit;
+    }
+
+    bool DeterministicServerScriptRuntime::bindPersistentState(const CanonicalScriptState& state) noexcept
+    {
+        if (mStarted || mPersistentState)
+            return false;
+        mPersistentState = &state;
+        return true;
     }
 
     CanonicalSinkDeliveryResult DeterministicServerScriptRuntime::tryConsume(
@@ -181,11 +195,14 @@ namespace TES3MP
         for (std::size_t eventIndex = 0; eventIndex < events.size(); ++eventIndex)
         {
             const auto ordinal = static_cast<std::uint32_t>(eventIndex + 1);
-            const ServerScriptCallbackInput input(publicationOrdinal, ordinal, events[eventIndex]);
             for (const Registration& registration : mCallbacks)
             {
-                if (registration.eventKind != input.event().kind())
+                if (registration.eventKind != events[eventIndex].kind())
                     continue;
+                const auto packageState = mPersistentState ? mPersistentState->package(registration.package.packageId())
+                                                           : std::span<const CanonicalScriptVariableState>{};
+                const ServerScriptCallbackInput input(publicationOrdinal, ordinal, events[eventIndex],
+                    std::vector<CanonicalScriptVariableState>(packageState.begin(), packageState.end()));
                 ServerScriptCommandEmitter emitter(staged, *eligibleTick, publicationOrdinal, ordinal,
                     registration.package, registration.callbackOrder);
                 if (registration.callback->onEvent(input, emitter) != ServerScriptCallbackResult::Accepted)

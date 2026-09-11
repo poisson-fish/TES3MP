@@ -376,30 +376,22 @@ and [`character.cpp`](../../apps/openmw/mwmechanics/character.cpp).
 
 ### Deterministic server-scripting foundation
 
-- Version 2 of the engine-independent scripting boundary projects committed
-  canonical publications into immutable bounded command-finalized,
-  session-joined, spatial-state, and session-lifecycle events. Callbacks receive
-  copied project-owned values, never packet buffers or mutable canonical state.
-- Callback execution is event-major and then ordered by package load order,
-  package identity, and callback order. Generated commands carry the source
-  publication/event ordinals plus package, API, callback, and command-order
-  identity, so the same input trace reproduces the same command trace.
-- Callback output is staged atomically behind per-callback, per-publication,
-  pending, and per-tick bounds. A callback or queue failure discards the whole
-  publication output and terminates production composition rather than
-  continuing with a partial script result.
-- Script commands have their own origin. Typed commands install safe points,
-  replace the clock, update globals, set per-player quest stages, or append
-  journal entries after validating identities, types, catalogs, and revisions.
-  They execute the next tick through the prepared durability commit.
-- World V2 content carries bounded manifest-scoped quest, stage, and journal
-  declarations. Progress is sparse and player-scoped. The OpenMW committed-state
-  boundary rebuilds its journal only after complete local mapping validates.
+- Script API V3 projects committed publications into immutable bounded events.
+  Execution is event-major, then package-load/package/callback order; generated
+  commands retain complete replay-stable origin ordering.
+- Output is staged behind callback, publication, pending, and tick bounds. Any
+  callback or queue failure discards the publication output and terminates the
+  runtime instead of exposing a partial result.
+- Typed next-tick commands cover safe points, time, globals, quests, journals,
+  and atomic compare-and-set of package-scoped boolean, integer, finite-float,
+  and string variables. External input, catalogs, types, and revisions validate
+  before the prepared durability commit.
+- Restored state is bound before callbacks receive publications. A callback sees
+  only its package's immutable declared values; VM internals are never canonical.
 
-Primary sources: [`server_scripting.hpp`](../../components/tes3mp/include/tes3mp/server_scripting.hpp),
-[`server_command_reducer.cpp`](../../components/tes3mp/server_core/server_command_reducer.cpp),
-[`world_content.cpp`](../../apps/tes3mp-server/world_content.cpp), and
-[`desktop_providers.cpp`](../../apps/openmw/tes3mp/desktop_providers.cpp).
+Primary sources: [`script_state.hpp`](../../components/tes3mp/include/tes3mp/script_state.hpp),
+[`server_scripting.hpp`](../../components/tes3mp/include/tes3mp/server_scripting.hpp),
+and [`server_command_reducer.cpp`](../../components/tes3mp/server_core/server_command_reducer.cpp).
 
 ### Transactional gameplay persistence and replay envelope
 
@@ -407,7 +399,10 @@ Primary sources: [`server_scripting.hpp`](../../components/tes3mp/include/tes3mp
   versions, seeds, state version/revision/tick, and normalized command results.
   Its one checksum covers established players, inventory, objects, actor
   simulation/combat/respawn and RNG, clock, typed globals, and manifest-scoped
-  per-player quest stages/journal entries with revisions and change ticks.
+  per-player quest stages/journal entries and explicit script variables with
+  revisions and change ticks.
+- Identity includes the exact script API, ordered packages, and typed variable
+  catalog. Missing, extra, reordered, or retyped state rejects before install.
 - The reducer offers a fully prepared immutable candidate to the durability
   port before installing it or publishing it to replay, scripts, metrics, or
   clients. Only `Committed` acknowledges durability. Rejection or I/O failure
@@ -504,17 +499,10 @@ and [`test_bake_tes3mp_content.py`](../../scripts/tests/test_bake_tes3mp_content
   PvP/P2P, proactive AI aggression,
   duration/area magic, active spellcasting, Lua hit callbacks, and general magic
   remain unimplemented.
-- Established root checkpoints, current canonical player roots, complete
-  character profiles, inventory, equipment, containers, ground items, combat,
-  combat RNG, interactive objects, actor simulation and combat/respawn state,
-  canonical time and typed globals, canonical version/revision/tick counters,
-  deterministic identity, and bounded command ordering survive restart.
-  Live script memory does not. Chargen is the only packaged sequence with server
-  safe points. The runtime-neutral scripting boundary exists, but no loader or
-  interpreter is packaged and the default server has no callbacks. Other
-  cutscenes and live script progress are not durable. Starting
-  inventory/equipment is modeled in the profile, while broader inventory
-  persistence beyond the implemented gameplay domains remains unfinished.
+- Implemented canonical gameplay domains, counters, deterministic identity,
+  command ordering, and declared package script variables survive restart.
+  Undeclared script/VM memory does not. No script loader, interpreter, or default
+  callbacks are packaged; chargen remains the only packaged safe-point sequence.
 - The packaged default is the verified installed vanilla manifest. Other
   loadouts still require bounded content generation and local record mappings;
   server discovery/history remain unfinished. The V2 baker binds TES3 content
@@ -529,11 +517,12 @@ and [`test_bake_tes3mp_content.py`](../../scripts/tests/test_bake_tes3mp_content
 
 ## Work still required
 
-### Next milestone: durable script runtime state
+### Next milestone: script package loading and runtime composition
 
-Persist bounded script runtime state in V2 while retaining its checksum, replay,
-compaction, acknowledgement, 32-record journal, and exact identity checks.
-TES3MP 0.8.x saves remain unsupported.
+Load manifest-bound script packages and their persistent-variable catalogs into
+the versioned runtime, while retaining deterministic callbacks, bounded typed
+commands, and exact V2 restoration identity. TES3MP 0.8.x scripts and saves
+remain unsupported.
 
 ### Required before the desktop/PC-VR release
 
@@ -566,17 +555,17 @@ and do not enter protocol or canonical state.
 
 ## Verification snapshot
 
-The durable quest/journal working tree passed the following on 2026-09-10:
+The durable script-state working tree passed the following on 2026-09-10:
 
-- the standalone aggregate: bounded catalogs, typed per-player mutations, exact
-  mismatch rejection, V2 round trips/replay/checksum, and pre-installation
-  acknowledgement;
+- the standalone aggregate, including bounds, restored callback visibility, CAS,
+  stale revisions, exact identity, replay/checksum, and acknowledgement;
 - the dedicated-server application aggregate, including bounded compaction,
-  corruption/truncation rejection, exhaustive domain crash cuts, exact catalog
-  restoration, atomic replacement, and stale-temporary-file recovery; and
-- the dedicated-server product target, bounded Windows checks graph (including
-  the shipping client build and OpenMW adapter contracts), all 196 repository
-  Python tests, and patch-registry verification.
+  corruption/truncation rejection, script-aware exhaustive domain crash cuts,
+  exact catalog restoration, atomic replacement, and stale-temporary-file
+  recovery; and
+- the server product and Windows checks graph, including shipping client and
+  OpenMW adapter contracts; and
+- all 196 repository Python tests plus patch-registry verification.
 
 The baseline verifier was rerun and remains blocked by pre-existing provenance
 drift outside this milestone. Protocol generation, content baking, and the

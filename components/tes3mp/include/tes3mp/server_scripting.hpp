@@ -2,6 +2,7 @@
 #define TES3MP_SERVER_SCRIPTING_HPP
 
 #include "canonical_sinks.hpp"
+#include "script_state.hpp"
 #include "world_state.hpp"
 
 #include <compare>
@@ -15,7 +16,7 @@
 
 namespace TES3MP
 {
-    inline constexpr std::uint32_t ServerScriptApiVersion = 2;
+    inline constexpr std::uint32_t ServerScriptApiVersion = 3;
     inline constexpr std::size_t MaximumServerScriptCallbacks = 64;
     inline constexpr std::size_t MaximumServerScriptEventsPerPublication = 4096;
     inline constexpr std::size_t MaximumServerScriptCommandsPerCallback = 16;
@@ -108,20 +109,26 @@ namespace TES3MP
         constexpr std::uint64_t publicationOrdinal() const noexcept { return mPublicationOrdinal; }
         constexpr std::uint32_t eventOrdinal() const noexcept { return mEventOrdinal; }
         constexpr const ServerScriptEvent& event() const noexcept { return mEvent; }
+        constexpr std::span<const CanonicalScriptVariableState> persistentState() const noexcept
+        {
+            return mPersistentState;
+        }
 
     private:
         friend class DeterministicServerScriptRuntime;
-        ServerScriptCallbackInput(
-            std::uint64_t publicationOrdinal, std::uint32_t eventOrdinal, ServerScriptEvent event) noexcept
+        ServerScriptCallbackInput(std::uint64_t publicationOrdinal, std::uint32_t eventOrdinal, ServerScriptEvent event,
+            std::vector<CanonicalScriptVariableState> persistentState) noexcept
             : mPublicationOrdinal(publicationOrdinal)
             , mEventOrdinal(eventOrdinal)
             , mEvent(std::move(event))
+            , mPersistentState(persistentState)
         {
         }
 
         std::uint64_t mPublicationOrdinal;
         std::uint32_t mEventOrdinal;
         ServerScriptEvent mEvent;
+        std::vector<CanonicalScriptVariableState> mPersistentState;
     };
 
     class ServerScriptPlayerSafePointCommand
@@ -239,8 +246,31 @@ namespace TES3MP
         JournalEntryId mEntry;
     };
 
+    class ServerScriptCompareAndSetPersistentCommand
+    {
+    public:
+        ServerScriptCompareAndSetPersistentCommand(
+            ScriptVariableId id, ScriptStateRevision expectedRevision, ScriptVariableValue value) noexcept
+            : mId(id)
+            , mExpectedRevision(expectedRevision)
+            , mValue(std::move(value))
+        {
+        }
+        constexpr ScriptVariableId id() const noexcept { return mId; }
+        constexpr ScriptStateRevision expectedRevision() const noexcept { return mExpectedRevision; }
+        constexpr const ScriptVariableValue& value() const noexcept { return mValue; }
+        friend bool operator==(const ServerScriptCompareAndSetPersistentCommand&,
+            const ServerScriptCompareAndSetPersistentCommand&) noexcept = default;
+
+    private:
+        ScriptVariableId mId;
+        ScriptStateRevision mExpectedRevision;
+        ScriptVariableValue mValue;
+    };
+
     using ServerScriptCommandPayload = std::variant<ServerScriptPlayerSafePointCommand, ServerScriptSetGlobalCommand,
-        ServerScriptSetWorldTimeCommand, ServerScriptSetQuestStageCommand, ServerScriptAddJournalEntryCommand>;
+        ServerScriptSetWorldTimeCommand, ServerScriptSetQuestStageCommand, ServerScriptAddJournalEntryCommand,
+        ServerScriptCompareAndSetPersistentCommand>;
 
     class ServerScriptCommandOrder
     {
@@ -323,6 +353,7 @@ namespace TES3MP
         ServerScriptEmitResult enqueue(ServerScriptSetWorldTimeCommand command) noexcept;
         ServerScriptEmitResult enqueue(ServerScriptSetQuestStageCommand command) noexcept;
         ServerScriptEmitResult enqueue(ServerScriptAddJournalEntryCommand command) noexcept;
+        ServerScriptEmitResult enqueue(ServerScriptCompareAndSetPersistentCommand command) noexcept;
 
     private:
         friend class DeterministicServerScriptRuntime;
@@ -399,6 +430,7 @@ namespace TES3MP
     public:
         ServerScriptRegistrationResult registerCallback(ServerScriptPackage package, std::uint32_t callbackOrder,
             ServerScriptEventKind eventKind, ServerScriptCallback& callback) noexcept;
+        bool bindPersistentState(const CanonicalScriptState& state) noexcept;
 
         CanonicalSinkDeliveryResult tryConsume(
             const std::shared_ptr<const CanonicalStatePublication>& publication) noexcept override;
@@ -424,6 +456,7 @@ namespace TES3MP
         std::uint64_t mNextPublicationOrdinal = 1;
         bool mStarted = false;
         bool mTerminated = false;
+        const CanonicalScriptState* mPersistentState = nullptr;
 
         CanonicalSinkDeliveryResult terminate(CanonicalSinkDeliveryResult result) noexcept;
     };
@@ -450,6 +483,12 @@ namespace TES3MP
         JournalEntryQuestMismatch,
         JournalRevisionMismatch,
         JournalEntryAlreadyPresent,
+        UnknownPersistentVariable,
+        PersistentVariableTypeMismatch,
+        PersistentVariableRevisionMismatch,
+        PersistentVariableRevisionExhausted,
+        PersistentVariableTickRegression,
+        InvalidPersistentVariableValue,
         InvalidWorldMutation,
     };
 

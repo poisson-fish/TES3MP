@@ -192,6 +192,14 @@ namespace TES3MP::Detail
     {
         static constexpr std::string_view name = "JournalRevision";
     };
+    struct ScriptVariableIdTag
+    {
+        static constexpr std::string_view name = "ScriptVariableId";
+    };
+    struct ScriptStateRevisionTag
+    {
+        static constexpr std::string_view name = "ScriptStateRevision";
+    };
 
     struct RaceRecordIdTag
     {
@@ -272,6 +280,9 @@ namespace TES3MP
     using QuestRevision = Detail::StrongValue<Detail::QuestRevisionTag, Detail::StrongValuePolicy::CounterFromOne>;
     using JournalEntryId = Detail::StrongValue<Detail::JournalEntryIdTag, Detail::StrongValuePolicy::Identity>;
     using JournalRevision = Detail::StrongValue<Detail::JournalRevisionTag, Detail::StrongValuePolicy::CounterFromOne>;
+    using ScriptVariableId = Detail::StrongValue<Detail::ScriptVariableIdTag, Detail::StrongValuePolicy::Identity>;
+    using ScriptStateRevision
+        = Detail::StrongValue<Detail::ScriptStateRevisionTag, Detail::StrongValuePolicy::CounterFromOne>;
     using RaceRecordId = Detail::StrongValue<Detail::RaceRecordIdTag, Detail::StrongValuePolicy::Identity>;
     using HeadRecordId = Detail::StrongValue<Detail::HeadRecordIdTag, Detail::StrongValuePolicy::Identity>;
     using HairRecordId = Detail::StrongValue<Detail::HairRecordIdTag, Detail::StrongValuePolicy::Identity>;

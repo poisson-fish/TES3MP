@@ -43,6 +43,34 @@ namespace
             .value();
     }
 
+    ServerScriptStateCatalog scriptCatalog(std::int64_t initialValue = 0)
+    {
+        const std::array entries{ ServerScriptVariableCatalogEntry{ 11, id<ScriptVariableId>(1), initialValue } };
+        return ServerScriptStateCatalog::create(entries).value();
+    }
+
+    CanonicalPersistenceIdentity identityWithScriptState(std::int64_t initialValue = 0)
+    {
+        std::array<std::byte, 32> configurationBytes{};
+        configurationBytes[0] = std::byte{ 1 };
+        const std::array scripts{ ServerScriptPackage::create(11, 1, 0).value() };
+        const std::array seeds{ PersistenceSeed{ 7, { 1, 2, 3, 4 } } };
+        const auto catalog = scriptCatalog(initialValue);
+        return CanonicalPersistenceIdentity::create(testContentManifestId(),
+            ServerConfigurationId::fromBytes(configurationBytes).value(), scripts, catalog, seeds)
+            .value();
+    }
+
+    CanonicalScriptState scriptState(std::int64_t value, std::uint64_t tick)
+    {
+        auto state = CanonicalScriptState::initial(scriptCatalog()).value();
+        if (tick == 0)
+            return state;
+        auto changed = compareAndSetCanonicalScriptVariable(state, scriptCatalog(), 11, id<ScriptVariableId>(1),
+            ScriptStateRevision::initial(), value, id<ServerTick>(tick));
+        return std::get<CanonicalScriptState>(std::move(changed));
+    }
+
     DurableCommandOrder client(std::uint64_t tick, std::uint64_t ingress)
     {
         return { DurableCommandSource::Client, { tick, ingress, 1, 1, ingress, 100 + ingress, 0, 0, 0 }, 0 };
@@ -204,6 +232,51 @@ namespace
             == CanonicalPersistenceDecodeError::IdentityMismatch;
     }
 
+    std::variant<CanonicalReplayState, CanonicalChecksum> replayScriptState(
+        const CanonicalReplayState& prior, std::span<const DurableCommandOrder> commands, ServerTick tick)
+    {
+        if (commands.size() != 1 || commands.front().source != DurableCommandSource::Script
+            || tick != id<ServerTick>(2))
+            return CanonicalChecksum(0);
+        auto next = prior;
+        next.scriptState = scriptState(7, 2);
+        return next;
+    }
+
+    bool script_state_round_trip_replay_checksum_and_catalog_identity_are_exact()
+    {
+        const std::array players{ player(10) };
+        auto first = CanonicalDurableTick::create(id<CanonicalStateVersion>(1), id<CanonicalRevision>(1),
+            id<ServerTick>(1), players, std::span<const DurableCommandOrder>{}, CanonicalChecksum(0), std::nullopt,
+            std::nullopt, std::nullopt, std::nullopt, std::nullopt, scriptState(0, 0))
+                         .value();
+        const std::array commands{ script(2, 1) };
+        auto second = CanonicalDurableTick::create(id<CanonicalStateVersion>(2), id<CanonicalRevision>(2),
+            id<ServerTick>(2), players, commands, first.transactionChecksum(), std::nullopt, std::nullopt, std::nullopt,
+            std::nullopt, std::nullopt, scriptState(7, 2))
+                          .value();
+        const auto original
+            = CanonicalDurablePrefix::create(identityWithScriptState(), { std::move(first), std::move(second) })
+                  .value();
+        const auto bytes = encodeCanonicalDurablePrefixV2(original);
+        const auto decoded = decodeCanonicalDurablePrefix(bytes, identityWithScriptState());
+        const auto* restored = std::get_if<CanonicalDurablePrefix>(&decoded);
+        if (!restored || !restored->latest()->scriptState())
+            return false;
+        const auto* variable = restored->latest()->scriptState()->find(11, id<ScriptVariableId>(1));
+        return variable && std::get<std::int64_t>(variable->value) == 7 && variable->revision.value() == 2
+            && variable->lastChangeTick == id<ServerTick>(2)
+            && restored->latest()->canonicalChecksum()
+            == canonicalDurableStateChecksumV1(restored->latest()->stateVersion(), restored->latest()->checkpointTick(),
+                restored->latest()->players(), restored->latest()->inventory(), restored->latest()->combat(),
+                restored->latest()->objects(), restored->latest()->actors(), restored->latest()->world(),
+                restored->latest()->scriptState())
+            && replayCanonicalDurablePrefix(*restored, &replayScriptState)
+            && std::get<CanonicalPersistenceDecodeError>(
+                   decodeCanonicalDurablePrefix(bytes, identityWithScriptState(1)))
+            == CanonicalPersistenceDecodeError::IdentityMismatch;
+    }
+
     std::variant<CanonicalReplayState, CanonicalChecksum> replayStep(
         const CanonicalReplayState&, std::span<const DurableCommandOrder> commands, ServerTick)
     {
@@ -269,7 +342,7 @@ namespace
         CanonicalDurabilityResult commit(const std::shared_ptr<const CanonicalStatePublication>& candidate,
             CanonicalRevision, std::span<const DurableCommandOrder>, const CanonicalInventoryWorld*,
             const CanonicalCombatWorld*, const CanonicalInteractiveObjectWorld*, const CanonicalActorWorld* actors,
-            const CanonicalWorldState* world) noexcept override
+            const CanonicalWorldState* world, const CanonicalScriptState*) noexcept override
         {
             called = true;
             sawCandidate = candidate && candidate->state().players().size() == 1;
@@ -478,6 +551,8 @@ int main()
             &round_trip_preserves_identity_roots_versions_seeds_and_order },
         std::pair{ "malformed_inputs_and_identity_mismatches_reject_atomically",
             &malformed_inputs_and_identity_mismatches_reject_atomically },
+        std::pair{ "script_state_round_trip_replay_checksum_and_catalog_identity_are_exact",
+            &script_state_round_trip_replay_checksum_and_catalog_identity_are_exact },
         std::pair{ "replayed_command_stream_reaches_each_recorded_checksum",
             &replayed_command_stream_reaches_each_recorded_checksum },
         std::pair{ "replay_restores_inventory_combat_rng_and_the_full_canonical_checksum",

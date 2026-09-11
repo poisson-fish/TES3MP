@@ -312,8 +312,12 @@ int main(int argc, char** argv)
     std::vector<TES3MP::PersistenceSeed> persistenceSeeds;
     if (combatContent)
         persistenceSeeds.push_back({ 1, combatContent->world.randomState().words() });
-    auto persistenceIdentity = TES3MP::CanonicalPersistenceIdentity::create(
-        config.contentManifest.id(), *configurationId, {}, persistenceSeeds);
+    auto scriptStateCatalog = TES3MP::ServerScriptStateCatalog::create({});
+    auto scriptState = scriptStateCatalog ? TES3MP::CanonicalScriptState::initial(*scriptStateCatalog) : std::nullopt;
+    auto persistenceIdentity = scriptStateCatalog
+        ? TES3MP::CanonicalPersistenceIdentity::create(
+              config.contentManifest.id(), *configurationId, {}, *scriptStateCatalog, persistenceSeeds)
+        : std::nullopt;
     auto persistencePath = config.playerIdentityFile;
     persistencePath += ".world-v2";
     auto persistenceFileResult = persistenceIdentity
@@ -400,6 +404,23 @@ int main(int argc, char** argv)
     else if (persistenceFile->prefix().latest())
     {
         std::cerr << "persisted actor domain is missing\n";
+        return 2;
+    }
+    if (const auto* restoredScriptState = persistenceFile->restoredScriptState())
+    {
+        auto restored = scriptStateCatalog
+            ? TES3MP::CanonicalScriptState::restore(*scriptStateCatalog, restoredScriptState->variables())
+            : std::nullopt;
+        if (!restored)
+        {
+            std::cerr << "persisted script state catalog validation failed\n";
+            return 2;
+        }
+        scriptState = std::move(*restored);
+    }
+    else if (persistenceFile->prefix().latest())
+    {
+        std::cerr << "persisted script state domain is missing\n";
         return 2;
     }
     if (const auto* restoredCombat = persistenceFile->restoredCombat())
@@ -512,6 +533,11 @@ int main(int argc, char** argv)
     TES3MP::NullStructuredEventSink events;
     TES3MP::Observability observability(metrics, events);
     TES3MP::DeterministicServerScriptRuntime scripts;
+    if (!scriptState || !scripts.bindPersistentState(*scriptState))
+    {
+        std::cerr << "script state composition failed\n";
+        return 3;
+    }
     auto initialState = restoredState
         ? std::move(*restoredState)
         : std::get<TES3MP::CanonicalServerState>(TES3MP::createCanonicalServerState({}, {}));
@@ -525,7 +551,8 @@ int main(int argc, char** argv)
         *collision);
     if (!reducer.configureDurability(*persistenceFile, inventoryWorld ? &*inventoryWorld : nullptr,
             combatContent ? &combatContent->world : nullptr,
-            interactiveObjectWorld ? &*interactiveObjectWorld : nullptr, &actorWorld, &worldContent.world))
+            interactiveObjectWorld ? &*interactiveObjectWorld : nullptr, &actorWorld, &worldContent.world,
+            &*scriptState))
     {
         std::cerr << "canonical persistence composition failed\n";
         return 3;
@@ -568,7 +595,7 @@ int main(int argc, char** argv)
             combatContent ? &combatContent->settings : nullptr, combatContent ? &meleePolicy : nullptr,
             meleeContactHistory ? &*meleeContactHistory : nullptr,
             meleeContactHistory ? &*meleeContactHistory : nullptr, combatContent ? &combatContent->magic : nullptr,
-            &scripts, &worldContent.globals, &worldContent.world });
+            &scripts, &worldContent.globals, &worldContent.world, &*scriptStateCatalog, &*scriptState });
     if (!application.start())
     {
         std::cerr << application.failure() << '\n';

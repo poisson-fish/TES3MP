@@ -243,7 +243,7 @@ namespace TES3MP
 
     bool CanonicalCommandReducer::configureDurability(CanonicalDurabilityPort& durability,
         CanonicalInventoryWorld* inventory, CanonicalCombatWorld* combat, CanonicalInteractiveObjectWorld* objects,
-        CanonicalActorWorld* actors, CanonicalWorldState* world) noexcept
+        CanonicalActorWorld* actors, CanonicalWorldState* world, CanonicalScriptState* scriptState) noexcept
     {
         if (mDurability != nullptr)
             return false;
@@ -253,6 +253,7 @@ namespace TES3MP
         mDurableObjects = objects;
         mDurableActors = actors;
         mDurableWorld = world;
+        mDurableScriptState = scriptState;
         return true;
     }
 
@@ -317,7 +318,7 @@ namespace TES3MP
         if (mDurability
             && mDurability->commit(prepared.mPublication, prepared.mCanonicalRevision, {},
                    inventory ? inventory : mDurableInventory, combat ? combat : mDurableCombat, mDurableObjects,
-                   mDurableActors, mDurableWorld)
+                   mDurableActors, mDurableWorld, mDurableScriptState)
                 != CanonicalDurabilityResult::Committed)
             return false;
         mState = std::move(prepared.mState);
@@ -493,7 +494,7 @@ namespace TES3MP
         if (mDurability
             && mDurability->commit(prepared.mPublication, prepared.mCanonicalRevision, {},
                    inventory ? inventory : mDurableInventory, combat ? combat : mDurableCombat, mDurableObjects,
-                   mDurableActors, mDurableWorld)
+                   mDurableActors, mDurableWorld, mDurableScriptState)
                 != CanonicalDurabilityResult::Committed)
             return false;
         mState = std::move(prepared.mState);
@@ -1180,7 +1181,8 @@ namespace TES3MP
 
     CanonicalCommandReducer::PreparedBatch CanonicalCommandReducer::prepareScriptCommands(PreparedBatch prepared,
         const ServerTickCommandBatch& batch, std::span<const QueuedServerScriptCommand> commands,
-        const CanonicalWorldState* world, const GlobalVariableCatalog* globalCatalog)
+        const CanonicalWorldState* world, const GlobalVariableCatalog* globalCatalog,
+        const CanonicalScriptState* scriptState, const ServerScriptStateCatalog* scriptStateCatalog)
     {
         if (!prepared.result())
             return prepared;
@@ -1447,6 +1449,58 @@ namespace TES3MP
                         }
                     }
                 }
+                else if (const auto* persistent
+                    = std::get_if<ServerScriptCompareAndSetPersistentCommand>(&queued.payload()))
+                {
+                    if (!scriptState || !scriptStateCatalog)
+                        disposition = ServerScriptCommandDisposition::UnknownPersistentVariable;
+                    else
+                    {
+                        const auto& base = prepared.mScriptState ? *prepared.mScriptState : *scriptState;
+                        auto changed = compareAndSetCanonicalScriptVariable(base, *scriptStateCatalog,
+                            queued.order().packageId(), persistent->id(), persistent->expectedRevision(),
+                            persistent->value(), tick);
+                        if (auto* next = std::get_if<CanonicalScriptState>(&changed))
+                        {
+                            disposition = ServerScriptCommandDisposition::Applied;
+                            if (*next != base)
+                            {
+                                if (!recordChange())
+                                {
+                                    prepared.mResult.mError = CommandBatchReductionError::StateVersionCapacityExceeded;
+                                    return prepared;
+                                }
+                                if (!prepared.mBaseScriptState)
+                                    prepared.mBaseScriptState = *scriptState;
+                                prepared.mScriptState = std::move(*next);
+                            }
+                        }
+                        else
+                        {
+                            switch (std::get<CanonicalScriptStateMutationError>(changed))
+                            {
+                                case CanonicalScriptStateMutationError::UnknownVariable:
+                                    disposition = ServerScriptCommandDisposition::UnknownPersistentVariable;
+                                    break;
+                                case CanonicalScriptStateMutationError::TypeMismatch:
+                                    disposition = ServerScriptCommandDisposition::PersistentVariableTypeMismatch;
+                                    break;
+                                case CanonicalScriptStateMutationError::RevisionMismatch:
+                                    disposition = ServerScriptCommandDisposition::PersistentVariableRevisionMismatch;
+                                    break;
+                                case CanonicalScriptStateMutationError::RevisionExhausted:
+                                    disposition = ServerScriptCommandDisposition::PersistentVariableRevisionExhausted;
+                                    break;
+                                case CanonicalScriptStateMutationError::TickRegression:
+                                    disposition = ServerScriptCommandDisposition::PersistentVariableTickRegression;
+                                    break;
+                                case CanonicalScriptStateMutationError::InvalidValue:
+                                    disposition = ServerScriptCommandDisposition::InvalidPersistentVariableValue;
+                                    break;
+                            }
+                        }
+                    }
+                }
                 prepared.mResult.mScriptDispositions.emplace_back(queued.order(), disposition);
             }
             if (stateChanged)
@@ -1520,8 +1574,8 @@ namespace TES3MP
         auto prepared = prepareCommands(batch, worlds.interactiveObjects, worlds.interactiveObjectCatalog,
             worlds.inventory, worlds.itemCatalog, worlds.combat, worlds.actors, worlds.meleeWeapons,
             worlds.meleeSettings, worlds.meleePolicy, worlds.meleeContact, worlds.directMagic);
-        return prepareTickState(
-            prepareScriptCommands(std::move(prepared), batch, scriptCommands, worlds.world, worlds.globalCatalog),
+        return prepareTickState(prepareScriptCommands(std::move(prepared), batch, scriptCommands, worlds.world,
+                                    worlds.globalCatalog, worlds.scriptState, worlds.scriptStateCatalog),
             batch);
     }
 
@@ -1576,7 +1630,7 @@ namespace TES3MP
 
     bool CanonicalCommandReducer::commitPrepared(PreparedBatch&& prepared, CanonicalInteractiveObjectWorld* objects,
         CanonicalInventoryWorld* inventory, CanonicalCombatWorld* combat, CanonicalActorWorld* actors,
-        CanonicalWorldState* world)
+        CanonicalWorldState* world, CanonicalScriptState* scriptState)
     {
         if (prepared.mBaseVersion != mStateVersion || prepared.mBaseCanonicalRevision != mCanonicalRevision
             || !prepared.mState || !prepared.mPublication || (prepared.mInteractiveObjects && objects == nullptr)
@@ -1588,7 +1642,9 @@ namespace TES3MP
             || (prepared.mActors && actors == nullptr)
             || (prepared.mBaseActors && (!actors || *actors != *prepared.mBaseActors))
             || (prepared.mWorld && world == nullptr)
-            || (prepared.mBaseWorld && (!world || *world != *prepared.mBaseWorld)))
+            || (prepared.mBaseWorld && (!world || *world != *prepared.mBaseWorld))
+            || (prepared.mScriptState && scriptState == nullptr)
+            || (prepared.mBaseScriptState && (!scriptState || *scriptState != *prepared.mBaseScriptState)))
             return false;
         prepared.mPublication->mStateVersion = prepared.mStateVersion;
         prepared.mPublication->mCheckpointTick = prepared.mCheckpointTick;
@@ -1602,7 +1658,8 @@ namespace TES3MP
                 prepared.mCombat ? &*prepared.mCombat : mDurableCombat,
                 prepared.mInteractiveObjects ? &*prepared.mInteractiveObjects : mDurableObjects,
                 prepared.mActors ? &*prepared.mActors : mDurableActors,
-                prepared.mWorld ? &*prepared.mWorld : mDurableWorld);
+                prepared.mWorld ? &*prepared.mWorld : mDurableWorld,
+                prepared.mScriptState ? &*prepared.mScriptState : mDurableScriptState);
             if (prepared.mResult.mDurabilityResult != CanonicalDurabilityResult::Committed)
                 return false;
         }
@@ -1617,6 +1674,8 @@ namespace TES3MP
             *actors = std::move(*prepared.mActors);
         if (prepared.mWorld)
             *world = std::move(*prepared.mWorld);
+        if (prepared.mScriptState)
+            *scriptState = std::move(*prepared.mScriptState);
         mStateVersion = prepared.mStateVersion;
         mCanonicalRevision = prepared.mCanonicalRevision;
         mCheckpointTick = prepared.mCheckpointTick;
@@ -1631,29 +1690,29 @@ namespace TES3MP
 
     bool CanonicalCommandReducer::commit(PreparedBatch&& prepared)
     {
-        return commitPrepared(std::move(prepared), nullptr, nullptr, nullptr, nullptr, nullptr);
+        return commitPrepared(std::move(prepared), nullptr, nullptr, nullptr, nullptr, nullptr, nullptr);
     }
 
     bool CanonicalCommandReducer::commit(PreparedBatch&& prepared, CanonicalInteractiveObjectWorld& objects)
     {
-        return commitPrepared(std::move(prepared), &objects, nullptr, nullptr, nullptr, nullptr);
+        return commitPrepared(std::move(prepared), &objects, nullptr, nullptr, nullptr, nullptr, nullptr);
     }
 
     bool CanonicalCommandReducer::commit(PreparedBatch&& prepared, CanonicalInventoryWorld& inventory)
     {
-        return commitPrepared(std::move(prepared), nullptr, &inventory, nullptr, nullptr, nullptr);
+        return commitPrepared(std::move(prepared), nullptr, &inventory, nullptr, nullptr, nullptr, nullptr);
     }
 
     bool CanonicalCommandReducer::commit(
         PreparedBatch&& prepared, CanonicalInteractiveObjectWorld& objects, CanonicalInventoryWorld& inventory)
     {
-        return commitPrepared(std::move(prepared), &objects, &inventory, nullptr, nullptr, nullptr);
+        return commitPrepared(std::move(prepared), &objects, &inventory, nullptr, nullptr, nullptr, nullptr);
     }
 
     bool CanonicalCommandReducer::commit(PreparedBatch&& prepared, CanonicalCommandWorlds worlds)
     {
         return commitPrepared(std::move(prepared), worlds.interactiveObjects, worlds.inventory, worlds.combat,
-            worlds.actors, worlds.world);
+            worlds.actors, worlds.world, worlds.scriptState);
     }
 
     CommandBatchReductionResult CanonicalCommandReducer::apply(const ServerTickCommandBatch& batch)

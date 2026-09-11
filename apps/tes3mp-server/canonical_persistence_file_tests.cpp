@@ -40,13 +40,17 @@ namespace
         std::filesystem::path mPath;
     };
 
-    CanonicalPersistenceIdentity identity(std::uint64_t configuration = 1)
+    CanonicalPersistenceIdentity identity(std::uint64_t configuration = 1, std::int64_t scriptInitialValue = 0)
     {
         std::array<std::byte, 32> configurationBytes{};
         configurationBytes[0] = static_cast<std::byte>(configuration);
+        const std::array scripts{ ServerScriptPackage::create(11, 1, 0).value() };
+        const std::array variables{ ServerScriptVariableCatalogEntry{
+            11, id<ScriptVariableId>(1), scriptInitialValue } };
+        const auto scriptCatalog = ServerScriptStateCatalog::create(variables).value();
         const std::array seeds{ PersistenceSeed{ 1, { 4, 3, 2, 1 } } };
-        return CanonicalPersistenceIdentity::create(
-            testContentManifestId(), ServerConfigurationId::fromBytes(configurationBytes).value(), {}, seeds)
+        return CanonicalPersistenceIdentity::create(testContentManifestId(),
+            ServerConfigurationId::fromBytes(configurationBytes).value(), scripts, scriptCatalog, seeds)
             .value();
     }
 
@@ -70,6 +74,8 @@ namespace
         GlobalVariableCatalog globalCatalog;
         QuestJournalCatalog questJournalCatalog;
         CanonicalWorldState world;
+        ServerScriptStateCatalog scriptStateCatalog;
+        CanonicalScriptState scriptState;
     };
 
     DurableDomains domains(std::uint32_t count, float health, std::uint64_t randomSeed, bool actorDead = false)
@@ -201,21 +207,33 @@ namespace
         if (count > 1)
             questJournalStates.push_back(std::move(playerQuestJournal));
         auto world = *CanonicalWorldState::create(time, globals, questJournalCatalog, questJournalStates);
+        const std::array scriptDeclarations{ ServerScriptVariableCatalogEntry{
+            11, id<ScriptVariableId>(1), std::int64_t{ 0 } } };
+        auto scriptStateCatalog = ServerScriptStateCatalog::create(scriptDeclarations).value();
+        auto initialScriptState = CanonicalScriptState::initial(scriptStateCatalog).value();
+        auto changedScriptState = compareAndSetCanonicalScriptVariable(initialScriptState, scriptStateCatalog, 11,
+            id<ScriptVariableId>(1), ScriptStateRevision::initial(), std::int64_t{ count }, id<ServerTick>(count));
+        auto scriptState = std::get<CanonicalScriptState>(std::move(changedScriptState));
         return { std::move(catalog), std::move(inventory), std::move(combat), std::move(objectCatalog),
             std::move(objects), std::move(actorCatalog), std::move(actors), std::move(globalCatalog),
-            std::move(questJournalCatalog), std::move(world) };
+            std::move(questJournalCatalog), std::move(world), std::move(scriptStateCatalog), std::move(scriptState) };
     }
 
     bool commitJoin(CanonicalPersistenceFile& file, CanonicalInventoryWorld* inventory = nullptr,
         CanonicalCombatWorld* combat = nullptr, CanonicalInteractiveObjectWorld* objects = nullptr,
-        CanonicalActorWorld* actors = nullptr, CanonicalWorldState* world = nullptr, std::uint64_t tick = 1)
+        CanonicalActorWorld* actors = nullptr, CanonicalWorldState* world = nullptr,
+        CanonicalScriptState* scriptState = nullptr, std::uint64_t tick = 1)
     {
         NullMetricSink metrics;
         NullStructuredEventSink events;
         Observability observability(metrics, events);
         auto empty = std::get<CanonicalServerState>(createCanonicalServerState({}, {}));
         CanonicalCommandReducer reducer(std::move(empty), observability, testContentManifest());
-        if (!reducer.configureDurability(file, inventory, combat, objects, actors, world))
+        auto defaultScriptState = CanonicalScriptState::initial(file.prefix().identity().scriptStateCatalog());
+        if (!scriptState && !defaultScriptState)
+            return false;
+        if (!reducer.configureDurability(
+                file, inventory, combat, objects, actors, world, scriptState ? scriptState : &*defaultScriptState))
             return false;
         CanonicalSessionProgress session(
             id<SessionId>(1), id<SessionGeneration>(1), id<PlayerId>(1), id<EntityId>(2), std::nullopt);
@@ -237,8 +255,8 @@ namespace
         CanonicalCommandReducer reducer(std::move(*restored), *file.restoredStateVersion(),
             *file.restoredCanonicalRevision(), *file.restoredCheckpointTick(), observability, CanonicalSinkBundle{},
             testContentManifest(), collision);
-        if (!reducer.configureDurability(
-                file, &domains.inventory, &domains.combat, &domains.objects, &domains.actors, &domains.world))
+        if (!reducer.configureDurability(file, &domains.inventory, &domains.combat, &domains.objects, &domains.actors,
+                &domains.world, &domains.scriptState))
             return false;
         CanonicalSessionProgress session(
             id<SessionId>(1), id<SessionGeneration>(2), id<PlayerId>(1), id<EntityId>(2), std::nullopt);
@@ -296,15 +314,15 @@ namespace
         auto opened = CanonicalPersistenceFile::open(path, identity());
         auto* file = std::get_if<std::unique_ptr<CanonicalPersistenceFile>>(&opened);
         if (!file
-            || !commitJoin(
-                **file, &expected.inventory, &expected.combat, &expected.objects, &expected.actors, &expected.world, 2))
+            || !commitJoin(**file, &expected.inventory, &expected.combat, &expected.objects, &expected.actors,
+                &expected.world, &expected.scriptState, 2))
             return false;
         file->reset();
         auto reopened = CanonicalPersistenceFile::open(path, identity());
         auto* restoredFile = std::get_if<std::unique_ptr<CanonicalPersistenceFile>>(&reopened);
         if (!restoredFile || !(*restoredFile)->restoredInventory() || !(*restoredFile)->restoredCombat()
             || !(*restoredFile)->restoredObjects() || !(*restoredFile)->restoredActors()
-            || !(*restoredFile)->restoredWorld())
+            || !(*restoredFile)->restoredWorld() || !(*restoredFile)->restoredScriptState())
             return false;
         const auto& inventory = *(*restoredFile)->restoredInventory();
         auto rebuiltInventory = CanonicalInventoryWorld::create(testContentManifest(), expected.catalog,
@@ -328,9 +346,11 @@ namespace
             && std::get_if<CanonicalActorWorld>(&rebuiltActors)
             && *std::get_if<CanonicalActorWorld>(&rebuiltActors) == expected.actors && latest
             && *(*restoredFile)->restoredWorld() == expected.world
+            && *(*restoredFile)->restoredScriptState() == expected.scriptState
             && latest->canonicalChecksum()
             == canonicalDurableStateChecksumV1(latest->stateVersion(), latest->checkpointTick(), latest->players(),
-                latest->inventory(), latest->combat(), latest->objects(), latest->actors(), latest->world());
+                latest->inventory(), latest->combat(), latest->objects(), latest->actors(), latest->world(),
+                latest->scriptState());
     }
 
     std::vector<char> read(const std::filesystem::path& path)
@@ -367,7 +387,10 @@ namespace
             return false;
         write(path, valid);
         auto mismatchResult = CanonicalPersistenceFile::open(path, identity(2));
+        auto catalogMismatchResult = CanonicalPersistenceFile::open(path, identity(1, 1));
         return std::get<CanonicalPersistenceFileError>(mismatchResult)
+            == CanonicalPersistenceFileError::IdentityMismatch
+            && std::get<CanonicalPersistenceFileError>(catalogMismatchResult)
             == CanonicalPersistenceFileError::IdentityMismatch;
     }
 
@@ -397,11 +420,14 @@ namespace
         const auto* objects = file.restoredObjects();
         const auto* actors = file.restoredActors();
         const auto* world = file.restoredWorld();
+        const auto* scriptState = file.restoredScriptState();
         const auto* latest = file.prefix().latest();
-        return inventory && combat && objects && actors && world && latest && inventory->players.size() == 1
-            && inventory->players.front().stacks.size() == 1 && inventory->players.front().stacks.front().count == count
-            && combat->players.size() == 1 && combat->players.front().victim.health == health
-            && objects->objects.size() == 1 && objects->objects.front().doorState() == DoorState::Closed
+        const auto* scriptVariable = scriptState ? scriptState->find(11, id<ScriptVariableId>(1)) : nullptr;
+        return inventory && combat && objects && actors && world && scriptVariable && latest
+            && inventory->players.size() == 1 && inventory->players.front().stacks.size() == 1
+            && inventory->players.front().stacks.front().count == count && combat->players.size() == 1
+            && combat->players.front().victim.health == health && objects->objects.size() == 1
+            && objects->objects.front().doorState() == DoorState::Closed
             && objects->objects.front().lockState() == (count == 1 ? LockState::Locked : LockState::Unlocked)
             && actors->actors.size() == 1
             && actors->actors.front().root().position().x() == static_cast<std::int64_t>(count)
@@ -413,7 +439,9 @@ namespace
             && std::get<std::int16_t>(world->globals()[0].value) == static_cast<std::int16_t>(count)
             && std::get<std::int32_t>(world->globals()[1].value) == static_cast<std::int32_t>(count * 10)
             && std::get<float>(world->globals()[2].value) == static_cast<float>(count) + .5f
-            && world->questJournalCatalog() && world->questJournalCatalog()->quests().size() == 1
+            && std::get<std::int64_t>(scriptVariable->value) == count && scriptVariable->revision.value() == 2
+            && scriptVariable->lastChangeTick == id<ServerTick>(count) && world->questJournalCatalog()
+            && world->questJournalCatalog()->quests().size() == 1
             && world->questJournalCatalog()->journal().size() == 64
             && world->questJournal().size() == (count > 1 ? 1u : 0u)
             && (count == 1
@@ -421,7 +449,8 @@ namespace
                     && world->questJournal()[0].journalRevision.value() == count))
             && latest->canonicalChecksum() == checksum
             && canonicalDurableStateChecksumV1(latest->stateVersion(), latest->checkpointTick(), latest->players(),
-                   latest->inventory(), latest->combat(), latest->objects(), latest->actors(), latest->world())
+                   latest->inventory(), latest->combat(), latest->objects(), latest->actors(), latest->world(),
+                   latest->scriptState())
             == checksum;
     }
 
@@ -432,7 +461,9 @@ namespace
         auto state = domains(1, 100.f, 10);
         auto opened = CanonicalPersistenceFile::open(path, identity());
         auto* file = std::get_if<std::unique_ptr<CanonicalPersistenceFile>>(&opened);
-        if (!file || !commitJoin(**file, &state.inventory, &state.combat, &state.objects, &state.actors, &state.world))
+        if (!file
+            || !commitJoin(**file, &state.inventory, &state.combat, &state.objects, &state.actors, &state.world,
+                &state.scriptState))
         {
             std::cerr << "compaction setup failed\n";
             return false;
@@ -456,7 +487,7 @@ namespace
         return result;
     }
 
-    bool crash_cuts_preserve_time_global_key_door_and_actor_transactions()
+    bool crash_cuts_preserve_time_global_script_key_door_and_actor_transactions()
     {
         TemporaryDirectory directory;
         const auto path = directory.path() / "world.t3p";
@@ -465,7 +496,7 @@ namespace
         auto* file = std::get_if<std::unique_ptr<CanonicalPersistenceFile>>(&opened);
         if (!file
             || !commitJoin(**file, &previousDomains.inventory, &previousDomains.combat, &previousDomains.objects,
-                &previousDomains.actors, &previousDomains.world))
+                &previousDomains.actors, &previousDomains.world, &previousDomains.scriptState))
             return false;
         const auto previousBytes = read(path);
         const auto previousChecksum = (*file)->prefix().latest()->canonicalChecksum();
@@ -506,7 +537,8 @@ namespace
         auto opened = CanonicalPersistenceFile::open(path, identity());
         auto* file = std::get_if<std::unique_ptr<CanonicalPersistenceFile>>(&opened);
         if (!file
-            || !commitJoin(**file, &before.inventory, &before.combat, &before.objects, &before.actors, &before.world))
+            || !commitJoin(**file, &before.inventory, &before.combat, &before.objects, &before.actors, &before.world,
+                &before.scriptState))
             return false;
         const auto previousBytes = read(path);
         const auto previousChecksum = (*file)->prefix().latest()->canonicalChecksum();
@@ -552,8 +584,8 @@ int main()
             &stale_uncommitted_temporary_file_never_replaces_the_committed_prefix },
         std::pair{ "bounded_compaction_keeps_one_checkpoint_and_a_bounded_tail",
             &bounded_compaction_keeps_one_checkpoint_and_a_bounded_tail },
-        std::pair{ "crash_cuts_preserve_time_global_key_door_and_actor_transactions",
-            &crash_cuts_preserve_time_global_key_door_and_actor_transactions },
+        std::pair{ "crash_cuts_preserve_time_global_script_key_door_and_actor_transactions",
+            &crash_cuts_preserve_time_global_script_key_door_and_actor_transactions },
         std::pair{
             "crash_cuts_preserve_actor_death_and_respawn_state", &crash_cuts_preserve_actor_death_and_respawn_state },
     };

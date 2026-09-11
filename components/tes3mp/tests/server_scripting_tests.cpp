@@ -7,6 +7,7 @@
 #include <array>
 #include <cstdint>
 #include <iostream>
+#include <limits>
 #include <optional>
 #include <type_traits>
 #include <utility>
@@ -20,7 +21,7 @@ namespace
     constexpr std::uint64_t FirstTickDeadline = 33'333'334;
     constexpr std::uint64_t NextTickIncrement = 33'333'333;
 
-    static_assert(ServerScriptApiVersion == 2);
+    static_assert(ServerScriptApiVersion == 3);
     static_assert(MaximumServerScriptCallbacks == 64);
     static_assert(MaximumServerScriptCommandsPerCallback == 16);
     static_assert(MaximumServerScriptCommandsPerTick == 256);
@@ -167,6 +168,56 @@ namespace
                 ? ServerScriptCallbackResult::Accepted
                 : ServerScriptCallbackResult::Failed;
         }
+    };
+
+    class PersistentStateCallback final : public ServerScriptCallback
+    {
+    public:
+        explicit PersistentStateCallback(bool stale = false) noexcept
+            : mStale(stale)
+        {
+        }
+
+        ServerScriptCallbackResult onEvent(
+            const ServerScriptCallbackInput& input, ServerScriptCommandEmitter& output) noexcept override
+        {
+            if (input.persistentState().size() != 1)
+                return ServerScriptCallbackResult::Failed;
+            const auto& state = input.persistentState().front();
+            sawRestoredState = state.packageId == 1 && state.id == id<ScriptVariableId>(1)
+                && std::get<std::int64_t>(state.value) == 8 && state.revision.value() == 2
+                && state.lastChangeTick == id<ServerTick>(1);
+            const auto expected = mStale ? ScriptStateRevision::initial() : state.revision;
+            return output.enqueue(ServerScriptCompareAndSetPersistentCommand(state.id, expected, std::int64_t{ 9 }))
+                    == ServerScriptEmitResult::Accepted
+                ? ServerScriptCallbackResult::Accepted
+                : ServerScriptCallbackResult::Failed;
+        }
+
+        bool sawRestoredState = false;
+
+    private:
+        bool mStale;
+    };
+
+    class ScriptDurabilityProbe final : public CanonicalDurabilityPort
+    {
+    public:
+        CanonicalDurabilityResult commit(const std::shared_ptr<const CanonicalStatePublication>&, CanonicalRevision,
+            std::span<const DurableCommandOrder>, const CanonicalInventoryWorld*, const CanonicalCombatWorld*,
+            const CanonicalInteractiveObjectWorld*, const CanonicalActorWorld*, const CanonicalWorldState*,
+            const CanonicalScriptState* scriptState) noexcept override
+        {
+            sawExpected = !expected || (scriptState && *scriptState == *expected);
+            installedBeforeAcknowledgement = expected && current && *current == *expected;
+            return result;
+        }
+
+        CanonicalDurabilityResult result = CanonicalDurabilityResult::Committed;
+        const CanonicalScriptState* current = nullptr;
+        const CanonicalScriptState* expected = nullptr;
+        bool sawExpected = false;
+        bool installedBeforeAcknowledgement = false;
     };
 
     struct ScenarioResult
@@ -456,6 +507,143 @@ namespace
             && state->journal.size() == 1 && state->journal[0].id == id<JournalEntryId>(100)
             && state->journalRevision.value() == 2 && state->lastJournalChangeTick == id<ServerTick>(2);
     }
+
+    bool persistent_state_is_restored_before_callbacks_and_cas_is_atomic()
+    {
+        Fixture fixture;
+        const auto package = ServerScriptPackage::create(1, 1, 1).value();
+        const std::array declarations{ ServerScriptVariableCatalogEntry{
+            1, id<ScriptVariableId>(1), std::int64_t{ 5 } } };
+        const auto catalog = ServerScriptStateCatalog::create(declarations).value();
+        auto initial = CanonicalScriptState::initial(catalog).value();
+        auto restoredResult = compareAndSetCanonicalScriptVariable(initial, catalog, 1, id<ScriptVariableId>(1),
+            ScriptStateRevision::initial(), std::int64_t{ 8 }, id<ServerTick>(1));
+        auto* restored = std::get_if<CanonicalScriptState>(&restoredResult);
+        if (!restored)
+            return false;
+        auto state = std::move(*restored);
+        DeterministicServerScriptRuntime scripts;
+        PersistentStateCallback callback;
+        if (!scripts.bindPersistentState(state)
+            || scripts.registerCallback(package, 1, ServerScriptEventKind::CommandFinalized, callback)
+                != ServerScriptRegistrationResult::Accepted)
+            return false;
+        CanonicalCommandReducer reducer(fixture.initialState(), fixture.observability,
+            CanonicalSinkBundle(nullptr, nullptr, &scripts, nullptr), testContentManifest());
+        ScriptDurabilityProbe durability;
+        durability.current = &state;
+        if (!reducer.configureDurability(durability, nullptr, nullptr, nullptr, nullptr, nullptr, &state))
+            return false;
+        CanonicalCommandWorlds worlds;
+        worlds.scriptState = &state;
+        worlds.scriptStateCatalog = &catalog;
+        if (fixture.intake.submit(fixture.clientCommand()) != CommandSubmissionResult::Accepted)
+            return false;
+        const auto first = fixture.pumpFirst();
+        if (!first || first.batches().size() != 1 || !scripts.pump(id<ServerTick>(1)))
+            return false;
+        auto client = reducer.prepareTick(first.batches()[0], worlds, {});
+        if (!client.result() || !reducer.commit(std::move(client), worlds) || !callback.sawRestoredState)
+            return false;
+        const auto second = fixture.pumpNext();
+        const auto generated = scripts.pump(id<ServerTick>(2));
+        if (!second || second.batches().size() != 1 || !generated || generated.commands().size() != 1)
+            return false;
+        auto prepared = reducer.prepareTick(second.batches()[0], worlds, generated.commands());
+        if (!prepared.result() || prepared.result().scriptDispositions().size() != 1
+            || prepared.result().scriptDispositions()[0].disposition() != ServerScriptCommandDisposition::Applied
+            || !prepared.candidateScriptState())
+            return false;
+        const auto expected = *prepared.candidateScriptState();
+        durability.expected = &expected;
+        durability.result = CanonicalDurabilityResult::Rejected;
+        if (reducer.commit(std::move(prepared), worlds) || !durability.sawExpected
+            || durability.installedBeforeAcknowledgement || state == expected)
+            return false;
+        durability.result = CanonicalDurabilityResult::Committed;
+        durability.sawExpected = false;
+        auto accepted = reducer.prepareTick(second.batches()[0], worlds, generated.commands());
+        if (!accepted.result() || !reducer.commit(std::move(accepted), worlds) || !durability.sawExpected
+            || durability.installedBeforeAcknowledgement)
+            return false;
+        const auto* value = state.find(1, id<ScriptVariableId>(1));
+        return value && std::get<std::int64_t>(value->value) == 9 && value->revision.value() == 3
+            && value->lastChangeTick == id<ServerTick>(2);
+    }
+
+    bool stale_persistent_state_revision_fails_without_mutation()
+    {
+        Fixture fixture;
+        const auto package = ServerScriptPackage::create(1, 1, 1).value();
+        const std::array declarations{ ServerScriptVariableCatalogEntry{
+            1, id<ScriptVariableId>(1), std::int64_t{ 5 } } };
+        const auto catalog = ServerScriptStateCatalog::create(declarations).value();
+        auto state = CanonicalScriptState::initial(catalog).value();
+        auto advanced = compareAndSetCanonicalScriptVariable(state, catalog, 1, id<ScriptVariableId>(1),
+            ScriptStateRevision::initial(), std::int64_t{ 8 }, id<ServerTick>(1));
+        state = std::move(std::get<CanonicalScriptState>(advanced));
+        const auto before = state;
+        DeterministicServerScriptRuntime scripts;
+        PersistentStateCallback callback(true);
+        if (!scripts.bindPersistentState(state)
+            || scripts.registerCallback(package, 1, ServerScriptEventKind::CommandFinalized, callback)
+                != ServerScriptRegistrationResult::Accepted)
+            return false;
+        CanonicalCommandReducer reducer(fixture.initialState(), fixture.observability,
+            CanonicalSinkBundle(nullptr, nullptr, &scripts, nullptr), testContentManifest());
+        CanonicalCommandWorlds worlds;
+        worlds.scriptState = &state;
+        worlds.scriptStateCatalog = &catalog;
+        if (fixture.intake.submit(fixture.clientCommand()) != CommandSubmissionResult::Accepted)
+            return false;
+        const auto first = fixture.pumpFirst();
+        if (!first || !scripts.pump(id<ServerTick>(1)))
+            return false;
+        auto client = reducer.prepareTick(first.batches()[0], worlds, {});
+        if (!client.result() || !reducer.commit(std::move(client), worlds))
+            return false;
+        const auto second = fixture.pumpNext();
+        const auto generated = scripts.pump(id<ServerTick>(2));
+        if (!second || !generated)
+            return false;
+        auto prepared = reducer.prepareTick(second.batches()[0], worlds, generated.commands());
+        return prepared.result() && prepared.result().scriptDispositions().size() == 1
+            && prepared.result().scriptDispositions()[0].disposition()
+            == ServerScriptCommandDisposition::PersistentVariableRevisionMismatch
+            && reducer.commit(std::move(prepared), worlds) && state == before;
+    }
+
+    bool persistent_variable_bounds_and_types_fail_closed()
+    {
+        const std::array duplicate{ ServerScriptVariableCatalogEntry{ 1, id<ScriptVariableId>(1), std::int64_t{ 0 } },
+            ServerScriptVariableCatalogEntry{ 1, id<ScriptVariableId>(1), std::int64_t{ 1 } } };
+        const std::array oversized{ ServerScriptVariableCatalogEntry{
+            1, id<ScriptVariableId>(1), std::string(MaximumScriptStringBytes + 1, 'x') } };
+        const std::array invalidFloat{ ServerScriptVariableCatalogEntry{
+            1, id<ScriptVariableId>(1), std::numeric_limits<double>::quiet_NaN() } };
+        std::vector<ServerScriptVariableCatalogEntry> tooMany;
+        for (std::uint64_t value = 1; value <= MaximumScriptVariablesPerPackage + 1; ++value)
+            tooMany.push_back({ 1, id<ScriptVariableId>(value), std::int64_t{ 0 } });
+        const std::array valid{ ServerScriptVariableCatalogEntry{ 1, id<ScriptVariableId>(1), std::int64_t{ 0 } } };
+        const auto catalog = ServerScriptStateCatalog::create(valid);
+        const auto state = catalog ? CanonicalScriptState::initial(*catalog) : std::nullopt;
+        if (ServerScriptStateCatalog::create(duplicate) || ServerScriptStateCatalog::create(oversized)
+            || ServerScriptStateCatalog::create(invalidFloat) || ServerScriptStateCatalog::create(tooMany) || !catalog
+            || !state)
+            return false;
+        const auto wrongType = compareAndSetCanonicalScriptVariable(
+            *state, *catalog, 1, id<ScriptVariableId>(1), ScriptStateRevision::initial(), true, id<ServerTick>(1));
+        const std::array floatDeclaration{ ServerScriptVariableCatalogEntry{ 1, id<ScriptVariableId>(1), 0.0 } };
+        const auto floatCatalog = ServerScriptStateCatalog::create(floatDeclaration).value();
+        const auto floatState = CanonicalScriptState::initial(floatCatalog).value();
+        const auto invalidValue
+            = compareAndSetCanonicalScriptVariable(floatState, floatCatalog, 1, id<ScriptVariableId>(1),
+                ScriptStateRevision::initial(), std::numeric_limits<double>::infinity(), id<ServerTick>(1));
+        return std::get<CanonicalScriptStateMutationError>(wrongType) == CanonicalScriptStateMutationError::TypeMismatch
+            && std::get<CanonicalScriptStateMutationError>(invalidValue)
+            == CanonicalScriptStateMutationError::InvalidValue
+            && *state == CanonicalScriptState::initial(*catalog).value();
+    }
 }
 
 int main()
@@ -476,6 +664,12 @@ int main()
             &typed_time_and_global_commands_commit_as_one_script_batch },
         std::pair{ "quest_stage_and_journal_entry_commands_commit_as_one_durable_candidate",
             &quest_stage_and_journal_entry_commands_commit_as_one_durable_candidate },
+        std::pair{ "persistent_state_is_restored_before_callbacks_and_cas_is_atomic",
+            &persistent_state_is_restored_before_callbacks_and_cas_is_atomic },
+        std::pair{ "stale_persistent_state_revision_fails_without_mutation",
+            &stale_persistent_state_revision_fails_without_mutation },
+        std::pair{
+            "persistent_variable_bounds_and_types_fail_closed", &persistent_variable_bounds_and_types_fail_closed },
     };
     bool passed = true;
     for (const auto& [name, test] : tests)

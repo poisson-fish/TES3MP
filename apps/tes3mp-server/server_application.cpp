@@ -858,6 +858,12 @@ namespace TES3MP::ServerApp
             mFailure = "world content wiring is incomplete";
             return false;
         }
+        if ((mWiring->scriptStateCatalog || mWiring->scriptState)
+            && (!mWiring->scriptStateCatalog || !mWiring->scriptState))
+        {
+            mFailure = "script state wiring is incomplete";
+            return false;
+        }
         const bool anyCombat = mWiring->combat || mWiring->meleeWeapons || mWiring->playerCombatTemplate
             || mWiring->meleeSettings || mWiring->meleePolicy || mWiring->meleeContact || mWiring->directMagic;
         if (anyCombat
@@ -910,6 +916,8 @@ namespace TES3MP::ServerApp
                 mWiring->meleeSettings, mWiring->meleePolicy, mWiring->meleeContact, mWiring->directMagic };
             commandWorlds.world = mWiring->world;
             commandWorlds.globalCatalog = mWiring->globalCatalog;
+            commandWorlds.scriptState = mWiring->scriptState;
+            commandWorlds.scriptStateCatalog = mWiring->scriptStateCatalog;
             auto prepared = mWiring->reducer.prepareTick(batch, commandWorlds, pumpedScripts.commands());
             if (!prepared.result())
             {
@@ -1107,8 +1115,7 @@ namespace TES3MP::ServerApp
             std::optional<CanonicalWorldState> worldCandidate;
             if (mWiring->world)
             {
-                const auto& baseWorld
-                    = prepared.candidateWorld() ? *prepared.candidateWorld() : *mWiring->world;
+                const auto& baseWorld = prepared.candidateWorld() ? *prepared.candidateWorld() : *mWiring->world;
                 auto advancedWorld = advanceCanonicalWorldTime(
                     baseWorld, batch.scheduledTick().value(), mConfig.tickIntervalMilliseconds);
                 auto* worldValue = std::get_if<CanonicalWorldState>(&advancedWorld);

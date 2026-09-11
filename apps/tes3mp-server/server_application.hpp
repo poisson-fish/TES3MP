@@ -49,6 +49,8 @@ namespace TES3MP::ServerApp
         DeterministicServerScriptRuntime* scripts = nullptr;
         const GlobalVariableCatalog* globalCatalog = nullptr;
         CanonicalWorldState* world = nullptr;
+        const ServerScriptStateCatalog* scriptStateCatalog = nullptr;
+        CanonicalScriptState* scriptState = nullptr;
     };
 
     class ServerApplication
