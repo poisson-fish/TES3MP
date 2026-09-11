@@ -2,6 +2,7 @@
 #define MWGUI_DIALOGE_H
 
 #include <memory>
+#include <optional>
 
 #include "referenceinterface.hpp"
 #include "windowbase.hpp"
@@ -198,6 +199,9 @@ namespace MWGui
         std::vector<std::pair<std::string, int>> mChoices;
         std::vector<BookTypesetter::Style*> mChoiceStyles;
         bool mGoodbye;
+        std::optional<int> mPendingMultiplayerChoice;
+        std::optional<int> mRejectedMultiplayerChoice;
+        MWWorld::Ptr mPendingMultiplayerChoiceActor;
 
         std::vector<std::unique_ptr<Link>> mLinks;
         std::unordered_map<std::string, std::unique_ptr<Link>> mTopicLinks;

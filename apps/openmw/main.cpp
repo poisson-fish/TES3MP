@@ -449,9 +449,31 @@ bool parseOptions(int argc, char** argv, OMW::Engine& engine, Files::Configurati
             }
             questMappings.push_back({ *id, entry.substr(equal + 1) });
         }
+        std::vector<TES3MP::OpenMWAdapter::DesktopDialogueChoiceMapping> dialogueChoiceMappings;
+        for (const auto& entry : variables["tes3mp-content-dialogue-choice-map"].as<StringsVector>())
+        {
+            const auto equal = entry.find('=');
+            std::uint64_t rawId = 0;
+            const auto parsed = equal == std::string::npos ? std::from_chars_result{}
+                                                           : std::from_chars(entry.data(), entry.data() + equal, rawId);
+            const auto id = equal != std::string::npos && parsed.ec == std::errc{} && parsed.ptr == entry.data() + equal
+                ? TES3MP::DialogueChoiceId::fromValue(rawId)
+                : std::nullopt;
+            std::int32_t localChoice = 0;
+            const auto local = equal == std::string::npos
+                ? std::from_chars_result{}
+                : std::from_chars(entry.data() + equal + 1, entry.data() + entry.size(), localChoice);
+            if (!id || local.ec != std::errc{} || local.ptr != entry.data() + entry.size())
+            {
+                Log(Debug::Error) << "TES3MP startup failed: invalid dialogue choice mapping";
+                return false;
+            }
+            dialogueChoiceMappings.push_back({ *id, localChoice });
+        }
         auto contentMapping = TES3MP::OpenMWAdapter::DesktopContentMapping::create(*contentManifest, localMappings,
             contentManifest->defaultAppearance(), variables["tes3mp-content-appearance-record"].as<std::string>(),
-            actorMappings, interactiveObjectMappings, itemMappings, containerMappings, questMappings);
+            actorMappings, interactiveObjectMappings, itemMappings, containerMappings, questMappings,
+            dialogueChoiceMappings);
         if (!contentMapping)
         {
             Log(Debug::Error) << "TES3MP startup failed: content record mappings are required";

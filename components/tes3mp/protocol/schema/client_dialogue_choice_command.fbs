@@ -1,0 +1,14 @@
+namespace TES3MP.Protocol.Schema.DialogueChoiceCommand;
+
+table ClientDialogueChoiceCommand {
+  session_id:ulong (id: 0);
+  session_generation:ulong (id: 1);
+  command_sequence:ulong (id: 2);
+  command_id:ulong (id: 3);
+  observed_canonical_revision:ulong (id: 4);
+  choice_id:ulong (id: 5);
+}
+
+root_type ClientDialogueChoiceCommand;
+file_identifier "T3DC";
+file_extension "t3dc";

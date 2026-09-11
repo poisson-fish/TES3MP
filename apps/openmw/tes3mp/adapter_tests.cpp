@@ -48,7 +48,7 @@ namespace
     }
 
     TES3MP::ServerHello serverHello(bool pose = false, bool actors = false, bool interactiveObjects = false,
-        bool inventory = false, bool combat = false, std::uint16_t minor = 2)
+        bool inventory = false, bool combat = false, std::uint16_t minor = 2, bool dialogueChoices = false)
     {
         auto versions = std::get<TES3MP::ProtocolVersionRange>(TES3MP::ProtocolVersionRange::create(1, minor, minor));
         std::vector<TES3MP::CapabilityId> capabilities;
@@ -62,6 +62,8 @@ namespace
             capabilities.push_back(TES3MP::inventoryReplicationCapability());
         if (combat)
             capabilities.push_back(TES3MP::combatReplicationCapability());
+        if (dialogueChoices)
+            capabilities.push_back(TES3MP::dialogueChoiceCapability());
         auto client = std::get<TES3MP::CapabilityOffer>(TES3MP::CapabilityOffer::create(versions, capabilities, {}));
         auto server
             = std::get<TES3MP::CapabilityOffer>(TES3MP::CapabilityOffer::create(std::move(versions), capabilities, {}));
@@ -443,6 +445,10 @@ namespace
             auto value = std::move(nextMelee);
             nextMelee.reset();
             return value;
+        }
+        std::optional<TES3MP::DialogueChoiceId> mapDialogueChoice(int localChoice) const noexcept override
+        {
+            return localChoice == 7 ? TES3MP::DialogueChoiceId::fromValue(40) : std::nullopt;
         }
         void clearSessionState() noexcept override
         {
@@ -1420,6 +1426,101 @@ int main()
             && command->attackType == MeleeAttackType::Chop && command->attackStrength == 0.75f;
     }
     require(foundCombatCommand);
+
+    Input dialogueInput;
+    Presentation dialoguePresentation;
+    Status dialogueStatus;
+    DisconnectOnce dialogueDisconnect;
+    dialogueDisconnect.pending = false;
+    auto dialogueTransport = std::make_unique<IdleTransport>();
+    auto* dialogueTransportObserver = dialogueTransport.get();
+    dialogueTransportObserver->acceptConnections = true;
+    auto dialogueClock = std::make_unique<Clock>();
+    auto dialogueCreated = ClientSessionRuntime::create(
+        *dialogueTransport, *dialogueClock, timeouts, SessionGeneration::initial(), outbound);
+    auto dialogueRuntime = std::get<std::unique_ptr<ClientSessionRuntime>>(std::move(dialogueCreated));
+    auto dialogueVersions = std::get<ProtocolVersionRange>(ProtocolVersionRange::create(1, 6, 6));
+    const std::array dialogueCapabilities{ dialogueChoiceCapability() };
+    auto dialogueOffer = std::get<CapabilityOffer>(
+        CapabilityOffer::create(std::move(dialogueVersions), dialogueCapabilities, {}, testContentManifestId()));
+    const std::array dialoguePasswordBytes{ std::byte{ 12 } };
+    auto dialoguePassword = AuthenticationMaterial::create(dialoguePasswordBytes);
+    require(dialoguePassword
+        && dialogueRuntime->start(endpoint, ClientHello::fromOffer(std::move(dialogueOffer)),
+               AuthenticationRequest::join(std::move(*dialoguePassword)))
+            == HeadlessClientResult::Accepted);
+    auto dialogueCoordinator = makeCoordinator(std::move(dialogueTransport), std::move(dialogueClock),
+        std::move(dialogueRuntime), reconnect, dialogueInput, dialoguePresentation, dialogueStatus,
+        &dialogueDisconnect);
+    dialogueCoordinator->frame(0.01f);
+    const auto dialogueHello = encodeServerHello(serverHello(false, false, false, false, false, 6, true));
+    dialogueTransportObserver->enqueue(
+        MessageClass::SessionControl, MessageKind::ServerHello, dialogueHello, TransportChannel::ReliableOrdered);
+    dialogueCoordinator->frame(0.01f);
+    dialogueTransportObserver->enqueue(MessageClass::SessionControl, MessageKind::AuthenticationAccepted,
+        encodeAuthenticationAccepted(accepted(std::byte{ 12 }, 2 * MinimumResumeTokenLifetimeMilliseconds)),
+        TransportChannel::ReliableOrdered);
+    dialogueTransportObserver->enqueue(MessageClass::ReliableOperation, MessageKind::ReliableInterestBaseline,
+        encodeReliableInterestBaseline(selfBaseline(SessionGeneration::initial())),
+        TransportChannel::ReliableOrdered);
+    dialogueTransportObserver->enqueue(MessageClass::LatestWinsSnapshot, MessageKind::LatestWinsSnapshot,
+        encodeLatestWinsSnapshot(selfSnapshot(SessionGeneration::initial())), TransportChannel::LatestWins);
+    dialogueCoordinator->frame(0.01f);
+    require(dialogueCoordinator->multiplayerState() == MultiplayerState::Ready);
+    require(dialogueCoordinator->submitDialogueChoice(8) == DialogueChoiceSubmissionResult::Unmapped);
+    require(dialogueCoordinator->submitDialogueChoice(7) == DialogueChoiceSubmissionResult::Pending);
+    require(dialogueCoordinator->submitDialogueChoice(7) == DialogueChoiceSubmissionResult::Unavailable);
+    require(!dialogueCoordinator->takeDialogueChoiceResolution());
+    dialogueCoordinator->frame(0.01f);
+
+    std::vector<ClientDialogueChoiceCommand> sentDialogueChoices;
+    const auto collectDialogueChoices = [&] {
+        sentDialogueChoices.clear();
+        for (const auto& bytes : dialogueTransportObserver->sentFrames)
+        {
+            const auto decoded = decodeProtocolFrame(bytes);
+            const auto* decodedFrame = std::get_if<DecodedFrame>(&decoded);
+            if (!decodedFrame || decodedFrame->messageKind() != MessageKind::ClientDialogueChoiceCommand)
+                continue;
+            const auto command = decodeClientDialogueChoiceCommand(decodedFrame->payload());
+            if (const auto* value = std::get_if<ClientDialogueChoiceCommand>(&command))
+                sentDialogueChoices.push_back(*value);
+        }
+    };
+    collectDialogueChoices();
+    require(sentDialogueChoices.size() == 1 && sentDialogueChoices.front().choiceId == value<DialogueChoiceId>(40));
+    const auto retainedDialogueCommandId = sentDialogueChoices.front().commandId;
+
+    dialogueDisconnect.pending = true;
+    dialogueCoordinator->frame(0.01f);
+    require(dialogueStatus.last == ConnectionStatus::Reconnecting);
+    dialogueCoordinator->frame(0.01f);
+    dialogueTransportObserver->enqueue(
+        MessageClass::SessionControl, MessageKind::ServerHello, dialogueHello, TransportChannel::ReliableOrdered);
+    dialogueCoordinator->frame(0.01f);
+    const auto resumedGeneration = *SessionGeneration::initial().next();
+    dialogueTransportObserver->enqueue(MessageClass::SessionControl, MessageKind::AuthenticationAccepted,
+        encodeAuthenticationAccepted(accepted(std::byte{ 13 })), TransportChannel::ReliableOrdered);
+    dialogueTransportObserver->enqueue(MessageClass::ReliableOperation, MessageKind::ReliableInterestBaseline,
+        encodeReliableInterestBaseline(selfBaseline(resumedGeneration)), TransportChannel::ReliableOrdered);
+    dialogueTransportObserver->enqueue(MessageClass::LatestWinsSnapshot, MessageKind::LatestWinsSnapshot,
+        encodeLatestWinsSnapshot(selfSnapshot(resumedGeneration)), TransportChannel::LatestWins);
+    dialogueCoordinator->frame(0.01f);
+    dialogueCoordinator->frame(0.01f);
+    collectDialogueChoices();
+    require(sentDialogueChoices.size() == 2 && sentDialogueChoices.back().commandId == retainedDialogueCommandId
+        && sentDialogueChoices.back().choiceId == value<DialogueChoiceId>(40)
+        && dialogueStatus.last == ConnectionStatus::Resumed);
+    const auto& retriedDialogue = sentDialogueChoices.back();
+    dialogueTransportObserver->enqueue(MessageClass::ReliableOperation, MessageKind::ReliableDialogueChoiceResult,
+        encodeReliableDialogueChoiceResult({ value<SessionId>(1), resumedGeneration,
+            retriedDialogue.commandSequence, retainedDialogueCommandId, value<DialogueChoiceId>(40),
+            DialogueChoiceDisposition::Committed, true, value<CanonicalRevision>(2) }),
+        TransportChannel::ReliableOrdered);
+    dialogueCoordinator->frame(0.01f);
+    const auto dialogueResolution = dialogueCoordinator->takeDialogueChoiceResolution();
+    require(dialogueResolution && dialogueResolution->localChoice == 7 && dialogueResolution->committed()
+        && dialogueResolution->duplicate && !dialogueCoordinator->takeDialogueChoiceResolution());
 
     Input deferredInput;
     Presentation deferredPresentation;

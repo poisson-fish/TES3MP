@@ -215,7 +215,8 @@ namespace TES3MP::ServerApp
         const bool gameplayCommand = frame->messageKind() == MessageKind::ReliableOperation
             || frame->messageKind() == MessageKind::ClientInteractObjectCommand
             || frame->messageKind() == MessageKind::ClientInventoryTransactionCommand
-            || frame->messageKind() == MessageKind::ClientMeleeAttackCommand;
+            || frame->messageKind() == MessageKind::ClientMeleeAttackCommand
+            || frame->messageKind() == MessageKind::ClientDialogueChoiceCommand;
         if (gameplayCommand && mCharacterContent)
         {
             const auto* progress = state->sessionId() ? joins.state().findActiveSession(*state->sessionId()) : nullptr;
@@ -482,6 +483,34 @@ namespace TES3MP::ServerApp
                 command->commandId, command->observedCanonicalRevision,
                 EntityPrecondition(progress->entityId(), player->entityRevision(), player->authorityEpoch()),
                 InventoryCommandProposal(std::move(transaction)));
+            return intake.submit(std::move(proposal)) == CommandSubmissionResult::Accepted
+                ? ConnectionSessionResult::CommandSubmitted
+                : ConnectionSessionResult::QueueRejected;
+        }
+
+        if (frame->messageKind() == MessageKind::ClientDialogueChoiceCommand)
+        {
+            if (frame->messageClass() != MessageClass::ReliableOperation
+                || state->state() != ServerSessionState::Established || !state->sessionId())
+                return ConnectionSessionResult::ProtocolRejected;
+            const auto& hello = state->negotiatedHello();
+            if (!hello
+                || !std::ranges::binary_search(
+                    hello->negotiatedCapabilities(), dialogueChoiceCapability()))
+                return ConnectionSessionResult::ProtocolRejected;
+            auto decodedChoice = decodeClientDialogueChoiceCommand(frame->payload());
+            auto* command = std::get_if<ClientDialogueChoiceCommand>(&decodedChoice);
+            if (!command || command->sessionId != *state->sessionId()
+                || command->sessionGeneration != state->generation())
+                return ConnectionSessionResult::ProtocolRejected;
+            const auto* progress = joins.state().findActiveSession(*state->sessionId());
+            const auto* player = progress ? joins.state().findPlayer(progress->playerId()) : nullptr;
+            if (!progress || !player)
+                return ConnectionSessionResult::ProtocolRejected;
+            ServerCommandProposal proposal(command->sessionId, command->sessionGeneration, command->commandSequence,
+                command->commandId, command->observedCanonicalRevision,
+                EntityPrecondition(progress->entityId(), player->entityRevision(), player->authorityEpoch()),
+                DialogueChoiceCommandProposal(command->choiceId));
             return intake.submit(std::move(proposal)) == CommandSubmissionResult::Accepted
                 ? ConnectionSessionResult::CommandSubmitted
                 : ConnectionSessionResult::QueueRejected;

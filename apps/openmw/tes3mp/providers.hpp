@@ -116,6 +116,7 @@ namespace TES3MP::OpenMWAdapter
             return std::nullopt;
         }
         virtual std::optional<MeleeAttackCapture> captureMeleeAttack() noexcept { return std::nullopt; }
+        virtual std::optional<DialogueChoiceId> mapDialogueChoice(int) const noexcept { return std::nullopt; }
         virtual void clearSessionState() noexcept {}
     };
 

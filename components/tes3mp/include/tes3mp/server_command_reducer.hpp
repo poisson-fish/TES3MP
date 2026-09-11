@@ -313,7 +313,7 @@ namespace TES3MP
             const CanonicalCombatWorld* combat = nullptr, const CanonicalActorWorld* actors = nullptr,
             const MeleeWeaponCatalog* meleeWeapons = nullptr, const OpenMwMeleeSettings* meleeSettings = nullptr,
             const MeleeAuthorityPolicy* meleePolicy = nullptr, ServerMeleeContactQuery* meleeContact = nullptr,
-            const DirectMagicCatalog* directMagic = nullptr);
+            const DirectMagicCatalog* directMagic = nullptr, const CanonicalWorldState* world = nullptr);
         PreparedBatch prepareTickState(PreparedBatch prepared, const ServerTickCommandBatch& batch);
         PreparedBatch prepareScriptCommands(PreparedBatch prepared, const ServerTickCommandBatch& batch,
             std::span<const QueuedServerScriptCommand> commands, const CanonicalWorldState* world,

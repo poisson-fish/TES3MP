@@ -53,6 +53,8 @@ namespace TES3MP
         ReliableCombatEventBatch = 0x010c,
         ClientCharacterCreationCommand = 0x010d,
         ReliableCharacterProfile = 0x010e,
+        ClientDialogueChoiceCommand = 0x010f,
+        ReliableDialogueChoiceResult = 0x0110,
         LatestWinsSnapshot = 0x0200,
         LatestWinsActorSnapshot = 0x0201,
         LatestWinsEquipmentSnapshot = 0x0202,
@@ -96,6 +98,8 @@ namespace TES3MP
             case MessageKind::ReliableCombatEventBatch:
             case MessageKind::ClientCharacterCreationCommand:
             case MessageKind::ReliableCharacterProfile:
+            case MessageKind::ClientDialogueChoiceCommand:
+            case MessageKind::ReliableDialogueChoiceResult:
                 return MessageDescriptor{ kind, MessageClass::ReliableOperation, ReliableOperationMaximumPayloadBytes };
             case MessageKind::LatestWinsSnapshot:
             case MessageKind::LatestWinsActorSnapshot:

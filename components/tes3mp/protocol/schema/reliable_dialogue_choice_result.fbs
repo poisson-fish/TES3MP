@@ -1,0 +1,23 @@
+namespace TES3MP.Protocol.Schema.DialogueChoiceResult;
+
+enum Disposition : ubyte {
+  Committed = 0,
+  UnknownChoice = 1,
+  Ineligible = 2,
+  Rejected = 3
+}
+
+table ReliableDialogueChoiceResult {
+  target_session_id:ulong (id: 0);
+  target_session_generation:ulong (id: 1);
+  command_sequence:ulong (id: 2);
+  command_id:ulong (id: 3);
+  choice_id:ulong (id: 4);
+  disposition:Disposition = Committed (id: 5);
+  duplicate:bool = false (id: 6);
+  committed_canonical_revision:ulong (id: 7);
+}
+
+root_type ReliableDialogueChoiceResult;
+file_identifier "T3DR";
+file_extension "t3dr";

@@ -75,6 +75,12 @@ namespace TES3MP::ServerApp
             std::vector<std::byte> payload;
         };
 
+        struct RetainedDialogueChoiceResult
+        {
+            DialogueChoiceId choice;
+            DialogueChoiceDisposition disposition = DialogueChoiceDisposition::Rejected;
+        };
+
         TransportRuntime& mTransport;
         const ServerConfig& mConfig;
         std::optional<ListenerId> mListener;
@@ -82,6 +88,7 @@ namespace TES3MP::ServerApp
         std::string_view mFailure;
         std::optional<ServerApplicationWiring> mWiring;
         std::map<SessionId, RetainedPose> mLatestPoses;
+        std::map<std::pair<SessionId, CommandId>, RetainedDialogueChoiceResult> mDialogueChoiceResults;
         std::map<TransportConnectionId, MonotonicInstant> mRejectedCloseDeadlines;
 
         bool failConnection(TransportConnectionId connection, std::string_view failure) noexcept;
@@ -96,6 +103,7 @@ namespace TES3MP::ServerApp
         bool supportsInventory(TransportConnectionId connection) const noexcept;
         bool supportsCombat(TransportConnectionId connection) const noexcept;
         bool supportsCharacterCreation(TransportConnectionId connection) const noexcept;
+        bool supportsDialogueChoices(TransportConnectionId connection) const noexcept;
     };
 }
 

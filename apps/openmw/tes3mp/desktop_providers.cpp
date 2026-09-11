@@ -269,7 +269,8 @@ namespace TES3MP::OpenMWAdapter
         std::span<const DesktopActorPrototypeMapping> actorPrototypes,
         std::span<const DesktopInteractiveObjectMapping> interactiveObjects,
         std::span<const DesktopItemPrototypeMapping> itemPrototypes,
-        std::span<const DesktopContainerMapping> containers, std::span<const DesktopQuestMapping> quests)
+        std::span<const DesktopContainerMapping> containers, std::span<const DesktopQuestMapping> quests,
+        std::span<const DesktopDialogueChoiceMapping> dialogueChoices)
     try
     {
         if (appearanceId != manifest.defaultAppearance() || avatarNpc.empty()
@@ -364,9 +365,19 @@ namespace TES3MP::OpenMWAdapter
                 if (refId(questMappings[prior].record) == refId(questMappings[index].record))
                     return std::nullopt;
         }
+        std::vector<DesktopDialogueChoiceMapping> choiceMappings(dialogueChoices.begin(), dialogueChoices.end());
+        std::ranges::sort(choiceMappings, {}, &DesktopDialogueChoiceMapping::id);
+        for (std::size_t index = 0; index < choiceMappings.size(); ++index)
+        {
+            if (index != 0 && choiceMappings[index - 1].id == choiceMappings[index].id)
+                return std::nullopt;
+            for (std::size_t prior = 0; prior < index; ++prior)
+                if (choiceMappings[prior].localChoice == choiceMappings[index].localChoice)
+                    return std::nullopt;
+        }
         return DesktopContentMapping{ std::move(manifest), std::move(mappings), appearanceId, std::move(avatarNpc),
             std::move(prototypes), std::move(objects), std::move(items), std::move(containerMappings),
-            std::move(questMappings) };
+            std::move(questMappings), std::move(choiceMappings) };
     }
     catch (...)
     {
@@ -608,6 +619,15 @@ namespace TES3MP::OpenMWAdapter
         auto captured = std::move(mImpl->pendingMeleeAttack);
         mImpl->pendingMeleeAttack.reset();
         return captured;
+    }
+
+    std::optional<DialogueChoiceId> DesktopSemanticInput::mapDialogueChoice(int localChoice) const noexcept
+    {
+        if (!mImpl->mapping)
+            return std::nullopt;
+        const auto found = std::ranges::find(
+            mImpl->mapping->dialogueChoices, localChoice, &DesktopDialogueChoiceMapping::localChoice);
+        return found == mImpl->mapping->dialogueChoices.end() ? std::nullopt : std::optional(found->id);
     }
 
     CellTransitionCapture DesktopSemanticInput::captureCellTransition() noexcept

@@ -48,6 +48,12 @@ namespace
                 return CommandReductionObservationOutcome::InventoryTransactionRejected;
             case CommandDisposition::CombatRejected:
                 return CommandReductionObservationOutcome::CombatRejected;
+            case CommandDisposition::UnknownDialogueChoice:
+                return CommandReductionObservationOutcome::UnknownDialogueChoice;
+            case CommandDisposition::DialogueChoiceIneligible:
+                return CommandReductionObservationOutcome::DialogueChoiceIneligible;
+            case CommandDisposition::DialogueChoiceRejected:
+                return CommandReductionObservationOutcome::DialogueChoiceRejected;
         }
         return CommandReductionObservationOutcome::CandidateStateInvalid;
     }
@@ -77,9 +83,41 @@ namespace
 
     MetricDimensionValue metricValue(CommandReductionObservationOutcome outcome) noexcept
     {
-        return static_cast<MetricDimensionValue>(
-            static_cast<std::uint8_t>(MetricDimensionValue::CommandReductionApplied)
-            + static_cast<std::uint8_t>(outcome));
+        switch (outcome)
+        {
+            case CommandReductionObservationOutcome::Applied:
+            case CommandReductionObservationOutcome::UnknownSession:
+            case CommandReductionObservationOutcome::SessionGenerationMismatch:
+            case CommandReductionObservationOutcome::AlreadyFinalized:
+            case CommandReductionObservationOutcome::SequenceGap:
+            case CommandReductionObservationOutcome::DuplicateCommandId:
+            case CommandReductionObservationOutcome::EntityBindingMismatch:
+            case CommandReductionObservationOutcome::EntityRevisionMismatch:
+            case CommandReductionObservationOutcome::AuthorityEpochMismatch:
+            case CommandReductionObservationOutcome::SpatialTickRegression:
+            case CommandReductionObservationOutcome::EntityRevisionExhausted:
+            case CommandReductionObservationOutcome::CommandLimitExceeded:
+            case CommandReductionObservationOutcome::EligibleTickMismatch:
+            case CommandReductionObservationOutcome::IngressOrdinalNotStrictlyIncreasing:
+            case CommandReductionObservationOutcome::CandidateStateInvalid:
+            case CommandReductionObservationOutcome::StateVersionCapacityExceeded:
+            case CommandReductionObservationOutcome::UnknownCell:
+            case CommandReductionObservationOutcome::MotionOutOfRange:
+            case CommandReductionObservationOutcome::ObjectInteractionRejected:
+            case CommandReductionObservationOutcome::InventoryTransactionRejected:
+                return static_cast<MetricDimensionValue>(
+                    static_cast<std::uint8_t>(MetricDimensionValue::CommandReductionApplied)
+                    + static_cast<std::uint8_t>(outcome));
+            case CommandReductionObservationOutcome::CombatRejected:
+                return MetricDimensionValue::CommandReductionCombatRejected;
+            case CommandReductionObservationOutcome::UnknownDialogueChoice:
+                return MetricDimensionValue::CommandReductionUnknownDialogueChoice;
+            case CommandReductionObservationOutcome::DialogueChoiceIneligible:
+                return MetricDimensionValue::CommandReductionDialogueChoiceIneligible;
+            case CommandReductionObservationOutcome::DialogueChoiceRejected:
+                return MetricDimensionValue::CommandReductionDialogueChoiceRejected;
+        }
+        return MetricDimensionValue::CommandReductionCandidateStateInvalid;
     }
 
     CanonicalSinkObservationRole observationRole(CanonicalSinkRole role) noexcept
@@ -633,7 +671,8 @@ namespace TES3MP
         const CanonicalInventoryWorld* inventory, const ItemPrototypeCatalog* itemCatalog,
         const CanonicalCombatWorld* combat, const CanonicalActorWorld* actors, const MeleeWeaponCatalog* meleeWeapons,
         const OpenMwMeleeSettings* meleeSettings, const MeleeAuthorityPolicy* meleePolicy,
-        ServerMeleeContactQuery* meleeContact, const DirectMagicCatalog* directMagic)
+        ServerMeleeContactQuery* meleeContact, const DirectMagicCatalog* directMagic,
+        const CanonicalWorldState* world)
     {
         PreparedBatch prepared;
         prepared.mBaseVersion = mStateVersion;
@@ -747,6 +786,7 @@ namespace TES3MP
                         std::optional<std::size_t> playerIndex;
                         std::optional<CanonicalPlayerEntityState> playerReplacement;
                         std::optional<ObjectInteractionOutcome> objectInteractionOutcome;
+                        std::optional<DialogueChoiceId> committedDialogueChoice;
 
                         if (session->containsFinalizedCommandId(proposal.commandId()))
                             disposition = CommandDisposition::DuplicateCommandId;
@@ -979,6 +1019,25 @@ namespace TES3MP
                                             }
                                         }
                                     }
+                                    else if (const auto* dialogue
+                                        = std::get_if<DialogueChoiceCommandProposal>(&proposal.payload()))
+                                    {
+                                        requiresSpatialAdvance = false;
+                                        if (!world)
+                                            disposition = CommandDisposition::DialogueChoiceRejected;
+                                        else if (const auto invalid = validateCanonicalDialogueChoice(
+                                                     *world, session->playerId(), dialogue->choice()))
+                                        {
+                                            disposition = *invalid == CanonicalWorldMutationError::UnknownDialogueChoice
+                                                ? CommandDisposition::UnknownDialogueChoice
+                                                : CommandDisposition::DialogueChoiceIneligible;
+                                        }
+                                        else
+                                        {
+                                            disposition = CommandDisposition::Applied;
+                                            committedDialogueChoice = dialogue->choice();
+                                        }
+                                    }
                                     else
                                     {
                                         requiresSpatialAdvance = false;
@@ -1054,6 +1113,9 @@ namespace TES3MP
                                 std::move(objectInteractionOutcome));
                             auto nextState = std::make_shared<CanonicalServerState>(std::move(candidateState));
                             publication->mChanges.push_back(std::move(change));
+                            if (committedDialogueChoice)
+                                publication->mDialogueChoices.push_back(
+                                    { nextVersion, tick, sessionReplacement.playerId(), *committedDialogueChoice });
                             prepared.mState = std::move(nextState);
                             prepared.mStateVersion = nextVersion;
                             if (prepared.mCanonicalRevision == prepared.mBaseCanonicalRevision)
@@ -1089,13 +1151,17 @@ namespace TES3MP
             throw;
         }
         prepared.mDurableCommands.reserve(result.mDispositions.size());
-        for (const auto& record : result.mDispositions)
+        for (std::size_t index = 0; index < result.mDispositions.size(); ++index)
         {
+            const auto& record = result.mDispositions[index];
             DurableCommandOrder order;
             order.source = DurableCommandSource::Client;
             order.fields = { record.stamp().eligibleServerTick().value(), record.stamp().ingressOrdinal().value(),
                 record.sessionId().value(), record.sessionGeneration().value(), record.commandSequence().value(),
                 record.commandId().value(), 0, 0, 0 };
+            if (const auto* dialogue
+                = std::get_if<DialogueChoiceCommandProposal>(&commands[index].proposal().payload()))
+                order.fields[6] = dialogue->choice().value();
             order.disposition = static_cast<std::uint8_t>(record.disposition());
             prepared.mDurableCommands.push_back(order);
         }
@@ -1731,7 +1797,7 @@ namespace TES3MP
         return prepareTickState(
             prepareCommands(batch, worlds.interactiveObjects, worlds.interactiveObjectCatalog, worlds.inventory,
                 worlds.itemCatalog, worlds.combat, worlds.actors, worlds.meleeWeapons, worlds.meleeSettings,
-                worlds.meleePolicy, worlds.meleeContact, worlds.directMagic),
+                worlds.meleePolicy, worlds.meleeContact, worlds.directMagic, worlds.world),
             batch);
     }
 
@@ -1740,7 +1806,7 @@ namespace TES3MP
     {
         auto prepared = prepareCommands(batch, worlds.interactiveObjects, worlds.interactiveObjectCatalog,
             worlds.inventory, worlds.itemCatalog, worlds.combat, worlds.actors, worlds.meleeWeapons,
-            worlds.meleeSettings, worlds.meleePolicy, worlds.meleeContact, worlds.directMagic);
+            worlds.meleeSettings, worlds.meleePolicy, worlds.meleeContact, worlds.directMagic, worlds.world);
         return prepareTickState(prepareScriptCommands(std::move(prepared), batch, scriptCommands, worlds.world,
                                     worlds.globalCatalog, worlds.scriptState, worlds.scriptStateCatalog),
             batch);

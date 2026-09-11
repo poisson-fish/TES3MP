@@ -79,6 +79,7 @@ target_sources(tes3mp_protocol PRIVATE
     include/tes3mp/command_primitives.hpp
     include/tes3mp/combat_replication.hpp
     include/tes3mp/content_identity.hpp
+    include/tes3mp/dialogue_choice_protocol.hpp
     include/tes3mp/interactive_object_catalog.hpp
     include/tes3mp/interactive_object_replication.hpp
     include/tes3mp/inventory_replication.hpp
@@ -98,6 +99,7 @@ target_sources(tes3mp_protocol PRIVATE
     protocol/generated/authentication_request_generated.h
     protocol/generated/client_hello_generated.h
     protocol/generated/client_character_creation_command_generated.h
+    protocol/generated/client_dialogue_choice_command_generated.h
     protocol/generated/client_interact_object_command_generated.h
     protocol/generated/client_inventory_transaction_command_generated.h
     protocol/generated/client_melee_attack_command_generated.h
@@ -115,6 +117,7 @@ target_sources(tes3mp_protocol PRIVATE
     protocol/generated/reliable_observation_batch_generated.h
     protocol/generated/reliable_combat_event_batch_generated.h
     protocol/generated/reliable_character_profile_generated.h
+    protocol/generated/reliable_dialogue_choice_result_generated.h
     protocol/generated/reliable_operation_generated.h
     protocol/generated/server_hello_generated.h
     protocol/generated/server_vr_pose_snapshot_generated.h
@@ -122,6 +125,7 @@ target_sources(tes3mp_protocol PRIVATE
     protocol/generated/session_resync_request_generated.h
     protocol/authentication.cpp
     protocol/character_creation_protocol.cpp
+    protocol/dialogue_choice_protocol.cpp
     server_core/character_profile.cpp
     protocol/actor_catalog.cpp
     protocol/actor_replication.cpp
@@ -747,6 +751,15 @@ tes3mp_verify_target_dependencies(tes3mp_character_creation_protocol_tests ALLOW
 tes3mp_verify_target_includes(tes3mp_character_creation_protocol_tests
     FORBIDDEN ${TES3MP_ENGINE_INDEPENDENT_FORBIDDEN_INCLUDES})
 
+add_executable(tes3mp_dialogue_choice_protocol_tests tests/dialogue_choice_protocol_tests.cpp)
+target_compile_features(tes3mp_dialogue_choice_protocol_tests PRIVATE cxx_std_20)
+target_link_libraries(tes3mp_dialogue_choice_protocol_tests PRIVATE tes3mp_protocol)
+set_target_properties(tes3mp_dialogue_choice_protocol_tests PROPERTIES FOLDER "TES3MP/Tests")
+tes3mp_enable_runtime_safety(tes3mp_dialogue_choice_protocol_tests)
+tes3mp_verify_target_dependencies(tes3mp_dialogue_choice_protocol_tests ALLOWED tes3mp_protocol)
+tes3mp_verify_target_includes(tes3mp_dialogue_choice_protocol_tests
+    FORBIDDEN ${TES3MP_ENGINE_INDEPENDENT_FORBIDDEN_INCLUDES})
+
 add_executable(tes3mp_protocol_exchange_tests tests/protocol_exchange_tests.cpp)
 target_compile_features(tes3mp_protocol_exchange_tests PRIVATE cxx_std_20)
 target_link_libraries(tes3mp_protocol_exchange_tests PRIVATE tes3mp_test_support)
@@ -1038,6 +1051,7 @@ add_custom_target(tes3mp_protocol_tests_run
     COMMAND $<TARGET_FILE:tes3mp_character_creation_protocol_tests>
     COMMAND $<TARGET_FILE:tes3mp_character_creation_protocol_tests> --verify-corpus
         ${CMAKE_CURRENT_SOURCE_DIR}/tests/fuzz/corpus/character_creation_protocol
+    COMMAND $<TARGET_FILE:tes3mp_dialogue_choice_protocol_tests>
     COMMAND $<TARGET_FILE:tes3mp_protocol_exchange_tests>
     COMMAND $<TARGET_FILE:tes3mp_protocol_exchange_tests> --verify-corpus
         ${CMAKE_CURRENT_SOURCE_DIR}/tests/fuzz/corpus/protocol_exchange
@@ -1086,6 +1100,7 @@ add_custom_target(tes3mp_protocol_tests_run
         tes3mp_protocol_authentication_tests
         tes3mp_character_profile_tests
         tes3mp_character_creation_protocol_tests
+        tes3mp_dialogue_choice_protocol_tests
         tes3mp_protocol_exchange_tests
         tes3mp_protocol_pose_tests
         tes3mp_session_state_tests

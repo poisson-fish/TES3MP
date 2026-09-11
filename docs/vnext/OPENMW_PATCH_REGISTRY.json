@@ -132,6 +132,24 @@
       "removal_condition": "OpenMW supplies an equivalent supported pre-mutation and confirmed-projection character-generation seam"
     },
     {
+      "id": "P19-001",
+      "slice": "desktop dialogue choices",
+      "owner": "OpenMW adapter",
+      "purpose": "Intercept stock dialogue choices before local result scripts, display pending or rejected state, and apply client-local dialogue consequences only after the authoritative server commits the manifest-bound choice ID.",
+      "paths": [
+        "apps/openmw/mwgui/dialogue.cpp",
+        "apps/openmw/mwgui/dialogue.hpp"
+      ],
+      "tests": [
+        "scripts/tests/test_openmw_patch_registry.py",
+        "scripts/tests/test_dialogue_choice_contract.py",
+        "openmw_tes3mp_adapter_tests",
+        "tes3mp_dialogue_choice_protocol_tests"
+      ],
+      "disposition": "local product adapter",
+      "removal_condition": "OpenMW supplies an equivalent supported pre-consequence dialogue-choice interception and committed-result seam"
+    },
+    {
       "id": "P17-001",
       "slice": "client release flow",
       "owner": "OpenMW adapter",

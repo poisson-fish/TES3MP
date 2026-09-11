@@ -50,6 +50,12 @@ namespace TES3MP::OpenMWAdapter
         std::string record;
     };
 
+    struct DesktopDialogueChoiceMapping
+    {
+        DialogueChoiceId id;
+        int localChoice = 0;
+    };
+
     struct DesktopContentMapping
     {
         static std::optional<DesktopContentMapping> create(ContentManifest manifest,
@@ -57,7 +63,8 @@ namespace TES3MP::OpenMWAdapter
             std::span<const DesktopActorPrototypeMapping> actorPrototypes = {},
             std::span<const DesktopInteractiveObjectMapping> interactiveObjects = {},
             std::span<const DesktopItemPrototypeMapping> itemPrototypes = {},
-            std::span<const DesktopContainerMapping> containers = {}, std::span<const DesktopQuestMapping> quests = {});
+            std::span<const DesktopContainerMapping> containers = {}, std::span<const DesktopQuestMapping> quests = {},
+            std::span<const DesktopDialogueChoiceMapping> dialogueChoices = {});
 
         ContentManifest manifest;
         std::vector<DesktopCellSpaceMapping> cellSpaces;
@@ -68,6 +75,7 @@ namespace TES3MP::OpenMWAdapter
         std::vector<DesktopItemPrototypeMapping> itemPrototypes;
         std::vector<DesktopContainerMapping> containers;
         std::vector<DesktopQuestMapping> quests;
+        std::vector<DesktopDialogueChoiceMapping> dialogueChoices;
     };
 
 }
@@ -95,6 +103,7 @@ namespace TES3MP::OpenMWAdapter
         std::optional<ObjectInteractionCapture> captureObjectInteraction() noexcept override;
         std::optional<InventoryTransactionCapture> captureInventoryTransaction() noexcept override;
         std::optional<MeleeAttackCapture> captureMeleeAttack() noexcept override;
+        std::optional<DialogueChoiceId> mapDialogueChoice(int localChoice) const noexcept override;
 
         bool handleActivation(const MWWorld::Ptr& toActivate, const MWWorld::Ptr& player) noexcept;
         bool queueObjectActivation(const MWWorld::Ptr& doorPtr) noexcept;

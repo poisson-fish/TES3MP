@@ -357,6 +357,25 @@ class ContentBakerTests(unittest.TestCase):
         self.assertEqual(self.output.joinpath("CURRENT").read_text().strip(), manifest)
         self.assertEqual(sorted(item.name for item in path.parent.iterdir()), packs_before)
 
+    def test_dialogue_choice_mapping_is_exact_and_locally_unique(self):
+        world = self.source / "world.txt"
+        world.write_text(world.read_text(encoding="utf-8") + "dialogue_choice 40 unrestricted\n",
+                         encoding="utf-8")
+        self.client_mappings.write_text(
+            self.client_mappings.read_text(encoding="utf-8")
+            + "tes3mp-content-dialogue-choice-map=40=7\n", encoding="utf-8")
+        manifest, path = self._bake()
+        self.assertIn("tes3mp-content-dialogue-choice-map=40=7", path.joinpath("openmw.cfg").read_text())
+
+        world.write_text(world.read_text(encoding="utf-8") + "dialogue_choice 41 unrestricted\n",
+                         encoding="utf-8")
+        self.client_mappings.write_text(
+            self.client_mappings.read_text(encoding="utf-8")
+            + "tes3mp-content-dialogue-choice-map=41=7\n", encoding="utf-8")
+        with self.assertRaisesRegex(baker.BakeError, "duplicate local choice"):
+            self._bake()
+        self.assertEqual(self.output.joinpath("CURRENT").read_text().strip(), manifest)
+
     def test_deleted_winning_record_rejects_a_stale_mapping(self):
         override = self.data / "Override.esp"
         override.write_bytes(

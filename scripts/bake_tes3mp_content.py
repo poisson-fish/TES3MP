@@ -71,6 +71,7 @@ CLIENT_MAPPING_KEYS = {
     "tes3mp-content-item-prototype-map",
     "tes3mp-content-container-map",
     "tes3mp-content-quest-map",
+    "tes3mp-content-dialogue-choice-map",
 }
 
 ITEM_RECORD_TYPES = {
@@ -1323,11 +1324,24 @@ def validate_consistency(server_entries: Sequence[Assignment], client_entries: S
     object_mapping = _mapping_values(client_entries, "tes3mp-content-interactive-object-map")
     item_mapping = _mapping_values(client_entries, "tes3mp-content-item-prototype-map")
     container_mapping = _mapping_values(client_entries, "tes3mp-content-container-map")
+    dialogue_choice_mapping = _mapping_values(client_entries, "tes3mp-content-dialogue-choice-map")
     cell_mapping = _mapping_values(client_entries, "tes3mp-content-cell-space-map")
     _require_exact_mapping(actor_mapping, actor_prototypes, "actor prototype")
     _require_exact_mapping(object_mapping, objects, "interactive object")
     _require_exact_mapping(item_mapping, item_prototypes, "item prototype")
     _require_exact_mapping(container_mapping, containers, "container")
+    world_catalog = _catalog_by_key(catalogs, "world_content_file")
+    dialogue_choices = _record_ids(world_catalog, "dialogue_choice", 1)
+    _require_exact_mapping(dialogue_choice_mapping, dialogue_choices, "dialogue choice")
+    local_dialogue_choices: set[int] = set()
+    for value in dialogue_choice_mapping.values():
+        try:
+            local_choice = int(value, 10)
+        except ValueError as exc:
+            raise BakeError("dialogue choice mapping contains an invalid local choice") from exc
+        if local_choice < -0x80000000 or local_choice > 0x7fffffff or local_choice in local_dialogue_choices:
+            raise BakeError("dialogue choice mapping contains an out-of-range or duplicate local choice")
+        local_dialogue_choices.add(local_choice)
 
     cell_spaces = _one(server_entries, "cell_spaces")
     expected_spaces: set[int] = set()

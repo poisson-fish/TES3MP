@@ -459,7 +459,7 @@ int main()
     using namespace TES3MP::ServerApp;
     {
         const auto manifestId
-            = ContentManifestId::fromHex("afd2d1a2a6c8ba6a6ca826fe964122a8e8fc3830d8a366fa639cb6b925dd8da6");
+            = ContentManifestId::fromHex("6ce29aa7cdb584836f55f2fc0d916f8d66a684dea3e0a0b32e629d5648962b31");
         const auto spaces = parseCellSpaceDeclarations("interior:1;interior:2;interior:3;exterior:4");
         const auto cells = parseContentCells("interior:1;interior:2;interior:3;exterior:4:-2:-9");
         const auto movement = parseMovementProfile("sneak:4;walk:8;run:16;jump:12");
@@ -558,7 +558,7 @@ int main()
             && evidence->latestHighWaterMessages == 1 && evidence->latestHighWaterBytes == 10
             && !telemetry.takeDrainEvidence());
     }
-    static_assert(Phase7ProtocolMajor == 1 && Phase7ProtocolMinimumMinor == 5 && Phase7ProtocolMaximumMinor == 5);
+    static_assert(Phase7ProtocolMajor == 1 && Phase7ProtocolMinimumMinor == 6 && Phase7ProtocolMaximumMinor == 6);
     static_assert(Phase7SourceAuthenticationBurst == 4 && Phase7GlobalAuthenticationBurst == 32
         && Phase7AuthenticationRefillMilliseconds == 1'000 && Phase7ConnectionCapacity == 8);
     static_assert(!phase7ProofDisconnectGraceAccepted(MinimumResumeTokenLifetimeMilliseconds - 1));

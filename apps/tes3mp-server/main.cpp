@@ -551,7 +551,7 @@ int main(int argc, char** argv)
         TES3MP::ProtocolVersionRange::create(TES3MP::ServerApp::Phase7ProtocolMajor,
             TES3MP::ServerApp::Phase7ProtocolMinimumMinor, TES3MP::ServerApp::Phase7ProtocolMaximumMinor));
     std::vector<TES3MP::CapabilityId> optionalCapabilities{ TES3MP::vrPoseCapability(),
-        TES3MP::actorReplicationCapability() };
+        TES3MP::actorReplicationCapability(), TES3MP::dialogueChoiceCapability() };
     if (characterContent)
         optionalCapabilities.push_back(TES3MP::characterCreationCapability());
     if (interactiveObjectWorld)

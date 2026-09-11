@@ -5,6 +5,7 @@
 #include "tes3mp/authenticated_join.hpp"
 #include "tes3mp/character_creation_protocol.hpp"
 #include "tes3mp/combat_world.hpp"
+#include "tes3mp/dialogue_choice_protocol.hpp"
 #include "tes3mp/interactive_object_world.hpp"
 #include "tes3mp/inventory_world.hpp"
 #include "tes3mp/server_session.hpp"

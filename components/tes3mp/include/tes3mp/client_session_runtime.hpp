@@ -6,6 +6,7 @@
 #include "client_locomotion.hpp"
 #include "combat_replication.hpp"
 #include "character_creation_protocol.hpp"
+#include "dialogue_choice_protocol.hpp"
 #include "headless_client_session.hpp"
 #include "interactive_object_replication.hpp"
 #include "inventory_replication.hpp"
@@ -24,7 +25,7 @@ namespace TES3MP
         LatestWinsActorSnapshot, ReliableActorInterestBaseline, ReliableInteractiveObjectInterestBaseline,
         ReliablePlayerInventoryBaseline, ReliableContainerInventoryBaseline, ReliableGroundItemBaseline,
         LatestWinsEquipmentSnapshot, LatestWinsCombatSnapshot, ReliableCombatEventBatch, ReliableCharacterProfile,
-        ServerVrPoseSnapshot>;
+        ReliableDialogueChoiceResult, ServerVrPoseSnapshot>;
 // Combat is capability-gated and intentionally kept outside the spatial readiness lanes.
 
     enum class ClientRuntimeResult : std::uint8_t
@@ -70,12 +71,14 @@ namespace TES3MP
         bool characterProfileApplied = false;
         std::vector<ServerVrPoseSnapshot> poseSnapshots;
         std::vector<ReliableCombatEventBatch> combatEvents;
+        std::vector<ReliableDialogueChoiceResult> dialogueChoiceResults;
     };
 
     struct ClientRuntimeQueueResult
     {
         ClientRuntimeResult result = ClientRuntimeResult::Accepted;
         std::optional<CommandSequence> sequence;
+        std::optional<CommandId> commandId;
     };
 
     using ClientRuntimeCreateResult = std::variant<std::unique_ptr<class ClientSessionRuntime>, SessionTransitionError>;
@@ -110,6 +113,8 @@ namespace TES3MP
             MeleeAttackType attackType, float attackStrength);
         ClientRuntimeQueueResult queueCharacterCreation(CharacterCreationChoice choice,
             CharacterProfileRevision expectedRevision);
+        ClientRuntimeQueueResult queueDialogueChoice(
+            DialogueChoiceId choice, std::optional<CommandId> retainedCommandId = std::nullopt);
         std::optional<LocalLocomotionReconciliation> reconcileLocalPresentation(
             bool hardDiscontinuity = false) noexcept;
         ClientRuntimeResult requestResync(ResyncReason reason);

@@ -162,6 +162,31 @@ namespace
                 *LocomotionInputSequence::fromValue(sequence), LocomotionIntent(mode, facing, velocity)));
     }
 
+    ServerCommandProposal dialogueProposal(
+        std::uint64_t sequence, std::uint64_t command, std::uint64_t choice)
+    {
+        return ServerCommandProposal(sessionId(10), SessionGeneration::initial(),
+            *CommandSequence::fromValue(sequence), *CommandId::fromValue(command), CanonicalRevision::initial(),
+            EntityPrecondition(entityId(101), EntityRevision::initial(), AuthorityEpoch::initial()),
+            DialogueChoiceCommandProposal(*DialogueChoiceId::fromValue(choice)));
+    }
+
+    CanonicalWorldState dialogueWorld()
+    {
+        const std::array globals{ GlobalVariableCatalogEntry{ *GlobalVariableId::fromValue(1), std::int16_t{ 0 } } };
+        const auto globalCatalog = *GlobalVariableCatalog::create(globals);
+        const std::array factions{ FactionCatalogEntry{
+            *FactionId::fromValue(30), { *FactionRank::fromValue(0), *FactionRank::fromValue(1) } } };
+        const std::array choices{ DialogueChoiceCatalogEntry{ *DialogueChoiceId::fromValue(40) },
+            DialogueChoiceCatalogEntry{ *DialogueChoiceId::fromValue(41), *FactionId::fromValue(30),
+                *FactionRank::fromValue(1), 10 } };
+        const auto dialogue = *FactionDialogueCatalog::create(testContentManifestId(), factions, choices);
+        const std::array<QuestCatalogEntry, 0> quests{};
+        const std::array<JournalCatalogEntry, 0> journal{};
+        const auto questCatalog = *QuestJournalCatalog::create(testContentManifestId(), quests, journal);
+        return *CanonicalWorldState::initial(CanonicalWorldTimeState{}, globalCatalog, questCatalog, dialogue);
+    }
+
     class IntakeFixture
     {
     public:
@@ -1147,6 +1172,52 @@ namespace
             && classifyCanonicalPublication(CanonicalStateVersion::initial(), *publication)
             == CanonicalPublicationReadAction::ReplaceFromSnapshot;
     }
+
+    bool dialogue_choices_are_ordered_authoritative_idempotent_and_commit_gated()
+    {
+        const std::array players{ player(1, 101) };
+        const std::array sessions{ session(10, 1, 101) };
+        auto metrics = RecordingMetricSink::create(4);
+        auto events = RecordingStructuredEventSink::create(4);
+        Observability observability(*metrics, *events);
+        CanonicalCommandReducer reducer(state(players, sessions), observability);
+        auto world = dialogueWorld();
+        const std::array commands{ dialogueProposal(1, 1001, 40), dialogueProposal(2, 1001, 40),
+            dialogueProposal(3, 1003, 41), dialogueProposal(4, 1004, 99) };
+        IntakeFixture intake;
+        if (!intake.submit(commands))
+            return false;
+        const auto pumped = intake.pumpFirst();
+        if (!pumped || pumped.batches().size() != 1)
+            return false;
+        CanonicalCommandWorlds worlds;
+        worlds.world = &world;
+        auto prepared = reducer.prepareTick(pumped.batches().front(), worlds);
+        const auto dispositions = prepared.result().dispositions();
+        const auto* candidate = prepared.candidateState().findActiveSession(sessionId(10));
+        if (!prepared.result() || dispositions.size() != 4
+            || dispositions[0].disposition() != CommandDisposition::Applied
+            || dispositions[1].disposition() != CommandDisposition::DuplicateCommandId
+            || dispositions[2].disposition() != CommandDisposition::DialogueChoiceIneligible
+            || dispositions[3].disposition() != CommandDisposition::UnknownDialogueChoice || !candidate
+            || !candidate->highestContiguousFinalizedCommand()
+            || candidate->highestContiguousFinalizedCommand()->value() != 4
+            || reducer.state().activeSessions().front().highestContiguousFinalizedCommand()
+            || !reducer.latestPublication()->changes().empty())
+            return false;
+        if (!reducer.commit(std::move(prepared), worlds))
+            return false;
+        const auto publication = reducer.latestPublication();
+        return publication->dialogueChoices().size() == 1
+            && publication->dialogueChoices().front().choice == *DialogueChoiceId::fromValue(40)
+            && publication->changes().size() == 4
+            && reducer.state().activeSessions().front().highestContiguousFinalizedCommand()->value() == 4
+            && metrics->observations().size() == 4 && events->events().size() == 4
+            && metrics->observations()[2].dimensions().front().value
+                == MetricDimensionValue::CommandReductionDialogueChoiceIneligible
+            && metrics->observations()[3].dimensions().front().value
+                == MetricDimensionValue::CommandReductionUnknownDialogueChoice;
+    }
 }
 
 int main()
@@ -1226,6 +1297,8 @@ int main()
             &publication_exposes_no_wire_engine_socket_script_database_or_mutable_surface },
         std::pair{ "protocol_interest_sinks_checksum_and_online_composition_remain_gated",
             &protocol_interest_sinks_checksum_and_online_composition_remain_gated },
+        std::pair{ "dialogue_choices_are_ordered_authoritative_idempotent_and_commit_gated",
+            &dialogue_choices_are_ordered_authoritative_idempotent_and_commit_gated },
     };
     for (const auto& [name, test] : tests)
     {

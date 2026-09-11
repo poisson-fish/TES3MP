@@ -18,7 +18,7 @@ namespace
 {
     constexpr std::size_t Phase7ReconnectCycles = 32;
     constexpr auto Phase7SoakDuration = std::chrono::seconds(60);
-    constexpr std::string_view VanillaManifest = "afd2d1a2a6c8ba6a6ca826fe964122a8e8fc3830d8a366fa639cb6b925dd8da6";
+    constexpr std::string_view VanillaManifest = "6ce29aa7cdb584836f55f2fc0d916f8d66a684dea3e0a0b32e629d5648962b31";
 
     const char* sessionRejectionName(TES3MP::SessionRejectionReason reason) noexcept
     {
@@ -86,7 +86,7 @@ namespace
         auto created = policy ? TES3MP::ClientSessionRuntime::create(runtime, clock, timeouts, generation, *policy)
                               : TES3MP::ClientRuntimeCreateResult{ TES3MP::SessionTransitionError{} };
         auto* value = std::get_if<std::unique_ptr<TES3MP::ClientSessionRuntime>>(&created);
-        auto range = std::get<TES3MP::ProtocolVersionRange>(TES3MP::ProtocolVersionRange::create(1, 5, 5));
+        auto range = std::get<TES3MP::ProtocolVersionRange>(TES3MP::ProtocolVersionRange::create(1, 6, 6));
         auto offer = std::get<TES3MP::CapabilityOffer>(TES3MP::CapabilityOffer::create(std::move(range), {}, {}));
         if (!value || !*value
             || (*value)->start(endpoint, TES3MP::ClientHello::fromOffer(std::move(offer)), std::move(request))
@@ -285,7 +285,7 @@ int main(int argc, char** argv)
         factory.runtime->shutdown();
         return 0;
     }
-    auto versions = std::get<TES3MP::ProtocolVersionRange>(TES3MP::ProtocolVersionRange::create(1, 5, 5));
+    auto versions = std::get<TES3MP::ProtocolVersionRange>(TES3MP::ProtocolVersionRange::create(1, 6, 6));
     const bool vanillaCharacter = mode == "vanilla-character";
     const std::array characterCapabilities{ TES3MP::characterCreationCapability() };
     const auto contentManifestId = vanillaCharacter ? TES3MP::ContentManifestId::fromHex(VanillaManifest)

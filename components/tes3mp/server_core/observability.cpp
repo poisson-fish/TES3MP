@@ -32,8 +32,10 @@ namespace
                     || dimension.value == MetricDimensionValue::CommandTickExhausted
                     || dimension.value == MetricDimensionValue::CommandIngressOrdinalExhausted;
             case MetricDimensionKey::CommandReductionOutcome:
-                return dimension.value >= MetricDimensionValue::CommandReductionApplied
-                    && dimension.value <= MetricDimensionValue::CommandReductionStateVersionCapacityExceeded;
+                return (dimension.value >= MetricDimensionValue::CommandReductionApplied
+                           && dimension.value <= MetricDimensionValue::CommandReductionInventoryTransactionRejected)
+                    || (dimension.value >= MetricDimensionValue::CommandReductionCombatRejected
+                        && dimension.value <= MetricDimensionValue::CommandReductionDialogueChoiceRejected);
             case MetricDimensionKey::CanonicalSinkRole:
                 return dimension.value >= MetricDimensionValue::CanonicalSinkArchive
                     && dimension.value <= MetricDimensionValue::CanonicalSinkMetrics;
@@ -135,7 +137,7 @@ namespace
     {
         using TES3MP::CommandReductionObservationOutcome;
         return event.outcome >= CommandReductionObservationOutcome::Applied
-            && event.outcome <= CommandReductionObservationOutcome::CombatRejected;
+            && event.outcome <= CommandReductionObservationOutcome::DialogueChoiceRejected;
     }
 
     constexpr bool validCanonicalSinkDeliveryEvent(TES3MP::CanonicalSinkDeliveryEvent event) noexcept

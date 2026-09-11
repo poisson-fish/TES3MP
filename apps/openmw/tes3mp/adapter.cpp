@@ -32,10 +32,10 @@ namespace TES3MP::OpenMWAdapter
 
         ClientHello makeClientHello(ContentManifestId contentManifest)
         {
-            auto versions = std::get<ProtocolVersionRange>(ProtocolVersionRange::create(1, 5, 5));
+            auto versions = std::get<ProtocolVersionRange>(ProtocolVersionRange::create(1, 6, 6));
             const std::array optional{ vrPoseCapability(), actorReplicationCapability(),
                 interactiveObjectReplicationCapability(), inventoryReplicationCapability(),
-                combatReplicationCapability(), characterCreationCapability() };
+                combatReplicationCapability(), characterCreationCapability(), dialogueChoiceCapability() };
             auto offer = std::get<CapabilityOffer>(
                 CapabilityOffer::create(std::move(versions), optional, {}, contentManifest));
             return ClientHello::fromOffer(std::move(offer));
@@ -81,6 +81,14 @@ namespace TES3MP::OpenMWAdapter
                     combatReplicationCapability());
         }
 
+        bool dialogueChoicesNegotiated(const ClientSessionRuntime& runtime) noexcept
+        {
+            const auto& hello = runtime.session().stateMachine().negotiatedHello();
+            return hello
+                && std::binary_search(hello->negotiatedCapabilities().begin(), hello->negotiatedCapabilities().end(),
+                    dialogueChoiceCapability());
+        }
+
         struct ResumeContinuity
         {
             SessionId session;
@@ -88,6 +96,14 @@ namespace TES3MP::OpenMWAdapter
             EntityId entity;
             EntityRevision revision;
             std::optional<CommandSequence> acknowledged;
+        };
+
+        struct PendingDialogueChoice
+        {
+            int localChoice = 0;
+            DialogueChoiceId choice;
+            CommandId commandId;
+            CommandSequence commandSequence;
         };
 
         const SpatialEntitySnapshot* selfEntry(const LatestWinsSnapshot& snapshot)
@@ -116,6 +132,18 @@ namespace TES3MP::OpenMWAdapter
                 && current->session == prior.session && current->player == prior.player
                 && current->entity == prior.entity && current->revision == prior.revision
                 && current->acknowledged == prior.acknowledged;
+        }
+
+        bool preservesDialogueChoice(const LatestWinsSnapshot& snapshot, SessionGeneration generation,
+            const ResumeContinuity& prior, CommandSequence pendingSequence)
+        {
+            const auto current = continuity(snapshot);
+            const bool acknowledgementPreserved = current
+                && (current->acknowledged == prior.acknowledged
+                    || current->acknowledged == std::optional<CommandSequence>(pendingSequence));
+            return current && snapshot.header().targetSessionGeneration() == generation
+                && current->session == prior.session && current->player == prior.player
+                && current->entity == prior.entity && current->revision == prior.revision && acknowledgementPreserved;
         }
 
         class Coordinator final : public EngineCoordinator
@@ -192,6 +220,19 @@ namespace TES3MP::OpenMWAdapter
                     handleRuntimeFailure(advanced.result, advanced.action, now);
                     return;
                 }
+                for (const auto& dialogue : advanced.dialogueChoiceResults)
+                {
+                    if (!mPendingDialogueChoice || dialogue.commandId != mPendingDialogueChoice->commandId
+                        || dialogue.commandSequence != mPendingDialogueChoice->commandSequence
+                        || dialogue.choiceId != mPendingDialogueChoice->choice)
+                    {
+                        closeTerminal(ConnectionStatus::ProtocolRejected);
+                        return;
+                    }
+                    mDialogueChoiceResolution = DialogueChoiceResolution{ mPendingDialogueChoice->localChoice,
+                        dialogue.disposition, dialogue.duplicate };
+                    mPendingDialogueChoice.reset();
+                }
                 if (mAwaitingResync)
                 {
                     mResyncPlayerBaseline = mResyncPlayerBaseline || advanced.baselineCompleted;
@@ -263,13 +304,23 @@ namespace TES3MP::OpenMWAdapter
                 }
                 if (mResuming && advanced.baselineCompleted)
                 {
-                    if (!mAttemptGeneration || !mContinuity || !preserves(*snapshot, *mAttemptGeneration, *mContinuity))
+                    const bool preserved = mAttemptGeneration && mContinuity && snapshot
+                        && (mPendingDialogueChoice
+                                ? preservesDialogueChoice(*snapshot, *mAttemptGeneration, *mContinuity,
+                                      mPendingDialogueChoice->commandSequence)
+                                : preserves(*snapshot, *mAttemptGeneration, *mContinuity));
+                    if (!preserved)
                     {
                         closeTerminal(ConnectionStatus::ResumeFailed);
                         return;
                     }
                     mResuming = false;
                     mReady = true;
+                    if (!retryDialogueChoice())
+                    {
+                        closeTerminal(ConnectionStatus::TransportFailed);
+                        return;
+                    }
                     mStatus.report(ConnectionStatus::Resumed);
                 }
                 const bool firstBaseline = !mResuming && advanced.baselineCompleted && !mReady;
@@ -448,6 +499,13 @@ namespace TES3MP::OpenMWAdapter
                 {
                     mAwaitingResync = false;
                     mControl->resyncCompleted();
+                }
+                if (mPendingDialogueChoice)
+                {
+                    if (mRuntime->flushOutbound() != ClientRuntimeResult::Accepted)
+                        handleRuntimeFailure(
+                            ClientRuntimeResult::TransportFailed, ClientSessionAction::SessionClosed, now);
+                    return;
                 }
                 if (mResuming || !mReady)
                 {
@@ -649,6 +707,34 @@ namespace TES3MP::OpenMWAdapter
                 return false;
             }
 
+            DialogueChoiceSubmissionResult submitDialogueChoice(int localChoice) noexcept override
+            try
+            {
+                if (!mRuntime || !mReady || mResuming || mPendingDialogueChoice
+                    || !dialogueChoicesNegotiated(*mRuntime))
+                    return DialogueChoiceSubmissionResult::Unavailable;
+                const auto choice = mInput.mapDialogueChoice(localChoice);
+                if (!choice)
+                    return DialogueChoiceSubmissionResult::Unmapped;
+                const auto queued = mRuntime->queueDialogueChoice(*choice);
+                if (queued.result != ClientRuntimeResult::Accepted || !queued.sequence || !queued.commandId)
+                    return DialogueChoiceSubmissionResult::Backpressured;
+                mPendingDialogueChoice = PendingDialogueChoice{ localChoice, *choice, *queued.commandId,
+                    *queued.sequence };
+                return DialogueChoiceSubmissionResult::Pending;
+            }
+            catch (...)
+            {
+                return DialogueChoiceSubmissionResult::Backpressured;
+            }
+
+            std::optional<DialogueChoiceResolution> takeDialogueChoiceResolution() noexcept override
+            {
+                auto result = mDialogueChoiceResolution;
+                mDialogueChoiceResolution.reset();
+                return result;
+            }
+
             void setGameRunning(bool value) noexcept override { mGameRunning = value; }
 
             void confirmGameStart(bool running) noexcept override
@@ -816,6 +902,19 @@ namespace TES3MP::OpenMWAdapter
                 mPendingCellTransition = queued.sequence;
             }
 
+            bool retryDialogueChoice() noexcept
+            {
+                if (!mPendingDialogueChoice)
+                    return true;
+                const auto queued = mRuntime->queueDialogueChoice(
+                    mPendingDialogueChoice->choice, mPendingDialogueChoice->commandId);
+                if (queued.result != ClientRuntimeResult::Accepted || !queued.sequence || !queued.commandId
+                    || *queued.commandId != mPendingDialogueChoice->commandId)
+                    return false;
+                mPendingDialogueChoice->commandSequence = *queued.sequence;
+                return true;
+            }
+
             void closeForProviderFailure(ProviderResult result) noexcept
             {
                 closeTerminal(result == ProviderResult::ContentMappingFailed ? ConnectionStatus::ContentMappingFailed
@@ -860,6 +959,8 @@ namespace TES3MP::OpenMWAdapter
             std::optional<CanonicalRevision> mMinimumInventoryRevision;
             std::optional<CanonicalRevision> mMinimumEstablishedSnapshotRevision;
             std::optional<CanonicalRevision> mPendingCharacterCompletionRevision;
+            std::optional<PendingDialogueChoice> mPendingDialogueChoice;
+            std::optional<DialogueChoiceResolution> mDialogueChoiceResolution;
             bool mReady = false;
             bool mGameRunning = true;
             bool mPresentationBootstrapPending = false;

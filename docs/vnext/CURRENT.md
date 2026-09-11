@@ -4,38 +4,26 @@
 - Code snapshot inspected: `vnext` working tree based on `0641a1792d`
 - OpenMW baseline: `f4bec41444214a7903bebd178389ca22ca13f646`
 
-This is the only status and backlog document. “Implemented” means production
-code and representative executable tests exist in the named locations. It does
-not mean the full game is playable or release-ready. “Partial” names a usable
-foundation with known missing behavior. “Not implemented” means no production
-package should be inferred from plans, experiments, or historical records.
-
-Code and tests are authoritative when this document becomes stale.
+This status/backlog document treats “implemented” as production code plus
+representative executable tests. Code and tests remain authoritative.
 
 ## Executable and library surface
 
 | Surface | Current implementation |
 |---|---|
-| `tes3mp_protocol` | Strong value types, bounded frames, FlatBuffers codecs, negotiation, authentication and character-profile messages, reliable operations, canonical snapshots, actors, objects, inventory, melee combat, and VR pose |
+| `tes3mp_protocol` | Strong value types, bounded frames, FlatBuffers codecs, negotiation, authentication and character-profile/dialogue-choice messages, reliable operations, canonical snapshots, actors, objects, inventory, melee combat, and VR pose |
 | `tes3mp_transport` | Project-owned connection, channel, queue, lifecycle, reason, and telemetry interfaces |
 | `tes3mp_transport_gns` | Private GameNetworkingSockets adapter with c-ares/OpenSSL dependency composition |
 | `tes3mp_server_core` | Deterministic authentication, canonical worlds, fixed ticks, client and script command reduction, publication, checksums, lifecycle, resync, and a versioned server-scripting boundary |
 | `tes3mp_client_session` | Caller-pumped negotiation, authentication, resume/resync, command output, snapshot ingestion, replication state, and locomotion reconciliation |
 | `tes3mp_server` | Configuration/content loading and real-transport dedicated-server composition |
 | `tes3mp_headless_client` | Scripted real-transport client for bounded integration scenarios |
-| `openmw_tes3mp_adapter` | Shared OpenMW connection, stock-chargen confirmation bridge, state application, reconnect, remote presentation, object activation, inventory integration, and authoritative melee capture/presentation |
+| `openmw_tes3mp_adapter` | Shared OpenMW connection, stock-chargen and dialogue-choice confirmation bridges, state application, reconnect, remote presentation, object activation, inventory integration, and authoritative melee capture/presentation |
 
-The target graph and include-boundary enforcement live in
+The target graph and boundary checks live in
 [`components/tes3mp/CMakeLists.txt`](../../components/tes3mp/CMakeLists.txt) and
 [`cmake/TES3MPVerifyTargetBoundaries.cmake`](../../cmake/TES3MPVerifyTargetBoundaries.cmake).
-`components/tes3mp` public headers expose project-owned values and do not expose
-OpenMW, renderer, OpenXR, operating-system, FlatBuffers-generated, or
-GameNetworkingSockets types.
-
-Root product presets build only the shipping OpenMW client and TES3MP dedicated
-server. The headless client, focused TES3MP checks, standalone contracts, and
-full upstream OpenMW baseline are separate opt-in build scopes; the Windows
-wrapper selects the bounded product scope by default.
+Public core headers expose only project-owned values.
 
 ## Implemented behavior
 
@@ -43,9 +31,10 @@ wrapper selects the bounded product scope by default.
 
 - A 12-byte bounded frame separates message class and kind before payload
   allocation. Each payload is verifier-checked and semantically validated.
-- The production server negotiates protocol major 1, minor 5. Defined
+- The production server negotiates protocol major 1, minor 6. Defined
   optional capabilities are VR pose (1), actor replication (2), interactive
-  objects (3), inventory (4), combat (5), and character creation (6).
+  objects (3), inventory (4), combat (5), character creation (6), and dialogue
+  choices (7).
   Content-manifest mismatch rejects before authentication. Combat (5) is
   offered only when combat content and authoritative contact history are both
   successfully composed; the packaged derived-vanilla default now composes both
@@ -171,6 +160,28 @@ Primary sources: [`character_profile.hpp`](../../components/tes3mp/include/tes3m
 [`character_creation_protocol.cpp`](../../components/tes3mp/protocol/character_creation_protocol.cpp),
 [`character_content.cpp`](../../apps/tes3mp-server/character_content.cpp), and
 [`charactercreation.cpp`](../../apps/openmw/mwgui/charactercreation.cpp).
+
+### Authoritative desktop dialogue choices
+
+- A typed reliable command carries authenticated session/generation, global
+  command order/identity, observed revision, and a manifest-bound choice ID.
+  Text, voice, layout, actor presentation, and response rendering stay local.
+- The server derives player/entity binding and uses canonical faction, rank, and
+  reputation eligibility. Applied, unknown, ineligible, and rejected results
+  finalize in global gameplay-command order.
+- The initiator receives a reliable disposition only after atomic output
+  admission and durability commit. Resume retries reuse the command ID; retained
+  results prevent repeated events/consequences and are bounded by command history
+  and resume grace.
+- OpenMW intercepts before `questionAnswered`, shows pending/rejected markers,
+  and advances stock dialogue only on a matching commit. Late results cannot
+  execute against a different actor.
+
+Primary sources: [`dialogue_choice_protocol.hpp`](../../components/tes3mp/include/tes3mp/dialogue_choice_protocol.hpp),
+[`server_command_reducer.cpp`](../../components/tes3mp/server_core/server_command_reducer.cpp),
+[`server_application.cpp`](../../apps/tes3mp-server/server_application.cpp),
+[`adapter.cpp`](../../apps/openmw/tes3mp/adapter.cpp), and
+[`dialogue.cpp`](../../apps/openmw/mwgui/dialogue.cpp).
 
 ### Cells, interest, and resynchronization
 
@@ -498,13 +509,10 @@ and [`test_bake_tes3mp_content.py`](../../scripts/tests/test_bake_tes3mp_content
   does not exist. Lockpicking and probe disarming do not exist.
 - Inventory does not include barter/trade, merchant stock/restocking, or repair
   commands.
-- The packaged default is intentionally narrow: one vanilla dagger, one chitin
-  shield, one rat, one starting loadout, and pre-inflated collision boxes for
-  the four initial cells. The baker derives selected gameplay values from ESM
-  records, but does not extract arbitrary NIF/terrain geometry or broad world
-  catalogs.
-  Historical contact uses canonical root distance and static collision
-  occlusion, not rewound animation volumes or per-bone weapon traces.
+- The packaged default has one dagger, shield, rat, starting loadout, and
+  pre-inflated collision for four cells. The baker does not extract arbitrary
+  NIF/terrain geometry or broad world catalogs. Contact uses root distance and
+  static occlusion, not rewound animation or per-bone traces.
 - The current resolver covers direct player-versus-server-actor melee, reactive
   attacks, resources, death/respawn, recovery, relevant skill advancement,
   difficulty, shield blocking, armor mitigation/wear, and stock feedback.
@@ -518,7 +526,7 @@ and [`test_bake_tes3mp_content.py`](../../scripts/tests/test_bake_tes3mp_content
   choice, faction rank, reputation, and weather and emit cross-domain
   consequences. General branching/arithmetic and inventory, combat, or magic
   script surfaces remain absent. Dialogue text and presentation stay client-local;
-  desktop dialogue UI and its transport admission path are not implemented.
+  only manifest-declared choice identities participate in server authority.
 - The packaged default is the verified installed vanilla manifest. Other
   loadouts still require bounded content generation and local record mappings;
   server discovery/history remain unfinished. The V2 baker binds TES3 content
@@ -533,11 +541,11 @@ and [`test_bake_tes3mp_content.py`](../../scripts/tests/test_bake_tes3mp_content
 
 ## Work still required
 
-### Next milestone: desktop dialogue-choice transport and UI
+### Next milestone: desktop canonical-weather transport and presentation
 
-Wire the already committed dialogue-choice authority through bounded desktop
-transport and local OpenMW presentation as a separate milestone. TES3MP 0.8.x
-scripts and saves remain unsupported.
+Project the already durable canonical regional weather state through bounded
+desktop transport while retaining OpenMW weather rendering, sound, particles,
+and interpolation locally. TES3MP 0.8.x scripts and saves remain unsupported.
 
 ### Required before the desktop/PC-VR release
 
@@ -556,9 +564,9 @@ go decision. Device types remain provider-local.
 
 ## Verification snapshot
 
-API-V6 weather passed focused integration, Windows server/product contracts,
-standalone contracts, a fresh bake/verify, all 198 Python tests, and
-patch-registry verification on 2026-09-11.
+Desktop dialogue choices passed fresh Windows standalone/product builds,
+adapter/server contracts, FlatBuffers proof, bake/verify, all 204 Python tests,
+and patch-registry verification on 2026-09-11.
 
 Sanitizer/fuzzer profiles, non-Windows builds, PC-VR hardware, the upstream
 OpenMW baseline, and a visible OpenMW walkthrough were not run.

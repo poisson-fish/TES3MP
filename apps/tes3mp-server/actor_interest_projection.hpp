@@ -8,6 +8,7 @@
 #include <tes3mp/actor_replication.hpp>
 #include <tes3mp/actor_simulation.hpp>
 #include <tes3mp/canonical_state.hpp>
+#include <tes3mp/dialogue_choice_protocol.hpp>
 #include <tes3mp/transport.hpp>
 
 #include <optional>
@@ -39,7 +40,9 @@ namespace TES3MP::ServerApp
         = {},
         const std::vector<std::pair<TransportConnectionId, InventoryInterestDelivery>>& inventoryBaselines = {},
         const std::vector<std::pair<TransportConnectionId, LatestWinsCombatSnapshot>>& combatViews = {},
-        const std::vector<std::pair<TransportConnectionId, ReliableCombatEventBatch>>& combatEvents = {});
+        const std::vector<std::pair<TransportConnectionId, ReliableCombatEventBatch>>& combatEvents = {},
+        const std::vector<std::pair<TransportConnectionId, ReliableDialogueChoiceResult>>& dialogueResults = {});
+
 }
 
 #endif

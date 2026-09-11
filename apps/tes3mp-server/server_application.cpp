@@ -15,6 +15,8 @@ namespace TES3MP::ServerApp
     namespace
     {
         constexpr std::uint64_t RejectionDrainNanoseconds = 250'000'000;
+        constexpr std::size_t MaximumRetainedDialogueChoiceResults
+            = MaximumCanonicalActiveSessions * MaximumFinalizedCommandHistory;
 
         bool supportsPose(const ServerSessionStateMachine& session) noexcept
         {
@@ -106,6 +108,17 @@ namespace TES3MP::ServerApp
             return false;
         const auto& hello = state->negotiatedHello();
         return hello && std::ranges::binary_search(hello->negotiatedCapabilities(), characterCreationCapability());
+    }
+
+    bool ServerApplication::supportsDialogueChoices(TransportConnectionId connection) const noexcept
+    {
+        if (!mWiring)
+            return false;
+        const auto* session = mWiring->sessions.session(connection);
+        if (!session || session->state() != ServerSessionState::Established || !session->sessionId())
+            return false;
+        const auto& hello = session->negotiatedHello();
+        return hello && std::ranges::binary_search(hello->negotiatedCapabilities(), dialogueChoiceCapability());
     }
 
     bool ServerApplication::start() noexcept
@@ -645,8 +658,11 @@ namespace TES3MP::ServerApp
                 cancel();
                 return false;
             }
+            const auto expiredSession = lifecycle->session;
             if (!mWiring->lifecycle.commit(lifecycle->id) || !mWiring->joins.releasePrincipal(lifecycle->principal))
                 return false;
+            std::erase_if(mDialogueChoiceResults,
+                [expiredSession](const auto& entry) { return entry.first.first == expiredSession; });
         }
     }
 
@@ -933,6 +949,12 @@ namespace TES3MP::ServerApp
             bool refreshInventoryBaselines = false;
             const auto dispositions = prepared.result().dispositions();
             const auto commands = batch.commands();
+            auto dialogueChoiceResultsCandidate = mDialogueChoiceResults;
+            std::erase_if(dialogueChoiceResultsCandidate, [&prepared](const auto& entry) {
+                const auto* active = prepared.candidateState().findActiveSession(entry.first.first);
+                return active && !active->containsFinalizedCommandId(entry.first.second);
+            });
+            std::vector<std::pair<TransportConnectionId, ReliableDialogueChoiceResult>> dialogueChoiceResults;
             for (std::size_t index = 0; index < dispositions.size(); ++index)
             {
                 const auto* interaction
@@ -945,6 +967,61 @@ namespace TES3MP::ServerApp
                 if (std::holds_alternative<MeleeAttackCommandProposal>(commands[index].proposal().payload())
                     && dispositions[index].disposition() == CommandDisposition::Applied)
                     refreshInventoryBaselines = true;
+                const auto* dialogue
+                    = std::get_if<DialogueChoiceCommandProposal>(&commands[index].proposal().payload());
+                if (!dialogue)
+                    continue;
+                const auto& proposal = commands[index].proposal();
+                const auto key = std::pair{ proposal.sessionId(), proposal.commandId() };
+                const bool duplicate = dispositions[index].disposition() == CommandDisposition::DuplicateCommandId
+                    || dispositions[index].disposition() == CommandDisposition::AlreadyFinalized;
+                DialogueChoiceDisposition dialogueDisposition = DialogueChoiceDisposition::Rejected;
+                if (duplicate)
+                {
+                    const auto retained = dialogueChoiceResultsCandidate.find(key);
+                    if (retained != dialogueChoiceResultsCandidate.end()
+                        && retained->second.choice == dialogue->choice())
+                        dialogueDisposition = retained->second.disposition;
+                }
+                else
+                {
+                    switch (dispositions[index].disposition())
+                    {
+                        case CommandDisposition::Applied:
+                            dialogueDisposition = DialogueChoiceDisposition::Committed;
+                            break;
+                        case CommandDisposition::UnknownDialogueChoice:
+                            dialogueDisposition = DialogueChoiceDisposition::UnknownChoice;
+                            break;
+                        case CommandDisposition::DialogueChoiceIneligible:
+                            dialogueDisposition = DialogueChoiceDisposition::Ineligible;
+                            break;
+                        default:
+                            dialogueDisposition = DialogueChoiceDisposition::Rejected;
+                            break;
+                    }
+                    if (dispositions[index].acknowledgementAdvanced())
+                    {
+                        if (!dialogueChoiceResultsCandidate.contains(key)
+                            && dialogueChoiceResultsCandidate.size() >= MaximumRetainedDialogueChoiceResults)
+                        {
+                            mFailure = "dialogue choice result capacity exceeded";
+                            return false;
+                        }
+                        dialogueChoiceResultsCandidate.insert_or_assign(
+                            key, RetainedDialogueChoiceResult{ dialogue->choice(), dialogueDisposition });
+                    }
+                }
+                const auto connection = mWiring->sessions.connectionForSession(proposal.sessionId());
+                if (!connection || !supportsDialogueChoices(*connection))
+                {
+                    mFailure = "dialogue choice result target missing";
+                    return false;
+                }
+                dialogueChoiceResults.emplace_back(*connection,
+                    ReliableDialogueChoiceResult{ proposal.sessionId(), proposal.sessionGeneration(),
+                        proposal.commandSequence(), proposal.commandId(), dialogue->choice(), dialogueDisposition,
+                        duplicate, prepared.candidateRevision() });
             }
             if (prepared.candidateRevision() != revisionBefore)
             {
@@ -1190,7 +1267,7 @@ namespace TES3MP::ServerApp
                 return false;
             }
             if (!admitCombinedInterestTickAtomically(mWiring->queues, routed, routedViews, actorBaselines, actorViews,
-                    objectBaselines, inventoryBaselines, combatViews, combatEvents))
+                    objectBaselines, inventoryBaselines, combatViews, combatEvents, dialogueChoiceResults))
             {
                 mFailure = changedObjectCells.empty() ? "tick output admission failed"
                                                       : "interactive object output admission failed";
@@ -1200,8 +1277,10 @@ namespace TES3MP::ServerApp
             if (!committed)
             {
                 mFailure = "canonical commit failed";
+                mRunning = false;
                 return false;
             }
+            mDialogueChoiceResults = std::move(dialogueChoiceResultsCandidate);
             if (mWiring->scripts && !mWiring->scripts->healthy())
             {
                 mFailure = "server script delivery failed";

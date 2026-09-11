@@ -125,13 +125,15 @@ namespace TES3MP::ServerApp
         const std::vector<std::pair<TransportConnectionId, InteractiveObjectInterestBaselineDelivery>>& objectBaselines,
         const std::vector<std::pair<TransportConnectionId, InventoryInterestDelivery>>& inventoryBaselines,
         const std::vector<std::pair<TransportConnectionId, LatestWinsCombatSnapshot>>& combatViews,
-        const std::vector<std::pair<TransportConnectionId, ReliableCombatEventBatch>>& combatEvents)
+        const std::vector<std::pair<TransportConnectionId, ReliableCombatEventBatch>>& combatEvents,
+        const std::vector<std::pair<TransportConnectionId, ReliableDialogueChoiceResult>>& dialogueResults)
     try
     {
         std::vector<std::vector<std::byte>> frames;
         std::vector<OutboundQueueSet::AtomicMessage> messages;
         std::size_t frameCount = playerObservations.size() + playerViews.size() + actorBaselines.size() * 2
-            + actorViews.size() + objectBaselines.size() + combatViews.size() + combatEvents.size();
+            + actorViews.size() + objectBaselines.size() + combatViews.size() + combatEvents.size()
+            + dialogueResults.size();
         for (const auto& [connection, delivery] : inventoryBaselines)
         {
             (void)connection;
@@ -185,6 +187,10 @@ namespace TES3MP::ServerApp
             if (!events.events().empty()
                 && !add(connection, TransportChannel::ReliableOrdered, MessageClass::ReliableOperation,
                     MessageKind::ReliableCombatEventBatch, encodeReliableCombatEventBatch(events)))
+                return false;
+        for (const auto& [connection, result] : dialogueResults)
+            if (!add(connection, TransportChannel::ReliableOrdered, MessageClass::ReliableOperation,
+                    MessageKind::ReliableDialogueChoiceResult, encodeReliableDialogueChoiceResult(result)))
                 return false;
         return messages.empty() || queues.enqueueMessagesAtomically(messages) == TransportResult::Accepted;
     }

@@ -21,6 +21,7 @@
 #include "../mwbase/world.hpp"
 
 #include "../mwdialogue/keywordsearch.hpp"
+#include "../tes3mp/engine_coordinator.hpp"
 
 #include "../mwworld/class.hpp"
 #include "../mwworld/containerstore.hpp"
@@ -684,6 +685,10 @@ namespace MWGui
             BookTypesetter::Style* questionStyle = typesetter->createHotStyle(
                 body, textColours.answer, textColours.answerOver, textColours.answerPressed, interactiveId);
             typesetter->write(questionStyle, choice.first);
+            if (mPendingMultiplayerChoice == choice.second)
+                typesetter->write(body, " (waiting for server)");
+            else if (mRejectedMultiplayerChoice == choice.second)
+                typesetter->write(body, " (rejected by server)");
             mChoiceStyles.push_back(questionStyle);
         }
 
@@ -758,6 +763,29 @@ namespace MWGui
             onGoodbyeActivated();
             return;
         }
+        auto* multiplayer = MWBase::Environment::get().getMultiplayerCoordinator();
+        if (multiplayer)
+        {
+            if (mPendingMultiplayerChoice)
+                return;
+            if (multiplayer->multiplayerState() != TES3MP::OpenMWAdapter::MultiplayerState::Ready)
+            {
+                mRejectedMultiplayerChoice = id;
+                updateHistory();
+                return;
+            }
+            const auto submitted = multiplayer->submitDialogueChoice(id);
+            if (submitted == TES3MP::OpenMWAdapter::DialogueChoiceSubmissionResult::Pending)
+            {
+                mPendingMultiplayerChoice = id;
+                mPendingMultiplayerChoiceActor = mPtr;
+                mRejectedMultiplayerChoice.reset();
+            }
+            else
+                mRejectedMultiplayerChoice = id;
+            updateHistory();
+            return;
+        }
         MWBase::Environment::get().getDialogueManager()->questionAnswered(id, mCallback.get());
         updateTopics();
     }
@@ -826,6 +854,44 @@ namespace MWGui
     void DialogueWindow::onFrame(float dt)
     {
         checkReferenceAvailable();
+
+        if (mPendingMultiplayerChoice)
+        {
+            auto* multiplayer = MWBase::Environment::get().getMultiplayerCoordinator();
+            auto resolved = multiplayer ? multiplayer->takeDialogueChoiceResolution() : std::nullopt;
+            if (resolved)
+            {
+                const int localChoice = resolved->localChoice;
+                const bool sameActor = !mPtr.isEmpty() && mPtr == mPendingMultiplayerChoiceActor;
+                mPendingMultiplayerChoice.reset();
+                mPendingMultiplayerChoiceActor = MWWorld::Ptr();
+                if (resolved->committed() && sameActor)
+                {
+                    mRejectedMultiplayerChoice.reset();
+                    MWBase::Environment::get().getDialogueManager()->questionAnswered(localChoice, mCallback.get());
+                    updateTopics();
+                }
+                else
+                {
+                    if (sameActor)
+                    {
+                        mRejectedMultiplayerChoice = localChoice;
+                        updateHistory();
+                    }
+                }
+            }
+            else if (!multiplayer
+                || multiplayer->multiplayerState() == TES3MP::OpenMWAdapter::MultiplayerState::Failed
+                || multiplayer->multiplayerState() == TES3MP::OpenMWAdapter::MultiplayerState::Idle)
+            {
+                mRejectedMultiplayerChoice = *mPendingMultiplayerChoice;
+                mPendingMultiplayerChoice.reset();
+                mPendingMultiplayerChoiceActor = MWWorld::Ptr();
+                if (!mPtr.isEmpty())
+                    updateHistory();
+            }
+        }
+
         if (mPtr.isEmpty())
             return;
 

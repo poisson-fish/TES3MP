@@ -2,11 +2,13 @@
 #define OPENMW_TES3MP_ENGINE_COORDINATOR_HPP
 
 #include <cstddef>
+#include <optional>
 #include <span>
 #include <string_view>
 
 #include <tes3mp/character_profile.hpp>
 #include <tes3mp/character_creation_protocol.hpp>
+#include <tes3mp/dialogue_choice_protocol.hpp>
 
 namespace TES3MP::OpenMWAdapter
 {
@@ -16,6 +18,23 @@ namespace TES3MP::OpenMWAdapter
         Connecting,
         Ready,
         Failed,
+    };
+
+    enum class DialogueChoiceSubmissionResult
+    {
+        Pending,
+        Unavailable,
+        Unmapped,
+        Backpressured,
+    };
+
+    struct DialogueChoiceResolution
+    {
+        int localChoice = 0;
+        DialogueChoiceDisposition disposition = DialogueChoiceDisposition::Rejected;
+        bool duplicate = false;
+
+        constexpr bool committed() const noexcept { return disposition == DialogueChoiceDisposition::Committed; }
     };
 
     class EngineCoordinator
@@ -38,6 +57,14 @@ namespace TES3MP::OpenMWAdapter
         { return CharacterProfileRevision::initial(); }
         virtual const ReliableCharacterProfile* confirmedCharacterProfile() const noexcept { return nullptr; }
         virtual bool submitCharacterCreation(CharacterCreationChoice) noexcept { return false; }
+        virtual DialogueChoiceSubmissionResult submitDialogueChoice(int) noexcept
+        {
+            return DialogueChoiceSubmissionResult::Unavailable;
+        }
+        virtual std::optional<DialogueChoiceResolution> takeDialogueChoiceResolution() noexcept
+        {
+            return std::nullopt;
+        }
         virtual void setGameRunning(bool) noexcept {}
         virtual void confirmGameStart(bool running) noexcept { setGameRunning(running); }
     };

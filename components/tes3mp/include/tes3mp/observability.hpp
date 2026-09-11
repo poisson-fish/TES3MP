@@ -135,6 +135,8 @@ namespace TES3MP
         CommandReductionStateVersionCapacityExceeded = 55,
         CommandReductionUnknownCell = 56,
         CommandReductionMotionOutOfRange = 57,
+        CommandReductionObjectInteractionRejected = 58,
+        CommandReductionInventoryTransactionRejected = 59,
         CanonicalSinkArchive = 60,
         CanonicalSinkReplay = 61,
         CanonicalSinkScript = 62,
@@ -142,6 +144,10 @@ namespace TES3MP
         CanonicalSinkAccepted = 64,
         CanonicalSinkBackpressured = 65,
         CanonicalSinkFailed = 66,
+        CommandReductionCombatRejected = 67,
+        CommandReductionUnknownDialogueChoice = 68,
+        CommandReductionDialogueChoiceIneligible = 69,
+        CommandReductionDialogueChoiceRejected = 70,
     };
 
     struct MetricDimension
@@ -303,6 +309,9 @@ namespace TES3MP
         ObjectInteractionRejected,
         InventoryTransactionRejected,
         CombatRejected,
+        UnknownDialogueChoice,
+        DialogueChoiceIneligible,
+        DialogueChoiceRejected,
     };
 
     struct CommandReductionEvent

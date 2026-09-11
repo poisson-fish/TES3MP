@@ -164,6 +164,15 @@ namespace TES3MP
                 mCharacterProfile = std::move(*profile);
                 result.characterProfileApplied = true;
             }
+            else if (auto* dialogue = std::get_if<ReliableDialogueChoiceResult>(&message))
+            {
+                const auto sessionId = mSession->stateMachine().sessionId();
+                if (!sessionId || dialogue->targetSessionId != *sessionId
+                    || dialogue->targetSessionGeneration != mSession->stateMachine().generation()
+                    || !negotiated(mSession->stateMachine(), dialogueChoiceCapability()))
+                    return reject();
+                result.dialogueChoiceResults.push_back(std::move(*dialogue));
+            }
             else if (auto* snapshot = std::get_if<LatestWinsSnapshot>(&message))
             {
                 const auto wasComplete = mSession->stateMachine().interestBaselineComplete();
@@ -638,6 +647,36 @@ namespace TES3MP
         return { queued, queued == ClientRuntimeResult::Accepted ? sequence : std::nullopt };
     }
 
+    ClientRuntimeQueueResult ClientSessionRuntime::queueDialogueChoice(
+        DialogueChoiceId choice, std::optional<CommandId> retainedCommandId)
+    {
+        const auto& snapshot = mSession->stateMachine().confirmedSnapshot();
+        const auto sessionId = mSession->stateMachine().sessionId();
+        if (!snapshot || !sessionId || !mSession->stateMachine().interestBaselineComplete()
+            || !negotiated(mSession->stateMachine(), dialogueChoiceCapability()))
+            return { ClientRuntimeResult::NotConnected, std::nullopt, std::nullopt };
+        const auto sequence = mLastQueuedSequence ? mLastQueuedSequence->next()
+            : snapshot->header().acknowledgedCommandSequence()
+            ? snapshot->header().acknowledgedCommandSequence()->next()
+            : std::optional<CommandSequence>(CommandSequence::initial());
+        if (!sequence)
+            return { ClientRuntimeResult::EncodeRejected, std::nullopt, std::nullopt };
+        const auto commandId = retainedCommandId ? retainedCommandId : CommandId::fromValue(sequence->value());
+        if (!commandId)
+            return { ClientRuntimeResult::EncodeRejected, std::nullopt, std::nullopt };
+        const ClientDialogueChoiceCommand command{ *sessionId, snapshot->header().targetSessionGeneration(),
+            *sequence, *commandId, snapshot->header().canonicalRevision(), choice };
+        const auto encoded = encodeClientDialogueChoiceCommand(command);
+        if (encoded.empty())
+            return { ClientRuntimeResult::EncodeRejected, std::nullopt, std::nullopt };
+        const auto queued
+            = queue(MessageClass::ReliableOperation, MessageKind::ClientDialogueChoiceCommand, encoded);
+        if (queued == ClientRuntimeResult::Accepted)
+            mLastQueuedSequence = *sequence;
+        return { queued, queued == ClientRuntimeResult::Accepted ? sequence : std::nullopt,
+            queued == ClientRuntimeResult::Accepted ? commandId : std::nullopt };
+    }
+
     std::optional<LocalLocomotionReconciliation> ClientSessionRuntime::reconcileLocalPresentation(
         bool hardDiscontinuity) noexcept
     {
@@ -956,6 +995,15 @@ namespace TES3MP
                 {
                     auto value = decodeReliableCharacterProfile(frame->payload());
                     if (auto* typed = std::get_if<ReliableCharacterProfile>(&value))
+                        result.messages.emplace_back(std::move(*typed));
+                    else
+                        return fail(ClientRuntimeResult::ProtocolRejected);
+                    break;
+                }
+                case MessageKind::ReliableDialogueChoiceResult:
+                {
+                    auto value = decodeReliableDialogueChoiceResult(frame->payload());
+                    if (auto* typed = std::get_if<ReliableDialogueChoiceResult>(&value))
                         result.messages.emplace_back(std::move(*typed));
                     else
                         return fail(ClientRuntimeResult::ProtocolRejected);

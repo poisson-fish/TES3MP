@@ -36,6 +36,9 @@ namespace TES3MP
         ObjectInteractionRejected,
         InventoryTransactionRejected,
         CombatRejected,
+        UnknownDialogueChoice,
+        DialogueChoiceIneligible,
+        DialogueChoiceRejected,
     };
 
     class FinalizedCommandRecord

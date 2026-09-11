@@ -1,6 +1,8 @@
 #include "combat_interest_projection.hpp"
+#include "actor_interest_projection.hpp"
 
 #include <array>
+#include <vector>
 #include <variant>
 
 namespace
@@ -85,9 +87,64 @@ namespace
             && batch->actorEvents().size() == 1
             && batch->actorEvents()[0].attackerActorId == id<ActorId>(3);
     }
+
+    class RecordingTransport final : public TransportRuntime
+    {
+    public:
+        TransportAdmission<ListenerId> startListener(const ListenerEndpoint&) override { return {}; }
+        TransportResult stopListener(ListenerId) override { return TransportResult::Accepted; }
+        TransportAdmission<ConnectAttemptId> connect(const ConnectionEndpoint&) override { return {}; }
+        TransportResult cancelConnect(ConnectAttemptId) override { return TransportResult::Accepted; }
+        TransportResult send(TransportConnectionId, TransportChannel channel, std::span<const std::byte> bytes) override
+        {
+            sent.push_back({ channel, { bytes.begin(), bytes.end() } });
+            return TransportResult::Accepted;
+        }
+        TransportReceiveResult receive(TransportConnectionId, std::span<TransportMessage>) override { return {}; }
+        TransportResult close(TransportConnectionId, TransportCloseMode) override { return TransportResult::Accepted; }
+        TransportPollResult poll(std::span<TransportEvent>) override { return {}; }
+        TransportResult shutdown() override { return TransportResult::Accepted; }
+        std::vector<TransportMessage> sent;
+    };
+
+    bool dialogue_result_admission_is_typed_atomic_and_backpressured()
+    {
+        const auto policy = *OutboundQueuePolicy::create(1, 4096, 1, 1, 1, 1, 1, 1, 8, 250);
+        const auto connection = TransportConnectionId::initial();
+        auto queues = *OutboundQueueSet::create(policy, 1);
+        if (queues.attach(connection) != TransportResult::Accepted)
+            return false;
+        const ReliableDialogueChoiceResult result{ id<SessionId>(2), SessionGeneration::initial(),
+            CommandSequence::initial(), id<CommandId>(1), id<DialogueChoiceId>(40),
+            DialogueChoiceDisposition::Ineligible, false, id<CanonicalRevision>(3) };
+        const std::vector<std::pair<TransportConnectionId, ReliableDialogueChoiceResult>> delivery{
+            { connection, result } };
+        if (!ServerApp::admitCombinedInterestTickAtomically(
+                queues, {}, {}, {}, {}, {}, {}, {}, {}, delivery))
+            return false;
+        RecordingTransport transport;
+        if (queues.pump(transport, connection, 0) != OutboundPumpResult::Progress || transport.sent.size() != 1)
+            return false;
+        const auto frame = decodeProtocolFrame(transport.sent.front().bytes);
+        const auto* decodedFrame = std::get_if<DecodedFrame>(&frame);
+        const auto decoded = decodedFrame ? decodeReliableDialogueChoiceResult(decodedFrame->payload())
+                                          : ReliableDialogueChoiceResultDecodeResult{ DialogueChoiceProtocolError{} };
+        if (!decodedFrame || decodedFrame->messageKind() != MessageKind::ReliableDialogueChoiceResult
+            || !std::holds_alternative<ReliableDialogueChoiceResult>(decoded)
+            || std::get<ReliableDialogueChoiceResult>(decoded) != result)
+            return false;
+
+        const std::array<std::byte, 1> occupied{ std::byte{ 1 } };
+        if (queues.enqueue(connection, TransportChannel::ReliableOrdered, occupied) != TransportResult::Accepted
+            || ServerApp::admitCombinedInterestTickAtomically(queues, {}, {}, {}, {}, {}, {}, {}, {}, delivery))
+            return false;
+        return queues.hasPending(connection) == std::optional<bool>(true);
+    }
 }
 
 int main()
 {
-    return combat_projection_is_private_and_cell_scoped() ? 0 : 1;
+    return combat_projection_is_private_and_cell_scoped()
+            && dialogue_result_admission_is_typed_atomic_and_backpressured()
+        ? 0 : 1;
 }

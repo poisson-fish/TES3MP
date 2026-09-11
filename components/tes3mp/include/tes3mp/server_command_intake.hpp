@@ -142,9 +142,25 @@ namespace TES3MP
         ClientMeleeAttackCommand mCommand;
     };
 
+    class DialogueChoiceCommandProposal
+    {
+    public:
+        constexpr explicit DialogueChoiceCommandProposal(DialogueChoiceId choice) noexcept
+            : mChoice(choice)
+        {
+        }
+
+        constexpr DialogueChoiceId choice() const noexcept { return mChoice; }
+        friend constexpr bool operator==(DialogueChoiceCommandProposal, DialogueChoiceCommandProposal) noexcept
+            = default;
+
+    private:
+        DialogueChoiceId mChoice;
+    };
+
     using ServerCommandPayload = std::variant<PlayerMotionCommandProposal, CellTransitionCommandProposal,
         PlayerLocomotionCommandProposal, InteractiveObjectCommandProposal, InventoryCommandProposal,
-        MeleeAttackCommandProposal>;
+        MeleeAttackCommandProposal, DialogueChoiceCommandProposal>;
 
     class ServerCommandProposal
     {
@@ -194,6 +210,19 @@ namespace TES3MP
             : mSessionId(sessionId), mSessionGeneration(sessionGeneration), mCommandSequence(commandSequence),
               mCommandId(commandId), mObservedCanonicalRevision(observedCanonicalRevision),
               mEntityPrecondition(entityPrecondition), mPayload(std::move(melee))
+        {
+        }
+
+        constexpr ServerCommandProposal(SessionId sessionId, SessionGeneration sessionGeneration,
+            CommandSequence commandSequence, CommandId commandId, CanonicalRevision observedCanonicalRevision,
+            EntityPrecondition entityPrecondition, DialogueChoiceCommandProposal dialogue) noexcept
+            : mSessionId(sessionId)
+            , mSessionGeneration(sessionGeneration)
+            , mCommandSequence(commandSequence)
+            , mCommandId(commandId)
+            , mObservedCanonicalRevision(observedCanonicalRevision)
+            , mEntityPrecondition(entityPrecondition)
+            , mPayload(dialogue)
         {
         }
 

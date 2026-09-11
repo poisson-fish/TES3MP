@@ -49,7 +49,7 @@ namespace OpenMW
             "dedicated server configuration used by the multiplayer Host button");
         addOption("tes3mp-content-manifest-id",
             bpo::value<std::string>()->default_value(
-                "afd2d1a2a6c8ba6a6ca826fe964122a8e8fc3830d8a366fa639cb6b925dd8da6"),
+                "6ce29aa7cdb584836f55f2fc0d916f8d66a684dea3e0a0b32e629d5648962b31"),
             "exact TES3MP content manifest SHA-256 in hexadecimal");
         addOption("tes3mp-content-cell-spaces",
             bpo::value<std::string>()->default_value("interior:1;interior:2;interior:3;exterior:4"),
@@ -95,6 +95,11 @@ namespace OpenMW
         addOption("tes3mp-content-quest-map",
             bpo::value<StringsVector>()->default_value(StringsVector(), "")->multitoken()->composing(),
             "OpenMW quest mappings: <id>=<journal-record>");
+        addOption("tes3mp-content-dialogue-choice-map",
+            bpo::value<StringsVector>()->default_value(StringsVector{ "1=1", "2=2" }, "vanilla dialogue choices")
+                ->multitoken()
+                ->composing(),
+            "OpenMW dialogue choice mappings: <manifest-choice-id>=<local-choice-number>");
 #ifdef TES3MP_OPENMW_DESKTOP_AUTOMATION
         addOption("tes3mp-automation-role", bpo::value<std::string>()->default_value(""),
             "test-only fixed TES3MP desktop automation role");

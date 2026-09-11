@@ -24,6 +24,7 @@ namespace TES3MP
     inline constexpr std::uint32_t InventoryReplicationCapabilityValue = 4;
     inline constexpr std::uint32_t CombatReplicationCapabilityValue = 5;
     inline constexpr std::uint32_t CharacterCreationCapabilityValue = 6;
+    inline constexpr std::uint32_t DialogueChoiceCapabilityValue = 7;
 
     class CapabilityId
     {
@@ -77,6 +78,11 @@ namespace TES3MP
     inline constexpr CapabilityId characterCreationCapability() noexcept
     {
         return *CapabilityId::fromValue(CharacterCreationCapabilityValue);
+    }
+
+    inline constexpr CapabilityId dialogueChoiceCapability() noexcept
+    {
+        return *CapabilityId::fromValue(DialogueChoiceCapabilityValue);
     }
 
     struct ProtocolVersion
