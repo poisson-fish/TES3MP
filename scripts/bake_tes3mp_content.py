@@ -49,6 +49,7 @@ CATALOGS = {
     "combat_content_file": ("TES3MP_COMBAT_V6", False),
     "character_content_file": ("TES3MP_CHARACTERS_V2", False),
     "world_content_file": ("TES3MP_WORLD_V2", True),
+    "script_package_file": ("TES3MP_SCRIPT_PACKAGES_V1", False),
 }
 
 SERVER_CONTENT_KEYS = (
@@ -1178,6 +1179,69 @@ def _catalog_by_key(catalogs: Sequence[Catalog], key: str) -> Catalog | None:
     return next((catalog for catalog in catalogs if catalog.key == key), None)
 
 
+def _validate_script_packages(catalog: Catalog | None) -> None:
+    if catalog is None:
+        return
+    packages: dict[int, tuple[int, int, int]] = {}
+    variables: set[tuple[int, int]] = set()
+    per_package: dict[int, int] = {}
+    string_bytes = 0
+    for record in catalog.records:
+        try:
+            if record[0] == "package":
+                if len(record) != 5 or len(packages) == 64:
+                    raise BakeError(f"malformed or oversized package record in {catalog.path}")
+                package_id, version, load_order, api = map(int, record[1:])
+                if package_id <= 0 or package_id > 0xFFFFFFFFFFFFFFFF or version <= 0 \
+                        or version > 0xFFFFFFFF or load_order < 0 or load_order > 0xFFFFFFFF or api != 3 \
+                        or package_id in packages:
+                    raise BakeError(f"invalid or duplicate script package in {catalog.path}")
+                packages[package_id] = (version, load_order, api)
+            elif record[0] == "variable":
+                if len(record) != 5 or len(variables) == 16384:
+                    raise BakeError(f"malformed or oversized script variable in {catalog.path}")
+                package_id, variable_id = int(record[1]), int(record[2])
+                key = (package_id, variable_id)
+                if package_id <= 0 or package_id > 0xFFFFFFFFFFFFFFFF or variable_id <= 0 \
+                        or variable_id > 0xFFFFFFFFFFFFFFFF or key in variables:
+                    raise BakeError(f"invalid or duplicate script variable in {catalog.path}")
+                kind, value = record[3], record[4]
+                if kind == "boolean":
+                    if value not in {"true", "false"}:
+                        raise BakeError(f"invalid script boolean in {catalog.path}")
+                elif kind == "integer":
+                    parsed = int(value)
+                    if parsed < -0x8000000000000000 or parsed > 0x7FFFFFFFFFFFFFFF:
+                        raise BakeError(f"script integer is out of range in {catalog.path}")
+                elif kind == "float":
+                    if not math.isfinite(float(value)):
+                        raise BakeError(f"invalid script float in {catalog.path}")
+                elif kind == "string_hex":
+                    if value == "-":
+                        length = 0
+                    else:
+                        if not value or len(value) % 2 or any(byte not in "0123456789abcdef" for byte in value):
+                            raise BakeError(f"invalid script string encoding in {catalog.path}")
+                        length = len(value) // 2
+                    if length > 4096:
+                        raise BakeError(f"script string is too large in {catalog.path}")
+                    string_bytes += length
+                    if string_bytes > 1024 * 1024:
+                        raise BakeError(f"script catalog strings are too large in {catalog.path}")
+                else:
+                    raise BakeError(f"unknown script variable type in {catalog.path}")
+                variables.add(key)
+                per_package[package_id] = per_package.get(package_id, 0) + 1
+                if per_package[package_id] > 256:
+                    raise BakeError(f"script package has too many variables in {catalog.path}")
+            else:
+                raise BakeError(f"unknown script package record in {catalog.path}")
+        except ValueError as exc:
+            raise BakeError(f"malformed script package record in {catalog.path}") from exc
+    if any(package_id not in packages for package_id, _variable_id in variables):
+        raise BakeError(f"script variable references an unknown package in {catalog.path}")
+
+
 def validate_consistency(server_entries: Sequence[Assignment], client_entries: Sequence[Assignment],
     catalogs: Sequence[Catalog], records: dict[tuple[str, str], bool]) -> None:
     allowed_client_keys = CLIENT_SINGLE_KEYS | CLIENT_MAPPING_KEYS
@@ -1190,6 +1254,7 @@ def validate_consistency(server_entries: Sequence[Assignment], client_entries: S
     inventory_catalog = _catalog_by_key(catalogs, "inventory_content_file")
     combat_catalog = _catalog_by_key(catalogs, "combat_content_file")
     character_catalog = _catalog_by_key(catalogs, "character_content_file")
+    _validate_script_packages(_catalog_by_key(catalogs, "script_package_file"))
 
     actor_prototypes = _record_ids(actor_catalog, "actor", 3)
     objects = _record_ids(object_catalog, "object", 1)

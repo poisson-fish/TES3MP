@@ -128,7 +128,7 @@ namespace TES3MP::ServerApp
         if (!validUtf8(text))
             return error(ConfigErrorCode::InvalidUtf8);
 
-        std::array<bool, 21> seen{};
+        std::array<bool, 22> seen{};
         std::string bindAddress;
         std::uint16_t port = 0;
         std::uint64_t tick = 0;
@@ -148,6 +148,7 @@ namespace TES3MP::ServerApp
         std::filesystem::path combatContentPath;
         std::filesystem::path characterContentPath;
         std::filesystem::path worldContentPath;
+        std::filesystem::path scriptPackageContentPath;
         std::filesystem::path playerIdentityPath;
         std::int16_t combatDifficulty = 0;
         std::size_t lineNumber = 0;
@@ -210,6 +211,8 @@ namespace TES3MP::ServerApp
                     slot = 19;
                 else if (key == "world_content_file")
                     slot = 20;
+                else if (key == "script_package_file")
+                    slot = 21;
                 else
                     return error(ConfigErrorCode::UnknownKey, lineNumber, key);
                 if (seen[slot])
@@ -341,11 +344,17 @@ namespace TES3MP::ServerApp
                         return error(ConfigErrorCode::InvalidValue, lineNumber, key);
                     combatDifficulty = static_cast<std::int16_t>(*parsed);
                 }
-                else
+                else if (slot == 20)
                 {
                     if (value.size() > MaximumWorldContentPathBytes)
                         return error(ConfigErrorCode::InvalidValue, lineNumber, key);
                     worldContentPath = std::filesystem::u8path(value);
+                }
+                else
+                {
+                    if (value.size() > MaximumScriptPackageContentPathBytes)
+                        return error(ConfigErrorCode::InvalidValue, lineNumber, key);
+                    scriptPackageContentPath = std::filesystem::u8path(value);
                 }
             }
             if (end == std::string_view::npos)
@@ -370,9 +379,9 @@ namespace TES3MP::ServerApp
             return error(ConfigErrorCode::InvalidValue, 0, "content_manifest_id");
         return ServerConfig{ std::move(*endpoint), tick, grace, std::move(passwordPath), *manifest, *spawnCell,
             std::move(configuredSpawnPositions), std::move(collisionContentPath), std::move(actorContentPath),
-            std::move(interactiveObjectContentPath), std::move(inventoryContentPath),
-            std::move(combatContentPath), std::move(playerIdentityPath), std::move(characterContentPath),
-            std::move(worldContentPath), combatDifficulty };
+            std::move(interactiveObjectContentPath), std::move(inventoryContentPath), std::move(combatContentPath),
+            std::move(playerIdentityPath), std::move(characterContentPath), std::move(worldContentPath),
+            std::move(scriptPackageContentPath), combatDifficulty };
     }
 
     PasswordLoadResult loadJoinPassword(const std::filesystem::path& path)

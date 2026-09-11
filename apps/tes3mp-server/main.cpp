@@ -10,6 +10,7 @@
 #include "phase7_proof_profile.hpp"
 #include "phase7_queue_telemetry.hpp"
 #include "player_identity_file.hpp"
+#include "script_package_content.hpp"
 #include "server_application.hpp"
 #include "server_config.hpp"
 #include "world_content.hpp"
@@ -90,6 +91,7 @@ int main(int argc, char** argv)
     resolve(config.playerIdentityFile);
     resolve(config.characterContentFile);
     resolve(config.worldContentFile);
+    resolve(config.scriptPackageContentFile);
     auto loadedWorld = TES3MP::ServerApp::loadWorldContent(config.worldContentFile, config.contentManifest);
     auto* worldValue = std::get_if<TES3MP::ServerApp::WorldContent>(&loadedWorld);
     if (!worldValue)
@@ -98,6 +100,27 @@ int main(int argc, char** argv)
         return 2;
     }
     auto worldContent = std::move(*worldValue);
+    std::vector<TES3MP::ServerScriptPackage> scriptPackages;
+    auto scriptStateCatalog = TES3MP::ServerScriptStateCatalog::create({});
+    if (!config.scriptPackageContentFile.empty())
+    {
+        auto loaded
+            = TES3MP::ServerApp::loadScriptPackageContent(config.scriptPackageContentFile, config.contentManifest);
+        auto* content = std::get_if<TES3MP::ServerApp::ScriptPackageContent>(&loaded);
+        if (!content)
+        {
+            std::cerr << "script package content initialization failed\n";
+            return 2;
+        }
+        scriptPackages = std::move(content->packages);
+        scriptStateCatalog = std::move(content->stateCatalog);
+    }
+    TES3MP::DeterministicServerScriptRuntime scripts;
+    if (!scriptStateCatalog || !scripts.configurePackages(scriptPackages, *scriptStateCatalog))
+    {
+        std::cerr << "script package runtime configuration failed\n";
+        return 3;
+    }
     auto collisionResult
         = TES3MP::ServerApp::ContentCollisionProvider::load(config.collisionContentFile, config.contentManifest);
     auto* collisionValue = std::get_if<std::unique_ptr<TES3MP::ServerApp::ContentCollisionProvider>>(&collisionResult);
@@ -312,11 +335,10 @@ int main(int argc, char** argv)
     std::vector<TES3MP::PersistenceSeed> persistenceSeeds;
     if (combatContent)
         persistenceSeeds.push_back({ 1, combatContent->world.randomState().words() });
-    auto scriptStateCatalog = TES3MP::ServerScriptStateCatalog::create({});
     auto scriptState = scriptStateCatalog ? TES3MP::CanonicalScriptState::initial(*scriptStateCatalog) : std::nullopt;
     auto persistenceIdentity = scriptStateCatalog
         ? TES3MP::CanonicalPersistenceIdentity::create(
-              config.contentManifest.id(), *configurationId, {}, *scriptStateCatalog, persistenceSeeds)
+              config.contentManifest.id(), *configurationId, scriptPackages, *scriptStateCatalog, persistenceSeeds)
         : std::nullopt;
     auto persistencePath = config.playerIdentityFile;
     persistencePath += ".world-v2";
@@ -532,7 +554,6 @@ int main(int argc, char** argv)
     TES3MP::NullMetricSink metrics;
     TES3MP::NullStructuredEventSink events;
     TES3MP::Observability observability(metrics, events);
-    TES3MP::DeterministicServerScriptRuntime scripts;
     if (!scriptState || !scripts.bindPersistentState(*scriptState))
     {
         std::cerr << "script state composition failed\n";

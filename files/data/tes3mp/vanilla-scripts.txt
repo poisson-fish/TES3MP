@@ -1,3 +1,4 @@
-TES3MP_WORLD_V2
+TES3MP_SCRIPT_PACKAGES_V1
 manifest a780a9f80eb69ee97972b684963813f495cefb2e4fb50f0f846da7da9fb6ff09
-time 16 6 427 32400000 30000
+package 1 1 0 3
+variable 1 1 integer 0

@@ -49,7 +49,7 @@ namespace OpenMW
             "dedicated server configuration used by the multiplayer Host button");
         addOption("tes3mp-content-manifest-id",
             bpo::value<std::string>()->default_value(
-                "c5df902cab7f9920d4b3bbe77c9e17983e287d0cad533517abdc87babd645576"),
+                "a780a9f80eb69ee97972b684963813f495cefb2e4fb50f0f846da7da9fb6ff09"),
             "exact TES3MP content manifest SHA-256 in hexadecimal");
         addOption("tes3mp-content-cell-spaces",
             bpo::value<std::string>()->default_value("interior:1;interior:2;interior:3;exterior:4"),

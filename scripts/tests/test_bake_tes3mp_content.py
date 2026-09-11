@@ -97,6 +97,13 @@ class ContentBakerTests(unittest.TestCase):
             "global 1 short 0\n",
             encoding="utf-8",
         )
+        (self.source / "scripts.txt").write_text(
+            "TES3MP_SCRIPT_PACKAGES_V1\n"
+            f"manifest {ZERO_MANIFEST}\n"
+            "package 1 1 0 3\n"
+            "variable 1 1 integer 0\n",
+            encoding="utf-8",
+        )
         self.password = self.root / "join-password.txt"
         self.password.write_text("", encoding="utf-8")
         self.server_config = self.source / "server.cfg"
@@ -119,6 +126,7 @@ class ContentBakerTests(unittest.TestCase):
             "combat_content_file = combat.txt\n"
             "character_content_file = characters.txt\n"
             "world_content_file = world.txt\n"
+            "script_package_file = scripts.txt\n"
             f"player_identity_file = {self.root / 'players.txt'}\n",
             encoding="utf-8",
         )
@@ -250,10 +258,34 @@ class ContentBakerTests(unittest.TestCase):
         self.assertEqual(metadata["content_files"][0]["sha256"], hashlib.sha256(self.esm.read_bytes()).hexdigest())
         self.assertEqual(metadata["content_files"][0]["masters"], [])
         for name in ("server.cfg", "openmw.cfg", "collision.txt", "actors.txt", "inventory.txt", "combat.txt",
-                     "characters.txt"):
+                     "characters.txt", "scripts.txt"):
             self.assertIn(name, metadata["artifacts"])
         self.assertIn(f"content_manifest_id = {manifest}", path.joinpath("server.cfg").read_text())
         self.assertIn(f"tes3mp-content-manifest-id={manifest}", path.joinpath("openmw.cfg").read_text())
+
+    def test_malformed_script_package_rejects_before_publication(self):
+        (self.source / "scripts.txt").write_text(
+            "TES3MP_SCRIPT_PACKAGES_V1\n"
+            f"manifest {ZERO_MANIFEST}\n"
+            "package 1 1 0 4\n",
+            encoding="utf-8",
+        )
+
+        with self.assertRaisesRegex(baker.BakeError, "script package"):
+            self._bake()
+
+        self.assertFalse(self.output.joinpath("CURRENT").exists())
+
+    def test_script_package_upgrade_changes_manifest(self):
+        first_manifest, _first_path = self._bake()
+        scripts = self.source / "scripts.txt"
+        scripts.write_text(scripts.read_text().replace("package 1 1 0 3", "package 1 2 0 3"), encoding="utf-8")
+
+        second_manifest, second_path = self._bake()
+
+        self.assertNotEqual(first_manifest, second_manifest)
+        self.assertEqual(self.output.joinpath("CURRENT").read_text().strip(), second_manifest)
+        self.assertEqual(baker.verify_pack(second_path), second_manifest)
 
     def test_layered_mod_loadout_records_validated_master_graph(self):
         plugin = self._write_plugin("Expansion.esp", "Base.esm")

@@ -15,6 +15,7 @@
 #include "phase7_queue_telemetry.hpp"
 #include "player_identity_file.hpp"
 #include "resume_token_context.hpp"
+#include "script_package_content.hpp"
 #include "server_application.hpp"
 #include "server_config.hpp"
 #include "tes3mp/combat_replication.hpp"
@@ -72,7 +73,8 @@ namespace
           "interactive_object_content_file = objects.txt\n"
           "inventory_content_file = inventory.txt\n"
           "combat_content_file = combat.txt\ncombat_difficulty = 25\n"
-          "player_identity_file = players.txt\nworld_content_file = world.txt\n";
+          "player_identity_file = players.txt\nworld_content_file = world.txt\n"
+          "script_package_file = scripts.txt\n";
 
     class FakeRuntime final : public TES3MP::TransportRuntime
     {
@@ -456,7 +458,7 @@ int main()
     using namespace TES3MP::ServerApp;
     {
         const auto manifestId
-            = ContentManifestId::fromHex("c5df902cab7f9920d4b3bbe77c9e17983e287d0cad533517abdc87babd645576");
+            = ContentManifestId::fromHex("a780a9f80eb69ee97972b684963813f495cefb2e4fb50f0f846da7da9fb6ff09");
         const auto spaces = parseCellSpaceDeclarations("interior:1;interior:2;interior:3;exterior:4");
         const auto cells = parseContentCells("interior:1;interior:2;interior:3;exterior:4:-2:-9");
         const auto movement = parseMovementProfile("sneak:4;walk:8;run:16;jump:12");
@@ -654,6 +656,7 @@ int main()
         assert(config.inventoryContentFile == std::filesystem::path("inventory.txt"));
         assert(config.combatContentFile == std::filesystem::path("combat.txt"));
         assert(config.worldContentFile == std::filesystem::path("world.txt"));
+        assert(config.scriptPackageContentFile == std::filesystem::path("scripts.txt"));
         const std::vector<Position3> expectedSpawns{ Position3(-10, 20, 30), Position3(40, 50, 60) };
         assert(config.spawnPositions == expectedSpawns);
         assert(config.contentManifest.movementProfile().speed(LocomotionMode::Sneak) == 1024
@@ -2206,7 +2209,11 @@ int main()
         auto* packagedCombat = std::get_if<CombatContent>(&packagedCombatResult);
         auto packagedWorldResult = loadWorldContent(contentRoot / "vanilla-world.txt", packagedConfig.contentManifest);
         auto* packagedWorld = std::get_if<WorldContent>(&packagedWorldResult);
-        assert(packagedCombat && packagedWorld);
+        auto packagedScriptsResult
+            = loadScriptPackageContent(contentRoot / "vanilla-scripts.txt", packagedConfig.contentManifest);
+        auto* packagedScripts = std::get_if<ScriptPackageContent>(&packagedScriptsResult);
+        assert(packagedCombat && packagedWorld && packagedScripts && packagedScripts->packages.size() == 1
+            && packagedScripts->stateCatalog.entries().size() == 1);
 
         auto queues = OutboundQueueSet::create(OutboundQueuePolicy{}, 1);
         auto timeouts = *SessionTimeoutPolicy::create(1'000'000, 1'000'000, 1'000'000);

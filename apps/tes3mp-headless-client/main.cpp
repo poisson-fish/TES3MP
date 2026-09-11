@@ -18,7 +18,7 @@ namespace
 {
     constexpr std::size_t Phase7ReconnectCycles = 32;
     constexpr auto Phase7SoakDuration = std::chrono::seconds(60);
-    constexpr std::string_view VanillaManifest = "c5df902cab7f9920d4b3bbe77c9e17983e287d0cad533517abdc87babd645576";
+    constexpr std::string_view VanillaManifest = "a780a9f80eb69ee97972b684963813f495cefb2e4fb50f0f846da7da9fb6ff09";
 
     const char* sessionRejectionName(TES3MP::SessionRejectionReason reason) noexcept
     {

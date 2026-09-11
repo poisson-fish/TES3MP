@@ -17,6 +17,7 @@
 namespace TES3MP
 {
     inline constexpr std::uint32_t ServerScriptApiVersion = 3;
+    inline constexpr std::size_t MaximumServerScriptPackages = 64;
     inline constexpr std::size_t MaximumServerScriptCallbacks = 64;
     inline constexpr std::size_t MaximumServerScriptEventsPerPublication = 4096;
     inline constexpr std::size_t MaximumServerScriptCommandsPerCallback = 16;
@@ -402,6 +403,7 @@ namespace TES3MP
         CallbackLimit,
         DuplicateRegistration,
         PackageConflict,
+        UnknownPackage,
     };
 
     enum class ServerScriptPumpError : std::uint8_t
@@ -428,6 +430,8 @@ namespace TES3MP
     class DeterministicServerScriptRuntime final : public CanonicalScriptSink
     {
     public:
+        bool configurePackages(
+            std::span<const ServerScriptPackage> packages, const ServerScriptStateCatalog& stateCatalog) noexcept;
         ServerScriptRegistrationResult registerCallback(ServerScriptPackage package, std::uint32_t callbackOrder,
             ServerScriptEventKind eventKind, ServerScriptCallback& callback) noexcept;
         bool bindPersistentState(const CanonicalScriptState& state) noexcept;
@@ -438,6 +442,7 @@ namespace TES3MP
         constexpr std::size_t pendingCommandCount() const noexcept { return mPending.size(); }
         constexpr std::size_t callbackCount() const noexcept { return mCallbacks.size(); }
         constexpr bool healthy() const noexcept { return !mTerminated; }
+        std::span<const ServerScriptPackage> packages() const noexcept { return mPackages; }
 
     private:
         struct Registration
@@ -451,6 +456,8 @@ namespace TES3MP
         };
 
         std::vector<Registration> mCallbacks;
+        std::vector<ServerScriptPackage> mPackages;
+        std::optional<ServerScriptStateCatalog> mStateCatalog;
         std::vector<QueuedServerScriptCommand> mPending;
         std::optional<ServerTick> mLastPumpedTick;
         std::uint64_t mNextPublicationOrdinal = 1;

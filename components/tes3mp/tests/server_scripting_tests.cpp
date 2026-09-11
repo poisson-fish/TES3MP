@@ -392,11 +392,26 @@ namespace
     {
         DeterministicServerScriptRuntime scripts;
         DeterministicServerScriptRuntime started;
+        DeterministicServerScriptRuntime configured;
+        DeterministicServerScriptRuntime duplicatePackages;
         SafePointCallback callback(CellId::interior(id<CellSpaceId>(7)), 100);
         const auto valid = ServerScriptPackage::create(1, 1, 1);
         const auto conflicting = ServerScriptPackage::create(1, 2, 1);
+        const auto unknown = ServerScriptPackage::create(2, 1, 2);
+        const auto duplicate = ServerScriptPackage::create(1, 2, 2);
+        const auto emptyCatalog = ServerScriptStateCatalog::create({});
+        const std::array configuredPackages{ *valid };
+        const std::array invalidPackages{ *valid, *duplicate };
         return !ServerScriptPackage::create(0, 1, 1) && !ServerScriptPackage::create(1, 0, 1)
-            && !ServerScriptPackage::create(1, 1, 1, ServerScriptApiVersion + 1) && valid && conflicting
+            && !ServerScriptPackage::create(1, 1, 1, ServerScriptApiVersion + 1) && valid && conflicting && unknown
+            && duplicate && emptyCatalog && !duplicatePackages.configurePackages(invalidPackages, *emptyCatalog)
+            && duplicatePackages.configurePackages(configuredPackages, *emptyCatalog)
+            && configured.configurePackages(configuredPackages, *emptyCatalog) && configured.packages().size() == 1
+            && configured.packages()[0] == *valid
+            && configured.registerCallback(*conflicting, 1, ServerScriptEventKind::CommandFinalized, callback)
+            == ServerScriptRegistrationResult::PackageConflict
+            && configured.registerCallback(*unknown, 1, ServerScriptEventKind::CommandFinalized, callback)
+            == ServerScriptRegistrationResult::UnknownPackage
             && scripts.registerCallback(*valid, 1, ServerScriptEventKind::CommandFinalized, callback)
             == ServerScriptRegistrationResult::Accepted
             && scripts.registerCallback(*conflicting, 2, ServerScriptEventKind::CommandFinalized, callback)
@@ -409,6 +424,29 @@ namespace
             && started.tryConsume(nullptr) == CanonicalSinkDeliveryResult::Failed
             && started.registerCallback(*valid, 1, ServerScriptEventKind::CommandFinalized, callback)
             == ServerScriptRegistrationResult::RuntimeStarted;
+    }
+
+    bool configured_runtime_requires_state_before_any_callback()
+    {
+        Fixture fixture;
+        DeterministicServerScriptRuntime scripts;
+        std::vector<std::uint64_t> trace;
+        SafePointCallback callback(CellId::interior(id<CellSpaceId>(7)), 100, 1, &trace, 1);
+        const auto package = ServerScriptPackage::create(1, 1, 1).value();
+        const std::array packages{ package };
+        const auto catalog = ServerScriptStateCatalog::create({}).value();
+        if (!scripts.configurePackages(packages, catalog)
+            || scripts.registerCallback(package, 1, ServerScriptEventKind::CommandFinalized, callback)
+                != ServerScriptRegistrationResult::Accepted
+            || fixture.intake.submit(fixture.clientCommand()) != CommandSubmissionResult::Accepted)
+            return false;
+        CanonicalCommandReducer reducer(fixture.initialState(), fixture.observability,
+            CanonicalSinkBundle(nullptr, nullptr, &scripts, nullptr), testContentManifest());
+        const auto first = fixture.pumpFirst();
+        if (!first || first.batches().size() != 1)
+            return false;
+        auto prepared = reducer.prepareTick(first.batches()[0], CanonicalCommandWorlds{}, {});
+        return prepared.result() && reducer.commit(std::move(prepared)) && trace.empty() && !scripts.healthy();
     }
 
     bool typed_time_and_global_commands_commit_as_one_script_batch()
@@ -524,7 +562,8 @@ namespace
         auto state = std::move(*restored);
         DeterministicServerScriptRuntime scripts;
         PersistentStateCallback callback;
-        if (!scripts.bindPersistentState(state)
+        const std::array packages{ package };
+        if (!scripts.configurePackages(packages, catalog) || !scripts.bindPersistentState(state)
             || scripts.registerCallback(package, 1, ServerScriptEventKind::CommandFinalized, callback)
                 != ServerScriptRegistrationResult::Accepted)
             return false;
@@ -660,6 +699,8 @@ int main()
         std::pair{ "script_command_preconditions_and_manifest_fail_closed",
             &script_command_preconditions_and_manifest_fail_closed },
         std::pair{ "package_and_registration_versions_fail_closed", &package_and_registration_versions_fail_closed },
+        std::pair{ "configured_runtime_requires_state_before_any_callback",
+            &configured_runtime_requires_state_before_any_callback },
         std::pair{ "typed_time_and_global_commands_commit_as_one_script_batch",
             &typed_time_and_global_commands_commit_as_one_script_batch },
         std::pair{ "quest_stage_and_journal_entry_commands_commit_as_one_durable_candidate",

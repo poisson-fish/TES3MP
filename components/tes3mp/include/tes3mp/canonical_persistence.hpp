@@ -21,7 +21,7 @@
 namespace TES3MP
 {
     inline constexpr std::uint16_t CanonicalPersistenceFormatVersion = 2;
-    inline constexpr std::size_t MaximumPersistenceScriptPackages = 64;
+    inline constexpr std::size_t MaximumPersistenceScriptPackages = MaximumServerScriptPackages;
     inline constexpr std::size_t MaximumPersistenceSeeds = 64;
     inline constexpr std::size_t MaximumPersistenceCommandsPerTick
         = MaximumServerCommandsPerTick + MaximumServerScriptCommandsPerTick;

@@ -27,6 +27,7 @@ namespace TES3MP::ServerApp
     inline constexpr std::size_t MaximumCombatContentPathBytes = 1024;
     inline constexpr std::size_t MaximumCharacterContentPathBytes = 1024;
     inline constexpr std::size_t MaximumWorldContentPathBytes = 1024;
+    inline constexpr std::size_t MaximumScriptPackageContentPathBytes = 1024;
 
     enum class ConfigErrorCode : std::uint8_t
     {
@@ -68,6 +69,7 @@ namespace TES3MP::ServerApp
         std::filesystem::path playerIdentityFile;
         std::filesystem::path characterContentFile;
         std::filesystem::path worldContentFile;
+        std::filesystem::path scriptPackageContentFile;
         std::int16_t combatDifficulty = 0;
     };
 

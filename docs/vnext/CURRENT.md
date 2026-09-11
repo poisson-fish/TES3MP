@@ -376,6 +376,11 @@ and [`character.cpp`](../../apps/openmw/mwmechanics/character.cpp).
 
 ### Deterministic server-scripting foundation
 
+- Optional bounded `TES3MP_SCRIPT_PACKAGES_V1` content loads manifest-bound
+  package/version/load/API declarations and typed persistent-variable catalogs.
+  Production config contains one package and one declared integer variable.
+  Declarations are canonically sorted; malformed, oversized, unknown-package,
+  wrong-API, or manifest-mismatched input fails startup.
 - Script API V3 projects committed publications into immutable bounded events.
   Execution is event-major, then package-load/package/callback order; generated
   commands retain complete replay-stable origin ordering.
@@ -386,12 +391,15 @@ and [`character.cpp`](../../apps/openmw/mwmechanics/character.cpp).
   and atomic compare-and-set of package-scoped boolean, integer, finite-float,
   and string variables. External input, catalogs, types, and revisions validate
   before the prepared durability commit.
-- Restored state is bound before callbacks receive publications. A callback sees
-  only its package's immutable declared values; VM internals are never canonical.
+- Production registers the exact package catalog before opening V2 persistence,
+  then restores and binds catalog-compatible state before callbacks can run.
+  Undeclared or version-conflicting callback registration fails. A callback
+  sees only its package's immutable state.
 
 Primary sources: [`script_state.hpp`](../../components/tes3mp/include/tes3mp/script_state.hpp),
 [`server_scripting.hpp`](../../components/tes3mp/include/tes3mp/server_scripting.hpp),
-and [`server_command_reducer.cpp`](../../components/tes3mp/server_core/server_command_reducer.cpp).
+[`script_package_content.cpp`](../../apps/tes3mp-server/script_package_content.cpp), and
+[`server_command_reducer.cpp`](../../components/tes3mp/server_core/server_command_reducer.cpp).
 
 ### Transactional gameplay persistence and replay envelope
 
@@ -430,26 +438,16 @@ Primary sources: [`canonical_persistence.hpp`](../../components/tes3mp/include/t
 
 ### Repeatable content packs
 
-- The offline V2 baker resolves ordered TES3 content through OpenMW `data`,
-  `data-local`, and `content` configuration, hashes exact loadout bytes together
-  with normalized server catalogs and complete client mappings, and emits a
-  manifest-addressed server/client pack.
-- It inspects load-order winners, including deletion, and rejects absent or
-  wrongly hashed character, actor, item, cell, or appearance records. It also
-  rejects incomplete public mapping sets and cross-catalog combat/inventory or
-  actor mismatches before writing a pack.
-- It validates bounded TES3 `MAST` declarations against the resolved order and
-  records the checked direct-master graph in verified pack metadata. Missing or
-  misordered dependencies fail before publication.
-- Packs are immutable and carry per-artifact SHA-256 metadata. Successful
-  publication atomically advances `CURRENT`; failure preserves the previously
-  selected pack. Join-password and player-identity state remain outside the
-  pack and are neither copied nor hashed.
-- The derived-vanilla recipe replaces authored collision, actor, inventory,
-  combat, client actor/item mapping, and starting-equipment records. Numeric
-  item, weapon, armor, actor, player-template, and combat-setting values come
-  from the resolved TES3 load-order winners. Missing, deleted, ambiguous,
-  malformed, or unsupported selected records reject before publication.
+- The V2 baker hashes ordered TES3 loadout bytes, normalized server catalogs,
+  and complete client mappings into a manifest-addressed pack. It validates
+  load-order winners, direct `MAST` order, cross-catalog references, mappings,
+  and script-package catalogs before publication.
+- Packs are immutable, artifact-digested, and atomically selected through
+  `CURRENT`; failure preserves its predecessor. Secrets and player identity
+  remain outside the pack.
+- The derived-vanilla recipe replaces authored gameplay catalogs from selected
+  load-order winners. Missing, deleted, ambiguous, malformed, or unsupported
+  records reject the bake.
 
 Primary sources: [`bake_tes3mp_content.py`](../../scripts/bake_tes3mp_content.py)
 and [`test_bake_tes3mp_content.py`](../../scripts/tests/test_bake_tes3mp_content.py).
@@ -499,10 +497,9 @@ and [`test_bake_tes3mp_content.py`](../../scripts/tests/test_bake_tes3mp_content
   PvP/P2P, proactive AI aggression,
   duration/area magic, active spellcasting, Lua hit callbacks, and general magic
   remain unimplemented.
-- Implemented canonical gameplay domains, counters, deterministic identity,
-  command ordering, and declared package script variables survive restart.
-  Undeclared script/VM memory does not. No script loader, interpreter, or default
-  callbacks are packaged; chargen remains the only packaged safe-point sequence.
+- Declared package variables survive restart; undeclared script/VM memory does
+  not. Package metadata/catalog loading is implemented, but no interpreter or
+  default callback behavior is packaged.
 - The packaged default is the verified installed vanilla manifest. Other
   loadouts still require bounded content generation and local record mappings;
   server discovery/history remain unfinished. The V2 baker binds TES3 content
@@ -517,12 +514,11 @@ and [`test_bake_tes3mp_content.py`](../../scripts/tests/test_bake_tes3mp_content
 
 ## Work still required
 
-### Next milestone: script package loading and runtime composition
+### Next milestone: executable script modules
 
-Load manifest-bound script packages and their persistent-variable catalogs into
-the versioned runtime, while retaining deterministic callbacks, bounded typed
-commands, and exact V2 restoration identity. TES3MP 0.8.x scripts and saves
-remain unsupported.
+Load executable callbacks for the manifest-bound packages through the versioned
+runtime and expand the immutable event/typed-command surface. TES3MP 0.8.x
+scripts and saves remain unsupported.
 
 ### Required before the desktop/PC-VR release
 
@@ -555,17 +551,16 @@ and do not enter protocol or canonical state.
 
 ## Verification snapshot
 
-The durable script-state working tree passed the following on 2026-09-10:
+The script-package composition working tree passed the following on 2026-09-10:
 
-- the standalone aggregate, including bounds, restored callback visibility, CAS,
-  stale revisions, exact identity, replay/checksum, and acknowledgement;
+- the standalone aggregate, including package registration, restored callback
+  visibility, CAS, exact identity, replay/checksum, and acknowledgement;
 - the dedicated-server application aggregate, including bounded compaction,
-  corruption/truncation rejection, script-aware exhaustive domain crash cuts,
-  exact catalog restoration, atomic replacement, and stale-temporary-file
-  recovery; and
+  script package/catalog loading, restart restoration, upgrades, mismatches,
+  crash cuts, exact catalog restoration, and atomic replacement; and
 - the server product and Windows checks graph, including shipping client and
-  OpenMW adapter contracts; and
-- all 196 repository Python tests plus patch-registry verification.
+  OpenMW adapter contracts, plus the headless client; and
+- all 198 repository Python tests plus patch-registry verification.
 
 The baseline verifier was rerun and remains blocked by pre-existing provenance
 drift outside this milestone. Protocol generation, content baking, and the

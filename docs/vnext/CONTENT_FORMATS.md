@@ -77,6 +77,32 @@ can affect canonical behavior. Future resource identity must bind those inputs;
 an override may remain unbound only after it is explicitly classified as
 presentation-only.
 
+## Script packages V1
+
+Configured by optional `script_package_file`. The ASCII file is limited to
+2 MiB, 64 packages, 16,384 variables, 256 variables per package, 4 KiB per
+string, and 1 MiB of strings total.
+
+```text
+TES3MP_SCRIPT_PACKAGES_V1
+manifest <64-hex-digits>
+package <package-id> <package-version> <load-order> <api-version>
+variable <package-id> <variable-id> boolean <true|false>
+variable <package-id> <variable-id> integer <signed-64-bit-value>
+variable <package-id> <variable-id> float <finite-double>
+variable <package-id> <variable-id> string_hex <lowercase-hex-bytes|->
+```
+
+Package and variable declarations may be authored in any order; startup sorts
+them by load order/package identity and package/variable identity respectively.
+IDs are nonzero, package IDs are unique, variables reference a declared
+package, and API version must equal the compiled server API. The exact ordered
+package versions/API and complete typed initial-value catalog bind V2
+persistence. A package upgrade or catalog change therefore rejects an existing
+prefix instead of silently restoring incompatible state. `-` encodes an empty
+string. The baker validates, hashes, copies, and rebinds this catalog like other
+manifest-scoped server content.
+
 The authored-catalog path can describe a non-vanilla loadout today, but broad
 mod support still requires a bounded extractor that emits cells, placed actors,
 objects, inventories, collision, combat data, and mappings from load-order

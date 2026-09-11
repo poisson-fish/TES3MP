@@ -21,6 +21,38 @@ namespace TES3MP
         return ServerScriptPackage(packageId, packageVersion, loadOrder, apiVersion);
     }
 
+    bool DeterministicServerScriptRuntime::configurePackages(
+        std::span<const ServerScriptPackage> packages, const ServerScriptStateCatalog& stateCatalog) noexcept
+    try
+    {
+        if (mStarted || mPersistentState || mStateCatalog || !mCallbacks.empty()
+            || packages.size() > MaximumServerScriptPackages)
+            return false;
+        const auto key = [](ServerScriptPackage package) {
+            return std::tuple(package.loadOrder(), package.packageId(), package.packageVersion(), package.apiVersion());
+        };
+        for (std::size_t index = 0; index < packages.size(); ++index)
+            if (packages[index].apiVersion() != ServerScriptApiVersion
+                || (index != 0 && key(packages[index - 1]) >= key(packages[index]))
+                || std::ranges::any_of(packages.first(index),
+                    [&](const auto package) { return package.packageId() == packages[index].packageId(); }))
+                return false;
+        if (std::ranges::any_of(stateCatalog.entries(), [&](const auto& entry) {
+                return std::ranges::none_of(
+                    packages, [&](const auto package) { return package.packageId() == entry.packageId; });
+            }))
+            return false;
+        std::vector<ServerScriptPackage> stagedPackages(packages.begin(), packages.end());
+        auto stagedCatalog = stateCatalog;
+        mPackages = std::move(stagedPackages);
+        mStateCatalog = std::move(stagedCatalog);
+        return true;
+    }
+    catch (...)
+    {
+        return false;
+    }
+
     ServerScriptEmitResult ServerScriptCommandEmitter::enqueue(ServerScriptPlayerSafePointCommand command) noexcept
     {
         return enqueuePayload(ServerScriptCommandPayload(std::move(command)));
@@ -79,6 +111,15 @@ namespace TES3MP
             return ServerScriptRegistrationResult::RuntimeStarted;
         if (mCallbacks.size() == MaximumServerScriptCallbacks)
             return ServerScriptRegistrationResult::CallbackLimit;
+        if (mStateCatalog)
+        {
+            const auto configured = std::ranges::find_if(
+                mPackages, [&](const auto value) { return value.packageId() == package.packageId(); });
+            if (configured == mPackages.end())
+                return ServerScriptRegistrationResult::UnknownPackage;
+            if (*configured != package)
+                return ServerScriptRegistrationResult::PackageConflict;
+        }
         if (std::ranges::any_of(mCallbacks, [&](const Registration& value) {
                 return value.package.packageId() == package.packageId() && value.package != package;
             }))
@@ -104,6 +145,8 @@ namespace TES3MP
     {
         if (mStarted || mPersistentState)
             return false;
+        if (mStateCatalog && !CanonicalScriptState::restore(*mStateCatalog, state.variables()))
+            return false;
         mPersistentState = &state;
         return true;
     }
@@ -115,6 +158,8 @@ namespace TES3MP
         mStarted = true;
         if (mTerminated)
             return CanonicalSinkDeliveryResult::Failed;
+        if (mStateCatalog && !mPersistentState)
+            return terminate(CanonicalSinkDeliveryResult::Failed);
         if (!publication || mNextPublicationOrdinal == std::numeric_limits<std::uint64_t>::max())
             return terminate(CanonicalSinkDeliveryResult::Failed);
 

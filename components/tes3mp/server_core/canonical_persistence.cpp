@@ -1409,7 +1409,9 @@ namespace TES3MP
         };
         for (std::size_t index = 0; index < scripts.size(); ++index)
             if (scripts[index].apiVersion() != ServerScriptApiVersion
-                || (index != 0 && scriptKey(scripts[index - 1]) >= scriptKey(scripts[index])))
+                || (index != 0 && scriptKey(scripts[index - 1]) >= scriptKey(scripts[index]))
+                || std::ranges::any_of(scripts.first(index),
+                    [&](const auto package) { return package.packageId() == scripts[index].packageId(); }))
                 return std::nullopt;
         for (std::size_t index = 0; index < seeds.size(); ++index)
             if (seeds[index].domain == 0
