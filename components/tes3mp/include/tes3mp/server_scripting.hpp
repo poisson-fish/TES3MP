@@ -8,6 +8,7 @@
 #include <compare>
 #include <cstddef>
 #include <cstdint>
+#include <memory>
 #include <optional>
 #include <span>
 #include <utility>
@@ -16,7 +17,7 @@
 
 namespace TES3MP
 {
-    inline constexpr std::uint32_t ServerScriptApiVersion = 3;
+    inline constexpr std::uint32_t ServerScriptApiVersion = 4;
     inline constexpr std::size_t MaximumServerScriptPackages = 64;
     inline constexpr std::size_t MaximumServerScriptCallbacks = 64;
     inline constexpr std::size_t MaximumServerScriptEventsPerPublication = 4096;
@@ -103,6 +104,34 @@ namespace TES3MP
         std::uint32_t mApiVersion;
     };
 
+    struct ServerScriptQuestStageRead
+    {
+        QuestStage stage;
+        QuestRevision revision;
+
+        friend constexpr bool operator==(ServerScriptQuestStageRead, ServerScriptQuestStageRead) noexcept = default;
+    };
+
+    class ServerScriptReadModel
+    {
+    public:
+        std::span<const CanonicalGlobalVariableState> globals() const noexcept { return mWorld.globals(); }
+        const CanonicalGlobalVariableState* findGlobal(GlobalVariableId id) const noexcept { return mWorld.find(id); }
+        std::optional<ServerScriptQuestStageRead> findQuestStage(PlayerId player, QuestId quest) const noexcept;
+        JournalRevision journalRevision(PlayerId player) const noexcept;
+        std::span<const CanonicalJournalEntryState> journal(PlayerId player) const noexcept;
+        const CanonicalJournalEntryState* findJournalEntry(PlayerId player, JournalEntryId entry) const noexcept;
+
+    private:
+        friend class DeterministicServerScriptRuntime;
+        explicit ServerScriptReadModel(CanonicalWorldState world) noexcept
+            : mWorld(std::move(world))
+        {
+        }
+
+        CanonicalWorldState mWorld;
+    };
+
     class ServerScriptCallbackInput
     {
     public:
@@ -110,6 +139,7 @@ namespace TES3MP
         constexpr std::uint64_t publicationOrdinal() const noexcept { return mPublicationOrdinal; }
         constexpr std::uint32_t eventOrdinal() const noexcept { return mEventOrdinal; }
         constexpr const ServerScriptEvent& event() const noexcept { return mEvent; }
+        const ServerScriptReadModel* readModel() const noexcept { return mReadModel.get(); }
         constexpr std::span<const CanonicalScriptVariableState> persistentState() const noexcept
         {
             return mPersistentState;
@@ -118,11 +148,13 @@ namespace TES3MP
     private:
         friend class DeterministicServerScriptRuntime;
         ServerScriptCallbackInput(std::uint64_t publicationOrdinal, std::uint32_t eventOrdinal, ServerScriptEvent event,
-            std::vector<CanonicalScriptVariableState> persistentState) noexcept
+            std::vector<CanonicalScriptVariableState> persistentState,
+            std::shared_ptr<const ServerScriptReadModel> readModel) noexcept
             : mPublicationOrdinal(publicationOrdinal)
             , mEventOrdinal(eventOrdinal)
             , mEvent(std::move(event))
             , mPersistentState(persistentState)
+            , mReadModel(std::move(readModel))
         {
         }
 
@@ -130,6 +162,7 @@ namespace TES3MP
         std::uint32_t mEventOrdinal;
         ServerScriptEvent mEvent;
         std::vector<CanonicalScriptVariableState> mPersistentState;
+        std::shared_ptr<const ServerScriptReadModel> mReadModel;
     };
 
     class ServerScriptPlayerSafePointCommand
@@ -435,6 +468,7 @@ namespace TES3MP
         ServerScriptRegistrationResult registerCallback(ServerScriptPackage package, std::uint32_t callbackOrder,
             ServerScriptEventKind eventKind, ServerScriptCallback& callback) noexcept;
         bool bindPersistentState(const CanonicalScriptState& state) noexcept;
+        bool bindWorldState(const CanonicalWorldState& state) noexcept;
 
         CanonicalSinkDeliveryResult tryConsume(
             const std::shared_ptr<const CanonicalStatePublication>& publication) noexcept override;
@@ -464,6 +498,7 @@ namespace TES3MP
         bool mStarted = false;
         bool mTerminated = false;
         const CanonicalScriptState* mPersistentState = nullptr;
+        const CanonicalWorldState* mWorldState = nullptr;
 
         CanonicalSinkDeliveryResult terminate(CanonicalSinkDeliveryResult result) noexcept;
     };

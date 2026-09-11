@@ -21,13 +21,17 @@ namespace
     constexpr std::uint64_t FirstTickDeadline = 33'333'334;
     constexpr std::uint64_t NextTickIncrement = 33'333'333;
 
-    static_assert(ServerScriptApiVersion == 3);
+    static_assert(ServerScriptApiVersion == 4);
     static_assert(MaximumServerScriptCallbacks == 64);
     static_assert(MaximumServerScriptCommandsPerCallback == 16);
     static_assert(MaximumServerScriptCommandsPerTick == 256);
     static_assert(!std::is_constructible_v<ServerScriptCallbackInput, std::uint64_t, std::uint32_t, ServerScriptEvent>);
     static_assert(
         std::is_same_v<decltype(std::declval<const ServerScriptCallbackInput&>().event()), const ServerScriptEvent&>);
+    static_assert(std::is_same_v<decltype(std::declval<const ServerScriptCallbackInput&>().readModel()),
+        const ServerScriptReadModel*>);
+    static_assert(std::is_same_v<decltype(std::declval<const ServerScriptReadModel&>().globals()),
+        std::span<const CanonicalGlobalVariableState>>);
 
     template <class Value>
     Value id(std::uint64_t value)
@@ -170,6 +174,25 @@ namespace
         }
     };
 
+    class ReadModelCallback final : public ServerScriptCallback
+    {
+    public:
+        ServerScriptCallbackResult onEvent(
+            const ServerScriptCallbackInput& input, ServerScriptCommandEmitter&) noexcept override
+        {
+            const auto* read = input.readModel();
+            const auto* global = read ? read->findGlobal(id<GlobalVariableId>(1)) : nullptr;
+            const auto quest = read ? read->findQuestStage(id<PlayerId>(1), id<QuestId>(10)) : std::nullopt;
+            const auto* journal = read ? read->findJournalEntry(id<PlayerId>(1), id<JournalEntryId>(100)) : nullptr;
+            sawSnapshot = global && std::get<std::int32_t>(global->value) == 9 && global->revision.value() == 2 && quest
+                && quest->stage == id<QuestStage>(20) && quest->revision.value() == 2 && journal
+                && journal->revision.value() == 2 && read->journalRevision(id<PlayerId>(1)).value() == 2;
+            return sawSnapshot ? ServerScriptCallbackResult::Accepted : ServerScriptCallbackResult::Failed;
+        }
+
+        bool sawSnapshot = false;
+    };
+
     class PersistentStateCallback final : public ServerScriptCallback
     {
     public:
@@ -205,17 +228,21 @@ namespace
     public:
         CanonicalDurabilityResult commit(const std::shared_ptr<const CanonicalStatePublication>&, CanonicalRevision,
             std::span<const DurableCommandOrder>, const CanonicalInventoryWorld*, const CanonicalCombatWorld*,
-            const CanonicalInteractiveObjectWorld*, const CanonicalActorWorld*, const CanonicalWorldState*,
+            const CanonicalInteractiveObjectWorld*, const CanonicalActorWorld*, const CanonicalWorldState* world,
             const CanonicalScriptState* scriptState) noexcept override
         {
-            sawExpected = !expected || (scriptState && *scriptState == *expected);
-            installedBeforeAcknowledgement = expected && current && *current == *expected;
+            sawExpected = (!expected || (scriptState && *scriptState == *expected))
+                && (!expectedWorld || (world && *world == *expectedWorld));
+            installedBeforeAcknowledgement = (expected && current && *current == *expected)
+                || (expectedWorld && currentWorld && *currentWorld == *expectedWorld);
             return result;
         }
 
         CanonicalDurabilityResult result = CanonicalDurabilityResult::Committed;
         const CanonicalScriptState* current = nullptr;
         const CanonicalScriptState* expected = nullptr;
+        const CanonicalWorldState* currentWorld = nullptr;
+        const CanonicalWorldState* expectedWorld = nullptr;
         bool sawExpected = false;
         bool installedBeforeAcknowledgement = false;
     };
@@ -496,6 +523,42 @@ namespace
             && world.time().revision.value() == 2 && world.time().lastChangeTick == id<ServerTick>(2);
     }
 
+    bool immutable_world_read_model_exposes_restored_values_and_revisions()
+    {
+        Fixture fixture;
+        const std::array globalEntries{ GlobalVariableCatalogEntry{ id<GlobalVariableId>(1), std::int32_t{ 0 } } };
+        const auto globalCatalog = GlobalVariableCatalog::create(globalEntries).value();
+        const std::array questEntries{ QuestCatalogEntry{
+            id<QuestId>(10), id<QuestStage>(0), { id<QuestStage>(0), id<QuestStage>(20) } } };
+        const std::array journalEntries{ JournalCatalogEntry{
+            id<JournalEntryId>(100), id<QuestId>(10), id<QuestStage>(20) } };
+        const auto questCatalog
+            = QuestJournalCatalog::create(testContentManifestId(), questEntries, journalEntries).value();
+        auto world = CanonicalWorldState::initial(CanonicalWorldTimeState{}, globalCatalog, questCatalog).value();
+        world = std::get<CanonicalWorldState>(setCanonicalGlobal(world, globalCatalog, id<GlobalVariableId>(1),
+            GlobalVariableRevision::initial(), std::int32_t{ 9 }, id<ServerTick>(1)));
+        world = std::get<CanonicalWorldState>(setCanonicalQuestStage(
+            world, id<PlayerId>(1), id<QuestId>(10), QuestRevision::initial(), id<QuestStage>(20), id<ServerTick>(1)));
+        world = std::get<CanonicalWorldState>(addCanonicalJournalEntry(world, id<PlayerId>(1), id<QuestId>(10),
+            JournalRevision::initial(), id<JournalEntryId>(100), id<ServerTick>(1)));
+        DeterministicServerScriptRuntime scripts;
+        ReadModelCallback callback;
+        const auto package = ServerScriptPackage::create(1, 1, 1);
+        if (!package || !scripts.bindWorldState(world)
+            || scripts.registerCallback(*package, 1, ServerScriptEventKind::CommandFinalized, callback)
+                != ServerScriptRegistrationResult::Accepted)
+            return false;
+        CanonicalCommandReducer reducer(fixture.initialState(), fixture.observability,
+            CanonicalSinkBundle(nullptr, nullptr, &scripts, nullptr), testContentManifest());
+        if (fixture.intake.submit(fixture.clientCommand()) != CommandSubmissionResult::Accepted)
+            return false;
+        const auto first = fixture.pumpFirst();
+        if (!first || first.batches().size() != 1 || !scripts.pump(id<ServerTick>(1)))
+            return false;
+        auto prepared = reducer.prepareTick(first.batches()[0], CanonicalCommandWorlds{}, {});
+        return prepared.result() && reducer.commit(std::move(prepared)) && callback.sawSnapshot && scripts.healthy();
+    }
+
     bool quest_stage_and_journal_entry_commands_commit_as_one_durable_candidate()
     {
         Fixture fixture;
@@ -519,6 +582,10 @@ namespace
         CanonicalCommandWorlds worlds;
         worlds.world = &world;
         worlds.globalCatalog = &globalCatalog;
+        ScriptDurabilityProbe durability;
+        durability.currentWorld = &world;
+        if (!reducer.configureDurability(durability, nullptr, nullptr, nullptr, nullptr, &world, nullptr))
+            return false;
         if (fixture.intake.submit(fixture.clientCommand()) != CommandSubmissionResult::Accepted)
             return false;
         const auto first = fixture.pumpFirst();
@@ -537,13 +604,72 @@ namespace
                 [](const auto& value) { return value.disposition() != ServerScriptCommandDisposition::Applied; }))
             return false;
         const auto before = world;
-        if (!reducer.commit(std::move(prepared), worlds) || world == before)
+        if (!prepared.candidateWorld())
+            return false;
+        const auto expected = *prepared.candidateWorld();
+        durability.expectedWorld = &expected;
+        durability.result = CanonicalDurabilityResult::Rejected;
+        if (reducer.commit(std::move(prepared), worlds) || !durability.sawExpected
+            || durability.installedBeforeAcknowledgement || world != before)
+            return false;
+        durability.result = CanonicalDurabilityResult::Committed;
+        durability.sawExpected = false;
+        auto accepted = reducer.prepareTick(second.batches()[0], worlds, generated.commands());
+        if (!accepted.result() || !reducer.commit(std::move(accepted), worlds) || !durability.sawExpected
+            || durability.installedBeforeAcknowledgement || world == before)
             return false;
         const auto* state = world.findQuestJournal(id<PlayerId>(1));
         return state && state->quests.size() == 1 && state->quests[0].stage == id<QuestStage>(20)
             && state->quests[0].revision.value() == 2 && state->quests[0].lastChangeTick == id<ServerTick>(2)
             && state->journal.size() == 1 && state->journal[0].id == id<JournalEntryId>(100)
             && state->journalRevision.value() == 2 && state->lastJournalChangeTick == id<ServerTick>(2);
+    }
+
+    bool stale_quest_and_journal_revisions_fail_without_mutation()
+    {
+        Fixture fixture;
+        DeterministicServerScriptRuntime scripts;
+        QuestJournalCallback callback;
+        const auto package = ServerScriptPackage::create(1, 1, 1);
+        if (!package
+            || scripts.registerCallback(*package, 1, ServerScriptEventKind::CommandFinalized, callback)
+                != ServerScriptRegistrationResult::Accepted)
+            return false;
+        CanonicalCommandReducer reducer(fixture.initialState(), fixture.observability,
+            CanonicalSinkBundle(nullptr, nullptr, &scripts, nullptr), testContentManifest());
+        const auto globalCatalog = GlobalVariableCatalog::create({}).value();
+        const std::array quests{ QuestCatalogEntry{
+            id<QuestId>(10), id<QuestStage>(0), { id<QuestStage>(0), id<QuestStage>(10), id<QuestStage>(20) } } };
+        const std::array journal{ JournalCatalogEntry{ id<JournalEntryId>(100), id<QuestId>(10), id<QuestStage>(20) } };
+        const auto questCatalog = QuestJournalCatalog::create(testContentManifestId(), quests, journal).value();
+        auto world = CanonicalWorldState::initial(CanonicalWorldTimeState{}, globalCatalog, questCatalog).value();
+        world = std::get<CanonicalWorldState>(setCanonicalQuestStage(
+            world, id<PlayerId>(1), id<QuestId>(10), QuestRevision::initial(), id<QuestStage>(10), id<ServerTick>(1)));
+        world = std::get<CanonicalWorldState>(addCanonicalJournalEntry(world, id<PlayerId>(1), id<QuestId>(10),
+            JournalRevision::initial(), id<JournalEntryId>(100), id<ServerTick>(1)));
+        const auto before = world;
+        CanonicalCommandWorlds worlds;
+        worlds.world = &world;
+        worlds.globalCatalog = &globalCatalog;
+        if (fixture.intake.submit(fixture.clientCommand()) != CommandSubmissionResult::Accepted)
+            return false;
+        const auto first = fixture.pumpFirst();
+        if (!first || first.batches().size() != 1 || !scripts.pump(id<ServerTick>(1)))
+            return false;
+        auto client = reducer.prepareTick(first.batches()[0], worlds, {});
+        if (!client.result() || !reducer.commit(std::move(client), worlds))
+            return false;
+        const auto second = fixture.pumpNext();
+        const auto generated = scripts.pump(id<ServerTick>(2));
+        if (!second || second.batches().size() != 1 || !generated || generated.commands().size() != 2)
+            return false;
+        auto stale = reducer.prepareTick(second.batches()[0], worlds, generated.commands());
+        return stale.result() && stale.result().scriptDispositions().size() == 2
+            && stale.result().scriptDispositions()[0].disposition()
+            == ServerScriptCommandDisposition::QuestRevisionMismatch
+            && stale.result().scriptDispositions()[1].disposition()
+            == ServerScriptCommandDisposition::JournalRevisionMismatch
+            && !stale.candidateWorld() && reducer.commit(std::move(stale), worlds) && world == before;
     }
 
     bool persistent_state_is_restored_before_callbacks_and_cas_is_atomic()
@@ -703,8 +829,12 @@ int main()
             &configured_runtime_requires_state_before_any_callback },
         std::pair{ "typed_time_and_global_commands_commit_as_one_script_batch",
             &typed_time_and_global_commands_commit_as_one_script_batch },
+        std::pair{ "immutable_world_read_model_exposes_restored_values_and_revisions",
+            &immutable_world_read_model_exposes_restored_values_and_revisions },
         std::pair{ "quest_stage_and_journal_entry_commands_commit_as_one_durable_candidate",
             &quest_stage_and_journal_entry_commands_commit_as_one_durable_candidate },
+        std::pair{ "stale_quest_and_journal_revisions_fail_without_mutation",
+            &stale_quest_and_journal_revisions_fail_without_mutation },
         std::pair{ "persistent_state_is_restored_before_callbacks_and_cas_is_atomic",
             &persistent_state_is_restored_before_callbacks_and_cas_is_atomic },
         std::pair{ "stale_persistent_state_revision_fails_without_mutation",

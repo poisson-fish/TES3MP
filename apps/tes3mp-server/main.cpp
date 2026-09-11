@@ -127,8 +127,8 @@ int main(int argc, char** argv)
     TES3MP::ServerApp::ExecutableScriptModules executableScriptModules;
     if (scriptContent)
     {
-        auto loadedModules
-            = TES3MP::ServerApp::loadExecutableScriptModules(config.scriptPackageContentFile, *scriptContent, scripts);
+        auto loadedModules = TES3MP::ServerApp::loadExecutableScriptModules(
+            config.scriptPackageContentFile, *scriptContent, worldContent.globals, worldContent.questJournal, scripts);
         auto* modules = std::get_if<TES3MP::ServerApp::ExecutableScriptModules>(&loadedModules);
         if (!modules)
         {
@@ -570,7 +570,7 @@ int main(int argc, char** argv)
     TES3MP::NullMetricSink metrics;
     TES3MP::NullStructuredEventSink events;
     TES3MP::Observability observability(metrics, events);
-    if (!scriptState || !scripts.bindPersistentState(*scriptState))
+    if (!scriptState || !scripts.bindPersistentState(*scriptState) || !scripts.bindWorldState(worldContent.world))
     {
         std::cerr << "script state composition failed\n";
         return 3;

@@ -6,6 +6,45 @@
 
 namespace TES3MP
 {
+    std::optional<ServerScriptQuestStageRead> ServerScriptReadModel::findQuestStage(
+        PlayerId player, QuestId quest) const noexcept
+    {
+        if (!mWorld.questJournalCatalog())
+            return std::nullopt;
+        const auto* declaration = mWorld.questJournalCatalog()->findQuest(quest);
+        if (!declaration)
+            return std::nullopt;
+        const auto* playerState = mWorld.findQuestJournal(player);
+        if (playerState)
+        {
+            const auto found = std::ranges::find(playerState->quests, quest, &CanonicalQuestState::id);
+            if (found != playerState->quests.end())
+                return ServerScriptQuestStageRead{ found->stage, found->revision };
+        }
+        return ServerScriptQuestStageRead{ declaration->initialStage, QuestRevision::initial() };
+    }
+
+    JournalRevision ServerScriptReadModel::journalRevision(PlayerId player) const noexcept
+    {
+        const auto* state = mWorld.findQuestJournal(player);
+        return state ? state->journalRevision : JournalRevision::initial();
+    }
+
+    std::span<const CanonicalJournalEntryState> ServerScriptReadModel::journal(PlayerId player) const noexcept
+    {
+        const auto* state = mWorld.findQuestJournal(player);
+        return state ? std::span<const CanonicalJournalEntryState>(state->journal)
+                     : std::span<const CanonicalJournalEntryState>{};
+    }
+
+    const CanonicalJournalEntryState* ServerScriptReadModel::findJournalEntry(
+        PlayerId player, JournalEntryId entry) const noexcept
+    {
+        const auto entries = journal(player);
+        const auto found = std::ranges::find(entries, entry, &CanonicalJournalEntryState::id);
+        return found == entries.end() ? nullptr : &*found;
+    }
+
     CanonicalSinkDeliveryResult DeterministicServerScriptRuntime::terminate(CanonicalSinkDeliveryResult result) noexcept
     {
         mPending.clear();
@@ -151,6 +190,14 @@ namespace TES3MP
         return true;
     }
 
+    bool DeterministicServerScriptRuntime::bindWorldState(const CanonicalWorldState& state) noexcept
+    {
+        if (mStarted || mWorldState)
+            return false;
+        mWorldState = &state;
+        return true;
+    }
+
     CanonicalSinkDeliveryResult DeterministicServerScriptRuntime::tryConsume(
         const std::shared_ptr<const CanonicalStatePublication>& publication) noexcept
     try
@@ -235,6 +282,9 @@ namespace TES3MP
         }
 
         std::vector<QueuedServerScriptCommand> staged;
+        const auto readModel = mWorldState
+            ? std::shared_ptr<const ServerScriptReadModel>(new ServerScriptReadModel(*mWorldState))
+            : std::shared_ptr<const ServerScriptReadModel>{};
         staged.reserve(std::min(MaximumServerScriptCommandsPerPublication,
             events.size() * std::min(mCallbacks.size(), MaximumServerScriptCommandsPerCallback)));
         for (std::size_t eventIndex = 0; eventIndex < events.size(); ++eventIndex)
@@ -247,7 +297,7 @@ namespace TES3MP
                 const auto packageState = mPersistentState ? mPersistentState->package(registration.package.packageId())
                                                            : std::span<const CanonicalScriptVariableState>{};
                 const ServerScriptCallbackInput input(publicationOrdinal, ordinal, events[eventIndex],
-                    std::vector<CanonicalScriptVariableState>(packageState.begin(), packageState.end()));
+                    std::vector<CanonicalScriptVariableState>(packageState.begin(), packageState.end()), readModel);
                 ServerScriptCommandEmitter emitter(staged, *eligibleTick, publicationOrdinal, ordinal,
                     registration.package, registration.callbackOrder);
                 if (registration.callback->onEvent(input, emitter) != ServerScriptCallbackResult::Accepted)

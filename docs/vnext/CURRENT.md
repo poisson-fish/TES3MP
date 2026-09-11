@@ -382,9 +382,10 @@ and [`character.cpp`](../../apps/openmw/mwmechanics/character.cpp).
   Production config contains one executable package and one declared integer variable.
   Declarations are canonically sorted; malformed, oversized, unknown-package,
   wrong-API, or manifest-mismatched input fails startup.
-- Script API V3 projects committed publications into immutable bounded events.
-  Execution is event-major, then package-load/package/callback order; generated
-  commands retain complete replay-stable origin ordering.
+- Script API V4 projects committed publications into immutable bounded events
+  plus a copied read model for typed globals, per-player quest stages and
+  journals, and their revisions. Execution and generated commands retain
+  replay-stable event/package/callback/instruction order.
 - Output is staged behind callback, publication, pending, and tick bounds. Any
   callback or queue failure discards the publication output and terminates the
   runtime instead of exposing a partial result.
@@ -398,10 +399,12 @@ and [`character.cpp`](../../apps/openmw/mwmechanics/character.cpp).
   sees only its package's immutable state.
 - The bounded V1 module loader rejects missing, oversized, hash-mismatched,
   malformed, wrong-API/ABI, missing-entrypoint, resource-invalid, or
-  catalog-invalid artifacts before server startup. It instantiates callbacks in
-  canonical package/load order and terminates on execution-budget exhaustion.
-  The packaged module uses an immutable session-joined event to emit a typed
-  next-tick compare-and-set increment of its declared persistent integer.
+  catalog-invalid artifacts before startup. Its bounded predicates cover typed
+  global equality, quest-stage equality, and journal-entry absence; quest and
+  journal instructions emit revision-checked next-tick commands. Referenced
+  IDs, stages, entry ownership, and global types validate against the manifest
+  catalogs before registration. The packaged session-joined module retains its
+  persistent increment and adds an idempotent two-command quest consequence.
 
 Primary sources: [`script_state.hpp`](../../components/tes3mp/include/tes3mp/script_state.hpp),
 [`server_scripting.hpp`](../../components/tes3mp/include/tes3mp/server_scripting.hpp),
@@ -506,10 +509,9 @@ and [`test_bake_tes3mp_content.py`](../../scripts/tests/test_bake_tes3mp_content
   duration/area magic, active spellcasting, Lua hit callbacks, and general magic
   remain unimplemented.
 - Declared package variables survive restart; undeclared script/VM memory does
-  not. The initial executable module format supports bounded event callbacks,
-  explicit budget consumption, and integer-state increments only; broader
-  gameplay queries, branching, arithmetic, events, and typed commands remain
-  unimplemented.
+  not. Executable modules now query globals and quest/journal progress and emit
+  quest consequences, but general branching/arithmetic and weather, dialogue,
+  faction, reputation, inventory, combat, or magic script surfaces are absent.
 - The packaged default is the verified installed vanilla manifest. Other
   loadouts still require bounded content generation and local record mappings;
   server discovery/history remain unfinished. The V2 baker binds TES3 content
@@ -526,10 +528,9 @@ and [`test_bake_tes3mp_content.py`](../../scripts/tests/test_bake_tes3mp_content
 
 ### Next milestone: broader executable gameplay scripts
 
-Expand the versioned immutable event/query and typed-command surface beyond the
-initial session-joined persistent-state callback, prioritizing weather,
-dialogue, factions, reputation, and quest consequences. TES3MP 0.8.x scripts
-and saves remain unsupported.
+Continue the versioned immutable event/query and typed-command surface with a
+bounded dialogue/faction/reputation slice or canonical weather consequences.
+TES3MP 0.8.x scripts and saves remain unsupported.
 
 ### Required before the desktop/PC-VR release
 
@@ -562,10 +563,11 @@ and do not enter protocol or canonical state.
 
 ## Verification snapshot
 
-The executable-module working tree passed focused script/runtime and baker
-tests, the dedicated-server application aggregate, the Windows server product
-build, all 198 repository Python tests, and patch-registry verification on
-2026-09-10. The full standalone aggregate also passed.
+The API-V4 quest-script working tree passed focused runtime/module tests, the
+dedicated-server and standalone aggregates, Windows OpenMW/server/headless
+builds, a fresh packaged bake/verify, all 198 repository Python tests, and
+patch-registry verification on 2026-09-10. The separate baseline-provenance
+verifier still reports the branch's pre-existing registry drift.
 
 Sanitizer/fuzzer profiles, non-Windows builds, PC-VR hardware, the upstream
 OpenMW baseline, and a visible OpenMW walkthrough were not run.

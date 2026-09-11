@@ -1,7 +1,13 @@
 TES3MP_SCRIPT_MODULE_V1
 abi 1
-api 3
+api 4
 entry joined
 callback 0 session_joined
 increment_integer 1 1
+end
+callback 1 session_joined
+quest_stage_equals 1 0
+journal_entry_absent 1
+set_quest_stage 1 10
+add_journal_entry 1 1
 end

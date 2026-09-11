@@ -459,7 +459,7 @@ int main()
     using namespace TES3MP::ServerApp;
     {
         const auto manifestId
-            = ContentManifestId::fromHex("a780a9f80eb69ee97972b684963813f495cefb2e4fb50f0f846da7da9fb6ff09");
+            = ContentManifestId::fromHex("afd2d1a2a6c8ba6a6ca826fe964122a8e8fc3830d8a366fa639cb6b925dd8da6");
         const auto spaces = parseCellSpaceDeclarations("interior:1;interior:2;interior:3;exterior:4");
         const auto cells = parseContentCells("interior:1;interior:2;interior:3;exterior:4:-2:-9");
         const auto movement = parseMovementProfile("sneak:4;walk:8;run:16;jump:12");
@@ -2214,13 +2214,14 @@ int main()
             = loadScriptPackageContent(contentRoot / "vanilla-scripts.txt", packagedConfig.contentManifest);
         auto* packagedScripts = std::get_if<ScriptPackageContent>(&packagedScriptsResult);
         assert(packagedCombat && packagedWorld && packagedScripts && packagedScripts->packages.size() == 1
-            && packagedScripts->modules.size() == 1 && packagedScripts->stateCatalog.entries().size() == 1);
+            && packagedScripts->modules.size() == 1 && packagedScripts->stateCatalog.entries().size() == 1
+            && packagedWorld->questJournal.quests().size() == 1 && packagedWorld->questJournal.journal().size() == 1);
         DeterministicServerScriptRuntime packagedScriptRuntime;
         assert(packagedScriptRuntime.configurePackages(packagedScripts->packages, packagedScripts->stateCatalog));
-        auto packagedModules
-            = loadExecutableScriptModules(contentRoot / "vanilla-scripts.txt", *packagedScripts, packagedScriptRuntime);
+        auto packagedModules = loadExecutableScriptModules(contentRoot / "vanilla-scripts.txt", *packagedScripts,
+            packagedWorld->globals, packagedWorld->questJournal, packagedScriptRuntime);
         assert(std::holds_alternative<ExecutableScriptModules>(packagedModules));
-        assert(std::get<ExecutableScriptModules>(packagedModules).callbackCount() == 1);
+        assert(std::get<ExecutableScriptModules>(packagedModules).callbackCount() == 2);
 
         auto queues = OutboundQueueSet::create(OutboundQueuePolicy{}, 1);
         auto timeouts = *SessionTimeoutPolicy::create(1'000'000, 1'000'000, 1'000'000);

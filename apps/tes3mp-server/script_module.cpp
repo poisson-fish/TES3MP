@@ -4,6 +4,7 @@
 #include <array>
 #include <bit>
 #include <charconv>
+#include <cmath>
 #include <fstream>
 #include <limits>
 #include <optional>
@@ -30,13 +31,44 @@ namespace TES3MP::ServerApp
             std::uint32_t units;
         };
 
-        using Instruction = std::variant<IncrementInteger, ConsumeBudget>;
+        struct QuestStageEquals
+        {
+            QuestId quest;
+            QuestStage stage;
+        };
+
+        struct JournalEntryAbsent
+        {
+            JournalEntryId entry;
+        };
+
+        struct GlobalEquals
+        {
+            GlobalVariableId id;
+            GlobalVariableValue value;
+        };
+
+        struct SetQuestStage
+        {
+            QuestId quest;
+            QuestStage stage;
+        };
+
+        struct AddJournalEntry
+        {
+            QuestId quest;
+            JournalEntryId entry;
+        };
+
+        using Instruction = std::variant<IncrementInteger, ConsumeBudget, QuestStageEquals, JournalEntryAbsent,
+            GlobalEquals, SetQuestStage, AddJournalEntry>;
 
         struct ParsedCallback
         {
             std::uint32_t order = 0;
             ServerScriptEventKind eventKind = ServerScriptEventKind::CommandFinalized;
             std::vector<Instruction> instructions;
+            bool sawAction = false;
         };
 
         class ModuleCallback final : public ServerScriptCallback
@@ -54,8 +86,49 @@ namespace TES3MP::ServerApp
             try
             {
                 std::uint32_t consumed = 0;
+                const auto* read = input.readModel();
                 for (const auto& instruction : mInstructions)
                 {
+                    if (!std::holds_alternative<QuestStageEquals>(instruction)
+                        && !std::holds_alternative<JournalEntryAbsent>(instruction)
+                        && !std::holds_alternative<GlobalEquals>(instruction))
+                        continue;
+                    if (consumed == mBudget || !read)
+                        return ServerScriptCallbackResult::Failed;
+                    ++consumed;
+                    if (const auto* questPredicate = std::get_if<QuestStageEquals>(&instruction))
+                    {
+                        const auto player = input.event().playerId();
+                        const auto current
+                            = player ? read->findQuestStage(*player, questPredicate->quest) : std::nullopt;
+                        if (!current)
+                            return ServerScriptCallbackResult::Failed;
+                        if (current->stage != questPredicate->stage)
+                            return ServerScriptCallbackResult::Accepted;
+                    }
+                    else if (const auto* journalPredicate = std::get_if<JournalEntryAbsent>(&instruction))
+                    {
+                        const auto player = input.event().playerId();
+                        if (!player)
+                            return ServerScriptCallbackResult::Accepted;
+                        if (read->findJournalEntry(*player, journalPredicate->entry))
+                            return ServerScriptCallbackResult::Accepted;
+                    }
+                    else if (const auto* globalPredicate = std::get_if<GlobalEquals>(&instruction))
+                    {
+                        const auto* current = read->findGlobal(globalPredicate->id);
+                        if (!current)
+                            return ServerScriptCallbackResult::Failed;
+                        if (current->value != globalPredicate->value)
+                            return ServerScriptCallbackResult::Accepted;
+                    }
+                }
+                for (const auto& instruction : mInstructions)
+                {
+                    if (std::holds_alternative<QuestStageEquals>(instruction)
+                        || std::holds_alternative<JournalEntryAbsent>(instruction)
+                        || std::holds_alternative<GlobalEquals>(instruction))
+                        continue;
                     const auto cost = std::holds_alternative<ConsumeBudget>(instruction)
                         ? std::get<ConsumeBudget>(instruction).units
                         : 1;
@@ -79,6 +152,26 @@ namespace TES3MP::ServerApp
                         if (output.enqueue(ServerScriptCompareAndSetPersistentCommand(
                                 increment->id, found->revision, *current + increment->delta))
                             != ServerScriptEmitResult::Accepted)
+                            return ServerScriptCallbackResult::Failed;
+                    }
+                    else if (const auto* setQuest = std::get_if<SetQuestStage>(&instruction))
+                    {
+                        const auto player = input.event().playerId();
+                        const auto current
+                            = player && read ? read->findQuestStage(*player, setQuest->quest) : std::nullopt;
+                        if (!player || !current
+                            || output.enqueue(ServerScriptSetQuestStageCommand(
+                                   *player, setQuest->quest, current->revision, setQuest->stage))
+                                != ServerScriptEmitResult::Accepted)
+                            return ServerScriptCallbackResult::Failed;
+                    }
+                    else if (const auto* addJournal = std::get_if<AddJournalEntry>(&instruction))
+                    {
+                        const auto player = input.event().playerId();
+                        if (!player || !read
+                            || output.enqueue(ServerScriptAddJournalEntryCommand(
+                                   *player, addJournal->quest, read->journalRevision(*player), addJournal->entry))
+                                != ServerScriptEmitResult::Accepted)
                             return ServerScriptCallbackResult::Failed;
                     }
                 }
@@ -128,7 +221,7 @@ namespace TES3MP::ServerApp
                     ++begin;
                 if (begin == line.size())
                     break;
-                if (result.size() == 3)
+                if (result.size() == 4)
                     return std::nullopt;
                 auto end = begin;
                 while (end < line.size() && line[end] != ' ' && line[end] != '\t')
@@ -276,7 +369,8 @@ namespace TES3MP::ServerApp
         };
 
         std::variant<ParsedModule, ExecutableScriptModuleError> parseModule(std::string_view text,
-            const ScriptModuleBinding& binding, const ServerScriptStateCatalog& stateCatalog) noexcept
+            const ScriptModuleBinding& binding, const ServerScriptStateCatalog& stateCatalog,
+            const GlobalVariableCatalog& globalCatalog, const QuestJournalCatalog& questJournalCatalog) noexcept
         try
         {
             ParsedModule module;
@@ -356,6 +450,7 @@ namespace TES3MP::ServerApp
                         if (callback->instructions.size() == MaximumScriptModuleInstructionsPerCallback)
                             return ExecutableScriptModuleError::InvalidResourceBounds;
                         callback->instructions.emplace_back(IncrementInteger{ *id, *delta });
+                        callback->sawAction = true;
                     }
                     else if ((*tokens)[0] == "consume")
                     {
@@ -365,6 +460,95 @@ namespace TES3MP::ServerApp
                         if (callback->instructions.size() == MaximumScriptModuleInstructionsPerCallback)
                             return ExecutableScriptModuleError::InvalidResourceBounds;
                         callback->instructions.emplace_back(ConsumeBudget{ *units });
+                        callback->sawAction = true;
+                    }
+                    else if ((*tokens)[0] == "quest_stage_equals" || (*tokens)[0] == "set_quest_stage")
+                    {
+                        const auto rawQuest = tokens->size() == 3 ? number<std::uint64_t>((*tokens)[1]) : std::nullopt;
+                        const auto rawStage = tokens->size() == 3 ? number<std::uint64_t>((*tokens)[2]) : std::nullopt;
+                        const auto quest = rawQuest ? QuestId::fromValue(*rawQuest) : std::nullopt;
+                        const auto stage = rawStage ? QuestStage::fromValue(*rawStage) : std::nullopt;
+                        const auto* declaration = quest ? questJournalCatalog.findQuest(*quest) : nullptr;
+                        if (!callback || !quest || !stage
+                            || ((*tokens)[0] == "quest_stage_equals" && callback->sawAction))
+                            return ExecutableScriptModuleError::Malformed;
+                        if (!declaration || std::ranges::find(declaration->stages, *stage) == declaration->stages.end())
+                            return ExecutableScriptModuleError::InvalidWorldCatalog;
+                        if (callback->instructions.size() == MaximumScriptModuleInstructionsPerCallback)
+                            return ExecutableScriptModuleError::InvalidResourceBounds;
+                        if ((*tokens)[0] == "quest_stage_equals")
+                            callback->instructions.emplace_back(QuestStageEquals{ *quest, *stage });
+                        else
+                        {
+                            callback->instructions.emplace_back(SetQuestStage{ *quest, *stage });
+                            callback->sawAction = true;
+                        }
+                    }
+                    else if ((*tokens)[0] == "journal_entry_absent")
+                    {
+                        const auto rawEntry = tokens->size() == 2 ? number<std::uint64_t>((*tokens)[1]) : std::nullopt;
+                        const auto entry = rawEntry ? JournalEntryId::fromValue(*rawEntry) : std::nullopt;
+                        if (!callback || !entry || callback->sawAction)
+                            return ExecutableScriptModuleError::Malformed;
+                        if (!questJournalCatalog.findJournalEntry(*entry))
+                            return ExecutableScriptModuleError::InvalidWorldCatalog;
+                        if (callback->instructions.size() == MaximumScriptModuleInstructionsPerCallback)
+                            return ExecutableScriptModuleError::InvalidResourceBounds;
+                        callback->instructions.emplace_back(JournalEntryAbsent{ *entry });
+                    }
+                    else if ((*tokens)[0] == "add_journal_entry")
+                    {
+                        const auto rawQuest = tokens->size() == 3 ? number<std::uint64_t>((*tokens)[1]) : std::nullopt;
+                        const auto rawEntry = tokens->size() == 3 ? number<std::uint64_t>((*tokens)[2]) : std::nullopt;
+                        const auto quest = rawQuest ? QuestId::fromValue(*rawQuest) : std::nullopt;
+                        const auto entry = rawEntry ? JournalEntryId::fromValue(*rawEntry) : std::nullopt;
+                        const auto* declaration = entry ? questJournalCatalog.findJournalEntry(*entry) : nullptr;
+                        if (!callback || !quest || !entry)
+                            return ExecutableScriptModuleError::Malformed;
+                        if (!declaration || declaration->quest != *quest)
+                            return ExecutableScriptModuleError::InvalidWorldCatalog;
+                        if (callback->instructions.size() == MaximumScriptModuleInstructionsPerCallback)
+                            return ExecutableScriptModuleError::InvalidResourceBounds;
+                        callback->instructions.emplace_back(AddJournalEntry{ *quest, *entry });
+                        callback->sawAction = true;
+                    }
+                    else if ((*tokens)[0] == "global_equals")
+                    {
+                        const auto rawId = tokens->size() == 4 ? number<std::uint64_t>((*tokens)[1]) : std::nullopt;
+                        const auto id = rawId ? GlobalVariableId::fromValue(*rawId) : std::nullopt;
+                        const auto* declaration = id ? globalCatalog.find(*id) : nullptr;
+                        if (!callback || !id || !declaration || callback->sawAction)
+                            return !callback || !id ? ExecutableScriptModuleError::Malformed
+                                                    : ExecutableScriptModuleError::InvalidWorldCatalog;
+                        GlobalVariableValue value;
+                        if ((*tokens)[2] == "short")
+                        {
+                            const auto parsed = number<std::int16_t>((*tokens)[3]);
+                            if (!parsed)
+                                return ExecutableScriptModuleError::Malformed;
+                            value = *parsed;
+                        }
+                        else if ((*tokens)[2] == "long")
+                        {
+                            const auto parsed = number<std::int32_t>((*tokens)[3]);
+                            if (!parsed)
+                                return ExecutableScriptModuleError::Malformed;
+                            value = *parsed;
+                        }
+                        else if ((*tokens)[2] == "float")
+                        {
+                            const auto parsed = number<float>((*tokens)[3]);
+                            if (!parsed || !std::isfinite(*parsed))
+                                return ExecutableScriptModuleError::Malformed;
+                            value = *parsed;
+                        }
+                        else
+                            return ExecutableScriptModuleError::Malformed;
+                        if (value.index() != declaration->initialValue.index())
+                            return ExecutableScriptModuleError::InvalidWorldCatalog;
+                        if (callback->instructions.size() == MaximumScriptModuleInstructionsPerCallback)
+                            return ExecutableScriptModuleError::InvalidResourceBounds;
+                        callback->instructions.emplace_back(GlobalEquals{ *id, value });
                     }
                     else if ((*tokens)[0] == "end")
                     {
@@ -401,7 +585,8 @@ namespace TES3MP::ServerApp
     }
 
     ExecutableScriptModuleLoadResult loadExecutableScriptModules(const std::filesystem::path& packageContentPath,
-        const ScriptPackageContent& content, DeterministicServerScriptRuntime& runtime) noexcept
+        const ScriptPackageContent& content, const GlobalVariableCatalog& globalCatalog,
+        const QuestJournalCatalog& questJournalCatalog, DeterministicServerScriptRuntime& runtime) noexcept
     try
     {
         if (content.modules.size() != content.packages.size())
@@ -444,7 +629,7 @@ namespace TES3MP::ServerApp
             if (sha256(bytes) != binding.sha256)
                 return ExecutableScriptModuleError::HashMismatch;
             const std::string_view text(reinterpret_cast<const char*>(bytes.data()), bytes.size());
-            auto parsed = parseModule(text, binding, content.stateCatalog);
+            auto parsed = parseModule(text, binding, content.stateCatalog, globalCatalog, questJournalCatalog);
             const auto* module = std::get_if<ParsedModule>(&parsed);
             if (!module)
                 return std::get<ExecutableScriptModuleError>(parsed);

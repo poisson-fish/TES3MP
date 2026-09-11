@@ -29,6 +29,7 @@ namespace TES3MP::ServerApp
         EntrypointMissing,
         InvalidResourceBounds,
         InvalidStateCatalog,
+        InvalidWorldCatalog,
         RegistrationFailed,
     };
 
@@ -45,14 +46,16 @@ namespace TES3MP::ServerApp
 
     private:
         friend std::variant<ExecutableScriptModules, ExecutableScriptModuleError> loadExecutableScriptModules(
-            const std::filesystem::path&, const ScriptPackageContent&, DeterministicServerScriptRuntime&) noexcept;
+            const std::filesystem::path&, const ScriptPackageContent&, const GlobalVariableCatalog&,
+            const QuestJournalCatalog&, DeterministicServerScriptRuntime&) noexcept;
         std::vector<std::unique_ptr<ServerScriptCallback>> mCallbacks;
     };
 
     using ExecutableScriptModuleLoadResult = std::variant<ExecutableScriptModules, ExecutableScriptModuleError>;
 
     ExecutableScriptModuleLoadResult loadExecutableScriptModules(const std::filesystem::path& packageContentPath,
-        const ScriptPackageContent& content, DeterministicServerScriptRuntime& runtime) noexcept;
+        const ScriptPackageContent& content, const GlobalVariableCatalog& globalCatalog,
+        const QuestJournalCatalog& questJournalCatalog, DeterministicServerScriptRuntime& runtime) noexcept;
 }
 
 #endif

@@ -73,20 +73,12 @@ variable <package-id> <variable-id> float <finite-double>
 variable <package-id> <variable-id> string_hex <lowercase-hex-bytes|->
 ```
 
-Package and variable declarations may be authored in any order; startup sorts
-them by load order/package identity and package/variable identity respectively.
-IDs are nonzero, package IDs are unique, variables reference a declared
-package, API version is 3, and module ABI version is 1. A module filename is a
-bounded leaf name beside the package catalog; its exact bytes must match the
-declared lowercase SHA-256. Entrypoints are bounded identifiers and execution
-budgets are in the range 1–4,096. The exact ordered package versions/API and
-complete typed initial-value catalog bind V2
-persistence. A package upgrade or catalog change therefore rejects an existing
-prefix instead of silently restoring incompatible state. `-` encodes an empty
-string. V1 package catalogs have no executable binding and are rejected. The
-baker validates, hashes, copies, and rebinds the catalog and every referenced
-module into the immutable content pack; module bytes participate in the pack's
-manifest identity.
+Startup sorts declarations canonically. IDs are nonzero, package IDs are
+unique, variables reference a package, API is 4, and ABI is 1. Module leaf
+names, SHA-256 values, entrypoints, and budgets (1–4,096) are bounded. Ordered
+package versions/API and the typed initial-value catalog bind V2 persistence,
+so incompatible state rejects. `-` is an empty string. V1 catalogs reject. The
+baker validates, copies, and rebinds modules; their bytes enter pack identity.
 
 Module artifacts are ASCII files limited to 64 KiB, 16 callbacks per module,
 64 instructions per callback, and the package's declared execution budget per
@@ -96,23 +88,28 @@ narrow:
 ```text
 TES3MP_SCRIPT_MODULE_V1
 abi 1
-api 3
+api 4
 entry <entrypoint>
 callback <callback-order> <command_finalized|session_joined|spatial_state_changed|session_lifecycle>
 increment_integer <declared-integer-variable-id> <nonzero-signed-delta>
+global_equals <global-id> <short|long|float> <value>
+quest_stage_equals <quest-id> <stage>
+journal_entry_absent <journal-entry-id>
+set_quest_stage <quest-id> <stage>
+add_journal_entry <quest-id> <journal-entry-id>
 consume <positive-budget-units>
 end
 ```
 
-`increment_integer` reads only the package's immutable persistent-state view
-and emits a typed revision-checked compare-and-set command for the next tick.
-`consume` performs no mutation and exists to make execution metering explicit
-and testable. An unknown instruction, variable/type mismatch, missing export,
-hash/API/ABI mismatch, resource overflow, arithmetic overflow, or exhausted
-execution budget fails closed and terminates the script runtime without
-publishing partial callback output. Modules are instantiated in canonical
-package/load order. Persistent state is restored and bound before the first
-committed publication can invoke one.
+Predicates read a copied immutable snapshot of typed globals and per-player
+quest/journal state; a false predicate emits nothing. Quest and journal actions
+derive expected revisions from that snapshot and queue typed next-tick commands.
+Predicates must precede actions in a callback.
+Startup validates every variable, global type, quest stage, journal entry, and
+quest-entry relationship against the manifest catalogs. Each predicate and
+action costs one budget unit; `consume` costs its declared units. Invalid input,
+overflow, or exhaustion terminates execution and publishes no callback output.
+Modules use canonical package/load order, after durable state is restored.
 
 Broad mod support still requires a bounded extractor for cells, actors,
 objects, inventories, collision, combat, and mappings from load-order winners.
