@@ -63,13 +63,17 @@ namespace
         ItemPrototypeCatalog catalog;
         CanonicalInventoryWorld inventory;
         CanonicalCombatWorld combat;
+        InteractiveObjectCatalog objectCatalog;
+        CanonicalInteractiveObjectWorld objects;
+        ActorCatalog actorCatalog;
+        CanonicalActorWorld actors;
     };
 
-    DurableDomains domains(std::uint32_t count, float health, std::uint64_t randomSeed)
+    DurableDomains domains(std::uint32_t count, float health, std::uint64_t randomSeed, bool actorDead = false)
     {
         const auto manifest = testContentManifest();
         const std::array declarations{ ItemPrototypeDeclaration{
-            id<ItemPrototypeId>(1), ItemCategory::Miscellaneous, 1, 1, 0, 0, 0, true, std::nullopt } };
+            id<ItemPrototypeId>(1), ItemCategory::Miscellaneous, 1, 1, 0, 0, 0, true, id<KeyPrototypeId>(500) } };
         auto catalog = ItemPrototypeCatalog::create(manifest, declarations).value();
         CanonicalPlayerInventoryState inventoryPlayer{ .player = id<PlayerId>(1),
             .revision = id<InventoryRevision>(count),
@@ -88,38 +92,90 @@ namespace
         OpenMwMeleeVictim victim;
         victim.health = health;
         victim.fatigue = 100.f;
+        victim.dead = health <= 0.f;
         const std::array combatPlayers{ CanonicalPlayerCombatState{ .playerId = id<PlayerId>(1),
             .revision = id<CombatRevision>(count),
             .stats = attacker,
             .maximumEncumbranceWeightUnits = 100,
             .victim = victim,
             .respawnVictim = victim,
+            .deathTick = victim.dead ? std::optional(id<ServerTick>(count)) : std::nullopt,
             .maximumHealth = 100.f,
             .maximumFatigue = 100.f } };
+        OpenMwMeleeVictim actorVictim;
+        actorVictim.health = actorDead ? 0.f : 20.f;
+        actorVictim.fatigue = 50.f;
+        actorVictim.dead = actorDead;
+        OpenMwMeleeVictim actorRespawn = actorVictim;
+        actorRespawn.health = 20.f;
+        actorRespawn.dead = false;
+        const std::array combatActors{ CanonicalActorCombatState{ .actorId = id<ActorId>(1),
+            .revision = id<CombatRevision>(count),
+            .stats = actorVictim,
+            .respawnStats = actorRespawn,
+            .attackReachQuanta = 128,
+            .aggressionTarget = id<PlayerId>(1),
+            .lastAttackTick = id<ServerTick>(count),
+            .deathTick = actorDead ? std::optional(id<ServerTick>(count)) : std::nullopt,
+            .maximumHealth = 20.f,
+            .maximumFatigue = 50.f } };
         const auto key = RandomStreamKey::fromValues(5, 0).value();
-        auto combat = std::get<CanonicalCombatWorld>(createCanonicalCombatWorld(
-            combatPlayers, {}, Xoshiro256StarStar::fromWorldSeed(randomSeed, key).snapshot(), id<ServerTick>(count)));
-        return { std::move(catalog), std::move(inventory), std::move(combat) };
+        auto combat = std::get<CanonicalCombatWorld>(createCanonicalCombatWorld(combatPlayers, combatActors,
+            Xoshiro256StarStar::fromWorldSeed(randomSeed, key).snapshot(), id<ServerTick>(count)));
+
+        const auto zero = Turn32::fromValue(0);
+        const auto cell = CellId::interior(id<CellSpaceId>(7));
+        const auto doorRoot = Transform(cell, Position3(10, 20, 30), Orientation3(zero, zero, zero));
+        const std::array objectEntries{ InteractiveObjectCatalogEntry{ id<InteractiveObjectId>(1),
+            InteractiveObjectKind::StandardDoor, cell, doorRoot, std::nullopt,
+            ObjectLockDeclaration{ true, 25, id<KeyPrototypeId>(500) },
+            ObjectTrapDeclaration{ true, id<TrapPrototypeId>(600) } } };
+        auto objectCatalog = *InteractiveObjectCatalog::create(manifest, objectEntries);
+        auto objects
+            = std::get<CanonicalInteractiveObjectWorld>(createInitialCanonicalInteractiveObjectWorld(objectCatalog));
+        if (count > 1)
+        {
+            const std::array changed{ CanonicalInteractiveObjectState(id<InteractiveObjectId>(1), cell,
+                DoorState::Closed, LockState::Unlocked, 25, id<KeyPrototypeId>(500), TrapState::Disarmed,
+                id<TrapPrototypeId>(600), id<ObjectRevision>(count), id<ServerTick>(count)) };
+            objects = std::get<CanonicalInteractiveObjectWorld>(createCanonicalInteractiveObjectWorld(changed));
+        }
+
+        const std::array waypoints{ Position3(1000, 0, 0) };
+        const std::array actorEntries{ ActorCatalogEntry{ id<ActorId>(1), id<EntityId>(200), id<ActorPrototypeId>(10),
+            Transform(cell, Position3(0, 0, 0), Orientation3(zero, zero, zero)),
+            *ActorAiPackage::create(ActorAiPackageKind::Travel, waypoints) } };
+        auto actorCatalog = *ActorCatalog::create(manifest, actorEntries);
+        const std::array actorStates{ CanonicalActorEntityState(id<ActorId>(1), id<EntityId>(200),
+            id<ActorPrototypeId>(10),
+            Transform(cell, Position3(static_cast<std::int64_t>(count), 0, 0), Orientation3(zero, zero, zero)),
+            actorDead ? LinearVelocity3(0, 0, 0) : LinearVelocity3(1, 0, 0), id<EntityRevision>(count),
+            AuthorityEpoch::initial(), id<ServerTick>(count), actorDead ? ActorActivity::Idle : ActorActivity::Travel,
+            0) };
+        auto actors = std::get<CanonicalActorWorld>(createCanonicalActorWorld(actorStates));
+        return { std::move(catalog), std::move(inventory), std::move(combat), std::move(objectCatalog),
+            std::move(objects), std::move(actorCatalog), std::move(actors) };
     }
 
     bool commitJoin(CanonicalPersistenceFile& file, CanonicalInventoryWorld* inventory = nullptr,
-        CanonicalCombatWorld* combat = nullptr)
+        CanonicalCombatWorld* combat = nullptr, CanonicalInteractiveObjectWorld* objects = nullptr,
+        CanonicalActorWorld* actors = nullptr, std::uint64_t tick = 1)
     {
         NullMetricSink metrics;
         NullStructuredEventSink events;
         Observability observability(metrics, events);
         auto empty = std::get<CanonicalServerState>(createCanonicalServerState({}, {}));
         CanonicalCommandReducer reducer(std::move(empty), observability, testContentManifest());
-        if (!reducer.configureDurability(file, inventory, combat))
+        if (!reducer.configureDurability(file, inventory, combat, objects, actors))
             return false;
         CanonicalSessionProgress session(
             id<SessionId>(1), id<SessionGeneration>(1), id<PlayerId>(1), id<EntityId>(2), std::nullopt);
-        auto prepared = reducer.prepareJoin(player(), session, id<ServerTick>(1));
+        auto prepared = reducer.prepareJoin(player(), session, id<ServerTick>(tick));
         return prepared && reducer.commit(std::move(*prepared));
     }
 
-    bool advance(CanonicalPersistenceFile& file, CanonicalInventoryWorld& inventory, CanonicalCombatWorld& combat,
-        std::uint64_t firstTick, std::uint64_t lastTick)
+    bool advance(
+        CanonicalPersistenceFile& file, DurableDomains& domains, std::uint64_t firstTick, std::uint64_t lastTick)
     {
         NullMetricSink metrics;
         NullStructuredEventSink events;
@@ -132,7 +188,7 @@ namespace
         CanonicalCommandReducer reducer(std::move(*restored), *file.restoredStateVersion(),
             *file.restoredCanonicalRevision(), *file.restoredCheckpointTick(), observability, CanonicalSinkBundle{},
             testContentManifest(), collision);
-        if (!reducer.configureDurability(file, &inventory, &combat))
+        if (!reducer.configureDurability(file, &domains.inventory, &domains.combat, &domains.objects, &domains.actors))
             return false;
         CanonicalSessionProgress session(
             id<SessionId>(1), id<SessionGeneration>(2), id<PlayerId>(1), id<EntityId>(2), std::nullopt);
@@ -189,12 +245,13 @@ namespace
         auto expected = domains(2, 75.f, 20);
         auto opened = CanonicalPersistenceFile::open(path, identity());
         auto* file = std::get_if<std::unique_ptr<CanonicalPersistenceFile>>(&opened);
-        if (!file || !commitJoin(**file, &expected.inventory, &expected.combat))
+        if (!file || !commitJoin(**file, &expected.inventory, &expected.combat, &expected.objects, &expected.actors, 2))
             return false;
         file->reset();
         auto reopened = CanonicalPersistenceFile::open(path, identity());
         auto* restoredFile = std::get_if<std::unique_ptr<CanonicalPersistenceFile>>(&reopened);
-        if (!restoredFile || !(*restoredFile)->restoredInventory() || !(*restoredFile)->restoredCombat())
+        if (!restoredFile || !(*restoredFile)->restoredInventory() || !(*restoredFile)->restoredCombat()
+            || !(*restoredFile)->restoredObjects() || !(*restoredFile)->restoredActors())
             return false;
         const auto& inventory = *(*restoredFile)->restoredInventory();
         auto rebuiltInventory = CanonicalInventoryWorld::create(testContentManifest(), expected.catalog,
@@ -207,12 +264,19 @@ namespace
             : std::variant<CanonicalCombatWorld, CanonicalCombatWorldError>(
                   CanonicalCombatWorldError{ CanonicalCombatWorldErrorCode::InvalidStat });
         const auto* rebuiltCombatWorld = std::get_if<CanonicalCombatWorld>(&rebuiltCombat);
+        const auto rebuiltObjects = restoreCanonicalInteractiveObjectWorld(
+            expected.objectCatalog, (*restoredFile)->restoredObjects()->objects);
+        const auto rebuiltActors
+            = restoreCanonicalActorWorld(expected.actorCatalog, (*restoredFile)->restoredActors()->actors);
         const auto* latest = (*restoredFile)->prefix().latest();
         return rebuiltInventory && *rebuiltInventory == expected.inventory && rebuiltCombatWorld
-            && *rebuiltCombatWorld == expected.combat && latest
+            && *rebuiltCombatWorld == expected.combat && std::get_if<CanonicalInteractiveObjectWorld>(&rebuiltObjects)
+            && *std::get_if<CanonicalInteractiveObjectWorld>(&rebuiltObjects) == expected.objects
+            && std::get_if<CanonicalActorWorld>(&rebuiltActors)
+            && *std::get_if<CanonicalActorWorld>(&rebuiltActors) == expected.actors && latest
             && latest->canonicalChecksum()
             == canonicalDurableStateChecksumV1(latest->stateVersion(), latest->checkpointTick(), latest->players(),
-                latest->inventory(), latest->combat());
+                latest->inventory(), latest->combat(), latest->objects(), latest->actors());
     }
 
     std::vector<char> read(const std::filesystem::path& path)
@@ -272,17 +336,27 @@ namespace
     }
 
     bool matchesDomains(const CanonicalPersistenceFile& file, std::uint32_t count, float health,
-        std::array<std::uint64_t, 4> randomWords, CanonicalChecksum checksum)
+        std::array<std::uint64_t, 4> randomWords, CanonicalChecksum checksum, bool actorDead = false)
     {
         const auto* inventory = file.restoredInventory();
         const auto* combat = file.restoredCombat();
+        const auto* objects = file.restoredObjects();
+        const auto* actors = file.restoredActors();
         const auto* latest = file.prefix().latest();
-        return inventory && combat && latest && inventory->players.size() == 1
+        return inventory && combat && objects && actors && latest && inventory->players.size() == 1
             && inventory->players.front().stacks.size() == 1 && inventory->players.front().stacks.front().count == count
             && combat->players.size() == 1 && combat->players.front().victim.health == health
-            && combat->randomWords == randomWords && latest->canonicalChecksum() == checksum
+            && objects->objects.size() == 1 && objects->objects.front().doorState() == DoorState::Closed
+            && objects->objects.front().lockState() == (count == 1 ? LockState::Locked : LockState::Unlocked)
+            && actors->actors.size() == 1
+            && actors->actors.front().root().position().x() == static_cast<std::int64_t>(count)
+            && combat->actors.size() == 1 && combat->actors.front().stats.dead == actorDead
+            && combat->actors.front().respawnStats.health == 20.f && !combat->actors.front().respawnStats.dead
+            && combat->actors.front().lastAttackTick == id<ServerTick>(count)
+            && combat->actors.front().deathTick.has_value() == actorDead && combat->randomWords == randomWords
+            && latest->canonicalChecksum() == checksum
             && canonicalDurableStateChecksumV1(latest->stateVersion(), latest->checkpointTick(), latest->players(),
-                   latest->inventory(), latest->combat())
+                   latest->inventory(), latest->combat(), latest->objects(), latest->actors())
             == checksum;
     }
 
@@ -293,12 +367,12 @@ namespace
         auto state = domains(1, 100.f, 10);
         auto opened = CanonicalPersistenceFile::open(path, identity());
         auto* file = std::get_if<std::unique_ptr<CanonicalPersistenceFile>>(&opened);
-        if (!file || !commitJoin(**file, &state.inventory, &state.combat))
+        if (!file || !commitJoin(**file, &state.inventory, &state.combat, &state.objects, &state.actors))
         {
             std::cerr << "compaction setup failed\n";
             return false;
         }
-        if (!advance(**file, state.inventory, state.combat, 2, 41))
+        if (!advance(**file, state, 2, 41))
         {
             std::cerr << "compaction advance failed at durable tick "
                       << ((*file)->restoredCheckpointTick() ? (*file)->restoredCheckpointTick()->value() : 9999)
@@ -317,21 +391,23 @@ namespace
         return result;
     }
 
-    bool crash_cuts_select_the_previous_or_new_complete_multi_domain_tick()
+    bool crash_cuts_preserve_key_door_and_actor_attack_ticks()
     {
         TemporaryDirectory directory;
         const auto path = directory.path() / "world.t3p";
         auto previousDomains = domains(1, 100.f, 10);
         auto opened = CanonicalPersistenceFile::open(path, identity());
         auto* file = std::get_if<std::unique_ptr<CanonicalPersistenceFile>>(&opened);
-        if (!file || !commitJoin(**file, &previousDomains.inventory, &previousDomains.combat))
+        if (!file
+            || !commitJoin(**file, &previousDomains.inventory, &previousDomains.combat, &previousDomains.objects,
+                &previousDomains.actors))
             return false;
         const auto previousBytes = read(path);
         const auto previousChecksum = (*file)->prefix().latest()->canonicalChecksum();
         const auto previousRandom = previousDomains.combat.randomState().words();
 
         auto nextDomains = domains(2, 75.f, 20);
-        if (!advance(**file, nextDomains.inventory, nextDomains.combat, 2, 2))
+        if (!advance(**file, nextDomains, 2, 2))
             return false;
         const auto nextBytes = read(path);
         const auto nextChecksum = (*file)->prefix().latest()->canonicalChecksum();
@@ -356,6 +432,45 @@ namespace
         auto* recoveredFile = std::get_if<std::unique_ptr<CanonicalPersistenceFile>>(&recovered);
         return recoveredFile && matchesDomains(**recoveredFile, 2, 75.f, nextRandom, nextChecksum);
     }
+
+    bool crash_cuts_preserve_actor_death_and_respawn_state()
+    {
+        TemporaryDirectory directory;
+        const auto path = directory.path() / "actor-death.t3p";
+        auto before = domains(1, 100.f, 10);
+        auto opened = CanonicalPersistenceFile::open(path, identity());
+        auto* file = std::get_if<std::unique_ptr<CanonicalPersistenceFile>>(&opened);
+        if (!file || !commitJoin(**file, &before.inventory, &before.combat, &before.objects, &before.actors))
+            return false;
+        const auto previousBytes = read(path);
+        const auto previousChecksum = (*file)->prefix().latest()->canonicalChecksum();
+        const auto previousRandom = before.combat.randomState().words();
+
+        auto after = domains(2, 75.f, 20, true);
+        if (!advance(**file, after, 2, 2))
+            return false;
+        const auto nextBytes = read(path);
+        const auto nextChecksum = (*file)->prefix().latest()->canonicalChecksum();
+        const auto nextRandom = after.combat.randomState().words();
+        file->reset();
+
+        auto temporary = path;
+        temporary += ".tmp";
+        for (std::size_t cut = 0; cut <= nextBytes.size(); ++cut)
+        {
+            write(path, previousBytes);
+            write(temporary, std::span(nextBytes).first(cut));
+            auto recovered = CanonicalPersistenceFile::open(path, identity());
+            auto* recoveredFile = std::get_if<std::unique_ptr<CanonicalPersistenceFile>>(&recovered);
+            if (!recoveredFile || !matchesDomains(**recoveredFile, 1, 100.f, previousRandom, previousChecksum, false))
+                return false;
+        }
+
+        write(path, nextBytes);
+        auto recovered = CanonicalPersistenceFile::open(path, identity());
+        auto* recoveredFile = std::get_if<std::unique_ptr<CanonicalPersistenceFile>>(&recovered);
+        return recoveredFile && matchesDomains(**recoveredFile, 2, 75.f, nextRandom, nextChecksum, true);
+    }
 }
 
 int main()
@@ -371,8 +486,10 @@ int main()
             &stale_uncommitted_temporary_file_never_replaces_the_committed_prefix },
         std::pair{ "bounded_compaction_keeps_one_checkpoint_and_a_bounded_tail",
             &bounded_compaction_keeps_one_checkpoint_and_a_bounded_tail },
-        std::pair{ "crash_cuts_select_the_previous_or_new_complete_multi_domain_tick",
-            &crash_cuts_select_the_previous_or_new_complete_multi_domain_tick },
+        std::pair{ "crash_cuts_preserve_key_door_and_actor_attack_ticks",
+            &crash_cuts_preserve_key_door_and_actor_attack_ticks },
+        std::pair{
+            "crash_cuts_preserve_actor_death_and_respawn_state", &crash_cuts_preserve_actor_death_and_respawn_state },
     };
     for (const auto& [name, test] : tests)
         if (!test())

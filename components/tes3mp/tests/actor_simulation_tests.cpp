@@ -25,18 +25,17 @@ namespace
 
     CanonicalServerState players(bool active, std::uint64_t cell = 7, std::uint64_t entity = 100)
     {
-        const std::array values{ CanonicalPlayerEntityState(id<PlayerId>(1), id<EntityId>(entity),
-            id<AppearanceId>(1), root(0, cell), LinearVelocity3(0, 0, 0), EntityRevision::initial(),
-            AuthorityEpoch::initial(), ServerTick::initial()) };
+        const std::array values{ CanonicalPlayerEntityState(id<PlayerId>(1), id<EntityId>(entity), id<AppearanceId>(1),
+            root(0, cell), LinearVelocity3(0, 0, 0), EntityRevision::initial(), AuthorityEpoch::initial(),
+            ServerTick::initial()) };
         if (!active)
             return std::get<CanonicalServerState>(createCanonicalServerState(values, {}));
-        const std::array sessions{ CanonicalSessionProgress(id<SessionId>(1), SessionGeneration::initial(),
-            id<PlayerId>(1), id<EntityId>(entity), std::nullopt) };
+        const std::array sessions{ CanonicalSessionProgress(
+            id<SessionId>(1), SessionGeneration::initial(), id<PlayerId>(1), id<EntityId>(entity), std::nullopt) };
         return std::get<CanonicalServerState>(createCanonicalServerState(values, sessions));
     }
 
-    ActorCatalog catalog(ActorAiPackageKind kind, std::span<const Position3> waypoints,
-        std::uint64_t entity = 200)
+    ActorCatalog catalog(ActorAiPackageKind kind, std::span<const Position3> waypoints, std::uint64_t entity = 200)
     {
         const std::array entries{ ActorCatalogEntry{ id<ActorId>(1), id<EntityId>(entity), id<ActorPrototypeId>(10),
             root(0), *ActorAiPackage::create(kind, waypoints) } };
@@ -79,17 +78,39 @@ namespace
         const auto actorCatalog = catalog(ActorAiPackageKind::Idle, {});
         const auto initial = std::get<CanonicalActorWorld>(createInitialCanonicalActorWorld(actorCatalog)).actors()[0];
         const std::array unordered{ CanonicalActorEntityState(id<ActorId>(2), id<EntityId>(201),
-            id<ActorPrototypeId>(11), initial.root(), initial.velocity(), initial.revision(), initial.authorityEpoch(),
-            initial.lastChangeTick(), initial.activity(), 0), initial };
-        const std::array duplicateEntity{ initial, CanonicalActorEntityState(id<ActorId>(2), initial.entityId(),
-            id<ActorPrototypeId>(11), initial.root(), initial.velocity(), initial.revision(), initial.authorityEpoch(),
-            initial.lastChangeTick(), initial.activity(), 0) };
+                                        id<ActorPrototypeId>(11), initial.root(), initial.velocity(),
+                                        initial.revision(), initial.authorityEpoch(), initial.lastChangeTick(),
+                                        initial.activity(), 0),
+            initial };
+        const std::array duplicateEntity{ initial,
+            CanonicalActorEntityState(id<ActorId>(2), initial.entityId(), id<ActorPrototypeId>(11), initial.root(),
+                initial.velocity(), initial.revision(), initial.authorityEpoch(), initial.lastChangeTick(),
+                initial.activity(), 0) };
         const auto firstResult = createCanonicalActorWorld(unordered);
         const auto secondResult = createCanonicalActorWorld(duplicateEntity);
         const auto first = std::get_if<CanonicalActorWorldError>(&firstResult);
         const auto second = std::get_if<CanonicalActorWorldError>(&secondResult);
-        return first && first->code == CanonicalActorWorldErrorCode::ActorIdsNotStrictlyOrdered
-            && second && second->code == CanonicalActorWorldErrorCode::DuplicateEntityId;
+        return first && first->code == CanonicalActorWorldErrorCode::ActorIdsNotStrictlyOrdered && second
+            && second->code == CanonicalActorWorldErrorCode::DuplicateEntityId;
+    }
+
+    bool durable_actor_restore_requires_the_exact_catalog()
+    {
+        const std::array route{ Position3(10000, 0, 0) };
+        const auto actorCatalog = catalog(ActorAiPackageKind::Travel, route);
+        const auto initial = std::get<CanonicalActorWorld>(createInitialCanonicalActorWorld(actorCatalog));
+        RecordingCollision collision;
+        const auto advanced = advanceActorSimulation(
+            initial, actorCatalog, players(true), id<ServerTick>(1), testMovementProfile(), collision);
+        const auto* world = std::get_if<CanonicalActorWorld>(&advanced);
+        if (!world
+            || !std::holds_alternative<CanonicalActorWorld>(restoreCanonicalActorWorld(actorCatalog, world->actors())))
+            return false;
+        const auto mismatchedCatalog = catalog(ActorAiPackageKind::Travel, route, 201);
+        const auto mismatch = restoreCanonicalActorWorld(mismatchedCatalog, world->actors());
+        const auto* error = std::get_if<CanonicalActorWorldError>(&mismatch);
+        return error && error->code == CanonicalActorWorldErrorCode::CatalogMismatch
+            && std::holds_alternative<CanonicalActorWorldError>(restoreCanonicalActorWorld(actorCatalog, {}));
     }
 
     bool inactive_exact_cell_freezes_without_collision_or_revision()
@@ -98,8 +119,8 @@ namespace
         const auto actorCatalog = catalog(ActorAiPackageKind::Travel, route);
         const auto before = std::get<CanonicalActorWorld>(createInitialCanonicalActorWorld(actorCatalog));
         RecordingCollision collision;
-        const auto result = advanceActorSimulation(before, actorCatalog, players(false), id<ServerTick>(1),
-            testMovementProfile(), collision);
+        const auto result = advanceActorSimulation(
+            before, actorCatalog, players(false), id<ServerTick>(1), testMovementProfile(), collision);
         const auto* after = std::get_if<CanonicalActorWorld>(&result);
         return after && *after == before && collision.calls == 0;
     }
@@ -110,8 +131,8 @@ namespace
         const auto actorCatalog = catalog(ActorAiPackageKind::Travel, route);
         const auto before = std::get<CanonicalActorWorld>(createInitialCanonicalActorWorld(actorCatalog));
         RecordingCollision collision;
-        const auto result = advanceActorSimulation(before, actorCatalog, players(true), id<ServerTick>(1),
-            testMovementProfile(), collision);
+        const auto result = advanceActorSimulation(
+            before, actorCatalog, players(true), id<ServerTick>(1), testMovementProfile(), collision);
         const auto* after = std::get_if<CanonicalActorWorld>(&result);
         if (!after)
             return false;
@@ -127,8 +148,8 @@ namespace
         const auto before = std::get<CanonicalActorWorld>(createInitialCanonicalActorWorld(actorCatalog));
         RecordingCollision collision;
         collision.block = true;
-        const auto result = advanceActorSimulation(before, actorCatalog, players(true), id<ServerTick>(1),
-            testMovementProfile(), collision);
+        const auto result = advanceActorSimulation(
+            before, actorCatalog, players(true), id<ServerTick>(1), testMovementProfile(), collision);
         const auto* after = std::get_if<CanonicalActorWorld>(&result);
         return after && *after == before && collision.calls == 1;
     }
@@ -139,19 +160,19 @@ namespace
         RecordingCollision collision;
         const auto travelCatalog = catalog(ActorAiPackageKind::Travel, one);
         const auto travelBefore = std::get<CanonicalActorWorld>(createInitialCanonicalActorWorld(travelCatalog));
-        const auto travelResult = advanceActorSimulation(travelBefore, travelCatalog, players(true),
-            id<ServerTick>(1), testMovementProfile(), collision);
+        const auto travelResult = advanceActorSimulation(
+            travelBefore, travelCatalog, players(true), id<ServerTick>(1), testMovementProfile(), collision);
         const auto* travelAfter = std::get_if<CanonicalActorWorld>(&travelResult);
 
         const std::array loop{ Position3(0, 0, 0), Position3(10, 0, 0) };
         const auto wanderCatalog = catalog(ActorAiPackageKind::Wander, loop);
         const auto wanderBefore = std::get<CanonicalActorWorld>(createInitialCanonicalActorWorld(wanderCatalog));
-        const auto wanderResult = advanceActorSimulation(wanderBefore, wanderCatalog, players(true),
-            id<ServerTick>(1), testMovementProfile(), collision);
+        const auto wanderResult = advanceActorSimulation(
+            wanderBefore, wanderCatalog, players(true), id<ServerTick>(1), testMovementProfile(), collision);
         const auto* wanderAfter = std::get_if<CanonicalActorWorld>(&wanderResult);
         return travelAfter && travelAfter->actors()[0].activity() == ActorActivity::Idle
-            && travelAfter->actors()[0].revision().value() == 2
-            && wanderAfter && wanderAfter->actors()[0].activity() == ActorActivity::Wander
+            && travelAfter->actors()[0].revision().value() == 2 && wanderAfter
+            && wanderAfter->actors()[0].activity() == ActorActivity::Wander
             && wanderAfter->actors()[0].waypointIndex() == 1;
     }
 
@@ -164,8 +185,8 @@ namespace
         const auto actorCatalog = *ActorCatalog::create(testContentManifest(), entries);
         const auto before = std::get<CanonicalActorWorld>(createInitialCanonicalActorWorld(actorCatalog));
         RecordingCollision collision;
-        const auto result = advanceActorSimulation(before, actorCatalog, players(true), id<ServerTick>(1),
-            testMovementProfile(), collision);
+        const auto result = advanceActorSimulation(
+            before, actorCatalog, players(true), id<ServerTick>(1), testMovementProfile(), collision);
         const auto* after = std::get_if<CanonicalActorWorld>(&result);
         return after && after->actors()[0].velocity().x() == 4097
             && after->actors()[0].root().position().x() == std::numeric_limits<std::int64_t>::min() + 4097;
@@ -190,14 +211,14 @@ namespace
             initial.lastChangeTick(), initial.activity(), 0) };
         const auto wrongCell = std::get<CanonicalActorWorld>(createCanonicalActorWorld(wrongCellValues));
         RecordingCollision collision;
-        const auto staleResult = advanceActorSimulation(stale, actorCatalog, players(true), id<ServerTick>(4),
-            testMovementProfile(), collision);
-        const auto maximumResult = advanceActorSimulation(maximum, actorCatalog, players(true), id<ServerTick>(1),
-            testMovementProfile(), collision);
-        const auto mismatchResult = advanceActorSimulation(base, actorCatalog, players(true, 7, 200),
-            id<ServerTick>(1), testMovementProfile(), collision);
-        const auto wrongCellResult = advanceActorSimulation(wrongCell, actorCatalog, players(true, 8),
-            id<ServerTick>(1), testMovementProfile(), collision);
+        const auto staleResult = advanceActorSimulation(
+            stale, actorCatalog, players(true), id<ServerTick>(4), testMovementProfile(), collision);
+        const auto maximumResult = advanceActorSimulation(
+            maximum, actorCatalog, players(true), id<ServerTick>(1), testMovementProfile(), collision);
+        const auto mismatchResult = advanceActorSimulation(
+            base, actorCatalog, players(true, 7, 200), id<ServerTick>(1), testMovementProfile(), collision);
+        const auto wrongCellResult = advanceActorSimulation(
+            wrongCell, actorCatalog, players(true, 8), id<ServerTick>(1), testMovementProfile(), collision);
         return std::get<ActorSimulationError>(staleResult).code == ActorSimulationErrorCode::TickRegression
             && std::get<ActorSimulationError>(maximumResult).code == ActorSimulationErrorCode::RevisionExhausted
             && std::get<ActorSimulationError>(mismatchResult).code == ActorSimulationErrorCode::CatalogMismatch
@@ -211,8 +232,8 @@ namespace
         const auto eastCatalog = catalog(ActorAiPackageKind::Travel, eastRoute);
         const auto initialEast = std::get<CanonicalActorWorld>(createInitialCanonicalActorWorld(eastCatalog));
         RecordingCollision collision;
-        const auto advancedEast = advanceActorSimulation(initialEast, eastCatalog, players(true), id<ServerTick>(1),
-            testMovementProfile(), collision);
+        const auto advancedEast = advanceActorSimulation(
+            initialEast, eastCatalog, players(true), id<ServerTick>(1), testMovementProfile(), collision);
         const auto* eastWorld = std::get_if<CanonicalActorWorld>(&advancedEast);
         if (!eastWorld || eastWorld->actors()[0].root().orientation().z() != Turn32::fromValue(0x40000000))
             return false;
@@ -220,8 +241,8 @@ namespace
         const std::array southRoute{ Position3(0, -1000, 0) };
         const auto southCatalog = catalog(ActorAiPackageKind::Travel, southRoute);
         const auto initialSouth = std::get<CanonicalActorWorld>(createInitialCanonicalActorWorld(southCatalog));
-        const auto advancedSouth = advanceActorSimulation(initialSouth, southCatalog, players(true), id<ServerTick>(1),
-            testMovementProfile(), collision);
+        const auto advancedSouth = advanceActorSimulation(
+            initialSouth, southCatalog, players(true), id<ServerTick>(1), testMovementProfile(), collision);
         const auto* southWorld = std::get_if<CanonicalActorWorld>(&advancedSouth);
         if (!southWorld || southWorld->actors()[0].root().orientation().z() != Turn32::fromValue(0x80000000))
             return false;
@@ -229,8 +250,8 @@ namespace
         const std::array westRoute{ Position3(-1000, 0, 0) };
         const auto westCatalog = catalog(ActorAiPackageKind::Travel, westRoute);
         const auto initialWest = std::get<CanonicalActorWorld>(createInitialCanonicalActorWorld(westCatalog));
-        const auto advancedWest = advanceActorSimulation(initialWest, westCatalog, players(true), id<ServerTick>(1),
-            testMovementProfile(), collision);
+        const auto advancedWest = advanceActorSimulation(
+            initialWest, westCatalog, players(true), id<ServerTick>(1), testMovementProfile(), collision);
         const auto* westWorld = std::get_if<CanonicalActorWorld>(&advancedWest);
         if (!westWorld || westWorld->actors()[0].root().orientation().z() != Turn32::fromValue(0xc0000000))
             return false;
@@ -238,8 +259,8 @@ namespace
         const std::array northRoute{ Position3(0, 1000, 0) };
         const auto northCatalog = catalog(ActorAiPackageKind::Travel, northRoute);
         const auto initialNorth = std::get<CanonicalActorWorld>(createInitialCanonicalActorWorld(northCatalog));
-        const auto advancedNorth = advanceActorSimulation(initialNorth, northCatalog, players(true), id<ServerTick>(1),
-            testMovementProfile(), collision);
+        const auto advancedNorth = advanceActorSimulation(
+            initialNorth, northCatalog, players(true), id<ServerTick>(1), testMovementProfile(), collision);
         const auto* northWorld = std::get_if<CanonicalActorWorld>(&advancedNorth);
         if (!northWorld || northWorld->actors()[0].root().orientation().z() != Turn32::fromValue(0))
             return false;
@@ -253,29 +274,36 @@ namespace
         const auto before = std::get<CanonicalActorWorld>(createInitialCanonicalActorWorld(actorCatalog));
         auto spatial = players(true);
         const auto& originalPlayer = spatial.players()[0];
-        const std::array movedPlayers{ CanonicalPlayerEntityState(originalPlayer.playerId(),
-            originalPlayer.entityId(), originalPlayer.appearanceId(), root(10000), originalPlayer.linearVelocity(),
+        const std::array movedPlayers{ CanonicalPlayerEntityState(originalPlayer.playerId(), originalPlayer.entityId(),
+            originalPlayer.appearanceId(), root(10000), originalPlayer.linearVelocity(),
             originalPlayer.entityRevision(), originalPlayer.authorityEpoch(), originalPlayer.lastSpatialChangeTick()) };
         const std::array sessions{ spatial.activeSessions()[0] };
         spatial = std::get<CanonicalServerState>(createCanonicalServerState(movedPlayers, sessions));
         OpenMwMeleeVictim playerVictim;
         playerVictim.health = 20.f;
         const std::array combatPlayers{ CanonicalPlayerCombatState{ .playerId = id<PlayerId>(1),
-            .revision = CombatRevision::initial(), .maximumEncumbranceWeightUnits = 1,
-            .victim = playerVictim, .respawnVictim = playerVictim,
-            .maximumHealth = 20.f, .maximumFatigue = 0.f } };
+            .revision = CombatRevision::initial(),
+            .maximumEncumbranceWeightUnits = 1,
+            .victim = playerVictim,
+            .respawnVictim = playerVictim,
+            .maximumHealth = 20.f,
+            .maximumFatigue = 0.f } };
         OpenMwMeleeVictim actorVictim;
         actorVictim.health = 20.f;
         const std::array combatActors{ CanonicalActorCombatState{ .actorId = id<ActorId>(1),
-            .revision = CombatRevision::initial(), .stats = actorVictim, .respawnStats = actorVictim,
-            .attackReachQuanta = 100, .aggressionTarget = id<PlayerId>(1),
-            .maximumHealth = 20.f, .maximumFatigue = 0.f } };
+            .revision = CombatRevision::initial(),
+            .stats = actorVictim,
+            .respawnStats = actorVictim,
+            .attackReachQuanta = 100,
+            .aggressionTarget = id<PlayerId>(1),
+            .maximumHealth = 20.f,
+            .maximumFatigue = 0.f } };
         const auto key = *RandomStreamKey::fromValues(1, 1);
-        const auto combat = std::get<CanonicalCombatWorld>(createCanonicalCombatWorld(combatPlayers, combatActors,
-            Xoshiro256StarStar::fromWorldSeed(1, key).snapshot()));
+        const auto combat = std::get<CanonicalCombatWorld>(createCanonicalCombatWorld(
+            combatPlayers, combatActors, Xoshiro256StarStar::fromWorldSeed(1, key).snapshot()));
         RecordingCollision collision;
-        const auto result = advanceActorSimulation(before, actorCatalog, spatial, combat, id<ServerTick>(1),
-            testMovementProfile(), collision);
+        const auto result = advanceActorSimulation(
+            before, actorCatalog, spatial, combat, id<ServerTick>(1), testMovementProfile(), collision);
         const auto* after = std::get_if<CanonicalActorWorld>(&result);
         return after && collision.calls == 1 && after->actors()[0].root().position().x() == 4097
             && after->actors()[0].velocity().x() == 4097;
@@ -284,13 +312,12 @@ namespace
 
 int main()
 {
-    return initial_world_has_separate_stable_actor_identity()
-            && actor_world_is_bounded_ordered_unique_and_immutable()
+    return initial_world_has_separate_stable_actor_identity() && actor_world_is_bounded_ordered_unique_and_immutable()
+            && durable_actor_restore_requires_the_exact_catalog()
             && inactive_exact_cell_freezes_without_collision_or_revision()
             && active_travel_uses_server_movement_and_collision()
             && collision_can_stop_actor_without_client_result_authority()
-            && travel_stops_and_wander_cycles_at_waypoints()
-            && extreme_opposite_sign_waypoint_uses_bounded_step()
+            && travel_stops_and_wander_cycles_at_waypoints() && extreme_opposite_sign_waypoint_uses_bounded_step()
             && stale_tick_revision_exhaustion_and_catalog_mismatch_fail_atomically()
             && actor_simulation_updates_orientation_towards_movement_direction()
             && aggressive_actor_chases_the_canonical_player()

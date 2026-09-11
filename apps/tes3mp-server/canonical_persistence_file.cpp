@@ -191,6 +191,18 @@ namespace TES3MP::ServerApp
         return latest && latest->combat() ? &*latest->combat() : nullptr;
     }
 
+    const CanonicalDurableInteractiveObjectState* CanonicalPersistenceFile::restoredObjects() const noexcept
+    {
+        const auto* latest = mPrefix.latest();
+        return latest && latest->objects() ? &*latest->objects() : nullptr;
+    }
+
+    const CanonicalDurableActorState* CanonicalPersistenceFile::restoredActors() const noexcept
+    {
+        const auto* latest = mPrefix.latest();
+        return latest && latest->actors() ? &*latest->actors() : nullptr;
+    }
+
     bool CanonicalPersistenceFile::bindPlayerIdentities(const PlayerIdentityRegistry& identities) noexcept
     {
         if (mPlayerIdentities)
@@ -202,7 +214,8 @@ namespace TES3MP::ServerApp
     CanonicalDurabilityResult CanonicalPersistenceFile::commit(
         const std::shared_ptr<const CanonicalStatePublication>& candidate, CanonicalRevision canonicalRevision,
         std::span<const DurableCommandOrder> commands, const CanonicalInventoryWorld* inventory,
-        const CanonicalCombatWorld* combat) noexcept
+        const CanonicalCombatWorld* combat, const CanonicalInteractiveObjectWorld* objects,
+        const CanonicalActorWorld* actors) noexcept
     try
     {
         if (!candidate)
@@ -227,7 +240,7 @@ namespace TES3MP::ServerApp
             }
         std::ranges::sort(durablePlayers, {}, &CanonicalPlayerEntityState::playerId);
         auto transaction = CanonicalDurableTick::create(candidate->stateVersion(), canonicalRevision,
-            candidate->checkpointTick(), durablePlayers, commands, prior, inventory, combat);
+            candidate->checkpointTick(), durablePlayers, commands, prior, inventory, combat, objects, actors);
         if (!transaction)
             return CanonicalDurabilityResult::Rejected;
         std::vector<CanonicalDurableTick> transactions(mPrefix.transactions().begin(), mPrefix.transactions().end());
@@ -237,10 +250,11 @@ namespace TES3MP::ServerApp
             const auto& previous = transactions[transactions.size() - 2];
             auto checkpoint = CanonicalDurableTick::create(previous.stateVersion(), previous.canonicalRevision(),
                 previous.checkpointTick(), previous.players(), {}, CanonicalChecksum(0), previous.inventory(),
-                previous.combat());
+                previous.combat(), previous.objects(), previous.actors());
             auto newest = CanonicalDurableTick::create(candidate->stateVersion(), canonicalRevision,
                 candidate->checkpointTick(), durablePlayers, commands,
-                checkpoint ? checkpoint->transactionChecksum() : CanonicalChecksum(0), inventory, combat);
+                checkpoint ? checkpoint->transactionChecksum() : CanonicalChecksum(0), inventory, combat, objects,
+                actors);
             if (!checkpoint || !newest)
                 return CanonicalDurabilityResult::Rejected;
             transactions.clear();

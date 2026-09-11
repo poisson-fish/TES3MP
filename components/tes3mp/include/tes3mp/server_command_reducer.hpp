@@ -25,7 +25,7 @@ namespace TES3MP
         CanonicalInventoryWorld* inventory = nullptr;
         const ItemPrototypeCatalog* itemCatalog = nullptr;
         CanonicalCombatWorld* combat = nullptr;
-        const CanonicalActorWorld* actors = nullptr;
+        CanonicalActorWorld* actors = nullptr;
         const MeleeWeaponCatalog* meleeWeapons = nullptr;
         const OpenMwMeleeSettings* meleeSettings = nullptr;
         const MeleeAuthorityPolicy* meleePolicy = nullptr;
@@ -133,6 +133,7 @@ namespace TES3MP
             }
             const std::optional<CanonicalInventoryWorld>& candidateInventory() const noexcept { return mInventory; }
             const std::optional<CanonicalCombatWorld>& candidateCombat() const noexcept { return mCombat; }
+            const std::optional<CanonicalActorWorld>& candidateActors() const noexcept { return mActors; }
             std::span<const AuthoritativeMeleeEvent> combatEvents() const noexcept { return mCombatEvents; }
 
         private:
@@ -152,6 +153,8 @@ namespace TES3MP
             std::optional<CanonicalInventoryWorld> mInventory;
             std::optional<CanonicalCombatWorld> mBaseCombat;
             std::optional<CanonicalCombatWorld> mCombat;
+            std::optional<CanonicalActorWorld> mBaseActors;
+            std::optional<CanonicalActorWorld> mActors;
             std::vector<AuthoritativeMeleeEvent> mCombatEvents;
             std::vector<PlayerId> mClientAuthoritativePlayers;
             std::vector<DurableCommandOrder> mDurableCommands;
@@ -233,7 +236,8 @@ namespace TES3MP
         CanonicalRevision canonicalRevision() const noexcept { return mCanonicalRevision; }
         ServerTick checkpointTick() const noexcept { return mCheckpointTick; }
         bool configureDurability(CanonicalDurabilityPort& durability, CanonicalInventoryWorld* inventory = nullptr,
-            CanonicalCombatWorld* combat = nullptr) noexcept;
+            CanonicalCombatWorld* combat = nullptr, CanonicalInteractiveObjectWorld* objects = nullptr,
+            CanonicalActorWorld* actors = nullptr) noexcept;
         std::shared_ptr<const CanonicalStatePublication> latestPublication() const noexcept;
         PreparedBatch prepare(const ServerTickCommandBatch& batch);
         PreparedBatch prepare(const ServerTickCommandBatch& batch, const CanonicalInteractiveObjectWorld& objects,
@@ -254,6 +258,10 @@ namespace TES3MP
         PreparedBatch prepareTick(const ServerTickCommandBatch& batch, CanonicalCommandWorlds worlds);
         PreparedBatch prepareTick(const ServerTickCommandBatch& batch, CanonicalCommandWorlds worlds,
             std::span<const QueuedServerScriptCommand> scriptCommands);
+        bool stageSimulationCandidates(PreparedBatch& prepared, const CanonicalInventoryWorld* baseInventory,
+            std::optional<CanonicalInventoryWorld> inventory, const CanonicalCombatWorld* baseCombat,
+            std::optional<CanonicalCombatWorld> combat, const CanonicalActorWorld* baseActors,
+            std::optional<CanonicalActorWorld> actors) noexcept;
         bool commit(PreparedBatch&& prepared);
         bool commit(PreparedBatch&& prepared, CanonicalInteractiveObjectWorld& objects);
         bool commit(PreparedBatch&& prepared, CanonicalInventoryWorld& inventory);
@@ -295,7 +303,8 @@ namespace TES3MP
         PreparedBatch prepareScriptCommands(PreparedBatch prepared, const ServerTickCommandBatch& batch,
             std::span<const QueuedServerScriptCommand> commands);
         bool commitPrepared(PreparedBatch&& prepared, CanonicalInteractiveObjectWorld* objects,
-            CanonicalInventoryWorld* inventory, CanonicalCombatWorld* combat = nullptr);
+            CanonicalInventoryWorld* inventory, CanonicalCombatWorld* combat = nullptr,
+            CanonicalActorWorld* actors = nullptr);
 
         std::shared_ptr<const CanonicalServerState> mState;
         CanonicalStateVersion mStateVersion = CanonicalStateVersion::initial();
@@ -307,6 +316,8 @@ namespace TES3MP
         CanonicalDurabilityPort* mDurability = nullptr;
         CanonicalInventoryWorld* mDurableInventory = nullptr;
         CanonicalCombatWorld* mDurableCombat = nullptr;
+        CanonicalInteractiveObjectWorld* mDurableObjects = nullptr;
+        CanonicalActorWorld* mDurableActors = nullptr;
         ContentManifest mContentManifest;
         ServerCollisionQuery* mCollision;
         std::vector<PlayerId> mClientAuthoritativePlayers;

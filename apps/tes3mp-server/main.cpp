@@ -352,6 +352,46 @@ int main(int argc, char** argv)
         }
         inventoryWorld = std::move(*world);
     }
+    if (const auto* restoredObjects = persistenceFile->restoredObjects())
+    {
+        if (!interactiveObjectCatalog || !interactiveObjectWorld)
+        {
+            std::cerr << "persisted interactive objects have no configured domain\n";
+            return 2;
+        }
+        auto world
+            = TES3MP::restoreCanonicalInteractiveObjectWorld(*interactiveObjectCatalog, restoredObjects->objects);
+        auto* restored = std::get_if<TES3MP::CanonicalInteractiveObjectWorld>(&world);
+        if (!restored)
+        {
+            std::cerr << "persisted interactive object catalog validation failed\n";
+            return 2;
+        }
+        interactiveObjectWorld = std::move(*restored);
+    }
+    else if (persistenceFile->prefix().latest() && interactiveObjectWorld)
+    {
+        std::cerr << "persisted interactive object domain is missing\n";
+        return 2;
+    }
+    if (const auto* restoredActors = persistenceFile->restoredActors())
+    {
+        auto world = TES3MP::restoreCanonicalActorWorld(actorCatalog, restoredActors->actors);
+        auto* restored = std::get_if<TES3MP::CanonicalActorWorld>(&world);
+        if (!restored || std::ranges::any_of(restored->actors(), [&](const auto& actor) {
+                return !collision->canOccupy(actor.root().cell(), actor.root().position());
+            }))
+        {
+            std::cerr << "persisted actor catalog validation failed\n";
+            return 2;
+        }
+        actorWorld = std::move(*restored);
+    }
+    else if (persistenceFile->prefix().latest())
+    {
+        std::cerr << "persisted actor domain is missing\n";
+        return 2;
+    }
     if (const auto* restoredCombat = persistenceFile->restoredCombat())
     {
         const auto random = TES3MP::RandomStateV1::fromWords(restoredCombat->randomWords[0],
@@ -451,7 +491,8 @@ int main(int argc, char** argv)
         observability, TES3MP::CanonicalSinkBundle(nullptr, nullptr, &scripts, nullptr), config.contentManifest,
         *collision);
     if (!reducer.configureDurability(*persistenceFile, inventoryWorld ? &*inventoryWorld : nullptr,
-            combatContent ? &combatContent->world : nullptr))
+            combatContent ? &combatContent->world : nullptr,
+            interactiveObjectWorld ? &*interactiveObjectWorld : nullptr, &actorWorld))
     {
         std::cerr << "canonical persistence composition failed\n";
         return 3;

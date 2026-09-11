@@ -23,9 +23,12 @@ namespace TES3MP
         {
             switch (kind)
             {
-                case ActorAiPackageKind::Idle: return ActorActivity::Idle;
-                case ActorAiPackageKind::Travel: return ActorActivity::Travel;
-                case ActorAiPackageKind::Wander: return ActorActivity::Wander;
+                case ActorAiPackageKind::Idle:
+                    return ActorActivity::Idle;
+                case ActorAiPackageKind::Travel:
+                    return ActorActivity::Travel;
+                case ActorAiPackageKind::Wander:
+                    return ActorActivity::Wander;
             }
             return ActorActivity::Idle;
         }
@@ -154,8 +157,7 @@ namespace TES3MP
             entityIds.push_back(actor.entityId());
         std::ranges::sort(entityIds);
         if (const auto duplicate = std::ranges::adjacent_find(entityIds); duplicate != entityIds.end())
-            return CanonicalActorWorldError{ CanonicalActorWorldErrorCode::DuplicateEntityId, 0,
-                duplicate->value() };
+            return CanonicalActorWorldError{ CanonicalActorWorldErrorCode::DuplicateEntityId, 0, duplicate->value() };
         return CanonicalActorWorld(std::vector<CanonicalActorEntityState>(actors.begin(), actors.end()));
     }
 
@@ -166,8 +168,8 @@ namespace TES3MP
         actors.reserve(catalog.entries().size());
         for (const auto& entry : catalog.entries())
             actors.emplace_back(entry.actorId, entry.entityId, entry.prototypeId, entry.initialRoot,
-                LinearVelocity3(0, 0, 0), EntityRevision::initial(), AuthorityEpoch::initial(),
-                ServerTick::initial(), initialActivity(entry.aiPackage.kind()), 0);
+                LinearVelocity3(0, 0, 0), EntityRevision::initial(), AuthorityEpoch::initial(), ServerTick::initial(),
+                initialActivity(entry.aiPackage.kind()), 0);
         return createCanonicalActorWorld(actors);
     }
     catch (...)
@@ -175,13 +177,25 @@ namespace TES3MP
         return CanonicalActorWorldError{ CanonicalActorWorldErrorCode::AllocationFailure };
     }
 
+    CanonicalActorWorldResult restoreCanonicalActorWorld(
+        const ActorCatalog& catalog, std::span<const CanonicalActorEntityState> actors)
+    {
+        if (actors.size() != catalog.entries().size())
+            return CanonicalActorWorldError{ CanonicalActorWorldErrorCode::CatalogMismatch, actors.size(),
+                catalog.entries().size() };
+        for (std::size_t index = 0; index < actors.size(); ++index)
+            if (!stateMatchesCatalog(actors[index], catalog.entries()[index]))
+                return CanonicalActorWorldError{ CanonicalActorWorldErrorCode::CatalogMismatch, index,
+                    actors[index].actorId().value(), catalog.entries()[index].actorId.value() };
+        return createCanonicalActorWorld(actors);
+    }
+
     bool actorAndPlayerEntityIdsAreDisjoint(
         const CanonicalActorWorld& actors, const CanonicalServerState& players) noexcept
     {
         return std::ranges::none_of(actors.actors(), [&](const CanonicalActorEntityState& actor) {
-            return std::ranges::any_of(players.players(), [&](const CanonicalPlayerEntityState& player) {
-                return actor.entityId() == player.entityId();
-            });
+            return std::ranges::any_of(players.players(),
+                [&](const CanonicalPlayerEntityState& player) { return actor.entityId() == player.entityId(); });
         });
     }
 
@@ -190,131 +204,133 @@ namespace TES3MP
         ActorSimulationResult advanceActors(const CanonicalActorWorld& current, const ActorCatalog& catalog,
             const CanonicalServerState& players, const CanonicalCombatWorld* combat, ServerTick tick,
             MovementProfile movementProfile, ServerCollisionQuery& collision)
-    try
-    {
-        if (current.actors().size() != catalog.entries().size()
-            || !actorAndPlayerEntityIdsAreDisjoint(current, players))
-            return ActorSimulationError{ ActorSimulationErrorCode::CatalogMismatch };
-        std::vector<CanonicalActorEntityState> replacements;
-        replacements.reserve(current.actors().size());
-        for (std::size_t index = 0; index < current.actors().size(); ++index)
+        try
         {
-            const auto& actor = current.actors()[index];
-            const auto& entry = catalog.entries()[index];
-            if (!stateMatchesCatalog(actor, entry))
-                return ActorSimulationError{ ActorSimulationErrorCode::CatalogMismatch, index };
-            if (tick < actor.lastChangeTick())
-                return ActorSimulationError{ ActorSimulationErrorCode::TickRegression, index };
-            if (combat)
+            if (current.actors().size() != catalog.entries().size()
+                || !actorAndPlayerEntityIdsAreDisjoint(current, players))
+                return ActorSimulationError{ ActorSimulationErrorCode::CatalogMismatch };
+            std::vector<CanonicalActorEntityState> replacements;
+            replacements.reserve(current.actors().size());
+            for (std::size_t index = 0; index < current.actors().size(); ++index)
             {
-                const auto* combatActor = combat->findActor(actor.actorId());
-                if (!combatActor)
+                const auto& actor = current.actors()[index];
+                const auto& entry = catalog.entries()[index];
+                if (!stateMatchesCatalog(actor, entry))
                     return ActorSimulationError{ ActorSimulationErrorCode::CatalogMismatch, index };
-                if (combatActor->stats.dead)
+                if (tick < actor.lastChangeTick())
+                    return ActorSimulationError{ ActorSimulationErrorCode::TickRegression, index };
+                if (combat)
                 {
-                    if (actor.activity() == ActorActivity::Idle
-                        && actor.velocity() == LinearVelocity3(0, 0, 0))
+                    const auto* combatActor = combat->findActor(actor.actorId());
+                    if (!combatActor)
+                        return ActorSimulationError{ ActorSimulationErrorCode::CatalogMismatch, index };
+                    if (combatActor->stats.dead)
                     {
-                        replacements.push_back(actor);
-                        continue;
-                    }
-                    auto replacement = replaceActor(actor, tick, actor.root(), LinearVelocity3(0, 0, 0),
-                        ActorActivity::Idle, actor.waypointIndex(), index);
-                    if (const auto* error = std::get_if<ActorSimulationError>(&replacement))
-                        return *error;
-                    replacements.push_back(std::get<CanonicalActorEntityState>(std::move(replacement)));
-                    continue;
-                }
-                if (combatActor->aggressionTarget)
-                {
-                    const auto* target = players.findPlayer(*combatActor->aggressionTarget);
-                    const auto* targetCombat = combat->findPlayer(*combatActor->aggressionTarget);
-                    if (target && targetCombat && !targetCombat->victim.dead
-                        && target->transform().cell() == actor.root().cell())
-                    {
-                        Transform root = actor.root();
-                        LinearVelocity3 velocity(0, 0, 0);
-                        if (!withinReach(root.position(), target->transform().position(),
-                                combatActor->attackReachQuanta))
+                        if (actor.activity() == ActorActivity::Idle && actor.velocity() == LinearVelocity3(0, 0, 0))
                         {
-                            velocity = velocityToward(root.position(), target->transform().position(),
-                                movementProfile.speed(LocomotionMode::Run));
-                            const auto movement = advanceMovementKernel(catalog.contentManifestId(), movementProfile,
-                                LocomotionMode::Run, actor.entityId(), tick, root, velocity, collision);
-                            if (const auto* error = std::get_if<MovementKernelError>(&movement))
-                                return ActorSimulationError{ ActorSimulationErrorCode::MovementRejected, index, *error };
-                            const auto& step = std::get<MovementKernelStep>(movement);
-                            root = step.root;
-                            velocity = step.velocity;
-                            if (velocity.x() != 0 || velocity.y() != 0)
-                                root = Transform(root.cell(), root.position(), Orientation3(root.orientation().x(),
-                                    root.orientation().y(), facingToward(velocity.x(), velocity.y())));
+                            replacements.push_back(actor);
+                            continue;
                         }
-                        auto replacement = replaceActor(actor, tick, root, velocity, ActorActivity::Idle,
-                            actor.waypointIndex(), index);
+                        auto replacement = replaceActor(actor, tick, actor.root(), LinearVelocity3(0, 0, 0),
+                            ActorActivity::Idle, actor.waypointIndex(), index);
                         if (const auto* error = std::get_if<ActorSimulationError>(&replacement))
                             return *error;
                         replacements.push_back(std::get<CanonicalActorEntityState>(std::move(replacement)));
                         continue;
                     }
+                    if (combatActor->aggressionTarget)
+                    {
+                        const auto* target = players.findPlayer(*combatActor->aggressionTarget);
+                        const auto* targetCombat = combat->findPlayer(*combatActor->aggressionTarget);
+                        if (target && targetCombat && !targetCombat->victim.dead
+                            && target->transform().cell() == actor.root().cell())
+                        {
+                            Transform root = actor.root();
+                            LinearVelocity3 velocity(0, 0, 0);
+                            if (!withinReach(
+                                    root.position(), target->transform().position(), combatActor->attackReachQuanta))
+                            {
+                                velocity = velocityToward(root.position(), target->transform().position(),
+                                    movementProfile.speed(LocomotionMode::Run));
+                                const auto movement
+                                    = advanceMovementKernel(catalog.contentManifestId(), movementProfile,
+                                        LocomotionMode::Run, actor.entityId(), tick, root, velocity, collision);
+                                if (const auto* error = std::get_if<MovementKernelError>(&movement))
+                                    return ActorSimulationError{ ActorSimulationErrorCode::MovementRejected, index,
+                                        *error };
+                                const auto& step = std::get<MovementKernelStep>(movement);
+                                root = step.root;
+                                velocity = step.velocity;
+                                if (velocity.x() != 0 || velocity.y() != 0)
+                                    root = Transform(root.cell(), root.position(),
+                                        Orientation3(root.orientation().x(), root.orientation().y(),
+                                            facingToward(velocity.x(), velocity.y())));
+                            }
+                            auto replacement = replaceActor(
+                                actor, tick, root, velocity, ActorActivity::Idle, actor.waypointIndex(), index);
+                            if (const auto* error = std::get_if<ActorSimulationError>(&replacement))
+                                return *error;
+                            replacements.push_back(std::get<CanonicalActorEntityState>(std::move(replacement)));
+                            continue;
+                        }
+                    }
                 }
-            }
-            if (!activeCell(players, actor.root().cell()))
-            {
-                replacements.push_back(actor);
-                continue;
-            }
-
-            Transform root = actor.root();
-            LinearVelocity3 velocity = actor.velocity();
-            ActorActivity activity = actor.activity();
-            std::uint16_t waypointIndex = actor.waypointIndex();
-            const auto waypoints = entry.aiPackage.waypoints();
-            if (activity == ActorActivity::Idle)
-                velocity = LinearVelocity3(0, 0, 0);
-            else if (root.position() == waypoints[waypointIndex])
-            {
-                velocity = LinearVelocity3(0, 0, 0);
-                if (activity == ActorActivity::Travel && waypointIndex + 1 == waypoints.size())
-                    activity = ActorActivity::Idle;
-                else
-                    waypointIndex = static_cast<std::uint16_t>((waypointIndex + 1) % waypoints.size());
-            }
-            else
-            {
-                velocity = velocityToward(root.position(), waypoints[waypointIndex],
-                    movementProfile.speed(LocomotionMode::Walk));
-                const auto movement = advanceMovementKernel(catalog.contentManifestId(), movementProfile,
-                    LocomotionMode::Walk, actor.entityId(), tick, root, velocity, collision);
-                if (const auto* error = std::get_if<MovementKernelError>(&movement))
-                    return ActorSimulationError{ ActorSimulationErrorCode::MovementRejected, index, *error };
-                const auto& step = std::get<MovementKernelStep>(movement);
-                root = step.root;
-                velocity = step.velocity;
-                if (velocity.x() != 0 || velocity.y() != 0)
+                if (!activeCell(players, actor.root().cell()))
                 {
-                    root = Transform(root.cell(), root.position(),
-                        Orientation3(root.orientation().x(), root.orientation().y(),
-                            facingToward(velocity.x(), velocity.y())));
+                    replacements.push_back(actor);
+                    continue;
                 }
+
+                Transform root = actor.root();
+                LinearVelocity3 velocity = actor.velocity();
+                ActorActivity activity = actor.activity();
+                std::uint16_t waypointIndex = actor.waypointIndex();
+                const auto waypoints = entry.aiPackage.waypoints();
+                if (activity == ActorActivity::Idle)
+                    velocity = LinearVelocity3(0, 0, 0);
+                else if (root.position() == waypoints[waypointIndex])
+                {
+                    velocity = LinearVelocity3(0, 0, 0);
+                    if (activity == ActorActivity::Travel && waypointIndex + 1 == waypoints.size())
+                        activity = ActorActivity::Idle;
+                    else
+                        waypointIndex = static_cast<std::uint16_t>((waypointIndex + 1) % waypoints.size());
+                }
+                else
+                {
+                    velocity = velocityToward(
+                        root.position(), waypoints[waypointIndex], movementProfile.speed(LocomotionMode::Walk));
+                    const auto movement = advanceMovementKernel(catalog.contentManifestId(), movementProfile,
+                        LocomotionMode::Walk, actor.entityId(), tick, root, velocity, collision);
+                    if (const auto* error = std::get_if<MovementKernelError>(&movement))
+                        return ActorSimulationError{ ActorSimulationErrorCode::MovementRejected, index, *error };
+                    const auto& step = std::get<MovementKernelStep>(movement);
+                    root = step.root;
+                    velocity = step.velocity;
+                    if (velocity.x() != 0 || velocity.y() != 0)
+                    {
+                        root = Transform(root.cell(), root.position(),
+                            Orientation3(root.orientation().x(), root.orientation().y(),
+                                facingToward(velocity.x(), velocity.y())));
+                    }
+                }
+                auto replacement = replaceActor(actor, tick, root, velocity, activity, waypointIndex, index);
+                if (const auto* error = std::get_if<ActorSimulationError>(&replacement))
+                    return *error;
+                replacements.push_back(std::get<CanonicalActorEntityState>(std::move(replacement)));
             }
-            auto replacement = replaceActor(actor, tick, root, velocity, activity, waypointIndex, index);
-            if (const auto* error = std::get_if<ActorSimulationError>(&replacement))
-                return *error;
-            replacements.push_back(std::get<CanonicalActorEntityState>(std::move(replacement)));
+            auto created = createCanonicalActorWorld(replacements);
+            if (const auto* error = std::get_if<CanonicalActorWorldError>(&created))
+            {
+                (void)error;
+                return ActorSimulationError{ ActorSimulationErrorCode::InvalidResult };
+            }
+            return std::get<CanonicalActorWorld>(std::move(created));
         }
-        auto created = createCanonicalActorWorld(replacements);
-        if (const auto* error = std::get_if<CanonicalActorWorldError>(&created))
+        catch (...)
         {
-            (void)error;
             return ActorSimulationError{ ActorSimulationErrorCode::InvalidResult };
         }
-        return std::get<CanonicalActorWorld>(std::move(created));
-    }
-    catch (...)
-    {
-        return ActorSimulationError{ ActorSimulationErrorCode::InvalidResult };
-    }
     }
 
     ActorSimulationResult advanceActorSimulation(const CanonicalActorWorld& current, const ActorCatalog& catalog,

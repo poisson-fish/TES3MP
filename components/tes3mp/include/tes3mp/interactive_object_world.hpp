@@ -71,8 +71,7 @@ namespace TES3MP
         constexpr ServerTick lastChangeTick() const noexcept { return mLastChangeTick; }
 
         friend constexpr bool operator==(
-            const CanonicalInteractiveObjectState&, const CanonicalInteractiveObjectState&) noexcept
-            = default;
+            const CanonicalInteractiveObjectState&, const CanonicalInteractiveObjectState&) noexcept = default;
 
     private:
         InteractiveObjectId mObjectId;
@@ -91,6 +90,7 @@ namespace TES3MP
     {
         LimitExceeded,
         ObjectIdsNotStrictlyOrdered,
+        CatalogMismatch,
         AllocationFailure,
     };
 
@@ -102,8 +102,7 @@ namespace TES3MP
         std::uint64_t relatedValue = 0;
 
         friend constexpr bool operator==(
-            CanonicalInteractiveObjectWorldError, CanonicalInteractiveObjectWorldError) noexcept
-            = default;
+            CanonicalInteractiveObjectWorldError, CanonicalInteractiveObjectWorldError) noexcept = default;
     };
 
     class CanonicalInteractiveObjectWorld
@@ -140,6 +139,8 @@ namespace TES3MP
 
     CanonicalInteractiveObjectWorldResult createInitialCanonicalInteractiveObjectWorld(
         const InteractiveObjectCatalog& catalog);
+    CanonicalInteractiveObjectWorldResult restoreCanonicalInteractiveObjectWorld(
+        const InteractiveObjectCatalog& catalog, std::span<const CanonicalInteractiveObjectState> objects);
 
     enum class ObjectInteractionKind : std::uint8_t
     {

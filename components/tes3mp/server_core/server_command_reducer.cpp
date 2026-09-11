@@ -241,14 +241,17 @@ namespace TES3MP
     {
     }
 
-    bool CanonicalCommandReducer::configureDurability(
-        CanonicalDurabilityPort& durability, CanonicalInventoryWorld* inventory, CanonicalCombatWorld* combat) noexcept
+    bool CanonicalCommandReducer::configureDurability(CanonicalDurabilityPort& durability,
+        CanonicalInventoryWorld* inventory, CanonicalCombatWorld* combat, CanonicalInteractiveObjectWorld* objects,
+        CanonicalActorWorld* actors) noexcept
     {
         if (mDurability != nullptr)
             return false;
         mDurability = &durability;
         mDurableInventory = inventory;
         mDurableCombat = combat;
+        mDurableObjects = objects;
+        mDurableActors = actors;
         return true;
     }
 
@@ -312,7 +315,8 @@ namespace TES3MP
             = canonicalStateChecksumV2(prepared.mStateVersion, prepared.mCheckpointTick, *prepared.mState);
         if (mDurability
             && mDurability->commit(prepared.mPublication, prepared.mCanonicalRevision, {},
-                   inventory ? inventory : mDurableInventory, combat ? combat : mDurableCombat)
+                   inventory ? inventory : mDurableInventory, combat ? combat : mDurableCombat, mDurableObjects,
+                   mDurableActors)
                 != CanonicalDurabilityResult::Committed)
             return false;
         mState = std::move(prepared.mState);
@@ -487,7 +491,8 @@ namespace TES3MP
             = canonicalStateChecksumV2(prepared.mStateVersion, prepared.mCheckpointTick, *prepared.mState);
         if (mDurability
             && mDurability->commit(prepared.mPublication, prepared.mCanonicalRevision, {},
-                   inventory ? inventory : mDurableInventory, combat ? combat : mDurableCombat)
+                   inventory ? inventory : mDurableInventory, combat ? combat : mDurableCombat, mDurableObjects,
+                   mDurableActors)
                 != CanonicalDurabilityResult::Committed)
             return false;
         mState = std::move(prepared.mState);
@@ -1332,8 +1337,46 @@ namespace TES3MP
         return prepareTickState(prepareScriptCommands(std::move(prepared), batch, scriptCommands), batch);
     }
 
+    bool CanonicalCommandReducer::stageSimulationCandidates(PreparedBatch& prepared,
+        const CanonicalInventoryWorld* baseInventory, std::optional<CanonicalInventoryWorld> inventory,
+        const CanonicalCombatWorld* baseCombat, std::optional<CanonicalCombatWorld> combat,
+        const CanonicalActorWorld* baseActors, std::optional<CanonicalActorWorld> actors) noexcept
+    try
+    {
+        if (prepared.mBaseVersion != mStateVersion || prepared.mBaseCanonicalRevision != mCanonicalRevision)
+            return false;
+        if (inventory)
+        {
+            if (!baseInventory)
+                return false;
+            if (!prepared.mBaseInventory)
+                prepared.mBaseInventory = *baseInventory;
+            prepared.mInventory = std::move(*inventory);
+        }
+        if (combat)
+        {
+            if (!baseCombat)
+                return false;
+            if (!prepared.mBaseCombat)
+                prepared.mBaseCombat = *baseCombat;
+            prepared.mCombat = std::move(*combat);
+        }
+        if (actors)
+        {
+            if (!baseActors)
+                return false;
+            prepared.mBaseActors = *baseActors;
+            prepared.mActors = std::move(*actors);
+        }
+        return true;
+    }
+    catch (...)
+    {
+        return false;
+    }
+
     bool CanonicalCommandReducer::commitPrepared(PreparedBatch&& prepared, CanonicalInteractiveObjectWorld* objects,
-        CanonicalInventoryWorld* inventory, CanonicalCombatWorld* combat)
+        CanonicalInventoryWorld* inventory, CanonicalCombatWorld* combat, CanonicalActorWorld* actors)
     {
         if (prepared.mBaseVersion != mStateVersion || prepared.mBaseCanonicalRevision != mCanonicalRevision
             || !prepared.mState || !prepared.mPublication || (prepared.mInteractiveObjects && objects == nullptr)
@@ -1341,7 +1384,9 @@ namespace TES3MP
             || (prepared.mInventory && inventory == nullptr)
             || (prepared.mBaseInventory && (!inventory || *inventory != *prepared.mBaseInventory))
             || (prepared.mCombat && combat == nullptr)
-            || (prepared.mBaseCombat && (!combat || *combat != *prepared.mBaseCombat)))
+            || (prepared.mBaseCombat && (!combat || *combat != *prepared.mBaseCombat))
+            || (prepared.mActors && actors == nullptr)
+            || (prepared.mBaseActors && (!actors || *actors != *prepared.mBaseActors)))
             return false;
         prepared.mPublication->mStateVersion = prepared.mStateVersion;
         prepared.mPublication->mCheckpointTick = prepared.mCheckpointTick;
@@ -1352,7 +1397,9 @@ namespace TES3MP
         {
             prepared.mResult.mDurabilityResult = mDurability->commit(prepared.mPublication, prepared.mCanonicalRevision,
                 prepared.mDurableCommands, prepared.mInventory ? &*prepared.mInventory : mDurableInventory,
-                prepared.mCombat ? &*prepared.mCombat : mDurableCombat);
+                prepared.mCombat ? &*prepared.mCombat : mDurableCombat,
+                prepared.mInteractiveObjects ? &*prepared.mInteractiveObjects : mDurableObjects,
+                prepared.mActors ? &*prepared.mActors : mDurableActors);
             if (prepared.mResult.mDurabilityResult != CanonicalDurabilityResult::Committed)
                 return false;
         }
@@ -1363,6 +1410,8 @@ namespace TES3MP
             *inventory = std::move(*prepared.mInventory);
         if (prepared.mCombat)
             *combat = std::move(*prepared.mCombat);
+        if (prepared.mActors)
+            *actors = std::move(*prepared.mActors);
         mStateVersion = prepared.mStateVersion;
         mCanonicalRevision = prepared.mCanonicalRevision;
         mCheckpointTick = prepared.mCheckpointTick;
@@ -1377,28 +1426,29 @@ namespace TES3MP
 
     bool CanonicalCommandReducer::commit(PreparedBatch&& prepared)
     {
-        return commitPrepared(std::move(prepared), nullptr, nullptr, nullptr);
+        return commitPrepared(std::move(prepared), nullptr, nullptr, nullptr, nullptr);
     }
 
     bool CanonicalCommandReducer::commit(PreparedBatch&& prepared, CanonicalInteractiveObjectWorld& objects)
     {
-        return commitPrepared(std::move(prepared), &objects, nullptr, nullptr);
+        return commitPrepared(std::move(prepared), &objects, nullptr, nullptr, nullptr);
     }
 
     bool CanonicalCommandReducer::commit(PreparedBatch&& prepared, CanonicalInventoryWorld& inventory)
     {
-        return commitPrepared(std::move(prepared), nullptr, &inventory, nullptr);
+        return commitPrepared(std::move(prepared), nullptr, &inventory, nullptr, nullptr);
     }
 
     bool CanonicalCommandReducer::commit(
         PreparedBatch&& prepared, CanonicalInteractiveObjectWorld& objects, CanonicalInventoryWorld& inventory)
     {
-        return commitPrepared(std::move(prepared), &objects, &inventory, nullptr);
+        return commitPrepared(std::move(prepared), &objects, &inventory, nullptr, nullptr);
     }
 
     bool CanonicalCommandReducer::commit(PreparedBatch&& prepared, CanonicalCommandWorlds worlds)
     {
-        return commitPrepared(std::move(prepared), worlds.interactiveObjects, worlds.inventory, worlds.combat);
+        return commitPrepared(
+            std::move(prepared), worlds.interactiveObjects, worlds.inventory, worlds.combat, worlds.actors);
     }
 
     CommandBatchReductionResult CanonicalCommandReducer::apply(const ServerTickCommandBatch& batch)

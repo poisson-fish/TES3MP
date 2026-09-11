@@ -73,6 +73,26 @@ namespace
             && d4->lockState() == LockState::Unlocked && d4->trapState() == TrapState::Armed;
     }
 
+    bool durable_object_restore_requires_the_exact_catalog()
+    {
+        const auto catalog = sampleCatalog();
+        const auto initial
+            = std::get<CanonicalInteractiveObjectWorld>(createInitialCanonicalInteractiveObjectWorld(catalog));
+        const auto restored = restoreCanonicalInteractiveObjectWorld(catalog, initial.objects());
+        if (!std::holds_alternative<CanonicalInteractiveObjectWorld>(restored))
+            return false;
+        std::vector<CanonicalInteractiveObjectState> mismatched(initial.objects().begin(), initial.objects().end());
+        const auto& door = mismatched[1];
+        mismatched[1] = CanonicalInteractiveObjectState(door.objectId(), door.cell(), door.doorState(),
+            door.lockState(), door.lockLevel() + 1, door.keyId(), door.trapState(), door.trapId(), door.revision(),
+            door.lastChangeTick());
+        const auto mismatch = restoreCanonicalInteractiveObjectWorld(catalog, mismatched);
+        const auto* error = std::get_if<CanonicalInteractiveObjectWorldError>(&mismatch);
+        return error && error->code == CanonicalInteractiveObjectWorldErrorCode::CatalogMismatch
+            && std::holds_alternative<CanonicalInteractiveObjectWorldError>(
+                restoreCanonicalInteractiveObjectWorld(catalog, initial.objects().first(3)));
+    }
+
     bool standard_door_toggles_and_advances_revision()
     {
         const auto catalog = sampleCatalog();
@@ -356,11 +376,11 @@ namespace
 
 int main()
 {
-    return initial_world_matches_catalog_defaults() && standard_door_toggles_and_advances_revision()
-            && reach_validation_rejects_out_of_reach_activations() && cell_mismatch_is_rejected()
-            && locked_door_requires_key_and_unlocks() && armed_trap_springs_on_activation()
-            && teleport_door_initiates_player_teleport() && stale_revision_is_rejected()
-            && reported_origin_must_reach_object_and_remain_in_root_envelope()
+    return initial_world_matches_catalog_defaults() && durable_object_restore_requires_the_exact_catalog()
+            && standard_door_toggles_and_advances_revision() && reach_validation_rejects_out_of_reach_activations()
+            && cell_mismatch_is_rejected() && locked_door_requires_key_and_unlocks()
+            && armed_trap_springs_on_activation() && teleport_door_initiates_player_teleport()
+            && stale_revision_is_rejected() && reported_origin_must_reach_object_and_remain_in_root_envelope()
             && extreme_positions_and_maximum_reach_are_checked_without_overflow() && catalog_mismatch_is_rejected()
             && tick_regression_and_revision_exhaustion_are_explicit()
             && prepared_candidate_updates_in_place_and_can_restore_one_command()

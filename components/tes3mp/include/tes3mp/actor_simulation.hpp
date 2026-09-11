@@ -22,9 +22,18 @@ namespace TES3MP
         constexpr CanonicalActorEntityState(ActorId actorId, EntityId entityId, ActorPrototypeId prototypeId,
             Transform root, LinearVelocity3 velocity, EntityRevision revision, AuthorityEpoch authorityEpoch,
             ServerTick lastChangeTick, ActorActivity activity, std::uint16_t waypointIndex) noexcept
-            : mActorId(actorId), mEntityId(entityId), mPrototypeId(prototypeId), mRoot(root), mVelocity(velocity),
-              mRevision(revision), mAuthorityEpoch(authorityEpoch), mLastChangeTick(lastChangeTick),
-              mActivity(activity), mWaypointIndex(waypointIndex) {}
+            : mActorId(actorId)
+            , mEntityId(entityId)
+            , mPrototypeId(prototypeId)
+            , mRoot(root)
+            , mVelocity(velocity)
+            , mRevision(revision)
+            , mAuthorityEpoch(authorityEpoch)
+            , mLastChangeTick(lastChangeTick)
+            , mActivity(activity)
+            , mWaypointIndex(waypointIndex)
+        {
+        }
 
         constexpr ActorId actorId() const noexcept { return mActorId; }
         constexpr EntityId entityId() const noexcept { return mEntityId; }
@@ -37,8 +46,8 @@ namespace TES3MP
         constexpr ActorActivity activity() const noexcept { return mActivity; }
         constexpr std::uint16_t waypointIndex() const noexcept { return mWaypointIndex; }
 
-        friend constexpr bool operator==(
-            const CanonicalActorEntityState&, const CanonicalActorEntityState&) noexcept = default;
+        friend constexpr bool operator==(const CanonicalActorEntityState&, const CanonicalActorEntityState&) noexcept
+            = default;
 
     private:
         ActorId mActorId;
@@ -58,6 +67,7 @@ namespace TES3MP
         LimitExceeded,
         ActorIdsNotStrictlyOrdered,
         DuplicateEntityId,
+        CatalogMismatch,
         AllocationFailure,
     };
 
@@ -84,7 +94,9 @@ namespace TES3MP
             std::span<const CanonicalActorEntityState>);
 
         explicit CanonicalActorWorld(std::vector<CanonicalActorEntityState> actors) noexcept
-            : mActors(std::move(actors)) {}
+            : mActors(std::move(actors))
+        {
+        }
 
         std::vector<CanonicalActorEntityState> mActors;
     };
@@ -93,6 +105,8 @@ namespace TES3MP
 
     CanonicalActorWorldResult createCanonicalActorWorld(std::span<const CanonicalActorEntityState> actors);
     CanonicalActorWorldResult createInitialCanonicalActorWorld(const ActorCatalog& catalog);
+    CanonicalActorWorldResult restoreCanonicalActorWorld(
+        const ActorCatalog& catalog, std::span<const CanonicalActorEntityState> actors);
     bool actorAndPlayerEntityIdsAreDisjoint(
         const CanonicalActorWorld& actors, const CanonicalServerState& players) noexcept;
 

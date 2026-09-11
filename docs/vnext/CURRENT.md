@@ -88,8 +88,8 @@ Primary sources: [`protocol_frame.hpp`](../../components/tes3mp/include/tes3mp/p
   are never written. Credential reattachment restores established state with a new
   authority epoch; an incomplete character instead restarts from the fresh
   pre-chargen checkpoint even when replacing a hidden grace-period session.
-  V1–V4 identity files are rejected. Broader world persistence is not yet
-  present.
+  V1–V4 identity files are rejected. Broader canonical gameplay state is stored
+  separately in the manifest-bound V2 world prefix described below.
 
 Primary sources: [`authentication.hpp`](../../components/tes3mp/include/tes3mp/authentication.hpp),
 [`server_authentication.cpp`](../../components/tes3mp/server_core/server_authentication.cpp),
@@ -226,6 +226,9 @@ Primary sources: [`movement_kernel.hpp`](../../components/tes3mp/include/tes3mp/
 - Capability-gated reliable interest baselines and latest-wins actor snapshots
   drive renderer-only desktop/PC-VR presentation. Clients have no actor
   simulation lease or canonical authority.
+- Actor roots, velocities, entity revisions/change ticks, AI activity and
+  waypoint progress are durable. Aggression, attack/death ticks, respawn
+  baselines, and current death state are durable with the combat domain.
 
 Primary sources: [`actor_catalog.hpp`](../../components/tes3mp/include/tes3mp/actor_catalog.hpp),
 [`actor_simulation.cpp`](../../components/tes3mp/server_core/actor_simulation.cpp),
@@ -244,6 +247,9 @@ Primary sources: [`actor_catalog.hpp`](../../components/tes3mp/include/tes3mp/ac
   cell transition. Trap outcomes are canonical events, not client claims.
 - Complete reliable object baselines are scoped by exact-cell interest and used
   for join, transition, resume, and resync.
+- Door, lock, and trap state, object revision, and last-change tick are durable.
+  Restart requires a complete state vector matching the exact configured object
+  catalog before installing any object state.
 
 Primary sources: [`interactive_object_world.hpp`](../../components/tes3mp/include/tes3mp/interactive_object_world.hpp),
 [`interactive_object_replication.cpp`](../../components/tes3mp/protocol/interactive_object_replication.cpp),
@@ -400,8 +406,9 @@ and [`server_application.cpp`](../../apps/tes3mp-server/server_application.cpp).
   script API/package versions, and named deterministic seed states. Each record
   carries canonical state version, canonical revision, checkpoint tick, complete
   normalized client/script command order and disposition, session-independent
-  player roots, inventory/equipment/container/ground state, complete player and
-  actor combat state, combat simulation tick and PRNG words, and one checksum
+  player roots, inventory/equipment/container/ground state, complete interactive
+  object state, actor roots/velocity/AI progress, complete player and actor
+  combat/respawn state, combat simulation tick and PRNG words, and one checksum
   across the full durable snapshot.
 - The reducer offers a fully prepared immutable candidate to the durability
   port before installing it or publishing it to replay, scripts, metrics, or
@@ -415,11 +422,14 @@ and [`server_application.cpp`](../../apps/tes3mp-server/server_application.cpp).
   previous or new complete multi-domain tick, never a mixture. V1 development
   files remain untouched and are not migrated.
 - Restart validates the complete bounded prefix and exact identity before
-  restoring roots, inventory, combat, PRNG, and version/revision/tick counters;
-  live sessions are intentionally not restored. Replay begins from the verified
-  checkpoint, consumes tail ordering one tick at a time, and requires the full
-  reconstructed durable checksum at every record. Only established-character
-  player state is retained; incomplete chargen still restarts fresh.
+  restoring player roots, inventory, objects, actor simulation, combat, PRNG,
+  and version/revision/tick counters. Object and actor state must match their
+  exact configured catalogs, and restored actor roots must pass collision
+  occupancy. Live sessions are intentionally not restored. Replay begins from
+  the verified checkpoint, consumes tail ordering one tick at a time, and
+  requires the full reconstructed durable checksum at every record. Only
+  established-character player state is retained; incomplete chargen still
+  restarts fresh.
 
 Primary sources: [`canonical_persistence.hpp`](../../components/tes3mp/include/tes3mp/canonical_persistence.hpp),
 [`canonical_persistence.cpp`](../../components/tes3mp/server_core/canonical_persistence.cpp),
@@ -499,9 +509,10 @@ and [`test_bake_tes3mp_content.py`](../../scripts/tests/test_bake_tes3mp_content
   remain unimplemented.
 - Established root checkpoints, current canonical player roots, complete
   character profiles, inventory, equipment, containers, ground items, combat,
-  combat RNG, canonical version/revision/tick counters, deterministic identity,
-  and bounded command ordering survive restart. Dynamic object state, actor
-  simulation state outside combat, quests, globals, and live script memory do not. Chargen is the only
+  combat RNG, interactive objects, actor simulation and combat/respawn state,
+  canonical version/revision/tick counters, deterministic identity, and bounded
+  command ordering survive restart. Canonical time, globals, quests/journals,
+  and live script memory do not. Chargen is the only
   packaged scripted sequence with explicit server safe points today. The
   runtime-neutral versioned server-scripting boundary and its first safe-point
   command exist, but no script content loader or interpreter is packaged and the
@@ -523,19 +534,20 @@ and [`test_bake_tes3mp_content.py`](../../scripts/tests/test_bake_tes3mp_content
 
 ## Work still required
 
-### Next milestone: broader durable world domains
+### Next milestone: canonical time and global state
 
-Extend the versioned transaction payload and canonical checksum across
-actors, objects, quests, globals, and eventually live script state without
-weakening the existing acknowledgement point, bounded recovery, or exact
-identity checks. TES3MP 0.8.x saves remain unsupported.
+Add canonical time and globals to the same versioned transaction/checksum and
+replay envelope, followed by quests and journals, then durable script state.
+The existing acknowledgement point, 32-record journal bound, bounded recovery,
+and exact identity checks remain unchanged. TES3MP 0.8.x saves remain
+unsupported.
 
 ### Required before the desktop/PC-VR release
 
 1. Combat, stats, magic, death, resurrection, and respawn.
-2. Dialogue, journals, quests, factions, reputation, and their durable
+2. Canonical time, weather, globals, and durable world-state transitions.
+3. Dialogue, journals, quests, factions, reputation, and their durable
    consequences.
-3. Canonical time, weather, globals, and durable world-state transitions.
 4. Script content loading/runtime composition and expansion of the versioned
    immutable event/typed-command surface for release gameplay domains; the
    legacy CoreScripts API is not reused.
@@ -560,29 +572,27 @@ and do not enter protocol or canonical state.
 
 ## Verification snapshot
 
-The bounded multi-domain persistence working tree passed the following
+The durable interactive-object and actor-simulation working tree passed the following
 on 2026-09-10:
 
-- the standalone aggregate, including V2 domain round trips, inventory/combat
-  replay with RNG and full durable checksum comparison, identity and ordering,
-  and pre-publication acknowledgement;
+- the standalone aggregate, including V2 object/actor domain round trips,
+  inventory/combat/object/actor replay with RNG and full durable checksum
+  comparison, exact object/actor catalog restoration, identity and ordering,
+  and actor-simulation pre-installation acknowledgement;
 - the dedicated-server application aggregate, including bounded compaction,
-  corruption/truncation rejection, exhaustive candidate-file crash cuts, atomic
-  replacement, and stale-temporary-file recovery;
-- the bounded Windows checks graph and dedicated-server product build;
-- all 196 repository Python tests; and
-- patch-registry verification.
+  corruption/truncation rejection, exhaustive key/door and actor attack/death
+  crash cuts, atomic replacement, and stale-temporary-file recovery; and
+- the dedicated-server product target, bounded Windows checks graph (including
+  the shipping client build and OpenMW adapter contracts), all 196 repository
+  Python tests, and patch-registry verification.
 
-Protocol generation, content baking, the shipping client, and the headless
-client were unaffected and were not rerun for this milestone. The repository
-baseline verifier was not rerun and remains known to be blocked by pre-existing
-provenance drift outside this milestone. The Linux-only sanitizer/fuzzer
-execution profile, non-Windows builds, PC-VR hardware checks, a full upstream
-OpenMW baseline, and a human-driven visible OpenMW walkthrough were not
-performed. The product build uses the newest installed MSVC so its STL matches
-the provisioned protobuf/Abseil libraries. The repository baseline verifier
-still cannot attest the current dirty tree because pre-existing vNext additions
-and registry changes remain unmatched.
+The baseline verifier was rerun and remains blocked by pre-existing provenance
+drift outside this milestone. Protocol generation, content baking, and the
+headless client were not rerun. The Linux-only sanitizer/fuzzer execution
+profile, non-Windows builds, PC-VR hardware checks, a full upstream OpenMW
+baseline, and a human-driven visible OpenMW walkthrough were not performed. The
+product build uses the newest installed MSVC so its STL matches the provisioned
+protobuf/Abseil libraries.
 
 Use [DEVELOPMENT.md](DEVELOPMENT.md) for commands and record only the newest
 relevant verification here after behavior changes.

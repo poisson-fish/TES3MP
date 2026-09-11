@@ -72,6 +72,26 @@ namespace TES3MP
             0 };
     }
 
+    CanonicalInteractiveObjectWorldResult restoreCanonicalInteractiveObjectWorld(
+        const InteractiveObjectCatalog& catalog, std::span<const CanonicalInteractiveObjectState> objects)
+    {
+        if (objects.size() != catalog.entries().size())
+            return CanonicalInteractiveObjectWorldError{ CanonicalInteractiveObjectWorldErrorCode::CatalogMismatch,
+                objects.size(), catalog.entries().size() };
+        for (std::size_t index = 0; index < objects.size(); ++index)
+        {
+            const auto& state = objects[index];
+            const auto& entry = catalog.entries()[index];
+            if (!stateMatchesCatalog(state, entry)
+                || (!entry.lock.lockedByDefault && state.lockState() != LockState::Unlocked)
+                || (!entry.trap.trappedByDefault && state.trapState() != TrapState::Disarmed)
+                || (entry.kind == InteractiveObjectKind::TeleportDoor && state.doorState() != DoorState::Closed))
+                return CanonicalInteractiveObjectWorldError{ CanonicalInteractiveObjectWorldErrorCode::CatalogMismatch,
+                    index, state.objectId().value(), entry.objectId.value() };
+        }
+        return createCanonicalInteractiveObjectWorld(objects);
+    }
+
     StagedObjectInteractionResult applyObjectInteractionToCandidate(CanonicalInteractiveObjectWorld& current,
         const InteractiveObjectCatalog& catalog, const CanonicalServerState& players,
         const InteractObjectCommand& command, ServerTick currentTick,
