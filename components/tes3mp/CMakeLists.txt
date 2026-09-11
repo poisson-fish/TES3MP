@@ -646,7 +646,7 @@ add_executable(openmw_tes3mp_adapter_tests
 target_compile_features(openmw_tes3mp_adapter_tests PRIVATE cxx_std_20)
 target_include_directories(openmw_tes3mp_adapter_tests PRIVATE
     ${CMAKE_CURRENT_LIST_DIR}/../../apps/openmw/tes3mp)
-target_link_libraries(openmw_tes3mp_adapter_tests PRIVATE tes3mp_client_session)
+target_link_libraries(openmw_tes3mp_adapter_tests PRIVATE tes3mp_client_session tes3mp_server_core)
 if(TARGET TES3MP::GameNetworkingSocketsTransport)
     target_link_libraries(openmw_tes3mp_adapter_tests PRIVATE TES3MP::GameNetworkingSocketsTransport)
     target_compile_definitions(openmw_tes3mp_adapter_tests PRIVATE
@@ -656,10 +656,10 @@ set_target_properties(openmw_tes3mp_adapter_tests PROPERTIES FOLDER "TES3MP/Test
 tes3mp_enable_runtime_safety(openmw_tes3mp_adapter_tests)
 if(TARGET TES3MP::GameNetworkingSocketsTransport)
     tes3mp_verify_target_dependencies(openmw_tes3mp_adapter_tests
-        ALLOWED tes3mp_client_session tes3mp_protocol tes3mp_transport TES3MP::GameNetworkingSocketsTransport)
+        ALLOWED tes3mp_client_session tes3mp_server_core tes3mp_protocol tes3mp_transport TES3MP::GameNetworkingSocketsTransport)
 else()
     tes3mp_verify_target_dependencies(openmw_tes3mp_adapter_tests
-        ALLOWED tes3mp_client_session tes3mp_protocol tes3mp_transport)
+        ALLOWED tes3mp_client_session tes3mp_server_core tes3mp_protocol tes3mp_transport)
 endif()
 
 add_custom_target(openmw_tes3mp_adapter_tests_run

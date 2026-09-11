@@ -228,16 +228,18 @@ OpenMW clients bind opaque IDs locally with repeatable
 Mappings must be injective and complete for presented records. See
 [`inventory_content.cpp`](../../apps/tes3mp-server/inventory_content.cpp).
 
-## World V1
+## World V2
 
-The required `world_content_file` is at most 2 MiB and declares one clock plus
-an ordered catalog of at most 65,536 typed globals.
+The required `world_content_file` is at most 4 MiB. It declares one clock, up to
+65,536 typed globals, and manifest-scoped quest/journal catalogs.
 
 ```text
-TES3MP_WORLD_V1
+TES3MP_WORLD_V2
 manifest <64-lowercase-hex-digits>
 time <day> <month> <year> <milliseconds-since-midnight> <time-scale-thousandths>
 global <nonzero-id> <short-or-long-or-float> <value>
+quest <nonzero-quest-id> <initial-stage> <strictly-increasing-stage>...
+journal <nonzero-entry-id> <quest-id> <declared-stage>
 ```
 
 Days are 1–30, months 0–11, milliseconds 0–86,399,999, and time scale is in
@@ -245,7 +247,11 @@ thousandths from 0 through 1,000,000. Advancement uses integer milliseconds and
 a carried remainder over a fixed 30-day, 12-month calendar. `short` is signed
 16-bit, `long` signed 32-bit, and `float` finite. Global IDs are unique and
 declaration order is canonical: restart requires exactly the same IDs, order,
-and types before installation. See
+and types before installation. A quest declares 1–1,024 stages including its
+initial stage; the catalog is bounded to 4,096 quests, 32,768 total stages, and
+16,384 journal entries; each names a declared quest stage. Restart requires the
+exact catalog, including manifest, declarations, and stage order. Clients map
+quest IDs with `tes3mp-content-quest-map=<id>=<journal-record>`. See
 [`world_content.cpp`](../../apps/tes3mp-server/world_content.cpp).
 
 ## Combat V6

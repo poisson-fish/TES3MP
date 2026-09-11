@@ -8,6 +8,23 @@
 
 namespace TES3MP::OpenMWAdapter
 {
+    ProviderResult applyCommittedQuestJournal(PresentationProvider& presentation,
+        const CanonicalWorldState& committedWorld, PlayerId player, MonotonicInstant receivedAt) noexcept
+    try
+    {
+        if (!committedWorld.questJournalCatalog())
+            return ProviderResult::ContentMappingFailed;
+        const auto found = std::ranges::lower_bound(
+            committedWorld.questJournal(), player, {}, &CanonicalPlayerQuestJournalState::player);
+        const CanonicalPlayerQuestJournalState initial{ player };
+        const auto& state = found != committedWorld.questJournal().end() && found->player == player ? *found : initial;
+        return presentation.applyQuestJournal(*committedWorld.questJournalCatalog(), state, receivedAt);
+    }
+    catch (...)
+    {
+        return ProviderResult::PresentationFailed;
+    }
+
     namespace
     {
         constexpr std::uint64_t RetryIntervalNanoseconds = 1'000'000'000;

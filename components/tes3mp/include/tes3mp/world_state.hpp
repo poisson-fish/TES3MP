@@ -1,7 +1,7 @@
 #ifndef TES3MP_WORLD_STATE_HPP
 #define TES3MP_WORLD_STATE_HPP
 
-#include "value_types.hpp"
+#include "content_identity.hpp"
 
 #include <cstddef>
 #include <cstdint>
@@ -13,6 +13,13 @@
 namespace TES3MP
 {
     inline constexpr std::size_t MaximumGlobalVariables = 65'536;
+    inline constexpr std::size_t MaximumQuestCatalogEntries = 4'096;
+    inline constexpr std::size_t MaximumQuestStagesPerQuest = 1'024;
+    inline constexpr std::size_t MaximumQuestCatalogStages = 32'768;
+    inline constexpr std::size_t MaximumJournalCatalogEntries = 16'384;
+    inline constexpr std::size_t MaximumPlayerQuestJournalStates = 256;
+    inline constexpr std::size_t MaximumCanonicalQuestStates = 16'384;
+    inline constexpr std::size_t MaximumCanonicalJournalEntries = 16'384;
     inline constexpr std::uint32_t WorldMillisecondsPerHour = 3'600'000;
     inline constexpr std::uint32_t WorldMillisecondsPerDay = 24 * WorldMillisecondsPerHour;
     inline constexpr std::uint32_t WorldTimeScaleUnitsPerOne = 1'000;
@@ -57,6 +64,75 @@ namespace TES3MP
         std::vector<GlobalVariableCatalogEntry> mEntries;
     };
 
+    struct QuestCatalogEntry
+    {
+        QuestId id;
+        QuestStage initialStage;
+        std::vector<QuestStage> stages;
+        friend bool operator==(const QuestCatalogEntry&, const QuestCatalogEntry&) noexcept = default;
+    };
+
+    struct JournalCatalogEntry
+    {
+        JournalEntryId id;
+        QuestId quest;
+        QuestStage stage;
+        friend constexpr bool operator==(JournalCatalogEntry, JournalCatalogEntry) noexcept = default;
+    };
+
+    class QuestJournalCatalog
+    {
+    public:
+        static std::optional<QuestJournalCatalog> create(ContentManifestId manifest,
+            std::span<const QuestCatalogEntry> quests, std::span<const JournalCatalogEntry> journal) noexcept;
+        constexpr ContentManifestId manifest() const noexcept { return mManifest; }
+        std::span<const QuestCatalogEntry> quests() const noexcept { return mQuests; }
+        std::span<const JournalCatalogEntry> journal() const noexcept { return mJournal; }
+        const QuestCatalogEntry* findQuest(QuestId id) const noexcept;
+        const JournalCatalogEntry* findJournalEntry(JournalEntryId id) const noexcept;
+        friend bool operator==(const QuestJournalCatalog&, const QuestJournalCatalog&) noexcept = default;
+
+    private:
+        QuestJournalCatalog(ContentManifestId manifest, std::vector<QuestCatalogEntry> quests,
+            std::vector<JournalCatalogEntry> journal) noexcept
+            : mManifest(manifest)
+            , mQuests(std::move(quests))
+            , mJournal(std::move(journal))
+        {
+        }
+        ContentManifestId mManifest;
+        std::vector<QuestCatalogEntry> mQuests;
+        std::vector<JournalCatalogEntry> mJournal;
+    };
+
+    struct CanonicalQuestState
+    {
+        QuestId id;
+        QuestStage stage;
+        QuestRevision revision = QuestRevision::initial();
+        ServerTick lastChangeTick = ServerTick::initial();
+        friend constexpr bool operator==(CanonicalQuestState, CanonicalQuestState) noexcept = default;
+    };
+
+    struct CanonicalJournalEntryState
+    {
+        JournalEntryId id;
+        JournalRevision revision = JournalRevision::initial();
+        ServerTick changeTick = ServerTick::initial();
+        friend constexpr bool operator==(CanonicalJournalEntryState, CanonicalJournalEntryState) noexcept = default;
+    };
+
+    struct CanonicalPlayerQuestJournalState
+    {
+        PlayerId player;
+        std::vector<CanonicalQuestState> quests;
+        std::vector<CanonicalJournalEntryState> journal;
+        JournalRevision journalRevision = JournalRevision::initial();
+        ServerTick lastJournalChangeTick = ServerTick::initial();
+        friend bool operator==(
+            const CanonicalPlayerQuestJournalState&, const CanonicalPlayerQuestJournalState&) noexcept = default;
+    };
+
     struct CanonicalWorldTimeState
     {
         std::uint8_t day = 1;
@@ -73,10 +149,7 @@ namespace TES3MP
         {
             return static_cast<double>(millisecondsSinceMidnight) / WorldMillisecondsPerHour;
         }
-        double timeScale() const noexcept
-        {
-            return static_cast<double>(timeScaleUnits) / WorldTimeScaleUnitsPerOne;
-        }
+        double timeScale() const noexcept { return static_cast<double>(timeScaleUnits) / WorldTimeScaleUnitsPerOne; }
         friend constexpr bool operator==(const CanonicalWorldTimeState&, const CanonicalWorldTimeState&) noexcept
             = default;
     };
@@ -88,12 +161,9 @@ namespace TES3MP
         GlobalVariableRevision revision = GlobalVariableRevision::initial();
         ServerTick lastChangeTick = ServerTick::initial();
 
-        constexpr GlobalVariableType type() const noexcept
-        {
-            return static_cast<GlobalVariableType>(value.index());
-        }
-        friend constexpr bool operator==(const CanonicalGlobalVariableState&,
-            const CanonicalGlobalVariableState&) noexcept = default;
+        constexpr GlobalVariableType type() const noexcept { return static_cast<GlobalVariableType>(value.index()); }
+        friend constexpr bool operator==(
+            const CanonicalGlobalVariableState&, const CanonicalGlobalVariableState&) noexcept = default;
     };
 
     class CanonicalWorldState
@@ -101,22 +171,36 @@ namespace TES3MP
     public:
         static std::optional<CanonicalWorldState> create(
             CanonicalWorldTimeState time, std::span<const CanonicalGlobalVariableState> globals) noexcept;
+        static std::optional<CanonicalWorldState> create(CanonicalWorldTimeState time,
+            std::span<const CanonicalGlobalVariableState> globals, QuestJournalCatalog questJournalCatalog,
+            std::span<const CanonicalPlayerQuestJournalState> questJournal) noexcept;
         static std::optional<CanonicalWorldState> initial(
             CanonicalWorldTimeState time, const GlobalVariableCatalog& catalog) noexcept;
+        static std::optional<CanonicalWorldState> initial(CanonicalWorldTimeState time,
+            const GlobalVariableCatalog& globals, QuestJournalCatalog questJournalCatalog) noexcept;
 
         constexpr const CanonicalWorldTimeState& time() const noexcept { return mTime; }
         std::span<const CanonicalGlobalVariableState> globals() const noexcept { return mGlobals; }
         const CanonicalGlobalVariableState* find(GlobalVariableId id) const noexcept;
+        const std::optional<QuestJournalCatalog>& questJournalCatalog() const noexcept { return mQuestJournalCatalog; }
+        std::span<const CanonicalPlayerQuestJournalState> questJournal() const noexcept { return mQuestJournal; }
+        const CanonicalPlayerQuestJournalState* findQuestJournal(PlayerId player) const noexcept;
         friend bool operator==(const CanonicalWorldState&, const CanonicalWorldState&) noexcept = default;
 
     private:
-        CanonicalWorldState(CanonicalWorldTimeState time, std::vector<CanonicalGlobalVariableState> globals) noexcept
+        CanonicalWorldState(CanonicalWorldTimeState time, std::vector<CanonicalGlobalVariableState> globals,
+            std::optional<QuestJournalCatalog> questJournalCatalog = std::nullopt,
+            std::vector<CanonicalPlayerQuestJournalState> questJournal = {}) noexcept
             : mTime(time)
             , mGlobals(std::move(globals))
+            , mQuestJournalCatalog(std::move(questJournalCatalog))
+            , mQuestJournal(std::move(questJournal))
         {
         }
         CanonicalWorldTimeState mTime;
         std::vector<CanonicalGlobalVariableState> mGlobals;
+        std::optional<QuestJournalCatalog> mQuestJournalCatalog;
+        std::vector<CanonicalPlayerQuestJournalState> mQuestJournal;
     };
 
     enum class CanonicalWorldMutationError : std::uint8_t
@@ -129,6 +213,14 @@ namespace TES3MP
         TypeMismatch,
         RevisionMismatch,
         CatalogMismatch,
+        UnknownPlayer,
+        UnknownQuest,
+        UnknownQuestStage,
+        QuestRevisionMismatch,
+        UnknownJournalEntry,
+        JournalEntryQuestMismatch,
+        JournalRevisionMismatch,
+        DuplicateJournalEntry,
     };
 
     using CanonicalWorldMutationResult = std::variant<CanonicalWorldState, CanonicalWorldMutationError>;
@@ -140,8 +232,17 @@ namespace TES3MP
     CanonicalWorldMutationResult setCanonicalGlobal(const CanonicalWorldState& state,
         const GlobalVariableCatalog& catalog, GlobalVariableId id, GlobalVariableRevision expectedRevision,
         GlobalVariableValue value, ServerTick tick) noexcept;
+    CanonicalWorldMutationResult setCanonicalQuestStage(const CanonicalWorldState& state, PlayerId player,
+        QuestId quest, QuestRevision expectedRevision, QuestStage stage, ServerTick tick) noexcept;
+    CanonicalWorldMutationResult addCanonicalJournalEntry(const CanonicalWorldState& state, PlayerId player,
+        QuestId quest, JournalRevision expectedRevision, JournalEntryId entry, ServerTick tick) noexcept;
     CanonicalWorldMutationResult restoreCanonicalWorldState(const GlobalVariableCatalog& catalog,
         CanonicalWorldTimeState time, std::span<const CanonicalGlobalVariableState> globals) noexcept;
+    CanonicalWorldMutationResult restoreCanonicalWorldState(const GlobalVariableCatalog& globals,
+        const QuestJournalCatalog& expectedQuestJournalCatalog, CanonicalWorldTimeState time,
+        std::span<const CanonicalGlobalVariableState> globalStates,
+        const QuestJournalCatalog& restoredQuestJournalCatalog,
+        std::span<const CanonicalPlayerQuestJournalState> questJournal) noexcept;
 }
 
 #endif

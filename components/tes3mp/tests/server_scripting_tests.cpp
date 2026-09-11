@@ -3,8 +3,8 @@
 #include <tes3mp/test_support/manual_clock.hpp>
 #include <tes3mp/test_support/recording_observability.hpp>
 
-#include <array>
 #include <algorithm>
+#include <array>
 #include <cstdint>
 #include <iostream>
 #include <optional>
@@ -149,6 +149,23 @@ namespace
                     != ServerScriptEmitResult::Accepted)
                 return ServerScriptCallbackResult::Failed;
             return ServerScriptCallbackResult::Accepted;
+        }
+    };
+
+    class QuestJournalCallback final : public ServerScriptCallback
+    {
+    public:
+        ServerScriptCallbackResult onEvent(
+            const ServerScriptCallbackInput&, ServerScriptCommandEmitter& output) noexcept override
+        {
+            return output.enqueue(ServerScriptSetQuestStageCommand(
+                       id<PlayerId>(1), id<QuestId>(10), QuestRevision::initial(), id<QuestStage>(20)))
+                        == ServerScriptEmitResult::Accepted
+                    && output.enqueue(ServerScriptAddJournalEntryCommand(
+                           id<PlayerId>(1), id<QuestId>(10), JournalRevision::initial(), id<JournalEntryId>(100)))
+                        == ServerScriptEmitResult::Accepted
+                ? ServerScriptCallbackResult::Accepted
+                : ServerScriptCallbackResult::Failed;
         }
     };
 
@@ -355,8 +372,7 @@ namespace
             return false;
         CanonicalCommandReducer reducer(fixture.initialState(), fixture.observability,
             CanonicalSinkBundle(nullptr, nullptr, &scripts, nullptr), testContentManifest());
-        const std::array declarations{
-            GlobalVariableCatalogEntry{ id<GlobalVariableId>(1), std::int32_t{ 0 } } };
+        const std::array declarations{ GlobalVariableCatalogEntry{ id<GlobalVariableId>(1), std::int32_t{ 0 } } };
         const auto catalog = GlobalVariableCatalog::create(declarations).value();
         CanonicalWorldTimeState time;
         auto world = CanonicalWorldState::initial(time, catalog).value();
@@ -390,6 +406,56 @@ namespace
             && world.time().year == 428 && world.time().hour() == 12.0 && world.time().timeScale() == 15.0
             && world.time().revision.value() == 2 && world.time().lastChangeTick == id<ServerTick>(2);
     }
+
+    bool quest_stage_and_journal_entry_commands_commit_as_one_durable_candidate()
+    {
+        Fixture fixture;
+        DeterministicServerScriptRuntime scripts;
+        QuestJournalCallback callback;
+        const auto package = ServerScriptPackage::create(1, 1, 1);
+        if (!package
+            || scripts.registerCallback(*package, 1, ServerScriptEventKind::CommandFinalized, callback)
+                != ServerScriptRegistrationResult::Accepted)
+            return false;
+        CanonicalCommandReducer reducer(fixture.initialState(), fixture.observability,
+            CanonicalSinkBundle(nullptr, nullptr, &scripts, nullptr), testContentManifest());
+        const std::array globals{ GlobalVariableCatalogEntry{ id<GlobalVariableId>(1), std::int32_t{ 0 } } };
+        const auto globalCatalog = GlobalVariableCatalog::create(globals).value();
+        const std::array quests{ QuestCatalogEntry{
+            id<QuestId>(10), id<QuestStage>(0), { id<QuestStage>(0), id<QuestStage>(10), id<QuestStage>(20) } } };
+        const std::array journal{ JournalCatalogEntry{ id<JournalEntryId>(100), id<QuestId>(10), id<QuestStage>(20) } };
+        const auto questCatalog = QuestJournalCatalog::create(testContentManifestId(), quests, journal).value();
+        CanonicalWorldTimeState time;
+        auto world = CanonicalWorldState::initial(time, globalCatalog, questCatalog).value();
+        CanonicalCommandWorlds worlds;
+        worlds.world = &world;
+        worlds.globalCatalog = &globalCatalog;
+        if (fixture.intake.submit(fixture.clientCommand()) != CommandSubmissionResult::Accepted)
+            return false;
+        const auto first = fixture.pumpFirst();
+        if (!first || first.batches().size() != 1 || !scripts.pump(id<ServerTick>(1)))
+            return false;
+        auto client = reducer.prepareTick(first.batches()[0], worlds, {});
+        if (!client.result() || !reducer.commit(std::move(client), worlds))
+            return false;
+        const auto second = fixture.pumpNext();
+        const auto generated = scripts.pump(id<ServerTick>(2));
+        if (!second || second.batches().size() != 1 || !generated || generated.commands().size() != 2)
+            return false;
+        auto prepared = reducer.prepareTick(second.batches()[0], worlds, generated.commands());
+        if (!prepared.result() || prepared.result().scriptDispositions().size() != 2
+            || std::ranges::any_of(prepared.result().scriptDispositions(),
+                [](const auto& value) { return value.disposition() != ServerScriptCommandDisposition::Applied; }))
+            return false;
+        const auto before = world;
+        if (!reducer.commit(std::move(prepared), worlds) || world == before)
+            return false;
+        const auto* state = world.findQuestJournal(id<PlayerId>(1));
+        return state && state->quests.size() == 1 && state->quests[0].stage == id<QuestStage>(20)
+            && state->quests[0].revision.value() == 2 && state->quests[0].lastChangeTick == id<ServerTick>(2)
+            && state->journal.size() == 1 && state->journal[0].id == id<JournalEntryId>(100)
+            && state->journalRevision.value() == 2 && state->lastJournalChangeTick == id<ServerTick>(2);
+    }
 }
 
 int main()
@@ -408,6 +474,8 @@ int main()
         std::pair{ "package_and_registration_versions_fail_closed", &package_and_registration_versions_fail_closed },
         std::pair{ "typed_time_and_global_commands_commit_as_one_script_batch",
             &typed_time_and_global_commands_commit_as_one_script_batch },
+        std::pair{ "quest_stage_and_journal_entry_commands_commit_as_one_durable_candidate",
+            &quest_stage_and_journal_entry_commands_commit_as_one_durable_candidate },
     };
     bool passed = true;
     for (const auto& [name, test] : tests)

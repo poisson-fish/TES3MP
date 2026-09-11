@@ -48,7 +48,7 @@ CATALOGS = {
     "inventory_content_file": ("TES3MP_INVENTORY_V1", False),
     "combat_content_file": ("TES3MP_COMBAT_V6", False),
     "character_content_file": ("TES3MP_CHARACTERS_V2", False),
-    "world_content_file": ("TES3MP_WORLD_V1", True),
+    "world_content_file": ("TES3MP_WORLD_V2", True),
 }
 
 SERVER_CONTENT_KEYS = (
@@ -68,6 +68,7 @@ CLIENT_MAPPING_KEYS = {
     "tes3mp-content-interactive-object-map",
     "tes3mp-content-item-prototype-map",
     "tes3mp-content-container-map",
+    "tes3mp-content-quest-map",
 }
 
 ITEM_RECORD_TYPES = {

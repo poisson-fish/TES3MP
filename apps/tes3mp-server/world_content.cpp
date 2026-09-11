@@ -13,8 +13,8 @@ namespace TES3MP::ServerApp
 {
     namespace
     {
-        constexpr std::string_view Header = "TES3MP_WORLD_V1";
-        constexpr std::size_t MaximumFields = 8;
+        constexpr std::string_view Header = "TES3MP_WORLD_V2";
+        constexpr std::size_t MaximumFields = MaximumQuestStagesPerQuest + 3;
 
         template <class Value>
         std::optional<Value> number(std::string_view text) noexcept
@@ -48,8 +48,7 @@ namespace TES3MP::ServerApp
         }
     }
 
-    WorldContentLoadResult loadWorldContent(
-        const std::filesystem::path& path, const ContentManifest& manifest) noexcept
+    WorldContentLoadResult loadWorldContent(const std::filesystem::path& path, const ContentManifest& manifest) noexcept
     try
     {
         if (path.empty() || !std::filesystem::is_regular_file(path))
@@ -74,6 +73,8 @@ namespace TES3MP::ServerApp
         std::optional<ContentManifestId> declaredManifest;
         std::optional<CanonicalWorldTimeState> time;
         std::vector<GlobalVariableCatalogEntry> globals;
+        std::vector<QuestCatalogEntry> quests;
+        std::vector<JournalCatalogEntry> journal;
         std::size_t lineNumber = 0;
         for (std::size_t begin = 0; begin <= text.size();)
         {
@@ -151,6 +152,47 @@ namespace TES3MP::ServerApp
                         return WorldContentError::Malformed;
                     globals.push_back({ *id, value });
                 }
+                else if (values[0] == "quest")
+                {
+                    if (values.size() < 4 || quests.size() == MaximumQuestCatalogEntries
+                        || values.size() - 3 > MaximumQuestStagesPerQuest)
+                        return quests.size() == MaximumQuestCatalogEntries
+                                || values.size() - 3 > MaximumQuestStagesPerQuest
+                            ? WorldContentError::TooLarge
+                            : WorldContentError::Malformed;
+                    const auto rawId = number<std::uint64_t>(values[1]);
+                    const auto rawInitial = number<std::uint64_t>(values[2]);
+                    const auto id = rawId ? QuestId::fromValue(*rawId) : std::nullopt;
+                    const auto initial = rawInitial ? QuestStage::fromValue(*rawInitial) : std::nullopt;
+                    if (!id || !initial)
+                        return WorldContentError::Malformed;
+                    QuestCatalogEntry quest{ *id, *initial, {} };
+                    quest.stages.reserve(values.size() - 3);
+                    for (const auto field : values.subspan(3))
+                    {
+                        const auto rawStage = number<std::uint64_t>(field);
+                        const auto stage = rawStage ? QuestStage::fromValue(*rawStage) : std::nullopt;
+                        if (!stage)
+                            return WorldContentError::Malformed;
+                        quest.stages.push_back(*stage);
+                    }
+                    quests.push_back(std::move(quest));
+                }
+                else if (values[0] == "journal")
+                {
+                    if (values.size() != 4 || journal.size() == MaximumJournalCatalogEntries)
+                        return journal.size() == MaximumJournalCatalogEntries ? WorldContentError::TooLarge
+                                                                              : WorldContentError::Malformed;
+                    const auto rawEntry = number<std::uint64_t>(values[1]);
+                    const auto rawQuest = number<std::uint64_t>(values[2]);
+                    const auto rawStage = number<std::uint64_t>(values[3]);
+                    const auto entry = rawEntry ? JournalEntryId::fromValue(*rawEntry) : std::nullopt;
+                    const auto quest = rawQuest ? QuestId::fromValue(*rawQuest) : std::nullopt;
+                    const auto stage = rawStage ? QuestStage::fromValue(*rawStage) : std::nullopt;
+                    if (!entry || !quest || !stage)
+                        return WorldContentError::Malformed;
+                    journal.push_back({ *entry, *quest, *stage });
+                }
                 else
                     return WorldContentError::Malformed;
             }
@@ -163,10 +205,12 @@ namespace TES3MP::ServerApp
         if (*declaredManifest != manifest.id())
             return WorldContentError::ManifestMismatch;
         auto catalog = GlobalVariableCatalog::create(globals);
-        auto world = catalog ? CanonicalWorldState::initial(*time, *catalog) : std::nullopt;
-        if (!catalog || !world)
+        auto questJournal = QuestJournalCatalog::create(*declaredManifest, quests, journal);
+        auto world
+            = catalog && questJournal ? CanonicalWorldState::initial(*time, *catalog, *questJournal) : std::nullopt;
+        if (!catalog || !questJournal || !world)
             return WorldContentError::InvalidCatalog;
-        return WorldContent{ std::move(*catalog), std::move(*world) };
+        return WorldContent{ std::move(*catalog), std::move(*questJournal), std::move(*world) };
     }
     catch (...)
     {

@@ -17,12 +17,12 @@
 #include "resume_token_context.hpp"
 #include "server_application.hpp"
 #include "server_config.hpp"
-#include "world_content.hpp"
 #include "tes3mp/combat_replication.hpp"
 #include "tes3mp/interactive_object_catalog.hpp"
 #include "tes3mp/interactive_object_replication.hpp"
 #include "tes3mp/interactive_object_world.hpp"
 #include "tes3mp/inventory_replication.hpp"
+#include "world_content.hpp"
 
 #include <array>
 #include <cassert>
@@ -404,8 +404,8 @@ namespace
                 player->entityId(), player->entityRevision(), player->authorityEpoch());
             for (std::size_t index = 0; index <= MaximumServerScriptCommandsPerCallback; ++index)
             {
-                if (output.enqueue(ServerScriptPlayerSafePointCommand(
-                        player->playerId(), precondition, player->transform()))
+                if (output.enqueue(
+                        ServerScriptPlayerSafePointCommand(player->playerId(), precondition, player->transform()))
                     != ServerScriptEmitResult::Accepted)
                     break;
             }
@@ -692,25 +692,33 @@ int main()
         assert(static_cast<bool>(stream));
     };
     constexpr std::string_view worldHeader
-        = "TES3MP_WORLD_V1\n"
+        = "TES3MP_WORLD_V2\n"
           "manifest 0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20\n";
     writeWorld(std::string(worldHeader)
-        + "time 16 6 427 32400000 30000\nglobal 1 short 2\nglobal 2 long -3\nglobal 3 float 4.5\n");
+        + "time 16 6 427 32400000 30000\nglobal 1 short 2\nglobal 2 long -3\nglobal 3 float 4.5\n"
+          "quest 10 0 0 10 20\njournal 100 10 10\njournal 101 10 20\n");
     auto loadedWorldContent = loadWorldContent(worldPath, parsedConfig().contentManifest);
     auto* worldContent = std::get_if<WorldContent>(&loadedWorldContent);
-    assert(worldContent && worldContent->globals.entries().size() == 3
-        && worldContent->world.time().day == 16 && worldContent->world.time().month == 6
-        && worldContent->world.time().year == 427 && worldContent->world.time().hour() == 9.0
-        && worldContent->world.time().timeScale() == 30.0
-        && std::get<std::int32_t>(worldContent->world.globals()[1].value) == -3);
+    assert(worldContent && worldContent->globals.entries().size() == 3 && worldContent->world.time().day == 16
+        && worldContent->world.time().month == 6 && worldContent->world.time().year == 427
+        && worldContent->world.time().hour() == 9.0 && worldContent->world.time().timeScale() == 30.0
+        && std::get<std::int32_t>(worldContent->world.globals()[1].value) == -3
+        && worldContent->questJournal.quests().size() == 1 && worldContent->questJournal.journal().size() == 2
+        && worldContent->world.questJournalCatalog()
+        && *worldContent->world.questJournalCatalog() == worldContent->questJournal);
     writeWorld(std::string(worldHeader) + "time 16 6 427 32400000 30000\nglobal 1 short 2\nglobal 1 long 3\n");
     assert(std::get<WorldContentError>(loadWorldContent(worldPath, parsedConfig().contentManifest))
         == WorldContentError::InvalidCatalog);
     writeWorld(std::string(worldHeader) + "time 16 6 427 32400000 30000\nglobal 1 float inf\n");
     assert(std::get<WorldContentError>(loadWorldContent(worldPath, parsedConfig().contentManifest))
         == WorldContentError::Malformed);
-    writeWorld("TES3MP_WORLD_V1\nmanifest 0202030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20\n"
-               "time 16 6 427 32400000 30000\n");
+    writeWorld(std::string(worldHeader) + "time 16 6 427 32400000 30000\nquest 10 0 0 10\n"
+        "journal 100 11 10\n");
+    assert(std::get<WorldContentError>(loadWorldContent(worldPath, parsedConfig().contentManifest))
+        == WorldContentError::InvalidCatalog);
+    writeWorld(
+        "TES3MP_WORLD_V2\nmanifest 0202030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20\n"
+        "time 16 6 427 32400000 30000\n");
     assert(std::get<WorldContentError>(loadWorldContent(worldPath, parsedConfig().contentManifest))
         == WorldContentError::ManifestMismatch);
     std::filesystem::remove(worldPath);
@@ -1072,14 +1080,12 @@ int main()
         RecordingCrypto crypto;
         auto queues = OutboundQueueSet::create(OutboundQueuePolicy{}, 1);
         auto timeouts = *SessionTimeoutPolicy::create(1'000'000, 1'000'000, 1'000'000);
-        ConnectionSessionCoordinator sessions(
-            clock, observability, timeouts, poseOffer(), authentication, *queues, 1);
+        ConnectionSessionCoordinator sessions(clock, observability, timeouts, poseOffer(), authentication, *queues, 1);
         ScriptJoinFixture fixture;
         OverflowingJoinScript callback;
         const auto package = ServerScriptPackage::create(1, 1, 1);
         assert(package
-            && fixture.scripts.registerCallback(
-                   *package, 1, ServerScriptEventKind::SessionJoined, callback)
+            && fixture.scripts.registerCallback(*package, 1, ServerScriptEventKind::SessionJoined, callback)
                 == ServerScriptRegistrationResult::Accepted);
         ServerCommandIntakeCoordinator intake(
             clock, observability, clock.now(), ServerTick::initial(), IngressOrdinal::initial());
@@ -1092,18 +1098,18 @@ int main()
             { TransportEventKind::ConnectionAccepted, TransportFailure::None, std::nullopt, std::nullopt, connection,
                 std::nullopt, TransportSecurity::EncryptedUnauthenticated, scope(std::byte{ 9 }) });
         scriptRuntime.incoming.push_back({ TransportChannel::ReliableOrdered,
-            std::get<std::vector<std::byte>>(encodeProtocolFrame(MessageClass::SessionControl,
-                MessageKind::ClientHello, encodeClientHello(ClientHello::fromOffer(poseOffer())))) });
-        ServerApplicationWiring wiring{
-            sessions, fixture.joins, crypto, *queues, clock, intake, fixture.reducer, *lifecycle };
+            std::get<std::vector<std::byte>>(encodeProtocolFrame(MessageClass::SessionControl, MessageKind::ClientHello,
+                encodeClientHello(ClientHello::fromOffer(poseOffer())))) });
+        ServerApplicationWiring wiring{ sessions, fixture.joins, crypto, *queues, clock, intake, fixture.reducer,
+            *lifecycle };
         wiring.scripts = &fixture.scripts;
         ServerApplication scriptApplication(scriptRuntime, config, wiring);
         assert(scriptApplication.start() && scriptApplication.pump(ServerTick::initial()));
         auto material = AuthenticationMaterial::create({});
         scriptRuntime.incoming.push_back({ TransportChannel::ReliableOrdered,
-            std::get<std::vector<std::byte>>(encodeProtocolFrame(MessageClass::SessionControl,
-                MessageKind::AuthenticationRequest,
-                encodeAuthenticationRequest(AuthenticationRequest::join(std::move(*material))))) });
+            std::get<std::vector<std::byte>>(
+                encodeProtocolFrame(MessageClass::SessionControl, MessageKind::AuthenticationRequest,
+                    encodeAuthenticationRequest(AuthenticationRequest::join(std::move(*material))))) });
         assert(!scriptApplication.pump(ServerTick::initial())
             && scriptApplication.failure() == "server script delivery failed" && !fixture.scripts.healthy());
     }
@@ -2198,8 +2204,7 @@ int main()
         auto packagedCombatResult = loadCombatContent(contentRoot / "vanilla-combat.txt",
             packagedConfig.contentManifest, *packagedActorCatalog, packagedInventory->catalog);
         auto* packagedCombat = std::get_if<CombatContent>(&packagedCombatResult);
-        auto packagedWorldResult
-            = loadWorldContent(contentRoot / "vanilla-world.txt", packagedConfig.contentManifest);
+        auto packagedWorldResult = loadWorldContent(contentRoot / "vanilla-world.txt", packagedConfig.contentManifest);
         auto* packagedWorld = std::get_if<WorldContent>(&packagedWorldResult);
         assert(packagedCombat && packagedWorld);
 

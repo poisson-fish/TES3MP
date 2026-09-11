@@ -9,6 +9,7 @@
 #include <tes3mp/inventory_replication.hpp>
 #include <tes3mp/protocol_exchange.hpp>
 #include <tes3mp/protocol_pose.hpp>
+#include <tes3mp/world_state.hpp>
 
 #include <optional>
 #include <span>
@@ -154,6 +155,11 @@ namespace TES3MP::OpenMWAdapter
         {
             return ProviderResult::Accepted;
         }
+        virtual ProviderResult applyQuestJournal(
+            const QuestJournalCatalog&, const CanonicalPlayerQuestJournalState&, MonotonicInstant) noexcept
+        {
+            return ProviderResult::Accepted;
+        }
         virtual std::optional<ObjectRevision> observedObjectRevision(InteractiveObjectId) const noexcept
         {
             return std::nullopt;
@@ -168,6 +174,9 @@ namespace TES3MP::OpenMWAdapter
         }
         virtual void clear() noexcept = 0;
     };
+
+    ProviderResult applyCommittedQuestJournal(PresentationProvider& presentation,
+        const CanonicalWorldState& committedWorld, PlayerId player, MonotonicInstant receivedAt) noexcept;
 }
 
 #endif

@@ -432,9 +432,26 @@ bool parseOptions(int argc, char** argv, OMW::Engine& engine, Files::Configurati
             }
             containerMappings.push_back({ *id, refNumIndex, refNumFile });
         }
+        std::vector<TES3MP::OpenMWAdapter::DesktopQuestMapping> questMappings;
+        for (const auto& entry : variables["tes3mp-content-quest-map"].as<StringsVector>())
+        {
+            const auto equal = entry.find('=');
+            std::uint64_t rawId = 0;
+            const auto parsed = equal == std::string::npos ? std::from_chars_result{}
+                                                           : std::from_chars(entry.data(), entry.data() + equal, rawId);
+            const auto id = equal != std::string::npos && parsed.ec == std::errc{} && parsed.ptr == entry.data() + equal
+                ? TES3MP::QuestId::fromValue(rawId)
+                : std::nullopt;
+            if (!id || equal + 1 == entry.size())
+            {
+                Log(Debug::Error) << "TES3MP startup failed: invalid quest mapping";
+                return false;
+            }
+            questMappings.push_back({ *id, entry.substr(equal + 1) });
+        }
         auto contentMapping = TES3MP::OpenMWAdapter::DesktopContentMapping::create(*contentManifest, localMappings,
             contentManifest->defaultAppearance(), variables["tes3mp-content-appearance-record"].as<std::string>(),
-            actorMappings, interactiveObjectMappings, itemMappings, containerMappings);
+            actorMappings, interactiveObjectMappings, itemMappings, containerMappings, questMappings);
         if (!contentMapping)
         {
             Log(Debug::Error) << "TES3MP startup failed: content record mappings are required";

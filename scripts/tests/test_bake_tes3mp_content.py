@@ -91,7 +91,7 @@ class ContentBakerTests(unittest.TestCase):
             encoding="utf-8",
         )
         (self.source / "world.txt").write_text(
-            "TES3MP_WORLD_V1\n"
+            "TES3MP_WORLD_V2\n"
             f"manifest {ZERO_MANIFEST}\n"
             "time 16 6 427 32400000 30000\n"
             "global 1 short 0\n",

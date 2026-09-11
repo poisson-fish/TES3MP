@@ -139,9 +139,19 @@ namespace
         time.revision = id<WorldTimeRevision>(tick);
         time.lastChangeTick = id<ServerTick>(tick);
         time.lastAdvanceTick = id<ServerTick>(tick);
-        const std::array globals{ CanonicalGlobalVariableState{ id<GlobalVariableId>(1), value,
-            id<GlobalVariableRevision>(tick), id<ServerTick>(tick) } };
-        return CanonicalWorldState::create(time, globals).value();
+        const std::array globals{ CanonicalGlobalVariableState{
+            id<GlobalVariableId>(1), value, id<GlobalVariableRevision>(tick), id<ServerTick>(tick) } };
+        const std::array quests{ QuestCatalogEntry{
+            id<QuestId>(1), id<QuestStage>(0), { id<QuestStage>(0), id<QuestStage>(10) } } };
+        const std::array journal{ JournalCatalogEntry{ id<JournalEntryId>(1), id<QuestId>(1), id<QuestStage>(10) } };
+        const auto catalog = QuestJournalCatalog::create(testContentManifestId(), quests, journal).value();
+        std::vector<CanonicalPlayerQuestJournalState> players;
+        if (tick > 1)
+            players.push_back(
+                { id<PlayerId>(1), { { id<QuestId>(1), id<QuestStage>(10), id<QuestRevision>(2), id<ServerTick>(2) } },
+                    { { id<JournalEntryId>(1), id<JournalRevision>(2), id<ServerTick>(2) } }, id<JournalRevision>(2),
+                    id<ServerTick>(2) });
+        return CanonicalWorldState::create(time, globals, catalog, players).value();
     }
 
     CanonicalDurablePrefix domainPrefix()
@@ -240,8 +250,12 @@ namespace
             && latest.objects()->objects.front().doorState() == DoorState::Open
             && latest.objects()->objects.front().lockState() == LockState::Unlocked
             && latest.actors()->actors.front().root().position() == Position3(20, 0, 0)
-            && latest.world()->time().day == 2
-            && std::get<std::int32_t>(latest.world()->globals().front().value) == 2
+            && latest.world()->time().day == 2 && std::get<std::int32_t>(latest.world()->globals().front().value) == 2
+            && latest.world()->questJournalCatalog()
+            && latest.world()->questJournalCatalog()->manifest() == testContentManifestId()
+            && latest.world()->questJournal().size() == 1
+            && latest.world()->questJournal().front().quests.front().stage == id<QuestStage>(10)
+            && latest.world()->questJournal().front().journal.front().id == id<JournalEntryId>(1)
             && latest.combat()->actors.front().aggressionTarget == id<PlayerId>(1)
             && latest.canonicalChecksum()
             == canonicalDurableStateChecksumV1(latest.stateVersion(), latest.checkpointTick(), latest.players(),
@@ -254,8 +268,8 @@ namespace
     public:
         CanonicalDurabilityResult commit(const std::shared_ptr<const CanonicalStatePublication>& candidate,
             CanonicalRevision, std::span<const DurableCommandOrder>, const CanonicalInventoryWorld*,
-            const CanonicalCombatWorld*, const CanonicalInteractiveObjectWorld*,
-            const CanonicalActorWorld* actors, const CanonicalWorldState* world) noexcept override
+            const CanonicalCombatWorld*, const CanonicalInteractiveObjectWorld*, const CanonicalActorWorld* actors,
+            const CanonicalWorldState* world) noexcept override
         {
             called = true;
             sawCandidate = candidate && candidate->state().players().size() == 1;
@@ -383,15 +397,18 @@ namespace
         auto state = std::get<CanonicalServerState>(createCanonicalServerState(players, sessions));
         CanonicalCommandReducer reducer(std::move(state), observability, testContentManifest());
 
-        const std::array declarations{
-            GlobalVariableCatalogEntry{ id<GlobalVariableId>(1), std::int32_t{ 0 } } };
+        const std::array declarations{ GlobalVariableCatalogEntry{ id<GlobalVariableId>(1), std::int32_t{ 0 } } };
         const auto catalog = GlobalVariableCatalog::create(declarations).value();
+        const std::array quests{ QuestCatalogEntry{
+            id<QuestId>(1), id<QuestStage>(0), { id<QuestStage>(0), id<QuestStage>(10) } } };
+        const std::array journal{ JournalCatalogEntry{ id<JournalEntryId>(1), id<QuestId>(1), id<QuestStage>(10) } };
+        const auto questCatalog = QuestJournalCatalog::create(testContentManifestId(), quests, journal).value();
         CanonicalWorldTimeState initialTime;
         initialTime.day = 30;
         initialTime.month = 11;
         initialTime.year = 427;
         initialTime.millisecondsSinceMidnight = WorldMillisecondsPerDay - 480;
-        auto liveWorld = CanonicalWorldState::initial(initialTime, catalog).value();
+        auto liveWorld = CanonicalWorldState::initial(initialTime, catalog, questCatalog).value();
         auto advanced = advanceCanonicalWorldTime(liveWorld, id<ServerTick>(1), 16);
         auto* advancedWorld = std::get_if<CanonicalWorldState>(&advanced);
         if (!advancedWorld)
@@ -401,7 +418,17 @@ namespace
         auto* changedWorld = std::get_if<CanonicalWorldState>(&changed);
         if (!changedWorld)
             return false;
-        const auto expectedWorld = *changedWorld;
+        auto questChanged = setCanonicalQuestStage(*changedWorld, id<PlayerId>(1), id<QuestId>(1),
+            QuestRevision::initial(), id<QuestStage>(10), id<ServerTick>(1));
+        auto* questWorld = std::get_if<CanonicalWorldState>(&questChanged);
+        if (!questWorld)
+            return false;
+        auto journalChanged = addCanonicalJournalEntry(*questWorld, id<PlayerId>(1), id<QuestId>(1),
+            JournalRevision::initial(), id<JournalEntryId>(1), id<ServerTick>(1));
+        auto* expected = std::get_if<CanonicalWorldState>(&journalChanged);
+        if (!expected)
+            return false;
+        const auto expectedWorld = *expected;
 
         ProbeDurability durability;
         durability.reducer = &reducer;
@@ -438,7 +465,9 @@ namespace
         return committed && durability.called && durability.sawStagedWorld
             && !durability.worldInstalledBeforeAcknowledgement && liveWorld == expectedWorld
             && liveWorld.time().year == 428 && liveWorld.time().month == 0 && liveWorld.time().day == 1
-            && std::get<std::int32_t>(liveWorld.globals().front().value) == 7;
+            && std::get<std::int32_t>(liveWorld.globals().front().value) == 7 && liveWorld.questJournal().size() == 1
+            && liveWorld.questJournal().front().quests.front().stage == id<QuestStage>(10)
+            && liveWorld.questJournal().front().journal.front().id == id<JournalEntryId>(1);
     }
 }
 

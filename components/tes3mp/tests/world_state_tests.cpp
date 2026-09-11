@@ -34,6 +34,26 @@ namespace
         return CanonicalWorldState::initial(time, catalog()).value();
     }
 
+    QuestJournalCatalog questCatalog()
+    {
+        const std::array quests{
+            QuestCatalogEntry{
+                id<QuestId>(10), id<QuestStage>(0), { id<QuestStage>(0), id<QuestStage>(10), id<QuestStage>(20) } },
+            QuestCatalogEntry{ id<QuestId>(20), id<QuestStage>(5), { id<QuestStage>(5), id<QuestStage>(15) } },
+        };
+        const std::array journal{
+            JournalCatalogEntry{ id<JournalEntryId>(100), id<QuestId>(10), id<QuestStage>(10) },
+            JournalCatalogEntry{ id<JournalEntryId>(101), id<QuestId>(10), id<QuestStage>(20) },
+        };
+        return QuestJournalCatalog::create(testContentManifest().id(), quests, journal).value();
+    }
+
+    CanonicalWorldState questWorld()
+    {
+        CanonicalWorldTimeState time;
+        return CanonicalWorldState::initial(time, catalog(), questCatalog()).value();
+    }
+
     bool time_advances_exactly_across_calendar_boundaries()
     {
         const auto advanced = advanceCanonicalWorldTime(world(), id<ServerTick>(125), 16);
@@ -56,10 +76,10 @@ namespace
             return false;
         return std::get<CanonicalWorldMutationError>(setCanonicalGlobal(*result, catalog(), id<GlobalVariableId>(2),
                    GlobalVariableRevision::initial(), std::int32_t{ 100 }, id<ServerTick>(8)))
-                == CanonicalWorldMutationError::RevisionMismatch
-            && std::get<CanonicalWorldMutationError>(setCanonicalGlobal(*result, catalog(), id<GlobalVariableId>(2),
-                   id<GlobalVariableRevision>(2), 1.f, id<ServerTick>(8)))
-                == CanonicalWorldMutationError::TypeMismatch;
+            == CanonicalWorldMutationError::RevisionMismatch
+            && std::get<CanonicalWorldMutationError>(setCanonicalGlobal(
+                   *result, catalog(), id<GlobalVariableId>(2), id<GlobalVariableRevision>(2), 1.f, id<ServerTick>(8)))
+            == CanonicalWorldMutationError::TypeMismatch;
     }
 
     bool restore_requires_the_exact_ordered_typed_catalog()
@@ -71,8 +91,8 @@ namespace
             != CanonicalWorldMutationError::CatalogMismatch)
             return false;
         auto extra = std::vector<CanonicalGlobalVariableState>(initial.globals().begin(), initial.globals().end());
-        extra.push_back({ id<GlobalVariableId>(4), std::int16_t{ 0 }, GlobalVariableRevision::initial(),
-            ServerTick::initial() });
+        extra.push_back(
+            { id<GlobalVariableId>(4), std::int16_t{ 0 }, GlobalVariableRevision::initial(), ServerTick::initial() });
         if (std::get<CanonicalWorldMutationError>(restoreCanonicalWorldState(catalog(), initial.time(), extra))
             != CanonicalWorldMutationError::CatalogMismatch)
             return false;
@@ -91,23 +111,81 @@ namespace
     {
         const std::array duplicate{ GlobalVariableCatalogEntry{ id<GlobalVariableId>(1), std::int16_t{ 1 } },
             GlobalVariableCatalogEntry{ id<GlobalVariableId>(1), std::int32_t{ 2 } } };
-        const std::array nonfinite{ GlobalVariableCatalogEntry{ id<GlobalVariableId>(1),
-            std::bit_cast<float>(std::uint32_t{ 0x7f800000 }) } };
+        const std::array nonfinite{ GlobalVariableCatalogEntry{
+            id<GlobalVariableId>(1), std::bit_cast<float>(std::uint32_t{ 0x7f800000 }) } };
         return !GlobalVariableCatalog::create(duplicate) && !GlobalVariableCatalog::create(nonfinite);
+    }
+
+    bool quest_and_journal_transactions_are_typed_revisioned_and_per_player()
+    {
+        auto changed = setCanonicalQuestStage(questWorld(), id<PlayerId>(1), id<QuestId>(10), QuestRevision::initial(),
+            id<QuestStage>(10), id<ServerTick>(3));
+        auto* first = std::get_if<CanonicalWorldState>(&changed);
+        if (!first)
+            return false;
+        changed = addCanonicalJournalEntry(*first, id<PlayerId>(1), id<QuestId>(10), JournalRevision::initial(),
+            id<JournalEntryId>(100), id<ServerTick>(3));
+        const auto* result = std::get_if<CanonicalWorldState>(&changed);
+        const auto* player = result ? result->findQuestJournal(id<PlayerId>(1)) : nullptr;
+        if (!player || player->quests.size() != 1 || player->quests[0].stage != id<QuestStage>(10)
+            || player->quests[0].revision.value() != 2 || player->quests[0].lastChangeTick != id<ServerTick>(3)
+            || player->journal.size() != 1 || player->journal[0].id != id<JournalEntryId>(100)
+            || player->journalRevision.value() != 2 || player->lastJournalChangeTick != id<ServerTick>(3))
+            return false;
+        return std::get<CanonicalWorldMutationError>(setCanonicalQuestStage(*result, id<PlayerId>(1), id<QuestId>(10),
+                   QuestRevision::initial(), id<QuestStage>(20), id<ServerTick>(4)))
+            == CanonicalWorldMutationError::QuestRevisionMismatch
+            && std::get<CanonicalWorldMutationError>(setCanonicalQuestStage(*result, id<PlayerId>(1), id<QuestId>(10),
+                   id<QuestRevision>(2), id<QuestStage>(99), id<ServerTick>(4)))
+            == CanonicalWorldMutationError::UnknownQuestStage
+            && std::get<CanonicalWorldMutationError>(addCanonicalJournalEntry(*result, id<PlayerId>(1), id<QuestId>(10),
+                   id<JournalRevision>(2), id<JournalEntryId>(100), id<ServerTick>(4)))
+            == CanonicalWorldMutationError::DuplicateJournalEntry;
+    }
+
+    bool quest_journal_restore_requires_the_exact_manifest_catalog()
+    {
+        const auto source = questWorld();
+        const std::array changedQuests{ QuestCatalogEntry{
+            id<QuestId>(10), id<QuestStage>(0), { id<QuestStage>(0), id<QuestStage>(10) } } };
+        const std::array<JournalCatalogEntry, 0> noJournal{};
+        const auto mismatched
+            = QuestJournalCatalog::create(testContentManifest().id(), changedQuests, noJournal).value();
+        const auto restored = restoreCanonicalWorldState(
+            catalog(), questCatalog(), source.time(), source.globals(), mismatched, source.questJournal());
+        return std::get<CanonicalWorldMutationError>(restored) == CanonicalWorldMutationError::CatalogMismatch;
+    }
+
+    bool malformed_quest_catalogs_reject_atomically()
+    {
+        const std::array duplicateStages{ QuestCatalogEntry{
+            id<QuestId>(1), id<QuestStage>(0), { id<QuestStage>(0), id<QuestStage>(0) } } };
+        const std::array<JournalCatalogEntry, 0> none{};
+        const std::array validQuest{ QuestCatalogEntry{
+            id<QuestId>(1), id<QuestStage>(0), { id<QuestStage>(0), id<QuestStage>(10) } } };
+        const std::array unknownQuestJournal{ JournalCatalogEntry{
+            id<JournalEntryId>(1), id<QuestId>(2), id<QuestStage>(10) } };
+        return !QuestJournalCatalog::create(testContentManifest().id(), duplicateStages, none)
+            && !QuestJournalCatalog::create(testContentManifest().id(), validQuest, unknownQuestJournal);
     }
 }
 
 int main()
 {
     const std::array tests{
-        std::pair{ "time_advances_exactly_across_calendar_boundaries",
-            &time_advances_exactly_across_calendar_boundaries },
-        std::pair{ "typed_global_updates_preserve_revision_and_tick",
-            &typed_global_updates_preserve_revision_and_tick },
-        std::pair{ "restore_requires_the_exact_ordered_typed_catalog",
-            &restore_requires_the_exact_ordered_typed_catalog },
+        std::pair{
+            "time_advances_exactly_across_calendar_boundaries", &time_advances_exactly_across_calendar_boundaries },
+        std::pair{
+            "typed_global_updates_preserve_revision_and_tick", &typed_global_updates_preserve_revision_and_tick },
+        std::pair{
+            "restore_requires_the_exact_ordered_typed_catalog", &restore_requires_the_exact_ordered_typed_catalog },
         std::pair{ "invalid_catalog_and_nonfinite_values_reject_without_partial_state",
             &invalid_catalog_and_nonfinite_values_reject_without_partial_state },
+        std::pair{ "quest_and_journal_transactions_are_typed_revisioned_and_per_player",
+            &quest_and_journal_transactions_are_typed_revisioned_and_per_player },
+        std::pair{ "quest_journal_restore_requires_the_exact_manifest_catalog",
+            &quest_journal_restore_requires_the_exact_manifest_catalog },
+        std::pair{ "malformed_quest_catalogs_reject_atomically", &malformed_quest_catalogs_reject_atomically },
     };
     for (const auto& [name, test] : tests)
         if (!test())

@@ -24,6 +24,7 @@ namespace TES3MP::ServerApp
     struct WorldContent
     {
         GlobalVariableCatalog globals;
+        QuestJournalCatalog questJournal;
         CanonicalWorldState world;
     };
 

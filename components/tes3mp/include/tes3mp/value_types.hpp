@@ -160,16 +160,63 @@ namespace TES3MP::Detail
         static constexpr std::string_view name = "CharacterProfileRevision";
     };
 
-    struct GlobalVariableIdTag { static constexpr std::string_view name = "GlobalVariableId"; };
-    struct GlobalVariableRevisionTag { static constexpr std::string_view name = "GlobalVariableRevision"; };
-    struct WorldTimeRevisionTag { static constexpr std::string_view name = "WorldTimeRevision"; };
+    struct GlobalVariableIdTag
+    {
+        static constexpr std::string_view name = "GlobalVariableId";
+    };
+    struct GlobalVariableRevisionTag
+    {
+        static constexpr std::string_view name = "GlobalVariableRevision";
+    };
+    struct WorldTimeRevisionTag
+    {
+        static constexpr std::string_view name = "WorldTimeRevision";
+    };
+    struct QuestIdTag
+    {
+        static constexpr std::string_view name = "QuestId";
+    };
+    struct QuestStageTag
+    {
+        static constexpr std::string_view name = "QuestStage";
+    };
+    struct QuestRevisionTag
+    {
+        static constexpr std::string_view name = "QuestRevision";
+    };
+    struct JournalEntryIdTag
+    {
+        static constexpr std::string_view name = "JournalEntryId";
+    };
+    struct JournalRevisionTag
+    {
+        static constexpr std::string_view name = "JournalRevision";
+    };
 
-    struct RaceRecordIdTag { static constexpr std::string_view name = "RaceRecordId"; };
-    struct HeadRecordIdTag { static constexpr std::string_view name = "HeadRecordId"; };
-    struct HairRecordIdTag { static constexpr std::string_view name = "HairRecordId"; };
-    struct ClassRecordIdTag { static constexpr std::string_view name = "ClassRecordId"; };
-    struct BirthsignRecordIdTag { static constexpr std::string_view name = "BirthsignRecordId"; };
-    struct SpellRecordIdTag { static constexpr std::string_view name = "SpellRecordId"; };
+    struct RaceRecordIdTag
+    {
+        static constexpr std::string_view name = "RaceRecordId";
+    };
+    struct HeadRecordIdTag
+    {
+        static constexpr std::string_view name = "HeadRecordId";
+    };
+    struct HairRecordIdTag
+    {
+        static constexpr std::string_view name = "HairRecordId";
+    };
+    struct ClassRecordIdTag
+    {
+        static constexpr std::string_view name = "ClassRecordId";
+    };
+    struct BirthsignRecordIdTag
+    {
+        static constexpr std::string_view name = "BirthsignRecordId";
+    };
+    struct SpellRecordIdTag
+    {
+        static constexpr std::string_view name = "SpellRecordId";
+    };
 }
 
 namespace TES3MP
@@ -213,13 +260,18 @@ namespace TES3MP
         = Detail::StrongValue<Detail::WorldItemRevisionTag, Detail::StrongValuePolicy::CounterFromOne>;
     using ContainerId = Detail::StrongValue<Detail::ContainerIdTag, Detail::StrongValuePolicy::Identity>;
     using CombatRevision = Detail::StrongValue<Detail::CombatRevisionTag, Detail::StrongValuePolicy::CounterFromOne>;
-    using CharacterProfileRevision = Detail::StrongValue<Detail::CharacterProfileRevisionTag,
-        Detail::StrongValuePolicy::CounterFromOne>;
+    using CharacterProfileRevision
+        = Detail::StrongValue<Detail::CharacterProfileRevisionTag, Detail::StrongValuePolicy::CounterFromOne>;
     using GlobalVariableId = Detail::StrongValue<Detail::GlobalVariableIdTag, Detail::StrongValuePolicy::Identity>;
-    using GlobalVariableRevision = Detail::StrongValue<Detail::GlobalVariableRevisionTag,
-        Detail::StrongValuePolicy::CounterFromOne>;
+    using GlobalVariableRevision
+        = Detail::StrongValue<Detail::GlobalVariableRevisionTag, Detail::StrongValuePolicy::CounterFromOne>;
     using WorldTimeRevision
         = Detail::StrongValue<Detail::WorldTimeRevisionTag, Detail::StrongValuePolicy::CounterFromOne>;
+    using QuestId = Detail::StrongValue<Detail::QuestIdTag, Detail::StrongValuePolicy::Identity>;
+    using QuestStage = Detail::StrongValue<Detail::QuestStageTag, Detail::StrongValuePolicy::CounterFromZero>;
+    using QuestRevision = Detail::StrongValue<Detail::QuestRevisionTag, Detail::StrongValuePolicy::CounterFromOne>;
+    using JournalEntryId = Detail::StrongValue<Detail::JournalEntryIdTag, Detail::StrongValuePolicy::Identity>;
+    using JournalRevision = Detail::StrongValue<Detail::JournalRevisionTag, Detail::StrongValuePolicy::CounterFromOne>;
     using RaceRecordId = Detail::StrongValue<Detail::RaceRecordIdTag, Detail::StrongValuePolicy::Identity>;
     using HeadRecordId = Detail::StrongValue<Detail::HeadRecordIdTag, Detail::StrongValuePolicy::Identity>;
     using HairRecordId = Detail::StrongValue<Detail::HairRecordIdTag, Detail::StrongValuePolicy::Identity>;

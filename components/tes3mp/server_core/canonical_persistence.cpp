@@ -834,6 +834,49 @@ namespace
             writeStrong(writer, global.revision);
             writeStrong(writer, global.lastChangeTick);
         }
+        writeBool(writer, world.questJournalCatalog().has_value());
+        if (!world.questJournalCatalog())
+            return;
+        const auto& catalog = *world.questJournalCatalog();
+        writer.bytes(catalog.manifest().bytes());
+        writer.fixed(static_cast<std::uint32_t>(catalog.quests().size()));
+        for (const auto& quest : catalog.quests())
+        {
+            writeStrong(writer, quest.id);
+            writeStrong(writer, quest.initialStage);
+            writer.fixed(static_cast<std::uint32_t>(quest.stages.size()));
+            for (const auto stage : quest.stages)
+                writeStrong(writer, stage);
+        }
+        writer.fixed(static_cast<std::uint32_t>(catalog.journal().size()));
+        for (const auto entry : catalog.journal())
+        {
+            writeStrong(writer, entry.id);
+            writeStrong(writer, entry.quest);
+            writeStrong(writer, entry.stage);
+        }
+        writer.fixed(static_cast<std::uint32_t>(world.questJournal().size()));
+        for (const auto& player : world.questJournal())
+        {
+            writeStrong(writer, player.player);
+            writer.fixed(static_cast<std::uint32_t>(player.quests.size()));
+            for (const auto quest : player.quests)
+            {
+                writeStrong(writer, quest.id);
+                writeStrong(writer, quest.stage);
+                writeStrong(writer, quest.revision);
+                writeStrong(writer, quest.lastChangeTick);
+            }
+            writer.fixed(static_cast<std::uint32_t>(player.journal.size()));
+            for (const auto entry : player.journal)
+            {
+                writeStrong(writer, entry.id);
+                writeStrong(writer, entry.revision);
+                writeStrong(writer, entry.changeTick);
+            }
+            writeStrong(writer, player.journalRevision);
+            writeStrong(writer, player.lastJournalChangeTick);
+        }
     }
 
     std::optional<CanonicalWorldState> readWorld(Reader& reader) noexcept
@@ -849,8 +892,8 @@ namespace
         const auto lastChange = readStrong<ServerTick>(reader);
         const auto lastAdvance = readStrong<ServerTick>(reader);
         const auto count = reader.fixed<std::uint32_t>();
-        if (!day || !month || !year || !milliseconds || !scale || !remainder || !revision || !lastChange
-            || !lastAdvance || !count || *count > MaximumGlobalVariables)
+        if (!day || !month || !year || !milliseconds || !scale || !remainder || !revision || !lastChange || !lastAdvance
+            || !count || *count > MaximumGlobalVariables)
             return std::nullopt;
         time = { *day, *month, *year, *milliseconds, *scale, *remainder, *revision, *lastChange, *lastAdvance };
         std::vector<CanonicalGlobalVariableState> globals;
@@ -889,14 +932,113 @@ namespace
                 return std::nullopt;
             globals.push_back({ *id, value, *globalRevision, *globalTick });
         }
-        return CanonicalWorldState::create(time, globals);
+        bool hasQuestJournal = false;
+        if (!readBool(reader, hasQuestJournal))
+            return std::nullopt;
+        if (!hasQuestJournal)
+            return CanonicalWorldState::create(time, globals);
+        const auto manifestBytes = reader.bytes(ContentManifestIdBytes);
+        const auto questCount = reader.fixed<std::uint32_t>();
+        if (!manifestBytes || !questCount || *questCount > MaximumQuestCatalogEntries)
+            return std::nullopt;
+        const auto manifest = ContentManifestId::fromBytes(*manifestBytes);
+        if (!manifest)
+            return std::nullopt;
+        std::vector<QuestCatalogEntry> quests;
+        quests.reserve(*questCount);
+        std::size_t totalStages = 0;
+        for (std::uint32_t index = 0; index < *questCount; ++index)
+        {
+            const auto id = readStrong<QuestId>(reader);
+            const auto initialStage = readStrong<QuestStage>(reader);
+            const auto stageCount = reader.fixed<std::uint32_t>();
+            if (!id || !initialStage || !stageCount || *stageCount == 0 || *stageCount > MaximumQuestStagesPerQuest
+                || *stageCount > MaximumQuestCatalogStages - totalStages)
+                return std::nullopt;
+            totalStages += *stageCount;
+            std::vector<QuestStage> stages;
+            stages.reserve(*stageCount);
+            for (std::uint32_t stageIndex = 0; stageIndex < *stageCount; ++stageIndex)
+            {
+                auto stage = readStrong<QuestStage>(reader);
+                if (!stage)
+                    return std::nullopt;
+                stages.push_back(*stage);
+            }
+            quests.push_back({ *id, *initialStage, std::move(stages) });
+        }
+        const auto journalCount = reader.fixed<std::uint32_t>();
+        if (!journalCount || *journalCount > MaximumJournalCatalogEntries)
+            return std::nullopt;
+        std::vector<JournalCatalogEntry> journal;
+        journal.reserve(*journalCount);
+        for (std::uint32_t index = 0; index < *journalCount; ++index)
+        {
+            const auto id = readStrong<JournalEntryId>(reader);
+            const auto quest = readStrong<QuestId>(reader);
+            const auto stage = readStrong<QuestStage>(reader);
+            if (!id || !quest || !stage)
+                return std::nullopt;
+            journal.push_back({ *id, *quest, *stage });
+        }
+        auto catalog = QuestJournalCatalog::create(*manifest, quests, journal);
+        const auto playerCount = reader.fixed<std::uint32_t>();
+        if (!catalog || !playerCount || *playerCount > MaximumPlayerQuestJournalStates)
+            return std::nullopt;
+        std::vector<CanonicalPlayerQuestJournalState> players;
+        players.reserve(*playerCount);
+        std::size_t totalQuestStates = 0;
+        std::size_t totalJournalEntries = 0;
+        for (std::uint32_t playerIndex = 0; playerIndex < *playerCount; ++playerIndex)
+        {
+            const auto player = readStrong<PlayerId>(reader);
+            const auto playerQuestCount = reader.fixed<std::uint32_t>();
+            if (!player || !playerQuestCount || *playerQuestCount > quests.size()
+                || *playerQuestCount > MaximumCanonicalQuestStates - totalQuestStates)
+                return std::nullopt;
+            totalQuestStates += *playerQuestCount;
+            CanonicalPlayerQuestJournalState state{ *player };
+            state.quests.reserve(*playerQuestCount);
+            for (std::uint32_t questIndex = 0; questIndex < *playerQuestCount; ++questIndex)
+            {
+                const auto id = readStrong<QuestId>(reader);
+                const auto stage = readStrong<QuestStage>(reader);
+                const auto questRevision = readStrong<QuestRevision>(reader);
+                const auto tick = readStrong<ServerTick>(reader);
+                if (!id || !stage || !questRevision || !tick)
+                    return std::nullopt;
+                state.quests.push_back({ *id, *stage, *questRevision, *tick });
+            }
+            const auto entryCount = reader.fixed<std::uint32_t>();
+            if (!entryCount || *entryCount > journal.size()
+                || *entryCount > MaximumCanonicalJournalEntries - totalJournalEntries)
+                return std::nullopt;
+            totalJournalEntries += *entryCount;
+            state.journal.reserve(*entryCount);
+            for (std::uint32_t entryIndex = 0; entryIndex < *entryCount; ++entryIndex)
+            {
+                const auto id = readStrong<JournalEntryId>(reader);
+                const auto entryRevision = readStrong<JournalRevision>(reader);
+                const auto tick = readStrong<ServerTick>(reader);
+                if (!id || !entryRevision || !tick)
+                    return std::nullopt;
+                state.journal.push_back({ *id, *entryRevision, *tick });
+            }
+            const auto journalRevision = readStrong<JournalRevision>(reader);
+            const auto tick = readStrong<ServerTick>(reader);
+            if (!journalRevision || !tick)
+                return std::nullopt;
+            state.journalRevision = *journalRevision;
+            state.lastJournalChangeTick = *tick;
+            players.push_back(std::move(state));
+        }
+        return CanonicalWorldState::create(time, globals, std::move(*catalog), players);
     }
 
     void writeDomains(Writer& writer, const std::optional<CanonicalDurableInventoryState>& inventory,
         const std::optional<CanonicalDurableCombatState>& combat,
         const std::optional<CanonicalDurableInteractiveObjectState>& objects,
-        const std::optional<CanonicalDurableActorState>& actors,
-        const std::optional<CanonicalWorldState>& world)
+        const std::optional<CanonicalDurableActorState>& actors, const std::optional<CanonicalWorldState>& world)
     {
         writeBool(writer, inventory.has_value());
         if (inventory)
@@ -918,8 +1060,7 @@ namespace
     bool readDomains(Reader& reader, std::optional<CanonicalDurableInventoryState>& inventory,
         std::optional<CanonicalDurableCombatState>& combat,
         std::optional<CanonicalDurableInteractiveObjectState>& objects,
-        std::optional<CanonicalDurableActorState>& actors,
-        std::optional<CanonicalWorldState>& world) noexcept
+        std::optional<CanonicalDurableActorState>& actors, std::optional<CanonicalWorldState>& world) noexcept
     {
         bool present = false;
         if (!readBool(reader, present))
@@ -1005,8 +1146,7 @@ namespace
         const std::optional<CanonicalDurableInventoryState>& inventory,
         const std::optional<CanonicalDurableCombatState>& combat,
         const std::optional<CanonicalDurableInteractiveObjectState>& objects,
-        const std::optional<CanonicalDurableActorState>& actors,
-        const std::optional<CanonicalWorldState>& world)
+        const std::optional<CanonicalDurableActorState>& actors, const std::optional<CanonicalWorldState>& world)
     {
         Writer writer;
         writer.fixed(stateVersion.value());
@@ -1110,6 +1250,20 @@ namespace
         return CanonicalDurableActorState{ std::vector<CanonicalActorEntityState>(
             world->actors().begin(), world->actors().end()) };
     }
+
+    std::optional<CanonicalWorldState> snapshotWorld(
+        const CanonicalWorldState* world, std::span<const CanonicalPlayerEntityState> durablePlayers)
+    {
+        if (!world)
+            return std::nullopt;
+        if (!world->questJournalCatalog())
+            return *world;
+        std::vector<CanonicalPlayerQuestJournalState> players;
+        for (const auto& player : world->questJournal())
+            if (durablePlayer(durablePlayers, player.player))
+                players.push_back(player);
+        return CanonicalWorldState::create(world->time(), world->globals(), *world->questJournalCatalog(), players);
+    }
 }
 
 namespace TES3MP
@@ -1184,7 +1338,7 @@ namespace TES3MP
     {
         return create(stateVersion, canonicalRevision, checkpointTick, players, commands, previousTransactionChecksum,
             snapshotInventory(inventory, players), snapshotCombat(combat, players), snapshotObjects(objects),
-            snapshotActors(actors), world ? std::optional<CanonicalWorldState>(*world) : std::nullopt);
+            snapshotActors(actors), snapshotWorld(world, players));
     }
 
     std::optional<CanonicalDurableTick> CanonicalDurableTick::create(CanonicalStateVersion stateVersion,
@@ -1192,8 +1346,8 @@ namespace TES3MP
         std::span<const CanonicalPlayerEntityState> players, std::span<const DurableCommandOrder> commands,
         CanonicalChecksum previousTransactionChecksum, std::optional<CanonicalDurableInventoryState> inventory,
         std::optional<CanonicalDurableCombatState> combat,
-        std::optional<CanonicalDurableInteractiveObjectState> objects,
-        std::optional<CanonicalDurableActorState> actors, std::optional<CanonicalWorldState> world) noexcept
+        std::optional<CanonicalDurableInteractiveObjectState> objects, std::optional<CanonicalDurableActorState> actors,
+        std::optional<CanonicalWorldState> world) noexcept
     try
     {
         if (players.size() > MaximumCanonicalPlayerEntities || commands.size() > MaximumPersistenceCommandsPerTick
@@ -1268,8 +1422,14 @@ namespace TES3MP
             return std::nullopt;
         if (world
             && (world->time().lastAdvanceTick > checkpointTick || world->time().lastChangeTick > checkpointTick
-                || std::ranges::any_of(world->globals(), [checkpointTick](const auto& global) {
-                       return global.lastChangeTick > checkpointTick;
+                || std::ranges::any_of(world->globals(),
+                    [checkpointTick](const auto& global) { return global.lastChangeTick > checkpointTick; })
+                || std::ranges::any_of(world->questJournal(), [&](const auto& player) {
+                       return !durablePlayer(players, player.player) || player.lastJournalChangeTick > checkpointTick
+                           || std::ranges::any_of(player.quests,
+                               [checkpointTick](const auto& quest) { return quest.lastChangeTick > checkpointTick; })
+                           || std::ranges::any_of(player.journal,
+                               [checkpointTick](const auto& entry) { return entry.changeTick > checkpointTick; });
                    })))
             return std::nullopt;
         const auto canonical = canonicalDurableStateChecksumV1(

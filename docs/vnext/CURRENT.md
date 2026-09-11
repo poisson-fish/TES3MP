@@ -388,30 +388,26 @@ and [`character.cpp`](../../apps/openmw/mwmechanics/character.cpp).
   pending, and per-tick bounds. A callback or queue failure discards the whole
   publication output and terminates production composition rather than
   continuing with a partial script result.
-- Script commands have their own origin and do not impersonate client sessions.
-  Typed commands install an active player's manifest-scoped canonical safe
-  point, replace the canonical clock, or update a typed global after validating
-  expected identity, type, and revision. They execute only at the tick following
-  their source publication and share the reducer's prepared commit,
-  acknowledgement, and interest projection.
+- Script commands have their own origin. Typed commands install safe points,
+  replace the clock, update globals, set per-player quest stages, or append
+  journal entries after validating identities, types, catalogs, and revisions.
+  They execute the next tick through the prepared durability commit.
+- World V2 content carries bounded manifest-scoped quest, stage, and journal
+  declarations. Progress is sparse and player-scoped. The OpenMW committed-state
+  boundary rebuilds its journal only after complete local mapping validates.
 
 Primary sources: [`server_scripting.hpp`](../../components/tes3mp/include/tes3mp/server_scripting.hpp),
-[`server_scripting.cpp`](../../components/tes3mp/server_core/server_scripting.cpp),
 [`server_command_reducer.cpp`](../../components/tes3mp/server_core/server_command_reducer.cpp),
-and [`server_application.cpp`](../../apps/tes3mp-server/server_application.cpp).
+[`world_content.cpp`](../../apps/tes3mp-server/world_content.cpp), and
+[`desktop_providers.cpp`](../../apps/openmw/tes3mp/desktop_providers.cpp).
 
 ### Transactional gameplay persistence and replay envelope
 
-- Version 2 of the engine-independent persistence contract binds every durable
-  prefix to the content manifest, a SHA-256 server-configuration identity,
-  script API/package versions, and named deterministic seed states. Each record
-  carries canonical state version, canonical revision, checkpoint tick, complete
-  normalized client/script command order and disposition, session-independent
-  player roots, inventory/equipment/container/ground state, complete interactive
-  object state, actor roots/velocity/AI progress, complete player and actor
-  combat/respawn state, combat simulation tick and PRNG words, canonical
-  day/month/year/hour/time scale, typed globals with revisions/change ticks, and
-  one checksum across the full durable snapshot.
+- V2 binds every durable prefix to content/configuration identity, script
+  versions, seeds, state version/revision/tick, and normalized command results.
+  Its one checksum covers established players, inventory, objects, actor
+  simulation/combat/respawn and RNG, clock, typed globals, and manifest-scoped
+  per-player quest stages/journal entries with revisions and change ticks.
 - The reducer offers a fully prepared immutable candidate to the durability
   port before installing it or publishing it to replay, scripts, metrics, or
   clients. Only `Committed` acknowledges durability. Rejection or I/O failure
@@ -423,12 +419,9 @@ and [`server_application.cpp`](../../apps/tes3mp-server/server_application.cpp).
   atomically replaces the committed file; every crash cut therefore selects the
   previous or new complete multi-domain tick, never a mixture. V1 development
   files remain untouched and are not migrated.
-- Restart validates the complete bounded prefix and exact identity before
-  restoring player roots, inventory, objects, actor simulation, combat, PRNG,
-  canonical time and globals, and version/revision/tick counters. Object, actor,
-  and global state must match their exact configured catalogs; global count,
-  order, IDs, and types are checked atomically, and restored actor roots must
-  pass collision occupancy. Live sessions are intentionally not restored.
+- Restart validates the bounded prefix and configured catalogs before restoring
+  every durable domain and counter. Counts, order, typed IDs, stages, and types
+  are atomic; actor roots must pass occupancy. Live sessions are not restored.
   Replay begins from the verified checkpoint, consumes tail ordering one tick
   at a time, and requires the full reconstructed durable checksum at every
   record. Only established-character player state is retained; incomplete
@@ -516,12 +509,10 @@ and [`test_bake_tes3mp_content.py`](../../scripts/tests/test_bake_tes3mp_content
   combat RNG, interactive objects, actor simulation and combat/respawn state,
   canonical time and typed globals, canonical version/revision/tick counters,
   deterministic identity, and bounded command ordering survive restart.
-  Quests/journals and live script memory do not. Chargen is the only
-  packaged scripted sequence with explicit server safe points today. The
-  runtime-neutral versioned server-scripting boundary and its first safe-point
-  command exist, but no script content loader or interpreter is packaged and the
-  default server registers no callbacks. Other cutscenes, quest/script progress,
-  and their intermediate state are not yet canonical or durable. Starting
+  Live script memory does not. Chargen is the only packaged sequence with server
+  safe points. The runtime-neutral scripting boundary exists, but no loader or
+  interpreter is packaged and the default server has no callbacks. Other
+  cutscenes and live script progress are not durable. Starting
   inventory/equipment is modeled in the profile, while broader inventory
   persistence beyond the implemented gameplay domains remains unfinished.
 - The packaged default is the verified installed vanilla manifest. Other
@@ -538,20 +529,19 @@ and [`test_bake_tes3mp_content.py`](../../scripts/tests/test_bake_tes3mp_content
 
 ## Work still required
 
-### Next milestone: durable quests and journals
+### Next milestone: durable script runtime state
 
-Add quests and journals to the same versioned transaction/checksum and replay
-envelope, followed by durable script state. The existing acknowledgement point,
-32-record journal bound, bounded recovery, and exact identity checks remain
-unchanged. TES3MP 0.8.x saves remain unsupported.
+Persist bounded script runtime state in V2 while retaining its checksum, replay,
+compaction, acknowledgement, 32-record journal, and exact identity checks.
+TES3MP 0.8.x saves remain unsupported.
 
 ### Required before the desktop/PC-VR release
 
 1. Combat, stats, magic, death, resurrection, and respawn.
 2. Weather and broader durable world-state transitions; canonical time and
    globals are implemented.
-3. Dialogue, journals, quests, factions, reputation, and their durable
-   consequences.
+3. Dialogue, factions, reputation, and broader quest/journal gameplay
+   consequences; durable quest stages and journal entries are implemented.
 4. Script content loading/runtime composition and expansion of the versioned
    immutable event/typed-command surface for release gameplay domains; the
    legacy CoreScripts API is not reused.
@@ -576,17 +566,14 @@ and do not enter protocol or canonical state.
 
 ## Verification snapshot
 
-The durable canonical-time and global-state working tree passed the following on
-2026-09-10:
+The durable quest/journal working tree passed the following on 2026-09-10:
 
-- the standalone aggregate, including canonical calendar rollover, typed global
-  mutation, exact missing/extra/reordered/type-mismatch rejection, V2 world
-  round trips and replay, full durable checksum comparison, and pre-installation
-  acknowledgement for time/global mutations;
+- the standalone aggregate: bounded catalogs, typed per-player mutations, exact
+  mismatch rejection, V2 round trips/replay/checksum, and pre-installation
+  acknowledgement;
 - the dedicated-server application aggregate, including bounded compaction,
-  corruption/truncation rejection, exhaustive time/global/key/door/actor crash
-  cuts, automatic clock advancement, atomic replacement, and
-  stale-temporary-file recovery; and
+  corruption/truncation rejection, exhaustive domain crash cuts, exact catalog
+  restoration, atomic replacement, and stale-temporary-file recovery; and
 - the dedicated-server product target, bounded Windows checks graph (including
   the shipping client build and OpenMW adapter contracts), all 196 repository
   Python tests, and patch-registry verification.

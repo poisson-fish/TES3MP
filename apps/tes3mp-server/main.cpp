@@ -423,19 +423,25 @@ int main(int argc, char** argv)
     }
     if (const auto* restoredWorld = persistenceFile->restoredWorld())
     {
-        auto restored = TES3MP::restoreCanonicalWorldState(
-            worldContent.globals, restoredWorld->time(), restoredWorld->globals());
+        if (!restoredWorld->questJournalCatalog() || *restoredWorld->questJournalCatalog() != worldContent.questJournal)
+        {
+            std::cerr << "persisted quest/journal catalog validation failed\n";
+            return 2;
+        }
+        auto restored
+            = TES3MP::restoreCanonicalWorldState(worldContent.globals, worldContent.questJournal, restoredWorld->time(),
+                restoredWorld->globals(), *restoredWorld->questJournalCatalog(), restoredWorld->questJournal());
         auto* world = std::get_if<TES3MP::CanonicalWorldState>(&restored);
         if (!world)
         {
-            std::cerr << "persisted global catalog validation failed\n";
+            std::cerr << "persisted world catalog validation failed\n";
             return 2;
         }
         worldContent.world = std::move(*world);
     }
     else if (persistenceFile->prefix().latest())
     {
-        std::cerr << "persisted time/global domain is missing\n";
+        std::cerr << "persisted time/global/quest/journal domain is missing\n";
         return 2;
     }
     std::vector<TES3MP::PersistedPlayerIdentity> identityRecords(

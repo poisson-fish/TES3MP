@@ -3,10 +3,11 @@
 
 #include "../mwbase/environment.hpp"
 #include "../mwbase/inputmanager.hpp"
+#include "../mwbase/journal.hpp"
 #include "../mwbase/mechanicsmanager.hpp"
 #include "../mwbase/soundmanager.hpp"
-#include "../mwbase/world.hpp"
 #include "../mwbase/windowmanager.hpp"
+#include "../mwbase/world.hpp"
 #include "../mwgui/containeritemmodel.hpp"
 #include "../mwgui/inventoryitemmodel.hpp"
 #include "../mwgui/inventorywindow.hpp"
@@ -33,8 +34,8 @@
 #include <components/esm3/loadcell.hpp>
 #include <components/esm3/loadcont.hpp>
 #include <components/esm3/loaddoor.hpp>
-#include <components/esm3/loadweap.hpp>
 #include <components/esm3/loadskil.hpp>
+#include <components/esm3/loadweap.hpp>
 
 #include <algorithm>
 #include <array>
@@ -72,8 +73,7 @@ namespace TES3MP::OpenMWAdapter
             double turns = std::fmod(-static_cast<double>(rad) / Tau, 1.0);
             if (turns < 0.0)
                 turns += 1.0;
-            return Turn32::fromUnnormalized(static_cast<std::uint64_t>(
-                std::floor(turns * TurnScale + 0.5)));
+            return Turn32::fromUnnormalized(static_cast<std::uint64_t>(std::floor(turns * TurnScale + 0.5)));
         }
 
         ESM::RefId refId(std::string_view value)
@@ -269,7 +269,7 @@ namespace TES3MP::OpenMWAdapter
         std::span<const DesktopActorPrototypeMapping> actorPrototypes,
         std::span<const DesktopInteractiveObjectMapping> interactiveObjects,
         std::span<const DesktopItemPrototypeMapping> itemPrototypes,
-        std::span<const DesktopContainerMapping> containers)
+        std::span<const DesktopContainerMapping> containers, std::span<const DesktopQuestMapping> quests)
     try
     {
         if (appearanceId != manifest.defaultAppearance() || avatarNpc.empty()
@@ -353,8 +353,20 @@ namespace TES3MP::OpenMWAdapter
                 && (containerRefs[index - 1].second == -1 || containerRefs[index].second == -1
                     || containerRefs[index - 1].second == containerRefs[index].second))
                 return std::nullopt;
+        std::vector<DesktopQuestMapping> questMappings(quests.begin(), quests.end());
+        std::ranges::sort(questMappings, {}, &DesktopQuestMapping::id);
+        for (std::size_t index = 0; index < questMappings.size(); ++index)
+        {
+            if (questMappings[index].record.empty()
+                || (index != 0 && questMappings[index - 1].id == questMappings[index].id))
+                return std::nullopt;
+            for (std::size_t prior = 0; prior < index; ++prior)
+                if (refId(questMappings[prior].record) == refId(questMappings[index].record))
+                    return std::nullopt;
+        }
         return DesktopContentMapping{ std::move(manifest), std::move(mappings), appearanceId, std::move(avatarNpc),
-            std::move(prototypes), std::move(objects), std::move(items), std::move(containerMappings) };
+            std::move(prototypes), std::move(objects), std::move(items), std::move(containerMappings),
+            std::move(questMappings) };
     }
     catch (...)
     {
@@ -638,15 +650,12 @@ namespace TES3MP::OpenMWAdapter
                 || !std::isfinite(pos.rot[0]) || !std::isfinite(pos.rot[1]) || !std::isfinite(pos.rot[2]))
                 return LocomotionIntent(LocomotionMode::Walk, Turn32::fromValue(0), LinearVelocity3(0, 0, 0));
 
-            const auto position = Position3(
-                static_cast<std::int64_t>(std::round(pos.pos[0] * PositionScale)),
+            const auto position = Position3(static_cast<std::int64_t>(std::round(pos.pos[0] * PositionScale)),
                 static_cast<std::int64_t>(std::round(pos.pos[1] * PositionScale)),
                 static_cast<std::int64_t>(std::round(pos.pos[2] * PositionScale)));
 
-            const auto orientation = Orientation3(
-                turnFromOpenMW(pos.rot[0]),
-                turnFromOpenMW(pos.rot[1]),
-                turnFromOpenMW(pos.rot[2]));
+            const auto orientation
+                = Orientation3(turnFromOpenMW(pos.rot[0]), turnFromOpenMW(pos.rot[1]), turnFromOpenMW(pos.rot[2]));
             const auto rootFacing = orientation.z();
 
             auto mechanics = MWBase::Environment::get().getMechanicsManager();
@@ -677,10 +686,8 @@ namespace TES3MP::OpenMWAdapter
                     const double vx = (dx / dt) / ServerTickRate * PositionScale;
                     const double vy = (dy / dt) / ServerTickRate * PositionScale;
                     const double vz = (dz / dt) / ServerTickRate * PositionScale;
-                    mImpl->lastVelocity = LinearVelocity3(
-                        roundTiesToEven(vx),
-                        roundTiesToEven(vy),
-                        roundTiesToEven(vz));
+                    mImpl->lastVelocity
+                        = LinearVelocity3(roundTiesToEven(vx), roundTiesToEven(vy), roundTiesToEven(vz));
                     mImpl->lastPosition = osg::Vec3f(pos.pos[0], pos.pos[1], pos.pos[2]);
                     mImpl->lastSampleTime = now;
                 }
@@ -1107,23 +1114,75 @@ namespace TES3MP::OpenMWAdapter
                 if (remote == actorRemotes.end() || !remote->second.lastObserved)
                     return std::nullopt;
                 target = remote->second.lastObserved->actorId();
-                const auto combat = std::ranges::lower_bound(
-                    combatSnapshot->actors(), *target, {}, &ActorCombatSnapshot::actorId);
+                const auto combat
+                    = std::ranges::lower_bound(combatSnapshot->actors(), *target, {}, &ActorCombatSnapshot::actorId);
                 if (combat == combatSnapshot->actors().end() || combat->actorId != *target || combat->dead)
                     return std::nullopt;
                 targetRevision = combat->combatRevision;
             }
-            return MeleeAttackCapture{ target, combatSnapshot->serverTick(),
-                combatSnapshot->selfCombatRevision(), targetRevision, type, attackStrength };
+            return MeleeAttackCapture{ target, combatSnapshot->serverTick(), combatSnapshot->selfCombatRevision(),
+                targetRevision, type, attackStrength };
         }
 
-        ProviderResult applyCombat(const LatestWinsCombatSnapshot& snapshot,
-            std::span<const ReliableCombatEventBatch> events)
+        ProviderResult applyQuestJournal(
+            const QuestJournalCatalog& catalog, const CanonicalPlayerQuestJournalState& state)
+        {
+            if (!mapping || mapping->manifest.id() != catalog.manifest()
+                || mapping->quests.size() != catalog.quests().size())
+                return ProviderResult::ContentMappingFailed;
+            const auto questMapping = [&](QuestId id) -> const DesktopQuestMapping* {
+                const auto found = std::ranges::lower_bound(mapping->quests, id, {}, &DesktopQuestMapping::id);
+                return found == mapping->quests.end() || found->id != id ? nullptr : &*found;
+            };
+            const auto journalDeclaration = [&](JournalEntryId id) -> const JournalCatalogEntry* {
+                const auto journal = catalog.journal();
+                const auto found = std::ranges::find(journal, id, &JournalCatalogEntry::id);
+                return found == journal.end() ? nullptr : &*found;
+            };
+            for (const auto& quest : catalog.quests())
+                if (!questMapping(quest.id))
+                    return ProviderResult::ContentMappingFailed;
+            for (const auto& quest : state.quests)
+                if (!questMapping(quest.id) || quest.stage.value() > std::numeric_limits<int>::max())
+                    return ProviderResult::ContentMappingFailed;
+            for (const auto& entry : state.journal)
+            {
+                const auto* declaration = journalDeclaration(entry.id);
+                if (!declaration || !questMapping(declaration->quest)
+                    || declaration->stage.value() > std::numeric_limits<int>::max())
+                    return ProviderResult::ContentMappingFailed;
+            }
+            for (const auto& quest : catalog.quests())
+                if (quest.initialStage.value() > std::numeric_limits<int>::max())
+                    return ProviderResult::ContentMappingFailed;
+
+            auto world = MWBase::Environment::get().getWorld();
+            if (!world)
+                return ProviderResult::PresentationFailed;
+            auto journal = MWBase::Environment::get().getJournal();
+            journal->clear();
+            const auto player = world->getPlayerPtr();
+            for (const auto& entry : state.journal)
+            {
+                const auto* declaration = journalDeclaration(entry.id);
+                const auto* local = questMapping(declaration->quest);
+                journal->addEntry(refId(local->record), static_cast<int>(declaration->stage.value()), player);
+            }
+            for (const auto& quest : catalog.quests())
+            {
+                const auto current = std::ranges::find(state.quests, quest.id, &CanonicalQuestState::id);
+                const auto stage = current == state.quests.end() ? quest.initialStage : current->stage;
+                journal->setJournalIndex(refId(questMapping(quest.id)->record), static_cast<int>(stage.value()));
+            }
+            return ProviderResult::Accepted;
+        }
+
+        ProviderResult applyCombat(
+            const LatestWinsCombatSnapshot& snapshot, std::span<const ReliableCombatEventBatch> events)
         {
             if (combatSnapshot && snapshot.serverTick() < combatSnapshot->serverTick())
                 return ProviderResult::Accepted;
-            if (combatSnapshot && snapshot.serverTick() == combatSnapshot->serverTick()
-                && snapshot != *combatSnapshot)
+            if (combatSnapshot && snapshot.serverTick() == combatSnapshot->serverTick() && snapshot != *combatSnapshot)
                 return ProviderResult::PresentationFailed;
             auto world = MWBase::Environment::get().getWorld();
             if (!world)
@@ -1145,10 +1204,9 @@ namespace TES3MP::OpenMWAdapter
             magicka.setBase(snapshot.selfMaximumMagicka());
             magicka.setCurrent(snapshot.selfMagicka(), true, true);
             playerStats.setMagicka(magicka);
-            const std::array skillIds{ ESM::Skill::Block, ESM::Skill::ShortBlade,
-                ESM::Skill::LongBlade, ESM::Skill::BluntWeapon, ESM::Skill::Axe,
-                ESM::Skill::Spear, ESM::Skill::HandToHand, ESM::Skill::LightArmor,
-                ESM::Skill::MediumArmor, ESM::Skill::HeavyArmor, ESM::Skill::Unarmored };
+            const std::array skillIds{ ESM::Skill::Block, ESM::Skill::ShortBlade, ESM::Skill::LongBlade,
+                ESM::Skill::BluntWeapon, ESM::Skill::Axe, ESM::Skill::Spear, ESM::Skill::HandToHand,
+                ESM::Skill::LightArmor, ESM::Skill::MediumArmor, ESM::Skill::HeavyArmor, ESM::Skill::Unarmored };
             auto& npcStats = player.getClass().getNpcStats(player);
             for (const auto& confirmed : snapshot.selfSkills())
             {
@@ -1228,14 +1286,12 @@ namespace TES3MP::OpenMWAdapter
                                 const auto skill = shield->getClass().getEquipmentSkill(*shield);
                                 const auto soundId = skill == ESM::Skill::LightArmor
                                     ? ESM::RefId::stringRefId("Light Armor Hit")
-                                    : skill == ESM::Skill::MediumArmor
-                                    ? ESM::RefId::stringRefId("Medium Armor Hit")
-                                    : ESM::RefId::stringRefId("Heavy Armor Hit");
+                                    : skill == ESM::Skill::MediumArmor ? ESM::RefId::stringRefId("Medium Armor Hit")
+                                                                       : ESM::RefId::stringRefId("Heavy Armor Hit");
                                 sound->playSound3D(player, soundId, 1.f, 1.f);
                             }
                             else
-                                sound->playSound3D(player,
-                                    ESM::RefId::stringRefId("Light Armor Hit"), 1.f, 1.f);
+                                sound->playSound3D(player, ESM::RefId::stringRefId("Light Armor Hit"), 1.f, 1.f);
                         }
                         else if (event.damage > 0.f)
                         {
@@ -1906,6 +1962,20 @@ namespace TES3MP::OpenMWAdapter
         catch (...)
         {
             mImpl->clear();
+            return ProviderResult::PresentationFailed;
+        }
+    }
+
+    ProviderResult DesktopPresentation::applyQuestJournal(const QuestJournalCatalog& catalog,
+        const CanonicalPlayerQuestJournalState& state, MonotonicInstant receivedAt) noexcept
+    {
+        (void)receivedAt;
+        try
+        {
+            return mImpl->applyQuestJournal(catalog, state);
+        }
+        catch (...)
+        {
             return ProviderResult::PresentationFailed;
         }
     }

@@ -44,6 +44,12 @@ namespace TES3MP::OpenMWAdapter
         std::int32_t refNumContentFile = -1;
     };
 
+    struct DesktopQuestMapping
+    {
+        QuestId id;
+        std::string record;
+    };
+
     struct DesktopContentMapping
     {
         static std::optional<DesktopContentMapping> create(ContentManifest manifest,
@@ -51,7 +57,7 @@ namespace TES3MP::OpenMWAdapter
             std::span<const DesktopActorPrototypeMapping> actorPrototypes = {},
             std::span<const DesktopInteractiveObjectMapping> interactiveObjects = {},
             std::span<const DesktopItemPrototypeMapping> itemPrototypes = {},
-            std::span<const DesktopContainerMapping> containers = {});
+            std::span<const DesktopContainerMapping> containers = {}, std::span<const DesktopQuestMapping> quests = {});
 
         ContentManifest manifest;
         std::vector<DesktopCellSpaceMapping> cellSpaces;
@@ -61,6 +67,7 @@ namespace TES3MP::OpenMWAdapter
         std::vector<DesktopInteractiveObjectMapping> interactiveObjects;
         std::vector<DesktopItemPrototypeMapping> itemPrototypes;
         std::vector<DesktopContainerMapping> containers;
+        std::vector<DesktopQuestMapping> quests;
     };
 
 }
@@ -119,6 +126,8 @@ namespace TES3MP::OpenMWAdapter
             MonotonicInstant receivedAt) noexcept override;
         ProviderResult applyCombat(const LatestWinsCombatSnapshot& snapshot,
             std::span<const ReliableCombatEventBatch> events, MonotonicInstant receivedAt) noexcept override;
+        ProviderResult applyQuestJournal(const QuestJournalCatalog& catalog,
+            const CanonicalPlayerQuestJournalState& state, MonotonicInstant receivedAt) noexcept override;
         void appendMeleeTargets(std::vector<MWWorld::Ptr>& targets) const;
         std::optional<MeleeAttackCapture> captureMeleeAttack(
             const MWWorld::Ptr& victim, float attackStrength, int attackType) const noexcept;

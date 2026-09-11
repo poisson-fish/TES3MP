@@ -68,6 +68,7 @@ namespace
         ActorCatalog actorCatalog;
         CanonicalActorWorld actors;
         GlobalVariableCatalog globalCatalog;
+        QuestJournalCatalog questJournalCatalog;
         CanonicalWorldState world;
     };
 
@@ -177,10 +178,32 @@ namespace
                 id<GlobalVariableRevision>(count), id<ServerTick>(count) },
             CanonicalGlobalVariableState{ id<GlobalVariableId>(3), static_cast<float>(count) + .5f,
                 id<GlobalVariableRevision>(count), id<ServerTick>(count) } };
-        auto world = *CanonicalWorldState::create(time, globals);
+        std::vector<QuestStage> stages;
+        std::vector<JournalCatalogEntry> journalCatalogEntries;
+        for (std::uint64_t value = 0; value <= 64; ++value)
+            stages.push_back(id<QuestStage>(value));
+        for (std::uint64_t value = 1; value <= 64; ++value)
+            journalCatalogEntries.push_back({ id<JournalEntryId>(value), id<QuestId>(10), id<QuestStage>(value) });
+        const std::array questDeclarations{ QuestCatalogEntry{
+            id<QuestId>(10), id<QuestStage>(0), std::move(stages) } };
+        auto questJournalCatalog
+            = *QuestJournalCatalog::create(manifest.id(), questDeclarations, journalCatalogEntries);
+        CanonicalPlayerQuestJournalState playerQuestJournal{ id<PlayerId>(1) };
+        if (count > 1)
+            playerQuestJournal.quests.push_back(
+                { id<QuestId>(10), id<QuestStage>(count - 1), id<QuestRevision>(count), id<ServerTick>(count) });
+        for (std::uint32_t value = 1; value < count; ++value)
+            playerQuestJournal.journal.push_back(
+                { id<JournalEntryId>(value), id<JournalRevision>(value + 1), id<ServerTick>(value + 1) });
+        playerQuestJournal.journalRevision = id<JournalRevision>(count);
+        playerQuestJournal.lastJournalChangeTick = count > 1 ? id<ServerTick>(count) : ServerTick::initial();
+        std::vector<CanonicalPlayerQuestJournalState> questJournalStates;
+        if (count > 1)
+            questJournalStates.push_back(std::move(playerQuestJournal));
+        auto world = *CanonicalWorldState::create(time, globals, questJournalCatalog, questJournalStates);
         return { std::move(catalog), std::move(inventory), std::move(combat), std::move(objectCatalog),
             std::move(objects), std::move(actorCatalog), std::move(actors), std::move(globalCatalog),
-            std::move(world) };
+            std::move(questJournalCatalog), std::move(world) };
     }
 
     bool commitJoin(CanonicalPersistenceFile& file, CanonicalInventoryWorld* inventory = nullptr,
@@ -273,8 +296,8 @@ namespace
         auto opened = CanonicalPersistenceFile::open(path, identity());
         auto* file = std::get_if<std::unique_ptr<CanonicalPersistenceFile>>(&opened);
         if (!file
-            || !commitJoin(**file, &expected.inventory, &expected.combat, &expected.objects, &expected.actors,
-                &expected.world, 2))
+            || !commitJoin(
+                **file, &expected.inventory, &expected.combat, &expected.objects, &expected.actors, &expected.world, 2))
             return false;
         file->reset();
         auto reopened = CanonicalPersistenceFile::open(path, identity());
@@ -390,6 +413,12 @@ namespace
             && std::get<std::int16_t>(world->globals()[0].value) == static_cast<std::int16_t>(count)
             && std::get<std::int32_t>(world->globals()[1].value) == static_cast<std::int32_t>(count * 10)
             && std::get<float>(world->globals()[2].value) == static_cast<float>(count) + .5f
+            && world->questJournalCatalog() && world->questJournalCatalog()->quests().size() == 1
+            && world->questJournalCatalog()->journal().size() == 64
+            && world->questJournal().size() == (count > 1 ? 1u : 0u)
+            && (count == 1
+                || (world->questJournal()[0].quests.size() == 1 && world->questJournal()[0].journal.size() == count - 1
+                    && world->questJournal()[0].journalRevision.value() == count))
             && latest->canonicalChecksum() == checksum
             && canonicalDurableStateChecksumV1(latest->stateVersion(), latest->checkpointTick(), latest->players(),
                    latest->inventory(), latest->combat(), latest->objects(), latest->actors(), latest->world())
@@ -403,9 +432,7 @@ namespace
         auto state = domains(1, 100.f, 10);
         auto opened = CanonicalPersistenceFile::open(path, identity());
         auto* file = std::get_if<std::unique_ptr<CanonicalPersistenceFile>>(&opened);
-        if (!file
-            || !commitJoin(
-                **file, &state.inventory, &state.combat, &state.objects, &state.actors, &state.world))
+        if (!file || !commitJoin(**file, &state.inventory, &state.combat, &state.objects, &state.actors, &state.world))
         {
             std::cerr << "compaction setup failed\n";
             return false;

@@ -36,6 +36,16 @@ namespace TES3MP
         return enqueuePayload(ServerScriptCommandPayload(std::move(command)));
     }
 
+    ServerScriptEmitResult ServerScriptCommandEmitter::enqueue(ServerScriptSetQuestStageCommand command) noexcept
+    {
+        return enqueuePayload(ServerScriptCommandPayload(std::move(command)));
+    }
+
+    ServerScriptEmitResult ServerScriptCommandEmitter::enqueue(ServerScriptAddJournalEntryCommand command) noexcept
+    {
+        return enqueuePayload(ServerScriptCommandPayload(std::move(command)));
+    }
+
     ServerScriptEmitResult ServerScriptCommandEmitter::enqueuePayload(ServerScriptCommandPayload command) noexcept
     try
     {

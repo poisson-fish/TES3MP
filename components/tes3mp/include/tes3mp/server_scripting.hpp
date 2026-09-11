@@ -151,8 +151,8 @@ namespace TES3MP
     class ServerScriptSetGlobalCommand
     {
     public:
-        constexpr ServerScriptSetGlobalCommand(GlobalVariableId id, GlobalVariableRevision expectedRevision,
-            GlobalVariableValue value) noexcept
+        constexpr ServerScriptSetGlobalCommand(
+            GlobalVariableId id, GlobalVariableRevision expectedRevision, GlobalVariableValue value) noexcept
             : mId(id)
             , mExpectedRevision(expectedRevision)
             , mValue(std::move(value))
@@ -161,8 +161,8 @@ namespace TES3MP
         constexpr GlobalVariableId id() const noexcept { return mId; }
         constexpr GlobalVariableRevision expectedRevision() const noexcept { return mExpectedRevision; }
         constexpr const GlobalVariableValue& value() const noexcept { return mValue; }
-        friend constexpr bool operator==(const ServerScriptSetGlobalCommand&,
-            const ServerScriptSetGlobalCommand&) noexcept = default;
+        friend constexpr bool operator==(
+            const ServerScriptSetGlobalCommand&, const ServerScriptSetGlobalCommand&) noexcept = default;
 
     private:
         GlobalVariableId mId;
@@ -173,24 +173,74 @@ namespace TES3MP
     class ServerScriptSetWorldTimeCommand
     {
     public:
-        constexpr ServerScriptSetWorldTimeCommand(WorldTimeRevision expectedRevision,
-            CanonicalWorldTimeState replacement) noexcept
+        constexpr ServerScriptSetWorldTimeCommand(
+            WorldTimeRevision expectedRevision, CanonicalWorldTimeState replacement) noexcept
             : mExpectedRevision(expectedRevision)
             , mReplacement(replacement)
         {
         }
         constexpr WorldTimeRevision expectedRevision() const noexcept { return mExpectedRevision; }
         constexpr const CanonicalWorldTimeState& replacement() const noexcept { return mReplacement; }
-        friend constexpr bool operator==(const ServerScriptSetWorldTimeCommand&,
-            const ServerScriptSetWorldTimeCommand&) noexcept = default;
+        friend constexpr bool operator==(
+            const ServerScriptSetWorldTimeCommand&, const ServerScriptSetWorldTimeCommand&) noexcept = default;
 
     private:
         WorldTimeRevision mExpectedRevision;
         CanonicalWorldTimeState mReplacement;
     };
 
-    using ServerScriptCommandPayload
-        = std::variant<ServerScriptPlayerSafePointCommand, ServerScriptSetGlobalCommand, ServerScriptSetWorldTimeCommand>;
+    class ServerScriptSetQuestStageCommand
+    {
+    public:
+        constexpr ServerScriptSetQuestStageCommand(
+            PlayerId player, QuestId quest, QuestRevision expectedRevision, QuestStage stage) noexcept
+            : mPlayer(player)
+            , mQuest(quest)
+            , mExpectedRevision(expectedRevision)
+            , mStage(stage)
+        {
+        }
+        constexpr PlayerId player() const noexcept { return mPlayer; }
+        constexpr QuestId quest() const noexcept { return mQuest; }
+        constexpr QuestRevision expectedRevision() const noexcept { return mExpectedRevision; }
+        constexpr QuestStage stage() const noexcept { return mStage; }
+        friend constexpr bool operator==(ServerScriptSetQuestStageCommand, ServerScriptSetQuestStageCommand) noexcept
+            = default;
+
+    private:
+        PlayerId mPlayer;
+        QuestId mQuest;
+        QuestRevision mExpectedRevision;
+        QuestStage mStage;
+    };
+
+    class ServerScriptAddJournalEntryCommand
+    {
+    public:
+        constexpr ServerScriptAddJournalEntryCommand(
+            PlayerId player, QuestId quest, JournalRevision expectedRevision, JournalEntryId entry) noexcept
+            : mPlayer(player)
+            , mQuest(quest)
+            , mExpectedRevision(expectedRevision)
+            , mEntry(entry)
+        {
+        }
+        constexpr PlayerId player() const noexcept { return mPlayer; }
+        constexpr QuestId quest() const noexcept { return mQuest; }
+        constexpr JournalRevision expectedRevision() const noexcept { return mExpectedRevision; }
+        constexpr JournalEntryId entry() const noexcept { return mEntry; }
+        friend constexpr bool operator==(
+            ServerScriptAddJournalEntryCommand, ServerScriptAddJournalEntryCommand) noexcept = default;
+
+    private:
+        PlayerId mPlayer;
+        QuestId mQuest;
+        JournalRevision mExpectedRevision;
+        JournalEntryId mEntry;
+    };
+
+    using ServerScriptCommandPayload = std::variant<ServerScriptPlayerSafePointCommand, ServerScriptSetGlobalCommand,
+        ServerScriptSetWorldTimeCommand, ServerScriptSetQuestStageCommand, ServerScriptAddJournalEntryCommand>;
 
     class ServerScriptCommandOrder
     {
@@ -271,6 +321,8 @@ namespace TES3MP
         ServerScriptEmitResult enqueue(ServerScriptPlayerSafePointCommand command) noexcept;
         ServerScriptEmitResult enqueue(ServerScriptSetGlobalCommand command) noexcept;
         ServerScriptEmitResult enqueue(ServerScriptSetWorldTimeCommand command) noexcept;
+        ServerScriptEmitResult enqueue(ServerScriptSetQuestStageCommand command) noexcept;
+        ServerScriptEmitResult enqueue(ServerScriptAddJournalEntryCommand command) noexcept;
 
     private:
         friend class DeterministicServerScriptRuntime;
@@ -391,6 +443,13 @@ namespace TES3MP
         GlobalTypeMismatch,
         GlobalRevisionMismatch,
         WorldTimeRevisionMismatch,
+        UnknownQuest,
+        UnknownQuestStage,
+        QuestRevisionMismatch,
+        UnknownJournalEntry,
+        JournalEntryQuestMismatch,
+        JournalRevisionMismatch,
+        JournalEntryAlreadyPresent,
         InvalidWorldMutation,
     };
 

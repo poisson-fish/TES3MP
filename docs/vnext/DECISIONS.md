@@ -62,6 +62,9 @@ the affected code/tests in the same milestone.
   catalog order; restore rejects any missing, extra, reordered, or retyped entry
   before installation. Clock and global changes use the same persistence
   acknowledgement as every other durable domain.
+- **Player-scoped quests and journals.** Per-player canonical progress uses
+  opaque IDs bound to an exact manifest catalog; OpenMW names remain
+  adapter-local. Mutations carry expected revisions and V2 acknowledgement.
 - **Interest is server-owned.** Current visibility is exact canonical-cell
   membership. A client cannot select its own interest set or use presentation
   pose to expand gameplay reach.
@@ -193,11 +196,10 @@ the affected code/tests in the same milestone.
   installs or publishes the candidate. Failure leaves the prior state visible.
   Every prefix is exactly bound to configuration, content, script/API package
   versions, deterministic seeds, and complete client/script command ordering.
-  V2 restores established, session-independent roots, inventory, combat,
-  combat RNG, canonical time, and typed globals but never live sessions or
-  incomplete-chargen state. It keeps one checkpoint plus a bounded journal
-  tail. Development V1 files are left intact rather than migrated; later
-  domains extend V2 instead of creating parallel save authorities.
+  V2 restores durable gameplay state, including combat RNG, time, globals,
+  quests, and journals, but not live sessions or incomplete chargen. It keeps
+  one checkpoint plus a bounded journal tail. Development V1 files are not
+  migrated; later domains extend V2 instead of creating another authority.
 - **Administration.** Public health and privileged operational detail remain
   separate. Administrative APIs do not expose scripting/runtime internals.
 - **Quest isolation.** A future Quest implementation reuses the platform-neutral

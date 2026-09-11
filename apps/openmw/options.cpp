@@ -41,21 +41,21 @@ namespace OpenMW
         addOption("tes3mp-player-credential-directory", bpo::value<Files::MaybeQuotedPath>()->default_value({}, ""),
             "private directory for endpoint-scoped TES3MP player credentials");
         addOption("tes3mp-server-executable",
-            bpo::value<Files::MaybeQuotedPath>()->default_value(defaultPath("tes3mp_server.exe"),
-                "tes3mp_server.exe"),
+            bpo::value<Files::MaybeQuotedPath>()->default_value(defaultPath("tes3mp_server.exe"), "tes3mp_server.exe"),
             "dedicated server executable used by the multiplayer Host button");
         addOption("tes3mp-server-config",
             bpo::value<Files::MaybeQuotedPath>()->default_value(
                 defaultPath("resources/vfs/tes3mp/server.cfg"), "resources/vfs/tes3mp/server.cfg"),
             "dedicated server configuration used by the multiplayer Host button");
-        addOption("tes3mp-content-manifest-id", bpo::value<std::string>()->default_value(
-            "c5df902cab7f9920d4b3bbe77c9e17983e287d0cad533517abdc87babd645576"),
+        addOption("tes3mp-content-manifest-id",
+            bpo::value<std::string>()->default_value(
+                "c5df902cab7f9920d4b3bbe77c9e17983e287d0cad533517abdc87babd645576"),
             "exact TES3MP content manifest SHA-256 in hexadecimal");
         addOption("tes3mp-content-cell-spaces",
             bpo::value<std::string>()->default_value("interior:1;interior:2;interior:3;exterior:4"),
             "TES3MP cell-space catalog: interior:<id>;exterior:<id>");
-        addOption("tes3mp-content-allowed-cells", bpo::value<std::string>()->default_value(
-            "interior:1;interior:2;interior:3;exterior:4:-2:-9"),
+        addOption("tes3mp-content-allowed-cells",
+            bpo::value<std::string>()->default_value("interior:1;interior:2;interior:3;exterior:4:-2:-9"),
             "TES3MP exact cell catalog: interior:<id>;exterior:<id>:<x>:<y>");
         addOption("tes3mp-content-appearance-id", bpo::value<unsigned long long>()->default_value(100),
             "manifest-scoped TES3MP default appearance ID");
@@ -63,28 +63,38 @@ namespace OpenMW
             bpo::value<std::string>()->default_value("sneak:1024;walk:4097;run:8192;jump:4096"),
             "TES3MP movement profile: sneak:<speed>;walk:<speed>;run:<speed>;jump:<speed>");
         addOption("tes3mp-content-cell-space-map",
-            bpo::value<StringsVector>()->default_value(StringsVector{ "1=Imperial Prison Ship",
-                "2=Seyda Neen, Census and Excise Office", "3=Seyda Neen, Census and Excise Warehouse",
-                "4=sys::default" }, "vanilla chargen cells")->multitoken()->composing(),
+            bpo::value<StringsVector>()
+                ->default_value(StringsVector{ "1=Imperial Prison Ship", "2=Seyda Neen, Census and Excise Office",
+                                    "3=Seyda Neen, Census and Excise Warehouse", "4=sys::default" },
+                    "vanilla chargen cells")
+                ->multitoken()
+                ->composing(),
             "OpenMW cell-space mapping entries: <id>=<record>");
         addOption("tes3mp-content-appearance-record", bpo::value<std::string>()->default_value("player"),
             "OpenMW NPC record mapped by the TES3MP content manifest");
         addOption("tes3mp-content-actor-prototype-map",
-            bpo::value<StringsVector>()->default_value(
-                StringsVector{ "9941342243677752440=rat" }, "vanilla actor prototypes")->multitoken()->composing(),
+            bpo::value<StringsVector>()
+                ->default_value(StringsVector{ "9941342243677752440=rat" }, "vanilla actor prototypes")
+                ->multitoken()
+                ->composing(),
             "OpenMW actor prototype mappings: <id>=<NPC-or-creature-record>");
         addOption("tes3mp-content-interactive-object-map",
             bpo::value<StringsVector>()->default_value(StringsVector(), "")->multitoken()->composing(),
             "OpenMW interactive object mappings: <id>=<ref-num-index>[:<content-file>]");
         addOption("tes3mp-content-item-prototype-map",
-            bpo::value<StringsVector>()->default_value(
-                StringsVector{ "579706974062055657=chargen dagger",
-                    "9071396267722241944=chitin_shield" }, "vanilla item prototypes")
-                ->multitoken()->composing(),
+            bpo::value<StringsVector>()
+                ->default_value(
+                    StringsVector{ "579706974062055657=chargen dagger", "9071396267722241944=chitin_shield" },
+                    "vanilla item prototypes")
+                ->multitoken()
+                ->composing(),
             "OpenMW item prototype mappings: <id>=<item-record>");
         addOption("tes3mp-content-container-map",
             bpo::value<StringsVector>()->default_value(StringsVector(), "")->multitoken()->composing(),
             "OpenMW container mappings: <id>=<ref-num-index>[:<content-file>]");
+        addOption("tes3mp-content-quest-map",
+            bpo::value<StringsVector>()->default_value(StringsVector(), "")->multitoken()->composing(),
+            "OpenMW quest mappings: <id>=<journal-record>");
 #ifdef TES3MP_OPENMW_DESKTOP_AUTOMATION
         addOption("tes3mp-automation-role", bpo::value<std::string>()->default_value(""),
             "test-only fixed TES3MP desktop automation role");

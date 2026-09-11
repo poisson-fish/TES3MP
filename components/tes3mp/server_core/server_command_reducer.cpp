@@ -1253,8 +1253,8 @@ namespace TES3MP
                             disposition = ServerScriptCommandDisposition::UnknownCell;
                         else
                         {
-                            auto advanced = advanceCanonicalSpatialState(*found, tick, safePoint->destination(),
-                                LinearVelocity3(0, 0, 0), LocomotionMode::Walk);
+                            auto advanced = advanceCanonicalSpatialState(
+                                *found, tick, safePoint->destination(), LinearVelocity3(0, 0, 0), LocomotionMode::Walk);
                             if (const auto* replacement = std::get_if<CanonicalPlayerEntityState>(&advanced))
                             {
                                 if (!recordChange())
@@ -1344,6 +1344,107 @@ namespace TES3MP
                         else if (std::get<CanonicalWorldMutationError>(changed)
                             == CanonicalWorldMutationError::RevisionMismatch)
                             disposition = ServerScriptCommandDisposition::WorldTimeRevisionMismatch;
+                    }
+                }
+                else if (const auto* questCommand = std::get_if<ServerScriptSetQuestStageCommand>(&queued.payload()))
+                {
+                    if (std::ranges::none_of(
+                            players, [&](const auto& value) { return value.playerId() == questCommand->player(); }))
+                        disposition = ServerScriptCommandDisposition::UnknownPlayer;
+                    else if (!world)
+                        disposition = ServerScriptCommandDisposition::UnknownQuest;
+                    else
+                    {
+                        const auto& base = prepared.mWorld ? *prepared.mWorld : *world;
+                        auto changed = setCanonicalQuestStage(base, questCommand->player(), questCommand->quest(),
+                            questCommand->expectedRevision(), questCommand->stage(), tick);
+                        if (auto* next = std::get_if<CanonicalWorldState>(&changed))
+                        {
+                            disposition = ServerScriptCommandDisposition::Applied;
+                            if (*next != base)
+                            {
+                                if (!recordChange())
+                                {
+                                    prepared.mResult.mError = CommandBatchReductionError::StateVersionCapacityExceeded;
+                                    return prepared;
+                                }
+                                if (!prepared.mBaseWorld)
+                                    prepared.mBaseWorld = *world;
+                                prepared.mWorld = std::move(*next);
+                            }
+                        }
+                        else
+                        {
+                            switch (std::get<CanonicalWorldMutationError>(changed))
+                            {
+                                case CanonicalWorldMutationError::UnknownQuest:
+                                    disposition = ServerScriptCommandDisposition::UnknownQuest;
+                                    break;
+                                case CanonicalWorldMutationError::UnknownQuestStage:
+                                    disposition = ServerScriptCommandDisposition::UnknownQuestStage;
+                                    break;
+                                case CanonicalWorldMutationError::QuestRevisionMismatch:
+                                    disposition = ServerScriptCommandDisposition::QuestRevisionMismatch;
+                                    break;
+                                default:
+                                    disposition = ServerScriptCommandDisposition::InvalidWorldMutation;
+                                    break;
+                            }
+                        }
+                    }
+                }
+                else if (const auto* journalCommand
+                    = std::get_if<ServerScriptAddJournalEntryCommand>(&queued.payload()))
+                {
+                    if (std::ranges::none_of(
+                            players, [&](const auto& value) { return value.playerId() == journalCommand->player(); }))
+                        disposition = ServerScriptCommandDisposition::UnknownPlayer;
+                    else if (!world)
+                        disposition = ServerScriptCommandDisposition::UnknownJournalEntry;
+                    else
+                    {
+                        const auto& base = prepared.mWorld ? *prepared.mWorld : *world;
+                        auto changed = addCanonicalJournalEntry(base, journalCommand->player(), journalCommand->quest(),
+                            journalCommand->expectedRevision(), journalCommand->entry(), tick);
+                        if (auto* next = std::get_if<CanonicalWorldState>(&changed))
+                        {
+                            disposition = ServerScriptCommandDisposition::Applied;
+                            if (*next != base)
+                            {
+                                if (!recordChange())
+                                {
+                                    prepared.mResult.mError = CommandBatchReductionError::StateVersionCapacityExceeded;
+                                    return prepared;
+                                }
+                                if (!prepared.mBaseWorld)
+                                    prepared.mBaseWorld = *world;
+                                prepared.mWorld = std::move(*next);
+                            }
+                        }
+                        else
+                        {
+                            switch (std::get<CanonicalWorldMutationError>(changed))
+                            {
+                                case CanonicalWorldMutationError::UnknownQuest:
+                                    disposition = ServerScriptCommandDisposition::UnknownQuest;
+                                    break;
+                                case CanonicalWorldMutationError::UnknownJournalEntry:
+                                    disposition = ServerScriptCommandDisposition::UnknownJournalEntry;
+                                    break;
+                                case CanonicalWorldMutationError::JournalEntryQuestMismatch:
+                                    disposition = ServerScriptCommandDisposition::JournalEntryQuestMismatch;
+                                    break;
+                                case CanonicalWorldMutationError::JournalRevisionMismatch:
+                                    disposition = ServerScriptCommandDisposition::JournalRevisionMismatch;
+                                    break;
+                                case CanonicalWorldMutationError::DuplicateJournalEntry:
+                                    disposition = ServerScriptCommandDisposition::JournalEntryAlreadyPresent;
+                                    break;
+                                default:
+                                    disposition = ServerScriptCommandDisposition::InvalidWorldMutation;
+                                    break;
+                            }
+                        }
                     }
                 }
                 prepared.mResult.mScriptDispositions.emplace_back(queued.order(), disposition);
@@ -1551,9 +1652,8 @@ namespace TES3MP
 
     bool CanonicalCommandReducer::commit(PreparedBatch&& prepared, CanonicalCommandWorlds worlds)
     {
-        return commitPrepared(
-            std::move(prepared), worlds.interactiveObjects, worlds.inventory, worlds.combat, worlds.actors,
-            worlds.world);
+        return commitPrepared(std::move(prepared), worlds.interactiveObjects, worlds.inventory, worlds.combat,
+            worlds.actors, worlds.world);
     }
 
     CommandBatchReductionResult CanonicalCommandReducer::apply(const ServerTickCommandBatch& batch)

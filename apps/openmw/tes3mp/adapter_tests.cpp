@@ -466,8 +466,7 @@ namespace
     {
     public:
         TES3MP::OpenMWAdapter::ProviderResult applyAuthoritative(const TES3MP::LatestWinsSnapshot&,
-            std::span<const TES3MP::ObservedPlayer> observed, bool allowLocalCellCorrection,
-            TES3MP::MonotonicInstant,
+            std::span<const TES3MP::ObservedPlayer> observed, bool allowLocalCellCorrection, TES3MP::MonotonicInstant,
             const std::optional<TES3MP::LocalLocomotionReconciliation>&) noexcept override
         {
             ++calls;
@@ -521,6 +520,14 @@ namespace
             lastCombatEvents = events.size();
             return TES3MP::OpenMWAdapter::ProviderResult::Accepted;
         }
+        TES3MP::OpenMWAdapter::ProviderResult applyQuestJournal(const TES3MP::QuestJournalCatalog& catalog,
+            const TES3MP::CanonicalPlayerQuestJournalState& state, TES3MP::MonotonicInstant) noexcept override
+        {
+            ++questJournals;
+            lastQuestCatalogSize = catalog.quests().size();
+            lastQuestJournal = state;
+            return TES3MP::OpenMWAdapter::ProviderResult::Accepted;
+        }
         std::optional<TES3MP::ObjectRevision> observedObjectRevision(
             TES3MP::InteractiveObjectId id) const noexcept override
         {
@@ -551,6 +558,7 @@ namespace
         unsigned interactiveObjects = 0;
         unsigned inventories = 0;
         unsigned combats = 0;
+        unsigned questJournals = 0;
         unsigned poseFallbacks = 0;
         double lastPoseWeight = 0.0;
         std::map<TES3MP::InteractiveObjectId, TES3MP::ObjectRevision> objectRevisions;
@@ -560,6 +568,8 @@ namespace
         std::size_t lastEquipmentCount = 0;
         float lastCombatFatigue = 0.f;
         std::size_t lastCombatEvents = 0;
+        std::size_t lastQuestCatalogSize = 0;
+        std::optional<TES3MP::CanonicalPlayerQuestJournalState> lastQuestJournal;
     };
 
     class PoseInput final : public TES3MP::OpenMWAdapter::VrPoseInputProvider
@@ -826,6 +836,31 @@ int main()
     require(bounded.acceptedCount() == 1 && bounded.droppedCount() == 1
         && std::string_view(movementMetricName(MovementMetricKey::BufferDepth)) == "remote_buffer_depth");
 
+    {
+        const std::array<GlobalVariableCatalogEntry, 0> globals{};
+        const auto globalCatalog = GlobalVariableCatalog::create(globals).value();
+        const std::array quests{ QuestCatalogEntry{
+            value<QuestId>(10), value<QuestStage>(0), { value<QuestStage>(0), value<QuestStage>(20) } } };
+        const std::array journal{ JournalCatalogEntry{
+            value<JournalEntryId>(100), value<QuestId>(10), value<QuestStage>(20) } };
+        const auto catalog = QuestJournalCatalog::create(testContentManifestId(), quests, journal).value();
+        CanonicalWorldTimeState time;
+        auto committed = CanonicalWorldState::initial(time, globalCatalog, catalog).value();
+        auto quest = setCanonicalQuestStage(committed, value<PlayerId>(1), value<QuestId>(10), QuestRevision::initial(),
+            value<QuestStage>(20), value<ServerTick>(3));
+        committed = std::get<CanonicalWorldState>(std::move(quest));
+        auto entry = addCanonicalJournalEntry(committed, value<PlayerId>(1), value<QuestId>(10),
+            JournalRevision::initial(), value<JournalEntryId>(100), value<ServerTick>(3));
+        committed = std::get<CanonicalWorldState>(std::move(entry));
+        Presentation questPresentation;
+        require(applyCommittedQuestJournal(
+                    questPresentation, committed, value<PlayerId>(1), MonotonicInstant::fromNanoseconds(1))
+            == ProviderResult::Accepted);
+        require(questPresentation.questJournals == 1 && questPresentation.lastQuestCatalogSize == 1
+            && questPresentation.lastQuestJournal && questPresentation.lastQuestJournal->quests.size() == 1
+            && questPresentation.lastQuestJournal->journal.size() == 1);
+    }
+
     Input input;
     auto intent = input.sampleCurrentIntent();
     require(input.calls == 1 && intent && intent->desiredVelocity() == TES3MP::LinearVelocity3(1, 2, 3));
@@ -931,9 +966,8 @@ int main()
     auto* concurrentProtocolRejectedTransportObserver = concurrentProtocolRejectedTransport.get();
     concurrentProtocolRejectedTransportObserver->acceptConnections = true;
     auto concurrentProtocolRejectedClock = std::make_unique<Clock>();
-    auto concurrentProtocolRejectedCreated = ClientSessionRuntime::create(
-        *concurrentProtocolRejectedTransport, *concurrentProtocolRejectedClock, timeouts,
-        SessionGeneration::initial(), outbound);
+    auto concurrentProtocolRejectedCreated = ClientSessionRuntime::create(*concurrentProtocolRejectedTransport,
+        *concurrentProtocolRejectedClock, timeouts, SessionGeneration::initial(), outbound);
     auto concurrentProtocolRejectedRuntime
         = std::get<std::unique_ptr<ClientSessionRuntime>>(std::move(concurrentProtocolRejectedCreated));
     auto concurrentProtocolRejectedVersions = std::get<ProtocolVersionRange>(ProtocolVersionRange::create(1, 2, 3));
@@ -1488,19 +1522,17 @@ int main()
         TransportChannel::ReliableOrdered);
     chargenCoordinator->frame(0.01f);
     require(chargenCoordinator->characterLifecycle() == CharacterLifecycle::EstablishedCharacter
-        && chargenPresentation.calls == 1 && chargenPresentation.lastObservedPlayers == 2
-        && chargenInput.calls == 1);
+        && chargenPresentation.calls == 1 && chargenPresentation.lastObservedPlayers == 2 && chargenInput.calls == 1);
 
     const auto transientStartupCell = CellId::exterior(value<CellSpaceId>(4), 0, 0);
-    chargenInput.nextTransition = CellTransitionCapture{
-        ProviderResult::Accepted, CellTransition(transientStartupCell)
-    };
+    chargenInput.nextTransition
+        = CellTransitionCapture{ ProviderResult::Accepted, CellTransition(transientStartupCell) };
     chargenPresentation.lastAllowLocalCellCorrection = false;
     const auto sentBeforeTransientTransition = chargenTransportObserver->sentFrames.size();
     chargenCoordinator->frame(0.01f);
     std::optional<CommandSequence> transientTransitionSequence;
-    for (std::size_t index = sentBeforeTransientTransition;
-         index < chargenTransportObserver->sentFrames.size(); ++index)
+    for (std::size_t index = sentBeforeTransientTransition; index < chargenTransportObserver->sentFrames.size();
+        ++index)
     {
         auto decoded = decodeProtocolFrame(chargenTransportObserver->sentFrames[index]);
         const auto* commandFrame = std::get_if<DecodedFrame>(&decoded);
