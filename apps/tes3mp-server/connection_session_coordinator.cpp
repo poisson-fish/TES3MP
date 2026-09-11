@@ -38,7 +38,8 @@ namespace TES3MP::ServerApp
         OutboundQueueSet& queues, std::size_t capacity, const CanonicalActorWorld* actors,
         const CanonicalInteractiveObjectWorld* objects, CanonicalInventoryWorld* inventory,
         CanonicalCombatWorld* combat, const CanonicalPlayerCombatTemplate* playerCombatTemplate,
-        const ItemPrototypeCatalog* itemCatalog, const CharacterContentCatalog* characterContent) noexcept
+        const ItemPrototypeCatalog* itemCatalog, const CharacterContentCatalog* characterContent,
+        const CanonicalWorldState* world) noexcept
         : mClock(clock)
         , mObservability(observability)
         , mTimeouts(timeouts)
@@ -53,6 +54,7 @@ namespace TES3MP::ServerApp
         , mPlayerCombatTemplate(playerCombatTemplate)
         , mItemCatalog(itemCatalog)
         , mCharacterContent(characterContent)
+        , mWorld(world)
     {
     }
 
@@ -599,7 +601,7 @@ namespace TES3MP::ServerApp
             return ConnectionSessionResult::ProtocolRejected;
         TransportJoinResponseQueue responses(
             mQueues, connection, this, mActors, mObjects, mInventory, mCombat, mPlayerCombatTemplate, mItemCatalog,
-            mCharacterContent);
+            mCharacterContent, mWorld);
         AuthenticatedJoinComposition composition(joins, mAuthentication, responses);
         auto outcome = composition.join(*state->principal(), state->generation(), tick, *context, state->playerClaim(),
             state->takePlayerCredential(), state->username());

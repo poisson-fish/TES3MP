@@ -551,7 +551,8 @@ int main(int argc, char** argv)
         TES3MP::ProtocolVersionRange::create(TES3MP::ServerApp::Phase7ProtocolMajor,
             TES3MP::ServerApp::Phase7ProtocolMinimumMinor, TES3MP::ServerApp::Phase7ProtocolMaximumMinor));
     std::vector<TES3MP::CapabilityId> optionalCapabilities{ TES3MP::vrPoseCapability(),
-        TES3MP::actorReplicationCapability(), TES3MP::dialogueChoiceCapability() };
+        TES3MP::actorReplicationCapability(), TES3MP::dialogueChoiceCapability(),
+        TES3MP::weatherReplicationCapability() };
     if (characterContent)
         optionalCapabilities.push_back(TES3MP::characterCreationCapability());
     if (interactiveObjectWorld)
@@ -630,7 +631,8 @@ int main(int argc, char** argv)
         TES3MP::ServerApp::Phase7ConnectionCapacity, &actorWorld,
         interactiveObjectWorld ? &*interactiveObjectWorld : nullptr, inventoryWorld ? &*inventoryWorld : nullptr,
         combatContent ? &combatContent->world : nullptr, combatContent ? &combatContent->playerTemplate : nullptr,
-        itemCatalog ? &*itemCatalog : nullptr, characterContent ? &*characterContent : nullptr);
+        itemCatalog ? &*itemCatalog : nullptr, characterContent ? &*characterContent : nullptr,
+        &worldContent.world);
     TES3MP::ServerApp::ServerApplication application(*factory.runtime, config,
         { sessions, *joins, *crypto, *queues, clock, intake, reducer, *lifecycle, &actorCatalog, &actorWorld,
             collision.get(), interactiveObjectCatalog ? &*interactiveObjectCatalog : nullptr,

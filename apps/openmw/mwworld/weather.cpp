@@ -715,6 +715,36 @@ namespace MWWorld
         }
     }
 
+    void WeatherManager::setExternalAuthority(bool authoritative)
+    {
+        mExternalAuthority = authoritative;
+        if (!authoritative)
+            mAuthoritativeRegions.clear();
+    }
+
+    bool WeatherManager::applyAuthoritativeWeather(const ESM::RefId& regionID,
+        const ESM::RefId& currentWeatherID, const ESM::RefId& targetWeatherID, float transitionFactor,
+        float transitionDelta)
+    {
+        const auto region = mRegions.find(regionID);
+        const auto current = std::find_if(mWeatherSettings.begin(), mWeatherSettings.end(),
+            [&](const auto& weather) { return weather.mId == currentWeatherID; });
+        const auto target = std::find_if(mWeatherSettings.begin(), mWeatherSettings.end(),
+            [&](const auto& weather) { return weather.mId == targetWeatherID; });
+        if (region == mRegions.end() || current == mWeatherSettings.end() || target == mWeatherSettings.end()
+            || !std::isfinite(transitionFactor) || transitionFactor < 0.f || transitionFactor > 1.f
+            || !std::isfinite(transitionDelta) || transitionDelta < 0.f)
+            return false;
+        mExternalAuthority = true;
+        const AuthoritativeRegionWeather state{
+            current->mScriptId, target->mScriptId, transitionFactor, transitionDelta };
+        mAuthoritativeRegions.insert_or_assign(regionID, state);
+        region->second.setWeather(target->mScriptId);
+        if (regionID == mCurrentRegion)
+            applyAuthoritativeRegion(state);
+        return true;
+    }
+
     void WeatherManager::changeWeather(const ESM::RefId& regionID, const unsigned int weatherID)
     {
         // In Morrowind, this seems to have the following behavior, when applied to the current region:
@@ -764,7 +794,11 @@ namespace MWWorld
             if (it != mRegions.end() && playerRegion != mCurrentRegion)
             {
                 mCurrentRegion = playerRegion;
-                forceWeather(it->second.getWeather());
+                const auto authoritative = mAuthoritativeRegions.find(playerRegion);
+                if (mExternalAuthority && authoritative != mAuthoritativeRegions.end())
+                    applyAuthoritativeRegion(authoritative->second);
+                else
+                    forceWeather(it->second.getWeather());
             }
         }
     }
@@ -792,7 +826,8 @@ namespace MWWorld
         if (!paused || mFastForward)
         {
             // Add new transitions when either the player's current external region changes.
-            if (updateWeatherTime() || updateWeatherRegion(player.getCell()->getCell()->getRegion()))
+            if ((!mExternalAuthority && updateWeatherTime())
+                || updateWeatherRegion(player.getCell()->getCell()->getRegion()))
             {
                 auto it = mRegions.find(mCurrentRegion);
                 if (it != mRegions.end())
@@ -1147,6 +1182,14 @@ namespace MWWorld
         {
             mCurrentRegion = playerRegion;
 
+            if (mExternalAuthority)
+            {
+                const auto authoritative = mAuthoritativeRegions.find(playerRegion);
+                if (authoritative != mAuthoritativeRegions.end())
+                    applyAuthoritativeRegion(authoritative->second);
+                return false;
+            }
+
             return true;
         }
 
@@ -1159,7 +1202,8 @@ namespace MWWorld
         // weather type set, regardless of the remaining transition time.
         if (!mFastForward && inTransition())
         {
-            const float delta = mWeatherSettings[mNextWeather].transitionDelta();
+            const float delta = mExternalAuthority ? mAuthoritativeTransitionDelta
+                                                   : mWeatherSettings[mNextWeather].transitionDelta();
             mTransitionFactor -= elapsedRealSeconds * delta;
             if (mTransitionFactor <= 0.0f)
             {
@@ -1204,6 +1248,20 @@ namespace MWWorld
         mCurrentWeather = weatherID;
         mNextWeather = invalidWeatherID;
         mQueuedWeather = invalidWeatherID;
+    }
+
+    inline void WeatherManager::applyAuthoritativeRegion(const AuthoritativeRegionWeather& weather)
+    {
+        mCurrentWeather = weather.currentWeather;
+        mAuthoritativeTransitionDelta = weather.transitionDelta;
+        mQueuedWeather = invalidWeatherID;
+        if (weather.currentWeather == weather.targetWeather || weather.transitionFactor >= 1.f)
+        {
+            forceWeather(weather.targetWeather);
+            return;
+        }
+        mNextWeather = weather.targetWeather;
+        mTransitionFactor = 1.f - weather.transitionFactor;
     }
 
     inline bool WeatherManager::inTransition() const

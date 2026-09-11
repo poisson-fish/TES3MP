@@ -48,7 +48,8 @@ namespace
     }
 
     TES3MP::ServerHello serverHello(bool pose = false, bool actors = false, bool interactiveObjects = false,
-        bool inventory = false, bool combat = false, std::uint16_t minor = 2, bool dialogueChoices = false)
+        bool inventory = false, bool combat = false, std::uint16_t minor = 2, bool dialogueChoices = false,
+        bool weather = false)
     {
         auto versions = std::get<TES3MP::ProtocolVersionRange>(TES3MP::ProtocolVersionRange::create(1, minor, minor));
         std::vector<TES3MP::CapabilityId> capabilities;
@@ -64,6 +65,8 @@ namespace
             capabilities.push_back(TES3MP::combatReplicationCapability());
         if (dialogueChoices)
             capabilities.push_back(TES3MP::dialogueChoiceCapability());
+        if (weather)
+            capabilities.push_back(TES3MP::weatherReplicationCapability());
         auto client = std::get<TES3MP::CapabilityOffer>(TES3MP::CapabilityOffer::create(versions, capabilities, {}));
         auto server
             = std::get<TES3MP::CapabilityOffer>(TES3MP::CapabilityOffer::create(std::move(versions), capabilities, {}));
@@ -146,6 +149,18 @@ namespace
             value<TES3MP::ServerTick>(tick), value<TES3MP::CanonicalRevision>(revision), value<TES3MP::PlayerId>(1),
             TES3MP::CombatRevision::initial(), 100.f, 120.f, 80.f, 100.f, 60.f, 75.f, false, actors, skills);
         return std::get<TES3MP::LatestWinsCombatSnapshot>(std::move(created));
+    }
+
+    TES3MP::ReliableWeatherState weatherState(TES3MP::SessionGeneration generation, std::uint64_t tick,
+        std::uint64_t canonicalRevision, std::uint64_t weatherRevision, bool baseline, std::uint64_t target = 2)
+    {
+        const std::array regions{ TES3MP::WeatherRegionSnapshot{ value<TES3MP::WeatherRegionId>(1),
+            value<TES3MP::WeatherId>(1), value<TES3MP::WeatherId>(target), value<TES3MP::ServerTick>(5),
+            value<TES3MP::ServerTick>(15), value<TES3MP::ServerTick>(25),
+            value<TES3MP::WeatherRevision>(weatherRevision) } };
+        const TES3MP::WeatherStateHeader header{ value<TES3MP::SessionId>(1), generation,
+            value<TES3MP::ServerTick>(tick), value<TES3MP::CanonicalRevision>(canonicalRevision), 0, 1, baseline };
+        return std::get<TES3MP::ReliableWeatherState>(TES3MP::ReliableWeatherState::create(header, regions));
     }
 
     std::vector<std::byte> frame(
@@ -526,6 +541,14 @@ namespace
             lastCombatEvents = events.size();
             return TES3MP::OpenMWAdapter::ProviderResult::Accepted;
         }
+        TES3MP::OpenMWAdapter::ProviderResult applyWeather(std::span<const TES3MP::WeatherRegionSnapshot> regions,
+            TES3MP::ServerTick tick, TES3MP::MonotonicInstant) noexcept override
+        {
+            ++weathers;
+            lastWeatherTick = tick;
+            lastWeatherRegions.assign(regions.begin(), regions.end());
+            return weatherResult;
+        }
         TES3MP::OpenMWAdapter::ProviderResult applyQuestJournal(const TES3MP::QuestJournalCatalog& catalog,
             const TES3MP::CanonicalPlayerQuestJournalState& state, TES3MP::MonotonicInstant) noexcept override
         {
@@ -565,6 +588,7 @@ namespace
         unsigned inventories = 0;
         unsigned combats = 0;
         unsigned questJournals = 0;
+        unsigned weathers = 0;
         unsigned poseFallbacks = 0;
         double lastPoseWeight = 0.0;
         std::map<TES3MP::InteractiveObjectId, TES3MP::ObjectRevision> objectRevisions;
@@ -576,6 +600,10 @@ namespace
         std::size_t lastCombatEvents = 0;
         std::size_t lastQuestCatalogSize = 0;
         std::optional<TES3MP::CanonicalPlayerQuestJournalState> lastQuestJournal;
+        TES3MP::OpenMWAdapter::ProviderResult weatherResult
+            = TES3MP::OpenMWAdapter::ProviderResult::Accepted;
+        std::optional<TES3MP::ServerTick> lastWeatherTick;
+        std::vector<TES3MP::WeatherRegionSnapshot> lastWeatherRegions;
     };
 
     class PoseInput final : public TES3MP::OpenMWAdapter::VrPoseInputProvider
@@ -1426,6 +1454,59 @@ int main()
             && command->attackType == MeleeAttackType::Chop && command->attackStrength == 0.75f;
     }
     require(foundCombatCommand);
+
+    Input weatherInput;
+    Presentation weatherPresentation;
+    Status weatherStatus;
+    auto weatherTransport = std::make_unique<IdleTransport>();
+    auto* weatherTransportObserver = weatherTransport.get();
+    weatherTransportObserver->acceptConnections = true;
+    auto weatherClock = std::make_unique<Clock>();
+    auto weatherCreated = ClientSessionRuntime::create(
+        *weatherTransport, *weatherClock, timeouts, SessionGeneration::initial(), outbound);
+    auto weatherRuntime = std::get<std::unique_ptr<ClientSessionRuntime>>(std::move(weatherCreated));
+    auto weatherVersions = std::get<ProtocolVersionRange>(ProtocolVersionRange::create(1, 7, 7));
+    const std::array weatherCapabilities{ weatherReplicationCapability() };
+    auto weatherOffer
+        = std::get<CapabilityOffer>(CapabilityOffer::create(std::move(weatherVersions), weatherCapabilities, {}));
+    auto weatherPassword = AuthenticationMaterial::create(passwordBytes);
+    require(weatherPassword
+        && weatherRuntime->start(endpoint, ClientHello::fromOffer(std::move(weatherOffer)),
+               AuthenticationRequest::join(std::move(*weatherPassword)))
+            == HeadlessClientResult::Accepted);
+    auto weatherCoordinator = makeCoordinator(std::move(weatherTransport), std::move(weatherClock),
+        std::move(weatherRuntime), reconnect, weatherInput, weatherPresentation, weatherStatus);
+    weatherCoordinator->frame(0.01f);
+    weatherTransportObserver->enqueue(MessageClass::SessionControl, MessageKind::ServerHello,
+        encodeServerHello(serverHello(false, false, false, false, false, 7, false, true)),
+        TransportChannel::ReliableOrdered);
+    weatherCoordinator->frame(0.01f);
+    weatherTransportObserver->enqueue(MessageClass::SessionControl, MessageKind::AuthenticationAccepted,
+        encodeAuthenticationAccepted(accepted(std::byte{ 14 })), TransportChannel::ReliableOrdered);
+    weatherTransportObserver->enqueue(MessageClass::ReliableOperation, MessageKind::ReliableInterestBaseline,
+        encodeReliableInterestBaseline(selfBaseline(SessionGeneration::initial())), TransportChannel::ReliableOrdered);
+    weatherTransportObserver->enqueue(MessageClass::LatestWinsSnapshot, MessageKind::LatestWinsSnapshot,
+        encodeLatestWinsSnapshot(selfSnapshot(SessionGeneration::initial())), TransportChannel::LatestWins);
+    weatherCoordinator->frame(0.01f);
+    require(weatherCoordinator->multiplayerState() != MultiplayerState::Ready && weatherPresentation.weathers == 0);
+    const auto weatherBaseline = weatherState(SessionGeneration::initial(), 5, 1, 1, true);
+    weatherTransportObserver->enqueue(MessageClass::ReliableOperation, MessageKind::ReliableWeatherState,
+        encodeReliableWeatherState(weatherBaseline), TransportChannel::ReliableOrdered);
+    weatherCoordinator->frame(0.01f);
+    require(weatherCoordinator->multiplayerState() == MultiplayerState::Ready && weatherPresentation.weathers == 1
+        && weatherPresentation.lastWeatherTick == value<ServerTick>(5)
+        && weatherPresentation.lastWeatherRegions.size() == 1
+        && weatherPresentation.lastWeatherRegions[0].targetWeather == value<WeatherId>(2));
+    weatherTransportObserver->enqueue(MessageClass::ReliableOperation, MessageKind::ReliableWeatherState,
+        encodeReliableWeatherState(weatherBaseline), TransportChannel::ReliableOrdered);
+    weatherCoordinator->frame(0.01f);
+    require(weatherPresentation.weathers == 1);
+    weatherPresentation.weatherResult = ProviderResult::ContentMappingFailed;
+    weatherTransportObserver->enqueue(MessageClass::ReliableOperation, MessageKind::ReliableWeatherState,
+        encodeReliableWeatherState(weatherState(SessionGeneration::initial(), 6, 2, 2, false, 3)),
+        TransportChannel::ReliableOrdered);
+    weatherCoordinator->frame(0.01f);
+    require(weatherPresentation.weathers == 2 && weatherStatus.last == ConnectionStatus::ContentMappingFailed);
 
     Input dialogueInput;
     Presentation dialoguePresentation;

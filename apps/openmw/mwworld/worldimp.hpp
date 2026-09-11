@@ -315,6 +315,10 @@ namespace MWWorld
 
         void changeWeather(const ESM::RefId& region, const ESM::RefId& id) override;
 
+        void setWeatherAuthority(bool authoritative) override;
+        bool applyAuthoritativeWeather(const ESM::RefId& region, const ESM::RefId& current,
+            const ESM::RefId& target, float transitionFactor, float transitionDelta) override;
+
         const std::vector<MWWorld::Weather>& getAllWeather() const override;
 
         int getCurrentWeatherScriptId() const override;

@@ -308,6 +308,9 @@ namespace MWWorld
          */
         void changeWeather(const ESM::RefId& regionID, const unsigned int weatherID);
         void changeWeather(const ESM::RefId& regionID, const ESM::RefId& weatherID);
+        void setExternalAuthority(bool authoritative);
+        bool applyAuthoritativeWeather(const ESM::RefId& regionID, const ESM::RefId& currentWeatherID,
+            const ESM::RefId& targetWeatherID, float transitionFactor, float transitionDelta);
         void modRegion(const ESM::RefId& regionID, const std::vector<uint8_t>& chances);
         void playerTeleported(const ESM::RefId& playerRegion, bool isExterior);
 
@@ -404,6 +407,16 @@ namespace MWWorld
         int mNextWeather;
         int mQueuedWeather;
         std::map<ESM::RefId, RegionWeather> mRegions;
+        struct AuthoritativeRegionWeather
+        {
+            int currentWeather;
+            int targetWeather;
+            float transitionFactor;
+            float transitionDelta;
+        };
+        std::map<ESM::RefId, AuthoritativeRegionWeather> mAuthoritativeRegions;
+        bool mExternalAuthority = false;
+        float mAuthoritativeTransitionDelta = 0.f;
         MWRender::WeatherResult mResult;
 
         MWBase::Sound* mAmbientSound{ nullptr };
@@ -421,6 +434,7 @@ namespace MWWorld
         bool updateWeatherRegion(const ESM::RefId& playerRegion);
         void updateWeatherTransitions(const float elapsedRealSeconds);
         void forceWeather(const int weatherID);
+        void applyAuthoritativeRegion(const AuthoritativeRegionWeather& weather);
 
         bool inTransition() const;
         void addWeatherTransition(const int weatherID);

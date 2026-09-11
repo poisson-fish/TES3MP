@@ -32,10 +32,11 @@ namespace TES3MP::OpenMWAdapter
 
         ClientHello makeClientHello(ContentManifestId contentManifest)
         {
-            auto versions = std::get<ProtocolVersionRange>(ProtocolVersionRange::create(1, 6, 6));
+            auto versions = std::get<ProtocolVersionRange>(ProtocolVersionRange::create(1, 7, 7));
             const std::array optional{ vrPoseCapability(), actorReplicationCapability(),
                 interactiveObjectReplicationCapability(), inventoryReplicationCapability(),
-                combatReplicationCapability(), characterCreationCapability(), dialogueChoiceCapability() };
+                combatReplicationCapability(), characterCreationCapability(), dialogueChoiceCapability(),
+                weatherReplicationCapability() };
             auto offer = std::get<CapabilityOffer>(
                 CapabilityOffer::create(std::move(versions), optional, {}, contentManifest));
             return ClientHello::fromOffer(std::move(offer));
@@ -87,6 +88,14 @@ namespace TES3MP::OpenMWAdapter
             return hello
                 && std::binary_search(hello->negotiatedCapabilities().begin(), hello->negotiatedCapabilities().end(),
                     dialogueChoiceCapability());
+        }
+
+        bool weatherNegotiated(const ClientSessionRuntime& runtime) noexcept
+        {
+            const auto& hello = runtime.session().stateMachine().negotiatedHello();
+            return hello
+                && std::binary_search(hello->negotiatedCapabilities().begin(), hello->negotiatedCapabilities().end(),
+                    weatherReplicationCapability());
         }
 
         struct ResumeContinuity
@@ -240,6 +249,7 @@ namespace TES3MP::OpenMWAdapter
                     mResyncObjectBaseline = mResyncObjectBaseline || advanced.interactiveObjectBaselineCompleted;
                     mResyncInventory = mResyncInventory || advanced.inventoryReplicationCompleted;
                     mResyncCombat = mResyncCombat || advanced.combatSnapshotApplied;
+                    mResyncWeather = mResyncWeather || advanced.weatherBaselineCompleted;
                 }
                 if (advanced.authenticationAccepted)
                 {
@@ -302,7 +312,11 @@ namespace TES3MP::OpenMWAdapter
                     mMinimumObjectBaselineRevision = snapshot->header().canonicalRevision();
                     mMinimumInventoryRevision = snapshot->header().canonicalRevision();
                 }
-                if (mResuming && advanced.baselineCompleted)
+                const bool completeInitialBaselines = mRuntime->session().stateMachine().interestBaselineComplete()
+                    && (!weatherNegotiated(*mRuntime)
+                        || mRuntime->session().stateMachine().weatherBaselineComplete());
+                if (mResuming && completeInitialBaselines
+                    && (advanced.baselineCompleted || advanced.weatherBaselineCompleted))
                 {
                     const bool preserved = mAttemptGeneration && mContinuity && snapshot
                         && (mPendingDialogueChoice
@@ -323,7 +337,8 @@ namespace TES3MP::OpenMWAdapter
                     }
                     mStatus.report(ConnectionStatus::Resumed);
                 }
-                const bool firstBaseline = !mResuming && advanced.baselineCompleted && !mReady;
+                const bool firstBaseline = !mResuming && completeInitialBaselines && !mReady
+                    && (advanced.baselineCompleted || advanced.weatherBaselineCompleted);
                 if (firstBaseline)
                 {
                     auto current = snapshot ? continuity(*snapshot) : std::nullopt;
@@ -449,6 +464,20 @@ namespace TES3MP::OpenMWAdapter
                         return;
                     }
                 }
+                const auto weatherTick = mRuntime->session().stateMachine().confirmedWeatherServerTick();
+                if (mGameRunning && weatherTick
+                    && (mPresentationBootstrapPending || advanced.weatherStateApplied
+                        || advanced.weatherBaselineCompleted)
+                    && mRuntime->session().stateMachine().weatherBaselineComplete())
+                {
+                    const auto applied = mPresentation.applyWeather(
+                        mRuntime->session().stateMachine().confirmedWeather(), *weatherTick, now);
+                    if (applied != ProviderResult::Accepted)
+                    {
+                        closeForProviderFailure(applied);
+                        return;
+                    }
+                }
                 if (mGameRunning && snapshot)
                 {
                     mPoseEvidence.retain(snapshot->view().entries());
@@ -495,7 +524,8 @@ namespace TES3MP::OpenMWAdapter
                 if (mAwaitingResync && mResyncPlayerBaseline && (!actorsNegotiated(*mRuntime) || mResyncActorBaseline)
                     && (!interactiveObjectsNegotiated(*mRuntime) || mResyncObjectBaseline)
                     && (!inventoryNegotiated(*mRuntime) || mResyncInventory)
-                    && (!combatNegotiated(*mRuntime) || mResyncCombat))
+                    && (!combatNegotiated(*mRuntime) || mResyncCombat)
+                    && (!weatherNegotiated(*mRuntime) || mResyncWeather))
                 {
                     mAwaitingResync = false;
                     mControl->resyncCompleted();
@@ -551,6 +581,7 @@ namespace TES3MP::OpenMWAdapter
                         mResyncObjectBaseline = false;
                         mResyncInventory = false;
                         mResyncCombat = false;
+                        mResyncWeather = false;
                     }
                 }
 
@@ -801,6 +832,7 @@ namespace TES3MP::OpenMWAdapter
                 mResyncObjectBaseline = false;
                 mResyncInventory = false;
                 mResyncCombat = false;
+                mResyncWeather = false;
                 mMinimumActorBaselineRevision.reset();
                 mMinimumObjectBaselineRevision.reset();
                 mMinimumInventoryRevision.reset();
@@ -954,6 +986,7 @@ namespace TES3MP::OpenMWAdapter
             bool mResyncObjectBaseline = false;
             bool mResyncInventory = false;
             bool mResyncCombat = false;
+            bool mResyncWeather = false;
             std::optional<CanonicalRevision> mMinimumActorBaselineRevision;
             std::optional<CanonicalRevision> mMinimumObjectBaselineRevision;
             std::optional<CanonicalRevision> mMinimumInventoryRevision;

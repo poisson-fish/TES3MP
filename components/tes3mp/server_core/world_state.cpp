@@ -1007,22 +1007,22 @@ namespace TES3MP
                     return CanonicalWorldMutationError::ArithmeticOverflow;
                 const WeatherId target = declaration.eligibleWeather[static_cast<std::size_t>(*selection)];
                 region.nextSelectionTick = *nextSelection;
+                const auto revision = region.revision.next();
+                if (!revision)
+                    return CanonicalWorldMutationError::RevisionExhausted;
+                region.revision = *revision;
+                region.lastChangeTick = tick;
                 if (target != region.currentWeather)
                 {
-                    const auto revision = region.revision.next();
                     const auto transitionEnd = addTicks(tick, declaration.transitionDurationTicks);
                     const auto afterTransition
                         = transitionEnd ? addTicks(*transitionEnd, declaration.selectionIntervalTicks) : std::nullopt;
-                    if (!revision)
-                        return CanonicalWorldMutationError::RevisionExhausted;
                     if (!transitionEnd || !afterTransition)
                         return CanonicalWorldMutationError::ArithmeticOverflow;
                     region.targetWeather = target;
                     region.transitionStartTick = tick;
                     region.transitionEndTick = *transitionEnd;
                     region.nextSelectionTick = *afterTransition;
-                    region.revision = *revision;
-                    region.lastChangeTick = tick;
                 }
             }
         }

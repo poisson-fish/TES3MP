@@ -6,6 +6,7 @@
 #include "interactive_object_interest_projection.hpp"
 #include "interest_projection.hpp"
 #include "inventory_interest_projection.hpp"
+#include "weather_projection.hpp"
 #include "tes3mp/character_creation_protocol.hpp"
 #include "tes3mp/protocol_frame.hpp"
 
@@ -46,6 +47,15 @@ namespace TES3MP::ServerApp
                 ? projectInteractiveObjectInterestBaseline(after, *mObjects, join.session, tick, revision)
                 : std::optional<InteractiveObjectInterestBaselineDelivery>{};
             if (objectCapable && (!mObjects || !objectBaseline))
+                return false;
+
+            const auto weatherCapable = joiningSession && joiningSession->negotiatedHello()
+                && std::ranges::binary_search(
+                    joiningSession->negotiatedHello()->negotiatedCapabilities(), weatherReplicationCapability());
+            auto weatherBaseline = weatherCapable && mWorld
+                ? projectWeatherBaseline(after, *mWorld, join.session, tick, revision)
+                : std::optional<WeatherStateDelivery>{};
+            if (weatherCapable && (!mWorld || !weatherBaseline))
                 return false;
 
             const auto inventoryCapable = joiningSession && joiningSession->negotiatedHello()
@@ -129,7 +139,16 @@ namespace TES3MP::ServerApp
 
             std::vector<std::vector<std::byte>> owned;
             std::vector<OutboundQueueSet::AtomicMessage> messages;
-            owned.reserve(8 + projected->size() * 2);
+            std::size_t frameCapacity
+                = 8 + projected->size() * 2 + (weatherBaseline ? weatherBaseline->chunks.size() : 0);
+            for (const auto& [connection, delivery] : inventoryBaselines)
+            {
+                (void)connection;
+                frameCapacity += delivery.playerInventory.size() + delivery.containers.size()
+                    + delivery.groundItems.size() + 1;
+            }
+            owned.reserve(frameCapacity);
+            messages.reserve(owned.capacity());
             owned.emplace_back(authentication.begin(), authentication.end());
             auto baselineFrame = encodeProtocolFrame(MessageClass::ReliableOperation,
                 MessageKind::ReliableInterestBaseline, encodeReliableInterestBaseline(baseline->baseline));
@@ -192,6 +211,9 @@ namespace TES3MP::ServerApp
                 owned.push_back(std::get<std::vector<std::byte>>(std::move(combatFrame)));
                 messages.push_back({ mConnection, TransportChannel::LatestWins, owned.back() });
             }
+
+            if (weatherBaseline && !appendWeatherMessages(owned, messages, mConnection, *weatherBaseline))
+                return false;
 
             for (const auto& [connection, inventoryBaseline] : inventoryBaselines)
                 if (!appendInventoryInterestMessages(owned, messages, connection, inventoryBaseline))

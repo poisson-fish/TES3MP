@@ -154,6 +154,7 @@ class ContentBakerTests(unittest.TestCase):
             + named_record("NPC_", "player")
             + named_record("WEAP", self.item_record)
             + named_record("MISC", "wulfharth’s cup")
+            + named_record("REGN", "Bitter Coast Region")
             + extra
         )
 
@@ -173,7 +174,9 @@ class ContentBakerTests(unittest.TestCase):
             "tes3mp-content-appearance-record=player\n"
             "tes3mp-content-cell-space-map=1=Room\n"
             f"tes3mp-content-actor-prototype-map={self.actor_prototype}={self.actor_record}\n"
-            f"tes3mp-content-item-prototype-map={item_id}={self.item_record}\n",
+            f"tes3mp-content-item-prototype-map={item_id}={self.item_record}\n"
+            "tes3mp-content-weather-region-map=1=Bitter Coast Region\n"
+            "tes3mp-content-weather-map=1=Clear\n",
             encoding="utf-8",
         )
 
@@ -225,6 +228,7 @@ class ContentBakerTests(unittest.TestCase):
                                       subrecord("WPDT", weapon_data),
                                       *(tuple([subrecord("ENAM", item_enchantment.encode() + b"\0")])
                                         if item_enchantment else ()))
+                             + named_record("REGN", "Bitter Coast Region")
                              + gmsts + skill_records + extra)
 
     def _write_recipe(self, **changes) -> pathlib.Path:
@@ -247,7 +251,9 @@ class ContentBakerTests(unittest.TestCase):
     def _write_minimal_client_mappings(self) -> None:
         self.client_mappings.write_text(
             "tes3mp-content-appearance-record=player\n"
-            "tes3mp-content-cell-space-map=1=Room\n", encoding="utf-8")
+            "tes3mp-content-cell-space-map=1=Room\n"
+            "tes3mp-content-weather-region-map=1=Bitter Coast Region\n"
+            "tes3mp-content-weather-map=1=Clear\n", encoding="utf-8")
 
     def _bake(self):
         return baker.bake(
@@ -375,6 +381,20 @@ class ContentBakerTests(unittest.TestCase):
         with self.assertRaisesRegex(baker.BakeError, "duplicate local choice"):
             self._bake()
         self.assertEqual(self.output.joinpath("CURRENT").read_text().strip(), manifest)
+
+    def test_weather_mappings_are_exact_and_reference_local_regions(self):
+        mappings = self.client_mappings.read_text(encoding="utf-8")
+        self.client_mappings.write_text(
+            mappings.replace("tes3mp-content-weather-map=1=Clear\n", ""), encoding="utf-8")
+        with self.assertRaisesRegex(baker.BakeError, "weather mapping does not match"):
+            self._bake()
+        self.assertFalse(self.output.joinpath("CURRENT").exists())
+
+        self.client_mappings.write_text(
+            mappings.replace("1=Bitter Coast Region", "1=Missing Region"), encoding="utf-8")
+        with self.assertRaisesRegex(baker.BakeError, "missing winning region"):
+            self._bake()
+        self.assertFalse(self.output.joinpath("CURRENT").exists())
 
     def test_deleted_winning_record_rejects_a_stale_mapping(self):
         override = self.data / "Override.esp"

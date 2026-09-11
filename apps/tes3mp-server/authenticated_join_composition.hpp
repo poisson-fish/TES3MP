@@ -7,6 +7,7 @@
 #include "tes3mp/inventory_world.hpp"
 #include "tes3mp/server_authentication.hpp"
 #include "tes3mp/transport.hpp"
+#include "tes3mp/world_state.hpp"
 
 #include <optional>
 #include <span>
@@ -76,7 +77,8 @@ namespace TES3MP::ServerApp
             const CanonicalInteractiveObjectWorld* objects = nullptr, CanonicalInventoryWorld* inventory = nullptr,
             CanonicalCombatWorld* combat = nullptr, const CanonicalPlayerCombatTemplate* playerCombatTemplate = nullptr,
             const ItemPrototypeCatalog* itemCatalog = nullptr,
-            const CharacterContentCatalog* characterContent = nullptr) noexcept
+            const CharacterContentCatalog* characterContent = nullptr,
+            const CanonicalWorldState* world = nullptr) noexcept
             : mQueues(queues)
             , mConnection(connection)
             , mSessions(sessions)
@@ -87,6 +89,7 @@ namespace TES3MP::ServerApp
             , mPlayerCombatTemplate(playerCombatTemplate)
             , mItemCatalog(itemCatalog)
             , mCharacterContent(characterContent)
+            , mWorld(world)
         {
         }
 
@@ -114,6 +117,7 @@ namespace TES3MP::ServerApp
         const CanonicalPlayerCombatTemplate* mPlayerCombatTemplate;
         const ItemPrototypeCatalog* mItemCatalog;
         const CharacterContentCatalog* mCharacterContent;
+        const CanonicalWorldState* mWorld = nullptr;
         std::optional<CanonicalInventoryWorld> mPendingInventory;
         std::optional<CanonicalCombatWorld> mPendingCombat;
     };

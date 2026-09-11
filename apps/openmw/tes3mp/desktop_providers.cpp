@@ -21,6 +21,7 @@
 #include "../mwworld/cellstore.hpp"
 #include "../mwworld/class.hpp"
 #include "../mwworld/containerstore.hpp"
+#include "../mwworld/esmstore.hpp"
 #include "../mwworld/inventorystore.hpp"
 #include "../mwworld/manualref.hpp"
 #include "../mwworld/player.hpp"
@@ -34,8 +35,10 @@
 #include <components/esm3/loadcell.hpp>
 #include <components/esm3/loadcont.hpp>
 #include <components/esm3/loaddoor.hpp>
+#include <components/esm3/loadregn.hpp>
 #include <components/esm3/loadskil.hpp>
 #include <components/esm3/loadweap.hpp>
+#include <tes3mp/fixed_tick_scheduler.hpp>
 
 #include <algorithm>
 #include <array>
@@ -270,7 +273,9 @@ namespace TES3MP::OpenMWAdapter
         std::span<const DesktopInteractiveObjectMapping> interactiveObjects,
         std::span<const DesktopItemPrototypeMapping> itemPrototypes,
         std::span<const DesktopContainerMapping> containers, std::span<const DesktopQuestMapping> quests,
-        std::span<const DesktopDialogueChoiceMapping> dialogueChoices)
+        std::span<const DesktopDialogueChoiceMapping> dialogueChoices,
+        std::span<const DesktopWeatherRegionMapping> weatherRegions,
+        std::span<const DesktopWeatherMapping> weather)
     try
     {
         if (appearanceId != manifest.defaultAppearance() || avatarNpc.empty()
@@ -375,9 +380,32 @@ namespace TES3MP::OpenMWAdapter
                 if (choiceMappings[prior].localChoice == choiceMappings[index].localChoice)
                     return std::nullopt;
         }
+        std::vector<DesktopWeatherRegionMapping> regionMappings(weatherRegions.begin(), weatherRegions.end());
+        std::ranges::sort(regionMappings, {}, &DesktopWeatherRegionMapping::id);
+        for (std::size_t index = 0; index < regionMappings.size(); ++index)
+        {
+            if (regionMappings[index].record.empty()
+                || (index != 0 && regionMappings[index - 1].id == regionMappings[index].id))
+                return std::nullopt;
+            for (std::size_t prior = 0; prior < index; ++prior)
+                if (refId(regionMappings[prior].record) == refId(regionMappings[index].record))
+                    return std::nullopt;
+        }
+        std::vector<DesktopWeatherMapping> weatherMappings(weather.begin(), weather.end());
+        std::ranges::sort(weatherMappings, {}, &DesktopWeatherMapping::id);
+        for (std::size_t index = 0; index < weatherMappings.size(); ++index)
+        {
+            if (weatherMappings[index].record.empty()
+                || (index != 0 && weatherMappings[index - 1].id == weatherMappings[index].id))
+                return std::nullopt;
+            for (std::size_t prior = 0; prior < index; ++prior)
+                if (refId(weatherMappings[prior].record) == refId(weatherMappings[index].record))
+                    return std::nullopt;
+        }
         return DesktopContentMapping{ std::move(manifest), std::move(mappings), appearanceId, std::move(avatarNpc),
             std::move(prototypes), std::move(objects), std::move(items), std::move(containerMappings),
-            std::move(questMappings), std::move(choiceMappings) };
+            std::move(questMappings), std::move(choiceMappings), std::move(regionMappings),
+            std::move(weatherMappings) };
     }
     catch (...)
     {
@@ -838,6 +866,15 @@ namespace TES3MP::OpenMWAdapter
             observedPlayerInventoryRevision.reset();
             observedInventoryCanonicalRevision.reset();
             combatSnapshot.reset();
+            try
+            {
+                auto world = MWBase::Environment::get().getWorld();
+                if (world)
+                    world->setWeatherAuthority(false);
+            }
+            catch (...)
+            {
+            }
         }
 
         void erase(std::map<EntityId, ActorRemote>::iterator iter) noexcept
@@ -1194,6 +1231,69 @@ namespace TES3MP::OpenMWAdapter
                 const auto stage = current == state.quests.end() ? quest.initialStage : current->stage;
                 journal->setJournalIndex(refId(questMapping(quest.id)->record), static_cast<int>(stage.value()));
             }
+            return ProviderResult::Accepted;
+        }
+
+        ProviderResult applyWeather(std::span<const WeatherRegionSnapshot> regions, ServerTick serverTick)
+        {
+            if (!mapping || mapping->weatherRegions.size() != regions.size())
+                return ProviderResult::ContentMappingFailed;
+            struct Mapped
+            {
+                ESM::RefId region;
+                ESM::RefId current;
+                ESM::RefId target;
+                float transitionFactor;
+                float transitionDelta;
+            };
+            std::vector<Mapped> mapped;
+            mapped.reserve(regions.size());
+            auto world = MWBase::Environment::get().getWorld();
+            auto store = MWBase::Environment::get().getESMStore();
+            if (!world)
+                return ProviderResult::PresentationFailed;
+            for (const auto& state : regions)
+            {
+                const auto region = std::ranges::lower_bound(
+                    mapping->weatherRegions, state.region, {}, &DesktopWeatherRegionMapping::id);
+                const auto current = std::ranges::lower_bound(
+                    mapping->weather, state.currentWeather, {}, &DesktopWeatherMapping::id);
+                const auto target = std::ranges::lower_bound(
+                    mapping->weather, state.targetWeather, {}, &DesktopWeatherMapping::id);
+                if (region == mapping->weatherRegions.end() || region->id != state.region
+                    || current == mapping->weather.end() || current->id != state.currentWeather
+                    || target == mapping->weather.end() || target->id != state.targetWeather)
+                    return ProviderResult::ContentMappingFailed;
+                const auto localRegion = refId(region->record);
+                const auto localCurrent = refId(current->record);
+                const auto localTarget = refId(target->record);
+                if (!store->get<ESM::Region>().search(localRegion) || !world->getWeather(localCurrent)
+                    || !world->getWeather(localTarget))
+                    return ProviderResult::ContentMappingFailed;
+                float factor = 1.f;
+                float delta = 0.f;
+                if (state.currentWeather != state.targetWeather && state.transitionEndTick > state.transitionStartTick
+                    && serverTick < state.transitionEndTick)
+                {
+                    delta = static_cast<float>(ServerTicksPerSecond)
+                        / static_cast<float>(state.transitionEndTick.value() - state.transitionStartTick.value());
+                    if (serverTick <= state.transitionStartTick)
+                        factor = 0.f;
+                    else
+                    {
+                        const double elapsed = static_cast<double>(serverTick.value() - state.transitionStartTick.value());
+                        const double duration
+                            = static_cast<double>(state.transitionEndTick.value() - state.transitionStartTick.value());
+                        factor = static_cast<float>(elapsed / duration);
+                    }
+                }
+                mapped.push_back({ localRegion, localCurrent, localTarget, factor, delta });
+            }
+            world->setWeatherAuthority(true);
+            for (const auto& state : mapped)
+                if (!world->applyAuthoritativeWeather(
+                        state.region, state.current, state.target, state.transitionFactor, state.transitionDelta))
+                    return ProviderResult::PresentationFailed;
             return ProviderResult::Accepted;
         }
 
@@ -1996,6 +2096,24 @@ namespace TES3MP::OpenMWAdapter
         }
         catch (...)
         {
+            return ProviderResult::PresentationFailed;
+        }
+    }
+
+    ProviderResult DesktopPresentation::applyWeather(
+        std::span<const WeatherRegionSnapshot> regions, ServerTick serverTick, MonotonicInstant receivedAt) noexcept
+    {
+        (void)receivedAt;
+        try
+        {
+            const auto result = mImpl->applyWeather(regions, serverTick);
+            if (result != ProviderResult::Accepted)
+                mImpl->clear();
+            return result;
+        }
+        catch (...)
+        {
+            mImpl->clear();
             return ProviderResult::PresentationFailed;
         }
     }

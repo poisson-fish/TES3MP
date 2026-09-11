@@ -5,6 +5,7 @@
 #include "interest_projection.hpp"
 #include "inventory_interest_projection.hpp"
 #include "combat_interest_projection.hpp"
+#include "weather_projection.hpp"
 #include <tes3mp/actor_replication.hpp>
 #include <tes3mp/actor_simulation.hpp>
 #include <tes3mp/canonical_state.hpp>
@@ -41,7 +42,8 @@ namespace TES3MP::ServerApp
         const std::vector<std::pair<TransportConnectionId, InventoryInterestDelivery>>& inventoryBaselines = {},
         const std::vector<std::pair<TransportConnectionId, LatestWinsCombatSnapshot>>& combatViews = {},
         const std::vector<std::pair<TransportConnectionId, ReliableCombatEventBatch>>& combatEvents = {},
-        const std::vector<std::pair<TransportConnectionId, ReliableDialogueChoiceResult>>& dialogueResults = {});
+        const std::vector<std::pair<TransportConnectionId, ReliableDialogueChoiceResult>>& dialogueResults = {},
+        const std::vector<std::pair<TransportConnectionId, WeatherStateDelivery>>& weatherUpdates = {});
 
 }
 

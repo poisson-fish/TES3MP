@@ -100,6 +100,18 @@ namespace OpenMW
                 ->multitoken()
                 ->composing(),
             "OpenMW dialogue choice mappings: <manifest-choice-id>=<local-choice-number>");
+        addOption("tes3mp-content-weather-region-map",
+            bpo::value<StringsVector>()->default_value(
+                StringsVector{ "1=Bitter Coast Region" }, "vanilla weather regions")
+                ->multitoken()
+                ->composing(),
+            "OpenMW weather region mappings: <manifest-region-id>=<region-record>");
+        addOption("tes3mp-content-weather-map",
+            bpo::value<StringsVector>()->default_value(
+                StringsVector{ "1=Clear", "2=Cloudy" }, "vanilla weather records")
+                ->multitoken()
+                ->composing(),
+            "OpenMW weather mappings: <manifest-weather-id>=<weather-record>");
 #ifdef TES3MP_OPENMW_DESKTOP_AUTOMATION
         addOption("tes3mp-automation-role", bpo::value<std::string>()->default_value(""),
             "test-only fixed TES3MP desktop automation role");

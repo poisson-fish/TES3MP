@@ -1827,6 +1827,17 @@ namespace MWWorld
         mWeatherManager->changeWeather(region, id);
     }
 
+    void World::setWeatherAuthority(bool authoritative)
+    {
+        mWeatherManager->setExternalAuthority(authoritative);
+    }
+
+    bool World::applyAuthoritativeWeather(const ESM::RefId& region, const ESM::RefId& current,
+        const ESM::RefId& target, float transitionFactor, float transitionDelta)
+    {
+        return mWeatherManager->applyAuthoritativeWeather(region, current, target, transitionFactor, transitionDelta);
+    }
+
     void World::modRegion(const ESM::RefId& regionid, const std::vector<uint8_t>& chances)
     {
         mWeatherManager->modRegion(regionid, chances);

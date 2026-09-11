@@ -25,6 +25,7 @@
 #include "tes3mp/interactive_object_world.hpp"
 #include "tes3mp/inventory_replication.hpp"
 #include "world_content.hpp"
+#include "weather_projection.hpp"
 
 #include <array>
 #include <cassert>
@@ -151,6 +152,33 @@ namespace
         std::vector<TES3MP::TransportMessage> incoming;
         std::map<TES3MP::TransportConnectionId, std::vector<TES3MP::TransportMessage>> incomingByConnection;
         std::size_t closes = 0;
+    };
+
+    class WeatherDurabilityProbe final : public CanonicalDurabilityPort
+    {
+    public:
+        CanonicalDurabilityResult commit(const std::shared_ptr<const CanonicalStatePublication>&,
+            CanonicalRevision, std::span<const DurableCommandOrder>, const CanonicalInventoryWorld*,
+            const CanonicalCombatWorld*, const CanonicalInteractiveObjectWorld*, const CanonicalActorWorld*,
+            const CanonicalWorldState*, const CanonicalScriptState*) noexcept override
+        {
+            ++commits;
+            if (!runtime)
+                return CanonicalDurabilityResult::Failed;
+            for (const auto& bytes : runtime->sent)
+            {
+                const auto decoded = decodeProtocolFrame(bytes);
+                const auto* frame = std::get_if<DecodedFrame>(&decoded);
+                if (frame && frame->messageKind() == MessageKind::ReliableWeatherState)
+                    weatherSentBeforeAcknowledgement = true;
+            }
+            return result;
+        }
+
+        FakeRuntime* runtime = nullptr;
+        CanonicalDurabilityResult result = CanonicalDurabilityResult::Committed;
+        std::size_t commits = 0;
+        bool weatherSentBeforeAcknowledgement = false;
     };
 
     class AcceptedOperation final : public AuthenticationOperation
@@ -314,6 +342,13 @@ namespace
         return std::get<CapabilityOffer>(CapabilityOffer::create(versions, capabilities, {}));
     }
 
+    CapabilityOffer weatherOffer()
+    {
+        auto versions = std::get<ProtocolVersionRange>(ProtocolVersionRange::create(1, 7, 7));
+        const std::array capabilities{ weatherReplicationCapability() };
+        return std::get<CapabilityOffer>(CapabilityOffer::create(versions, capabilities, {}));
+    }
+
     InteractiveObjectCatalog sampleObjectCatalog(const ContentManifest& manifest)
     {
         const auto zero = Turn32::fromValue(0);
@@ -434,7 +469,8 @@ namespace
         return std::get<TES3MP::ServerApp::ServerConfig>(std::move(result));
     }
 
-    CanonicalServerState fixtureState(bool secondExterior)
+    CanonicalServerState fixtureState(
+        bool secondExterior, SessionGeneration firstGeneration = SessionGeneration::initial())
     {
         const auto zero = Turn32::fromValue(0);
         const auto interior = CellId::interior(id<CellSpaceId>(7));
@@ -448,15 +484,168 @@ namespace
                 LinearVelocity3(0, 0, 0), id<EntityRevision>(secondExterior ? 2 : 1), AuthorityEpoch::initial(),
                 id<ServerTick>(4) }
         };
-        std::vector<CanonicalSessionProgress> sessions{ { id<SessionId>(1), SessionGeneration::initial(),
+        std::vector<CanonicalSessionProgress> sessions{ { id<SessionId>(1), firstGeneration,
                                                             id<PlayerId>(1), id<EntityId>(1), std::nullopt },
             { id<SessionId>(2), SessionGeneration::initial(), id<PlayerId>(2), id<EntityId>(2), std::nullopt } };
         return std::get<CanonicalServerState>(createCanonicalServerState(players, sessions));
+    }
+
+    CanonicalWorldState fixtureWeatherWorld()
+    {
+        const std::array<GlobalVariableCatalogEntry, 0> globals{};
+        const std::array<QuestCatalogEntry, 0> quests{};
+        const std::array<JournalCatalogEntry, 0> journal{};
+        const std::array<FactionCatalogEntry, 0> factions{};
+        const std::array<DialogueChoiceCatalogEntry, 0> choices{};
+        const std::array weatherIds{ id<WeatherId>(1), id<WeatherId>(2) };
+        const std::array regions{ WeatherRegionCatalogEntry{ id<WeatherRegionId>(1), id<WeatherId>(1), 6, 3,
+            { id<WeatherId>(1), id<WeatherId>(2) } } };
+        const auto globalsCatalog = GlobalVariableCatalog::create(globals).value();
+        const auto questCatalog = QuestJournalCatalog::create(testContentManifestId(), quests, journal).value();
+        const auto factionCatalog
+            = FactionDialogueCatalog::create(testContentManifestId(), factions, choices).value();
+        const auto weatherCatalog = WeatherCatalog::create(testContentManifestId(), weatherIds, regions).value();
+        const auto random = Xoshiro256StarStar::fromWorldSeed(
+            99, *RandomStreamKey::fromValues(0x5745415448455231ULL, 0));
+        return CanonicalWorldState::initial(CanonicalWorldTimeState{}, globalsCatalog, questCatalog, factionCatalog,
+            weatherCatalog, random.snapshot())
+            .value();
     }
 }
 int main()
 {
     using namespace TES3MP::ServerApp;
+    {
+        const auto resumedGeneration = *SessionGeneration::initial().next();
+        const auto players = fixtureState(false, resumedGeneration);
+        const auto initial = fixtureWeatherWorld();
+        auto baseline = projectWeatherBaseline(
+            players, initial, id<SessionId>(1), id<ServerTick>(4), id<CanonicalRevision>(7));
+        assert(baseline && baseline->chunks.size() == 1);
+        const auto& baselineChunk = baseline->chunks.front();
+        assert(baselineChunk.header().completeBaseline
+            && baselineChunk.header().targetSessionGeneration == resumedGeneration
+            && baselineChunk.header().canonicalRevision == id<CanonicalRevision>(7)
+            && baselineChunk.regions().size() == 1
+            && baselineChunk.regions()[0].currentWeather == id<WeatherId>(1));
+
+        auto changedValue = setCanonicalWeather(initial, id<WeatherRegionId>(1), WeatherRevision::initial(),
+            id<WeatherId>(2), id<ServerTick>(5));
+        const auto* changed = std::get_if<CanonicalWorldState>(&changedValue);
+        assert(changed);
+        auto update = projectWeatherUpdate(initial, *changed, id<SessionId>(1), resumedGeneration,
+            id<ServerTick>(5), id<CanonicalRevision>(8));
+        assert(update && update->chunks.size() == 1 && !update->chunks[0].header().completeBaseline
+            && update->chunks[0].regions().size() == 1
+            && update->chunks[0].regions()[0].targetWeather == id<WeatherId>(2)
+            && update->chunks[0].regions()[0].transitionStartTick == id<ServerTick>(5)
+            && update->chunks[0].regions()[0].transitionEndTick == id<ServerTick>(8));
+
+        auto queues = OutboundQueueSet::create(OutboundQueuePolicy{}, 1);
+        const auto connection = TransportConnectionId::initial();
+        assert(queues && queues->attach(connection) == TransportResult::Accepted);
+        const std::array<std::byte, 1> filler{};
+        for (std::size_t index = 0; index < OutboundQueuePolicy::MaxReliableMessages; ++index)
+            assert(queues->enqueue(connection, TransportChannel::ReliableOrdered, filler) == TransportResult::Accepted);
+        std::vector<std::vector<std::byte>> frames;
+        std::vector<OutboundQueueSet::AtomicMessage> messages;
+        frames.reserve(update->chunks.size());
+        messages.reserve(update->chunks.size());
+        assert(appendWeatherMessages(frames, messages, connection, *update));
+        assert(queues->enqueueMessagesAtomically(messages) == TransportResult::WouldBlock);
+        FakeRuntime runtime;
+        std::size_t drained = 0;
+        while (queues->hasPending(connection) == true)
+        {
+            assert(queues->pump(runtime, connection, drained) == OutboundPumpResult::Progress);
+            ++drained;
+        }
+        assert(runtime.sent.size() == OutboundQueuePolicy::MaxReliableMessages);
+    }
+    {
+        const auto config = parsedConfig();
+        FixedClock clock;
+        NullMetricSink metrics;
+        NullStructuredEventSink events;
+        Observability observability(metrics, events);
+        FakeAuthentication authentication;
+        RecordingCrypto crypto;
+        FakeRuntime runtime;
+        WeatherDurabilityProbe durability;
+        durability.runtime = &runtime;
+        auto queues = OutboundQueueSet::create(OutboundQueuePolicy{}, 1);
+        auto timeouts = *SessionTimeoutPolicy::create(1'000'000'000, 1'000'000'000, 1'000'000'000);
+        const std::array<GlobalVariableCatalogEntry, 0> noGlobals{};
+        const auto globalCatalog = GlobalVariableCatalog::create(noGlobals).value();
+        auto world = fixtureWeatherWorld();
+        CanonicalCommandReducer reducer(
+            std::get<CanonicalServerState>(createCanonicalServerState({}, {})), observability);
+        assert(reducer.configureDurability(durability, nullptr, nullptr, nullptr, nullptr, &world));
+        auto joins = joinCoordinator(reducer);
+        ConnectionSessionCoordinator sessions(clock, observability, timeouts, weatherOffer(), authentication, *queues,
+            1, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, &world);
+        ServerCommandIntakeCoordinator intake(
+            clock, observability, clock.now(), ServerTick::initial(), IngressOrdinal::initial());
+        auto lifecycle = ServerLifecycleCoordinator::create(config.disconnectGraceMilliseconds * 1'000'000, reducer);
+        assert(lifecycle);
+        ServerApplicationWiring wiring{ sessions, joins, crypto, *queues, clock, intake, reducer, *lifecycle };
+        wiring.globalCatalog = &globalCatalog;
+        wiring.world = &world;
+        ServerApplication application(runtime, config, wiring);
+        const auto connection = TransportConnectionId::initial();
+        runtime.events.push_back(
+            { TransportEventKind::ConnectionAccepted, TransportFailure::None, std::nullopt, std::nullopt, connection,
+                std::nullopt, TransportSecurity::EncryptedUnauthenticated, scope(std::byte{ 11 }) });
+        runtime.incoming.push_back({ TransportChannel::ReliableOrdered,
+            std::get<std::vector<std::byte>>(encodeProtocolFrame(MessageClass::SessionControl,
+                MessageKind::ClientHello, encodeClientHello(ClientHello::fromOffer(weatherOffer())))) });
+        assert(application.start());
+        const bool initialPumped = application.pump(ServerTick::initial());
+        if (!initialPumped)
+            std::cerr << "weather application initial pump: " << application.failure() << '\n';
+        assert(initialPumped);
+        auto material = AuthenticationMaterial::create({});
+        runtime.incoming.push_back({ TransportChannel::ReliableOrdered,
+            std::get<std::vector<std::byte>>(encodeProtocolFrame(MessageClass::SessionControl,
+                MessageKind::AuthenticationRequest,
+                encodeAuthenticationRequest(AuthenticationRequest::join(std::move(*material))))) });
+        assert(application.pump(ServerTick::initial()));
+        bool sawJoinBaseline = false;
+        for (const auto& bytes : runtime.sent)
+        {
+            const auto decoded = decodeProtocolFrame(bytes);
+            const auto* frame = std::get_if<DecodedFrame>(&decoded);
+            sawJoinBaseline = sawJoinBaseline
+                || (frame && frame->messageKind() == MessageKind::ReliableWeatherState);
+        }
+        assert(sawJoinBaseline && durability.commits != 0 && !durability.weatherSentBeforeAcknowledgement);
+
+        runtime.sent.clear();
+        runtime.sentConnections.clear();
+        runtime.sentChannels.clear();
+        durability.weatherSentBeforeAcknowledgement = false;
+        clock.nanoseconds = 200'000'000;
+        assert(application.pump(id<ServerTick>(5)));
+        assert(application.pump(id<ServerTick>(6)));
+        bool sawRevisionedUpdate = false;
+        for (const auto& bytes : runtime.sent)
+        {
+            const auto decoded = decodeProtocolFrame(bytes);
+            const auto* frame = std::get_if<DecodedFrame>(&decoded);
+            if (!frame || frame->messageKind() != MessageKind::ReliableWeatherState)
+                continue;
+            const auto weather = decodeReliableWeatherState(frame->payload());
+            const auto* state = std::get_if<ReliableWeatherState>(&weather);
+            sawRevisionedUpdate = sawRevisionedUpdate
+                || (state && !state->header().completeBaseline
+                    && state->header().canonicalRevision == reducer.canonicalRevision()
+                    && state->regions()[0].revision > WeatherRevision::initial());
+        }
+        if (!sawRevisionedUpdate)
+            std::cerr << "weather update missing after " << runtime.sent.size() << " sent frames; revision "
+                      << world.weather()->regions[0].revision.value() << '\n';
+        assert(sawRevisionedUpdate && !durability.weatherSentBeforeAcknowledgement);
+    }
     {
         const auto manifestId
             = ContentManifestId::fromHex("6ce29aa7cdb584836f55f2fc0d916f8d66a684dea3e0a0b32e629d5648962b31");
@@ -558,7 +747,7 @@ int main()
             && evidence->latestHighWaterMessages == 1 && evidence->latestHighWaterBytes == 10
             && !telemetry.takeDrainEvidence());
     }
-    static_assert(Phase7ProtocolMajor == 1 && Phase7ProtocolMinimumMinor == 6 && Phase7ProtocolMaximumMinor == 6);
+    static_assert(Phase7ProtocolMajor == 1 && Phase7ProtocolMinimumMinor == 7 && Phase7ProtocolMaximumMinor == 7);
     static_assert(Phase7SourceAuthenticationBurst == 4 && Phase7GlobalAuthenticationBurst == 32
         && Phase7AuthenticationRefillMilliseconds == 1'000 && Phase7ConnectionCapacity == 8);
     static_assert(!phase7ProofDisconnectGraceAccepted(MinimumResumeTokenLifetimeMilliseconds - 1));

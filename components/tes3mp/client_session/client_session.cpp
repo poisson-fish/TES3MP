@@ -732,4 +732,125 @@ namespace TES3MP
             && mConfirmedEquipmentSnapshot->canonicalRevision >= revision
             && mConfirmedSnapshot->header().canonicalRevision() >= revision;
     }
+
+    WeatherReplicationReceiveResult ClientSessionStateMachine::receiveReliableWeatherState(
+        ReliableWeatherState state)
+    try
+    {
+        if (mState != ClientSessionState::Established)
+            return WeatherReplicationReceiveResult::NotEstablished;
+        if (!mNegotiatedHello
+            || !std::ranges::binary_search(
+                mNegotiatedHello->negotiatedCapabilities(), weatherReplicationCapability()))
+            return WeatherReplicationReceiveResult::CapabilityNotNegotiated;
+        if (!mSessionId)
+            return WeatherReplicationReceiveResult::SessionNotBound;
+        const auto& header = state.header();
+        if (header.targetSessionId != *mSessionId)
+            return WeatherReplicationReceiveResult::SessionMismatch;
+        if (header.targetSessionGeneration != mGeneration)
+            return WeatherReplicationReceiveResult::GenerationMismatch;
+        if (!header.completeBaseline && !mWeatherBaselineComplete)
+            return WeatherReplicationReceiveResult::BaselineMissing;
+        if (mWeatherCanonicalRevision && header.canonicalRevision < *mWeatherCanonicalRevision)
+            return WeatherReplicationReceiveResult::StaleRevision;
+        if (mWeatherCanonicalRevision && header.canonicalRevision == *mWeatherCanonicalRevision
+            && !header.completeBaseline)
+        {
+            for (const auto& incoming : state.regions())
+            {
+                const auto found = std::ranges::lower_bound(
+                    mConfirmedWeather, incoming.region, {}, &WeatherRegionSnapshot::region);
+                if (found == mConfirmedWeather.end() || found->region != incoming.region || *found != incoming)
+                    return WeatherReplicationReceiveResult::ContradictorySameRevision;
+            }
+            return WeatherReplicationReceiveResult::IdenticalDuplicate;
+        }
+        if (mWeatherServerTick && header.serverTick < *mWeatherServerTick)
+            return WeatherReplicationReceiveResult::StaleRevision;
+
+        const auto sameGroup = [&](const WeatherStateHeader& value) {
+            return value.targetSessionId == header.targetSessionId
+                && value.targetSessionGeneration == header.targetSessionGeneration
+                && value.serverTick == header.serverTick
+                && value.canonicalRevision == header.canonicalRevision
+                && value.chunkCount == header.chunkCount
+                && value.completeBaseline == header.completeBaseline;
+        };
+        if (!mPendingWeather)
+            mPendingWeather.emplace(PendingWeatherState{ header,
+                std::vector<std::optional<ReliableWeatherState>>(header.chunkCount) });
+        else if (!sameGroup(mPendingWeather->header))
+            return WeatherReplicationReceiveResult::InvalidChunkSequence;
+        auto& slot = mPendingWeather->chunks[header.chunkIndex];
+        if (slot)
+            return *slot == state ? WeatherReplicationReceiveResult::ChunkAccepted
+                                  : WeatherReplicationReceiveResult::InvalidChunkSequence;
+        slot = std::move(state);
+        if (std::ranges::any_of(mPendingWeather->chunks, [](const auto& chunk) { return !chunk.has_value(); }))
+            return WeatherReplicationReceiveResult::ChunkAccepted;
+
+        std::vector<WeatherRegionSnapshot> assembled;
+        for (const auto& chunk : mPendingWeather->chunks)
+        {
+            for (const auto& region : chunk->regions())
+            {
+                if (!assembled.empty() && assembled.back().region >= region.region)
+                {
+                    mPendingWeather.reset();
+                    return WeatherReplicationReceiveResult::InvalidChunkSequence;
+                }
+                assembled.push_back(region);
+            }
+        }
+        if (header.completeBaseline)
+        {
+            if (mWeatherCanonicalRevision && header.canonicalRevision == *mWeatherCanonicalRevision)
+            {
+                if (assembled != mConfirmedWeather)
+                {
+                    mPendingWeather.reset();
+                    return WeatherReplicationReceiveResult::ContradictorySameRevision;
+                }
+                if (mWeatherServerTick && header.serverTick == *mWeatherServerTick)
+                {
+                    mPendingWeather.reset();
+                    return WeatherReplicationReceiveResult::IdenticalDuplicate;
+                }
+            }
+            mConfirmedWeather = std::move(assembled);
+            mWeatherBaselineComplete = true;
+        }
+        else
+        {
+            auto next = mConfirmedWeather;
+            for (const auto& incoming : assembled)
+            {
+                const auto found = std::ranges::lower_bound(next, incoming.region, {}, &WeatherRegionSnapshot::region);
+                if (found == next.end() || found->region != incoming.region)
+                {
+                    mPendingWeather.reset();
+                    return WeatherReplicationReceiveResult::ContradictorySameRevision;
+                }
+                const auto expected = found->revision.next();
+                if (!expected || incoming.revision != *expected)
+                {
+                    mPendingWeather.reset();
+                    return incoming.revision <= found->revision ? WeatherReplicationReceiveResult::StaleRevision
+                                                                : WeatherReplicationReceiveResult::RevisionGap;
+                }
+                *found = incoming;
+            }
+            mConfirmedWeather = std::move(next);
+        }
+        mWeatherCanonicalRevision = header.canonicalRevision;
+        mWeatherServerTick = header.serverTick;
+        mPendingWeather.reset();
+        return WeatherReplicationReceiveResult::Applied;
+    }
+    catch (...)
+    {
+        mPendingWeather.reset();
+        return WeatherReplicationReceiveResult::InvalidChunkSequence;
+    }
 }

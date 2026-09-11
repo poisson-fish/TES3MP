@@ -161,6 +161,11 @@ namespace TES3MP::OpenMWAdapter
         {
             return ProviderResult::Accepted;
         }
+        virtual ProviderResult applyWeather(
+            std::span<const WeatherRegionSnapshot>, ServerTick, MonotonicInstant) noexcept
+        {
+            return ProviderResult::Accepted;
+        }
         virtual std::optional<ObjectRevision> observedObjectRevision(InteractiveObjectId) const noexcept
         {
             return std::nullopt;

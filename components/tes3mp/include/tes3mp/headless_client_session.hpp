@@ -52,6 +52,7 @@ namespace TES3MP
             ReliableContainerInventoryBaseline baseline);
         InventoryReplicationReceiveResult receiveReliableGroundItemBaseline(ReliableGroundItemBaseline baseline);
         InventoryReplicationReceiveResult receiveLatestWinsEquipmentSnapshot(LatestWinsEquipmentSnapshot snapshot);
+        WeatherReplicationReceiveResult receiveReliableWeatherState(ReliableWeatherState state);
         HeadlessClientResult close() noexcept;
 
         const ClientSessionStateMachine& stateMachine() const noexcept { return *mState; }

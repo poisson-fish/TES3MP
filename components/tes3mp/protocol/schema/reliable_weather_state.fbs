@@ -1,0 +1,30 @@
+namespace TES3MP.Protocol.Schema.WeatherReplication;
+
+table WeatherStateHeader {
+  target_session_id:ulong (id: 0);
+  target_session_generation:ulong (id: 1);
+  server_tick:ulong (id: 2);
+  canonical_revision:ulong (id: 3);
+  chunk_index:uint (id: 4);
+  chunk_count:uint (id: 5);
+  complete_baseline:bool (id: 6);
+}
+
+struct WeatherRegionState {
+  region_id:ulong;
+  current_weather_id:ulong;
+  target_weather_id:ulong;
+  transition_start_tick:ulong;
+  transition_end_tick:ulong;
+  next_selection_tick:ulong;
+  weather_revision:ulong;
+}
+
+table ReliableWeatherState {
+  header:WeatherStateHeader (id: 0);
+  regions:[WeatherRegionState] (id: 1);
+}
+
+root_type ReliableWeatherState;
+file_identifier "T3WR";
+file_extension "t3wr";

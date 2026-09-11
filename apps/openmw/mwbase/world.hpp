@@ -217,6 +217,14 @@ namespace MWBase
 
         virtual void changeWeather(const ESM::RefId& region, const ESM::RefId& id) = 0;
 
+        virtual void setWeatherAuthority(bool) {}
+
+        virtual bool applyAuthoritativeWeather(
+            const ESM::RefId&, const ESM::RefId&, const ESM::RefId&, float, float)
+        {
+            return false;
+        }
+
         virtual const std::vector<MWWorld::Weather>& getAllWeather() const = 0;
 
         virtual int getCurrentWeatherScriptId() const = 0;

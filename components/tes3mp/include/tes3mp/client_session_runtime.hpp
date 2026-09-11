@@ -12,6 +12,7 @@
 #include "inventory_replication.hpp"
 #include "protocol_handshake.hpp"
 #include "protocol_pose.hpp"
+#include "weather_replication.hpp"
 
 #include <memory>
 #include <optional>
@@ -25,7 +26,7 @@ namespace TES3MP
         LatestWinsActorSnapshot, ReliableActorInterestBaseline, ReliableInteractiveObjectInterestBaseline,
         ReliablePlayerInventoryBaseline, ReliableContainerInventoryBaseline, ReliableGroundItemBaseline,
         LatestWinsEquipmentSnapshot, LatestWinsCombatSnapshot, ReliableCombatEventBatch, ReliableCharacterProfile,
-        ReliableDialogueChoiceResult, ServerVrPoseSnapshot>;
+        ReliableDialogueChoiceResult, ReliableWeatherState, ServerVrPoseSnapshot>;
 // Combat is capability-gated and intentionally kept outside the spatial readiness lanes.
 
     enum class ClientRuntimeResult : std::uint8_t
@@ -69,6 +70,8 @@ namespace TES3MP
         bool resyncRequested = false;
         bool authenticationAccepted = false;
         bool characterProfileApplied = false;
+        bool weatherStateApplied = false;
+        bool weatherBaselineCompleted = false;
         std::vector<ServerVrPoseSnapshot> poseSnapshots;
         std::vector<ReliableCombatEventBatch> combatEvents;
         std::vector<ReliableDialogueChoiceResult> dialogueChoiceResults;
@@ -169,6 +172,7 @@ namespace TES3MP
         bool mResyncGroundItemsObserved = false;
         bool mResyncEquipmentObserved = false;
         bool mResyncCombatObserved = false;
+        bool mResyncWeatherObserved = false;
         std::optional<CommandSequence> mLastQueuedSequence;
         std::optional<CommandSequence> mLastCharacterCommandSequence;
         ClientLocomotionHistory mLocomotionHistory;

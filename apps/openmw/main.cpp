@@ -470,10 +470,44 @@ bool parseOptions(int argc, char** argv, OMW::Engine& engine, Files::Configurati
             }
             dialogueChoiceMappings.push_back({ *id, localChoice });
         }
+        std::vector<TES3MP::OpenMWAdapter::DesktopWeatherRegionMapping> weatherRegionMappings;
+        for (const auto& entry : variables["tes3mp-content-weather-region-map"].as<StringsVector>())
+        {
+            const auto equal = entry.find('=');
+            std::uint64_t rawId = 0;
+            const auto parsed = equal == std::string::npos ? std::from_chars_result{}
+                                                           : std::from_chars(entry.data(), entry.data() + equal, rawId);
+            const auto id = equal != std::string::npos && parsed.ec == std::errc{} && parsed.ptr == entry.data() + equal
+                ? TES3MP::WeatherRegionId::fromValue(rawId)
+                : std::nullopt;
+            if (!id || equal + 1 == entry.size())
+            {
+                Log(Debug::Error) << "TES3MP startup failed: invalid weather region mapping";
+                return false;
+            }
+            weatherRegionMappings.push_back({ *id, entry.substr(equal + 1) });
+        }
+        std::vector<TES3MP::OpenMWAdapter::DesktopWeatherMapping> weatherMappings;
+        for (const auto& entry : variables["tes3mp-content-weather-map"].as<StringsVector>())
+        {
+            const auto equal = entry.find('=');
+            std::uint64_t rawId = 0;
+            const auto parsed = equal == std::string::npos ? std::from_chars_result{}
+                                                           : std::from_chars(entry.data(), entry.data() + equal, rawId);
+            const auto id = equal != std::string::npos && parsed.ec == std::errc{} && parsed.ptr == entry.data() + equal
+                ? TES3MP::WeatherId::fromValue(rawId)
+                : std::nullopt;
+            if (!id || equal + 1 == entry.size())
+            {
+                Log(Debug::Error) << "TES3MP startup failed: invalid weather mapping";
+                return false;
+            }
+            weatherMappings.push_back({ *id, entry.substr(equal + 1) });
+        }
         auto contentMapping = TES3MP::OpenMWAdapter::DesktopContentMapping::create(*contentManifest, localMappings,
             contentManifest->defaultAppearance(), variables["tes3mp-content-appearance-record"].as<std::string>(),
             actorMappings, interactiveObjectMappings, itemMappings, containerMappings, questMappings,
-            dialogueChoiceMappings);
+            dialogueChoiceMappings, weatherRegionMappings, weatherMappings);
         if (!contentMapping)
         {
             Log(Debug::Error) << "TES3MP startup failed: content record mappings are required";

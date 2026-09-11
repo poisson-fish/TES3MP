@@ -72,6 +72,8 @@ CLIENT_MAPPING_KEYS = {
     "tes3mp-content-container-map",
     "tes3mp-content-quest-map",
     "tes3mp-content-dialogue-choice-map",
+    "tes3mp-content-weather-region-map",
+    "tes3mp-content-weather-map",
 }
 
 ITEM_RECORD_TYPES = {
@@ -1325,6 +1327,8 @@ def validate_consistency(server_entries: Sequence[Assignment], client_entries: S
     item_mapping = _mapping_values(client_entries, "tes3mp-content-item-prototype-map")
     container_mapping = _mapping_values(client_entries, "tes3mp-content-container-map")
     dialogue_choice_mapping = _mapping_values(client_entries, "tes3mp-content-dialogue-choice-map")
+    weather_region_mapping = _mapping_values(client_entries, "tes3mp-content-weather-region-map")
+    weather_mapping = _mapping_values(client_entries, "tes3mp-content-weather-map")
     cell_mapping = _mapping_values(client_entries, "tes3mp-content-cell-space-map")
     _require_exact_mapping(actor_mapping, actor_prototypes, "actor prototype")
     _require_exact_mapping(object_mapping, objects, "interactive object")
@@ -1333,6 +1337,10 @@ def validate_consistency(server_entries: Sequence[Assignment], client_entries: S
     world_catalog = _catalog_by_key(catalogs, "world_content_file")
     dialogue_choices = _record_ids(world_catalog, "dialogue_choice", 1)
     _require_exact_mapping(dialogue_choice_mapping, dialogue_choices, "dialogue choice")
+    weather_regions = _record_ids(world_catalog, "weather_region", 1)
+    weather_ids = _record_ids(world_catalog, "weather", 1)
+    _require_exact_mapping(weather_region_mapping, weather_regions, "weather region")
+    _require_exact_mapping(weather_mapping, weather_ids, "weather")
     local_dialogue_choices: set[int] = set()
     for value in dialogue_choice_mapping.values():
         try:
@@ -1363,6 +1371,7 @@ def validate_consistency(server_entries: Sequence[Assignment], client_entries: S
     item_records = _records_of_type(records, ITEM_RECORD_TYPES)
     npc_records = _records_of_type(records, {"NPC_"})
     cell_records = _records_of_type(records, {"CELL"})
+    region_records = _records_of_type(records, {"REGN"})
     _require_hashed_mapping(actor_mapping, actor_records, "actor prototype")
     _require_hashed_mapping(item_mapping, item_records, "item prototype")
     appearance = _one(client_entries, "tes3mp-content-appearance-record")
@@ -1373,6 +1382,9 @@ def validate_consistency(server_entries: Sequence[Assignment], client_entries: S
         declaration = next(part for part in cell_spaces.split(";") if int(part.split(":")[1]) == identifier)
         if declaration.startswith("interior:") and value.casefold() not in cell_records:
             raise BakeError(f"interior cell mapping references a missing winning cell: {value}")
+    for value in weather_region_mapping.values():
+        if value.casefold() not in region_records:
+            raise BakeError(f"weather region mapping references a missing winning region: {value}")
 
     if character_catalog:
         hashed_by_type: dict[str, set[int]] = {}

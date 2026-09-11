@@ -8,6 +8,7 @@
 #include "protocol_exchange.hpp"
 #include "protocol_handshake.hpp"
 #include "session_types.hpp"
+#include "weather_replication.hpp"
 
 #include <cstdint>
 #include <map>
@@ -198,6 +199,23 @@ namespace TES3MP
         InvalidChunkSequence,
     };
 
+    enum class WeatherReplicationReceiveResult : std::uint8_t
+    {
+        Applied,
+        ChunkAccepted,
+        IdenticalDuplicate,
+        NotEstablished,
+        CapabilityNotNegotiated,
+        SessionNotBound,
+        SessionMismatch,
+        GenerationMismatch,
+        StaleRevision,
+        ContradictorySameRevision,
+        RevisionGap,
+        BaselineMissing,
+        InvalidChunkSequence,
+    };
+
     using ClientSessionCreateResult
         = std::variant<std::unique_ptr<class ClientSessionStateMachine>, SessionTransitionError>;
 
@@ -227,6 +245,7 @@ namespace TES3MP
             ReliableContainerInventoryBaseline baseline);
         InventoryReplicationReceiveResult receiveReliableGroundItemBaseline(ReliableGroundItemBaseline baseline);
         InventoryReplicationReceiveResult receiveLatestWinsEquipmentSnapshot(LatestWinsEquipmentSnapshot snapshot);
+        WeatherReplicationReceiveResult receiveReliableWeatherState(ReliableWeatherState state);
 
         ClientSessionState state() const noexcept { return mState; }
         SessionGeneration generation() const noexcept { return mGeneration; }
@@ -288,6 +307,9 @@ namespace TES3MP
             return mConfirmedEquipmentSnapshot;
         }
         bool inventoryReplicationComplete() const noexcept;
+        std::span<const WeatherRegionSnapshot> confirmedWeather() const noexcept { return mConfirmedWeather; }
+        std::optional<ServerTick> confirmedWeatherServerTick() const noexcept { return mWeatherServerTick; }
+        bool weatherBaselineComplete() const noexcept { return mWeatherBaselineComplete; }
 
     private:
         ClientSessionStateMachine(MonotonicClock& clock, SessionTimeoutPolicy timeoutPolicy,
@@ -347,6 +369,16 @@ namespace TES3MP
         std::vector<ReliableContainerInventoryBaseline> mConfirmedContainerInventoryBaselines;
         std::optional<ReliableGroundItemBaseline> mConfirmedGroundItemBaseline;
         std::optional<LatestWinsEquipmentSnapshot> mConfirmedEquipmentSnapshot;
+        struct PendingWeatherState
+        {
+            WeatherStateHeader header;
+            std::vector<std::optional<ReliableWeatherState>> chunks;
+        };
+        std::optional<PendingWeatherState> mPendingWeather;
+        std::vector<WeatherRegionSnapshot> mConfirmedWeather;
+        std::optional<CanonicalRevision> mWeatherCanonicalRevision;
+        std::optional<ServerTick> mWeatherServerTick;
+        bool mWeatherBaselineComplete = false;
     };
 }
 

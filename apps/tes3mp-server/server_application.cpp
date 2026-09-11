@@ -4,6 +4,7 @@
 #include "interactive_object_interest_projection.hpp"
 #include "interest_projection.hpp"
 #include "inventory_interest_projection.hpp"
+#include "weather_projection.hpp"
 #include "tes3mp/canonical_resync.hpp"
 
 #include <algorithm>
@@ -119,6 +120,17 @@ namespace TES3MP::ServerApp
             return false;
         const auto& hello = session->negotiatedHello();
         return hello && std::ranges::binary_search(hello->negotiatedCapabilities(), dialogueChoiceCapability());
+    }
+
+    bool ServerApplication::supportsWeather(TransportConnectionId connection) const noexcept
+    {
+        if (!mWiring)
+            return false;
+        const auto* session = mWiring->sessions.session(connection);
+        if (!session || session->state() != ServerSessionState::Established || !session->sessionId())
+            return false;
+        const auto& hello = session->negotiatedHello();
+        return hello && std::ranges::binary_search(hello->negotiatedCapabilities(), weatherReplicationCapability());
     }
 
     bool ServerApplication::start() noexcept
@@ -375,9 +387,13 @@ namespace TES3MP::ServerApp
             ? projectCombatSnapshot(
                   *candidate, *mWiring->actors, *mWiring->combat, *session->sessionId(), tick, *revision)
             : std::optional<LatestWinsCombatSnapshot>{};
+        auto weatherBaseline = candidate && revision && mWiring->world && supportsWeather(connection)
+            ? projectWeatherBaseline(*candidate, *mWiring->world, *session->sessionId(), tick, *revision)
+            : std::optional<WeatherStateDelivery>{};
         if (!candidate || !baseline || !observations || !accepted || (supportsActors(connection) && !actorBaseline)
             || (supportsInteractiveObjects(connection) && !objectBaseline)
-            || (supportsInventory(connection) && !inventoryBaseline) || (supportsCombat(connection) && !combatSnapshot))
+            || (supportsInventory(connection) && !inventoryBaseline) || (supportsCombat(connection) && !combatSnapshot)
+            || (supportsWeather(connection) && !weatherBaseline))
         {
             cancel();
             return false;
@@ -386,7 +402,13 @@ namespace TES3MP::ServerApp
         try
         {
             std::vector<std::vector<std::byte>> frames;
-            frames.reserve(8 + observations->size() * 2);
+            const auto weatherFrames = weatherBaseline ? weatherBaseline->chunks.size() : 0;
+            const auto inventoryFrames = inventoryBaseline
+                ? inventoryBaseline->playerInventory.size() + inventoryBaseline->containers.size()
+                    + inventoryBaseline->groundItems.size() + 1
+                : 0;
+            const auto frameCapacity = 8 + observations->size() * 2 + weatherFrames + inventoryFrames;
+            frames.reserve(frameCapacity);
             auto addFrame = [&](MessageClass messageClass, MessageKind kind, std::vector<std::byte> payload) {
                 auto encoded = encodeProtocolFrame(messageClass, kind, payload);
                 if (!std::holds_alternative<std::vector<std::byte>>(encoded))
@@ -438,7 +460,7 @@ namespace TES3MP::ServerApp
             }
 
             std::vector<OutboundQueueSet::AtomicMessage> messages;
-            messages.reserve(8 + observations->size() * 2);
+            messages.reserve(frameCapacity);
             std::size_t nextFrameIdx = 0;
             messages.push_back({ connection, TransportChannel::ReliableOrdered, frames[nextFrameIdx++] });
             messages.push_back({ connection, TransportChannel::ReliableOrdered, frames[nextFrameIdx++] });
@@ -456,6 +478,11 @@ namespace TES3MP::ServerApp
             }
             if (combatSnapshot)
                 messages.push_back({ connection, TransportChannel::LatestWins, frames[nextFrameIdx++] });
+            if (weatherBaseline && !appendWeatherMessages(frames, messages, connection, *weatherBaseline))
+            {
+                cancel();
+                return false;
+            }
             for (const auto& delivery : *observations)
             {
                 auto target = mWiring->sessions.connectionForSession(delivery.targetSession);
@@ -518,7 +545,8 @@ namespace TES3MP::ServerApp
         const bool wantObjects = supportsInteractiveObjects(connection);
         const bool wantInventory = supportsInventory(connection);
         const bool wantCombat = supportsCombat(connection);
-        if (!wantActors && !wantObjects && !wantInventory && !wantCombat)
+        const bool wantWeather = supportsWeather(connection);
+        if (!wantActors && !wantObjects && !wantInventory && !wantCombat && !wantWeather)
             return admitInterestBaseline(mWiring->queues, connection, *delivery);
         if (wantActors && !mWiring->actors)
             return false;
@@ -527,6 +555,8 @@ namespace TES3MP::ServerApp
         if (wantInventory && !mWiring->inventory)
             return false;
         if (wantCombat && (!mWiring->combat || !mWiring->actors))
+            return false;
+        if (wantWeather && !mWiring->world)
             return false;
         auto actorDelivery = wantActors
             ? projectActorInterestBaseline(resolved.publication()->state(), *mWiring->actors, request->sessionId(),
@@ -552,10 +582,20 @@ namespace TES3MP::ServerApp
             : std::nullopt;
         if (wantCombat && !combatDelivery)
             return false;
+        auto weatherDelivery = wantWeather
+            ? projectWeatherBaseline(resolved.publication()->state(), *mWiring->world, request->sessionId(), tick,
+                  mWiring->reducer.canonicalRevision())
+            : std::nullopt;
+        if (wantWeather && !weatherDelivery)
+            return false;
         try
         {
             std::vector<std::vector<std::byte>> frames;
-            frames.reserve(7);
+            std::size_t frameCount = 7 + (weatherDelivery ? weatherDelivery->chunks.size() : 0);
+            if (inventoryDelivery)
+                frameCount += inventoryDelivery->playerInventory.size() + inventoryDelivery->containers.size()
+                    + inventoryDelivery->groundItems.size() + 1;
+            frames.reserve(frameCount);
             const auto add = [&](MessageClass messageClass, MessageKind kind, std::vector<std::byte> payload) {
                 auto frame = encodeProtocolFrame(messageClass, kind, payload);
                 if (!std::holds_alternative<std::vector<std::byte>>(frame))
@@ -583,7 +623,7 @@ namespace TES3MP::ServerApp
                     encodeLatestWinsCombatSnapshot(*combatDelivery)))
                 return false;
             std::vector<OutboundQueueSet::AtomicMessage> messages;
-            messages.reserve(frames.size());
+            messages.reserve(frameCount);
             std::size_t nextIdx = 0;
             messages.push_back({ connection, TransportChannel::ReliableOrdered, frames[nextIdx++] });
             messages.push_back({ connection, TransportChannel::LatestWins, frames[nextIdx++] });
@@ -599,6 +639,8 @@ namespace TES3MP::ServerApp
             if (wantCombat)
                 messages.push_back({ connection, TransportChannel::LatestWins, frames[nextIdx++] });
             if (wantInventory && !appendInventoryInterestMessages(frames, messages, connection, *inventoryDelivery))
+                return false;
+            if (wantWeather && !appendWeatherMessages(frames, messages, connection, *weatherDelivery))
                 return false;
             return mWiring->queues.enqueueMessagesAtomically(messages) == TransportResult::Accepted;
         }
@@ -945,6 +987,7 @@ namespace TES3MP::ServerApp
             std::vector<std::pair<TransportConnectionId, ActorInterestBaselineDelivery>> actorBaselines;
             std::vector<std::pair<TransportConnectionId, InteractiveObjectInterestBaselineDelivery>> objectBaselines;
             std::vector<std::pair<TransportConnectionId, InventoryInterestDelivery>> inventoryBaselines;
+            std::vector<std::pair<TransportConnectionId, WeatherStateDelivery>> weatherUpdates;
             std::vector<CellId> changedObjectCells;
             bool refreshInventoryBaselines = false;
             const auto dispositions = prepared.result().dispositions();
@@ -1266,8 +1309,28 @@ namespace TES3MP::ServerApp
                 mFailure = "simulation candidate staging failed";
                 return false;
             }
+            if (prepared.candidateWorld())
+            {
+                for (const auto& target : prepared.candidateState().activeSessions())
+                {
+                    const auto connection = mWiring->sessions.connectionForSession(target.sessionId());
+                    if (!connection || !supportsWeather(*connection))
+                        continue;
+                    auto delivery = projectWeatherUpdate(*mWiring->world, *prepared.candidateWorld(),
+                        target.sessionId(), target.sessionGeneration(), batch.scheduledTick().value(),
+                        prepared.candidateRevision());
+                    if (!delivery)
+                    {
+                        mFailure = "weather projection failed";
+                        return false;
+                    }
+                    if (!delivery->chunks.empty())
+                        weatherUpdates.emplace_back(*connection, std::move(*delivery));
+                }
+            }
             if (!admitCombinedInterestTickAtomically(mWiring->queues, routed, routedViews, actorBaselines, actorViews,
-                    objectBaselines, inventoryBaselines, combatViews, combatEvents, dialogueChoiceResults))
+                    objectBaselines, inventoryBaselines, combatViews, combatEvents, dialogueChoiceResults,
+                    weatherUpdates))
             {
                 mFailure = changedObjectCells.empty() ? "tick output admission failed"
                                                       : "interactive object output admission failed";

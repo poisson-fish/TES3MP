@@ -94,6 +94,7 @@ target_sources(tes3mp_protocol PRIVATE
     include/tes3mp/spatial_types.hpp
     include/tes3mp/strong_value.hpp
     include/tes3mp/value_types.hpp
+    include/tes3mp/weather_replication.hpp
     protocol/generated/authentication_accepted_generated.h
     protocol/generated/authentication_rejected_generated.h
     protocol/generated/authentication_request_generated.h
@@ -123,6 +124,7 @@ target_sources(tes3mp_protocol PRIVATE
     protocol/generated/server_vr_pose_snapshot_generated.h
     protocol/generated/session_rejected_generated.h
     protocol/generated/session_resync_request_generated.h
+    protocol/generated/reliable_weather_state_generated.h
     protocol/authentication.cpp
     protocol/character_creation_protocol.cpp
     protocol/dialogue_choice_protocol.cpp
@@ -140,6 +142,7 @@ target_sources(tes3mp_protocol PRIVATE
     protocol/protocol_handshake.cpp
     protocol/protocol_frame.cpp
     protocol/protocol_pose.cpp
+    protocol/weather_replication.cpp
 )
 target_include_directories(tes3mp_protocol PRIVATE
     "${tes3mp_flatbuffers_SOURCE_DIR}/include"
@@ -402,6 +405,15 @@ set_target_properties(tes3mp_actor_replication_tests PROPERTIES FOLDER "TES3MP/T
 tes3mp_enable_runtime_safety(tes3mp_actor_replication_tests)
 tes3mp_verify_target_dependencies(tes3mp_actor_replication_tests ALLOWED tes3mp_client_session)
 tes3mp_verify_target_includes(tes3mp_actor_replication_tests
+    FORBIDDEN ${TES3MP_ENGINE_INDEPENDENT_FORBIDDEN_INCLUDES})
+
+add_executable(tes3mp_weather_replication_tests tests/weather_replication_tests.cpp)
+target_compile_features(tes3mp_weather_replication_tests PRIVATE cxx_std_20)
+target_link_libraries(tes3mp_weather_replication_tests PRIVATE tes3mp_client_session)
+set_target_properties(tes3mp_weather_replication_tests PROPERTIES FOLDER "TES3MP/Tests")
+tes3mp_enable_runtime_safety(tes3mp_weather_replication_tests)
+tes3mp_verify_target_dependencies(tes3mp_weather_replication_tests ALLOWED tes3mp_client_session)
+tes3mp_verify_target_includes(tes3mp_weather_replication_tests
     FORBIDDEN ${TES3MP_ENGINE_INDEPENDENT_FORBIDDEN_INCLUDES})
 
 add_executable(tes3mp_actor_simulation_tests tests/actor_simulation_tests.cpp)
@@ -1075,6 +1087,7 @@ add_custom_target(tes3mp_protocol_tests_run
     COMMAND $<TARGET_FILE:tes3mp_authenticated_join_tests>
     COMMAND $<TARGET_FILE:tes3mp_actor_catalog_tests>
     COMMAND $<TARGET_FILE:tes3mp_actor_replication_tests>
+    COMMAND $<TARGET_FILE:tes3mp_weather_replication_tests>
     COMMAND $<TARGET_FILE:tes3mp_actor_simulation_tests>
     COMMAND $<TARGET_FILE:tes3mp_melee_combat_tests>
     COMMAND $<TARGET_FILE:tes3mp_combat_world_tests>
@@ -1120,6 +1133,7 @@ add_custom_target(tes3mp_protocol_tests_run
         tes3mp_authenticated_join_tests
         tes3mp_actor_catalog_tests
         tes3mp_actor_replication_tests
+        tes3mp_weather_replication_tests
         tes3mp_actor_simulation_tests
         tes3mp_melee_combat_tests
         tes3mp_combat_world_tests

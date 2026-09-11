@@ -56,6 +56,18 @@ namespace TES3MP::OpenMWAdapter
         int localChoice = 0;
     };
 
+    struct DesktopWeatherRegionMapping
+    {
+        WeatherRegionId id;
+        std::string record;
+    };
+
+    struct DesktopWeatherMapping
+    {
+        WeatherId id;
+        std::string record;
+    };
+
     struct DesktopContentMapping
     {
         static std::optional<DesktopContentMapping> create(ContentManifest manifest,
@@ -64,7 +76,9 @@ namespace TES3MP::OpenMWAdapter
             std::span<const DesktopInteractiveObjectMapping> interactiveObjects = {},
             std::span<const DesktopItemPrototypeMapping> itemPrototypes = {},
             std::span<const DesktopContainerMapping> containers = {}, std::span<const DesktopQuestMapping> quests = {},
-            std::span<const DesktopDialogueChoiceMapping> dialogueChoices = {});
+            std::span<const DesktopDialogueChoiceMapping> dialogueChoices = {},
+            std::span<const DesktopWeatherRegionMapping> weatherRegions = {},
+            std::span<const DesktopWeatherMapping> weather = {});
 
         ContentManifest manifest;
         std::vector<DesktopCellSpaceMapping> cellSpaces;
@@ -76,6 +90,8 @@ namespace TES3MP::OpenMWAdapter
         std::vector<DesktopContainerMapping> containers;
         std::vector<DesktopQuestMapping> quests;
         std::vector<DesktopDialogueChoiceMapping> dialogueChoices;
+        std::vector<DesktopWeatherRegionMapping> weatherRegions;
+        std::vector<DesktopWeatherMapping> weather;
     };
 
 }
@@ -137,6 +153,8 @@ namespace TES3MP::OpenMWAdapter
             std::span<const ReliableCombatEventBatch> events, MonotonicInstant receivedAt) noexcept override;
         ProviderResult applyQuestJournal(const QuestJournalCatalog& catalog,
             const CanonicalPlayerQuestJournalState& state, MonotonicInstant receivedAt) noexcept override;
+        ProviderResult applyWeather(
+            std::span<const WeatherRegionSnapshot> regions, ServerTick serverTick, MonotonicInstant receivedAt) noexcept override;
         void appendMeleeTargets(std::vector<MWWorld::Ptr>& targets) const;
         std::optional<MeleeAttackCapture> captureMeleeAttack(
             const MWWorld::Ptr& victim, float attackStrength, int attackType) const noexcept;

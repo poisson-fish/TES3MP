@@ -407,6 +407,31 @@ namespace TES3MP
                     || ((!wasComplete || (mResyncPending && mResyncInventoryObserved))
                         && mSession->stateMachine().inventoryReplicationComplete());
             }
+            else if (auto* weather = std::get_if<ReliableWeatherState>(&message))
+            {
+                const bool wasComplete = mSession->stateMachine().weatherBaselineComplete();
+                const bool completeBaseline = weather->header().completeBaseline;
+                if (!mSession->stateMachine().sessionId()
+                    && mSession->bindEstablishedSession(weather->header().targetSessionId)
+                        != ClientSessionBindingResult::Bound)
+                    return reject();
+                const auto applied = mSession->receiveReliableWeatherState(std::move(*weather));
+                if (applied != WeatherReplicationReceiveResult::Applied
+                    && applied != WeatherReplicationReceiveResult::ChunkAccepted
+                    && applied != WeatherReplicationReceiveResult::IdenticalDuplicate
+                    && applied != WeatherReplicationReceiveResult::StaleRevision)
+                    return reject();
+                result.weatherStateApplied
+                    = result.weatherStateApplied || applied == WeatherReplicationReceiveResult::Applied;
+                const bool completedBaseline = completeBaseline
+                    && (applied == WeatherReplicationReceiveResult::Applied
+                        || applied == WeatherReplicationReceiveResult::IdenticalDuplicate);
+                if (mResyncPending && completedBaseline)
+                    mResyncWeatherObserved = true;
+                result.weatherBaselineCompleted = result.weatherBaselineCompleted
+                    || ((!wasComplete || mResyncPending) && completedBaseline
+                        && mSession->stateMachine().weatherBaselineComplete());
+            }
             else if (auto* combat = std::get_if<LatestWinsCombatSnapshot>(&message))
             {
                 const auto sessionId = mSession->stateMachine().sessionId();
@@ -452,7 +477,9 @@ namespace TES3MP
                     && mSession->stateMachine().interactiveObjectInterestBaselineComplete()))
             && (!negotiated(mSession->stateMachine(), inventoryReplicationCapability())
                 || (mResyncInventoryObserved && mSession->stateMachine().inventoryReplicationComplete()))
-            && (!negotiated(mSession->stateMachine(), combatReplicationCapability()) || mResyncCombatObserved))
+            && (!negotiated(mSession->stateMachine(), combatReplicationCapability()) || mResyncCombatObserved)
+            && (!negotiated(mSession->stateMachine(), weatherReplicationCapability())
+                || (mResyncWeatherObserved && mSession->stateMachine().weatherBaselineComplete())))
         {
             mResyncPending = false;
             mResyncPlayerBaselineObserved = false;
@@ -463,6 +490,7 @@ namespace TES3MP
             mResyncGroundItemsObserved = false;
             mResyncEquipmentObserved = false;
             mResyncCombatObserved = false;
+            mResyncWeatherObserved = false;
         }
         if (drained.action == ClientSessionAction::SessionClosed
             || mSession->stateMachine().state() == ClientSessionState::Closed)
@@ -731,6 +759,7 @@ namespace TES3MP
             mResyncGroundItemsObserved = false;
             mResyncEquipmentObserved = false;
             mResyncCombatObserved = false;
+            mResyncWeatherObserved = false;
         }
         return result;
     }
@@ -1004,6 +1033,15 @@ namespace TES3MP
                 {
                     auto value = decodeReliableDialogueChoiceResult(frame->payload());
                     if (auto* typed = std::get_if<ReliableDialogueChoiceResult>(&value))
+                        result.messages.emplace_back(std::move(*typed));
+                    else
+                        return fail(ClientRuntimeResult::ProtocolRejected);
+                    break;
+                }
+                case MessageKind::ReliableWeatherState:
+                {
+                    auto value = decodeReliableWeatherState(frame->payload());
+                    if (auto* typed = std::get_if<ReliableWeatherState>(&value))
                         result.messages.emplace_back(std::move(*typed));
                     else
                         return fail(ClientRuntimeResult::ProtocolRejected);

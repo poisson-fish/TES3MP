@@ -171,6 +171,26 @@
       ],
       "disposition": "local product composition",
       "removal_condition": "OpenMW supplies an equivalent supported multiplayer menu and deferred game-start lifecycle"
+    },
+    {
+      "id": "P20-001",
+      "slice": "desktop canonical weather",
+      "owner": "OpenMW adapter",
+      "purpose": "Suppress stock regional weather selection while multiplayer authority is active and apply manifest-mapped canonical current/target weather through OpenMW's native rendering, sound, particles, and transition presentation.",
+      "paths": [
+        "apps/openmw/mwbase/world.hpp",
+        "apps/openmw/mwworld/weather.cpp",
+        "apps/openmw/mwworld/weather.hpp",
+        "apps/openmw/mwworld/worldimp.cpp",
+        "apps/openmw/mwworld/worldimp.hpp"
+      ],
+      "tests": [
+        "scripts/tests/test_openmw_patch_registry.py",
+        "openmw_tes3mp_adapter_tests",
+        "openmw RelWithDebInfo link"
+      ],
+      "disposition": "local product adapter",
+      "removal_condition": "OpenMW supplies an equivalent supported external weather-authority and canonical transition seam"
     }
   ]
 }

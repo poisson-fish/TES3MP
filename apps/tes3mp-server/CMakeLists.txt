@@ -47,6 +47,8 @@ add_library(tes3mp_server_app STATIC
     server_config.cpp
     world_content.hpp
     world_content.cpp
+    weather_projection.hpp
+    weather_projection.cpp
     server_application.hpp
     server_application.cpp)
 add_library(TES3MP::ServerApp ALIAS tes3mp_server_app)

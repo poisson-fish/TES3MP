@@ -157,6 +157,11 @@ namespace TES3MP
         return mState->receiveLatestWinsEquipmentSnapshot(std::move(snapshot));
     }
 
+    WeatherReplicationReceiveResult HeadlessClientSession::receiveReliableWeatherState(ReliableWeatherState state)
+    {
+        return mState->receiveReliableWeatherState(std::move(state));
+    }
+
     HeadlessClientResult HeadlessClientSession::close() noexcept
     {
         if (mAttempt)

@@ -11,14 +11,14 @@ representative executable tests. Code and tests remain authoritative.
 
 | Surface | Current implementation |
 |---|---|
-| `tes3mp_protocol` | Strong value types, bounded frames, FlatBuffers codecs, negotiation, authentication and character-profile/dialogue-choice messages, reliable operations, canonical snapshots, actors, objects, inventory, melee combat, and VR pose |
+| `tes3mp_protocol` | Strong value types, bounded frames, FlatBuffers codecs, negotiation, authentication and character-profile/dialogue-choice messages, reliable operations, canonical snapshots, actors, objects, inventory, melee combat, regional weather, and VR pose |
 | `tes3mp_transport` | Project-owned connection, channel, queue, lifecycle, reason, and telemetry interfaces |
 | `tes3mp_transport_gns` | Private GameNetworkingSockets adapter with c-ares/OpenSSL dependency composition |
 | `tes3mp_server_core` | Deterministic authentication, canonical worlds, fixed ticks, client and script command reduction, publication, checksums, lifecycle, resync, and a versioned server-scripting boundary |
 | `tes3mp_client_session` | Caller-pumped negotiation, authentication, resume/resync, command output, snapshot ingestion, replication state, and locomotion reconciliation |
 | `tes3mp_server` | Configuration/content loading and real-transport dedicated-server composition |
 | `tes3mp_headless_client` | Scripted real-transport client for bounded integration scenarios |
-| `openmw_tes3mp_adapter` | Shared OpenMW connection, stock-chargen and dialogue-choice confirmation bridges, state application, reconnect, remote presentation, object activation, inventory integration, and authoritative melee capture/presentation |
+| `openmw_tes3mp_adapter` | Shared OpenMW connection, stock-chargen and dialogue-choice confirmation bridges, state application, reconnect, remote and canonical-weather presentation, object activation, inventory integration, and authoritative melee capture/presentation |
 
 The target graph and boundary checks live in
 [`components/tes3mp/CMakeLists.txt`](../../components/tes3mp/CMakeLists.txt) and
@@ -31,10 +31,10 @@ Public core headers expose only project-owned values.
 
 - A 12-byte bounded frame separates message class and kind before payload
   allocation. Each payload is verifier-checked and semantically validated.
-- The production server negotiates protocol major 1, minor 6. Defined
+- The production server negotiates protocol major 1, minor 7. Defined
   optional capabilities are VR pose (1), actor replication (2), interactive
-  objects (3), inventory (4), combat (5), character creation (6), and dialogue
-  choices (7).
+  objects (3), inventory (4), combat (5), character creation (6), dialogue
+  choices (7), and regional weather replication (8).
   Content-manifest mismatch rejects before authentication. Combat (5) is
   offered only when combat content and authoritative contact history are both
   successfully composed; the packaged derived-vanilla default now composes both
@@ -432,8 +432,23 @@ Primary sources: [`script_state.hpp`](../../components/tes3mp/include/tes3mp/scr
 RNG seed. The server persists current/target weather, transition and selection
 ticks, revisions, and RNG state; catalog-order fixed ticks replay identically.
 Manual and automatic changes share the atomic durability path and emit ordered
-immutable records. Client transport is future work; rendering, sound, particles,
-and visual interpolation remain local.
+immutable records.
+
+Capability 8 sends complete typed baselines on join, resume, and resync, then
+revisioned changed-region updates after output admission and durability. Payloads
+include current/target weather, transition/selection ticks, and region/server/
+canonical revisions. Atomic chunk assembly rejects stale, contradictory, gapped,
+malformed, or misbound input.
+
+Content packs bind canonical weather and region IDs to local OpenMW names. The
+desktop waits for spatial and weather baselines, suppresses local selection under
+multiplayer authority, and feeds confirmed state to WeatherManager. OpenMW retains
+interpolation, sky/fog, sound, wind, and particles. Missing local records fail closed.
+
+Primary sources: [`weather_replication.hpp`](../../components/tes3mp/include/tes3mp/weather_replication.hpp),
+[`weather_projection.cpp`](../../apps/tes3mp-server/weather_projection.cpp),
+[`adapter.cpp`](../../apps/openmw/tes3mp/adapter.cpp), and
+[`weather.cpp`](../../apps/openmw/mwworld/weather.cpp).
 
 ### Transactional gameplay persistence and replay envelope
 
@@ -490,9 +505,8 @@ and [`test_bake_tes3mp_content.py`](../../scripts/tests/test_bake_tes3mp_content
 
 ## Partial foundations and known limitations
 
-- The OpenMW desktop, scripted headless, and shared PC-VR provider architecture
-  exist, but representative PC-VR hardware budget capture remains deferred until
-  a headset is available.
+- Desktop, headless, and PC-VR provider architecture exists; representative
+  PC-VR hardware evidence awaits a headset.
 - Remote actor/root presentation exists. Articulated remote skeleton head/hands,
   improved pose-loss blending, pose compression hardening, and any pose-assisted
   gameplay reach are not implemented.
@@ -501,18 +515,15 @@ and [`test_bake_tes3mp_content.py`](../../scripts/tests/test_bake_tes3mp_content
   collision and wander kernels remain in place for server-simulated actors. Full
   server-side Bullet physics and terrain/mesh collision integration remain a future
   milestone.
-- Actor AI is deliberately limited to idle/travel/wander and reactive pursuit of
-  the player who struck it. There is no proactive detection, target selection,
-  navmesh parity, schedules, needs, dynamic spawning/removal, or authority
-  delegation.
+- Actor AI is limited to idle/travel/wander and reactive pursuit; proactive
+  detection, navmesh parity, schedules, spawning, and delegation remain absent.
 - Interactive traps publish bounded outcomes but full spell-effect resolution
   does not exist. Lockpicking and probe disarming do not exist.
 - Inventory does not include barter/trade, merchant stock/restocking, or repair
   commands.
-- The packaged default has one dagger, shield, rat, starting loadout, and
-  pre-inflated collision for four cells. The baker does not extract arbitrary
-  NIF/terrain geometry or broad world catalogs. Contact uses root distance and
-  static occlusion, not rewound animation or per-bone traces.
+- The packaged default remains narrow: one dagger, shield, rat, starting loadout,
+  and four-cell collision fixture. Arbitrary geometry/catalog extraction and
+  rewound or per-bone contact are not implemented.
 - The current resolver covers direct player-versus-server-actor melee, reactive
   attacks, resources, death/respawn, recovery, relevant skill advancement,
   difficulty, shield blocking, armor mitigation/wear, and stock feedback.
@@ -521,31 +532,25 @@ and [`test_bake_tes3mp_content.py`](../../scripts/tests/test_bake_tes3mp_content
   constant-defense, elemental-shield, and disease subset and rejects other
   magic. Actor armor, PvP/P2P, proactive aggression, duration/area magic, active
   casting, Lua hit callbacks, and general magic remain unimplemented.
-- Declared package variables survive restart; undeclared script/VM memory does
-  not. Executable modules now query globals, quest/journal progress, dialogue
-  choice, faction rank, reputation, and weather and emit cross-domain
-  consequences. General branching/arithmetic and inventory, combat, or magic
-  script surfaces remain absent. Dialogue text and presentation stay client-local;
-  only manifest-declared choice identities participate in server authority.
+- Declared package variables survive restart; other VM memory does not. Modules
+  query the implemented world slices, but general branching/arithmetic and
+  inventory, combat, or magic scripting remain absent.
 - The packaged default is the verified installed vanilla manifest. Other
   loadouts still require bounded content generation and local record mappings;
   server discovery/history remain unfinished. The V2 baker binds TES3 content
   plugins but does not yet bind archives or loose resources, so it cannot claim
   complete modpack parity when external assets affect canonical behavior.
-- Content packs are deterministic and loadout-bound. Broad record selection and
-  placed-reference selection, full geometry extraction, and deterministic
-  handling of mod scripts remain unfinished.
-- Test and fixture paths demonstrate subsystem behavior, but release-quality
-  real-game coverage, packaging, performance budgets, and soak evidence remain
-  unfinished.
+- Content packs remain narrow: broad record/reference selection, full geometry,
+  deterministic mod scripts, release packaging, performance, and soak evidence
+  are unfinished.
 
 ## Work still required
 
-### Next milestone: desktop canonical-weather transport and presentation
+### Next milestone: broader canonical-world gameplay and release evidence
 
-Project the already durable canonical regional weather state through bounded
-desktop transport while retaining OpenMW weather rendering, sound, particles,
-and interpolation locally. TES3MP 0.8.x scripts and saves remain unsupported.
+Extend authoritative world state into the next bounded gameplay surface and add
+content-backed multi-client weather/reconnect evidence. TES3MP 0.8.x compatibility
+remains unsupported.
 
 ### Required before the desktop/PC-VR release
 
@@ -564,8 +569,8 @@ go decision. Device types remain provider-local.
 
 ## Verification snapshot
 
-Desktop dialogue choices passed fresh Windows standalone/product builds,
-adapter/server contracts, FlatBuffers proof, bake/verify, all 204 Python tests,
+Desktop canonical weather passed Windows standalone, headless, and product builds,
+adapter/server contracts, FlatBuffers proof, bake/verify, all 205 Python tests,
 and patch-registry verification on 2026-09-11.
 
 Sanitizer/fuzzer profiles, non-Windows builds, PC-VR hardware, the upstream
