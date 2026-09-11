@@ -7,6 +7,7 @@
 #include "interactive_object_world.hpp"
 #include "inventory_world.hpp"
 #include "server_scripting.hpp"
+#include "world_state.hpp"
 
 #include <array>
 #include <cstddef>
@@ -145,14 +146,15 @@ namespace TES3MP
             CanonicalChecksum previousTransactionChecksum = CanonicalChecksum(0),
             const CanonicalInventoryWorld* inventory = nullptr, const CanonicalCombatWorld* combat = nullptr,
             const CanonicalInteractiveObjectWorld* objects = nullptr,
-            const CanonicalActorWorld* actors = nullptr) noexcept;
+            const CanonicalActorWorld* actors = nullptr, const CanonicalWorldState* world = nullptr) noexcept;
         static std::optional<CanonicalDurableTick> create(CanonicalStateVersion stateVersion,
             CanonicalRevision canonicalRevision, ServerTick checkpointTick,
             std::span<const CanonicalPlayerEntityState> players, std::span<const DurableCommandOrder> commands,
             CanonicalChecksum previousTransactionChecksum, std::optional<CanonicalDurableInventoryState> inventory,
             std::optional<CanonicalDurableCombatState> combat,
             std::optional<CanonicalDurableInteractiveObjectState> objects = std::nullopt,
-            std::optional<CanonicalDurableActorState> actors = std::nullopt) noexcept;
+            std::optional<CanonicalDurableActorState> actors = std::nullopt,
+            std::optional<CanonicalWorldState> world = std::nullopt) noexcept;
 
         constexpr CanonicalStateVersion stateVersion() const noexcept { return mStateVersion; }
         constexpr CanonicalRevision canonicalRevision() const noexcept { return mCanonicalRevision; }
@@ -169,6 +171,7 @@ namespace TES3MP
         const std::optional<CanonicalDurableCombatState>& combat() const noexcept { return mCombat; }
         const std::optional<CanonicalDurableInteractiveObjectState>& objects() const noexcept { return mObjects; }
         const std::optional<CanonicalDurableActorState>& actors() const noexcept { return mActors; }
+        const std::optional<CanonicalWorldState>& world() const noexcept { return mWorld; }
         friend bool operator==(const CanonicalDurableTick&, const CanonicalDurableTick&) noexcept = default;
 
     private:
@@ -178,7 +181,7 @@ namespace TES3MP
             std::vector<CanonicalPlayerEntityState> players, std::vector<DurableCommandOrder> commands,
             std::optional<CanonicalDurableInventoryState> inventory, std::optional<CanonicalDurableCombatState> combat,
             std::optional<CanonicalDurableInteractiveObjectState> objects,
-            std::optional<CanonicalDurableActorState> actors) noexcept
+            std::optional<CanonicalDurableActorState> actors, std::optional<CanonicalWorldState> world) noexcept
             : mStateVersion(stateVersion)
             , mCanonicalRevision(canonicalRevision)
             , mCheckpointTick(checkpointTick)
@@ -191,6 +194,7 @@ namespace TES3MP
             , mCombat(std::move(combat))
             , mObjects(std::move(objects))
             , mActors(std::move(actors))
+            , mWorld(std::move(world))
         {
         }
 
@@ -206,6 +210,7 @@ namespace TES3MP
         std::optional<CanonicalDurableCombatState> mCombat;
         std::optional<CanonicalDurableInteractiveObjectState> mObjects;
         std::optional<CanonicalDurableActorState> mActors;
+        std::optional<CanonicalWorldState> mWorld;
     };
 
     class CanonicalDurablePrefix
@@ -263,7 +268,8 @@ namespace TES3MP
         const std::optional<CanonicalDurableInventoryState>& inventory,
         const std::optional<CanonicalDurableCombatState>& combat,
         const std::optional<CanonicalDurableInteractiveObjectState>& objects = std::nullopt,
-        const std::optional<CanonicalDurableActorState>& actors = std::nullopt) noexcept;
+        const std::optional<CanonicalDurableActorState>& actors = std::nullopt,
+        const std::optional<CanonicalWorldState>& world = std::nullopt) noexcept;
 
     enum class CanonicalDurabilityResult : std::uint8_t
     {
@@ -283,7 +289,7 @@ namespace TES3MP
             CanonicalRevision canonicalRevision, std::span<const DurableCommandOrder> commands,
             const CanonicalInventoryWorld* inventory = nullptr, const CanonicalCombatWorld* combat = nullptr,
             const CanonicalInteractiveObjectWorld* objects = nullptr,
-            const CanonicalActorWorld* actors = nullptr) noexcept = 0;
+            const CanonicalActorWorld* actors = nullptr, const CanonicalWorldState* world = nullptr) noexcept = 0;
     };
 
     struct CanonicalReplayState
@@ -293,6 +299,7 @@ namespace TES3MP
         std::optional<CanonicalDurableCombatState> combat;
         std::optional<CanonicalDurableInteractiveObjectState> objects;
         std::optional<CanonicalDurableActorState> actors;
+        std::optional<CanonicalWorldState> world;
 
         friend bool operator==(const CanonicalReplayState&, const CanonicalReplayState&) noexcept = default;
     };

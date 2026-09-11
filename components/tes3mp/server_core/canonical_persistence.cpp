@@ -808,10 +808,95 @@ namespace
         return result;
     }
 
+    void writeWorld(Writer& writer, const CanonicalWorldState& world)
+    {
+        const auto& time = world.time();
+        writer.fixed(time.day);
+        writer.fixed(time.month);
+        writer.fixed(time.year);
+        writer.fixed(time.millisecondsSinceMidnight);
+        writer.fixed(time.timeScaleUnits);
+        writer.fixed(time.subMillisecondRemainder);
+        writeStrong(writer, time.revision);
+        writeStrong(writer, time.lastChangeTick);
+        writeStrong(writer, time.lastAdvanceTick);
+        writer.fixed(static_cast<std::uint32_t>(world.globals().size()));
+        for (const auto& global : world.globals())
+        {
+            writeStrong(writer, global.id);
+            writer.fixed(static_cast<std::uint8_t>(global.type()));
+            if (const auto* shortValue = std::get_if<std::int16_t>(&global.value))
+                writer.fixed(*shortValue);
+            else if (const auto* longValue = std::get_if<std::int32_t>(&global.value))
+                writer.fixed(*longValue);
+            else
+                writeFloat(writer, std::get<float>(global.value));
+            writeStrong(writer, global.revision);
+            writeStrong(writer, global.lastChangeTick);
+        }
+    }
+
+    std::optional<CanonicalWorldState> readWorld(Reader& reader) noexcept
+    {
+        CanonicalWorldTimeState time;
+        const auto day = reader.fixed<std::uint8_t>();
+        const auto month = reader.fixed<std::uint8_t>();
+        const auto year = reader.fixed<std::int32_t>();
+        const auto milliseconds = reader.fixed<std::uint32_t>();
+        const auto scale = reader.fixed<std::uint32_t>();
+        const auto remainder = reader.fixed<std::uint16_t>();
+        const auto revision = readStrong<WorldTimeRevision>(reader);
+        const auto lastChange = readStrong<ServerTick>(reader);
+        const auto lastAdvance = readStrong<ServerTick>(reader);
+        const auto count = reader.fixed<std::uint32_t>();
+        if (!day || !month || !year || !milliseconds || !scale || !remainder || !revision || !lastChange
+            || !lastAdvance || !count || *count > MaximumGlobalVariables)
+            return std::nullopt;
+        time = { *day, *month, *year, *milliseconds, *scale, *remainder, *revision, *lastChange, *lastAdvance };
+        std::vector<CanonicalGlobalVariableState> globals;
+        globals.reserve(*count);
+        for (std::uint32_t index = 0; index < *count; ++index)
+        {
+            const auto id = readStrong<GlobalVariableId>(reader);
+            const auto type = reader.fixed<std::uint8_t>();
+            if (!id || !type || *type > static_cast<std::uint8_t>(GlobalVariableType::Float))
+                return std::nullopt;
+            GlobalVariableValue value;
+            if (*type == static_cast<std::uint8_t>(GlobalVariableType::Short))
+            {
+                const auto parsed = reader.fixed<std::int16_t>();
+                if (!parsed)
+                    return std::nullopt;
+                value = *parsed;
+            }
+            else if (*type == static_cast<std::uint8_t>(GlobalVariableType::Long))
+            {
+                const auto parsed = reader.fixed<std::int32_t>();
+                if (!parsed)
+                    return std::nullopt;
+                value = *parsed;
+            }
+            else
+            {
+                float parsed = 0.f;
+                if (!readFloat(reader, parsed))
+                    return std::nullopt;
+                value = parsed;
+            }
+            const auto globalRevision = readStrong<GlobalVariableRevision>(reader);
+            const auto globalTick = readStrong<ServerTick>(reader);
+            if (!globalRevision || !globalTick)
+                return std::nullopt;
+            globals.push_back({ *id, value, *globalRevision, *globalTick });
+        }
+        return CanonicalWorldState::create(time, globals);
+    }
+
     void writeDomains(Writer& writer, const std::optional<CanonicalDurableInventoryState>& inventory,
         const std::optional<CanonicalDurableCombatState>& combat,
         const std::optional<CanonicalDurableInteractiveObjectState>& objects,
-        const std::optional<CanonicalDurableActorState>& actors)
+        const std::optional<CanonicalDurableActorState>& actors,
+        const std::optional<CanonicalWorldState>& world)
     {
         writeBool(writer, inventory.has_value());
         if (inventory)
@@ -825,12 +910,16 @@ namespace
         writeBool(writer, actors.has_value());
         if (actors)
             writeActors(writer, *actors);
+        writeBool(writer, world.has_value());
+        if (world)
+            writeWorld(writer, *world);
     }
 
     bool readDomains(Reader& reader, std::optional<CanonicalDurableInventoryState>& inventory,
         std::optional<CanonicalDurableCombatState>& combat,
         std::optional<CanonicalDurableInteractiveObjectState>& objects,
-        std::optional<CanonicalDurableActorState>& actors) noexcept
+        std::optional<CanonicalDurableActorState>& actors,
+        std::optional<CanonicalWorldState>& world) noexcept
     {
         bool present = false;
         if (!readBool(reader, present))
@@ -868,6 +957,15 @@ namespace
             if (!value)
                 return false;
             actors = std::move(*value);
+        }
+        if (!readBool(reader, present))
+            return false;
+        if (present)
+        {
+            auto value = readWorld(reader);
+            if (!value)
+                return false;
+            world = std::move(*value);
         }
         return true;
     }
@@ -907,7 +1005,8 @@ namespace
         const std::optional<CanonicalDurableInventoryState>& inventory,
         const std::optional<CanonicalDurableCombatState>& combat,
         const std::optional<CanonicalDurableInteractiveObjectState>& objects,
-        const std::optional<CanonicalDurableActorState>& actors)
+        const std::optional<CanonicalDurableActorState>& actors,
+        const std::optional<CanonicalWorldState>& world)
     {
         Writer writer;
         writer.fixed(stateVersion.value());
@@ -918,7 +1017,7 @@ namespace
         writer.fixed(static_cast<std::uint32_t>(players.size()));
         for (const auto& player : players)
             writePlayer(writer, player);
-        writeDomains(writer, inventory, combat, objects, actors);
+        writeDomains(writer, inventory, combat, objects, actors, world);
         writer.fixed(static_cast<std::uint32_t>(commands.size()));
         for (const auto order : commands)
             writeOrder(writer, order);
@@ -946,7 +1045,7 @@ namespace
             {
                 scriptsStarted = true;
                 if (command.disposition
-                        > static_cast<std::uint8_t>(ServerScriptCommandDisposition::EntityRevisionExhausted)
+                        > static_cast<std::uint8_t>(ServerScriptCommandDisposition::InvalidWorldMutation)
                     || command.fields[1] == 0 || command.fields[4] == 0 || command.fields[5] == 0
                     || command.fields[6] != ServerScriptApiVersion || (priorScript && command.fields <= *priorScript))
                     return false;
@@ -1057,7 +1156,8 @@ namespace TES3MP
         const std::optional<CanonicalDurableInventoryState>& inventory,
         const std::optional<CanonicalDurableCombatState>& combat,
         const std::optional<CanonicalDurableInteractiveObjectState>& objects,
-        const std::optional<CanonicalDurableActorState>& actors) noexcept
+        const std::optional<CanonicalDurableActorState>& actors,
+        const std::optional<CanonicalWorldState>& world) noexcept
     try
     {
         Writer writer;
@@ -1066,7 +1166,7 @@ namespace TES3MP
         writer.fixed(static_cast<std::uint32_t>(players.size()));
         for (const auto& player : players)
             writePlayer(writer, player);
-        writeDomains(writer, inventory, combat, objects, actors);
+        writeDomains(writer, inventory, combat, objects, actors, world);
         const auto& bytes = writer.view();
         return crc64Ecma182({ reinterpret_cast<const std::uint8_t*>(bytes.data()), bytes.size() });
     }
@@ -1080,11 +1180,11 @@ namespace TES3MP
         std::span<const CanonicalPlayerEntityState> players, std::span<const DurableCommandOrder> commands,
         CanonicalChecksum previousTransactionChecksum, const CanonicalInventoryWorld* inventory,
         const CanonicalCombatWorld* combat, const CanonicalInteractiveObjectWorld* objects,
-        const CanonicalActorWorld* actors) noexcept
+        const CanonicalActorWorld* actors, const CanonicalWorldState* world) noexcept
     {
         return create(stateVersion, canonicalRevision, checkpointTick, players, commands, previousTransactionChecksum,
             snapshotInventory(inventory, players), snapshotCombat(combat, players), snapshotObjects(objects),
-            snapshotActors(actors));
+            snapshotActors(actors), world ? std::optional<CanonicalWorldState>(*world) : std::nullopt);
     }
 
     std::optional<CanonicalDurableTick> CanonicalDurableTick::create(CanonicalStateVersion stateVersion,
@@ -1093,7 +1193,7 @@ namespace TES3MP
         CanonicalChecksum previousTransactionChecksum, std::optional<CanonicalDurableInventoryState> inventory,
         std::optional<CanonicalDurableCombatState> combat,
         std::optional<CanonicalDurableInteractiveObjectState> objects,
-        std::optional<CanonicalDurableActorState> actors) noexcept
+        std::optional<CanonicalDurableActorState> actors, std::optional<CanonicalWorldState> world) noexcept
     try
     {
         if (players.size() > MaximumCanonicalPlayerEntities || commands.size() > MaximumPersistenceCommandsPerTick
@@ -1166,10 +1266,16 @@ namespace TES3MP
                 return actor.aggressionTarget && !durablePlayer(players, *actor.aggressionTarget);
             }))
             return std::nullopt;
+        if (world
+            && (world->time().lastAdvanceTick > checkpointTick || world->time().lastChangeTick > checkpointTick
+                || std::ranges::any_of(world->globals(), [checkpointTick](const auto& global) {
+                       return global.lastChangeTick > checkpointTick;
+                   })))
+            return std::nullopt;
         const auto canonical = canonicalDurableStateChecksumV1(
-            stateVersion, checkpointTick, players, inventory, combat, objects, actors);
+            stateVersion, checkpointTick, players, inventory, combat, objects, actors, world);
         auto material = transactionMaterial(stateVersion, canonicalRevision, checkpointTick,
-            previousTransactionChecksum, canonical, players, commands, inventory, combat, objects, actors);
+            previousTransactionChecksum, canonical, players, commands, inventory, combat, objects, actors, world);
         if (material.size() + sizeof(std::uint64_t) > MaximumPersistenceRecordBytes)
             return std::nullopt;
         const auto transaction
@@ -1177,7 +1283,7 @@ namespace TES3MP
         return CanonicalDurableTick(stateVersion, canonicalRevision, checkpointTick, previousTransactionChecksum,
             canonical, transaction, std::vector<CanonicalPlayerEntityState>(players.begin(), players.end()),
             std::vector<DurableCommandOrder>(commands.begin(), commands.end()), std::move(inventory), std::move(combat),
-            std::move(objects), std::move(actors));
+            std::move(objects), std::move(actors), std::move(world));
     }
     catch (...)
     {
@@ -1202,7 +1308,8 @@ namespace TES3MP
                 return std::nullopt;
             auto rebuilt = CanonicalDurableTick::create(transaction.stateVersion(), transaction.canonicalRevision(),
                 transaction.checkpointTick(), transaction.players(), transaction.commands(), prior,
-                transaction.inventory(), transaction.combat(), transaction.objects(), transaction.actors());
+                transaction.inventory(), transaction.combat(), transaction.objects(), transaction.actors(),
+                transaction.world());
             if (!rebuilt || rebuilt->transactionChecksum() != transaction.transactionChecksum()
                 || rebuilt->canonicalChecksum() != transaction.canonicalChecksum())
                 return std::nullopt;
@@ -1249,7 +1356,7 @@ namespace TES3MP
             auto material = transactionMaterial(transaction.stateVersion(), transaction.canonicalRevision(),
                 transaction.checkpointTick(), transaction.previousTransactionChecksum(),
                 transaction.canonicalChecksum(), transaction.players(), transaction.commands(), transaction.inventory(),
-                transaction.combat(), transaction.objects(), transaction.actors());
+                transaction.combat(), transaction.objects(), transaction.actors(), transaction.world());
             writer.fixed(static_cast<std::uint32_t>(material.size() + sizeof(std::uint64_t)));
             writer.fixed(transaction.transactionChecksum().value());
             writer.bytes(material);
@@ -1374,7 +1481,8 @@ namespace TES3MP
             std::optional<CanonicalDurableCombatState> combat;
             std::optional<CanonicalDurableInteractiveObjectState> objects;
             std::optional<CanonicalDurableActorState> actors;
-            if (!readDomains(recordReader, inventory, combat, objects, actors))
+            std::optional<CanonicalWorldState> world;
+            if (!readDomains(recordReader, inventory, combat, objects, actors, world))
                 return CanonicalPersistenceDecodeError::Malformed;
             const auto commandCount = recordReader.fixed<std::uint32_t>();
             if (!commandCount || *commandCount > MaximumPersistenceCommandsPerTick)
@@ -1395,7 +1503,7 @@ namespace TES3MP
                 return CanonicalPersistenceDecodeError::Malformed;
             auto transaction = CanonicalDurableTick::create(*stateVersion, *revision, *tick, players, commands,
                 CanonicalChecksum(*previousRaw), std::move(inventory), std::move(combat), std::move(objects),
-                std::move(actors));
+                std::move(actors), std::move(world));
             if (!transaction || transaction->canonicalChecksum().value() != *canonicalRaw
                 || transaction->transactionChecksum().value() != *storedChecksum)
                 return CanonicalPersistenceDecodeError::Corrupted;
@@ -1425,18 +1533,18 @@ namespace TES3MP
         if (!checkpointPlayers
             || canonicalDurableStateChecksumV1(checkpoint->stateVersion(), checkpoint->checkpointTick(),
                    checkpoint->players(), checkpoint->inventory(), checkpoint->combat(), checkpoint->objects(),
-                   checkpoint->actors())
+                   checkpoint->actors(), checkpoint->world())
                 != checkpoint->canonicalChecksum())
             return false;
         CanonicalReplayState state{ std::move(*checkpointPlayers), checkpoint->inventory(), checkpoint->combat(),
-            checkpoint->objects(), checkpoint->actors() };
+            checkpoint->objects(), checkpoint->actors(), checkpoint->world() };
         for (const auto& transaction : prefix.journal())
         {
             auto replayed = step(state, transaction.commands(), transaction.checkpointTick());
             auto* next = std::get_if<CanonicalReplayState>(&replayed);
             if (!next || !next->players.activeSessions().empty()
                 || canonicalDurableStateChecksumV1(transaction.stateVersion(), transaction.checkpointTick(),
-                       next->players.players(), next->inventory, next->combat, next->objects, next->actors)
+                       next->players.players(), next->inventory, next->combat, next->objects, next->actors, next->world)
                     != transaction.canonicalChecksum())
                 return false;
             state = std::move(*next);

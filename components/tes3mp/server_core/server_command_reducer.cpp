@@ -243,7 +243,7 @@ namespace TES3MP
 
     bool CanonicalCommandReducer::configureDurability(CanonicalDurabilityPort& durability,
         CanonicalInventoryWorld* inventory, CanonicalCombatWorld* combat, CanonicalInteractiveObjectWorld* objects,
-        CanonicalActorWorld* actors) noexcept
+        CanonicalActorWorld* actors, CanonicalWorldState* world) noexcept
     {
         if (mDurability != nullptr)
             return false;
@@ -252,6 +252,7 @@ namespace TES3MP
         mDurableCombat = combat;
         mDurableObjects = objects;
         mDurableActors = actors;
+        mDurableWorld = world;
         return true;
     }
 
@@ -316,7 +317,7 @@ namespace TES3MP
         if (mDurability
             && mDurability->commit(prepared.mPublication, prepared.mCanonicalRevision, {},
                    inventory ? inventory : mDurableInventory, combat ? combat : mDurableCombat, mDurableObjects,
-                   mDurableActors)
+                   mDurableActors, mDurableWorld)
                 != CanonicalDurabilityResult::Committed)
             return false;
         mState = std::move(prepared.mState);
@@ -492,7 +493,7 @@ namespace TES3MP
         if (mDurability
             && mDurability->commit(prepared.mPublication, prepared.mCanonicalRevision, {},
                    inventory ? inventory : mDurableInventory, combat ? combat : mDurableCombat, mDurableObjects,
-                   mDurableActors)
+                   mDurableActors, mDurableWorld)
                 != CanonicalDurabilityResult::Committed)
             return false;
         mState = std::move(prepared.mState);
@@ -1178,7 +1179,8 @@ namespace TES3MP
     }
 
     CanonicalCommandReducer::PreparedBatch CanonicalCommandReducer::prepareScriptCommands(PreparedBatch prepared,
-        const ServerTickCommandBatch& batch, std::span<const QueuedServerScriptCommand> commands)
+        const ServerTickCommandBatch& batch, std::span<const QueuedServerScriptCommand> commands,
+        const CanonicalWorldState* world, const GlobalVariableCatalog* globalCatalog)
     {
         if (!prepared.result())
             return prepared;
@@ -1213,52 +1215,135 @@ namespace TES3MP
                 prepared.mState->players().begin(), prepared.mState->players().end());
             prepared.mResult.mScriptDispositions.reserve(commands.size());
             bool stateChanged = false;
+            const auto recordChange = [&]() -> bool {
+                const auto nextStateVersion = prepared.mStateVersion.next();
+                if (!nextStateVersion)
+                    return false;
+                prepared.mStateVersion = *nextStateVersion;
+                if (prepared.mCanonicalRevision == prepared.mBaseCanonicalRevision)
+                {
+                    const auto nextRevision = prepared.mCanonicalRevision.next();
+                    if (!nextRevision)
+                        return false;
+                    prepared.mCanonicalRevision = *nextRevision;
+                }
+                prepared.mCheckpointTick = tick;
+                return true;
+            };
             for (const auto& queued : commands)
             {
-                const auto& command = std::get<ServerScriptPlayerSafePointCommand>(queued.payload());
-                ServerScriptCommandDisposition disposition = ServerScriptCommandDisposition::UnknownPlayer;
-                const auto found = std::ranges::find(players, command.player(), &CanonicalPlayerEntityState::playerId);
-                if (found != players.end())
+                ServerScriptCommandDisposition disposition = ServerScriptCommandDisposition::InvalidWorldMutation;
+                if (const auto* safePoint = std::get_if<ServerScriptPlayerSafePointCommand>(&queued.payload()))
                 {
-                    if (!std::ranges::any_of(prepared.mState->activeSessions(),
-                            [&](const auto& session) { return session.playerId() == command.player(); }))
-                        disposition = ServerScriptCommandDisposition::InactivePlayer;
-                    else if (command.precondition().entityId() != found->entityId())
-                        disposition = ServerScriptCommandDisposition::EntityBindingMismatch;
-                    else if (command.precondition().expectedRevision() != found->entityRevision())
-                        disposition = ServerScriptCommandDisposition::EntityRevisionMismatch;
-                    else if (command.precondition().expectedAuthorityEpoch() != found->authorityEpoch())
-                        disposition = ServerScriptCommandDisposition::AuthorityEpochMismatch;
-                    else if (!mContentManifest.contains(command.destination().cell()))
-                        disposition = ServerScriptCommandDisposition::UnknownCell;
-                    else
+                    disposition = ServerScriptCommandDisposition::UnknownPlayer;
+                    const auto found
+                        = std::ranges::find(players, safePoint->player(), &CanonicalPlayerEntityState::playerId);
+                    if (found != players.end())
                     {
-                        auto advanced = advanceCanonicalSpatialState(
-                            *found, tick, command.destination(), LinearVelocity3(0, 0, 0), LocomotionMode::Walk);
-                        if (const auto* replacement = std::get_if<CanonicalPlayerEntityState>(&advanced))
+                        if (!std::ranges::any_of(prepared.mState->activeSessions(),
+                                [&](const auto& session) { return session.playerId() == safePoint->player(); }))
+                            disposition = ServerScriptCommandDisposition::InactivePlayer;
+                        else if (safePoint->precondition().entityId() != found->entityId())
+                            disposition = ServerScriptCommandDisposition::EntityBindingMismatch;
+                        else if (safePoint->precondition().expectedRevision() != found->entityRevision())
+                            disposition = ServerScriptCommandDisposition::EntityRevisionMismatch;
+                        else if (safePoint->precondition().expectedAuthorityEpoch() != found->authorityEpoch())
+                            disposition = ServerScriptCommandDisposition::AuthorityEpochMismatch;
+                        else if (!mContentManifest.contains(safePoint->destination().cell()))
+                            disposition = ServerScriptCommandDisposition::UnknownCell;
+                        else
                         {
-                            *found = *replacement;
-                            prepared.mStateVersion = *prepared.mStateVersion.next();
-                            if (prepared.mCanonicalRevision == prepared.mBaseCanonicalRevision)
+                            auto advanced = advanceCanonicalSpatialState(*found, tick, safePoint->destination(),
+                                LinearVelocity3(0, 0, 0), LocomotionMode::Walk);
+                            if (const auto* replacement = std::get_if<CanonicalPlayerEntityState>(&advanced))
                             {
-                                const auto nextRevision = prepared.mCanonicalRevision.next();
-                                if (!nextRevision)
+                                if (!recordChange())
                                 {
                                     prepared.mResult.mError = CommandBatchReductionError::StateVersionCapacityExceeded;
                                     return prepared;
                                 }
-                                prepared.mCanonicalRevision = *nextRevision;
+                                *found = *replacement;
+                                prepared.mPublication->mSpatialTicks.push_back(
+                                    { prepared.mStateVersion, tick, *replacement });
+                                disposition = ServerScriptCommandDisposition::Applied;
+                                stateChanged = true;
                             }
-                            prepared.mPublication->mSpatialTicks.push_back(
-                                { prepared.mStateVersion, tick, *replacement });
-                            disposition = ServerScriptCommandDisposition::Applied;
-                            stateChanged = true;
+                            else if (std::get<SpatialAdvanceError>(advanced).code
+                                == SpatialAdvanceErrorCode::TickRegression)
+                                disposition = ServerScriptCommandDisposition::SpatialTickRegression;
+                            else
+                                disposition = ServerScriptCommandDisposition::EntityRevisionExhausted;
                         }
-                        else if (std::get<SpatialAdvanceError>(advanced).code
-                            == SpatialAdvanceErrorCode::TickRegression)
-                            disposition = ServerScriptCommandDisposition::SpatialTickRegression;
+                    }
+                }
+                else if (const auto* globalCommand = std::get_if<ServerScriptSetGlobalCommand>(&queued.payload()))
+                {
+                    if (!world || !globalCatalog)
+                        disposition = ServerScriptCommandDisposition::UnknownGlobal;
+                    else
+                    {
+                        const auto& base = prepared.mWorld ? *prepared.mWorld : *world;
+                        auto changed = setCanonicalGlobal(base, *globalCatalog, globalCommand->id(),
+                            globalCommand->expectedRevision(), globalCommand->value(), tick);
+                        if (auto* next = std::get_if<CanonicalWorldState>(&changed))
+                        {
+                            disposition = ServerScriptCommandDisposition::Applied;
+                            if (*next != base)
+                            {
+                                if (!recordChange())
+                                {
+                                    prepared.mResult.mError = CommandBatchReductionError::StateVersionCapacityExceeded;
+                                    return prepared;
+                                }
+                                if (!prepared.mBaseWorld)
+                                    prepared.mBaseWorld = *world;
+                                prepared.mWorld = std::move(*next);
+                            }
+                        }
                         else
-                            disposition = ServerScriptCommandDisposition::EntityRevisionExhausted;
+                        {
+                            switch (std::get<CanonicalWorldMutationError>(changed))
+                            {
+                                case CanonicalWorldMutationError::UnknownGlobal:
+                                    disposition = ServerScriptCommandDisposition::UnknownGlobal;
+                                    break;
+                                case CanonicalWorldMutationError::TypeMismatch:
+                                    disposition = ServerScriptCommandDisposition::GlobalTypeMismatch;
+                                    break;
+                                case CanonicalWorldMutationError::RevisionMismatch:
+                                    disposition = ServerScriptCommandDisposition::GlobalRevisionMismatch;
+                                    break;
+                                default:
+                                    disposition = ServerScriptCommandDisposition::InvalidWorldMutation;
+                                    break;
+                            }
+                        }
+                    }
+                }
+                else if (const auto* timeCommand = std::get_if<ServerScriptSetWorldTimeCommand>(&queued.payload()))
+                {
+                    if (!world)
+                        disposition = ServerScriptCommandDisposition::InvalidWorldMutation;
+                    else
+                    {
+                        const auto& base = prepared.mWorld ? *prepared.mWorld : *world;
+                        auto changed = setCanonicalWorldTime(
+                            base, timeCommand->expectedRevision(), timeCommand->replacement(), tick);
+                        if (auto* next = std::get_if<CanonicalWorldState>(&changed))
+                        {
+                            if (!recordChange())
+                            {
+                                prepared.mResult.mError = CommandBatchReductionError::StateVersionCapacityExceeded;
+                                return prepared;
+                            }
+                            if (!prepared.mBaseWorld)
+                                prepared.mBaseWorld = *world;
+                            prepared.mWorld = std::move(*next);
+                            disposition = ServerScriptCommandDisposition::Applied;
+                        }
+                        else if (std::get<CanonicalWorldMutationError>(changed)
+                            == CanonicalWorldMutationError::RevisionMismatch)
+                            disposition = ServerScriptCommandDisposition::WorldTimeRevisionMismatch;
                     }
                 }
                 prepared.mResult.mScriptDispositions.emplace_back(queued.order(), disposition);
@@ -1334,13 +1419,16 @@ namespace TES3MP
         auto prepared = prepareCommands(batch, worlds.interactiveObjects, worlds.interactiveObjectCatalog,
             worlds.inventory, worlds.itemCatalog, worlds.combat, worlds.actors, worlds.meleeWeapons,
             worlds.meleeSettings, worlds.meleePolicy, worlds.meleeContact, worlds.directMagic);
-        return prepareTickState(prepareScriptCommands(std::move(prepared), batch, scriptCommands), batch);
+        return prepareTickState(
+            prepareScriptCommands(std::move(prepared), batch, scriptCommands, worlds.world, worlds.globalCatalog),
+            batch);
     }
 
     bool CanonicalCommandReducer::stageSimulationCandidates(PreparedBatch& prepared,
         const CanonicalInventoryWorld* baseInventory, std::optional<CanonicalInventoryWorld> inventory,
         const CanonicalCombatWorld* baseCombat, std::optional<CanonicalCombatWorld> combat,
-        const CanonicalActorWorld* baseActors, std::optional<CanonicalActorWorld> actors) noexcept
+        const CanonicalActorWorld* baseActors, std::optional<CanonicalActorWorld> actors,
+        const CanonicalWorldState* baseWorld, std::optional<CanonicalWorldState> world) noexcept
     try
     {
         if (prepared.mBaseVersion != mStateVersion || prepared.mBaseCanonicalRevision != mCanonicalRevision)
@@ -1368,6 +1456,16 @@ namespace TES3MP
             prepared.mBaseActors = *baseActors;
             prepared.mActors = std::move(*actors);
         }
+        if (world)
+        {
+            if (!baseWorld)
+                return false;
+            if (!prepared.mBaseWorld)
+                prepared.mBaseWorld = *baseWorld;
+            else if (*prepared.mBaseWorld != *baseWorld)
+                return false;
+            prepared.mWorld = std::move(*world);
+        }
         return true;
     }
     catch (...)
@@ -1376,7 +1474,8 @@ namespace TES3MP
     }
 
     bool CanonicalCommandReducer::commitPrepared(PreparedBatch&& prepared, CanonicalInteractiveObjectWorld* objects,
-        CanonicalInventoryWorld* inventory, CanonicalCombatWorld* combat, CanonicalActorWorld* actors)
+        CanonicalInventoryWorld* inventory, CanonicalCombatWorld* combat, CanonicalActorWorld* actors,
+        CanonicalWorldState* world)
     {
         if (prepared.mBaseVersion != mStateVersion || prepared.mBaseCanonicalRevision != mCanonicalRevision
             || !prepared.mState || !prepared.mPublication || (prepared.mInteractiveObjects && objects == nullptr)
@@ -1386,7 +1485,9 @@ namespace TES3MP
             || (prepared.mCombat && combat == nullptr)
             || (prepared.mBaseCombat && (!combat || *combat != *prepared.mBaseCombat))
             || (prepared.mActors && actors == nullptr)
-            || (prepared.mBaseActors && (!actors || *actors != *prepared.mBaseActors)))
+            || (prepared.mBaseActors && (!actors || *actors != *prepared.mBaseActors))
+            || (prepared.mWorld && world == nullptr)
+            || (prepared.mBaseWorld && (!world || *world != *prepared.mBaseWorld)))
             return false;
         prepared.mPublication->mStateVersion = prepared.mStateVersion;
         prepared.mPublication->mCheckpointTick = prepared.mCheckpointTick;
@@ -1399,7 +1500,8 @@ namespace TES3MP
                 prepared.mDurableCommands, prepared.mInventory ? &*prepared.mInventory : mDurableInventory,
                 prepared.mCombat ? &*prepared.mCombat : mDurableCombat,
                 prepared.mInteractiveObjects ? &*prepared.mInteractiveObjects : mDurableObjects,
-                prepared.mActors ? &*prepared.mActors : mDurableActors);
+                prepared.mActors ? &*prepared.mActors : mDurableActors,
+                prepared.mWorld ? &*prepared.mWorld : mDurableWorld);
             if (prepared.mResult.mDurabilityResult != CanonicalDurabilityResult::Committed)
                 return false;
         }
@@ -1412,6 +1514,8 @@ namespace TES3MP
             *combat = std::move(*prepared.mCombat);
         if (prepared.mActors)
             *actors = std::move(*prepared.mActors);
+        if (prepared.mWorld)
+            *world = std::move(*prepared.mWorld);
         mStateVersion = prepared.mStateVersion;
         mCanonicalRevision = prepared.mCanonicalRevision;
         mCheckpointTick = prepared.mCheckpointTick;
@@ -1426,29 +1530,30 @@ namespace TES3MP
 
     bool CanonicalCommandReducer::commit(PreparedBatch&& prepared)
     {
-        return commitPrepared(std::move(prepared), nullptr, nullptr, nullptr, nullptr);
+        return commitPrepared(std::move(prepared), nullptr, nullptr, nullptr, nullptr, nullptr);
     }
 
     bool CanonicalCommandReducer::commit(PreparedBatch&& prepared, CanonicalInteractiveObjectWorld& objects)
     {
-        return commitPrepared(std::move(prepared), &objects, nullptr, nullptr, nullptr);
+        return commitPrepared(std::move(prepared), &objects, nullptr, nullptr, nullptr, nullptr);
     }
 
     bool CanonicalCommandReducer::commit(PreparedBatch&& prepared, CanonicalInventoryWorld& inventory)
     {
-        return commitPrepared(std::move(prepared), nullptr, &inventory, nullptr, nullptr);
+        return commitPrepared(std::move(prepared), nullptr, &inventory, nullptr, nullptr, nullptr);
     }
 
     bool CanonicalCommandReducer::commit(
         PreparedBatch&& prepared, CanonicalInteractiveObjectWorld& objects, CanonicalInventoryWorld& inventory)
     {
-        return commitPrepared(std::move(prepared), &objects, &inventory, nullptr, nullptr);
+        return commitPrepared(std::move(prepared), &objects, &inventory, nullptr, nullptr, nullptr);
     }
 
     bool CanonicalCommandReducer::commit(PreparedBatch&& prepared, CanonicalCommandWorlds worlds)
     {
         return commitPrepared(
-            std::move(prepared), worlds.interactiveObjects, worlds.inventory, worlds.combat, worlds.actors);
+            std::move(prepared), worlds.interactiveObjects, worlds.inventory, worlds.combat, worlds.actors,
+            worlds.world);
     }
 
     CommandBatchReductionResult CanonicalCommandReducer::apply(const ServerTickCommandBatch& batch)

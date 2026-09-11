@@ -4,6 +4,7 @@
 #include <tes3mp/test_support/recording_observability.hpp>
 
 #include <array>
+#include <algorithm>
 #include <cstdint>
 #include <iostream>
 #include <optional>
@@ -19,7 +20,7 @@ namespace
     constexpr std::uint64_t FirstTickDeadline = 33'333'334;
     constexpr std::uint64_t NextTickIncrement = 33'333'333;
 
-    static_assert(ServerScriptApiVersion == 1);
+    static_assert(ServerScriptApiVersion == 2);
     static_assert(MaximumServerScriptCallbacks == 64);
     static_assert(MaximumServerScriptCommandsPerCallback == 16);
     static_assert(MaximumServerScriptCommandsPerTick == 256);
@@ -127,6 +128,28 @@ namespace
         std::vector<std::uint64_t>* mTrace;
         std::uint64_t mMarker;
         bool mStaleRevision;
+    };
+
+    class WorldMutationCallback final : public ServerScriptCallback
+    {
+    public:
+        ServerScriptCallbackResult onEvent(
+            const ServerScriptCallbackInput&, ServerScriptCommandEmitter& output) noexcept override
+        {
+            CanonicalWorldTimeState time;
+            time.day = 2;
+            time.month = 3;
+            time.year = 428;
+            time.millisecondsSinceMidnight = 12 * WorldMillisecondsPerHour;
+            time.timeScaleUnits = 15 * WorldTimeScaleUnitsPerOne;
+            if (output.enqueue(ServerScriptSetGlobalCommand(
+                    id<GlobalVariableId>(1), GlobalVariableRevision::initial(), std::int32_t{ 9 }))
+                    != ServerScriptEmitResult::Accepted
+                || output.enqueue(ServerScriptSetWorldTimeCommand(WorldTimeRevision::initial(), time))
+                    != ServerScriptEmitResult::Accepted)
+                return ServerScriptCallbackResult::Failed;
+            return ServerScriptCallbackResult::Accepted;
+        }
     };
 
     struct ScenarioResult
@@ -319,6 +342,54 @@ namespace
             && started.registerCallback(*valid, 1, ServerScriptEventKind::CommandFinalized, callback)
             == ServerScriptRegistrationResult::RuntimeStarted;
     }
+
+    bool typed_time_and_global_commands_commit_as_one_script_batch()
+    {
+        Fixture fixture;
+        DeterministicServerScriptRuntime scripts;
+        WorldMutationCallback callback;
+        const auto package = ServerScriptPackage::create(1, 1, 1);
+        if (!package
+            || scripts.registerCallback(*package, 1, ServerScriptEventKind::CommandFinalized, callback)
+                != ServerScriptRegistrationResult::Accepted)
+            return false;
+        CanonicalCommandReducer reducer(fixture.initialState(), fixture.observability,
+            CanonicalSinkBundle(nullptr, nullptr, &scripts, nullptr), testContentManifest());
+        const std::array declarations{
+            GlobalVariableCatalogEntry{ id<GlobalVariableId>(1), std::int32_t{ 0 } } };
+        const auto catalog = GlobalVariableCatalog::create(declarations).value();
+        CanonicalWorldTimeState time;
+        auto world = CanonicalWorldState::initial(time, catalog).value();
+        CanonicalCommandWorlds worlds;
+        worlds.world = &world;
+        worlds.globalCatalog = &catalog;
+        if (fixture.intake.submit(fixture.clientCommand()) != CommandSubmissionResult::Accepted)
+            return false;
+        const auto first = fixture.pumpFirst();
+        if (!first || first.batches().size() != 1 || !scripts.pump(id<ServerTick>(1)))
+            return false;
+        auto client = reducer.prepareTick(first.batches()[0], worlds, {});
+        if (!client.result() || !reducer.commit(std::move(client), worlds))
+            return false;
+        const auto second = fixture.pumpNext();
+        const auto generated = scripts.pump(id<ServerTick>(2));
+        if (!second || second.batches().size() != 1 || !generated || generated.commands().size() != 2)
+            return false;
+        auto scripted = reducer.prepareTick(second.batches()[0], worlds, generated.commands());
+        if (!scripted.result() || scripted.result().scriptDispositions().size() != 2
+            || std::ranges::any_of(scripted.result().scriptDispositions(), [](const auto& disposition) {
+                   return disposition.disposition() != ServerScriptCommandDisposition::Applied;
+               }))
+            return false;
+        const auto before = world;
+        if (!reducer.commit(std::move(scripted), worlds) || world == before)
+            return false;
+        const auto* global = world.find(id<GlobalVariableId>(1));
+        return global && std::get<std::int32_t>(global->value) == 9 && global->revision.value() == 2
+            && global->lastChangeTick == id<ServerTick>(2) && world.time().day == 2 && world.time().month == 3
+            && world.time().year == 428 && world.time().hour() == 12.0 && world.time().timeScale() == 15.0
+            && world.time().revision.value() == 2 && world.time().lastChangeTick == id<ServerTick>(2);
+    }
 }
 
 int main()
@@ -335,6 +406,8 @@ int main()
         std::pair{ "script_command_preconditions_and_manifest_fail_closed",
             &script_command_preconditions_and_manifest_fail_closed },
         std::pair{ "package_and_registration_versions_fail_closed", &package_and_registration_versions_fail_closed },
+        std::pair{ "typed_time_and_global_commands_commit_as_one_script_batch",
+            &typed_time_and_global_commands_commit_as_one_script_batch },
     };
     bool passed = true;
     for (const auto& [name, test] : tests)

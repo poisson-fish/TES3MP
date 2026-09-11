@@ -58,6 +58,10 @@ def write_server_config(root: Path, port: int, password: Path) -> Path:
         f"TES3MP_ACTORS_V1\nmanifest {TEST_CONTENT_MANIFEST}\n"
         "actor 1 9001 1 interior 7 0 0 0 0 0 0 wander 0 0 0 1000000 0 0\n",
         encoding="utf-8")
+    world = root / "world-content"
+    world.write_text(
+        f"TES3MP_WORLD_V1\nmanifest {TEST_CONTENT_MANIFEST}\ntime 16 6 427 32400000 30000\n",
+        encoding="utf-8")
     config = root / "server.cfg"
     config.write_text(
         f"bind_address=127.0.0.1\nport={port}\ntick_interval_ms=16\n"
@@ -67,6 +71,7 @@ def write_server_config(root: Path, port: int, password: Path) -> Path:
         "spawn_cell=interior:7\ndefault_appearance_id=1\n"
         "movement_profile=sneak:1024;walk:4097;run:8192;jump:4096\n"
         f"collision_content_file={collision.as_posix()}\nactor_content_file={actors.as_posix()}\n"
+        f"world_content_file={world.as_posix()}\n"
         f"player_identity_file={(root / 'player-identities').as_posix()}\n", encoding="utf-8")
     return config
 

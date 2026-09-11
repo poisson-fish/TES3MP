@@ -17,6 +17,7 @@
 #include "resume_token_context.hpp"
 #include "server_application.hpp"
 #include "server_config.hpp"
+#include "world_content.hpp"
 #include "tes3mp/combat_replication.hpp"
 #include "tes3mp/interactive_object_catalog.hpp"
 #include "tes3mp/interactive_object_replication.hpp"
@@ -71,7 +72,7 @@ namespace
           "interactive_object_content_file = objects.txt\n"
           "inventory_content_file = inventory.txt\n"
           "combat_content_file = combat.txt\ncombat_difficulty = 25\n"
-          "player_identity_file = players.txt\n";
+          "player_identity_file = players.txt\nworld_content_file = world.txt\n";
 
     class FakeRuntime final : public TES3MP::TransportRuntime
     {
@@ -652,6 +653,7 @@ int main()
         assert(config.interactiveObjectContentFile == std::filesystem::path("objects.txt"));
         assert(config.inventoryContentFile == std::filesystem::path("inventory.txt"));
         assert(config.combatContentFile == std::filesystem::path("combat.txt"));
+        assert(config.worldContentFile == std::filesystem::path("world.txt"));
         const std::vector<Position3> expectedSpawns{ Position3(-10, 20, 30), Position3(40, 50, 60) };
         assert(config.spawnPositions == expectedSpawns);
         assert(config.contentManifest.movementProfile().speed(LocomotionMode::Sneak) == 1024
@@ -682,6 +684,36 @@ int main()
     invalidDifficulty.replace(invalidDifficulty.find("combat_difficulty = 25"),
         std::string("combat_difficulty = 25").size(), "combat_difficulty = 101");
     assert(std::holds_alternative<ConfigError>(parseServerConfig(invalidDifficulty)));
+
+    const auto worldPath = std::filesystem::temp_directory_path() / "tes3mp-server-world-content-test";
+    const auto writeWorld = [&](std::string_view content) {
+        std::ofstream stream(worldPath, std::ios::binary | std::ios::trunc);
+        stream << content;
+        assert(static_cast<bool>(stream));
+    };
+    constexpr std::string_view worldHeader
+        = "TES3MP_WORLD_V1\n"
+          "manifest 0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20\n";
+    writeWorld(std::string(worldHeader)
+        + "time 16 6 427 32400000 30000\nglobal 1 short 2\nglobal 2 long -3\nglobal 3 float 4.5\n");
+    auto loadedWorldContent = loadWorldContent(worldPath, parsedConfig().contentManifest);
+    auto* worldContent = std::get_if<WorldContent>(&loadedWorldContent);
+    assert(worldContent && worldContent->globals.entries().size() == 3
+        && worldContent->world.time().day == 16 && worldContent->world.time().month == 6
+        && worldContent->world.time().year == 427 && worldContent->world.time().hour() == 9.0
+        && worldContent->world.time().timeScale() == 30.0
+        && std::get<std::int32_t>(worldContent->world.globals()[1].value) == -3);
+    writeWorld(std::string(worldHeader) + "time 16 6 427 32400000 30000\nglobal 1 short 2\nglobal 1 long 3\n");
+    assert(std::get<WorldContentError>(loadWorldContent(worldPath, parsedConfig().contentManifest))
+        == WorldContentError::InvalidCatalog);
+    writeWorld(std::string(worldHeader) + "time 16 6 427 32400000 30000\nglobal 1 float inf\n");
+    assert(std::get<WorldContentError>(loadWorldContent(worldPath, parsedConfig().contentManifest))
+        == WorldContentError::Malformed);
+    writeWorld("TES3MP_WORLD_V1\nmanifest 0202030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20\n"
+               "time 16 6 427 32400000 30000\n");
+    assert(std::get<WorldContentError>(loadWorldContent(worldPath, parsedConfig().contentManifest))
+        == WorldContentError::ManifestMismatch);
+    std::filesystem::remove(worldPath);
 
     const auto collisionPath = std::filesystem::temp_directory_path() / "tes3mp-server-collision-content-test";
     const auto writeCollision = [&](std::string_view content) {
@@ -2166,7 +2198,10 @@ int main()
         auto packagedCombatResult = loadCombatContent(contentRoot / "vanilla-combat.txt",
             packagedConfig.contentManifest, *packagedActorCatalog, packagedInventory->catalog);
         auto* packagedCombat = std::get_if<CombatContent>(&packagedCombatResult);
-        assert(packagedCombat);
+        auto packagedWorldResult
+            = loadWorldContent(contentRoot / "vanilla-world.txt", packagedConfig.contentManifest);
+        auto* packagedWorld = std::get_if<WorldContent>(&packagedWorldResult);
+        assert(packagedCombat && packagedWorld);
 
         auto queues = OutboundQueueSet::create(OutboundQueuePolicy{}, 1);
         auto timeouts = *SessionTimeoutPolicy::create(1'000'000, 1'000'000, 1'000'000);
@@ -2208,7 +2243,7 @@ int main()
             { sessions, joins, crypto, *queues, clock, intake, reducer, *lifecycle, packagedActorCatalog, &combatActors,
                 packagedCollision.get(), nullptr, nullptr, &packagedInventory->catalog, &inventory, &combatWorld,
                 &packagedCombat->weapons, &playerTemplate, &packagedCombat->settings, &meleePolicy, &*contactHistory,
-                &*contactHistory, &packagedCombat->magic });
+                &*contactHistory, &packagedCombat->magic, nullptr, &packagedWorld->globals, &packagedWorld->world });
         assert(application.start() && application.pump(ServerTick::initial()));
 
         bool negotiatedCombat = false;
@@ -2264,6 +2299,8 @@ int main()
                 MessageKind::ClientMeleeAttackCommand, encodeClientMeleeAttackCommand(attack))) });
         clock.nanoseconds = 34'000'000;
         assert(application.pump(id<ServerTick>(1)));
+        assert(packagedWorld->world.time().lastAdvanceTick == id<ServerTick>(1));
+        assert(packagedWorld->world.time().millisecondsSinceMidnight == 32'400'480);
         for (std::uint64_t now = 35; now < 48; ++now)
         {
             const auto drained = queues->pump(runtime, connection, now);

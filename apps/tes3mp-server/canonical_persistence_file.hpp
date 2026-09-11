@@ -36,13 +36,14 @@ namespace TES3MP::ServerApp
         const CanonicalDurableCombatState* restoredCombat() const noexcept;
         const CanonicalDurableInteractiveObjectState* restoredObjects() const noexcept;
         const CanonicalDurableActorState* restoredActors() const noexcept;
+        const CanonicalWorldState* restoredWorld() const noexcept;
         bool bindPlayerIdentities(const PlayerIdentityRegistry& identities) noexcept;
 
         CanonicalDurabilityResult commit(const std::shared_ptr<const CanonicalStatePublication>& candidate,
             CanonicalRevision canonicalRevision, std::span<const DurableCommandOrder> commands,
             const CanonicalInventoryWorld* inventory = nullptr, const CanonicalCombatWorld* combat = nullptr,
             const CanonicalInteractiveObjectWorld* objects = nullptr,
-            const CanonicalActorWorld* actors = nullptr) noexcept override;
+            const CanonicalActorWorld* actors = nullptr, const CanonicalWorldState* world = nullptr) noexcept override;
 
     private:
         CanonicalPersistenceFile(std::filesystem::path path, CanonicalDurablePrefix prefix) noexcept

@@ -11,6 +11,7 @@
 #include "tes3mp/protocol_pose.hpp"
 #include "tes3mp/server_lifecycle.hpp"
 #include "tes3mp/server_scripting.hpp"
+#include "tes3mp/world_state.hpp"
 
 #include <map>
 #include <optional>
@@ -46,6 +47,8 @@ namespace TES3MP::ServerApp
         ServerMeleeContactHistory* meleeContactHistory = nullptr;
         const DirectMagicCatalog* directMagic = nullptr;
         DeterministicServerScriptRuntime* scripts = nullptr;
+        const GlobalVariableCatalog* globalCatalog = nullptr;
+        CanonicalWorldState* world = nullptr;
     };
 
     class ServerApplication

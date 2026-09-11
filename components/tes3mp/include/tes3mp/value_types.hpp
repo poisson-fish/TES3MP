@@ -160,6 +160,10 @@ namespace TES3MP::Detail
         static constexpr std::string_view name = "CharacterProfileRevision";
     };
 
+    struct GlobalVariableIdTag { static constexpr std::string_view name = "GlobalVariableId"; };
+    struct GlobalVariableRevisionTag { static constexpr std::string_view name = "GlobalVariableRevision"; };
+    struct WorldTimeRevisionTag { static constexpr std::string_view name = "WorldTimeRevision"; };
+
     struct RaceRecordIdTag { static constexpr std::string_view name = "RaceRecordId"; };
     struct HeadRecordIdTag { static constexpr std::string_view name = "HeadRecordId"; };
     struct HairRecordIdTag { static constexpr std::string_view name = "HairRecordId"; };
@@ -211,6 +215,11 @@ namespace TES3MP
     using CombatRevision = Detail::StrongValue<Detail::CombatRevisionTag, Detail::StrongValuePolicy::CounterFromOne>;
     using CharacterProfileRevision = Detail::StrongValue<Detail::CharacterProfileRevisionTag,
         Detail::StrongValuePolicy::CounterFromOne>;
+    using GlobalVariableId = Detail::StrongValue<Detail::GlobalVariableIdTag, Detail::StrongValuePolicy::Identity>;
+    using GlobalVariableRevision = Detail::StrongValue<Detail::GlobalVariableRevisionTag,
+        Detail::StrongValuePolicy::CounterFromOne>;
+    using WorldTimeRevision
+        = Detail::StrongValue<Detail::WorldTimeRevisionTag, Detail::StrongValuePolicy::CounterFromOne>;
     using RaceRecordId = Detail::StrongValue<Detail::RaceRecordIdTag, Detail::StrongValuePolicy::Identity>;
     using HeadRecordId = Detail::StrongValue<Detail::HeadRecordIdTag, Detail::StrongValuePolicy::Identity>;
     using HairRecordId = Detail::StrongValue<Detail::HairRecordIdTag, Detail::StrongValuePolicy::Identity>;

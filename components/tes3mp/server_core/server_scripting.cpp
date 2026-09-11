@@ -22,6 +22,21 @@ namespace TES3MP
     }
 
     ServerScriptEmitResult ServerScriptCommandEmitter::enqueue(ServerScriptPlayerSafePointCommand command) noexcept
+    {
+        return enqueuePayload(ServerScriptCommandPayload(std::move(command)));
+    }
+
+    ServerScriptEmitResult ServerScriptCommandEmitter::enqueue(ServerScriptSetGlobalCommand command) noexcept
+    {
+        return enqueuePayload(ServerScriptCommandPayload(std::move(command)));
+    }
+
+    ServerScriptEmitResult ServerScriptCommandEmitter::enqueue(ServerScriptSetWorldTimeCommand command) noexcept
+    {
+        return enqueuePayload(ServerScriptCommandPayload(std::move(command)));
+    }
+
+    ServerScriptEmitResult ServerScriptCommandEmitter::enqueuePayload(ServerScriptCommandPayload command) noexcept
     try
     {
         if (mEmitted == MaximumServerScriptCommandsPerCallback)
@@ -32,7 +47,7 @@ namespace TES3MP
         mCommands.push_back(QueuedServerScriptCommand(
             ServerScriptCommandOrder(mEligibleTick, mPublicationOrdinal, mEventOrdinal, mPackage.loadOrder(),
                 mPackage.packageId(), mPackage.packageVersion(), mPackage.apiVersion(), mCallbackOrder, mEmitted),
-            ServerScriptCommandPayload(std::move(command))));
+            std::move(command)));
         return ServerScriptEmitResult::Accepted;
     }
     catch (...)

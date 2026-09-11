@@ -55,6 +55,13 @@ the affected code/tests in the same milestone.
 - **Revision is not time.** Canonical revisions/state versions describe committed
   state ordering; server ticks describe simulation time. Neither substitutes
   for the other.
+- **Canonical clock and globals.** World time advances from authoritative server
+  ticks using integer milliseconds, a thousandths time scale, and a fixed
+  30-day/12-month calendar so replay does not depend on floating-point wall
+  time. Globals retain their TES3 `short`, `long`, or `float` type and stable
+  catalog order; restore rejects any missing, extra, reordered, or retyped entry
+  before installation. Clock and global changes use the same persistence
+  acknowledgement as every other durable domain.
 - **Interest is server-owned.** Current visibility is exact canonical-cell
   membership. A client cannot select its own interest set or use presentation
   pose to expand gameplay reach.
@@ -186,11 +193,11 @@ the affected code/tests in the same milestone.
   installs or publishes the candidate. Failure leaves the prior state visible.
   Every prefix is exactly bound to configuration, content, script/API package
   versions, deterministic seeds, and complete client/script command ordering.
-  V2 restores established, session-independent roots, inventory, combat, and
-  combat RNG but never live sessions or incomplete-chargen state. It keeps one
-  checkpoint plus a bounded journal tail. Development V1 files are left intact
-  rather than migrated; later domains extend V2 instead of creating parallel
-  save authorities.
+  V2 restores established, session-independent roots, inventory, combat,
+  combat RNG, canonical time, and typed globals but never live sessions or
+  incomplete-chargen state. It keeps one checkpoint plus a bounded journal
+  tail. Development V1 files are left intact rather than migrated; later
+  domains extend V2 instead of creating parallel save authorities.
 - **Administration.** Public health and privileged operational detail remain
   separate. Administrative APIs do not expose scripting/runtime internals.
 - **Quest isolation.** A future Quest implementation reuses the platform-neutral

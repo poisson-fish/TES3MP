@@ -67,6 +67,8 @@ namespace
         CanonicalInteractiveObjectWorld objects;
         ActorCatalog actorCatalog;
         CanonicalActorWorld actors;
+        GlobalVariableCatalog globalCatalog;
+        CanonicalWorldState world;
     };
 
     DurableDomains domains(std::uint32_t count, float health, std::uint64_t randomSeed, bool actorDead = false)
@@ -153,20 +155,44 @@ namespace
             AuthorityEpoch::initial(), id<ServerTick>(count), actorDead ? ActorActivity::Idle : ActorActivity::Travel,
             0) };
         auto actors = std::get<CanonicalActorWorld>(createCanonicalActorWorld(actorStates));
+        const std::array globalDeclarations{
+            GlobalVariableCatalogEntry{ id<GlobalVariableId>(1), std::int16_t{ 0 } },
+            GlobalVariableCatalogEntry{ id<GlobalVariableId>(2), std::int32_t{ 0 } },
+            GlobalVariableCatalogEntry{ id<GlobalVariableId>(3), 0.f },
+        };
+        auto globalCatalog = *GlobalVariableCatalog::create(globalDeclarations);
+        CanonicalWorldTimeState time;
+        time.day = static_cast<std::uint8_t>(count);
+        time.month = 6;
+        time.year = 427;
+        time.millisecondsSinceMidnight = count * 1000;
+        time.timeScaleUnits = count * WorldTimeScaleUnitsPerOne;
+        time.revision = id<WorldTimeRevision>(count);
+        time.lastChangeTick = id<ServerTick>(count);
+        time.lastAdvanceTick = id<ServerTick>(count);
+        const std::array globals{ CanonicalGlobalVariableState{ id<GlobalVariableId>(1),
+                                      static_cast<std::int16_t>(count), id<GlobalVariableRevision>(count),
+                                      id<ServerTick>(count) },
+            CanonicalGlobalVariableState{ id<GlobalVariableId>(2), static_cast<std::int32_t>(count * 10),
+                id<GlobalVariableRevision>(count), id<ServerTick>(count) },
+            CanonicalGlobalVariableState{ id<GlobalVariableId>(3), static_cast<float>(count) + .5f,
+                id<GlobalVariableRevision>(count), id<ServerTick>(count) } };
+        auto world = *CanonicalWorldState::create(time, globals);
         return { std::move(catalog), std::move(inventory), std::move(combat), std::move(objectCatalog),
-            std::move(objects), std::move(actorCatalog), std::move(actors) };
+            std::move(objects), std::move(actorCatalog), std::move(actors), std::move(globalCatalog),
+            std::move(world) };
     }
 
     bool commitJoin(CanonicalPersistenceFile& file, CanonicalInventoryWorld* inventory = nullptr,
         CanonicalCombatWorld* combat = nullptr, CanonicalInteractiveObjectWorld* objects = nullptr,
-        CanonicalActorWorld* actors = nullptr, std::uint64_t tick = 1)
+        CanonicalActorWorld* actors = nullptr, CanonicalWorldState* world = nullptr, std::uint64_t tick = 1)
     {
         NullMetricSink metrics;
         NullStructuredEventSink events;
         Observability observability(metrics, events);
         auto empty = std::get<CanonicalServerState>(createCanonicalServerState({}, {}));
         CanonicalCommandReducer reducer(std::move(empty), observability, testContentManifest());
-        if (!reducer.configureDurability(file, inventory, combat, objects, actors))
+        if (!reducer.configureDurability(file, inventory, combat, objects, actors, world))
             return false;
         CanonicalSessionProgress session(
             id<SessionId>(1), id<SessionGeneration>(1), id<PlayerId>(1), id<EntityId>(2), std::nullopt);
@@ -188,7 +214,8 @@ namespace
         CanonicalCommandReducer reducer(std::move(*restored), *file.restoredStateVersion(),
             *file.restoredCanonicalRevision(), *file.restoredCheckpointTick(), observability, CanonicalSinkBundle{},
             testContentManifest(), collision);
-        if (!reducer.configureDurability(file, &domains.inventory, &domains.combat, &domains.objects, &domains.actors))
+        if (!reducer.configureDurability(
+                file, &domains.inventory, &domains.combat, &domains.objects, &domains.actors, &domains.world))
             return false;
         CanonicalSessionProgress session(
             id<SessionId>(1), id<SessionGeneration>(2), id<PlayerId>(1), id<EntityId>(2), std::nullopt);
@@ -245,13 +272,16 @@ namespace
         auto expected = domains(2, 75.f, 20);
         auto opened = CanonicalPersistenceFile::open(path, identity());
         auto* file = std::get_if<std::unique_ptr<CanonicalPersistenceFile>>(&opened);
-        if (!file || !commitJoin(**file, &expected.inventory, &expected.combat, &expected.objects, &expected.actors, 2))
+        if (!file
+            || !commitJoin(**file, &expected.inventory, &expected.combat, &expected.objects, &expected.actors,
+                &expected.world, 2))
             return false;
         file->reset();
         auto reopened = CanonicalPersistenceFile::open(path, identity());
         auto* restoredFile = std::get_if<std::unique_ptr<CanonicalPersistenceFile>>(&reopened);
         if (!restoredFile || !(*restoredFile)->restoredInventory() || !(*restoredFile)->restoredCombat()
-            || !(*restoredFile)->restoredObjects() || !(*restoredFile)->restoredActors())
+            || !(*restoredFile)->restoredObjects() || !(*restoredFile)->restoredActors()
+            || !(*restoredFile)->restoredWorld())
             return false;
         const auto& inventory = *(*restoredFile)->restoredInventory();
         auto rebuiltInventory = CanonicalInventoryWorld::create(testContentManifest(), expected.catalog,
@@ -274,9 +304,10 @@ namespace
             && *std::get_if<CanonicalInteractiveObjectWorld>(&rebuiltObjects) == expected.objects
             && std::get_if<CanonicalActorWorld>(&rebuiltActors)
             && *std::get_if<CanonicalActorWorld>(&rebuiltActors) == expected.actors && latest
+            && *(*restoredFile)->restoredWorld() == expected.world
             && latest->canonicalChecksum()
             == canonicalDurableStateChecksumV1(latest->stateVersion(), latest->checkpointTick(), latest->players(),
-                latest->inventory(), latest->combat(), latest->objects(), latest->actors());
+                latest->inventory(), latest->combat(), latest->objects(), latest->actors(), latest->world());
     }
 
     std::vector<char> read(const std::filesystem::path& path)
@@ -342,8 +373,9 @@ namespace
         const auto* combat = file.restoredCombat();
         const auto* objects = file.restoredObjects();
         const auto* actors = file.restoredActors();
+        const auto* world = file.restoredWorld();
         const auto* latest = file.prefix().latest();
-        return inventory && combat && objects && actors && latest && inventory->players.size() == 1
+        return inventory && combat && objects && actors && world && latest && inventory->players.size() == 1
             && inventory->players.front().stacks.size() == 1 && inventory->players.front().stacks.front().count == count
             && combat->players.size() == 1 && combat->players.front().victim.health == health
             && objects->objects.size() == 1 && objects->objects.front().doorState() == DoorState::Closed
@@ -354,9 +386,13 @@ namespace
             && combat->actors.front().respawnStats.health == 20.f && !combat->actors.front().respawnStats.dead
             && combat->actors.front().lastAttackTick == id<ServerTick>(count)
             && combat->actors.front().deathTick.has_value() == actorDead && combat->randomWords == randomWords
+            && world->time().day == count && world->time().timeScaleUnits == count * WorldTimeScaleUnitsPerOne
+            && std::get<std::int16_t>(world->globals()[0].value) == static_cast<std::int16_t>(count)
+            && std::get<std::int32_t>(world->globals()[1].value) == static_cast<std::int32_t>(count * 10)
+            && std::get<float>(world->globals()[2].value) == static_cast<float>(count) + .5f
             && latest->canonicalChecksum() == checksum
             && canonicalDurableStateChecksumV1(latest->stateVersion(), latest->checkpointTick(), latest->players(),
-                   latest->inventory(), latest->combat(), latest->objects(), latest->actors())
+                   latest->inventory(), latest->combat(), latest->objects(), latest->actors(), latest->world())
             == checksum;
     }
 
@@ -367,7 +403,9 @@ namespace
         auto state = domains(1, 100.f, 10);
         auto opened = CanonicalPersistenceFile::open(path, identity());
         auto* file = std::get_if<std::unique_ptr<CanonicalPersistenceFile>>(&opened);
-        if (!file || !commitJoin(**file, &state.inventory, &state.combat, &state.objects, &state.actors))
+        if (!file
+            || !commitJoin(
+                **file, &state.inventory, &state.combat, &state.objects, &state.actors, &state.world))
         {
             std::cerr << "compaction setup failed\n";
             return false;
@@ -391,7 +429,7 @@ namespace
         return result;
     }
 
-    bool crash_cuts_preserve_key_door_and_actor_attack_ticks()
+    bool crash_cuts_preserve_time_global_key_door_and_actor_transactions()
     {
         TemporaryDirectory directory;
         const auto path = directory.path() / "world.t3p";
@@ -400,7 +438,7 @@ namespace
         auto* file = std::get_if<std::unique_ptr<CanonicalPersistenceFile>>(&opened);
         if (!file
             || !commitJoin(**file, &previousDomains.inventory, &previousDomains.combat, &previousDomains.objects,
-                &previousDomains.actors))
+                &previousDomains.actors, &previousDomains.world))
             return false;
         const auto previousBytes = read(path);
         const auto previousChecksum = (*file)->prefix().latest()->canonicalChecksum();
@@ -440,7 +478,8 @@ namespace
         auto before = domains(1, 100.f, 10);
         auto opened = CanonicalPersistenceFile::open(path, identity());
         auto* file = std::get_if<std::unique_ptr<CanonicalPersistenceFile>>(&opened);
-        if (!file || !commitJoin(**file, &before.inventory, &before.combat, &before.objects, &before.actors))
+        if (!file
+            || !commitJoin(**file, &before.inventory, &before.combat, &before.objects, &before.actors, &before.world))
             return false;
         const auto previousBytes = read(path);
         const auto previousChecksum = (*file)->prefix().latest()->canonicalChecksum();
@@ -486,8 +525,8 @@ int main()
             &stale_uncommitted_temporary_file_never_replaces_the_committed_prefix },
         std::pair{ "bounded_compaction_keeps_one_checkpoint_and_a_bounded_tail",
             &bounded_compaction_keeps_one_checkpoint_and_a_bounded_tail },
-        std::pair{ "crash_cuts_preserve_key_door_and_actor_attack_ticks",
-            &crash_cuts_preserve_key_door_and_actor_attack_ticks },
+        std::pair{ "crash_cuts_preserve_time_global_key_door_and_actor_transactions",
+            &crash_cuts_preserve_time_global_key_door_and_actor_transactions },
         std::pair{
             "crash_cuts_preserve_actor_death_and_respawn_state", &crash_cuts_preserve_actor_death_and_respawn_state },
     };

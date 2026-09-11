@@ -128,7 +128,7 @@ namespace TES3MP::ServerApp
         if (!validUtf8(text))
             return error(ConfigErrorCode::InvalidUtf8);
 
-        std::array<bool, 20> seen{};
+        std::array<bool, 21> seen{};
         std::string bindAddress;
         std::uint16_t port = 0;
         std::uint64_t tick = 0;
@@ -147,6 +147,7 @@ namespace TES3MP::ServerApp
         std::filesystem::path inventoryContentPath;
         std::filesystem::path combatContentPath;
         std::filesystem::path characterContentPath;
+        std::filesystem::path worldContentPath;
         std::filesystem::path playerIdentityPath;
         std::int16_t combatDifficulty = 0;
         std::size_t lineNumber = 0;
@@ -207,6 +208,8 @@ namespace TES3MP::ServerApp
                     slot = 18;
                 else if (key == "combat_difficulty")
                     slot = 19;
+                else if (key == "world_content_file")
+                    slot = 20;
                 else
                     return error(ConfigErrorCode::UnknownKey, lineNumber, key);
                 if (seen[slot])
@@ -331,12 +334,18 @@ namespace TES3MP::ServerApp
                         return error(ConfigErrorCode::InvalidValue, lineNumber, key);
                     characterContentPath = std::filesystem::u8path(value);
                 }
-                else
+                else if (slot == 19)
                 {
                     const auto parsed = signedValue(value);
                     if (!parsed || *parsed < -100 || *parsed > 100)
                         return error(ConfigErrorCode::InvalidValue, lineNumber, key);
                     combatDifficulty = static_cast<std::int16_t>(*parsed);
+                }
+                else
+                {
+                    if (value.size() > MaximumWorldContentPathBytes)
+                        return error(ConfigErrorCode::InvalidValue, lineNumber, key);
+                    worldContentPath = std::filesystem::u8path(value);
                 }
             }
             if (end == std::string_view::npos)
@@ -350,6 +359,8 @@ namespace TES3MP::ServerApp
                         "join_password_file", "content_manifest_id", "cell_spaces", "allowed_cells", "spawn_cell",
                         "default_appearance_id", "movement_profile", "collision_content_file", "actor_content_file",
                         "player_identity_file" }[slot]);
+        if (!seen[20])
+            return error(ConfigErrorCode::MissingKey, 0, "world_content_file");
         auto endpoint = ListenerEndpoint::create(bindAddress, port);
         if (!endpoint)
             return error(ConfigErrorCode::InvalidValue, 0, "bind_address");
@@ -361,7 +372,7 @@ namespace TES3MP::ServerApp
             std::move(configuredSpawnPositions), std::move(collisionContentPath), std::move(actorContentPath),
             std::move(interactiveObjectContentPath), std::move(inventoryContentPath),
             std::move(combatContentPath), std::move(playerIdentityPath), std::move(characterContentPath),
-            combatDifficulty };
+            std::move(worldContentPath), combatDifficulty };
     }
 
     PasswordLoadResult loadJoinPassword(const std::filesystem::path& path)

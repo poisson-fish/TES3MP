@@ -12,6 +12,7 @@
 #include "player_identity_file.hpp"
 #include "server_application.hpp"
 #include "server_config.hpp"
+#include "world_content.hpp"
 
 #include <tes3mp/canonical_persistence.hpp>
 #include <tes3mp/observability.hpp>
@@ -88,6 +89,15 @@ int main(int argc, char** argv)
     resolve(config.combatContentFile);
     resolve(config.playerIdentityFile);
     resolve(config.characterContentFile);
+    resolve(config.worldContentFile);
+    auto loadedWorld = TES3MP::ServerApp::loadWorldContent(config.worldContentFile, config.contentManifest);
+    auto* worldValue = std::get_if<TES3MP::ServerApp::WorldContent>(&loadedWorld);
+    if (!worldValue)
+    {
+        std::cerr << "world content initialization failed\n";
+        return 2;
+    }
+    auto worldContent = std::move(*worldValue);
     auto collisionResult
         = TES3MP::ServerApp::ContentCollisionProvider::load(config.collisionContentFile, config.contentManifest);
     auto* collisionValue = std::get_if<std::unique_ptr<TES3MP::ServerApp::ContentCollisionProvider>>(&collisionResult);
@@ -411,6 +421,23 @@ int main(int argc, char** argv)
         }
         combatContent->world = std::move(*restored);
     }
+    if (const auto* restoredWorld = persistenceFile->restoredWorld())
+    {
+        auto restored = TES3MP::restoreCanonicalWorldState(
+            worldContent.globals, restoredWorld->time(), restoredWorld->globals());
+        auto* world = std::get_if<TES3MP::CanonicalWorldState>(&restored);
+        if (!world)
+        {
+            std::cerr << "persisted global catalog validation failed\n";
+            return 2;
+        }
+        worldContent.world = std::move(*world);
+    }
+    else if (persistenceFile->prefix().latest())
+    {
+        std::cerr << "persisted time/global domain is missing\n";
+        return 2;
+    }
     std::vector<TES3MP::PersistedPlayerIdentity> identityRecords(
         identityFile->records().begin(), identityFile->records().end());
     if (restoredState)
@@ -492,7 +519,7 @@ int main(int argc, char** argv)
         *collision);
     if (!reducer.configureDurability(*persistenceFile, inventoryWorld ? &*inventoryWorld : nullptr,
             combatContent ? &combatContent->world : nullptr,
-            interactiveObjectWorld ? &*interactiveObjectWorld : nullptr, &actorWorld))
+            interactiveObjectWorld ? &*interactiveObjectWorld : nullptr, &actorWorld, &worldContent.world))
     {
         std::cerr << "canonical persistence composition failed\n";
         return 3;
@@ -535,7 +562,7 @@ int main(int argc, char** argv)
             combatContent ? &combatContent->settings : nullptr, combatContent ? &meleePolicy : nullptr,
             meleeContactHistory ? &*meleeContactHistory : nullptr,
             meleeContactHistory ? &*meleeContactHistory : nullptr, combatContent ? &combatContent->magic : nullptr,
-            &scripts });
+            &scripts, &worldContent.globals, &worldContent.world });
     if (!application.start())
     {
         std::cerr << application.failure() << '\n';

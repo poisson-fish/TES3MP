@@ -853,6 +853,11 @@ namespace TES3MP::ServerApp
             mFailure = "inventory composition incomplete";
             return false;
         }
+        if ((mWiring->globalCatalog || mWiring->world) && (!mWiring->globalCatalog || !mWiring->world))
+        {
+            mFailure = "world content wiring is incomplete";
+            return false;
+        }
         const bool anyCombat = mWiring->combat || mWiring->meleeWeapons || mWiring->playerCombatTemplate
             || mWiring->meleeSettings || mWiring->meleePolicy || mWiring->meleeContact || mWiring->directMagic;
         if (anyCombat
@@ -903,6 +908,8 @@ namespace TES3MP::ServerApp
             CanonicalCommandWorlds commandWorlds{ mWiring->interactiveObjects, mWiring->interactiveObjectCatalog,
                 mWiring->inventory, mWiring->itemCatalog, mWiring->combat, mWiring->actors, mWiring->meleeWeapons,
                 mWiring->meleeSettings, mWiring->meleePolicy, mWiring->meleeContact, mWiring->directMagic };
+            commandWorlds.world = mWiring->world;
+            commandWorlds.globalCatalog = mWiring->globalCatalog;
             auto prepared = mWiring->reducer.prepareTick(batch, commandWorlds, pumpedScripts.commands());
             if (!prepared.result())
             {
@@ -1097,6 +1104,21 @@ namespace TES3MP::ServerApp
                     actorViews.emplace_back(*connection, std::move(*view));
                 }
             }
+            std::optional<CanonicalWorldState> worldCandidate;
+            if (mWiring->world)
+            {
+                const auto& baseWorld
+                    = prepared.candidateWorld() ? *prepared.candidateWorld() : *mWiring->world;
+                auto advancedWorld = advanceCanonicalWorldTime(
+                    baseWorld, batch.scheduledTick().value(), mConfig.tickIntervalMilliseconds);
+                auto* worldValue = std::get_if<CanonicalWorldState>(&advancedWorld);
+                if (!worldValue)
+                {
+                    mFailure = "world time simulation failed";
+                    return false;
+                }
+                worldCandidate.emplace(std::move(*worldValue));
+            }
             std::vector<std::pair<TransportConnectionId, LatestWinsCombatSnapshot>> combatViews;
             std::vector<std::pair<TransportConnectionId, ReliableCombatEventBatch>> combatEvents;
             if (mWiring->combat)
@@ -1147,7 +1169,7 @@ namespace TES3MP::ServerApp
             }
             if (!mWiring->reducer.stageSimulationCandidates(prepared, mWiring->inventory,
                     std::move(combatInventoryCandidate), mWiring->combat, std::move(combatCandidate), mWiring->actors,
-                    std::move(actorCandidate)))
+                    std::move(actorCandidate), mWiring->world, std::move(worldCandidate)))
             {
                 mFailure = "simulation candidate staging failed";
                 return false;

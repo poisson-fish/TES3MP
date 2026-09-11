@@ -2,6 +2,7 @@
 #define TES3MP_SERVER_SCRIPTING_HPP
 
 #include "canonical_sinks.hpp"
+#include "world_state.hpp"
 
 #include <compare>
 #include <cstddef>
@@ -14,7 +15,7 @@
 
 namespace TES3MP
 {
-    inline constexpr std::uint32_t ServerScriptApiVersion = 1;
+    inline constexpr std::uint32_t ServerScriptApiVersion = 2;
     inline constexpr std::size_t MaximumServerScriptCallbacks = 64;
     inline constexpr std::size_t MaximumServerScriptEventsPerPublication = 4096;
     inline constexpr std::size_t MaximumServerScriptCommandsPerCallback = 16;
@@ -147,7 +148,49 @@ namespace TES3MP
         Transform mDestination;
     };
 
-    using ServerScriptCommandPayload = std::variant<ServerScriptPlayerSafePointCommand>;
+    class ServerScriptSetGlobalCommand
+    {
+    public:
+        constexpr ServerScriptSetGlobalCommand(GlobalVariableId id, GlobalVariableRevision expectedRevision,
+            GlobalVariableValue value) noexcept
+            : mId(id)
+            , mExpectedRevision(expectedRevision)
+            , mValue(std::move(value))
+        {
+        }
+        constexpr GlobalVariableId id() const noexcept { return mId; }
+        constexpr GlobalVariableRevision expectedRevision() const noexcept { return mExpectedRevision; }
+        constexpr const GlobalVariableValue& value() const noexcept { return mValue; }
+        friend constexpr bool operator==(const ServerScriptSetGlobalCommand&,
+            const ServerScriptSetGlobalCommand&) noexcept = default;
+
+    private:
+        GlobalVariableId mId;
+        GlobalVariableRevision mExpectedRevision;
+        GlobalVariableValue mValue;
+    };
+
+    class ServerScriptSetWorldTimeCommand
+    {
+    public:
+        constexpr ServerScriptSetWorldTimeCommand(WorldTimeRevision expectedRevision,
+            CanonicalWorldTimeState replacement) noexcept
+            : mExpectedRevision(expectedRevision)
+            , mReplacement(replacement)
+        {
+        }
+        constexpr WorldTimeRevision expectedRevision() const noexcept { return mExpectedRevision; }
+        constexpr const CanonicalWorldTimeState& replacement() const noexcept { return mReplacement; }
+        friend constexpr bool operator==(const ServerScriptSetWorldTimeCommand&,
+            const ServerScriptSetWorldTimeCommand&) noexcept = default;
+
+    private:
+        WorldTimeRevision mExpectedRevision;
+        CanonicalWorldTimeState mReplacement;
+    };
+
+    using ServerScriptCommandPayload
+        = std::variant<ServerScriptPlayerSafePointCommand, ServerScriptSetGlobalCommand, ServerScriptSetWorldTimeCommand>;
 
     class ServerScriptCommandOrder
     {
@@ -226,6 +269,8 @@ namespace TES3MP
     {
     public:
         ServerScriptEmitResult enqueue(ServerScriptPlayerSafePointCommand command) noexcept;
+        ServerScriptEmitResult enqueue(ServerScriptSetGlobalCommand command) noexcept;
+        ServerScriptEmitResult enqueue(ServerScriptSetWorldTimeCommand command) noexcept;
 
     private:
         friend class DeterministicServerScriptRuntime;
@@ -249,6 +294,8 @@ namespace TES3MP
         std::uint32_t mCallbackOrder;
         std::uint32_t mEmitted = 0;
         ServerScriptEmitResult mResult = ServerScriptEmitResult::Accepted;
+
+        ServerScriptEmitResult enqueuePayload(ServerScriptCommandPayload command) noexcept;
     };
 
     enum class ServerScriptCallbackResult : std::uint8_t
@@ -340,6 +387,11 @@ namespace TES3MP
         UnknownCell,
         SpatialTickRegression,
         EntityRevisionExhausted,
+        UnknownGlobal,
+        GlobalTypeMismatch,
+        GlobalRevisionMismatch,
+        WorldTimeRevisionMismatch,
+        InvalidWorldMutation,
     };
 
     class ServerScriptCommandDispositionRecord

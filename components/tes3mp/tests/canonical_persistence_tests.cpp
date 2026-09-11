@@ -128,19 +128,35 @@ namespace
             ActorActivity::Travel, 0) } };
     }
 
+    CanonicalWorldState world(std::int32_t value, std::uint64_t tick)
+    {
+        CanonicalWorldTimeState time;
+        time.day = static_cast<std::uint8_t>(value);
+        time.month = 6;
+        time.year = 427;
+        time.millisecondsSinceMidnight = static_cast<std::uint32_t>(value) * 1000;
+        time.timeScaleUnits = static_cast<std::uint32_t>(value) * WorldTimeScaleUnitsPerOne;
+        time.revision = id<WorldTimeRevision>(tick);
+        time.lastChangeTick = id<ServerTick>(tick);
+        time.lastAdvanceTick = id<ServerTick>(tick);
+        const std::array globals{ CanonicalGlobalVariableState{ id<GlobalVariableId>(1), value,
+            id<GlobalVariableRevision>(tick), id<ServerTick>(tick) } };
+        return CanonicalWorldState::create(time, globals).value();
+    }
+
     CanonicalDurablePrefix domainPrefix()
     {
         const std::array firstPlayers{ player(10) };
         const std::array firstCommands{ client(1, 1) };
         auto first = CanonicalDurableTick::create(id<CanonicalStateVersion>(1), id<CanonicalRevision>(1),
             id<ServerTick>(1), firstPlayers, firstCommands, CanonicalChecksum(0), inventory(1, 1), combat(100.f, 10, 1),
-            objects(DoorState::Closed, LockState::Locked, 1), actors(10, 1))
+            objects(DoorState::Closed, LockState::Locked, 1), actors(10, 1), world(1, 1))
                          .value();
         const std::array secondPlayers{ player(20, 2) };
         const std::array secondCommands{ client(2, 2) };
         auto second = CanonicalDurableTick::create(id<CanonicalStateVersion>(2), id<CanonicalRevision>(2),
             id<ServerTick>(2), secondPlayers, secondCommands, first.transactionChecksum(), inventory(2, 2),
-            combat(75.f, 20, 2), objects(DoorState::Open, LockState::Unlocked, 2), actors(20, 2))
+            combat(75.f, 20, 2), objects(DoorState::Open, LockState::Unlocked, 2), actors(20, 2), world(2, 2))
                           .value();
         return CanonicalDurablePrefix::create(identity(), { std::move(first), std::move(second) }).value();
     }
@@ -205,7 +221,7 @@ namespace
         auto state = createCanonicalServerState(players, {});
         if (auto* value = std::get_if<CanonicalServerState>(&state))
             return CanonicalReplayState{ std::move(*value), inventory(2, 2), combat(75.f, 20, 2),
-                objects(DoorState::Open, LockState::Unlocked, 2), actors(20, 2) };
+                objects(DoorState::Open, LockState::Unlocked, 2), actors(20, 2), world(2, 2) };
         return CanonicalChecksum(0);
     }
 
@@ -215,7 +231,7 @@ namespace
         const auto decoded = decodeCanonicalDurablePrefix(encodeCanonicalDurablePrefixV2(original), identity());
         const auto* restored = std::get_if<CanonicalDurablePrefix>(&decoded);
         if (!restored || !restored->latest()->inventory() || !restored->latest()->combat()
-            || !restored->latest()->objects() || !restored->latest()->actors())
+            || !restored->latest()->objects() || !restored->latest()->actors() || !restored->latest()->world())
             return false;
         const auto& latest = *restored->latest();
         return latest.inventory()->players.front().stacks.front().count == 2
@@ -224,10 +240,12 @@ namespace
             && latest.objects()->objects.front().doorState() == DoorState::Open
             && latest.objects()->objects.front().lockState() == LockState::Unlocked
             && latest.actors()->actors.front().root().position() == Position3(20, 0, 0)
+            && latest.world()->time().day == 2
+            && std::get<std::int32_t>(latest.world()->globals().front().value) == 2
             && latest.combat()->actors.front().aggressionTarget == id<PlayerId>(1)
             && latest.canonicalChecksum()
             == canonicalDurableStateChecksumV1(latest.stateVersion(), latest.checkpointTick(), latest.players(),
-                latest.inventory(), latest.combat(), latest.objects(), latest.actors())
+                latest.inventory(), latest.combat(), latest.objects(), latest.actors(), latest.world())
             && replayCanonicalDurablePrefix(*restored, &replayDomains);
     }
 
@@ -237,7 +255,7 @@ namespace
         CanonicalDurabilityResult commit(const std::shared_ptr<const CanonicalStatePublication>& candidate,
             CanonicalRevision, std::span<const DurableCommandOrder>, const CanonicalInventoryWorld*,
             const CanonicalCombatWorld*, const CanonicalInteractiveObjectWorld*,
-            const CanonicalActorWorld* actors) noexcept override
+            const CanonicalActorWorld* actors, const CanonicalWorldState* world) noexcept override
         {
             called = true;
             sawCandidate = candidate && candidate->state().players().size() == 1;
@@ -246,6 +264,11 @@ namespace
             {
                 sawStagedActors = actors && *actors == *expectedActors;
                 actorsInstalledBeforeAcknowledgement = currentActors && *currentActors == *expectedActors;
+            }
+            if (expectedWorld)
+            {
+                sawStagedWorld = world && *world == *expectedWorld;
+                worldInstalledBeforeAcknowledgement = currentWorld && *currentWorld == *expectedWorld;
             }
             return result;
         }
@@ -258,6 +281,10 @@ namespace
         const CanonicalActorWorld* expectedActors = nullptr;
         bool sawStagedActors = false;
         bool actorsInstalledBeforeAcknowledgement = false;
+        const CanonicalWorldState* currentWorld = nullptr;
+        const CanonicalWorldState* expectedWorld = nullptr;
+        bool sawStagedWorld = false;
+        bool worldInstalledBeforeAcknowledgement = false;
     };
 
     bool durability_acknowledgement_precedes_installation_and_publication()
@@ -343,6 +370,76 @@ namespace
         return committed && durability.called && durability.sawStagedActors
             && !durability.actorsInstalledBeforeAcknowledgement && liveActors == expectedActors;
     }
+
+    bool time_and_global_mutations_are_durable_before_installation()
+    {
+        NullMetricSink metrics;
+        NullStructuredEventSink events;
+        Observability observability(metrics, events);
+        const auto durablePlayer = player(10);
+        const std::array players{ durablePlayer };
+        const std::array sessions{ CanonicalSessionProgress(id<SessionId>(1), SessionGeneration::initial(),
+            durablePlayer.playerId(), durablePlayer.entityId(), std::nullopt) };
+        auto state = std::get<CanonicalServerState>(createCanonicalServerState(players, sessions));
+        CanonicalCommandReducer reducer(std::move(state), observability, testContentManifest());
+
+        const std::array declarations{
+            GlobalVariableCatalogEntry{ id<GlobalVariableId>(1), std::int32_t{ 0 } } };
+        const auto catalog = GlobalVariableCatalog::create(declarations).value();
+        CanonicalWorldTimeState initialTime;
+        initialTime.day = 30;
+        initialTime.month = 11;
+        initialTime.year = 427;
+        initialTime.millisecondsSinceMidnight = WorldMillisecondsPerDay - 480;
+        auto liveWorld = CanonicalWorldState::initial(initialTime, catalog).value();
+        auto advanced = advanceCanonicalWorldTime(liveWorld, id<ServerTick>(1), 16);
+        auto* advancedWorld = std::get_if<CanonicalWorldState>(&advanced);
+        if (!advancedWorld)
+            return false;
+        auto changed = setCanonicalGlobal(*advancedWorld, catalog, id<GlobalVariableId>(1),
+            GlobalVariableRevision::initial(), std::int32_t{ 7 }, id<ServerTick>(1));
+        auto* changedWorld = std::get_if<CanonicalWorldState>(&changed);
+        if (!changedWorld)
+            return false;
+        const auto expectedWorld = *changedWorld;
+
+        ProbeDurability durability;
+        durability.reducer = &reducer;
+        durability.currentWorld = &liveWorld;
+        durability.expectedWorld = &expectedWorld;
+        if (!reducer.configureDurability(durability, nullptr, nullptr, nullptr, nullptr, &liveWorld))
+            return false;
+
+        TestClock clock;
+        ServerCommandIntakeCoordinator intake(
+            clock, observability, clock.now(), id<ServerTick>(1), IngressOrdinal::initial());
+        clock.nanoseconds = 33'333'334;
+        const auto pumped = intake.pump();
+        if (!pumped || pumped.batches().size() != 1)
+            return false;
+        auto prepared = reducer.prepareTick(pumped.batches().front());
+        if (!reducer.stageSimulationCandidates(prepared, nullptr, std::nullopt, nullptr, std::nullopt, nullptr,
+                std::nullopt, &liveWorld, expectedWorld))
+            return false;
+        CanonicalCommandWorlds worlds;
+        worlds.world = &liveWorld;
+        worlds.globalCatalog = &catalog;
+        if (reducer.commit(std::move(prepared), worlds) || !durability.called || !durability.sawStagedWorld
+            || durability.worldInstalledBeforeAcknowledgement || liveWorld == expectedWorld)
+            return false;
+
+        durability.result = CanonicalDurabilityResult::Committed;
+        durability.called = false;
+        auto accepted = reducer.prepareTick(pumped.batches().front());
+        if (!reducer.stageSimulationCandidates(accepted, nullptr, std::nullopt, nullptr, std::nullopt, nullptr,
+                std::nullopt, &liveWorld, expectedWorld))
+            return false;
+        const bool committed = reducer.commit(std::move(accepted), worlds);
+        return committed && durability.called && durability.sawStagedWorld
+            && !durability.worldInstalledBeforeAcknowledgement && liveWorld == expectedWorld
+            && liveWorld.time().year == 428 && liveWorld.time().month == 0 && liveWorld.time().day == 1
+            && std::get<std::int32_t>(liveWorld.globals().front().value) == 7;
+    }
 }
 
 int main()
@@ -360,6 +457,8 @@ int main()
             &durability_acknowledgement_precedes_installation_and_publication },
         std::pair{
             "actor_simulation_is_durable_before_installation", &actor_simulation_is_durable_before_installation },
+        std::pair{ "time_and_global_mutations_are_durable_before_installation",
+            &time_and_global_mutations_are_durable_before_installation },
     };
     for (const auto& [name, test] : tests)
         if (!test())

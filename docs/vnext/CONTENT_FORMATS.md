@@ -228,6 +228,26 @@ OpenMW clients bind opaque IDs locally with repeatable
 Mappings must be injective and complete for presented records. See
 [`inventory_content.cpp`](../../apps/tes3mp-server/inventory_content.cpp).
 
+## World V1
+
+The required `world_content_file` is at most 2 MiB and declares one clock plus
+an ordered catalog of at most 65,536 typed globals.
+
+```text
+TES3MP_WORLD_V1
+manifest <64-lowercase-hex-digits>
+time <day> <month> <year> <milliseconds-since-midnight> <time-scale-thousandths>
+global <nonzero-id> <short-or-long-or-float> <value>
+```
+
+Days are 1–30, months 0–11, milliseconds 0–86,399,999, and time scale is in
+thousandths from 0 through 1,000,000. Advancement uses integer milliseconds and
+a carried remainder over a fixed 30-day, 12-month calendar. `short` is signed
+16-bit, `long` signed 32-bit, and `float` finite. Global IDs are unique and
+declaration order is canonical: restart requires exactly the same IDs, order,
+and types before installation. See
+[`world_content.cpp`](../../apps/tes3mp-server/world_content.cpp).
+
 ## Combat V6
 
 Configured optionally by `combat_content_file`; combat also requires actor,
@@ -278,8 +298,9 @@ redistribution settings. Progression specializations use combat 0, magic 1, and 
 the server combines them with the confirmed character class and current skill.
 Health and magicka recovery rates are derived from the stock rest formulas at
 the default 30x time scale and apply only to active, living players without a
-live same-cell aggressor until canonical time/rest exists. Values are finite and
-range checked; cross-catalog failure is atomic. See
+live same-cell aggressor; integrating those rates with canonical time and full
+rest semantics remains future work. Values are finite and range checked;
+cross-catalog failure is atomic. See
 [`combat_content.cpp`](../../apps/tes3mp-server/combat_content.cpp).
 
 Direct-magic sources contain one through eight instantaneous effects. An

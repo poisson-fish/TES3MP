@@ -48,6 +48,7 @@ CATALOGS = {
     "inventory_content_file": ("TES3MP_INVENTORY_V1", False),
     "combat_content_file": ("TES3MP_COMBAT_V6", False),
     "character_content_file": ("TES3MP_CHARACTERS_V2", False),
+    "world_content_file": ("TES3MP_WORLD_V1", True),
 }
 
 SERVER_CONTENT_KEYS = (

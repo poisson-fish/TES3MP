@@ -90,6 +90,13 @@ class ContentBakerTests(unittest.TestCase):
             f"starting_item {self.item_prototype} 2 -1\n",
             encoding="utf-8",
         )
+        (self.source / "world.txt").write_text(
+            "TES3MP_WORLD_V1\n"
+            f"manifest {ZERO_MANIFEST}\n"
+            "time 16 6 427 32400000 30000\n"
+            "global 1 short 0\n",
+            encoding="utf-8",
+        )
         self.password = self.root / "join-password.txt"
         self.password.write_text("", encoding="utf-8")
         self.server_config = self.source / "server.cfg"
@@ -111,6 +118,7 @@ class ContentBakerTests(unittest.TestCase):
             "inventory_content_file = inventory.txt\n"
             "combat_content_file = combat.txt\n"
             "character_content_file = characters.txt\n"
+            "world_content_file = world.txt\n"
             f"player_identity_file = {self.root / 'players.txt'}\n",
             encoding="utf-8",
         )
