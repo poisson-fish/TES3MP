@@ -432,6 +432,27 @@ namespace TES3MP
                     || ((!wasComplete || mResyncPending) && completedBaseline
                         && mSession->stateMachine().weatherBaselineComplete());
             }
+            else if (auto* worldTime = std::get_if<ReliableWorldTimeState>(&message))
+            {
+                const bool wasComplete = mSession->stateMachine().worldTimeBaselineComplete();
+                const bool completeBaseline = worldTime->completeBaseline;
+                if (!mSession->stateMachine().sessionId()
+                    && mSession->bindEstablishedSession(worldTime->targetSessionId)
+                        != ClientSessionBindingResult::Bound)
+                    return reject();
+                const auto applied = mSession->receiveReliableWorldTimeState(std::move(*worldTime));
+                if (applied != WorldTimeReplicationReceiveResult::Applied
+                    && applied != WorldTimeReplicationReceiveResult::IdenticalDuplicate
+                    && applied != WorldTimeReplicationReceiveResult::StaleRevision)
+                    return reject();
+                result.worldTimeStateApplied
+                    = result.worldTimeStateApplied || applied == WorldTimeReplicationReceiveResult::Applied;
+                if (mResyncPending && completeBaseline)
+                    mResyncWorldTimeObserved = true;
+                result.worldTimeBaselineCompleted = result.worldTimeBaselineCompleted
+                    || ((!wasComplete || mResyncPending) && completeBaseline
+                        && mSession->stateMachine().worldTimeBaselineComplete());
+            }
             else if (auto* combat = std::get_if<LatestWinsCombatSnapshot>(&message))
             {
                 const auto sessionId = mSession->stateMachine().sessionId();
@@ -479,7 +500,9 @@ namespace TES3MP
                 || (mResyncInventoryObserved && mSession->stateMachine().inventoryReplicationComplete()))
             && (!negotiated(mSession->stateMachine(), combatReplicationCapability()) || mResyncCombatObserved)
             && (!negotiated(mSession->stateMachine(), weatherReplicationCapability())
-                || (mResyncWeatherObserved && mSession->stateMachine().weatherBaselineComplete())))
+                || (mResyncWeatherObserved && mSession->stateMachine().weatherBaselineComplete()))
+            && (!negotiated(mSession->stateMachine(), worldTimeReplicationCapability())
+                || (mResyncWorldTimeObserved && mSession->stateMachine().worldTimeBaselineComplete())))
         {
             mResyncPending = false;
             mResyncPlayerBaselineObserved = false;
@@ -491,6 +514,7 @@ namespace TES3MP
             mResyncEquipmentObserved = false;
             mResyncCombatObserved = false;
             mResyncWeatherObserved = false;
+            mResyncWorldTimeObserved = false;
         }
         if (drained.action == ClientSessionAction::SessionClosed
             || mSession->stateMachine().state() == ClientSessionState::Closed)
@@ -760,6 +784,7 @@ namespace TES3MP
             mResyncEquipmentObserved = false;
             mResyncCombatObserved = false;
             mResyncWeatherObserved = false;
+            mResyncWorldTimeObserved = false;
         }
         return result;
     }
@@ -1047,6 +1072,15 @@ namespace TES3MP
                         return fail(ClientRuntimeResult::ProtocolRejected);
                     break;
                 }
+                case MessageKind::ReliableWorldTimeState:
+                {
+                    auto value = decodeReliableWorldTimeState(frame->payload());
+                    if (auto* typed = std::get_if<ReliableWorldTimeState>(&value))
+                        result.messages.emplace_back(std::move(*typed));
+                    else
+                        return fail(ClientRuntimeResult::ProtocolRejected);
+                    break;
+                }
                 case MessageKind::ServerVrPoseSnapshot:
                 {
                     auto value = decodeServerVrPoseSnapshot(frame->payload());
@@ -1091,13 +1125,13 @@ namespace TES3MP
         return ClientRuntimeResult::TransportFailed;
     }
 
-    HeadlessClientResult ClientSessionRuntime::close() noexcept
+    HeadlessClientResult ClientSessionRuntime::close(TransportCloseMode mode) noexcept
     {
         mMayAcceptPlayerCredential = false;
         mOutbound.clear();
         mLocomotionHistory.clear();
         mPendingCharacterProfile.reset();
-        return mSession->close();
+        return mSession->close(mode);
     }
 
     std::optional<PlayerCredential> ClientSessionRuntime::takePlayerCredential() noexcept

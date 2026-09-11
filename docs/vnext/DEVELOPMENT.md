@@ -213,6 +213,24 @@ the adapter executable. Run affected live/headless flows when behavior crosses
 the real transport, OpenMW presentation, reconnect, or content-loading boundary.
 Do not claim a hardware or platform result that was not actually run.
 
+For the content-backed two-client weather/reconnect/slow-peer capture, use a
+test-enabled product build and a fresh artifact directory:
+
+```sh
+python scripts/run_weather_reconnect_capture.py \
+  --server build/vnext-product/tes3mp_server.exe \
+  --openmw build/vnext-product/openmw.exe \
+  --openmw-config build/weather-source-openmw.cfg \
+  --resources build/vnext-product/resources \
+  --data "/path/to/Morrowind/Data Files" \
+  --fallback-archive Morrowind.bsa --content Morrowind.esm \
+  --artifacts build/weather-reconnect-evidence
+```
+
+The runner bakes the real loadout and captures bounded logs, transition/resume
+samples, RSS, queue high-water/drain state, and `summary.json`. It rejects a
+nonempty artifact directory.
+
 ## Machine-owned evidence
 
 - [BASELINE_PROVENANCE.json](BASELINE_PROVENANCE.json) enumerates every intended

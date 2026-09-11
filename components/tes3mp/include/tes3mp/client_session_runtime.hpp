@@ -13,6 +13,7 @@
 #include "protocol_handshake.hpp"
 #include "protocol_pose.hpp"
 #include "weather_replication.hpp"
+#include "world_time_replication.hpp"
 
 #include <memory>
 #include <optional>
@@ -26,7 +27,7 @@ namespace TES3MP
         LatestWinsActorSnapshot, ReliableActorInterestBaseline, ReliableInteractiveObjectInterestBaseline,
         ReliablePlayerInventoryBaseline, ReliableContainerInventoryBaseline, ReliableGroundItemBaseline,
         LatestWinsEquipmentSnapshot, LatestWinsCombatSnapshot, ReliableCombatEventBatch, ReliableCharacterProfile,
-        ReliableDialogueChoiceResult, ReliableWeatherState, ServerVrPoseSnapshot>;
+        ReliableDialogueChoiceResult, ReliableWeatherState, ReliableWorldTimeState, ServerVrPoseSnapshot>;
 // Combat is capability-gated and intentionally kept outside the spatial readiness lanes.
 
     enum class ClientRuntimeResult : std::uint8_t
@@ -72,6 +73,8 @@ namespace TES3MP
         bool characterProfileApplied = false;
         bool weatherStateApplied = false;
         bool weatherBaselineCompleted = false;
+        bool worldTimeStateApplied = false;
+        bool worldTimeBaselineCompleted = false;
         std::vector<ServerVrPoseSnapshot> poseSnapshots;
         std::vector<ReliableCombatEventBatch> combatEvents;
         std::vector<ReliableDialogueChoiceResult> dialogueChoiceResults;
@@ -125,7 +128,7 @@ namespace TES3MP
         ClientRuntimeDrainResult drainInbound();
         ClientRuntimeResult queue(MessageClass messageClass, MessageKind kind, std::span<const std::byte> payload);
         ClientRuntimeResult flushOutbound() noexcept;
-        HeadlessClientResult close() noexcept;
+        HeadlessClientResult close(TransportCloseMode mode = TransportCloseMode::Graceful) noexcept;
 
         HeadlessClientSession& session() noexcept { return *mSession; }
         const HeadlessClientSession& session() const noexcept { return *mSession; }
@@ -173,6 +176,7 @@ namespace TES3MP
         bool mResyncEquipmentObserved = false;
         bool mResyncCombatObserved = false;
         bool mResyncWeatherObserved = false;
+        bool mResyncWorldTimeObserved = false;
         std::optional<CommandSequence> mLastQueuedSequence;
         std::optional<CommandSequence> mLastCharacterCommandSequence;
         ClientLocomotionHistory mLocomotionHistory;

@@ -853,4 +853,41 @@ namespace TES3MP
         mPendingWeather.reset();
         return WeatherReplicationReceiveResult::InvalidChunkSequence;
     }
+
+    WorldTimeReplicationReceiveResult ClientSessionStateMachine::receiveReliableWorldTimeState(
+        ReliableWorldTimeState state)
+    {
+        if (mState != ClientSessionState::Established)
+            return WorldTimeReplicationReceiveResult::NotEstablished;
+        if (!mNegotiatedHello
+            || !std::ranges::binary_search(
+                mNegotiatedHello->negotiatedCapabilities(), worldTimeReplicationCapability()))
+            return WorldTimeReplicationReceiveResult::CapabilityNotNegotiated;
+        if (!mSessionId)
+            return WorldTimeReplicationReceiveResult::SessionNotBound;
+        if (state.targetSessionId != *mSessionId)
+            return WorldTimeReplicationReceiveResult::SessionMismatch;
+        if (state.targetSessionGeneration != mGeneration)
+            return WorldTimeReplicationReceiveResult::GenerationMismatch;
+        if (!state.completeBaseline && !mWorldTimeBaselineComplete)
+            return WorldTimeReplicationReceiveResult::BaselineMissing;
+        if (mConfirmedWorldTime)
+        {
+            if (state.serverTick < mConfirmedWorldTime->serverTick
+                || state.canonicalRevision < mConfirmedWorldTime->canonicalRevision
+                || state.time.revision < mConfirmedWorldTime->time.revision)
+                return WorldTimeReplicationReceiveResult::StaleRevision;
+            if (state.serverTick == mConfirmedWorldTime->serverTick)
+            {
+                if (state.canonicalRevision == mConfirmedWorldTime->canonicalRevision
+                    && state.time.revision == mConfirmedWorldTime->time.revision)
+                    return state.time == mConfirmedWorldTime->time
+                        ? WorldTimeReplicationReceiveResult::IdenticalDuplicate
+                        : WorldTimeReplicationReceiveResult::ContradictorySameRevision;
+            }
+        }
+        mWorldTimeBaselineComplete = mWorldTimeBaselineComplete || state.completeBaseline;
+        mConfirmedWorldTime = std::move(state);
+        return WorldTimeReplicationReceiveResult::Applied;
+    }
 }

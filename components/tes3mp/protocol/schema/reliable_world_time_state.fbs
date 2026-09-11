@@ -1,0 +1,22 @@
+namespace TES3MP.Protocol.Schema.WorldTimeReplication;
+
+table ReliableWorldTimeState {
+  target_session_id:ulong (id: 0);
+  target_session_generation:ulong (id: 1);
+  server_tick:ulong (id: 2);
+  canonical_revision:ulong (id: 3);
+  day:ubyte (id: 4);
+  month:ubyte (id: 5);
+  year:int (id: 6);
+  milliseconds_since_midnight:uint (id: 7);
+  time_scale_units:uint (id: 8);
+  sub_millisecond_remainder:ushort (id: 9);
+  world_time_revision:ulong (id: 10);
+  last_change_tick:ulong (id: 11);
+  last_advance_tick:ulong (id: 12);
+  complete_baseline:bool (id: 13);
+}
+
+root_type ReliableWorldTimeState;
+file_identifier "T3WT";
+file_extension "t3wt";

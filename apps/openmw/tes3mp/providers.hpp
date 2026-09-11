@@ -66,6 +66,7 @@ namespace TES3MP::OpenMWAdapter
     public:
         virtual ~ConnectionControlProvider() = default;
         virtual bool disconnectRequested() noexcept = 0;
+        virtual std::uint64_t reconnectDelayNanoseconds() noexcept { return 0; }
         virtual std::optional<ResyncReason> resyncRequested() noexcept { return std::nullopt; }
         virtual void resyncCompleted() noexcept {}
     };
@@ -163,6 +164,10 @@ namespace TES3MP::OpenMWAdapter
         }
         virtual ProviderResult applyWeather(
             std::span<const WeatherRegionSnapshot>, ServerTick, MonotonicInstant) noexcept
+        {
+            return ProviderResult::Accepted;
+        }
+        virtual ProviderResult applyWorldTime(const ReliableWorldTimeState&, MonotonicInstant) noexcept
         {
             return ProviderResult::Accepted;
         }

@@ -155,6 +155,8 @@ namespace TES3MP::OpenMWAdapter
             const CanonicalPlayerQuestJournalState& state, MonotonicInstant receivedAt) noexcept override;
         ProviderResult applyWeather(
             std::span<const WeatherRegionSnapshot> regions, ServerTick serverTick, MonotonicInstant receivedAt) noexcept override;
+        ProviderResult applyWorldTime(
+            const ReliableWorldTimeState& state, MonotonicInstant receivedAt) noexcept override;
         void appendMeleeTargets(std::vector<MWWorld::Ptr>& targets) const;
         std::optional<MeleeAttackCapture> captureMeleeAttack(
             const MWWorld::Ptr& victim, float attackStrength, int attackType) const noexcept;

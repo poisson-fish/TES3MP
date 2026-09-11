@@ -52,6 +52,7 @@ class FlatBuffersProofRunnerTests(unittest.TestCase):
                 "reliable_operation.fbs",
                 "reliable_player_inventory_baseline.fbs",
                 "reliable_weather_state.fbs",
+                "reliable_world_time_state.fbs",
                 "server_hello.fbs",
                 "server_vr_pose_snapshot.fbs",
                 "session_rejected.fbs",

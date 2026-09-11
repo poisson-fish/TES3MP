@@ -105,6 +105,7 @@ namespace TES3MP::ServerApp
         bool supportsCharacterCreation(TransportConnectionId connection) const noexcept;
         bool supportsDialogueChoices(TransportConnectionId connection) const noexcept;
         bool supportsWeather(TransportConnectionId connection) const noexcept;
+        bool supportsWorldTime(TransportConnectionId connection) const noexcept;
     };
 }
 

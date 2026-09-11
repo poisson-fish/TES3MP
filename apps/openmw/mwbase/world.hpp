@@ -4,6 +4,7 @@
 #include "rotationflags.hpp"
 
 #include <deque>
+#include <cstdint>
 #include <set>
 #include <span>
 #include <string_view>
@@ -209,6 +210,9 @@ namespace MWBase
 
         virtual MWWorld::TimeStamp getTimeStamp() const = 0;
         ///< Return current in-game time and number of day since new game start.
+
+        virtual void setWorldTimeAuthority(bool) {}
+        virtual bool applyAuthoritativeWorldTime(int, int, int, std::uint32_t, std::uint32_t) { return false; }
 
         virtual bool toggleSky() = 0;
         ///< \return Resulting mode

@@ -9,6 +9,7 @@
 #include "protocol_handshake.hpp"
 #include "session_types.hpp"
 #include "weather_replication.hpp"
+#include "world_time_replication.hpp"
 
 #include <cstdint>
 #include <map>
@@ -216,6 +217,20 @@ namespace TES3MP
         InvalidChunkSequence,
     };
 
+    enum class WorldTimeReplicationReceiveResult : std::uint8_t
+    {
+        Applied,
+        IdenticalDuplicate,
+        NotEstablished,
+        CapabilityNotNegotiated,
+        SessionNotBound,
+        SessionMismatch,
+        GenerationMismatch,
+        StaleRevision,
+        ContradictorySameRevision,
+        BaselineMissing,
+    };
+
     using ClientSessionCreateResult
         = std::variant<std::unique_ptr<class ClientSessionStateMachine>, SessionTransitionError>;
 
@@ -246,6 +261,7 @@ namespace TES3MP
         InventoryReplicationReceiveResult receiveReliableGroundItemBaseline(ReliableGroundItemBaseline baseline);
         InventoryReplicationReceiveResult receiveLatestWinsEquipmentSnapshot(LatestWinsEquipmentSnapshot snapshot);
         WeatherReplicationReceiveResult receiveReliableWeatherState(ReliableWeatherState state);
+        WorldTimeReplicationReceiveResult receiveReliableWorldTimeState(ReliableWorldTimeState state);
 
         ClientSessionState state() const noexcept { return mState; }
         SessionGeneration generation() const noexcept { return mGeneration; }
@@ -310,6 +326,8 @@ namespace TES3MP
         std::span<const WeatherRegionSnapshot> confirmedWeather() const noexcept { return mConfirmedWeather; }
         std::optional<ServerTick> confirmedWeatherServerTick() const noexcept { return mWeatherServerTick; }
         bool weatherBaselineComplete() const noexcept { return mWeatherBaselineComplete; }
+        const std::optional<ReliableWorldTimeState>& confirmedWorldTime() const noexcept { return mConfirmedWorldTime; }
+        bool worldTimeBaselineComplete() const noexcept { return mWorldTimeBaselineComplete; }
 
     private:
         ClientSessionStateMachine(MonotonicClock& clock, SessionTimeoutPolicy timeoutPolicy,
@@ -379,6 +397,8 @@ namespace TES3MP
         std::optional<CanonicalRevision> mWeatherCanonicalRevision;
         std::optional<ServerTick> mWeatherServerTick;
         bool mWeatherBaselineComplete = false;
+        std::optional<ReliableWorldTimeState> mConfirmedWorldTime;
+        bool mWorldTimeBaselineComplete = false;
     };
 }
 

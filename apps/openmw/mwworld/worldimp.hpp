@@ -111,6 +111,7 @@ namespace MWWorld
         bool mGodMode;
         bool mScriptsEnabled;
         bool mDiscardMovements;
+        bool mWorldTimeAuthority = false;
         std::vector<std::string> mContentFiles;
 
         std::filesystem::path mUserDataPath;
@@ -307,6 +308,11 @@ namespace MWWorld
 
         TimeStamp getTimeStamp() const override;
         ///< Return current in-game time and number of day since new game start.
+
+        void setWorldTimeAuthority(bool authoritative) override;
+        bool applyAuthoritativeWorldTime(
+            int day, int month, int year, std::uint32_t millisecondsSinceMidnight,
+            std::uint32_t timeScaleUnits) override;
 
         bool toggleSky() override;
         ///< \return Resulting mode

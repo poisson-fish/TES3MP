@@ -5,6 +5,7 @@
 
 #include <limits>
 #include <ranges>
+#include <thread>
 
 namespace TES3MP::OpenMWAdapter
 {
@@ -89,6 +90,14 @@ namespace TES3MP::OpenMWAdapter
             return DesktopAutomationRole::ActorReconnect;
         if (value == "actor-auth")
             return DesktopAutomationRole::ActorAuth;
+        if (value == "weather-one")
+            return DesktopAutomationRole::WeatherOne;
+        if (value == "weather-two")
+            return DesktopAutomationRole::WeatherTwo;
+        if (value == "weather-reconnect")
+            return DesktopAutomationRole::WeatherReconnect;
+        if (value == "weather-slow")
+            return DesktopAutomationRole::WeatherSlow;
         return std::nullopt;
     }
 
@@ -307,6 +316,13 @@ namespace TES3MP::OpenMWAdapter
         else if ((mRole == DesktopAutomationRole::CaptureOne || mRole == DesktopAutomationRole::CaptureTwo)
             && elapsed >= CaptureDuration)
             finish(mMoved && mSawPeer);
+        else if ((mRole == DesktopAutomationRole::WeatherOne || mRole == DesktopAutomationRole::WeatherTwo)
+            && mSawWeatherTransition && mSawWeatherCompletion)
+            finish(mWeatherPresentations >= 2 && mWeatherDuplicates == 0);
+        else if (mRole == DesktopAutomationRole::WeatherReconnect && mWeatherConvergedAfterResume)
+            finish(mWeatherDuplicates == 0);
+        else if (mRole == DesktopAutomationRole::WeatherSlow && mSlowPeerRecovered)
+            finish(mWeatherDuplicates == 0);
         return ProviderResult::Accepted;
     }
 
@@ -321,6 +337,76 @@ namespace TES3MP::OpenMWAdapter
         const LatestWinsEquipmentSnapshot& equipment, MonotonicInstant receivedAt) noexcept
     {
         return mPresentation.applyInventory(player, containers, groundItems, equipment, receivedAt);
+    }
+
+    ProviderResult DesktopAutomation::applyWeather(std::span<const WeatherRegionSnapshot> regions,
+        ServerTick serverTick, MonotonicInstant receivedAt) noexcept
+    {
+        const auto applied = mPresentation.applyWeather(regions, serverTick, receivedAt);
+        if (applied != ProviderResult::Accepted)
+            return applied;
+        ++mWeatherPresentations;
+        if (mLastWeatherTick && *mLastWeatherTick == serverTick && std::ranges::equal(mLastWeather, regions))
+            ++mWeatherDuplicates;
+        else
+            writeWeatherSample(regions, serverTick);
+        mLastWeather.assign(regions.begin(), regions.end());
+        mLastWeatherTick = serverTick;
+
+        const bool transitioning = std::ranges::any_of(regions, [serverTick](const auto& region) {
+            return region.currentWeather != region.targetWeather && serverTick >= region.transitionStartTick
+                && serverTick < region.transitionEndTick;
+        });
+        const bool completed = std::ranges::all_of(regions, [](const auto& region) {
+            return region.currentWeather == region.targetWeather;
+        });
+        mSawWeatherTransition = mSawWeatherTransition || transitioning;
+        mSawWeatherCompletion = mSawWeatherCompletion || (mSawWeatherTransition && completed);
+
+        if (mRole == DesktopAutomationRole::WeatherReconnect && transitioning && !mWeatherTickBeforeDisconnect)
+        {
+            mWeatherTickBeforeDisconnect = serverTick;
+            mWeatherRevisionBeforeDisconnect = regions.front().revision;
+            mReadyToDisconnect = true;
+            mNextDisconnect = receivedAt;
+        }
+        if (mRole == DesktopAutomationRole::WeatherReconnect && mResumes != 0 && mWeatherTickBeforeDisconnect
+            && serverTick > *mWeatherTickBeforeDisconnect
+            && std::ranges::all_of(regions, [&](const auto& region) {
+                   return !mWeatherRevisionBeforeDisconnect || region.revision > *mWeatherRevisionBeforeDisconnect;
+               }))
+            mWeatherConvergedAfterResume = true;
+
+        if (mRole == DesktopAutomationRole::WeatherSlow && transitioning && !mSlowPeerStalled)
+        {
+            mSlowPeerStalled = true;
+            if (mOutput && mEvidenceEvents < MaximumEvidenceEvents)
+            {
+                mOutput << "{\"event\":\"weather_slow_peer_stall_started\",\"role\":\"" << roleName()
+                        << "\",\"server_tick\":" << serverTick.value() << "}\n";
+                mOutput.flush();
+                ++mEvidenceEvents;
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(1500));
+        }
+        else if (mRole == DesktopAutomationRole::WeatherSlow && mSlowPeerStalled && completed)
+        {
+            mSlowPeerRecovered = true;
+            if (mOutput && mEvidenceEvents < MaximumEvidenceEvents)
+            {
+                mOutput << "{\"event\":\"weather_slow_peer_recovered\",\"role\":\"" << roleName()
+                        << "\",\"server_tick\":" << serverTick.value() << "}\n";
+                mOutput.flush();
+                ++mEvidenceEvents;
+            }
+        }
+        return ProviderResult::Accepted;
+    }
+
+    ProviderResult DesktopAutomation::applyWorldTime(
+        const ReliableWorldTimeState& state, MonotonicInstant receivedAt) noexcept
+    {
+        return mPresentation.applyWorldTime(state, receivedAt);
     }
 
     std::optional<ObjectRevision> DesktopAutomation::observedObjectRevision(InteractiveObjectId id) const noexcept
@@ -353,6 +439,7 @@ namespace TES3MP::OpenMWAdapter
     {
         const auto maximumResumes = mRole == DesktopAutomationRole::Reconnect ? 32u
             : mRole == DesktopAutomationRole::ActorReconnect                  ? 4u
+            : mRole == DesktopAutomationRole::WeatherReconnect                ? 1u
                                                                               : 0u;
         if (maximumResumes == 0 || !mReadyToDisconnect || !mNow || !mNextDisconnect || *mNow < *mNextDisconnect
             || mResumes >= maximumResumes)
@@ -360,6 +447,11 @@ namespace TES3MP::OpenMWAdapter
         mReadyToDisconnect = false;
         mNextDisconnect.reset();
         return true;
+    }
+
+    std::uint64_t DesktopAutomation::reconnectDelayNanoseconds() noexcept
+    {
+        return mRole == DesktopAutomationRole::WeatherReconnect ? 4'000'000'000ull : 0;
     }
 
     std::optional<ResyncReason> DesktopAutomation::resyncRequested() noexcept
@@ -410,6 +502,14 @@ namespace TES3MP::OpenMWAdapter
                 return "actor-reconnect";
             case DesktopAutomationRole::ActorAuth:
                 return "actor-auth";
+            case DesktopAutomationRole::WeatherOne:
+                return "weather-one";
+            case DesktopAutomationRole::WeatherTwo:
+                return "weather-two";
+            case DesktopAutomationRole::WeatherReconnect:
+                return "weather-reconnect";
+            case DesktopAutomationRole::WeatherSlow:
+                return "weather-slow";
         }
         return "unknown";
     }
@@ -429,6 +529,31 @@ namespace TES3MP::OpenMWAdapter
         mOutput.flush();
         ++mEvidenceEvents;
         ++mActorEvidenceSamples;
+    }
+
+    void DesktopAutomation::writeWeatherSample(
+        std::span<const WeatherRegionSnapshot> regions, ServerTick serverTick) noexcept
+    {
+        if (!mOutput || mEvidenceEvents >= MaximumEvidenceEvents || mWeatherEvidenceSamples >= 24)
+            return;
+        mOutput << "{\"event\":\"weather_sample\",\"role\":\"" << roleName()
+                << "\",\"server_tick\":" << serverTick.value() << ",\"regions\":[";
+        for (std::size_t index = 0; index < regions.size(); ++index)
+        {
+            const auto& region = regions[index];
+            if (index != 0)
+                mOutput << ',';
+            mOutput << "{\"region\":" << region.region.value() << ",\"current\":"
+                    << region.currentWeather.value() << ",\"target\":" << region.targetWeather.value()
+                    << ",\"revision\":" << region.revision.value() << ",\"transition_start\":"
+                    << region.transitionStartTick.value() << ",\"transition_end\":"
+                    << region.transitionEndTick.value() << ",\"next_selection\":"
+                    << region.nextSelectionTick.value() << '}';
+        }
+        mOutput << "]}\n";
+        mOutput.flush();
+        ++mEvidenceEvents;
+        ++mWeatherEvidenceSamples;
     }
 
     void DesktopAutomation::writeStatus(ConnectionStatus status) noexcept
@@ -469,7 +594,15 @@ namespace TES3MP::OpenMWAdapter
                     << ",\"actor_saw_leave\":" << (mActorSawLeave ? "true" : "false")
                     << ",\"actor_saw_return\":" << (mActorSawReturn ? "true" : "false")
                     << ",\"resync_completed\":" << (mResyncDone ? "true" : "false")
-                    << ",\"actor_after_resync\":" << (mActorAppliedAfterResync ? "true" : "false") << "}\n";
+                    << ",\"actor_after_resync\":" << (mActorAppliedAfterResync ? "true" : "false")
+                    << ",\"weather_presentations\":" << mWeatherPresentations
+                    << ",\"weather_duplicate_presentations\":" << mWeatherDuplicates
+                    << ",\"weather_regions\":" << mLastWeather.size()
+                    << ",\"weather_transition\":" << (mSawWeatherTransition ? "true" : "false")
+                    << ",\"weather_completion\":" << (mSawWeatherCompletion ? "true" : "false")
+                    << ",\"weather_resumed_converged\":" << (mWeatherConvergedAfterResume ? "true" : "false")
+                    << ",\"slow_peer_stalled\":" << (mSlowPeerStalled ? "true" : "false")
+                    << ",\"slow_peer_recovered\":" << (mSlowPeerRecovered ? "true" : "false") << "}\n";
             mOutput.flush();
             ++mEvidenceEvents;
         }

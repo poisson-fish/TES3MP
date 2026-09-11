@@ -7,6 +7,7 @@
 #include "interest_projection.hpp"
 #include "inventory_interest_projection.hpp"
 #include "weather_projection.hpp"
+#include "world_time_projection.hpp"
 #include "tes3mp/character_creation_protocol.hpp"
 #include "tes3mp/protocol_frame.hpp"
 
@@ -56,6 +57,15 @@ namespace TES3MP::ServerApp
                 ? projectWeatherBaseline(after, *mWorld, join.session, tick, revision)
                 : std::optional<WeatherStateDelivery>{};
             if (weatherCapable && (!mWorld || !weatherBaseline))
+                return false;
+
+            const auto worldTimeCapable = joiningSession && joiningSession->negotiatedHello()
+                && std::ranges::binary_search(joiningSession->negotiatedHello()->negotiatedCapabilities(),
+                    worldTimeReplicationCapability());
+            auto worldTimeBaseline = worldTimeCapable && mWorld
+                ? projectWorldTimeBaseline(after, *mWorld, join.session, tick, revision)
+                : std::optional<ReliableWorldTimeState>{};
+            if (worldTimeCapable && (!mWorld || !worldTimeBaseline))
                 return false;
 
             const auto inventoryCapable = joiningSession && joiningSession->negotiatedHello()
@@ -140,7 +150,7 @@ namespace TES3MP::ServerApp
             std::vector<std::vector<std::byte>> owned;
             std::vector<OutboundQueueSet::AtomicMessage> messages;
             std::size_t frameCapacity
-                = 8 + projected->size() * 2 + (weatherBaseline ? weatherBaseline->chunks.size() : 0);
+                = 9 + projected->size() * 2 + (weatherBaseline ? weatherBaseline->chunks.size() : 0);
             for (const auto& [connection, delivery] : inventoryBaselines)
             {
                 (void)connection;
@@ -213,6 +223,8 @@ namespace TES3MP::ServerApp
             }
 
             if (weatherBaseline && !appendWeatherMessages(owned, messages, mConnection, *weatherBaseline))
+                return false;
+            if (worldTimeBaseline && !appendWorldTimeMessage(owned, messages, mConnection, *worldTimeBaseline))
                 return false;
 
             for (const auto& [connection, inventoryBaseline] : inventoryBaselines)

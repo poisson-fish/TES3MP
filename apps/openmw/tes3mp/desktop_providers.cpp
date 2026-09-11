@@ -870,7 +870,10 @@ namespace TES3MP::OpenMWAdapter
             {
                 auto world = MWBase::Environment::get().getWorld();
                 if (world)
+                {
                     world->setWeatherAuthority(false);
+                    world->setWorldTimeAuthority(false);
+                }
             }
             catch (...)
             {
@@ -1295,6 +1298,19 @@ namespace TES3MP::OpenMWAdapter
                         state.region, state.current, state.target, state.transitionFactor, state.transitionDelta))
                     return ProviderResult::PresentationFailed;
             return ProviderResult::Accepted;
+        }
+
+        ProviderResult applyWorldTime(const ReliableWorldTimeState& state)
+        {
+            auto world = MWBase::Environment::get().getWorld();
+            if (!world)
+                return ProviderResult::PresentationFailed;
+            world->setWorldTimeAuthority(true);
+            const auto& time = state.time;
+            return world->applyAuthoritativeWorldTime(time.day, time.month, time.year,
+                       time.millisecondsSinceMidnight, time.timeScaleUnits)
+                ? ProviderResult::Accepted
+                : ProviderResult::PresentationFailed;
         }
 
         ProviderResult applyCombat(
@@ -2107,6 +2123,24 @@ namespace TES3MP::OpenMWAdapter
         try
         {
             const auto result = mImpl->applyWeather(regions, serverTick);
+            if (result != ProviderResult::Accepted)
+                mImpl->clear();
+            return result;
+        }
+        catch (...)
+        {
+            mImpl->clear();
+            return ProviderResult::PresentationFailed;
+        }
+    }
+
+    ProviderResult DesktopPresentation::applyWorldTime(
+        const ReliableWorldTimeState& state, MonotonicInstant receivedAt) noexcept
+    {
+        (void)receivedAt;
+        try
+        {
+            const auto result = mImpl->applyWorldTime(state);
             if (result != ProviderResult::Accepted)
                 mImpl->clear();
             return result;

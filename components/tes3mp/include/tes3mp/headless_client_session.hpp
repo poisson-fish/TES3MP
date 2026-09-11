@@ -53,7 +53,8 @@ namespace TES3MP
         InventoryReplicationReceiveResult receiveReliableGroundItemBaseline(ReliableGroundItemBaseline baseline);
         InventoryReplicationReceiveResult receiveLatestWinsEquipmentSnapshot(LatestWinsEquipmentSnapshot snapshot);
         WeatherReplicationReceiveResult receiveReliableWeatherState(ReliableWeatherState state);
-        HeadlessClientResult close() noexcept;
+        WorldTimeReplicationReceiveResult receiveReliableWorldTimeState(ReliableWorldTimeState state);
+        HeadlessClientResult close(TransportCloseMode mode = TransportCloseMode::Graceful) noexcept;
 
         const ClientSessionStateMachine& stateMachine() const noexcept { return *mState; }
         std::optional<ConnectAttemptId> attempt() const noexcept { return mAttempt; }

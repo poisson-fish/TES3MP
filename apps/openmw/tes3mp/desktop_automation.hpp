@@ -7,6 +7,7 @@
 #include <fstream>
 #include <optional>
 #include <string_view>
+#include <vector>
 
 namespace TES3MP::OpenMWAdapter
 {
@@ -21,6 +22,10 @@ namespace TES3MP::OpenMWAdapter
         CaptureTwo,
         ActorReconnect,
         ActorAuth,
+        WeatherOne,
+        WeatherTwo,
+        WeatherReconnect,
+        WeatherSlow,
     };
 
     std::optional<DesktopAutomationRole> parseDesktopAutomationRole(std::string_view value) noexcept;
@@ -50,11 +55,16 @@ namespace TES3MP::OpenMWAdapter
             std::span<const ReliableContainerInventoryBaseline> containers,
             const ReliableGroundItemBaseline& groundItems, const LatestWinsEquipmentSnapshot& equipment,
             MonotonicInstant receivedAt) noexcept override;
+        ProviderResult applyWeather(std::span<const WeatherRegionSnapshot> regions, ServerTick serverTick,
+            MonotonicInstant receivedAt) noexcept override;
+        ProviderResult applyWorldTime(
+            const ReliableWorldTimeState& state, MonotonicInstant receivedAt) noexcept override;
         std::optional<ObjectRevision> observedObjectRevision(InteractiveObjectId id) const noexcept override;
         ProviderResult advance(MonotonicInstant now) noexcept override;
         void clear() noexcept override;
         void report(ConnectionStatus status) noexcept override;
         bool disconnectRequested() noexcept override;
+        std::uint64_t reconnectDelayNanoseconds() noexcept override;
         std::optional<ResyncReason> resyncRequested() noexcept override;
         void resyncCompleted() noexcept override;
 
@@ -62,6 +72,7 @@ namespace TES3MP::OpenMWAdapter
         const char* roleName() const noexcept;
         void writeStatus(ConnectionStatus status) noexcept;
         void writeActorSample(const ActorSpatialSnapshot& actor) noexcept;
+        void writeWeatherSample(std::span<const WeatherRegionSnapshot> regions, ServerTick serverTick) noexcept;
         void finish(bool success) noexcept;
 
         DesktopAutomationRole mRole;
@@ -76,6 +87,9 @@ namespace TES3MP::OpenMWAdapter
         std::size_t mActorSnapshots = 0;
         std::size_t mActorEvidenceSamples = 0;
         std::size_t mActorResumeSnapshots = 0;
+        std::size_t mWeatherPresentations = 0;
+        std::size_t mWeatherDuplicates = 0;
+        std::size_t mWeatherEvidenceSamples = 0;
         std::optional<MonotonicInstant> mStartedAt;
         std::optional<MonotonicInstant> mNow;
         std::optional<MonotonicInstant> mNextDisconnect;
@@ -86,6 +100,10 @@ namespace TES3MP::OpenMWAdapter
         std::optional<EntityId> mPlayerEntityId;
         std::optional<ActorSpatialSnapshot> mFirstActor;
         std::optional<ActorSpatialSnapshot> mLastActor;
+        std::vector<WeatherRegionSnapshot> mLastWeather;
+        std::optional<ServerTick> mLastWeatherTick;
+        std::optional<WeatherRevision> mWeatherRevisionBeforeDisconnect;
+        std::optional<ServerTick> mWeatherTickBeforeDisconnect;
         bool mSawPeer = false;
         bool mSawLeave = false;
         bool mSawReturn = false;
@@ -105,6 +123,11 @@ namespace TES3MP::OpenMWAdapter
         bool mResyncIssued = false;
         bool mResyncDone = false;
         bool mActorAppliedAfterResync = false;
+        bool mSawWeatherTransition = false;
+        bool mSawWeatherCompletion = false;
+        bool mWeatherConvergedAfterResume = false;
+        bool mSlowPeerStalled = false;
+        bool mSlowPeerRecovered = false;
         bool mFinished = false;
     };
 }

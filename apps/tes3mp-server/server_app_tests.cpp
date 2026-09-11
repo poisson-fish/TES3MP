@@ -26,6 +26,7 @@
 #include "tes3mp/inventory_replication.hpp"
 #include "world_content.hpp"
 #include "weather_projection.hpp"
+#include "world_time_projection.hpp"
 
 #include <array>
 #include <cassert>
@@ -528,6 +529,14 @@ int main()
             && baselineChunk.header().canonicalRevision == id<CanonicalRevision>(7)
             && baselineChunk.regions().size() == 1
             && baselineChunk.regions()[0].currentWeather == id<WeatherId>(1));
+        auto timeBaseline = projectWorldTimeBaseline(
+            players, initial, id<SessionId>(1), id<ServerTick>(4), id<CanonicalRevision>(7));
+        assert(timeBaseline && timeBaseline->completeBaseline
+            && timeBaseline->targetSessionGeneration == resumedGeneration
+            && timeBaseline->time == initial.time());
+        auto timeUpdate = projectWorldTimeUpdate(
+            initial, id<SessionId>(1), resumedGeneration, id<ServerTick>(5), id<CanonicalRevision>(8));
+        assert(timeUpdate && !timeUpdate->completeBaseline && timeUpdate->time == initial.time());
 
         auto changedValue = setCanonicalWeather(initial, id<WeatherRegionId>(1), WeatherRevision::initial(),
             id<WeatherId>(2), id<ServerTick>(5));

@@ -174,9 +174,9 @@
     },
     {
       "id": "P20-001",
-      "slice": "desktop canonical weather",
+      "slice": "desktop canonical weather and world time",
       "owner": "OpenMW adapter",
-      "purpose": "Suppress stock regional weather selection while multiplayer authority is active and apply manifest-mapped canonical current/target weather through OpenMW's native rendering, sound, particles, and transition presentation.",
+      "purpose": "Suppress stock regional weather selection and local clock advancement while multiplayer authority is active, apply manifest-mapped canonical weather through native presentation, and apply the canonical fixed calendar/time-scale directly to OpenMW globals.",
       "paths": [
         "apps/openmw/mwbase/world.hpp",
         "apps/openmw/mwworld/weather.cpp",
@@ -190,7 +190,7 @@
         "openmw RelWithDebInfo link"
       ],
       "disposition": "local product adapter",
-      "removal_condition": "OpenMW supplies an equivalent supported external weather-authority and canonical transition seam"
+      "removal_condition": "OpenMW supplies equivalent supported external weather and world-time authority seams"
     }
   ]
 }

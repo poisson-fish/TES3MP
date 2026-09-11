@@ -757,7 +757,8 @@ namespace TES3MP::OpenMWAdapter
         auto versions = std::get<ProtocolVersionRange>(ProtocolVersionRange::create(1, 7, 7));
         const std::array optional{ vrPoseCapability(), actorReplicationCapability(),
             interactiveObjectReplicationCapability(), inventoryReplicationCapability(), combatReplicationCapability(),
-            characterCreationCapability(), dialogueChoiceCapability(), weatherReplicationCapability() };
+            characterCreationCapability(), dialogueChoiceCapability(), weatherReplicationCapability(),
+            worldTimeReplicationCapability() };
         auto offer
             = std::get<CapabilityOffer>(CapabilityOffer::create(std::move(versions), optional, {}, contentManifest));
         if ((*runtime)->start(*endpoint, ClientHello::fromOffer(std::move(offer)),

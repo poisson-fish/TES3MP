@@ -49,7 +49,7 @@ namespace
 
     TES3MP::ServerHello serverHello(bool pose = false, bool actors = false, bool interactiveObjects = false,
         bool inventory = false, bool combat = false, std::uint16_t minor = 2, bool dialogueChoices = false,
-        bool weather = false)
+        bool weather = false, bool worldTime = false)
     {
         auto versions = std::get<TES3MP::ProtocolVersionRange>(TES3MP::ProtocolVersionRange::create(1, minor, minor));
         std::vector<TES3MP::CapabilityId> capabilities;
@@ -67,6 +67,8 @@ namespace
             capabilities.push_back(TES3MP::dialogueChoiceCapability());
         if (weather)
             capabilities.push_back(TES3MP::weatherReplicationCapability());
+        if (worldTime)
+            capabilities.push_back(TES3MP::worldTimeReplicationCapability());
         auto client = std::get<TES3MP::CapabilityOffer>(TES3MP::CapabilityOffer::create(versions, capabilities, {}));
         auto server
             = std::get<TES3MP::CapabilityOffer>(TES3MP::CapabilityOffer::create(std::move(versions), capabilities, {}));
@@ -161,6 +163,22 @@ namespace
         const TES3MP::WeatherStateHeader header{ value<TES3MP::SessionId>(1), generation,
             value<TES3MP::ServerTick>(tick), value<TES3MP::CanonicalRevision>(canonicalRevision), 0, 1, baseline };
         return std::get<TES3MP::ReliableWeatherState>(TES3MP::ReliableWeatherState::create(header, regions));
+    }
+
+    TES3MP::ReliableWorldTimeState worldTimeState(
+        TES3MP::SessionGeneration generation, std::uint64_t tick, bool baseline)
+    {
+        TES3MP::CanonicalWorldTimeState time;
+        time.day = 30;
+        time.month = 1;
+        time.year = 427;
+        time.millisecondsSinceMidnight = 45'000'000;
+        time.timeScaleUnits = 30 * TES3MP::WorldTimeScaleUnitsPerOne;
+        time.revision = value<TES3MP::WorldTimeRevision>(tick);
+        time.lastChangeTick = value<TES3MP::ServerTick>(tick);
+        time.lastAdvanceTick = value<TES3MP::ServerTick>(tick);
+        return { value<TES3MP::SessionId>(1), generation, value<TES3MP::ServerTick>(tick),
+            value<TES3MP::CanonicalRevision>(tick), time, baseline };
     }
 
     std::vector<std::byte> frame(
@@ -549,6 +567,13 @@ namespace
             lastWeatherRegions.assign(regions.begin(), regions.end());
             return weatherResult;
         }
+        TES3MP::OpenMWAdapter::ProviderResult applyWorldTime(
+            const TES3MP::ReliableWorldTimeState& state, TES3MP::MonotonicInstant) noexcept override
+        {
+            ++worldTimes;
+            lastWorldTime = state;
+            return TES3MP::OpenMWAdapter::ProviderResult::Accepted;
+        }
         TES3MP::OpenMWAdapter::ProviderResult applyQuestJournal(const TES3MP::QuestJournalCatalog& catalog,
             const TES3MP::CanonicalPlayerQuestJournalState& state, TES3MP::MonotonicInstant) noexcept override
         {
@@ -604,6 +629,8 @@ namespace
             = TES3MP::OpenMWAdapter::ProviderResult::Accepted;
         std::optional<TES3MP::ServerTick> lastWeatherTick;
         std::vector<TES3MP::WeatherRegionSnapshot> lastWeatherRegions;
+        std::size_t worldTimes = 0;
+        std::optional<TES3MP::ReliableWorldTimeState> lastWorldTime;
     };
 
     class PoseInput final : public TES3MP::OpenMWAdapter::VrPoseInputProvider
@@ -1507,6 +1534,52 @@ int main()
         TransportChannel::ReliableOrdered);
     weatherCoordinator->frame(0.01f);
     require(weatherPresentation.weathers == 2 && weatherStatus.last == ConnectionStatus::ContentMappingFailed);
+
+    Input timeInput;
+    Presentation timePresentation;
+    Status timeStatus;
+    auto timeTransport = std::make_unique<IdleTransport>();
+    auto* timeTransportObserver = timeTransport.get();
+    timeTransportObserver->acceptConnections = true;
+    auto timeClock = std::make_unique<Clock>();
+    auto timeCreated = ClientSessionRuntime::create(
+        *timeTransport, *timeClock, timeouts, SessionGeneration::initial(), outbound);
+    auto timeRuntime = std::get<std::unique_ptr<ClientSessionRuntime>>(std::move(timeCreated));
+    auto timeVersions = std::get<ProtocolVersionRange>(ProtocolVersionRange::create(1, 7, 7));
+    const std::array timeCapabilities{ worldTimeReplicationCapability() };
+    auto timeOffer
+        = std::get<CapabilityOffer>(CapabilityOffer::create(std::move(timeVersions), timeCapabilities, {}));
+    auto timePassword = AuthenticationMaterial::create(passwordBytes);
+    require(timePassword
+        && timeRuntime->start(endpoint, ClientHello::fromOffer(std::move(timeOffer)),
+               AuthenticationRequest::join(std::move(*timePassword)))
+            == HeadlessClientResult::Accepted);
+    auto timeCoordinator = makeCoordinator(std::move(timeTransport), std::move(timeClock),
+        std::move(timeRuntime), reconnect, timeInput, timePresentation, timeStatus);
+    timeCoordinator->frame(0.01f);
+    timeTransportObserver->enqueue(MessageClass::SessionControl, MessageKind::ServerHello,
+        encodeServerHello(serverHello(false, false, false, false, false, 7, false, false, true)),
+        TransportChannel::ReliableOrdered);
+    timeCoordinator->frame(0.01f);
+    timeTransportObserver->enqueue(MessageClass::SessionControl, MessageKind::AuthenticationAccepted,
+        encodeAuthenticationAccepted(accepted(std::byte{ 15 })), TransportChannel::ReliableOrdered);
+    timeTransportObserver->enqueue(MessageClass::ReliableOperation, MessageKind::ReliableInterestBaseline,
+        encodeReliableInterestBaseline(selfBaseline(SessionGeneration::initial())), TransportChannel::ReliableOrdered);
+    timeTransportObserver->enqueue(MessageClass::LatestWinsSnapshot, MessageKind::LatestWinsSnapshot,
+        encodeLatestWinsSnapshot(selfSnapshot(SessionGeneration::initial())), TransportChannel::LatestWins);
+    timeCoordinator->frame(0.01f);
+    require(timeCoordinator->multiplayerState() != MultiplayerState::Ready && timePresentation.worldTimes == 0);
+    const auto timeBaseline = worldTimeState(SessionGeneration::initial(), 5, true);
+    timeTransportObserver->enqueue(MessageClass::ReliableOperation, MessageKind::ReliableWorldTimeState,
+        encodeReliableWorldTimeState(timeBaseline), TransportChannel::ReliableOrdered);
+    timeCoordinator->frame(0.01f);
+    require(timeCoordinator->multiplayerState() == MultiplayerState::Ready && timePresentation.worldTimes == 1
+        && timePresentation.lastWorldTime && timePresentation.lastWorldTime->time.day == 30
+        && timePresentation.lastWorldTime->time.month == 1);
+    timeTransportObserver->enqueue(MessageClass::ReliableOperation, MessageKind::ReliableWorldTimeState,
+        encodeReliableWorldTimeState(timeBaseline), TransportChannel::ReliableOrdered);
+    timeCoordinator->frame(0.01f);
+    require(timePresentation.worldTimes == 1);
 
     Input dialogueInput;
     Presentation dialoguePresentation;

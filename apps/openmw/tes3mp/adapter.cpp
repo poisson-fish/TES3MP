@@ -36,7 +36,7 @@ namespace TES3MP::OpenMWAdapter
             const std::array optional{ vrPoseCapability(), actorReplicationCapability(),
                 interactiveObjectReplicationCapability(), inventoryReplicationCapability(),
                 combatReplicationCapability(), characterCreationCapability(), dialogueChoiceCapability(),
-                weatherReplicationCapability() };
+                weatherReplicationCapability(), worldTimeReplicationCapability() };
             auto offer = std::get<CapabilityOffer>(
                 CapabilityOffer::create(std::move(versions), optional, {}, contentManifest));
             return ClientHello::fromOffer(std::move(offer));
@@ -96,6 +96,14 @@ namespace TES3MP::OpenMWAdapter
             return hello
                 && std::binary_search(hello->negotiatedCapabilities().begin(), hello->negotiatedCapabilities().end(),
                     weatherReplicationCapability());
+        }
+
+        bool worldTimeNegotiated(const ClientSessionRuntime& runtime) noexcept
+        {
+            const auto& hello = runtime.session().stateMachine().negotiatedHello();
+            return hello
+                && std::binary_search(hello->negotiatedCapabilities().begin(), hello->negotiatedCapabilities().end(),
+                    worldTimeReplicationCapability());
         }
 
         struct ResumeContinuity
@@ -195,6 +203,16 @@ namespace TES3MP::OpenMWAdapter
                 const auto now = mClock->now();
                 if (!mRuntime)
                 {
+                    std::array<TransportEvent, TransportLimits::MaxRetainedEvents> events{};
+                    const auto polled = mTransport->poll(events);
+                    if (polled.result != TransportResult::Accepted
+                        || std::ranges::any_of(std::span(events).first(polled.events), [](const auto& event) {
+                               return event.kind == TransportEventKind::RuntimeFailed;
+                           }))
+                    {
+                        closeTerminal(ConnectionStatus::ResumeFailed);
+                        return;
+                    }
                     if (mResuming && mNextAttempt && now >= *mNextAttempt)
                         startResumeAttempt(now);
                     return;
@@ -250,6 +268,7 @@ namespace TES3MP::OpenMWAdapter
                     mResyncInventory = mResyncInventory || advanced.inventoryReplicationCompleted;
                     mResyncCombat = mResyncCombat || advanced.combatSnapshotApplied;
                     mResyncWeather = mResyncWeather || advanced.weatherBaselineCompleted;
+                    mResyncWorldTime = mResyncWorldTime || advanced.worldTimeBaselineCompleted;
                 }
                 if (advanced.authenticationAccepted)
                 {
@@ -314,9 +333,12 @@ namespace TES3MP::OpenMWAdapter
                 }
                 const bool completeInitialBaselines = mRuntime->session().stateMachine().interestBaselineComplete()
                     && (!weatherNegotiated(*mRuntime)
-                        || mRuntime->session().stateMachine().weatherBaselineComplete());
+                        || mRuntime->session().stateMachine().weatherBaselineComplete())
+                    && (!worldTimeNegotiated(*mRuntime)
+                        || mRuntime->session().stateMachine().worldTimeBaselineComplete());
                 if (mResuming && completeInitialBaselines
-                    && (advanced.baselineCompleted || advanced.weatherBaselineCompleted))
+                    && (advanced.baselineCompleted || advanced.weatherBaselineCompleted
+                        || advanced.worldTimeBaselineCompleted))
                 {
                     const bool preserved = mAttemptGeneration && mContinuity && snapshot
                         && (mPendingDialogueChoice
@@ -338,7 +360,8 @@ namespace TES3MP::OpenMWAdapter
                     mStatus.report(ConnectionStatus::Resumed);
                 }
                 const bool firstBaseline = !mResuming && completeInitialBaselines && !mReady
-                    && (advanced.baselineCompleted || advanced.weatherBaselineCompleted);
+                    && (advanced.baselineCompleted || advanced.weatherBaselineCompleted
+                        || advanced.worldTimeBaselineCompleted);
                 if (firstBaseline)
                 {
                     auto current = snapshot ? continuity(*snapshot) : std::nullopt;
@@ -478,6 +501,19 @@ namespace TES3MP::OpenMWAdapter
                         return;
                     }
                 }
+                const auto& worldTime = mRuntime->session().stateMachine().confirmedWorldTime();
+                if (mGameRunning && worldTime
+                    && (mPresentationBootstrapPending || advanced.worldTimeStateApplied
+                        || advanced.worldTimeBaselineCompleted)
+                    && mRuntime->session().stateMachine().worldTimeBaselineComplete())
+                {
+                    const auto applied = mPresentation.applyWorldTime(*worldTime, now);
+                    if (applied != ProviderResult::Accepted)
+                    {
+                        closeForProviderFailure(applied);
+                        return;
+                    }
+                }
                 if (mGameRunning && snapshot)
                 {
                     mPoseEvidence.retain(snapshot->view().entries());
@@ -525,7 +561,8 @@ namespace TES3MP::OpenMWAdapter
                     && (!interactiveObjectsNegotiated(*mRuntime) || mResyncObjectBaseline)
                     && (!inventoryNegotiated(*mRuntime) || mResyncInventory)
                     && (!combatNegotiated(*mRuntime) || mResyncCombat)
-                    && (!weatherNegotiated(*mRuntime) || mResyncWeather))
+                    && (!weatherNegotiated(*mRuntime) || mResyncWeather)
+                    && (!worldTimeNegotiated(*mRuntime) || mResyncWorldTime))
                 {
                     mAwaitingResync = false;
                     mControl->resyncCompleted();
@@ -582,6 +619,7 @@ namespace TES3MP::OpenMWAdapter
                         mResyncInventory = false;
                         mResyncCombat = false;
                         mResyncWeather = false;
+                        mResyncWorldTime = false;
                     }
                 }
 
@@ -833,6 +871,7 @@ namespace TES3MP::OpenMWAdapter
                 mResyncInventory = false;
                 mResyncCombat = false;
                 mResyncWeather = false;
+                mResyncWorldTime = false;
                 mMinimumActorBaselineRevision.reset();
                 mMinimumObjectBaselineRevision.reset();
                 mMinimumInventoryRevision.reset();
@@ -843,10 +882,16 @@ namespace TES3MP::OpenMWAdapter
                 mAttemptGeneration = *nextGeneration;
                 mResumeDeadline = *mTokenDeadline;
                 mNextAttempt = now;
-                mRuntime->close();
+                mRuntime->close(TransportCloseMode::Abort);
                 mRuntime.reset();
                 mStatus.report(ConnectionStatus::Reconnecting);
-                startResumeAttempt(now);
+                const auto delay = mControl ? mControl->reconnectDelayNanoseconds() : 0;
+                if (delay == 0)
+                    startResumeAttempt(now);
+                else if (delay <= std::numeric_limits<std::uint64_t>::max() - now.nanoseconds())
+                    mNextAttempt = MonotonicInstant::fromNanoseconds(now.nanoseconds() + delay);
+                else
+                    closeTerminal(ConnectionStatus::ResumeFailed);
             }
 
             void startResumeAttempt(MonotonicInstant now)
@@ -987,6 +1032,7 @@ namespace TES3MP::OpenMWAdapter
             bool mResyncInventory = false;
             bool mResyncCombat = false;
             bool mResyncWeather = false;
+            bool mResyncWorldTime = false;
             std::optional<CanonicalRevision> mMinimumActorBaselineRevision;
             std::optional<CanonicalRevision> mMinimumObjectBaselineRevision;
             std::optional<CanonicalRevision> mMinimumInventoryRevision;

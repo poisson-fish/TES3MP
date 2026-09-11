@@ -162,7 +162,13 @@ namespace TES3MP
         return mState->receiveReliableWeatherState(std::move(state));
     }
 
-    HeadlessClientResult HeadlessClientSession::close() noexcept
+    WorldTimeReplicationReceiveResult HeadlessClientSession::receiveReliableWorldTimeState(
+        ReliableWorldTimeState state)
+    {
+        return mState->receiveReliableWorldTimeState(std::move(state));
+    }
+
+    HeadlessClientResult HeadlessClientSession::close(TransportCloseMode mode) noexcept
     {
         if (mAttempt)
         {
@@ -171,7 +177,7 @@ namespace TES3MP
         }
         if (mConnection)
         {
-            mTransport.close(*mConnection, TransportCloseMode::Graceful);
+            mTransport.close(*mConnection, mode);
             mConnection.reset();
         }
         mState->handle(ClientClose{});

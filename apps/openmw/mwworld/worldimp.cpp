@@ -1,6 +1,7 @@
 #include "worldimp.hpp"
 
 #include <charconv>
+#include <limits>
 #include <vector>
 
 #include <osg/ComputeBoundsVisitor>
@@ -786,6 +787,8 @@ namespace MWWorld
 
     void World::advanceTime(double hours, bool incremental)
     {
+        if (mWorldTimeAuthority)
+            return;
         if (!incremental)
         {
             // When we fast-forward time, we should recharge magic items
@@ -1825,6 +1828,36 @@ namespace MWWorld
     void World::changeWeather(const ESM::RefId& region, const ESM::RefId& id)
     {
         mWeatherManager->changeWeather(region, id);
+    }
+
+    void World::setWorldTimeAuthority(bool authoritative)
+    {
+        mWorldTimeAuthority = authoritative;
+    }
+
+    bool World::applyAuthoritativeWorldTime(
+        int day, int month, int year, std::uint32_t millisecondsSinceMidnight, std::uint32_t timeScaleUnits)
+    {
+        if (day < 1 || day > 30 || month < 0 || month >= 12 || millisecondsSinceMidnight >= 86'400'000
+            || timeScaleUnits > 1'000'000)
+            return false;
+        const float hour = static_cast<float>(millisecondsSinceMidnight) / 3'600'000.f;
+        const auto totalDays = static_cast<std::int64_t>(year) * 360 + month * 30 + (day - 1);
+        if (totalDays < std::numeric_limits<int>::min() || totalDays > std::numeric_limits<int>::max())
+            return false;
+        mTimeManager->mDay = day;
+        mTimeManager->mMonth = month;
+        mTimeManager->mYear = year;
+        mTimeManager->mDaysPassed = static_cast<int>(totalDays);
+        mTimeManager->mGameHour = hour;
+        mTimeManager->mGameTimeScale = static_cast<float>(timeScaleUnits) / 1000.f;
+        mGlobalVariables[Globals::sDay].setInteger(day);
+        mGlobalVariables[Globals::sMonth].setInteger(month);
+        mGlobalVariables[Globals::sYear].setInteger(year);
+        mGlobalVariables[Globals::sDaysPassed].setInteger(static_cast<int>(totalDays));
+        mGlobalVariables[Globals::sGameHour].setFloat(hour);
+        mGlobalVariables[Globals::sTimeScale].setFloat(mTimeManager->mGameTimeScale);
+        return true;
     }
 
     void World::setWeatherAuthority(bool authoritative)

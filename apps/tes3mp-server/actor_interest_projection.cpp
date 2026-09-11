@@ -127,7 +127,8 @@ namespace TES3MP::ServerApp
         const std::vector<std::pair<TransportConnectionId, LatestWinsCombatSnapshot>>& combatViews,
         const std::vector<std::pair<TransportConnectionId, ReliableCombatEventBatch>>& combatEvents,
         const std::vector<std::pair<TransportConnectionId, ReliableDialogueChoiceResult>>& dialogueResults,
-        const std::vector<std::pair<TransportConnectionId, WeatherStateDelivery>>& weatherUpdates)
+        const std::vector<std::pair<TransportConnectionId, WeatherStateDelivery>>& weatherUpdates,
+        const std::vector<std::pair<TransportConnectionId, ReliableWorldTimeState>>& worldTimeUpdates)
     try
     {
         std::vector<std::vector<std::byte>> frames;
@@ -135,6 +136,7 @@ namespace TES3MP::ServerApp
         std::size_t frameCount = playerObservations.size() + playerViews.size() + actorBaselines.size() * 2
             + actorViews.size() + objectBaselines.size() + combatViews.size() + combatEvents.size()
             + dialogueResults.size();
+        frameCount += worldTimeUpdates.size();
         for (const auto& [connection, delivery] : weatherUpdates)
         {
             (void)connection;
@@ -200,6 +202,9 @@ namespace TES3MP::ServerApp
                 return false;
         for (const auto& [connection, delivery] : weatherUpdates)
             if (!appendWeatherMessages(frames, messages, connection, delivery))
+                return false;
+        for (const auto& [connection, state] : worldTimeUpdates)
+            if (!appendWorldTimeMessage(frames, messages, connection, state))
                 return false;
         return messages.empty() || queues.enqueueMessagesAtomically(messages) == TransportResult::Accepted;
     }
