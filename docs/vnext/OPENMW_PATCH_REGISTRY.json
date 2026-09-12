@@ -208,6 +208,23 @@
       ],
       "disposition": "local product adapter",
       "removal_condition": "OpenMW supplies an equivalent supported pre-mutation external wait/rest authority seam"
+    },
+    {
+      "id": "P22-001",
+      "slice": "authoritative security attempts",
+      "owner": "OpenMW adapter",
+      "purpose": "Intercept stock lockpick and probe attempts before client RNG, tool wear, skill gain, lock mutation, or trap mutation and submit only the mapped target and canonical tool intent.",
+      "paths": [
+        "apps/openmw/mwmechanics/security.cpp",
+        "apps/openmw/mwmechanics/security.hpp"
+      ],
+      "tests": [
+        "scripts/tests/test_openmw_patch_registry.py",
+        "openmw_tes3mp_adapter_tests",
+        "authoritative lockpick and probe desktop capture"
+      ],
+      "disposition": "local product adapter",
+      "removal_condition": "OpenMW supplies an equivalent supported pre-mutation external lockpick and probe authority seam"
     }
   ]
 }

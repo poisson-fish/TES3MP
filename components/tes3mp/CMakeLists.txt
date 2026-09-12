@@ -345,6 +345,7 @@ target_sources(tes3mp_server_core PRIVATE
     include/tes3mp/server_authentication.hpp
     include/tes3mp/server_session.hpp
     include/tes3mp/server_scripting.hpp
+    include/tes3mp/security.hpp
     include/tes3mp/script_state.hpp
     include/tes3mp/server_lifecycle.hpp
     include/tes3mp/world_state.hpp
@@ -370,6 +371,7 @@ target_sources(tes3mp_server_core PRIVATE
     server_core/server_authentication.cpp
     server_core/server_session.cpp
     server_core/server_scripting.cpp
+    server_core/security.cpp
     server_core/script_state.cpp
     server_core/server_lifecycle.cpp
     server_core/world_state.cpp
@@ -463,6 +465,15 @@ set_target_properties(tes3mp_direct_magic_tests PROPERTIES FOLDER "TES3MP/Tests"
 tes3mp_enable_runtime_safety(tes3mp_direct_magic_tests)
 tes3mp_verify_target_dependencies(tes3mp_direct_magic_tests ALLOWED tes3mp_server_core tes3mp_protocol)
 tes3mp_verify_target_includes(tes3mp_direct_magic_tests
+    FORBIDDEN ${TES3MP_ENGINE_INDEPENDENT_FORBIDDEN_INCLUDES})
+
+add_executable(tes3mp_security_authority_tests tests/security_authority_tests.cpp)
+target_compile_features(tes3mp_security_authority_tests PRIVATE cxx_std_20)
+target_link_libraries(tes3mp_security_authority_tests PRIVATE tes3mp_server_core)
+set_target_properties(tes3mp_security_authority_tests PROPERTIES FOLDER "TES3MP/Tests")
+tes3mp_enable_runtime_safety(tes3mp_security_authority_tests)
+tes3mp_verify_target_dependencies(tes3mp_security_authority_tests ALLOWED tes3mp_server_core tes3mp_protocol)
+tes3mp_verify_target_includes(tes3mp_security_authority_tests
     FORBIDDEN ${TES3MP_ENGINE_INDEPENDENT_FORBIDDEN_INCLUDES})
 
 add_executable(tes3mp_combat_replication_tests tests/combat_replication_tests.cpp)
@@ -1129,6 +1140,7 @@ add_custom_target(tes3mp_server_logic_tests_run
     COMMAND $<TARGET_FILE:tes3mp_actor_simulation_tests>
     COMMAND $<TARGET_FILE:tes3mp_combat_world_tests>
     COMMAND $<TARGET_FILE:tes3mp_direct_magic_tests>
+    COMMAND $<TARGET_FILE:tes3mp_security_authority_tests>
     COMMAND $<TARGET_FILE:tes3mp_combat_command_reducer_tests>
     COMMAND $<TARGET_FILE:tes3mp_interactive_object_world_tests>
     COMMAND $<TARGET_FILE:tes3mp_inventory_world_tests>
@@ -1148,6 +1160,7 @@ add_custom_target(tes3mp_server_logic_tests_run
         tes3mp_actor_simulation_tests
         tes3mp_combat_world_tests
         tes3mp_direct_magic_tests
+        tes3mp_security_authority_tests
         tes3mp_combat_command_reducer_tests
         tes3mp_interactive_object_world_tests
         tes3mp_inventory_world_tests

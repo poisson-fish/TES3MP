@@ -45,9 +45,9 @@ DERIVED_CATALOG_KEYS = {
 CATALOGS = {
     "collision_content_file": ("TES3MP_COLLISION_V1", True),
     "actor_content_file": ("TES3MP_ACTORS_V1", True),
-    "interactive_object_content_file": ("TES3MP_INTERACTIVE_OBJECTS_V1", False),
-    "inventory_content_file": ("TES3MP_INVENTORY_V1", False),
-    "combat_content_file": ("TES3MP_COMBAT_V7", False),
+    "interactive_object_content_file": ("TES3MP_INTERACTIVE_OBJECTS_V2", False),
+    "inventory_content_file": ("TES3MP_INVENTORY_V2", False),
+    "combat_content_file": ("TES3MP_COMBAT_V8", False),
     "character_content_file": ("TES3MP_CHARACTERS_V2", False),
     "world_content_file": ("TES3MP_WORLD_V4", True),
     "script_package_file": ("TES3MP_SCRIPT_PACKAGES_V2", False),
@@ -649,13 +649,14 @@ def _weight_units(weight: float, record_name: str) -> int:
     return result
 
 
-def _item_values(record_value: Tes3Record) -> tuple[int, int, int, int, int, bool, int | None]:
-    """Return category, weight units, value, max condition, slot mask, stackable, key id."""
+def _item_values(record_value: Tes3Record) -> tuple[int, int, int, int, int, bool, int | None, float]:
+    """Return category, weight units, value, max condition, slot mask, stacking, key, and tool quality."""
     kind = record_value.kind
     max_condition = 0
     slot_mask = 0
     stackable = True
     key_id: int | None = None
+    tool_quality = 0.0
     if kind == "WEAP":
         values = _unpack(record_value, "WPDT", "<fihHffH2B2B2Bi")
         weight, value, weapon_type, health = float(values[0]), int(values[1]), int(values[2]), int(values[3])
@@ -703,8 +704,8 @@ def _item_values(record_value: Tes3Record) -> tuple[int, int, int, int, int, boo
         if int(flags) & 2:
             slot_mask, stackable = 1 << 17, False
     elif kind in {"LOCK", "PROB"}:
-        weight, value, _quality, uses = _unpack(record_value, "LKDT" if kind == "LOCK" else "PBDT", "<fifi")
-        category, max_condition = (7 if kind == "LOCK" else 9), int(uses)
+        weight, value, quality, uses = _unpack(record_value, "LKDT" if kind == "LOCK" else "PBDT", "<fifi")
+        category, max_condition, stackable, tool_quality = (7 if kind == "LOCK" else 9), int(uses), False, float(quality)
     elif kind == "MISC":
         weight, value, flags = _unpack(record_value, "MCDT", "<fii")
         category = 8
@@ -716,9 +717,10 @@ def _item_values(record_value: Tes3Record) -> tuple[int, int, int, int, int, boo
     else:
         raise BakeError(f"unsupported item record type: {record_value.kind}")
     numeric_value = int(value)
-    if numeric_value < 0 or numeric_value > 0xFFFFFFFF or max_condition < 0 or max_condition > 0xFFFFFFFF:
+    if numeric_value < 0 or numeric_value > 0xFFFFFFFF or max_condition < 0 or max_condition > 0xFFFFFFFF \
+            or not math.isfinite(tool_quality) or tool_quality < 0:
         raise BakeError(f"item {record_value.name} has an out-of-range value or condition")
-    return category, _weight_units(float(weight), record_value.name), numeric_value, max_condition, slot_mask, stackable, key_id
+    return category, _weight_units(float(weight), record_value.name), numeric_value, max_condition, slot_mask, stackable, key_id, tool_quality
 
 
 def _weapon_values(record_value: Tes3Record) -> tuple[int, tuple[float, ...], bool]:
@@ -757,7 +759,7 @@ PROGRESSION_GMSTS = (
     "fMiscSkillBonus", "fMinorSkillBonus", "fMajorSkillBonus", "fSpecialSkillBonus",
 )
 
-PROGRESSION_SKILL_INDEXES = (0, 20, 5, 4, 6, 7, 26, 21, 2, 3, 17)
+PROGRESSION_SKILL_INDEXES = (0, 20, 5, 4, 6, 7, 26, 21, 2, 3, 17, 18)
 
 ARMOR_WEIGHT_GMSTS = {
     0: "iHelmWeight", 1: "iCuirassWeight", 2: "iPauldronWeight", 3: "iPauldronWeight",
@@ -875,12 +877,26 @@ def _actor_magic(record_value: Tes3Record, records: dict[tuple[str, str], Tes3Re
     return tuple(defense), tuple(sorted(diseases))
 
 
-def _skill_progression_rule(records: dict[tuple[str, str], Tes3Record], index: int) -> tuple[int, float]:
+def _trap_magic_profiles(records: dict[tuple[str, str], Tes3Record],
+                         trap_ids: set[int]) -> tuple[tuple[int, tuple[str, ...]], ...]:
+    profiles = []
+    for trap_id in sorted(trap_ids):
+        candidates = [record_value for (kind, name), record_value in records.items()
+                      if kind == "SPEL" and not record_value.deleted
+                      and _optional_stable_record_id(name) == trap_id]
+        if len(candidates) != 1:
+            raise BakeError(f"interactive trap identity does not name one live spell: {trap_id}")
+        profiles.append((trap_id, _direct_effect_tokens(candidates[0], True)))
+    return tuple(profiles)
+
+
+def _skill_progression_rule(records: dict[tuple[str, str], Tes3Record], index: int,
+                            use_index: int = 0) -> tuple[int, float]:
     record_value = _winning_record(records, str(index), {"SKIL"}, "skill")
     attribute, specialization, *use_values = _unpack(record_value, "SKDT", "<ii4f")
     if int(attribute) < 0 or int(attribute) >= 8 or int(specialization) < 0 or int(specialization) > 2:
         raise BakeError(f"skill {index} has unsupported progression metadata")
-    gain = float(use_values[0])
+    gain = float(use_values[use_index])
     if not math.isfinite(gain) or gain < 0:
         raise BakeError(f"skill {index} has invalid use gain")
     return int(specialization), gain
@@ -943,7 +959,9 @@ def derive_catalogs(recipe: DerivedRecipe, server_entries: Sequence[Assignment],
     progression_factors = tuple(_gmst_value(records, name) for name in PROGRESSION_GMSTS)
     if any(value <= 0 for value in progression_factors):
         raise BakeError("derived skill progression factor is invalid")
-    progression_rules = tuple(_skill_progression_rule(records, index) for index in PROGRESSION_SKILL_INDEXES)
+    progression_rules = tuple(_skill_progression_rule(records, index, 1 if index == 18 else 0)
+                              for index in PROGRESSION_SKILL_INDEXES)
+    security_disarm_gain = _skill_progression_rule(records, 18, 0)[1]
     fatigue_base = gmsts[12]
     strength, agility, luck = player_attributes[0], player_attributes[3], player_attributes[7]
     weapon_skill_values = (player_skills[22], player_skills[5], player_skills[4], player_skills[6], player_skills[7])
@@ -1017,14 +1035,16 @@ def derive_catalogs(recipe: DerivedRecipe, server_entries: Sequence[Assignment],
 
     inventory_lines = [CATALOGS["inventory_content_file"][0], f"manifest {MANIFEST_PLACEHOLDER}"]
     for identifier, values, _record, maximum_charge in sorted(item_declarations):
-        category, weight, item_value, condition, slots, stackable, key_id = values
+        category, weight, item_value, condition, slots, stackable, key_id, tool_quality = values
         inventory_lines.append(" ".join(("prototype", str(identifier), str(category), str(weight),
             str(item_value), str(condition), str(maximum_charge), str(slots), "1" if stackable else "0",
-            str(key_id) if key_id is not None else "none")))
+            str(key_id) if key_id is not None else "none", _float_text(tool_quality))))
 
     combat_lines = [CATALOGS["combat_content_file"][0], f"manifest {MANIFEST_PLACEHOLDER}",
                     f"seed {recipe.seed}",
                     "settings " + " ".join((*(_float_text(value) for value in gmsts), "0", "0"))]
+    combat_lines.append("security_settings " + " ".join((_float_text(_gmst_value(records, "fPickLockMult")),
+        _float_text(_gmst_value(records, "fTrapCostMult")), _float_text(security_disarm_gain))))
     combat_lines.append("magic_settings " + " ".join(_float_text(_gmst_value(records, name))
         for name in ("fElementalShieldMult", "fDiseaseXferChance")))
     player_magic = (float(player_attributes[2]), float(player_skills[10]), *([0.0] * 9))
@@ -1043,7 +1063,7 @@ def derive_catalogs(recipe: DerivedRecipe, server_entries: Sequence[Assignment],
                      float(player_attributes[5]), float(player_skills[0]), float(player_attributes[1]),
                      float(player_magicka), health_recovery, magicka_recovery,
                      float(player_skills[21]), float(player_skills[2]), float(player_skills[3]),
-                     float(player_skills[17]))
+                     float(player_skills[17]), float(player_skills[18]))
     combat_lines.append("player " + " ".join((*(_float_text(value) for value in player_fields),
         str(maximum_weight), "0")))
     for actor, _record, health, fatigue, evasion, attack, magic_defense, diseases in sorted(
@@ -1067,6 +1087,9 @@ def derive_catalogs(recipe: DerivedRecipe, server_entries: Sequence[Assignment],
     for identifier, defense in sorted(equipment_magic_profiles):
         combat_lines.append("equipment_magic " + " ".join((str(identifier),
             *(_float_text(value) for value in defense))))
+    object_catalog = _catalog_by_key(retained_catalogs, "interactive_object_content_file")
+    for identifier, effects in _trap_magic_profiles(records, _interactive_object_trap_ids(object_catalog)):
+        combat_lines.append("trap " + " ".join((str(identifier), str(len(effects) // 4), *effects)))
     light_multiplier = _gmst_value(records, "fLightMaxMod")
     medium_multiplier = _gmst_value(records, "fMedMaxMod")
     for identifier, _values, record_value, _charge in sorted(item_declarations):

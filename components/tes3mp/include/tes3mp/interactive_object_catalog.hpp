@@ -44,6 +44,7 @@ namespace TES3MP
     {
         bool trappedByDefault = false;
         std::optional<TrapPrototypeId> trapId = std::nullopt;
+        std::uint32_t disarmDifficulty = 0;
 
         friend bool operator==(const ObjectTrapDeclaration&, const ObjectTrapDeclaration&) noexcept = default;
     };

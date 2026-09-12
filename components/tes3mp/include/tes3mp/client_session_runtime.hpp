@@ -107,7 +107,10 @@ namespace TES3MP
         ClientRuntimeQueueResult queueInteractObject(InteractiveObjectId objectId, CellId targetCell,
             Position3 interactionOrigin, ObjectRevision expectedRevision,
             ObjectInteractionKind kind = ObjectInteractionKind::Activate,
-            std::optional<KeyPrototypeId> requestedKey = std::nullopt);
+            std::optional<KeyPrototypeId> requestedKey = std::nullopt,
+            std::optional<ItemStackId> requestedTool = std::nullopt,
+            std::optional<InventoryRevision> expectedInventoryRevision = std::nullopt,
+            std::optional<CombatRevision> expectedCombatRevision = std::nullopt);
         ClientRuntimeQueueResult queueInventoryTransaction(InventoryTransactionKind kind, ItemPrototypeId prototypeId,
             std::optional<ItemStackId> stackId, std::uint32_t count, InventoryRevision expectedInventoryRevision,
             Position3 interactionOrigin, std::optional<ContainerId> containerId = std::nullopt,

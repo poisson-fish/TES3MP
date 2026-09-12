@@ -255,6 +255,8 @@ python scripts/run_wait_rest_capture.py \
 It bakes a December 30 23:00 fixture, requests one matching two-hour rest per
 active client, and rejects non-identical rollover revisions, duplicate world-time
 presentation, failed resume convergence, undrained queues, or unbounded RSS.
+`run_security_capture.py` uses the same arguments and records lockpick/probe
+wear, progression, object mutation, resume convergence, and queue drain.
 
 ## Machine-owned evidence
 

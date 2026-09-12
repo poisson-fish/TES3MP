@@ -27,6 +27,7 @@ namespace TES3MP::OpenMWAdapter
         constexpr std::uint64_t CaptureStopAt = 4 * Second;
         constexpr std::uint64_t CaptureDuration = 5 * Second;
         constexpr std::uint64_t ActorAuthDuration = 8 * Second;
+        constexpr std::uint64_t SecurityDuration = 12 * Second;
         constexpr std::uint64_t SlowPeerEvidenceDuration = 20 * Second;
         constexpr std::int64_t AutomationSpeed = 4096;
         std::optional<MonotonicInstant> add(MonotonicInstant value, std::uint64_t duration) noexcept
@@ -113,6 +114,10 @@ namespace TES3MP::OpenMWAdapter
             return DesktopAutomationRole::WaitSlowAnchor;
         if (value == "wait-slow")
             return DesktopAutomationRole::WaitSlow;
+        if (value == "security-pick")
+            return DesktopAutomationRole::SecurityPick;
+        if (value == "security-probe")
+            return DesktopAutomationRole::SecurityProbe;
         return std::nullopt;
     }
 
@@ -176,6 +181,35 @@ namespace TES3MP::OpenMWAdapter
             ? AutomationSpeed
             : 0;
         return LocomotionIntent(LocomotionMode::Walk, Turn32::fromValue(0), LinearVelocity3(x, y, 0));
+    }
+
+    std::optional<ObjectInteractionCapture> DesktopAutomation::captureObjectInteraction() noexcept
+    {
+        if ((mRole != DesktopAutomationRole::SecurityPick && mRole != DesktopAutomationRole::SecurityProbe)
+            || mSecuritySubmitted || !mSecurityObject
+            || !mSecurityObjectRevision || !mSecurityTool || !mSecurityInventoryRevision || !mSecurityCombatRevision
+            || !mSelfCell || !mInitialPosition)
+            return std::nullopt;
+        mSecuritySubmitted = true;
+        if (mOutput && mEvidenceEvents < MaximumEvidenceEvents)
+        {
+            mOutput << "{\"event\":\"security_"
+                    << (mRole == DesktopAutomationRole::SecurityPick ? "pick" : "probe")
+                    << "_submitted\",\"role\":\"" << roleName()
+                    << "\",\"object_id\":" << mSecurityObject->value() << ",\"tool_stack_id\":"
+                    << mSecurityTool->value() << "}\n";
+            mOutput.flush();
+            ++mEvidenceEvents;
+        }
+        return ObjectInteractionCapture{ .objectId = *mSecurityObject,
+            .targetCell = *mSelfCell,
+            .interactionOrigin = *mInitialPosition,
+            .expectedRevision = *mSecurityObjectRevision,
+            .kind = mRole == DesktopAutomationRole::SecurityPick ? ObjectInteractionKind::PickLock
+                                                                 : ObjectInteractionKind::DisarmTrap,
+            .requestedTool = *mSecurityTool,
+            .expectedInventoryRevision = *mSecurityInventoryRevision,
+            .expectedCombatRevision = *mSecurityCombatRevision };
     }
 
     ProviderResult DesktopAutomation::applyAuthoritative(const LatestWinsSnapshot& snapshot,
@@ -374,20 +408,109 @@ namespace TES3MP::OpenMWAdapter
         else if (mRole == DesktopAutomationRole::WaitSlow && mSlowPeerRecovered && mWaitRestApplied
             && elapsed >= SlowPeerEvidenceDuration)
             finish(mWorldTimeDuplicates == 0);
+        else if ((mRole == DesktopAutomationRole::SecurityPick || mRole == DesktopAutomationRole::SecurityProbe)
+            && (mRole == DesktopAutomationRole::SecurityPick ? mSecurityUnlocked : mSecurityDisarmed)
+            && mInitialSecurityToolCondition
+            && mSecurityToolCondition && *mSecurityToolCondition + 1 == *mInitialSecurityToolCondition
+            && mInitialSecurityProgress && mSecurityProgress && *mSecurityProgress > *mInitialSecurityProgress)
+        {
+            if (mResumes == 0 && !mSecurityResumeRequested && !mReadyToDisconnect && !mNextDisconnect)
+            {
+                mSecurityResumeRequested = true;
+                mReadyToDisconnect = true;
+                mNextDisconnect = now;
+                if (mOutput && mEvidenceEvents < MaximumEvidenceEvents)
+                {
+                    mOutput << "{\"event\":\"security_resume_scheduled\",\"role\":\"" << roleName() << "\"}\n";
+                    mOutput.flush();
+                    ++mEvidenceEvents;
+                }
+            }
+            else if (mResumes == 1 && mSecurityObjectAfterResume && mSecurityInventoryAfterResume
+                && mSecurityCombatAfterResume && elapsed >= 6 * Second)
+                finish(true);
+            else if (elapsed >= SecurityDuration)
+                finish(false);
+        }
+        else if ((mRole == DesktopAutomationRole::SecurityPick || mRole == DesktopAutomationRole::SecurityProbe)
+            && elapsed >= SecurityDuration)
+            finish(false);
         return ProviderResult::Accepted;
     }
 
     ProviderResult DesktopAutomation::applyInteractiveObjects(
         const ReliableInteractiveObjectInterestBaseline& baseline, MonotonicInstant receivedAt) noexcept
     {
-        return mPresentation.applyInteractiveObjects(baseline, receivedAt);
+        const auto applied = mPresentation.applyInteractiveObjects(baseline, receivedAt);
+        if (applied != ProviderResult::Accepted
+            || (mRole != DesktopAutomationRole::SecurityPick && mRole != DesktopAutomationRole::SecurityProbe)
+            || baseline.members().empty())
+            return applied;
+        const auto& member = baseline.members().front();
+        mSecurityObject = member.objectId;
+        mSecurityObjectRevision = member.revision;
+        if (!mInitialSecurityObjectRevision)
+            mInitialSecurityObjectRevision = member.revision;
+        if (mSecuritySubmitted && member.revision > *mInitialSecurityObjectRevision
+            && member.lockState == LockState::Unlocked)
+            mSecurityUnlocked = true;
+        if (mSecuritySubmitted && member.revision > *mInitialSecurityObjectRevision
+            && member.trapState == TrapState::Disarmed)
+            mSecurityDisarmed = true;
+        if (mResumes != 0
+            && (mRole == DesktopAutomationRole::SecurityPick ? mSecurityUnlocked : mSecurityDisarmed))
+            mSecurityObjectAfterResume = true;
+        return applied;
     }
 
     ProviderResult DesktopAutomation::applyInventory(const ReliablePlayerInventoryBaseline& player,
         std::span<const ReliableContainerInventoryBaseline> containers, const ReliableGroundItemBaseline& groundItems,
         const LatestWinsEquipmentSnapshot& equipment, MonotonicInstant receivedAt) noexcept
     {
-        return mPresentation.applyInventory(player, containers, groundItems, equipment, receivedAt);
+        const auto applied = mPresentation.applyInventory(player, containers, groundItems, equipment, receivedAt);
+        if (applied != ProviderResult::Accepted
+            || (mRole != DesktopAutomationRole::SecurityPick && mRole != DesktopAutomationRole::SecurityProbe))
+            return applied;
+        constexpr std::uint64_t ApprenticeLockpickPrototype = 12936841098047256804ull;
+        constexpr std::uint64_t ApprenticeProbePrototype = 16269827911551786073ull;
+        const auto prototype = ItemPrototypeId::fromValue(mRole == DesktopAutomationRole::SecurityPick
+                ? ApprenticeLockpickPrototype : ApprenticeProbePrototype);
+        const auto tool = prototype ? std::ranges::find(player.stacks, *prototype, &CanonicalItemStack::prototypeId)
+                                    : player.stacks.end();
+        if (tool != player.stacks.end())
+        {
+            mSecurityTool = tool->stackId;
+            mSecurityToolCondition = tool->condition;
+            if (!mInitialSecurityToolCondition)
+                mInitialSecurityToolCondition = tool->condition;
+        }
+        mSecurityInventoryRevision = player.revision;
+        if (mResumes != 0 && mInitialSecurityToolCondition && mSecurityToolCondition
+            && *mSecurityToolCondition + 1 == *mInitialSecurityToolCondition)
+            mSecurityInventoryAfterResume = true;
+        return applied;
+    }
+
+    ProviderResult DesktopAutomation::applyCombat(const LatestWinsCombatSnapshot& snapshot,
+        std::span<const ReliableCombatEventBatch> events, MonotonicInstant receivedAt) noexcept
+    {
+        const auto applied = mPresentation.applyCombat(snapshot, events, receivedAt);
+        if (applied != ProviderResult::Accepted
+            || (mRole != DesktopAutomationRole::SecurityPick && mRole != DesktopAutomationRole::SecurityProbe))
+            return applied;
+        mSecurityCombatRevision = snapshot.selfCombatRevision();
+        const auto skill = std::ranges::find(
+            snapshot.selfSkills(), ReplicatedCombatSkill::Security, &CombatSkillSnapshot::skill);
+        if (skill != snapshot.selfSkills().end())
+        {
+            mSecurityProgress = skill->progress;
+            if (!mInitialSecurityProgress)
+                mInitialSecurityProgress = skill->progress;
+        }
+        if (mResumes != 0 && mInitialSecurityProgress && mSecurityProgress
+            && *mSecurityProgress > *mInitialSecurityProgress)
+            mSecurityCombatAfterResume = true;
+        return applied;
     }
 
     ProviderResult DesktopAutomation::applyWeather(std::span<const WeatherRegionSnapshot> regions,
@@ -535,12 +658,21 @@ namespace TES3MP::OpenMWAdapter
             : mRole == DesktopAutomationRole::ActorReconnect                  ? 4u
             : mRole == DesktopAutomationRole::WeatherReconnect                ? 1u
             : mRole == DesktopAutomationRole::WaitReconnect                   ? 1u
+            : mRole == DesktopAutomationRole::SecurityPick                    ? 1u
+            : mRole == DesktopAutomationRole::SecurityProbe                   ? 1u
                                                                               : 0u;
         if (maximumResumes == 0 || !mReadyToDisconnect || !mNow || !mNextDisconnect || *mNow < *mNextDisconnect
             || mResumes >= maximumResumes)
             return false;
         mReadyToDisconnect = false;
         mNextDisconnect.reset();
+        if ((mRole == DesktopAutomationRole::SecurityPick || mRole == DesktopAutomationRole::SecurityProbe)
+            && mOutput && mEvidenceEvents < MaximumEvidenceEvents)
+        {
+            mOutput << "{\"event\":\"security_disconnect_requested\",\"role\":\"" << roleName() << "\"}\n";
+            mOutput.flush();
+            ++mEvidenceEvents;
+        }
         return true;
     }
 
@@ -620,6 +752,10 @@ namespace TES3MP::OpenMWAdapter
                 return "wait-slow-anchor";
             case DesktopAutomationRole::WaitSlow:
                 return "wait-slow";
+            case DesktopAutomationRole::SecurityPick:
+                return "security-pick";
+            case DesktopAutomationRole::SecurityProbe:
+                return "security-probe";
         }
         return "unknown";
     }
@@ -731,7 +867,17 @@ namespace TES3MP::OpenMWAdapter
                     << ",\"wait_rest_submitted\":" << (mWaitRestSubmitted ? "true" : "false")
                     << ",\"wait_rest_applied\":" << (mWaitRestApplied ? "true" : "false")
                     << ",\"world_time_resumed_converged\":"
-                    << (mWorldTimeConvergedAfterResume ? "true" : "false") << "}\n";
+                    << (mWorldTimeConvergedAfterResume ? "true" : "false")
+                    << ",\"security_submitted\":" << (mSecuritySubmitted ? "true" : "false")
+                    << ",\"security_unlocked\":" << (mSecurityUnlocked ? "true" : "false")
+                    << ",\"security_disarmed\":" << (mSecurityDisarmed ? "true" : "false")
+                    << ",\"security_resumed_converged\":"
+                    << (mSecurityObjectAfterResume && mSecurityInventoryAfterResume && mSecurityCombatAfterResume
+                            ? "true" : "false")
+                    << ",\"security_initial_tool_condition\":" << mInitialSecurityToolCondition.value_or(0)
+                    << ",\"security_tool_condition\":" << mSecurityToolCondition.value_or(0)
+                    << ",\"security_initial_progress\":" << mInitialSecurityProgress.value_or(0.f)
+                    << ",\"security_progress\":" << mSecurityProgress.value_or(0.f) << "}\n";
             mOutput.flush();
             ++mEvidenceEvents;
         }

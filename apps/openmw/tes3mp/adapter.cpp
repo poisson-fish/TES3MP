@@ -32,11 +32,12 @@ namespace TES3MP::OpenMWAdapter
 
         ClientHello makeClientHello(ContentManifestId contentManifest)
         {
-            auto versions = std::get<ProtocolVersionRange>(ProtocolVersionRange::create(1, 8, 8));
+            auto versions = std::get<ProtocolVersionRange>(ProtocolVersionRange::create(1, 9, 9));
             const std::array optional{ vrPoseCapability(), actorReplicationCapability(),
                 interactiveObjectReplicationCapability(), inventoryReplicationCapability(),
                 combatReplicationCapability(), characterCreationCapability(), dialogueChoiceCapability(),
-                weatherReplicationCapability(), worldTimeReplicationCapability(), authoritativeWaitRestCapability() };
+                weatherReplicationCapability(), worldTimeReplicationCapability(), authoritativeWaitRestCapability(),
+                authoritativeSecurityCapability() };
             auto offer = std::get<CapabilityOffer>(
                 CapabilityOffer::create(std::move(versions), optional, {}, contentManifest));
             return ClientHello::fromOffer(std::move(offer));
@@ -112,6 +113,14 @@ namespace TES3MP::OpenMWAdapter
             return hello && hello->selectedVersion().major == 1 && hello->selectedVersion().minor >= 8
                 && std::binary_search(hello->negotiatedCapabilities().begin(),
                     hello->negotiatedCapabilities().end(), authoritativeWaitRestCapability());
+        }
+
+        bool securityNegotiated(const ClientSessionRuntime& runtime) noexcept
+        {
+            const auto& hello = runtime.session().stateMachine().negotiatedHello();
+            return hello && hello->selectedVersion().major == 1 && hello->selectedVersion().minor >= 9
+                && std::binary_search(hello->negotiatedCapabilities().begin(),
+                    hello->negotiatedCapabilities().end(), authoritativeSecurityCapability());
         }
 
         struct ResumeContinuity
@@ -383,6 +392,9 @@ namespace TES3MP::OpenMWAdapter
                     mReady = true;
                     mPresentationBootstrapPending = true;
                 }
+                if (!mResuming && mReady && snapshot)
+                    if (auto current = continuity(*snapshot))
+                        mContinuity = std::move(current);
                 if (mRuntime->characterLifecycle() != CharacterLifecycle::EstablishedCharacter
                     || mMinimumEstablishedSnapshotRevision)
                 {
@@ -636,9 +648,17 @@ namespace TES3MP::OpenMWAdapter
                 {
                     if (auto interaction = mInput.captureObjectInteraction())
                     {
+                        if ((interaction->kind == ObjectInteractionKind::PickLock
+                                || interaction->kind == ObjectInteractionKind::DisarmTrap)
+                            && !securityNegotiated(*mRuntime))
+                        {
+                            closeTerminal(ConnectionStatus::ProtocolVersionMismatch);
+                            return;
+                        }
                         const auto queued = mRuntime->queueInteractObject(interaction->objectId,
                             interaction->targetCell, interaction->interactionOrigin, interaction->expectedRevision,
-                            interaction->kind, interaction->requestedKey);
+                            interaction->kind, interaction->requestedKey, interaction->requestedTool,
+                            interaction->expectedInventoryRevision, interaction->expectedCombatRevision);
                         if (queued.result != ClientRuntimeResult::Accepted || !queued.sequence)
                         {
                             closeTerminal(ConnectionStatus::TransportFailed);
@@ -825,10 +845,17 @@ namespace TES3MP::OpenMWAdapter
                 return false;
             }
 
-            void setGameRunning(bool value) noexcept override { mGameRunning = value; }
+            void setGameRunning(bool value) noexcept override
+            {
+                if (value && !mGameRunning)
+                    mPresentationBootstrapPending = true;
+                mGameRunning = value;
+            }
 
             void confirmGameStart(bool running) noexcept override
             {
+                if (running && !mGameRunning)
+                    mPresentationBootstrapPending = true;
                 mGameRunning = running;
                 if (!running)
                     closeTerminal(ConnectionStatus::PresentationFailed);

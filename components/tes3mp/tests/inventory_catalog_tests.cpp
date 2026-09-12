@@ -2,6 +2,7 @@
 #include <tes3mp/item_catalog.hpp>
 
 #include <cassert>
+#include <array>
 #include <cstdlib>
 #include <iostream>
 
@@ -54,12 +55,26 @@ namespace
                 .stackable = false,
                 .keyId = *KeyPrototypeId::fromValue(99),
             },
+            ItemPrototypeDeclaration{ .id = *ItemPrototypeId::fromValue(4),
+                .category = ItemCategory::Lockpick,
+                .weightUnits = 1,
+                .value = 5,
+                .maxCondition = 10,
+                .stackable = false,
+                .toolQuality = 1.25f },
+            ItemPrototypeDeclaration{ .id = *ItemPrototypeId::fromValue(5),
+                .category = ItemCategory::Probe,
+                .weightUnits = 1,
+                .value = 5,
+                .maxCondition = 10,
+                .stackable = false,
+                .toolQuality = 0.75f },
         };
 
         const auto catalog = ItemPrototypeCatalog::create(manifest, decls);
         assert(catalog.has_value());
         assert(catalog->contentManifestId() == manifest.id());
-        assert(catalog->declarations().size() == 3);
+        assert(catalog->declarations().size() == 5);
 
         const auto* item1 = catalog->find(*ItemPrototypeId::fromValue(1));
         assert(item1 != nullptr);
@@ -120,6 +135,20 @@ namespace
         };
         assert(!ItemPrototypeCatalog::create(manifest, declarations));
     }
+
+    void testSecurityToolQualityIsManifestBound()
+    {
+        const auto manifest = testContentManifest();
+        const std::array missingQuality{ ItemPrototypeDeclaration{ .id = *ItemPrototypeId::fromValue(1),
+            .category = ItemCategory::Lockpick,
+            .maxCondition = 10 } };
+        const std::array qualityOnWeapon{ ItemPrototypeDeclaration{ .id = *ItemPrototypeId::fromValue(2),
+            .category = ItemCategory::Weapon,
+            .maxCondition = 10,
+            .toolQuality = 1.f } };
+        assert(!ItemPrototypeCatalog::create(manifest, missingQuality));
+        assert(!ItemPrototypeCatalog::create(manifest, qualityOnWeapon));
+    }
 }
 
 int main()
@@ -129,6 +158,7 @@ int main()
     testZeroItemIdRejected();
     testInvalidSlotMaskRejected();
     testInvalidCategoryRejected();
+    testSecurityToolQualityIsManifestBound();
 
     std::cout << "All inventory catalog tests passed." << std::endl;
     return 0;

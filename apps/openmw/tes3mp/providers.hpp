@@ -79,6 +79,9 @@ namespace TES3MP::OpenMWAdapter
         ObjectRevision expectedRevision;
         ObjectInteractionKind kind = ObjectInteractionKind::Activate;
         std::optional<KeyPrototypeId> requestedKey = std::nullopt;
+        std::optional<ItemStackId> requestedTool = std::nullopt;
+        std::optional<InventoryRevision> expectedInventoryRevision = std::nullopt;
+        std::optional<CombatRevision> expectedCombatRevision = std::nullopt;
     };
 
     struct InventoryTransactionCapture

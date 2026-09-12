@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <array>
 #include <charconv>
+#include <cmath>
 #include <fstream>
 #include <map>
 #include <optional>
@@ -17,7 +18,7 @@ namespace TES3MP::ServerApp
 {
     namespace
     {
-        constexpr std::string_view Header = "TES3MP_INVENTORY_V1";
+        constexpr std::string_view Header = "TES3MP_INVENTORY_V2";
         constexpr std::size_t MaximumFields = 24;
 
         template <class Value>
@@ -161,7 +162,7 @@ namespace TES3MP::ServerApp
                 }
                 else if (values[0] == "prototype")
                 {
-                    if (values.size() != 10)
+                    if (values.size() != 11)
                         return InventoryContentError::Malformed;
                     const auto rawId = number<std::uint64_t>(values[1]);
                     const auto id = rawId ? ItemPrototypeId::fromValue(*rawId) : std::nullopt;
@@ -173,11 +174,13 @@ namespace TES3MP::ServerApp
                     const auto slots = number<std::uint32_t>(values[7]);
                     const auto stackable = number<std::uint8_t>(values[8]);
                     const auto key = optionalId<KeyPrototypeId>(values[9]);
+                    const auto quality = number<float>(values[10]);
                     if (!id || !category || *category > static_cast<std::uint8_t>(ItemCategory::Weapon) || !weight
-                        || !itemValue || !condition || !charge || !slots || !stackable || *stackable > 1 || !key)
+                        || !itemValue || !condition || !charge || !slots || !stackable || *stackable > 1 || !key
+                        || !quality || !std::isfinite(*quality))
                         return InventoryContentError::Malformed;
                     prototypes.push_back({ *id, static_cast<ItemCategory>(*category), *weight, *itemValue, *condition,
-                        *charge, *slots, *stackable != 0, *key });
+                        *charge, *slots, *stackable != 0, *key, *quality });
                     if (prototypes.size() > MaximumItemPrototypes)
                         return InventoryContentError::TooLarge;
                 }

@@ -32,7 +32,7 @@
     }
   ],
   "format": "TES3MP_DERIVED_VANILLA_V1",
-  "items": ["chargen dagger", "chitin_shield"],
+  "items": ["chargen dagger", "chitin_shield", "pick_apprentice_01", "probe_apprentice_01"],
   "player_record": "player",
   "seed": 14474947440507032443,
   "starting_items": [
@@ -45,6 +45,16 @@
       "count": 1,
       "record": "chitin_shield",
       "slot": 17
+    },
+    {
+      "count": 1,
+      "record": "pick_apprentice_01",
+      "slot": null
+    },
+    {
+      "count": 1,
+      "record": "probe_apprentice_01",
+      "slot": null
     }
   ]
 }

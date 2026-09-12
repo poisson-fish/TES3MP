@@ -256,38 +256,39 @@ Primary sources: [`actor_catalog.hpp`](../../components/tes3mp/include/tes3mp/ac
 - Reliable interaction commands validate authenticated session, expected
   revision, canonical player cell/root, bounded reach, object state, and
   server-verified key ownership before an atomic commit.
-- Standard doors publish discrete state; OpenMW performs the visual 90-degree
-  interpolation and sound locally. Teleport doors request a server-owned player
-  cell transition. Trap outcomes are canonical events, not client claims.
+- Standard doors publish discrete state; OpenMW animates them locally. Teleport
+  doors request a server-owned cell transition. Trap outcomes are canonical.
 - Complete reliable object baselines are scoped by exact-cell interest and used
   for join, transition, resume, and resync.
-- Door, lock, and trap state, object revision, and last-change tick are durable.
-  Restart requires a complete state vector matching the exact configured object
-  catalog before installing any object state.
-- Combat V7 exactly covers configured trap IDs. Server-resolved effects,
+- Door, lock, trap, revision, and change tick are durable. Restart requires a
+  complete state vector matching the configured object catalog.
+- Combat V8 exactly covers configured trap IDs. Server-resolved effects,
   damage/death/revision, and trap disarm share one durable commit.
+- Capability 11 carries lockpick/probe intent only: object/tool identity plus
+  object, inventory, and combat revisions. The server validates canonical tool
+  ownership and quality, performs the stock-formula roll from its durable PRNG,
+  and commits wear, Security progress, and lock/trap mutation atomically.
 
 Primary sources: [`interactive_object_world.hpp`](../../components/tes3mp/include/tes3mp/interactive_object_world.hpp),
 [`interactive_object_replication.cpp`](../../components/tes3mp/protocol/interactive_object_replication.cpp),
+[`security.cpp`](../../components/tes3mp/server_core/security.cpp),
 [`interactive_object_interest_projection.cpp`](../../apps/tes3mp-server/interactive_object_interest_projection.cpp),
 and [`desktop_providers.cpp`](../../apps/openmw/tes3mp/desktop_providers.cpp).
 
 ### Inventory, equipment, containers, and ground items
 
 - A manifest-scoped item catalog defines prototype category, weight, value,
-  condition/charge bounds, equipment masks, stackability, and optional key
-  identity. Canonical state owns private player backpacks, 19 equipment slots,
-  exact-cell containers, and ground-item stacks.
+  condition/charge bounds, equipment masks, stackability, optional key
+  identity, and lockpick/probe quality. Canonical state owns private player
+  backpacks, 19 equipment slots, exact-cell containers, and ground-item stacks.
 - Take, put, drop, pickup, equip, and unequip are reliable atomic server
   transactions. Validation includes exact source identity/count, revisions,
   capacity, canonical same-cell/reach, and equipment compatibility. Whole-stack
   moves preserve globally unique identity; splits allocate a new monotonic ID.
 - Held canonical keys feed the interactive-object validation context. A claimed
   client key ID is never sufficient.
-- Completed character profiles seed starting items with server-owned monotonic
-  stack IDs, full catalog condition/charge, and declared equipment. The profile
-  revision marks that initialization, so reattach and resume cannot duplicate
-  the grant or silently apply a different character profile.
+- Completed profiles seed items with server-owned IDs and catalog state. Their
+  revision makes initialization idempotent across reattach and resume.
 - Owning clients receive reliable private inventory. Same-cell clients receive
   bounded container/ground views and public equipment snapshots only.
 - The OpenMW adapter consumes local pre-mutation inventory actions, sends a
@@ -310,7 +311,7 @@ and [`desktop_providers.cpp`](../../apps/openmw/tes3mp/desktop_providers.cpp).
   revisions, skill progress, recovery, aggression, respawn, blocking, armor,
   equipment wear, and supported direct-magic effects. Combat, inventory, death,
   revisions, and command finalization share one prepared atomic commit.
-- Bounded `TES3MP_COMBAT_V7` content supplies manifest-scoped player and actor
+- Bounded `TES3MP_COMBAT_V8` content supplies manifest-scoped player and actor
   profiles, weapons, armor, resolver constants, progression/recovery values,
   random seed, and direct-magic data. Invalid or inconsistent configured content
   fails startup before state is exposed. Confirmed character profiles initialize
@@ -321,12 +322,9 @@ and [`desktop_providers.cpp`](../../apps/openmw/tes3mp/desktop_providers.cpp).
   and occluded contact before mutation. Production retains nine bounded
   server-tick position frames and uses stock base reach scaled by canonical
   weapon data and manifest collision solids.
-- Private player resources, eleven combat skills/progress counters, death, and
-  revision use latest-wins snapshots; same-cell actor state and reliable attack
-  outcomes drive OpenMW presentation. Server ticks handle actor attacks, passive
-  recovery, 30-second respawn, defensive skill gains, and stock-rate recovery
-  outside active aggression. Capability 5 is advertised only with the complete
-  validator and combat content graph.
+- Private resources, twelve skill/progress counters, death, and revision use
+  latest-wins snapshots. Server ticks handle actor attacks, recovery, respawn,
+  and defensive gains. Capability 5 requires the complete combat graph.
 
 Primary sources: [`melee_combat.cpp`](../../components/tes3mp/protocol/melee_combat.cpp),
 [`combat_world.cpp`](../../components/tes3mp/server_core/combat_world.cpp),
@@ -434,7 +432,8 @@ Primary sources: [`world_time_replication.hpp`](../../components/tes3mp/include/
 
 ### Transactional gameplay persistence and replay envelope
 
-- V2 binds each durable prefix to configuration/content, scripts, seeds,
+- The V2 envelope's format version 3 binds each durable prefix to
+  configuration/content, scripts, seeds,
   ordering, and normalized command results. One checksum covers all canonical
   player, inventory, object, actor/combat, clock/global, quest/journal, faction,
   script-variable, weather, and RNG state. Dialogue choices retain command order.
@@ -444,13 +443,9 @@ Primary sources: [`world_time_replication.hpp`](../../components/tes3mp/include/
   port before installing it or publishing it to replay, scripts, metrics, or
   clients. Only `Committed` acknowledges durability. Rejection or I/O failure
   leaves the previous canonical state and publication installed.
-- The production V2 adapter stores a checkpoint plus at most 32 chained journal
-  records beside `players.txt` as `players.txt.world-v2`. On overflow it rebases
-  the previous complete tick as the new checkpoint, bounding persistence cost,
-  file size, and recovery verification. It flushes a temporary file and
-  atomically replaces the committed file; every crash cut therefore selects the
-  previous or new complete multi-domain tick, never a mixture. V1 development
-  files remain untouched and are not migrated.
+- The production V2 adapter stores a checkpoint plus at most 32 journal records
+  in `players.txt.world-v2`, rebasing on overflow. Atomic replacement makes each
+  crash cut select the previous or new complete tick. V1 is not migrated.
 - Restart validates the bounded prefix and configured catalogs before restoring
   every durable domain and counter. Counts, order, typed IDs, stages, and types
   are atomic; actor roots must pass occupancy. Live sessions are not restored.
@@ -474,8 +469,8 @@ Primary sources: [`canonical_persistence.hpp`](../../components/tes3mp/include/t
 - Packs are immutable, artifact-digested, and atomically selected through
   `CURRENT`; failure preserves its predecessor. Secrets and player identity
   remain outside the pack.
-- The derived-vanilla recipe uses load-order winners and rejects missing,
-  deleted, ambiguous, malformed, or unsupported records.
+- The derived recipe uses load-order winners, derives declared trap profiles,
+  and rejects missing, ambiguous, malformed, or unsupported records.
 
 Primary sources: [`bake_tes3mp_content.py`](../../scripts/bake_tes3mp_content.py)
 and [`test_bake_tes3mp_content.py`](../../scripts/tests/test_bake_tes3mp_content.py).
@@ -489,10 +484,9 @@ and [`test_bake_tes3mp_content.py`](../../scripts/tests/test_bake_tes3mp_content
 - Actor AI is limited to idle/travel/wander and reactive pursuit; detection,
   schedules, spawning, and delegation remain absent.
 - Traps cover bounded instantaneous direct effects, but durations, area effects,
-  and other general spell semantics remain absent. Lockpicking/probes are absent;
-  inventory lacks trade, restocking, and repair.
-- The packaged default remains narrow: one dagger, shield, rat, starting loadout,
-  and four-cell collision fixture. Arbitrary geometry/catalog extraction and
+  and other general spell semantics remain absent. Inventory still lacks trade,
+  restocking, and repair.
+- The packaged default remains a narrow four-cell fixture. Broad geometry and
   rewound or per-bone contact are not implemented.
 - Combat covers direct player/actor melee, reactive attacks, resources,
   death/respawn, skills, difficulty, blocking, mitigation/wear, feedback, and a
@@ -505,14 +499,6 @@ and [`test_bake_tes3mp_content.py`](../../scripts/tests/test_bake_tes3mp_content
   release-scale performance/soak remain unfinished.
 
 ## Work still required
-
-### Next milestone: authoritative lockpicking and probe disarming
-
-Add manifest-bound lockpick/probe tool quality and canonical security progression,
-then make attempts consume tool condition and update lock/trap state in the same
-durable transaction. Client submissions remain intent-only and must not supply
-chance, success, skill gain, or resulting state. TES3MP 0.8.x compatibility
-remains unsupported.
 
 ### Required before the desktop/PC-VR release
 
@@ -529,13 +515,12 @@ go decision. Device types remain provider-local.
 
 ## Verification snapshot
 
-All 220 Python contracts and the focused protocol, server-logic/server-app, and
-adapter gates passed on Windows. A fresh `BUILD_TESTING=FALSE` desktop-evidence tree linked `openmw` and
-`tes3mp_server`. Its live real-`Morrowind.esm` wait/rest capture produced
-`summary.json`: two clients presented the identical synchronized rollover, a
-reattached client converged after one resume with zero duplicate world-time or
-weather presentations, and a deliberately stalled peer recovered with bounded
-resident memory and all outbound queues drained to zero, on 2026-09-11.
+All 224 Python contracts and the focused protocol, server-logic/server-app, and
+adapter gates passed on Windows on 2026-09-11. The desktop-evidence build linked
+`openmw` and `tes3mp_server`. Live real-`Morrowind.esm` lockpick and probe runs
+each submitted intent only, consumed one of 25 tool uses, advanced Security,
+mutated the mapped door, resumed once, reconverged every affected baseline, and
+drained all queues. Evidence is in `build/security-evidence-v17/summary.json`.
 
 The baseline provenance verifier remains red against the broader working tree:
 its registry omits many existing vNext files and still expects retired workflow

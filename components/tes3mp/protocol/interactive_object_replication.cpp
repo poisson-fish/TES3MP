@@ -219,7 +219,12 @@ namespace TES3MP
         const auto kind = static_cast<CommandSchema::ObjectInteractionKind>(input.kind);
         const auto root = CommandSchema::CreateClientInteractObjectCommand(builder,
             header, input.objectId.value(), &cell, &origin, input.expectedRevision.value(),
-            kind, input.requestedKey.has_value(), input.requestedKey ? input.requestedKey->value() : 0);
+            kind, input.requestedKey.has_value(), input.requestedKey ? input.requestedKey->value() : 0,
+            input.requestedTool.has_value(), input.requestedTool ? input.requestedTool->value() : 0,
+            input.expectedInventoryRevision.has_value(),
+            input.expectedInventoryRevision ? input.expectedInventoryRevision->value() : 0,
+            input.expectedCombatRevision.has_value(),
+            input.expectedCombatRevision ? input.expectedCombatRevision->value() : 0);
         CommandSchema::FinishSizePrefixedClientInteractObjectCommandBuffer(builder, root);
         return take(builder);
     }
@@ -253,7 +258,7 @@ namespace TES3MP
             std::get_if<Error>(&cell), std::get_if<Error>(&expectedRevision) };
         for (const auto* failure : failures) if (failure) return *failure;
 
-        if (static_cast<std::uint8_t>(root->kind()) > static_cast<std::uint8_t>(ObjectInteractionKind::UnlockWithKey))
+        if (static_cast<std::uint8_t>(root->kind()) > static_cast<std::uint8_t>(ObjectInteractionKind::DisarmTrap))
             return error(Code::InvalidInteractionKind, static_cast<std::size_t>(root->kind()));
 
         std::optional<KeyPrototypeId> requestedKey;
@@ -263,6 +268,33 @@ namespace TES3MP
             if (const auto* failure = std::get_if<Error>(&key)) return *failure;
             requestedKey = *value(key);
         }
+
+        std::optional<ItemStackId> requestedTool;
+        if (root->has_requested_tool())
+        {
+            auto tool = strong<ItemStackId>(root->requested_tool_stack_id());
+            if (const auto* failure = std::get_if<Error>(&tool)) return *failure;
+            requestedTool = *value(tool);
+        }
+        std::optional<InventoryRevision> inventoryRevision;
+        if (root->has_expected_inventory_revision())
+        {
+            auto revision = strong<InventoryRevision>(root->expected_inventory_revision());
+            if (const auto* failure = std::get_if<Error>(&revision)) return *failure;
+            inventoryRevision = *value(revision);
+        }
+        std::optional<CombatRevision> combatRevision;
+        if (root->has_expected_combat_revision())
+        {
+            auto revision = strong<CombatRevision>(root->expected_combat_revision());
+            if (const auto* failure = std::get_if<Error>(&revision)) return *failure;
+            combatRevision = *value(revision);
+        }
+        const auto kind = static_cast<ObjectInteractionKind>(root->kind());
+        const bool security = kind == ObjectInteractionKind::PickLock || kind == ObjectInteractionKind::DisarmTrap;
+        if (security != (requestedTool && inventoryRevision && combatRevision) || (security && requestedKey)
+            || (!security && (requestedTool || inventoryRevision || combatRevision)))
+            return error(Code::InvalidInteractionParameters);
 
         const auto* origin = root->interaction_origin();
         return ClientInteractObjectCommand{
@@ -275,8 +307,11 @@ namespace TES3MP
             .targetCell = std::get<CellId>(cell),
             .interactionOrigin = Position3(origin->x(), origin->y(), origin->z()),
             .expectedRevision = *value(expectedRevision),
-            .kind = static_cast<ObjectInteractionKind>(root->kind()),
-            .requestedKey = requestedKey
+            .kind = kind,
+            .requestedKey = requestedKey,
+            .requestedTool = requestedTool,
+            .expectedInventoryRevision = inventoryRevision,
+            .expectedCombatRevision = combatRevision
         };
     }
 }

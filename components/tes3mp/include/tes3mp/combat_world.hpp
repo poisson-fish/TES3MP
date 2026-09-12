@@ -37,7 +37,8 @@ namespace TES3MP
         MediumArmor = 8,
         HeavyArmor = 9,
         Unarmored = 10,
-        Count = 11,
+        Security = 11,
+        Count = 12,
     };
 
     struct CombatSkillProgressionRule
@@ -67,6 +68,21 @@ namespace TES3MP
 
         friend constexpr bool operator==(CombatSkillProgressionSettings,
             CombatSkillProgressionSettings) noexcept = default;
+    };
+
+    enum class SecurityAttemptKind : std::uint8_t
+    {
+        PickLock,
+        DisarmTrap,
+    };
+
+    struct OpenMwSecuritySettings
+    {
+        float pickLockMultiplier = 0.f;
+        float trapCostMultiplier = 0.f;
+        float disarmTrapUseGain = 1.f;
+
+        friend constexpr bool operator==(OpenMwSecuritySettings, OpenMwSecuritySettings) noexcept = default;
     };
 
     enum class MeleeWeaponSkill : std::uint8_t
@@ -158,6 +174,8 @@ namespace TES3MP
         std::array<float, 4> armorSkills{};
         DirectMagicDefense magicDefense;
 
+        float securitySkill = 0.f;
+
         friend constexpr bool operator==(const CanonicalPlayerCombatTemplate&,
             const CanonicalPlayerCombatTemplate&) noexcept = default;
     };
@@ -188,6 +206,8 @@ namespace TES3MP
         std::array<float, 4> armorSkills{};
         DirectMagicDefense magicDefense;
         std::vector<SpellRecordId> contractedDiseases;
+
+        float securitySkill = 0.f;
 
         friend constexpr bool operator==(const CanonicalPlayerCombatState&,
             const CanonicalPlayerCombatState&) noexcept = default;
@@ -245,6 +265,18 @@ namespace TES3MP
         bool initializePlayerFromCharacter(PlayerId id, const CanonicalPlayerCombatTemplate& source,
             std::uint64_t inventoryWeightUnits, CharacterProfileRevision profileRevision) noexcept;
         bool advancePlayerInventoryBinding(PlayerId id, std::uint64_t inventoryWeightUnits) noexcept;
+        enum class SecurityAttemptResult : std::uint8_t
+        {
+            Succeeded,
+            Failed,
+            PlayerNotFound,
+            StaleCombatRevision,
+            InvalidInput,
+            RevisionExhausted,
+        };
+        SecurityAttemptResult applySecurityAttempt(PlayerId player, CombatRevision expectedRevision,
+            SecurityAttemptKind kind, std::uint32_t difficulty, float toolQuality,
+            const OpenMwSecuritySettings& settings) noexcept;
 
         friend bool operator==(const CanonicalCombatWorld&, const CanonicalCombatWorld&) noexcept = default;
 

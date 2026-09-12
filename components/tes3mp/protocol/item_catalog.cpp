@@ -1,6 +1,7 @@
 #include <tes3mp/item_catalog.hpp>
 
 #include <algorithm>
+#include <cmath>
 
 namespace TES3MP
 {
@@ -33,6 +34,12 @@ namespace TES3MP
                 return std::nullopt;
 
             if (decl.keyId.has_value() && decl.keyId->value() == 0)
+                return std::nullopt;
+
+            const bool securityTool
+                = decl.category == ItemCategory::Lockpick || decl.category == ItemCategory::Probe;
+            if (!std::isfinite(decl.toolQuality) || (securityTool ? decl.toolQuality <= 0.f : decl.toolQuality != 0.f)
+                || (securityTool && (decl.maxCondition == 0 || decl.stackable)))
                 return std::nullopt;
         }
 

@@ -578,6 +578,8 @@ int main(int argc, char** argv)
     {
         optionalCapabilities.push_back(TES3MP::combatReplicationCapability());
         optionalCapabilities.push_back(TES3MP::authoritativeWaitRestCapability());
+        if (interactiveObjectWorld && inventoryWorld)
+            optionalCapabilities.push_back(TES3MP::authoritativeSecurityCapability());
     }
     std::sort(optionalCapabilities.begin(), optionalCapabilities.end());
     optionalCapabilities.erase(
@@ -660,6 +662,7 @@ int main(int argc, char** argv)
             combatContent ? &combatContent->settings : nullptr, combatContent ? &meleePolicy : nullptr,
             meleeContactHistory ? &*meleeContactHistory : nullptr,
             meleeContactHistory ? &*meleeContactHistory : nullptr, combatContent ? &combatContent->magic : nullptr,
+            combatContent ? &combatContent->securitySettings : nullptr,
             &scripts, &worldContent.globals, &worldContent.world, &*scriptStateCatalog, &*scriptState });
     if (!application.start())
     {

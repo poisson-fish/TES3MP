@@ -41,7 +41,7 @@ namespace
             // Door 2: locked door in cell 7 at x=200 requiring key 500
             InteractiveObjectCatalogEntry{ id<InteractiveObjectId>(2), InteractiveObjectKind::StandardDoor,
                 CellId::interior(id<CellSpaceId>(7)), tr(7, 200), std::nullopt, ObjectLockDeclaration{ true, 50, key },
-                ObjectTrapDeclaration{ true, trap } },
+                ObjectTrapDeclaration{ true, trap, 10 } },
             // Door 3: teleport door in cell 7 at x=50 leading to cell 7 at x=1000
             InteractiveObjectCatalogEntry{ id<InteractiveObjectId>(3), InteractiveObjectKind::TeleportDoor,
                 CellId::interior(id<CellSpaceId>(7)), tr(7, 50),
@@ -50,7 +50,7 @@ namespace
             // Door 4: trapped-only door in cell 7 at x=150
             InteractiveObjectCatalogEntry{ id<InteractiveObjectId>(4), InteractiveObjectKind::StandardDoor,
                 CellId::interior(id<CellSpaceId>(7)), tr(7, 150), std::nullopt,
-                ObjectLockDeclaration{ false, 0, std::nullopt }, ObjectTrapDeclaration{ true, trap } }
+                ObjectLockDeclaration{ false, 0, std::nullopt }, ObjectTrapDeclaration{ true, trap, 10 } }
         };
         return *InteractiveObjectCatalog::create(testContentManifest(), entries);
     }

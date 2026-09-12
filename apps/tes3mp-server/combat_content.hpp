@@ -36,6 +36,7 @@ namespace TES3MP::ServerApp
     struct CombatContent
     {
         OpenMwMeleeSettings settings;
+        OpenMwSecuritySettings securitySettings;
         CanonicalPlayerCombatTemplate playerTemplate;
         MeleeWeaponCatalog weapons;
         DirectMagicCatalog magic;

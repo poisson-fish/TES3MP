@@ -47,6 +47,7 @@ namespace TES3MP::ServerApp
             self->armorSkills[1],
             self->armorSkills[2],
             self->armorSkills[3],
+            self->securitySkill,
         };
         std::array<CombatSkillSnapshot, ReplicatedCombatSkillCount> skills{};
         for (std::size_t index = 0; index < skills.size(); ++index)

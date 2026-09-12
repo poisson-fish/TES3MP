@@ -14,7 +14,7 @@ namespace
     }
 
     constexpr std::array<std::size_t, static_cast<std::size_t>(TES3MP::CombatProgressionSkill::Count)>
-        CharacterSkillIndexes{ 0, 20, 5, 4, 6, 7, 26, 21, 2, 3, 17 };
+        CharacterSkillIndexes{ 0, 20, 5, 4, 6, 7, 26, 21, 2, 3, 17, 18 };
 
     float combatSkillValue(
         const TES3MP::CanonicalPlayerCombatState& player, TES3MP::CombatProgressionSkill skill) noexcept
@@ -44,6 +44,8 @@ namespace
                 return player.armorSkills[2];
             case Skill::Unarmored:
                 return player.armorSkills[3];
+            case Skill::Security:
+                return player.securitySkill;
             case Skill::Count:
                 break;
         }
@@ -89,6 +91,9 @@ namespace
             case Skill::Unarmored:
                 player.armorSkills[3] = value;
                 break;
+            case Skill::Security:
+                player.securitySkill = value;
+                break;
             case Skill::Count:
                 break;
         }
@@ -115,7 +120,8 @@ namespace
         return Progression::HandToHand;
     }
 
-    bool advanceCombatSkill(TES3MP::CanonicalPlayerCombatState& player, TES3MP::CombatProgressionSkill skill) noexcept
+    bool advanceCombatSkill(TES3MP::CanonicalPlayerCombatState& player, TES3MP::CombatProgressionSkill skill,
+        std::optional<float> useGain = std::nullopt) noexcept
     {
         const auto index = static_cast<std::size_t>(skill);
         if (index >= player.skillRules.size())
@@ -127,7 +133,7 @@ namespace
             || state.progress < 0.f || !finite(state.requirementFactor) || state.requirementFactor <= 0.f)
             return false;
         const float requirement = (value + 1.f) * state.requirementFactor;
-        const float gained = rule.useGain / requirement;
+        const float gained = useGain.value_or(rule.useGain) / requirement;
         if (!finite(gained) || gained <= 0.f)
             return false;
         state.progress += gained;
@@ -175,6 +181,7 @@ namespace
             || value.maximumEncumbranceWeightUnits == 0 || !finite(value.blockSkill)
             || !std::ranges::all_of(value.weaponSkills, [](float skill) { return finite(skill); })
             || !std::ranges::all_of(value.armorSkills, [](float skill) { return finite(skill); })
+            || !finite(value.securitySkill) || value.securitySkill < 0.f || value.securitySkill > 100.f
             || !validVictim(value.victim) || !validVictim(value.respawnVictim) || !finite(value.maximumHealth)
             || value.maximumHealth <= 0.f || !finite(value.maximumFatigue) || value.maximumFatigue < 0.f
             || !finite(value.magicka) || !finite(value.maximumMagicka) || value.maximumMagicka < 0.f
@@ -483,6 +490,7 @@ namespace TES3MP
         result.weaponSkills[static_cast<std::size_t>(MeleeWeaponSkill::Spear)] = static_cast<float>(skills[7]);
         result.armorSkills = { static_cast<float>(skills[21]), static_cast<float>(skills[2]),
             static_cast<float>(skills[3]), static_cast<float>(skills[17]) };
+        result.securitySkill = static_cast<float>(skills[18]);
         for (std::size_t index = 0; index < result.skillProgression.size(); ++index)
         {
             const auto characterSkill = static_cast<std::uint8_t>(CharacterSkillIndexes[index]);
@@ -598,6 +606,7 @@ namespace TES3MP
         value.skillProgression = source.skillProgression;
         value.armorSkills = source.armorSkills;
         value.magicDefense = source.magicDefense;
+        value.securitySkill = source.securitySkill;
         value.stats.weaponSkill = 0.f;
         value.stats.normalizedEncumbrance
             = normalizedEncumbrance(inventoryWeightUnits, source.maximumEncumbranceWeightUnits);
@@ -641,6 +650,7 @@ namespace TES3MP
         value.skillProgression = source.skillProgression;
         value.armorSkills = source.armorSkills;
         value.magicDefense = source.magicDefense;
+        value.securitySkill = source.securitySkill;
         value.stats.weaponSkill = 0.f;
         value.stats.normalizedEncumbrance
             = normalizedEncumbrance(inventoryWeightUnits, source.maximumEncumbranceWeightUnits);
@@ -666,6 +676,55 @@ namespace TES3MP
             = normalizedEncumbrance(inventoryWeightUnits, found->maximumEncumbranceWeightUnits);
         found->revision = *revision;
         return valid(*found);
+    }
+
+    CanonicalCombatWorld::SecurityAttemptResult CanonicalCombatWorld::applySecurityAttempt(PlayerId id,
+        CombatRevision expectedRevision, SecurityAttemptKind kind, std::uint32_t difficulty, float toolQuality,
+        const OpenMwSecuritySettings& settings) noexcept
+    {
+        auto found = std::ranges::lower_bound(mPlayers, id, {}, &CanonicalPlayerCombatState::playerId);
+        if (found == mPlayers.end() || found->playerId != id)
+            return SecurityAttemptResult::PlayerNotFound;
+        if (found->revision != expectedRevision)
+            return SecurityAttemptResult::StaleCombatRevision;
+        if (!finite(toolQuality) || toolQuality <= 0.f || !finite(settings.pickLockMultiplier)
+            || !finite(settings.trapCostMultiplier) || !finite(settings.disarmTrapUseGain)
+            || settings.disarmTrapUseGain <= 0.f)
+            return SecurityAttemptResult::InvalidInput;
+        const auto revision = found->revision.next();
+        if (!revision)
+            return SecurityAttemptResult::RevisionExhausted;
+
+        const float base = 0.2f * found->stats.agility + 0.1f * found->stats.luck + found->securitySkill;
+        float chance = 0.f;
+        if (kind == SecurityAttemptKind::PickLock)
+            chance = base * toolQuality * found->stats.fatigueTerm
+                + settings.pickLockMultiplier * static_cast<float>(difficulty);
+        else
+            chance = (base + settings.trapCostMultiplier * static_cast<float>(difficulty))
+                * toolQuality * found->stats.fatigueTerm;
+        if (!finite(chance))
+            return SecurityAttemptResult::InvalidInput;
+
+        bool succeeded = false;
+        auto random = Xoshiro256StarStar::restore(mRandomState);
+        if (chance > 0.f)
+        {
+            const auto roll = random.uniformBelow(100);
+            if (!roll)
+                return SecurityAttemptResult::InvalidInput;
+            succeeded = static_cast<float>(*roll) <= chance;
+            mRandomState = random.snapshot();
+        }
+        if (succeeded)
+        {
+            const auto useGain = kind == SecurityAttemptKind::DisarmTrap
+                ? std::optional<float>(settings.disarmTrapUseGain)
+                : std::nullopt;
+            (void)advanceCombatSkill(*found, CombatProgressionSkill::Security, useGain);
+        }
+        found->revision = *revision;
+        return succeeded ? SecurityAttemptResult::Succeeded : SecurityAttemptResult::Failed;
     }
 
     std::variant<CanonicalCombatWorld, CanonicalCombatWorldError> createCanonicalCombatWorld(

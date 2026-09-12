@@ -16,7 +16,7 @@ namespace TES3MP::ServerApp
 {
     namespace
     {
-        constexpr std::string_view Header = "TES3MP_COMBAT_V7";
+        constexpr std::string_view Header = "TES3MP_COMBAT_V8";
         constexpr std::size_t MaximumFields = 48;
 
         struct ActorAttackDeclaration
@@ -167,6 +167,7 @@ namespace TES3MP::ServerApp
 
         std::optional<ContentManifestId> declaredManifest;
         std::optional<OpenMwMeleeSettings> settings;
+        std::optional<OpenMwSecuritySettings> securitySettings;
         std::optional<CanonicalPlayerCombatTemplate> playerTemplate;
         std::optional<CombatSkillProgressionSettings> skillSettings;
         std::optional<std::array<CombatSkillProgressionRule, static_cast<std::size_t>(CombatProgressionSkill::Count)>>
@@ -268,6 +269,17 @@ namespace TES3MP::ServerApp
                         return error(CombatContentErrorCode::InvalidMagicCatalog, lineNumber);
                     magicSettings = DirectMagicSettings{ *shieldMultiplier, *diseaseChance };
                 }
+                else if (values[0] == "security_settings")
+                {
+                    if (values.size() != 4 || securitySettings)
+                        return error(CombatContentErrorCode::Malformed, lineNumber);
+                    const auto pick = finiteFloat(values[1]);
+                    const auto trap = finiteFloat(values[2]);
+                    const auto disarmGain = finiteFloat(values[3]);
+                    if (!pick || !trap || !disarmGain || *disarmGain <= 0.f)
+                        return error(CombatContentErrorCode::InvalidSettings, lineNumber);
+                    securitySettings = OpenMwSecuritySettings{ *pick, *trap, *disarmGain };
+                }
                 else if (values[0] == "player_magic")
                 {
                     if (playerMagic || values.size() != 12)
@@ -364,9 +376,9 @@ namespace TES3MP::ServerApp
                 }
                 else if (values[0] == "player")
                 {
-                    if (values.size() != 26 || playerTemplate)
+                    if (values.size() != 27 || playerTemplate)
                         return error(CombatContentErrorCode::Malformed, lineNumber);
-                    std::array<float, 23> parsed{};
+                    std::array<float, 24> parsed{};
                     for (std::size_t index = 0; index < parsed.size(); ++index)
                     {
                         const auto value = finiteFloat(values[index + 1]);
@@ -374,8 +386,8 @@ namespace TES3MP::ServerApp
                             return error(CombatContentErrorCode::InvalidPlayerTemplate, lineNumber);
                         parsed[index] = *value;
                     }
-                    const auto maximumWeight = number<std::uint64_t>(values[24]);
-                    const auto werewolf = boolean(values[25]);
+                    const auto maximumWeight = number<std::uint64_t>(values[25]);
+                    const auto werewolf = boolean(values[26]);
                     if (!maximumWeight || *maximumWeight == 0 || !werewolf || parsed[13] < 0.f || parsed[14] < 0.f
                         || parsed[15] <= 0.f || parsed[16] < 0.f || parsed[17] < 0.f || parsed[18] < 0.f)
                         return error(CombatContentErrorCode::InvalidPlayerTemplate, lineNumber);
@@ -404,6 +416,7 @@ namespace TES3MP::ServerApp
                     playerTemplate->healthRecoveryPerSecond = parsed[17];
                     playerTemplate->magickaRecoveryPerSecond = parsed[18];
                     playerTemplate->armorSkills = { parsed[19], parsed[20], parsed[21], parsed[22] };
+                    playerTemplate->securitySkill = parsed[23];
                 }
                 else if (values[0] == "progression")
                 {
@@ -424,7 +437,9 @@ namespace TES3MP::ServerApp
                         const auto specialization = number<std::uint8_t>(values[5 + index * 2]);
                         const auto gain = finiteFloat(values[6 + index * 2]);
                         if (!specialization || *specialization > static_cast<std::uint8_t>(ClassSpecialization::Stealth)
-                            || !gain || *gain < 0.f)
+                            || !gain || *gain < 0.f
+                            || (index == static_cast<std::size_t>(CombatProgressionSkill::Security)
+                                && *gain <= 0.f))
                             return error(CombatContentErrorCode::InvalidPlayerTemplate, lineNumber);
                         rules[index] = { static_cast<ClassSpecialization>(*specialization), *gain };
                     }
@@ -559,7 +574,8 @@ namespace TES3MP::ServerApp
             begin = end + 1;
         }
 
-        if (!declaredManifest || !settings || !playerTemplate || !skillSettings || !skillRules || !randomSeed
+        if (!declaredManifest || !settings || !securitySettings || !playerTemplate || !skillSettings || !skillRules
+            || !randomSeed
             || !magicSettings || !playerMagic)
             return error(CombatContentErrorCode::Malformed);
         playerTemplate->skillSettings = *skillSettings;
@@ -617,7 +633,8 @@ namespace TES3MP::ServerApp
         CanonicalCombatWorld validation = *created;
         if (!validation.ensurePlayer(*PlayerId::fromValue(1), *playerTemplate, 0))
             return error(CombatContentErrorCode::InvalidPlayerTemplate);
-        return CombatContent{ *settings, *playerTemplate, std::move(*weapons), std::move(*magic), std::move(*created) };
+        return CombatContent{ *settings, *securitySettings, *playerTemplate, std::move(*weapons),
+            std::move(*magic), std::move(*created) };
     }
     catch (...)
     {

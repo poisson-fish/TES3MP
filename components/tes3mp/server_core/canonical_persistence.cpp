@@ -531,6 +531,7 @@ namespace
             }
             for (float value : player.armorSkills)
                 writeFloat(writer, value);
+            writeFloat(writer, player.securitySkill);
             writeDefense(writer, player.magicDefense);
             writer.fixed(static_cast<std::uint32_t>(player.contractedDiseases.size()));
             for (const auto disease : player.contractedDiseases)
@@ -609,6 +610,8 @@ namespace
             for (auto& value : player.armorSkills)
                 if (!readFloat(reader, value))
                     return std::nullopt;
+            if (!readFloat(reader, player.securitySkill))
+                return std::nullopt;
             if (!readDefense(reader, player.magicDefense))
                 return std::nullopt;
             const auto diseaseCount = reader.fixed<std::uint32_t>();

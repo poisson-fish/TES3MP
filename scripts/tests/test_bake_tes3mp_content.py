@@ -66,20 +66,21 @@ class ContentBakerTests(unittest.TestCase):
             encoding="utf-8",
         )
         (self.source / "inventory.txt").write_text(
-            "TES3MP_INVENTORY_V1\n"
+            "TES3MP_INVENTORY_V2\n"
             f"manifest {ZERO_MANIFEST}\n"
-            f"prototype {self.item_prototype} 11 10 5 100 0 16 0 none\n",
+            f"prototype {self.item_prototype} 11 10 5 100 0 16 0 none 0\n",
             encoding="utf-8",
         )
         (self.source / "combat.txt").write_text(
-            "TES3MP_COMBAT_V7\n"
+            "TES3MP_COMBAT_V8\n"
             f"manifest {ZERO_MANIFEST}\n"
             "seed 1234\n"
             "settings 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 -90 90 1 1 1 0 100 1 1 1 30 .01 .01 .25 0 0\n"
             "magic_settings .1 .1\n"
+            "security_settings -1 -1 1\n"
             "player_magic 50 10 0 0 0 0 0 0 0 0 0\n"
             "progression 1 1 1 1 0 1 0 1 0 1 0 1 0 1 0 1 0 1 0 1 0 1 0 1 0 1\n"
-            "player 50 50 50 1 0 0 20 20 20 20 20 25 100 50 20 50 100 0.1 0.2 20 20 20 20 500 0\n"
+            "player 50 50 50 1 0 0 20 20 20 20 20 25 100 50 20 50 100 0.1 0.2 20 20 20 20 500 0 20\n"
             "actor 1 20 20 10 0 0 0 0 0 0 0 0 1\n"
             f"weapon {self.item_prototype} 0 1 5 1 5 1 5 10 1 1\n",
             encoding="utf-8",
@@ -207,6 +208,7 @@ class ContentBakerTests(unittest.TestCase):
             "fMiscSkillBonus": 1., "fMinorSkillBonus": .75, "fMajorSkillBonus": .5,
             "fSpecialSkillBonus": .8, "fRestMagicMult": .15,
             "fElementalShieldMult": .1, "fDiseaseXferChance": 10.,
+            "fPickLockMult": -1., "fTrapCostMult": -1.,
         }
         gmsts = b"".join(record("GMST", subrecord("NAME", name.encode() + b"\0"),
                                   subrecord("FLTV", struct.pack("<f", value)))
@@ -443,7 +445,8 @@ class ContentBakerTests(unittest.TestCase):
         self.assertIn(f"prototype {self.item_prototype} 11 30 10 400 0 65536 0 none", inventory)
         self.assertIn("settings 0.200000003 2 0 0.25 0.100000001 0.5 0.100000001 0.100000001 0.5 0.100000001 4 1.5 1.25 0.5 0.0199999996 0.0399999991 0.100000001 5 -60 60 1 1 1.25 10 50 2 3 0.25 30 0.00999999978 0.00999999978 0.25 0 0", combat)
         self.assertIn("progression 1 0.75 0.5 0.800000012 0 1 0 21 0 6 0 5 0 7 0 8 0 27 0 22 0 3 0 4 0 18", combat)
-        self.assertIn("player 40 40 40 1.25 0 0 21 22 23 24 25 26 160 40 5 30 0 0.0333333333 0.0375000015 5 5 5 5 2000 0", combat)
+        self.assertIn("security_settings -1 -1 19", combat)
+        self.assertIn("player 40 40 40 1.25 0 0 21 22 23 24 25 26 160 40 5 30 0 0.0333333333 0.0375000015 5 5 5 5 5 2000 0", combat)
         self.assertIn("magic_settings 0.100000001 10", combat)
         self.assertIn("player_magic 30 5 0 0 0 0 0 0 0 0 0", combat)
         self.assertIn(f"weapon {self.item_prototype} 0 4 5 4 5 5 5 3 1 1", combat)
@@ -509,6 +512,15 @@ class ContentBakerTests(unittest.TestCase):
         catalog = baker.Catalog("interactive_object_content_file", self.source / "objects.txt", "objects.txt", b"",
                                 (interior, exterior))
         self.assertEqual(baker._interactive_object_trap_ids(catalog), {41, 42})
+
+    def test_interactive_trap_profiles_are_derived_from_manifest_spells(self):
+        name = "burning hand"
+        effect = subrecord("ENAM", struct.pack("<hbbiiiii", 14, -1, -1, 1, 0, 1, 50, 50))
+        spell = baker.Tes3Record("SPEL", name, False, (("NAME", name.encode() + b"\0"),
+                                                       ("ENAM", effect[8:])))
+        identifier = baker.stable_record_id(name)
+        profiles = baker._trap_magic_profiles({("SPEL", name): spell}, {identifier})
+        self.assertEqual(profiles, ((identifier, ("other", "fire", "50", "50")),))
 
     def test_derived_pack_missing_record_preserves_current_pointer(self):
         self._write_derived_esm()

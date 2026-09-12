@@ -584,7 +584,9 @@ namespace TES3MP
 
     ClientRuntimeQueueResult ClientSessionRuntime::queueInteractObject(InteractiveObjectId objectId, CellId targetCell,
         Position3 interactionOrigin, ObjectRevision expectedRevision, ObjectInteractionKind kind,
-        std::optional<KeyPrototypeId> requestedKey)
+        std::optional<KeyPrototypeId> requestedKey, std::optional<ItemStackId> requestedTool,
+        std::optional<InventoryRevision> expectedInventoryRevision,
+        std::optional<CombatRevision> expectedCombatRevision)
     {
         const auto& snapshot = mSession->stateMachine().confirmedSnapshot();
         const auto sessionId = mSession->stateMachine().sessionId();
@@ -602,7 +604,7 @@ namespace TES3MP
             return { ClientRuntimeResult::EncodeRejected, std::nullopt };
         ClientInteractObjectCommand command{ *sessionId, snapshot->header().targetSessionGeneration(), *sequence,
             *commandId, snapshot->header().canonicalRevision(), objectId, targetCell, interactionOrigin,
-            expectedRevision, kind, requestedKey };
+            expectedRevision, kind, requestedKey, requestedTool, expectedInventoryRevision, expectedCombatRevision };
         const auto encoded = encodeClientInteractObjectCommand(command);
         const auto queued = queue(MessageClass::ReliableOperation, MessageKind::ClientInteractObjectCommand, encoded);
         if (queued == ClientRuntimeResult::Accepted)

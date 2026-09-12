@@ -657,7 +657,7 @@ int main()
     }
     {
         const auto manifestId
-            = ContentManifestId::fromHex("6ce29aa7cdb584836f55f2fc0d916f8d66a684dea3e0a0b32e629d5648962b31");
+            = ContentManifestId::fromHex("6a36b3a30eb45a8473e4e635880a182045c254657d5931c136aabf3fb5605ea8");
         const auto spaces = parseCellSpaceDeclarations("interior:1;interior:2;interior:3;exterior:4");
         const auto cells = parseContentCells("interior:1;interior:2;interior:3;exterior:4:-2:-9");
         const auto movement = parseMovementProfile("sneak:4;walk:8;run:16;jump:12");
@@ -697,11 +697,15 @@ int main()
             && std::ranges::find(darkElf->appearances, stockFemale) != darkElf->appearances.end()
             && catalog->find(*ClassRecordId::fromValue(*characterRecordId("Warrior")))
             && catalog->find(*BirthsignRecordId::fromValue(*characterRecordId("Fay")))
-            && catalog->startingInventory().size() == 2
+            && catalog->startingInventory().size() == 4
             && catalog->startingInventory()[0].prototype == id<ItemPrototypeId>(579706974062055657ull)
             && catalog->startingInventory()[0].equipmentSlot == static_cast<std::uint8_t>(EquipmentSlot::CarriedRight)
             && catalog->startingInventory()[1].prototype == id<ItemPrototypeId>(9071396267722241944ull)
-            && catalog->startingInventory()[1].equipmentSlot == static_cast<std::uint8_t>(EquipmentSlot::CarriedLeft));
+            && catalog->startingInventory()[1].equipmentSlot == static_cast<std::uint8_t>(EquipmentSlot::CarriedLeft)
+            && catalog->startingInventory()[2].prototype == id<ItemPrototypeId>(12936841098047256804ull)
+            && !catalog->startingInventory()[2].equipmentSlot
+            && catalog->startingInventory()[3].prototype == id<ItemPrototypeId>(16269827911551786073ull)
+            && !catalog->startingInventory()[3].equipmentSlot);
 
         const auto contentRoot = std::filesystem::path(TES3MP_SOURCE_ROOT) / "files/data/tes3mp";
         auto packagedCollisionResult = ContentCollisionProvider::load(contentRoot / "vanilla-collision.txt", *manifest);
@@ -756,7 +760,7 @@ int main()
             && evidence->latestHighWaterMessages == 1 && evidence->latestHighWaterBytes == 10
             && !telemetry.takeDrainEvidence());
     }
-    static_assert(Phase7ProtocolMajor == 1 && Phase7ProtocolMinimumMinor == 8 && Phase7ProtocolMaximumMinor == 8);
+    static_assert(Phase7ProtocolMajor == 1 && Phase7ProtocolMinimumMinor == 9 && Phase7ProtocolMaximumMinor == 9);
     static_assert(Phase7SourceAuthenticationBurst == 4 && Phase7GlobalAuthenticationBurst == 32
         && Phase7AuthenticationRefillMilliseconds == 1'000 && Phase7ConnectionCapacity == 8);
     static_assert(!phase7ProofDisconnectGraceAccepted(MinimumResumeTokenLifetimeMilliseconds - 1));
@@ -1048,16 +1052,17 @@ int main()
         assert(static_cast<bool>(stream));
     };
     constexpr std::string_view combatHeader
-        = "TES3MP_COMBAT_V7\n"
+        = "TES3MP_COMBAT_V8\n"
           "manifest 0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20\n"
           "seed 42\n";
     constexpr std::string_view combatBody
         = "settings 0.2 5 1 0.1 1 1 0.1 0.1 1 1 1.5 1 1.25 0.5 0.02 0.04 0.1 5 -90 90 1 1 1 0 100 1 1 1 30 .01 .01 .25 "
           "0 0\n"
+          "security_settings -1 0 3\n"
           "magic_settings .1 .1\n"
           "player_magic 40 10 0 0 0 0 0 0 0 0 0\n"
-          "progression 1 0.75 0.5 0.8 0 1 0 2 0 3 0 4 0 5 0 6 0 7 0 8 0 9 0 10 0 11\n"
-          "player 50 40 40 1 0 0 10 20 30 40 50 25 100 30 35 40 80 0.1 0.2 15 16 17 18 500 0\n"
+          "progression 1 0.75 0.5 0.8 0 1 0 2 0 3 0 4 0 5 0 6 0 7 0 8 0 9 0 10 0 11 0 12\n"
+          "player 50 40 40 1 0 0 10 20 30 40 50 25 100 30 35 40 80 0.1 0.2 15 16 17 18 19 500 0\n"
           "actor 1 20 50 0 0 0 25 0 0 0 0 0 1\n"
           "actor_attack 1 50 40 40 1 25 50 1 4 1 4 1 4 1 30\n"
           "actor_magic 1 30 5 1 2 3 4 5 6 7 8 9\n"
@@ -1122,16 +1127,17 @@ int main()
         == CombatContentErrorCode::InvalidSettings);
     writeCombat(std::string(combatHeader)
         + "settings 0.2 5 1 0.1 1 1 0.1 0.1 1 1 1.5 1 1.25 0.5 0.02 0.04 0.1 5 -90 90 1 1 1 0 100 1 1 1 30 .01 .01 .25 0 0\n"
+          "security_settings -1 0 3\n"
           "magic_settings .1 .1\n"
           "player_magic 40 10 0 0 0 0 0 0 0 0 0\n"
-          "progression 1 0.75 0.5 0.8 0 1 0 2 0 3 0 4 0 5 0 6 0 7 0 8 0 9 0 10 0 11\n"
-          "player 50 40 40 1 0 0 10 20 30 40 50 25 100 30 35 40 80 0.1 0.2 15 16 17 18 500 0\n");
+          "progression 1 0.75 0.5 0.8 0 1 0 2 0 3 0 4 0 5 0 6 0 7 0 8 0 9 0 10 0 11 0 12\n"
+          "player 50 40 40 1 0 0 10 20 30 40 50 25 100 30 35 40 80 0.1 0.2 15 16 17 18 19 500 0\n");
     assert(std::get<CombatContentError>(
                loadCombatContent(combatPath, parsedConfig().contentManifest, actorCatalog, combatItems))
                .code
         == CombatContentErrorCode::InvalidActorSet);
     writeCombat(
-        "TES3MP_COMBAT_V7\n"
+        "TES3MP_COMBAT_V8\n"
         "manifest 0202030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20\n"
         "seed 42\n"
         + std::string(combatBody));
@@ -1148,11 +1154,11 @@ int main()
         assert(static_cast<bool>(stream));
     };
     constexpr std::string_view objectHeader
-        = "TES3MP_INTERACTIVE_OBJECTS_V1\n"
+        = "TES3MP_INTERACTIVE_OBJECTS_V2\n"
           "manifest 0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20\n";
     writeObjects(std::string(objectHeader)
-        + "object 1 standard interior 7 100 20 30 0 0 0 0 none none\n"
-          "object 2 teleport interior 7 20 20 30 0 0 0 0 none none exterior 8 0 0 500 20 30 0 0 0\n");
+        + "object 1 standard interior 7 100 20 30 0 0 0 0 none none 0\n"
+          "object 2 teleport interior 7 20 20 30 0 0 0 0 none none 0 exterior 8 0 0 500 20 30 0 0 0\n");
     auto objectContent = loadInteractiveObjectContent(objectPath, parsedConfig().contentManifest);
     assert(std::holds_alternative<InteractiveObjectCatalog>(objectContent));
     const auto& loadedObjects = std::get<InteractiveObjectCatalog>(objectContent);
@@ -1174,10 +1180,10 @@ int main()
         assert(static_cast<bool>(stream));
     };
     constexpr std::string_view inventoryHeader
-        = "TES3MP_INVENTORY_V1\n"
+        = "TES3MP_INVENTORY_V2\n"
           "manifest 0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20\n";
     writeInventory(std::string(inventoryHeader)
-        + "prototype 1 8 1 5 0 0 0 1 1\n"
+        + "prototype 1 8 1 5 0 0 0 1 1 0\n"
           "container 1 interior 7 20 20 30 100\n"
           "container_item 1 10 1 1 0 0 none\n"
           "ground_item 11 1 1 0 0 none interior 7 25 20 30\n");
@@ -2498,7 +2504,8 @@ int main()
             { sessions, joins, crypto, *queues, clock, intake, reducer, *lifecycle, packagedActorCatalog, &combatActors,
                 packagedCollision.get(), nullptr, nullptr, &packagedInventory->catalog, &inventory, &combatWorld,
                 &packagedCombat->weapons, &playerTemplate, &packagedCombat->settings, &meleePolicy, &*contactHistory,
-                &*contactHistory, &packagedCombat->magic, nullptr, &packagedWorld->globals, &packagedWorld->world });
+                &*contactHistory, &packagedCombat->magic, &packagedCombat->securitySettings, nullptr,
+                &packagedWorld->globals, &packagedWorld->world });
         assert(application.start() && application.pump(ServerTick::initial()));
 
         bool negotiatedCombat = false;

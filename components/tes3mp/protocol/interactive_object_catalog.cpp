@@ -54,7 +54,8 @@ namespace TES3MP
             if (entry.lock.lockedByDefault && entry.lock.lockLevel == 0)
                 return std::nullopt;
 
-            if (entry.trap.trappedByDefault && !entry.trap.trapId.has_value())
+            if (entry.trap.trappedByDefault != entry.trap.trapId.has_value()
+                || entry.trap.trappedByDefault != (entry.trap.disarmDifficulty != 0))
                 return std::nullopt;
         }
 

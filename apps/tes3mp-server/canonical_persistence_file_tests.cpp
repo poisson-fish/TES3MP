@@ -82,15 +82,19 @@ namespace
     DurableDomains domains(std::uint32_t count, float health, std::uint64_t randomSeed, bool actorDead = false)
     {
         const auto manifest = testContentManifest();
-        const std::array declarations{ ItemPrototypeDeclaration{
-            id<ItemPrototypeId>(1), ItemCategory::Miscellaneous, 1, 1, 0, 0, 0, true, id<KeyPrototypeId>(500) } };
+        const std::array declarations{
+            ItemPrototypeDeclaration{
+                id<ItemPrototypeId>(1), ItemCategory::Miscellaneous, 1, 1, 0, 0, 0, true, id<KeyPrototypeId>(500) },
+            ItemPrototypeDeclaration{
+                id<ItemPrototypeId>(2), ItemCategory::Lockpick, 1, 1, 25, 0, 0, false, std::nullopt, 1.f } };
         auto catalog = ItemPrototypeCatalog::create(manifest, declarations).value();
         CanonicalPlayerInventoryState inventoryPlayer{ .player = id<PlayerId>(1),
             .revision = id<InventoryRevision>(count),
             .lastChangeTick = id<ServerTick>(count),
-            .stacks = { { id<ItemStackId>(1), id<ItemPrototypeId>(1), count, 0, 0, std::nullopt } } };
+            .stacks = { { id<ItemStackId>(1), id<ItemPrototypeId>(1), count, 0, 0, std::nullopt },
+                { id<ItemStackId>(2), id<ItemPrototypeId>(2), 1, 26 - count, 0, std::nullopt } } };
         auto inventory = CanonicalInventoryWorld::create(
-            manifest, catalog, std::array{ inventoryPlayer }, {}, {}, id<ItemStackId>(2))
+            manifest, catalog, std::array{ inventoryPlayer }, {}, {}, id<ItemStackId>(3))
                              .value();
 
         OpenMwMeleeAttacker attacker;
@@ -103,7 +107,7 @@ namespace
         victim.health = health;
         victim.fatigue = 100.f;
         victim.dead = health <= 0.f;
-        const std::array combatPlayers{ CanonicalPlayerCombatState{ .playerId = id<PlayerId>(1),
+        CanonicalPlayerCombatState combatPlayer{ .playerId = id<PlayerId>(1),
             .revision = id<CombatRevision>(count),
             .stats = attacker,
             .maximumEncumbranceWeightUnits = 100,
@@ -111,7 +115,12 @@ namespace
             .respawnVictim = victim,
             .deathTick = victim.dead ? std::optional(id<ServerTick>(count)) : std::nullopt,
             .maximumHealth = 100.f,
-            .maximumFatigue = 100.f } };
+            .maximumFatigue = 100.f,
+            .securitySkill = 47.f };
+        const auto security = static_cast<std::size_t>(CombatProgressionSkill::Security);
+        combatPlayer.skillRules[security].useGain = 3.f;
+        combatPlayer.skillProgression[security].progress = count > 1 ? 0.02f : 0.f;
+        const std::array combatPlayers{ combatPlayer };
         OpenMwMeleeVictim actorVictim;
         actorVictim.health = actorDead ? 0.f : 20.f;
         actorVictim.fatigue = 50.f;
@@ -139,7 +148,7 @@ namespace
         const std::array objectEntries{ InteractiveObjectCatalogEntry{ id<InteractiveObjectId>(1),
             InteractiveObjectKind::StandardDoor, cell, doorRoot, std::nullopt,
             ObjectLockDeclaration{ true, 25, id<KeyPrototypeId>(500) },
-            ObjectTrapDeclaration{ true, id<TrapPrototypeId>(600) } } };
+            ObjectTrapDeclaration{ true, id<TrapPrototypeId>(600), 10 } } };
         auto objectCatalog = *InteractiveObjectCatalog::create(manifest, objectEntries);
         auto objects
             = std::get<CanonicalInteractiveObjectWorld>(createInitialCanonicalInteractiveObjectWorld(objectCatalog));
@@ -438,12 +447,17 @@ namespace
         const auto* scriptState = file.restoredScriptState();
         const auto* latest = file.prefix().latest();
         const auto* scriptVariable = scriptState ? scriptState->find(11, id<ScriptVariableId>(1)) : nullptr;
+        const auto security = static_cast<std::size_t>(CombatProgressionSkill::Security);
         return inventory && combat && objects && actors && world && scriptVariable && latest
-            && inventory->players.size() == 1 && inventory->players.front().stacks.size() == 1
+            && inventory->players.size() == 1 && inventory->players.front().stacks.size() == 2
             && inventory->players.front().stacks.front().count == count && combat->players.size() == 1
-            && combat->players.front().victim.health == health && objects->objects.size() == 1
+            && combat->players.front().victim.health == health && combat->players.front().securitySkill == 47.f
+            && inventory->players.front().stacks[1].condition == 26 - count
+            && combat->players.front().skillProgression[security].progress == (count > 1 ? 0.02f : 0.f)
+            && objects->objects.size() == 1
             && objects->objects.front().doorState() == DoorState::Closed
             && objects->objects.front().lockState() == (count == 1 ? LockState::Locked : LockState::Unlocked)
+            && objects->objects.front().trapState() == (count == 1 ? TrapState::Armed : TrapState::Disarmed)
             && actors->actors.size() == 1
             && actors->actors.front().root().position().x() == static_cast<std::int64_t>(count)
             && combat->actors.size() == 1 && combat->actors.front().stats.dead == actorDead

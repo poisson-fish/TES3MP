@@ -90,7 +90,9 @@ def _runtime_config(pack: Path, output: Path, port: int, password: Path,
 
 def _seed_established_players(args: argparse.Namespace, pack: Path, phase: Path,
                               roles: tuple[str, ...], credential_namespace: str,
-                              username_prefix: str) -> None:
+                              username_prefix: str,
+                              starting_inventory: tuple[tuple[int, int, int], ...] = (),
+                              skill_overrides: dict[int, int] | None = None) -> None:
     template_path = Path(__file__).resolve().parent / "fixtures" / "desktop_evidence_established_player_v5.txt"
     template_lines = [line for line in template_path.read_text(encoding="utf-8").splitlines()
                       if line and not line.startswith("TES3MP_")]
@@ -110,6 +112,16 @@ def _seed_established_players(args: argparse.Namespace, pack: Path, phase: Path,
         tokens[3] = manifest
         tokens[4] = hashlib.sha256(credential).hexdigest()
         tokens[6:16] = ["0", "1", "0", "0", "62464", "-138240", "24576", "0", "0", "4056358002"]
+        for skill, value in (skill_overrides or {}).items():
+            if skill < 0 or skill >= 27 or value < 0 or value > 65535:
+                raise RuntimeError("established player skill override is invalid")
+            tokens[44 + skill] = str(value)
+        if tokens[-2] != "0":
+            raise RuntimeError("established vanilla player template inventory is not empty")
+        tokens = tokens[:-2] + [str(len(starting_inventory))] + [
+            value for prototype, count, slot in starting_inventory
+            for value in (str(prototype), str(count), str(slot))
+        ] + [tokens[-1]]
         old_name = tokens[-1]
         new_name = (username_prefix + str(index + 1)).encode().hex()
         records.append(" ".join(new_name if token == old_name else token for token in tokens))
@@ -131,10 +143,13 @@ def run_phase(args: argparse.Namespace, pack: Path, password: Path, artifacts: P
               roles: tuple[str, ...], timeout: int, *, allowed_roles: set[str],
               scenario: str, credential_namespace: str, username_prefix: str,
               omitted_config_keys: set[str] | None = None,
-              sample_rss: bool = False) -> dict:
+              sample_rss: bool = False,
+              starting_inventory: tuple[tuple[int, int, int], ...] = (),
+              skill_overrides: dict[int, int] | None = None) -> dict:
     phase = artifacts / "-".join(roles)
     phase.mkdir(parents=True, exist_ok=True)
-    _seed_established_players(args, pack, phase, roles, credential_namespace, username_prefix)
+    _seed_established_players(args, pack, phase, roles, credential_namespace, username_prefix,
+                              starting_inventory, skill_overrides)
     server = None
     for _ in range(5):
         port = _free_port()
@@ -181,6 +196,9 @@ def run_phase(args: argparse.Namespace, pack: Path, password: Path, artifacts: P
         if any(process.returncode != 0 for process in processes):
             codes = [process.returncode for process in processes]
             raise RuntimeError(f"{scenario} client failed: roles={roles!r} codes={codes!r}")
+        # Let the server observe the clients' orderly transport close and emit its
+        # bounded queue-drain record before the evidence process is terminated.
+        time.sleep(0.5)
     finally:
         for process in processes:
             if process.poll() is None:

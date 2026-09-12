@@ -103,7 +103,7 @@ namespace
         const auto destination = Transform(cell8, Position3(500, 600, 700), Orientation3(zero, zero, zero));
         const std::array entries{
             InteractiveObjectCatalogEntry{ *InteractiveObjectId::fromValue(1), InteractiveObjectKind::StandardDoor,
-                cell7, trapRoot, std::nullopt, {}, ObjectTrapDeclaration{ true, *TrapPrototypeId::fromValue(11) } },
+                cell7, trapRoot, std::nullopt, {}, ObjectTrapDeclaration{ true, *TrapPrototypeId::fromValue(11), 10 } },
             InteractiveObjectCatalogEntry{ *InteractiveObjectId::fromValue(2), InteractiveObjectKind::TeleportDoor,
                 cell7, teleportRoot, TeleportDestination{ cell8, destination }, {}, {} },
         };

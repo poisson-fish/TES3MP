@@ -22,6 +22,22 @@ namespace TES3MP
     struct ObjectInteractionValidationContext;
     struct StagedObjectInteractionResult;
 
+    enum class SecurityObjectMutation : std::uint8_t
+    {
+        Unlock,
+        Disarm,
+    };
+
+    enum class SecurityObjectMutationResult : std::uint8_t
+    {
+        Applied,
+        ObjectNotFound,
+        StaleRevision,
+        StateMismatch,
+        TickRegression,
+        RevisionExhausted,
+    };
+
     enum class DoorState : std::uint8_t
     {
         Closed = 0,
@@ -110,6 +126,8 @@ namespace TES3MP
     public:
         std::span<const CanonicalInteractiveObjectState> objects() const noexcept { return mObjects; }
         const CanonicalInteractiveObjectState* find(InteractiveObjectId id) const noexcept;
+        SecurityObjectMutationResult applySecurityResult(InteractiveObjectId id, ObjectRevision expectedRevision,
+            SecurityObjectMutation mutation, bool succeeded, ServerTick tick) noexcept;
 
         friend bool operator==(const CanonicalInteractiveObjectWorld&, const CanonicalInteractiveObjectWorld&) noexcept
             = default;
@@ -146,6 +164,8 @@ namespace TES3MP
     {
         Activate,
         UnlockWithKey,
+        PickLock,
+        DisarmTrap,
     };
 
     struct InteractObjectCommand
@@ -157,6 +177,9 @@ namespace TES3MP
         ObjectRevision expectedRevision;
         ObjectInteractionKind kind = ObjectInteractionKind::Activate;
         std::optional<KeyPrototypeId> requestedKey = std::nullopt;
+        std::optional<ItemStackId> requestedTool = std::nullopt;
+        std::optional<InventoryRevision> expectedInventoryRevision = std::nullopt;
+        std::optional<CombatRevision> expectedCombatRevision = std::nullopt;
 
         friend bool operator==(const InteractObjectCommand&, const InteractObjectCommand&) noexcept = default;
     };
@@ -181,6 +204,9 @@ namespace TES3MP
         CatalogMismatch,
         TickRegression,
         RevisionExhausted,
+        InvalidSecurityAttempt,
+        LockpickFailed,
+        ProbeFailed,
         InternalError,
     };
 
@@ -194,6 +220,7 @@ namespace TES3MP
         TrapState newTrapState = TrapState::Disarmed;
         std::optional<TeleportDestination> playerTeleport = std::nullopt;
         std::optional<TrapPrototypeId> sprungTrap = std::nullopt;
+        std::optional<ItemStackId> usedTool = std::nullopt;
 
         friend bool operator==(const ObjectInteractionOutcome&, const ObjectInteractionOutcome&) noexcept = default;
     };

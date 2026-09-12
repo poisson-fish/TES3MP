@@ -16,6 +16,7 @@
 #include "../mwinput/actions.hpp"
 #include "../mwmechanics/creaturestats.hpp"
 #include "../mwmechanics/npcstats.hpp"
+#include "../mwmechanics/security.hpp"
 #include "../mwrender/replicatedactor.hpp"
 #include "../mwworld/cell.hpp"
 #include "../mwworld/cellstore.hpp"
@@ -471,6 +472,16 @@ namespace TES3MP::OpenMWAdapter
                         self->mImpl->pendingInventoryTransaction = std::move(*capture);
                     return capture.has_value() || presentation->observesInventoryItem(item);
                 });
+                MWMechanics::Security::setAttemptInterceptor(
+                    [self](const MWWorld::Ptr& target, const MWWorld::Ptr& tool, bool disarm) {
+                        auto* presentation = dynamic_cast<const DesktopPresentation*>(self->mImpl->presentation);
+                        if (!presentation)
+                            return false;
+                        auto capture = presentation->captureSecurityAttempt(target, tool, disarm);
+                        if (capture && !self->mImpl->pendingInteraction)
+                            self->mImpl->pendingInteraction = std::move(*capture);
+                        return capture.has_value();
+                    });
                 interceptorInstalled = true;
             }
             catch (...)
@@ -492,6 +503,7 @@ namespace TES3MP::OpenMWAdapter
                 }
                 MWGui::ItemModel::clearTransferInterceptor();
                 MWGui::InventoryWindow::clearUseItemInterceptor();
+                MWMechanics::Security::clearAttemptInterceptor();
             }
             catch (...)
             {
@@ -1184,6 +1196,41 @@ namespace TES3MP::OpenMWAdapter
                 targetRevision, type, attackStrength };
         }
 
+        std::optional<ObjectInteractionCapture> captureSecurityAttempt(
+            const MWWorld::Ptr& target, const MWWorld::Ptr& tool, bool disarm) const
+        {
+            if (!mapping || !combatSnapshot || !observedPlayerInventoryRevision || target.isEmpty() || tool.isEmpty())
+                return std::nullopt;
+            const auto refNum = target.getCellRef().getRefNum();
+            std::optional<InteractiveObjectId> objectId;
+            for (const auto& candidate : mapping->interactiveObjects)
+                if (candidate.refNumIndex == refNum.mIndex
+                    && (candidate.refNumContentFile == -1 || candidate.refNumContentFile == refNum.mContentFile))
+                {
+                    objectId = candidate.id;
+                    break;
+                }
+            const auto observedObject = objectId ? observedDoors.find(*objectId) : observedDoors.end();
+            const auto* observedTool = observedStack(tool);
+            if (!objectId || observedObject == observedDoors.end() || !observedTool || observedTool->ground
+                || observedTool->container)
+                return std::nullopt;
+            auto* cell = target.getCell();
+            if (!cell)
+                return std::nullopt;
+            const auto canonicalCell = toCanonical(*cell->getCell(), *mapping);
+            if (!canonicalCell)
+                return std::nullopt;
+            return ObjectInteractionCapture{ .objectId = *objectId,
+                .targetCell = *canonicalCell,
+                .interactionOrigin = playerOrigin(),
+                .expectedRevision = observedObject->second.lastRevision,
+                .kind = disarm ? ObjectInteractionKind::DisarmTrap : ObjectInteractionKind::PickLock,
+                .requestedTool = observedTool->stack.stackId,
+                .expectedInventoryRevision = *observedPlayerInventoryRevision,
+                .expectedCombatRevision = combatSnapshot->selfCombatRevision() };
+        }
+
         ProviderResult applyQuestJournal(
             const QuestJournalCatalog& catalog, const CanonicalPlayerQuestJournalState& state)
         {
@@ -1342,7 +1389,8 @@ namespace TES3MP::OpenMWAdapter
             playerStats.setMagicka(magicka);
             const std::array skillIds{ ESM::Skill::Block, ESM::Skill::ShortBlade, ESM::Skill::LongBlade,
                 ESM::Skill::BluntWeapon, ESM::Skill::Axe, ESM::Skill::Spear, ESM::Skill::HandToHand,
-                ESM::Skill::LightArmor, ESM::Skill::MediumArmor, ESM::Skill::HeavyArmor, ESM::Skill::Unarmored };
+                ESM::Skill::LightArmor, ESM::Skill::MediumArmor, ESM::Skill::HeavyArmor, ESM::Skill::Unarmored,
+                ESM::Skill::Security };
             auto& npcStats = player.getClass().getNpcStats(player);
             for (const auto& confirmed : snapshot.selfSkills())
             {
@@ -2163,6 +2211,19 @@ namespace TES3MP::OpenMWAdapter
         try
         {
             return mImpl->captureMeleeAttack(victim, attackStrength, attackType);
+        }
+        catch (...)
+        {
+            return std::nullopt;
+        }
+    }
+
+    std::optional<ObjectInteractionCapture> DesktopPresentation::captureSecurityAttempt(
+        const MWWorld::Ptr& target, const MWWorld::Ptr& tool, bool disarm) const noexcept
+    {
+        try
+        {
+            return mImpl->captureSecurityAttempt(target, tool, disarm);
         }
         catch (...)
         {

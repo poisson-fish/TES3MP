@@ -672,7 +672,7 @@ namespace TES3MP
         const CanonicalCombatWorld* combat, const CanonicalActorWorld* actors, const MeleeWeaponCatalog* meleeWeapons,
         const OpenMwMeleeSettings* meleeSettings, const MeleeAuthorityPolicy* meleePolicy,
         ServerMeleeContactQuery* meleeContact, const DirectMagicCatalog* directMagic,
-        const CanonicalWorldState* world)
+        const OpenMwSecuritySettings* securitySettings, const CanonicalWorldState* world)
     {
         PreparedBatch prepared;
         prepared.mBaseVersion = mStateVersion;
@@ -906,12 +906,82 @@ namespace TES3MP
                                                 .expectedRevision = interaction->expectedRevision(),
                                                 .kind = interaction->kind(),
                                                 .requestedKey = interaction->requestedKey(),
+                                                .requestedTool = interaction->requestedTool(),
+                                                .expectedInventoryRevision = interaction->expectedInventoryRevision(),
+                                                .expectedCombatRevision = interaction->expectedCombatRevision(),
                                             };
                                             ObjectInteractionValidationContext validation;
                                             if (prepared.mInventory)
                                                 validation.verifiedPlayerKeys
                                                     = prepared.mInventory->collectVerifiedKeys(session->playerId());
-                                            auto interactionResult
+                                            const bool securityAttempt
+                                                = interaction->kind() == ObjectInteractionKind::PickLock
+                                                || interaction->kind() == ObjectInteractionKind::DisarmTrap;
+                                            if (securityAttempt)
+                                            {
+                                                ObjectInteractionOutcome outcome;
+                                                outcome.objectId = interaction->objectId();
+                                                outcome.usedTool = interaction->requestedTool();
+                                                const auto* currentObject
+                                                    = prepared.mInteractiveObjects->find(interaction->objectId());
+                                                if (currentObject)
+                                                {
+                                                    outcome.newRevision = currentObject->revision();
+                                                    outcome.newDoorState = currentObject->doorState();
+                                                    outcome.newLockState = currentObject->lockState();
+                                                    outcome.newTrapState = currentObject->trapState();
+                                                }
+                                                if (!prepared.mInventory || !prepared.mCombat || !itemCatalog
+                                                    || !securitySettings)
+                                                {
+                                                    outcome.code = ObjectInteractionResultCode::InternalError;
+                                                    disposition = CommandDisposition::ObjectInteractionRejected;
+                                                }
+                                                else
+                                                {
+                                                    auto security = prepareAuthoritativeSecurityAttempt(
+                                                        *prepared.mInteractiveObjects, *objectCatalog,
+                                                        *prepared.mInventory, *itemCatalog, *prepared.mCombat,
+                                                        *prepared.mState, objectCommand, *securitySettings, tick,
+                                                        validation);
+                                                    if (security.applied() && security.objects && security.inventory
+                                                        && security.combat)
+                                                    {
+                                                        prepared.mInteractiveObjects = std::move(*security.objects);
+                                                        prepared.mInventory = std::move(*security.inventory);
+                                                        prepared.mCombat = std::move(*security.combat);
+                                                        const auto* changed = prepared.mInteractiveObjects->find(
+                                                            interaction->objectId());
+                                                        if (!changed)
+                                                        {
+                                                            result.mError
+                                                                = CommandBatchReductionError::CandidateStateInvalid;
+                                                            prepared.mPublication = std::move(publication);
+                                                            return prepared;
+                                                        }
+                                                        outcome.newRevision = changed->revision();
+                                                        outcome.newDoorState = changed->doorState();
+                                                        outcome.newLockState = changed->lockState();
+                                                        outcome.newTrapState = changed->trapState();
+                                                        outcome.code = security.succeeded()
+                                                            ? ObjectInteractionResultCode::Success
+                                                            : interaction->kind() == ObjectInteractionKind::PickLock
+                                                            ? ObjectInteractionResultCode::LockpickFailed
+                                                            : ObjectInteractionResultCode::ProbeFailed;
+                                                        disposition = CommandDisposition::Applied;
+                                                    }
+                                                    else
+                                                    {
+                                                        outcome.code
+                                                            = ObjectInteractionResultCode::InvalidSecurityAttempt;
+                                                        disposition = CommandDisposition::ObjectInteractionRejected;
+                                                    }
+                                                }
+                                                objectInteractionOutcome = outcome;
+                                            }
+                                            else
+                                            {
+                                                auto interactionResult
                                                 = applyObjectInteractionToCandidate(*prepared.mInteractiveObjects,
                                                     *objectCatalog, *prepared.mState, objectCommand, tick, validation);
                                             objectInteractionOutcome = interactionResult.outcome;
@@ -989,6 +1059,7 @@ namespace TES3MP
                                                 result.mError = CommandBatchReductionError::CandidateStateInvalid;
                                                 prepared.mPublication = std::move(publication);
                                                 return prepared;
+                                            }
                                             }
                                         }
                                     }
@@ -1200,6 +1271,13 @@ namespace TES3MP
             {
                 order.fields[6] = waitRest->request().hours();
                 order.fields[7] = static_cast<std::uint8_t>(waitRest->request().mode());
+            }
+            if (const auto* interaction
+                = std::get_if<InteractiveObjectCommandProposal>(&commands[index].proposal().payload()))
+            {
+                order.fields[6] = interaction->objectId().value();
+                order.fields[7] = static_cast<std::uint8_t>(interaction->kind());
+                order.fields[8] = interaction->requestedTool() ? interaction->requestedTool()->value() : 0;
             }
             order.disposition = static_cast<std::uint8_t>(record.disposition());
             prepared.mDurableCommands.push_back(order);
@@ -1836,7 +1914,7 @@ namespace TES3MP
         return prepareTickState(
             prepareCommands(batch, worlds.interactiveObjects, worlds.interactiveObjectCatalog, worlds.inventory,
                 worlds.itemCatalog, worlds.combat, worlds.actors, worlds.meleeWeapons, worlds.meleeSettings,
-                worlds.meleePolicy, worlds.meleeContact, worlds.directMagic, worlds.world),
+                worlds.meleePolicy, worlds.meleeContact, worlds.directMagic, worlds.securitySettings, worlds.world),
             batch);
     }
 
@@ -1845,7 +1923,8 @@ namespace TES3MP
     {
         auto prepared = prepareCommands(batch, worlds.interactiveObjects, worlds.interactiveObjectCatalog,
             worlds.inventory, worlds.itemCatalog, worlds.combat, worlds.actors, worlds.meleeWeapons,
-            worlds.meleeSettings, worlds.meleePolicy, worlds.meleeContact, worlds.directMagic, worlds.world);
+            worlds.meleeSettings, worlds.meleePolicy, worlds.meleeContact, worlds.directMagic,
+            worlds.securitySettings, worlds.world);
         return prepareTickState(prepareScriptCommands(std::move(prepared), batch, scriptCommands, worlds.world,
                                     worlds.globalCatalog, worlds.scriptState, worlds.scriptStateCatalog),
             batch);

@@ -85,13 +85,18 @@ namespace TES3MP
     public:
         InteractiveObjectCommandProposal(InteractiveObjectId objectId, CellId cell, Position3 interactionOrigin,
             ObjectRevision expectedRevision, ObjectInteractionKind kind,
-            std::optional<KeyPrototypeId> requestedKey) noexcept
+            std::optional<KeyPrototypeId> requestedKey, std::optional<ItemStackId> requestedTool = std::nullopt,
+            std::optional<InventoryRevision> expectedInventoryRevision = std::nullopt,
+            std::optional<CombatRevision> expectedCombatRevision = std::nullopt) noexcept
             : mObjectId(objectId)
             , mCell(cell)
             , mInteractionOrigin(interactionOrigin)
             , mExpectedRevision(expectedRevision)
             , mKind(kind)
             , mRequestedKey(requestedKey)
+            , mRequestedTool(requestedTool)
+            , mExpectedInventoryRevision(expectedInventoryRevision)
+            , mExpectedCombatRevision(expectedCombatRevision)
         {
         }
 
@@ -101,6 +106,11 @@ namespace TES3MP
         constexpr ObjectRevision expectedRevision() const noexcept { return mExpectedRevision; }
         constexpr ObjectInteractionKind kind() const noexcept { return mKind; }
         constexpr std::optional<KeyPrototypeId> requestedKey() const noexcept { return mRequestedKey; }
+        constexpr std::optional<ItemStackId> requestedTool() const noexcept { return mRequestedTool; }
+        constexpr std::optional<InventoryRevision> expectedInventoryRevision() const noexcept
+        { return mExpectedInventoryRevision; }
+        constexpr std::optional<CombatRevision> expectedCombatRevision() const noexcept
+        { return mExpectedCombatRevision; }
 
         friend bool operator==(
             const InteractiveObjectCommandProposal&, const InteractiveObjectCommandProposal&) noexcept = default;
@@ -112,6 +122,9 @@ namespace TES3MP
         ObjectRevision mExpectedRevision;
         ObjectInteractionKind mKind;
         std::optional<KeyPrototypeId> mRequestedKey;
+        std::optional<ItemStackId> mRequestedTool;
+        std::optional<InventoryRevision> mExpectedInventoryRevision;
+        std::optional<CombatRevision> mExpectedCombatRevision;
     };
 
     class InventoryCommandProposal

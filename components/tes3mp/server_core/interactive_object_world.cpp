@@ -21,6 +21,32 @@ namespace TES3MP
         return found != mObjects.end() && found->objectId() == id ? &*found : nullptr;
     }
 
+    SecurityObjectMutationResult CanonicalInteractiveObjectWorld::applySecurityResult(InteractiveObjectId id,
+        ObjectRevision expectedRevision, SecurityObjectMutation mutation, bool succeeded, ServerTick tick) noexcept
+    {
+        auto found = std::ranges::lower_bound(mObjects, id, {}, &CanonicalInteractiveObjectState::objectId);
+        if (found == mObjects.end() || found->objectId() != id)
+            return SecurityObjectMutationResult::ObjectNotFound;
+        if (found->revision() != expectedRevision)
+            return SecurityObjectMutationResult::StaleRevision;
+        if (tick < found->lastChangeTick())
+            return SecurityObjectMutationResult::TickRegression;
+        if ((mutation == SecurityObjectMutation::Unlock && found->lockState() != LockState::Locked)
+            || (mutation == SecurityObjectMutation::Disarm && found->trapState() != TrapState::Armed))
+            return SecurityObjectMutationResult::StateMismatch;
+        if (!succeeded)
+            return SecurityObjectMutationResult::Applied;
+        const auto revision = found->revision().next();
+        if (!revision)
+            return SecurityObjectMutationResult::RevisionExhausted;
+        *found = CanonicalInteractiveObjectState(found->objectId(), found->cell(), found->doorState(),
+            mutation == SecurityObjectMutation::Unlock ? LockState::Unlocked : found->lockState(),
+            found->lockLevel(), found->keyId(),
+            mutation == SecurityObjectMutation::Disarm ? TrapState::Disarmed : found->trapState(),
+            found->trapId(), *revision, tick);
+        return SecurityObjectMutationResult::Applied;
+    }
+
     CanonicalInteractiveObjectWorldResult createCanonicalInteractiveObjectWorld(
         std::span<const CanonicalInteractiveObjectState> objects)
     try
@@ -153,6 +179,13 @@ namespace TES3MP
         if (currentTick < object->lastChangeTick())
         {
             outcome.code = ObjectInteractionResultCode::TickRegression;
+            return { outcome, false };
+        }
+
+        if (command.kind == ObjectInteractionKind::PickLock
+            || command.kind == ObjectInteractionKind::DisarmTrap)
+        {
+            outcome.code = ObjectInteractionResultCode::InvalidSecurityAttempt;
             return { outcome, false };
         }
 

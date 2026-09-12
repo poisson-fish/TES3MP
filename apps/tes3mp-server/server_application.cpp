@@ -966,11 +966,13 @@ namespace TES3MP::ServerApp
             return false;
         }
         const bool anyCombat = mWiring->combat || mWiring->meleeWeapons || mWiring->playerCombatTemplate
-            || mWiring->meleeSettings || mWiring->meleePolicy || mWiring->meleeContact || mWiring->directMagic;
+            || mWiring->meleeSettings || mWiring->meleePolicy || mWiring->meleeContact || mWiring->directMagic
+            || mWiring->securitySettings;
         if (anyCombat
             && (!mWiring->combat || !mWiring->actors || !mWiring->meleeSettings || !mWiring->inventory
                 || !mWiring->itemCatalog || !mWiring->meleeWeapons || !mWiring->playerCombatTemplate
-                || !mWiring->meleePolicy || !mWiring->meleeContact || !mWiring->directMagic))
+                || !mWiring->meleePolicy || !mWiring->meleeContact || !mWiring->directMagic
+                || !mWiring->securitySettings))
         {
             mFailure = "combat composition incomplete";
             return false;
@@ -1012,9 +1014,18 @@ namespace TES3MP::ServerApp
             const auto revisionBefore = directMutationBaseRevision.value_or(mWiring->reducer.canonicalRevision());
             directMutationBase.reset();
             directMutationBaseRevision.reset();
-            CanonicalCommandWorlds commandWorlds{ mWiring->interactiveObjects, mWiring->interactiveObjectCatalog,
-                mWiring->inventory, mWiring->itemCatalog, mWiring->combat, mWiring->actors, mWiring->meleeWeapons,
-                mWiring->meleeSettings, mWiring->meleePolicy, mWiring->meleeContact, mWiring->directMagic };
+            CanonicalCommandWorlds commandWorlds{ .interactiveObjects = mWiring->interactiveObjects,
+                .interactiveObjectCatalog = mWiring->interactiveObjectCatalog,
+                .inventory = mWiring->inventory,
+                .itemCatalog = mWiring->itemCatalog,
+                .combat = mWiring->combat,
+                .actors = mWiring->actors,
+                .meleeWeapons = mWiring->meleeWeapons,
+                .meleeSettings = mWiring->meleeSettings,
+                .meleePolicy = mWiring->meleePolicy,
+                .meleeContact = mWiring->meleeContact,
+                .directMagic = mWiring->directMagic,
+                .securitySettings = mWiring->securitySettings };
             commandWorlds.world = mWiring->world;
             commandWorlds.globalCatalog = mWiring->globalCatalog;
             commandWorlds.scriptState = mWiring->scriptState;
@@ -1082,6 +1093,10 @@ namespace TES3MP::ServerApp
                 if (interaction && dispositions[index].disposition() == CommandDisposition::Applied
                     && std::ranges::find(changedObjectCells, interaction->cell()) == changedObjectCells.end())
                     changedObjectCells.push_back(interaction->cell());
+                if (interaction && dispositions[index].disposition() == CommandDisposition::Applied
+                    && (interaction->kind() == ObjectInteractionKind::PickLock
+                        || interaction->kind() == ObjectInteractionKind::DisarmTrap))
+                    refreshInventoryBaselines = true;
                 if (std::holds_alternative<InventoryCommandProposal>(commands[index].proposal().payload()))
                     refreshInventoryBaselines = true;
                 if (std::holds_alternative<MeleeAttackCommandProposal>(commands[index].proposal().payload())

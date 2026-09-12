@@ -106,7 +106,8 @@ namespace
         return { { CanonicalPlayerInventoryState{ .player = id<PlayerId>(1),
                      .revision = id<InventoryRevision>(count),
                      .lastChangeTick = id<ServerTick>(tick),
-                     .stacks = { { id<ItemStackId>(1), id<ItemPrototypeId>(1), count, 0, 0, std::nullopt } } } },
+                     .stacks = { { id<ItemStackId>(1), id<ItemPrototypeId>(1), count, 26 - count, 0,
+                         std::nullopt } } } },
             {}, {}, id<ItemStackId>(2) };
     }
 
@@ -128,7 +129,11 @@ namespace
             .victim = victim,
             .respawnVictim = victim,
             .maximumHealth = 100.f,
-            .maximumFatigue = 100.f };
+            .maximumFatigue = 100.f,
+            .securitySkill = 47.f };
+        const auto security = static_cast<std::size_t>(CombatProgressionSkill::Security);
+        playerCombat.skillRules[security].useGain = 3.f;
+        playerCombat.skillProgression[security].progress = tick > 1 ? 0.02f : 0.f;
         OpenMwMeleeVictim actorVictim;
         actorVictim.health = 20.f;
         actorVictim.fatigue = 50.f;
@@ -148,7 +153,8 @@ namespace
     CanonicalDurableInteractiveObjectState objects(DoorState door, LockState lock, std::uint64_t tick)
     {
         return { { CanonicalInteractiveObjectState(id<InteractiveObjectId>(1), CellId::interior(id<CellSpaceId>(30)),
-            door, lock, 25, id<KeyPrototypeId>(9), TrapState::Disarmed, id<TrapPrototypeId>(10),
+            door, lock, 25, id<KeyPrototypeId>(9), tick > 1 ? TrapState::Disarmed : TrapState::Armed,
+            id<TrapPrototypeId>(10),
             id<ObjectRevision>(tick), id<ServerTick>(tick)) } };
     }
 
@@ -379,10 +385,15 @@ namespace
             || restartedAtSelection != uninterruptedAtSelection)
             return false;
         return latest.inventory()->players.front().stacks.front().count == 2
+            && latest.inventory()->players.front().stacks.front().condition == 24
             && latest.combat()->players.front().victim.health == 75.f
+            && latest.combat()->players.front().securitySkill == 47.f
+            && latest.combat()->players.front()
+                    .skillProgression[static_cast<std::size_t>(CombatProgressionSkill::Security)].progress == 0.02f
             && latest.combat()->randomWords == combat(75.f, 20, 2).randomWords
             && latest.objects()->objects.front().doorState() == DoorState::Open
             && latest.objects()->objects.front().lockState() == LockState::Unlocked
+            && latest.objects()->objects.front().trapState() == TrapState::Disarmed
             && latest.actors()->actors.front().root().position() == Position3(20, 0, 0)
             && latest.world()->time().day == 2 && std::get<std::int32_t>(latest.world()->globals().front().value) == 2
             && latest.world()->questJournalCatalog()

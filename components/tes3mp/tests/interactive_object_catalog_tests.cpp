@@ -32,7 +32,7 @@ namespace
     {
         return { id<InteractiveObjectId>(objId), InteractiveObjectKind::StandardDoor,
             CellId::interior(id<CellSpaceId>(cell)), tr(cell, x), std::nullopt,
-            ObjectLockDeclaration{ locked, lockLevel, key }, ObjectTrapDeclaration{ trapped, trap } };
+            ObjectLockDeclaration{ locked, lockLevel, key }, ObjectTrapDeclaration{ trapped, trap, trapped ? 10u : 0u } };
     }
 
     InteractiveObjectCatalogEntry teleportDoor(std::uint64_t objId, std::uint64_t srcCell, std::uint64_t dstCell)
@@ -143,6 +143,7 @@ namespace
         const auto* door2 = catalog->find(id<InteractiveObjectId>(2));
         return door1 && door1->lock.lockedByDefault && door1->lock.lockLevel == 50 && door1->lock.keyId == key
             && door1->trap.trappedByDefault && door1->trap.trapId == trap && door2
+            && door1->trap.disarmDifficulty == 10
             && door2->kind == InteractiveObjectKind::TeleportDoor && door2->destination.has_value();
     }
 }

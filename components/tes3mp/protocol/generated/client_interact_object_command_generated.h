@@ -64,29 +64,35 @@ inline const char *EnumNameCellKind(CellKind e) {
 enum class ObjectInteractionKind : uint8_t {
   Activate = 0,
   UnlockWithKey = 1,
+  PickLock = 2,
+  DisarmTrap = 3,
   MIN = Activate,
-  MAX = UnlockWithKey
+  MAX = DisarmTrap
 };
 
-inline const ObjectInteractionKind (&EnumValuesObjectInteractionKind())[2] {
+inline const ObjectInteractionKind (&EnumValuesObjectInteractionKind())[4] {
   static const ObjectInteractionKind values[] = {
     ObjectInteractionKind::Activate,
-    ObjectInteractionKind::UnlockWithKey
+    ObjectInteractionKind::UnlockWithKey,
+    ObjectInteractionKind::PickLock,
+    ObjectInteractionKind::DisarmTrap
   };
   return values;
 }
 
 inline const char * const *EnumNamesObjectInteractionKind() {
-  static const char * const names[3] = {
+  static const char * const names[5] = {
     "Activate",
     "UnlockWithKey",
+    "PickLock",
+    "DisarmTrap",
     nullptr
   };
   return names;
 }
 
 inline const char *EnumNameObjectInteractionKind(ObjectInteractionKind e) {
-  if (::flatbuffers::IsOutRange(e, ObjectInteractionKind::Activate, ObjectInteractionKind::UnlockWithKey)) return "";
+  if (::flatbuffers::IsOutRange(e, ObjectInteractionKind::Activate, ObjectInteractionKind::DisarmTrap)) return "";
   const size_t index = static_cast<size_t>(e);
   return EnumNamesObjectInteractionKind()[index];
 }
@@ -260,7 +266,13 @@ struct ClientInteractObjectCommand FLATBUFFERS_FINAL_CLASS : private ::flatbuffe
     VT_EXPECTED_REVISION = 12,
     VT_KIND = 14,
     VT_HAS_REQUESTED_KEY = 16,
-    VT_REQUESTED_KEY_ID = 18
+    VT_REQUESTED_KEY_ID = 18,
+    VT_HAS_REQUESTED_TOOL = 20,
+    VT_REQUESTED_TOOL_STACK_ID = 22,
+    VT_HAS_EXPECTED_INVENTORY_REVISION = 24,
+    VT_EXPECTED_INVENTORY_REVISION = 26,
+    VT_HAS_EXPECTED_COMBAT_REVISION = 28,
+    VT_EXPECTED_COMBAT_REVISION = 30
   };
   const TES3MP::Protocol::Schema::InteractObject::ClientCommandHeader *header() const {
     return GetPointer<const TES3MP::Protocol::Schema::InteractObject::ClientCommandHeader *>(VT_HEADER);
@@ -286,6 +298,24 @@ struct ClientInteractObjectCommand FLATBUFFERS_FINAL_CLASS : private ::flatbuffe
   uint64_t requested_key_id() const {
     return GetField<uint64_t>(VT_REQUESTED_KEY_ID, 0);
   }
+  bool has_requested_tool() const {
+    return GetField<uint8_t>(VT_HAS_REQUESTED_TOOL, 0) != 0;
+  }
+  uint64_t requested_tool_stack_id() const {
+    return GetField<uint64_t>(VT_REQUESTED_TOOL_STACK_ID, 0);
+  }
+  bool has_expected_inventory_revision() const {
+    return GetField<uint8_t>(VT_HAS_EXPECTED_INVENTORY_REVISION, 0) != 0;
+  }
+  uint64_t expected_inventory_revision() const {
+    return GetField<uint64_t>(VT_EXPECTED_INVENTORY_REVISION, 0);
+  }
+  bool has_expected_combat_revision() const {
+    return GetField<uint8_t>(VT_HAS_EXPECTED_COMBAT_REVISION, 0) != 0;
+  }
+  uint64_t expected_combat_revision() const {
+    return GetField<uint64_t>(VT_EXPECTED_COMBAT_REVISION, 0);
+  }
   template <bool B = false>
   bool Verify(::flatbuffers::VerifierTemplate<B> &verifier) const {
     return VerifyTableStart(verifier) &&
@@ -298,6 +328,12 @@ struct ClientInteractObjectCommand FLATBUFFERS_FINAL_CLASS : private ::flatbuffe
            VerifyField<uint8_t>(verifier, VT_KIND, 1) &&
            VerifyField<uint8_t>(verifier, VT_HAS_REQUESTED_KEY, 1) &&
            VerifyField<uint64_t>(verifier, VT_REQUESTED_KEY_ID, 8) &&
+           VerifyField<uint8_t>(verifier, VT_HAS_REQUESTED_TOOL, 1) &&
+           VerifyField<uint64_t>(verifier, VT_REQUESTED_TOOL_STACK_ID, 8) &&
+           VerifyField<uint8_t>(verifier, VT_HAS_EXPECTED_INVENTORY_REVISION, 1) &&
+           VerifyField<uint64_t>(verifier, VT_EXPECTED_INVENTORY_REVISION, 8) &&
+           VerifyField<uint8_t>(verifier, VT_HAS_EXPECTED_COMBAT_REVISION, 1) &&
+           VerifyField<uint64_t>(verifier, VT_EXPECTED_COMBAT_REVISION, 8) &&
            verifier.EndTable();
   }
 };
@@ -330,6 +366,24 @@ struct ClientInteractObjectCommandBuilder {
   void add_requested_key_id(uint64_t requested_key_id) {
     fbb_.AddElement<uint64_t>(ClientInteractObjectCommand::VT_REQUESTED_KEY_ID, requested_key_id, 0);
   }
+  void add_has_requested_tool(bool has_requested_tool) {
+    fbb_.AddElement<uint8_t>(ClientInteractObjectCommand::VT_HAS_REQUESTED_TOOL, static_cast<uint8_t>(has_requested_tool), 0);
+  }
+  void add_requested_tool_stack_id(uint64_t requested_tool_stack_id) {
+    fbb_.AddElement<uint64_t>(ClientInteractObjectCommand::VT_REQUESTED_TOOL_STACK_ID, requested_tool_stack_id, 0);
+  }
+  void add_has_expected_inventory_revision(bool has_expected_inventory_revision) {
+    fbb_.AddElement<uint8_t>(ClientInteractObjectCommand::VT_HAS_EXPECTED_INVENTORY_REVISION, static_cast<uint8_t>(has_expected_inventory_revision), 0);
+  }
+  void add_expected_inventory_revision(uint64_t expected_inventory_revision) {
+    fbb_.AddElement<uint64_t>(ClientInteractObjectCommand::VT_EXPECTED_INVENTORY_REVISION, expected_inventory_revision, 0);
+  }
+  void add_has_expected_combat_revision(bool has_expected_combat_revision) {
+    fbb_.AddElement<uint8_t>(ClientInteractObjectCommand::VT_HAS_EXPECTED_COMBAT_REVISION, static_cast<uint8_t>(has_expected_combat_revision), 0);
+  }
+  void add_expected_combat_revision(uint64_t expected_combat_revision) {
+    fbb_.AddElement<uint64_t>(ClientInteractObjectCommand::VT_EXPECTED_COMBAT_REVISION, expected_combat_revision, 0);
+  }
   explicit ClientInteractObjectCommandBuilder(::flatbuffers::FlatBufferBuilder &_fbb)
         : fbb_(_fbb) {
     start_ = fbb_.StartTable();
@@ -350,14 +404,26 @@ inline ::flatbuffers::Offset<ClientInteractObjectCommand> CreateClientInteractOb
     uint64_t expected_revision = 0,
     TES3MP::Protocol::Schema::InteractObject::ObjectInteractionKind kind = TES3MP::Protocol::Schema::InteractObject::ObjectInteractionKind::Activate,
     bool has_requested_key = false,
-    uint64_t requested_key_id = 0) {
+    uint64_t requested_key_id = 0,
+    bool has_requested_tool = false,
+    uint64_t requested_tool_stack_id = 0,
+    bool has_expected_inventory_revision = false,
+    uint64_t expected_inventory_revision = 0,
+    bool has_expected_combat_revision = false,
+    uint64_t expected_combat_revision = 0) {
   ClientInteractObjectCommandBuilder builder_(_fbb);
+  builder_.add_expected_combat_revision(expected_combat_revision);
+  builder_.add_expected_inventory_revision(expected_inventory_revision);
+  builder_.add_requested_tool_stack_id(requested_tool_stack_id);
   builder_.add_requested_key_id(requested_key_id);
   builder_.add_expected_revision(expected_revision);
   builder_.add_object_id(object_id);
   builder_.add_interaction_origin(interaction_origin);
   builder_.add_target_cell(target_cell);
   builder_.add_header(header);
+  builder_.add_has_expected_combat_revision(has_expected_combat_revision);
+  builder_.add_has_expected_inventory_revision(has_expected_inventory_revision);
+  builder_.add_has_requested_tool(has_requested_tool);
   builder_.add_has_requested_key(has_requested_key);
   builder_.add_kind(kind);
   return builder_.Finish();

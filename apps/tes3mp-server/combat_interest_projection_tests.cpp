@@ -45,8 +45,10 @@ namespace
         combatPlayer.maximumMagicka = 50.f;
         combatPlayer.blockSkill = 15.f;
         combatPlayer.armorSkills = { 21.f, 22.f, 23.f, 24.f };
+        combatPlayer.securitySkill = 42.f;
         combatPlayer.skillProgression[static_cast<std::size_t>(CombatProgressionSkill::Block)].progress = 0.25f;
         combatPlayer.skillProgression[static_cast<std::size_t>(CombatProgressionSkill::Unarmored)].progress = 0.75f;
+        combatPlayer.skillProgression[static_cast<std::size_t>(CombatProgressionSkill::Security)].progress = 0.5f;
         const std::array combatPlayers{ combatPlayer };
         OpenMwMeleeVictim first;
         first.health = 40.f;
@@ -80,6 +82,8 @@ namespace
             && snapshot->selfSkills()[0] == CombatSkillSnapshot{ ReplicatedCombatSkill::Block, 15.f, 0.25f }
             && snapshot->selfSkills()[10]
                 == CombatSkillSnapshot{ ReplicatedCombatSkill::Unarmored, 24.f, 0.75f }
+            && snapshot->selfSkills()[11]
+                == CombatSkillSnapshot{ ReplicatedCombatSkill::Security, 42.f, 0.5f }
             && !snapshot->selfDead()
             && snapshot->actors().size() == 1 && snapshot->actors()[0].actorId == id<ActorId>(3)
             && snapshot->actors()[0].maximumHealth == 50.f

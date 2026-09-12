@@ -159,6 +159,18 @@ namespace TES3MP
         RevisionExhausted,
     };
 
+    enum class SecurityToolUseResult : std::uint8_t
+    {
+        Applied,
+        PlayerNotFound,
+        StaleInventoryRevision,
+        ToolNotFound,
+        WrongToolCategory,
+        ToolBroken,
+        TickRegression,
+        RevisionExhausted,
+    };
+
     struct InventoryTransactionOutcome
     {
         InventoryTransactionResultCode code = InventoryTransactionResultCode::InternalError;
@@ -205,6 +217,8 @@ namespace TES3MP
             std::uint32_t condition, bool unequip, ServerTick tick) noexcept;
         EquippedConditionResult setEquippedItemEnchantmentCharge(
             PlayerId player, EquipmentSlot slot, ItemStackId stack, std::uint32_t charge, ServerTick tick) noexcept;
+        SecurityToolUseResult consumeSecurityToolUse(PlayerId player, ItemStackId stack,
+            InventoryRevision expectedRevision, ItemCategory category, ServerTick tick) noexcept;
 
         friend bool operator==(const CanonicalInventoryWorld&, const CanonicalInventoryWorld&) noexcept = default;
 

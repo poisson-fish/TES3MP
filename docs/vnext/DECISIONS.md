@@ -138,6 +138,13 @@ the affected code/tests in the same milestone.
   while an active living player has no live same-cell aggressor. These live
   values are durable canonical combat state; the V5 character checkpoint remains
   a reattachment safe point rather than a competing live-resource writer.
+- **Lockpicking and probing are one server transaction.** Clients identify a
+  manifest-mapped object and canonical tool stack with observed object,
+  inventory, and combat revisions; they never submit chance, success, wear,
+  progression, or resulting state. The server uses baked tool quality,
+  difficulty, Security rules, stock formulas, and its durable PRNG, then commits
+  the roll state, one tool use, successful Security progress, and lock/trap
+  mutation through the same durability acknowledgement.
 
 ## Protocol, transport, and security
 

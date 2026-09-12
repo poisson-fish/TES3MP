@@ -160,6 +160,8 @@ namespace TES3MP::OpenMWAdapter
         void appendMeleeTargets(std::vector<MWWorld::Ptr>& targets) const;
         std::optional<MeleeAttackCapture> captureMeleeAttack(
             const MWWorld::Ptr& victim, float attackStrength, int attackType) const noexcept;
+        std::optional<ObjectInteractionCapture> captureSecurityAttempt(
+            const MWWorld::Ptr& target, const MWWorld::Ptr& tool, bool disarm) const noexcept;
         std::optional<InventoryTransactionCapture> inventoryTransfer(MWGui::ItemModel& source, const MWWorld::Ptr& item,
             std::size_t count, MWGui::ItemModel& target) const noexcept;
         std::optional<InventoryTransactionCapture> inventoryUse(const MWWorld::Ptr& item) const noexcept;

@@ -333,7 +333,15 @@ namespace TES3MP::ServerApp
                 || !std::ranges::binary_search(
                     hello->negotiatedCapabilities(), interactiveObjectReplicationCapability()))
                 return ConnectionSessionResult::ProtocolRejected;
-            if (cmd->kind == ObjectInteractionKind::UnlockWithKey && !mInventory)
+            if ((cmd->kind == ObjectInteractionKind::UnlockWithKey
+                    || cmd->kind == ObjectInteractionKind::PickLock
+                    || cmd->kind == ObjectInteractionKind::DisarmTrap)
+                && !mInventory)
+                return ConnectionSessionResult::ProtocolRejected;
+            if ((cmd->kind == ObjectInteractionKind::PickLock || cmd->kind == ObjectInteractionKind::DisarmTrap)
+                && (hello->selectedVersion().major != 1 || hello->selectedVersion().minor < 9 || !mCombat
+                    || !std::ranges::binary_search(
+                        hello->negotiatedCapabilities(), authoritativeSecurityCapability())))
                 return ConnectionSessionResult::ProtocolRejected;
             const auto* progress = joins.state().findActiveSession(*state->sessionId());
             const auto* player = progress ? joins.state().findPlayer(progress->playerId()) : nullptr;
@@ -343,7 +351,8 @@ namespace TES3MP::ServerApp
                 cmd->observedCanonicalRevision,
                 EntityPrecondition(progress->entityId(), player->entityRevision(), player->authorityEpoch()),
                 InteractiveObjectCommandProposal(cmd->objectId, cmd->targetCell, cmd->interactionOrigin,
-                    cmd->expectedRevision, cmd->kind, cmd->requestedKey));
+                    cmd->expectedRevision, cmd->kind, cmd->requestedKey, cmd->requestedTool,
+                    cmd->expectedInventoryRevision, cmd->expectedCombatRevision));
             return intake.submit(std::move(proposal)) == CommandSubmissionResult::Accepted
                 ? ConnectionSessionResult::CommandSubmitted
                 : ConnectionSessionResult::QueueRejected;

@@ -21,7 +21,9 @@ struct Cell {
 
 enum ObjectInteractionKind : ubyte {
   Activate = 0,
-  UnlockWithKey = 1
+  UnlockWithKey = 1,
+  PickLock = 2,
+  DisarmTrap = 3
 }
 
 table ClientCommandHeader {
@@ -41,6 +43,12 @@ table ClientInteractObjectCommand {
   kind:ObjectInteractionKind (id: 5);
   has_requested_key:bool (id: 6);
   requested_key_id:ulong (id: 7);
+  has_requested_tool:bool (id: 8);
+  requested_tool_stack_id:ulong (id: 9);
+  has_expected_inventory_revision:bool (id: 10);
+  expected_inventory_revision:ulong (id: 11);
+  has_expected_combat_revision:bool (id: 12);
+  expected_combat_revision:ulong (id: 13);
 }
 
 root_type ClientInteractObjectCommand;

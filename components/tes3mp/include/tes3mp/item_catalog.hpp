@@ -74,6 +74,7 @@ namespace TES3MP
         std::uint32_t slotMask = 0;
         bool stackable = true;
         std::optional<KeyPrototypeId> keyId = std::nullopt;
+        float toolQuality = 0.f;
 
         friend bool operator==(const ItemPrototypeDeclaration&, const ItemPrototypeDeclaration&) noexcept = default;
     };

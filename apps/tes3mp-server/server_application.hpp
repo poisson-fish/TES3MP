@@ -46,6 +46,7 @@ namespace TES3MP::ServerApp
         ServerMeleeContactQuery* meleeContact = nullptr;
         ServerMeleeContactHistory* meleeContactHistory = nullptr;
         const DirectMagicCatalog* directMagic = nullptr;
+        const OpenMwSecuritySettings* securitySettings = nullptr;
         DeterministicServerScriptRuntime* scripts = nullptr;
         const GlobalVariableCatalog* globalCatalog = nullptr;
         CanonicalWorldState* world = nullptr;

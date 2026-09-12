@@ -13,8 +13,21 @@
 #include "creaturestats.hpp"
 #include "spellutil.hpp"
 
+#include <utility>
+
 namespace MWMechanics
 {
+    Security::AttemptInterceptor Security::sAttemptInterceptor;
+
+    void Security::setAttemptInterceptor(AttemptInterceptor interceptor)
+    {
+        sAttemptInterceptor = std::move(interceptor);
+    }
+
+    void Security::clearAttemptInterceptor()
+    {
+        sAttemptInterceptor = nullptr;
+    }
 
     Security::Security(const MWWorld::Ptr& actor)
         : mActor(actor)
@@ -36,6 +49,9 @@ namespace MWMechanics
 
         int uses = lockpick.getClass().getItemHealth(lockpick);
         if (uses == 0)
+            return;
+
+        if (sAttemptInterceptor && sAttemptInterceptor(lock, lockpick, false))
             return;
 
         int lockStrength = lock.getCellRef().getLockLevel();
@@ -84,6 +100,9 @@ namespace MWMechanics
 
         int uses = probe.getClass().getItemHealth(probe);
         if (uses == 0)
+            return;
+
+        if (sAttemptInterceptor && sAttemptInterceptor(trap, probe, true))
             return;
 
         float probeQuality = probe.get<ESM::Probe>()->mBase->mData.mQuality;

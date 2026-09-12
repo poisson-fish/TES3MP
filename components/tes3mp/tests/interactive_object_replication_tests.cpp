@@ -196,6 +196,20 @@ namespace
         assert(!resultNoKey.requestedKey.has_value());
         assert(resultNoKey.kind == ObjectInteractionKind::Activate);
 
+        ClientInteractObjectCommand security = cmdNoKey;
+        security.kind = ObjectInteractionKind::PickLock;
+        security.requestedTool = id<ItemStackId>(77);
+        security.expectedInventoryRevision = id<InventoryRevision>(4);
+        security.expectedCombatRevision = id<CombatRevision>(5);
+        const auto encodedSecurity = encodeClientInteractObjectCommand(security);
+        const auto decodedSecurity = decodeClientInteractObjectCommand(encodedSecurity);
+        assert(std::holds_alternative<ClientInteractObjectCommand>(decodedSecurity));
+        assert(std::get<ClientInteractObjectCommand>(decodedSecurity) == security);
+
+        security.expectedCombatRevision.reset();
+        assert(std::holds_alternative<InteractiveObjectReplicationDecodeError>(
+            decodeClientInteractObjectCommand(encodeClientInteractObjectCommand(security))));
+
         for (std::size_t size = 0; size < encoded.size(); ++size)
             assert(std::holds_alternative<InteractiveObjectReplicationDecodeError>(
                 decodeClientInteractObjectCommand(std::span(encoded).first(size))));

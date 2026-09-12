@@ -70,7 +70,7 @@ namespace
         const auto transform = Transform(cell, Position3(0, 0, 0), Orientation3(zero, zero, zero));
         const std::array objectEntries{ InteractiveObjectCatalogEntry{ id<InteractiveObjectId>(1),
             InteractiveObjectKind::StandardDoor, cell, transform, std::nullopt, {},
-            ObjectTrapDeclaration{ true, id<TrapPrototypeId>(5) } } };
+            ObjectTrapDeclaration{ true, id<TrapPrototypeId>(5), 10 } } };
         const auto objects = InteractiveObjectCatalog::create(testContentManifest(), objectEntries);
         assert(objects && directMagicCoversInteractiveObjectTraps(*catalog, *objects));
 

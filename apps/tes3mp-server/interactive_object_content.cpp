@@ -13,7 +13,7 @@ namespace TES3MP::ServerApp
 {
     namespace
     {
-        constexpr std::string_view Header = "TES3MP_INTERACTIVE_OBJECTS_V1";
+        constexpr std::string_view Header = "TES3MP_INTERACTIVE_OBJECTS_V2";
         constexpr std::size_t MaximumFields = 32;
 
         template <class Value>
@@ -177,14 +177,17 @@ namespace TES3MP::ServerApp
                     std::size_t cellFieldCount = 0;
                     const auto cell = parseCell(values.subspan(3), cellFieldCount);
                     std::size_t next = 3 + cellFieldCount;
-                    if (!objectId || !kind || !cell || next + 9 > values.size())
+                    if (!objectId || !kind || !cell || next + 10 > values.size())
                         return InteractiveObjectContentError::Malformed;
                     const auto transform = parseTransform(*cell, values.subspan(next, 6));
                     const auto lockLevel = number<std::uint32_t>(values[next + 6]);
                     const auto key = optionalId<KeyPrototypeId>(values[next + 7]);
                     const auto trap = optionalId<TrapPrototypeId>(values[next + 8]);
-                    next += 9;
-                    if (!transform || !lockLevel || !key || !trap || (*lockLevel == 0 && (*key).has_value()))
+                    const auto disarmDifficulty = number<std::uint32_t>(values[next + 9]);
+                    next += 10;
+                    if (!transform || !lockLevel || !key || !trap || !disarmDifficulty
+                        || (*lockLevel == 0 && (*key).has_value())
+                        || ((*trap).has_value() != (*disarmDifficulty != 0)))
                         return InteractiveObjectContentError::Malformed;
 
                     std::optional<TeleportDestination> destination;
@@ -206,7 +209,7 @@ namespace TES3MP::ServerApp
 
                     entries.push_back({ *objectId, *kind, *cell, *transform, destination,
                         ObjectLockDeclaration{ *lockLevel != 0, *lockLevel, *key },
-                        ObjectTrapDeclaration{ (*trap).has_value(), *trap } });
+                        ObjectTrapDeclaration{ (*trap).has_value(), *trap, *disarmDifficulty } });
                     if (entries.size() > MaximumInteractiveObjectCatalogEntries)
                         return InteractiveObjectContentError::TooLarge;
                     if (++cellCounts[*cell] > MaximumInteractiveObjectsPerCell)

@@ -36,6 +36,7 @@ namespace TES3MP
         InvalidLockState,
         InvalidTrapState,
         InvalidInteractionKind,
+        InvalidInteractionParameters,
         InvalidCellKind,
         InvalidInteriorGrid,
     };
@@ -112,6 +113,9 @@ namespace TES3MP
         ObjectRevision expectedRevision;
         ObjectInteractionKind kind = ObjectInteractionKind::Activate;
         std::optional<KeyPrototypeId> requestedKey = std::nullopt;
+        std::optional<ItemStackId> requestedTool = std::nullopt;
+        std::optional<InventoryRevision> expectedInventoryRevision = std::nullopt;
+        std::optional<CombatRevision> expectedCombatRevision = std::nullopt;
 
         friend bool operator==(const ClientInteractObjectCommand&,
             const ClientInteractObjectCommand&) noexcept = default;

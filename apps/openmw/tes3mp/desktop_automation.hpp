@@ -34,6 +34,8 @@ namespace TES3MP::OpenMWAdapter
         WaitReconnect,
         WaitSlowAnchor,
         WaitSlow,
+        SecurityPick,
+        SecurityProbe,
     };
 
     std::optional<DesktopAutomationRole> parseDesktopAutomationRole(std::string_view value) noexcept;
@@ -52,6 +54,7 @@ namespace TES3MP::OpenMWAdapter
         bool valid() const noexcept { return mOutput.is_open(); }
         CellTransitionCapture captureCellTransition() noexcept override;
         std::optional<LocomotionIntent> sampleCurrentIntent() noexcept override;
+        std::optional<ObjectInteractionCapture> captureObjectInteraction() noexcept override;
         void setCoordinator(EngineCoordinator* coordinator) noexcept { mCoordinator = coordinator; }
         ProviderResult applyAuthoritative(const LatestWinsSnapshot& snapshot,
             std::span<const ObservedPlayer> observedPlayers, bool allowLocalCellCorrection, MonotonicInstant receivedAt,
@@ -64,6 +67,8 @@ namespace TES3MP::OpenMWAdapter
             std::span<const ReliableContainerInventoryBaseline> containers,
             const ReliableGroundItemBaseline& groundItems, const LatestWinsEquipmentSnapshot& equipment,
             MonotonicInstant receivedAt) noexcept override;
+        ProviderResult applyCombat(const LatestWinsCombatSnapshot& snapshot,
+            std::span<const ReliableCombatEventBatch> events, MonotonicInstant receivedAt) noexcept override;
         ProviderResult applyWeather(std::span<const WeatherRegionSnapshot> regions, ServerTick serverTick,
             MonotonicInstant receivedAt) noexcept override;
         ProviderResult applyWorldTime(
@@ -120,6 +125,16 @@ namespace TES3MP::OpenMWAdapter
         std::optional<ReliableWorldTimeState> mLastWorldTime;
         std::optional<CanonicalWorldTimeState> mInitialWorldTime;
         std::optional<WorldTimeRevision> mWorldTimeRevisionBeforeDisconnect;
+        std::optional<InteractiveObjectId> mSecurityObject;
+        std::optional<ObjectRevision> mInitialSecurityObjectRevision;
+        std::optional<ObjectRevision> mSecurityObjectRevision;
+        std::optional<ItemStackId> mSecurityTool;
+        std::optional<std::uint32_t> mInitialSecurityToolCondition;
+        std::optional<std::uint32_t> mSecurityToolCondition;
+        std::optional<InventoryRevision> mSecurityInventoryRevision;
+        std::optional<CombatRevision> mSecurityCombatRevision;
+        std::optional<float> mInitialSecurityProgress;
+        std::optional<float> mSecurityProgress;
         bool mSawPeer = false;
         bool mSawLeave = false;
         bool mSawReturn = false;
@@ -147,6 +162,13 @@ namespace TES3MP::OpenMWAdapter
         bool mWaitRestSubmitted = false;
         bool mWaitRestApplied = false;
         bool mWorldTimeConvergedAfterResume = false;
+        bool mSecuritySubmitted = false;
+        bool mSecurityUnlocked = false;
+        bool mSecurityDisarmed = false;
+        bool mSecurityResumeRequested = false;
+        bool mSecurityObjectAfterResume = false;
+        bool mSecurityInventoryAfterResume = false;
+        bool mSecurityCombatAfterResume = false;
         bool mFinished = false;
     };
 }

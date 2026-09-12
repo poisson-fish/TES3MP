@@ -440,6 +440,39 @@ namespace TES3MP
         return EquippedConditionResult::Applied;
     }
 
+    SecurityToolUseResult CanonicalInventoryWorld::consumeSecurityToolUse(PlayerId playerId, ItemStackId stackId,
+        InventoryRevision expectedRevision, ItemCategory category, ServerTick tick) noexcept
+    {
+        auto* player = findMutablePlayer(playerId);
+        if (!player)
+            return SecurityToolUseResult::PlayerNotFound;
+        if (player->revision != expectedRevision)
+            return SecurityToolUseResult::StaleInventoryRevision;
+        if (tick < player->lastChangeTick)
+            return SecurityToolUseResult::TickRegression;
+        const auto found = std::ranges::lower_bound(player->stacks, stackId, {}, &CanonicalItemStack::stackId);
+        if (found == player->stacks.end() || found->stackId != stackId)
+            return SecurityToolUseResult::ToolNotFound;
+        const auto* declaration = mCatalog.find(found->prototypeId);
+        if (!declaration || declaration->category != category)
+            return SecurityToolUseResult::WrongToolCategory;
+        if (found->condition == 0)
+            return SecurityToolUseResult::ToolBroken;
+        const auto revision = player->revision.next();
+        if (!revision)
+            return SecurityToolUseResult::RevisionExhausted;
+        if (--found->condition == 0)
+        {
+            for (auto& equipped : player->equipment)
+                if (equipped == stackId)
+                    equipped.reset();
+            player->stacks.erase(found);
+        }
+        player->revision = *revision;
+        player->lastChangeTick = tick;
+        return SecurityToolUseResult::Applied;
+    }
+
     bool CanonicalInventoryWorld::ensureContainer(
         ContainerId container, CellId cell, Position3 position, std::uint32_t capacityWeight) noexcept
     try

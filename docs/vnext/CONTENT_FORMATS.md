@@ -213,30 +213,34 @@ Clients map prototype IDs locally with repeated
 `tes3mp-content-actor-prototype-map <id>=<record>` options. See
 [`actor_content.cpp`](../../apps/tes3mp-server/actor_content.cpp).
 
-## Interactive objects V1
+## Interactive objects V2
 
 Configured optionally by `interactive_object_content_file`. Omission disables
 the capability. Maximum size is 2 MiB, with at most 16,384 objects and 512 in
 one exact cell.
 
 ```text
-TES3MP_INTERACTIVE_OBJECTS_V1
+TES3MP_INTERACTIVE_OBJECTS_V2
 manifest <64-hex-digits>
-object <id> <standard|teleport> <cell> <px> <py> <pz> <ox> <oy> <oz> <lock-level> <key-id|none> <trap-id|none> [<destination-cell> <dpx> <dpy> <dpz> <dox> <doy> <doz>]
+object <id> <standard|teleport> <cell> <px> <py> <pz> <ox> <oy> <oz> <lock-level> <key-id|none> <trap-id|none> <trap-disarm-difficulty> [<destination-cell> <dpx> <dpy> <dpz> <dox> <doy> <doz>]
 ```
 
 `<cell>` is `interior <space-id>` or
 `exterior <worldspace-id> <grid-x> <grid-y>`. IDs are nonzero unsigned 64-bit
 values. Coordinates are signed fixed-point 32-bit values and rotations are
 unsigned 32-bit turns. Standard doors have no destination; teleport doors have
-one. A key is valid only on an initially locked object. Trap `none` starts
-disarmed. Source/destination cells and transforms must belong to the manifest.
+one. A key is valid only on an initially locked object. Trap `none` requires
+zero disarm difficulty and starts disarmed; an armed trap requires a positive
+manifest-bound difficulty. Source/destination cells and transforms must belong
+to the manifest. V1 is rejected.
 
 Clients submit interaction intent only. Canonical validation covers object,
-cell, reach, tick, expected revision, state, and independently verified key
-ownership. See [`interactive_object_content.cpp`](../../apps/tes3mp-server/interactive_object_content.cpp).
+cell, reach, tick, expected revision, state, and independently verified key or
+tool ownership. Lockpick/probe attempts additionally carry the observed
+inventory and combat revisions; chance and result are never client fields. See
+[`interactive_object_content.cpp`](../../apps/tes3mp-server/interactive_object_content.cpp).
 
-## Inventory V1
+## Inventory V2
 
 Configured optionally by `inventory_content_file`. Omission disables the
 capability. Maximum size is 8 MiB. Current canonical bounds are 65,536 item
@@ -245,9 +249,9 @@ prototypes, 256 player inventories, 65,536 containers, 65,536 ground stacks,
 must also fit the configured per-cell outbound bound.
 
 ```text
-TES3MP_INVENTORY_V1
+TES3MP_INVENTORY_V2
 manifest <64-lowercase-hex-digits>
-prototype <id> <category> <weight> <value> <max-condition> <max-charge> <slot-mask> <stackable-0-or-1> <key-id-or-none>
+prototype <id> <category> <weight> <value> <max-condition> <max-charge> <slot-mask> <stackable-0-or-1> <key-id-or-none> <tool-quality>
 container <id> <interior space-id | exterior worldspace-id grid-x grid-y> <x> <y> <z> <capacity-weight>
 container_item <container-id> <stack-id> <prototype-id> <count> <condition> <charge> <soul-actor-prototype-id-or-none>
 ground_item <stack-id> <prototype-id> <count> <condition> <charge> <soul-actor-prototype-id-or-none> <interior space-id | exterior worldspace-id grid-x grid-y> <x> <y> <z>
@@ -256,7 +260,9 @@ ground_item <stack-id> <prototype-id> <count> <condition> <charge> <soul-actor-p
 Categories are the closed numeric `ItemCategory` range 0–11. Slot masks use the
 19 canonical `EquipmentSlot` bits. Zero container capacity means unlimited.
 Stack IDs are globally unique across initial locations. Container and ground
-positions must be declared collision cells and occupiable.
+positions must be declared collision cells and occupiable. Tool quality must be
+finite and positive exactly for lockpick and probe prototypes, and zero for all
+other categories. V1 is rejected.
 
 OpenMW clients bind opaque IDs locally with repeatable
 `--tes3mp-content-item-prototype-map <id>=<item-record>` and
@@ -302,25 +308,26 @@ entries, and 1–1,000,000,000 ticks per timing value. Initial weather must be
 eligible. Region transitions and RNG are durable. V1–V3 reject. See
 [`world_content.cpp`](../../apps/tes3mp-server/world_content.cpp).
 
-## Combat V7
+## Combat V8
 
 Configured optionally by `combat_content_file`; combat also requires actor,
 inventory, collision, and historical-contact composition. The catalog contains
 one deterministic seed; exactly one settings record, progression profile, and
 player template; one combat state per actor; an optional complete actor-attack
 set; and zero or more melee weapon or armor profiles keyed by inventory
-prototype ID. V7 carries bounded direct magic for melee and traps: on-strike
-enchantments, equipped defenses/shields, actor diseases, and trapped-object effects.
+prototype ID. V8 adds Security state and the manifest settings needed for
+server-owned lockpick and probe rolls to the bounded V7 direct-magic surface.
 
 ```text
-TES3MP_COMBAT_V7
+TES3MP_COMBAT_V8
 manifest <64-lowercase-hex-digits>
 seed <unsigned-64-bit>
 settings <12-finite-OpenMW-melee-values> <fatigue-base> <fatigue-multiplier> <fatigue-return-base> <fatigue-return-multiplier> <endurance-fatigue-multiplier> <difficulty-multiplier> <block-left-angle> <block-right-angle> <swing-block-multiplier> <swing-block-base> <block-still-bonus> <block-minimum-chance> <block-maximum-chance> <fatigue-block-base> <fatigue-block-multiplier> <weapon-fatigue-block-multiplier> <base-armor-skill> <unarmored-base-1> <unarmored-base-2> <armor-minimum-damage-multiplier> <unarmed-creature-wears-armor-0-or-1> <redistribute-missing-shield-hit-0-or-1>
+security_settings <pick-lock-multiplier> <trap-cost-multiplier> <positive-disarm-use-gain>
 magic_settings <elemental-shield-multiplier> <disease-transfer-percent>
 player_magic <willpower> <destruction> <fire-resist> <shock-resist> <frost-resist> <poison-resist> <common-disease-resist> <blight-disease-resist> <fire-shield> <shock-shield> <frost-shield>
-progression <misc-factor> <minor-factor> <major-factor> <specialization-factor> <block-specialization> <block-use-gain> <short-blade-specialization> <short-blade-use-gain> <long-blade-specialization> <long-blade-use-gain> <blunt-specialization> <blunt-use-gain> <axe-specialization> <axe-use-gain> <spear-specialization> <spear-use-gain> <hand-to-hand-specialization> <hand-to-hand-use-gain> <light-armor-specialization> <light-armor-use-gain> <medium-armor-specialization> <medium-armor-use-gain> <heavy-armor-specialization> <heavy-armor-use-gain> <unarmored-specialization> <unarmored-use-gain>
-player <agility> <luck> <strength> <fatigue-term> <fortify-attack> <blind> <short-blade> <long-blade> <blunt> <axe> <spear> <hand-to-hand> <fatigue> <endurance> <block> <intelligence> <magicka> <health-recovery-per-second> <magicka-recovery-per-second> <light-armor> <medium-armor> <heavy-armor> <unarmored> <maximum-weight> <werewolf-0-or-1>
+progression <misc-factor> <minor-factor> <major-factor> <specialization-factor> <block-specialization> <block-use-gain> <short-blade-specialization> <short-blade-use-gain> <long-blade-specialization> <long-blade-use-gain> <blunt-specialization> <blunt-use-gain> <axe-specialization> <axe-use-gain> <spear-specialization> <spear-use-gain> <hand-to-hand-specialization> <hand-to-hand-use-gain> <light-armor-specialization> <light-armor-use-gain> <medium-armor-specialization> <medium-armor-use-gain> <heavy-armor-specialization> <heavy-armor-use-gain> <unarmored-specialization> <unarmored-use-gain> <security-specialization> <positive-security-use-gain>
+player <agility> <luck> <strength> <fatigue-term> <fortify-attack> <blind> <short-blade> <long-blade> <blunt> <axe> <spear> <hand-to-hand> <fatigue> <endurance> <block> <intelligence> <magicka> <health-recovery-per-second> <magicka-recovery-per-second> <light-armor> <medium-armor> <heavy-armor> <unarmored> <security> <maximum-weight> <werewolf-0-or-1>
 actor <actor-id> <health> <fatigue> <evasion> <chameleon> <invisibility> <normal-resistance> <normal-weakness> <knocked-down-0-or-1> <paralyzed-0-or-1> <unaware-0-or-1> <dead-0-or-1> <creature-0-or-1>
 actor_attack <actor-id> <agility> <luck> <strength> <fatigue-term> <combat-skill> <fatigue> <chop-min> <chop-max> <slash-min> <slash-max> <thrust-min> <thrust-max> <reach> <endurance>
 actor_magic <actor-id> <willpower> <destruction> <fire-resist> <shock-resist> <frost-resist> <poison-resist> <common-disease-resist> <blight-disease-resist> <fire-shield> <shock-shield> <frost-shield>
@@ -363,8 +370,8 @@ canonical charge; charge, wear, melee damage, magic damage, retaliation, death,
 and revisions commit together. Equipped magic may supply only resistances and
 the three elemental shields. Disease entries are unique per actor, transfer by
 the server PRNG and configured resistance-aware chance, and apply at most once
-per player. Unique trap entries exactly cover Interactive objects V1 trap IDs.
+per player. Unique trap entries exactly cover Interactive objects V2 trap IDs.
 Effects, defenses, RNG, damage/death/revision, and disarm commit together. General casting,
 durations, area effects, summons, attribute/skill effects, dispelling, and
-scripted effects are outside V7 and fail content
+scripted effects are outside V8 and fail content
 validation instead of being approximated.
