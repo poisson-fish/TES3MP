@@ -118,6 +118,8 @@ namespace TES3MP::OpenMWAdapter
             return DesktopAutomationRole::SecurityPick;
         if (value == "security-probe")
             return DesktopAutomationRole::SecurityProbe;
+        if (value == "magic-item")
+            return DesktopAutomationRole::MagicItem;
         return std::nullopt;
     }
 
@@ -186,18 +188,15 @@ namespace TES3MP::OpenMWAdapter
     std::optional<ObjectInteractionCapture> DesktopAutomation::captureObjectInteraction() noexcept
     {
         if ((mRole != DesktopAutomationRole::SecurityPick && mRole != DesktopAutomationRole::SecurityProbe)
-            || mSecuritySubmitted || !mSecurityObject
-            || !mSecurityObjectRevision || !mSecurityTool || !mSecurityInventoryRevision || !mSecurityCombatRevision
-            || !mSelfCell || !mInitialPosition)
+            || mSecuritySubmitted || !mSecurityObject || !mSecurityObjectRevision || !mSecurityTool
+            || !mSecurityInventoryRevision || !mSecurityCombatRevision || !mSelfCell || !mInitialPosition)
             return std::nullopt;
         mSecuritySubmitted = true;
         if (mOutput && mEvidenceEvents < MaximumEvidenceEvents)
         {
-            mOutput << "{\"event\":\"security_"
-                    << (mRole == DesktopAutomationRole::SecurityPick ? "pick" : "probe")
-                    << "_submitted\",\"role\":\"" << roleName()
-                    << "\",\"object_id\":" << mSecurityObject->value() << ",\"tool_stack_id\":"
-                    << mSecurityTool->value() << "}\n";
+            mOutput << "{\"event\":\"security_" << (mRole == DesktopAutomationRole::SecurityPick ? "pick" : "probe")
+                    << "_submitted\",\"role\":\"" << roleName() << "\",\"object_id\":" << mSecurityObject->value()
+                    << ",\"tool_stack_id\":" << mSecurityTool->value() << "}\n";
             mOutput.flush();
             ++mEvidenceEvents;
         }
@@ -210,6 +209,25 @@ namespace TES3MP::OpenMWAdapter
             .requestedTool = *mSecurityTool,
             .expectedInventoryRevision = *mSecurityInventoryRevision,
             .expectedCombatRevision = *mSecurityCombatRevision };
+    }
+
+    std::optional<MagicUseCapture> DesktopAutomation::captureMagicUse() noexcept
+    {
+        if (mRole != DesktopAutomationRole::MagicItem || mMagicSubmitted || !mMagicActor || !mMagicItem
+            || !mMagicInventoryRevision || !mMagicCasterRevision || !mMagicTargetRevision || !mMagicSourceTick)
+            return std::nullopt;
+        mMagicSubmitted = true;
+        if (mOutput && mEvidenceEvents < MaximumEvidenceEvents)
+        {
+            mOutput << "{\"event\":\"magic_item_submitted\",\"role\":\"" << roleName()
+                    << "\",\"actor_id\":" << mMagicActor->value() << ",\"item_stack_id\":" << mMagicItem->value()
+                    << "}\n";
+            mOutput.flush();
+            ++mEvidenceEvents;
+        }
+        return MagicUseCapture{ MagicUseSourceKind::EnchantedItem, mMagicItem->value(), MagicUseTargetKind::Actor,
+            mMagicActor->value(), *mMagicSourceTick, *mMagicCasterRevision, *mMagicTargetRevision,
+            *mMagicInventoryRevision };
     }
 
     ProviderResult DesktopAutomation::applyAuthoritative(const LatestWinsSnapshot& snapshot,
@@ -292,6 +310,8 @@ namespace TES3MP::OpenMWAdapter
         if (actor.actorId() != observed.actorId || actor.entityId() != observed.entityId
             || actor.prototypeId() != observed.prototypeId)
             return ProviderResult::PresentationFailed;
+        if (mRole == DesktopAutomationRole::MagicItem)
+            mMagicActor = actor.actorId();
         if (!mFirstActor)
             mFirstActor = actor;
         else if (actor.actorId() != mFirstActor->actorId() || actor.entityId() != mFirstActor->entityId()
@@ -334,9 +354,9 @@ namespace TES3MP::OpenMWAdapter
         if (mFinished)
             return ProviderResult::Accepted;
         const auto elapsed = now.nanoseconds() - mStartedAt->nanoseconds();
-        const bool submitsWaitRest = mRole == DesktopAutomationRole::WaitOne
-            || mRole == DesktopAutomationRole::WaitTwo || mRole == DesktopAutomationRole::WaitAnchor
-            || mRole == DesktopAutomationRole::WaitSlowAnchor || mRole == DesktopAutomationRole::WaitSlow;
+        const bool submitsWaitRest = mRole == DesktopAutomationRole::WaitOne || mRole == DesktopAutomationRole::WaitTwo
+            || mRole == DesktopAutomationRole::WaitAnchor || mRole == DesktopAutomationRole::WaitSlowAnchor
+            || mRole == DesktopAutomationRole::WaitSlow;
         if (submitsWaitRest && !mWaitRestSubmitted && mLastWorldTime && elapsed >= 5 * Second)
         {
             const bool accepted = mCoordinator && mCoordinator->submitWaitRest(2, WaitRestMode::Rest);
@@ -410,9 +430,9 @@ namespace TES3MP::OpenMWAdapter
             finish(mWorldTimeDuplicates == 0);
         else if ((mRole == DesktopAutomationRole::SecurityPick || mRole == DesktopAutomationRole::SecurityProbe)
             && (mRole == DesktopAutomationRole::SecurityPick ? mSecurityUnlocked : mSecurityDisarmed)
-            && mInitialSecurityToolCondition
-            && mSecurityToolCondition && *mSecurityToolCondition + 1 == *mInitialSecurityToolCondition
-            && mInitialSecurityProgress && mSecurityProgress && *mSecurityProgress > *mInitialSecurityProgress)
+            && mInitialSecurityToolCondition && mSecurityToolCondition
+            && *mSecurityToolCondition + 1 == *mInitialSecurityToolCondition && mInitialSecurityProgress
+            && mSecurityProgress && *mSecurityProgress > *mInitialSecurityProgress)
         {
             if (mResumes == 0 && !mSecurityResumeRequested && !mReadyToDisconnect && !mNextDisconnect)
             {
@@ -434,6 +454,31 @@ namespace TES3MP::OpenMWAdapter
         }
         else if ((mRole == DesktopAutomationRole::SecurityPick || mRole == DesktopAutomationRole::SecurityProbe)
             && elapsed >= SecurityDuration)
+            finish(false);
+        else if (mRole == DesktopAutomationRole::MagicItem && mResumes == 1 && mMagicInventoryAfterResume
+            && mMagicCombatAfterResume && elapsed >= 6 * Second)
+            finish(true);
+        else if (mRole == DesktopAutomationRole::MagicItem && mMagicEventPresented && mInitialMagicCharge
+            && mMagicCharge && *mMagicCharge < *mInitialMagicCharge && mInitialMagicTargetFatigue && mMagicTargetFatigue
+            && *mMagicTargetFatigue < *mInitialMagicTargetFatigue && mInitialEnchantProgress && mEnchantProgress
+            && *mEnchantProgress > *mInitialEnchantProgress)
+        {
+            if (mResumes == 0 && !mMagicResumeRequested && !mReadyToDisconnect && !mNextDisconnect)
+            {
+                mMagicResumeRequested = true;
+                mReadyToDisconnect = true;
+                mNextDisconnect = now;
+                if (mOutput && mEvidenceEvents < MaximumEvidenceEvents)
+                {
+                    mOutput << "{\"event\":\"magic_resume_scheduled\",\"role\":\"" << roleName() << "\"}\n";
+                    mOutput.flush();
+                    ++mEvidenceEvents;
+                }
+            }
+            else if (elapsed >= SecurityDuration)
+                finish(false);
+        }
+        else if (mRole == DesktopAutomationRole::MagicItem && elapsed >= SecurityDuration)
             finish(false);
         return ProviderResult::Accepted;
     }
@@ -457,8 +502,7 @@ namespace TES3MP::OpenMWAdapter
         if (mSecuritySubmitted && member.revision > *mInitialSecurityObjectRevision
             && member.trapState == TrapState::Disarmed)
             mSecurityDisarmed = true;
-        if (mResumes != 0
-            && (mRole == DesktopAutomationRole::SecurityPick ? mSecurityUnlocked : mSecurityDisarmed))
+        if (mResumes != 0 && (mRole == DesktopAutomationRole::SecurityPick ? mSecurityUnlocked : mSecurityDisarmed))
             mSecurityObjectAfterResume = true;
         return applied;
     }
@@ -468,13 +512,32 @@ namespace TES3MP::OpenMWAdapter
         const LatestWinsEquipmentSnapshot& equipment, MonotonicInstant receivedAt) noexcept
     {
         const auto applied = mPresentation.applyInventory(player, containers, groundItems, equipment, receivedAt);
-        if (applied != ProviderResult::Accepted
-            || (mRole != DesktopAutomationRole::SecurityPick && mRole != DesktopAutomationRole::SecurityProbe))
+        if (applied != ProviderResult::Accepted)
+            return applied;
+        if (mRole == DesktopAutomationRole::MagicItem)
+        {
+            constexpr std::uint64_t RingOfFleabitePrototype = 13568541167308910850ull;
+            const auto prototype = ItemPrototypeId::fromValue(RingOfFleabitePrototype);
+            const auto item = prototype ? std::ranges::find(player.stacks, *prototype, &CanonicalItemStack::prototypeId)
+                                        : player.stacks.end();
+            if (item != player.stacks.end())
+            {
+                mMagicItem = item->stackId;
+                mMagicCharge = item->enchantmentCharge;
+                if (!mInitialMagicCharge)
+                    mInitialMagicCharge = item->enchantmentCharge;
+            }
+            mMagicInventoryRevision = player.revision;
+            if (mResumes != 0 && mInitialMagicCharge && mMagicCharge && *mMagicCharge < *mInitialMagicCharge)
+                mMagicInventoryAfterResume = true;
+            return applied;
+        }
+        if (mRole != DesktopAutomationRole::SecurityPick && mRole != DesktopAutomationRole::SecurityProbe)
             return applied;
         constexpr std::uint64_t ApprenticeLockpickPrototype = 12936841098047256804ull;
         constexpr std::uint64_t ApprenticeProbePrototype = 16269827911551786073ull;
-        const auto prototype = ItemPrototypeId::fromValue(mRole == DesktopAutomationRole::SecurityPick
-                ? ApprenticeLockpickPrototype : ApprenticeProbePrototype);
+        const auto prototype = ItemPrototypeId::fromValue(
+            mRole == DesktopAutomationRole::SecurityPick ? ApprenticeLockpickPrototype : ApprenticeProbePrototype);
         const auto tool = prototype ? std::ranges::find(player.stacks, *prototype, &CanonicalItemStack::prototypeId)
                                     : player.stacks.end();
         if (tool != player.stacks.end())
@@ -495,12 +558,52 @@ namespace TES3MP::OpenMWAdapter
         std::span<const ReliableCombatEventBatch> events, MonotonicInstant receivedAt) noexcept
     {
         const auto applied = mPresentation.applyCombat(snapshot, events, receivedAt);
-        if (applied != ProviderResult::Accepted
-            || (mRole != DesktopAutomationRole::SecurityPick && mRole != DesktopAutomationRole::SecurityProbe))
+        if (applied != ProviderResult::Accepted)
+            return applied;
+        if (mRole == DesktopAutomationRole::MagicItem)
+        {
+            mMagicCasterRevision = snapshot.selfCombatRevision();
+            mMagicSourceTick = snapshot.serverTick();
+            if (mMagicActor)
+            {
+                const auto actor = std::ranges::find(snapshot.actors(), *mMagicActor, &ActorCombatSnapshot::actorId);
+                if (actor != snapshot.actors().end())
+                {
+                    mMagicTargetRevision = actor->combatRevision;
+                    mMagicTargetFatigue = actor->fatigue;
+                    if (!mInitialMagicTargetFatigue)
+                        mInitialMagicTargetFatigue = actor->fatigue;
+                    if (!mMinimumMagicTargetFatigue || actor->fatigue < *mMinimumMagicTargetFatigue)
+                        mMinimumMagicTargetFatigue = actor->fatigue;
+                }
+            }
+            const auto skill
+                = std::ranges::find(snapshot.selfSkills(), ReplicatedCombatSkill::Enchant, &CombatSkillSnapshot::skill);
+            if (skill != snapshot.selfSkills().end())
+            {
+                mEnchantProgress = skill->progress;
+                if (!mInitialEnchantProgress)
+                    mInitialEnchantProgress = skill->progress;
+            }
+            for (const auto& batch : events)
+                if (std::ranges::any_of(batch.magicEvents(), [&](const MagicUseCombatEvent& event) {
+                        return event.casterPlayerId == snapshot.selfPlayerId()
+                            && event.sourceKind == MagicUseSourceKind::EnchantedItem
+                            && event.targetKind == MagicUseTargetKind::Actor && mMagicActor
+                            && event.targetId == mMagicActor->value() && event.castSucceeded;
+                    }))
+                    mMagicEventPresented = true;
+            if (mResumes != 0 && mInitialMagicTargetFatigue && mMagicTargetFatigue
+                && *mMagicTargetFatigue < *mInitialMagicTargetFatigue && mInitialEnchantProgress && mEnchantProgress
+                && *mEnchantProgress > *mInitialEnchantProgress)
+                mMagicCombatAfterResume = true;
+            return applied;
+        }
+        if (mRole != DesktopAutomationRole::SecurityPick && mRole != DesktopAutomationRole::SecurityProbe)
             return applied;
         mSecurityCombatRevision = snapshot.selfCombatRevision();
-        const auto skill = std::ranges::find(
-            snapshot.selfSkills(), ReplicatedCombatSkill::Security, &CombatSkillSnapshot::skill);
+        const auto skill
+            = std::ranges::find(snapshot.selfSkills(), ReplicatedCombatSkill::Security, &CombatSkillSnapshot::skill);
         if (skill != snapshot.selfSkills().end())
         {
             mSecurityProgress = skill->progress;
@@ -513,8 +616,8 @@ namespace TES3MP::OpenMWAdapter
         return applied;
     }
 
-    ProviderResult DesktopAutomation::applyWeather(std::span<const WeatherRegionSnapshot> regions,
-        ServerTick serverTick, MonotonicInstant receivedAt) noexcept
+    ProviderResult DesktopAutomation::applyWeather(
+        std::span<const WeatherRegionSnapshot> regions, ServerTick serverTick, MonotonicInstant receivedAt) noexcept
     {
         const auto applied = mPresentation.applyWeather(regions, serverTick, receivedAt);
         if (applied != ProviderResult::Accepted)
@@ -531,9 +634,8 @@ namespace TES3MP::OpenMWAdapter
             return region.currentWeather != region.targetWeather && serverTick >= region.transitionStartTick
                 && serverTick < region.transitionEndTick;
         });
-        const bool completed = std::ranges::all_of(regions, [](const auto& region) {
-            return region.currentWeather == region.targetWeather;
-        });
+        const bool completed = std::ranges::all_of(
+            regions, [](const auto& region) { return region.currentWeather == region.targetWeather; });
         mSawWeatherTransition = mSawWeatherTransition || transitioning;
         mSawWeatherCompletion = mSawWeatherCompletion || (mSawWeatherTransition && completed);
 
@@ -545,8 +647,7 @@ namespace TES3MP::OpenMWAdapter
             mNextDisconnect = receivedAt;
         }
         if (mRole == DesktopAutomationRole::WeatherReconnect && mResumes != 0 && mWeatherTickBeforeDisconnect
-            && serverTick > *mWeatherTickBeforeDisconnect
-            && std::ranges::all_of(regions, [&](const auto& region) {
+            && serverTick > *mWeatherTickBeforeDisconnect && std::ranges::all_of(regions, [&](const auto& region) {
                    return !mWeatherRevisionBeforeDisconnect || region.revision > *mWeatherRevisionBeforeDisconnect;
                }))
             mWeatherConvergedAfterResume = true;
@@ -601,8 +702,7 @@ namespace TES3MP::OpenMWAdapter
             && state.time.revision > *mWorldTimeRevisionBeforeDisconnect && mWaitRestApplied)
             mWorldTimeConvergedAfterResume = true;
 
-        if (mRole == DesktopAutomationRole::WaitSlow && mLastWorldTime && !mSlowPeerStalled
-            && mWaitRestApplied)
+        if (mRole == DesktopAutomationRole::WaitSlow && mLastWorldTime && !mSlowPeerStalled && mWaitRestApplied)
         {
             mSlowPeerStalled = true;
             if (mOutput && mEvidenceEvents < MaximumEvidenceEvents)
@@ -660,16 +760,19 @@ namespace TES3MP::OpenMWAdapter
             : mRole == DesktopAutomationRole::WaitReconnect                   ? 1u
             : mRole == DesktopAutomationRole::SecurityPick                    ? 1u
             : mRole == DesktopAutomationRole::SecurityProbe                   ? 1u
+            : mRole == DesktopAutomationRole::MagicItem                       ? 1u
                                                                               : 0u;
         if (maximumResumes == 0 || !mReadyToDisconnect || !mNow || !mNextDisconnect || *mNow < *mNextDisconnect
             || mResumes >= maximumResumes)
             return false;
         mReadyToDisconnect = false;
         mNextDisconnect.reset();
-        if ((mRole == DesktopAutomationRole::SecurityPick || mRole == DesktopAutomationRole::SecurityProbe)
+        if ((mRole == DesktopAutomationRole::SecurityPick || mRole == DesktopAutomationRole::SecurityProbe
+                || mRole == DesktopAutomationRole::MagicItem)
             && mOutput && mEvidenceEvents < MaximumEvidenceEvents)
         {
-            mOutput << "{\"event\":\"security_disconnect_requested\",\"role\":\"" << roleName() << "\"}\n";
+            mOutput << "{\"event\":\"" << (mRole == DesktopAutomationRole::MagicItem ? "magic" : "security")
+                    << "_disconnect_requested\",\"role\":\"" << roleName() << "\"}\n";
             mOutput.flush();
             ++mEvidenceEvents;
         }
@@ -680,8 +783,7 @@ namespace TES3MP::OpenMWAdapter
     {
         if (mRole == DesktopAutomationRole::WaitReconnect)
             return 8'000'000'000ull;
-        return mRole == DesktopAutomationRole::WeatherReconnect ? 4'000'000'000ull
-            : 0;
+        return mRole == DesktopAutomationRole::WeatherReconnect ? 4'000'000'000ull : 0;
     }
 
     std::optional<ResyncReason> DesktopAutomation::resyncRequested() noexcept
@@ -756,6 +858,8 @@ namespace TES3MP::OpenMWAdapter
                 return "security-pick";
             case DesktopAutomationRole::SecurityProbe:
                 return "security-probe";
+            case DesktopAutomationRole::MagicItem:
+                return "magic-item";
         }
         return "unknown";
     }
@@ -789,12 +893,11 @@ namespace TES3MP::OpenMWAdapter
             const auto& region = regions[index];
             if (index != 0)
                 mOutput << ',';
-            mOutput << "{\"region\":" << region.region.value() << ",\"current\":"
-                    << region.currentWeather.value() << ",\"target\":" << region.targetWeather.value()
-                    << ",\"revision\":" << region.revision.value() << ",\"transition_start\":"
-                    << region.transitionStartTick.value() << ",\"transition_end\":"
-                    << region.transitionEndTick.value() << ",\"next_selection\":"
-                    << region.nextSelectionTick.value() << '}';
+            mOutput << "{\"region\":" << region.region.value() << ",\"current\":" << region.currentWeather.value()
+                    << ",\"target\":" << region.targetWeather.value() << ",\"revision\":" << region.revision.value()
+                    << ",\"transition_start\":" << region.transitionStartTick.value()
+                    << ",\"transition_end\":" << region.transitionEndTick.value()
+                    << ",\"next_selection\":" << region.nextSelectionTick.value() << '}';
         }
         mOutput << "]}\n";
         mOutput.flush();
@@ -807,8 +910,8 @@ namespace TES3MP::OpenMWAdapter
         if (!mOutput || mEvidenceEvents >= MaximumEvidenceEvents)
             return;
         mOutput << "{\"event\":\"wait_rest_time_sample\",\"role\":\"" << roleName()
-                << "\",\"revision\":" << state.time.revision.value() << ",\"tick\":"
-                << state.serverTick.value() << ",\"day\":" << static_cast<unsigned>(state.time.day)
+                << "\",\"revision\":" << state.time.revision.value() << ",\"tick\":" << state.serverTick.value()
+                << ",\"day\":" << static_cast<unsigned>(state.time.day)
                 << ",\"month\":" << static_cast<unsigned>(state.time.month) << ",\"year\":" << state.time.year
                 << ",\"milliseconds_since_midnight\":" << state.time.millisecondsSinceMidnight << "}\n";
         mOutput.flush();
@@ -866,18 +969,29 @@ namespace TES3MP::OpenMWAdapter
                     << ",\"world_time_duplicate_presentations\":" << mWorldTimeDuplicates
                     << ",\"wait_rest_submitted\":" << (mWaitRestSubmitted ? "true" : "false")
                     << ",\"wait_rest_applied\":" << (mWaitRestApplied ? "true" : "false")
-                    << ",\"world_time_resumed_converged\":"
-                    << (mWorldTimeConvergedAfterResume ? "true" : "false")
+                    << ",\"world_time_resumed_converged\":" << (mWorldTimeConvergedAfterResume ? "true" : "false")
                     << ",\"security_submitted\":" << (mSecuritySubmitted ? "true" : "false")
                     << ",\"security_unlocked\":" << (mSecurityUnlocked ? "true" : "false")
                     << ",\"security_disarmed\":" << (mSecurityDisarmed ? "true" : "false")
                     << ",\"security_resumed_converged\":"
                     << (mSecurityObjectAfterResume && mSecurityInventoryAfterResume && mSecurityCombatAfterResume
-                            ? "true" : "false")
+                               ? "true"
+                               : "false")
                     << ",\"security_initial_tool_condition\":" << mInitialSecurityToolCondition.value_or(0)
                     << ",\"security_tool_condition\":" << mSecurityToolCondition.value_or(0)
                     << ",\"security_initial_progress\":" << mInitialSecurityProgress.value_or(0.f)
-                    << ",\"security_progress\":" << mSecurityProgress.value_or(0.f) << "}\n";
+                    << ",\"security_progress\":" << mSecurityProgress.value_or(0.f)
+                    << ",\"magic_submitted\":" << (mMagicSubmitted ? "true" : "false")
+                    << ",\"magic_event_presented\":" << (mMagicEventPresented ? "true" : "false")
+                    << ",\"magic_resumed_converged\":"
+                    << (mMagicInventoryAfterResume && mMagicCombatAfterResume ? "true" : "false")
+                    << ",\"magic_initial_charge\":" << mInitialMagicCharge.value_or(0)
+                    << ",\"magic_charge\":" << mMagicCharge.value_or(0)
+                    << ",\"magic_initial_target_fatigue\":" << mInitialMagicTargetFatigue.value_or(0.f)
+                    << ",\"magic_target_fatigue\":" << mMagicTargetFatigue.value_or(0.f)
+                    << ",\"magic_minimum_target_fatigue\":" << mMinimumMagicTargetFatigue.value_or(0.f)
+                    << ",\"magic_initial_enchant_progress\":" << mInitialEnchantProgress.value_or(0.f)
+                    << ",\"magic_enchant_progress\":" << mEnchantProgress.value_or(0.f) << "}\n";
             mOutput.flush();
             ++mEvidenceEvents;
         }

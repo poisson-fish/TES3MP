@@ -24,8 +24,8 @@
 #include "tes3mp/interactive_object_replication.hpp"
 #include "tes3mp/interactive_object_world.hpp"
 #include "tes3mp/inventory_replication.hpp"
-#include "world_content.hpp"
 #include "weather_projection.hpp"
+#include "world_content.hpp"
 #include "world_time_projection.hpp"
 
 #include <array>
@@ -158,10 +158,10 @@ namespace
     class WeatherDurabilityProbe final : public CanonicalDurabilityPort
     {
     public:
-        CanonicalDurabilityResult commit(const std::shared_ptr<const CanonicalStatePublication>&,
-            CanonicalRevision, std::span<const DurableCommandOrder>, const CanonicalInventoryWorld*,
-            const CanonicalCombatWorld*, const CanonicalInteractiveObjectWorld*, const CanonicalActorWorld*,
-            const CanonicalWorldState*, const CanonicalScriptState*) noexcept override
+        CanonicalDurabilityResult commit(const std::shared_ptr<const CanonicalStatePublication>&, CanonicalRevision,
+            std::span<const DurableCommandOrder>, const CanonicalInventoryWorld*, const CanonicalCombatWorld*,
+            const CanonicalInteractiveObjectWorld*, const CanonicalActorWorld*, const CanonicalWorldState*,
+            const CanonicalScriptState*) noexcept override
         {
             ++commits;
             if (!runtime)
@@ -485,8 +485,8 @@ namespace
                 LinearVelocity3(0, 0, 0), id<EntityRevision>(secondExterior ? 2 : 1), AuthorityEpoch::initial(),
                 id<ServerTick>(4) }
         };
-        std::vector<CanonicalSessionProgress> sessions{ { id<SessionId>(1), firstGeneration,
-                                                            id<PlayerId>(1), id<EntityId>(1), std::nullopt },
+        std::vector<CanonicalSessionProgress> sessions{ { id<SessionId>(1), firstGeneration, id<PlayerId>(1),
+                                                            id<EntityId>(1), std::nullopt },
             { id<SessionId>(2), SessionGeneration::initial(), id<PlayerId>(2), id<EntityId>(2), std::nullopt } };
         return std::get<CanonicalServerState>(createCanonicalServerState(players, sessions));
     }
@@ -499,17 +499,16 @@ namespace
         const std::array<FactionCatalogEntry, 0> factions{};
         const std::array<DialogueChoiceCatalogEntry, 0> choices{};
         const std::array weatherIds{ id<WeatherId>(1), id<WeatherId>(2) };
-        const std::array regions{ WeatherRegionCatalogEntry{ id<WeatherRegionId>(1), id<WeatherId>(1), 6, 3,
-            { id<WeatherId>(1), id<WeatherId>(2) } } };
+        const std::array regions{ WeatherRegionCatalogEntry{
+            id<WeatherRegionId>(1), id<WeatherId>(1), 6, 3, { id<WeatherId>(1), id<WeatherId>(2) } } };
         const auto globalsCatalog = GlobalVariableCatalog::create(globals).value();
         const auto questCatalog = QuestJournalCatalog::create(testContentManifestId(), quests, journal).value();
-        const auto factionCatalog
-            = FactionDialogueCatalog::create(testContentManifestId(), factions, choices).value();
+        const auto factionCatalog = FactionDialogueCatalog::create(testContentManifestId(), factions, choices).value();
         const auto weatherCatalog = WeatherCatalog::create(testContentManifestId(), weatherIds, regions).value();
-        const auto random = Xoshiro256StarStar::fromWorldSeed(
-            99, *RandomStreamKey::fromValues(0x5745415448455231ULL, 0));
-        return CanonicalWorldState::initial(CanonicalWorldTimeState{}, globalsCatalog, questCatalog, factionCatalog,
-            weatherCatalog, random.snapshot())
+        const auto random
+            = Xoshiro256StarStar::fromWorldSeed(99, *RandomStreamKey::fromValues(0x5745415448455231ULL, 0));
+        return CanonicalWorldState::initial(
+            CanonicalWorldTimeState{}, globalsCatalog, questCatalog, factionCatalog, weatherCatalog, random.snapshot())
             .value();
     }
 }
@@ -520,30 +519,28 @@ int main()
         const auto resumedGeneration = *SessionGeneration::initial().next();
         const auto players = fixtureState(false, resumedGeneration);
         const auto initial = fixtureWeatherWorld();
-        auto baseline = projectWeatherBaseline(
-            players, initial, id<SessionId>(1), id<ServerTick>(4), id<CanonicalRevision>(7));
+        auto baseline
+            = projectWeatherBaseline(players, initial, id<SessionId>(1), id<ServerTick>(4), id<CanonicalRevision>(7));
         assert(baseline && baseline->chunks.size() == 1);
         const auto& baselineChunk = baseline->chunks.front();
         assert(baselineChunk.header().completeBaseline
             && baselineChunk.header().targetSessionGeneration == resumedGeneration
             && baselineChunk.header().canonicalRevision == id<CanonicalRevision>(7)
-            && baselineChunk.regions().size() == 1
-            && baselineChunk.regions()[0].currentWeather == id<WeatherId>(1));
-        auto timeBaseline = projectWorldTimeBaseline(
-            players, initial, id<SessionId>(1), id<ServerTick>(4), id<CanonicalRevision>(7));
+            && baselineChunk.regions().size() == 1 && baselineChunk.regions()[0].currentWeather == id<WeatherId>(1));
+        auto timeBaseline
+            = projectWorldTimeBaseline(players, initial, id<SessionId>(1), id<ServerTick>(4), id<CanonicalRevision>(7));
         assert(timeBaseline && timeBaseline->completeBaseline
-            && timeBaseline->targetSessionGeneration == resumedGeneration
-            && timeBaseline->time == initial.time());
+            && timeBaseline->targetSessionGeneration == resumedGeneration && timeBaseline->time == initial.time());
         auto timeUpdate = projectWorldTimeUpdate(
             initial, id<SessionId>(1), resumedGeneration, id<ServerTick>(5), id<CanonicalRevision>(8));
         assert(timeUpdate && !timeUpdate->completeBaseline && timeUpdate->time == initial.time());
 
-        auto changedValue = setCanonicalWeather(initial, id<WeatherRegionId>(1), WeatherRevision::initial(),
-            id<WeatherId>(2), id<ServerTick>(5));
+        auto changedValue = setCanonicalWeather(
+            initial, id<WeatherRegionId>(1), WeatherRevision::initial(), id<WeatherId>(2), id<ServerTick>(5));
         const auto* changed = std::get_if<CanonicalWorldState>(&changedValue);
         assert(changed);
-        auto update = projectWeatherUpdate(initial, *changed, id<SessionId>(1), resumedGeneration,
-            id<ServerTick>(5), id<CanonicalRevision>(8));
+        auto update = projectWeatherUpdate(
+            initial, *changed, id<SessionId>(1), resumedGeneration, id<ServerTick>(5), id<CanonicalRevision>(8));
         assert(update && update->chunks.size() == 1 && !update->chunks[0].header().completeBaseline
             && update->chunks[0].regions().size() == 1
             && update->chunks[0].regions()[0].targetWeather == id<WeatherId>(2)
@@ -606,8 +603,8 @@ int main()
             { TransportEventKind::ConnectionAccepted, TransportFailure::None, std::nullopt, std::nullopt, connection,
                 std::nullopt, TransportSecurity::EncryptedUnauthenticated, scope(std::byte{ 11 }) });
         runtime.incoming.push_back({ TransportChannel::ReliableOrdered,
-            std::get<std::vector<std::byte>>(encodeProtocolFrame(MessageClass::SessionControl,
-                MessageKind::ClientHello, encodeClientHello(ClientHello::fromOffer(weatherOffer())))) });
+            std::get<std::vector<std::byte>>(encodeProtocolFrame(MessageClass::SessionControl, MessageKind::ClientHello,
+                encodeClientHello(ClientHello::fromOffer(weatherOffer())))) });
         assert(application.start());
         const bool initialPumped = application.pump(ServerTick::initial());
         if (!initialPumped)
@@ -615,17 +612,16 @@ int main()
         assert(initialPumped);
         auto material = AuthenticationMaterial::create({});
         runtime.incoming.push_back({ TransportChannel::ReliableOrdered,
-            std::get<std::vector<std::byte>>(encodeProtocolFrame(MessageClass::SessionControl,
-                MessageKind::AuthenticationRequest,
-                encodeAuthenticationRequest(AuthenticationRequest::join(std::move(*material))))) });
+            std::get<std::vector<std::byte>>(
+                encodeProtocolFrame(MessageClass::SessionControl, MessageKind::AuthenticationRequest,
+                    encodeAuthenticationRequest(AuthenticationRequest::join(std::move(*material))))) });
         assert(application.pump(ServerTick::initial()));
         bool sawJoinBaseline = false;
         for (const auto& bytes : runtime.sent)
         {
             const auto decoded = decodeProtocolFrame(bytes);
             const auto* frame = std::get_if<DecodedFrame>(&decoded);
-            sawJoinBaseline = sawJoinBaseline
-                || (frame && frame->messageKind() == MessageKind::ReliableWeatherState);
+            sawJoinBaseline = sawJoinBaseline || (frame && frame->messageKind() == MessageKind::ReliableWeatherState);
         }
         assert(sawJoinBaseline && durability.commits != 0 && !durability.weatherSentBeforeAcknowledgement);
 
@@ -913,23 +909,23 @@ int main()
         && std::get<std::int32_t>(worldContent->world.globals()[1].value) == -3
         && worldContent->questJournal.quests().size() == 1 && worldContent->questJournal.journal().size() == 2
         && worldContent->factionDialogue.factions().size() == 1
-        && worldContent->factionDialogue.dialogueChoices().size() == 2
-        && worldContent->weather.weather().size() == 2 && worldContent->weather.regions().size() == 1
-        && worldContent->world.questJournalCatalog()
+        && worldContent->factionDialogue.dialogueChoices().size() == 2 && worldContent->weather.weather().size() == 2
+        && worldContent->weather.regions().size() == 1 && worldContent->world.questJournalCatalog()
         && worldContent->world.factionDialogueCatalog()
         && *worldContent->world.questJournalCatalog() == worldContent->questJournal
         && *worldContent->world.factionDialogueCatalog() == worldContent->factionDialogue
         && worldContent->world.weatherCatalog() && *worldContent->world.weatherCatalog() == worldContent->weather);
     constexpr std::string_view weather = "weather_seed 1234\nweather 50\nweather_region 60 50 100 10 50\n";
-    writeWorld(std::string(worldHeader) + "time 16 6 427 32400000 30000\nglobal 1 short 2\nglobal 1 long 3\n" + std::string(weather));
+    writeWorld(std::string(worldHeader) + "time 16 6 427 32400000 30000\nglobal 1 short 2\nglobal 1 long 3\n"
+        + std::string(weather));
     assert(std::get<WorldContentError>(loadWorldContent(worldPath, parsedConfig().contentManifest))
         == WorldContentError::InvalidCatalog);
-    writeWorld(std::string(worldHeader)
-        + "time 16 6 427 32400000 30000\nfaction 30 0 0\ndialogue_choice 40 30 0 0\n" + std::string(weather));
+    writeWorld(std::string(worldHeader) + "time 16 6 427 32400000 30000\nfaction 30 0 0\ndialogue_choice 40 30 0 0\n"
+        + std::string(weather));
     assert(std::get<WorldContentError>(loadWorldContent(worldPath, parsedConfig().contentManifest))
         == WorldContentError::InvalidCatalog);
-    writeWorld(std::string(worldHeader)
-        + "time 16 6 427 32400000 30000\nfaction 30 0 1\ndialogue_choice 40 31 0 0\n" + std::string(weather));
+    writeWorld(std::string(worldHeader) + "time 16 6 427 32400000 30000\nfaction 30 0 1\ndialogue_choice 40 31 0 0\n"
+        + std::string(weather));
     assert(std::get<WorldContentError>(loadWorldContent(worldPath, parsedConfig().contentManifest))
         == WorldContentError::InvalidCatalog);
     writeWorld(std::string(worldHeader) + "time 16 6 427 32400000 30000\nglobal 1 float inf\n" + std::string(weather));
@@ -1052,7 +1048,7 @@ int main()
         assert(static_cast<bool>(stream));
     };
     constexpr std::string_view combatHeader
-        = "TES3MP_COMBAT_V8\n"
+        = "TES3MP_COMBAT_V9\n"
           "manifest 0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20\n"
           "seed 42\n";
     constexpr std::string_view combatBody
@@ -1061,21 +1057,24 @@ int main()
           "security_settings -1 0 3\n"
           "magic_settings .1 .1\n"
           "player_magic 40 10 0 0 0 0 0 0 0 0 0\n"
-          "progression 1 0.75 0.5 0.8 0 1 0 2 0 3 0 4 0 5 0 6 0 7 0 8 0 9 0 10 0 11 0 12\n"
-          "player 50 40 40 1 0 0 10 20 30 40 50 25 100 30 35 40 80 0.1 0.2 15 16 17 18 19 500 0\n"
-          "actor 1 20 50 0 0 0 25 0 0 0 0 0 1\n"
+          "progression 1 0.75 0.5 0.8 0 1 0 2 0 3 0 4 0 5 0 6 0 7 0 8 0 9 0 10 0 11 0 12 1 13 1 14 1 15 1 16 1 17 1 18 "
+          "1 19\n"
+          "player 50 40 40 1 0 0 10 20 30 40 50 25 100 30 35 40 80 0.1 0.2 15 16 17 18 19 21 22 23 24 25 26 27 500 0\n"
+          "actor 1 20 50 0 0 0 25 0 30 0 0 0 0 1\n"
           "actor_attack 1 50 40 40 1 25 50 1 4 1 4 1 4 1 30\n"
           "actor_magic 1 30 5 1 2 3 4 5 6 7 8 9\n"
           "weapon 4 1 1 10 1 10 1 10 5 1 1\n"
           "armor 5 2 30\n"
-          "enchantment 4 5 2 other fire 3 3 self fatigue 1 1\n"
+          "enchantment 4 strike 5 2 other fire 3 3 self fatigue 1 1\n"
+          "enchantment 5 use 4 1 self restore_health 2 2\n"
+          "spell 20 5 5 10 1 1 self restore_magicka 3 3\n"
           "equipment_magic 5 0 0 10 0 0 0 0 0 5 0 0\n"
           "disease 1 9 common 1 other health 2 2\n"
           "trap 12 2 other fire 4 4 other fatigue 3 3\n";
     const std::array combatItemDeclarations{
         ItemPrototypeDeclaration{ id<ItemPrototypeId>(4), ItemCategory::Weapon, 5, 1, 100, 40,
             slotToMask(EquipmentSlot::CarriedRight), false, std::nullopt },
-        ItemPrototypeDeclaration{ id<ItemPrototypeId>(5), ItemCategory::Armor, 5, 1, 100, 0,
+        ItemPrototypeDeclaration{ id<ItemPrototypeId>(5), ItemCategory::Armor, 5, 1, 100, 40,
             slotToMask(EquipmentSlot::CarriedLeft), false, std::nullopt },
     };
     auto combatItems = *ItemPrototypeCatalog::create(parsedConfig().contentManifest, combatItemDeclarations);
@@ -1098,6 +1097,9 @@ int main()
         && combat.playerTemplate.skillRules[static_cast<std::size_t>(CombatProgressionSkill::LongBlade)].useGain == 3.f
         && combat.magic.settings().elementalShieldMultiplier == 0.1f
         && combat.magic.findEnchantment(id<ItemPrototypeId>(4))->chargeCost == 5
+        && combat.magic.findEnchantment(id<ItemPrototypeId>(5))->kind == DirectMagicEnchantmentKind::WhenUsed
+        && combat.magic.findSpell(id<SpellRecordId>(20))->school == DirectMagicSchool::Restoration
+        && combat.magic.findSpell(id<SpellRecordId>(20))->magickaCost == 5
         && combat.magic.findEnchantment(id<ItemPrototypeId>(4))->effects.size() == 2
         && combat.magic.findEquipment(id<ItemPrototypeId>(5))->defense.fireResistance == 10.f
         && combat.magic.findActor(id<ActorId>(1))->diseases[0].spellId == id<SpellRecordId>(9)
@@ -1130,14 +1132,14 @@ int main()
           "security_settings -1 0 3\n"
           "magic_settings .1 .1\n"
           "player_magic 40 10 0 0 0 0 0 0 0 0 0\n"
-          "progression 1 0.75 0.5 0.8 0 1 0 2 0 3 0 4 0 5 0 6 0 7 0 8 0 9 0 10 0 11 0 12\n"
-          "player 50 40 40 1 0 0 10 20 30 40 50 25 100 30 35 40 80 0.1 0.2 15 16 17 18 19 500 0\n");
+          "progression 1 0.75 0.5 0.8 0 1 0 2 0 3 0 4 0 5 0 6 0 7 0 8 0 9 0 10 0 11 0 12 1 13 1 14 1 15 1 16 1 17 1 18 1 19\n"
+          "player 50 40 40 1 0 0 10 20 30 40 50 25 100 30 35 40 80 0.1 0.2 15 16 17 18 19 21 22 23 24 25 26 27 500 0\n");
     assert(std::get<CombatContentError>(
                loadCombatContent(combatPath, parsedConfig().contentManifest, actorCatalog, combatItems))
                .code
         == CombatContentErrorCode::InvalidActorSet);
     writeCombat(
-        "TES3MP_COMBAT_V8\n"
+        "TES3MP_COMBAT_V9\n"
         "manifest 0202030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20\n"
         "seed 42\n"
         + std::string(combatBody));
@@ -2459,8 +2461,8 @@ int main()
         DeterministicServerScriptRuntime packagedScriptRuntime;
         assert(packagedScriptRuntime.configurePackages(packagedScripts->packages, packagedScripts->stateCatalog));
         auto packagedModules = loadExecutableScriptModules(contentRoot / "vanilla-scripts.txt", *packagedScripts,
-            packagedWorld->globals, packagedWorld->questJournal, packagedWorld->factionDialogue,
-            packagedWorld->weather, packagedScriptRuntime);
+            packagedWorld->globals, packagedWorld->questJournal, packagedWorld->factionDialogue, packagedWorld->weather,
+            packagedScriptRuntime);
         assert(std::holds_alternative<ExecutableScriptModules>(packagedModules));
         assert(std::get<ExecutableScriptModules>(packagedModules).callbackCount() == 3);
 

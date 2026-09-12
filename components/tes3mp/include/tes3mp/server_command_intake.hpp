@@ -1,11 +1,12 @@
 #ifndef TES3MP_SERVER_COMMAND_INTAKE_HPP
 #define TES3MP_SERVER_COMMAND_INTAKE_HPP
 
-#include "command_primitives.hpp"
 #include "combat_replication.hpp"
+#include "command_primitives.hpp"
 #include "fixed_tick_scheduler.hpp"
 #include "interactive_object_world.hpp"
 #include "inventory_world.hpp"
+#include "magic_use.hpp"
 #include "movement_policy.hpp"
 #include "observability.hpp"
 #include "protocol_exchange.hpp"
@@ -84,8 +85,8 @@ namespace TES3MP
     {
     public:
         InteractiveObjectCommandProposal(InteractiveObjectId objectId, CellId cell, Position3 interactionOrigin,
-            ObjectRevision expectedRevision, ObjectInteractionKind kind,
-            std::optional<KeyPrototypeId> requestedKey, std::optional<ItemStackId> requestedTool = std::nullopt,
+            ObjectRevision expectedRevision, ObjectInteractionKind kind, std::optional<KeyPrototypeId> requestedKey,
+            std::optional<ItemStackId> requestedTool = std::nullopt,
             std::optional<InventoryRevision> expectedInventoryRevision = std::nullopt,
             std::optional<CombatRevision> expectedCombatRevision = std::nullopt) noexcept
             : mObjectId(objectId)
@@ -108,9 +109,13 @@ namespace TES3MP
         constexpr std::optional<KeyPrototypeId> requestedKey() const noexcept { return mRequestedKey; }
         constexpr std::optional<ItemStackId> requestedTool() const noexcept { return mRequestedTool; }
         constexpr std::optional<InventoryRevision> expectedInventoryRevision() const noexcept
-        { return mExpectedInventoryRevision; }
+        {
+            return mExpectedInventoryRevision;
+        }
         constexpr std::optional<CombatRevision> expectedCombatRevision() const noexcept
-        { return mExpectedCombatRevision; }
+        {
+            return mExpectedCombatRevision;
+        }
 
         friend bool operator==(
             const InteractiveObjectCommandProposal&, const InteractiveObjectCommandProposal&) noexcept = default;
@@ -150,10 +155,26 @@ namespace TES3MP
         {
         }
         constexpr const ClientMeleeAttackCommand& command() const noexcept { return mCommand; }
-        friend constexpr bool operator==(const MeleeAttackCommandProposal&,
-            const MeleeAttackCommandProposal&) noexcept = default;
+        friend constexpr bool operator==(const MeleeAttackCommandProposal&, const MeleeAttackCommandProposal&) noexcept
+            = default;
+
     private:
         ClientMeleeAttackCommand mCommand;
+    };
+
+    class MagicUseCommandProposal
+    {
+    public:
+        explicit MagicUseCommandProposal(ClientMagicUseCommand command) noexcept
+            : mCommand(std::move(command))
+        {
+        }
+        constexpr const ClientMagicUseCommand& command() const noexcept { return mCommand; }
+        friend constexpr bool operator==(const MagicUseCommandProposal&, const MagicUseCommandProposal&) noexcept
+            = default;
+
+    private:
+        ClientMagicUseCommand mCommand;
     };
 
     class DialogueChoiceCommandProposal
@@ -176,7 +197,9 @@ namespace TES3MP
     {
     public:
         constexpr explicit WaitRestCommandProposal(WaitRestRequest request) noexcept
-            : mRequest(request) {}
+            : mRequest(request)
+        {
+        }
 
         constexpr WaitRestRequest request() const noexcept { return mRequest; }
         friend constexpr bool operator==(WaitRestCommandProposal, WaitRestCommandProposal) noexcept = default;
@@ -187,7 +210,7 @@ namespace TES3MP
 
     using ServerCommandPayload = std::variant<PlayerMotionCommandProposal, CellTransitionCommandProposal,
         PlayerLocomotionCommandProposal, InteractiveObjectCommandProposal, InventoryCommandProposal,
-        MeleeAttackCommandProposal, DialogueChoiceCommandProposal, WaitRestCommandProposal>;
+        MeleeAttackCommandProposal, MagicUseCommandProposal, DialogueChoiceCommandProposal, WaitRestCommandProposal>;
 
     class ServerCommandProposal
     {
@@ -220,6 +243,19 @@ namespace TES3MP
 
         ServerCommandProposal(SessionId sessionId, SessionGeneration sessionGeneration, CommandSequence commandSequence,
             CommandId commandId, CanonicalRevision observedCanonicalRevision, EntityPrecondition entityPrecondition,
+            MagicUseCommandProposal magic) noexcept
+            : mSessionId(sessionId)
+            , mSessionGeneration(sessionGeneration)
+            , mCommandSequence(commandSequence)
+            , mCommandId(commandId)
+            , mObservedCanonicalRevision(observedCanonicalRevision)
+            , mEntityPrecondition(entityPrecondition)
+            , mPayload(std::move(magic))
+        {
+        }
+
+        ServerCommandProposal(SessionId sessionId, SessionGeneration sessionGeneration, CommandSequence commandSequence,
+            CommandId commandId, CanonicalRevision observedCanonicalRevision, EntityPrecondition entityPrecondition,
             InventoryCommandProposal inventory) noexcept
             : mSessionId(sessionId)
             , mSessionGeneration(sessionGeneration)
@@ -234,9 +270,13 @@ namespace TES3MP
         ServerCommandProposal(SessionId sessionId, SessionGeneration sessionGeneration, CommandSequence commandSequence,
             CommandId commandId, CanonicalRevision observedCanonicalRevision, EntityPrecondition entityPrecondition,
             MeleeAttackCommandProposal melee) noexcept
-            : mSessionId(sessionId), mSessionGeneration(sessionGeneration), mCommandSequence(commandSequence),
-              mCommandId(commandId), mObservedCanonicalRevision(observedCanonicalRevision),
-              mEntityPrecondition(entityPrecondition), mPayload(std::move(melee))
+            : mSessionId(sessionId)
+            , mSessionGeneration(sessionGeneration)
+            , mCommandSequence(commandSequence)
+            , mCommandId(commandId)
+            , mObservedCanonicalRevision(observedCanonicalRevision)
+            , mEntityPrecondition(entityPrecondition)
+            , mPayload(std::move(melee))
         {
         }
 
@@ -252,7 +292,6 @@ namespace TES3MP
             , mPayload(dialogue)
         {
         }
-
 
         constexpr ServerCommandProposal(SessionId sessionId, SessionGeneration sessionGeneration,
             CommandSequence commandSequence, CommandId commandId, CanonicalRevision observedCanonicalRevision,

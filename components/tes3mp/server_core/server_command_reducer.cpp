@@ -503,10 +503,9 @@ namespace TES3MP
     std::optional<CanonicalCommandReducer::PreparedLifecycle> CanonicalCommandReducer::prepareDialogueChoice(
         PlayerId player, DialogueChoiceId choice, const CanonicalWorldState& world, ServerTick tick)
     {
-        if (tick < mCheckpointTick || !mStateVersion.next() || !mCanonicalRevision.next()
-            || !mState->findPlayer(player)
-            || std::ranges::none_of(mState->activeSessions(),
-                [&](const auto& session) { return session.playerId() == player; })
+        if (tick < mCheckpointTick || !mStateVersion.next() || !mCanonicalRevision.next() || !mState->findPlayer(player)
+            || std::ranges::none_of(
+                mState->activeSessions(), [&](const auto& session) { return session.playerId() == player; })
             || validateCanonicalDialogueChoice(world, player, choice))
             return std::nullopt;
         PreparedLifecycle prepared;
@@ -580,9 +579,9 @@ namespace TES3MP
     CanonicalSinkDeliveryReport CanonicalCommandReducer::publish(
         std::shared_ptr<CanonicalStatePublication> publication) noexcept
     {
-        if (publication->mChanges.empty() && publication->mJoinedSessions.empty()
-            && publication->mSpatialTicks.empty() && publication->mSessionLifecycle.empty()
-            && publication->mDialogueChoices.empty() && publication->mWeatherChanges.empty())
+        if (publication->mChanges.empty() && publication->mJoinedSessions.empty() && publication->mSpatialTicks.empty()
+            && publication->mSessionLifecycle.empty() && publication->mDialogueChoices.empty()
+            && publication->mWeatherChanges.empty())
             return {};
         publication->mStateVersion = mStateVersion;
         publication->mCheckpointTick = mCheckpointTick;
@@ -733,7 +732,10 @@ namespace TES3MP
         const bool hasMeleeAttack = std::ranges::any_of(commands, [](const StampedServerCommand& command) {
             return std::holds_alternative<MeleeAttackCommandProposal>(command.proposal().payload());
         });
-        if ((hasInventoryTransaction || hasObjectInteraction || hasMeleeAttack) && inventory != nullptr)
+        const bool hasMagicUse = std::ranges::any_of(commands, [](const StampedServerCommand& command) {
+            return std::holds_alternative<MagicUseCommandProposal>(command.proposal().payload());
+        });
+        if ((hasInventoryTransaction || hasObjectInteraction || hasMeleeAttack || hasMagicUse) && inventory != nullptr)
         {
             try
             {
@@ -746,7 +748,7 @@ namespace TES3MP
                 return prepared;
             }
         }
-        if ((hasMeleeAttack || hasInventoryTransaction || hasObjectInteraction) && combat != nullptr)
+        if ((hasMeleeAttack || hasMagicUse || hasInventoryTransaction || hasObjectInteraction) && combat != nullptr)
         {
             try
             {
@@ -981,85 +983,86 @@ namespace TES3MP
                                             }
                                             else
                                             {
-                                                auto interactionResult
-                                                = applyObjectInteractionToCandidate(*prepared.mInteractiveObjects,
-                                                    *objectCatalog, *prepared.mState, objectCommand, tick, validation);
-                                            objectInteractionOutcome = interactionResult.outcome;
-                                            disposition
-                                                = interactionResult.outcome.code == ObjectInteractionResultCode::Success
-                                                    || interactionResult.outcome.code
-                                                        == ObjectInteractionResultCode::TrapSprung
-                                                ? CommandDisposition::Applied
-                                                : CommandDisposition::ObjectInteractionRejected;
+                                                auto interactionResult = applyObjectInteractionToCandidate(
+                                                    *prepared.mInteractiveObjects, *objectCatalog, *prepared.mState,
+                                                    objectCommand, tick, validation);
+                                                objectInteractionOutcome = interactionResult.outcome;
+                                                disposition = interactionResult.outcome.code
+                                                            == ObjectInteractionResultCode::Success
+                                                        || interactionResult.outcome.code
+                                                            == ObjectInteractionResultCode::TrapSprung
+                                                    ? CommandDisposition::Applied
+                                                    : CommandDisposition::ObjectInteractionRejected;
 
-                                            bool acceptObjectMutation = interactionResult.worldChanged;
-                                            if (interactionResult.outcome.sprungTrap && directMagic)
-                                            {
-                                                if (!prepared.mCombat || !prepared.mInventory)
+                                                bool acceptObjectMutation = interactionResult.worldChanged;
+                                                if (interactionResult.outcome.sprungTrap && directMagic)
                                                 {
-                                                    acceptObjectMutation = false;
-                                                    disposition = CommandDisposition::ObjectInteractionRejected;
-                                                    objectInteractionOutcome->code
-                                                        = ObjectInteractionResultCode::InternalError;
-                                                }
-                                                else
-                                                {
-                                                    auto trap = prepareAuthoritativeTrapMagic(*prepared.mCombat,
-                                                        *prepared.mInventory, *directMagic, session->playerId(),
-                                                        *interactionResult.outcome.sprungTrap, tick);
-                                                    if (trap.disposition == AuthoritativeTrapMagicDisposition::Applied
-                                                        && trap.candidate)
-                                                        prepared.mCombat = std::move(*trap.candidate);
-                                                    else
+                                                    if (!prepared.mCombat || !prepared.mInventory)
                                                     {
                                                         acceptObjectMutation = false;
                                                         disposition = CommandDisposition::ObjectInteractionRejected;
                                                         objectInteractionOutcome->code
                                                             = ObjectInteractionResultCode::InternalError;
                                                     }
-                                                }
-                                            }
-                                            if (interactionResult.outcome.playerTeleport)
-                                            {
-                                                const auto& destination = *interactionResult.outcome.playerTeleport;
-                                                auto teleported
-                                                    = advanceCanonicalSpatialState(*player, tick, destination.transform,
-                                                        LinearVelocity3(0, 0, 0), replacementLocomotionMode);
-                                                if (const auto* value
-                                                    = std::get_if<CanonicalPlayerEntityState>(&teleported))
-                                                {
-                                                    playerReplacement = *value;
-                                                    playerStateChanged = true;
-                                                }
-                                                else
-                                                {
-                                                    acceptObjectMutation = false;
-                                                    playerReplacement.reset();
-                                                    playerStateChanged = false;
-                                                    if (std::get<SpatialAdvanceError>(teleported).code
-                                                        == SpatialAdvanceErrorCode::TickRegression)
+                                                    else
                                                     {
-                                                        disposition = CommandDisposition::SpatialTickRegression;
-                                                        objectInteractionOutcome->code
-                                                            = ObjectInteractionResultCode::TickRegression;
+                                                        auto trap = prepareAuthoritativeTrapMagic(*prepared.mCombat,
+                                                            *prepared.mInventory, *directMagic, session->playerId(),
+                                                            *interactionResult.outcome.sprungTrap, tick);
+                                                        if (trap.disposition
+                                                                == AuthoritativeTrapMagicDisposition::Applied
+                                                            && trap.candidate)
+                                                            prepared.mCombat = std::move(*trap.candidate);
+                                                        else
+                                                        {
+                                                            acceptObjectMutation = false;
+                                                            disposition = CommandDisposition::ObjectInteractionRejected;
+                                                            objectInteractionOutcome->code
+                                                                = ObjectInteractionResultCode::InternalError;
+                                                        }
+                                                    }
+                                                }
+                                                if (interactionResult.outcome.playerTeleport)
+                                                {
+                                                    const auto& destination = *interactionResult.outcome.playerTeleport;
+                                                    auto teleported = advanceCanonicalSpatialState(*player, tick,
+                                                        destination.transform, LinearVelocity3(0, 0, 0),
+                                                        replacementLocomotionMode);
+                                                    if (const auto* value
+                                                        = std::get_if<CanonicalPlayerEntityState>(&teleported))
+                                                    {
+                                                        playerReplacement = *value;
+                                                        playerStateChanged = true;
                                                     }
                                                     else
                                                     {
-                                                        disposition = CommandDisposition::EntityRevisionExhausted;
-                                                        objectInteractionOutcome->code
-                                                            = ObjectInteractionResultCode::RevisionExhausted;
+                                                        acceptObjectMutation = false;
+                                                        playerReplacement.reset();
+                                                        playerStateChanged = false;
+                                                        if (std::get<SpatialAdvanceError>(teleported).code
+                                                            == SpatialAdvanceErrorCode::TickRegression)
+                                                        {
+                                                            disposition = CommandDisposition::SpatialTickRegression;
+                                                            objectInteractionOutcome->code
+                                                                = ObjectInteractionResultCode::TickRegression;
+                                                        }
+                                                        else
+                                                        {
+                                                            disposition = CommandDisposition::EntityRevisionExhausted;
+                                                            objectInteractionOutcome->code
+                                                                = ObjectInteractionResultCode::RevisionExhausted;
+                                                        }
+                                                        objectInteractionOutcome->playerTeleport.reset();
                                                     }
-                                                    objectInteractionOutcome->playerTeleport.reset();
                                                 }
-                                            }
-                                            if (!acceptObjectMutation && interactionResult.previousState
-                                                && !restoreInteractiveObjectCandidate(
-                                                    *prepared.mInteractiveObjects, *interactionResult.previousState))
-                                            {
-                                                result.mError = CommandBatchReductionError::CandidateStateInvalid;
-                                                prepared.mPublication = std::move(publication);
-                                                return prepared;
-                                            }
+                                                if (!acceptObjectMutation && interactionResult.previousState
+                                                    && !restoreInteractiveObjectCandidate(*prepared.mInteractiveObjects,
+                                                        *interactionResult.previousState))
+                                                {
+                                                    result.mError = CommandBatchReductionError::CandidateStateInvalid;
+                                                    prepared.mPublication = std::move(publication);
+                                                    return prepared;
+                                                }
                                             }
                                         }
                                     }
@@ -1114,6 +1117,38 @@ namespace TES3MP
                                                     return prepared;
                                                 }
                                             }
+                                        }
+                                    }
+                                    else if (const auto* magicUse
+                                        = std::get_if<MagicUseCommandProposal>(&proposal.payload()))
+                                    {
+                                        requiresSpatialAdvance = false;
+                                        const auto& magicCommand = magicUse->command();
+                                        if (!prepared.mCombat || !prepared.mInventory || !actors || !directMagic)
+                                            disposition = CommandDisposition::CombatRejected;
+                                        else
+                                        {
+                                            const AuthoritativeMagicUse use{ session->playerId(),
+                                                magicCommand.sourceKind, magicCommand.sourceId, magicCommand.targetKind,
+                                                magicCommand.targetId, magicCommand.sourceServerTick,
+                                                magicCommand.expectedCasterRevision,
+                                                magicCommand.expectedTargetRevision,
+                                                magicCommand.expectedInventoryRevision };
+                                            auto magicResult = prepareAuthoritativeMagicUse(*prepared.mCombat,
+                                                *prepared.mInventory, *prepared.mState, *actors, *directMagic,
+                                                MagicUseAuthorityPolicy{}, tick, use);
+                                            if (magicResult.disposition == AuthoritativeMagicUseDisposition::Applied
+                                                && magicResult.candidate)
+                                            {
+                                                prepared.mCombat = std::move(*magicResult.candidate);
+                                                if (magicResult.candidateInventory)
+                                                    prepared.mInventory = std::move(*magicResult.candidateInventory);
+                                                if (magicResult.event)
+                                                    prepared.mMagicEvents.push_back(*magicResult.event);
+                                                disposition = CommandDisposition::Applied;
+                                            }
+                                            else
+                                                disposition = CommandDisposition::CombatRejected;
                                         }
                                     }
                                     else if (const auto* dialogue
@@ -1266,8 +1301,7 @@ namespace TES3MP
             if (const auto* dialogue
                 = std::get_if<DialogueChoiceCommandProposal>(&commands[index].proposal().payload()))
                 order.fields[6] = dialogue->choice().value();
-            if (const auto* waitRest
-                = std::get_if<WaitRestCommandProposal>(&commands[index].proposal().payload()))
+            if (const auto* waitRest = std::get_if<WaitRestCommandProposal>(&commands[index].proposal().payload()))
             {
                 order.fields[6] = waitRest->request().hours();
                 order.fields[7] = static_cast<std::uint8_t>(waitRest->request().mode());
@@ -1658,8 +1692,7 @@ namespace TES3MP
                         }
                     }
                 }
-                else if (const auto* factionCommand
-                    = std::get_if<ServerScriptSetFactionRankCommand>(&queued.payload()))
+                else if (const auto* factionCommand = std::get_if<ServerScriptSetFactionRankCommand>(&queued.payload()))
                 {
                     if (std::ranges::none_of(
                             players, [&](const auto& value) { return value.playerId() == factionCommand->player(); }))
@@ -1669,8 +1702,9 @@ namespace TES3MP
                     else
                     {
                         const auto& base = prepared.mWorld ? *prepared.mWorld : *world;
-                        auto changed = setCanonicalFactionRank(base, factionCommand->player(),
-                            factionCommand->faction(), factionCommand->expectedRevision(), factionCommand->rank(), tick);
+                        auto changed
+                            = setCanonicalFactionRank(base, factionCommand->player(), factionCommand->faction(),
+                                factionCommand->expectedRevision(), factionCommand->rank(), tick);
                         if (auto* next = std::get_if<CanonicalWorldState>(&changed))
                         {
                             disposition = ServerScriptCommandDisposition::Applied;
@@ -1743,8 +1777,7 @@ namespace TES3MP
                             disposition = ServerScriptCommandDisposition::FactionReputationRevisionMismatch;
                     }
                 }
-                else if (const auto* weatherCommand
-                    = std::get_if<ServerScriptSetWeatherCommand>(&queued.payload()))
+                else if (const auto* weatherCommand = std::get_if<ServerScriptSetWeatherCommand>(&queued.payload()))
                 {
                     if (!world)
                         disposition = ServerScriptCommandDisposition::UnknownWeatherRegion;
@@ -1921,10 +1954,10 @@ namespace TES3MP
     CanonicalCommandReducer::PreparedBatch CanonicalCommandReducer::prepareTick(const ServerTickCommandBatch& batch,
         CanonicalCommandWorlds worlds, std::span<const QueuedServerScriptCommand> scriptCommands)
     {
-        auto prepared = prepareCommands(batch, worlds.interactiveObjects, worlds.interactiveObjectCatalog,
-            worlds.inventory, worlds.itemCatalog, worlds.combat, worlds.actors, worlds.meleeWeapons,
-            worlds.meleeSettings, worlds.meleePolicy, worlds.meleeContact, worlds.directMagic,
-            worlds.securitySettings, worlds.world);
+        auto prepared
+            = prepareCommands(batch, worlds.interactiveObjects, worlds.interactiveObjectCatalog, worlds.inventory,
+                worlds.itemCatalog, worlds.combat, worlds.actors, worlds.meleeWeapons, worlds.meleeSettings,
+                worlds.meleePolicy, worlds.meleeContact, worlds.directMagic, worlds.securitySettings, worlds.world);
         return prepareTickState(prepareScriptCommands(std::move(prepared), batch, scriptCommands, worlds.world,
                                     worlds.globalCatalog, worlds.scriptState, worlds.scriptStateCatalog),
             batch);
@@ -2001,9 +2034,8 @@ namespace TES3MP
                             return false;
                         prepared.mCanonicalRevision = *nextRevision;
                     }
-                    prepared.mPublication->mWeatherChanges.push_back(
-                        { prepared.mStateVersion, world->weather()->regions[index].lastChangeTick,
-                            world->weather()->regions[index] });
+                    prepared.mPublication->mWeatherChanges.push_back({ prepared.mStateVersion,
+                        world->weather()->regions[index].lastChangeTick, world->weather()->regions[index] });
                 }
             }
             prepared.mWorld = std::move(*world);

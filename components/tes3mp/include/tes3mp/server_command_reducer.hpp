@@ -8,8 +8,8 @@
 #include "inventory_world.hpp"
 #include "movement_kernel.hpp"
 #include "observability.hpp"
-#include "server_scripting.hpp"
 #include "security.hpp"
+#include "server_scripting.hpp"
 
 #include <atomic>
 #include <cstdint>
@@ -143,6 +143,7 @@ namespace TES3MP
             const std::optional<CanonicalWorldState>& candidateWorld() const noexcept { return mWorld; }
             const std::optional<CanonicalScriptState>& candidateScriptState() const noexcept { return mScriptState; }
             std::span<const AuthoritativeMeleeEvent> combatEvents() const noexcept { return mCombatEvents; }
+            std::span<const AuthoritativeMagicUseEvent> magicEvents() const noexcept { return mMagicEvents; }
 
         private:
             friend class CanonicalCommandReducer;
@@ -168,6 +169,7 @@ namespace TES3MP
             std::optional<CanonicalScriptState> mBaseScriptState;
             std::optional<CanonicalScriptState> mScriptState;
             std::vector<AuthoritativeMeleeEvent> mCombatEvents;
+            std::vector<AuthoritativeMagicUseEvent> mMagicEvents;
             std::vector<PlayerId> mClientAuthoritativePlayers;
             std::vector<DurableCommandOrder> mDurableCommands;
         };

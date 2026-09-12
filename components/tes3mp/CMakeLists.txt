@@ -85,6 +85,7 @@ target_sources(tes3mp_protocol PRIVATE
     include/tes3mp/inventory_replication.hpp
     include/tes3mp/item_catalog.hpp
     include/tes3mp/melee_combat.hpp
+    include/tes3mp/magic_use.hpp
     include/tes3mp/protocol_envelope.hpp
     include/tes3mp/protocol_exchange.hpp
     include/tes3mp/protocol_handshake.hpp
@@ -106,6 +107,7 @@ target_sources(tes3mp_protocol PRIVATE
     protocol/generated/client_interact_object_command_generated.h
     protocol/generated/client_inventory_transaction_command_generated.h
     protocol/generated/client_melee_attack_command_generated.h
+    protocol/generated/client_magic_use_command_generated.h
     protocol/generated/client_vr_pose_sample_generated.h
     protocol/generated/latest_wins_snapshot_generated.h
     protocol/generated/latest_wins_actor_snapshot_generated.h
@@ -141,6 +143,7 @@ target_sources(tes3mp_protocol PRIVATE
     protocol/inventory_replication.cpp
     protocol/item_catalog.cpp
     protocol/melee_combat.cpp
+    protocol/magic_use.cpp
     protocol/protocol_exchange.cpp
     protocol/protocol_handshake.cpp
     protocol/protocol_frame.cpp

@@ -145,8 +145,8 @@ namespace TES3MP::ServerApp
         for (const auto& [connection, delivery] : inventoryBaselines)
         {
             (void)connection;
-            frameCount += delivery.playerInventory.size() + delivery.containers.size()
-                + delivery.groundItems.size() + 1;
+            frameCount
+                += delivery.playerInventory.size() + delivery.containers.size() + delivery.groundItems.size() + 1;
         }
         frames.reserve(frameCount);
         messages.reserve(frameCount);
@@ -192,7 +192,7 @@ namespace TES3MP::ServerApp
                     MessageKind::LatestWinsCombatSnapshot, encodeLatestWinsCombatSnapshot(view)))
                 return false;
         for (const auto& [connection, events] : combatEvents)
-            if (!events.events().empty()
+            if ((!events.events().empty() || !events.actorEvents().empty() || !events.magicEvents().empty())
                 && !add(connection, TransportChannel::ReliableOrdered, MessageClass::ReliableOperation,
                     MessageKind::ReliableCombatEventBatch, encodeReliableCombatEventBatch(events)))
                 return false;

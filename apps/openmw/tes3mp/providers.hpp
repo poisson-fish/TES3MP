@@ -7,6 +7,7 @@
 #include <tes3mp/combat_replication.hpp>
 #include <tes3mp/interactive_object_replication.hpp>
 #include <tes3mp/inventory_replication.hpp>
+#include <tes3mp/magic_use.hpp>
 #include <tes3mp/protocol_exchange.hpp>
 #include <tes3mp/protocol_pose.hpp>
 #include <tes3mp/world_state.hpp>
@@ -108,6 +109,18 @@ namespace TES3MP::OpenMWAdapter
         float attackStrength = 0.f;
     };
 
+    struct MagicUseCapture
+    {
+        MagicUseSourceKind sourceKind = MagicUseSourceKind::Spell;
+        std::uint64_t sourceId = 0;
+        MagicUseTargetKind targetKind = MagicUseTargetKind::Self;
+        std::uint64_t targetId = 0;
+        ServerTick sourceTick = ServerTick::initial();
+        CombatRevision expectedCasterRevision = CombatRevision::initial();
+        CombatRevision expectedTargetRevision = CombatRevision::initial();
+        InventoryRevision expectedInventoryRevision = InventoryRevision::initial();
+    };
+
     class SemanticInputProvider
     {
     public:
@@ -120,6 +133,7 @@ namespace TES3MP::OpenMWAdapter
             return std::nullopt;
         }
         virtual std::optional<MeleeAttackCapture> captureMeleeAttack() noexcept { return std::nullopt; }
+        virtual std::optional<MagicUseCapture> captureMagicUse() noexcept { return std::nullopt; }
         virtual std::optional<DialogueChoiceId> mapDialogueChoice(int) const noexcept { return std::nullopt; }
         virtual void clearSessionState() noexcept {}
     };

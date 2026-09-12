@@ -23,6 +23,8 @@ struct CombatSnapshotHeaderBuilder;
 
 struct ActorCombatSnapshot;
 
+struct PlayerCombatSnapshot;
+
 struct CombatSkillSnapshot;
 
 struct LatestWinsCombatSnapshot;
@@ -36,6 +38,8 @@ FLATBUFFERS_MANUALLY_ALIGNED_STRUCT(8) ActorCombatSnapshot FLATBUFFERS_FINAL_CLA
   float maximum_health_;
   float fatigue_;
   float maximum_fatigue_;
+  float magicka_;
+  float maximum_magicka_;
   uint8_t dead_;
   int8_t padding0__;  int16_t padding1__;  int32_t padding2__;
 
@@ -47,6 +51,8 @@ FLATBUFFERS_MANUALLY_ALIGNED_STRUCT(8) ActorCombatSnapshot FLATBUFFERS_FINAL_CLA
         maximum_health_(0),
         fatigue_(0),
         maximum_fatigue_(0),
+        magicka_(0),
+        maximum_magicka_(0),
         dead_(0),
         padding0__(0),
         padding1__(0),
@@ -55,13 +61,15 @@ FLATBUFFERS_MANUALLY_ALIGNED_STRUCT(8) ActorCombatSnapshot FLATBUFFERS_FINAL_CLA
     (void)padding1__;
     (void)padding2__;
   }
-  ActorCombatSnapshot(uint64_t _actor_id, uint64_t _combat_revision, float _health, float _maximum_health, float _fatigue, float _maximum_fatigue, bool _dead)
+  ActorCombatSnapshot(uint64_t _actor_id, uint64_t _combat_revision, float _health, float _maximum_health, float _fatigue, float _maximum_fatigue, float _magicka, float _maximum_magicka, bool _dead)
       : actor_id_(::flatbuffers::EndianScalar(_actor_id)),
         combat_revision_(::flatbuffers::EndianScalar(_combat_revision)),
         health_(::flatbuffers::EndianScalar(_health)),
         maximum_health_(::flatbuffers::EndianScalar(_maximum_health)),
         fatigue_(::flatbuffers::EndianScalar(_fatigue)),
         maximum_fatigue_(::flatbuffers::EndianScalar(_maximum_fatigue)),
+        magicka_(::flatbuffers::EndianScalar(_magicka)),
+        maximum_magicka_(::flatbuffers::EndianScalar(_maximum_magicka)),
         dead_(::flatbuffers::EndianScalar(static_cast<uint8_t>(_dead))),
         padding0__(0),
         padding1__(0),
@@ -88,11 +96,95 @@ FLATBUFFERS_MANUALLY_ALIGNED_STRUCT(8) ActorCombatSnapshot FLATBUFFERS_FINAL_CLA
   float maximum_fatigue() const {
     return ::flatbuffers::EndianScalar(maximum_fatigue_);
   }
+  float magicka() const {
+    return ::flatbuffers::EndianScalar(magicka_);
+  }
+  float maximum_magicka() const {
+    return ::flatbuffers::EndianScalar(maximum_magicka_);
+  }
   bool dead() const {
     return ::flatbuffers::EndianScalar(dead_) != 0;
   }
 };
-FLATBUFFERS_STRUCT_END(ActorCombatSnapshot, 40);
+FLATBUFFERS_STRUCT_END(ActorCombatSnapshot, 48);
+
+FLATBUFFERS_MANUALLY_ALIGNED_STRUCT(8) PlayerCombatSnapshot FLATBUFFERS_FINAL_CLASS {
+ private:
+  uint64_t player_id_;
+  uint64_t combat_revision_;
+  float health_;
+  float maximum_health_;
+  float fatigue_;
+  float maximum_fatigue_;
+  float magicka_;
+  float maximum_magicka_;
+  uint8_t dead_;
+  int8_t padding0__;  int16_t padding1__;  int32_t padding2__;
+
+ public:
+  PlayerCombatSnapshot()
+      : player_id_(0),
+        combat_revision_(0),
+        health_(0),
+        maximum_health_(0),
+        fatigue_(0),
+        maximum_fatigue_(0),
+        magicka_(0),
+        maximum_magicka_(0),
+        dead_(0),
+        padding0__(0),
+        padding1__(0),
+        padding2__(0) {
+    (void)padding0__;
+    (void)padding1__;
+    (void)padding2__;
+  }
+  PlayerCombatSnapshot(uint64_t _player_id, uint64_t _combat_revision, float _health, float _maximum_health, float _fatigue, float _maximum_fatigue, float _magicka, float _maximum_magicka, bool _dead)
+      : player_id_(::flatbuffers::EndianScalar(_player_id)),
+        combat_revision_(::flatbuffers::EndianScalar(_combat_revision)),
+        health_(::flatbuffers::EndianScalar(_health)),
+        maximum_health_(::flatbuffers::EndianScalar(_maximum_health)),
+        fatigue_(::flatbuffers::EndianScalar(_fatigue)),
+        maximum_fatigue_(::flatbuffers::EndianScalar(_maximum_fatigue)),
+        magicka_(::flatbuffers::EndianScalar(_magicka)),
+        maximum_magicka_(::flatbuffers::EndianScalar(_maximum_magicka)),
+        dead_(::flatbuffers::EndianScalar(static_cast<uint8_t>(_dead))),
+        padding0__(0),
+        padding1__(0),
+        padding2__(0) {
+    (void)padding0__;
+    (void)padding1__;
+    (void)padding2__;
+  }
+  uint64_t player_id() const {
+    return ::flatbuffers::EndianScalar(player_id_);
+  }
+  uint64_t combat_revision() const {
+    return ::flatbuffers::EndianScalar(combat_revision_);
+  }
+  float health() const {
+    return ::flatbuffers::EndianScalar(health_);
+  }
+  float maximum_health() const {
+    return ::flatbuffers::EndianScalar(maximum_health_);
+  }
+  float fatigue() const {
+    return ::flatbuffers::EndianScalar(fatigue_);
+  }
+  float maximum_fatigue() const {
+    return ::flatbuffers::EndianScalar(maximum_fatigue_);
+  }
+  float magicka() const {
+    return ::flatbuffers::EndianScalar(magicka_);
+  }
+  float maximum_magicka() const {
+    return ::flatbuffers::EndianScalar(maximum_magicka_);
+  }
+  bool dead() const {
+    return ::flatbuffers::EndianScalar(dead_) != 0;
+  }
+};
+FLATBUFFERS_STRUCT_END(PlayerCombatSnapshot, 48);
 
 FLATBUFFERS_MANUALLY_ALIGNED_STRUCT(4) CombatSkillSnapshot FLATBUFFERS_FINAL_CLASS {
  private:
@@ -299,7 +391,8 @@ struct LatestWinsCombatSnapshot FLATBUFFERS_FINAL_CLASS : private ::flatbuffers:
   enum FlatBuffersVTableOffset FLATBUFFERS_VTABLE_UNDERLYING_TYPE {
     VT_HEADER = 4,
     VT_ACTORS = 6,
-    VT_SELF_SKILLS = 8
+    VT_SELF_SKILLS = 8,
+    VT_PLAYERS = 10
   };
   const TES3MP::Protocol::Schema::CombatSnapshot::CombatSnapshotHeader *header() const {
     return GetPointer<const TES3MP::Protocol::Schema::CombatSnapshot::CombatSnapshotHeader *>(VT_HEADER);
@@ -310,6 +403,9 @@ struct LatestWinsCombatSnapshot FLATBUFFERS_FINAL_CLASS : private ::flatbuffers:
   const ::flatbuffers::Vector<const TES3MP::Protocol::Schema::CombatSnapshot::CombatSkillSnapshot *> *self_skills() const {
     return GetPointer<const ::flatbuffers::Vector<const TES3MP::Protocol::Schema::CombatSnapshot::CombatSkillSnapshot *> *>(VT_SELF_SKILLS);
   }
+  const ::flatbuffers::Vector<const TES3MP::Protocol::Schema::CombatSnapshot::PlayerCombatSnapshot *> *players() const {
+    return GetPointer<const ::flatbuffers::Vector<const TES3MP::Protocol::Schema::CombatSnapshot::PlayerCombatSnapshot *> *>(VT_PLAYERS);
+  }
   template <bool B = false>
   bool Verify(::flatbuffers::VerifierTemplate<B> &verifier) const {
     return VerifyTableStart(verifier) &&
@@ -319,6 +415,8 @@ struct LatestWinsCombatSnapshot FLATBUFFERS_FINAL_CLASS : private ::flatbuffers:
            verifier.VerifyVector(actors()) &&
            VerifyOffset(verifier, VT_SELF_SKILLS) &&
            verifier.VerifyVector(self_skills()) &&
+           VerifyOffset(verifier, VT_PLAYERS) &&
+           verifier.VerifyVector(players()) &&
            verifier.EndTable();
   }
 };
@@ -336,6 +434,9 @@ struct LatestWinsCombatSnapshotBuilder {
   void add_self_skills(::flatbuffers::Offset<::flatbuffers::Vector<const TES3MP::Protocol::Schema::CombatSnapshot::CombatSkillSnapshot *>> self_skills) {
     fbb_.AddOffset(LatestWinsCombatSnapshot::VT_SELF_SKILLS, self_skills);
   }
+  void add_players(::flatbuffers::Offset<::flatbuffers::Vector<const TES3MP::Protocol::Schema::CombatSnapshot::PlayerCombatSnapshot *>> players) {
+    fbb_.AddOffset(LatestWinsCombatSnapshot::VT_PLAYERS, players);
+  }
   explicit LatestWinsCombatSnapshotBuilder(::flatbuffers::FlatBufferBuilder &_fbb)
         : fbb_(_fbb) {
     start_ = fbb_.StartTable();
@@ -351,8 +452,10 @@ inline ::flatbuffers::Offset<LatestWinsCombatSnapshot> CreateLatestWinsCombatSna
     ::flatbuffers::FlatBufferBuilder &_fbb,
     ::flatbuffers::Offset<TES3MP::Protocol::Schema::CombatSnapshot::CombatSnapshotHeader> header = 0,
     ::flatbuffers::Offset<::flatbuffers::Vector<const TES3MP::Protocol::Schema::CombatSnapshot::ActorCombatSnapshot *>> actors = 0,
-    ::flatbuffers::Offset<::flatbuffers::Vector<const TES3MP::Protocol::Schema::CombatSnapshot::CombatSkillSnapshot *>> self_skills = 0) {
+    ::flatbuffers::Offset<::flatbuffers::Vector<const TES3MP::Protocol::Schema::CombatSnapshot::CombatSkillSnapshot *>> self_skills = 0,
+    ::flatbuffers::Offset<::flatbuffers::Vector<const TES3MP::Protocol::Schema::CombatSnapshot::PlayerCombatSnapshot *>> players = 0) {
   LatestWinsCombatSnapshotBuilder builder_(_fbb);
+  builder_.add_players(players);
   builder_.add_self_skills(self_skills);
   builder_.add_actors(actors);
   builder_.add_header(header);
@@ -363,14 +466,17 @@ inline ::flatbuffers::Offset<LatestWinsCombatSnapshot> CreateLatestWinsCombatSna
     ::flatbuffers::FlatBufferBuilder &_fbb,
     ::flatbuffers::Offset<TES3MP::Protocol::Schema::CombatSnapshot::CombatSnapshotHeader> header = 0,
     const std::vector<TES3MP::Protocol::Schema::CombatSnapshot::ActorCombatSnapshot> *actors = nullptr,
-    const std::vector<TES3MP::Protocol::Schema::CombatSnapshot::CombatSkillSnapshot> *self_skills = nullptr) {
+    const std::vector<TES3MP::Protocol::Schema::CombatSnapshot::CombatSkillSnapshot> *self_skills = nullptr,
+    const std::vector<TES3MP::Protocol::Schema::CombatSnapshot::PlayerCombatSnapshot> *players = nullptr) {
   auto actors__ = actors ? _fbb.CreateVectorOfStructs<TES3MP::Protocol::Schema::CombatSnapshot::ActorCombatSnapshot>(*actors) : 0;
   auto self_skills__ = self_skills ? _fbb.CreateVectorOfStructs<TES3MP::Protocol::Schema::CombatSnapshot::CombatSkillSnapshot>(*self_skills) : 0;
+  auto players__ = players ? _fbb.CreateVectorOfStructs<TES3MP::Protocol::Schema::CombatSnapshot::PlayerCombatSnapshot>(*players) : 0;
   return TES3MP::Protocol::Schema::CombatSnapshot::CreateLatestWinsCombatSnapshot(
       _fbb,
       header,
       actors__,
-      self_skills__);
+      self_skills__,
+      players__);
 }
 
 inline const TES3MP::Protocol::Schema::CombatSnapshot::LatestWinsCombatSnapshot *GetLatestWinsCombatSnapshot(const void *buf) {

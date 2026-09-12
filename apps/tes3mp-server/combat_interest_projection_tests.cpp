@@ -1,36 +1,39 @@
-#include "combat_interest_projection.hpp"
 #include "actor_interest_projection.hpp"
+#include "combat_interest_projection.hpp"
 
 #include <array>
-#include <vector>
 #include <variant>
+#include <vector>
 
 namespace
 {
     using namespace TES3MP;
-    template <class T> T id(std::uint64_t value) { return *T::fromValue(value); }
+    template <class T>
+    T id(std::uint64_t value)
+    {
+        return *T::fromValue(value);
+    }
     Transform root(std::uint64_t cell)
     {
         const auto zero = Turn32::fromValue(0);
-        return Transform(CellId::interior(id<CellSpaceId>(cell)), Position3(0, 0, 0),
-            Orientation3(zero, zero, zero));
+        return Transform(CellId::interior(id<CellSpaceId>(cell)), Position3(0, 0, 0), Orientation3(zero, zero, zero));
     }
 
     bool combat_projection_is_private_and_cell_scoped()
     {
-        const std::array players{ CanonicalPlayerEntityState(id<PlayerId>(1), id<EntityId>(10),
-            id<AppearanceId>(1), root(7), LinearVelocity3(0, 0, 0), EntityRevision::initial(),
-            AuthorityEpoch::initial(), ServerTick::initial()) };
-        const std::array sessions{ CanonicalSessionProgress(id<SessionId>(2), SessionGeneration::initial(),
-            id<PlayerId>(1), id<EntityId>(10), std::nullopt) };
+        const std::array players{ CanonicalPlayerEntityState(id<PlayerId>(1), id<EntityId>(10), id<AppearanceId>(1),
+            root(7), LinearVelocity3(0, 0, 0), EntityRevision::initial(), AuthorityEpoch::initial(),
+            ServerTick::initial()) };
+        const std::array sessions{ CanonicalSessionProgress(
+            id<SessionId>(2), SessionGeneration::initial(), id<PlayerId>(1), id<EntityId>(10), std::nullopt) };
         const auto canonical = std::get<CanonicalServerState>(createCanonicalServerState(players, sessions));
-        const std::array actorStates{
-            CanonicalActorEntityState(id<ActorId>(3), id<EntityId>(30), id<ActorPrototypeId>(1), root(7),
-                LinearVelocity3(0, 0, 0), EntityRevision::initial(), AuthorityEpoch::initial(),
-                ServerTick::initial(), ActorActivity::Idle, 0),
+        const std::array actorStates{ CanonicalActorEntityState(id<ActorId>(3), id<EntityId>(30),
+                                          id<ActorPrototypeId>(1), root(7), LinearVelocity3(0, 0, 0),
+                                          EntityRevision::initial(), AuthorityEpoch::initial(), ServerTick::initial(),
+                                          ActorActivity::Idle, 0),
             CanonicalActorEntityState(id<ActorId>(4), id<EntityId>(40), id<ActorPrototypeId>(1), root(8),
-                LinearVelocity3(0, 0, 0), EntityRevision::initial(), AuthorityEpoch::initial(),
-                ServerTick::initial(), ActorActivity::Idle, 0) };
+                LinearVelocity3(0, 0, 0), EntityRevision::initial(), AuthorityEpoch::initial(), ServerTick::initial(),
+                ActorActivity::Idle, 0) };
         const auto spatial = std::get<CanonicalActorWorld>(createCanonicalActorWorld(actorStates));
         OpenMwMeleeAttacker attacker;
         attacker.fatigue = 75.f;
@@ -38,9 +41,13 @@ namespace
         playerVictim.health = 60.f;
         playerVictim.fatigue = 75.f;
         CanonicalPlayerCombatState combatPlayer{ .playerId = id<PlayerId>(1),
-            .revision = id<CombatRevision>(5), .stats = attacker, .maximumEncumbranceWeightUnits = 100,
-            .victim = playerVictim, .respawnVictim = playerVictim,
-            .maximumHealth = 80.f, .maximumFatigue = 100.f };
+            .revision = id<CombatRevision>(5),
+            .stats = attacker,
+            .maximumEncumbranceWeightUnits = 100,
+            .victim = playerVictim,
+            .respawnVictim = playerVictim,
+            .maximumHealth = 80.f,
+            .maximumFatigue = 100.f };
         combatPlayer.magicka = 40.f;
         combatPlayer.maximumMagicka = 50.f;
         combatPlayer.blockSkill = 15.f;
@@ -54,41 +61,42 @@ namespace
         first.health = 40.f;
         OpenMwMeleeVictim second;
         second.health = 90.f;
-        const std::array combatActors{
-            CanonicalActorCombatState{ .actorId = id<ActorId>(3), .revision = id<CombatRevision>(6),
-                .stats = first, .respawnStats = first, .maximumHealth = 50.f, .maximumFatigue = 0.f },
-            CanonicalActorCombatState{ .actorId = id<ActorId>(4), .revision = id<CombatRevision>(7),
-                .stats = second, .respawnStats = second, .maximumHealth = 100.f, .maximumFatigue = 0.f } };
+        const std::array combatActors{ CanonicalActorCombatState{ .actorId = id<ActorId>(3),
+                                           .revision = id<CombatRevision>(6),
+                                           .stats = first,
+                                           .respawnStats = first,
+                                           .maximumHealth = 50.f,
+                                           .maximumFatigue = 0.f },
+            CanonicalActorCombatState{ .actorId = id<ActorId>(4),
+                .revision = id<CombatRevision>(7),
+                .stats = second,
+                .respawnStats = second,
+                .maximumHealth = 100.f,
+                .maximumFatigue = 0.f } };
         const auto random = Xoshiro256StarStar::fromWorldSeed(1, *RandomStreamKey::fromValues(1, 1)).snapshot();
-        const auto combat = std::get<CanonicalCombatWorld>(
-            createCanonicalCombatWorld(combatPlayers, combatActors, random));
+        const auto combat
+            = std::get<CanonicalCombatWorld>(createCanonicalCombatWorld(combatPlayers, combatActors, random));
         const AuthoritativeMeleeEvent visibleEvent{ id<ServerTick>(9), id<PlayerId>(1), id<ActorId>(3),
             id<CombatRevision>(5), id<CombatRevision>(6), OpenMwMeleeResolution{ .damage = 10.f, .hit = true } };
         const AuthoritativeMeleeEvent hiddenEvent{ id<ServerTick>(9), id<PlayerId>(1), id<ActorId>(4),
             id<CombatRevision>(5), id<CombatRevision>(7), OpenMwMeleeResolution{ .damage = 5.f, .hit = true } };
         const std::array events{ visibleEvent, hiddenEvent };
-        const std::array actorEvents{ AuthoritativeActorMeleeEvent{ id<ServerTick>(9), id<ActorId>(3),
-            id<PlayerId>(1), id<CombatRevision>(8), id<CombatRevision>(9),
-            OpenMwMeleeResolution{ .damage = 4.f, .hit = true } } };
-        auto snapshot = TES3MP::ServerApp::projectCombatSnapshot(canonical, spatial, combat, id<SessionId>(2),
-            id<ServerTick>(9), id<CanonicalRevision>(4));
-        auto batch = TES3MP::ServerApp::projectCombatEvents(canonical, spatial, id<SessionId>(2),
-            id<ServerTick>(9), id<CanonicalRevision>(4), events, actorEvents);
+        const std::array actorEvents{ AuthoritativeActorMeleeEvent{ id<ServerTick>(9), id<ActorId>(3), id<PlayerId>(1),
+            id<CombatRevision>(8), id<CombatRevision>(9), OpenMwMeleeResolution{ .damage = 4.f, .hit = true } } };
+        auto snapshot = TES3MP::ServerApp::projectCombatSnapshot(
+            canonical, spatial, combat, id<SessionId>(2), id<ServerTick>(9), id<CanonicalRevision>(4));
+        auto batch = TES3MP::ServerApp::projectCombatEvents(
+            canonical, spatial, id<SessionId>(2), id<ServerTick>(9), id<CanonicalRevision>(4), events, actorEvents);
         return snapshot && snapshot->selfPlayerId() == id<PlayerId>(1) && snapshot->selfHealth() == 60.f
             && snapshot->selfMaximumHealth() == 80.f && snapshot->selfFatigue() == 75.f
             && snapshot->selfMaximumFatigue() == 100.f && snapshot->selfMagicka() == 40.f
-            && snapshot->selfMaximumMagicka() == 50.f
-            && snapshot->selfSkills().size() == ReplicatedCombatSkillCount
+            && snapshot->selfMaximumMagicka() == 50.f && snapshot->selfSkills().size() == ReplicatedCombatSkillCount
             && snapshot->selfSkills()[0] == CombatSkillSnapshot{ ReplicatedCombatSkill::Block, 15.f, 0.25f }
-            && snapshot->selfSkills()[10]
-                == CombatSkillSnapshot{ ReplicatedCombatSkill::Unarmored, 24.f, 0.75f }
-            && snapshot->selfSkills()[11]
-                == CombatSkillSnapshot{ ReplicatedCombatSkill::Security, 42.f, 0.5f }
-            && !snapshot->selfDead()
-            && snapshot->actors().size() == 1 && snapshot->actors()[0].actorId == id<ActorId>(3)
-            && snapshot->actors()[0].maximumHealth == 50.f
-            && batch && batch->events().size() == 1 && batch->events()[0].targetActorId == id<ActorId>(3)
-            && batch->actorEvents().size() == 1
+        && snapshot->selfSkills()[10] == CombatSkillSnapshot{ ReplicatedCombatSkill::Unarmored, 24.f, 0.75f }
+        && snapshot->selfSkills()[11] == CombatSkillSnapshot{ ReplicatedCombatSkill::Security, 42.f, 0.5f }
+        && !snapshot->selfDead() && snapshot->actors().size() == 1 && snapshot->actors()[0].actorId == id<ActorId>(3)
+            && snapshot->actors()[0].maximumHealth == 50.f && batch && batch->events().size() == 1
+            && batch->events()[0].targetActorId == id<ActorId>(3) && batch->actorEvents().size() == 1
             && batch->actorEvents()[0].attackerActorId == id<ActorId>(3);
     }
 
@@ -121,10 +129,9 @@ namespace
         const ReliableDialogueChoiceResult result{ id<SessionId>(2), SessionGeneration::initial(),
             CommandSequence::initial(), id<CommandId>(1), id<DialogueChoiceId>(40),
             DialogueChoiceDisposition::Ineligible, false, id<CanonicalRevision>(3) };
-        const std::vector<std::pair<TransportConnectionId, ReliableDialogueChoiceResult>> delivery{
-            { connection, result } };
-        if (!ServerApp::admitCombinedInterestTickAtomically(
-                queues, {}, {}, {}, {}, {}, {}, {}, {}, delivery))
+        const std::vector<std::pair<TransportConnectionId, ReliableDialogueChoiceResult>> delivery{ { connection,
+            result } };
+        if (!ServerApp::admitCombinedInterestTickAtomically(queues, {}, {}, {}, {}, {}, {}, {}, {}, delivery))
             return false;
         RecordingTransport transport;
         if (queues.pump(transport, connection, 0) != OutboundPumpResult::Progress || transport.sent.size() != 1)
@@ -144,11 +151,45 @@ namespace
             return false;
         return queues.hasPending(connection) == std::optional<bool>(true);
     }
+
+    bool magic_only_combat_batch_is_admitted()
+    {
+        const auto policy = *OutboundQueuePolicy::create(1, 4096, 1, 1, 1, 1, 1, 1, 8, 250);
+        const auto connection = TransportConnectionId::initial();
+        auto queues = *OutboundQueueSet::create(policy, 1);
+        if (queues.attach(connection) != TransportResult::Accepted)
+            return false;
+        const std::array magicEvents{ MagicUseCombatEvent{ id<PlayerId>(1), MagicUseSourceKind::EnchantedItem, 3,
+            MagicUseTargetKind::Actor, 4, id<CombatRevision>(5), id<CombatRevision>(6), true, 0.f, 0.f, 0.f, 0.f, -9.f,
+            0.f, false } };
+        auto created = ReliableCombatEventBatch::create(id<SessionId>(2), SessionGeneration::initial(),
+            id<ServerTick>(7), id<CanonicalRevision>(8), {}, {}, magicEvents);
+        const auto* batch = std::get_if<ReliableCombatEventBatch>(&created);
+        if (!batch)
+            return false;
+        const std::vector<std::pair<TransportConnectionId, ReliableCombatEventBatch>> delivery{ { connection,
+            *batch } };
+        if (!ServerApp::admitCombinedInterestTickAtomically(queues, {}, {}, {}, {}, {}, {}, {}, delivery))
+            return false;
+        RecordingTransport transport;
+        if (queues.pump(transport, connection, 0) != OutboundPumpResult::Progress || transport.sent.size() != 1)
+            return false;
+        const auto frame = decodeProtocolFrame(transport.sent.front().bytes);
+        const auto* decodedFrame = std::get_if<DecodedFrame>(&frame);
+        const auto decoded = decodedFrame
+            ? decodeReliableCombatEventBatch(decodedFrame->payload())
+            : ReliableCombatEventBatch::create(
+                  id<SessionId>(2), SessionGeneration::initial(), id<ServerTick>(7), id<CanonicalRevision>(8), {});
+        const auto* decodedBatch = std::get_if<ReliableCombatEventBatch>(&decoded);
+        return decodedFrame && decodedFrame->messageKind() == MessageKind::ReliableCombatEventBatch && decodedBatch
+            && decodedBatch->magicEvents().size() == 1 && decodedBatch->magicEvents()[0] == magicEvents[0];
+    }
 }
 
 int main()
 {
     return combat_projection_is_private_and_cell_scoped()
-            && dialogue_result_admission_is_typed_atomic_and_backpressured()
-        ? 0 : 1;
+            && dialogue_result_admission_is_typed_atomic_and_backpressured() && magic_only_combat_batch_is_admitted()
+        ? 0
+        : 1;
 }

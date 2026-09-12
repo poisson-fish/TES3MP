@@ -7,6 +7,7 @@
 #include "deterministic_random.hpp"
 #include "direct_magic.hpp"
 #include "inventory_world.hpp"
+#include "magic_use.hpp"
 #include "melee_combat.hpp"
 #include "wait_rest.hpp"
 
@@ -38,7 +39,14 @@ namespace TES3MP
         HeavyArmor = 9,
         Unarmored = 10,
         Security = 11,
-        Count = 12,
+        Alteration = 12,
+        Conjuration = 13,
+        Destruction = 14,
+        Illusion = 15,
+        Mysticism = 16,
+        Restoration = 17,
+        Enchant = 18,
+        Count = 19,
     };
 
     struct CombatSkillProgressionRule
@@ -46,8 +54,7 @@ namespace TES3MP
         ClassSpecialization specialization = ClassSpecialization::Combat;
         float useGain = 0.f;
 
-        friend constexpr bool operator==(CombatSkillProgressionRule,
-            CombatSkillProgressionRule) noexcept = default;
+        friend constexpr bool operator==(CombatSkillProgressionRule, CombatSkillProgressionRule) noexcept = default;
     };
 
     struct CombatSkillProgressionState
@@ -55,8 +62,7 @@ namespace TES3MP
         float progress = 0.f;
         float requirementFactor = 1.f;
 
-        friend constexpr bool operator==(CombatSkillProgressionState,
-            CombatSkillProgressionState) noexcept = default;
+        friend constexpr bool operator==(CombatSkillProgressionState, CombatSkillProgressionState) noexcept = default;
     };
 
     struct CombatSkillProgressionSettings
@@ -66,8 +72,8 @@ namespace TES3MP
         float majorFactor = 1.f;
         float specializationFactor = 1.f;
 
-        friend constexpr bool operator==(CombatSkillProgressionSettings,
-            CombatSkillProgressionSettings) noexcept = default;
+        friend constexpr bool operator==(CombatSkillProgressionSettings, CombatSkillProgressionSettings) noexcept
+            = default;
     };
 
     enum class SecurityAttemptKind : std::uint8_t
@@ -131,9 +137,8 @@ namespace TES3MP
     class MeleeWeaponCatalog
     {
     public:
-        static std::optional<MeleeWeaponCatalog> create(
-            const ItemPrototypeCatalog& items, std::span<const MeleeWeaponProfile> profiles,
-            std::span<const MeleeArmorProfile> armor = {}) noexcept;
+        static std::optional<MeleeWeaponCatalog> create(const ItemPrototypeCatalog& items,
+            std::span<const MeleeWeaponProfile> profiles, std::span<const MeleeArmorProfile> armor = {}) noexcept;
 
         ContentManifestId contentManifestId() const noexcept { return mContentManifestId; }
         std::span<const MeleeWeaponProfile> profiles() const noexcept { return mProfiles; }
@@ -145,7 +150,11 @@ namespace TES3MP
     private:
         MeleeWeaponCatalog(ContentManifestId contentManifestId, std::vector<MeleeWeaponProfile> profiles,
             std::vector<MeleeArmorProfile> armor) noexcept
-            : mContentManifestId(contentManifestId), mProfiles(std::move(profiles)), mArmor(std::move(armor)) {}
+            : mContentManifestId(contentManifestId)
+            , mProfiles(std::move(profiles))
+            , mArmor(std::move(armor))
+        {
+        }
 
         ContentManifestId mContentManifestId;
         std::vector<MeleeWeaponProfile> mProfiles;
@@ -165,19 +174,21 @@ namespace TES3MP
         float maximumMagicka = 0.f;
         float healthRecoveryPerSecond = 0.f;
         float magickaRecoveryPerSecond = 0.f;
-        std::array<CombatSkillProgressionRule,
-            static_cast<std::size_t>(CombatProgressionSkill::Count)> skillRules{};
+        std::array<CombatSkillProgressionRule, static_cast<std::size_t>(CombatProgressionSkill::Count)> skillRules{};
         CombatSkillProgressionSettings skillSettings;
-        std::array<CombatSkillProgressionState,
-            static_cast<std::size_t>(CombatProgressionSkill::Count)> skillProgression{};
+        std::array<CombatSkillProgressionState, static_cast<std::size_t>(CombatProgressionSkill::Count)>
+            skillProgression{};
         float intelligence = 1.f;
         std::array<float, 4> armorSkills{};
         DirectMagicDefense magicDefense;
+        std::array<float, static_cast<std::size_t>(DirectMagicSchool::Count)> magicSkills{};
+        float enchantSkill = 0.f;
+        std::vector<SpellRecordId> knownSpells;
 
         float securitySkill = 0.f;
 
-        friend constexpr bool operator==(const CanonicalPlayerCombatTemplate&,
-            const CanonicalPlayerCombatTemplate&) noexcept = default;
+        friend constexpr bool operator==(
+            const CanonicalPlayerCombatTemplate&, const CanonicalPlayerCombatTemplate&) noexcept = default;
     };
 
     struct CanonicalPlayerCombatState
@@ -199,18 +210,21 @@ namespace TES3MP
         float maximumMagicka = 0.f;
         float healthRecoveryPerSecond = 0.f;
         float magickaRecoveryPerSecond = 0.f;
-        std::array<CombatSkillProgressionRule,
-            static_cast<std::size_t>(CombatProgressionSkill::Count)> skillRules{};
-        std::array<CombatSkillProgressionState,
-            static_cast<std::size_t>(CombatProgressionSkill::Count)> skillProgression{};
+        std::array<CombatSkillProgressionRule, static_cast<std::size_t>(CombatProgressionSkill::Count)> skillRules{};
+        std::array<CombatSkillProgressionState, static_cast<std::size_t>(CombatProgressionSkill::Count)>
+            skillProgression{};
         std::array<float, 4> armorSkills{};
         DirectMagicDefense magicDefense;
+        std::array<float, static_cast<std::size_t>(DirectMagicSchool::Count)> magicSkills{};
+        float enchantSkill = 0.f;
+        std::vector<SpellRecordId> knownSpells;
+        std::optional<ServerTick> lastMagicUseTick;
         std::vector<SpellRecordId> contractedDiseases;
 
         float securitySkill = 0.f;
 
-        friend constexpr bool operator==(const CanonicalPlayerCombatState&,
-            const CanonicalPlayerCombatState&) noexcept = default;
+        friend constexpr bool operator==(const CanonicalPlayerCombatState&, const CanonicalPlayerCombatState&) noexcept
+            = default;
     };
 
     struct CanonicalActorCombatState
@@ -227,11 +241,13 @@ namespace TES3MP
         std::optional<ServerTick> deathTick;
         float maximumHealth = 0.f;
         float maximumFatigue = 0.f;
+        float magicka = 0.f;
+        float maximumMagicka = 0.f;
         bool creature = false;
         DirectMagicDefense magicDefense;
 
-        friend constexpr bool operator==(const CanonicalActorCombatState&,
-            const CanonicalActorCombatState&) noexcept = default;
+        friend constexpr bool operator==(const CanonicalActorCombatState&, const CanonicalActorCombatState&) noexcept
+            = default;
     };
 
     enum class CanonicalCombatWorldErrorCode : std::uint8_t
@@ -260,8 +276,8 @@ namespace TES3MP
         const CanonicalActorCombatState* findActor(ActorId id) const noexcept;
         RandomStateV1 randomState() const noexcept { return mRandomState; }
         std::optional<ServerTick> lastSimulationTick() const noexcept { return mLastSimulationTick; }
-        bool ensurePlayer(PlayerId id, const CanonicalPlayerCombatTemplate& source,
-            std::uint64_t inventoryWeightUnits) noexcept;
+        bool ensurePlayer(
+            PlayerId id, const CanonicalPlayerCombatTemplate& source, std::uint64_t inventoryWeightUnits) noexcept;
         bool initializePlayerFromCharacter(PlayerId id, const CanonicalPlayerCombatTemplate& source,
             std::uint64_t inventoryWeightUnits, CharacterProfileRevision profileRevision) noexcept;
         bool advancePlayerInventoryBinding(PlayerId id, std::uint64_t inventoryWeightUnits) noexcept;
@@ -287,8 +303,12 @@ namespace TES3MP
         CanonicalCombatWorld(std::vector<CanonicalPlayerCombatState> players,
             std::vector<CanonicalActorCombatState> actors, RandomStateV1 randomState,
             std::optional<ServerTick> lastSimulationTick) noexcept
-            : mPlayers(std::move(players)), mActors(std::move(actors)), mRandomState(randomState),
-              mLastSimulationTick(lastSimulationTick) {}
+            : mPlayers(std::move(players))
+            , mActors(std::move(actors))
+            , mRandomState(randomState)
+            , mLastSimulationTick(lastSimulationTick)
+        {
+        }
 
         std::vector<CanonicalPlayerCombatState> mPlayers;
         std::vector<CanonicalActorCombatState> mActors;
@@ -299,9 +319,8 @@ namespace TES3MP
     std::variant<CanonicalCombatWorld, CanonicalCombatWorldError> createCanonicalCombatWorld(
         std::span<const CanonicalPlayerCombatState> players, std::span<const CanonicalActorCombatState> actors,
         RandomStateV1 randomState, std::optional<ServerTick> lastSimulationTick = std::nullopt);
-    std::optional<CanonicalPlayerCombatTemplate> deriveCharacterCombatTemplate(
-        const CharacterProfile& profile, const CanonicalPlayerCombatTemplate& base,
-        const CharacterContentCatalog* characterContent = nullptr) noexcept;
+    std::optional<CanonicalPlayerCombatTemplate> deriveCharacterCombatTemplate(const CharacterProfile& profile,
+        const CanonicalPlayerCombatTemplate& base, const CharacterContentCatalog* characterContent = nullptr) noexcept;
 
     enum class MeleeContactValidation : std::uint8_t
     {
@@ -341,8 +360,8 @@ namespace TES3MP
     class ServerMeleeContactHistory : public ServerMeleeContactQuery
     {
     public:
-        virtual bool capture(ServerTick tick, const CanonicalServerState& players,
-            const CanonicalActorWorld& actors) noexcept = 0;
+        virtual bool capture(
+            ServerTick tick, const CanonicalServerState& players, const CanonicalActorWorld& actors) noexcept = 0;
     };
 
     struct AuthoritativeMeleeAttack
@@ -460,24 +479,93 @@ namespace TES3MP
         std::optional<AuthoritativeMeleeEvent> event;
     };
 
+    struct MagicUseAuthorityPolicy
+    {
+        std::uint64_t minimumUseIntervalTicks = 1;
+        std::uint64_t maximumRewindTicks = 8;
+        std::uint32_t touchReachQuanta = 128 * 1024;
+    };
+
+    struct AuthoritativeMagicUse
+    {
+        PlayerId caster;
+        MagicUseSourceKind sourceKind = MagicUseSourceKind::Spell;
+        std::uint64_t sourceId = 0;
+        MagicUseTargetKind targetKind = MagicUseTargetKind::Self;
+        std::uint64_t targetId = 0;
+        ServerTick sourceTick = ServerTick::initial();
+        CombatRevision expectedCasterRevision = CombatRevision::initial();
+        CombatRevision expectedTargetRevision = CombatRevision::initial();
+        InventoryRevision expectedInventoryRevision = InventoryRevision::initial();
+    };
+
+    enum class AuthoritativeMagicUseDisposition : std::uint8_t
+    {
+        Applied,
+        UnknownCaster,
+        UnknownSource,
+        SourceNotOwned,
+        UnknownTarget,
+        StaleCasterRevision,
+        StaleTargetRevision,
+        StaleInventoryRevision,
+        DifferentCell,
+        OutOfRange,
+        FutureSourceTick,
+        RewindWindowExceeded,
+        RateLimited,
+        DeadCaster,
+        DeadTarget,
+        InsufficientMagicka,
+        InsufficientCharge,
+        RevisionExhausted,
+        InvalidAttempt,
+    };
+
+    struct AuthoritativeMagicUseEvent
+    {
+        ServerTick serverTick = ServerTick::initial();
+        PlayerId caster;
+        MagicUseSourceKind sourceKind = MagicUseSourceKind::Spell;
+        std::uint64_t sourceId = 0;
+        MagicUseTargetKind targetKind = MagicUseTargetKind::Self;
+        std::uint64_t targetId = 0;
+        CombatRevision casterRevision = CombatRevision::initial();
+        CombatRevision targetRevision = CombatRevision::initial();
+        bool castSucceeded = false;
+        DirectMagicResolution selfResolution;
+        DirectMagicResolution targetResolution;
+        bool targetDied = false;
+    };
+
+    struct PreparedMagicUse
+    {
+        AuthoritativeMagicUseDisposition disposition = AuthoritativeMagicUseDisposition::InvalidAttempt;
+        std::optional<CanonicalCombatWorld> candidate;
+        std::optional<CanonicalInventoryWorld> candidateInventory;
+        std::optional<AuthoritativeMagicUseEvent> event;
+    };
+
     PreparedMeleeAttack prepareAuthoritativeMeleeAttack(const CanonicalCombatWorld& combat,
-        const CanonicalInventoryWorld& inventory, const ItemPrototypeCatalog& items,
-        const MeleeWeaponCatalog& weapons, const CanonicalServerState& players,
-        const CanonicalActorWorld& actors, const OpenMwMeleeSettings& settings, MeleeAuthorityPolicy policy,
-        ServerMeleeContactQuery& contact, ServerTick serverTick, const AuthoritativeMeleeAttack& attack,
-        const DirectMagicCatalog* magic = nullptr) noexcept;
+        const CanonicalInventoryWorld& inventory, const ItemPrototypeCatalog& items, const MeleeWeaponCatalog& weapons,
+        const CanonicalServerState& players, const CanonicalActorWorld& actors, const OpenMwMeleeSettings& settings,
+        MeleeAuthorityPolicy policy, ServerMeleeContactQuery& contact, ServerTick serverTick,
+        const AuthoritativeMeleeAttack& attack, const DirectMagicCatalog* magic = nullptr) noexcept;
     std::variant<CombatSimulationStep, CombatSimulationError> advanceAuthoritativeCombat(
-        const CanonicalCombatWorld& combat, const CanonicalInventoryWorld& inventory,
-        const ItemPrototypeCatalog& items, const MeleeWeaponCatalog& weapons,
-        const CanonicalServerState& players, const CanonicalActorWorld& actors,
+        const CanonicalCombatWorld& combat, const CanonicalInventoryWorld& inventory, const ItemPrototypeCatalog& items,
+        const MeleeWeaponCatalog& weapons, const CanonicalServerState& players, const CanonicalActorWorld& actors,
         const OpenMwMeleeSettings& settings, CombatSimulationPolicy policy, ServerTick tick,
         const DirectMagicCatalog* magic = nullptr) noexcept;
     PreparedTrapMagic prepareAuthoritativeTrapMagic(const CanonicalCombatWorld& combat,
         const CanonicalInventoryWorld& inventory, const DirectMagicCatalog& magic, PlayerId player,
         TrapPrototypeId trap, ServerTick tick) noexcept;
+    PreparedMagicUse prepareAuthoritativeMagicUse(const CanonicalCombatWorld& combat,
+        const CanonicalInventoryWorld& inventory, const CanonicalServerState& players,
+        const CanonicalActorWorld& actors, const DirectMagicCatalog& magic, MagicUseAuthorityPolicy policy,
+        ServerTick serverTick, const AuthoritativeMagicUse& use) noexcept;
     WaitRestRecoveryResult applyAuthoritativeWaitRestRecovery(const CanonicalCombatWorld& combat,
-        const CanonicalServerState& players, const CanonicalActorWorld& actors,
-        const OpenMwMeleeSettings& settings, std::uint8_t hours, WaitRestMode mode) noexcept;
+        const CanonicalServerState& players, const CanonicalActorWorld& actors, const OpenMwMeleeSettings& settings,
+        std::uint8_t hours, WaitRestMode mode) noexcept;
 }
 
 #endif

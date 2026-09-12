@@ -16,7 +16,7 @@ namespace TES3MP::ServerApp
 {
     namespace
     {
-        constexpr std::string_view Header = "TES3MP_COMBAT_V8";
+        constexpr std::string_view Header = "TES3MP_COMBAT_V9";
         constexpr std::size_t MaximumFields = 48;
 
         struct ActorAttackDeclaration
@@ -80,7 +80,23 @@ namespace TES3MP::ServerApp
                 return DirectMagicEffectKind::DamageHealth;
             if (text == "fatigue")
                 return DirectMagicEffectKind::DamageFatigue;
+            if (text == "magicka")
+                return DirectMagicEffectKind::DamageMagicka;
+            if (text == "restore_health")
+                return DirectMagicEffectKind::RestoreHealth;
+            if (text == "restore_fatigue")
+                return DirectMagicEffectKind::RestoreFatigue;
+            if (text == "restore_magicka")
+                return DirectMagicEffectKind::RestoreMagicka;
             return std::nullopt;
+        }
+
+        std::optional<DirectMagicSchool> magicSchool(std::string_view text) noexcept
+        {
+            const auto value = number<std::uint8_t>(text);
+            return value && *value < static_cast<std::uint8_t>(DirectMagicSchool::Count)
+                ? std::optional(static_cast<DirectMagicSchool>(*value))
+                : std::nullopt;
         }
 
         std::optional<DirectMagicDefense> magicDefense(std::span<const std::string_view> values) noexcept
@@ -180,6 +196,7 @@ namespace TES3MP::ServerApp
         std::vector<MeleeWeaponProfile> weaponProfiles;
         std::vector<MeleeArmorProfile> armorProfiles;
         std::vector<DirectEnchantmentProfile> enchantmentProfiles;
+        std::vector<DirectSpellProfile> spellProfiles;
         std::vector<DirectEquipmentMagicProfile> equipmentMagicProfiles;
         std::vector<DirectTrapMagicProfile> trapMagicProfiles;
         std::map<ActorId, DirectActorMagicProfile> actorMagicProfiles;
@@ -307,19 +324,39 @@ namespace TES3MP::ServerApp
                 }
                 else if (values[0] == "enchantment")
                 {
-                    if (values.size() < 8)
+                    if (values.size() < 9)
                         return error(CombatContentErrorCode::Malformed, lineNumber);
                     const auto rawPrototype = number<std::uint64_t>(values[1]);
                     const auto prototype = rawPrototype ? ItemPrototypeId::fromValue(*rawPrototype) : std::nullopt;
-                    const auto chargeCost = number<std::uint32_t>(values[2]);
-                    const auto countEffects = number<std::size_t>(values[3]);
-                    const auto effects = countEffects ? magicEffects(values.subspan(4), *countEffects) : std::nullopt;
-                    if (!prototype || !chargeCost || *chargeCost == 0 || !effects)
+                    const auto kind = values[2] == "strike" ? std::optional(DirectMagicEnchantmentKind::OnStrike)
+                        : values[2] == "use"                ? std::optional(DirectMagicEnchantmentKind::WhenUsed)
+                                                            : std::nullopt;
+                    const auto chargeCost = number<std::uint32_t>(values[3]);
+                    const auto countEffects = number<std::size_t>(values[4]);
+                    const auto effects = countEffects ? magicEffects(values.subspan(5), *countEffects) : std::nullopt;
+                    if (!prototype || !kind || !chargeCost || *chargeCost == 0 || !effects)
                         return error(CombatContentErrorCode::InvalidMagicCatalog, lineNumber);
                     if (enchantmentProfiles.size() >= MaximumItemPrototypes)
                         return error(CombatContentErrorCode::TooLarge, lineNumber);
-                    enchantmentProfiles.push_back(
-                        { *prototype, DirectMagicEnchantmentKind::OnStrike, *chargeCost, std::move(*effects) });
+                    enchantmentProfiles.push_back({ *prototype, *kind, *chargeCost, std::move(*effects) });
+                }
+                else if (values[0] == "spell")
+                {
+                    if (values.size() < 11)
+                        return error(CombatContentErrorCode::Malformed, lineNumber);
+                    const auto rawSpell = number<std::uint64_t>(values[1]);
+                    const auto spell = rawSpell ? SpellRecordId::fromValue(*rawSpell) : std::nullopt;
+                    const auto school = magicSchool(values[2]);
+                    const auto cost = number<std::uint32_t>(values[3]);
+                    const auto difficulty = finiteFloat(values[4]);
+                    const auto always = boolean(values[5]);
+                    const auto countEffects = number<std::size_t>(values[6]);
+                    const auto effects = countEffects ? magicEffects(values.subspan(7), *countEffects) : std::nullopt;
+                    if (!spell || !school || !cost || !difficulty || *difficulty < 0.f || !always || !effects)
+                        return error(CombatContentErrorCode::InvalidMagicCatalog, lineNumber);
+                    if (spellProfiles.size() >= MaximumDirectMagicSpells)
+                        return error(CombatContentErrorCode::TooLarge, lineNumber);
+                    spellProfiles.push_back({ *spell, *school, *cost, *difficulty, *always, std::move(*effects) });
                 }
                 else if (values[0] == "equipment_magic")
                 {
@@ -366,9 +403,9 @@ namespace TES3MP::ServerApp
                     const auto trap = rawTrap ? TrapPrototypeId::fromValue(*rawTrap) : std::nullopt;
                     const auto countEffects = number<std::size_t>(values[2]);
                     const auto effects = countEffects ? magicEffects(values.subspan(3), *countEffects) : std::nullopt;
-                    if (!trap || !effects
-                        || !std::ranges::all_of(
-                            *effects, [](const auto& effect) { return effect.target == DirectMagicTarget::Other; }))
+                    if (!trap || !effects || !std::ranges::all_of(*effects, [](const auto& effect) {
+                            return effect.target == DirectMagicTarget::Other;
+                        }))
                         return error(CombatContentErrorCode::InvalidMagicCatalog, lineNumber);
                     if (trapMagicProfiles.size() >= MaximumDirectMagicTraps)
                         return error(CombatContentErrorCode::TooLarge, lineNumber);
@@ -376,9 +413,9 @@ namespace TES3MP::ServerApp
                 }
                 else if (values[0] == "player")
                 {
-                    if (values.size() != 27 || playerTemplate)
+                    if (values.size() != 34 || playerTemplate)
                         return error(CombatContentErrorCode::Malformed, lineNumber);
-                    std::array<float, 24> parsed{};
+                    std::array<float, 31> parsed{};
                     for (std::size_t index = 0; index < parsed.size(); ++index)
                     {
                         const auto value = finiteFloat(values[index + 1]);
@@ -386,8 +423,8 @@ namespace TES3MP::ServerApp
                             return error(CombatContentErrorCode::InvalidPlayerTemplate, lineNumber);
                         parsed[index] = *value;
                     }
-                    const auto maximumWeight = number<std::uint64_t>(values[25]);
-                    const auto werewolf = boolean(values[26]);
+                    const auto maximumWeight = number<std::uint64_t>(values[32]);
+                    const auto werewolf = boolean(values[33]);
                     if (!maximumWeight || *maximumWeight == 0 || !werewolf || parsed[13] < 0.f || parsed[14] < 0.f
                         || parsed[15] <= 0.f || parsed[16] < 0.f || parsed[17] < 0.f || parsed[18] < 0.f)
                         return error(CombatContentErrorCode::InvalidPlayerTemplate, lineNumber);
@@ -417,6 +454,9 @@ namespace TES3MP::ServerApp
                     playerTemplate->magickaRecoveryPerSecond = parsed[18];
                     playerTemplate->armorSkills = { parsed[19], parsed[20], parsed[21], parsed[22] };
                     playerTemplate->securitySkill = parsed[23];
+                    playerTemplate->magicSkills
+                        = { parsed[24], parsed[25], parsed[26], parsed[27], parsed[28], parsed[29] };
+                    playerTemplate->enchantSkill = parsed[30];
                 }
                 else if (values[0] == "progression")
                 {
@@ -438,8 +478,7 @@ namespace TES3MP::ServerApp
                         const auto gain = finiteFloat(values[6 + index * 2]);
                         if (!specialization || *specialization > static_cast<std::uint8_t>(ClassSpecialization::Stealth)
                             || !gain || *gain < 0.f
-                            || (index == static_cast<std::size_t>(CombatProgressionSkill::Security)
-                                && *gain <= 0.f))
+                            || (index == static_cast<std::size_t>(CombatProgressionSkill::Security) && *gain <= 0.f))
                             return error(CombatContentErrorCode::InvalidPlayerTemplate, lineNumber);
                         rules[index] = { static_cast<ClassSpecialization>(*specialization), *gain };
                     }
@@ -448,11 +487,11 @@ namespace TES3MP::ServerApp
                 }
                 else if (values[0] == "actor")
                 {
-                    if (values.size() != 14)
+                    if (values.size() != 15)
                         return error(CombatContentErrorCode::Malformed, lineNumber);
                     const auto rawActor = number<std::uint64_t>(values[1]);
                     const auto actor = rawActor ? ActorId::fromValue(*rawActor) : std::nullopt;
-                    std::array<float, 7> parsed{};
+                    std::array<float, 8> parsed{};
                     for (std::size_t index = 0; index < parsed.size(); ++index)
                     {
                         const auto value = finiteFloat(values[index + 2]);
@@ -460,14 +499,15 @@ namespace TES3MP::ServerApp
                             return error(CombatContentErrorCode::InvalidActorSet, lineNumber);
                         parsed[index] = *value;
                     }
-                    const auto knockedDown = boolean(values[9]);
-                    const auto paralyzed = boolean(values[10]);
-                    const auto unaware = boolean(values[11]);
-                    const auto dead = boolean(values[12]);
-                    const auto creature = boolean(values[13]);
+                    const auto knockedDown = boolean(values[10]);
+                    const auto paralyzed = boolean(values[11]);
+                    const auto unaware = boolean(values[12]);
+                    const auto dead = boolean(values[13]);
+                    const auto creature = boolean(values[14]);
                     if (!actor || !knockedDown || !paralyzed || !unaware || !dead || !creature)
                         return error(CombatContentErrorCode::InvalidActorSet, lineNumber);
-                    if (parsed[0] < 0.f || (*dead && parsed[0] != 0.f) || (!*dead && parsed[0] < 1.f))
+                    if (parsed[0] < 0.f || parsed[7] < 0.f || (*dead && parsed[0] != 0.f)
+                        || (!*dead && parsed[0] < 1.f))
                         return error(CombatContentErrorCode::InvalidActorSet, lineNumber);
                     OpenMwMeleeVictim victim;
                     victim.health = parsed[0];
@@ -482,8 +522,15 @@ namespace TES3MP::ServerApp
                     victim.paralyzed = *paralyzed;
                     victim.unaware = *unaware;
                     victim.dead = *dead;
-                    actorStates.push_back({ *actor, CombatRevision::initial(), victim, victim, {}, std::nullopt, 0,
-                        std::nullopt, std::nullopt, std::nullopt, victim.health, victim.fatigue, *creature });
+                    actorStates.push_back({ .actorId = *actor,
+                        .revision = CombatRevision::initial(),
+                        .stats = victim,
+                        .respawnStats = victim,
+                        .maximumHealth = victim.health,
+                        .maximumFatigue = victim.fatigue,
+                        .magicka = parsed[7],
+                        .maximumMagicka = parsed[7],
+                        .creature = *creature });
                     if (actorStates.size() > MaximumActorCombatants)
                         return error(CombatContentErrorCode::TooLarge, lineNumber);
                 }
@@ -575,8 +622,7 @@ namespace TES3MP::ServerApp
         }
 
         if (!declaredManifest || !settings || !securitySettings || !playerTemplate || !skillSettings || !skillRules
-            || !randomSeed
-            || !magicSettings || !playerMagic)
+            || !randomSeed || !magicSettings || !playerMagic)
             return error(CombatContentErrorCode::Malformed);
         playerTemplate->skillSettings = *skillSettings;
         playerTemplate->skillRules = *skillRules;
@@ -617,9 +663,8 @@ namespace TES3MP::ServerApp
         auto weapons = MeleeWeaponCatalog::create(items, weaponProfiles, armorProfiles);
         if (!weapons)
             return error(CombatContentErrorCode::InvalidWeaponCatalog);
-        auto magic = DirectMagicCatalog::create(
-            manifest.id(), items, *magicSettings, enchantmentProfiles, equipmentMagicProfiles, actorMagic,
-            trapMagicProfiles);
+        auto magic = DirectMagicCatalog::create(manifest.id(), items, *magicSettings, enchantmentProfiles,
+            equipmentMagicProfiles, actorMagic, trapMagicProfiles, spellProfiles);
         if (!magic)
             return error(CombatContentErrorCode::InvalidMagicCatalog);
         const auto streamKey = RandomStreamKey::fromValues(5, 0);
@@ -633,8 +678,8 @@ namespace TES3MP::ServerApp
         CanonicalCombatWorld validation = *created;
         if (!validation.ensurePlayer(*PlayerId::fromValue(1), *playerTemplate, 0))
             return error(CombatContentErrorCode::InvalidPlayerTemplate);
-        return CombatContent{ *settings, *securitySettings, *playerTemplate, std::move(*weapons),
-            std::move(*magic), std::move(*created) };
+        return CombatContent{ *settings, *securitySettings, *playerTemplate, std::move(*weapons), std::move(*magic),
+            std::move(*created) };
     }
     catch (...)
     {

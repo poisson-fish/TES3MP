@@ -128,9 +128,9 @@ int main(int argc, char** argv)
     TES3MP::ServerApp::ExecutableScriptModules executableScriptModules;
     if (scriptContent)
     {
-        auto loadedModules = TES3MP::ServerApp::loadExecutableScriptModules(
-            config.scriptPackageContentFile, *scriptContent, worldContent.globals, worldContent.questJournal,
-            worldContent.factionDialogue, worldContent.weather, scripts);
+        auto loadedModules = TES3MP::ServerApp::loadExecutableScriptModules(config.scriptPackageContentFile,
+            *scriptContent, worldContent.globals, worldContent.questJournal, worldContent.factionDialogue,
+            worldContent.weather, scripts);
         auto* modules = std::get_if<TES3MP::ServerApp::ExecutableScriptModules>(&loadedModules);
         if (!modules)
         {
@@ -271,14 +271,12 @@ int main(int argc, char** argv)
         combatContent.emplace(std::move(*content));
     }
     const bool configuredObjectTraps = interactiveObjectCatalog
-        && std::ranges::any_of(interactiveObjectCatalog->entries(), [](const auto& object) {
-               return object.trap.trapId.has_value();
-           });
+        && std::ranges::any_of(
+            interactiveObjectCatalog->entries(), [](const auto& object) { return object.trap.trapId.has_value(); });
     if ((configuredObjectTraps && !combatContent)
         || (combatContent
             && (interactiveObjectCatalog
-                    ? !TES3MP::directMagicCoversInteractiveObjectTraps(
-                        combatContent->magic, *interactiveObjectCatalog)
+                    ? !TES3MP::directMagicCoversInteractiveObjectTraps(combatContent->magic, *interactiveObjectCatalog)
                     : !combatContent->magic.traps().empty())))
     {
         std::cerr << "interactive object traps require exact combat magic coverage\n";
@@ -578,6 +576,10 @@ int main(int argc, char** argv)
     {
         optionalCapabilities.push_back(TES3MP::combatReplicationCapability());
         optionalCapabilities.push_back(TES3MP::authoritativeWaitRestCapability());
+        if (!combatContent->magic.spells().empty()
+            || std::ranges::any_of(combatContent->magic.enchantments(),
+                [](const auto& value) { return value.kind == TES3MP::DirectMagicEnchantmentKind::WhenUsed; }))
+            optionalCapabilities.push_back(TES3MP::authoritativeInstantMagicCapability());
         if (interactiveObjectWorld && inventoryWorld)
             optionalCapabilities.push_back(TES3MP::authoritativeSecurityCapability());
     }
@@ -651,8 +653,7 @@ int main(int argc, char** argv)
         TES3MP::ServerApp::Phase7ConnectionCapacity, &actorWorld,
         interactiveObjectWorld ? &*interactiveObjectWorld : nullptr, inventoryWorld ? &*inventoryWorld : nullptr,
         combatContent ? &combatContent->world : nullptr, combatContent ? &combatContent->playerTemplate : nullptr,
-        itemCatalog ? &*itemCatalog : nullptr, characterContent ? &*characterContent : nullptr,
-        &worldContent.world);
+        itemCatalog ? &*itemCatalog : nullptr, characterContent ? &*characterContent : nullptr, &worldContent.world);
     TES3MP::ServerApp::ServerApplication application(*factory.runtime, config,
         { sessions, *joins, *crypto, *queues, clock, intake, reducer, *lifecycle, &actorCatalog, &actorWorld,
             collision.get(), interactiveObjectCatalog ? &*interactiveObjectCatalog : nullptr,
@@ -662,8 +663,8 @@ int main(int argc, char** argv)
             combatContent ? &combatContent->settings : nullptr, combatContent ? &meleePolicy : nullptr,
             meleeContactHistory ? &*meleeContactHistory : nullptr,
             meleeContactHistory ? &*meleeContactHistory : nullptr, combatContent ? &combatContent->magic : nullptr,
-            combatContent ? &combatContent->securitySettings : nullptr,
-            &scripts, &worldContent.globals, &worldContent.world, &*scriptStateCatalog, &*scriptState });
+            combatContent ? &combatContent->securitySettings : nullptr, &scripts, &worldContent.globals,
+            &worldContent.world, &*scriptStateCatalog, &*scriptState });
     if (!application.start())
     {
         std::cerr << application.failure() << '\n';

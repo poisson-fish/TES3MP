@@ -275,8 +275,8 @@ namespace TES3MP::OpenMWAdapter
         std::span<const DesktopItemPrototypeMapping> itemPrototypes,
         std::span<const DesktopContainerMapping> containers, std::span<const DesktopQuestMapping> quests,
         std::span<const DesktopDialogueChoiceMapping> dialogueChoices,
-        std::span<const DesktopWeatherRegionMapping> weatherRegions,
-        std::span<const DesktopWeatherMapping> weather)
+        std::span<const DesktopWeatherRegionMapping> weatherRegions, std::span<const DesktopWeatherMapping> weather,
+        std::span<const DesktopSpellMapping> spells)
     try
     {
         if (appearanceId != manifest.defaultAppearance() || avatarNpc.empty()
@@ -403,10 +403,21 @@ namespace TES3MP::OpenMWAdapter
                 if (refId(weatherMappings[prior].record) == refId(weatherMappings[index].record))
                     return std::nullopt;
         }
+        std::vector<DesktopSpellMapping> spellMappings(spells.begin(), spells.end());
+        std::ranges::sort(spellMappings, {}, &DesktopSpellMapping::id);
+        for (std::size_t index = 0; index < spellMappings.size(); ++index)
+        {
+            if (spellMappings[index].record.empty()
+                || (index != 0 && spellMappings[index - 1].id == spellMappings[index].id))
+                return std::nullopt;
+            for (std::size_t prior = 0; prior < index; ++prior)
+                if (refId(spellMappings[prior].record) == refId(spellMappings[index].record))
+                    return std::nullopt;
+        }
         return DesktopContentMapping{ std::move(manifest), std::move(mappings), appearanceId, std::move(avatarNpc),
             std::move(prototypes), std::move(objects), std::move(items), std::move(containerMappings),
-            std::move(questMappings), std::move(choiceMappings), std::move(regionMappings),
-            std::move(weatherMappings) };
+            std::move(questMappings), std::move(choiceMappings), std::move(regionMappings), std::move(weatherMappings),
+            std::move(spellMappings) };
     }
     catch (...)
     {
@@ -421,6 +432,7 @@ namespace TES3MP::OpenMWAdapter
         std::optional<ObjectInteractionCapture> pendingInteraction;
         std::optional<InventoryTransactionCapture> pendingInventoryTransaction;
         std::optional<MeleeAttackCapture> pendingMeleeAttack;
+        std::optional<MagicUseCapture> pendingMagicUse;
         bool interceptorInstalled = false;
         std::optional<osg::Vec3f> lastPosition;
         std::optional<std::chrono::steady_clock::time_point> lastSampleTime;
@@ -452,6 +464,19 @@ namespace TES3MP::OpenMWAdapter
                     if (capture && !self->mImpl->pendingMeleeAttack)
                         self->mImpl->pendingMeleeAttack = std::move(*capture);
                     return capture.has_value();
+                });
+                player.setMagicCastInterceptor([self](bool release, const ESM::RefId& spell, const MWWorld::Ptr& item,
+                                                   const MWWorld::Ptr& target) {
+                    auto* presentation = dynamic_cast<const DesktopPresentation*>(self->mImpl->presentation);
+                    if (!presentation)
+                        return false;
+                    const bool supported = presentation->captureMagicUse(spell, item, {}).has_value();
+                    if (!supported || !release)
+                        return supported;
+                    auto capture = presentation->captureMagicUse(spell, item, target);
+                    if (capture && !self->mImpl->pendingMagicUse)
+                        self->mImpl->pendingMagicUse = std::move(*capture);
+                    return true;
                 });
                 MWGui::ItemModel::setTransferInterceptor([self](MWGui::ItemModel& source, const MWGui::ItemStack& item,
                                                              std::size_t count, MWGui::ItemModel& target) {
@@ -500,6 +525,7 @@ namespace TES3MP::OpenMWAdapter
                 {
                     world->getPlayer().clearActivationInterceptor();
                     world->getPlayer().clearMeleeCombatInterceptors();
+                    world->getPlayer().clearMagicCastInterceptor();
                 }
                 MWGui::ItemModel::clearTransferInterceptor();
                 MWGui::InventoryWindow::clearUseItemInterceptor();
@@ -531,6 +557,7 @@ namespace TES3MP::OpenMWAdapter
         mImpl->pendingInteraction.reset();
         mImpl->pendingInventoryTransaction.reset();
         mImpl->pendingMeleeAttack.reset();
+        mImpl->pendingMagicUse.reset();
         mImpl->lastPosition.reset();
         mImpl->lastSampleTime.reset();
         mImpl->lastVelocity = LinearVelocity3(0, 0, 0);
@@ -661,6 +688,16 @@ namespace TES3MP::OpenMWAdapter
         return captured;
     }
 
+    std::optional<MagicUseCapture> DesktopSemanticInput::captureMagicUse() noexcept
+    {
+        mImpl->ensureInterceptor(this);
+        if (!mImpl->pendingMagicUse)
+            return std::nullopt;
+        auto captured = std::move(mImpl->pendingMagicUse);
+        mImpl->pendingMagicUse.reset();
+        return captured;
+    }
+
     std::optional<DialogueChoiceId> DesktopSemanticInput::mapDialogueChoice(int localChoice) const noexcept
     {
         if (!mImpl->mapping)
@@ -681,6 +718,7 @@ namespace TES3MP::OpenMWAdapter
             mImpl->pendingInteraction.reset();
             mImpl->pendingInventoryTransaction.reset();
             mImpl->pendingMeleeAttack.reset();
+            mImpl->pendingMagicUse.reset();
             if (!current)
                 return {};
             if (!mImpl->mapping)
@@ -1196,6 +1234,67 @@ namespace TES3MP::OpenMWAdapter
                 targetRevision, type, attackStrength };
         }
 
+        std::optional<MagicUseCapture> captureMagicUse(
+            const ESM::RefId& spell, const MWWorld::Ptr& item, const MWWorld::Ptr& target) const
+        {
+            if (!mapping || !combatSnapshot)
+                return std::nullopt;
+            MagicUseCapture result;
+            if (!spell.empty())
+            {
+                const auto source = std::ranges::find_if(
+                    mapping->spells, [&](const auto& value) { return refId(value.record) == spell; });
+                if (source == mapping->spells.end())
+                    return std::nullopt;
+                result.sourceKind = MagicUseSourceKind::Spell;
+                result.sourceId = source->id.value();
+            }
+            else
+            {
+                const auto* source = item.isEmpty() ? nullptr : observedStack(item);
+                if (!source || source->ground || source->container || !observedPlayerInventoryRevision)
+                    return std::nullopt;
+                result.sourceKind = MagicUseSourceKind::EnchantedItem;
+                result.sourceId = source->stack.stackId.value();
+            }
+            result.sourceTick = combatSnapshot->serverTick();
+            result.expectedCasterRevision = combatSnapshot->selfCombatRevision();
+            result.expectedTargetRevision = combatSnapshot->selfCombatRevision();
+            result.expectedInventoryRevision = observedPlayerInventoryRevision.value_or(InventoryRevision::initial());
+            if (target.isEmpty() || target == MWBase::Environment::get().getWorld()->getPlayerPtr())
+                return result;
+
+            const auto actor = std::ranges::find_if(actorRemotes,
+                [&](const auto& entry) { return entry.second.actor && entry.second.actor->ptr() == target; });
+            if (actor != actorRemotes.end() && actor->second.lastObserved)
+            {
+                const auto id = actor->second.lastObserved->actorId();
+                const auto state
+                    = std::ranges::lower_bound(combatSnapshot->actors(), id, {}, &ActorCombatSnapshot::actorId);
+                if (state == combatSnapshot->actors().end() || state->actorId != id || state->dead)
+                    return std::nullopt;
+                result.targetKind = MagicUseTargetKind::Actor;
+                result.targetId = id.value();
+                result.expectedTargetRevision = state->combatRevision;
+                return result;
+            }
+            const auto player = std::ranges::find_if(
+                remotes, [&](const auto& entry) { return entry.second.actor && entry.second.actor->ptr() == target; });
+            if (player != remotes.end() && player->second.lastObserved)
+            {
+                const auto id = player->second.lastObserved->playerId();
+                const auto state
+                    = std::ranges::lower_bound(combatSnapshot->players(), id, {}, &PlayerCombatSnapshot::playerId);
+                if (state == combatSnapshot->players().end() || state->playerId != id || state->dead)
+                    return std::nullopt;
+                result.targetKind = MagicUseTargetKind::Player;
+                result.targetId = id.value();
+                result.expectedTargetRevision = state->combatRevision;
+                return result;
+            }
+            return std::nullopt;
+        }
+
         std::optional<ObjectInteractionCapture> captureSecurityAttempt(
             const MWWorld::Ptr& target, const MWWorld::Ptr& tool, bool disarm) const
         {
@@ -1306,10 +1405,10 @@ namespace TES3MP::OpenMWAdapter
             {
                 const auto region = std::ranges::lower_bound(
                     mapping->weatherRegions, state.region, {}, &DesktopWeatherRegionMapping::id);
-                const auto current = std::ranges::lower_bound(
-                    mapping->weather, state.currentWeather, {}, &DesktopWeatherMapping::id);
-                const auto target = std::ranges::lower_bound(
-                    mapping->weather, state.targetWeather, {}, &DesktopWeatherMapping::id);
+                const auto current
+                    = std::ranges::lower_bound(mapping->weather, state.currentWeather, {}, &DesktopWeatherMapping::id);
+                const auto target
+                    = std::ranges::lower_bound(mapping->weather, state.targetWeather, {}, &DesktopWeatherMapping::id);
                 if (region == mapping->weatherRegions.end() || region->id != state.region
                     || current == mapping->weather.end() || current->id != state.currentWeather
                     || target == mapping->weather.end() || target->id != state.targetWeather)
@@ -1331,7 +1430,8 @@ namespace TES3MP::OpenMWAdapter
                         factor = 0.f;
                     else
                     {
-                        const double elapsed = static_cast<double>(serverTick.value() - state.transitionStartTick.value());
+                        const double elapsed
+                            = static_cast<double>(serverTick.value() - state.transitionStartTick.value());
                         const double duration
                             = static_cast<double>(state.transitionEndTick.value() - state.transitionStartTick.value());
                         factor = static_cast<float>(elapsed / duration);
@@ -1354,8 +1454,8 @@ namespace TES3MP::OpenMWAdapter
                 return ProviderResult::PresentationFailed;
             world->setWorldTimeAuthority(true);
             const auto& time = state.time;
-            return world->applyAuthoritativeWorldTime(time.day, time.month, time.year,
-                       time.millisecondsSinceMidnight, time.timeScaleUnits)
+            return world->applyAuthoritativeWorldTime(
+                       time.day, time.month, time.year, time.millisecondsSinceMidnight, time.timeScaleUnits)
                 ? ProviderResult::Accepted
                 : ProviderResult::PresentationFailed;
         }
@@ -1390,7 +1490,8 @@ namespace TES3MP::OpenMWAdapter
             const std::array skillIds{ ESM::Skill::Block, ESM::Skill::ShortBlade, ESM::Skill::LongBlade,
                 ESM::Skill::BluntWeapon, ESM::Skill::Axe, ESM::Skill::Spear, ESM::Skill::HandToHand,
                 ESM::Skill::LightArmor, ESM::Skill::MediumArmor, ESM::Skill::HeavyArmor, ESM::Skill::Unarmored,
-                ESM::Skill::Security };
+                ESM::Skill::Security, ESM::Skill::Alteration, ESM::Skill::Conjuration, ESM::Skill::Destruction,
+                ESM::Skill::Illusion, ESM::Skill::Mysticism, ESM::Skill::Restoration, ESM::Skill::Enchant };
             auto& npcStats = player.getClass().getNpcStats(player);
             for (const auto& confirmed : snapshot.selfSkills())
             {
@@ -1423,6 +1524,38 @@ namespace TES3MP::OpenMWAdapter
                 actorFatigue.setBase(combat->maximumFatigue);
                 actorFatigue.setCurrent(combat->fatigue, true, true);
                 stats.setFatigue(actorFatigue);
+                auto actorMagicka = stats.getMagicka();
+                actorMagicka.setBase(combat->maximumMagicka);
+                actorMagicka.setCurrent(combat->magicka, true, true);
+                stats.setMagicka(actorMagicka);
+                if (!replicatedActorResultAccepted(remote.actor->setDead(combat->dead)))
+                    return ProviderResult::PresentationFailed;
+            }
+            for (auto& [entity, remote] : remotes)
+            {
+                (void)entity;
+                if (!remote.actor || !remote.lastObserved)
+                    continue;
+                const auto combat = std::ranges::lower_bound(
+                    snapshot.players(), remote.lastObserved->playerId(), {}, &PlayerCombatSnapshot::playerId);
+                if (combat == snapshot.players().end() || combat->playerId != remote.lastObserved->playerId())
+                    continue;
+                auto ptr = remote.actor->ptr();
+                auto& stats = ptr.getClass().getCreatureStats(ptr);
+                if (!combat->dead && stats.isDead())
+                    stats.resurrect();
+                auto health = stats.getHealth();
+                health.setBase(combat->maximumHealth);
+                health.setCurrent(combat->health);
+                stats.setHealth(health);
+                auto remoteFatigue = stats.getFatigue();
+                remoteFatigue.setBase(combat->maximumFatigue);
+                remoteFatigue.setCurrent(combat->fatigue, true, true);
+                stats.setFatigue(remoteFatigue);
+                auto remoteMagicka = stats.getMagicka();
+                remoteMagicka.setBase(combat->maximumMagicka);
+                remoteMagicka.setCurrent(combat->magicka, true, true);
+                stats.setMagicka(remoteMagicka);
                 if (!replicatedActorResultAccepted(remote.actor->setDead(combat->dead)))
                     return ProviderResult::PresentationFailed;
             }
@@ -1487,6 +1620,44 @@ namespace TES3MP::OpenMWAdapter
                             if (event.damagedStat == MeleeDamageStat::Health)
                                 MWBase::Environment::get().getWindowManager()->activateHitOverlay();
                         }
+                    }
+                }
+                for (const auto& event : batch.magicEvents())
+                {
+                    if (!event.castSucceeded)
+                        continue;
+                    if (event.targetKind == MagicUseTargetKind::Actor && event.targetHealthDelta < 0.f)
+                    {
+                        const auto target = ActorId::fromValue(event.targetId);
+                        const auto remote = target ? std::ranges::find_if(actorRemotes,
+                                                         [&](const auto& entry) {
+                                                             return entry.second.actor && entry.second.lastObserved
+                                                                 && entry.second.lastObserved->actorId() == *target;
+                                                         })
+                                                   : actorRemotes.end();
+                        if (remote != actorRemotes.end()
+                            && !replicatedActorResultAccepted(
+                                remote->second.actor->playAction(MWRender::ReplicatedActorAction::Hit)))
+                            return ProviderResult::PresentationFailed;
+                    }
+                    if (event.targetKind == MagicUseTargetKind::Player && event.targetHealthDelta < 0.f)
+                    {
+                        const auto target = PlayerId::fromValue(event.targetId);
+                        if (target && *target == snapshot.selfPlayerId())
+                        {
+                            playerStats.setHitRecovery(true);
+                            MWBase::Environment::get().getWindowManager()->activateHitOverlay();
+                        }
+                        const auto remote = target ? std::ranges::find_if(remotes,
+                                                         [&](const auto& entry) {
+                                                             return entry.second.actor && entry.second.lastObserved
+                                                                 && entry.second.lastObserved->playerId() == *target;
+                                                         })
+                                                   : remotes.end();
+                        if (remote != remotes.end()
+                            && !replicatedActorResultAccepted(
+                                remote->second.actor->playAction(MWRender::ReplicatedActorAction::Hit)))
+                            return ProviderResult::PresentationFailed;
                     }
                 }
             }
@@ -2211,6 +2382,19 @@ namespace TES3MP::OpenMWAdapter
         try
         {
             return mImpl->captureMeleeAttack(victim, attackStrength, attackType);
+        }
+        catch (...)
+        {
+            return std::nullopt;
+        }
+    }
+
+    std::optional<MagicUseCapture> DesktopPresentation::captureMagicUse(
+        const ESM::RefId& spell, const MWWorld::Ptr& item, const MWWorld::Ptr& target) const noexcept
+    {
+        try
+        {
+            return mImpl->captureMagicUse(spell, item, target);
         }
         catch (...)
         {

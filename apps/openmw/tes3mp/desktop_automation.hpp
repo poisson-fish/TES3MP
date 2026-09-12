@@ -36,6 +36,7 @@ namespace TES3MP::OpenMWAdapter
         WaitSlow,
         SecurityPick,
         SecurityProbe,
+        MagicItem,
     };
 
     std::optional<DesktopAutomationRole> parseDesktopAutomationRole(std::string_view value) noexcept;
@@ -55,6 +56,7 @@ namespace TES3MP::OpenMWAdapter
         CellTransitionCapture captureCellTransition() noexcept override;
         std::optional<LocomotionIntent> sampleCurrentIntent() noexcept override;
         std::optional<ObjectInteractionCapture> captureObjectInteraction() noexcept override;
+        std::optional<MagicUseCapture> captureMagicUse() noexcept override;
         void setCoordinator(EngineCoordinator* coordinator) noexcept { mCoordinator = coordinator; }
         ProviderResult applyAuthoritative(const LatestWinsSnapshot& snapshot,
             std::span<const ObservedPlayer> observedPlayers, bool allowLocalCellCorrection, MonotonicInstant receivedAt,
@@ -135,6 +137,19 @@ namespace TES3MP::OpenMWAdapter
         std::optional<CombatRevision> mSecurityCombatRevision;
         std::optional<float> mInitialSecurityProgress;
         std::optional<float> mSecurityProgress;
+        std::optional<ActorId> mMagicActor;
+        std::optional<ItemStackId> mMagicItem;
+        std::optional<InventoryRevision> mMagicInventoryRevision;
+        std::optional<CombatRevision> mMagicCasterRevision;
+        std::optional<CombatRevision> mMagicTargetRevision;
+        std::optional<ServerTick> mMagicSourceTick;
+        std::optional<std::uint32_t> mInitialMagicCharge;
+        std::optional<std::uint32_t> mMagicCharge;
+        std::optional<float> mInitialMagicTargetFatigue;
+        std::optional<float> mMagicTargetFatigue;
+        std::optional<float> mMinimumMagicTargetFatigue;
+        std::optional<float> mInitialEnchantProgress;
+        std::optional<float> mEnchantProgress;
         bool mSawPeer = false;
         bool mSawLeave = false;
         bool mSawReturn = false;
@@ -169,6 +184,11 @@ namespace TES3MP::OpenMWAdapter
         bool mSecurityObjectAfterResume = false;
         bool mSecurityInventoryAfterResume = false;
         bool mSecurityCombatAfterResume = false;
+        bool mMagicSubmitted = false;
+        bool mMagicEventPresented = false;
+        bool mMagicResumeRequested = false;
+        bool mMagicInventoryAfterResume = false;
+        bool mMagicCombatAfterResume = false;
         bool mFinished = false;
     };
 }

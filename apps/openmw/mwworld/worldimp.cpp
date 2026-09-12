@@ -1335,9 +1335,9 @@ namespace MWWorld
             spawnPoint.z() += 30; // move up a little to account for slopes, will snap down later
 
             if (!mPhysics
-                     ->castRay(spawnPoint, osg::Vec3f(pos.x(), pos.y(), pos.z() + 20),
-                         MWPhysics::CollisionType_World | MWPhysics::CollisionType_Door)
-                     .mHit)
+                    ->castRay(spawnPoint, osg::Vec3f(pos.x(), pos.y(), pos.z() + 20),
+                        MWPhysics::CollisionType_World | MWPhysics::CollisionType_Door)
+                    .mHit)
             {
                 // safe
                 break;
@@ -1865,8 +1865,8 @@ namespace MWWorld
         mWeatherManager->setExternalAuthority(authoritative);
     }
 
-    bool World::applyAuthoritativeWeather(const ESM::RefId& region, const ESM::RefId& current,
-        const ESM::RefId& target, float transitionFactor, float transitionDelta)
+    bool World::applyAuthoritativeWeather(const ESM::RefId& region, const ESM::RefId& current, const ESM::RefId& target,
+        float transitionFactor, float transitionDelta)
     {
         return mWeatherManager->applyAuthoritativeWeather(region, current, target, transitionFactor, transitionDelta);
     }
@@ -2866,6 +2866,16 @@ namespace MWWorld
 
         const ESM::RefId& selectedSpell = stats.getSpells().getSelectedSpell();
 
+        Ptr selectedItem;
+        if (selectedSpell.empty())
+        {
+            MWWorld::ContainerStore& inv = actor.getClass().getContainerStore(actor);
+            if (inv.getSelectedEnchantItem() != inv.end())
+                selectedItem = *inv.getSelectedEnchantItem();
+        }
+        if (isPlayer && mPlayer->interceptMagicCast(false, selectedSpell, selectedItem, {}))
+            return MWWorld::SpellCastState::Success;
+
         if (!selectedSpell.empty())
         {
             const ESM::Spell* spell = mStore.get<ESM::Spell>().find(selectedSpell);
@@ -2988,6 +2998,16 @@ namespace MWWorld
         }
 
         const ESM::RefId& selectedSpell = stats.getSpells().getSelectedSpell();
+
+        MWWorld::Ptr selectedItem;
+        if (selectedSpell.empty())
+        {
+            MWWorld::ContainerStore& inv = actor.getClass().getContainerStore(actor);
+            if (inv.getSelectedEnchantItem() != inv.end())
+                selectedItem = *inv.getSelectedEnchantItem();
+        }
+        if (casterIsPlayer && !scriptedSpell && mPlayer->interceptMagicCast(true, selectedSpell, selectedItem, target))
+            return;
 
         MWMechanics::CastSpell cast(actor, target, false, scriptedSpell);
         cast.mHitPosition = hitPosition;

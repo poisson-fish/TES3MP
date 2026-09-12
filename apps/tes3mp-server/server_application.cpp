@@ -4,9 +4,9 @@
 #include "interactive_object_interest_projection.hpp"
 #include "interest_projection.hpp"
 #include "inventory_interest_projection.hpp"
+#include "tes3mp/canonical_resync.hpp"
 #include "weather_projection.hpp"
 #include "world_time_projection.hpp"
-#include "tes3mp/canonical_resync.hpp"
 
 #include <algorithm>
 #include <array>
@@ -152,8 +152,7 @@ namespace TES3MP::ServerApp
         const auto* session = mWiring->sessions.session(connection);
         const auto& hello = session->negotiatedHello();
         return hello && hello->selectedVersion().major == 1 && hello->selectedVersion().minor >= 8
-            && std::ranges::binary_search(
-                hello->negotiatedCapabilities(), authoritativeWaitRestCapability());
+            && std::ranges::binary_search(hello->negotiatedCapabilities(), authoritativeWaitRestCapability());
     }
 
     bool ServerApplication::start() noexcept
@@ -430,10 +429,9 @@ namespace TES3MP::ServerApp
         {
             std::vector<std::vector<std::byte>> frames;
             const auto weatherFrames = weatherBaseline ? weatherBaseline->chunks.size() : 0;
-            const auto inventoryFrames = inventoryBaseline
-                ? inventoryBaseline->playerInventory.size() + inventoryBaseline->containers.size()
-                    + inventoryBaseline->groundItems.size() + 1
-                : 0;
+            const auto inventoryFrames = inventoryBaseline ? inventoryBaseline->playerInventory.size()
+                    + inventoryBaseline->containers.size() + inventoryBaseline->groundItems.size() + 1
+                                                           : 0;
             const auto frameCapacity = 9 + observations->size() * 2 + weatherFrames + inventoryFrames;
             frames.reserve(frameCapacity);
             auto addFrame = [&](MessageClass messageClass, MessageKind kind, std::vector<std::byte> payload) {
@@ -617,10 +615,9 @@ namespace TES3MP::ServerApp
             : std::nullopt;
         if (wantCombat && !combatDelivery)
             return false;
-        auto weatherDelivery = wantWeather
-            ? projectWeatherBaseline(resolved.publication()->state(), *mWiring->world, request->sessionId(), tick,
-                  mWiring->reducer.canonicalRevision())
-            : std::nullopt;
+        auto weatherDelivery = wantWeather ? projectWeatherBaseline(resolved.publication()->state(), *mWiring->world,
+                                                 request->sessionId(), tick, mWiring->reducer.canonicalRevision())
+                                           : std::nullopt;
         if (wantWeather && !weatherDelivery)
             return false;
         auto worldTimeDelivery = wantWorldTime
@@ -1056,8 +1053,7 @@ namespace TES3MP::ServerApp
             });
             for (std::size_t index = 0; index < dispositions.size(); ++index)
             {
-                const auto* waitRest
-                    = std::get_if<WaitRestCommandProposal>(&commands[index].proposal().payload());
+                const auto* waitRest = std::get_if<WaitRestCommandProposal>(&commands[index].proposal().payload());
                 if (waitRest && dispositions[index].disposition() == CommandDisposition::Applied)
                 {
                     const auto& proposal = commands[index].proposal();
@@ -1070,12 +1066,11 @@ namespace TES3MP::ServerApp
                 && waitRestConsentsCandidate.size() == prepared.candidateState().activeSessions().size())
             {
                 const auto& first = waitRestConsentsCandidate.begin()->second.request;
-                const bool unanimous = std::ranges::all_of(prepared.candidateState().activeSessions(),
-                    [&](const CanonicalSessionProgress& active) {
+                const bool unanimous = std::ranges::all_of(
+                    prepared.candidateState().activeSessions(), [&](const CanonicalSessionProgress& active) {
                         const auto found = waitRestConsentsCandidate.find(active.sessionId());
                         return found != waitRestConsentsCandidate.end()
-                            && found->second.generation == active.sessionGeneration()
-                            && found->second.request == first;
+                            && found->second.generation == active.sessionGeneration() && found->second.request == first;
                     });
                 if (unanimous)
                     waitRestCommit = first;
@@ -1100,6 +1095,9 @@ namespace TES3MP::ServerApp
                 if (std::holds_alternative<InventoryCommandProposal>(commands[index].proposal().payload()))
                     refreshInventoryBaselines = true;
                 if (std::holds_alternative<MeleeAttackCommandProposal>(commands[index].proposal().payload())
+                    && dispositions[index].disposition() == CommandDisposition::Applied)
+                    refreshInventoryBaselines = true;
+                if (std::holds_alternative<MagicUseCommandProposal>(commands[index].proposal().payload())
                     && dispositions[index].disposition() == CommandDisposition::Applied)
                     refreshInventoryBaselines = true;
                 const auto* dialogue
@@ -1359,8 +1357,7 @@ namespace TES3MP::ServerApp
                     mFailure = "world time simulation failed";
                     return false;
                 }
-                auto advancedWeather
-                    = advanceCanonicalWeather(*worldValue, batch.scheduledTick().value());
+                auto advancedWeather = advanceCanonicalWeather(*worldValue, batch.scheduledTick().value());
                 auto* weatherValue = std::get_if<CanonicalWorldState>(&advancedWeather);
                 if (!weatherValue)
                 {
@@ -1369,8 +1366,8 @@ namespace TES3MP::ServerApp
                 }
                 if (waitRestApplied)
                 {
-                    auto advancedWaitRest = advanceCanonicalWorldTimeByHours(*weatherValue,
-                        batch.scheduledTick().value(), waitRestCommit->hours());
+                    auto advancedWaitRest = advanceCanonicalWorldTimeByHours(
+                        *weatherValue, batch.scheduledTick().value(), waitRestCommit->hours());
                     auto* waitedWorld = std::get_if<CanonicalWorldState>(&advancedWaitRest);
                     if (!waitedWorld)
                     {
@@ -1397,7 +1394,7 @@ namespace TES3MP::ServerApp
                         target.sessionId(), batch.scheduledTick().value(), prepared.candidateRevision());
                     auto eventBatch = projectCombatEvents(prepared.candidateState(), projectedActors,
                         target.sessionId(), batch.scheduledTick().value(), prepared.candidateRevision(),
-                        prepared.combatEvents(), authoritativeActorEvents);
+                        prepared.combatEvents(), authoritativeActorEvents, prepared.magicEvents());
                     if (!view || !eventBatch)
                     {
                         mFailure = "combat projection failed";
@@ -1444,9 +1441,9 @@ namespace TES3MP::ServerApp
                     const auto connection = mWiring->sessions.connectionForSession(target.sessionId());
                     if (!connection || !supportsWeather(*connection))
                         continue;
-                    auto delivery = projectWeatherUpdate(*mWiring->world, *prepared.candidateWorld(),
-                        target.sessionId(), target.sessionGeneration(), batch.scheduledTick().value(),
-                        prepared.candidateRevision());
+                    auto delivery
+                        = projectWeatherUpdate(*mWiring->world, *prepared.candidateWorld(), target.sessionId(),
+                            target.sessionGeneration(), batch.scheduledTick().value(), prepared.candidateRevision());
                     if (!delivery)
                     {
                         mFailure = "weather projection failed";
@@ -1455,9 +1452,8 @@ namespace TES3MP::ServerApp
                     if (!delivery->chunks.empty())
                         weatherUpdates.emplace_back(*connection, std::move(*delivery));
                 }
-                const auto ticksPerSecond
-                    = std::max<std::uint64_t>(1, (1000 + mConfig.tickIntervalMilliseconds - 1)
-                            / mConfig.tickIntervalMilliseconds);
+                const auto ticksPerSecond = std::max<std::uint64_t>(
+                    1, (1000 + mConfig.tickIntervalMilliseconds - 1) / mConfig.tickIntervalMilliseconds);
                 if (waitRestApplied || batch.scheduledTick().value().value() % ticksPerSecond == 0)
                 {
                     for (const auto& target : prepared.candidateState().activeSessions())

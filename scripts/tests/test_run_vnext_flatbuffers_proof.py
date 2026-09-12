@@ -35,6 +35,7 @@ class FlatBuffersProofRunnerTests(unittest.TestCase):
                 "client_interact_object_command.fbs",
                 "client_inventory_transaction_command.fbs",
                 "client_melee_attack_command.fbs",
+                "client_magic_use_command.fbs",
                 "client_vr_pose_sample.fbs",
                 "latest_wins_actor_snapshot.fbs",
                 "latest_wins_combat_snapshot.fbs",

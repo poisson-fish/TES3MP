@@ -16,7 +16,7 @@ namespace
     {
         return static_cast<std::uint8_t>(effect.target) <= static_cast<std::uint8_t>(TES3MP::DirectMagicTarget::Other)
             && static_cast<std::uint8_t>(effect.kind)
-            <= static_cast<std::uint8_t>(TES3MP::DirectMagicEffectKind::DamageFatigue)
+            <= static_cast<std::uint8_t>(TES3MP::DirectMagicEffectKind::RestoreMagicka)
             && finite(effect.minimumMagnitude) && finite(effect.maximumMagnitude) && effect.minimumMagnitude >= 0.f
             && effect.minimumMagnitude <= effect.maximumMagnitude && effect.maximumMagnitude <= 1'000'000.f;
     }
@@ -36,6 +36,10 @@ namespace
                 return defense.poisonResistance;
             case Kind::DamageHealth:
             case Kind::DamageFatigue:
+            case Kind::DamageMagicka:
+            case Kind::RestoreHealth:
+            case Kind::RestoreFatigue:
+            case Kind::RestoreMagicka:
                 return 0.f;
         }
         return 0.f;
@@ -62,7 +66,8 @@ namespace TES3MP
     std::optional<DirectMagicCatalog> DirectMagicCatalog::create(ContentManifestId manifest,
         const ItemPrototypeCatalog& items, DirectMagicSettings settings,
         std::span<const DirectEnchantmentProfile> enchantments, std::span<const DirectEquipmentMagicProfile> equipment,
-        std::span<const DirectActorMagicProfile> actors, std::span<const DirectTrapMagicProfile> traps) noexcept
+        std::span<const DirectActorMagicProfile> actors, std::span<const DirectTrapMagicProfile> traps,
+        std::span<const DirectSpellProfile> spells) noexcept
     try
     {
         if (manifest != items.contentManifestId() || !finite(settings.elementalShieldMultiplier)
@@ -70,7 +75,7 @@ namespace TES3MP
             || !finite(settings.diseaseTransferChance) || settings.diseaseTransferChance < 0.f
             || settings.diseaseTransferChance > 100.f || enchantments.size() > MaximumItemPrototypes
             || equipment.size() > MaximumItemPrototypes || actors.size() > MaximumActorCatalogEntries
-            || traps.size() > MaximumDirectMagicTraps)
+            || traps.size() > MaximumDirectMagicTraps || spells.size() > MaximumDirectMagicSpells)
             return std::nullopt;
 
         std::vector<DirectEnchantmentProfile> enchantmentValues(enchantments.begin(), enchantments.end());
@@ -79,10 +84,13 @@ namespace TES3MP
         {
             const auto& profile = enchantmentValues[index];
             const auto* item = items.find(profile.prototypeId);
-            if (!item || item->category != ItemCategory::Weapon
-                || (item->slotMask & slotToMask(EquipmentSlot::CarriedRight)) == 0
-                || profile.kind != DirectMagicEnchantmentKind::OnStrike || profile.chargeCost == 0
-                || profile.chargeCost > item->maxEnchantmentCharge || profile.effects.empty()
+            const bool onStrike = profile.kind == DirectMagicEnchantmentKind::OnStrike;
+            const bool whenUsed = profile.kind == DirectMagicEnchantmentKind::WhenUsed;
+            if (!item || (!onStrike && !whenUsed)
+                || (onStrike
+                    && (item->category != ItemCategory::Weapon
+                        || (item->slotMask & slotToMask(EquipmentSlot::CarriedRight)) == 0))
+                || profile.chargeCost == 0 || profile.chargeCost > item->maxEnchantmentCharge || profile.effects.empty()
                 || profile.effects.size() > MaximumDirectMagicEffectsPerSource
                 || !std::ranges::all_of(profile.effects, validEffect)
                 || (index && enchantmentValues[index - 1].prototypeId == profile.prototypeId))
@@ -132,14 +140,28 @@ namespace TES3MP
         {
             const auto& profile = trapValues[index];
             if (profile.effects.empty() || profile.effects.size() > MaximumDirectMagicEffectsPerSource
-                || !std::ranges::all_of(profile.effects, [](const DirectMagicEffectProfile& effect) {
-                       return validEffect(effect) && effect.target == DirectMagicTarget::Other;
-                   })
+                || !std::ranges::all_of(profile.effects,
+                    [](const DirectMagicEffectProfile& effect) {
+                        return validEffect(effect) && effect.target == DirectMagicTarget::Other;
+                    })
                 || (index && trapValues[index - 1].trapId == profile.trapId))
                 return std::nullopt;
         }
+        std::vector<DirectSpellProfile> spellValues(spells.begin(), spells.end());
+        std::ranges::sort(spellValues, {}, &DirectSpellProfile::spellId);
+        for (std::size_t index = 0; index < spellValues.size(); ++index)
+        {
+            const auto& profile = spellValues[index];
+            if (static_cast<std::uint8_t>(profile.school) >= static_cast<std::uint8_t>(DirectMagicSchool::Count)
+                || profile.magickaCost > 1'000'000 || !finite(profile.effectDifficulty)
+                || profile.effectDifficulty < 0.f || profile.effectDifficulty > 1'000'000.f || profile.effects.empty()
+                || profile.effects.size() > MaximumDirectMagicEffectsPerSource
+                || !std::ranges::all_of(profile.effects, validEffect)
+                || (index && spellValues[index - 1].spellId == profile.spellId))
+                return std::nullopt;
+        }
         return DirectMagicCatalog(manifest, settings, std::move(enchantmentValues), std::move(equipmentValues),
-            std::move(actorValues), std::move(trapValues));
+            std::move(actorValues), std::move(trapValues), std::move(spellValues));
     }
     catch (...)
     {
@@ -168,6 +190,12 @@ namespace TES3MP
     {
         const auto found = std::ranges::lower_bound(mTraps, id, {}, &DirectTrapMagicProfile::trapId);
         return found != mTraps.end() && found->trapId == id ? &*found : nullptr;
+    }
+
+    const DirectSpellProfile* DirectMagicCatalog::findSpell(SpellRecordId id) const noexcept
+    {
+        const auto found = std::ranges::lower_bound(mSpells, id, {}, &DirectSpellProfile::spellId);
+        return found != mSpells.end() && found->spellId == id ? &*found : nullptr;
     }
 
     bool directMagicCoversInteractiveObjectTraps(
@@ -245,10 +273,27 @@ namespace TES3MP
             const float damage = magnitude * multiplier;
             if (!finite(damage))
                 return std::nullopt;
-            if (effect.kind == DirectMagicEffectKind::DamageFatigue)
-                result.fatigueDamage = addBounded(result.fatigueDamage, damage);
-            else
-                result.healthDamage = addBounded(result.healthDamage, damage);
+            switch (effect.kind)
+            {
+                case DirectMagicEffectKind::DamageFatigue:
+                    result.fatigueDamage = addBounded(result.fatigueDamage, damage);
+                    break;
+                case DirectMagicEffectKind::DamageMagicka:
+                    result.magickaDamage = addBounded(result.magickaDamage, damage);
+                    break;
+                case DirectMagicEffectKind::RestoreHealth:
+                    result.healthRestore = addBounded(result.healthRestore, magnitude);
+                    break;
+                case DirectMagicEffectKind::RestoreFatigue:
+                    result.fatigueRestore = addBounded(result.fatigueRestore, magnitude);
+                    break;
+                case DirectMagicEffectKind::RestoreMagicka:
+                    result.magickaRestore = addBounded(result.magickaRestore, magnitude);
+                    break;
+                default:
+                    result.healthDamage = addBounded(result.healthDamage, damage);
+                    break;
+            }
         }
         return result;
     }

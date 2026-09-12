@@ -7,9 +7,9 @@
 
 #include <algorithm>
 #include <array>
-#include <chrono>
-#include <charconv>
 #include <cctype>
+#include <charconv>
+#include <chrono>
 #include <cstdio>
 #include <fstream>
 #include <limits>
@@ -53,14 +53,18 @@ namespace TES3MP::OpenMWAdapter
 #ifdef _WIN32
             std::wstring buffer(32768, L'\0');
             const auto size = GetModuleFileNameW(nullptr, buffer.data(), static_cast<DWORD>(buffer.size()));
-            if (size == 0 || size == buffer.size()) return {};
+            if (size == 0 || size == buffer.size())
+                return {};
             buffer.resize(size);
             return std::filesystem::path(buffer).parent_path();
 #else
             return std::filesystem::current_path();
 #endif
         }
-        catch (...) { return {}; }
+        catch (...)
+        {
+            return {};
+        }
 
         bool replaceCredentialFile(const std::filesystem::path& temporary, const std::filesystem::path& target) noexcept
         {
@@ -222,14 +226,22 @@ namespace TES3MP::OpenMWAdapter
         {
             switch (failure)
             {
-                case ClientCompositionFailure::ProvidersUnavailable: return "multiplayer providers are unavailable";
-                case ClientCompositionFailure::InvalidEndpoint: return "the server address is invalid";
-                case ClientCompositionFailure::InvalidTimeout: return "the connection timeout is invalid";
-                case ClientCompositionFailure::CredentialReadFailed: return "the saved player credential is invalid";
-                case ClientCompositionFailure::CredentialRejected: return "the join credential is invalid";
-                case ClientCompositionFailure::TransportUnavailable: return "the multiplayer transport is unavailable";
-                case ClientCompositionFailure::RuntimeUnavailable: return "the multiplayer runtime is unavailable";
-                case ClientCompositionFailure::ConnectionRejected: return "the connection could not be started";
+                case ClientCompositionFailure::ProvidersUnavailable:
+                    return "multiplayer providers are unavailable";
+                case ClientCompositionFailure::InvalidEndpoint:
+                    return "the server address is invalid";
+                case ClientCompositionFailure::InvalidTimeout:
+                    return "the connection timeout is invalid";
+                case ClientCompositionFailure::CredentialReadFailed:
+                    return "the saved player credential is invalid";
+                case ClientCompositionFailure::CredentialRejected:
+                    return "the join credential is invalid";
+                case ClientCompositionFailure::TransportUnavailable:
+                    return "the multiplayer transport is unavailable";
+                case ClientCompositionFailure::RuntimeUnavailable:
+                    return "the multiplayer runtime is unavailable";
+                case ClientCompositionFailure::ConnectionRejected:
+                    return "the connection could not be started";
             }
             return "multiplayer startup failed";
         }
@@ -257,8 +269,10 @@ namespace TES3MP::OpenMWAdapter
                 if (!CreatePipe(&readPipe, &writePipe, &security, 0)
                     || !SetHandleInformation(readPipe, HANDLE_FLAG_INHERIT, 0))
                 {
-                    if (readPipe) CloseHandle(readPipe);
-                    if (writePipe) CloseHandle(writePipe);
+                    if (readPipe)
+                        CloseHandle(readPipe);
+                    if (writePipe)
+                        CloseHandle(writePipe);
                     mFailure = "The dedicated server output pipe could not be created.";
                     return false;
                 }
@@ -270,8 +284,8 @@ namespace TES3MP::OpenMWAdapter
                 startup.hStdOutput = writePipe;
                 startup.hStdError = writePipe;
                 PROCESS_INFORMATION process{};
-                if (!CreateProcessW(executable.c_str(), command.data(), nullptr, nullptr, TRUE,
-                        CREATE_NO_WINDOW, nullptr, executable.parent_path().c_str(), &startup, &process))
+                if (!CreateProcessW(executable.c_str(), command.data(), nullptr, nullptr, TRUE, CREATE_NO_WINDOW,
+                        nullptr, executable.parent_path().c_str(), &startup, &process))
                 {
                     CloseHandle(readPipe);
                     CloseHandle(writePipe);
@@ -291,8 +305,8 @@ namespace TES3MP::OpenMWAdapter
                     if (WaitForSingleObject(mProcess, 0) != WAIT_TIMEOUT)
                     {
                         drainOutput();
-                        mFailure = mCapturedOutput.empty() ? "The dedicated server exited during startup."
-                                                          : mCapturedOutput;
+                        mFailure
+                            = mCapturedOutput.empty() ? "The dedicated server exited during startup." : mCapturedOutput;
                         stop();
                         return false;
                     }
@@ -367,8 +381,8 @@ namespace TES3MP::OpenMWAdapter
                 {
                     std::array<char, 512> buffer{};
                     DWORD read = 0;
-                    if (!ReadFile(mOutput, buffer.data(),
-                            (std::min)(available, static_cast<DWORD>(buffer.size())), &read, nullptr)
+                    if (!ReadFile(mOutput, buffer.data(), (std::min)(available, static_cast<DWORD>(buffer.size())),
+                            &read, nullptr)
                         || read == 0)
                         break;
                     if (mCapturedOutput.size() + read > 4096)
@@ -449,10 +463,8 @@ namespace TES3MP::OpenMWAdapter
                 const auto credentialFile = mConfiguration.playerCredentialDirectory / credentialFileName(*endpoint);
                 mActiveCredentialFile = mProfileUsername.empty() ? credentialFile : std::filesystem::path{};
                 auto created = makeClientCoordinator(endpoint->host(), endpoint->port(),
-                    mConfiguration.timeoutMilliseconds, mConfiguration.passwordFile,
-                    credentialFile,
-                    mConfiguration.contentManifest, providers, mJoinPassword,
-                    mProfileUsername, mProfileCredential);
+                    mConfiguration.timeoutMilliseconds, mConfiguration.passwordFile, credentialFile,
+                    mConfiguration.contentManifest, providers, mJoinPassword, mProfileUsername, mProfileCredential);
                 auto* session = std::get_if<std::unique_ptr<EngineCoordinator>>(&created);
                 if (!session || !*session)
                 {
@@ -484,9 +496,8 @@ namespace TES3MP::OpenMWAdapter
                 if (!mServer.start(mConfiguration.serverExecutable, mConfiguration.serverConfig))
                     return fail(mServer.failure().empty() ? "The dedicated server could not be started."
                                                           : std::string(mServer.failure()));
-                const std::string local = address.empty()
-                    ? "127.0.0.1:" + std::to_string(mConfiguration.defaultPort)
-                    : std::string(address);
+                const std::string local = address.empty() ? "127.0.0.1:" + std::to_string(mConfiguration.defaultPort)
+                                                          : std::string(address);
                 if (connect(local))
                 {
                     mHosted = true;
@@ -517,14 +528,8 @@ namespace TES3MP::OpenMWAdapter
                     std::ranges::fill(mProfileCredential, std::byte{});
                 }
             }
-            std::string_view activePlayerUsername() const noexcept override
-            {
-                return mProfileUsername;
-            }
-            bool gameStartRequested() const noexcept override
-            {
-                return mSession && mSession->gameStartRequested();
-            }
+            std::string_view activePlayerUsername() const noexcept override { return mProfileUsername; }
+            bool gameStartRequested() const noexcept override { return mSession && mSession->gameStartRequested(); }
             CharacterLifecycle characterLifecycle() const noexcept override
             {
                 return mSession ? mSession->characterLifecycle() : CharacterLifecycle::NewCharacter;
@@ -534,9 +539,13 @@ namespace TES3MP::OpenMWAdapter
                 return mSession ? mSession->characterProfileRevision() : CharacterProfileRevision::initial();
             }
             const ReliableCharacterProfile* confirmedCharacterProfile() const noexcept override
-            { return mSession ? mSession->confirmedCharacterProfile() : nullptr; }
+            {
+                return mSession ? mSession->confirmedCharacterProfile() : nullptr;
+            }
             bool submitCharacterCreation(CharacterCreationChoice choice) noexcept override
-            { return mSession && mSession->submitCharacterCreation(std::move(choice)); }
+            {
+                return mSession && mSession->submitCharacterCreation(std::move(choice));
+            }
             void setGameRunning(bool value) noexcept override
             {
                 mGameRunning = value;
@@ -596,14 +605,13 @@ namespace TES3MP::OpenMWAdapter
         };
     }
 
-    std::optional<ConnectionEndpoint> parseServerAddress(
-        std::string_view address, std::uint16_t defaultPort) noexcept
+    std::optional<ConnectionEndpoint> parseServerAddress(std::string_view address, std::uint16_t defaultPort) noexcept
     {
         constexpr std::string_view scheme = "tes3mp://";
         const bool hasTes3mpScheme = address.size() >= scheme.size()
             && std::equal(scheme.begin(), scheme.end(), address.begin(), [](char expected, char actual) {
-                return expected == static_cast<char>(std::tolower(static_cast<unsigned char>(actual)));
-            });
+                   return expected == static_cast<char>(std::tolower(static_cast<unsigned char>(actual)));
+               });
         if (hasTes3mpScheme)
             address.remove_prefix(scheme.size());
         else if (address.find("://") != std::string_view::npos)
@@ -672,9 +680,9 @@ namespace TES3MP::OpenMWAdapter
 
     ClientCoordinatorResult makeClientCoordinator(std::string_view host, std::uint64_t port,
         std::uint64_t timeoutMilliseconds, const std::filesystem::path& passwordFile,
-        const std::filesystem::path& playerCredentialFile, ContentManifestId contentManifest,
-        ClientProviders providers, std::string_view passwordOverride,
-        std::string_view profileUsername, std::span<const std::byte> profileCredential) noexcept
+        const std::filesystem::path& playerCredentialFile, ContentManifestId contentManifest, ClientProviders providers,
+        std::string_view passwordOverride, std::string_view profileUsername,
+        std::span<const std::byte> profileCredential) noexcept
     try
     {
         if (!providers.input || !providers.presentation || !providers.status)
@@ -722,8 +730,7 @@ namespace TES3MP::OpenMWAdapter
         {
             if (!isValidPlayerUsername(profileUsername) || profileCredential.size() != PlayerCredentialBytes)
                 return ClientCompositionFailure::CredentialRejected;
-            auto endpointCredential
-                = deriveEndpointCredential(profileCredential, endpoint->host(), endpoint->port());
+            auto endpointCredential = deriveEndpointCredential(profileCredential, endpoint->host(), endpoint->port());
             playerCredential = PlayerCredential::create(endpointCredential);
             std::ranges::fill(endpointCredential, std::byte{});
             if (!playerCredential)
@@ -758,12 +765,13 @@ namespace TES3MP::OpenMWAdapter
         const std::array optional{ vrPoseCapability(), actorReplicationCapability(),
             interactiveObjectReplicationCapability(), inventoryReplicationCapability(), combatReplicationCapability(),
             characterCreationCapability(), dialogueChoiceCapability(), weatherReplicationCapability(),
-            worldTimeReplicationCapability(), authoritativeWaitRestCapability(), authoritativeSecurityCapability() };
+            worldTimeReplicationCapability(), authoritativeWaitRestCapability(), authoritativeSecurityCapability(),
+            authoritativeInstantMagicCapability() };
         auto offer
             = std::get<CapabilityOffer>(CapabilityOffer::create(std::move(versions), optional, {}, contentManifest));
         if ((*runtime)->start(*endpoint, ClientHello::fromOffer(std::move(offer)),
-                AuthenticationRequest::join(std::move(*password), std::move(playerCredential),
-                    std::string(profileUsername)))
+                AuthenticationRequest::join(
+                    std::move(*password), std::move(playerCredential), std::string(profileUsername)))
             != HeadlessClientResult::Accepted)
             return ClientCompositionFailure::ConnectionRejected;
         return makeCoordinator(std::move(transport.runtime), std::move(clock), std::move(*runtime),

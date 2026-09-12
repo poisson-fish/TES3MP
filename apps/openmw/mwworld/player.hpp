@@ -40,6 +40,8 @@ namespace MWWorld
         using MeleeHitInterceptor
             = std::function<bool(float attackStrength, int attackType, const MWWorld::Ptr& victim)>;
         using MeleeTargetProvider = std::function<void(std::vector<MWWorld::Ptr>& targets)>;
+        using MagicCastInterceptor = std::function<bool(
+            bool release, const ESM::RefId& spell, const MWWorld::Ptr& item, const MWWorld::Ptr& target)>;
 
     private:
         LiveCellRef<ESM::NPC> mPlayer;
@@ -68,6 +70,7 @@ namespace MWWorld
         ActivationInterceptor mActivationInterceptor;
         MeleeHitInterceptor mMeleeHitInterceptor;
         MeleeTargetProvider mMeleeTargetProvider;
+        MagicCastInterceptor mMagicCastInterceptor;
 
     public:
         Player(const ESM::NPC* player);
@@ -106,10 +109,7 @@ namespace MWWorld
         {
             mActivationInterceptor = std::move(interceptor);
         }
-        void clearActivationInterceptor()
-        {
-            mActivationInterceptor = nullptr;
-        }
+        void clearActivationInterceptor() { mActivationInterceptor = nullptr; }
         void setMeleeHitInterceptor(MeleeHitInterceptor interceptor) { mMeleeHitInterceptor = std::move(interceptor); }
         void setMeleeTargetProvider(MeleeTargetProvider provider) { mMeleeTargetProvider = std::move(provider); }
         void clearMeleeCombatInterceptors()
@@ -125,6 +125,16 @@ namespace MWWorld
         {
             if (mMeleeTargetProvider)
                 mMeleeTargetProvider(targets);
+        }
+        void setMagicCastInterceptor(MagicCastInterceptor interceptor)
+        {
+            mMagicCastInterceptor = std::move(interceptor);
+        }
+        void clearMagicCastInterceptor() { mMagicCastInterceptor = nullptr; }
+        bool interceptMagicCast(
+            bool release, const ESM::RefId& spell, const MWWorld::Ptr& item, const MWWorld::Ptr& target) const
+        {
+            return mMagicCastInterceptor && mMagicCastInterceptor(release, spell, item, target);
         }
 
         void yaw(float yaw);

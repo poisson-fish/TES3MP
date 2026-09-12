@@ -130,6 +130,14 @@ the affected code/tests in the same milestone.
   delegated to local OpenMW magic state. Armed object traps use the same rule:
   exact manifest-bound trap profiles resolve against canonical equipped defenses,
   and RNG, damage/death, combat revision, and trap disarm commit atomically.
+- **Spells and enchanted-item use carry intent, never outcomes.** A client names
+  only a manifest-mapped known spell or canonical carried stack, a self/player/actor
+  target, observed tick, and expected revisions. The server owns range, cast
+  success, resistance, magnitude, target state, and durable RNG. Spell magicka or
+  effective enchantment charge is consumed in the same commit as instantaneous
+  health/fatigue/magicka effects and school/Enchant progress; a failed spell roll
+  consumes magicka but grants no effect or progress. Duration, area, summoning,
+  and projectile state are deferred rather than simulated locally.
 - **Live authoritative combat progression and recovery.** Successful server-confirmed
   weapon, hand-to-hand, block, armor, and unarmored uses advance only the corresponding canonical
   skill using baked OpenMW use gains plus the confirmed character's class and

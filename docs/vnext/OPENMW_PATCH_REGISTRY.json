@@ -58,7 +58,7 @@
       "id": "P14-001",
       "slice": "14.4",
       "owner": "OpenMW adapter",
-      "purpose": "Provide a clean activation interceptor seam on MWWorld::Player to route interactive object activation raycasts to the multiplayer input provider before stock single-player activation occurs.",
+      "purpose": "Provide clean activation and spell-release interceptor seams on MWWorld::Player to route interactive object raycasts and manifest-mapped magic intent to multiplayer authority before stock single-player mutation occurs.",
       "paths": [
         "apps/openmw/mwworld/player.cpp",
         "apps/openmw/mwworld/player.hpp"
@@ -66,7 +66,8 @@
       "tests": [
         "scripts/tests/test_openmw_patch_registry.py",
         "scripts/tests/test_interactive_object_contract.py",
-        "openmw_tes3mp_adapter_tests"
+        "openmw_tes3mp_adapter_tests",
+        "authoritative enchanted-item desktop capture"
       ],
       "disposition": "local; possible general-purpose upstream candidate; no upstream contact authorized",
       "removal_condition": "OpenMW supplies an equivalent reviewed activation interceptor hook on MWWorld::Player"
@@ -176,7 +177,7 @@
       "id": "P20-001",
       "slice": "desktop canonical weather and world time",
       "owner": "OpenMW adapter",
-      "purpose": "Suppress stock regional weather selection and local clock advancement while multiplayer authority is active, apply manifest-mapped canonical weather through native presentation, and apply the canonical fixed calendar/time-scale directly to OpenMW globals.",
+      "purpose": "Suppress stock regional weather selection, local clock advancement, and authoritative-mode local spell mutation; apply manifest-mapped canonical weather and magic presentation through native OpenMW surfaces, and apply the canonical fixed calendar/time-scale directly to OpenMW globals.",
       "paths": [
         "apps/openmw/mwbase/world.hpp",
         "apps/openmw/mwworld/weather.cpp",
@@ -187,7 +188,8 @@
       "tests": [
         "scripts/tests/test_openmw_patch_registry.py",
         "openmw_tes3mp_adapter_tests",
-        "openmw RelWithDebInfo link"
+        "openmw RelWithDebInfo link",
+        "authoritative enchanted-item desktop capture"
       ],
       "disposition": "local product adapter",
       "removal_condition": "OpenMW supplies equivalent supported external weather and world-time authority seams"

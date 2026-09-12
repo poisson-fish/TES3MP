@@ -533,6 +533,13 @@ namespace
                 writeFloat(writer, value);
             writeFloat(writer, player.securitySkill);
             writeDefense(writer, player.magicDefense);
+            for (float value : player.magicSkills)
+                writeFloat(writer, value);
+            writeFloat(writer, player.enchantSkill);
+            writer.fixed(static_cast<std::uint32_t>(player.knownSpells.size()));
+            for (const auto spell : player.knownSpells)
+                writeStrong(writer, spell);
+            writeOptionalStrong(writer, player.lastMagicUseTick);
             writer.fixed(static_cast<std::uint32_t>(player.contractedDiseases.size()));
             for (const auto disease : player.contractedDiseases)
                 writeStrong(writer, disease);
@@ -554,6 +561,8 @@ namespace
             writeOptionalStrong(writer, actor.deathTick);
             writeFloat(writer, actor.maximumHealth);
             writeFloat(writer, actor.maximumFatigue);
+            writeFloat(writer, actor.magicka);
+            writeFloat(writer, actor.maximumMagicka);
             writeBool(writer, actor.creature);
             writeDefense(writer, actor.magicDefense);
         }
@@ -614,6 +623,24 @@ namespace
                 return std::nullopt;
             if (!readDefense(reader, player.magicDefense))
                 return std::nullopt;
+            for (auto& value : player.magicSkills)
+                if (!readFloat(reader, value))
+                    return std::nullopt;
+            if (!readFloat(reader, player.enchantSkill))
+                return std::nullopt;
+            const auto knownSpellCount = reader.fixed<std::uint32_t>();
+            if (!knownSpellCount || *knownSpellCount > MaximumStartingSpells)
+                return std::nullopt;
+            player.knownSpells.reserve(*knownSpellCount);
+            for (std::uint32_t spellIndex = 0; spellIndex < *knownSpellCount; ++spellIndex)
+            {
+                auto spell = readStrong<SpellRecordId>(reader);
+                if (!spell)
+                    return std::nullopt;
+                player.knownSpells.push_back(*spell);
+            }
+            if (!readOptionalStrong(reader, player.lastMagicUseTick))
+                return std::nullopt;
             const auto diseaseCount = reader.fixed<std::uint32_t>();
             if (!diseaseCount || *diseaseCount > MaximumContractedDiseasesPerPlayer)
                 return std::nullopt;
@@ -658,7 +685,8 @@ namespace
             actor.attackReachQuanta = *reach;
             if (!readOptionalStrong(reader, actor.aggressionTarget) || !readOptionalStrong(reader, actor.lastAttackTick)
                 || !readOptionalStrong(reader, actor.deathTick) || !readFloat(reader, actor.maximumHealth)
-                || !readFloat(reader, actor.maximumFatigue) || !readBool(reader, actor.creature)
+                || !readFloat(reader, actor.maximumFatigue) || !readFloat(reader, actor.magicka)
+                || !readFloat(reader, actor.maximumMagicka) || !readBool(reader, actor.creature)
                 || !readDefense(reader, actor.magicDefense))
                 return std::nullopt;
             result.actors.push_back(std::move(actor));
@@ -1215,12 +1243,11 @@ namespace
         if (!readBool(reader, hasWeather))
             return std::nullopt;
         if (!hasWeather)
-            return CanonicalWorldState::create(time, globals, std::move(*catalog), std::move(*factionCatalog),
-                players, playerFactions);
+            return CanonicalWorldState::create(
+                time, globals, std::move(*catalog), std::move(*factionCatalog), players, playerFactions);
         const auto weatherManifestBytes = reader.bytes(ContentManifestIdBytes);
         const auto weatherCount = reader.fixed<std::uint32_t>();
-        if (!weatherManifestBytes || !weatherCount || *weatherCount == 0
-            || *weatherCount > MaximumWeatherIdentities)
+        if (!weatherManifestBytes || !weatherCount || *weatherCount == 0 || *weatherCount > MaximumWeatherIdentities)
             return std::nullopt;
         const auto weatherManifest = ContentManifestId::fromBytes(*weatherManifestBytes);
         if (!weatherManifest)
@@ -1271,12 +1298,10 @@ namespace
                 return std::nullopt;
             word = *value;
         }
-        const auto random = RandomStateV1::fromWords(
-            randomWords[0], randomWords[1], randomWords[2], randomWords[3]);
+        const auto random = RandomStateV1::fromWords(randomWords[0], randomWords[1], randomWords[2], randomWords[3]);
         const auto weatherLastAdvance = readStrong<ServerTick>(reader);
         const auto stateCount = reader.fixed<std::uint32_t>();
-        if (!weatherCatalog || !random || !weatherLastAdvance || !stateCount
-            || *stateCount != *weatherRegionCount)
+        if (!weatherCatalog || !random || !weatherLastAdvance || !stateCount || *stateCount != *weatherRegionCount)
             return std::nullopt;
         CanonicalWeatherState weatherState{ {}, *random, *weatherLastAdvance };
         weatherState.regions.reserve(*stateCount);
@@ -1570,10 +1595,8 @@ namespace
             }
             else if (command.source == DurableCommandSource::DialogueChoice)
             {
-                if (commands.size() != 1 || command.disposition != 0 || command.fields[1] == 0
-                    || command.fields[2] == 0
-                    || std::ranges::any_of(
-                        std::span(command.fields).subspan(3), [](auto field) { return field != 0; }))
+                if (commands.size() != 1 || command.disposition != 0 || command.fields[1] == 0 || command.fields[2] == 0
+                    || std::ranges::any_of(std::span(command.fields).subspan(3), [](auto field) { return field != 0; }))
                     return false;
             }
             else
@@ -1655,8 +1678,7 @@ namespace
                 factionPlayers.push_back(player);
         if (world->weatherCatalog() && world->weather())
             return CanonicalWorldState::create(world->time(), world->globals(), *world->questJournalCatalog(),
-                *world->factionDialogueCatalog(), *world->weatherCatalog(), players, factionPlayers,
-                *world->weather());
+                *world->factionDialogueCatalog(), *world->weatherCatalog(), players, factionPlayers, *world->weather());
         return CanonicalWorldState::create(world->time(), world->globals(), *world->questJournalCatalog(),
             *world->factionDialogueCatalog(), players, factionPlayers);
     }
@@ -1840,13 +1862,14 @@ namespace TES3MP
                         || world->weather()->lastAdvanceTick > checkpointTick))
                 || std::ranges::any_of(world->globals(),
                     [checkpointTick](const auto& global) { return global.lastChangeTick > checkpointTick; })
-                || std::ranges::any_of(world->questJournal(), [&](const auto& player) {
-                       return !durablePlayer(players, player.player) || player.lastJournalChangeTick > checkpointTick
-                           || std::ranges::any_of(player.quests,
-                               [checkpointTick](const auto& quest) { return quest.lastChangeTick > checkpointTick; })
-                           || std::ranges::any_of(player.journal,
-                               [checkpointTick](const auto& entry) { return entry.changeTick > checkpointTick; });
-                   })
+                || std::ranges::any_of(world->questJournal(),
+                    [&](const auto& player) {
+                        return !durablePlayer(players, player.player) || player.lastJournalChangeTick > checkpointTick
+                            || std::ranges::any_of(player.quests,
+                                [checkpointTick](const auto& quest) { return quest.lastChangeTick > checkpointTick; })
+                            || std::ranges::any_of(player.journal,
+                                [checkpointTick](const auto& entry) { return entry.changeTick > checkpointTick; });
+                    })
                 || std::ranges::any_of(world->factionStates(), [&](const auto& player) {
                        return !durablePlayer(players, player.player)
                            || std::ranges::any_of(player.factions, [checkpointTick](const auto& faction) {

@@ -72,16 +72,16 @@ class ContentBakerTests(unittest.TestCase):
             encoding="utf-8",
         )
         (self.source / "combat.txt").write_text(
-            "TES3MP_COMBAT_V8\n"
+            "TES3MP_COMBAT_V9\n"
             f"manifest {ZERO_MANIFEST}\n"
             "seed 1234\n"
             "settings 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 -90 90 1 1 1 0 100 1 1 1 30 .01 .01 .25 0 0\n"
             "magic_settings .1 .1\n"
             "security_settings -1 -1 1\n"
             "player_magic 50 10 0 0 0 0 0 0 0 0 0\n"
-            "progression 1 1 1 1 0 1 0 1 0 1 0 1 0 1 0 1 0 1 0 1 0 1 0 1 0 1\n"
-            "player 50 50 50 1 0 0 20 20 20 20 20 25 100 50 20 50 100 0.1 0.2 20 20 20 20 500 0 20\n"
-            "actor 1 20 20 10 0 0 0 0 0 0 0 0 1\n"
+            "progression 1 1 1 1 0 1 0 1 0 1 0 1 0 1 0 1 0 1 0 1 0 1 0 1 0 1 0 1 0 1 0 1 0 1 0 1 0 1 0 1 0 1\n"
+            "player 50 50 50 1 0 0 20 20 20 20 20 25 100 50 20 50 100 0.1 0.2 20 20 20 20 20 20 20 20 20 20 20 20 500 0\n"
+            "actor 1 20 20 10 0 0 0 0 0 0 0 0 0 1\n"
             f"weapon {self.item_prototype} 0 1 5 1 5 1 5 10 1 1\n",
             encoding="utf-8",
         )
@@ -207,6 +207,7 @@ class ContentBakerTests(unittest.TestCase):
             "iShieldWeight": 15., "fLightMaxMod": .6, "fMedMaxMod": .9,
             "fMiscSkillBonus": 1., "fMinorSkillBonus": .75, "fMajorSkillBonus": .5,
             "fSpecialSkillBonus": .8, "fRestMagicMult": .15,
+            "fEffectCostMult": 1.,
             "fElementalShieldMult": .1, "fDiseaseXferChance": 10.,
             "fPickLockMult": -1., "fTrapCostMult": -1.,
         }
@@ -444,13 +445,13 @@ class ContentBakerTests(unittest.TestCase):
         self.assertIn(f"manifest {manifest}", inventory)
         self.assertIn(f"prototype {self.item_prototype} 11 30 10 400 0 65536 0 none", inventory)
         self.assertIn("settings 0.200000003 2 0 0.25 0.100000001 0.5 0.100000001 0.100000001 0.5 0.100000001 4 1.5 1.25 0.5 0.0199999996 0.0399999991 0.100000001 5 -60 60 1 1 1.25 10 50 2 3 0.25 30 0.00999999978 0.00999999978 0.25 0 0", combat)
-        self.assertIn("progression 1 0.75 0.5 0.800000012 0 1 0 21 0 6 0 5 0 7 0 8 0 27 0 22 0 3 0 4 0 18", combat)
+        self.assertIn("progression 1 0.75 0.5 0.800000012 0 1 0 21 0 6 0 5 0 7 0 8 0 27 0 22 0 3 0 4 0 18 0 0 0 12 0 14 0 11 0 13 0 15 0 16 0 10", combat)
         self.assertIn("security_settings -1 -1 19", combat)
-        self.assertIn("player 40 40 40 1.25 0 0 21 22 23 24 25 26 160 40 5 30 0 0.0333333333 0.0375000015 5 5 5 5 5 2000 0", combat)
+        self.assertIn("player 40 40 40 1.25 0 0 21 22 23 24 25 26 160 40 5 30 0 0.0333333333 0.0375000015 5 5 5 5 5 5 5 5 5 5 5 5 2000 0", combat)
         self.assertIn("magic_settings 0.100000001 10", combat)
         self.assertIn("player_magic 30 5 0 0 0 0 0 0 0 0 0", combat)
         self.assertIn(f"weapon {self.item_prototype} 0 4 5 4 5 5 5 3 1 1", combat)
-        self.assertIn("actor 1 23 60 6.25 0 0 0 0 0 0 0 0 1", combat)
+        self.assertIn("actor 1 23 60 6.25 0 0 0 0 10 0 0 0 0 1", combat)
         self.assertIn("actor_attack 1 20 10 10 1.25 30 60 1 2 1 2 1 2 1 10", combat)
         self.assertIn("actor_magic 1 5 0 0 0 0 0 0 0 0 0 0", combat)
         self.assertIn(f"actor 1 2 {self.actor_prototype} interior 1 0 0 0 0 0 0 idle", actors)
@@ -490,10 +491,13 @@ class ContentBakerTests(unittest.TestCase):
         enchantment_record = record("ENCH", subrecord("NAME", enchantment.encode() + b"\0"),
                                     subrecord("ENDT", struct.pack("<4i", 1, 5, 40, 0)),
                                     effect(14, 1, 7))
+        fire_metadata = record("MGEF", subrecord("INDX", struct.pack("<i", 14)),
+                               subrecord("MEDT", struct.pack("<if4i3f", 10, 1., 0x1000,
+                                                             0, 0, 0, 0., 0., 0.)))
         disease_record = record("SPEL", subrecord("NAME", disease.encode() + b"\0"),
                                 subrecord("SPDT", struct.pack("<3i", 3, 0, 0)),
                                 effect(23, 0, 3))
-        self._write_derived_esm(enchantment_record + disease_record, enchantment, (disease,))
+        self._write_derived_esm(fire_metadata + enchantment_record + disease_record, enchantment, (disease,))
 
         _manifest, path = baker.bake([self.openmw_config], self.server_config, self.client_mappings,
                                      self.output, self._write_recipe())
@@ -501,8 +505,39 @@ class ContentBakerTests(unittest.TestCase):
         inventory = path.joinpath("vanilla-inventory.txt").read_text()
         combat = path.joinpath("vanilla-combat.txt").read_text()
         self.assertIn(f"prototype {self.item_prototype} 11 30 10 400 40 65536 0 none", inventory)
-        self.assertIn(f"enchantment {self.item_prototype} 5 1 other fire 7 7", combat)
+        self.assertIn(f"enchantment {self.item_prototype} strike 5 1 other fire 7 7", combat)
         self.assertIn(f"disease 1 {baker.stable_record_id(disease)} common 1 other health 3 3", combat)
+
+    def test_instant_spell_and_when_used_profiles_use_manifest_magic_metadata(self):
+        metadata = baker.Tes3Record("MGEF", "75", False,
+                                    (("INDX", struct.pack("<i", 75)),
+                                     ("MEDT", struct.pack("<if4i3f", 15, 2., 0x1000,
+                                                          0, 0, 0, 0., 0., 0.))))
+        multiplier = baker.Tes3Record("GMST", "fEffectCostMult", False,
+                                      (("NAME", b"fEffectCostMult\0"),
+                                       ("FLTV", struct.pack("<f", 1.))))
+        effect = ("ENAM", struct.pack("<hbbiiiii", 75, -1, -1, 0, 0, 1, 3, 3))
+        spell = baker.Tes3Record("SPEL", "healing word", False,
+                                 (("SPDT", struct.pack("<3i", 0, 5, 1)), effect))
+        enchantment = baker.Tes3Record("ENCH", "healing ring", False,
+                                       (("ENDT", struct.pack("<4i", 2, 4, 20, 0)), effect))
+        item = baker.Tes3Record("CLOT", "healing ring", False,
+                                (("ENAM", b"healing ring\0"),))
+        records = {("MGEF", "75"): metadata,
+                   ("GMST", "feffectcostmult"): multiplier,
+                   ("ENCH", "healing ring"): enchantment}
+        profile = baker._spell_profile(spell, records, tuple([50] * 27))
+        charge, item_magic, passive = baker._item_magic(item, records)
+        self.assertEqual(profile, ("5", "5", "0.6", "1", "1", "self", "restore_health", "3", "3"))
+        self.assertEqual((charge, item_magic, passive),
+                         (20, ("use", "4", "self", "restore_health", "3", "3"), None))
+
+        target_effect = ("ENAM", struct.pack("<hbbiiiii", 75, -1, -1, 2, 0, 1, 3, 3))
+        target_enchantment = baker.Tes3Record("ENCH", "healing ring", False,
+                                              (("ENDT", struct.pack("<4i", 2, 4, 20, 0)), target_effect))
+        records[("ENCH", "healing ring")] = target_enchantment
+        with self.assertRaisesRegex(baker.BakeError, "projectile or area magic is deferred"):
+            baker._item_magic(item, records)
 
     def test_interactive_trap_ids_are_extracted_for_exact_combat_coverage(self):
         interior = ("object", "1", "standard", "interior", "1", "0", "0", "0", "0", "0", "0",

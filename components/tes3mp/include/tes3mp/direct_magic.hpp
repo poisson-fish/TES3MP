@@ -16,6 +16,7 @@
 namespace TES3MP
 {
     inline constexpr std::size_t MaximumDirectMagicEffectsPerSource = 8;
+    inline constexpr std::size_t MaximumDirectMagicSpells = 4096;
     inline constexpr std::size_t MaximumDirectMagicDiseasesPerActor = 16;
     inline constexpr std::size_t MaximumContractedDiseasesPerPlayer = 64;
     inline constexpr std::size_t MaximumDirectMagicTraps = MaximumInteractiveObjectCatalogEntries;
@@ -34,12 +35,28 @@ namespace TES3MP
         PoisonDamage = 3,
         DamageHealth = 4,
         DamageFatigue = 5,
+        DamageMagicka = 6,
+        RestoreHealth = 7,
+        RestoreFatigue = 8,
+        RestoreMagicka = 9,
+    };
+
+    enum class DirectMagicSchool : std::uint8_t
+    {
+        Alteration = 0,
+        Conjuration = 1,
+        Destruction = 2,
+        Illusion = 3,
+        Mysticism = 4,
+        Restoration = 5,
+        Count = 6,
     };
 
     enum class DirectMagicEnchantmentKind : std::uint8_t
     {
         OnStrike = 0,
         ConstantEffect = 1,
+        WhenUsed = 2,
     };
 
     enum class DirectDiseaseKind : std::uint8_t
@@ -93,6 +110,18 @@ namespace TES3MP
         friend bool operator==(const DirectEnchantmentProfile&, const DirectEnchantmentProfile&) noexcept = default;
     };
 
+    struct DirectSpellProfile
+    {
+        SpellRecordId spellId;
+        DirectMagicSchool school = DirectMagicSchool::Alteration;
+        std::uint32_t magickaCost = 0;
+        float effectDifficulty = 0.f;
+        bool alwaysSucceeds = false;
+        std::vector<DirectMagicEffectProfile> effects;
+
+        friend bool operator==(const DirectSpellProfile&, const DirectSpellProfile&) noexcept = default;
+    };
+
     struct DirectEquipmentMagicProfile
     {
         ItemPrototypeId prototypeId;
@@ -132,9 +161,9 @@ namespace TES3MP
     public:
         static std::optional<DirectMagicCatalog> create(ContentManifestId manifest, const ItemPrototypeCatalog& items,
             DirectMagicSettings settings, std::span<const DirectEnchantmentProfile> enchantments,
-            std::span<const DirectEquipmentMagicProfile> equipment,
-            std::span<const DirectActorMagicProfile> actors,
-            std::span<const DirectTrapMagicProfile> traps = {}) noexcept;
+            std::span<const DirectEquipmentMagicProfile> equipment, std::span<const DirectActorMagicProfile> actors,
+            std::span<const DirectTrapMagicProfile> traps = {},
+            std::span<const DirectSpellProfile> spells = {}) noexcept;
 
         constexpr ContentManifestId contentManifestId() const noexcept { return mManifest; }
         constexpr DirectMagicSettings settings() const noexcept { return mSettings; }
@@ -142,23 +171,27 @@ namespace TES3MP
         const DirectEquipmentMagicProfile* findEquipment(ItemPrototypeId id) const noexcept;
         const DirectActorMagicProfile* findActor(ActorId id) const noexcept;
         const DirectTrapMagicProfile* findTrap(TrapPrototypeId id) const noexcept;
+        const DirectSpellProfile* findSpell(SpellRecordId id) const noexcept;
         std::span<const DirectEnchantmentProfile> enchantments() const noexcept { return mEnchantments; }
         std::span<const DirectEquipmentMagicProfile> equipment() const noexcept { return mEquipment; }
         std::span<const DirectActorMagicProfile> actors() const noexcept { return mActors; }
         std::span<const DirectTrapMagicProfile> traps() const noexcept { return mTraps; }
+        std::span<const DirectSpellProfile> spells() const noexcept { return mSpells; }
 
         friend bool operator==(const DirectMagicCatalog&, const DirectMagicCatalog&) noexcept = default;
 
     private:
         DirectMagicCatalog(ContentManifestId manifest, DirectMagicSettings settings,
             std::vector<DirectEnchantmentProfile> enchantments, std::vector<DirectEquipmentMagicProfile> equipment,
-            std::vector<DirectActorMagicProfile> actors, std::vector<DirectTrapMagicProfile> traps) noexcept
+            std::vector<DirectActorMagicProfile> actors, std::vector<DirectTrapMagicProfile> traps,
+            std::vector<DirectSpellProfile> spells) noexcept
             : mManifest(manifest)
             , mSettings(settings)
             , mEnchantments(std::move(enchantments))
             , mEquipment(std::move(equipment))
             , mActors(std::move(actors))
             , mTraps(std::move(traps))
+            , mSpells(std::move(spells))
         {
         }
 
@@ -168,12 +201,17 @@ namespace TES3MP
         std::vector<DirectEquipmentMagicProfile> mEquipment;
         std::vector<DirectActorMagicProfile> mActors;
         std::vector<DirectTrapMagicProfile> mTraps;
+        std::vector<DirectSpellProfile> mSpells;
     };
 
     struct DirectMagicResolution
     {
         float healthDamage = 0.f;
         float fatigueDamage = 0.f;
+        float magickaDamage = 0.f;
+        float healthRestore = 0.f;
+        float fatigueRestore = 0.f;
+        float magickaRestore = 0.f;
 
         friend constexpr bool operator==(DirectMagicResolution, DirectMagicResolution) noexcept = default;
     };

@@ -5,6 +5,17 @@ enum MeleeDamageStat : ubyte {
   Fatigue = 1,
 }
 
+enum MagicUseSourceKind : ubyte {
+  Spell = 0,
+  EnchantedItem = 1,
+}
+
+enum MagicUseTargetKind : ubyte {
+  Self = 0,
+  Player = 1,
+  Actor = 2,
+}
+
 table CombatEventHeader {
   target_session_id:ulong (id: 0);
   target_session_generation:ulong (id: 1);
@@ -36,10 +47,29 @@ struct ActorMeleeCombatEvent {
   target_died:bool;
 }
 
+struct MagicUseCombatEvent {
+  caster_player_id:ulong;
+  source_id:ulong;
+  target_id:ulong;
+  caster_combat_revision:ulong;
+  target_combat_revision:ulong;
+  self_health_delta:float;
+  self_fatigue_delta:float;
+  self_magicka_delta:float;
+  target_health_delta:float;
+  target_fatigue_delta:float;
+  target_magicka_delta:float;
+  source_kind:MagicUseSourceKind;
+  target_kind:MagicUseTargetKind;
+  cast_succeeded:bool;
+  target_died:bool;
+}
+
 table ReliableCombatEventBatch {
   header:CombatEventHeader (id: 0);
   events:[MeleeCombatEvent] (id: 1);
   actor_events:[ActorMeleeCombatEvent] (id: 2);
+  magic_events:[MagicUseCombatEvent] (id: 3);
 }
 
 root_type ReliableCombatEventBatch;

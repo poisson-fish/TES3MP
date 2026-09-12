@@ -191,9 +191,8 @@ namespace TES3MP
                 const auto equipmentSlot = static_cast<EquipmentSlot>(slot);
                 const auto* declaration = stack ? catalog.find(stack->prototypeId) : nullptr;
                 if (!stack || !declaration || (declaration->slotMask & slotToMask(equipmentSlot)) == 0
-                    || (equipmentSlot == EquipmentSlot::CarriedRight
-                        && declaration->category == ItemCategory::Weapon && declaration->maxCondition != 0
-                        && stack->condition == 0)
+                    || (equipmentSlot == EquipmentSlot::CarriedRight && declaration->category == ItemCategory::Weapon
+                        && declaration->maxCondition != 0 && stack->condition == 0)
                     || equipmentUseCount(player, stack->stackId) > stack->count)
                     return std::nullopt;
             }
@@ -306,15 +305,15 @@ namespace TES3MP
     }
 
     bool CanonicalInventoryWorld::initializePlayerFromCharacter(PlayerId playerId,
-        CharacterProfileRevision profileRevision, std::span<const StartingItem> startingItems,
-        ServerTick tick) noexcept
+        CharacterProfileRevision profileRevision, std::span<const StartingItem> startingItems, ServerTick tick) noexcept
     try
     {
         auto* player = findMutablePlayer(playerId);
         if (player && player->initializedCharacterProfile)
             return *player->initializedCharacterProfile == profileRevision;
-        if (player && (!player->stacks.empty()
-                || std::ranges::any_of(player->equipment, [](const auto& value) { return value.has_value(); })))
+        if (player && (!player->stacks.empty() || std::ranges::any_of(player->equipment, [](const auto& value) {
+                return value.has_value();
+            })))
             return false;
         if (!player && mPlayers.size() >= MaximumInventoryPlayers)
             return false;
@@ -342,8 +341,7 @@ namespace TES3MP
 
         auto nextStackId = mNextItemStackId;
         if (requiredStacks != 0
-            && (!nextStackId
-                || requiredStacks - 1 > std::numeric_limits<std::uint64_t>::max() - nextStackId->value()))
+            && (!nextStackId || requiredStacks - 1 > std::numeric_limits<std::uint64_t>::max() - nextStackId->value()))
             return false;
         std::vector<CanonicalItemStack> stacks;
         stacks.reserve(requiredStacks);
@@ -358,9 +356,8 @@ namespace TES3MP
                 const auto following = stackId.value() == std::numeric_limits<std::uint64_t>::max()
                     ? std::optional<ItemStackId>{}
                     : ItemStackId::fromValue(stackId.value() + 1);
-                stacks.push_back(CanonicalItemStack{ stackId, item.prototype,
-                    declaration.stackable ? item.count : 1, declaration.maxCondition,
-                    declaration.maxEnchantmentCharge, std::nullopt });
+                stacks.push_back(CanonicalItemStack{ stackId, item.prototype, declaration.stackable ? item.count : 1,
+                    declaration.maxCondition, declaration.maxEnchantmentCharge, std::nullopt });
                 if (index == 0 && item.equipmentSlot)
                     equipment[*item.equipmentSlot] = stackId;
                 nextStackId = following;
@@ -471,6 +468,33 @@ namespace TES3MP
         player->revision = *revision;
         player->lastChangeTick = tick;
         return SecurityToolUseResult::Applied;
+    }
+
+    EnchantedItemUseResult CanonicalInventoryWorld::consumeEnchantmentCharge(PlayerId playerId, ItemStackId stackId,
+        InventoryRevision expectedRevision, std::uint32_t charge, ServerTick tick) noexcept
+    {
+        auto* player = findMutablePlayer(playerId);
+        if (!player)
+            return EnchantedItemUseResult::PlayerNotFound;
+        if (player->revision != expectedRevision)
+            return EnchantedItemUseResult::StaleInventoryRevision;
+        if (tick < player->lastChangeTick)
+            return EnchantedItemUseResult::TickRegression;
+        auto* stack = player->findStack(stackId);
+        if (!stack)
+            return EnchantedItemUseResult::ItemNotFound;
+        const auto* item = mCatalog.find(stack->prototypeId);
+        if (!item || item->maxEnchantmentCharge == 0 || charge == 0)
+            return EnchantedItemUseResult::NotEnchanted;
+        if (stack->enchantmentCharge < charge)
+            return EnchantedItemUseResult::InsufficientCharge;
+        const auto revision = player->revision.next();
+        if (!revision)
+            return EnchantedItemUseResult::RevisionExhausted;
+        stack->enchantmentCharge -= charge;
+        player->revision = *revision;
+        player->lastChangeTick = tick;
+        return EnchantedItemUseResult::Applied;
     }
 
     bool CanonicalInventoryWorld::ensureContainer(

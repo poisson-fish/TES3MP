@@ -3,13 +3,14 @@
 
 #include "actor_replication.hpp"
 #include "authentication.hpp"
+#include "character_creation_protocol.hpp"
 #include "client_locomotion.hpp"
 #include "combat_replication.hpp"
-#include "character_creation_protocol.hpp"
 #include "dialogue_choice_protocol.hpp"
 #include "headless_client_session.hpp"
 #include "interactive_object_replication.hpp"
 #include "inventory_replication.hpp"
+#include "magic_use.hpp"
 #include "protocol_handshake.hpp"
 #include "protocol_pose.hpp"
 #include "weather_replication.hpp"
@@ -28,7 +29,7 @@ namespace TES3MP
         ReliablePlayerInventoryBaseline, ReliableContainerInventoryBaseline, ReliableGroundItemBaseline,
         LatestWinsEquipmentSnapshot, LatestWinsCombatSnapshot, ReliableCombatEventBatch, ReliableCharacterProfile,
         ReliableDialogueChoiceResult, ReliableWeatherState, ReliableWorldTimeState, ServerVrPoseSnapshot>;
-// Combat is capability-gated and intentionally kept outside the spatial readiness lanes.
+    // Combat is capability-gated and intentionally kept outside the spatial readiness lanes.
 
     enum class ClientRuntimeResult : std::uint8_t
     {
@@ -118,10 +119,14 @@ namespace TES3MP
             std::optional<ContainerRevision> expectedContainerRevision = std::nullopt,
             std::optional<WorldItemRevision> expectedWorldItemRevision = std::nullopt);
         ClientRuntimeQueueResult queueMeleeAttack(std::optional<ActorId> target, ServerTick sourceTick,
-            CombatRevision expectedAttackerRevision, CombatRevision expectedTargetRevision,
-            MeleeAttackType attackType, float attackStrength);
-        ClientRuntimeQueueResult queueCharacterCreation(CharacterCreationChoice choice,
-            CharacterProfileRevision expectedRevision);
+            CombatRevision expectedAttackerRevision, CombatRevision expectedTargetRevision, MeleeAttackType attackType,
+            float attackStrength);
+        ClientRuntimeQueueResult queueMagicUse(MagicUseSourceKind sourceKind, std::uint64_t sourceId,
+            MagicUseTargetKind targetKind, std::uint64_t targetId, ServerTick sourceTick,
+            CombatRevision expectedCasterRevision, CombatRevision expectedTargetRevision,
+            InventoryRevision expectedInventoryRevision);
+        ClientRuntimeQueueResult queueCharacterCreation(
+            CharacterCreationChoice choice, CharacterProfileRevision expectedRevision);
         ClientRuntimeQueueResult queueDialogueChoice(
             DialogueChoiceId choice, std::optional<CommandId> retainedCommandId = std::nullopt);
         ClientRuntimeQueueResult queueWaitRest(std::uint8_t hours, WaitRestMode mode);
@@ -143,9 +148,13 @@ namespace TES3MP
         CharacterLifecycle characterLifecycle() const noexcept { return mCharacterLifecycle; }
         CharacterProfileRevision characterProfileRevision() const noexcept { return mCharacterProfileRevision; }
         const std::optional<ReliableCharacterProfile>& confirmedCharacterProfile() const noexcept
-        { return mCharacterProfile; }
+        {
+            return mCharacterProfile;
+        }
         const std::optional<LatestWinsCombatSnapshot>& confirmedCombatSnapshot() const noexcept
-        { return mCombatSnapshot; }
+        {
+            return mCombatSnapshot;
+        }
         std::optional<AuthenticationRejectionReason> authenticationRejection() const noexcept;
         const std::optional<SessionRejected>& protocolRejection() const noexcept;
 

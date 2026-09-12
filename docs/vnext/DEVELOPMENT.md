@@ -257,6 +257,21 @@ active client, and rejects non-identical rollover revisions, duplicate world-tim
 presentation, failed resume convergence, undrained queues, or unbounded RSS.
 `run_security_capture.py` uses the same arguments and records lockpick/probe
 wear, progression, object mutation, resume convergence, and queue drain.
+`run_magic_use_capture.py` uses the same arguments for a real-loadout
+when-used enchantment and records the intent, reliable event presentation,
+charge consumption, target effect, Enchant progress, one durable resume, and
+queue drain:
+
+```sh
+python scripts/run_magic_use_capture.py \
+  --server build/vnext-desktop-evidence/tes3mp_server.exe \
+  --openmw build/vnext-desktop-evidence/openmw.exe \
+  --openmw-config build/weather-source-openmw.cfg \
+  --resources build/vnext-desktop-evidence/resources \
+  --data "/path/to/Morrowind/Data Files" \
+  --fallback-archive Morrowind.bsa --content Morrowind.esm \
+  --artifacts build/magic-use-evidence
+```
 
 ## Machine-owned evidence
 

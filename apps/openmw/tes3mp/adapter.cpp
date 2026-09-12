@@ -37,7 +37,7 @@ namespace TES3MP::OpenMWAdapter
                 interactiveObjectReplicationCapability(), inventoryReplicationCapability(),
                 combatReplicationCapability(), characterCreationCapability(), dialogueChoiceCapability(),
                 weatherReplicationCapability(), worldTimeReplicationCapability(), authoritativeWaitRestCapability(),
-                authoritativeSecurityCapability() };
+                authoritativeSecurityCapability(), authoritativeInstantMagicCapability() };
             auto offer = std::get<CapabilityOffer>(
                 CapabilityOffer::create(std::move(versions), optional, {}, contentManifest));
             return ClientHello::fromOffer(std::move(offer));
@@ -83,6 +83,14 @@ namespace TES3MP::OpenMWAdapter
                     combatReplicationCapability());
         }
 
+        bool instantMagicNegotiated(const ClientSessionRuntime& runtime) noexcept
+        {
+            const auto& hello = runtime.session().stateMachine().negotiatedHello();
+            return hello
+                && std::binary_search(hello->negotiatedCapabilities().begin(), hello->negotiatedCapabilities().end(),
+                    authoritativeInstantMagicCapability());
+        }
+
         bool dialogueChoicesNegotiated(const ClientSessionRuntime& runtime) noexcept
         {
             const auto& hello = runtime.session().stateMachine().negotiatedHello();
@@ -111,16 +119,16 @@ namespace TES3MP::OpenMWAdapter
         {
             const auto& hello = runtime.session().stateMachine().negotiatedHello();
             return hello && hello->selectedVersion().major == 1 && hello->selectedVersion().minor >= 8
-                && std::binary_search(hello->negotiatedCapabilities().begin(),
-                    hello->negotiatedCapabilities().end(), authoritativeWaitRestCapability());
+                && std::binary_search(hello->negotiatedCapabilities().begin(), hello->negotiatedCapabilities().end(),
+                    authoritativeWaitRestCapability());
         }
 
         bool securityNegotiated(const ClientSessionRuntime& runtime) noexcept
         {
             const auto& hello = runtime.session().stateMachine().negotiatedHello();
             return hello && hello->selectedVersion().major == 1 && hello->selectedVersion().minor >= 9
-                && std::binary_search(hello->negotiatedCapabilities().begin(),
-                    hello->negotiatedCapabilities().end(), authoritativeSecurityCapability());
+                && std::binary_search(hello->negotiatedCapabilities().begin(), hello->negotiatedCapabilities().end(),
+                    authoritativeSecurityCapability());
         }
 
         struct ResumeContinuity
@@ -223,9 +231,8 @@ namespace TES3MP::OpenMWAdapter
                     std::array<TransportEvent, TransportLimits::MaxRetainedEvents> events{};
                     const auto polled = mTransport->poll(events);
                     if (polled.result != TransportResult::Accepted
-                        || std::ranges::any_of(std::span(events).first(polled.events), [](const auto& event) {
-                               return event.kind == TransportEventKind::RuntimeFailed;
-                           }))
+                        || std::ranges::any_of(std::span(events).first(polled.events),
+                            [](const auto& event) { return event.kind == TransportEventKind::RuntimeFailed; }))
                     {
                         closeTerminal(ConnectionStatus::ResumeFailed);
                         return;
@@ -349,8 +356,7 @@ namespace TES3MP::OpenMWAdapter
                     mMinimumInventoryRevision = snapshot->header().canonicalRevision();
                 }
                 const bool completeInitialBaselines = mRuntime->session().stateMachine().interestBaselineComplete()
-                    && (!weatherNegotiated(*mRuntime)
-                        || mRuntime->session().stateMachine().weatherBaselineComplete())
+                    && (!weatherNegotiated(*mRuntime) || mRuntime->session().stateMachine().weatherBaselineComplete())
                     && (!worldTimeNegotiated(*mRuntime)
                         || mRuntime->session().stateMachine().worldTimeBaselineComplete());
                 if (mResuming && completeInitialBaselines
@@ -358,10 +364,9 @@ namespace TES3MP::OpenMWAdapter
                         || advanced.worldTimeBaselineCompleted))
                 {
                     const bool preserved = mAttemptGeneration && mContinuity && snapshot
-                        && (mPendingDialogueChoice
-                                ? preservesDialogueChoice(*snapshot, *mAttemptGeneration, *mContinuity,
-                                      mPendingDialogueChoice->commandSequence)
-                                : preserves(*snapshot, *mAttemptGeneration, *mContinuity));
+                        && (mPendingDialogueChoice ? preservesDialogueChoice(*snapshot, *mAttemptGeneration,
+                                                         *mContinuity, mPendingDialogueChoice->commandSequence)
+                                                   : preserves(*snapshot, *mAttemptGeneration, *mContinuity));
                     if (!preserved)
                     {
                         closeTerminal(ConnectionStatus::ResumeFailed);
@@ -698,6 +703,21 @@ namespace TES3MP::OpenMWAdapter
                         }
                     }
                 }
+                if (mReady && !mAwaitingResync && !mPendingCellTransition && !mDeferredCellTransition
+                    && !captured.transition && instantMagicNegotiated(*mRuntime))
+                {
+                    if (auto magic = mInput.captureMagicUse())
+                    {
+                        const auto queued = mRuntime->queueMagicUse(magic->sourceKind, magic->sourceId,
+                            magic->targetKind, magic->targetId, magic->sourceTick, magic->expectedCasterRevision,
+                            magic->expectedTargetRevision, magic->expectedInventoryRevision);
+                        if (queued.result != ClientRuntimeResult::Accepted || !queued.sequence)
+                        {
+                            closeTerminal(ConnectionStatus::TransportFailed);
+                            return;
+                        }
+                    }
+                }
                 if (snapshot)
                 {
                     if (auto intent = mInput.sampleCurrentIntent())
@@ -816,8 +836,8 @@ namespace TES3MP::OpenMWAdapter
                 const auto queued = mRuntime->queueDialogueChoice(*choice);
                 if (queued.result != ClientRuntimeResult::Accepted || !queued.sequence || !queued.commandId)
                     return DialogueChoiceSubmissionResult::Backpressured;
-                mPendingDialogueChoice = PendingDialogueChoice{ localChoice, *choice, *queued.commandId,
-                    *queued.sequence };
+                mPendingDialogueChoice
+                    = PendingDialogueChoice{ localChoice, *choice, *queued.commandId, *queued.sequence };
                 return DialogueChoiceSubmissionResult::Pending;
             }
             catch (...)
@@ -831,7 +851,6 @@ namespace TES3MP::OpenMWAdapter
                 mDialogueChoiceResolution.reset();
                 return result;
             }
-
 
             bool submitWaitRest(std::uint8_t hours, WaitRestMode mode) noexcept override
             try
@@ -1031,8 +1050,8 @@ namespace TES3MP::OpenMWAdapter
             {
                 if (!mPendingDialogueChoice)
                     return true;
-                const auto queued = mRuntime->queueDialogueChoice(
-                    mPendingDialogueChoice->choice, mPendingDialogueChoice->commandId);
+                const auto queued
+                    = mRuntime->queueDialogueChoice(mPendingDialogueChoice->choice, mPendingDialogueChoice->commandId);
                 if (queued.result != ClientRuntimeResult::Accepted || !queued.sequence || !queued.commandId
                     || *queued.commandId != mPendingDialogueChoice->commandId)
                     return false;

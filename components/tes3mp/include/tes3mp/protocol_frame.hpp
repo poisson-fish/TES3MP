@@ -57,6 +57,7 @@ namespace TES3MP
         ReliableDialogueChoiceResult = 0x0110,
         ReliableWeatherState = 0x0111,
         ReliableWorldTimeState = 0x0112,
+        ClientMagicUseCommand = 0x0113,
         LatestWinsSnapshot = 0x0200,
         LatestWinsActorSnapshot = 0x0201,
         LatestWinsEquipmentSnapshot = 0x0202,
@@ -104,6 +105,7 @@ namespace TES3MP
             case MessageKind::ReliableDialogueChoiceResult:
             case MessageKind::ReliableWeatherState:
             case MessageKind::ReliableWorldTimeState:
+            case MessageKind::ClientMagicUseCommand:
                 return MessageDescriptor{ kind, MessageClass::ReliableOperation, ReliableOperationMaximumPayloadBytes };
             case MessageKind::LatestWinsSnapshot:
             case MessageKind::LatestWinsActorSnapshot:

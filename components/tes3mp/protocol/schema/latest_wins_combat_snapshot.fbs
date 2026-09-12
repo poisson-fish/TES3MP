@@ -23,6 +23,20 @@ struct ActorCombatSnapshot {
   maximum_health:float;
   fatigue:float;
   maximum_fatigue:float;
+  magicka:float;
+  maximum_magicka:float;
+  dead:bool;
+}
+
+struct PlayerCombatSnapshot {
+  player_id:ulong;
+  combat_revision:ulong;
+  health:float;
+  maximum_health:float;
+  fatigue:float;
+  maximum_fatigue:float;
+  magicka:float;
+  maximum_magicka:float;
   dead:bool;
 }
 
@@ -36,6 +50,7 @@ table LatestWinsCombatSnapshot {
   header:CombatSnapshotHeader (id: 0);
   actors:[ActorCombatSnapshot] (id: 1);
   self_skills:[CombatSkillSnapshot] (id: 2);
+  players:[PlayerCombatSnapshot] (id: 3);
 }
 
 root_type LatestWinsCombatSnapshot;

@@ -25,6 +25,8 @@ struct MeleeCombatEvent;
 
 struct ActorMeleeCombatEvent;
 
+struct MagicUseCombatEvent;
+
 struct ReliableCombatEventBatch;
 struct ReliableCombatEventBatchBuilder;
 
@@ -56,6 +58,69 @@ inline const char *EnumNameMeleeDamageStat(MeleeDamageStat e) {
   if (::flatbuffers::IsOutRange(e, MeleeDamageStat::Health, MeleeDamageStat::Fatigue)) return "";
   const size_t index = static_cast<size_t>(e);
   return EnumNamesMeleeDamageStat()[index];
+}
+
+enum class MagicUseSourceKind : uint8_t {
+  Spell = 0,
+  EnchantedItem = 1,
+  MIN = Spell,
+  MAX = EnchantedItem
+};
+
+inline const MagicUseSourceKind (&EnumValuesMagicUseSourceKind())[2] {
+  static const MagicUseSourceKind values[] = {
+    MagicUseSourceKind::Spell,
+    MagicUseSourceKind::EnchantedItem
+  };
+  return values;
+}
+
+inline const char * const *EnumNamesMagicUseSourceKind() {
+  static const char * const names[3] = {
+    "Spell",
+    "EnchantedItem",
+    nullptr
+  };
+  return names;
+}
+
+inline const char *EnumNameMagicUseSourceKind(MagicUseSourceKind e) {
+  if (::flatbuffers::IsOutRange(e, MagicUseSourceKind::Spell, MagicUseSourceKind::EnchantedItem)) return "";
+  const size_t index = static_cast<size_t>(e);
+  return EnumNamesMagicUseSourceKind()[index];
+}
+
+enum class MagicUseTargetKind : uint8_t {
+  Self = 0,
+  Player = 1,
+  Actor = 2,
+  MIN = Self,
+  MAX = Actor
+};
+
+inline const MagicUseTargetKind (&EnumValuesMagicUseTargetKind())[3] {
+  static const MagicUseTargetKind values[] = {
+    MagicUseTargetKind::Self,
+    MagicUseTargetKind::Player,
+    MagicUseTargetKind::Actor
+  };
+  return values;
+}
+
+inline const char * const *EnumNamesMagicUseTargetKind() {
+  static const char * const names[4] = {
+    "Self",
+    "Player",
+    "Actor",
+    nullptr
+  };
+  return names;
+}
+
+inline const char *EnumNameMagicUseTargetKind(MagicUseTargetKind e) {
+  if (::flatbuffers::IsOutRange(e, MagicUseTargetKind::Self, MagicUseTargetKind::Actor)) return "";
+  const size_t index = static_cast<size_t>(e);
+  return EnumNamesMagicUseTargetKind()[index];
 }
 
 FLATBUFFERS_MANUALLY_ALIGNED_STRUCT(8) MeleeCombatEvent FLATBUFFERS_FINAL_CLASS {
@@ -188,6 +253,112 @@ FLATBUFFERS_MANUALLY_ALIGNED_STRUCT(8) ActorMeleeCombatEvent FLATBUFFERS_FINAL_C
 };
 FLATBUFFERS_STRUCT_END(ActorMeleeCombatEvent, 40);
 
+FLATBUFFERS_MANUALLY_ALIGNED_STRUCT(8) MagicUseCombatEvent FLATBUFFERS_FINAL_CLASS {
+ private:
+  uint64_t caster_player_id_;
+  uint64_t source_id_;
+  uint64_t target_id_;
+  uint64_t caster_combat_revision_;
+  uint64_t target_combat_revision_;
+  float self_health_delta_;
+  float self_fatigue_delta_;
+  float self_magicka_delta_;
+  float target_health_delta_;
+  float target_fatigue_delta_;
+  float target_magicka_delta_;
+  uint8_t source_kind_;
+  uint8_t target_kind_;
+  uint8_t cast_succeeded_;
+  uint8_t target_died_;
+  int32_t padding0__;
+
+ public:
+  MagicUseCombatEvent()
+      : caster_player_id_(0),
+        source_id_(0),
+        target_id_(0),
+        caster_combat_revision_(0),
+        target_combat_revision_(0),
+        self_health_delta_(0),
+        self_fatigue_delta_(0),
+        self_magicka_delta_(0),
+        target_health_delta_(0),
+        target_fatigue_delta_(0),
+        target_magicka_delta_(0),
+        source_kind_(0),
+        target_kind_(0),
+        cast_succeeded_(0),
+        target_died_(0),
+        padding0__(0) {
+    (void)padding0__;
+  }
+  MagicUseCombatEvent(uint64_t _caster_player_id, uint64_t _source_id, uint64_t _target_id, uint64_t _caster_combat_revision, uint64_t _target_combat_revision, float _self_health_delta, float _self_fatigue_delta, float _self_magicka_delta, float _target_health_delta, float _target_fatigue_delta, float _target_magicka_delta, TES3MP::Protocol::Schema::CombatEvent::MagicUseSourceKind _source_kind, TES3MP::Protocol::Schema::CombatEvent::MagicUseTargetKind _target_kind, bool _cast_succeeded, bool _target_died)
+      : caster_player_id_(::flatbuffers::EndianScalar(_caster_player_id)),
+        source_id_(::flatbuffers::EndianScalar(_source_id)),
+        target_id_(::flatbuffers::EndianScalar(_target_id)),
+        caster_combat_revision_(::flatbuffers::EndianScalar(_caster_combat_revision)),
+        target_combat_revision_(::flatbuffers::EndianScalar(_target_combat_revision)),
+        self_health_delta_(::flatbuffers::EndianScalar(_self_health_delta)),
+        self_fatigue_delta_(::flatbuffers::EndianScalar(_self_fatigue_delta)),
+        self_magicka_delta_(::flatbuffers::EndianScalar(_self_magicka_delta)),
+        target_health_delta_(::flatbuffers::EndianScalar(_target_health_delta)),
+        target_fatigue_delta_(::flatbuffers::EndianScalar(_target_fatigue_delta)),
+        target_magicka_delta_(::flatbuffers::EndianScalar(_target_magicka_delta)),
+        source_kind_(::flatbuffers::EndianScalar(static_cast<uint8_t>(_source_kind))),
+        target_kind_(::flatbuffers::EndianScalar(static_cast<uint8_t>(_target_kind))),
+        cast_succeeded_(::flatbuffers::EndianScalar(static_cast<uint8_t>(_cast_succeeded))),
+        target_died_(::flatbuffers::EndianScalar(static_cast<uint8_t>(_target_died))),
+        padding0__(0) {
+    (void)padding0__;
+  }
+  uint64_t caster_player_id() const {
+    return ::flatbuffers::EndianScalar(caster_player_id_);
+  }
+  uint64_t source_id() const {
+    return ::flatbuffers::EndianScalar(source_id_);
+  }
+  uint64_t target_id() const {
+    return ::flatbuffers::EndianScalar(target_id_);
+  }
+  uint64_t caster_combat_revision() const {
+    return ::flatbuffers::EndianScalar(caster_combat_revision_);
+  }
+  uint64_t target_combat_revision() const {
+    return ::flatbuffers::EndianScalar(target_combat_revision_);
+  }
+  float self_health_delta() const {
+    return ::flatbuffers::EndianScalar(self_health_delta_);
+  }
+  float self_fatigue_delta() const {
+    return ::flatbuffers::EndianScalar(self_fatigue_delta_);
+  }
+  float self_magicka_delta() const {
+    return ::flatbuffers::EndianScalar(self_magicka_delta_);
+  }
+  float target_health_delta() const {
+    return ::flatbuffers::EndianScalar(target_health_delta_);
+  }
+  float target_fatigue_delta() const {
+    return ::flatbuffers::EndianScalar(target_fatigue_delta_);
+  }
+  float target_magicka_delta() const {
+    return ::flatbuffers::EndianScalar(target_magicka_delta_);
+  }
+  TES3MP::Protocol::Schema::CombatEvent::MagicUseSourceKind source_kind() const {
+    return static_cast<TES3MP::Protocol::Schema::CombatEvent::MagicUseSourceKind>(::flatbuffers::EndianScalar(source_kind_));
+  }
+  TES3MP::Protocol::Schema::CombatEvent::MagicUseTargetKind target_kind() const {
+    return static_cast<TES3MP::Protocol::Schema::CombatEvent::MagicUseTargetKind>(::flatbuffers::EndianScalar(target_kind_));
+  }
+  bool cast_succeeded() const {
+    return ::flatbuffers::EndianScalar(cast_succeeded_) != 0;
+  }
+  bool target_died() const {
+    return ::flatbuffers::EndianScalar(target_died_) != 0;
+  }
+};
+FLATBUFFERS_STRUCT_END(MagicUseCombatEvent, 72);
+
 struct CombatEventHeader FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
   typedef CombatEventHeaderBuilder Builder;
   enum FlatBuffersVTableOffset FLATBUFFERS_VTABLE_UNDERLYING_TYPE {
@@ -265,7 +436,8 @@ struct ReliableCombatEventBatch FLATBUFFERS_FINAL_CLASS : private ::flatbuffers:
   enum FlatBuffersVTableOffset FLATBUFFERS_VTABLE_UNDERLYING_TYPE {
     VT_HEADER = 4,
     VT_EVENTS = 6,
-    VT_ACTOR_EVENTS = 8
+    VT_ACTOR_EVENTS = 8,
+    VT_MAGIC_EVENTS = 10
   };
   const TES3MP::Protocol::Schema::CombatEvent::CombatEventHeader *header() const {
     return GetPointer<const TES3MP::Protocol::Schema::CombatEvent::CombatEventHeader *>(VT_HEADER);
@@ -276,6 +448,9 @@ struct ReliableCombatEventBatch FLATBUFFERS_FINAL_CLASS : private ::flatbuffers:
   const ::flatbuffers::Vector<const TES3MP::Protocol::Schema::CombatEvent::ActorMeleeCombatEvent *> *actor_events() const {
     return GetPointer<const ::flatbuffers::Vector<const TES3MP::Protocol::Schema::CombatEvent::ActorMeleeCombatEvent *> *>(VT_ACTOR_EVENTS);
   }
+  const ::flatbuffers::Vector<const TES3MP::Protocol::Schema::CombatEvent::MagicUseCombatEvent *> *magic_events() const {
+    return GetPointer<const ::flatbuffers::Vector<const TES3MP::Protocol::Schema::CombatEvent::MagicUseCombatEvent *> *>(VT_MAGIC_EVENTS);
+  }
   template <bool B = false>
   bool Verify(::flatbuffers::VerifierTemplate<B> &verifier) const {
     return VerifyTableStart(verifier) &&
@@ -285,6 +460,8 @@ struct ReliableCombatEventBatch FLATBUFFERS_FINAL_CLASS : private ::flatbuffers:
            verifier.VerifyVector(events()) &&
            VerifyOffset(verifier, VT_ACTOR_EVENTS) &&
            verifier.VerifyVector(actor_events()) &&
+           VerifyOffset(verifier, VT_MAGIC_EVENTS) &&
+           verifier.VerifyVector(magic_events()) &&
            verifier.EndTable();
   }
 };
@@ -302,6 +479,9 @@ struct ReliableCombatEventBatchBuilder {
   void add_actor_events(::flatbuffers::Offset<::flatbuffers::Vector<const TES3MP::Protocol::Schema::CombatEvent::ActorMeleeCombatEvent *>> actor_events) {
     fbb_.AddOffset(ReliableCombatEventBatch::VT_ACTOR_EVENTS, actor_events);
   }
+  void add_magic_events(::flatbuffers::Offset<::flatbuffers::Vector<const TES3MP::Protocol::Schema::CombatEvent::MagicUseCombatEvent *>> magic_events) {
+    fbb_.AddOffset(ReliableCombatEventBatch::VT_MAGIC_EVENTS, magic_events);
+  }
   explicit ReliableCombatEventBatchBuilder(::flatbuffers::FlatBufferBuilder &_fbb)
         : fbb_(_fbb) {
     start_ = fbb_.StartTable();
@@ -317,8 +497,10 @@ inline ::flatbuffers::Offset<ReliableCombatEventBatch> CreateReliableCombatEvent
     ::flatbuffers::FlatBufferBuilder &_fbb,
     ::flatbuffers::Offset<TES3MP::Protocol::Schema::CombatEvent::CombatEventHeader> header = 0,
     ::flatbuffers::Offset<::flatbuffers::Vector<const TES3MP::Protocol::Schema::CombatEvent::MeleeCombatEvent *>> events = 0,
-    ::flatbuffers::Offset<::flatbuffers::Vector<const TES3MP::Protocol::Schema::CombatEvent::ActorMeleeCombatEvent *>> actor_events = 0) {
+    ::flatbuffers::Offset<::flatbuffers::Vector<const TES3MP::Protocol::Schema::CombatEvent::ActorMeleeCombatEvent *>> actor_events = 0,
+    ::flatbuffers::Offset<::flatbuffers::Vector<const TES3MP::Protocol::Schema::CombatEvent::MagicUseCombatEvent *>> magic_events = 0) {
   ReliableCombatEventBatchBuilder builder_(_fbb);
+  builder_.add_magic_events(magic_events);
   builder_.add_actor_events(actor_events);
   builder_.add_events(events);
   builder_.add_header(header);
@@ -329,14 +511,17 @@ inline ::flatbuffers::Offset<ReliableCombatEventBatch> CreateReliableCombatEvent
     ::flatbuffers::FlatBufferBuilder &_fbb,
     ::flatbuffers::Offset<TES3MP::Protocol::Schema::CombatEvent::CombatEventHeader> header = 0,
     const std::vector<TES3MP::Protocol::Schema::CombatEvent::MeleeCombatEvent> *events = nullptr,
-    const std::vector<TES3MP::Protocol::Schema::CombatEvent::ActorMeleeCombatEvent> *actor_events = nullptr) {
+    const std::vector<TES3MP::Protocol::Schema::CombatEvent::ActorMeleeCombatEvent> *actor_events = nullptr,
+    const std::vector<TES3MP::Protocol::Schema::CombatEvent::MagicUseCombatEvent> *magic_events = nullptr) {
   auto events__ = events ? _fbb.CreateVectorOfStructs<TES3MP::Protocol::Schema::CombatEvent::MeleeCombatEvent>(*events) : 0;
   auto actor_events__ = actor_events ? _fbb.CreateVectorOfStructs<TES3MP::Protocol::Schema::CombatEvent::ActorMeleeCombatEvent>(*actor_events) : 0;
+  auto magic_events__ = magic_events ? _fbb.CreateVectorOfStructs<TES3MP::Protocol::Schema::CombatEvent::MagicUseCombatEvent>(*magic_events) : 0;
   return TES3MP::Protocol::Schema::CombatEvent::CreateReliableCombatEventBatch(
       _fbb,
       header,
       events__,
-      actor_events__);
+      actor_events__,
+      magic_events__);
 }
 
 inline const TES3MP::Protocol::Schema::CombatEvent::ReliableCombatEventBatch *GetReliableCombatEventBatch(const void *buf) {

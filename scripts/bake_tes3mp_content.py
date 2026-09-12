@@ -47,7 +47,7 @@ CATALOGS = {
     "actor_content_file": ("TES3MP_ACTORS_V1", True),
     "interactive_object_content_file": ("TES3MP_INTERACTIVE_OBJECTS_V2", False),
     "inventory_content_file": ("TES3MP_INVENTORY_V2", False),
-    "combat_content_file": ("TES3MP_COMBAT_V8", False),
+    "combat_content_file": ("TES3MP_COMBAT_V9", False),
     "character_content_file": ("TES3MP_CHARACTERS_V2", False),
     "world_content_file": ("TES3MP_WORLD_V4", True),
     "script_package_file": ("TES3MP_SCRIPT_PACKAGES_V2", False),
@@ -74,6 +74,7 @@ CLIENT_MAPPING_KEYS = {
     "tes3mp-content-dialogue-choice-map",
     "tes3mp-content-weather-region-map",
     "tes3mp-content-weather-map",
+    "tes3mp-content-spell-map",
 }
 
 ITEM_RECORD_TYPES = {
@@ -464,7 +465,7 @@ def _tes3_record_data(path: pathlib.Path) -> Iterable[Tes3Record]:
                         name = raw_name.decode("cp1252").casefold()
                     elif subtype == "DELE":
                         deleted = True
-                if name is None and record_type == "SKIL":
+                if name is None and record_type in {"SKIL", "MGEF"}:
                     indexes = [value for subtype, value in subrecords if subtype == "INDX"]
                     if len(indexes) == 1 and len(indexes[0]) == 4:
                         name = str(struct.unpack("<i", indexes[0])[0])
@@ -759,7 +760,7 @@ PROGRESSION_GMSTS = (
     "fMiscSkillBonus", "fMinorSkillBonus", "fMajorSkillBonus", "fSpecialSkillBonus",
 )
 
-PROGRESSION_SKILL_INDEXES = (0, 20, 5, 4, 6, 7, 26, 21, 2, 3, 17, 18)
+PROGRESSION_SKILL_INDEXES = (0, 20, 5, 4, 6, 7, 26, 21, 2, 3, 17, 18, 11, 13, 10, 12, 14, 15, 9)
 
 ARMOR_WEIGHT_GMSTS = {
     0: "iHelmWeight", 1: "iCuirassWeight", 2: "iPauldronWeight", 3: "iPauldronWeight",
@@ -768,8 +769,12 @@ ARMOR_WEIGHT_GMSTS = {
 }
 
 DIRECT_EFFECT_KINDS = {
-    14: "fire", 15: "shock", 16: "frost", 23: "health", 25: "fatigue", 27: "poison",
+    14: "fire", 15: "shock", 16: "frost", 23: "health", 24: "magicka",
+    25: "fatigue", 27: "poison", 75: "restore_health", 76: "restore_magicka",
+    77: "restore_fatigue",
 }
+
+MAGIC_SCHOOLS = {11: 0, 13: 1, 10: 2, 12: 3, 14: 4, 15: 5}
 
 PASSIVE_EFFECT_FIELDS = {
     4: 8, 5: 9, 6: 10, 90: 2, 91: 4, 92: 3, 94: 6, 95: 7, 97: 5,
@@ -843,10 +848,53 @@ def _item_magic(record_value: Tes3Record, records: dict[tuple[str, str], Tes3Rec
             raise BakeError(f"unsupported on-strike item type: {record_value.name}")
         if cost <= 0 or charge <= 0 or cost > charge:
             raise BakeError(f"invalid on-strike enchantment charge: {enchantment.name}")
-        return charge, (str(cost), *_direct_effect_tokens(enchantment)), None
+        return charge, ("strike", str(cost), *_instant_direct_effect_tokens(enchantment, records)), None
+    if enchant_type == 2:
+        if cost <= 0 or charge <= 0 or cost > charge:
+            raise BakeError(f"invalid when-used enchantment charge: {enchantment.name}")
+        return charge, ("use", str(cost), *_instant_direct_effect_tokens(enchantment, records)), None
     if enchant_type == 3:
         return 0, None, _passive_magic_defense(enchantment)
     raise BakeError(f"unsupported item enchantment type: {enchantment.name}")
+
+
+def _magic_effect_data(records: dict[tuple[str, str], Tes3Record], effect: int) -> tuple[int, float, int]:
+    record_value = _winning_record(records, str(effect), {"MGEF"}, "magic effect")
+    school, base_cost, flags, _red, _green, _blue, _unknown1, _speed, _unknown2 = \
+        _unpack(record_value, "MEDT", "<if4i3f")
+    if int(school) not in MAGIC_SCHOOLS or not math.isfinite(float(base_cost)) or float(base_cost) < 0:
+        raise BakeError(f"unsupported magic effect metadata: {effect}")
+    return MAGIC_SCHOOLS[int(school)], float(base_cost), int(flags)
+
+
+def _instant_direct_effect_tokens(record_value: Tes3Record,
+        records: dict[tuple[str, str], Tes3Record]) -> tuple[str, ...]:
+    del records
+    for _effect, effect_range, _duration, _minimum, _maximum, area in _effect_values(record_value):
+        if effect_range == 2 or area != 0:
+            raise BakeError(f"projectile or area magic is deferred: {record_value.name}")
+    return _direct_effect_tokens(record_value)
+
+
+def _spell_profile(record_value: Tes3Record, records: dict[tuple[str, str], Tes3Record],
+                   player_skills: tuple[int, ...]) -> tuple[str, ...]:
+    spell_type, cost, flags = (int(value) for value in _unpack(record_value, "SPDT", "<3i"))
+    if spell_type not in {0, 5} or cost < 0:
+        raise BakeError(f"unsupported castable spell: {record_value.name}")
+    candidates = []
+    for effect, effect_range, duration, minimum, maximum, area in _effect_values(record_value):
+        if effect_range == 2 or area != 0:
+            raise BakeError(f"projectile or area spell is deferred: {record_value.name}")
+        school, base_cost, effect_flags = _magic_effect_data(records, effect)
+        adjusted_duration = float(duration) if effect_flags & 0x1000 else max(1.0, float(duration))
+        difficulty = adjusted_duration * 0.1 * base_cost * 0.5 * float(minimum + maximum)
+        difficulty *= _gmst_value(records, "fEffectCostMult")
+        candidates.append((2.0 * float(player_skills[PROGRESSION_SKILL_INDEXES[12 + school]]) - difficulty,
+                           school, difficulty))
+    _score, school, difficulty = min(candidates)
+    effects = _direct_effect_tokens(record_value)
+    return (str(school), str(cost), _float_text(difficulty), "1" if (flags & 1) else "0",
+            str(len(effects) // 4), *effects)
 
 
 def _actor_magic(record_value: Tes3Record, records: dict[tuple[str, str], Tes3Record],
@@ -990,12 +1038,12 @@ def derive_catalogs(recipe: DerivedRecipe, server_entries: Sequence[Assignment],
     if len({identifier for identifier, _values, _record, _charge in item_declarations}) != len(item_declarations):
         raise BakeError("derived item identities collide")
 
-    actor_values: list[tuple[DerivedActor, Tes3Record, float, float, float, tuple[float, ...],
+    actor_values: list[tuple[DerivedActor, Tes3Record, float, float, float, float, tuple[float, ...],
                             tuple[float, ...], tuple[tuple[int, str, tuple[str, ...]], ...]]] = []
     for actor in recipe.actors:
         record_value = _winning_record(records, actor.record, {"NPC_", "CREA"}, "actor")
         if record_value.kind == "NPC_":
-            _level, attributes, actor_skills, health, _magicka, fatigue = _npc_values(record_value, "actor")
+            _level, attributes, actor_skills, health, magicka, fatigue = _npc_values(record_value, "actor")
             combat_skill = float(actor_skills[26])
             destruction_skill = float(actor_skills[10])
             attacks = (0.0,) * 6
@@ -1003,6 +1051,7 @@ def derive_catalogs(recipe: DerivedRecipe, server_entries: Sequence[Assignment],
             values = _unpack(record_value, "NPDT", "<24i")
             attributes = tuple(int(value) for value in values[2:10])
             health, fatigue = int(values[10]), int(values[12])
+            magicka = int(values[11])
             if health < 1 or fatigue < 0:
                 raise BakeError(f"actor has unsupported creature stats: {actor.record}")
             combat_skill = float(values[14])
@@ -1013,7 +1062,7 @@ def derive_catalogs(recipe: DerivedRecipe, server_entries: Sequence[Assignment],
                   combat_skill, float(fatigue), *attacks, 1.0, float(attributes[5]))
         magic_defense, diseases = _actor_magic(
             record_value, records, float(attributes[2]), destruction_skill)
-        actor_values.append((actor, record_value, float(health), float(fatigue), evasion, attack,
+        actor_values.append((actor, record_value, float(health), float(fatigue), float(magicka), evasion, attack,
                              magic_defense, diseases))
     if len({stable_record_id(actor.record) for actor in recipe.actors}) != len(
             {actor.record.casefold() for actor in recipe.actors}):
@@ -1027,7 +1076,7 @@ def derive_catalogs(recipe: DerivedRecipe, server_entries: Sequence[Assignment],
             *(str(value) for value in solid.minimum), *(str(value) for value in solid.maximum))))
 
     actor_lines = [CATALOGS["actor_content_file"][0], f"manifest {MANIFEST_PLACEHOLDER}"]
-    for actor, _record, _health, _fatigue, _evasion, _attack, _magic, _diseases in sorted(
+    for actor, _record, _health, _fatigue, _magicka, _evasion, _attack, _magic, _diseases in sorted(
             actor_values, key=lambda value: value[0].actor_id):
         actor_lines.append(" ".join(("actor", str(actor.actor_id), str(actor.entity_id),
             str(stable_record_id(actor.record)), *_cell_tokens(actor.cell),
@@ -1063,13 +1112,38 @@ def derive_catalogs(recipe: DerivedRecipe, server_entries: Sequence[Assignment],
                      float(player_attributes[5]), float(player_skills[0]), float(player_attributes[1]),
                      float(player_magicka), health_recovery, magicka_recovery,
                      float(player_skills[21]), float(player_skills[2]), float(player_skills[3]),
-                     float(player_skills[17]), float(player_skills[18]))
+                     float(player_skills[17]), float(player_skills[18]),
+                     float(player_skills[11]), float(player_skills[13]), float(player_skills[10]),
+                     float(player_skills[12]), float(player_skills[14]), float(player_skills[15]),
+                     float(player_skills[9]))
     combat_lines.append("player " + " ".join((*(_float_text(value) for value in player_fields),
         str(maximum_weight), "0")))
-    for actor, _record, health, fatigue, evasion, attack, magic_defense, diseases in sorted(
+    supported_spells: list[tuple[int, str, tuple[str, ...]]] = []
+    character_catalog = _catalog_by_key(retained_catalogs, "character_content_file")
+    referenced_spell_ids: set[int] = set()
+    if character_catalog is not None:
+        for declaration in character_catalog.records:
+            if declaration[0] == "race":
+                referenced_spell_ids.update(int(value) for value in declaration[46:])
+            elif declaration[0] == "birthsign":
+                referenced_spell_ids.update(int(value) for value in declaration[3:])
+    for spell_id in sorted(referenced_spell_ids):
+        candidates = [record_value for (kind, _name), record_value in records.items()
+                      if kind == "SPEL" and not record_value.deleted
+                      and _optional_stable_record_id(record_value.name) == spell_id]
+        if len(candidates) != 1:
+            raise BakeError(f"character spell identity does not name one live spell: {spell_id}")
+        try:
+            profile = _spell_profile(candidates[0], records, player_skills)
+        except BakeError:
+            continue
+        supported_spells.append((spell_id, candidates[0].name, profile))
+        combat_lines.append("spell " + " ".join((str(spell_id), *profile)))
+    for actor, _record, health, fatigue, magicka, evasion, attack, magic_defense, diseases in sorted(
             actor_values, key=lambda value: value[0].actor_id):
         combat_lines.append("actor " + " ".join((str(actor.actor_id), _float_text(health),
-            _float_text(fatigue), _float_text(evasion), "0", "0", "0", "0", "0", "0", "0", "0",
+            _float_text(fatigue), _float_text(evasion), "0", "0", "0", "0", _float_text(magicka),
+            "0", "0", "0", "0",
             "1" if _record.kind == "CREA" else "0")))
         combat_lines.append("actor_attack " + " ".join((str(actor.actor_id),
             *(_float_text(value) for value in attack))))
@@ -1082,8 +1156,8 @@ def derive_catalogs(recipe: DerivedRecipe, server_entries: Sequence[Assignment],
         combat_lines.append("weapon " + " ".join((str(identifier), str(skill),
             *(_float_text(value) for value in values), "1" if normal else "0")))
     for identifier, values in sorted(enchantment_profiles):
-        combat_lines.append("enchantment " + " ".join((str(identifier), values[0],
-            str((len(values) - 1) // 4), *values[1:])))
+        combat_lines.append("enchantment " + " ".join((str(identifier), values[0], values[1],
+            str((len(values) - 2) // 4), *values[2:])))
     for identifier, defense in sorted(equipment_magic_profiles):
         combat_lines.append("equipment_magic " + " ".join((str(identifier),
             *(_float_text(value) for value in defense))))
@@ -1143,7 +1217,8 @@ def derive_catalogs(recipe: DerivedRecipe, server_entries: Sequence[Assignment],
     # Discard stale checked-in/generated values before rebuilding the exact set.
     augmented = [entry for entry in client_entries
                  if entry.key not in {"tes3mp-content-actor-prototype-map",
-                                      "tes3mp-content-item-prototype-map"}]
+                                      "tes3mp-content-item-prototype-map",
+                                      "tes3mp-content-spell-map"}]
     line = max((entry.line for entry in augmented), default=0) + 1
     existing_actor_names: dict[int, str] = {}
     for actor in recipe.actors:
@@ -1153,6 +1228,8 @@ def derive_catalogs(recipe: DerivedRecipe, server_entries: Sequence[Assignment],
     for identifier, _values, record_value, _charge in sorted(item_declarations):
         original_name = next(name for name in recipe.items if name.casefold() == record_value.name)
         augmented.append(Assignment("tes3mp-content-item-prototype-map", f"{identifier}={original_name}", line)); line += 1
+    for identifier, record_name, _profile in supported_spells:
+        augmented.append(Assignment("tes3mp-content-spell-map", f"{identifier}={record_name}", line)); line += 1
     return catalogs, augmented
 
 
@@ -1369,6 +1446,7 @@ def validate_consistency(server_entries: Sequence[Assignment], client_entries: S
     weapon_ids = _record_ids(combat_catalog, "weapon", 1)
     object_trap_ids = _interactive_object_trap_ids(object_catalog)
     combat_trap_ids = _record_ids(combat_catalog, "trap", 1)
+    combat_spell_ids = _record_ids(combat_catalog, "spell", 1)
     if combat_catalog and inventory_catalog is None:
         raise BakeError("combat content requires inventory content")
     if combat_actor_ids != actor_ids:
@@ -1385,6 +1463,7 @@ def validate_consistency(server_entries: Sequence[Assignment], client_entries: S
     dialogue_choice_mapping = _mapping_values(client_entries, "tes3mp-content-dialogue-choice-map")
     weather_region_mapping = _mapping_values(client_entries, "tes3mp-content-weather-region-map")
     weather_mapping = _mapping_values(client_entries, "tes3mp-content-weather-map")
+    spell_mapping = _mapping_values(client_entries, "tes3mp-content-spell-map")
     cell_mapping = _mapping_values(client_entries, "tes3mp-content-cell-space-map")
     _require_exact_mapping(actor_mapping, actor_prototypes, "actor prototype")
     _require_exact_mapping(object_mapping, objects, "interactive object")
@@ -1397,6 +1476,7 @@ def validate_consistency(server_entries: Sequence[Assignment], client_entries: S
     weather_ids = _record_ids(world_catalog, "weather", 1)
     _require_exact_mapping(weather_region_mapping, weather_regions, "weather region")
     _require_exact_mapping(weather_mapping, weather_ids, "weather")
+    _require_exact_mapping(spell_mapping, combat_spell_ids, "spell")
     local_dialogue_choices: set[int] = set()
     for value in dialogue_choice_mapping.values():
         try:
@@ -1430,6 +1510,7 @@ def validate_consistency(server_entries: Sequence[Assignment], client_entries: S
     region_records = _records_of_type(records, {"REGN"})
     _require_hashed_mapping(actor_mapping, actor_records, "actor prototype")
     _require_hashed_mapping(item_mapping, item_records, "item prototype")
+    _require_hashed_mapping(spell_mapping, _records_of_type(records, {"SPEL"}), "spell")
     appearance = _one(client_entries, "tes3mp-content-appearance-record")
     assert appearance is not None
     if appearance.casefold() not in npc_records:

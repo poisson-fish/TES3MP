@@ -49,7 +49,7 @@ namespace
 
     TES3MP::ServerHello serverHello(bool pose = false, bool actors = false, bool interactiveObjects = false,
         bool inventory = false, bool combat = false, std::uint16_t minor = 2, bool dialogueChoices = false,
-        bool weather = false, bool worldTime = false, bool waitRest = false)
+        bool weather = false, bool worldTime = false, bool waitRest = false, bool instantMagic = false)
     {
         auto versions = std::get<TES3MP::ProtocolVersionRange>(TES3MP::ProtocolVersionRange::create(1, minor, minor));
         std::vector<TES3MP::CapabilityId> capabilities;
@@ -71,6 +71,8 @@ namespace
             capabilities.push_back(TES3MP::worldTimeReplicationCapability());
         if (waitRest)
             capabilities.push_back(TES3MP::authoritativeWaitRestCapability());
+        if (instantMagic)
+            capabilities.push_back(TES3MP::authoritativeInstantMagicCapability());
         auto client = std::get<TES3MP::CapabilityOffer>(TES3MP::CapabilityOffer::create(versions, capabilities, {}));
         auto server
             = std::get<TES3MP::CapabilityOffer>(TES3MP::CapabilityOffer::create(std::move(versions), capabilities, {}));
@@ -481,6 +483,13 @@ namespace
             nextMelee.reset();
             return value;
         }
+        std::optional<TES3MP::OpenMWAdapter::MagicUseCapture> captureMagicUse() noexcept override
+        {
+            ++magicCalls;
+            auto value = std::move(nextMagic);
+            nextMagic.reset();
+            return value;
+        }
         std::optional<TES3MP::DialogueChoiceId> mapDialogueChoice(int localChoice) const noexcept override
         {
             return localChoice == 7 ? TES3MP::DialogueChoiceId::fromValue(40) : std::nullopt;
@@ -491,16 +500,19 @@ namespace
             nextInteraction.reset();
             nextInventory.reset();
             nextMelee.reset();
+            nextMagic.reset();
         }
         unsigned calls = 0;
         unsigned interactionCalls = 0;
         unsigned inventoryCalls = 0;
         unsigned meleeCalls = 0;
+        unsigned magicCalls = 0;
         unsigned clearCalls = 0;
         std::optional<TES3MP::OpenMWAdapter::CellTransitionCapture> nextTransition;
         std::optional<TES3MP::OpenMWAdapter::ObjectInteractionCapture> nextInteraction;
         std::optional<TES3MP::OpenMWAdapter::InventoryTransactionCapture> nextInventory;
         std::optional<TES3MP::OpenMWAdapter::MeleeAttackCapture> nextMelee;
+        std::optional<TES3MP::OpenMWAdapter::MagicUseCapture> nextMagic;
     };
 
     class Presentation final : public TES3MP::OpenMWAdapter::PresentationProvider
@@ -627,8 +639,7 @@ namespace
         std::size_t lastCombatEvents = 0;
         std::size_t lastQuestCatalogSize = 0;
         std::optional<TES3MP::CanonicalPlayerQuestJournalState> lastQuestJournal;
-        TES3MP::OpenMWAdapter::ProviderResult weatherResult
-            = TES3MP::OpenMWAdapter::ProviderResult::Accepted;
+        TES3MP::OpenMWAdapter::ProviderResult weatherResult = TES3MP::OpenMWAdapter::ProviderResult::Accepted;
         std::optional<TES3MP::ServerTick> lastWeatherTick;
         std::vector<TES3MP::WeatherRegionSnapshot> lastWeatherRegions;
         std::size_t worldTimes = 0;
@@ -1440,7 +1451,7 @@ int main()
         *combatTransport, *combatClock, timeouts, SessionGeneration::initial(), outbound);
     auto combatRuntime = std::get<std::unique_ptr<ClientSessionRuntime>>(std::move(combatCreated));
     auto combatVersions = std::get<ProtocolVersionRange>(ProtocolVersionRange::create(1, 2, 2));
-    const std::array combatCapabilities{ combatReplicationCapability() };
+    const std::array combatCapabilities{ combatReplicationCapability(), authoritativeInstantMagicCapability() };
     auto combatOffer
         = std::get<CapabilityOffer>(CapabilityOffer::create(std::move(combatVersions), combatCapabilities, {}));
     auto combatPassword = AuthenticationMaterial::create(passwordBytes);
@@ -1452,7 +1463,8 @@ int main()
         std::move(combatRuntime), reconnect, combatInput, combatPresentation, combatStatus);
     combatCoordinator->frame(0.01f);
     combatTransportObserver->enqueue(MessageClass::SessionControl, MessageKind::ServerHello,
-        encodeServerHello(serverHello(false, false, false, false, true)), TransportChannel::ReliableOrdered);
+        encodeServerHello(serverHello(false, false, false, false, true, 2, false, false, false, false, true)),
+        TransportChannel::ReliableOrdered);
     combatCoordinator->frame(0.01f);
     combatTransportObserver->enqueue(MessageClass::SessionControl, MessageKind::AuthenticationAccepted,
         encodeAuthenticationAccepted(accepted(std::byte{ 8 })), TransportChannel::ReliableOrdered);
@@ -1483,6 +1495,24 @@ int main()
             && command->attackType == MeleeAttackType::Chop && command->attackStrength == 0.75f;
     }
     require(foundCombatCommand);
+    combatInput.nextMagic = MagicUseCapture{ MagicUseSourceKind::Spell, 22, MagicUseTargetKind::Actor, 1,
+        value<ServerTick>(1), CombatRevision::initial(), CombatRevision::initial(), InventoryRevision::initial() };
+    const auto sentBeforeMagic = combatTransportObserver->sentFrames.size();
+    combatCoordinator->frame(0.01f);
+    bool foundMagicCommand = false;
+    for (std::size_t index = sentBeforeMagic; index < combatTransportObserver->sentFrames.size(); ++index)
+    {
+        auto decoded = decodeProtocolFrame(combatTransportObserver->sentFrames[index]);
+        auto* commandFrame = std::get_if<DecodedFrame>(&decoded);
+        if (!commandFrame || commandFrame->messageKind() != MessageKind::ClientMagicUseCommand)
+            continue;
+        auto decodedCommand = decodeClientMagicUseCommand(commandFrame->payload());
+        auto* command = std::get_if<ClientMagicUseCommand>(&decodedCommand);
+        foundMagicCommand = command && command->sourceKind == MagicUseSourceKind::Spell && command->sourceId == 22
+            && command->targetKind == MagicUseTargetKind::Actor && command->targetId == 1
+            && command->expectedCasterRevision == CombatRevision::initial();
+    }
+    require(foundMagicCommand);
 
     Input weatherInput;
     Presentation weatherPresentation;
@@ -1544,22 +1574,20 @@ int main()
     auto* timeTransportObserver = timeTransport.get();
     timeTransportObserver->acceptConnections = true;
     auto timeClock = std::make_unique<Clock>();
-    auto timeCreated = ClientSessionRuntime::create(
-        *timeTransport, *timeClock, timeouts, SessionGeneration::initial(), outbound);
+    auto timeCreated
+        = ClientSessionRuntime::create(*timeTransport, *timeClock, timeouts, SessionGeneration::initial(), outbound);
     auto timeRuntime = std::get<std::unique_ptr<ClientSessionRuntime>>(std::move(timeCreated));
     auto timeVersions = std::get<ProtocolVersionRange>(ProtocolVersionRange::create(1, 8, 8));
-    const std::array timeCapabilities{
-        combatReplicationCapability(), worldTimeReplicationCapability(), authoritativeWaitRestCapability()
-    };
-    auto timeOffer
-        = std::get<CapabilityOffer>(CapabilityOffer::create(std::move(timeVersions), timeCapabilities, {}));
+    const std::array timeCapabilities{ combatReplicationCapability(), worldTimeReplicationCapability(),
+        authoritativeWaitRestCapability() };
+    auto timeOffer = std::get<CapabilityOffer>(CapabilityOffer::create(std::move(timeVersions), timeCapabilities, {}));
     auto timePassword = AuthenticationMaterial::create(passwordBytes);
     require(timePassword
         && timeRuntime->start(endpoint, ClientHello::fromOffer(std::move(timeOffer)),
                AuthenticationRequest::join(std::move(*timePassword)))
             == HeadlessClientResult::Accepted);
-    auto timeCoordinator = makeCoordinator(std::move(timeTransport), std::move(timeClock),
-        std::move(timeRuntime), reconnect, timeInput, timePresentation, timeStatus);
+    auto timeCoordinator = makeCoordinator(std::move(timeTransport), std::move(timeClock), std::move(timeRuntime),
+        reconnect, timeInput, timePresentation, timeStatus);
     timeCoordinator->frame(0.01f);
     timeTransportObserver->enqueue(MessageClass::SessionControl, MessageKind::ServerHello,
         encodeServerHello(serverHello(false, false, false, false, true, 8, false, false, true, true)),
@@ -1627,9 +1655,9 @@ int main()
         && dialogueRuntime->start(endpoint, ClientHello::fromOffer(std::move(dialogueOffer)),
                AuthenticationRequest::join(std::move(*dialoguePassword)))
             == HeadlessClientResult::Accepted);
-    auto dialogueCoordinator = makeCoordinator(std::move(dialogueTransport), std::move(dialogueClock),
-        std::move(dialogueRuntime), reconnect, dialogueInput, dialoguePresentation, dialogueStatus,
-        &dialogueDisconnect);
+    auto dialogueCoordinator
+        = makeCoordinator(std::move(dialogueTransport), std::move(dialogueClock), std::move(dialogueRuntime), reconnect,
+            dialogueInput, dialoguePresentation, dialogueStatus, &dialogueDisconnect);
     dialogueCoordinator->frame(0.01f);
     const auto dialogueHello = encodeServerHello(serverHello(false, false, false, false, false, 6, true));
     dialogueTransportObserver->enqueue(
@@ -1639,8 +1667,7 @@ int main()
         encodeAuthenticationAccepted(accepted(std::byte{ 12 }, 2 * MinimumResumeTokenLifetimeMilliseconds)),
         TransportChannel::ReliableOrdered);
     dialogueTransportObserver->enqueue(MessageClass::ReliableOperation, MessageKind::ReliableInterestBaseline,
-        encodeReliableInterestBaseline(selfBaseline(SessionGeneration::initial())),
-        TransportChannel::ReliableOrdered);
+        encodeReliableInterestBaseline(selfBaseline(SessionGeneration::initial())), TransportChannel::ReliableOrdered);
     dialogueTransportObserver->enqueue(MessageClass::LatestWinsSnapshot, MessageKind::LatestWinsSnapshot,
         encodeLatestWinsSnapshot(selfSnapshot(SessionGeneration::initial())), TransportChannel::LatestWins);
     dialogueCoordinator->frame(0.01f);
@@ -1691,9 +1718,9 @@ int main()
         && dialogueStatus.last == ConnectionStatus::Resumed);
     const auto& retriedDialogue = sentDialogueChoices.back();
     dialogueTransportObserver->enqueue(MessageClass::ReliableOperation, MessageKind::ReliableDialogueChoiceResult,
-        encodeReliableDialogueChoiceResult({ value<SessionId>(1), resumedGeneration,
-            retriedDialogue.commandSequence, retainedDialogueCommandId, value<DialogueChoiceId>(40),
-            DialogueChoiceDisposition::Committed, true, value<CanonicalRevision>(2) }),
+        encodeReliableDialogueChoiceResult(
+            { value<SessionId>(1), resumedGeneration, retriedDialogue.commandSequence, retainedDialogueCommandId,
+                value<DialogueChoiceId>(40), DialogueChoiceDisposition::Committed, true, value<CanonicalRevision>(2) }),
         TransportChannel::ReliableOrdered);
     dialogueCoordinator->frame(0.01f);
     const auto dialogueResolution = dialogueCoordinator->takeDialogueChoiceResolution();

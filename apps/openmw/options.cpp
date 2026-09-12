@@ -96,22 +96,26 @@ namespace OpenMW
             bpo::value<StringsVector>()->default_value(StringsVector(), "")->multitoken()->composing(),
             "OpenMW quest mappings: <id>=<journal-record>");
         addOption("tes3mp-content-dialogue-choice-map",
-            bpo::value<StringsVector>()->default_value(StringsVector{ "1=1", "2=2" }, "vanilla dialogue choices")
+            bpo::value<StringsVector>()
+                ->default_value(StringsVector{ "1=1", "2=2" }, "vanilla dialogue choices")
                 ->multitoken()
                 ->composing(),
             "OpenMW dialogue choice mappings: <manifest-choice-id>=<local-choice-number>");
         addOption("tes3mp-content-weather-region-map",
-            bpo::value<StringsVector>()->default_value(
-                StringsVector{ "1=Bitter Coast Region" }, "vanilla weather regions")
+            bpo::value<StringsVector>()
+                ->default_value(StringsVector{ "1=Bitter Coast Region" }, "vanilla weather regions")
                 ->multitoken()
                 ->composing(),
             "OpenMW weather region mappings: <manifest-region-id>=<region-record>");
         addOption("tes3mp-content-weather-map",
-            bpo::value<StringsVector>()->default_value(
-                StringsVector{ "1=Clear", "2=Cloudy" }, "vanilla weather records")
+            bpo::value<StringsVector>()
+                ->default_value(StringsVector{ "1=Clear", "2=Cloudy" }, "vanilla weather records")
                 ->multitoken()
                 ->composing(),
             "OpenMW weather mappings: <manifest-weather-id>=<weather-record>");
+        addOption("tes3mp-content-spell-map",
+            bpo::value<StringsVector>()->default_value(StringsVector(), "")->multitoken()->composing(),
+            "OpenMW spell mappings: <manifest-spell-id>=<spell-record>");
 #ifdef TES3MP_OPENMW_DESKTOP_AUTOMATION
         addOption("tes3mp-automation-role", bpo::value<std::string>()->default_value(""),
             "test-only fixed TES3MP desktop automation role");

@@ -526,7 +526,8 @@ namespace TES3MP
             || mSession->stateMachine().state() == ClientSessionState::TimedOut)
         {
             fail(ClientRuntimeResult::TransportFailed);
-            return { ClientRuntimeResult::TransportFailed, ClientSessionAction::SessionTimedOut, result.transportEvents };
+            return { ClientRuntimeResult::TransportFailed, ClientSessionAction::SessionTimedOut,
+                result.transportEvents };
         }
         return result;
     }
@@ -675,6 +676,35 @@ namespace TES3MP
         return { queued, queued == ClientRuntimeResult::Accepted ? sequence : std::nullopt };
     }
 
+    ClientRuntimeQueueResult ClientSessionRuntime::queueMagicUse(MagicUseSourceKind sourceKind, std::uint64_t sourceId,
+        MagicUseTargetKind targetKind, std::uint64_t targetId, ServerTick sourceTick,
+        CombatRevision expectedCasterRevision, CombatRevision expectedTargetRevision,
+        InventoryRevision expectedInventoryRevision)
+    {
+        const auto& spatial = mSession->stateMachine().confirmedSnapshot();
+        const auto sessionId = mSession->stateMachine().sessionId();
+        if (!spatial || !mCombatSnapshot || !sessionId
+            || !negotiated(mSession->stateMachine(), authoritativeInstantMagicCapability()))
+            return { ClientRuntimeResult::NotConnected, std::nullopt };
+        const auto sequence = mLastQueuedSequence ? mLastQueuedSequence->next()
+            : spatial->header().acknowledgedCommandSequence()
+            ? spatial->header().acknowledgedCommandSequence()->next()
+            : std::optional<CommandSequence>(CommandSequence::initial());
+        if (!sequence)
+            return { ClientRuntimeResult::EncodeRejected, std::nullopt };
+        const auto commandId = CommandId::fromValue(sequence->value());
+        if (!commandId || sourceId == 0 || ((targetKind == MagicUseTargetKind::Self) != (targetId == 0)))
+            return { ClientRuntimeResult::EncodeRejected, std::nullopt };
+        const ClientMagicUseCommand command{ *sessionId, spatial->header().targetSessionGeneration(), *sequence,
+            *commandId, spatial->header().canonicalRevision(), sourceKind, sourceId, targetKind, targetId, sourceTick,
+            expectedCasterRevision, expectedTargetRevision, expectedInventoryRevision };
+        const auto encoded = encodeClientMagicUseCommand(command);
+        const auto queued = queue(MessageClass::ReliableOperation, MessageKind::ClientMagicUseCommand, encoded);
+        if (queued == ClientRuntimeResult::Accepted)
+            mLastQueuedSequence = *sequence;
+        return { queued, queued == ClientRuntimeResult::Accepted ? sequence : std::nullopt };
+    }
+
     ClientRuntimeQueueResult ClientSessionRuntime::queueCharacterCreation(
         CharacterCreationChoice choice, CharacterProfileRevision expectedRevision)
     {
@@ -718,13 +748,12 @@ namespace TES3MP
         const auto commandId = retainedCommandId ? retainedCommandId : CommandId::fromValue(sequence->value());
         if (!commandId)
             return { ClientRuntimeResult::EncodeRejected, std::nullopt, std::nullopt };
-        const ClientDialogueChoiceCommand command{ *sessionId, snapshot->header().targetSessionGeneration(),
-            *sequence, *commandId, snapshot->header().canonicalRevision(), choice };
+        const ClientDialogueChoiceCommand command{ *sessionId, snapshot->header().targetSessionGeneration(), *sequence,
+            *commandId, snapshot->header().canonicalRevision(), choice };
         const auto encoded = encodeClientDialogueChoiceCommand(command);
         if (encoded.empty())
             return { ClientRuntimeResult::EncodeRejected, std::nullopt, std::nullopt };
-        const auto queued
-            = queue(MessageClass::ReliableOperation, MessageKind::ClientDialogueChoiceCommand, encoded);
+        const auto queued = queue(MessageClass::ReliableOperation, MessageKind::ClientDialogueChoiceCommand, encoded);
         if (queued == ClientRuntimeResult::Accepted)
             mLastQueuedSequence = *sequence;
         return { queued, queued == ClientRuntimeResult::Accepted ? sequence : std::nullopt,

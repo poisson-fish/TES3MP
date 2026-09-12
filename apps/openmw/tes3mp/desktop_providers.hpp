@@ -4,6 +4,8 @@
 #include "providers.hpp"
 #include "remote_motion.hpp"
 
+#include <components/esm/refid.hpp>
+
 #include <memory>
 #include <optional>
 #include <string>
@@ -68,6 +70,12 @@ namespace TES3MP::OpenMWAdapter
         std::string record;
     };
 
+    struct DesktopSpellMapping
+    {
+        SpellRecordId id;
+        std::string record;
+    };
+
     struct DesktopContentMapping
     {
         static std::optional<DesktopContentMapping> create(ContentManifest manifest,
@@ -78,7 +86,7 @@ namespace TES3MP::OpenMWAdapter
             std::span<const DesktopContainerMapping> containers = {}, std::span<const DesktopQuestMapping> quests = {},
             std::span<const DesktopDialogueChoiceMapping> dialogueChoices = {},
             std::span<const DesktopWeatherRegionMapping> weatherRegions = {},
-            std::span<const DesktopWeatherMapping> weather = {});
+            std::span<const DesktopWeatherMapping> weather = {}, std::span<const DesktopSpellMapping> spells = {});
 
         ContentManifest manifest;
         std::vector<DesktopCellSpaceMapping> cellSpaces;
@@ -92,6 +100,7 @@ namespace TES3MP::OpenMWAdapter
         std::vector<DesktopDialogueChoiceMapping> dialogueChoices;
         std::vector<DesktopWeatherRegionMapping> weatherRegions;
         std::vector<DesktopWeatherMapping> weather;
+        std::vector<DesktopSpellMapping> spells;
     };
 
 }
@@ -119,6 +128,7 @@ namespace TES3MP::OpenMWAdapter
         std::optional<ObjectInteractionCapture> captureObjectInteraction() noexcept override;
         std::optional<InventoryTransactionCapture> captureInventoryTransaction() noexcept override;
         std::optional<MeleeAttackCapture> captureMeleeAttack() noexcept override;
+        std::optional<MagicUseCapture> captureMagicUse() noexcept override;
         std::optional<DialogueChoiceId> mapDialogueChoice(int localChoice) const noexcept override;
 
         bool handleActivation(const MWWorld::Ptr& toActivate, const MWWorld::Ptr& player) noexcept;
@@ -153,13 +163,15 @@ namespace TES3MP::OpenMWAdapter
             std::span<const ReliableCombatEventBatch> events, MonotonicInstant receivedAt) noexcept override;
         ProviderResult applyQuestJournal(const QuestJournalCatalog& catalog,
             const CanonicalPlayerQuestJournalState& state, MonotonicInstant receivedAt) noexcept override;
-        ProviderResult applyWeather(
-            std::span<const WeatherRegionSnapshot> regions, ServerTick serverTick, MonotonicInstant receivedAt) noexcept override;
+        ProviderResult applyWeather(std::span<const WeatherRegionSnapshot> regions, ServerTick serverTick,
+            MonotonicInstant receivedAt) noexcept override;
         ProviderResult applyWorldTime(
             const ReliableWorldTimeState& state, MonotonicInstant receivedAt) noexcept override;
         void appendMeleeTargets(std::vector<MWWorld::Ptr>& targets) const;
         std::optional<MeleeAttackCapture> captureMeleeAttack(
             const MWWorld::Ptr& victim, float attackStrength, int attackType) const noexcept;
+        std::optional<MagicUseCapture> captureMagicUse(
+            const ESM::RefId& spell, const MWWorld::Ptr& item, const MWWorld::Ptr& target) const noexcept;
         std::optional<ObjectInteractionCapture> captureSecurityAttempt(
             const MWWorld::Ptr& target, const MWWorld::Ptr& tool, bool disarm) const noexcept;
         std::optional<InventoryTransactionCapture> inventoryTransfer(MWGui::ItemModel& source, const MWWorld::Ptr& item,

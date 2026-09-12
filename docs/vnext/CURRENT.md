@@ -1,6 +1,6 @@
 # TES3MP vNext current implementation
 
-- Updated: 2026-09-11
+- Updated: 2026-09-12
 - Code snapshot inspected: `vnext` working tree based on `0641a1792d`
 - OpenMW baseline: `f4bec41444214a7903bebd178389ca22ca13f646`
 
@@ -11,14 +11,14 @@ representative executable tests. Code and tests remain authoritative.
 
 | Surface | Current implementation |
 |---|---|
-| `tes3mp_protocol` | Strong value types, bounded frames, FlatBuffers codecs, negotiation, authentication and character-profile/dialogue-choice messages, reliable operations, canonical snapshots, actors, objects, inventory, melee combat, regional weather, world time, and VR pose |
+| `tes3mp_protocol` | Strong value types, bounded frames, FlatBuffers codecs, negotiation, authentication and character-profile/dialogue-choice messages, reliable operations, canonical snapshots, actors, objects, inventory, melee and instantaneous-magic combat, regional weather, world time, and VR pose |
 | `tes3mp_transport` | Project-owned connection, channel, queue, lifecycle, reason, and telemetry interfaces |
 | `tes3mp_transport_gns` | Private GameNetworkingSockets adapter with c-ares/OpenSSL dependency composition |
 | `tes3mp_server_core` | Deterministic authentication, canonical worlds, fixed ticks, client and script command reduction, publication, checksums, lifecycle, resync, and a versioned server-scripting boundary |
 | `tes3mp_client_session` | Caller-pumped negotiation, authentication, resume/resync, command output, snapshot ingestion, replication state, and locomotion reconciliation |
 | `tes3mp_server` | Configuration/content loading and real-transport dedicated-server composition |
 | `tes3mp_headless_client` | Scripted real-transport client for bounded integration scenarios |
-| `openmw_tes3mp_adapter` | Shared OpenMW connection, stock-chargen, dialogue-choice, and wait/rest confirmation bridges, state application, reconnect, remote, canonical-weather, and canonical calendar/time presentation, object activation, inventory integration, and authoritative melee capture/presentation |
+| `openmw_tes3mp_adapter` | Shared OpenMW connection, stock-chargen, dialogue-choice, and wait/rest confirmation bridges, state application, reconnect, remote, canonical-weather, and canonical calendar/time presentation, object activation, inventory integration, and authoritative melee/magic capture and presentation |
 
 The target graph and boundary checks live in
 [`components/tes3mp/CMakeLists.txt`](../../components/tes3mp/CMakeLists.txt) and
@@ -31,11 +31,12 @@ Public core headers expose only project-owned values.
 
 - A 12-byte bounded frame separates message class and kind before payload
   allocation. Each payload is verifier-checked and semantically validated.
-- The production server negotiates protocol major 1, minor 8. Defined
+- The production server negotiates protocol major 1, minor 9. Defined
   optional capabilities are VR pose (1), actor replication (2), interactive
   objects (3), inventory (4), combat (5), character creation (6), dialogue
   choices (7), regional weather replication (8), world-time replication (9),
-  and authoritative synchronized wait/rest (10).
+  authoritative synchronized wait/rest (10), authoritative security (11), and
+  authoritative instantaneous magic (12).
   Content-manifest mismatch rejects before authentication. Combat (5) is
   offered only when combat content and authoritative contact history are both
   successfully composed; the packaged derived-vanilla default now composes both
@@ -91,78 +92,26 @@ Primary sources: [`authentication.hpp`](../../components/tes3mp/include/tes3mp/a
 
 ### Main-menu entry and player continuation
 
-- The stock main menu exposes a Profiles button opening a modal Profile Manager
-  dialog supporting profile creation, local deletion, and active profile
-  selection. Profiles are stored locally in `tes3mp/profiles.json` with
-  client-side derived profile roots; plaintext files from the initial
-  development implementation are rewritten on successful load. Server-side
-  credential rotation and durable identity deletion are not yet exposed.
-- The main menu Multiplayer button remains disabled until at least one profile
-  exists.
-- An explicitly configured multiplayer build exposes a stock-main-menu
-  Multiplayer dialog accepting a DNS name, IPv4 address, bracketed IPv6
-  address, `host:port`, or `tes3mp://` URI. The dialog displays the active
-  profile username, and connects using the active profile's username and
-  endpoint-derived credential. Legacy generated credentials remain stored per
-  endpoint and are pruned only when that legacy credential was actually used.
-- The dialog includes bounded password entry. Host starts the packaged
-  dedicated-server configuration/content, waits for an explicit readiness
-  signal, reports captured startup errors, then connects through the same
-  client path. The child is stopped with the client.
-- A terminal connection or game-start failure releases its client session and
-  process-wide transport ownership. A later Join or Host request in the same
-  OpenMW process starts with a fresh transport instead of reporting that the
-  multiplayer transport is unavailable.
-- Network/session admission is pumped while the main menu remains active, but
-  no world provider is called before a game exists. Once the complete initial
-  baseline is ready, OpenMW runs its normal new-game startup and the adapter
-  applies an authoritative root only for established characters. Fresh and
-  incomplete characters retain stock new-game intro placement. Existing
-  command-line automation remains available.
-
-Primary sources: [`mainmenu.cpp`](../../apps/openmw/mwgui/mainmenu.cpp),
-[`profiledialog.cpp`](../../apps/openmw/mwgui/profiledialog.cpp),
-[`multiplayerdialog.cpp`](../../apps/openmw/mwgui/multiplayerdialog.cpp),
-[`player_profile_manager.cpp`](../../apps/openmw/tes3mp/player_profile_manager.cpp),
-[`client_connection.cpp`](../../apps/openmw/tes3mp/client_connection.cpp), and
-[`player_identity_file.cpp`](../../apps/tes3mp-server/player_identity_file.cpp).
+- The stock main menu manages local username/profile roots in
+  `tes3mp/profiles.json`; Multiplayer activates once a profile exists. Its Join
+  flow accepts DNS, IPv4, bracketed IPv6, `host:port`, or `tes3mp://`, while
+  Host launches the packaged server, waits for readiness, and uses the same
+  connection path. Terminal failure releases transport ownership for retry.
+- Session admission runs at the menu without touching a nonexistent world.
+  Complete initial baselines start normal OpenMW new-game flow; only established
+  characters receive the durable authoritative root.
 
 ### Authoritative character creation
 
-- Authentication and join results explicitly classify each identity as
-  `NewCharacter`, `CreatingCharacter`, or `EstablishedCharacter` and carry the
-  canonical profile revision. Entity presence is not a freshness signal.
-- The packaged vanilla profile contains distinct stock pre-chargen Imperial
-  Prison Ship and post-boat Seyda Neen safe-point transforms, plus bounded
-  playable race/appearance, class, birthsign, spell, and starting-item declarations.
-  Its appearance allowlist is the exact stock race-dialog-selectable set, and
-  sex uses the same female-0/male-1 encoding as the protocol and OpenMW bridge.
-  Startup validates its manifest, cell, and collision occupancy.
-- In multiplayer mode, the Census and Excise character name dialog is bypassed
-  entirely; the character name is automatically set to the active profile's
-  username (`charactername = username`).
-- Typed reliable name, race/appearance, predefined/custom class, birthsign, and
-  completion commands carry expected profile and canonical revisions. The
-  server validates record IDs and phase and computes attributes, skills,
-  spells, and starting inventory/equipment. Intermediate confirmations remain
-  live-only. When stock `CharGenState` reaches `-1`, the completion command
-  prepares the profile, configured post-boat root, catalog-validated starting
-  inventory/equipment, and character-derived combat state as one operation.
-  Persistence or publication failure leaves every domain unchanged.
-- The focused OpenMW bridge intercepts each stock chargen choice, waits for
-  confirmation, projects it through existing player mechanics, and advances
-  the normal UI. Gameplay input and authoritative presentation are suppressed
-  during chargen. After completion, the bridge waits for a newer safe-point
-  snapshot before applying the root, using the canonical revision observed when
-  completion was submitted so cross-channel delivery order cannot strand an
-  already-arrived safe point. A process restart or credential reattachment
-  restarts incomplete chargen; established players skip it and restore their
-  saved root.
-
-Primary sources: [`character_profile.hpp`](../../components/tes3mp/include/tes3mp/character_profile.hpp),
-[`character_creation_protocol.cpp`](../../components/tes3mp/protocol/character_creation_protocol.cpp),
-[`character_content.cpp`](../../apps/tes3mp-server/character_content.cpp), and
-[`charactercreation.cpp`](../../apps/openmw/mwgui/charactercreation.cpp).
+- Join explicitly reports `NewCharacter`, `CreatingCharacter`, or
+  `EstablishedCharacter`. Manifest content bounds selectable appearance, class,
+  birthsign, spells, items, equipment, and the pre/post-chargen safe points;
+  multiplayer character name equals the active username.
+- Reliable choices carry expected profile/canonical revisions. The server
+  validates phase and records, computes derived attributes/skills/spells, and
+  atomically commits the completed profile, post-boat root, inventory/equipment,
+  and combat state. The OpenMW bridge waits for each confirmation while retaining
+  stock UI. Incomplete chargen restarts; established identities restore directly.
 
 ### Authoritative desktop dialogue choices
 
@@ -262,7 +211,7 @@ Primary sources: [`actor_catalog.hpp`](../../components/tes3mp/include/tes3mp/ac
   for join, transition, resume, and resync.
 - Door, lock, trap, revision, and change tick are durable. Restart requires a
   complete state vector matching the configured object catalog.
-- Combat V8 exactly covers configured trap IDs. Server-resolved effects,
+- Combat V9 exactly covers configured trap IDs. Server-resolved effects,
   damage/death/revision, and trap disarm share one durable commit.
 - Capability 11 carries lockpick/probe intent only: object/tool identity plus
   object, inventory, and combat revisions. The server validates canonical tool
@@ -301,7 +250,7 @@ Primary sources: [`item_catalog.hpp`](../../components/tes3mp/include/tes3mp/ite
 [`inventory_interest_projection.cpp`](../../apps/tes3mp-server/inventory_interest_projection.cpp),
 and [`desktop_providers.cpp`](../../apps/openmw/tes3mp/desktop_providers.cpp).
 
-### Authoritative melee combat foundation
+### Authoritative melee and instantaneous magic
 
 - OpenMW keeps its normal attack animation and contact selection, but a
   negotiated session suppresses local mutation. The client submits bounded
@@ -311,7 +260,7 @@ and [`desktop_providers.cpp`](../../apps/openmw/tes3mp/desktop_providers.cpp).
   revisions, skill progress, recovery, aggression, respawn, blocking, armor,
   equipment wear, and supported direct-magic effects. Combat, inventory, death,
   revisions, and command finalization share one prepared atomic commit.
-- Bounded `TES3MP_COMBAT_V8` content supplies manifest-scoped player and actor
+- Bounded `TES3MP_COMBAT_V9` content supplies manifest-scoped player and actor
   profiles, weapons, armor, resolver constants, progression/recovery values,
   random seed, and direct-magic data. Invalid or inconsistent configured content
   fails startup before state is exposed. Confirmed character profiles initialize
@@ -322,11 +271,24 @@ and [`desktop_providers.cpp`](../../apps/openmw/tes3mp/desktop_providers.cpp).
   and occluded contact before mutation. Production retains nine bounded
   server-tick position frames and uses stock base reach scaled by canonical
   weapon data and manifest collision solids.
-- Private resources, twelve skill/progress counters, death, and revision use
+- Private resources, nineteen skill/progress counters, death, and revision use
   latest-wins snapshots. Server ticks handle actor attacks, recovery, respawn,
   and defensive gains. Capability 5 requires the complete combat graph.
+- Capability 12 intercepts stock spell release and enchanted-item use before
+  local mutation. Clients submit only the mapped spell or canonical item stack,
+  target identity, observed tick, and combat/inventory revisions. The server
+  validates known spells, ownership, same-cell/touch targeting, resource cost,
+  replay/rate bounds, and player or actor revisions; it owns cast success,
+  resistances, magnitudes, and every random draw.
+- Successful instantaneous effects may damage or restore health, fatigue, and
+  magicka on self, player, or actor targets. Spell magicka or item charge,
+  durable PRNG state, effect application, death/aggression, school or Enchant
+  progress, inventory/combat revisions, persistence, and reliable event plus
+  latest-state replication share one prepared commit. Failed spell rolls still
+  consume magicka but apply no effect or progression.
 
 Primary sources: [`melee_combat.cpp`](../../components/tes3mp/protocol/melee_combat.cpp),
+[`magic_use.cpp`](../../components/tes3mp/protocol/magic_use.cpp),
 [`combat_world.cpp`](../../components/tes3mp/server_core/combat_world.cpp),
 [`direct_magic.cpp`](../../components/tes3mp/server_core/direct_magic.cpp),
 [`combat_content.cpp`](../../apps/tes3mp-server/combat_content.cpp),
@@ -337,44 +299,16 @@ and [`character.cpp`](../../apps/openmw/mwmechanics/character.cpp).
 
 ### Deterministic server-scripting foundation
 
-- Optional bounded `TES3MP_SCRIPT_PACKAGES_V2` content loads manifest-bound
-  package/version/load/API/ABI declarations, exact module SHA-256 and entrypoint
-  bindings, execution budgets, and typed persistent-variable catalogs.
-  Production config contains one executable package and one declared integer variable.
-  Declarations are canonically sorted; malformed, oversized, unknown-package,
-  wrong-API, or manifest-mismatched input fails startup.
-- Script API V6 projects committed publications into immutable bounded events
-  plus copied typed-global, quest/journal, and per-player faction rank and
-  reputation reads. It includes committed dialogue-choice identity and
-  per-region current/target weather, transition timing, and revision; execution
-  and generated commands retain replay-stable order.
-- Output is staged behind callback, publication, pending, and tick bounds. Any
-  callback or queue failure discards the publication output and terminates the
-  runtime instead of exposing a partial result.
-- Typed next-tick commands cover safe points, time, globals, quests, journals,
-  faction rank, reputation, weather targets, and atomic compare-and-set of
-  package-scoped variables. Catalogs, eligibility, types, ranks, and independent
-  revisions validate before the prepared durability commit.
-- Production registers the exact package catalog before opening V2 persistence,
-  then restores and binds catalog-compatible state before callbacks can run.
-  Undeclared or version-conflicting callback registration fails. A callback
-  sees only its package's immutable state.
-- The bounded V1 module loader rejects missing, oversized, hash-mismatched,
-  malformed, wrong-API/ABI, missing-entrypoint, resource-invalid, or
-  catalog-invalid artifacts before startup. Predicates cover typed globals,
-  quest/journal state, dialogue identity, faction rank, reputation, and current
-  or target weather; revision-checked actions cover quest/journal, faction, and
-  weather consequences. A committed weather change also creates an immutable
-  `weather_changed` callback event.
-  Referenced IDs, stages, ranks, choices, ownership, and types validate against
-  manifest catalogs before registration. The packaged module demonstrates both
-  quest and dialogue-driven cross-domain consequences.
-
-Primary sources: [`script_state.hpp`](../../components/tes3mp/include/tes3mp/script_state.hpp),
-[`server_scripting.hpp`](../../components/tes3mp/include/tes3mp/server_scripting.hpp),
-[`script_package_content.cpp`](../../apps/tes3mp-server/script_package_content.cpp),
-[`script_module.cpp`](../../apps/tes3mp-server/script_module.cpp), and
-[`server_command_reducer.cpp`](../../components/tes3mp/server_core/server_command_reducer.cpp).
+- Bounded `TES3MP_SCRIPT_PACKAGES_V2` binds package/version/order, API/ABI,
+  module hashes/entrypoints, budgets, and typed persistent variables to the
+  manifest. The loader and callback registry fail closed on mismatches.
+- Script API V6 supplies immutable committed events and copied typed reads for
+  globals, quest/journal, dialogue, factions, reputation, and weather. Bounded
+  next-tick commands mutate those domains or compare-and-set package variables
+  only after catalog, eligibility, type, ownership, and revision validation.
+- Output remains staged until the durability commit; callback or queue failure
+  exposes no partial result. Package state restores before callbacks, and all
+  execution/generated-command order is replay stable.
 
 ### Canonical weather
 
@@ -432,7 +366,7 @@ Primary sources: [`world_time_replication.hpp`](../../components/tes3mp/include/
 
 ### Transactional gameplay persistence and replay envelope
 
-- The V2 envelope's format version 3 binds each durable prefix to
+- The V2 envelope's format version 4 binds each durable prefix to
   configuration/content, scripts, seeds,
   ordering, and normalized command results. One checksum covers all canonical
   player, inventory, object, actor/combat, clock/global, quest/journal, faction,
@@ -483,15 +417,16 @@ and [`test_bake_tes3mp_content.py`](../../scripts/tests/test_bake_tes3mp_content
   collision; full Bullet terrain/mesh physics is deferred.
 - Actor AI is limited to idle/travel/wander and reactive pursuit; detection,
   schedules, spawning, and delegation remain absent.
-- Traps cover bounded instantaneous direct effects, but durations, area effects,
-  and other general spell semantics remain absent. Inventory still lacks trade,
-  restocking, and repair.
+- Traps, spells, and on-strike/when-used enchantments cover bounded instantaneous
+  direct effects, but durations, area effects, summons, projectiles, and other
+  general spell semantics remain absent. Inventory still lacks trade, restocking,
+  and repair.
 - The packaged default remains a narrow four-cell fixture. Broad geometry and
   rewound or per-bone contact are not implemented.
 - Combat covers direct player/actor melee, reactive attacks, resources,
-  death/respawn, skills, difficulty, blocking, mitigation/wear, feedback, and a
-  narrow baked magic subset. Actor armor, PvP, proactive aggression, general
-  casting/magic, and Lua hit callbacks remain absent.
+  death/respawn, skills, difficulty, blocking, mitigation/wear, feedback, and
+  instantaneous player/actor magic targeting. Actor armor, melee PvP, proactive
+  aggression, extended magic semantics, and Lua hit callbacks remain absent.
 - Only declared package variables survive restart. General VM logic and
   inventory/combat/magic scripting remain absent.
 - Other loadouts require generated mappings. The baker does not bind archives or
@@ -515,12 +450,14 @@ go decision. Device types remain provider-local.
 
 ## Verification snapshot
 
-All 224 Python contracts and the focused protocol, server-logic/server-app, and
-adapter gates passed on Windows on 2026-09-11. The desktop-evidence build linked
-`openmw` and `tes3mp_server`. Live real-`Morrowind.esm` lockpick and probe runs
-each submitted intent only, consumed one of 25 tool uses, advanced Security,
-mutated the mapped door, resumed once, reconverged every affected baseline, and
-drained all queues. Evidence is in `build/security-evidence-v17/summary.json`.
+Focused authoritative-magic protocol, world, reducer, replication, persistence,
+server-app, interest-projection, adapter, content-baker, schema, patch-registry,
+and documentation gates passed on Windows on 2026-09-12. The product build
+linked `openmw` and `tes3mp_server`. A live real-`Morrowind.esm` enchanted-item
+run submitted intent only, consumed one charge, applied an actor effect, advanced
+Enchant, resumed once, reconverged every affected baseline, and drained all
+queues. Evidence is in `build/magic-use-evidence-v3/summary.json`. Earlier live
+lockpick and probe evidence remains in `build/security-evidence-v17/summary.json`.
 
 The baseline provenance verifier remains red against the broader working tree:
 its registry omits many existing vNext files and still expects retired workflow

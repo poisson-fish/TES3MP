@@ -218,6 +218,7 @@ namespace TES3MP::ServerApp
             || frame->messageKind() == MessageKind::ClientInteractObjectCommand
             || frame->messageKind() == MessageKind::ClientInventoryTransactionCommand
             || frame->messageKind() == MessageKind::ClientMeleeAttackCommand
+            || frame->messageKind() == MessageKind::ClientMagicUseCommand
             || frame->messageKind() == MessageKind::ClientDialogueChoiceCommand;
         if (gameplayCommand && mCharacterContent)
         {
@@ -333,15 +334,13 @@ namespace TES3MP::ServerApp
                 || !std::ranges::binary_search(
                     hello->negotiatedCapabilities(), interactiveObjectReplicationCapability()))
                 return ConnectionSessionResult::ProtocolRejected;
-            if ((cmd->kind == ObjectInteractionKind::UnlockWithKey
-                    || cmd->kind == ObjectInteractionKind::PickLock
+            if ((cmd->kind == ObjectInteractionKind::UnlockWithKey || cmd->kind == ObjectInteractionKind::PickLock
                     || cmd->kind == ObjectInteractionKind::DisarmTrap)
                 && !mInventory)
                 return ConnectionSessionResult::ProtocolRejected;
             if ((cmd->kind == ObjectInteractionKind::PickLock || cmd->kind == ObjectInteractionKind::DisarmTrap)
                 && (hello->selectedVersion().major != 1 || hello->selectedVersion().minor < 9 || !mCombat
-                    || !std::ranges::binary_search(
-                        hello->negotiatedCapabilities(), authoritativeSecurityCapability())))
+                    || !std::ranges::binary_search(hello->negotiatedCapabilities(), authoritativeSecurityCapability())))
                 return ConnectionSessionResult::ProtocolRejected;
             const auto* progress = joins.state().findActiveSession(*state->sessionId());
             const auto* player = progress ? joins.state().findPlayer(progress->playerId()) : nullptr;
@@ -381,8 +380,8 @@ namespace TES3MP::ServerApp
             const auto* progress = joins.state().findActiveSession(*state->sessionId());
             if (!progress)
                 return ConnectionSessionResult::ProtocolRejected;
-            auto prepared = joins.prepareCharacterCreation(progress->playerId(), *mCharacterContent,
-                command->command, tick, mInventory, mCombat, mPlayerCombatTemplate, mItemCatalog);
+            auto prepared = joins.prepareCharacterCreation(progress->playerId(), *mCharacterContent, command->command,
+                tick, mInventory, mCombat, mPlayerCombatTemplate, mItemCatalog);
             CharacterConfirmationResult result = CharacterConfirmationResult::Confirmed;
             if (const auto* rejected = std::get_if<CharacterProfileError>(&prepared))
                 result = characterConfirmationResult(*rejected);
@@ -421,8 +420,8 @@ namespace TES3MP::ServerApp
                                 inventoryReplicationCapability());
                         if (!targetConnection || !capable)
                             continue;
-                        auto delivery = projectInventoryInterestBaseline(candidateState,
-                            *pending->candidateInventory(), target.sessionId(), tick, revision);
+                        auto delivery = projectInventoryInterestBaseline(
+                            candidateState, *pending->candidateInventory(), target.sessionId(), tick, revision);
                         if (!delivery
                             || !appendInventoryInterestMessages(owned, messages, *targetConnection, *delivery))
                         {
@@ -442,8 +441,8 @@ namespace TES3MP::ServerApp
                                 combatReplicationCapability());
                         if (!targetConnection || !capable)
                             continue;
-                        auto snapshot = projectCombatSnapshot(candidateState, *mActors,
-                            *pending->candidateCombat(), target.sessionId(), tick, revision);
+                        auto snapshot = projectCombatSnapshot(
+                            candidateState, *mActors, *pending->candidateCombat(), target.sessionId(), tick, revision);
                         if (!snapshot)
                         {
                             (void)joins.cancelCharacterCreation(std::move(*pending));
@@ -520,9 +519,7 @@ namespace TES3MP::ServerApp
                 || state->state() != ServerSessionState::Established || !state->sessionId())
                 return ConnectionSessionResult::ProtocolRejected;
             const auto& hello = state->negotiatedHello();
-            if (!hello
-                || !std::ranges::binary_search(
-                    hello->negotiatedCapabilities(), dialogueChoiceCapability()))
+            if (!hello || !std::ranges::binary_search(hello->negotiatedCapabilities(), dialogueChoiceCapability()))
                 return ConnectionSessionResult::ProtocolRejected;
             auto decodedChoice = decodeClientDialogueChoiceCommand(frame->payload());
             auto* command = std::get_if<ClientDialogueChoiceCommand>(&decodedChoice);
@@ -563,6 +560,33 @@ namespace TES3MP::ServerApp
                 command->commandId, command->observedCanonicalRevision,
                 EntityPrecondition(progress->entityId(), player->entityRevision(), player->authorityEpoch()),
                 MeleeAttackCommandProposal(*command));
+            return intake.submit(std::move(proposal)) == CommandSubmissionResult::Accepted
+                ? ConnectionSessionResult::CommandSubmitted
+                : ConnectionSessionResult::QueueRejected;
+        }
+
+        if (frame->messageKind() == MessageKind::ClientMagicUseCommand)
+        {
+            if (frame->messageClass() != MessageClass::ReliableOperation
+                || state->state() != ServerSessionState::Established || !state->sessionId())
+                return ConnectionSessionResult::ProtocolRejected;
+            auto decodedCommand = decodeClientMagicUseCommand(frame->payload());
+            auto* command = std::get_if<ClientMagicUseCommand>(&decodedCommand);
+            if (!command || command->sessionId != *state->sessionId()
+                || command->sessionGeneration != state->generation())
+                return ConnectionSessionResult::ProtocolRejected;
+            const auto& hello = state->negotiatedHello();
+            if (!hello
+                || !std::ranges::binary_search(hello->negotiatedCapabilities(), authoritativeInstantMagicCapability()))
+                return ConnectionSessionResult::ProtocolRejected;
+            const auto* progress = joins.state().findActiveSession(*state->sessionId());
+            const auto* player = progress ? joins.state().findPlayer(progress->playerId()) : nullptr;
+            if (!progress || !player)
+                return ConnectionSessionResult::ProtocolRejected;
+            ServerCommandProposal proposal(command->sessionId, command->sessionGeneration, command->commandSequence,
+                command->commandId, command->observedCanonicalRevision,
+                EntityPrecondition(progress->entityId(), player->entityRevision(), player->authorityEpoch()),
+                MagicUseCommandProposal(*command));
             return intake.submit(std::move(proposal)) == CommandSubmissionResult::Accepted
                 ? ConnectionSessionResult::CommandSubmitted
                 : ConnectionSessionResult::QueueRejected;
@@ -623,9 +647,8 @@ namespace TES3MP::ServerApp
         auto context = makeResumeTokenContext(*state->negotiatedHello(), crypto);
         if (!context)
             return ConnectionSessionResult::ProtocolRejected;
-        TransportJoinResponseQueue responses(
-            mQueues, connection, this, mActors, mObjects, mInventory, mCombat, mPlayerCombatTemplate, mItemCatalog,
-            mCharacterContent, mWorld);
+        TransportJoinResponseQueue responses(mQueues, connection, this, mActors, mObjects, mInventory, mCombat,
+            mPlayerCombatTemplate, mItemCatalog, mCharacterContent, mWorld);
         AuthenticatedJoinComposition composition(joins, mAuthentication, responses);
         auto outcome = composition.join(*state->principal(), state->generation(), tick, *context, state->playerClaim(),
             state->takePlayerCredential(), state->username());

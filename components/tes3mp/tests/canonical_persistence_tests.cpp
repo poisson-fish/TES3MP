@@ -103,12 +103,13 @@ namespace
 
     CanonicalDurableInventoryState inventory(std::uint32_t count, std::uint64_t tick)
     {
-        return { { CanonicalPlayerInventoryState{ .player = id<PlayerId>(1),
-                     .revision = id<InventoryRevision>(count),
-                     .lastChangeTick = id<ServerTick>(tick),
-                     .stacks = { { id<ItemStackId>(1), id<ItemPrototypeId>(1), count, 26 - count, 0,
-                         std::nullopt } } } },
-            {}, {}, id<ItemStackId>(2) };
+        return {
+            { CanonicalPlayerInventoryState{ .player = id<PlayerId>(1),
+                .revision = id<InventoryRevision>(count),
+                .lastChangeTick = id<ServerTick>(tick),
+                .stacks = { { id<ItemStackId>(1), id<ItemPrototypeId>(1), count, 26 - count, 0, std::nullopt } } } },
+            {}, {}, id<ItemStackId>(2)
+        };
     }
 
     CanonicalDurableCombatState combat(float health, std::uint64_t seed, std::uint64_t tick)
@@ -130,6 +131,12 @@ namespace
             .respawnVictim = victim,
             .maximumHealth = 100.f,
             .maximumFatigue = 100.f,
+            .magicka = 60.f,
+            .maximumMagicka = 80.f,
+            .magicSkills = { 31.f, 32.f, 33.f, 34.f, 35.f, 36.f },
+            .enchantSkill = 37.f,
+            .knownSpells = { id<SpellRecordId>(7), id<SpellRecordId>(9) },
+            .lastMagicUseTick = id<ServerTick>(tick),
             .securitySkill = 47.f };
         const auto security = static_cast<std::size_t>(CombatProgressionSkill::Security);
         playerCombat.skillRules[security].useGain = 3.f;
@@ -144,7 +151,9 @@ namespace
             .aggressionTarget = id<PlayerId>(1),
             .lastAttackTick = id<ServerTick>(tick),
             .maximumHealth = 20.f,
-            .maximumFatigue = 50.f };
+            .maximumFatigue = 50.f,
+            .magicka = 15.f,
+            .maximumMagicka = 25.f };
         const auto key = RandomStreamKey::fromValues(5, 0).value();
         const auto random = Xoshiro256StarStar::fromWorldSeed(seed, key).snapshot();
         return { { std::move(playerCombat) }, { std::move(actorCombat) }, random.words(), id<ServerTick>(tick) };
@@ -154,8 +163,7 @@ namespace
     {
         return { { CanonicalInteractiveObjectState(id<InteractiveObjectId>(1), CellId::interior(id<CellSpaceId>(30)),
             door, lock, 25, id<KeyPrototypeId>(9), tick > 1 ? TrapState::Disarmed : TrapState::Armed,
-            id<TrapPrototypeId>(10),
-            id<ObjectRevision>(tick), id<ServerTick>(tick)) } };
+            id<TrapPrototypeId>(10), id<ObjectRevision>(tick), id<ServerTick>(tick)) } };
     }
 
     CanonicalDurableActorState actors(std::int64_t position, std::uint64_t tick)
@@ -184,24 +192,22 @@ namespace
             id<QuestId>(1), id<QuestStage>(0), { id<QuestStage>(0), id<QuestStage>(10) } } };
         const std::array journal{ JournalCatalogEntry{ id<JournalEntryId>(1), id<QuestId>(1), id<QuestStage>(10) } };
         const auto catalog = QuestJournalCatalog::create(testContentManifestId(), quests, journal).value();
-        const std::array factions{
-            FactionCatalogEntry{ id<FactionId>(1), { id<FactionRank>(0), id<FactionRank>(1) } } };
+        const std::array factions{ FactionCatalogEntry{
+            id<FactionId>(1), { id<FactionRank>(0), id<FactionRank>(1) } } };
         const std::array choices{ DialogueChoiceCatalogEntry{
             id<DialogueChoiceId>(1), id<FactionId>(1), id<FactionRank>(1), 5 } };
-        const auto factionCatalog
-            = FactionDialogueCatalog::create(testContentManifestId(), factions, choices).value();
+        const auto factionCatalog = FactionDialogueCatalog::create(testContentManifestId(), factions, choices).value();
         const std::array weatherIds{ id<WeatherId>(1), id<WeatherId>(2) };
-        const std::array weatherRegions{ WeatherRegionCatalogEntry{ id<WeatherRegionId>(1), id<WeatherId>(1), 3, 3,
-            { id<WeatherId>(1), id<WeatherId>(2) } } };
-        const auto weatherCatalog
-            = WeatherCatalog::create(testContentManifestId(), weatherIds, weatherRegions).value();
-        const auto random = Xoshiro256StarStar::fromWorldSeed(
-            44, *RandomStreamKey::fromValues(0x5745415448455231ULL, 0));
+        const std::array weatherRegions{ WeatherRegionCatalogEntry{
+            id<WeatherRegionId>(1), id<WeatherId>(1), 3, 3, { id<WeatherId>(1), id<WeatherId>(2) } } };
+        const auto weatherCatalog = WeatherCatalog::create(testContentManifestId(), weatherIds, weatherRegions).value();
+        const auto random
+            = Xoshiro256StarStar::fromWorldSeed(44, *RandomStreamKey::fromValues(0x5745415448455231ULL, 0));
         CanonicalWeatherState weather{ {}, random.snapshot(), id<ServerTick>(tick) };
-        weather.regions.push_back({ id<WeatherRegionId>(1), id<WeatherId>(1),
-            tick > 1 ? id<WeatherId>(2) : id<WeatherId>(1), id<ServerTick>(tick),
-            id<ServerTick>(tick > 1 ? tick + 3 : tick), id<ServerTick>(tick > 1 ? tick + 6 : tick + 3),
-            id<WeatherRevision>(tick), id<ServerTick>(tick) });
+        weather.regions.push_back(
+            { id<WeatherRegionId>(1), id<WeatherId>(1), tick > 1 ? id<WeatherId>(2) : id<WeatherId>(1),
+                id<ServerTick>(tick), id<ServerTick>(tick > 1 ? tick + 3 : tick),
+                id<ServerTick>(tick > 1 ? tick + 6 : tick + 3), id<WeatherRevision>(tick), id<ServerTick>(tick) });
         std::vector<CanonicalPlayerQuestJournalState> players;
         std::vector<CanonicalPlayerFactionState> playerFactions;
         if (tick > 1)
@@ -273,19 +279,18 @@ namespace
     {
         const std::array players{ player(10) };
         const std::array commands{ dialogue(1) };
-        const auto tick = CanonicalDurableTick::create(id<CanonicalStateVersion>(1), id<CanonicalRevision>(1),
-            id<ServerTick>(1), players, commands);
+        const auto tick = CanonicalDurableTick::create(
+            id<CanonicalStateVersion>(1), id<CanonicalRevision>(1), id<ServerTick>(1), players, commands);
         const auto prefix = tick ? CanonicalDurablePrefix::create(identity(), { *tick }) : std::nullopt;
-        const auto decoded = prefix
-            ? decodeCanonicalDurablePrefix(encodeCanonicalDurablePrefixV2(*prefix), identity())
-            : CanonicalPersistenceDecodeResult(CanonicalPersistenceDecodeError::Malformed);
+        const auto decoded = prefix ? decodeCanonicalDurablePrefix(encodeCanonicalDurablePrefixV2(*prefix), identity())
+                                    : CanonicalPersistenceDecodeResult(CanonicalPersistenceDecodeError::Malformed);
         const auto* restored = std::get_if<CanonicalDurablePrefix>(&decoded);
         auto invalid = dialogue(1);
         invalid.fields[3] = 1;
         return restored && restored->latest()->commands().size() == 1
             && restored->latest()->commands().front() == commands.front()
-            && !CanonicalDurableTick::create(id<CanonicalStateVersion>(1), id<CanonicalRevision>(1),
-                id<ServerTick>(1), players, std::array{ invalid });
+            && !CanonicalDurableTick::create(id<CanonicalStateVersion>(1), id<CanonicalRevision>(1), id<ServerTick>(1),
+                players, std::array{ invalid });
     }
 
     std::variant<CanonicalReplayState, CanonicalChecksum> replayScriptState(
@@ -388,8 +393,18 @@ namespace
             && latest.inventory()->players.front().stacks.front().condition == 24
             && latest.combat()->players.front().victim.health == 75.f
             && latest.combat()->players.front().securitySkill == 47.f
-            && latest.combat()->players.front()
-                    .skillProgression[static_cast<std::size_t>(CombatProgressionSkill::Security)].progress == 0.02f
+            && latest.combat()->players.front().magicka == 60.f
+            && latest.combat()->players.front().maximumMagicka == 80.f
+            && latest.combat()->players.front().magicSkills[2] == 33.f
+            && latest.combat()->players.front().enchantSkill == 37.f
+            && latest.combat()->players.front().knownSpells
+            == std::vector<SpellRecordId>{ id<SpellRecordId>(7), id<SpellRecordId>(9) }
+        && latest.combat()->players.front().lastMagicUseTick == id<ServerTick>(2)
+            && latest.combat()
+                   ->players.front()
+                   .skillProgression[static_cast<std::size_t>(CombatProgressionSkill::Security)]
+                   .progress
+            == 0.02f
             && latest.combat()->randomWords == combat(75.f, 20, 2).randomWords
             && latest.objects()->objects.front().doorState() == DoorState::Open
             && latest.objects()->objects.front().lockState() == LockState::Unlocked
@@ -411,6 +426,7 @@ namespace
             && latest.world()->weather()->regions.front().targetWeather == id<WeatherId>(2)
             && latest.world()->weather()->regions.front().transitionEndTick == id<ServerTick>(5)
             && latest.combat()->actors.front().aggressionTarget == id<PlayerId>(1)
+            && latest.combat()->actors.front().magicka == 15.f && latest.combat()->actors.front().maximumMagicka == 25.f
             && latest.canonicalChecksum()
             == canonicalDurableStateChecksumV1(latest.stateVersion(), latest.checkpointTick(), latest.players(),
                 latest.inventory(), latest.combat(), latest.objects(), latest.actors(), latest.world())
