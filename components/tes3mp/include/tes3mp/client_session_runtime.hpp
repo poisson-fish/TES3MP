@@ -121,6 +121,7 @@ namespace TES3MP
             CharacterProfileRevision expectedRevision);
         ClientRuntimeQueueResult queueDialogueChoice(
             DialogueChoiceId choice, std::optional<CommandId> retainedCommandId = std::nullopt);
+        ClientRuntimeQueueResult queueWaitRest(std::uint8_t hours, WaitRestMode mode);
         std::optional<LocalLocomotionReconciliation> reconcileLocalPresentation(
             bool hardDiscontinuity = false) noexcept;
         ClientRuntimeResult requestResync(ResyncReason reason);

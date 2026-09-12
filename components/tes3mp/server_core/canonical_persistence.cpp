@@ -1548,7 +1548,7 @@ namespace
             if (command.source == DurableCommandSource::Client)
             {
                 if (scriptsStarted
-                    || command.disposition > static_cast<std::uint8_t>(CommandDisposition::DialogueChoiceRejected)
+                    || command.disposition > static_cast<std::uint8_t>(CommandDisposition::WaitRestRejected)
                     || command.fields[1] == 0 || command.fields[2] == 0 || command.fields[3] == 0
                     || command.fields[4] == 0 || command.fields[5] == 0
                     || (priorClient && command.fields <= *priorClient))

@@ -3,6 +3,7 @@
 
 #include "content_identity.hpp"
 #include "deterministic_random.hpp"
+#include "wait_rest.hpp"
 
 #include <cstddef>
 #include <cstdint>
@@ -404,6 +405,8 @@ namespace TES3MP
 
     CanonicalWorldMutationResult advanceCanonicalWorldTime(
         const CanonicalWorldState& state, ServerTick tick, std::uint64_t tickIntervalMilliseconds) noexcept;
+    CanonicalWorldMutationResult advanceCanonicalWorldTimeByHours(
+        const CanonicalWorldState& state, ServerTick tick, std::uint8_t hours) noexcept;
     CanonicalWorldMutationResult setCanonicalWorldTime(const CanonicalWorldState& state,
         WorldTimeRevision expectedRevision, CanonicalWorldTimeState replacement, ServerTick tick) noexcept;
     CanonicalWorldMutationResult setCanonicalGlobal(const CanonicalWorldState& state,

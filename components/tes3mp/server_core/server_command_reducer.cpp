@@ -1038,6 +1038,13 @@ namespace TES3MP
                                             committedDialogueChoice = dialogue->choice();
                                         }
                                     }
+                                    else if (std::holds_alternative<WaitRestCommandProposal>(proposal.payload()))
+                                    {
+                                        requiresSpatialAdvance = false;
+                                        disposition = world && combat && actors && meleeSettings
+                                            ? CommandDisposition::Applied
+                                            : CommandDisposition::WaitRestRejected;
+                                    }
                                     else
                                     {
                                         requiresSpatialAdvance = false;
@@ -1162,6 +1169,12 @@ namespace TES3MP
             if (const auto* dialogue
                 = std::get_if<DialogueChoiceCommandProposal>(&commands[index].proposal().payload()))
                 order.fields[6] = dialogue->choice().value();
+            if (const auto* waitRest
+                = std::get_if<WaitRestCommandProposal>(&commands[index].proposal().payload()))
+            {
+                order.fields[6] = waitRest->request().hours();
+                order.fields[7] = static_cast<std::uint8_t>(waitRest->request().mode());
+            }
             order.disposition = static_cast<std::uint8_t>(record.disposition());
             prepared.mDurableCommands.push_back(order);
         }

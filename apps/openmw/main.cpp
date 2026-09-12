@@ -599,6 +599,10 @@ bool parseOptions(int argc, char** argv, OMW::Engine& engine, Files::Configurati
                     std::move(credentialDirectory), std::move(serverExecutable), std::move(serverConfig),
                     contentManifest->id(), providers });
         }
+#ifdef TES3MP_OPENMW_DESKTOP_AUTOMATION
+        if (multiplayerAutomation)
+            multiplayerAutomation->setCoordinator(coordinator.get());
+#endif
         if (!coordinator || !engine.attachMultiplayerCoordinator(std::move(coordinator)))
         {
             Log(Debug::Error) << "TES3MP startup failed: "

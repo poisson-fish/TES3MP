@@ -3,6 +3,7 @@
 
 #include "movement_policy.hpp"
 #include "spatial_types.hpp"
+#include "wait_rest.hpp"
 
 #include <compare>
 

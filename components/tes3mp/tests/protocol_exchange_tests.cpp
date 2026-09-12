@@ -290,6 +290,35 @@ namespace
         return true;
     }
 
+    bool wait_rest_requests_are_typed_bounded_and_round_trip()
+    {
+        const ReliableOperationHeader header(
+            ClientCommandHeader(value<SessionId>(21), value<SessionGeneration>(2), value<CommandSequence>(2),
+                value<CommandId>(32), value<CanonicalRevision>(5)),
+            EntityPrecondition(value<EntityId>(41), value<EntityRevision>(3), value<AuthorityEpoch>(2)));
+        for (const auto mode : { WaitRestMode::Wait, WaitRestMode::Rest })
+        {
+            auto request = WaitRestRequest::create(MaximumWaitRestHours, mode);
+            const auto* typed = std::get_if<WaitRestRequest>(&request);
+            if (!typed)
+                return false;
+            auto operation = ReliableOperation::create(header, *typed);
+            const auto* original = std::get_if<ReliableOperation>(&operation);
+            if (!original)
+                return false;
+            const auto decoded = decodeReliableOperation(encodeReliableOperation(*original));
+            const auto* roundTripped = std::get_if<ReliableOperation>(&decoded);
+            if (!roundTripped || *roundTripped != *original)
+                return false;
+        }
+        return hasError(WaitRestRequest::create(0, WaitRestMode::Wait),
+                   ExchangeDecodeErrorCode::InvalidWaitRestHours)
+            && hasError(WaitRestRequest::create(MaximumWaitRestHours + 1, WaitRestMode::Rest),
+                ExchangeDecodeErrorCode::InvalidWaitRestHours)
+            && hasError(WaitRestRequest::create(1, static_cast<WaitRestMode>(0)),
+                ExchangeDecodeErrorCode::InvalidWaitRestMode);
+    }
+
     bool deterministic_exchange_properties_round_trip()
     {
         const auto sessionId = value<SessionId>(1);
@@ -431,7 +460,7 @@ namespace
             return false;
 
         auto unknownReliableBody = reliable;
-        unknownReliableBody[31] = std::byte{ 4 };
+        unknownReliableBody[31] = std::byte{ 5 };
         auto unknownSnapshotBody = latestWins;
         unknownSnapshotBody[31] = std::byte{ 2 };
 
@@ -761,6 +790,7 @@ int main(int argc, char** argv)
         "versioned locomotion input");
     passed &= check(canonical_locomotion_round_trips_without_snapshot_one_shots(), "canonical locomotion snapshot");
     passed &= check(cell_transitions_round_trip_as_typed_owned_values(), "cell transition round trips");
+    passed &= check(wait_rest_requests_are_typed_bounded_and_round_trip(), "wait/rest request round trips");
     passed &= check(reliable_observation_batch_is_distinct_bounded_and_owned(), "reliable observation batch");
     passed &= check(interest_baseline_resync_and_cell_catalog_are_bounded_owned_values(),
         "interest baseline resync and cell catalog");

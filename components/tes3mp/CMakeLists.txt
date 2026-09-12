@@ -95,6 +95,7 @@ target_sources(tes3mp_protocol PRIVATE
     include/tes3mp/strong_value.hpp
     include/tes3mp/value_types.hpp
     include/tes3mp/weather_replication.hpp
+    include/tes3mp/wait_rest.hpp
     include/tes3mp/world_time_replication.hpp
     protocol/generated/authentication_accepted_generated.h
     protocol/generated/authentication_rejected_generated.h
@@ -1059,7 +1060,7 @@ if(TES3MP_BUILD_FUZZERS)
         FORBIDDEN ${TES3MP_ENGINE_INDEPENDENT_FORBIDDEN_INCLUDES})
 endif()
 
-add_custom_target(tes3mp_protocol_tests_run
+add_custom_target(tes3mp_protocol_contracts_run
     COMMAND $<TARGET_FILE:tes3mp_protocol_tests>
     COMMAND $<TARGET_FILE:tes3mp_protocol_envelope_tests>
     COMMAND $<TARGET_FILE:tes3mp_protocol_frame_tests>
@@ -1082,42 +1083,16 @@ add_custom_target(tes3mp_protocol_tests_run
     COMMAND $<TARGET_FILE:tes3mp_protocol_pose_tests>
     COMMAND $<TARGET_FILE:tes3mp_protocol_pose_tests> --verify-corpus
         ${CMAKE_CURRENT_SOURCE_DIR}/tests/fuzz/corpus/protocol_pose
-    COMMAND $<TARGET_FILE:tes3mp_session_state_tests>
-    COMMAND $<TARGET_FILE:tes3mp_client_locomotion_tests>
-    COMMAND $<TARGET_FILE:tes3mp_spatial_primitive_tests>
-    COMMAND $<TARGET_FILE:tes3mp_deterministic_facilities_tests>
-    COMMAND $<TARGET_FILE:tes3mp_deterministic_harness_tests>
-    COMMAND $<TARGET_FILE:tes3mp_fault_injection_tests>
-    COMMAND $<TARGET_FILE:tes3mp_observability_tests>
-    COMMAND $<TARGET_FILE:tes3mp_server_command_intake_tests>
-    COMMAND $<TARGET_FILE:tes3mp_canonical_state_tests>
-    COMMAND $<TARGET_FILE:tes3mp_server_command_reducer_tests>
-    COMMAND $<TARGET_FILE:tes3mp_server_scripting_tests>
-    COMMAND $<TARGET_FILE:tes3mp_server_core_safety_tests>
-    COMMAND $<TARGET_FILE:tes3mp_server_authentication_tests>
-    COMMAND $<TARGET_FILE:tes3mp_server_lifecycle_tests>
-    COMMAND $<TARGET_FILE:tes3mp_authenticated_join_tests>
     COMMAND $<TARGET_FILE:tes3mp_actor_catalog_tests>
     COMMAND $<TARGET_FILE:tes3mp_actor_replication_tests>
     COMMAND $<TARGET_FILE:tes3mp_weather_replication_tests>
     COMMAND $<TARGET_FILE:tes3mp_world_time_replication_tests>
-    COMMAND $<TARGET_FILE:tes3mp_actor_simulation_tests>
     COMMAND $<TARGET_FILE:tes3mp_melee_combat_tests>
-    COMMAND $<TARGET_FILE:tes3mp_combat_world_tests>
-    COMMAND $<TARGET_FILE:tes3mp_direct_magic_tests>
     COMMAND $<TARGET_FILE:tes3mp_combat_replication_tests>
-    COMMAND $<TARGET_FILE:tes3mp_combat_command_reducer_tests>
     COMMAND $<TARGET_FILE:tes3mp_interactive_object_catalog_tests>
-    COMMAND $<TARGET_FILE:tes3mp_interactive_object_world_tests>
     COMMAND $<TARGET_FILE:tes3mp_interactive_object_replication_tests>
-    COMMAND $<TARGET_FILE:tes3mp_inventory_replication_tests>
     COMMAND $<TARGET_FILE:tes3mp_item_catalog_tests>
-    COMMAND $<TARGET_FILE:tes3mp_inventory_world_tests>
-    COMMAND $<TARGET_FILE:tes3mp_canonical_sink_tests>
-    COMMAND $<TARGET_FILE:tes3mp_canonical_persistence_tests>
-    COMMAND $<TARGET_FILE:tes3mp_world_state_tests>
-    COMMAND $<TARGET_FILE:tes3mp_server_core_property_tests>
-    COMMAND $<TARGET_FILE:tes3mp_transport_lifecycle_tests>
+    COMMAND $<TARGET_FILE:tes3mp_inventory_replication_tests>
     DEPENDS
         tes3mp_protocol_tests
         tes3mp_protocol_envelope_tests
@@ -1129,13 +1104,39 @@ add_custom_target(tes3mp_protocol_tests_run
         tes3mp_dialogue_choice_protocol_tests
         tes3mp_protocol_exchange_tests
         tes3mp_protocol_pose_tests
-        tes3mp_session_state_tests
-        tes3mp_client_locomotion_tests
-        tes3mp_spatial_primitive_tests
-        tes3mp_deterministic_facilities_tests
-        tes3mp_deterministic_harness_tests
-        tes3mp_fault_injection_tests
-        tes3mp_observability_tests
+        tes3mp_actor_catalog_tests
+        tes3mp_actor_replication_tests
+        tes3mp_weather_replication_tests
+        tes3mp_world_time_replication_tests
+        tes3mp_melee_combat_tests
+        tes3mp_combat_replication_tests
+        tes3mp_interactive_object_catalog_tests
+        tes3mp_interactive_object_replication_tests
+        tes3mp_item_catalog_tests
+        tes3mp_inventory_replication_tests
+    COMMENT "Running focused TES3MP protocol contracts"
+)
+
+add_custom_target(tes3mp_server_logic_tests_run
+    COMMAND $<TARGET_FILE:tes3mp_server_command_intake_tests>
+    COMMAND $<TARGET_FILE:tes3mp_canonical_state_tests>
+    COMMAND $<TARGET_FILE:tes3mp_server_command_reducer_tests>
+    COMMAND $<TARGET_FILE:tes3mp_server_scripting_tests>
+    COMMAND $<TARGET_FILE:tes3mp_server_core_safety_tests>
+    COMMAND $<TARGET_FILE:tes3mp_server_authentication_tests>
+    COMMAND $<TARGET_FILE:tes3mp_server_lifecycle_tests>
+    COMMAND $<TARGET_FILE:tes3mp_authenticated_join_tests>
+    COMMAND $<TARGET_FILE:tes3mp_actor_simulation_tests>
+    COMMAND $<TARGET_FILE:tes3mp_combat_world_tests>
+    COMMAND $<TARGET_FILE:tes3mp_direct_magic_tests>
+    COMMAND $<TARGET_FILE:tes3mp_combat_command_reducer_tests>
+    COMMAND $<TARGET_FILE:tes3mp_interactive_object_world_tests>
+    COMMAND $<TARGET_FILE:tes3mp_inventory_world_tests>
+    COMMAND $<TARGET_FILE:tes3mp_canonical_sink_tests>
+    COMMAND $<TARGET_FILE:tes3mp_canonical_persistence_tests>
+    COMMAND $<TARGET_FILE:tes3mp_world_state_tests>
+    COMMAND $<TARGET_FILE:tes3mp_server_core_property_tests>
+    DEPENDS
         tes3mp_server_command_intake_tests
         tes3mp_canonical_state_tests
         tes3mp_server_command_reducer_tests
@@ -1144,26 +1145,38 @@ add_custom_target(tes3mp_protocol_tests_run
         tes3mp_server_authentication_tests
         tes3mp_server_lifecycle_tests
         tes3mp_authenticated_join_tests
-        tes3mp_actor_catalog_tests
-        tes3mp_actor_replication_tests
-        tes3mp_weather_replication_tests
-        tes3mp_world_time_replication_tests
         tes3mp_actor_simulation_tests
-        tes3mp_melee_combat_tests
         tes3mp_combat_world_tests
         tes3mp_direct_magic_tests
-        tes3mp_combat_replication_tests
         tes3mp_combat_command_reducer_tests
-        tes3mp_interactive_object_catalog_tests
         tes3mp_interactive_object_world_tests
-        tes3mp_interactive_object_replication_tests
-        tes3mp_inventory_replication_tests
-        tes3mp_item_catalog_tests
         tes3mp_inventory_world_tests
         tes3mp_canonical_sink_tests
         tes3mp_canonical_persistence_tests
         tes3mp_world_state_tests
         tes3mp_server_core_property_tests
+    COMMENT "Running focused TES3MP server logic tests"
+)
+
+add_custom_target(tes3mp_protocol_tests_run
+    COMMAND $<TARGET_FILE:tes3mp_session_state_tests>
+    COMMAND $<TARGET_FILE:tes3mp_client_locomotion_tests>
+    COMMAND $<TARGET_FILE:tes3mp_spatial_primitive_tests>
+    COMMAND $<TARGET_FILE:tes3mp_deterministic_facilities_tests>
+    COMMAND $<TARGET_FILE:tes3mp_deterministic_harness_tests>
+    COMMAND $<TARGET_FILE:tes3mp_fault_injection_tests>
+    COMMAND $<TARGET_FILE:tes3mp_observability_tests>
+    COMMAND $<TARGET_FILE:tes3mp_transport_lifecycle_tests>
+    DEPENDS
+        tes3mp_protocol_contracts_run
+        tes3mp_server_logic_tests_run
+        tes3mp_session_state_tests
+        tes3mp_client_locomotion_tests
+        tes3mp_spatial_primitive_tests
+        tes3mp_deterministic_facilities_tests
+        tes3mp_deterministic_harness_tests
+        tes3mp_fault_injection_tests
+        tes3mp_observability_tests
         tes3mp_transport_lifecycle_tests
     COMMENT "Running TES3MP protocol, deterministic facility, fault, and observability contracts"
 )

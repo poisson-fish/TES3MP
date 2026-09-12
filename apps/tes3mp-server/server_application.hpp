@@ -81,6 +81,12 @@ namespace TES3MP::ServerApp
             DialogueChoiceDisposition disposition = DialogueChoiceDisposition::Rejected;
         };
 
+        struct RetainedWaitRestConsent
+        {
+            SessionGeneration generation;
+            WaitRestRequest request;
+        };
+
         TransportRuntime& mTransport;
         const ServerConfig& mConfig;
         std::optional<ListenerId> mListener;
@@ -89,6 +95,7 @@ namespace TES3MP::ServerApp
         std::optional<ServerApplicationWiring> mWiring;
         std::map<SessionId, RetainedPose> mLatestPoses;
         std::map<std::pair<SessionId, CommandId>, RetainedDialogueChoiceResult> mDialogueChoiceResults;
+        std::map<SessionId, RetainedWaitRestConsent> mWaitRestConsents;
         std::map<TransportConnectionId, MonotonicInstant> mRejectedCloseDeadlines;
 
         bool failConnection(TransportConnectionId connection, std::string_view failure) noexcept;
@@ -106,6 +113,7 @@ namespace TES3MP::ServerApp
         bool supportsDialogueChoices(TransportConnectionId connection) const noexcept;
         bool supportsWeather(TransportConnectionId connection) const noexcept;
         bool supportsWorldTime(TransportConnectionId connection) const noexcept;
+        bool supportsWaitRest(TransportConnectionId connection) const noexcept;
     };
 }
 

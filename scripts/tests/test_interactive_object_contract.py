@@ -148,7 +148,7 @@ class InteractiveObjectContractTests(unittest.TestCase):
             "const std::array optional{ vrPoseCapability(), actorReplicationCapability(), "
             "interactiveObjectReplicationCapability(), inventoryReplicationCapability(), "
             "combatReplicationCapability(), characterCreationCapability(), dialogueChoiceCapability(), "
-            "weatherReplicationCapability(), worldTimeReplicationCapability() };"
+            "weatherReplicationCapability(), worldTimeReplicationCapability(), authoritativeWaitRestCapability() };"
         )
         old_capabilities = "const std::array optional{ vrPoseCapability(), actorReplicationCapability() };"
         for src in (adapter_src, connection_src):

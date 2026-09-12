@@ -191,6 +191,23 @@
       ],
       "disposition": "local product adapter",
       "removal_condition": "OpenMW supplies equivalent supported external weather and world-time authority seams"
+    },
+    {
+      "id": "P21-001",
+      "slice": "authoritative synchronized wait/rest",
+      "owner": "OpenMW adapter",
+      "purpose": "Intercept stock wait and rest confirmation before local clock or resource mutation and submit one bounded semantic request to multiplayer authority.",
+      "paths": [
+        "apps/openmw/mwgui/waitdialog.cpp"
+      ],
+      "tests": [
+        "scripts/tests/test_openmw_patch_registry.py",
+        "scripts/tests/test_wait_rest_capture.py",
+        "openmw_tes3mp_adapter_tests",
+        "content-backed two-client wait/rest rollover, reconnect, and slow-peer capture"
+      ],
+      "disposition": "local product adapter",
+      "removal_condition": "OpenMW supplies an equivalent supported pre-mutation external wait/rest authority seam"
     }
   ]
 }

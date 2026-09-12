@@ -16,6 +16,7 @@
 #include "../mwbase/statemanager.hpp"
 #include "../mwbase/windowmanager.hpp"
 #include "../mwbase/world.hpp"
+#include "../tes3mp/engine_coordinator.hpp"
 
 #include "../mwworld/cellstore.hpp"
 #include "../mwworld/class.hpp"
@@ -188,6 +189,19 @@ namespace MWGui
 
     void WaitDialog::startWaiting(int hoursToWait)
     {
+        if (auto* multiplayer = MWBase::Environment::get().getMultiplayerCoordinator())
+        {
+            const auto mode = mSleeping ? TES3MP::WaitRestMode::Rest : TES3MP::WaitRestMode::Wait;
+            if (!multiplayer->submitWaitRest(static_cast<std::uint8_t>(hoursToWait), mode))
+            {
+                MWBase::Environment::get().getWindowManager()->messageBox("Unable to submit multiplayer wait/rest.");
+                return;
+            }
+            MWBase::Environment::get().getWindowManager()->removeGuiMode(GM_Rest);
+            MWBase::Environment::get().getWindowManager()->messageBox("Waiting for all active players to agree.");
+            return;
+        }
+
         if (Settings::saves().mAutosave) // autosaves when enabled
             MWBase::Environment::get().getStateManager()->quickSave("Autosave");
 

@@ -71,10 +71,22 @@ table CellTransition {
   requested_cell:Cell (id: 0);
 }
 
+enum WaitRestMode : ubyte {
+  Unknown = 0,
+  Wait = 1,
+  Rest = 2
+}
+
+table WaitRestRequest {
+  hours:ubyte (id: 0);
+  mode:WaitRestMode (id: 1);
+}
+
 union ReliableOperationBody {
   PlayerMotionIntent = 1,
   CellTransition = 2,
-  PlayerLocomotionInput = 3
+  PlayerLocomotionInput = 3,
+  WaitRestRequest = 4
 }
 
 table ReliableOperation {

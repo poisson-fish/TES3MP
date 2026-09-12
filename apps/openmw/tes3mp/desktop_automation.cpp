@@ -1,5 +1,7 @@
 #include "desktop_automation.hpp"
 
+#include "engine_coordinator.hpp"
+
 #include "../mwbase/environment.hpp"
 #include "../mwbase/statemanager.hpp"
 
@@ -98,6 +100,16 @@ namespace TES3MP::OpenMWAdapter
             return DesktopAutomationRole::WeatherReconnect;
         if (value == "weather-slow")
             return DesktopAutomationRole::WeatherSlow;
+        if (value == "wait-one")
+            return DesktopAutomationRole::WaitOne;
+        if (value == "wait-two")
+            return DesktopAutomationRole::WaitTwo;
+        if (value == "wait-anchor")
+            return DesktopAutomationRole::WaitAnchor;
+        if (value == "wait-reconnect")
+            return DesktopAutomationRole::WaitReconnect;
+        if (value == "wait-slow")
+            return DesktopAutomationRole::WaitSlow;
         return std::nullopt;
     }
 
@@ -205,6 +217,12 @@ namespace TES3MP::OpenMWAdapter
         }
         else if (mSawPeer)
             mSawLeave = true;
+        if (mRole == DesktopAutomationRole::WaitReconnect && mWorldTimeRevisionBeforeDisconnect && mSawPeer
+            && mResumes == 0 && !mNextDisconnect)
+        {
+            mReadyToDisconnect = true;
+            mNextDisconnect = receivedAt;
+        }
         if (mAwaitingResumeSnapshot)
         {
             mAwaitingResumeSnapshot = false;
@@ -279,6 +297,24 @@ namespace TES3MP::OpenMWAdapter
         if (mFinished)
             return ProviderResult::Accepted;
         const auto elapsed = now.nanoseconds() - mStartedAt->nanoseconds();
+        const bool submitsWaitRest = mRole == DesktopAutomationRole::WaitOne
+            || mRole == DesktopAutomationRole::WaitTwo || mRole == DesktopAutomationRole::WaitAnchor
+            || mRole == DesktopAutomationRole::WaitSlow;
+        if (submitsWaitRest && !mWaitRestSubmitted && mLastWorldTime && elapsed >= 5 * Second)
+        {
+            const bool accepted = mCoordinator && mCoordinator->submitWaitRest(2, WaitRestMode::Rest);
+            if (accepted)
+            {
+                mWaitRestSubmitted = true;
+                if (mOutput && mEvidenceEvents < MaximumEvidenceEvents)
+                {
+                    mOutput << "{\"event\":\"wait_rest_submitted\",\"role\":\"" << roleName()
+                            << "\",\"hours\":2,\"mode\":\"rest\",\"accepted\":true}\n";
+                    mOutput.flush();
+                    ++mEvidenceEvents;
+                }
+            }
+        }
         if (mRole == DesktopAutomationRole::Reconnect)
         {
             if (mReadyToDisconnect && !mNextDisconnect)
@@ -323,6 +359,14 @@ namespace TES3MP::OpenMWAdapter
             finish(mWeatherDuplicates == 0);
         else if (mRole == DesktopAutomationRole::WeatherSlow && mSlowPeerRecovered)
             finish(mWeatherDuplicates == 0);
+        else if ((mRole == DesktopAutomationRole::WaitOne || mRole == DesktopAutomationRole::WaitTwo
+                     || mRole == DesktopAutomationRole::WaitAnchor)
+            && mWaitRestApplied)
+            finish(mWorldTimeDuplicates == 0);
+        else if (mRole == DesktopAutomationRole::WaitReconnect && mWorldTimeConvergedAfterResume)
+            finish(mWorldTimeDuplicates == 0);
+        else if (mRole == DesktopAutomationRole::WaitSlow && mSlowPeerRecovered && mWaitRestApplied)
+            finish(mWorldTimeDuplicates == 0);
         return ProviderResult::Accepted;
     }
 
@@ -406,7 +450,50 @@ namespace TES3MP::OpenMWAdapter
     ProviderResult DesktopAutomation::applyWorldTime(
         const ReliableWorldTimeState& state, MonotonicInstant receivedAt) noexcept
     {
-        return mPresentation.applyWorldTime(state, receivedAt);
+        const auto applied = mPresentation.applyWorldTime(state, receivedAt);
+        if (applied != ProviderResult::Accepted)
+            return applied;
+        ++mWorldTimePresentations;
+        if (mLastWorldTime && *mLastWorldTime == state)
+            ++mWorldTimeDuplicates;
+        else
+            writeWaitRestSample(state);
+        if (!mInitialWorldTime)
+            mInitialWorldTime = state.time;
+        if (mInitialWorldTime
+            && (state.time.year != mInitialWorldTime->year || state.time.month != mInitialWorldTime->month
+                || state.time.day != mInitialWorldTime->day))
+            mWaitRestApplied = true;
+
+        if (mRole == DesktopAutomationRole::WaitReconnect && !mWorldTimeRevisionBeforeDisconnect && mResumes == 0)
+            mWorldTimeRevisionBeforeDisconnect = state.time.revision;
+        if (mRole == DesktopAutomationRole::WaitReconnect && mResumes != 0 && mWorldTimeRevisionBeforeDisconnect
+            && state.time.revision > *mWorldTimeRevisionBeforeDisconnect && mWaitRestApplied)
+            mWorldTimeConvergedAfterResume = true;
+
+        if (mRole == DesktopAutomationRole::WaitSlow && mLastWorldTime && !mSlowPeerStalled
+            && mWaitRestApplied)
+        {
+            mSlowPeerStalled = true;
+            if (mOutput && mEvidenceEvents < MaximumEvidenceEvents)
+            {
+                mOutput << "{\"event\":\"wait_slow_peer_stall_started\",\"role\":\"" << roleName()
+                        << "\",\"revision\":" << state.time.revision.value() << "}\n";
+                mOutput.flush();
+                ++mEvidenceEvents;
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(1500));
+            mSlowPeerRecovered = true;
+            if (mOutput && mEvidenceEvents < MaximumEvidenceEvents)
+            {
+                mOutput << "{\"event\":\"wait_slow_peer_recovered\",\"role\":\"" << roleName()
+                        << "\",\"revision\":" << state.time.revision.value() << "}\n";
+                mOutput.flush();
+                ++mEvidenceEvents;
+            }
+        }
+        mLastWorldTime = state;
+        return ProviderResult::Accepted;
     }
 
     std::optional<ObjectRevision> DesktopAutomation::observedObjectRevision(InteractiveObjectId id) const noexcept
@@ -440,6 +527,7 @@ namespace TES3MP::OpenMWAdapter
         const auto maximumResumes = mRole == DesktopAutomationRole::Reconnect ? 32u
             : mRole == DesktopAutomationRole::ActorReconnect                  ? 4u
             : mRole == DesktopAutomationRole::WeatherReconnect                ? 1u
+            : mRole == DesktopAutomationRole::WaitReconnect                   ? 1u
                                                                               : 0u;
         if (maximumResumes == 0 || !mReadyToDisconnect || !mNow || !mNextDisconnect || *mNow < *mNextDisconnect
             || mResumes >= maximumResumes)
@@ -451,7 +539,10 @@ namespace TES3MP::OpenMWAdapter
 
     std::uint64_t DesktopAutomation::reconnectDelayNanoseconds() noexcept
     {
-        return mRole == DesktopAutomationRole::WeatherReconnect ? 4'000'000'000ull : 0;
+        if (mRole == DesktopAutomationRole::WaitReconnect)
+            return 8'000'000'000ull;
+        return mRole == DesktopAutomationRole::WeatherReconnect ? 4'000'000'000ull
+            : 0;
     }
 
     std::optional<ResyncReason> DesktopAutomation::resyncRequested() noexcept
@@ -510,6 +601,16 @@ namespace TES3MP::OpenMWAdapter
                 return "weather-reconnect";
             case DesktopAutomationRole::WeatherSlow:
                 return "weather-slow";
+            case DesktopAutomationRole::WaitOne:
+                return "wait-one";
+            case DesktopAutomationRole::WaitTwo:
+                return "wait-two";
+            case DesktopAutomationRole::WaitAnchor:
+                return "wait-anchor";
+            case DesktopAutomationRole::WaitReconnect:
+                return "wait-reconnect";
+            case DesktopAutomationRole::WaitSlow:
+                return "wait-slow";
         }
         return "unknown";
     }
@@ -554,6 +655,19 @@ namespace TES3MP::OpenMWAdapter
         mOutput.flush();
         ++mEvidenceEvents;
         ++mWeatherEvidenceSamples;
+    }
+
+    void DesktopAutomation::writeWaitRestSample(const ReliableWorldTimeState& state) noexcept
+    {
+        if (!mOutput || mEvidenceEvents >= MaximumEvidenceEvents)
+            return;
+        mOutput << "{\"event\":\"wait_rest_time_sample\",\"role\":\"" << roleName()
+                << "\",\"revision\":" << state.time.revision.value() << ",\"tick\":"
+                << state.serverTick.value() << ",\"day\":" << static_cast<unsigned>(state.time.day)
+                << ",\"month\":" << static_cast<unsigned>(state.time.month) << ",\"year\":" << state.time.year
+                << ",\"milliseconds_since_midnight\":" << state.time.millisecondsSinceMidnight << "}\n";
+        mOutput.flush();
+        ++mEvidenceEvents;
     }
 
     void DesktopAutomation::writeStatus(ConnectionStatus status) noexcept
@@ -602,7 +716,13 @@ namespace TES3MP::OpenMWAdapter
                     << ",\"weather_completion\":" << (mSawWeatherCompletion ? "true" : "false")
                     << ",\"weather_resumed_converged\":" << (mWeatherConvergedAfterResume ? "true" : "false")
                     << ",\"slow_peer_stalled\":" << (mSlowPeerStalled ? "true" : "false")
-                    << ",\"slow_peer_recovered\":" << (mSlowPeerRecovered ? "true" : "false") << "}\n";
+                    << ",\"slow_peer_recovered\":" << (mSlowPeerRecovered ? "true" : "false")
+                    << ",\"world_time_presentations\":" << mWorldTimePresentations
+                    << ",\"world_time_duplicate_presentations\":" << mWorldTimeDuplicates
+                    << ",\"wait_rest_submitted\":" << (mWaitRestSubmitted ? "true" : "false")
+                    << ",\"wait_rest_applied\":" << (mWaitRestApplied ? "true" : "false")
+                    << ",\"world_time_resumed_converged\":"
+                    << (mWorldTimeConvergedAfterResume ? "true" : "false") << "}\n";
             mOutput.flush();
             ++mEvidenceEvents;
         }

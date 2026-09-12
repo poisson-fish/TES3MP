@@ -145,6 +145,17 @@ namespace TES3MP::ServerApp
         return hello && std::ranges::binary_search(hello->negotiatedCapabilities(), worldTimeReplicationCapability());
     }
 
+    bool ServerApplication::supportsWaitRest(TransportConnectionId connection) const noexcept
+    {
+        if (!supportsWorldTime(connection) || !supportsCombat(connection))
+            return false;
+        const auto* session = mWiring->sessions.session(connection);
+        const auto& hello = session->negotiatedHello();
+        return hello && hello->selectedVersion().major == 1 && hello->selectedVersion().minor >= 8
+            && std::ranges::binary_search(
+                hello->negotiatedCapabilities(), authoritativeWaitRestCapability());
+    }
+
     bool ServerApplication::start() noexcept
     {
         if (mRunning || mListener)
@@ -1025,6 +1036,39 @@ namespace TES3MP::ServerApp
             bool refreshInventoryBaselines = false;
             const auto dispositions = prepared.result().dispositions();
             const auto commands = batch.commands();
+            auto waitRestConsentsCandidate = mWaitRestConsents;
+            std::erase_if(waitRestConsentsCandidate, [&](const auto& entry) {
+                const auto* active = prepared.candidateState().findActiveSession(entry.first);
+                const auto connection = active ? mWiring->sessions.connectionForSession(entry.first) : std::nullopt;
+                return !active || active->sessionGeneration() != entry.second.generation || !connection
+                    || !supportsWaitRest(*connection);
+            });
+            for (std::size_t index = 0; index < dispositions.size(); ++index)
+            {
+                const auto* waitRest
+                    = std::get_if<WaitRestCommandProposal>(&commands[index].proposal().payload());
+                if (waitRest && dispositions[index].disposition() == CommandDisposition::Applied)
+                {
+                    const auto& proposal = commands[index].proposal();
+                    waitRestConsentsCandidate.insert_or_assign(proposal.sessionId(),
+                        RetainedWaitRestConsent{ proposal.sessionGeneration(), waitRest->request() });
+                }
+            }
+            std::optional<WaitRestRequest> waitRestCommit;
+            if (!prepared.candidateState().activeSessions().empty()
+                && waitRestConsentsCandidate.size() == prepared.candidateState().activeSessions().size())
+            {
+                const auto& first = waitRestConsentsCandidate.begin()->second.request;
+                const bool unanimous = std::ranges::all_of(prepared.candidateState().activeSessions(),
+                    [&](const CanonicalSessionProgress& active) {
+                        const auto found = waitRestConsentsCandidate.find(active.sessionId());
+                        return found != waitRestConsentsCandidate.end()
+                            && found->second.generation == active.sessionGeneration()
+                            && found->second.request == first;
+                    });
+                if (unanimous)
+                    waitRestCommit = first;
+            }
             auto dialogueChoiceResultsCandidate = mDialogueChoiceResults;
             std::erase_if(dialogueChoiceResultsCandidate, [&prepared](const auto& entry) {
                 const auto* active = prepared.candidateState().findActiveSession(entry.first.first);
@@ -1265,6 +1309,29 @@ namespace TES3MP::ServerApp
                     actorViews.emplace_back(*connection, std::move(*view));
                 }
             }
+            bool waitRestApplied = false;
+            if (waitRestCommit)
+            {
+                if (!mWiring->combat || !mWiring->actors || !mWiring->meleeSettings)
+                {
+                    mFailure = "wait/rest composition incomplete";
+                    return false;
+                }
+                const auto& baseCombat = combatCandidate ? *combatCandidate : *mWiring->combat;
+                const auto& baseActors = actorCandidate ? *actorCandidate : *mWiring->actors;
+                auto recovered = applyAuthoritativeWaitRestRecovery(baseCombat, prepared.candidateState(), baseActors,
+                    *mWiring->meleeSettings, waitRestCommit->hours(), waitRestCommit->mode());
+                if (auto* value = std::get_if<CanonicalCombatWorld>(&recovered))
+                {
+                    combatCandidate = std::move(*value);
+                    waitRestApplied = true;
+                }
+                else
+                {
+                    waitRestCommit.reset();
+                    waitRestConsentsCandidate.clear();
+                }
+            }
             std::optional<CanonicalWorldState> worldCandidate;
             if (mWiring->world)
             {
@@ -1285,7 +1352,20 @@ namespace TES3MP::ServerApp
                     mFailure = "weather simulation failed";
                     return false;
                 }
-                worldCandidate.emplace(std::move(*weatherValue));
+                if (waitRestApplied)
+                {
+                    auto advancedWaitRest = advanceCanonicalWorldTimeByHours(*weatherValue,
+                        batch.scheduledTick().value(), waitRestCommit->hours());
+                    auto* waitedWorld = std::get_if<CanonicalWorldState>(&advancedWaitRest);
+                    if (!waitedWorld)
+                    {
+                        mFailure = "wait/rest world time advance failed";
+                        return false;
+                    }
+                    worldCandidate.emplace(std::move(*waitedWorld));
+                }
+                else
+                    worldCandidate.emplace(std::move(*weatherValue));
             }
             std::vector<std::pair<TransportConnectionId, LatestWinsCombatSnapshot>> combatViews;
             std::vector<std::pair<TransportConnectionId, ReliableCombatEventBatch>> combatEvents;
@@ -1363,7 +1443,7 @@ namespace TES3MP::ServerApp
                 const auto ticksPerSecond
                     = std::max<std::uint64_t>(1, (1000 + mConfig.tickIntervalMilliseconds - 1)
                             / mConfig.tickIntervalMilliseconds);
-                if (batch.scheduledTick().value().value() % ticksPerSecond == 0)
+                if (waitRestApplied || batch.scheduledTick().value().value() % ticksPerSecond == 0)
                 {
                     for (const auto& target : prepared.candidateState().activeSessions())
                     {
@@ -1397,6 +1477,9 @@ namespace TES3MP::ServerApp
                 return false;
             }
             mDialogueChoiceResults = std::move(dialogueChoiceResultsCandidate);
+            if (waitRestApplied)
+                waitRestConsentsCandidate.clear();
+            mWaitRestConsents = std::move(waitRestConsentsCandidate);
             if (mWiring->scripts && !mWiring->scripts->healthy())
             {
                 mFailure = "server script delivery failed";

@@ -8,6 +8,7 @@
 #include "inventory_world.hpp"
 #include "movement_policy.hpp"
 #include "observability.hpp"
+#include "protocol_exchange.hpp"
 
 #include <cstddef>
 #include <cstdint>
@@ -158,9 +159,22 @@ namespace TES3MP
         DialogueChoiceId mChoice;
     };
 
+    class WaitRestCommandProposal
+    {
+    public:
+        constexpr explicit WaitRestCommandProposal(WaitRestRequest request) noexcept
+            : mRequest(request) {}
+
+        constexpr WaitRestRequest request() const noexcept { return mRequest; }
+        friend constexpr bool operator==(WaitRestCommandProposal, WaitRestCommandProposal) noexcept = default;
+
+    private:
+        WaitRestRequest mRequest;
+    };
+
     using ServerCommandPayload = std::variant<PlayerMotionCommandProposal, CellTransitionCommandProposal,
         PlayerLocomotionCommandProposal, InteractiveObjectCommandProposal, InventoryCommandProposal,
-        MeleeAttackCommandProposal, DialogueChoiceCommandProposal>;
+        MeleeAttackCommandProposal, DialogueChoiceCommandProposal, WaitRestCommandProposal>;
 
     class ServerCommandProposal
     {
@@ -223,6 +237,20 @@ namespace TES3MP
             , mObservedCanonicalRevision(observedCanonicalRevision)
             , mEntityPrecondition(entityPrecondition)
             , mPayload(dialogue)
+        {
+        }
+
+
+        constexpr ServerCommandProposal(SessionId sessionId, SessionGeneration sessionGeneration,
+            CommandSequence commandSequence, CommandId commandId, CanonicalRevision observedCanonicalRevision,
+            EntityPrecondition entityPrecondition, WaitRestCommandProposal waitRest) noexcept
+            : mSessionId(sessionId)
+            , mSessionGeneration(sessionGeneration)
+            , mCommandSequence(commandSequence)
+            , mCommandId(commandId)
+            , mObservedCanonicalRevision(observedCanonicalRevision)
+            , mEntityPrecondition(entityPrecondition)
+            , mPayload(waitRest)
         {
         }
 

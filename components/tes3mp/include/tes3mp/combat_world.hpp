@@ -8,6 +8,7 @@
 #include "direct_magic.hpp"
 #include "inventory_world.hpp"
 #include "melee_combat.hpp"
+#include "wait_rest.hpp"
 
 #include <array>
 #include <cstddef>
@@ -392,6 +393,17 @@ namespace TES3MP
         std::vector<AuthoritativeActorMeleeEvent> events;
     };
 
+    enum class WaitRestRecoveryError : std::uint8_t
+    {
+        InvalidRequest,
+        InvalidWorld,
+        ActiveCombat,
+        DeadPlayer,
+        RevisionExhausted,
+    };
+
+    using WaitRestRecoveryResult = std::variant<CanonicalCombatWorld, WaitRestRecoveryError>;
+
     struct PreparedMeleeAttack
     {
         AuthoritativeMeleeDisposition disposition = AuthoritativeMeleeDisposition::InvalidAttempt;
@@ -412,6 +424,9 @@ namespace TES3MP
         const CanonicalServerState& players, const CanonicalActorWorld& actors,
         const OpenMwMeleeSettings& settings, CombatSimulationPolicy policy, ServerTick tick,
         const DirectMagicCatalog* magic = nullptr) noexcept;
+    WaitRestRecoveryResult applyAuthoritativeWaitRestRecovery(const CanonicalCombatWorld& combat,
+        const CanonicalServerState& players, const CanonicalActorWorld& actors,
+        const OpenMwMeleeSettings& settings, std::uint8_t hours, WaitRestMode mode) noexcept;
 }
 
 #endif

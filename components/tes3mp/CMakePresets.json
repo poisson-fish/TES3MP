@@ -52,6 +52,24 @@
       "targets": ["tes3mp_protocol_tests_run"]
     },
     {
+      "name": "tes3mp-protocol-contracts",
+      "configurePreset": "tes3mp-standalone",
+      "targets": ["tes3mp_protocol_contracts_run"]
+    },
+    {
+      "name": "tes3mp-server-logic",
+      "configurePreset": "tes3mp-standalone",
+      "targets": [
+        "tes3mp_server_logic_tests_run",
+        "tes3mp_server_app_tests_run"
+      ]
+    },
+    {
+      "name": "tes3mp-adapter-tests",
+      "configurePreset": "tes3mp-standalone",
+      "targets": ["openmw_tes3mp_adapter_tests_run"]
+    },
+    {
       "name": "tes3mp-safety-asan-ubsan",
       "configurePreset": "tes3mp-safety-asan-ubsan",
       "targets": [

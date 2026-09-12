@@ -20,9 +20,11 @@ namespace Reliable {
 
 struct ClientCommandHeader;
 struct ClientCommandHeaderBuilder;
+struct ClientCommandHeaderT;
 
 struct EntityPrecondition;
 struct EntityPreconditionBuilder;
+struct EntityPreconditionT;
 
 struct Position3;
 
@@ -32,17 +34,25 @@ struct LinearVelocity3;
 
 struct PlayerMotionIntent;
 struct PlayerMotionIntentBuilder;
+struct PlayerMotionIntentT;
 
 struct PlayerLocomotionInput;
 struct PlayerLocomotionInputBuilder;
+struct PlayerLocomotionInputT;
 
 struct Cell;
 
 struct CellTransition;
 struct CellTransitionBuilder;
+struct CellTransitionT;
+
+struct WaitRestRequest;
+struct WaitRestRequestBuilder;
+struct WaitRestRequestT;
 
 struct ReliableOperation;
 struct ReliableOperationBuilder;
+struct ReliableOperationT;
 
 enum class LocomotionMode : uint8_t {
   Unknown = 0,
@@ -116,38 +126,74 @@ inline const char *EnumNameCellKind(CellKind e) {
   return EnumNamesCellKind()[index];
 }
 
+enum class WaitRestMode : uint8_t {
+  Unknown = 0,
+  Wait = 1,
+  Rest = 2,
+  MIN = Unknown,
+  MAX = Rest
+};
+
+inline const WaitRestMode (&EnumValuesWaitRestMode())[3] {
+  static const WaitRestMode values[] = {
+    WaitRestMode::Unknown,
+    WaitRestMode::Wait,
+    WaitRestMode::Rest
+  };
+  return values;
+}
+
+inline const char * const *EnumNamesWaitRestMode() {
+  static const char * const names[4] = {
+    "Unknown",
+    "Wait",
+    "Rest",
+    nullptr
+  };
+  return names;
+}
+
+inline const char *EnumNameWaitRestMode(WaitRestMode e) {
+  if (::flatbuffers::IsOutRange(e, WaitRestMode::Unknown, WaitRestMode::Rest)) return "";
+  const size_t index = static_cast<size_t>(e);
+  return EnumNamesWaitRestMode()[index];
+}
+
 enum class ReliableOperationBody : uint8_t {
   NONE = 0,
   PlayerMotionIntent = 1,
   CellTransition = 2,
   PlayerLocomotionInput = 3,
+  WaitRestRequest = 4,
   MIN = NONE,
-  MAX = PlayerLocomotionInput
+  MAX = WaitRestRequest
 };
 
-inline const ReliableOperationBody (&EnumValuesReliableOperationBody())[4] {
+inline const ReliableOperationBody (&EnumValuesReliableOperationBody())[5] {
   static const ReliableOperationBody values[] = {
     ReliableOperationBody::NONE,
     ReliableOperationBody::PlayerMotionIntent,
     ReliableOperationBody::CellTransition,
-    ReliableOperationBody::PlayerLocomotionInput
+    ReliableOperationBody::PlayerLocomotionInput,
+    ReliableOperationBody::WaitRestRequest
   };
   return values;
 }
 
 inline const char * const *EnumNamesReliableOperationBody() {
-  static const char * const names[5] = {
+  static const char * const names[6] = {
     "NONE",
     "PlayerMotionIntent",
     "CellTransition",
     "PlayerLocomotionInput",
+    "WaitRestRequest",
     nullptr
   };
   return names;
 }
 
 inline const char *EnumNameReliableOperationBody(ReliableOperationBody e) {
-  if (::flatbuffers::IsOutRange(e, ReliableOperationBody::NONE, ReliableOperationBody::PlayerLocomotionInput)) return "";
+  if (::flatbuffers::IsOutRange(e, ReliableOperationBody::NONE, ReliableOperationBody::WaitRestRequest)) return "";
   const size_t index = static_cast<size_t>(e);
   return EnumNamesReliableOperationBody()[index];
 }
@@ -166,6 +212,94 @@ template<> struct ReliableOperationBodyTraits<TES3MP::Protocol::Schema::Reliable
 
 template<> struct ReliableOperationBodyTraits<TES3MP::Protocol::Schema::Reliable::PlayerLocomotionInput> {
   static const ReliableOperationBody enum_value = ReliableOperationBody::PlayerLocomotionInput;
+};
+
+template<> struct ReliableOperationBodyTraits<TES3MP::Protocol::Schema::Reliable::WaitRestRequest> {
+  static const ReliableOperationBody enum_value = ReliableOperationBody::WaitRestRequest;
+};
+
+template<typename T> struct ReliableOperationBodyUnionTraits {
+  static const ReliableOperationBody enum_value = ReliableOperationBody::NONE;
+};
+
+template<> struct ReliableOperationBodyUnionTraits<TES3MP::Protocol::Schema::Reliable::PlayerMotionIntentT> {
+  static const ReliableOperationBody enum_value = ReliableOperationBody::PlayerMotionIntent;
+};
+
+template<> struct ReliableOperationBodyUnionTraits<TES3MP::Protocol::Schema::Reliable::CellTransitionT> {
+  static const ReliableOperationBody enum_value = ReliableOperationBody::CellTransition;
+};
+
+template<> struct ReliableOperationBodyUnionTraits<TES3MP::Protocol::Schema::Reliable::PlayerLocomotionInputT> {
+  static const ReliableOperationBody enum_value = ReliableOperationBody::PlayerLocomotionInput;
+};
+
+template<> struct ReliableOperationBodyUnionTraits<TES3MP::Protocol::Schema::Reliable::WaitRestRequestT> {
+  static const ReliableOperationBody enum_value = ReliableOperationBody::WaitRestRequest;
+};
+
+struct ReliableOperationBodyUnion {
+  ReliableOperationBody type;
+  void *value;
+
+  ReliableOperationBodyUnion() : type(ReliableOperationBody::NONE), value(nullptr) {}
+  ReliableOperationBodyUnion(ReliableOperationBodyUnion&& u) FLATBUFFERS_NOEXCEPT :
+    type(ReliableOperationBody::NONE), value(nullptr)
+    { std::swap(type, u.type); std::swap(value, u.value); }
+  ReliableOperationBodyUnion(const ReliableOperationBodyUnion &);
+  ReliableOperationBodyUnion &operator=(const ReliableOperationBodyUnion &u)
+    { ReliableOperationBodyUnion t(u); std::swap(type, t.type); std::swap(value, t.value); return *this; }
+  ReliableOperationBodyUnion &operator=(ReliableOperationBodyUnion &&u) FLATBUFFERS_NOEXCEPT
+    { std::swap(type, u.type); std::swap(value, u.value); return *this; }
+  ~ReliableOperationBodyUnion() { Reset(); }
+
+  void Reset();
+
+  template <typename T>
+  void Set(T&& val) {
+    typedef typename std::remove_reference<T>::type RT;
+    Reset();
+    type = ReliableOperationBodyUnionTraits<RT>::enum_value;
+    if (type != ReliableOperationBody::NONE) {
+      value = new RT(std::forward<T>(val));
+    }
+  }
+
+  static void *UnPack(const void *obj, ReliableOperationBody type, const ::flatbuffers::resolver_function_t *resolver);
+  ::flatbuffers::Offset<void> Pack(::flatbuffers::FlatBufferBuilder &_fbb, const ::flatbuffers::rehasher_function_t *_rehasher = nullptr) const;
+
+  TES3MP::Protocol::Schema::Reliable::PlayerMotionIntentT *AsPlayerMotionIntent() {
+    return type == ReliableOperationBody::PlayerMotionIntent ?
+      reinterpret_cast<TES3MP::Protocol::Schema::Reliable::PlayerMotionIntentT *>(value) : nullptr;
+  }
+  const TES3MP::Protocol::Schema::Reliable::PlayerMotionIntentT *AsPlayerMotionIntent() const {
+    return type == ReliableOperationBody::PlayerMotionIntent ?
+      reinterpret_cast<const TES3MP::Protocol::Schema::Reliable::PlayerMotionIntentT *>(value) : nullptr;
+  }
+  TES3MP::Protocol::Schema::Reliable::CellTransitionT *AsCellTransition() {
+    return type == ReliableOperationBody::CellTransition ?
+      reinterpret_cast<TES3MP::Protocol::Schema::Reliable::CellTransitionT *>(value) : nullptr;
+  }
+  const TES3MP::Protocol::Schema::Reliable::CellTransitionT *AsCellTransition() const {
+    return type == ReliableOperationBody::CellTransition ?
+      reinterpret_cast<const TES3MP::Protocol::Schema::Reliable::CellTransitionT *>(value) : nullptr;
+  }
+  TES3MP::Protocol::Schema::Reliable::PlayerLocomotionInputT *AsPlayerLocomotionInput() {
+    return type == ReliableOperationBody::PlayerLocomotionInput ?
+      reinterpret_cast<TES3MP::Protocol::Schema::Reliable::PlayerLocomotionInputT *>(value) : nullptr;
+  }
+  const TES3MP::Protocol::Schema::Reliable::PlayerLocomotionInputT *AsPlayerLocomotionInput() const {
+    return type == ReliableOperationBody::PlayerLocomotionInput ?
+      reinterpret_cast<const TES3MP::Protocol::Schema::Reliable::PlayerLocomotionInputT *>(value) : nullptr;
+  }
+  TES3MP::Protocol::Schema::Reliable::WaitRestRequestT *AsWaitRestRequest() {
+    return type == ReliableOperationBody::WaitRestRequest ?
+      reinterpret_cast<TES3MP::Protocol::Schema::Reliable::WaitRestRequestT *>(value) : nullptr;
+  }
+  const TES3MP::Protocol::Schema::Reliable::WaitRestRequestT *AsWaitRestRequest() const {
+    return type == ReliableOperationBody::WaitRestRequest ?
+      reinterpret_cast<const TES3MP::Protocol::Schema::Reliable::WaitRestRequestT *>(value) : nullptr;
+  }
 };
 
 template <bool B = false>
@@ -308,7 +442,17 @@ FLATBUFFERS_MANUALLY_ALIGNED_STRUCT(8) Cell FLATBUFFERS_FINAL_CLASS {
 };
 FLATBUFFERS_STRUCT_END(Cell, 24);
 
+struct ClientCommandHeaderT : public ::flatbuffers::NativeTable {
+  typedef ClientCommandHeader TableType;
+  uint64_t session_id = 0;
+  uint64_t session_generation = 0;
+  uint64_t command_sequence = 0;
+  uint64_t command_id = 0;
+  uint64_t observed_canonical_revision = 0;
+};
+
 struct ClientCommandHeader FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
+  typedef ClientCommandHeaderT NativeTableType;
   typedef ClientCommandHeaderBuilder Builder;
   enum FlatBuffersVTableOffset FLATBUFFERS_VTABLE_UNDERLYING_TYPE {
     VT_SESSION_ID = 4,
@@ -342,6 +486,9 @@ struct ClientCommandHeader FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Tabl
            VerifyField<uint64_t>(verifier, VT_OBSERVED_CANONICAL_REVISION, 8) &&
            verifier.EndTable();
   }
+  ClientCommandHeaderT *UnPack(const ::flatbuffers::resolver_function_t *_resolver = nullptr) const;
+  void UnPackTo(ClientCommandHeaderT *_o, const ::flatbuffers::resolver_function_t *_resolver = nullptr) const;
+  static ::flatbuffers::Offset<ClientCommandHeader> Pack(::flatbuffers::FlatBufferBuilder &_fbb, const ClientCommandHeaderT* _o, const ::flatbuffers::rehasher_function_t *_rehasher = nullptr);
 };
 
 struct ClientCommandHeaderBuilder {
@@ -390,7 +537,17 @@ inline ::flatbuffers::Offset<ClientCommandHeader> CreateClientCommandHeader(
   return builder_.Finish();
 }
 
+::flatbuffers::Offset<ClientCommandHeader> CreateClientCommandHeader(::flatbuffers::FlatBufferBuilder &_fbb, const ClientCommandHeaderT *_o, const ::flatbuffers::rehasher_function_t *_rehasher = nullptr);
+
+struct EntityPreconditionT : public ::flatbuffers::NativeTable {
+  typedef EntityPrecondition TableType;
+  uint64_t entity_id = 0;
+  uint64_t expected_revision = 0;
+  uint64_t expected_authority_epoch = 0;
+};
+
 struct EntityPrecondition FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
+  typedef EntityPreconditionT NativeTableType;
   typedef EntityPreconditionBuilder Builder;
   enum FlatBuffersVTableOffset FLATBUFFERS_VTABLE_UNDERLYING_TYPE {
     VT_ENTITY_ID = 4,
@@ -414,6 +571,9 @@ struct EntityPrecondition FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table
            VerifyField<uint64_t>(verifier, VT_EXPECTED_AUTHORITY_EPOCH, 8) &&
            verifier.EndTable();
   }
+  EntityPreconditionT *UnPack(const ::flatbuffers::resolver_function_t *_resolver = nullptr) const;
+  void UnPackTo(EntityPreconditionT *_o, const ::flatbuffers::resolver_function_t *_resolver = nullptr) const;
+  static ::flatbuffers::Offset<EntityPrecondition> Pack(::flatbuffers::FlatBufferBuilder &_fbb, const EntityPreconditionT* _o, const ::flatbuffers::rehasher_function_t *_rehasher = nullptr);
 };
 
 struct EntityPreconditionBuilder {
@@ -452,7 +612,19 @@ inline ::flatbuffers::Offset<EntityPrecondition> CreateEntityPrecondition(
   return builder_.Finish();
 }
 
+::flatbuffers::Offset<EntityPrecondition> CreateEntityPrecondition(::flatbuffers::FlatBufferBuilder &_fbb, const EntityPreconditionT *_o, const ::flatbuffers::rehasher_function_t *_rehasher = nullptr);
+
+struct PlayerMotionIntentT : public ::flatbuffers::NativeTable {
+  typedef PlayerMotionIntent TableType;
+  std::unique_ptr<TES3MP::Protocol::Schema::Reliable::LinearVelocity3> desired_velocity{};
+  PlayerMotionIntentT() = default;
+  PlayerMotionIntentT(const PlayerMotionIntentT &o);
+  PlayerMotionIntentT(PlayerMotionIntentT&&) FLATBUFFERS_NOEXCEPT = default;
+  PlayerMotionIntentT &operator=(PlayerMotionIntentT o) FLATBUFFERS_NOEXCEPT;
+};
+
 struct PlayerMotionIntent FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
+  typedef PlayerMotionIntentT NativeTableType;
   typedef PlayerMotionIntentBuilder Builder;
   enum FlatBuffersVTableOffset FLATBUFFERS_VTABLE_UNDERLYING_TYPE {
     VT_DESIRED_VELOCITY = 4
@@ -466,6 +638,9 @@ struct PlayerMotionIntent FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table
            VerifyField<TES3MP::Protocol::Schema::Reliable::LinearVelocity3>(verifier, VT_DESIRED_VELOCITY, 8) &&
            verifier.EndTable();
   }
+  PlayerMotionIntentT *UnPack(const ::flatbuffers::resolver_function_t *_resolver = nullptr) const;
+  void UnPackTo(PlayerMotionIntentT *_o, const ::flatbuffers::resolver_function_t *_resolver = nullptr) const;
+  static ::flatbuffers::Offset<PlayerMotionIntent> Pack(::flatbuffers::FlatBufferBuilder &_fbb, const PlayerMotionIntentT* _o, const ::flatbuffers::rehasher_function_t *_rehasher = nullptr);
 };
 
 struct PlayerMotionIntentBuilder {
@@ -494,7 +669,25 @@ inline ::flatbuffers::Offset<PlayerMotionIntent> CreatePlayerMotionIntent(
   return builder_.Finish();
 }
 
+::flatbuffers::Offset<PlayerMotionIntent> CreatePlayerMotionIntent(::flatbuffers::FlatBufferBuilder &_fbb, const PlayerMotionIntentT *_o, const ::flatbuffers::rehasher_function_t *_rehasher = nullptr);
+
+struct PlayerLocomotionInputT : public ::flatbuffers::NativeTable {
+  typedef PlayerLocomotionInput TableType;
+  uint64_t input_tick = 0;
+  uint64_t input_sequence = 0;
+  TES3MP::Protocol::Schema::Reliable::LocomotionMode locomotion_mode = TES3MP::Protocol::Schema::Reliable::LocomotionMode::Unknown;
+  uint32_t root_facing = 0;
+  std::unique_ptr<TES3MP::Protocol::Schema::Reliable::LinearVelocity3> desired_velocity{};
+  std::unique_ptr<TES3MP::Protocol::Schema::Reliable::Position3> position{};
+  std::unique_ptr<TES3MP::Protocol::Schema::Reliable::Orientation3> orientation{};
+  PlayerLocomotionInputT() = default;
+  PlayerLocomotionInputT(const PlayerLocomotionInputT &o);
+  PlayerLocomotionInputT(PlayerLocomotionInputT&&) FLATBUFFERS_NOEXCEPT = default;
+  PlayerLocomotionInputT &operator=(PlayerLocomotionInputT o) FLATBUFFERS_NOEXCEPT;
+};
+
 struct PlayerLocomotionInput FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
+  typedef PlayerLocomotionInputT NativeTableType;
   typedef PlayerLocomotionInputBuilder Builder;
   enum FlatBuffersVTableOffset FLATBUFFERS_VTABLE_UNDERLYING_TYPE {
     VT_INPUT_TICK = 4,
@@ -538,6 +731,9 @@ struct PlayerLocomotionInput FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Ta
            VerifyField<TES3MP::Protocol::Schema::Reliable::Orientation3>(verifier, VT_ORIENTATION, 4) &&
            verifier.EndTable();
   }
+  PlayerLocomotionInputT *UnPack(const ::flatbuffers::resolver_function_t *_resolver = nullptr) const;
+  void UnPackTo(PlayerLocomotionInputT *_o, const ::flatbuffers::resolver_function_t *_resolver = nullptr) const;
+  static ::flatbuffers::Offset<PlayerLocomotionInput> Pack(::flatbuffers::FlatBufferBuilder &_fbb, const PlayerLocomotionInputT* _o, const ::flatbuffers::rehasher_function_t *_rehasher = nullptr);
 };
 
 struct PlayerLocomotionInputBuilder {
@@ -596,7 +792,19 @@ inline ::flatbuffers::Offset<PlayerLocomotionInput> CreatePlayerLocomotionInput(
   return builder_.Finish();
 }
 
+::flatbuffers::Offset<PlayerLocomotionInput> CreatePlayerLocomotionInput(::flatbuffers::FlatBufferBuilder &_fbb, const PlayerLocomotionInputT *_o, const ::flatbuffers::rehasher_function_t *_rehasher = nullptr);
+
+struct CellTransitionT : public ::flatbuffers::NativeTable {
+  typedef CellTransition TableType;
+  std::unique_ptr<TES3MP::Protocol::Schema::Reliable::Cell> requested_cell{};
+  CellTransitionT() = default;
+  CellTransitionT(const CellTransitionT &o);
+  CellTransitionT(CellTransitionT&&) FLATBUFFERS_NOEXCEPT = default;
+  CellTransitionT &operator=(CellTransitionT o) FLATBUFFERS_NOEXCEPT;
+};
+
 struct CellTransition FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
+  typedef CellTransitionT NativeTableType;
   typedef CellTransitionBuilder Builder;
   enum FlatBuffersVTableOffset FLATBUFFERS_VTABLE_UNDERLYING_TYPE {
     VT_REQUESTED_CELL = 4
@@ -610,6 +818,9 @@ struct CellTransition FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
            VerifyField<TES3MP::Protocol::Schema::Reliable::Cell>(verifier, VT_REQUESTED_CELL, 8) &&
            verifier.EndTable();
   }
+  CellTransitionT *UnPack(const ::flatbuffers::resolver_function_t *_resolver = nullptr) const;
+  void UnPackTo(CellTransitionT *_o, const ::flatbuffers::resolver_function_t *_resolver = nullptr) const;
+  static ::flatbuffers::Offset<CellTransition> Pack(::flatbuffers::FlatBufferBuilder &_fbb, const CellTransitionT* _o, const ::flatbuffers::rehasher_function_t *_rehasher = nullptr);
 };
 
 struct CellTransitionBuilder {
@@ -638,7 +849,85 @@ inline ::flatbuffers::Offset<CellTransition> CreateCellTransition(
   return builder_.Finish();
 }
 
+::flatbuffers::Offset<CellTransition> CreateCellTransition(::flatbuffers::FlatBufferBuilder &_fbb, const CellTransitionT *_o, const ::flatbuffers::rehasher_function_t *_rehasher = nullptr);
+
+struct WaitRestRequestT : public ::flatbuffers::NativeTable {
+  typedef WaitRestRequest TableType;
+  uint8_t hours = 0;
+  TES3MP::Protocol::Schema::Reliable::WaitRestMode mode = TES3MP::Protocol::Schema::Reliable::WaitRestMode::Unknown;
+};
+
+struct WaitRestRequest FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
+  typedef WaitRestRequestT NativeTableType;
+  typedef WaitRestRequestBuilder Builder;
+  enum FlatBuffersVTableOffset FLATBUFFERS_VTABLE_UNDERLYING_TYPE {
+    VT_HOURS = 4,
+    VT_MODE = 6
+  };
+  uint8_t hours() const {
+    return GetField<uint8_t>(VT_HOURS, 0);
+  }
+  TES3MP::Protocol::Schema::Reliable::WaitRestMode mode() const {
+    return static_cast<TES3MP::Protocol::Schema::Reliable::WaitRestMode>(GetField<uint8_t>(VT_MODE, 0));
+  }
+  template <bool B = false>
+  bool Verify(::flatbuffers::VerifierTemplate<B> &verifier) const {
+    return VerifyTableStart(verifier) &&
+           VerifyField<uint8_t>(verifier, VT_HOURS, 1) &&
+           VerifyField<uint8_t>(verifier, VT_MODE, 1) &&
+           verifier.EndTable();
+  }
+  WaitRestRequestT *UnPack(const ::flatbuffers::resolver_function_t *_resolver = nullptr) const;
+  void UnPackTo(WaitRestRequestT *_o, const ::flatbuffers::resolver_function_t *_resolver = nullptr) const;
+  static ::flatbuffers::Offset<WaitRestRequest> Pack(::flatbuffers::FlatBufferBuilder &_fbb, const WaitRestRequestT* _o, const ::flatbuffers::rehasher_function_t *_rehasher = nullptr);
+};
+
+struct WaitRestRequestBuilder {
+  typedef WaitRestRequest Table;
+  ::flatbuffers::FlatBufferBuilder &fbb_;
+  ::flatbuffers::uoffset_t start_;
+  void add_hours(uint8_t hours) {
+    fbb_.AddElement<uint8_t>(WaitRestRequest::VT_HOURS, hours, 0);
+  }
+  void add_mode(TES3MP::Protocol::Schema::Reliable::WaitRestMode mode) {
+    fbb_.AddElement<uint8_t>(WaitRestRequest::VT_MODE, static_cast<uint8_t>(mode), 0);
+  }
+  explicit WaitRestRequestBuilder(::flatbuffers::FlatBufferBuilder &_fbb)
+        : fbb_(_fbb) {
+    start_ = fbb_.StartTable();
+  }
+  ::flatbuffers::Offset<WaitRestRequest> Finish() {
+    const auto end = fbb_.EndTable(start_);
+    auto o = ::flatbuffers::Offset<WaitRestRequest>(end);
+    return o;
+  }
+};
+
+inline ::flatbuffers::Offset<WaitRestRequest> CreateWaitRestRequest(
+    ::flatbuffers::FlatBufferBuilder &_fbb,
+    uint8_t hours = 0,
+    TES3MP::Protocol::Schema::Reliable::WaitRestMode mode = TES3MP::Protocol::Schema::Reliable::WaitRestMode::Unknown) {
+  WaitRestRequestBuilder builder_(_fbb);
+  builder_.add_mode(mode);
+  builder_.add_hours(hours);
+  return builder_.Finish();
+}
+
+::flatbuffers::Offset<WaitRestRequest> CreateWaitRestRequest(::flatbuffers::FlatBufferBuilder &_fbb, const WaitRestRequestT *_o, const ::flatbuffers::rehasher_function_t *_rehasher = nullptr);
+
+struct ReliableOperationT : public ::flatbuffers::NativeTable {
+  typedef ReliableOperation TableType;
+  std::unique_ptr<TES3MP::Protocol::Schema::Reliable::ClientCommandHeaderT> command_header{};
+  std::unique_ptr<TES3MP::Protocol::Schema::Reliable::EntityPreconditionT> entity_precondition{};
+  TES3MP::Protocol::Schema::Reliable::ReliableOperationBodyUnion body{};
+  ReliableOperationT() = default;
+  ReliableOperationT(const ReliableOperationT &o);
+  ReliableOperationT(ReliableOperationT&&) FLATBUFFERS_NOEXCEPT = default;
+  ReliableOperationT &operator=(ReliableOperationT o) FLATBUFFERS_NOEXCEPT;
+};
+
 struct ReliableOperation FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
+  typedef ReliableOperationT NativeTableType;
   typedef ReliableOperationBuilder Builder;
   enum FlatBuffersVTableOffset FLATBUFFERS_VTABLE_UNDERLYING_TYPE {
     VT_COMMAND_HEADER = 4,
@@ -668,6 +957,9 @@ struct ReliableOperation FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table 
   const TES3MP::Protocol::Schema::Reliable::PlayerLocomotionInput *body_as_PlayerLocomotionInput() const {
     return body_type() == TES3MP::Protocol::Schema::Reliable::ReliableOperationBody::PlayerLocomotionInput ? static_cast<const TES3MP::Protocol::Schema::Reliable::PlayerLocomotionInput *>(body()) : nullptr;
   }
+  const TES3MP::Protocol::Schema::Reliable::WaitRestRequest *body_as_WaitRestRequest() const {
+    return body_type() == TES3MP::Protocol::Schema::Reliable::ReliableOperationBody::WaitRestRequest ? static_cast<const TES3MP::Protocol::Schema::Reliable::WaitRestRequest *>(body()) : nullptr;
+  }
   template <bool B = false>
   bool Verify(::flatbuffers::VerifierTemplate<B> &verifier) const {
     return VerifyTableStart(verifier) &&
@@ -680,6 +972,9 @@ struct ReliableOperation FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table 
            VerifyReliableOperationBody(verifier, body(), body_type()) &&
            verifier.EndTable();
   }
+  ReliableOperationT *UnPack(const ::flatbuffers::resolver_function_t *_resolver = nullptr) const;
+  void UnPackTo(ReliableOperationT *_o, const ::flatbuffers::resolver_function_t *_resolver = nullptr) const;
+  static ::flatbuffers::Offset<ReliableOperation> Pack(::flatbuffers::FlatBufferBuilder &_fbb, const ReliableOperationT* _o, const ::flatbuffers::rehasher_function_t *_rehasher = nullptr);
 };
 
 template<> inline const TES3MP::Protocol::Schema::Reliable::PlayerMotionIntent *ReliableOperation::body_as<TES3MP::Protocol::Schema::Reliable::PlayerMotionIntent>() const {
@@ -692,6 +987,10 @@ template<> inline const TES3MP::Protocol::Schema::Reliable::CellTransition *Reli
 
 template<> inline const TES3MP::Protocol::Schema::Reliable::PlayerLocomotionInput *ReliableOperation::body_as<TES3MP::Protocol::Schema::Reliable::PlayerLocomotionInput>() const {
   return body_as_PlayerLocomotionInput();
+}
+
+template<> inline const TES3MP::Protocol::Schema::Reliable::WaitRestRequest *ReliableOperation::body_as<TES3MP::Protocol::Schema::Reliable::WaitRestRequest>() const {
+  return body_as_WaitRestRequest();
 }
 
 struct ReliableOperationBuilder {
@@ -735,6 +1034,290 @@ inline ::flatbuffers::Offset<ReliableOperation> CreateReliableOperation(
   return builder_.Finish();
 }
 
+::flatbuffers::Offset<ReliableOperation> CreateReliableOperation(::flatbuffers::FlatBufferBuilder &_fbb, const ReliableOperationT *_o, const ::flatbuffers::rehasher_function_t *_rehasher = nullptr);
+
+inline ClientCommandHeaderT *ClientCommandHeader::UnPack(const ::flatbuffers::resolver_function_t *_resolver) const {
+  auto _o = std::unique_ptr<ClientCommandHeaderT>(new ClientCommandHeaderT());
+  UnPackTo(_o.get(), _resolver);
+  return _o.release();
+}
+
+inline void ClientCommandHeader::UnPackTo(ClientCommandHeaderT *_o, const ::flatbuffers::resolver_function_t *_resolver) const {
+  (void)_o;
+  (void)_resolver;
+  { auto _e = session_id(); _o->session_id = _e; }
+  { auto _e = session_generation(); _o->session_generation = _e; }
+  { auto _e = command_sequence(); _o->command_sequence = _e; }
+  { auto _e = command_id(); _o->command_id = _e; }
+  { auto _e = observed_canonical_revision(); _o->observed_canonical_revision = _e; }
+}
+
+inline ::flatbuffers::Offset<ClientCommandHeader> CreateClientCommandHeader(::flatbuffers::FlatBufferBuilder &_fbb, const ClientCommandHeaderT *_o, const ::flatbuffers::rehasher_function_t *_rehasher) {
+  return ClientCommandHeader::Pack(_fbb, _o, _rehasher);
+}
+
+inline ::flatbuffers::Offset<ClientCommandHeader> ClientCommandHeader::Pack(::flatbuffers::FlatBufferBuilder &_fbb, const ClientCommandHeaderT* _o, const ::flatbuffers::rehasher_function_t *_rehasher) {
+  (void)_rehasher;
+  (void)_o;
+  struct _VectorArgs { ::flatbuffers::FlatBufferBuilder *__fbb; const ClientCommandHeaderT* __o; const ::flatbuffers::rehasher_function_t *__rehasher; } _va = { &_fbb, _o, _rehasher}; (void)_va;
+  auto _session_id = _o->session_id;
+  auto _session_generation = _o->session_generation;
+  auto _command_sequence = _o->command_sequence;
+  auto _command_id = _o->command_id;
+  auto _observed_canonical_revision = _o->observed_canonical_revision;
+  return TES3MP::Protocol::Schema::Reliable::CreateClientCommandHeader(
+      _fbb,
+      _session_id,
+      _session_generation,
+      _command_sequence,
+      _command_id,
+      _observed_canonical_revision);
+}
+
+inline EntityPreconditionT *EntityPrecondition::UnPack(const ::flatbuffers::resolver_function_t *_resolver) const {
+  auto _o = std::unique_ptr<EntityPreconditionT>(new EntityPreconditionT());
+  UnPackTo(_o.get(), _resolver);
+  return _o.release();
+}
+
+inline void EntityPrecondition::UnPackTo(EntityPreconditionT *_o, const ::flatbuffers::resolver_function_t *_resolver) const {
+  (void)_o;
+  (void)_resolver;
+  { auto _e = entity_id(); _o->entity_id = _e; }
+  { auto _e = expected_revision(); _o->expected_revision = _e; }
+  { auto _e = expected_authority_epoch(); _o->expected_authority_epoch = _e; }
+}
+
+inline ::flatbuffers::Offset<EntityPrecondition> CreateEntityPrecondition(::flatbuffers::FlatBufferBuilder &_fbb, const EntityPreconditionT *_o, const ::flatbuffers::rehasher_function_t *_rehasher) {
+  return EntityPrecondition::Pack(_fbb, _o, _rehasher);
+}
+
+inline ::flatbuffers::Offset<EntityPrecondition> EntityPrecondition::Pack(::flatbuffers::FlatBufferBuilder &_fbb, const EntityPreconditionT* _o, const ::flatbuffers::rehasher_function_t *_rehasher) {
+  (void)_rehasher;
+  (void)_o;
+  struct _VectorArgs { ::flatbuffers::FlatBufferBuilder *__fbb; const EntityPreconditionT* __o; const ::flatbuffers::rehasher_function_t *__rehasher; } _va = { &_fbb, _o, _rehasher}; (void)_va;
+  auto _entity_id = _o->entity_id;
+  auto _expected_revision = _o->expected_revision;
+  auto _expected_authority_epoch = _o->expected_authority_epoch;
+  return TES3MP::Protocol::Schema::Reliable::CreateEntityPrecondition(
+      _fbb,
+      _entity_id,
+      _expected_revision,
+      _expected_authority_epoch);
+}
+
+inline PlayerMotionIntentT::PlayerMotionIntentT(const PlayerMotionIntentT &o)
+      : desired_velocity((o.desired_velocity) ? new TES3MP::Protocol::Schema::Reliable::LinearVelocity3(*o.desired_velocity) : nullptr) {
+}
+
+inline PlayerMotionIntentT &PlayerMotionIntentT::operator=(PlayerMotionIntentT o) FLATBUFFERS_NOEXCEPT {
+  std::swap(desired_velocity, o.desired_velocity);
+  return *this;
+}
+
+inline PlayerMotionIntentT *PlayerMotionIntent::UnPack(const ::flatbuffers::resolver_function_t *_resolver) const {
+  auto _o = std::unique_ptr<PlayerMotionIntentT>(new PlayerMotionIntentT());
+  UnPackTo(_o.get(), _resolver);
+  return _o.release();
+}
+
+inline void PlayerMotionIntent::UnPackTo(PlayerMotionIntentT *_o, const ::flatbuffers::resolver_function_t *_resolver) const {
+  (void)_o;
+  (void)_resolver;
+  { auto _e = desired_velocity(); if (_e) _o->desired_velocity = std::unique_ptr<TES3MP::Protocol::Schema::Reliable::LinearVelocity3>(new TES3MP::Protocol::Schema::Reliable::LinearVelocity3(*_e)); }
+}
+
+inline ::flatbuffers::Offset<PlayerMotionIntent> CreatePlayerMotionIntent(::flatbuffers::FlatBufferBuilder &_fbb, const PlayerMotionIntentT *_o, const ::flatbuffers::rehasher_function_t *_rehasher) {
+  return PlayerMotionIntent::Pack(_fbb, _o, _rehasher);
+}
+
+inline ::flatbuffers::Offset<PlayerMotionIntent> PlayerMotionIntent::Pack(::flatbuffers::FlatBufferBuilder &_fbb, const PlayerMotionIntentT* _o, const ::flatbuffers::rehasher_function_t *_rehasher) {
+  (void)_rehasher;
+  (void)_o;
+  struct _VectorArgs { ::flatbuffers::FlatBufferBuilder *__fbb; const PlayerMotionIntentT* __o; const ::flatbuffers::rehasher_function_t *__rehasher; } _va = { &_fbb, _o, _rehasher}; (void)_va;
+  auto _desired_velocity = _o->desired_velocity ? _o->desired_velocity.get() : nullptr;
+  return TES3MP::Protocol::Schema::Reliable::CreatePlayerMotionIntent(
+      _fbb,
+      _desired_velocity);
+}
+
+inline PlayerLocomotionInputT::PlayerLocomotionInputT(const PlayerLocomotionInputT &o)
+      : input_tick(o.input_tick),
+        input_sequence(o.input_sequence),
+        locomotion_mode(o.locomotion_mode),
+        root_facing(o.root_facing),
+        desired_velocity((o.desired_velocity) ? new TES3MP::Protocol::Schema::Reliable::LinearVelocity3(*o.desired_velocity) : nullptr),
+        position((o.position) ? new TES3MP::Protocol::Schema::Reliable::Position3(*o.position) : nullptr),
+        orientation((o.orientation) ? new TES3MP::Protocol::Schema::Reliable::Orientation3(*o.orientation) : nullptr) {
+}
+
+inline PlayerLocomotionInputT &PlayerLocomotionInputT::operator=(PlayerLocomotionInputT o) FLATBUFFERS_NOEXCEPT {
+  std::swap(input_tick, o.input_tick);
+  std::swap(input_sequence, o.input_sequence);
+  std::swap(locomotion_mode, o.locomotion_mode);
+  std::swap(root_facing, o.root_facing);
+  std::swap(desired_velocity, o.desired_velocity);
+  std::swap(position, o.position);
+  std::swap(orientation, o.orientation);
+  return *this;
+}
+
+inline PlayerLocomotionInputT *PlayerLocomotionInput::UnPack(const ::flatbuffers::resolver_function_t *_resolver) const {
+  auto _o = std::unique_ptr<PlayerLocomotionInputT>(new PlayerLocomotionInputT());
+  UnPackTo(_o.get(), _resolver);
+  return _o.release();
+}
+
+inline void PlayerLocomotionInput::UnPackTo(PlayerLocomotionInputT *_o, const ::flatbuffers::resolver_function_t *_resolver) const {
+  (void)_o;
+  (void)_resolver;
+  { auto _e = input_tick(); _o->input_tick = _e; }
+  { auto _e = input_sequence(); _o->input_sequence = _e; }
+  { auto _e = locomotion_mode(); _o->locomotion_mode = _e; }
+  { auto _e = root_facing(); _o->root_facing = _e; }
+  { auto _e = desired_velocity(); if (_e) _o->desired_velocity = std::unique_ptr<TES3MP::Protocol::Schema::Reliable::LinearVelocity3>(new TES3MP::Protocol::Schema::Reliable::LinearVelocity3(*_e)); }
+  { auto _e = position(); if (_e) _o->position = std::unique_ptr<TES3MP::Protocol::Schema::Reliable::Position3>(new TES3MP::Protocol::Schema::Reliable::Position3(*_e)); }
+  { auto _e = orientation(); if (_e) _o->orientation = std::unique_ptr<TES3MP::Protocol::Schema::Reliable::Orientation3>(new TES3MP::Protocol::Schema::Reliable::Orientation3(*_e)); }
+}
+
+inline ::flatbuffers::Offset<PlayerLocomotionInput> CreatePlayerLocomotionInput(::flatbuffers::FlatBufferBuilder &_fbb, const PlayerLocomotionInputT *_o, const ::flatbuffers::rehasher_function_t *_rehasher) {
+  return PlayerLocomotionInput::Pack(_fbb, _o, _rehasher);
+}
+
+inline ::flatbuffers::Offset<PlayerLocomotionInput> PlayerLocomotionInput::Pack(::flatbuffers::FlatBufferBuilder &_fbb, const PlayerLocomotionInputT* _o, const ::flatbuffers::rehasher_function_t *_rehasher) {
+  (void)_rehasher;
+  (void)_o;
+  struct _VectorArgs { ::flatbuffers::FlatBufferBuilder *__fbb; const PlayerLocomotionInputT* __o; const ::flatbuffers::rehasher_function_t *__rehasher; } _va = { &_fbb, _o, _rehasher}; (void)_va;
+  auto _input_tick = _o->input_tick;
+  auto _input_sequence = _o->input_sequence;
+  auto _locomotion_mode = _o->locomotion_mode;
+  auto _root_facing = _o->root_facing;
+  auto _desired_velocity = _o->desired_velocity ? _o->desired_velocity.get() : nullptr;
+  auto _position = _o->position ? _o->position.get() : nullptr;
+  auto _orientation = _o->orientation ? _o->orientation.get() : nullptr;
+  return TES3MP::Protocol::Schema::Reliable::CreatePlayerLocomotionInput(
+      _fbb,
+      _input_tick,
+      _input_sequence,
+      _locomotion_mode,
+      _root_facing,
+      _desired_velocity,
+      _position,
+      _orientation);
+}
+
+inline CellTransitionT::CellTransitionT(const CellTransitionT &o)
+      : requested_cell((o.requested_cell) ? new TES3MP::Protocol::Schema::Reliable::Cell(*o.requested_cell) : nullptr) {
+}
+
+inline CellTransitionT &CellTransitionT::operator=(CellTransitionT o) FLATBUFFERS_NOEXCEPT {
+  std::swap(requested_cell, o.requested_cell);
+  return *this;
+}
+
+inline CellTransitionT *CellTransition::UnPack(const ::flatbuffers::resolver_function_t *_resolver) const {
+  auto _o = std::unique_ptr<CellTransitionT>(new CellTransitionT());
+  UnPackTo(_o.get(), _resolver);
+  return _o.release();
+}
+
+inline void CellTransition::UnPackTo(CellTransitionT *_o, const ::flatbuffers::resolver_function_t *_resolver) const {
+  (void)_o;
+  (void)_resolver;
+  { auto _e = requested_cell(); if (_e) _o->requested_cell = std::unique_ptr<TES3MP::Protocol::Schema::Reliable::Cell>(new TES3MP::Protocol::Schema::Reliable::Cell(*_e)); }
+}
+
+inline ::flatbuffers::Offset<CellTransition> CreateCellTransition(::flatbuffers::FlatBufferBuilder &_fbb, const CellTransitionT *_o, const ::flatbuffers::rehasher_function_t *_rehasher) {
+  return CellTransition::Pack(_fbb, _o, _rehasher);
+}
+
+inline ::flatbuffers::Offset<CellTransition> CellTransition::Pack(::flatbuffers::FlatBufferBuilder &_fbb, const CellTransitionT* _o, const ::flatbuffers::rehasher_function_t *_rehasher) {
+  (void)_rehasher;
+  (void)_o;
+  struct _VectorArgs { ::flatbuffers::FlatBufferBuilder *__fbb; const CellTransitionT* __o; const ::flatbuffers::rehasher_function_t *__rehasher; } _va = { &_fbb, _o, _rehasher}; (void)_va;
+  auto _requested_cell = _o->requested_cell ? _o->requested_cell.get() : nullptr;
+  return TES3MP::Protocol::Schema::Reliable::CreateCellTransition(
+      _fbb,
+      _requested_cell);
+}
+
+inline WaitRestRequestT *WaitRestRequest::UnPack(const ::flatbuffers::resolver_function_t *_resolver) const {
+  auto _o = std::unique_ptr<WaitRestRequestT>(new WaitRestRequestT());
+  UnPackTo(_o.get(), _resolver);
+  return _o.release();
+}
+
+inline void WaitRestRequest::UnPackTo(WaitRestRequestT *_o, const ::flatbuffers::resolver_function_t *_resolver) const {
+  (void)_o;
+  (void)_resolver;
+  { auto _e = hours(); _o->hours = _e; }
+  { auto _e = mode(); _o->mode = _e; }
+}
+
+inline ::flatbuffers::Offset<WaitRestRequest> CreateWaitRestRequest(::flatbuffers::FlatBufferBuilder &_fbb, const WaitRestRequestT *_o, const ::flatbuffers::rehasher_function_t *_rehasher) {
+  return WaitRestRequest::Pack(_fbb, _o, _rehasher);
+}
+
+inline ::flatbuffers::Offset<WaitRestRequest> WaitRestRequest::Pack(::flatbuffers::FlatBufferBuilder &_fbb, const WaitRestRequestT* _o, const ::flatbuffers::rehasher_function_t *_rehasher) {
+  (void)_rehasher;
+  (void)_o;
+  struct _VectorArgs { ::flatbuffers::FlatBufferBuilder *__fbb; const WaitRestRequestT* __o; const ::flatbuffers::rehasher_function_t *__rehasher; } _va = { &_fbb, _o, _rehasher}; (void)_va;
+  auto _hours = _o->hours;
+  auto _mode = _o->mode;
+  return TES3MP::Protocol::Schema::Reliable::CreateWaitRestRequest(
+      _fbb,
+      _hours,
+      _mode);
+}
+
+inline ReliableOperationT::ReliableOperationT(const ReliableOperationT &o)
+      : command_header((o.command_header) ? new TES3MP::Protocol::Schema::Reliable::ClientCommandHeaderT(*o.command_header) : nullptr),
+        entity_precondition((o.entity_precondition) ? new TES3MP::Protocol::Schema::Reliable::EntityPreconditionT(*o.entity_precondition) : nullptr),
+        body(o.body) {
+}
+
+inline ReliableOperationT &ReliableOperationT::operator=(ReliableOperationT o) FLATBUFFERS_NOEXCEPT {
+  std::swap(command_header, o.command_header);
+  std::swap(entity_precondition, o.entity_precondition);
+  std::swap(body, o.body);
+  return *this;
+}
+
+inline ReliableOperationT *ReliableOperation::UnPack(const ::flatbuffers::resolver_function_t *_resolver) const {
+  auto _o = std::unique_ptr<ReliableOperationT>(new ReliableOperationT());
+  UnPackTo(_o.get(), _resolver);
+  return _o.release();
+}
+
+inline void ReliableOperation::UnPackTo(ReliableOperationT *_o, const ::flatbuffers::resolver_function_t *_resolver) const {
+  (void)_o;
+  (void)_resolver;
+  { auto _e = command_header(); if (_e) { if(_o->command_header) { _e->UnPackTo(_o->command_header.get(), _resolver); } else { _o->command_header = std::unique_ptr<TES3MP::Protocol::Schema::Reliable::ClientCommandHeaderT>(_e->UnPack(_resolver)); } } else if (_o->command_header) { _o->command_header.reset(); } }
+  { auto _e = entity_precondition(); if (_e) { if(_o->entity_precondition) { _e->UnPackTo(_o->entity_precondition.get(), _resolver); } else { _o->entity_precondition = std::unique_ptr<TES3MP::Protocol::Schema::Reliable::EntityPreconditionT>(_e->UnPack(_resolver)); } } else if (_o->entity_precondition) { _o->entity_precondition.reset(); } }
+  { auto _e = body_type(); _o->body.type = _e; }
+  { auto _e = body(); if (_e) _o->body.value = TES3MP::Protocol::Schema::Reliable::ReliableOperationBodyUnion::UnPack(_e, body_type(), _resolver); }
+}
+
+inline ::flatbuffers::Offset<ReliableOperation> CreateReliableOperation(::flatbuffers::FlatBufferBuilder &_fbb, const ReliableOperationT *_o, const ::flatbuffers::rehasher_function_t *_rehasher) {
+  return ReliableOperation::Pack(_fbb, _o, _rehasher);
+}
+
+inline ::flatbuffers::Offset<ReliableOperation> ReliableOperation::Pack(::flatbuffers::FlatBufferBuilder &_fbb, const ReliableOperationT* _o, const ::flatbuffers::rehasher_function_t *_rehasher) {
+  (void)_rehasher;
+  (void)_o;
+  struct _VectorArgs { ::flatbuffers::FlatBufferBuilder *__fbb; const ReliableOperationT* __o; const ::flatbuffers::rehasher_function_t *__rehasher; } _va = { &_fbb, _o, _rehasher}; (void)_va;
+  auto _command_header = _o->command_header ? CreateClientCommandHeader(_fbb, _o->command_header.get(), _rehasher) : 0;
+  auto _entity_precondition = _o->entity_precondition ? CreateEntityPrecondition(_fbb, _o->entity_precondition.get(), _rehasher) : 0;
+  auto _body_type = _o->body.type;
+  auto _body = _o->body.Pack(_fbb);
+  return TES3MP::Protocol::Schema::Reliable::CreateReliableOperation(
+      _fbb,
+      _command_header,
+      _entity_precondition,
+      _body_type,
+      _body);
+}
+
 template <bool B>
 inline bool VerifyReliableOperationBody(::flatbuffers::VerifierTemplate<B> &verifier, const void *obj, ReliableOperationBody type) {
   switch (type) {
@@ -753,6 +1336,10 @@ inline bool VerifyReliableOperationBody(::flatbuffers::VerifierTemplate<B> &veri
       auto ptr = reinterpret_cast<const TES3MP::Protocol::Schema::Reliable::PlayerLocomotionInput *>(obj);
       return verifier.VerifyTable(ptr);
     }
+    case ReliableOperationBody::WaitRestRequest: {
+      auto ptr = reinterpret_cast<const TES3MP::Protocol::Schema::Reliable::WaitRestRequest *>(obj);
+      return verifier.VerifyTable(ptr);
+    }
     default: return true;
   }
 }
@@ -768,6 +1355,103 @@ inline bool VerifyReliableOperationBodyVector(::flatbuffers::VerifierTemplate<B>
     }
   }
   return true;
+}
+
+inline void *ReliableOperationBodyUnion::UnPack(const void *obj, ReliableOperationBody type, const ::flatbuffers::resolver_function_t *resolver) {
+  (void)resolver;
+  switch (type) {
+    case ReliableOperationBody::PlayerMotionIntent: {
+      auto ptr = reinterpret_cast<const TES3MP::Protocol::Schema::Reliable::PlayerMotionIntent *>(obj);
+      return ptr->UnPack(resolver);
+    }
+    case ReliableOperationBody::CellTransition: {
+      auto ptr = reinterpret_cast<const TES3MP::Protocol::Schema::Reliable::CellTransition *>(obj);
+      return ptr->UnPack(resolver);
+    }
+    case ReliableOperationBody::PlayerLocomotionInput: {
+      auto ptr = reinterpret_cast<const TES3MP::Protocol::Schema::Reliable::PlayerLocomotionInput *>(obj);
+      return ptr->UnPack(resolver);
+    }
+    case ReliableOperationBody::WaitRestRequest: {
+      auto ptr = reinterpret_cast<const TES3MP::Protocol::Schema::Reliable::WaitRestRequest *>(obj);
+      return ptr->UnPack(resolver);
+    }
+    default: return nullptr;
+  }
+}
+
+inline ::flatbuffers::Offset<void> ReliableOperationBodyUnion::Pack(::flatbuffers::FlatBufferBuilder &_fbb, const ::flatbuffers::rehasher_function_t *_rehasher) const {
+  (void)_rehasher;
+  switch (type) {
+    case ReliableOperationBody::PlayerMotionIntent: {
+      auto ptr = reinterpret_cast<const TES3MP::Protocol::Schema::Reliable::PlayerMotionIntentT *>(value);
+      return CreatePlayerMotionIntent(_fbb, ptr, _rehasher).Union();
+    }
+    case ReliableOperationBody::CellTransition: {
+      auto ptr = reinterpret_cast<const TES3MP::Protocol::Schema::Reliable::CellTransitionT *>(value);
+      return CreateCellTransition(_fbb, ptr, _rehasher).Union();
+    }
+    case ReliableOperationBody::PlayerLocomotionInput: {
+      auto ptr = reinterpret_cast<const TES3MP::Protocol::Schema::Reliable::PlayerLocomotionInputT *>(value);
+      return CreatePlayerLocomotionInput(_fbb, ptr, _rehasher).Union();
+    }
+    case ReliableOperationBody::WaitRestRequest: {
+      auto ptr = reinterpret_cast<const TES3MP::Protocol::Schema::Reliable::WaitRestRequestT *>(value);
+      return CreateWaitRestRequest(_fbb, ptr, _rehasher).Union();
+    }
+    default: return 0;
+  }
+}
+
+inline ReliableOperationBodyUnion::ReliableOperationBodyUnion(const ReliableOperationBodyUnion &u) : type(u.type), value(nullptr) {
+  switch (type) {
+    case ReliableOperationBody::PlayerMotionIntent: {
+      value = new TES3MP::Protocol::Schema::Reliable::PlayerMotionIntentT(*reinterpret_cast<TES3MP::Protocol::Schema::Reliable::PlayerMotionIntentT *>(u.value));
+      break;
+    }
+    case ReliableOperationBody::CellTransition: {
+      value = new TES3MP::Protocol::Schema::Reliable::CellTransitionT(*reinterpret_cast<TES3MP::Protocol::Schema::Reliable::CellTransitionT *>(u.value));
+      break;
+    }
+    case ReliableOperationBody::PlayerLocomotionInput: {
+      value = new TES3MP::Protocol::Schema::Reliable::PlayerLocomotionInputT(*reinterpret_cast<TES3MP::Protocol::Schema::Reliable::PlayerLocomotionInputT *>(u.value));
+      break;
+    }
+    case ReliableOperationBody::WaitRestRequest: {
+      value = new TES3MP::Protocol::Schema::Reliable::WaitRestRequestT(*reinterpret_cast<TES3MP::Protocol::Schema::Reliable::WaitRestRequestT *>(u.value));
+      break;
+    }
+    default:
+      break;
+  }
+}
+
+inline void ReliableOperationBodyUnion::Reset() {
+  switch (type) {
+    case ReliableOperationBody::PlayerMotionIntent: {
+      auto ptr = reinterpret_cast<TES3MP::Protocol::Schema::Reliable::PlayerMotionIntentT *>(value);
+      delete ptr;
+      break;
+    }
+    case ReliableOperationBody::CellTransition: {
+      auto ptr = reinterpret_cast<TES3MP::Protocol::Schema::Reliable::CellTransitionT *>(value);
+      delete ptr;
+      break;
+    }
+    case ReliableOperationBody::PlayerLocomotionInput: {
+      auto ptr = reinterpret_cast<TES3MP::Protocol::Schema::Reliable::PlayerLocomotionInputT *>(value);
+      delete ptr;
+      break;
+    }
+    case ReliableOperationBody::WaitRestRequest: {
+      auto ptr = reinterpret_cast<TES3MP::Protocol::Schema::Reliable::WaitRestRequestT *>(value);
+      delete ptr;
+      break;
+    }
+    default: break;
+  }
+  value = nullptr;
+  type = ReliableOperationBody::NONE;
 }
 
 inline const TES3MP::Protocol::Schema::Reliable::ReliableOperation *GetReliableOperation(const void *buf) {
@@ -818,6 +1502,18 @@ inline void FinishSizePrefixedReliableOperationBuffer(
     ::flatbuffers::FlatBufferBuilder &fbb,
     ::flatbuffers::Offset<TES3MP::Protocol::Schema::Reliable::ReliableOperation> root) {
   fbb.FinishSizePrefixed(root, ReliableOperationIdentifier());
+}
+
+inline std::unique_ptr<TES3MP::Protocol::Schema::Reliable::ReliableOperationT> UnPackReliableOperation(
+    const void *buf,
+    const ::flatbuffers::resolver_function_t *res = nullptr) {
+  return std::unique_ptr<TES3MP::Protocol::Schema::Reliable::ReliableOperationT>(GetReliableOperation(buf)->UnPack(res));
+}
+
+inline std::unique_ptr<TES3MP::Protocol::Schema::Reliable::ReliableOperationT> UnPackSizePrefixedReliableOperation(
+    const void *buf,
+    const ::flatbuffers::resolver_function_t *res = nullptr) {
+  return std::unique_ptr<TES3MP::Protocol::Schema::Reliable::ReliableOperationT>(GetSizePrefixedReliableOperation(buf)->UnPack(res));
 }
 
 }  // namespace Reliable

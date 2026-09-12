@@ -278,12 +278,18 @@ endif()
 
 add_subdirectory(tes3mp)
 
-if(BUILD_TESTING)
+if(TES3MP_ENABLE_DESKTOP_AUTOMATION)
     target_compile_definitions(openmw-lib PRIVATE TES3MP_OPENMW_DESKTOP_AUTOMATION)
 endif()
 
 if(TARGET openmw)
     target_link_libraries(openmw TES3MP::OpenMWAdapter TES3MP::OpenMWDesktopProviders)
+endif()
+
+if(TES3MP_ENABLE_DESKTOP_AUTOMATION AND TARGET openmw AND TARGET tes3mp_server)
+    add_custom_target(tes3mp_desktop_evidence
+        DEPENDS openmw tes3mp_server
+        COMMENT "Building TES3MP desktop evidence binaries")
 endif()
 
 if(BUILD_OPENMW_VR AND TARGET openmw_vr)

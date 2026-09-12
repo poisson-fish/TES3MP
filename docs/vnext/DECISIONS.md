@@ -62,6 +62,14 @@ the affected code/tests in the same milestone.
   catalog order; restore rejects any missing, extra, reordered, or retyped entry
   before installation. Clock and global changes use the same persistence
   acknowledgement as every other durable domain.
+- **Wait/rest is unanimous live-session authority.** A request is one to 24
+  hours and distinguishes waiting from resting. Consent is scoped to the current
+  session generation, is not durable, and commits only when every active capable
+  session has supplied the same mode and duration. Disconnect or generation
+  change removes that consent. Commit rechecks that every active player is alive
+  and has no live same-cell aggressor; waiting restores fatigue, while resting
+  also restores health and magicka from the baked OpenMW rates. The clock and all
+  player resource changes share one durability acknowledgement and publication.
 - **Canonical weather, local atmosphere.** The server owns weather identity,
   eligibility, timing, RNG, revisions, and gameplay consequences. Rendering,
   sound, particles, and visual interpolation stay client-local.
@@ -126,8 +134,8 @@ the affected code/tests in the same milestone.
   specialization factors; clients receive values and progress but submit none.
   Health and magicka use baked stock rest rates at the default 30x time scale
   while an active living player has no live same-cell aggressor. These live
-  values deliberately remain outside the V5 character checkpoint until broader
-  canonical persistence and time/rest semantics are defined.
+  values are durable canonical combat state; the V5 character checkpoint remains
+  a reattachment safe point rather than a competing live-resource writer.
 
 ## Protocol, transport, and security
 

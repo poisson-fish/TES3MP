@@ -106,6 +106,25 @@ namespace
             && result->time().lastAdvanceTick == id<ServerTick>(125);
     }
 
+    bool wait_rest_time_jump_is_single_revisioned_and_bounded()
+    {
+        const auto before = world();
+        const auto advanced = advanceCanonicalWorldTimeByHours(before, id<ServerTick>(7), 2);
+        const auto* result = std::get_if<CanonicalWorldState>(&advanced);
+        return result && result->time().year == 428 && result->time().month == 0 && result->time().day == 1
+            && result->time().millisecondsSinceMidnight == (60 + 59) * 60 * 1000
+            && result->time().revision.value() == before.time().revision.value() + 1
+            && result->time().lastChangeTick == id<ServerTick>(7)
+            && result->time().lastAdvanceTick == id<ServerTick>(7)
+            && std::get<CanonicalWorldMutationError>(
+                   advanceCanonicalWorldTimeByHours(before, id<ServerTick>(7), 0))
+                == CanonicalWorldMutationError::InvalidState
+            && std::get<CanonicalWorldMutationError>(
+                   advanceCanonicalWorldTimeByHours(before, id<ServerTick>(7), MaximumWaitRestHours + 1))
+                == CanonicalWorldMutationError::InvalidState
+            && before == world();
+    }
+
     bool typed_global_updates_preserve_revision_and_tick()
     {
         const auto initial = world();
@@ -313,6 +332,8 @@ int main()
     const std::array tests{
         std::pair{
             "time_advances_exactly_across_calendar_boundaries", &time_advances_exactly_across_calendar_boundaries },
+        std::pair{ "wait_rest_time_jump_is_single_revisioned_and_bounded",
+            &wait_rest_time_jump_is_single_revisioned_and_bounded },
         std::pair{
             "typed_global_updates_preserve_revision_and_tick", &typed_global_updates_preserve_revision_and_tick },
         std::pair{

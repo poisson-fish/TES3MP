@@ -560,7 +560,10 @@ int main(int argc, char** argv)
     if (inventoryWorld)
         optionalCapabilities.push_back(TES3MP::inventoryReplicationCapability());
     if (combatContent && meleeContactHistory)
+    {
         optionalCapabilities.push_back(TES3MP::combatReplicationCapability());
+        optionalCapabilities.push_back(TES3MP::authoritativeWaitRestCapability());
+    }
     std::sort(optionalCapabilities.begin(), optionalCapabilities.end());
     optionalCapabilities.erase(
         std::unique(optionalCapabilities.begin(), optionalCapabilities.end()), optionalCapabilities.end());

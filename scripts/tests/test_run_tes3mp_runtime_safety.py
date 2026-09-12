@@ -234,6 +234,7 @@ class RuntimeSafetyRunnerTests(unittest.TestCase):
         self.assertIn("tes3mp_enable_libfuzzer(tes3mp_character_creation_protocol_fuzz)", component)
         self.assertIn("TES3MP_TEST_TSAN_ALLOCATOR_INTERPOSITION=1", component)
         self.assertEqual(component.count("--verify-corpus"), 6)
+        self.assertIn("add_custom_target(tes3mp_protocol_contracts_run", component)
         asan_preset = next(
             preset
             for preset in data["buildPresets"]

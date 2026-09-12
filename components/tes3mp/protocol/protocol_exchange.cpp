@@ -319,6 +319,26 @@ namespace TES3MP
         return ReliableOperation(header, input);
     }
 
+    std::variant<WaitRestRequest, ExchangeDecodeError> WaitRestRequest::create(
+        std::uint8_t hours, WaitRestMode mode) noexcept
+    {
+        if (hours == 0 || hours > MaximumWaitRestHours)
+            return error(ExchangeDecodeErrorStage::SemanticValidation,
+                ExchangeDecodeErrorCode::InvalidWaitRestHours, hours, MaximumWaitRestHours);
+        if (mode != WaitRestMode::Wait && mode != WaitRestMode::Rest)
+            return error(ExchangeDecodeErrorStage::SemanticValidation,
+                ExchangeDecodeErrorCode::InvalidWaitRestMode, static_cast<std::size_t>(mode));
+        return WaitRestRequest(hours, mode);
+    }
+
+    std::variant<ReliableOperation, ExchangeDecodeError> ReliableOperation::create(
+        ReliableOperationHeader header, WaitRestRequest request) noexcept
+    {
+        if (!header.entityPrecondition())
+            return error(ExchangeDecodeErrorStage::SemanticValidation, ExchangeDecodeErrorCode::MissingEntityPrecondition);
+        return ReliableOperation(header, request);
+    }
+
     std::variant<SpatialWorldView, ExchangeDecodeError> SpatialWorldView::create(
         std::span<const SpatialEntitySnapshot> entries)
     {
@@ -393,6 +413,12 @@ namespace TES3MP
                 encodedPosition ? &*encodedPosition : nullptr,
                 encodedOrientation ? &*encodedOrientation : nullptr).Union();
             bodyType = ReliableSchema::ReliableOperationBody::PlayerLocomotionInput;
+        }
+        else if (const auto* request = std::get_if<WaitRestRequest>(&value.body()))
+        {
+            body = ReliableSchema::CreateWaitRestRequest(builder, request->hours(),
+                static_cast<ReliableSchema::WaitRestMode>(request->mode())).Union();
+            bodyType = ReliableSchema::ReliableOperationBody::WaitRestRequest;
         }
         else
         {
@@ -504,7 +530,8 @@ namespace TES3MP
             return error(ExchangeDecodeErrorStage::SemanticValidation, ExchangeDecodeErrorCode::MissingBody);
         if (root->body_type() != ReliableSchema::ReliableOperationBody::PlayerMotionIntent
             && root->body_type() != ReliableSchema::ReliableOperationBody::CellTransition
-            && root->body_type() != ReliableSchema::ReliableOperationBody::PlayerLocomotionInput)
+            && root->body_type() != ReliableSchema::ReliableOperationBody::PlayerLocomotionInput
+            && root->body_type() != ReliableSchema::ReliableOperationBody::WaitRestRequest)
         {
             return error(ExchangeDecodeErrorStage::SemanticValidation, ExchangeDecodeErrorCode::UnknownBody,
                 static_cast<std::size_t>(root->body_type()));
@@ -577,6 +604,23 @@ namespace TES3MP
                 LocomotionIntent(mode, Turn32::fromValue(input->root_facing()),
                     LinearVelocity3(velocity->x(), velocity->y(), velocity->z()),
                     position, orientation)));
+        }
+        if (root->body_type() == ReliableSchema::ReliableOperationBody::WaitRestRequest)
+        {
+            const auto* input = root->body_as_WaitRestRequest();
+            if (input == nullptr || input->hours() == 0 || input->hours() > MaximumWaitRestHours)
+                return error(ExchangeDecodeErrorStage::SemanticValidation,
+                    ExchangeDecodeErrorCode::InvalidWaitRestHours, input ? input->hours() : 0,
+                    MaximumWaitRestHours);
+            if (input->mode() != ReliableSchema::WaitRestMode::Wait
+                && input->mode() != ReliableSchema::WaitRestMode::Rest)
+                return error(ExchangeDecodeErrorStage::SemanticValidation,
+                    ExchangeDecodeErrorCode::InvalidWaitRestMode, static_cast<std::size_t>(input->mode()));
+            auto request = WaitRestRequest::create(
+                input->hours(), static_cast<WaitRestMode>(input->mode()));
+            if (const auto* failure = std::get_if<ExchangeDecodeError>(&request))
+                return *failure;
+            return ReliableOperation::create(header, std::get<WaitRestRequest>(request));
         }
         const auto* transition = root->body_as_CellTransition();
         if (transition == nullptr || transition->requested_cell() == nullptr)

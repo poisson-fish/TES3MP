@@ -195,6 +195,11 @@
       "purpose": "Declares the modal multiplayer connection dialog without adding TES3MP ownership to generic GUI infrastructure."
     },
     {
+      "path": "apps/openmw/mwgui/waitdialog.cpp",
+      "status": "M",
+      "purpose": "Routes confirmed wait and rest choices to multiplayer authority before stock local time or resource mutation."
+    },
+    {
       "path": "apps/openmw/mwmechanics/character.cpp",
       "status": "M",
       "purpose": "Routes native player melee contact through the authoritative capture boundary while preserving local single-player behavior."
@@ -282,7 +287,7 @@
     {
       "path": "apps/openmw/tes3mp/adapter.cpp",
       "status": "A",
-      "purpose": "Implements the bounded correct-then-command coordinator, optional pose weighting, and borrowed-provider orchestration."
+      "purpose": "Implements the bounded correct-then-command coordinator, including authoritative wait/rest submission, optional pose weighting, and borrowed-provider orchestration."
     },
     {
       "path": "apps/openmw/tes3mp/adapter.hpp",
@@ -307,7 +312,7 @@
     {
       "path": "apps/openmw/tes3mp/desktop_automation.cpp",
       "status": "A",
-      "purpose": "Implements bounded fixed-role desktop flow, reconnect, and soak automation with peer evidence that excludes the target player, available only to testing builds."
+      "purpose": "Implements bounded fixed-role desktop flow, reconnect, soak, weather, and wait/rest automation with duplicate-free peer evidence, available only to testing builds."
     },
     {
       "path": "apps/openmw/tes3mp/desktop_automation.hpp",

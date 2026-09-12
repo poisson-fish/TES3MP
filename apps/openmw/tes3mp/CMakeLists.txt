@@ -42,7 +42,7 @@ add_library(openmw_tes3mp_desktop_providers STATIC
     desktop_providers.cpp
     desktop_providers.hpp
 )
-if(BUILD_TESTING)
+if(TES3MP_ENABLE_DESKTOP_AUTOMATION)
     target_sources(openmw_tes3mp_desktop_providers PRIVATE desktop_automation.cpp desktop_automation.hpp)
     target_compile_definitions(openmw_tes3mp_desktop_providers PUBLIC TES3MP_OPENMW_DESKTOP_AUTOMATION)
 endif()

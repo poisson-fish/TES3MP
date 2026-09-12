@@ -11,6 +11,8 @@
 
 namespace TES3MP::OpenMWAdapter
 {
+    class EngineCoordinator;
+
     enum class DesktopAutomationRole
     {
         FlowOne,
@@ -26,6 +28,11 @@ namespace TES3MP::OpenMWAdapter
         WeatherTwo,
         WeatherReconnect,
         WeatherSlow,
+        WaitOne,
+        WaitTwo,
+        WaitAnchor,
+        WaitReconnect,
+        WaitSlow,
     };
 
     std::optional<DesktopAutomationRole> parseDesktopAutomationRole(std::string_view value) noexcept;
@@ -44,6 +51,7 @@ namespace TES3MP::OpenMWAdapter
         bool valid() const noexcept { return mOutput.is_open(); }
         CellTransitionCapture captureCellTransition() noexcept override;
         std::optional<LocomotionIntent> sampleCurrentIntent() noexcept override;
+        void setCoordinator(EngineCoordinator* coordinator) noexcept { mCoordinator = coordinator; }
         ProviderResult applyAuthoritative(const LatestWinsSnapshot& snapshot,
             std::span<const ObservedPlayer> observedPlayers, bool allowLocalCellCorrection, MonotonicInstant receivedAt,
             const std::optional<LocalLocomotionReconciliation>& localReconciliation = std::nullopt) noexcept override;
@@ -73,6 +81,7 @@ namespace TES3MP::OpenMWAdapter
         void writeStatus(ConnectionStatus status) noexcept;
         void writeActorSample(const ActorSpatialSnapshot& actor) noexcept;
         void writeWeatherSample(std::span<const WeatherRegionSnapshot> regions, ServerTick serverTick) noexcept;
+        void writeWaitRestSample(const ReliableWorldTimeState& state) noexcept;
         void finish(bool success) noexcept;
 
         DesktopAutomationRole mRole;
@@ -81,6 +90,7 @@ namespace TES3MP::OpenMWAdapter
         std::ofstream mOutput;
         DesktopPresentation& mPresentation;
         ConnectionStatusProvider& mStatus;
+        EngineCoordinator* mCoordinator = nullptr;
         std::size_t mEvidenceEvents = 0;
         std::size_t mSnapshots = 0;
         std::size_t mResumes = 0;
@@ -90,6 +100,8 @@ namespace TES3MP::OpenMWAdapter
         std::size_t mWeatherPresentations = 0;
         std::size_t mWeatherDuplicates = 0;
         std::size_t mWeatherEvidenceSamples = 0;
+        std::size_t mWorldTimePresentations = 0;
+        std::size_t mWorldTimeDuplicates = 0;
         std::optional<MonotonicInstant> mStartedAt;
         std::optional<MonotonicInstant> mNow;
         std::optional<MonotonicInstant> mNextDisconnect;
@@ -104,6 +116,9 @@ namespace TES3MP::OpenMWAdapter
         std::optional<ServerTick> mLastWeatherTick;
         std::optional<WeatherRevision> mWeatherRevisionBeforeDisconnect;
         std::optional<ServerTick> mWeatherTickBeforeDisconnect;
+        std::optional<ReliableWorldTimeState> mLastWorldTime;
+        std::optional<CanonicalWorldTimeState> mInitialWorldTime;
+        std::optional<WorldTimeRevision> mWorldTimeRevisionBeforeDisconnect;
         bool mSawPeer = false;
         bool mSawLeave = false;
         bool mSawReturn = false;
@@ -128,6 +143,9 @@ namespace TES3MP::OpenMWAdapter
         bool mWeatherConvergedAfterResume = false;
         bool mSlowPeerStalled = false;
         bool mSlowPeerRecovered = false;
+        bool mWaitRestSubmitted = false;
+        bool mWaitRestApplied = false;
+        bool mWorldTimeConvergedAfterResume = false;
         bool mFinished = false;
     };
 }

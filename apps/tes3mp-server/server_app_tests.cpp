@@ -756,7 +756,7 @@ int main()
             && evidence->latestHighWaterMessages == 1 && evidence->latestHighWaterBytes == 10
             && !telemetry.takeDrainEvidence());
     }
-    static_assert(Phase7ProtocolMajor == 1 && Phase7ProtocolMinimumMinor == 7 && Phase7ProtocolMaximumMinor == 7);
+    static_assert(Phase7ProtocolMajor == 1 && Phase7ProtocolMinimumMinor == 8 && Phase7ProtocolMaximumMinor == 8);
     static_assert(Phase7SourceAuthenticationBurst == 4 && Phase7GlobalAuthenticationBurst == 32
         && Phase7AuthenticationRefillMilliseconds == 1'000 && Phase7ConnectionCapacity == 8);
     static_assert(!phase7ProofDisconnectGraceAccepted(MinimumResumeTokenLifetimeMilliseconds - 1));

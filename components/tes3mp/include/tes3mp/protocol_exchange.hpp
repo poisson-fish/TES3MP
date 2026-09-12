@@ -41,6 +41,8 @@ namespace TES3MP
         InvalidLocomotionInputTick,
         InvalidLocomotionInputSequence,
         InvalidLocomotionMode,
+        InvalidWaitRestHours,
+        InvalidWaitRestMode,
         MissingRequestedCell,
         InvalidStrongValue,
         InvalidAcknowledgementPresence,
@@ -154,7 +156,26 @@ namespace TES3MP
         LocomotionIntent mIntent;
     };
 
-    using ReliableOperationBody = std::variant<PlayerMotionIntent, CellTransition, PlayerLocomotionInput>;
+    class WaitRestRequest
+    {
+    public:
+        static std::variant<WaitRestRequest, ExchangeDecodeError> create(
+            std::uint8_t hours, WaitRestMode mode) noexcept;
+
+        constexpr std::uint8_t hours() const noexcept { return mHours; }
+        constexpr WaitRestMode mode() const noexcept { return mMode; }
+        friend constexpr bool operator==(WaitRestRequest, WaitRestRequest) noexcept = default;
+
+    private:
+        constexpr WaitRestRequest(std::uint8_t hours, WaitRestMode mode) noexcept
+            : mHours(hours), mMode(mode) {}
+
+        std::uint8_t mHours;
+        WaitRestMode mMode;
+    };
+
+    using ReliableOperationBody
+        = std::variant<PlayerMotionIntent, CellTransition, PlayerLocomotionInput, WaitRestRequest>;
 
     class ReliableOperation
     {
@@ -165,6 +186,8 @@ namespace TES3MP
             ReliableOperationHeader header, CellTransition transition) noexcept;
         static std::variant<ReliableOperation, ExchangeDecodeError> create(
             ReliableOperationHeader header, PlayerLocomotionInput input) noexcept;
+        static std::variant<ReliableOperation, ExchangeDecodeError> create(
+            ReliableOperationHeader header, WaitRestRequest request) noexcept;
 
         constexpr const ReliableOperationHeader& header() const noexcept { return mHeader; }
         constexpr const ReliableOperationBody& body() const noexcept { return mBody; }

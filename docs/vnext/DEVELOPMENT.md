@@ -67,9 +67,10 @@ The product preset builds only the two shipping runtime targets: the OpenMW
 client and the TES3MP dedicated server. It disables the launcher, editor,
 conversion tools, benchmarks, and upstream test suites.
 
-On Windows, the wrapper initializes the compiler environment, downloads and
-builds missing pinned transport dependencies, configures the bounded preset,
-and builds the product. From a clean checkout or after deleting `build`, run:
+On Windows, the wrapper initializes MSVC, provisions missing pinned transport
+dependencies, configures, and builds. It is quiet by default: stage markers and
+a short filtered tail go to the console, while the complete output is retained
+under `build/logs`. Use `-VerboseOutput` only for interactive diagnosis.
 
 ```bat
 build_windows.bat
@@ -96,16 +97,24 @@ python scripts/provision_vnext_transport.py
 python scripts/provision_vnext_transport.py --refresh
 ```
 
-`product` is the Windows default; narrower and broader scopes remain explicit:
+`product` is the default. Focused targets use the standalone tree and do not
+build OpenMW; desktop evidence has a persistent instrumented tree:
 
 ```bat
 build_windows.bat
 build_windows.bat -Target client
 build_windows.bat -Target server
 build_windows.bat -Target headless
-build_windows.bat -Target checks
-build_windows.bat -Target contracts
+build_windows.bat -Target protocol
+build_windows.bat -Target server-logic
+build_windows.bat -Target adapter-tests
+build_windows.bat -Target desktop-evidence
 ```
+
+`contracts`, `checks`, `baseline`, and `-VerboseOutput` remain explicit broader
+or diagnostic gates. The product preset pins desktop automation off. The
+desktop-evidence preset alone enables `TES3MP_ENABLE_DESKTOP_AUTOMATION`, keeps
+`BUILD_TESTING` off, and writes to `build/vnext-desktop-evidence`.
 
 CI and other supported desktop platforms use the matching root preset:
 
@@ -207,21 +216,19 @@ same provision/all flow.
 
 ### Full OpenMW/TES3MP integration
 
-When adapter or engine patches change, build the full `openmw` and
-`openmw_tes3mp_adapter_tests` targets in the configured full-tree build and run
-the adapter executable. Run affected live/headless flows when behavior crosses
-the real transport, OpenMW presentation, reconnect, or content-loading boundary.
-Do not claim a hardware or platform result that was not actually run.
+Use `build_windows.bat -Target adapter-tests` for adapter-only changes. Use
+`-Target desktop-evidence` plus the affected live capture when behavior crosses
+OpenMW presentation, reconnect, or content loading. Do not claim an unrun result.
 
-For the content-backed two-client weather/reconnect/slow-peer capture, use a
-test-enabled product build and a fresh artifact directory:
+For the content-backed two-client weather/reconnect/slow-peer capture, first
+build `desktop-evidence`, then use a fresh artifact directory:
 
 ```sh
 python scripts/run_weather_reconnect_capture.py \
-  --server build/vnext-product/tes3mp_server.exe \
-  --openmw build/vnext-product/openmw.exe \
+  --server build/vnext-desktop-evidence/tes3mp_server.exe \
+  --openmw build/vnext-desktop-evidence/openmw.exe \
   --openmw-config build/weather-source-openmw.cfg \
-  --resources build/vnext-product/resources \
+  --resources build/vnext-desktop-evidence/resources \
   --data "/path/to/Morrowind/Data Files" \
   --fallback-archive Morrowind.bsa --content Morrowind.esm \
   --artifacts build/weather-reconnect-evidence
@@ -230,6 +237,24 @@ python scripts/run_weather_reconnect_capture.py \
 The runner bakes the real loadout and captures bounded logs, transition/resume
 samples, RSS, queue high-water/drain state, and `summary.json`. It rejects a
 nonempty artifact directory.
+
+The wait/rest rollover, reconnect-across-jump, and slow-peer capture uses the
+same dedicated evidence binaries and loadout arguments:
+
+```sh
+python scripts/run_wait_rest_capture.py \
+  --server build/vnext-desktop-evidence/tes3mp_server.exe \
+  --openmw build/vnext-desktop-evidence/openmw.exe \
+  --openmw-config build/weather-source-openmw.cfg \
+  --resources build/vnext-desktop-evidence/resources \
+  --data "/path/to/Morrowind/Data Files" \
+  --fallback-archive Morrowind.bsa --content Morrowind.esm \
+  --artifacts build/wait-rest-evidence
+```
+
+It bakes a December 30 23:00 fixture, requests one matching two-hour rest per
+active client, and rejects non-identical rollover revisions, duplicate world-time
+presentation, failed resume convergence, undrained queues, or unbounded RSS.
 
 ## Machine-owned evidence
 

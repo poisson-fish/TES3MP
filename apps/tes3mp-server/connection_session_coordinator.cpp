@@ -300,6 +300,21 @@ namespace TES3MP::ServerApp
                 connectionState.lastLocomotionInputSequence = locomotion->inputSequence();
                 return ConnectionSessionResult::CommandSubmitted;
             }
+            if (const auto* waitRest = std::get_if<WaitRestRequest>(&operation->body()))
+            {
+                const auto& capabilities = state->negotiatedHello()->negotiatedCapabilities();
+                if (negotiated.major != 1 || negotiated.minor < 8 || !mWorld || !mCombat || !mActors
+                    || !std::ranges::binary_search(capabilities, worldTimeReplicationCapability())
+                    || !std::ranges::binary_search(capabilities, combatReplicationCapability())
+                    || !std::ranges::binary_search(capabilities, authoritativeWaitRestCapability()))
+                    return ConnectionSessionResult::ProtocolRejected;
+                ServerCommandProposal proposal(header.sessionId(), header.sessionGeneration(), header.commandSequence(),
+                    header.commandId(), header.observedCanonicalRevision(), *operation->header().entityPrecondition(),
+                    WaitRestCommandProposal(*waitRest));
+                return intake.submit(std::move(proposal)) == CommandSubmissionResult::Accepted
+                    ? ConnectionSessionResult::CommandSubmitted
+                    : ConnectionSessionResult::QueueRejected;
+            }
             return ConnectionSessionResult::ProtocolRejected;
         }
 

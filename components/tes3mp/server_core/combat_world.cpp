@@ -1331,4 +1331,85 @@ namespace TES3MP
     {
         return CombatSimulationError{ CombatSimulationErrorCode::InvalidWorld };
     }
+
+    WaitRestRecoveryResult applyAuthoritativeWaitRestRecovery(const CanonicalCombatWorld& combat,
+        const CanonicalServerState& players, const CanonicalActorWorld& actors,
+        const OpenMwMeleeSettings& settings, std::uint8_t hours, WaitRestMode mode) noexcept
+    try
+    {
+        if (hours == 0 || hours > MaximumWaitRestHours
+            || (mode != WaitRestMode::Wait && mode != WaitRestMode::Rest))
+            return WaitRestRecoveryError::InvalidRequest;
+
+        for (const auto& active : players.activeSessions())
+        {
+            const auto* spatialPlayer = players.findPlayer(active.playerId());
+            const auto* combatPlayer = combat.findPlayer(active.playerId());
+            if (!spatialPlayer || !combatPlayer)
+                return WaitRestRecoveryError::InvalidWorld;
+            if (combatPlayer->victim.dead)
+                return WaitRestRecoveryError::DeadPlayer;
+            const bool engaged = std::ranges::any_of(combat.actors(), [&](const CanonicalActorCombatState& actor) {
+                if (actor.stats.dead || actor.aggressionTarget != active.playerId())
+                    return false;
+                const auto* spatialActor = actors.find(actor.actorId);
+                return spatialActor && spatialActor->root().cell() == spatialPlayer->transform().cell();
+            });
+            if (engaged)
+                return WaitRestRecoveryError::ActiveCombat;
+        }
+
+        std::vector<CanonicalPlayerCombatState> playerStates(combat.players().begin(), combat.players().end());
+        constexpr float RestRecoverySecondsPerHour = 120.f;
+        const float restSeconds = static_cast<float>(hours) * RestRecoverySecondsPerHour;
+        const float fatigueSeconds = static_cast<float>(hours) * 3600.f;
+        if (!finite(restSeconds) || !finite(fatigueSeconds))
+            return WaitRestRecoveryError::InvalidRequest;
+
+        for (const auto& active : players.activeSessions())
+        {
+            auto found = std::ranges::lower_bound(
+                playerStates, active.playerId(), {}, &CanonicalPlayerCombatState::playerId);
+            if (found == playerStates.end() || found->playerId != active.playerId())
+                return WaitRestRecoveryError::InvalidWorld;
+            auto next = *found;
+            if (next.stats.fatigue < next.maximumFatigue)
+            {
+                const float rate = openMwFatigueRecoveryPerSecond(
+                    settings, next.stats.endurance, next.stats.normalizedEncumbrance);
+                if (!finite(rate) || rate < 0.f)
+                    return WaitRestRecoveryError::InvalidWorld;
+                next.stats.fatigue = std::min(next.maximumFatigue, next.stats.fatigue + rate * fatigueSeconds);
+                next.victim.fatigue = next.stats.fatigue;
+                next.victim.fatigueNonNegative = next.victim.fatigue >= 0.f;
+            }
+            if (mode == WaitRestMode::Rest)
+            {
+                if (next.victim.health < next.maximumHealth)
+                    next.victim.health = std::min(next.maximumHealth,
+                        next.victim.health + next.healthRecoveryPerSecond * restSeconds);
+                if (next.magicka < next.maximumMagicka)
+                    next.magicka = std::min(next.maximumMagicka,
+                        next.magicka + next.magickaRecoveryPerSecond * restSeconds);
+            }
+            if (next != *found)
+            {
+                const auto revision = found->revision.next();
+                if (!revision)
+                    return WaitRestRecoveryError::RevisionExhausted;
+                next.revision = *revision;
+                *found = std::move(next);
+            }
+        }
+
+        auto created = createCanonicalCombatWorld(
+            playerStates, combat.actors(), combat.randomState(), combat.lastSimulationTick());
+        auto* candidate = std::get_if<CanonicalCombatWorld>(&created);
+        return candidate ? WaitRestRecoveryResult(std::move(*candidate))
+                         : WaitRestRecoveryResult(WaitRestRecoveryError::InvalidWorld);
+    }
+    catch (...)
+    {
+        return WaitRestRecoveryError::InvalidWorld;
+    }
 }

@@ -622,6 +622,47 @@ namespace TES3MP
         return CanonicalWorldMutationError::InvalidState;
     }
 
+    CanonicalWorldMutationResult advanceCanonicalWorldTimeByHours(
+        const CanonicalWorldState& state, ServerTick tick, std::uint8_t hours) noexcept
+    try
+    {
+        const auto& current = state.time();
+        if (!validTime(current) || hours == 0 || hours > MaximumWaitRestHours)
+            return CanonicalWorldMutationError::InvalidState;
+        if (tick < current.lastAdvanceTick)
+            return CanonicalWorldMutationError::TickRegression;
+        const auto revision = current.revision.next();
+        if (!revision)
+            return CanonicalWorldMutationError::RevisionExhausted;
+
+        const auto elapsed = static_cast<std::uint64_t>(hours) * WorldMillisecondsPerHour;
+        const auto total = static_cast<std::uint64_t>(current.millisecondsSinceMidnight) + elapsed;
+        const auto elapsedDays = total / WorldMillisecondsPerDay;
+        const auto currentDay = static_cast<std::uint64_t>(current.year) * 360
+            + static_cast<std::uint64_t>(current.month) * 30 + current.day - 1;
+        if (elapsedDays
+            > static_cast<std::uint64_t>(std::numeric_limits<std::int32_t>::max()) * 360 + 359 - currentDay)
+            return CanonicalWorldMutationError::ArithmeticOverflow;
+
+        CanonicalWorldTimeState next = current;
+        const auto absoluteDay = currentDay + elapsedDays;
+        next.year = static_cast<std::int32_t>(absoluteDay / 360);
+        next.month = static_cast<std::uint8_t>((absoluteDay % 360) / 30);
+        next.day = static_cast<std::uint8_t>((absoluteDay % 30) + 1);
+        next.millisecondsSinceMidnight = static_cast<std::uint32_t>(total % WorldMillisecondsPerDay);
+        next.revision = *revision;
+        next.lastChangeTick = tick;
+        next.lastAdvanceTick = tick;
+
+        auto result = recreateWorld(state, next, state.globals(), state.questJournal(), state.factionStates());
+        return result ? CanonicalWorldMutationResult(std::move(*result))
+                      : CanonicalWorldMutationResult(CanonicalWorldMutationError::InvalidState);
+    }
+    catch (...)
+    {
+        return CanonicalWorldMutationError::InvalidState;
+    }
+
     CanonicalWorldMutationResult setCanonicalWorldTime(const CanonicalWorldState& state,
         WorldTimeRevision expectedRevision, CanonicalWorldTimeState replacement, ServerTick tick) noexcept
     try

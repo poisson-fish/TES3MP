@@ -63,10 +63,11 @@ class Phase8DesktopHarnessTests(unittest.TestCase):
                 encoding="utf-8")
             self.assertTrue(MODULE.read_completion(evidence, "flow-one")["success"])
 
-    def test_testing_guard_owns_automation_surface(self):
+    def test_narrow_option_owns_automation_surface(self):
         cmake = (ROOT / "apps" / "openmw" / "tes3mp" / "CMakeLists.txt").read_text(encoding="utf-8")
         options = (ROOT / "apps" / "openmw" / "options.cpp").read_text(encoding="utf-8")
-        self.assertIn("if(BUILD_TESTING)", cmake)
+        self.assertIn("if(TES3MP_ENABLE_DESKTOP_AUTOMATION)", cmake)
+        self.assertNotIn("BUILD_TESTING", cmake)
         self.assertIn("TES3MP_OPENMW_DESKTOP_AUTOMATION", cmake)
         self.assertIn("#ifdef TES3MP_OPENMW_DESKTOP_AUTOMATION", options)
 

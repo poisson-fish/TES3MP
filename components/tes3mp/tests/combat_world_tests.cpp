@@ -879,6 +879,57 @@ namespace
             && inactive->combat.findPlayer(id<TES3MP::PlayerId>(1))->magicka == 5.f && engagedPlayer
             && engagedPlayer->victim.health == 10.f && engagedPlayer->magicka == 5.f;
     }
+
+    bool unanimous_wait_rest_recovery_is_mode_specific_and_combat_gated()
+    {
+        const auto baseline = combatWorld();
+        std::vector<TES3MP::CanonicalPlayerCombatState> players(baseline.players().begin(), baseline.players().end());
+        players[0].stats.endurance = 50.f;
+        players[0].stats.normalizedEncumbrance = 0.5f;
+        players[0].stats.fatigue = 20.f;
+        players[0].victim.fatigue = 20.f;
+        players[0].victim.health = 10.f;
+        players[0].magicka = 5.f;
+        players[0].maximumMagicka = 20.f;
+        players[0].healthRecoveryPerSecond = 0.1f;
+        players[0].magickaRecoveryPerSecond = 0.05f;
+        const auto created = TES3MP::createCanonicalCombatWorld(
+            players, baseline.actors(), baseline.randomState(), baseline.lastSimulationTick());
+        const auto* world = std::get_if<TES3MP::CanonicalCombatWorld>(&created);
+        if (!world)
+            return false;
+        auto recoverySettings = settings();
+        recoverySettings.fatigueReturnBase = 0.001f;
+        recoverySettings.fatigueReturnMultiplier = 0.001f;
+        recoverySettings.enduranceFatigueMultiplier = 0.01f;
+
+        const auto waited = TES3MP::applyAuthoritativeWaitRestRecovery(*world, activeSpatialPlayers(),
+            spatialActors(), recoverySettings, 2, TES3MP::WaitRestMode::Wait);
+        const auto rested = TES3MP::applyAuthoritativeWaitRestRecovery(*world, activeSpatialPlayers(),
+            spatialActors(), recoverySettings, 2, TES3MP::WaitRestMode::Rest);
+        const auto* waitedWorld = std::get_if<TES3MP::CanonicalCombatWorld>(&waited);
+        const auto* restedWorld = std::get_if<TES3MP::CanonicalCombatWorld>(&rested);
+        const auto* waitedPlayer = waitedWorld ? waitedWorld->findPlayer(id<TES3MP::PlayerId>(1)) : nullptr;
+        const auto* restedPlayer = restedWorld ? restedWorld->findPlayer(id<TES3MP::PlayerId>(1)) : nullptr;
+        if (!waitedPlayer || !restedPlayer || waitedPlayer->victim.health != 10.f || waitedPlayer->magicka != 5.f
+            || waitedPlayer->stats.fatigue <= 20.f || restedPlayer->victim.health <= 10.f
+            || restedPlayer->magicka <= 5.f || restedPlayer->stats.fatigue != waitedPlayer->stats.fatigue
+            || waitedPlayer->revision.value() != 2 || restedPlayer->revision.value() != 2)
+            return false;
+
+        std::vector<TES3MP::CanonicalActorCombatState> engagedActors(
+            world->actors().begin(), world->actors().end());
+        engagedActors[0].aggressionTarget = id<TES3MP::PlayerId>(1);
+        const auto engaged = TES3MP::createCanonicalCombatWorld(
+            world->players(), engagedActors, world->randomState(), world->lastSimulationTick());
+        const auto* engagedWorld = std::get_if<TES3MP::CanonicalCombatWorld>(&engaged);
+        if (!engagedWorld)
+            return false;
+        const auto rejected = TES3MP::applyAuthoritativeWaitRestRecovery(*engagedWorld, activeSpatialPlayers(),
+            spatialActors(), recoverySettings, 2, TES3MP::WaitRestMode::Rest);
+        return std::get<TES3MP::WaitRestRecoveryError>(rejected) == TES3MP::WaitRestRecoveryError::ActiveCombat
+            && *engagedWorld == std::get<TES3MP::CanonicalCombatWorld>(engaged);
+    }
 }
 int main()
 {
@@ -902,6 +953,7 @@ int main()
             && actor_respawn_restores_baseline_and_clears_combat_intent()
             && fatigue_recovery_is_tick_deterministic_bounded_and_active_only()
             && health_and_magicka_recovery_are_tick_bounded_active_and_out_of_combat()
+            && unanimous_wait_rest_recovery_is_mode_specific_and_combat_gated()
         ? 0
         : 1;
 }

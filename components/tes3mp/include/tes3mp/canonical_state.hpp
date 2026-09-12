@@ -39,6 +39,7 @@ namespace TES3MP
         UnknownDialogueChoice,
         DialogueChoiceIneligible,
         DialogueChoiceRejected,
+        WaitRestRejected,
     };
 
     class FinalizedCommandRecord

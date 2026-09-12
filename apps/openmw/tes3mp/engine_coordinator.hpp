@@ -9,6 +9,7 @@
 #include <tes3mp/character_profile.hpp>
 #include <tes3mp/character_creation_protocol.hpp>
 #include <tes3mp/dialogue_choice_protocol.hpp>
+#include <tes3mp/wait_rest.hpp>
 
 namespace TES3MP::OpenMWAdapter
 {
@@ -65,6 +66,7 @@ namespace TES3MP::OpenMWAdapter
         {
             return std::nullopt;
         }
+        virtual bool submitWaitRest(std::uint8_t, WaitRestMode) noexcept { return false; }
         virtual void setGameRunning(bool) noexcept {}
         virtual void confirmGameStart(bool running) noexcept { setGameRunning(running); }
     };

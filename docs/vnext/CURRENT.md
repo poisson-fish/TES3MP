@@ -18,7 +18,7 @@ representative executable tests. Code and tests remain authoritative.
 | `tes3mp_client_session` | Caller-pumped negotiation, authentication, resume/resync, command output, snapshot ingestion, replication state, and locomotion reconciliation |
 | `tes3mp_server` | Configuration/content loading and real-transport dedicated-server composition |
 | `tes3mp_headless_client` | Scripted real-transport client for bounded integration scenarios |
-| `openmw_tes3mp_adapter` | Shared OpenMW connection, stock-chargen and dialogue-choice confirmation bridges, state application, reconnect, remote, canonical-weather, and canonical calendar/time presentation, object activation, inventory integration, and authoritative melee capture/presentation |
+| `openmw_tes3mp_adapter` | Shared OpenMW connection, stock-chargen, dialogue-choice, and wait/rest confirmation bridges, state application, reconnect, remote, canonical-weather, and canonical calendar/time presentation, object activation, inventory integration, and authoritative melee capture/presentation |
 
 The target graph and boundary checks live in
 [`components/tes3mp/CMakeLists.txt`](../../components/tes3mp/CMakeLists.txt) and
@@ -31,10 +31,11 @@ Public core headers expose only project-owned values.
 
 - A 12-byte bounded frame separates message class and kind before payload
   allocation. Each payload is verifier-checked and semantically validated.
-- The production server negotiates protocol major 1, minor 7. Defined
+- The production server negotiates protocol major 1, minor 8. Defined
   optional capabilities are VR pose (1), actor replication (2), interactive
   objects (3), inventory (4), combat (5), character creation (6), dialogue
-  choices (7), regional weather replication (8), and world-time replication (9).
+  choices (7), regional weather replication (8), world-time replication (9),
+  and authoritative synchronized wait/rest (10).
   Content-manifest mismatch rejects before authentication. Combat (5) is
   offered only when combat content and authoritative contact history are both
   successfully composed; the packaged derived-vanilla default now composes both
@@ -297,84 +298,31 @@ and [`desktop_providers.cpp`](../../apps/openmw/tes3mp/desktop_providers.cpp).
 
 ### Authoritative melee combat foundation
 
-- OpenMW's normal player attack animation and contact selection remain the
-  capture path. At the native hit key, a negotiated combat session suppresses
-  local mutation and sends only attack type/strength, optional actor identity,
-  last observed server tick, and expected combat revisions. Client hit rolls,
-  damage, resources, targets, and wall-clock time are not accepted as outcomes.
-- A shared engine-independent resolver is also used by OpenMW's hit chance,
-  weapon damage, hand-to-hand damage, and fatigue helpers. The server owns the
-  PRNG, canonical maximum/current health, magicka, and fatigue, actor dead state,
-  cooldown, and separate combat revisions. Damage and death commit atomically
-  with command finalization.
-- Optional bounded `TES3MP_COMBAT_V6` content supplies manifest-scoped resolver
-  settings, a validated default player combat profile, exhaustive actor combat
-  seeds and attack profiles, weapon and armor records, OpenMW fatigue/block/armor
-  constants, progression gains/class factors, recovery rates, endurance,
-  intelligence, a deterministic random seed, and direct-magic settings and
-  profiles.
-  Startup rejects a missing, malformed, mismatched, or internally inconsistent
-  configured file before exposing any of its state.
-- Fresh joins establish the validated server baseline. Character completion and
-  established reattachment derive strength, intelligence, agility, luck,
-  health, magicka, fatigue, tracked combat skills, their class/specialization
-  progression factors, recovery rates, and maximum encumbrance from the confirmed
-  profile while preserving baseline resolver modifiers and weight scale. The
-  profile revision makes that initialization idempotent. The carried-right
-  inventory stack selects server weapon data and skill. Its canonical condition
-  receives wear and breakage, including automatic unequip, in the same prepared
-  commit as fatigue, damage, death, and command finalization. Relevant
-  inventory/equipment changes advance the combat revision and recompute
-  normalized encumbrance.
-- Server validation rejects unknown or cross-cell targets, stale revisions,
-  future/expired source ticks, missing contact history, failed authoritative
-  contact/reach, and rate abuse before mutation. Existing session generation,
-  command sequence/ID, entity binding, authority epoch, and canonical revision
-  checks reject stale authority and replay.
-- Private self maximum/current health, magicka, fatigue, eleven combat skill
-  values/progress counters, death state, and revision, plus same-cell actor
-  stats, replicate through a latest-wins snapshot.
-  Same-cell player and actor attack outcomes use a reliable event batch. OpenMW
-  applies confirmed stat bases and current resources, hit recovery, actor
-  health/fatigue/dead state, native death/resurrection, actor attack/hit
-  animations, and canonical inventory condition/breakage.
-- Confirmed player contact assigns actor aggression. In-reach actors resolve one
-  server-owned attack per configured tick interval using their baked stats and
-  natural weapon. A bounded server-wide difficulty setting scales player damage
-  in both directions. Incoming hits use canonical facing, motion, stats, and the
-  equipped left-hand shield plus a server PRNG roll to decide passive blocking;
-  a block atomically spends fatigue, wears or breaks the shield, suppresses
-  health damage, and publishes the outcome. Unblocked hits then apply the stock
-  slot-weighted armor or unarmored rating, advance the selected defensive skill,
-  and wear the server-selected struck armor piece in that same atomic step.
-  Active living players and actors recover fatigue deterministically from
-  elapsed server ticks, endurance, and canonical encumbrance, clamped to their
-  server-owned maximum. Latest-wins server ticks order passive recovery without
-  invalidating combat intent revisions on every simulation tick.
-  Active living players without a live same-cell aggressor likewise recover
-  health and magicka using baked stock rest rates mapped to the default 30x time
-  scale. Successful server-confirmed weapon, hand-to-hand, and block uses advance
-  only the corresponding canonical skill using its baked gain and the confirmed
-  character's class and specialization factors.
-  Dead players and actors automatically respawn after 30 seconds at their
-  current canonical root with baseline resources and cleared attack state.
-- Successful melee contact also resolves a bounded server-owned direct-magic
-  subset. Carried-right on-strike enchantments spend canonical item charge and
-  apply self/target elemental, poison, health, or fatigue damage. Equipped
-  constant effects contribute elemental/poison/disease resistance and fire,
-  shock, or frost shields; shields retaliate against a contacting attacker.
-  Common and blight diseases transfer from configured actors using the server
-  PRNG, canonical resistance, and a once-per-player disease identity. These
-  consequences, melee, equipment wear/charge, death, revisions, and publication
-  share the existing atomic prepared commit. Existing combat and inventory
-  snapshots carry the resulting stats and charge without a protocol revision.
-- Production composition retains nine bounded server-tick frames of player and
-  actor roots. Contact uses the client-observed historical tick, stock 128-unit
-  base distance scaled by canonical weapon reach, exact-cell identity, and the
-  collision catalog's obstructing solids. Missing frames, missing historical
-  entities, excessive distance, and occlusion fail closed. Capability 5 is
-  advertised only after this validator and the complete combat content graph
-  exist.
+- OpenMW keeps its normal attack animation and contact selection, but a
+  negotiated session suppresses local mutation. The client submits bounded
+  intent and observed tick/revisions; it cannot claim hit rolls, damage,
+  resources, targets, or time.
+- The server owns the deterministic resolver, PRNG, resources, death, cooldown,
+  revisions, skill progress, recovery, aggression, respawn, blocking, armor,
+  equipment wear, and supported direct-magic effects. Combat, inventory, death,
+  revisions, and command finalization share one prepared atomic commit.
+- Bounded `TES3MP_COMBAT_V6` content supplies manifest-scoped player and actor
+  profiles, weapons, armor, resolver constants, progression/recovery values,
+  random seed, and direct-magic data. Invalid or inconsistent configured content
+  fails startup before state is exposed. Confirmed character profiles initialize
+  combat state idempotently; canonical equipped items select weapons and armor
+  and feed encumbrance.
+- Validation rejects unknown or cross-cell targets, stale authority/revisions,
+  replay, rate abuse, invalid observed ticks, absent history, excessive reach,
+  and occluded contact before mutation. Production retains nine bounded
+  server-tick position frames and uses stock base reach scaled by canonical
+  weapon data and manifest collision solids.
+- Private player resources, eleven combat skills/progress counters, death, and
+  revision use latest-wins snapshots; same-cell actor state and reliable attack
+  outcomes drive OpenMW presentation. Server ticks handle actor attacks, passive
+  recovery, 30-second respawn, defensive skill gains, and stock-rate recovery
+  outside active aggression. Capability 5 is advertised only with the complete
+  validator and combat content graph.
 
 Primary sources: [`melee_combat.cpp`](../../components/tes3mp/protocol/melee_combat.cpp),
 [`combat_world.cpp`](../../components/tes3mp/server_core/combat_world.cpp),
@@ -465,6 +413,16 @@ skipped revisions; stale data is ignored and same-tick contradictions fail.
 Desktop readiness waits for this baseline, disables local advancement, applies
 confirmed calendar/time globals, and restores local authority on clear.
 
+Capability 10 intercepts the stock OpenMW wait/rest confirmation before local
+clock or resource mutation. Requests are bounded to one through 24 hours and
+retain their wait-versus-rest mode as consent for the current session generation.
+Every active capable player must submit an exact match. The commit rechecks that
+all are alive and no live same-cell actor is targeting any of them, advances the
+fixed calendar once, restores fatigue for wait or fatigue/health/magicka for
+rest, and durably installs and publishes the clock and combat resources as one
+transaction. A disconnect removes that session from the active vote; resume
+receives the full post-jump clock and resource baselines.
+
 Primary sources: [`world_time_replication.hpp`](../../components/tes3mp/include/tes3mp/world_time_replication.hpp),
 [`world_time_projection.cpp`](../../apps/tes3mp-server/world_time_projection.cpp),
 [`adapter.cpp`](../../apps/openmw/tes3mp/adapter.cpp), and
@@ -540,15 +498,18 @@ and [`test_bake_tes3mp_content.py`](../../scripts/tests/test_bake_tes3mp_content
 - Other loadouts require generated mappings. The baker does not bind archives or
   loose assets; broad references/geometry/mod scripts, discovery, packaging, and
   release-scale performance/soak remain unfinished.
+- Wait/rest protocol, reducer, persistence, and adapter contracts pass, but its
+  fresh live desktop capture is not complete: both clients received synchronized
+  time samples, then timed out without an accepted rest submission or summary.
 
 ## Work still required
 
-### Next milestone: broaden canonical-world gameplay and release evidence
+### Next milestone: close wait/rest desktop proof
 
-Weather/reconnect evidence and server-to-client calendar/time presentation are
-implemented. Select the next bounded canonical-world gameplay surface and add
-its content-backed multi-client/reconnect evidence. TES3MP 0.8.x compatibility
-remains unsupported.
+Resolve the missing live rest submission, then pass the rollover, reconnect, and
+slow-peer capture from the dedicated evidence preset. Do not add gameplay scope
+or claim this milestone complete before `summary.json` is produced. TES3MP 0.8.x
+compatibility remains unsupported.
 
 ### Required before the desktop/PC-VR release
 
@@ -565,14 +526,17 @@ go decision. Device types remain provider-local.
 
 ## Verification snapshot
 
-The two-region desktop weather/reconnect/slow-peer capture passed against a real
-baked `Morrowind.esm` pack and newly linked product binaries. World-time codec,
-revision convergence, server projection, adapter readiness/presentation,
-server-app, all 207 Python, and patch-registry tests passed on Windows, together
-with the RelWithDebInfo `tes3mp_server` and `openmw` links, on 2026-09-11.
+All 219 Python contracts and the focused protocol, server-logic/server-app, and
+adapter gates passed on Windows. A fresh `BUILD_TESTING=FALSE` desktop-evidence
+tree linked `openmw` and `tes3mp_server`; its real-`Morrowind.esm`
+weather/reconnect/slow-peer capture passed. The wait/rest capture reached
+synchronized time presentation but timed out before either client submitted an
+accepted rest, so it remains unproven, on 2026-09-11.
 
-Sanitizers/fuzzers, non-Windows builds, PC-VR hardware, the upstream baseline,
-and a visible walkthrough were not run.
+The baseline provenance verifier remains red against the broader working tree:
+its registry omits many existing vNext files and still expects retired workflow
+files. Sanitizers/fuzzers, non-Windows builds, PC-VR hardware, the upstream
+baseline, and a visible walkthrough were not run.
 
 Use [DEVELOPMENT.md](DEVELOPMENT.md) for commands and record only the newest
 relevant verification here after behavior changes.

@@ -27,6 +27,7 @@ namespace TES3MP
     inline constexpr std::uint32_t DialogueChoiceCapabilityValue = 7;
     inline constexpr std::uint32_t WeatherReplicationCapabilityValue = 8;
     inline constexpr std::uint32_t WorldTimeReplicationCapabilityValue = 9;
+    inline constexpr std::uint32_t AuthoritativeWaitRestCapabilityValue = 10;
 
     class CapabilityId
     {
@@ -95,6 +96,11 @@ namespace TES3MP
     inline constexpr CapabilityId worldTimeReplicationCapability() noexcept
     {
         return *CapabilityId::fromValue(WorldTimeReplicationCapabilityValue);
+    }
+
+    inline constexpr CapabilityId authoritativeWaitRestCapability() noexcept
+    {
+        return *CapabilityId::fromValue(AuthoritativeWaitRestCapabilityValue);
     }
 
     struct ProtocolVersion

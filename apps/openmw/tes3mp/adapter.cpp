@@ -32,11 +32,11 @@ namespace TES3MP::OpenMWAdapter
 
         ClientHello makeClientHello(ContentManifestId contentManifest)
         {
-            auto versions = std::get<ProtocolVersionRange>(ProtocolVersionRange::create(1, 7, 7));
+            auto versions = std::get<ProtocolVersionRange>(ProtocolVersionRange::create(1, 8, 8));
             const std::array optional{ vrPoseCapability(), actorReplicationCapability(),
                 interactiveObjectReplicationCapability(), inventoryReplicationCapability(),
                 combatReplicationCapability(), characterCreationCapability(), dialogueChoiceCapability(),
-                weatherReplicationCapability(), worldTimeReplicationCapability() };
+                weatherReplicationCapability(), worldTimeReplicationCapability(), authoritativeWaitRestCapability() };
             auto offer = std::get<CapabilityOffer>(
                 CapabilityOffer::create(std::move(versions), optional, {}, contentManifest));
             return ClientHello::fromOffer(std::move(offer));
@@ -104,6 +104,14 @@ namespace TES3MP::OpenMWAdapter
             return hello
                 && std::binary_search(hello->negotiatedCapabilities().begin(), hello->negotiatedCapabilities().end(),
                     worldTimeReplicationCapability());
+        }
+
+        bool waitRestNegotiated(const ClientSessionRuntime& runtime) noexcept
+        {
+            const auto& hello = runtime.session().stateMachine().negotiatedHello();
+            return hello && hello->selectedVersion().major == 1 && hello->selectedVersion().minor >= 8
+                && std::binary_search(hello->negotiatedCapabilities().begin(),
+                    hello->negotiatedCapabilities().end(), authoritativeWaitRestCapability());
         }
 
         struct ResumeContinuity
@@ -802,6 +810,19 @@ namespace TES3MP::OpenMWAdapter
                 auto result = mDialogueChoiceResolution;
                 mDialogueChoiceResolution.reset();
                 return result;
+            }
+
+
+            bool submitWaitRest(std::uint8_t hours, WaitRestMode mode) noexcept override
+            try
+            {
+                if (!mRuntime || !mReady || mResuming || !mGameRunning || !waitRestNegotiated(*mRuntime))
+                    return false;
+                return mRuntime->queueWaitRest(hours, mode).result == ClientRuntimeResult::Accepted;
+            }
+            catch (...)
+            {
+                return false;
             }
 
             void setGameRunning(bool value) noexcept override { mGameRunning = value; }

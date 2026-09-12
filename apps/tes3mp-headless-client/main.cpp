@@ -86,7 +86,7 @@ namespace
         auto created = policy ? TES3MP::ClientSessionRuntime::create(runtime, clock, timeouts, generation, *policy)
                               : TES3MP::ClientRuntimeCreateResult{ TES3MP::SessionTransitionError{} };
         auto* value = std::get_if<std::unique_ptr<TES3MP::ClientSessionRuntime>>(&created);
-        auto range = std::get<TES3MP::ProtocolVersionRange>(TES3MP::ProtocolVersionRange::create(1, 7, 7));
+        auto range = std::get<TES3MP::ProtocolVersionRange>(TES3MP::ProtocolVersionRange::create(1, 8, 8));
         auto offer = std::get<TES3MP::CapabilityOffer>(TES3MP::CapabilityOffer::create(std::move(range), {}, {}));
         if (!value || !*value
             || (*value)->start(endpoint, TES3MP::ClientHello::fromOffer(std::move(offer)), std::move(request))
@@ -285,7 +285,7 @@ int main(int argc, char** argv)
         factory.runtime->shutdown();
         return 0;
     }
-    auto versions = std::get<TES3MP::ProtocolVersionRange>(TES3MP::ProtocolVersionRange::create(1, 7, 7));
+    auto versions = std::get<TES3MP::ProtocolVersionRange>(TES3MP::ProtocolVersionRange::create(1, 8, 8));
     const bool vanillaCharacter = mode == "vanilla-character";
     const std::array characterCapabilities{ TES3MP::characterCreationCapability() };
     const auto contentManifestId = vanillaCharacter ? TES3MP::ContentManifestId::fromHex(VanillaManifest)

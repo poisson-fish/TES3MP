@@ -729,6 +729,20 @@ namespace TES3MP
             queued == ClientRuntimeResult::Accepted ? commandId : std::nullopt };
     }
 
+    ClientRuntimeQueueResult ClientSessionRuntime::queueWaitRest(std::uint8_t hours, WaitRestMode mode)
+    {
+        const auto& hello = mSession->stateMachine().negotiatedHello();
+        if (!hello || hello->selectedVersion().major != 1 || hello->selectedVersion().minor < 8
+            || !mSession->stateMachine().worldTimeBaselineComplete() || !mCombatSnapshot
+            || !negotiated(mSession->stateMachine(), authoritativeWaitRestCapability()))
+            return { ClientRuntimeResult::NotConnected, std::nullopt, std::nullopt };
+        auto created = WaitRestRequest::create(hours, mode);
+        auto* request = std::get_if<WaitRestRequest>(&created);
+        if (!request)
+            return { ClientRuntimeResult::EncodeRejected, std::nullopt, std::nullopt };
+        return queueReliable(ReliableOperationBody(*request));
+    }
+
     std::optional<LocalLocomotionReconciliation> ClientSessionRuntime::reconcileLocalPresentation(
         bool hardDiscontinuity) noexcept
     {

@@ -41,6 +41,7 @@
         "CMAKE_BUILD_TYPE": "RelWithDebInfo",
         "CMAKE_EXPORT_COMPILE_COMMANDS": true,
         "BUILD_TESTING": false,
+        "TES3MP_ENABLE_DESKTOP_AUTOMATION": false,
         "BUILD_OPENMW": true,
         "BUILD_LAUNCHER": false,
         "BUILD_WIZARD": false,
@@ -109,6 +110,48 @@
         "OPENMW_USE_SYSTEM_YAML_CPP": false,
         "VCPKG_HOST_TRIPLET": "$env{VNEXT_VCPKG_TRIPLET}",
         "VCPKG_TARGET_TRIPLET": "$env{VNEXT_VCPKG_TRIPLET}"
+      }
+    },
+    {
+      "name": "vnext-desktop-evidence-windows",
+      "displayName": "TES3MP desktop evidence (Windows x86-64)",
+      "inherits": "vnext-product-windows",
+      "binaryDir": "${sourceDir}/build/vnext-desktop-evidence",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Windows"
+      },
+      "cacheVariables": {
+        "TES3MP_ENABLE_DESKTOP_AUTOMATION": true
+      }
+    },
+    {
+      "name": "vnext-desktop-evidence-linux",
+      "displayName": "TES3MP desktop evidence (Linux x86-64)",
+      "inherits": "vnext-product-linux",
+      "binaryDir": "${sourceDir}/build/vnext-desktop-evidence",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Linux"
+      },
+      "cacheVariables": {
+        "TES3MP_ENABLE_DESKTOP_AUTOMATION": true
+      }
+    },
+    {
+      "name": "vnext-desktop-evidence-macos",
+      "displayName": "TES3MP desktop evidence (macOS)",
+      "inherits": "vnext-product-macos",
+      "binaryDir": "${sourceDir}/build/vnext-desktop-evidence",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Darwin"
+      },
+      "cacheVariables": {
+        "TES3MP_ENABLE_DESKTOP_AUTOMATION": true
       }
     },
     {
@@ -256,6 +299,29 @@
       ]
     },
     {
+      "name": "vnext-protocol-contracts-windows",
+      "configurePreset": "vnext-product-windows",
+      "targets": ["tes3mp_protocol_contracts_run"]
+    },
+    {
+      "name": "vnext-server-logic-windows",
+      "configurePreset": "vnext-product-windows",
+      "targets": [
+        "tes3mp_server_logic_tests_run",
+        "tes3mp_server_app_tests_run"
+      ]
+    },
+    {
+      "name": "vnext-adapter-tests-windows",
+      "configurePreset": "vnext-product-windows",
+      "targets": ["openmw_tes3mp_adapter_tests_run"]
+    },
+    {
+      "name": "vnext-desktop-evidence-windows",
+      "configurePreset": "vnext-desktop-evidence-windows",
+      "targets": ["tes3mp_desktop_evidence"]
+    },
+    {
       "name": "vnext-product-linux",
       "configurePreset": "vnext-product-linux",
       "targets": [
@@ -270,6 +336,16 @@
         "openmw",
         "tes3mp_server"
       ]
+    },
+    {
+      "name": "vnext-desktop-evidence-linux",
+      "configurePreset": "vnext-desktop-evidence-linux",
+      "targets": ["tes3mp_desktop_evidence"]
+    },
+    {
+      "name": "vnext-desktop-evidence-macos",
+      "configurePreset": "vnext-desktop-evidence-macos",
+      "targets": ["tes3mp_desktop_evidence"]
     },
     {
       "name": "vnext-baseline-windows",

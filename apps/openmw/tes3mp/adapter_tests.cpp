@@ -49,7 +49,7 @@ namespace
 
     TES3MP::ServerHello serverHello(bool pose = false, bool actors = false, bool interactiveObjects = false,
         bool inventory = false, bool combat = false, std::uint16_t minor = 2, bool dialogueChoices = false,
-        bool weather = false, bool worldTime = false)
+        bool weather = false, bool worldTime = false, bool waitRest = false)
     {
         auto versions = std::get<TES3MP::ProtocolVersionRange>(TES3MP::ProtocolVersionRange::create(1, minor, minor));
         std::vector<TES3MP::CapabilityId> capabilities;
@@ -69,6 +69,8 @@ namespace
             capabilities.push_back(TES3MP::weatherReplicationCapability());
         if (worldTime)
             capabilities.push_back(TES3MP::worldTimeReplicationCapability());
+        if (waitRest)
+            capabilities.push_back(TES3MP::authoritativeWaitRestCapability());
         auto client = std::get<TES3MP::CapabilityOffer>(TES3MP::CapabilityOffer::create(versions, capabilities, {}));
         auto server
             = std::get<TES3MP::CapabilityOffer>(TES3MP::CapabilityOffer::create(std::move(versions), capabilities, {}));
@@ -1545,8 +1547,10 @@ int main()
     auto timeCreated = ClientSessionRuntime::create(
         *timeTransport, *timeClock, timeouts, SessionGeneration::initial(), outbound);
     auto timeRuntime = std::get<std::unique_ptr<ClientSessionRuntime>>(std::move(timeCreated));
-    auto timeVersions = std::get<ProtocolVersionRange>(ProtocolVersionRange::create(1, 7, 7));
-    const std::array timeCapabilities{ worldTimeReplicationCapability() };
+    auto timeVersions = std::get<ProtocolVersionRange>(ProtocolVersionRange::create(1, 8, 8));
+    const std::array timeCapabilities{
+        combatReplicationCapability(), worldTimeReplicationCapability(), authoritativeWaitRestCapability()
+    };
     auto timeOffer
         = std::get<CapabilityOffer>(CapabilityOffer::create(std::move(timeVersions), timeCapabilities, {}));
     auto timePassword = AuthenticationMaterial::create(passwordBytes);
@@ -1558,7 +1562,7 @@ int main()
         std::move(timeRuntime), reconnect, timeInput, timePresentation, timeStatus);
     timeCoordinator->frame(0.01f);
     timeTransportObserver->enqueue(MessageClass::SessionControl, MessageKind::ServerHello,
-        encodeServerHello(serverHello(false, false, false, false, false, 7, false, false, true)),
+        encodeServerHello(serverHello(false, false, false, false, true, 8, false, false, true, true)),
         TransportChannel::ReliableOrdered);
     timeCoordinator->frame(0.01f);
     timeTransportObserver->enqueue(MessageClass::SessionControl, MessageKind::AuthenticationAccepted,
@@ -1567,6 +1571,9 @@ int main()
         encodeReliableInterestBaseline(selfBaseline(SessionGeneration::initial())), TransportChannel::ReliableOrdered);
     timeTransportObserver->enqueue(MessageClass::LatestWinsSnapshot, MessageKind::LatestWinsSnapshot,
         encodeLatestWinsSnapshot(selfSnapshot(SessionGeneration::initial())), TransportChannel::LatestWins);
+    timeTransportObserver->enqueue(MessageClass::LatestWinsSnapshot, MessageKind::LatestWinsCombatSnapshot,
+        encodeLatestWinsCombatSnapshot(combatSnapshot(SessionGeneration::initial(), 1, 1)),
+        TransportChannel::LatestWins);
     timeCoordinator->frame(0.01f);
     require(timeCoordinator->multiplayerState() != MultiplayerState::Ready && timePresentation.worldTimes == 0);
     const auto timeBaseline = worldTimeState(SessionGeneration::initial(), 5, true);
@@ -1580,6 +1587,23 @@ int main()
         encodeReliableWorldTimeState(timeBaseline), TransportChannel::ReliableOrdered);
     timeCoordinator->frame(0.01f);
     require(timePresentation.worldTimes == 1);
+    const auto sentBeforeWait = timeTransportObserver->sentFrames.size();
+    timeCoordinator->setGameRunning(true);
+    require(timeCoordinator->submitWaitRest(2, WaitRestMode::Rest));
+    timeCoordinator->frame(0.01f);
+    bool sentWaitRest = false;
+    for (std::size_t index = sentBeforeWait; index < timeTransportObserver->sentFrames.size(); ++index)
+    {
+        const auto frame = decodeProtocolFrame(timeTransportObserver->sentFrames[index]);
+        const auto* decoded = std::get_if<DecodedFrame>(&frame);
+        if (!decoded || decoded->messageKind() != MessageKind::ReliableOperation)
+            continue;
+        const auto operation = decodeReliableOperation(decoded->payload());
+        const auto* value = std::get_if<ReliableOperation>(&operation);
+        const auto* request = value ? std::get_if<WaitRestRequest>(&value->body()) : nullptr;
+        sentWaitRest = request && request->hours() == 2 && request->mode() == WaitRestMode::Rest;
+    }
+    require(sentWaitRest && !timeCoordinator->submitWaitRest(0, WaitRestMode::Rest));
 
     Input dialogueInput;
     Presentation dialoguePresentation;
