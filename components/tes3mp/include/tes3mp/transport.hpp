@@ -387,14 +387,17 @@ namespace TES3MP
         bool hasLatest() const noexcept
         {
             return mLatest.has_value() || mActorLatest.has_value() || mEquipmentLatest.has_value()
+                || mCombatLatest.has_value()
                 || mPresentationLatest.has_value();
         }
         bool hasWorldLatest() const noexcept
         {
-            return mLatest.has_value() || mActorLatest.has_value() || mEquipmentLatest.has_value();
+            return mLatest.has_value() || mActorLatest.has_value() || mEquipmentLatest.has_value()
+                || mCombatLatest.has_value();
         }
         bool hasActorLatest() const noexcept { return mActorLatest.has_value(); }
         bool hasEquipmentLatest() const noexcept { return mEquipmentLatest.has_value(); }
+        bool hasCombatLatest() const noexcept { return mCombatLatest.has_value(); }
         bool hasPresentationLatest() const noexcept { return mPresentationLatest.has_value(); }
 
     private:
@@ -417,12 +420,13 @@ namespace TES3MP
         std::optional<std::vector<std::byte>> mLatest;
         std::optional<std::vector<std::byte>> mActorLatest;
         std::optional<std::vector<std::byte>> mEquipmentLatest;
+        std::optional<std::vector<std::byte>> mCombatLatest;
         std::optional<std::vector<std::byte>> mPresentationLatest;
         std::size_t mReliableBytes = 0;
         RateBucket mReliableRate;
         RateBucket mLatestRate;
         RateBucket mPresentationRate;
-        bool mPreferActorLatest = false;
+        std::size_t mNextWorldLatest = 0;
         std::optional<std::uint64_t> mFirstReliableBlock;
         std::size_t mConsecutiveReliableBlocks = 0;
         std::optional<std::uint64_t> mLastPumpTime;

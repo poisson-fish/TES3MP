@@ -930,6 +930,30 @@ namespace
         return std::get<TES3MP::WaitRestRecoveryError>(rejected) == TES3MP::WaitRestRecoveryError::ActiveCombat
             && *engagedWorld == std::get<TES3MP::CanonicalCombatWorld>(engaged);
     }
+
+    bool trap_magic_resolves_into_one_combat_candidate()
+    {
+        const auto before = combatWorld();
+        auto sources = combatSources();
+        const std::array traps{ TES3MP::DirectTrapMagicProfile{ id<TES3MP::TrapPrototypeId>(9),
+            { { TES3MP::DirectMagicTarget::Other, TES3MP::DirectMagicEffectKind::FireDamage, 10.f, 20.f },
+                { TES3MP::DirectMagicTarget::Other, TES3MP::DirectMagicEffectKind::DamageFatigue, 5.f, 5.f } } } };
+        const auto magic = TES3MP::DirectMagicCatalog::create(
+            TES3MP::testContentManifestId(), sources.items, {}, {}, {}, {}, traps);
+        if (!magic)
+            return false;
+        const auto applied = TES3MP::prepareAuthoritativeTrapMagic(before, sources.inventory, *magic,
+            id<TES3MP::PlayerId>(1), id<TES3MP::TrapPrototypeId>(9), id<TES3MP::ServerTick>(7));
+        const auto* player
+            = applied.candidate ? applied.candidate->findPlayer(id<TES3MP::PlayerId>(1)) : nullptr;
+        const auto rejected = TES3MP::prepareAuthoritativeTrapMagic(before, sources.inventory, *magic,
+            id<TES3MP::PlayerId>(1), id<TES3MP::TrapPrototypeId>(10), id<TES3MP::ServerTick>(7));
+        return applied.disposition == TES3MP::AuthoritativeTrapMagicDisposition::Applied && player
+            && player->revision.value() == 2 && player->victim.health <= 90.f && player->victim.health >= 80.f
+            && player->victim.fatigue == 95.f && applied.candidate->randomState() != before.randomState()
+            && rejected.disposition == TES3MP::AuthoritativeTrapMagicDisposition::UnknownTrap
+            && !rejected.candidate && before.findPlayer(id<TES3MP::PlayerId>(1))->victim.health == 100.f;
+    }
 }
 int main()
 {
@@ -954,6 +978,7 @@ int main()
             && fatigue_recovery_is_tick_deterministic_bounded_and_active_only()
             && health_and_magicka_recovery_are_tick_bounded_active_and_out_of_combat()
             && unanimous_wait_rest_recovery_is_mode_specific_and_combat_gated()
+            && trap_magic_resolves_into_one_combat_candidate()
         ? 0
         : 1;
 }

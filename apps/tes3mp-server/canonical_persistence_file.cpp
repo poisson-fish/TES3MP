@@ -60,7 +60,18 @@ namespace
     bool replaceFile(const std::filesystem::path& temporary, const std::filesystem::path& target) noexcept
     {
 #ifdef _WIN32
-        return MoveFileExW(temporary.c_str(), target.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH) != 0;
+        constexpr unsigned MaximumAttempts = 6;
+        for (unsigned attempt = 0; attempt < MaximumAttempts; ++attempt)
+        {
+            if (MoveFileExW(temporary.c_str(), target.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH) != 0)
+                return true;
+            const auto error = GetLastError();
+            if (error != ERROR_ACCESS_DENIED && error != ERROR_SHARING_VIOLATION && error != ERROR_LOCK_VIOLATION)
+                return false;
+            if (attempt + 1 < MaximumAttempts)
+                Sleep(1u << attempt);
+        }
+        return false;
 #else
         if (std::rename(temporary.c_str(), target.c_str()) != 0)
             return false;

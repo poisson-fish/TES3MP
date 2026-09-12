@@ -46,6 +46,8 @@ Public core headers expose only project-owned values.
   staged session deadlines and close stalled handshakes.
 - Reliable ordered operations, latest-wins canonical snapshots, and ephemeral
   pose samples use distinct delivery/queue semantics.
+- Player, actor, equipment, and combat latest snapshots have independent bounded,
+  round-robin slots, preventing cross-family overwrite.
 - The owned transport boundary supports lifecycle events, bounded outbound
   queues, slow-peer handling, stable disconnect reasons, telemetry, and
   deterministic fault scheduling. The GNS implementation remains private to
@@ -262,6 +264,8 @@ Primary sources: [`actor_catalog.hpp`](../../components/tes3mp/include/tes3mp/ac
 - Door, lock, and trap state, object revision, and last-change tick are durable.
   Restart requires a complete state vector matching the exact configured object
   catalog before installing any object state.
+- Combat V7 exactly covers configured trap IDs. Server-resolved effects,
+  damage/death/revision, and trap disarm share one durable commit.
 
 Primary sources: [`interactive_object_world.hpp`](../../components/tes3mp/include/tes3mp/interactive_object_world.hpp),
 [`interactive_object_replication.cpp`](../../components/tes3mp/protocol/interactive_object_replication.cpp),
@@ -306,7 +310,7 @@ and [`desktop_providers.cpp`](../../apps/openmw/tes3mp/desktop_providers.cpp).
   revisions, skill progress, recovery, aggression, respawn, blocking, armor,
   equipment wear, and supported direct-magic effects. Combat, inventory, death,
   revisions, and command finalization share one prepared atomic commit.
-- Bounded `TES3MP_COMBAT_V6` content supplies manifest-scoped player and actor
+- Bounded `TES3MP_COMBAT_V7` content supplies manifest-scoped player and actor
   profiles, weapons, armor, resolver constants, progression/recovery values,
   random seed, and direct-magic data. Invalid or inconsistent configured content
   fails startup before state is exposed. Confirmed character profiles initialize
@@ -484,8 +488,9 @@ and [`test_bake_tes3mp_content.py`](../../scripts/tests/test_bake_tes3mp_content
   collision; full Bullet terrain/mesh physics is deferred.
 - Actor AI is limited to idle/travel/wander and reactive pursuit; detection,
   schedules, spawning, and delegation remain absent.
-- Traps lack full spell resolution; lockpicking/probes are absent. Inventory
-  lacks trade, restocking, and repair.
+- Traps cover bounded instantaneous direct effects, but durations, area effects,
+  and other general spell semantics remain absent. Lockpicking/probes are absent;
+  inventory lacks trade, restocking, and repair.
 - The packaged default remains narrow: one dagger, shield, rat, starting loadout,
   and four-cell collision fixture. Arbitrary geometry/catalog extraction and
   rewound or per-bone contact are not implemented.
@@ -498,18 +503,16 @@ and [`test_bake_tes3mp_content.py`](../../scripts/tests/test_bake_tes3mp_content
 - Other loadouts require generated mappings. The baker does not bind archives or
   loose assets; broad references/geometry/mod scripts, discovery, packaging, and
   release-scale performance/soak remain unfinished.
-- Wait/rest protocol, reducer, persistence, and adapter contracts pass, but its
-  fresh live desktop capture is not complete: both clients received synchronized
-  time samples, then timed out without an accepted rest submission or summary.
 
 ## Work still required
 
-### Next milestone: close wait/rest desktop proof
+### Next milestone: authoritative lockpicking and probe disarming
 
-Resolve the missing live rest submission, then pass the rollover, reconnect, and
-slow-peer capture from the dedicated evidence preset. Do not add gameplay scope
-or claim this milestone complete before `summary.json` is produced. TES3MP 0.8.x
-compatibility remains unsupported.
+Add manifest-bound lockpick/probe tool quality and canonical security progression,
+then make attempts consume tool condition and update lock/trap state in the same
+durable transaction. Client submissions remain intent-only and must not supply
+chance, success, skill gain, or resulting state. TES3MP 0.8.x compatibility
+remains unsupported.
 
 ### Required before the desktop/PC-VR release
 
@@ -526,12 +529,13 @@ go decision. Device types remain provider-local.
 
 ## Verification snapshot
 
-All 219 Python contracts and the focused protocol, server-logic/server-app, and
-adapter gates passed on Windows. A fresh `BUILD_TESTING=FALSE` desktop-evidence
-tree linked `openmw` and `tes3mp_server`; its real-`Morrowind.esm`
-weather/reconnect/slow-peer capture passed. The wait/rest capture reached
-synchronized time presentation but timed out before either client submitted an
-accepted rest, so it remains unproven, on 2026-09-11.
+All 220 Python contracts and the focused protocol, server-logic/server-app, and
+adapter gates passed on Windows. A fresh `BUILD_TESTING=FALSE` desktop-evidence tree linked `openmw` and
+`tes3mp_server`. Its live real-`Morrowind.esm` wait/rest capture produced
+`summary.json`: two clients presented the identical synchronized rollover, a
+reattached client converged after one resume with zero duplicate world-time or
+weather presentations, and a deliberately stalled peer recovered with bounded
+resident memory and all outbound queues drained to zero, on 2026-09-11.
 
 The baseline provenance verifier remains red against the broader working tree:
 its registry omits many existing vNext files and still expects retired workflow

@@ -9,7 +9,7 @@ from pathlib import Path
 import desktop_evidence_harness as harness
 
 
-ROLES = {"wait-one", "wait-two", "wait-anchor", "wait-reconnect", "wait-slow"}
+ROLES = {"wait-one", "wait-two", "wait-anchor", "wait-reconnect", "wait-slow-anchor", "wait-slow"}
 
 
 def client_command(args: argparse.Namespace, pack: Path, port: int, password: Path,
@@ -96,7 +96,8 @@ def main() -> int:
         password.write_text(secret + "\n", encoding="utf-8")
         pair = _run_phase(args, pack, password, args.artifacts, ("wait-one", "wait-two"), 30)
         reconnect = _run_phase(args, pack, password, args.artifacts, ("wait-anchor", "wait-reconnect"), 35)
-        slow = _run_phase(args, pack, password, args.artifacts, ("wait-one", "wait-slow"), 30, sample_rss=True)
+        slow = _run_phase(
+            args, pack, password, args.artifacts, ("wait-slow-anchor", "wait-slow"), 30, sample_rss=True)
         manifest = json.loads(pack.joinpath("pack.json").read_text(encoding="utf-8"))["manifest_id"]
         summary = {"event": "authoritative_wait_rest_capture_passed", "manifest": manifest,
                    "two_client": _validate_pair(pair), "reconnect": _validate_reconnect(reconnect),

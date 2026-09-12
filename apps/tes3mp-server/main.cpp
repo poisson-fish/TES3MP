@@ -21,6 +21,7 @@
 #include <tes3mp/server_authentication.hpp>
 #include <tes3mp/transport_gns.hpp>
 
+#include <algorithm>
 #include <csignal>
 #include <fstream>
 #include <iostream>
@@ -268,6 +269,20 @@ int main(int argc, char** argv)
             return 2;
         }
         combatContent.emplace(std::move(*content));
+    }
+    const bool configuredObjectTraps = interactiveObjectCatalog
+        && std::ranges::any_of(interactiveObjectCatalog->entries(), [](const auto& object) {
+               return object.trap.trapId.has_value();
+           });
+    if ((configuredObjectTraps && !combatContent)
+        || (combatContent
+            && (interactiveObjectCatalog
+                    ? !TES3MP::directMagicCoversInteractiveObjectTraps(
+                        combatContent->magic, *interactiveObjectCatalog)
+                    : !combatContent->magic.traps().empty())))
+    {
+        std::cerr << "interactive object traps require exact combat magic coverage\n";
+        return 2;
     }
     TES3MP::MeleeAuthorityPolicy meleePolicy{};
     meleePolicy.difficulty = config.combatDifficulty;

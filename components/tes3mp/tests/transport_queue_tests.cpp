@@ -181,6 +181,42 @@ namespace
             && check(!queue.hasWorldLatest(), "latest records retained after fair drain");
     }
 
+    bool gameplayLatestFamiliesSurviveAtomicAdmissionAndDrainFairly()
+    {
+        auto queues = TES3MP::OutboundQueueSet::create(policy(), 1);
+        FakeRuntime runtime;
+        const auto connection = TES3MP::TransportConnectionId::initial();
+        if (!queues || queues->attach(connection) != TES3MP::TransportResult::Accepted)
+            return false;
+        const std::array kinds{ TES3MP::MessageKind::LatestWinsSnapshot,
+            TES3MP::MessageKind::LatestWinsActorSnapshot, TES3MP::MessageKind::LatestWinsEquipmentSnapshot,
+            TES3MP::MessageKind::LatestWinsCombatSnapshot };
+        std::array<std::vector<std::byte>, kinds.size()> frames;
+        std::array<TES3MP::OutboundQueueSet::AtomicMessage, kinds.size()> messages;
+        for (std::size_t index = 0; index < kinds.size(); ++index)
+        {
+            frames[index] = std::get<std::vector<std::byte>>(TES3MP::encodeProtocolFrame(
+                TES3MP::MessageClass::LatestWinsSnapshot, kinds[index], bytes(static_cast<unsigned>(index + 1))));
+            messages[index] = { connection, TES3MP::TransportChannel::LatestWins, frames[index] };
+        }
+        const auto admitted = queues->enqueueMessagesAtomically(messages);
+        for (std::uint64_t now = 0; now < 40; now += 10)
+            queues->pump(runtime, connection, now);
+        if (runtime.sent.size() != kinds.size())
+            return false;
+        for (std::size_t index = 0; index < kinds.size(); ++index)
+        {
+            const auto decoded = TES3MP::decodeProtocolFrame(runtime.sent[index].bytes);
+            const auto* frame = std::get_if<TES3MP::DecodedFrame>(&decoded);
+            if (!frame || frame->messageKind() != kinds[index])
+                return false;
+        }
+        return check(admitted == TES3MP::TransportResult::Accepted,
+                   "complete latest-wins family transaction was rejected")
+            && check(queues->hasPending(connection) == false,
+                "complete latest-wins family transaction did not drain");
+    }
+
     bool pairAdmissionIsAtomic()
     {
         auto queues = TES3MP::OutboundQueueSet::create(policy(), 1);
@@ -333,6 +369,7 @@ int main()
 {
     return policyAndBounds() && connectionSetBounds() && orderingCoalescingAndFairness()
             && actorAndPlayerLatestAreCoalescedSeparatelyAndDrainFairly() && presentationIsCoalescedAndIndependent()
+            && gameplayLatestFamiliesSurviveAtomicAdmissionAndDrainFairly()
             && pairAdmissionIsAtomic() && limitsRateAndTime() && multiConnectionAdmissionIsAtomic()
             && isolatedSlowPeerEviction() && telemetryIsExactBoundedAndIsolated()
         ? 0

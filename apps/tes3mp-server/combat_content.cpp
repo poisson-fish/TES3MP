@@ -16,7 +16,7 @@ namespace TES3MP::ServerApp
 {
     namespace
     {
-        constexpr std::string_view Header = "TES3MP_COMBAT_V6";
+        constexpr std::string_view Header = "TES3MP_COMBAT_V7";
         constexpr std::size_t MaximumFields = 48;
 
         struct ActorAttackDeclaration
@@ -180,6 +180,7 @@ namespace TES3MP::ServerApp
         std::vector<MeleeArmorProfile> armorProfiles;
         std::vector<DirectEnchantmentProfile> enchantmentProfiles;
         std::vector<DirectEquipmentMagicProfile> equipmentMagicProfiles;
+        std::vector<DirectTrapMagicProfile> trapMagicProfiles;
         std::map<ActorId, DirectActorMagicProfile> actorMagicProfiles;
         std::vector<ActorId> declaredActorMagic;
         std::size_t lineNumber = 0;
@@ -344,6 +345,22 @@ namespace TES3MP::ServerApp
                     if (position->second.diseases.size() >= MaximumDirectMagicDiseasesPerActor)
                         return error(CombatContentErrorCode::TooLarge, lineNumber);
                     position->second.diseases.push_back({ *spell, *diseaseKind, std::move(*effects) });
+                }
+                else if (values[0] == "trap")
+                {
+                    if (values.size() < 7)
+                        return error(CombatContentErrorCode::Malformed, lineNumber);
+                    const auto rawTrap = number<std::uint64_t>(values[1]);
+                    const auto trap = rawTrap ? TrapPrototypeId::fromValue(*rawTrap) : std::nullopt;
+                    const auto countEffects = number<std::size_t>(values[2]);
+                    const auto effects = countEffects ? magicEffects(values.subspan(3), *countEffects) : std::nullopt;
+                    if (!trap || !effects
+                        || !std::ranges::all_of(
+                            *effects, [](const auto& effect) { return effect.target == DirectMagicTarget::Other; }))
+                        return error(CombatContentErrorCode::InvalidMagicCatalog, lineNumber);
+                    if (trapMagicProfiles.size() >= MaximumDirectMagicTraps)
+                        return error(CombatContentErrorCode::TooLarge, lineNumber);
+                    trapMagicProfiles.push_back({ *trap, std::move(*effects) });
                 }
                 else if (values[0] == "player")
                 {
@@ -585,7 +602,8 @@ namespace TES3MP::ServerApp
         if (!weapons)
             return error(CombatContentErrorCode::InvalidWeaponCatalog);
         auto magic = DirectMagicCatalog::create(
-            manifest.id(), items, *magicSettings, enchantmentProfiles, equipmentMagicProfiles, actorMagic);
+            manifest.id(), items, *magicSettings, enchantmentProfiles, equipmentMagicProfiles, actorMagic,
+            trapMagicProfiles);
         if (!magic)
             return error(CombatContentErrorCode::InvalidMagicCatalog);
         const auto streamKey = RandomStreamKey::fromValues(5, 0);

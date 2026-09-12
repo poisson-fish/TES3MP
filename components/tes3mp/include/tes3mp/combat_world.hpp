@@ -393,6 +393,22 @@ namespace TES3MP
         std::vector<AuthoritativeActorMeleeEvent> events;
     };
 
+    enum class AuthoritativeTrapMagicDisposition : std::uint8_t
+    {
+        Applied,
+        UnknownPlayer,
+        UnknownTrap,
+        RevisionExhausted,
+        InvalidWorld,
+    };
+
+    struct PreparedTrapMagic
+    {
+        AuthoritativeTrapMagicDisposition disposition = AuthoritativeTrapMagicDisposition::InvalidWorld;
+        std::optional<CanonicalCombatWorld> candidate;
+        DirectMagicResolution resolution;
+    };
+
     enum class WaitRestRecoveryError : std::uint8_t
     {
         InvalidRequest,
@@ -424,6 +440,9 @@ namespace TES3MP
         const CanonicalServerState& players, const CanonicalActorWorld& actors,
         const OpenMwMeleeSettings& settings, CombatSimulationPolicy policy, ServerTick tick,
         const DirectMagicCatalog* magic = nullptr) noexcept;
+    PreparedTrapMagic prepareAuthoritativeTrapMagic(const CanonicalCombatWorld& combat,
+        const CanonicalInventoryWorld& inventory, const DirectMagicCatalog& magic, PlayerId player,
+        TrapPrototypeId trap, ServerTick tick) noexcept;
     WaitRestRecoveryResult applyAuthoritativeWaitRestRecovery(const CanonicalCombatWorld& combat,
         const CanonicalServerState& players, const CanonicalActorWorld& actors,
         const OpenMwMeleeSettings& settings, std::uint8_t hours, WaitRestMode mode) noexcept;

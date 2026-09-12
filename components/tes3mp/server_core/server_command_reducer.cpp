@@ -746,7 +746,7 @@ namespace TES3MP
                 return prepared;
             }
         }
-        if ((hasMeleeAttack || hasInventoryTransaction) && combat != nullptr)
+        if ((hasMeleeAttack || hasInventoryTransaction || hasObjectInteraction) && combat != nullptr)
         {
             try
             {
@@ -923,6 +923,32 @@ namespace TES3MP
                                                 : CommandDisposition::ObjectInteractionRejected;
 
                                             bool acceptObjectMutation = interactionResult.worldChanged;
+                                            if (interactionResult.outcome.sprungTrap && directMagic)
+                                            {
+                                                if (!prepared.mCombat || !prepared.mInventory)
+                                                {
+                                                    acceptObjectMutation = false;
+                                                    disposition = CommandDisposition::ObjectInteractionRejected;
+                                                    objectInteractionOutcome->code
+                                                        = ObjectInteractionResultCode::InternalError;
+                                                }
+                                                else
+                                                {
+                                                    auto trap = prepareAuthoritativeTrapMagic(*prepared.mCombat,
+                                                        *prepared.mInventory, *directMagic, session->playerId(),
+                                                        *interactionResult.outcome.sprungTrap, tick);
+                                                    if (trap.disposition == AuthoritativeTrapMagicDisposition::Applied
+                                                        && trap.candidate)
+                                                        prepared.mCombat = std::move(*trap.candidate);
+                                                    else
+                                                    {
+                                                        acceptObjectMutation = false;
+                                                        disposition = CommandDisposition::ObjectInteractionRejected;
+                                                        objectInteractionOutcome->code
+                                                            = ObjectInteractionResultCode::InternalError;
+                                                    }
+                                                }
+                                            }
                                             if (interactionResult.outcome.playerTeleport)
                                             {
                                                 const auto& destination = *interactionResult.outcome.playerTeleport;

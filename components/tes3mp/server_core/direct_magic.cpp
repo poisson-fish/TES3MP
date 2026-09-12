@@ -62,14 +62,15 @@ namespace TES3MP
     std::optional<DirectMagicCatalog> DirectMagicCatalog::create(ContentManifestId manifest,
         const ItemPrototypeCatalog& items, DirectMagicSettings settings,
         std::span<const DirectEnchantmentProfile> enchantments, std::span<const DirectEquipmentMagicProfile> equipment,
-        std::span<const DirectActorMagicProfile> actors) noexcept
+        std::span<const DirectActorMagicProfile> actors, std::span<const DirectTrapMagicProfile> traps) noexcept
     try
     {
         if (manifest != items.contentManifestId() || !finite(settings.elementalShieldMultiplier)
             || settings.elementalShieldMultiplier < 0.f || settings.elementalShieldMultiplier > 1'000.f
             || !finite(settings.diseaseTransferChance) || settings.diseaseTransferChance < 0.f
             || settings.diseaseTransferChance > 100.f || enchantments.size() > MaximumItemPrototypes
-            || equipment.size() > MaximumItemPrototypes || actors.size() > MaximumActorCatalogEntries)
+            || equipment.size() > MaximumItemPrototypes || actors.size() > MaximumActorCatalogEntries
+            || traps.size() > MaximumDirectMagicTraps)
             return std::nullopt;
 
         std::vector<DirectEnchantmentProfile> enchantmentValues(enchantments.begin(), enchantments.end());
@@ -124,8 +125,21 @@ namespace TES3MP
             if (std::ranges::adjacent_find(diseaseIds) != diseaseIds.end())
                 return std::nullopt;
         }
-        return DirectMagicCatalog(
-            manifest, settings, std::move(enchantmentValues), std::move(equipmentValues), std::move(actorValues));
+
+        std::vector<DirectTrapMagicProfile> trapValues(traps.begin(), traps.end());
+        std::ranges::sort(trapValues, {}, &DirectTrapMagicProfile::trapId);
+        for (std::size_t index = 0; index < trapValues.size(); ++index)
+        {
+            const auto& profile = trapValues[index];
+            if (profile.effects.empty() || profile.effects.size() > MaximumDirectMagicEffectsPerSource
+                || !std::ranges::all_of(profile.effects, [](const DirectMagicEffectProfile& effect) {
+                       return validEffect(effect) && effect.target == DirectMagicTarget::Other;
+                   })
+                || (index && trapValues[index - 1].trapId == profile.trapId))
+                return std::nullopt;
+        }
+        return DirectMagicCatalog(manifest, settings, std::move(enchantmentValues), std::move(equipmentValues),
+            std::move(actorValues), std::move(trapValues));
     }
     catch (...)
     {
@@ -148,6 +162,36 @@ namespace TES3MP
     {
         const auto found = std::ranges::lower_bound(mActors, id, {}, &DirectActorMagicProfile::actorId);
         return found != mActors.end() && found->actorId == id ? &*found : nullptr;
+    }
+
+    const DirectTrapMagicProfile* DirectMagicCatalog::findTrap(TrapPrototypeId id) const noexcept
+    {
+        const auto found = std::ranges::lower_bound(mTraps, id, {}, &DirectTrapMagicProfile::trapId);
+        return found != mTraps.end() && found->trapId == id ? &*found : nullptr;
+    }
+
+    bool directMagicCoversInteractiveObjectTraps(
+        const DirectMagicCatalog& magic, const InteractiveObjectCatalog& objects) noexcept
+    {
+        if (magic.contentManifestId() != objects.contentManifestId())
+            return false;
+        std::vector<TrapPrototypeId> configured;
+        try
+        {
+            configured.reserve(objects.entries().size());
+            for (const auto& object : objects.entries())
+                if (object.trap.trapId)
+                    configured.push_back(*object.trap.trapId);
+            std::ranges::sort(configured);
+            configured.erase(std::unique(configured.begin(), configured.end()), configured.end());
+        }
+        catch (...)
+        {
+            return false;
+        }
+        if (configured.size() != magic.traps().size())
+            return false;
+        return std::ranges::equal(configured, magic.traps(), {}, std::identity{}, &DirectTrapMagicProfile::trapId);
     }
 
     DirectMagicDefense combinedDirectMagicDefense(const DirectMagicDefense& base,

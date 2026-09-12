@@ -1332,6 +1332,57 @@ namespace TES3MP
         return CombatSimulationError{ CombatSimulationErrorCode::InvalidWorld };
     }
 
+    PreparedTrapMagic prepareAuthoritativeTrapMagic(const CanonicalCombatWorld& combat,
+        const CanonicalInventoryWorld& inventory, const DirectMagicCatalog& magic, PlayerId player,
+        TrapPrototypeId trap, ServerTick tick) noexcept
+    try
+    {
+        PreparedTrapMagic result;
+        const auto* current = combat.findPlayer(player);
+        if (!current)
+        {
+            result.disposition = AuthoritativeTrapMagicDisposition::UnknownPlayer;
+            return result;
+        }
+        const auto* profile = magic.findTrap(trap);
+        if (!profile)
+        {
+            result.disposition = AuthoritativeTrapMagicDisposition::UnknownTrap;
+            return result;
+        }
+        const auto revision = current->revision.next();
+        if (!revision)
+        {
+            result.disposition = AuthoritativeTrapMagicDisposition::RevisionExhausted;
+            return result;
+        }
+
+        auto random = Xoshiro256StarStar::restore(combat.randomState());
+        const auto defense = combinedDirectMagicDefense(current->magicDefense, inventory.findPlayer(player), magic);
+        const auto resolution
+            = resolveDirectMagicEffects(profile->effects, DirectMagicTarget::Other, defense, random);
+        if (!resolution)
+            return result;
+
+        std::vector<CanonicalPlayerCombatState> players(combat.players().begin(), combat.players().end());
+        auto found = std::ranges::lower_bound(players, player, {}, &CanonicalPlayerCombatState::playerId);
+        applyDirectMagic(*found, *resolution, tick);
+        found->revision = *revision;
+        auto candidate = createCanonicalCombatWorld(
+            players, combat.actors(), random.snapshot(), combat.lastSimulationTick());
+        auto* created = std::get_if<CanonicalCombatWorld>(&candidate);
+        if (!created)
+            return result;
+        result.disposition = AuthoritativeTrapMagicDisposition::Applied;
+        result.candidate.emplace(std::move(*created));
+        result.resolution = *resolution;
+        return result;
+    }
+    catch (...)
+    {
+        return PreparedTrapMagic{};
+    }
+
     WaitRestRecoveryResult applyAuthoritativeWaitRestRecovery(const CanonicalCombatWorld& combat,
         const CanonicalServerState& players, const CanonicalActorWorld& actors,
         const OpenMwMeleeSettings& settings, std::uint8_t hours, WaitRestMode mode) noexcept

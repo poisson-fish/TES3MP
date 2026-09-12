@@ -356,6 +356,75 @@ namespace
             && teleporter && teleporter->revision() == *ObjectRevision::fromValue(2);
     }
 
+    bool trap_disarm_and_magic_damage_commit_as_one_candidate()
+    {
+        auto fixture = interactiveFixture();
+        const auto itemCatalog
+            = *ItemPrototypeCatalog::create(fixture.manifest, std::span<const ItemPrototypeDeclaration>{});
+        const std::array inventoryPlayers{ CanonicalPlayerInventoryState{ .player = playerId(1) } };
+        auto inventory = *CanonicalInventoryWorld::create(fixture.manifest, itemCatalog, inventoryPlayers, {});
+        OpenMwMeleeAttacker stats;
+        stats.fatigue = 20.f;
+        OpenMwMeleeVictim victim;
+        victim.health = 20.f;
+        victim.fatigue = 20.f;
+        const std::array combatPlayers{ CanonicalPlayerCombatState{ .playerId = playerId(1),
+            .stats = stats,
+            .maximumEncumbranceWeightUnits = 1,
+            .victim = victim,
+            .respawnVictim = victim,
+            .maximumHealth = 20.f,
+            .maximumFatigue = 20.f } };
+        const auto randomKey = *RandomStreamKey::fromValues(1, 1);
+        auto combat = std::get<CanonicalCombatWorld>(createCanonicalCombatWorld(
+            combatPlayers, std::span<const CanonicalActorCombatState>{},
+            Xoshiro256StarStar::fromWorldSeed(1, randomKey).snapshot()));
+        const std::array traps{ DirectTrapMagicProfile{ *TrapPrototypeId::fromValue(11),
+            { { DirectMagicTarget::Other, DirectMagicEffectKind::DamageHealth, 7.f, 7.f } } } };
+        const auto magic = DirectMagicCatalog::create(
+            fixture.manifest.id(), itemCatalog, {}, {}, {}, {}, traps);
+        if (!magic)
+            return false;
+
+        NullMetricSink metrics;
+        NullStructuredEventSink events;
+        Observability observability(metrics, events);
+        CanonicalCommandReducer reducer(fixture.players, observability, fixture.manifest);
+        IntakeFixture intake;
+        const auto cell = CellId::interior(*CellSpaceId::fromValue(7));
+        const std::array commands{ interactionProposal(
+            1, 1001, 1, cell, Position3(10, 0, 0), ObjectRevision::initial()) };
+        if (!intake.submit(commands))
+            return false;
+        const auto batch = intake.pumpFirst();
+        if (!batch || batch.batches().size() != 1)
+            return false;
+        CanonicalCommandWorlds worlds{ .interactiveObjects = &fixture.objects,
+            .interactiveObjectCatalog = &fixture.catalog,
+            .inventory = &inventory,
+            .itemCatalog = &itemCatalog,
+            .combat = &combat,
+            .directMagic = &*magic };
+        auto prepared = reducer.prepareTick(batch.batches().front(), worlds);
+        const auto* candidateObject
+            = prepared.candidateInteractiveObjects() ? prepared.candidateInteractiveObjects()->find(
+                  *InteractiveObjectId::fromValue(1))
+                                                     : nullptr;
+        const auto* candidatePlayer
+            = prepared.candidateCombat() ? prepared.candidateCombat()->findPlayer(playerId(1)) : nullptr;
+        if (!prepared.result() || prepared.result().dispositions().size() != 1
+            || prepared.result().dispositions()[0].disposition() != CommandDisposition::Applied || !candidateObject
+            || candidateObject->trapState() != TrapState::Disarmed || !candidatePlayer
+            || candidatePlayer->victim.health != 13.f || combat.findPlayer(playerId(1))->victim.health != 20.f
+            || fixture.objects.find(*InteractiveObjectId::fromValue(1))->trapState() != TrapState::Armed)
+            return false;
+        if (!reducer.commit(std::move(prepared), worlds))
+            return false;
+        return combat.findPlayer(playerId(1))->victim.health == 13.f
+            && combat.findPlayer(playerId(1))->revision.value() == 2
+            && fixture.objects.find(*InteractiveObjectId::fromValue(1))->trapState() == TrapState::Disarmed;
+    }
+
     bool stale_object_base_rejects_the_whole_prepared_commit()
     {
         auto fixture = interactiveFixture();
@@ -1227,6 +1296,8 @@ int main()
             &object_interactions_share_global_command_order_with_cell_transitions },
         std::pair{ "trap_and_teleport_outcomes_commit_with_object_and_player_state",
             &trap_and_teleport_outcomes_commit_with_object_and_player_state },
+        std::pair{ "trap_disarm_and_magic_damage_commit_as_one_candidate",
+            &trap_disarm_and_magic_damage_commit_as_one_candidate },
         std::pair{ "stale_object_base_rejects_the_whole_prepared_commit",
             &stale_object_base_rejects_the_whole_prepared_commit },
         std::pair{ "valid_bound_next_command_atomically_replaces_player_and_ack",

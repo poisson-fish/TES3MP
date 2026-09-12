@@ -3,6 +3,7 @@
 
 #include "actor_catalog.hpp"
 #include "deterministic_random.hpp"
+#include "interactive_object_catalog.hpp"
 #include "inventory_world.hpp"
 
 #include <cstddef>
@@ -17,6 +18,7 @@ namespace TES3MP
     inline constexpr std::size_t MaximumDirectMagicEffectsPerSource = 8;
     inline constexpr std::size_t MaximumDirectMagicDiseasesPerActor = 16;
     inline constexpr std::size_t MaximumContractedDiseasesPerPlayer = 64;
+    inline constexpr std::size_t MaximumDirectMagicTraps = MaximumInteractiveObjectCatalogEntries;
 
     enum class DirectMagicTarget : std::uint8_t
     {
@@ -117,34 +119,46 @@ namespace TES3MP
         friend bool operator==(const DirectActorMagicProfile&, const DirectActorMagicProfile&) noexcept = default;
     };
 
+    struct DirectTrapMagicProfile
+    {
+        TrapPrototypeId trapId;
+        std::vector<DirectMagicEffectProfile> effects;
+
+        friend bool operator==(const DirectTrapMagicProfile&, const DirectTrapMagicProfile&) noexcept = default;
+    };
+
     class DirectMagicCatalog
     {
     public:
         static std::optional<DirectMagicCatalog> create(ContentManifestId manifest, const ItemPrototypeCatalog& items,
             DirectMagicSettings settings, std::span<const DirectEnchantmentProfile> enchantments,
             std::span<const DirectEquipmentMagicProfile> equipment,
-            std::span<const DirectActorMagicProfile> actors) noexcept;
+            std::span<const DirectActorMagicProfile> actors,
+            std::span<const DirectTrapMagicProfile> traps = {}) noexcept;
 
         constexpr ContentManifestId contentManifestId() const noexcept { return mManifest; }
         constexpr DirectMagicSettings settings() const noexcept { return mSettings; }
         const DirectEnchantmentProfile* findEnchantment(ItemPrototypeId id) const noexcept;
         const DirectEquipmentMagicProfile* findEquipment(ItemPrototypeId id) const noexcept;
         const DirectActorMagicProfile* findActor(ActorId id) const noexcept;
+        const DirectTrapMagicProfile* findTrap(TrapPrototypeId id) const noexcept;
         std::span<const DirectEnchantmentProfile> enchantments() const noexcept { return mEnchantments; }
         std::span<const DirectEquipmentMagicProfile> equipment() const noexcept { return mEquipment; }
         std::span<const DirectActorMagicProfile> actors() const noexcept { return mActors; }
+        std::span<const DirectTrapMagicProfile> traps() const noexcept { return mTraps; }
 
         friend bool operator==(const DirectMagicCatalog&, const DirectMagicCatalog&) noexcept = default;
 
     private:
         DirectMagicCatalog(ContentManifestId manifest, DirectMagicSettings settings,
             std::vector<DirectEnchantmentProfile> enchantments, std::vector<DirectEquipmentMagicProfile> equipment,
-            std::vector<DirectActorMagicProfile> actors) noexcept
+            std::vector<DirectActorMagicProfile> actors, std::vector<DirectTrapMagicProfile> traps) noexcept
             : mManifest(manifest)
             , mSettings(settings)
             , mEnchantments(std::move(enchantments))
             , mEquipment(std::move(equipment))
             , mActors(std::move(actors))
+            , mTraps(std::move(traps))
         {
         }
 
@@ -153,6 +167,7 @@ namespace TES3MP
         std::vector<DirectEnchantmentProfile> mEnchantments;
         std::vector<DirectEquipmentMagicProfile> mEquipment;
         std::vector<DirectActorMagicProfile> mActors;
+        std::vector<DirectTrapMagicProfile> mTraps;
     };
 
     struct DirectMagicResolution
@@ -173,6 +188,8 @@ namespace TES3MP
         float attackerMaximumFatigue, DirectMagicSettings settings, Xoshiro256StarStar& random) noexcept;
     std::optional<bool> resolveDiseaseTransfer(DirectDiseaseKind kind, const DirectMagicDefense& target,
         DirectMagicSettings settings, Xoshiro256StarStar& random) noexcept;
+    bool directMagicCoversInteractiveObjectTraps(
+        const DirectMagicCatalog& magic, const InteractiveObjectCatalog& objects) noexcept;
 }
 
 #endif

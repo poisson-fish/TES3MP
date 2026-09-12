@@ -54,12 +54,25 @@ namespace
         const std::array actors{ DirectActorMagicProfile{ id<ActorId>(3), actorDefense,
             { { id<SpellRecordId>(4), DirectDiseaseKind::Common,
                 { { DirectMagicTarget::Other, DirectMagicEffectKind::DamageHealth, 1.f, 1.f } } } } } };
+        const std::array traps{ DirectTrapMagicProfile{ id<TrapPrototypeId>(5),
+            { { DirectMagicTarget::Other, DirectMagicEffectKind::FireDamage, 6.f, 6.f } } } };
         const auto catalog = DirectMagicCatalog::create(testContentManifestId(), itemCatalog,
-            { .elementalShieldMultiplier = 0.1f, .diseaseTransferChance = 10.f }, enchantments, equipment, actors);
+            { .elementalShieldMultiplier = 0.1f, .diseaseTransferChance = 10.f }, enchantments, equipment, actors,
+            traps);
         assert(catalog);
         assert(catalog->findEnchantment(id<ItemPrototypeId>(1)) != nullptr);
         assert(catalog->findEquipment(id<ItemPrototypeId>(2))->defense.fireResistance == 25.f);
         assert(catalog->findActor(id<ActorId>(3))->diseases[0].spellId == id<SpellRecordId>(4));
+        assert(catalog->findTrap(id<TrapPrototypeId>(5))->effects[0].minimumMagnitude == 6.f);
+
+        const auto zero = Turn32::fromValue(0);
+        const auto cell = CellId::interior(id<CellSpaceId>(7));
+        const auto transform = Transform(cell, Position3(0, 0, 0), Orientation3(zero, zero, zero));
+        const std::array objectEntries{ InteractiveObjectCatalogEntry{ id<InteractiveObjectId>(1),
+            InteractiveObjectKind::StandardDoor, cell, transform, std::nullopt, {},
+            ObjectTrapDeclaration{ true, id<TrapPrototypeId>(5) } } };
+        const auto objects = InteractiveObjectCatalog::create(testContentManifest(), objectEntries);
+        assert(objects && directMagicCoversInteractiveObjectTraps(*catalog, *objects));
 
         auto invalidCharge = enchantments;
         invalidCharge[0].chargeCost = 21;
@@ -70,6 +83,9 @@ namespace
         auto invalidEquipment = equipment;
         invalidEquipment[0].defense.willpower = 1.f;
         assert(!DirectMagicCatalog::create(testContentManifestId(), itemCatalog, {}, {}, invalidEquipment, {}));
+        auto invalidTrap = traps;
+        invalidTrap[0].effects[0].target = DirectMagicTarget::Self;
+        assert(!DirectMagicCatalog::create(testContentManifestId(), itemCatalog, {}, {}, {}, {}, invalidTrap));
     }
 
     void direct_effects_shields_and_disease_use_server_randomness()

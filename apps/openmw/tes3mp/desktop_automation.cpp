@@ -27,6 +27,7 @@ namespace TES3MP::OpenMWAdapter
         constexpr std::uint64_t CaptureStopAt = 4 * Second;
         constexpr std::uint64_t CaptureDuration = 5 * Second;
         constexpr std::uint64_t ActorAuthDuration = 8 * Second;
+        constexpr std::uint64_t SlowPeerEvidenceDuration = 20 * Second;
         constexpr std::int64_t AutomationSpeed = 4096;
         std::optional<MonotonicInstant> add(MonotonicInstant value, std::uint64_t duration) noexcept
         {
@@ -108,6 +109,8 @@ namespace TES3MP::OpenMWAdapter
             return DesktopAutomationRole::WaitAnchor;
         if (value == "wait-reconnect")
             return DesktopAutomationRole::WaitReconnect;
+        if (value == "wait-slow-anchor")
+            return DesktopAutomationRole::WaitSlowAnchor;
         if (value == "wait-slow")
             return DesktopAutomationRole::WaitSlow;
         return std::nullopt;
@@ -299,7 +302,7 @@ namespace TES3MP::OpenMWAdapter
         const auto elapsed = now.nanoseconds() - mStartedAt->nanoseconds();
         const bool submitsWaitRest = mRole == DesktopAutomationRole::WaitOne
             || mRole == DesktopAutomationRole::WaitTwo || mRole == DesktopAutomationRole::WaitAnchor
-            || mRole == DesktopAutomationRole::WaitSlow;
+            || mRole == DesktopAutomationRole::WaitSlowAnchor || mRole == DesktopAutomationRole::WaitSlow;
         if (submitsWaitRest && !mWaitRestSubmitted && mLastWorldTime && elapsed >= 5 * Second)
         {
             const bool accepted = mCoordinator && mCoordinator->submitWaitRest(2, WaitRestMode::Rest);
@@ -365,7 +368,11 @@ namespace TES3MP::OpenMWAdapter
             finish(mWorldTimeDuplicates == 0);
         else if (mRole == DesktopAutomationRole::WaitReconnect && mWorldTimeConvergedAfterResume)
             finish(mWorldTimeDuplicates == 0);
-        else if (mRole == DesktopAutomationRole::WaitSlow && mSlowPeerRecovered && mWaitRestApplied)
+        else if (mRole == DesktopAutomationRole::WaitSlowAnchor && mWaitRestApplied
+            && elapsed >= SlowPeerEvidenceDuration)
+            finish(mWorldTimeDuplicates == 0);
+        else if (mRole == DesktopAutomationRole::WaitSlow && mSlowPeerRecovered && mWaitRestApplied
+            && elapsed >= SlowPeerEvidenceDuration)
             finish(mWorldTimeDuplicates == 0);
         return ProviderResult::Accepted;
     }
@@ -609,6 +616,8 @@ namespace TES3MP::OpenMWAdapter
                 return "wait-anchor";
             case DesktopAutomationRole::WaitReconnect:
                 return "wait-reconnect";
+            case DesktopAutomationRole::WaitSlowAnchor:
+                return "wait-slow-anchor";
             case DesktopAutomationRole::WaitSlow:
                 return "wait-slow";
         }

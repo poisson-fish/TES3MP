@@ -121,13 +121,15 @@ the affected code/tests in the same milestone.
   and skills, then owns the struck-slot roll, defensive progression, and armor
   wear. Blocking, mitigation, wear/breakage, resource changes, and publication
   form one atomic operation.
-- **Direct contact magic is part of the melee transaction.** On-strike charge
+- **Instantaneous direct magic is part of its originating transaction.** On-strike charge
   use and direct effects, equipped constant defenses and elemental-shield
   retaliation, and actor disease transfer are resolved from manifest-bound
   profiles with the server PRNG. Their resource, health, fatigue, death, and
   disease-identity changes commit with the contacting melee operation. Effects
   outside the typed instantaneous subset fail content validation; they are not
-  delegated to local OpenMW magic state.
+  delegated to local OpenMW magic state. Armed object traps use the same rule:
+  exact manifest-bound trap profiles resolve against canonical equipped defenses,
+  and RNG, damage/death, combat revision, and trap disarm commit atomically.
 - **Live authoritative combat progression and recovery.** Successful server-confirmed
   weapon, hand-to-hand, block, armor, and unarmored uses advance only the corresponding canonical
   skill using baked OpenMW use gains plus the confirmed character's class and

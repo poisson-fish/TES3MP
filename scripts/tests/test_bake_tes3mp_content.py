@@ -72,7 +72,7 @@ class ContentBakerTests(unittest.TestCase):
             encoding="utf-8",
         )
         (self.source / "combat.txt").write_text(
-            "TES3MP_COMBAT_V6\n"
+            "TES3MP_COMBAT_V7\n"
             f"manifest {ZERO_MANIFEST}\n"
             "seed 1234\n"
             "settings 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 -90 90 1 1 1 0 100 1 1 1 30 .01 .01 .25 0 0\n"
@@ -500,6 +500,15 @@ class ContentBakerTests(unittest.TestCase):
         self.assertIn(f"prototype {self.item_prototype} 11 30 10 400 40 65536 0 none", inventory)
         self.assertIn(f"enchantment {self.item_prototype} 5 1 other fire 7 7", combat)
         self.assertIn(f"disease 1 {baker.stable_record_id(disease)} common 1 other health 3 3", combat)
+
+    def test_interactive_trap_ids_are_extracted_for_exact_combat_coverage(self):
+        interior = ("object", "1", "standard", "interior", "1", "0", "0", "0", "0", "0", "0",
+                    "0", "none", "41")
+        exterior = ("object", "2", "standard", "exterior", "2", "-1", "3", "0", "0", "0", "0",
+                    "0", "0", "0", "0", "42")
+        catalog = baker.Catalog("interactive_object_content_file", self.source / "objects.txt", "objects.txt", b"",
+                                (interior, exterior))
+        self.assertEqual(baker._interactive_object_trap_ids(catalog), {41, 42})
 
     def test_derived_pack_missing_record_preserves_current_pointer(self):
         self._write_derived_esm()

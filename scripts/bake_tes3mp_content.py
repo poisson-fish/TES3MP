@@ -47,7 +47,7 @@ CATALOGS = {
     "actor_content_file": ("TES3MP_ACTORS_V1", True),
     "interactive_object_content_file": ("TES3MP_INTERACTIVE_OBJECTS_V1", False),
     "inventory_content_file": ("TES3MP_INVENTORY_V1", False),
-    "combat_content_file": ("TES3MP_COMBAT_V6", False),
+    "combat_content_file": ("TES3MP_COMBAT_V7", False),
     "character_content_file": ("TES3MP_CHARACTERS_V2", False),
     "world_content_file": ("TES3MP_WORLD_V4", True),
     "script_package_file": ("TES3MP_SCRIPT_PACKAGES_V2", False),
@@ -1172,6 +1172,35 @@ def _record_ids(catalog: Catalog | None, kind: str, field: int) -> set[int]:
     return result
 
 
+def _interactive_object_trap_ids(catalog: Catalog | None) -> set[int]:
+    if catalog is None:
+        return set()
+    result: set[int] = set()
+    for record in catalog.records:
+        if record[0] != "object":
+            continue
+        try:
+            trap_field = 13 if record[3] == "interior" else 15 if record[3] == "exterior" else -1
+        except IndexError as exc:
+            raise BakeError(f"malformed object record in {catalog.path}") from exc
+        if trap_field < 0:
+            raise BakeError(f"malformed object record in {catalog.path}")
+        try:
+            value = record[trap_field]
+        except IndexError as exc:
+            raise BakeError(f"malformed object record in {catalog.path}") from exc
+        if value == "none":
+            continue
+        try:
+            identifier = int(value, 10)
+        except ValueError as exc:
+            raise BakeError(f"invalid trap identity in {catalog.path}") from exc
+        if identifier <= 0 or identifier > 0xFFFFFFFFFFFFFFFF:
+            raise BakeError(f"invalid trap identity in {catalog.path}")
+        result.add(identifier)
+    return result
+
+
 def _require_exact_mapping(mapping: dict[int, str], expected: set[int], description: str) -> None:
     if set(mapping) != expected:
         missing = sorted(expected - set(mapping))
@@ -1315,12 +1344,16 @@ def validate_consistency(server_entries: Sequence[Assignment], client_entries: S
     actor_ids = _record_ids(actor_catalog, "actor", 1)
     combat_actor_ids = _record_ids(combat_catalog, "actor", 1)
     weapon_ids = _record_ids(combat_catalog, "weapon", 1)
+    object_trap_ids = _interactive_object_trap_ids(object_catalog)
+    combat_trap_ids = _record_ids(combat_catalog, "trap", 1)
     if combat_catalog and inventory_catalog is None:
         raise BakeError("combat content requires inventory content")
     if combat_actor_ids != actor_ids:
         raise BakeError("combat actor identities do not exactly match the actor catalog")
     if not weapon_ids.issubset(item_prototypes):
         raise BakeError("combat weapon identities are absent from the inventory catalog")
+    if combat_trap_ids != object_trap_ids:
+        raise BakeError("combat trap identities do not exactly match the interactive object catalog")
 
     actor_mapping = _mapping_values(client_entries, "tes3mp-content-actor-prototype-map")
     object_mapping = _mapping_values(client_entries, "tes3mp-content-interactive-object-map")

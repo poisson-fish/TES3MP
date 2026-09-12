@@ -32,6 +32,7 @@ namespace TES3MP::OpenMWAdapter
         WaitTwo,
         WaitAnchor,
         WaitReconnect,
+        WaitSlowAnchor,
         WaitSlow,
     };
 

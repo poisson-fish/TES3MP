@@ -1048,7 +1048,7 @@ int main()
         assert(static_cast<bool>(stream));
     };
     constexpr std::string_view combatHeader
-        = "TES3MP_COMBAT_V6\n"
+        = "TES3MP_COMBAT_V7\n"
           "manifest 0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20\n"
           "seed 42\n";
     constexpr std::string_view combatBody
@@ -1065,7 +1065,8 @@ int main()
           "armor 5 2 30\n"
           "enchantment 4 5 2 other fire 3 3 self fatigue 1 1\n"
           "equipment_magic 5 0 0 10 0 0 0 0 0 5 0 0\n"
-          "disease 1 9 common 1 other health 2 2\n";
+          "disease 1 9 common 1 other health 2 2\n"
+          "trap 12 2 other fire 4 4 other fatigue 3 3\n";
     const std::array combatItemDeclarations{
         ItemPrototypeDeclaration{ id<ItemPrototypeId>(4), ItemCategory::Weapon, 5, 1, 100, 40,
             slotToMask(EquipmentSlot::CarriedRight), false, std::nullopt },
@@ -1095,6 +1096,7 @@ int main()
         && combat.magic.findEnchantment(id<ItemPrototypeId>(4))->effects.size() == 2
         && combat.magic.findEquipment(id<ItemPrototypeId>(5))->defense.fireResistance == 10.f
         && combat.magic.findActor(id<ActorId>(1))->diseases[0].spellId == id<SpellRecordId>(9)
+        && combat.magic.findTrap(id<TrapPrototypeId>(12))->effects.size() == 2
         && combat.world.actors()[0].magicDefense.frostShield == 9.f
         && combat.playerTemplate.magicDefense.willpower == 40.f && combat.settings.difficultyMultiplier == 5.f
         && combat.settings.baseArmorSkill == 30.f && combat.settings.combatArmorMinimumMultiplier == 0.25f
@@ -1129,7 +1131,7 @@ int main()
                .code
         == CombatContentErrorCode::InvalidActorSet);
     writeCombat(
-        "TES3MP_COMBAT_V6\n"
+        "TES3MP_COMBAT_V7\n"
         "manifest 0202030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20\n"
         "seed 42\n"
         + std::string(combatBody));

@@ -302,19 +302,18 @@ entries, and 1–1,000,000,000 ticks per timing value. Initial weather must be
 eligible. Region transitions and RNG are durable. V1–V3 reject. See
 [`world_content.cpp`](../../apps/tes3mp-server/world_content.cpp).
 
-## Combat V6
+## Combat V7
 
 Configured optionally by `combat_content_file`; combat also requires actor,
 inventory, collision, and historical-contact composition. The catalog contains
 one deterministic seed; exactly one settings record, progression profile, and
 player template; one combat state per actor; an optional complete actor-attack
 set; and zero or more melee weapon or armor profiles keyed by inventory
-prototype ID. V6 also carries the bounded direct-magic subset used during
-melee contact: on-strike enchantments, equipped constant defenses and elemental
-shields, and actor-carried common or blight diseases.
+prototype ID. V7 carries bounded direct magic for melee and traps: on-strike
+enchantments, equipped defenses/shields, actor diseases, and trapped-object effects.
 
 ```text
-TES3MP_COMBAT_V6
+TES3MP_COMBAT_V7
 manifest <64-lowercase-hex-digits>
 seed <unsigned-64-bit>
 settings <12-finite-OpenMW-melee-values> <fatigue-base> <fatigue-multiplier> <fatigue-return-base> <fatigue-return-multiplier> <endurance-fatigue-multiplier> <difficulty-multiplier> <block-left-angle> <block-right-angle> <swing-block-multiplier> <swing-block-base> <block-still-bonus> <block-minimum-chance> <block-maximum-chance> <fatigue-block-base> <fatigue-block-multiplier> <weapon-fatigue-block-multiplier> <base-armor-skill> <unarmored-base-1> <unarmored-base-2> <armor-minimum-damage-multiplier> <unarmed-creature-wears-armor-0-or-1> <redistribute-missing-shield-hit-0-or-1>
@@ -330,6 +329,7 @@ armor <prototype-id> <light-0-medium-1-heavy-2> <base-armor>
 enchantment <weapon-prototype-id> <charge-cost> <effect-count> [<self-or-other> <fire-or-shock-or-frost-or-poison-or-health-or-fatigue> <minimum> <maximum>]...
 equipment_magic <prototype-id> <zero> <zero> <fire-resist> <shock-resist> <frost-resist> <poison-resist> <common-disease-resist> <blight-disease-resist> <fire-shield> <shock-shield> <frost-shield>
 disease <actor-id> <spell-record-id> <common-or-blight> <effect-count> [<other> <fire-or-shock-or-frost-or-poison-or-health-or-fatigue> <minimum> <maximum>]...
+trap <trap-id> <effect-count> [<other> <fire-or-shock-or-frost-or-poison-or-health-or-fatigue> <minimum> <maximum>]...
 ```
 
 The actor set must exactly match Actors V1. Every weapon must be a conditioned,
@@ -363,6 +363,8 @@ canonical charge; charge, wear, melee damage, magic damage, retaliation, death,
 and revisions commit together. Equipped magic may supply only resistances and
 the three elemental shields. Disease entries are unique per actor, transfer by
 the server PRNG and configured resistance-aware chance, and apply at most once
-per player. General casting, durations, area effects, summons, attribute/skill
-effects, dispelling, and scripted effects are outside V6 and fail content
+per player. Unique trap entries exactly cover Interactive objects V1 trap IDs.
+Effects, defenses, RNG, damage/death/revision, and disarm commit together. General casting,
+durations, area effects, summons, attribute/skill effects, dispelling, and
+scripted effects are outside V7 and fail content
 validation instead of being approximated.
