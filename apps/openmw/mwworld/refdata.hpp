@@ -99,6 +99,10 @@ namespace MWWorld
         // Unlike the stock copy constructor, this preserves activation flags.
         RefData copyForContainerTransfer() const;
 
+        // Compare owned transfer values without consuming activation flags, sharing
+        // scene nodes, cloning custom data or invoking script services.
+        bool matchesContainerTransferState(const RefData& other) const;
+
         /// Return base node (can be a null pointer).
         SceneUtil::PositionAttitudeTransform* getBaseNode();
 

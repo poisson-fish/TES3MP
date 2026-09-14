@@ -111,6 +111,28 @@ namespace MWWorld
         int mStackCount = 0;
     };
 
+    // Owned source decision only. No saved inventory Ptr/iterator, removal effects
+    // or installation API. The private witness is detached even for full removal.
+    class PreparedContainerRemove
+    {
+    public:
+        ESM::RefNum getItemIdentity() const { return mItemIdentity; }
+        int getCount() const { return mCount; }
+        int getRemainingCount() const { return mRemainingCount; }
+
+    private:
+        friend class ContainerStore;
+        std::unique_ptr<LiveCellRef<ESM::Miscellaneous>> mItemState;
+        const ContainerStore* mSource = nullptr;
+        const WorldModel* mWorldModel = nullptr;
+        const LiveCellRefBase* mItemReference = nullptr; // Compared only.
+        const LiveCellRefBase* mOwnerReference = nullptr; // Compared only.
+        ESM::RefNum mItemIdentity, mOwnerIdentity;
+        CellStore* mOwnerCell = nullptr;
+        int mCount = 0;
+        int mRemainingCount = 0;
+    };
+
     template <class PtrType>
     class ContainerStoreIteratorBase;
 
@@ -374,6 +396,14 @@ namespace MWWorld
     private:
         ContainerStoreIterator addImp(const ConstPtr& ptr, int count, const ESMStore& store);
         void validateTransferCount(const ConstPtr& item, int count) const;
+        void validateTransferSource(const ConstPtr& item, int count, const WorldModel& worldModel) const;
+        struct ItemRemoval
+        {
+            int mRemoved;
+            int mRemainingCount;
+            bool mFullRemoval;
+        };
+        static ItemRemoval prepareRemoveCount(const CellRef& item, int count);
         ContainerStoreIterator addWithContext(
             const ConstPtr& ptr, int count, const ContainerStoreAddContext& context, bool resolve);
         int removeWithContext(const Ptr& item, int count, const ContainerStoreRemoveContext& context, bool resolve);
@@ -479,6 +509,18 @@ namespace MWWorld
         // Does not validate source state, script/effect intents, or durability.
         void validateTransferStacking(
             const PreparedContainerAdd& prepared, const ContainerStoreAddContext& context) const;
+
+        // Plain non-gold MISC only; scripts/Lua/custom state and equipment reject.
+        // Uses stock removal counts without applying them, including zero. These
+        // independent decisions do not bind destination state or detached add values.
+        PreparedContainerRemove prepareTransferRemove(
+            const ConstPtr& item, int count, const ConstPtr& sourceOwner, const WorldModel& worldModel) const;
+
+        // Current-state validation, not a mutation-history or atomic-transfer check.
+        // Source store, content, world model and owner/cell must remain alive; source
+        // inventory nodes may be destroyed/replaced. Only current members are read.
+        void validateTransferRemoval(const PreparedContainerRemove& prepared, const ConstPtr& sourceOwner,
+            const WorldModel& worldModel) const;
 
         int remove(const ESM::RefId& itemId, int count, bool equipReplacement = 0, bool resolve = true);
         ///< Remove \a count item(s) designated by \a itemId from this container.

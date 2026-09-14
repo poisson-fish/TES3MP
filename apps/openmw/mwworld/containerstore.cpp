@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <limits>
 #include <stdexcept>
+#include <tuple>
 
 #include <components/debug/debuglog.hpp>
 #include <components/esm3/inventorystate.hpp>
@@ -34,6 +35,28 @@
 
 namespace
 {
+    std::unique_ptr<MWWorld::LiveCellRef<ESM::Miscellaneous>> copyContainerTransferItem(const MWWorld::ConstPtr& item)
+    {
+        auto data = item.getRefData().copyForContainerTransfer();
+        // Never copy LiveCellRefBase: even its destructor would retain a live
+        // WorldModel link. Copy only values into a fresh unregistered reference.
+        auto prepared = std::make_unique<MWWorld::LiveCellRef<ESM::Miscellaneous>>(
+            ESM::makeBlankCellRef(), item.get<ESM::Miscellaneous>()->mBase);
+        prepared->mRef = item.getCellRef();
+        prepared->mRef.unsetRefNum();
+        prepared->mData = std::move(data);
+        return prepared;
+    }
+
+    auto miscTransferValues(const MWWorld::CellRef& ref)
+    {
+        // Identity is checked separately. These are owned MISC values, including
+        // ownership fields that destination normalization would later reset.
+        return std::tuple{ ref.getRefId(), ref.getCount(false), ref.getSoul(), ref.getCharge(),
+            ref.getChargeIntRemainder(), ref.getEnchantmentCharge(), ref.getOwner(), ref.getGlobalVariable(),
+            ref.getFaction(), ref.getFactionRank(), ref.getScale(), ref.getPosition() };
+    }
+
     void addScripts(MWWorld::ContainerStore& store, MWWorld::CellStore* cell)
     {
         auto& scripts = MWBase::Environment::get().getWorld()->getLocalScripts();
@@ -476,6 +499,17 @@ std::unique_ptr<MWWorld::LiveCellRef<ESM::Miscellaneous>> MWWorld::ContainerStor
     destination.validateExplicitOwner(destinationOwner, worldModel);
     if (this == &destination || sourceOwner == destinationOwner)
         throw std::invalid_argument("Container transfer preparation requires two distinct owners and stores");
+    validateTransferSource(item, count, worldModel);
+    destination.validateTransferCount(item, count);
+
+    auto prepared = copyContainerTransferItem(item);
+    prepared->mRef.setCount(count); // Strictly positive: no global zero-count cleanup.
+    return prepared;
+}
+
+void MWWorld::ContainerStore::validateTransferSource(
+    const ConstPtr& item, int count, const WorldModel& worldModel) const
+{
     if (count <= 0)
         throw std::invalid_argument("Container transfer preparation count must be positive");
     if (item.isEmpty() || item.getContainerStore() != this || std::find(begin(), end(), item) == end()
@@ -491,19 +525,60 @@ std::unique_ptr<MWWorld::LiveCellRef<ESM::Miscellaneous>> MWWorld::ContainerStor
         throw std::logic_error("Container transfer preparation currently requires non-gold MISC");
     if (item.getRefData().getLocals().getScriptId() != item.getClass().getScript(item))
         throw std::logic_error("Container transfer preparation requires matching initialized script locals");
+}
 
-    destination.validateTransferCount(item, count);
+MWWorld::PreparedContainerRemove MWWorld::ContainerStore::prepareTransferRemove(
+    const ConstPtr& item, int count, const ConstPtr& sourceOwner, const WorldModel& worldModel) const
+{
+    validateExplicitOwner(sourceOwner, worldModel);
+    if (getPtr(worldModel).mCell != sourceOwner.mCell)
+        throw std::invalid_argument("Container removal preparation owner cell mismatch");
+    validateTransferSource(item, count, worldModel);
+    if (!item.getClass().getScript(item).empty())
+        throw std::logic_error("Container removal preparation excludes scripted source effects");
 
-    auto data = item.getRefData().copyForContainerTransfer();
-    // Never copy LiveCellRefBase: even its destructor would retain a live WorldModel
-    // link. CellRef is value state; give the fresh instance no registry identity.
-    auto prepared = std::make_unique<LiveCellRef<ESM::Miscellaneous>>(
-        ESM::makeBlankCellRef(), item.get<ESM::Miscellaneous>()->mBase);
-    prepared->mRef = item.getCellRef();
-    prepared->mRef.unsetRefNum();
-    prepared->mRef.setCount(count); // Strictly positive: no global zero-count cleanup.
-    prepared->mData = std::move(data);
+    PreparedContainerRemove prepared;
+    prepared.mSource = this;
+    prepared.mWorldModel = &worldModel;
+    prepared.mItemReference = item.mRef;
+    prepared.mItemIdentity = item.getCellRef().getRefNum();
+    prepared.mOwnerReference = sourceOwner.mRef;
+    prepared.mOwnerIdentity = getPtr(worldModel).getCellRef().getRefNum();
+    prepared.mOwnerCell = getPtr(worldModel).mCell;
+    prepared.mCount = count;
+    prepared.mRemainingCount = prepareRemoveCount(item.getCellRef(), count).mRemainingCount;
+    // Keep the original signed count in the witness. In particular, never apply
+    // a full-removal zero through CellRef::setCount (which cleans live scripts).
+    prepared.mItemState = copyContainerTransferItem(item);
     return prepared;
+}
+
+void MWWorld::ContainerStore::validateTransferRemoval(
+    const PreparedContainerRemove& prepared, const ConstPtr& sourceOwner, const WorldModel& worldModel) const
+{
+    validateExplicitOwner(sourceOwner, worldModel);
+    const auto owner = worldModel.getPtr(prepared.mOwnerIdentity);
+    if (prepared.mSource != this || prepared.mWorldModel != &worldModel || !prepared.mItemState || owner.isEmpty()
+        || owner != sourceOwner || owner.mRef != prepared.mOwnerReference || owner.mCell != prepared.mOwnerCell
+        || sourceOwner.mCell != prepared.mOwnerCell)
+        throw std::invalid_argument("Container removal preparation source context changed");
+
+    for (const auto& ref : mLists.mMiscItems.mList)
+    {
+        // Only current list members may be dereferenced. Neither a stale caller
+        // Ptr nor a saved list iterator can establish that a node is still alive.
+        if (&ref != prepared.mItemReference || ref.mRef.getRefNum() != prepared.mItemIdentity)
+            continue;
+        const auto registered = worldModel.getPtr(prepared.mItemIdentity);
+        const auto& saved = *prepared.mItemState;
+        if (ref.mWorldModel != &worldModel || registered.mRef != &ref || registered.mContainerStore != this
+            || ref.mBase != saved.mBase || !ref.mBase->mScript.empty() || ref.isDeleted()
+            || miscTransferValues(ref.mRef) != miscTransferValues(saved.mRef)
+            || !ref.mData.matchesContainerTransferState(saved.mData))
+            throw std::invalid_argument("Container removal preparation source state changed");
+        return;
+    }
+    throw std::invalid_argument("Container removal preparation source membership changed");
 }
 
 void MWWorld::ContainerStore::validateTransferCount(const ConstPtr& item, int count) const
@@ -939,38 +1014,38 @@ int MWWorld::ContainerStore::remove(const Ptr& item, int count, const ContainerS
     return removeWithContext(item, count, context, true);
 }
 
+MWWorld::ContainerStore::ItemRemoval MWWorld::ContainerStore::prepareRemoveCount(const CellRef& item, int count)
+{
+    const int available = item.getCount();
+    if (available <= count)
+        return { available, 0, true };
+    return { count, subtractItems(item.getCount(false), count), false };
+}
+
 int MWWorld::ContainerStore::removeWithContext(
     const Ptr& item, int count, const ContainerStoreRemoveContext& context, bool resolveFirst)
 {
     if (resolveFirst)
         resolve(context.mContainer);
 
-    int toRemove = count;
     CellRef& itemRef = item.getCellRef();
-
-    if (itemRef.getCount() <= toRemove)
+    const auto removal = prepareRemoveCount(itemRef, count);
+    itemRef.setCount(removal.mRemainingCount, context.mLocalScripts);
+    if (removal.mFullRemoval)
     {
-        toRemove -= itemRef.getCount();
-        itemRef.setCount(0, context.mLocalScripts);
-
         if (mSelectedEnchantItem != end() && *mSelectedEnchantItem == item)
             mSelectedEnchantItem = end();
-    }
-    else
-    {
-        itemRef.setCount(subtractItems(itemRef.getCount(false), toRemove), context.mLocalScripts);
-        toRemove = 0;
     }
 
     flagAsModified();
 
     // we should not fire event for InventoryStore yet - it has some custom logic
     if (mListener && typeid(*this) == typeid(ContainerStore))
-        mListener->itemRemoved(item, count - toRemove);
+        mListener->itemRemoved(item, removal.mRemoved);
     context.mInventoryUpdated(context.mContainer);
 
     // number of removed items
-    return count - toRemove;
+    return removal.mRemoved;
 }
 
 void MWWorld::ContainerStore::fill(const ESM::InventoryList& items, const ESM::RefId& owner, Misc::Rng::Generator& prng)

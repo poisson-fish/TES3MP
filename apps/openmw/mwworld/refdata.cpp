@@ -1,5 +1,6 @@
 #include "refdata.hpp"
 
+#include <algorithm>
 #include <stdexcept>
 
 #include <components/esm3/objectstate.hpp>
@@ -202,6 +203,23 @@ namespace MWWorld
         result.mPhysicsPostponed = mPhysicsPostponed;
         result.mChanged = mChanged;
         return result;
+    }
+
+    bool RefData::matchesContainerTransferState(const RefData& other) const
+    {
+        const auto& a = mLocals;
+        const auto& b = other.mLocals;
+        return !mLuaScripts && !other.mLuaScripts && !mCustomData && !other.mCustomData
+            && a.getScriptId() == b.getScriptId() && a.isEmpty() == b.isEmpty() && a.mShorts == b.mShorts
+            && a.mLongs == b.mLongs && a.mFloats == b.mFloats && mPosition == other.mPosition && mFlags == other.mFlags
+            && mDeletedByContentFile == other.mDeletedByContentFile && mEnabled == other.mEnabled
+            && mPhysicsPostponed == other.mPhysicsPostponed && mChanged == other.mChanged
+            && std::equal(mAnimationState.mScriptedAnims.begin(), mAnimationState.mScriptedAnims.end(),
+                other.mAnimationState.mScriptedAnims.begin(), other.mAnimationState.mScriptedAnims.end(),
+                [](const auto& left, const auto& right) {
+                    return left.mGroup == right.mGroup && left.mTime == right.mTime && left.mAbsolute == right.mAbsolute
+                        && left.mLoopCount == right.mLoopCount;
+                });
     }
 
     void RefData::setBaseNode(osg::ref_ptr<SceneUtil::PositionAttitudeTransform> base)
