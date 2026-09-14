@@ -458,7 +458,7 @@ void MWWorld::ContainerStore::setPtr(const Ptr& ptr, const WorldModel& worldMode
     mPtr = SafePtr(ptr.getCellRef().getRefNum());
 }
 
-void MWWorld::ContainerStore::validateExplicitOwner(const Ptr& owner, const WorldModel& worldModel) const
+void MWWorld::ContainerStore::validateExplicitOwner(const ConstPtr& owner, const WorldModel& worldModel) const
 {
     if (typeid(*this) != typeid(ContainerStore))
         throw std::logic_error("Explicit context does not yet support InventoryStore or other derived stores");
@@ -466,6 +466,51 @@ void MWWorld::ContainerStore::validateExplicitOwner(const Ptr& owner, const Worl
         throw std::logic_error("Explicit context does not yet support unresolved container contents");
     if (owner.isEmpty() || getPtr(worldModel) != owner)
         throw std::invalid_argument("Explicit container owner mismatch");
+}
+
+std::unique_ptr<MWWorld::LiveCellRef<ESM::Miscellaneous>> MWWorld::ContainerStore::prepareTransferItem(
+    const ConstPtr& item, int count, const ContainerStore& destination, const ConstPtr& sourceOwner,
+    const ConstPtr& destinationOwner, const WorldModel& worldModel) const
+{
+    validateExplicitOwner(sourceOwner, worldModel);
+    destination.validateExplicitOwner(destinationOwner, worldModel);
+    if (this == &destination || sourceOwner == destinationOwner)
+        throw std::invalid_argument("Container transfer preparation requires two distinct owners and stores");
+    if (count <= 0)
+        throw std::invalid_argument("Container transfer preparation count must be positive");
+    if (item.isEmpty() || item.getContainerStore() != this || std::find(begin(), end(), item) == end()
+        || item.mRef->isDeleted())
+        throw std::invalid_argument("Container transfer preparation item ownership mismatch");
+    const auto available = std::abs(static_cast<std::int64_t>(item.getCellRef().getCount(false)));
+    if (available > std::numeric_limits<int>::max() || count > available)
+        throw std::invalid_argument("Container transfer preparation item count is invalid");
+    if (item.mRef->mWorldModel != &worldModel || !item.getCellRef().getRefNum().isSet()
+        || worldModel.getPtr(item.getCellRef().getRefNum()) != item)
+        throw std::invalid_argument("Container transfer preparation item must be registered");
+    if (item.getType() != ESM::Miscellaneous::sRecordId || item.getClass().isGold(item))
+        throw std::logic_error("Container transfer preparation currently requires non-gold MISC");
+    if (item.getRefData().getLocals().getScriptId() != item.getClass().getScript(item))
+        throw std::logic_error("Container transfer preparation requires matching initialized script locals");
+
+    std::int64_t total = count;
+    for (const auto& target : destination)
+        if (target.getCellRef().getRefId() == item.getCellRef().getRefId())
+        {
+            total += std::abs(static_cast<std::int64_t>(target.getCellRef().getCount(false)));
+            if (total > std::numeric_limits<int>::max())
+                throw std::invalid_argument("Container transfer preparation count would overflow inventory");
+        }
+
+    auto data = item.getRefData().copyForContainerTransfer();
+    // Never copy LiveCellRefBase: even its destructor would retain a live WorldModel
+    // link. CellRef is value state; give the fresh instance no registry identity.
+    auto prepared = std::make_unique<LiveCellRef<ESM::Miscellaneous>>(
+        ESM::makeBlankCellRef(), item.get<ESM::Miscellaneous>()->mBase);
+    prepared->mRef = item.getCellRef();
+    prepared->mRef.unsetRefNum();
+    prepared->mRef.setCount(count); // Strictly positive: no global zero-count cleanup.
+    prepared->mData = std::move(data);
+    return prepared;
 }
 
 MWWorld::ContainerStoreIterator MWWorld::ContainerStore::addWithContext(

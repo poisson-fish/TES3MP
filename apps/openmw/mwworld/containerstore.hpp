@@ -330,7 +330,7 @@ namespace MWWorld
         ContainerStoreIterator addWithContext(
             const ConstPtr& ptr, int count, const ContainerStoreAddContext& context, bool resolve);
         int removeWithContext(const Ptr& item, int count, const ContainerStoreRemoveContext& context, bool resolve);
-        void validateExplicitOwner(const Ptr& owner, const WorldModel& worldModel) const;
+        void validateExplicitOwner(const ConstPtr& owner, const WorldModel& worldModel) const;
         void resolve(const Ptr& container);
         void addInitialItem(
             const ESM::RefId& id, const ESM::RefId& owner, int count, Misc::Rng::Generator* prng, bool topLevel = true);
@@ -406,6 +406,16 @@ namespace MWWorld
         // Removes up to count, as in stock OpenMW. Empty/dead/foreign items reject.
         // Effects run synchronously after mutation; failure/transfer staging is separate work.
         int remove(const Ptr& item, int count, const ContainerStoreRemoveContext& context);
+
+        // Preparation only, for distinct registered owners of resolved base stores.
+        // Currently accepts non-gold MISC, including already initialized MWScript locals.
+        // Returns a fresh, unregistered reference with count items and no live store/cell
+        // or scene links. The ESM base record remains borrowed from the loaded store.
+        // No stacking, script registration/OnPCAdd, installation, or notifications occur.
+        // The caller owns this temporary until discarded; it is NOT a commit-ready transfer.
+        std::unique_ptr<LiveCellRef<ESM::Miscellaneous>> prepareTransferItem(const ConstPtr& item, int count,
+            const ContainerStore& destination, const ConstPtr& sourceOwner, const ConstPtr& destinationOwner,
+            const WorldModel& worldModel) const;
 
         int remove(const ESM::RefId& itemId, int count, bool equipReplacement = 0, bool resolve = true);
         ///< Remove \a count item(s) designated by \a itemId from this container.

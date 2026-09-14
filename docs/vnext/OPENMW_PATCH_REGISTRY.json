@@ -14,9 +14,9 @@
     },
     {
       "id": "M1-002",
-      "slice": "native scripted inventory initialization",
+      "slice": "native scripted inventory initialization and isolated item values",
       "owner": "OpenMW server runtime",
-      "purpose": "Pass the actual script manager into shared compiler-derived locals, reference initialization, and local/global registration while preserving stock Environment wrappers and inherited global locals.",
+      "purpose": "Pass an explicit script manager into shared locals and registration; prepare owned RefData values and MWScript locals without scene/Lua aliases or arbitrary custom-state cloning, preserving stock copies and wrappers.",
       "paths": [
         "apps/openmw/mwscript/globalscripts.cpp",
         "apps/openmw/mwscript/globalscripts.hpp",
@@ -27,15 +27,15 @@
         "apps/openmw/mwworld/refdata.cpp",
         "apps/openmw/mwworld/refdata.hpp"
       ],
-      "tests": ["tes3mp_native_loadout_tests inventory-scripted", "tes3mp_native_loadout_tests inventory-rejection"],
+      "tests": ["tes3mp_native_loadout_tests inventory-scripted", "tes3mp_native_loadout_tests inventory-rejection", "tes3mp_native_loadout_tests inventory-transfer-preparation"],
       "disposition": "local shared engine extraction; no upstream contact authorized",
       "removal_condition": "OpenMW supplies equivalent explicit script service interfaces for locals and registration"
     },
     {
       "id": "M1-001",
-      "slice": "native inventory runtime seam and M2 owner-bound removal",
+      "slice": "native inventory runtime seam and M2 owner-bound preparation",
       "owner": "OpenMW server runtime",
-      "purpose": "Share ContainerStore add, stacking, and removal with explicit content/player/registry/script/owner/presentation dependencies, including CellRef zero-count script cleanup; validate resolved base-store owners and counts and retain stock equipment dispatch.",
+      "purpose": "Share explicit-context ContainerStore add/remove and zero-count script cleanup; validate resolved owners and prepare fresh unregistered MISC state between two base stores without installing or publishing a transfer. Retain stock equipment dispatch.",
       "paths": [
         "apps/openmw/mwworld/cellref.cpp",
         "apps/openmw/mwworld/cellref.hpp",
@@ -46,7 +46,7 @@
         "apps/openmw/mwworld/worldmodel.cpp",
         "apps/openmw/mwworld/worldmodel.hpp"
       ],
-      "tests": ["tes3mp_native_loadout_tests inventory-plain", "tes3mp_native_loadout_tests inventory-scripted", "tes3mp_native_loadout_tests inventory-rejection", "tes3mp_native_loadout_tests inventory-two-owners"],
+      "tests": ["tes3mp_native_loadout_tests inventory-plain", "tes3mp_native_loadout_tests inventory-scripted", "tes3mp_native_loadout_tests inventory-rejection", "tes3mp_native_loadout_tests inventory-two-owners", "tes3mp_native_loadout_tests inventory-transfer-preparation"],
       "disposition": "local shared engine extraction; no upstream contact authorized",
       "removal_condition": "OpenMW supplies equivalent explicit inventory operation and headless registry composition interfaces"
     },

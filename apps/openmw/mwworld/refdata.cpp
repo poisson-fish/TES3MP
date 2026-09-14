@@ -1,5 +1,7 @@
 #include "refdata.hpp"
 
+#include <stdexcept>
+
 #include <components/esm3/objectstate.hpp>
 #include <components/esm4/loadachr.hpp>
 #include <components/esm4/loadrefr.hpp>
@@ -182,6 +184,25 @@ namespace MWWorld
 
     RefData::RefData(RefData&& other) = default;
     RefData& RefData::operator=(RefData&& other) = default;
+
+    RefData RefData::copyForContainerTransfer() const
+    {
+        if (mLuaScripts || mCustomData)
+            throw std::logic_error("Container transfer preparation does not yet support Lua or custom state");
+
+        // Do not call copy(): it shares mutable scene/Lua objects and invokes arbitrary
+        // CustomData::clone implementations. Only these owned values may cross the seam.
+        RefData result;
+        result.mLocals = mLocals; // Locals owns its short/long/float vectors and script identity.
+        result.mPosition = mPosition;
+        result.mAnimationState = mAnimationState;
+        result.mFlags = mFlags;
+        result.mDeletedByContentFile = mDeletedByContentFile;
+        result.mEnabled = mEnabled;
+        result.mPhysicsPostponed = mPhysicsPostponed;
+        result.mChanged = mChanged;
+        return result;
+    }
 
     void RefData::setBaseNode(osg::ref_ptr<SceneUtil::PositionAttitudeTransform> base)
     {

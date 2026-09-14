@@ -5,10 +5,13 @@
 #include <functional>
 #include <iostream>
 #include <limits>
+#include <map>
 #include <set>
 #include <sstream>
 #include <stdexcept>
 #include <tuple>
+
+#include <osg/observer_ptr>
 
 #include <apps/openmw/mwclass/classes.hpp>
 #include <apps/openmw/mwmechanics/spellutil.hpp>
@@ -27,6 +30,7 @@
 #include <components/esm3/formatversion.hpp>
 #include <components/esm3/loadcont.hpp>
 #include <components/files/conversion.hpp>
+#include <components/sceneutil/positionattitudetransform.hpp>
 
 namespace
 {
@@ -364,7 +368,288 @@ namespace
         }
     }
 
-    void checkInventoryOwners(const TES3MP::Native::Loadout& loadout)
+    void checkInventoryPreparation(MWWorld::ContainerStore& a, MWWorld::ContainerStore& b,
+        const MWWorld::ContainerStoreAddContext& addA, const MWWorld::ContainerStoreAddContext& addB,
+        MWWorld::LocalScripts& localScripts, const std::function<std::pair<size_t, size_t>()>& notificationCounts)
+    {
+        const auto& store = addA.mStore;
+        auto& worldModel = addA.mWorldModel;
+        const auto scriptId = ESM::RefId::stringRefId("native_script");
+        Compiler::Extensions extensions;
+        Compiler::registerExtensions(extensions);
+        MWScript::CompilerContext compilerContext(MWScript::CompilerContext::Type_Full);
+        compilerContext.setExtensions(&extensions);
+        MWScript::ScriptManager scripts(store, compilerContext, 1);
+        auto scriptedAddA = addA;
+        auto scriptedAddB = addB;
+        for (auto* context : { &scriptedAddA, &scriptedAddB })
+        {
+            context->mLocalScripts = &localScripts;
+            context->mScriptManager = &scripts;
+        }
+        MWWorld::ManualRef plain(store, ESM::RefId::stringRefId("native_plain"));
+        MWWorld::ManualRef scripted(store, ESM::RefId::stringRefId("native_scripted"));
+        const auto plainA = a.add(plain.getPtr(), 4, addA);
+        const auto plainB = b.add(plain.getPtr(), 7, addB);
+        const auto scriptA = a.add(scripted.getPtr(), 3, scriptedAddA);
+        const auto scriptB = b.add(scripted.getPtr(), 2, scriptedAddB);
+        plainA->getCellRef().setCount(-4); // Preparation must preserve the live restocking count.
+        a.setSelectedEnchantItem(scriptA);
+        b.setSelectedEnchantItem(scriptB);
+        const std::vector<MWWorld::Ptr> live{ *plainA, *plainB, *scriptA, *scriptB };
+        for (size_t i = 0; i < live.size(); ++i)
+        {
+            auto& ref = live[i].getCellRef();
+            ref.setSoul(ESM::RefId::stringRefId("test_soul_" + std::to_string(i)));
+            ref.setCharge(51 + static_cast<int>(i));
+            ref.setChargeIntRemainder(0.25f);
+            ref.setEnchantmentCharge(12.5f + i);
+            ref.setOwner(ESM::RefId::stringRefId("test_owner"));
+            ref.setFaction(ESM::RefId::stringRefId("test_faction"));
+            ref.setFactionRank(4);
+            ref.setScale(0.75f);
+            ESM::Position position{ { 1.f + static_cast<float>(i), 2.f, 3.f }, { .1f, .2f, .3f } };
+            ref.setPosition(position);
+            auto& data = live[i].getRefData();
+            position.pos[0] += 20;
+            data.setPosition(position);
+            data.disable();
+            data.mPhysicsPostponed = true;
+            data.getAnimationState().mScriptedAnims.emplace_back();
+            auto& animation = data.getAnimationState().mScriptedAnims.back();
+            animation.mGroup = "owned animation group with heap storage";
+            animation.mTime = 3.5f;
+            animation.mAbsolute = true;
+            animation.mLoopCount = 7;
+            // The source may carry a scene node; preparation must never share it.
+            data.setBaseNode(new SceneUtil::PositionAttitudeTransform);
+            data.onActivate();
+            require(!data.activate(), "fixture did not buffer activation");
+        }
+        for (auto item : { *scriptA, *scriptB })
+        {
+            auto& locals = item.getRefData().getLocals();
+            require(locals.mShorts.size() == 1 && locals.mLongs.size() == 1 && locals.mFloats.size() == 1,
+                "preparation fixture script locals were not initialized");
+            locals.mShorts[0] = 0; // Preparation must not run OnPCAdd again.
+            locals.mLongs[0] = item == *scriptA ? 123 : 456;
+            locals.mFloats[0] = item == *scriptA ? 1.25f : 2.5f;
+        }
+        const auto values = [](const MWWorld::ConstPtr& item) {
+            const auto& ref = item.getCellRef();
+            const auto& data = item.getRefData();
+            const auto& locals = data.getLocals();
+            std::vector<std::tuple<std::string, float, bool, uint64_t>> animations;
+            for (const auto& animation : data.getAnimationState().mScriptedAnims)
+                animations.emplace_back(animation.mGroup, animation.mTime, animation.mAbsolute, animation.mLoopCount);
+            return std::tuple{ ref.getRefId(), ref.getSoul(), ref.getCharge(), ref.getChargeIntRemainder(),
+                ref.getEnchantmentCharge(), ref.getOwner(), ref.getGlobalVariable(), ref.getFaction(),
+                ref.getFactionRank(), ref.getScale(), ref.getPosition(), ref.hasChanged(), data.getPosition(),
+                data.isEnabled(), data.isDeletedByContentFile(), data.mPhysicsPostponed, data.hasChanged(),
+                locals.getScriptId(), locals.mShorts, locals.mLongs, locals.mFloats, animations };
+        };
+        const auto itemSnapshot = [&](const MWWorld::Ptr& item) {
+            const auto& data = item.getRefData();
+            const auto& locals = data.getLocals();
+            return std::tuple{ values(item), item.mRef, item.mCell, item.mContainerStore, item.mRef->mWorldModel,
+                item.get<ESM::Miscellaneous>()->mBase, item.getCellRef().getRefNum(), item.getCellRef().getCount(false),
+                data.getBaseNode(), data.getBaseNode()->referenceCount(), data.getLuaScripts(), data.getCustomData(),
+                locals.mShorts.data(), locals.mLongs.data(), locals.mFloats.data(),
+                data.getAnimationState().mScriptedAnims.data() };
+        };
+        const auto snapshot = [&] {
+            std::vector<decltype(itemSnapshot(live.front()))> inventoryA, inventoryB;
+            for (auto item : a)
+                inventoryA.push_back(itemSnapshot(item));
+            for (auto item : b)
+                inventoryB.push_back(itemSnapshot(item));
+            std::map<ESM::RefNum, std::tuple<MWWorld::LiveCellRefBase*, MWWorld::CellStore*, MWWorld::ContainerStore*>>
+                registry;
+            for (const auto& [id, ptr] : worldModel.getPtrRegistryView())
+                registry.emplace(id, std::tuple{ ptr.mRef, ptr.mCell, ptr.mContainerStore });
+            return std::tuple{ inventoryA, inventoryB, registry, worldModel.getPtrRegistryRevision(),
+                worldModel.getLastGeneratedRefNum(), a.getWeight(), b.getWeight(), a.getPtr(worldModel),
+                b.getPtr(worldModel), a.isResolved(), b.isResolved(), a.getSelectedEnchantItem(),
+                b.getSelectedEnchantItem(), a.getContListener(), b.getContListener(), notificationCounts() };
+        };
+        const auto startScripts = [&] {
+            localScripts.startIteration();
+            std::pair<ESM::RefId, MWWorld::Ptr> entry;
+            require(localScripts.getNext(entry) && entry == std::pair(scriptId, *scriptA)
+                    && entry.second.mCell == nullptr && entry.second.mContainerStore == &a,
+                "live script order changed before preparation");
+        };
+        const auto unchangedScripts = [&] {
+            std::pair<ESM::RefId, MWWorld::Ptr> entry;
+            require(localScripts.isRunning(scriptId, *scriptA) && localScripts.isRunning(scriptId, *scriptB)
+                    && localScripts.getNext(entry) && entry == std::pair(scriptId, *scriptB)
+                    && entry.second.mCell == nullptr && entry.second.mContainerStore == &b
+                    && !localScripts.getNext(entry),
+                "preparation changed live script membership or iteration cursor");
+        };
+        const auto prepare = [&](const MWWorld::Ptr& item) {
+            const bool fromA = item.mContainerStore == &a;
+            return (fromA ? a : b)
+                .prepareTransferItem(item, 2, fromA ? b : a, fromA ? addA.mContainer : addB.mContainer,
+                    fromA ? addB.mContainer : addA.mContainer, worldModel);
+        };
+        // This marker is owned only by the prepared RefData. Its destructor proves
+        // the entire temporary reference reaches cleanup during unwinding.
+        struct Lifetime final : MWWorld::CustomData
+        {
+            int& mAlive;
+            explicit Lifetime(int& alive)
+                : mAlive(alive)
+            {
+                ++mAlive;
+            }
+            ~Lifetime() override { --mAlive; }
+            std::unique_ptr<MWWorld::CustomData> clone() const override
+            {
+                throw std::logic_error("preparation must never clone arbitrary custom state");
+            }
+        };
+        struct PreparationFailure
+        {
+        };
+        for (const auto& item : live)
+        {
+            for (bool fail : { false, true })
+            {
+                const auto before = snapshot();
+                startScripts();
+                int alive = 0;
+                osg::observer_ptr<SceneUtil::PositionAttitudeTransform> temporaryNode;
+                bool caught = false;
+                try
+                {
+                    auto prepared = prepare(item);
+                    const MWWorld::Ptr temporary(prepared.get());
+                    require(temporary.mRef != item.mRef && temporary.mRef->mWorldModel == nullptr
+                            && !temporary.getCellRef().getRefNum().isSet() && temporary.mCell == nullptr
+                            && temporary.mContainerStore == nullptr && temporary.getRefData().getBaseNode() == nullptr
+                            && temporary.getRefData().getCustomData() == nullptr
+                            && temporary.getRefData().getLuaScripts() == nullptr
+                            && temporary.get<ESM::Miscellaneous>()->mBase == item.get<ESM::Miscellaneous>()->mBase
+                            && temporary.getCellRef().getCount(false) == 2 && values(temporary) == values(item),
+                        "prepared item lost value state or retained live links");
+                    require(!localScripts.isRunning(scriptId, temporary), "preparation registered a temporary script");
+                    auto& locals = temporary.getRefData().getLocals();
+                    const auto& sourceLocals = item.getRefData().getLocals();
+                    if (!locals.isEmpty())
+                    {
+                        require(locals.mShorts.data() != sourceLocals.mShorts.data()
+                                && locals.mLongs.data() != sourceLocals.mLongs.data()
+                                && locals.mFloats.data() != sourceLocals.mFloats.data(),
+                            "prepared locals alias live buffers");
+                        locals.mShorts[0] = 1;
+                        locals.mLongs[0] += 99;
+                        locals.mFloats[0] += 10;
+                        require(locals.setVar(*store.get<ESM::Script>().find(scriptId), "counter", 999, scripts),
+                            "prepared locals lost compiler identity");
+                    }
+                    auto& data = temporary.getRefData();
+                    require(data.activateByScript() && data.activate(), "preparation lost buffered activation flags");
+                    require(data.getAnimationState().mScriptedAnims.data()
+                            != item.getRefData().getAnimationState().mScriptedAnims.data(),
+                        "prepared animation aliases live state");
+                    data.getAnimationState().mScriptedAnims[0].mGroup = "temporary animation";
+                    data.getAnimationState().mScriptedAnims[0].mTime = 100;
+                    data.enable();
+                    data.mPhysicsPostponed = false;
+                    data.setPosition({});
+                    temporary.getCellRef().setSoul(ESM::RefId());
+                    temporary.getCellRef().setOwner(ESM::RefId());
+                    temporary.getCellRef().setCharge(1);
+                    temporary.getCellRef().setChargeIntRemainder(0);
+                    temporary.getCellRef().setEnchantmentCharge(0);
+                    temporary.getCellRef().setPosition({});
+                    // Also exercise cleanup of a zero-count temporary, using a private
+                    // LocalScripts collection rather than the live script registry.
+                    MWWorld::LocalScripts temporaryScripts(store);
+                    temporary.getCellRef().setCount(0, temporaryScripts);
+                    data.setCustomData(std::make_unique<Lifetime>(alive));
+                    data.setBaseNode(new SceneUtil::PositionAttitudeTransform);
+                    temporaryNode = data.getBaseNode();
+                    require(alive == 1 && temporaryNode.valid() && snapshot() == before,
+                        "mutating prepared item changed live inventory, registry or notifications");
+                    // Inject a failure in the remaining preparation work, while the
+                    // owned item and its mutated locals still exist. No install is attempted.
+                    if (fail)
+                        throw PreparationFailure{};
+                }
+                catch (const PreparationFailure&)
+                {
+                    caught = true;
+                }
+                require(caught == fail && alive == 0 && !temporaryNode.valid(),
+                    "failed or discarded preparation leaked temporary state");
+                require(snapshot() == before, "preparation cleanup changed live state or emitted success");
+                unchangedScripts();
+            }
+        }
+        const auto reject = [&](const auto& operation, std::string_view reason) {
+            const auto before = snapshot();
+            startScripts();
+            bool caught = false;
+            try
+            {
+                operation();
+            }
+            catch (const std::exception& error)
+            {
+                caught = true;
+                require(std::string_view(error.what()).find(reason) != std::string_view::npos,
+                    "unexpected preparation rejection reason");
+            }
+            require(caught && snapshot() == before, "preparation rejection changed live state");
+            unchangedScripts();
+        };
+        const auto attempt = [&](const MWWorld::ConstPtr& item, int count, const MWWorld::ContainerStore& from,
+                                 const MWWorld::ContainerStore& to) {
+            return from.prepareTransferItem(item, count, to, addA.mContainer, addB.mContainer, worldModel);
+        };
+        for (int count : { 0, -1, std::numeric_limits<int>::min(), 5 })
+            reject([&] { attempt(*plainA, count, a, b); }, "count");
+        reject([&] { attempt({}, 1, a, b); }, "ownership mismatch");
+        auto forged = *plainB;
+        forged.mContainerStore = &a;
+        reject([&] { attempt(forged, 1, a, b); }, "ownership mismatch");
+        reject([&] { a.prepareTransferItem(*plainA, 1, b, addB.mContainer, addA.mContainer, worldModel); },
+            "owner mismatch");
+        reject([&] { a.prepareTransferItem(*plainA, 1, a, addA.mContainer, addA.mContainer, worldModel); },
+            "distinct owners");
+        MWWorld::ContainerStore unresolved;
+        unresolved.setPtr(addB.mContainer, worldModel);
+        reject([&] { attempt(*plainA, 1, a, unresolved); }, "unresolved");
+        unresolved.setPtr(addA.mContainer, worldModel);
+        reject([&] { attempt(*plainA, 1, unresolved, b); }, "unresolved");
+        MWWorld::InventoryStore equipment;
+        reject([&] { attempt(*plainA, 1, a, equipment); }, "InventoryStore");
+        reject([&] { attempt(*plainA, 1, equipment, b); }, "InventoryStore");
+        require(
+            !unresolved.isResolved() && unresolved.begin() == unresolved.end() && equipment.begin() == equipment.end(),
+            "preparation touched an excluded store");
+        plainB->getCellRef().setCount(std::numeric_limits<int>::max());
+        reject([&] { prepare(*plainA); }, "overflow");
+        plainB->getCellRef().setCount(7);
+        worldModel.deregisterLiveCellRef(*plainA->mRef);
+        reject([&] { prepare(*plainA); }, "must be registered");
+        worldModel.registerPtr(*plainA);
+        auto savedLocals = scriptA->getRefData().getLocals();
+        scriptA->getRefData().getLocals() = {};
+        reject([&] { prepare(*scriptA); }, "initialized script locals");
+        scriptA->getRefData().getLocals() = std::move(savedLocals);
+        int customAlive = 0;
+        plainA->getRefData().setCustomData(std::make_unique<Lifetime>(customAlive));
+        reject([&] { prepare(*plainA); }, "Lua or custom state");
+        require(customAlive == 1, "rejection cloned or destroyed live custom state");
+        plainA->getRefData().setCustomData(nullptr);
+        for (auto item : live)
+            require(item.getRefData().onActivate(), "preparation disturbed live activation flags");
+    }
+
+    void checkInventoryOwners(const TES3MP::Native::Loadout& loadout, bool preparation = false)
     {
         MWClass::registerClasses();
         MWWorld::ESMStore store;
@@ -430,6 +715,12 @@ namespace
             nullptr, updated };
         const MWWorld::ContainerStoreRemoveContext removeA{ worldModel, ownerA.getPtr(), localScripts, updated };
         const MWWorld::ContainerStoreRemoveContext removeB{ worldModel, ownerB.getPtr(), localScripts, updated };
+        if (preparation)
+        {
+            checkInventoryPreparation(a, b, addA, addB, localScripts,
+                [&] { return std::pair(events.size(), notifications.size()); });
+            return;
+        }
         const auto success = [&](const MWWorld::Ptr& owner, const MWWorld::Ptr& item, int count, bool added) {
             require(events.size() == notifications.size() && !events.empty() && events.back().mOwner == owner
                     && events.back().mItem == item && events.back().mCount == count && events.back().mAdded == added
@@ -584,9 +875,9 @@ namespace
         auto options = TES3MP::Native::readLoadoutOptions(argc, argv);
         options.mContent.push_back("Inventory.esm");
         TES3MP::Native::Loadout loadout(options);
-        if (filter == "inventory-two-owners")
+        if (filter == "inventory-two-owners" || filter == "inventory-transfer-preparation")
         {
-            checkInventoryOwners(loadout);
+            checkInventoryOwners(loadout, filter == "inventory-transfer-preparation");
             return;
         }
         if (filter == "inventory-plain")

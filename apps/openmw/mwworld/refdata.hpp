@@ -94,6 +94,11 @@ namespace MWWorld
         RefData& operator=(const RefData& refData);
         RefData& operator=(RefData&& other);
 
+        // Owned value state for a detached container item. Scene nodes are omitted;
+        // Lua and class-specific state require their own staging and currently reject.
+        // Unlike the stock copy constructor, this preserves activation flags.
+        RefData copyForContainerTransfer() const;
+
         /// Return base node (can be a null pointer).
         SceneUtil::PositionAttitudeTransform* getBaseNode();
 
@@ -117,6 +122,7 @@ namespace MWWorld
         bool isDeletedByContentFile() const;
 
         MWScript::Locals& getLocals();
+        const MWScript::Locals& getLocals() const { return mLocals; }
 
         bool isEnabled() const;
 

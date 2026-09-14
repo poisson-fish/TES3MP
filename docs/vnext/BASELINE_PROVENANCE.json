@@ -307,12 +307,12 @@
     {
       "path": "apps/openmw/mwworld/containerstore.cpp",
       "status": "M",
-      "purpose": "Share inventory add, normalization, stacking, and removal with explicit store/player/registry/owner/presentation context; reject invalid counts, ownership, unresolved stores, and unavailable services before mutation."
+      "purpose": "Share explicit-context inventory add/remove and prepare isolated non-gold MISC state between resolved base-store owners without live mutation, registration, or publication."
     },
     {
       "path": "apps/openmw/mwworld/containerstore.hpp",
       "status": "M",
-      "purpose": "Declare operation-local inventory add/remove dependencies and registry-explicit owner access for resolved base ContainerStores, with actor equipment excluded."
+      "purpose": "Declare explicit inventory add/remove, registered owner access, and an owned detached-item preparation entry for resolved base stores; equipment and transfer installation remain excluded."
     },
     {
       "path": "apps/openmw/mwworld/inventorystore.cpp",
@@ -347,12 +347,12 @@
     {
       "path": "apps/openmw/mwworld/refdata.cpp",
       "status": "M",
-      "purpose": "Preserve the changed flag when initializing compiler-derived locals with an explicit script manager."
+      "purpose": "Initialize locals with an explicit script manager and copy owned container-item values and locals without sharing scene/Lua objects or invoking arbitrary CustomData clones."
     },
     {
       "path": "apps/openmw/mwworld/refdata.hpp",
       "status": "M",
-      "purpose": "Expose explicit-service reference local initialization."
+      "purpose": "Expose explicit-service local initialization, const local inspection, and isolated container-transfer value preparation."
     },
     {
       "path": "apps/openmw/mwworld/worldmodel.cpp",
