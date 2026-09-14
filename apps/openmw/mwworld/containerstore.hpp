@@ -111,18 +111,25 @@ namespace MWWorld
         int mStackCount = 0;
     };
 
-    // Owned source decision only. No saved inventory Ptr/iterator, removal effects
-    // or installation API. The private witness is detached even for full removal.
+    // Owned source decision and deferred deregistration only. No saved inventory
+    // Ptr/iterator or installation API. The witness stays detached for full removal.
     class PreparedContainerRemove
     {
     public:
         ESM::RefNum getItemIdentity() const { return mItemIdentity; }
         int getCount() const { return mCount; }
         int getRemainingCount() const { return mRemainingCount; }
+        const LocalScripts::Removal* getScriptRemoval() const
+        {
+            return mRemainingCount == 0 && mScriptState && mScriptState->hasRegistration() ? &*mScriptState : nullptr;
+        }
 
     private:
         friend class ContainerStore;
         std::unique_ptr<LiveCellRef<ESM::Miscellaneous>> mItemState;
+        // Partial removal also witnesses registration, but must preserve it.
+        std::optional<LocalScripts::Removal> mScriptState;
+        const LocalScripts* mLocalScripts = nullptr;
         const ContainerStore* mSource = nullptr;
         const WorldModel* mWorldModel = nullptr;
         const LiveCellRefBase* mItemReference = nullptr; // Compared only.
@@ -510,17 +517,20 @@ namespace MWWorld
         void validateTransferStacking(
             const PreparedContainerAdd& prepared, const ContainerStoreAddContext& context) const;
 
-        // Plain non-gold MISC only; scripts/Lua/custom state and equipment reject.
+        // Non-gold MISC with matching initialized MWScript locals. Scripted items
+        // require explicit LocalScripts; Lua/custom state and equipment reject.
         // Uses stock removal counts without applying them, including zero. These
         // independent decisions do not bind destination state or detached add values.
         PreparedContainerRemove prepareTransferRemove(
-            const ConstPtr& item, int count, const ConstPtr& sourceOwner, const WorldModel& worldModel) const;
+            const ConstPtr& item, int count, const ConstPtr& sourceOwner, const WorldModel& worldModel,
+            const LocalScripts* localScripts = nullptr) const;
 
         // Current-state validation, not a mutation-history or atomic-transfer check.
-        // Source store, content, world model and owner/cell must remain alive; source
-        // inventory nodes may be destroyed/replaced. Only current members are read.
+        // Source store, content, world model, LocalScripts and owner/cell must remain
+        // alive; inventory nodes/script entries may be destroyed. Only current
+        // members are read. Registration replacement rejects even at the same address.
         void validateTransferRemoval(const PreparedContainerRemove& prepared, const ConstPtr& sourceOwner,
-            const WorldModel& worldModel) const;
+            const WorldModel& worldModel, const LocalScripts* localScripts = nullptr) const;
 
         int remove(const ESM::RefId& itemId, int count, bool equipReplacement = 0, bool resolve = true);
         ///< Remove \a count item(s) designated by \a itemId from this container.

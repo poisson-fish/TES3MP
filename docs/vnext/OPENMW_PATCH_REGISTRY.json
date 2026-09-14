@@ -16,7 +16,7 @@
       "id": "M1-002",
       "slice": "native scripted inventory initialization and isolated item values",
       "owner": "OpenMW server runtime",
-      "purpose": "Share explicit-service locals initialization and script/cell registration intents; prepare and compare owned RefData values without scene/Lua aliases, consuming activation flags or arbitrary custom-state cloning, preserving stock copies, registration catches and iteration ordering.",
+      "purpose": "Share explicit-service locals initialization, add intents and immutable deregistration identities; validate registration presence/replacement with address-only lookup, preserving stock first-match removal, iterator repair and registration catches. Prepare and compare owned RefData without scene/Lua aliases, consuming activation flags or custom-state cloning.",
       "paths": [
         "apps/openmw/mwscript/globalscripts.cpp",
         "apps/openmw/mwscript/globalscripts.hpp",
@@ -35,7 +35,7 @@
       "id": "M1-001",
       "slice": "native inventory runtime seam and M2 source-removal/destination stacking preparation",
       "owner": "OpenMW server runtime",
-      "purpose": "Share explicit-context ContainerStore add/remove, first-stack selection, signed removal/count decisions, normalization and OnPCAdd ordering; prepare owned plain MISC source-removal witnesses and destination stacking/deferred effects, validating current inventory members without reading destroyed references or applying zero-count cleanup. No live installation or publication; retain stock equipment dispatch and safe raw-count iterator zero checks.",
+      "purpose": "Share explicit-context ContainerStore add/remove, first-stack selection, signed removal/count decisions, normalization and OnPCAdd ordering; prepare owned plain/initialized-MWScript MISC source-removal witnesses, deferred deregistration and destination stacking/add effects, validating current inventory members and script registration identity without reading destroyed references/iterators or applying zero-count cleanup. No live installation or publication; retain stock equipment dispatch and safe raw-count iterator zero checks.",
       "paths": [
         "apps/openmw/mwworld/cellref.cpp",
         "apps/openmw/mwworld/cellref.hpp",

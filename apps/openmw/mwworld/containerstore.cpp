@@ -528,14 +528,15 @@ void MWWorld::ContainerStore::validateTransferSource(
 }
 
 MWWorld::PreparedContainerRemove MWWorld::ContainerStore::prepareTransferRemove(
-    const ConstPtr& item, int count, const ConstPtr& sourceOwner, const WorldModel& worldModel) const
+    const ConstPtr& item, int count, const ConstPtr& sourceOwner, const WorldModel& worldModel,
+    const LocalScripts* localScripts) const
 {
     validateExplicitOwner(sourceOwner, worldModel);
     if (getPtr(worldModel).mCell != sourceOwner.mCell)
         throw std::invalid_argument("Container removal preparation owner cell mismatch");
     validateTransferSource(item, count, worldModel);
-    if (!item.getClass().getScript(item).empty())
-        throw std::logic_error("Container removal preparation excludes scripted source effects");
+    if (!item.getClass().getScript(item).empty() && !localScripts)
+        throw std::logic_error("Container removal preparation requires LocalScripts for scripted items");
 
     PreparedContainerRemove prepared;
     prepared.mSource = this;
@@ -550,17 +551,30 @@ MWWorld::PreparedContainerRemove MWWorld::ContainerStore::prepareTransferRemove(
     // Keep the original signed count in the witness. In particular, never apply
     // a full-removal zero through CellRef::setCount (which cleans live scripts).
     prepared.mItemState = copyContainerTransferItem(item);
+    if (localScripts)
+    {
+        prepared.mLocalScripts = localScripts;
+        // Zero-count cleanup uses this same first-match lookup even if no script
+        // is currently registered. Capture absence too, and bind partial removal
+        // to the registration it must preserve. No cursor is retained or read.
+        prepared.mScriptState = localScripts->prepareRemove(&item.getCellRef());
+        if (prepared.mScriptState->hasRegistration()
+            && (prepared.mScriptState->getScript() != item.getClass().getScript(item)
+                || prepared.mScriptState->getContainer() != this))
+            throw std::invalid_argument("Container removal preparation script registration mismatch");
+    }
     return prepared;
 }
 
 void MWWorld::ContainerStore::validateTransferRemoval(
-    const PreparedContainerRemove& prepared, const ConstPtr& sourceOwner, const WorldModel& worldModel) const
+    const PreparedContainerRemove& prepared, const ConstPtr& sourceOwner, const WorldModel& worldModel,
+    const LocalScripts* localScripts) const
 {
     validateExplicitOwner(sourceOwner, worldModel);
     const auto owner = worldModel.getPtr(prepared.mOwnerIdentity);
     if (prepared.mSource != this || prepared.mWorldModel != &worldModel || !prepared.mItemState || owner.isEmpty()
         || owner != sourceOwner || owner.mRef != prepared.mOwnerReference || owner.mCell != prepared.mOwnerCell
-        || sourceOwner.mCell != prepared.mOwnerCell)
+        || sourceOwner.mCell != prepared.mOwnerCell || localScripts != prepared.mLocalScripts)
         throw std::invalid_argument("Container removal preparation source context changed");
 
     for (const auto& ref : mLists.mMiscItems.mList)
@@ -572,10 +586,12 @@ void MWWorld::ContainerStore::validateTransferRemoval(
         const auto registered = worldModel.getPtr(prepared.mItemIdentity);
         const auto& saved = *prepared.mItemState;
         if (ref.mWorldModel != &worldModel || registered.mRef != &ref || registered.mContainerStore != this
-            || ref.mBase != saved.mBase || !ref.mBase->mScript.empty() || ref.isDeleted()
+            || ref.mBase != saved.mBase || ref.mBase->mScript != saved.mData.getLocals().getScriptId() || ref.isDeleted()
             || miscTransferValues(ref.mRef) != miscTransferValues(saved.mRef)
             || !ref.mData.matchesContainerTransferState(saved.mData))
             throw std::invalid_argument("Container removal preparation source state changed");
+        if (prepared.mScriptState)
+            localScripts->validateRemoval(*prepared.mScriptState, &ref.mRef);
         return;
     }
     throw std::invalid_argument("Container removal preparation source membership changed");

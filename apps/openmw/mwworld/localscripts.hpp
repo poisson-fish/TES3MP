@@ -2,6 +2,7 @@
 #define GAME_MWWORLD_LOCALSCRIPTS_H
 
 #include <list>
+#include <memory>
 #include <string>
 
 #include "ptr.hpp"
@@ -15,11 +16,49 @@ namespace MWWorld
     /// \brief List of active local scripts
     class LocalScripts
     {
-        std::list<std::pair<ESM::RefId, Ptr>> mScripts;
-        std::list<std::pair<ESM::RefId, Ptr>>::iterator mIter;
+        // Immutable, operation-shareable identity. It owns values, never a live
+        // reference or iterator; address keys are only compared during lookup.
+        struct ScriptRegistration
+        {
+            ESM::RefId mScript;
+            const CellRef* mReference;
+            CellStore* mCell;
+            ContainerStore* mContainer;
+        };
+        struct Entry
+        {
+            Ptr mItem;
+            std::shared_ptr<const ScriptRegistration> mRegistration;
+        };
+        using Scripts = std::list<Entry>;
+        Scripts mScripts;
+        Scripts::iterator mIter;
         const MWWorld::ESMStore& mStore;
 
+        Scripts::const_iterator find(const CellRef* ref) const;
+        void erase(Scripts::const_iterator iter);
+
     public:
+        // Read-only witness of stock remove's first match (including absence).
+        // Sharing the immutable registration prevents identity reuse after erase.
+        // No deregistration/installation API is exposed for this owned intent.
+        class Removal
+        {
+            friend class LocalScripts;
+            const LocalScripts* mScripts = nullptr;
+            const CellRef* mReference = nullptr;
+            std::shared_ptr<const ScriptRegistration> mRegistration;
+
+        public:
+            bool hasRegistration() const { return mRegistration != nullptr; }
+            ESM::RefId getScript() const { return mRegistration ? mRegistration->mScript : ESM::RefId(); }
+            CellStore* getCell() const { return mRegistration ? mRegistration->mCell : nullptr; }
+            ContainerStore* getContainer() const { return mRegistration ? mRegistration->mContainer : nullptr; }
+        };
+
+        Removal prepareRemove(const CellRef* ref) const;
+        void validateRemoval(const Removal& prepared, const CellRef* ref) const;
+
         // An operation-owned intent, with no item pointer or link to the live list.
         // The cell is borrowed and must outlive preparation and any later installation.
         struct Registration

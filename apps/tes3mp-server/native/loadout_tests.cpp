@@ -501,20 +501,30 @@ namespace
             return std::tuple{ inventories, registry, worldModel.getPtrRegistryRevision(),
                 worldModel.getLastGeneratedRefNum(), notificationCounts() };
         };
+        using ScriptEntry = std::tuple<ESM::RefId, MWWorld::LiveCellRefBase*, MWWorld::CellStore*,
+            MWWorld::ContainerStore*>;
+        const auto remainingScripts = [&] {
+            std::vector<ScriptEntry> result;
+            std::pair<ESM::RefId, MWWorld::Ptr> entry;
+            while (localScripts.getNext(entry))
+                result.emplace_back(entry.first, entry.second.mRef, entry.second.mCell, entry.second.mContainerStore);
+            return result;
+        };
+        std::vector<ScriptEntry> expectedScripts;
         const auto startScripts = [&] {
             localScripts.startIteration();
+            expectedScripts = remainingScripts();
+            localScripts.startIteration();
             std::pair<ESM::RefId, MWWorld::Ptr> entry;
-            require(localScripts.getNext(entry) && entry == std::pair(scriptId, *scriptA)
-                    && entry.second.mCell == nullptr && entry.second.mContainerStore == &a,
-                "live script order changed before preparation");
+            if (!expectedScripts.empty())
+                require(localScripts.getNext(entry), "script iteration fixture lost first entry");
         };
         const auto unchangedScripts = [&] {
-            std::pair<ESM::RefId, MWWorld::Ptr> entry;
-            require(localScripts.isRunning(scriptId, *scriptA) && localScripts.isRunning(scriptId, *scriptB)
-                    && localScripts.getNext(entry) && entry == std::pair(scriptId, *scriptB)
-                    && entry.second.mCell == addB.mContainer.mCell && entry.second.mContainerStore == &b
-                    && !localScripts.getNext(entry),
-                "preparation changed live script membership or iteration cursor");
+            const std::vector<ScriptEntry> tail(
+                expectedScripts.begin() + !expectedScripts.empty(), expectedScripts.end());
+            require(remainingScripts() == tail, "preparation changed live script iteration cursor");
+            localScripts.startIteration();
+            require(remainingScripts() == expectedScripts, "preparation changed live script membership or bindings");
         };
         const auto prepare = [&](const MWWorld::Ptr& item) {
             const bool fromA = item.mContainerStore == &a;
@@ -750,30 +760,48 @@ namespace
                 require(std::string_view(error.what()).find(reason) != std::string_view::npos,
                     "unexpected preparation rejection reason");
             }
-            require(caught && snapshot() == before, "preparation rejection changed live state");
+            require(caught, "preparation accepted a stale or unsupported decision");
+            require(snapshot() == before, "preparation rejection changed live state");
             unchangedScripts();
         };
         const auto checkRemoval = [&](const MWWorld::Ptr& item, int count, int remaining,
                                       MWWorld::ContainerStore& source, const MWWorld::Ptr& owner) {
             const auto before = snapshot();
             startScripts();
-            auto prepared = source.prepareTransferRemove(item, count, owner, worldModel);
+            auto prepared = source.prepareTransferRemove(item, count, owner, worldModel, &localScripts);
             require(prepared.getItemIdentity() == item.getCellRef().getRefNum() && prepared.getCount() == count
                     && prepared.getRemainingCount() == remaining,
                 "source preparation chose the wrong identity/quantity/signed remainder");
-            source.validateTransferRemoval(prepared, owner, worldModel);
+            const auto registration = localScripts.prepareRemove(&item.getCellRef());
+            const auto* intent = prepared.getScriptRemoval();
+            require((intent != nullptr) == (remaining == 0 && registration.hasRegistration()),
+                "source preparation failed to preserve partial registration or defer full deregistration");
+            if (intent)
+                require(intent->getScript() == item.getClass().getScript(item)
+                        && intent->getCell() == registration.getCell() && intent->getContainer() == &source,
+                    "source deregistration intent lost script/cell/store binding");
+            source.validateTransferRemoval(prepared, owner, worldModel, &localScripts);
             require(snapshot() == before, "source preparation/validation changed live state");
             unchangedScripts();
             return prepared;
         };
-        for (const auto& item : { *plainA, *plainB })
+        for (const auto& item : live)
         {
             const bool fromA = item.mContainerStore == &a;
             auto& source = fromA ? a : b;
             auto& destination = fromA ? b : a;
-            const auto& sourceContext = fromA ? addA : addB;
-            const auto& destinationContext = fromA ? addB : addA;
+            const auto& sourceContext = fromA ? scriptedAddA : scriptedAddB;
+            const auto& destinationContext = fromA ? scriptedAddB : scriptedAddA;
             const int originalCount = item.getCellRef().getCount(false);
+            const auto originalRegistration = localScripts.prepareRemove(&item.getCellRef());
+            const auto restoreRegistration = [&] {
+                if (originalRegistration.hasRegistration() && !localScripts.isRunning(scriptId, item))
+                {
+                    auto registered = item;
+                    registered.mCell = originalRegistration.getCell();
+                    localScripts.add(scriptId, registered, scripts);
+                }
+            };
             for (int signedCount : { 4, -4, std::numeric_limits<int>::max(), -std::numeric_limits<int>::max() })
             {
                 item.getCellRef().setCount(signedCount);
@@ -785,15 +813,26 @@ namespace
                     // base store, outside the preparation-only snapshot.
                     MWWorld::ContainerStore stock;
                     bindEmptyStore(stock, sourceContext.mContainer, worldModel);
-                    auto stockItem = stock.add(plain.getPtr(), std::abs(signedCount), sourceContext);
+                    MWWorld::LocalScripts stockScripts(store);
+                    auto stockAdd = sourceContext;
+                    stockAdd.mLocalScripts = &stockScripts;
+                    const bool hasScript = !item.getClass().getScript(item).empty();
+                    auto stockItem
+                        = stock.add(hasScript ? scripted.getPtr() : plain.getPtr(), std::abs(signedCount), stockAdd);
+                    stockScripts.startIteration();
                     stockItem->getCellRef().setCount(signedCount);
                     stock.setSelectedEnchantItem(stockItem);
                     MWWorld::ContainerStoreRemoveContext removeContext{ worldModel, sourceContext.mContainer,
-                        localScripts, sourceContext.mInventoryUpdated };
+                        stockScripts, sourceContext.mInventoryUpdated };
                     require(stock.remove(*stockItem, quantity, removeContext) == removal.getCount()
                             && stockItem->getCellRef().getCount(false) == removal.getRemainingCount()
                             && (stock.getSelectedEnchantItem() == stock.end()) == (remaining == 0),
                         "prepared removal differs from stock signed counts/full-removal selection cleanup");
+                    std::pair<ESM::RefId, MWWorld::Ptr> stockEntry;
+                    require(stockScripts.isRunning(scriptId, *stockItem) == (hasScript && remaining != 0)
+                            && stockScripts.getNext(stockEntry) == (hasScript && remaining != 0)
+                            && (remaining == 0 || !hasScript || stockEntry.second == *stockItem),
+                        "stock removal lost registration preservation or next-iterator repair");
                     if (std::abs(signedCount) != 4)
                         continue;
                     const auto before = snapshot();
@@ -802,7 +841,7 @@ namespace
                         auto detached = source.prepareTransferItem(item, quantity, destination,
                             sourceContext.mContainer, destinationContext.mContainer, worldModel);
                         auto addition = destination.prepareTransferAdd(std::move(detached), destinationContext);
-                        source.validateTransferRemoval(removal, sourceContext.mContainer, worldModel);
+                        source.validateTransferRemoval(removal, sourceContext.mContainer, worldModel, &localScripts);
                         destination.validateTransferStacking(addition, destinationContext);
                     }
                     require(snapshot() == before, "two-owner partial/full preparation or discard changed live state");
@@ -811,14 +850,21 @@ namespace
             }
             item.getCellRef().setCount(originalCount);
             for (int quantity : { 0, -1, std::numeric_limits<int>::min(), std::abs(originalCount) + 1 })
-                reject([&] { source.prepareTransferRemove(item, quantity, sourceContext.mContainer, worldModel); },
+                reject(
+                    [&] {
+                        source.prepareTransferRemove(item, quantity, sourceContext.mContainer, worldModel, &localScripts);
+                    },
                     "count");
             for (int invalidCount : { 0, std::numeric_limits<int>::min() })
             {
                 item.getCellRef().setCount(invalidCount, localScripts);
-                reject([&] { source.prepareTransferRemove(item, 1, sourceContext.mContainer, worldModel); },
+                reject(
+                    [&] {
+                        source.prepareTransferRemove(item, 1, sourceContext.mContainer, worldModel, &localScripts);
+                    },
                     invalidCount == 0 ? "ownership mismatch" : "count is invalid");
                 item.getCellRef().setCount(originalCount);
+                restoreRegistration();
             }
 
             const auto staleSource = [&](const auto& change, const auto& restore) {
@@ -826,8 +872,10 @@ namespace
                     sourceContext.mContainer);
                 change();
                 reject(
-                    [&] { source.validateTransferRemoval(removal, sourceContext.mContainer, worldModel); }, "changed");
+                    [&] { source.validateTransferRemoval(removal, sourceContext.mContainer, worldModel, &localScripts); },
+                    "changed");
                 restore();
+                restoreRegistration();
             };
             for (int changedCount : { -originalCount, originalCount + 1, 0, std::numeric_limits<int>::min() })
                 staleSource([&] { item.getCellRef().setCount(changedCount, localScripts); },
@@ -876,36 +924,230 @@ namespace
             require(alive == 0, "stale source validation cloned or retained custom data");
             auto removal = checkRemoval(
                 item, 2, originalCount < 0 ? originalCount + 2 : originalCount - 2, source, sourceContext.mContainer);
-            reject([&] { destination.validateTransferRemoval(removal, destinationContext.mContainer, worldModel); },
+            reject(
+                [&] {
+                    destination.validateTransferRemoval(removal, destinationContext.mContainer, worldModel, &localScripts);
+                },
                 "context changed");
             auto movedOwner = sourceContext.mContainer;
             movedOwner.mCell = destinationContext.mContainer.mCell;
-            reject([&] { source.validateTransferRemoval(removal, movedOwner, worldModel); }, "context changed");
-            worldModel.registerPtr(movedOwner);
-            reject([&] { source.validateTransferRemoval(removal, sourceContext.mContainer, worldModel); },
+            reject([&] { source.validateTransferRemoval(removal, movedOwner, worldModel, &localScripts); },
                 "context changed");
-            reject([&] { source.prepareTransferRemove(item, 2, sourceContext.mContainer, worldModel); },
+            worldModel.registerPtr(movedOwner);
+            reject(
+                [&] {
+                    source.validateTransferRemoval(removal, sourceContext.mContainer, worldModel, &localScripts);
+                },
+                "context changed");
+            reject([&] { source.prepareTransferRemove(item, 2, sourceContext.mContainer, worldModel, &localScripts); },
                 "owner cell mismatch");
             worldModel.registerPtr(sourceContext.mContainer);
         }
+        for (const auto& item : { *scriptA, *scriptB })
+        {
+            const bool fromA = item.mContainerStore == &a;
+            auto& source = fromA ? a : b;
+            const auto& context = fromA ? scriptedAddA : scriptedAddB;
+            const auto registration = localScripts.prepareRemove(&item.getCellRef());
+            auto registered = item;
+            registered.mCell = registration.getCell();
+            const int count = item.getCellRef().getCount();
+            for (int quantity : { 1, count })
+            {
+                const auto prepareRemoval
+                    = [&] { return checkRemoval(item, quantity, count - quantity, source, context.mContainer); };
+                const auto validate = [&](const auto& removal) {
+                    source.validateTransferRemoval(removal, context.mContainer, worldModel, &localScripts);
+                };
+                auto removal = prepareRemoval();
+                reject([&] { source.validateTransferRemoval(removal, context.mContainer, worldModel); },
+                    "context changed");
+                MWWorld::LocalScripts otherScripts(store);
+                reject([&] { source.validateTransferRemoval(removal, context.mContainer, worldModel, &otherScripts); },
+                    "context changed");
+                reject([&] { source.prepareTransferRemove(item, quantity, context.mContainer, worldModel); },
+                    "requires LocalScripts");
+
+                // Erased registration/iterator, then an identical registration:
+                // neither absence nor reusing the same Ptr/script/cell may validate.
+                localScripts.remove(item);
+                reject([&] { validate(removal); }, "registration changed");
+                auto absent = prepareRemoval();
+                require(!absent.getScriptRemoval(), "absent stock registration produced a deregistration effect");
+                localScripts.add(scriptId, registered, scripts);
+                reject([&] { validate(removal); }, "registration changed");
+                reject([&] { validate(absent); }, "registration changed");
+
+                for (int change : { 0, 1, 2 })
+                {
+                    auto current = prepareRemoval();
+                    localScripts.remove(item);
+                    auto changed = registered;
+                    if (change == 0)
+                        changed.mCell = fromA ? addB.mContainer.mCell : nullptr;
+                    else if (change == 1)
+                        changed.mContainerStore = fromA ? &b : &a;
+                    localScripts.add(change == 2 ? ESM::RefId::stringRefId("alternate_script") : scriptId, changed, scripts);
+                    reject([&] { validate(current); }, "registration changed");
+                    if (change != 0)
+                        reject(
+                            [&] {
+                                source.prepareTransferRemove(item, quantity, context.mContainer, worldModel, &localScripts);
+                            },
+                            "registration mismatch");
+                    localScripts.remove(item);
+                    localScripts.add(scriptId, registered, scripts);
+                }
+
+                // Initialized script identity and each owned locals buffer are
+                // independent stale inputs. No compiler or script execution is needed.
+                const auto saved = item.getRefData().copyForContainerTransfer();
+                const osg::ref_ptr<SceneUtil::PositionAttitudeTransform> node = item.getRefData().getBaseNode();
+                for (int change : { 0, 1, 2, 3 })
+                {
+                    auto current = prepareRemoval();
+                    auto& locals = item.getRefData().getLocals();
+                    if (change == 0)
+                        locals = MWScript::Locals();
+                    else if (change == 1)
+                        ++locals.mShorts[0];
+                    else if (change == 2)
+                        ++locals.mLongs[0];
+                    else
+                        locals.mFloats[0] += 1;
+                    reject([&] { validate(current); }, "state changed");
+                    if (change == 0)
+                        reject(
+                            [&] {
+                                source.prepareTransferRemove(item, quantity, context.mContainer, worldModel, &localScripts);
+                            },
+                            "matching initialized");
+                    item.getRefData() = saved.copyForContainerTransfer();
+                    item.getRefData().setBaseNode(node);
+                }
+            }
+        }
+
+        // Fallible destination notification preparation runs after both source
+        // state/deregistration and destination item/add intents are owned.
+        for (const auto& item : { *scriptA, *scriptB })
+        {
+            const bool fromA = item.mContainerStore == &a;
+            auto& source = fromA ? a : b;
+            auto& destination = fromA ? b : a;
+            const auto& owner = fromA ? addA.mContainer : addB.mContainer;
+            for (int quantity : { 1, item.getCellRef().getCount() })
+                for (bool fail : { false, true })
+                {
+                    int itemAlive = 0, intentAlive = 0, emitted = 0, copies = 0;
+                    osg::observer_ptr<SceneUtil::PositionAttitudeTransform> node;
+                    std::function<void()> onCopy;
+                    {
+                        auto context = fromA ? scriptedAddB : scriptedAddA;
+                        context.mInventoryUpdated = NotificationIntent(intentAlive, onCopy, emitted);
+                        const auto before = snapshot();
+                        startScripts();
+                        bool caught = false;
+                        try
+                        {
+                            auto initial = source.prepareTransferRemove(item, quantity, owner, worldModel, &localScripts);
+                            auto removal = std::move(initial);
+                            require((removal.getScriptRemoval() != nullptr) == (quantity == item.getCellRef().getCount()),
+                                "late failure source lost owned deregistration intent");
+                            auto detached = source.prepareTransferItem(
+                                item, quantity, destination, owner, context.mContainer, worldModel);
+                            const MWWorld::Ptr temporary(detached.get());
+                            onCopy = [&] {
+                                source.validateTransferRemoval(removal, owner, worldModel, &localScripts);
+                                ++copies;
+                                temporary.getRefData().setCustomData(std::make_unique<Lifetime>(itemAlive));
+                                temporary.getRefData().setBaseNode(new SceneUtil::PositionAttitudeTransform);
+                                node = temporary.getRefData().getBaseNode();
+                                require(intentAlive == 2 && temporary.getRefData().getLocals().getScriptId() == scriptId
+                                        && snapshot() == before,
+                                    "late scripted failure preceded owned temporary/effect preparation");
+                                if (fail)
+                                    throw PreparationFailure{};
+                            };
+                            auto addition = destination.prepareTransferAdd(std::move(detached), context);
+                            require(addition.mScript && addition.mScript->mScript == scriptId
+                                    && !addition.getStackTarget().isSet(),
+                                "late failure destination lost deferred registration or stacked a script");
+                        }
+                        catch (const PreparationFailure&)
+                        {
+                            caught = true;
+                        }
+                        onCopy = {};
+                        require(caught == fail && copies == 1 && itemAlive == 0 && intentAlive == 1
+                                && !node.valid() && emitted == 0 && snapshot() == before,
+                            "scripted removal/add failure or discard leaked state, registrations or success");
+                        unchangedScripts();
+                    }
+                    require(intentAlive == 0, "scripted operation retained a notification intent");
+                }
+        }
+
+        // Stock callers still repair the next iterator for both removal overloads,
+        // cell cleanup and clear, including erasing already-visited entries.
+        for (int consumed : { 0, 1, 2 })
+            for (int cleanup : { 0, 1, 2, 3 })
+            {
+                const auto before = snapshot();
+                MWWorld::LocalScripts stockScripts(store);
+                auto first = *scriptA;
+                auto second = *scriptB;
+                first.mCell = nullptr;
+                second.mCell = addB.mContainer.mCell;
+                stockScripts.add(scriptId, first, scripts);
+                stockScripts.add(scriptId, second, scripts);
+                auto old = stockScripts.prepareRemove(&first.getCellRef());
+                stockScripts.startIteration();
+                std::pair<ESM::RefId, MWWorld::Ptr> entry;
+                for (int i = 0; i < consumed; ++i)
+                    require(stockScripts.getNext(entry), "stock script iteration fixture ended early");
+                if (cleanup == 0)
+                    stockScripts.remove(&first.getCellRef());
+                else if (cleanup == 1)
+                    stockScripts.remove(first);
+                else if (cleanup == 2)
+                    stockScripts.clearCell(nullptr);
+                else
+                    stockScripts.clear();
+                const bool expectSecond = cleanup != 3 && consumed < 2;
+                require(stockScripts.getNext(entry) == expectSecond && (!expectSecond || entry.second == second)
+                        && !stockScripts.getNext(entry),
+                    "stock cleanup changed next-script repair");
+                stockScripts.add(scriptId, first, scripts);
+                reject([&] { stockScripts.validateRemoval(old, &first.getCellRef()); }, "registration changed");
+                stockScripts.remove(&first.getCellRef()); // Also safe after clear/re-add without startIteration.
+                require(snapshot() == before, "stock script-only fixture changed inventory or notifications");
+            }
+
         // Destroy source nodes while decisions survive; validation and preparation
         // from the stale Ptr must reject without dereferencing it or old iterators.
+        for (bool scriptedSource : { false, true })
         {
             MWWorld::ContainerStore source;
             bindEmptyStore(source, addA.mContainer, worldModel);
             observedStores.push_back(&source);
-            const auto oldItem = *source.add(plain.getPtr(), 4, addA);
+            const auto& sourceContext = scriptedSource ? scriptedAddA : addA;
+            const auto& sourceItem = scriptedSource ? scripted.getPtr() : plain.getPtr();
+            const auto oldItem = *source.add(sourceItem, 4, sourceContext);
+            const auto* oldCellRef = &oldItem.getCellRef();
             const auto identity = oldItem.getCellRef().getRefNum();
             auto partial = checkRemoval(oldItem, 2, 2, source, addA.mContainer);
             auto full = checkRemoval(oldItem, 4, 0, source, addA.mContainer);
             MWWorld::ContainerStore replacement;
             bindEmptyStore(replacement, addA.mContainer, worldModel);
-            const auto newItem = *replacement.add(plain.getPtr(), 4, addA);
+            const auto newItem = *replacement.add(sourceItem, 4, sourceContext);
             source = std::move(replacement);
             for (const auto* decision : { &partial, &full })
-                reject([&] { source.validateTransferRemoval(*decision, addA.mContainer, worldModel); }, "changed");
+                reject([&] { source.validateTransferRemoval(*decision, addA.mContainer, worldModel, &localScripts); },
+                    "changed");
             reject(
-                [&] { source.prepareTransferRemove(oldItem, 2, addA.mContainer, worldModel); }, "ownership mismatch");
+                [&] { source.prepareTransferRemove(oldItem, 2, addA.mContainer, worldModel, &localScripts); },
+                "ownership mismatch");
             require(worldModel.getPtr(identity).isEmpty(), "destroyed source retained its registration");
             worldModel.deregisterLiveCellRef(*newItem.mRef);
             newItem.getCellRef().setRefNum(identity);
@@ -913,17 +1155,22 @@ namespace
             registeredReplacement.mContainerStore = &source;
             worldModel.registerPtr(registeredReplacement);
             for (const auto* decision : { &partial, &full })
-                reject([&] { source.validateTransferRemoval(*decision, addA.mContainer, worldModel); }, "changed");
+                reject([&] { source.validateTransferRemoval(*decision, addA.mContainer, worldModel, &localScripts); },
+                    "changed");
+            // A stale script Ptr still exists here. Lookup for another item must
+            // skip it without reading freed memory. Stock cleanup can also use its
+            // saved address key, repairing iteration without dereferencing it.
+            const auto beforeLookup = snapshot();
+            startScripts();
+            const auto replacementIntent = localScripts.prepareRemove(&newItem.getCellRef());
+            localScripts.validateRemoval(replacementIntent, &newItem.getCellRef());
+            require(replacementIntent.hasRegistration() == scriptedSource && snapshot() == beforeLookup,
+                "lookup past a destroyed source changed state or lost the replacement registration");
+            unchangedScripts();
+            localScripts.remove(oldCellRef);
+            localScripts.remove(newItem);
             observedStores.pop_back();
         }
-        for (const auto& item : { *scriptA, *scriptB })
-            reject(
-                [&] {
-                    item.mContainerStore->prepareTransferRemove(
-                        item, 1, item.mContainerStore == &a ? addA.mContainer : addB.mContainer, worldModel);
-                },
-                "scripted source effects");
-
         const auto checkDecision
             = [&](const MWWorld::Ptr& item, MWWorld::ContainerStore& destination,
                   const MWWorld::ContainerStoreAddContext& context, ESM::RefNum target, int count) {
@@ -1240,6 +1487,12 @@ namespace
         const auto scriptId = ESM::RefId::stringRefId("native_script");
         const auto scriptedId = ESM::RefId::stringRefId("native_scripted");
         store.insertStatic(*loadout.store().get<ESM::Script>().find(scriptId));
+        if (preparation)
+        {
+            auto alternate = record<ESM::Script>("alternate_script");
+            alternate.mScriptText = "begin alternate_script\nend alternate_script\n";
+            store.insertStatic(alternate);
+        }
         store.insertStatic(*loadout.store().get<ESM::Miscellaneous>().find(scriptedId));
         ESM::ReadersCache readers;
         MWWorld::WorldModel worldModel(store, readers, 1);

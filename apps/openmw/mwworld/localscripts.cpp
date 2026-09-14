@@ -1,5 +1,8 @@
 #include "localscripts.hpp"
 
+#include <algorithm>
+#include <stdexcept>
+
 #include <components/debug/debuglog.hpp>
 #include <components/esm3/loadcont.hpp>
 #include <components/esm3/loadcrea.hpp>
@@ -86,7 +89,7 @@ bool MWWorld::LocalScripts::getNext(std::pair<ESM::RefId, Ptr>& script)
     if (mIter != mScripts.end())
     {
         auto iter = mIter++;
-        script = *iter;
+        script = { iter->mRegistration->mScript, iter->mItem };
         return true;
     }
     return false;
@@ -113,7 +116,7 @@ void MWWorld::LocalScripts::add(const ESM::RefId& scriptName, const Ptr& ptr, MW
             const auto prepared = prepareAdd(*script, ptr.getRefData(), ptr.mCell, scripts);
 
             for (auto iter = mScripts.begin(); iter != mScripts.end(); ++iter)
-                if (iter->second == ptr)
+                if (iter->mItem == ptr)
                 {
                     Log(Debug::Warning) << "Error: tried to add local script twice for " << ptr.getCellRef().getRefId();
                     remove(ptr);
@@ -122,7 +125,8 @@ void MWWorld::LocalScripts::add(const ESM::RefId& scriptName, const Ptr& ptr, MW
 
             auto registered = ptr;
             registered.mCell = prepared.mCell;
-            mScripts.emplace_back(prepared.mScript, registered);
+            mScripts.push_back({ registered, std::make_shared<const ScriptRegistration>(
+                ScriptRegistration{ prepared.mScript, &ptr.getCellRef(), prepared.mCell, ptr.mContainerStore }) });
         }
         catch (const std::exception& exception)
         {
@@ -148,6 +152,7 @@ void MWWorld::LocalScripts::addCell(CellStore* cell)
 void MWWorld::LocalScripts::clear()
 {
     mScripts.clear();
+    mIter = mScripts.end();
 }
 
 void MWWorld::LocalScripts::clearCell(CellStore* cell)
@@ -156,7 +161,7 @@ void MWWorld::LocalScripts::clearCell(CellStore* cell)
 
     while (iter != mScripts.end())
     {
-        if (iter->second.mCell == cell)
+        if (iter->mItem.mCell == cell)
         {
             if (iter == mIter)
                 ++mIter;
@@ -170,31 +175,52 @@ void MWWorld::LocalScripts::clearCell(CellStore* cell)
 
 void MWWorld::LocalScripts::remove(const MWWorld::CellRef* ref)
 {
-    for (auto iter = mScripts.begin(); iter != mScripts.end(); ++iter)
-        if (&(iter->second.getCellRef()) == ref)
-        {
-            if (iter == mIter)
-                ++mIter;
-
-            mScripts.erase(iter);
-            break;
-        }
+    erase(find(ref));
 }
 
 void MWWorld::LocalScripts::remove(const Ptr& ptr)
 {
-    for (auto iter = mScripts.begin(); iter != mScripts.end(); ++iter)
-        if (iter->second == ptr)
-        {
-            if (iter == mIter)
-                ++mIter;
+    erase(std::find_if(mScripts.begin(), mScripts.end(), [&](const Entry& entry) { return entry.mItem == ptr; }));
+}
 
-            mScripts.erase(iter);
-            break;
-        }
+MWWorld::LocalScripts::Scripts::const_iterator MWWorld::LocalScripts::find(const CellRef* ref) const
+{
+    // A registry Ptr may outlive a destroyed inventory node. Use the address
+    // captured at registration, never getCellRef() through that borrowed Ptr.
+    return std::find_if(mScripts.begin(), mScripts.end(),
+        [&](const Entry& entry) { return entry.mRegistration->mReference == ref; });
+}
+
+void MWWorld::LocalScripts::erase(Scripts::const_iterator iter)
+{
+    if (iter == mScripts.end())
+        return;
+    if (iter == mIter)
+        ++mIter;
+    mScripts.erase(iter);
+}
+
+MWWorld::LocalScripts::Removal MWWorld::LocalScripts::prepareRemove(const CellRef* ref) const
+{
+    Removal prepared;
+    prepared.mScripts = this;
+    prepared.mReference = ref;
+    const auto iter = find(ref);
+    if (iter != mScripts.end())
+        prepared.mRegistration = iter->mRegistration;
+    return prepared;
+}
+
+void MWWorld::LocalScripts::validateRemoval(const Removal& prepared, const CellRef* ref) const
+{
+    const auto iter = find(ref);
+    if (prepared.mScripts != this || prepared.mReference != ref
+        || prepared.mRegistration != (iter == mScripts.end() ? nullptr : iter->mRegistration))
+        throw std::invalid_argument("Local script removal preparation registration changed");
 }
 
 bool MWWorld::LocalScripts::isRunning(const ESM::RefId& scriptName, const Ptr& ptr) const
 {
-    return std::ranges::find(mScripts, std::pair(scriptName, ptr)) != mScripts.end();
+    return std::ranges::any_of(mScripts,
+        [&](const Entry& entry) { return entry.mRegistration->mScript == scriptName && entry.mItem == ptr; });
 }
