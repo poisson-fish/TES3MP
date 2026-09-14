@@ -127,6 +127,11 @@ namespace MWScript
 
     void GlobalScripts::addScript(const ESM::RefId& name, const MWWorld::Ptr& target)
     {
+        addScript(name, *MWBase::Environment::get().getScriptManager(), target);
+    }
+
+    void GlobalScripts::addScript(const ESM::RefId& name, MWBase::ScriptManager& scripts, const MWWorld::Ptr& target)
+    {
         const auto iter = mScripts.find(name);
 
         if (iter == mScripts.end())
@@ -137,7 +142,7 @@ namespace MWScript
                 MWWorld::Ptr ptr = target;
                 desc->mTarget = ptr;
                 desc->mRunning = true;
-                desc->mLocals.configure(*script);
+                desc->mLocals.configure(*script, scripts);
                 mScripts.insert(std::make_pair(name, desc));
             }
             else
@@ -197,7 +202,7 @@ namespace MWScript
         scripts.emplace_back(ESM::RefId::stringRefId("main"));
 
         for (MWWorld::Store<ESM::StartScript>::iterator iter = mStore.get<ESM::StartScript>().begin();
-             iter != mStore.get<ESM::StartScript>().end(); ++iter)
+            iter != mStore.get<ESM::StartScript>().end(); ++iter)
         {
             scripts.push_back(iter->mId);
         }

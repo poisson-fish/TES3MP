@@ -43,8 +43,8 @@ namespace MWWorld
     class LocalScripts;
     class WorldModel;
 
-    // Operation-local dependencies. LocalScripts still requires the stock
-    // ScriptManager through Environment; nullptr rejects scripts before mutation.
+    // Operation-local dependencies. Both script services are required for scripts;
+    // nullptr rejects scripted items before mutation.
     // Presentation must be consumed explicitly, even by an offline diagnostic.
     struct ContainerStoreAddContext
     {
@@ -53,6 +53,7 @@ namespace MWWorld
         Ptr mPlayer;
         Ptr mContainer;
         LocalScripts* mLocalScripts;
+        MWBase::ScriptManager* mScriptManager;
         std::function<void(const Ptr&)> mInventoryUpdated;
     };
 

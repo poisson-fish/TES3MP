@@ -15,8 +15,9 @@ int main(int argc, char** argv)
                      "--sample stages up to four winning IDs per category as owned diagnostic values,\n"
                      "  with 60 records, 32 effects/record, 4096 bytes/string and 64 KiB report limits.\n"
                      "--inventory adds 2 then 1 copies of a MISC record to a disposable ContainerStore,\n"
-                     "  verifies stacking/WorldModel registration, and records presentation requests.\n"
-                     "  Scripted items (including OnPCAdd) are rejected before mutation.\n"
+                     "  verifies stacks/WorldModel and local script registration, and records presentation requests.\n"
+                     "  Script locals use OpenMW declarations; declared OnPCAdd is assigned without execution.\n"
+                     "  Script probe limits: 64 KiB source text, 256 locals.\n"
                      "No World, Environment, rendering, UI, equipment, or script execution.\n";
         return 0;
     }

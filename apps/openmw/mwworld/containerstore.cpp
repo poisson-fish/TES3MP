@@ -8,6 +8,7 @@
 #include <components/esm3/inventorystate.hpp>
 #include <components/esm3/loadench.hpp>
 #include <components/esm3/loadlevlist.hpp>
+#include <components/esm3/loadscpt.hpp>
 #include <components/misc/strings/algorithm.hpp>
 #include <components/misc/strings/lower.hpp>
 #include <components/sceneutil/positionattitudetransform.hpp>
@@ -416,6 +417,7 @@ MWWorld::ContainerStoreIterator MWWorld::ContainerStore::add(
     auto& environment = MWBase::Environment::get();
     const ContainerStoreAddContext context{ *environment.getESMStore(), *environment.getWorldModel(),
         environment.getWorld()->getPlayerPtr(), getPtr(), &environment.getWorld()->getLocalScripts(),
+        environment.getScriptManager(),
         [&environment](const Ptr& owner) { environment.getWindowManager()->inventoryUpdated(owner); } };
     return addWithContext(itemPtr, count, context, resolve);
 }
@@ -436,7 +438,7 @@ MWWorld::ContainerStoreIterator MWWorld::ContainerStore::addWithContext(
     getType(itemPtr);
     if (!context.mInventoryUpdated)
         throw std::logic_error("ContainerStore::add requires an inventory presentation consumer");
-    if (!context.mLocalScripts
+    if ((!context.mLocalScripts || !context.mScriptManager)
         && (!itemPtr.getClass().getScript(itemPtr).empty()
             || (itemPtr.getClass().isGold(itemPtr)
                 && !context.mStore.get<ESM::Miscellaneous>().find(sGoldId)->mScript.empty())))
@@ -490,12 +492,13 @@ MWWorld::ContainerStoreIterator MWWorld::ContainerStore::addWithContext(
 
         item.mContainerStore = this;
 
-        context.mLocalScripts->add(script, item);
+        context.mLocalScripts->add(script, item, *context.mScriptManager);
 
         // Set OnPCAdd special variable, if it is declared
         // Make sure to do this *after* we have added the script to LocalScripts
         if (playerContainer)
-            item.getRefData().getLocals().setVarByInt(script, "onpcadd", 1);
+            item.getRefData().getLocals().setVar(
+                *context.mStore.get<ESM::Script>().find(script), "onpcadd", 1, *context.mScriptManager);
     }
 
     // we should not fire event for InventoryStore yet - it has some custom logic

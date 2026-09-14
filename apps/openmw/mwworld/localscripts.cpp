@@ -6,6 +6,8 @@
 #include <components/esm3/loadnpc.hpp>
 #include <components/esm3/loadscpt.hpp>
 
+#include "../mwbase/environment.hpp"
+
 #include "cellstore.hpp"
 #include "class.hpp"
 #include "containerstore.hpp"
@@ -92,11 +94,16 @@ bool MWWorld::LocalScripts::getNext(std::pair<ESM::RefId, Ptr>& script)
 
 void MWWorld::LocalScripts::add(const ESM::RefId& scriptName, const Ptr& ptr)
 {
+    add(scriptName, ptr, *MWBase::Environment::get().getScriptManager());
+}
+
+void MWWorld::LocalScripts::add(const ESM::RefId& scriptName, const Ptr& ptr, MWBase::ScriptManager& scripts)
+{
     if (const ESM::Script* script = mStore.get<ESM::Script>().search(scriptName))
     {
         try
         {
-            ptr.getRefData().setLocals(*script);
+            ptr.getRefData().setLocals(*script, scripts);
 
             for (auto iter = mScripts.begin(); iter != mScripts.end(); ++iter)
                 if (iter->second == ptr)

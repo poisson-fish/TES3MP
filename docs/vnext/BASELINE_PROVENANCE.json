@@ -265,6 +265,26 @@
       "purpose": "Includes replicas in the same configured water render passes as ordinary actors."
     },
     {
+      "path": "apps/openmw/mwscript/globalscripts.cpp",
+      "status": "M",
+      "purpose": "Share global-script creation with an explicit script manager while preserving global local initialization and stock callers."
+    },
+    {
+      "path": "apps/openmw/mwscript/globalscripts.hpp",
+      "status": "M",
+      "purpose": "Expose explicit-service global-script creation for native initialization checks."
+    },
+    {
+      "path": "apps/openmw/mwscript/locals.cpp",
+      "status": "M",
+      "purpose": "Share compiler-derived local initialization and assignment with an explicit script manager, preserving inherited global locals."
+    },
+    {
+      "path": "apps/openmw/mwscript/locals.hpp",
+      "status": "M",
+      "purpose": "Declare explicit script-service overloads for local initialization and assignment."
+    },
+    {
       "path": "apps/openmw/mwworld/containerstore.cpp",
       "status": "M",
       "purpose": "Share inventory add, normalization, and stacking with explicit store/player/registry/presentation context; reject unavailable script services before mutation."
@@ -285,14 +305,14 @@
       "purpose": "Expose inherited stock stacking and override the explicit-store stacking seam."
     },
     {
-      "path": "apps/openmw/mwworld/worldmodel.cpp",
+      "path": "apps/openmw/mwworld/localscripts.cpp",
       "status": "M",
-      "purpose": "Delegate stock construction to an explicit pointer-cache-size constructor for headless registry composition without global Settings initialization."
+      "purpose": "Share local script registration and RefData initialization with an explicit script manager."
     },
     {
-      "path": "apps/openmw/mwworld/worldmodel.hpp",
+      "path": "apps/openmw/mwworld/localscripts.hpp",
       "status": "M",
-      "purpose": "Declare the explicit cache-size WorldModel constructor used by the native inventory probe."
+      "purpose": "Expose explicit-service local script registration alongside stock callers."
     },
     {
       "path": "apps/openmw/mwworld/player.cpp",
@@ -303,6 +323,26 @@
       "path": "apps/openmw/mwworld/player.hpp",
       "status": "M",
       "purpose": "Declares the activation interceptor callback and setter/clearer methods on MWWorld::Player."
+    },
+    {
+      "path": "apps/openmw/mwworld/refdata.cpp",
+      "status": "M",
+      "purpose": "Preserve the changed flag when initializing compiler-derived locals with an explicit script manager."
+    },
+    {
+      "path": "apps/openmw/mwworld/refdata.hpp",
+      "status": "M",
+      "purpose": "Expose explicit-service reference local initialization."
+    },
+    {
+      "path": "apps/openmw/mwworld/worldmodel.cpp",
+      "status": "M",
+      "purpose": "Delegate stock construction to an explicit pointer-cache-size constructor for headless registry composition without global Settings initialization."
+    },
+    {
+      "path": "apps/openmw/mwworld/worldmodel.hpp",
+      "status": "M",
+      "purpose": "Declare the explicit cache-size WorldModel constructor used by the native inventory probe."
     },
     {
       "path": "apps/openmw/options.cpp",
@@ -427,7 +467,7 @@
     {
       "path": "apps/tes3mp-server/native/inventory.cpp",
       "status": "A",
-      "purpose": "Exercise real ManualRef, ContainerStore add/stack/cleanup, and WorldModel registration with owned diagnostics; reject scripts instead of omitting their behavior."
+      "purpose": "Exercise real ContainerStore and WorldModel lifecycle plus compiler-derived script locals, registration, and OnPCAdd assignment with bounded owned diagnostics; execute no script instructions."
     },
     {
       "path": "apps/tes3mp-server/native/loadout.hpp",

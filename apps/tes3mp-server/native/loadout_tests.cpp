@@ -9,10 +9,16 @@
 #include <stdexcept>
 
 #include <apps/openmw/mwclass/classes.hpp>
+#include <apps/openmw/mwscript/compilercontext.hpp>
+#include <apps/openmw/mwscript/scriptmanagerimp.hpp>
+#include <apps/openmw/mwworld/cellstore.hpp>
 #include <apps/openmw/mwworld/containerstore.hpp>
 #include <apps/openmw/mwworld/inventorystore.hpp>
+#include <apps/openmw/mwworld/localscripts.hpp>
 #include <apps/openmw/mwworld/manualref.hpp>
 #include <apps/openmw/mwworld/worldmodel.hpp>
+#include <components/compiler/extensions.hpp>
+#include <components/compiler/extensions0.hpp>
 #include <components/esm/records.hpp>
 #include <components/esm3/esmwriter.hpp>
 #include <components/esm3/formatversion.hpp>
@@ -358,7 +364,7 @@ namespace
             write(writer, player);
             auto script = record<ESM::Script>("native_script");
             script.mScriptText
-                = "begin native_script\nshort OnPCAdd\nif ( OnPCAdd == 1 )\n"
+                = "begin native_script\nshort OnPCAdd\nlong counter\nfloat ratio\nif ( OnPCAdd == 1 )\n"
                   "set OnPCAdd to 0\nendif\nend native_script\n";
             write(writer, script);
             auto item = record<ESM::Miscellaneous>("native_plain");
@@ -381,8 +387,10 @@ namespace
             loadout.enumerate(before);
             std::ostringstream output;
             loadout.writeInventoryProbe(output, "NATIVE_PLAIN");
-            require(output.str() == "native-inventory\t1\nitem\t\"native_plain\"\ncount\t3\nstacks\t1\nweight\t7.5\n"
+            require(output.str() == "native-inventory\t2\nitem\t\"native_plain\"\ncount\t3\nstacks\t1\nweight\t7.5\n"
                                     "presentation-requests\t2\nregistered\t1\nderegistered\t1\n"
+                                    "local-shorts\t0\nlocal-longs\t0\nlocal-floats\t0\nscripts-registered\t0\n"
+                                    "scripts-removed\t0\nonpcadd-assigned\t0\n"
                                     "script-executed\t0\ncomplete\n",
                 "native inventory diagnostic mismatch");
             std::ostringstream goldOutput;
@@ -395,23 +403,149 @@ namespace
             require(before.str() == after.str(), "inventory probe changed retained base records");
             return;
         }
+        if (filter == "inventory-scripted")
+        {
+            const auto scriptId = ESM::RefId::stringRefId("native_script");
+            const auto* script = loadout.store().get<ESM::Script>().find(scriptId);
+            require(script->mNumShorts == 0 && script->mNumLongs == 0 && script->mNumFloats == 0
+                    && script->mVarNames.empty(),
+                "fixture must have no precompiled local declarations");
+            std::ostringstream output;
+            loadout.writeInventoryProbe(output, "native_scripted");
+            require(output.str() == "native-inventory\t2\nitem\t\"native_scripted\"\ncount\t3\nstacks\t2\nweight\t7.5\n"
+                                    "presentation-requests\t2\nregistered\t2\nderegistered\t2\n"
+                                    "local-shorts\t1\nlocal-longs\t1\nlocal-floats\t1\nscripts-registered\t2\n"
+                                    "scripts-removed\t2\nonpcadd-assigned\t2\nscript-executed\t0\ncomplete\n",
+                "scripted inventory diagnostic mismatch");
+
+            plugin(root / "local/ScriptedGold.esm", true, [&](ESM::ESMWriter& writer) {
+                auto gold = record<ESM::Miscellaneous>("gold_001");
+                gold.mScript = scriptId;
+                gold.mData.mWeight = 0.25f;
+                write(writer, gold);
+            });
+            auto goldOptions = options;
+            goldOptions.mContent.push_back("ScriptedGold.esm");
+            TES3MP::Native::Loadout scriptedGold(goldOptions);
+            std::ostringstream goldOutput;
+            scriptedGold.writeInventoryProbe(goldOutput, "gold_100");
+            require(
+                goldOutput.str().find("item\t\"gold_001\"\ncount\t3\nstacks\t1\nweight\t0.75\n") != std::string::npos
+                    && goldOutput.str().find("scripts-registered\t1\nscripts-removed\t1\nonpcadd-assigned\t1\n")
+                        != std::string::npos,
+                "normalized scripted gold did not retain engine stacking/locals/registration behavior");
+
+            // WorldModel owns mutable registry/content services; copy only the
+            // already engine-loaded bases needed by this isolated operation.
+            MWWorld::ESMStore store;
+            store.insertStatic(*script);
+            store.insertStatic(*loadout.store().get<ESM::NPC>().find(ESM::RefId::stringRefId("player")));
+            store.insertStatic(
+                *loadout.store().get<ESM::Miscellaneous>().find(ESM::RefId::stringRefId("native_scripted")));
+            Compiler::Extensions extensions;
+            Compiler::registerExtensions(extensions);
+            MWScript::CompilerContext compilerContext(MWScript::CompilerContext::Type_Full);
+            compilerContext.setExtensions(&extensions);
+            MWScript::ScriptManager scripts(store, compilerContext, 1);
+            ESM::ReadersCache readers;
+            MWWorld::WorldModel worldModel(store, readers, 1);
+            MWWorld::ManualRef player(store, ESM::RefId::stringRefId("player"));
+            MWWorld::ManualRef owner(store, ESM::RefId::stringRefId("player"));
+            ESM::Cell cell;
+            cell.blank();
+            MWWorld::CellStore ownerCell(MWWorld::Cell(cell), store, readers);
+            auto ownerPtr = owner.getPtr();
+            ownerPtr.mCell = &ownerCell;
+            MWWorld::ManualRef source(store, ESM::RefId::stringRefId("native_scripted"));
+            MWWorld::ContainerStore container;
+            MWWorld::LocalScripts localScripts(store);
+            int notifications = 0;
+            MWWorld::ContainerStoreAddContext context{ store, worldModel, player.getPtr(), ownerPtr, &localScripts,
+                &scripts, [&](const MWWorld::Ptr& ptr) {
+                    require(ptr == ownerPtr, "wrong explicit inventory owner");
+                    ++notifications;
+                } };
+            const auto first = container.add(source.getPtr(), 1, context);
+            auto& locals = first->getRefData().getLocals();
+            require(locals.mShorts == std::vector<Interpreter::Type_Short>{ 0 }
+                    && locals.mLongs == std::vector<Interpreter::Type_Integer>{ 0 }
+                    && locals.mFloats == std::vector<Interpreter::Type_Float>{ 0 }
+                    && localScripts.isRunning(scriptId, *first) && notifications == 1,
+                "non-player initialization incorrectly assigned OnPCAdd or lost registration");
+            require(!locals.setVar(*script, "absent", 9, scripts) && locals.mShorts[0] == 0,
+                "undeclared local assignment changed state");
+
+            // Preserve OpenMW's unusual rule: new local instances inherit existing
+            // global-script locals, including stopped globals, instead of zeroing.
+            scripts.getGlobalScripts().addScript(scriptId, scripts);
+            auto& global = scripts.getGlobalScripts().getScripts().at(scriptId)->mLocals;
+            require(global.setVar(*script, "onpcadd", 7, scripts) && global.setVar(*script, "counter", 42, scripts)
+                    && global.setVar(*script, "ratio", 1.25, scripts),
+                "explicit global local initialization failed");
+            scripts.getGlobalScripts().removeScript(scriptId);
+            const auto inherited = container.add(source.getPtr(), 1, context);
+            auto& inheritedLocals = inherited->getRefData().getLocals();
+            require(inheritedLocals.mShorts[0] == 7 && inheritedLocals.mLongs[0] == 42
+                    && inheritedLocals.mFloats[0] == 1.25f && locals.mShorts[0] == 0,
+                "global-script locals were not copied into only the new instance");
+            context.mPlayer = owner.getPtr();
+            const auto playerItem = container.add(source.getPtr(), 1, context);
+            require(playerItem->getRefData().getLocals().mShorts[0] == 1
+                    && playerItem->getRefData().getLocals().mLongs[0] == 42 && global.mShorts[0] == 7,
+                "explicit player OnPCAdd assignment did not preserve other/inherited locals");
+            global.setVar(*script, "counter", 99, scripts);
+            localScripts.add(scriptId, *inherited, scripts);
+            require(inheritedLocals.mLongs[0] == 42, "repeat registration reset initialized locals");
+            localScripts.startIteration();
+            std::pair<ESM::RefId, MWWorld::Ptr> entry;
+            int registered = 0;
+            while (localScripts.getNext(entry))
+                ++registered;
+            require(registered == 3 && notifications == 3 && source.getPtr().getRefData().getLocals().isEmpty(),
+                "duplicate registration or source mutation");
+            for (const auto& item : container)
+                localScripts.remove(item);
+            require(!localScripts.isRunning(scriptId, *inherited), "script registration survived removal");
+            return;
+        }
         require(filter == "inventory-rejection", "unknown inventory filter");
         const auto scriptedId = ESM::RefId::stringRefId("native_scripted");
         require(!loadout.store().get<ESM::Miscellaneous>().find(scriptedId)->mScript.empty(),
             "OpenMW removed fixture script before probing");
-        std::ostringstream output;
-        output << "previous publication\n";
-        try
+        for (const bool oversizedText : { true, false })
         {
-            loadout.writeInventoryProbe(output, "native_scripted");
-            throw std::logic_error("scripted item accepted");
+            plugin(root / "local/ScriptLimit.esm", true, [&](ESM::ESMWriter& writer) {
+                auto script = record<ESM::Script>("native_script");
+                if (oversizedText)
+                    script.mScriptText.assign(64 * 1024 + 1, ' ');
+                else
+                {
+                    script.mScriptText = "begin native_script\n";
+                    for (int i = 0; i < 257; ++i)
+                        script.mScriptText += "short var" + std::to_string(i) + "\n";
+                    script.mScriptText += "end native_script\n";
+                }
+                write(writer, script);
+            });
+            auto invalidOptions = options;
+            invalidOptions.mContent.push_back("ScriptLimit.esm");
+            TES3MP::Native::Loadout invalid(invalidOptions);
+            std::ostringstream output;
+            output << "previous publication\n";
+            bool rejected = false;
+            try
+            {
+                invalid.writeInventoryProbe(output, "native_scripted");
+            }
+            catch (const std::runtime_error& error)
+            {
+                rejected = true;
+                require(std::string_view(error.what()).find(oversizedText ? "64 KiB" : "256 locals")
+                        != std::string_view::npos,
+                    "unexpected script limit rejection");
+            }
+            require(rejected && output.str() == "previous publication\n", "script limit published a partial report");
         }
-        catch (const std::runtime_error& error)
-        {
-            require(std::string_view(error.what()).find("OnPCAdd") != std::string_view::npos,
-                "script rejection did not identify the missing OnPCAdd dependency");
-        }
-        require(output.str() == "previous publication\n", "script rejection published a partial report");
 
         // Exercise preflight against a nonempty engine store and observe every
         // possible effect. Records come from the OpenMW-written/loaded fixture.
@@ -445,7 +579,7 @@ namespace
         container.setContListener(&listener);
         int notifications = 0;
         MWWorld::ContainerStoreAddContext context{ store, worldModel, player.getPtr(), player.getPtr(), nullptr,
-            [&](const MWWorld::Ptr&) { ++notifications; } };
+            nullptr, [&](const MWWorld::Ptr&) { ++notifications; } };
         const auto first = container.add(plain.getPtr(), 2, context);
         require(first->getCellRef().getOwner().empty() && first->getCellRef().getFaction().empty()
                 && first->getCellRef().getFactionRank() == -2 && first->getCellRef().getPosition().pos[0] == 0
@@ -475,6 +609,14 @@ namespace
         };
         reject([&] { container.add(scripted.getPtr(), 1, context); }, "OnPCAdd");
         reject([&] { container.add(goldPile.getPtr(), 1, context); }, "OnPCAdd");
+        MWWorld::LocalScripts localScripts(store);
+        context.mLocalScripts = &localScripts;
+        reject([&] { container.add(scripted.getPtr(), 1, context); }, "ScriptManager");
+        context.mLocalScripts = nullptr;
+        MWScript::CompilerContext compilerContext(MWScript::CompilerContext::Type_Full);
+        MWScript::ScriptManager scripts(store, compilerContext, 1);
+        context.mScriptManager = &scripts;
+        reject([&] { container.add(scripted.getPtr(), 1, context); }, "LocalScripts");
         MWWorld::InventoryStore equipment;
         reject([&] { static_cast<MWWorld::ContainerStore&>(equipment).add(plain.getPtr(), 1, context); },
             "InventoryStore");

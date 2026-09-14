@@ -15,6 +15,16 @@ namespace ESM
     class RefId;
 }
 
+namespace MWBase
+{
+    class ScriptManager;
+}
+
+namespace Compiler
+{
+    class Locals;
+}
+
 namespace MWScript
 {
     class Locals
@@ -23,6 +33,7 @@ namespace MWScript
         ESM::RefId mScriptId;
 
         void ensure(const ESM::RefId& scriptName);
+        bool setVar(const Compiler::Locals& declarations, std::string_view var, double val);
 
     public:
         std::vector<Interpreter::Type_Short> mShorts;
@@ -40,12 +51,14 @@ namespace MWScript
 
         /// \return Did the state of *this change from uninitialised to initialised?
         bool configure(const ESM::Script& script);
+        bool configure(const ESM::Script& script, MWBase::ScriptManager& scripts);
 
         /// @note var needs to be in lowercase
         ///
         /// \note Locals will be automatically configured first, if necessary
         bool setVarByInt(const ESM::RefId& script, std::string_view var, int val) { return setVar(script, var, val); }
         bool setVar(const ESM::RefId& script, std::string_view var, double val);
+        bool setVar(const ESM::Script& script, std::string_view var, double val, MWBase::ScriptManager& scripts);
 
         /// \note Locals will be automatically configured first, if necessary
         //

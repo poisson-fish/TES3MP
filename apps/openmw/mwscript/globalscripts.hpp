@@ -61,6 +61,8 @@ namespace MWScript
         GlobalScripts(const MWWorld::ESMStore& store);
 
         void addScript(const ESM::RefId& name, const MWWorld::Ptr& target = MWWorld::Ptr());
+        void addScript(
+            const ESM::RefId& name, MWBase::ScriptManager& scripts, const MWWorld::Ptr& target = MWWorld::Ptr());
 
         void removeScript(const ESM::RefId& name);
 

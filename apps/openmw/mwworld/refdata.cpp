@@ -204,6 +204,12 @@ namespace MWWorld
             mChanged = true;
     }
 
+    void RefData::setLocals(const ESM::Script& script, MWBase::ScriptManager& scripts)
+    {
+        if (mLocals.configure(script, scripts) && !mLocals.isEmpty())
+            mChanged = true;
+    }
+
     void RefData::setDeletedByContentFile(bool deleted)
     {
         mDeletedByContentFile = deleted;

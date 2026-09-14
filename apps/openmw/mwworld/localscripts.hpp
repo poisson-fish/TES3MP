@@ -32,6 +32,9 @@ namespace MWWorld
         void add(const ESM::RefId& scriptName, const Ptr& ptr);
         ///< Add script to collection of active local scripts.
 
+        void add(const ESM::RefId& scriptName, const Ptr& ptr, MWBase::ScriptManager& scripts);
+        ///< Same registration and initialization with an explicit script service.
+
         void addCell(CellStore* cell);
         ///< Add all local scripts in a cell.
 

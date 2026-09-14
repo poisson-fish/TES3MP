@@ -3,6 +3,25 @@
   "baseline_commit": "f4bec41444214a7903bebd178389ca22ca13f646",
   "patches": [
     {
+      "id": "M1-002",
+      "slice": "native scripted inventory initialization",
+      "owner": "OpenMW server runtime",
+      "purpose": "Pass the actual script manager into shared compiler-derived locals, reference initialization, and local/global registration while preserving stock Environment wrappers and inherited global locals.",
+      "paths": [
+        "apps/openmw/mwscript/globalscripts.cpp",
+        "apps/openmw/mwscript/globalscripts.hpp",
+        "apps/openmw/mwscript/locals.cpp",
+        "apps/openmw/mwscript/locals.hpp",
+        "apps/openmw/mwworld/localscripts.cpp",
+        "apps/openmw/mwworld/localscripts.hpp",
+        "apps/openmw/mwworld/refdata.cpp",
+        "apps/openmw/mwworld/refdata.hpp"
+      ],
+      "tests": ["tes3mp_native_loadout_tests inventory-scripted", "tes3mp_native_loadout_tests inventory-rejection"],
+      "disposition": "local shared engine extraction; no upstream contact authorized",
+      "removal_condition": "OpenMW supplies equivalent explicit script service interfaces for locals and registration"
+    },
+    {
       "id": "M1-001",
       "slice": "native inventory runtime seam",
       "owner": "OpenMW server runtime",
@@ -15,7 +34,7 @@
         "apps/openmw/mwworld/worldmodel.cpp",
         "apps/openmw/mwworld/worldmodel.hpp"
       ],
-      "tests": ["tes3mp_native_loadout_tests inventory-plain", "tes3mp_native_loadout_tests inventory-rejection"],
+      "tests": ["tes3mp_native_loadout_tests inventory-plain", "tes3mp_native_loadout_tests inventory-scripted", "tes3mp_native_loadout_tests inventory-rejection"],
       "disposition": "local shared engine extraction; no upstream contact authorized",
       "removal_condition": "OpenMW supplies equivalent explicit inventory operation and headless registry composition interfaces"
     },

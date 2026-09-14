@@ -33,9 +33,15 @@ namespace MWScript
     {
         if (mInitialised)
             return false;
+        return configure(script, *MWBase::Environment::get().getScriptManager());
+    }
 
-        const GlobalScriptDesc* global
-            = MWBase::Environment::get().getScriptManager()->getGlobalScripts().getScriptIfPresent(script.mId);
+    bool Locals::configure(const ESM::Script& script, MWBase::ScriptManager& scripts)
+    {
+        if (mInitialised)
+            return false;
+
+        const GlobalScriptDesc* global = scripts.getGlobalScripts().getScriptIfPresent(script.mId);
         if (global)
         {
             mShorts = global->mLocals.mShorts;
@@ -44,7 +50,7 @@ namespace MWScript
         }
         else
         {
-            const Compiler::Locals& locals = MWBase::Environment::get().getScriptManager()->getLocals(script.mId);
+            const Compiler::Locals& locals = scripts.getLocals(script.mId);
 
             mShorts.clear();
             mShorts.resize(locals.get('s').size(), 0);
@@ -99,8 +105,17 @@ namespace MWScript
     bool Locals::setVar(const ESM::RefId& script, std::string_view var, double val)
     {
         ensure(script);
+        return setVar(MWBase::Environment::get().getScriptManager()->getLocals(script), var, val);
+    }
 
-        const Compiler::Locals& locals = MWBase::Environment::get().getScriptManager()->getLocals(script);
+    bool Locals::setVar(const ESM::Script& script, std::string_view var, double val, MWBase::ScriptManager& scripts)
+    {
+        configure(script, scripts);
+        return setVar(scripts.getLocals(script.mId), var, val);
+    }
+
+    bool Locals::setVar(const Compiler::Locals& locals, std::string_view var, double val)
+    {
         int index = locals.getIndex(var);
         if (index == -1)
             return false;
