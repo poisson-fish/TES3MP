@@ -65,11 +65,40 @@ struct MagicUseCombatEvent {
   target_died:bool;
 }
 
+enum MagicEffectCombatEventKind : ubyte {
+  Started = 0,
+  Updated = 1,
+  Ended = 2,
+}
+
+enum MagicEffectCombatEndReason : ubyte {
+  None = 0,
+  Expired = 1,
+  Dispelled = 2,
+  Replaced = 3,
+  TargetDied = 4,
+}
+
+struct MagicEffectCombatEvent {
+  instance_id:ulong;
+  target_id:ulong;
+  start_tick:ulong;
+  end_tick:ulong;
+  target_combat_revision:ulong;
+  magnitude_per_second:float;
+  applied_delta:float;
+  event_kind:MagicEffectCombatEventKind;
+  end_reason:MagicEffectCombatEndReason;
+  target_kind:MagicUseTargetKind;
+  effect_kind:ubyte;
+}
+
 table ReliableCombatEventBatch {
   header:CombatEventHeader (id: 0);
   events:[MeleeCombatEvent] (id: 1);
   actor_events:[ActorMeleeCombatEvent] (id: 2);
   magic_events:[MagicUseCombatEvent] (id: 3);
+  magic_effect_events:[MagicEffectCombatEvent] (id: 4);
 }
 
 root_type ReliableCombatEventBatch;

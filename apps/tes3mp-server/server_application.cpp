@@ -10,6 +10,7 @@
 
 #include <algorithm>
 #include <array>
+#include <iterator>
 #include <ranges>
 
 namespace TES3MP::ServerApp
@@ -1269,6 +1270,8 @@ namespace TES3MP::ServerApp
             std::optional<CanonicalCombatWorld> combatCandidate;
             std::optional<CanonicalInventoryWorld> combatInventoryCandidate;
             std::vector<AuthoritativeActorMeleeEvent> authoritativeActorEvents;
+            std::vector<AuthoritativeMagicEffectEvent> authoritativeMagicEffectEvents(
+                prepared.magicEffectEvents().begin(), prepared.magicEffectEvents().end());
             if (mWiring->combat)
             {
                 const auto& baseCombat = prepared.candidateCombat() ? *prepared.candidateCombat() : *mWiring->combat;
@@ -1288,6 +1291,9 @@ namespace TES3MP::ServerApp
                 if (step->inventory)
                     combatInventoryCandidate.emplace(std::move(*step->inventory));
                 authoritativeActorEvents = std::move(step->events);
+                authoritativeMagicEffectEvents.insert(authoritativeMagicEffectEvents.end(),
+                    std::make_move_iterator(step->magicEffectEvents.begin()),
+                    std::make_move_iterator(step->magicEffectEvents.end()));
             }
             std::optional<CanonicalActorWorld> actorCandidate;
             std::vector<std::pair<TransportConnectionId, LatestWinsActorSnapshot>> actorViews;
@@ -1394,7 +1400,8 @@ namespace TES3MP::ServerApp
                         target.sessionId(), batch.scheduledTick().value(), prepared.candidateRevision());
                     auto eventBatch = projectCombatEvents(prepared.candidateState(), projectedActors,
                         target.sessionId(), batch.scheduledTick().value(), prepared.candidateRevision(),
-                        prepared.combatEvents(), authoritativeActorEvents, prepared.magicEvents());
+                        prepared.combatEvents(), authoritativeActorEvents, prepared.magicEvents(),
+                        authoritativeMagicEffectEvents);
                     if (!view || !eventBatch)
                     {
                         mFailure = "combat projection failed";

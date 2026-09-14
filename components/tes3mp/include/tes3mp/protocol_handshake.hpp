@@ -30,6 +30,7 @@ namespace TES3MP
     inline constexpr std::uint32_t AuthoritativeWaitRestCapabilityValue = 10;
     inline constexpr std::uint32_t AuthoritativeSecurityCapabilityValue = 11;
     inline constexpr std::uint32_t AuthoritativeInstantMagicCapabilityValue = 12;
+    inline constexpr std::uint32_t AuthoritativeTimedAreaMagicCapabilityValue = 13;
 
     class CapabilityId
     {
@@ -113,6 +114,11 @@ namespace TES3MP
     inline constexpr CapabilityId authoritativeInstantMagicCapability() noexcept
     {
         return *CapabilityId::fromValue(AuthoritativeInstantMagicCapabilityValue);
+    }
+
+    inline constexpr CapabilityId authoritativeTimedAreaMagicCapability() noexcept
+    {
+        return *CapabilityId::fromValue(AuthoritativeTimedAreaMagicCapabilityValue);
     }
 
     struct ProtocolVersion

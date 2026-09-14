@@ -684,7 +684,8 @@ namespace TES3MP
         const auto& spatial = mSession->stateMachine().confirmedSnapshot();
         const auto sessionId = mSession->stateMachine().sessionId();
         if (!spatial || !mCombatSnapshot || !sessionId
-            || !negotiated(mSession->stateMachine(), authoritativeInstantMagicCapability()))
+            || !negotiated(mSession->stateMachine(), authoritativeInstantMagicCapability())
+            || !negotiated(mSession->stateMachine(), authoritativeTimedAreaMagicCapability()))
             return { ClientRuntimeResult::NotConnected, std::nullopt };
         const auto sequence = mLastQueuedSequence ? mLastQueuedSequence->next()
             : spatial->header().acknowledgedCommandSequence()

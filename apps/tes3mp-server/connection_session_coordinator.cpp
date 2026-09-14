@@ -339,7 +339,7 @@ namespace TES3MP::ServerApp
                 && !mInventory)
                 return ConnectionSessionResult::ProtocolRejected;
             if ((cmd->kind == ObjectInteractionKind::PickLock || cmd->kind == ObjectInteractionKind::DisarmTrap)
-                && (hello->selectedVersion().major != 1 || hello->selectedVersion().minor < 9 || !mCombat
+                && (hello->selectedVersion().major != 1 || hello->selectedVersion().minor < 10 || !mCombat
                     || !std::ranges::binary_search(hello->negotiatedCapabilities(), authoritativeSecurityCapability())))
                 return ConnectionSessionResult::ProtocolRejected;
             const auto* progress = joins.state().findActiveSession(*state->sessionId());
@@ -577,7 +577,9 @@ namespace TES3MP::ServerApp
                 return ConnectionSessionResult::ProtocolRejected;
             const auto& hello = state->negotiatedHello();
             if (!hello
-                || !std::ranges::binary_search(hello->negotiatedCapabilities(), authoritativeInstantMagicCapability()))
+                || !std::ranges::binary_search(hello->negotiatedCapabilities(), authoritativeInstantMagicCapability())
+                || !std::ranges::binary_search(
+                    hello->negotiatedCapabilities(), authoritativeTimedAreaMagicCapability()))
                 return ConnectionSessionResult::ProtocolRejected;
             const auto* progress = joins.state().findActiveSession(*state->sessionId());
             const auto* player = progress ? joins.state().findPlayer(progress->playerId()) : nullptr;

@@ -1,5 +1,6 @@
 #include <tes3mp/combat_world.hpp>
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <limits>
@@ -1127,6 +1128,196 @@ namespace
                    ->enchantmentCharge
             == 20;
     }
+
+    bool timed_area_effects_refresh_stack_tick_dispel_and_expire_atomically()
+    {
+        const auto baseline = combatWorld();
+        std::vector<TES3MP::CanonicalPlayerCombatState> combatPlayers(
+            baseline.players().begin(), baseline.players().end());
+        combatPlayers[0].knownSpells = { id<TES3MP::SpellRecordId>(9), id<TES3MP::SpellRecordId>(10) };
+        combatPlayers[0].magicka = 100.f;
+        combatPlayers[0].maximumMagicka = 100.f;
+        auto second = combatPlayers[0];
+        second.playerId = id<TES3MP::PlayerId>(2);
+        second.knownSpells.clear();
+        combatPlayers.push_back(second);
+        const auto worldValue
+            = TES3MP::createCanonicalCombatWorld(combatPlayers, baseline.actors(), baseline.randomState());
+        const auto* world = std::get_if<TES3MP::CanonicalCombatWorld>(&worldValue);
+        if (!world)
+            return false;
+
+        const std::array spatialPlayerStates{
+            TES3MP::CanonicalPlayerEntityState(id<TES3MP::PlayerId>(1), id<TES3MP::EntityId>(100),
+                id<TES3MP::AppearanceId>(1), root(0), TES3MP::LinearVelocity3(0, 0, 0),
+                TES3MP::EntityRevision::initial(), TES3MP::AuthorityEpoch::initial(), TES3MP::ServerTick::initial()),
+            TES3MP::CanonicalPlayerEntityState(id<TES3MP::PlayerId>(2), id<TES3MP::EntityId>(101),
+                id<TES3MP::AppearanceId>(1), root(20), TES3MP::LinearVelocity3(0, 0, 0),
+                TES3MP::EntityRevision::initial(), TES3MP::AuthorityEpoch::initial(), TES3MP::ServerTick::initial()),
+        };
+        const std::array sessions{ TES3MP::CanonicalSessionProgress(id<TES3MP::SessionId>(1),
+            TES3MP::SessionGeneration::initial(), id<TES3MP::PlayerId>(1), id<TES3MP::EntityId>(100), std::nullopt) };
+        const auto spatialValue = TES3MP::createCanonicalServerState(spatialPlayerStates, sessions);
+        const auto* spatial = std::get_if<TES3MP::CanonicalServerState>(&spatialValue);
+        if (!spatial)
+            return false;
+        auto sources = combatSources();
+        const std::array spells{
+            TES3MP::DirectSpellProfile{ id<TES3MP::SpellRecordId>(9), TES3MP::DirectMagicSchool::Destruction, 0, 0.f,
+                true,
+                { { TES3MP::DirectMagicTarget::Other, TES3MP::DirectMagicEffectKind::DamageHealth, 1.f, 1.f, 4, 30,
+                      TES3MP::DirectMagicStacking::Stack },
+                    { TES3MP::DirectMagicTarget::Other, TES3MP::DirectMagicEffectKind::DamageHealth, 1.f, 1.f, 4, 30,
+                        TES3MP::DirectMagicStacking::Refresh } } },
+            TES3MP::DirectSpellProfile{ id<TES3MP::SpellRecordId>(10), TES3MP::DirectMagicSchool::Mysticism, 0, 0.f,
+                true,
+                { { TES3MP::DirectMagicTarget::Other, TES3MP::DirectMagicEffectKind::Dispel, 100.f, 100.f, 0, 30,
+                    TES3MP::DirectMagicStacking::Refresh } } },
+        };
+        const auto magic = TES3MP::DirectMagicCatalog::create(
+            TES3MP::testContentManifestId(), sources.items, {}, {}, {}, {}, {}, spells);
+        if (!magic)
+            return false;
+        TES3MP::AuthoritativeMagicUse use{ .caster = id<TES3MP::PlayerId>(1),
+            .sourceKind = TES3MP::MagicUseSourceKind::Spell,
+            .sourceId = 9,
+            .targetKind = TES3MP::MagicUseTargetKind::Actor,
+            .targetId = 2,
+            .sourceTick = id<TES3MP::ServerTick>(5),
+            .expectedCasterRevision = TES3MP::CombatRevision::initial(),
+            .expectedTargetRevision = TES3MP::CombatRevision::initial(),
+            .expectedInventoryRevision = TES3MP::InventoryRevision::initial() };
+        const auto started = TES3MP::prepareAuthoritativeMagicUse(
+            *world, sources.inventory, *spatial, spatialActors(), *magic, {}, id<TES3MP::ServerTick>(5), use);
+        if (!started.candidate || started.effectEvents.size() != 6
+            || !std::ranges::all_of(started.effectEvents,
+                [](const auto& event) {
+                    return event.eventKind == TES3MP::AuthoritativeMagicEffectEventKind::Started;
+                }))
+            return false;
+        const auto firstIds = started.effectEvents;
+        use.sourceTick = id<TES3MP::ServerTick>(6);
+        use.expectedCasterRevision = id<TES3MP::CombatRevision>(2);
+        use.expectedTargetRevision = id<TES3MP::CombatRevision>(2);
+        const auto refreshed = TES3MP::prepareAuthoritativeMagicUse(*started.candidate, sources.inventory, *spatial,
+            spatialActors(), *magic, {}, id<TES3MP::ServerTick>(6), use);
+        if (!refreshed.candidate || refreshed.effectEvents.size() != 6
+            || refreshed.candidate->nextActiveMagicEffectId().value()
+                != started.candidate->nextActiveMagicEffectId().value() + 3)
+            return false;
+        for (std::size_t index = 0; index < firstIds.size(); ++index)
+            if ((index < 3
+                    && (refreshed.effectEvents[index].instanceId == firstIds[index].instanceId
+                        || refreshed.effectEvents[index].eventKind
+                            != TES3MP::AuthoritativeMagicEffectEventKind::Started))
+                || (index >= 3
+                    && (refreshed.effectEvents[index].instanceId != firstIds[index].instanceId
+                        || refreshed.effectEvents[index].eventKind
+                            != TES3MP::AuthoritativeMagicEffectEventKind::Updated))
+                || refreshed.effectEvents[index].endTick != id<TES3MP::ServerTick>(10))
+                return false;
+
+        const auto advanced = TES3MP::advanceAuthoritativeCombat(*refreshed.candidate, sources.inventory,
+            sources.items, sources.weapons, *spatial, spatialActors(), settings(), { 100, 100, 0.5f },
+            id<TES3MP::ServerTick>(8), &*magic);
+        const auto* step = std::get_if<TES3MP::CombatSimulationStep>(&advanced);
+        const auto* firstPlayer = step ? step->combat.findPlayer(id<TES3MP::PlayerId>(1)) : nullptr;
+        const auto* secondPlayer = step ? step->combat.findPlayer(id<TES3MP::PlayerId>(2)) : nullptr;
+        const auto* actor = step ? step->combat.findActor(id<TES3MP::ActorId>(2)) : nullptr;
+        if (!step || step->magicEffectEvents.size() != 9 || !firstPlayer || !secondPlayer || !actor
+            || firstPlayer->victim.health != 96.5f || secondPlayer->victim.health != 96.5f
+            || actor->stats.health != 16.5f
+            || firstPlayer->activeMagicEffects.size() != 3 || secondPlayer->activeMagicEffects.size() != 3
+            || actor->activeMagicEffects.size() != 3)
+            return false;
+
+        use.sourceId = 10;
+        use.sourceTick = id<TES3MP::ServerTick>(8);
+        use.expectedCasterRevision = firstPlayer->revision;
+        use.expectedTargetRevision = actor->revision;
+        const auto dispelled = TES3MP::prepareAuthoritativeMagicUse(
+            step->combat, sources.inventory, *spatial, spatialActors(), *magic, {}, id<TES3MP::ServerTick>(8), use);
+        if (!dispelled.candidate || dispelled.effectEvents.size() != 9
+            || !std::ranges::all_of(dispelled.effectEvents,
+                [](const auto& event) {
+                    return event.eventKind == TES3MP::AuthoritativeMagicEffectEventKind::Ended
+                        && event.endReason == TES3MP::AuthoritativeMagicEffectEndReason::Dispelled;
+                })
+            || !dispelled.candidate->findPlayer(id<TES3MP::PlayerId>(1))->activeMagicEffects.empty()
+            || !dispelled.candidate->findPlayer(id<TES3MP::PlayerId>(2))->activeMagicEffects.empty()
+            || !dispelled.candidate->findActor(id<TES3MP::ActorId>(2))->activeMagicEffects.empty())
+            return false;
+
+        const auto expired = TES3MP::advanceAuthoritativeCombat(*refreshed.candidate, sources.inventory,
+            sources.items, sources.weapons, *spatial, spatialActors(), settings(), { 100, 100, 0.5f },
+            id<TES3MP::ServerTick>(10), &*magic);
+        const auto* expiredStep = std::get_if<TES3MP::CombatSimulationStep>(&expired);
+        return expiredStep && expiredStep->combat.findPlayer(id<TES3MP::PlayerId>(1))->activeMagicEffects.empty()
+            && expiredStep->combat.findPlayer(id<TES3MP::PlayerId>(2))->activeMagicEffects.empty()
+            && expiredStep->combat.findActor(id<TES3MP::ActorId>(2))->activeMagicEffects.empty()
+            && std::ranges::count_if(expiredStep->magicEffectEvents,
+                   [](const auto& event) {
+                       return event.eventKind == TES3MP::AuthoritativeMagicEffectEventKind::Ended
+                           && event.endReason == TES3MP::AuthoritativeMagicEffectEndReason::Expired;
+                   })
+                == 9;
+    }
+
+    bool oversized_area_target_set_is_rejected_atomically()
+    {
+        const auto baseline = combatWorld();
+        std::vector<TES3MP::CanonicalPlayerCombatState> combatPlayers;
+        std::vector<TES3MP::CanonicalPlayerEntityState> spatialPlayerStates;
+        combatPlayers.reserve(TES3MP::MaximumAreaMagicTargets + 1);
+        spatialPlayerStates.reserve(TES3MP::MaximumAreaMagicTargets + 1);
+        for (std::uint64_t value = 1; value <= TES3MP::MaximumAreaMagicTargets + 1; ++value)
+        {
+            auto combatPlayer = baseline.players().front();
+            combatPlayer.playerId = id<TES3MP::PlayerId>(value);
+            combatPlayer.knownSpells = value == 1 ? std::vector{ id<TES3MP::SpellRecordId>(9) }
+                                                  : std::vector<TES3MP::SpellRecordId>{};
+            combatPlayer.magicka = 100.f;
+            combatPlayer.maximumMagicka = 100.f;
+            combatPlayers.push_back(std::move(combatPlayer));
+            spatialPlayerStates.emplace_back(id<TES3MP::PlayerId>(value), id<TES3MP::EntityId>(100 + value),
+                id<TES3MP::AppearanceId>(1), root(static_cast<std::int64_t>(value)),
+                TES3MP::LinearVelocity3(0, 0, 0), TES3MP::EntityRevision::initial(),
+                TES3MP::AuthorityEpoch::initial(), TES3MP::ServerTick::initial());
+        }
+        const auto worldValue
+            = TES3MP::createCanonicalCombatWorld(combatPlayers, baseline.actors(), baseline.randomState());
+        const std::array sessions{ TES3MP::CanonicalSessionProgress(id<TES3MP::SessionId>(1),
+            TES3MP::SessionGeneration::initial(), id<TES3MP::PlayerId>(1), id<TES3MP::EntityId>(101),
+            std::nullopt) };
+        const auto spatialValue = TES3MP::createCanonicalServerState(spatialPlayerStates, sessions);
+        const auto* world = std::get_if<TES3MP::CanonicalCombatWorld>(&worldValue);
+        const auto* spatial = std::get_if<TES3MP::CanonicalServerState>(&spatialValue);
+        if (!world || !spatial)
+            return false;
+        auto sources = combatSources();
+        const std::array spells{ TES3MP::DirectSpellProfile{ id<TES3MP::SpellRecordId>(9),
+            TES3MP::DirectMagicSchool::Destruction, 10, 0.f, true,
+            { { TES3MP::DirectMagicTarget::Other, TES3MP::DirectMagicEffectKind::DamageHealth, 1.f, 1.f, 4, 100,
+                TES3MP::DirectMagicStacking::Refresh } } } };
+        const auto magic = TES3MP::DirectMagicCatalog::create(
+            TES3MP::testContentManifestId(), sources.items, {}, {}, {}, {}, {}, spells);
+        if (!magic)
+            return false;
+        const TES3MP::AuthoritativeMagicUse use{ .caster = id<TES3MP::PlayerId>(1),
+            .sourceKind = TES3MP::MagicUseSourceKind::Spell,
+            .sourceId = 9,
+            .targetKind = TES3MP::MagicUseTargetKind::Player,
+            .targetId = 2,
+            .sourceTick = id<TES3MP::ServerTick>(5),
+            .expectedCasterRevision = TES3MP::CombatRevision::initial(),
+            .expectedTargetRevision = TES3MP::CombatRevision::initial(),
+            .expectedInventoryRevision = TES3MP::InventoryRevision::initial() };
+        const auto prepared = TES3MP::prepareAuthoritativeMagicUse(
+            *world, sources.inventory, *spatial, spatialActors(), *magic, {}, id<TES3MP::ServerTick>(5), use);
+        return prepared.disposition == TES3MP::AuthoritativeMagicUseDisposition::AreaTargetLimitExceeded
+            && !prepared.candidate && !prepared.candidateInventory && !prepared.event
+            && prepared.effectEvents.empty() && world->findPlayer(id<TES3MP::PlayerId>(1))->magicka == 100.f;
+    }
 }
 int main()
 {
@@ -1154,6 +1345,8 @@ int main()
             && trap_magic_resolves_into_one_combat_candidate()
             && spell_cast_success_and_failure_are_server_owned_and_atomic()
             && enchanted_item_use_targets_players_and_consumes_charge_atomically()
+            && timed_area_effects_refresh_stack_tick_dispel_and_expire_atomically()
+            && oversized_area_target_set_is_rejected_atomically()
         ? 0
         : 1;
 }

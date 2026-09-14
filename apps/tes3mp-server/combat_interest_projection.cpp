@@ -1,6 +1,7 @@
 #include "combat_interest_projection.hpp"
 
 #include <array>
+#include <algorithm>
 #include <vector>
 
 namespace TES3MP::ServerApp
@@ -49,6 +50,21 @@ namespace TES3MP::ServerApp
                 { state->playerId, state->revision, state->victim.health, state->maximumHealth, state->victim.fatigue,
                     state->maximumFatigue, state->magicka, state->maximumMagicka, state->victim.dead });
         }
+        std::vector<ActiveMagicEffectSnapshot> activeEffects;
+        const auto appendEffects = [&](MagicUseTargetKind kind, std::uint64_t id,
+                                       std::span<const CanonicalActiveMagicEffect> effects) {
+            for (const auto& effect : effects)
+                activeEffects.push_back({ effect.instanceId, effect.caster, effect.sourceKind, effect.sourceId, kind,
+                    id, effect.kind, effect.magnitudePerSecond, effect.startTick, effect.endTick });
+        };
+        appendEffects(MagicUseTargetKind::Player, self->playerId.value(), self->activeMagicEffects);
+        for (const auto& visiblePlayer : visiblePlayers)
+            appendEffects(MagicUseTargetKind::Player, visiblePlayer.playerId.value(),
+                combat.findPlayer(visiblePlayer.playerId)->activeMagicEffects);
+        for (const auto& visibleActor : visible)
+            appendEffects(MagicUseTargetKind::Actor, visibleActor.actorId.value(),
+                combat.findActor(visibleActor.actorId)->activeMagicEffects);
+        std::ranges::sort(activeEffects, {}, &ActiveMagicEffectSnapshot::instanceId);
         const std::array skillValues{
             self->blockSkill,
             self->weaponSkills[static_cast<std::size_t>(MeleeWeaponSkill::ShortBlade)],
@@ -79,7 +95,7 @@ namespace TES3MP::ServerApp
         auto created = LatestWinsCombatSnapshot::create(target, session->sessionGeneration(), tick, canonicalRevision,
             session->playerId(), self->revision, self->victim.health, self->maximumHealth, self->stats.fatigue,
             self->maximumFatigue, self->magicka, self->maximumMagicka, self->victim.dead, visible, skills,
-            visiblePlayers);
+            visiblePlayers, activeEffects);
         auto* snapshot = std::get_if<LatestWinsCombatSnapshot>(&created);
         return snapshot ? std::optional<LatestWinsCombatSnapshot>(std::move(*snapshot)) : std::nullopt;
     }
@@ -92,7 +108,8 @@ namespace TES3MP::ServerApp
         const CanonicalActorWorld& spatialActors, SessionId target, ServerTick tick,
         CanonicalRevision canonicalRevision, std::span<const AuthoritativeMeleeEvent> events,
         std::span<const AuthoritativeActorMeleeEvent> actorEvents,
-        std::span<const AuthoritativeMagicUseEvent> magicEvents)
+        std::span<const AuthoritativeMagicUseEvent> magicEvents,
+        std::span<const AuthoritativeMagicEffectEvent> magicEffectEvents)
     try
     {
         const auto* session = players.findActiveSession(target);
@@ -102,6 +119,7 @@ namespace TES3MP::ServerApp
         std::vector<MeleeCombatEvent> visible;
         std::vector<ActorMeleeCombatEvent> visibleActorEvents;
         std::vector<MagicUseCombatEvent> visibleMagicEvents;
+        std::vector<MagicEffectCombatEvent> visibleMagicEffectEvents;
         for (const auto& event : events)
         {
             const auto* actor = spatialActors.find(event.target);
@@ -134,8 +152,33 @@ namespace TES3MP::ServerApp
                 event.targetResolution.fatigueRestore - event.targetResolution.fatigueDamage,
                 event.targetResolution.magickaRestore - event.targetResolution.magickaDamage, event.targetDied });
         }
+        for (const auto& event : magicEffectEvents)
+        {
+            const Transform* effectTarget = nullptr;
+            if (event.targetKind == MagicUseTargetKind::Player)
+            {
+                const auto id = PlayerId::fromValue(event.targetId);
+                const auto* state = id ? players.findPlayer(*id) : nullptr;
+                if (state)
+                    effectTarget = &state->transform();
+            }
+            else if (event.targetKind == MagicUseTargetKind::Actor)
+            {
+                const auto id = ActorId::fromValue(event.targetId);
+                const auto* state = id ? spatialActors.find(*id) : nullptr;
+                if (state)
+                    effectTarget = &state->root();
+            }
+            if (!effectTarget || effectTarget->cell() != player->transform().cell())
+                continue;
+            visibleMagicEffectEvents.push_back({ event.instanceId,
+                static_cast<MagicEffectCombatEventKind>(event.eventKind),
+                static_cast<MagicEffectCombatEndReason>(event.endReason), event.targetKind, event.targetId,
+                event.effectKind, event.magnitudePerSecond, event.appliedDelta, event.startTick, event.endTick,
+                event.targetRevision });
+        }
         auto created = ReliableCombatEventBatch::create(target, session->sessionGeneration(), tick, canonicalRevision,
-            visible, visibleActorEvents, visibleMagicEvents);
+            visible, visibleActorEvents, visibleMagicEvents, visibleMagicEffectEvents);
         auto* batch = std::get_if<ReliableCombatEventBatch>(&created);
         return batch ? std::optional<ReliableCombatEventBatch>(std::move(*batch)) : std::nullopt;
     }

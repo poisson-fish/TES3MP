@@ -69,10 +69,14 @@ namespace
             value<TES3MP::ActorId>(2), value<TES3MP::CombatRevision>(3), 40.f, 50.f, 20.f, 30.f, 15.f, 25.f, false } };
         const std::array players{ TES3MP::PlayerCombatSnapshot{
             value<TES3MP::PlayerId>(8), value<TES3MP::CombatRevision>(4), 60.f, 80.f, 30.f, 90.f, 20.f, 40.f, false } };
+        const std::array activeEffects{ TES3MP::ActiveMagicEffectSnapshot{ value<TES3MP::ActiveMagicEffectId>(3),
+            value<TES3MP::PlayerId>(7), TES3MP::MagicUseSourceKind::Spell, 22,
+            TES3MP::MagicUseTargetKind::Player, 8, TES3MP::DirectMagicEffectKind::FireDamage, 4.f,
+            value<TES3MP::ServerTick>(5), value<TES3MP::ServerTick>(15) } };
         auto created = TES3MP::LatestWinsCombatSnapshot::create(value<TES3MP::SessionId>(1),
             TES3MP::SessionGeneration::initial(), value<TES3MP::ServerTick>(5), value<TES3MP::CanonicalRevision>(6),
             value<TES3MP::PlayerId>(7), value<TES3MP::CombatRevision>(8), 75.f, 100.f, 90.f, 120.f, 40.f, 60.f, false,
-            actors, selfSkills, players);
+            actors, selfSkills, players, activeEffects);
         const auto snapshot = std::get<TES3MP::LatestWinsCombatSnapshot>(created);
         const auto decodedSnapshot
             = TES3MP::decodeLatestWinsCombatSnapshot(TES3MP::encodeLatestWinsCombatSnapshot(snapshot));
@@ -86,9 +90,15 @@ namespace
             TES3MP::MagicUseSourceKind::Spell, 22, TES3MP::MagicUseTargetKind::Player, 8,
             value<TES3MP::CombatRevision>(9), value<TES3MP::CombatRevision>(5), true, 0.f, 5.f, -10.f, -7.f, -3.f, -2.f,
             false } };
+        const std::array magicEffectEvents{ TES3MP::MagicEffectCombatEvent{
+            value<TES3MP::ActiveMagicEffectId>(3), TES3MP::MagicEffectCombatEventKind::Updated,
+            TES3MP::MagicEffectCombatEndReason::None, TES3MP::MagicUseTargetKind::Player, 8,
+            TES3MP::DirectMagicEffectKind::FireDamage, 4.f, -0.064f, value<TES3MP::ServerTick>(5),
+            value<TES3MP::ServerTick>(15), value<TES3MP::CombatRevision>(5) } };
         auto batch = std::get<TES3MP::ReliableCombatEventBatch>(
             TES3MP::ReliableCombatEventBatch::create(value<TES3MP::SessionId>(1), TES3MP::SessionGeneration::initial(),
-                value<TES3MP::ServerTick>(5), value<TES3MP::CanonicalRevision>(6), events, actorEvents, magicEvents));
+                value<TES3MP::ServerTick>(5), value<TES3MP::CanonicalRevision>(6), events, actorEvents, magicEvents,
+                magicEffectEvents));
         const auto decodedBatch = TES3MP::decodeReliableCombatEventBatch(TES3MP::encodeReliableCombatEventBatch(batch));
         return std::get<TES3MP::LatestWinsCombatSnapshot>(decodedSnapshot) == snapshot
             && std::get<TES3MP::ReliableCombatEventBatch>(decodedBatch) == batch;
@@ -119,10 +129,20 @@ namespace
             TES3MP::SessionGeneration::initial(), TES3MP::ServerTick::initial(), TES3MP::CanonicalRevision::initial(),
             value<TES3MP::PlayerId>(1), TES3MP::CombatRevision::initial(), 1.f, 1.f, 1.f, 1.f, 1.f, 1.f, false, {},
             invalidSkills);
+        const std::array invalidLifecycle{ TES3MP::MagicEffectCombatEvent{
+            value<TES3MP::ActiveMagicEffectId>(3), TES3MP::MagicEffectCombatEventKind::Ended,
+            TES3MP::MagicEffectCombatEndReason::None, TES3MP::MagicUseTargetKind::Player, 2,
+            TES3MP::DirectMagicEffectKind::DamageHealth, 1.f, 0.f, value<TES3MP::ServerTick>(1),
+            value<TES3MP::ServerTick>(2), TES3MP::CombatRevision::initial() } };
+        const auto lifecycle = TES3MP::ReliableCombatEventBatch::create(value<TES3MP::SessionId>(1),
+            TES3MP::SessionGeneration::initial(), TES3MP::ServerTick::initial(),
+            TES3MP::CanonicalRevision::initial(), {}, {}, {}, invalidLifecycle);
         return std::holds_alternative<TES3MP::CombatReplicationDecodeError>(invalid)
             && std::holds_alternative<TES3MP::CombatReplicationDecodeError>(order)
             && std::holds_alternative<TES3MP::CombatReplicationDecodeError>(magicka)
-            && std::holds_alternative<TES3MP::CombatReplicationDecodeError>(progression);
+            && std::holds_alternative<TES3MP::CombatReplicationDecodeError>(progression)
+            && std::get<TES3MP::CombatReplicationDecodeError>(lifecycle).code
+                == TES3MP::CombatReplicationDecodeErrorCode::InvalidMagicEffect;
     }
 
     bool frame_classes_are_pinned()

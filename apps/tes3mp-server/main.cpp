@@ -482,7 +482,8 @@ int main(int argc, char** argv)
             restoredCombat->randomWords[1], restoredCombat->randomWords[2], restoredCombat->randomWords[3]);
         auto world = random
             ? TES3MP::createCanonicalCombatWorld(
-                  restoredCombat->players, restoredCombat->actors, *random, restoredCombat->lastSimulationTick)
+                  restoredCombat->players, restoredCombat->actors, *random, restoredCombat->lastSimulationTick,
+                  restoredCombat->nextActiveMagicEffectId)
             : std::variant<TES3MP::CanonicalCombatWorld, TES3MP::CanonicalCombatWorldError>(
                   TES3MP::CanonicalCombatWorldError{ TES3MP::CanonicalCombatWorldErrorCode::InvalidStat });
         auto* restored = std::get_if<TES3MP::CanonicalCombatWorld>(&world);
@@ -579,7 +580,10 @@ int main(int argc, char** argv)
         if (!combatContent->magic.spells().empty()
             || std::ranges::any_of(combatContent->magic.enchantments(),
                 [](const auto& value) { return value.kind == TES3MP::DirectMagicEnchantmentKind::WhenUsed; }))
+        {
             optionalCapabilities.push_back(TES3MP::authoritativeInstantMagicCapability());
+            optionalCapabilities.push_back(TES3MP::authoritativeTimedAreaMagicCapability());
+        }
         if (interactiveObjectWorld && inventoryWorld)
             optionalCapabilities.push_back(TES3MP::authoritativeSecurityCapability());
     }

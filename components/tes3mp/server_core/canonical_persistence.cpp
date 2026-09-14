@@ -496,6 +496,55 @@ namespace
             && readFloat(reader, value.frostShield);
     }
 
+    void writeActiveEffects(Writer& writer, std::span<const CanonicalActiveMagicEffect> effects)
+    {
+        writer.fixed(static_cast<std::uint16_t>(effects.size()));
+        for (const auto& effect : effects)
+        {
+            writeStrong(writer, effect.instanceId);
+            writeStrong(writer, effect.caster);
+            writer.fixed(static_cast<std::uint8_t>(effect.sourceKind));
+            writer.fixed(effect.sourceId);
+            writer.fixed(effect.effectIndex);
+            writer.fixed(static_cast<std::uint8_t>(effect.kind));
+            writeFloat(writer, effect.magnitudePerSecond);
+            writeStrong(writer, effect.startTick);
+            writeStrong(writer, effect.endTick);
+            writeStrong(writer, effect.lastAppliedTick);
+        }
+    }
+
+    bool readActiveEffects(Reader& reader, std::vector<CanonicalActiveMagicEffect>& effects) noexcept
+    {
+        const auto count = reader.fixed<std::uint16_t>();
+        if (!count || *count > MaximumActiveMagicEffectsPerCombatant)
+            return false;
+        effects.reserve(*count);
+        for (std::uint16_t index = 0; index < *count; ++index)
+        {
+            auto instance = readStrong<ActiveMagicEffectId>(reader);
+            auto caster = readStrong<PlayerId>(reader);
+            const auto sourceKind = reader.fixed<std::uint8_t>();
+            const auto sourceId = reader.fixed<std::uint64_t>();
+            const auto effectIndex = reader.fixed<std::uint8_t>();
+            const auto kind = reader.fixed<std::uint8_t>();
+            float magnitude = 0.f;
+            if (!instance || !caster || !sourceKind || !sourceId || *sourceId == 0 || !effectIndex || !kind
+                || *sourceKind > static_cast<std::uint8_t>(MagicUseSourceKind::EnchantedItem)
+                || *kind >= static_cast<std::uint8_t>(DirectMagicEffectKind::Dispel)
+                || !readFloat(reader, magnitude))
+                return false;
+            auto start = readStrong<ServerTick>(reader);
+            auto end = readStrong<ServerTick>(reader);
+            auto applied = readStrong<ServerTick>(reader);
+            if (!start || !end || !applied)
+                return false;
+            effects.push_back({ *instance, *caster, static_cast<MagicUseSourceKind>(*sourceKind), *sourceId,
+                *effectIndex, static_cast<DirectMagicEffectKind>(*kind), magnitude, *start, *end, *applied });
+        }
+        return true;
+    }
+
     void writeCombat(Writer& writer, const CanonicalDurableCombatState& combat)
     {
         writer.fixed(static_cast<std::uint32_t>(combat.players.size()));
@@ -543,6 +592,7 @@ namespace
             writer.fixed(static_cast<std::uint32_t>(player.contractedDiseases.size()));
             for (const auto disease : player.contractedDiseases)
                 writeStrong(writer, disease);
+            writeActiveEffects(writer, player.activeMagicEffects);
         }
         writer.fixed(static_cast<std::uint32_t>(combat.actors.size()));
         for (const auto& actor : combat.actors)
@@ -565,10 +615,12 @@ namespace
             writeFloat(writer, actor.maximumMagicka);
             writeBool(writer, actor.creature);
             writeDefense(writer, actor.magicDefense);
+            writeActiveEffects(writer, actor.activeMagicEffects);
         }
         for (const auto word : combat.randomWords)
             writer.fixed(word);
         writeOptionalStrong(writer, combat.lastSimulationTick);
+        writeStrong(writer, combat.nextActiveMagicEffectId);
     }
 
     std::optional<CanonicalDurableCombatState> readCombat(Reader& reader) noexcept
@@ -652,6 +704,8 @@ namespace
                     return std::nullopt;
                 player.contractedDiseases.push_back(*disease);
             }
+            if (!readActiveEffects(reader, player.activeMagicEffects))
+                return std::nullopt;
             result.players.push_back(std::move(player));
         }
         const auto actorCount = reader.fixed<std::uint32_t>();
@@ -689,6 +743,8 @@ namespace
                 || !readFloat(reader, actor.maximumMagicka) || !readBool(reader, actor.creature)
                 || !readDefense(reader, actor.magicDefense))
                 return std::nullopt;
+            if (!readActiveEffects(reader, actor.activeMagicEffects))
+                return std::nullopt;
             result.actors.push_back(std::move(actor));
         }
         for (auto& word : result.randomWords)
@@ -701,11 +757,16 @@ namespace
         if (std::ranges::all_of(result.randomWords, [](auto value) { return value == 0; })
             || !readOptionalStrong(reader, result.lastSimulationTick))
             return std::nullopt;
+        const auto nextEffect = readStrong<ActiveMagicEffectId>(reader);
+        if (!nextEffect)
+            return std::nullopt;
+        result.nextActiveMagicEffectId = *nextEffect;
         const auto random = RandomStateV1::fromWords(
             result.randomWords[0], result.randomWords[1], result.randomWords[2], result.randomWords[3]);
         if (!random
             || !std::holds_alternative<CanonicalCombatWorld>(
-                createCanonicalCombatWorld(result.players, result.actors, *random, result.lastSimulationTick)))
+                createCanonicalCombatWorld(result.players, result.actors, *random, result.lastSimulationTick,
+                    result.nextActiveMagicEffectId)))
             return std::nullopt;
         return result;
     }
@@ -1635,11 +1696,19 @@ namespace
             if (durablePlayer(durablePlayers, player.playerId))
                 result.players.push_back(player);
         result.actors.assign(world->actors().begin(), world->actors().end());
+        for (auto& player : result.players)
+            std::erase_if(player.activeMagicEffects,
+                [&](const auto& effect) { return !durablePlayer(durablePlayers, effect.caster); });
         for (auto& actor : result.actors)
+        {
             if (actor.aggressionTarget && !durablePlayer(durablePlayers, *actor.aggressionTarget))
                 actor.aggressionTarget.reset();
+            std::erase_if(actor.activeMagicEffects,
+                [&](const auto& effect) { return !durablePlayer(durablePlayers, effect.caster); });
+        }
         result.randomWords = world->randomState().words();
         result.lastSimulationTick = world->lastSimulationTick();
+        result.nextActiveMagicEffectId = world->nextActiveMagicEffectId();
         return result;
     }
 
@@ -1808,11 +1877,22 @@ namespace TES3MP
         {
             const auto random = RandomStateV1::fromWords(
                 combat->randomWords[0], combat->randomWords[1], combat->randomWords[2], combat->randomWords[3]);
+            const auto effectsInvalid = [&](std::span<const CanonicalActiveMagicEffect> effects) {
+                return std::ranges::any_of(effects, [&](const auto& effect) {
+                    return effect.startTick > checkpointTick || effect.lastAppliedTick > checkpointTick
+                        || !durablePlayer(players, effect.caster);
+                });
+            };
             if (!random
                 || std::ranges::any_of(
                     combat->players, [&](const auto& player) { return !durablePlayer(players, player.playerId); })
+                || std::ranges::any_of(
+                    combat->players, [&](const auto& player) { return effectsInvalid(player.activeMagicEffects); })
+                || std::ranges::any_of(
+                    combat->actors, [&](const auto& actor) { return effectsInvalid(actor.activeMagicEffects); })
                 || !std::holds_alternative<CanonicalCombatWorld>(
-                    createCanonicalCombatWorld(combat->players, combat->actors, *random, combat->lastSimulationTick)))
+                    createCanonicalCombatWorld(combat->players, combat->actors, *random, combat->lastSimulationTick,
+                        combat->nextActiveMagicEffectId)))
                 return std::nullopt;
         }
         if (objects)

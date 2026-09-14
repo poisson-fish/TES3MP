@@ -32,12 +32,13 @@ namespace TES3MP::OpenMWAdapter
 
         ClientHello makeClientHello(ContentManifestId contentManifest)
         {
-            auto versions = std::get<ProtocolVersionRange>(ProtocolVersionRange::create(1, 9, 9));
+            auto versions = std::get<ProtocolVersionRange>(ProtocolVersionRange::create(1, 10, 10));
             const std::array optional{ vrPoseCapability(), actorReplicationCapability(),
                 interactiveObjectReplicationCapability(), inventoryReplicationCapability(),
                 combatReplicationCapability(), characterCreationCapability(), dialogueChoiceCapability(),
                 weatherReplicationCapability(), worldTimeReplicationCapability(), authoritativeWaitRestCapability(),
-                authoritativeSecurityCapability(), authoritativeInstantMagicCapability() };
+                authoritativeSecurityCapability(), authoritativeInstantMagicCapability(),
+                authoritativeTimedAreaMagicCapability() };
             auto offer = std::get<CapabilityOffer>(
                 CapabilityOffer::create(std::move(versions), optional, {}, contentManifest));
             return ClientHello::fromOffer(std::move(offer));
@@ -83,12 +84,14 @@ namespace TES3MP::OpenMWAdapter
                     combatReplicationCapability());
         }
 
-        bool instantMagicNegotiated(const ClientSessionRuntime& runtime) noexcept
+        bool directMagicNegotiated(const ClientSessionRuntime& runtime) noexcept
         {
             const auto& hello = runtime.session().stateMachine().negotiatedHello();
             return hello
                 && std::binary_search(hello->negotiatedCapabilities().begin(), hello->negotiatedCapabilities().end(),
-                    authoritativeInstantMagicCapability());
+                    authoritativeInstantMagicCapability())
+                && std::binary_search(hello->negotiatedCapabilities().begin(), hello->negotiatedCapabilities().end(),
+                    authoritativeTimedAreaMagicCapability());
         }
 
         bool dialogueChoicesNegotiated(const ClientSessionRuntime& runtime) noexcept
@@ -126,7 +129,7 @@ namespace TES3MP::OpenMWAdapter
         bool securityNegotiated(const ClientSessionRuntime& runtime) noexcept
         {
             const auto& hello = runtime.session().stateMachine().negotiatedHello();
-            return hello && hello->selectedVersion().major == 1 && hello->selectedVersion().minor >= 9
+            return hello && hello->selectedVersion().major == 1 && hello->selectedVersion().minor >= 10
                 && std::binary_search(hello->negotiatedCapabilities().begin(), hello->negotiatedCapabilities().end(),
                     authoritativeSecurityCapability());
         }
@@ -704,7 +707,7 @@ namespace TES3MP::OpenMWAdapter
                     }
                 }
                 if (mReady && !mAwaitingResync && !mPendingCellTransition && !mDeferredCellTransition
-                    && !captured.transition && instantMagicNegotiated(*mRuntime))
+                    && !captured.transition && directMagicNegotiated(*mRuntime))
                 {
                     if (auto magic = mInput.captureMagicUse())
                     {

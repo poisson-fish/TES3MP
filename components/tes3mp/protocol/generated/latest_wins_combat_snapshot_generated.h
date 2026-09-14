@@ -27,8 +27,73 @@ struct PlayerCombatSnapshot;
 
 struct CombatSkillSnapshot;
 
+struct ActiveMagicEffectSnapshot;
+
 struct LatestWinsCombatSnapshot;
 struct LatestWinsCombatSnapshotBuilder;
+
+enum class MagicUseSourceKind : uint8_t {
+  Spell = 0,
+  EnchantedItem = 1,
+  MIN = Spell,
+  MAX = EnchantedItem
+};
+
+inline const MagicUseSourceKind (&EnumValuesMagicUseSourceKind())[2] {
+  static const MagicUseSourceKind values[] = {
+    MagicUseSourceKind::Spell,
+    MagicUseSourceKind::EnchantedItem
+  };
+  return values;
+}
+
+inline const char * const *EnumNamesMagicUseSourceKind() {
+  static const char * const names[3] = {
+    "Spell",
+    "EnchantedItem",
+    nullptr
+  };
+  return names;
+}
+
+inline const char *EnumNameMagicUseSourceKind(MagicUseSourceKind e) {
+  if (::flatbuffers::IsOutRange(e, MagicUseSourceKind::Spell, MagicUseSourceKind::EnchantedItem)) return "";
+  const size_t index = static_cast<size_t>(e);
+  return EnumNamesMagicUseSourceKind()[index];
+}
+
+enum class MagicUseTargetKind : uint8_t {
+  Self = 0,
+  Player = 1,
+  Actor = 2,
+  MIN = Self,
+  MAX = Actor
+};
+
+inline const MagicUseTargetKind (&EnumValuesMagicUseTargetKind())[3] {
+  static const MagicUseTargetKind values[] = {
+    MagicUseTargetKind::Self,
+    MagicUseTargetKind::Player,
+    MagicUseTargetKind::Actor
+  };
+  return values;
+}
+
+inline const char * const *EnumNamesMagicUseTargetKind() {
+  static const char * const names[4] = {
+    "Self",
+    "Player",
+    "Actor",
+    nullptr
+  };
+  return names;
+}
+
+inline const char *EnumNameMagicUseTargetKind(MagicUseTargetKind e) {
+  if (::flatbuffers::IsOutRange(e, MagicUseTargetKind::Self, MagicUseTargetKind::Actor)) return "";
+  const size_t index = static_cast<size_t>(e);
+  return EnumNamesMagicUseTargetKind()[index];
+}
 
 FLATBUFFERS_MANUALLY_ALIGNED_STRUCT(8) ActorCombatSnapshot FLATBUFFERS_FINAL_CLASS {
  private:
@@ -224,6 +289,82 @@ FLATBUFFERS_MANUALLY_ALIGNED_STRUCT(4) CombatSkillSnapshot FLATBUFFERS_FINAL_CLA
 };
 FLATBUFFERS_STRUCT_END(CombatSkillSnapshot, 12);
 
+FLATBUFFERS_MANUALLY_ALIGNED_STRUCT(8) ActiveMagicEffectSnapshot FLATBUFFERS_FINAL_CLASS {
+ private:
+  uint64_t instance_id_;
+  uint64_t caster_player_id_;
+  uint64_t source_id_;
+  uint64_t target_id_;
+  uint64_t start_tick_;
+  uint64_t end_tick_;
+  float magnitude_per_second_;
+  uint8_t source_kind_;
+  uint8_t target_kind_;
+  uint8_t effect_kind_;
+  int8_t padding0__;
+
+ public:
+  ActiveMagicEffectSnapshot()
+      : instance_id_(0),
+        caster_player_id_(0),
+        source_id_(0),
+        target_id_(0),
+        start_tick_(0),
+        end_tick_(0),
+        magnitude_per_second_(0),
+        source_kind_(0),
+        target_kind_(0),
+        effect_kind_(0),
+        padding0__(0) {
+    (void)padding0__;
+  }
+  ActiveMagicEffectSnapshot(uint64_t _instance_id, uint64_t _caster_player_id, uint64_t _source_id, uint64_t _target_id, uint64_t _start_tick, uint64_t _end_tick, float _magnitude_per_second, TES3MP::Protocol::Schema::CombatSnapshot::MagicUseSourceKind _source_kind, TES3MP::Protocol::Schema::CombatSnapshot::MagicUseTargetKind _target_kind, uint8_t _effect_kind)
+      : instance_id_(::flatbuffers::EndianScalar(_instance_id)),
+        caster_player_id_(::flatbuffers::EndianScalar(_caster_player_id)),
+        source_id_(::flatbuffers::EndianScalar(_source_id)),
+        target_id_(::flatbuffers::EndianScalar(_target_id)),
+        start_tick_(::flatbuffers::EndianScalar(_start_tick)),
+        end_tick_(::flatbuffers::EndianScalar(_end_tick)),
+        magnitude_per_second_(::flatbuffers::EndianScalar(_magnitude_per_second)),
+        source_kind_(::flatbuffers::EndianScalar(static_cast<uint8_t>(_source_kind))),
+        target_kind_(::flatbuffers::EndianScalar(static_cast<uint8_t>(_target_kind))),
+        effect_kind_(::flatbuffers::EndianScalar(_effect_kind)),
+        padding0__(0) {
+    (void)padding0__;
+  }
+  uint64_t instance_id() const {
+    return ::flatbuffers::EndianScalar(instance_id_);
+  }
+  uint64_t caster_player_id() const {
+    return ::flatbuffers::EndianScalar(caster_player_id_);
+  }
+  uint64_t source_id() const {
+    return ::flatbuffers::EndianScalar(source_id_);
+  }
+  uint64_t target_id() const {
+    return ::flatbuffers::EndianScalar(target_id_);
+  }
+  uint64_t start_tick() const {
+    return ::flatbuffers::EndianScalar(start_tick_);
+  }
+  uint64_t end_tick() const {
+    return ::flatbuffers::EndianScalar(end_tick_);
+  }
+  float magnitude_per_second() const {
+    return ::flatbuffers::EndianScalar(magnitude_per_second_);
+  }
+  TES3MP::Protocol::Schema::CombatSnapshot::MagicUseSourceKind source_kind() const {
+    return static_cast<TES3MP::Protocol::Schema::CombatSnapshot::MagicUseSourceKind>(::flatbuffers::EndianScalar(source_kind_));
+  }
+  TES3MP::Protocol::Schema::CombatSnapshot::MagicUseTargetKind target_kind() const {
+    return static_cast<TES3MP::Protocol::Schema::CombatSnapshot::MagicUseTargetKind>(::flatbuffers::EndianScalar(target_kind_));
+  }
+  uint8_t effect_kind() const {
+    return ::flatbuffers::EndianScalar(effect_kind_);
+  }
+};
+FLATBUFFERS_STRUCT_END(ActiveMagicEffectSnapshot, 56);
+
 struct CombatSnapshotHeader FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
   typedef CombatSnapshotHeaderBuilder Builder;
   enum FlatBuffersVTableOffset FLATBUFFERS_VTABLE_UNDERLYING_TYPE {
@@ -392,7 +533,8 @@ struct LatestWinsCombatSnapshot FLATBUFFERS_FINAL_CLASS : private ::flatbuffers:
     VT_HEADER = 4,
     VT_ACTORS = 6,
     VT_SELF_SKILLS = 8,
-    VT_PLAYERS = 10
+    VT_PLAYERS = 10,
+    VT_ACTIVE_EFFECTS = 12
   };
   const TES3MP::Protocol::Schema::CombatSnapshot::CombatSnapshotHeader *header() const {
     return GetPointer<const TES3MP::Protocol::Schema::CombatSnapshot::CombatSnapshotHeader *>(VT_HEADER);
@@ -406,6 +548,9 @@ struct LatestWinsCombatSnapshot FLATBUFFERS_FINAL_CLASS : private ::flatbuffers:
   const ::flatbuffers::Vector<const TES3MP::Protocol::Schema::CombatSnapshot::PlayerCombatSnapshot *> *players() const {
     return GetPointer<const ::flatbuffers::Vector<const TES3MP::Protocol::Schema::CombatSnapshot::PlayerCombatSnapshot *> *>(VT_PLAYERS);
   }
+  const ::flatbuffers::Vector<const TES3MP::Protocol::Schema::CombatSnapshot::ActiveMagicEffectSnapshot *> *active_effects() const {
+    return GetPointer<const ::flatbuffers::Vector<const TES3MP::Protocol::Schema::CombatSnapshot::ActiveMagicEffectSnapshot *> *>(VT_ACTIVE_EFFECTS);
+  }
   template <bool B = false>
   bool Verify(::flatbuffers::VerifierTemplate<B> &verifier) const {
     return VerifyTableStart(verifier) &&
@@ -417,6 +562,8 @@ struct LatestWinsCombatSnapshot FLATBUFFERS_FINAL_CLASS : private ::flatbuffers:
            verifier.VerifyVector(self_skills()) &&
            VerifyOffset(verifier, VT_PLAYERS) &&
            verifier.VerifyVector(players()) &&
+           VerifyOffset(verifier, VT_ACTIVE_EFFECTS) &&
+           verifier.VerifyVector(active_effects()) &&
            verifier.EndTable();
   }
 };
@@ -437,6 +584,9 @@ struct LatestWinsCombatSnapshotBuilder {
   void add_players(::flatbuffers::Offset<::flatbuffers::Vector<const TES3MP::Protocol::Schema::CombatSnapshot::PlayerCombatSnapshot *>> players) {
     fbb_.AddOffset(LatestWinsCombatSnapshot::VT_PLAYERS, players);
   }
+  void add_active_effects(::flatbuffers::Offset<::flatbuffers::Vector<const TES3MP::Protocol::Schema::CombatSnapshot::ActiveMagicEffectSnapshot *>> active_effects) {
+    fbb_.AddOffset(LatestWinsCombatSnapshot::VT_ACTIVE_EFFECTS, active_effects);
+  }
   explicit LatestWinsCombatSnapshotBuilder(::flatbuffers::FlatBufferBuilder &_fbb)
         : fbb_(_fbb) {
     start_ = fbb_.StartTable();
@@ -453,8 +603,10 @@ inline ::flatbuffers::Offset<LatestWinsCombatSnapshot> CreateLatestWinsCombatSna
     ::flatbuffers::Offset<TES3MP::Protocol::Schema::CombatSnapshot::CombatSnapshotHeader> header = 0,
     ::flatbuffers::Offset<::flatbuffers::Vector<const TES3MP::Protocol::Schema::CombatSnapshot::ActorCombatSnapshot *>> actors = 0,
     ::flatbuffers::Offset<::flatbuffers::Vector<const TES3MP::Protocol::Schema::CombatSnapshot::CombatSkillSnapshot *>> self_skills = 0,
-    ::flatbuffers::Offset<::flatbuffers::Vector<const TES3MP::Protocol::Schema::CombatSnapshot::PlayerCombatSnapshot *>> players = 0) {
+    ::flatbuffers::Offset<::flatbuffers::Vector<const TES3MP::Protocol::Schema::CombatSnapshot::PlayerCombatSnapshot *>> players = 0,
+    ::flatbuffers::Offset<::flatbuffers::Vector<const TES3MP::Protocol::Schema::CombatSnapshot::ActiveMagicEffectSnapshot *>> active_effects = 0) {
   LatestWinsCombatSnapshotBuilder builder_(_fbb);
+  builder_.add_active_effects(active_effects);
   builder_.add_players(players);
   builder_.add_self_skills(self_skills);
   builder_.add_actors(actors);
@@ -467,16 +619,19 @@ inline ::flatbuffers::Offset<LatestWinsCombatSnapshot> CreateLatestWinsCombatSna
     ::flatbuffers::Offset<TES3MP::Protocol::Schema::CombatSnapshot::CombatSnapshotHeader> header = 0,
     const std::vector<TES3MP::Protocol::Schema::CombatSnapshot::ActorCombatSnapshot> *actors = nullptr,
     const std::vector<TES3MP::Protocol::Schema::CombatSnapshot::CombatSkillSnapshot> *self_skills = nullptr,
-    const std::vector<TES3MP::Protocol::Schema::CombatSnapshot::PlayerCombatSnapshot> *players = nullptr) {
+    const std::vector<TES3MP::Protocol::Schema::CombatSnapshot::PlayerCombatSnapshot> *players = nullptr,
+    const std::vector<TES3MP::Protocol::Schema::CombatSnapshot::ActiveMagicEffectSnapshot> *active_effects = nullptr) {
   auto actors__ = actors ? _fbb.CreateVectorOfStructs<TES3MP::Protocol::Schema::CombatSnapshot::ActorCombatSnapshot>(*actors) : 0;
   auto self_skills__ = self_skills ? _fbb.CreateVectorOfStructs<TES3MP::Protocol::Schema::CombatSnapshot::CombatSkillSnapshot>(*self_skills) : 0;
   auto players__ = players ? _fbb.CreateVectorOfStructs<TES3MP::Protocol::Schema::CombatSnapshot::PlayerCombatSnapshot>(*players) : 0;
+  auto active_effects__ = active_effects ? _fbb.CreateVectorOfStructs<TES3MP::Protocol::Schema::CombatSnapshot::ActiveMagicEffectSnapshot>(*active_effects) : 0;
   return TES3MP::Protocol::Schema::CombatSnapshot::CreateLatestWinsCombatSnapshot(
       _fbb,
       header,
       actors__,
       self_skills__,
-      players__);
+      players__,
+      active_effects__);
 }
 
 inline const TES3MP::Protocol::Schema::CombatSnapshot::LatestWinsCombatSnapshot *GetLatestWinsCombatSnapshot(const void *buf) {

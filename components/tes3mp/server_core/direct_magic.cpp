@@ -16,9 +16,14 @@ namespace
     {
         return static_cast<std::uint8_t>(effect.target) <= static_cast<std::uint8_t>(TES3MP::DirectMagicTarget::Other)
             && static_cast<std::uint8_t>(effect.kind)
-            <= static_cast<std::uint8_t>(TES3MP::DirectMagicEffectKind::RestoreMagicka)
+            <= static_cast<std::uint8_t>(TES3MP::DirectMagicEffectKind::Dispel)
             && finite(effect.minimumMagnitude) && finite(effect.maximumMagnitude) && effect.minimumMagnitude >= 0.f
-            && effect.minimumMagnitude <= effect.maximumMagnitude && effect.maximumMagnitude <= 1'000'000.f;
+            && effect.minimumMagnitude <= effect.maximumMagnitude && effect.maximumMagnitude <= 1'000'000.f
+            && effect.durationTicks <= TES3MP::MaximumDirectMagicDurationTicks
+            && effect.areaRadiusQuanta <= TES3MP::MaximumDirectMagicAreaRadiusQuanta
+            && static_cast<std::uint8_t>(effect.stacking)
+                <= static_cast<std::uint8_t>(TES3MP::DirectMagicStacking::Refresh)
+            && (effect.kind != TES3MP::DirectMagicEffectKind::Dispel || effect.durationTicks == 0);
     }
 
     float resistance(const TES3MP::DirectMagicDefense& defense, TES3MP::DirectMagicEffectKind kind) noexcept
@@ -40,6 +45,7 @@ namespace
             case Kind::RestoreHealth:
             case Kind::RestoreFatigue:
             case Kind::RestoreMagicka:
+            case Kind::Dispel:
                 return 0.f;
         }
         return 0.f;
@@ -93,6 +99,10 @@ namespace TES3MP
                 || profile.chargeCost == 0 || profile.chargeCost > item->maxEnchantmentCharge || profile.effects.empty()
                 || profile.effects.size() > MaximumDirectMagicEffectsPerSource
                 || !std::ranges::all_of(profile.effects, validEffect)
+                || (onStrike && std::ranges::any_of(profile.effects, [](const auto& effect) {
+                       return effect.durationTicks != 0 || effect.areaRadiusQuanta != 0
+                           || effect.kind == DirectMagicEffectKind::Dispel;
+                   }))
                 || (index && enchantmentValues[index - 1].prototypeId == profile.prototypeId))
                 return std::nullopt;
         }
@@ -124,7 +134,9 @@ namespace TES3MP
             {
                 if (disease.effects.empty() || disease.effects.size() > MaximumDirectMagicEffectsPerSource
                     || !std::ranges::all_of(disease.effects, [](const DirectMagicEffectProfile& effect) {
-                           return validEffect(effect) && effect.target == DirectMagicTarget::Other;
+                           return validEffect(effect) && effect.target == DirectMagicTarget::Other
+                               && effect.durationTicks == 0 && effect.areaRadiusQuanta == 0
+                               && effect.kind != DirectMagicEffectKind::Dispel;
                        }))
                     return std::nullopt;
                 diseaseIds.push_back(disease.spellId);
@@ -142,7 +154,9 @@ namespace TES3MP
             if (profile.effects.empty() || profile.effects.size() > MaximumDirectMagicEffectsPerSource
                 || !std::ranges::all_of(profile.effects,
                     [](const DirectMagicEffectProfile& effect) {
-                        return validEffect(effect) && effect.target == DirectMagicTarget::Other;
+                        return validEffect(effect) && effect.target == DirectMagicTarget::Other
+                            && effect.durationTicks == 0 && effect.areaRadiusQuanta == 0
+                            && effect.kind != DirectMagicEffectKind::Dispel;
                     })
                 || (index && trapValues[index - 1].trapId == profile.trapId))
                 return std::nullopt;
@@ -261,25 +275,17 @@ namespace TES3MP
                 return std::nullopt;
             if (effect.target != target)
                 continue;
-            float magnitude = effect.minimumMagnitude;
-            if (effect.maximumMagnitude != effect.minimumMagnitude)
-            {
-                const auto roll = random.uniformBelow(10'001);
-                if (!roll)
-                    return std::nullopt;
-                magnitude += (effect.maximumMagnitude - effect.minimumMagnitude) * static_cast<float>(*roll) / 10'000.f;
-            }
-            const float multiplier = std::max(0.f, 1.f - resistance(defense, effect.kind) * 0.01f);
-            const float damage = magnitude * multiplier;
-            if (!finite(damage))
+            const auto resolvedMagnitude = resolveDirectMagicEffectMagnitude(effect, defense, random);
+            if (!resolvedMagnitude)
                 return std::nullopt;
+            const float magnitude = *resolvedMagnitude;
             switch (effect.kind)
             {
                 case DirectMagicEffectKind::DamageFatigue:
-                    result.fatigueDamage = addBounded(result.fatigueDamage, damage);
+                    result.fatigueDamage = addBounded(result.fatigueDamage, magnitude);
                     break;
                 case DirectMagicEffectKind::DamageMagicka:
-                    result.magickaDamage = addBounded(result.magickaDamage, damage);
+                    result.magickaDamage = addBounded(result.magickaDamage, magnitude);
                     break;
                 case DirectMagicEffectKind::RestoreHealth:
                     result.healthRestore = addBounded(result.healthRestore, magnitude);
@@ -290,12 +296,32 @@ namespace TES3MP
                 case DirectMagicEffectKind::RestoreMagicka:
                     result.magickaRestore = addBounded(result.magickaRestore, magnitude);
                     break;
+                case DirectMagicEffectKind::Dispel:
+                    break;
                 default:
-                    result.healthDamage = addBounded(result.healthDamage, damage);
+                    result.healthDamage = addBounded(result.healthDamage, magnitude);
                     break;
             }
         }
         return result;
+    }
+
+    std::optional<float> resolveDirectMagicEffectMagnitude(const DirectMagicEffectProfile& effect,
+        const DirectMagicDefense& defense, Xoshiro256StarStar& random) noexcept
+    {
+        if (!validEffect(effect) || !validDirectMagicDefense(defense))
+            return std::nullopt;
+        float magnitude = effect.minimumMagnitude;
+        if (effect.maximumMagnitude != effect.minimumMagnitude)
+        {
+            const auto roll = random.uniformBelow(10'001);
+            if (!roll)
+                return std::nullopt;
+            magnitude += (effect.maximumMagnitude - effect.minimumMagnitude) * static_cast<float>(*roll) / 10'000.f;
+        }
+        const float multiplier = std::max(0.f, 1.f - resistance(defense, effect.kind) * 0.01f);
+        magnitude *= multiplier;
+        return finite(magnitude) ? std::optional<float>(magnitude) : std::nullopt;
     }
 
     std::optional<float> resolveElementalShieldDamage(const DirectMagicDefense& shieldOwner,

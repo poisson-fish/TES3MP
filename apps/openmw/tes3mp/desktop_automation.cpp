@@ -28,6 +28,7 @@ namespace TES3MP::OpenMWAdapter
         constexpr std::uint64_t CaptureDuration = 5 * Second;
         constexpr std::uint64_t ActorAuthDuration = 8 * Second;
         constexpr std::uint64_t SecurityDuration = 12 * Second;
+        constexpr std::uint64_t MagicSpellDuration = 20 * Second;
         constexpr std::uint64_t SlowPeerEvidenceDuration = 20 * Second;
         constexpr std::int64_t AutomationSpeed = 4096;
         std::optional<MonotonicInstant> add(MonotonicInstant value, std::uint64_t duration) noexcept
@@ -120,6 +121,10 @@ namespace TES3MP::OpenMWAdapter
             return DesktopAutomationRole::SecurityProbe;
         if (value == "magic-item")
             return DesktopAutomationRole::MagicItem;
+        if (value == "magic-spell-caster")
+            return DesktopAutomationRole::MagicSpellCaster;
+        if (value == "magic-spell-target")
+            return DesktopAutomationRole::MagicSpellTarget;
         return std::nullopt;
     }
 
@@ -213,6 +218,24 @@ namespace TES3MP::OpenMWAdapter
 
     std::optional<MagicUseCapture> DesktopAutomation::captureMagicUse() noexcept
     {
+        if (mRole == DesktopAutomationRole::MagicSpellCaster && !mMagicSubmitted && mMagicPlayer
+            && mMagicInventoryRevision && mMagicCasterRevision && mMagicTargetRevision && mMagicSourceTick
+            && mStartedAt && mNow && mNow->nanoseconds() - mStartedAt->nanoseconds() >= 3 * Second)
+        {
+            constexpr std::uint64_t CurseFatigueSpell = 13128897029866312148ull;
+            mMagicSubmitted = true;
+            if (mOutput && mEvidenceEvents < MaximumEvidenceEvents)
+            {
+                mOutput << "{\"event\":\"magic_spell_submitted\",\"role\":\"" << roleName()
+                        << "\",\"target_player_id\":" << mMagicPlayer->value() << ",\"spell_id\":"
+                        << CurseFatigueSpell << "}\n";
+                mOutput.flush();
+                ++mEvidenceEvents;
+            }
+            return MagicUseCapture{ MagicUseSourceKind::Spell, CurseFatigueSpell, MagicUseTargetKind::Player,
+                mMagicPlayer->value(), *mMagicSourceTick, *mMagicCasterRevision, *mMagicTargetRevision,
+                *mMagicInventoryRevision };
+        }
         if (mRole != DesktopAutomationRole::MagicItem || mMagicSubmitted || !mMagicActor || !mMagicItem
             || !mMagicInventoryRevision || !mMagicCasterRevision || !mMagicTargetRevision || !mMagicSourceTick)
             return std::nullopt;
@@ -272,6 +295,14 @@ namespace TES3MP::OpenMWAdapter
         }
         else if (mSawPeer)
             mSawLeave = true;
+        if (mRole == DesktopAutomationRole::MagicSpellCaster && !mMagicPlayer)
+        {
+            const auto peer = std::ranges::find_if(observedPlayers, [&](const ObservedPlayer& observed) {
+                return observed.playerId != snapshot.header().targetPlayerId();
+            });
+            if (peer != observedPlayers.end())
+                mMagicPlayer = peer->playerId;
+        }
         if (mRole == DesktopAutomationRole::WaitReconnect && mWorldTimeRevisionBeforeDisconnect && mSawPeer
             && mResumes == 0 && !mNextDisconnect)
         {
@@ -480,6 +511,17 @@ namespace TES3MP::OpenMWAdapter
         }
         else if (mRole == DesktopAutomationRole::MagicItem && elapsed >= SecurityDuration)
             finish(false);
+        else if (mRole == DesktopAutomationRole::MagicSpellCaster && mResumes == 1 && mMagicEventPresented
+            && mMagicEffectStarted && mMagicEffectUpdated && mMagicEffectEnded && mMagicEffectActiveAfterResume
+            && mMagicAppliedDelta < 0.f && elapsed >= 6 * Second)
+            finish(true);
+        else if (mRole == DesktopAutomationRole::MagicSpellTarget && mMagicEventPresented && mMagicEffectStarted
+            && mMagicEffectUpdated && mMagicEffectEnded && mMagicAppliedDelta < 0.f && elapsed >= 6 * Second)
+            finish(true);
+        else if ((mRole == DesktopAutomationRole::MagicSpellCaster
+                     || mRole == DesktopAutomationRole::MagicSpellTarget)
+            && elapsed >= MagicSpellDuration)
+            finish(false);
         return ProviderResult::Accepted;
     }
 
@@ -514,6 +556,11 @@ namespace TES3MP::OpenMWAdapter
         const auto applied = mPresentation.applyInventory(player, containers, groundItems, equipment, receivedAt);
         if (applied != ProviderResult::Accepted)
             return applied;
+        if (mRole == DesktopAutomationRole::MagicSpellCaster)
+        {
+            mMagicInventoryRevision = player.revision;
+            return applied;
+        }
         if (mRole == DesktopAutomationRole::MagicItem)
         {
             constexpr std::uint64_t RingOfFleabitePrototype = 13568541167308910850ull;
@@ -560,6 +607,78 @@ namespace TES3MP::OpenMWAdapter
         const auto applied = mPresentation.applyCombat(snapshot, events, receivedAt);
         if (applied != ProviderResult::Accepted)
             return applied;
+        if (mRole == DesktopAutomationRole::MagicSpellCaster || mRole == DesktopAutomationRole::MagicSpellTarget)
+        {
+            constexpr std::uint64_t CurseFatigueSpell = 13128897029866312148ull;
+            mMagicCasterRevision = snapshot.selfCombatRevision();
+            mMagicSourceTick = snapshot.serverTick();
+            if (mRole == DesktopAutomationRole::MagicSpellCaster && mMagicPlayer)
+            {
+                const auto target
+                    = std::ranges::find(snapshot.players(), *mMagicPlayer, &PlayerCombatSnapshot::playerId);
+                if (target != snapshot.players().end())
+                {
+                    mMagicTargetRevision = target->combatRevision;
+                    mMagicTargetFatigue = target->fatigue;
+                }
+            }
+            else if (mRole == DesktopAutomationRole::MagicSpellTarget)
+                mMagicTargetFatigue = snapshot.selfFatigue();
+            if (mMagicTargetFatigue)
+            {
+                if (!mInitialMagicTargetFatigue)
+                    mInitialMagicTargetFatigue = *mMagicTargetFatigue;
+                if (!mMinimumMagicTargetFatigue || *mMagicTargetFatigue < *mMinimumMagicTargetFatigue)
+                    mMinimumMagicTargetFatigue = *mMagicTargetFatigue;
+            }
+            for (const auto& batch : events)
+            {
+                if (std::ranges::any_of(batch.magicEvents(), [&](const MagicUseCombatEvent& event) {
+                        const bool targetMatches = event.targetKind == MagicUseTargetKind::Player
+                            && (mRole == DesktopAutomationRole::MagicSpellTarget
+                                    ? event.targetId == snapshot.selfPlayerId().value()
+                                    : mMagicPlayer && event.targetId == mMagicPlayer->value());
+                        return event.sourceKind == MagicUseSourceKind::Spell && event.sourceId == CurseFatigueSpell
+                            && event.castSucceeded && targetMatches;
+                    }))
+                    mMagicEventPresented = true;
+                for (const auto& event : batch.magicEffectEvents())
+                {
+                    const bool targetMatches = event.targetKind == MagicUseTargetKind::Player
+                        && (mRole == DesktopAutomationRole::MagicSpellTarget
+                                ? event.targetId == snapshot.selfPlayerId().value()
+                                : mMagicPlayer && event.targetId == mMagicPlayer->value());
+                    if (!targetMatches || (mMagicEffect && event.instanceId != *mMagicEffect))
+                        continue;
+                    if (event.eventKind == MagicEffectCombatEventKind::Started)
+                    {
+                        mMagicEffect = event.instanceId;
+                        mMagicEffectStarted = true;
+                    }
+                    else if (event.eventKind == MagicEffectCombatEventKind::Updated)
+                    {
+                        mMagicEffectUpdated = mMagicEffectUpdated || event.appliedDelta < 0.f;
+                        mMagicAppliedDelta += event.appliedDelta;
+                        if (mRole == DesktopAutomationRole::MagicSpellCaster && mResumes == 0 && !mNextDisconnect)
+                        {
+                            mReadyToDisconnect = true;
+                            mNextDisconnect = receivedAt;
+                        }
+                    }
+                    else if (event.eventKind == MagicEffectCombatEventKind::Ended)
+                        mMagicEffectEnded = true;
+                }
+            }
+            if (mRole == DesktopAutomationRole::MagicSpellCaster && mResumes != 0 && mMagicEffect
+                && std::ranges::any_of(snapshot.activeEffects(), [&](const ActiveMagicEffectSnapshot& effect) {
+                       return effect.instanceId == *mMagicEffect && effect.targetKind == MagicUseTargetKind::Player
+                           && mMagicPlayer && effect.targetId == mMagicPlayer->value();
+                   }))
+                mMagicEffectActiveAfterResume = true;
+            if (mResumes != 0 && mMagicEffectActiveAfterResume && mMagicEffectUpdated)
+                mMagicCombatAfterResume = true;
+            return applied;
+        }
         if (mRole == DesktopAutomationRole::MagicItem)
         {
             mMagicCasterRevision = snapshot.selfCombatRevision();
@@ -761,6 +880,7 @@ namespace TES3MP::OpenMWAdapter
             : mRole == DesktopAutomationRole::SecurityPick                    ? 1u
             : mRole == DesktopAutomationRole::SecurityProbe                   ? 1u
             : mRole == DesktopAutomationRole::MagicItem                       ? 1u
+            : mRole == DesktopAutomationRole::MagicSpellCaster                ? 1u
                                                                               : 0u;
         if (maximumResumes == 0 || !mReadyToDisconnect || !mNow || !mNextDisconnect || *mNow < *mNextDisconnect
             || mResumes >= maximumResumes)
@@ -768,10 +888,12 @@ namespace TES3MP::OpenMWAdapter
         mReadyToDisconnect = false;
         mNextDisconnect.reset();
         if ((mRole == DesktopAutomationRole::SecurityPick || mRole == DesktopAutomationRole::SecurityProbe
-                || mRole == DesktopAutomationRole::MagicItem)
+                || mRole == DesktopAutomationRole::MagicItem || mRole == DesktopAutomationRole::MagicSpellCaster)
             && mOutput && mEvidenceEvents < MaximumEvidenceEvents)
         {
-            mOutput << "{\"event\":\"" << (mRole == DesktopAutomationRole::MagicItem ? "magic" : "security")
+            const bool magicRole
+                = mRole == DesktopAutomationRole::MagicItem || mRole == DesktopAutomationRole::MagicSpellCaster;
+            mOutput << "{\"event\":\"" << (magicRole ? "magic" : "security")
                     << "_disconnect_requested\",\"role\":\"" << roleName() << "\"}\n";
             mOutput.flush();
             ++mEvidenceEvents;
@@ -860,6 +982,10 @@ namespace TES3MP::OpenMWAdapter
                 return "security-probe";
             case DesktopAutomationRole::MagicItem:
                 return "magic-item";
+            case DesktopAutomationRole::MagicSpellCaster:
+                return "magic-spell-caster";
+            case DesktopAutomationRole::MagicSpellTarget:
+                return "magic-spell-target";
         }
         return "unknown";
     }
@@ -991,7 +1117,13 @@ namespace TES3MP::OpenMWAdapter
                     << ",\"magic_target_fatigue\":" << mMagicTargetFatigue.value_or(0.f)
                     << ",\"magic_minimum_target_fatigue\":" << mMinimumMagicTargetFatigue.value_or(0.f)
                     << ",\"magic_initial_enchant_progress\":" << mInitialEnchantProgress.value_or(0.f)
-                    << ",\"magic_enchant_progress\":" << mEnchantProgress.value_or(0.f) << "}\n";
+                    << ",\"magic_enchant_progress\":" << mEnchantProgress.value_or(0.f)
+                    << ",\"magic_effect_started\":" << (mMagicEffectStarted ? "true" : "false")
+                    << ",\"magic_effect_updated\":" << (mMagicEffectUpdated ? "true" : "false")
+                    << ",\"magic_effect_ended\":" << (mMagicEffectEnded ? "true" : "false")
+                    << ",\"magic_effect_active_after_resume\":"
+                    << (mMagicEffectActiveAfterResume ? "true" : "false")
+                    << ",\"magic_applied_delta\":" << mMagicAppliedDelta << "}\n";
             mOutput.flush();
             ++mEvidenceEvents;
         }

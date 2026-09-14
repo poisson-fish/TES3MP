@@ -20,6 +20,8 @@ namespace TES3MP
     inline constexpr std::size_t MaximumDirectMagicDiseasesPerActor = 16;
     inline constexpr std::size_t MaximumContractedDiseasesPerPlayer = 64;
     inline constexpr std::size_t MaximumDirectMagicTraps = MaximumInteractiveObjectCatalogEntries;
+    inline constexpr std::uint32_t MaximumDirectMagicDurationTicks = 63 * 60 * 60;
+    inline constexpr std::uint32_t MaximumDirectMagicAreaRadiusQuanta = 256 * 1024;
 
     enum class DirectMagicTarget : std::uint8_t
     {
@@ -39,6 +41,13 @@ namespace TES3MP
         RestoreHealth = 7,
         RestoreFatigue = 8,
         RestoreMagicka = 9,
+        Dispel = 10,
+    };
+
+    enum class DirectMagicStacking : std::uint8_t
+    {
+        Stack = 0,
+        Refresh = 1,
     };
 
     enum class DirectMagicSchool : std::uint8_t
@@ -71,6 +80,9 @@ namespace TES3MP
         DirectMagicEffectKind kind = DirectMagicEffectKind::DamageHealth;
         float minimumMagnitude = 0.f;
         float maximumMagnitude = 0.f;
+        std::uint32_t durationTicks = 0;
+        std::uint32_t areaRadiusQuanta = 0;
+        DirectMagicStacking stacking = DirectMagicStacking::Refresh;
 
         friend constexpr bool operator==(DirectMagicEffectProfile, DirectMagicEffectProfile) noexcept = default;
     };
@@ -221,6 +233,8 @@ namespace TES3MP
         const CanonicalPlayerInventoryState* inventory, const DirectMagicCatalog& catalog) noexcept;
     std::optional<DirectMagicResolution> resolveDirectMagicEffects(std::span<const DirectMagicEffectProfile> effects,
         DirectMagicTarget target, const DirectMagicDefense& defense, Xoshiro256StarStar& random) noexcept;
+    std::optional<float> resolveDirectMagicEffectMagnitude(const DirectMagicEffectProfile& effect,
+        const DirectMagicDefense& defense, Xoshiro256StarStar& random) noexcept;
     std::optional<float> resolveElementalShieldDamage(const DirectMagicDefense& shieldOwner,
         const DirectMagicDefense& attackerDefense, float attackerLuck, float attackerFatigue,
         float attackerMaximumFatigue, DirectMagicSettings settings, Xoshiro256StarStar& random) noexcept;

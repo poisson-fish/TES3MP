@@ -878,6 +878,7 @@ namespace TES3MP::OpenMWAdapter
         std::optional<InventoryRevision> observedPlayerInventoryRevision;
         std::optional<CanonicalRevision> observedInventoryCanonicalRevision;
         std::optional<LatestWinsCombatSnapshot> combatSnapshot;
+        std::map<ActiveMagicEffectId, ActiveMagicEffectSnapshot> activeMagicEffects;
         bool sessionBootstrapPending = true;
 
         void clear() noexcept
@@ -916,6 +917,7 @@ namespace TES3MP::OpenMWAdapter
             observedPlayerInventoryRevision.reset();
             observedInventoryCanonicalRevision.reset();
             combatSnapshot.reset();
+            activeMagicEffects.clear();
             try
             {
                 auto world = MWBase::Environment::get().getWorld();
@@ -1657,10 +1659,56 @@ namespace TES3MP::OpenMWAdapter
                         if (remote != remotes.end()
                             && !replicatedActorResultAccepted(
                                 remote->second.actor->playAction(MWRender::ReplicatedActorAction::Hit)))
+                        return ProviderResult::PresentationFailed;
+                    }
+                }
+                for (const auto& event : batch.magicEffectEvents())
+                {
+                    if (event.eventKind == MagicEffectCombatEventKind::Ended)
+                        activeMagicEffects.erase(event.instanceId);
+                    if (event.appliedDelta >= 0.f)
+                        continue;
+                    if (event.targetKind == MagicUseTargetKind::Actor)
+                    {
+                        const auto target = ActorId::fromValue(event.targetId);
+                        const auto remote = target ? std::ranges::find_if(actorRemotes,
+                                                         [&](const auto& entry) {
+                                                             return entry.second.actor && entry.second.lastObserved
+                                                                 && entry.second.lastObserved->actorId() == *target;
+                                                         })
+                                                   : actorRemotes.end();
+                        if (remote != actorRemotes.end()
+                            && !replicatedActorResultAccepted(
+                                remote->second.actor->playAction(MWRender::ReplicatedActorAction::Hit)))
+                            return ProviderResult::PresentationFailed;
+                    }
+                    else if (event.targetKind == MagicUseTargetKind::Player)
+                    {
+                        const auto target = PlayerId::fromValue(event.targetId);
+                        if (target && *target == snapshot.selfPlayerId()
+                            && event.effectKind <= DirectMagicEffectKind::DamageHealth)
+                        {
+                            playerStats.setHitRecovery(true);
+                            MWBase::Environment::get().getWindowManager()->activateHitOverlay();
+                        }
+                        const auto remote = target ? std::ranges::find_if(remotes,
+                                                         [&](const auto& entry) {
+                                                             return entry.second.actor && entry.second.lastObserved
+                                                                 && entry.second.lastObserved->playerId() == *target;
+                                                         })
+                                                   : remotes.end();
+                        if (remote != remotes.end()
+                            && !replicatedActorResultAccepted(
+                                remote->second.actor->playAction(MWRender::ReplicatedActorAction::Hit)))
                             return ProviderResult::PresentationFailed;
                     }
                 }
             }
+            std::map<ActiveMagicEffectId, ActiveMagicEffectSnapshot> confirmedEffects;
+            for (const auto& effect : snapshot.activeEffects())
+                if (!confirmedEffects.emplace(effect.instanceId, effect).second)
+                    return ProviderResult::PresentationFailed;
+            activeMagicEffects = std::move(confirmedEffects);
             combatSnapshot = snapshot;
             return ProviderResult::Accepted;
         }

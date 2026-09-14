@@ -27,6 +27,8 @@ struct ActorMeleeCombatEvent;
 
 struct MagicUseCombatEvent;
 
+struct MagicEffectCombatEvent;
+
 struct ReliableCombatEventBatch;
 struct ReliableCombatEventBatchBuilder;
 
@@ -121,6 +123,78 @@ inline const char *EnumNameMagicUseTargetKind(MagicUseTargetKind e) {
   if (::flatbuffers::IsOutRange(e, MagicUseTargetKind::Self, MagicUseTargetKind::Actor)) return "";
   const size_t index = static_cast<size_t>(e);
   return EnumNamesMagicUseTargetKind()[index];
+}
+
+enum class MagicEffectCombatEventKind : uint8_t {
+  Started = 0,
+  Updated = 1,
+  Ended = 2,
+  MIN = Started,
+  MAX = Ended
+};
+
+inline const MagicEffectCombatEventKind (&EnumValuesMagicEffectCombatEventKind())[3] {
+  static const MagicEffectCombatEventKind values[] = {
+    MagicEffectCombatEventKind::Started,
+    MagicEffectCombatEventKind::Updated,
+    MagicEffectCombatEventKind::Ended
+  };
+  return values;
+}
+
+inline const char * const *EnumNamesMagicEffectCombatEventKind() {
+  static const char * const names[4] = {
+    "Started",
+    "Updated",
+    "Ended",
+    nullptr
+  };
+  return names;
+}
+
+inline const char *EnumNameMagicEffectCombatEventKind(MagicEffectCombatEventKind e) {
+  if (::flatbuffers::IsOutRange(e, MagicEffectCombatEventKind::Started, MagicEffectCombatEventKind::Ended)) return "";
+  const size_t index = static_cast<size_t>(e);
+  return EnumNamesMagicEffectCombatEventKind()[index];
+}
+
+enum class MagicEffectCombatEndReason : uint8_t {
+  None = 0,
+  Expired = 1,
+  Dispelled = 2,
+  Replaced = 3,
+  TargetDied = 4,
+  MIN = None,
+  MAX = TargetDied
+};
+
+inline const MagicEffectCombatEndReason (&EnumValuesMagicEffectCombatEndReason())[5] {
+  static const MagicEffectCombatEndReason values[] = {
+    MagicEffectCombatEndReason::None,
+    MagicEffectCombatEndReason::Expired,
+    MagicEffectCombatEndReason::Dispelled,
+    MagicEffectCombatEndReason::Replaced,
+    MagicEffectCombatEndReason::TargetDied
+  };
+  return values;
+}
+
+inline const char * const *EnumNamesMagicEffectCombatEndReason() {
+  static const char * const names[6] = {
+    "None",
+    "Expired",
+    "Dispelled",
+    "Replaced",
+    "TargetDied",
+    nullptr
+  };
+  return names;
+}
+
+inline const char *EnumNameMagicEffectCombatEndReason(MagicEffectCombatEndReason e) {
+  if (::flatbuffers::IsOutRange(e, MagicEffectCombatEndReason::None, MagicEffectCombatEndReason::TargetDied)) return "";
+  const size_t index = static_cast<size_t>(e);
+  return EnumNamesMagicEffectCombatEndReason()[index];
 }
 
 FLATBUFFERS_MANUALLY_ALIGNED_STRUCT(8) MeleeCombatEvent FLATBUFFERS_FINAL_CLASS {
@@ -359,6 +433,88 @@ FLATBUFFERS_MANUALLY_ALIGNED_STRUCT(8) MagicUseCombatEvent FLATBUFFERS_FINAL_CLA
 };
 FLATBUFFERS_STRUCT_END(MagicUseCombatEvent, 72);
 
+FLATBUFFERS_MANUALLY_ALIGNED_STRUCT(8) MagicEffectCombatEvent FLATBUFFERS_FINAL_CLASS {
+ private:
+  uint64_t instance_id_;
+  uint64_t target_id_;
+  uint64_t start_tick_;
+  uint64_t end_tick_;
+  uint64_t target_combat_revision_;
+  float magnitude_per_second_;
+  float applied_delta_;
+  uint8_t event_kind_;
+  uint8_t end_reason_;
+  uint8_t target_kind_;
+  uint8_t effect_kind_;
+  int32_t padding0__;
+
+ public:
+  MagicEffectCombatEvent()
+      : instance_id_(0),
+        target_id_(0),
+        start_tick_(0),
+        end_tick_(0),
+        target_combat_revision_(0),
+        magnitude_per_second_(0),
+        applied_delta_(0),
+        event_kind_(0),
+        end_reason_(0),
+        target_kind_(0),
+        effect_kind_(0),
+        padding0__(0) {
+    (void)padding0__;
+  }
+  MagicEffectCombatEvent(uint64_t _instance_id, uint64_t _target_id, uint64_t _start_tick, uint64_t _end_tick, uint64_t _target_combat_revision, float _magnitude_per_second, float _applied_delta, TES3MP::Protocol::Schema::CombatEvent::MagicEffectCombatEventKind _event_kind, TES3MP::Protocol::Schema::CombatEvent::MagicEffectCombatEndReason _end_reason, TES3MP::Protocol::Schema::CombatEvent::MagicUseTargetKind _target_kind, uint8_t _effect_kind)
+      : instance_id_(::flatbuffers::EndianScalar(_instance_id)),
+        target_id_(::flatbuffers::EndianScalar(_target_id)),
+        start_tick_(::flatbuffers::EndianScalar(_start_tick)),
+        end_tick_(::flatbuffers::EndianScalar(_end_tick)),
+        target_combat_revision_(::flatbuffers::EndianScalar(_target_combat_revision)),
+        magnitude_per_second_(::flatbuffers::EndianScalar(_magnitude_per_second)),
+        applied_delta_(::flatbuffers::EndianScalar(_applied_delta)),
+        event_kind_(::flatbuffers::EndianScalar(static_cast<uint8_t>(_event_kind))),
+        end_reason_(::flatbuffers::EndianScalar(static_cast<uint8_t>(_end_reason))),
+        target_kind_(::flatbuffers::EndianScalar(static_cast<uint8_t>(_target_kind))),
+        effect_kind_(::flatbuffers::EndianScalar(_effect_kind)),
+        padding0__(0) {
+    (void)padding0__;
+  }
+  uint64_t instance_id() const {
+    return ::flatbuffers::EndianScalar(instance_id_);
+  }
+  uint64_t target_id() const {
+    return ::flatbuffers::EndianScalar(target_id_);
+  }
+  uint64_t start_tick() const {
+    return ::flatbuffers::EndianScalar(start_tick_);
+  }
+  uint64_t end_tick() const {
+    return ::flatbuffers::EndianScalar(end_tick_);
+  }
+  uint64_t target_combat_revision() const {
+    return ::flatbuffers::EndianScalar(target_combat_revision_);
+  }
+  float magnitude_per_second() const {
+    return ::flatbuffers::EndianScalar(magnitude_per_second_);
+  }
+  float applied_delta() const {
+    return ::flatbuffers::EndianScalar(applied_delta_);
+  }
+  TES3MP::Protocol::Schema::CombatEvent::MagicEffectCombatEventKind event_kind() const {
+    return static_cast<TES3MP::Protocol::Schema::CombatEvent::MagicEffectCombatEventKind>(::flatbuffers::EndianScalar(event_kind_));
+  }
+  TES3MP::Protocol::Schema::CombatEvent::MagicEffectCombatEndReason end_reason() const {
+    return static_cast<TES3MP::Protocol::Schema::CombatEvent::MagicEffectCombatEndReason>(::flatbuffers::EndianScalar(end_reason_));
+  }
+  TES3MP::Protocol::Schema::CombatEvent::MagicUseTargetKind target_kind() const {
+    return static_cast<TES3MP::Protocol::Schema::CombatEvent::MagicUseTargetKind>(::flatbuffers::EndianScalar(target_kind_));
+  }
+  uint8_t effect_kind() const {
+    return ::flatbuffers::EndianScalar(effect_kind_);
+  }
+};
+FLATBUFFERS_STRUCT_END(MagicEffectCombatEvent, 56);
+
 struct CombatEventHeader FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
   typedef CombatEventHeaderBuilder Builder;
   enum FlatBuffersVTableOffset FLATBUFFERS_VTABLE_UNDERLYING_TYPE {
@@ -437,7 +593,8 @@ struct ReliableCombatEventBatch FLATBUFFERS_FINAL_CLASS : private ::flatbuffers:
     VT_HEADER = 4,
     VT_EVENTS = 6,
     VT_ACTOR_EVENTS = 8,
-    VT_MAGIC_EVENTS = 10
+    VT_MAGIC_EVENTS = 10,
+    VT_MAGIC_EFFECT_EVENTS = 12
   };
   const TES3MP::Protocol::Schema::CombatEvent::CombatEventHeader *header() const {
     return GetPointer<const TES3MP::Protocol::Schema::CombatEvent::CombatEventHeader *>(VT_HEADER);
@@ -451,6 +608,9 @@ struct ReliableCombatEventBatch FLATBUFFERS_FINAL_CLASS : private ::flatbuffers:
   const ::flatbuffers::Vector<const TES3MP::Protocol::Schema::CombatEvent::MagicUseCombatEvent *> *magic_events() const {
     return GetPointer<const ::flatbuffers::Vector<const TES3MP::Protocol::Schema::CombatEvent::MagicUseCombatEvent *> *>(VT_MAGIC_EVENTS);
   }
+  const ::flatbuffers::Vector<const TES3MP::Protocol::Schema::CombatEvent::MagicEffectCombatEvent *> *magic_effect_events() const {
+    return GetPointer<const ::flatbuffers::Vector<const TES3MP::Protocol::Schema::CombatEvent::MagicEffectCombatEvent *> *>(VT_MAGIC_EFFECT_EVENTS);
+  }
   template <bool B = false>
   bool Verify(::flatbuffers::VerifierTemplate<B> &verifier) const {
     return VerifyTableStart(verifier) &&
@@ -462,6 +622,8 @@ struct ReliableCombatEventBatch FLATBUFFERS_FINAL_CLASS : private ::flatbuffers:
            verifier.VerifyVector(actor_events()) &&
            VerifyOffset(verifier, VT_MAGIC_EVENTS) &&
            verifier.VerifyVector(magic_events()) &&
+           VerifyOffset(verifier, VT_MAGIC_EFFECT_EVENTS) &&
+           verifier.VerifyVector(magic_effect_events()) &&
            verifier.EndTable();
   }
 };
@@ -482,6 +644,9 @@ struct ReliableCombatEventBatchBuilder {
   void add_magic_events(::flatbuffers::Offset<::flatbuffers::Vector<const TES3MP::Protocol::Schema::CombatEvent::MagicUseCombatEvent *>> magic_events) {
     fbb_.AddOffset(ReliableCombatEventBatch::VT_MAGIC_EVENTS, magic_events);
   }
+  void add_magic_effect_events(::flatbuffers::Offset<::flatbuffers::Vector<const TES3MP::Protocol::Schema::CombatEvent::MagicEffectCombatEvent *>> magic_effect_events) {
+    fbb_.AddOffset(ReliableCombatEventBatch::VT_MAGIC_EFFECT_EVENTS, magic_effect_events);
+  }
   explicit ReliableCombatEventBatchBuilder(::flatbuffers::FlatBufferBuilder &_fbb)
         : fbb_(_fbb) {
     start_ = fbb_.StartTable();
@@ -498,8 +663,10 @@ inline ::flatbuffers::Offset<ReliableCombatEventBatch> CreateReliableCombatEvent
     ::flatbuffers::Offset<TES3MP::Protocol::Schema::CombatEvent::CombatEventHeader> header = 0,
     ::flatbuffers::Offset<::flatbuffers::Vector<const TES3MP::Protocol::Schema::CombatEvent::MeleeCombatEvent *>> events = 0,
     ::flatbuffers::Offset<::flatbuffers::Vector<const TES3MP::Protocol::Schema::CombatEvent::ActorMeleeCombatEvent *>> actor_events = 0,
-    ::flatbuffers::Offset<::flatbuffers::Vector<const TES3MP::Protocol::Schema::CombatEvent::MagicUseCombatEvent *>> magic_events = 0) {
+    ::flatbuffers::Offset<::flatbuffers::Vector<const TES3MP::Protocol::Schema::CombatEvent::MagicUseCombatEvent *>> magic_events = 0,
+    ::flatbuffers::Offset<::flatbuffers::Vector<const TES3MP::Protocol::Schema::CombatEvent::MagicEffectCombatEvent *>> magic_effect_events = 0) {
   ReliableCombatEventBatchBuilder builder_(_fbb);
+  builder_.add_magic_effect_events(magic_effect_events);
   builder_.add_magic_events(magic_events);
   builder_.add_actor_events(actor_events);
   builder_.add_events(events);
@@ -512,16 +679,19 @@ inline ::flatbuffers::Offset<ReliableCombatEventBatch> CreateReliableCombatEvent
     ::flatbuffers::Offset<TES3MP::Protocol::Schema::CombatEvent::CombatEventHeader> header = 0,
     const std::vector<TES3MP::Protocol::Schema::CombatEvent::MeleeCombatEvent> *events = nullptr,
     const std::vector<TES3MP::Protocol::Schema::CombatEvent::ActorMeleeCombatEvent> *actor_events = nullptr,
-    const std::vector<TES3MP::Protocol::Schema::CombatEvent::MagicUseCombatEvent> *magic_events = nullptr) {
+    const std::vector<TES3MP::Protocol::Schema::CombatEvent::MagicUseCombatEvent> *magic_events = nullptr,
+    const std::vector<TES3MP::Protocol::Schema::CombatEvent::MagicEffectCombatEvent> *magic_effect_events = nullptr) {
   auto events__ = events ? _fbb.CreateVectorOfStructs<TES3MP::Protocol::Schema::CombatEvent::MeleeCombatEvent>(*events) : 0;
   auto actor_events__ = actor_events ? _fbb.CreateVectorOfStructs<TES3MP::Protocol::Schema::CombatEvent::ActorMeleeCombatEvent>(*actor_events) : 0;
   auto magic_events__ = magic_events ? _fbb.CreateVectorOfStructs<TES3MP::Protocol::Schema::CombatEvent::MagicUseCombatEvent>(*magic_events) : 0;
+  auto magic_effect_events__ = magic_effect_events ? _fbb.CreateVectorOfStructs<TES3MP::Protocol::Schema::CombatEvent::MagicEffectCombatEvent>(*magic_effect_events) : 0;
   return TES3MP::Protocol::Schema::CombatEvent::CreateReliableCombatEventBatch(
       _fbb,
       header,
       events__,
       actor_events__,
-      magic_events__);
+      magic_events__,
+      magic_effect_events__);
 }
 
 inline const TES3MP::Protocol::Schema::CombatEvent::ReliableCombatEventBatch *GetReliableCombatEventBatch(const void *buf) {

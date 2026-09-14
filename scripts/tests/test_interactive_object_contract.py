@@ -149,7 +149,8 @@ class InteractiveObjectContractTests(unittest.TestCase):
             "interactiveObjectReplicationCapability(), inventoryReplicationCapability(), "
             "combatReplicationCapability(), characterCreationCapability(), dialogueChoiceCapability(), "
             "weatherReplicationCapability(), worldTimeReplicationCapability(), authoritativeWaitRestCapability(), "
-            "authoritativeSecurityCapability(), authoritativeInstantMagicCapability() };"
+            "authoritativeSecurityCapability(), authoritativeInstantMagicCapability(),\n"
+            "                authoritativeTimedAreaMagicCapability() };"
         )
         old_capabilities = "const std::array optional{ vrPoseCapability(), actorReplicationCapability() };"
         for src in (adapter_src, connection_src):

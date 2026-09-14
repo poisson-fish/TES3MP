@@ -72,7 +72,7 @@ class ContentBakerTests(unittest.TestCase):
             encoding="utf-8",
         )
         (self.source / "combat.txt").write_text(
-            "TES3MP_COMBAT_V9\n"
+            "TES3MP_COMBAT_V10\n"
             f"manifest {ZERO_MANIFEST}\n"
             "seed 1234\n"
             "settings 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 -90 90 1 1 1 0 100 1 1 1 30 .01 .01 .25 0 0\n"
@@ -505,13 +505,13 @@ class ContentBakerTests(unittest.TestCase):
         inventory = path.joinpath("vanilla-inventory.txt").read_text()
         combat = path.joinpath("vanilla-combat.txt").read_text()
         self.assertIn(f"prototype {self.item_prototype} 11 30 10 400 40 65536 0 none", inventory)
-        self.assertIn(f"enchantment {self.item_prototype} strike 5 1 other fire 7 7", combat)
-        self.assertIn(f"disease 1 {baker.stable_record_id(disease)} common 1 other health 3 3", combat)
+        self.assertIn(f"enchantment {self.item_prototype} strike 5 1 other fire 7 7 0 0 refresh", combat)
+        self.assertIn(f"disease 1 {baker.stable_record_id(disease)} common 1 other health 3 3 0 0 refresh", combat)
 
     def test_instant_spell_and_when_used_profiles_use_manifest_magic_metadata(self):
         metadata = baker.Tes3Record("MGEF", "75", False,
                                     (("INDX", struct.pack("<i", 75)),
-                                     ("MEDT", struct.pack("<if4i3f", 15, 2., 0x1000,
+                                     ("MEDT", struct.pack("<if4i3f", 5, 2., 0x1000,
                                                           0, 0, 0, 0., 0., 0.))))
         multiplier = baker.Tes3Record("GMST", "fEffectCostMult", False,
                                       (("NAME", b"fEffectCostMult\0"),
@@ -528,15 +528,23 @@ class ContentBakerTests(unittest.TestCase):
                    ("ENCH", "healing ring"): enchantment}
         profile = baker._spell_profile(spell, records, tuple([50] * 27))
         charge, item_magic, passive = baker._item_magic(item, records)
-        self.assertEqual(profile, ("5", "5", "0.6", "1", "1", "self", "restore_health", "3", "3"))
+        self.assertEqual(profile, ("5", "5", "0.6", "1", "1", "self", "restore_health", "3", "3",
+                                   "63", "0", "refresh"))
         self.assertEqual((charge, item_magic, passive),
-                         (20, ("use", "4", "self", "restore_health", "3", "3"), None))
+                         (20, ("use", "4", "self", "restore_health", "3", "3", "63", "0", "refresh"), None))
+
+        area_effect = ("ENAM", struct.pack("<hbbiiiii", 75, -1, -1, 1, 10, 2, 3, 3))
+        area_enchantment = baker.Tes3Record("ENCH", "healing ring", False,
+                                            (("ENDT", struct.pack("<4i", 2, 4, 20, 0)), area_effect))
+        records[("ENCH", "healing ring")] = area_enchantment
+        self.assertEqual(baker._item_magic(item, records)[1],
+                         ("use", "4", "other", "restore_health", "3", "3", "126", "10240", "refresh"))
 
         target_effect = ("ENAM", struct.pack("<hbbiiiii", 75, -1, -1, 2, 0, 1, 3, 3))
         target_enchantment = baker.Tes3Record("ENCH", "healing ring", False,
                                               (("ENDT", struct.pack("<4i", 2, 4, 20, 0)), target_effect))
         records[("ENCH", "healing ring")] = target_enchantment
-        with self.assertRaisesRegex(baker.BakeError, "projectile or area magic is deferred"):
+        with self.assertRaisesRegex(baker.BakeError, "projectile magic is deferred"):
             baker._item_magic(item, records)
 
     def test_interactive_trap_ids_are_extracted_for_exact_combat_coverage(self):
@@ -555,7 +563,7 @@ class ContentBakerTests(unittest.TestCase):
                                                        ("ENAM", effect[8:])))
         identifier = baker.stable_record_id(name)
         profiles = baker._trap_magic_profiles({("SPEL", name): spell}, {identifier})
-        self.assertEqual(profiles, ((identifier, ("other", "fire", "50", "50")),))
+        self.assertEqual(profiles, ((identifier, ("other", "fire", "50", "50", "0", "0", "refresh")),))
 
     def test_derived_pack_missing_record_preserves_current_pointer(self):
         self._write_derived_esm()

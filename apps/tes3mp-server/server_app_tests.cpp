@@ -756,7 +756,7 @@ int main()
             && evidence->latestHighWaterMessages == 1 && evidence->latestHighWaterBytes == 10
             && !telemetry.takeDrainEvidence());
     }
-    static_assert(Phase7ProtocolMajor == 1 && Phase7ProtocolMinimumMinor == 9 && Phase7ProtocolMaximumMinor == 9);
+    static_assert(Phase7ProtocolMajor == 1 && Phase7ProtocolMinimumMinor == 10 && Phase7ProtocolMaximumMinor == 10);
     static_assert(Phase7SourceAuthenticationBurst == 4 && Phase7GlobalAuthenticationBurst == 32
         && Phase7AuthenticationRefillMilliseconds == 1'000 && Phase7ConnectionCapacity == 8);
     static_assert(!phase7ProofDisconnectGraceAccepted(MinimumResumeTokenLifetimeMilliseconds - 1));
@@ -1048,7 +1048,7 @@ int main()
         assert(static_cast<bool>(stream));
     };
     constexpr std::string_view combatHeader
-        = "TES3MP_COMBAT_V9\n"
+        = "TES3MP_COMBAT_V10\n"
           "manifest 0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20\n"
           "seed 42\n";
     constexpr std::string_view combatBody
@@ -1065,12 +1065,12 @@ int main()
           "actor_magic 1 30 5 1 2 3 4 5 6 7 8 9\n"
           "weapon 4 1 1 10 1 10 1 10 5 1 1\n"
           "armor 5 2 30\n"
-          "enchantment 4 strike 5 2 other fire 3 3 self fatigue 1 1\n"
-          "enchantment 5 use 4 1 self restore_health 2 2\n"
-          "spell 20 5 5 10 1 1 self restore_magicka 3 3\n"
+          "enchantment 4 strike 5 2 other fire 3 3 0 0 refresh self fatigue 1 1 0 0 refresh\n"
+          "enchantment 5 use 4 1 self restore_health 2 2 0 0 refresh\n"
+          "spell 20 5 5 10 1 1 self restore_magicka 3 3 0 0 refresh\n"
           "equipment_magic 5 0 0 10 0 0 0 0 0 5 0 0\n"
-          "disease 1 9 common 1 other health 2 2\n"
-          "trap 12 2 other fire 4 4 other fatigue 3 3\n";
+          "disease 1 9 common 1 other health 2 2 0 0 refresh\n"
+          "trap 12 2 other fire 4 4 0 0 refresh other fatigue 3 3 0 0 refresh\n";
     const std::array combatItemDeclarations{
         ItemPrototypeDeclaration{ id<ItemPrototypeId>(4), ItemCategory::Weapon, 5, 1, 100, 40,
             slotToMask(EquipmentSlot::CarriedRight), false, std::nullopt },
@@ -1139,7 +1139,7 @@ int main()
                .code
         == CombatContentErrorCode::InvalidActorSet);
     writeCombat(
-        "TES3MP_COMBAT_V9\n"
+        "TES3MP_COMBAT_V10\n"
         "manifest 0202030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20\n"
         "seed 42\n"
         + std::string(combatBody));

@@ -72,7 +72,10 @@ namespace
         if (waitRest)
             capabilities.push_back(TES3MP::authoritativeWaitRestCapability());
         if (instantMagic)
+        {
             capabilities.push_back(TES3MP::authoritativeInstantMagicCapability());
+            capabilities.push_back(TES3MP::authoritativeTimedAreaMagicCapability());
+        }
         auto client = std::get<TES3MP::CapabilityOffer>(TES3MP::CapabilityOffer::create(versions, capabilities, {}));
         auto server
             = std::get<TES3MP::CapabilityOffer>(TES3MP::CapabilityOffer::create(std::move(versions), capabilities, {}));
@@ -1450,8 +1453,9 @@ int main()
     auto combatCreated = ClientSessionRuntime::create(
         *combatTransport, *combatClock, timeouts, SessionGeneration::initial(), outbound);
     auto combatRuntime = std::get<std::unique_ptr<ClientSessionRuntime>>(std::move(combatCreated));
-    auto combatVersions = std::get<ProtocolVersionRange>(ProtocolVersionRange::create(1, 2, 2));
-    const std::array combatCapabilities{ combatReplicationCapability(), authoritativeInstantMagicCapability() };
+    auto combatVersions = std::get<ProtocolVersionRange>(ProtocolVersionRange::create(1, 10, 10));
+    const std::array combatCapabilities{ combatReplicationCapability(), authoritativeInstantMagicCapability(),
+        authoritativeTimedAreaMagicCapability() };
     auto combatOffer
         = std::get<CapabilityOffer>(CapabilityOffer::create(std::move(combatVersions), combatCapabilities, {}));
     auto combatPassword = AuthenticationMaterial::create(passwordBytes);
@@ -1463,7 +1467,7 @@ int main()
         std::move(combatRuntime), reconnect, combatInput, combatPresentation, combatStatus);
     combatCoordinator->frame(0.01f);
     combatTransportObserver->enqueue(MessageClass::SessionControl, MessageKind::ServerHello,
-        encodeServerHello(serverHello(false, false, false, false, true, 2, false, false, false, false, true)),
+        encodeServerHello(serverHello(false, false, false, false, true, 10, false, false, false, false, true)),
         TransportChannel::ReliableOrdered);
     combatCoordinator->frame(0.01f);
     combatTransportObserver->enqueue(MessageClass::SessionControl, MessageKind::AuthenticationAccepted,

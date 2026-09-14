@@ -1145,6 +1145,8 @@ namespace TES3MP
                                                     prepared.mInventory = std::move(*magicResult.candidateInventory);
                                                 if (magicResult.event)
                                                     prepared.mMagicEvents.push_back(*magicResult.event);
+                                                prepared.mMagicEffectEvents.insert(prepared.mMagicEffectEvents.end(),
+                                                    magicResult.effectEvents.begin(), magicResult.effectEvents.end());
                                                 disposition = CommandDisposition::Applied;
                                             }
                                             else

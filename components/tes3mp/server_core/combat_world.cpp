@@ -5,6 +5,7 @@
 #include <limits>
 #include <numbers>
 #include <ranges>
+#include <type_traits>
 
 namespace
 {
@@ -189,6 +190,27 @@ namespace
             && finite(value.baseArmor) && value.baseArmor >= 0.f;
     }
 
+    bool validActiveEffects(std::span<const TES3MP::CanonicalActiveMagicEffect> effects) noexcept
+    {
+        if (effects.size() > TES3MP::MaximumActiveMagicEffectsPerCombatant)
+            return false;
+        for (std::size_t index = 0; index < effects.size(); ++index)
+        {
+            const auto& effect = effects[index];
+            if (effect.sourceId == 0 || effect.effectIndex >= TES3MP::MaximumDirectMagicEffectsPerSource
+                || static_cast<std::uint8_t>(effect.sourceKind)
+                    > static_cast<std::uint8_t>(TES3MP::MagicUseSourceKind::EnchantedItem)
+                || static_cast<std::uint8_t>(effect.kind)
+                    >= static_cast<std::uint8_t>(TES3MP::DirectMagicEffectKind::Dispel)
+                || !finite(effect.magnitudePerSecond) || effect.magnitudePerSecond < 0.f
+                || effect.magnitudePerSecond > 1'000'000.f || effect.endTick <= effect.startTick
+                || effect.lastAppliedTick < effect.startTick || effect.lastAppliedTick > effect.endTick
+                || (index && effects[index - 1].instanceId >= effect.instanceId))
+                return false;
+        }
+        return true;
+    }
+
     bool valid(const TES3MP::CanonicalPlayerCombatState& value) noexcept
     {
         const auto& s = value.stats;
@@ -217,7 +239,8 @@ namespace
             || std::ranges::adjacent_find(value.knownSpells) != value.knownSpells.end()
             || value.contractedDiseases.size() > TES3MP::MaximumContractedDiseasesPerPlayer
             || !std::ranges::is_sorted(value.contractedDiseases)
-            || std::ranges::adjacent_find(value.contractedDiseases) != value.contractedDiseases.end())
+            || std::ranges::adjacent_find(value.contractedDiseases) != value.contractedDiseases.end()
+            || !validActiveEffects(value.activeMagicEffects))
             return false;
         for (std::size_t index = 0; index < value.skillRules.size(); ++index)
         {
@@ -259,7 +282,7 @@ namespace
                     value.naturalWeapon->slashMaximum, value.naturalWeapon->thrustMinimum,
                     value.naturalWeapon->thrustMaximum, value.naturalWeapon->weight, 1.f,
                     value.naturalWeapon->normalWeapon }))
-            && value.attackReachQuanta <= (1u << 30);
+            && value.attackReachQuanta <= (1u << 30) && validActiveEffects(value.activeMagicEffects);
     }
 
     std::uint64_t distanceSquared(
@@ -448,6 +471,51 @@ namespace
             target.stats.dead = true;
             if (!target.deathTick)
                 target.deathTick = tick;
+        }
+    }
+
+    TES3MP::DirectMagicResolution resolutionForEffect(
+        TES3MP::DirectMagicEffectKind kind, float magnitude) noexcept
+    {
+        TES3MP::DirectMagicResolution result;
+        switch (kind)
+        {
+            case TES3MP::DirectMagicEffectKind::DamageFatigue:
+                result.fatigueDamage = magnitude;
+                break;
+            case TES3MP::DirectMagicEffectKind::DamageMagicka:
+                result.magickaDamage = magnitude;
+                break;
+            case TES3MP::DirectMagicEffectKind::RestoreHealth:
+                result.healthRestore = magnitude;
+                break;
+            case TES3MP::DirectMagicEffectKind::RestoreFatigue:
+                result.fatigueRestore = magnitude;
+                break;
+            case TES3MP::DirectMagicEffectKind::RestoreMagicka:
+                result.magickaRestore = magnitude;
+                break;
+            case TES3MP::DirectMagicEffectKind::Dispel:
+                break;
+            default:
+                result.healthDamage = magnitude;
+                break;
+        }
+        return result;
+    }
+
+    float signedEffectDelta(TES3MP::DirectMagicEffectKind kind, float magnitude) noexcept
+    {
+        switch (kind)
+        {
+            case TES3MP::DirectMagicEffectKind::RestoreHealth:
+            case TES3MP::DirectMagicEffectKind::RestoreFatigue:
+            case TES3MP::DirectMagicEffectKind::RestoreMagicka:
+                return magnitude;
+            case TES3MP::DirectMagicEffectKind::Dispel:
+                return 0.f;
+            default:
+                return -magnitude;
         }
     }
 
@@ -781,7 +849,8 @@ namespace TES3MP
 
     std::variant<CanonicalCombatWorld, CanonicalCombatWorldError> createCanonicalCombatWorld(
         std::span<const CanonicalPlayerCombatState> players, std::span<const CanonicalActorCombatState> actors,
-        RandomStateV1 randomState, std::optional<ServerTick> lastSimulationTick)
+        RandomStateV1 randomState, std::optional<ServerTick> lastSimulationTick,
+        ActiveMagicEffectId nextActiveMagicEffectId)
     {
         if (players.size() > MaximumPlayerCombatants)
             return CanonicalCombatWorldError{ CanonicalCombatWorldErrorCode::PlayerLimitExceeded };
@@ -801,8 +870,30 @@ namespace TES3MP
             if (i && actors[i - 1].actorId >= actors[i].actorId)
                 return CanonicalCombatWorldError{ CanonicalCombatWorldErrorCode::ActorsNotStrictlySorted, i };
         }
+        std::vector<ActiveMagicEffectId> effectIds;
+        effectIds.reserve(MaximumActiveMagicEffects);
+        const auto inspectEffects = [&](std::span<const CanonicalActiveMagicEffect> effects) {
+            if (effectIds.size() > MaximumActiveMagicEffects - effects.size())
+                return false;
+            for (const auto& effect : effects)
+            {
+                if (effect.instanceId >= nextActiveMagicEffectId)
+                    return false;
+                effectIds.push_back(effect.instanceId);
+            }
+            return true;
+        };
+        for (const auto& player : players)
+            if (!inspectEffects(player.activeMagicEffects))
+                return CanonicalCombatWorldError{ CanonicalCombatWorldErrorCode::InvalidStat };
+        for (const auto& actor : actors)
+            if (!inspectEffects(actor.activeMagicEffects))
+                return CanonicalCombatWorldError{ CanonicalCombatWorldErrorCode::InvalidStat };
+        std::ranges::sort(effectIds);
+        if (std::ranges::adjacent_find(effectIds) != effectIds.end())
+            return CanonicalCombatWorldError{ CanonicalCombatWorldErrorCode::InvalidStat };
         return CanonicalCombatWorld(std::vector(players.begin(), players.end()),
-            std::vector(actors.begin(), actors.end()), randomState, lastSimulationTick);
+            std::vector(actors.begin(), actors.end()), randomState, lastSimulationTick, nextActiveMagicEffectId);
     }
 
     PreparedMeleeAttack prepareAuthoritativeMeleeAttack(const CanonicalCombatWorld& combat,
@@ -1073,7 +1164,8 @@ namespace TES3MP
             mutableTarget->revision = *targetRevision;
         }
         auto created
-            = createCanonicalCombatWorld(playerStates, actorStates, random.snapshot(), combat.lastSimulationTick());
+            = createCanonicalCombatWorld(playerStates, actorStates, random.snapshot(), combat.lastSimulationTick(),
+                combat.nextActiveMagicEffectId());
         auto* candidate = std::get_if<CanonicalCombatWorld>(&created);
         if (!candidate)
         {
@@ -1278,16 +1370,6 @@ namespace TES3MP
         if (hasOther != (use.targetKind != MagicUseTargetKind::Self))
             return out;
 
-        const auto casterRevision = caster->revision.next();
-        const auto targetRevision = targetPlayer ? targetPlayer->revision.next()
-            : targetActor                        ? targetActor->revision.next()
-                                                 : casterRevision;
-        if (!casterRevision || !targetRevision)
-        {
-            out.disposition = AuthoritativeMagicUseDisposition::RevisionExhausted;
-            return out;
-        }
-
         std::vector<CanonicalPlayerCombatState> playerStates(combat.players().begin(), combat.players().end());
         std::vector<CanonicalActorCombatState> actorStates(combat.actors().begin(), combat.actors().end());
         CanonicalInventoryWorld inventoryCandidate = inventory;
@@ -1301,6 +1383,106 @@ namespace TES3MP
         if (targetActor)
             mutableTargetActor = &*std::ranges::lower_bound(
                 actorStates, targetActor->actorId, {}, &CanonicalActorCombatState::actorId);
+
+        struct TargetKey
+        {
+            MagicUseTargetKind kind = MagicUseTargetKind::Player;
+            std::uint64_t id = 0;
+            bool operator==(const TargetKey&) const noexcept = default;
+            auto operator<=>(const TargetKey&) const noexcept = default;
+        };
+        const TargetKey casterKey{ MagicUseTargetKind::Player, use.caster.value() };
+        const TargetKey primaryKey = targetPlayer
+            ? TargetKey{ MagicUseTargetKind::Player, targetPlayer->playerId.value() }
+            : targetActor ? TargetKey{ MagicUseTargetKind::Actor, targetActor->actorId.value() } : casterKey;
+        const auto targetTransformFor = [&](TargetKey key) -> const Transform* {
+            if (key.kind == MagicUseTargetKind::Player)
+            {
+                const auto id = PlayerId::fromValue(key.id);
+                const auto* spatial = id ? players.findPlayer(*id) : nullptr;
+                return spatial ? &spatial->transform() : nullptr;
+            }
+            const auto id = ActorId::fromValue(key.id);
+            const auto* spatial = id ? actors.find(*id) : nullptr;
+            return spatial ? &spatial->root() : nullptr;
+        };
+        const auto isAlive = [&](TargetKey key) {
+            if (key.kind == MagicUseTargetKind::Player)
+            {
+                const auto id = PlayerId::fromValue(key.id);
+                const auto* state = id ? combat.findPlayer(*id) : nullptr;
+                return state && !state->victim.dead;
+            }
+            const auto id = ActorId::fromValue(key.id);
+            const auto* state = id ? combat.findActor(*id) : nullptr;
+            return state && !state->stats.dead;
+        };
+        std::vector<std::vector<TargetKey>> effectTargets;
+        effectTargets.reserve(effects.size());
+        std::size_t projectedEventCount = 0;
+        for (const auto& effect : effects)
+        {
+            const TargetKey direct = effect.target == DirectMagicTarget::Self ? casterKey : primaryKey;
+            std::vector<TargetKey> selected;
+            if (effect.areaRadiusQuanta == 0)
+                selected.push_back(direct);
+            else
+            {
+                const auto* center = targetTransformFor(direct);
+                if (!center)
+                    return out;
+                const auto radiusSquared
+                    = static_cast<std::uint64_t>(effect.areaRadiusQuanta) * effect.areaRadiusQuanta;
+                for (const auto& player : combat.players())
+                {
+                    const TargetKey key{ MagicUseTargetKind::Player, player.playerId.value() };
+                    const auto* transform = targetTransformFor(key);
+                    if (isAlive(key) && transform && transform->cell() == center->cell()
+                        && distanceSquared(center->position(), transform->position(), effect.areaRadiusQuanta)
+                            <= radiusSquared)
+                        selected.push_back(key);
+                }
+                for (const auto& actor : combat.actors())
+                {
+                    const TargetKey key{ MagicUseTargetKind::Actor, actor.actorId.value() };
+                    const auto* transform = targetTransformFor(key);
+                    if (isAlive(key) && transform && transform->cell() == center->cell()
+                        && distanceSquared(center->position(), transform->position(), effect.areaRadiusQuanta)
+                            <= radiusSquared)
+                        selected.push_back(key);
+                }
+                std::ranges::sort(selected);
+                selected.erase(std::unique(selected.begin(), selected.end()), selected.end());
+                if (selected.size() > MaximumAreaMagicTargets)
+                {
+                    out.disposition = AuthoritativeMagicUseDisposition::AreaTargetLimitExceeded;
+                    return out;
+                }
+            }
+            if (effect.kind == DirectMagicEffectKind::Dispel)
+            {
+                for (const auto key : selected)
+                {
+                    const auto count = key.kind == MagicUseTargetKind::Player
+                        ? combat.findPlayer(*PlayerId::fromValue(key.id))->activeMagicEffects.size()
+                        : combat.findActor(*ActorId::fromValue(key.id))->activeMagicEffects.size();
+                    if (projectedEventCount > MaximumMagicEffectEventsPerTick - count)
+                    {
+                        out.disposition = AuthoritativeMagicUseDisposition::AreaTargetLimitExceeded;
+                        return out;
+                    }
+                    projectedEventCount += count;
+                }
+            }
+            else if (projectedEventCount > MaximumMagicEffectEventsPerTick - selected.size())
+            {
+                out.disposition = AuthoritativeMagicUseDisposition::AreaTargetLimitExceeded;
+                return out;
+            }
+            else
+                projectedEventCount += selected.size();
+            effectTargets.push_back(std::move(selected));
+        }
 
         auto random = Xoshiro256StarStar::restore(combat.randomState());
         bool succeeded = true;
@@ -1339,30 +1521,165 @@ namespace TES3MP
 
         DirectMagicResolution selfResolution;
         DirectMagicResolution targetResolution;
+        ActiveMagicEffectId nextEffectId = combat.nextActiveMagicEffectId();
+        std::vector<TargetKey> changedTargets{ casterKey };
+        if (primaryKey != casterKey)
+            changedTargets.push_back(primaryKey);
+        const auto playerFor = [&](TargetKey key) -> CanonicalPlayerCombatState* {
+            if (key.kind != MagicUseTargetKind::Player)
+                return nullptr;
+            const auto id = PlayerId::fromValue(key.id);
+            if (!id)
+                return nullptr;
+            const auto found = std::ranges::lower_bound(playerStates, *id, {}, &CanonicalPlayerCombatState::playerId);
+            return found != playerStates.end() && found->playerId == *id ? &*found : nullptr;
+        };
+        const auto actorFor = [&](TargetKey key) -> CanonicalActorCombatState* {
+            if (key.kind != MagicUseTargetKind::Actor)
+                return nullptr;
+            const auto id = ActorId::fromValue(key.id);
+            if (!id)
+                return nullptr;
+            const auto found = std::ranges::lower_bound(actorStates, *id, {}, &CanonicalActorCombatState::actorId);
+            return found != actorStates.end() && found->actorId == *id ? &*found : nullptr;
+        };
+        const auto effectsFor = [&](TargetKey key) -> std::vector<CanonicalActiveMagicEffect>* {
+            if (auto* player = playerFor(key))
+                return &player->activeMagicEffects;
+            if (auto* actor = actorFor(key))
+                return &actor->activeMagicEffects;
+            return nullptr;
+        };
+        const auto defenseFor = [&](TargetKey key) {
+            if (auto* player = playerFor(key))
+                return combinedDirectMagicDefense(
+                    player->magicDefense, inventoryCandidate.findPlayer(player->playerId), magic);
+            if (auto* actor = actorFor(key))
+                return actor->magicDefense;
+            return DirectMagicDefense{};
+        };
+        const auto addResolution = [](DirectMagicResolution& destination, DirectMagicResolution source) {
+            destination.healthDamage += source.healthDamage;
+            destination.fatigueDamage += source.fatigueDamage;
+            destination.magickaDamage += source.magickaDamage;
+            destination.healthRestore += source.healthRestore;
+            destination.fatigueRestore += source.fatigueRestore;
+            destination.magickaRestore += source.magickaRestore;
+        };
         if (succeeded)
         {
-            const auto casterInventoryAfter = inventoryCandidate.findPlayer(use.caster);
-            const auto self = resolveDirectMagicEffects(effects, DirectMagicTarget::Self,
-                combinedDirectMagicDefense(mutableCaster.magicDefense, casterInventoryAfter, magic), random);
-            const DirectMagicDefense targetDefense = mutableTargetPlayer
-                ? combinedDirectMagicDefense(mutableTargetPlayer->magicDefense,
-                      inventoryCandidate.findPlayer(mutableTargetPlayer->playerId), magic)
-                : mutableTargetActor ? mutableTargetActor->magicDefense
-                                     : DirectMagicDefense{};
-            const auto other = resolveDirectMagicEffects(effects, DirectMagicTarget::Other, targetDefense, random);
-            if (!self || !other)
-                return out;
-            selfResolution = *self;
-            targetResolution = *other;
-            applyDirectMagic(mutableCaster, selfResolution, serverTick);
-            if (mutableTargetPlayer)
-                applyDirectMagic(*mutableTargetPlayer, targetResolution, serverTick);
-            if (mutableTargetActor)
+            for (std::size_t effectIndex = 0; effectIndex < effects.size(); ++effectIndex)
             {
-                applyDirectMagic(*mutableTargetActor, targetResolution, serverTick);
-                if (targetResolution.healthDamage > 0.f || targetResolution.fatigueDamage > 0.f
-                    || targetResolution.magickaDamage > 0.f)
-                    mutableTargetActor->aggressionTarget = use.caster;
+                const auto& profile = effects[effectIndex];
+                for (const auto key : effectTargets[effectIndex])
+                {
+                    auto* active = effectsFor(key);
+                    if (!active)
+                        return out;
+                    const auto magnitude = resolveDirectMagicEffectMagnitude(profile, defenseFor(key), random);
+                    if (!magnitude)
+                        return out;
+                    if (std::ranges::find(changedTargets, key) == changedTargets.end())
+                        changedTargets.push_back(key);
+                    if (profile.kind == DirectMagicEffectKind::Dispel)
+                    {
+                        for (auto current = active->begin(); current != active->end();)
+                        {
+                            const auto roll = random.uniformBelow(10'000);
+                            if (!roll)
+                                return out;
+                            const float threshold = std::clamp(*magnitude, 0.f, 100.f) * 100.f;
+                            if (static_cast<float>(*roll) >= threshold)
+                            {
+                                ++current;
+                                continue;
+                            }
+                            out.effectEvents.push_back({ serverTick, current->instanceId,
+                                AuthoritativeMagicEffectEventKind::Ended,
+                                AuthoritativeMagicEffectEndReason::Dispelled, key.kind, key.id, current->kind,
+                                current->magnitudePerSecond, 0.f, current->startTick, current->endTick });
+                            current = active->erase(current);
+                        }
+                        continue;
+                    }
+                    if (profile.durationTicks == 0)
+                    {
+                        const auto afterId = nextEffectId.next();
+                        if (!afterId)
+                        {
+                            out.disposition = AuthoritativeMagicUseDisposition::RevisionExhausted;
+                            return out;
+                        }
+                        const auto resolution = resolutionForEffect(profile.kind, *magnitude);
+                        if (auto* player = playerFor(key))
+                            applyDirectMagic(*player, resolution, serverTick);
+                        else if (auto* actor = actorFor(key))
+                        {
+                            applyDirectMagic(*actor, resolution, serverTick);
+                            if (*magnitude > 0.f && profile.kind <= DirectMagicEffectKind::DamageMagicka)
+                                actor->aggressionTarget = use.caster;
+                        }
+                        if (key == casterKey && profile.target == DirectMagicTarget::Self)
+                            addResolution(selfResolution, resolution);
+                        if (key == primaryKey && profile.target == DirectMagicTarget::Other)
+                            addResolution(targetResolution, resolution);
+                        out.effectEvents.push_back({ serverTick, nextEffectId,
+                            AuthoritativeMagicEffectEventKind::Updated, AuthoritativeMagicEffectEndReason::None,
+                            key.kind, key.id, profile.kind, *magnitude, signedEffectDelta(profile.kind, *magnitude),
+                            serverTick, serverTick });
+                        nextEffectId = *afterId;
+                        continue;
+                    }
+
+                    const auto endValue = serverTick.value() + profile.durationTicks;
+                    const auto endTick = endValue >= serverTick.value() ? ServerTick::fromValue(endValue) : std::nullopt;
+                    if (!endTick)
+                    {
+                        out.disposition = AuthoritativeMagicUseDisposition::RevisionExhausted;
+                        return out;
+                    }
+                    auto refresh = profile.stacking == DirectMagicStacking::Refresh
+                        ? std::ranges::find_if(*active, [&](const CanonicalActiveMagicEffect& current) {
+                              return current.caster == use.caster && current.sourceKind == use.sourceKind
+                                  && current.sourceId == use.sourceId && current.effectIndex == effectIndex
+                                  && current.kind == profile.kind;
+                          })
+                        : active->end();
+                    if (refresh != active->end())
+                    {
+                        refresh->magnitudePerSecond = *magnitude;
+                        refresh->startTick = serverTick;
+                        refresh->endTick = *endTick;
+                        refresh->lastAppliedTick = serverTick;
+                        out.effectEvents.push_back({ serverTick, refresh->instanceId,
+                            AuthoritativeMagicEffectEventKind::Updated, AuthoritativeMagicEffectEndReason::None,
+                            key.kind, key.id, profile.kind, *magnitude, 0.f, serverTick, *endTick });
+                    }
+                    else
+                    {
+                        if (active->size() >= MaximumActiveMagicEffectsPerCombatant)
+                        {
+                            out.disposition = AuthoritativeMagicUseDisposition::ActiveEffectLimitExceeded;
+                            return out;
+                        }
+                        const auto afterId = nextEffectId.next();
+                        if (!afterId)
+                        {
+                            out.disposition = AuthoritativeMagicUseDisposition::RevisionExhausted;
+                            return out;
+                        }
+                        CanonicalActiveMagicEffect instance{ nextEffectId, use.caster, use.sourceKind, use.sourceId,
+                            static_cast<std::uint8_t>(effectIndex), profile.kind, *magnitude, serverTick, *endTick,
+                            serverTick };
+                        const auto position = std::ranges::lower_bound(
+                            *active, instance.instanceId, {}, &CanonicalActiveMagicEffect::instanceId);
+                        active->insert(position, instance);
+                        out.effectEvents.push_back({ serverTick, nextEffectId,
+                            AuthoritativeMagicEffectEventKind::Started, AuthoritativeMagicEffectEndReason::None,
+                            key.kind, key.id, profile.kind, *magnitude, 0.f, serverTick, *endTick });
+                        nextEffectId = *afterId;
+                    }
+                }
             }
             (void)advanceCombatSkill(mutableCaster,
                 spell
@@ -1370,20 +1687,40 @@ namespace TES3MP
                           + static_cast<std::uint8_t>(spell->school))
                     : CombatProgressionSkill::Enchant);
         }
-        mutableCaster.revision = *casterRevision;
-        if (mutableTargetPlayer)
-            mutableTargetPlayer->revision = *targetRevision;
-        if (mutableTargetActor)
-            mutableTargetActor->revision = *targetRevision;
+        std::ranges::sort(changedTargets);
+        changedTargets.erase(std::unique(changedTargets.begin(), changedTargets.end()), changedTargets.end());
+        for (const auto key : changedTargets)
+        {
+            const auto current = playerFor(key) ? playerFor(key)->revision : actorFor(key)->revision;
+            const auto revision = current.next();
+            if (!revision)
+            {
+                out.disposition = AuthoritativeMagicUseDisposition::RevisionExhausted;
+                return out;
+            }
+            if (auto* player = playerFor(key))
+                player->revision = *revision;
+            else
+                actorFor(key)->revision = *revision;
+        }
+        for (auto& event : out.effectEvents)
+        {
+            const TargetKey key{ event.targetKind, event.targetId };
+            event.targetRevision = playerFor(key) ? playerFor(key)->revision : actorFor(key)->revision;
+        }
+        const auto casterRevision = mutableCaster.revision;
+        const auto targetRevision = mutableTargetPlayer ? mutableTargetPlayer->revision
+            : mutableTargetActor                    ? mutableTargetActor->revision
+                                                    : mutableCaster.revision;
 
-        auto created
-            = createCanonicalCombatWorld(playerStates, actorStates, random.snapshot(), combat.lastSimulationTick());
+        auto created = createCanonicalCombatWorld(
+            playerStates, actorStates, random.snapshot(), combat.lastSimulationTick(), nextEffectId);
         auto* candidate = std::get_if<CanonicalCombatWorld>(&created);
         if (!candidate)
             return out;
         out.disposition = AuthoritativeMagicUseDisposition::Applied;
         out.event = AuthoritativeMagicUseEvent{ serverTick, use.caster, use.sourceKind, use.sourceId, use.targetKind,
-            use.targetId, *casterRevision, *targetRevision, succeeded, selfResolution, targetResolution,
+            use.targetId, casterRevision, targetRevision, succeeded, selfResolution, targetResolution,
             mutableTargetPlayer      ? mutableTargetPlayer->victim.dead
                 : mutableTargetActor ? mutableTargetActor->stats.dead
                                      : mutableCaster.victim.dead };
@@ -1417,6 +1754,7 @@ namespace TES3MP
         std::vector<CanonicalPlayerCombatState> playerStates(combat.players().begin(), combat.players().end());
         std::vector<CanonicalActorCombatState> actorStates(combat.actors().begin(), combat.actors().end());
         std::vector<AuthoritativeActorMeleeEvent> events;
+        std::vector<AuthoritativeMagicEffectEvent> magicEffectEvents;
         CanonicalInventoryWorld inventoryCandidate = inventory;
         auto random = Xoshiro256StarStar::restore(combat.randomState());
 
@@ -1424,6 +1762,88 @@ namespace TES3MP
             return std::ranges::any_of(players.activeSessions(),
                 [&](const CanonicalSessionProgress& session) { return session.playerId() == id; });
         };
+        const auto advanceEffects = [&](auto& target, MagicUseTargetKind targetKind,
+                                        std::uint64_t targetId) -> std::optional<CombatSimulationError> {
+            const std::size_t firstEvent = magicEffectEvents.size();
+            auto& active = target.activeMagicEffects;
+            bool targetDied = false;
+            for (auto current = active.begin(); current != active.end();)
+            {
+                if (tick < current->lastAppliedTick || current->lastAppliedTick > current->endTick)
+                    return CombatSimulationError{ CombatSimulationErrorCode::TickRegression };
+                const ServerTick appliedThrough = tick < current->endTick ? tick : current->endTick;
+                if (appliedThrough > current->lastAppliedTick)
+                {
+                    const float seconds = static_cast<float>(
+                                              appliedThrough.value() - current->lastAppliedTick.value())
+                        * policy.secondsPerTick;
+                    const float magnitude = current->magnitudePerSecond * seconds;
+                    if (!finite(magnitude) || magicEffectEvents.size() >= MaximumMagicEffectEventsPerTick)
+                        return CombatSimulationError{ CombatSimulationErrorCode::EventLimitExceeded };
+                    const auto resolution = resolutionForEffect(current->kind, magnitude);
+                    if constexpr (std::is_same_v<std::decay_t<decltype(target)>, CanonicalPlayerCombatState>)
+                    {
+                        applyDirectMagic(target, resolution, appliedThrough);
+                        targetDied = target.victim.dead;
+                    }
+                    else
+                    {
+                        applyDirectMagic(target, resolution, appliedThrough);
+                        targetDied = target.stats.dead;
+                        if (magnitude > 0.f && current->kind <= DirectMagicEffectKind::DamageMagicka)
+                            target.aggressionTarget = current->caster;
+                    }
+                    current->lastAppliedTick = appliedThrough;
+                    magicEffectEvents.push_back({ tick, current->instanceId,
+                        AuthoritativeMagicEffectEventKind::Updated, AuthoritativeMagicEffectEndReason::None,
+                        targetKind, targetId, current->kind, current->magnitudePerSecond,
+                        signedEffectDelta(current->kind, magnitude), current->startTick, current->endTick });
+                }
+                if (targetDied)
+                    break;
+                if (tick < current->endTick)
+                {
+                    ++current;
+                    continue;
+                }
+                if (magicEffectEvents.size() >= MaximumMagicEffectEventsPerTick)
+                    return CombatSimulationError{ CombatSimulationErrorCode::EventLimitExceeded };
+                magicEffectEvents.push_back({ tick, current->instanceId,
+                    AuthoritativeMagicEffectEventKind::Ended, AuthoritativeMagicEffectEndReason::Expired,
+                    targetKind, targetId, current->kind, current->magnitudePerSecond, 0.f, current->startTick,
+                    current->endTick });
+                current = active.erase(current);
+            }
+            if (targetDied)
+            {
+                for (const auto& effect : active)
+                {
+                    if (magicEffectEvents.size() >= MaximumMagicEffectEventsPerTick)
+                        return CombatSimulationError{ CombatSimulationErrorCode::EventLimitExceeded };
+                    magicEffectEvents.push_back({ tick, effect.instanceId,
+                        AuthoritativeMagicEffectEventKind::Ended, AuthoritativeMagicEffectEndReason::TargetDied,
+                        targetKind, targetId, effect.kind, effect.magnitudePerSecond, 0.f, effect.startTick,
+                        effect.endTick });
+                }
+                active.clear();
+            }
+            if (magicEffectEvents.size() != firstEvent)
+            {
+                const auto revision = target.revision.next();
+                if (!revision)
+                    return CombatSimulationError{ CombatSimulationErrorCode::RevisionExhausted };
+                target.revision = *revision;
+                for (std::size_t index = firstEvent; index < magicEffectEvents.size(); ++index)
+                    magicEffectEvents[index].targetRevision = *revision;
+            }
+            return std::nullopt;
+        };
+        for (auto& player : playerStates)
+            if (const auto error = advanceEffects(player, MagicUseTargetKind::Player, player.playerId.value()))
+                return *error;
+        for (auto& actor : actorStates)
+            if (const auto error = advanceEffects(actor, MagicUseTargetKind::Actor, actor.actorId.value()))
+                return *error;
         for (std::size_t index = 0; index < actorStates.size(); ++index)
         {
             auto& actor = actorStates[index];
@@ -1732,14 +2152,16 @@ namespace TES3MP
             actor.stats.fatigueNonNegative = recovered >= 0.f;
         }
 
-        auto created = createCanonicalCombatWorld(playerStates, actorStates, random.snapshot(), tick);
+        auto created = createCanonicalCombatWorld(
+            playerStates, actorStates, random.snapshot(), tick, combat.nextActiveMagicEffectId());
         auto* candidate = std::get_if<CanonicalCombatWorld>(&created);
         if (!candidate)
             return CombatSimulationError{ CombatSimulationErrorCode::InvalidWorld };
         std::optional<CanonicalInventoryWorld> changedInventory;
         if (inventoryCandidate != inventory)
             changedInventory.emplace(std::move(inventoryCandidate));
-        return CombatSimulationStep{ std::move(*candidate), std::move(changedInventory), std::move(events) };
+        return CombatSimulationStep{ std::move(*candidate), std::move(changedInventory), std::move(events),
+            std::move(magicEffectEvents) };
     }
     catch (...)
     {
@@ -1782,7 +2204,8 @@ namespace TES3MP
         applyDirectMagic(*found, *resolution, tick);
         found->revision = *revision;
         auto candidate
-            = createCanonicalCombatWorld(players, combat.actors(), random.snapshot(), combat.lastSimulationTick());
+            = createCanonicalCombatWorld(players, combat.actors(), random.snapshot(), combat.lastSimulationTick(),
+                combat.nextActiveMagicEffectId());
         auto* created = std::get_if<CanonicalCombatWorld>(&candidate);
         if (!created)
             return result;
@@ -1865,8 +2288,8 @@ namespace TES3MP
             }
         }
 
-        auto created = createCanonicalCombatWorld(
-            playerStates, combat.actors(), combat.randomState(), combat.lastSimulationTick());
+        auto created = createCanonicalCombatWorld(playerStates, combat.actors(), combat.randomState(),
+            combat.lastSimulationTick(), combat.nextActiveMagicEffectId());
         auto* candidate = std::get_if<CanonicalCombatWorld>(&created);
         return candidate ? WaitRestRecoveryResult(std::move(*candidate))
                          : WaitRestRecoveryResult(WaitRestRecoveryError::InvalidWorld);

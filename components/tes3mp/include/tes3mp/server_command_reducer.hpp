@@ -144,6 +144,10 @@ namespace TES3MP
             const std::optional<CanonicalScriptState>& candidateScriptState() const noexcept { return mScriptState; }
             std::span<const AuthoritativeMeleeEvent> combatEvents() const noexcept { return mCombatEvents; }
             std::span<const AuthoritativeMagicUseEvent> magicEvents() const noexcept { return mMagicEvents; }
+            std::span<const AuthoritativeMagicEffectEvent> magicEffectEvents() const noexcept
+            {
+                return mMagicEffectEvents;
+            }
 
         private:
             friend class CanonicalCommandReducer;
@@ -170,6 +174,7 @@ namespace TES3MP
             std::optional<CanonicalScriptState> mScriptState;
             std::vector<AuthoritativeMeleeEvent> mCombatEvents;
             std::vector<AuthoritativeMagicUseEvent> mMagicEvents;
+            std::vector<AuthoritativeMagicEffectEvent> mMagicEffectEvents;
             std::vector<PlayerId> mClientAuthoritativePlayers;
             std::vector<DurableCommandOrder> mDurableCommands;
         };

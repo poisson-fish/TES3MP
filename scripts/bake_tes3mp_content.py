@@ -47,7 +47,7 @@ CATALOGS = {
     "actor_content_file": ("TES3MP_ACTORS_V1", True),
     "interactive_object_content_file": ("TES3MP_INTERACTIVE_OBJECTS_V2", False),
     "inventory_content_file": ("TES3MP_INVENTORY_V2", False),
-    "combat_content_file": ("TES3MP_COMBAT_V9", False),
+    "combat_content_file": ("TES3MP_COMBAT_V10", False),
     "character_content_file": ("TES3MP_CHARACTERS_V2", False),
     "world_content_file": ("TES3MP_WORLD_V4", True),
     "script_package_file": ("TES3MP_SCRIPT_PACKAGES_V2", False),
@@ -771,10 +771,10 @@ ARMOR_WEIGHT_GMSTS = {
 DIRECT_EFFECT_KINDS = {
     14: "fire", 15: "shock", 16: "frost", 23: "health", 24: "magicka",
     25: "fatigue", 27: "poison", 75: "restore_health", 76: "restore_magicka",
-    77: "restore_fatigue",
+    77: "restore_fatigue", 57: "dispel",
 }
 
-MAGIC_SCHOOLS = {11: 0, 13: 1, 10: 2, 12: 3, 14: 4, 15: 5}
+MAGIC_SCHOOLS = {0: 0, 1: 1, 2: 2, 3: 3, 4: 4, 5: 5}
 
 PASSIVE_EFFECT_FIELDS = {
     4: 8, 5: 9, 6: 10, 90: 2, 91: 4, 92: 3, 94: 6, 95: 7, 97: 5,
@@ -802,8 +802,8 @@ def _effect_values(record_value: Tes3Record) -> tuple[tuple[int, int, int, int, 
             raise BakeError(f"unsupported magic effect layout: {record_value.name}")
         effect, _skill, _attribute, effect_range, area, duration, minimum, maximum = \
             struct.unpack("<hbbiiiii", payload)
-        if effect_range < 0 or effect_range > 2 or area != 0 or duration not in {0, 1} \
-                or minimum < 0 or maximum < minimum:
+        if effect_range < 0 or effect_range > 2 or area < 0 or area > 256 \
+                or duration < 0 or duration > 3600 or minimum < 0 or maximum < minimum:
             raise BakeError(f"unsupported direct magic effect: {record_value.name}")
         result.append((effect, effect_range, duration, minimum, maximum, area))
     if not result or len(result) > 8:
@@ -811,14 +811,18 @@ def _effect_values(record_value: Tes3Record) -> tuple[tuple[int, int, int, int, 
     return tuple(result)
 
 
-def _direct_effect_tokens(record_value: Tes3Record, force_other: bool = False) -> tuple[str, ...]:
+def _direct_effect_tokens(record_value: Tes3Record, force_other: bool = False,
+                          force_instant: bool = False) -> tuple[str, ...]:
     result = []
-    for effect, effect_range, _duration, minimum, maximum, _area in _effect_values(record_value):
+    for effect, effect_range, duration, minimum, maximum, area in _effect_values(record_value):
         effect_kind = DIRECT_EFFECT_KINDS.get(effect)
         if effect_kind is None:
             raise BakeError(f"unsupported direct magic effect: {record_value.name}")
         target = "other" if force_other or effect_range != 0 else "self"
-        result.extend((target, effect_kind, str(minimum), str(maximum)))
+        duration_ticks = 0 if force_instant else duration * 63
+        area_quanta = 0 if force_instant else area * 1024
+        result.extend((target, effect_kind, str(minimum), str(maximum), str(duration_ticks),
+                       str(area_quanta), "refresh"))
     return tuple(result)
 
 
@@ -852,7 +856,7 @@ def _item_magic(record_value: Tes3Record, records: dict[tuple[str, str], Tes3Rec
     if enchant_type == 2:
         if cost <= 0 or charge <= 0 or cost > charge:
             raise BakeError(f"invalid when-used enchantment charge: {enchantment.name}")
-        return charge, ("use", str(cost), *_instant_direct_effect_tokens(enchantment, records)), None
+        return charge, ("use", str(cost), *_timed_area_effect_tokens(enchantment, records)), None
     if enchant_type == 3:
         return 0, None, _passive_magic_defense(enchantment)
     raise BakeError(f"unsupported item enchantment type: {enchantment.name}")
@@ -871,8 +875,17 @@ def _instant_direct_effect_tokens(record_value: Tes3Record,
         records: dict[tuple[str, str], Tes3Record]) -> tuple[str, ...]:
     del records
     for _effect, effect_range, _duration, _minimum, _maximum, area in _effect_values(record_value):
-        if effect_range == 2 or area != 0:
-            raise BakeError(f"projectile or area magic is deferred: {record_value.name}")
+        if effect_range == 2:
+            raise BakeError(f"projectile magic is deferred: {record_value.name}")
+    return _direct_effect_tokens(record_value, force_instant=True)
+
+
+def _timed_area_effect_tokens(record_value: Tes3Record,
+        records: dict[tuple[str, str], Tes3Record]) -> tuple[str, ...]:
+    del records
+    for _effect, effect_range, _duration, _minimum, _maximum, _area in _effect_values(record_value):
+        if effect_range == 2:
+            raise BakeError(f"projectile magic is deferred: {record_value.name}")
     return _direct_effect_tokens(record_value)
 
 
@@ -883,8 +896,8 @@ def _spell_profile(record_value: Tes3Record, records: dict[tuple[str, str], Tes3
         raise BakeError(f"unsupported castable spell: {record_value.name}")
     candidates = []
     for effect, effect_range, duration, minimum, maximum, area in _effect_values(record_value):
-        if effect_range == 2 or area != 0:
-            raise BakeError(f"projectile or area spell is deferred: {record_value.name}")
+        if effect_range == 2:
+            raise BakeError(f"projectile spell is deferred: {record_value.name}")
         school, base_cost, effect_flags = _magic_effect_data(records, effect)
         adjusted_duration = float(duration) if effect_flags & 0x1000 else max(1.0, float(duration))
         difficulty = adjusted_duration * 0.1 * base_cost * 0.5 * float(minimum + maximum)
@@ -894,7 +907,7 @@ def _spell_profile(record_value: Tes3Record, records: dict[tuple[str, str], Tes3
     _score, school, difficulty = min(candidates)
     effects = _direct_effect_tokens(record_value)
     return (str(school), str(cost), _float_text(difficulty), "1" if (flags & 1) else "0",
-            str(len(effects) // 4), *effects)
+            str(len(effects) // 7), *effects)
 
 
 def _actor_magic(record_value: Tes3Record, records: dict[tuple[str, str], Tes3Record],
@@ -915,7 +928,7 @@ def _actor_magic(record_value: Tes3Record, records: dict[tuple[str, str], Tes3Re
             if len(diseases) >= 16:
                 raise BakeError(f"invalid actor disease set: {record_value.name}")
             diseases.append((stable_record_id(spell.name), "blight" if spell_type == 2 else "common",
-                             _direct_effect_tokens(spell, True)))
+                             _direct_effect_tokens(spell, True, True)))
         else:
             raise BakeError(f"unsupported initial actor spell type: {spell.name}")
     if len(diseases) > 16 or len({value[0] for value in diseases}) != len(diseases):
@@ -934,7 +947,7 @@ def _trap_magic_profiles(records: dict[tuple[str, str], Tes3Record],
                       and _optional_stable_record_id(name) == trap_id]
         if len(candidates) != 1:
             raise BakeError(f"interactive trap identity does not name one live spell: {trap_id}")
-        profiles.append((trap_id, _direct_effect_tokens(candidates[0], True)))
+        profiles.append((trap_id, _direct_effect_tokens(candidates[0], True, True)))
     return tuple(profiles)
 
 
@@ -1151,19 +1164,19 @@ def derive_catalogs(recipe: DerivedRecipe, server_entries: Sequence[Assignment],
             *(_float_text(value) for value in magic_defense))))
         for spell_id, disease_kind, effects in diseases:
             combat_lines.append("disease " + " ".join((str(actor.actor_id), str(spell_id), disease_kind,
-                str(len(effects) // 4), *effects)))
+            str(len(effects) // 7), *effects)))
     for identifier, skill, values, normal in sorted(weapon_profiles):
         combat_lines.append("weapon " + " ".join((str(identifier), str(skill),
             *(_float_text(value) for value in values), "1" if normal else "0")))
     for identifier, values in sorted(enchantment_profiles):
         combat_lines.append("enchantment " + " ".join((str(identifier), values[0], values[1],
-            str((len(values) - 2) // 4), *values[2:])))
+            str((len(values) - 2) // 7), *values[2:])))
     for identifier, defense in sorted(equipment_magic_profiles):
         combat_lines.append("equipment_magic " + " ".join((str(identifier),
             *(_float_text(value) for value in defense))))
     object_catalog = _catalog_by_key(retained_catalogs, "interactive_object_content_file")
     for identifier, effects in _trap_magic_profiles(records, _interactive_object_trap_ids(object_catalog)):
-        combat_lines.append("trap " + " ".join((str(identifier), str(len(effects) // 4), *effects)))
+        combat_lines.append("trap " + " ".join((str(identifier), str(len(effects) // 7), *effects)))
     light_multiplier = _gmst_value(records, "fLightMaxMod")
     medium_multiplier = _gmst_value(records, "fMedMaxMod")
     for identifier, _values, record_value, _charge in sorted(item_declarations):

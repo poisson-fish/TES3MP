@@ -16,8 +16,8 @@ namespace TES3MP::ServerApp
 {
     namespace
     {
-        constexpr std::string_view Header = "TES3MP_COMBAT_V9";
-        constexpr std::size_t MaximumFields = 48;
+        constexpr std::string_view Header = "TES3MP_COMBAT_V10";
+        constexpr std::size_t MaximumFields = 72;
 
         struct ActorAttackDeclaration
         {
@@ -88,6 +88,8 @@ namespace TES3MP::ServerApp
                 return DirectMagicEffectKind::RestoreFatigue;
             if (text == "restore_magicka")
                 return DirectMagicEffectKind::RestoreMagicka;
+            if (text == "dispel")
+                return DirectMagicEffectKind::Dispel;
             return std::nullopt;
         }
 
@@ -119,19 +121,25 @@ namespace TES3MP::ServerApp
         std::optional<std::vector<DirectMagicEffectProfile>> magicEffects(
             std::span<const std::string_view> values, std::size_t count)
         {
-            if (count == 0 || count > MaximumDirectMagicEffectsPerSource || values.size() != count * 4)
+            if (count == 0 || count > MaximumDirectMagicEffectsPerSource || values.size() != count * 7)
                 return std::nullopt;
             std::vector<DirectMagicEffectProfile> result;
             result.reserve(count);
             for (std::size_t index = 0; index < count; ++index)
             {
-                const auto target = magicTarget(values[index * 4]);
-                const auto effect = magicEffect(values[index * 4 + 1]);
-                const auto minimum = finiteFloat(values[index * 4 + 2]);
-                const auto maximum = finiteFloat(values[index * 4 + 3]);
-                if (!target || !effect || !minimum || !maximum || *minimum < 0.f || *minimum > *maximum)
+                const auto target = magicTarget(values[index * 7]);
+                const auto effect = magicEffect(values[index * 7 + 1]);
+                const auto minimum = finiteFloat(values[index * 7 + 2]);
+                const auto maximum = finiteFloat(values[index * 7 + 3]);
+                const auto duration = number<std::uint32_t>(values[index * 7 + 4]);
+                const auto area = number<std::uint32_t>(values[index * 7 + 5]);
+                const auto stacking = values[index * 7 + 6] == "stack" ? std::optional(DirectMagicStacking::Stack)
+                    : values[index * 7 + 6] == "refresh"              ? std::optional(DirectMagicStacking::Refresh)
+                                                                        : std::nullopt;
+                if (!target || !effect || !minimum || !maximum || !duration || !area || !stacking
+                    || *minimum < 0.f || *minimum > *maximum)
                     return std::nullopt;
-                result.push_back({ *target, *effect, *minimum, *maximum });
+                result.push_back({ *target, *effect, *minimum, *maximum, *duration, *area, *stacking });
             }
             return result;
         }
@@ -324,7 +332,7 @@ namespace TES3MP::ServerApp
                 }
                 else if (values[0] == "enchantment")
                 {
-                    if (values.size() < 9)
+                    if (values.size() < 12)
                         return error(CombatContentErrorCode::Malformed, lineNumber);
                     const auto rawPrototype = number<std::uint64_t>(values[1]);
                     const auto prototype = rawPrototype ? ItemPrototypeId::fromValue(*rawPrototype) : std::nullopt;
@@ -342,7 +350,7 @@ namespace TES3MP::ServerApp
                 }
                 else if (values[0] == "spell")
                 {
-                    if (values.size() < 11)
+                    if (values.size() < 14)
                         return error(CombatContentErrorCode::Malformed, lineNumber);
                     const auto rawSpell = number<std::uint64_t>(values[1]);
                     const auto spell = rawSpell ? SpellRecordId::fromValue(*rawSpell) : std::nullopt;
@@ -373,7 +381,7 @@ namespace TES3MP::ServerApp
                 }
                 else if (values[0] == "disease")
                 {
-                    if (values.size() < 9)
+                    if (values.size() < 12)
                         return error(CombatContentErrorCode::Malformed, lineNumber);
                     const auto rawActor = number<std::uint64_t>(values[1]);
                     const auto actor = rawActor ? ActorId::fromValue(*rawActor) : std::nullopt;
@@ -397,7 +405,7 @@ namespace TES3MP::ServerApp
                 }
                 else if (values[0] == "trap")
                 {
-                    if (values.size() < 7)
+                    if (values.size() < 10)
                         return error(CombatContentErrorCode::Malformed, lineNumber);
                     const auto rawTrap = number<std::uint64_t>(values[1]);
                     const auto trap = rawTrap ? TrapPrototypeId::fromValue(*rawTrap) : std::nullopt;

@@ -11,7 +11,7 @@ representative executable tests. Code and tests remain authoritative.
 
 | Surface | Current implementation |
 |---|---|
-| `tes3mp_protocol` | Strong value types, bounded frames, FlatBuffers codecs, negotiation, authentication and character-profile/dialogue-choice messages, reliable operations, canonical snapshots, actors, objects, inventory, melee and instantaneous-magic combat, regional weather, world time, and VR pose |
+| `tes3mp_protocol` | Strong value types, bounded frames, FlatBuffers codecs, negotiation, authentication and character-profile/dialogue-choice messages, reliable operations, canonical snapshots, actors, objects, inventory, melee and authoritative magic combat, regional weather, world time, and VR pose |
 | `tes3mp_transport` | Project-owned connection, channel, queue, lifecycle, reason, and telemetry interfaces |
 | `tes3mp_transport_gns` | Private GameNetworkingSockets adapter with c-ares/OpenSSL dependency composition |
 | `tes3mp_server_core` | Deterministic authentication, canonical worlds, fixed ticks, client and script command reduction, publication, checksums, lifecycle, resync, and a versioned server-scripting boundary |
@@ -31,12 +31,13 @@ Public core headers expose only project-owned values.
 
 - A 12-byte bounded frame separates message class and kind before payload
   allocation. Each payload is verifier-checked and semantically validated.
-- The production server negotiates protocol major 1, minor 9. Defined
+- The production server negotiates protocol major 1, minor 10. Defined
   optional capabilities are VR pose (1), actor replication (2), interactive
   objects (3), inventory (4), combat (5), character creation (6), dialogue
   choices (7), regional weather replication (8), world-time replication (9),
   authoritative synchronized wait/rest (10), authoritative security (11), and
-  authoritative instantaneous magic (12).
+  authoritative instantaneous magic (12), and authoritative timed/area magic
+  (13).
   Content-manifest mismatch rejects before authentication. Combat (5) is
   offered only when combat content and authoritative contact history are both
   successfully composed; the packaged derived-vanilla default now composes both
@@ -250,7 +251,7 @@ Primary sources: [`item_catalog.hpp`](../../components/tes3mp/include/tes3mp/ite
 [`inventory_interest_projection.cpp`](../../apps/tes3mp-server/inventory_interest_projection.cpp),
 and [`desktop_providers.cpp`](../../apps/openmw/tes3mp/desktop_providers.cpp).
 
-### Authoritative melee and instantaneous magic
+### Authoritative melee and magic
 
 - OpenMW keeps its normal attack animation and contact selection, but a
   negotiated session suppresses local mutation. The client submits bounded
@@ -260,7 +261,7 @@ and [`desktop_providers.cpp`](../../apps/openmw/tes3mp/desktop_providers.cpp).
   revisions, skill progress, recovery, aggression, respawn, blocking, armor,
   equipment wear, and supported direct-magic effects. Combat, inventory, death,
   revisions, and command finalization share one prepared atomic commit.
-- Bounded `TES3MP_COMBAT_V9` content supplies manifest-scoped player and actor
+- Bounded `TES3MP_COMBAT_V10` content supplies manifest-scoped player and actor
   profiles, weapons, armor, resolver constants, progression/recovery values,
   random seed, and direct-magic data. Invalid or inconsistent configured content
   fails startup before state is exposed. Confirmed character profiles initialize
@@ -286,6 +287,13 @@ and [`desktop_providers.cpp`](../../apps/openmw/tes3mp/desktop_providers.cpp).
   progress, inventory/combat revisions, persistence, and reliable event plus
   latest-state replication share one prepared commit. Failed spell rolls still
   consume magicka but apply no effect or progression.
+- Capability 13 adds durable active effects with start, last-applied, and end
+  ticks. Server steps integrate magnitude, publish bounded start/update/end
+  events, and own stack, refresh, dispel, expiration, and death cleanup.
+- Resistance and magnitude resolve at application. Area delivery selects at most
+  32 alive same-cell targets in deterministic radius order. Any validation,
+  capacity, event, or revision failure rejects the whole use. Persistence,
+  checksums, and resume snapshots include instances and the next instance ID.
 
 Primary sources: [`melee_combat.cpp`](../../components/tes3mp/protocol/melee_combat.cpp),
 [`magic_use.cpp`](../../components/tes3mp/protocol/magic_use.cpp),
@@ -417,16 +425,17 @@ and [`test_bake_tes3mp_content.py`](../../scripts/tests/test_bake_tes3mp_content
   collision; full Bullet terrain/mesh physics is deferred.
 - Actor AI is limited to idle/travel/wander and reactive pursuit; detection,
   schedules, spawning, and delegation remain absent.
-- Traps, spells, and on-strike/when-used enchantments cover bounded instantaneous
-  direct effects, but durations, area effects, summons, projectiles, and other
+- Traps and on-strike enchantments remain bounded instantaneous direct effects;
+  spells and when-used enchantments also cover bounded duration, area, stacking,
+  refresh, resistance, dispel, and expiration. Summons, projectiles, and other
   general spell semantics remain absent. Inventory still lacks trade, restocking,
   and repair.
 - The packaged default remains a narrow four-cell fixture. Broad geometry and
   rewound or per-bone contact are not implemented.
 - Combat covers direct player/actor melee, reactive attacks, resources,
   death/respawn, skills, difficulty, blocking, mitigation/wear, feedback, and
-  instantaneous player/actor magic targeting. Actor armor, melee PvP, proactive
-  aggression, extended magic semantics, and Lua hit callbacks remain absent.
+  timed/area player and actor magic targeting. Actor armor, melee PvP, proactive
+  aggression, projectile/summon semantics, and Lua hit callbacks remain absent.
 - Only declared package variables survive restart. General VM logic and
   inventory/combat/magic scripting remain absent.
 - Other loadouts require generated mappings. The baker does not bind archives or
@@ -451,13 +460,12 @@ go decision. Device types remain provider-local.
 ## Verification snapshot
 
 Focused authoritative-magic protocol, world, reducer, replication, persistence,
-server-app, interest-projection, adapter, content-baker, schema, patch-registry,
-and documentation gates passed on Windows on 2026-09-12. The product build
-linked `openmw` and `tes3mp_server`. A live real-`Morrowind.esm` enchanted-item
-run submitted intent only, consumed one charge, applied an actor effect, advanced
-Enchant, resumed once, reconverged every affected baseline, and drained all
-queues. Evidence is in `build/magic-use-evidence-v3/summary.json`. Earlier live
-lockpick and probe evidence remains in `build/security-evidence-v17/summary.json`.
+server-app, interest-projection, adapter, and content-baker tests passed on
+Windows on 2026-09-12. The product build linked `openmw` and `tes3mp_server`.
+A live two-desktop `Morrowind.esm` run cast a timed player-target spell. Both
+clients presented start/update/end and negative deltas; the caster resumed once,
+observed the same active instance, and drained all queues. Evidence is in
+`build/timed-area-magic-evidence-v7/summary.json`.
 
 The baseline provenance verifier remains red against the broader working tree:
 its registry omits many existing vNext files and still expects retired workflow

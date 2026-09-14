@@ -37,6 +37,8 @@ namespace TES3MP::OpenMWAdapter
         SecurityPick,
         SecurityProbe,
         MagicItem,
+        MagicSpellCaster,
+        MagicSpellTarget,
     };
 
     std::optional<DesktopAutomationRole> parseDesktopAutomationRole(std::string_view value) noexcept;
@@ -138,6 +140,8 @@ namespace TES3MP::OpenMWAdapter
         std::optional<float> mInitialSecurityProgress;
         std::optional<float> mSecurityProgress;
         std::optional<ActorId> mMagicActor;
+        std::optional<PlayerId> mMagicPlayer;
+        std::optional<ActiveMagicEffectId> mMagicEffect;
         std::optional<ItemStackId> mMagicItem;
         std::optional<InventoryRevision> mMagicInventoryRevision;
         std::optional<CombatRevision> mMagicCasterRevision;
@@ -150,6 +154,7 @@ namespace TES3MP::OpenMWAdapter
         std::optional<float> mMinimumMagicTargetFatigue;
         std::optional<float> mInitialEnchantProgress;
         std::optional<float> mEnchantProgress;
+        float mMagicAppliedDelta = 0.f;
         bool mSawPeer = false;
         bool mSawLeave = false;
         bool mSawReturn = false;
@@ -189,6 +194,10 @@ namespace TES3MP::OpenMWAdapter
         bool mMagicResumeRequested = false;
         bool mMagicInventoryAfterResume = false;
         bool mMagicCombatAfterResume = false;
+        bool mMagicEffectStarted = false;
+        bool mMagicEffectUpdated = false;
+        bool mMagicEffectEnded = false;
+        bool mMagicEffectActiveAfterResume = false;
         bool mFinished = false;
     };
 }

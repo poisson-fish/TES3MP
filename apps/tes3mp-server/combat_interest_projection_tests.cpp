@@ -53,6 +53,9 @@ namespace
         combatPlayer.blockSkill = 15.f;
         combatPlayer.armorSkills = { 21.f, 22.f, 23.f, 24.f };
         combatPlayer.securitySkill = 42.f;
+        combatPlayer.activeMagicEffects.push_back(CanonicalActiveMagicEffect{ id<ActiveMagicEffectId>(1),
+            id<PlayerId>(1), MagicUseSourceKind::Spell, 20, 0, DirectMagicEffectKind::RestoreHealth, 2.f,
+            id<ServerTick>(8), id<ServerTick>(20), id<ServerTick>(9) });
         combatPlayer.skillProgression[static_cast<std::size_t>(CombatProgressionSkill::Block)].progress = 0.25f;
         combatPlayer.skillProgression[static_cast<std::size_t>(CombatProgressionSkill::Unarmored)].progress = 0.75f;
         combatPlayer.skillProgression[static_cast<std::size_t>(CombatProgressionSkill::Security)].progress = 0.5f;
@@ -61,21 +64,29 @@ namespace
         first.health = 40.f;
         OpenMwMeleeVictim second;
         second.health = 90.f;
-        const std::array combatActors{ CanonicalActorCombatState{ .actorId = id<ActorId>(3),
+        CanonicalActorCombatState firstActor{ .actorId = id<ActorId>(3),
                                            .revision = id<CombatRevision>(6),
                                            .stats = first,
                                            .respawnStats = first,
                                            .maximumHealth = 50.f,
-                                           .maximumFatigue = 0.f },
-            CanonicalActorCombatState{ .actorId = id<ActorId>(4),
+                                           .maximumFatigue = 0.f };
+        firstActor.activeMagicEffects.push_back(CanonicalActiveMagicEffect{ id<ActiveMagicEffectId>(2),
+            id<PlayerId>(1), MagicUseSourceKind::Spell, 20, 0, DirectMagicEffectKind::DamageHealth, 3.f,
+            id<ServerTick>(8), id<ServerTick>(20), id<ServerTick>(9) });
+        CanonicalActorCombatState secondActor{ .actorId = id<ActorId>(4),
                 .revision = id<CombatRevision>(7),
                 .stats = second,
                 .respawnStats = second,
                 .maximumHealth = 100.f,
-                .maximumFatigue = 0.f } };
+                .maximumFatigue = 0.f };
+        secondActor.activeMagicEffects.push_back(CanonicalActiveMagicEffect{ id<ActiveMagicEffectId>(3),
+            id<PlayerId>(1), MagicUseSourceKind::Spell, 20, 0, DirectMagicEffectKind::DamageHealth, 4.f,
+            id<ServerTick>(8), id<ServerTick>(20), id<ServerTick>(9) });
+        const std::array combatActors{ firstActor, secondActor };
         const auto random = Xoshiro256StarStar::fromWorldSeed(1, *RandomStreamKey::fromValues(1, 1)).snapshot();
         const auto combat
-            = std::get<CanonicalCombatWorld>(createCanonicalCombatWorld(combatPlayers, combatActors, random));
+            = std::get<CanonicalCombatWorld>(createCanonicalCombatWorld(combatPlayers, combatActors, random,
+                std::nullopt, id<ActiveMagicEffectId>(4)));
         const AuthoritativeMeleeEvent visibleEvent{ id<ServerTick>(9), id<PlayerId>(1), id<ActorId>(3),
             id<CombatRevision>(5), id<CombatRevision>(6), OpenMwMeleeResolution{ .damage = 10.f, .hit = true } };
         const AuthoritativeMeleeEvent hiddenEvent{ id<ServerTick>(9), id<PlayerId>(1), id<ActorId>(4),
@@ -83,10 +94,20 @@ namespace
         const std::array events{ visibleEvent, hiddenEvent };
         const std::array actorEvents{ AuthoritativeActorMeleeEvent{ id<ServerTick>(9), id<ActorId>(3), id<PlayerId>(1),
             id<CombatRevision>(8), id<CombatRevision>(9), OpenMwMeleeResolution{ .damage = 4.f, .hit = true } } };
+        const std::array magicEffectEvents{
+            AuthoritativeMagicEffectEvent{ id<ServerTick>(9), id<ActiveMagicEffectId>(2),
+                AuthoritativeMagicEffectEventKind::Updated, AuthoritativeMagicEffectEndReason::None,
+                MagicUseTargetKind::Actor, 3, DirectMagicEffectKind::DamageHealth, 3.f, -3.f,
+                id<ServerTick>(8), id<ServerTick>(20), id<CombatRevision>(8) },
+            AuthoritativeMagicEffectEvent{ id<ServerTick>(9), id<ActiveMagicEffectId>(3),
+                AuthoritativeMagicEffectEventKind::Updated, AuthoritativeMagicEffectEndReason::None,
+                MagicUseTargetKind::Actor, 4, DirectMagicEffectKind::DamageHealth, 4.f, -4.f,
+                id<ServerTick>(8), id<ServerTick>(20), id<CombatRevision>(9) } };
         auto snapshot = TES3MP::ServerApp::projectCombatSnapshot(
             canonical, spatial, combat, id<SessionId>(2), id<ServerTick>(9), id<CanonicalRevision>(4));
         auto batch = TES3MP::ServerApp::projectCombatEvents(
-            canonical, spatial, id<SessionId>(2), id<ServerTick>(9), id<CanonicalRevision>(4), events, actorEvents);
+            canonical, spatial, id<SessionId>(2), id<ServerTick>(9), id<CanonicalRevision>(4), events, actorEvents, {},
+            magicEffectEvents);
         return snapshot && snapshot->selfPlayerId() == id<PlayerId>(1) && snapshot->selfHealth() == 60.f
             && snapshot->selfMaximumHealth() == 80.f && snapshot->selfFatigue() == 75.f
             && snapshot->selfMaximumFatigue() == 100.f && snapshot->selfMagicka() == 40.f
@@ -95,9 +116,13 @@ namespace
         && snapshot->selfSkills()[10] == CombatSkillSnapshot{ ReplicatedCombatSkill::Unarmored, 24.f, 0.75f }
         && snapshot->selfSkills()[11] == CombatSkillSnapshot{ ReplicatedCombatSkill::Security, 42.f, 0.5f }
         && !snapshot->selfDead() && snapshot->actors().size() == 1 && snapshot->actors()[0].actorId == id<ActorId>(3)
-            && snapshot->actors()[0].maximumHealth == 50.f && batch && batch->events().size() == 1
+            && snapshot->actors()[0].maximumHealth == 50.f && snapshot->activeEffects().size() == 2
+            && snapshot->activeEffects()[0].instanceId == id<ActiveMagicEffectId>(1)
+            && snapshot->activeEffects()[1].instanceId == id<ActiveMagicEffectId>(2) && batch
+            && batch->events().size() == 1
             && batch->events()[0].targetActorId == id<ActorId>(3) && batch->actorEvents().size() == 1
-            && batch->actorEvents()[0].attackerActorId == id<ActorId>(3);
+            && batch->actorEvents()[0].attackerActorId == id<ActorId>(3) && batch->magicEffectEvents().size() == 1
+            && batch->magicEffectEvents()[0].instanceId == id<ActiveMagicEffectId>(2);
     }
 
     class RecordingTransport final : public TransportRuntime

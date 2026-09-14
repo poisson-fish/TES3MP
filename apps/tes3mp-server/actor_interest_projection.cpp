@@ -192,7 +192,8 @@ namespace TES3MP::ServerApp
                     MessageKind::LatestWinsCombatSnapshot, encodeLatestWinsCombatSnapshot(view)))
                 return false;
         for (const auto& [connection, events] : combatEvents)
-            if ((!events.events().empty() || !events.actorEvents().empty() || !events.magicEvents().empty())
+            if ((!events.events().empty() || !events.actorEvents().empty() || !events.magicEvents().empty()
+                    || !events.magicEffectEvents().empty())
                 && !add(connection, TransportChannel::ReliableOrdered, MessageClass::ReliableOperation,
                     MessageKind::ReliableCombatEventBatch, encodeReliableCombatEventBatch(events)))
                 return false;

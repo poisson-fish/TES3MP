@@ -120,6 +120,9 @@ namespace
         const auto security = static_cast<std::size_t>(CombatProgressionSkill::Security);
         combatPlayer.skillRules[security].useGain = 3.f;
         combatPlayer.skillProgression[security].progress = count > 1 ? 0.02f : 0.f;
+        combatPlayer.activeMagicEffects.push_back(CanonicalActiveMagicEffect{ id<ActiveMagicEffectId>(1),
+            id<PlayerId>(1), MagicUseSourceKind::Spell, 700, 0, DirectMagicEffectKind::RestoreHealth, 2.f,
+            id<ServerTick>(count - 1), id<ServerTick>(count + 50), id<ServerTick>(count) });
         const std::array combatPlayers{ combatPlayer };
         OpenMwMeleeVictim actorVictim;
         actorVictim.health = actorDead ? 0.f : 20.f;
@@ -128,7 +131,7 @@ namespace
         OpenMwMeleeVictim actorRespawn = actorVictim;
         actorRespawn.health = 20.f;
         actorRespawn.dead = false;
-        const std::array combatActors{ CanonicalActorCombatState{ .actorId = id<ActorId>(1),
+        CanonicalActorCombatState combatActor{ .actorId = id<ActorId>(1),
             .revision = id<CombatRevision>(count),
             .stats = actorVictim,
             .respawnStats = actorRespawn,
@@ -137,10 +140,16 @@ namespace
             .lastAttackTick = id<ServerTick>(count),
             .deathTick = actorDead ? std::optional(id<ServerTick>(count)) : std::nullopt,
             .maximumHealth = 20.f,
-            .maximumFatigue = 50.f } };
+            .maximumFatigue = 50.f };
+        if (!actorDead)
+            combatActor.activeMagicEffects.push_back(CanonicalActiveMagicEffect{ id<ActiveMagicEffectId>(2),
+                id<PlayerId>(1), MagicUseSourceKind::Spell, 700, 0, DirectMagicEffectKind::DamageHealth, 3.f,
+                id<ServerTick>(count - 1), id<ServerTick>(count + 50), id<ServerTick>(count) });
+        const std::array combatActors{ combatActor };
         const auto key = RandomStreamKey::fromValues(5, 0).value();
         auto combat = std::get<CanonicalCombatWorld>(createCanonicalCombatWorld(combatPlayers, combatActors,
-            Xoshiro256StarStar::fromWorldSeed(randomSeed, key).snapshot(), id<ServerTick>(count)));
+            Xoshiro256StarStar::fromWorldSeed(randomSeed, key).snapshot(), id<ServerTick>(count),
+            id<ActiveMagicEffectId>(actorDead ? 2 : 3)));
 
         const auto zero = Turn32::fromValue(0);
         const auto cell = CellId::interior(id<CellSpaceId>(7));
@@ -355,7 +364,8 @@ namespace
         const auto random = RandomStateV1::fromWords(
             combat.randomWords[0], combat.randomWords[1], combat.randomWords[2], combat.randomWords[3]);
         auto rebuiltCombat = random
-            ? createCanonicalCombatWorld(combat.players, combat.actors, *random, combat.lastSimulationTick)
+            ? createCanonicalCombatWorld(
+                  combat.players, combat.actors, *random, combat.lastSimulationTick, combat.nextActiveMagicEffectId)
             : std::variant<CanonicalCombatWorld, CanonicalCombatWorldError>(
                   CanonicalCombatWorldError{ CanonicalCombatWorldErrorCode::InvalidStat });
         const auto* rebuiltCombatWorld = std::get_if<CanonicalCombatWorld>(&rebuiltCombat);
@@ -452,6 +462,9 @@ namespace
             && inventory->players.size() == 1 && inventory->players.front().stacks.size() == 2
             && inventory->players.front().stacks.front().count == count && combat->players.size() == 1
             && combat->players.front().victim.health == health && combat->players.front().securitySkill == 47.f
+            && combat->players.front().activeMagicEffects.size() == 1
+            && combat->players.front().activeMagicEffects.front().instanceId == id<ActiveMagicEffectId>(1)
+            && combat->players.front().activeMagicEffects.front().endTick == id<ServerTick>(count + 50)
             && inventory->players.front().stacks[1].condition == 26 - count
             && combat->players.front().skillProgression[security].progress == (count > 1 ? 0.02f : 0.f)
             && objects->objects.size() == 1
@@ -461,6 +474,8 @@ namespace
             && actors->actors.size() == 1
             && actors->actors.front().root().position().x() == static_cast<std::int64_t>(count)
             && combat->actors.size() == 1 && combat->actors.front().stats.dead == actorDead
+            && combat->actors.front().activeMagicEffects.size() == (actorDead ? 0u : 1u)
+            && combat->nextActiveMagicEffectId == id<ActiveMagicEffectId>(actorDead ? 2 : 3)
             && combat->actors.front().respawnStats.health == 20.f && !combat->actors.front().respawnStats.dead
             && combat->actors.front().lastAttackTick == id<ServerTick>(count)
             && combat->actors.front().deathTick.has_value() == actorDead && combat->randomWords == randomWords

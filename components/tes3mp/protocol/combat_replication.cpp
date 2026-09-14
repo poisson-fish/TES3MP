@@ -105,7 +105,7 @@ namespace TES3MP
         PlayerId self, CombatRevision selfRevision, float selfHealth, float selfMaximumHealth, float selfFatigue,
         float selfMaximumFatigue, float selfMagicka, float selfMaximumMagicka, bool selfDead,
         std::span<const ActorCombatSnapshot> actors, std::span<const CombatSkillSnapshot> skills,
-        std::span<const PlayerCombatSnapshot> players)
+        std::span<const PlayerCombatSnapshot> players, std::span<const ActiveMagicEffectSnapshot> activeEffects)
     {
         if (!std::isfinite(selfHealth) || !std::isfinite(selfMaximumHealth) || !std::isfinite(selfFatigue)
             || !std::isfinite(selfMaximumFatigue) || !std::isfinite(selfMagicka) || !std::isfinite(selfMaximumMagicka)
@@ -149,20 +149,37 @@ namespace TES3MP
                 || skills[i].value > 100.f || skills[i].progress < 0.f || skills[i].progress >= 1.f)
                 return error(Code::InvalidFloat, 0, 0, i);
         }
+        if (activeEffects.size() > MaximumReplicatedActiveMagicEffects)
+            return error(Code::TooManyEntries, activeEffects.size(), MaximumReplicatedActiveMagicEffects);
+        for (std::size_t i = 0; i < activeEffects.size(); ++i)
+        {
+            const auto& effect = activeEffects[i];
+            if (effect.sourceId == 0 || effect.targetId == 0 || effect.endTick <= effect.startTick
+                || !std::isfinite(effect.magnitudePerSecond) || effect.magnitudePerSecond < 0.f
+                || static_cast<std::uint8_t>(effect.sourceKind)
+                    > static_cast<std::uint8_t>(MagicUseSourceKind::EnchantedItem)
+                || (effect.targetKind != MagicUseTargetKind::Player && effect.targetKind != MagicUseTargetKind::Actor)
+                || static_cast<std::uint8_t>(effect.effectKind)
+                    >= static_cast<std::uint8_t>(DirectMagicEffectKind::Dispel)
+                || (i && activeEffects[i - 1].instanceId >= effect.instanceId))
+                return error(Code::InvalidMagicEffect, 0, 0, i);
+        }
         return LatestWinsCombatSnapshot(session, generation, tick, canonicalRevision, self, selfRevision, selfHealth,
             selfMaximumHealth, selfFatigue, selfMaximumFatigue, selfMagicka, selfMaximumMagicka, selfDead,
             std::vector(actors.begin(), actors.end()), std::vector(skills.begin(), skills.end()),
-            std::vector(players.begin(), players.end()));
+            std::vector(players.begin(), players.end()), std::vector(activeEffects.begin(), activeEffects.end()));
     }
 
     std::variant<ReliableCombatEventBatch, CombatReplicationDecodeError> ReliableCombatEventBatch::create(
         SessionId session, SessionGeneration generation, ServerTick tick, CanonicalRevision revision,
         std::span<const MeleeCombatEvent> events, std::span<const ActorMeleeCombatEvent> actorEvents,
-        std::span<const MagicUseCombatEvent> magicEvents)
+        std::span<const MagicUseCombatEvent> magicEvents, std::span<const MagicEffectCombatEvent> magicEffectEvents)
     {
         if (events.size() > MaximumCombatEventsPerBatch || actorEvents.size() > MaximumCombatEventsPerBatch
-            || magicEvents.size() > MaximumCombatEventsPerBatch)
-            return error(Code::TooManyEntries, std::max({ events.size(), actorEvents.size(), magicEvents.size() }),
+            || magicEvents.size() > MaximumCombatEventsPerBatch
+            || magicEffectEvents.size() > MaximumReplicatedMagicEffectEvents)
+            return error(Code::TooManyEntries,
+                std::max({ events.size(), actorEvents.size(), magicEvents.size(), magicEffectEvents.size() }),
                 MaximumCombatEventsPerBatch);
         for (std::size_t i = 0; i < events.size(); ++i)
         {
@@ -192,8 +209,25 @@ namespace TES3MP
                 || event.sourceId == 0 || ((event.targetKind == MagicUseTargetKind::Self) != (event.targetId == 0)))
                 return error(Code::InvalidMagicKind, 0, 0, i);
         }
+        for (std::size_t i = 0; i < magicEffectEvents.size(); ++i)
+        {
+            const auto& event = magicEffectEvents[i];
+            if (event.targetId == 0 || !std::isfinite(event.magnitudePerSecond)
+                || !std::isfinite(event.appliedDelta) || event.magnitudePerSecond < 0.f
+                || event.eventKind > MagicEffectCombatEventKind::Ended
+                || event.endReason > MagicEffectCombatEndReason::TargetDied
+                || (event.targetKind != MagicUseTargetKind::Player && event.targetKind != MagicUseTargetKind::Actor)
+                || static_cast<std::uint8_t>(event.effectKind)
+                    >= static_cast<std::uint8_t>(DirectMagicEffectKind::Dispel)
+                || event.startTick > event.endTick
+                || ((event.eventKind == MagicEffectCombatEventKind::Ended)
+                    != (event.endReason != MagicEffectCombatEndReason::None))
+                || (event.eventKind != MagicEffectCombatEventKind::Updated && event.startTick == event.endTick))
+                return error(Code::InvalidMagicEffect, 0, 0, i);
+        }
         return ReliableCombatEventBatch(session, generation, tick, revision, std::vector(events.begin(), events.end()),
-            std::vector(actorEvents.begin(), actorEvents.end()), std::vector(magicEvents.begin(), magicEvents.end()));
+            std::vector(actorEvents.begin(), actorEvents.end()), std::vector(magicEvents.begin(), magicEvents.end()),
+            std::vector(magicEffectEvents.begin(), magicEffectEvents.end()));
     }
 
     std::vector<std::byte> encodeClientMeleeAttackCommand(const ClientMeleeAttackCommand& input)
@@ -233,9 +267,18 @@ namespace TES3MP
             players.emplace_back(player.playerId.value(), player.combatRevision.value(), player.health,
                 player.maximumHealth, player.fatigue, player.maximumFatigue, player.magicka, player.maximumMagicka,
                 player.dead);
+        std::vector<Snapshot::ActiveMagicEffectSnapshot> activeEffects;
+        activeEffects.reserve(input.activeEffects().size());
+        for (const auto& effect : input.activeEffects())
+            activeEffects.emplace_back(effect.instanceId.value(), effect.casterPlayerId.value(), effect.sourceId,
+                effect.targetId, effect.startTick.value(), effect.endTick.value(), effect.magnitudePerSecond,
+                static_cast<Snapshot::MagicUseSourceKind>(effect.sourceKind),
+                static_cast<Snapshot::MagicUseTargetKind>(effect.targetKind),
+                static_cast<std::uint8_t>(effect.effectKind));
         const auto root
             = Snapshot::CreateLatestWinsCombatSnapshot(builder, header, builder.CreateVectorOfStructs(actors),
-                builder.CreateVectorOfStructs(skills), builder.CreateVectorOfStructs(players));
+                builder.CreateVectorOfStructs(skills), builder.CreateVectorOfStructs(players),
+                builder.CreateVectorOfStructs(activeEffects));
         Snapshot::FinishSizePrefixedLatestWinsCombatSnapshotBuffer(builder, root);
         return take(builder);
     }
@@ -265,8 +308,18 @@ namespace TES3MP
                 event.selfFatigueDelta, event.selfMagickaDelta, event.targetHealthDelta, event.targetFatigueDelta,
                 event.targetMagickaDelta, static_cast<Event::MagicUseSourceKind>(event.sourceKind),
                 static_cast<Event::MagicUseTargetKind>(event.targetKind), event.castSucceeded, event.targetDied);
+        std::vector<Event::MagicEffectCombatEvent> magicEffectEvents;
+        magicEffectEvents.reserve(input.magicEffectEvents().size());
+        for (const auto& event : input.magicEffectEvents())
+            magicEffectEvents.emplace_back(event.instanceId.value(), event.targetId, event.startTick.value(),
+                event.endTick.value(), event.targetCombatRevision.value(), event.magnitudePerSecond,
+                event.appliedDelta, static_cast<Event::MagicEffectCombatEventKind>(event.eventKind),
+                static_cast<Event::MagicEffectCombatEndReason>(event.endReason),
+                static_cast<Event::MagicUseTargetKind>(event.targetKind),
+                static_cast<std::uint8_t>(event.effectKind));
         const auto root = Event::CreateReliableCombatEventBatch(builder, header, builder.CreateVectorOfStructs(events),
-            builder.CreateVectorOfStructs(actorEvents), builder.CreateVectorOfStructs(magicEvents));
+            builder.CreateVectorOfStructs(actorEvents), builder.CreateVectorOfStructs(magicEvents),
+            builder.CreateVectorOfStructs(magicEffectEvents));
         Event::FinishSizePrefixedReliableCombatEventBatchBuffer(builder, root);
         return take(builder);
     }
@@ -404,10 +457,38 @@ namespace TES3MP
                 { *value(player), *value(revision), current.health(), current.maximum_health(), current.fatigue(),
                     current.maximum_fatigue(), current.magicka(), current.maximum_magicka(), current.dead() });
         }
+        const auto* encodedEffects = root->active_effects();
+        const std::size_t effectCount = encodedEffects ? encodedEffects->size() : 0;
+        if (effectCount > MaximumReplicatedActiveMagicEffects)
+            return error(Code::TooManyEntries, effectCount, MaximumReplicatedActiveMagicEffects);
+        std::vector<ActiveMagicEffectSnapshot> activeEffects;
+        activeEffects.reserve(effectCount);
+        for (std::size_t i = 0; i < effectCount; ++i)
+        {
+            const auto current = copyStruct(encodedEffects, i);
+            auto instance = strong<ActiveMagicEffectId>(current.instance_id(), i);
+            auto caster = strong<PlayerId>(current.caster_player_id(), i);
+            auto start = strong<ServerTick>(current.start_tick(), i);
+            auto end = strong<ServerTick>(current.end_tick(), i);
+            if (auto* failure = std::get_if<Error>(&instance))
+                return *failure;
+            if (auto* failure = std::get_if<Error>(&caster))
+                return *failure;
+            if (auto* failure = std::get_if<Error>(&start))
+                return *failure;
+            if (auto* failure = std::get_if<Error>(&end))
+                return *failure;
+            activeEffects.push_back({ *value(instance), *value(caster),
+                static_cast<MagicUseSourceKind>(current.source_kind()), current.source_id(),
+                static_cast<MagicUseTargetKind>(current.target_kind()), current.target_id(),
+                static_cast<DirectMagicEffectKind>(current.effect_kind()), current.magnitude_per_second(),
+                *value(start), *value(end) });
+        }
         return LatestWinsCombatSnapshot::create(*value(session), *value(generation), *value(tick), *value(canonical),
             *value(self), *value(selfRevision), root->header()->self_health(), root->header()->self_maximum_health(),
             root->header()->self_fatigue(), root->header()->self_maximum_fatigue(), root->header()->self_magicka(),
-            root->header()->self_maximum_magicka(), root->header()->self_dead(), actors, skills, players);
+            root->header()->self_maximum_magicka(), root->header()->self_dead(), actors, skills, players,
+            activeEffects);
     }
 
     std::variant<ReliableCombatEventBatch, CombatReplicationDecodeError> decodeReliableCombatEventBatch(
@@ -520,7 +601,36 @@ namespace TES3MP
                 current.self_fatigue_delta(), current.self_magicka_delta(), current.target_health_delta(),
                 current.target_fatigue_delta(), current.target_magicka_delta(), current.target_died() });
         }
+        const auto* encodedMagicEffectEvents = root->magic_effect_events();
+        const std::size_t magicEffectCount = encodedMagicEffectEvents ? encodedMagicEffectEvents->size() : 0;
+        if (magicEffectCount > MaximumReplicatedMagicEffectEvents)
+            return error(Code::TooManyEntries, magicEffectCount, MaximumReplicatedMagicEffectEvents);
+        std::vector<MagicEffectCombatEvent> magicEffectEvents;
+        magicEffectEvents.reserve(magicEffectCount);
+        for (std::size_t i = 0; i < magicEffectCount; ++i)
+        {
+            const auto current = copyStruct(encodedMagicEffectEvents, i);
+            auto instance = strong<ActiveMagicEffectId>(current.instance_id(), i);
+            auto start = strong<ServerTick>(current.start_tick(), i);
+            auto end = strong<ServerTick>(current.end_tick(), i);
+            auto revision = strong<CombatRevision>(current.target_combat_revision(), i);
+            if (auto* failure = std::get_if<Error>(&instance))
+                return *failure;
+            if (auto* failure = std::get_if<Error>(&start))
+                return *failure;
+            if (auto* failure = std::get_if<Error>(&end))
+                return *failure;
+            if (auto* failure = std::get_if<Error>(&revision))
+                return *failure;
+            magicEffectEvents.push_back({ *value(instance),
+                static_cast<MagicEffectCombatEventKind>(current.event_kind()),
+                static_cast<MagicEffectCombatEndReason>(current.end_reason()),
+                static_cast<MagicUseTargetKind>(current.target_kind()), current.target_id(),
+                static_cast<DirectMagicEffectKind>(current.effect_kind()), current.magnitude_per_second(),
+                current.applied_delta(), *value(start), *value(end), *value(revision) });
+        }
         return ReliableCombatEventBatch::create(
-            *value(session), *value(generation), *value(tick), *value(canonical), events, actorEvents, magicEvents);
+            *value(session), *value(generation), *value(tick), *value(canonical), events, actorEvents, magicEvents,
+            magicEffectEvents);
     }
 }

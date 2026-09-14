@@ -92,7 +92,8 @@ def _seed_established_players(args: argparse.Namespace, pack: Path, phase: Path,
                               roles: tuple[str, ...], credential_namespace: str,
                               username_prefix: str,
                               starting_inventory: tuple[tuple[int, int, int], ...] = (),
-                              skill_overrides: dict[int, int] | None = None) -> None:
+                              skill_overrides: dict[int, int] | None = None,
+                              starting_spells: tuple[int, ...] = ()) -> None:
     template_path = Path(__file__).resolve().parent / "fixtures" / "desktop_evidence_established_player_v5.txt"
     template_lines = [line for line in template_path.read_text(encoding="utf-8").splitlines()
                       if line and not line.startswith("TES3MP_")]
@@ -116,6 +117,9 @@ def _seed_established_players(args: argparse.Namespace, pack: Path, phase: Path,
             if skill < 0 or skill >= 27 or value < 0 or value > 65535:
                 raise RuntimeError("established player skill override is invalid")
             tokens[44 + skill] = str(value)
+        spell_count = int(tokens[71])
+        spells = sorted({int(value) for value in tokens[72:72 + spell_count]} | set(starting_spells))
+        tokens = tokens[:71] + [str(len(spells)), *(str(value) for value in spells)] + tokens[72 + spell_count:]
         if tokens[-2] != "0":
             raise RuntimeError("established vanilla player template inventory is not empty")
         tokens = tokens[:-2] + [str(len(starting_inventory))] + [
@@ -145,11 +149,12 @@ def run_phase(args: argparse.Namespace, pack: Path, password: Path, artifacts: P
               omitted_config_keys: set[str] | None = None,
               sample_rss: bool = False,
               starting_inventory: tuple[tuple[int, int, int], ...] = (),
-              skill_overrides: dict[int, int] | None = None) -> dict:
+              skill_overrides: dict[int, int] | None = None,
+              starting_spells: tuple[int, ...] = ()) -> dict:
     phase = artifacts / "-".join(roles)
     phase.mkdir(parents=True, exist_ok=True)
     _seed_established_players(args, pack, phase, roles, credential_namespace, username_prefix,
-                              starting_inventory, skill_overrides)
+                              starting_inventory, skill_overrides, starting_spells)
     server = None
     for _ in range(5):
         port = _free_port()

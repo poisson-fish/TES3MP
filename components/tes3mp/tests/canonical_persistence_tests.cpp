@@ -137,6 +137,9 @@ namespace
             .enchantSkill = 37.f,
             .knownSpells = { id<SpellRecordId>(7), id<SpellRecordId>(9) },
             .lastMagicUseTick = id<ServerTick>(tick),
+            .activeMagicEffects = { { id<ActiveMagicEffectId>(1), id<PlayerId>(1), MagicUseSourceKind::Spell, 9, 0,
+                DirectMagicEffectKind::FireDamage, 2.f, ServerTick::initial(), id<ServerTick>(10),
+                id<ServerTick>(tick) } },
             .securitySkill = 47.f };
         const auto security = static_cast<std::size_t>(CombatProgressionSkill::Security);
         playerCombat.skillRules[security].useGain = 3.f;
@@ -153,10 +156,14 @@ namespace
             .maximumHealth = 20.f,
             .maximumFatigue = 50.f,
             .magicka = 15.f,
-            .maximumMagicka = 25.f };
+            .maximumMagicka = 25.f,
+            .activeMagicEffects = { { id<ActiveMagicEffectId>(2), id<PlayerId>(1), MagicUseSourceKind::Spell, 9, 1,
+                DirectMagicEffectKind::DamageFatigue, 3.f, ServerTick::initial(), id<ServerTick>(10),
+                id<ServerTick>(tick) } } };
         const auto key = RandomStreamKey::fromValues(5, 0).value();
         const auto random = Xoshiro256StarStar::fromWorldSeed(seed, key).snapshot();
-        return { { std::move(playerCombat) }, { std::move(actorCombat) }, random.words(), id<ServerTick>(tick) };
+        return { { std::move(playerCombat) }, { std::move(actorCombat) }, random.words(), id<ServerTick>(tick),
+            id<ActiveMagicEffectId>(3) };
     }
 
     CanonicalDurableInteractiveObjectState objects(DoorState door, LockState lock, std::uint64_t tick)
@@ -400,6 +407,10 @@ namespace
             && latest.combat()->players.front().knownSpells
             == std::vector<SpellRecordId>{ id<SpellRecordId>(7), id<SpellRecordId>(9) }
         && latest.combat()->players.front().lastMagicUseTick == id<ServerTick>(2)
+            && latest.combat()->players.front().activeMagicEffects.size() == 1
+            && latest.combat()->players.front().activeMagicEffects.front().lastAppliedTick == id<ServerTick>(2)
+            && latest.combat()->actors.front().activeMagicEffects.size() == 1
+            && latest.combat()->nextActiveMagicEffectId == id<ActiveMagicEffectId>(3)
             && latest.combat()
                    ->players.front()
                    .skillProgression[static_cast<std::size_t>(CombatProgressionSkill::Security)]

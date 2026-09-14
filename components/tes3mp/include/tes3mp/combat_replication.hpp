@@ -2,6 +2,7 @@
 #define TES3MP_COMBAT_REPLICATION_HPP
 
 #include "command_primitives.hpp"
+#include "direct_magic.hpp"
 #include "magic_use.hpp"
 #include "melee_combat.hpp"
 #include "session_types.hpp"
@@ -19,6 +20,8 @@ namespace TES3MP
     inline constexpr std::size_t MaximumCombatSnapshotPlayers = 255;
     inline constexpr std::size_t MaximumCombatEventsPerBatch = 256;
     inline constexpr std::size_t ReplicatedCombatSkillCount = 19;
+    inline constexpr std::size_t MaximumReplicatedActiveMagicEffects = 64;
+    inline constexpr std::size_t MaximumReplicatedMagicEffectEvents = MaximumCombatEventsPerBatch;
 
     enum class ReplicatedCombatSkill : std::uint8_t
     {
@@ -60,6 +63,7 @@ namespace TES3MP
         InvalidAttackStrength,
         InvalidSkill,
         InvalidMagicKind,
+        InvalidMagicEffect,
     };
 
     struct CombatReplicationDecodeError
@@ -131,6 +135,21 @@ namespace TES3MP
         friend constexpr bool operator==(CombatSkillSnapshot, CombatSkillSnapshot) noexcept = default;
     };
 
+    struct ActiveMagicEffectSnapshot
+    {
+        ActiveMagicEffectId instanceId;
+        PlayerId casterPlayerId;
+        MagicUseSourceKind sourceKind = MagicUseSourceKind::Spell;
+        std::uint64_t sourceId = 0;
+        MagicUseTargetKind targetKind = MagicUseTargetKind::Player;
+        std::uint64_t targetId = 0;
+        DirectMagicEffectKind effectKind = DirectMagicEffectKind::DamageHealth;
+        float magnitudePerSecond = 0.f;
+        ServerTick startTick = ServerTick::initial();
+        ServerTick endTick = ServerTick::initial();
+        friend constexpr bool operator==(ActiveMagicEffectSnapshot, ActiveMagicEffectSnapshot) noexcept = default;
+    };
+
     class LatestWinsCombatSnapshot
     {
     public:
@@ -139,7 +158,8 @@ namespace TES3MP
             CombatRevision selfRevision, float selfHealth, float selfMaximumHealth, float selfFatigue,
             float selfMaximumFatigue, float selfMagicka, float selfMaximumMagicka, bool selfDead,
             std::span<const ActorCombatSnapshot> actors, std::span<const CombatSkillSnapshot> skills,
-            std::span<const PlayerCombatSnapshot> players = {});
+            std::span<const PlayerCombatSnapshot> players = {},
+            std::span<const ActiveMagicEffectSnapshot> activeEffects = {});
         SessionId targetSessionId() const noexcept { return mSession; }
         SessionGeneration targetSessionGeneration() const noexcept { return mGeneration; }
         ServerTick serverTick() const noexcept { return mTick; }
@@ -156,6 +176,7 @@ namespace TES3MP
         std::span<const ActorCombatSnapshot> actors() const noexcept { return mActors; }
         std::span<const CombatSkillSnapshot> selfSkills() const noexcept { return mSkills; }
         std::span<const PlayerCombatSnapshot> players() const noexcept { return mPlayers; }
+        std::span<const ActiveMagicEffectSnapshot> activeEffects() const noexcept { return mActiveEffects; }
         friend bool operator==(const LatestWinsCombatSnapshot&, const LatestWinsCombatSnapshot&) noexcept = default;
 
     private:
@@ -163,7 +184,8 @@ namespace TES3MP
             CanonicalRevision canonicalRevision, PlayerId self, CombatRevision selfRevision, float selfHealth,
             float selfMaximumHealth, float selfFatigue, float selfMaximumFatigue, float selfMagicka,
             float selfMaximumMagicka, bool selfDead, std::vector<ActorCombatSnapshot> actors,
-            std::vector<CombatSkillSnapshot> skills, std::vector<PlayerCombatSnapshot> players)
+            std::vector<CombatSkillSnapshot> skills, std::vector<PlayerCombatSnapshot> players,
+            std::vector<ActiveMagicEffectSnapshot> activeEffects)
             : mSession(session)
             , mGeneration(generation)
             , mTick(tick)
@@ -180,6 +202,7 @@ namespace TES3MP
             , mActors(std::move(actors))
             , mSkills(std::move(skills))
             , mPlayers(std::move(players))
+            , mActiveEffects(std::move(activeEffects))
         {
         }
         SessionId mSession;
@@ -198,6 +221,7 @@ namespace TES3MP
         std::vector<ActorCombatSnapshot> mActors;
         std::vector<CombatSkillSnapshot> mSkills;
         std::vector<PlayerCombatSnapshot> mPlayers;
+        std::vector<ActiveMagicEffectSnapshot> mActiveEffects;
     };
 
     struct MeleeCombatEvent
@@ -248,13 +272,46 @@ namespace TES3MP
         friend constexpr bool operator==(MagicUseCombatEvent, MagicUseCombatEvent) noexcept = default;
     };
 
+    enum class MagicEffectCombatEventKind : std::uint8_t
+    {
+        Started = 0,
+        Updated = 1,
+        Ended = 2,
+    };
+
+    enum class MagicEffectCombatEndReason : std::uint8_t
+    {
+        None = 0,
+        Expired = 1,
+        Dispelled = 2,
+        Replaced = 3,
+        TargetDied = 4,
+    };
+
+    struct MagicEffectCombatEvent
+    {
+        ActiveMagicEffectId instanceId;
+        MagicEffectCombatEventKind eventKind = MagicEffectCombatEventKind::Started;
+        MagicEffectCombatEndReason endReason = MagicEffectCombatEndReason::None;
+        MagicUseTargetKind targetKind = MagicUseTargetKind::Player;
+        std::uint64_t targetId = 0;
+        DirectMagicEffectKind effectKind = DirectMagicEffectKind::DamageHealth;
+        float magnitudePerSecond = 0.f;
+        float appliedDelta = 0.f;
+        ServerTick startTick = ServerTick::initial();
+        ServerTick endTick = ServerTick::initial();
+        CombatRevision targetCombatRevision = CombatRevision::initial();
+        friend constexpr bool operator==(MagicEffectCombatEvent, MagicEffectCombatEvent) noexcept = default;
+    };
+
     class ReliableCombatEventBatch
     {
     public:
         static std::variant<ReliableCombatEventBatch, CombatReplicationDecodeError> create(SessionId session,
             SessionGeneration generation, ServerTick tick, CanonicalRevision canonicalRevision,
             std::span<const MeleeCombatEvent> events, std::span<const ActorMeleeCombatEvent> actorEvents = {},
-            std::span<const MagicUseCombatEvent> magicEvents = {});
+            std::span<const MagicUseCombatEvent> magicEvents = {},
+            std::span<const MagicEffectCombatEvent> magicEffectEvents = {});
         SessionId targetSessionId() const noexcept { return mSession; }
         SessionGeneration targetSessionGeneration() const noexcept { return mGeneration; }
         ServerTick serverTick() const noexcept { return mTick; }
@@ -262,12 +319,14 @@ namespace TES3MP
         std::span<const MeleeCombatEvent> events() const noexcept { return mEvents; }
         std::span<const ActorMeleeCombatEvent> actorEvents() const noexcept { return mActorEvents; }
         std::span<const MagicUseCombatEvent> magicEvents() const noexcept { return mMagicEvents; }
+        std::span<const MagicEffectCombatEvent> magicEffectEvents() const noexcept { return mMagicEffectEvents; }
         friend bool operator==(const ReliableCombatEventBatch&, const ReliableCombatEventBatch&) noexcept = default;
 
     private:
         ReliableCombatEventBatch(SessionId session, SessionGeneration generation, ServerTick tick,
             CanonicalRevision revision, std::vector<MeleeCombatEvent> events,
-            std::vector<ActorMeleeCombatEvent> actorEvents, std::vector<MagicUseCombatEvent> magicEvents)
+            std::vector<ActorMeleeCombatEvent> actorEvents, std::vector<MagicUseCombatEvent> magicEvents,
+            std::vector<MagicEffectCombatEvent> magicEffectEvents)
             : mSession(session)
             , mGeneration(generation)
             , mTick(tick)
@@ -275,6 +334,7 @@ namespace TES3MP
             , mEvents(std::move(events))
             , mActorEvents(std::move(actorEvents))
             , mMagicEvents(std::move(magicEvents))
+            , mMagicEffectEvents(std::move(magicEffectEvents))
         {
         }
         SessionId mSession;
@@ -284,6 +344,7 @@ namespace TES3MP
         std::vector<MeleeCombatEvent> mEvents;
         std::vector<ActorMeleeCombatEvent> mActorEvents;
         std::vector<MagicUseCombatEvent> mMagicEvents;
+        std::vector<MagicEffectCombatEvent> mMagicEffectEvents;
     };
 
     std::vector<std::byte> encodeClientMeleeAttackCommand(const ClientMeleeAttackCommand& value);

@@ -134,10 +134,16 @@ the affected code/tests in the same milestone.
   only a manifest-mapped known spell or canonical carried stack, a self/player/actor
   target, observed tick, and expected revisions. The server owns range, cast
   success, resistance, magnitude, target state, and durable RNG. Spell magicka or
-  effective enchantment charge is consumed in the same commit as instantaneous
-  health/fatigue/magicka effects and school/Enchant progress; a failed spell roll
-  consumes magicka but grants no effect or progress. Duration, area, summoning,
-  and projectile state are deferred rather than simulated locally.
+  effective enchantment charge is consumed in the same commit as effect creation
+  or instantaneous health/fatigue/magicka mutation and school/Enchant progress; a
+  failed spell roll consumes magicka but grants no effect or progress.
+- **Timed and area magic remains canonical, bounded, and atomic.** Durable
+  instances record ID, source, magnitude rate, and start/last/end ticks. The
+  server owns ticking, stack/refresh, dispel, expiration/death, resistance, and
+  start/update/end replication. Sorted same-cell area queries admit at most 32
+  targets; any target failure rejects the transaction. Instances and the next ID
+  survive restart/resume. Projectiles await collision/latency rules; summons
+  await ownership, AI lifecycle, dismissal, and persistence.
 - **Live authoritative combat progression and recovery.** Successful server-confirmed
   weapon, hand-to-hand, block, armor, and unarmored uses advance only the corresponding canonical
   skill using baked OpenMW use gains plus the confirmed character's class and

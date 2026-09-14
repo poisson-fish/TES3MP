@@ -308,19 +308,18 @@ entries, and 1–1,000,000,000 ticks per timing value. Initial weather must be
 eligible. Region transitions and RNG are durable. V1–V3 reject. See
 [`world_content.cpp`](../../apps/tes3mp-server/world_content.cpp).
 
-## Combat V9
+## Combat V10
 
 Configured optionally by `combat_content_file`; combat also requires actor,
 inventory, collision, and historical-contact composition. The catalog contains
 one deterministic seed; exactly one settings record, progression profile, and
 player template; one combat state per actor; an optional complete actor-attack
 set; and zero or more melee weapon or armor profiles keyed by inventory
-prototype ID. V9 adds manifest-bound spells, when-used enchantments, magicka on
-actors, six magic-school skills, Enchant progression, and the inputs needed for
-server-owned cast success and charge cost to the V8 security/direct-magic surface.
+prototype ID. V10 extends the V9 spell and when-used-enchantment surface with
+bounded duration and area values plus explicit stack/refresh behavior.
 
 ```text
-TES3MP_COMBAT_V9
+TES3MP_COMBAT_V10
 manifest <64-lowercase-hex-digits>
 seed <unsigned-64-bit>
 settings <12-finite-OpenMW-melee-values> <fatigue-base> <fatigue-multiplier> <fatigue-return-base> <fatigue-return-multiplier> <endurance-fatigue-multiplier> <difficulty-multiplier> <block-left-angle> <block-right-angle> <swing-block-multiplier> <swing-block-base> <block-still-bonus> <block-minimum-chance> <block-maximum-chance> <fatigue-block-base> <fatigue-block-multiplier> <weapon-fatigue-block-multiplier> <base-armor-skill> <unarmored-base-1> <unarmored-base-2> <armor-minimum-damage-multiplier> <unarmed-creature-wears-armor-0-or-1> <redistribute-missing-shield-hit-0-or-1>
@@ -334,8 +333,8 @@ actor_attack <actor-id> <agility> <luck> <strength> <fatigue-term> <combat-skill
 actor_magic <actor-id> <willpower> <destruction> <fire-resist> <shock-resist> <frost-resist> <poison-resist> <common-disease-resist> <blight-disease-resist> <fire-shield> <shock-shield> <frost-shield>
 weapon <prototype-id> <skill> <chop-min> <chop-max> <slash-min> <slash-max> <thrust-min> <thrust-max> <weight> <reach> <normal-weapon-0-or-1>
 armor <prototype-id> <light-0-medium-1-heavy-2> <base-armor>
-enchantment <prototype-id> <strike-or-use> <charge-cost> <effect-count> [<self-or-other> <effect-kind> <minimum> <maximum>]...
-spell <spell-record-id> <school-0-through-5> <magicka-cost> <cast-difficulty> <always-succeeds-0-or-1> <effect-count> [<self-or-other> <effect-kind> <minimum> <maximum>]...
+enchantment <prototype-id> <strike-or-use> <charge-cost> <effect-count> [<self-or-other> <effect-kind> <minimum> <maximum> <duration-ticks> <area-radius-quanta> <stack-or-refresh>]...
+spell <spell-record-id> <school-0-through-5> <magicka-cost> <cast-difficulty> <always-succeeds-0-or-1> <effect-count> [<self-or-other> <effect-kind> <minimum> <maximum> <duration-ticks> <area-radius-quanta> <stack-or-refresh>]...
 equipment_magic <prototype-id> <zero> <zero> <fire-resist> <shock-resist> <frost-resist> <poison-resist> <common-disease-resist> <blight-disease-resist> <fire-shield> <shock-shield> <frost-shield>
 disease <actor-id> <spell-record-id> <common-or-blight> <effect-count> [<other> <fire-or-shock-or-frost-or-poison-or-health-or-fatigue> <minimum> <maximum>]...
 trap <trap-id> <effect-count> [<other> <fire-or-shock-or-frost-or-poison-or-health-or-fatigue> <minimum> <maximum>]...
@@ -366,9 +365,9 @@ rest semantics remains future work. Values are finite and range checked;
 cross-catalog failure is atomic. See
 [`combat_content.cpp`](../../apps/tes3mp-server/combat_content.cpp).
 
-Direct-magic sources contain one through eight instantaneous effects. Effect
+Direct-magic sources contain one through eight effects. Effect
 kinds are fire, shock, frost, poison, health, fatigue, magicka,
-restore_health, restore_fatigue, and restore_magicka. Magic-school IDs 0–5 are
+restore_health, restore_fatigue, restore_magicka, and dispel. Magic-school IDs 0–5 are
 Alteration, Conjuration, Destruction, Illusion, Mysticism, and Restoration.
 Starting spells derived from the confirmed race/birthsign/profile must resolve
 to unique spell rows and use `tes3mp-content-spell-map=<id>=<spell-record>` on
@@ -380,9 +379,11 @@ the three elemental shields. Disease entries are unique per actor, transfer by
 the server PRNG and configured resistance-aware chance, and apply at most once
 per player. Unique trap entries exactly cover Interactive objects V2 trap IDs.
 Effects, defenses, RNG, damage/death/revision, and disarm commit together.
-When-used enchantments and spells support self or one touch-reachable player or
-actor. The baker accepts only raw duration 0/1 direct health/fatigue/magicka
-effects and rejects nonzero area or target-range projectile delivery. Durations,
-area effects, summons, projectiles, attribute/skill effects, dispelling, and
-scripted effects are outside V9 and fail content validation instead of being
-approximated.
+When-used enchantments and spells center on self or one touch-reachable player or
+actor. Source duration 0–3,600 seconds becomes 63 ticks/second; radius 0–256 units
+becomes 1,024 quanta/unit. Zero duration is instant; otherwise the declaration
+stacks or refreshes. Instant dispel rolls its magnitude percentage per instance.
+Same-cell area selection is ordered, atomic, and capped at 32 targets. On-strike,
+disease, and trap effects force zero duration/radius and forbid dispel. Projectile
+delivery is rejected; summons, projectiles, attribute/skill effects, and scripted
+effects remain outside V10.

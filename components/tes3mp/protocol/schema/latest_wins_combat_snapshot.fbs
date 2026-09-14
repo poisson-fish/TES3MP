@@ -46,11 +46,36 @@ struct CombatSkillSnapshot {
   progress:float;
 }
 
+enum MagicUseSourceKind : ubyte {
+  Spell = 0,
+  EnchantedItem = 1,
+}
+
+enum MagicUseTargetKind : ubyte {
+  Self = 0,
+  Player = 1,
+  Actor = 2,
+}
+
+struct ActiveMagicEffectSnapshot {
+  instance_id:ulong;
+  caster_player_id:ulong;
+  source_id:ulong;
+  target_id:ulong;
+  start_tick:ulong;
+  end_tick:ulong;
+  magnitude_per_second:float;
+  source_kind:MagicUseSourceKind;
+  target_kind:MagicUseTargetKind;
+  effect_kind:ubyte;
+}
+
 table LatestWinsCombatSnapshot {
   header:CombatSnapshotHeader (id: 0);
   actors:[ActorCombatSnapshot] (id: 1);
   self_skills:[CombatSkillSnapshot] (id: 2);
   players:[PlayerCombatSnapshot] (id: 3);
+  active_effects:[ActiveMagicEffectSnapshot] (id: 4);
 }
 
 root_type LatestWinsCombatSnapshot;

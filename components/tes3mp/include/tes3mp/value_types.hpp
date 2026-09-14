@@ -155,6 +155,11 @@ namespace TES3MP::Detail
         static constexpr std::string_view name = "CombatRevision";
     };
 
+    struct ActiveMagicEffectIdTag
+    {
+        static constexpr std::string_view name = "ActiveMagicEffectId";
+    };
+
     struct CharacterProfileRevisionTag
     {
         static constexpr std::string_view name = "CharacterProfileRevision";
@@ -300,6 +305,8 @@ namespace TES3MP
         = Detail::StrongValue<Detail::WorldItemRevisionTag, Detail::StrongValuePolicy::CounterFromOne>;
     using ContainerId = Detail::StrongValue<Detail::ContainerIdTag, Detail::StrongValuePolicy::Identity>;
     using CombatRevision = Detail::StrongValue<Detail::CombatRevisionTag, Detail::StrongValuePolicy::CounterFromOne>;
+    using ActiveMagicEffectId
+        = Detail::StrongValue<Detail::ActiveMagicEffectIdTag, Detail::StrongValuePolicy::CounterFromOne>;
     using CharacterProfileRevision
         = Detail::StrongValue<Detail::CharacterProfileRevisionTag, Detail::StrongValuePolicy::CounterFromOne>;
     using GlobalVariableId = Detail::StrongValue<Detail::GlobalVariableIdTag, Detail::StrongValuePolicy::Identity>;

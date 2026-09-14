@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Bake and run bounded authoritative enchanted-item desktop evidence."""
+"""Bake and run bounded authoritative timed-spell desktop evidence."""
 
 import argparse
 import json
@@ -12,9 +12,8 @@ from pathlib import Path
 import desktop_evidence_harness as harness
 
 
-ROLES = {"magic-item"}
-ITEM_RECORD = "ring of fleabite"
-ITEM_PROTOTYPE = 13568541167308910850
+ROLES = {"magic-spell-caster", "magic-spell-target"}
+SPELL_ID = 13128897029866312148
 
 
 def _bake(args: argparse.Namespace, root: Path) -> Path:
@@ -23,16 +22,24 @@ def _bake(args: argparse.Namespace, root: Path) -> Path:
     for name in harness.AUTHORING_FILES:
         shutil.copy2(args.content_source / name, source / name)
 
+    characters = source / "vanilla-characters.txt"
+    character_lines = []
+    for line in characters.read_text(encoding="utf-8").splitlines():
+        fields = line.split()
+        if fields and fields[0] == "race":
+            spell_count = int(fields[45])
+            spells = sorted({int(value) for value in fields[46:46 + spell_count]} | {SPELL_ID})
+            fields = fields[:45] + [str(len(spells)), *(str(value) for value in spells)]
+            line = " ".join(fields)
+        character_lines.append(line)
+    characters.write_text("\n".join(character_lines) + "\n", encoding="utf-8", newline="\n")
+
     recipe = json.loads(args.derived_pack_recipe.read_text(encoding="utf-8"))
-    if ITEM_RECORD not in recipe["items"]:
-        recipe["items"].append(ITEM_RECORD)
     recipe_path = root / "magic-derived-pack.json"
     recipe_path.write_text(json.dumps(recipe, indent=2) + "\n", encoding="utf-8")
 
     mappings = root / "client-mappings.cfg"
-    mappings.write_text(args.client_mappings.read_text(encoding="utf-8")
-                        + f"tes3mp-content-item-prototype-map={ITEM_PROTOTYPE}={ITEM_RECORD}\n",
-                        encoding="utf-8")
+    mappings.write_text(args.client_mappings.read_text(encoding="utf-8"), encoding="utf-8")
     output = root / "pack-output"
     subprocess.run([sys.executable, str(args.baker), "bake",
                     "--openmw-config", str(args.openmw_config),
@@ -48,20 +55,19 @@ def _bake(args: argparse.Namespace, root: Path) -> Path:
 
 
 def _validate(phase: dict) -> dict:
-    completion = phase["roles"][0]
-    records = phase["records"]["magic-item"]
-    submitted = [record for record in records if record.get("event") == "magic_item_submitted"]
-    if len(submitted) != 1 or completion.get("magic_submitted") is not True \
-            or completion.get("magic_event_presented") is not True \
-            or completion.get("resumes") != 1 \
-            or completion.get("magic_resumed_converged") is not True \
-            or completion.get("magic_initial_charge", 0) <= completion.get("magic_charge", 0) \
-            or completion.get("magic_initial_target_fatigue", 0) \
-            <= completion.get("magic_minimum_target_fatigue", 0) \
-            or completion.get("magic_enchant_progress", 0) \
-            <= completion.get("magic_initial_enchant_progress", 0):
+    caster, target = phase["roles"]
+    records = phase["records"]["magic-spell-caster"]
+    submitted = [record for record in records if record.get("event") == "magic_spell_submitted"]
+    lifecycle = ("magic_effect_started", "magic_effect_updated", "magic_effect_ended")
+    if len(submitted) != 1 or submitted[0].get("spell_id") != SPELL_ID \
+            or caster.get("magic_submitted") is not True or caster.get("magic_event_presented") is not True \
+            or caster.get("resumes") != 1 or caster.get("magic_effect_active_after_resume") is not True \
+            or any(caster.get(field) is not True for field in lifecycle) \
+            or target.get("resumes") != 0 or target.get("magic_event_presented") is not True \
+            or any(target.get(field) is not True for field in lifecycle) \
+            or caster.get("magic_applied_delta", 0) >= 0 or target.get("magic_applied_delta", 0) >= 0:
         raise RuntimeError(f"authoritative magic desktop convergence failed: {phase!r}")
-    return {"submission": submitted[0], "completion": completion,
+    return {"submission": submitted[0], "caster": caster, "target": target,
             "queue_drain": phase["queue_drain"]}
 
 
@@ -79,14 +85,14 @@ def main() -> int:
         pack = _bake(args, Path(temporary))
         password = Path(temporary) / "join-password.txt"
         password.write_text(secret + "\n", encoding="utf-8")
-        phase = harness.run_phase(args, pack, password, args.artifacts, ("magic-item",), 30,
-                                  allowed_roles=ROLES, scenario="authoritative enchanted-item use",
-                                  credential_namespace="magic-item-credential", username_prefix="magic",
-                                  starting_inventory=((ITEM_PROTOTYPE, 1, -1),),
-                                  skill_overrides={9: 90})
+        phase = harness.run_phase(args, pack, password, args.artifacts,
+                                  ("magic-spell-caster", "magic-spell-target"), 35,
+                                  allowed_roles=ROLES, scenario="authoritative timed player-target spell",
+                                  credential_namespace="magic-spell-credential", username_prefix="magic",
+                                  starting_spells=(SPELL_ID,))
         manifest = json.loads(pack.joinpath("pack.json").read_text(encoding="utf-8"))["manifest_id"]
         summary = {"event": "authoritative_magic_use_capture_passed", "manifest": manifest,
-                   "enchanted_item": _validate(phase)}
+                   "timed_player_spell": _validate(phase)}
         harness.write_summary(args.artifacts, summary, secret)
     return 0
 

@@ -86,6 +86,24 @@ namespace
         auto invalidTrap = traps;
         invalidTrap[0].effects[0].target = DirectMagicTarget::Self;
         assert(!DirectMagicCatalog::create(testContentManifestId(), itemCatalog, {}, {}, {}, {}, invalidTrap));
+
+        const std::array timedSpells{ DirectSpellProfile{ id<SpellRecordId>(8), DirectMagicSchool::Destruction, 10,
+            5.f, true,
+            { { DirectMagicTarget::Other, DirectMagicEffectKind::FireDamage, 2.f, 4.f, 126, 10240,
+                DirectMagicStacking::Refresh } } } };
+        assert(DirectMagicCatalog::create(
+            testContentManifestId(), itemCatalog, {}, {}, {}, {}, {}, timedSpells));
+        auto invalidDuration = timedSpells;
+        invalidDuration[0].effects[0].durationTicks = MaximumDirectMagicDurationTicks + 1;
+        assert(!DirectMagicCatalog::create(
+            testContentManifestId(), itemCatalog, {}, {}, {}, {}, {}, invalidDuration));
+        auto invalidDispel = timedSpells;
+        invalidDispel[0].effects[0].kind = DirectMagicEffectKind::Dispel;
+        assert(!DirectMagicCatalog::create(
+            testContentManifestId(), itemCatalog, {}, {}, {}, {}, {}, invalidDispel));
+        auto invalidStrike = enchantments;
+        invalidStrike[0].effects[0].durationTicks = 1;
+        assert(!DirectMagicCatalog::create(testContentManifestId(), itemCatalog, {}, invalidStrike, {}, {}));
     }
 
     void direct_effects_shields_and_disease_use_server_randomness()

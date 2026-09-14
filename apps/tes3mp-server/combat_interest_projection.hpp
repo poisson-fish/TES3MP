@@ -16,7 +16,8 @@ namespace TES3MP::ServerApp
         const CanonicalActorWorld& spatialActors, SessionId target, ServerTick tick,
         CanonicalRevision canonicalRevision, std::span<const AuthoritativeMeleeEvent> events,
         std::span<const AuthoritativeActorMeleeEvent> actorEvents = {},
-        std::span<const AuthoritativeMagicUseEvent> magicEvents = {});
+        std::span<const AuthoritativeMagicUseEvent> magicEvents = {},
+        std::span<const AuthoritativeMagicEffectEvent> magicEffectEvents = {});
 }
 
 #endif

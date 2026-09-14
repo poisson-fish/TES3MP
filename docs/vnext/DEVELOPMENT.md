@@ -257,10 +257,10 @@ active client, and rejects non-identical rollover revisions, duplicate world-tim
 presentation, failed resume convergence, undrained queues, or unbounded RSS.
 `run_security_capture.py` uses the same arguments and records lockpick/probe
 wear, progression, object mutation, resume convergence, and queue drain.
-`run_magic_use_capture.py` uses the same arguments for a real-loadout
-when-used enchantment and records the intent, reliable event presentation,
-charge consumption, target effect, Enchant progress, one durable resume, and
-queue drain:
+`run_magic_use_capture.py` uses the same arguments for a real-loadout timed spell
+cast between two desktop players. It records intent, start/update/end
+presentation on caster and target, negative applied deltas, the same active
+instance after one durable caster resume, and queue drain:
 
 ```sh
 python scripts/run_magic_use_capture.py \

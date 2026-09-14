@@ -20,7 +20,7 @@
 
 namespace TES3MP
 {
-    inline constexpr std::uint16_t CanonicalPersistenceFormatVersion = 4;
+    inline constexpr std::uint16_t CanonicalPersistenceFormatVersion = 5;
     inline constexpr std::size_t MaximumPersistenceScriptPackages = MaximumServerScriptPackages;
     inline constexpr std::size_t MaximumPersistenceSeeds = 64;
     inline constexpr std::size_t MaximumPersistenceCommandsPerTick
@@ -126,6 +126,7 @@ namespace TES3MP
         std::vector<CanonicalActorCombatState> actors;
         std::array<std::uint64_t, 4> randomWords{};
         std::optional<ServerTick> lastSimulationTick;
+        ActiveMagicEffectId nextActiveMagicEffectId = ActiveMagicEffectId::initial();
 
         friend bool operator==(const CanonicalDurableCombatState&, const CanonicalDurableCombatState&) noexcept
             = default;
