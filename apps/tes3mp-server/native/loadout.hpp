@@ -1,6 +1,8 @@
 #ifndef TES3MP_NATIVE_LOADOUT_H
 #define TES3MP_NATIVE_LOADOUT_H
 
+#include "diagnostic.hpp"
+
 #include <filesystem>
 #include <iosfwd>
 #include <string>
@@ -18,6 +20,7 @@ namespace TES3MP::Native
         std::vector<std::filesystem::path> mDataPaths;
         std::vector<std::string> mContent;
         std::string mEncoding;
+        bool mSample = false;
     };
 
     LoadoutOptions readLoadoutOptions(int argc, const char* const argv[]);
@@ -30,6 +33,10 @@ namespace TES3MP::Native
         explicit Loadout(LoadoutOptions options);
         const MWWorld::ESMStore& store() const { return mStore; }
         void enumerate(std::ostream& output) const;
+        DiagnosticSample sample(const DiagnosticLimits& limits = {}) const;
+        // Prepare completely before touching output. Stream/device write failure
+        // itself cannot be rolled back; this is not a durable publication API.
+        void writeSample(std::ostream& output, const DiagnosticLimits& limits = {}) const;
 
     private:
         LoadoutOptions mOptions;

@@ -9,9 +9,11 @@ int main(int argc, char** argv)
     if (argc == 2 && std::string_view(argv[1]) == "--help")
     {
         std::cout << "tes3mp_native_loadout_probe [OpenMW --config DIR --data DIR --data-local DIR\n"
-                     "  --content FILE --encoding win1252 --replace SETTING ...]\n"
+                     "  --content FILE --encoding win1252 --replace SETTING ...] [--sample]\n"
                      "Loads configured TES3 records through OpenMW; writes diagnostic TSV to stdout.\n"
                      "Uses the engine's local/global openmw.cfg and its config chain.\n"
+                     "--sample stages up to four winning IDs per category as owned diagnostic values,\n"
+                     "  with 60 records, 32 effects/record, 4096 bytes/string and 64 KiB report limits.\n"
                      "No World, rendering, UI, inventory operations, or script execution.\n";
         return 0;
     }

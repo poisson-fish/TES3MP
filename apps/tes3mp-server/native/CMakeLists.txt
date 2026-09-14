@@ -2,7 +2,7 @@
 # dependency graph, but the loader does not initialize those services. Replace
 # this edge with extracted engine content/runtime libraries before production
 # headless packaging. Do not relax components/tes3mp's independent boundaries.
-add_library(tes3mp_native_loadout STATIC loadout.cpp loadout.hpp)
+add_library(tes3mp_native_loadout STATIC loadout.cpp loadout.hpp diagnostic.hpp)
 target_compile_features(tes3mp_native_loadout PUBLIC cxx_std_20)
 target_link_libraries(tes3mp_native_loadout PRIVATE openmw-lib Boost::program_options)
 tes3mp_verify_target_dependencies(tes3mp_native_loadout ALLOWED openmw-lib Boost::program_options)

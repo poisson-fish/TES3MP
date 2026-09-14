@@ -3,6 +3,8 @@
 #include <fstream>
 #include <functional>
 #include <iostream>
+#include <limits>
+#include <set>
 #include <sstream>
 #include <stdexcept>
 
@@ -67,10 +69,12 @@ namespace
     {
         for (const char* dir : { "low", "high", "local", "extra", "userdata" })
             std::filesystem::create_directories(root / dir);
-        config(root / "openmw.cfg", "replace=data\nreplace=content\ndata=low\ncontent=Base.esm\n"
-                                    "config=extra\nuser-data=userdata\n");
-        config(root / "extra/openmw.cfg", "data=../high\ndata-local=../local\nencoding=win1251\n"
-                                          "content=empty.omwscripts\ncontent=Patch.esp\n");
+        config(root / "openmw.cfg",
+            "replace=data\nreplace=content\ndata=low\ncontent=Base.esm\n"
+            "config=extra\nuser-data=userdata\n");
+        config(root / "extra/openmw.cfg",
+            "data=../high\ndata-local=../local\nencoding=win1251\n"
+            "content=empty.omwscripts\ncontent=Patch.esp\n");
         config(root / "local/empty.omwscripts", "# Synthetic; stored, never executed\n");
         plugin(root / "low/Base.esm", true, [](ESM::ESMWriter& writer) {
             write(writer, record<ESM::Class>("test_class"));
@@ -94,9 +98,14 @@ namespace
             valid.mEffectID = ESM::MagicEffect::RestoreHealth;
             valid.mSkill = ESM::Skill::Block;
             valid.mAttribute = ESM::Attribute::Strength;
+            valid.mRange = 2;
+            valid.mArea = 7;
+            valid.mDuration = 13;
+            valid.mMagnMin = 5;
+            valid.mMagnMax = 9;
             ESM::ENAMstruct missing{};
             missing.mEffectID = ESM::MagicEffect::FireDamage;
-            spell.mEffects.populate({ valid, missing });
+            spell.mEffects.populate({ missing, valid });
             write(writer, spell);
             auto enchantment = record<ESM::Enchantment>("normalized_enchantment");
             enchantment.mEffects = spell.mEffects;
@@ -122,11 +131,226 @@ namespace
         }
     }
 
+    void sampleFixture(const std::filesystem::path& root)
+    {
+        plugin(root / "local/Sample.esm", true, [](ESM::ESMWriter& writer) {
+            const auto item = [&]<class T> {
+                auto value = record<T>("sample_item");
+                value.mName = "line\t\"quoted\"\\\n";
+                write(writer, value);
+            };
+            item.operator()<ESM::Potion>();
+            item.operator()<ESM::Apparatus>();
+            item.operator()<ESM::Armor>();
+            item.operator()<ESM::Book>();
+            item.operator()<ESM::Clothing>();
+            item.operator()<ESM::Ingredient>();
+            item.operator()<ESM::Light>();
+            item.operator()<ESM::Lockpick>();
+            item.operator()<ESM::Probe>();
+            item.operator()<ESM::Repair>();
+            item.operator()<ESM::Weapon>();
+            // More winners than the sample cap, deliberately in reverse ID order.
+            for (int i = 5; i >= 0; --i)
+                write(writer, record<ESM::Miscellaneous>("z_sample_" + std::to_string(i)));
+            auto setting = record<ESM::GameSetting>("iTest");
+            setting.mValue = ESM::Variant(std::int32_t(-7));
+            setting.mValue.setType(ESM::VT_Int);
+            write(writer, setting);
+            setting.mId = ESM::RefId::stringRefId("sTest");
+            setting.mValue = ESM::Variant(std::string("line\n\"quoted\"\\"));
+            write(writer, setting);
+            write(writer, record<ESM::GameSetting>("xEmpty"));
+        });
+        config(root / "extra/openmw.cfg",
+            "data=../high\ndata-local=../local\nencoding=win1251\n"
+            "content=empty.omwscripts\ncontent=Patch.esp\ncontent=Sample.esm\n");
+    }
+
+    const TES3MP::Native::DiagnosticRecord& findSample(
+        const TES3MP::Native::DiagnosticSample& sample, std::string_view type, std::string_view id)
+    {
+        for (const auto& value : sample.mRecords)
+            if (value.mType == type && value.mId == id)
+                return value;
+        throw std::runtime_error("Expected sampled record missing");
+    }
+
+    void rejectSample(const TES3MP::Native::Loadout& loadout, const TES3MP::Native::DiagnosticLimits& limits,
+        std::string_view expected)
+    {
+        std::ostringstream output;
+        output << "previous publication\n";
+        bool failed = false;
+        try
+        {
+            loadout.writeSample(output, limits);
+        }
+        catch (const std::runtime_error& error)
+        {
+            failed = true;
+            require(std::string_view(error.what()).find(expected) != std::string_view::npos,
+                "unexpected diagnostic rejection reason");
+        }
+        require(failed, "invalid sample accepted");
+        require(output.str() == "previous publication\n", "rejected sample changed publication");
+    }
+
+    void checkSample(const std::filesystem::path& root, int argc, const char* const argv[], const std::string& filter)
+    {
+        using namespace TES3MP::Native;
+        sampleFixture(root);
+        const auto options = readLoadoutOptions(argc, argv);
+        if (filter == "sample-owned")
+        {
+            DiagnosticSample owned;
+            {
+                Loadout loadout(options);
+                owned = loadout.sample();
+                require(owned == loadout.sample(), "sample order or values changed on repeat");
+                require(
+                    loadout.store().get<ESM::Miscellaneous>().getSize() == 8, "sampling truncated the engine store");
+                require(loadout.store().get<ESM::Miscellaneous>().search(ESM::RefId::stringRefId("z_sample_5")),
+                    "unsampled engine record unavailable");
+            }
+            // All projected strings, variants and effects remain usable after the
+            // engine store/encoder/readers have been destroyed.
+            require(owned.mRecords.size() == 21, "sample category/count mismatch");
+            std::set<std::string> categories;
+            std::vector<std::string> miscIds;
+            for (const auto& value : owned.mRecords)
+            {
+                categories.insert(value.mType);
+                if (value.mType == "Miscellaneous")
+                    miscIds.push_back(value.mId);
+            }
+            require(categories.size() == 15, "sample omitted a supported record category");
+            require(
+                miscIds == std::vector<std::string>({ "ignored_override", "mixed_item", "z_sample_0", "z_sample_1" }),
+                "sample did not select first winning IDs in engine order");
+            const auto& item = findSample(owned, "Miscellaneous", "mixed_item");
+            require(item.mValue == 40 && item.mName == "\xd0\x9c\xd0\xb5\xd1\x87",
+                "owned override/encoding projection mismatch");
+            require(
+                findSample(owned, "Miscellaneous", "ignored_override").mValue == 10, "owned ignored override mismatch");
+            for (const auto& [type, id] :
+                { std::pair{ "Spell", "normalized_spell" }, std::pair{ "Enchantment", "normalized_enchantment" } })
+            {
+                const auto& effects = findSample(owned, type, id).mEffects;
+                const DiagnosticEffect expected{ "restorehealth", "", "", 1, 2, 7, 13, 5, 9 };
+                require(effects.size() == 1 && effects.front() == expected,
+                    "owned effects did not preserve engine normalization");
+            }
+            require(std::get<float>(*findSample(owned, "GameSetting", "ftestsetting").mSetting) == 2.5f,
+                "owned float GMST mismatch");
+            require(std::get<std::int32_t>(*findSample(owned, "GameSetting", "itest").mSetting) == -7,
+                "owned integer GMST mismatch");
+            require(std::get<std::string>(*findSample(owned, "GameSetting", "stest").mSetting) == "line\n\"quoted\"\\",
+                "owned string GMST mismatch");
+            require(std::holds_alternative<std::monostate>(*findSample(owned, "GameSetting", "xempty").mSetting),
+                "empty engine GMST was not preserved");
+            require(owned.mReport.find("line\\x09\\\"quoted\\\"\\\\\\x0a") != std::string::npos,
+                "sample TSV did not escape control characters and quotes");
+            require(owned.mReport.ends_with("complete\n"), "staged sample completion missing");
+            return;
+        }
+        if (filter == "sample-limits")
+        {
+            Loadout loadout(options);
+            const auto expected = loadout.sample();
+            DiagnosticLimits limits;
+            limits.mMaxRecords = expected.mRecords.size();
+            limits.mMaxBytes = expected.mReport.size();
+            require(loadout.sample(limits) == expected, "exact record/report ceilings rejected");
+            --limits.mMaxRecords;
+            rejectSample(loadout, limits, "record count limit");
+            limits.mMaxRecords = expected.mRecords.size();
+            --limits.mMaxBytes;
+            rejectSample(loadout, limits, "report byte limit");
+            limits = {};
+            limits.mMaxStringBytes = 22; // normalized_enchantment is the longest field.
+            require(loadout.sample(limits) == expected, "exact string ceiling rejected");
+            --limits.mMaxStringBytes;
+            rejectSample(loadout, limits, "string byte limit");
+            limits = {};
+            limits.mMaxEffectsPerRecord = 1;
+            require(loadout.sample(limits) == expected, "exact effect ceiling rejected");
+            limits.mMaxEffectsPerRecord = 0;
+            rejectSample(loadout, limits, "effect count limit");
+            limits = {};
+            limits.mMaxBytes = 100;
+            rejectSample(loadout, limits, "aggregate string byte limit");
+            for (auto member : { &DiagnosticLimits::mRecordsPerType, &DiagnosticLimits::mMaxRecords,
+                     &DiagnosticLimits::mMaxStringBytes, &DiagnosticLimits::mMaxEffectsPerRecord,
+                     &DiagnosticLimits::mMaxBytes })
+            {
+                limits = {};
+                limits.*member = std::numeric_limits<std::size_t>::max();
+                rejectSample(loadout, limits, "Invalid diagnostic sample limits");
+            }
+            limits = {};
+            limits.mRecordsPerType = 0;
+            rejectSample(loadout, limits, "Invalid diagnostic sample limits");
+            limits.mRecordsPerType = 1;
+            require(loadout.sample(limits).mRecords.size() == 15, "reduced sampling limit not applied");
+            require(loadout.sample() == expected, "rejection changed the loaded engine records");
+            return;
+        }
+        require(filter == "sample-malformed", "unknown sample filter");
+        for (const std::string problem : { "weight", "setting", "range", "string", "effects" })
+        {
+            plugin(root / "local/Invalid.esm", true, [&](ESM::ESMWriter& writer) {
+                if (problem == "weight" || problem == "string")
+                {
+                    auto value = record<ESM::Miscellaneous>("mixed_item");
+                    if (problem == "weight")
+                        value.mData.mWeight = std::numeric_limits<float>::quiet_NaN();
+                    else
+                        value.mName.assign(4097, 'x');
+                    write(writer, value);
+                }
+                else if (problem == "setting")
+                {
+                    auto value = record<ESM::GameSetting>("fTestSetting");
+                    value.mValue = ESM::Variant(std::numeric_limits<float>::infinity());
+                    write(writer, value);
+                }
+                else
+                {
+                    auto value = record<ESM::Spell>("normalized_spell");
+                    ESM::ENAMstruct effect{};
+                    effect.mEffectID = ESM::MagicEffect::RestoreHealth;
+                    effect.mRange = problem == "range" ? 3 : 0;
+                    value.mEffects.populate(std::vector<ESM::ENAMstruct>(problem == "effects" ? 33 : 1, effect));
+                    write(writer, value);
+                }
+            });
+            auto invalid = options;
+            invalid.mContent.push_back("Invalid.esm");
+            Loadout loadout(std::move(invalid)); // Malformed projected fields survive engine loading.
+            std::ostringstream before;
+            loadout.enumerate(before);
+            const auto reason = problem == "string" ? "string byte limit"
+                : problem == "effects"              ? "effect count limit"
+                : problem == "range"                ? "invalid effect range"
+                                                    : "non-finite numeric field";
+            rejectSample(loadout, {}, reason);
+            std::ostringstream after;
+            loadout.enumerate(after);
+            require(before.str() == after.str(), "projection rejection mutated engine data");
+        }
+    }
+
     void check(const std::filesystem::path& root, const std::string& filter)
     {
         fixture(root);
         const std::string directory = Files::pathToUnicodeString(root);
         const char* args[] = { "native-test", "--config", directory.c_str(), "--replace", "config" };
+        if (filter.starts_with("sample-"))
+        {
+            checkSample(root, 5, args, filter);
+            return;
+        }
         if (filter == "layered")
         {
             const auto options = TES3MP::Native::readLoadoutOptions(5, args);
@@ -145,19 +369,18 @@ namespace
             require(items.search(ESM::RefId::stringRefId("deleted_item")) == nullptr, "deleted record survived");
             require(store.get<ESM::GameSetting>().find("ftestsetting")->mValue.getFloat() == 2.5f,
                 "case-insensitive GMST override mismatch");
-            for (const auto* effects : {
-                     &store.get<ESM::Spell>().find(ESM::RefId::stringRefId("normalized_spell"))->mEffects,
-                     &store.get<ESM::Enchantment>().find(ESM::RefId::stringRefId("normalized_enchantment"))->mEffects })
+            for (const auto* effects :
+                { &store.get<ESM::Spell>().find(ESM::RefId::stringRefId("normalized_spell"))->mEffects,
+                    &store.get<ESM::Enchantment>().find(ESM::RefId::stringRefId("normalized_enchantment"))->mEffects })
             {
                 require(effects->mList.size() == 1, "engine did not remove missing magic effect");
-                require(effects->mList.front().mData.mSkill.empty()
-                        && effects->mList.front().mData.mAttribute.empty(),
+                require(effects->mList.front().mData.mSkill.empty() && effects->mList.front().mData.mAttribute.empty(),
                     "engine did not normalize effect arguments");
             }
             std::ostringstream output;
             loadout.enumerate(output);
-            require(output.str().find("record\tSpell\t\"normalized_spell\"\tname=\"\"\teffects=1\n")
-                    != std::string::npos,
+            require(
+                output.str().find("record\tSpell\t\"normalized_spell\"\tname=\"\"\teffects=1\n") != std::string::npos,
                 "report did not enumerate normalized spell");
             require(output.str().ends_with("complete\n"), "report completion marker missing");
             return;
