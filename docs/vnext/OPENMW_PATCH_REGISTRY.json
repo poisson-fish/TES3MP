@@ -33,9 +33,9 @@
     },
     {
       "id": "M1-001",
-      "slice": "native inventory runtime seam and M2 deferred add preparation",
+      "slice": "native inventory runtime seam and M2 destination stacking preparation",
       "owner": "OpenMW server runtime",
-      "purpose": "Share explicit-context ContainerStore add/remove, stock add normalization and OnPCAdd ordering; prepare fresh MISC state and deferred script/notification intents between resolved owners without live installation or publication. Retain stock equipment dispatch.",
+      "purpose": "Share explicit-context ContainerStore add/remove, first-stack selection, signed count arithmetic, normalization and OnPCAdd ordering; prepare owned MISC stacking decisions and deferred effects with destination state validation, without live installation or publication. Retain stock equipment dispatch and safe raw-count iterator zero checks.",
       "paths": [
         "apps/openmw/mwworld/cellref.cpp",
         "apps/openmw/mwworld/cellref.hpp",

@@ -492,14 +492,7 @@ std::unique_ptr<MWWorld::LiveCellRef<ESM::Miscellaneous>> MWWorld::ContainerStor
     if (item.getRefData().getLocals().getScriptId() != item.getClass().getScript(item))
         throw std::logic_error("Container transfer preparation requires matching initialized script locals");
 
-    std::int64_t total = count;
-    for (const auto& target : destination)
-        if (target.getCellRef().getRefId() == item.getCellRef().getRefId())
-        {
-            total += std::abs(static_cast<std::int64_t>(target.getCellRef().getCount(false)));
-            if (total > std::numeric_limits<int>::max())
-                throw std::invalid_argument("Container transfer preparation count would overflow inventory");
-        }
+    destination.validateTransferCount(item, count);
 
     auto data = item.getRefData().copyForContainerTransfer();
     // Never copy LiveCellRefBase: even its destructor would retain a live WorldModel
@@ -513,8 +506,44 @@ std::unique_ptr<MWWorld::LiveCellRef<ESM::Miscellaneous>> MWWorld::ContainerStor
     return prepared;
 }
 
+void MWWorld::ContainerStore::validateTransferCount(const ConstPtr& item, int count) const
+{
+    // Bound stock addItems before calling it, and the aggregate returned by count(id).
+    // Inspect raw MISC nodes, including dormant ones, before stock abs(int)
+    // arithmetic. No temporary allocations or mutations here.
+    std::int64_t total = count;
+    for (const auto& target : mLists.mMiscItems.mList)
+    {
+        const auto available = std::abs(static_cast<std::int64_t>(target.mRef.getCount(false)));
+        if (available > std::numeric_limits<int>::max())
+            throw std::invalid_argument("Container transfer preparation count would overflow inventory");
+        if (target.mRef.getRefId() == item.getCellRef().getRefId())
+        {
+            total += available;
+            if (total > std::numeric_limits<int>::max())
+                throw std::invalid_argument("Container transfer preparation count would overflow inventory");
+        }
+    }
+}
+
 namespace
 {
+    MWWorld::ContainerStoreIterator findContainerStack(
+        MWWorld::ContainerStore& destination, const MWWorld::ConstPtr& item, const MWWorld::ESMStore& store)
+    {
+        auto iter = destination.begin(MWWorld::ContainerStore::getType(item));
+        for (; iter != destination.end(); ++iter)
+        {
+            // Keep stock equipment exclusion and virtual compatibility dispatch.
+            if (auto* inventory = dynamic_cast<MWWorld::InventoryStore*>(&destination))
+                if (inventory->isEquipped(*iter))
+                    continue;
+            if (destination.stacks(*iter, item, store))
+                break;
+        }
+        return iter;
+    }
+
     // The registration consumer chooses immediate stock registration or an owned
     // intent. Keep OnPCAdd after that step: stock registration catches exceptions,
     // whereas deferred preparation must unwind without reporting success.
@@ -566,11 +595,26 @@ namespace
     }
 }
 
+MWWorld::PreparedContainerAdd::MiscState MWWorld::PreparedContainerAdd::miscState(const ConstPtr& item)
+{
+    if (item.getRefData().getLuaScripts() || item.getRefData().getCustomData())
+        throw std::logic_error("Container stacking preparation excludes Lua or custom state");
+    const auto script = item.getClass().getScript(item);
+    if (item.getRefData().getLocals().getScriptId() != script)
+        throw std::logic_error("Container stacking preparation requires matching initialized script locals");
+    return { item.getCellRef().getRefNum(), item.mRef, item.get<ESM::Miscellaneous>()->mBase,
+        item.getCellRef().getRefId(), item.getCellRef().getSoul(), script, item.getCellRef().getCount(false),
+        item.mRef->isDeleted() };
+}
+
 MWWorld::PreparedContainerAdd MWWorld::ContainerStore::prepareTransferAdd(
     std::unique_ptr<LiveCellRef<ESM::Miscellaneous>> item, const ContainerStoreAddContext& context)
 {
     validateExplicitOwner(context.mContainer, context.mWorldModel);
-    if (!item || item->mWorldModel || item->mRef.getRefNum().isSet() || item->mRef.getCount(false) <= 0)
+    if (getPtr(context.mWorldModel).mCell != context.mContainer.mCell)
+        throw std::invalid_argument("Container add preparation owner cell mismatch");
+    if (!item || item->mWorldModel || item->mRef.getRefNum().isSet() || item->mRef.getCount(false) <= 0
+        || item->isDeleted())
         throw std::invalid_argument("Container add preparation requires a detached positive-count item");
     const Ptr temporary(item.get());
     if (temporary.getClass().isGold(temporary) || item->mData.getLuaScripts() || item->mData.getCustomData())
@@ -578,19 +622,80 @@ MWWorld::PreparedContainerAdd MWWorld::ContainerStore::prepareTransferAdd(
     if (item->mData.getLocals().getScriptId() != temporary.getClass().getScript(temporary))
         throw std::logic_error("Container add preparation requires matching initialized script locals");
     validateAddServices(temporary, context);
+    validateTransferCount(temporary, temporary.getCellRef().getCount(false));
 
-    PreparedContainerAdd prepared{ std::move(item), {}, context.mContainer, temporary.getCellRef().getCount(),
-        mListener != nullptr, {} };
+    PreparedContainerAdd prepared;
+    prepared.mItem = std::move(item);
+    prepared.mOwner = context.mContainer;
+    prepared.mCount = temporary.getCellRef().getCount(false);
+    prepared.mNotifyItemAdded = mListener != nullptr;
+    prepared.mDestination = this;
+    prepared.mStore = &context.mStore;
+    prepared.mWorldModel = &context.mWorldModel;
+    prepared.mOwnerIdentity = context.mContainer.getCellRef().getRefNum();
+    prepared.mOwnerCell = context.mContainer.mCell;
+    // Include dormant nodes too: reviving one can change first-match selection.
+    for (const auto& ref : mLists.mMiscItems.mList)
+    {
+        const auto registered = context.mWorldModel.getPtr(ref.mRef.getRefNum());
+        if (!ref.mRef.getRefNum().isSet() || ref.mWorldModel != &context.mWorldModel || registered.mRef != &ref
+            || registered.mContainerStore != this)
+            throw std::invalid_argument("Container stacking preparation destination item must be registered");
+        prepared.mDestinationState.push_back(PreparedContainerAdd::miscState(ConstPtr(&ref)));
+    }
+    // Selection precedes normalization, just as in stock addImp/addWithContext.
+    const auto stack = findContainerStack(*this, temporary, context.mStore);
+    if (stack != end())
+    {
+        prepared.mStackTarget = stack->getCellRef().getRefNum();
+        prepared.mStackCount = addItems(stack->getCellRef().getCount(false), prepared.mCount);
+    }
+    else
+        prepared.mStackCount = prepared.mCount;
     prepareContainerAdd(temporary, *this, context, [&](const ESM::RefId& script, const Ptr& scriptItem) {
         // Unlike stock LocalScripts::add, missing records or preparation errors
         // must propagate. Never insert the temporary into a LocalScripts list.
         prepared.mScript = LocalScripts::prepareAdd(*context.mStore.get<ESM::Script>().find(script),
             scriptItem.getRefData(), scriptItem.mCell, *context.mScriptManager);
     });
+    prepared.mItemState = PreparedContainerAdd::miscState(temporary);
     // Copying the consumer may allocate or throw. Own all prepared state/intents
     // before this final effect-preparation step, so any failure discards them.
     prepared.mInventoryUpdated = context.mInventoryUpdated;
     return prepared;
+}
+
+void MWWorld::ContainerStore::validateTransferStacking(
+    const PreparedContainerAdd& prepared, const ContainerStoreAddContext& context) const
+{
+    validateExplicitOwner(context.mContainer, context.mWorldModel);
+    if (prepared.mDestination != this || prepared.mStore != &context.mStore
+        || prepared.mWorldModel != &context.mWorldModel
+        || prepared.mOwnerIdentity != context.mContainer.getCellRef().getRefNum()
+        || prepared.mOwner != context.mContainer || prepared.mOwnerCell != context.mContainer.mCell
+        || prepared.mOwnerCell != getPtr(context.mWorldModel).mCell)
+        throw std::invalid_argument("Container stacking preparation destination context changed");
+    if (!prepared.mItem || prepared.mItem->mWorldModel || !prepared.mItemState
+        || prepared.mItemState != PreparedContainerAdd::miscState(ConstPtr(prepared.mItem.get()))
+        || prepared.mCount != prepared.mItemState->mCount)
+        throw std::invalid_argument("Container stacking preparation item changed");
+
+    auto saved = prepared.mDestinationState.begin();
+    for (const auto& ref : mLists.mMiscItems.mList)
+    {
+        // Only dereference current list members. Store replacement may have destroyed
+        // every reference that existed during preparation, invalidating all iterators.
+        const auto registered = context.mWorldModel.getPtr(ref.mRef.getRefNum());
+        if (saved == prepared.mDestinationState.end() || ref.mWorldModel != &context.mWorldModel
+            || registered.mRef != &ref || registered.mContainerStore != this
+            || *saved != PreparedContainerAdd::miscState(ConstPtr(&ref)))
+            throw std::invalid_argument("Container stacking preparation destination state changed");
+        ++saved;
+    }
+    if (saved != prepared.mDestinationState.end())
+        throw std::invalid_argument("Container stacking preparation destination membership changed");
+    // Content records are immutable for this operation. The witnesses bind all MISC
+    // stacking inputs and signed counts, so no add, registration or effects run here.
 }
 
 MWWorld::ContainerStoreIterator MWWorld::ContainerStore::addWithContext(
@@ -647,22 +752,11 @@ MWWorld::ContainerStoreIterator MWWorld::ContainerStore::addImp(
         return addNewStack(ref.getPtr(), count);
     }
 
-    // determine whether to stack or not
-    for (MWWorld::ContainerStoreIterator iter(begin(type)); iter != end(); ++iter)
+    if (const auto iter = findContainerStack(*this, ptr, esmStore); iter != end())
     {
-        // Don't stack with equipped items
-        if (auto* inventoryStore = dynamic_cast<InventoryStore*>(this))
-            if (inventoryStore->isEquipped(*iter))
-                continue;
-
-        if (stacks(*iter, ptr, esmStore))
-        {
-            // stack
-            iter->getCellRef().setCount(addItems(iter->getCellRef().getCount(false), count));
-
-            flagAsModified();
-            return iter;
-        }
+        iter->getCellRef().setCount(addItems(iter->getCellRef().getCount(false), count));
+        flagAsModified();
+        return iter;
     }
     // if we got here, this means no stacking
     return addNewStack(ptr, count);
@@ -1630,7 +1724,7 @@ MWWorld::ContainerStoreIteratorBase<PtrType>& MWWorld::ContainerStoreIteratorBas
     {
         if (incIterator())
             nextType();
-    } while (mType != -1 && !(**this).getCellRef().getCount());
+    } while (mType != -1 && !(**this).getCellRef().getCount(false));
 
     return *this;
 }
@@ -1682,7 +1776,7 @@ MWWorld::ContainerStoreIteratorBase<PtrType>::ContainerStoreIteratorBase(int mas
 {
     nextType();
 
-    if (mType == -1 || (**this).getCellRef().getCount())
+    if (mType == -1 || (**this).getCellRef().getCount(false))
         return;
 
     ++*this;

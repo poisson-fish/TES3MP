@@ -7,6 +7,7 @@
 #include <memory>
 #include <optional>
 #include <utility>
+#include <vector>
 
 #include <components/esm3/loadalch.hpp>
 #include <components/esm3/loadappa.hpp>
@@ -75,9 +76,39 @@ namespace MWWorld
         std::unique_ptr<LiveCellRef<ESM::Miscellaneous>> mItem;
         std::optional<LocalScripts::Registration> mScript;
         Ptr mOwner;
-        int mCount;
-        bool mNotifyItemAdded;
+        int mCount = 0;
+        bool mNotifyItemAdded = false;
         std::function<void(const Ptr&)> mInventoryUpdated;
+
+        // Unset identity means a new detached stack; otherwise the proposed signed
+        // count belongs to this existing destination stack; mItem still holds the
+        // incoming value. No destination inventory Ptr/iterator is retained.
+        ESM::RefNum getStackTarget() const { return mStackTarget; }
+        int getStackCount() const { return mStackCount; }
+
+    private:
+        friend class ContainerStore;
+        // MISC has no enchantment, item health or timed usage. These are state
+        // witnesses, not a second compatibility predicate: selection uses stacks().
+        struct MiscState
+        {
+            ESM::RefNum mIdentity;
+            const LiveCellRefBase* mReference; // Compared only, never dereferenced.
+            const ESM::Miscellaneous* mBase;
+            ESM::RefId mId, mSoul, mScript;
+            int mCount;
+            bool mDeleted;
+            bool operator==(const MiscState&) const = default;
+        };
+        static MiscState miscState(const ConstPtr& item);
+        std::vector<MiscState> mDestinationState;
+        std::optional<MiscState> mItemState;
+        const ContainerStore* mDestination = nullptr;
+        const ESMStore* mStore = nullptr;
+        const WorldModel* mWorldModel = nullptr;
+        ESM::RefNum mOwnerIdentity, mStackTarget;
+        CellStore* mOwnerCell = nullptr;
+        int mStackCount = 0;
     };
 
     template <class PtrType>
@@ -342,6 +373,7 @@ namespace MWWorld
 
     private:
         ContainerStoreIterator addImp(const ConstPtr& ptr, int count, const ESMStore& store);
+        void validateTransferCount(const ConstPtr& item, int count) const;
         ContainerStoreIterator addWithContext(
             const ConstPtr& ptr, int count, const ContainerStoreAddContext& context, bool resolve);
         int removeWithContext(const Ptr& item, int count, const ContainerStoreRemoveContext& context, bool resolve);
@@ -433,12 +465,20 @@ namespace MWWorld
             const WorldModel& worldModel) const;
 
         // Consume a detached item from prepareTransferItem and prepare stock add
-        // normalization, locals/OnPCAdd and deferred effects for this destination.
+        // stacking decision, normalization, locals/OnPCAdd and deferred effects.
+        // Destination MISC nodes must be registered and free of Lua/custom state.
         // Failure destroys the consumed temporary; neither live inventory is changed.
-        // No stacking, registration, iteration, script execution or success emission.
+        // No live stacking, registration, iteration, script execution or success emission.
         // This remains operation-local staging, NOT a validated commit-ready transfer.
         PreparedContainerAdd prepareTransferAdd(
             std::unique_ptr<LiveCellRef<ESM::Miscellaneous>> item, const ContainerStoreAddContext& context);
+
+        // Narrow state validation only, not a transfer/commit precondition. Dependencies
+        // (this store, content, world model, owner/cell) must still be alive. Reacquires
+        // destination members instead of dereferencing saved inventory references.
+        // Does not validate source state, script/effect intents, or durability.
+        void validateTransferStacking(
+            const PreparedContainerAdd& prepared, const ContainerStoreAddContext& context) const;
 
         int remove(const ESM::RefId& itemId, int count, bool equipReplacement = 0, bool resolve = true);
         ///< Remove \a count item(s) designated by \a itemId from this container.

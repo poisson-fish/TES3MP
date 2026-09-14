@@ -476,24 +476,30 @@ namespace
             const auto& locals = data.getLocals();
             return std::tuple{ values(item), item.mRef, item.mCell, item.mContainerStore, item.mRef->mWorldModel,
                 item.get<ESM::Miscellaneous>()->mBase, item.getCellRef().getRefNum(), item.getCellRef().getCount(false),
-                data.getBaseNode(), data.getBaseNode()->referenceCount(), data.getLuaScripts(), data.getCustomData(),
-                locals.mShorts.data(), locals.mLongs.data(), locals.mFloats.data(),
+                data.getBaseNode(), data.getBaseNode() ? data.getBaseNode()->referenceCount() : 0, data.getLuaScripts(),
+                data.getCustomData(), locals.mShorts.data(), locals.mLongs.data(), locals.mFloats.data(),
                 data.getAnimationState().mScriptedAnims.data() };
         };
+        std::vector<MWWorld::ContainerStore*> observedStores{ &a, &b };
         const auto snapshot = [&] {
-            std::vector<decltype(itemSnapshot(live.front()))> inventoryA, inventoryB;
-            for (auto item : a)
-                inventoryA.push_back(itemSnapshot(item));
-            for (auto item : b)
-                inventoryB.push_back(itemSnapshot(item));
+            using Items = std::vector<decltype(itemSnapshot(live.front()))>;
+            std::vector<std::tuple<Items, float, MWWorld::Ptr, bool, MWWorld::ContainerStoreIterator,
+                MWWorld::ContainerStoreListener*>>
+                inventories;
+            for (auto* container : observedStores)
+            {
+                Items items;
+                for (auto item : *container)
+                    items.push_back(itemSnapshot(item));
+                inventories.emplace_back(std::move(items), container->getWeight(), container->getPtr(worldModel),
+                    container->isResolved(), container->getSelectedEnchantItem(), container->getContListener());
+            }
             std::map<ESM::RefNum, std::tuple<MWWorld::LiveCellRefBase*, MWWorld::CellStore*, MWWorld::ContainerStore*>>
                 registry;
             for (const auto& [id, ptr] : worldModel.getPtrRegistryView())
                 registry.emplace(id, std::tuple{ ptr.mRef, ptr.mCell, ptr.mContainerStore });
-            return std::tuple{ inventoryA, inventoryB, registry, worldModel.getPtrRegistryRevision(),
-                worldModel.getLastGeneratedRefNum(), a.getWeight(), b.getWeight(), a.getPtr(worldModel),
-                b.getPtr(worldModel), a.isResolved(), b.isResolved(), a.getSelectedEnchantItem(),
-                b.getSelectedEnchantItem(), a.getContListener(), b.getContListener(), notificationCounts() };
+            return std::tuple{ inventories, registry, worldModel.getPtrRegistryRevision(),
+                worldModel.getLastGeneratedRefNum(), notificationCounts() };
         };
         const auto startScripts = [&] {
             localScripts.startIteration();
@@ -706,6 +712,7 @@ namespace
                             onCopy = {};
                             require(!detached && prepared.mItem.get() == temporary.mRef
                                     && prepared.mOwner == context.mContainer && prepared.mCount == 2
+                                    && !prepared.getStackTarget().isSet() && prepared.getStackCount() == 2
                                     && prepared.mNotifyItemAdded && prepared.mInventoryUpdated
                                     && prepared.mScript.has_value() == hasScript && intentAlive == 2 && itemAlive == 1,
                                 "prepared effects lost ownership or destination notification intent");
@@ -746,6 +753,199 @@ namespace
             require(caught && snapshot() == before, "preparation rejection changed live state");
             unchangedScripts();
         };
+        const auto checkDecision
+            = [&](const MWWorld::Ptr& item, MWWorld::ContainerStore& destination,
+                  const MWWorld::ContainerStoreAddContext& context, ESM::RefNum target, int count) {
+                  const auto before = snapshot();
+                  startScripts();
+                  auto detached = (item.mContainerStore == &a ? a : b)
+                                      .prepareTransferItem(item, 2, destination,
+                                          item.mContainerStore == &a ? addA.mContainer : addB.mContainer,
+                                          context.mContainer, worldModel);
+                  auto prepared = destination.prepareTransferAdd(std::move(detached), context);
+                  require(prepared.getStackTarget() == target && prepared.getStackCount() == count
+                          && prepared.mItem->mRef.getCount(false) == 2 && !prepared.mItem->mRef.getRefNum().isSet()
+                          && prepared.mItem->mWorldModel == nullptr,
+                      "destination preparation chose the wrong stack/count or attached the temporary");
+                  destination.validateTransferStacking(prepared, context);
+                  require(snapshot() == before, "stacking preparation/validation changed live state");
+                  unchangedScripts();
+                  return prepared;
+              };
+        for (const auto& item : { *plainA, *plainB })
+        {
+            const bool fromA = item.mContainerStore == &a;
+            auto& destination = fromA ? b : a;
+            const auto& context = fromA ? addB : addA;
+            const auto target = fromA ? *plainB : *plainA;
+            checkDecision(item, destination, context, {}, 2); // Different souls cannot stack.
+            const auto soul = target.getCellRef().getSoul();
+            const auto originalCount = target.getCellRef().getCount(false);
+            target.getCellRef().setSoul(item.getCellRef().getSoul());
+            for (int signedCount :
+                { 7, -7, std::numeric_limits<int>::max() - 2, -(std::numeric_limits<int>::max() - 2) })
+            {
+                target.getCellRef().setCount(signedCount);
+                const int expected = signedCount < 0 ? signedCount - 2 : signedCount + 2;
+                auto prepared = checkDecision(item, destination, context, target.getCellRef().getRefNum(), expected);
+                // Compare to actual stock addImp/addItems on a separate disposable
+                // base store. Stock mutations are outside the preparation snapshot.
+                MWWorld::ContainerStore stock;
+                bindEmptyStore(stock, context.mContainer, worldModel);
+                const MWWorld::ConstPtr value(prepared.mItem.get());
+                auto existing = stock.add(value, std::abs(signedCount), context);
+                existing->getCellRef().setCount(signedCount);
+                auto result = stock.add(value, 2, context);
+                require(result == existing && result->getCellRef().getCount(false) == prepared.getStackCount(),
+                    "prepared signed arithmetic differs from stock add");
+            }
+            target.getCellRef().setCount(originalCount);
+            target.getCellRef().setSoul(soul);
+        }
+        // Scripts remain separate even when all non-script stacking inputs match.
+        const auto scriptedSoul = scriptB->getCellRef().getSoul();
+        scriptB->getCellRef().setSoul(scriptA->getCellRef().getSoul());
+        checkDecision(*scriptA, b, scriptedAddB, {}, 2);
+        checkDecision(*scriptB, a, scriptedAddA, {}, 2);
+        scriptB->getCellRef().setSoul(scriptedSoul);
+
+        const auto destinationSoul = plainB->getCellRef().getSoul();
+        plainB->getCellRef().setSoul(plainA->getCellRef().getSoul());
+        // Capture a decision, make exactly one intentional change, then snapshot
+        // that new state. Rejection itself must have no additional side effects.
+        const auto stale = [&](const auto& change, const auto& restore) {
+            auto prepared = checkDecision(*plainA, b, addB, plainB->getCellRef().getRefNum(), 9);
+            change();
+            reject([&] { b.validateTransferStacking(prepared, addB); }, "changed");
+            restore();
+        };
+        stale([&] { plainB->getCellRef().setCount(-7); }, [&] { plainB->getCellRef().setCount(7); });
+        stale([&] { plainB->getCellRef().setCount(8); }, [&] { plainB->getCellRef().setCount(7); });
+        stale([&] { plainB->getCellRef().setCount(0, localScripts); }, [&] { plainB->getCellRef().setCount(7); });
+        stale([&] { plainB->getCellRef().setSoul(destinationSoul); },
+            [&] { plainB->getCellRef().setSoul(plainA->getCellRef().getSoul()); });
+        stale([&] { plainB->getRefData().setDeletedByContentFile(true); },
+            [&] { plainB->getRefData().setDeletedByContentFile(false); });
+        // A different immutable base, even with the same ID/soul, invalidates the witness.
+        const auto originalBase = plainB->get<ESM::Miscellaneous>()->mBase;
+        auto replacementBase = *originalBase;
+        stale([&] { plainB->get<ESM::Miscellaneous>()->mBase = &replacementBase; },
+            [&] { plainB->get<ESM::Miscellaneous>()->mBase = originalBase; });
+        replacementBase.mScript = scriptId;
+        stale(
+            [&] {
+                plainB->get<ESM::Miscellaneous>()->mBase = &replacementBase;
+                plainB->getRefData().getLocals() = scriptB->getRefData().getLocals();
+            },
+            [&] {
+                plainB->get<ESM::Miscellaneous>()->mBase = originalBase;
+                plainB->getRefData().getLocals() = {};
+            });
+        stale([&] { worldModel.deregisterLiveCellRef(*plainB->mRef); }, [&] { worldModel.registerPtr(*plainB); });
+        stale(
+            [&] {
+                auto relocated = *plainB;
+                relocated.mContainerStore = &a;
+                worldModel.registerPtr(relocated);
+            },
+            [&] { worldModel.registerPtr(*plainB); });
+        {
+            auto prepared = checkDecision(*plainA, b, addB, plainB->getCellRef().getRefNum(), 9);
+            prepared.mItem->mRef.setSoul(destinationSoul);
+            reject([&] { b.validateTransferStacking(prepared, addB); }, "item changed");
+        }
+        {
+            auto prepared = checkDecision(*plainA, b, addB, plainB->getCellRef().getRefNum(), 9);
+            reject([&] { a.validateTransferStacking(prepared, addA); }, "context changed");
+            auto movedOwner = addB;
+            movedOwner.mContainer.mCell = addA.mContainer.mCell;
+            reject([&] { b.validateTransferStacking(prepared, movedOwner); }, "context changed");
+            worldModel.registerPtr(movedOwner.mContainer);
+            reject([&] { b.validateTransferStacking(prepared, addB); }, "context changed");
+            reject([&] { b.prepareTransferAdd(prepare(*plainA), addB); }, "owner cell mismatch");
+            worldModel.registerPtr(addB.mContainer);
+            b.setPtr(addA.mContainer, worldModel);
+            reject([&] { b.validateTransferStacking(prepared, addB); }, "owner mismatch");
+            b.setPtr(addB.mContainer, worldModel);
+        }
+        // Recheck the count at destination preparation, not only at detachment.
+        // INT_MIN must reject before inventory iteration or stock abs(int) arithmetic.
+        for (int count :
+            { std::numeric_limits<int>::max(), -std::numeric_limits<int>::max(), std::numeric_limits<int>::min() })
+        {
+            auto detached = prepare(*plainA);
+            plainB->getCellRef().setCount(count);
+            reject([&] { b.prepareTransferAdd(std::move(detached), addB); }, "overflow");
+            plainB->getCellRef().setCount(7);
+        }
+        // Fail after the existing-stack decision and owned temporary are prepared.
+        for (bool fail : { false, true })
+        {
+            int itemAlive = 0, intentAlive = 0, emitted = 0, copies = 0;
+            osg::observer_ptr<SceneUtil::PositionAttitudeTransform> node;
+            std::function<void()> onCopy;
+            auto context = addB;
+            context.mInventoryUpdated = NotificationIntent(intentAlive, onCopy, emitted);
+            const auto before = snapshot();
+            startScripts();
+            bool caught = false;
+            try
+            {
+                auto detached = prepare(*plainA);
+                const MWWorld::Ptr temporary(detached.get());
+                onCopy = [&] {
+                    ++copies;
+                    temporary.getRefData().setCustomData(std::make_unique<Lifetime>(itemAlive));
+                    temporary.getRefData().setBaseNode(new SceneUtil::PositionAttitudeTransform);
+                    node = temporary.getRefData().getBaseNode();
+                    if (fail)
+                        throw PreparationFailure{};
+                };
+                auto prepared = b.prepareTransferAdd(std::move(detached), context);
+                require(prepared.getStackTarget() == plainB->getCellRef().getRefNum() && prepared.getStackCount() == 9
+                        && itemAlive == 1 && intentAlive == 2,
+                    "late-failure fixture did not prepare an owned existing-stack decision");
+            }
+            catch (const PreparationFailure&)
+            {
+                caught = true;
+            }
+            onCopy = {};
+            require(caught == fail && copies == 1 && itemAlive == 0 && intentAlive == 1 && !node.valid() && emitted == 0
+                    && snapshot() == before,
+                "existing-stack failure/discard leaked temporary state or emitted success");
+            unchangedScripts();
+        }
+        plainB->getCellRef().setSoul(destinationSoul);
+
+        // An empty destination, multiple candidates, and destruction/replacement of
+        // list nodes use the same two owners without disturbing their scripted lists.
+        {
+            MWWorld::ContainerStore destination;
+            bindEmptyStore(destination, addB.mContainer, worldModel);
+            observedStores.push_back(&destination);
+            auto empty = checkDecision(*plainA, destination, addB, {}, 2);
+            auto incompatible = destination.add(plain.getPtr(), 3, addB);
+            reject([&] { destination.validateTransferStacking(empty, addB); }, "changed");
+            auto separate = checkDecision(*plainA, destination, addB, {}, 2);
+            auto value = prepare(*plainA);
+            auto compatible = destination.add(MWWorld::ConstPtr(value.get()), 5, addB);
+            reject([&] { destination.validateTransferStacking(separate, addB); }, "changed");
+            auto selected = checkDecision(*plainA, destination, addB, compatible->getCellRef().getRefNum(), 7);
+            incompatible->getCellRef().setSoul(plainA->getCellRef().getSoul());
+            reject([&] { destination.validateTransferStacking(selected, addB); }, "changed");
+            auto first = checkDecision(*plainA, destination, addB, incompatible->getCellRef().getRefNum(), 5);
+            compatible->getCellRef().setCount(std::numeric_limits<int>::max() - 3);
+            reject([&] { destination.prepareTransferAdd(prepare(*plainA), addB); }, "overflow");
+            compatible->getCellRef().setCount(5);
+            MWWorld::ContainerStore replacement;
+            bindEmptyStore(replacement, addB.mContainer, worldModel);
+            destination = std::move(replacement); // Destroys the old nodes, unlike clear's zero-count tombstones.
+            reject([&] { destination.validateTransferStacking(first, addB); }, "membership changed");
+            destination.add(MWWorld::ConstPtr(value.get()), 3, addB);
+            reject([&] { destination.validateTransferStacking(first, addB); }, "changed");
+            observedStores.pop_back();
+        }
         for (const auto& item : { *scriptA, *scriptB })
         {
             const bool fromA = item.mContainerStore == &a;
@@ -782,6 +982,9 @@ namespace
         };
         for (int count : { 0, -1, std::numeric_limits<int>::min(), 5 })
             reject([&] { attempt(*plainA, count, a, b); }, "count");
+        plainA->getCellRef().setCount(std::numeric_limits<int>::min());
+        reject([&] { prepare(*plainA); }, "count is invalid");
+        plainA->getCellRef().setCount(-4);
         reject([&] { attempt({}, 1, a, b); }, "ownership mismatch");
         auto forged = *plainB;
         forged.mContainerStore = &a;
