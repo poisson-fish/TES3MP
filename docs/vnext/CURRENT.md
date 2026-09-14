@@ -4,97 +4,97 @@
 
 - **Direction:** OpenMW-backed authoritative cooperative multiplayer; see
   [README.md](README.md) and [DECISIONS.md](DECISIONS.md).
-- **Active milestone:** M1 in [PLAN.md](PLAN.md). Native static-loadout enumeration
-  and bounded owned diagnostic sampling work; M1 remains incomplete.
-- **Next action:** implement a filtered native inventory probe using the retained
-  engine store, [ManualRef](../../apps/openmw/mwworld/manualref.cpp), and
-  [ContainerStore::add](../../apps/openmw/mwworld/containerstore.cpp). Start at
-  `add`/`addImp`: expose explicit store/player/service context for the global
-  player, WorldModel registration, local scripts, and inventory presentation.
-  Keep stock OpenMW calling the shared behavior. Exercise a plain item and a
-  scripted item, including OnPCAdd; report any remaining coupling instead of
-  supplying silent UI/script stubs. Do not start protocol redesign.
-- **Checkpoint:** `8850e745c298c6de629ef9a5a26bbdddf6aa56e3` preserves the previous
-  timed/area-magic implementation before the engine-backed pivot.
+- **Active milestone:** M1 in [PLAN.md](PLAN.md), still incomplete. Native loadout
+  enumeration, owned sampling, and a disposable plain-item inventory probe work.
+- **Next action:** separate [MWScript::Locals](../../apps/openmw/mwscript/locals.cpp)
+  `configure`/`setVar` and [LocalScripts::add](../../apps/openmw/mwworld/localscripts.cpp)
+  from Environment's ScriptManager. Pass the actual script service explicitly;
+  preserve engine compiler-derived declarations and existing global-script local
+  initialization. Wire it into `ContainerStoreAddContext`, then make the native
+  probe add a scripted MISC item with declared OnPCAdd. Verify actual local
+  initialization, registration, and OnPCAdd assignment; distinguish those from
+  executing script instructions. Keep stock OpenMW on shared behavior. Do not
+  start protocol redesign or replace compiler behavior with TES3 precompiled locals.
+- **Checkpoint:** `8850e745c298c6de629ef9a5a26bbdddf6aa56e3` preserves the working
+  gameplay implementation before the engine-backed pivot.
 
 ## Implemented native slice
 
-The opt-in [native targets](../../apps/tes3mp-server/native/CMakeLists.txt) build
-`tes3mp_native_loadout_probe` and individually filtered
-`tes3mp_native_loadout_tests`. They remain excluded from default builds and
-outside the independent server/standalone graph. Existing server, desktop,
-baker, and canonical-gameplay callers remain the working migration base.
+The opt-in [native targets](../../apps/tes3mp-server/native/CMakeLists.txt) remain
+excluded from default builds and outside the independent server/standalone graph.
+Existing server, desktop, baker, and canonical-gameplay callers remain the working
+migration base. No `components/tes3mp` interfaces changed.
 
-[Loadout](../../apps/tes3mp-server/native/loadout.hpp) owns actual OpenMW records,
-encoder, and cached readers. ConfigurationManager resolves configuration layers,
-paths, encoding, and ordered content; Collections handles data/data-local
-priority. EsmLoader and ESMStore retain engine overrides, ignored/deleted records,
-setup, effect normalization, and cell-key handling. Default TSV enumeration
-still covers twelve item categories, spells, enchantments, and GMSTs.
+[Loadout](../../apps/tes3mp-server/native/loadout.hpp) retains OpenMW's configured
+records, encoding, and readers. ConfigurationManager, Collections, EsmLoader,
+ESMStore setup/validation, winning-record enumeration, and bounded owned `--sample`
+remain available. TES4 is rejected; `.omwscripts` paths are retained without execution.
 
-`--sample` now stages [owned diagnostic values](../../apps/tes3mp-server/native/diagnostic.hpp)
-from those winning stores in [loadout.cpp](../../apps/tes3mp-server/native/loadout.cpp).
-A bounded heap selects the first four IDs per category in engine order. IDs use
-OpenMW's ASCII case fold; names, item weight/value, normalized effect fields and
-indexes, and typed GMST values are copied. The full engine store remains intact
-and available, including unsampled records.
+`--inventory ID` now runs [inventory.cpp](../../apps/tes3mp-server/native/inventory.cpp):
+load a configured MISC record, construct ManualRefs, add two then one copies using
+actual ContainerStore behavior, verify one stack and WorldModel lookup, record two
+presentation requests, and verify deregistration after container destruction.
+Gold piles use engine `gold_001` normalization. IDs are limited to 256 bytes without
+control characters, counts are fixed, and effective record weight is validated.
+The bounded diagnostic report is staged until the disposable operation completes.
 
-Ceilings are 60 records, 32 effects/record, 4,096 bytes/string, 64 KiB aggregate
-string bytes, and 64 KiB staged escaped TSV. Callers can lower limits only.
-Counts and strings are checked before copying; report growth is checked before
-append. Invalid IDs, non-finite projected numbers, invalid effect ranges, and
-limit violations reject the whole sample before touching the output stream.
-Stream/device write failures remain visible but cannot be rolled back. This is
-an offline diagnostic, not a wire protocol, complete record validator, or new
-gameplay catalog; only selected fields/records are projected and validated.
+[ContainerStore::add](../../apps/openmw/mwworld/containerstore.cpp) shares its
+mutation path between stock callers and an explicit context containing the store,
+registry, player/owner, local-script service, and presentation consumer. Stacking
+uses an explicit ESMStore; InventoryStore retains its equipment-aware override.
+WorldModel has an explicit cache-size constructor, avoiding Settings initialization.
+Stock entry points retain their real services and equipment dispatch.
 
-No World, Environment, renderer, UI, audio, or Lua runtime is constructed. TES4
-is rejected before its resource-dependent branch; `.omwscripts` paths are stored
-without execution. Added globals and dynamic player initialization remain outside
-this slice. Load and projection errors exit 1 with diagnostics on stderr.
+The probe initializes engine classes, WorldModel with a one-entry cache, ManualRef,
+and a base ContainerStore. Its player reference provides identity only; this is not
+a live actor InventoryStore. No Environment, World, renderer, UI, audio, LocalScripts,
+ScriptManager, Lua runtime, or NPC custom data is initialized.
+
+Absent script services reject before inventory mutation, including scripted
+`gold_001` reached through normalization. Scripted items are **not supported yet**;
+OnPCAdd is not silently skipped. Explicit-context calls also reject derived stores,
+unresolved container contents, and missing presentation consumers. This is an
+offline probe, not transactional server mutation; arbitrary service/allocation or
+device failures do not establish rollback guarantees.
 
 ## Fresh verification
 
-Windows MSVC RelWithDebInfo in `build/vnext-product`, final checks all exit 0:
+Windows MSVC RelWithDebInfo in `build/vnext-product`, checks run individually:
 
-- Individual builds of `tes3mp_native_loadout_tests` and
-  `tes3mp_native_loadout_probe`.
-- `sample-owned`: all fifteen categories, winning IDs, decoded text, typed GMSTs,
-  normalized effects, deterministic selection, and values surviving store destruction.
-- `sample-limits`: exact ceilings, oversized limits, count/string/effect/report
-  rejection, and unchanged publication/engine records.
-- `sample-malformed`: OpenMW-written plugins with NaN/infinite fields, invalid
-  effect range, 4,097-byte text, and 33 effects; no partial publication/mutation.
-- `layered`: existing configuration priority, override/deletion, and normalization.
-- Documentation budget and local-link methods, each run individually.
+- Builds of `tes3mp_native_loadout_tests` and `tes3mp_native_loadout_probe`: exit 0.
+- `inventory-plain`: exit 0; OpenMW-written/loadable fixtures, insertion/stacking,
+  gold normalization/weight, registry lifetime, unchanged retained records.
+- `inventory-rejection`: exit 0; declared OnPCAdd script, normalized scripted gold,
+  missing presentation service, derived-store rejection, copied metadata cleanup,
+  and unchanged items/source/registry/listeners/publication on rejected adds.
+- `layered`: exit 0; retained configuration/override/deletion/normalization path.
+- Formatting, touched provenance/patch coverage, documentation budget and local
+  links: exit 0. No complete suites, upstream baseline tests, or live clients ran.
 
-Logs are `build/logs/native-sample-*.log`. The first ownership run exposed an
-incorrect GMST integer type in the new fixture; it was corrected and rerun.
-No complete suites, broad gates, upstream baseline tests, or live clients ran.
-
-Real installed Morrowind.esm with the isolated existing configuration passed
-`--sample`: 60 records, 6,819 output bytes, 0.356 seconds native elapsed,
-0.560 seconds process wall time, and 90,636,288 bytes sampled peak working set
-(about 86 MiB). Report: `build/logs/native-sample-real.tsv`; config/content hashes,
-timing, and observed DLLs: `build/native-loadout/real/sample-evidence.json`.
-Reproduce after the MSVC target build with:
+Logs: `build/logs/native-inventory-*.log`. Real installed Morrowind.esm:
 
 ```text
-build/vnext-product/tes3mp_native_loadout_probe.exe --config build/native-loadout/real --replace config --sample
+build/vnext-product/tes3mp_native_loadout_probe.exe --config build/native-loadout/real --replace config --inventory misc_com_bottle_01
 ```
 
-Retained prior full enumeration found 3,352 items, 990 spells, 708 enchantments,
-and 1,449 GMSTs. Its report/evidence remains in `build/native-loadout/real`;
-prior missing-content/master-order/truncated/TES4 filters were not rerun here.
+Exit 0: three bottles, one stack, weight 3, two presentation requests, registration
+and cleanup verified; 0.566 seconds wall time, 94,044,160 bytes sampled peak working
+set (about 90 MiB). `artifact_bittercup_01` correctly exits 1 with the missing
+LocalScripts/ScriptManager/OnPCAdd diagnostic and zero report bytes; its capture
+check exits 0. Reports are `build/logs/native-inventory-real*.tsv`; config/content/
+executable hashes, timing, and observed DLLs are in
+`build/native-loadout/real/inventory-*-evidence.json`. Reproduction capture:
+`build/native-loadout/capture-inventory.ps1`.
+
+Prior real enumeration and 60-record sample evidence remains under
+`build/native-loadout/real`; the real sample was not rerun here.
 
 ## Remaining limits
 
-The generated `loadout-dependencies-RelWithDebInfo.txt` under the native build
-directory records broad `openmw-lib`/`components` OSG/OpenGL/MyGUI edges. Replace
-them with extracted content/runtime libraries before production headless packaging.
-Linked DLLs do not establish initialized runtime services.
-
-Tamriel Rebuilt validation, inventory operations, scripted/enchanted gameplay,
-calculation parity, and engine-backed server authority remain unfinished.
-Client-authoritative positions and bounded migration worlds remain. Inherited
-whole-baseline provenance debt remains; only touched native entries were updated.
+The generated `loadout-dependencies-RelWithDebInfo.txt` records broad
+`openmw-lib`/`components` OSG/OpenGL/MyGUI edges. Replace these with extracted
+content/runtime libraries before production headless packaging. Linked DLLs do
+not establish initialized services. Tamriel Rebuilt, script execution, equipment,
+calculation parity, and engine-backed authority remain unverified/unfinished.
+Client-authoritative positions and migration worlds remain. Inherited whole-baseline
+provenance debt remains; only touched entries were updated.

@@ -3,6 +3,23 @@
   "baseline_commit": "f4bec41444214a7903bebd178389ca22ca13f646",
   "patches": [
     {
+      "id": "M1-001",
+      "slice": "native inventory runtime seam",
+      "owner": "OpenMW server runtime",
+      "purpose": "Share ContainerStore add and stacking with explicit content/player/registry/script/presentation dependencies; retain stock equipment dispatch and expose headless WorldModel construction.",
+      "paths": [
+        "apps/openmw/mwworld/containerstore.cpp",
+        "apps/openmw/mwworld/containerstore.hpp",
+        "apps/openmw/mwworld/inventorystore.cpp",
+        "apps/openmw/mwworld/inventorystore.hpp",
+        "apps/openmw/mwworld/worldmodel.cpp",
+        "apps/openmw/mwworld/worldmodel.hpp"
+      ],
+      "tests": ["tes3mp_native_loadout_tests inventory-plain", "tes3mp_native_loadout_tests inventory-rejection"],
+      "disposition": "local shared engine extraction; no upstream contact authorized",
+      "removal_condition": "OpenMW supplies equivalent explicit inventory operation and headless registry composition interfaces"
+    },
+    {
       "id": "P8-001",
       "slice": "8.2",
       "owner": "OpenMW adapter",

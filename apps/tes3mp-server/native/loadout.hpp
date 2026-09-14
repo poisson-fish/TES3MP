@@ -21,6 +21,7 @@ namespace TES3MP::Native
         std::vector<std::string> mContent;
         std::string mEncoding;
         bool mSample = false;
+        std::string mInventoryItem;
     };
 
     LoadoutOptions readLoadoutOptions(int argc, const char* const argv[]);
@@ -37,6 +38,9 @@ namespace TES3MP::Native
         // Prepare completely before touching output. Stream/device write failure
         // itself cannot be rolled back; this is not a durable publication API.
         void writeSample(std::ostream& output, const DiagnosticLimits& limits = {}) const;
+        // Disposable base ContainerStore operation; scripts fail before mutation.
+        // Does not initialize a live player InventoryStore or execute scripts.
+        void writeInventoryProbe(std::ostream& output, std::string_view itemId);
 
     private:
         LoadoutOptions mOptions;

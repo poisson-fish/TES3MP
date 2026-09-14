@@ -41,6 +41,8 @@ namespace MWWorld
     {
     public:
         explicit WorldModel(ESMStore& store, ESM::ReadersCache& reader);
+        // Offline runtime composition without initializing all Settings categories.
+        WorldModel(ESMStore& store, ESM::ReadersCache& reader, std::size_t pointersCacheSize);
 
         WorldModel(const WorldModel&) = delete;
         WorldModel& operator=(const WorldModel&) = delete;

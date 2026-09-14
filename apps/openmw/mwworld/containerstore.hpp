@@ -1,6 +1,7 @@
 #ifndef GAME_MWWORLD_CONTAINERSTORE_H
 #define GAME_MWWORLD_CONTAINERSTORE_H
 
+#include <functional>
 #include <iterator>
 #include <map>
 #include <memory>
@@ -38,6 +39,22 @@ namespace MWClass
 namespace MWWorld
 {
     class ContainerStore;
+    class ESMStore;
+    class LocalScripts;
+    class WorldModel;
+
+    // Operation-local dependencies. LocalScripts still requires the stock
+    // ScriptManager through Environment; nullptr rejects scripts before mutation.
+    // Presentation must be consumed explicitly, even by an offline diagnostic.
+    struct ContainerStoreAddContext
+    {
+        const ESMStore& mStore;
+        WorldModel& mWorldModel;
+        Ptr mPlayer;
+        Ptr mContainer;
+        LocalScripts* mLocalScripts;
+        std::function<void(const Ptr&)> mInventoryUpdated;
+    };
 
     template <class PtrType>
     class ContainerStoreIteratorBase;
@@ -300,7 +317,10 @@ namespace MWWorld
         std::ptrdiff_t index(const ContainerStoreIterator& iter) const;
 
     private:
-        ContainerStoreIterator addImp(const ConstPtr& ptr, int count, bool markModified = true);
+        ContainerStoreIterator addImp(const ConstPtr& ptr, int count, const ESMStore& store);
+        ContainerStoreIterator addWithContext(
+            const ConstPtr& ptr, int count, const ContainerStoreAddContext& context, bool resolve);
+        void resolve(const Ptr& container);
         void addInitialItem(
             const ESM::RefId& id, const ESM::RefId& owner, int count, Misc::Rng::Generator* prng, bool topLevel = true);
         void addInitialItemImp(const MWWorld::Ptr& ptr, const ESM::RefId& owner, int count, Misc::Rng::Generator* prng,
@@ -364,6 +384,11 @@ namespace MWWorld
         ContainerStoreIterator add(const ESM::RefId& id, int count, bool allowAutoEquip = true);
         ///< Utility to construct a ManualRef and call add(ptr, count, actorPtr, true)
 
+        // Explicit-context entry for a base ContainerStore only. InventoryStore's
+        // equipment, listeners and actor services have not yet been separated.
+        // This is shared engine mutation, not a transactional server command API.
+        ContainerStoreIterator add(const ConstPtr& item, int count, const ContainerStoreAddContext& context);
+
         int remove(const ESM::RefId& itemId, int count, bool equipReplacement = 0, bool resolve = true);
         ///< Remove \a count item(s) designated by \a itemId from this container.
         ///
@@ -415,7 +440,8 @@ namespace MWWorld
         static int subtractItems(int count1, int count2);
 
     public:
-        virtual bool stacks(const ConstPtr& ptr1, const ConstPtr& ptr2) const;
+        bool stacks(const ConstPtr& ptr1, const ConstPtr& ptr2) const;
+        virtual bool stacks(const ConstPtr& ptr1, const ConstPtr& ptr2, const ESMStore& store) const;
         ///< @return true if the two specified objects can stack with each other
 
         void fill(const ESM::InventoryList& items, const ESM::RefId& owner, Misc::Rng::Generator& seed);

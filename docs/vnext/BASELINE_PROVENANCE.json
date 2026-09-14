@@ -265,6 +265,36 @@
       "purpose": "Includes replicas in the same configured water render passes as ordinary actors."
     },
     {
+      "path": "apps/openmw/mwworld/containerstore.cpp",
+      "status": "M",
+      "purpose": "Share inventory add, normalization, and stacking with explicit store/player/registry/presentation context; reject unavailable script services before mutation."
+    },
+    {
+      "path": "apps/openmw/mwworld/containerstore.hpp",
+      "status": "M",
+      "purpose": "Declare operation-local inventory add dependencies and an explicit base ContainerStore entry, with actor equipment and unresolved containers excluded."
+    },
+    {
+      "path": "apps/openmw/mwworld/inventorystore.cpp",
+      "status": "M",
+      "purpose": "Preserve equipment-aware virtual stacking through the shared explicit ESMStore overload."
+    },
+    {
+      "path": "apps/openmw/mwworld/inventorystore.hpp",
+      "status": "M",
+      "purpose": "Expose inherited stock stacking and override the explicit-store stacking seam."
+    },
+    {
+      "path": "apps/openmw/mwworld/worldmodel.cpp",
+      "status": "M",
+      "purpose": "Delegate stock construction to an explicit pointer-cache-size constructor for headless registry composition without global Settings initialization."
+    },
+    {
+      "path": "apps/openmw/mwworld/worldmodel.hpp",
+      "status": "M",
+      "purpose": "Declare the explicit cache-size WorldModel constructor used by the native inventory probe."
+    },
+    {
       "path": "apps/openmw/mwworld/player.cpp",
       "status": "M",
       "purpose": "Provides the clean activation interceptor seam on MWWorld::Player to route interactive object activation raycasts to multiplayer input before stock single-player activation."
@@ -387,7 +417,7 @@
     {
       "path": "apps/tes3mp-server/native/CMakeLists.txt",
       "status": "A",
-      "purpose": "Opt-in M1 native loader/probe, owned diagnostic values, and filtered synthetic tests, with explicit temporary OpenMW links and dependency evidence."
+      "purpose": "Opt-in M1 native loadout and inventory probe with filtered synthetic tests, explicit temporary OpenMW links, and mode-specific dependency evidence."
     },
     {
       "path": "apps/tes3mp-server/native/diagnostic.hpp",
@@ -395,24 +425,29 @@
       "purpose": "Engine-free owned diagnostic record/effect/GMST values and fixed sample count/string/report limits."
     },
     {
+      "path": "apps/tes3mp-server/native/inventory.cpp",
+      "status": "A",
+      "purpose": "Exercise real ManualRef, ContainerStore add/stack/cleanup, and WorldModel registration with owned diagnostics; reject scripts instead of omitting their behavior."
+    },
+    {
       "path": "apps/tes3mp-server/native/loadout.hpp",
       "status": "A",
-      "purpose": "App-local owner for configured engine records, encoding, and cached readers; exposes staged diagnostic samples while retaining engine stores."
+      "purpose": "App-local owner for configured engine records, encoding, and cached readers; exposes staged diagnostic samples and a disposable native inventory probe."
     },
     {
       "path": "apps/tes3mp-server/native/loadout.cpp",
       "status": "A",
-      "purpose": "Reuses OpenMW configuration, TES3 loading, and store normalization; enumerates winners and stages a bounded owned sample before publication."
+      "purpose": "Reuses OpenMW configuration, TES3 loading, and store normalization; selects enumeration, bounded owned sampling, or native inventory diagnostics."
     },
     {
       "path": "apps/tes3mp-server/native/main.cpp",
       "status": "A",
-      "purpose": "Headless native probe entry point with separate diagnostic/report streams, bounded sample selection, and visible load/projection failures."
+      "purpose": "Headless native probe entry point with separate diagnostic/report streams, sample/inventory selection, and visible load/projection/operation failures."
     },
     {
       "path": "apps/tes3mp-server/native/loadout_tests.cpp",
       "status": "A",
-      "purpose": "Native OpenMW-written synthetic loadouts exercise configuration/normalization, owned projection lifetime and limits, and atomic load/projection rejection."
+      "purpose": "OpenMW-written synthetic loadouts exercise configuration/normalization, owned projection, native inventory stacking/cleanup, and script-service rejection without mutation or publication."
     },
     {
       "path": "apps/tes3mp-server/actor_content.cpp",

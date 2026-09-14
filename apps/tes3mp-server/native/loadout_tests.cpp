@@ -8,6 +8,11 @@
 #include <sstream>
 #include <stdexcept>
 
+#include <apps/openmw/mwclass/classes.hpp>
+#include <apps/openmw/mwworld/containerstore.hpp>
+#include <apps/openmw/mwworld/inventorystore.hpp>
+#include <apps/openmw/mwworld/manualref.hpp>
+#include <apps/openmw/mwworld/worldmodel.hpp>
 #include <components/esm/records.hpp>
 #include <components/esm3/esmwriter.hpp>
 #include <components/esm3/formatversion.hpp>
@@ -341,11 +346,152 @@ namespace
         }
     }
 
+    void checkInventory(
+        const std::filesystem::path& root, int argc, const char* const argv[], const std::string& filter)
+    {
+        plugin(root / "local/Inventory.esm", true, [](ESM::ESMWriter& writer) {
+            write(writer, record<ESM::Class>("native_class"));
+            write(writer, record<ESM::Race>("native_race"));
+            auto player = record<ESM::NPC>("player");
+            player.mClass = ESM::RefId::stringRefId("native_class");
+            player.mRace = ESM::RefId::stringRefId("native_race");
+            write(writer, player);
+            auto script = record<ESM::Script>("native_script");
+            script.mScriptText
+                = "begin native_script\nshort OnPCAdd\nif ( OnPCAdd == 1 )\n"
+                  "set OnPCAdd to 0\nendif\nend native_script\n";
+            write(writer, script);
+            auto item = record<ESM::Miscellaneous>("native_plain");
+            item.mData.mWeight = 2.5f;
+            write(writer, item);
+            item.mId = ESM::RefId::stringRefId("native_scripted");
+            item.mScript = script.mId;
+            write(writer, item);
+            item = record<ESM::Miscellaneous>("gold_001");
+            item.mData.mWeight = 0.25f;
+            write(writer, item);
+            write(writer, record<ESM::Miscellaneous>("gold_100"));
+        });
+        auto options = TES3MP::Native::readLoadoutOptions(argc, argv);
+        options.mContent.push_back("Inventory.esm");
+        TES3MP::Native::Loadout loadout(options);
+        if (filter == "inventory-plain")
+        {
+            std::ostringstream before;
+            loadout.enumerate(before);
+            std::ostringstream output;
+            loadout.writeInventoryProbe(output, "NATIVE_PLAIN");
+            require(output.str() == "native-inventory\t1\nitem\t\"native_plain\"\ncount\t3\nstacks\t1\nweight\t7.5\n"
+                                    "presentation-requests\t2\nregistered\t1\nderegistered\t1\n"
+                                    "script-executed\t0\ncomplete\n",
+                "native inventory diagnostic mismatch");
+            std::ostringstream goldOutput;
+            loadout.writeInventoryProbe(goldOutput, "gold_100");
+            require(
+                goldOutput.str().find("item\t\"gold_001\"\ncount\t3\nstacks\t1\nweight\t0.75\n") != std::string::npos,
+                "native inventory did not use OpenMW gold normalization and canonical weight");
+            std::ostringstream after;
+            loadout.enumerate(after);
+            require(before.str() == after.str(), "inventory probe changed retained base records");
+            return;
+        }
+        require(filter == "inventory-rejection", "unknown inventory filter");
+        const auto scriptedId = ESM::RefId::stringRefId("native_scripted");
+        require(!loadout.store().get<ESM::Miscellaneous>().find(scriptedId)->mScript.empty(),
+            "OpenMW removed fixture script before probing");
+        std::ostringstream output;
+        output << "previous publication\n";
+        try
+        {
+            loadout.writeInventoryProbe(output, "native_scripted");
+            throw std::logic_error("scripted item accepted");
+        }
+        catch (const std::runtime_error& error)
+        {
+            require(std::string_view(error.what()).find("OnPCAdd") != std::string_view::npos,
+                "script rejection did not identify the missing OnPCAdd dependency");
+        }
+        require(output.str() == "previous publication\n", "script rejection published a partial report");
+
+        // Exercise preflight against a nonempty engine store and observe every
+        // possible effect. Records come from the OpenMW-written/loaded fixture.
+        MWWorld::ESMStore store;
+        for (const auto* id : { "native_plain", "native_scripted" })
+            store.insertStatic(*loadout.store().get<ESM::Miscellaneous>().find(ESM::RefId::stringRefId(id)));
+        store.insertStatic(*loadout.store().get<ESM::NPC>().find(ESM::RefId::stringRefId("player")));
+        auto gold = record<ESM::Miscellaneous>("gold_001");
+        gold.mScript = ESM::RefId::stringRefId("native_script");
+        store.insertStatic(gold);
+        store.insertStatic(record<ESM::Miscellaneous>("gold_100"));
+        ESM::ReadersCache readers;
+        MWWorld::WorldModel worldModel(store, readers, 1);
+        MWWorld::ManualRef player(store, ESM::RefId::stringRefId("player"));
+        MWWorld::ManualRef plain(store, ESM::RefId::stringRefId("native_plain"), 2);
+        MWWorld::ManualRef scripted(store, scriptedId, 2);
+        MWWorld::ManualRef goldPile(store, ESM::RefId::stringRefId("gold_100"), 2);
+        plain.getPtr().getCellRef().setOwner(ESM::RefId::stringRefId("old_owner"));
+        plain.getPtr().getCellRef().setFaction(ESM::RefId::stringRefId("old_faction"));
+        plain.getPtr().getCellRef().setFactionRank(4);
+        ESM::Position position{};
+        position.pos[0] = 7;
+        position.rot[1] = 2;
+        plain.getPtr().getCellRef().setPosition(position);
+        MWWorld::ContainerStore container;
+        struct Listener final : MWWorld::ContainerStoreListener
+        {
+            int mAdded = 0;
+            void itemAdded(const MWWorld::ConstPtr&, int) override { ++mAdded; }
+        } listener;
+        container.setContListener(&listener);
+        int notifications = 0;
+        MWWorld::ContainerStoreAddContext context{ store, worldModel, player.getPtr(), player.getPtr(), nullptr,
+            [&](const MWWorld::Ptr&) { ++notifications; } };
+        const auto first = container.add(plain.getPtr(), 2, context);
+        require(first->getCellRef().getOwner().empty() && first->getCellRef().getFaction().empty()
+                && first->getCellRef().getFactionRank() == -2 && first->getCellRef().getPosition().pos[0] == 0
+                && first->getCellRef().getPosition().rot[1] == 0
+                && plain.getPtr().getCellRef().getOwner() == "old_owner"
+                && plain.getPtr().getCellRef().getPosition().pos[0] == 7,
+            "engine add did not scrub copied world metadata while preserving the source");
+        const auto revision = worldModel.getPtrRegistryRevision();
+        const auto reject = [&](const auto& operation, std::string_view reason) {
+            bool rejected = false;
+            try
+            {
+                operation();
+            }
+            catch (const std::exception& error)
+            {
+                rejected = true;
+                require(std::string_view(error.what()).find(reason) != std::string_view::npos,
+                    "unexpected inventory rejection reason");
+            }
+            require(rejected, "unsupported inventory operation accepted");
+            require(first->getCellRef().getCount() == 2 && std::distance(container.begin(), container.end()) == 1
+                    && container.getWeight() == 5 && notifications == 1 && listener.mAdded == 1
+                    && worldModel.getPtrRegistryRevision() == revision && scripted.getPtr().getCellRef().getCount() == 2
+                    && !scripted.getPtr().getCellRef().getRefNum().isSet(),
+                "rejected add changed items, source, registry, listener or presentation");
+        };
+        reject([&] { container.add(scripted.getPtr(), 1, context); }, "OnPCAdd");
+        reject([&] { container.add(goldPile.getPtr(), 1, context); }, "OnPCAdd");
+        MWWorld::InventoryStore equipment;
+        reject([&] { static_cast<MWWorld::ContainerStore&>(equipment).add(plain.getPtr(), 1, context); },
+            "InventoryStore");
+        context.mInventoryUpdated = {};
+        reject([&] { container.add(plain.getPtr(), 1, context); }, "presentation consumer");
+    }
+
     void check(const std::filesystem::path& root, const std::string& filter)
     {
         fixture(root);
         const std::string directory = Files::pathToUnicodeString(root);
         const char* args[] = { "native-test", "--config", directory.c_str(), "--replace", "config" };
+        if (filter.starts_with("inventory-"))
+        {
+            checkInventory(root, 5, args, filter);
+            return;
+        }
         if (filter.starts_with("sample-"))
         {
             checkSample(root, 5, args, filter);

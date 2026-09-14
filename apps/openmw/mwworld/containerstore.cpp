@@ -365,6 +365,11 @@ MWWorld::ContainerStoreIterator MWWorld::ContainerStore::restack(const MWWorld::
 
 bool MWWorld::ContainerStore::stacks(const ConstPtr& ptr1, const ConstPtr& ptr2) const
 {
+    return stacks(ptr1, ptr2, *MWBase::Environment::get().getESMStore());
+}
+
+bool MWWorld::ContainerStore::stacks(const ConstPtr& ptr1, const ConstPtr& ptr2, const ESMStore& store) const
+{
     const MWWorld::Class& cls1 = ptr1.getClass();
     const MWWorld::Class& cls2 = ptr2.getClass();
 
@@ -374,8 +379,7 @@ bool MWWorld::ContainerStore::stacks(const ConstPtr& ptr1, const ConstPtr& ptr2)
     // If it has an enchantment, don't stack when some of the charge is already used
     if (!ptr1.getClass().getEnchantment(ptr1).empty())
     {
-        const ESM::Enchantment* enchantment = MWBase::Environment::get().getESMStore()->get<ESM::Enchantment>().find(
-            ptr1.getClass().getEnchantment(ptr1));
+        const ESM::Enchantment* enchantment = store.get<ESM::Enchantment>().find(ptr1.getClass().getEnchantment(ptr1));
         const float maxCharge = static_cast<float>(MWMechanics::getEnchantmentCharge(*enchantment));
         float enchantCharge1
             = ptr1.getCellRef().getEnchantmentCharge() == -1 ? maxCharge : ptr1.getCellRef().getEnchantmentCharge();
@@ -409,13 +413,44 @@ MWWorld::ContainerStoreIterator MWWorld::ContainerStore::add(const ESM::RefId& i
 MWWorld::ContainerStoreIterator MWWorld::ContainerStore::add(
     const ConstPtr& itemPtr, int count, bool /*allowAutoEquip*/, bool resolve)
 {
-    Ptr player = MWBase::Environment::get().getWorld()->getPlayerPtr();
+    auto& environment = MWBase::Environment::get();
+    const ContainerStoreAddContext context{ *environment.getESMStore(), *environment.getWorldModel(),
+        environment.getWorld()->getPlayerPtr(), getPtr(), &environment.getWorld()->getLocalScripts(),
+        [&environment](const Ptr& owner) { environment.getWindowManager()->inventoryUpdated(owner); } };
+    return addWithContext(itemPtr, count, context, resolve);
+}
 
-    MWWorld::ContainerStoreIterator it = addImp(itemPtr, count, resolve);
+MWWorld::ContainerStoreIterator MWWorld::ContainerStore::add(
+    const ConstPtr& itemPtr, int count, const ContainerStoreAddContext& context)
+{
+    if (typeid(*this) != typeid(ContainerStore))
+        throw std::logic_error("Explicit add context does not yet support InventoryStore or other derived stores");
+    if (!mResolved && !context.mContainer.isEmpty() && context.mContainer.getType() == ESM::REC_CONT)
+        throw std::logic_error("Explicit add context does not yet support unresolved container contents");
+    return addWithContext(itemPtr, count, context, true);
+}
+
+MWWorld::ContainerStoreIterator MWWorld::ContainerStore::addWithContext(
+    const ConstPtr& itemPtr, int count, const ContainerStoreAddContext& context, bool resolve)
+{
+    getType(itemPtr);
+    if (!context.mInventoryUpdated)
+        throw std::logic_error("ContainerStore::add requires an inventory presentation consumer");
+    if (!context.mLocalScripts
+        && (!itemPtr.getClass().getScript(itemPtr).empty()
+            || (itemPtr.getClass().isGold(itemPtr)
+                && !context.mStore.get<ESM::Miscellaneous>().find(sGoldId)->mScript.empty())))
+        throw std::runtime_error(
+            "ContainerStore::add requires LocalScripts and ScriptManager for scripted items "
+            "(including OnPCAdd); rejected before mutation");
+    if (resolve)
+        this->resolve(context.mContainer);
+
+    MWWorld::ContainerStoreIterator it = addImp(itemPtr, count, context.mStore);
 
     // The copy of the original item we just made
     MWWorld::Ptr item = *it;
-    MWBase::Environment::get().getWorldModel()->registerPtr(item);
+    context.mWorldModel.registerPtr(item);
 
     // we may have copied an item from the world, so reset a few things first
     item.getRefData().setBaseNode(
@@ -436,10 +471,11 @@ MWWorld::ContainerStoreIterator MWWorld::ContainerStore::add(
     item.getCellRef().setFactionRank(-2);
 
     const ESM::RefId& script = item.getClass().getScript(item);
-    const Ptr& contPtr = getPtr();
+    const Ptr& contPtr = context.mContainer;
+    const bool playerContainer = !context.mPlayer.isEmpty() && contPtr == context.mPlayer;
     if (!script.empty())
     {
-        if (contPtr == player)
+        if (playerContainer)
         {
             // Items in player's inventory have cell set to 0, so their scripts will never be removed
             item.mCell = nullptr;
@@ -454,29 +490,26 @@ MWWorld::ContainerStoreIterator MWWorld::ContainerStore::add(
 
         item.mContainerStore = this;
 
-        MWBase::Environment::get().getWorld()->getLocalScripts().add(script, item);
+        context.mLocalScripts->add(script, item);
 
         // Set OnPCAdd special variable, if it is declared
         // Make sure to do this *after* we have added the script to LocalScripts
-        if (contPtr == player)
+        if (playerContainer)
             item.getRefData().getLocals().setVarByInt(script, "onpcadd", 1);
     }
 
     // we should not fire event for InventoryStore yet - it has some custom logic
     if (mListener && typeid(*this) == typeid(ContainerStore))
         mListener->itemAdded(item, count);
-    MWBase::Environment::get().getWindowManager()->inventoryUpdated(contPtr);
+    context.mInventoryUpdated(contPtr);
 
     return it;
 }
 
-MWWorld::ContainerStoreIterator MWWorld::ContainerStore::addImp(const ConstPtr& ptr, int count, bool markModified)
+MWWorld::ContainerStoreIterator MWWorld::ContainerStore::addImp(
+    const ConstPtr& ptr, int count, const ESMStore& esmStore)
 {
-    if (markModified)
-        resolve();
     int type = getType(ptr);
-
-    const MWWorld::ESMStore& esmStore = *MWBase::Environment::get().getESMStore();
 
     // gold needs special handling: when it is inserted into a container, the base object automatically becomes Gold_001
     // this ensures that gold piles of different sizes stack with each other (also, several scripts rely on Gold_001 for
@@ -509,7 +542,7 @@ MWWorld::ContainerStoreIterator MWWorld::ContainerStore::addImp(const ConstPtr& 
             if (inventoryStore->isEquipped(*iter))
                 continue;
 
-        if (stacks(*iter, ptr))
+        if (stacks(*iter, ptr, esmStore))
         {
             // stack
             iter->getCellRef().setCount(addItems(iter->getCellRef().getCount(false), count));
@@ -780,7 +813,7 @@ void MWWorld::ContainerStore::addInitialItemImp(
     else
     {
         ptr.getCellRef().setOwner(owner);
-        MWWorld::ContainerStoreIterator it = addImp(ptr, count, false);
+        MWWorld::ContainerStoreIterator it = addImp(ptr, count, *MWBase::Environment::get().getESMStore());
         MWBase::Environment::get().getWorldModel()->registerPtr(*it);
     }
 }
@@ -807,7 +840,11 @@ bool MWWorld::ContainerStore::isResolved() const
 
 void MWWorld::ContainerStore::resolve()
 {
-    const Ptr& container = getPtr();
+    resolve(getPtr());
+}
+
+void MWWorld::ContainerStore::resolve(const Ptr& container)
+{
     if (!mResolved && !container.isEmpty() && container.getType() == ESM::REC_CONT)
     {
         for (const auto&& ptr : *this)

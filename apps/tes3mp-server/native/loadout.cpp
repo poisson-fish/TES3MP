@@ -253,7 +253,8 @@ namespace TES3MP::Native
             "data-local", bpo::value<Files::MaybeQuotedPath>()->default_value({}, ""))(
             "content", bpo::value<std::vector<std::string>>()->default_value({}, "")->multitoken()->composing())(
             "encoding", bpo::value<std::string>()->default_value("win1252"))(
-            "sample", bpo::bool_switch(), "Stage a bounded owned diagnostic sample");
+            "sample", bpo::bool_switch(), "Stage a bounded owned diagnostic sample")(
+            "inventory", bpo::value<std::string>(), "Probe adding a MISC item to an engine ContainerStore");
         bpo::variables_map variables;
         Files::parseArgs(argc, argv, variables, description);
         Files::ConfigurationManager config(true);
@@ -271,6 +272,12 @@ namespace TES3MP::Native
         result.mContent = variables["content"].as<std::vector<std::string>>();
         result.mEncoding = variables["encoding"].as<std::string>();
         result.mSample = variables["sample"].as<bool>();
+        if (variables.count("inventory"))
+        {
+            result.mInventoryItem = variables["inventory"].as<std::string>();
+            if (result.mSample || result.mInventoryItem.empty())
+                throw std::runtime_error("--inventory requires an item ID and cannot be combined with --sample");
+        }
         return result;
     }
 
@@ -445,8 +452,11 @@ namespace TES3MP::Native
     {
         auto options = readLoadoutOptions(argc, argv);
         const bool sample = options.mSample;
+        const std::string inventoryItem = options.mInventoryItem;
         Loadout loadout(std::move(options));
-        if (sample)
+        if (!inventoryItem.empty())
+            loadout.writeInventoryProbe(output, inventoryItem);
+        else if (sample)
             loadout.writeSample(output);
         else
             loadout.enumerate(output);

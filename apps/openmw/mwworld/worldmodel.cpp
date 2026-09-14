@@ -186,9 +186,14 @@ void MWWorld::WorldModel::writeCell(ESM::ESMWriter& writer, CellStore& cell) con
 }
 
 MWWorld::WorldModel::WorldModel(MWWorld::ESMStore& store, ESM::ReadersCache& readers)
+    : WorldModel(store, readers, Settings::cells().mPointersCacheSize)
+{
+}
+
+MWWorld::WorldModel::WorldModel(MWWorld::ESMStore& store, ESM::ReadersCache& readers, std::size_t pointersCacheSize)
     : mStore(store)
     , mReaders(readers)
-    , mIdCache(Settings::cells().mPointersCacheSize, { ESM::RefId(), nullptr })
+    , mIdCache(std::max<std::size_t>(1, pointersCacheSize), { ESM::RefId(), nullptr })
 {
     mDraftCell.mId = draftCellId;
 }

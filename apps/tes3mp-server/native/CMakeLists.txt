@@ -2,7 +2,7 @@
 # dependency graph, but the loader does not initialize those services. Replace
 # this edge with extracted engine content/runtime libraries before production
 # headless packaging. Do not relax components/tes3mp's independent boundaries.
-add_library(tes3mp_native_loadout STATIC loadout.cpp loadout.hpp diagnostic.hpp)
+add_library(tes3mp_native_loadout STATIC loadout.cpp loadout.hpp diagnostic.hpp inventory.cpp)
 target_compile_features(tes3mp_native_loadout PUBLIC cxx_std_20)
 target_link_libraries(tes3mp_native_loadout PRIVATE openmw-lib Boost::program_options)
 tes3mp_verify_target_dependencies(tes3mp_native_loadout ALLOWED openmw-lib Boost::program_options)
@@ -10,7 +10,7 @@ tes3mp_verify_target_includes(tes3mp_native_loadout
     FORBIDDEN "components/tes3mp" "apps/openmw/mwbase" "apps/openmw/mwgui" "apps/openmw/mwrender")
 
 file(GENERATE OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/loadout-dependencies-$<CONFIG>.txt"
-    CONTENT "Probe direct: tes3mp_native_loadout\nLoadout direct: $<TARGET_PROPERTY:tes3mp_native_loadout,LINK_LIBRARIES>\nOpenMW direct: $<TARGET_PROPERTY:openmw-lib,LINK_LIBRARIES>\nComponents direct: $<TARGET_PROPERTY:components,LINK_LIBRARIES>\nInitialized: ConfigurationManager, Utf8Encoder, ReadersCache, EsmLoader, ESMStore\nNot constructed: World, Environment, renderer, UI, audio, Lua runtime\n")
+    CONTENT "Probe direct: tes3mp_native_loadout\nLoadout direct: $<TARGET_PROPERTY:tes3mp_native_loadout,LINK_LIBRARIES>\nOpenMW direct: $<TARGET_PROPERTY:openmw-lib,LINK_LIBRARIES>\nComponents direct: $<TARGET_PROPERTY:components,LINK_LIBRARIES>\nInitialized: ConfigurationManager, Utf8Encoder, ReadersCache, EsmLoader, ESMStore\nInventory mode additionally initializes: engine classes, WorldModel (one-entry cache), ManualRef, base ContainerStore\nNot constructed: World, Environment, renderer, UI, audio, Lua runtime, ScriptManager, LocalScripts, actor InventoryStore\n")
 
 add_executable(tes3mp_native_loadout_probe main.cpp)
 target_link_libraries(tes3mp_native_loadout_probe PRIVATE tes3mp_native_loadout)

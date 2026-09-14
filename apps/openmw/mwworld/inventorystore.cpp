@@ -544,9 +544,9 @@ MWWorld::ContainerStoreIterator MWWorld::InventoryStore::getPreferredShield()
     return slots[Slot_CarriedLeft];
 }
 
-bool MWWorld::InventoryStore::stacks(const ConstPtr& ptr1, const ConstPtr& ptr2) const
+bool MWWorld::InventoryStore::stacks(const ConstPtr& ptr1, const ConstPtr& ptr2, const ESMStore& store) const
 {
-    bool canStack = MWWorld::ContainerStore::stacks(ptr1, ptr2);
+    bool canStack = MWWorld::ContainerStore::stacks(ptr1, ptr2, store);
     if (!canStack)
         return false;
 
