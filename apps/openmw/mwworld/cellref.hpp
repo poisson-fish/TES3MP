@@ -15,6 +15,7 @@ namespace ESM
 
 namespace MWWorld
 {
+    class LocalScripts;
 
     /// \brief Encapsulated variant of ESM::CellRef with change tracking
     class CellRef
@@ -257,6 +258,7 @@ namespace MWWorld
         }
 
         void setCount(int value);
+        void setCount(int value, LocalScripts& localScripts);
 
         // Write the content of this CellRef into the given ObjectState
         void writeState(ESM::ObjectState& state) const;
@@ -265,6 +267,7 @@ namespace MWWorld
         bool hasChanged() const { return mChanged; }
 
     private:
+        bool setCountImpl(int value);
         bool mChanged = false;
         ESM::ReferenceVariant mCellRef;
     };

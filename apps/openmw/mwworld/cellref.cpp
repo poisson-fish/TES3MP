@@ -12,6 +12,7 @@
 #include "apps/openmw/mwbase/world.hpp"
 #include "apps/openmw/mwmechanics/spellutil.hpp"
 #include "apps/openmw/mwworld/esmstore.hpp"
+#include "apps/openmw/mwworld/localscripts.hpp"
 
 namespace MWWorld
 {
@@ -379,6 +380,18 @@ namespace MWWorld
 
     void CellRef::setCount(int value)
     {
+        if (setCountImpl(value) && value == 0)
+            MWBase::Environment::get().getWorld()->removeRefScript(this);
+    }
+
+    void CellRef::setCount(int value, LocalScripts& localScripts)
+    {
+        if (setCountImpl(value) && value == 0)
+            localScripts.remove(this);
+    }
+
+    bool CellRef::setCountImpl(int value)
+    {
         if (value != getCount(false))
         {
             mChanged = true;
@@ -388,9 +401,9 @@ namespace MWWorld
                            [&](ESM::CellRef& ref) { ref.mCount = value; },
                        },
                 mCellRef.mVariant);
-            if (value == 0)
-                MWBase::Environment::get().getWorld()->removeRefScript(this);
+            return true;
         }
+        return false;
     }
 
     void CellRef::writeState(ESM::ObjectState& state) const

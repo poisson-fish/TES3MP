@@ -1,7 +1,10 @@
 #include "containerstore.hpp"
 #include "inventorystore.hpp"
 
+#include <algorithm>
 #include <cassert>
+#include <cstdint>
+#include <limits>
 #include <stdexcept>
 
 #include <components/debug/debuglog.hpp>
@@ -425,11 +428,44 @@ MWWorld::ContainerStoreIterator MWWorld::ContainerStore::add(
 MWWorld::ContainerStoreIterator MWWorld::ContainerStore::add(
     const ConstPtr& itemPtr, int count, const ContainerStoreAddContext& context)
 {
-    if (typeid(*this) != typeid(ContainerStore))
-        throw std::logic_error("Explicit add context does not yet support InventoryStore or other derived stores");
-    if (!mResolved && !context.mContainer.isEmpty() && context.mContainer.getType() == ESM::REC_CONT)
-        throw std::logic_error("Explicit add context does not yet support unresolved container contents");
+    validateExplicitOwner(context.mContainer, context.mWorldModel);
+    if (count <= 0)
+        throw std::invalid_argument("Explicit add count must be positive");
+    getType(itemPtr);
+    const auto& id = itemPtr.getClass().isGold(itemPtr) ? sGoldId : itemPtr.getCellRef().getRefId();
+    // Bound the aggregate as well as each stack: count(id) also returns an int.
+    std::int64_t total = count;
+    for (const auto& item : *this)
+        if (item.getCellRef().getRefId() == id)
+        {
+            total += std::abs(static_cast<std::int64_t>(item.getCellRef().getCount(false)));
+            if (total > std::numeric_limits<int>::max())
+                throw std::invalid_argument("Explicit add count would overflow inventory");
+        }
     return addWithContext(itemPtr, count, context, true);
+}
+
+MWWorld::Ptr MWWorld::ContainerStore::getPtr(const WorldModel& worldModel) const
+{
+    return worldModel.getPtr(mPtr.id());
+}
+
+void MWWorld::ContainerStore::setPtr(const Ptr& ptr, const WorldModel& worldModel)
+{
+    if (ptr.isEmpty() || !ptr.getCellRef().getRefNum().isSet()
+        || worldModel.getPtr(ptr.getCellRef().getRefNum()) != ptr)
+        throw std::invalid_argument("Explicit container owner must be registered");
+    mPtr = SafePtr(ptr.getCellRef().getRefNum());
+}
+
+void MWWorld::ContainerStore::validateExplicitOwner(const Ptr& owner, const WorldModel& worldModel) const
+{
+    if (typeid(*this) != typeid(ContainerStore))
+        throw std::logic_error("Explicit context does not yet support InventoryStore or other derived stores");
+    if (!mResolved)
+        throw std::logic_error("Explicit context does not yet support unresolved container contents");
+    if (owner.isEmpty() || getPtr(worldModel) != owner)
+        throw std::invalid_argument("Explicit container owner mismatch");
 }
 
 MWWorld::ContainerStoreIterator MWWorld::ContainerStore::addWithContext(
@@ -708,11 +744,38 @@ bool MWWorld::ContainerStore::hasVisibleItems() const
     return false;
 }
 
-int MWWorld::ContainerStore::remove(const Ptr& item, int count, bool equipReplacement, bool resolveFirst)
+int MWWorld::ContainerStore::remove(const Ptr& item, int count, bool /*equipReplacement*/, bool resolveFirst)
 {
     assert(this == item.getContainerStore());
+    auto& environment = MWBase::Environment::get();
+    const ContainerStoreRemoveContext context{ *environment.getWorldModel(), getPtr(),
+        environment.getWorld()->getLocalScripts(),
+        [&environment](const Ptr& owner) { environment.getWindowManager()->inventoryUpdated(owner); } };
+    return removeWithContext(item, count, context, resolveFirst);
+}
+
+int MWWorld::ContainerStore::remove(const Ptr& item, int count, const ContainerStoreRemoveContext& context)
+{
+    validateExplicitOwner(context.mContainer, context.mWorldModel);
+    if (count <= 0)
+        throw std::invalid_argument("Explicit remove count must be positive");
+    // Ptr's container field is public; check actual membership as well as its hint.
+    if (item.isEmpty() || item.getContainerStore() != this)
+        throw std::invalid_argument("Explicit remove item ownership mismatch");
+    if (item.getCellRef().getCount(false) == std::numeric_limits<int>::min())
+        throw std::invalid_argument("Explicit remove item count is invalid");
+    if (std::find(begin(), end(), item) == end())
+        throw std::invalid_argument("Explicit remove item ownership mismatch");
+    if (!context.mInventoryUpdated)
+        throw std::logic_error("ContainerStore::remove requires an inventory presentation consumer");
+    return removeWithContext(item, count, context, true);
+}
+
+int MWWorld::ContainerStore::removeWithContext(
+    const Ptr& item, int count, const ContainerStoreRemoveContext& context, bool resolveFirst)
+{
     if (resolveFirst)
-        resolve();
+        resolve(context.mContainer);
 
     int toRemove = count;
     CellRef& itemRef = item.getCellRef();
@@ -720,14 +783,14 @@ int MWWorld::ContainerStore::remove(const Ptr& item, int count, bool equipReplac
     if (itemRef.getCount() <= toRemove)
     {
         toRemove -= itemRef.getCount();
-        itemRef.setCount(0);
+        itemRef.setCount(0, context.mLocalScripts);
 
         if (mSelectedEnchantItem != end() && *mSelectedEnchantItem == item)
             mSelectedEnchantItem = end();
     }
     else
     {
-        itemRef.setCount(subtractItems(itemRef.getCount(false), toRemove));
+        itemRef.setCount(subtractItems(itemRef.getCount(false), toRemove), context.mLocalScripts);
         toRemove = 0;
     }
 
@@ -736,7 +799,7 @@ int MWWorld::ContainerStore::remove(const Ptr& item, int count, bool equipReplac
     // we should not fire event for InventoryStore yet - it has some custom logic
     if (mListener && typeid(*this) == typeid(ContainerStore))
         mListener->itemRemoved(item, count - toRemove);
-    MWBase::Environment::get().getWindowManager()->inventoryUpdated(getPtr());
+    context.mInventoryUpdated(context.mContainer);
 
     // number of removed items
     return count - toRemove;

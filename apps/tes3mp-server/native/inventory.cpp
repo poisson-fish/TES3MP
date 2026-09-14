@@ -19,6 +19,7 @@
 #include <apps/openmw/mwworld/worldmodel.hpp>
 #include <components/compiler/extensions.hpp>
 #include <components/compiler/extensions0.hpp>
+#include <components/esm3/loadcont.hpp>
 #include <components/esm3/loadscpt.hpp>
 #include <components/misc/strings/lower.hpp>
 
@@ -83,6 +84,10 @@ namespace TES3MP::Native
                     throw std::runtime_error("Inventory probe script exceeds 256 locals limit");
             }
             MWWorld::ContainerStore container;
+            worldModel.registerPtr(player.getPtr());
+            container.setPtr(player.getPtr(), worldModel);
+            Misc::Rng::Generator prng{ 0 };
+            container.fill({}, ESM::RefId(), prng);
             // Destroy the list of script Ptrs before the container, also on failure.
             MWWorld::LocalScripts localScripts(mStore);
             const MWWorld::ContainerStoreAddContext context{ mStore, worldModel, player.getPtr(), player.getPtr(),

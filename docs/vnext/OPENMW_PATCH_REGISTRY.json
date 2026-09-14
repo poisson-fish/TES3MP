@@ -33,10 +33,12 @@
     },
     {
       "id": "M1-001",
-      "slice": "native inventory runtime seam",
+      "slice": "native inventory runtime seam and M2 owner-bound removal",
       "owner": "OpenMW server runtime",
-      "purpose": "Share ContainerStore add and stacking with explicit content/player/registry/script/presentation dependencies; retain stock equipment dispatch and expose headless WorldModel construction.",
+      "purpose": "Share ContainerStore add, stacking, and removal with explicit content/player/registry/script/owner/presentation dependencies, including CellRef zero-count script cleanup; validate resolved base-store owners and counts and retain stock equipment dispatch.",
       "paths": [
+        "apps/openmw/mwworld/cellref.cpp",
+        "apps/openmw/mwworld/cellref.hpp",
         "apps/openmw/mwworld/containerstore.cpp",
         "apps/openmw/mwworld/containerstore.hpp",
         "apps/openmw/mwworld/inventorystore.cpp",
@@ -44,7 +46,7 @@
         "apps/openmw/mwworld/worldmodel.cpp",
         "apps/openmw/mwworld/worldmodel.hpp"
       ],
-      "tests": ["tes3mp_native_loadout_tests inventory-plain", "tes3mp_native_loadout_tests inventory-scripted", "tes3mp_native_loadout_tests inventory-rejection"],
+      "tests": ["tes3mp_native_loadout_tests inventory-plain", "tes3mp_native_loadout_tests inventory-scripted", "tes3mp_native_loadout_tests inventory-rejection", "tes3mp_native_loadout_tests inventory-two-owners"],
       "disposition": "local shared engine extraction; no upstream contact authorized",
       "removal_condition": "OpenMW supplies equivalent explicit inventory operation and headless registry composition interfaces"
     },

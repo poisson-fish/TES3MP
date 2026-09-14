@@ -4,92 +4,91 @@
 
 - **Direction:** OpenMW-backed authoritative cooperative multiplayer; see
   [README.md](README.md) and [DECISIONS.md](DECISIONS.md).
-- **Milestone:** M1's bounded probe exit remains met. This checkout already had
-  native loading, owned sampling, inventory initialization, and normal-client
-  enchantment-charge parity. The latest slice fixes normalized identity in full
-  enumeration. M2 in [PLAN.md](PLAN.md) is next; no M2 work is claimed.
-- **Next action:** separate the explicit owner/presentation dependencies in
-  [containerstore.cpp](../../apps/openmw/mwworld/containerstore.cpp)
-  `ContainerStore::remove(const Ptr&, ...)`, preserving stock and InventoryStore
-  dispatch. Add a narrow two-owner base-store add/remove check with count/ownership
-  rejection before mutation and correctly routed notifications. Keep unresolved
-  stores and equipment excluded initially; do not claim atomic cross-container
-  transfer until staging and failure handling exist.
+- **Milestone:** M2 in [PLAN.md](PLAN.md) has its first bounded owner-bound
+  base-store add/remove slice. M1's inherited probe exit remains met. M2's actor,
+  transfer, equipment, persistence, and production cutover criteria remain open.
+- **Next action:** implement isolated item preparation for a resolved base-store
+  transfer. Inspect `LiveCellRefBase`/`RefData` copy and registry/script lifetimes;
+  prepare detached item state and deferred effects, then inject preparation failure
+  and prove both live owners, script state, and registry remain unchanged with no
+  success notifications. Keep equipment and unresolved stores excluded. Do not
+  wire or claim atomic cross-container transfer until staging and failure handling
+  are proven.
 - **Checkpoint:** `8850e745c298c6de629ef9a5a26bbdddf6aa56e3` preserves the working
   gameplay implementation before the engine-backed pivot.
 
-## Implemented enumeration correction
+## Implemented M2 slice
 
-The app-local [native loader](../../apps/tes3mp-server/native/loadout.cpp) retains
-OpenMW ConfigurationManager, Utf8Encoder, ReadersCache, EsmLoader, and ESMStore
-loading/setup/validation. Full enumeration now applies OpenMW's ASCII case fold
-to winning record IDs, matching bounded samples. Previously it exposed the first
-spelling interned process-wide, including spelling from an earlier load.
-Display text, engine records, override/deletion handling, and report ordering are
-preserved. The CLI help documents this identity convention.
+[ContainerStore](../../apps/openmw/mwworld/containerstore.cpp) now shares removal
+between the stock virtual entry and a registry/owner/LocalScripts/presentation
+context. Registry-explicit owner binding and lookup avoid SafePtr's global lookup.
+Explicit add/remove require a registered matching owner and a resolved base store;
+derived stores, nonpositive counts, add-count overflow, and empty/dead/foreign
+removal items reject before mutation or success. Removal checks actual membership,
+including when a Ptr's public container hint is forged. Positive oversized removal
+requests retain OpenMW's clamping semantics.
 
-The [filtered regression](../../apps/tes3mp-server/native/loadout_tests.cpp)
-uses OpenMW-written TES3 fixtures and checks all 15 categories, earlier interned
-spellings, repeated loads, enumeration/sample identity agreement, winners beyond
-the sample cap, deleted records, effect normalization, text escaping, unchanged
-records, and default CLI dispatch. This is a diagnostic correction, not another
-gameplay model.
+The shared removal body preserves negative restocking counts, cached-weight
+invalidation, selected-enchantment cleanup, and listener ordering. Stock RefId
+removal still dispatches virtually to InventoryStore; its equipment/replacement
+logic remains intact. [CellRef](../../apps/openmw/mwworld/cellref.cpp) shares count
+mutation with explicit LocalScripts cleanup when a stack reaches zero, retaining
+the stock World wrapper. This removes a hidden global dependency without skipping
+script unregistration.
+
+The [native probe](../../apps/tes3mp-server/native/inventory.cpp) now binds its
+registered owner and explicitly initializes an empty resolved store. The new
+`inventory-two-owners` [filter](../../apps/tes3mp-server/native/loadout_tests.cpp)
+uses OpenMW-written/loaded synthetic MISC/script records, two distinct registered
+NPC references, and disposable base stores. It checks isolated add/stack/removal,
+rejection without changes to inventories/registry/selection/notifications,
+correct owner/item/count notifications, negative-stack arithmetic, full removal,
+and removal of only the intended owner's script registration. No Environment,
+World, WindowManager, or actor custom data is initialized; an empty InventoryStore
+only exercises rejection.
 
 ## Fresh verification
 
 Windows MSVC RelWithDebInfo in `build/vnext-product`, individually run:
 
-- Builds of `tes3mp_native_loadout_tests` and
-  `tes3mp_native_loadout_probe`: exit 0.
-- `enumeration-normalized`: exit 0.
-- Real installed Morrowind.esm enumeration: exit 0; 6,499 winning records across
-  15 categories, normalized IDs, no duplicate identities, matching category
-  counts, and the completion marker.
-- Real-report verifier initially exited 1 because its content-path assertion
-  assumed forward slashes. After fixing the verifier's Windows path comparison,
-  the same captured report passed with exit 0; the probe had succeeded.
+- `tes3mp_native_loadout_tests` build: exit 0, including affected stock callers.
+- `inventory-two-owners`, `inventory-plain`, `inventory-scripted`, and
+  `inventory-rejection`: each exit 0.
+- `tes3mp_native_loadout_probe` build: exit 0.
 
-Reproduce one command at a time, with the existing dependency DLL directory on
-PATH and output redirected to `build/logs`:
+Initial build exit 2 reported an incomplete InventoryList type; the direct header
+include fixed it. Initial two-owner exit `-1073741819` exposed CellRef's global
+zero-count cleanup; explicit LocalScripts fixed it. Each failing check was fixed
+and rerun before continuing. Final logs are
+`build/logs/native-removal-build-script-cleanup.log`, `native-removal-build-probe.log`,
+`native-removal-two-owners-retry.log`, and `native-removal-{plain,scripted,rejection}.log`
+under the same directory. No complete suites or upstream baseline tests ran.
+
+Reproduce one filter at a time with the existing dependency DLL directory on PATH
+and output redirected to `build/logs`:
 
 ```text
-build/vnext-product/tes3mp_native_loadout_tests.exe enumeration-normalized build/native-loadout/enumeration-normalized
-build/native-loadout/capture-enumeration.ps1
-python build/native-loadout/verify-enumeration.py
+build/vnext-product/tes3mp_native_loadout_tests.exe inventory-two-owners build/native-loadout/inventory-two-owners
 ```
 
-The capture invokes the default probe with `--config build/native-loadout/real
---replace config` (resolved to an absolute config directory). Local configuration,
-input/executable SHA-256 hashes, observed DLLs, and timing are in
-`build/native-loadout/real/enumeration-evidence.json`. Wall startup/run time was
-0.530 seconds; sampled peak working set was 90,923,008 bytes. The report is
-`build/logs/native-enumeration-real.tsv`; all new logs use
-`build/logs/native-enumeration-*`. No complete suites or upstream baseline tests ran.
+## Remaining limits and inherited evidence
 
-## Inherited evidence and remaining limits
+These synchronous engine operations are not transactional commands. Allocation,
+script preparation, callbacks, durability failure, and cross-container transfer
+still need isolated staging and installation. Script instructions, equipment and
+enchanted effect execution, coherent inventory save/restore, stable multiplayer
+instance mapping, and production actor integration remain unfinished. The two
+NPC references provide owner identity only; this is not two live actor inventories.
 
-Earlier real samples and scripted MISC captures (Bittercup and the Dwemer puzzle
-box) remain under `build/native-loadout/real`. Compiler-derived locals,
-registration, and OnPCAdd initialization are implemented; script instructions,
-equipment, enchanted effect execution, live-actor cost adjustment, transactional
-inventory publication, and Tamriel Rebuilt remain unverified.
+Inherited M1 evidence was not rerun: normalized real Morrowind enumeration and
+Bittercup/Dwemer puzzle-box initialization remain under `build/native-loadout/real`;
+normal-client/native enchantment-charge captures remain under
+`build/native-loadout/parity`. Tamriel Rebuilt remains unverified.
 
-Earlier normal-client/native charge captures remain under
-`build/native-loadout/parity`: the installed amulet's winning
-`almsivi intervention_en` produced charge 40/40 with Morrowind.esm and 630/630
-with synthetic GMST overrides. The client used `world.createObject` and
-`Item.itemData(...).enchantmentCharge`; paired input hashes matched. This evidence
-was not rerun. Shared store-explicit calculations remain in
-[spellutil.cpp](../../apps/openmw/mwmechanics/spellutil.cpp).
-
-The opt-in [native targets](../../apps/tes3mp-server/native/CMakeLists.txt) stay
-outside the default independent server/standalone graph. No networking or
-migration-world callers changed. Enumeration constructs no Environment, World,
-renderer, UI, audio, actor, or script runtime. This is not an authoritative
-engine-backed server; client-authoritative positions and migration worlds remain.
-
-`loadout-dependencies-RelWithDebInfo.txt` still records broad
-openmw-lib/components OSG/OpenGL/MyGUI edges. Replace these with extracted
-content/runtime libraries before production headless packaging. Linked DLLs do
-not establish initialized services. Inherited whole-baseline provenance debt
-remains; only touched entries were updated.
+The opt-in [native targets](../../apps/tes3mp-server/native/CMakeLists.txt) remain
+outside the independent server/standalone graph. No networking or migration-world
+callers changed. Client-authoritative positions and migration worlds remain.
+The probe still links broad openmw-lib/components OSG/OpenGL/MyGUI dependencies;
+extract content/runtime libraries before production headless packaging. Linked
+DLLs do not establish initialized services. Inherited whole-baseline provenance
+debt remains; only touched entries were updated.

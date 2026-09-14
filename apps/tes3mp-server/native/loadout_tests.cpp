@@ -8,6 +8,7 @@
 #include <set>
 #include <sstream>
 #include <stdexcept>
+#include <tuple>
 
 #include <apps/openmw/mwclass/classes.hpp>
 #include <apps/openmw/mwmechanics/spellutil.hpp>
@@ -24,6 +25,7 @@
 #include <components/esm/records.hpp>
 #include <components/esm3/esmwriter.hpp>
 #include <components/esm3/formatversion.hpp>
+#include <components/esm3/loadcont.hpp>
 #include <components/files/conversion.hpp>
 
 namespace
@@ -32,6 +34,14 @@ namespace
     {
         if (!condition)
             throw std::runtime_error(message);
+    }
+
+    void bindEmptyStore(MWWorld::ContainerStore& container, const MWWorld::Ptr& owner, MWWorld::WorldModel& worldModel)
+    {
+        worldModel.registerPtr(owner);
+        container.setPtr(owner, worldModel);
+        Misc::Rng::Generator prng{ 0 };
+        container.fill({}, ESM::RefId(), prng);
     }
 
     template <class T>
@@ -354,6 +364,197 @@ namespace
         }
     }
 
+    void checkInventoryOwners(const TES3MP::Native::Loadout& loadout)
+    {
+        MWClass::registerClasses();
+        MWWorld::ESMStore store;
+        const auto id = ESM::RefId::stringRefId("native_plain");
+        const auto playerId = ESM::RefId::stringRefId("player");
+        store.insertStatic(*loadout.store().get<ESM::Miscellaneous>().find(id));
+        store.insertStatic(*loadout.store().get<ESM::NPC>().find(playerId));
+        const auto scriptId = ESM::RefId::stringRefId("native_script");
+        const auto scriptedId = ESM::RefId::stringRefId("native_scripted");
+        store.insertStatic(*loadout.store().get<ESM::Script>().find(scriptId));
+        store.insertStatic(*loadout.store().get<ESM::Miscellaneous>().find(scriptedId));
+        ESM::ReadersCache readers;
+        MWWorld::WorldModel worldModel(store, readers, 1);
+        // Two separate NPC references, with disposable base stores. No actor
+        // custom data, equipment, Environment, or WindowManager is constructed.
+        MWWorld::ManualRef ownerA(store, playerId);
+        MWWorld::ManualRef ownerB(store, playerId);
+        MWWorld::ManualRef source(store, id, 5);
+        MWWorld::ContainerStore a;
+        MWWorld::ContainerStore b;
+        MWWorld::LocalScripts localScripts(store);
+        bindEmptyStore(a, ownerA.getPtr(), worldModel);
+        bindEmptyStore(b, ownerB.getPtr(), worldModel);
+        require(ownerA.getPtr() != ownerB.getPtr()
+                && ownerA.getPtr().getCellRef().getRefNum() != ownerB.getPtr().getCellRef().getRefNum(),
+            "two-owner fixture did not create distinct registered owners");
+
+        struct Event
+        {
+            MWWorld::Ptr mOwner;
+            MWWorld::ConstPtr mItem;
+            int mCount;
+            bool mAdded;
+        };
+        std::vector<Event> events;
+        struct Listener final : MWWorld::ContainerStoreListener
+        {
+            MWWorld::ContainerStore& mStore;
+            const MWWorld::WorldModel& mWorldModel;
+            std::vector<Event>& mEvents;
+            Listener(MWWorld::ContainerStore& store, const MWWorld::WorldModel& worldModel, std::vector<Event>& events)
+                : mStore(store)
+                , mWorldModel(worldModel)
+                , mEvents(events)
+            {
+            }
+            void itemAdded(const MWWorld::ConstPtr& item, int count) override
+            {
+                mEvents.push_back({ mStore.getPtr(mWorldModel), item, count, true });
+            }
+            void itemRemoved(const MWWorld::ConstPtr& item, int count) override
+            {
+                mEvents.push_back({ mStore.getPtr(mWorldModel), item, count, false });
+            }
+        } listenerA(a, worldModel, events), listenerB(b, worldModel, events);
+        a.setContListener(&listenerA);
+        b.setContListener(&listenerB);
+        std::vector<MWWorld::Ptr> notifications;
+        const auto updated = [&](const MWWorld::Ptr& owner) { notifications.push_back(owner); };
+        const MWWorld::ContainerStoreAddContext addA{ store, worldModel, ownerA.getPtr(), ownerA.getPtr(), nullptr,
+            nullptr, updated };
+        const MWWorld::ContainerStoreAddContext addB{ store, worldModel, ownerB.getPtr(), ownerB.getPtr(), nullptr,
+            nullptr, updated };
+        const MWWorld::ContainerStoreRemoveContext removeA{ worldModel, ownerA.getPtr(), localScripts, updated };
+        const MWWorld::ContainerStoreRemoveContext removeB{ worldModel, ownerB.getPtr(), localScripts, updated };
+        const auto success = [&](const MWWorld::Ptr& owner, const MWWorld::Ptr& item, int count, bool added) {
+            require(events.size() == notifications.size() && !events.empty() && events.back().mOwner == owner
+                    && events.back().mItem == item && events.back().mCount == count && events.back().mAdded == added
+                    && notifications.back() == owner,
+                "success listener/presentation owner, item, count or multiplicity mismatch");
+        };
+        const auto first = a.add(source.getPtr(), 3, addA);
+        require(a.count(id) == 3 && b.count(id) == 0 && events.size() == 1, "add A changed wrong inventory");
+        success(ownerA.getPtr(), *first, 3, true);
+        const auto second = b.add(source.getPtr(), 5, addB);
+        require(a.count(id) == 3 && b.count(id) == 5 && events.size() == 2, "add B changed wrong inventory");
+        success(ownerB.getPtr(), *second, 5, true);
+        require(a.add(source.getPtr(), 1, addA) == first && a.count(id) == 4 && b.count(id) == 5,
+            "add A did not stack locally");
+        success(ownerA.getPtr(), *first, 1, true);
+        a.setSelectedEnchantItem(first);
+        b.setSelectedEnchantItem(second);
+
+        const auto snapshot = [&] {
+            return std::tuple{ a.count(id), b.count(id), a.getWeight(), b.getWeight(),
+                std::distance(a.begin(), a.end()), std::distance(b.begin(), b.end()), a.getSelectedEnchantItem(),
+                b.getSelectedEnchantItem(), worldModel.getPtrRegistryRevision(), events.size(), notifications.size(),
+                source.getPtr().getCellRef().getCount(false), source.getPtr().getCellRef().getRefNum() };
+        };
+        const auto reject = [&](const auto& operation, std::string_view reason) {
+            const auto before = snapshot();
+            bool rejected = false;
+            try
+            {
+                operation();
+            }
+            catch (const std::exception& error)
+            {
+                rejected = true;
+                require(std::string_view(error.what()).find(reason) != std::string_view::npos,
+                    "unexpected two-owner rejection reason");
+            }
+            require(
+                rejected && snapshot() == before, "rejection changed inventory, selection, registry or notifications");
+        };
+        for (int count : { 0, -1, std::numeric_limits<int>::min() })
+        {
+            reject([&] { a.add(source.getPtr(), count, addA); }, "count");
+            reject([&] { b.remove(*second, count, removeB); }, "count");
+        }
+        reject([&] { a.add(source.getPtr(), std::numeric_limits<int>::max(), addA); }, "overflow");
+        reject([&] { a.add(source.getPtr(), 1, addB); }, "owner mismatch");
+        reject([&] { b.remove(*second, 1, removeA); }, "owner mismatch");
+        reject([&] { a.remove(*second, 1, removeA); }, "ownership mismatch");
+        auto forged = *second;
+        forged.mContainerStore = &a;
+        reject([&] { a.remove(forged, 1, removeA); }, "ownership mismatch");
+        reject([&] { a.remove(source.getPtr(), 1, removeA); }, "ownership mismatch");
+        reject([&] { a.remove(MWWorld::Ptr(), 1, removeA); }, "ownership mismatch");
+        auto noAddPresentation = addA;
+        noAddPresentation.mInventoryUpdated = {};
+        reject([&] { a.add(source.getPtr(), 1, noAddPresentation); }, "presentation consumer");
+        auto noRemovePresentation = removeA;
+        noRemovePresentation.mInventoryUpdated = {};
+        reject([&] { a.remove(*first, 1, noRemovePresentation); }, "presentation consumer");
+        MWWorld::ContainerStore unresolved;
+        unresolved.setPtr(ownerA.getPtr(), worldModel);
+        reject([&] { unresolved.add(source.getPtr(), 1, addA); }, "unresolved");
+        reject([&] { unresolved.remove(*first, 1, removeA); }, "unresolved");
+        require(!unresolved.isResolved() && unresolved.begin() == unresolved.end(), "rejection resolved a store");
+        MWWorld::InventoryStore equipment;
+        auto& baseEquipment = static_cast<MWWorld::ContainerStore&>(equipment);
+        reject([&] { baseEquipment.add(source.getPtr(), 1, addA); }, "InventoryStore");
+        reject([&] { baseEquipment.remove(*first, 1, removeA); }, "InventoryStore");
+        require(equipment.begin() == equipment.end(), "explicit operation mutated equipment store");
+
+        require(a.remove(*first, 1, removeA) == 1 && a.count(id) == 3 && b.count(id) == 5 && a.getWeight() == 7.5f
+                && a.getSelectedEnchantItem() == first && events.size() == 4,
+            "partial removal changed wrong inventory, weight or selection");
+        success(ownerA.getPtr(), *first, 1, false);
+        // Preserve stock negative (restocking) stack arithmetic and clamp oversize requests.
+        second->getCellRef().setCount(-5);
+        require(b.remove(*second, 2, removeB) == 2 && second->getCellRef().getCount(false) == -3
+                && b.getWeight() == 7.5f && a.count(id) == 3 && events.size() == 5,
+            "removal lost stock negative-stack semantics or changed the other inventory");
+        success(ownerB.getPtr(), *second, 2, false);
+        require(b.remove(*second, 99, removeB) == 3 && b.count(id) == 0 && b.getWeight() == 0
+                && b.getSelectedEnchantItem() == b.end() && a.getSelectedEnchantItem() == first && events.size() == 6,
+            "full removal did not clamp count or clear only its owner's selection");
+        success(ownerB.getPtr(), *second, 3, false);
+        reject([&] { b.remove(*second, 1, removeB); }, "ownership mismatch");
+        require(a.remove(*first, 3, removeA) == 3 && a.count(id) == 0 && a.getWeight() == 0
+                && a.getSelectedEnchantItem() == a.end() && events.size() == 7,
+            "full removal did not empty A");
+        success(ownerA.getPtr(), *first, 3, false);
+        require(source.getPtr().getCellRef().getCount() == 5 && !source.getPtr().getCellRef().getRefNum().isSet(),
+            "add/remove changed source reference");
+
+        Compiler::Extensions extensions;
+        Compiler::registerExtensions(extensions);
+        MWScript::CompilerContext compilerContext(MWScript::CompilerContext::Type_Full);
+        compilerContext.setExtensions(&extensions);
+        MWScript::ScriptManager scripts(store, compilerContext, 1);
+        MWWorld::ManualRef scripted(store, scriptedId);
+        auto scriptedAddA = addA;
+        scriptedAddA.mLocalScripts = &localScripts;
+        scriptedAddA.mScriptManager = &scripts;
+        auto scriptedAddB = addB;
+        scriptedAddB.mLocalScripts = &localScripts;
+        scriptedAddB.mScriptManager = &scripts;
+        const auto scriptA = a.add(scripted.getPtr(), 1, scriptedAddA);
+        success(ownerA.getPtr(), *scriptA, 1, true);
+        const auto scriptB = b.add(scripted.getPtr(), 1, scriptedAddB);
+        success(ownerB.getPtr(), *scriptB, 1, true);
+        require(localScripts.isRunning(scriptId, *scriptA) && localScripts.isRunning(scriptId, *scriptB),
+            "two-owner script registration failed");
+        reject([&] { a.remove(*scriptA, 1, removeB); }, "owner mismatch");
+        require(a.count(scriptedId) == 1 && b.count(scriptedId) == 1 && localScripts.isRunning(scriptId, *scriptA)
+                && localScripts.isRunning(scriptId, *scriptB),
+            "rejected removal changed a scripted stack or registration");
+        require(a.remove(*scriptA, 1, removeA) == 1 && !localScripts.isRunning(scriptId, *scriptA)
+                && localScripts.isRunning(scriptId, *scriptB) && b.count(scriptedId) == 1,
+            "full removal did not unregister only the intended owner's script");
+        success(ownerA.getPtr(), *scriptA, 1, false);
+        require(b.remove(*scriptB, 1, removeB) == 1 && !localScripts.isRunning(scriptId, *scriptB)
+                && a.count(scriptedId) == 0 && b.count(scriptedId) == 0 && events.size() == 11,
+            "full removal left a script registration or emitted duplicate success");
+        success(ownerB.getPtr(), *scriptB, 1, false);
+    }
+
     void checkInventory(
         const std::filesystem::path& root, int argc, const char* const argv[], const std::string& filter)
     {
@@ -383,6 +584,11 @@ namespace
         auto options = TES3MP::Native::readLoadoutOptions(argc, argv);
         options.mContent.push_back("Inventory.esm");
         TES3MP::Native::Loadout loadout(options);
+        if (filter == "inventory-two-owners")
+        {
+            checkInventoryOwners(loadout);
+            return;
+        }
         if (filter == "inventory-plain")
         {
             std::ostringstream before;
@@ -460,6 +666,7 @@ namespace
             ownerPtr.mCell = &ownerCell;
             MWWorld::ManualRef source(store, ESM::RefId::stringRefId("native_scripted"));
             MWWorld::ContainerStore container;
+            bindEmptyStore(container, ownerPtr, worldModel);
             MWWorld::LocalScripts localScripts(store);
             int notifications = 0;
             MWWorld::ContainerStoreAddContext context{ store, worldModel, player.getPtr(), ownerPtr, &localScripts,
@@ -573,6 +780,7 @@ namespace
         position.rot[1] = 2;
         plain.getPtr().getCellRef().setPosition(position);
         MWWorld::ContainerStore container;
+        bindEmptyStore(container, player.getPtr(), worldModel);
         struct Listener final : MWWorld::ContainerStoreListener
         {
             int mAdded = 0;

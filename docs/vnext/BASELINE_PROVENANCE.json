@@ -295,14 +295,24 @@
       "purpose": "Declare explicit script-service overloads for local initialization and assignment."
     },
     {
+      "path": "apps/openmw/mwworld/cellref.cpp",
+      "status": "M",
+      "purpose": "Share count mutation and zero-count script cleanup with explicit LocalScripts while retaining the stock World service wrapper."
+    },
+    {
+      "path": "apps/openmw/mwworld/cellref.hpp",
+      "status": "M",
+      "purpose": "Declare the LocalScripts-explicit count setter used by headless ContainerStore removal."
+    },
+    {
       "path": "apps/openmw/mwworld/containerstore.cpp",
       "status": "M",
-      "purpose": "Share inventory add, normalization, and stacking with explicit store/player/registry/presentation context; reject unavailable script services before mutation."
+      "purpose": "Share inventory add, normalization, stacking, and removal with explicit store/player/registry/owner/presentation context; reject invalid counts, ownership, unresolved stores, and unavailable services before mutation."
     },
     {
       "path": "apps/openmw/mwworld/containerstore.hpp",
       "status": "M",
-      "purpose": "Declare operation-local inventory add dependencies and an explicit base ContainerStore entry, with actor equipment and unresolved containers excluded."
+      "purpose": "Declare operation-local inventory add/remove dependencies and registry-explicit owner access for resolved base ContainerStores, with actor equipment excluded."
     },
     {
       "path": "apps/openmw/mwworld/inventorystore.cpp",
@@ -482,7 +492,7 @@
     {
       "path": "apps/tes3mp-server/native/inventory.cpp",
       "status": "A",
-      "purpose": "Exercise real ContainerStore and WorldModel lifecycle plus compiler-derived script locals, registration, and OnPCAdd assignment with bounded owned diagnostics; execute no script instructions."
+      "purpose": "Exercise real ContainerStore and WorldModel lifecycle with an explicitly registered owner and resolved empty store plus compiler-derived script locals, registration, and OnPCAdd assignment; execute no script instructions."
     },
     {
       "path": "apps/tes3mp-server/native/loadout.hpp",
@@ -502,7 +512,7 @@
     {
       "path": "apps/tes3mp-server/native/loadout_tests.cpp",
       "status": "A",
-      "purpose": "OpenMW-written synthetic loadouts exercise configuration, stable winning-ID enumeration across loads, bounded projection, inventory/script initialization, and enchantment calculations with per-store GMSTs and atomic report rejection."
+      "purpose": "OpenMW-written synthetic loadouts exercise configuration, normalized enumeration, bounded projection, inventory/script initialization, two-owner add/remove isolation and notification rejection, and per-store enchantment calculations."
     },
     {
       "path": "apps/tes3mp-server/actor_content.cpp",

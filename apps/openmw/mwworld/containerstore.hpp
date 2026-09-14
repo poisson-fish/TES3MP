@@ -57,6 +57,14 @@ namespace MWWorld
         std::function<void(const Ptr&)> mInventoryUpdated;
     };
 
+    struct ContainerStoreRemoveContext
+    {
+        const WorldModel& mWorldModel;
+        Ptr mContainer;
+        LocalScripts& mLocalScripts;
+        std::function<void(const Ptr&)> mInventoryUpdated;
+    };
+
     template <class PtrType>
     class ContainerStoreIteratorBase;
 
@@ -321,6 +329,8 @@ namespace MWWorld
         ContainerStoreIterator addImp(const ConstPtr& ptr, int count, const ESMStore& store);
         ContainerStoreIterator addWithContext(
             const ConstPtr& ptr, int count, const ContainerStoreAddContext& context, bool resolve);
+        int removeWithContext(const Ptr& item, int count, const ContainerStoreRemoveContext& context, bool resolve);
+        void validateExplicitOwner(const Ptr& owner, const WorldModel& worldModel) const;
         void resolve(const Ptr& container);
         void addInitialItem(
             const ESM::RefId& id, const ESM::RefId& owner, int count, Misc::Rng::Generator* prng, bool topLevel = true);
@@ -359,6 +369,8 @@ namespace MWWorld
         // Container or actor that holds this store.
         const Ptr& getPtr() const { return mPtr.ptrOrEmpty(); }
         void setPtr(const Ptr& ptr) { mPtr = SafePtr(ptr); }
+        Ptr getPtr(const WorldModel& worldModel) const;
+        void setPtr(const Ptr& ptr, const WorldModel& worldModel);
 
         ConstContainerStoreIterator cbegin(int mask = Type_All) const;
         ConstContainerStoreIterator cend() const;
@@ -385,10 +397,15 @@ namespace MWWorld
         ContainerStoreIterator add(const ESM::RefId& id, int count, bool allowAutoEquip = true);
         ///< Utility to construct a ManualRef and call add(ptr, count, actorPtr, true)
 
-        // Explicit-context entry for a base ContainerStore only. InventoryStore's
-        // equipment, listeners and actor services have not yet been separated.
+        // Explicit-context entries require a resolved base store bound to a registered
+        // owner using setPtr. Counts must be positive; additions must not overflow.
+        // InventoryStore's equipment, listeners and actor services have not yet been separated.
         // This is shared engine mutation, not a transactional server command API.
         ContainerStoreIterator add(const ConstPtr& item, int count, const ContainerStoreAddContext& context);
+
+        // Removes up to count, as in stock OpenMW. Empty/dead/foreign items reject.
+        // Effects run synchronously after mutation; failure/transfer staging is separate work.
+        int remove(const Ptr& item, int count, const ContainerStoreRemoveContext& context);
 
         int remove(const ESM::RefId& itemId, int count, bool equipReplacement = 0, bool resolve = true);
         ///< Remove \a count item(s) designated by \a itemId from this container.
