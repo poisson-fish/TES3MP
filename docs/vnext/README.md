@@ -1,66 +1,72 @@
-# TES3MP vNext overview
+# Multiplayer modded OpenMW
 
-TES3MP vNext is a clean-break authoritative multiplayer implementation for
-Morrowind on OpenMW 0.51. It replaces the TES3MP 0.8.x protocol, transport,
-server, scripting API, saves, and engine patch set instead of porting them.
+The product is cooperative multiplayer OpenMW: load a compatible modpack such
+as Tamriel Rebuilt, explore together, fight the same actors, complete quests
+together, and share objects, time, weather, and persistent world consequences.
+Clients retain OpenMW graphics and compatible visual mods. This is the target,
+not a claim that the current implementation already supports it.
 
-The first release target is desktop and PC-VR multiplayer on Windows, Linux,
-and macOS. Standalone Quest support is conditional work after that release.
-The project is not yet a playable TES3MP replacement; see [CURRENT.md](CURRENT.md)
-for the precise implemented surface and remaining work.
+## Chosen route
 
-## Architecture
+Build an OpenMW-backed authoritative dedicated server. Reuse and refactor
+OpenMW's content loading, world, inventory, mechanics, and scripting behavior.
+Separate simulation from presentation and give gameplay an explicit player
+context. Do not grow a second implementation of Morrowind behind manually
+selected item, spell, actor, or quest catalogs.
 
 ```text
-OpenMW / OpenMW-VR
-        |
-OpenMW provider and adapter
-        |
-reusable client session
-        |
-bounded versioned protocol
-        |
-owned transport boundary
-        |
-authoritative server core
-        |
-future scripting | persistence | operations
+Shared gameplay loadout
+          |
+OpenMW content and gameplay runtime <--- authenticated player intent
+          |                              through TES3MP sessions/transport
+Server-owned world + player state
+          |
+Coherent persistence and committed replication
+          |
+OpenMW clients: input, prediction, UI, graphics, audio
 ```
 
-- [`components/tes3mp`](../../components/tes3mp) owns engine-independent
-  protocol, transport, server-core, client-session, and test-support targets.
-- [`apps/tes3mp-server`](../../apps/tes3mp-server) composes the dedicated server
-  and bounded server content.
-- [`apps/tes3mp-headless-client`](../../apps/tes3mp-headless-client) provides a
-  scripted client for deterministic integration flows.
-- [`apps/openmw/tes3mp`](../../apps/openmw/tes3mp) is the OpenMW-facing adapter
-  and desktop provider implementation. Fork-specific VR tracking stays in the
-  OpenMW-VR provider leaf.
+Networking stays engine-independent. A separate server-runtime target may use
+OpenMW types internally. That target does not exist yet. The existing server
+and desktop adapter remain the working migration base; each subsystem changes
+authority exactly once. Broad compatibility is the destination, reached through
+small playable slices rather than an engine-wide rewrite before the first test.
 
-The server is the only canonical gameplay writer. Clients submit semantic
-intent; server reducers validate it and publish canonical results. Reliable
-operations, latest-wins canonical samples, and ephemeral VR presentation data
-remain separate.
+## Product boundaries
 
-## Compatibility
+- One authoritative shared world; individual characters, inventories, and stats.
+- Start with a cooperative party sharing quest progress and world consequences.
+  Dialogue and player-specific script operations need an explicit initiator;
+  rewards and unique world items must not duplicate when clients retry.
+- Match gameplay plugins, ordering, scripts, and gameplay-relevant resources.
+  Purely visual texture/shader/settings differences may remain client-local.
+- Target mods supported by the chosen OpenMW version. MWSE/native-engine-only
+  behavior is not automatically supported. OpenMW mod compatibility alone does
+  not prove multiplayer script compatibility.
+- Develop the first two-client proof on desktop using the existing toolchain.
+  Preserve portability and existing VR interfaces, but VR hardware, standalone
+  headsets, large public servers, and administration are not prerequisites for
+  proving the gameplay route.
 
-vNext does not support TES3MP 0.8.x wire compatibility, mixed old/new peers,
-RakNet or CrabNet, the legacy CoreScripts API, legacy saves, or the old patch
-set. Archived code may help identify gameplay requirements but is not an
-implementation template.
+## Start and resume
 
-The source baseline is OpenMW `openmw-0.51.0` at
-`f4bec41444214a7903bebd178389ca22ca13f646`. Intentional differences and engine
-patches are machine-recorded in [BASELINE_PROVENANCE.json](BASELINE_PROVENANCE.json)
-and [OPENMW_PATCH_REGISTRY.json](OPENMW_PATCH_REGISTRY.json).
+1. [CURRENT.md](CURRENT.md): actual state, active milestone, next concrete action.
+2. [DEVELOPMENT.md](DEVELOPMENT.md): session, migration, and verification rules.
+3. [PLAN.md](PLAN.md): ordered outcomes and acceptance criteria; read the active
+   milestone, not an invented expansion of the entire roadmap.
+4. [DECISIONS.md](DECISIONS.md): durable architecture and cooperative semantics.
 
-## Documentation
+A fresh implementation request can be: "Follow AGENTS.md. Implement the next
+unfinished slice of the active milestone in docs/vnext/CURRENT.md using PLAN.md.
+Verify it narrowly and replace the handoff with the next concrete action."
 
-- [CURRENT.md](CURRENT.md): authoritative code inventory, limitations, and work
-  still required
-- [DEVELOPMENT.md](DEVELOPMENT.md): build, verification, and contribution flow
-- [DECISIONS.md](DECISIONS.md): compact durable architecture and product rules
-- [CONTENT_FORMATS.md](CONTENT_FORMATS.md): server content input contracts
+The code baseline remains OpenMW 0.51.0 at
+`f4bec41444214a7903bebd178389ca22ca13f646`; this pivot does not upgrade it.
+[BASELINE_PROVENANCE.json](BASELINE_PROVENANCE.json) and
+[OPENMW_PATCH_REGISTRY.json](OPENMW_PATCH_REGISTRY.json) are tooling inputs.
+The existing `proofs/` sources remain because dependency tooling consumes them;
+they are not an active roadmap or a place to add implementation diaries.
 
-Historical planning, review dialogue, and command transcripts live in Git
-history rather than the active documentation tree.
+There are exactly five active documents and a 5,000-word combined ceiling.
+Replace stale material rather than accumulating history. Source and executable
+tests define implemented behavior; these documents define the intended change.

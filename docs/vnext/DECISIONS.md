@@ -1,259 +1,102 @@
-# TES3MP vNext durable decisions
+# Durable decisions
 
-This compact ledger preserves non-obvious rules that remain relevant to future
-code. Implementation details already enforced by source and tests are not
-repeated. Change an entry only through an explicit project decision and update
-the affected code/tests in the same milestone.
+These rules describe the accepted direction. CURRENT.md distinguishes it from
+the implementation still running. Replace obsolete rules; add only consequential
+decisions, each in a short paragraph. This reset supersedes the checkpoint's
+clean-room gameplay, custom-script-only, and baked-subset product constraints.
 
-## Product and compatibility
+## Product and reuse
 
-- **Clean break.** vNext does not preserve TES3MP 0.8.x wire, server API,
-  CoreScripts, persistence, RakNet/CrabNet, mixed-peer, save, or patch-set
-  compatibility. Legacy code is requirements evidence, not an implementation
-  template.
-- **Release order.** Windows/Linux/macOS desktop and PC VR share the primary
-  release boundary. Standalone Quest is a conditional later product and cannot
-  delay that release.
-- **Pinned base.** The active engine base is OpenMW 0.51.0 commit
-  `f4bec41444214a7903bebd178389ca22ca13f646`. Differences and patch ownership are
-  maintained by machine registries rather than narrative provenance.
-- **Modpack is the compatibility unit.** A server selects one immutable,
-  manifest-addressed modpack. The ordered exact bytes of every gameplay plugin
-  and any resource that can affect canonical outcomes belong to that identity;
-  additional client content is allowed only when explicitly classified as
-  presentation-only. Canonical state is derived from load-order winners, not
-  from a preferred source plugin. Unsupported records or scripts fail baking or
-  remain explicitly non-canonical; running them locally never grants authority.
-  Packs reference third-party content and do not imply permission to redistribute it.
-- **Multiplayer game entry.** A menu connection does not load a client-authored
-  OpenMW save. After authentication and the complete initial baseline, OpenMW
-  runs its stock new-game initialization and the adapter then applies the
-  server-owned root. The local profile stores a username-bound credential root;
-  the offered durable player credential is derived from that root and the
-  normalized server endpoint so one server's identity is never intentionally
-  offered to another. Plaintext profile passwords are not retained.
-- **Server-owned chargen with stock presentation.** Freshness is explicit
-  state (`NewCharacter`, `CreatingCharacter`, or `EstablishedCharacter`), never
-  inferred from the current entity set. OpenMW retains the prison-ship dialogue,
-  UI, and animation sequence. Confirmed intermediate choices remain live-only;
-  the complete profile and post-boat canonical root become durable together
-  only after stock chargen exits. A process restart or credential reattachment
-  of an incomplete character deliberately restarts from the fresh pre-chargen
-  checkpoint. Only established profiles restore a saved canonical root.
+**OpenMW gameplay is the foundation.** The target is modded cooperative OpenMW,
+including Tamriel Rebuilt, combat, shared quests/world state, and graphical mods.
+The dedicated server reuses/refactors engine content, mechanics, world, and
+scripting. An independent reimplementation of each gameplay system is not the
+default. A successful small slice must improve this route, not broaden a parallel
+catalog-based game indefinitely.
 
-## Authority and state
+**Independent networking; engine-dependent runtime.** Keep components/tes3mp
+portable and use owned integration values. A distinct server-runtime leaf may
+link selected OpenMW libraries and use their types internally. Extraction may
+change OpenMW's own callers so single-player and server use the same behavior.
+Do not force an engine-wide library cleanup before proving a vertical slice.
 
-- **Single canonical writer.** The server alone commits durable gameplay state.
-  Clients, rendering, physics presentation, VR tracking, scripts, and admin
-  tools submit typed intent or consume immutable results.
-- **Atomic failure.** Decode, validation, admission, reducer, lifecycle,
-  persistence, and publication failures cannot partially commit a logical
-  operation. Cross-domain operations either publish together or not at all.
-- **Stable identity.** Durable entities use typed, nonzero, manifest-scoped
-  identities and revisions. IDs are not recycled after committed allocation.
-  Player, actor, item, object, session, and connection identity are distinct.
-- **Revision is not time.** Canonical revisions/state versions describe committed
-  state ordering; server ticks describe simulation time. Neither substitutes
-  for the other.
-- **Canonical clock and globals.** World time advances from authoritative server
-  ticks using integer milliseconds, a thousandths time scale, and a fixed
-  30-day/12-month calendar so replay does not depend on floating-point wall
-  time. Globals retain their TES3 `short`, `long`, or `float` type and stable
-  catalog order; restore rejects any missing, extra, reordered, or retyped entry
-  before installation. Clock and global changes use the same persistence
-  acknowledgement as every other durable domain.
-- **Wait/rest is unanimous live-session authority.** A request is one to 24
-  hours and distinguishes waiting from resting. Consent is scoped to the current
-  session generation, is not durable, and commits only when every active capable
-  session has supplied the same mode and duration. Disconnect or generation
-  change removes that consent. Commit rechecks that every active player is alive
-  and has no live same-cell aggressor; waiting restores fatigue, while resting
-  also restores health and magicka from the baked OpenMW rates. The clock and all
-  player resource changes share one durability acknowledgement and publication.
-- **Canonical weather, local atmosphere.** The server owns weather identity,
-  eligibility, timing, RNG, revisions, and gameplay consequences. Rendering,
-  sound, particles, and visual interpolation stay client-local.
-- **Player-scoped quests and journals.** Per-player canonical progress uses
-  opaque IDs bound to an exact manifest catalog; OpenMW names remain
-  adapter-local. Mutations carry expected revisions and V2 acknowledgement.
-- **Explicit script state, never VM snapshots.** Only bounded, catalog-declared,
-  package-scoped typed variables are durable. Revision-checked atomic commands
-  update values and change ticks. Interpreter stacks, closures, coroutines,
-  pointers, allocator state, and other VM internals are never canonical.
-- **Interest is server-owned.** Current visibility is exact canonical-cell
-  membership. A client cannot select its own interest set or use presentation
-  pose to expand gameplay reach.
-- **No actor delegation yet.** Canonical actor simulation stays server-owned.
-  Any future delegation requires a measured decision, finite epoch-bound lease,
-  complete atomic handoff, revocation, and deterministic server fallback.
-- **Disconnect checkpoint.** Resume-token recovery keeps the same live canonical
-  session. Credential reattachment of an established character supersedes the
-  hidden principal/session binding and preserves its current canonical root;
-  reattachment after expiration or restart uses its last atomic server-side
-  checkpoint. Reattachment advances entity revision and authority epoch,
-  rebases the spatial tick, and clears velocity. Incomplete chargen is the
-  deliberate exception: it restarts at the pre-chargen safe point.
-- **Character save clean break.** Identity file V5 stores either a fresh
-  pre-chargen identity with no root or an established complete profile with its
-  canonical root. It cannot represent a half-created durable character. V1–V4
-  identity files are rejected without migration.
-- **Character bootstrap transaction.** Chargen completion binds the established
-  profile, post-boat root, starting inventory/equipment, and derived combat
-  state in one prepared operation. Inventory and combat record the profile
-  revision that initialized them, making resume/reattach idempotent and
-  preventing a different profile from silently replacing live state. The
-  operator combat template retains resolver modifiers and the weight-unit
-  scale; confirmed character attributes and skills override player-specific
-  fields.
-- **Reactive actor combat and timed respawn.** A confirmed player strike assigns
-  that player as the actor's server-owned aggression target. The actor pursues
-  and attacks on deterministic tick cadence while both remain active, alive,
-  and in the same cell. Player and actor health/death are canonical; death
-  starts a server-tick timer, and after 30 seconds the combatant respawns at its
-  current canonical root with its configured baseline stats and cleared combat
-  intent. Clients only animate replicated outcomes.
-- **Server-selected melee difficulty, blocking, and armor.** One bounded server setting
-  scales player damage in both directions; a client difficulty preference is
-  presentation-only. Player blocking is passive and requires a canonical
-  equipped shield, server-owned stats, motion and facing, baked OpenMW rules,
-  and a server PRNG roll. If blocking fails, the server computes the stock
-  slot-weighted armor or unarmored rating from canonical equipment, condition,
-  and skills, then owns the struck-slot roll, defensive progression, and armor
-  wear. Blocking, mitigation, wear/breakage, resource changes, and publication
-  form one atomic operation.
-- **Instantaneous direct magic is part of its originating transaction.** On-strike charge
-  use and direct effects, equipped constant defenses and elemental-shield
-  retaliation, and actor disease transfer are resolved from manifest-bound
-  profiles with the server PRNG. Their resource, health, fatigue, death, and
-  disease-identity changes commit with the contacting melee operation. Effects
-  outside the typed instantaneous subset fail content validation; they are not
-  delegated to local OpenMW magic state. Armed object traps use the same rule:
-  exact manifest-bound trap profiles resolve against canonical equipped defenses,
-  and RNG, damage/death, combat revision, and trap disarm commit atomically.
-- **Spells and enchanted-item use carry intent, never outcomes.** A client names
-  only a manifest-mapped known spell or canonical carried stack, a self/player/actor
-  target, observed tick, and expected revisions. The server owns range, cast
-  success, resistance, magnitude, target state, and durable RNG. Spell magicka or
-  effective enchantment charge is consumed in the same commit as effect creation
-  or instantaneous health/fatigue/magicka mutation and school/Enchant progress; a
-  failed spell roll consumes magicka but grants no effect or progress.
-- **Timed and area magic remains canonical, bounded, and atomic.** Durable
-  instances record ID, source, magnitude rate, and start/last/end ticks. The
-  server owns ticking, stack/refresh, dispel, expiration/death, resistance, and
-  start/update/end replication. Sorted same-cell area queries admit at most 32
-  targets; any target failure rejects the transaction. Instances and the next ID
-  survive restart/resume. Projectiles await collision/latency rules; summons
-  await ownership, AI lifecycle, dismissal, and persistence.
-- **Live authoritative combat progression and recovery.** Successful server-confirmed
-  weapon, hand-to-hand, block, armor, and unarmored uses advance only the corresponding canonical
-  skill using baked OpenMW use gains plus the confirmed character's class and
-  specialization factors; clients receive values and progress but submit none.
-  Health and magicka use baked stock rest rates at the default 30x time scale
-  while an active living player has no live same-cell aggressor. These live
-  values are durable canonical combat state; the V5 character checkpoint remains
-  a reattachment safe point rather than a competing live-resource writer.
-- **Lockpicking and probing are one server transaction.** Clients identify a
-  manifest-mapped object and canonical tool stack with observed object,
-  inventory, and combat revisions; they never submit chance, success, wear,
-  progression, or resulting state. The server uses baked tool quality,
-  difficulty, Security rules, stock formulas, and its durable PRNG, then commits
-  the roll state, one tool use, successful Security progress, and lock/trap
-  mutation through the same durability acknowledgement.
+**Compatibility targets the chosen OpenMW version.** The base remains 0.51.0
+until an explicit upgrade. Existing TES3MP 0.8 wire/API/save compatibility is not
+required. Existing engine or older multiplayer code may be reused when inspection
+and tests justify it; there is no blanket ban based on its origin. Native/MWSE-only
+mods are outside automatic compatibility. Broad mod support is a tested goal,
+not a promise that arbitrary scripts have unambiguous multiplayer meaning.
 
-## Protocol, transport, and security
+**One gameplay loadout.** Use OpenMW's configuration, encoding, load order,
+deletion/override handling, references, and normalization. Bind gameplay plugins,
+scripts, settings, and relevant resources to server/client/save identity. Python
+may package/hash/cache, but should cease being a separate ESM semantic authority.
+Network IDs and bounded caches must not require manual catalog entries for every
+mod item, actor, or quest. Unsupported behavior must be visible, never silently
+delegated to a client's local simulation.
 
-- **Bound before allocation.** Frame, schema, count, byte, numeric, enum, queue,
-  and rate limits are checked before allocation or mutation. Invalid inputs fail
-  closed with stable owned errors.
-- **Owned public types.** FlatBuffers, GameNetworkingSockets, OpenSSL, OpenMW,
-  OpenXR, platform, and renderer types remain behind their private adapters.
-- **Separate traffic semantics.** Reliable apply-once operations carry identity
-  and revision context. Canonical sampled state is latest-wins. VR pose is
-  ephemeral latest-wins presentation. Queues may not silently substitute one
-  class for another.
-- **Capability negotiation.** Additive optional domains are negotiated explicitly.
-  Required-capability, protocol-range, and exact content-manifest mismatches
-  reject before gameplay admission.
-- **Baked content identity.** A production content manifest identifies the
-  ordered exact bytes of the resolved OpenMW loadout together with normalized
-  canonical server catalogs and complete client record mappings. Baked packs
-  are immutable and manifest-addressed; publication advances a small atomic
-  pointer rather than rewriting a live pack in place.
-- **Authentication separation.** Routing principals, process-local resume tokens,
-  durable player credentials, sessions, and canonical player identity have
-  separate lifetimes. Servers store player-credential digests, not reusable
-  client secrets.
-- **Transport trust is limited.** The current direct-IP profile requires
-  GameNetworkingSockets encryption against passive observation but does not
-  authenticate server endpoint identity. It has no project CA, certificate
-  management, or private trust-store patch; active endpoint impersonation is an
-  explicitly accepted first-release risk until a later security decision.
-- **No secrets in evidence.** Credentials, resume tokens, passwords, and
-  unfiltered user data do not enter logs, metrics, fixtures, captures, or
-  retained debugging artifacts.
-- **Backpressure is correctness.** Outbound queues are bounded. Admission of a
-  required multi-message canonical result is atomic, and slow peers receive a
-  stable policy outcome rather than causing unbounded memory growth.
+## Authority and cooperative semantics
 
-## Simulation and presentation
+**One server world.** The server owns gameplay outcomes, actors, object changes,
+time, regional weather, and player resources. Each player has a distinct
+character/inventory. Clients supply authenticated intent and present committed
+results; prediction cannot author rewards, damage, or world mutations. Old and
+new paths may not be simultaneous authorities. Client-authoritative movement is
+an inherited limitation to replace/validate for the new combat path.
 
-- **Semantic controls.** Desktop and VR produce the same semantic gameplay
-  commands. Fork-specific OpenXR tracking stays in the provider leaf.
-- **Client-authoritative player movement.** Server-side Bullet physics and
-  collision simulation for player movement are deferred. The client is authoritative
-  over its own character's 3D position, orientation, velocity, and locomotion mode.
-  The server ingests client transform proposals, records them into canonical state,
-  and relays them to peers; server movement simulation kernels are skipped for
-  client-authoritative players. Intra-cell client presentation does not override
-  local physics with server snapshots.
-- **Prediction is presentation.** Local input replay and correction cannot create
-  new input. Remote interpolation, door animation, actor animation, sounds, and
-  pose degradation do not change canonical outcomes.
-- **Historical melee contact.** A melee claim is checked against bounded
-  server-captured player and actor roots at the client's observed server tick.
-  Stock base distance, canonical weapon reach, exact-cell membership, and
-  server collision occlusion decide contact; missing history fails closed.
-- **Freeze inactive cells.** Current actors, objects, and inventories retain
-  canonical in-memory state while their exact cell has no active player; they do
-  not simulate client-owned background results.
-- **Private inventory.** A player's backpack is delivered only to its owner.
-  Other clients receive scoped container/ground views and public equipment, not
-  another player's private contents.
-- **Dialogue authority.** Dialogue text and presentation are client-local. The
-  server owns bounded choice identity, eligibility, and canonical consequences,
-  so presentation cannot invent an outcome.
+**Shared cooperative campaign first.** Start with one party's quest progression
+and shared world consequences. Dialogue, Player operations, and local item
+scripts use an explicit initiating/owning player context. Global gameplay
+scripts run once server-side. Preserve player-specific condition/reward context;
+do not multiply a script's item grants by connected-player count or clone unique
+world loot. Retry/reconnect must not replay rewards. Additional parties, personal
+quest instances, and alternative reward policies need a later explicit design.
 
-## Future systems
+**Simulation and presentation have different owners.** Script UI requests,
+animations, audio, and graphics go to relevant clients. Time/weather changes and
+their gameplay effects originate on the server. Pure visual replacements may
+vary; collision/bounds or script-affecting resources belong to gameplay identity.
+Multiple players require explicit active-region scheduling, not one player's
+scene or menu state controlling the whole server.
 
-- **Scripting.** Server scripts receive immutable bounded values/events and queue
-  typed commands for deterministic ticks. They never receive packet buffers or
-  direct mutable canonical references. Callback and generated-command ordering
-  must be replay-stable. Executable packages bind exact module bytes and an
-  entrypoint through a versioned, resource-metered module ABI; modules do not
-  load OS dynamic libraries or persist VM state. Reusing a broader language in
-  the future does not imply legacy API compatibility.
-- **Persistence acknowledgement and identity.** Persist canonical domain
-  records, not protocol payloads, OpenMW pointers, renderer objects, or
-  transport types. `Committed` from the durability port is the sole
-  acknowledgement point: it occurs after the file-backed adapter has flushed
-  and atomically replaced a completely verified prefix, but before the reducer
-  installs or publishes the candidate. Failure leaves the prior state visible.
-  Every prefix is exactly bound to configuration, content, script/API package
-  versions, deterministic seeds, and complete client/script command ordering.
-  V2 restores durable gameplay state, including combat RNG, time, globals,
-  quests, journals, factions, and reputation, but not live sessions or incomplete chargen. It keeps
-  one checkpoint plus a bounded journal tail. Development V1 files are not
-  migrated; later domains extend V2 instead of creating another authority.
-- **Administration.** Public health and privileged operational detail remain
-  separate. Administrative APIs do not expose scripting/runtime internals.
-- **Quest isolation.** A future Quest implementation reuses the platform-neutral
-  protocol/client core. Android, headset, and OpenXR device concepts remain in a
-  platform/provider layer.
+**Script compatibility includes execution and state.** Reuse MWScript/OpenMW Lua
+where appropriate with server bindings, explicit context, and resource limits.
+Engine-supported serialized locals/Lua state and dynamic definitions are allowed;
+the old requirement to rewrite all logic as catalog-declared variables is retired.
+Do not serialize process pointers, raw memory, rendering objects, or live sessions.
+Persist only supported semantic state under a validated server save boundary.
 
-## Decision process
+## Integrity and migration
 
-Add a new entry only when a choice is expensive to reverse or changes
-architecture, authority, durable state, compatibility, security, persistence,
-or player-facing semantics. Record the chosen rule and the reason in at most a
-short paragraph. Options analysis and review dialogue stay in the issue or Git
-history; routine choices stay in code and tests.
+**Atomic failure remains required.** Validate and bound external input before
+allocation/mutation. Rejected commands, failed preparation, and failed durability
+must not leave partial gameplay or publish success. Separate/stage script and
+presentation effects as part of the operation. Copying engine objects or catching
+exceptions is not proof of isolation. A legitimate failed cast or missed attack
+may still have the resource costs prescribed by the game's rules.
+
+**Persistence is coherent and server-owned.** Preserve the current
+durability-before-install/publication guarantee during migration. Engine field
+serializers may be reused inside a server-owned, content/version-bound format;
+the existing independent schema is not sacred. Restore validates the complete
+world/player relationship before installation. This pivot does not authorize
+silently changing to checkpoint-only acknowledgment or losing saved progress.
+
+**Determinism is explicit, not assumed.** Server-owned order/ticks and saved RNG
+state remain important. Measure scheduling and stream consumption when reusing
+engine code; do not require copying old PRNG/formula implementations for their own
+sake or claim cross-platform bitwise replay without evidence. Network authority
+does not require clients to run identical lockstep simulations.
+
+**Preserve proven network boundaries.** Keep authentication/session separation,
+stable instance identity, stale/retry rejection, reliable versus latest-state
+traffic, bounded queues, backpressure, and secret-free evidence. Existing direct-IP
+transport encryption does not authenticate server endpoint identity; the pivot
+does not repair that inherited limitation. Protocol/development-save revisions
+may change deliberately without maintaining two gameplay worlds.
+
+**Retirement follows cutover.** Preserve the checkpoint and functioning old paths
+until replacements cover their callers and relevant failure cases. Then delete
+obsolete code/configuration/tests instead of retaining indefinite compatibility
+branches. Small behavioral fixtures remain useful; old architectural assertions
+must not force the new runtime back into the abandoned product.

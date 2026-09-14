@@ -11,6 +11,13 @@ Application composition lives outside this directory:
 - `apps/tes3mp-headless-client` owns the thin scripted client process.
 - `apps/openmw/tes3mp` owns the OpenMW adapter.
 
+The product is migrating to an OpenMW-backed gameplay runtime in a separate
+application leaf. Existing canonical gameplay worlds here are the working
+migration base, not a requirement to reimplement all engine behavior. The new
+runtime may depend on OpenMW internally without weakening this directory's
+independent interfaces. Follow the active milestone in
+[`docs/vnext/PLAN.md`](../../docs/vnext/PLAN.md).
+
 ## Target graph
 
 ```text

@@ -10,20 +10,32 @@ ACTIVE_DOCS = {
     "CURRENT.md",
     "DEVELOPMENT.md",
     "DECISIONS.md",
-    "CONTENT_FORMATS.md",
+    "PLAN.md",
 }
-MAX_ACTIVE_WORDS = 10_000
+SUPPORT_DOCS = {
+    "proofs/cares/README.md",
+    "proofs/flatbuffers/README.md",
+    "proofs/flatbuffers/ANDROID_ARM64.md",
+    "proofs/gamenetworkingsockets/README.md",
+    "proofs/gamenetworkingsockets/ANDROID_ARM64.md",
+    "proofs/gamenetworkingsockets/TRUST_INTEGRATION_ASSESSMENT.md",
+}
+MAX_ACTIVE_WORDS = 5_000
+DOCUMENT_WORD_LIMITS = {"CURRENT.md": 850, "PLAN.md": 1_500}
 LOCAL_LINK = re.compile(r"\[[^]]+\]\((?!https?://|#)([^)#]+)(?:#[^)]+)?\)")
 
 
 class VnextDocumentationTests(unittest.TestCase):
     def test_active_document_set_stays_small_and_unambiguous(self):
-        actual = {path.name for path in VNEXT_DOCS.glob("*.md")}
-        self.assertEqual(ACTIVE_DOCS, actual)
+        actual = {path.relative_to(VNEXT_DOCS).as_posix() for path in VNEXT_DOCS.rglob("*.md")}
+        self.assertEqual(ACTIVE_DOCS | SUPPORT_DOCS, actual)
 
         words = 0
         for name in ACTIVE_DOCS:
-            words += len((VNEXT_DOCS / name).read_text(encoding="utf-8").split())
+            count = len((VNEXT_DOCS / name).read_text(encoding="utf-8").split())
+            words += count
+            if name in DOCUMENT_WORD_LIMITS:
+                self.assertLessEqual(count, DOCUMENT_WORD_LIMITS[name], name)
         self.assertLessEqual(words, MAX_ACTIVE_WORDS)
 
     def test_active_local_links_resolve(self):

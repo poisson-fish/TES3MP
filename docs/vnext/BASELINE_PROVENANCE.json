@@ -67,7 +67,7 @@
     {
       "path": "AGENTS.md",
       "status": "A",
-      "purpose": "Small repository instruction router that limits LLM context to the active vNext truth, workflow, decisions, and specialist content contract."
+      "purpose": "Small agent router for the OpenMW-backed cooperative multiplayer direction, one active milestone, narrow verification, and bounded fresh-session handoffs."
     },
     {
       "path": "CI/install_debian_deps.sh",
@@ -2075,11 +2075,6 @@
       "purpose": "Machine-readable OpenMW baseline, cutover, dependency-input, and intentional-difference record."
     },
     {
-      "path": "docs/vnext/CONTENT_FORMATS.md",
-      "status": "A",
-      "purpose": "Consolidated bounded collision, actor, interactive-object, and inventory server content contracts."
-    },
-    {
       "path": "docs/vnext/CURRENT.md",
       "status": "A",
       "purpose": "Single code-backed inventory of implemented, partial, and unfinished TES3MP behavior plus the active milestone."
@@ -2098,6 +2093,11 @@
       "path": "docs/vnext/OPENMW_PATCH_REGISTRY.json",
       "status": "A",
       "purpose": "Machine-checked semantic registry for every non-adapter OpenMW delta."
+    },
+    {
+      "path": "docs/vnext/PLAN.md",
+      "status": "A",
+      "purpose": "Bounded implementation milestones for the native OpenMW server runtime, shared modded world, combat, quests, persistence, and old-path retirement."
     },
     {
       "path": "docs/vnext/README.md",
