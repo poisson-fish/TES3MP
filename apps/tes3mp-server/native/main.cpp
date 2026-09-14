@@ -12,6 +12,7 @@ int main(int argc, char** argv)
                      "  --content FILE --encoding win1252 --replace SETTING ...]\n"
                      "  [--sample | --inventory ID | --enchantment ID]\n"
                      "Loads configured TES3 records through OpenMW; writes diagnostic TSV to stdout.\n"
+                     "Record IDs use OpenMW's ASCII case folding; display names retain their spelling.\n"
                      "Uses the engine's local/global openmw.cfg and its config chain.\n"
                      "--sample stages up to four winning IDs per category as owned diagnostic values,\n"
                      "  with 60 records, 32 effects/record, 4096 bytes/string and 64 KiB report limits.\n"

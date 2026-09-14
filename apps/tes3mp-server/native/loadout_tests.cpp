@@ -815,6 +815,13 @@ namespace
 
     void check(const std::filesystem::path& root, const std::string& filter)
     {
+        if (filter == "enumeration-normalized")
+        {
+            // Simulate records interned by an earlier load in this process,
+            // before the writer/reader sees the fixture's lowercase spelling.
+            for (const char* id : { "SaMpLe_ItEm", "NoRmAlIzEd_SpElL", "NoRmAlIzEd_EnChAnTmEnT" })
+                ESM::RefId::stringRefId(id);
+        }
         fixture(root);
         const std::string directory = Files::pathToUnicodeString(root);
         const char* args[] = { "native-test", "--config", directory.c_str(), "--replace", "config" };
@@ -831,6 +838,54 @@ namespace
         if (filter.starts_with("sample-"))
         {
             checkSample(root, 5, args, filter);
+            return;
+        }
+        if (filter == "enumeration-normalized")
+        {
+            sampleFixture(root);
+            const auto options = TES3MP::Native::readLoadoutOptions(5, args);
+            std::string previous;
+            for (int pass = 0; pass < 2; ++pass)
+            {
+                TES3MP::Native::Loadout loadout(options);
+                const auto& item
+                    = *loadout.store().get<ESM::Miscellaneous>().find(ESM::RefId::stringRefId("mixed_item"));
+                require(item.mId.getRefIdString() == "MiXeD_Item", "fixture did not preserve interned spelling");
+                require(loadout.store()
+                            .get<ESM::Spell>()
+                            .find(ESM::RefId::stringRefId("normalized_spell"))
+                            ->mId.getRefIdString()
+                        == "NoRmAlIzEd_SpElL",
+                    "fixture did not preserve earlier-load spelling");
+                const auto sample = loadout.sample();
+                std::ostringstream output;
+                loadout.enumerate(output);
+                const auto report = output.str();
+                for (const auto& value : sample.mRecords)
+                {
+                    const std::string row = "record\t" + value.mType + "\t\"" + value.mId + "\"\t";
+                    const auto position = report.find(row);
+                    require(position != std::string::npos, "enumeration/sample winning identity mismatch");
+                    require(report.find(row, position + row.size()) == std::string::npos,
+                        "enumeration duplicated a winning identity");
+                }
+                require(report.find("\"deleted_item\"") == std::string::npos, "enumeration included a deleted item");
+                require(report.find("\"z_sample_5\"") != std::string::npos, "enumeration was limited to the sample");
+                require(report.find("name=\"line\\x09\\\"quoted\\\"\\\\\\x0a\"") != std::string::npos,
+                    "enumeration changed display text escaping");
+                require(report.find("record\tSpell\t\"normalized_spell\"\tname=\"\"\teffects=1\n") != std::string::npos,
+                    "enumeration lost engine effect normalization");
+                require(item.mId.getRefIdString() == "MiXeD_Item" && item.mData.mValue == 40
+                        && item.mName == "\xd0\x9c\xd0\xb5\xd1\x87" && loadout.sample() == sample,
+                    "enumeration changed the winning engine records");
+                require(report.ends_with("complete\n"), "enumeration completion marker missing");
+                if (pass != 0)
+                    require(report == previous, "enumeration changed across loads in the same process");
+                previous = report;
+            }
+            std::ostringstream output;
+            TES3MP::Native::probe(5, args, output);
+            require(output.str() == previous, "default CLI enumeration differs from retained store enumeration");
             return;
         }
         if (filter == "layered")

@@ -492,17 +492,17 @@
     {
       "path": "apps/tes3mp-server/native/loadout.cpp",
       "status": "A",
-      "purpose": "Reuse OpenMW configuration, TES3 loading, and store normalization; select enumeration, bounded sampling, inventory, or enchantment diagnostics."
+      "purpose": "Reuse OpenMW configuration, TES3 loading, and store normalization; enumerate winning IDs with engine ASCII folding, or select bounded sampling, inventory, or enchantment diagnostics."
     },
     {
       "path": "apps/tes3mp-server/native/main.cpp",
       "status": "A",
-      "purpose": "Headless native probe entry point with separate diagnostic/report streams, sample/inventory/enchantment selection, and visible failures."
+      "purpose": "Headless native probe entry point with documented normalized record IDs, separate diagnostic/report streams, sample/inventory/enchantment selection, and visible failures."
     },
     {
       "path": "apps/tes3mp-server/native/loadout_tests.cpp",
       "status": "A",
-      "purpose": "OpenMW-written synthetic loadouts exercise configuration, normalization, bounded projection, inventory/script initialization, and enchantment calculations with per-store GMSTs and atomic report rejection."
+      "purpose": "OpenMW-written synthetic loadouts exercise configuration, stable winning-ID enumeration across loads, bounded projection, inventory/script initialization, and enchantment calculations with per-store GMSTs and atomic report rejection."
     },
     {
       "path": "apps/tes3mp-server/actor_content.cpp",

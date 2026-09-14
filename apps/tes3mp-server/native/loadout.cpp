@@ -216,7 +216,9 @@ namespace TES3MP::Native
             for (const T* record : sorted)
             {
                 out << "record\t" << T::getRecordType() << '\t';
-                field(out, record->mId.getRefIdString());
+                // The engine retains the first interned spelling process-wide.
+                // Export the same identity as sample(), without changing records.
+                field(out, Misc::StringUtils::lowerCase(record->mId.getRefIdString()));
                 if constexpr (requires { record->mName; })
                 {
                     out << "\tname=";
