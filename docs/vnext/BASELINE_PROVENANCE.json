@@ -1952,7 +1952,7 @@
     {
       "path": "components/tes3mp/tests/inventory_world_tests.cpp",
       "status": "A",
-      "purpose": "Focused unit contracts for canonical inventory validation, transaction atomicity, authority, concurrency, equipment, and item conservation."
+      "purpose": "Executable inventory validation, atomicity, authority, concurrency, equipment, and conservation tests, with compile-time immutable lookup contracts."
     },
     {
       "path": "components/tes3mp/tests/melee_combat_tests.cpp",
@@ -2387,12 +2387,12 @@
     {
       "path": "scripts/tests/test_interactive_object_contract.py",
       "status": "A",
-      "purpose": "Unit test contract verifying interactive object components have no forbidden engine or OpenMW dependencies."
+      "purpose": "Temporary source guards for OpenMW activation ordering, desktop door validation, and complete numeric mapping parsing; gameplay has executable C++ coverage."
     },
     {
       "path": "scripts/tests/test_inventory_contract.py",
       "status": "A",
-      "purpose": "Unit contract for inventory target boundaries, canonical authority, mutation encapsulation, and release-active C++ assertions."
+      "purpose": "Temporary OpenMW inventory UI interception-order and release-assertion guards; inventory behavior and immutable lookups are covered in C++."
     },
     {
       "path": "scripts/tests/test_openmw_patch_registry.py",
@@ -2467,7 +2467,7 @@
     {
       "path": "scripts/tests/test_tes3mp_target_boundaries.py",
       "status": "A",
-      "purpose": "Focused configure/build and intentional-failure tests for target boundaries plus incompatible runtime-safety and fuzz configurations."
+      "purpose": "Focused configure/build and intentional-failure boundary tests, consolidated inventory/object engine-type guards, and incompatible runtime-safety/fuzz configurations."
     },
     {
       "path": "scripts/tests/test_verify_vnext_baseline.py",

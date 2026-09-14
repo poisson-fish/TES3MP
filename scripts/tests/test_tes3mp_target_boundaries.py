@@ -105,6 +105,42 @@ def _build_environment():
 
 
 class TES3MPTargetBoundaryTests(unittest.TestCase):
+    def test_inventory_and_object_migration_sources_remain_engine_independent(self):
+        # Consolidated from the inventory/object source-contract files. Keep
+        # public engine/legacy type guards as well as CMake's link/include checks.
+        sources = (
+            "components/tes3mp/protocol/item_catalog.cpp",
+            "components/tes3mp/server_core/inventory_world.cpp",
+            "components/tes3mp/include/tes3mp/item_catalog.hpp",
+            "components/tes3mp/include/tes3mp/inventory_world.hpp",
+            "components/tes3mp/protocol/interactive_object_catalog.cpp",
+            "components/tes3mp/server_core/interactive_object_world.cpp",
+            "components/tes3mp/include/tes3mp/interactive_object_catalog.hpp",
+            "components/tes3mp/include/tes3mp/interactive_object_world.hpp",
+            "components/tes3mp/protocol/interactive_object_replication.cpp",
+            "components/tes3mp/include/tes3mp/interactive_object_replication.hpp",
+            "apps/tes3mp-server/interactive_object_interest_projection.cpp",
+            "apps/tes3mp-server/interactive_object_interest_projection.hpp",
+        )
+        forbidden = (
+            "openmw", "mwclass", "mwmechanics", "mwworld", "components/esm", "components/sceneutil",
+            "osg", "RakNet", "PacketDoorState", "PacketObjectLock", "PacketObjectTrap",
+            "PacketPlayerInventory", "PacketContainer", "PacketPlayerEquipment",
+        )
+        checks = [(path, forbidden) for path in sources]
+        checks.extend((path, ("PacketDoorState", "PacketObjectLock", "PacketObjectTrap", "RakNet"))
+                      for path in (
+                          "components/tes3mp/client_session/client_session.cpp",
+                          "components/tes3mp/client_session/client_session_runtime.cpp",
+                          "apps/openmw/tes3mp/adapter.cpp",
+                          "apps/openmw/tes3mp/desktop_providers.cpp",
+                      ))
+        violations = []
+        for path, tokens in checks:
+            source = (REPOSITORY_ROOT / path).read_text(encoding="utf-8")
+            violations.extend(f"{path}: {token}" for token in tokens if token in source)
+        self.assertEqual([], violations)
+
     def test_openmw_runtime_failure_is_visible_and_sanitized(self):
         source = OPENMW_MAIN_SOURCE.read_text(encoding="utf-8")
         status_body = source.split("class MultiplayerStatus final", 1)[1].split("};", 1)[0]

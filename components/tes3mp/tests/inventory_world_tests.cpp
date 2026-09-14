@@ -16,6 +16,12 @@ namespace
     static_assert(
         std::is_same_v<decltype(std::declval<CanonicalInventoryWorld&>().findPlayer(std::declval<PlayerId>())),
             const CanonicalPlayerInventoryState*>);
+    static_assert(
+        std::is_same_v<decltype(std::declval<CanonicalInventoryWorld&>().findContainer(std::declval<ContainerId>())),
+            const CanonicalContainerInventoryState*>);
+    static_assert(
+        std::is_same_v<decltype(std::declval<CanonicalInventoryWorld&>().findWorldItem(std::declval<ItemStackId>())),
+            const CanonicalWorldItemState*>);
 
     void require(bool condition, int line)
     {
