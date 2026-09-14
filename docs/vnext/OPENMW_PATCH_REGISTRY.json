@@ -3,6 +3,16 @@
   "baseline_commit": "f4bec41444214a7903bebd178389ca22ca13f646",
   "patches": [
     {
+      "id": "M1-003",
+      "slice": "native enchantment calculation probe",
+      "owner": "OpenMW server runtime",
+      "purpose": "Share effect and enchantment cost/charge calculations with explicit ESMStore inputs; use each loadout's GMSTs and preserve stock Environment wrappers over the same arithmetic.",
+      "paths": ["apps/openmw/mwmechanics/spellutil.cpp", "apps/openmw/mwmechanics/spellutil.hpp"],
+      "tests": ["tes3mp_native_loadout_tests enchantment-cost", "tes3mp_native_loadout_tests enchantment-rejection"],
+      "disposition": "local shared engine extraction; no upstream contact authorized",
+      "removal_condition": "OpenMW supplies equivalent explicit content/settings interfaces for these calculations"
+    },
+    {
       "id": "M1-002",
       "slice": "native scripted inventory initialization",
       "owner": "OpenMW server runtime",

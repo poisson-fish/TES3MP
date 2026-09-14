@@ -210,6 +210,16 @@
       "purpose": "Shares OpenMW melee hit chance, fatigue, weapon damage, hand-to-hand damage, wear, and death ordering with the engine-independent resolver."
     },
     {
+      "path": "apps/openmw/mwmechanics/spellutil.cpp",
+      "status": "M",
+      "purpose": "Share effect, total, and enchantment cost/charge calculations with an explicit ESMStore; read the selected loadout GMSTs without process-global caches and retain stock Environment wrappers."
+    },
+    {
+      "path": "apps/openmw/mwmechanics/spellutil.hpp",
+      "status": "M",
+      "purpose": "Declare explicit content/settings overloads for shared effect and enchantment calculations without actor or presentation initialization."
+    },
+    {
       "path": "apps/openmw/mwrender/animation.cpp",
       "status": "M",
       "purpose": "Adds the explicit replicated-actor animation context and prevents replica animation completion from reaching Lua."
@@ -457,12 +467,17 @@
     {
       "path": "apps/tes3mp-server/native/CMakeLists.txt",
       "status": "A",
-      "purpose": "Opt-in M1 native loadout and inventory probe with filtered synthetic tests, explicit temporary OpenMW links, and mode-specific dependency evidence."
+      "purpose": "Opt-in M1 native loadout, inventory, and enchantment probe with filtered synthetic tests, explicit temporary OpenMW links, and mode-specific dependency evidence."
     },
     {
       "path": "apps/tes3mp-server/native/diagnostic.hpp",
       "status": "A",
       "purpose": "Engine-free owned diagnostic record/effect/GMST values and fixed sample count/string/report limits."
+    },
+    {
+      "path": "apps/tes3mp-server/native/enchantment.cpp",
+      "status": "A",
+      "purpose": "Bound and stage engine enchantment cost/charge diagnostics from the retained loadout, validating numeric conversion and multiplication before calling engine calculations."
     },
     {
       "path": "apps/tes3mp-server/native/inventory.cpp",
@@ -472,22 +487,22 @@
     {
       "path": "apps/tes3mp-server/native/loadout.hpp",
       "status": "A",
-      "purpose": "App-local owner for configured engine records, encoding, and cached readers; exposes staged diagnostic samples and a disposable native inventory probe."
+      "purpose": "App-local owner for configured engine records, encoding, and cached readers; exposes staged samples, disposable inventory operations, and enchantment calculation diagnostics."
     },
     {
       "path": "apps/tes3mp-server/native/loadout.cpp",
       "status": "A",
-      "purpose": "Reuses OpenMW configuration, TES3 loading, and store normalization; selects enumeration, bounded owned sampling, or native inventory diagnostics."
+      "purpose": "Reuse OpenMW configuration, TES3 loading, and store normalization; select enumeration, bounded sampling, inventory, or enchantment diagnostics."
     },
     {
       "path": "apps/tes3mp-server/native/main.cpp",
       "status": "A",
-      "purpose": "Headless native probe entry point with separate diagnostic/report streams, sample/inventory selection, and visible load/projection/operation failures."
+      "purpose": "Headless native probe entry point with separate diagnostic/report streams, sample/inventory/enchantment selection, and visible failures."
     },
     {
       "path": "apps/tes3mp-server/native/loadout_tests.cpp",
       "status": "A",
-      "purpose": "OpenMW-written synthetic loadouts exercise configuration/normalization, owned projection, native inventory stacking/cleanup, and script-service rejection without mutation or publication."
+      "purpose": "OpenMW-written synthetic loadouts exercise configuration, normalization, bounded projection, inventory/script initialization, and enchantment calculations with per-store GMSTs and atomic report rejection."
     },
     {
       "path": "apps/tes3mp-server/actor_content.cpp",

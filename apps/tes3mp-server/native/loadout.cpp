@@ -254,7 +254,8 @@ namespace TES3MP::Native
             "content", bpo::value<std::vector<std::string>>()->default_value({}, "")->multitoken()->composing())(
             "encoding", bpo::value<std::string>()->default_value("win1252"))(
             "sample", bpo::bool_switch(), "Stage a bounded owned diagnostic sample")(
-            "inventory", bpo::value<std::string>(), "Probe adding a MISC item to an engine ContainerStore");
+            "inventory", bpo::value<std::string>(), "Probe adding a MISC item to an engine ContainerStore")(
+            "enchantment", bpo::value<std::string>(), "Probe an enchantment's engine cast cost and charge");
         bpo::variables_map variables;
         Files::parseArgs(argc, argv, variables, description);
         Files::ConfigurationManager config(true);
@@ -277,6 +278,13 @@ namespace TES3MP::Native
             result.mInventoryItem = variables["inventory"].as<std::string>();
             if (result.mSample || result.mInventoryItem.empty())
                 throw std::runtime_error("--inventory requires an item ID and cannot be combined with --sample");
+        }
+        if (variables.count("enchantment"))
+        {
+            result.mEnchantment = variables["enchantment"].as<std::string>();
+            if (result.mSample || !result.mInventoryItem.empty() || result.mEnchantment.empty())
+                throw std::runtime_error(
+                    "--enchantment requires an ID and cannot be combined with --sample/--inventory");
         }
         return result;
     }
@@ -453,8 +461,11 @@ namespace TES3MP::Native
         auto options = readLoadoutOptions(argc, argv);
         const bool sample = options.mSample;
         const std::string inventoryItem = options.mInventoryItem;
+        const std::string enchantment = options.mEnchantment;
         Loadout loadout(std::move(options));
-        if (!inventoryItem.empty())
+        if (!enchantment.empty())
+            loadout.writeEnchantmentProbe(output, enchantment);
+        else if (!inventoryItem.empty())
             loadout.writeInventoryProbe(output, inventoryItem);
         else if (sample)
             loadout.writeSample(output);

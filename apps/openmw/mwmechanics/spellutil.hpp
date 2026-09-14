@@ -18,6 +18,7 @@ namespace ESM
 
 namespace MWWorld
 {
+    class ESMStore;
     class Ptr;
 }
 
@@ -33,11 +34,19 @@ namespace MWMechanics
 
     float calcEffectCost(const ESM::ENAMstruct& effect, const ESM::MagicEffect* magicEffect = nullptr,
         const EffectCostMethod method = EffectCostMethod::GameSpell);
+    // Explicit content and GMST context; shared with the stock Environment callers.
+    float calcEffectCost(const ESM::ENAMstruct& effect, const MWWorld::ESMStore& store,
+        const ESM::MagicEffect* magicEffect = nullptr, const EffectCostMethod method = EffectCostMethod::GameSpell);
+    float getTotalCost(const ESM::EffectList& list, const MWWorld::ESMStore& store,
+        const EffectCostMethod method = EffectCostMethod::GameSpell);
+    // Before the actor's Enchant skill adjustment. Does not execute any effects.
+    float getEnchantmentCastCost(const ESM::Enchantment& enchantment, const MWWorld::ESMStore& store);
     int calcSpellCost(const ESM::Spell& spell);
 
     int getEffectiveEnchantmentCastCost(float castCost, const MWWorld::Ptr& actor);
     int getEffectiveEnchantmentCastCost(const ESM::Enchantment& enchantment, const MWWorld::Ptr& actor);
     int getEnchantmentCharge(const ESM::Enchantment& enchantment);
+    int getEnchantmentCharge(const ESM::Enchantment& enchantment, const MWWorld::ESMStore& store);
 
     int getPotionValue(const ESM::Potion& potion);
     std::optional<ESM::EffectList> rollIngredientEffect(

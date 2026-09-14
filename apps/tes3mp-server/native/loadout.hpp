@@ -22,6 +22,7 @@ namespace TES3MP::Native
         std::string mEncoding;
         bool mSample = false;
         std::string mInventoryItem;
+        std::string mEnchantment;
     };
 
     LoadoutOptions readLoadoutOptions(int argc, const char* const argv[]);
@@ -41,6 +42,8 @@ namespace TES3MP::Native
         // Disposable base ContainerStore operation, including script local initialization.
         // Does not initialize a live player InventoryStore or execute scripts.
         void writeInventoryProbe(std::ostream& output, std::string_view itemId);
+        // Bounded, staged cost/charge diagnostics using the retained engine store.
+        void writeEnchantmentProbe(std::ostream& output, std::string_view enchantmentId) const;
 
     private:
         LoadoutOptions mOptions;

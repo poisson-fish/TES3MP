@@ -9,7 +9,8 @@ int main(int argc, char** argv)
     if (argc == 2 && std::string_view(argv[1]) == "--help")
     {
         std::cout << "tes3mp_native_loadout_probe [OpenMW --config DIR --data DIR --data-local DIR\n"
-                     "  --content FILE --encoding win1252 --replace SETTING ...] [--sample | --inventory ID]\n"
+                     "  --content FILE --encoding win1252 --replace SETTING ...]\n"
+                     "  [--sample | --inventory ID | --enchantment ID]\n"
                      "Loads configured TES3 records through OpenMW; writes diagnostic TSV to stdout.\n"
                      "Uses the engine's local/global openmw.cfg and its config chain.\n"
                      "--sample stages up to four winning IDs per category as owned diagnostic values,\n"
@@ -18,6 +19,9 @@ int main(int argc, char** argv)
                      "  verifies stacks/WorldModel and local script registration, and records presentation requests.\n"
                      "  Script locals use OpenMW declarations; declared OnPCAdd is assigned without execution.\n"
                      "  Script probe limits: 64 KiB source text, 256 locals.\n"
+                     "--enchantment stages native cast cost (before skill adjustment) and maximum charge.\n"
+                     "  Limits: 256 bytes/ID, 32 effects, nonnegative effect fields/base cost/multiplier <= 1e6,\n"
+                     "  and representable rounded cost/charge. This does not execute enchanted effects.\n"
                      "No World, Environment, rendering, UI, equipment, or script execution.\n";
         return 0;
     }

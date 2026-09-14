@@ -22,27 +22,37 @@ namespace MWMechanics
     {
         float getTotalCost(const ESM::EffectList& list, const EffectCostMethod method = EffectCostMethod::GameSpell)
         {
-            float cost = 0;
-
-            for (const ESM::IndexedENAMstruct& effect : list.mList)
-            {
-                float effectCost = std::max(0.f, MWMechanics::calcEffectCost(effect.mData, nullptr, method));
-
-                // This is applied to the whole spell cost for each effect when
-                // creating spells, but is only applied on the effect itself in TES:CS.
-                if (effect.mData.mRange == ESM::RT_Target)
-                    effectCost *= 1.5;
-
-                cost += effectCost;
-            }
-            return cost;
+            return MWMechanics::getTotalCost(list, *MWBase::Environment::get().getESMStore(), method);
         }
+    }
+
+    float getTotalCost(const ESM::EffectList& list, const MWWorld::ESMStore& store, const EffectCostMethod method)
+    {
+        float cost = 0;
+
+        for (const ESM::IndexedENAMstruct& effect : list.mList)
+        {
+            float effectCost = std::max(0.f, MWMechanics::calcEffectCost(effect.mData, store, nullptr, method));
+
+            // This is applied to the whole spell cost for each effect when
+            // creating spells, but is only applied on the effect itself in TES:CS.
+            if (effect.mData.mRange == ESM::RT_Target)
+                effectCost *= 1.5;
+
+            cost += effectCost;
+        }
+        return cost;
     }
 
     float calcEffectCost(
         const ESM::ENAMstruct& effect, const ESM::MagicEffect* magicEffect, const EffectCostMethod method)
     {
-        const MWWorld::ESMStore& store = *MWBase::Environment::get().getESMStore();
+        return calcEffectCost(effect, *MWBase::Environment::get().getESMStore(), magicEffect, method);
+    }
+
+    float calcEffectCost(const ESM::ENAMstruct& effect, const MWWorld::ESMStore& store,
+        const ESM::MagicEffect* magicEffect, const EffectCostMethod method)
+    {
         if (!magicEffect)
             magicEffect = store.get<ESM::MagicEffect>().find(effect.mEffectID);
         bool hasMagnitude = !(magicEffect->mData.mFlags & ESM::MagicEffect::NoMagnitude);
@@ -58,12 +68,11 @@ namespace MWMechanics
         int duration = hasDuration ? effect.mDuration : 1;
         if (!appliedOnce)
             duration = std::max(1, duration);
-        static const float fEffectCostMult = store.get<ESM::GameSetting>().find("fEffectCostMult")->mValue.getFloat();
-        static const float iAlchemyMod = store.get<ESM::GameSetting>().find("iAlchemyMod")->mValue.getFloat();
-
         int durationOffset = 0;
         int minArea = 0;
-        float costMult = fEffectCostMult;
+        float costMult = store.get<ESM::GameSetting>()
+                             .find(method == EffectCostMethod::GamePotion ? "iAlchemyMod" : "fEffectCostMult")
+                             ->mValue.getFloat();
         if (method == EffectCostMethod::PlayerSpell)
         {
             durationOffset = 1;
@@ -72,7 +81,6 @@ namespace MWMechanics
         else if (method == EffectCostMethod::GamePotion)
         {
             minArea = 1;
-            costMult = iAlchemyMod;
         }
 
         float x = 0.5f * (minMagn + maxMagn);
@@ -109,7 +117,7 @@ namespace MWMechanics
     {
         float castCost;
         if (enchantment.mData.mFlags & ESM::Enchantment::Autocalc)
-            castCost = getTotalCost(enchantment.mEffects, EffectCostMethod::GameEnchantment);
+            castCost = getEnchantmentCastCost(enchantment, *MWBase::Environment::get().getESMStore());
         else
             castCost = static_cast<float>(enchantment.mData.mCost);
         return getEffectiveEnchantmentCastCost(castCost, actor);
@@ -117,31 +125,44 @@ namespace MWMechanics
 
     int getEnchantmentCharge(const ESM::Enchantment& enchantment)
     {
+        if (!(enchantment.mData.mFlags & ESM::Enchantment::Autocalc))
+            return enchantment.mData.mCharge;
+        return getEnchantmentCharge(enchantment, *MWBase::Environment::get().getESMStore());
+    }
+
+    float getEnchantmentCastCost(const ESM::Enchantment& enchantment, const MWWorld::ESMStore& store)
+    {
+        if (enchantment.mData.mFlags & ESM::Enchantment::Autocalc)
+            return getTotalCost(enchantment.mEffects, store, EffectCostMethod::GameEnchantment);
+        return static_cast<float>(enchantment.mData.mCost);
+    }
+
+    int getEnchantmentCharge(const ESM::Enchantment& enchantment, const MWWorld::ESMStore& content)
+    {
         if (enchantment.mData.mFlags & ESM::Enchantment::Autocalc)
         {
-            int charge
-                = static_cast<int>(std::round(getTotalCost(enchantment.mEffects, EffectCostMethod::GameEnchantment)));
-            const auto& store = MWBase::Environment::get().getESMStore()->get<ESM::GameSetting>();
+            int charge = static_cast<int>(std::round(getEnchantmentCastCost(enchantment, content)));
+            const auto& store = content.get<ESM::GameSetting>();
             switch (enchantment.mData.mType)
             {
                 case ESM::Enchantment::CastOnce:
                 {
-                    static const int iMagicItemChargeOnce = store.find("iMagicItemChargeOnce")->mValue.getInteger();
+                    const int iMagicItemChargeOnce = store.find("iMagicItemChargeOnce")->mValue.getInteger();
                     return charge * iMagicItemChargeOnce;
                 }
                 case ESM::Enchantment::WhenStrikes:
                 {
-                    static const int iMagicItemChargeStrike = store.find("iMagicItemChargeStrike")->mValue.getInteger();
+                    const int iMagicItemChargeStrike = store.find("iMagicItemChargeStrike")->mValue.getInteger();
                     return charge * iMagicItemChargeStrike;
                 }
                 case ESM::Enchantment::WhenUsed:
                 {
-                    static const int iMagicItemChargeUse = store.find("iMagicItemChargeUse")->mValue.getInteger();
+                    const int iMagicItemChargeUse = store.find("iMagicItemChargeUse")->mValue.getInteger();
                     return charge * iMagicItemChargeUse;
                 }
                 case ESM::Enchantment::ConstantEffect:
                 {
-                    static const int iMagicItemChargeConst = store.find("iMagicItemChargeConst")->mValue.getInteger();
+                    const int iMagicItemChargeConst = store.find("iMagicItemChargeConst")->mValue.getInteger();
                     return charge * iMagicItemChargeConst;
                 }
             }

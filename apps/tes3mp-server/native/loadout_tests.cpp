@@ -1,5 +1,6 @@
 #include "loadout.hpp"
 
+#include <cmath>
 #include <fstream>
 #include <functional>
 #include <iostream>
@@ -9,6 +10,7 @@
 #include <stdexcept>
 
 #include <apps/openmw/mwclass/classes.hpp>
+#include <apps/openmw/mwmechanics/spellutil.hpp>
 #include <apps/openmw/mwscript/compilercontext.hpp>
 #include <apps/openmw/mwscript/scriptmanagerimp.hpp>
 #include <apps/openmw/mwworld/cellstore.hpp>
@@ -624,11 +626,203 @@ namespace
         reject([&] { container.add(plain.getPtr(), 1, context); }, "presentation consumer");
     }
 
+    void enchantmentFixture(
+        const std::filesystem::path& root, float multiplier = 2, int chargeScale = 1, std::string_view invalid = {})
+    {
+        plugin(root / "local/Calculation.esp", false, [&](ESM::ESMWriter& writer) {
+            auto setting = record<ESM::GameSetting>("fEffectCostMult");
+            setting.mValue = ESM::Variant(multiplier);
+            if (invalid == "setting-type")
+                setting.mValue = ESM::Variant(std::string("invalid"));
+            write(writer, setting);
+            setting.mId = ESM::RefId::stringRefId("iAlchemyMod");
+            setting.mValue = ESM::Variant(std::int32_t(5));
+            setting.mValue.setType(ESM::VT_Int);
+            write(writer, setting);
+            for (const auto& [id, value] : { std::pair{ "iMagicItemChargeOnce", 3 }, { "iMagicItemChargeStrike", 5 },
+                     { "iMagicItemChargeUse", 7 }, { "iMagicItemChargeConst", 11 } })
+            {
+                setting.mId = ESM::RefId::stringRefId(id);
+                setting.mValue = ESM::Variant(std::int32_t(invalid == "charge-overflow" ? 1000000000
+                        : invalid == "negative-charge"                                  ? -1
+                                                                                        : value * chargeScale));
+                setting.mValue.setType(ESM::VT_Int);
+                write(writer, setting);
+            }
+            auto magicEffect = record<ESM::MagicEffect>("RestoreHealth");
+            magicEffect.mData.mBaseCost = invalid == "base-cost" ? std::numeric_limits<float>::infinity() : 4;
+            write(writer, magicEffect);
+            ESM::ENAMstruct effect{};
+            effect.mEffectID = ESM::MagicEffect::RestoreHealth;
+            effect.mRange = ESM::RT_Self;
+            effect.mArea = 2;
+            effect.mDuration = 3;
+            effect.mMagnMin = 2;
+            effect.mMagnMax = 4;
+            ESM::ENAMstruct target = effect;
+            target.mRange = ESM::RT_Target;
+            target.mArea = 0;
+            target.mDuration = 1;
+            target.mMagnMin = 1;
+            target.mMagnMax = 2;
+            if (invalid == "effect-fields")
+                effect.mMagnMax = std::numeric_limits<int>::max();
+            if (invalid == "range")
+                effect.mRange = 3;
+            if (invalid == "cost-overflow")
+                effect.mArea = effect.mDuration = effect.mMagnMin = effect.mMagnMax = 1000000;
+            for (int type = 0; type < 4; ++type)
+            {
+                auto enchantment = record<ESM::Enchantment>("calc_" + std::to_string(type));
+                enchantment.mData = { invalid == "type" ? 4 : type, 77, 99, ESM::Enchantment::Autocalc };
+                enchantment.mEffects.populate({ effect, target });
+                if (invalid == "effects")
+                    enchantment.mEffects.mList.resize(33, enchantment.mEffects.mList.front());
+                write(writer, enchantment);
+                enchantment.mId = ESM::RefId::stringRefId("manual_" + std::to_string(type));
+                enchantment.mData.mFlags = 0;
+                write(writer, enchantment);
+            }
+        });
+        config(root / "extra/openmw.cfg",
+            "data=../high\ndata-local=../local\nencoding=win1251\ncontent=Patch.esp\ncontent=Calculation.esp\n");
+    }
+
+    void checkEnchantment(
+        const std::filesystem::path& root, int argc, const char* const argv[], const std::string& filter)
+    {
+        using namespace TES3MP::Native;
+        if (filter == "enchantment-cost")
+        {
+            // Engine-written plugins and independently specified expected values.
+            // This tests adapter inputs/rounding, not parity with a running client.
+            for (int pass = 0; pass < 2; ++pass)
+            {
+                enchantmentFixture(root, pass == 0 ? 2.f : 3.f, pass + 1);
+                Loadout loadout(readLoadoutOptions(argc, argv));
+                const int charges[] = { 3, 5, 7, 11 };
+                for (int type = 0; type < 4; ++type)
+                {
+                    for (const bool manual : { false, true })
+                    {
+                        const std::string id = (manual ? "manual_" : "calc_") + std::to_string(type);
+                        const auto& value = *loadout.store().get<ESM::Enchantment>().find(ESM::RefId::stringRefId(id));
+                        const float expectedCost = manual ? 77.f : pass == 0 ? 9.8f : 14.7f;
+                        const int expectedCharge = manual ? 99 : (pass == 0 ? 10 : 15) * charges[type] * (pass + 1);
+                        require(std::abs(MWMechanics::getEnchantmentCastCost(value, loadout.store()) - expectedCost)
+                                < 0.00001f,
+                            "enchantment cost, target surcharge or per-store setting mismatch");
+                        require(MWMechanics::getEnchantmentCharge(value, loadout.store()) == expectedCharge,
+                            "enchantment charge rounding, type multiplier or per-store setting mismatch");
+                        std::ostringstream report;
+                        loadout.writeEnchantmentProbe(report, id);
+                        require(report.str().find("maximum-charge\t" + std::to_string(expectedCharge) + '\n')
+                                    != std::string::npos
+                                && report.str().ends_with("complete\n") && report.str().size() < 2048,
+                            "enchantment report charge, completion or bound mismatch");
+                        require(value.mData.mCost == 77 && value.mData.mCharge == 99,
+                            "calculation changed retained enchantment record");
+                    }
+                }
+                const auto& store = loadout.store();
+                const auto& enchantment = *store.get<ESM::Enchantment>().find(ESM::RefId::stringRefId("calc_0"));
+                auto effect = enchantment.mEffects.mList.front().mData;
+                const float factor = pass == 0 ? 2.f : 3.f;
+                require(std::abs(MWMechanics::calcEffectCost(
+                                     effect, store, nullptr, MWMechanics::EffectCostMethod::PlayerSpell)
+                            - 5.2f * factor)
+                        < 0.00001f,
+                    "player spell duration offset changed");
+                require(std::abs(MWMechanics::calcEffectCost(
+                                     effect, store, nullptr, MWMechanics::EffectCostMethod::GamePotion)
+                            - 20.f)
+                        < 0.00001f,
+                    "potion used spell multiplier");
+                effect.mMagnMin = effect.mMagnMax = effect.mDuration = effect.mArea = 0;
+                auto magicEffect = *store.get<ESM::MagicEffect>().find(effect.mEffectID);
+                magicEffect.mData.mFlags = 0;
+                require(std::abs(MWMechanics::calcEffectCost(effect, store, &magicEffect) - 0.4f * factor) < 0.00001f,
+                    "game spell magnitude/duration floor changed");
+                magicEffect.mData.mFlags = ESM::MagicEffect::NoMagnitude | ESM::MagicEffect::NoDuration;
+                require(std::abs(MWMechanics::calcEffectCost(
+                                     effect, store, &magicEffect, MWMechanics::EffectCostMethod::GameEnchantment)
+                            - 0.4f * factor)
+                        < 0.00001f,
+                    "magic effect flags changed");
+                magicEffect.mData.mFlags = ESM::MagicEffect::AppliedOnce;
+                require(MWMechanics::calcEffectCost(effect, store, &magicEffect) == 0, "applied-once duration changed");
+                // Exercise actual CLI dispatch and normalized request identity.
+                std::vector<const char*> args(argv, argv + argc);
+                args.insert(args.end(), { "--enchantment", "CaLc_0" });
+                std::ostringstream report;
+                probe(static_cast<int>(args.size()), args.data(), report);
+                require(report.str().starts_with("native-enchantment-probe\t1\nid\t\"calc_0\"\n"),
+                    "enchantment CLI dispatch or normalization failed");
+            }
+            return;
+        }
+        require(filter == "enchantment-rejection", "unknown enchantment filter");
+        for (const auto& [invalid, reason] : { std::pair{ "effects", "32 effects" }, { "type", "enchantment type" },
+                 { "effect-fields", "effect fields" }, { "range", "effect fields" }, { "base-cost", "base cost" },
+                 { "negative-charge", "charge multiplier" }, { "charge-overflow", "integer range" },
+                 { "cost-overflow", "integer range" }, { "setting-type", "" }, { "multiplier", "fEffectCostMult" },
+                 { "id-size", "256 byte ID" }, { "id-control", "control character" }, { "missing", "" } })
+        {
+            enchantmentFixture(root,
+                std::string_view(invalid) == "multiplier" ? std::numeric_limits<float>::quiet_NaN() : 2, 1, invalid);
+            Loadout loadout(readLoadoutOptions(argc, argv));
+            std::string id = "calc_0";
+            if (std::string_view(invalid) == "id-size")
+                id.assign(257, 'x');
+            else if (std::string_view(invalid) == "id-control")
+                id = "calc_0\n";
+            else if (std::string_view(invalid) == "missing")
+                id = "missing";
+            std::ostringstream report;
+            report << "previous publication\n";
+            bool failed = false;
+            try
+            {
+                loadout.writeEnchantmentProbe(report, id);
+            }
+            catch (const std::exception& error)
+            {
+                failed = true;
+                require(std::string_view(error.what()).find(reason) != std::string_view::npos,
+                    "unexpected enchantment rejection reason");
+            }
+            require(failed, "invalid enchantment probe accepted");
+            require(report.str() == "previous publication\n", "rejected enchantment published partial report");
+        }
+        for (const char* mode : { "--sample", "--inventory" })
+        {
+            std::vector<const char*> args(argv, argv + argc);
+            args.insert(args.end(), { "--enchantment", "calc_0", mode });
+            if (std::string_view(mode) == "--inventory")
+                args.push_back("mixed_item");
+            bool failed = false;
+            try
+            {
+                readLoadoutOptions(static_cast<int>(args.size()), args.data());
+            }
+            catch (const std::runtime_error&)
+            {
+                failed = true;
+            }
+            require(failed, "conflicting enchantment CLI mode accepted");
+        }
+    }
+
     void check(const std::filesystem::path& root, const std::string& filter)
     {
         fixture(root);
         const std::string directory = Files::pathToUnicodeString(root);
         const char* args[] = { "native-test", "--config", directory.c_str(), "--replace", "config" };
+        if (filter.starts_with("enchantment-"))
+        {
+            checkEnchantment(root, 5, args, filter);
+            return;
+        }
         if (filter.starts_with("inventory-"))
         {
             checkInventory(root, 5, args, filter);
