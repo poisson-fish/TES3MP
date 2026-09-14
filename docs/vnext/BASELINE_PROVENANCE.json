@@ -77,7 +77,7 @@
     {
       "path": "CMakeLists.txt",
       "status": "M",
-      "purpose": "Adds the owner-approved engine-independent TES3MP target subtree before the monolithic OpenMW components target."
+      "purpose": "Adds the independent TES3MP target subtree and an opt-in app-local native loadout probe after openmw-lib, outside the independent server graph."
     },
     {
       "path": "CMakePresets.json",
@@ -383,6 +383,31 @@
       "path": "apps/tes3mp-server/CMakeLists.txt",
       "status": "A",
       "purpose": "Defines the app-owned testable dedicated-server composition library, focused contracts, and verified-transport executable root."
+    },
+    {
+      "path": "apps/tes3mp-server/native/CMakeLists.txt",
+      "status": "A",
+      "purpose": "Opt-in M1 native loader/probe and filtered synthetic tests, with explicit temporary OpenMW links and dependency evidence."
+    },
+    {
+      "path": "apps/tes3mp-server/native/loadout.hpp",
+      "status": "A",
+      "purpose": "App-local owner for configured engine records, encoding, and cached readers; no independent networking interface."
+    },
+    {
+      "path": "apps/tes3mp-server/native/loadout.cpp",
+      "status": "A",
+      "purpose": "Reuses OpenMW configuration, TES3 loading, and store normalization to enumerate winning static records."
+    },
+    {
+      "path": "apps/tes3mp-server/native/main.cpp",
+      "status": "A",
+      "purpose": "Headless native probe entry point with separate diagnostic/report streams and visible load failures."
+    },
+    {
+      "path": "apps/tes3mp-server/native/loadout_tests.cpp",
+      "status": "A",
+      "purpose": "Native OpenMW-written synthetic loadouts exercise configuration layers, winning records, normalization, and failed-load publication."
     },
     {
       "path": "apps/tes3mp-server/actor_content.cpp",

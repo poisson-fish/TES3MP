@@ -26,8 +26,9 @@ Coherent persistence and committed replication
 OpenMW clients: input, prediction, UI, graphics, audio
 ```
 
-Networking stays engine-independent. A separate server-runtime target may use
-OpenMW types internally. That target does not exist yet. The existing server
+Networking stays engine-independent. An app-local native loadout probe now uses
+OpenMW types internally; the production engine-backed server runtime is still
+unfinished. The existing server
 and desktop adapter remain the working migration base; each subsystem changes
 authority exactly once. Broad compatibility is the destination, reached through
 small playable slices rather than an engine-wide rewrite before the first test.
