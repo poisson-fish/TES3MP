@@ -18,6 +18,7 @@
 #include <apps/openmw/mwscript/compilercontext.hpp>
 #include <apps/openmw/mwscript/scriptmanagerimp.hpp>
 #include <apps/openmw/mwworld/cellstore.hpp>
+#include <apps/openmw/mwworld/class.hpp>
 #include <apps/openmw/mwworld/containerstore.hpp>
 #include <apps/openmw/mwworld/inventorystore.hpp>
 #include <apps/openmw/mwworld/localscripts.hpp>
@@ -379,7 +380,23 @@ namespace
         Compiler::registerExtensions(extensions);
         MWScript::CompilerContext compilerContext(MWScript::CompilerContext::Type_Full);
         compilerContext.setExtensions(&extensions);
-        MWScript::ScriptManager scripts(store, compilerContext, 1);
+        struct ObservedScripts final : MWScript::ScriptManager
+        {
+            using MWScript::ScriptManager::ScriptManager;
+            std::function<void()> mBeforeLocals;
+            int mRuns = 0;
+            const Compiler::Locals& getLocals(const ESM::RefId& id) override
+            {
+                if (mBeforeLocals)
+                    mBeforeLocals();
+                return MWScript::ScriptManager::getLocals(id);
+            }
+            bool run(const ESM::RefId&, Interpreter::Context&) override
+            {
+                ++mRuns;
+                throw std::runtime_error("preparation must not execute scripts");
+            }
+        } scripts(store, compilerContext, 1);
         auto scriptedAddA = addA;
         auto scriptedAddB = addB;
         for (auto* context : { &scriptedAddA, &scriptedAddB })
@@ -387,12 +404,18 @@ namespace
             context->mLocalScripts = &localScripts;
             context->mScriptManager = &scripts;
         }
+        // Exercise a stock nonplayer registration with a real owner cell as well
+        // as the player registration whose null cell survives owner-cell unload.
+        scriptedAddB.mPlayer = addA.mPlayer;
         MWWorld::ManualRef plain(store, ESM::RefId::stringRefId("native_plain"));
         MWWorld::ManualRef scripted(store, ESM::RefId::stringRefId("native_scripted"));
         const auto plainA = a.add(plain.getPtr(), 4, addA);
         const auto plainB = b.add(plain.getPtr(), 7, addB);
         const auto scriptA = a.add(scripted.getPtr(), 3, scriptedAddA);
         const auto scriptB = b.add(scripted.getPtr(), 2, scriptedAddB);
+        require(scriptA->getRefData().getLocals().mShorts.at(0) == 1
+                && scriptB->getRefData().getLocals().mShorts.at(0) == 0,
+            "shared stock add lost player/nonplayer OnPCAdd behavior");
         plainA->getCellRef().setCount(-4); // Preparation must preserve the live restocking count.
         a.setSelectedEnchantItem(scriptA);
         b.setSelectedEnchantItem(scriptB);
@@ -431,7 +454,7 @@ namespace
             auto& locals = item.getRefData().getLocals();
             require(locals.mShorts.size() == 1 && locals.mLongs.size() == 1 && locals.mFloats.size() == 1,
                 "preparation fixture script locals were not initialized");
-            locals.mShorts[0] = 0; // Preparation must not run OnPCAdd again.
+            locals.mShorts[0] = item == *scriptA ? 0 : 7;
             locals.mLongs[0] = item == *scriptA ? 123 : 456;
             locals.mFloats[0] = item == *scriptA ? 1.25f : 2.5f;
         }
@@ -483,7 +506,7 @@ namespace
             std::pair<ESM::RefId, MWWorld::Ptr> entry;
             require(localScripts.isRunning(scriptId, *scriptA) && localScripts.isRunning(scriptId, *scriptB)
                     && localScripts.getNext(entry) && entry == std::pair(scriptId, *scriptB)
-                    && entry.second.mCell == nullptr && entry.second.mContainerStore == &b
+                    && entry.second.mCell == addB.mContainer.mCell && entry.second.mContainerStore == &b
                     && !localScripts.getNext(entry),
                 "preparation changed live script membership or iteration cursor");
         };
@@ -588,6 +611,124 @@ namespace
                 unchangedScripts();
             }
         }
+
+        // Copying the notification consumer is real, fallible effect preparation.
+        // Its owned member is constructed before the injected throw, so both normal
+        // discard and a partially constructed intent must release that ownership.
+        struct IntentLifetime
+        {
+            int& mAlive;
+            explicit IntentLifetime(int& alive)
+                : mAlive(alive)
+            {
+                ++mAlive;
+            }
+            IntentLifetime(const IntentLifetime& other)
+                : IntentLifetime(other.mAlive)
+            {
+            }
+            ~IntentLifetime() { --mAlive; }
+        };
+        struct NotificationIntent
+        {
+            IntentLifetime mLifetime;
+            std::function<void()>& mOnCopy;
+            int& mEmitted;
+            NotificationIntent(int& alive, std::function<void()>& onCopy, int& emitted)
+                : mLifetime(alive)
+                , mOnCopy(onCopy)
+                , mEmitted(emitted)
+            {
+            }
+            NotificationIntent(const NotificationIntent& other)
+                : mLifetime(other.mLifetime)
+                , mOnCopy(other.mOnCopy)
+                , mEmitted(other.mEmitted)
+            {
+                if (mOnCopy)
+                    mOnCopy();
+            }
+            void operator()(const MWWorld::Ptr&) const { ++mEmitted; }
+        };
+        for (const auto& item : live)
+        {
+            const bool fromA = item.mContainerStore == &a;
+            auto& destination = fromA ? b : a;
+            // Each owner can be the explicit player, the other player's container,
+            // or a nonplayer destination with no selected player context.
+            for (int playerMode : { 0, 1, 2 })
+            {
+                for (bool fail : { false, true })
+                {
+                    const auto before = snapshot();
+                    startScripts();
+                    int itemAlive = 0, intentAlive = 0, emitted = 0, copies = 0;
+                    bool caught = false;
+                    osg::observer_ptr<SceneUtil::PositionAttitudeTransform> temporaryNode;
+                    std::function<void()> onCopy;
+                    {
+                        auto context = fromA ? scriptedAddB : scriptedAddA;
+                        context.mPlayer = playerMode == 0 ? context.mContainer
+                            : playerMode == 1             ? (fromA ? addA.mContainer : addB.mContainer)
+                                                          : MWWorld::Ptr();
+                        context.mInventoryUpdated = NotificationIntent(intentAlive, onCopy, emitted);
+                        require(intentAlive == 1, "notification fixture retained a temporary copy");
+                        try
+                        {
+                            auto detached = prepare(item);
+                            const MWWorld::Ptr temporary(detached.get());
+                            auto expected = prepare(item);
+                            expected->mRef.setPosition({});
+                            expected->mRef.setOwner({});
+                            expected->mRef.resetGlobalVariable();
+                            expected->mRef.setFaction({});
+                            expected->mRef.setFactionRank(-2);
+                            const bool hasScript = !item.getClass().getScript(item).empty();
+                            if (hasScript && playerMode == 0)
+                                expected->mData.getLocals().mShorts[0] = 1;
+                            onCopy = [&] {
+                                ++copies;
+                                require(intentAlive == 2 && values(temporary) == values(MWWorld::Ptr(expected.get()))
+                                        && temporary.mRef->mWorldModel == nullptr
+                                        && !temporary.getCellRef().getRefNum().isSet() && temporary.mCell == nullptr
+                                        && temporary.mContainerStore == nullptr
+                                        && !localScripts.isRunning(scriptId, temporary) && snapshot() == before,
+                                    "effect preparation changed live state or prepared wrong destination locals");
+                                // Installed only in temporary test state, after the production
+                                // custom-state exclusion. Unwinding must destroy the whole item.
+                                temporary.getRefData().setCustomData(std::make_unique<Lifetime>(itemAlive));
+                                temporary.getRefData().setBaseNode(new SceneUtil::PositionAttitudeTransform);
+                                temporaryNode = temporary.getRefData().getBaseNode();
+                                if (fail)
+                                    throw PreparationFailure{};
+                            };
+                            auto prepared = destination.prepareTransferAdd(std::move(detached), context);
+                            onCopy = {};
+                            require(!detached && prepared.mItem.get() == temporary.mRef
+                                    && prepared.mOwner == context.mContainer && prepared.mCount == 2
+                                    && prepared.mNotifyItemAdded && prepared.mInventoryUpdated
+                                    && prepared.mScript.has_value() == hasScript && intentAlive == 2 && itemAlive == 1,
+                                "prepared effects lost ownership or destination notification intent");
+                            if (hasScript)
+                                require(prepared.mScript->mScript == scriptId
+                                        && prepared.mScript->mCell
+                                            == (playerMode == 0 ? nullptr : context.mContainer.mCell),
+                                    "prepared script intent has wrong script or owner cell");
+                        }
+                        catch (const PreparationFailure&)
+                        {
+                            caught = true;
+                        }
+                        onCopy = {};
+                        require(caught == fail && copies == 1 && intentAlive == 1 && itemAlive == 0
+                                && !temporaryNode.valid() && emitted == 0 && snapshot() == before,
+                            "effect preparation failure/discard leaked state, intents or success");
+                    }
+                    require(intentAlive == 0, "notification intent survived its operation");
+                    unchangedScripts();
+                }
+            }
+        }
         const auto reject = [&](const auto& operation, std::string_view reason) {
             const auto before = snapshot();
             startScripts();
@@ -605,6 +746,36 @@ namespace
             require(caught && snapshot() == before, "preparation rejection changed live state");
             unchangedScripts();
         };
+        for (const auto& item : { *scriptA, *scriptB })
+        {
+            const bool fromA = item.mContainerStore == &a;
+            auto& destination = fromA ? b : a;
+            auto context = fromA ? scriptedAddB : scriptedAddA;
+            context.mPlayer = context.mContainer;
+            int alive = 0, calls = 0;
+            reject(
+                [&] {
+                    auto detached = prepare(item);
+                    const MWWorld::Ptr temporary(detached.get());
+                    scripts.mBeforeLocals = [&] {
+                        ++calls;
+                        require(!localScripts.isRunning(scriptId, temporary)
+                                && temporary.getRefData().getLocals().mShorts == item.getRefData().getLocals().mShorts,
+                            "OnPCAdd lookup ran after live registration or assignment");
+                        temporary.getRefData().setCustomData(std::make_unique<Lifetime>(alive));
+                        throw std::runtime_error("injected OnPCAdd preparation failure");
+                    };
+                    destination.prepareTransferAdd(std::move(detached), context);
+                },
+                "injected OnPCAdd preparation failure");
+            scripts.mBeforeLocals = {};
+            require(calls == 1 && alive == 0, "OnPCAdd preparation swallowed failure or leaked its item");
+            context.mScriptManager = nullptr;
+            reject([&] { destination.prepareTransferAdd(prepare(item), context); }, "requires LocalScripts");
+            context.mScriptManager = &scripts;
+            context.mInventoryUpdated = {};
+            reject([&] { destination.prepareTransferAdd(prepare(item), context); }, "presentation consumer");
+        }
         const auto attempt = [&](const MWWorld::ConstPtr& item, int count, const MWWorld::ContainerStore& from,
                                  const MWWorld::ContainerStore& to) {
             return from.prepareTransferItem(item, count, to, addA.mContainer, addB.mContainer, worldModel);
@@ -645,6 +816,37 @@ namespace
         reject([&] { prepare(*plainA); }, "Lua or custom state");
         require(customAlive == 1, "rejection cloned or destroyed live custom state");
         plainA->getRefData().setCustomData(nullptr);
+        // Stock LocalScripts retains its catch boundary, duplicate replacement and
+        // iterator repair. A separate real list keeps these checks off both owners.
+        MWWorld::LocalScripts stockScripts(store);
+        MWWorld::ManualRef stockFirst(store, scripted.getPtr().getCellRef().getRefId());
+        MWWorld::ManualRef stockSecond(store, scripted.getPtr().getCellRef().getRefId());
+        scripts.mBeforeLocals = [] { throw std::runtime_error("injected stock registration failure"); };
+        stockScripts.add(scriptId, stockFirst.getPtr(), scripts); // Must log and swallow.
+        scripts.mBeforeLocals = {};
+        require(!stockScripts.isRunning(scriptId, stockFirst.getPtr()), "failed stock registration inserted a script");
+        auto firstScript = stockFirst.getPtr();
+        auto secondScript = stockSecond.getPtr();
+        firstScript.mCell = addA.mContainer.mCell;
+        secondScript.mCell = addB.mContainer.mCell;
+        stockScripts.add(scriptId, firstScript, scripts);
+        stockScripts.add(scriptId, secondScript, scripts);
+        firstScript.getRefData().getLocals().mLongs.at(0) = 99;
+        stockScripts.startIteration();
+        stockScripts.add(scriptId, firstScript, scripts); // Replace the pending first entry.
+        stockScripts.add(ESM::RefId::stringRefId("missing_script"), firstScript, scripts);
+        std::pair<ESM::RefId, MWWorld::Ptr> stockEntry;
+        require(stockScripts.getNext(stockEntry) && stockEntry.second == secondScript
+                && stockEntry.second.mCell == secondScript.mCell && stockScripts.getNext(stockEntry)
+                && stockEntry.second == firstScript && stockEntry.second.mCell == firstScript.mCell
+                && !stockScripts.getNext(stockEntry) && firstScript.getRefData().getLocals().mLongs.at(0) == 99,
+            "stock duplicate/missing registration changed locals, cell ownership or iteration");
+        stockScripts.startIteration();
+        stockScripts.clearCell(secondScript.mCell);
+        require(
+            stockScripts.getNext(stockEntry) && stockEntry.second == firstScript && !stockScripts.getNext(stockEntry),
+            "stock cell removal invalidated script iteration");
+        require(scripts.mRuns == 0, "preparation executed a script");
         for (auto item : live)
             require(item.getRefData().onActivate(), "preparation disturbed live activation flags");
     }
@@ -667,12 +869,22 @@ namespace
         // custom data, equipment, Environment, or WindowManager is constructed.
         MWWorld::ManualRef ownerA(store, playerId);
         MWWorld::ManualRef ownerB(store, playerId);
+        ESM::Cell cellRecordA;
+        ESM::Cell cellRecordB;
+        cellRecordA.blank();
+        cellRecordB.blank();
+        MWWorld::CellStore cellA(MWWorld::Cell(cellRecordA), store, readers);
+        MWWorld::CellStore cellB(MWWorld::Cell(cellRecordB), store, readers);
+        auto ownerPtrA = ownerA.getPtr();
+        auto ownerPtrB = ownerB.getPtr();
+        ownerPtrA.mCell = &cellA;
+        ownerPtrB.mCell = &cellB;
         MWWorld::ManualRef source(store, id, 5);
         MWWorld::ContainerStore a;
         MWWorld::ContainerStore b;
         MWWorld::LocalScripts localScripts(store);
-        bindEmptyStore(a, ownerA.getPtr(), worldModel);
-        bindEmptyStore(b, ownerB.getPtr(), worldModel);
+        bindEmptyStore(a, ownerPtrA, worldModel);
+        bindEmptyStore(b, ownerPtrB, worldModel);
         require(ownerA.getPtr() != ownerB.getPtr()
                 && ownerA.getPtr().getCellRef().getRefNum() != ownerB.getPtr().getCellRef().getRefNum(),
             "two-owner fixture did not create distinct registered owners");
@@ -709,16 +921,16 @@ namespace
         b.setContListener(&listenerB);
         std::vector<MWWorld::Ptr> notifications;
         const auto updated = [&](const MWWorld::Ptr& owner) { notifications.push_back(owner); };
-        const MWWorld::ContainerStoreAddContext addA{ store, worldModel, ownerA.getPtr(), ownerA.getPtr(), nullptr,
-            nullptr, updated };
-        const MWWorld::ContainerStoreAddContext addB{ store, worldModel, ownerB.getPtr(), ownerB.getPtr(), nullptr,
-            nullptr, updated };
+        const MWWorld::ContainerStoreAddContext addA{ store, worldModel, ownerPtrA, ownerPtrA, nullptr, nullptr,
+            updated };
+        const MWWorld::ContainerStoreAddContext addB{ store, worldModel, ownerPtrB, ownerPtrB, nullptr, nullptr,
+            updated };
         const MWWorld::ContainerStoreRemoveContext removeA{ worldModel, ownerA.getPtr(), localScripts, updated };
         const MWWorld::ContainerStoreRemoveContext removeB{ worldModel, ownerB.getPtr(), localScripts, updated };
         if (preparation)
         {
-            checkInventoryPreparation(a, b, addA, addB, localScripts,
-                [&] { return std::pair(events.size(), notifications.size()); });
+            checkInventoryPreparation(
+                a, b, addA, addB, localScripts, [&] { return std::pair(events.size(), notifications.size()); });
             return;
         }
         const auto success = [&](const MWWorld::Ptr& owner, const MWWorld::Ptr& item, int count, bool added) {

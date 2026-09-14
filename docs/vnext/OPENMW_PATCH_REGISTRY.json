@@ -16,7 +16,7 @@
       "id": "M1-002",
       "slice": "native scripted inventory initialization and isolated item values",
       "owner": "OpenMW server runtime",
-      "purpose": "Pass an explicit script manager into shared locals and registration; prepare owned RefData values and MWScript locals without scene/Lua aliases or arbitrary custom-state cloning, preserving stock copies and wrappers.",
+      "purpose": "Share explicit-service locals initialization and script/cell registration intents; prepare owned RefData values without scene/Lua aliases or arbitrary custom-state cloning, preserving stock copies, registration catches and iteration ordering.",
       "paths": [
         "apps/openmw/mwscript/globalscripts.cpp",
         "apps/openmw/mwscript/globalscripts.hpp",
@@ -33,9 +33,9 @@
     },
     {
       "id": "M1-001",
-      "slice": "native inventory runtime seam and M2 owner-bound preparation",
+      "slice": "native inventory runtime seam and M2 deferred add preparation",
       "owner": "OpenMW server runtime",
-      "purpose": "Share explicit-context ContainerStore add/remove and zero-count script cleanup; validate resolved owners and prepare fresh unregistered MISC state between two base stores without installing or publishing a transfer. Retain stock equipment dispatch.",
+      "purpose": "Share explicit-context ContainerStore add/remove, stock add normalization and OnPCAdd ordering; prepare fresh MISC state and deferred script/notification intents between resolved owners without live installation or publication. Retain stock equipment dispatch.",
       "paths": [
         "apps/openmw/mwworld/cellref.cpp",
         "apps/openmw/mwworld/cellref.hpp",

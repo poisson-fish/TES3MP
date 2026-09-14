@@ -307,12 +307,12 @@
     {
       "path": "apps/openmw/mwworld/containerstore.cpp",
       "status": "M",
-      "purpose": "Share explicit-context inventory add/remove and prepare isolated non-gold MISC state between resolved base-store owners without live mutation, registration, or publication."
+      "purpose": "Share explicit-context inventory add/remove, stock add normalization and OnPCAdd ordering; prepare isolated non-gold MISC values and deferred destination effects without live mutation, registration or publication."
     },
     {
       "path": "apps/openmw/mwworld/containerstore.hpp",
       "status": "M",
-      "purpose": "Declare explicit inventory add/remove, registered owner access, and an owned detached-item preparation entry for resolved base stores; equipment and transfer installation remain excluded."
+      "purpose": "Declare explicit inventory add/remove, registered owner access, detached item preparation and owned destination script/notification intents for resolved base stores; equipment and transfer installation remain excluded."
     },
     {
       "path": "apps/openmw/mwworld/inventorystore.cpp",
@@ -327,12 +327,12 @@
     {
       "path": "apps/openmw/mwworld/localscripts.cpp",
       "status": "M",
-      "purpose": "Share local script registration and RefData initialization with an explicit script manager."
+      "purpose": "Share explicit-service RefData initialization and script/cell intent preparation while retaining stock registration exception handling and iteration ordering."
     },
     {
       "path": "apps/openmw/mwworld/localscripts.hpp",
       "status": "M",
-      "purpose": "Expose explicit-service local script registration alongside stock callers."
+      "purpose": "Expose explicit-service registration and item-pointer-free script/cell preparation intents alongside stock callers."
     },
     {
       "path": "apps/openmw/mwworld/player.cpp",

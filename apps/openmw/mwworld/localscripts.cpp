@@ -97,13 +97,20 @@ void MWWorld::LocalScripts::add(const ESM::RefId& scriptName, const Ptr& ptr)
     add(scriptName, ptr, *MWBase::Environment::get().getScriptManager());
 }
 
+MWWorld::LocalScripts::Registration MWWorld::LocalScripts::prepareAdd(
+    const ESM::Script& script, RefData& data, CellStore* cell, MWBase::ScriptManager& scripts)
+{
+    data.setLocals(script, scripts);
+    return { script.mId, cell };
+}
+
 void MWWorld::LocalScripts::add(const ESM::RefId& scriptName, const Ptr& ptr, MWBase::ScriptManager& scripts)
 {
     if (const ESM::Script* script = mStore.get<ESM::Script>().search(scriptName))
     {
         try
         {
-            ptr.getRefData().setLocals(*script, scripts);
+            const auto prepared = prepareAdd(*script, ptr.getRefData(), ptr.mCell, scripts);
 
             for (auto iter = mScripts.begin(); iter != mScripts.end(); ++iter)
                 if (iter->second == ptr)
@@ -113,7 +120,9 @@ void MWWorld::LocalScripts::add(const ESM::RefId& scriptName, const Ptr& ptr, MW
                     break;
                 }
 
-            mScripts.emplace_back(scriptName, ptr);
+            auto registered = ptr;
+            registered.mCell = prepared.mCell;
+            mScripts.emplace_back(prepared.mScript, registered);
         }
         catch (const std::exception& exception)
         {

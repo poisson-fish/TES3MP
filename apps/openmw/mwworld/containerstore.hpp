@@ -5,6 +5,7 @@
 #include <iterator>
 #include <map>
 #include <memory>
+#include <optional>
 #include <utility>
 
 #include <components/esm3/loadalch.hpp>
@@ -23,6 +24,7 @@
 #include <components/misc/rng.hpp>
 
 #include "cellreflist.hpp"
+#include "localscripts.hpp"
 #include "ptr.hpp"
 
 namespace ESM
@@ -62,6 +64,19 @@ namespace MWWorld
         const WorldModel& mWorldModel;
         Ptr mContainer;
         LocalScripts& mLocalScripts;
+        std::function<void(const Ptr&)> mInventoryUpdated;
+    };
+
+    // Operation-owned destination state/effects. Destruction discards everything;
+    // there is deliberately no transfer installation or effect execution API here.
+    // The base record, owner and registration cell are borrowed for this operation.
+    struct PreparedContainerAdd
+    {
+        std::unique_ptr<LiveCellRef<ESM::Miscellaneous>> mItem;
+        std::optional<LocalScripts::Registration> mScript;
+        Ptr mOwner;
+        int mCount;
+        bool mNotifyItemAdded;
         std::function<void(const Ptr&)> mInventoryUpdated;
     };
 
@@ -416,6 +431,14 @@ namespace MWWorld
         std::unique_ptr<LiveCellRef<ESM::Miscellaneous>> prepareTransferItem(const ConstPtr& item, int count,
             const ContainerStore& destination, const ConstPtr& sourceOwner, const ConstPtr& destinationOwner,
             const WorldModel& worldModel) const;
+
+        // Consume a detached item from prepareTransferItem and prepare stock add
+        // normalization, locals/OnPCAdd and deferred effects for this destination.
+        // Failure destroys the consumed temporary; neither live inventory is changed.
+        // No stacking, registration, iteration, script execution or success emission.
+        // This remains operation-local staging, NOT a validated commit-ready transfer.
+        PreparedContainerAdd prepareTransferAdd(
+            std::unique_ptr<LiveCellRef<ESM::Miscellaneous>> item, const ContainerStoreAddContext& context);
 
         int remove(const ESM::RefId& itemId, int count, bool equipReplacement = 0, bool resolve = true);
         ///< Remove \a count item(s) designated by \a itemId from this container.

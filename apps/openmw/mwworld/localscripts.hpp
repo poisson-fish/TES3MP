@@ -20,6 +20,19 @@ namespace MWWorld
         const MWWorld::ESMStore& mStore;
 
     public:
+        // An operation-owned intent, with no item pointer or link to the live list.
+        // The cell is borrowed and must outlive preparation and any later installation.
+        struct Registration
+        {
+            ESM::RefId mScript;
+            CellStore* mCell;
+        };
+
+        // Initializes only the supplied RefData. Exceptions propagate to the staging
+        // owner; stock add retains its logging/catch and live-list ordering below.
+        static Registration prepareAdd(
+            const ESM::Script& script, RefData& data, CellStore* cell, MWBase::ScriptManager& scripts);
+
         LocalScripts(const MWWorld::ESMStore& store);
 
         void startIteration();

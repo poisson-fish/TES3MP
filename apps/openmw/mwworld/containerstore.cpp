@@ -513,19 +513,91 @@ std::unique_ptr<MWWorld::LiveCellRef<ESM::Miscellaneous>> MWWorld::ContainerStor
     return prepared;
 }
 
+namespace
+{
+    // The registration consumer chooses immediate stock registration or an owned
+    // intent. Keep OnPCAdd after that step: stock registration catches exceptions,
+    // whereas deferred preparation must unwind without reporting success.
+    template <class RegisterScript>
+    MWWorld::Ptr prepareContainerAdd(MWWorld::Ptr item, MWWorld::ContainerStore& destination,
+        const MWWorld::ContainerStoreAddContext& context, const RegisterScript& registerScript)
+    {
+        item.getRefData().setBaseNode(nullptr);
+        item.getCellRef().setPosition({});
+        item.getCellRef().setOwner(ESM::RefId());
+        item.getCellRef().resetGlobalVariable();
+        item.getCellRef().setFaction(ESM::RefId());
+        item.getCellRef().setFactionRank(-2);
+
+        const ESM::RefId& script = item.getClass().getScript(item);
+        const auto& owner = context.mContainer;
+        const bool playerContainer = !context.mPlayer.isEmpty() && owner == context.mPlayer;
+        if (!script.empty())
+        {
+            // Player scripts survive cell unload. Other inventory scripts belong
+            // to their owner cell. These hints are on a local Ptr, never the ref.
+            if (playerContainer)
+                item.mCell = nullptr;
+            else if (!owner.isEmpty())
+                item.mCell = owner.getCell();
+            item.mContainerStore = &destination;
+            registerScript(script, item);
+
+            if (playerContainer)
+                item.getRefData().getLocals().setVar(
+                    *context.mStore.get<ESM::Script>().find(script), "onpcadd", 1, *context.mScriptManager);
+        }
+        return item;
+    }
+
+    void validateAddServices(const MWWorld::ConstPtr& item, const MWWorld::ContainerStoreAddContext& context)
+    {
+        if (!context.mInventoryUpdated)
+            throw std::logic_error("ContainerStore::add requires an inventory presentation consumer");
+        if ((!context.mLocalScripts || !context.mScriptManager)
+            && (!item.getClass().getScript(item).empty()
+                || (item.getClass().isGold(item)
+                    && !context.mStore.get<ESM::Miscellaneous>()
+                        .find(MWWorld::ContainerStore::sGoldId)
+                        ->mScript.empty())))
+            throw std::runtime_error(
+                "ContainerStore::add requires LocalScripts and ScriptManager for scripted items "
+                "(including OnPCAdd); rejected before mutation");
+    }
+}
+
+MWWorld::PreparedContainerAdd MWWorld::ContainerStore::prepareTransferAdd(
+    std::unique_ptr<LiveCellRef<ESM::Miscellaneous>> item, const ContainerStoreAddContext& context)
+{
+    validateExplicitOwner(context.mContainer, context.mWorldModel);
+    if (!item || item->mWorldModel || item->mRef.getRefNum().isSet() || item->mRef.getCount(false) <= 0)
+        throw std::invalid_argument("Container add preparation requires a detached positive-count item");
+    const Ptr temporary(item.get());
+    if (temporary.getClass().isGold(temporary) || item->mData.getLuaScripts() || item->mData.getCustomData())
+        throw std::logic_error("Container add preparation excludes gold, Lua or custom state");
+    if (item->mData.getLocals().getScriptId() != temporary.getClass().getScript(temporary))
+        throw std::logic_error("Container add preparation requires matching initialized script locals");
+    validateAddServices(temporary, context);
+
+    PreparedContainerAdd prepared{ std::move(item), {}, context.mContainer, temporary.getCellRef().getCount(),
+        mListener != nullptr, {} };
+    prepareContainerAdd(temporary, *this, context, [&](const ESM::RefId& script, const Ptr& scriptItem) {
+        // Unlike stock LocalScripts::add, missing records or preparation errors
+        // must propagate. Never insert the temporary into a LocalScripts list.
+        prepared.mScript = LocalScripts::prepareAdd(*context.mStore.get<ESM::Script>().find(script),
+            scriptItem.getRefData(), scriptItem.mCell, *context.mScriptManager);
+    });
+    // Copying the consumer may allocate or throw. Own all prepared state/intents
+    // before this final effect-preparation step, so any failure discards them.
+    prepared.mInventoryUpdated = context.mInventoryUpdated;
+    return prepared;
+}
+
 MWWorld::ContainerStoreIterator MWWorld::ContainerStore::addWithContext(
     const ConstPtr& itemPtr, int count, const ContainerStoreAddContext& context, bool resolve)
 {
     getType(itemPtr);
-    if (!context.mInventoryUpdated)
-        throw std::logic_error("ContainerStore::add requires an inventory presentation consumer");
-    if ((!context.mLocalScripts || !context.mScriptManager)
-        && (!itemPtr.getClass().getScript(itemPtr).empty()
-            || (itemPtr.getClass().isGold(itemPtr)
-                && !context.mStore.get<ESM::Miscellaneous>().find(sGoldId)->mScript.empty())))
-        throw std::runtime_error(
-            "ContainerStore::add requires LocalScripts and ScriptManager for scripted items "
-            "(including OnPCAdd); rejected before mutation");
+    validateAddServices(itemPtr, context);
     if (resolve)
         this->resolve(context.mContainer);
 
@@ -535,57 +607,14 @@ MWWorld::ContainerStoreIterator MWWorld::ContainerStore::addWithContext(
     MWWorld::Ptr item = *it;
     context.mWorldModel.registerPtr(item);
 
-    // we may have copied an item from the world, so reset a few things first
-    item.getRefData().setBaseNode(
-        nullptr); // Especially important, otherwise scripts on the item could think that it's actually in a cell
-    ESM::Position pos;
-    pos.rot[0] = 0;
-    pos.rot[1] = 0;
-    pos.rot[2] = 0;
-    pos.pos[0] = 0;
-    pos.pos[1] = 0;
-    pos.pos[2] = 0;
-    item.getCellRef().setPosition(pos);
-
-    // We do not need to store owners for items in container stores - we do not use it anyway.
-    item.getCellRef().setOwner(ESM::RefId());
-    item.getCellRef().resetGlobalVariable();
-    item.getCellRef().setFaction(ESM::RefId());
-    item.getCellRef().setFactionRank(-2);
-
-    const ESM::RefId& script = item.getClass().getScript(item);
-    const Ptr& contPtr = context.mContainer;
-    const bool playerContainer = !context.mPlayer.isEmpty() && contPtr == context.mPlayer;
-    if (!script.empty())
-    {
-        if (playerContainer)
-        {
-            // Items in player's inventory have cell set to 0, so their scripts will never be removed
-            item.mCell = nullptr;
-        }
-        else
-        {
-            // Set mCell to the cell of the container/actor, so that the scripts are removed properly when
-            // the cell of the container/actor goes inactive
-            if (!contPtr.isEmpty())
-                item.mCell = contPtr.getCell();
-        }
-
-        item.mContainerStore = this;
-
-        context.mLocalScripts->add(script, item, *context.mScriptManager);
-
-        // Set OnPCAdd special variable, if it is declared
-        // Make sure to do this *after* we have added the script to LocalScripts
-        if (playerContainer)
-            item.getRefData().getLocals().setVar(
-                *context.mStore.get<ESM::Script>().find(script), "onpcadd", 1, *context.mScriptManager);
-    }
+    item = prepareContainerAdd(item, *this, context, [&](const ESM::RefId& script, const Ptr& scriptItem) {
+        context.mLocalScripts->add(script, scriptItem, *context.mScriptManager);
+    });
 
     // we should not fire event for InventoryStore yet - it has some custom logic
     if (mListener && typeid(*this) == typeid(ContainerStore))
         mListener->itemAdded(item, count);
-    context.mInventoryUpdated(contPtr);
+    context.mInventoryUpdated(context.mContainer);
 
     return it;
 }
