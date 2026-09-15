@@ -36,6 +36,8 @@ namespace MWWorld::Testing
         PreparedContainerTransfer pair, const std::function<void(Stage)>& observer)
     {
         Allocations::InPhase phase(Allocations::Phase::Validation);
+        if (mFailedClosed)
+            throw TestDurabilityUncertain{};
         if (mActive)
             throw std::invalid_argument("Disposable rehearsal already active");
         // Even modified fixture contexts cannot redirect an exchange to a live
@@ -205,7 +207,19 @@ namespace MWWorld::Testing
     bool DisposableTransferRehearsal::commit(
         PreparedContainerTransfer input, const Compiler::Locals& declarations, const TestSink& sink)
     {
+        if (!sink)
+            throw std::invalid_argument("Disposable commit requires a sink");
+        return commitDurably(std::move(input), declarations, [&](const SerializedPair& saved) {
+            return sink(saved) ? TestPersistenceResult::Accepted : TestPersistenceResult::Rejected;
+        });
+    }
+
+    bool DisposableTransferRehearsal::commitDurably(
+        PreparedContainerTransfer input, const Compiler::Locals& declarations, const TestDurableSink& sink)
+    {
         Allocations::InPhase phase(Allocations::Phase::Validation);
+        if (mFailedClosed)
+            throw TestDurabilityUncertain{};
         if (mActive)
             throw std::invalid_argument("Disposable rehearsal already active");
         if (!sink || &mRemoval.mWorldModel != &mModel || &mDestinationAdd.mWorldModel != &mModel
@@ -268,8 +282,14 @@ namespace MWWorld::Testing
         identities(destination, saved.mDestination.mProposedIdentities);
 
         phase.set(Allocations::Phase::Persistence);
-        if (!sink(saved))
+        const auto outcome = sink(saved);
+        if (outcome == TestPersistenceResult::Rejected)
             return false;
+        if (outcome != TestPersistenceResult::Accepted)
+        {
+            mFailedClosed = true;
+            throw TestDurabilityUncertain{};
+        }
 
         // Synchronous acceptance is the last fallible call. No callbacks,
         // validation, Ptr construction, identity generation or effect dispatch.

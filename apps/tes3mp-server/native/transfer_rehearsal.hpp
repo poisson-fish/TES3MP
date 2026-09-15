@@ -6,8 +6,23 @@
 #include <apps/openmw/mwworld/worldmodel.hpp>
 #include <components/esm3/objectstate.hpp>
 
+#include <filesystem>
+
 namespace MWWorld::Testing
 {
+    enum class TestPersistenceResult
+    {
+        Rejected,
+        Accepted,
+        Uncertain
+    };
+
+    // Allocation-free signal. An uncertain fixture must be discarded; no retry
+    // or recovery installation is authorized by this test composition.
+    struct TestDurabilityUncertain
+    {
+    };
+
     // Owned test save: identity associations remain separate from ObjectState.
     // This is not a production persistence format or a durable file adapter.
     struct SerializedInventory
@@ -55,6 +70,7 @@ namespace MWWorld::Testing
     class DisposableTransferRehearsal
     {
         bool mActive = false;
+        bool mFailedClosed = false;
 
     public:
         WorldModel mModel;
@@ -95,6 +111,14 @@ namespace MWWorld::Testing
         using TestSink = std::function<bool(const SerializedPair&)>;
         bool commit(PreparedContainerTransfer pair, const Compiler::Locals& declarations, const TestSink& sink);
 
+        // Throws TestDurabilityUncertain and permanently blocks commit/rehearse
+        // if the sink cannot prove rejection or acceptance. Such a sink must
+        // return Uncertain, never throw after it may have replaced durable bytes.
+        using TestDurableSink = std::function<TestPersistenceResult(const SerializedPair&)>;
+        bool commitDurably(
+            PreparedContainerTransfer pair, const Compiler::Locals& declarations, const TestDurableSink& sink);
+        bool failedClosed() const noexcept { return mFailedClosed; }
+
         // Read-only exact storage/cursor witnesses for rollback assertions.
         const PreparedContainerTransfer::MiscList& sourceStorage() const;
         const PreparedContainerTransfer::MiscList& destinationStorage() const;
@@ -121,6 +145,7 @@ namespace MWWorld::Testing
     void checkTransferLocalsRestore(const ESMStore& content);
     void checkTransferRestore(const ESMStore& content);
     void checkTransferCodec(const ESMStore& content);
+    void checkTransferFileSink(const ESMStore& content, const std::filesystem::path& scratch);
     void checkTransferCommit(const ESMStore& content);
 }
 

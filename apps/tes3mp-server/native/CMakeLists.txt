@@ -20,6 +20,7 @@ tes3mp_verify_target_dependencies(tes3mp_native_loadout_probe ALLOWED tes3mp_nat
 add_executable(tes3mp_native_loadout_tests loadout_tests.cpp
     transfer_rehearsal.cpp transfer_rehearsal.hpp transfer_rehearsal_tests.cpp
     transfer_save_codec.cpp transfer_save_codec.hpp
+    transfer_file_sink.cpp transfer_file_sink.hpp
     test_allocations.cpp test_allocations.hpp)
 target_link_libraries(tes3mp_native_loadout_tests PRIVATE tes3mp_native_loadout)
 tes3mp_verify_target_dependencies(tes3mp_native_loadout_tests ALLOWED tes3mp_native_loadout)

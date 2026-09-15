@@ -1,4 +1,5 @@
 #include "test_allocations.hpp"
+#include "transfer_file_sink.hpp"
 #include "transfer_rehearsal.hpp"
 #include "transfer_save_codec.hpp"
 
@@ -6,6 +7,7 @@
 #include <bit>
 #include <cmath>
 #include <cstdint>
+#include <fstream>
 #include <iostream>
 #include <limits>
 #include <new>
@@ -1870,6 +1872,482 @@ namespace MWWorld::Testing
             return allocations;
         }
 
+        struct FileEvidence
+        {
+            size_t mRejected = 0, mUncertain = 0, mMalformed = 0, mAllocations = 0;
+        };
+
+        TransferSaveBytes fileBytes(const std::filesystem::path& path)
+        {
+            TransferSaveBytes result;
+            FileFaults faults;
+            require(readTransferFile(path, result, faults) == FileReadResult::Read, "file reopen failed");
+            return result;
+        }
+
+        void loadFile(
+            const std::filesystem::path& path, const SaveBindings& bindings, SerializedPair& output, FileFaults& faults)
+        {
+            TransferSaveBytes bytes;
+            if (readTransferFile(path, bytes, faults) != FileReadResult::Read)
+                throw Failure{};
+            decodeTransferSave(bytes, bindings, output);
+        }
+
+        void checkFileReads(const std::filesystem::path& path, const TransferSaveBytes& bytes,
+            const SerializedPair& saved, const SaveBindings& bindings, FileEvidence& evidence)
+        {
+            // A separate malformed-input path cannot damage the accepted save.
+            auto badPath = path;
+            badPath += ".input";
+            const auto writeInput = [&](std::span<const char> input) {
+                std::ofstream stream(badPath, std::ios::binary | std::ios::trunc);
+                stream.write(input.data(), static_cast<std::streamsize>(input.size()));
+                stream.close();
+                require(!stream.fail(), "malformed file setup failed");
+            };
+            const auto verify = [&] { require(fileBytes(path) == bytes, "file read changed accepted bytes"); };
+            {
+                Allocations::Trace measured;
+                {
+                    Allocations::Observe observe(measured);
+                    TransferFileSink fresh(path);
+                }
+                require(measured.mTotal > 0 && measured.mOutstanding == 0 && measured.mTrackingOverflow == 0,
+                    "file sink constructor allocation coverage/cleanup missing");
+                for (size_t ordinal = 1; ordinal <= measured.mTotal; ++ordinal)
+                {
+                    Allocations::Trace trace;
+                    bool caught = false;
+                    {
+                        Allocations::Observe observe(trace, ordinal);
+                        try
+                        {
+                            TransferFileSink fresh(path);
+                        }
+                        catch (const std::bad_alloc&)
+                        {
+                            caught = true;
+                        }
+                    }
+                    require(caught && trace.mFailures == 1 && trace.mOutstanding == 0 && trace.mTrackingOverflow == 0,
+                        "file sink constructor missed allocation failure or leaked");
+                    TransferFileSink retry(path);
+                    verify();
+                    ++evidence.mAllocations;
+                }
+            }
+            evidence.mAllocations += checkSerializationAllocations([] { return TransferSaveBytes(57, 'x'); },
+                [&](auto& output) {
+                    FileFaults faults;
+                    require(readTransferFile(path, output, faults) == FileReadResult::Read, "bounded read failed");
+                },
+                byteState, [&](const auto& output) { require(output == bytes, "read changed bytes"); }, verify);
+            evidence.mAllocations += checkSerializationAllocations([] { return pairOutputSentinel<true>(); },
+                [&](auto& output) {
+                    FileFaults faults;
+                    loadFile(path, bindings, output, faults);
+                },
+                [](const auto& output) { return pairOutputState(output); },
+                [&](const auto& output) { checkSavedValues(output, saved); }, verify);
+
+            const auto reject = [&](const SaveBindings& supplied, FileFault fault = FileFault::None) {
+                auto output = pairOutputSentinel<true>();
+                const auto before = pairOutputState(output);
+                Allocations::Trace measured;
+                bool caught = false;
+                {
+                    Allocations::Observe observe(measured);
+                    try
+                    {
+                        FileFaults faults{ fault, 17 };
+                        loadFile(badPath, supplied, output, faults);
+                    }
+                    catch (...)
+                    {
+                        caught = true;
+                    }
+                }
+                require(caught && pairOutputState(output) == before && measured.mOutstanding == 0
+                        && measured.mTrackingOverflow == 0,
+                    "invalid file changed prior decode output/storage or leaked");
+                // Fault every observed allocation, including the rejection path.
+                for (size_t ordinal = 1; ordinal <= measured.mTotal; ++ordinal)
+                {
+                    Allocations::Trace trace;
+                    bool rejected = false;
+                    {
+                        Allocations::Observe observe(trace, ordinal);
+                        try
+                        {
+                            FileFaults faults{ fault, 17 };
+                            loadFile(badPath, supplied, output, faults);
+                        }
+                        catch (...)
+                        {
+                            rejected = true;
+                        }
+                    }
+                    require(rejected && trace.mFailures == 1 && trace.mOutstanding == 0 && trace.mTrackingOverflow == 0
+                            && pairOutputState(output) == before,
+                        "invalid-file allocation failure published output or leaked");
+                    ++evidence.mAllocations;
+                }
+                FileFaults healthy;
+                loadFile(path, bindings, output, healthy);
+                checkSavedValues(output, saved);
+                verify();
+                ++evidence.mMalformed;
+            };
+            for (const size_t length :
+                { size_t{ 0 }, size_t{ 1 }, size_t{ 15 }, size_t{ 16 }, bytes.size() / 2, bytes.size() - 1 })
+            {
+                writeInput(std::span(bytes).first(length));
+                reject(bindings);
+            }
+            for (const char* tag : { "TES3", "FORM", "FVER", "RUNT", "CONT", "SOWN", "DOWN", "INIT" })
+            {
+                auto malformed = bytes;
+                const auto found = std::search(malformed.begin(), malformed.end(), tag, tag + 4);
+                require(found != malformed.end(), "file corruption field missing");
+                // Corrupt the record name for TES3, the first payload byte otherwise.
+                *(found + (std::string_view(tag) == "TES3" ? 0 : 8)) ^= 0x40;
+                writeInput(malformed);
+                reject(bindings);
+            }
+            auto trailing = bytes;
+            trailing.push_back('x');
+            writeInput(trailing);
+            reject(bindings);
+            writeInput(bytes);
+            for (int mismatch = 0; mismatch < 5; ++mismatch)
+            {
+                auto envelope = bindings.mEnvelope;
+                if (mismatch == 0)
+                    envelope.mRuntime += "-foreign";
+                else if (mismatch == 1)
+                    ++envelope.mContent[0];
+                else if (mismatch == 2)
+                    ++envelope.mSourceOwner.mIndex;
+                else if (mismatch == 3)
+                    ++envelope.mDestinationOwner.mIndex;
+                else
+                    ++envelope.mInitiator.mIndex;
+                reject({ envelope, bindings.mContent, bindings.mReferenceIds });
+            }
+            for (const auto fault :
+                { FileFault::ReadOpen, FileFault::ReadSize, FileFault::Read, FileFault::ReadEof, FileFault::ReadClose })
+            {
+                TransferSaveBytes output(57, 'x');
+                const auto before = byteState(output);
+                FileFaults faults{ fault, 17 };
+                require(readTransferFile(badPath, output, faults) == FileReadResult::Unavailable
+                        && byteState(output) == before,
+                    "failed read changed prior byte output/storage");
+                reject(bindings, fault);
+            }
+            std::filesystem::resize_file(badPath, MaxTransferSaveBytes + 1);
+            TransferSaveBytes sentinel(57, 'x');
+            const auto before = byteState(sentinel);
+            Allocations::Trace bounded;
+            FileReadResult result;
+            {
+                Allocations::Observe observe(bounded, 1);
+                FileFaults faults;
+                result = readTransferFile(badPath, sentinel, faults);
+            }
+            require(result == FileReadResult::TooLarge && bounded.mTotal == 0 && byteState(sentinel) == before,
+                "oversized file allocated before bound or changed prior output");
+            reject(bindings);
+            std::filesystem::remove(badPath);
+            reject(bindings); // Absent file is not an empty successful restore.
+            std::filesystem::create_directory(badPath);
+            reject(bindings);
+            std::filesystem::remove(badPath);
+            verify();
+        }
+
+        template <class Make, class Verify, class Unrelated>
+        size_t checkFileCommitCase(std::unique_ptr<DisposableTransferRehearsal>& owner, Make make,
+            Verify verifyOriginal, Unrelated verifyUnrelated, const RestoreContent& content,
+            const std::filesystem::path& scratch, size_t failAt, size_t allocationCount, FileFault fault,
+            bool exhaustive, FileEvidence& evidence)
+        {
+            using namespace Allocations;
+            auto& fixture = *owner;
+            const auto path = scratch / "inventory.bin";
+            const auto temporary = scratch / "inventory.bin.tmp";
+            SaveEnvelope envelope{ "OpenMW-0.51.0-test-inventory-runtime-1", { 1, 7, 19 },
+                fixture.mSourceOwner.getPtr().getCellRef().getRefNum(),
+                fixture.mDestinationOwner.getPtr().getCellRef().getRefNum(),
+                fixture.mDestinationAdd.mPlayer.getCellRef().getRefNum() };
+            const std::array referenceIds{ content.mBases[0]->mId, content.mBases[1]->mId,
+                ESM::RefId::stringRefId("serialization_owner"), ESM::RefId::stringRefId("serialization_soul"),
+                ESM::RefId::stringRefId("serialization_faction"), ESM::RefId::stringRefId("serialization_key"),
+                ESM::RefId::stringRefId("serialization_trap"), ESM::RefId::stringRefId("dormant_soul") };
+            const SaveBindings bindings{ envelope, content, referenceIds };
+            SerializedPair prior, expectedSave;
+            const auto saveInstalled = [&](SerializedPair& output) {
+                const auto save = [&](const auto& storage, SerializedInventory& inventory) {
+                    std::vector<ESM::RefNum> ids;
+                    for (const auto& node : storage)
+                        ids.push_back(node.mRef.getRefNum());
+                    serializeInventory(storage, [&](size_t i) { return ids.at(i); }, content.mDeclarations, inventory);
+                    for (auto& object : inventory.mObjects)
+                        object.mRef.mRefNum = {};
+                };
+                save(fixture.sourceStorage(), output.mSource);
+                save(fixture.destinationStorage(), output.mDestination);
+            };
+            saveInstalled(prior);
+            auto pair = make();
+            serializePair(fixture, pair, content.mDeclarations, expectedSave);
+            const auto expected = expectedRestoration(pair);
+            const auto expectedRegistry = pair.getRelocation().mRegistry;
+            const auto expectedScripts = pair.getRelocation().mSourceScripts;
+            const auto expectedDestinationScripts = pair.getRelocation().mDestinationScripts.value_or(expectedScripts);
+            TransferSaveBytes priorBytes, expectedBytes;
+            encodeTransferSave(prior, bindings, priorBytes);
+            encodeTransferSave(expectedSave, bindings, expectedBytes);
+            require(priorBytes != expectedBytes, "file test lost distinct prior/new states");
+            TransferFileSink file(path);
+            FileFaults seed;
+            const auto seeded = file.write(priorBytes, seed);
+            if (seeded != TestPersistenceResult::Accepted)
+                std::cerr << "Prior file setup: stage=" << static_cast<int>(seed.mReached)
+                          << " replace-error=" << seed.mReplaceError << '\n';
+            require(seeded == TestPersistenceResult::Accepted, "prior file setup failed");
+            const auto inputBefore = pairOutputState(expectedSave);
+            const auto contentBefore = contentState(content);
+            const auto verify = [&] {
+                require(pairOutputState(expectedSave) == inputBefore && contentState(content) == contentBefore,
+                    "file sink changed supplied save/content storage");
+                verifyOriginal();
+                require(fileBytes(path) == priorBytes && !std::filesystem::exists(temporary),
+                    "safe file rejection changed prior bytes or leaked staging");
+            };
+            FileFaults faults{ fault, 17 };
+            int accepted = 0, calls = 0;
+            const DisposableTransferRehearsal::TestDurableSink sink = [&](const SerializedPair& saved) {
+                ++calls;
+                TransferSaveBytes bytes;
+                encodeTransferSave(saved, bindings, bytes);
+                const auto result = file.write(bytes, faults);
+                accepted += result == TestPersistenceResult::Accepted;
+                return result;
+            };
+            if (!failAt && fault == FileFault::None)
+            {
+                TransferSaveBytes oversized(MaxTransferSaveBytes + 1, 'x');
+                Trace bounds;
+                TestPersistenceResult emptyResult, oversizedResult;
+                {
+                    Observe observe(bounds, 1);
+                    emptyResult = file.write({}, faults);
+                    oversizedResult = file.write(oversized, faults);
+                }
+                require(emptyResult == TestPersistenceResult::Rejected
+                        && oversizedResult == TestPersistenceResult::Rejected && bounds.mTotal == 0
+                        && faults.mWrites == 0 && faults.mReads == 0,
+                    "file sink touched I/O or allocated before byte bounds");
+                verify();
+                evidence.mRejected += 2;
+                for (auto failure :
+                    { FileFault::Create, FileFault::Write, FileFault::Flush, FileFault::Close, FileFault::Replace })
+                {
+                    faults = { failure, 17 };
+                    require(!fixture.commitDurably(make(), content.mDeclarations, sink) && accepted == 0
+                            && !fixture.failedClosed() && !file.failedClosed(),
+                        "safe file rejection accepted or poisoned fixture");
+                    require(failure != FileFault::Write || faults.mWrites == 1, "partial write seam missed");
+                    verify();
+                    ++evidence.mRejected;
+                }
+                // A foreign/stale staging file must never be truncated/deleted.
+                {
+                    std::ofstream stream(temporary, std::ios::binary);
+                    stream.write(priorBytes.data(), static_cast<std::streamsize>(priorBytes.size()));
+                }
+                faults = {};
+                require(!fixture.commitDurably(make(), content.mDeclarations, sink)
+                        && fileBytes(temporary) == priorBytes && fileBytes(path) == priorBytes,
+                    "exclusive staging overwrote another file");
+                std::filesystem::remove(temporary);
+                verify();
+                ++evidence.mRejected;
+                // Invalid preparation cannot reach encode/write, preserving all guards.
+                auto invalid = make();
+                ++const_cast<PreparedContainerTransfer::IteratorBindings&>(invalid.getIteratorBindings()).mCount;
+                const int priorCalls = calls;
+                bool rejected = false;
+                try
+                {
+                    fixture.commitDurably(std::move(invalid), content.mDeclarations, sink);
+                }
+                catch (const std::invalid_argument&)
+                {
+                    rejected = true;
+                }
+                require(rejected && calls == priorCalls, "protected iterator mismatch reached file sink");
+                verify();
+            }
+            // Include preparation, encoding, accepted installation and retirement.
+            // The earlier pair remains a stale witness, never followed on success.
+            calls = accepted = 0;
+            faults = { fault, 17 };
+            Trace measured;
+            bool committed = false, allocationFailed = false, uncertain = false;
+            {
+                Observe observe(measured, failAt);
+                InPhase phase(Phase::Preparation);
+                try
+                {
+                    committed = fixture.commitDurably(make(), content.mDeclarations, sink);
+                }
+                catch (const std::bad_alloc&)
+                {
+                    allocationFailed = true;
+                }
+                catch (const TestDurabilityUncertain&)
+                {
+                    uncertain = true;
+                }
+                if (committed && failAt)
+                    owner.reset();
+            }
+            require(measured.mTrackingOverflow == 0 && measured.allocations(Phase::Installation) == 0
+                    && measured.allocations(Phase::Retirement) == 0,
+                "file commit tracking overflow or post-acceptance allocation");
+            if (fault != FileFault::None)
+            {
+                require(uncertain && !committed && !allocationFailed && accepted == 0 && calls == 1
+                        && fixture.failedClosed() && file.failedClosed() && measured.mOutstanding == 0
+                        && measured.visits(Phase::Installation) == 0,
+                    "post-replacement uncertainty did not fail closed");
+                verifyOriginal();
+                require(fileBytes(path) == (fault == FileFault::ReplaceError ? priorBytes : expectedBytes)
+                        && !std::filesystem::exists(temporary),
+                    "uncertain replacement left incoherent bytes/staging");
+                faults = {};
+                require(file.write(priorBytes, faults) == TestPersistenceResult::Uncertain && faults.mWrites == 0
+                        && faults.mReads == 0,
+                    "uncertain sink permitted subsequent writes");
+                for (int operation = 0; operation < 3; ++operation)
+                {
+                    bool blocked = false;
+                    try
+                    {
+                        if (operation == 0)
+                            fixture.commitDurably(make(), content.mDeclarations, sink);
+                        else if (operation == 1)
+                            fixture.commit(make(), content.mDeclarations, [](const SerializedPair&) { return true; });
+                        else
+                            fixture.rehearse(make());
+                    }
+                    catch (const TestDurabilityUncertain&)
+                    {
+                        blocked = true;
+                    }
+                    require(blocked && calls == 1 && accepted == 0, "uncertain fixture allowed mutation/retry");
+                    verifyOriginal();
+                }
+                ++evidence.mUncertain;
+                owner.reset(); // Recovery is fresh detached decode only.
+            }
+            else if (failAt && failAt <= allocationCount)
+            {
+                require(allocationFailed && !committed && !uncertain && accepted == 0 && measured.mFailures == 1
+                        && measured.mTotal == failAt && measured.mOutstanding == 0
+                        && measured.visits(Phase::Installation) == 0 && !file.failedClosed(),
+                    "file commit missed allocation failure or partially accepted");
+                verify();
+                Trace retry;
+                faults = { FileFault::None, 17 };
+                {
+                    Observe observe(retry, allocationCount + 1);
+                    committed = fixture.commitDurably(make(), content.mDeclarations, sink);
+                    owner.reset();
+                }
+                require(committed && accepted == 1 && retry.mFailures == 0 && retry.mOutstanding == 0
+                        && retry.mTrackingOverflow == 0 && retry.allocations(Phase::Installation) == 0
+                        && retry.allocations(Phase::Retirement) == 0,
+                    "file commit retry/cleanup failed");
+                verifyUnrelated();
+                require(fileBytes(path) == expectedBytes, "retry persisted wrong bytes");
+                return measured.mTotal;
+            }
+            else
+            {
+                require(committed && !uncertain && !allocationFailed && accepted == 1 && calls == 1
+                        && measured.mFailures == 0 && faults.mWrites > 1 && faults.mReads > 1
+                        && measured.visits(Phase::Installation) == 1 && measured.visits(Phase::Retirement) == 1,
+                    "file acceptance/install/short I/O boundary failed");
+                if (failAt)
+                {
+                    require(measured.mTotal == allocationCount && measured.mOutstanding == 0,
+                        "accepted file commit allocated beyond measured boundary or leaked");
+                    verifyUnrelated();
+                    return measured.mTotal;
+                }
+                // Independent preparations own different nodes/registrations.
+                // Compare semantic bindings, then resolve every installed node.
+                const auto registry = fixture.mModel.snapshotPtrRegistry();
+                require(registry.mRevision == expectedRegistry.mRevision
+                        && registry.mLastGenerated == expectedRegistry.mLastGenerated
+                        && registry.mEntries.size() == expectedRegistry.mEntries.size(),
+                    "file commit installed wrong registry metadata");
+                for (const auto& [id, binding] : expectedRegistry.mEntries)
+                {
+                    const auto& actual = registry.mEntries.at(id);
+                    require(actual.getCell() == binding.getCell() && actual.getContainer() == binding.getContainer(),
+                        "file commit installed wrong registry ownership");
+                }
+                for (const auto* storage : { &fixture.sourceStorage(), &fixture.destinationStorage() })
+                    for (const auto& node : *storage)
+                        require(fixture.mModel.getPtr(node.mRef.getRefNum()).mRef == &node
+                                && node.mWorldModel == &fixture.mModel,
+                            "file commit registered a different node");
+                const auto checkScripts = [](const auto& actual, const auto& wanted) {
+                    require(actual.mCursor == wanted.mCursor && actual.mEntries.size() == wanted.mEntries.size(),
+                        "file commit installed wrong script membership/cursor");
+                    for (size_t i = 0; i < actual.mEntries.size(); ++i)
+                        require(actual.mEntries[i].getScript() == wanted.mEntries[i].getScript()
+                                && actual.mEntries[i].getCell() == wanted.mEntries[i].getCell()
+                                && actual.mEntries[i].getContainer() == wanted.mEntries[i].getContainer(),
+                            "file commit installed wrong script order/ownership");
+                };
+                checkScripts(fixture.mSourceScripts.snapshot(), expectedScripts);
+                checkScripts(fixture.mDestinationAdd.mLocalScripts->snapshot(), expectedDestinationScripts);
+                SerializedPair installed;
+                saveInstalled(installed);
+                checkSavedValues(installed, expectedSave);
+                owner.reset();
+            }
+            verifyUnrelated();
+            // Fresh handle and fresh owned state after fixture destruction. This
+            // does not authorize live installation, even when outcome was uncertain.
+            SerializedPair decoded;
+            FileFaults fresh;
+            loadFile(path, bindings, decoded, fresh);
+            const auto& coherentSave = fault == FileFault::ReplaceError ? prior : expectedSave;
+            const auto& coherentBytes = fault == FileFault::ReplaceError ? priorBytes : expectedBytes;
+            checkSavedValues(decoded, coherentSave);
+            std::unique_ptr<const RestoredPair> restored;
+            restorePair(decoded, content, restored);
+            if (fault != FileFault::ReplaceError)
+                checkRestored(*restored, expected);
+            SerializedPair savedAgain;
+            serializePair(*restored, content.mDeclarations, savedAgain);
+            checkSavedValues(savedAgain, coherentSave);
+            TransferSaveBytes again;
+            encodeTransferSave(savedAgain, bindings, again);
+            require(again == coherentBytes && fileBytes(path) == coherentBytes && !std::filesystem::exists(temporary),
+                "reopen/decode/detached restore/save lost accepted bytes or leaked staging");
+            if (exhaustive && fault == FileFault::None)
+                checkFileReads(path, expectedBytes, expectedSave, bindings, evidence);
+            return measured.mTotal;
+        }
+
         template <class Make, class Incomplete, class Verify, class Unrelated>
         size_t checkCommitCase(std::unique_ptr<DisposableTransferRehearsal>& owner, Make make, Incomplete incomplete,
             Verify verifyOriginal, Unrelated verifyUnrelated, const RestoreContent& content, size_t failAt,
@@ -2434,16 +2912,19 @@ namespace MWWorld::Testing
         LocalsRestore,
         Restore,
         Codec,
+        FileSink,
         Commit
     };
 
-    static void checkTransferRehearsalCases(const ESMStore& content, AllocationCheck allocationCheck)
+    static void checkTransferRehearsalCases(
+        const ESMStore& content, AllocationCheck allocationCheck, const std::filesystem::path& scratch = {})
     {
         using Rehearsal = DisposableTransferRehearsal;
         using Stage = Rehearsal::Stage;
         using Pair = PreparedContainerTransfer;
         const bool localsRestore = allocationCheck == AllocationCheck::LocalsRestore;
-        const bool codec = allocationCheck == AllocationCheck::Codec;
+        const bool fileSink = allocationCheck == AllocationCheck::FileSink;
+        const bool codec = allocationCheck == AllocationCheck::Codec || fileSink;
         const bool commit = allocationCheck == AllocationCheck::Commit || codec;
         const bool inventoryRestore = allocationCheck == AllocationCheck::Restore || commit;
         const bool serialization = allocationCheck == AllocationCheck::Serialization
@@ -2482,6 +2963,8 @@ namespace MWWorld::Testing
         ManualRef plain(store, plainId), scripted(store, scriptedId);
         size_t cases = 0, restoredLocals = 0, localRejections = 0, codecAllocations = 0, codecRejections = 0;
         Allocations::Trace totals;
+        FileEvidence fileEvidence;
+        FileFault fileFault = FileFault::None;
         const bool allocationFailures = allocationCheck != AllocationCheck::None;
         if (allocationFailures)
             checkAllocationHooks();
@@ -2668,6 +3151,12 @@ namespace MWWorld::Testing
                                     }
                                     const std::array bases{ store.get<ESM::Miscellaneous>().find(plainId),
                                         store.get<ESM::Miscellaneous>().find(scriptedId) };
+                                    if (fileSink)
+                                        return checkFileCommitCase(fixtureOwner, make, verifyOriginal, verifyUnrelated,
+                                            { bases, script, scripts.getLocals(scriptId) }, scratch, commitFailAt,
+                                            commitAllocations, fileFault,
+                                            !shared && scriptedItem && !stack && quantity == 1 && cursorPosition == 0,
+                                            fileEvidence);
                                     return checkCommitCase(fixtureOwner, make, incomplete, verifyOriginal,
                                         verifyUnrelated, { bases, script, scripts.getLocals(scriptId) }, commitFailAt,
                                         commitAllocations, codec,
@@ -3001,6 +3490,27 @@ namespace MWWorld::Testing
                                 const size_t allocations = run(0, 0);
                                 ++cases;
                                 totals.mTotal += allocations;
+                                if (fileSink)
+                                {
+                                    for (auto fault : { FileFault::ReplaceError, FileFault::AfterReplace,
+                                             FileFault::Barrier, FileFault::ReadOpen, FileFault::ReadSize,
+                                             FileFault::Read, FileFault::ReadEof, FileFault::ReadClose })
+                                    {
+                                        fileFault = fault;
+                                        run(0, 0);
+                                    }
+                                    fileFault = FileFault::None;
+                                    // A representative scripted fixture exhausts all
+                                    // observed ordinals; every matrix case exercises I/O.
+                                    if (shared || !scriptedItem || stack || quantity != 1 || cursorPosition != 0)
+                                    {
+                                        // Complete successful cleanup is observed in
+                                        // every case, with the next ordinal armed.
+                                        run(allocations + 1, allocations);
+                                        continue;
+                                    }
+                                    fileEvidence.mAllocations += allocations;
+                                }
                                 for (size_t failAt = 1; failAt <= allocations + 1; ++failAt)
                                 {
                                     try
@@ -3023,6 +3533,16 @@ namespace MWWorld::Testing
         if (allocationFailures)
         {
             require(cases == 48, "allocation failure matrix lost a fixture combination");
+            if (fileSink)
+            {
+                std::cout << "Inventory file sink: cases=" << cases
+                          << " safe-file-rejections=" << fileEvidence.mRejected
+                          << " fail-closed-outcomes=" << fileEvidence.mUncertain
+                          << " invalid-file-rejections=" << fileEvidence.mMalformed
+                          << " observed-allocation-failures=" << fileEvidence.mAllocations
+                          << " installation=0 retirement=0 remaining-after-cleanup=0\n";
+                return;
+            }
             if (codec)
             {
                 require(codecRejections > 0 && codecAllocations > 0, "codec coverage missing");
@@ -3118,6 +3638,25 @@ namespace MWWorld::Testing
     void checkTransferCodec(const ESMStore& content)
     {
         checkTransferRehearsalCases(content, AllocationCheck::Codec);
+    }
+
+    void checkTransferFileSink(const ESMStore& content, const std::filesystem::path& scratch)
+    {
+        // Refuse reuse of an existing directory. Cleanup only this owned leaf;
+        // the caller's other scratch fixtures/content are never removed.
+        require(std::filesystem::create_directory(scratch), "file sink scratch directory already exists");
+        struct Cleanup
+        {
+            const std::filesystem::path& mPath;
+            ~Cleanup()
+            {
+                std::error_code ignored;
+                std::filesystem::remove_all(mPath, ignored);
+            }
+        } cleanup{ scratch };
+        checkTransferRehearsalCases(content, AllocationCheck::FileSink, scratch);
+        require(std::filesystem::remove(scratch / "inventory.bin") && std::filesystem::is_empty(scratch),
+            "file sink test left unowned staging files");
     }
 
     void checkTransferCommit(const ESMStore& content)
