@@ -390,6 +390,13 @@ namespace MWWorld
             localScripts.remove(this);
     }
 
+    CellRef CellRef::copyWithCount(int value) const
+    {
+        CellRef result(*this);
+        result.setCountImpl(value);
+        return result;
+    }
+
     bool CellRef::setCountImpl(int value)
     {
         if (value != getCount(false))

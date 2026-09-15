@@ -260,6 +260,10 @@ namespace MWWorld
         void setCount(int value);
         void setCount(int value, LocalScripts& localScripts);
 
+        // Prepare a value using stock count/change tracking, including zero, without
+        // changing this reference or cleaning scripts. Cleanup remains a separate intent.
+        CellRef copyWithCount(int value) const;
+
         // Write the content of this CellRef into the given ObjectState
         void writeState(ESM::ObjectState& state) const;
 

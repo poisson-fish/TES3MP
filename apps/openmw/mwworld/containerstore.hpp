@@ -151,6 +151,9 @@ namespace MWWorld
         ~PreparedContainerTransfer();
 
         const PreparedContainerRemove& getRemoval() const;
+        // Owned post-removal source value, including zero for full removal.
+        // Retains applicable source RefData; detached with no script cleanup.
+        ConstPtr getSourceItem() const;
         // Incoming source-derived value, with the removal quantity.
         ConstPtr getItem() const;
         // Owned post-add value: preserves the selected destination stack's state,
@@ -568,8 +571,8 @@ namespace MWWorld
         void validateTransferRemoval(const PreparedContainerRemove& prepared, const ConstPtr& sourceOwner,
             const WorldModel& worldModel, const LocalScripts* localScripts = nullptr) const;
 
-        // Paired preparation only. Captures removal, detached incoming and destination
-        // values, stacking, script intents and both notification consumers as one unit.
+        // Paired preparation only. Captures removal, detached source/incoming/destination
+        // results, stacking, script intents and both notification consumers as one unit.
         // Both contexts require LocalScripts, even for plain registration absence.
         // No live removal, installation, effects, persistence or atomic transfer.
         PreparedContainerTransfer prepareTransfer(const ConstPtr& item, int count, ContainerStore& destination,

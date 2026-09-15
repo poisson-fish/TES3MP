@@ -803,6 +803,8 @@ void MWWorld::ContainerStore::validateTransferStacking(
 struct MWWorld::PreparedContainerTransfer::State
 {
     PreparedContainerRemove mRemoval;
+    // Separate from the original removal witness used to detect stale live state.
+    std::unique_ptr<LiveCellRef<ESM::Miscellaneous>> mSourceItem;
     PreparedContainerAdd mAddition;
     std::unique_ptr<LiveCellRef<ESM::Miscellaneous>> mAddedValues;
     // Only an existing stack needs a second result. New stacks retain mAddition's
@@ -850,6 +852,11 @@ const MWWorld::PreparedContainerRemove& MWWorld::PreparedContainerTransfer::getR
 MWWorld::ConstPtr MWWorld::PreparedContainerTransfer::getItem() const
 {
     return ConstPtr(state().mAddition.mItem.get());
+}
+
+MWWorld::ConstPtr MWWorld::PreparedContainerTransfer::getSourceItem() const
+{
+    return ConstPtr(state().mSourceItem.get());
 }
 
 MWWorld::ConstPtr MWWorld::PreparedContainerTransfer::getDestinationItem() const
@@ -958,6 +965,8 @@ MWWorld::PreparedContainerTransfer MWWorld::ContainerStore::prepareTransfer(cons
     validateTransferRegistration(*state->mRemoval.mScriptState, item, *this, sourceContext.mContainer.mCell);
     state->mClearSelection
         = state->mRemoval.getRemainingCount() == 0 && mSelectedEnchantItem != end() && *mSelectedEnchantItem == item;
+    state->mSourceItem = copyContainerTransferItem(ConstPtr(&source));
+    state->mSourceItem->mRef = source.mRef.copyWithCount(state->mRemoval.getRemainingCount());
     for (const auto& ref : destination.mLists.mMiscItems.mList)
     {
         if (destinationContext.mStore.get<ESM::Miscellaneous>().search(ref.mRef.getRefId()) != ref.mBase)
@@ -1014,6 +1023,19 @@ void MWWorld::ContainerStore::validateTransfer(const PreparedContainerTransfer& 
         throw std::invalid_argument("Container transfer preparation context changed");
     validateTransferRemoval(state.mRemoval, sourceContext.mContainer, worldModel, &sourceContext.mLocalScripts);
     destination.validateTransferStacking(state.mAddition, destinationContext);
+    const auto& source = *state.mRemoval.mItemState;
+    if (state.mRemoval.getCount() <= 0)
+        throw std::invalid_argument("Container transfer preparation removal count changed");
+    const auto removal = prepareRemoveCount(source.mRef, state.mRemoval.getCount());
+    const auto expectedSource = source.mRef.copyWithCount(removal.mRemainingCount);
+    const auto* sourceResult = state.mSourceItem.get();
+    if (removal.mRemoved != state.mRemoval.getCount() || removal.mRemainingCount != state.mRemoval.getRemainingCount()
+        || !sourceResult || sourceResult->mBase != source.mBase || sourceResult->mWorldModel
+        || sourceResult->mRef.getRefNum().isSet() || sourceResult->mData.getBaseNode()
+        || miscTransferValues(sourceResult->mRef) != miscTransferValues(expectedSource)
+        || sourceResult->mRef.hasChanged() != expectedSource.hasChanged()
+        || !sourceResult->mData.matchesContainerTransferState(source.mData))
+        throw std::invalid_argument("Container transfer preparation source item values changed");
     const auto& item = *state.mAddition.mItem;
     if (!sameTransferValues(item, *state.mAddedValues) || item.mData.getBaseNode() || item.mRef.getRefNum().isSet()
         || item.mWorldModel || item.mRef.getCount(false) != state.mRemoval.getCount())

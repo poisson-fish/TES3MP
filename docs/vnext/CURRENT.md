@@ -5,10 +5,10 @@
 - **Direction:** OpenMW-backed authoritative cooperative multiplayer; see
   [README.md](README.md) and [DECISIONS.md](DECISIONS.md).
 - **Milestone:** M2 in [PLAN.md](PLAN.md). Paired non-gold MISC preparation now
-  owns the proposed existing destination stack value as well as source removal,
-  incoming values and deferred effects. This is not an atomic transfer.
-- **Next action:** prepare an owned post-removal source MISC value, including
-  zero-count full removal without script cleanup, and bind it into the pair.
+  owns the post-removal source value, including zero for full removal, alongside
+  incoming/destination values and deferred effects. This is not an atomic transfer.
+- **Next action:** match stock new-stack RefData activation-flag handling in
+  detached MISC preparation while preserving source RefData and scripted OnPCAdd ordering.
 - **Checkpoint:** `8850e745c298c6de629ef9a5a26bbdddf6aa56e3` preserves the working
   gameplay implementation before the engine-backed pivot.
 
@@ -16,51 +16,50 @@
 
 [ContainerStore::prepareTransfer](../../apps/openmw/mwworld/containerstore.cpp)
 returns one move-only `PreparedContainerTransfer`. Private owned state binds
-source removal, normalized incoming and destination values, stack/count selection,
-script deregistration/registration and both notification consumers. Public access
-exposes const item/removal views, scalar decisions and a copied registration value;
-it cannot independently replace values or execute effects. Moved-from decisions
-reject validation.
+source removal, source/incoming/destination results, stack selection, script
+intents and both notification consumers to one removal quantity. Public access
+exposes const item/removal views, scalar decisions and a copied registration value.
+Moved-from decisions reject validation and source-result access.
 
-Stock stacking changes the selected destination reference. Its owned result now
-comes from that exact destination witness, preserving applicable RefData even
-when compatible source/destination values differ. Shared stock normalization
-resets ownership and CellRef position; stock signed arithmetic adds the removal
-quantity. Scene links and live identity are omitted. The incoming value remains
-source-derived with that same quantity. `getDestinationItem()` returns the owned
-stack result or the existing incoming value for a new stack.
+`getSourceItem()` exposes an owned post-removal value derived from the original
+source witness. It preserves applicable RefData, ownership and CellRef position,
+with independent locals/animation buffers and no scene link or live identity.
+[CellRef::copyWithCount](../../apps/openmw/mwworld/cellref.cpp) shares stock
+count/change tracking without cleanup, including zero. Stock `setCount` callers
+retain their existing cleanup behavior. Partial removal preserves the signed
+remainder and registration; full removal proposes zero and deferred deregistration.
 
-Scripted items never stack. Their existing detached preparation, registration and
-OnPCAdd ordering are preserved: explicit player destinations use a null script
-cell; nonplayers retain the incoming local and use the owner cell. Partial source
-removal preserves the signed remainder and registration; full removal proposes
-zero and deregistration without cleanup. Inherited new-stack preparation retains
-activation flags that stock copying clears; complete new-stack parity is not claimed.
+The original source witness remains separate. Joint validation first checks live
+source state, then derives the expected source result from that witness and the
+removal quantity, checking count, CellRef values/change tracking, RefData and
+detachment. Changing live state to the proposed remainder still rejects.
 
-`validateTransfer` checks both stores/owners, WorldModel mappings, content-store
-identity, player/service/listener bindings, source selection relevant to full
-removal, script registrations and owned item values. Both contexts require
-LocalScripts bound to the content store, including plain-item registration
-absence. Destination witnesses include raw/dormant MISC nodes, CellRef values,
-independent RefData and registration identity. Validation derives the expected
-destination result from the selected witness and removal quantity, checking
-normalized values, signed count, RefData and detachment jointly. It uses current
-members, without script service calls or saved inventory/script iterators.
+Existing destination stacks retain their own applicable RefData. Shared stock
+normalization resets ownership and CellRef position; signed arithmetic adds the
+same removal quantity. The incoming value remains source-derived.
+`getDestinationItem()` returns the owned stack result or the incoming value for a
+new stack. Scripted items never stack; detached registration and OnPCAdd ordering
+remain unchanged. Explicit player destinations use a null script cell; nonplayers
+retain the incoming local and use the owner cell. Inherited new-stack preparation
+retains activation flags that stock copying clears; complete new-stack parity is
+not claimed.
 
-Each base store has an owned storage identity. Copy/move replacement invalidates
-paired witnesses even when list assignment reuses node addresses and item IDs.
-Immutable LocalScripts registration identities detect erase/reinsert; address-only
-lookup remains safe past dangling registry Ptrs. These checks do not track every
-mutation: ordinary values may change and return to their captured state. Content
-records are borrowed and immutable; stores, owners/cells, WorldModel and script
-services must outlive the decision. Notification callables are owned snapshots,
-not re-sourced or compared against callables in later validation contexts.
+Validation also checks stores/owners, WorldModel mappings, content-store identity,
+player/service/listener bindings, full-removal selection and registrations.
+Both contexts require LocalScripts bound to the content store, including plain
+registration absence. Destination witnesses include dormant MISC nodes. Only
+current inventory members are read; no saved inventory/script iterators or script
+service calls are used. Storage identities reject copy/move replacement even
+when nodes/IDs are reused; immutable registration identities detect erase/reinsert.
+Ordinary values may change and return to their captured state.
 
-Preparation, validation, rejection and discard leave live inventories, selection,
-scripts, locals, registry mappings and notifications unchanged. There is no live
-removal, deregistration, destination installation or effect execution API in the
-pair. Stock callers continue through the shared engine rules; networking boundaries
-and production authority are unchanged.
+Content records remain borrowed and immutable. Stores, owners/cells, WorldModel
+and script services must outlive the decision. Notification callables are owned
+snapshots, not re-sourced from later validation contexts. Preparation, validation,
+rejection, moves and discard leave live inventories, selection, scripts, locals,
+registry mappings and notifications unchanged. No live removal, deregistration,
+installation or effect execution API is introduced. Stock callers, networking
+boundaries and production authority remain unchanged.
 
 ## Fresh verification
 
@@ -72,23 +71,22 @@ Windows MSVC RelWithDebInfo, `build/vnext-product`, individually:
 - Documentation budget, local-link and patch-registry semantic-field guards:
   each exit 0.
 
-The expanded synthetic preparation filter compares results with stock add/remove
-in disposable stores with separate owners, WorldModel and script registry. It
-covers both directions, positive/negative source and destination counts,
-partial/full source removal, differing compatible RefData, new/scripted stacks,
-player contexts, move/discard, stale/replaced destinations and corrupted owned
-results. Existing-stack RefData, including activation flags, matches stock.
+The expanded synthetic preparation filter compares proposed source values and
+applicable RefData with stock removal in disposable stores with separate owners,
+WorldModel and scripts. It also retains stock destination comparisons. Coverage
+includes both directions, positive/negative source and destination counts,
+partial/full removal, plain/scripted items, existing/new stacks, player contexts,
+stale/replaced sources, corrupted results, move assignment and discard.
 
 Snapshots compare live values/buffers, weight, selection, bindings, WorldModel
 mappings/revision/ID counter, script membership/cursor and notifications. Late
-consumer-copy exceptions unwind after the destination result exists; lifetime
-counters check notification unwinding and item/OSG observers check discard of
-both owned values. Destination custom-state and overflow rejection are covered.
-No Environment, World, UI or Lua runtime is initialized; actors are synthetic
-NPC identities with real engine base stores/cells.
+consumer-copy failures unwind after all results exist; lifetime counters and OSG
+observers check source/incoming/destination discard and replaced source-result
+ownership. No Environment, World, UI or Lua runtime is initialized; actors are
+synthetic NPC identities with real engine base stores/cells.
 
-Logs: `build/logs/native-destination-value-*`. No complete suites, expensive gates
-or upstream baseline tests ran.
+Logs: `build/logs/native-source-value-*`. No complete suites, expensive gates or
+upstream baseline tests ran.
 
 ## Remaining limits and inherited evidence
 
@@ -102,4 +100,4 @@ Inherited M1 real-Morrowind/enchantment-charge evidence under
 remains unverified. Independent networking/standalone targets and the migration
 base are unchanged. Broad openmw-lib rendering dependencies still need extraction
 before production headless packaging. Whole-baseline provenance debt remains;
-only touched patch-registry entries changed.
+only the touched patch-registry entry changed.
