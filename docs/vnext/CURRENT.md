@@ -6,92 +6,94 @@
   [README.md](README.md) and [DECISIONS.md](DECISIONS.md).
 - **Milestone:** M2 in [PLAN.md](PLAN.md). Fully resolved non-gold MISC pairs
   support allocation-tested preparation, reversible effect-free rehearsal, and
-  owned RefData serialization without Environment. Production installation
-  remains unavailable; no live atomic transfer exists.
-- **Next action:** make TES3 `CellRef::writeState` failure-atomic, then extend the
-  test-only complete-pair serialization composition to stage detached non-gold
-  MISC CellRef plus RefData into separate source/destination `ESM::ObjectState`
-  collections. Keep proposed identities as separate owned metadata; never assign
-  them to detached nodes. Verify counts, soul, charge/remainder, enchantment
-  charge, ownership and remaining CellRef fields alongside locals, flags,
-  position and animation. Inject every observed allocation failure individually;
-  preserve caller output and original fixtures and prove fresh serialization
-  after each failure. No installation, file durability or effects.
+  owned CellRef plus RefData serialization without Environment. Production
+  installation remains unavailable; no live atomic transfer exists.
+- **Next action:** add a failure-atomic explicit-declaration named-locals read
+  overload for already configured `MWScript::Locals`, consuming this seam's
+  modern named `ESM::Locals` output. Validate declaration/value names, types,
+  counts and numeric ranges before publication; reject malformed input without
+  changing locals or caller-owned serialized data. Preserve existing stock
+  tolerant/legacy read semantics. Individually inject allocations, verify safe
+  cleanup and fresh read/write round trips after every failure. Keep this bounded
+  to locals restoration; complete ObjectState restoration remains deferred.
 - **Checkpoint:** `8850e745c298c6de629ef9a5a26bbdddf6aa56e3` preserves the working
   gameplay implementation before the engine-backed pivot.
 
 ## Implemented M2 slice
 
-[MWScript locals](../../apps/openmw/mwscript/locals.cpp) and
-[RefData](../../apps/openmw/mwworld/refdata.cpp) now have explicit-declaration
-`write` overloads. Stock wrappers share their serialization behavior. Initialized
-short/long/float declaration counts must match values exactly; empty names and
-same-type/cross-type duplicates reject before staging. Locals retain stock named
-append order and integer/float variant types. RefData stages locals and animation
-before publishing flags, enabled state, position and animation through nonthrowing
-operations. Unrelated caller ObjectState fields remain intact. Uninitialized
-locals write nothing; initialized scripts with no locals still set `mHasLocals`.
+TES3 [CellRef::writeState](../../apps/openmw/mwworld/cellref.cpp) copies allocating
+fields into a temporary before nonthrowing move assignment to the caller's
+`mRef`. Unrelated ObjectState fields and TES4 no-op behavior remain intact.
+Direct checks cover every CellRef field, signed/zero/positive counts, unchanged
+input/change tracking and unrelated caller values/storage.
 
-The new `inventory-transfer-serialization` filter in
+The new `inventory-transfer-object-state` filter in
 [transfer tests](../../apps/tes3mp-server/native/transfer_rehearsal_tests.cpp)
-serializes only const detached RefData after full `validateTransfer` and complete
-registry/script resolution. Its composition and
-[allocation instrumentation](../../apps/tes3mp-server/native/test_allocations.hpp)
-remain test-only. No production installation or persistence API was added.
+extends the test-only complete-pair composition to separate source/destination
+`ESM::ObjectState` collections with separate owned proposed-identity vectors.
+Full current `validateTransfer` and complete registry/script resolution precede
+all owned-node reads. CellRef and RefData use their engine serializers with
+explicit script declarations. Both collections publish only after all staging
+succeeds. Proposed identities are never assigned to serialized or detached
+CellRefs; outputs remain valid after pair destruction.
 
 All 48 synthetic combinations cover plain/scripted MISC, existing/empty
 destinations, full/partial removal, shared/distinct services and begin/middle/end
-script cursors, including dormant nodes and selections. Checks exercise two
-locals of each type, allocating names, signed values, activation flags, enabled
-state, position and multi-entry animation with a wide loop count. Direct locals
-and RefData calls also preserve pre-existing caller data. Nineteen malformed
-shapes cause 38 direct rejections; malformed pair declarations, 48 incomplete
-pairs and 48 corrupted completeness reports preserve caller output.
+script cursors, including dormant nodes/selections. Checks cover counts, soul,
+charge/remainder, enchantment charge, ownership, global/faction data, scale,
+teleport/destination, locks, key/trap, reference-blocked state and original
+position; two short/long/float names, types and values; flags, enabled state,
+current position and multi-entry animation with a wide loop count.
 
-Every observed serialization allocation is failed individually. Each failure
-propagates `std::bad_alloc`, performs no further allocation during cleanup and
-releases every tracked block. Fresh serialization succeeds after every failure.
-Exact snapshots preserve output values/storage, detached nodes/lifetimes,
-original inventories/identities/locals/selections, script nodes/cursors, registry
-metadata, cache storage and listeners. Notifications and script execution remain
-unchanged, as do the supplied store and independent WorldModel. Rehearsal permits
-fresh serialization; discarding the pair expires owned reference lifetimes.
+Every observed successful serialization allocation is failed individually.
+Failures preserve caller output values/storage and original fixtures, propagate
+`std::bad_alloc`, allocate nothing further during cleanup and release every
+tracked block. Fresh serialization succeeds after each failure. Each filter
+also covers 19 malformed shapes/38 direct rejections, 13 malformed pair
+declarations, 48 incomplete pairs and 48 corrupted completeness reports.
+Malformed aggregate staging releases all tracked allocations.
 
 Complete-resolution validation, protected pair/context/collection bindings,
-separate proposed identities, ownership/storage/lifetime witnesses, read-only
-views and owned-node/iterator guards remain intact. Unresolved keys are never
-followed and no additional objects are resolved. Shared services coalesce;
-distinct services retain source-then-destination order.
+separate identities, ownership/storage/lifetime witnesses, owned-node/iterator
+guards and read-only views remain intact. No unresolved keys are followed or
+additional objects resolved. Shared services coalesce; distinct services retain
+source-then-destination order. Original inventories, registry metadata, script
+nodes/cursors, selections, cache storage, listeners, supplied store and an
+independent WorldModel remain unchanged. Notifications and script execution
+remain unchanged; rehearsal still permits fresh serialization.
 
 ## Fresh verification
 
 Windows MSVC 14.51 (`scripts/setup_msvc_env.ps1 -PreferLatest`), RelWithDebInfo,
-`build/vnext-product`, individually, all exit **0**:
+`build/vnext-product`, individually, final exit **0**:
 
-- Focused `tes3mp_native_loadout_tests` build and warning-cleanup rebuild.
-- `inventory-transfer-serialization`: **5,217** individual allocation failures,
+- Focused `tes3mp_native_loadout_tests` build and two incremental rebuilds.
+- `inventory-transfer-object-state`: **6,219** individual allocation failures,
   **48** cases, remaining tracked allocations after cleanup **0**.
-- `inventory-transfer-preparation`.
-- `inventory-transfer-rehearsal`.
+- `inventory-transfer-serialization`: **5,273** individual failures, **48** cases.
+- `inventory-transfer-preparation` and `inventory-transfer-rehearsal`.
 - `inventory-transfer-preparation-allocations`: **13,970** individual failures,
   including **48** final consumer-copy allocations; peak outstanding **237**.
 - `inventory-transfer-rehearsal-allocations`: **6,998** individual failures;
-  validation **3,454**, setup **90**, revalidation **3,454**; exchange/rollback **0**.
-- Documentation budget/links, patch-registry semantic fields, formatting and
-  whitespace.
+  validation **3,454**, setup **90**, revalidation **3,454**, exchange/rollback **0**.
+- Documentation budget/links, patch-registry semantic fields, formatting and whitespace.
 
-No check failed. Logs use `build/logs/native-serialization-` with `build.log`,
-`rebuild.log`, `test.log`, `preparation.log`, `rehearsal.log`,
-`preparation-allocations.log`, `rehearsal-allocations.log` and named review logs.
+The first ObjectState run exited **1** because the new test incorrectly assumed
+`setCharge()` marks CellRef changed. The fixture now uses `setEnchantmentCharge()`;
+its rebuild and same-filter rerun passed before continuing. Formatting initially
+exited **1** for include-line endings; normalization and the same check passed.
+Logs are under
+`build/logs/native-object-state-`, including `test.log`, `test-rerun.log`,
+`fixture-fix-build.log` and individually named regression/review logs.
 No complete suites, expensive gates or upstream baseline tests ran.
 
 ## Remaining limits and inherited evidence
 
-This is an owned RefData serialization seam, not coherent inventory persistence.
-CellRef serialization, durable files, production installation and notification
-execution remain unavailable in this composition. Unresolved stores, equipment,
-gold/other types, Lua/custom-state transfer, persistence and stable multiplayer
-mapping remain outside scope.
+This remains an owned serialization seam. Complete restoration, coherent
+inventory persistence, durable files, production installation and notification
+execution remain unavailable. Unresolved stores, equipment, gold/other types,
+Lua/custom-state transfer and stable multiplayer mapping remain outside scope.
+Disposable ownership and allocation instrumentation remain test-only.
 
 Allocation coverage excludes direct C allocation, other threads and external
 libraries' private allocators. Borrowed services must outlive use. Validation

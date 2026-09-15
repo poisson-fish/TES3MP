@@ -38,6 +38,7 @@ namespace MWWorld::Testing
             detached.getLocals() = {};
             ESM::ObjectState state;
             detached.write(state);
+            ref.writeState(state);
             std::vector<std::tuple<std::string, float, bool, uint64_t>> animations;
             for (const auto& animation : data.getAnimationState().mScriptedAnims)
                 animations.emplace_back(animation.mGroup, animation.mTime, animation.mAbsolute, animation.mLoopCount);
@@ -51,7 +52,8 @@ namespace MWWorld::Testing
                 data.getAnimationState().mScriptedAnims.data(), data.getAnimationState().mScriptedAnims.capacity(),
                 animations, data.isDeletedByContentFile(), ref.getRefId(), ref.getGlobalVariable(), ref.getFaction(),
                 ref.getFactionRank(), ref.getScale(), ref.getTeleport(), ref.getDoorDest(), ref.getDestCell(),
-                ref.getLockLevel(), ref.getKey(), ref.getTrap() };
+                ref.getLockLevel(), ref.getKey(), ref.getTrap(), state.mRef.mIsLocked, state.mRef.mReferenceBlocked,
+                ref.getGlobalVariable().data(), ref.getGlobalVariable().capacity() };
         }
 
         auto snapshot(const DisposableTransferRehearsal& fixture)
@@ -241,24 +243,28 @@ namespace MWWorld::Testing
             return result;
         }
 
+        auto cellRefValues(const ESM::CellRef& r)
+        {
+            return std::tuple{ r.mRefNum, r.mRefID, r.mScale, r.mOwner, r.mGlobalVariable, r.mSoul, r.mFaction,
+                r.mFactionRank, r.mChargeInt, r.mChargeIntRemainder, r.mEnchantmentCharge, r.mCount, r.mTeleport,
+                r.mDoorDest, r.mDestCell, r.mLockLevel, r.mIsLocked, r.mKey, r.mTrap, r.mReferenceBlocked, r.mPos };
+        }
+
         auto objectOutputState(const ESM::ObjectState& state)
         {
             const auto& r = state.mRef;
-            const auto ref = std::tuple{ r.mRefNum, r.mRefID, r.mScale, r.mOwner, r.mGlobalVariable, r.mSoul,
-                r.mFaction, r.mFactionRank, r.mChargeInt, r.mChargeIntRemainder, r.mEnchantmentCharge, r.mCount,
-                r.mTeleport, r.mDoorDest, r.mDestCell, r.mLockLevel, r.mIsLocked, r.mKey, r.mTrap, r.mReferenceBlocked,
-                r.mPos };
             std::vector<std::tuple<int32_t, std::string, size_t>> lua;
             for (const auto& script : state.mLuaScripts.mScripts)
                 lua.emplace_back(script.mScriptId, script.mData, script.mTimers.size());
             std::vector<std::pair<const char*, size_t>> strings;
             for (const auto& animation : state.mAnimationState.mScriptedAnims)
                 strings.emplace_back(animation.mGroup.data(), animation.mGroup.capacity());
-            return std::tuple{ ref, localOutputState(state.mLocals), lua, state.mLuaScripts.mScripts.data(),
-                state.mLuaScripts.mScripts.capacity(), state.mPosition, animationValues(state.mAnimationState),
-                state.mAnimationState.mScriptedAnims.data(), state.mAnimationState.mScriptedAnims.capacity(), strings,
-                state.mActorIdConverter, state.mVersion, state.mFlags, state.mHasLocals, state.mEnabled,
-                state.mHasCustomState };
+            return std::tuple{ cellRefValues(r), r.mGlobalVariable.data(), r.mGlobalVariable.capacity(),
+                r.mDestCell.data(), r.mDestCell.capacity(), localOutputState(state.mLocals), lua,
+                state.mLuaScripts.mScripts.data(), state.mLuaScripts.mScripts.capacity(), state.mPosition,
+                animationValues(state.mAnimationState), state.mAnimationState.mScriptedAnims.data(),
+                state.mAnimationState.mScriptedAnims.capacity(), strings, state.mActorIdConverter, state.mVersion,
+                state.mFlags, state.mHasLocals, state.mEnabled, state.mHasCustomState };
         }
 
         ESM::ObjectState outputSentinel()
@@ -267,6 +273,7 @@ namespace MWWorld::Testing
             state.blank();
             state.mRef.mCount = 73;
             state.mRef.mGlobalVariable = "unrelated caller cellref sentinel";
+            state.mRef.mDestCell = "unrelated caller destination cell sentinel";
             state.mLocals.mVariables.emplace_back("existing caller local sentinel", ESM::Variant(91.f));
             state.mLuaScripts.mScripts.push_back({ 12, "unrelated caller Lua sentinel", {} });
             state.mFlags = 93;
@@ -303,6 +310,113 @@ namespace MWWorld::Testing
             for (const auto& state : output)
                 states.push_back(objectOutputState(state));
             return std::tuple{ output.data(), output.capacity(), states };
+        }
+
+        // Owned test output only: these associations never become node RefNums.
+        // No borrowed Ptr, registry key to follow, or production persistence API.
+        struct SerializedInventory
+        {
+            std::vector<ESM::ObjectState> mObjects;
+            std::vector<ESM::RefNum> mProposedIdentities;
+
+            void swap(SerializedInventory& other) noexcept
+            {
+                static_assert(noexcept(mObjects.swap(other.mObjects)));
+                static_assert(noexcept(mProposedIdentities.swap(other.mProposedIdentities)));
+                mObjects.swap(other.mObjects);
+                mProposedIdentities.swap(other.mProposedIdentities);
+            }
+        };
+
+        struct SerializedPair
+        {
+            SerializedInventory mSource, mDestination;
+        };
+
+        void serializePair(const DisposableTransferRehearsal& fixture, const PreparedContainerTransfer& pair,
+            const Compiler::Locals& declarations, SerializedPair& output)
+        {
+            if (!fixture.mSource.validateTransfer(pair, fixture.mDestination, fixture.mRemoval, fixture.mDestinationAdd)
+                    .isComplete())
+                throw std::invalid_argument("ObjectState serialization requires complete resolution");
+            SerializedPair staged;
+            const auto serialize = [&](const auto& storage, const auto& views, SerializedInventory& inventory) {
+                inventory.mObjects.reserve(storage.size());
+                inventory.mProposedIdentities.reserve(storage.size());
+                size_t i = 0;
+                for (const auto& node : storage)
+                {
+                    const auto identity = views.at(i++).mIdentity;
+                    inventory.mProposedIdentities.push_back(
+                        identity.isSet() ? identity : pair.getDestinationIdentity());
+                    inventory.mObjects.emplace_back();
+                    auto& object = inventory.mObjects.back();
+                    object.blank();
+                    node.mRef.writeState(object);
+                    node.mData.write(object, declarations);
+                    // Only plain/initialized MWScript MISC without custom/Lua state
+                    // passes preparation. No class-specific state is staged here.
+                    object.mHasCustomState = false;
+                }
+            };
+            serialize(pair.getSourceStorage(), pair.getRelocation().mSource, staged.mSource);
+            serialize(pair.getDestinationStorage(), pair.getRelocation().mDestination, staged.mDestination);
+            output.mSource.swap(staged.mSource);
+            output.mDestination.swap(staged.mDestination);
+        }
+
+        auto pairOutputState(const SerializedPair& output)
+        {
+            const auto inventory = [](const SerializedInventory& value) {
+                return std::tuple{ pairOutputState(value.mObjects), value.mProposedIdentities,
+                    value.mProposedIdentities.data(), value.mProposedIdentities.capacity() };
+            };
+            return std::tuple{ inventory(output.mSource), inventory(output.mDestination) };
+        }
+
+        template <bool ObjectStates>
+        auto pairOutputSentinel()
+        {
+            if constexpr (ObjectStates)
+            {
+                SerializedPair result;
+                result.mSource.mObjects.push_back(outputSentinel());
+                result.mDestination.mObjects = { outputSentinel(), outputSentinel() };
+                result.mSource.mProposedIdentities.push_back({ 701, -1 });
+                result.mDestination.mProposedIdentities = { { 702, -1 }, { 703, -1 } };
+                return result;
+            }
+            else
+                return std::vector<ESM::ObjectState>{ outputSentinel() };
+        }
+
+        // Synthetic TES3 fields, including fields unusual on MISC, establish that
+        // the serializer preserves the complete CellRef rather than a selected subset.
+        ESM::CellRef decoratedCellRef(const CellRef& ref)
+        {
+            ESM::ObjectState state;
+            ref.writeState(state);
+            auto& r = state.mRef;
+            r.mScale = 1.25f;
+            r.mOwner = ESM::RefId::stringRefId("serialization_owner");
+            r.mGlobalVariable = "serialization_global_with_allocating_name";
+            if (r.mSoul.empty())
+                r.mSoul = ESM::RefId::stringRefId("serialization_soul");
+            r.mFaction = ESM::RefId::stringRefId("serialization_faction");
+            r.mFactionRank = 3;
+            r.mChargeInt = 61;
+            r.mChargeIntRemainder = 0.375f;
+            r.mEnchantmentCharge = 12.5f;
+            r.mTeleport = true;
+            r.mDoorDest = { { 11.f, -12.f, 13.f }, { 0.25f, -0.5f, 0.75f } };
+            r.mDestCell = "Serialization destination with allocating name";
+            r.mLockLevel = 42;
+            r.mIsLocked = true;
+            r.mKey = ESM::RefId::stringRefId("serialization_key");
+            r.mTrap = ESM::RefId::stringRefId("serialization_trap");
+            r.mReferenceBlocked = 1;
+            r.mPos = { { -31.f, 32.f, 33.f }, { -0.125f, 0.5f, 1.25f } };
+            return r;
         }
 
         template <class MakeOutput, class Write, class Snapshot, class Check, class Verify>
@@ -396,7 +510,119 @@ namespace MWWorld::Testing
                 "serialized flags/enabled/position/animation mismatch");
         }
 
-        template <class Verify>
+        void checkSerializedRef(const CellRef& ref, const ESM::CellRef& output)
+        {
+            require(output.mRefNum == ref.getRefNum() && output.mRefID == ref.getRefId()
+                    && output.mCount == ref.getCount(false) && output.mSoul == ref.getSoul()
+                    && output.mChargeInt == ref.getCharge() && output.mChargeIntRemainder == ref.getChargeIntRemainder()
+                    && output.mEnchantmentCharge == ref.getEnchantmentCharge() && output.mOwner == ref.getOwner()
+                    && output.mGlobalVariable == ref.getGlobalVariable() && output.mFaction == ref.getFaction()
+                    && output.mFactionRank == ref.getFactionRank() && output.mScale == ref.getScale()
+                    && output.mTeleport == ref.getTeleport() && output.mDoorDest == ref.getDoorDest()
+                    && ESM::RefId::stringRefId(output.mDestCell) == ref.getDestCell()
+                    && output.mLockLevel == ref.getLockLevel() && output.mIsLocked == ref.isLocked()
+                    && output.mKey == ref.getKey() && output.mTrap == ref.getTrap() && output.mReferenceBlocked == 1
+                    && output.mPos == ref.getPosition(),
+                "serialized CellRef field mismatch");
+        }
+
+        void checkPairOutput(const PreparedContainerTransfer& pair, const std::vector<ESM::ObjectState>& output)
+        {
+            const auto nodes = ownedNodes(pair);
+            require(output.size() == nodes.size(), "serialization omitted dormant owned nodes");
+            for (size_t i = 0; i < nodes.size(); ++i)
+                checkSerializedData(nodes[i].getRefData(), output[i]);
+        }
+
+        void checkPairOutput(const PreparedContainerTransfer& pair, const SerializedPair& output)
+        {
+            const auto check = [&](const auto& storage, const auto& views, const SerializedInventory& inventory) {
+                require(inventory.mObjects.size() == storage.size() && views.size() == storage.size()
+                        && inventory.mProposedIdentities.size() == storage.size(),
+                    "ObjectState serialization lost membership/identity metadata or dormant nodes");
+                size_t i = 0;
+                for (const auto& node : storage)
+                {
+                    const auto& state = inventory.mObjects[i];
+                    const auto id = views[i].mIdentity;
+                    require(inventory.mProposedIdentities[i] == (id.isSet() ? id : pair.getDestinationIdentity())
+                            && inventory.mProposedIdentities[i].isSet() && !node.mRef.getRefNum().isSet()
+                            && !state.mRef.mRefNum.isSet() && node.mWorldModel == nullptr,
+                        "ObjectState serialization mixed detached values and proposed identities");
+                    checkSerializedRef(node.mRef, state.mRef);
+                    checkSerializedData(node.mData, state);
+                    require(state.mLuaScripts.mScripts.empty() && !state.mHasCustomState
+                            && state.mActorIdConverter == nullptr && state.mVersion == ESM::DefaultFormatVersion,
+                        "ObjectState serialization introduced unsupported state");
+                    ++i;
+                }
+            };
+            check(pair.getSourceStorage(), pair.getRelocation().mSource, output.mSource);
+            check(pair.getDestinationStorage(), pair.getRelocation().mDestination, output.mDestination);
+        }
+
+        size_t checkCellRefSerialization()
+        {
+            auto raw = decoratedCellRef(CellRef(ESM::makeBlankCellRef()));
+            raw.mRefNum = { 51, 2 };
+            CellRef ref(raw);
+            ref.setEnchantmentCharge(10.5f); // Preserve an already changed input as well.
+            raw.mEnchantmentCharge = 10.5f;
+            const auto expected = cellRefValues(raw);
+            const auto* global = ref.getGlobalVariable().data();
+            const auto verify = [&] {
+                ESM::ObjectState current;
+                ref.writeState(current);
+                require(cellRefValues(current.mRef) == expected && ref.hasChanged()
+                        && ref.getGlobalVariable().data() == global,
+                    "CellRef serialization changed input fields/storage/change tracking");
+            };
+            size_t allocations = 0;
+            for (int count : { -4, 0, 7 })
+            {
+                const auto counted = ref.copyWithCount(count);
+                allocations += checkSerializationAllocations(
+                    outputSentinel, [&](auto& output) { counted.writeState(output); }, objectOutputState,
+                    [&](const auto& output) {
+                        auto fields = raw;
+                        fields.mCount = count;
+                        require(cellRefValues(output.mRef) == cellRefValues(fields), "CellRef copy lost a field");
+                        auto sentinel = outputSentinel();
+                        const auto& unchanged = output;
+                        require(unchanged.mLocals.mVariables == sentinel.mLocals.mVariables
+                                && unchanged.mFlags == sentinel.mFlags && unchanged.mEnabled == sentinel.mEnabled
+                                && unchanged.mHasLocals == sentinel.mHasLocals
+                                && unchanged.mPosition == sentinel.mPosition
+                                && animationValues(unchanged.mAnimationState)
+                                    == animationValues(sentinel.mAnimationState)
+                                && unchanged.mLuaScripts.mScripts.front().mData
+                                    == sentinel.mLuaScripts.mScripts.front().mData
+                                && unchanged.mHasCustomState == sentinel.mHasCustomState
+                                && unchanged.mActorIdConverter == sentinel.mActorIdConverter
+                                && unchanged.mVersion == sentinel.mVersion,
+                            "CellRef serialization changed unrelated ObjectState fields");
+                    },
+                    verify);
+            }
+            auto output = outputSentinel();
+            // A successful direct call must also preserve unrelated caller storage.
+            const auto locals = localOutputState(output.mLocals);
+            const auto* animation = output.mAnimationState.mScriptedAnims.data();
+            const auto* lua = output.mLuaScripts.mScripts.data();
+            ref.writeState(output);
+            require(localOutputState(output.mLocals) == locals
+                    && output.mAnimationState.mScriptedAnims.data() == animation
+                    && output.mLuaScripts.mScripts.data() == lua,
+                "CellRef serialization replaced unrelated storage");
+            // TES4 has no serialization implementation here; preserve both no-ops.
+            const auto before = objectOutputState(output);
+            for (const CellRef& other : { CellRef(ESM4::Reference{}), CellRef(ESM4::ActorCharacter{}) })
+                other.writeState(output);
+            require(objectOutputState(output) == before, "TES4 CellRef serialization changed caller output");
+            return allocations;
+        }
+
+        template <bool ObjectStates = false, class Verify>
         size_t checkPairSerialization(DisposableTransferRehearsal& fixture, const PreparedContainerTransfer& pair,
             const Compiler::Locals& declarations, Verify verifyOriginal, bool checkMalformed)
         {
@@ -414,13 +640,9 @@ namespace MWWorld::Testing
                 for (size_t i = 0; i < nodes.size(); ++i)
                     require(nodeState(nodes[i]) == before[i], "serialization changed detached value/storage/identity");
             };
-            const auto makeOutput = [] { return std::vector<ESM::ObjectState>{ outputSentinel() }; };
+            const auto makeOutput = [] { return pairOutputSentinel<ObjectStates>(); };
             const auto write = [&](auto& output) { serializePair(fixture, pair, declarations, output); };
-            const auto check = [&](const auto& output) {
-                require(output.size() == nodes.size(), "serialization omitted dormant owned nodes");
-                for (size_t i = 0; i < nodes.size(); ++i)
-                    checkSerializedData(nodes[i].getRefData(), output[i]);
-            };
+            const auto check = [&](const auto& output) { checkPairOutput(pair, output); };
             // A saved completeness flag is insufficient: even an all-resolved
             // report must pass the complete current pair validator.
             auto rejectedOutput = makeOutput();
@@ -444,7 +666,8 @@ namespace MWWorld::Testing
             write(rejectedOutput);
             check(rejectedOutput);
             verify();
-            size_t allocations = checkSerializationAllocations(makeOutput, write, pairOutputState, check, verify);
+            size_t allocations = checkSerializationAllocations(
+                makeOutput, write, [](const auto& output) { return pairOutputState(output); }, check, verify);
             if (!checkMalformed)
                 return allocations;
 
@@ -519,6 +742,31 @@ namespace MWWorld::Testing
                     check(fresh);
                     verify();
                 }
+                if (&malformed == &data)
+                {
+                    auto aggregate = makeOutput();
+                    const auto savedOutput = pairOutputState(aggregate);
+                    bool caught = false;
+                    Allocations::Trace trace;
+                    {
+                        Allocations::Observe observe(trace);
+                        try
+                        {
+                            serializePair(fixture, pair, decl, aggregate);
+                        }
+                        catch (const std::invalid_argument&)
+                        {
+                            caught = true;
+                        }
+                    }
+                    require(caught && pairOutputState(aggregate) == savedOutput && trace.mOutstanding == 0
+                            && trace.mTrackingOverflow == 0,
+                        "malformed declarations leaked staging or partially published pair output");
+                    verify();
+                    write(aggregate);
+                    check(aggregate);
+                    verify();
+                }
             };
             for (char type : { 's', 'l', 'f' })
             {
@@ -562,24 +810,6 @@ namespace MWWorld::Testing
                     duplicate.declare(type, name == "counter" ? "onpcadd" : name);
             reject(data, duplicate);
 
-            // Malformed declarations must leave aggregate caller output exact.
-            auto output = makeOutput();
-            const auto savedOutput = pairOutputState(output);
-            bool caught = false;
-            try
-            {
-                serializePair(fixture, pair, duplicate, output);
-            }
-            catch (const std::invalid_argument&)
-            {
-                caught = true;
-            }
-            require(caught && pairOutputState(output) == savedOutput,
-                "malformed declarations partially published pair output");
-            verify();
-            write(output);
-            check(output);
-            verify();
             return allocations;
         }
 
@@ -770,7 +1000,8 @@ namespace MWWorld::Testing
         None,
         Rehearsal,
         Preparation,
-        Serialization
+        Serialization,
+        ObjectState
     };
 
     static void checkTransferRehearsalCases(const ESMStore& content, AllocationCheck allocationCheck)
@@ -778,6 +1009,8 @@ namespace MWWorld::Testing
         using Rehearsal = DisposableTransferRehearsal;
         using Stage = Rehearsal::Stage;
         using Pair = PreparedContainerTransfer;
+        const bool serialization
+            = allocationCheck == AllocationCheck::Serialization || allocationCheck == AllocationCheck::ObjectState;
         MWClass::registerClasses();
         ESMStore store;
         const auto plainId = ESM::RefId::stringRefId("native_plain");
@@ -788,7 +1021,7 @@ namespace MWWorld::Testing
             store.insertStatic(*content.get<ESM::Miscellaneous>().find(id));
         store.insertStatic(*content.get<ESM::NPC>().find(ownerId));
         auto script = *content.get<ESM::Script>().find(scriptId);
-        if (allocationCheck == AllocationCheck::Serialization)
+        if (serialization)
             script.mScriptText
                 = "begin native_script\nshort OnPCAdd\nshort serialization_short_variable\n"
                   "long counter\nlong serialization_long_variable\n"
@@ -815,6 +1048,8 @@ namespace MWWorld::Testing
         const bool allocationFailures = allocationCheck != AllocationCheck::None;
         if (allocationFailures)
             checkAllocationHooks();
+        if (allocationCheck == AllocationCheck::ObjectState)
+            totals.mTotal += checkCellRefSerialization();
 
         // Unrelated registered state in an independent WorldModel must stay exact,
         // even while another fixture has partially exchanged its stock storage.
@@ -851,11 +1086,13 @@ namespace MWWorld::Testing
                                 item.getRefData().getLocals().mLongs.at(0) = 27;
                             source.setSelectedEnchantItem(cursorPosition == 1 ? dormantIterator : source.begin());
                             destination.setSelectedEnchantItem(destination.begin());
+                            Ptr destinationDormant;
                             if (cursorPosition == 1)
                             {
                                 const auto selected = destination.add(dormantItem.getPtr(), 2, fixture.mDestinationAdd);
                                 selected->getCellRef() = selected->getCellRef().copyWithCount(0);
                                 destination.setSelectedEnchantItem(selected);
+                                destinationDormant = *selected;
                             }
                             // Non-mutated supplied store resolves unrelated registry
                             // and script entries, including dormant selection.
@@ -863,9 +1100,12 @@ namespace MWWorld::Testing
                                 scriptedItem ? scripted.getPtr() : plain.getPtr(), 3, fixture.mOtherAdd);
                             fixture.mOther.setSelectedEnchantItem(other);
                             other->getCellRef() = other->getCellRef().copyWithCount(0);
-                            if (allocationCheck == AllocationCheck::Serialization)
+                            if (serialization)
                             {
-                                const auto decorate = [](RefData& data) {
+                                const auto decorate = [&](const Ptr& ptr) {
+                                    if (allocationCheck == AllocationCheck::ObjectState)
+                                        ptr.getCellRef() = CellRef(decoratedCellRef(ptr.getCellRef()));
+                                    auto& data = ptr.getRefData();
                                     data.disable();
                                     data.mPhysicsPostponed = true;
                                     data.setPosition({ { 11.5f, -2.25f, 300.f }, { 0.125f, -0.5f, 1.75f } });
@@ -888,10 +1128,12 @@ namespace MWWorld::Testing
                                     animations[1].mTime = -0.5f;
                                     animations[1].mLoopCount = 3;
                                 };
-                                decorate(item.getRefData());
-                                decorate(dormant.getRefData());
+                                decorate(item);
+                                decorate(dormant);
                                 for (auto it = destination.begin(); it != destination.end(); ++it)
-                                    decorate(it->getRefData());
+                                    decorate(*it);
+                                if (!destinationDormant.isEmpty())
+                                    decorate(destinationDormant);
                             }
                             for (auto* service : { &fixture.mSourceScripts, &fixture.mDestinationScripts })
                             {
@@ -920,47 +1162,63 @@ namespace MWWorld::Testing
                                 require(snapshot(live) == liveBefore && listener.mCalls == 0 && scripts.mRuns == 0,
                                     "transfer emitted notifications/scripts or changed unrelated live state");
                             };
-                            if (allocationCheck == AllocationCheck::Serialization)
+                            if (serialization)
                             {
-                                const auto& declarations = scripts.getLocals(scriptId);
-                                std::vector<ConstPtr> nodes;
-                                {
-                                    auto pair = make();
-                                    nodes = ownedNodes(pair);
-                                    const bool malformed
-                                        = !shared && scriptedItem && !stack && quantity == 1 && cursorPosition == 0;
-                                    totals.mTotal += checkPairSerialization(
-                                        fixture, pair, declarations, verifyOriginal, malformed);
-                                    // Rehearsal must retain the same read-only owned values
-                                    // and protected bindings for another serialization.
-                                    pair = fixture.rehearse(std::move(pair));
-                                    std::vector<ESM::ObjectState> output;
-                                    serializePair(fixture, pair, declarations, output);
-                                    require(ownedNodes(pair) == nodes, "serialization/rehearsal replaced owned nodes");
-                                }
-                                requireDiscarded(nodes);
-                                verifyOriginal();
-                                auto incomplete = source.prepareTransfer(
-                                    item, quantity, destination, fixture.mRemoval, fixture.mDestinationAdd);
-                                require(!incomplete.getResolutionCompleteness().isComplete(),
-                                    "serialization incomplete fixture resolved extra objects");
-                                auto output = std::vector<ESM::ObjectState>{ outputSentinel() };
-                                const auto saved = pairOutputState(output);
-                                bool caught = false;
-                                try
-                                {
-                                    serializePair(fixture, incomplete, declarations, output);
-                                }
-                                catch (const std::invalid_argument&)
-                                {
-                                    caught = true;
-                                }
-                                require(caught && pairOutputState(output) == saved,
-                                    "incomplete serialization accepted or changed caller output");
-                                verifyOriginal();
-                                auto fresh = make();
-                                serializePair(fixture, fresh, declarations, output);
-                                verifyOriginal();
+                                const auto run = [&]<bool ObjectStates>() {
+                                    const auto& declarations = scripts.getLocals(scriptId);
+                                    std::vector<ConstPtr> nodes;
+                                    auto output = pairOutputSentinel<ObjectStates>();
+                                    std::optional<decltype(pairOutputState(output))> retained;
+                                    {
+                                        auto pair = make();
+                                        nodes = ownedNodes(pair);
+                                        require(pair.getSourceItem().getCellRef().getCount(false) == 4 - quantity
+                                                && pair.getDestinationItem().getCellRef().getCount(false)
+                                                    == (!scriptedItem && stack ? 7 + quantity : quantity),
+                                            "serialization fixture lost full/partial removal or destination count");
+                                        const bool malformed
+                                            = !shared && scriptedItem && !stack && quantity == 1 && cursorPosition == 0;
+                                        totals.mTotal += checkPairSerialization<ObjectStates>(
+                                            fixture, pair, declarations, verifyOriginal, malformed);
+                                        // Rehearsal must retain the same read-only owned values
+                                        // and protected bindings for another serialization.
+                                        pair = fixture.rehearse(std::move(pair));
+                                        serializePair(fixture, pair, declarations, output);
+                                        checkPairOutput(pair, output);
+                                        require(
+                                            ownedNodes(pair) == nodes, "serialization/rehearsal replaced owned nodes");
+                                        retained = pairOutputState(output);
+                                    }
+                                    requireDiscarded(nodes);
+                                    // Owned values and proposed identities outlive the pair.
+                                    require(pairOutputState(output) == *retained, "discard invalidated owned output");
+                                    verifyOriginal();
+                                    auto incomplete = source.prepareTransfer(
+                                        item, quantity, destination, fixture.mRemoval, fixture.mDestinationAdd);
+                                    require(!incomplete.getResolutionCompleteness().isComplete(),
+                                        "serialization incomplete fixture resolved extra objects");
+                                    const auto saved = pairOutputState(output);
+                                    bool caught = false;
+                                    try
+                                    {
+                                        serializePair(fixture, incomplete, declarations, output);
+                                    }
+                                    catch (const std::invalid_argument&)
+                                    {
+                                        caught = true;
+                                    }
+                                    require(caught && pairOutputState(output) == saved,
+                                        "incomplete serialization accepted or changed caller output");
+                                    verifyOriginal();
+                                    auto fresh = make();
+                                    serializePair(fixture, fresh, declarations, output);
+                                    checkPairOutput(fresh, output);
+                                    verifyOriginal();
+                                };
+                                if (allocationCheck == AllocationCheck::ObjectState)
+                                    run.template operator()<true>();
+                                else
+                                    run.template operator()<false>();
                                 ++cases;
                                 continue;
                             }
@@ -1178,14 +1436,15 @@ namespace MWWorld::Testing
                         }
         if (allocationFailures)
         {
-            if (allocationCheck == AllocationCheck::Serialization)
+            require(cases == 48, "allocation failure matrix lost a fixture combination");
+            if (serialization)
             {
-                std::cout << "Serialization: cases=" << cases << " individually-failed=" << totals.mTotal
+                std::cout << (allocationCheck == AllocationCheck::ObjectState ? "ObjectState" : "RefData")
+                          << " serialization: cases=" << cases << " individually-failed=" << totals.mTotal
                           << " remaining-after-cleanup=0 malformed-shapes=19 direct-rejections=38"
-                             " incomplete-pairs=48 corrupted-pairs=48\n";
+                             " malformed-pair-declarations=13 incomplete-pairs=48 corrupted-pairs=48\n";
                 return;
             }
-            require(cases == 48, "allocation failure matrix lost a fixture combination");
             if (allocationCheck == AllocationCheck::Preparation)
             {
                 require(totals.allocations(Allocations::Phase::ConsumerCopy) == cases,
@@ -1224,5 +1483,10 @@ namespace MWWorld::Testing
     void checkTransferSerialization(const ESMStore& content)
     {
         checkTransferRehearsalCases(content, AllocationCheck::Serialization);
+    }
+
+    void checkTransferObjectState(const ESMStore& content)
+    {
+        checkTransferRehearsalCases(content, AllocationCheck::ObjectState);
     }
 }

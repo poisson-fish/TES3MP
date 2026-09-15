@@ -264,7 +264,8 @@ namespace MWWorld
         // changing this reference or cleaning scripts. Cleanup remains a separate intent.
         CellRef copyWithCount(int value) const;
 
-        // Write the content of this CellRef into the given ObjectState
+        // Write TES3 content with atomic failure; preserve unrelated ObjectState fields.
+        // TES4 variants retain their existing no-op behavior.
         void writeState(ESM::ObjectState& state) const;
 
         // Has this CellRef changed since it was originally loaded?

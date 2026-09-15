@@ -1,6 +1,7 @@
 #include "cellref.hpp"
 
 #include <cassert>
+#include <utility>
 
 #include <components/debug/debuglog.hpp>
 #include <components/esm/refid.hpp>
@@ -418,7 +419,12 @@ namespace MWWorld
         std::visit(ESM::VisitOverload{
                        [&](const ESM4::Reference& /*ref*/) {},
                        [&](const ESM4::ActorCharacter&) {},
-                       [&](const ESM::CellRef& ref) { state.mRef = ref; },
+                       [&](const ESM::CellRef& ref) {
+                           // Copy allocating fields before publishing any caller state.
+                           auto staged = ref;
+                           static_assert(noexcept(state.mRef = std::move(staged)));
+                           state.mRef = std::move(staged);
+                       },
                    },
             mCellRef.mVariant);
     }
