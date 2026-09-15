@@ -712,6 +712,13 @@ MWWorld::PreparedContainerAdd::MiscState MWWorld::PreparedContainerAdd::miscStat
 MWWorld::PreparedContainerAdd MWWorld::ContainerStore::prepareTransferAdd(
     std::unique_ptr<LiveCellRef<ESM::Miscellaneous>> item, const ContainerStoreAddContext& context)
 {
+    return prepareTransferAdd(std::move(item), context, nullptr);
+}
+
+MWWorld::PreparedContainerAdd MWWorld::ContainerStore::prepareTransferAdd(
+    std::unique_ptr<LiveCellRef<ESM::Miscellaneous>> item, const ContainerStoreAddContext& context,
+    LocalScripts::PreparedList* scriptList)
+{
     validateExplicitOwner(context.mContainer, context.mWorldModel);
     if (getPtr(context.mWorldModel).mCell != context.mContainer.mCell)
         throw std::invalid_argument("Container add preparation owner cell mismatch");
@@ -765,6 +772,8 @@ MWWorld::PreparedContainerAdd MWWorld::ContainerStore::prepareTransferAdd(
         // must propagate. Never insert the temporary into a LocalScripts list.
         prepared.mScript = LocalScripts::prepareAdd(*context.mStore.get<ESM::Script>().find(script),
             scriptItem.getRefData(), scriptItem.mCell, *context.mScriptManager);
+        if (scriptList)
+            context.mLocalScripts->prepareListAddition(*scriptList, *prepared.mScript, &scriptItem.getCellRef(), this);
     });
     prepared.mItemState = PreparedContainerAdd::miscState(temporary);
     // Copying the consumer may allocate or throw. Own all prepared state/intents
@@ -830,6 +839,9 @@ struct MWWorld::PreparedContainerTransfer::State
     ESM::RefNum mDestinationSelection;
     std::shared_ptr<const void> mSourceStorage, mDestinationStorage;
     const LocalScripts* mDestinationScripts = nullptr;
+    LocalScripts::PreparedList mSourceScriptList;
+    // Absent for a shared service: both views then use the combined source list.
+    std::optional<LocalScripts::PreparedList> mDestinationScriptList;
     const MWBase::ScriptManager* mScriptManager = nullptr;
     Ptr mPlayer;
     ESM::RefNum mPlayerIdentity;
@@ -925,6 +937,17 @@ int MWWorld::PreparedContainerTransfer::getStackCount() const
 std::optional<MWWorld::LocalScripts::Registration> MWWorld::PreparedContainerTransfer::getScriptAddition() const
 {
     return state().mAddition.mScript;
+}
+
+const MWWorld::LocalScripts::List& MWWorld::PreparedContainerTransfer::getSourceScripts() const
+{
+    return state().mSourceScriptList.mResult;
+}
+
+const MWWorld::LocalScripts::List& MWWorld::PreparedContainerTransfer::getDestinationScripts() const
+{
+    const auto& owned = state();
+    return owned.mDestinationScriptList ? owned.mDestinationScriptList->mResult : owned.mSourceScriptList.mResult;
 }
 
 bool MWWorld::PreparedContainerTransfer::hasRemovalNotification() const
@@ -1075,7 +1098,11 @@ MWWorld::PreparedContainerTransfer MWWorld::ContainerStore::prepareTransfer(cons
     // separately supplied item/count. Keep the independent incoming preparation.
     auto detached = copyContainerTransferItem(ConstPtr(&source));
     detached->mRef.setCount(state->mRemoval.getCount());
-    state->mAddition = destination.prepareTransferAdd(std::move(detached), destinationContext);
+    state->mSourceScriptList = sourceContext.mLocalScripts.prepareList(state->mRemoval.getScriptRemoval());
+    if (&sourceContext.mLocalScripts != destinationContext.mLocalScripts)
+        state->mDestinationScriptList = destinationContext.mLocalScripts->prepareList(nullptr);
+    auto& addedScripts = state->mDestinationScriptList ? *state->mDestinationScriptList : state->mSourceScriptList;
+    state->mAddition = destination.prepareTransferAdd(std::move(detached), destinationContext, &addedScripts);
     state->mAddedValues = copyContainerTransferItem(ConstPtr(state->mAddition.mItem.get()));
     if (state->mAddition.getStackTarget().isSet())
     {
@@ -1226,6 +1253,16 @@ void MWWorld::ContainerStore::validateTransfer(const PreparedContainerTransfer& 
         || state.mAddition.mNotifyItemAdded != (state.mDestinationListener != nullptr)
         || !state.mAddition.mInventoryUpdated || !state.mSourceUpdated)
         throw std::invalid_argument("Container transfer preparation effects changed");
+    const bool sharedScripts = &sourceContext.mLocalScripts == destinationContext.mLocalScripts;
+    if (sharedScripts == state.mDestinationScriptList.has_value() || (script && foundStack))
+        throw std::invalid_argument("Container transfer preparation script list binding changed");
+    const auto* addition = script ? &*script : nullptr;
+    const auto* addedRef = &item.mRef;
+    sourceContext.mLocalScripts.validateList(state.mSourceScriptList, state.mRemoval.getScriptRemoval(),
+        sharedScripts ? addition : nullptr, addedRef, &destination);
+    if (!sharedScripts)
+        destinationContext.mLocalScripts->validateList(
+            *state.mDestinationScriptList, nullptr, addition, addedRef, &destination);
     // The immutable pair binds its derived item and intents; this is neither an
     // installation precondition nor a durability or mutation-history guarantee.
 }

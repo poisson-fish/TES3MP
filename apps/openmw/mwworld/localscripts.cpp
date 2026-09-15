@@ -125,8 +125,9 @@ void MWWorld::LocalScripts::add(const ESM::RefId& scriptName, const Ptr& ptr, MW
 
             auto registered = ptr;
             registered.mCell = prepared.mCell;
-            mScripts.push_back({ registered, std::make_shared<const ScriptRegistration>(
-                ScriptRegistration{ prepared.mScript, &ptr.getCellRef(), prepared.mCell, ptr.mContainerStore }) });
+            mScripts.push_back({ registered,
+                std::make_shared<const ScriptRegistration>(
+                    ScriptRegistration{ prepared.mScript, &ptr.getCellRef(), prepared.mCell, ptr.mContainerStore }) });
         }
         catch (const std::exception& exception)
         {
@@ -187,8 +188,8 @@ MWWorld::LocalScripts::Scripts::const_iterator MWWorld::LocalScripts::find(const
 {
     // A registry Ptr may outlive a destroyed inventory node. Use the address
     // captured at registration, never getCellRef() through that borrowed Ptr.
-    return std::find_if(mScripts.begin(), mScripts.end(),
-        [&](const Entry& entry) { return entry.mRegistration->mReference == ref; });
+    return std::find_if(
+        mScripts.begin(), mScripts.end(), [&](const Entry& entry) { return entry.mRegistration->mReference == ref; });
 }
 
 void MWWorld::LocalScripts::erase(Scripts::const_iterator iter)
@@ -219,8 +220,95 @@ void MWWorld::LocalScripts::validateRemoval(const Removal& prepared, const CellR
         throw std::invalid_argument("Local script removal preparation registration changed");
 }
 
+MWWorld::LocalScripts::List MWWorld::LocalScripts::snapshot() const
+{
+    List result;
+    for (auto iter = mScripts.begin(); iter != mScripts.end(); ++iter)
+    {
+        if (iter == mIter)
+            result.mCursor = result.mEntries.size();
+        Removal entry;
+        entry.mScripts = this;
+        entry.mReference = iter->mRegistration->mReference;
+        entry.mRegistration = iter->mRegistration;
+        result.mEntries.push_back(std::move(entry));
+    }
+    if (mIter == mScripts.end())
+        result.mCursor = result.mEntries.size();
+    return result;
+}
+
+MWWorld::LocalScripts::PreparedList MWWorld::LocalScripts::prepareList(const Removal* removal) const
+{
+    PreparedList prepared;
+    prepared.mOriginal = snapshot();
+    prepared.mResult = prepared.mOriginal;
+    if (removal)
+    {
+        validateRemoval(*removal, removal->mReference);
+        const auto iter = std::find(prepared.mResult.mEntries.begin(), prepared.mResult.mEntries.end(), *removal);
+        if (iter != prepared.mResult.mEntries.end())
+        {
+            const auto index = static_cast<size_t>(iter - prepared.mResult.mEntries.begin());
+            // Stock erase advances a cursor on this entry to its successor. In
+            // the vector that successor has the same index; earlier erases shift it.
+            if (index < prepared.mResult.mCursor)
+                --prepared.mResult.mCursor;
+            prepared.mResult.mEntries.erase(iter);
+        }
+    }
+    return prepared;
+}
+
+void MWWorld::LocalScripts::prepareListAddition(
+    PreparedList& prepared, const Registration& addition, const CellRef* ref, ContainerStore* container) const
+{
+    // Only a fresh detached destination node may enter this preparation path.
+    // Stock duplicate replacement remains in add(); it is never an installation here.
+    if (!ref || std::ranges::any_of(prepared.mOriginal.mEntries, [&](const Removal& entry) {
+            return entry.references(ref);
+        }))
+        throw std::invalid_argument("Local script list preparation requires a new reference");
+    Removal entry;
+    entry.mScripts = this;
+    entry.mReference = ref;
+    entry.mRegistration = std::make_shared<const ScriptRegistration>(
+        ScriptRegistration{ addition.mScript, ref, addition.mCell, container });
+    const bool atEnd = prepared.mResult.mCursor == prepared.mResult.mEntries.size();
+    prepared.mResult.mEntries.push_back(std::move(entry));
+    // std::list::push_back leaves the end iterator at end, not at the new entry.
+    if (atEnd)
+        ++prepared.mResult.mCursor;
+}
+
+void MWWorld::LocalScripts::validateList(const PreparedList& prepared, const Removal* removal,
+    const Registration* addition, const CellRef* ref, const ContainerStore* container) const
+{
+    if (snapshot() != prepared.mOriginal)
+        throw std::invalid_argument("Local script list preparation membership, registration or cursor changed");
+    // Recompute order/cursor from the protected original and transfer removal.
+    // No locals initialization, item dereference, registration or effects here.
+    const auto expected = prepareList(removal);
+    const auto& result = prepared.mResult;
+    const auto size = expected.mResult.mEntries.size();
+    const auto cursor = expected.mResult.mCursor;
+    if (result.mEntries.size() != size + bool(addition) || result.mCursor != cursor + (addition && cursor == size)
+        || !std::equal(expected.mResult.mEntries.begin(), expected.mResult.mEntries.end(), result.mEntries.begin()))
+        throw std::invalid_argument("Local script list preparation result changed");
+    if (addition)
+    {
+        const auto& entry = result.mEntries.back();
+        if (entry.mScripts != this || !entry.references(ref) || !entry.hasRegistration()
+            || entry.getScript() != addition->mScript || entry.getCell() != addition->mCell
+            || entry.getContainer() != container
+            || std::ranges::any_of(
+                prepared.mOriginal.mEntries, [&](const Removal& original) { return original.references(ref); }))
+            throw std::invalid_argument("Local script list preparation addition result changed");
+    }
+}
+
 bool MWWorld::LocalScripts::isRunning(const ESM::RefId& scriptName, const Ptr& ptr) const
 {
-    return std::ranges::any_of(mScripts,
-        [&](const Entry& entry) { return entry.mRegistration->mScript == scriptName && entry.mItem == ptr; });
+    return std::ranges::any_of(
+        mScripts, [&](const Entry& entry) { return entry.mRegistration->mScript == scriptName && entry.mItem == ptr; });
 }

@@ -566,6 +566,12 @@ namespace
             require(remainingScripts() == tail, "preparation changed live script iteration cursor");
             localScripts.startIteration();
             require(remainingScripts() == expectedScripts, "preparation changed live script membership or bindings");
+            // Joint preparation now witnesses the cursor as well as membership.
+            // Restore the starting cursor after this destructive stock observation.
+            localScripts.startIteration();
+            std::pair<ESM::RefId, MWWorld::Ptr> entry;
+            if (!expectedScripts.empty())
+                localScripts.getNext(entry);
         };
         const auto prepare = [&](const MWWorld::Ptr& item) {
             const bool fromA = item.mContainerStore == &a;
@@ -1488,6 +1494,10 @@ namespace
         plainA->getRefData().setCustomData(nullptr);
 
         using Pair = MWWorld::PreparedContainerTransfer;
+        static_assert(std::is_same_v<decltype(std::declval<const Pair&>().getSourceScripts()),
+            const MWWorld::LocalScripts::List&>);
+        static_assert(std::is_same_v<decltype(std::declval<const Pair&>().getDestinationScripts()),
+            const MWWorld::LocalScripts::List&>);
         static_assert(!std::is_copy_constructible_v<Pair> && !std::is_copy_assignable_v<Pair>);
         static_assert(std::is_nothrow_move_constructible_v<Pair> && std::is_nothrow_move_assignable_v<Pair>);
         static_assert(std::is_same_v<decltype(std::declval<const Pair&>().getSourceItem().getRefData()),
@@ -1539,6 +1549,8 @@ namespace
             bindEmptyStore(source, sourcePtr, model);
             bindEmptyStore(destination, destinationPtr, model);
             MWWorld::LocalScripts stockScripts(store);
+            MWWorld::LocalScripts stockDestinationScripts(store);
+            const bool sharedScripts = sourceContext.mLocalScripts == destinationContext.mLocalScripts;
             int notifications = 0;
             MWWorld::ContainerStoreAddContext sourceAdd{ store, model,
                 sourceContext.mPlayer.isEmpty()                         ? MWWorld::Ptr()
@@ -1549,11 +1561,13 @@ namespace
                 destinationContext.mPlayer.isEmpty()                              ? MWWorld::Ptr()
                     : destinationContext.mPlayer == destinationContext.mContainer ? destinationPtr
                                                                                   : sourcePtr,
-                destinationPtr, &stockScripts, &scripts, sourceAdd.mInventoryUpdated };
+                destinationPtr, sharedScripts ? &stockScripts : &stockDestinationScripts, &scripts,
+                sourceAdd.mInventoryUpdated };
             const bool scriptedItem = !item.getClass().getScript(item).empty();
             auto stockSource = source.end();
             std::map<ESM::RefNum, ESM::RefNum> sourceIdentities, destinationIdentities;
             std::vector<MWWorld::Ptr> stockDormant;
+            std::map<const MWWorld::CellRef*, MWWorld::Ptr> clonedReferences;
             const auto clone
                 = [&](const MWWorld::ContainerStore& original, MWWorld::ContainerStore& copiedStore,
                       const MWWorld::ContainerStoreAddContext& add, std::map<ESM::RefNum, ESM::RefNum>& identities,
@@ -1564,6 +1578,7 @@ namespace
                           seed.getPtr().getCellRef().setSoul(
                               ESM::RefId::stringRefId("stock_clone_" + std::to_string(identities.size())));
                           const auto copied = copiedStore.add(seed.getPtr(), 1, add);
+                          clonedReferences.emplace(&member.getCellRef(), *copied);
                           copyValues(*copied, member);
                           if (member.getRefData().getBaseNode())
                               copied->getRefData().setBaseNode(new SceneUtil::PositionAttitudeTransform);
@@ -1575,16 +1590,6 @@ namespace
                               copiedStore.setSelectedEnchantItem(copied);
                           if (!member.getCellRef().getCount(false))
                               stockDormant.push_back(*copied);
-                          // Clone the actual registration presence/cell, independent of
-                          // the context chosen for this next addition's player semantics.
-                          const auto registration = localScripts.prepareRemove(&member.getCellRef());
-                          stockScripts.remove(*copied);
-                          if (registration.hasRegistration())
-                          {
-                              auto ptr = *copied;
-                              ptr.mCell = registration.getCell();
-                              stockScripts.add(registration.getScript(), ptr, scripts);
-                          }
                       };
                       if (raw.empty())
                           for (const auto& member : original)
@@ -1595,6 +1600,42 @@ namespace
                   };
             clone(*item.mContainerStore, source, sourceAdd, sourceIdentities, rawSource);
             clone(liveDestination, destination, destinationAdd, destinationIdentities, rawDestination);
+            // Clone the entire service in registration order, including other
+            // inventories/world entries, then reproduce the original cursor.
+            std::vector<std::unique_ptr<MWWorld::ManualRef>> otherReferences;
+            const auto cloneScripts = [&](const MWWorld::LocalScripts& original, MWWorld::LocalScripts& copied) {
+                copied.clear();
+                const auto originalList = original.snapshot();
+                for (const auto& entry : originalList.mEntries)
+                {
+                    auto found = std::find_if(clonedReferences.begin(), clonedReferences.end(),
+                        [&](const auto& member) { return entry.references(member.first); });
+                    if (found == clonedReferences.end())
+                    {
+                        const auto& registry = worldModel.getPtrRegistryView();
+                        const auto live = std::find_if(registry.begin(), registry.end(),
+                            [&](const auto& member) { return entry.references(&member.second.getCellRef()); });
+                        require(live != registry.end(), "stock script clone lost unrelated registration reference");
+                        auto extra = std::make_unique<MWWorld::ManualRef>(store, live->second.getCellRef().getRefId());
+                        copyValues(extra->getPtr(), live->second);
+                        found = clonedReferences.emplace(&live->second.getCellRef(), extra->getPtr()).first;
+                        otherReferences.push_back(std::move(extra));
+                    }
+                    auto ptr = found->second;
+                    ptr.mCell = entry.getCell();
+                    ptr.mContainerStore = entry.getContainer() == item.mContainerStore ? &source
+                        : entry.getContainer() == &liveDestination                     ? &destination
+                                                                                       : entry.getContainer();
+                    copied.add(entry.getScript(), ptr, scripts);
+                }
+                copied.startIteration();
+                std::pair<ESM::RefId, MWWorld::Ptr> next;
+                for (size_t i = 0; i < originalList.mCursor; ++i)
+                    require(copied.getNext(next), "stock script clone lost cursor");
+            };
+            cloneScripts(*sourceContext.mLocalScripts, stockScripts);
+            if (!sharedScripts)
+                cloneScripts(*destinationContext.mLocalScripts, stockDestinationScripts);
             require(stockSource != source.end(), "disposable source clone lost transfer item");
             MWWorld::ManualRef incoming(store, item.getCellRef().getRefId());
             copyValues(incoming.getPtr(), item);
@@ -1608,13 +1649,55 @@ namespace
                 const auto added = std::find_if(destination.begin(), destination.end(), [&](const auto& candidate) {
                     return !destinationIdentities.contains(candidate.getCellRef().getRefNum());
                 });
-                require(added != destination.end() && stockScripts.isRunning(scriptId, *added)
+                require(added != destination.end() && destinationAdd.mLocalScripts->isRunning(scriptId, *added)
                         && flags(added->getRefData()) == (flags(item.getRefData()) & ~7u)
                         && added->getRefData().getLocals().mShorts == item.getRefData().getLocals().mShorts,
                     "stock new-stack copying/registration did not precede OnPCAdd");
             };
             const auto stockResult = destination.add(incoming.getPtr(), removed, destinationAdd);
             scripts.mBeforeLocals = {};
+            const auto compareScripts = [&](const MWWorld::LocalScripts::List& proposed, MWWorld::LocalScripts& stock) {
+                const auto actual = stock.snapshot();
+                require(proposed.mCursor == actual.mCursor && proposed.mEntries.size() == actual.mEntries.size(),
+                    "prepared script membership/cursor differs from stock remove/add");
+                for (size_t i = 0; i < proposed.mEntries.size(); ++i)
+                {
+                    const auto& entry = proposed.mEntries[i];
+                    const auto& observed = actual.mEntries[i];
+                    const auto copied = std::find_if(clonedReferences.begin(), clonedReferences.end(),
+                        [&](const auto& member) { return entry.references(member.first); });
+                    const auto* reference
+                        = copied == clonedReferences.end() ? &stockResult->getCellRef() : &copied->second.getCellRef();
+                    require((copied != clonedReferences.end() || entry.references(&paired.getItem().getCellRef()))
+                            && observed.references(reference) && entry.getScript() == observed.getScript()
+                            && entry.getCell() == observed.getCell()
+                            && observed.getContainer()
+                                == (entry.getContainer() == item.mContainerStore   ? &source
+                                        : entry.getContainer() == &liveDestination ? &destination
+                                                                                   : entry.getContainer()),
+                        "prepared script order, reference or owner/cell association differs from stock");
+                }
+                // Observe stock iteration itself, independently of snapshot's
+                // numeric cursor. Restore it for a shared service's second view.
+                size_t cursor = proposed.mCursor;
+                std::pair<ESM::RefId, MWWorld::Ptr> next;
+                while (stock.getNext(next))
+                {
+                    require(cursor < actual.mEntries.size()
+                            && actual.mEntries[cursor].references(&next.second.getCellRef())
+                            && actual.mEntries[cursor].getScript() == next.first,
+                        "prepared script cursor differs from stock getNext");
+                    ++cursor;
+                }
+                require(cursor == actual.mEntries.size(), "prepared script cursor lost stock iteration tail");
+                stock.startIteration();
+                for (size_t i = 0; i < actual.mCursor; ++i)
+                    require(stock.getNext(next), "stock cursor restoration failed");
+            };
+            compareScripts(paired.getSourceScripts(), stockScripts);
+            compareScripts(paired.getDestinationScripts(), *destinationAdd.mLocalScripts);
+            require((&paired.getSourceScripts() == &paired.getDestinationScripts()) == sharedScripts,
+                "shared/distinct script service result binding lost");
             require(onPCAddLookups == (scriptedItem && destinationAdd.mPlayer == destinationPtr ? 1 : 0),
                 "disposable stock made unexpected OnPCAdd lookups");
             const auto result = paired.getDestinationItem();
@@ -1646,7 +1729,7 @@ namespace
                         && view.mItem.getRefData().matchesContainerTransferState(member.getRefData()),
                     "prepared source inventory order, identity, count or RefData differs from stock removal");
                 const auto current = worldModel.getPtr(view.mIdentity);
-                const auto originalRegistration = localScripts.prepareRemove(&current.getCellRef());
+                const auto originalRegistration = sourceContext.mLocalScripts->prepareRemove(&current.getCellRef());
                 const auto stockRegistration = stockScripts.prepareRemove(&member.getCellRef());
                 require(stockRegistration.hasRegistration() == originalRegistration.hasRegistration()
                         && (!stockRegistration.hasRegistration()
@@ -1677,8 +1760,8 @@ namespace
                 if (member != *stockResult)
                 {
                     const auto original = worldModel.getPtr(view.mIdentity);
-                    const auto registration = localScripts.prepareRemove(&original.getCellRef());
-                    const auto stockRegistration = stockScripts.prepareRemove(&member.getCellRef());
+                    const auto registration = destinationContext.mLocalScripts->prepareRemove(&original.getCellRef());
+                    const auto stockRegistration = destinationAdd.mLocalScripts->prepareRemove(&member.getCellRef());
                     require(stockRegistration.hasRegistration() == registration.hasRegistration()
                             && bool(member.getRefData().getBaseNode()) == bool(original.getRefData().getBaseNode())
                             && (!registration.hasRegistration()
@@ -1699,8 +1782,12 @@ namespace
             {
                 const auto& identities = member.mContainerStore == &source ? sourceIdentities : destinationIdentities;
                 const auto original = worldModel.getPtr(identities.at(member.getCellRef().getRefNum()));
-                const auto registration = localScripts.prepareRemove(&original.getCellRef());
-                const auto stockRegistration = stockScripts.prepareRemove(&member.getCellRef());
+                const auto* originalScripts = member.mContainerStore == &source ? sourceContext.mLocalScripts
+                                                                                : destinationContext.mLocalScripts;
+                const auto* copiedScripts
+                    = member.mContainerStore == &source ? &stockScripts : destinationAdd.mLocalScripts;
+                const auto registration = originalScripts->prepareRemove(&original.getCellRef());
+                const auto stockRegistration = copiedScripts->prepareRemove(&member.getCellRef());
                 require(!member.getCellRef().getCount(false) && values(member) == values(original)
                         && member.getRefData().matchesContainerTransferState(original.getRefData())
                         && registration.hasRegistration() == stockRegistration.hasRegistration()
@@ -1710,12 +1797,14 @@ namespace
                                 && stockRegistration.getContainer() == member.mContainerStore)),
                     "stock transfer changed a dormant node or registration");
             }
-            require(stockScripts.isRunning(scriptId, *stockResult) == paired.getScriptAddition().has_value()
+            require(destinationAdd.mLocalScripts->isRunning(scriptId, *stockResult)
+                        == paired.getScriptAddition().has_value()
                     && (!paired.getScriptAddition()
-                        || stockScripts.prepareRemove(&stockResult->getCellRef()).getCell()
+                        || destinationAdd.mLocalScripts->prepareRemove(&stockResult->getCellRef()).getCell()
                             == paired.getScriptAddition()->mCell)
                     && stockScripts.isRunning(scriptId, *stockSource)
-                        == (scriptedItem && paired.getRemoval().getRemainingCount() != 0),
+                        == (sourceContext.mLocalScripts->prepareRemove(&item.getCellRef()).hasRegistration()
+                            && paired.getRemoval().getRemainingCount() != 0),
                 "paired deferred script intents differ from disposable stock behavior");
         };
         for (const auto& item : live)
@@ -2614,6 +2703,243 @@ namespace
                     }
             target.getCellRef().setSoul(originalSoul);
         }
+
+        // Entire service membership/cursor, including unrelated owners, must be
+        // prepared jointly. Enumerate before/at/after removal and end positions
+        // against real stock lists; distinct destination cursors vary independently.
+        const auto positionScripts = [&](MWWorld::LocalScripts& service, size_t cursor) {
+            service.startIteration();
+            std::pair<ESM::RefId, MWWorld::Ptr> next;
+            for (size_t i = 0; i < cursor; ++i)
+                require(service.getNext(next), "script cursor fixture exceeded membership");
+        };
+        for (bool shared : { false, true })
+            for (bool fromA : { false, true })
+                for (bool hasScript : { false, true })
+                {
+                    MWWorld::LocalScripts sourceScripts(store), destinationScripts(store);
+                    auto sourceAdd = fromA ? scriptedAddA : scriptedAddB;
+                    auto destinationAdd = fromA ? scriptedAddB : scriptedAddA;
+                    sourceAdd.mLocalScripts = &sourceScripts;
+                    destinationAdd.mLocalScripts = shared ? &sourceScripts : &destinationScripts;
+                    auto& addedScripts = *destinationAdd.mLocalScripts;
+                    // Exercise OnPCAdd in both directions with this operation's player.
+                    destinationAdd.mPlayer = destinationAdd.mContainer;
+                    MWWorld::ContainerStore source, destination;
+                    bindEmptyStore(source, sourceAdd.mContainer, worldModel);
+                    bindEmptyStore(destination, destinationAdd.mContainer, worldModel);
+                    observedStores.push_back(&source);
+                    observedStores.push_back(&destination);
+                    const auto item = *source.add(hasScript ? scripted.getPtr() : plain.getPtr(), 4, sourceAdd);
+                    copyValues(item, fromA ? (hasScript ? *scriptA : *plainA) : (hasScript ? *scriptB : *plainB));
+                    item.getCellRef().setCount(fromA ? 4 : -4);
+                    const auto other = *source.add(scripted.getPtr(), 2, sourceAdd);
+                    const auto target = *destination.add(scripted.getPtr(), 3, destinationAdd);
+                    const auto plainTarget = *destination.add(plain.getPtr(), 2, destinationAdd);
+                    plainTarget.getCellRef().setSoul(item.getCellRef().getSoul());
+                    source.setSelectedEnchantItem(std::find(source.begin(), source.end(), item));
+                    destination.setSelectedEnchantItem(std::find(destination.begin(), destination.end(), target));
+                    const auto registerItem
+                        = [&](MWWorld::LocalScripts& service, MWWorld::Ptr ptr, MWWorld::CellStore* cell) {
+                              ptr.mCell = cell;
+                              service.add(scriptId, ptr, scripts);
+                          };
+                    for (bool registered : { false, true })
+                    {
+                        if (registered && !hasScript)
+                            continue;
+                        sourceScripts.clear();
+                        destinationScripts.clear();
+                        registerItem(sourceScripts, *scriptA, nullptr);
+                        registerItem(addedScripts, target, destinationAdd.mContainer.mCell);
+                        if (registered)
+                            registerItem(sourceScripts, item, sourceAdd.mContainer.mCell);
+                        registerItem(sourceScripts, other, nullptr);
+                        registerItem(addedScripts, *scriptB, scriptedAddB.mContainer.mCell);
+                        MWWorld::ContainerStoreRemoveContext removal{ worldModel, sourceAdd.mContainer, sourceScripts,
+                            sourceAdd.mInventoryUpdated };
+                        const auto make = [&](int quantity) {
+                            return source.prepareTransfer(item, quantity, destination, removal, destinationAdd);
+                        };
+                        const auto validate = [&](const Pair& decision) {
+                            const auto before
+                                = std::tuple{ snapshot(), sourceScripts.snapshot(), addedScripts.snapshot() };
+                            const auto unchanged = [&] {
+                                require(before
+                                        == std::tuple{ snapshot(), sourceScripts.snapshot(), addedScripts.snapshot() },
+                                    "script-list validation changed live state");
+                            };
+                            try
+                            {
+                                source.validateTransfer(decision, destination, removal, destinationAdd);
+                            }
+                            catch (...)
+                            {
+                                unchanged();
+                                throw;
+                            }
+                            unchanged();
+                        };
+                        for (int quantity : { 1, 4 })
+                            for (size_t sourceCursor = 0; sourceCursor <= sourceScripts.snapshot().mEntries.size();
+                                ++sourceCursor)
+                                for (size_t destinationCursor = 0;
+                                    destinationCursor <= addedScripts.snapshot().mEntries.size(); ++destinationCursor)
+                                {
+                                    if (shared && sourceCursor != destinationCursor)
+                                        continue;
+                                    positionScripts(sourceScripts, sourceCursor);
+                                    positionScripts(addedScripts, destinationCursor);
+                                    const auto before = snapshot();
+                                    const auto sourceBefore = sourceScripts.snapshot();
+                                    const auto destinationBefore = addedScripts.snapshot();
+                                    {
+                                        auto initial = make(quantity);
+                                        const auto sourceResult = initial.getSourceScripts();
+                                        const auto destinationResult = initial.getDestinationScripts();
+                                        auto decision = std::move(initial);
+                                        reject([&] { initial.getSourceScripts(); }, "moved from");
+                                        reject([&] { initial.getDestinationScripts(); }, "moved from");
+                                        auto assigned = make(quantity);
+                                        assigned = std::move(decision);
+                                        reject([&] { validate(decision); }, "moved from");
+                                        require(assigned.getSourceScripts() == sourceResult
+                                                && assigned.getDestinationScripts() == destinationResult,
+                                            "move changed script list ownership or detached registration binding");
+                                        validate(assigned);
+                                        compareStock(assigned, item, destination, sourceAdd, destinationAdd);
+                                        // Cursor changes alone must invalidate either service.
+                                        for (auto* service : { &sourceScripts, &addedScripts })
+                                        {
+                                            const auto saved = service->snapshot();
+                                            positionScripts(
+                                                *service, (saved.mCursor + 1) % (saved.mEntries.size() + 1));
+                                            reject([&] { validate(assigned); }, "cursor changed");
+                                            positionScripts(*service, saved.mCursor);
+                                            validate(assigned);
+                                        }
+                                        for (const auto* view :
+                                            { &assigned.getSourceScripts(), &assigned.getDestinationScripts() })
+                                        {
+                                            auto& result = const_cast<MWWorld::LocalScripts::List&>(*view);
+                                            const auto saved = result;
+                                            ++result.mCursor;
+                                            reject([&] { validate(assigned); }, "result changed");
+                                            result = saved;
+                                            result.mEntries.erase(result.mEntries.begin());
+                                            reject([&] { validate(assigned); }, "result changed");
+                                            result = saved;
+                                            std::reverse(result.mEntries.begin(), result.mEntries.end());
+                                            reject([&] { validate(assigned); }, "result changed");
+                                            result = saved;
+                                            result.mEntries[0] = {};
+                                            reject([&] { validate(assigned); }, "result changed");
+                                            result = saved;
+                                        }
+                                        if (hasScript)
+                                        {
+                                            auto differentQuantity = make(quantity == 1 ? 4 : 1);
+                                            auto& result = const_cast<MWWorld::LocalScripts::List&>(
+                                                assigned.getDestinationScripts());
+                                            const auto saved = result;
+                                            result.mEntries.back()
+                                                = differentQuantity.getDestinationScripts().mEntries.back();
+                                            reject([&] { validate(assigned); }, "addition result changed");
+                                            result = saved;
+                                        }
+                                        validate(assigned);
+                                    }
+                                    require(snapshot() == before && sourceScripts.snapshot() == sourceBefore
+                                            && addedScripts.snapshot() == destinationBefore,
+                                        "script preparation/validation/moves/discard changed live state");
+                                }
+                        // Replacement with identical metadata still has a new registration
+                        // identity. These unrelated entries are outside both inventories.
+                        for (auto* service : { &sourceScripts, &addedScripts })
+                        {
+                            auto decision = make(4);
+                            const auto external = service == &sourceScripts ? *scriptA : *scriptB;
+                            const auto cell = service->prepareRemove(&external.getCellRef()).getCell();
+                            registerItem(*service, external, cell);
+                            reject([&] { validate(decision); }, "registration or cursor changed");
+                            auto replaced = make(1);
+                            service->remove(external);
+                            reject([&] { validate(replaced); }, "registration or cursor changed");
+                            auto absent = make(1);
+                            registerItem(*service, external, cell);
+                            reject([&] { validate(absent); }, "registration or cursor changed");
+                        }
+                        // A failure after owned registration preparation and before
+                        // OnPCAdd must unwind without touching either live service.
+                        if (hasScript)
+                        {
+                            const auto before = snapshot();
+                            const auto sourceBefore = sourceScripts.snapshot();
+                            const auto destinationBefore = addedScripts.snapshot();
+                            scripts.mBeforeLocals = [&] { throw PreparationFailure{}; };
+                            bool caught = false;
+                            try
+                            {
+                                make(4);
+                            }
+                            catch (const PreparationFailure&)
+                            {
+                                caught = true;
+                            }
+                            scripts.mBeforeLocals = {};
+                            require(caught && snapshot() == before && sourceScripts.snapshot() == sourceBefore
+                                    && addedScripts.snapshot() == destinationBefore,
+                                "OnPCAdd preparation failure leaked inventory, registration or effects");
+                            validate(make(4));
+                        }
+                    }
+                    // Empty lists and a sole source registration cover erase-to-end
+                    // followed by append: the new entry must not become the cursor.
+                    sourceScripts.clear();
+                    destinationScripts.clear();
+                    if (hasScript)
+                        registerItem(sourceScripts, item, sourceAdd.mContainer.mCell);
+                    MWWorld::ContainerStoreRemoveContext removal{ worldModel, sourceAdd.mContainer, sourceScripts,
+                        sourceAdd.mInventoryUpdated };
+                    for (size_t cursor = 0; cursor <= sourceScripts.snapshot().mEntries.size(); ++cursor)
+                    {
+                        positionScripts(sourceScripts, cursor);
+                        const auto before = snapshot();
+                        const auto sourceBefore = sourceScripts.snapshot();
+                        const auto destinationBefore = addedScripts.snapshot();
+                        {
+                            auto decision = source.prepareTransfer(item, 4, destination, removal, destinationAdd);
+                            compareStock(decision, item, destination, sourceAdd, destinationAdd);
+                            require(decision.getSourceScripts().mCursor == decision.getSourceScripts().mEntries.size()
+                                    && decision.getDestinationScripts().mCursor
+                                        == decision.getDestinationScripts().mEntries.size(),
+                                "erase-to-end/empty append exposed a new registration to an end cursor");
+                            source.validateTransfer(decision, destination, removal, destinationAdd);
+                        }
+                        require(snapshot() == before && sourceScripts.snapshot() == sourceBefore
+                                && addedScripts.snapshot() == destinationBefore,
+                            "empty/final-registration preparation changed live state");
+                    }
+                    // An unrelated registration may already contain a dead stock Ptr.
+                    // Snapshot/validation must use its immutable address key only.
+                    auto expired
+                        = std::make_unique<MWWorld::ManualRef>(store, scripted.getPtr().getCellRef().getRefId());
+                    copyValues(expired->getPtr(), *scriptA);
+                    registerItem(sourceScripts, expired->getPtr(), nullptr);
+                    const auto* expiredKey = &expired->getPtr().getCellRef();
+                    auto withExpired = source.prepareTransfer(item, 1, destination, removal, destinationAdd);
+                    expired.reset();
+                    const auto expiredBefore = sourceScripts.snapshot();
+                    const auto beforeExpiredValidation = snapshot();
+                    source.validateTransfer(withExpired, destination, removal, destinationAdd);
+                    require(sourceScripts.snapshot() == expiredBefore && snapshot() == beforeExpiredValidation,
+                        "validation touched an unrelated expired reference or live state");
+                    sourceScripts.remove(expiredKey);
+                    reject([&] { source.validateTransfer(withExpired, destination, removal, destinationAdd); },
+                        "registration or cursor changed");
+                    observedStores.pop_back();
+                    observedStores.pop_back();
+                }
 
         // Dormant raw nodes are absent from stock iteration but still witnessed.
         // Also compare multiple signed remaining items and an empty full-removal

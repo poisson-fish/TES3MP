@@ -181,6 +181,12 @@ namespace MWWorld
         ESM::RefNum getStackTarget() const;
         int getStackCount() const;
         std::optional<LocalScripts::Registration> getScriptAddition() const;
+        // Entire service results, including unaffected world/other-owner entries.
+        // Shared services expose the same combined remove-then-append result.
+        // New registration references only the owned detached destination value;
+        // all other entries preserve immutable registration identities/bindings.
+        const LocalScripts::List& getSourceScripts() const;
+        const LocalScripts::List& getDestinationScripts() const;
         bool hasRemovalNotification() const;
         bool hasAdditionNotification() const;
 
@@ -464,6 +470,8 @@ namespace MWWorld
         void validateTransferCount(const ConstPtr& item, int count) const;
         void validateTransferSource(const ConstPtr& item, int count, const WorldModel& worldModel) const;
         ESM::RefNum transferSelection() const;
+        PreparedContainerAdd prepareTransferAdd(std::unique_ptr<LiveCellRef<ESM::Miscellaneous>> item,
+            const ContainerStoreAddContext& context, LocalScripts::PreparedList* scriptList);
         struct ItemRemoval
         {
             int mRemoved;

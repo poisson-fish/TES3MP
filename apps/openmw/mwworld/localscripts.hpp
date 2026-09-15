@@ -4,6 +4,7 @@
 #include <list>
 #include <memory>
 #include <string>
+#include <vector>
 
 #include "ptr.hpp"
 
@@ -54,7 +55,20 @@ namespace MWWorld
             ESM::RefId getScript() const { return mRegistration ? mRegistration->mScript : ESM::RefId(); }
             CellStore* getCell() const { return mRegistration ? mRegistration->mCell : nullptr; }
             ContainerStore* getContainer() const { return mRegistration ? mRegistration->mContainer : nullptr; }
+            // Address comparison only; never access a possibly destroyed item.
+            bool references(const CellRef* ref) const { return mReference == ref; }
+            bool operator==(const Removal&) const = default;
         };
+
+        // Owned registration witnesses in stock order; cursor == size means end.
+        // Neither the snapshot nor its entries retain live Ptrs or iterators.
+        struct List
+        {
+            std::vector<Removal> mEntries;
+            size_t mCursor = 0;
+            bool operator==(const List&) const = default;
+        };
+        List snapshot() const;
 
         Removal prepareRemove(const CellRef* ref) const;
         void validateRemoval(const Removal& prepared, const CellRef* ref) const;
@@ -67,6 +81,20 @@ namespace MWWorld
             CellStore* mCell;
         };
 
+    private:
+        friend class ContainerStore;
+        friend class PreparedContainerTransfer;
+        struct PreparedList
+        {
+            List mOriginal, mResult;
+        };
+        PreparedList prepareList(const Removal* removal) const;
+        void prepareListAddition(
+            PreparedList& prepared, const Registration& addition, const CellRef* ref, ContainerStore* container) const;
+        void validateList(const PreparedList& prepared, const Removal* removal, const Registration* addition,
+            const CellRef* ref, const ContainerStore* container) const;
+
+    public:
         // Initializes only the supplied RefData. Exceptions propagate to the staging
         // owner; stock add retains its logging/catch and live-list ordering below.
         static Registration prepareAdd(
