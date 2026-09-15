@@ -45,6 +45,10 @@ namespace MWClass
 
 namespace MWWorld
 {
+    namespace Testing
+    {
+        class DisposableTransferRehearsal;
+    }
     class ContainerStore;
     class ESMStore;
     class LocalScripts;
@@ -522,6 +526,7 @@ namespace MWWorld
         friend class ContainerStore;
         friend class ContainerStoreIteratorBase<Ptr>;
         friend class ContainerStoreIteratorBase<ConstPtr>;
+        friend class Testing::DisposableTransferRehearsal;
     };
 
     class ContainerStore
@@ -881,6 +886,8 @@ namespace MWWorld
         friend class ResolutionListener;
         friend class MWClass::Container;
         friend class PreparedContainerTransfer;
+        // Defined/linked only by the disposable native test target.
+        friend class Testing::DisposableTransferRehearsal;
     };
 
     template <class T, class U>

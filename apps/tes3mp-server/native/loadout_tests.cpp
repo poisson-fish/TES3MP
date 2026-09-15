@@ -1,4 +1,5 @@
 #include "loadout.hpp"
+#include "transfer_rehearsal.hpp"
 
 #include <cmath>
 #include <fstream>
@@ -5693,6 +5694,11 @@ namespace
         auto options = TES3MP::Native::readLoadoutOptions(argc, argv);
         options.mContent.push_back("Inventory.esm");
         TES3MP::Native::Loadout loadout(options);
+        if (filter == "inventory-transfer-rehearsal")
+        {
+            MWWorld::Testing::checkTransferRehearsal(loadout.store());
+            return;
+        }
         if (filter == "inventory-two-owners" || filter == "inventory-transfer-preparation")
         {
             checkInventoryOwners(loadout, filter == "inventory-transfer-preparation");

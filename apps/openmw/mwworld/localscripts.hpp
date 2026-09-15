@@ -10,6 +10,10 @@
 
 namespace MWWorld
 {
+    namespace Testing
+    {
+        class DisposableTransferRehearsal;
+    }
     class ESMStore;
     class CellStore;
     class RefData;
@@ -99,6 +103,7 @@ namespace MWWorld
         {
             friend class LocalScripts;
             friend class ContainerStore;
+            friend class Testing::DisposableTransferRehearsal;
             const LocalScripts* mService;
             Scripts mEntries;
             std::vector<const Entry*> mNodes;
@@ -132,6 +137,7 @@ namespace MWWorld
     private:
         friend class ContainerStore;
         friend class PreparedContainerTransfer;
+        friend class Testing::DisposableTransferRehearsal;
         struct PreparedList
         {
             List mOriginal, mResult;

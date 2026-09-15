@@ -108,6 +108,7 @@ namespace MWWorld
         bool readRecord(ESM::ESMReader& reader, uint32_t type);
 
     private:
+        friend class Testing::DisposableTransferRehearsal;
         struct GetCellStoreCallback;
 
         PtrRegistry mPtrRegistry; // defined before mCells because during destruction it should be the last

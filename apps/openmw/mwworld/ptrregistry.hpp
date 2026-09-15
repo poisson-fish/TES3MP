@@ -14,6 +14,10 @@
 
 namespace MWWorld
 {
+    namespace Testing
+    {
+        class DisposableTransferRehearsal;
+    }
     class PtrRegistry
     {
         using Index = std::unordered_map<ESM::RefNum, Ptr>;
@@ -48,6 +52,7 @@ namespace MWWorld
         class PreparedStorage
         {
             friend class PtrRegistry;
+            friend class Testing::DisposableTransferRehearsal;
             const Snapshot* mResult; // Pair-owned identity, compared only.
             Snapshot mBindings;
             Index mIndex;
@@ -138,6 +143,7 @@ namespace MWWorld
 
     private:
         friend class ContainerStore;
+        friend class Testing::DisposableTransferRehearsal;
         static std::unique_ptr<PreparedStorage> prepareStorage(
             const Snapshot& relocated, const std::vector<std::pair<ESM::RefNum, Ptr>>& nodes)
         {
