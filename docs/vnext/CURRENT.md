@@ -4,101 +4,93 @@
 
 - **Direction:** OpenMW-backed authoritative cooperative multiplayer; see
   [README.md](README.md) and [DECISIONS.md](DECISIONS.md).
-- **Milestone:** M2 in [PLAN.md](PLAN.md) prepares detached MISC values,
-  source-removal/destination stacking decisions and deferred script effects
-  between resolved base-store owners. This is not atomic cross-container transfer.
-- **Next action:** prepare one owned paired non-gold MISC transfer decision that
-  binds source removal to the detached destination value and validates both
-  owners and deferred intents together, without live installation.
+- **Milestone:** M2 in [PLAN.md](PLAN.md). Paired non-gold MISC preparation now
+  binds source removal, detached incoming values, destination stacking and deferred
+  effects between resolved base-store owners. This is not an atomic transfer.
+- **Next action:** prepare an owned post-transfer value for an existing destination
+  MISC stack, preserving its RefData and applying stock normalization/count rules,
+  and bind it into the pair without live installation.
 - **Checkpoint:** `8850e745c298c6de629ef9a5a26bbdddf6aa56e3` preserves the working
   gameplay implementation before the engine-backed pivot.
 
 ## Implemented M2 slice
 
-[ContainerStore::prepareTransferRemove](../../apps/openmw/mwworld/containerstore.cpp)
-accepts non-gold MISC with matching initialized MWScript locals and an explicit
-LocalScripts collection. Plain callers may still omit that service. Stock
-`prepareRemoveCount` supplies signed partial/full counts without applying zero
-or invoking cleanup. The move-only decision owns independent original item state;
-full removal exposes a read-only deregistration intent only when stock cleanup
-would find a registration. Partial removal preserves registration. Both bind its
-presence or absence for validation.
+[ContainerStore::prepareTransfer](../../apps/openmw/mwworld/containerstore.cpp)
+returns one move-only `PreparedContainerTransfer`. Private owned state contains
+source removal, the detached normalized incoming item, destination stack/count
+selection, script deregistration/registration and both notification consumers.
+The item is derived from the owned source witness and its removal quantity.
+Public access exposes const item/removal views, scalar decisions and a copied
+registration value; it cannot independently replace the item or execute effects.
+Moved-from decisions reject validation.
 
-[LocalScripts](../../apps/openmw/mwworld/localscripts.cpp) now owns immutable
-registration identities containing script, CellRef address, cell and store.
-Preparation shares ownership of that immutable identity, with no live item Ptr or
-list iterator. Erase/reinsert of identical registration values invalidates the
-witness. Stock CellRef removal and preparation share first-match address lookup;
-lookup compares stored keys without dereferencing possibly destroyed references.
-Both stock remove overloads preserve next-iterator repair. `clear` resets its
-cursor to end, including before subsequent add/remove calls.
+Preparation composes existing engine source/count checks, detached copying,
+first-compatible-stack selection, normalization and deferred OnPCAdd. Partial
+removal preserves the signed remainder and registration; full removal proposes
+zero and deregistration without invoking cleanup. Explicit player destinations
+change only copied OnPCAdd and use a null script cell; nonplayers retain the
+incoming local and use the owner cell. Existing-stack decisions still hold the
+normalized incoming value plus a count proposal, not an installed target value.
 
-`validateTransferRemoval` first reacquires current source MISC members, then
-checks source/owner/store/cell identity, WorldModel mappings, base/script identity,
-signed count, CellRef values and independent RefData state, including all locals,
-animation and activation flags. It checks the captured script collection and
-registration identity only after establishing source membership/state. Stale
-script, locals, registration, membership, registry mappings or source values
-reject without invoking script services or reading destroyed inventory references
-or erased script iterators.
+`validateTransfer` checks both stores/owners, WorldModel mappings, content-store
+identity, player/service/listener bindings, source selection relevant to full
+removal, script registrations and owned item values. Both contexts require
+LocalScripts bound to the content store, including plain-item registration
+absence. Destination witnesses include raw/dormant MISC nodes, CellRef values,
+independent RefData and registration identity. Validation uses current members;
+it does not call script services or read saved inventory/script iterators.
 
-Source state validation remains current-state comparison, not a mutation-history
-tracker. Content records remain borrowed and immutable; stores, WorldModel,
-LocalScripts and owner/cell dependencies must outlive the operation. Source and
-destination decisions are still independent: they do not establish that an
-incoming detached value matches the source or jointly validate deferred effects.
+Each base store has an owned storage identity. Copy/move replacement invalidates
+paired witnesses even when list assignment reuses node addresses and item IDs.
+Immutable LocalScripts registration identities detect erase/reinsert; address-only
+lookup remains safe past dangling registry Ptrs. These checks do not track every
+mutation: ordinary values may change and return to their captured state. Content
+records are borrowed and immutable; stores, owners/cells, WorldModel and script
+services must outlive the decision. Notification callables are owned snapshots,
+not re-sourced or compared against callables in later validation contexts.
 
-Existing `prepareTransferItem` detached copying and `prepareTransferAdd` first
-compatible destination stack/count selection remain. Raw aggregate guards include
-incompatible/dormant MISC nodes. Stock normalization and deferred registration/
-OnPCAdd share the engine path: explicit player destinations change only copied
-OnPCAdd and use a null script cell; nonplayers retain OnPCAdd and use the owner
-cell. Notifications remain owned, unexecuted intents.
-
-Preparation, validation, rejection and discard never mutate live inventories,
-apply zero-count cleanup, register temporary references/scripts, advance script
-iteration, execute scripts or emit success. No installation API exists.
+Preparation, validation, rejection and discard leave live inventories, selection,
+scripts, locals, registry mappings and notifications unchanged. There is no live
+removal, deregistration, destination installation or effect execution API in the
+pair. Stock callers continue through the shared engine rules; networking boundaries
+and production authority are unchanged.
 
 ## Fresh verification
 
 Windows MSVC RelWithDebInfo, `build/vnext-product`, individually:
 
-- `tes3mp_native_loadout_tests` build and fixture-fix rebuild: exit 0.
-- `inventory-transfer-preparation`: initially exit 1 because the alternate-script
-  fixture was absent from the two-owner ESMStore; fixed and rerun, exit 0.
+- `tes3mp_native_loadout_tests` initial/reviewed focused builds: each exit 0.
+- `inventory-transfer-preparation` initial/expanded checks: each exit 0.
 - `inventory-two-owners`, `inventory-scripted`: each exit 0.
-- Documentation budget and local-link guards: each exit 0.
+- Documentation budget, local-link and patch-registry semantic-field guards:
+  each exit 0.
 
-The synthetic preparation check covers both scripted directions, partial/full
-removal and positive/negative stock parity through exact integer limits. It
-rejects stale locals buffers/identity, script/cell/store registration changes,
-absence/reinsertion, source values/ownership/mappings and destroyed/replaced source
-nodes, including reused item IDs. Script lookup passes a dangling registry Ptr
-safely. Stock cursor checks cover both remove overloads, clearCell and clear at
-unvisited, partially visited and exhausted positions.
+The synthetic filter covers both directions, plain/scripted partial/full signed
+removal, player/nonplayer/no-player destinations, stacking/new-stack choices,
+move/discard and stale source/destination/context rejection, including owner/content
+replacement, full-removal selection and source/destination storage replacement.
+Snapshots compare
+inventory values and backing buffers, weight, selection, owner bindings,
+WorldModel mappings/revision/ID counter, script membership/cursor and notifications.
+Late notification-copy exceptions occur after both owned decisions and destination
+intents exist; notification lifetime counters verify unwinding. Detached-item
+destructor/OSG observers cover discard and inherited independent preparation
+failure paths. No Environment, World, UI, Lua runtime or actor custom data is
+initialized: these are synthetic NPC identities with real engine base stores/cells.
 
-Late notification-copy failure/discard runs with owned source state/deregistration
-and destination item/registration intents. Destructor counters and OSG observers
-verify temporary cleanup; snapshots verify inventories, locals/buffers, selection,
-weight, owner bindings, registry mappings/revision/ID counter, script membership/
-cursor and notifications. Plain removal, destination stacking and deferred OnPCAdd
-failure coverage remain. No Environment, World, UI, Lua runtime or live actor
-custom data is initialized. These are two NPC identities and real engine base
-stores/cell objects, not live actor inventories.
-
-Logs: `build/logs/native-script-removal-*`. No complete suites, expensive gates or
-upstream baseline tests ran.
+Logs: `build/logs/native-paired-transfer-*`. No complete suites, expensive gates
+or upstream baseline tests ran.
 
 ## Remaining limits and inherited evidence
 
-Live removal/deregistration, destination installation, effect execution, unresolved
-stores, equipment, gold/other item types, Lua/custom state, persistence, durability
-and stable multiplayer instance mapping remain outside this slice. Copy-time
-allocator faults and live installation failures are not covered.
+Unresolved stores, equipment, gold/other item types, Lua/custom state, live
+installation/effect failures, persistence, durability and stable multiplayer
+instance mapping remain outside this slice. Copy-time allocator faults are not
+injected. No coherent post-transfer inventories or atomic transfer are claimed.
 
 Inherited M1 real-Morrowind/enchantment-charge evidence under
-`build/native-loadout/real` and `build/native-loadout/parity` was not rerun; TR remains
-unverified. Independent networking/standalone targets and the migration base are
-unchanged. Broad openmw-lib rendering dependencies still need extraction before
-production headless packaging. Whole-baseline provenance debt remains; only
-touched patch-registry entries changed.
+`build/native-loadout/real` and `build/native-loadout/parity` was not rerun; TR
+remains unverified. Independent networking/standalone targets and the migration
+base are unchanged. Broad openmw-lib rendering dependencies still need extraction
+before production headless packaging. Whole-baseline provenance debt remains;
+only touched patch-registry entries changed.

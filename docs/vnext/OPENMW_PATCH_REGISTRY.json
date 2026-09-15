@@ -33,9 +33,9 @@
     },
     {
       "id": "M1-001",
-      "slice": "native inventory runtime seam and M2 source-removal/destination stacking preparation",
+      "slice": "native inventory runtime seam and M2 paired transfer preparation",
       "owner": "OpenMW server runtime",
-      "purpose": "Share explicit-context ContainerStore add/remove, first-stack selection, signed removal/count decisions, normalization and OnPCAdd ordering; prepare owned plain/initialized-MWScript MISC source-removal witnesses, deferred deregistration and destination stacking/add effects, validating current inventory members and script registration identity without reading destroyed references/iterators or applying zero-count cleanup. No live installation or publication; retain stock equipment dispatch and safe raw-count iterator zero checks.",
+      "purpose": "Share explicit-context ContainerStore add/remove, first-stack selection, signed removal/count decisions, normalization and OnPCAdd ordering; compose owned plain/initialized-MWScript MISC removal, detached incoming values, stacking and deferred script/notification intents in a protected move-only pair. Validate both owners, services, registrations and values through current members; storage identity rejects replacement/address reuse before reading nodes. Never read destroyed references/iterators or apply zero-count cleanup. No live installation or publication; retain stock equipment dispatch and safe raw-count iterator zero checks.",
       "paths": [
         "apps/openmw/mwworld/cellref.cpp",
         "apps/openmw/mwworld/cellref.hpp",

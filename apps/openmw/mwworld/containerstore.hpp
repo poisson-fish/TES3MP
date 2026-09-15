@@ -140,6 +140,32 @@ namespace MWWorld
         int mRemainingCount = 0;
     };
 
+    // One owned pair, constructed only by ContainerStore. Never expose the add
+    // aggregate: even a const unique_ptr would allow independent item mutation.
+    // Views are read-only and valid only while this decision owns its state.
+    class PreparedContainerTransfer
+    {
+    public:
+        PreparedContainerTransfer(PreparedContainerTransfer&&) noexcept;
+        PreparedContainerTransfer& operator=(PreparedContainerTransfer&&) noexcept;
+        ~PreparedContainerTransfer();
+
+        const PreparedContainerRemove& getRemoval() const;
+        ConstPtr getItem() const;
+        ESM::RefNum getStackTarget() const;
+        int getStackCount() const;
+        std::optional<LocalScripts::Registration> getScriptAddition() const;
+        bool hasRemovalNotification() const;
+        bool hasAdditionNotification() const;
+
+    private:
+        friend class ContainerStore;
+        struct State;
+        std::unique_ptr<State> mState;
+        explicit PreparedContainerTransfer(std::unique_ptr<State> state);
+        const State& state() const;
+    };
+
     template <class PtrType>
     class ContainerStoreIteratorBase;
 
@@ -380,6 +406,13 @@ namespace MWWorld
     private:
         Lists mLists;
 
+        // Assigning/moving storage may destroy or reuse list node addresses and
+        // item IDs. A decision owns this token so replacement cannot reuse it.
+        struct StorageIdentity
+        {
+        };
+        std::shared_ptr<const StorageIdentity> mStorageIdentity = std::make_shared<const StorageIdentity>();
+
         mutable float mCachedWeight = 0;
         unsigned int mSeed = 0;
         MWWorld::SafePtr mPtr; // Container or actor that holds this store.
@@ -531,6 +564,20 @@ namespace MWWorld
         // members are read. Registration replacement rejects even at the same address.
         void validateTransferRemoval(const PreparedContainerRemove& prepared, const ConstPtr& sourceOwner,
             const WorldModel& worldModel, const LocalScripts* localScripts = nullptr) const;
+
+        // Paired preparation only. Captures removal, detached normalized value,
+        // stacking, script intents and both notification consumers as one unit.
+        // Both contexts require LocalScripts, even for plain registration absence.
+        // No live removal, installation, effects, persistence or atomic transfer.
+        PreparedContainerTransfer prepareTransfer(const ConstPtr& item, int count, ContainerStore& destination,
+            const ContainerStoreRemoveContext& sourceContext, const ContainerStoreAddContext& destinationContext) const;
+
+        // Narrow current-state check; re-acquires inventory nodes before reading.
+        // Stores/content/owners/cells/services must outlive the decision. Consumers
+        // are owned snapshots, not re-sourced from the validation contexts; service,
+        // player, owner and listener bindings must still match. No script calls.
+        void validateTransfer(const PreparedContainerTransfer& prepared, const ContainerStore& destination,
+            const ContainerStoreRemoveContext& sourceContext, const ContainerStoreAddContext& destinationContext) const;
 
         int remove(const ESM::RefId& itemId, int count, bool equipReplacement = 0, bool resolve = true);
         ///< Remove \a count item(s) designated by \a itemId from this container.

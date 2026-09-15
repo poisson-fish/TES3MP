@@ -223,6 +223,7 @@ MWWorld::ContainerStore::ContainerStore(MWWorld::ContainerStore&& store)
     , mResolved(store.mResolved)
     , mRechargingItemsUpToDate(false)
 {
+    store.mStorageIdentity = std::make_shared<const StorageIdentity>();
     const std::ptrdiff_t distance = store.index(store.mSelectedEnchantItem);
     mLists = std::move(store.mLists);
     if (distance != -1)
@@ -236,6 +237,7 @@ MWWorld::ContainerStore& MWWorld::ContainerStore::operator=(const ContainerStore
 {
     if (this == &store)
         return *this;
+    mStorageIdentity = std::make_shared<const StorageIdentity>();
     mListener = store.mListener;
     mLists = store.mLists;
     mCachedWeight = store.mCachedWeight;
@@ -259,6 +261,12 @@ MWWorld::ContainerStore& MWWorld::ContainerStore::operator=(const ContainerStore
 
 MWWorld::ContainerStore& MWWorld::ContainerStore::operator=(ContainerStore&& store)
 {
+    if (this == &store)
+        return *this;
+    auto identity = std::make_shared<const StorageIdentity>();
+    auto sourceIdentity = std::make_shared<const StorageIdentity>();
+    mStorageIdentity = std::move(identity);
+    store.mStorageIdentity = std::move(sourceIdentity);
     const std::ptrdiff_t distance = store.index(store.mSelectedEnchantItem);
     mListener = store.mListener;
     mLists = std::move(store.mLists);
@@ -787,6 +795,227 @@ void MWWorld::ContainerStore::validateTransferStacking(
         throw std::invalid_argument("Container stacking preparation destination membership changed");
     // Content records are immutable for this operation. The witnesses bind all MISC
     // stacking inputs and signed counts, so no add, registration or effects run here.
+}
+
+struct MWWorld::PreparedContainerTransfer::State
+{
+    PreparedContainerRemove mRemoval;
+    PreparedContainerAdd mAddition;
+    std::unique_ptr<LiveCellRef<ESM::Miscellaneous>> mAddedValues;
+    struct DestinationState
+    {
+        std::unique_ptr<LiveCellRef<ESM::Miscellaneous>> mValues;
+        LocalScripts::Removal mScript;
+    };
+    std::vector<DestinationState> mDestinationValues;
+    std::shared_ptr<const void> mSourceStorage, mDestinationStorage;
+    const LocalScripts* mDestinationScripts = nullptr;
+    const MWBase::ScriptManager* mScriptManager = nullptr;
+    Ptr mPlayer;
+    ESM::RefNum mPlayerIdentity;
+    ContainerStoreListener* mSourceListener = nullptr;
+    ContainerStoreListener* mDestinationListener = nullptr;
+    bool mClearSelection = false;
+    std::function<void(const Ptr&)> mSourceUpdated;
+};
+
+MWWorld::PreparedContainerTransfer::PreparedContainerTransfer(std::unique_ptr<State> state)
+    : mState(std::move(state))
+{
+}
+
+MWWorld::PreparedContainerTransfer::PreparedContainerTransfer(PreparedContainerTransfer&&) noexcept = default;
+MWWorld::PreparedContainerTransfer& MWWorld::PreparedContainerTransfer::operator=(PreparedContainerTransfer&&) noexcept
+    = default;
+MWWorld::PreparedContainerTransfer::~PreparedContainerTransfer() = default;
+
+const MWWorld::PreparedContainerTransfer::State& MWWorld::PreparedContainerTransfer::state() const
+{
+    if (!mState)
+        throw std::invalid_argument("Container transfer preparation was moved from");
+    return *mState;
+}
+
+const MWWorld::PreparedContainerRemove& MWWorld::PreparedContainerTransfer::getRemoval() const
+{
+    return state().mRemoval;
+}
+
+MWWorld::ConstPtr MWWorld::PreparedContainerTransfer::getItem() const
+{
+    return ConstPtr(state().mAddition.mItem.get());
+}
+
+ESM::RefNum MWWorld::PreparedContainerTransfer::getStackTarget() const
+{
+    return state().mAddition.getStackTarget();
+}
+
+int MWWorld::PreparedContainerTransfer::getStackCount() const
+{
+    return state().mAddition.getStackCount();
+}
+
+std::optional<MWWorld::LocalScripts::Registration> MWWorld::PreparedContainerTransfer::getScriptAddition() const
+{
+    return state().mAddition.mScript;
+}
+
+bool MWWorld::PreparedContainerTransfer::hasRemovalNotification() const
+{
+    return state().mSourceListener != nullptr;
+}
+
+bool MWWorld::PreparedContainerTransfer::hasAdditionNotification() const
+{
+    return state().mAddition.mNotifyItemAdded;
+}
+
+namespace
+{
+    bool sameBinding(const MWWorld::ConstPtr& a, const MWWorld::ConstPtr& b)
+    {
+        // Ptr equality alone deliberately ignores cell and container hints.
+        return a.mRef == b.mRef && a.mCell == b.mCell && a.mContainerStore == b.mContainerStore;
+    }
+
+    void validateTransferRegistration(const MWWorld::LocalScripts::Removal& registration, const MWWorld::ConstPtr& item,
+        const MWWorld::ContainerStore& container, MWWorld::CellStore* ownerCell)
+    {
+        if (registration.hasRegistration()
+            && (registration.getScript() != item.getClass().getScript(item) || registration.getContainer() != &container
+                || (registration.getCell() && registration.getCell() != ownerCell)))
+            throw std::invalid_argument("Container transfer preparation script registration mismatch");
+    }
+
+    bool sameTransferValues(
+        const MWWorld::LiveCellRef<ESM::Miscellaneous>& item, const MWWorld::LiveCellRef<ESM::Miscellaneous>& saved)
+    {
+        return item.mBase == saved.mBase && miscTransferValues(item.mRef) == miscTransferValues(saved.mRef)
+            && item.mData.matchesContainerTransferState(saved.mData);
+    }
+}
+
+MWWorld::PreparedContainerTransfer MWWorld::ContainerStore::prepareTransfer(const ConstPtr& item, int count,
+    ContainerStore& destination, const ContainerStoreRemoveContext& sourceContext,
+    const ContainerStoreAddContext& destinationContext) const
+{
+    const auto& worldModel = sourceContext.mWorldModel;
+    if (&worldModel != &destinationContext.mWorldModel)
+        throw std::invalid_argument("Container transfer preparation world context mismatch");
+    validateExplicitOwner(sourceContext.mContainer, worldModel);
+    destination.validateExplicitOwner(destinationContext.mContainer, worldModel);
+    if (this == &destination || sourceContext.mContainer == destinationContext.mContainer)
+        throw std::invalid_argument("Container transfer preparation requires two distinct owners and stores");
+    if (!sameBinding(getPtr(worldModel), sourceContext.mContainer)
+        || !sameBinding(destination.getPtr(worldModel), destinationContext.mContainer))
+        throw std::invalid_argument("Container transfer preparation owner binding mismatch");
+    if (!sourceContext.mInventoryUpdated || !destinationContext.mInventoryUpdated)
+        throw std::logic_error("Container transfer preparation requires both presentation consumers");
+    if (!destinationContext.mLocalScripts || !sourceContext.mLocalScripts.usesStore(destinationContext.mStore)
+        || !destinationContext.mLocalScripts->usesStore(destinationContext.mStore))
+        throw std::invalid_argument("Container transfer preparation requires LocalScripts bound to the content store");
+    validateTransferSource(item, count, worldModel);
+    destination.validateTransferCount(item, count);
+
+    auto state = std::make_unique<PreparedContainerTransfer::State>();
+    state->mSourceStorage = mStorageIdentity;
+    state->mDestinationStorage = destination.mStorageIdentity;
+    state->mDestinationScripts = destinationContext.mLocalScripts;
+    state->mScriptManager = destinationContext.mScriptManager;
+    state->mSourceListener = mListener;
+    state->mDestinationListener = destination.mListener;
+    state->mPlayer = destinationContext.mPlayer;
+    if (!state->mPlayer.isEmpty())
+    {
+        // Find the caller's binding without dereferencing a possibly stale Ptr.
+        for (const auto& [id, ptr] : worldModel.getPtrRegistryView())
+            if (sameBinding(ptr, state->mPlayer))
+            {
+                state->mPlayerIdentity = id;
+                break;
+            }
+        if (!state->mPlayerIdentity.isSet())
+            throw std::invalid_argument("Container transfer preparation player binding mismatch");
+    }
+    state->mRemoval
+        = prepareTransferRemove(item, count, sourceContext.mContainer, worldModel, &sourceContext.mLocalScripts);
+    const auto& source = *state->mRemoval.mItemState;
+    if (destinationContext.mStore.get<ESM::Miscellaneous>().search(source.mRef.getRefId()) != source.mBase)
+        throw std::invalid_argument("Container transfer preparation source content mismatch");
+    validateTransferRegistration(*state->mRemoval.mScriptState, item, *this, sourceContext.mContainer.mCell);
+    state->mClearSelection
+        = state->mRemoval.getRemainingCount() == 0 && mSelectedEnchantItem != end() && *mSelectedEnchantItem == item;
+    for (const auto& ref : destination.mLists.mMiscItems.mList)
+    {
+        if (destinationContext.mStore.get<ESM::Miscellaneous>().search(ref.mRef.getRefId()) != ref.mBase)
+            throw std::invalid_argument("Container transfer preparation destination content mismatch");
+        auto registration = destinationContext.mLocalScripts->prepareRemove(&ref.mRef);
+        validateTransferRegistration(registration, ConstPtr(&ref), destination, destinationContext.mContainer.mCell);
+        state->mDestinationValues.push_back({ copyContainerTransferItem(ConstPtr(&ref)), std::move(registration) });
+    }
+    // Derive the incoming value from the owned removal witness, never from a
+    // separately supplied item/count. Shared stock add rules normalize only it.
+    auto detached = copyContainerTransferItem(ConstPtr(&source));
+    detached->mRef.setCount(state->mRemoval.getCount());
+    state->mAddition = destination.prepareTransferAdd(std::move(detached), destinationContext);
+    state->mAddedValues = copyContainerTransferItem(ConstPtr(state->mAddition.mItem.get()));
+    // The last fallible consumer copy occurs after both decisions, values and
+    // script/notification intents exist. Any throw destroys the entire pair.
+    state->mSourceUpdated = sourceContext.mInventoryUpdated;
+    PreparedContainerTransfer prepared(std::move(state));
+    validateTransfer(prepared, destination, sourceContext, destinationContext);
+    return prepared;
+}
+
+void MWWorld::ContainerStore::validateTransfer(const PreparedContainerTransfer& prepared,
+    const ContainerStore& destination, const ContainerStoreRemoveContext& sourceContext,
+    const ContainerStoreAddContext& destinationContext) const
+{
+    const auto& state = prepared.state();
+    const auto& worldModel = sourceContext.mWorldModel;
+    if (state.mSourceStorage != mStorageIdentity || state.mDestinationStorage != destination.mStorageIdentity)
+        throw std::invalid_argument("Container transfer preparation storage changed");
+    if (&worldModel != &destinationContext.mWorldModel || state.mDestinationScripts != destinationContext.mLocalScripts
+        || state.mScriptManager != destinationContext.mScriptManager || state.mSourceListener != mListener
+        || state.mDestinationListener != destination.mListener
+        || !sameBinding(state.mPlayer, destinationContext.mPlayer)
+        || (!state.mPlayer.isEmpty() && !sameBinding(worldModel.getPtr(state.mPlayerIdentity), state.mPlayer))
+        || !sameBinding(getPtr(worldModel), sourceContext.mContainer)
+        || !sameBinding(destination.getPtr(worldModel), destinationContext.mContainer))
+        throw std::invalid_argument("Container transfer preparation context changed");
+    validateTransferRemoval(state.mRemoval, sourceContext.mContainer, worldModel, &sourceContext.mLocalScripts);
+    destination.validateTransferStacking(state.mAddition, destinationContext);
+    const auto& item = *state.mAddition.mItem;
+    if (!sameTransferValues(item, *state.mAddedValues) || item.mData.getBaseNode() || item.mRef.getRefNum().isSet()
+        || item.mWorldModel || item.mRef.getCount(false) != state.mRemoval.getCount())
+        throw std::invalid_argument("Container transfer preparation item values changed");
+    const bool clearSelection = state.mRemoval.getRemainingCount() == 0 && mSelectedEnchantItem != end()
+        && mSelectedEnchantItem->mRef == state.mRemoval.mItemReference;
+    if (clearSelection != state.mClearSelection)
+        throw std::invalid_argument("Container transfer preparation source selection changed");
+    auto saved = state.mDestinationValues.begin();
+    for (const auto& ref : destination.mLists.mMiscItems.mList)
+    {
+        // Stacking validation has already established current membership/order.
+        if (saved == state.mDestinationValues.end() || !sameTransferValues(ref, *saved->mValues))
+            throw std::invalid_argument("Container transfer preparation destination values changed");
+        state.mDestinationScripts->validateRemoval(saved->mScript, &ref.mRef);
+        ++saved;
+    }
+    if (saved != state.mDestinationValues.end())
+        throw std::invalid_argument("Container transfer preparation destination membership changed");
+    const auto& script = state.mAddition.mScript;
+    const auto scriptId = item.mBase->mScript;
+    const bool player = !state.mPlayer.isEmpty() && state.mAddition.mOwner == state.mPlayer;
+    if (script.has_value() != !scriptId.empty()
+        || (script
+            && (script->mScript != scriptId || script->mCell != (player ? nullptr : state.mAddition.mOwner.mCell)))
+        || state.mAddition.mNotifyItemAdded != (state.mDestinationListener != nullptr)
+        || !state.mAddition.mInventoryUpdated || !state.mSourceUpdated)
+        throw std::invalid_argument("Container transfer preparation effects changed");
+    // The immutable pair binds its derived item and intents; this is neither an
+    // installation precondition nor a durability or mutation-history guarantee.
 }
 
 MWWorld::ContainerStoreIterator MWWorld::ContainerStore::addWithContext(

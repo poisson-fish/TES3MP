@@ -74,6 +74,8 @@ namespace MWWorld
 
         LocalScripts(const MWWorld::ESMStore& store);
 
+        bool usesStore(const ESMStore& store) const { return &mStore == &store; }
+
         void startIteration();
         ///< Set the iterator to the begin of the script list.
 
