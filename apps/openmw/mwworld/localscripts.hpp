@@ -42,7 +42,12 @@ namespace MWWorld
                 , mRegistration(std::move(registration))
             {
             }
-            ConstPtr getItem() const { return mItem; }
+            ConstPtr getItem() const
+            {
+                if (!mItem.isEmpty() && !mItem.hasLiveReference())
+                    throw std::invalid_argument("Local script prepared item lifetime changed");
+                return mItem;
+            }
             ESM::RefId getScript() const { return mRegistration->mScript; }
             const CellStore* getCell() const { return mRegistration->mCell; }
             const ContainerStore* getContainer() const { return mRegistration->mContainer; }
@@ -87,9 +92,9 @@ namespace MWWorld
         };
         List snapshot() const;
 
-        // Owns the same node type/list as the live service. Only pair-owned items
-        // have Ptrs; unaffected entries retain immutable compare-only bindings.
-        // Their live Ptrs must be resolved separately before any future install.
+        // Owns the same node type/list as the live service. Ptrs resolve pair-owned
+        // items and lifetime-checked explicit contexts. All other entries retain
+        // immutable compare-only bindings until a future resolution slice.
         class PreparedStorage
         {
             friend class LocalScripts;
@@ -141,9 +146,11 @@ namespace MWWorld
         // the protected list as witnesses; no live Ptr or iterator is followed.
         static List relocateList(const List& original, const Relocations& bindings);
         static bool sameRelocatedList(const List& left, const List& right, const List& original);
-        std::unique_ptr<PreparedStorage> prepareStorage(const List& relocated, const std::vector<Ptr>& nodes) const;
-        void validateStorage(
-            const PreparedStorage& storage, const List& relocated, const std::vector<ConstPtr>& nodes) const;
+        std::unique_ptr<PreparedStorage> prepareStorage(const List& relocated, const List& original,
+            const std::vector<Ptr>& nodes, const std::vector<Ptr>& contexts) const;
+        void validateStorage(const PreparedStorage& storage, const List& relocated, const List& original,
+            const std::vector<ConstPtr>& nodes, const std::vector<ConstPtr>& contexts) const;
+        void validateContextBindings(const std::vector<ConstPtr>& contexts) const;
 
     public:
         // Initializes only the supplied RefData. Exceptions propagate to the staging

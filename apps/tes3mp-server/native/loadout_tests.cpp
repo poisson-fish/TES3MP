@@ -1586,6 +1586,8 @@ namespace
             MWWorld::ManualRef destinationOwner(store, destinationContext.mContainer.getCellRef().getRefId());
             auto sourcePtr = sourceOwner.getPtr();
             auto destinationPtr = destinationOwner.getPtr();
+            copyValues(sourcePtr, sourceContext.mContainer);
+            copyValues(destinationPtr, destinationContext.mContainer);
             sourcePtr.mCell = sourceContext.mContainer.mCell;
             destinationPtr.mCell = destinationContext.mContainer.mCell;
             MWWorld::ContainerStore source, destination;
@@ -1612,6 +1614,8 @@ namespace
             std::vector<MWWorld::Ptr> stockDormant;
             std::vector<MWWorld::Ptr> sourceNodes, destinationNodes;
             std::map<const MWWorld::CellRef*, MWWorld::Ptr> clonedReferences;
+            clonedReferences.emplace(&sourceContext.mContainer.getCellRef(), sourcePtr);
+            clonedReferences.emplace(&destinationContext.mContainer.getCellRef(), destinationPtr);
             const auto clone
                 = [&](const MWWorld::ContainerStore& original, MWWorld::ContainerStore& copiedStore,
                       const MWWorld::ContainerStoreAddContext& add, std::map<ESM::RefNum, ESM::RefNum>& identities,
@@ -1893,6 +1897,11 @@ namespace
                     require(
                         binding == proposedRegistry.mEntries.at(id), "relocation changed unrelated registry binding");
             const auto& registryStorage = paired.getRegistryStorage();
+            const auto isContext = [&](const MWWorld::LiveCellRefBase* reference) {
+                return reference
+                    && std::ranges::any_of(paired.getContextBindings().mReferences,
+                        [&](const auto& binding) { return binding.mItem.mRef == reference; });
+            };
             require(registryStorage.getBindings() == relocation.mRegistry,
                 "owned registry storage changed relocated membership, revision or counter");
             require(registryStorage.getItem({}).isEmpty(), "owned registry storage resolved an absent identity");
@@ -1901,9 +1910,15 @@ namespace
                 const auto owned = registryStorage.getItem(id);
                 const auto actual = model.getPtr(id);
                 if (paired.getRegistryItem(id).isEmpty())
-                    require(owned.isEmpty() && !owned.mCell && !owned.mContainerStore
+                    require(
+                        (isContext(worldModel.getPtr(id).mRef)
+                                ? owned == worldModel.getPtr(id) && owned.hasLiveReference()
+                                    && owned.mCell == actual.mCell && owned.mContainerStore == actual.mContainerStore
+                                    && values(owned) == values(actual)
+                                    && owned.getRefData().matchesContainerTransferState(actual.getRefData())
+                                : owned.isEmpty() && !owned.mCell && !owned.mContainerStore)
                             && binding == proposedRegistry.mEntries.at(id),
-                        "unaffected registry storage lost a mapping or exposed a live reference");
+                        "context registry resolution differs from stock or resolved an unrelated reference");
                 else
                 {
                     require(!owned.isEmpty() && binding.references(owned.mRef)
@@ -1969,6 +1984,13 @@ namespace
                                 && storedItem.getRefData().matchesContainerTransferState(copied->second.getRefData()),
                             "owned script item lost stable detached values or cell/container hints");
                     }
+                    else if (isContext(storedItem.mRef))
+                        require(storedItem.hasLiveReference() && &storedItem.getCellRef() == copied->first
+                                && storedItem.mCell == entry.getCell()
+                                && storedItem.mContainerStore == entry.getContainer()
+                                && values(storedItem) == values(copied->second)
+                                && storedItem.getRefData().matchesContainerTransferState(copied->second.getRefData()),
+                            "context script resolution differs from disposable stock");
                     else
                         require(storedItem.isEmpty() && !storedItem.mCell && !storedItem.mContainerStore,
                             "unaffected script storage retained a live item binding");
@@ -4230,6 +4252,295 @@ namespace
                             observedStores.pop_back();
                         }
 
+        {
+            struct DestructionProbe final : MWWorld::CustomData
+            {
+                MWWorld::Ptr mPtr;
+                bool& mObservedExpired;
+                DestructionProbe(MWWorld::Ptr ptr, bool& expired)
+                    : mPtr(ptr)
+                    , mObservedExpired(expired)
+                {
+                }
+                ~DestructionProbe() override { mObservedExpired = !mPtr.hasLiveReference(); }
+                std::unique_ptr<MWWorld::CustomData> clone() const override
+                {
+                    throw std::logic_error("lifetime probe must never be cloned");
+                }
+            };
+            bool expiredBeforeData = false;
+            {
+                MWWorld::ManualRef reference(store, ESM::RefId::stringRefId("native_context_owner"));
+                auto* original = reference.getPtr().get<ESM::NPC>();
+                MWWorld::LiveCellRef<ESM::NPC> copied(*original);
+                const MWWorld::Ptr copiedPtr(&copied);
+                MWWorld::LiveCellRef<ESM::NPC> moved(std::move(copied));
+                const MWWorld::Ptr movedPtr(&moved);
+                require(copiedPtr.hasLiveReference() && movedPtr.hasLiveReference()
+                        && copiedPtr.getReferenceLifetime() != reference.getPtr().getReferenceLifetime()
+                        && movedPtr.getReferenceLifetime() != copiedPtr.getReferenceLifetime(),
+                    "reference copy/move construction reused a lifetime");
+                copied = *original;
+                moved = std::move(copied);
+                require(MWWorld::Ptr(&copied).getReferenceLifetime() == copiedPtr.getReferenceLifetime()
+                        && MWWorld::Ptr(&moved).getReferenceLifetime() == movedPtr.getReferenceLifetime(),
+                    "reference assignment replaced an existing object's lifetime");
+                reference.getPtr().getRefData().setCustomData(
+                    std::make_unique<DestructionProbe>(reference.getPtr(), expiredBeforeData));
+            }
+            require(expiredBeforeData, "reference lifetime survived into RefData destruction");
+        }
+        // Only explicit context references may resolve unaffected map/script slots.
+        // Each fixture owns its contexts independently of both inventory stores.
+        for (bool shared : { false, true })
+            for (int initiator : { -1, 0, 1, 2 })
+            {
+                std::array<std::unique_ptr<MWWorld::ManualRef>, 4> owners;
+                std::array<MWWorld::Ptr, 4> contexts;
+                for (size_t i = 0; i < owners.size(); ++i)
+                {
+                    owners[i]
+                        = std::make_unique<MWWorld::ManualRef>(store, ESM::RefId::stringRefId("native_context_owner"));
+                    contexts[i] = owners[i]->getPtr();
+                    contexts[i].mCell = i % 2 ? addB.mContainer.mCell : addA.mContainer.mCell;
+                    worldModel.registerPtr(contexts[i]);
+                }
+                MWWorld::LocalScripts sourceScripts(store), destinationScripts(store);
+                MWWorld::ContainerStore source, destination;
+                auto sourceAdd = scriptedAddA;
+                auto destinationAdd = scriptedAddB;
+                sourceAdd.mContainer = contexts[0];
+                destinationAdd.mContainer = contexts[1];
+                sourceAdd.mLocalScripts = &sourceScripts;
+                destinationAdd.mLocalScripts = shared ? &sourceScripts : &destinationScripts;
+                sourceAdd.mPlayer = destinationAdd.mPlayer = initiator < 0 ? MWWorld::Ptr() : contexts[initiator];
+                bindEmptyStore(source, contexts[0], worldModel);
+                bindEmptyStore(destination, contexts[1], worldModel);
+                observedStores.push_back(&source);
+                observedStores.push_back(&destination);
+                const auto item = *source.add(scripted.getPtr(), 4, sourceAdd);
+                destination.add(plain.getPtr(), 2, destinationAdd);
+                source.setSelectedEnchantItem(source.begin());
+                destination.setSelectedEnchantItem(destination.begin());
+                for (auto* service : { &sourceScripts, &destinationScripts })
+                    for (auto context : contexts)
+                        service->add(scriptId, context, scripts);
+                for (size_t i = 0; i < contexts.size(); ++i)
+                {
+                    contexts[i].getRefData().getLocals().mLongs.at(0) = static_cast<int>(51 + i);
+                    setFlags(contexts[i].getRefData(), 5);
+                }
+                MWWorld::ContainerStoreRemoveContext removal{ worldModel, contexts[0], sourceScripts,
+                    sourceAdd.mInventoryUpdated };
+                const auto make = [&](int count = 1) {
+                    return source.prepareTransfer(item, count, destination, removal, destinationAdd);
+                };
+                const auto validate = [&](const Pair& decision) {
+                    source.validateTransfer(decision, destination, removal, destinationAdd);
+                };
+                const auto unchangedState = [&] {
+                    std::vector<decltype(itemSnapshot(contexts[0]))> references;
+                    for (const auto& context : contexts)
+                        if (context.hasLiveReference())
+                            references.push_back(itemSnapshot(context));
+                    return std::tuple{ snapshot(), sourceScripts.snapshot(), destinationScripts.snapshot(),
+                        references };
+                };
+                for (int quantity : { 1, 4 })
+                    for (size_t cursor = 0; cursor <= sourceScripts.snapshot().mEntries.size(); ++cursor)
+                    {
+                        positionScripts(sourceScripts, cursor);
+                        if (!shared)
+                            positionScripts(
+                                destinationScripts, std::min(cursor, destinationScripts.snapshot().mEntries.size()));
+                        const auto before = unchangedState();
+                        {
+                            auto initial = make(quantity);
+                            auto decision = std::move(initial);
+                            auto assigned = make(quantity);
+                            assigned = std::move(decision);
+                            validate(assigned);
+                            compareStock(assigned, item, destination, sourceAdd, destinationAdd);
+                            require(assigned.getContextBindings().mIterators == &assigned.getIteratorBindings(),
+                                "context resolution lost pair storage on move");
+                            for (size_t i = 0; i < contexts.size(); ++i)
+                            {
+                                const bool resolved = i < 2 || static_cast<int>(i) == initiator;
+                                const auto view
+                                    = assigned.getRegistryStorage().getItem(contexts[i].getCellRef().getRefNum());
+                                require(resolved ? view == contexts[i] && view.hasLiveReference() : view.isEmpty(),
+                                    "context role resolution included an unrelated owner or omitted an alias");
+                                for (const auto* storage :
+                                    { &assigned.getSourceScriptStorage(), &assigned.getDestinationScriptStorage() })
+                                {
+                                    const auto found = std::ranges::find_if(storage->getEntries(),
+                                        [&](const auto& entry) { return entry.references(&contexts[i].getCellRef()); });
+                                    require(found != storage->getEntries().end()
+                                            && (resolved ? found->getItem() == contexts[i]
+                                                         : found->getItem().isEmpty()),
+                                        "context script resolution lost service membership or resolved an unrelated "
+                                        "owner");
+                                }
+                            }
+                            reject([&] { initial.getContextBindings(); }, "moved from");
+                            auto other = make(quantity);
+                            auto& bindings = const_cast<Pair::ContextBindings&>(assigned.getContextBindings());
+                            const auto saved = bindings;
+                            bindings.mIterators = &other.getIteratorBindings();
+                            reject([&] { validate(assigned); }, "context pair changed");
+                            bindings = saved;
+                            for (size_t role = 0; role < bindings.mReferences.size(); ++role)
+                            {
+                                bindings.mReferences[role] = other.getContextBindings().mReferences[0];
+                                ++bindings.mReferences[role].mIdentity.mIndex;
+                                reject([&] { validate(assigned); }, "context lifetime or binding changed");
+                                bindings = saved;
+                                auto& witness = const_cast<MWWorld::ReferenceLifetime::Witness&>(
+                                    bindings.mReferences[role].mItem.getReferenceLifetime());
+                                witness = contexts[3].getReferenceLifetime();
+                                reject([&] { validate(assigned); }, "context lifetime or binding changed");
+                                bindings = saved;
+                            }
+                            validate(assigned);
+                        }
+                        require(unchangedState() == before, "context resolution/move/discard changed live state");
+                    }
+                auto decision = make();
+                for (auto* input : { &removal.mContainer, &destinationAdd.mContainer, &destinationAdd.mPlayer })
+                {
+                    const auto saved = *input;
+                    auto& witness = const_cast<MWWorld::ReferenceLifetime::Witness&>(input->getReferenceLifetime());
+                    witness = contexts[3].getReferenceLifetime();
+                    const auto before = unchangedState();
+                    reject([&] { validate(decision); }, "context changed");
+                    reject([&] { make(); }, input->isEmpty() ? "empty context" : "context lifetime");
+                    *input = saved;
+                    require(unchangedState() == before, "corrupt input lifetime changed live state");
+                }
+                // A current registry address with a foreign/empty lifetime cannot
+                // validate a context, even when every raw mapping field still matches.
+                for (const auto& context : contexts)
+                {
+                    if (context == contexts[3] || (context == contexts[2] && initiator != 2))
+                        continue;
+                    const auto id = context.getCellRef().getRefNum();
+                    const auto registry = worldModel.getPtrRegistryView();
+                    const auto it
+                        = std::ranges::find_if(registry, [&](const auto& entry) { return entry.first == id; });
+                    auto& ptr = const_cast<MWWorld::Ptr&>(it->second);
+                    const auto saved = ptr;
+                    const_cast<MWWorld::ReferenceLifetime::Witness&>(ptr.getReferenceLifetime()) = {};
+                    const auto before = unchangedState();
+                    reject([&] { validate(decision); }, "context registry binding");
+                    reject([&] { make(); }, "context registry binding");
+                    require(unchangedState() == before, "corrupt registry lifetime changed live state");
+                    ptr = saved;
+                }
+                // LocalScripts may retain a stale Ptr despite a current registry.
+                // Reconstruct an identical owner in place without deregistration,
+                // then provide fresh explicit contexts and a fresh registry Ptr.
+                auto* node = contexts[0].get<ESM::NPC>();
+                auto replacement = *node;
+                replacement.mWorldModel = nullptr;
+                auto originalData = node->mData.copyForContainerTransfer();
+                node->mWorldModel = nullptr;
+                const auto staleOwner = contexts[0];
+                std::destroy_at(node);
+                std::construct_at(node, replacement);
+                node->mData = std::move(originalData);
+                node->mWorldModel = &worldModel;
+                const auto beforeStale = unchangedState();
+                require(!staleOwner.hasLiveReference() && !MWWorld::ConstPtr(staleOwner).hasLiveReference(),
+                    "same-address reconstruction revived a captured reference lifetime");
+                reject([&] { validate(decision); }, "context lifetime");
+                reject([&] { make(); }, "context lifetime");
+                require(unchangedState() == beforeStale, "stale context rejection changed live state");
+                contexts[0] = MWWorld::Ptr(node, staleOwner.mCell);
+                removal.mContainer = sourceAdd.mContainer = contexts[0];
+                if (initiator == 0)
+                    destinationAdd.mPlayer = sourceAdd.mPlayer = contexts[0];
+                worldModel.registerPtr(contexts[0]);
+                const auto beforeRegistration = unchangedState();
+                reject([&] { make(); }, "Local script context binding");
+                require(unchangedState() == beforeRegistration, "stale script rejection changed live state");
+                for (auto* service : { &sourceScripts, &destinationScripts })
+                {
+                    service->remove(&node->mRef);
+                    service->add(scriptId, contexts[0], scripts);
+                }
+                validate(make());
+                // Missing registrations are valid, while wrong cell ownership is not.
+                auto wrong = contexts[0];
+                wrong.mCell = contexts[1].mCell;
+                sourceScripts.add(scriptId, wrong, scripts);
+                const auto beforeWrong = unchangedState();
+                reject([&] { make(); }, "Local script context binding");
+                require(unchangedState() == beforeWrong, "inconsistent script rejection changed live state");
+                sourceScripts.remove(&node->mRef);
+                validate(make());
+                auto beforeReplace = make();
+                sourceScripts.add(scriptId, contexts[0], scripts);
+                reject([&] { validate(beforeReplace); }, "registration or cursor changed");
+                const auto beforeFailure = unchangedState();
+                int alive = 0, emitted = 0;
+                std::function<void()> onCopy;
+                auto failing = removal;
+                failing.mInventoryUpdated = NotificationIntent(alive, onCopy, emitted);
+                onCopy = [] { throw PreparationFailure{}; };
+                bool failed = false;
+                try
+                {
+                    source.prepareTransfer(item, 4, destination, failing, destinationAdd);
+                }
+                catch (const PreparationFailure&)
+                {
+                    failed = true;
+                }
+                onCopy = {};
+                failing.mInventoryUpdated = {};
+                require(failed && alive == 0 && emitted == 0 && unchangedState() == beforeFailure,
+                    "context preparation failure partially published state or effects");
+                // The destination consumer copy precedes storage resolution. It
+                // may invalidate an explicit context without throwing itself.
+                const auto originalDestination = destinationAdd;
+                destinationAdd.mPlayer = contexts[3];
+                destinationAdd.mInventoryUpdated = NotificationIntent(alive, onCopy, emitted);
+                std::optional<decltype(unchangedState())> afterCallback;
+                onCopy = [&] {
+                    owners[3].reset();
+                    afterCallback = unchangedState();
+                };
+                bool expiredDuringCopy = false;
+                try
+                {
+                    make();
+                }
+                catch (const std::invalid_argument& error)
+                {
+                    expiredDuringCopy
+                        = std::string_view(error.what()).find("context lifetime") != std::string_view::npos;
+                }
+                onCopy = {};
+                destinationAdd.mPlayer = originalDestination.mPlayer;
+                destinationAdd.mInventoryUpdated = originalDestination.mInventoryUpdated;
+                require(expiredDuringCopy && afterCallback && unchangedState() == *afterCallback && alive == 0
+                        && emitted == 0,
+                    "consumer-copy context destruction reached saved pointers or partially published state");
+                validate(make()); // Unrelated stale script entries stay unresolved.
+                // Destruction with ordinary registry cleanup is rejected before
+                // saved owner/script pointers can be read; the pair still discards.
+                auto expired = make();
+                const auto expiredId = contexts[1].getCellRef().getRefNum();
+                owners[1].reset();
+                const auto beforeDestroyed = unchangedState();
+                reject([&] { validate(expired); }, "context lifetime");
+                reject([&] { make(); }, "context lifetime");
+                reject([&] { expired.getRegistryStorage().getItem(expiredId); }, "item lifetime changed");
+                require(unchangedState() == beforeDestroyed, "destroyed context rejection changed live state");
+                observedStores.pop_back();
+                observedStores.pop_back();
+            }
+
         // Store replacement can reuse the same node address and ID (copy assignment
         // may reuse list nodes). Reject by storage identity before inspecting nodes.
         for (bool replaceSource : { false, true })
@@ -4269,7 +4580,7 @@ namespace
                 for (const auto& [id, binding] : paired.getRegistryStorage().getBindings().mEntries)
                 {
                     const auto owned = paired.getRegistryStorage().getItem(id);
-                    if (!owned.isEmpty())
+                    if (!paired.getRegistryItem(id).isEmpty())
                         registryValues.emplace_back(owned, values(owned));
                 }
                 std::vector<std::pair<MWWorld::ConstPtr, decltype(values(item))>> scriptValues;
@@ -4380,6 +4691,10 @@ namespace
         store.insertStatic(*loadout.store().get<ESM::Script>().find(scriptId));
         if (preparation)
         {
+            auto contextOwner = *store.get<ESM::NPC>().find(playerId);
+            contextOwner.mId = ESM::RefId::stringRefId("native_context_owner");
+            contextOwner.mScript = scriptId;
+            store.insertStatic(contextOwner);
             auto alternate = record<ESM::Script>("alternate_script");
             alternate.mScriptText = "begin alternate_script\nend alternate_script\n";
             store.insertStatic(alternate);

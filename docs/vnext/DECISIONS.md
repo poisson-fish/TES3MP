@@ -75,6 +75,15 @@ presentation effects as part of the operation. Copying engine objects or catchin
 exceptions is not proof of isolation. A legitimate failed cast or missed attack
 may still have the resource costs prescribed by the game's rules.
 
+**Borrowed references need lifetime witnesses.** Ptr construction from a current
+reference captures a weak identity; copies preserve it, and reference destruction
+invalidates it. Reference copy/move construction starts a new lifetime; assignment
+preserves the existing object's lifetime. This costs one lazy token per referenced
+node. Preparation checks lifetime before saved-pointer access, then current registry
+and script ownership. Address equality or registry membership alone proves neither
+liveness nor stable multiplayer identity. These checks assume serialized engine
+access; they do not pin objects or authorize installation.
+
 **Persistence is coherent and server-owned.** Preserve the current
 durability-before-install/publication guarantee during migration. Engine field
 serializers may be reused inside a server-owned, content/version-bound format;

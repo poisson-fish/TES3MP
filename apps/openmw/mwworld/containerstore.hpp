@@ -1,6 +1,7 @@
 #ifndef GAME_MWWORLD_CONTAINERSTORE_H
 #define GAME_MWWORLD_CONTAINERSTORE_H
 
+#include <array>
 #include <functional>
 #include <iterator>
 #include <map>
@@ -222,13 +223,13 @@ namespace MWWorld
         const Relocation& getRelocation() const;
         // Stock LocalScripts nodes and cursor relocation, built from the same
         // owned inventory nodes. Shared services return the same storage object.
-        // Unaffected entries expose an empty item; their registration bindings
-        // remain compare-only keys in getRelocation(). No installation is exposed.
+        // Explicit owners/initiator resolve through captured reference lifetimes.
+        // Other unaffected entries keep empty items. No installation is exposed.
         const LocalScripts::PreparedStorage& getSourceScriptStorage() const;
         const LocalScripts::PreparedStorage& getDestinationScriptStorage() const;
         // Stock registry map with the relocated revision/counter and bindings.
-        // Item views reference only the owned stock lists; unaffected mappings
-        // retain compare-only keys and expose empty items. No installation API.
+        // Item views reference owned stock lists or lifetime-checked contexts;
+        // other unaffected mappings retain empty items. No installation API.
         const PtrRegistry::PreparedStorage& getRegistryStorage() const;
         // Compare-only witnesses for private stock iterator positions. The exact
         // relocation object binds the pair, quantity, values and all service results.
@@ -245,9 +246,25 @@ namespace MWWorld
             bool operator==(const IteratorBindings&) const = default;
         };
         const IteratorBindings& getIteratorBindings() const;
+        struct ContextReference
+        {
+            ESM::RefNum mIdentity;
+            ConstPtr mItem;
+        };
+        struct ContextBindings
+        {
+            const IteratorBindings* mIterators;
+            // Source owner, destination owner, initiator (possibly absent).
+            std::array<ContextReference, 3> mReferences;
+        };
+        // Borrowed read-only contexts, separate from detached inventory values.
+        // Views expire on reference destruction; validateTransfer checks current
+        // registry/script state before the pair can be accepted again.
+        const ContextBindings& getContextBindings() const;
         // Check current owned storage before copying any saved iterator. These
         // read-only copies traverse isolated stock stores/lists and their own end
-        // sentinels. They expire with the pair's state, never refer to live items,
+        // sentinels. They expire with the pair's state; script items may also be
+        // borrowed explicit contexts guarded by their reference lifetimes,
         // and neither install a selection nor advance a service's live cursor.
         ConstContainerStoreIterator getSourceSelectionIterator() const;
         ConstContainerStoreIterator getDestinationSelectionIterator() const;
@@ -536,6 +553,7 @@ namespace MWWorld
         static void validateTransferStorage(const PreparedContainerTransfer& prepared);
         static void prepareTransferIterators(PreparedContainerTransfer& prepared);
         static void validateTransferIterators(const PreparedContainerTransfer& prepared);
+        static void validateTransferContextBindings(const PreparedContainerTransfer& prepared);
         PreparedContainerAdd prepareTransferAdd(std::unique_ptr<LiveCellRef<ESM::Miscellaneous>> item,
             const ContainerStoreAddContext& context, LocalScripts::PreparedList* scriptList);
         struct ItemRemoval

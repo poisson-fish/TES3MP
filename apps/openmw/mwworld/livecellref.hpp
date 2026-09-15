@@ -19,6 +19,61 @@ namespace MWWorld
     class ESMStore;
     class Class;
     class WorldModel;
+    struct LiveCellRefBase;
+
+    // Reference ownership stays with the engine. Ptr copies carry weak witnesses,
+    // captured only when constructed from a current reference. A retained witness
+    // cannot keep an object alive or validate a replacement at the same address.
+    class ReferenceLifetime
+    {
+        struct State
+        {
+            const LiveCellRefBase* mReference;
+        };
+        mutable std::shared_ptr<State> mState;
+
+    public:
+        class Witness
+        {
+            friend class ReferenceLifetime;
+            std::weak_ptr<const State> mState;
+
+        public:
+            bool isLive(const LiveCellRefBase* reference) const
+            {
+                const auto state = mState.lock();
+                return reference && state && state->mReference == reference;
+            }
+            bool operator==(const Witness& other) const
+            {
+                return !mState.owner_before(other.mState) && !other.mState.owner_before(mState);
+            }
+        };
+        ReferenceLifetime() = default;
+        ReferenceLifetime(const ReferenceLifetime&) noexcept {}
+        ReferenceLifetime(ReferenceLifetime&&) noexcept {}
+        ReferenceLifetime& operator=(const ReferenceLifetime&) noexcept { return *this; }
+        ReferenceLifetime& operator=(ReferenceLifetime&&) noexcept { return *this; }
+        ~ReferenceLifetime() { invalidate(); }
+
+    private:
+        friend struct LiveCellRefBase;
+        template <template <class> class>
+        friend class PtrBase;
+        void invalidate() noexcept
+        {
+            if (mState)
+                mState->mReference = nullptr;
+        }
+        Witness witness(const LiveCellRefBase* reference) const
+        {
+            if (!mState)
+                mState = std::make_shared<State>(State{ reference });
+            Witness result;
+            result.mState = mState;
+            return result;
+        }
+    };
 
     template <typename X>
     struct LiveCellRef;
@@ -51,7 +106,10 @@ namespace MWWorld
     {
     private:
         friend class ContainerStore;
+        template <template <class> class>
+        friend class PtrBase;
         PreparedNodeIdentity mPreparedIdentity;
+        ReferenceLifetime mReferenceLifetime;
 
     public:
         const Class* mClass;

@@ -341,9 +341,9 @@ bool MWWorld::LocalScripts::sameRelocatedList(const List& left, const List& righ
 }
 
 std::unique_ptr<MWWorld::LocalScripts::PreparedStorage> MWWorld::LocalScripts::prepareStorage(
-    const List& relocated, const std::vector<Ptr>& nodes) const
+    const List& relocated, const List& original, const std::vector<Ptr>& nodes, const std::vector<Ptr>& contexts) const
 {
-    if (relocated.mCursor > relocated.mEntries.size())
+    if (relocated.mCursor > relocated.mEntries.size() || original.mEntries.size() != relocated.mEntries.size())
         throw std::invalid_argument("Local script storage preparation cursor out of range");
     auto storage = std::unique_ptr<PreparedStorage>(new PreparedStorage(this));
     storage->mNodes.reserve(relocated.mEntries.size());
@@ -352,7 +352,11 @@ std::unique_ptr<MWWorld::LocalScripts::PreparedStorage> MWWorld::LocalScripts::p
         if (registration.mScripts != this || !registration.mRegistration)
             throw std::invalid_argument("Local script storage preparation binding mismatch");
         Ptr item;
-        for (const auto& node : nodes)
+        // Only relocated registration identities may resolve to owned nodes.
+        // An unchanged stale key can reuse an owned address; consider explicit,
+        // lifetime-checked contexts only for those unaffected registrations.
+        const auto& candidates = registration == original.mEntries[storage->mNodes.size()] ? contexts : nodes;
+        for (const auto& node : candidates)
             if (registration.references(&node.getCellRef()))
             {
                 item = node;
@@ -371,11 +375,12 @@ std::unique_ptr<MWWorld::LocalScripts::PreparedStorage> MWWorld::LocalScripts::p
     return storage;
 }
 
-void MWWorld::LocalScripts::validateStorage(
-    const PreparedStorage& storage, const List& relocated, const std::vector<ConstPtr>& nodes) const
+void MWWorld::LocalScripts::validateStorage(const PreparedStorage& storage, const List& relocated, const List& original,
+    const std::vector<ConstPtr>& nodes, const std::vector<ConstPtr>& contexts) const
 {
     if (storage.mService != this || storage.mEntries.size() != relocated.mEntries.size()
-        || storage.mNodes.size() != relocated.mEntries.size() || relocated.mCursor > relocated.mEntries.size())
+        || original.mEntries.size() != relocated.mEntries.size() || storage.mNodes.size() != relocated.mEntries.size()
+        || relocated.mCursor > relocated.mEntries.size())
         throw std::invalid_argument("Local script prepared storage membership or service changed");
     const Entry* cursor = nullptr;
     size_t i = 0;
@@ -383,7 +388,8 @@ void MWWorld::LocalScripts::validateStorage(
     {
         const auto& registration = relocated.mEntries[i];
         ConstPtr expected;
-        for (const auto& node : nodes)
+        const bool contextBinding = registration == original.mEntries[i];
+        for (const auto& node : contextBinding ? contexts : nodes)
             if (registration.references(&node.getCellRef()))
             {
                 expected = node;
@@ -395,7 +401,8 @@ void MWWorld::LocalScripts::validateStorage(
         // destroyed by a stale write. Only current protected inventory nodes are read.
         if (&entry != storage.mNodes[i] || registration.mScripts != this
             || entry.mRegistration != registration.mRegistration || entry.mItem.mRef != expected.mRef
-            || entry.mItem.mCell != expected.mCell || entry.mItem.mContainerStore != expected.mContainerStore)
+            || entry.mItem.mCell != expected.mCell || entry.mItem.mContainerStore != expected.mContainerStore
+            || (contextBinding && entry.mItem.getReferenceLifetime() != expected.getReferenceLifetime()))
             throw std::invalid_argument("Local script prepared storage node or binding changed");
         if (i == relocated.mCursor)
             cursor = &entry;
@@ -403,6 +410,32 @@ void MWWorld::LocalScripts::validateStorage(
     }
     if (storage.mCursor != cursor)
         throw std::invalid_argument("Local script prepared storage cursor changed");
+}
+
+void MWWorld::LocalScripts::validateContextBindings(const std::vector<ConstPtr>& contexts) const
+{
+    for (const auto& context : contexts)
+    {
+        if (!context.hasLiveReference())
+            throw std::invalid_argument("Local script context lifetime changed");
+        bool found = false;
+        for (const auto& entry : mScripts)
+        {
+            if (!entry.references(&context.getCellRef()))
+                continue;
+            // The registration key alone is not a lifetime witness. Check the
+            // captured Ptr before following it, including same-address reuse.
+            const auto& item = entry.mItem;
+            if (found || !item.hasLiveReference() || item.mRef != context.mRef
+                || item.getReferenceLifetime() != context.getReferenceLifetime() || item.mCell != context.mCell
+                || item.mContainerStore != context.mContainerStore || entry.getCell() != context.mCell
+                || entry.getContainer() != context.mContainerStore
+                || entry.getScript() != context.getClass().getScript(context)
+                || entry.getScript() != context.getRefData().getLocals().getScriptId())
+                throw std::invalid_argument("Local script context binding changed or inconsistent");
+            found = true;
+        }
+    }
 }
 
 bool MWWorld::LocalScripts::isRunning(const ESM::RefId& scriptName, const Ptr& ptr) const

@@ -42,9 +42,9 @@ namespace MWWorld
             bool operator==(const Snapshot&) const = default;
         };
 
-        // Own the stock map type, with Ptrs only to stable pair-owned nodes.
-        // Unaffected mappings remain compare-only bindings and occupy empty map
-        // slots; resolving their live Ptrs is a separate, later prerequisite.
+        // Own the stock map type, with Ptrs to stable pair-owned nodes and
+        // lifetime-checked explicit contexts. Other unaffected mappings retain
+        // compare-only bindings and empty map slots pending later resolution.
         class PreparedStorage
         {
             friend class PtrRegistry;
@@ -65,6 +65,8 @@ namespace MWWorld
             ConstPtr getItem(ESM::RefNum id) const
             {
                 const auto it = mIndex.find(id);
+                if (it != mIndex.end() && !it->second.isEmpty() && !it->second.hasLiveReference())
+                    throw std::invalid_argument("Ptr registry prepared item lifetime changed");
                 return it == mIndex.end() ? ConstPtr() : ConstPtr(it->second);
             }
         };
@@ -187,7 +189,9 @@ namespace MWWorld
                 // Compare Ptr fields only. Neither stored map Ptrs nor saved
                 // reference keys may be followed when rejecting stale storage.
                 if (it == storage.mIndex.end() || it->second.mRef != expected.mRef || it->second.mCell != expected.mCell
-                    || it->second.mContainerStore != expected.mContainerStore)
+                    || it->second.mContainerStore != expected.mContainerStore
+                    || (!expected.isEmpty() && expected.getCellRef().getRefNum().isSet()
+                        && it->second.getReferenceLifetime() != expected.getReferenceLifetime()))
                     throw std::invalid_argument("Ptr registry prepared storage mapping changed");
             }
         }

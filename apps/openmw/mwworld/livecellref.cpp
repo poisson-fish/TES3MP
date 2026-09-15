@@ -48,6 +48,9 @@ namespace MWWorld
 
     LiveCellRefBase::~LiveCellRefBase()
     {
+        // RefData teardown can invoke custom destructors. Expire borrowed Ptrs
+        // before deregistration and before any subobject starts destruction.
+        mReferenceLifetime.invalidate();
         if (mWorldModel != nullptr)
             mWorldModel->deregisterLiveCellRef(*this);
     }

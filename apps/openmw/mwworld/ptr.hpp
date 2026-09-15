@@ -19,6 +19,8 @@ namespace MWWorld
     template <template <class> class TypeTransform>
     class PtrBase
     {
+        ReferenceLifetime::Witness mReferenceLifetime;
+
     public:
         typedef TypeTransform<MWWorld::LiveCellRefBase> LiveCellRefBaseType;
         typedef TypeTransform<CellStore> CellStoreType;
@@ -29,6 +31,8 @@ namespace MWWorld
         ContainerStoreType* mContainerStore;
 
         bool isEmpty() const { return mRef == nullptr; }
+        bool hasLiveReference() const { return mReferenceLifetime.isLive(mRef); }
+        const ReferenceLifetime::Witness& getReferenceLifetime() const { return mReferenceLifetime; }
 
         // Returns a 32-bit id of the ESM record this object is based on.
         // Specific values of ids are defined in ESM::RecNameInts.
@@ -126,9 +130,20 @@ namespace MWWorld
 
     protected:
         PtrBase(LiveCellRefBaseType* liveCellRef, CellStoreType* cell, ContainerStoreType* containerStore)
-            : mRef(liveCellRef)
+            : mReferenceLifetime(
+                  liveCellRef ? liveCellRef->mReferenceLifetime.witness(liveCellRef) : ReferenceLifetime::Witness())
+            , mRef(liveCellRef)
             , mCell(cell)
             , mContainerStore(containerStore)
+        {
+        }
+
+        template <template <class> class OtherTransform>
+        PtrBase(const PtrBase<OtherTransform>& other)
+            : mReferenceLifetime(other.getReferenceLifetime())
+            , mRef(other.mRef)
+            , mCell(other.mCell)
+            , mContainerStore(other.mContainerStore)
         {
         }
     };
@@ -150,7 +165,7 @@ namespace MWWorld
     {
     public:
         ConstPtr(const Ptr& ptr)
-            : PtrBase(ptr.mRef, ptr.mCell, ptr.mContainerStore)
+            : PtrBase(ptr)
         {
         }
         ConstPtr(const LiveCellRefBase* liveCellRef = nullptr, const CellStoreType* cell = nullptr)

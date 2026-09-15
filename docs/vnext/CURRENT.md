@@ -4,69 +4,64 @@
 
 - **Direction:** OpenMW-backed authoritative cooperative multiplayer; see
   [README.md](README.md) and [DECISIONS.md](DECISIONS.md).
-- **Milestone:** M2 in [PLAN.md](PLAN.md). The protected MISC transfer pair owns
-  stock inventory/script/registry storage and guarded stock iterator bindings.
-  Preparation remains isolated; no atomic transfer or live installation exists.
-- **Next action:** prepare lifetime-checked resolution of unaffected source-owner,
-  destination-owner and initiator registry/script bindings from explicit contexts,
-  binding them to the same protected pair. Leave all other unaffected entries
-  unresolved and keep installation/effects deferred.
+- **Milestone:** M2 in [PLAN.md](PLAN.md). The protected MISC transfer pair now
+  resolves unaffected source-owner, destination-owner and initiator bindings from
+  explicit contexts. Other unaffected entries stay unresolved; installation and
+  effects remain deferred. No atomic transfer exists.
+- **Next action:** prepare lifetime-checked resolution of unaffected non-gold MISC
+  registry/script bindings from one explicitly supplied, resolved third base
+  ContainerStore. Bind its registered owner, storage and current nodes to the same
+  protected pair; leave all remaining entries unresolved and installation/effects
+  deferred.
 - **Checkpoint:** `8850e745c298c6de629ef9a5a26bbdddf6aa56e3` preserves the working
   gameplay implementation before the engine-backed pivot.
 
 ## Implemented M2 slice
 
 [ContainerStore::prepareTransfer](../../apps/openmw/mwworld/containerstore.cpp)
-returns one move-only `PreparedContainerTransfer`. Its private stock selection and
-LocalScripts cursor iterators bind exact pair relocation, removal quantity,
-inventory lists, script storage and registry storage. Joint validation also checks
-original/proposed values, live inventories/selections, script registrations/results/
-cursors, registry mappings/revision/generated counter, contexts and deferred consumers.
-No stock mutation caller or production authority changed.
+returns one move-only `PreparedContainerTransfer`. Its context bindings name the
+exact private iterator binding object, source owner, destination owner and optional
+initiator, with their original identities and read-only Ptr views. Aliased roles
+resolve the same reference; absent initiators add no binding. Both shared and
+distinct script services retain their stock registration order and cursors.
 
-Each prepared inventory now has an isolated stock ContainerStore owner. Stock
-selection iterators traverse its owned MISC nodes and use its distinct end; they
-cannot advance into live inventory lists. Raw dormant selections are preserved,
-full removal clears a selected source item, and stock traversal skips zero counts.
-Existing destination selections remain at their original position. Raw order,
-signed partial/full counts, new-stack append and in-place destination replacement
-remain covered. Item values stay detached with independently owned RefData;
-original/proposed identities remain separate and no live RefNum is assigned.
-Iterator Ptr container hints name only the isolated stock owner.
+[Ptr](../../apps/openmw/mwworld/ptr.hpp) now captures a weak lifetime witness when
+constructed from a current reference. Copies, including conversion to ConstPtr,
+preserve that witness without touching the reference. Reference copy/move
+construction creates a different lifetime; assignment preserves the existing
+object's lifetime. [LiveCellRef](../../apps/openmw/mwworld/livecellref.cpp)
+invalidates witnesses before deregistration and RefData teardown. Tokens are lazy,
+private to reference ownership, and cannot keep references alive. This adds one
+lifetime token per referenced node; it is separate from the existing opt-in
+prepared-node iterator identities.
 
-[LocalScripts::PreparedStorage](../../apps/openmw/mwworld/localscripts.hpp) retains
-stock list nodes, immutable registration identities and compare-only cursor keys.
-Private iterators select those nodes. End is stored logically and resolved against
-the current list sentinel; no saved std::list end iterator survives replacement.
-Shared services use one combined remove-then-append list/cursor; distinct services
-retain independent positions. Only pair-owned nodes receive item pointers.
-Unaffected registrations remain immutable keys with empty item views.
+Preparation establishes context liveness before reading saved pointers, then
+checks reference identity, WorldModel ownership, exact registry Ptr/lifetime/cell
+bindings, and LocalScripts membership, registration identity, script/locals identity
+and cell/container ownership. It repeats lifetime checks after fallible script and
+consumer preparation. A registry match or reused address alone cannot establish
+liveness. Unchanged script registrations consider only explicit contexts;
+relocated registration identities select owned inventory nodes, so unrelated stale
+keys cannot resolve merely by reusing an owned address.
 
-[PtrRegistry::PreparedStorage](../../apps/openmw/mwworld/ptrregistry.hpp) still owns
-the stock map type with relocated keys, revision, counter and cell/container hints.
-Protected identity membership selects owned pointers, including dormant entries;
-unaffected mappings remain exact compare-only bindings with empty map slots.
-Lookup exposes ConstPtr, without generating identities or changing item values.
+Joint validation still binds removal quantity, both inventories and selections,
+original/proposed item values, script membership/results/storage/cursors, registry
+membership/results/storage/revision/generated counter, contexts and deferred
+notifications to one pair. Corrupted, expired, replaced, foreign and inconsistent
+bindings reject before publication. Registry/script item access rejects expired
+references. Full validation remains necessary to check current live state.
 
-Before accessing or comparing private saved iterators, validation checks current
-owned storage identities, nodes, values, relocation, script storage and registry
-results. Opt-in [node lifetime witnesses](../../apps/openmw/mwworld/livecellref.hpp)
-reject identical payload reconstruction at the same address. Copies/moves create
-new node lifetimes; assignment to an existing node preserves its lifetime. Stock
-references/script entries carry lifetime metadata, but live nodes allocate no token.
-These checks witness current state and node lifetime, not complete mutation history
-or stable multiplayer identity.
-
-Public iterator accessors validate owned storage and return read-only copies; they
-do not establish live installation preconditions. Tokens/iterators are prepared
-before the final fallible consumer copy and destroyed before their lists. Pair moves
-preserve nodes, owners and sentinels; moved-from access rejects. Borrowed content,
-services, owners/cells and WorldModel must outlive the pair. Public views expire
-with its owned state.
+Existing stock inventory owners, owned-node identities and guarded selection/script
+iterators remain intact. Detached item values own their RefData; proposed identities
+remain separate and no live RefNum is assigned. Dormant nodes, signed counts,
+new-stack append, in-place replacement, raw selections and stock zero-count skipping
+remain covered. Moves preserve the pair's nodes, owners and sentinels; moved-from
+access rejects. No production mutation caller or gameplay authority changed.
 
 ## Fresh verification
 
-Windows MSVC RelWithDebInfo, `build/vnext-product`, individually:
+Windows MSVC 14.51 (`setup_msvc_env.ps1 -PreferLatest`), RelWithDebInfo,
+`build/vnext-product`, individually:
 
 - `tes3mp_native_loadout_tests` focused build: exit 0.
 - `inventory-transfer-preparation`: exit 0.
@@ -74,23 +69,28 @@ Windows MSVC RelWithDebInfo, `build/vnext-product`, individually:
 - Documentation budget/links, patch-registry semantic fields, formatting and
   whitespace checks: exit 0.
 
-Synthetic disposable-stock comparisons now walk actual prepared iterators. Cases
-cover empty/end positions, dormant selections/nodes, signed partial/full removal,
-shared/distinct services, foreign/corrupted bindings and quantities, replaced owned
-stores, destroyed and same-address reconstructed nodes, replaced end sentinels,
-preparation failure, moves and discard. Snapshots preserve live inventories,
-RefData flags/locals, scripts/cursors, selection, WorldModel mappings/revision/
-counter and notifications. Non-end owned selections and script items remain usable
-after live inventory destruction. No Environment, World, UI or Lua runtime initialized.
+Synthetic disposable-stock comparisons cover shared/distinct services, scripted
+owners, context aliases, absent/distinct initiators, corrupt lifetime witnesses,
+expired/reconstructed references, stale/inconsistent registrations, consumer-copy
+failure/destruction, moves and discard. Snapshots preserve live inventories,
+RefData flags/locals, scripts/cursors, selections, WorldModel mappings/revision/
+counter and notifications. Reference copy/move/assignment and expiry before RefData
+teardown also pass. No Environment, World, UI or Lua runtime initialized.
 
-Logs: `build/logs/native-iterator-bindings-*`. No complete suites, expensive gates
+Logs: `build/logs/native-context-bindings-*`. No complete suites, expensive gates
 or upstream baseline tests ran.
 
 ## Remaining limits and inherited evidence
 
-Unaffected live-pointer resolution, installation, durability and effect execution
-remain unprepared. No atomic transfer, installation-failure or allocator-fault
-proof exists. Unresolved stores, equipment, gold/other types, Lua/custom state,
+Content, WorldModel, LocalScripts, live stores and cell services remain borrowed;
+they must outlive their use. Reference expiry rejects without pinning objects.
+Checks assume serialized engine access and witness current state/lifetime, not
+complete mutation history or stable multiplayer identity. Public views expire with
+their owning state or referenced lifetime.
+
+Other unaffected references, installation, durability and effect execution remain
+unprepared. No atomic transfer, installation-failure or allocator-fault proof exists.
+Unresolved stores, equipment, gold/other types, Lua/custom-state transfer,
 persistence and stable multiplayer instance mapping remain outside this slice.
 
 Inherited M1 real-Morrowind/enchantment evidence under `build/native-loadout/real`
