@@ -151,7 +151,11 @@ namespace MWWorld
         ~PreparedContainerTransfer();
 
         const PreparedContainerRemove& getRemoval() const;
+        // Incoming source-derived value, with the removal quantity.
         ConstPtr getItem() const;
+        // Owned post-add value: preserves the selected destination stack's state,
+        // or returns the incoming value for a new stack. Always unregistered.
+        ConstPtr getDestinationItem() const;
         ESM::RefNum getStackTarget() const;
         int getStackCount() const;
         std::optional<LocalScripts::Registration> getScriptAddition() const;
@@ -554,9 +558,8 @@ namespace MWWorld
         // require explicit LocalScripts; Lua/custom state and equipment reject.
         // Uses stock removal counts without applying them, including zero. These
         // independent decisions do not bind destination state or detached add values.
-        PreparedContainerRemove prepareTransferRemove(
-            const ConstPtr& item, int count, const ConstPtr& sourceOwner, const WorldModel& worldModel,
-            const LocalScripts* localScripts = nullptr) const;
+        PreparedContainerRemove prepareTransferRemove(const ConstPtr& item, int count, const ConstPtr& sourceOwner,
+            const WorldModel& worldModel, const LocalScripts* localScripts = nullptr) const;
 
         // Current-state validation, not a mutation-history or atomic-transfer check.
         // Source store, content, world model, LocalScripts and owner/cell must remain
@@ -565,8 +568,8 @@ namespace MWWorld
         void validateTransferRemoval(const PreparedContainerRemove& prepared, const ConstPtr& sourceOwner,
             const WorldModel& worldModel, const LocalScripts* localScripts = nullptr) const;
 
-        // Paired preparation only. Captures removal, detached normalized value,
-        // stacking, script intents and both notification consumers as one unit.
+        // Paired preparation only. Captures removal, detached incoming and destination
+        // values, stacking, script intents and both notification consumers as one unit.
         // Both contexts require LocalScripts, even for plain registration absence.
         // No live removal, installation, effects, persistence or atomic transfer.
         PreparedContainerTransfer prepareTransfer(const ConstPtr& item, int count, ContainerStore& destination,

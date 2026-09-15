@@ -535,9 +535,8 @@ void MWWorld::ContainerStore::validateTransferSource(
         throw std::logic_error("Container transfer preparation requires matching initialized script locals");
 }
 
-MWWorld::PreparedContainerRemove MWWorld::ContainerStore::prepareTransferRemove(
-    const ConstPtr& item, int count, const ConstPtr& sourceOwner, const WorldModel& worldModel,
-    const LocalScripts* localScripts) const
+MWWorld::PreparedContainerRemove MWWorld::ContainerStore::prepareTransferRemove(const ConstPtr& item, int count,
+    const ConstPtr& sourceOwner, const WorldModel& worldModel, const LocalScripts* localScripts) const
 {
     validateExplicitOwner(sourceOwner, worldModel);
     if (getPtr(worldModel).mCell != sourceOwner.mCell)
@@ -574,9 +573,8 @@ MWWorld::PreparedContainerRemove MWWorld::ContainerStore::prepareTransferRemove(
     return prepared;
 }
 
-void MWWorld::ContainerStore::validateTransferRemoval(
-    const PreparedContainerRemove& prepared, const ConstPtr& sourceOwner, const WorldModel& worldModel,
-    const LocalScripts* localScripts) const
+void MWWorld::ContainerStore::validateTransferRemoval(const PreparedContainerRemove& prepared,
+    const ConstPtr& sourceOwner, const WorldModel& worldModel, const LocalScripts* localScripts) const
 {
     validateExplicitOwner(sourceOwner, worldModel);
     const auto owner = worldModel.getPtr(prepared.mOwnerIdentity);
@@ -594,8 +592,8 @@ void MWWorld::ContainerStore::validateTransferRemoval(
         const auto registered = worldModel.getPtr(prepared.mItemIdentity);
         const auto& saved = *prepared.mItemState;
         if (ref.mWorldModel != &worldModel || registered.mRef != &ref || registered.mContainerStore != this
-            || ref.mBase != saved.mBase || ref.mBase->mScript != saved.mData.getLocals().getScriptId() || ref.isDeleted()
-            || miscTransferValues(ref.mRef) != miscTransferValues(saved.mRef)
+            || ref.mBase != saved.mBase || ref.mBase->mScript != saved.mData.getLocals().getScriptId()
+            || ref.isDeleted() || miscTransferValues(ref.mRef) != miscTransferValues(saved.mRef)
             || !ref.mData.matchesContainerTransferState(saved.mData))
             throw std::invalid_argument("Container removal preparation source state changed");
         if (prepared.mScriptState)
@@ -643,6 +641,15 @@ namespace
         return iter;
     }
 
+    void normalizeContainerAddReference(MWWorld::CellRef& ref)
+    {
+        ref.setPosition({});
+        ref.setOwner(ESM::RefId());
+        ref.resetGlobalVariable();
+        ref.setFaction(ESM::RefId());
+        ref.setFactionRank(-2);
+    }
+
     // The registration consumer chooses immediate stock registration or an owned
     // intent. Keep OnPCAdd after that step: stock registration catches exceptions,
     // whereas deferred preparation must unwind without reporting success.
@@ -651,11 +658,7 @@ namespace
         const MWWorld::ContainerStoreAddContext& context, const RegisterScript& registerScript)
     {
         item.getRefData().setBaseNode(nullptr);
-        item.getCellRef().setPosition({});
-        item.getCellRef().setOwner(ESM::RefId());
-        item.getCellRef().resetGlobalVariable();
-        item.getCellRef().setFaction(ESM::RefId());
-        item.getCellRef().setFactionRank(-2);
+        normalizeContainerAddReference(item.getCellRef());
 
         const ESM::RefId& script = item.getClass().getScript(item);
         const auto& owner = context.mContainer;
@@ -802,6 +805,9 @@ struct MWWorld::PreparedContainerTransfer::State
     PreparedContainerRemove mRemoval;
     PreparedContainerAdd mAddition;
     std::unique_ptr<LiveCellRef<ESM::Miscellaneous>> mAddedValues;
+    // Only an existing stack needs a second result. New stacks retain mAddition's
+    // incoming value and its prepared script locals/intents. No live Ptr is saved.
+    std::unique_ptr<LiveCellRef<ESM::Miscellaneous>> mStackItem;
     struct DestinationState
     {
         std::unique_ptr<LiveCellRef<ESM::Miscellaneous>> mValues;
@@ -844,6 +850,12 @@ const MWWorld::PreparedContainerRemove& MWWorld::PreparedContainerTransfer::getR
 MWWorld::ConstPtr MWWorld::PreparedContainerTransfer::getItem() const
 {
     return ConstPtr(state().mAddition.mItem.get());
+}
+
+MWWorld::ConstPtr MWWorld::PreparedContainerTransfer::getDestinationItem() const
+{
+    const auto& owned = state();
+    return ConstPtr(owned.mStackItem ? owned.mStackItem.get() : owned.mAddition.mItem.get());
 }
 
 ESM::RefNum MWWorld::PreparedContainerTransfer::getStackTarget() const
@@ -955,11 +967,27 @@ MWWorld::PreparedContainerTransfer MWWorld::ContainerStore::prepareTransfer(cons
         state->mDestinationValues.push_back({ copyContainerTransferItem(ConstPtr(&ref)), std::move(registration) });
     }
     // Derive the incoming value from the owned removal witness, never from a
-    // separately supplied item/count. Shared stock add rules normalize only it.
+    // separately supplied item/count. Keep the independent incoming preparation.
     auto detached = copyContainerTransferItem(ConstPtr(&source));
     detached->mRef.setCount(state->mRemoval.getCount());
     state->mAddition = destination.prepareTransferAdd(std::move(detached), destinationContext);
     state->mAddedValues = copyContainerTransferItem(ConstPtr(state->mAddition.mItem.get()));
+    if (state->mAddition.getStackTarget().isSet())
+    {
+        // Stock addImp changes the selected destination, not the incoming item.
+        // Reuse that exact selection and its owned witness, including RefData that
+        // stacks() need not compare. Scripted items never take this branch.
+        for (size_t i = 0; i < state->mAddition.mDestinationState.size(); ++i)
+            if (state->mAddition.mDestinationState[i].mIdentity == state->mAddition.getStackTarget())
+            {
+                state->mStackItem = copyContainerTransferItem(ConstPtr(state->mDestinationValues[i].mValues.get()));
+                state->mStackItem->mRef.setCount(state->mAddition.getStackCount());
+                normalizeContainerAddReference(state->mStackItem->mRef);
+                break;
+            }
+        if (!state->mStackItem)
+            throw std::logic_error("Container transfer preparation stack witness missing");
+    }
     // The last fallible consumer copy occurs after both decisions, values and
     // script/notification intents exist. Any throw destroys the entire pair.
     state->mSourceUpdated = sourceContext.mInventoryUpdated;
@@ -995,16 +1023,37 @@ void MWWorld::ContainerStore::validateTransfer(const PreparedContainerTransfer& 
     if (clearSelection != state.mClearSelection)
         throw std::invalid_argument("Container transfer preparation source selection changed");
     auto saved = state.mDestinationValues.begin();
+    bool foundStack = false;
     for (const auto& ref : destination.mLists.mMiscItems.mList)
     {
         // Stacking validation has already established current membership/order.
         if (saved == state.mDestinationValues.end() || !sameTransferValues(ref, *saved->mValues))
             throw std::invalid_argument("Container transfer preparation destination values changed");
         state.mDestinationScripts->validateRemoval(saved->mScript, &ref.mRef);
+        if (ref.mRef.getRefNum() == state.mAddition.getStackTarget())
+        {
+            foundStack = true;
+            // Derive the expected result from the selected destination witness,
+            // using the same removal quantity and stock signed arithmetic. Never
+            // re-run script preparation or read a saved inventory/script iterator.
+            auto expected = saved->mValues->mRef;
+            expected.setCount(addItems(expected.getCount(false), state.mRemoval.getCount()));
+            normalizeContainerAddReference(expected);
+            const auto* result = state.mStackItem.get();
+            if (!result || result->mBase != saved->mValues->mBase || !result->mBase->mScript.empty()
+                || result->mWorldModel || result->mRef.getRefNum().isSet() || result->mData.getBaseNode()
+                || miscTransferValues(result->mRef) != miscTransferValues(expected)
+                || !result->mData.matchesContainerTransferState(saved->mValues->mData)
+                || result->mRef.getCount(false) != state.mAddition.getStackCount())
+                throw std::invalid_argument("Container transfer preparation destination item values changed");
+        }
         ++saved;
     }
     if (saved != state.mDestinationValues.end())
         throw std::invalid_argument("Container transfer preparation destination membership changed");
+    if (foundStack != state.mAddition.getStackTarget().isSet() || foundStack != bool(state.mStackItem)
+        || (!foundStack && state.mAddition.getStackCount() != state.mRemoval.getCount()))
+        throw std::invalid_argument("Container transfer preparation destination result changed");
     const auto& script = state.mAddition.mScript;
     const auto scriptId = item.mBase->mScript;
     const bool player = !state.mPlayer.isEmpty() && state.mAddition.mOwner == state.mPlayer;
@@ -1028,7 +1077,7 @@ MWWorld::ContainerStoreIterator MWWorld::ContainerStore::addWithContext(
 
     MWWorld::ContainerStoreIterator it = addImp(itemPtr, count, context.mStore);
 
-    // The copy of the original item we just made
+    // The selected existing stack or the new copy of the incoming item.
     MWWorld::Ptr item = *it;
     context.mWorldModel.registerPtr(item);
 

@@ -502,8 +502,8 @@ namespace
             return std::tuple{ inventories, registry, worldModel.getPtrRegistryRevision(),
                 worldModel.getLastGeneratedRefNum(), notificationCounts() };
         };
-        using ScriptEntry = std::tuple<ESM::RefId, MWWorld::LiveCellRefBase*, MWWorld::CellStore*,
-            MWWorld::ContainerStore*>;
+        using ScriptEntry
+            = std::tuple<ESM::RefId, MWWorld::LiveCellRefBase*, MWWorld::CellStore*, MWWorld::ContainerStore*>;
         const auto remainingScripts = [&] {
             std::vector<ScriptEntry> result;
             std::pair<ESM::RefId, MWWorld::Ptr> entry;
@@ -853,16 +853,15 @@ namespace
             for (int quantity : { 0, -1, std::numeric_limits<int>::min(), std::abs(originalCount) + 1 })
                 reject(
                     [&] {
-                        source.prepareTransferRemove(item, quantity, sourceContext.mContainer, worldModel, &localScripts);
+                        source.prepareTransferRemove(
+                            item, quantity, sourceContext.mContainer, worldModel, &localScripts);
                     },
                     "count");
             for (int invalidCount : { 0, std::numeric_limits<int>::min() })
             {
                 item.getCellRef().setCount(invalidCount, localScripts);
                 reject(
-                    [&] {
-                        source.prepareTransferRemove(item, 1, sourceContext.mContainer, worldModel, &localScripts);
-                    },
+                    [&] { source.prepareTransferRemove(item, 1, sourceContext.mContainer, worldModel, &localScripts); },
                     invalidCount == 0 ? "ownership mismatch" : "count is invalid");
                 item.getCellRef().setCount(originalCount);
                 restoreRegistration();
@@ -873,7 +872,9 @@ namespace
                     sourceContext.mContainer);
                 change();
                 reject(
-                    [&] { source.validateTransferRemoval(removal, sourceContext.mContainer, worldModel, &localScripts); },
+                    [&] {
+                        source.validateTransferRemoval(removal, sourceContext.mContainer, worldModel, &localScripts);
+                    },
                     "changed");
                 restore();
                 restoreRegistration();
@@ -927,7 +928,8 @@ namespace
                 item, 2, originalCount < 0 ? originalCount + 2 : originalCount - 2, source, sourceContext.mContainer);
             reject(
                 [&] {
-                    destination.validateTransferRemoval(removal, destinationContext.mContainer, worldModel, &localScripts);
+                    destination.validateTransferRemoval(
+                        removal, destinationContext.mContainer, worldModel, &localScripts);
                 },
                 "context changed");
             auto movedOwner = sourceContext.mContainer;
@@ -936,9 +938,7 @@ namespace
                 "context changed");
             worldModel.registerPtr(movedOwner);
             reject(
-                [&] {
-                    source.validateTransferRemoval(removal, sourceContext.mContainer, worldModel, &localScripts);
-                },
+                [&] { source.validateTransferRemoval(removal, sourceContext.mContainer, worldModel, &localScripts); },
                 "context changed");
             reject([&] { source.prepareTransferRemove(item, 2, sourceContext.mContainer, worldModel, &localScripts); },
                 "owner cell mismatch");
@@ -988,12 +988,14 @@ namespace
                         changed.mCell = fromA ? addB.mContainer.mCell : nullptr;
                     else if (change == 1)
                         changed.mContainerStore = fromA ? &b : &a;
-                    localScripts.add(change == 2 ? ESM::RefId::stringRefId("alternate_script") : scriptId, changed, scripts);
+                    localScripts.add(
+                        change == 2 ? ESM::RefId::stringRefId("alternate_script") : scriptId, changed, scripts);
                     reject([&] { validate(current); }, "registration changed");
                     if (change != 0)
                         reject(
                             [&] {
-                                source.prepareTransferRemove(item, quantity, context.mContainer, worldModel, &localScripts);
+                                source.prepareTransferRemove(
+                                    item, quantity, context.mContainer, worldModel, &localScripts);
                             },
                             "registration mismatch");
                     localScripts.remove(item);
@@ -1020,7 +1022,8 @@ namespace
                     if (change == 0)
                         reject(
                             [&] {
-                                source.prepareTransferRemove(item, quantity, context.mContainer, worldModel, &localScripts);
+                                source.prepareTransferRemove(
+                                    item, quantity, context.mContainer, worldModel, &localScripts);
                             },
                             "matching initialized");
                     item.getRefData() = saved.copyForContainerTransfer();
@@ -1051,9 +1054,11 @@ namespace
                         bool caught = false;
                         try
                         {
-                            auto initial = source.prepareTransferRemove(item, quantity, owner, worldModel, &localScripts);
+                            auto initial
+                                = source.prepareTransferRemove(item, quantity, owner, worldModel, &localScripts);
                             auto removal = std::move(initial);
-                            require((removal.getScriptRemoval() != nullptr) == (quantity == item.getCellRef().getCount()),
+                            require(
+                                (removal.getScriptRemoval() != nullptr) == (quantity == item.getCellRef().getCount()),
                                 "late failure source lost owned deregistration intent");
                             auto detached = source.prepareTransferItem(
                                 item, quantity, destination, owner, context.mContainer, worldModel);
@@ -1080,8 +1085,8 @@ namespace
                             caught = true;
                         }
                         onCopy = {};
-                        require(caught == fail && copies == 1 && itemAlive == 0 && intentAlive == 1
-                                && !node.valid() && emitted == 0 && snapshot() == before,
+                        require(caught == fail && copies == 1 && itemAlive == 0 && intentAlive == 1 && !node.valid()
+                                && emitted == 0 && snapshot() == before,
                             "scripted removal/add failure or discard leaked state, registrations or success");
                         unchangedScripts();
                     }
@@ -1146,8 +1151,7 @@ namespace
             for (const auto* decision : { &partial, &full })
                 reject([&] { source.validateTransferRemoval(*decision, addA.mContainer, worldModel, &localScripts); },
                     "changed");
-            reject(
-                [&] { source.prepareTransferRemove(oldItem, 2, addA.mContainer, worldModel, &localScripts); },
+            reject([&] { source.prepareTransferRemove(oldItem, 2, addA.mContainer, worldModel, &localScripts); },
                 "ownership mismatch");
             require(worldModel.getPtr(identity).isEmpty(), "destroyed source retained its registration");
             worldModel.deregisterLiveCellRef(*newItem.mRef);
@@ -1448,8 +1452,78 @@ namespace
         static_assert(std::is_nothrow_move_constructible_v<Pair> && std::is_nothrow_move_assignable_v<Pair>);
         static_assert(
             std::is_same_v<decltype(std::declval<const Pair&>().getItem().getRefData()), const MWWorld::RefData&>);
+        static_assert(std::is_same_v<decltype(std::declval<const Pair&>().getDestinationItem().getRefData()),
+            const MWWorld::RefData&>);
+        static_assert(std::is_same_v<decltype(std::declval<const Pair&>().getDestinationItem().getCellRef()),
+            const MWWorld::CellRef&>);
         static_assert(std::is_same_v<decltype(std::declval<const Pair&>().getRemoval()),
             const MWWorld::PreparedContainerRemove&>);
+        const auto compareStock = [&](const Pair& paired, const MWWorld::Ptr& item, const MWWorld::Ptr& target,
+                                      const MWWorld::ContainerStoreAddContext& sourceContext,
+                                      const MWWorld::ContainerStoreAddContext& destinationContext) {
+            // Separate stores, owners, registry and script list: real stock mutation
+            // must not disturb the live preparation snapshots, even their ID counter.
+            MWWorld::ESMStore registryStore;
+            ESM::ReadersCache readers;
+            MWWorld::WorldModel model(registryStore, readers, 1);
+            MWWorld::ManualRef sourceOwner(store, sourceContext.mContainer.getCellRef().getRefId());
+            MWWorld::ManualRef destinationOwner(store, destinationContext.mContainer.getCellRef().getRefId());
+            auto sourcePtr = sourceOwner.getPtr();
+            auto destinationPtr = destinationOwner.getPtr();
+            sourcePtr.mCell = sourceContext.mContainer.mCell;
+            destinationPtr.mCell = destinationContext.mContainer.mCell;
+            MWWorld::ContainerStore source, destination;
+            bindEmptyStore(source, sourcePtr, model);
+            bindEmptyStore(destination, destinationPtr, model);
+            MWWorld::LocalScripts stockScripts(store);
+            int notifications = 0;
+            MWWorld::ContainerStoreAddContext sourceAdd{ store, model, sourcePtr, sourcePtr, &stockScripts, &scripts,
+                [&](const MWWorld::Ptr&) { ++notifications; } };
+            MWWorld::ContainerStoreAddContext destinationAdd{ store, model,
+                destinationContext.mPlayer.isEmpty()                              ? MWWorld::Ptr()
+                    : destinationContext.mPlayer == destinationContext.mContainer ? destinationPtr
+                                                                                  : sourcePtr,
+                destinationPtr, &stockScripts, &scripts, sourceAdd.mInventoryUpdated };
+            const auto copyValues = [](const MWWorld::Ptr& to, const MWWorld::Ptr& from) {
+                const auto identity = to.getCellRef().getRefNum();
+                to.getCellRef() = from.getCellRef();
+                to.getCellRef().setRefNum(identity);
+                to.getRefData() = from.getRefData().copyForContainerTransfer();
+            };
+            const bool scriptedItem = !item.getClass().getScript(item).empty();
+            auto stockSource = source.add(
+                scriptedItem ? scripted.getPtr() : plain.getPtr(), item.getCellRef().getCount(), sourceAdd);
+            auto stockTarget = destination.add(plain.getPtr(), target.getCellRef().getCount(), destinationAdd);
+            copyValues(*stockSource, item);
+            copyValues(*stockTarget, target);
+            stockTarget->getRefData().setBaseNode(new SceneUtil::PositionAttitudeTransform);
+            source.setSelectedEnchantItem(stockSource);
+            destination.setSelectedEnchantItem(stockTarget);
+            MWWorld::ManualRef incoming(store, item.getCellRef().getRefId());
+            copyValues(incoming.getPtr(), item);
+            MWWorld::ContainerStoreRemoveContext removal{ model, sourcePtr, stockScripts, sourceAdd.mInventoryUpdated };
+            const auto removed = source.remove(*stockSource, paired.getRemoval().getCount(), removal);
+            const auto stockResult = destination.add(incoming.getPtr(), removed, destinationAdd);
+            const auto result = paired.getDestinationItem();
+            require(removed == paired.getRemoval().getCount()
+                    && stockSource->getCellRef().getCount(false) == paired.getRemoval().getRemainingCount()
+                    && (source.getSelectedEnchantItem() == source.end())
+                        == (paired.getRemoval().getRemainingCount() == 0)
+                    && (stockResult == stockTarget) == paired.getStackTarget().isSet()
+                    && destination.getSelectedEnchantItem() == stockTarget
+                    && values(*stockResult) == values(result)
+                    // Stock new-stack copying clears activation flags; detached
+                    // preparation deliberately retains them (an inherited limit).
+                    && (!paired.getStackTarget().isSet()
+                        || stockResult->getRefData().matchesContainerTransferState(result.getRefData()))
+                    && stockResult->getCellRef().getCount(false) == result.getCellRef().getCount(false)
+                    && !stockResult->getRefData().getBaseNode() && notifications == 4,
+                "paired destination/removal values differ from stock add/remove in disposable stores");
+            require(stockScripts.isRunning(scriptId, *stockResult) == paired.getScriptAddition().has_value()
+                    && stockScripts.isRunning(scriptId, *stockSource)
+                        == (scriptedItem && paired.getRemoval().getRemainingCount() != 0),
+                "paired deferred script intents differ from disposable stock behavior");
+        };
         for (const auto& item : live)
         {
             const bool fromA = item.mContainerStore == &a;
@@ -1463,91 +1537,116 @@ namespace
             const auto target = fromA ? *plainB : *plainA;
             const auto originalSoul = target.getCellRef().getSoul();
             const auto originalCount = item.getCellRef().getCount(false);
+            const auto originalTargetCount = target.getCellRef().getCount(false);
             for (bool compatible : { false, true })
                 for (int playerMode : { 0, 1, 2 })
                     for (int signedCount : { 4, -4 })
-                        for (int quantity : { 1, 4 })
-                        {
-                            item.getCellRef().setCount(signedCount);
-                            target.getCellRef().setSoul(compatible ? item.getCellRef().getSoul() : originalSoul);
-                            context.mPlayer = playerMode == 0 ? context.mContainer
-                                : playerMode == 1             ? removalContext.mContainer
-                                                              : MWWorld::Ptr();
-                            const auto before = snapshot();
-                            startScripts();
+                        for (int destinationCount : { 7, -7 })
+                            for (int quantity : { 1, 4 })
                             {
-                                auto initial
-                                    = source.prepareTransfer(item, quantity, destination, removalContext, context);
-                                auto paired = std::move(initial);
-                                const auto& removal = paired.getRemoval();
-                                const auto temporary = paired.getItem();
-                                const auto expectedRemainder
-                                    = signedCount < 0 ? signedCount + quantity : signedCount - quantity;
-                                require(removal.getCount() == quantity
-                                        && removal.getRemainingCount() == expectedRemainder
-                                        && removal.getItemIdentity() == item.getCellRef().getRefNum()
-                                        && (removal.getScriptRemoval() != nullptr) == (hasScript && quantity == 4)
-                                        && paired.getStackTarget()
-                                            == (compatible && !hasScript ? target.getCellRef().getRefNum()
-                                                                         : ESM::RefNum())
-                                        && paired.getStackCount()
-                                            == (compatible && !hasScript
-                                                    ? (target.getCellRef().getCount(false) < 0
-                                                              ? target.getCellRef().getCount(false) - quantity
-                                                              : target.getCellRef().getCount(false) + quantity)
-                                                    : quantity)
-                                        && paired.hasRemovalNotification() && paired.hasAdditionNotification(),
-                                    "paired preparation lost counts, stack selection or deferred notifications");
-                                auto expected = source.prepareTransferItem(item, quantity, destination,
-                                    removalContext.mContainer, context.mContainer, worldModel);
-                                auto independent = destination.prepareTransferAdd(std::move(expected), context);
-                                require(values(temporary) == values(MWWorld::ConstPtr(independent.mItem.get()))
-                                        && temporary.getCellRef().getCount(false) == quantity
-                                        && !temporary.getCellRef().getRefNum().isSet() && !temporary.mRef->mWorldModel
-                                        && !temporary.mCell && !temporary.mContainerStore
-                                        && !temporary.getRefData().getBaseNode()
-                                        && !localScripts.isRunning(scriptId, MWWorld::Ptr(independent.mItem.get())),
-                                    "paired value differs from shared detached/stock normalization rules");
-                                auto registration = paired.getScriptAddition();
-                                require(registration.has_value() == hasScript
-                                        && (!registration
-                                            || (registration->mScript == scriptId
-                                                && registration->mCell
-                                                    == (playerMode == 0 ? nullptr : context.mContainer.mCell))),
-                                    "paired destination script/OnPCAdd context was lost");
-                                if (registration)
-                                    registration->mScript = {}; // A returned value cannot change the owned intent.
-                                scripts.mBeforeLocals
-                                    = [] { throw std::runtime_error("validation called script services"); };
-                                source.validateTransfer(paired, destination, removalContext, context);
-                                scripts.mBeforeLocals = {};
-                                bool movedRejected = false;
-                                try
+                                item.getCellRef().setCount(signedCount);
+                                target.getCellRef().setCount(destinationCount);
+                                target.getCellRef().setSoul(compatible ? item.getCellRef().getSoul() : originalSoul);
+                                context.mPlayer = playerMode == 0 ? context.mContainer
+                                    : playerMode == 1             ? removalContext.mContainer
+                                                                  : MWWorld::Ptr();
+                                const auto before = snapshot();
+                                startScripts();
                                 {
-                                    source.validateTransfer(initial, destination, removalContext, context);
+                                    auto initial
+                                        = source.prepareTransfer(item, quantity, destination, removalContext, context);
+                                    auto paired = std::move(initial);
+                                    const auto& removal = paired.getRemoval();
+                                    const auto temporary = paired.getItem();
+                                    const auto expectedRemainder
+                                        = signedCount < 0 ? signedCount + quantity : signedCount - quantity;
+                                    require(removal.getCount() == quantity
+                                            && removal.getRemainingCount() == expectedRemainder
+                                            && removal.getItemIdentity() == item.getCellRef().getRefNum()
+                                            && (removal.getScriptRemoval() != nullptr) == (hasScript && quantity == 4)
+                                            && paired.getStackTarget()
+                                                == (compatible && !hasScript ? target.getCellRef().getRefNum()
+                                                                             : ESM::RefNum())
+                                            && paired.getStackCount()
+                                                == (compatible && !hasScript
+                                                        ? (target.getCellRef().getCount(false) < 0
+                                                                  ? target.getCellRef().getCount(false) - quantity
+                                                                  : target.getCellRef().getCount(false) + quantity)
+                                                        : quantity)
+                                            && paired.hasRemovalNotification() && paired.hasAdditionNotification(),
+                                        "paired preparation lost counts, stack selection or deferred notifications");
+                                    auto expected = source.prepareTransferItem(item, quantity, destination,
+                                        removalContext.mContainer, context.mContainer, worldModel);
+                                    auto independent = destination.prepareTransferAdd(std::move(expected), context);
+                                    require(values(temporary) == values(MWWorld::ConstPtr(independent.mItem.get()))
+                                            && temporary.getCellRef().getCount(false) == quantity
+                                            && !temporary.getCellRef().getRefNum().isSet()
+                                            && !temporary.mRef->mWorldModel && !temporary.mCell
+                                            && !temporary.mContainerStore && !temporary.getRefData().getBaseNode()
+                                            && !localScripts.isRunning(scriptId, MWWorld::Ptr(independent.mItem.get())),
+                                        "paired value differs from shared detached/stock normalization rules");
+                                    const auto result = paired.getDestinationItem();
+                                    const bool stacked = compatible && !hasScript;
+                                    require(result.getCellRef().getCount(false) == paired.getStackCount()
+                                            && !result.getCellRef().getRefNum().isSet() && !result.mRef->mWorldModel
+                                            && !result.mCell && !result.mContainerStore
+                                            && !result.getRefData().getBaseNode() && (result == temporary) == !stacked,
+                                        "paired destination result lost owned/detached state or new-stack identity");
+                                    if (stacked)
+                                        require(result.mRef != target.mRef
+                                                && result.getRefData().matchesContainerTransferState(
+                                                    target.getRefData())
+                                                && !result.getRefData().matchesContainerTransferState(item.getRefData())
+                                                && result.getRefData().getAnimationState().mScriptedAnims.data()
+                                                    != target.getRefData().getAnimationState().mScriptedAnims.data()
+                                                && result.getRefData().getAnimationState().mScriptedAnims.data()
+                                                    != temporary.getRefData().getAnimationState().mScriptedAnims.data(),
+                                            "compatible stack lost distinct destination RefData or aliases owned "
+                                            "buffers");
+                                    compareStock(paired, item, target, sourceAdd, context);
+                                    auto registration = paired.getScriptAddition();
+                                    require(registration.has_value() == hasScript
+                                            && (!registration
+                                                || (registration->mScript == scriptId
+                                                    && registration->mCell
+                                                        == (playerMode == 0 ? nullptr : context.mContainer.mCell))),
+                                        "paired destination script/OnPCAdd context was lost");
+                                    if (registration)
+                                        registration->mScript = {}; // A returned value cannot change the owned intent.
+                                    scripts.mBeforeLocals
+                                        = [] { throw std::runtime_error("validation called script services"); };
+                                    source.validateTransfer(paired, destination, removalContext, context);
+                                    scripts.mBeforeLocals = {};
+                                    bool movedRejected = false;
+                                    try
+                                    {
+                                        source.validateTransfer(initial, destination, removalContext, context);
+                                    }
+                                    catch (const std::invalid_argument&)
+                                    {
+                                        movedRejected = true;
+                                    }
+                                    require(movedRejected, "moved-from pair validated");
+                                    // Move assignment discards the previous entire decision too.
+                                    auto assigned
+                                        = source.prepareTransfer(item, quantity, destination, removalContext, context);
+                                    assigned = std::move(paired);
+                                    source.validateTransfer(assigned, destination, removalContext, context);
                                 }
-                                catch (const std::invalid_argument&)
-                                {
-                                    movedRejected = true;
-                                }
-                                require(movedRejected, "moved-from pair validated");
-                                // Move assignment discards the previous entire decision too.
-                                auto assigned
-                                    = source.prepareTransfer(item, quantity, destination, removalContext, context);
-                                assigned = std::move(paired);
-                                source.validateTransfer(assigned, destination, removalContext, context);
+                                require(snapshot() == before,
+                                    "paired preparation/validation/move/discard changed live state");
+                                unchangedScripts();
                             }
-                            require(
-                                snapshot() == before, "paired preparation/validation/move/discard changed live state");
-                            unchangedScripts();
-                        }
             item.getCellRef().setCount(originalCount);
             target.getCellRef().setSoul(originalSoul);
+            target.getCellRef().setCount(originalTargetCount);
             context.mPlayer = (fromA ? scriptedAddB : scriptedAddA).mPlayer;
+            if (!hasScript)
+                target.getCellRef().setSoul(item.getCellRef().getSoul());
             const auto makePair = [&] { return source.prepareTransfer(item, 1, destination, removalContext, context); };
             const auto validatePair
                 = [&](const Pair& paired) { source.validateTransfer(paired, destination, removalContext, context); };
-            for (const auto& changedItem : { item, fromA ? *scriptB : *scriptA })
+            for (const auto& changedItem : { item, target, fromA ? *scriptB : *scriptA })
             {
                 auto paired = makePair();
                 const auto ref = changedItem.getCellRef();
@@ -1633,6 +1732,71 @@ namespace
             reject([&] { validatePair(paired); }, "item values changed");
             temporary->mData.getLocals().mFloats.pop_back();
             validatePair(paired);
+            if (!hasScript)
+            {
+                require(paired.getStackTarget() == target.getCellRef().getRefNum(),
+                    "destination fault fixture did not select the existing stack");
+                auto* result = const_cast<MWWorld::LiveCellRef<ESM::Miscellaneous>*>(
+                    paired.getDestinationItem().get<ESM::Miscellaneous>());
+                const auto savedResultRef = result->mRef;
+                const auto savedResultData = result->mData.copyForContainerTransfer();
+                for (const auto& change : std::vector<std::function<void(MWWorld::CellRef&)>>{
+                         [](auto& ref) { ref.setCount(-999); }, [](auto& ref) { ref.setCharge(999); },
+                         [](auto& ref) { ref.setOwner(ESM::RefId::stringRefId("corrupt_owner")); },
+                         [&](auto& ref) { ref.setRefNum(target.getCellRef().getRefNum()); } })
+                {
+                    change(result->mRef);
+                    reject([&] { validatePair(paired); }, "destination item values changed");
+                    result->mRef = savedResultRef;
+                }
+                for (const auto& change :
+                    std::vector<std::function<void(MWWorld::RefData&)>>{ [](auto& data) { data.setPosition({}); },
+                        [](auto& data) { data.enable(); }, [](auto& data) { data.mPhysicsPostponed = false; },
+                        [](auto& data) { data.getAnimationState().mScriptedAnims[0].mTime += 1; },
+                        [](auto& data) { data.activateByScript(); },
+                        [](auto& data) { data.getLocals().mLongs.push_back(42); },
+                        [](auto& data) { data.setBaseNode(new SceneUtil::PositionAttitudeTransform); } })
+                {
+                    change(result->mData);
+                    reject([&] { validatePair(paired); }, "destination item values changed");
+                    result->mData = savedResultData.copyForContainerTransfer();
+                }
+                // Replacing the result with the normalized incoming state would
+                // preserve compatibility but lose the destination's applicable state.
+                result->mData = temporary->mData.copyForContainerTransfer();
+                reject([&] { validatePair(paired); }, "destination item values changed");
+                result->mData = savedResultData.copyForContainerTransfer();
+                validatePair(paired);
+
+                const auto targetRef = target.getCellRef();
+                for (int staleCount : { 0, -originalTargetCount, originalTargetCount + 1 })
+                {
+                    target.getCellRef().setCount(staleCount, localScripts);
+                    reject([&] { validatePair(paired); }, "changed");
+                    target.getCellRef() = targetRef;
+                }
+                const auto targetData = target.getRefData().copyForContainerTransfer();
+                target.getRefData().getAnimationState().mScriptedAnims[0].mTime += 1;
+                reject([&] { validatePair(paired); }, "destination values changed");
+                target.getRefData().getAnimationState().mScriptedAnims[0].mTime
+                    = targetData.getAnimationState().mScriptedAnims[0].mTime;
+                MWWorld::ManualRef replacement(store, target.getCellRef().getRefId());
+                replacement.getPtr().getCellRef().setRefNum(target.getCellRef().getRefNum());
+                auto replacementPtr = replacement.getPtr();
+                replacementPtr.mContainerStore = &destination;
+                worldModel.registerPtr(replacementPtr);
+                reject([&] { validatePair(paired); }, "changed");
+                worldModel.registerPtr(target);
+                int alive = 0;
+                target.getRefData().setCustomData(std::make_unique<Lifetime>(alive));
+                reject([&] { makePair(); }, "Lua or custom state");
+                require(alive == 1, "failed destination copying cloned or destroyed live custom data");
+                target.getRefData().setCustomData(nullptr);
+                target.getCellRef().setCount(std::numeric_limits<int>::max());
+                reject([&] { makePair(); }, "overflow");
+                target.getCellRef() = targetRef;
+                validatePair(paired);
+            }
             auto full = source.prepareTransfer(item, std::abs(originalCount), destination, removalContext, context);
             const auto selection = source.getSelectedEnchantItem();
             source.setSelectedEnchantItem(hasScript ? source.end() : (fromA ? plainA : plainB));
@@ -1670,8 +1834,9 @@ namespace
                     for (bool fail : { false, true })
                     {
                         target.getCellRef().setSoul(compatible ? item.getCellRef().getSoul() : originalSoul);
-                        int sourceAlive = 0, destinationAlive = 0, emitted = 0, copies = 0, itemAlive = 0;
-                        osg::observer_ptr<SceneUtil::PositionAttitudeTransform> node;
+                        int sourceAlive = 0, destinationAlive = 0, emitted = 0, copies = 0, itemAlive = 0,
+                            resultAlive = 0;
+                        osg::observer_ptr<SceneUtil::PositionAttitudeTransform> node, resultNode;
                         std::function<void()> sourceCopy, destinationCopy;
                         {
                             auto addition = context;
@@ -1702,6 +1867,16 @@ namespace
                                 data.setCustomData(std::make_unique<Lifetime>(itemAlive));
                                 data.setBaseNode(new SceneUtil::PositionAttitudeTransform);
                                 node = data.getBaseNode();
+                                if (decision.getStackTarget().isSet())
+                                {
+                                    auto& result
+                                        = const_cast<MWWorld::RefData&>(decision.getDestinationItem().getRefData());
+                                    result.setCustomData(std::make_unique<Lifetime>(resultAlive));
+                                    result.setBaseNode(new SceneUtil::PositionAttitudeTransform);
+                                    resultNode = result.getBaseNode();
+                                    require(itemAlive == 1 && resultAlive == 1 && node.valid() && resultNode.valid(),
+                                        "paired discard did not own two separate item values");
+                                }
                             }
                             catch (const PreparationFailure&)
                             {
@@ -1709,7 +1884,8 @@ namespace
                             }
                             sourceCopy = {};
                             require(caught == fail && copies == 1 && sourceAlive == 1 && destinationAlive == 1
-                                    && emitted == 0 && itemAlive == 0 && !node.valid() && snapshot() == before,
+                                    && emitted == 0 && itemAlive == 0 && resultAlive == 0 && !node.valid()
+                                    && !resultNode.valid() && snapshot() == before,
                                 "paired late failure/discard leaked owned state or changed live state/notifications");
                             unchangedScripts();
                         }
