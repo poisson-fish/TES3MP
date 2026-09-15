@@ -120,6 +120,7 @@ namespace MWWorld::Testing
     void checkTransferObjectState(const ESMStore& content);
     void checkTransferLocalsRestore(const ESMStore& content);
     void checkTransferRestore(const ESMStore& content);
+    void checkTransferCodec(const ESMStore& content);
     void checkTransferCommit(const ESMStore& content);
 }
 

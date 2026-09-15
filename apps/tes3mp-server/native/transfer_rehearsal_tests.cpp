@@ -1,5 +1,6 @@
 #include "test_allocations.hpp"
 #include "transfer_rehearsal.hpp"
+#include "transfer_save_codec.hpp"
 
 #include <algorithm>
 #include <bit>
@@ -360,116 +361,6 @@ namespace MWWorld::Testing
         {
             RestoredInventory mSource, mDestination;
         };
-
-        struct RestoreContent
-        {
-            std::span<const ESM::Miscellaneous* const> mBases;
-            const ESM::Script& mScript;
-            const Compiler::Locals& mDeclarations;
-        };
-
-        void validateText(std::string_view text, bool optional = true)
-        {
-            if ((!optional && text.empty()) || text.size() > 4096 || text.find('\0') != std::string_view::npos)
-                throw std::invalid_argument("Invalid detached inventory name");
-        }
-
-        void validateId(const ESM::RefId& id, bool optional = true)
-        {
-            if (optional && id.empty())
-                return;
-            if (!id.is<ESM::StringRefId>())
-                throw std::invalid_argument("Detached inventory requires TES3 string IDs");
-            validateText(id.getRefIdString(), false);
-        }
-
-        const ESM::Miscellaneous& suppliedBase(const ESM::RefId& id, const RestoreContent& content)
-        {
-            // Only search the explicit base-record collection, never a world/store.
-            for (const auto* base : content.mBases)
-                if (base->mId == id)
-                    return *base;
-            throw std::invalid_argument("Missing supplied inventory base record");
-        }
-
-        void validateRestore(const SerializedPair& input, const RestoreContent& content)
-        {
-            constexpr size_t maxObjects = 1024;
-            if (content.mBases.empty() || content.mBases.size() > maxObjects)
-                throw std::invalid_argument("Invalid supplied base count");
-            validateId(content.mScript.mId, false);
-            for (char type : { 's', 'l', 'f' })
-            {
-                if (content.mDeclarations.get(type).size() > 1024)
-                    throw std::invalid_argument("Too many supplied declarations");
-                const auto& names = content.mDeclarations.get(type);
-                for (size_t i = 0; i < names.size(); ++i)
-                {
-                    validateText(names[i], false);
-                    if (content.mDeclarations.getType(names[i]) != type
-                        || content.mDeclarations.getIndex(names[i]) != static_cast<int>(i))
-                        throw std::invalid_argument("Ambiguous supplied declaration");
-                }
-            }
-            for (size_t i = 0; i < content.mBases.size(); ++i)
-            {
-                const auto* base = content.mBases[i];
-                if (!base)
-                    throw std::invalid_argument("Null supplied base record");
-                validateId(base->mId, false);
-                validateId(base->mScript);
-                if (base->mId == "gold_001" || base->mId == "gold_005" || base->mId == "gold_010"
-                    || base->mId == "gold_025" || base->mId == "gold_100"
-                    || (!base->mScript.empty() && base->mScript != content.mScript.mId))
-                    throw std::invalid_argument("Unsupported gold or missing script declaration");
-                for (size_t j = 0; j < i; ++j)
-                    if (content.mBases[j]->mId == base->mId)
-                        throw std::invalid_argument("Ambiguous supplied base record");
-            }
-            const std::array inventories{ &input.mSource, &input.mDestination };
-            // Validate every shape before scanning identity associations or staging.
-            for (const auto* inventory : inventories)
-                if (inventory->mObjects.size() > maxObjects
-                    || inventory->mObjects.size() != inventory->mProposedIdentities.size())
-                    throw std::invalid_argument("Invalid detached inventory membership");
-            for (const auto* inventory : inventories)
-                for (size_t i = 0; i < inventory->mObjects.size(); ++i)
-                {
-                    const auto& state = inventory->mObjects[i];
-                    const auto& ref = state.mRef;
-                    const auto id = inventory->mProposedIdentities[i];
-                    if (!id.isSet() || id.mContentFile < -1 || ref.mRefNum.isSet())
-                        throw std::invalid_argument("Invalid detached identity association");
-                    size_t occurrences = 0;
-                    for (const auto* collection : inventories)
-                        occurrences += std::count(
-                            collection->mProposedIdentities.begin(), collection->mProposedIdentities.end(), id);
-                    if (occurrences != 1)
-                        throw std::invalid_argument("Duplicate proposed inventory identity");
-                    validateId(ref.mRefID, false);
-                    const auto& base = suppliedBase(ref.mRefID, content);
-                    for (const auto& key : { ref.mOwner, ref.mSoul, ref.mFaction, ref.mKey, ref.mTrap })
-                        validateId(key); // Preserve semantic fields without resolving their targets.
-                    validateText(ref.mGlobalVariable);
-                    validateText(ref.mDestCell);
-                    // Stock signed restocking counts are retained, including zero.
-                    if (ref.mCount == std::numeric_limits<int32_t>::min() || !std::isfinite(ref.mScale)
-                        || ref.mScale <= 0 || ref.mChargeInt < -1 || !std::isfinite(ref.mChargeIntRemainder)
-                        || !std::isfinite(ref.mEnchantmentCharge) || ref.mEnchantmentCharge < -1)
-                        throw std::invalid_argument("Invalid detached CellRef numeric value");
-                    for (const auto* position : { &ref.mPos, &ref.mDoorDest })
-                        for (int axis = 0; axis < 3; ++axis)
-                            if (!std::isfinite(position->pos[axis]) || !std::isfinite(position->rot[axis]))
-                                throw std::invalid_argument("Nonfinite detached CellRef position");
-                    if (state.mLocals.mVariables.size() > 1024 || state.mAnimationState.mScriptedAnims.size() > 256)
-                        throw std::invalid_argument("Oversized detached RefData");
-                    for (const auto& [name, value] : state.mLocals.mVariables)
-                        validateText(name, false);
-                    for (const auto& animation : state.mAnimationState.mScriptedAnims)
-                        validateText(animation.mGroup, false);
-                    RefData::validateRestore(state, base.mScript, content.mDeclarations);
-                }
-        }
 
         void restorePair(
             const SerializedPair& input, const RestoreContent& content, std::unique_ptr<const RestoredPair>& output)
@@ -1010,9 +901,9 @@ namespace MWWorld::Testing
                     && output.mGlobalVariable == ref.getGlobalVariable() && output.mFaction == ref.getFaction()
                     && output.mFactionRank == ref.getFactionRank() && output.mScale == ref.getScale()
                     && output.mTeleport == ref.getTeleport() && output.mDoorDest == ref.getDoorDest()
-                    && ESM::RefId::stringRefId(output.mDestCell) == ref.getDestCell()
-                    && output.mLockLevel == ref.getLockLevel() && output.mIsLocked == ref.isLocked()
-                    && output.mKey == ref.getKey() && output.mTrap == ref.getTrap() && output.mReferenceBlocked == 1
+                    && CellRef(output).getDestCell() == ref.getDestCell() && output.mLockLevel == ref.getLockLevel()
+                    && output.mIsLocked == ref.isLocked() && output.mKey == ref.getKey()
+                    && output.mTrap == ref.getTrap() && output.mReferenceBlocked == 1
                     && output.mPos == ref.getPosition(),
                 "serialized CellRef field mismatch");
         }
@@ -1617,10 +1508,372 @@ namespace MWWorld::Testing
             return allocations;
         }
 
+        auto byteState(const TransferSaveBytes& bytes)
+        {
+            return std::tuple{ bytes, bytes.data(), bytes.capacity() };
+        }
+
+        template <class Verify>
+        size_t checkCodecSave(const SerializedPair& input, const TransferSaveBytes& bytes, const SaveBindings& bindings,
+            const RestoredPair& expected, Verify verifyOriginal, bool malformed, size_t& rejections)
+        {
+            const auto inputBefore = pairOutputState(input);
+            const auto bytesBefore = byteState(bytes);
+            const auto contentBefore = contentState(bindings.mContent);
+            const auto envelopeBefore = bindings.mEnvelope;
+            const auto verify = [&] {
+                require(pairOutputState(input) == inputBefore && byteState(bytes) == bytesBefore
+                        && contentState(bindings.mContent) == contentBefore && bindings.mEnvelope == envelopeBefore,
+                    "codec changed input/storage/content/envelope");
+                verifyOriginal();
+            };
+            const auto check = [&](const SerializedPair& decoded) {
+                checkSavedValues(decoded, input);
+                std::unique_ptr<const RestoredPair> restored;
+                restorePair(decoded, bindings.mContent, restored);
+                checkRestored(*restored, expected);
+                SerializedPair saved;
+                serializePair(*restored, bindings.mContent.mDeclarations, saved);
+                checkSavedValues(saved, input);
+                TransferSaveBytes again;
+                encodeTransferSave(saved, bindings, again);
+                require(again == bytes, "restored save changed canonical bytes");
+            };
+            size_t allocations = checkSerializationAllocations([] { return TransferSaveBytes(57, 'x'); },
+                [&](auto& output) { encodeTransferSave(input, bindings, output); }, byteState,
+                [&](const auto& output) { require(output == bytes, "encoding changed accepted bytes"); }, verify);
+            allocations += checkSerializationAllocations([] { return pairOutputSentinel<true>(); },
+                [&](auto& output) { decodeTransferSave(bytes, bindings, output); },
+                [](const auto& output) { return pairOutputState(output); }, check, verify);
+            if (!malformed)
+                return allocations;
+
+            const auto reject = [&](std::span<const char> bad, const SaveBindings& supplied, bool preflight = false) {
+                auto output = pairOutputSentinel<true>();
+                const auto before = pairOutputState(output);
+                const TransferSaveBytes retained(bad.begin(), bad.end());
+                Allocations::Trace trace;
+                bool caught = false;
+                {
+                    Allocations::Observe observe(trace);
+                    try
+                    {
+                        decodeTransferSave(bad, supplied, output);
+                    }
+                    catch (const std::exception&)
+                    {
+                        caught = true;
+                    }
+                }
+                require(caught && pairOutputState(output) == before
+                        && std::equal(bad.begin(), bad.end(), retained.begin()) && trace.mOutstanding == 0
+                        && trace.mTrackingOverflow == 0,
+                    "malformed codec input accepted, leaked or changed prior output");
+                // Only std::invalid_argument's diagnostic may allocate before
+                // preflight rejects. ESMReader alone would allocate 50 KiB.
+                require(!preflight || trace.mTotal <= 1, "unbounded input reached engine allocation");
+                ++rejections;
+                verify();
+                // Rejection diagnostics and late semantic/canonical checks can
+                // allocate too. Fail each observed ordinal on those paths with
+                // fresh retries, then retry on the unchanged prior output.
+                for (size_t ordinal = 1; ordinal <= trace.mTotal; ++ordinal)
+                {
+                    Allocations::Trace failure;
+                    caught = false;
+                    {
+                        Allocations::Observe observe(failure, ordinal);
+                        try
+                        {
+                            decodeTransferSave(bad, supplied, output);
+                        }
+                        catch (const std::exception&)
+                        {
+                            caught = true;
+                        }
+                    }
+                    require(caught && failure.mFailures == 1 && failure.mOutstanding == 0
+                            && failure.mTrackingOverflow == 0 && pairOutputState(output) == before,
+                        "malformed decode allocation failure changed output or leaked");
+                    verify();
+                    auto retry = pairOutputSentinel<true>();
+                    decodeTransferSave(bytes, bindings, retry);
+                    check(retry);
+                }
+                allocations += trace.mTotal;
+                decodeTransferSave(bytes, bindings, output);
+                check(output);
+                verify();
+            };
+            for (size_t size = 0; size < bytes.size(); ++size)
+                reject(std::span(bytes).first(size), bindings, true);
+            auto bad = bytes;
+            bad.push_back(0);
+            reject(bad, bindings, true);
+            bad.assign(MaxTransferSaveBytes + 1, 0);
+            reject(bad, bindings, true);
+
+            const auto number = [](const TransferSaveBytes& data, size_t offset) {
+                uint32_t value = 0;
+                for (size_t i = 0; i < 4; ++i)
+                    value |= static_cast<uint32_t>(static_cast<unsigned char>(data.at(offset + i))) << (8 * i);
+                return value;
+            };
+            const auto put = [](TransferSaveBytes& data, size_t offset, uint32_t value) {
+                for (size_t i = 0; i < 4; ++i)
+                    data.at(offset + i) = static_cast<char>(value >> (8 * i));
+            };
+            struct Field
+            {
+                std::string mTag;
+                size_t mRecord, mHeader, mSize;
+            };
+            std::vector<Field> fields;
+            std::vector<size_t> records;
+            for (size_t record = 0; record < bytes.size();)
+            {
+                records.push_back(record);
+                const auto end = record + 16 + number(bytes, record + 4);
+                for (size_t sub = record + 16; sub < end;)
+                {
+                    const auto size = number(bytes, sub + 4);
+                    fields.push_back({ std::string(bytes.data() + sub, 4), record, sub, size });
+                    sub += 8 + size;
+                }
+                record = end;
+            }
+            for (const auto record : records)
+            {
+                bad = bytes;
+                put(bad, record + 4, UINT32_MAX);
+                reject(bad, bindings, true);
+                bad = bytes;
+                put(bad, record + 8, 1);
+                reject(bad, bindings, true);
+            }
+            for (const auto& field : fields)
+            {
+                bad = bytes;
+                put(bad, field.mHeader + 4, UINT32_MAX);
+                reject(bad, bindings, true);
+                bad = bytes;
+                bad[field.mHeader] = '?';
+                reject(bad, bindings, true);
+            }
+            const auto find = [&](std::string_view tag) -> const Field& {
+                const auto it
+                    = std::find_if(fields.begin(), fields.end(), [&](const auto& f) { return f.mTag == tag; });
+                if (it == fields.end())
+                    throw std::runtime_error("missing codec mutation field: " + std::string(tag));
+                return *it;
+            };
+            const auto change = [&](std::string_view tag, uint32_t value, bool early = false) {
+                bad = bytes;
+                put(bad, find(tag).mHeader + 8, value);
+                reject(bad, bindings, early);
+            };
+            for (auto tag : { "FORM", "FVER", "SOWN", "DOWN", "INIT" })
+                change(tag, 999999, true);
+            bad = bytes;
+            put(bad, find("HEDR").mHeader + 16, UINT32_MAX); // Nested author length.
+            reject(bad, bindings, true);
+            change("SIZE", 1025, true);
+            change("SIZE", 0, true);
+            change("XSAV", 0x7f800000); // Nonfinite scale.
+            change("NAM9", 0x80000000); // Unsupported signed count.
+            change("FLAG", UINT32_MAX);
+            change("XTIM", 0x7fc00000);
+            change("POS_", 0x7f800000);
+            change("XPOS", 0x7f800000);
+            bad = bytes;
+            const auto& local = find("LOCA");
+            put(bad, local.mHeader + 8 + local.mSize + 8, INT32_MAX);
+            reject(bad, bindings); // Short local outside its declared range.
+            for (auto tag : { "HCUS", "HLOC", "ENAB", "ABST" })
+            {
+                bad = bytes;
+                bad[find(tag).mHeader + 8] = 2;
+                reject(bad, bindings, true);
+            }
+            bad = bytes;
+            bad[find("NAME").mHeader + 9] = '?'; // Unknown RefId must never intern.
+            reject(bad, bindings, true);
+            bad = bytes;
+            bad[find("NAME").mHeader + 8] = static_cast<char>(ESM::RefIdType::SizedString);
+            reject(bad, bindings, true);
+            const auto firstId = find("IDEN").mHeader + 8;
+            for (uint32_t value : { 0u, bindings.mEnvelope.mSourceOwner.mIndex })
+            {
+                bad = bytes;
+                put(bad, firstId, value);
+                put(bad, firstId + 4, UINT32_MAX);
+                reject(bad, bindings, true);
+            }
+            bad = bytes;
+            put(bad, firstId + 4, UINT32_MAX - 1);
+            reject(bad, bindings, true);
+            const auto secondId = std::find_if(fields.begin(), fields.end(),
+                [&](const auto& f) { return f.mTag == "IDEN" && f.mHeader + 8 != firstId; });
+            require(secondId != fields.end(), "codec duplicate fixture needs two nodes");
+            bad = bytes;
+            std::copy_n(bytes.begin() + firstId, 8, bad.begin() + secondId->mHeader + 8);
+            reject(bad, bindings, true);
+            bad = bytes;
+            bad[find("IDEN").mRecord + 3] = 'D';
+            reject(bad, bindings, true);
+
+            const auto append = [&](std::string_view tag, size_t count) {
+                const auto& field = find(tag);
+                bad = bytes;
+                const size_t end = field.mRecord + 16 + number(bytes, field.mRecord + 4);
+                TransferSaveBytes extra;
+                for (size_t i = 0; i < count; ++i)
+                    extra.insert(
+                        extra.end(), bytes.begin() + field.mHeader, bytes.begin() + field.mHeader + 8 + field.mSize);
+                bad.insert(bad.begin() + end, extra.begin(), extra.end());
+                put(bad, field.mRecord + 4, number(bytes, field.mRecord + 4) + static_cast<uint32_t>(extra.size()));
+            };
+            append("LOCA", 1025);
+            reject(bad, bindings, true);
+            append("ANIS", 257);
+            reject(bad, bindings, true);
+            append("XSAV", 1); // Well-framed duplicate extension.
+            reject(bad, bindings);
+            append("ANIS", MaxTransferObjectBytes / (find("ANIS").mSize + 8) + 1);
+            reject(bad, bindings, true);
+            const auto& text = find("XDST");
+            bad = bytes;
+            bad.insert(bad.begin() + text.mHeader + 8 + text.mSize, 4097, 'a');
+            put(bad, text.mHeader + 4, static_cast<uint32_t>(text.mSize + 4097));
+            put(bad, text.mRecord + 4, number(bytes, text.mRecord + 4) + 4097);
+            reject(bad, bindings, true);
+            for (int mode = 0; mode < 6; ++mode)
+            {
+                auto envelope = bindings.mEnvelope;
+                if (mode == 0)
+                    envelope.mRuntime += "-foreign";
+                if (mode == 1)
+                    ++envelope.mContent[0];
+                if (mode == 2)
+                    ++envelope.mSourceOwner.mIndex;
+                if (mode == 3)
+                    ++envelope.mDestinationOwner.mIndex;
+                if (mode == 4)
+                    ++envelope.mInitiator.mIndex;
+                if (mode == 5)
+                    std::swap(envelope.mSourceOwner, envelope.mDestinationOwner);
+                reject(bytes, { envelope, bindings.mContent, bindings.mReferenceIds }, true);
+            }
+            auto missing = bindings.mContent;
+            missing.mBases = missing.mBases.first(1);
+            reject(bytes, { bindings.mEnvelope, missing, bindings.mReferenceIds });
+            Compiler::Locals noDeclarations;
+            RestoreContent noLocals{ bindings.mContent.mBases, bindings.mContent.mScript, noDeclarations };
+            reject(bytes, { bindings.mEnvelope, noLocals, bindings.mReferenceIds });
+            reject(bytes, { bindings.mEnvelope, bindings.mContent, bindings.mReferenceIds.first(1) }, true);
+
+            for (int mode = 0; mode < 18; ++mode)
+            {
+                auto invalid = input;
+                auto& inventory = invalid.mSource;
+                auto& object = inventory.mObjects.front();
+                if (mode == 0)
+                    inventory.mProposedIdentities.pop_back();
+                if (mode == 1)
+                    inventory.mProposedIdentities[0] = invalid.mDestination.mProposedIdentities[0];
+                if (mode == 2)
+                    inventory.mProposedIdentities[0] = {};
+                if (mode == 3)
+                    inventory.mProposedIdentities[0] = bindings.mEnvelope.mSourceOwner;
+                if (mode == 4)
+                    object.mRef.mRefNum = { 99, -1 };
+                if (mode == 5)
+                    object.mRef.mRefID = bindings.mContent.mScript.mId;
+                if (mode == 6)
+                    object.mHasLocals = 2;
+                if (mode == 7)
+                    object.mVersion = 37;
+                if (mode == 8)
+                    object.mHasCustomState = true;
+                if (mode == 9)
+                    object.mLuaScripts.mScripts.push_back({ 1, "unsupported", {} });
+                if (mode == 10)
+                    object.mActorIdConverter = reinterpret_cast<ESM::ActorIdConverter*>(uintptr_t{ 1 });
+                if (mode == 11)
+                    object.mRef.mGlobalVariable.assign(4097, 'x');
+                if (mode == 12)
+                    object.mRef.mCount = INT32_MIN;
+                if (mode == 13)
+                    object.mRef.mScale = std::numeric_limits<float>::infinity();
+                if (mode == 14)
+                    object.mAnimationState.mScriptedAnims.resize(257);
+                if (mode == 15)
+                    inventory.mObjects.resize(1025);
+                if (mode == 16)
+                    object.mLocals.mVariables.front().first = "missing_local_binding";
+                if (mode == 17)
+                {
+                    // Valid per-field sizes, but beyond the encoded object cap.
+                    object.mAnimationState.mScriptedAnims.resize(256);
+                    for (auto& animation : object.mAnimationState.mScriptedAnims)
+                        animation.mGroup.assign(4096, 'a');
+                }
+                const auto retained = pairOutputState(invalid);
+                TransferSaveBytes output(57, 'x');
+                const auto before = byteState(output);
+                bool caught = false;
+                Allocations::Trace trace;
+                {
+                    Allocations::Observe observe(trace);
+                    try
+                    {
+                        encodeTransferSave(invalid, bindings, output);
+                    }
+                    catch (const std::invalid_argument&)
+                    {
+                        caught = true;
+                    }
+                }
+                require(caught && byteState(output) == before && pairOutputState(invalid) == retained
+                        && trace.mOutstanding == 0 && trace.mTrackingOverflow == 0,
+                    "invalid encoder input accepted, leaked or changed input/output");
+                for (size_t ordinal = 1; ordinal <= trace.mTotal; ++ordinal)
+                {
+                    Allocations::Trace failure;
+                    caught = false;
+                    {
+                        Allocations::Observe observe(failure, ordinal);
+                        try
+                        {
+                            encodeTransferSave(invalid, bindings, output);
+                        }
+                        catch (const std::exception&)
+                        {
+                            caught = true;
+                        }
+                    }
+                    require(caught && failure.mFailures == 1 && failure.mOutstanding == 0
+                            && failure.mTrackingOverflow == 0 && byteState(output) == before
+                            && pairOutputState(invalid) == retained,
+                        "invalid encoding allocation failure changed output or leaked");
+                    TransferSaveBytes retry;
+                    encodeTransferSave(input, bindings, retry);
+                    require(retry == bytes, "encoding allocation retry failed");
+                    verify();
+                }
+                allocations += trace.mTotal;
+                ++rejections;
+                encodeTransferSave(input, bindings, output);
+                require(output == bytes, "encoding retry failed");
+                verify();
+            }
+            return allocations;
+        }
+
         template <class Make, class Incomplete, class Verify, class Unrelated>
         size_t checkCommitCase(std::unique_ptr<DisposableTransferRehearsal>& owner, Make make, Incomplete incomplete,
             Verify verifyOriginal, Unrelated verifyUnrelated, const RestoreContent& content, size_t failAt,
-            size_t allocationCount)
+            size_t allocationCount, bool codec, bool malformed, size_t& codecAllocations, size_t& codecRejections)
         {
             using namespace Allocations;
             using Pair = PreparedContainerTransfer;
@@ -1628,6 +1881,17 @@ namespace MWWorld::Testing
             auto& fixture = *owner;
             auto persisted = std::make_unique<SerializedPair>(pairOutputSentinel<true>());
             const auto priorOutput = pairOutputState(*persisted);
+            std::optional<TransferSaveBytes> encoded{ TransferSaveBytes(57, 'x') };
+            const auto priorBytes = byteState(*encoded);
+            SaveEnvelope envelope{ "OpenMW-0.51.0-test-inventory-runtime-1", { 1, 7, 19 },
+                fixture.mSourceOwner.getPtr().getCellRef().getRefNum(),
+                fixture.mDestinationOwner.getPtr().getCellRef().getRefNum(),
+                fixture.mDestinationAdd.mPlayer.getCellRef().getRefNum() };
+            const std::array referenceIds{ content.mBases[0]->mId, content.mBases[1]->mId,
+                ESM::RefId::stringRefId("serialization_owner"), ESM::RefId::stringRefId("serialization_soul"),
+                ESM::RefId::stringRefId("serialization_faction"), ESM::RefId::stringRefId("serialization_key"),
+                ESM::RefId::stringRefId("serialization_trap"), ESM::RefId::stringRefId("dormant_soul") };
+            const SaveBindings saveBindings{ envelope, content, referenceIds };
             int calls = 0, accepted = 0;
             // Stage a full independent sink copy. A failed copy, false return or
             // throw never publishes an acceptance, just like a synchronous sink.
@@ -1635,9 +1899,14 @@ namespace MWWorld::Testing
             const Fixture::TestSink sink = [&](const SerializedPair& saved) {
                 ++calls;
                 auto staged = std::make_unique<SerializedPair>(saved);
+                TransferSaveBytes stagedBytes;
+                if (codec)
+                    encodeTransferSave(saved, saveBindings, stagedBytes);
                 if (!accept)
                     return false;
                 persisted.swap(staged);
+                if (codec)
+                    encoded->swap(stagedBytes);
                 ++accepted;
                 return true;
             };
@@ -1659,6 +1928,7 @@ namespace MWWorld::Testing
                     // The ordinal immediately beyond all pre-acceptance work
                     // must never fire, even during complete successful cleanup.
                     persisted.reset();
+                    encoded.reset();
                     owner.reset();
                 }
             }
@@ -1675,7 +1945,8 @@ namespace MWWorld::Testing
                 verifyUnrelated();
                 return measured.mTotal;
             }
-            require(!committed && accepted == 0 && pairOutputState(*persisted) == priorOutput,
+            require(!committed && accepted == 0 && pairOutputState(*persisted) == priorOutput
+                    && byteState(*encoded) == priorBytes,
                 "failed commit accepted or changed prior sink output");
             require(failAt ? caught && measured.mFailures == 1 && measured.mTotal == failAt
                            : !caught && calls == 1 && measured.mFailures == 0,
@@ -1694,6 +1965,7 @@ namespace MWWorld::Testing
                     InPhase phase(Phase::Preparation);
                     committed = fixture.commit(make(), content.mDeclarations, sink);
                     persisted.reset();
+                    encoded.reset();
                     owner.reset();
                 }
                 require(committed && calls == 1 && accepted == 1 && retry.mTotal == allocationCount
@@ -1916,6 +2188,17 @@ namespace MWWorld::Testing
             SerializedPair resaved;
             serializePair(*restored, content.mDeclarations, resaved);
             checkSavedValues(resaved, installed);
+            if (codec)
+            {
+                const auto installedBefore = snapshot(fixture);
+                codecAllocations += checkCodecSave(
+                    *persisted, *encoded, saveBindings, restoreExpected,
+                    [&] {
+                        require(snapshot(fixture) == installedBefore, "codec changed installed fixture");
+                        verifyUnrelated();
+                    },
+                    malformed, codecRejections);
+            }
             // A moved-from pair cannot even be read to collect owned witnesses.
             bool reused = false;
             const auto committedBefore = snapshot(fixture);
@@ -1943,6 +2226,18 @@ namespace MWWorld::Testing
                 "retired witness accepted or changed committed state");
             owner.reset();
             requireDiscarded(nodes);
+            if (codec)
+            {
+                // Decode after both the consumed prepared pair and committed
+                // fixture are gone: only owned bytes and explicit content remain.
+                SerializedPair decoded;
+                decodeTransferSave(*encoded, saveBindings, decoded);
+                restored.reset();
+                restorePair(decoded, content, restored);
+                checkRestored(*restored, restoreExpected);
+                serializePair(*restored, content.mDeclarations, resaved);
+                checkSavedValues(resaved, installed);
+            }
             verifyUnrelated();
             return measured.mTotal;
         }
@@ -2138,6 +2433,7 @@ namespace MWWorld::Testing
         ObjectState,
         LocalsRestore,
         Restore,
+        Codec,
         Commit
     };
 
@@ -2147,7 +2443,8 @@ namespace MWWorld::Testing
         using Stage = Rehearsal::Stage;
         using Pair = PreparedContainerTransfer;
         const bool localsRestore = allocationCheck == AllocationCheck::LocalsRestore;
-        const bool commit = allocationCheck == AllocationCheck::Commit;
+        const bool codec = allocationCheck == AllocationCheck::Codec;
+        const bool commit = allocationCheck == AllocationCheck::Commit || codec;
         const bool inventoryRestore = allocationCheck == AllocationCheck::Restore || commit;
         const bool serialization = allocationCheck == AllocationCheck::Serialization
             || allocationCheck == AllocationCheck::ObjectState || localsRestore || inventoryRestore;
@@ -2183,7 +2480,7 @@ namespace MWWorld::Testing
             }
         } scripts(store, compilerContext, 1);
         ManualRef plain(store, plainId), scripted(store, scriptedId);
-        size_t cases = 0, restoredLocals = 0, localRejections = 0;
+        size_t cases = 0, restoredLocals = 0, localRejections = 0, codecAllocations = 0, codecRejections = 0;
         Allocations::Trace totals;
         const bool allocationFailures = allocationCheck != AllocationCheck::None;
         if (allocationFailures)
@@ -2250,7 +2547,21 @@ namespace MWWorld::Testing
                                     const auto decorate = [&](const Ptr& ptr) {
                                         if (allocationCheck == AllocationCheck::ObjectState || localsRestore
                                             || inventoryRestore)
-                                            ptr.getCellRef() = CellRef(decoratedCellRef(ptr.getCellRef()));
+                                        {
+                                            auto ref = decoratedCellRef(ptr.getCellRef());
+                                            if (codec && cursorPosition != 0)
+                                            {
+                                                ref.mScale = cursorPosition == 1 ? 3.5f : 0.25f;
+                                                ref.mIsLocked = false;
+                                                ref.mLockLevel = -42;
+                                                ref.mTeleport = false;
+                                                ref.mDoorDest.pos[0] = -0.f;
+                                                ref.mDestCell.clear();
+                                                ref.mGlobalVariable.clear();
+                                                ref.mChargeIntRemainder = -0.f;
+                                            }
+                                            ptr.getCellRef() = CellRef(ref);
+                                        }
                                         auto& data = ptr.getRefData();
                                         data.disable();
                                         data.mPhysicsPostponed = true;
@@ -2359,7 +2670,9 @@ namespace MWWorld::Testing
                                         store.get<ESM::Miscellaneous>().find(scriptedId) };
                                     return checkCommitCase(fixtureOwner, make, incomplete, verifyOriginal,
                                         verifyUnrelated, { bases, script, scripts.getLocals(scriptId) }, commitFailAt,
-                                        commitAllocations);
+                                        commitAllocations, codec,
+                                        !shared && scriptedItem && !stack && quantity == 1 && cursorPosition == 0,
+                                        codecAllocations, codecRejections);
                                 }
                                 if (serialization)
                                 {
@@ -2710,6 +3023,16 @@ namespace MWWorld::Testing
         if (allocationFailures)
         {
             require(cases == 48, "allocation failure matrix lost a fixture combination");
+            if (codec)
+            {
+                require(codecRejections > 0 && codecAllocations > 0, "codec coverage missing");
+                std::cout << "Inventory binary codec: cases=" << cases
+                          << " commit-allocation-failures=" << totals.mTotal
+                          << " encoding/decoding-allocation-failures=" << codecAllocations
+                          << " malformed-rejections=" << codecRejections
+                          << " installation=0 retirement=0 remaining-after-cleanup=0\n";
+                return;
+            }
             if (commit)
             {
                 std::cout << "Persistence-gated fixture commit: cases=" << cases
@@ -2790,6 +3113,11 @@ namespace MWWorld::Testing
     void checkTransferLocalsRestore(const ESMStore& content)
     {
         checkTransferRehearsalCases(content, AllocationCheck::LocalsRestore);
+    }
+
+    void checkTransferCodec(const ESMStore& content)
+    {
+        checkTransferRehearsalCases(content, AllocationCheck::Codec);
     }
 
     void checkTransferCommit(const ESMStore& content)
