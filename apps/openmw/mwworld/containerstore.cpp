@@ -851,6 +851,7 @@ struct MWWorld::PreparedContainerTransfer::State
     // Declared after inventory lists: script entries are destroyed before the
     // owned items they reference, on discard, failure and move assignment alike.
     std::unique_ptr<LocalScripts::PreparedStorage> mSourceScriptStorage, mDestinationScriptStorage;
+    std::unique_ptr<PtrRegistry::PreparedStorage> mRegistryStorage;
     const MWBase::ScriptManager* mScriptManager = nullptr;
     Ptr mPlayer;
     ESM::RefNum mPlayerIdentity;
@@ -1015,6 +1016,11 @@ const MWWorld::LocalScripts::PreparedStorage& MWWorld::PreparedContainerTransfer
 {
     const auto& owned = state();
     return *(owned.mDestinationScriptStorage ? owned.mDestinationScriptStorage : owned.mSourceScriptStorage);
+}
+
+const MWWorld::PtrRegistry::PreparedStorage& MWWorld::PreparedContainerTransfer::getRegistryStorage() const
+{
+    return *state().mRegistryStorage;
 }
 
 namespace
@@ -1205,16 +1211,26 @@ MWWorld::PreparedContainerTransfer MWWorld::ContainerStore::prepareTransfer(cons
         append(owned.mDestinationList, prepared.getDestinationItem());
     owned.mRelocation = relocateTransfer(prepared);
     std::vector<Ptr> scriptNodes;
-    for (auto* list : { &owned.mSourceList.mList, &owned.mDestinationList.mList })
-        for (auto& node : *list)
+    std::vector<std::pair<ESM::RefNum, Ptr>> registryNodes;
+    const auto collectNodes = [&](auto& list, const auto& views) {
+        size_t i = 0;
+        for (auto& node : list)
+        {
             scriptNodes.emplace_back(&node);
+            const auto id = views.at(i++).mIdentity;
+            registryNodes.emplace_back(id.isSet() ? id : owned.mDestinationIdentity, Ptr(&node));
+        }
+    };
+    collectNodes(owned.mSourceList.mList, owned.mRelocation.mSource);
+    collectNodes(owned.mDestinationList.mList, owned.mRelocation.mDestination);
     owned.mSourceScriptStorage
         = sourceContext.mLocalScripts.prepareStorage(owned.mRelocation.mSourceScripts, scriptNodes);
     if (owned.mRelocation.mDestinationScripts)
         owned.mDestinationScriptStorage
             = destinationContext.mLocalScripts->prepareStorage(*owned.mRelocation.mDestinationScripts, scriptNodes);
-    // The last fallible consumer copy now also follows list allocation and
-    // script storage/cursor relocation. Failure discards all owned nodes together.
+    owned.mRegistryStorage = PtrRegistry::prepareStorage(owned.mRelocation.mRegistry, registryNodes);
+    // The last fallible consumer copy follows inventory/script list and registry
+    // map allocation. Failure destroys pointer storage before the owned items.
     owned.mSourceUpdated = sourceContext.mInventoryUpdated;
     validateTransfer(prepared, destination, sourceContext, destinationContext);
     return prepared;
@@ -1467,6 +1483,17 @@ void MWWorld::ContainerStore::validateTransferStorage(const PreparedContainerTra
     if (state.mDestinationScriptStorage)
         state.mDestinationScripts->validateStorage(
             *state.mDestinationScriptStorage, *actual.mDestinationScripts, scriptNodes);
+    if (!state.mRegistryStorage)
+        throw std::invalid_argument("Container transfer preparation registry storage missing");
+    // An unrelated expired key could equal a newly allocated owned node address.
+    // Owned identity membership, not address equality or container hints alone,
+    // decides which map entries can receive an item pointer.
+    std::vector<std::pair<ESM::RefNum, ConstPtr>> registryNodes;
+    for (const auto* views : { &actual.mSource, &actual.mDestination })
+        for (const auto& view : *views)
+            registryNodes.emplace_back(
+                view.mIdentity.isSet() ? view.mIdentity : state.mDestinationIdentity, view.mItem);
+    PtrRegistry::validateStorage(*state.mRegistryStorage, actual.mRegistry, registryNodes);
 }
 
 MWWorld::ContainerStoreIterator MWWorld::ContainerStore::addWithContext(

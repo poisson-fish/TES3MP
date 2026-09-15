@@ -7,13 +7,17 @@
 
 #include <limits>
 #include <map>
+#include <memory>
 #include <stdexcept>
 #include <unordered_map>
+#include <vector>
 
 namespace MWWorld
 {
     class PtrRegistry
     {
+        using Index = std::unordered_map<ESM::RefNum, Ptr>;
+
     public:
         // Owned mapping witnesses. Address keys are compared only: snapshotting
         // never dereferences registered objects, including unrelated stale Ptrs.
@@ -36,6 +40,33 @@ namespace MWWorld
             std::size_t mRevision = 0;
             ESM::RefNum mLastGenerated;
             bool operator==(const Snapshot&) const = default;
+        };
+
+        // Own the stock map type, with Ptrs only to stable pair-owned nodes.
+        // Unaffected mappings remain compare-only bindings and occupy empty map
+        // slots; resolving their live Ptrs is a separate, later prerequisite.
+        class PreparedStorage
+        {
+            friend class PtrRegistry;
+            const Snapshot* mResult; // Pair-owned identity, compared only.
+            Snapshot mBindings;
+            Index mIndex;
+            explicit PreparedStorage(const Snapshot& result)
+                : mResult(&result)
+                , mBindings(result)
+            {
+            }
+
+        public:
+            PreparedStorage(const PreparedStorage&) = delete;
+            PreparedStorage& operator=(const PreparedStorage&) = delete;
+            const Snapshot& getBindings() const { return mBindings; }
+            // Do not expose const Index: its Ptr values still allow mutation.
+            ConstPtr getItem(ESM::RefNum id) const
+            {
+                const auto it = mIndex.find(id);
+                return it == mIndex.end() ? ConstPtr() : ConstPtr(it->second);
+            }
         };
 
         Snapshot snapshot() const
@@ -105,6 +136,62 @@ namespace MWWorld
 
     private:
         friend class ContainerStore;
+        static std::unique_ptr<PreparedStorage> prepareStorage(
+            const Snapshot& relocated, const std::vector<std::pair<ESM::RefNum, Ptr>>& nodes)
+        {
+            auto storage = std::unique_ptr<PreparedStorage>(new PreparedStorage(relocated));
+            storage->mIndex.reserve(relocated.mEntries.size());
+            for (const auto& [id, target] : relocated.mEntries)
+            {
+                Ptr item;
+                // The pair supplies identity membership. An unrelated stale
+                // address can be reused by an owned node; it must stay unresolved.
+                for (const auto& [identity, node] : nodes)
+                    if (id == identity)
+                    {
+                        if (!target.references(node.mRef))
+                            throw std::invalid_argument("Ptr registry storage preparation node mismatch");
+                        item = node;
+                        item.mCell = target.mCell;
+                        item.mContainerStore = const_cast<ContainerStore*>(target.mContainer);
+                        break;
+                    }
+                // Use the already proposed key, never insert()/identity generation
+                // or a live mapping. In particular, zero-count nodes stay mapped.
+                storage->mIndex.emplace(id, item);
+            }
+            return storage;
+        }
+
+        static void validateStorage(const PreparedStorage& storage, const Snapshot& relocated,
+            const std::vector<std::pair<ESM::RefNum, ConstPtr>>& nodes)
+        {
+            if (storage.mResult != &relocated || storage.mBindings != relocated
+                || storage.mIndex.size() != relocated.mEntries.size())
+                throw std::invalid_argument(
+                    "Ptr registry prepared storage binding, membership, revision or counter changed");
+            for (const auto& [id, target] : relocated.mEntries)
+            {
+                ConstPtr expected;
+                for (const auto& [identity, node] : nodes)
+                    if (id == identity)
+                    {
+                        if (!target.references(node.mRef))
+                            throw std::invalid_argument("Ptr registry prepared storage node changed");
+                        expected = node;
+                        expected.mCell = target.mCell;
+                        expected.mContainerStore = target.mContainer;
+                        break;
+                    }
+                const auto it = storage.mIndex.find(id);
+                // Compare Ptr fields only. Neither stored map Ptrs nor saved
+                // reference keys may be followed when rejecting stale storage.
+                if (it == storage.mIndex.end() || it->second.mRef != expected.mRef || it->second.mCell != expected.mCell
+                    || it->second.mContainerStore != expected.mContainerStore)
+                    throw std::invalid_argument("Ptr registry prepared storage mapping changed");
+            }
+        }
+
         static Binding binding(const LiveCellRefBase* ref, CellStore* cell, const ContainerStore* container)
         {
             Binding result;
@@ -138,7 +225,7 @@ namespace MWWorld
         }
 
         std::size_t mRevision = 0;
-        std::unordered_map<ESM::RefNum, Ptr> mIndex;
+        Index mIndex;
         ESM::RefNum mLastGenerated;
     };
 

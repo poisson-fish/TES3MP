@@ -222,6 +222,10 @@ namespace MWWorld
         // remain compare-only keys in getRelocation(). No installation is exposed.
         const LocalScripts::PreparedStorage& getSourceScriptStorage() const;
         const LocalScripts::PreparedStorage& getDestinationScriptStorage() const;
+        // Stock registry map with the relocated revision/counter and bindings.
+        // Item views reference only the owned stock lists; unaffected mappings
+        // retain compare-only keys and expose empty items. No installation API.
+        const PtrRegistry::PreparedStorage& getRegistryStorage() const;
         bool hasRemovalNotification() const;
         bool hasAdditionNotification() const;
 

@@ -1514,6 +1514,15 @@ namespace
             const MWWorld::LocalScripts::List&>);
         static_assert(!std::is_copy_constructible_v<Pair> && !std::is_copy_assignable_v<Pair>);
         using ScriptStorage = MWWorld::LocalScripts::PreparedStorage;
+        using RegistryStorage = MWWorld::PtrRegistry::PreparedStorage;
+        static_assert(
+            std::is_same_v<decltype(std::declval<const Pair&>().getRegistryStorage()), const RegistryStorage&>);
+        static_assert(!std::is_copy_constructible_v<RegistryStorage> && !std::is_move_constructible_v<RegistryStorage>);
+        static_assert(std::is_same_v<decltype(std::declval<const RegistryStorage&>().getBindings()),
+            const MWWorld::PtrRegistry::Snapshot&>);
+        static_assert(std::is_same_v<decltype(std::declval<const RegistryStorage&>().getItem({})), MWWorld::ConstPtr>);
+        static_assert(std::is_same_v<decltype(std::declval<const RegistryStorage&>().getItem({}).getRefData()),
+            const MWWorld::RefData&>);
         static_assert(
             std::is_same_v<decltype(std::declval<const Pair&>().getSourceScriptStorage()), const ScriptStorage&>);
         static_assert(
@@ -1849,6 +1858,37 @@ namespace
                 if (paired.getRegistryItem(id).isEmpty())
                     require(
                         binding == proposedRegistry.mEntries.at(id), "relocation changed unrelated registry binding");
+            const auto& registryStorage = paired.getRegistryStorage();
+            require(registryStorage.getBindings() == relocation.mRegistry,
+                "owned registry storage changed relocated membership, revision or counter");
+            require(registryStorage.getItem({}).isEmpty(), "owned registry storage resolved an absent identity");
+            for (const auto& [id, binding] : registryStorage.getBindings().mEntries)
+            {
+                const auto owned = registryStorage.getItem(id);
+                const auto actual = model.getPtr(id);
+                if (paired.getRegistryItem(id).isEmpty())
+                    require(owned.isEmpty() && !owned.mCell && !owned.mContainerStore
+                            && binding == proposedRegistry.mEntries.at(id),
+                        "unaffected registry storage lost a mapping or exposed a live reference");
+                else
+                {
+                    require(!owned.isEmpty() && binding.references(owned.mRef)
+                            && relocatedReferences.at(&owned.getCellRef()) == actual && owned.mCell == actual.mCell
+                            && owned.mContainerStore == binding.getContainer() && !owned.mRef->mWorldModel
+                            && !owned.getCellRef().getRefNum().isSet() && values(owned) == values(actual)
+                            && owned.getCellRef().getCount(false) == actual.getCellRef().getCount(false)
+                            && owned.getRefData().matchesContainerTransferState(actual.getRefData()),
+                        "owned registry map differs from stock reference, values or cell/container binding");
+                    // The map and script list may carry different cell hints,
+                    // but must share the exact protected stock inventory node.
+                    for (const auto* storage :
+                        { &paired.getSourceScriptStorage(), &paired.getDestinationScriptStorage() })
+                        for (const auto& script : storage->getEntries())
+                            if (script.references(&owned.getCellRef()))
+                                require(script.getItem().mRef == owned.mRef,
+                                    "script and registry storage refer to different inventory nodes");
+                }
+            }
             const auto compareRelocatedScripts = [&](const auto& proposed, MWWorld::LocalScripts& stock,
                                                      const ScriptStorage& storage) {
                 const auto actual = stock.snapshot();
@@ -2122,6 +2162,36 @@ namespace
             else
                 corrupt([&] { result.mDestinationScripts = result.mSourceScripts; });
             validate(decision);
+        };
+        const auto registryStorageIdentity = [](const RegistryStorage& storage) {
+            std::vector<const void*> result{ &storage, &storage.getBindings() };
+            for (const auto& [id, binding] : storage.getBindings().mEntries)
+                result.push_back(storage.getItem(id).mRef);
+            return result;
+        };
+        const auto corruptRegistryStorage = [&](Pair& decision, const Pair& other, const auto& validate) {
+            auto& bindings = const_cast<MWWorld::PtrRegistry::Snapshot&>(decision.getRegistryStorage().getBindings());
+            const auto saved = bindings;
+            const auto id = decision.getDestinationIdentity();
+            const auto corrupt = [&](const auto& change) {
+                change();
+                reject([&] { validate(decision); }, "Ptr registry prepared storage binding");
+                bindings = saved;
+                validate(decision);
+            };
+            corrupt([&] { ++bindings.mRevision; });
+            corrupt([&] { ++bindings.mLastGenerated.mIndex; });
+            corrupt([&] { --bindings.mLastGenerated.mContentFile; });
+            corrupt([&] { bindings.mEntries.erase(id); });
+            corrupt([&] { bindings.mEntries[id] = {}; });
+            corrupt([&] { bindings.mEntries.emplace(ESM::RefNum{ 456789, -12 }, bindings.mEntries.at(id)); });
+            corrupt([&] { bindings = decision.getRegistry(); }); // Old live/detached value keys.
+            corrupt([&] { bindings = other.getRegistryStorage().getBindings(); });
+            for (const auto& [key, binding] : saved.mEntries)
+            {
+                corrupt([&] { bindings.mEntries.erase(key); }); // Including dormant/unaffected entries.
+                corrupt([&] { bindings.mEntries[key] = {}; });
+            }
         };
         const auto scriptStorageIdentity = [](const ScriptStorage& storage) {
             std::vector<const void*> result{ &storage, storage.getCursor() };
@@ -3161,6 +3231,31 @@ namespace
                 externalPtr.mContainerStore = &externalStore;
                 worldModel.registerPtr(externalPtr);
                 const auto externalId = externalPtr.getCellRef().getRefNum();
+                {
+                    // An alias key can name the same reference and owner hints
+                    // as an inventory item, yet it is outside owned membership.
+                    const auto view = worldModel.getPtrRegistryView();
+                    const auto found = std::find_if(
+                        view.begin(), view.end(), [&](const auto& entry) { return entry.first == externalId; });
+                    auto& alias = const_cast<MWWorld::Ptr&>(found->second);
+                    const auto saved = alias;
+                    alias = sourceCellBinding;
+                    const auto before = std::tuple{ snapshot(), localScripts.snapshot() };
+                    {
+                        auto decision = make();
+                        validate(decision);
+                        const auto& storage = decision.getRegistryStorage();
+                        require(storage.getItem(externalId).isEmpty()
+                                && storage.getBindings().mEntries.at(externalId)
+                                    == decision.getRegistry().mEntries.at(externalId)
+                                && storage.getBindings().mEntries.at(externalId).references(item.mRef)
+                                && storage.getItem(item.getCellRef().getRefNum()).mRef != item.mRef,
+                            "registry alias inherited owned identity membership or lost its original binding");
+                    }
+                    require(before == std::tuple{ snapshot(), localScripts.snapshot() },
+                        "registry alias preparation or discard changed live state");
+                    alias = saved;
+                }
                 for (int change : { 0, 1, 2 })
                 {
                     auto decision = make();
@@ -3207,17 +3302,28 @@ namespace
                         const auto savedRegistry = initial.getRegistry();
                         const auto savedIdentity = initial.getDestinationIdentity();
                         const auto savedValue = initial.getRegistryItem(savedIdentity);
+                        const auto savedStorage = registryStorageIdentity(initial.getRegistryStorage());
                         auto moved = std::move(initial);
                         reject([&] { initial.getRegistry(); }, "moved from");
                         reject([&] { initial.getDestinationIdentity(); }, "moved from");
                         reject([&] { initial.getRegistryItem(savedIdentity); }, "moved from");
+                        reject([&] { initial.getRegistryStorage(); }, "moved from");
+                        require(registryStorageIdentity(moved.getRegistryStorage()) == savedStorage,
+                            "move construction moved registry storage or item bindings");
                         auto decision = make(quantity);
                         decision = std::move(moved);
+                        reject([&] { moved.getRegistryStorage(); }, "moved from");
                         require(decision.getRegistry() == savedRegistry
                                 && decision.getDestinationIdentity() == savedIdentity
                                 && decision.getRegistryItem(savedIdentity) == savedValue
-                                && decision.getRegistryItem(externalId).isEmpty(),
+                                && decision.getRegistryItem(externalId).isEmpty()
+                                && registryStorageIdentity(decision.getRegistryStorage()) == savedStorage,
                             "move lost registry ownership or detached value binding");
+                        auto sameQuantity = make(quantity);
+                        corruptRegistryStorage(decision, sameQuantity, validate);
+                        auto otherQuantity = make(quantity == 1 ? item.getCellRef().getCount() : 1);
+                        corruptRegistryStorage(decision, otherQuantity, validate);
+                        compareStock(decision, item, destination, sourceAdd, destinationAdd);
                         auto& result = const_cast<MWWorld::PtrRegistry::Snapshot&>(decision.getRegistry());
                         for (int change : { 0, 1, 2, 3, 4 })
                         {
@@ -3300,26 +3406,39 @@ namespace
         {
             // A stale unrelated WorldModel mapping must be copied/compared without
             // touching the destroyed object. Replace its key safely for teardown.
-            ESM::RefNum staleId;
-            const MWWorld::LiveCellRefBase* staleKey;
-            {
-                MWWorld::ManualRef expired(store, plain.getPtr().getCellRef().getRefId());
-                auto ptr = expired.getPtr();
-                worldModel.registerPtr(ptr);
-                staleId = ptr.getCellRef().getRefNum();
-                staleKey = ptr.mRef;
-                ptr.mRef->mWorldModel = nullptr; // Deliberately retain a stale registry entry.
-            }
+            auto expired = std::make_unique<MWWorld::ManualRef>(store, plain.getPtr().getCellRef().getRefId());
+            auto ptr = expired->getPtr();
+            ptr.mCell = addA.mContainer.mCell;
+            ptr.mContainerStore = &a; // Hints alone must not grant pair-owned membership.
+            worldModel.registerPtr(ptr);
+            const auto staleId = ptr.getCellRef().getRefNum();
+            const auto* staleKey = ptr.mRef;
+            ptr.mRef->mWorldModel = nullptr; // Deliberately retain a stale registry entry.
             startScripts();
             MWWorld::ContainerStoreRemoveContext removal{ worldModel, addA.mContainer, localScripts,
                 addA.mInventoryUpdated };
             const auto before = std::tuple{ snapshot(), localScripts.snapshot() };
             {
+                auto beforeExpiry = a.prepareTransfer(*scriptA, 1, b, removal, scriptedAddB);
+                expired.reset();
+                a.validateTransfer(beforeExpiry, b, removal, scriptedAddB);
                 auto decision = a.prepareTransfer(*scriptA, 1, b, removal, scriptedAddB);
                 a.validateTransfer(decision, b, removal, scriptedAddB);
                 require(decision.getRegistry().mEntries.at(staleId).references(staleKey)
-                        && decision.getRegistryItem(staleId).isEmpty(),
+                        && decision.getRegistryItem(staleId).isEmpty()
+                        && decision.getRegistryStorage().getItem(staleId).isEmpty()
+                        && beforeExpiry.getRegistryStorage().getItem(staleId).isEmpty()
+                        && decision.getRegistryStorage().getBindings().mEntries.at(staleId)
+                            == decision.getRegistry().mEntries.at(staleId),
                     "registry preparation lost unrelated stale mapping");
+                auto& bindings
+                    = const_cast<MWWorld::PtrRegistry::Snapshot&>(decision.getRegistryStorage().getBindings());
+                const auto saved = bindings;
+                bindings.mEntries[decision.getDestinationIdentity()] = bindings.mEntries.at(staleId);
+                reject([&] { a.validateTransfer(decision, b, removal, scriptedAddB); },
+                    "Ptr registry prepared storage binding");
+                bindings = saved;
+                a.validateTransfer(decision, b, removal, scriptedAddB);
             }
             require(before == std::tuple{ snapshot(), localScripts.snapshot() },
                 "stale registry preparation changed live state");
@@ -3449,11 +3568,14 @@ namespace
                                             = scriptStorageIdentity(initial.getSourceScriptStorage());
                                         const auto destinationStorage
                                             = scriptStorageIdentity(initial.getDestinationScriptStorage());
+                                        const auto registryStorage
+                                            = registryStorageIdentity(initial.getRegistryStorage());
                                         auto decision = std::move(initial);
                                         reject([&] { initial.getSourceScripts(); }, "moved from");
                                         reject([&] { initial.getDestinationScripts(); }, "moved from");
                                         reject([&] { initial.getSourceScriptStorage(); }, "moved from");
                                         reject([&] { initial.getDestinationScriptStorage(); }, "moved from");
+                                        reject([&] { initial.getRegistryStorage(); }, "moved from");
                                         require(
                                             scriptStorageIdentity(decision.getSourceScriptStorage()) == sourceStorage
                                                 && scriptStorageIdentity(decision.getDestinationScriptStorage())
@@ -3464,19 +3586,24 @@ namespace
                                         reject([&] { validate(decision); }, "moved from");
                                         reject([&] { decision.getSourceScriptStorage(); }, "moved from");
                                         reject([&] { decision.getDestinationScriptStorage(); }, "moved from");
+                                        reject([&] { decision.getRegistryStorage(); }, "moved from");
                                         require(assigned.getSourceScripts() == sourceResult
                                                 && assigned.getDestinationScripts() == destinationResult
                                                 && scriptStorageIdentity(assigned.getSourceScriptStorage())
                                                     == sourceStorage
                                                 && scriptStorageIdentity(assigned.getDestinationScriptStorage())
-                                                    == destinationStorage,
+                                                    == destinationStorage
+                                                && registryStorageIdentity(assigned.getRegistryStorage())
+                                                    == registryStorage,
                                             "move changed script list ownership or detached registration binding");
                                         validate(assigned);
                                         compareStock(assigned, item, destination, sourceAdd, destinationAdd);
                                         auto sameQuantity = make(quantity);
                                         corruptScriptStorage(assigned, sameQuantity, validate);
+                                        corruptRegistryStorage(assigned, sameQuantity, validate);
                                         auto otherQuantity = make(quantity == 1 ? 4 : 1);
                                         corruptScriptStorage(assigned, otherQuantity, validate);
+                                        corruptRegistryStorage(assigned, otherQuantity, validate);
                                         for (bool replaceSource : { false, true })
                                         {
                                             auto destroyed = make(quantity);
@@ -3575,8 +3702,8 @@ namespace
                                 "OnPCAdd preparation failure leaked inventory, registration or effects");
                             validate(make(4));
                         }
-                        // This consumer copy is after both stock script lists and
-                        // cursors have been allocated. Exercise shared/distinct unwind.
+                        // This consumer copy follows the stock inventory/script
+                        // lists and registry map. Exercise shared/distinct unwind.
                         const auto beforeFailure
                             = std::tuple{ snapshot(), sourceScripts.snapshot(), addedScripts.snapshot() };
                         auto failingRemoval = removal;
@@ -3601,7 +3728,7 @@ namespace
                         require(failed && copies == 1 && alive == 0 && emitted == 0
                                 && beforeFailure
                                     == std::tuple{ snapshot(), sourceScripts.snapshot(), addedScripts.snapshot() },
-                            "failure after script storage preparation leaked state, intents or notifications");
+                            "failure after registry storage preparation leaked state, intents or notifications");
                         validate(make(4));
                     }
                     // Empty lists and a sole source registration cover erase-to-end
@@ -3945,6 +4072,14 @@ namespace
                 const auto sourceStorageValue = values(paired.getRelocation().mSource.front().mItem);
                 const auto destinationStorageValue = values(paired.getRelocation().mDestination.front().mItem);
                 const auto relocatedRegistry = paired.getRelocation().mRegistry;
+                const auto registryStorage = registryStorageIdentity(paired.getRegistryStorage());
+                std::vector<std::pair<MWWorld::ConstPtr, decltype(values(item))>> registryValues;
+                for (const auto& [id, binding] : paired.getRegistryStorage().getBindings().mEntries)
+                {
+                    const auto owned = paired.getRegistryStorage().getItem(id);
+                    if (!owned.isEmpty())
+                        registryValues.emplace_back(owned, values(owned));
+                }
                 std::vector<std::pair<MWWorld::ConstPtr, decltype(values(item))>> scriptValues;
                 for (const auto* storage : { &paired.getSourceScriptStorage(), &paired.getDestinationScriptStorage() })
                     for (const auto& entry : storage->getEntries())
@@ -3968,8 +4103,14 @@ namespace
                 reject([&] { source.validateTransfer(paired, destination, removal, scriptedAddB); }, "storage changed");
                 require(values(paired.getRelocation().mSource.front().mItem) == sourceStorageValue
                         && values(paired.getRelocation().mDestination.front().mItem) == destinationStorageValue
-                        && paired.getRelocation().mRegistry == relocatedRegistry,
+                        && paired.getRelocation().mRegistry == relocatedRegistry
+                        && paired.getRegistryStorage().getBindings() == relocatedRegistry
+                        && registryStorageIdentity(paired.getRegistryStorage()) == registryStorage,
                     "destroying live storage invalidated owned stock nodes or relocation");
+                for (const auto& [owned, saved] : registryValues)
+                    require(
+                        values(owned) == saved && !owned.getCellRef().getRefNum().isSet() && !owned.mRef->mWorldModel,
+                        "destroying live storage invalidated a prepared registry item");
                 for (const auto& [owned, saved] : scriptValues)
                     require(
                         values(owned) == saved && !owned.getCellRef().getRefNum().isSet() && !owned.mRef->mWorldModel,
