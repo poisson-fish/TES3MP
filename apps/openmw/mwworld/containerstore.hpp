@@ -216,6 +216,12 @@ namespace MWWorld
         // Rebound associations preserve owner/container/cell hints separately
         // from detached values. Unrelated entries retain compare-only keys.
         const Relocation& getRelocation() const;
+        // Stock LocalScripts nodes and cursor relocation, built from the same
+        // owned inventory nodes. Shared services return the same storage object.
+        // Unaffected entries expose an empty item; their registration bindings
+        // remain compare-only keys in getRelocation(). No installation is exposed.
+        const LocalScripts::PreparedStorage& getSourceScriptStorage() const;
+        const LocalScripts::PreparedStorage& getDestinationScriptStorage() const;
         bool hasRemovalNotification() const;
         bool hasAdditionNotification() const;
 

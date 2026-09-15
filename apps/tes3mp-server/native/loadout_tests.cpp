@@ -1513,6 +1513,16 @@ namespace
         static_assert(std::is_same_v<decltype(std::declval<const Pair&>().getDestinationScripts()),
             const MWWorld::LocalScripts::List&>);
         static_assert(!std::is_copy_constructible_v<Pair> && !std::is_copy_assignable_v<Pair>);
+        using ScriptStorage = MWWorld::LocalScripts::PreparedStorage;
+        static_assert(
+            std::is_same_v<decltype(std::declval<const Pair&>().getSourceScriptStorage()), const ScriptStorage&>);
+        static_assert(
+            std::is_same_v<decltype(std::declval<const Pair&>().getDestinationScriptStorage()), const ScriptStorage&>);
+        static_assert(!std::is_copy_constructible_v<ScriptStorage> && !std::is_move_constructible_v<ScriptStorage>);
+        static_assert(std::is_same_v<decltype(std::declval<const ScriptStorage&>().getEntries().front().getItem()),
+            MWWorld::ConstPtr>);
+        static_assert(
+            std::is_const_v<std::remove_reference_t<decltype(*std::declval<const ScriptStorage&>().getCursor())>>);
         static_assert(std::is_nothrow_move_constructible_v<Pair> && std::is_nothrow_move_assignable_v<Pair>);
         static_assert(std::is_same_v<decltype(std::declval<const Pair&>().getSourceItem().getRefData()),
             const MWWorld::RefData&>);
@@ -1839,10 +1849,14 @@ namespace
                 if (paired.getRegistryItem(id).isEmpty())
                     require(
                         binding == proposedRegistry.mEntries.at(id), "relocation changed unrelated registry binding");
-            const auto compareRelocatedScripts = [&](const auto& proposed, const MWWorld::LocalScripts& stock) {
+            const auto compareRelocatedScripts = [&](const auto& proposed, MWWorld::LocalScripts& stock,
+                                                     const ScriptStorage& storage) {
                 const auto actual = stock.snapshot();
                 require(proposed.mCursor == actual.mCursor && proposed.mEntries.size() == actual.mEntries.size(),
                     "script relocation changed stock order/cursor");
+                require(storage.getEntries().size() == actual.mEntries.size(),
+                    "owned script storage lost stock membership");
+                auto stored = storage.getEntries().begin();
                 for (size_t i = 0; i < proposed.mEntries.size(); ++i)
                 {
                     const auto& entry = proposed.mEntries[i];
@@ -1857,6 +1871,11 @@ namespace
                                         : entry.getContainer() == &liveDestination ? &destination
                                                                                    : entry.getContainer()),
                         "relocated script binding differs from stock node, order or owner/cell");
+                    require(stored->getScript() == entry.getScript() && stored->getCell() == entry.getCell()
+                            && stored->getContainer() == entry.getContainer() && stored->references(copied->first)
+                            && (storage.getCursor() == &*stored) == (i == actual.mCursor),
+                        "owned script entry or cursor lost its relocated registration binding");
+                    const auto storedItem = stored->getItem();
                     if (copied->second.mContainerStore == &source || copied->second.mContainerStore == &destination)
                     {
                         const auto owns = [&](const auto& views) {
@@ -1868,15 +1887,49 @@ namespace
                         };
                         require(owns(relocation.mSource) || owns(relocation.mDestination),
                             "script relocation retained an old inventory key");
+                        require(!storedItem.isEmpty() && &storedItem.getCellRef() == copied->first
+                                && storedItem.mCell == entry.getCell()
+                                && storedItem.mContainerStore == entry.getContainer()
+                                && !storedItem.getCellRef().getRefNum().isSet() && !storedItem.mRef->mWorldModel
+                                && values(storedItem) == values(copied->second)
+                                && storedItem.getRefData().matchesContainerTransferState(copied->second.getRefData()),
+                            "owned script item lost stable detached values or cell/container hints");
                     }
+                    else
+                        require(storedItem.isEmpty() && !storedItem.mCell && !storedItem.mContainerStore,
+                            "unaffected script storage retained a live item binding");
+                    ++stored;
                 }
+                require((storage.getCursor() == nullptr) == (actual.mCursor == actual.mEntries.size()),
+                    "owned script cursor lost stock end");
+                // Walk real owned list nodes from the relocated cursor and compare
+                // the tail with stock getNext; never execute either set of scripts.
+                auto tail = std::find_if(storage.getEntries().begin(), storage.getEntries().end(),
+                    [&](const auto& entry) { return &entry == storage.getCursor(); });
+                std::pair<ESM::RefId, MWWorld::Ptr> next;
+                while (stock.getNext(next))
+                {
+                    require(tail != storage.getEntries().end() && tail->getScript() == next.first,
+                        "owned script cursor iteration differs from stock getNext");
+                    const auto copied = std::find_if(relocatedReferences.begin(), relocatedReferences.end(),
+                        [&](const auto& member) { return tail->references(member.first); });
+                    require(copied != relocatedReferences.end() && copied->second == next.second,
+                        "owned script iteration changed stock item order");
+                    ++tail;
+                }
+                require(tail == storage.getEntries().end(), "owned script cursor retained an extra iteration tail");
+                stock.startIteration();
+                for (size_t i = 0; i < actual.mCursor; ++i)
+                    require(stock.getNext(next), "owned script comparison could not restore stock cursor");
             };
-            compareRelocatedScripts(relocation.mSourceScripts, stockScripts);
+            compareRelocatedScripts(relocation.mSourceScripts, stockScripts, paired.getSourceScriptStorage());
+            require((&paired.getSourceScriptStorage() == &paired.getDestinationScriptStorage()) == sharedScripts,
+                "owned script storage lost shared/distinct service identity");
             require(
                 relocation.mDestinationScripts.has_value() != sharedScripts, "script relocation lost shared service");
             compareRelocatedScripts(
                 relocation.mDestinationScripts ? *relocation.mDestinationScripts : relocation.mSourceScripts,
-                *destinationAdd.mLocalScripts);
+                *destinationAdd.mLocalScripts, paired.getDestinationScriptStorage());
             require((&paired.getSourceScripts() == &paired.getDestinationScripts()) == sharedScripts,
                 "shared/distinct script service result binding lost");
             require(onPCAddLookups == (scriptedItem && destinationAdd.mPlayer == destinationPtr ? 1 : 0),
@@ -2069,6 +2122,70 @@ namespace
             else
                 corrupt([&] { result.mDestinationScripts = result.mSourceScripts; });
             validate(decision);
+        };
+        const auto scriptStorageIdentity = [](const ScriptStorage& storage) {
+            std::vector<const void*> result{ &storage, storage.getCursor() };
+            for (const auto& entry : storage.getEntries())
+            {
+                result.push_back(&entry);
+                result.push_back(entry.getItem().mRef);
+            }
+            return result;
+        };
+        const auto corruptScriptStorage = [&](Pair& decision, const Pair& other, const auto& validate) {
+            for (const auto* storage : { &decision.getSourceScriptStorage(), &decision.getDestinationScriptStorage() })
+            {
+                auto& entries = const_cast<ScriptStorage::Entries&>(storage->getEntries());
+                using Cursor = std::remove_cvref_t<decltype(storage->getCursor())>;
+                auto& cursor = const_cast<Cursor&>(storage->getCursor());
+                const auto savedCursor = cursor;
+                const auto& foreign = other.getDestinationScriptStorage().getEntries();
+                if (!entries.empty() || !foreign.empty())
+                {
+                    cursor = entries.empty() ? &foreign.front() : (cursor ? nullptr : &entries.front());
+                    reject([&] { validate(decision); }, "storage cursor changed");
+                    cursor = savedCursor;
+                }
+                if (entries.empty())
+                    continue;
+                // Equal entries in different list nodes must not inherit the saved
+                // cursor or pair binding. The validator never follows stale keys.
+                ScriptStorage::Entries replacement(entries);
+                entries.swap(replacement);
+                reject([&] { validate(decision); }, "storage node or binding changed");
+                entries.swap(replacement);
+                ScriptStorage::Entries removed;
+                const auto selected = cursor
+                    ? std::find_if(entries.begin(), entries.end(), [&](const auto& entry) { return &entry == cursor; })
+                    : entries.begin();
+                const auto next = std::next(selected);
+                removed.splice(removed.end(), entries, selected);
+                reject([&] { validate(decision); }, "storage membership or service changed");
+                entries.splice(next, removed);
+                if (entries.size() > 1)
+                {
+                    entries.splice(entries.end(), entries, entries.begin());
+                    reject([&] { validate(decision); }, "storage node or binding changed");
+                    entries.splice(entries.begin(), entries, std::prev(entries.end()));
+                    const auto saved = entries.front();
+                    entries.front() = entries.back();
+                    reject([&] { validate(decision); }, "storage node or binding changed");
+                    entries.front() = saved;
+                }
+                // The other pair may have the same item values and quantity; its
+                // owned inventory/registration nodes still cannot bind this pair.
+                if (!foreign.empty())
+                {
+                    const auto saved = entries.front();
+                    entries.front() = foreign.back();
+                    reject([&] { validate(decision); }, "storage node or binding changed");
+                    entries.front() = saved;
+                    cursor = &foreign.front();
+                    reject([&] { validate(decision); }, "storage cursor changed");
+                    cursor = savedCursor;
+                }
+                validate(decision);
+            }
         };
         for (const auto& item : live)
         {
@@ -3328,17 +3445,52 @@ namespace
                                         auto initial = make(quantity);
                                         const auto sourceResult = initial.getSourceScripts();
                                         const auto destinationResult = initial.getDestinationScripts();
+                                        const auto sourceStorage
+                                            = scriptStorageIdentity(initial.getSourceScriptStorage());
+                                        const auto destinationStorage
+                                            = scriptStorageIdentity(initial.getDestinationScriptStorage());
                                         auto decision = std::move(initial);
                                         reject([&] { initial.getSourceScripts(); }, "moved from");
                                         reject([&] { initial.getDestinationScripts(); }, "moved from");
+                                        reject([&] { initial.getSourceScriptStorage(); }, "moved from");
+                                        reject([&] { initial.getDestinationScriptStorage(); }, "moved from");
+                                        require(
+                                            scriptStorageIdentity(decision.getSourceScriptStorage()) == sourceStorage
+                                                && scriptStorageIdentity(decision.getDestinationScriptStorage())
+                                                    == destinationStorage,
+                                            "move construction moved script storage, nodes or cursor");
                                         auto assigned = make(quantity);
                                         assigned = std::move(decision);
                                         reject([&] { validate(decision); }, "moved from");
+                                        reject([&] { decision.getSourceScriptStorage(); }, "moved from");
+                                        reject([&] { decision.getDestinationScriptStorage(); }, "moved from");
                                         require(assigned.getSourceScripts() == sourceResult
-                                                && assigned.getDestinationScripts() == destinationResult,
+                                                && assigned.getDestinationScripts() == destinationResult
+                                                && scriptStorageIdentity(assigned.getSourceScriptStorage())
+                                                    == sourceStorage
+                                                && scriptStorageIdentity(assigned.getDestinationScriptStorage())
+                                                    == destinationStorage,
                                             "move changed script list ownership or detached registration binding");
                                         validate(assigned);
                                         compareStock(assigned, item, destination, sourceAdd, destinationAdd);
+                                        auto sameQuantity = make(quantity);
+                                        corruptScriptStorage(assigned, sameQuantity, validate);
+                                        auto otherQuantity = make(quantity == 1 ? 4 : 1);
+                                        corruptScriptStorage(assigned, otherQuantity, validate);
+                                        for (bool replaceSource : { false, true })
+                                        {
+                                            auto destroyed = make(quantity);
+                                            const auto& storage = replaceSource
+                                                ? destroyed.getSourceScriptStorage()
+                                                : destroyed.getDestinationScriptStorage();
+                                            auto& entries = const_cast<ScriptStorage::Entries&>(storage.getEntries());
+                                            if (entries.empty())
+                                                continue;
+                                            ScriptStorage::Entries replacement(entries);
+                                            entries.swap(replacement);
+                                            replacement.clear(); // Saved node/cursor keys are now dangling.
+                                            reject([&] { validate(destroyed); }, "storage node or binding changed");
+                                        }
                                         // Cursor changes alone must invalidate either service.
                                         for (auto* service : { &sourceScripts, &addedScripts })
                                         {
@@ -3423,6 +3575,34 @@ namespace
                                 "OnPCAdd preparation failure leaked inventory, registration or effects");
                             validate(make(4));
                         }
+                        // This consumer copy is after both stock script lists and
+                        // cursors have been allocated. Exercise shared/distinct unwind.
+                        const auto beforeFailure
+                            = std::tuple{ snapshot(), sourceScripts.snapshot(), addedScripts.snapshot() };
+                        auto failingRemoval = removal;
+                        int alive = 0, emitted = 0, copies = 0;
+                        std::function<void()> onCopy;
+                        failingRemoval.mInventoryUpdated = NotificationIntent(alive, onCopy, emitted);
+                        onCopy = [&] {
+                            ++copies;
+                            throw PreparationFailure{};
+                        };
+                        bool failed = false;
+                        try
+                        {
+                            source.prepareTransfer(item, 4, destination, failingRemoval, destinationAdd);
+                        }
+                        catch (const PreparationFailure&)
+                        {
+                            failed = true;
+                        }
+                        onCopy = {};
+                        failingRemoval.mInventoryUpdated = {};
+                        require(failed && copies == 1 && alive == 0 && emitted == 0
+                                && beforeFailure
+                                    == std::tuple{ snapshot(), sourceScripts.snapshot(), addedScripts.snapshot() },
+                            "failure after script storage preparation leaked state, intents or notifications");
+                        validate(make(4));
                     }
                     // Empty lists and a sole source registration cover erase-to-end
                     // followed by append: the new entry must not become the cursor.
@@ -3463,6 +3643,19 @@ namespace
                     const auto expiredBefore = sourceScripts.snapshot();
                     const auto beforeExpiredValidation = snapshot();
                     source.validateTransfer(withExpired, destination, removal, destinationAdd);
+                    {
+                        auto afterExpired = source.prepareTransfer(item, 1, destination, removal, destinationAdd);
+                        source.validateTransfer(afterExpired, destination, removal, destinationAdd);
+                        for (const auto* storage :
+                            { &withExpired.getSourceScriptStorage(), &afterExpired.getSourceScriptStorage() })
+                        {
+                            const auto found = std::find_if(storage->getEntries().begin(), storage->getEntries().end(),
+                                [&](const auto& entry) { return entry.references(expiredKey); });
+                            require(found != storage->getEntries().end() && found->getItem().isEmpty()
+                                    && found->getScript() == scriptId,
+                                "script storage retained an expired live Ptr or lost its registration key");
+                        }
+                    }
                     require(sourceScripts.snapshot() == expiredBefore && snapshot() == beforeExpiredValidation,
                         "validation touched an unrelated expired reference or live state");
                     sourceScripts.remove(expiredKey);
@@ -3752,6 +3945,11 @@ namespace
                 const auto sourceStorageValue = values(paired.getRelocation().mSource.front().mItem);
                 const auto destinationStorageValue = values(paired.getRelocation().mDestination.front().mItem);
                 const auto relocatedRegistry = paired.getRelocation().mRegistry;
+                std::vector<std::pair<MWWorld::ConstPtr, decltype(values(item))>> scriptValues;
+                for (const auto* storage : { &paired.getSourceScriptStorage(), &paired.getDestinationScriptStorage() })
+                    for (const auto& entry : storage->getEntries())
+                        if (!entry.getItem().isEmpty())
+                            scriptValues.emplace_back(entry.getItem(), values(entry.getItem()));
                 auto& replaced = replaceSource ? source : destination;
                 std::vector<const MWWorld::CellRef*> oldScriptKeys;
                 for (const auto& ptr : replaced)
@@ -3772,6 +3970,10 @@ namespace
                         && values(paired.getRelocation().mDestination.front().mItem) == destinationStorageValue
                         && paired.getRelocation().mRegistry == relocatedRegistry,
                     "destroying live storage invalidated owned stock nodes or relocation");
+                for (const auto& [owned, saved] : scriptValues)
+                    require(
+                        values(owned) == saved && !owned.getCellRef().getRefNum().isSet() && !owned.mRef->mWorldModel,
+                        "destroying live storage invalidated a prepared script item");
                 if (replaceSource)
                     reject([&] { source.prepareTransfer(item, 2, destination, removal, scriptedAddB); },
                         "ownership mismatch");

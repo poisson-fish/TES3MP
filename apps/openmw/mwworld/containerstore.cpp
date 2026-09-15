@@ -848,6 +848,9 @@ struct MWWorld::PreparedContainerTransfer::State
     // never moves a list, its nodes or its end sentinel. No live iterator is kept.
     CellRefList<ESM::Miscellaneous> mSourceList, mDestinationList;
     Relocation mRelocation;
+    // Declared after inventory lists: script entries are destroyed before the
+    // owned items they reference, on discard, failure and move assignment alike.
+    std::unique_ptr<LocalScripts::PreparedStorage> mSourceScriptStorage, mDestinationScriptStorage;
     const MWBase::ScriptManager* mScriptManager = nullptr;
     Ptr mPlayer;
     ESM::RefNum mPlayerIdentity;
@@ -1001,6 +1004,17 @@ const MWWorld::PreparedContainerTransfer::MiscList& MWWorld::PreparedContainerTr
 const MWWorld::PreparedContainerTransfer::Relocation& MWWorld::PreparedContainerTransfer::getRelocation() const
 {
     return state().mRelocation;
+}
+
+const MWWorld::LocalScripts::PreparedStorage& MWWorld::PreparedContainerTransfer::getSourceScriptStorage() const
+{
+    return *state().mSourceScriptStorage;
+}
+
+const MWWorld::LocalScripts::PreparedStorage& MWWorld::PreparedContainerTransfer::getDestinationScriptStorage() const
+{
+    const auto& owned = state();
+    return *(owned.mDestinationScriptStorage ? owned.mDestinationScriptStorage : owned.mSourceScriptStorage);
 }
 
 namespace
@@ -1190,8 +1204,17 @@ MWWorld::PreparedContainerTransfer MWWorld::ContainerStore::prepareTransfer(cons
     if (!owned.mDestinationItemIndex)
         append(owned.mDestinationList, prepared.getDestinationItem());
     owned.mRelocation = relocateTransfer(prepared);
+    std::vector<Ptr> scriptNodes;
+    for (auto* list : { &owned.mSourceList.mList, &owned.mDestinationList.mList })
+        for (auto& node : *list)
+            scriptNodes.emplace_back(&node);
+    owned.mSourceScriptStorage
+        = sourceContext.mLocalScripts.prepareStorage(owned.mRelocation.mSourceScripts, scriptNodes);
+    if (owned.mRelocation.mDestinationScripts)
+        owned.mDestinationScriptStorage
+            = destinationContext.mLocalScripts->prepareStorage(*owned.mRelocation.mDestinationScripts, scriptNodes);
     // The last fallible consumer copy now also follows list allocation and
-    // relocation. Failure discards every owned node and association together.
+    // script storage/cursor relocation. Failure discards all owned nodes together.
     owned.mSourceUpdated = sourceContext.mInventoryUpdated;
     validateTransfer(prepared, destination, sourceContext, destinationContext);
     return prepared;
@@ -1432,6 +1455,18 @@ void MWWorld::ContainerStore::validateTransferStorage(const PreparedContainerTra
             && !LocalScripts::sameRelocatedList(
                 *actual.mDestinationScripts, *expected.mDestinationScripts, prepared.getDestinationScripts())))
         throw std::invalid_argument("Container transfer preparation relocation result changed");
+    if (!state.mSourceScriptStorage || bool(state.mDestinationScriptStorage) != bool(state.mDestinationScriptList))
+        throw std::invalid_argument("Container transfer preparation script storage binding changed");
+    std::vector<ConstPtr> scriptNodes;
+    for (const auto* list : { &state.mSourceList.mList, &state.mDestinationList.mList })
+        for (const auto& node : *list)
+            scriptNodes.emplace_back(&node);
+    // Relocation has just been independently checked against the protected
+    // witnesses/current nodes. Retain its exact immutable registration identities.
+    state.mRemoval.mLocalScripts->validateStorage(*state.mSourceScriptStorage, actual.mSourceScripts, scriptNodes);
+    if (state.mDestinationScriptStorage)
+        state.mDestinationScripts->validateStorage(
+            *state.mDestinationScriptStorage, *actual.mDestinationScripts, scriptNodes);
 }
 
 MWWorld::ContainerStoreIterator MWWorld::ContainerStore::addWithContext(

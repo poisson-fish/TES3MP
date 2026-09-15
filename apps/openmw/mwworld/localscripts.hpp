@@ -28,8 +28,23 @@ namespace MWWorld
         };
         struct Entry
         {
+            friend class LocalScripts;
+
+        private:
             Ptr mItem;
             std::shared_ptr<const ScriptRegistration> mRegistration;
+
+        public:
+            Entry(Ptr item, std::shared_ptr<const ScriptRegistration> registration)
+                : mItem(item)
+                , mRegistration(std::move(registration))
+            {
+            }
+            ConstPtr getItem() const { return mItem; }
+            ESM::RefId getScript() const { return mRegistration->mScript; }
+            const CellStore* getCell() const { return mRegistration->mCell; }
+            const ContainerStore* getContainer() const { return mRegistration->mContainer; }
+            bool references(const CellRef* ref) const { return mRegistration->mReference == ref; }
         };
         using Scripts = std::list<Entry>;
         Scripts mScripts;
@@ -70,6 +85,31 @@ namespace MWWorld
         };
         List snapshot() const;
 
+        // Owns the same node type/list as the live service. Only pair-owned items
+        // have Ptrs; unaffected entries retain immutable compare-only bindings.
+        // Their live Ptrs must be resolved separately before any future install.
+        class PreparedStorage
+        {
+            friend class LocalScripts;
+            const LocalScripts* mService;
+            Scripts mEntries;
+            std::vector<const Entry*> mNodes;
+            // A compare-only cursor relocation, nullptr for end. Never keep an
+            // iterator that could become invalid when rejecting stale storage.
+            const Entry* mCursor = nullptr;
+            explicit PreparedStorage(const LocalScripts* service)
+                : mService(service)
+            {
+            }
+
+        public:
+            using Entries = Scripts;
+            PreparedStorage(const PreparedStorage&) = delete;
+            PreparedStorage& operator=(const PreparedStorage&) = delete;
+            const Entries& getEntries() const { return mEntries; }
+            const Entry* const& getCursor() const { return mCursor; }
+        };
+
         Removal prepareRemove(const CellRef* ref) const;
         void validateRemoval(const Removal& prepared, const CellRef* ref) const;
 
@@ -98,6 +138,9 @@ namespace MWWorld
         // the protected list as witnesses; no live Ptr or iterator is followed.
         static List relocateList(const List& original, const Relocations& bindings);
         static bool sameRelocatedList(const List& left, const List& right, const List& original);
+        std::unique_ptr<PreparedStorage> prepareStorage(const List& relocated, const std::vector<Ptr>& nodes) const;
+        void validateStorage(
+            const PreparedStorage& storage, const List& relocated, const std::vector<ConstPtr>& nodes) const;
 
     public:
         // Initializes only the supplied RefData. Exceptions propagate to the staging

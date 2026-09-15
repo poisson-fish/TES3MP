@@ -340,6 +340,71 @@ bool MWWorld::LocalScripts::sameRelocatedList(const List& left, const List& righ
     return true;
 }
 
+std::unique_ptr<MWWorld::LocalScripts::PreparedStorage> MWWorld::LocalScripts::prepareStorage(
+    const List& relocated, const std::vector<Ptr>& nodes) const
+{
+    if (relocated.mCursor > relocated.mEntries.size())
+        throw std::invalid_argument("Local script storage preparation cursor out of range");
+    auto storage = std::unique_ptr<PreparedStorage>(new PreparedStorage(this));
+    storage->mNodes.reserve(relocated.mEntries.size());
+    for (const auto& registration : relocated.mEntries)
+    {
+        if (registration.mScripts != this || !registration.mRegistration)
+            throw std::invalid_argument("Local script storage preparation binding mismatch");
+        Ptr item;
+        for (const auto& node : nodes)
+            if (registration.references(&node.getCellRef()))
+            {
+                item = node;
+                item.mCell = registration.getCell();
+                item.mContainerStore = registration.getContainer();
+                break;
+            }
+        // The relocated witness supplies identities/order and already accounts
+        // for stock remove/append cursor repair. Do not initialize locals again.
+        storage->mEntries.emplace_back(item, registration.mRegistration);
+        const auto* entry = &storage->mEntries.back();
+        if (storage->mNodes.size() == relocated.mCursor)
+            storage->mCursor = entry;
+        storage->mNodes.push_back(entry);
+    }
+    return storage;
+}
+
+void MWWorld::LocalScripts::validateStorage(
+    const PreparedStorage& storage, const List& relocated, const std::vector<ConstPtr>& nodes) const
+{
+    if (storage.mService != this || storage.mEntries.size() != relocated.mEntries.size()
+        || storage.mNodes.size() != relocated.mEntries.size() || relocated.mCursor > relocated.mEntries.size())
+        throw std::invalid_argument("Local script prepared storage membership or service changed");
+    const Entry* cursor = nullptr;
+    size_t i = 0;
+    for (const auto& entry : storage.mEntries)
+    {
+        const auto& registration = relocated.mEntries[i];
+        ConstPtr expected;
+        for (const auto& node : nodes)
+            if (registration.references(&node.getCellRef()))
+            {
+                expected = node;
+                expected.mCell = registration.getCell();
+                expected.mContainerStore = registration.getContainer();
+                break;
+            }
+        // Compare keys/Ptr fields only: either saved node or item may have been
+        // destroyed by a stale write. Only current protected inventory nodes are read.
+        if (&entry != storage.mNodes[i] || registration.mScripts != this
+            || entry.mRegistration != registration.mRegistration || entry.mItem.mRef != expected.mRef
+            || entry.mItem.mCell != expected.mCell || entry.mItem.mContainerStore != expected.mContainerStore)
+            throw std::invalid_argument("Local script prepared storage node or binding changed");
+        if (i == relocated.mCursor)
+            cursor = &entry;
+        ++i;
+    }
+    if (storage.mCursor != cursor)
+        throw std::invalid_argument("Local script prepared storage cursor changed");
+}
+
 bool MWWorld::LocalScripts::isRunning(const ESM::RefId& scriptName, const Ptr& ptr) const
 {
     return std::ranges::any_of(
