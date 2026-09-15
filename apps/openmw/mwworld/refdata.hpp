@@ -43,6 +43,7 @@ namespace MWWorld
 
     class RefData
     {
+        friend class ContainerStore;
         osg::ref_ptr<SceneUtil::PositionAttitudeTransform> mBaseNode;
 
         MWScript::Locals mLocals;
@@ -67,6 +68,9 @@ namespace MWWorld
         void copy(const RefData& refData);
 
         void cleanup();
+
+        // Shared by stock copy construction and detached new-stack preparation.
+        void clearActivationFlags();
 
     public:
         RefData();

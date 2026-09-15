@@ -16,7 +16,7 @@
       "id": "M1-002",
       "slice": "native scripted inventory initialization and isolated item values",
       "owner": "OpenMW server runtime",
-      "purpose": "Share explicit-service locals initialization, add intents and immutable deregistration identities; validate registration presence/replacement with address-only lookup, preserving stock first-match removal, iterator repair and registration catches. Prepare and compare owned RefData without scene/Lua aliases, consuming activation flags or custom-state cloning.",
+      "purpose": "Share explicit-service locals initialization, add intents and immutable deregistration identities; validate registration presence/replacement with address-only lookup, preserving stock first-match removal, iterator repair and registration catches. Prepare and compare owned RefData without scene/Lua aliases or custom-state cloning. Share stock copy-constructor activation-flag clearing with detached new-stack preparation; preserve source witnesses and existing-stack flags.",
       "paths": [
         "apps/openmw/mwscript/globalscripts.cpp",
         "apps/openmw/mwscript/globalscripts.hpp",
@@ -35,7 +35,7 @@
       "id": "M1-001",
       "slice": "native inventory runtime seam and M2 paired transfer preparation",
       "owner": "OpenMW server runtime",
-      "purpose": "Share explicit-context ContainerStore add/remove, first-stack selection, signed removal/count decisions, normalization and OnPCAdd ordering; compose owned plain/initialized-MWScript MISC source results, incoming values, destination results and deferred script/notification intents in a protected move-only pair. Use CellRef count-only copies for zero-count source results without cleanup; retain the original source witness separately. Preserve source and selected destination RefData, jointly validating results against their witnesses and one removal quantity. Validate both owners, services, registrations and values through current members; storage identity rejects replacement/address reuse before reading nodes. Never read destroyed references/iterators or apply zero-count cleanup during preparation. No live installation or publication; retain stock cleanup, equipment dispatch and safe raw-count iterator zero checks.",
+      "purpose": "Share explicit-context ContainerStore add/remove, first-stack selection, signed removal/count decisions, normalization and OnPCAdd ordering; compose owned plain/initialized-MWScript MISC source results, incoming values, destination results and deferred script/notification intents in a protected move-only pair. Use CellRef count-only copies for zero-count source results without cleanup; retain the original source witness separately. Preserve source and selected destination RefData; clear new-stack activation flags before registration/OnPCAdd using stock copy semantics. Jointly validate results against their witnesses and one removal quantity. Validate both owners, services, registrations and values through current members; storage identity rejects replacement/address reuse before reading nodes. Never read destroyed references/iterators or apply zero-count cleanup during preparation. No live installation or publication; retain stock cleanup, equipment dispatch and safe raw-count iterator zero checks.",
       "paths": [
         "apps/openmw/mwworld/cellref.cpp",
         "apps/openmw/mwworld/cellref.hpp",

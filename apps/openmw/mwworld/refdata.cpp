@@ -136,7 +136,7 @@ namespace MWWorld
         try
         {
             copy(refData);
-            mFlags &= ~(Flag_SuppressActivate | Flag_OnActivate | Flag_ActivationBuffered);
+            clearActivationFlags();
         }
         catch (...)
         {
@@ -185,6 +185,11 @@ namespace MWWorld
 
     RefData::RefData(RefData&& other) = default;
     RefData& RefData::operator=(RefData&& other) = default;
+
+    void RefData::clearActivationFlags()
+    {
+        mFlags &= ~(Flag_SuppressActivate | Flag_OnActivate | Flag_ActivationBuffered);
+    }
 
     RefData RefData::copyForContainerTransfer() const
     {

@@ -753,7 +753,13 @@ MWWorld::PreparedContainerAdd MWWorld::ContainerStore::prepareTransferAdd(
         prepared.mStackCount = addItems(stack->getCellRef().getCount(false), prepared.mCount);
     }
     else
+    {
         prepared.mStackCount = prepared.mCount;
+        // Stock addNewStack copy-constructs RefData before registration/OnPCAdd.
+        // Clear only the new destination's activation flags, never source values
+        // or an existing stack's RefData. The detached copy owns every buffer.
+        temporary.getRefData().clearActivationFlags();
+    }
     prepareContainerAdd(temporary, *this, context, [&](const ESM::RefId& script, const Ptr& scriptItem) {
         // Unlike stock LocalScripts::add, missing records or preparation errors
         // must propagate. Never insert the temporary into a LocalScripts list.

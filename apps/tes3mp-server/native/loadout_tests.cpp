@@ -31,6 +31,7 @@
 #include <components/esm3/esmwriter.hpp>
 #include <components/esm3/formatversion.hpp>
 #include <components/esm3/loadcont.hpp>
+#include <components/esm3/objectstate.hpp>
 #include <components/files/conversion.hpp>
 #include <components/sceneutil/positionattitudetransform.hpp>
 
@@ -472,13 +473,47 @@ namespace
                 data.isEnabled(), data.isDeletedByContentFile(), data.mPhysicsPostponed, data.hasChanged(),
                 locals.getScriptId(), locals.mShorts, locals.mLongs, locals.mFloats, animations };
         };
+        const auto refDataState = [](const MWWorld::RefData& data) {
+            auto detached = data.copyForContainerTransfer();
+            // Serializing initialized locals needs Environment. They are already
+            // compared separately; read flags through stock write on an owned copy.
+            detached.getLocals() = {};
+            ESM::ObjectState state;
+            detached.write(state);
+            return state;
+        };
+        const auto flags = [&](const MWWorld::RefData& data) { return refDataState(data).mFlags; };
+        const auto setFlags = [&](MWWorld::RefData& data, unsigned int bits) {
+            auto state = refDataState(data);
+            state.mFlags = bits;
+            MWWorld::RefData changed(state, data.isDeletedByContentFile());
+            // Save loading clears suppression. Restore runtime-reachable states
+            // through activation calls; OnActivate-only states come from saves.
+            if (bits & 1)
+            {
+                changed.onActivate();
+                if (bits & 2)
+                    require(!changed.activate(), "flag fixture did not suppress activation");
+            }
+            changed.getLocals() = data.getLocals();
+            changed.mPhysicsPostponed = data.mPhysicsPostponed;
+            changed.setBaseNode(data.getBaseNode());
+            data = std::move(changed);
+            require(flags(data) == bits, "flag fixture does not match requested activation state");
+        };
+        // All runtime/save-load reachable combinations, plus unrelated high bits
+        // which stock copying must retain. Destination states vary independently.
+        const std::vector<std::pair<unsigned int, unsigned int>> activationCases{ { 0, 7 }, { 1, 6 }, { 2, 5 },
+            { 4, 4 }, { 5, 2 }, { 6, 1 }, { 7, 0 }, { 15, 8 } };
         const auto itemSnapshot = [&](const MWWorld::Ptr& item) {
             const auto& data = item.getRefData();
             const auto& locals = data.getLocals();
             return std::tuple{ values(item), item.mRef, item.mCell, item.mContainerStore, item.mRef->mWorldModel,
                 item.get<ESM::Miscellaneous>()->mBase, item.getCellRef().getRefNum(), item.getCellRef().getCount(false),
                 data.getBaseNode(), data.getBaseNode() ? data.getBaseNode()->referenceCount() : 0, data.getLuaScripts(),
-                data.getCustomData(), locals.mShorts.data(), locals.mLongs.data(), locals.mFloats.data(),
+                data.getCustomData(),
+                data.getLuaScripts() || data.getCustomData() ? std::optional<unsigned int>() : flags(data),
+                locals.mShorts.data(), locals.mLongs.data(), locals.mFloats.data(),
                 data.getAnimationState().mScriptedAnims.data() };
         };
         std::vector<MWWorld::ContainerStore*> observedStores{ &a, &b };
@@ -1386,9 +1421,9 @@ namespace
                     const MWWorld::Ptr temporary(detached.get());
                     scripts.mBeforeLocals = [&] {
                         ++calls;
-                        require(!localScripts.isRunning(scriptId, temporary)
+                        require(!localScripts.isRunning(scriptId, temporary) && flags(temporary.getRefData()) == 0
                                 && temporary.getRefData().getLocals().mShorts == item.getRefData().getLocals().mShorts,
-                            "OnPCAdd lookup ran after live registration or assignment");
+                            "OnPCAdd lookup lost new-stack flag clearing or ran after live registration/assignment");
                         temporary.getRefData().setCustomData(std::make_unique<Lifetime>(alive));
                         throw std::runtime_error("injected OnPCAdd preparation failure");
                     };
@@ -1507,7 +1542,23 @@ namespace
             copyValues(incoming.getPtr(), item);
             MWWorld::ContainerStoreRemoveContext removal{ model, sourcePtr, stockScripts, sourceAdd.mInventoryUpdated };
             const auto removed = source.remove(*stockSource, paired.getRemoval().getCount(), removal);
+            int onPCAddLookups = 0;
+            scripts.mBeforeLocals = [&] {
+                ++onPCAddLookups;
+                // search() resolves through global World even for a resolved
+                // store. Observe current members of this disposable store only.
+                const auto added = std::find_if(destination.begin(), destination.end(), [&](const auto& candidate) {
+                    return candidate.getCellRef().getRefId() == item.getCellRef().getRefId();
+                });
+                require(added != destination.end() && stockScripts.isRunning(scriptId, *added)
+                        && flags(added->getRefData()) == (flags(item.getRefData()) & ~7u)
+                        && added->getRefData().getLocals().mShorts == item.getRefData().getLocals().mShorts,
+                    "stock new-stack copying/registration did not precede OnPCAdd");
+            };
             const auto stockResult = destination.add(incoming.getPtr(), removed, destinationAdd);
+            scripts.mBeforeLocals = {};
+            require(onPCAddLookups == (scriptedItem && destinationAdd.mPlayer == destinationPtr ? 1 : 0),
+                "disposable stock made unexpected OnPCAdd lookups");
             const auto result = paired.getDestinationItem();
             const auto sourceResult = paired.getSourceItem();
             require(removed == paired.getRemoval().getCount()
@@ -1518,16 +1569,15 @@ namespace
                     && (source.getSelectedEnchantItem() == source.end())
                         == (paired.getRemoval().getRemainingCount() == 0)
                     && (stockResult == stockTarget) == paired.getStackTarget().isSet()
-                    && destination.getSelectedEnchantItem() == stockTarget
-                    && values(*stockResult) == values(result)
-                    // Stock new-stack copying clears activation flags; detached
-                    // preparation deliberately retains them (an inherited limit).
-                    && (!paired.getStackTarget().isSet()
-                        || stockResult->getRefData().matchesContainerTransferState(result.getRefData()))
+                    && destination.getSelectedEnchantItem() == stockTarget && values(*stockResult) == values(result)
+                    && stockResult->getRefData().matchesContainerTransferState(result.getRefData())
                     && stockResult->getCellRef().getCount(false) == result.getCellRef().getCount(false)
                     && !stockResult->getRefData().getBaseNode() && notifications == 4,
                 "paired source/destination values differ from stock add/remove in disposable stores");
             require(stockScripts.isRunning(scriptId, *stockResult) == paired.getScriptAddition().has_value()
+                    && (!paired.getScriptAddition()
+                        || stockScripts.prepareRemove(&stockResult->getCellRef()).getCell()
+                            == paired.getScriptAddition()->mCell)
                     && stockScripts.isRunning(scriptId, *stockSource)
                         == (scriptedItem && paired.getRemoval().getRemainingCount() != 0),
                 "paired deferred script intents differ from disposable stock behavior");
@@ -1546,147 +1596,238 @@ namespace
             const auto originalSoul = target.getCellRef().getSoul();
             const auto originalCount = item.getCellRef().getCount(false);
             const auto originalTargetCount = target.getCellRef().getCount(false);
-            for (bool compatible : { false, true })
-                for (int playerMode : { 0, 1, 2 })
-                    for (int signedCount : { 4, -4 })
-                        for (int destinationCount : { 7, -7 })
-                            for (int quantity : { 1, 4 })
-                            {
-                                item.getCellRef().setCount(signedCount);
-                                target.getCellRef().setCount(destinationCount);
-                                target.getCellRef().setSoul(compatible ? item.getCellRef().getSoul() : originalSoul);
-                                context.mPlayer = playerMode == 0 ? context.mContainer
-                                    : playerMode == 1             ? removalContext.mContainer
-                                                                  : MWWorld::Ptr();
-                                const auto before = snapshot();
-                                startScripts();
+            const auto originalData = item.getRefData().copyForContainerTransfer();
+            const auto originalTargetData = target.getRefData().copyForContainerTransfer();
+            const osg::ref_ptr<SceneUtil::PositionAttitudeTransform> originalNode = item.getRefData().getBaseNode();
+            const osg::ref_ptr<SceneUtil::PositionAttitudeTransform> originalTargetNode
+                = target.getRefData().getBaseNode();
+            for (const auto& [sourceFlags, destinationFlags] : activationCases)
+                for (bool compatible : { false, true })
+                    for (int playerMode : { 0, 1, 2 })
+                        for (int signedCount : { 4, -4 })
+                            for (int destinationCount : { 7, -7 })
+                                for (int quantity : { 1, 4 })
                                 {
-                                    auto initial
-                                        = source.prepareTransfer(item, quantity, destination, removalContext, context);
-                                    auto paired = std::move(initial);
-                                    const auto& removal = paired.getRemoval();
-                                    const auto temporary = paired.getItem();
-                                    const auto sourceResult = paired.getSourceItem();
-                                    const auto expectedRemainder
-                                        = signedCount < 0 ? signedCount + quantity : signedCount - quantity;
-                                    require(removal.getCount() == quantity
-                                            && removal.getRemainingCount() == expectedRemainder
-                                            && removal.getItemIdentity() == item.getCellRef().getRefNum()
-                                            && (removal.getScriptRemoval() != nullptr) == (hasScript && quantity == 4)
-                                            && paired.getStackTarget()
-                                                == (compatible && !hasScript ? target.getCellRef().getRefNum()
-                                                                             : ESM::RefNum())
-                                            && paired.getStackCount()
-                                                == (compatible && !hasScript
-                                                        ? (target.getCellRef().getCount(false) < 0
-                                                                  ? target.getCellRef().getCount(false) - quantity
-                                                                  : target.getCellRef().getCount(false) + quantity)
-                                                        : quantity)
-                                            && paired.hasRemovalNotification() && paired.hasAdditionNotification(),
-                                        "paired preparation lost counts, stack selection or deferred notifications");
-                                    require(sourceResult.getCellRef().getCount(false) == expectedRemainder
-                                            && values(sourceResult) == values(item)
-                                            && sourceResult.getRefData().matchesContainerTransferState(
-                                                item.getRefData())
-                                            && sourceResult.mRef != item.mRef && sourceResult != temporary
-                                            && !sourceResult.getCellRef().getRefNum().isSet()
-                                            && !sourceResult.mRef->mWorldModel && !sourceResult.mCell
-                                            && !sourceResult.mContainerStore && !sourceResult.getRefData().getBaseNode()
-                                            && !localScripts.prepareRemove(&sourceResult.getCellRef())
-                                                .hasRegistration(),
-                                        "paired source result lost count, source values or detachment");
-                                    for (const auto& other : { MWWorld::ConstPtr(item), temporary })
+                                    item.getCellRef().setCount(signedCount);
+                                    target.getCellRef().setCount(destinationCount);
+                                    target.getCellRef().setSoul(
+                                        compatible ? item.getCellRef().getSoul() : originalSoul);
+                                    context.mPlayer = playerMode == 0 ? context.mContainer
+                                        : playerMode == 1             ? removalContext.mContainer
+                                                                      : MWWorld::Ptr();
+                                    setFlags(item.getRefData(), sourceFlags);
+                                    setFlags(target.getRefData(), destinationFlags);
+                                    const auto before = snapshot();
+                                    startScripts();
                                     {
-                                        const auto& data = sourceResult.getRefData();
-                                        const auto& otherData = other.getRefData();
-                                        require(data.getAnimationState().mScriptedAnims.data()
-                                                    != otherData.getAnimationState().mScriptedAnims.data()
-                                                && (!hasScript
-                                                    || (data.getLocals().mShorts.data()
-                                                            != otherData.getLocals().mShorts.data()
-                                                        && data.getLocals().mLongs.data()
-                                                            != otherData.getLocals().mLongs.data()
-                                                        && data.getLocals().mFloats.data()
-                                                            != otherData.getLocals().mFloats.data())),
-                                            "paired source result aliases live or incoming buffers");
+                                        auto initial = source.prepareTransfer(
+                                            item, quantity, destination, removalContext, context);
+                                        auto paired = std::move(initial);
+                                        const auto& removal = paired.getRemoval();
+                                        const auto temporary = paired.getItem();
+                                        const auto sourceResult = paired.getSourceItem();
+                                        const auto expectedRemainder
+                                            = signedCount < 0 ? signedCount + quantity : signedCount - quantity;
+                                        require(removal.getCount() == quantity
+                                                && removal.getRemainingCount() == expectedRemainder
+                                                && removal.getItemIdentity() == item.getCellRef().getRefNum()
+                                                && (removal.getScriptRemoval() != nullptr)
+                                                    == (hasScript && quantity == 4)
+                                                && paired.getStackTarget()
+                                                    == (compatible && !hasScript ? target.getCellRef().getRefNum()
+                                                                                 : ESM::RefNum())
+                                                && paired.getStackCount()
+                                                    == (compatible && !hasScript
+                                                            ? (target.getCellRef().getCount(false) < 0
+                                                                      ? target.getCellRef().getCount(false) - quantity
+                                                                      : target.getCellRef().getCount(false) + quantity)
+                                                            : quantity)
+                                                && paired.hasRemovalNotification() && paired.hasAdditionNotification(),
+                                            "paired preparation lost counts, stack selection or deferred "
+                                            "notifications");
+                                        require(sourceResult.getCellRef().getCount(false) == expectedRemainder
+                                                && values(sourceResult) == values(item)
+                                                && sourceResult.getRefData().matchesContainerTransferState(
+                                                    item.getRefData())
+                                                && sourceResult.mRef != item.mRef && sourceResult != temporary
+                                                && !sourceResult.getCellRef().getRefNum().isSet()
+                                                && !sourceResult.mRef->mWorldModel && !sourceResult.mCell
+                                                && !sourceResult.mContainerStore
+                                                && !sourceResult.getRefData().getBaseNode()
+                                                && !localScripts.prepareRemove(&sourceResult.getCellRef())
+                                                    .hasRegistration(),
+                                            "paired source result lost count, source values or detachment");
+                                        for (const auto& other : { MWWorld::ConstPtr(item), temporary })
+                                        {
+                                            const auto& data = sourceResult.getRefData();
+                                            const auto& otherData = other.getRefData();
+                                            require(data.getAnimationState().mScriptedAnims.data()
+                                                        != otherData.getAnimationState().mScriptedAnims.data()
+                                                    && (!hasScript
+                                                        || (data.getLocals().mShorts.data()
+                                                                != otherData.getLocals().mShorts.data()
+                                                            && data.getLocals().mLongs.data()
+                                                                != otherData.getLocals().mLongs.data()
+                                                            && data.getLocals().mFloats.data()
+                                                                != otherData.getLocals().mFloats.data())),
+                                                "paired source result aliases live or incoming buffers");
+                                        }
+                                        auto expected = source.prepareTransferItem(item, quantity, destination,
+                                            removalContext.mContainer, context.mContainer, worldModel);
+                                        const MWWorld::Ptr independentItem(expected.get());
+                                        int onPCAddLookups = 0;
+                                        scripts.mBeforeLocals = [&] {
+                                            ++onPCAddLookups;
+                                            require(flags(independentItem.getRefData()) == (sourceFlags & ~7u)
+                                                    && independentItem.getRefData().getLocals().mShorts
+                                                        == item.getRefData().getLocals().mShorts
+                                                    && !localScripts.isRunning(scriptId, independentItem)
+                                                    && snapshot() == before,
+                                                "new-stack flags/registration preparation did not precede OnPCAdd");
+                                        };
+                                        auto independent = destination.prepareTransferAdd(std::move(expected), context);
+                                        scripts.mBeforeLocals = {};
+                                        require(onPCAddLookups == (hasScript && playerMode == 0 ? 1 : 0),
+                                            "preparation performed unexpected script service calls");
+                                        require(values(temporary) == values(MWWorld::ConstPtr(independent.mItem.get()))
+                                                && temporary.getCellRef().getCount(false) == quantity
+                                                && !temporary.getCellRef().getRefNum().isSet()
+                                                && !temporary.mRef->mWorldModel && !temporary.mCell
+                                                && !temporary.mContainerStore && !temporary.getRefData().getBaseNode()
+                                                && !localScripts.isRunning(
+                                                    scriptId, MWWorld::Ptr(independent.mItem.get())),
+                                            "paired value differs from shared detached/stock normalization rules");
+                                        const auto result = paired.getDestinationItem();
+                                        const bool stacked = compatible && !hasScript;
+                                        require(flags(sourceResult.getRefData()) == sourceFlags
+                                                && flags(temporary.getRefData())
+                                                    == (stacked ? sourceFlags : sourceFlags & ~7u)
+                                                && flags(result.getRefData())
+                                                    == (stacked ? destinationFlags : sourceFlags & ~7u),
+                                            "paired source/incoming/destination activation flags differ from stock");
+                                        require(result.getCellRef().getCount(false) == paired.getStackCount()
+                                                && !result.getCellRef().getRefNum().isSet() && !result.mRef->mWorldModel
+                                                && !result.mCell && !result.mContainerStore
+                                                && !result.getRefData().getBaseNode()
+                                                && (result == temporary) == !stacked,
+                                            "paired destination result lost owned/detached state or new-stack "
+                                            "identity");
+                                        if (stacked)
+                                            require(result.mRef != target.mRef
+                                                    && result.getRefData().matchesContainerTransferState(
+                                                        target.getRefData())
+                                                    && !result.getRefData().matchesContainerTransferState(
+                                                        item.getRefData())
+                                                    && result.getRefData().getAnimationState().mScriptedAnims.data()
+                                                        != target.getRefData().getAnimationState().mScriptedAnims.data()
+                                                    && result.getRefData().getAnimationState().mScriptedAnims.data()
+                                                        != temporary.getRefData()
+                                                            .getAnimationState()
+                                                            .mScriptedAnims.data(),
+                                                "compatible stack lost distinct destination RefData or aliases owned "
+                                                "buffers");
+                                        compareStock(paired, item, target, sourceAdd, context);
+                                        auto registration = paired.getScriptAddition();
+                                        require(registration.has_value() == hasScript
+                                                && (!registration
+                                                    || (registration->mScript == scriptId
+                                                        && registration->mCell
+                                                            == (playerMode == 0 ? nullptr : context.mContainer.mCell))),
+                                            "paired destination script/OnPCAdd context was lost");
+                                        if (registration)
+                                            registration->mScript
+                                                = {}; // A returned value cannot change the owned intent.
+                                        scripts.mBeforeLocals
+                                            = [] { throw std::runtime_error("validation called script services"); };
+                                        source.validateTransfer(paired, destination, removalContext, context);
+                                        scripts.mBeforeLocals = {};
+                                        if (!stacked)
+                                        {
+                                            auto& proposed = const_cast<MWWorld::RefData&>(result.getRefData());
+                                            const auto saved = proposed.copyForContainerTransfer();
+                                            for (unsigned int bit : { 1u, 2u, 4u })
+                                            {
+                                                setFlags(proposed, (sourceFlags & ~7u) | bit);
+                                                bool rejected = false;
+                                                try
+                                                {
+                                                    source.validateTransfer(
+                                                        paired, destination, removalContext, context);
+                                                }
+                                                catch (const std::invalid_argument& error)
+                                                {
+                                                    rejected
+                                                        = std::string_view(error.what()).find("item values changed")
+                                                        != std::string_view::npos;
+                                                }
+                                                require(rejected, "corrupted new-stack activation flag validated");
+                                                proposed = saved.copyForContainerTransfer();
+                                            }
+                                        }
+                                        bool movedRejected = false;
+                                        try
+                                        {
+                                            source.validateTransfer(initial, destination, removalContext, context);
+                                        }
+                                        catch (const std::invalid_argument&)
+                                        {
+                                            movedRejected = true;
+                                        }
+                                        require(movedRejected, "moved-from pair validated");
+                                        // Move assignment discards the previous entire decision too.
+                                        auto assigned = source.prepareTransfer(
+                                            item, quantity, destination, removalContext, context);
+                                        int replacedSourceAlive = 0;
+                                        const_cast<MWWorld::RefData&>(assigned.getSourceItem().getRefData())
+                                            .setCustomData(std::make_unique<Lifetime>(replacedSourceAlive));
+                                        assigned = std::move(paired);
+                                        require(replacedSourceAlive == 0 && assigned.getSourceItem() == sourceResult,
+                                            "move assignment leaked the prior source result or lost the new one");
+                                        source.validateTransfer(assigned, destination, removalContext, context);
+                                        movedRejected = false;
+                                        try
+                                        {
+                                            paired.getSourceItem();
+                                        }
+                                        catch (const std::invalid_argument&)
+                                        {
+                                            movedRejected = true;
+                                        }
+                                        require(movedRejected, "moved-from pair exposed a source result");
                                     }
-                                    auto expected = source.prepareTransferItem(item, quantity, destination,
-                                        removalContext.mContainer, context.mContainer, worldModel);
-                                    auto independent = destination.prepareTransferAdd(std::move(expected), context);
-                                    require(values(temporary) == values(MWWorld::ConstPtr(independent.mItem.get()))
-                                            && temporary.getCellRef().getCount(false) == quantity
-                                            && !temporary.getCellRef().getRefNum().isSet()
-                                            && !temporary.mRef->mWorldModel && !temporary.mCell
-                                            && !temporary.mContainerStore && !temporary.getRefData().getBaseNode()
-                                            && !localScripts.isRunning(scriptId, MWWorld::Ptr(independent.mItem.get())),
-                                        "paired value differs from shared detached/stock normalization rules");
-                                    const auto result = paired.getDestinationItem();
-                                    const bool stacked = compatible && !hasScript;
-                                    require(result.getCellRef().getCount(false) == paired.getStackCount()
-                                            && !result.getCellRef().getRefNum().isSet() && !result.mRef->mWorldModel
-                                            && !result.mCell && !result.mContainerStore
-                                            && !result.getRefData().getBaseNode() && (result == temporary) == !stacked,
-                                        "paired destination result lost owned/detached state or new-stack identity");
-                                    if (stacked)
-                                        require(result.mRef != target.mRef
-                                                && result.getRefData().matchesContainerTransferState(
-                                                    target.getRefData())
-                                                && !result.getRefData().matchesContainerTransferState(item.getRefData())
-                                                && result.getRefData().getAnimationState().mScriptedAnims.data()
-                                                    != target.getRefData().getAnimationState().mScriptedAnims.data()
-                                                && result.getRefData().getAnimationState().mScriptedAnims.data()
-                                                    != temporary.getRefData().getAnimationState().mScriptedAnims.data(),
-                                            "compatible stack lost distinct destination RefData or aliases owned "
-                                            "buffers");
-                                    compareStock(paired, item, target, sourceAdd, context);
-                                    auto registration = paired.getScriptAddition();
-                                    require(registration.has_value() == hasScript
-                                            && (!registration
-                                                || (registration->mScript == scriptId
-                                                    && registration->mCell
-                                                        == (playerMode == 0 ? nullptr : context.mContainer.mCell))),
-                                        "paired destination script/OnPCAdd context was lost");
-                                    if (registration)
-                                        registration->mScript = {}; // A returned value cannot change the owned intent.
-                                    scripts.mBeforeLocals
-                                        = [] { throw std::runtime_error("validation called script services"); };
-                                    source.validateTransfer(paired, destination, removalContext, context);
-                                    scripts.mBeforeLocals = {};
-                                    bool movedRejected = false;
+                                    // Failure after all values and add intents exist must
+                                    // discard flag normalization together with the pair.
+                                    auto failingRemoval = removalContext;
+                                    int intentAlive = 0, emitted = 0, copies = 0;
+                                    std::function<void()> onCopy;
+                                    failingRemoval.mInventoryUpdated = NotificationIntent(intentAlive, onCopy, emitted);
+                                    onCopy = [&] {
+                                        ++copies;
+                                        require(
+                                            snapshot() == before, "late preparation consumed live activation flags");
+                                        throw PreparationFailure{};
+                                    };
+                                    bool failed = false;
                                     try
                                     {
-                                        source.validateTransfer(initial, destination, removalContext, context);
+                                        source.prepareTransfer(item, quantity, destination, failingRemoval, context);
                                     }
-                                    catch (const std::invalid_argument&)
+                                    catch (const PreparationFailure&)
                                     {
-                                        movedRejected = true;
+                                        failed = true;
                                     }
-                                    require(movedRejected, "moved-from pair validated");
-                                    // Move assignment discards the previous entire decision too.
-                                    auto assigned
-                                        = source.prepareTransfer(item, quantity, destination, removalContext, context);
-                                    int replacedSourceAlive = 0;
-                                    const_cast<MWWorld::RefData&>(assigned.getSourceItem().getRefData())
-                                        .setCustomData(std::make_unique<Lifetime>(replacedSourceAlive));
-                                    assigned = std::move(paired);
-                                    require(replacedSourceAlive == 0 && assigned.getSourceItem() == sourceResult,
-                                        "move assignment leaked the prior source result or lost the new one");
-                                    source.validateTransfer(assigned, destination, removalContext, context);
-                                    movedRejected = false;
-                                    try
-                                    {
-                                        paired.getSourceItem();
-                                    }
-                                    catch (const std::invalid_argument&)
-                                    {
-                                        movedRejected = true;
-                                    }
-                                    require(movedRejected, "moved-from pair exposed a source result");
+                                    onCopy = {};
+                                    failingRemoval.mInventoryUpdated = {};
+                                    require(failed && copies == 1 && intentAlive == 0 && emitted == 0,
+                                        "activation preparation failure leaked an intent or emitted success");
+                                    require(snapshot() == before,
+                                        "paired preparation/validation/move/discard changed live state");
+                                    unchangedScripts();
                                 }
-                                require(snapshot() == before,
-                                    "paired preparation/validation/move/discard changed live state");
-                                unchangedScripts();
-                            }
+            item.getRefData() = originalData.copyForContainerTransfer();
+            item.getRefData().setBaseNode(originalNode);
+            target.getRefData() = originalTargetData.copyForContainerTransfer();
+            target.getRefData().setBaseNode(originalTargetNode);
             item.getCellRef().setCount(originalCount);
             target.getCellRef().setSoul(originalSoul);
             target.getCellRef().setCount(originalTargetCount);
@@ -1696,6 +1837,25 @@ namespace
             const auto makePair = [&] { return source.prepareTransfer(item, 1, destination, removalContext, context); };
             const auto validatePair
                 = [&](const Pair& paired) { source.validateTransfer(paired, destination, removalContext, context); };
+            for (const auto& [sourceFlags, destinationFlags] : activationCases)
+            {
+                setFlags(item.getRefData(), sourceFlags);
+                auto decision = makePair();
+                const unsigned int changedFlags = sourceFlags & 7u ? sourceFlags & ~7u : sourceFlags | 1u;
+                auto& sourceResult = const_cast<MWWorld::RefData&>(decision.getSourceItem().getRefData());
+                setFlags(sourceResult, changedFlags);
+                reject([&] { validatePair(decision); }, "source item values changed");
+                setFlags(sourceResult, sourceFlags);
+                validatePair(decision);
+                // Even changing the live source to new-stack flag semantics must
+                // reject against the original witness, not the proposed value.
+                setFlags(item.getRefData(), changedFlags);
+                reject([&] { validatePair(decision); }, "source state changed");
+                setFlags(item.getRefData(), sourceFlags);
+                validatePair(decision);
+            }
+            item.getRefData() = originalData.copyForContainerTransfer();
+            item.getRefData().setBaseNode(originalNode);
             for (int signedCount : { 4, -4 })
                 for (int quantity : { 1, 4 })
                 {

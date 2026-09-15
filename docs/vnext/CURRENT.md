@@ -5,10 +5,10 @@
 - **Direction:** OpenMW-backed authoritative cooperative multiplayer; see
   [README.md](README.md) and [DECISIONS.md](DECISIONS.md).
 - **Milestone:** M2 in [PLAN.md](PLAN.md). Paired non-gold MISC preparation now
-  owns the post-removal source value, including zero for full removal, alongside
-  incoming/destination values and deferred effects. This is not an atomic transfer.
-- **Next action:** match stock new-stack RefData activation-flag handling in
-  detached MISC preparation while preserving source RefData and scripted OnPCAdd ordering.
+  matches stock new-stack activation flags while retaining source and existing
+  destination-stack RefData. This is not an atomic transfer.
+- **Next action:** prepare an owned source MISC inventory result from the pair,
+  including full-removal membership and selected-item handling, without live installation.
 - **Checkpoint:** `8850e745c298c6de629ef9a5a26bbdddf6aa56e3` preserves the working
   gameplay implementation before the engine-backed pivot.
 
@@ -34,15 +34,19 @@ source state, then derives the expected source result from that witness and the
 removal quantity, checking count, CellRef values/change tracking, RefData and
 detachment. Changing live state to the proposed remainder still rejects.
 
-Existing destination stacks retain their own applicable RefData. Shared stock
-normalization resets ownership and CellRef position; signed arithmetic adds the
-same removal quantity. The incoming value remains source-derived.
-`getDestinationItem()` returns the owned stack result or the incoming value for a
-new stack. Scripted items never stack; detached registration and OnPCAdd ordering
-remain unchanged. Explicit player destinations use a null script cell; nonplayers
-retain the incoming local and use the owner cell. Inherited new-stack preparation
-retains activation flags that stock copying clears; complete new-stack parity is
-not claimed.
+Stock `addNewStack` copy-constructs RefData before registration and OnPCAdd.
+[RefData](../../apps/openmw/mwworld/refdata.cpp) now shares that activation-flag
+clearing with detached preparation, only when a new stack is selected. Suppression,
+OnActivate and buffered activation are cleared; unrelated bits and other applicable
+RefData survive. The original source witness and post-removal source retain their
+flags and locals. Existing destination stacks retain their own RefData and flags.
+
+Shared normalization resets ownership and CellRef position; signed arithmetic
+uses the same removal quantity. `getDestinationItem()` returns the owned stack
+result or the normalized incoming value for a new stack. Scripted items never
+stack. Registration preparation precedes OnPCAdd; explicit player destinations
+use a null script cell and set OnPCAdd, while nonplayers retain the incoming local
+and use the owner cell. No public mutable view or activation mutator was added.
 
 Validation also checks stores/owners, WorldModel mappings, content-store identity,
 player/service/listener bindings, full-removal selection and registrations.
@@ -66,26 +70,30 @@ boundaries and production authority remain unchanged.
 Windows MSVC RelWithDebInfo, `build/vnext-product`, individually:
 
 - `tes3mp_native_loadout_tests` focused build: exit 0.
-- `inventory-transfer-preparation`: exit 0.
+- `inventory-transfer-preparation`: exit 0 after fixing a test observation that
+  called global-World `search`; initial exit was -1073741819. The replacement
+  iterates current disposable-store members.
 - `inventory-two-owners`, `inventory-scripted`: each exit 0.
-- Documentation budget, local-link and patch-registry semantic-field guards:
-  each exit 0.
 
-The expanded synthetic preparation filter compares proposed source values and
-applicable RefData with stock removal in disposable stores with separate owners,
-WorldModel and scripts. It also retains stock destination comparisons. Coverage
-includes both directions, positive/negative source and destination counts,
-partial/full removal, plain/scripted items, existing/new stacks, player contexts,
-stale/replaced sources, corrupted results, move assignment and discard.
+The expanded synthetic filter compares source and destination RefData with stock
+add/remove in disposable stores with separate owners, WorldModel and scripts.
+Coverage includes every runtime/save-load reachable activation combination and
+unrelated flag bits, both directions, signed source/destination counts, partial/full
+removal, plain/scripted items, existing/new stacks, and player/nonplayer contexts.
+It checks stock registration before OnPCAdd and detached clearing before that
+lookup; corrupted new-stack flags, corrupted source results and normalized live
+source flags reject. Move construction/assignment, discard and late consumer-copy
+failure exercise the flag matrix.
 
-Snapshots compare live values/buffers, weight, selection, bindings, WorldModel
-mappings/revision/ID counter, script membership/cursor and notifications. Late
+Snapshots compare live values/buffers and supported RefData flags, weight,
+selection, bindings, WorldModel mappings/revision/ID counter, script
+membership/cursor and notifications. Late
 consumer-copy failures unwind after all results exist; lifetime counters and OSG
 observers check source/incoming/destination discard and replaced source-result
 ownership. No Environment, World, UI or Lua runtime is initialized; actors are
 synthetic NPC identities with real engine base stores/cells.
 
-Logs: `build/logs/native-source-value-*`. No complete suites, expensive gates or
+Logs: `build/logs/native-activation-*`. No complete suites, expensive gates or
 upstream baseline tests ran.
 
 ## Remaining limits and inherited evidence
@@ -100,4 +108,4 @@ Inherited M1 real-Morrowind/enchantment-charge evidence under
 remains unverified. Independent networking/standalone targets and the migration
 base are unchanged. Broad openmw-lib rendering dependencies still need extraction
 before production headless packaging. Whole-baseline provenance debt remains;
-only the touched patch-registry entry changed.
+only the touched patch-registry entries changed.

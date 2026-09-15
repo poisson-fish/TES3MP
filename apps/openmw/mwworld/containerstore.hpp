@@ -154,7 +154,8 @@ namespace MWWorld
         // Owned post-removal source value, including zero for full removal.
         // Retains applicable source RefData; detached with no script cleanup.
         ConstPtr getSourceItem() const;
-        // Incoming source-derived value, with the removal quantity.
+        // Incoming source-derived value, with the removal quantity. New stacks
+        // clear stock activation flags before script registration/OnPCAdd.
         ConstPtr getItem() const;
         // Owned post-add value: preserves the selected destination stack's state,
         // or returns the incoming value for a new stack. Always unregistered.
