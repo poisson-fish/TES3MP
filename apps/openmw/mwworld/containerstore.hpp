@@ -46,6 +46,10 @@ namespace MWWorld
     class ESMStore;
     class LocalScripts;
     class WorldModel;
+    template <class PtrType>
+    class ContainerStoreIteratorBase;
+    using ContainerStoreIterator = ContainerStoreIteratorBase<Ptr>;
+    using ConstContainerStoreIterator = ContainerStoreIteratorBase<ConstPtr>;
 
     // Operation-local dependencies. Both script services are required for scripts;
     // nullptr rejects scripted items before mutation.
@@ -169,7 +173,7 @@ namespace MWWorld
         // owned but are excluded from this non-gold MISC membership view.
         // All values are detached; new membership does not allocate a live identity.
         std::vector<InventoryItem> getDestinationInventory() const;
-        // Original identity to retain, or unset for no selection. No iterator.
+        // Original identity to retain, or unset for no selection.
         ESM::RefNum getSourceSelection() const;
         // Stock addition retains the original selection, even on a replaced stack.
         ESM::RefNum getDestinationSelection() const;
@@ -226,6 +230,31 @@ namespace MWWorld
         // Item views reference only the owned stock lists; unaffected mappings
         // retain compare-only keys and expose empty items. No installation API.
         const PtrRegistry::PreparedStorage& getRegistryStorage() const;
+        // Compare-only witnesses for private stock iterator positions. The exact
+        // relocation object binds the pair, quantity, values and all service results.
+        // No saved iterator is exposed by reference, including for fault injection.
+        struct IteratorBindings
+        {
+            const Relocation* mRelocation;
+            const MiscList* mSourceStorage;
+            const MiscList* mDestinationStorage;
+            const LocalScripts::PreparedStorage* mSourceScripts;
+            const LocalScripts::PreparedStorage* mDestinationScripts;
+            const PtrRegistry::PreparedStorage* mRegistry;
+            int mCount;
+            bool operator==(const IteratorBindings&) const = default;
+        };
+        const IteratorBindings& getIteratorBindings() const;
+        // Check current owned storage before copying any saved iterator. These
+        // read-only copies traverse isolated stock stores/lists and their own end
+        // sentinels. They expire with the pair's state, never refer to live items,
+        // and neither install a selection nor advance a service's live cursor.
+        ConstContainerStoreIterator getSourceSelectionIterator() const;
+        ConstContainerStoreIterator getDestinationSelectionIterator() const;
+        ConstContainerStoreIterator getSourceEndIterator() const;
+        ConstContainerStoreIterator getDestinationEndIterator() const;
+        LocalScripts::PreparedStorage::Entries::const_iterator getSourceScriptCursorIterator() const;
+        LocalScripts::PreparedStorage::Entries::const_iterator getDestinationScriptCursorIterator() const;
         bool hasRemovalNotification() const;
         bool hasAdditionNotification() const;
 
@@ -236,12 +265,6 @@ namespace MWWorld
         explicit PreparedContainerTransfer(std::unique_ptr<State> state);
         const State& state() const;
     };
-
-    template <class PtrType>
-    class ContainerStoreIteratorBase;
-
-    typedef ContainerStoreIteratorBase<Ptr> ContainerStoreIterator;
-    typedef ContainerStoreIteratorBase<ConstPtr> ConstContainerStoreIterator;
 
     class ResolutionListener
     {
@@ -511,6 +534,8 @@ namespace MWWorld
         ESM::RefNum transferSelection() const;
         static PreparedContainerTransfer::Relocation relocateTransfer(const PreparedContainerTransfer& prepared);
         static void validateTransferStorage(const PreparedContainerTransfer& prepared);
+        static void prepareTransferIterators(PreparedContainerTransfer& prepared);
+        static void validateTransferIterators(const PreparedContainerTransfer& prepared);
         PreparedContainerAdd prepareTransferAdd(std::unique_ptr<LiveCellRef<ESM::Miscellaneous>> item,
             const ContainerStoreAddContext& context, LocalScripts::PreparedList* scriptList);
         struct ItemRemoval
@@ -745,6 +770,7 @@ namespace MWWorld
         friend class ContainerStoreIteratorBase<ConstPtr>;
         friend class ResolutionListener;
         friend class MWClass::Container;
+        friend class PreparedContainerTransfer;
     };
 
     template <class T, class U>

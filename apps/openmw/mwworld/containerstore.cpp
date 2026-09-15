@@ -846,7 +846,9 @@ struct MWWorld::PreparedContainerTransfer::State
     ESM::RefNum mDestinationIdentity;
     // Keep the stock list objects inside the heap-owned State: moving the pair
     // never moves a list, its nodes or its end sentinel. No live iterator is kept.
-    CellRefList<ESM::Miscellaneous> mSourceList, mDestinationList;
+    // Isolated stock owners make ContainerStoreIterator traversal/end semantics
+    // usable without ever crossing into a live inventory. Only MISC lists are filled.
+    ContainerStore mSourceInventory, mDestinationInventory;
     Relocation mRelocation;
     // Declared after inventory lists: script entries are destroyed before the
     // owned items they reference, on discard, failure and move assignment alike.
@@ -858,6 +860,19 @@ struct MWWorld::PreparedContainerTransfer::State
     ContainerStoreListener* mSourceListener = nullptr;
     ContainerStoreListener* mDestinationListener = nullptr;
     std::function<void(const Ptr&)> mSourceUpdated;
+    struct Iterators
+    {
+        IteratorBindings mBindings;
+        ContainerStoreIterator mSourceSelection, mDestinationSelection;
+        // End is a logical position, never a saved std::list end iterator: empty
+        // list replacement can invalidate a sentinel without changing any nodes.
+        std::optional<LocalScripts::PreparedStorage::Entries::iterator> mSourceCursor, mDestinationCursor;
+        std::vector<std::shared_ptr<const void>> mSourceNodes, mDestinationNodes, mSourceScriptNodes,
+            mDestinationScriptNodes;
+        std::shared_ptr<const void> mSourceStorageIdentity, mDestinationStorageIdentity;
+    };
+    // Last to die first, before script/registry storage and inventory end sentinels.
+    std::unique_ptr<Iterators> mIterators;
 };
 
 MWWorld::PreparedContainerTransfer::PreparedContainerTransfer(std::unique_ptr<State> state)
@@ -994,12 +1009,12 @@ bool MWWorld::PreparedContainerTransfer::hasAdditionNotification() const
 
 const MWWorld::PreparedContainerTransfer::MiscList& MWWorld::PreparedContainerTransfer::getSourceStorage() const
 {
-    return state().mSourceList.mList;
+    return state().mSourceInventory.mLists.mMiscItems.mList;
 }
 
 const MWWorld::PreparedContainerTransfer::MiscList& MWWorld::PreparedContainerTransfer::getDestinationStorage() const
 {
-    return state().mDestinationList.mList;
+    return state().mDestinationInventory.mLists.mMiscItems.mList;
 }
 
 const MWWorld::PreparedContainerTransfer::Relocation& MWWorld::PreparedContainerTransfer::getRelocation() const
@@ -1021,6 +1036,56 @@ const MWWorld::LocalScripts::PreparedStorage& MWWorld::PreparedContainerTransfer
 const MWWorld::PtrRegistry::PreparedStorage& MWWorld::PreparedContainerTransfer::getRegistryStorage() const
 {
     return *state().mRegistryStorage;
+}
+
+const MWWorld::PreparedContainerTransfer::IteratorBindings&
+MWWorld::PreparedContainerTransfer::getIteratorBindings() const
+{
+    return state().mIterators->mBindings;
+}
+
+MWWorld::ConstContainerStoreIterator MWWorld::PreparedContainerTransfer::getSourceSelectionIterator() const
+{
+    ContainerStore::validateTransferStorage(*this);
+    return state().mIterators->mSourceSelection;
+}
+
+MWWorld::ConstContainerStoreIterator MWWorld::PreparedContainerTransfer::getDestinationSelectionIterator() const
+{
+    ContainerStore::validateTransferStorage(*this);
+    return state().mIterators->mDestinationSelection;
+}
+
+MWWorld::ConstContainerStoreIterator MWWorld::PreparedContainerTransfer::getSourceEndIterator() const
+{
+    ContainerStore::validateTransferStorage(*this);
+    return state().mSourceInventory.end();
+}
+
+MWWorld::ConstContainerStoreIterator MWWorld::PreparedContainerTransfer::getDestinationEndIterator() const
+{
+    ContainerStore::validateTransferStorage(*this);
+    return state().mDestinationInventory.end();
+}
+
+MWWorld::LocalScripts::PreparedStorage::Entries::const_iterator
+MWWorld::PreparedContainerTransfer::getSourceScriptCursorIterator() const
+{
+    ContainerStore::validateTransferStorage(*this);
+    const auto& cursor = state().mIterators->mSourceCursor;
+    if (cursor)
+        return *cursor;
+    return getSourceScriptStorage().getEntries().end();
+}
+
+MWWorld::LocalScripts::PreparedStorage::Entries::const_iterator
+MWWorld::PreparedContainerTransfer::getDestinationScriptCursorIterator() const
+{
+    ContainerStore::validateTransferStorage(*this);
+    const auto& cursor = state().mIterators->mDestinationCursor;
+    if (cursor)
+        return *cursor;
+    return getDestinationScriptStorage().getEntries().end();
 }
 
 namespace
@@ -1052,11 +1117,11 @@ ESM::RefNum MWWorld::ContainerStore::transferSelection() const
 {
     if (mSelectedEnchantItem == end())
         return {};
-    // Read only a current member, never dereference the stored selection. A
-    // dormant or foreign selection cannot describe this MISC inventory result.
-    for (auto iter = begin(Type_Miscellaneous); iter != end(); ++iter)
-        if (iter == mSelectedEnchantItem)
-            return iter->getCellRef().getRefNum();
+    // Read only a current raw member, never dereference the stored selection.
+    // A stock selection can point to a dormant node even though begin/++ skip it.
+    for (auto iter = mLists.mMiscItems.mList.begin(); iter != mLists.mMiscItems.mList.end(); ++iter)
+        if (ConstContainerStoreIterator(this, iter) == mSelectedEnchantItem)
+            return iter->mRef.getRefNum();
     throw std::invalid_argument("Container transfer preparation selection changed or unsupported");
 }
 
@@ -1204,11 +1269,11 @@ MWWorld::PreparedContainerTransfer MWWorld::ContainerStore::prepareTransfer(cons
     };
     auto& owned = *prepared.mState;
     for (const auto& member : owned.mSourceValues)
-        append(owned.mSourceList, ConstPtr(member.mResult.get()));
+        append(owned.mSourceInventory.mLists.mMiscItems, ConstPtr(member.mResult.get()));
     for (const auto& member : owned.mDestinationValues)
-        append(owned.mDestinationList, ConstPtr(member.mResult.get()));
+        append(owned.mDestinationInventory.mLists.mMiscItems, ConstPtr(member.mResult.get()));
     if (!owned.mDestinationItemIndex)
-        append(owned.mDestinationList, prepared.getDestinationItem());
+        append(owned.mDestinationInventory.mLists.mMiscItems, prepared.getDestinationItem());
     owned.mRelocation = relocateTransfer(prepared);
     std::vector<Ptr> scriptNodes;
     std::vector<std::pair<ESM::RefNum, Ptr>> registryNodes;
@@ -1221,16 +1286,17 @@ MWWorld::PreparedContainerTransfer MWWorld::ContainerStore::prepareTransfer(cons
             registryNodes.emplace_back(id.isSet() ? id : owned.mDestinationIdentity, Ptr(&node));
         }
     };
-    collectNodes(owned.mSourceList.mList, owned.mRelocation.mSource);
-    collectNodes(owned.mDestinationList.mList, owned.mRelocation.mDestination);
+    collectNodes(owned.mSourceInventory.mLists.mMiscItems.mList, owned.mRelocation.mSource);
+    collectNodes(owned.mDestinationInventory.mLists.mMiscItems.mList, owned.mRelocation.mDestination);
     owned.mSourceScriptStorage
         = sourceContext.mLocalScripts.prepareStorage(owned.mRelocation.mSourceScripts, scriptNodes);
     if (owned.mRelocation.mDestinationScripts)
         owned.mDestinationScriptStorage
             = destinationContext.mLocalScripts->prepareStorage(*owned.mRelocation.mDestinationScripts, scriptNodes);
     owned.mRegistryStorage = PtrRegistry::prepareStorage(owned.mRelocation.mRegistry, registryNodes);
-    // The last fallible consumer copy follows inventory/script list and registry
-    // map allocation. Failure destroys pointer storage before the owned items.
+    prepareTransferIterators(prepared);
+    // The last fallible consumer copy follows stock iterator binding as well as
+    // inventory/script/registry allocation. Failure destroys iterators before lists.
     owned.mSourceUpdated = sourceContext.mInventoryUpdated;
     validateTransfer(prepared, destination, sourceContext, destinationContext);
     return prepared;
@@ -1422,19 +1488,114 @@ MWWorld::PreparedContainerTransfer::Relocation MWWorld::ContainerStore::relocate
                   ++i;
               }
           };
-    relocate(
-        state.mSourceValues, state.mSourceList.mList, result.mSource, state.mSourceSelection, result.mSourceSelection);
-    relocate(state.mDestinationValues, state.mDestinationList.mList, result.mDestination, state.mDestinationSelection,
-        result.mDestinationSelection);
+    relocate(state.mSourceValues, state.mSourceInventory.mLists.mMiscItems.mList, result.mSource,
+        state.mSourceSelection, result.mSourceSelection);
+    relocate(state.mDestinationValues, state.mDestinationInventory.mLists.mMiscItems.mList, result.mDestination,
+        state.mDestinationSelection, result.mDestinationSelection);
     result.mSourceScripts = LocalScripts::relocateList(prepared.getSourceScripts(), scriptBindings);
     if (state.mDestinationScriptList)
         result.mDestinationScripts = LocalScripts::relocateList(prepared.getDestinationScripts(), scriptBindings);
     return result;
 }
 
+void MWWorld::ContainerStore::prepareTransferIterators(PreparedContainerTransfer& prepared)
+{
+    auto& state = *prepared.mState;
+    const auto selection = [](auto& inventory, const ConstPtr& selected) {
+        for (auto it = inventory.mLists.mMiscItems.mList.begin(); it != inventory.mLists.mMiscItems.mList.end(); ++it)
+            if (&*it == selected.mRef)
+                return ContainerStoreIterator(&inventory, it);
+        if (!selected.isEmpty())
+            throw std::invalid_argument("Container transfer preparation selection iterator node missing");
+        return inventory.end();
+    };
+    const auto cursor
+        = [](auto& storage, size_t position) -> std::optional<LocalScripts::PreparedStorage::Entries::iterator> {
+        if (position > storage.mEntries.size())
+            throw std::invalid_argument("Container transfer preparation script iterator position invalid");
+        if (position == storage.mEntries.size())
+            return std::nullopt;
+        return std::next(storage.mEntries.begin(), position);
+    };
+    auto& sourceScripts = *state.mSourceScriptStorage;
+    auto& destinationScripts = state.mDestinationScriptStorage ? *state.mDestinationScriptStorage : sourceScripts;
+    state.mIterators
+        = std::make_unique<PreparedContainerTransfer::State::Iterators>(PreparedContainerTransfer::State::Iterators{
+            { &state.mRelocation, &state.mSourceInventory.mLists.mMiscItems.mList,
+                &state.mDestinationInventory.mLists.mMiscItems.mList, &sourceScripts, &destinationScripts,
+                state.mRegistryStorage.get(), state.mRemoval.getCount() },
+            selection(state.mSourceInventory, state.mRelocation.mSourceSelection),
+            selection(state.mDestinationInventory, state.mRelocation.mDestinationSelection),
+            cursor(sourceScripts, state.mRelocation.mSourceScripts.mCursor),
+            cursor(destinationScripts, prepared.getDestinationScripts().mCursor) });
+    state.mIterators->mSourceStorageIdentity = state.mSourceInventory.mStorageIdentity;
+    state.mIterators->mDestinationStorageIdentity = state.mDestinationInventory.mStorageIdentity;
+    const auto bindNodes = [](auto& nodes, auto& identities) {
+        identities.reserve(nodes.size());
+        for (auto& node : nodes)
+            identities.push_back(node.mPreparedIdentity.bind());
+    };
+    bindNodes(state.mSourceInventory.mLists.mMiscItems.mList, state.mIterators->mSourceNodes);
+    bindNodes(state.mDestinationInventory.mLists.mMiscItems.mList, state.mIterators->mDestinationNodes);
+    bindNodes(sourceScripts.mEntries, state.mIterators->mSourceScriptNodes);
+    bindNodes(destinationScripts.mEntries, state.mIterators->mDestinationScriptNodes);
+}
+
+void MWWorld::ContainerStore::validateTransferIterators(const PreparedContainerTransfer& prepared)
+{
+    const auto& state = prepared.state();
+    const PreparedContainerTransfer::IteratorBindings expected{ &state.mRelocation,
+        &state.mSourceInventory.mLists.mMiscItems.mList, &state.mDestinationInventory.mLists.mMiscItems.mList,
+        state.mSourceScriptStorage.get(),
+        state.mDestinationScriptStorage ? state.mDestinationScriptStorage.get() : state.mSourceScriptStorage.get(),
+        state.mRegistryStorage.get(), state.mRemoval.getCount() };
+    if (!state.mIterators || state.mIterators->mBindings != expected)
+        throw std::invalid_argument("Container transfer preparation iterator bindings changed");
+    const auto validateNodes = [](const auto& nodes, const auto& identities) {
+        if (nodes.size() != identities.size())
+            throw std::invalid_argument("Container transfer preparation iterator node lifetimes changed");
+        size_t i = 0;
+        for (const auto& node : nodes)
+            if (!node.mPreparedIdentity.matches(identities[i++]))
+                throw std::invalid_argument("Container transfer preparation iterator node lifetimes changed");
+    };
+    validateNodes(state.mSourceInventory.mLists.mMiscItems.mList, state.mIterators->mSourceNodes);
+    validateNodes(state.mDestinationInventory.mLists.mMiscItems.mList, state.mIterators->mDestinationNodes);
+    validateNodes(expected.mSourceScripts->mEntries, state.mIterators->mSourceScriptNodes);
+    validateNodes(expected.mDestinationScripts->mEntries, state.mIterators->mDestinationScriptNodes);
+    // Called only after inventory nodes/values, relocation, script nodes/cursors
+    // and registry storage have all been checked. Saved iterators are private;
+    // replacing/destroying any of their nodes must reject before even copying or
+    // comparing them. Never use a saved iterator to establish its own validity.
+    const auto selection = [](const auto& inventory, const ConstPtr& selected, const auto& saved) {
+        auto current = inventory.end();
+        for (auto it = inventory.mLists.mMiscItems.mList.begin(); it != inventory.mLists.mMiscItems.mList.end(); ++it)
+            if (&*it == selected.mRef)
+                current = ConstContainerStoreIterator(&inventory, it);
+        if (saved != current)
+            throw std::invalid_argument("Container transfer preparation selection iterator changed");
+    };
+    selection(state.mSourceInventory, state.mRelocation.mSourceSelection, state.mIterators->mSourceSelection);
+    selection(
+        state.mDestinationInventory, state.mRelocation.mDestinationSelection, state.mIterators->mDestinationSelection);
+    const auto validateCursor = [](const auto& entries, size_t position, const auto& saved) {
+        if (saved.has_value() != (position != entries.size()))
+            throw std::invalid_argument("Container transfer preparation script iterator changed");
+        if (saved && *saved != std::next(entries.begin(), position))
+            throw std::invalid_argument("Container transfer preparation script iterator changed");
+    };
+    validateCursor(
+        expected.mSourceScripts->mEntries, state.mRelocation.mSourceScripts.mCursor, state.mIterators->mSourceCursor);
+    validateCursor(expected.mDestinationScripts->mEntries, prepared.getDestinationScripts().mCursor,
+        state.mIterators->mDestinationCursor);
+}
+
 void MWWorld::ContainerStore::validateTransferStorage(const PreparedContainerTransfer& prepared)
 {
     const auto& state = prepared.state();
+    if (!state.mIterators || state.mIterators->mSourceStorageIdentity != state.mSourceInventory.mStorageIdentity
+        || state.mIterators->mDestinationStorageIdentity != state.mDestinationInventory.mStorageIdentity)
+        throw std::invalid_argument("Container transfer preparation iterator storage changed");
     const auto validate = [](const auto& list, const auto& values, const ConstPtr& appended) {
         if (list.size() != values.size() + !appended.isEmpty())
             throw std::invalid_argument("Container transfer preparation owned storage membership changed");
@@ -1449,8 +1610,8 @@ void MWWorld::ContainerStore::validateTransferStorage(const PreparedContainerTra
             ++i;
         }
     };
-    validate(state.mSourceList.mList, state.mSourceValues, ConstPtr());
-    validate(state.mDestinationList.mList, state.mDestinationValues,
+    validate(state.mSourceInventory.mLists.mMiscItems.mList, state.mSourceValues, ConstPtr());
+    validate(state.mDestinationInventory.mLists.mMiscItems.mList, state.mDestinationValues,
         state.mDestinationItemIndex ? ConstPtr() : prepared.getDestinationItem());
     // Recompute bindings from current owned list nodes, never dereference a
     // relocation view: corrupted views may refer to destroyed or foreign nodes.
@@ -1474,7 +1635,8 @@ void MWWorld::ContainerStore::validateTransferStorage(const PreparedContainerTra
     if (!state.mSourceScriptStorage || bool(state.mDestinationScriptStorage) != bool(state.mDestinationScriptList))
         throw std::invalid_argument("Container transfer preparation script storage binding changed");
     std::vector<ConstPtr> scriptNodes;
-    for (const auto* list : { &state.mSourceList.mList, &state.mDestinationList.mList })
+    for (const auto* list :
+        { &state.mSourceInventory.mLists.mMiscItems.mList, &state.mDestinationInventory.mLists.mMiscItems.mList })
         for (const auto& node : *list)
             scriptNodes.emplace_back(&node);
     // Relocation has just been independently checked against the protected
@@ -1494,6 +1656,7 @@ void MWWorld::ContainerStore::validateTransferStorage(const PreparedContainerTra
             registryNodes.emplace_back(
                 view.mIdentity.isSet() ? view.mIdentity : state.mDestinationIdentity, view.mItem);
     PtrRegistry::validateStorage(*state.mRegistryStorage, actual.mRegistry, registryNodes);
+    validateTransferIterators(prepared);
 }
 
 MWWorld::ContainerStoreIterator MWWorld::ContainerStore::addWithContext(

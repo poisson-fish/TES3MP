@@ -1515,6 +1515,16 @@ namespace
         static_assert(!std::is_copy_constructible_v<Pair> && !std::is_copy_assignable_v<Pair>);
         using ScriptStorage = MWWorld::LocalScripts::PreparedStorage;
         using RegistryStorage = MWWorld::PtrRegistry::PreparedStorage;
+        static_assert(std::is_same_v<decltype(std::declval<const Pair&>().getSourceSelectionIterator()),
+            MWWorld::ConstContainerStoreIterator>);
+        static_assert(
+            std::is_same_v<decltype(std::declval<const Pair&>().getDestinationSelectionIterator()->getRefData()),
+                const MWWorld::RefData&>);
+        static_assert(std::is_same_v<decltype(std::declval<const Pair&>().getSourceScriptCursorIterator()),
+            ScriptStorage::Entries::const_iterator>);
+        static_assert(std::is_same_v<
+            decltype(std::declval<const Pair&>().getDestinationScriptCursorIterator()->getItem().getRefData()),
+            const MWWorld::RefData&>);
         static_assert(
             std::is_same_v<decltype(std::declval<const Pair&>().getRegistryStorage()), const RegistryStorage&>);
         static_assert(!std::is_copy_constructible_v<RegistryStorage> && !std::is_move_constructible_v<RegistryStorage>);
@@ -1850,6 +1860,30 @@ namespace
                 paired.getSourceStorage(), relocation.mSource, sourceNodes, relocation.mSourceSelection, source);
             compareStorage(paired.getDestinationStorage(), relocation.mDestination, destinationNodes,
                 relocation.mDestinationSelection, destination);
+            const auto compareSelectionIterator
+                = [&](auto selected, const auto& end, const MWWorld::ContainerStore& stock, const auto& relocated) {
+                      require(selected.getContainerStore() == end.getContainerStore()
+                              && end.getContainerStore() != item.mContainerStore
+                              && end.getContainerStore() != &liveDestination && end.getType() == -1,
+                          "selection iterator is bound to a live/foreign store or invalid end");
+                      auto actual = stock.getSelectedEnchantItem();
+                      require((selected == end) == (actual == stock.end()), "selection iterator lost stock end");
+                      if (selected != end)
+                          require(selected->mRef == relocated.mRef, "selection iterator lost its relocated owned node");
+                      for (; actual != stock.end(); ++actual, ++selected)
+                          require(selected != end && relocatedReferences.at(&selected->getCellRef()) == *actual
+                                  && selected->getRefData().matchesContainerTransferState(actual->getRefData())
+                                  && !selected->getCellRef().getRefNum().isSet() && !selected->mRef->mWorldModel
+                                  && selected->mCell == nullptr && selected->mContainerStore == end.getContainerStore(),
+                              "prepared selection iterator traversal differs from stock or retained a live item");
+                      require(selected == end, "selection iterator lost stock dormant skipping or end");
+                  };
+            compareSelectionIterator(paired.getSourceSelectionIterator(), paired.getSourceEndIterator(), source,
+                relocation.mSourceSelection);
+            compareSelectionIterator(paired.getDestinationSelectionIterator(), paired.getDestinationEndIterator(),
+                destination, relocation.mDestinationSelection);
+            require(paired.getSourceEndIterator() != paired.getDestinationEndIterator(),
+                "distinct prepared inventory end sentinels compare equal");
             require(relocation.mRegistry.mRevision == proposedRegistry.mRevision
                     && relocation.mRegistry.mLastGenerated == proposedRegistry.mLastGenerated
                     && relocation.mRegistry.mEntries.size() == proposedRegistry.mEntries.size(),
@@ -1890,7 +1924,7 @@ namespace
                 }
             }
             const auto compareRelocatedScripts = [&](const auto& proposed, MWWorld::LocalScripts& stock,
-                                                     const ScriptStorage& storage) {
+                                                     const ScriptStorage& storage, auto tail) {
                 const auto actual = stock.snapshot();
                 require(proposed.mCursor == actual.mCursor && proposed.mEntries.size() == actual.mEntries.size(),
                     "script relocation changed stock order/cursor");
@@ -1942,10 +1976,12 @@ namespace
                 }
                 require((storage.getCursor() == nullptr) == (actual.mCursor == actual.mEntries.size()),
                     "owned script cursor lost stock end");
-                // Walk real owned list nodes from the relocated cursor and compare
-                // the tail with stock getNext; never execute either set of scripts.
-                auto tail = std::find_if(storage.getEntries().begin(), storage.getEntries().end(),
-                    [&](const auto& entry) { return &entry == storage.getCursor(); });
+                // Use the actual prepared stock iterator, including an empty/end
+                // cursor, and compare with stock getNext without executing scripts.
+                require((tail == storage.getEntries().end()) == (storage.getCursor() == nullptr),
+                    "prepared script iterator lost its owned end sentinel");
+                if (tail != storage.getEntries().end())
+                    require(&*tail == storage.getCursor(), "prepared script iterator lost its current node");
                 std::pair<ESM::RefId, MWWorld::Ptr> next;
                 while (stock.getNext(next))
                 {
@@ -1962,14 +1998,19 @@ namespace
                 for (size_t i = 0; i < actual.mCursor; ++i)
                     require(stock.getNext(next), "owned script comparison could not restore stock cursor");
             };
-            compareRelocatedScripts(relocation.mSourceScripts, stockScripts, paired.getSourceScriptStorage());
+            compareRelocatedScripts(relocation.mSourceScripts, stockScripts, paired.getSourceScriptStorage(),
+                paired.getSourceScriptCursorIterator());
             require((&paired.getSourceScriptStorage() == &paired.getDestinationScriptStorage()) == sharedScripts,
                 "owned script storage lost shared/distinct service identity");
             require(
                 relocation.mDestinationScripts.has_value() != sharedScripts, "script relocation lost shared service");
             compareRelocatedScripts(
                 relocation.mDestinationScripts ? *relocation.mDestinationScripts : relocation.mSourceScripts,
-                *destinationAdd.mLocalScripts, paired.getDestinationScriptStorage());
+                *destinationAdd.mLocalScripts, paired.getDestinationScriptStorage(),
+                paired.getDestinationScriptCursorIterator());
+            if (sharedScripts)
+                require(paired.getSourceScriptCursorIterator() == paired.getDestinationScriptCursorIterator(),
+                    "shared service prepared two different iterator positions");
             require((&paired.getSourceScripts() == &paired.getDestinationScripts()) == sharedScripts,
                 "shared/distinct script service result binding lost");
             require(onPCAddLookups == (scriptedItem && destinationAdd.mPlayer == destinationPtr ? 1 : 0),
@@ -2081,6 +2122,35 @@ namespace
                             && paired.getRemoval().getRemainingCount() != 0),
                 "paired deferred script intents differ from disposable stock behavior");
         };
+        const auto rejectIterators = [&](const Pair& decision, const std::string& message) {
+            reject([&] { decision.getSourceSelectionIterator(); }, message);
+            reject([&] { decision.getDestinationSelectionIterator(); }, message);
+            reject([&] { decision.getSourceScriptCursorIterator(); }, message);
+            reject([&] { decision.getDestinationScriptCursorIterator(); }, message);
+            reject([&] { decision.getSourceEndIterator(); }, message);
+            reject([&] { decision.getDestinationEndIterator(); }, message);
+        };
+        const auto corruptIterators = [&](Pair& decision, const Pair& other, const auto& validate) {
+            auto& bindings = const_cast<Pair::IteratorBindings&>(decision.getIteratorBindings());
+            const auto saved = bindings;
+            const auto& foreign = other.getIteratorBindings();
+            const auto corrupt = [&](const auto& change) {
+                change();
+                reject([&] { validate(decision); }, "iterator bindings changed");
+                rejectIterators(decision, "iterator bindings changed");
+                bindings = saved;
+            };
+            corrupt([&] { bindings = foreign; });
+            corrupt([&] { bindings.mRelocation = foreign.mRelocation; });
+            corrupt([&] { bindings.mRelocation = nullptr; });
+            corrupt([&] { bindings.mSourceStorage = foreign.mSourceStorage; });
+            corrupt([&] { bindings.mDestinationStorage = saved.mSourceStorage; });
+            corrupt([&] { bindings.mSourceScripts = foreign.mSourceScripts; });
+            corrupt([&] { bindings.mDestinationScripts = nullptr; });
+            corrupt([&] { bindings.mRegistry = foreign.mRegistry; });
+            corrupt([&] { ++bindings.mCount; });
+            validate(decision);
+        };
         const auto corruptStorage = [&](Pair& decision, const Pair& other, const auto& validate) {
             for (const auto* storage : { &decision.getSourceStorage(), &decision.getDestinationStorage() })
             {
@@ -2088,6 +2158,7 @@ namespace
                 Pair::MiscList removed;
                 removed.splice(removed.end(), list, list.begin());
                 reject([&] { validate(decision); }, "owned storage membership changed");
+                rejectIterators(decision, "owned storage membership changed");
                 list.splice(list.begin(), removed);
                 Pair::MiscList replacement;
                 for (const auto& node : list)
@@ -2098,6 +2169,7 @@ namespace
                 }
                 list.swap(replacement);
                 reject([&] { validate(decision); }, "relocation result changed");
+                rejectIterators(decision, "relocation result changed");
                 list.swap(replacement);
                 for (auto& node : list)
                 {
@@ -2138,6 +2210,7 @@ namespace
             const auto corrupt = [&](const auto& change) {
                 change();
                 reject([&] { validate(decision); }, "relocation result changed");
+                rejectIterators(decision, "relocation result changed");
                 result = saved;
             };
             corrupt([&] { result = other.getRelocation(); });
@@ -3570,7 +3643,21 @@ namespace
                                             = scriptStorageIdentity(initial.getDestinationScriptStorage());
                                         const auto registryStorage
                                             = registryStorageIdentity(initial.getRegistryStorage());
+                                        const auto selectionIterator = initial.getSourceSelectionIterator();
+                                        const auto destinationIterator = initial.getDestinationSelectionIterator();
+                                        const auto sourceEnd = initial.getSourceEndIterator();
+                                        const auto destinationEnd = initial.getDestinationEndIterator();
+                                        const auto sourceCursorIterator = initial.getSourceScriptCursorIterator();
+                                        const auto destinationCursorIterator
+                                            = initial.getDestinationScriptCursorIterator();
                                         auto decision = std::move(initial);
+                                        reject([&] { initial.getSourceSelectionIterator(); }, "moved from");
+                                        reject([&] { initial.getDestinationSelectionIterator(); }, "moved from");
+                                        reject([&] { initial.getSourceScriptCursorIterator(); }, "moved from");
+                                        reject([&] { initial.getDestinationScriptCursorIterator(); }, "moved from");
+                                        reject([&] { initial.getSourceEndIterator(); }, "moved from");
+                                        reject([&] { initial.getDestinationEndIterator(); }, "moved from");
+                                        reject([&] { initial.getIteratorBindings(); }, "moved from");
                                         reject([&] { initial.getSourceScripts(); }, "moved from");
                                         reject([&] { initial.getDestinationScripts(); }, "moved from");
                                         reject([&] { initial.getSourceScriptStorage(); }, "moved from");
@@ -3583,6 +3670,14 @@ namespace
                                             "move construction moved script storage, nodes or cursor");
                                         auto assigned = make(quantity);
                                         assigned = std::move(decision);
+                                        require(assigned.getSourceSelectionIterator() == selectionIterator
+                                                && assigned.getDestinationSelectionIterator() == destinationIterator
+                                                && assigned.getSourceEndIterator() == sourceEnd
+                                                && assigned.getDestinationEndIterator() == destinationEnd
+                                                && assigned.getSourceScriptCursorIterator() == sourceCursorIterator
+                                                && assigned.getDestinationScriptCursorIterator()
+                                                    == destinationCursorIterator,
+                                            "pair moves changed saved stock iterators or end sentinels");
                                         reject([&] { validate(decision); }, "moved from");
                                         reject([&] { decision.getSourceScriptStorage(); }, "moved from");
                                         reject([&] { decision.getDestinationScriptStorage(); }, "moved from");
@@ -3599,9 +3694,59 @@ namespace
                                         validate(assigned);
                                         compareStock(assigned, item, destination, sourceAdd, destinationAdd);
                                         auto sameQuantity = make(quantity);
+                                        if (sourceCursor == 0 && destinationCursor == 0)
+                                            corruptIterators(assigned, sameQuantity, validate);
                                         corruptScriptStorage(assigned, sameQuantity, validate);
                                         corruptRegistryStorage(assigned, sameQuantity, validate);
+                                        if (sourceCursor == 0 && destinationCursor == 0)
+                                            for (bool sourceSide : { false, true })
+                                            {
+                                                auto replacedStore = make(quantity);
+                                                const auto selected = sourceSide
+                                                    ? replacedStore.getSourceSelectionIterator()
+                                                    : replacedStore.getDestinationSelectionIterator();
+                                                auto& inventory = const_cast<MWWorld::ContainerStore&>(
+                                                    *selected.getContainerStore());
+                                                MWWorld::ContainerStore copied(inventory);
+                                                inventory = copied;
+                                                reject([&] { validate(replacedStore); }, "iterator storage changed");
+                                                rejectIterators(replacedStore, "iterator storage changed");
+                                                MWWorld::ContainerStore empty;
+                                                inventory = std::move(empty);
+                                                reject([&] { validate(replacedStore); }, "iterator storage changed");
+                                                rejectIterators(replacedStore, "iterator storage changed");
+                                                // Reconstruct a payload at exactly the same address with
+                                                // identical values/keys. Address checks alone cannot prove
+                                                // the lifetime of a saved stock iterator.
+                                                auto replaced = make(quantity);
+                                                auto& nodes = const_cast<Pair::MiscList&>(sourceSide
+                                                        ? replaced.getSourceStorage()
+                                                        : replaced.getDestinationStorage());
+                                                auto* node = &nodes.front();
+                                                MWWorld::LiveCellRef<ESM::Miscellaneous> copy(
+                                                    ESM::makeBlankCellRef(), node->mBase);
+                                                copy.mRef = node->mRef;
+                                                copy.mData = node->mData.copyForContainerTransfer();
+                                                std::destroy_at(node);
+                                                std::construct_at(node, std::move(copy));
+                                                reject([&] { validate(replaced); }, "iterator node lifetimes changed");
+                                                rejectIterators(replaced, "iterator node lifetimes changed");
+
+                                                auto scriptsReplaced = make(quantity);
+                                                auto& entries = const_cast<ScriptStorage::Entries&>(sourceSide
+                                                        ? scriptsReplaced.getSourceScriptStorage().getEntries()
+                                                        : scriptsReplaced.getDestinationScriptStorage().getEntries());
+                                                const auto copyEntry = entries.front();
+                                                auto* entry = &entries.front();
+                                                std::destroy_at(entry);
+                                                std::construct_at(entry, copyEntry);
+                                                reject([&] { validate(scriptsReplaced); },
+                                                    "iterator node lifetimes changed");
+                                                rejectIterators(scriptsReplaced, "iterator node lifetimes changed");
+                                            }
                                         auto otherQuantity = make(quantity == 1 ? 4 : 1);
+                                        if (sourceCursor == 0 && destinationCursor == 0)
+                                            corruptIterators(assigned, otherQuantity, validate);
                                         corruptScriptStorage(assigned, otherQuantity, validate);
                                         corruptRegistryStorage(assigned, otherQuantity, validate);
                                         for (bool replaceSource : { false, true })
@@ -3617,6 +3762,7 @@ namespace
                                             entries.swap(replacement);
                                             replacement.clear(); // Saved node/cursor keys are now dangling.
                                             reject([&] { validate(destroyed); }, "storage node or binding changed");
+                                            rejectIterators(destroyed, "storage node or binding changed");
                                         }
                                         // Cursor changes alone must invalidate either service.
                                         for (auto* service : { &sourceScripts, &addedScripts })
@@ -3728,7 +3874,7 @@ namespace
                         require(failed && copies == 1 && alive == 0 && emitted == 0
                                 && beforeFailure
                                     == std::tuple{ snapshot(), sourceScripts.snapshot(), addedScripts.snapshot() },
-                            "failure after registry storage preparation leaked state, intents or notifications");
+                            "failure after stock iterator preparation leaked state, intents or notifications");
                         validate(make(4));
                     }
                     // Empty lists and a sole source registration cover erase-to-end
@@ -3752,7 +3898,23 @@ namespace
                                     && decision.getDestinationScripts().mCursor
                                         == decision.getDestinationScripts().mEntries.size(),
                                 "erase-to-end/empty append exposed a new registration to an end cursor");
+                            // Replace list sentinels while keeping every node and its
+                            // lifetime. End positions must resolve against current storage;
+                            // no saved end iterator may be copied or compared here.
+                            for (const auto* storage :
+                                { &decision.getSourceScriptStorage(), &decision.getDestinationScriptStorage() })
+                            {
+                                auto& entries = const_cast<ScriptStorage::Entries&>(storage->getEntries());
+                                ScriptStorage::Entries replacement;
+                                replacement.splice(replacement.end(), entries);
+                                entries.swap(replacement);
+                            }
                             source.validateTransfer(decision, destination, removal, destinationAdd);
+                            require(decision.getSourceScriptCursorIterator()
+                                        == decision.getSourceScriptStorage().getEntries().end()
+                                    && decision.getDestinationScriptCursorIterator()
+                                        == decision.getDestinationScriptStorage().getEntries().end(),
+                                "prepared empty/end script iterator followed a replaced sentinel");
                         }
                         require(snapshot() == before && sourceScripts.snapshot() == sourceBefore
                                 && addedScripts.snapshot() == destinationBefore,
@@ -3904,6 +4066,22 @@ namespace
                                     snapshot() == before, "owned source inventory preparation changed raw/live values");
                                 unchangedScripts();
                                 const auto dormantRef = dormant.getCellRef();
+                                const auto selectedSource = source.getSelectedEnchantItem();
+                                dormant.getCellRef().setCount(1);
+                                const auto dormantSourcePosition = std::find(source.begin(), source.end(), dormant);
+                                dormant.getCellRef() = dormantRef;
+                                source.setSelectedEnchantItem(dormantSourcePosition);
+                                {
+                                    const auto beforeDormantSelection = snapshot();
+                                    auto dormantSelection
+                                        = source.prepareTransfer(item, quantity, destination, removal, destinationAdd);
+                                    source.validateTransfer(dormantSelection, destination, removal, destinationAdd);
+                                    compareStock(dormantSelection, item, destination, sourceAdd, destinationAdd,
+                                        rawDestination, rawSource);
+                                    require(snapshot() == beforeDormantSelection,
+                                        "dormant source selection preparation changed live state");
+                                }
+                                source.setSelectedEnchantItem(selectedSource);
                                 for (int count : { 1, -1 })
                                 {
                                     dormant.getCellRef().setCount(count);
@@ -3946,13 +4124,12 @@ namespace
                                             [&] {
                                                 source.validateTransfer(decision, destination, removal, destinationAdd);
                                             },
-                                            "selection changed or unsupported");
-                                        reject(
-                                            [&] {
-                                                source.prepareTransfer(
-                                                    item, quantity, destination, removal, destinationAdd);
-                                            },
-                                            "selection changed or unsupported");
+                                            "destination selection changed");
+                                        auto dormantSelection = source.prepareTransfer(
+                                            item, quantity, destination, removal, destinationAdd);
+                                        source.validateTransfer(dormantSelection, destination, removal, destinationAdd);
+                                        compareStock(dormantSelection, item, destination, sourceAdd, destinationAdd,
+                                            rawDestination, rawSource);
                                         destination.setSelectedEnchantItem(selection);
                                     }
                                     const auto data = dormantDestination.getRefData().copyForContainerTransfer();
@@ -4066,9 +4243,24 @@ namespace
                 const auto& seed = scriptedItem ? scripted.getPtr() : plain.getPtr();
                 auto item = *source.add(seed, 4, scriptedAddA);
                 destination.add(seed, 5, scriptedAddB);
+                source.setSelectedEnchantItem(source.begin());
+                destination.setSelectedEnchantItem(destination.begin());
+                if (scriptedItem)
+                {
+                    const auto registered = localScripts.snapshot();
+                    const auto current = std::find_if(registered.mEntries.begin(), registered.mEntries.end(),
+                        [&](const auto& entry) { return entry.references(&item.getCellRef()); });
+                    positionScripts(localScripts, std::distance(registered.mEntries.begin(), current));
+                }
                 MWWorld::ContainerStoreRemoveContext removal{ worldModel, addA.mContainer, localScripts,
                     addA.mInventoryUpdated };
                 auto paired = source.prepareTransfer(item, 2, destination, removal, scriptedAddB);
+                const auto sourceSelectionIterator = paired.getSourceSelectionIterator();
+                const auto destinationSelectionIterator = paired.getDestinationSelectionIterator();
+                const auto sourceEndIterator = paired.getSourceEndIterator();
+                const auto destinationEndIterator = paired.getDestinationEndIterator();
+                const auto sourceCursorIterator = paired.getSourceScriptCursorIterator();
+                const auto destinationCursorIterator = paired.getDestinationScriptCursorIterator();
                 const auto sourceStorageValue = values(paired.getRelocation().mSource.front().mItem);
                 const auto destinationStorageValue = values(paired.getRelocation().mDestination.front().mItem);
                 const auto relocatedRegistry = paired.getRelocation().mRegistry;
@@ -4107,6 +4299,22 @@ namespace
                         && paired.getRegistryStorage().getBindings() == relocatedRegistry
                         && registryStorageIdentity(paired.getRegistryStorage()) == registryStorage,
                     "destroying live storage invalidated owned stock nodes or relocation");
+                require(paired.getSourceSelectionIterator() == sourceSelectionIterator
+                        && paired.getDestinationSelectionIterator() == destinationSelectionIterator
+                        && paired.getSourceEndIterator() == sourceEndIterator
+                        && paired.getDestinationEndIterator() == destinationEndIterator
+                        && paired.getSourceScriptCursorIterator() == sourceCursorIterator
+                        && paired.getDestinationScriptCursorIterator() == destinationCursorIterator,
+                    "destroying live inventories invalidated prepared iterators/end sentinels");
+                require(sourceSelectionIterator != sourceEndIterator
+                        && destinationSelectionIterator != destinationEndIterator
+                        && values(*sourceSelectionIterator) == sourceStorageValue
+                        && values(*destinationSelectionIterator) == destinationStorageValue,
+                    "selected owned values did not survive live inventory destruction");
+                if (scriptedItem)
+                    require(sourceCursorIterator != paired.getSourceScriptStorage().getEntries().end()
+                            && sourceCursorIterator->getItem().mRef == sourceSelectionIterator->mRef,
+                        "prepared cursor did not retain the owned source item after live destruction");
                 for (const auto& [owned, saved] : registryValues)
                     require(
                         values(owned) == saved && !owned.getCellRef().getRefNum().isSet() && !owned.mRef->mWorldModel,

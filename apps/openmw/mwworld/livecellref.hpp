@@ -5,6 +5,7 @@
 
 #include "refdata.hpp"
 
+#include <memory>
 #include <stdexcept>
 
 namespace ESM
@@ -22,9 +23,37 @@ namespace MWWorld
     template <typename X>
     struct LiveCellRef;
 
+    // Opt-in lifetime witness for prepared stock nodes. Live nodes allocate no
+    // token. Copy/move construction starts a new lifetime; assigning values to an
+    // existing node preserves its lifetime. A witness prevents address reuse from
+    // making a destroyed node's saved iterator appear valid again.
+    class PreparedNodeIdentity
+    {
+        std::shared_ptr<const void> mIdentity;
+
+    public:
+        PreparedNodeIdentity() = default;
+        PreparedNodeIdentity(const PreparedNodeIdentity&) noexcept {}
+        PreparedNodeIdentity(PreparedNodeIdentity&&) noexcept {}
+        PreparedNodeIdentity& operator=(const PreparedNodeIdentity&) noexcept { return *this; }
+        PreparedNodeIdentity& operator=(PreparedNodeIdentity&&) noexcept { return *this; }
+        std::shared_ptr<const void> bind()
+        {
+            if (!mIdentity)
+                mIdentity = std::make_shared<const char>();
+            return mIdentity;
+        }
+        bool matches(const std::shared_ptr<const void>& identity) const { return identity && mIdentity == identity; }
+    };
+
     /// Used to create pointers to hold any type of LiveCellRef<> object.
     struct LiveCellRefBase
     {
+    private:
+        friend class ContainerStore;
+        PreparedNodeIdentity mPreparedIdentity;
+
+    public:
         const Class* mClass;
 
         /** Information about this instance, such as 3D location and rotation

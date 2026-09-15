@@ -29,10 +29,12 @@ namespace MWWorld
         struct Entry
         {
             friend class LocalScripts;
+            friend class ContainerStore;
 
         private:
             Ptr mItem;
             std::shared_ptr<const ScriptRegistration> mRegistration;
+            PreparedNodeIdentity mPreparedIdentity;
 
         public:
             Entry(Ptr item, std::shared_ptr<const ScriptRegistration> registration)
@@ -91,11 +93,12 @@ namespace MWWorld
         class PreparedStorage
         {
             friend class LocalScripts;
+            friend class ContainerStore;
             const LocalScripts* mService;
             Scripts mEntries;
             std::vector<const Entry*> mNodes;
-            // A compare-only cursor relocation, nullptr for end. Never keep an
-            // iterator that could become invalid when rejecting stale storage.
+            // Compare-only witness, nullptr for end. The protected transfer keeps
+            // the stock iterator separately and validates these current nodes first.
             const Entry* mCursor = nullptr;
             explicit PreparedStorage(const LocalScripts* service)
                 : mService(service)
