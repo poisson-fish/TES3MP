@@ -94,6 +94,13 @@ namespace MWScript
 
         /// \note Locals will be automatically configured first, if necessary
         void read(const ESM::Locals& locals, const ESM::RefId& script);
+
+        /// Strict modern named values with explicit declarations; requires configured locals.
+        /// Names/counts must match exactly (input order may differ); short/long use
+        /// VT_Int and floats use finite VT_Float. No coercion or legacy fallback.
+        /// Invalid input throws invalid_argument; any failure preserves both inputs
+        /// and existing values/storage. No Environment lookup or script execution.
+        void read(const ESM::Locals& locals, const Compiler::Locals& declarations);
     };
 }
 

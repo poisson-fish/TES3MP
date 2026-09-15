@@ -1,6 +1,10 @@
 #include "locals.hpp"
 #include "globalscripts.hpp"
 
+#include <algorithm>
+#include <cmath>
+#include <iterator>
+#include <limits>
 #include <stdexcept>
 
 #include <components/compiler/locals.hpp>
@@ -199,6 +203,82 @@ namespace MWScript
         }
         locals.mVariables.swap(variables);
         return true;
+    }
+
+    void Locals::read(const ESM::Locals& locals, const Compiler::Locals& declarations)
+    {
+        if (!mInitialised)
+            throw std::invalid_argument("Local restoration requires configured locals");
+        if (declarations.get('s').size() != mShorts.size() || declarations.get('l').size() != mLongs.size()
+            || declarations.get('f').size() != mFloats.size())
+            throw std::invalid_argument("Local declaration/value shape mismatch");
+
+        // Bound lookup indices and the total without overflowing a count sum.
+        size_t remaining = locals.mVariables.size();
+        for (char type : { 's', 'l', 'f' })
+        {
+            const auto& names = declarations.get(type);
+            if (names.size() > static_cast<size_t>(std::numeric_limits<int>::max()) || names.size() > remaining)
+                throw std::invalid_argument("Invalid local value count");
+            remaining -= names.size();
+        }
+        if (remaining != 0)
+            throw std::invalid_argument("Invalid local value count");
+
+        // Validate the entire input before staging. Each unique declaration must
+        // have exactly one named value. Exact counts then exclude unknown names.
+        // Allocation-free scans also avoid allocating from unvalidated names.
+        for (char type : { 's', 'l', 'f' })
+        {
+            const auto& names = declarations.get(type);
+            for (size_t i = 0; i < names.size(); ++i)
+            {
+                const auto& name = names[i];
+                if (name.empty() || name.find('\0') != std::string::npos || declarations.getType(name) != type
+                    || declarations.getIndex(name) != static_cast<int>(i))
+                    throw std::invalid_argument("Invalid local declaration name");
+                const auto matches = [&](const auto& variable) { return variable.first == name; };
+                const auto found = std::find_if(locals.mVariables.begin(), locals.mVariables.end(), matches);
+                if (found == locals.mVariables.end()
+                    || std::find_if(std::next(found), locals.mVariables.end(), matches) != locals.mVariables.end())
+                    throw std::invalid_argument("Missing or duplicate local value name");
+                const auto& value = found->second;
+                if (value.getType() != (type == 'f' ? ESM::VT_Float : ESM::VT_Int))
+                    throw std::invalid_argument("Invalid local value type");
+                if (type == 's'
+                    && (value.getInteger() < std::numeric_limits<Interpreter::Type_Short>::min()
+                        || value.getInteger() > std::numeric_limits<Interpreter::Type_Short>::max()))
+                    throw std::invalid_argument("Short local value out of range");
+                // VT_Int and Type_Integer are both int32_t, so every long fits.
+                // VT_Float and Type_Float are both float; reject NaN/infinity.
+                if (type == 'f' && !std::isfinite(value.getFloat()))
+                    throw std::invalid_argument("Nonfinite float local value");
+            }
+        }
+
+        std::vector<Interpreter::Type_Short> shorts(mShorts.size());
+        std::vector<Interpreter::Type_Integer> longs(mLongs.size());
+        std::vector<Interpreter::Type_Float> floats(mFloats.size());
+        for (const auto& [name, value] : locals.mVariables)
+        {
+            const auto index = declarations.getIndex(name);
+            switch (declarations.getType(name))
+            {
+                case 's':
+                    shorts[index] = static_cast<Interpreter::Type_Short>(value.getInteger());
+                    break;
+                case 'l':
+                    longs[index] = value.getInteger();
+                    break;
+                case 'f':
+                    floats[index] = value.getFloat();
+                    break;
+            }
+        }
+        static_assert(noexcept(mShorts.swap(shorts)) && noexcept(mLongs.swap(longs)) && noexcept(mFloats.swap(floats)));
+        mShorts.swap(shorts);
+        mLongs.swap(longs);
+        mFloats.swap(floats);
     }
 
     void Locals::read(const ESM::Locals& locals, const ESM::RefId& script)

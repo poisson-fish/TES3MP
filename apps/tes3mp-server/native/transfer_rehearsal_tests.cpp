@@ -2,8 +2,10 @@
 #include "transfer_rehearsal.hpp"
 
 #include <algorithm>
+#include <bit>
 #include <cstdint>
 #include <iostream>
+#include <limits>
 #include <new>
 #include <optional>
 
@@ -456,6 +458,13 @@ namespace MWWorld::Testing
                 if (failAt)
                     require(output && capture(*output) == before, "failed serialization changed caller output/storage");
                 verify();
+                if (failAt)
+                {
+                    // Retry on the preserved caller as well as a fresh instance.
+                    write(*output);
+                    check(*output);
+                    verify();
+                }
                 fresh();
                 return trace.mTotal;
             };
@@ -474,6 +483,302 @@ namespace MWWorld::Testing
                 }
             }
             return count;
+        }
+
+        auto localValues(const MWScript::Locals& locals)
+        {
+            std::vector<uint32_t> floats;
+            for (float value : locals.mFloats)
+                floats.push_back(std::bit_cast<uint32_t>(value));
+            return std::tuple{ locals.getScriptId(), locals.mShorts, locals.mLongs, floats };
+        }
+
+        auto localStorage(const MWScript::Locals& locals)
+        {
+            return std::tuple{ localValues(locals), locals.mShorts.data(), locals.mShorts.capacity(),
+                locals.mLongs.data(), locals.mLongs.capacity(), locals.mFloats.data(), locals.mFloats.capacity() };
+        }
+
+        // Bitwise float witnesses include NaNs and signed zero. Also witness the
+        // allocating string payload of deliberately malformed Variant values.
+        auto namedLocalState(const ESM::Locals& locals)
+        {
+            std::vector<std::tuple<std::string, ESM::VarType, int32_t, uint32_t, std::string, const char*, size_t,
+                const char*, size_t>>
+                values;
+            for (const auto& [name, value] : locals.mVariables)
+            {
+                const auto type = value.getType();
+                const bool integer = type == ESM::VT_Int || type == ESM::VT_Short || type == ESM::VT_Long;
+                const bool string = type == ESM::VT_String;
+                values.emplace_back(name, type, integer ? value.getInteger() : 0,
+                    type == ESM::VT_Float ? std::bit_cast<uint32_t>(value.getFloat()) : 0,
+                    string ? value.getString() : std::string{}, name.data(), name.capacity(),
+                    string ? value.getString().data() : nullptr, string ? value.getString().capacity() : 0);
+            }
+            return std::tuple{ values, locals.mVariables.data(), locals.mVariables.capacity() };
+        }
+
+        auto declarationState(const Compiler::Locals& declarations)
+        {
+            const auto capture = [&](char type) {
+                const auto& names = declarations.get(type);
+                std::vector<std::pair<const char*, size_t>> strings;
+                for (const auto& name : names)
+                    strings.emplace_back(name.data(), name.capacity());
+                return std::tuple{ names, names.data(), names.capacity(), strings };
+            };
+            return std::tuple{ capture('s'), capture('l'), capture('f') };
+        }
+
+        template <class Verify>
+        size_t checkLocalRestore(const MWScript::Locals& configured, const ESM::Locals& input,
+            const Compiler::Locals& declarations, Verify verifyOriginal, bool malformed, size_t& rejections)
+        {
+            const auto inputBefore = namedLocalState(input);
+            const auto configuredBefore = localStorage(configured);
+            const auto declarationsBefore = declarationState(declarations);
+            const auto verify = [&] {
+                require(namedLocalState(input) == inputBefore && localStorage(configured) == configuredBefore
+                        && declarationState(declarations) == declarationsBefore,
+                    "local restoration changed input/declaration values or storage");
+                verifyOriginal();
+            };
+            const auto roundTrip
+                = [&](const MWScript::Locals& restored, const ESM::Locals& expected, const Compiler::Locals& decl) {
+                      ESM::Locals output;
+                      require(restored.write(output, decl), "restored locals lost configured state");
+                      // Canonical write order is independent of the input order.
+                      auto ordered = expected.mVariables;
+                      auto actual = output.mVariables;
+                      const auto byName = [](const auto& a, const auto& b) { return a.first < b.first; };
+                      std::sort(ordered.begin(), ordered.end(), byName);
+                      std::sort(actual.begin(), actual.end(), byName);
+                      require(actual == ordered, "named local read/write lost names/types/values");
+                      auto fresh = configured;
+                      fresh.mShorts.resize(restored.mShorts.size());
+                      fresh.mLongs.resize(restored.mLongs.size());
+                      fresh.mFloats.resize(restored.mFloats.size());
+                      fresh.read(output, decl);
+                      require(localValues(fresh) == localValues(restored), "local write/read lost restored values");
+                  };
+            const auto make = [&] {
+                auto locals = configured;
+                std::fill(locals.mShorts.begin(), locals.mShorts.end(), 71);
+                std::fill(locals.mLongs.begin(), locals.mLongs.end(), 829);
+                std::fill(locals.mFloats.begin(), locals.mFloats.end(), 93.5f);
+                return locals;
+            };
+            size_t allocations = checkSerializationAllocations(
+                make, [&](auto& locals) { locals.read(input, declarations); }, localStorage,
+                [&](const auto& locals) { roundTrip(locals, input, declarations); }, verify);
+            // Exercise each write allocation after restoration, with a preserved
+            // caller prefix and fresh read/write recovery after every failure.
+            auto restored = make();
+            restored.read(input, declarations);
+            const auto restoredBefore = localStorage(restored);
+            ESM::Locals canonical;
+            restored.write(canonical, declarations);
+            allocations += checkSerializationAllocations([] { return outputSentinel().mLocals; },
+                [&](auto& output) { restored.write(output, declarations); }, namedLocalState,
+                [&](const auto& output) {
+                    auto expected = outputSentinel().mLocals.mVariables;
+                    expected.insert(expected.end(), canonical.mVariables.begin(), canonical.mVariables.end());
+                    require(output.mVariables == expected, "restored local write changed append semantics");
+                    roundTrip(restored, input, declarations);
+                },
+                [&] {
+                    require(localStorage(restored) == restoredBefore, "write changed restored locals/storage");
+                    verify();
+                });
+            if (!malformed)
+                return allocations;
+
+            const auto reject = [&](MWScript::Locals target, const ESM::Locals& bad, const Compiler::Locals& decl) {
+                const auto targetBefore = localStorage(target);
+                const auto badBefore = namedLocalState(bad);
+                const auto declBefore = declarationState(decl);
+                Allocations::Trace trace;
+                bool caught = false;
+                {
+                    Allocations::Observe observe(trace);
+                    try
+                    {
+                        target.read(bad, decl);
+                    }
+                    catch (const std::invalid_argument&)
+                    {
+                        caught = true;
+                    }
+                }
+                require(caught && trace.mOutstanding == 0 && trace.mTrackingOverflow == 0
+                        && localStorage(target) == targetBefore && namedLocalState(bad) == badBefore
+                        && declarationState(decl) == declBefore,
+                    "malformed local restoration accepted, leaked, or changed input/target storage");
+                ++rejections;
+                // Repair only deliberately malformed target shapes/configuration;
+                // valid targets retry directly with the good input.
+                if (target.getScriptId().empty())
+                {
+                    ESM::Locals unwritten;
+                    require(!target.write(unwritten, declarations), "rejection initialized locals");
+                    target = make();
+                }
+                target.mShorts.resize(configured.mShorts.size());
+                target.mLongs.resize(configured.mLongs.size());
+                target.mFloats.resize(configured.mFloats.size());
+                target.read(input, declarations);
+                roundTrip(target, input, declarations);
+                auto fresh = make();
+                fresh.read(input, declarations);
+                roundTrip(fresh, input, declarations);
+                verify();
+            };
+            reject({}, input, declarations);
+            for (char type : { 's', 'l', 'f' })
+            {
+                for (int shape = 0; shape < 5; ++shape)
+                {
+                    Compiler::Locals bad;
+                    for (char current : { 's', 'l', 'f' })
+                    {
+                        const auto& names = declarations.get(current);
+                        for (size_t i = 0; i < names.size(); ++i)
+                        {
+                            if (current == type && shape == 0 && i == 1)
+                                continue;
+                            bad.declare(current,
+                                current == type && i == 1 && shape >= 2
+                                    ? (shape == 2          ? std::string{}
+                                              : shape == 3 ? names[0]
+                                                           : std::string("bad\0name", 8))
+                                    : names[i]);
+                        }
+                        if (current == type && shape == 1)
+                            bad.declare(current, "unexpected_extra_declaration");
+                    }
+                    reject(make(), input, bad);
+                }
+                for (bool extra : { false, true })
+                {
+                    auto target = make();
+                    const auto resize = [&](auto& values) { values.resize(values.size() + (extra ? 1 : -1)); };
+                    if (type == 's')
+                        resize(target.mShorts);
+                    else if (type == 'l')
+                        resize(target.mLongs);
+                    else
+                        resize(target.mFloats);
+                    reject(target, input, declarations);
+                }
+            }
+            Compiler::Locals duplicate;
+            for (char type : { 's', 'l', 'f' })
+                for (const auto& name : declarations.get(type))
+                    duplicate.declare(type, name == "counter" ? "onpcadd" : name);
+            reject(make(), input, duplicate);
+
+            for (size_t i = 0; i < input.mVariables.size(); ++i)
+            {
+                for (int shape = 0; shape < 6; ++shape)
+                {
+                    auto bad = input;
+                    auto& name = bad.mVariables[i].first;
+                    if (shape == 0)
+                        bad.mVariables.erase(bad.mVariables.begin() + i);
+                    else if (shape == 1)
+                        bad.mVariables.push_back(bad.mVariables[i]);
+                    else if (shape == 2)
+                        name.clear();
+                    else if (shape == 3)
+                        name = "unknown_allocating_local_name";
+                    else if (shape == 4)
+                        name = input.mVariables[(i + 1) % input.mVariables.size()].first;
+                    else
+                        name[0] = 'X';
+                    reject(make(), bad, declarations);
+                }
+                for (auto type : { ESM::VT_Unknown, ESM::VT_None, ESM::VT_Short, ESM::VT_Long, ESM::VT_String,
+                         ESM::VT_Int, ESM::VT_Float })
+                {
+                    if (type == input.mVariables[i].second.getType())
+                        continue;
+                    auto bad = input;
+                    auto& value = bad.mVariables[i].second;
+                    value.setType(type);
+                    if (type == ESM::VT_String)
+                        value.setString("malformed allocating variant string");
+                    if (type == ESM::VT_Float)
+                        value.setFloat(1.5f);
+                    reject(make(), bad, declarations);
+                }
+            }
+            for (int value :
+                { -32769, 32768, std::numeric_limits<int32_t>::min(), std::numeric_limits<int32_t>::max() })
+                for (size_t index : { 0, 1 })
+                {
+                    auto bad = input;
+                    bad.mVariables[index].second.setInteger(value);
+                    reject(make(), bad, declarations);
+                }
+            for (float value : { std::numeric_limits<float>::infinity(), -std::numeric_limits<float>::infinity(),
+                     std::numeric_limits<float>::quiet_NaN() })
+                for (size_t index : { 4, 5 })
+                {
+                    auto bad = input;
+                    bad.mVariables[index].second.setFloat(value);
+                    reject(make(), bad, declarations);
+                }
+
+            // Numeric endpoints, subnormals, signed zero, and arbitrary named order.
+            for (int sample = 0; sample < 3; ++sample)
+            {
+                auto expected = make();
+                expected.mShorts = { -32768, 32767 };
+                expected.mLongs = { std::numeric_limits<int32_t>::min(), std::numeric_limits<int32_t>::max() };
+                expected.mFloats = sample == 0
+                    ? std::vector<float>{ std::numeric_limits<float>::lowest(), std::numeric_limits<float>::max() }
+                    : sample == 1 ? std::vector<float>{ -0.f, 0.f }
+                                  : std::vector<float>{ -std::numeric_limits<float>::denorm_min(),
+                                        std::numeric_limits<float>::denorm_min() };
+                ESM::Locals values;
+                expected.write(values, declarations);
+                std::reverse(values.mVariables.begin(), values.mVariables.end());
+                allocations += checkLocalRestore(configured, values, declarations, verifyOriginal, false, rejections);
+                auto target = make();
+                target.read(values, declarations);
+                require(localValues(target) == localValues(expected), "local restoration lost numeric endpoint bits");
+            }
+            // Empty configured scripts and each individual vector shape are valid.
+            for (char only : { ' ', 's', 'l', 'f' })
+            {
+                auto target = make();
+                Compiler::Locals decl;
+                for (const auto& name : only == ' ' ? std::vector<std::string>{} : declarations.get(only))
+                    decl.declare(only, name);
+                if (only != 's')
+                    target.mShorts.clear();
+                if (only != 'l')
+                    target.mLongs.clear();
+                if (only != 'f')
+                    target.mFloats.clear();
+                ESM::Locals values;
+                target.write(values, decl);
+                if (only != ' ')
+                    allocations += checkLocalRestore(target, values, decl, verifyOriginal, false, rejections);
+                else
+                {
+                    Allocations::Trace trace;
+                    {
+                        Allocations::Observe observe(trace);
+                        target.read(values, decl);
+                    }
+                    require(trace.mTotal == 0, "empty locals restoration allocated");
+                }
+                roundTrip(target, values, decl);
+            }
+            verify();
+            return allocations;
         }
 
         void checkSerializedData(const RefData& data, const ESM::ObjectState& output, size_t prefix = 0)
@@ -1001,7 +1306,8 @@ namespace MWWorld::Testing
         Rehearsal,
         Preparation,
         Serialization,
-        ObjectState
+        ObjectState,
+        LocalsRestore
     };
 
     static void checkTransferRehearsalCases(const ESMStore& content, AllocationCheck allocationCheck)
@@ -1009,8 +1315,9 @@ namespace MWWorld::Testing
         using Rehearsal = DisposableTransferRehearsal;
         using Stage = Rehearsal::Stage;
         using Pair = PreparedContainerTransfer;
-        const bool serialization
-            = allocationCheck == AllocationCheck::Serialization || allocationCheck == AllocationCheck::ObjectState;
+        const bool localsRestore = allocationCheck == AllocationCheck::LocalsRestore;
+        const bool serialization = allocationCheck == AllocationCheck::Serialization
+            || allocationCheck == AllocationCheck::ObjectState || localsRestore;
         MWClass::registerClasses();
         ESMStore store;
         const auto plainId = ESM::RefId::stringRefId("native_plain");
@@ -1043,7 +1350,7 @@ namespace MWWorld::Testing
             }
         } scripts(store, compilerContext, 1);
         ManualRef plain(store, plainId), scripted(store, scriptedId);
-        size_t cases = 0;
+        size_t cases = 0, restoredLocals = 0, localRejections = 0;
         Allocations::Trace totals;
         const bool allocationFailures = allocationCheck != AllocationCheck::None;
         if (allocationFailures)
@@ -1103,7 +1410,7 @@ namespace MWWorld::Testing
                             if (serialization)
                             {
                                 const auto decorate = [&](const Ptr& ptr) {
-                                    if (allocationCheck == AllocationCheck::ObjectState)
+                                    if (allocationCheck == AllocationCheck::ObjectState || localsRestore)
                                         ptr.getCellRef() = CellRef(decoratedCellRef(ptr.getCellRef()));
                                     auto& data = ptr.getRefData();
                                     data.disable();
@@ -1178,8 +1485,9 @@ namespace MWWorld::Testing
                                             "serialization fixture lost full/partial removal or destination count");
                                         const bool malformed
                                             = !shared && scriptedItem && !stack && quantity == 1 && cursorPosition == 0;
-                                        totals.mTotal += checkPairSerialization<ObjectStates>(
-                                            fixture, pair, declarations, verifyOriginal, malformed);
+                                        if (!localsRestore)
+                                            totals.mTotal += checkPairSerialization<ObjectStates>(
+                                                fixture, pair, declarations, verifyOriginal, malformed);
                                         // Rehearsal must retain the same read-only owned values
                                         // and protected bindings for another serialization.
                                         pair = fixture.rehearse(std::move(pair));
@@ -1193,6 +1501,32 @@ namespace MWWorld::Testing
                                     // Owned values and proposed identities outlive the pair.
                                     require(pairOutputState(output) == *retained, "discard invalidated owned output");
                                     verifyOriginal();
+                                    if constexpr (ObjectStates)
+                                    {
+                                        if (localsRestore)
+                                        {
+                                            const auto verifyOwned = [&] {
+                                                require(pairOutputState(output) == *retained,
+                                                    "locals restoration changed caller-owned serialized pair");
+                                                verifyOriginal();
+                                            };
+                                            // Read only retained owned serialized values, after
+                                            // pair destruction; never follow a key or resolve objects.
+                                            for (const auto* inventory : { &output.mSource, &output.mDestination })
+                                                for (const auto& object : inventory->mObjects)
+                                                {
+                                                    if (!object.mHasLocals)
+                                                        continue;
+                                                    MWScript::Locals configured;
+                                                    require(configured.configure(script, scripts),
+                                                        "locals restore fixture did not configure");
+                                                    totals.mTotal
+                                                        += checkLocalRestore(configured, object.mLocals, declarations,
+                                                            verifyOwned, localRejections == 0, localRejections);
+                                                    ++restoredLocals;
+                                                }
+                                        }
+                                    }
                                     auto incomplete = source.prepareTransfer(
                                         item, quantity, destination, fixture.mRemoval, fixture.mDestinationAdd);
                                     require(!incomplete.getResolutionCompleteness().isComplete(),
@@ -1215,7 +1549,7 @@ namespace MWWorld::Testing
                                     checkPairOutput(fresh, output);
                                     verifyOriginal();
                                 };
-                                if (allocationCheck == AllocationCheck::ObjectState)
+                                if (allocationCheck == AllocationCheck::ObjectState || localsRestore)
                                     run.template operator()<true>();
                                 else
                                     run.template operator()<false>();
@@ -1437,6 +1771,14 @@ namespace MWWorld::Testing
         if (allocationFailures)
         {
             require(cases == 48, "allocation failure matrix lost a fixture combination");
+            if (localsRestore)
+            {
+                require(restoredLocals > 0 && localRejections > 0, "locals restore coverage missing");
+                std::cout << "Locals restoration: cases=" << cases << " restored-locals=" << restoredLocals
+                          << " individually-failed=" << totals.mTotal << " malformed-rejections=" << localRejections
+                          << " remaining-after-cleanup=0 incomplete-pairs=48\n";
+                return;
+            }
             if (serialization)
             {
                 std::cout << (allocationCheck == AllocationCheck::ObjectState ? "ObjectState" : "RefData")
@@ -1488,5 +1830,10 @@ namespace MWWorld::Testing
     void checkTransferObjectState(const ESMStore& content)
     {
         checkTransferRehearsalCases(content, AllocationCheck::ObjectState);
+    }
+
+    void checkTransferLocalsRestore(const ESMStore& content)
+    {
+        checkTransferRehearsalCases(content, AllocationCheck::LocalsRestore);
     }
 }
