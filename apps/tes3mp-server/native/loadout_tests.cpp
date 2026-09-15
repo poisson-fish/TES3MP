@@ -1497,6 +1497,9 @@ namespace
 
         std::cerr << "Checking protected transfer stock comparisons and faults\n";
         using Pair = MWWorld::PreparedContainerTransfer;
+        using Completeness = Pair::ResolutionCompleteness;
+        static_assert(
+            std::is_same_v<decltype(std::declval<const Pair&>().getResolutionCompleteness()), const Completeness&>);
         static_assert(std::is_same_v<decltype(std::declval<const Pair&>().getSourceStorage()), const Pair::MiscList&>);
         static_assert(
             std::is_same_v<decltype(std::declval<const Pair&>().getDestinationStorage()), const Pair::MiscList&>);
@@ -1910,8 +1913,18 @@ namespace
             require(registryStorage.getBindings() == relocation.mRegistry,
                 "owned registry storage changed relocated membership, revision or counter");
             require(registryStorage.getItem({}).isEmpty(), "owned registry storage resolved an absent identity");
+            const auto& completeness = paired.getResolutionCompleteness();
+            require(completeness.mIterators == &paired.getIteratorBindings()
+                    && completeness.mContexts == &paired.getContextBindings()
+                    && completeness.mResolvedStores == &paired.getResolvedStoreBindings()
+                    && completeness.mRegistryEntries == proposedRegistry.mEntries.size()
+                    && completeness.mScripts.size() == (sharedScripts ? 1 : 2),
+                "resolution completeness lost protected pair, collection or service membership");
+            size_t unresolvedRegistry = 0;
             for (const auto& [id, binding] : registryStorage.getBindings().mEntries)
             {
+                if (paired.getRegistryItem(id).isEmpty() && !isContext(worldModel.getPtr(id).mRef))
+                    ++unresolvedRegistry;
                 const auto owned = registryStorage.getItem(id);
                 const auto actual = model.getPtr(id);
                 if (paired.getRegistryItem(id).isEmpty())
@@ -1943,6 +1956,9 @@ namespace
                                     "script and registry storage refer to different inventory nodes");
                 }
             }
+            require(completeness.mUnresolvedRegistry == unresolvedRegistry,
+                "resolution completeness omitted an unaffected stock registry mapping");
+            size_t unresolvedScripts = 0;
             const auto compareRelocatedScripts = [&](const auto& proposed, MWWorld::LocalScripts& stock,
                                                      const ScriptStorage& storage, auto tail) {
                 const auto actual = stock.snapshot();
@@ -1951,6 +1967,7 @@ namespace
                 require(storage.getEntries().size() == actual.mEntries.size(),
                     "owned script storage lost stock membership");
                 auto stored = storage.getEntries().begin();
+                size_t unresolved = 0;
                 for (size_t i = 0; i < proposed.mEntries.size(); ++i)
                 {
                     const auto& entry = proposed.mEntries[i];
@@ -1997,10 +2014,22 @@ namespace
                                 && storedItem.getRefData().matchesContainerTransferState(copied->second.getRefData()),
                             "context script resolution differs from disposable stock");
                     else
+                    {
                         require(storedItem.isEmpty() && !storedItem.mCell && !storedItem.mContainerStore,
                             "unaffected script storage retained a live item binding");
+                        ++unresolved;
+                    }
                     ++stored;
                 }
+                const auto serviceIndex = &storage == &paired.getSourceScriptStorage() ? 0 : 1;
+                const auto& resolution = completeness.mScripts.at(serviceIndex);
+                require(resolution.mStorage == &storage && resolution.mEntries == actual.mEntries.size()
+                        && resolution.mUnresolved == unresolved
+                        && resolution.mService
+                            == (serviceIndex == 0 ? sourceContext.mLocalScripts : destinationContext.mLocalScripts),
+                    "resolution completeness lost stock script order, service or unresolved entries");
+                if (serviceIndex == 1 || &stock == &stockScripts)
+                    unresolvedScripts += unresolved;
                 require((storage.getCursor() == nullptr) == (actual.mCursor == actual.mEntries.size()),
                     "owned script cursor lost stock end");
                 // Use the actual prepared stock iterator, including an empty/end
@@ -2038,6 +2067,14 @@ namespace
             if (sharedScripts)
                 require(paired.getSourceScriptCursorIterator() == paired.getDestinationScriptCursorIterator(),
                     "shared service prepared two different iterator positions");
+            // A shared service is compared twice above, but contributes once.
+            if (sharedScripts)
+                unresolvedScripts /= 2;
+            const auto unresolved = unresolvedRegistry + unresolvedScripts;
+            require(completeness.isComplete() == (unresolved == 0)
+                    && completeness.mDiagnostics.size() == std::min(unresolved, Pair::MaxResolutionDiagnostics)
+                    && completeness.mDiagnosticsTruncated == (unresolved > Pair::MaxResolutionDiagnostics),
+                "resolution completeness or diagnostic truncation differs from disposable stock");
             require((&paired.getSourceScripts() == &paired.getDestinationScripts()) == sharedScripts,
                 "shared/distinct script service result binding lost");
             require(onPCAddLookups == (scriptedItem && destinationAdd.mPlayer == destinationPtr ? 1 : 0),
@@ -4302,6 +4339,216 @@ namespace
             }
             require(expiredBeforeData, "reference lifetime survived into RefData destruction");
         }
+        // Isolated registries make exact completeness observable: registry-only
+        // and script-only unrelated keys independently prevent a complete result.
+        // The diagnostic cap is shared by both kinds and both script services.
+        require(!Completeness{}.isComplete(), "unprepared resolution result reported complete");
+        for (bool shared : { false, true })
+            for (bool scriptedItem : { false, true })
+                for (const auto [registryCount, scriptCount] : { std::pair<size_t, size_t>{ 0, 0 }, { 0, 1 }, { 1, 1 },
+                         { 15, 1 }, { 16, 0 }, { 17, 2 }, { 33, 33 } })
+                {
+                    MWWorld::ESMStore registryStore;
+                    ESM::ReadersCache readers;
+                    MWWorld::WorldModel model(registryStore, readers, 1);
+                    MWWorld::ManualRef sourceOwner(store, ESM::RefId::stringRefId("native_context_owner"));
+                    MWWorld::ManualRef destinationOwner(store, ESM::RefId::stringRefId("native_context_owner"));
+                    MWWorld::LocalScripts sourceScripts(store), destinationScripts(store);
+                    MWWorld::ContainerStore source, destination;
+                    bindEmptyStore(source, sourceOwner.getPtr(), model);
+                    bindEmptyStore(destination, destinationOwner.getPtr(), model);
+                    int notifications = 0;
+                    MWWorld::ContainerStoreAddContext sourceAdd{ store, model, sourceOwner.getPtr(),
+                        sourceOwner.getPtr(), &sourceScripts, &scripts, [&](const MWWorld::Ptr&) { ++notifications; } };
+                    MWWorld::ContainerStoreAddContext destinationAdd{ store, model, destinationOwner.getPtr(),
+                        destinationOwner.getPtr(), shared ? &sourceScripts : &destinationScripts, &scripts,
+                        sourceAdd.mInventoryUpdated };
+                    const auto item = *source.add(scriptedItem ? scripted.getPtr() : plain.getPtr(), 4, sourceAdd);
+                    source.setSelectedEnchantItem(source.begin());
+                    MWWorld::ContainerStoreRemoveContext removal{ model, sourceOwner.getPtr(), sourceScripts,
+                        sourceAdd.mInventoryUpdated };
+                    std::vector<std::unique_ptr<MWWorld::ManualRef>> extras;
+                    std::vector<ESM::RefNum> unresolvedIds;
+                    for (size_t i = 0; i < registryCount; ++i)
+                    {
+                        auto& extra = extras.emplace_back(
+                            std::make_unique<MWWorld::ManualRef>(store, plain.getPtr().getCellRef().getRefId()));
+                        model.registerPtr(extra->getPtr());
+                        unresolvedIds.push_back(extra->getPtr().getCellRef().getRefNum());
+                    }
+                    // Unregistered world script entries have no registry mapping.
+                    // Retain their immutable keys even after their Ptrs expire.
+                    std::vector<std::unique_ptr<MWWorld::ManualRef>> scriptExtras;
+                    for (size_t i = 0; i < scriptCount; ++i)
+                    {
+                        auto& extra = scriptExtras.emplace_back(
+                            std::make_unique<MWWorld::ManualRef>(store, scripted.getPtr().getCellRef().getRefId()));
+                        sourceScripts.add(scriptId, extra->getPtr(), scripts);
+                        if (!shared)
+                            destinationScripts.add(scriptId, extra->getPtr(), scripts);
+                    }
+                    // Expire the captured lifetimes without freeing their storage
+                    // for a new incoming registration to reuse. The replacement
+                    // at the same address is deliberately never resolved.
+                    for (const auto& extra : scriptExtras)
+                    {
+                        auto* ref = extra->getPtr().get<ESM::Miscellaneous>();
+                        MWWorld::LiveCellRef<ESM::Miscellaneous> replacement(*ref);
+                        std::destroy_at(ref);
+                        std::construct_at(ref, std::move(replacement));
+                    }
+                    const auto current = [&] {
+                        std::vector<decltype(itemSnapshot(item))> references;
+                        for (const auto& ptr : { sourceOwner.getPtr(), destinationOwner.getPtr(), item })
+                            references.push_back(itemSnapshot(ptr));
+                        for (const auto& extra : extras)
+                            references.push_back(itemSnapshot(extra->getPtr()));
+                        return std::tuple{ references, model.snapshotPtrRegistry(), sourceScripts.snapshot(),
+                            destinationScripts.snapshot(), source.getSelectedEnchantItem(),
+                            destination.getSelectedEnchantItem(), source.count(item.getCellRef().getRefId()),
+                            std::distance(destination.begin(), destination.end()), notifications };
+                    };
+                    const auto make = [&](int quantity = 1) {
+                        return source.prepareTransfer(item, quantity, destination, removal, destinationAdd);
+                    };
+                    const auto validate = [&](const Pair& decision) -> const Completeness& {
+                        return source.validateTransfer(decision, destination, removal, destinationAdd);
+                    };
+                    const auto before = current();
+                    for (int quantity : { 1, 4 })
+                    {
+                        auto initial = make(quantity);
+                        const auto* address = &initial.getResolutionCompleteness();
+                        auto moved = std::move(initial);
+                        auto decision = make(quantity);
+                        decision = std::move(moved);
+                        const auto& result = validate(decision);
+                        require(&result == address && &result == &decision.getResolutionCompleteness()
+                                && result.mRegistryEntries == registryCount + 4
+                                && result.mUnresolvedRegistry == registryCount
+                                && result.mScripts.size() == (shared ? 1 : 2)
+                                && result.isComplete() == (registryCount == 0 && scriptCount == 0),
+                            "complete/partial resolution or move binding differs from exact fixture");
+                        reject([&] { initial.getResolutionCompleteness(); }, "moved from");
+                        reject([&] { moved.getResolutionCompleteness(); }, "moved from");
+                        std::vector<std::variant<Pair::UnresolvedRegistryMapping, Pair::UnresolvedScriptEntry>>
+                            expected;
+                        for (const auto id : unresolvedIds)
+                            expected.emplace_back(
+                                Pair::UnresolvedRegistryMapping{ id, model.snapshotPtrRegistry().mEntries.at(id) });
+                        for (size_t i = 0; i < result.mScripts.size(); ++i)
+                        {
+                            const auto& resolution = result.mScripts[i];
+                            const auto& list = i == 0 ? decision.getSourceScripts() : decision.getDestinationScripts();
+                            const auto owned
+                                = scriptedItem ? (shared ? 1 + (quantity == 1) : (i == 0 ? quantity == 1 : 1)) : 0;
+                            require(resolution.mService == (i == 0 ? &sourceScripts : &destinationScripts)
+                                    && resolution.mStorage
+                                        == (i == 0 ? &decision.getSourceScriptStorage()
+                                                   : &decision.getDestinationScriptStorage())
+                                    && resolution.mEntries == scriptCount + owned
+                                    && resolution.mUnresolved == scriptCount,
+                                "empty/shared/distinct script resolution counts differ from exact fixture");
+                            // Source's original entry precedes the unrelated keys;
+                            // new destination registration follows all original keys.
+                            const size_t offset = scriptedItem && quantity == 1 && i == 0 ? 1 : 0;
+                            for (size_t j = 0; j < scriptCount; ++j)
+                                expected.emplace_back(
+                                    Pair::UnresolvedScriptEntry{ i, j + offset, list.mEntries[j + offset] });
+                        }
+                        const auto diagnosticCount = expected.size();
+                        expected.resize(std::min(diagnosticCount, Pair::MaxResolutionDiagnostics));
+                        require(result.mDiagnostics == expected
+                                && result.mDiagnosticsTruncated == (diagnosticCount > Pair::MaxResolutionDiagnostics),
+                            "bounded resolution diagnostics lost compare-only keys, service order or truncation");
+                        auto other = make(quantity == 1 ? 4 : 1);
+                        auto& changed = const_cast<Completeness&>(result);
+                        const auto saved = changed;
+                        const auto corrupt = [&](const auto& mutation) {
+                            mutation();
+                            reject([&] { validate(decision); }, "resolution completeness changed");
+                            changed = saved;
+                        };
+                        corrupt([&] { changed = other.getResolutionCompleteness(); });
+                        corrupt([&] { changed.mIterators = other.getResolutionCompleteness().mIterators; });
+                        corrupt([&] { changed.mContexts = nullptr; });
+                        corrupt([&] { changed.mResolvedStores = other.getResolutionCompleteness().mResolvedStores; });
+                        corrupt([&] { ++changed.mRegistryEntries; });
+                        corrupt([&] { changed.mUnresolvedRegistry = registryCount + 1; });
+                        corrupt([&] { changed.mScripts.clear(); });
+                        corrupt([&] { changed.mScripts.push_back(changed.mScripts.front()); });
+                        corrupt([&] { changed.mScripts.front().mService = nullptr; });
+                        corrupt([&] { changed.mScripts.front().mStorage = &other.getSourceScriptStorage(); });
+                        corrupt([&] { ++changed.mScripts.front().mEntries; });
+                        corrupt([&] { ++changed.mScripts.back().mUnresolved; });
+                        if (!shared)
+                            corrupt([&] { std::swap(changed.mScripts[0], changed.mScripts[1]); });
+                        corrupt([&] { changed.mDiagnosticsTruncated = !saved.mDiagnosticsTruncated; });
+                        if (!changed.mDiagnostics.empty())
+                        {
+                            corrupt([&] { changed.mDiagnostics.pop_back(); });
+                            corrupt([&] { changed.mDiagnostics.push_back(changed.mDiagnostics.front()); });
+                            corrupt([&] { changed.mDiagnostics.front() = Pair::UnresolvedRegistryMapping{}; });
+                            corrupt([&] { changed.mDiagnostics.back() = Pair::UnresolvedScriptEntry{ 9, 99, {} }; });
+                            if (changed.mDiagnostics.size() > 1)
+                                corrupt([&] { std::swap(changed.mDiagnostics.front(), changed.mDiagnostics.back()); });
+                            corrupt([&] {
+                                changed.mUnresolvedRegistry = 0;
+                                for (auto& service : changed.mScripts)
+                                    service.mUnresolved = 0;
+                                changed.mDiagnostics.clear();
+                                changed.mDiagnosticsTruncated = false;
+                            });
+                        }
+                        // A result's pointers are compared, never followed: even
+                        // another discarded pair's report must reject safely.
+                        Completeness discarded;
+                        {
+                            auto temporary = make();
+                            discarded = temporary.getResolutionCompleteness();
+                        }
+                        corrupt([&] { changed = discarded; });
+                        validate(decision);
+                        const auto ref = item.getCellRef();
+                        item.getCellRef().setCount(3);
+                        const auto staleState = current();
+                        reject([&] { validate(decision); }, "changed");
+                        require(current() == staleState, "stale completeness validation changed live state");
+                        item.getCellRef() = ref;
+                        auto& sourceResult = const_cast<MWWorld::CellRef&>(decision.getSourceItem().getCellRef());
+                        const auto originalResult = sourceResult;
+                        sourceResult.setCount(19);
+                        reject([&] { validate(decision); }, "source item values changed");
+                        sourceResult = originalResult;
+                        validate(decision);
+                        require(
+                            current() == before, "completeness, faults or moves changed live state or notifications");
+                    }
+                    // Failure in the final consumer copy discards the already
+                    // built report together with its pair; no result is published.
+                    int alive = 0, emitted = 0;
+                    std::function<void()> onCopy;
+                    {
+                        auto failing = removal;
+                        failing.mInventoryUpdated = NotificationIntent(alive, onCopy, emitted);
+                        onCopy = [] { throw PreparationFailure{}; };
+                        std::optional<Pair> published;
+                        bool failed = false;
+                        try
+                        {
+                            published.emplace(source.prepareTransfer(item, 1, destination, failing, destinationAdd));
+                        }
+                        catch (const PreparationFailure&)
+                        {
+                            failed = true;
+                        }
+                        onCopy = {};
+                        require(failed && !published && alive == 1 && emitted == 0 && current() == before,
+                            "completeness preparation failure published a pair, live state or notifications");
+                    }
+                    require(
+                        alive == 0 && current() == before, "completeness discard retained effects or changed state");
+                }
         // Explicit collections resolve only supplied stores, in first-occurrence order.
         // Each fixture owns its contexts independently of both inventory stores.
         for (bool shared : { false, true })

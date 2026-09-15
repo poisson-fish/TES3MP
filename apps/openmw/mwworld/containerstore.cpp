@@ -906,6 +906,7 @@ struct MWWorld::PreparedContainerTransfer::State
     };
     std::vector<ResolvedStore> mResolvedStores;
     std::vector<ResolvedStoreBindings> mResolvedStoreBindings;
+    ResolutionCompleteness mCompleteness;
 };
 
 MWWorld::PreparedContainerTransfer::PreparedContainerTransfer(std::unique_ptr<State> state)
@@ -1087,6 +1088,18 @@ const std::vector<MWWorld::PreparedContainerTransfer::ResolvedStoreBindings>&
 MWWorld::PreparedContainerTransfer::getResolvedStoreBindings() const
 {
     return state().mResolvedStoreBindings;
+}
+
+bool MWWorld::PreparedContainerTransfer::ResolutionCompleteness::isComplete() const
+{
+    return !mDiagnosticsTruncated && mDiagnostics.empty() && mUnresolvedRegistry == 0 && !mScripts.empty()
+        && std::ranges::all_of(mScripts, [](const auto& service) { return service.mUnresolved == 0; });
+}
+
+const MWWorld::PreparedContainerTransfer::ResolutionCompleteness&
+MWWorld::PreparedContainerTransfer::getResolutionCompleteness() const
+{
+    return state().mCompleteness;
 }
 
 MWWorld::ConstContainerStoreIterator MWWorld::PreparedContainerTransfer::getSourceSelectionIterator() const
@@ -1472,6 +1485,10 @@ MWWorld::PreparedContainerTransfer MWWorld::ContainerStore::prepareTransfer(cons
         for (size_t i = 0; i < resolved.mNodes.size(); ++i)
             binding.mNodes.push_back({ resolved.mValues[i].mIdentity.mIdentity, resolved.mNodes[i] });
     }
+    // Count only validated storage, without following any unresolved keys. The
+    // final validation below binds this result to all live and owned witnesses.
+    validateTransferStorage(prepared);
+    owned.mCompleteness = deriveTransferCompleteness(prepared);
     // The last fallible consumer copy follows stock iterator binding as well as
     // inventory/script/registry allocation. Failure destroys iterators before lists.
     owned.mSourceUpdated = sourceContext.mInventoryUpdated;
@@ -1479,9 +1496,9 @@ MWWorld::PreparedContainerTransfer MWWorld::ContainerStore::prepareTransfer(cons
     return prepared;
 }
 
-void MWWorld::ContainerStore::validateTransfer(const PreparedContainerTransfer& prepared,
-    const ContainerStore& destination, const ContainerStoreRemoveContext& sourceContext,
-    const ContainerStoreAddContext& destinationContext) const
+const MWWorld::PreparedContainerTransfer::ResolutionCompleteness& MWWorld::ContainerStore::validateTransfer(
+    const PreparedContainerTransfer& prepared, const ContainerStore& destination,
+    const ContainerStoreRemoveContext& sourceContext, const ContainerStoreAddContext& destinationContext) const
 {
     const auto& state = prepared.state();
     const auto& worldModel = sourceContext.mWorldModel;
@@ -1647,8 +1664,57 @@ void MWWorld::ContainerStore::validateTransfer(const PreparedContainerTransfer& 
     if (state.mRegistry != expectedRegistry || state.mDestinationIdentity != expectedIdentity)
         throw std::invalid_argument("Container transfer preparation registry result changed");
     validateTransferStorage(prepared);
+    if (state.mCompleteness != deriveTransferCompleteness(prepared))
+        throw std::invalid_argument("Container transfer preparation resolution completeness changed");
     // The immutable pair binds its derived item and intents; this is neither an
     // installation precondition nor a durability or mutation-history guarantee.
+    return state.mCompleteness;
+}
+
+MWWorld::PreparedContainerTransfer::ResolutionCompleteness MWWorld::ContainerStore::deriveTransferCompleteness(
+    const PreparedContainerTransfer& prepared)
+{
+    // Private: callers establish current ownership, lifetimes, values, service
+    // results and storage before counting. Never use diagnostic keys or report
+    // pointers as input, and never look up another object through the WorldModel.
+    const auto& state = prepared.state();
+    PreparedContainerTransfer::ResolutionCompleteness result{ &state.mIterators->mBindings, &state.mContextBindings,
+        &state.mResolvedStoreBindings };
+    const auto diagnose = [&](auto diagnostic) {
+        if (result.mDiagnostics.size() < PreparedContainerTransfer::MaxResolutionDiagnostics)
+            result.mDiagnostics.emplace_back(std::move(diagnostic));
+        else
+            result.mDiagnosticsTruncated = true;
+    };
+    const auto& registry = *state.mRegistryStorage;
+    result.mRegistryEntries = registry.getBindings().mEntries.size();
+    for (const auto& [id, binding] : registry.getBindings().mEntries)
+        if (registry.getItem(id).isEmpty())
+        {
+            ++result.mUnresolvedRegistry;
+            diagnose(PreparedContainerTransfer::UnresolvedRegistryMapping{ id, binding });
+        }
+    const auto scripts = [&](const LocalScripts* service, const LocalScripts::PreparedStorage& storage,
+                             const LocalScripts::List& bindings) {
+        const auto index = result.mScripts.size();
+        auto& resolution = result.mScripts.emplace_back(
+            PreparedContainerTransfer::ScriptResolution{ service, &storage, storage.getEntries().size() });
+        size_t position = 0;
+        for (const auto& entry : storage.getEntries())
+        {
+            if (entry.getItem().isEmpty())
+            {
+                ++resolution.mUnresolved;
+                diagnose(
+                    PreparedContainerTransfer::UnresolvedScriptEntry{ index, position, bindings.mEntries[position] });
+            }
+            ++position;
+        }
+    };
+    scripts(state.mRemoval.mLocalScripts, *state.mSourceScriptStorage, state.mRelocation.mSourceScripts);
+    if (state.mDestinationScriptStorage)
+        scripts(state.mDestinationScripts, *state.mDestinationScriptStorage, *state.mRelocation.mDestinationScripts);
+    return result;
 }
 
 MWWorld::PreparedContainerTransfer::Relocation MWWorld::ContainerStore::relocateTransfer(
@@ -1788,6 +1854,12 @@ void MWWorld::ContainerStore::validateTransferStorage(const PreparedContainerTra
 {
     const auto& state = prepared.state();
     validateTransferContextBindings(prepared);
+    // Storage readers also use this path without the full validation contexts.
+    // Establish current registry ownership/identity, not just a surviving Ptr,
+    // before script/registry validation can access a saved context reference.
+    for (size_t i = 0; i < state.mContexts.size(); ++i)
+        if (validateContextReference(state.mContexts[i], *state.mAddition.mWorldModel) != state.mContextIdentities[i])
+            throw std::invalid_argument("Container transfer preparation context changed");
     const auto resolvedPointers = validateTransferResolution(prepared);
     if (!state.mIterators || state.mIterators->mSourceStorageIdentity != state.mSourceInventory.mStorageIdentity
         || state.mIterators->mDestinationStorageIdentity != state.mDestinationInventory.mStorageIdentity)

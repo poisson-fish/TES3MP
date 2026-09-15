@@ -9,6 +9,7 @@
 #include <optional>
 #include <span>
 #include <utility>
+#include <variant>
 #include <vector>
 
 #include <components/esm3/loadalch.hpp>
@@ -293,6 +294,48 @@ namespace MWWorld
         };
         // Coalesced in first-supplied order; bound to this exact protected pair.
         const std::vector<ResolvedStoreBindings>& getResolvedStoreBindings() const;
+        struct ScriptResolution
+        {
+            const LocalScripts* mService = nullptr;
+            const LocalScripts::PreparedStorage* mStorage = nullptr;
+            size_t mEntries = 0, mUnresolved = 0;
+            bool operator==(const ScriptResolution&) const = default;
+        };
+        struct UnresolvedRegistryMapping
+        {
+            ESM::RefNum mIdentity;
+            PtrRegistry::Binding mBinding;
+            bool operator==(const UnresolvedRegistryMapping&) const = default;
+        };
+        struct UnresolvedScriptEntry
+        {
+            size_t mServiceIndex, mPosition;
+            LocalScripts::Removal mBinding;
+            bool operator==(const UnresolvedScriptEntry&) const = default;
+        };
+        static constexpr size_t MaxResolutionDiagnostics = 16;
+        struct ResolutionCompleteness
+        {
+            // Compare-only identities of this exact protected pair and collection.
+            const IteratorBindings* mIterators = nullptr;
+            const ContextBindings* mContexts = nullptr;
+            const std::vector<ResolvedStoreBindings>* mResolvedStores = nullptr;
+            size_t mRegistryEntries = 0, mUnresolvedRegistry = 0;
+            // Source first, then destination only for a distinct service, even
+            // when empty. Shared services contribute their combined result once.
+            std::vector<ScriptResolution> mScripts;
+            // One bound across registry identity order, then service/list order.
+            // Keys are compare-only; never follow them to resolve another object.
+            std::vector<std::variant<UnresolvedRegistryMapping, UnresolvedScriptEntry>> mDiagnostics;
+            bool mDiagnosticsTruncated = false;
+            bool isComplete() const;
+            bool operator==(const ResolutionCompleteness&) const = default;
+        };
+        // Saved read-only result, valid only after full validateTransfer against
+        // current contexts. That validator returns this same result on success.
+        // Completeness covers resolution only; it never authorizes installation
+        // or effects, and a copied result is not an independently valid decision.
+        const ResolutionCompleteness& getResolutionCompleteness() const;
         // Check current owned storage before copying any saved iterator. These
         // read-only copies traverse isolated stock stores/lists and their own end
         // sentinels. They expire with the pair's state; script items may also be
@@ -591,6 +634,8 @@ namespace MWWorld
         static void validateTransferIterators(const PreparedContainerTransfer& prepared);
         static void validateTransferContextBindings(const PreparedContainerTransfer& prepared);
         static std::vector<Ptr> validateTransferResolution(const PreparedContainerTransfer& prepared);
+        static PreparedContainerTransfer::ResolutionCompleteness deriveTransferCompleteness(
+            const PreparedContainerTransfer& prepared);
         PreparedContainerAdd prepareTransferAdd(std::unique_ptr<LiveCellRef<ESM::Miscellaneous>> item,
             const ContainerStoreAddContext& context, LocalScripts::PreparedList* scriptList);
         struct ItemRemoval
@@ -740,7 +785,9 @@ namespace MWWorld
         // and reference destruction rejects through lifetime witnesses. Consumers
         // are owned snapshots, not re-sourced from the validation contexts; service,
         // player, owner and listener bindings must still match. No script calls.
-        void validateTransfer(const PreparedContainerTransfer& prepared, const ContainerStore& destination,
+        // Returns resolution completeness only after all witnesses validate.
+        const PreparedContainerTransfer::ResolutionCompleteness& validateTransfer(
+            const PreparedContainerTransfer& prepared, const ContainerStore& destination,
             const ContainerStoreRemoveContext& sourceContext, const ContainerStoreAddContext& destinationContext) const;
 
         int remove(const ESM::RefId& itemId, int count, bool equipReplacement = 0, bool resolve = true);
